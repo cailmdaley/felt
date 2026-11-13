@@ -1284,7 +1284,7 @@
     "/lifecycle": {
       "post": {
         "summary": "Apply a named lifecycle action.",
-        "description": "Uses fiber (not fiber_id), a UID or exact namespace path, and returns CLI output as plain text on success. repeat requires schedule; set-model requires agent, set-outcome requires outcome, role requires role or clear=true; install/repeat require project_dir when arming, and fiber_path is an optional exact-path identity hint.",
+        "description": "Runs one Shuttle lifecycle verb on the fiber's owning host. The fiber is named by fiber (not fiber_id as on /dispatch, /deliver and /kill), as a UID or exact namespace path. Each action reads only its own fields, listed on each property; a field another action uses is ignored. Required beyond fiber and action: repeat needs schedule and project_dir, set-model needs agent, set-outcome needs outcome, and role needs role unless clear is true. Success is 200 with the CLI's output as text/plain, not JSON. Errors mix media types: a local refusal or CLI failure is text/plain, an unknown origin is JSON Error, a missing fiber is JSON LifecycleMissing and a timed-out write is JSON LifecycleUncertain. When origin names another host, the owner's status and body are relayed as text/plain whatever their original type (a remote 404 arrives as text/plain carrying the LifecycleMissing JSON), except a retryable 503, which stays application/json.",
         "tags": [
           "core"
         ],
@@ -1296,78 +1296,92 @@
                 "type": "object",
                 "properties": {
                   "fiber": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The fiber to act on: its UID or exact namespace path (no leaf-name lookup). Note the name: /dispatch, /deliver and /kill call this field fiber_id."
                   },
                   "origin": {
                     "type": "string",
                     "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400."
                   },
                   "fiber_path": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Exact namespace path of the fiber, consulted only when fiber is a UID, to pick the right document when several stores could hold it."
                   },
                   "project_dir": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Absolute worker directory on the owning host. Used by install, repeat, resume, reopen and set-agent; install requires it unless disabled is true, repeat requires it, and resume or reopen require it when the block has none."
                   },
                   "model": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Agent registry id to record on the new block. Used by install and repeat; absent uses the registry default."
                   },
                   "agent": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Agent registry id. Required by set-model; optional for set-agent, where absent or empty keeps the current base agent."
                   },
                   "effort": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Effort level for set-agent, a harness-native token such as low, medium or high; an empty string clears it, and absent keeps it."
                   },
                   "schedule": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Five-field cron expression. Required by repeat; optional for reshape to a standing kind."
                   },
                   "tz": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "IANA time zone for schedule. Used by repeat (default UTC) and reshape (default the block's existing zone, else UTC)."
                   },
                   "until": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "For rest: what the rest lasts until, as a YYYY-MM-DD date, a fiber reference or free text; empty records neither. Must be a string when present."
                   },
                   "review": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "For close: marks the close for the human's review, with the reason it is worth a look."
                   },
                   "actor": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "For rest and close: the native session id the verb acts on behalf of; absent means no caller session."
                   },
                   "role": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "For role: the office slug, or office/person, to set. Required by role unless clear is true."
                   },
                   "new_name": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "For role: creates a missing role charter with this office name."
                   },
                   "outcome": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "For set-outcome: the outcome text, written verbatim; may span lines. Required by set-outcome."
                   },
                   "disabled": {
                     "type": "boolean",
-                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                    "description": "For install: installs as a draft (status open) that does not dispatch until resumed."
                   },
                   "no_kill": {
                     "type": "boolean",
-                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                    "description": "For pause: stops future dispatch but leaves a live worker running."
                   },
                   "tempered": {
                     "type": "boolean",
-                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                    "description": "For close: records the verdict, true for tempered (accepted) and false for discarded; absent closes into Awaiting review."
                   },
                   "quiet": {
                     "type": "boolean",
-                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                    "description": "For close: delivers the outcome to the nearest orchestrator as context without waking it."
                   },
                   "as_draft": {
                     "type": "boolean",
-                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                    "description": "For reopen: reopens to status open (a draft that does not dispatch) instead of active."
                   },
                   "chrome": {
                     "type": "boolean",
-                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                    "description": "For set-agent: true enables the browser (chrome) axis, false clears it; absent keeps it. Claude harness only."
                   },
                   "clear": {
                     "type": "boolean",
-                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                    "description": "For role and seat: true removes the role and seat (role) or only the seat (seat) instead of setting them."
                   },
                   "action": {
                     "type": "string",
@@ -1386,27 +1400,35 @@
                       "seat",
                       "set-outcome",
                       "uninstall"
-                    ]
+                    ],
+                    "description": "The lifecycle verb. install and repeat add a shuttle block (oneshot or standing) to a fiber that has none; reshape changes an existing block's kind and schedule; pause stops dispatch and, unless no_kill, the live worker; rest parks the fiber in Resting and stops its worker; resume and reopen arm it again; close ends it, into review or with a verdict; set-model, set-agent and set-outcome edit one field; role and seat set its office; uninstall removes the block."
                   },
                   "kind": {
                     "type": "string",
                     "enum": [
                       "oneshot",
                       "standing"
-                    ]
+                    ],
+                    "description": "For reshape: the target kind; absent or empty keeps the current kind."
                   }
                 },
                 "required": [
                   "fiber",
                   "action"
                 ]
+              },
+              "example": {
+                "fiber": "01JABCDEF0123456789ABCDEFG",
+                "action": "close",
+                "tempered": true,
+                "origin": "laptop"
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "CLI output.",
+            "description": "The verb succeeded; the body is the shuttle CLI's output, which may be empty.",
             "content": {
               "text/plain": {
                 "schema": {
@@ -1416,7 +1438,7 @@
             }
           },
           "400": {
-            "description": "Unknown action, missing fields, unknown origin or local validation refusal.",
+            "description": "Unknown or missing action, a field the action requires is missing, kind or until is malformed (text/plain), or origin names no known host (JSON Error).",
             "content": {
               "text/plain": {
                 "schema": {
@@ -1431,7 +1453,7 @@
             }
           },
           "404": {
-            "description": "The owner lacks the fiber.",
+            "description": "The owning host has no fiber with that identifier.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1441,7 +1463,7 @@
             }
           },
           "422": {
-            "description": "CLI refusal: shuttle exited <status>: <message>.",
+            "description": "The shuttle CLI refused the verb; the text is \"shuttle exited <status>: <message>\".",
             "content": {
               "text/plain": {
                 "schema": {
@@ -1451,7 +1473,7 @@
             }
           },
           "502": {
-            "description": "Forward failed.",
+            "description": "The request could not be forwarded to the owning host; the text is \"forward to <host> failed: <reason>\".",
             "content": {
               "text/plain": {
                 "schema": {
@@ -1461,7 +1483,7 @@
             }
           },
           "503": {
-            "description": "Uncertain serialized write, CLI unavailability, or boot incomplete. Check the fiber before retrying. Forwarded JSON refusals other than retryable ones can be relayed as text/plain.",
+            "description": "The write timed out (JSON LifecycleUncertain, retryable; check the fiber before retrying), the felt store registry is unavailable (text/plain), or boot is incomplete (JSON BootUnavailable).",
             "content": {
               "text/plain": {
                 "schema": {
