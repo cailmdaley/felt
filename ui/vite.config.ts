@@ -1,4 +1,5 @@
-import { defineConfig, type Plugin } from 'vite'
+import { type Plugin } from 'vite'
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import { changeAliases } from './change-build.js'
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib'
@@ -54,6 +55,7 @@ function precompress(): Plugin {
 
 export default defineConfig({
   base: '',
+  test: { setupFiles: ['./test/setup.ts'] },
   resolve: { alias: changeAliases },
   plugins: [react(), precompress()],
   server: {
