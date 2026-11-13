@@ -261,7 +261,8 @@ list the daemon evaluates.
   ineligible on every daemon. `install` and `repeat` stamp it by
   default.
 - **`status: active`** — the sole dispatch gate. `open` marks a draft or a
-  pause. `closed` marks awaiting review or a terminus.
+  pause. `closed` marks awaiting review (the human's, or a thread's
+  orchestrator's) or a terminus.
 
 One more condition lives outside the block: the fiber must sit in a felt store
 the daemon polls.
@@ -272,6 +273,9 @@ It stays unarmed until the orchestrator runs `shuttle resume <thread>`.
 Containment relates the work; it does not gate dispatch.
 
 A thread carries its parent's immutable identity and owner hint in `shuttle.thread_parent`, with the session that asked for it in `asked_by`.
+A closed thread is its orchestrator's to review: without a verdict it sits in `orchestrator_review` until the orchestrator tempers it, discards it, or marks it for the human with `shuttle close <thread> --review "<why>"`, which writes `shuttle.review: {note, at}` and puts it in Awaiting review.
+The close notice the orchestrator receives says the verdict is its own.
+See [Thread review](lifecycle.md#thread-review).
 Its owner captures results durably even when the parent has no local archive copy.
 Delivery resolves the parent's current authority by identity; an unavailable authority retains the result for retry.
 

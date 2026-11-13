@@ -42,8 +42,9 @@ The worker asks four questions, in order. The answer sets `status`, and
 `status` decides what happens next.
 
 **1. Is the desired state realized?** Run `shuttle close <fiber>` and exit.
-The card lands in Awaiting review.
-A human accepts it or resumes it.
+Top-level work lands in Awaiting review, where a human accepts it or resumes
+it. A thread lands with its orchestrator, which reviews it (see
+[Thread review](#thread-review)).
 A standing run never closes: it has no review, and `close` refuses it (see 4).
 
 Substantive work needs independent fresh-eyes review before the session that
@@ -88,15 +89,44 @@ back.
 For a standing responsibility, `close --tempered=true` tempers the run waiting on you and keeps the schedule (the board's Temper run), Rest (`status: open`) pauses the schedule (the board's Pause schedule), Resume picks it up from the next tick, and `close --tempered=false` retires it (the board's Retire).
 A stashed horizon alone does neither.
 
-### Tempered — human only
+### Tempered — never by the worker itself
 
-`tempered` carries the verdict, and a worker never sets it to `true`.
+`tempered` carries the verdict. The human gives it to top-level work and to
+marked threads, an orchestrator to its own threads; a worker never sets it on
+its own constitution.
 
 | `tempered` | Meaning |
 |---|---|
-| absent | Awaiting review |
+| absent | Awaiting review: the human's, or a thread's orchestrator's |
 | `true` | Accepted |
 | `false` | Discarded — mooted or superseded |
+
+### Thread review
+
+A closed thread's review belongs to its orchestrator; only top-level work and
+the threads it marks reach the human. A closed thread without a verdict sits in
+the column `orchestrator_review`, drawn **With orchestrator** on the board and
+**To review** in its orchestrator's roster. The orchestrator reads it against
+its Desired State and settles it in one of three ways:
+
+```bash
+shuttle close <thread> --tempered=true            # temper it
+shuttle close <thread> --tempered=false           # discard it
+shuttle close <thread> --review "<why>"           # mark it for the human
+```
+
+The mark (`shuttle.review: {note, at}`) closes the thread if it is open and
+puts it in Awaiting review, where its page shows the note. The note is
+required, `--review` and `--tempered` are mutually exclusive, and a worker
+cannot mark its own constitution. Reopening clears the mark. Moving a thread to
+review on the board marks it too, with the note "Moved to review on the board".
+A thread the human asked for is reviewed the same way: the orchestrator marks
+the ones the human would want to see.
+
+An orchestrator cannot leave its backlog behind: a worker closing its own
+constitution for review is refused while a closed thread beneath it has
+neither a verdict nor a mark, and the refusal lists them. Verdicts, `rest`,
+`handoff` and closing someone else's fiber are not held.
 
 Workers also never uninstall their own `shuttle:` block. Closing and
 uninstalling are separate decisions, and the block stays as historical record.

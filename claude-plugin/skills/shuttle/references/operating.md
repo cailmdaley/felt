@@ -35,7 +35,8 @@ The Desk derives each card's column from `status`, `tempered`, `shuttle.kind` an
 - **Scheduled** — an armed standing constitution between runs, drawn in Resting with its next launch. A paused one (`status: open`) rests there too, drawn as paused with its schedule. One whose last run asked a question waits In flight, on your turn, until the ask is answered.
 - **Pulsed** — a oneshot constitution can wake its own conversation on an interval, without a review run per tick.
 - **In flight** — a live worker, or an armed oneshot.
-- **Awaiting review** — `status: closed` with no `tempered`, parked for review. Standing constitutions never land here.
+- **Awaiting review** — `status: closed` with no `tempered`, parked for the human's review: top-level work, and threads marked for the human (`shuttle.review`). Standing constitutions never land here.
+- **With orchestrator** — a closed thread with no `tempered` and no mark, waiting on its orchestrator's review. The board files it under its family, not in Awaiting review; a thread whose orchestrator is not on the board falls to Awaiting review.
 - **Tempered** — `closed`, `tempered: true`: accepted by the human or a thread's orchestrator.
 - **Discarded** — `closed`, `tempered: false`: set aside by the human or a thread's orchestrator. The block stays as the record.
 
@@ -45,11 +46,12 @@ The Desk gives the top-level orchestrator a card; its **thread badge** counts un
 The card's expansion lists threads by name, state and outcome, with waiting threads first; **sub-entries** draw the waiting threads under the root card without hovering, unless that display option is turned off.
 Opening the card lands on its **family map**, a live drawing of its threads with the whole tree folded at its foot.
 Open a thread there to read its report; `l` returns to the map and `b` goes up to its orchestrator.
-**To review** means closed work awaiting a verdict, not accepted work; tempered and discarded threads are archived, folded away rather than counted as unfinished.
+On the board a closed thread reads **With orchestrator** until its orchestrator settles it, and **To review** once marked for the human; tempered and discarded threads are archived, folded away rather than counted as unfinished.
+In `shuttle threads` and the launch roster, **To review** is the orchestrator's own backlog (closed threads without a verdict or a mark) and **For the human** counts the marked ones.
 
 “Keep going” tells the orchestrator to read incoming results, answer what it can, return work that misses Desired State, and arm draft threads whose inputs are ready.
 The orchestrator may temper or discard threads at any level and choose their hosts without asking.
-Oversight follows the human's investment: review and report before tempering a thread they requested, messaged, or expressed curiosity about; temper self-initiated work on your own judgment.
+A closed thread's review belongs to its orchestrator, and only top-level work and marked threads reach the human: read each against its Desired State, then temper it, discard it, or mark it with `shuttle close <thread> --review "<why it is worth their look>"`. A thread the human asked for is reviewed the same way; mark the ones they would want to see. A worker closing its own constitution for review is refused while a closed thread beneath it has neither a verdict nor a mark. Moving a thread to review on the board marks it.
 Keep the overview high-level, with outcomes, reports and thread chips making the detail one click away; reversible decisions call for inspection, not permission.
 The usual external-action gates still apply, including issues or PRs on repos where the human isn't a developer and messages in others' channels.
 Answering in the orchestrator's conversation lets it carry the decision to the relevant thread with `shuttle message <thread> "<decision>"` and keep the whole effort coherent.

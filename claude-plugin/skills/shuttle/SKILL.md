@@ -63,7 +63,7 @@ The owner writes its store directly; an unreachable owner fails without a local 
 
 Commit, `felt -C <store> sync --push`, then pick one. `close`, `handoff` and `rest` find your own fiber when you omit the id (after a `migrate`, name it if they can't) and end your session, so make the verb your last command.
 
-- **`shuttle close`** — the Desired State is met. The card goes to Awaiting review. Have a fresh-context subagent review substantive changes first.
+- **`shuttle close`** — the Desired State is met. Top-level work goes to the human's Awaiting review; a thread goes to its orchestrator, who reviews it. Have a fresh-context subagent review substantive changes first. An orchestrator settles its closed threads before it closes for review: the close refuses while one has neither a verdict nor a mark.
 - **`shuttle -C <store> ask <id> "<question>"`** — a human decision would unlock work. Rewrite `tapestry.html` first, leading with the background the human needs and the options; then keep working on what isn't blocked. `--clear` withdraws it.
 - **`shuttle handoff`** — the next slice needs a fresh worker: context is running low, at a sub-task boundary. `shuttle set-agent <id> <agent>` first to change who comes next. A standing run always hands off, which keeps its schedule; it asks first when its constitution says the run needs review.
 - **`shuttle rest`** — the human drove this session and nothing needs review; the card goes back to Resting. Not for a standing run: rest would pause its schedule, so it refuses one's own worker.
@@ -85,8 +85,10 @@ shuttle threads <id>                         # their state
 
 A thread's close or ask wakes only the session that asked for it with `shuttle thread`: its orchestrator, when the orchestrator's worker asked. Everyone else, including the orchestrator of a thread the human started, receives the result as context on their next turn. `close --quiet` wakes nobody. An asking orchestrator whose session is at rest, large and cold is not woken either: a fresh session takes the result.
 Write a thread's outcome for that orchestrator.
-An orchestrator reads each result against the thread's Desired State; review with the human first a thread they asked for.
-Temper a oneshot with `shuttle close <thread> --tempered=true`.
+A closed thread's review belongs to its orchestrator; only top-level work and the threads it marks reach the human.
+The orchestrator reads each result against the thread's Desired State, then tempers it (`shuttle close <thread> --tempered=true`), discards it (`--tempered=false`), or marks it for the human with `shuttle close <thread> --review "<why it is worth their look>"`.
+A thread the human asked for is no exception: review it, and mark the ones the human would want to see.
+A thread cannot mark itself.
 A standing thread has no review: its runs re-arm on exit and ask when they need a decision; `--tempered=true` on it ends the run waiting on you and keeps the schedule.
 `close --tempered=false` discards a constitution and ends a standing schedule; `rest` pauses it.
 An orchestrator leaving with live threads hands off rather than closes.

@@ -44,7 +44,8 @@ after setting cycles apart. The rule evaluates in this order:
 | Cycles | tagged `cycle` — the board checks this first, unconditionally |
 | Tempered | `closed` + `tempered: true` |
 | Discarded | `closed` + `tempered: false` |
-| Awaiting review | `closed`, `tempered` absent |
+| With orchestrator | `closed`, `tempered` absent, a thread (`shuttle.thread_parent`) with no `shuttle.review` mark |
+| Awaiting review | `closed`, `tempered` absent: top-level work, or a thread marked for review |
 | In flight | live worker — liveness wins over everything below |
 | Roles | `shuttle.seat: true` with a role, and at rest: not `active`, or `active` + `kind: standing` between runs |
 | Resting | `active` + `kind: standing` between runs — drawn wearing its next launch |
@@ -96,6 +97,15 @@ the seat, the horizon and its `due:`, and worker liveness. Neither the daemon
 nor the board reads tags for anything else.
 
 ### A family's threads
+
+A closed thread's review belongs to its orchestrator. Until the orchestrator
+tempers it, discards it or marks it for you (`shuttle close <thread> --review
+"<why>"`), it reads **With orchestrator**: it counts as unfinished in its
+family but asks nothing of you, so it never moves the family into Awaiting
+review. A marked thread awaits your review like top-level work, and its page
+says why it was marked. A thread whose orchestrator is not on the board falls
+to you and is drawn in Awaiting review. Its page still offers Temper and
+Discard, and **Move to review** marks it for you.
 
 A family's root heads its threads in each section of work they stand in (Your turn, Working, Awaiting review), its own mark drawn faintly where its state is another.
 If the root is not in the section and only one thread is, that thread stands alone as its slug path from the root, with its own dot and age.
@@ -247,7 +257,7 @@ One Back or root Escape returns from a step to its predecessor; returning to Des
 
 Bare reader keys work outside editable fields: h/l or left/right step pages, and on a constitution's page, away from the rows, `l` unfolds the selected thread's tapestry or report, else its newest file, under its row, and folds it again; j/k step constitutions in the Desk's order as one flow, across its columns (Drafts, In flight, Awaiting review, Resting and Roles), and J/K jump between those columns, landing on the constitution last open in each; a brief toast names the column and constitution a step lands on, and a constitution outside the Desk stands beside its family's row; down/up scroll about three lines, repeating while held; d/u scroll half a viewport; Space/Shift-Space scroll a full viewport.
 g/G or Home/End select first/last pages, Enter/o toggle expand, and Escape unwinds popovers, expand, then returns.
-The same constitution keys act on the open fiber in the reader and on the selected card on the Desk: c (or .) opens the worker's conversation exactly as its pill does, and with no worker up reopens its past session in a terminal on its host, in any column: nothing is sent, no turn starts, and the card's lifecycle does not move (a card that never ran is launched from the band); t tempers, x discards and a moves work in progress to Awaiting review, each after the same undo window (z takes the latest back).
+The same constitution keys act on the open fiber in the reader and on the selected card on the Desk: c (or .) opens the worker's conversation exactly as its pill does, and with no worker up reopens its past session in a terminal on its host, in any column: nothing is sent, no turn starts, and the card's lifecycle does not move (a card that never ran is launched from the band); t tempers, x discards and a moves work in progress, or a thread with its orchestrator, to Awaiting review (a thread so moved is marked for your review), each after the same undo window (z takes the latest back).
 s on a focused Desk card or constitution page opens a small date popover: Enter with no date rests undated, and a chosen date rests until that day.
 Rest works in any state and stops a live worker through the owning daemon's lifecycle path.
 In flight shows **Your turn** then **Working**; a question card (an ask or a harness prompt) leads Your turn and opens its report when present.
