@@ -872,7 +872,7 @@ for (const origin of ['desk', 'chronicle']) test(`Rest popover is above the read
   await p.keyboard.press('s')
   const panel = p.locator('.kbn-rest-popover')
   await panel.waitFor()
-  assert.equal(await panel.getAttribute('aria-modal'), 'true', 'Rest is a modal over the reader')
+  assert.equal(await p.getByRole('dialog', { name: /^Rest / }).getAttribute('aria-modal'), 'true', 'Rest is a modal over the reader')
   assert.equal(await panel.evaluate(el => {
     const rect = el.getBoundingClientRect()
     return el.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2))

@@ -427,10 +427,11 @@ describe('Desk keyboard selection', () => {
   it.each([['n', ''], ['Enter', 'tomorrow']])('s on the focused constitution then %s rests through lifecycle', async (k, which) => {
     press('j')
     press('s')
+    await settle()
     const input = document.querySelector<HTMLElement>('.kbn-rest-popover')!
     expect(input).not.toBeNull()
     press(k, {}, input)
-    await Promise.resolve(); await Promise.resolve()
+    await settle()
     const calls = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/api/v1/lifecycle'))
     expect(calls).toHaveLength(1)
     const body = JSON.parse(String(calls[0][1]?.body))

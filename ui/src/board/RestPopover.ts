@@ -1,3 +1,4 @@
+import '@ui-sdk/web/dialog'
 import type { KanbanCard } from './KanbanTypes.js'
 import { civilWeekday, daysBetween, formatCivilDay, isoDayLocal, shiftCivilDay } from './civilDay.js'
 
@@ -19,19 +20,18 @@ export function restPopover(
   card: KanbanCard,
   submit: (until: string) => Promise<void>,
 ): () => void {
-  const previous = document.activeElement as HTMLElement | null
   const today = isoDayLocal(Date.now())
   const earliest = shiftCivilDay(today, 1)
   let cursor = earliest
   let count = ''
 
-  const scrim = document.createElement('div')
+  const dialog = document.createElement('ui-dialog')
+  const scrim = document.createElement('ui-dialog-content')
+  scrim.setAttribute('aria-label', `Rest ${card.name}`)
+  scrim.setAttribute('initial-focus', '.kbn-rest-popover')
   scrim.className = 'kbn-rest-scrim'
   const panel = document.createElement('div')
   panel.className = 'kbn-rest-popover'
-  panel.setAttribute('role', 'dialog')
-  panel.setAttribute('aria-modal', 'true')
-  panel.setAttribute('aria-label', `Rest ${card.name}`)
   panel.tabIndex = -1
 
   const title = el('h2', 'kbn-rest-title', 'Rest until')
@@ -77,7 +77,8 @@ export function restPopover(
   scrim.append(panel)
   // The palette lives on :root, so the body is home: it stacks above the board's
   // bar and does not inherit an inert Desk or reader.
-  document.body.append(scrim)
+  dialog.append(scrim)
+  document.body.append(dialog)
 
   function clamp(day: string): string {
     return day < earliest ? earliest : day
@@ -115,7 +116,8 @@ export function restPopover(
       if (day === today) cell.classList.add('kbn-rest-day-today')
       if (day < earliest) { cell.disabled = true; cell.classList.add('kbn-rest-day-past') }
       if (day === cursor) { cell.classList.add('kbn-rest-day-cursor'); cell.setAttribute('aria-selected', 'true') }
-      cell.addEventListener('click', () => { cursor = day; paint() })
+      // Repainting replaces the clicked cell, so the panel keeps the keyboard.
+      cell.addEventListener('click', () => { cursor = day; paint(); panel.focus({ preventScroll: true }) })
       cell.addEventListener('dblclick', () => finish(day))
       cells.push(cell)
     }
@@ -148,9 +150,7 @@ export function restPopover(
 
   function onKey(event: KeyboardEvent): void {
     if (event.metaKey || event.ctrlKey || event.altKey) return
-    // The dialog owns the keyboard while it is open.
-    const own = (): void => { event.preventDefault(); event.stopImmediatePropagation() }
-    if (event.key === 'Escape') { own(); close(); return }
+    const own = (): void => { event.preventDefault(); event.stopPropagation() }
     if (event.key === 'Enter') {
       const target = event.target as HTMLElement | null
       if (target instanceof HTMLButtonElement && target !== rest && !target.classList.contains('kbn-rest-day')) return
@@ -161,32 +161,15 @@ export function restPopover(
       own(); count += event.key; paint(); return
     }
     if (event.key === 'Backspace') { own(); count = count.slice(0, -1); paint(); return }
-    if (event.key === 'Tab') {
-      // Two stops: the dialog itself and the confirm button.
-      own()
-      ;(document.activeElement === rest ? panel : rest).focus({ preventScroll: true })
-      return
-    }
     if (move(event.key)) { own(); paint(); return }
-    // Anything else is swallowed so board hotkeys cannot fire underneath.
-    if (event.key.length === 1) own()
   }
 
-  function onPointerDown(event: PointerEvent): void {
-    if (!panel.contains(event.target as Node)) close()
-  }
+  function close(): void { dialog.api.close() }
 
-  function close(): void {
-    document.removeEventListener('pointerdown', onPointerDown, true)
-    document.removeEventListener('keydown', onKey, true)
-    scrim.remove()
-    if (previous?.isConnected) previous.focus({ preventScroll: true })
-  }
-
-  document.addEventListener('pointerdown', onPointerDown, true)
-  document.addEventListener('keydown', onKey, true)
+  scrim.addEventListener('click', event => { if (event.target === scrim) close() })
+  panel.addEventListener('keydown', onKey)
   paint()
-  panel.focus({ preventScroll: true })
+  void dialog.api.open().then(() => queueMicrotask(() => dialog.remove()))
   return close
 }
 
