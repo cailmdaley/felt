@@ -45,6 +45,7 @@ write those links with full paths, or rename the new fiber.`,
 			if addNamespace {
 				storage = felt.NamespaceStorage(storage)
 			}
+			storage.MemoizeWalk()
 
 			// Pull [bracketed] tags out of the slug so `felt add "[tag]name"` works
 			extractedTags, cleanSlug := felt.ExtractTags(args[0])
@@ -110,14 +111,14 @@ write those links with full paths, or rename the new fiber.`,
 			// orders a never-edited fiber by when it was born, not file mtime.
 			f.Touch(f.CreatedAt)
 
-			changes, err := storage.CreationReferenceChanges(f.ID)
-			if err != nil {
-				return err
-			}
+			changes, warningErr := storage.CreationReferenceChanges(f.ID)
 			if err := storage.Create(f); err != nil {
 				return err
 			}
 
+			if warningErr != nil {
+				fmt.Fprintf(a.env.Stderr, "Warning: could not inspect all existing references: %v\n", warningErr)
+			}
 			a.printReferenceChanges(changes)
 			fmt.Fprintln(a.env.Stdout, f.ID)
 			return nil

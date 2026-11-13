@@ -971,6 +971,7 @@ type bodyRefSite struct {
 	ref            BodyRef
 	start, end     int
 	markdownTarget string
+	label          string
 }
 
 // bodyRefSites finds every fiber reference in body: markdown links first,
@@ -1004,7 +1005,7 @@ func bodyRefSites(body string) []bodyRefSite {
 				continue
 			}
 			start := m[2] + at
-			site := bodyRefSite{ref: ref, start: start, end: start + len(ref.Target)}
+			site := bodyRefSite{ref: ref, start: start, end: start + len(ref.Target), label: body[m[0]:m[1]]}
 			if re == bodyLinkRe {
 				site.markdownTarget = strings.SplitN(strings.TrimSpace(raw), "#", 2)[0]
 			}

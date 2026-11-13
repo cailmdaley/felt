@@ -357,15 +357,15 @@ store's top level.`,
 	return command
 }
 
-// printRewrittenRefs names each fiber whose references a move rewrote: those
-// in the store that moved by their ids there, those elsewhere in its
-// enclosing store by their ids in it.
 func (a *app) printReferenceChanges(changes []felt.ReferenceChange) {
 	for _, change := range changes {
-		fmt.Fprintf(a.env.Stderr, "Warning: %s: [[%s]] resolved to %s; the new id resolves it to %s. Write the link with its full path, or rename the new fiber.\n", change.SourceID, change.Label, change.Before, change.After)
+		fmt.Fprintf(a.env.Stderr, "Warning: %s: %s resolved to %s; the new id resolves it to %s. Write the link with its full path, or rename the new fiber.\n", change.SourceID, change.Label, change.Before, change.After)
 	}
 }
 
+// printRewrittenRefs names each fiber whose references a move rewrote: those
+// in the store that moved by their ids there, those elsewhere in its
+// enclosing store by their ids in it.
 func (a *app) printRewrittenRefs(storage *felt.Storage, result *felt.MoveResult) {
 	if len(result.ReferenceChanges) > 0 {
 		fmt.Fprintln(a.env.Stderr, "The move repairs links that its new ids would otherwise change:")

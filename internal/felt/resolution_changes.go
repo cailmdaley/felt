@@ -1,8 +1,12 @@
 package felt
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"os"
 	"path"
+	"strings"
 )
 
 // ReferenceChange describes a reference whose resolved target changes when ids
@@ -42,6 +46,9 @@ func ReferenceChanges(felts []*Felt, beforeIDs, afterIDs, introduced []string, e
 				return
 			}
 			old, _, oldErr := before.resolve(f.ID, target)
+			if oldErr != nil && !errors.Is(oldErr, ErrExternalReference) {
+				return
+			}
 			// Moves rewrite references to moved targets to preserve their identity.
 			if sourceID != nil && oldErr == nil && sourceID(old) != old {
 				return
@@ -62,8 +69,8 @@ func ReferenceChanges(felts []*Felt, beforeIDs, afterIDs, introduced []string, e
 			seen[key] = true
 			changes = append(changes, ReferenceChange{SourceID: source, Label: label, Before: oldResult, After: nextResult})
 		}
-		for _, ref := range ExtractBodyRefs(f.Body) {
-			visit(ref.Target, ref.String())
+		for _, site := range bodyRefSites(f.Body) {
+			visit(site.ref.Target, site.label)
 		}
 		for _, input := range f.DataFlowInputs() {
 			target, _ := splitDataFlowRef(input.From)
@@ -75,14 +82,52 @@ func ReferenceChanges(felts []*Felt, beforeIDs, afterIDs, introduced []string, e
 
 // CreationReferenceChanges reports the effects of adding id to this store.
 func (s *Storage) CreationReferenceChanges(id string) ([]ReferenceChange, error) {
-	felts, err := s.List()
+	changes, err := s.creationReferenceChanges(id, "")
+	if external := s.ExternalRefs(); external != nil {
+		outer := &Storage{root: external.Root()}
+		outside, outsideErr := outer.creationReferenceChanges(path.Join(external.Prefix(), id), external.Prefix())
+		changes = append(changes, outside...)
+		err = errors.Join(err, outsideErr)
+	}
+	return changes, err
+}
+
+func (s *Storage) creationReferenceChanges(id, excludePrefix string) ([]ReferenceChange, error) {
+	files, err := s.listFiberFiles()
 	if err != nil {
 		return nil, err
+	}
+	ids := make([]string, len(files))
+	for i, file := range files {
+		ids[i] = file.id
+	}
+	candidates := make([]*Felt, len(files))
+	failures := make([]error, len(files))
+	needle := []byte(path.Base(id))
+	parallelFileWork(len(files), func(i int) {
+		file := files[i]
+		if excludePrefix != "" && (file.id == excludePrefix || strings.HasPrefix(file.id, excludePrefix+"/")) {
+			return
+		}
+		data, err := os.ReadFile(file.path)
+		if err != nil {
+			failures[i] = err
+			return
+		}
+		if !bytes.Contains(data, needle) {
+			return
+		}
+		candidates[i], failures[i] = Parse(file.id, data)
+	})
+	var felts []*Felt
+	for _, f := range candidates {
+		if f != nil {
+			felts = append(felts, f)
+		}
 	}
 	absent, err := s.AbsentNeighbors()
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(append(failures, err)...)
 	}
-	ids := sortedFeltIDs(felts)
-	return ReferenceChanges(felts, ids, append(append([]string{}, ids...), id), []string{id}, s.ExternalRefs(), nil, absent), nil
+	return ReferenceChanges(felts, ids, append(append([]string{}, ids...), id), []string{id}, s.ExternalRefs(), nil, absent), errors.Join(failures...)
 }
