@@ -182,11 +182,23 @@ side. A link to `[[commons/jackknife]]` written there is sound when checked from
 `~/store` and flagged as broken when checked from the project, since the
 project cannot see the store.
 
-Two stores that are not joined by any symlink cannot see each other at all. A
-link from one into the other reads as broken from either side, and the warning
-is accurate. If the link matters, join the stores; mirroring the target into
-both is worth it only for a stable reference document, and often the link reads
-just as well as prose. Do not silence the warning by inventing a stub fiber.
+Two stores that are not joined by any symlink cannot resolve each other's
+links. A shared store can declare its expected neighbours in the frontmatter
+of its single bare root fiber (`.felt/shared.md`):
+
+```yaml
+neighbors: [commons, work]
+```
+
+`felt check` groups unresolved links starting with those names into one info
+line per absent neighbour, such as `commons: not mounted, 18 links`. A neighbour
+is reachable when the enclosing store has that top-level directory or fiber;
+links into it are checked normally. Other unresolved links remain errors.
+The declaration does not mount stores or change link resolution. Only this
+field is read; the root fiber's other custom fields remain opaque.
+
+If a link matters locally, join the stores; do not invent stub fibers to
+silence the warning.
 
 ## Sharing a store with other people
 

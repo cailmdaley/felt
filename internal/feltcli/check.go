@@ -15,6 +15,8 @@ func (a *app) checkCmd() *cobra.Command {
   - fibers that fail to parse, which every other command skips
   - empty names
   - wikilinks and inputs.from ids that resolve to no fiber
+  - absent neighbors declared in the root fiber's neighbors: [store, ...]
+    field: one info summary per unmounted neighbor, not broken-link errors
   - a link whose path names no fiber but whose last segment does (a warning:
     it resolves only by that guess, which rm, nest, and unnest refuse)
   - legacy title and MyST anchor forms (felt migrate converts them)
@@ -54,7 +56,11 @@ func (a *app) checkCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			issues = append(issues, felt.Check(felts, storage.ExternalRefs(), strays...)...)
+			relationshipIssues, err := storage.Check(felts, strays...)
+			if err != nil {
+				return err
+			}
+			issues = append(issues, relationshipIssues...)
 			structureIssues, err := felt.CheckStructure(storage)
 			if err != nil {
 				return err

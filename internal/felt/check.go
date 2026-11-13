@@ -53,7 +53,7 @@ func (i CheckIssue) FixedByMigrate() bool {
 // rescued into a same-named fiber elsewhere.
 func Check(felts []*Felt, external *ExternalRefs, strays ...StrayFiber) []CheckIssue {
 	issues := checkNativeMetadata(felts)
-	issues = append(issues, checkRelationshipIntegrity(felts, external, strays)...)
+	issues = append(issues, checkRelationshipIntegrity(felts, external, strays, nil)...)
 
 	sortIssues(issues)
 	return issues
@@ -184,7 +184,53 @@ func CheckLegacyFormat(s *Storage) ([]CheckIssue, error) {
 	return issues, nil
 }
 
-func checkRelationshipIntegrity(felts []*Felt, external *ExternalRefs, strays []StrayFiber) []CheckIssue {
+// Check checks this store's relationships, including its root fiber's neighbors.
+func (s *Storage) Check(felts []*Felt, strays ...StrayFiber) ([]CheckIssue, error) {
+	entries, err := os.ReadDir(s.root)
+	if err != nil {
+		return nil, err
+	}
+	var roots []string
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), FileExt) {
+			roots = append(roots, strings.TrimSuffix(entry.Name(), FileExt))
+		}
+	}
+	absent := map[string]int{}
+	if len(roots) == 1 {
+		for _, f := range felts {
+			if f.ID != roots[0] {
+				continue
+			}
+			var neighbors []string
+			if node := f.ExtraFields["neighbors"]; node != nil {
+				if err := node.Decode(&neighbors); err != nil {
+					return nil, fmt.Errorf("%s neighbors: %w", f.ID, err)
+				}
+			}
+			outer, _, mounted := s.EnclosingStore()
+			for _, neighbor := range neighbors {
+				reachable := false
+				if mounted {
+					for _, p := range []string{neighbor, neighbor + FileExt} {
+						if _, err := os.Stat(filepath.Join(outer, p)); err == nil {
+							reachable = true
+						}
+					}
+				}
+				if !reachable {
+					absent[neighbor] = 0
+				}
+			}
+		}
+	}
+	issues := checkNativeMetadata(felts)
+	issues = append(issues, checkRelationshipIntegrity(felts, s.ExternalRefs(), strays, absent)...)
+	sortIssues(issues)
+	return issues, nil
+}
+
+func checkRelationshipIntegrity(felts []*Felt, external *ExternalRefs, strays []StrayFiber, absent map[string]int) []CheckIssue {
 	ids := make([]string, 0, len(felts))
 	byID := make(map[string]*Felt, len(felts))
 	for _, f := range felts {
@@ -226,6 +272,13 @@ func checkRelationshipIntegrity(felts []*Felt, external *ExternalRefs, strays []
 				}
 			}
 			return nil
+		}
+		if r.ResolveErr != nil {
+			neighbor := strings.SplitN(cleanLookupID(r.RawTarget), "/", 2)[0]
+			if _, ok := absent[neighbor]; ok {
+				absent[neighbor]++
+				return nil
+			}
 		}
 		if r.ResolveErr == nil && r.Via == resolvedBySlug {
 			// Resolution keeps a stale path working through its final
@@ -285,6 +338,11 @@ func checkRelationshipIntegrity(felts []*Felt, external *ExternalRefs, strays []
 		}
 		return nil
 	})
+	for neighbor, count := range absent {
+		if count > 0 {
+			issues = append(issues, CheckIssue{Level: CheckLevelInfo, FiberID: neighbor, Message: fmt.Sprintf("not mounted, %d links", count)})
+		}
+	}
 	return issues
 }
 
