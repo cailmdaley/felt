@@ -126,7 +126,7 @@ func TestAddWarnsAboutOutsideReferencesInEnclosingStore(t *testing.T) {
 	}
 }
 
-func TestNestWarnsAboutCapturedLinksAndRepairsThem(t *testing.T) {
+func TestNestDoesNotWarnAboutLinksItRepairs(t *testing.T) {
 	t.Parallel()
 	dir, s := newStore(t)
 	for _, f := range []*felt.Felt{
@@ -148,8 +148,8 @@ func TestNestWarnsAboutCapturedLinksAndRepairsThem(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v: %s", err, stderr)
 	}
-	if !strings.Contains(stderr, "work/note: [[euclid]] resolved to work/euclid") {
-		t.Fatal(stderr)
+	if stderr != "" {
+		t.Fatalf("repaired link must not warn: %s", stderr)
 	}
 	got := mustRead(t, s, "work/note")
 	if !strings.Contains(got.Body, "[[work/euclid]]") {

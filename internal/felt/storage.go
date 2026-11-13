@@ -1027,7 +1027,7 @@ func (s *Storage) MoveSubtree(oldID, newID string) (*MoveResult, error) {
 				introduced = append(introduced, afterIDs[i])
 			}
 		}
-		result.ReferenceChanges = ReferenceChanges(felts, beforeIDs, afterIDs, introduced, external, remap, absent)
+		result.ReferenceChanges = s.unrewrittenReferenceChanges(ReferenceChanges(felts, beforeIDs, afterIDs, introduced, external, remap, absent))
 	}
 	return result, err
 }

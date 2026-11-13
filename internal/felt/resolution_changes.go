@@ -80,6 +80,32 @@ func ReferenceChanges(felts []*Felt, beforeIDs, afterIDs, introduced []string, e
 	return changes
 }
 
+// unrewrittenReferenceChanges keeps only references whose original spelling
+// remains in the document after a move's automatic repairs.
+func (s *Storage) unrewrittenReferenceChanges(changes []ReferenceChange) []ReferenceChange {
+	labelsBySource := map[string]map[string]bool{}
+	var remaining []ReferenceChange
+	for _, change := range changes {
+		labels, read := labelsBySource[change.SourceID]
+		if !read {
+			labels = map[string]bool{}
+			if f, err := s.Read(change.SourceID); err == nil {
+				for _, site := range bodyRefSites(f.Body) {
+					labels[site.label] = true
+				}
+				for _, input := range f.DataFlowInputs() {
+					labels[input.From] = true
+				}
+			}
+			labelsBySource[change.SourceID] = labels
+		}
+		if labels[change.Label] {
+			remaining = append(remaining, change)
+		}
+	}
+	return remaining
+}
+
 // CreationReferenceChanges reports the effects of adding id to this store.
 func (s *Storage) CreationReferenceChanges(id string) ([]ReferenceChange, error) {
 	changes, err := s.creationReferenceChanges(id, "")
