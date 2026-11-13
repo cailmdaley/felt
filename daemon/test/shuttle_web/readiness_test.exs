@@ -22,6 +22,18 @@ defmodule ShuttleWeb.ReadinessTest do
     :ok
   end
 
+  @tag :tmp_dir
+  test "personal UI files and redirects are available during boot", %{tmp_dir: home} do
+    Shuttle.Test.Env.put_env("HOME", home)
+    ui = Path.join(home, ".config/shuttle/ui/example")
+    File.mkdir_p!(ui)
+    File.write!(Path.join(ui, "index.html"), "boot UI")
+
+    assert get(local_conn(), "/ui/example/").resp_body == "boot UI"
+    assert get(local_conn(), "/ui/example").status == 302
+    assert get(local_conn(), "/ui/example/missing").status == 404
+  end
+
   test "state-dependent routes fail fast with JSON 503 and no Retry-After" do
     conn = get(api_conn(), "/api/v1/state")
 

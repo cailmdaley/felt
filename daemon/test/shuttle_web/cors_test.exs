@@ -170,6 +170,25 @@ defmodule ShuttleWeb.CORSTest do
     assert conn.resp_body == "origin not allowed"
   end
 
+  test "a personal UI's same-origin POST passes while a foreign origin is refused" do
+    for {origin, allowed?} <- [
+          {"http://127.0.0.1:4000", true},
+          {"https://evil.example.com", false}
+        ] do
+      conn =
+        local_conn(:post, "/api/v1/felt-edit", %{})
+        |> put_req_header("origin", origin)
+        |> ShuttleWeb.CORSPlug.call([])
+
+      if allowed? do
+        refute conn.halted
+      else
+        assert conn.halted
+        assert conn.status == 403
+      end
+    end
+  end
+
   test "same-origin POST is allowed through a direct local listener" do
     conn = local_conn(:post, "/api/v1/felt-edit", %{})
 

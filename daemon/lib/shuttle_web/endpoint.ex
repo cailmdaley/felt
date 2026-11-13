@@ -19,6 +19,8 @@ defmodule ShuttleWeb.Endpoint do
   plug(ShuttleWeb.PeerPlug)
   plug(ShuttleWeb.PeerGatePlug)
 
+  plug(ShuttleWeb.PersonalUIPlug)
+
   # Serve the built Shuttle UI bundle so the daemon is one process (API + UI).
   # `only:` restricts to the bundle's first-segment dirs/files, so `/api/*`
   # and the bare `/` fall through to the router (which serves
