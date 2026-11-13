@@ -38,6 +38,7 @@ describe('workspace style contracts', () => {
     const dock = read('dock.css').replace(/\/\*[\s\S]*?\*\//g, '')
     const declarations = new Set([...`${tokens}\n${css}\n${dock}`.matchAll(/(--tone|--(?:ws|ctl|type|font|glyph|leading|track)-[\w-]+)\s*:/g)].map(m => m[1]))
     declarations.add('--verdict-ink') // The Desk's verdict plate declares it for the verbs both surfaces share.
+    declarations.add('--anchor-width').add('--available-height') // UI SDK writes these on the popups it positions.
     for (const token of [...dock.matchAll(/var\((--[\w-]+)/g)].map(m => m[1])) expect(declarations.has(token), token).toBe(true)
     expect(dock).not.toMatch(/#[\da-f]{3,8}\b|rgba?\(|url\(/i)
   })

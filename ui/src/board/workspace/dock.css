@@ -1,3 +1,5 @@
+@layer ui-sdk;
+
 /* The band over a constitution's pages, two lines: identity and navigation
    (back, the name, the context meter, ×), then the message box. The name gives
    way when it is tight. */
@@ -311,11 +313,11 @@
 .ws-dock .kbn-detail-parent-wrap { position: relative; flex: 1; min-width: 0; }
 .ws-dock .kbn-ctl-parent { display: block; max-width: 100%; padding: 4px 8px; border: var(--ws-line-width) solid var(--ws-hairline); background: transparent; font: var(--type-label)/var(--leading-ui) var(--font-serif); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-dock .kbn-detail-parent-input { width: 100%; }
-.ws-dock .kbn-detail-parent-dropdown { position: absolute; top: calc(100% + 3px); left: 0; right: 0; z-index: 2; max-height: 220px; overflow-y: auto; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: var(--ws-paper); }
-.ws-dock .kbn-detail-parent-option { display: flex; flex-direction: column; width: 100%; padding: 8px; border: none; background: transparent; text-align: left; }
-.ws-dock .kbn-detail-parent-option:hover { background: var(--ws-hover); }
+.ws-dock .kbn-detail-parent-dropdown { margin: 0; padding: 0; min-width: var(--anchor-width); max-width: calc(100vw - 16px); max-height: min(220px, var(--available-height)); overflow-y: auto; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: var(--ws-paper); color: var(--ws-ink); box-shadow: var(--ws-shadow-low); }
+.ws-dock .kbn-detail-parent-option { display: flex; flex-direction: column; padding: 8px; border: none; background: transparent; text-align: left; }
+.ws-dock .kbn-detail-parent-option:is(:hover, [data-highlighted]) { background: var(--ws-hover); }
 .ws-dock .kbn-detail-parent-option-id { font: var(--type-meta)/var(--leading-ui) var(--font-mono); color: var(--ws-ink-muted); overflow-wrap: anywhere; }
-.ws-dock .kbn-detail-parent-empty { cursor: default; color: var(--ws-ink-muted); font: italic var(--type-label)/var(--leading-ui) var(--font-serif); }
+.ws-dock .kbn-detail-parent-empty { display: block; padding: 8px; cursor: default; color: var(--ws-ink-muted); font: italic var(--type-label)/var(--leading-ui) var(--font-serif); }
 .ws-dock .kbn-ctl-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--ws-small-gap); }
 .ws-dock :is(.kbn-detail-controls-toggle, .kbn-ctl-foot .kbn-ctl-btn) { min-height: var(--ctl-h); display: flex; align-items: center; }
 .ws-dock .kbn-ctl-history-toggle { gap: 8px; }
@@ -365,7 +367,7 @@
 .ws-dock .ws-select-option:focus-visible { outline: var(--ws-focus-width) solid var(--ws-focus); outline-offset: calc(-1 * var(--ws-focus-width)); }
 .ws-dock .ws-select-option[aria-selected='true'] { background: var(--ws-fill); }
 .ws-dock .ws-select-option:disabled { color: var(--ws-ink-muted); cursor: default; }
-.ws-dock :is(.kbn-detail-parent-dropdown, .ws-select-picker)[data-anchored] { box-shadow: var(--ws-shadow-low); }
+.ws-dock .ws-select-picker[data-anchored] { box-shadow: var(--ws-shadow-low); }
 
 /* Data stays mono; verbs are serif plates. */
 .ws-dock .kbn-ctl-btn, .ws-dock .kbn-ctl-foot .kbn-ctl-btn,

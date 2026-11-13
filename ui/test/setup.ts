@@ -5,6 +5,8 @@ if (typeof HTMLElement !== 'undefined') {
     get() { return this.hasAttribute('inert') },
     set(value: boolean) { this.toggleAttribute('inert', value) },
   })
+  ElementInternals.prototype.setFormValue ??= function () {}
+  ElementInternals.prototype.setValidity ??= function () {}
   HTMLElement.prototype.showPopover ??= function () {}
   HTMLElement.prototype.hidePopover ??= function () {}
   Element.prototype.getAnimations ??= () => []

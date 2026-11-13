@@ -41,6 +41,19 @@ it('closes on Escape and returns focus to the button', () => {
   expect(opener.getAttribute('aria-expanded')).toBe('false')
 })
 
+it('leaves Escape to open search results inside it, then closes on the next', () => {
+  const { menu, opener, content, host } = mount()
+  const search = document.createElement('input')
+  search.setAttribute('role', 'combobox'); search.setAttribute('aria-expanded', 'true')
+  content.append(search)
+  menu.show(content, opener, host)
+  search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+  expect(menu.isOpen).toBe(true)
+  search.setAttribute('aria-expanded', 'false')
+  search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+  expect(menu.isOpen).toBe(false)
+})
+
 it('closes on a press outside, not on a press inside or on the button', () => {
   const { menu, opener, content, host, outside } = mount()
   menu.show(content, opener, host)

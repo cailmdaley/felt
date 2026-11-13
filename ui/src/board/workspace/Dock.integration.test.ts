@@ -873,27 +873,30 @@ describe('Dock settings queue', () => {
     expect(writes()[1]).toEqual({ action: 'set-agent', origin: 'owner', fiber: 'a/task', effort: 'high' })
   })
 
-  it('re-anchors the parent results each time they change, flipping above a field low in the viewport', async () => {
-    Object.defineProperty(document.documentElement, 'clientWidth', { configurable: true, value: 1000 })
-    Object.defineProperty(document.documentElement, 'clientHeight', { configurable: true, value: 800 })
-    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
-      return this.classList.contains('kbn-detail-parent-dropdown') ? 40 * this.childElementCount : 0
-    })
+  it('names the active parent option while arrows keep focus in the search, and Escape returns to the value', async () => {
+    actsOf(band).querySelector<HTMLButtonElement>('.ws-acts-settings')!.click()
+    await settle()
     vi.mocked(fetch).mockImplementation(async () => response({ fibers: [
       { fiber: { id: 'a/b', name: 'Beta' } }, { fiber: { id: 'a/c', name: 'Gamma' } }, { fiber: { id: 'a/d', name: 'Delta' } },
     ] }))
     band.el.querySelector<HTMLButtonElement>('.kbn-ctl-parent')!.click()
     const search = band.el.querySelector<HTMLInputElement>('.kbn-detail-parent-input')!
-    search.getBoundingClientRect = () => ({ left: 100, top: 690, width: 200, height: 30, right: 300, bottom: 720, x: 100, y: 690, toJSON: () => ({}) }) as DOMRect
-    const dropdown = band.el.querySelector<HTMLElement>('.kbn-detail-parent-dropdown')!
-    search.value = 'gamma'; search.dispatchEvent(new Event('focus'))
     await settle()
-    expect(dropdown.childElementCount).toBe(1)
-    expect([dropdown.dataset.side, dropdown.style.top]).toEqual(['below', '724px'])
-    search.value = ''; search.dispatchEvent(new Event('focus'))
+    expect(search.getAttribute('role')).toBe('combobox')
+    expect(search.getAttribute('aria-expanded')).toBe('true')
+    search.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
     await settle()
-    expect(dropdown.childElementCount).toBe(3)
-    expect([dropdown.dataset.side, dropdown.style.top]).toEqual(['above', `${690 - 4 - 120}px`])
+    expect(document.activeElement).toBe(search)
+    const first = document.getElementById(search.getAttribute('aria-activedescendant')!)!
+    expect(first.getAttribute('role')).toBe('option')
+    expect(first.textContent).toContain('Beta')
+    search.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    await settle()
+    expect(document.getElementById(search.getAttribute('aria-activedescendant')!)?.textContent).toContain('Delta')
+    search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await settle()
+    expect(search.hidden).toBe(true)
+    expect(document.activeElement).toBe(band.el.querySelector('.kbn-ctl-parent'))
   })
 
   it('serializes a parent reversal and addresses queued edits at the confirmed new parent', async () => {

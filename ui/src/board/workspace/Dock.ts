@@ -10,7 +10,7 @@ import { agentGroups } from '../../forms/agents.js'
 import { dispatchFailureMessage, isAgentCard, needsProjectDir, postForceDispatch, type DispatchFailureBody, type PastedImage } from '../KanbanModalShared.js'
 import { getDaemonJson, postDaemonJson } from '../daemonApi.js'
 import { buildProjectDirPrompt } from '../projectDirPrompt.js'
-import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from '../fiberSearch.js'
+import { fetchFiberIndex, filterParentCandidates } from '../fiberSearch.js'
 import { attachConversation, buildSessionHistory } from '../sessionHistory.js'
 import { showToast } from '../utils.js'
 import { coarsePointer } from '../mobile.js'
@@ -21,7 +21,7 @@ import { WorkerActions } from './workerActions.js'
 import { VoiceStrip, voiceLine, type FiberSlug } from './voiceStrip.js'
 import { fetchTranscriptUsage, paintUsage, warmUntil, type TranscriptUsage } from './transcriptUsage.js'
 import { slug } from '../threadOutline.js'
-import { anchorPopover, type Release } from './anchoredPopover.js'
+import '@ui-sdk/web/autocomplete'
 import { anchorSelect, dismissSelectPicker } from './selectPicker.js'
 import { ListenControl } from './ListenControl.js'
 import type { PhoneListening } from '../phoneListening.js'
@@ -1457,8 +1457,10 @@ export class Dock {
     let intended = parentId
     let revision = 0
 
-    const wrap = document.createElement('div')
+    const wrap = document.createElement('ui-autocomplete')
     wrap.className = 'kbn-detail-parent-wrap'
+    wrap.setAttribute('filter', 'false')
+    wrap.setAttribute('modal', 'false')
 
     const shown = document.createElement('button')
     shown.type = 'button'
@@ -1477,33 +1479,25 @@ export class Dock {
     search.hidden = true
     search.setAttribute('aria-label', 'Search parent fiber')
     search.setAttribute('autocomplete', 'off')
-    search.setAttribute('role', 'combobox')
-    search.setAttribute('aria-expanded', 'false')
-    search.setAttribute('aria-haspopup', 'listbox')
-
-    const dropdown = document.createElement('div')
-    dropdown.className = 'kbn-detail-parent-dropdown'
-    dropdown.style.display = 'none'
-    dropdown.setAttribute('role', 'listbox')
-
-    let release: Release | null = null
-    const hideDropdown = (): void => {
-      release?.(); release = null
-      dropdown.style.display = 'none'
-      search.setAttribute('aria-expanded', 'false')
-    }
-    /** Each render of the results places them again: their height, and so their side, may have changed. */
-    const showDropdown = (): void => {
-      dropdown.style.display = ''
-      if (release) release.reposition()
-      else release = anchorPopover(dropdown, search, { placement: 'below-start', matchWidth: true })
-    }
-    this.disposers.push(() => { release?.(); release = null })
+    const inputPart = document.createElement('ui-autocomplete-input')
+    inputPart.append(search)
+    const content = document.createElement('ui-autocomplete-content')
+    content.className = 'kbn-detail-parent-dropdown'
+    content.setAttribute('align', 'start')
+    content.setAttribute('side-offset', '3')
+    // The SDK stashes the empty part's children while there are results, so
+    // the message and its look live in one child that survives the stash.
+    const empty = document.createElement('ui-autocomplete-empty')
+    const emptyText = document.createElement('span')
+    emptyText.className = 'kbn-detail-parent-empty'
+    empty.append(emptyText)
+    const list = document.createElement('ui-autocomplete-list')
+    content.append(empty, list)
     const closeSearch = (): void => {
       this.searchRenderToken++
       if (this.searchDebounce !== null) window.clearTimeout(this.searchDebounce)
       this.searchDebounce = null
-      hideDropdown()
+      wrap.open = false
       search.hidden = true
       shown.hidden = false
     }
@@ -1515,14 +1509,14 @@ export class Dock {
       return true
     }
 
-    const onPick = (result: FiberSearchResult): void => {
+    const onPick = (id: string): void => {
       closeSearch()
       shown.focus()
-      if (result.id === intended) return
-      intended = result.id
+      if (id === intended) return
+      intended = id
       const request = ++revision
-      livePatch({ parentId: result.id }, () => {
-        parentId = result.id
+      livePatch({ parentId: id }, () => {
+        parentId = id
         if (request === revision) paint()
       }, () => {
         if (request === revision) { intended = parentId; paint() }
@@ -1530,8 +1524,8 @@ export class Dock {
     }
     const openDropdown = (): void => {
       if (search.hidden) return
-      void this.searchParents(search.value.trim(), card.id, dropdown, onPick, showDropdown).then(() => {
-        if (dropdown.style.display !== 'none') search.setAttribute('aria-expanded', 'true')
+      void this.searchParents(search.value.trim(), card.id, list, emptyText).then(() => {
+        if (!search.hidden) wrap.api.setOpen(true)
       })
     }
 
@@ -1539,7 +1533,7 @@ export class Dock {
       e.stopPropagation()
       shown.hidden = true
       search.hidden = false
-      search.value = ''
+      wrap.value = ''
       search.focus()
     })
     search.addEventListener('input', () => {
@@ -1547,55 +1541,21 @@ export class Dock {
       this.searchDebounce = window.setTimeout(() => openDropdown(), 200)
     })
     search.addEventListener('focus', () => openDropdown())
-    search.addEventListener('keydown', (e) => {
-      if (e.key === 'ArrowDown') {
-        const first = dropdown.querySelector<HTMLElement>('button')
-        if (first) {
-          e.preventDefault()
-          first.focus()
-        }
-      } else if (e.key === 'Escape') {
-        e.preventDefault()
-        e.stopPropagation()
-        closeSearch()
-        shown.focus()
-      }
+    wrap.addEventListener('valuechange', event => {
+      if (event.detail.reason !== 'item-press') return
+      // A pick commits the parent; the search text is put away with the field.
+      event.preventDefault()
+      onPick(event.detail.value)
     })
-    dropdown.addEventListener('keydown', (e) => {
-      const opts = Array.from(dropdown.querySelectorAll<HTMLElement>('button:not(:disabled)'))
-      const idx = opts.indexOf(document.activeElement as HTMLElement)
-      if (e.key === 'ArrowDown' && idx < opts.length - 1) {
-        e.preventDefault()
-        opts[idx + 1].focus()
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault()
-        if (idx > 0) opts[idx - 1].focus()
-        else search.focus()
-      } else if (e.key === 'Escape') {
-        e.preventDefault()
-        e.stopPropagation()
-        // Focus first — hiding a container that holds the focused element
-        // drops focus to <body> before it can be redirected.
-        shown.hidden = false
-        shown.focus()
-        closeSearch()
-      }
-    })
-    // A press on a result keeps focus where it is. WebKit gives a clicked
-    // button no focus, so without this pressing a result blurs the search to
-    // the body, the focusout below closes the list, and the result vanishes
-    // from under the pointer before its click lands.
-    dropdown.addEventListener('mousedown', (e) => e.preventDefault())
-    // Focus settling outside the picker — Tab away, a press elsewhere —
-    // closes it. Checked a tick later: switching windows fires focusout too,
-    // but leaves the search as the document's active element.
-    wrap.addEventListener('focusout', () => {
-      this.later(() => {
-        if (!wrap.contains(document.activeElement)) closeSearch()
-      }, 0)
+    wrap.addEventListener('openchange', event => {
+      if (event.detail.value) return
+      // Switching windows leaves the search where it was.
+      if (event.detail.reason === 'window-blur') { event.preventDefault(); return }
+      closeSearch()
+      if (event.detail.reason === 'escape-key') shown.focus()
     })
 
-    wrap.append(shown, search, dropdown)
+    wrap.append(shown, inputPart, content)
     return wrap
   }
 
@@ -1975,9 +1935,8 @@ export class Dock {
   private async searchParents(
     q: string,
     excludeId: string,
-    dropdown: HTMLElement,
-    onSelect: (result: FiberSearchResult) => void,
-    reveal: () => void,
+    list: HTMLElement,
+    empty: HTMLElement,
   ): Promise<void> {
     // Concurrent triggers (focus + debounced input) can resolve the shared
     // index promise in the same microtask batch — without a token the two
@@ -1989,19 +1948,13 @@ export class Dock {
       if (token !== this.searchRenderToken) return
       const candidates = filterParentCandidates(allFibers, q, excludeId)
 
-      dropdown.innerHTML = ''
-      if (candidates.length === 0) {
-        const empty = document.createElement('div')
-        empty.className = 'kbn-detail-parent-option kbn-detail-parent-empty'
-        empty.textContent = q ? 'No matches' : 'No fibers available'
-        dropdown.append(empty)
-        reveal()
-        return
-      }
-
+      empty.textContent = q ? 'No matches' : 'No fibers available'
+      list.replaceChildren()
       for (const fiber of candidates) {
-        const opt = document.createElement('button')
-        opt.type = 'button'
+        const opt = document.createElement('ui-autocomplete-item')
+        // A choice reports its label, so the label is the id the pick commits.
+        opt.setAttribute('value', fiber.id)
+        opt.setAttribute('label', fiber.id)
         opt.className = 'kbn-detail-parent-option'
         opt.dataset.depth = String(fiber.depth)
 
@@ -2014,16 +1967,12 @@ export class Dock {
         idSpan.textContent = fiber.id
 
         opt.append(nameSpan, idSpan)
-        opt.addEventListener('click', (e) => {
-          e.stopPropagation()
-          onSelect(fiber)
-        })
-        dropdown.append(opt)
+        list.append(opt)
       }
-      reveal()
     } catch {
-      dropdown.innerHTML = '<div class="kbn-detail-parent-option kbn-detail-parent-empty">Search failed</div>'
-      reveal()
+      if (token !== this.searchRenderToken) return
+      empty.textContent = 'Search failed'
+      list.replaceChildren()
     }
   }
 
