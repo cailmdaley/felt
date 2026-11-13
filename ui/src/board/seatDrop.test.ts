@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { KanbanModal, applyOptimisticSeat } from './KanbanModal.js'
 import { KanbanSurfaceRenderer, seatDropRefusal } from './KanbanSurfaces.js'
 import { rolePopover, validRole, type RoleChoice } from './RolePopover.js'
-import { card, response } from './testFixtures.js'
+import { card, response, settle } from './testFixtures.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 
 const postDaemonJson = vi.hoisted(() => vi.fn())
@@ -14,7 +14,7 @@ const writes = (): unknown[][] => postDaemonJson.mock.calls.map(call => call.sli
 const draft = (over: Partial<KanbanCard> = {}) => card({ id: 'work/new-office', name: 'New office', shuttleKind: 'oneshot', ...over })
 const roles = [{ slug: 'analyst', name: 'Analyst', outcome: 'Keeps the science right.' }, { slug: 'editor', name: 'Editor', outcome: 'Keeps writing clear.' }]
 let close: (() => void) | undefined
-afterEach(() => { close?.(); close = undefined; vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.replaceChildren() })
+afterEach(async () => { close?.(); await settle(); close = undefined; vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.replaceChildren() })
 function drop(type: string): Event {
   const event = new Event(type, { bubbles: true, cancelable: true })
   Object.defineProperty(event, 'dataTransfer', { value: { getData: () => 'work/new-office', dropEffect: '' } })
@@ -103,7 +103,9 @@ describe('dropping on the Roles band', () => {
     close = modal.closeRolePopover
     await vi.waitFor(() => expect(document.querySelector('.kbn-role-options')?.textContent).toContain('Analyst'))
     expect(postDaemonJson).not.toHaveBeenCalled()
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await settle()
+    document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await settle()
     expect(document.querySelector('[role="dialog"]')).toBeNull()
     expect(postDaemonJson).not.toHaveBeenCalled()
   })
@@ -126,6 +128,16 @@ describe('dropping on the Roles band', () => {
 })
 
 describe('the office picker', () => {
+  it('makes the board inert and returns focus when cancelled', async () => {
+    const anchor = document.createElement('button')
+    document.body.append(anchor); anchor.focus()
+    close = rolePopover(draft(), anchor, async () => roles, vi.fn())
+    await vi.waitFor(() => expect(anchor.inert).toBe(true))
+    document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await settle()
+    expect(anchor.inert).toBe(false)
+    expect(document.activeElement).toBe(anchor)
+  })
   it('filters offices and selects using the keyboard', async () => {
     const submit = vi.fn().mockResolvedValue(undefined)
     close = rolePopover(draft(), document.body, async () => roles, submit)
@@ -134,13 +146,14 @@ describe('the office picker', () => {
     filter.value = 'science'
     filter.dispatchEvent(new Event('input'))
     expect(document.querySelectorAll('.kbn-role-options button')).toHaveLength(1)
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    filter.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     expect(submit).toHaveBeenCalledExactlyOnceWith({ role: 'analyst' })
   })
   it('defaults a new office from the card and validates its slug', async () => {
     const submit = vi.fn().mockResolvedValue(undefined)
     close = rolePopover(draft(), document.body, async () => roles, submit)
-    document.querySelector<HTMLButtonElement>('[aria-expanded]')!.click()
+    await settle()
+    document.querySelector<HTMLButtonElement>('.kbn-role-option[aria-expanded]')!.click()
     const inputs = document.querySelectorAll<HTMLInputElement>('form input')
     expect([...inputs].map(input => input.value)).toEqual(['new-office', 'New office'])
     inputs[0].value = '../bad'
@@ -155,9 +168,10 @@ describe('the office picker', () => {
     const submit = vi.fn()
     let resolve!: (value: typeof roles) => void
     close = rolePopover(draft(), document.body, () => new Promise(done => { resolve = done }), submit)
-    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    await settle()
+    document.querySelector('.kbn-role-scrim')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     resolve(roles)
-    await Promise.resolve()
+    await settle()
     expect(document.querySelector('[role="dialog"]')).toBeNull()
     expect(submit).not.toHaveBeenCalled()
   })

@@ -1,3 +1,4 @@
+import '@ui-sdk/web/dialog'
 import type { KanbanCard } from './KanbanTypes.js'
 
 export interface RoleProfile { slug: string; name: string; outcome: string }
@@ -15,16 +16,15 @@ export function rolePopover(
   load: () => Promise<RoleProfile[]>,
   submit: (choice: RoleChoice) => Promise<void>,
 ): () => void {
-  const previous = document.activeElement as HTMLElement | null
   let closed = false
   let roles: RoleProfile[] = []
-  const scrim = document.createElement('div')
+  const dialog = document.createElement('ui-dialog')
+  const scrim = document.createElement('ui-dialog-content')
+  scrim.setAttribute('aria-label', `Choose a role for ${card.name}`)
+  scrim.setAttribute('initial-focus', 'input[type="search"]')
   scrim.className = 'kbn-role-scrim'
   const panel = document.createElement('div')
   panel.className = 'kbn-rest-popover kbn-role-popover'
-  panel.setAttribute('role', 'dialog')
-  panel.setAttribute('aria-modal', 'true')
-  panel.setAttribute('aria-label', `Choose a role for ${card.name}`)
   const title = document.createElement('h2')
   title.className = 'kbn-rest-title'
   title.textContent = 'Make a seat'
@@ -110,7 +110,8 @@ export function rolePopover(
   filter.addEventListener('input', paint)
   panel.append(title, subject, filter, list, message, create, form, cancel)
   scrim.append(panel)
-  document.body.append(scrim)
+  dialog.append(scrim)
+  document.body.append(dialog)
   const rect = anchor.getBoundingClientRect()
   const left = Math.max(16, Math.min(rect.left, window.innerWidth - panel.offsetWidth - 16))
   panel.style.left = `${left}px`
@@ -133,25 +134,10 @@ export function rolePopover(
   function close(): void {
     if (closed) return
     closed = true
-    document.removeEventListener('pointerdown', onPointerDown, true)
-    window.removeEventListener('keydown', onKey, true)
-    scrim.remove()
-    if (previous?.isConnected) previous.focus({ preventScroll: true })
-  }
-  function onPointerDown(event: PointerEvent): void {
-    if (!panel.contains(event.target as Node)) close()
+    dialog.api.close()
   }
   function onKey(event: KeyboardEvent): void {
-    // Keep the board's shortcuts out of the dialog; native input and button
-    // behavior still runs unless this dialog implements the key itself.
-    event.stopImmediatePropagation()
-    if (event.key === 'Escape') { event.preventDefault(); close(); return }
-    const stops = [...panel.querySelectorAll<HTMLElement>('input, button')].filter(el => !el.closest('[hidden]'))
-    if (event.key === 'Tab') {
-      event.preventDefault()
-      const i = stops.indexOf(document.activeElement as HTMLElement)
-      stops[(i + (event.shiftKey ? -1 : 1) + stops.length) % stops.length]?.focus()
-    } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && !form.contains(document.activeElement)) {
+    if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && !form.contains(document.activeElement)) {
       event.preventDefault()
       const choices = [filter, ...list.querySelectorAll<HTMLButtonElement>('button'), create]
       const i = choices.indexOf(document.activeElement as HTMLInputElement)
@@ -161,9 +147,12 @@ export function rolePopover(
       ;(list.querySelector<HTMLButtonElement>('button') ?? create).click()
     }
   }
-  document.addEventListener('pointerdown', onPointerDown, true)
-  window.addEventListener('keydown', onKey, true)
-  filter.focus({ preventScroll: true })
+  scrim.addEventListener('click', event => { if (event.target === scrim) close() })
+  panel.addEventListener('keydown', onKey)
+  void dialog.api.open().then(() => {
+    closed = true
+    queueMicrotask(() => dialog.remove())
+  })
   void load().then(result => { if (!closed) { roles = result; paint() } }).catch(error => {
     if (!closed) message.textContent = `Couldn't load roles: ${error instanceof Error ? error.message : String(error)}. You can still create one.`
   })
