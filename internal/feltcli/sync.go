@@ -52,6 +52,11 @@ killed merge holding the Git index lock.`,
   felt sync --push   after committing`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Missing plugin entries also remove the hooks that could report
+			// them; an ordinary felt command must notice independently.
+			for _, note := range a.pluginDriftNotes() {
+				fmt.Fprintln(a.env.Stderr, note)
+			}
 			if fetchTimeout <= 0 {
 				return fmt.Errorf("--fetch-timeout must be positive")
 			}

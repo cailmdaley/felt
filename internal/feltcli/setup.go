@@ -410,7 +410,7 @@ func (a *app) installClaudePluginAtSource(repoRoot string) error {
 			fmt.Fprintf(a.env.Stdout, "✓ Removed %d legacy Claude hook entries (served via plugin)\n", removed)
 		}
 		fmt.Fprintln(a.env.Stdout, "✓ Claude plugin payload unchanged; left installed bytes intact")
-		return nil
+		return setPluginHarness(repoRoot, "claude", true)
 	}
 	op, gerund := "install", "installing"
 	if installed {
@@ -442,7 +442,7 @@ func (a *app) installClaudePluginAtSource(repoRoot string) error {
 
 	fmt.Fprintln(a.env.Stdout)
 	fmt.Fprintln(a.env.Stdout, "Restart Claude Code for changes to take effect.")
-	return nil
+	return setPluginHarness(repoRoot, "claude", true)
 }
 
 // isPluginInstalled reports whether `claude plugin list` knows the given
@@ -547,7 +547,7 @@ func (a *app) uninstallPlugin() error {
 
 	fmt.Fprintln(a.env.Stdout)
 	fmt.Fprintln(a.env.Stdout, "Restart Claude Code for changes to take effect.")
-	return nil
+	return a.forgetPluginHarness("claude")
 }
 
 // pruneMarketplaceSkillLinks removes symlinks in ~/.claude/skills that point
@@ -962,6 +962,9 @@ func (a *app) installCodexBundlesAtSource(marketplaceSource string, names []stri
 
 	fmt.Fprintln(a.env.Stdout)
 	a.refreshCodexHookTrust()
+	if len(names) > 0 {
+		return setPluginHarness(marketplaceSource, "codex", true)
+	}
 	return nil
 }
 
@@ -1223,6 +1226,9 @@ func (a *app) uninstallCodexPlugin() error {
 
 	fmt.Fprintln(a.env.Stdout)
 	fmt.Fprintln(a.env.Stdout, "Restart Codex for changes to take effect.")
+	if _, err := a.env.LookPath("codex"); err == nil {
+		return a.forgetPluginHarness("codex")
+	}
 	return nil
 }
 
