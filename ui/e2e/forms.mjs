@@ -41,6 +41,20 @@ try {
     }
     await p.keyboard.press('Escape')
     await dialog.waitFor()
+    if (stage === 'after') {
+      const tags = p.getByRole('combobox', { name: 'Tags', exact: true })
+      await tags.fill('work')
+      await p.keyboard.press('ArrowDown')
+      await shot('tags-suggestions')
+      await p.keyboard.press('Escape')
+      await tags.fill('custom-tag')
+      await p.keyboard.press('Enter')
+      await p.getByRole('button', { name: 'Remove tag custom-tag' }).waitFor()
+      await shot('tags-chips')
+      await p.keyboard.press('Backspace')
+      await p.getByRole('button', { name: 'Remove tag custom-tag' }).waitFor({ state: 'detached' })
+      await p.keyboard.press('Escape')
+    }
     await p.keyboard.press('Escape')
     await dialog.waitFor({ state: 'detached' })
     await p.getByRole('button', { name: 'Settings', exact: true }).click()

@@ -32,6 +32,7 @@
 import type { JSX } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { Autocomplete, AutocompleteContent, AutocompleteEmpty, AutocompleteInput, AutocompleteItem, AutocompleteList } from '@ui-sdk/react/autocomplete'
+import { Combobox, ComboboxChip, ComboboxChipRemove, ComboboxChips, ComboboxContent, ComboboxInput, ComboboxItem, ComboboxList } from '@ui-sdk/react/combobox'
 import { agentGroups, resolveEffort } from './agents'
 import { useAgentRegistry } from './useAgentRegistry'
 import { AppDialog } from './AppDialog'
@@ -218,6 +219,7 @@ export function StashForm({
   const [body, setBody] = useState('')
   const [tags, setTags] = useState<string[]>([])
   const [tagInput, setTagInput] = useState('')
+  const [tagListOpen, setTagListOpen] = useState(false)
   const [parentSlug, setParentSlug] = useState<string>('')
 
   // Dispatch fields (shuttle)
@@ -266,31 +268,12 @@ export function StashForm({
     if (def) setAgentId(def.id)
   }, [registry])
 
+  // Suggestions answer what is typed; with nothing typed, or nothing to
+  // suggest, the list stays shut.
   const tagInputLower = tagInput.trim().toLowerCase()
-  const filteredSuggestions = tagSuggestions
-    .filter((t) => !tags.includes(t) && (!tagInputLower || t.toLowerCase().includes(tagInputLower)))
-    .slice(0, 8)
-
-  const addTag = (raw: string): void => {
-    const t = raw.trim()
-    if (!t) return
-    if (tags.includes(t)) return
-    setTags([...tags, t])
-    setTagInput('')
-  }
-
-  const removeTag = (t: string): void => {
-    setTags(tags.filter((x) => x !== t))
-  }
-
-  const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
-    if (e.key === 'Enter' || e.key === ',') {
-      e.preventDefault()
-      addTag(tagInput)
-    } else if (e.key === 'Backspace' && tagInput === '' && tags.length > 0) {
-      removeTag(tags[tags.length - 1])
-    }
-  }
+  const tagMatches = tagInputLower
+    ? tagSuggestions.filter((t) => !tags.includes(t) && t.toLowerCase().includes(tagInputLower)).slice(0, 8)
+    : []
 
   const submit = async (): Promise<void> => {
     if (submitting) return
@@ -430,45 +413,37 @@ export function StashForm({
           />
         </Field>
         <Field label="Tags" optional as="div">
-          <div className="stash-chips">
-            {tags.map((t) => (
-              <span key={t} className="stash-chip">
-                {t}
-                <button
-                  type="button"
-                  className="stash-chip-x"
-                  onClick={() => removeTag(t)}
-                  aria-label={`Remove tag ${t}`}
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-            <input
-              type="text"
-              className="stash-tag-input"
-              value={tagInput}
-              onChange={(e) => setTagInput(e.target.value)}
-              onKeyDown={handleTagKeyDown}
-              placeholder={tags.length === 0 ? 'tag, then Enter' : ''}
-            />
-          </div>
-          {filteredSuggestions.length > 0 && tagInput && (
-            <div className="stash-suggestions" role="listbox">
-              {filteredSuggestions.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  className="stash-suggestion"
-                  onClick={() => addTag(t)}
-                  role="option"
-                  aria-selected="false"
-                >
+          <Combobox multiple value={tags} onValueChange={setTags}
+            query={tagInput} onQueryChange={setTagInput} filter={false}
+            open={tagListOpen && tagMatches.length > 0} onOpenChange={setTagListOpen}>
+            <ComboboxChips className="stash-chips">
+              {tags.map(t => (
+                <ComboboxChip key={t} value={t} className="stash-chip">
                   {t}
-                </button>
+                  <ComboboxChipRemove className="stash-chip-x" aria-label={`Remove tag ${t}`}>×</ComboboxChipRemove>
+                </ComboboxChip>
               ))}
-            </div>
-          )}
+              <ComboboxInput className="stash-tag-input" aria-label="Tags"
+                placeholder={tags.length === 0 ? 'tag, then Enter' : ''}
+                onKeyDown={event => {
+                  // Enter on a highlighted suggestion is the list's; otherwise
+                  // Enter, like a comma, makes a tag of what was typed.
+                  const typed = event.key === ',' || (event.key === 'Enter' && !event.currentTarget.getAttribute('aria-activedescendant'))
+                  if (!typed) return
+                  event.preventDefault()
+                  const tag = tagInput.trim()
+                  if (tag && !tags.includes(tag)) setTags([...tags, tag])
+                  setTagInput('')
+                }} />
+            </ComboboxChips>
+            <ComboboxContent className="stash-suggestions" sideOffset={4} align="start">
+              <ComboboxList aria-label="Tag suggestions">
+                {tagMatches.map(t => (
+                  <ComboboxItem key={t} value={t} className="stash-suggestion">{t}</ComboboxItem>
+                ))}
+              </ComboboxList>
+            </ComboboxContent>
+          </Combobox>
         </Field>
         <div className="form-controls">
           {/* Rendered even with no projects, as long as there is a way to add
@@ -692,6 +667,15 @@ export function injectStashFormStyles(): void {
       font-style: italic;
     }
     .stash-suggestions {
+      box-sizing: border-box;
+      width: var(--anchor-width);
+      padding: 6px;
+      background: var(--kbn-blank);
+      border: 1px solid color-mix(in srgb, var(--kbn-graphite) 18%, transparent);
+      border-radius: 3px;
+      box-shadow: 0 8px 18px color-mix(in srgb, var(--kbn-shade) 18%, transparent);
+    }
+    .stash-suggestions [role="listbox"] {
       display: flex;
       flex-wrap: wrap;
       gap: 4px;
@@ -705,9 +689,9 @@ export function injectStashFormStyles(): void {
       padding: 2px 8px;
       border-radius: 10px;
       cursor: pointer;
-      transition: background 100ms ease-out;
     }
-    .stash-suggestion:hover {
+    .stash-suggestion:hover,
+    .stash-suggestion[data-highlighted] {
       background: color-mix(in srgb, var(--kbn-owed) 18%, transparent);
       border-color: color-mix(in srgb, var(--kbn-owed) 42%, transparent);
     }

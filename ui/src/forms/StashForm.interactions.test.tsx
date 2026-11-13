@@ -28,6 +28,12 @@ async function mount() {
 function key(el: Element, value: string) {
   return act(async () => { el.dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true })) })
 }
+async function type(input: HTMLInputElement, value: string) {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+}
 afterEach(() => {
   act(() => root?.unmount())
   document.body.replaceChildren()
@@ -55,4 +61,35 @@ it('announces the highlighted project-relative parent and lets Escape close its 
   expect(blockingDialogOpen()).toBe(true)
   await key(input, 'Escape')
   expect(cancel).toHaveBeenCalledOnce()
+})
+
+it('chooses tag suggestions by keyboard and creates, navigates and removes chips', async () => {
+  await mount()
+  const input = document.querySelector<HTMLInputElement>('[aria-label="Tags"]')!
+  await act(async () => input.focus())
+  expect(input.getAttribute('aria-expanded')).toBe('false')
+  await type(input, 'zzz')
+  expect(input.getAttribute('aria-expanded')).toBe('false')
+  await type(input, 'res')
+  expect(input.getAttribute('aria-expanded')).toBe('true')
+  await key(input, 'ArrowDown')
+  const option = document.getElementById(input.getAttribute('aria-activedescendant')!)!
+  expect(option?.getAttribute('role')).toBe('option')
+  expect(option?.textContent).toBe('research')
+  await key(input, 'Enter')
+  expect(document.querySelector('[aria-label="Remove tag research"]')).not.toBeNull()
+  expect(input.value).toBe('')
+  await type(input, ' custom ')
+  await key(input, 'Enter')
+  expect(document.querySelector('[aria-label="Remove tag custom"]')).not.toBeNull()
+  await type(input, 'custom')
+  await key(input, 'Enter')
+  expect(document.querySelectorAll('[aria-label="Remove tag custom"]')).toHaveLength(1)
+  await key(input, 'Backspace')
+  expect(document.querySelector('[aria-label="Remove tag custom"]')).toBeNull()
+  await type(input, 'comma')
+  await key(input, ',')
+  expect(document.querySelector('[aria-label="Remove tag comma"]')).not.toBeNull()
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Remove tag research"]')!.click())
+  expect(document.querySelector('[aria-label="Remove tag research"]')).toBeNull()
 })
