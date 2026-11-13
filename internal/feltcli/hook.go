@@ -21,9 +21,9 @@ func (a *app) sessionCmd() *cobra.Command {
 		Use:   "session",
 		Short: "Print the start-of-session context",
 		Long: `Prints what an agent is given at session start: the skill directive, up to
-five open or active fibers and five other recently updated ones. Attention
-names fibers outside the directory layout and missing plugin entries for
-harnesses set up by felt. felt hook session wraps the same text for harness hooks.`,
+five open or active fibers and five other recently updated ones, and one
+Attention line when fibers sit outside the directory layout, where felt cannot
+see them. felt hook session wraps the same text for harness hooks.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fmt.Fprint(a.env.Stdout, a.buildSessionContext())
@@ -159,22 +159,10 @@ func (a *app) buildSessionContext() string {
 	sb.WriteString(sessionDirective)
 	sb.WriteString("\n\n")
 
-	driftNotes := a.pluginDriftNotes()
-	writeAttention := func(notes []string) {
-		if len(notes) > 0 {
-			sb.WriteString("## Attention\n\n")
-			sb.WriteString(strings.Join(notes, "\n"))
-			sb.WriteString("\n")
-		}
-	}
 	root, err := felt.ProjectRoot(a.env, a.dir)
 	if err != nil || root == "" {
 		sb.WriteString(sessionNoRepoNote)
 		sb.WriteString("\n")
-		if len(driftNotes) > 0 {
-			sb.WriteString("\n")
-			writeAttention(driftNotes)
-		}
 		return sb.String()
 	}
 
@@ -248,10 +236,13 @@ func (a *app) buildSessionContext() string {
 		sb.WriteString("\n")
 	}
 
+	// Tending the store (queue size, sprawl, containers) is the librarian's
+	// office, not every session's; only fibers felt cannot see are flagged.
 	if layoutNote != "" {
-		driftNotes = append([]string{layoutNote}, driftNotes...)
+		sb.WriteString("## Attention\n\n")
+		sb.WriteString(layoutNote)
+		sb.WriteString("\n")
 	}
-	writeAttention(driftNotes)
 
 	return sb.String()
 }

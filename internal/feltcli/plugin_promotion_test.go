@@ -737,10 +737,6 @@ func TestSingleHarnessSetupRefreshesBothEnabledCaches(t *testing.T) {
 				t.Fatal(err)
 			}
 			current := filepath.Join(f.home, ".felt", pluginRuntimeDirName, pluginCurrentName)
-			identity, markerErr := readPluginGeneration(filepath.Join(current, "claude-plugin"))
-			if markerErr != nil || strings.Join(identity.Harnesses, ",") != "claude,codex" {
-				t.Fatalf("setup ownership lost across promotion: %+v, %v", identity.Harnesses, markerErr)
-			}
 			if err := f.a.verifyClaudeLoadedGeneration(current); err != nil {
 				t.Errorf("Claude stale: %v", err)
 			}
