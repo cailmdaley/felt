@@ -2716,7 +2716,8 @@
         "type": "object",
         "properties": {
           "surface": {
-            "const": "cli"
+            "const": "cli",
+            "description": "Always cli: the worker runs in a terminal."
           },
           "terminal": {
             "type": [
@@ -2728,10 +2729,11 @@
               "rex",
               null
             ],
-            "description": "Observed terminal holder; null when no holder has been remembered, including capture responses."
+            "description": "The terminal backend this daemon last saw holding the session (tmux or rex), or null when it has not observed one in the last ten seconds."
           },
           "tmux_session": {
-            "type": "string"
+            "type": "string",
+            "description": "The worker's terminal session name, named tmux_session whichever backend holds it."
           }
         },
         "required": [
@@ -2901,13 +2903,23 @@
             ]
           },
           "tmux_session": {
-            "type": "string"
+            "type": "string",
+            "description": "With already_running: the running worker's terminal session name."
           },
           "surface": {
             "type": "string"
           },
           "terminal": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "tmux",
+              "rex",
+              null
+            ],
+            "description": "With already_running: the backend holding the running worker, or null when not recently observed."
           }
         },
         "required": [
