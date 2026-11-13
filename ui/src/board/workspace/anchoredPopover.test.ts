@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest'
-import { anchorPopover, popoverFloor } from './anchoredPopover.js'
+import { anchorPopover } from './anchoredPopover.js'
 
 const rect = (left: number, top: number, width: number, height: number): DOMRect =>
   ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect
@@ -38,17 +38,13 @@ describe('anchorPopover', () => {
     anchorPopover(panel, anchor, { placement: 'below-end' })
     expect(panel.style.left).toBe('8px')
   })
-  it('stays above a visible phone bottom bar, capping its height to the room it has', () => {
+  it('caps its height to the room on the roomier side', () => {
     viewport(390, 844)
-    const bar = document.createElement('div'); bar.dataset.part = 'phone-bottom-bar'
-    bar.getBoundingClientRect = () => rect(0, 788, 390, 56)
-    document.body.append(bar)
-    expect(popoverFloor()).toBe(788)
     const { anchor, panel } = fixture(rect(16, 200, 44, 44), { width: 140, height: 700 })
     anchorPopover(panel, anchor)
     expect(panel.dataset.side).toBe('below')
     expect(panel.style.top).toBe('248px')
-    expect(panel.style.maxHeight).toBe(`${788 - 8 - 248}px`)
+    expect(panel.style.maxHeight).toBe(`${844 - 8 - 248}px`)
   })
   it('re-places on request when its content changes size', () => {
     viewport(400, 800)

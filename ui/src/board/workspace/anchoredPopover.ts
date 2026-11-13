@@ -1,8 +1,8 @@
 /**
- * One positioning rule for every popover, menu and dropdown the fiber page and
- * its plates open: anchored to the control that opened it, flipped or shifted
- * to stay inside the viewport and above the phone's bottom bar, and never
- * clipped by an ancestor's `overflow` or displaced by an ancestor's transform.
+ * The positioning rule for the hand-placed popovers, menus and dropdowns the
+ * fiber page and its plates open: anchored to the control that opened it,
+ * flipped or shifted to stay inside the viewport, and never clipped by an
+ * ancestor's `overflow` or displaced by an ancestor's transform.
  *
  * Where the Popover API exists the panel is promoted to the top layer, which
  * escapes clipping and transformed containing blocks while leaving it in place
@@ -32,16 +32,6 @@ export type Release = (() => void) & { reposition: () => void }
 
 const STYLE_KEYS = ['position', 'inset', 'margin', 'left', 'top', 'maxHeight', 'minWidth', 'overflowY', 'color', 'zIndex'] as const
 
-/** The lowest y a popover may reach: the viewport's bottom, or the top of a visible phone bottom bar. */
-export function popoverFloor(): number {
-  let bottom = document.documentElement.clientHeight || window.innerHeight
-  for (const bar of document.querySelectorAll<HTMLElement>('[data-part="phone-bottom-bar"]')) {
-    const rect = bar.getBoundingClientRect()
-    if (rect.height > 0 && rect.width > 0 && rect.top > 0 && rect.top < bottom) bottom = rect.top
-  }
-  return bottom
-}
-
 /** Places `panel` against `trigger` and keeps it there until the returned release is called. */
 export function anchorPopover(panel: HTMLElement, trigger: HTMLElement, options: AnchorOptions = {}): Release {
   const { placement = 'below-start', gap = 4, margin = 8, matchWidth = false } = options
@@ -63,8 +53,8 @@ export function anchorPopover(panel: HTMLElement, trigger: HTMLElement, options:
     const width = panel.offsetWidth
     const natural = panel.offsetHeight
     const right = document.documentElement.clientWidth || window.innerWidth
-    const floor = popoverFloor()
-    const below = floor - margin - (anchor.bottom + gap)
+    const bottom = document.documentElement.clientHeight || window.innerHeight
+    const below = bottom - margin - (anchor.bottom + gap)
     const above = anchor.top - gap - margin
     let side: 'above' | 'below' = placement.startsWith('above') ? 'above' : 'below'
     if (side === 'below' && natural > below && above > below) side = 'above'
