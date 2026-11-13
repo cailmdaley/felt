@@ -27,7 +27,11 @@ roles/), the fiber lands exactly there. Otherwise a leading segment that is an
 existing fiber's basename places <slug> under that fiber's parent: with
 project/launch in the store, launch/log becomes project/launch/log (reported
 on stderr). An ambiguous match aborts with the candidates; --top-level skips
-resolution and uses <slug> as spelled.`,
+resolution and uses <slug> as spelled.
+
+If the new name changes existing link resolution, a warning on stderr names
+the affected references and their original targets. Resolve it on the spot:
+write those links with full paths, or rename the new fiber.`,
 		Example: `  felt add analysis/covariance "Covariance method" -s open
   felt add analysis/jackknife-bias "Jackknife bias" -o "negligible below 200 patches"`,
 		Args: cobra.ExactArgs(2),
@@ -106,10 +110,15 @@ resolution and uses <slug> as spelled.`,
 			// orders a never-edited fiber by when it was born, not file mtime.
 			f.Touch(f.CreatedAt)
 
+			changes, err := storage.CreationReferenceChanges(f.ID)
+			if err != nil {
+				return err
+			}
 			if err := storage.Create(f); err != nil {
 				return err
 			}
 
+			a.printReferenceChanges(changes)
 			fmt.Fprintln(a.env.Stdout, f.ID)
 			return nil
 		},

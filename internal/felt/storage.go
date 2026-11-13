@@ -916,8 +916,9 @@ func (s *Storage) pruneEmptyDirs(startDir string) error {
 // the move. Outside holds fibers of the enclosing store, outside this view,
 // by their ids there.
 type MoveResult struct {
-	Rewritten []string
-	Outside   []string
+	Rewritten        []string
+	Outside          []string
+	ReferenceChanges []ReferenceChange
 }
 
 // MoveSubtree moves a fiber and any nested descendants to a new path, rewriting
@@ -1000,6 +1001,22 @@ func (s *Storage) MoveSubtree(oldID, newID string) (*MoveResult, error) {
 		return nil, err
 	}
 	result, _, err := s.recoverMove(oldID, newID)
+	if result != nil && err == nil {
+		beforeIDs := sortedFeltIDs(felts)
+		afterIDs := make([]string, len(beforeIDs))
+		var introduced []string
+		remap := func(id string) string {
+			mapped, _ := remapIDPrefix(id, oldID, newID)
+			return mapped
+		}
+		for i, id := range beforeIDs {
+			afterIDs[i] = remap(id)
+			if afterIDs[i] != id {
+				introduced = append(introduced, afterIDs[i])
+			}
+		}
+		result.ReferenceChanges = ReferenceChanges(felts, beforeIDs, afterIDs, introduced, external, remap)
+	}
 	return result, err
 }
 
