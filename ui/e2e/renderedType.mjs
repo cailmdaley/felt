@@ -25,10 +25,11 @@ export async function renderedTypeViolations(page) {
     // These exact elements draw a letter with the initials font, not a text role.
     // No suffix-based exemption: a new *-mark or *-cap remains ordinary text.
     const initial = '.kbn-cap'
+    // The SDK announcer is a one-pixel live region read by screen readers, not drawn text.
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
     for (let node; (node = walker.nextNode());) {
       const text = node.textContent.trim(), el = node.parentElement
-      if (!text || !el || el.closest('script, style, noscript') || !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) continue
+      if (!text || !el || el.closest('script, style, noscript, [data-ui-sdk-announcer]') || !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) continue
       const range = document.createRange(); range.selectNodeContents(node)
       if (![...range.getClientRects()].some(r => r.width > 0 && r.height > 0)) continue
       const style = getComputedStyle(el), size = parseFloat(style.fontSize)
