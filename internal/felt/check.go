@@ -53,7 +53,7 @@ func (i CheckIssue) FixedByMigrate() bool {
 // rescued into a same-named fiber elsewhere.
 func Check(felts []*Felt, external *ExternalRefs, strays ...StrayFiber) []CheckIssue {
 	issues := checkNativeMetadata(felts)
-	issues = append(issues, checkRelationshipIntegrity(felts, external, strays, nil)...)
+	issues = append(issues, checkRelationshipIntegrity(felts, external, strays, nil, nil)...)
 
 	sortIssues(issues)
 	return issues
@@ -225,12 +225,31 @@ func (s *Storage) Check(felts []*Felt, strays ...StrayFiber) ([]CheckIssue, erro
 		}
 	}
 	issues := checkNativeMetadata(felts)
-	issues = append(issues, checkRelationshipIntegrity(felts, s.ExternalRefs(), strays, absent)...)
+	issues = append(issues, checkRelationshipIntegrity(felts, s.ExternalRefs(), strays, absent, s.isCompanionLink)...)
 	sortIssues(issues)
 	return issues, nil
 }
 
-func checkRelationshipIntegrity(felts []*Felt, external *ExternalRefs, strays []StrayFiber, absent map[string]int) []CheckIssue {
+// isCompanionLink recognizes markdown targets relative to the source document.
+// A directory carrying its own fiber stays in the relationship checks.
+func (s *Storage) isCompanionLink(source *Felt, site bodyRefSite) bool {
+	if site.markdownTarget == "" {
+		return false
+	}
+	target := filepath.Join(filepath.Dir(s.Path(source.ID)), filepath.FromSlash(site.markdownTarget))
+	info, err := os.Stat(target)
+	if err != nil {
+		return false
+	}
+	if info.IsDir() {
+		if _, err := os.Stat(filepath.Join(target, filepath.Base(target)+FileExt)); err == nil {
+			return false
+		}
+	}
+	return true
+}
+
+func checkRelationshipIntegrity(felts []*Felt, external *ExternalRefs, strays []StrayFiber, absent map[string]int, skip func(*Felt, bodyRefSite) bool) []CheckIssue {
 	ids := make([]string, 0, len(felts))
 	byID := make(map[string]*Felt, len(felts))
 	for _, f := range felts {
@@ -251,7 +270,7 @@ func checkRelationshipIntegrity(felts []*Felt, external *ExternalRefs, strays []
 			return rel, ok
 		}
 	}
-	_ = iterRefsResolved(felts, resolver, func(r resolvedRef) error {
+	_ = iterRefsResolvedSkipping(felts, resolver, skip, func(r resolvedRef) error {
 		// A reference that resolves to a fiber in the enclosing store is not
 		// broken — this store simply cannot see it. Silence, not an issue,
 		// EXCEPT where an INFERRED external hit shadowed a local basename

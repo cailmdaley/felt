@@ -180,8 +180,16 @@ type resolvedRef struct {
 // rebuilds maps + sorts over every id. Extraction, the costly half over a
 // whole store, runs across workers first; resolution and yield stay in order.
 func iterRefsResolved(felts []*Felt, resolver *scopedIDResolver, yield func(resolvedRef) error) error {
+	return iterRefsResolvedSkipping(felts, resolver, nil, yield)
+}
+
+func iterRefsResolvedSkipping(felts []*Felt, resolver *scopedIDResolver, skip func(*Felt, bodyRefSite) bool, yield func(resolvedRef) error) error {
 	bodyRefs := make([][]BodyRef, len(felts))
-	parallelFileWork(len(felts), func(i int) { bodyRefs[i] = ExtractBodyRefs(felts[i].Body) })
+	parallelFileWork(len(felts), func(i int) {
+		bodyRefs[i] = extractBodyRefs(felts[i].Body, func(site bodyRefSite) bool {
+			return skip != nil && skip(felts[i], site)
+		})
+	})
 	for i, f := range felts {
 		for _, ref := range bodyRefs[i] {
 			resolved, via, err := resolver.resolve(f.ID, ref.Target)

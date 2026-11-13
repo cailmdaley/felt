@@ -968,8 +968,9 @@ func maskCode(body string) string {
 // byte range of its target spelling, which is the only part a rewrite touches
 // — a wikilink's #fragment and |label, a markdown link's text, stay as written.
 type bodyRefSite struct {
-	ref        BodyRef
-	start, end int
+	ref            BodyRef
+	start, end     int
+	markdownTarget string
 }
 
 // bodyRefSites finds every fiber reference in body: markdown links first,
@@ -1003,7 +1004,11 @@ func bodyRefSites(body string) []bodyRefSite {
 				continue
 			}
 			start := m[2] + at
-			sites = append(sites, bodyRefSite{ref: ref, start: start, end: start + len(ref.Target)})
+			site := bodyRefSite{ref: ref, start: start, end: start + len(ref.Target)}
+			if re == bodyLinkRe {
+				site.markdownTarget = strings.SplitN(strings.TrimSpace(raw), "#", 2)[0]
+			}
+			sites = append(sites, site)
 		}
 	}
 	return sites
@@ -1012,9 +1017,16 @@ func bodyRefSites(body string) []bodyRefSite {
 // ExtractBodyRefs finds fiber references in a body from markdown links and wikilinks.
 // References inside code spans or fenced code blocks are ignored.
 func ExtractBodyRefs(body string) []BodyRef {
+	return extractBodyRefs(body, nil)
+}
+
+func extractBodyRefs(body string, skip func(bodyRefSite) bool) []BodyRef {
 	seen := map[string]bool{}
 	var refs []BodyRef
 	for _, site := range bodyRefSites(body) {
+		if skip != nil && skip(site) {
+			continue
+		}
 		key := site.ref.Target + "#" + site.ref.Fragment
 		if seen[key] {
 			continue
