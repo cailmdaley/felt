@@ -1004,6 +1004,8 @@ describe('Dock poll reconciliation', () => {
     expect(select('Agent').value).toBe('codex-luna')
     expect(select('Effort').value).toBe('low')
     expect(band.el.querySelector('[aria-label="Kind"] [aria-checked="true"]')?.textContent).toBe('Standing')
+    // A reseed is not a pick: the cron field does not take focus.
+    expect(document.activeElement).not.toBe(band.el.querySelector('[aria-label="Cron"]'))
     expect(band.el.querySelector<HTMLInputElement>('input[type="date"]')?.value).toBe('2026-10-12')
     expect(band.el.querySelector('.kbn-ctl-parent')?.textContent).toBe('b')
     expect(band.el.querySelector('.kbn-ctl-strip')?.textContent).toContain('codex-luna')

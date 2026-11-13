@@ -1,3 +1,4 @@
+import '@ui-sdk/web/segmented-control'
 import { headerIcon } from './headerIcon.js'
 import { ago, clockTime, daysBetween, hostZone, isoDayLocal, type Zone } from '../civilDay.js'
 import type { KanbanCard } from '../KanbanTypes.js'
@@ -191,8 +192,7 @@ export class Overview {
   private readonly groupsEl = node('div', 'ws-overview-groups')
   private readonly status = node('p', 'ws-overview-status')
   private readonly find = node('input', 'ws-overview-find')
-  private readonly lensGroup = node('div', 'ws-overview-lens')
-  private readonly lensButtons = new Map<OverviewLens, HTMLButtonElement>()
+  private readonly lensGroup = node('ui-segmented-control', 'ws-overview-lens')
   private readonly folios = new Map<string, Folio>()
   private readonly fallbacks = new Map<string, KanbanCard>()
   private readonly ribbonItems = new Map<DocKey, RibbonItem>()
@@ -274,26 +274,20 @@ export class Overview {
     this.read.setAttribute('aria-label', 'Read lately')
     this.read.append(node('h2', 'ws-overview-read-title', 'Read lately'), this.readList)
     const controls = node('div', 'ws-overview-controls')
-    this.lensGroup.setAttribute('role', 'radiogroup')
+    this.lensGroup.setAttribute('default-value', this.lens)
     this.lensGroup.setAttribute('aria-label', 'Group documents')
     for (const [value, label] of [['recent', 'Recent'], ['projects', 'Projects'], ['hosts', 'Hosts']] as const) {
       const option = button('')
       option.textContent = label
-      option.setAttribute('role', 'radio')
       option.setAttribute('aria-label', label)
       option.dataset.lens = value
-      option.addEventListener('click', () => this.setLens(value))
-      this.lensButtons.set(value, option); this.lensGroup.append(option)
+      const item = document.createElement('ui-segmented-control-item')
+      item.setAttribute('value', value)
+      item.setAttribute('as-child', '')
+      item.append(option)
+      this.lensGroup.append(item)
     }
-    this.markLens()
-    this.lensGroup.addEventListener('keydown', e => {
-      const order = [...this.lensButtons.keys()]
-      const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0
-      if (!step) return
-      e.preventDefault(); e.stopPropagation()
-      const next = order[(order.indexOf(this.lens) + step + order.length) % order.length]
-      this.setLens(next); this.lensButtons.get(next)?.focus()
-    })
+    this.lensGroup.addEventListener('valuechange', event => this.setLens(event.detail.value as OverviewLens))
     this.find.type = 'search'; this.find.placeholder = 'Find… /'
     this.find.setAttribute('aria-label', 'Find work or files')
     this.find.addEventListener('input', () => this.render())
@@ -425,14 +419,8 @@ export class Overview {
     if (lens === this.lens) return
     this.lens = lens
     persist(LENS_STORAGE, lens)
-    this.markLens()
+    this.lensGroup.value = lens
     this.render()
-  }
-  private markLens(): void {
-    for (const [value, option] of this.lensButtons) {
-      option.setAttribute('aria-checked', String(value === this.lens))
-      option.tabIndex = value === this.lens ? 0 : -1
-    }
   }
   /** Find never truncates keyboard channel order. */
   orderedCards(): KanbanCard[] { this.resolveFolios(); return [...this.order] }

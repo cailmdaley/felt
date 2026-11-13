@@ -8,6 +8,8 @@ if (typeof HTMLElement !== 'undefined') {
   HTMLElement.prototype.showPopover ??= function () {}
   HTMLElement.prototype.hidePopover ??= function () {}
   Element.prototype.getAnimations ??= () => []
+  ElementInternals.prototype.setFormValue ??= function () {}
+  ElementInternals.prototype.setValidity ??= function () {}
   HTMLElement.prototype.scrollIntoView ??= function () {}
   window.matchMedia ??= (media: string): MediaQueryList => ({
     matches: false, media, onchange: null,

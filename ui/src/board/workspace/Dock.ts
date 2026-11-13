@@ -1,3 +1,4 @@
+import '@ui-sdk/web/segmented-control'
 import { paintAncestry, type Ancestor } from './ancestryTrail.js'
 import { headerIcon } from './headerIcon.js'
 import { attachConversationPicker, openActionMenu } from '../conversationMenu.js'
@@ -265,81 +266,30 @@ function ctlToggle(label: string, cls: string): { label: HTMLLabelElement; input
   return { label: el, input }
 }
 
-/** A row of mutually exclusive choices, all visible at once. */
-interface Segmented<T extends string> {
-  el: HTMLElement
-  buttons: HTMLButtonElement[]
-  readonly value: T
-  /** Select without firing `onPick` — for programmatic changes. */
-  set(value: T): void
-  setDisabled(disabled: boolean): void
-  /** Called after the user picks a DIFFERENT value. */
-  onPick(fn: (value: T, keyboard: boolean) => void): void
-}
-
-function segmented<T extends string>(
+/** A row of mutually exclusive choices, all visible at once: one Tab stop,
+ *  arrows move the choice. Setting `value` repaints without `valuechange`. */
+function segmented(
   name: string,
-  options: ReadonlyArray<readonly [T, string]>,
-  initial: T,
-): Segmented<T> {
-  const el = document.createElement('div')
+  options: ReadonlyArray<readonly [string, string]>,
+  initial: string,
+): HTMLElementTagNameMap['ui-segmented-control'] {
+  const el = document.createElement('ui-segmented-control')
   el.className = 'kbn-ctl-segmented'
-  el.setAttribute('role', 'radiogroup')
+  el.setAttribute('default-value', initial)
   el.setAttribute('aria-label', name)
-  let value = initial
-  const listeners: Array<(value: T, keyboard: boolean) => void> = []
-  let keyboardPick = false
-  const buttons = options.map(([v, label]) => {
+  for (const [value, label] of options) {
     const btn = document.createElement('button')
     btn.type = 'button'
     btn.className = 'kbn-ctl-segment'
-    btn.setAttribute('role', 'radio')
-    btn.dataset.value = v
+    btn.dataset.value = value
     btn.textContent = label
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation()
-      if (value === v) return
-      paint(v)
-      for (const fn of listeners) fn(v, keyboardPick)
-    })
-    return btn
-  })
-  function paint(v: T): void {
-    value = v
-    for (const btn of buttons) {
-      const on = btn.dataset.value === v
-      btn.setAttribute('aria-checked', String(on))
-      btn.tabIndex = on ? 0 : -1
-    }
+    const item = document.createElement('ui-segmented-control-item')
+    item.setAttribute('value', value)
+    item.setAttribute('as-child', '')
+    item.append(btn)
+    el.append(item)
   }
-  paint(initial)
-  // One Tab stop; arrows move the choice, as in any radio group.
-  el.addEventListener('keydown', (e) => {
-    const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0
-    if (!step) return
-    e.preventDefault()
-    const at = buttons.findIndex((b) => b.dataset.value === value)
-    const next = buttons[(at + step + buttons.length) % buttons.length]
-    if (next.disabled) return
-    next.focus()
-    keyboardPick = true
-    try { next.click() } finally { keyboardPick = false }
-  })
-  el.append(...buttons)
-  return {
-    el,
-    buttons,
-    get value() {
-      return value
-    },
-    set: paint,
-    setDisabled(disabled) {
-      for (const btn of buttons) btn.disabled = disabled
-    },
-    onPick(fn) {
-      listeners.push(fn)
-    },
-  }
+  return el
 }
 
 /** One ledger line: a label, then its controls. */
@@ -1231,7 +1181,7 @@ export class Dock {
       schedule: card.shuttleSchedule ?? '',
       tz: card.shuttleTz ?? 'Europe/Paris',
     }
-    const kind = segmented<ShuttleKind>(
+    const kind = segmented(
       'Kind',
       [['oneshot', 'One-shot'], ['standing', 'Standing']],
       baseline.kind,
@@ -1266,12 +1216,12 @@ export class Dock {
 
     const cronRow = field('Cron', cronInput, tzInput, spoken)
     cronRow.hidden = baseline.kind !== 'standing'
-    col.append(field('Kind', kind.el), cronRow)
+    col.append(field('Kind', kind), cronRow)
     reseed(() => {
       baseline.kind = card.shuttleKind ?? 'oneshot'
       baseline.schedule = card.shuttleSchedule ?? ''
       baseline.tz = card.shuttleTz ?? 'Europe/Paris'
-      kind.set(baseline.kind)
+      kind.value = baseline.kind
       cronInput.value = baseline.schedule
       tzInput.value = baseline.tz
       cronRow.hidden = baseline.kind !== 'standing'
@@ -1317,7 +1267,7 @@ export class Dock {
         // the next click on the same choice retries it.
         () => {
           if (revision !== kindRevision) return
-          kind.set(baseline.kind)
+          kind.value = baseline.kind
           cronRow.hidden = baseline.kind !== 'standing'
         },
       )
@@ -1327,7 +1277,8 @@ export class Dock {
      *  staged but uncommitted, so the cron field's blur doesn't commit on the
      *  way out. */
     let abandoningPromotion = false
-    kind.onPick((value, keyboard) => {
+    kind.addEventListener('valuechange', (event) => {
+      const value = event.detail.value as ShuttleKind
       const revision = ++kindRevision
       cronRow.hidden = value !== 'standing'
       if (value === 'standing') {
@@ -1337,9 +1288,9 @@ export class Dock {
         cronInput.focus()
         cronInput.select()
       }
-      this.deferSetting('kind', () => commitKind(value, revision), keyboard)
+      this.deferSetting('kind', () => commitKind(value, revision), event.detail.reason === 'list-navigation')
     })
-    for (const btn of kind.buttons) {
+    for (const btn of kind.querySelectorAll('button')) {
       // Backing OUT of an uncommitted promotion must write nothing, and the
       // hazard is the BLUR the click causes: picking Standing focuses the cron
       // field, and clicking away blurs it, which is what commits. mousedown
@@ -1356,7 +1307,7 @@ export class Dock {
     // The keyboard twin of that mousedown: an arrow off a staged Standing
     // moves focus to the next segment before it picks it, and that focus move
     // is the cron field's blur. Captured ahead of the group's own handler.
-    kind.el.addEventListener('keydown', (e) => {
+    kind.addEventListener('keydown', (e) => {
       const arrow = e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowUp'
       if (arrow && kind.value === 'standing' && baseline.kind !== 'standing') abandoningPromotion = true
     }, true)

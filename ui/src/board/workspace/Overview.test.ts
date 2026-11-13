@@ -92,6 +92,21 @@ beforeEach(() => {
 })
 afterEach(() => { overview?.dispose(); vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); resetDocumentResources(); resetLanes() })
 
+it('names its grouping radios and moves one checked tab stop with either arrow axis', async () => {
+  await settle()
+  const group = overview.el.querySelector('[role="radiogroup"][aria-label="Group documents"]')!
+  const radios = [...group.querySelectorAll<HTMLElement>('[role="radio"]')]
+  expect(radios.map(radio => radio.getAttribute('aria-label'))).toEqual(['Recent', 'Projects', 'Hosts'])
+  radios[0].focus()
+  for (const [key, index] of [['ArrowRight', 1], ['ArrowDown', 2], ['ArrowRight', 0], ['ArrowUp', 2]] as const) {
+    document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+    await settle()
+    expect(document.activeElement).toBe(radios[index])
+    expect(radios[index].getAttribute('aria-checked')).toBe('true')
+    expect(radios.filter(radio => radio.tabIndex === 0)).toEqual([radios[index]])
+  }
+})
+
 describe('Overview receipt membership and identity', () => {
   it('binds retained news and folio roots by channel, releasing them on hide, removal and disposal', async () => {
     overview.dispose()
