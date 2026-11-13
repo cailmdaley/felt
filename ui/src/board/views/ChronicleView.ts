@@ -33,7 +33,7 @@
  */
 
 import '@ui-sdk/web/autocomplete'
-import { registerView, type TemporalView, type ViewContext } from './ViewRegistry.js'
+import { blockingDialogOpen, registerView, type TemporalView, type ViewContext } from './ViewRegistry.js'
 import { createViewEmptyState, createViewPage } from './ViewPage.js'
 import {
   buildLedgerNarration,
@@ -347,7 +347,7 @@ class ChronicleView implements TemporalView {
     host.append(page.root)
 
     this.onEsc = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape' || this.scopedCycleId === null || !this.ctx) return
+      if (e.key !== 'Escape' || this.scopedCycleId === null || !this.ctx || blockingDialogOpen()) return
       e.stopPropagation() // the board closes itself on Escape; leaving an era comes first
       this.scopeTo(null, this.ctx)
     }

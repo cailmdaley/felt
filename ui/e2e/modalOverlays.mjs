@@ -12,6 +12,13 @@ if (shots) await mkdir(shots, { recursive: true })
 const focused = locator => locator.evaluate(el => el === document.activeElement)
 const boardInert = page => page.waitForFunction(() => !!document.querySelector('.kbn-desk')?.closest('[inert]'))
 
+/** Press inside a dialog, drag to the page's top-left corner (its scrim) and release there. */
+const dragToScrim = async (page, from) => {
+  const box = await from.boundingBox()
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down(); await page.mouse.move(4, 4, { steps: 4 }); await page.mouse.up()
+}
+
 const browser = await launchBrowser()
 try {
   for (const phone of [false, true]) for (const theme of ['light', 'dark']) {
@@ -68,6 +75,10 @@ try {
     await p.keyboard.press('Tab'); assert.equal(await focused(role.getByRole('link', { name: 'Role charter' })), true, 'role trap includes links')
     await p.keyboard.press('Tab'); assert.equal(await focused(role.getByRole('combobox', { name: 'Office scope' })), true, 'role trap includes selects')
     await p.keyboard.press('Tab'); assert.equal(await focused(filter), true, 'role trap wraps to the filter')
+    if (!phone) {
+      await dragToScrim(p, filter)
+      assert.equal(await role.isVisible(), true, 'a drag from the filter out onto the scrim leaves the role picker open')
+    }
     await p.keyboard.press('Escape'); await role.waitFor({ state: 'detached' })
 
     // Rest calendar: the vim keys move its cursor and survive a click on a day.
@@ -87,11 +98,28 @@ try {
     await p.keyboard.press('l')
     assert.notEqual(await headline.textContent(), clicked, 'vim keys still move after a click on a day')
     await shot('rest')
+    if (!phone) {
+      await dragToScrim(p, headline)
+      assert.equal(await rest.isVisible(), true, 'a drag from the calendar out onto the scrim leaves it open')
+    }
     await rest.getByRole('button', { name: 'Rest', exact: true }).focus()
     await p.keyboard.press('Tab')
     assert.equal(await focused(rest.getByRole('button', { name: 'Tomorrow t', exact: true })), true, 'Tab wraps to the presets')
     await p.keyboard.press('Escape'); await rest.waitFor({ state: 'detached' })
     assert.equal(await focused(p.locator('[data-rest-opener]')), true, 'Escape returns focus to where it was')
+
+    // Keyboard help over a Chronicle era: Escape closes help and leaves the era open.
+    if (!phone) {
+      await p.goto(harness)
+      await p.locator('.kbn-viewtab').filter({ hasText: 'Chronicle' }).click()
+      await p.locator('.chr-band').first().click()
+      const era = p.locator('.chr-face-close')
+      await era.waitFor()
+      await p.keyboard.press('?'); await help.waitFor()
+      await p.keyboard.press('Escape'); await help.waitFor({ state: 'detached' })
+      assert.equal(await era.isVisible(), true, 'Escape under help leaves the Chronicle era open')
+      await p.keyboard.press('Escape'); await era.waitFor({ state: 'detached' })
+    }
 
     // Sent files, on the phone's reader: the native modal makes the reader inert, Tab wraps, Back closes it.
     if (phone) {

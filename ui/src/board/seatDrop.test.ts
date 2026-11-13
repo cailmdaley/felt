@@ -169,7 +169,9 @@ describe('the office picker', () => {
     let resolve!: (value: typeof roles) => void
     close = rolePopover(draft(), document.body, () => new Promise(done => { resolve = done }), submit)
     await settle()
-    document.querySelector('.kbn-role-scrim')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    const scrim = document.querySelector('.kbn-role-scrim')!
+    scrim.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))
+    scrim.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     resolve(roles)
     await settle()
     expect(document.querySelector('[role="dialog"]')).toBeNull()

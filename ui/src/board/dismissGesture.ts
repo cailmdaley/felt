@@ -146,6 +146,20 @@ export function onPressRelease(
  * on `document.body` is outside that subtree, and a selection made before the
  * surface existed survives it appearing.
  */
+/**
+ * Close a modal when its scrim is pressed: the press must begin and end on the
+ * scrim itself, so a drag that starts inside the panel and is released outside
+ * it (selecting a field's text, say) leaves the modal open.
+ */
+export function onScrimPress(scrim: HTMLElement, close: () => void): void {
+  let pressed = false
+  scrim.addEventListener('pointerdown', event => { pressed = event.target === scrim })
+  scrim.addEventListener('click', event => {
+    if (pressed && event.target === scrim) close()
+    pressed = false
+  })
+}
+
 export function clearSelection(): void {
   globalThis.getSelection?.()?.removeAllRanges()
 }

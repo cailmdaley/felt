@@ -1,5 +1,6 @@
 import '@ui-sdk/web/dialog'
 import type { KanbanCard } from './KanbanTypes.js'
+import { onScrimPress } from './dismissGesture.js'
 import { civilWeekday, daysBetween, formatCivilDay, isoDayLocal, shiftCivilDay } from './civilDay.js'
 
 /**
@@ -166,7 +167,7 @@ export function restPopover(
 
   function close(): void { dialog.api.close() }
 
-  scrim.addEventListener('click', event => { if (event.target === scrim) close() })
+  onScrimPress(scrim, close)
   panel.addEventListener('keydown', onKey)
   paint()
   void dialog.api.open().then(() => queueMicrotask(() => dialog.remove()))

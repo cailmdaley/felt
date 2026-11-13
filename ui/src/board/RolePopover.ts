@@ -1,5 +1,6 @@
 import '@ui-sdk/web/dialog'
 import type { KanbanCard } from './KanbanTypes.js'
+import { onScrimPress } from './dismissGesture.js'
 
 export interface RoleProfile { slug: string; name: string; outcome: string }
 export interface RoleChoice { role: string; new_name?: string }
@@ -147,7 +148,7 @@ export function rolePopover(
       ;(list.querySelector<HTMLButtonElement>('button') ?? create).click()
     }
   }
-  scrim.addEventListener('click', event => { if (event.target === scrim) close() })
+  onScrimPress(scrim, close)
   panel.addEventListener('keydown', onKey)
   void dialog.api.open().then(() => {
     closed = true
