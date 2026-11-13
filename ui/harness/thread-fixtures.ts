@@ -2,6 +2,35 @@ import { HUB_ROWS, hubTimes, type HubRow } from './hub-family.js'
 import imageData from './fixtures/figure.png?inline'
 import { WORKSPACE_HOST, WORKSPACE_ID, WORKSPACE_UID, blobFor, type WorkspaceExample } from './workspace-fixtures.js'
 
+/**
+ * Thread review: a working root whose threads stand in each review state (one
+ * with its orchestrator, one marked for the human, one working), and a closed
+ * thread whose orchestrator is not on the board, which falls to the human.
+ */
+export function addThreadReviewFixtures(example: WorkspaceExample, now: number): void {
+  example.feed.fibers = []
+  type Row = { id: string; name: string; parent?: string; status: string; phase?: string; outcome: string; mark?: string }
+  const rows: Row[] = [
+    { id: 'atlas', name: 'Shear calibration atlas', status: 'active', phase: 'working', outcome: 'Calibrating the atlas; three threads out.' },
+    { id: 'atlas/fit', name: 'Fit the multiplicative bias', parent: 'atlas', status: 'closed', outcome: 'The bias fit converged at m = -0.012 ± 0.004.' },
+    { id: 'atlas/cuts', name: 'Choose the magnitude cut', parent: 'atlas', status: 'closed', outcome: 'A 24.5 cut keeps 81% of sources.', mark: 'The cut moves S8 by one sigma; worth your eyes before we adopt it.' },
+    { id: 'atlas/sims', name: 'Image simulations', parent: 'atlas', status: 'active', phase: 'working', outcome: 'Rendering the second batch.' },
+    { id: 'archive-run/followup', name: 'Independent follow-up', parent: 'archive-run', status: 'closed', outcome: 'The follow-up found nothing new.' },
+  ]
+  for (const row of rows) {
+    example.feed.fibers.push({
+      origin: WORKSPACE_HOST, felt_store: '/fixture-store/workspace', path: `${row.id}/constitution.md`, orchestrator: row.parent,
+      fiber: { id: row.id, uid: row.id, name: row.name, status: row.status, outcome: row.outcome, created_at: new Date(now - 3600000).toISOString(),
+        closed_at: row.status === 'closed' ? new Date(now - 60000).toISOString() : undefined,
+        shuttle: { kind: 'oneshot', host: WORKSPACE_HOST, agent: 'codex-sol', project_dir: '/fixture-project',
+          thread_parent: row.parent ? { uid: row.parent, host: WORKSPACE_HOST, slug: row.parent, name: row.parent } : undefined,
+          review: row.mark ? { note: row.mark, at: new Date(now - 30000).toISOString() } : undefined } },
+      runtime: row.phase ? { state: 'running', phase: row.phase, session_uuid: `session-${row.id}` } : null,
+    })
+    example.bodies[row.id] = `## Desired State\n\n${row.name}.\n\n## Status\n\nThread review fixture.`
+  }
+}
+
 /** Family stories: a question under quiet ancestry, a working root over an asker, an orphan, and an entirely quiet tree. */
 export function addFrontierFixtures(example: WorkspaceExample, now: number): void {
   example.feed.fibers = []

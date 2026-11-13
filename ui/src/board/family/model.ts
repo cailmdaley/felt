@@ -34,7 +34,7 @@ export interface MapThread {
   tone: Exclude<Standing, 'new'>
   /** The standing in a word or two, for a label. */
   word: string
-  /** What it asks, else what it came to. */
+  /** What it asks, else why its orchestrator sent it to the human's review, else what it came to. */
   note: string
   /** Its place in `FamilyModel.order`; -1 when the map does not draw it. */
   rank: number
@@ -108,7 +108,7 @@ export function familyModel(index: ThreadIndex, root: KanbanCard, feeds: MapFeed
     const thread: MapThread = {
       key: threadKey(card), card, name: card.name, depth, parent, children: [], standing, tone,
       word: WORD[standing] ?? (standing === 'working' ? turnOf(card, now).word : standing === 'still' ? stillWord(card) : index.state(card) === 'roles' ? 'seat' : THREAD_LABEL[index.state(card)].toLowerCase()),
-      note: ask?.text ?? card.outcome ?? '', rank: -1, lastMove, born, ended, launches, commits, files, fresh,
+      note: ask?.text ?? (card.column === 'awaitingReview' && card.reviewMark ? `Marked for your review: ${card.reviewMark.note}` : card.outcome ?? ''), rank: -1, lastMove, born, ended, launches, commits, files, fresh,
       merged: index.state(card) === 'archived', weight: launches.length + commits.length + files.length,
     }
     threads.set(thread.key, thread)

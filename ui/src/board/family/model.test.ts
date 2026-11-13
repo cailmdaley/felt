@@ -105,3 +105,12 @@ it('keeps archived work on the map only within the reach the daemon serves', () 
   expect(standing(24 * hour)).toBe('aside')
   expect(standing(0)).toBe('aside')
 })
+it('draws a thread with its orchestrator as no worker, and a marked thread to review saying why', () => {
+  const m = model([root,
+    thread('hub/fit', { status: 'closed', column: 'orchestratorReview', outcome: 'The fit converged.' }),
+    thread('hub/cuts', { status: 'closed', outcome: 'A 24.5 cut.', reviewMark: { note: 'It moves S8.', at: new Date(now - hour).toISOString() } }),
+  ])
+  const fit = [...m.threads.values()].find(t => t.card.id === 'hub/fit')!, cuts = [...m.threads.values()].find(t => t.card.id === 'hub/cuts')!
+  expect([fit.standing, fit.word, fit.note]).toEqual(['still', 'with orchestrator', 'The fit converged.'])
+  expect([cuts.standing, cuts.note]).toEqual(['review', 'Marked for your review: It moves S8.'])
+})
