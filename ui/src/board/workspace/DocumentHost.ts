@@ -690,7 +690,7 @@ export class DocumentHost {
   private readonly onMediaKey = (event: KeyboardEvent): void => {
     if (!this.selected || !['p', '[', ']'].includes(event.key) || event.altKey || event.ctrlKey || event.metaKey || event.isComposing || event.keyCode === 229 || (event.key === 'p' && event.repeat)) return
     const state = this.frames.get(this.selected)
-    if (!state?.active || state.frame.el.closest('[inert]') || blockingDialogOpen() || this.track.closest('.ws-reader')?.querySelector('.ws-menu')) return
+    if (!state?.active || state.frame.el.closest('[inert]') || blockingDialogOpen() || this.track.closest('.ws-reader')?.querySelector('.ws-switcher, .ws-menu[data-open]')) return
     const intent = keyIntent(event, 'reader')
     if (!intent || !['audioPlay', 'audioBack', 'audioForward'].includes(intent)) return
     const media = state.frame.viewer?.querySelector('audio')

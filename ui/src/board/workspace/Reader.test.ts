@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { card } from '../testFixtures.js'
+import { card, settle } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { MOBILE_MEDIA } from '../mobile.js'
 import { Reader, type ReaderOptions } from './Reader.js'
@@ -104,7 +104,7 @@ describe('Reader', () => {
   it("keeps the phone's top bar to return, name and document actions; the map rides the centre column", () => {
     const reader = makeReader(beta)
     const trail = reader.el.querySelector<HTMLElement>('.ws-navbar .ws-nav-trail')!
-    expect(trail.lastElementChild?.getAttribute('aria-label')).toBe('Document menu')
+    expect(trail.lastElementChild?.querySelector('button')?.getAttribute('aria-label')).toBe('Document menu')
     expect(reader.el.querySelector('.ws-head-position')).toBeNull()
     expect(reader.el.querySelector('.ws-navbar [data-part="page-band"]')).toBeNull()
     expect(reader.el.querySelector('.ws-stage-column > [data-part="page-band"]')).toBeNull()
@@ -139,7 +139,39 @@ describe('Reader', () => {
     expect(reader.el.innerHTML).toBe(before)
   })
 
-  it('puts the theme toggle in the page menu, hidden without a theme', () => {
+  it('opens the document menu as a dialog its ⋯ owns: Escape and an action hand focus back without leaving the reader', async () => {
+    const onReturn = vi.fn()
+    const reader = makeReader(alpha, undefined, { onReturn })
+    // The SDK binds its external trigger on the next frame.
+    for (const frame of frames.splice(0)) frame(0)
+    await settle()
+    const opener = reader.el.querySelector<HTMLButtonElement>('.ws-phone-document-menu')!
+    const key = async (value: string): Promise<void> => {
+      document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true }))
+      await settle()
+    }
+    const menu = (): HTMLElement | null => reader.el.querySelector<HTMLElement>('.ws-menu[role="dialog"]:not([hidden])')
+    expect(opener.getAttribute('aria-haspopup')).toBe('dialog')
+    opener.focus(); opener.click()
+    await settle()
+    expect(document.getElementById(menu()!.getAttribute('aria-labelledby')!)).toBe(opener)
+    expect(opener.getAttribute('aria-expanded')).toBe('true')
+    expect(menu()!.contains(document.activeElement)).toBe(true)
+    await key('Escape')
+    expect(menu()).toBeNull()
+    expect(document.activeElement).toBe(opener)
+    expect(onReturn).not.toHaveBeenCalled()
+
+    opener.click()
+    await settle()
+    menu()!.querySelector<HTMLButtonElement>('button[aria-label="Refresh"]')!.click()
+    await settle()
+    expect(menu()).toBeNull()
+    expect(document.activeElement).toBe(opener)
+    expect(opener.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('puts the theme toggle in the page menu, hidden without a theme', async () => {
     let hasTheme = false
     let plain = false
     const themes = {
@@ -149,7 +181,11 @@ describe('Reader', () => {
     const reader = makeReader(alpha, themes)
     expect(reader.el.querySelector('[data-part="plain-toggle"]')).toBeNull()
 
+    // The SDK binds its external trigger on the next frame.
+    for (const frame of frames.splice(0)) frame(0)
+    await settle()
     reader.el.querySelector<HTMLButtonElement>('.ws-phone-document-menu')!.click()
+    await settle()
     const toggle = reader.el.querySelector<HTMLButtonElement>('.ws-menu [data-part="plain-toggle"]')!
     expect(toggle.textContent).toBe("Plain (drop this constitution's theme)")
     expect(toggle.hidden).toBe(true)

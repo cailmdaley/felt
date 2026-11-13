@@ -1660,10 +1660,14 @@ describe('workspace reader integration', () => {
     expect(popover).toHaveBeenCalledOnce()
     expect(document.querySelector('.ws-selected.ws-expanded')).not.toBeNull()
 
-    document.querySelector<HTMLButtonElement>('.ws-phone-document-menu')!.click()
-    expect(document.querySelector('.ws-menu')).not.toBeNull()
-    escape()
-    expect(document.querySelector('.ws-menu')).toBeNull()
+    const menuButton = document.querySelector<HTMLButtonElement>('.ws-phone-document-menu')!
+    menuButton.focus(); menuButton.click()
+    await settle()
+    expect(document.querySelector('.ws-menu[data-open]')).not.toBeNull()
+    document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await settle()
+    expect(document.querySelector('.ws-menu[data-open]')).toBeNull()
+    expect(document.activeElement).toBe(menuButton)
     expect(popover).toHaveBeenCalledOnce()
     escape()
     expect(document.querySelector('.ws-selected.ws-expanded')).toBeNull()

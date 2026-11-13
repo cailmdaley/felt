@@ -1,3 +1,5 @@
+@layer ui-sdk;
+
 /* On the desktop the reader starts beneath the board's bar. Its frame is the
    tab bar, the page's one header line and the document: the selected page
    fills the stage beneath the bar. */
@@ -95,6 +97,7 @@
 .ws-icon-button:hover { background: var(--ws-hover); color: var(--ws-ink); }
 .ws-download { display: inline-flex; align-items: center; justify-content: center; }
 .ws-download > svg { width: 15px; height: 15px; }
+.ws-menu[data-slot="popover-content"] { max-height: var(--available-height); }
 .ws-menu {
   position: fixed; z-index: 5; min-width: var(--ws-menu-width); max-width: min(var(--ws-menu-ceiling), calc(100vw - var(--ws-gap)));
   max-height: calc(100dvh - var(--ws-gap)); overflow: auto; padding: var(--ws-small-gap);
@@ -166,7 +169,7 @@
   .ws-reader { top: 0; --ws-stage-inset: 0px; --ws-stage-top: 0px; --ws-prose-padding: 24px 16px 48px; --ws-phone-bar-height: calc(var(--ws-phone-nav-height) + env(safe-area-inset-top)); }
   .ws-veil { background: var(--ws-ground); -webkit-backdrop-filter: none; backdrop-filter: none; }
   .ws-navbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0; column-gap: 0; height: auto; min-height: calc(var(--ws-phone-nav-height) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) var(--ws-small-gap) 0; background: var(--ws-paper); align-items: center; transition: transform 180ms var(--ws-ease), margin-top 180ms var(--ws-ease); }
-  .ws-topbar-hidden:not(:has(> .ws-menu)) .ws-navbar:not(:focus-within) { transform: translateY(-100%); margin-top: calc(-1 * var(--ws-phone-bar-height)); }
+  .ws-topbar-hidden:not(:has(> ui-popover > [data-open])) .ws-navbar:not(:focus-within) { transform: translateY(-100%); margin-top: calc(-1 * var(--ws-phone-bar-height)); }
   /* Hidden pages keep unscaled geometry on phones. */
   .ws-page.ws-receded { transform: none; opacity: 1; }
   .ws-labelbar { display: none; }

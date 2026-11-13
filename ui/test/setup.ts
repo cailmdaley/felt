@@ -23,6 +23,11 @@ if (typeof HTMLElement !== 'undefined') {
     matches: false, media, onchange: null,
     addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent: () => false,
   })
+  // jsdom has no CSS namespace: no feature is supported, and escape covers the ids an external popup trigger names.
+  globalThis.CSS ??= {
+    supports: () => false,
+    escape: (value: string) => value.replace(/[^\w-]/g, ch => `\\${ch}`),
+  } as unknown as typeof CSS
   globalThis.ResizeObserver ??= class {
     observe() {}
     unobserve() {}

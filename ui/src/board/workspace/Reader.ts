@@ -25,7 +25,8 @@ import { type Verdict } from './Verdicts.js'
 import { installPageSwipe, PhoneTopbar, SWIPE, swipeFollow, swipeOutcome, swipeSettleTime, type SwipeSignal } from './PhoneGestures.js'
 import { PageSheet } from './PageSheet.js'
 import { SettingsMenu } from './SettingsMenu.js'
-import { anchorPopover, type Release } from './anchoredPopover.js'
+import '@ui-sdk/web/popover'
+import type { UiPopoverElement } from '@ui-sdk/web'
 import { headerIcon } from './headerIcon.js'
 
 export interface ReaderOptions {
@@ -84,6 +85,10 @@ function button(cls: string, text: string, action: () => void, label = text): HT
   return b
 }
 
+let menuCount = 0
+/** Names the document a ⋯ opens the menu for. */
+type DocumentOf = () => WorkspaceDocument | undefined
+
 /** A latched swipe that neither moves nor releases for this long has lost its release. */
 const SWIPE_QUIET = 500
 /** How long the landing toast of a constitution step stands. */
@@ -136,9 +141,9 @@ export class Reader {
   private selected: DocKey | null = null
   private expanded = false
   private active = false
-  private menu: HTMLElement | null = null
-  private menuRelease: Release | null = null
-  private menuAnchor: HTMLElement | null = null
+  /** The document menu: one non-modal SDK popover that every ⋯ opens for its own document. */
+  private readonly menu = document.createElement('ui-popover') as UiPopoverElement<DocumentOf>
+  private readonly menuContent = document.createElement('ui-popover-content')
   private readonly picker: ConstitutionPicker
   /** The way to the sheet of sent files, marked while one is unread. */
   private readonly filesToggle: HTMLButtonElement
@@ -148,6 +153,7 @@ export class Reader {
 
   constructor(opts: ReaderOptions) {
     this.opts = opts
+    this.prepareMenu()
     this.stopTitles = watchDocumentTitles(key => {
       const ch = this.channel
       if (!ch?.documents.some(d => d.key === key)) return
@@ -164,11 +170,7 @@ export class Reader {
     this.title = button('ws-channel-title', '', () => this.openSwitcher())
     this.lead = element('div', 'ws-nav-lead')
     this.lead.append(this.returnButton, this.title)
-    const documentMenu = button('ws-icon-button ws-phone-document-menu', '⋯', () => {
-      const doc = this.document
-      if (doc) this.openMenu(doc, documentMenu)
-    }, 'Document menu')
-    this.trail.append(this.filesToggle, documentMenu)
+    this.trail.append(this.filesToggle, this.menuTrigger('ws-icon-button ws-phone-document-menu', () => this.document))
     // The phone's top bar owns return, the fiber's name and document actions.
     // The desktop draws no head of its own.
     this.navbar = element('nav', 'ws-navbar')
@@ -188,7 +190,7 @@ export class Reader {
     const column = element('div', 'ws-stage-column')
     this.band.hidden = true
     column.append(this.band, this.stage)
-    this.el.append(this.veil, this.navbar, column, this.pageSheet.el)
+    this.el.append(this.veil, this.navbar, column, this.pageSheet.el, this.menu)
     this.host = new DocumentHost(this.track, {
       shuttleBase: opts.shuttleBase,
       buildProse: opts.buildProse,
@@ -209,7 +211,6 @@ export class Reader {
     this.observer?.observe(this.stage)
     window.addEventListener('resize', this.relayout)
     document.addEventListener('keydown', this.keydown, true)
-    document.addEventListener('pointerdown', this.outside)
     document.addEventListener('pointerdown', this.pointerInput, true)
     this.motion.addEventListener('change', this.relayout)
     this.phone.addEventListener('change', this.relayout)
@@ -345,7 +346,7 @@ export class Reader {
     this.pageSheet.show(opener)
   }
   private get swipeable(): boolean {
-    return this.active && this.phone.matches && !this.expanded && !this.pageSheet.isOpen && !this.menu
+    return this.active && this.phone.matches && !this.expanded && !this.pageSheet.isOpen && !this.menu.open
       && this.runSettled && (window.visualViewport?.scale ?? 1) <= 1.01
   }
   /**
@@ -442,8 +443,7 @@ export class Reader {
       download.href = fileBytesUrl(this.opts.shuttleBase, frame.doc.path, frame.doc.owner); download.download = frame.doc.name
       download.innerHTML = headerIcon('download')
       download.title = `Download ${frame.doc.name}`; download.setAttribute('aria-label', download.title)
-      const menu = button('ws-icon-button ws-menu-button', '⋯', () => this.openMenu(frame.doc, menu), 'Document menu')
-      frame.label.append(download, menu)
+      frame.label.append(download, this.menuTrigger('ws-icon-button ws-menu-button', () => frame.doc))
     }
     this.labels.set(frame, { glyph, title, provenance })
     frame.label.addEventListener('dblclick', e => {
@@ -536,12 +536,35 @@ export class Reader {
     invalidateWorkspaceMeasures(this.el)
     this.opts.onExpand?.(expanded)
   }
-  private openMenu(doc: WorkspaceDocument, anchor: HTMLElement): void {
-    const same = this.menuAnchor === anchor
-    this.closeMenu()
-    if (same) return
-    const menu = element('div', 'ws-menu')
-    menu.setAttribute('aria-label', 'Document and constitution actions')
+  private prepareMenu(): void {
+    this.menu.id = `ws-document-menu-${++menuCount}`
+    this.menu.setAttribute('modal', 'false')
+    const content = this.menuContent
+    content.className = 'ws-menu'
+    content.setAttribute('side', 'top')
+    content.setAttribute('align', 'end')
+    content.setAttribute('side-offset', '6')
+    content.setAttribute('collision-padding', '12')
+    this.menu.append(content)
+    const fill = (doc: DocumentOf | undefined): void => { const d = doc?.(); if (d) this.fillMenu(d) }
+    this.menu.addEventListener('openchange', event => { if (event.detail.value) fill(this.menu.api.getPayload()) })
+    // Another ⋯ takes over the open menu.
+    this.menu.addEventListener('payloadchange', event => { if (this.menu.open) fill(event.detail.value) })
+  }
+  /** A ⋯ that opens the document menu for the document `doc` names when pressed. */
+  private menuTrigger(cls: string, doc: DocumentOf): HTMLElement {
+    const trigger = document.createElement('ui-popover-trigger')
+    trigger.setAttribute('for', this.menu.id)
+    trigger.payload = doc
+    const b = element('button', cls, '⋯')
+    b.type = 'button'
+    b.setAttribute('aria-label', 'Document menu')
+    trigger.append(b)
+    return trigger
+  }
+  private fillMenu(doc: WorkspaceDocument): void {
+    const menu = this.menuContent
+    menu.replaceChildren()
     const url = isDrawn(doc) ? window.location.href : fileBytesUrl(this.opts.shuttleBase, doc.path, doc.owner)
     for (const [label, download] of (doc.kind === 'family' ? [['Open in new tab', false]] : [['Open in new tab', false], ['Download', true]]) as Array<[string, boolean]>) {
       const a = element('a', 'ws-menu-item', label)
@@ -573,14 +596,9 @@ export class Reader {
       menu.append(plain)
     }
     menu.append(element('code', 'ws-path', `${doc.owner}:${doc.path}`))
-    this.el.append(menu)
-    this.menu = menu
-    this.menuAnchor = anchor
-    this.menuRelease = anchorPopover(menu, anchor, { placement: 'above-end', gap: 6, margin: 12 })
-    if (this.keyboardInput) menu.querySelector<HTMLElement>('a,button')?.focus({ preventScroll: true })
   }
   private syncPlainToggle(item?: HTMLButtonElement): void {
-    const toggle = item ?? this.menu?.querySelector<HTMLButtonElement>('[data-part="plain-toggle"]')
+    const toggle = item ?? this.menuContent.querySelector<HTMLButtonElement>('[data-part="plain-toggle"]')
     const card = this.currentCard
     const themes = this.opts.themes
     if (!toggle || !themes) return
@@ -590,18 +608,10 @@ export class Reader {
   }
   private closeMenu(): boolean {
     if (this.picker.isOpen) { this.picker.close(); return true }
-    if (!this.menu) return false
-    this.menuRelease?.(); this.menuRelease = null
-    this.menu.remove()
-    this.menu = null
-    this.menuAnchor = null
-    return true
+    return this.menu.open && this.menu.api.close()
   }
   private readonly pointerInput = (): void => { this.keyboardInput = false; this.el.classList.remove('ws-keyboard') }
   private readonly keyboardModality = (): void => { this.keyboardInput = true; this.el.classList.add('ws-keyboard') }
-  private readonly outside = (e: PointerEvent): void => {
-    if (this.menu && !this.menu.contains(e.target as Node) && !this.menuAnchor?.contains(e.target as Node)) this.closeMenu()
-  }
   private openSwitcher(): void {
     if (!this.phone.matches && this.opts.onFind?.()) return
     if (this.picker.isOpen) { this.picker.close(); return }
@@ -620,7 +630,8 @@ export class Reader {
     this.filesToggle.toggleAttribute('data-attention', this.fresh.size > 0)
   }
   private readonly keydown = (e: KeyboardEvent): void => {
-    if (this.pageSheet.isOpen || this.settingsMenu.isOpen) return
+    // Open popups own their keys, Escape included.
+    if (this.pageSheet.isOpen || this.settingsMenu.isOpen || this.menu.open) return
     this.keyboardModality()
     if (!this.active || e.isComposing || e.defaultPrevented || blockingDialogOpen()) return
     if ((e.key === 'Enter' || e.key === 'Escape') && this.picker.el.contains(e.target as Node)) return
@@ -641,7 +652,6 @@ export class Reader {
     if (intent === 'back') {
       if (repeat) return true
       if (this.picker.isOpen) this.picker.close(true)
-      else if (this.menu) { const anchor = this.menuAnchor; this.closeMenu(); anchor?.focus({ preventScroll: true }) }
       else if (this.opts.onEscapeLayer?.()) { /* An inline control popover consumed Escape. */ }
       else if (escape && this.expanded) this.toggleExpand()
       else this.back()
@@ -745,7 +755,6 @@ export class Reader {
     this.picker.dispose()
     this.host.dispose()
     document.removeEventListener('keydown', this.keydown, true)
-    document.removeEventListener('pointerdown', this.outside)
     document.removeEventListener('pointerdown', this.pointerInput, true)
     this.motion.removeEventListener('change', this.relayout)
     this.phone.removeEventListener('change', this.relayout)
