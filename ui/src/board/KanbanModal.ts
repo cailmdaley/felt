@@ -35,6 +35,7 @@
  * handler's only knob is which surface and day to send.
  */
 
+import { announce, prepareAnnouncements } from '@ui-sdk/core'
 import '../styles/type.css'
 import './palette.css'
 import './darkControls.css'
@@ -178,7 +179,6 @@ export class KanbanModal {
 
   private container: HTMLDivElement | null = null
   private body: HTMLDivElement | null = null
-  private liveEl: HTMLDivElement | null = null
   private bannerEl: HTMLDivElement | null = null
   /** Unsubscribes the 700px-threshold watch installed in assembleChrome. */
   private stopMobileWatch: (() => void) | null = null
@@ -519,12 +519,8 @@ export class KanbanModal {
     this.body.addEventListener('dragleave', (e) => this.handleBodyDragLeave(e))
     this.body.addEventListener('drop', () => this.stopDragAutoScroll())
 
-    // aria-live region for transition announcements ("Moved 'X' to Tempered.")
-    // — invisible but read by screen readers and observable in the a11y tree.
-    this.liveEl = document.createElement('div')
-    this.liveEl.className = 'kbn-live'
-    this.liveEl.setAttribute('role', 'status')
-    this.liveEl.setAttribute('aria-live', 'polite')
+    // Transition announcements ("Moved 'X' to Tempered.") go to the shared live region.
+    prepareAnnouncements(document)
 
     // Transient error/info banner for transitions that fail.
     this.bannerEl = document.createElement('div')
@@ -553,7 +549,7 @@ export class KanbanModal {
 
     // The bar stands outside the body: the body goes inert under the reader,
     // and the bar stays live above it, in the same place on every view.
-    this.container.append(this.tabsEl, this.bannerEl, this.body, this.liveEl)
+    this.container.append(this.tabsEl, this.bannerEl, this.body)
 
     // Crossing 700px changes what the Desk IS, not just how it is painted: the
     // Now triad becomes a pager with a folio strip, and the two bands grow fold
@@ -993,7 +989,6 @@ export class KanbanModal {
   private teardownState(): void {
     this.container = null
     this.body = null
-    this.liveEl = null
     this.bannerEl = null
     this.tabsEl = null
     this.lensSlotEl = null
@@ -1474,12 +1469,7 @@ export class KanbanModal {
   }
 
   private announce(msg: string): void {
-    if (!this.liveEl) return
-    // Clear → set forces re-announcement on identical text.
-    this.liveEl.textContent = ''
-    window.setTimeout(() => {
-      if (this.liveEl) this.liveEl.textContent = msg
-    }, 50)
+    if (this.container) announce(msg)
   }
 
   private showBanner(text: string, kind: 'error' | 'info' = 'info'): void {

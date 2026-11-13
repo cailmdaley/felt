@@ -2,7 +2,6 @@
 /* --fp-text is the row's text column, where its name and all it holds start: the mark's 12px and the title's 8px gap. */
 .ws-family-grid { --fp-gutter: 20px; --fp-text: 20px; --fp-views: 118px; --fp-acts: 244px; --fp-control: 24px; --fp-spring: linear(0, .32 9%, .78 20%, 1.06 32%, 1.12 39%, 1.08 47%, 1 58%, .98 68%, 1); height: 100%; display: grid; grid-template-rows: minmax(0, 1fr); min-height: 0; color: var(--ws-ink); font: var(--type-label)/var(--leading-tight) var(--font-serif); }
 .ws-family-scroll { min-height: 0; overflow: auto; }
-.ws-family-announce { position: absolute; width: 1px; height: 1px; margin: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 .fp-tree { max-width: 1200px; padding-bottom: 32px; outline: none; }
 /* Room below an unfolded document, so even the last row's can scroll to the top of the view. */

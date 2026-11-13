@@ -118,15 +118,6 @@
   color: var(--kbn-ink);
   overflow: hidden;
 }
-/* aria-live region — invisible but observable in the a11y tree. */
-.kbn-live {
-  position: absolute;
-  width: 1px; height: 1px;
-  margin: -1px; padding: 0;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  border: 0;
-}
 .kbn-banner {
   margin: 0 20px;
   padding: 8px 12px;

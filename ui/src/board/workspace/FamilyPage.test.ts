@@ -49,6 +49,18 @@ const press = (el: Element, key: string): KeyboardEvent => { const event = new K
 afterEach(() => { document.body.replaceChildren(); vi.restoreAllMocks() })
 
 describe('the page', () => {
+  it('announces keyboard selection without adding a live region to the page', async () => {
+    const { family } = made()
+    const first = row(family, 'hub')
+    first.focus()
+    press(first, 'j')
+    const selected = family.el.querySelector<HTMLElement>('.fp-row[data-selected]')!
+    expect(document.activeElement).toBe(selected)
+    await new Promise(resolve => setTimeout(resolve, 120))
+    expect(document.querySelector('[role="status"][aria-live="polite"]')?.textContent).toContain('Asked')
+    expect(family.el.querySelector('[aria-live]')).toBeNull()
+  })
+
   it('heads with the constitution and its outcome, then its threads under one divider per kind, the set-aside behind one fold', () => {
     const { family } = made()
     expect(said(family)).toEqual(['hub', '[Questions]', 'Asked', '[Your turn]', 'Mid', 'Idle', '(1 draft · 1 archived)'])

@@ -1,3 +1,4 @@
+import { announce, prepareAnnouncements } from '@ui-sdk/core'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { familyModel, type FamilyModel, type MapFeeds, type MapFile, type MapThread } from '../family/model.js'
 import { htmlEl as el, markPath, markSvg } from '../family/drawing.js'
@@ -100,7 +101,6 @@ export class FamilyPage {
   readonly el = el('div', 'ws-family-page family-map')
   private readonly scroller = el('div', 'ws-family-scroll')
   private readonly tree = el('div', 'fp-tree')
-  private readonly announcement = el('p', 'ws-family-announce')
   private readonly rows = new Map<string, HTMLElement>()
   /** Each thread's tapestry: the read that finds it, and the file once it has. */
   private readonly leads = new Map<string, { read: Promise<MapFile | undefined>; file?: MapFile }>()
@@ -138,10 +138,10 @@ export class FamilyPage {
     this.place.docs ??= new Map()
     this.tree.setAttribute('role', 'tree')
     this.tree.setAttribute('aria-label', 'The constitution and its threads, most urgent first')
-    this.announcement.setAttribute('aria-live', 'polite')
+    prepareAnnouncements(document)
     this.scroller.append(this.tree)
     const grid = el('div', 'ws-family-grid')
-    grid.append(this.scroller, this.announcement)
+    grid.append(this.scroller)
     this.el.append(grid)
     this.tree.addEventListener('click', event => this.clicked(event))
     // A row's act highlights its row before it acts, so the band and keys follow the fiber acted on.
@@ -766,7 +766,7 @@ export class FamilyPage {
     next.focus({ preventScroll: true })
     this.reveal(next, false)
     const at = next.dataset.row ? model.threads.get(next.dataset.row) : undefined
-    this.announcement.textContent = at ? [at.name, at.note].filter(Boolean).join('. ') : next.title || next.textContent || ''
+    announce(at ? [at.name, at.note].filter(Boolean).join('. ') : next.title || next.textContent || '')
   }
   /** Unfolds a segment's document under its row (sends: its list, and the newest file), returning what to rest on: the segment, or an open sent file's way back. */
   private show(thread: MapThread, chip: HTMLElement): HTMLElement | undefined {

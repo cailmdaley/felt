@@ -1219,7 +1219,9 @@ test('a moves in-flight work to review through the Desk drag\'s transition, afte
   await appFocus(p); await p.keyboard.press('a')
   const line = acts(p).locator('.ws-verdict-undo')
   assert.equal(await line.textContent(), 'To review·undo z')
-  assert.equal(await p.locator('.ws-sr-only[aria-live="polite"]').filter({ hasText: 'undo z' }).textContent(), 'To review Remote covariance review · undo z')
+  // The shared live region takes the announcement a beat after the verdict.
+  await p.clock.runFor(100)
+  assert.equal(await p.locator('[role="status"][aria-live="polite"]').filter({ hasText: 'undo z' }).textContent(), 'To review Remote covariance review · undo z')
   if (process.env.WORKSPACE_SHOTS) {
     await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
     await acts(p).screenshot({ path: `${process.env.WORKSPACE_SHOTS}/to-review-window-reader.png` })
@@ -1267,9 +1269,10 @@ test('Verdict keys delay writes, guard typing, undo, and commit after leaving th
   assert.equal(await p.locator('.ws-verdict-undo').count(), 0)
   await p.keyboard.press('t')
   assert.equal(await band(p).locator('.ws-fiber-acts .ws-verdict-undo').textContent(), 'Tempered·undo z')
-  assert.equal(await p.locator('.ws-sr-only[aria-live="polite"]').filter({ hasText: 'undo z' }).textContent(), 'Tempered Calibrate the shear response · undo z')
+  await p.clock.runFor(100)
+  assert.equal(await p.locator('[role="status"][aria-live="polite"]').filter({ hasText: 'undo z' }).textContent(), 'Tempered Calibrate the shear response · undo z')
   assert.equal((await posts()).length, 0)
-  await p.clock.runFor(3999)
+  await p.clock.runFor(3899)
   assert.equal((await posts()).length, 0)
   await p.keyboard.press('z')
   await p.clock.runFor(1)

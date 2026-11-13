@@ -1,3 +1,4 @@
+import { announce, prepareAnnouncements } from '@ui-sdk/core'
 import { hasWorkerToStop, type KanbanCard } from '../KanbanTypes.js'
 import { keyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
@@ -51,12 +52,9 @@ interface Pending { timer: number; verdict: (typeof VERDICT_KIND)[Verdict]; word
  */
 export class Verdicts {
   private readonly pending = new Map<string, Pending>()
-  private readonly live = document.createElement('div')
   private readonly observer = new MutationObserver(() => this.paint())
   constructor() {
-    this.live.className = 'ws-sr-only'
-    this.live.setAttribute('aria-live', 'polite')
-    document.body.append(this.live)
+    prepareAnnouncements(document)
     window.addEventListener('keydown', this.keydown, true)
   }
   queue(card: KanbanCard, verdict: Verdict, commit: () => void): void {
@@ -71,7 +69,7 @@ export class Verdicts {
     }, VERDICT_DELAY_MS)
     const [word] = verdictWords(card, verdict)
     this.pending.set(key, { timer, verdict: VERDICT_KIND[verdict], word, name: card.name, due: Date.now() + VERDICT_DELAY_MS })
-    this.live.textContent = `${word} ${card.name} · undo z`
+    announce(`${word} ${card.name} · undo z`)
     this.paint()
   }
   /** z cancels the latest remaining verdict; each visible undo names its own. */
@@ -141,6 +139,5 @@ export class Verdicts {
     for (const key of [...this.pending.keys()]) this.undo(key)
     this.observer.disconnect()
     window.removeEventListener('keydown', this.keydown, true)
-    this.live.remove()
   }
 }

@@ -7,6 +7,7 @@ import { constitutionAction } from './fiberPageState.js'
 import { keyIntent, shouldForwardDocumentKey, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { MOBILE_MEDIA } from '../mobile.js'
+import { announce, prepareAnnouncements } from '@ui-sdk/core'
 import { fileBytesUrl, showToast } from '../utils.js'
 import { instantStamp } from '../civilDay.js'
 import { DocumentHost, type DocumentFrame } from './DocumentHost.js'
@@ -124,7 +125,7 @@ export class Reader {
   private swipeWatchdog: ReturnType<typeof setTimeout> | null = null
   private readonly pageSheet: PageSheet
   private readonly settingsMenu: SettingsMenu
-  private readonly announcement = element('div', 'ws-sr-only')
+  private announcement = ''
   private readonly observer: ResizeObserver | null
   private readonly labels = new WeakMap<DocumentFrame, { glyph: HTMLElement; title: HTMLElement; provenance: HTMLElement }>()
   private channel: Channel | null = null
@@ -175,8 +176,7 @@ export class Reader {
     this.navbar.append(this.lead, this.trail)
     this.settingsMenu = new SettingsMenu()
     this.pageSheet = new PageSheet(opts.shuttleBase, key => this.openDocument(key), () => this.paintFilesToggle())
-    this.announcement.setAttribute('aria-live', 'polite')
-    this.announcement.setAttribute('aria-atomic', 'true')
+    prepareAnnouncements(document)
     this.parallax.append(this.track)
     this.stage.append(this.parallax)
     this.picker = new ConstitutionPicker({
@@ -188,7 +188,7 @@ export class Reader {
     const column = element('div', 'ws-stage-column')
     this.band.hidden = true
     column.append(this.band, this.stage)
-    this.el.append(this.veil, this.navbar, column, this.announcement, this.pageSheet.el)
+    this.el.append(this.veil, this.navbar, column, this.pageSheet.el)
     this.host = new DocumentHost(this.track, {
       shuttleBase: opts.shuttleBase,
       buildProse: opts.buildProse,
@@ -418,7 +418,10 @@ export class Reader {
     }
     const announcement = ch.labels[index] ?? ''
     // A provisional run's count goes unannounced; the final one is read once it lands.
-    if (this.runSettled && this.announcement.textContent !== announcement) this.announcement.textContent = announcement
+    if (this.runSettled && this.announcement !== announcement) {
+      this.announcement = announcement
+      announce(announcement)
+    }
     this.layout(animate)
   }
   private prepareFrame(frame: DocumentFrame): void {
