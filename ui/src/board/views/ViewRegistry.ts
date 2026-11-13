@@ -181,7 +181,7 @@ export function isTypingTarget(
  *
  * The exclusion is the whole subtlety. `.kbn-modal` is `role="dialog"
  * aria-modal="true"` — it is the board — so a query broad enough to catch a
- * non-Radix form dialog also catches the page it is protecting, and the
+ * form dialog also catches the page it is protecting, and the
  * hotkeys would be dead permanently rather than only while a form is open.
  */
 export function isBlockingDialog(
@@ -194,9 +194,9 @@ export function isBlockingDialog(
 /**
  * Selector for anything that takes keystrokes away from the board.
  *
- * `[data-state="open"]` is Radix's stamp — Stash, Capture and the settings
- * sheet all render through `AppDialog`. `[aria-modal="true"]` catches every
- * OTHER modal dialog, an SDK dialog's content included: without this clause
+ * `[data-open]` is the SDK dialog's open stamp — Stash, Capture and the
+ * settings sheet all render through `AppDialog`. `[aria-modal="true"]` catches
+ * every modal dialog, a hand-rolled one included: without this clause
  * `1`-`4` would switch views out from under it. Matching on aria rather than on
  * a library's attribute means a dialog built outside AppDialog is covered
  * without a code change here. A native `<dialog>` the board opens with
@@ -205,7 +205,7 @@ export function isBlockingDialog(
  * Listen's options both mark it with `data-open`.
  */
 export const BLOCKING_DIALOG_SELECTOR =
-  '[role="dialog"][data-state="open"], [role="dialog"][aria-modal="true"], [role="menu"][data-open], dialog[open]'
+  '[role="dialog"][data-open], [role="dialog"][aria-modal="true"], [role="menu"][data-open], dialog[open]'
 
 /**
  * Is a dialog or SDK menu currently taking keys away from the board?

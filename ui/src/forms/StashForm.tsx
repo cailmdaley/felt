@@ -25,7 +25,7 @@
  * Capture's sibling: the same AppDialog card and the same formKit column —
  * lead field, the host · project · agent · effort row, session and `--chrome`,
  * the footer — with Stash's own parts (slug receipt, tags, parent picker, kind
- * segments, schedule) slotted into that rhythm. Esc closes (Radix);
+ * segments, schedule) slotted into that rhythm. Esc closes the dialog;
  * Cmd/Ctrl+Enter submits.
  */
 
@@ -227,7 +227,10 @@ function ParentPicker({ value, onChange, scopePrefix, shuttleBase }: ParentPicke
     } else if (e.key === 'Escape') {
       // The dialog leaves Escape to an expanded combobox (see AppDialog), so
       // this closes only the dropdown.
-      if (open) setOpen(false)
+      if (open) {
+        e.preventDefault()
+        setOpen(false)
+      }
     }
   }
 

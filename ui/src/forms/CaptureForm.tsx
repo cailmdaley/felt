@@ -16,7 +16,7 @@
  * owner-routed at the daemon — `origin` forwards to the owning host — so the
  * project picker offers remote projects too.
  *
- * Built on AppDialog (Radix) — focus trap, Esc, portal, scroll lock for free.
+ * Built on AppDialog, which owns focus, Escape and the modal layer.
  * Cmd/Ctrl+Enter submits. The column, the control row, the session and
  * `--chrome` controls and the footer are formKit's, shared with StashForm;
  * the yap (17px, the one field the dialog exists for) is Capture's own.
@@ -200,7 +200,7 @@ export function CaptureForm({
       }}
       title="New idea"
       eyebrow="shuttle · capture"
-      onOpenAutoFocus={mobile ? (event) => event.preventDefault() : undefined}
+      initialFocus={mobile ? 'content' : 'auto'}
     >
       <div className="form-sheet" onKeyDown={handleKeyDown}>
         <textarea

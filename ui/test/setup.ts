@@ -7,6 +7,8 @@ if (typeof HTMLElement !== 'undefined') {
   })
   ElementInternals.prototype.setFormValue ??= function () {}
   ElementInternals.prototype.setValidity ??= function () {}
+  globalThis.CSS ??= {} as typeof CSS
+  CSS.escape ??= (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, char => `\\${char}`)
   HTMLElement.prototype.showPopover ??= function () {}
   HTMLElement.prototype.hidePopover ??= function () {}
   Element.prototype.getAnimations ??= () => []

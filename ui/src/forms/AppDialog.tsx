@@ -1,20 +1,20 @@
 /**
  * AppDialog — the paper card the Capture and Stash forms and the settings
- * sheet live in, built on Radix Dialog.
+ * sheet live in, built on UI SDK Dialog.
  *
- * Gives focus trap, escape-to-close, accessible labelling, scroll lock, and
- * portal-to-body for free. The standalone UI has no competing modal stack, so
- * the z-index just needs to clear the board (10000/10001 for headroom).
+ * The dialog traps focus, makes the board inert, closes on Escape (after any
+ * open popup inside it), labels itself by its title, and draws its backdrop
+ * and card in the top layer, above the board.
  *
  * The chrome is the board's manuscript language: the forms' paper field (`--kbn-form-paper`)
  * under a slightly darker header band, a brass hairline under the header, and
  * EB Garamond throughout. It is small enough to carry inline, with a small
- * sheet for the entrance keyframes (CSS-only, so Radix's mount is what
+ * sheet for the entrance keyframes (CSS-only, so the content's mount is what
  * triggers it) and the geometry a media query has to answer.
  */
 
 import type { JSX } from 'react'
-import * as Dialog from '@radix-ui/react-dialog'
+import { Dialog, DialogBackdrop, DialogContent, DialogTitle } from '@ui-sdk/react/dialog'
 import type { ReactNode } from 'react'
 import { injectStyles } from './injectStyles'
 
@@ -126,7 +126,6 @@ const appDialogOverlayStyles: React.CSSProperties = {
   inset: 0,
   background: 'color-mix(in srgb, var(--kbn-shade) 45%, transparent)',
   backdropFilter: 'blur(2px)',
-  zIndex: 10000,
   animation: 'app-dialog-scrim-in 120ms ease-out',
 }
 
@@ -146,7 +145,6 @@ const appDialogContentStyles: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   overflow: 'hidden',
-  zIndex: 10001,
 }
 
 const headerStyles: React.CSSProperties = {
@@ -191,7 +189,7 @@ export interface AppDialogProps {
    * child owns its own layout and its own overflow.
    */
   flush?: boolean
-  onOpenAutoFocus?: (event: Event) => void
+  initialFocus?: 'auto' | 'content' | 'none'
   children: ReactNode
 }
 
@@ -202,80 +200,72 @@ export function AppDialog({
   eyebrow,
   wide,
   flush,
-  onOpenAutoFocus,
+  initialFocus,
   children,
 }: AppDialogProps): JSX.Element {
   injectAppDialogStyles()
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Overlay style={appDialogOverlayStyles} />
-        <Dialog.Content
-          onOpenAutoFocus={onOpenAutoFocus}
-          className={wide ? 'app-dialog-card app-dialog-card-wide' : 'app-dialog-card'}
-          style={appDialogContentStyles}
-          // Radix warns unless a Description is rendered or the attribute is
-          // explicitly opted out of. A dialog whose own fields say what it does
-          // needs no gloss, so drop the attribute rather than invent one.
-          aria-describedby={undefined}
-          // Escape from an open combobox closes its list, not the dialog. Radix
-          // hears the key first (a capture-phase listener), so the field's own
-          // handler cannot stop it; the field's aria-expanded is what says the
-          // key is spoken for.
-          onEscapeKeyDown={(event) => {
-            const target = event.target as Element | null
-            if (target?.getAttribute?.('aria-expanded') === 'true') event.preventDefault()
-          }}
-        >
-          <div style={headerStyles}>
-            <div
+    <Dialog open={open} onOpenChange={(next, details) => {
+      if (details.reason === 'escape-key' && (details.event?.target as Element | null)?.getAttribute('aria-expanded') === 'true') {
+        details.cancel()
+        return
+      }
+      onOpenChange(next)
+    }}>
+      <DialogBackdrop style={appDialogOverlayStyles} />
+      <DialogContent
+        initialFocus={initialFocus}
+        className={wide ? 'app-dialog-card app-dialog-card-wide' : 'app-dialog-card'}
+        style={appDialogContentStyles}
+      >
+        <div style={headerStyles}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'baseline',
+              justifyContent: 'space-between',
+              gap: '12px',
+            }}
+          >
+            <DialogTitle
               style={{
-                display: 'flex',
-                alignItems: 'baseline',
-                justifyContent: 'space-between',
-                gap: '12px',
+                margin: 0,
+                fontSize: 'var(--type-prose)',
+                fontWeight: 600,
+                lineHeight: 'var(--leading-tight)',
               }}
             >
-              <Dialog.Title
+              {title}
+            </DialogTitle>
+            {eyebrow && (
+              <span
                 style={{
-                  margin: 0,
-                  fontSize: 'var(--type-prose)',
-                  fontWeight: 600,
-                  lineHeight: 'var(--leading-tight)',
+                  fontFamily: 'var(--font-serif)',
+                  fontSize: 'var(--type-note)',
+                  fontVariant: 'all-small-caps',
+                  letterSpacing: 'var(--track-kicker)',
+                  color: 'var(--kbn-graphite-faint)',
                 }}
               >
-                {title}
-              </Dialog.Title>
-              {eyebrow && (
-                <span
-                  style={{
-                    fontFamily: 'var(--font-serif)',
-                    fontSize: 'var(--type-note)',
-                    fontVariant: 'all-small-caps',
-                    letterSpacing: 'var(--track-kicker)',
-                    color: 'var(--kbn-graphite-faint)',
-                  }}
-                >
-                  {eyebrow}
-                </span>
-              )}
-            </div>
-            <span style={headerRuleStyles} aria-hidden="true" />
+                {eyebrow}
+              </span>
+            )}
           </div>
-          {/* One scroll region; the child owns its own internal rhythm so the
-              form's blocks are all direct siblings on one alignment grid. */}
-          <div
-            className="app-dialog-body"
-            style={
-              flush
-                ? { flex: '1 1 auto', minHeight: 0, display: 'flex', overflow: 'hidden' }
-                : { padding: '15px 22px 16px', overflowY: 'auto', flex: '1 1 auto' }
-            }
-          >
-            {children}
-          </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+          <span style={headerRuleStyles} aria-hidden="true" />
+        </div>
+        {/* One scroll region; the child owns its own internal rhythm so the
+            form's blocks are all direct siblings on one alignment grid. */}
+        <div
+          className="app-dialog-body"
+          style={
+            flush
+              ? { flex: '1 1 auto', minHeight: 0, display: 'flex', overflow: 'hidden' }
+              : { padding: '15px 22px 16px', overflowY: 'auto', flex: '1 1 auto' }
+          }
+        >
+          {children}
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }

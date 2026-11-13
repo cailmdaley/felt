@@ -6,9 +6,9 @@
 //      no heading, no message, no way back. A blank page and a broken app are
 //      indistinguishable, so the two states now name themselves.
 // M1 — bare view hotkeys switched views out from under an open form that was
-//      hand-rolled with `aria-modal` and no data-state, because the guard only
-//      knew Radix's `data-state`. Every form now renders through AppDialog;
-//      the aria clause stays so a dialog built outside it is still covered.
+//      hand-rolled with `aria-modal`, because the guard only knew one dialog
+//      library's open stamp. Every form renders through AppDialog; the aria
+//      clause covers a dialog built outside it.
 // S1 — `⌘,` and bare `,` both open settings, and they are guarded
 //      DIFFERENTLY: the chord survives a focused text field, the bare key does
 //      not. That asymmetry is the whole reason `settingsHotkey` reports WHICH
@@ -111,10 +111,10 @@ describe('isBlockingDialog', () => {
 })
 
 describe('BLOCKING_DIALOG_SELECTOR', () => {
-  it('covers Radix and hand-rolled aria dialogs', () => {
+  it('covers SDK and hand-rolled aria dialogs', () => {
     // A hand-rolled dialog is the case M1 missed: role="dialog"
-    // aria-modal="true", no data-state anywhere.
-    expect(BLOCKING_DIALOG_SELECTOR).toContain('[role="dialog"][data-state="open"]')
+    // aria-modal="true", no library open stamp.
+    expect(BLOCKING_DIALOG_SELECTOR).toContain('[role="dialog"][data-open]')
     expect(BLOCKING_DIALOG_SELECTOR).toContain('[role="dialog"][aria-modal="true"]')
   })
 })
@@ -187,7 +187,7 @@ describe('blockingDialogOpen beside keystrokeIsSpokenFor', () => {
   /**
    * Really evaluate `BLOCKING_DIALOG_SELECTOR` against the sketches rather than
    * hand the guard a pre-filtered list. A pre-filtered list would pin nothing:
-   * the question these cases ask is whether the selector REACHES a Radix
+   * the question these cases ask is whether the selector REACHES an SDK
    * settings sheet and whether the board's own root survives it, and the
    * matching is the whole of the answer. Anything the matcher does not
    * understand throws, so a selector that outgrows it fails loudly instead of
@@ -222,12 +222,12 @@ describe('blockingDialogOpen beside keystrokeIsSpokenFor', () => {
   // The board itself. It is `role="dialog" aria-modal="true"`, so it matches
   // the selector — and it is always in the list, under everything else.
   const boardRoot = el({ classes: ['kbn-modal'], attrs: { role: 'dialog', 'aria-modal': 'true' } })
-  // The settings sheet as AppDialog renders it: Radix, so `data-state`.
+  // The settings sheet as AppDialog renders it: an SDK dialog, so `data-open`.
   const settingsSheet = el({
     classes: ['app-dialog-card', 'app-dialog-card-wide'],
-    attrs: { role: 'dialog', 'data-state': 'open' },
+    attrs: { role: 'dialog', 'data-open': '' },
   })
-  // A hand-rolled dialog: aria-modal, no data-state. M1's shape.
+  // A hand-rolled dialog: aria-modal, no open stamp. M1's shape.
   const handRolled = el({ classes: ['hand-rolled-dialog'], attrs: { role: 'dialog', 'aria-modal': 'true' } })
   const searchBox = el({ tag: 'INPUT' })
 
@@ -258,12 +258,11 @@ describe('blockingDialogOpen beside keystrokeIsSpokenFor', () => {
   it('sweep up neither ordinary board chrome nor a dialog on its way out', () => {
     // The control case, and the one that keeps the three above honest: a guard
     // that matched everything would pass all of them. A card is not a dialog,
-    // and a Radix sheet mid-exit still carries `data-state`, only "closed" —
-    // which is why the selector pins the VALUE rather than the attribute.
+    // and an SDK dialog mid-exit carries `data-closed`, not `data-open`.
     stubDOM([
       boardRoot,
       el({ classes: ['kbn-card'] }),
-      el({ classes: ['app-dialog-card'], attrs: { role: 'dialog', 'data-state': 'closed' } }),
+      el({ classes: ['app-dialog-card'], attrs: { role: 'dialog', 'data-closed': '' } }),
     ])
     expect(blockingDialogOpen()).toBe(false)
     expect(keystrokeIsSpokenFor()).toBe(false)
@@ -278,8 +277,7 @@ describe('blockingDialogOpen beside keystrokeIsSpokenFor', () => {
   })
 
   it('both see the settings sheet, with no change to the selector', () => {
-    // A Radix `AppDialog` is already what `[role="dialog"][data-state="open"]`
-    // describes, so `,` and `1`-`3` go dead while settings is open — including
+    // An open `AppDialog` is what `[role="dialog"][data-open]` describes, so `,` and `1`-`3` go dead while settings is open — including
     // the `,` that would otherwise stack a second sheet on the first.
     //
     // The board root is listed FIRST, as it is in the document: it matches the
