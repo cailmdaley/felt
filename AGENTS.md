@@ -48,6 +48,7 @@ lives in the docs site (`docs/`, published to
 | Event stream + ledger writer/reader contract | [`docs/dev/event-stream.md`](docs/dev/event-stream.md) |
 | Plugin integration, `scripts/release.sh`, release candidates | [`docs/dev/releasing.md`](docs/dev/releasing.md) |
 | Codebase layout, test suites | [`docs/dev/layout.md`](docs/dev/layout.md) |
+| UI SDK elements, imperative menus, styling and testing | [`docs/dev/ui-sdk.md`](docs/dev/ui-sdk.md) |
 | Writing a test: where it goes, tiers, fixtures, properties | [`docs/dev/testing.md`](docs/dev/testing.md) |
 | Installing a daemon, keep-alive, Rex, Remote Control | [`docs/shuttle/installation.md`](docs/shuttle/installation.md) |
 | Stores, agents, host classes, remotes, Tailscale | [`docs/shuttle/configuration.md`](docs/shuttle/configuration.md) |
