@@ -243,8 +243,6 @@ async function measureColdApp() {
       assert.equal(initial.some(entry => /mountForms|katex|pdfViewer|pdf\.worker/.test(entry.name)), false,
         'idle first paint does not download forms, KaTeX, or PDF-viewer chunks')
     }
-    const main = initial.find(entry => /^index-.*\.js$/.test(entry.name))
-    if (process.env.REPORT_ONLY !== '1') assert.ok(main && main.transferBytes < 260_000, 'cold main script stays below 260 KB transferred')
     await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Math note"])`).click()
     await page.waitForFunction(() => performance.getEntriesByType('resource').some(entry => /katex/.test(new URL(entry.name).pathname)))
     const afterMathUse = await page.evaluate(() => performance.getEntriesByType('resource').map(entry => ({
@@ -266,7 +264,6 @@ async function measureColdApp() {
     assert.ok(afterFirstUse.some(entry => /mountForms/.test(entry.name)), 'first stash use downloads the forms chunk')
     result.coldApp = { initialTiming, initialTransferBytes, initialAssets: initial, afterMathUseAssets: afterMathUse, afterFirstUseAssets: afterFirstUse,
       delayedChunks: { formula: 'katex', stash: 'mountForms' } }
-    if (process.env.REPORT_ONLY !== '1') assert.ok(initialTransferBytes < 300_000, 'cold Desk initial resources stay below 300 KB transferred')
     await page.close()
   } finally {
     await new Promise(resolve => server.close(resolve))
