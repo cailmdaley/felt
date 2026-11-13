@@ -9,7 +9,7 @@ import (
 
 // setPluginHarness records setup ownership outside the plugin payload, in the
 // promoted generation's existing marker. Uninstall removes that ownership.
-func setPluginHarness(source, harness string, installed bool) error {
+func setPluginHarness(source, harness string, installed bool, bundles ...[]string) error {
 	pluginRoot := filepath.Join(source, "claude-plugin")
 	identity, err := readPluginGeneration(pluginRoot)
 	if os.IsNotExist(err) {
@@ -23,6 +23,17 @@ func setPluginHarness(source, harness string, installed bool) error {
 		identity.Harnesses = append(identity.Harnesses, harness)
 	}
 	slices.Sort(identity.Harnesses)
+	if harness == "codex" {
+		if !installed {
+			identity.CodexBundles = nil
+		} else {
+			for _, names := range bundles {
+				identity.CodexBundles = append(identity.CodexBundles, names...)
+			}
+			slices.Sort(identity.CodexBundles)
+			identity.CodexBundles = slices.Compact(identity.CodexBundles)
+		}
+	}
 	return writePluginGeneration(source, identity)
 }
 
@@ -67,17 +78,16 @@ func (a *app) pluginDriftNotes() []string {
 					market = market || registered
 				}
 			}
-			missing = !settings.EnabledPlugins["felt@"+marketplaceName] || !market
+			_, configured := settings.EnabledPlugins["felt@"+marketplaceName]
+			missing = !configured || !market
 		case "codex":
 			cfg, err := a.readCodexConfig()
 			if err != nil {
 				continue
 			}
 			plugins, _ := cfg["plugins"].(map[string]interface{})
-			for _, name := range codexBundleNames {
-				plugin, _ := plugins[name+"@"+marketplaceName].(map[string]interface{})
-				enabled, _ := plugin["enabled"].(bool)
-				if !enabled {
+			for _, name := range identity.CodexBundles {
+				if _, configured := plugins[name+"@"+marketplaceName]; !configured {
 					missing = true
 				}
 			}
