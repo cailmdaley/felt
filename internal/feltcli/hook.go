@@ -99,7 +99,8 @@ func (a *app) hookPreToolCmd() *cobra.Command {
 		Short: "PreToolUse gate: deny non-felt tool calls until the felt skill is activated",
 		Long: `Reads the PreToolUse payload from stdin and emits either a deny envelope
 (if the felt skill hasn't been activated this session in a felt-enabled
-project) or nothing (pass through). Outside felt-enabled projects, or in
+project) or nothing (pass through). After two refusals it opens with a
+non-blocking warning, then stays silent. Outside felt-enabled projects, or in
 non-Claude sessions like Codex, this is a pass-through.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -322,7 +323,7 @@ func pluralize(count int, singular, plural string) string {
 // PreToolUse gate
 // ----------------------------------------------------------------------------
 
-const preToolDenyReason = "Activate the felt skill first. You are in a felt-enabled project but haven't activated the felt skill yet. Call the Skill tool with skill: \"felt\" before proceeding with any other tools. The skill body carries the philosophy, CLI cheatsheet, and references that shape how to work — reading the SessionStart context is not the same as having the skill loaded."
+const preToolDenyReason = "Activate the felt skill first. You are in a felt-enabled project but haven't activated the felt skill yet. Call the Skill tool with skill: \"felt\" before proceeding with any other tools. The skill body carries the philosophy, CLI cheatsheet, and references that shape how to work — reading the SessionStart context is not the same as having the skill loaded. If the skill is unknown, the gate opens after a second refusal; resume the session to load it."
 
 type preToolInput struct {
 	SessionID      string `json:"session_id"`
@@ -342,7 +343,7 @@ type preToolInput struct {
 //   - Skill tool activating something else: pass (don't mark).
 //   - Codex (transcript_path not under ~/.claude/projects/, or empty): mark, pass.
 //   - flag matches this transcript generation: pass.
-//   - otherwise: emit deny envelope.
+//   - otherwise: deny twice, open with context on the next call, then pass.
 func (a *app) runPreToolHook(stdin io.Reader, stdout io.Writer) error {
 	var input preToolInput
 	if err := json.NewDecoder(stdin).Decode(&input); err != nil {
@@ -380,6 +381,30 @@ func (a *app) runPreToolHook(stdin io.Reader, stdout io.Writer) error {
 
 	if recorded, err := os.ReadFile(flagPath); err == nil && bytes.Equal(recorded, marker) {
 		return nil
+	}
+
+	denialsPath := flagPath + "-denials"
+	var state struct {
+		Marker string `json:"marker"`
+		Count  int    `json:"count"`
+	}
+	if data, err := os.ReadFile(denialsPath); err == nil {
+		_ = json.Unmarshal(data, &state)
+	}
+	if state.Marker != string(marker) {
+		state.Marker, state.Count = string(marker), 0
+	}
+	if state.Count >= 3 {
+		return nil
+	}
+	state.Count++
+	data, _ := json.Marshal(state)
+	_ = os.WriteFile(denialsPath, data, 0600)
+	if state.Count == 3 {
+		return encodeHookJSON(stdout, sessionEnvelope{HookSpecificOutput: sessionInner{
+			HookEventName:     "PreToolUse",
+			AdditionalContext: "The felt skill isn't loaded in this session. The gate has opened after two refusals so tools can proceed. Resuming the session loads the skill.",
+		}})
 	}
 
 	type denyInner struct {

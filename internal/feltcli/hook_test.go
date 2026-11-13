@@ -615,6 +615,39 @@ func TestHookPreToolFlagPersists(t *testing.T) {
 	}
 }
 
+func TestHookPreToolOpensAfterTwoRefusals(t *testing.T) {
+	t.Parallel()
+	dir, _ := newStore(t)
+	env, _ := testEnv(t)
+	env.Set("TMPDIR", t.TempDir())
+	a := testApp(t, env)
+	input := preToolInput{SessionID: "limited", ToolName: "Bash", CWD: dir}
+	for _, generation := range []string{"first.jsonl", "second.jsonl"} {
+		input.TranscriptPath = filepath.Join(homeOf(t, env), ".claude", "projects", "x", generation)
+		for call := 1; call <= 5; call++ {
+			out := runPreToolWithInput(t, a, input)
+			switch {
+			case call <= 2:
+				if !strings.Contains(out, `"permissionDecision": "deny"`) || !strings.Contains(out, "after a second refusal") {
+					t.Fatalf("call %d: expected actionable denial: %s", call, out)
+				}
+			case call == 3:
+				var envelope sessionEnvelope
+				if err := json.Unmarshal([]byte(out), &envelope); err != nil {
+					t.Fatal(err)
+				}
+				if envelope.HookSpecificOutput.HookEventName != "PreToolUse" || !strings.Contains(envelope.HookSpecificOutput.AdditionalContext, "gate has opened") || strings.Contains(out, "permissionDecision") {
+					t.Fatalf("expected pass-through context without permission override: %s", out)
+				}
+			default:
+				if out != "" {
+					t.Fatalf("call %d must be silent: %s", call, out)
+				}
+			}
+		}
+	}
+}
+
 func TestHookPreToolMarkerRequiresTranscriptGeneration(t *testing.T) {
 	t.Parallel()
 	feltDir := t.TempDir()
