@@ -7,10 +7,12 @@
  * that region, with a rule between the Now columns and the rest. The card being
  * moved is in the menu's accessible name and the subline beside the heading.
  *
- * It is an SDK menu mounted on `document.body`: a popover beside the card on
- * desktop, a sheet from the bottom edge on a phone. The SDK owns its keys,
- * focus, positioning and dismissal; an outside press closes it without reaching
- * what lies beneath.
+ * It is an SDK popover menu mounted on `document.body`: beside the card on
+ * desktop, and on a phone pinned by `MoveMenu.css` to the bottom edge as a
+ * sheet over a scrim. The SDK owns its keys, focus and dismissal; an outside
+ * press closes it without reaching what lies beneath. The phone sheet is a
+ * plain popover rather than the SDK's swipeable sheet, so a long press that
+ * keeps dragging after it opens cannot move it.
  */
 import '@ui-sdk/web/menu'
 import type { KanbanCard } from './KanbanTypes.js'
@@ -26,7 +28,6 @@ export function openMoveMenu(card: KanbanCard, anchor: HTMLElement, broker: Move
   closeOpenMenu?.()
   const sheet = isMobileViewport()
   const root = document.createElement('ui-menu')
-  root.setAttribute('presentation', sheet ? 'sheet' : 'popover')
   const menu = document.createElement('ui-menu-content')
   menu.className = sheet ? 'kbn-move-menu kbn-move-sheet' : 'kbn-move-menu'
   menu.setAttribute('aria-label', `Move ${card.name}`)

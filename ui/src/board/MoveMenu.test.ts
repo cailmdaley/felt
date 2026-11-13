@@ -84,7 +84,7 @@ it('releases the hold gate on pointercancel too', async () => {
 
 it('opens the phone sheet on its surface rather than on a destination', async () => {
   await open(true)
-  expect(menu()!.getAttribute('data-presentation')).toBe('sheet')
+  expect(menu()!.classList.contains('kbn-move-sheet')).toBe(true)
   expect(document.activeElement).toBe(menu())
   await key('ArrowDown'); expect(document.activeElement).toBe(items()[0])
   await key('Escape'); expect(document.activeElement).toBe(anchor)

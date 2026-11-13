@@ -1,9 +1,9 @@
 @layer ui-sdk;
 
 /* ── The move menu ────────────────────────────────────────────────────────
-   An SDK menu in the top layer: a popover beside its card on desktop, a sheet
-   from the bottom edge on a phone. The SDK places, shows and slides it; these
-   rules give it the board's look. */
+   An SDK popover menu in the top layer. The SDK places it beside its card on
+   desktop; on a phone these rules pin it to the bottom edge as a sheet over a
+   scrim. They also give it the board's look. */
 
 /* The menu is outside the Desk, so the Desk's coarse-pointer selection opt-out
    does not reach it, and iPadOS would select a row's label under the finger
@@ -99,9 +99,10 @@
 .kbn-move-item-label { font-weight: 600; }
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  /* The move menu rises from the bottom edge. Same list, different arrival. */
+  /* The move menu rises from the bottom edge. Same list, different arrival.
+     The SDK writes the popover's anchored inset inline; the sheet replaces it. */
   .kbn-move-menu.kbn-move-sheet {
-    --sheet-backdrop: color-mix(in srgb, var(--kbn-shade) 34%, transparent);
+    inset: auto 0 0 0 !important;
     width: 100%;
     max-width: none;
     max-height: 76dvh;
@@ -111,6 +112,10 @@
     border-radius: 6px 6px 0 0;
     padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
     box-shadow: 0 -14px 40px color-mix(in srgb, var(--kbn-shade) 30%, transparent);
+    animation: kbn-move-rise 180ms cubic-bezier(0.22, 0.7, 0.3, 1);
+  }
+  .kbn-move-menu.kbn-move-sheet::backdrop {
+    background: color-mix(in srgb, var(--kbn-shade) 34%, transparent);
   }
   .kbn-move-sheet .kbn-move-heading { padding: 8px 18px 8px; }
   .kbn-move-sheet .kbn-move-item {
@@ -131,3 +136,10 @@
   }
 }
 
+@keyframes kbn-move-rise {
+  from { transform: translateY(16px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kbn-move-menu.kbn-move-sheet { animation: none; }
+}

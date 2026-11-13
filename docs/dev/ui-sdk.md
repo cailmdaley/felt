@@ -70,6 +70,12 @@ Menu-launch gestures use the board's existing context-key and long-press binding
 The shared hold binding cancels on ancestor scroll and drag, clears selection and coordinates nested row/pill presses; the SDK context trigger doesn't supply that full contract.
 Don't delete the shared gesture helpers as a side effect of porting another menu.
 
+## Phone sheets
+
+The Move menu's phone sheet is a popover that `MoveMenu.css` pins to the bottom edge over a `::backdrop` scrim, not the SDK's `presentation="sheet"`.
+On touch screens the SDK sheet scrolls into place natively: its rise ignores `prefers-reduced-motion`, and a touch that began before it opened, such as the long press that opens the Move menu, can stop it below the viewport while it stays open.
+A menu has no option to choose the sheet's driver or motion, so phone menus use the pinned popover.
+
 ## Style the behaviour target
 
 Declare `@layer ui-sdk;` before the component rules.

@@ -9,6 +9,18 @@ const browser = await launchBrowser()
 const url = pathToFileURL(resolve('harness-board-dist/index.html')).href
 const shots = process.env.UI_SDK_SHOTS
 if (shots) await mkdir(shots, { recursive: true })
+
+/** Record the Move menu's box on the first frame it is open. */
+const watchFirstFrame = page => page.evaluate(() => {
+  window.__firstFrame = null
+  const tick = () => {
+    const menu = document.querySelector('ui-menu-content.kbn-move-menu')
+    if (menu?.hasAttribute('data-open')) { window.__firstFrame = { top: menu.getBoundingClientRect().top }; return }
+    requestAnimationFrame(tick)
+  }
+  requestAnimationFrame(tick)
+})
+
 try {
   for (const phone of [false, true]) for (const theme of ['light', 'dark']) {
     const context = await browser.newContext({
@@ -33,6 +45,7 @@ try {
     const chip = p.locator('.kbn-role-chip').first()
     await chip.scrollIntoViewIfNeeded()
     const held = await chip.boundingBox()
+    await watchFirstFrame(p)
     await touch('touchStart', [{ x: held.x + held.width / 2, y: held.y + held.height / 2 }])
     await p.waitForTimeout(600)
     await move.waitFor()
@@ -40,24 +53,20 @@ try {
       window.__moveClosed = null
       document.querySelector('ui-menu').addEventListener('openchange', event => { if (!event.detail.value) window.__moveClosed = event.detail.reason })
     })
-    // The phone sheet rises into place; slide onto a place once it is there.
-    let place = await destinations.first().boundingBox()
-    for (let settled = false; !settled;) {
-      await p.waitForTimeout(80)
-      const next = await destinations.first().boundingBox()
-      settled = next.y === place.y
-      place = next
+    const place = await destinations.first().boundingBox()
+    if (phone) {
+      // Under reduced motion the sheet is at its resting place on its first frame.
+      const first = await p.evaluate(() => window.__firstFrame)
+      const rest = await move.boundingBox()
+      assert.ok(first && Math.abs(first.top - rest.y) < 1, `the sheet does not move after its first frame (${first?.top} then ${rest.y})`)
+      assert.ok(Math.abs(rest.y + rest.height - p.viewportSize().height) < 1, 'the sheet rests on the bottom edge')
     }
     await touch('touchMove', [{ x: place.x + 20, y: place.y + place.height / 2 }])
     await touch('touchEnd', [])
     await p.waitForTimeout(300)
-    // On the phone sheet a downward slide is the SDK's swipe to dismiss; either way nothing is chosen.
-    const closed = await p.evaluate(() => window.__moveClosed)
-    assert.ok(closed === null || closed === 'swipe', `the opening hold chooses no destination (closed by ${closed})`)
-    if (closed === null) {
-      await shot('hold')
-      await p.keyboard.press('Escape')
-    }
+    assert.equal(await p.evaluate(() => window.__moveClosed), null, 'the opening hold chooses no destination')
+    await shot('hold')
+    await p.keyboard.press('Escape')
     await move.waitFor({ state: 'detached' })
 
     // From a line's menu by keyboard: the SDK owns the menu keys.
@@ -103,4 +112,36 @@ try {
     await context.close()
     console.log(`PASS Move menu (${phone ? 'phone' : 'desktop'}, ${theme})`)
   }
+
+  // A hold whose finger keeps dragging down as the phone sheet opens, with motion on,
+  // leaves the menu closed or wholly on screen, never open below the viewport.
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+  const p = await context.newPage()
+  p.setDefaultTimeout(10000)
+  await p.goto(url)
+  const cdp = await context.newCDPSession(p)
+  const touch = (type, touchPoints) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints })
+  const chip = p.locator('.kbn-role-chip').first()
+  // Hold where the rising sheet will pass under the finger.
+  await chip.evaluate(el => {
+    el.scrollIntoView({ block: 'start' })
+    let scroller = el.parentElement
+    while (getComputedStyle(scroller).overflowY === 'visible' || scroller.scrollHeight <= scroller.clientHeight) scroller = scroller.parentElement
+    scroller.scrollTop += el.getBoundingClientRect().y - 600
+  })
+  await p.waitForTimeout(300)
+  const held = await chip.boundingBox()
+  const x = held.x + held.width / 2, y = held.y + held.height / 2
+  await touch('touchStart', [{ x, y }])
+  const move = p.getByRole('menu', { name: /^Move / })
+  await move.waitFor()
+  for (const dy of [100, 200]) await touch('touchMove', [{ x, y: y + dy }])
+  await touch('touchEnd', [])
+  await p.waitForTimeout(1000)
+  if (await move.count()) {
+    const box = await move.boundingBox()
+    assert.ok(box.y >= 0 && box.y + box.height <= p.viewportSize().height + 1, `an open sheet is on screen (top ${box.y})`)
+  }
+  await context.close()
+  console.log('PASS Move menu (phone, drag after hold)')
 } finally { await browser.close() }
