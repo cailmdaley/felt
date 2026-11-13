@@ -41,8 +41,8 @@ func TestAbsentNeighborsCannotResolveToLocalTwins(t *testing.T) {
 	if len(issues) != 3 {
 		t.Fatalf("want only neighbor summaries, not rescued links: %s", out)
 	}
-	for i, want := range []string{"not mounted, 1 links", "not mounted, 1 links", "not mounted, 3 links"} {
-		if issues[i].Level != felt.CheckLevelInfo || issues[i].Message != want {
+	for i, want := range []string{"ai-futures: not mounted, 1 link", "foreign: not mounted, 1 link", "loom: not mounted, 3 links"} {
+		if issues[i].Level != felt.CheckLevelInfo || issues[i].FiberID != "shared" || issues[i].Message != want {
 			t.Fatalf("unexpected summaries: %s", out)
 		}
 	}

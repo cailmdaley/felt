@@ -321,13 +321,6 @@ func sessionLayoutNote(issues []felt.CheckIssue) string {
 	return fmt.Sprintf("Fibers outside the directory layout, invisible to felt: %s; %s.", strings.Join(where, " and "), felt.LegacyFlatMigrationHint)
 }
 
-func pluralize(count int, singular, plural string) string {
-	if count == 1 {
-		return singular
-	}
-	return plural
-}
-
 // ----------------------------------------------------------------------------
 // PreToolUse gate
 // ----------------------------------------------------------------------------

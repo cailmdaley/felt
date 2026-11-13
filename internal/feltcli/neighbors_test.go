@@ -10,6 +10,37 @@ import (
 	"github.com/cailmdaley/felt/internal/felt"
 )
 
+func TestCheckNeighborDeclarationShapes(t *testing.T) {
+	t.Parallel()
+	for _, declaration := range []string{"commons", "{name: commons}"} {
+		t.Run(declaration, func(t *testing.T) {
+			dir, storage := newStore(t)
+			body := ""
+			if declaration == "commons" {
+				body = "[[commons/one]]"
+			}
+			if err := os.WriteFile(filepath.Join(storage.Root(), "shared.md"), []byte("---\nname: Shared\nneighbors: "+declaration+"\n---\n"+body), 0644); err != nil {
+				t.Fatal(err)
+			}
+			out, runErr := runCommand(t, dir, "check", "--json")
+			var issues []felt.CheckIssue
+			if err := json.Unmarshal([]byte(out), &issues); err != nil {
+				t.Fatalf("invalid JSON: %v: %s", err, out)
+			}
+			if len(issues) != 1 || issues[0].FiberID != "shared" {
+				t.Fatalf("unexpected issues: %s", out)
+			}
+			if declaration == "commons" {
+				if runErr != nil || issues[0].Level != felt.CheckLevelInfo || issues[0].Message != "commons: not mounted, 1 link" {
+					t.Fatalf("%v: %s", runErr, out)
+				}
+			} else if runErr == nil || issues[0].Level != felt.CheckLevelError || issues[0].Path != "frontmatter.neighbors" {
+				t.Fatalf("invalid declaration must be an issue: %v: %s", runErr, out)
+			}
+		})
+	}
+}
+
 func TestCheckAbsentNeighbors(t *testing.T) {
 	t.Parallel()
 	for _, mounted := range []bool{false, true} {
@@ -53,7 +84,7 @@ func TestCheckAbsentNeighbors(t *testing.T) {
 					}
 				}
 			} else {
-				if len(issues) != 2 || issues[0].Level != felt.CheckLevelInfo || issues[0].Message != "not mounted, 2 links" || !strings.Contains(issues[1].Message, "typo") {
+				if len(issues) != 2 || issues[0].Level != felt.CheckLevelInfo || issues[0].Message != "commons: not mounted, 2 links" || issues[0].FiberID != "shared" || !strings.Contains(issues[1].Message, "typo") {
 					t.Fatalf("unexpected issues: %s", output)
 				}
 				text, _ := runCommand(t, dir, "check")

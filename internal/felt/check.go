@@ -53,7 +53,7 @@ func (i CheckIssue) FixedByMigrate() bool {
 // rescued into a same-named fiber elsewhere.
 func Check(felts []*Felt, external *ExternalRefs, strays ...StrayFiber) []CheckIssue {
 	issues := checkNativeMetadata(felts)
-	issues = append(issues, checkRelationshipIntegrity(felts, external, strays, nil, nil)...)
+	issues = append(issues, checkRelationshipIntegrity(felts, external, strays, nil, "", nil)...)
 
 	sortIssues(issues)
 	return issues
@@ -186,12 +186,15 @@ func CheckLegacyFormat(s *Storage) ([]CheckIssue, error) {
 
 // Check checks this store's relationships, including its root fiber's neighbors.
 func (s *Storage) Check(felts []*Felt, strays ...StrayFiber) ([]CheckIssue, error) {
-	absent, err := s.AbsentNeighbors()
-	if err != nil {
+	rootID, absent, err := s.neighborState()
+	if err != nil && rootID == "" {
 		return nil, err
 	}
 	issues := checkNativeMetadata(felts)
-	issues = append(issues, checkRelationshipIntegrity(felts, s.ExternalRefs(), strays, absent, s.isCompanionLink)...)
+	if err != nil {
+		issues = append(issues, CheckIssue{Level: CheckLevelError, FiberID: rootID, Path: "frontmatter.neighbors", Message: err.Error()})
+	}
+	issues = append(issues, checkRelationshipIntegrity(felts, s.ExternalRefs(), strays, absent, rootID, s.isCompanionLink)...)
 	sortIssues(issues)
 	return issues, nil
 }
@@ -215,7 +218,7 @@ func (s *Storage) isCompanionLink(source *Felt, site bodyRefSite) bool {
 	return true
 }
 
-func checkRelationshipIntegrity(felts []*Felt, external *ExternalRefs, strays []StrayFiber, absent map[string]int, skip func(*Felt, bodyRefSite) bool) []CheckIssue {
+func checkRelationshipIntegrity(felts []*Felt, external *ExternalRefs, strays []StrayFiber, absent map[string]int, neighborRoot string, skip func(*Felt, bodyRefSite) bool) []CheckIssue {
 	ids := make([]string, 0, len(felts))
 	byID := make(map[string]*Felt, len(felts))
 	for _, f := range felts {
@@ -325,7 +328,7 @@ func checkRelationshipIntegrity(felts []*Felt, external *ExternalRefs, strays []
 	})
 	for neighbor, count := range absent {
 		if count > 0 {
-			issues = append(issues, CheckIssue{Level: CheckLevelInfo, FiberID: neighbor, Message: fmt.Sprintf("not mounted, %d links", count)})
+			issues = append(issues, CheckIssue{Level: CheckLevelInfo, FiberID: neighborRoot, Message: fmt.Sprintf("%s: not mounted, %d %s", neighbor, count, Pluralize(count, "link", "links"))})
 		}
 	}
 	return issues

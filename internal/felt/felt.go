@@ -876,6 +876,14 @@ func (f *Felt) SearchText() string {
 	return strings.Join(parts, "\n")
 }
 
+// Pluralize chooses the singular form for a count of one.
+func Pluralize(count int, singular, plural string) string {
+	if count == 1 {
+		return singular
+	}
+	return plural
+}
+
 // StatusIcon returns the display character for a status.
 func StatusIcon(status string) string {
 	switch status {

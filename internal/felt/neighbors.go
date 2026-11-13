@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 func absentNeighborError(query string, absent map[string]int) error {
@@ -18,9 +20,14 @@ func absentNeighborError(query string, absent map[string]int) error {
 // AbsentNeighbors returns the root fiber's declared neighbors that cannot be
 // reached through an enclosing store. Each count starts at zero for check.
 func (s *Storage) AbsentNeighbors() (map[string]int, error) {
+	_, absent, err := s.neighborState()
+	return absent, err
+}
+
+func (s *Storage) neighborState() (string, map[string]int, error) {
 	entries, err := os.ReadDir(s.root)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	var roots []string
 	for _, entry := range entries {
@@ -30,17 +37,27 @@ func (s *Storage) AbsentNeighbors() (map[string]int, error) {
 	}
 	absent := map[string]int{}
 	if len(roots) != 1 {
-		return absent, nil
+		return "", absent, nil
 	}
-	f, err := s.readPathWithMode(filepath.Join(s.root, roots[0]+FileExt), roots[0], ParseMetadataOnly)
+	rootID := roots[0]
+	f, err := s.readPathWithMode(filepath.Join(s.root, rootID+FileExt), rootID, ParseMetadataOnly)
 	if err != nil {
 		// CheckParseability reports an unreadable root; it cannot declare neighbors.
-		return absent, nil
+		return rootID, absent, nil
 	}
 	var neighbors []string
 	if node := f.ExtraFields["neighbors"]; node != nil {
-		if err := node.Decode(&neighbors); err != nil {
-			return nil, fmt.Errorf("%s neighbors: %w", f.ID, err)
+		if node.Kind == yaml.ScalarNode {
+			var neighbor string
+			err = node.Decode(&neighbor)
+			if neighbor != "" {
+				neighbors = []string{neighbor}
+			}
+		} else {
+			err = node.Decode(&neighbors)
+		}
+		if err != nil {
+			return rootID, nil, fmt.Errorf("%s neighbors: %w", rootID, err)
 		}
 	}
 	outer, _, mounted := s.EnclosingStore()
@@ -57,5 +74,5 @@ func (s *Storage) AbsentNeighbors() (map[string]int, error) {
 			absent[neighbor] = 0
 		}
 	}
-	return absent, nil
+	return rootID, absent, nil
 }

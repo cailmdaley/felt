@@ -131,7 +131,7 @@ func writeBodySize(sb *strings.Builder, f *felt.Felt) {
 	if n == 0 {
 		return
 	}
-	fmt.Fprintf(sb, "Body:     %d %s\n", n, pluralize(n, "line", "lines"))
+	fmt.Fprintf(sb, "Body:     %d %s\n", n, felt.Pluralize(n, "line", "lines"))
 }
 
 // bodyLineCount counts the body's lines, ignoring the trailing newline the

@@ -21,7 +21,7 @@ func formatFeltTwoLine(f *felt.Felt, collapsed int, bodyOnly bool) string {
 
 	metaStr := tagSuffix(f)
 	if collapsed > 0 {
-		metaStr += fmt.Sprintf(" (+%d matching %s; -v to expand)", collapsed, pluralize(collapsed, "descendant", "descendants"))
+		metaStr += fmt.Sprintf(" (+%d matching %s; -v to expand)", collapsed, felt.Pluralize(collapsed, "descendant", "descendants"))
 	}
 	if bodyOnly {
 		metaStr += " [body]"

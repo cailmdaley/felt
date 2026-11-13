@@ -190,6 +190,7 @@ of its single bare root fiber (`.felt/shared.md`):
 neighbors: [commons, work]
 ```
 
+For one neighbour, `neighbors: commons` also works.
 `felt check` groups unresolved links starting with those names into one info
 line per absent neighbour, such as `commons: not mounted, 18 links`. A neighbour
 is reachable when the enclosing store has that top-level directory or fiber;
