@@ -88,44 +88,6 @@ func TestAddReferenceInspectionFailureDoesNotBlockCreation(t *testing.T) {
 	}
 }
 
-func TestAddWarnsAboutOutsideReferencesInEnclosingStore(t *testing.T) {
-	t.Parallel()
-	outer, outerStorage := newStore(t)
-	if err := outerStorage.Write(&felt.Felt{ID: "note", Name: "Note", Body: "[[euclid]] [mission](euclid)"}); err != nil {
-		t.Fatal(err)
-	}
-	consumer := &felt.Felt{ID: "consumer", Name: "Consumer"}
-	if err := consumer.SetExtraField("inputs", []map[string]any{{"id": "mission", "from": "euclid"}}); err != nil {
-		t.Fatal(err)
-	}
-	if err := outerStorage.Write(consumer); err != nil {
-		t.Fatal(err)
-	}
-	_, s := newStore(t)
-	if err := s.Write(&felt.Felt{ID: "work/euclid", Name: "Euclid"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(s.Root(), filepath.Join(outer, ".felt", "shared")); err != nil {
-		t.Fatal(err)
-	}
-	view := t.TempDir()
-	if err := os.Symlink(filepath.Join(outer, ".felt", "shared"), filepath.Join(view, ".felt")); err != nil {
-		t.Fatal(err)
-	}
-	_, stderr, err := executeCLI(t, view, "add", "other/euclid", "New", "--top-level")
-	if err != nil {
-		t.Fatalf("add: %v %s", err, stderr)
-	}
-	if !strings.Contains(stderr, "consumer: euclid pointed to shared/work/euclid") {
-		t.Fatal(stderr)
-	}
-	for _, label := range []string{"[[euclid]]", "[mission](euclid)"} {
-		if !strings.Contains(stderr, "note: "+label+" pointed to shared/work/euclid") {
-			t.Fatal(stderr)
-		}
-	}
-}
-
 func TestNestDoesNotWarnAboutLinksItRepairs(t *testing.T) {
 	t.Parallel()
 	dir, s := newStore(t)

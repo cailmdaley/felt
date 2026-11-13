@@ -367,10 +367,6 @@ func (a *app) printReferenceChanges(changes []felt.ReferenceChange) {
 // in the store that moved by their ids there, those elsewhere in its
 // enclosing store by their ids in it.
 func (a *app) printRewrittenRefs(storage *felt.Storage, result *felt.MoveResult) {
-	if len(result.ReferenceChanges) > 0 {
-		fmt.Fprintln(a.env.Stderr, "The move left these references with changed resolution:")
-		a.printReferenceChanges(result.ReferenceChanges)
-	}
 	for _, id := range result.Rewritten {
 		fmt.Fprintf(a.env.Stdout, "Rewrote references in %s\n", id)
 	}
