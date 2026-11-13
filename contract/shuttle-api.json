@@ -46,8 +46,7 @@
             "required": false,
             "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400.",
             "schema": {
-              "type": "string",
-              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              "type": "string"
             }
           }
         ],
@@ -99,8 +98,7 @@
             "required": false,
             "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400.",
             "schema": {
-              "type": "string",
-              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              "type": "string"
             }
           }
         ],
@@ -208,8 +206,7 @@
             "required": false,
             "description": "Send the ETag from a prior response. A match returns 304 with no body.",
             "schema": {
-              "type": "string",
-              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              "type": "string"
             }
           }
         ],
@@ -222,8 +219,7 @@
                   "type": "object",
                   "properties": {
                     "host": {
-                      "type": "string",
-                      "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                      "type": "string"
                     },
                     "fibers": {
                       "type": "array",
@@ -246,15 +242,13 @@
             "headers": {
               "ETag": {
                 "schema": {
-                  "type": "string",
-                  "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  "type": "string"
                 },
                 "description": "Weak validator over the visible feed."
               },
               "Cache-Control": {
                 "schema": {
-                  "type": "string",
-                  "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  "type": "string"
                 },
                 "description": "no-cache"
               }
@@ -265,8 +259,7 @@
             "headers": {
               "ETag": {
                 "schema": {
-                  "type": "string",
-                  "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  "type": "string"
                 },
                 "description": "Validator for the representation."
               }
@@ -288,7 +281,7 @@
     "/fibers/{id}": {
       "get": {
         "summary": "Read one fiber from its owner.",
-        "description": "The wildcard id accepts a UID or a slash-separated namespace path; encode each path segment separately. body=true includes Markdown in fiber.body; without an explicit origin a locally read shuttle.host can select a configured owner, otherwise the local copy is returned.",
+        "description": "Reads by UID or slash-separated namespace path; encode each path segment separately. body=true includes Markdown in fiber.body; omitted origin can infer a configured owner from shuttle.host, but local reads use felt’s convenient lookup, so a missing namespace path can resolve by its leaf name instead of returning 404.",
         "tags": [
           "core"
         ],
@@ -299,8 +292,7 @@
             "required": true,
             "description": "Fiber UID or namespace path, including nested segments.",
             "schema": {
-              "type": "string",
-              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              "type": "string"
             }
           },
           {
@@ -324,8 +316,7 @@
             "required": false,
             "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400.",
             "schema": {
-              "type": "string",
-              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              "type": "string"
             }
           },
           {
@@ -420,12 +411,10 @@
                 "type": "object",
                 "properties": {
                   "prompt": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "project_dir": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "agent": {
                     "type": [
@@ -542,20 +531,16 @@
                 "type": "object",
                 "properties": {
                   "id": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "name": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "body": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "uid": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "origin": {
                     "type": "string",
@@ -576,33 +561,27 @@
                         "type": "object",
                         "properties": {
                           "project_dir": {
-                            "type": "string",
-                            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                            "type": "string"
                           },
                           "host": {
-                            "type": "string",
-                            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                            "type": "string"
                           }
                         }
                       },
                       "tags": {
                         "type": "array",
                         "items": {
-                          "type": "string",
-                          "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                          "type": "string"
                         }
                       },
                       "outcome": {
-                        "type": "string",
-                        "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                        "type": "string"
                       },
                       "role": {
-                        "type": "string",
-                        "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                        "type": "string"
                       },
                       "due": {
-                        "type": "string",
-                        "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                        "type": "string"
                       }
                     }
                   }
@@ -674,8 +653,7 @@
                 "type": "object",
                 "properties": {
                   "fiber_id": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "origin": {
                     "type": "string",
@@ -722,8 +700,7 @@
                       "type": "object",
                       "properties": {
                         "name": {
-                          "type": "string",
-                          "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                          "type": "string"
                         },
                         "data": {
                           "type": "string",
@@ -859,36 +836,30 @@
                 "type": "object",
                 "properties": {
                   "fiber_id": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "text": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "origin": {
                     "type": "string",
                     "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400."
                   },
                   "from": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "from_claim": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "address": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "context_only": {
                     "type": "boolean",
                     "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
                   },
                   "message_id": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "wake": {
                     "type": "boolean",
@@ -914,12 +885,10 @@
                     "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
                   },
                   "reply_to": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "notify_address": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "notify_when_idle": {
                     "type": "boolean",
@@ -1191,32 +1160,26 @@
                 "type": "object",
                 "properties": {
                   "address": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "text": {
                     "type": "string",
                     "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
                   },
                   "message_id": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "from": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "from_claim": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "reply_to": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "notify_address": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "wake": {
                     "type": "boolean",
@@ -1333,64 +1296,50 @@
                 "type": "object",
                 "properties": {
                   "fiber": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "origin": {
                     "type": "string",
                     "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400."
                   },
                   "fiber_path": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "project_dir": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "model": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "agent": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "effort": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "schedule": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "tz": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "until": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "review": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "actor": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "role": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "new_name": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "outcome": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "disabled": {
                     "type": "boolean",
@@ -1461,8 +1410,7 @@
             "content": {
               "text/plain": {
                 "schema": {
-                  "type": "string",
-                  "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  "type": "string"
                 }
               }
             }
@@ -1472,8 +1420,7 @@
             "content": {
               "text/plain": {
                 "schema": {
-                  "type": "string",
-                  "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  "type": "string"
                 }
               },
               "application/json": {
@@ -1498,8 +1445,7 @@
             "content": {
               "text/plain": {
                 "schema": {
-                  "type": "string",
-                  "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  "type": "string"
                 }
               }
             }
@@ -1509,8 +1455,7 @@
             "content": {
               "text/plain": {
                 "schema": {
-                  "type": "string",
-                  "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  "type": "string"
                 }
               }
             }
@@ -1520,8 +1465,7 @@
             "content": {
               "text/plain": {
                 "schema": {
-                  "type": "string",
-                  "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  "type": "string"
                 }
               },
               "application/json": {
@@ -1556,8 +1500,7 @@
                 "type": "object",
                 "properties": {
                   "fiber_id": {
-                    "type": "string",
-                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    "type": "string"
                   },
                   "origin": {
                     "type": "string",
@@ -1639,8 +1582,7 @@
             "required": true,
             "description": "Fiber identifier used by the sent-files projection.",
             "schema": {
-              "type": "string",
-              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              "type": "string"
             }
           },
           {
@@ -1649,8 +1591,7 @@
             "required": false,
             "description": "Nonempty native conversation ID; preserves repeated sends.",
             "schema": {
-              "type": "string",
-              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              "type": "string"
             }
           },
           {
@@ -1659,8 +1600,7 @@
             "required": false,
             "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400.",
             "schema": {
-              "type": "string",
-              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              "type": "string"
             }
           },
           {
@@ -1669,8 +1609,7 @@
             "required": false,
             "description": "Send the ETag from a prior response. A match returns 304 with no body.",
             "schema": {
-              "type": "string",
-              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              "type": "string"
             }
           }
         ],
@@ -1683,6 +1622,20 @@
                   "type": "object"
                 }
               }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Representation validator (usually weak)."
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Revalidation policy."
+              }
             }
           },
           "304": {
@@ -1690,8 +1643,7 @@
             "headers": {
               "ETag": {
                 "schema": {
-                  "type": "string",
-                  "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  "type": "string"
                 },
                 "description": "Validator for the representation."
               }
@@ -1744,8 +1696,7 @@
             "required": true,
             "description": "Absolute host-local filename.",
             "schema": {
-              "type": "string",
-              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              "type": "string"
             }
           },
           {
@@ -1754,8 +1705,7 @@
             "required": false,
             "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400.",
             "schema": {
-              "type": "string",
-              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              "type": "string"
             }
           },
           {
@@ -1764,8 +1714,7 @@
             "required": false,
             "description": "Send the ETag from a prior response. A match returns 304 with no body.",
             "schema": {
-              "type": "string",
-              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              "type": "string"
             }
           },
           {
@@ -1774,8 +1723,7 @@
             "required": false,
             "description": "Forwarded to the owner, but does not by itself produce 304; only If-None-Match decides unchanged content.",
             "schema": {
-              "type": "string",
-              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              "type": "string"
             }
           },
           {
@@ -1784,8 +1732,7 @@
             "required": false,
             "description": "One bytes=start-end, bytes=start- or suffix range.",
             "schema": {
-              "type": "string",
-              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              "type": "string"
             }
           },
           {
@@ -1794,8 +1741,7 @@
             "required": false,
             "description": "Use range only when the strong validator or date matches; weak tags cannot authorize it.",
             "schema": {
-              "type": "string",
-              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              "type": "string"
             }
           }
         ],
@@ -1805,6 +1751,26 @@
             "content": {
               "*/*": {
                 "schema": {}
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Representation validator (usually weak)."
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Revalidation policy."
+              },
+              "Last-Modified": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "HTTP-date file modification time."
               }
             }
           },
@@ -1821,8 +1787,7 @@
             "headers": {
               "ETag": {
                 "schema": {
-                  "type": "string",
-                  "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  "type": "string"
                 },
                 "description": "Validator for the representation."
               }
@@ -1881,20 +1846,16 @@
         "type": "object",
         "properties": {
           "error": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "message": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "detail": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "origin": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "stores": {
             "type": "array",
@@ -1943,8 +1904,7 @@
           "pending": {
             "type": "array",
             "items": {
-              "type": "string",
-              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              "type": "string"
             }
           },
           "elapsed_ms": {
@@ -1964,28 +1924,22 @@
         "type": "object",
         "properties": {
           "git_sha": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "git_short_sha": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "built_at": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "booted_at": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "mix_vsn": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "release_path": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           }
         },
         "required": [
@@ -2012,8 +1966,7 @@
                 "type": "integer"
               },
               "host": {
-                "type": "string",
-                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                "type": "string"
               },
               "terminal": {
                 "type": "string",
@@ -2042,12 +1995,10 @@
                 "type": "integer"
               },
               "listen": {
-                "type": "string",
-                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                "type": "string"
               },
               "host_class": {
-                "type": "string",
-                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                "type": "string"
               },
               "incarnation": {
                 "type": [
@@ -2057,7 +2008,7 @@
               },
               "reconciliation_hold": {
                 "type": [
-                  "object",
+                  "string",
                   "null"
                 ]
               },
@@ -2127,8 +2078,7 @@
             ],
             "properties": {
               "state": {
-                "type": "string",
-                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                "type": "string"
               }
             },
             "required": [
@@ -2153,20 +2103,16 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "uid": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "slug": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "name": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "status": {
             "type": [
@@ -2175,8 +2121,7 @@
             ]
           },
           "body": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "outcome": {
             "type": [
@@ -2205,27 +2150,29 @@
           "tags": {
             "type": "array",
             "items": {
-              "type": "string",
-              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              "type": "string"
             }
           },
           "created_at": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "ISO 8601 timestamp when present."
           },
           "closed_at": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "ISO 8601 timestamp when present."
           },
           "modified_at": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "ISO 8601 timestamp when present."
           },
           "tempered": {
             "type": [
@@ -2249,24 +2196,19 @@
             "$ref": "#/components/schemas/Fiber"
           },
           "felt_store": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "path": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "dir": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "report_path": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "origin": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "orchestrator": {
             "type": [
@@ -2325,8 +2267,7 @@
             "type": "object",
             "properties": {
               "origin": {
-                "type": "string",
-                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                "type": "string"
               }
             },
             "required": [
@@ -2339,19 +2280,16 @@
         "type": "object",
         "properties": {
           "host": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "felt_stores": {
             "type": "array",
             "items": {
-              "type": "string",
-              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              "type": "string"
             }
           },
           "generated_at": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "fibers": {
             "type": "array",
@@ -2371,32 +2309,25 @@
         "type": "object",
         "properties": {
           "address": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "host": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "harness": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "id": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "title": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "cwd": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "state": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "capabilities": {
             "type": [
@@ -2404,24 +2335,20 @@
               "null"
             ],
             "items": {
-              "type": "string",
-              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              "type": "string"
             }
           },
           "last_seen": {
             "type": "integer"
           },
           "fiber": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "fiber_uid": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "transcript_id": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           }
         },
         "required": [
@@ -2434,8 +2361,7 @@
         "type": "object",
         "properties": {
           "host": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "sessions": {
             "type": "array",
@@ -2449,16 +2375,13 @@
               "type": "object",
               "properties": {
                 "host": {
-                  "type": "string",
-                  "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  "type": "string"
                 },
                 "harness": {
-                  "type": "string",
-                  "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  "type": "string"
                 },
                 "error": {
-                  "type": "string",
-                  "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  "type": "string"
                 }
               },
               "required": [
@@ -2504,8 +2427,7 @@
             ],
             "properties": {
               "state": {
-                "type": "string",
-                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                "type": "string"
               },
               "attempt": {
                 "type": "integer"
@@ -2536,31 +2458,25 @@
         "type": "object",
         "properties": {
           "name": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "url": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "port": {
             "type": "integer"
           },
           "source": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "ssh": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "display": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "checkout": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "tunnel": {
             "type": "object"
@@ -2581,28 +2497,22 @@
             ],
             "properties": {
               "git_sha": {
-                "type": "string",
-                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                "type": "string"
               },
               "git_short_sha": {
-                "type": "string",
-                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                "type": "string"
               },
               "built_at": {
-                "type": "string",
-                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                "type": "string"
               },
               "booted_at": {
-                "type": "string",
-                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                "type": "string"
               },
               "mix_vsn": {
-                "type": "string",
-                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                "type": "string"
               },
               "release_path": {
-                "type": "string",
-                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                "type": "string"
               }
             }
           }
@@ -2618,8 +2528,7 @@
         "type": "object",
         "properties": {
           "host": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "supervisor": {
             "type": "string",
@@ -2683,8 +2592,7 @@
             "description": "Observed terminal holder; null when no holder has been remembered, including capture responses."
           },
           "tmux_session": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           }
         },
         "required": [
@@ -2705,12 +2613,10 @@
                 "const": true
               },
               "agent": {
-                "type": "string",
-                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                "type": "string"
               },
               "session_uuid": {
-                "type": "string",
-                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                "type": "string"
               }
             },
             "required": [
@@ -2727,12 +2633,10 @@
             "const": false
           },
           "reason": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "message": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "waiting": {
             "type": "boolean",
@@ -2743,16 +2647,13 @@
             "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
           },
           "project_dir": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "origin": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "error": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           }
         },
         "required": [
@@ -2772,8 +2673,7 @@
                 "const": true
               },
               "fiber_id": {
-                "type": "string",
-                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                "type": "string"
               },
               "session_uuid": {
                 "type": [
@@ -2797,32 +2697,25 @@
             "const": false
           },
           "reason": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "fiber_id": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "error": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "message": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "detail": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "host": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "needs": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "fiber_host": {
             "type": [
@@ -2831,8 +2724,7 @@
             ]
           },
           "daemon_host": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "project_dir": {
             "type": [
@@ -2870,16 +2762,13 @@
             ]
           },
           "tmux_session": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "surface": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "terminal": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           }
         },
         "required": [
@@ -2898,12 +2787,10 @@
             "const": "forward_failed"
           },
           "origin": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "error": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           }
         },
         "required": [
@@ -2917,12 +2804,10 @@
         "type": "object",
         "properties": {
           "message_id": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "address": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "status": {
             "type": "string",
@@ -2937,8 +2822,7 @@
             ]
           },
           "transport": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "detail": {
             "type": [
@@ -2970,9 +2854,7 @@
               }
             },
             "required": [
-              "state",
-              "signal",
-              "detail"
+              "state"
             ]
           }
         },
@@ -2996,19 +2878,16 @@
             ]
           },
           "fiber_id": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "receipt": {
             "$ref": "#/components/schemas/MessageReceipt"
           },
           "detail": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "error": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           }
         },
         "required": [
@@ -3051,8 +2930,7 @@
             "const": "input"
           },
           "fiber_id": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "delivered": {
             "type": [
@@ -3061,12 +2939,10 @@
             ]
           },
           "detail": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "error": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           }
         },
         "required": [
@@ -3088,8 +2964,7 @@
             "const": true
           },
           "fiber_id": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "status": {
             "const": "queued_for_next_worker"
@@ -3106,8 +2981,7 @@
         "type": "object",
         "properties": {
           "error": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "delivery": {
             "type": "string",
@@ -3134,8 +3008,7 @@
             "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
           },
           "fiber_id": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           }
         },
         "required": [
@@ -3188,16 +3061,13 @@
             ]
           },
           "origin": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "detail": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "error": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           }
         },
         "required": [
@@ -3210,16 +3080,14 @@
         "type": "object",
         "properties": {
           "fiber_id": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "killed": {
             "type": "boolean",
             "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
           },
           "session": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           }
         },
         "required": [
@@ -3231,15 +3099,13 @@
         "type": "object",
         "properties": {
           "fiber_id": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "killed": {
             "const": false
           },
           "error": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           }
         },
         "required": [
@@ -3252,20 +3118,16 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "path": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "uid": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "host": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "status": {
             "type": "string",
@@ -3291,16 +3153,13 @@
             "const": "fiber_not_found"
           },
           "host": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "fiber": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "error": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           }
         },
         "required": [
@@ -3314,8 +3173,7 @@
         "type": "object",
         "properties": {
           "error": {
-            "type": "string",
-            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            "type": "string"
           },
           "retryable": {
             "const": true
