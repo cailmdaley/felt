@@ -3,14 +3,6 @@
 Stores, agents, host trust, remotes and the tailnet transport are configured per host.
 [Installation](installation.md) gets the daemon running first; [Sharp edges](troubleshooting.md) collects what tends to go wrong.
 
-## Personal UIs
-
-Put a UI in `~/.config/shuttle/ui/<name>/`, with an `index.html` at its root.
-The daemon serves it at `/ui/<name>/` and reads its files on each request, so
-edits need no restart. The UI shares the daemon's origin and can write through
-its API. Its files are served to whoever can reach the daemon; see
-[Host classes and trust boundaries](#host-classes-and-trust-boundaries).
-
 ## Configuring stores
 
 The daemon polls felt stores. It resolves them in this order:
@@ -579,3 +571,14 @@ For another reverse proxy, preserve the browser-facing host and scheme in
 The daemon accepts direct requests only under loopback hostnames and rejects
 browser writes from unrelated origins. These checks protect the local browser
 boundary; they do not authenticate clients or replace access controls on the proxy.
+
+## Personal UIs
+
+The board is one UI over the daemon; you can serve your own beside it.
+Put a UI in `~/.config/shuttle/ui/<name>/`, with an `index.html` at its root.
+The daemon serves it at `/ui/<name>/` and reads its files on each request, so
+edits need no restart. The UI shares the daemon's origin and can write through
+its API; a page served from anywhere else can only read. Build it on the
+[core routes](../reference/api.md#core), which are the stable ones.
+Its files are served to whoever can reach the daemon; see
+[Host classes and trust boundaries](#host-classes-and-trust-boundaries).
