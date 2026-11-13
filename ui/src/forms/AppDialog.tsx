@@ -13,6 +13,7 @@
  * triggers it) and the geometry a media query has to answer.
  */
 
+import type { JSX } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type { ReactNode } from 'react'
 import { injectStyles } from './injectStyles'

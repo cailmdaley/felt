@@ -22,6 +22,7 @@
  * the yap (17px, the one field the dialog exists for) is Capture's own.
  */
 
+import type { JSX } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { AppDialog } from './AppDialog'
 import { injectStyles } from './injectStyles'

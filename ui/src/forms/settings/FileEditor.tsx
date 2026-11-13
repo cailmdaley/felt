@@ -22,6 +22,7 @@
  * remote and which port, and no paraphrase improves on that.
  */
 
+import type { JSX } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { useSettingsDraft } from './SettingsDraftContext'
 

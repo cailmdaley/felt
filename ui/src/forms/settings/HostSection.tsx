@@ -26,6 +26,7 @@
  * dispatch authority, and the sentence beside it says so.
  */
 
+import type { JSX } from 'react'
 import { useEffect, useState } from 'react'
 
 import { ago } from '../../board/civilDay.js'

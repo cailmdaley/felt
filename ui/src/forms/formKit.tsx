@@ -14,6 +14,7 @@
  * --type-label, and labels as kickers (all-small-caps at --type-note).
  */
 
+import type { JSX } from 'react'
 import type { ReactNode } from 'react'
 import { injectStyles } from './injectStyles'
 import { resolveEffort, type AgentEntry } from './agents'

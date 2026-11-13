@@ -17,6 +17,7 @@
  * immediately — the help text says so rather than implying a live toggle.
  */
 
+import type { JSX } from 'react'
 import { useEffect, useState } from 'react'
 
 import { FileEditor } from './FileEditor'

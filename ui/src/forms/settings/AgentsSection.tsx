@@ -28,6 +28,7 @@
  * textarea below is otherwise a poor place to start from.
  */
 
+import type { JSX } from 'react'
 import { useEffect, useState } from 'react'
 
 import { FileEditor } from './FileEditor'

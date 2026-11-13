@@ -1,3 +1,4 @@
+import type { JSX } from 'react'
 import { useEffect, useState } from 'react'
 import { conversationDevice, conversationOpening, resolveDestination, saveConversationOpening, CONVERSATION_OPENING_CHANGED, type ConversationOpening } from '../../board/conversationOpening'
 

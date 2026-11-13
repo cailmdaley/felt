@@ -26,6 +26,7 @@
  * and arrow keys cannot land on it either.
  */
 
+import type { JSX } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import type { Host } from './projectModel'
 import { injectStyles } from './injectStyles'

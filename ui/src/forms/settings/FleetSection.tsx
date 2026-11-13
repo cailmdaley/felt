@@ -36,6 +36,7 @@
  * `--dry-run` — it reports both halves and touches nothing.
  */
 
+import type { JSX } from 'react'
 import { useEffect, useState } from 'react'
 
 import { FileEditor } from './FileEditor'

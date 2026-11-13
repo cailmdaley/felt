@@ -1,3 +1,4 @@
+import type { JSX } from 'react'
 import { useEffect, useState } from 'react'
 import {
   APPEARANCE_CHANGED, DARK_THEMES, DARK_THEME_LABELS, appearance, saveAppearance, systemScheme, watchAppearance,

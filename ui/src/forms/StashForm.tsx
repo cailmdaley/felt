@@ -29,6 +29,7 @@
  * Cmd/Ctrl+Enter submits.
  */
 
+import type { JSX } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { agentGroups, resolveEffort } from './agents'
 import { useAgentRegistry } from './useAgentRegistry'

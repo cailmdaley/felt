@@ -38,6 +38,7 @@
  * people editing one host's list cannot silently drop each other's rows.
  */
 
+import type { JSX } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { FileEditor } from './FileEditor'

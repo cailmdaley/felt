@@ -1,5 +1,6 @@
 /** Browser preferences and explicitly scoped worker-host configuration. */
 
+import type { JSX } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { AppDialog } from '../AppDialog'

@@ -1,3 +1,4 @@
+import type { JSX } from 'react'
 import { useEffect, useState } from 'react'
 import { daemonErrorMessage, getDaemonJson, postDaemonJson } from '../../board/daemonApi'
 import type { SettingsHost } from './settingsApi'
