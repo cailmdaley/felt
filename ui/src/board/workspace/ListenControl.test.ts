@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { ListenControl } from './ListenControl.js'
 import { Voice } from '../voice.js'
 import { card, voiceStatus } from '../testFixtures.js'
+import { keystrokeIsSpokenFor } from '../views/ViewRegistry.js'
 
 let control: ListenControl
 let voice: Voice
@@ -64,4 +65,13 @@ it('closes before running the selected route action', () => {
   items().find(item => item.textContent === 'Pin to this card')!.click()
   expect(menu()).toBeNull()
   expect(voice.set).toHaveBeenCalledWith(expect.objectContaining({ follow: false }))
+})
+
+it('holds the board\'s bare keys while open, so a digit cannot switch views beneath it', () => {
+  expect(keystrokeIsSpokenFor()).toBe(false)
+  opener.click()
+  expect(document.activeElement).toBe(items()[0])
+  expect(keystrokeIsSpokenFor()).toBe(true)
+  key('Escape')
+  expect(keystrokeIsSpokenFor()).toBe(false)
 })

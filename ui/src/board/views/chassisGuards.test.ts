@@ -231,11 +231,13 @@ describe('blockingDialogOpen beside keystrokeIsSpokenFor', () => {
   const handRolled = el({ classes: ['hand-rolled-dialog'], attrs: { role: 'dialog', 'aria-modal': 'true' } })
   const searchBox = el({ tag: 'INPUT' })
 
-  it('both yield to an open SDK menu but not a closed one', () => {
-    stubDOM([boardRoot, el({ attrs: { 'data-slot': 'menu-content', 'data-open': '' } })])
+  it('both yield to an open menu but not a closed one', () => {
+    stubDOM([boardRoot, el({ attrs: { role: 'menu', 'data-slot': 'menu-content', 'data-open': '' } })])
     expect(blockingDialogOpen()).toBe(true)
     expect(keystrokeIsSpokenFor()).toBe(true)
-    stubDOM([boardRoot, el({ attrs: { 'data-slot': 'menu-content', 'data-closed': '' } })])
+    stubDOM([boardRoot, el({ classes: ['ws-select-picker'], attrs: { role: 'menu', 'data-open': '' } })])
+    expect(blockingDialogOpen()).toBe(true)
+    stubDOM([boardRoot, el({ attrs: { role: 'menu', 'data-slot': 'menu-content', 'data-closed': '' } })])
     expect(blockingDialogOpen()).toBe(false)
   })
 

@@ -194,6 +194,8 @@ export class ListenControl {
     const menu = this.menu = document.createElement('div')
     menu.className = 'ws-select-picker'
     menu.setAttribute('role', 'menu'); menu.setAttribute('aria-label', 'Listening options')
+    // An open menu holds the board's bare keys (`blockingDialogOpen`).
+    menu.dataset.open = ''
     this.menuState = this.signature()
     const mode = listenMode(state)
     if (mode !== 'off') {

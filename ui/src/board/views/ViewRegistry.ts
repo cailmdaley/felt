@@ -201,10 +201,11 @@ export function isBlockingDialog(
  * a library's attribute means a dialog built outside AppDialog is covered
  * without a code change here. A native `<dialog>` the board opens with
  * `showModal()` exposes its modality without the attribute, so `dialog[open]`
- * names it. Open SDK menus also own keys, despite being non-modal.
+ * names it. An open menu owns keys too, despite being non-modal: SDK menus and
+ * Listen's options both mark it with `data-open`.
  */
 export const BLOCKING_DIALOG_SELECTOR =
-  '[role="dialog"][data-state="open"], [role="dialog"][aria-modal="true"], [data-slot="menu-content"][data-open], dialog[open]'
+  '[role="dialog"][data-state="open"], [role="dialog"][aria-modal="true"], [role="menu"][data-open], dialog[open]'
 
 /**
  * Is a dialog or SDK menu currently taking keys away from the board?
