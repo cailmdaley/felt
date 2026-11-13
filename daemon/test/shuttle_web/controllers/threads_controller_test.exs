@@ -97,7 +97,11 @@ defmodule ShuttleWeb.ThreadsControllerTest do
       [
         entry("hub", %{"status" => "active"}),
         entry("hub/live", %{"status" => "open"}),
-        entry("hub/live/deep", %{"status" => "closed", "outcome" => "Found it."}),
+        entry("hub/live/deep", %{
+          "status" => "closed",
+          "outcome" => "Found it.",
+          "shuttle" => %{"thread_parent" => %{"uid" => "u-hub/live", "slug" => "hub/live"}}
+        }),
         entry("hub/done", %{"status" => "closed", "tempered" => true})
       ],
       ["u-hub/live"]

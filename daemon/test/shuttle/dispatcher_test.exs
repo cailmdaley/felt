@@ -1211,7 +1211,11 @@ defmodule Shuttle.DispatcherTest do
 
     entries = [
       thread.("tests/haiku", %{"status" => "active"}),
-      thread.("tests/haiku/blinding", %{"status" => "closed", "outcome" => "Rebuilt. More."}),
+      thread.("tests/haiku/blinding", %{
+        "status" => "closed",
+        "outcome" => "Rebuilt. More.",
+        "shuttle" => %{"thread_parent" => %{"uid" => "u-tests/haiku", "slug" => "tests/haiku"}}
+      }),
       thread.("tests/haiku/live", %{"status" => "active"})
     ]
 
