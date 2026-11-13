@@ -1530,11 +1530,16 @@
             }
           },
           "404": {
-            "description": "The owning host has no fiber with that identifier.",
+            "description": "The owning host has no fiber with that identifier (JSON LifecycleMissing). Relayed from another host, the same JSON arrives as text/plain.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/LifecycleMissing"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
                 }
               }
             }

@@ -95,6 +95,23 @@ defmodule ShuttleWeb.ApiContractTest do
 
     assert %{"delivered" => nil, "reason" => "forward_timeout"} =
              assert_contract(conn, "/deliver")
+
+    # The owner's JSON 404 reaches a lifecycle caller relayed as text/plain;
+    # only a retryable 503 keeps its JSON media type.
+    missing = ~s({"error_code":"fiber_not_found","host":"edge","fiber":"work/item","error":"x"})
+    StubPostClient.set_response({:ok, 404, missing})
+    body = Jason.encode!(%{origin: "edge", fiber: "work/item", action: "pause"})
+    conn = post(api_conn(), "/api/v1/lifecycle", body)
+
+    assert {conn.status, get_resp_header(conn, "content-type")} ==
+             {404, ["text/plain; charset=utf-8"]}
+
+    assert assert_contract(conn, "/lifecycle") == missing
+
+    StubPostClient.set_response({:ok, 503, ~s({"error":"timed out","retryable":true})})
+    conn = post(api_conn(), "/api/v1/lifecycle", body)
+    assert conn.status == 503
+    assert %{"retryable" => true} = assert_contract(conn, "/lifecycle")
   end
 
   test "boot refuses stateful routes with the shared readiness shape" do
@@ -152,9 +169,28 @@ defmodule ShuttleWeb.ApiContractTest do
       assert_contract(refused, "/file")
     end
 
+    uid = "01KTS261GJMMRDRHS2QDMEFV3K"
     events = Path.join(tmp, "events.jsonl")
-    File.write!(events, "")
+
+    File.write!(
+      events,
+      Jason.encode!(%{
+        type: "pre_tool_use",
+        sessionId: "sess-1",
+        tmuxSession: "report-#{uid}-shuttle",
+        tool: "SendUserFile",
+        timestamp: 1_800_000_000_000,
+        toolInput: %{files: [path]}
+      }) <> "\n"
+    )
+
     Shuttle.Test.EventFiles.scope!(events)
+
+    assert %{
+             "files" => [
+               %{"fullPath" => ^path, "basename" => "report.txt", "sessionId" => "sess-1"}
+             ]
+           } = get(api_conn(), "/api/v1/sent-files?uid=#{uid}") |> assert_contract("/sent-files")
 
     assert %{"files" => []} =
              get(api_conn(), "/api/v1/sent-files?uid=not-sent") |> assert_contract("/sent-files")
