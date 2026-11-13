@@ -207,17 +207,6 @@ defmodule Shuttle.RemoteTemporalRegistry do
   end
 
   @doc """
-  Invalidate one remote feed after a successful owner-routed write. The next
-  composite read bypasses the freshness gate; a fetch begun before the write
-  cannot restore an older answer. Last-good data remains available offline.
-  """
-  def invalidate(name, feed), do: invalidate(Shuttle.Env.server(__MODULE__), name, feed)
-
-  def invalidate(server, name, feed) when feed in @feeds do
-    RegistryCommon.read(server, {:invalidate, name, feed}, :ok)
-  end
-
-  @doc """
   Synchronously fetches every feed of every remote once, ignoring the gate,
   and returns when all have been handled. Inline (no `Task`) — used by tests to
   prime the registry deterministically against a stub client.
@@ -294,32 +283,6 @@ defmodule Shuttle.RemoteTemporalRegistry do
       waiter = %{from: from, feed: feed, keys: keys, timer: timer}
       {:noreply, %{state | waiters: Map.put(state.waiters, ref, waiter)}}
     end
-  end
-
-  def handle_call({:invalidate, name, feed}, _from, state) do
-    state =
-      case Map.get(state.in_flight, {name, feed}) do
-        nil ->
-          state
-
-        ref ->
-          Process.demonitor(ref, [:flush])
-          finish_task(state, ref)
-      end
-
-    state =
-      case Map.get(state.entries, name) do
-        nil ->
-          state
-
-        entry ->
-          entry =
-            put_feed(entry, feed, &%{&1 | last_attempt_at: nil, last_error: :refresh_required})
-
-          %{state | entries: Map.put(state.entries, name, entry)}
-      end
-
-    {:reply, :ok, settle_waiters(state)}
   end
 
   def handle_call(:refresh_now, _from, state) do

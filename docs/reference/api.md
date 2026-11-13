@@ -654,11 +654,6 @@ covers the `events.jsonl` pair and the session ledger. The trail is whatever
 `events.jsonl.1` and `events.jsonl` hold, so a send survives one rotation and is
 gone after the second.
 
-`POST /sent-files/clear` takes `{uid, origin, path?}` and returns `{ok: true}` after appending a `sent_files_cleared` event on the selected stream host.
-`uid` must be a canonical fiber ULID; a missing or invalid UID or an unknown `origin` returns 400.
-When supplied, `path` must be a nonempty absolute string or the request returns 400 before writing or forwarding.
-The path is an exact `fullPath` from the sent-files response and is forwarded unchanged, without expansion or normalization on either host.
-The route forwards through `OriginRouter` for a remote origin, relays the owner's response, and returns 502 if forwarding fails.
 A local writer refusal returns 422; an unavailable CLI returns 503.
 Without `path`, both sent-files read surfaces hide sends at or before the latest whole-fiber clear timestamp for that UID.
 With `path`, only that file is hidden, including when it shares a send event with other files.
@@ -815,7 +810,6 @@ curl -s http://127.0.0.1:4000/api/v1/agents  | jq
 ```
 
 `GET /` outside `/api/v1` serves the board's `index.html`, or a 404 with a build hint when `ui/dist` has never been built.
-`GET /phone` redirects to `/`.
 The phone enables Listen with `source: "phone"`, then binds its microphone stream to the returned `recorder` and `launch` at `/api/v1/voice/audio`.
 A secure context such as a tailnet HTTPS front is required for browser microphone access.
 iOS screen lock or backgrounding can interrupt the microphone; the transport never queues missed audio for later.

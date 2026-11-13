@@ -497,7 +497,6 @@ Listen can use the desktop or a phone as its audio source.
 Capture creates a card; pin Listen to that card to keep a call's speech there while navigating elsewhere.
 The recording host and the worker's host can differ.
 The `--chrome` flag appears only for a browser-capable agent on a macOS host with an active GUI session.
-`/phone` redirects to `/`.
 To pull it up locally: `make start`, then open the root URL in a browser. A fresh
 checkout that hasn't built the bundle gets a 404 with the hint
 `cd ui && npm run build`; the API stays usable regardless.

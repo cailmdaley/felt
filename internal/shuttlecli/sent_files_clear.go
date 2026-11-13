@@ -19,38 +19,29 @@ func (a *app) shuttleSentFilesCmd() *cobra.Command {
 Sends at or before this clear are hidden; newer sends appear normally.
 With --path, only that exact absolute fullPath is hidden; the path is not expanded.
 Files on disk and embeds in the fiber body are untouched. Recording works offline.
-A fiber assigned to another host must be cleared there, or through the board.`,
+A fiber assigned to another host must be cleared there.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, _ := cmd.Flags().GetBool("uid")
-			local, _ := cmd.Flags().GetBool("local")
 			path, _ := cmd.Flags().GetString("path")
 			if cmd.Flags().Changed("path") && !filepath.IsAbs(path) {
 				return fmt.Errorf("path must be a nonempty absolute path")
 			}
-			uid := args[0]
-			if raw {
-				if !local {
-					return fmt.Errorf("--uid requires --local; it addresses this host's stream directly")
-				}
-			} else {
-				fiber, _, err := a.shuttleResolveFiber(args[0], false)
+			fiber, _, err := a.shuttleResolveFiber(args[0], false)
+			if err != nil {
+				return err
+			}
+			uid := fiber.UID
+			block, ok, err := shuttle.BlockOf(fiber)
+			if err != nil {
+				return err
+			}
+			if ok && strings.TrimSpace(block.Host) != "" {
+				own, err := a.resolveOwnHost("")
 				if err != nil {
 					return err
 				}
-				uid = fiber.UID
-				block, ok, err := shuttle.BlockOf(fiber)
-				if err != nil {
-					return err
-				}
-				if ok && strings.TrimSpace(block.Host) != "" {
-					own, err := a.resolveOwnHost("")
-					if err != nil {
-						return err
-					}
-					if block.Host != own {
-						return fmt.Errorf("fiber %q belongs to host %q; run shuttle sent-files clear there, or use Clear in the board gallery", args[0], block.Host)
-					}
+				if block.Host != own {
+					return fmt.Errorf("fiber %q belongs to host %q; run shuttle sent-files clear there", args[0], block.Host)
 				}
 			}
 			if err := a.clearSentFiles(uid, path); err != nil {
@@ -64,8 +55,6 @@ A fiber assigned to another host must be cleared there, or through the board.`,
 			return nil
 		},
 	}
-	clear.Flags().Bool("uid", false, "Treat the argument as a raw fiber UID (daemon only; requires --local)")
-	_ = clear.Flags().MarkHidden("uid")
 	clear.Flags().String("path", "", "Clear only this exact absolute fullPath (not expanded)")
 	clear.Flags().Bool("local", false, "Address the local stream (does not bypass fiber host checks)")
 	cmd.AddCommand(clear)

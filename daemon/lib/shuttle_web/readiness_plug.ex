@@ -2,7 +2,7 @@ defmodule ShuttleWeb.ReadinessPlug do
   @moduledoc """
   Fail fast on API routes whose state is not safe to serve until boot completes.
 
-  The board shell and `/phone` redirect remain available before Poller
+  The board shell remains available before Poller
   initialization, as do version, the API contract, direct text/file message delivery, peer
   discovery and the append-only local session ledger. Plug.Static runs before
   this gate, so its assets also load. The booting response intentionally has no
@@ -16,7 +16,6 @@ defmodule ShuttleWeb.ReadinessPlug do
 
   @available_during_boot [
     {"GET", "/"},
-    {"GET", "/phone"},
     {"GET", "/api/v1/version"},
     {"HEAD", "/api/v1/version"},
     {"GET", "/api/v1/contract"},

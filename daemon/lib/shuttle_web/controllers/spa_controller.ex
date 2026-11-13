@@ -1,6 +1,6 @@
 defmodule ShuttleWeb.SpaController do
   @moduledoc """
-  Serve the Shuttle board at `GET /` and redirect `GET /phone` to it. Static
+  Serve the Shuttle board at `GET /`. Static
   assets (`/assets`, `/fonts`, …) are served by `Plug.Static` in the endpoint;
   this controller handles the page document.
 
@@ -12,9 +12,6 @@ defmodule ShuttleWeb.SpaController do
   use Phoenix.Controller, formats: [:html]
 
   def index(conn, _params), do: page(conn, "index.html")
-
-  @doc "Redirect `GET /phone` to the board root."
-  def phone(conn, _params), do: redirect(conn, to: "/")
 
   defp page(conn, file) do
     path = Path.join(ShuttleWeb.Assets.dist(), file)

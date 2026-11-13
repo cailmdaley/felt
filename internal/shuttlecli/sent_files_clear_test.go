@@ -82,36 +82,15 @@ func TestSentFilesClearRefusesRemoteEvenWithLocal(t *testing.T) {
 	}
 }
 
-func TestSentFilesClearRawUIDRequiresLocalAndValidUID(t *testing.T) {
-	t.Parallel()
-	for _, args := range [][]string{{clearTestUID, "--uid"}, {"not-a-uid", "--uid", "--local"}, {strings.ToLower(clearTestUID), "--uid", "--local"}} {
-		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			t.Parallel()
-			env, sink, _ := sendFileTestEnv(t)
-			if _, err := runIn(t, env, t.TempDir(), append([]string{"sent-files", "clear"}, args...)...); err == nil {
-				t.Fatal("expected refusal")
-			}
-			if _, err := os.Stat(sink); !os.IsNotExist(err) {
-				t.Fatalf("recorded invalid clear: %v", err)
-			}
-		})
-	}
-	env, sink, _ := sendFileTestEnv(t)
-	if _, err := runIn(t, env, t.TempDir(), "sent-files", "clear", clearTestUID, "--uid", "--local"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(sink); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestSentFilesClearPathFlag(t *testing.T) {
 	t.Parallel()
 	for _, path := range []string{"", "relative.html", "~/report.html", "/tmp/missing/../report.html"} {
 		t.Run("path="+path, func(t *testing.T) {
 			t.Parallel()
 			env, sink, _ := sendFileTestEnv(t)
-			_, err := runIn(t, env, t.TempDir(), "sent-files", "clear", clearTestUID, "--uid", "--local", "--path", path)
+			dir, storage := newStore(t)
+			seedFiber(t, storage, "work/reports", clearTestUID, "", nil, nil)
+			_, err := runIn(t, env, dir, "sent-files", "clear", "work/reports", "--local", "--path", path)
 			if !strings.HasPrefix(path, "/") {
 				if err == nil || !strings.Contains(err.Error(), "absolute path") {
 					t.Fatalf("expected invalid path refusal: %v", err)

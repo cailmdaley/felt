@@ -629,9 +629,8 @@ Each path is hidden through the latest of its path-specific and whole-fiber cuto
 Recording must be enabled and works while the daemon is offline.
 
 A fiber assigned to another host is refused, even with `--local`.
-Run the command on that host or use the gallery's **Clear** control, which routes through the daemon to each host holding sends.
+Run the command on that host.
 Unowned notes can be cleared locally.
-The daemon uses the internal form `shuttle sent-files clear <UID> --uid --local` after routing to the stream host; it bypasses fiber lookup, requires a canonical UID, and never routes again.
 
 ### `shuttle transcript [--date YYYY-MM-DD] [--fiber <id|slug>] [--since HH:MM[:SS]] [--recorder HOST] [--json]`
 

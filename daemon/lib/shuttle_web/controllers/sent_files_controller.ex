@@ -36,7 +36,6 @@ defmodule ShuttleWeb.SentFilesController do
   import ShuttleWeb.RelayHelpers,
     only: [
       relay_file_bytes: 2,
-      relay_json: 2,
       integer_param: 3,
       json_with_validator: 3,
       rotating_file_tokens: 1,
@@ -44,14 +43,11 @@ defmodule ShuttleWeb.SentFilesController do
     ]
 
   alias Shuttle.{
-    CLI,
     EventStream,
     OriginRouter,
     Poller,
-    RemoteTemporalRegistry,
     SentFiles,
-    SessionLedger,
-    ULID
+    SessionLedger
   }
 
   alias ShuttleWeb.TemporalComposite, as: Composite
@@ -92,76 +88,6 @@ defmodule ShuttleWeb.SentFilesController do
   def show(conn, _params) do
     conn |> put_status(400) |> json(%{error: "uid is required"})
   end
-
-  @doc """
-  `POST /api/v1/sent-files/clear` with `{uid, origin, path?}` records a cutoff on
-  the selected stream host. Bytes on disk and body embeds are untouched.
-  Unknown origins are refused: a synchronized fiber may exist here while its
-  send history belongs to another host.
-  """
-  def clear(conn, %{"uid" => uid} = params) do
-    cond do
-      not ULID.valid?(uid) ->
-        conn |> put_status(400) |> json(%{ok: false, error: "uid must be a fiber ULID"})
-
-      Map.has_key?(params, "path") and not valid_clear_path?(params["path"]) ->
-        conn
-        |> put_status(400)
-        |> json(%{ok: false, error: "path must be a nonempty absolute path"})
-
-      true ->
-        case OriginRouter.route_host(Map.get(params, "origin")) do
-          {:remote, remote} ->
-            result =
-              OriginRouter.forward(
-                remote,
-                "/api/v1/sent-files/clear",
-                Map.take(params, ["uid", "path"])
-              )
-
-            case result do
-              {:forwarded, status, _body} when status in 200..299 ->
-                RemoteTemporalRegistry.invalidate(remote.name, :sent_files)
-
-              _ ->
-                :ok
-            end
-
-            relay_json(conn, result)
-
-          :local ->
-            path_args = if Map.has_key?(params, "path"), do: ["--path", params["path"]], else: []
-
-            case CLI.run(["sent-files", "clear", uid, "--uid", "--local"] ++ path_args) do
-              {:ok, _output} ->
-                json(conn, %{ok: true})
-
-              {:command_error, status, output} when status in [:timeout, 127] ->
-                conn |> put_status(503) |> json(%{ok: false, error: output})
-
-              {:command_error, _status, output} ->
-                conn |> put_status(422) |> json(%{ok: false, error: output})
-
-              {:error, reason} ->
-                conn |> put_status(503) |> json(%{ok: false, error: reason})
-            end
-
-          {:error, {:unknown_origin, origin}} ->
-            conn
-            |> put_status(400)
-            |> json(%{ok: false, error: OriginRouter.unknown_origin_message(origin)})
-        end
-    end
-  end
-
-  def clear(conn, _params) do
-    conn |> put_status(400) |> json(%{ok: false, error: "uid is required"})
-  end
-
-  defp valid_clear_path?(path) when is_binary(path) and path != "",
-    do: Path.type(path) == :absolute
-
-  defp valid_clear_path?(_path), do: false
 
   @doc """
   This host's global sent-files feed: `GET /api/v1/sent-files/all?since_ms=<int>`.

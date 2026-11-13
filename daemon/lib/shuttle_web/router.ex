@@ -135,7 +135,6 @@ defmodule ShuttleWeb.Router do
     get("/board", BoardController, :show)
     post("/board/open", VoiceController, :open)
     get("/sent-files", SentFilesController, :show)
-    post("/sent-files/clear", SentFilesController, :clear)
     # The global sent-files feed, HOST-scoped like /commits (not owner-routed):
     # every fiber's SendUserFile sends recorded on this host's events.jsonl, no
     # uid filter — the composite counterpart fans in each remote's feed
@@ -203,7 +202,5 @@ defmodule ShuttleWeb.Router do
   # daemon hosts the board itself — one `shuttle` process, API + UI.
   scope "/", ShuttleWeb do
     get("/", SpaController, :index)
-    # `/phone` redirects to the board root.
-    get("/phone", SpaController, :phone)
   end
 end
