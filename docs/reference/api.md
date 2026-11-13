@@ -122,7 +122,7 @@ Every constitution entry a daemon serves (its owner feed, `/fibers/:id`, and
 the listings) carries `column` and `turn`, read against the worker runtime
 that daemon serves on the row (`Shuttle.Lifecycle`); a document read serves
 none, so its pair is the constitution's at rest. `column` is the Desk column:
-`drafts`, `in_flight`, `awaiting_review`, `tempered`, `discarded`, `resting` or
+`drafts`, `in_flight`, `awaiting_review`, `orchestrator_review`, `tempered`, `discarded`, `resting` or
 `roles`, by the rule `shuttle status --json` reports. `turn` is whose move it
 is: `question`, `blocked` or `idle` (the human's), `working`, `starting` or
 `no-signal` (the worker's), or `none`. The composite carries each remote
@@ -323,8 +323,9 @@ Attachments go through the fleet route [`POST /messages/files`](#fleet).
 
 `/file` sits outside the JSON pipeline on purpose: it returns arbitrary content
 types, so a strict `Accept: application/pdf` would otherwise 406 before the
-controller ran. A 200 response carries a weak content-digest `ETag`
-(`W/"sha256-<hex>"`) and `Last-Modified`; only a matching `If-None-Match`
+controller ran. A 200 response carries `Last-Modified` and a weak `ETag`: a
+content digest (`W/"sha256-<hex>"`), or for a large file without a settled
+digest a metadata validator (`W/"stat-…"`); only a matching `If-None-Match`
 returns a bodyless 304, because a whole-second timestamp can't see a
 same-second rewrite. Owner-routed reads forward these validators and relay the
 owner's cache headers, including a remote 304. The board sends `If-None-Match`
@@ -332,9 +333,8 @@ only with a digest `ETag`; an owner that offers none is read in full and the
 board compares a content fingerprint, leaving unchanged views untouched.
 
 `/sent-files` is owner-routed like `/file` — one fiber's trail is read on the
-host that owns the fiber; its LOCAL leg carries a weak `ETag` and honors
-`If-None-Match` with a 304 (the forwarded remote leg does not, because
-`OriginRouter.forward_get/4` carries no headers either way).
+host that owns the fiber; it carries a weak `ETag` and honors
+`If-None-Match` with a 304, and a forwarded read relays the owner's validators.
 `/sent-files/all` is the host-scoped feed with the composite.
 
 `/sent-files` takes `uid` (required; 400 without it) and `origin`. Its `ETag`
@@ -357,12 +357,12 @@ poll. A request costs one `stat`; the files are read once, at boot.
 
 ## How a route is routed
 
-Three patterns, and knowing which one a route follows explains most of its
+Four patterns, and knowing which one a route follows explains most of its
 behaviour on a multi-host setup.
 
 | Pattern | Meaning |
 |---|---|
-| **owner-routed** | The request carries an `origin`; the daemon runs it locally or forwards it to the daemon that *owns* the fiber. A fiber's files live on its owner's disk. An explicit unknown origin returns 400 naming the origin before any local lookup, read or write. An absent origin means local. |
+| **owner-routed** | The request carries an `origin`; the daemon runs it locally or forwards it to the daemon that *owns* the fiber. A fiber's files live on its owner's disk. An explicit unknown origin returns 400 naming the origin before any local lookup, read or write. An absent origin means local, except on `GET /fibers/*id`, which reads the local copy and forwards to the owner its `shuttle.host` names. |
 | **host-addressed** | Uses the same fail-closed origin rule as owner-routed requests. The subject is a host rather than a fiber — a config file, a store list, a tunnel job, a quarantine — and every host has one, so degrading would not fail: it would succeed on the wrong machine. |
 | **host-scoped** | The route answers for *this* machine only, because what it reads (a transcript, an event stream, a ledger) lives on the machine that wrote it. |
 | **fan-in** | A `/composite` sibling that merges this host's live read with each configured remote's cached read, reporting per-origin freshness. |
