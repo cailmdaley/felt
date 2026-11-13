@@ -200,7 +200,8 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
 // Graph is a resolved set of felts keyed by ID, used to render body references
 // with their display names.
 type Graph struct {
-	Nodes map[string]*felt.Felt
+	Nodes           map[string]*felt.Felt
+	AbsentNeighbors map[string]int
 }
 
 func graphForBodyRefs(storage *felt.Storage, f *felt.Felt) *Graph {
@@ -209,7 +210,8 @@ func graphForBodyRefs(storage *felt.Storage, f *felt.Felt) *Graph {
 		return nil
 	}
 
-	g := &Graph{Nodes: map[string]*felt.Felt{f.ID: f}}
+	absent, _ := storage.AbsentNeighbors()
+	g := &Graph{Nodes: map[string]*felt.Felt{f.ID: f}, AbsentNeighbors: absent}
 	for _, ref := range refs {
 		target, ok, err := storage.FindExistingMetadataInScope(f.ID, ref.Target)
 		if err != nil || !ok {

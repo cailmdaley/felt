@@ -34,7 +34,11 @@ func (s *Storage) ScanRelationships(targetID string) ([]Citation, []DataFlowCons
 	if err != nil {
 		return nil, nil, err
 	}
-	return RelationshipsFromFelts(felts, targetID, s.ExternalRefs())
+	absent, err := s.AbsentNeighbors()
+	if err != nil {
+		return nil, nil, err
+	}
+	return RelationshipsFromFelts(felts, targetID, s.ExternalRefs(), absent)
 }
 
 // ScanRelationshipsAcrossStore is ScanRelationships plus the enclosing store's
@@ -94,7 +98,11 @@ func (s *Storage) outerRelationships(targetID string) ([]Citation, []DataFlowCon
 	ids := sortedFeltIDs(felts)
 	outerTarget := path.Join(prefix, targetID)
 
-	citations, consumers := collectRelationships(outside, newScopedIDResolverIn(ids, nil), outerTarget, targetID)
+	absent, err := outer.AbsentNeighbors()
+	if err != nil {
+		return nil, nil, err
+	}
+	citations, consumers := collectRelationships(outside, newScopedIDResolverIn(ids, nil, absent), outerTarget, targetID)
 	return citations, consumers, nil
 }
 
@@ -131,9 +139,9 @@ func collectRelationships(sources []*Felt, resolver *scopedIDResolver, matchID, 
 
 // RelationshipsFromFelts collects citations and consumers for targetID in one
 // iterRefs pass, dispatching each yielded ref to the matching accumulator.
-func RelationshipsFromFelts(felts []*Felt, targetID string, external *ExternalRefs) ([]Citation, []DataFlowConsumer, error) {
+func RelationshipsFromFelts(felts []*Felt, targetID string, external *ExternalRefs, absent ...map[string]int) ([]Citation, []DataFlowConsumer, error) {
 	ids := sortedFeltIDs(felts)
-	citations, consumers := collectRelationships(felts, newScopedIDResolverIn(ids, external), targetID, targetID)
+	citations, consumers := collectRelationships(felts, newScopedIDResolverIn(ids, external, absent...), targetID, targetID)
 	sortCitations(citations)
 	sortConsumers(consumers)
 	return citations, consumers, nil

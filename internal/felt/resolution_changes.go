@@ -27,13 +27,13 @@ func resolutionTarget(id string, err error) string {
 // ReferenceChanges compares references with a matching final segment against
 // the id sets on either side of a creation or move. sourceID maps a source's
 // address into the new set; nil leaves sources in place.
-func ReferenceChanges(felts []*Felt, beforeIDs, afterIDs, introduced []string, external *ExternalRefs, sourceID func(string) string) []ReferenceChange {
+func ReferenceChanges(felts []*Felt, beforeIDs, afterIDs, introduced []string, external *ExternalRefs, sourceID func(string) string, absent ...map[string]int) []ReferenceChange {
 	bases := map[string]bool{}
 	for _, id := range introduced {
 		bases[path.Base(id)] = true
 	}
-	before := newScopedIDResolverIn(beforeIDs, external)
-	after := newScopedIDResolverIn(afterIDs, external)
+	before := newScopedIDResolverIn(beforeIDs, external, absent...)
+	after := newScopedIDResolverIn(afterIDs, external, absent...)
 	var changes []ReferenceChange
 	seen := map[string]bool{}
 	for _, f := range felts {
@@ -79,6 +79,10 @@ func (s *Storage) CreationReferenceChanges(id string) ([]ReferenceChange, error)
 	if err != nil {
 		return nil, err
 	}
+	absent, err := s.AbsentNeighbors()
+	if err != nil {
+		return nil, err
+	}
 	ids := sortedFeltIDs(felts)
-	return ReferenceChanges(felts, ids, append(append([]string{}, ids...), id), []string{id}, s.ExternalRefs(), nil), nil
+	return ReferenceChanges(felts, ids, append(append([]string{}, ids...), id), []string{id}, s.ExternalRefs(), nil, absent), nil
 }

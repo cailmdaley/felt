@@ -194,8 +194,11 @@ neighbors: [commons, work]
 line per absent neighbour, such as `commons: not mounted, 18 links`. A neighbour
 is reachable when the enclosing store has that top-level directory or fiber;
 links into it are checked normally. Other unresolved links remain errors.
-The declaration does not mount stores or change link resolution. Only this
-field is read; the root fiber's other custom fields remain opaque.
+A path starting with an absent neighbour's name stays unresolved, even when
+its final segment matches a local fiber; lookups and move rewrites cannot
+redirect it into that local fiber.
+The declaration does not mount stores.
+Only this field is read; the root fiber's other custom fields remain opaque.
 
 If a link matters locally, join the stores; do not invent stub fibers to
 silence the warning.

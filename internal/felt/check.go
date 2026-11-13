@@ -186,43 +186,9 @@ func CheckLegacyFormat(s *Storage) ([]CheckIssue, error) {
 
 // Check checks this store's relationships, including its root fiber's neighbors.
 func (s *Storage) Check(felts []*Felt, strays ...StrayFiber) ([]CheckIssue, error) {
-	entries, err := os.ReadDir(s.root)
+	absent, err := s.AbsentNeighbors()
 	if err != nil {
 		return nil, err
-	}
-	var roots []string
-	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), FileExt) {
-			roots = append(roots, strings.TrimSuffix(entry.Name(), FileExt))
-		}
-	}
-	absent := map[string]int{}
-	if len(roots) == 1 {
-		for _, f := range felts {
-			if f.ID != roots[0] {
-				continue
-			}
-			var neighbors []string
-			if node := f.ExtraFields["neighbors"]; node != nil {
-				if err := node.Decode(&neighbors); err != nil {
-					return nil, fmt.Errorf("%s neighbors: %w", f.ID, err)
-				}
-			}
-			outer, _, mounted := s.EnclosingStore()
-			for _, neighbor := range neighbors {
-				reachable := false
-				if mounted {
-					for _, p := range []string{neighbor, neighbor + FileExt} {
-						if _, err := os.Stat(filepath.Join(outer, p)); err == nil {
-							reachable = true
-						}
-					}
-				}
-				if !reachable {
-					absent[neighbor] = 0
-				}
-			}
-		}
 	}
 	issues := checkNativeMetadata(felts)
 	issues = append(issues, checkRelationshipIntegrity(felts, s.ExternalRefs(), strays, absent, s.isCompanionLink)...)
@@ -259,7 +225,7 @@ func checkRelationshipIntegrity(felts []*Felt, external *ExternalRefs, strays []
 	sort.Strings(ids)
 
 	var issues []CheckIssue
-	resolver := newScopedIDResolverIn(ids, external)
+	resolver := newScopedIDResolverIn(ids, external, absent)
 	if len(strays) > 0 {
 		byID := make(map[string]string, len(strays))
 		for _, sf := range strays {

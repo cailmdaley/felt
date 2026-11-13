@@ -223,7 +223,7 @@ func writeBodyRefs(sb *strings.Builder, f *felt.Felt, g *Graph, external *felt.E
 		// to, so every entry on the line is something `felt show` accepts.
 		target := ref.Target
 		if g != nil {
-			if resolved, err := felt.ResolveScopedIDIn(ids, f.ID, ref.Target, external); err == nil {
+			if resolved, err := felt.ResolveScopedIDIn(ids, f.ID, ref.Target, external, g.AbsentNeighbors); err == nil {
 				if _, ok := g.Nodes[resolved]; ok {
 					target = resolved
 				}

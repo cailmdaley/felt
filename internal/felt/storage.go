@@ -415,7 +415,8 @@ func (x *ExternalRefs) Lookup(scopeID, query string) (string, resolution, bool) 
 		for _, file := range files {
 			ids = append(ids, file.id)
 		}
-		x.resolver = newScopedIDResolverIn(ids, nil)
+		absent, _ := outer.AbsentNeighbors()
+		x.resolver = newScopedIDResolverIn(ids, nil, absent)
 	})
 
 	// The citing fiber sits at <prefix>/<scopeID> in the outer namespace;
@@ -832,6 +833,13 @@ func (e *GuessError) Error() string {
 // lexical scope chain. It intentionally does not fall back to walking the whole
 // store, so narrow read paths can annotate exact refs without surprise work.
 func (s *Storage) FindExistingMetadataInScope(scopeID, query string) (*Felt, bool, error) {
+	absent, err := s.AbsentNeighbors()
+	if err != nil {
+		return nil, false, err
+	}
+	if err := absentNeighborError(query, absent); err != nil {
+		return nil, false, err
+	}
 	return s.findExistingPathWithModeAndScope(scopeID, query, ParseMetadataOnly)
 }
 
@@ -976,7 +984,11 @@ func (s *Storage) MoveSubtree(oldID, newID string) (*MoveResult, error) {
 	}
 
 	external := s.ExternalRefs()
-	writes, err := planMoveRewrites(felts, felts, external, oldID, newID)
+	absent, err := s.AbsentNeighbors()
+	if err != nil {
+		return nil, err
+	}
+	writes, err := planMoveRewrites(felts, felts, external, oldID, newID, absent)
 	if err != nil {
 		return nil, err
 	}
@@ -1015,18 +1027,19 @@ func (s *Storage) MoveSubtree(oldID, newID string) (*MoveResult, error) {
 				introduced = append(introduced, afterIDs[i])
 			}
 		}
-		result.ReferenceChanges = ReferenceChanges(felts, beforeIDs, afterIDs, introduced, external, remap)
+		result.ReferenceChanges = ReferenceChanges(felts, beforeIDs, afterIDs, introduced, external, remap, absent)
 	}
 	return result, err
 }
 
 type moveRewriteContext struct {
-	OldIDs         []string
-	NewIDs         []string
-	OldID          string
-	NewID          string
-	ExternalRoot   string
-	ExternalPrefix string
+	OldIDs          []string
+	NewIDs          []string
+	OldID           string
+	NewID           string
+	ExternalRoot    string
+	ExternalPrefix  string
+	AbsentNeighbors map[string]int
 }
 
 // pendingWrite applies the move's reference semantics to the current document.
@@ -1049,8 +1062,8 @@ func (w pendingWrite) writeJournaled(s *Storage, task *moveRewrite, journal *mov
 		external = &ExternalRefs{root: context.ExternalRoot, prefix: context.ExternalPrefix,
 			cache: map[string]string{}, via: map[string]resolution{}}
 	}
-	before := newScopedIDResolverIn(context.OldIDs, external)
-	after := newScopedIDResolverIn(context.NewIDs, external)
+	before := newScopedIDResolverIn(context.OldIDs, external, context.AbsentNeighbors)
+	after := newScopedIDResolverIn(context.NewIDs, external, context.AbsentNeighbors)
 	_, err := updateFiberFile(path, w.id, func(f *Felt) error {
 		if task != nil && task.BeforeSHA256 != "" {
 			current, err := os.ReadFile(path)
@@ -1118,12 +1131,16 @@ func (s *Storage) planOutsideRewrites(external *ExternalRefs, oldID, newID strin
 			outside = append(outside, f)
 		}
 	}
-	return planMoveRewrites(all, outside, nil, path.Join(prefix, oldID), path.Join(prefix, newID))
+	absent, err := outer.AbsentNeighbors()
+	if err != nil {
+		return nil, err
+	}
+	return planMoveRewrites(all, outside, nil, path.Join(prefix, oldID), path.Join(prefix, newID), absent)
 }
 
 // planMoveRewrites plans the file rewrites for sources when oldID moves to
 // newID within the id space of all.
-func planMoveRewrites(all, sources []*Felt, external *ExternalRefs, oldID, newID string) ([]pendingWrite, error) {
+func planMoveRewrites(all, sources []*Felt, external *ExternalRefs, oldID, newID string, absent ...map[string]int) ([]pendingWrite, error) {
 	oldIDs := make([]string, 0, len(all))
 	newIDs := make([]string, 0, len(all))
 	for _, f := range all {
@@ -1133,10 +1150,10 @@ func planMoveRewrites(all, sources []*Felt, external *ExternalRefs, oldID, newID
 	}
 	sort.Strings(oldIDs)
 	sort.Strings(newIDs)
-	before := newScopedIDResolverIn(oldIDs, external)
-	after := newScopedIDResolverIn(newIDs, external)
+	before := newScopedIDResolverIn(oldIDs, external, absent...)
+	after := newScopedIDResolverIn(newIDs, external, absent...)
 	context := &moveRewriteContext{OldIDs: oldIDs, NewIDs: newIDs,
-		OldID: oldID, NewID: newID, ExternalRoot: external.Root(), ExternalPrefix: external.Prefix()}
+		OldID: oldID, NewID: newID, ExternalRoot: external.Root(), ExternalPrefix: external.Prefix(), AbsentNeighbors: before.absent}
 
 	var writes []pendingWrite
 	for _, f := range sources {
@@ -1859,6 +1876,13 @@ func (s *Storage) FindInScope(scopeID, query string) (*Felt, error) {
 // candidates first, then falls back to a full-store scan with slug and
 // (UID-shaped) exact-UID matching.
 func (s *Storage) find(scopeID, query string, mode ParseMode) (*Felt, resolution, error) {
+	absent, err := s.AbsentNeighbors()
+	if err != nil {
+		return nil, resolvedExact, err
+	}
+	if err := absentNeighborError(query, absent); err != nil {
+		return nil, resolvedExact, err
+	}
 	if f, ok, err := s.findExistingPathWithModeAndScope(scopeID, query, mode); ok || err != nil {
 		return f, resolvedExact, err
 	}
@@ -1878,7 +1902,7 @@ func (s *Storage) find(scopeID, query string, mode ParseMode) (*Felt, resolution
 		ids = append(ids, file.id)
 	}
 
-	matchID, via, err := newScopedIDResolverIn(ids, s.ExternalRefs()).resolve(scopeID, query)
+	matchID, via, err := newScopedIDResolverIn(ids, s.ExternalRefs(), absent).resolve(scopeID, query)
 	if err != nil {
 		// Slug resolution missed. If the query is UID-shaped, fall back to an
 		// exact-UID walk: the UID lives in frontmatter (not the path-derived
@@ -2439,12 +2463,13 @@ func ResolveAddPath(slug string, existingIDs []string) (resolved string, rewritt
 // scope, with knowledge of the enclosing store for callers that have a *Storage
 // in hand (see Storage.ExternalRefs). A nil external is the top-level-store
 // case.
-func ResolveScopedIDIn(ids []string, scopeID, query string, external *ExternalRefs) (string, error) {
-	return newScopedIDResolverIn(ids, external).Resolve(scopeID, query)
+func ResolveScopedIDIn(ids []string, scopeID, query string, external *ExternalRefs, absent ...map[string]int) (string, error) {
+	return newScopedIDResolverIn(ids, external, absent...).Resolve(scopeID, query)
 }
 
 type scopedIDResolver struct {
 	external *ExternalRefs
+	absent   map[string]int
 	// strayAt, when set, names the stray fiber file an id would be (see
 	// Storage.strayAt), so a query naming one stops there.
 	strayAt      func(id string) (rel string, ok bool)
@@ -2459,13 +2484,16 @@ type scopedIDEntry struct {
 	id   string
 }
 
-func newScopedIDResolverIn(ids []string, external *ExternalRefs) *scopedIDResolver {
+func newScopedIDResolverIn(ids []string, external *ExternalRefs, absent ...map[string]int) *scopedIDResolver {
 	resolver := &scopedIDResolver{
 		external:     external,
 		ids:          make([]string, 0, len(ids)),
 		exact:        make(map[string]struct{}, len(ids)),
 		parentSorted: map[string][]scopedIDEntry{},
 		byBase:       map[string][]string{},
+	}
+	if len(absent) > 0 {
+		resolver.absent = absent[0]
 	}
 	for _, id := range ids {
 		cleanID := path.Clean(id)
@@ -2613,6 +2641,9 @@ func (r *scopedIDResolver) ResolvePath(scopeID, query string) (string, bool) {
 // error is a hard stop (a stray file, an ambiguity, an id that lives in the
 // enclosing store), not an invitation to try the fallbacks in resolve.
 func (r *scopedIDResolver) resolveByPath(scopeID, query string) (string, resolution, bool, error) {
+	if err := absentNeighborError(query, r.absent); err != nil {
+		return "", resolvedExact, false, err
+	}
 	if id, ok, err := r.exactInStore(scopeID, query); ok || err != nil {
 		return id, resolvedExact, ok, err
 	}
