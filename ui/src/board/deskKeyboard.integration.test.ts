@@ -647,16 +647,23 @@ describe('Desk keyboard selection', () => {
 })
 
 describe('keyboard help', () => {
-  it('opens from the table, traps Tab, prevents navigation underneath, and returns focus', () => {
+  it('opens from the table, traps Tab, prevents navigation underneath, and returns focus', async () => {
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => setTimeout(() => callback(performance.now()), 0))
     const focus = document.querySelector<HTMLElement>('.kbn-col-head')!; focus.focus()
     press('?')
-    const dialog = document.querySelector('.kbn-keymap-dialog')!
-    expect(dialog.getAttribute('role')).toBe('dialog')
+    await settle()
+    const dialog = document.querySelector('[role="dialog"][aria-label="Keyboard shortcuts"]')!
+    expect(dialog.getAttribute('aria-modal')).toBe('true')
+    await vi.waitFor(() => expect(focus.closest('[inert]')).not.toBeNull())
     expect([...dialog.querySelectorAll('h3')].map(el => el.textContent)).toEqual(['Everywhere', 'Moving', 'A constitution', 'Fiber page', "A constitution's page"])
     press('j'); expect(selected()).toBeUndefined()
-    press('Tab'); expect(document.activeElement).toBe(dialog.querySelector('button'))
-    press('Escape'); expect(document.querySelector('.kbn-keymap-dialog')).toBeNull()
+    document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
+    expect(dialog.contains(document.activeElement)).toBe(true)
+    document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await settle()
+    expect(document.querySelector('.kbn-keymap-dialog')).toBeNull()
     expect(document.activeElement).toBe(focus)
-    press('?'); press('?'); expect(document.querySelector('.kbn-keymap-dialog')).toBeNull()
+    press('?'); await settle(); press('?'); await settle()
+    expect(document.querySelector('.kbn-keymap-dialog')).toBeNull()
   })
 })

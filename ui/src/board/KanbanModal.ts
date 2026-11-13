@@ -2034,7 +2034,8 @@ export class KanbanModal {
   }
 
   private handleKanbanKeyDown(e: KeyboardEvent): void {
-    if (!this.body) return
+    // A dialog layered over the board owns every key, Tab and Escape included.
+    if (!this.body || blockingDialogOpen()) return
     // The view keys work from the reader too: 1 or 2 parks it, 3 comes back to it.
     if (this.workspace?.isActive) { this.handleViewHotkey(e); return }
     const nativeControl = (e.target as HTMLElement | null)?.closest?.('button, a, [role="button"], [role="tab"]')

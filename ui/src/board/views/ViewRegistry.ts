@@ -203,7 +203,7 @@ export function isBlockingDialog(
  * change here. Open SDK menus also own keys, despite being non-modal.
  */
 export const BLOCKING_DIALOG_SELECTOR =
-  '[role="dialog"][data-state="open"], [role="dialog"][aria-modal="true"], [data-slot="menu-content"][data-open]'
+  '[role="dialog"][data-state="open"], [role="dialog"][aria-modal="true"], [data-slot="menu-content"][data-open], [data-slot="dialog-content"][data-open]'
 
 /**
  * Is a dialog or SDK menu currently taking keys away from the board?
