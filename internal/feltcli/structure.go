@@ -359,7 +359,7 @@ store's top level.`,
 
 func (a *app) printReferenceChanges(changes []felt.ReferenceChange) {
 	for _, change := range changes {
-		fmt.Fprintf(a.env.Stderr, "Warning: %s: %s resolved to %s; the new id resolves it to %s. Write the link with its full path, or rename the new fiber.\n", change.SourceID, change.Label, change.Before, change.After)
+		fmt.Fprintf(a.env.Stderr, "Warning: %s: %s pointed to %s, now: %s. Spell the link out in full, or rename the new fiber.\n", change.SourceID, change.Label, change.Before, change.After)
 	}
 }
 

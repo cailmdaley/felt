@@ -38,7 +38,7 @@ func TestMoveWarnsOnlyAboutLinksItLeavesChanged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v: %s", err, stderr)
 	}
-	if !strings.Contains(stderr, "The move left these references with changed resolution:") || !strings.Contains(stderr, "source: [[foreign/target]] resolved to foreign/target (enclosing store)") {
+	if !strings.Contains(stderr, "The move left these references with changed resolution:") || !strings.Contains(stderr, "source: [[foreign/target]] pointed to foreign/target (enclosing store)") {
 		t.Fatal(stderr)
 	}
 	if strings.Contains(stderr, "[[other/target]]") {

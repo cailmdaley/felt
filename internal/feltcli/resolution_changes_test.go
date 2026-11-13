@@ -27,7 +27,7 @@ func TestAddWarnsWhenNameChangesExistingLinks(t *testing.T) {
 			if err != nil || strings.TrimSpace(out) != id {
 				t.Fatalf("%s %s %v", out, stderr, err)
 			}
-			if !strings.Contains(stderr, "note: [[euclid]] resolved to work/euclid") || !strings.Contains(stderr, "full path") {
+			if !strings.Contains(stderr, "note: [[euclid]] pointed to work/euclid") || !strings.Contains(stderr, "in full") {
 				t.Fatal(stderr)
 			}
 			if strings.Contains(stderr, "[[work/euclid]]") || strings.Contains(stderr, "unrelated") {
@@ -49,7 +49,7 @@ func TestAddWarnsWhenAResolvedPrefixBecomesAmbiguous(t *testing.T) {
 		}
 	}
 	_, stderr, err := executeCLI(t, dir, "add", "foreign/euclid/child/euclid", "New", "--top-level")
-	if err != nil || !strings.Contains(stderr, "[[foreign/euclid]] resolved to foreign/euclid-old") || !strings.Contains(stderr, "ambiguous ID") {
+	if err != nil || !strings.Contains(stderr, "[[foreign/euclid]] pointed to foreign/euclid-old") || !strings.Contains(stderr, "ambiguous ID") {
 		t.Fatalf("prefix ambiguity was not reported: %v: %s", err, stderr)
 	}
 }
@@ -116,11 +116,11 @@ func TestAddWarnsAboutOutsideReferencesInEnclosingStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add: %v %s", err, stderr)
 	}
-	if !strings.Contains(stderr, "consumer: euclid resolved to shared/work/euclid") {
+	if !strings.Contains(stderr, "consumer: euclid pointed to shared/work/euclid") {
 		t.Fatal(stderr)
 	}
 	for _, label := range []string{"[[euclid]]", "[mission](euclid)"} {
-		if !strings.Contains(stderr, "note: "+label+" resolved to shared/work/euclid") {
+		if !strings.Contains(stderr, "note: "+label+" pointed to shared/work/euclid") {
 			t.Fatal(stderr)
 		}
 	}
