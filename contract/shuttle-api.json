@@ -1,0 +1,35 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Shuttle daemon API, stable tier",
+    "version": "1",
+    "description": "The routes a UI other than the board can build on. `info.version` is the API level, the integer `GET /api/v1/version` reports as `api_level`: adding a route or an optional field leaves it alone, removing or renaming anything described here raises it by one. Response objects may carry fields this document does not name; a client ignores them. Everything under /api/v1 that is absent from this document is internal and moves with the board."
+  },
+  "servers": [{ "url": "/api/v1" }],
+  "paths": {
+    "/contract": {
+      "get": {
+        "summary": "This document, as served by the daemon answering.",
+        "responses": {
+          "200": {
+            "description": "The OpenAPI document.",
+            "content": { "application/json": { "schema": { "type": "object" } } }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Error": {
+        "description": "A refusal. Routes do not yet share one error shape: `error` is always present, as a short string or a structured value, and other fields vary by route.",
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {},
+          "message": { "type": "string" }
+        }
+      }
+    }
+  }
+}

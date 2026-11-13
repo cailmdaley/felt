@@ -3,7 +3,7 @@ defmodule ShuttleWeb.ReadinessPlug do
   Fail fast on API routes whose state is not safe to serve until boot completes.
 
   The board shell and `/phone` redirect remain available before Poller
-  initialization, as do version, direct text/file message delivery, peer
+  initialization, as do version, the API contract, direct text/file message delivery, peer
   discovery and the append-only local session ledger. Plug.Static runs before
   this gate, so its assets also load. The booting response intentionally has no
   Retry-After header: HTTP clients such as OTP :httpc may replay POST requests
@@ -19,6 +19,7 @@ defmodule ShuttleWeb.ReadinessPlug do
     {"GET", "/phone"},
     {"GET", "/api/v1/version"},
     {"HEAD", "/api/v1/version"},
+    {"GET", "/api/v1/contract"},
     {"POST", "/api/v1/messages"},
     {"POST", "/api/v1/messages/files"},
     {"GET", "/api/v1/peers"},

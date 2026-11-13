@@ -3,7 +3,9 @@ defmodule ShuttleWeb.VersionController do
   Agent-API endpoint: GET /api/v1/version
 
   Returns the daemon's compile-time build stamp, listener and host identity,
-  plus the independent application-readiness bit. `host` is the frozen host id
+  plus the independent application-readiness bit. `api_level` is the level of
+  the stable HTTP contract (`Shuttle.ApiContract`); `contract_level` pins the
+  daemon to the CLI it shells. `host` is the frozen host id
   this daemon dispatches under; other daemons' tailnet discovery
   (`Shuttle.TailnetPeers`) names this daemon by it. `discovery` is this
   daemon's own discovery report. It never calls into the
@@ -41,6 +43,7 @@ defmodule ShuttleWeb.VersionController do
       conn,
       Shuttle.BuildStamp.stamp()
       |> Map.put(:contract_level, Shuttle.Contract.expected_level())
+      |> Map.put(:api_level, Shuttle.ApiContract.level())
       |> Map.put(:ready, readiness.ready)
       |> Map.put(:boot_hold, readiness.boot_hold)
       |> Map.put(:boot, readiness.boot)

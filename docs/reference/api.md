@@ -760,6 +760,7 @@ here" rather than as a missing file.
 | Route | Purpose |
 |---|---|
 | `GET /version` | Daemon build stamp and liveness probe, including `ready` and boot duration; deploy verifiers require matching `git_short_sha`, fresh `booted_at`, canonical `release_path`, `ready: true`, `contract.ok: true`, explicit `reconciliation_hold: null` and a nonempty `incarnation`; also carries `host` (the frozen host id this daemon dispatches under, by which other daemons' discovery names it), `listen`, `host_class`, peer-gate mode/uid/source, `tailnet_dial` (with `socket_source`: `configured`, `default`, `system` or `none`, and `default_socket_refused` when an untrusted default socket was passed over), and `discovery` (this daemon's tailnet peer discovery: `enabled`, `state` of `pending`/`ok`/`unavailable`/`disabled`, `via` of `cli`/`localapi`, `error`, `last_run_at`, the `peers` found with `name`, `url`, `dns_name` and `last_seen_at`, and the nodes `rejected` with a `reason`) |
+| `GET /contract` | The OpenAPI document for the stable routes, as built into this daemon. Available while booting |
 | `GET /state` | Full local state: running workers, blocked and `pending_launch` rows, standing constitutions, boot quarantine, contract check and `poll_health` |
 | `GET /state/composite` | The same plus per-origin remote snapshots |
 | `POST /quarantine/release` | Release the boot quarantine (host-addressed; `shuttle daemon release`); optional `expected: {incarnation, release_path}` binds authorization to a verified daemon, with HTTP 409 `incarnation_mismatch` if it changed |

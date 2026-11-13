@@ -86,6 +86,8 @@ defmodule ShuttleWeb.Router do
     # agents effort`, which stays the only writer of that grammar.
     post("/agents/effort", AgentsController, :effort)
     get("/version", VersionController, :show)
+    # The OpenAPI document for the stable routes, the ones a second UI builds on.
+    get("/contract", ContractController, :show)
     get("/remote_control", RemoteControlController, :show)
     post("/fiber/create", FiberController, :create)
     post("/document-changed", DocumentChangedController, :create)
