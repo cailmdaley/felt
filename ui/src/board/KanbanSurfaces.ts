@@ -1,3 +1,4 @@
+import '@ui-sdk/web/tabs'
 import { installFrontierDetails } from './DeskFrontier.js'
 import { responseThreadIndex, ThreadIndex } from './threads.js'
 import { stateDot } from './stateDot.js'
@@ -282,25 +283,38 @@ export class KanbanSurfaceRenderer {
    * Invisible above 700px: the three columns are all on screen there, so a
    * strip naming them is a label for what you can already see.
    */
-  private buildFolioStrip(board: HTMLElement, counts: number[]): HTMLElement {
-    const strip = document.createElement('div')
+  private buildFolioStrip(board: HTMLElement, counts: number[]): HTMLElementTagNameMap['ui-tabs'] {
+    const strip = document.createElement('ui-tabs')
     strip.className = 'kbn-folio'
-    strip.setAttribute('role', 'tablist')
-    strip.setAttribute('aria-label', 'Now — which column is showing')
+    strip.setAttribute('default-value', String(this.folioIndex))
+    // A choice turns the pager; the pager's scroll then marks the strip.
+    strip.addEventListener('valuechange', (e) => {
+      const index = Number(e.detail.value)
+      board.scrollTo({
+        left: folioScrollTarget(index, board.clientWidth, NOW_COLUMN_ORDER.length),
+        behavior: 'smooth',
+      })
+    })
+    const list = document.createElement('ui-tabs-list')
+    list.className = 'kbn-folio-tabs'
+    list.setAttribute('aria-label', 'Now — which column is showing')
+    strip.append(list)
 
     NOW_COLUMN_ORDER.forEach((kind, i) => {
-      // A tab says the leaf in one plain word and its count; the column's
-      // full name is its accessible name.
-      const title = COLUMN_TITLES[kind]
-      // A div, not a button: on a phone the column's own action glyph moves
-      // into this segment (see `adoptColumnActions`), and a real <button>
-      // inside a <button> is invalid HTML that browsers un-nest on parse.
+      // The segment holds the tab and, on a phone, the column's own action
+      // glyph beside it (see `adoptColumnActions`), so neither control nests
+      // inside the other.
       const seg = document.createElement('div')
       seg.className = `kbn-folio-seg kbn-col-${kind}`
       seg.dataset.folio = String(i)
-      seg.setAttribute('role', 'tab')
-      seg.tabIndex = -1
-      seg.setAttribute('aria-label', `${title} (${counts[i]})`)
+
+      // A tab says the leaf in one plain word and its count; the column's
+      // full name is its accessible name.
+      const title = COLUMN_TITLES[kind]
+      const tab = document.createElement('button')
+      tab.type = 'button'
+      tab.className = 'kbn-folio-tab'
+      tab.setAttribute('aria-label', `${title} (${counts[i]})`)
 
       const name = document.createElement('span')
       name.className = 'kbn-folio-name'
@@ -310,26 +324,12 @@ export class KanbanSurfaceRenderer {
       count.className = 'kbn-folio-count'
       count.textContent = String(counts[i])
 
-      seg.append(name, count)
-      const turnTo = (): void => {
-        board.scrollTo({
-          left: folioScrollTarget(i, board.clientWidth, NOW_COLUMN_ORDER.length),
-          behavior: 'smooth',
-        })
-      }
-      seg.addEventListener('click', (e) => {
-        // The adopted action glyph lives inside this segment; pressing it is
-        // "dispatch a draft", not "turn to Drafts".
-        if ((e.target as HTMLElement).closest('.kbn-col-action')) return
-        turnTo()
-      })
-      seg.addEventListener('keydown', (e) => {
-        if (e.key !== 'Enter' && e.key !== ' ') return
-        if ((e.target as HTMLElement).closest('.kbn-col-action')) return
-        e.preventDefault()
-        turnTo()
-      })
-      strip.append(seg)
+      tab.append(name, count)
+      const part = document.createElement('ui-tabs-tab')
+      part.setAttribute('value', String(i))
+      part.append(tab)
+      seg.append(part)
+      list.append(seg)
     })
     return strip
   }
@@ -344,15 +344,11 @@ export class KanbanSurfaceRenderer {
    * renderer only so a poll-driven rebuild doesn't yank the reader back to
    * Drafts mid-read.
    */
-  private installFolioPager(board: HTMLElement, strip: HTMLElement): void {
+  private installFolioPager(board: HTMLElement, strip: HTMLElementTagNameMap['ui-tabs']): void {
     const segs = Array.from(strip.querySelectorAll<HTMLElement>('.kbn-folio-seg'))
     const paint = (index: number): void => {
-      segs.forEach((seg, i) => {
-        const on = i === index
-        seg.classList.toggle('kbn-folio-seg-active', on)
-        seg.setAttribute('aria-selected', on ? 'true' : 'false')
-        seg.tabIndex = on ? 0 : -1
-      })
+      segs.forEach((seg, i) => seg.classList.toggle('kbn-folio-seg-active', i === index))
+      strip.value = String(index)
     }
     /** Read the leaf off the board and mark it on the strip. The board is the
      *  only authority: whatever `scrollLeft` says is the page you are on. */

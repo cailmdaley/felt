@@ -1683,6 +1683,10 @@
      the column's own pigment, so the strip is legible as the triad even
      before you read the names. */
   .kbn-folio {
+    display: block;
+    flex: 0 0 auto;
+  }
+  .kbn-folio-tabs {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 2px;
@@ -1691,7 +1695,7 @@
     border-bottom: 1px solid color-mix(in srgb, var(--kbn-owed-bright) 42%, transparent);
   }
   .kbn-folio-seg {
-    appearance: none;
+    position: relative;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1704,11 +1708,26 @@
     border: 1px solid transparent;
     border-radius: 3px 3px 0 0;
     color: color-mix(in srgb, var(--kbn-ink-soft) 53%, var(--kbn-plate));
-    cursor: pointer;
-    font-family: inherit;
     transition: color 140ms ease, background 140ms ease, border-color 140ms ease;
   }
-  .kbn-folio-seg:focus-visible {
+  /* The tab holds the name and count; its ::after spreads its press over the
+     whole segment, under the action glyph that rides beside it. */
+  .kbn-folio-tab {
+    appearance: none;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .kbn-folio-tab::after { content: ''; position: absolute; inset: 0; }
+  .kbn-folio-tab:focus-visible { outline: none; }
+  .kbn-folio-seg:has(.kbn-folio-tab:focus-visible) {
     outline: 1px dashed color-mix(in srgb, var(--kbn-you) 55%, transparent);
     outline-offset: -3px;
   }
@@ -1800,6 +1819,7 @@
      marks instead of turning the strip into a toolbar. */
   .kbn-folio-seg .kbn-col-action { display: none; }
   .kbn-folio-seg-active .kbn-col-action {
+    position: relative;
     display: inline-flex;
     flex: 0 0 auto;
     width: 26px;

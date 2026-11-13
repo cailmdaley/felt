@@ -56,6 +56,7 @@
   :root { --kbn-desk-row: 32px; --kbn-desk-indent: 6px; }
   .kbn-col-list .kbn-card { padding: 0 6px 0 4px; }
   .kbn-folio .kbn-folio-seg { gap: 6px; color: var(--kbn-ink-muted); }
+  .kbn-folio .kbn-folio-tab { gap: 6px; }
   .kbn-folio .kbn-folio-seg.kbn-folio-seg-active { color: var(--kbn-ink); }
   .kbn-folio .kbn-folio-name { font-size: var(--type-note); font-variant-caps: normal; font-feature-settings: normal; letter-spacing: 0; overflow: visible; text-overflow: clip; }
   .kbn-folio .kbn-folio-count { font: var(--type-meta)/var(--leading-tight) var(--font-mono); font-variant-caps: normal; letter-spacing: 0; color: var(--kbn-ink-muted); }

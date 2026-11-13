@@ -156,7 +156,7 @@ async function chooseDeskColumn(p, index) {
   const segment = p.locator(`.kbn-folio-seg[data-folio="${index}"]`)
   if (!await segment.isVisible()) return
   await segment.click()
-  await poll(p, index => document.querySelector(`.kbn-folio-seg[data-folio="${index}"]`)?.getAttribute('aria-selected') === 'true', index)
+  await poll(p, index => document.querySelector(`.kbn-folio-seg[data-folio="${index}"] [role="tab"]`)?.getAttribute('aria-selected') === 'true', index)
   // The strip marks the leaf before the pager's scroll lands on it; wait for the leaf itself.
   await poll(p, index => {
     const leaf = document.querySelectorAll('.kbn-now-board > .kbn-col')[index]?.getBoundingClientRect()
@@ -173,7 +173,7 @@ test('Phone 375 Desk folio keeps its full label and count clear of the active ac
     const rect = el => { const box = el.getBoundingClientRect(); return { left: box.left, right: box.right, width: box.width, clientWidth: el.clientWidth, scrollWidth: el.scrollWidth } }
     return {
       tabName: name?.textContent,
-      tabLabel: segment.getAttribute('aria-label'),
+      tabLabel: segment.querySelector('[role="tab"]')?.getAttribute('aria-label'),
       count: count?.textContent,
       actionLabel: action?.getAttribute('aria-label'),
       actionText: action?.textContent,
