@@ -1,3 +1,4 @@
+import { announce } from '@ui-sdk/core'
 import { marked } from 'marked'
 import createDOMPurify, { type Config } from 'dompurify'
 import { mathDollars, typesetSanitized } from './mathDollars.js'
@@ -516,6 +517,8 @@ export function showToast(message: string, type: 'success' | 'warning' | 'error'
 
   toast.classList.add(type)
   document.body.appendChild(toast)
+  // The toast is drawn for the eye; screen readers hear it from the shared live region, errors at once.
+  announce(message, { priority: type === 'error' ? 'assertive' : 'polite' })
 
   setTimeout(() => {
     toast.classList.add('toast-out')
