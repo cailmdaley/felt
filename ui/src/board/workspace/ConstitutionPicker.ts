@@ -75,7 +75,9 @@ export class ConstitutionPicker {
     if (this.listening) this.opts.supplement?.refresh(this.find.value)
     const focused = this.el.contains(document.activeElement) ? document.activeElement as HTMLElement : null
     this.placeRows()
-    if (focused?.isConnected && document.activeElement !== focused) focused.focus({ preventScroll: true })
+    if (focused && document.activeElement === document.body) {
+      (focused.isConnected ? focused : this.find).focus({ preventScroll: true })
+    }
   }
   private placeRows(): void {
     const cards = [...new Map(this.opts.cards().map(card => [deskCardKey(card), card])).values()]

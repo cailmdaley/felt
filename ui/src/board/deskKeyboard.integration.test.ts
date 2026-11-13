@@ -569,6 +569,25 @@ describe('Desk keyboard selection', () => {
     draw(updated)
     expect(document.querySelector<HTMLElement>('.kbn-key-selected')?.dataset.cardOrigin).toBe('b')
   })
+  it('keeps focus on its row through a poll, and gives a removed row\'s focus to the row in its place', () => {
+    const row = (uid: string) => document.querySelector(`[data-card-uid="${uid}"]`)
+    press('j'); press('k'); press('k')
+    expect(document.activeElement).toBe(row('head-uid'))
+    draw(data())
+    expect(document.activeElement).toBe(row('head-uid'))
+    const without = data()
+    without.now.inFlight = without.now.inFlight.filter(card => card.uid !== 'head-uid')
+    draw(without)
+    expect(document.activeElement).toBe(row('working'))
+    expect(selected()).toBe('working')
+    press('j'); press('j')
+    expect(document.activeElement).toBe(row('resting'))
+    const shorter = data()
+    shorter.stash = []
+    draw(shorter)
+    expect(document.activeElement).toBe(row('review'))
+    expect(selected()).toBe('review')
+  })
   it('keeps the selection painted through a poll without scrolling the Desk out from under the pointer', () => {
     for (const phone of [false, true]) {
       mobile = phone
@@ -611,14 +630,15 @@ describe('Desk keyboard selection', () => {
 
   it('chooses the first movement target by review, Needs-you flight, then drafts', () => {
     press('ArrowDown'); expect(selected()).toBe('review')
-    press('u')
+    // With focus off the Desk, a selection the poll removes leaves no row to follow.
+    press('u'); (document.activeElement as HTMLElement).blur()
 
     const flight = data()
     flight.now.awaitingReview = []
     flight.now.inFlight = [card({ id: 'needs-you', uid: 'needs-you', status: 'active', workerState: 'running', runtimePhase: 'attention' })]
     draw(flight)
     press('ArrowDown'); expect(selected()).toBe('needs-you')
-    press('u')
+    press('u'); (document.activeElement as HTMLElement).blur()
 
     const drafts = response({ now: { drafts: [card({ id: 'draft', uid: 'draft' })], inFlight: [], awaitingReview: [] } })
     draw(drafts)

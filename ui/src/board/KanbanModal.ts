@@ -1702,6 +1702,7 @@ export class KanbanModal {
     this.pendingDeskData = null
 
     const scrollSnapshot = this.captureScrollSnapshot()
+    const focusedRow = this.deskKeyboard?.focusedRow() ?? null
     const { staleness } = data
 
     this.deskEl.innerHTML = ''
@@ -1736,6 +1737,7 @@ export class KanbanModal {
     // A redraw repaints the selection in place: the Desk scrolls only when the
     // selection moves, never under a pointer on its way to another card.
     this.deskKeyboard?.refresh()
+    this.deskKeyboard?.refocus(focusedRow)
     void this.fiberSends.refresh()
     this.updateBodyScrollAffordance()
     window.requestAnimationFrame(() => this.updateBodyScrollAffordance())

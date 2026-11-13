@@ -21,6 +21,17 @@ it('keeps a row and its focus across a refresh, in the order of its cards', () =
   expect([...picker.el.querySelectorAll<HTMLElement>('.ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['beta', 'alpha'])
 })
 
+it('returns focus to Find when a focused row disappears on refresh', () => {
+  let cards = [card({ id: 'alpha' }), card({ id: 'beta' })]
+  picker = new ConstitutionPicker({ cards: () => cards, onOpen: vi.fn() })
+  document.body.append(picker.el)
+  picker.refresh()
+  picker.el.querySelector<HTMLElement>('[data-channel-uid="beta"]')!.focus()
+  cards = [cards[0]]
+  picker.refresh()
+  expect(document.activeElement).toBe(picker.find)
+})
+
 it('sets its rows before a supplement, and drops rows Find no longer matches', () => {
   const supplement = { el: document.createElement('section'), refresh: vi.fn(), close: vi.fn(), dispose: vi.fn() }
   const find = document.createElement('input')

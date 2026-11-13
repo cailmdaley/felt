@@ -6,6 +6,12 @@ import { folioScrollTarget } from './deskMobile.js'
 export interface DeskAddress { uid: string; origin: string; section?: string }
 const identity = (el: HTMLElement): DeskAddress => ({ uid: el.dataset.cardUid!, origin: el.dataset.cardOrigin!, section: el.dataset.deskSection })
 const matches = (el: HTMLElement, address: DeskAddress): boolean => el.dataset.cardUid === address.uid && el.dataset.cardOrigin === address.origin && el.dataset.deskSection === address.section
+/** Focus a row without adding every card to the tab sequence. */
+const focusRow = (el: HTMLElement): boolean => {
+  if (!el.hasAttribute('tabindex') && el.tabIndex < 0) el.tabIndex = -1
+  el.focus({ preventScroll: true })
+  return document.activeElement === el
+}
 const behavior = (): ScrollBehavior => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'
 
 /** Selection belongs to card identity, not a DOM node or a feed position. */
@@ -27,10 +33,30 @@ export class DeskKeyboard {
   /** Restore focus without adding every card to the tab sequence. */
   focusSelection(): boolean {
     const el = this.node()
-    if (!el) return false
-    if (!el.hasAttribute('tabindex') && el.tabIndex < 0) el.tabIndex = -1
-    el.focus({ preventScroll: true })
-    return document.activeElement === el
+    return el ? focusRow(el) : false
+  }
+
+  /** The row focus is in, by identity and by place in the walk, for `refocus` after a repaint. */
+  focusedRow(): { address: DeskAddress; index: number } | null {
+    const active = document.activeElement
+    const el = active instanceof HTMLElement ? active.closest<HTMLElement>('[data-card-uid]') : null
+    if (!el || !this.root.contains(el)) return null
+    return { address: identity(el), index: this.regions().flat().indexOf(el) }
+  }
+
+  /**
+   * After a repaint dropped focus to the page, focus the row that held it, or the
+   * row now in its place (the last, when the walk got shorter), which becomes the selection.
+   */
+  refocus(held: { address: DeskAddress; index: number } | null): void {
+    if (!held || document.activeElement !== document.body) return
+    const rows = this.regions().flat()
+    const same = rows.find(el => matches(el, held.address))
+    if (same) { focusRow(same); return }
+    const next = rows[Math.min(held.index, rows.length - 1)]
+    if (!next) return
+    this.select(identity(next), false)
+    focusRow(next)
   }
 
   private regions(): HTMLElement[][] {
