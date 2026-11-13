@@ -427,7 +427,7 @@ export function registerHeaderBarJourneys(test) {
       }
       const settings = strip.locator('.ws-acts-settings')
       await settings.click()
-      const sheet = page.getByRole('group', { name: 'Settings', exact: true })
+      const sheet = page.getByRole('dialog', { name: 'Settings', exact: true })
       await sheet.waitFor()
       assert.ok(await sheet.locator('.kbn-ctl-history').count())
       assert.equal(await sheet.locator('.ws-band-open').count(), 0, 'the way to the conversation stays outside Settings')
@@ -459,12 +459,16 @@ export function registerHeaderBarJourneys(test) {
     const menu = page.locator('.ws-settings-menu:not([hidden])')
     const under = async (gear, label) => {
       const [box, anchor] = await Promise.all([menu.boundingBox(), gear.boundingBox()])
-      assert.ok(Math.abs(box.y - (anchor.y + anchor.height)) <= 8, `${label}: the menu opens against its ⚙: ${JSON.stringify({ box, anchor })}`)
+      const below = Math.abs(box.y - (anchor.y + anchor.height)) <= 8, above = Math.abs(box.y + box.height - anchor.y) <= 8
+      assert.ok(below || above, `${label}: the menu opens against its ⚙: ${JSON.stringify({ box, anchor })}`)
+      assert.ok(box.y >= 0 && box.y + box.height <= page.viewportSize().height, `${label}: the menu stays inside the viewport`)
     }
     const tree = await familyTree(page)
     await openThread(page, tree.locator('.fp-head'), title)
     const root = acts(page).locator('.ws-acts-settings')
     await root.click(); await menu.waitFor(); await under(root, 'root')
+    const head = await band(page).locator('.ws-band-head').boundingBox()
+    assert.ok((await menu.boundingBox()).y >= head.y + head.height, 'Settings opened on the title row keeps both header rows clear')
     // A row clear of the open menu shows its acts under the pointer.
     const thread = threadRow(page, tree, 'Discarded pilot')
     await thread.hover()
