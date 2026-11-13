@@ -44,7 +44,7 @@
             "name": "origin",
             "in": "query",
             "required": false,
-            "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400.",
+            "description": "Host id of the daemon that owns the fiber or file, as a composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400.",
             "schema": {
               "type": "string"
             }
@@ -96,7 +96,7 @@
             "name": "origin",
             "in": "query",
             "required": false,
-            "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400.",
+            "description": "Host id of the daemon that owns the fiber or file, as a composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400.",
             "schema": {
               "type": "string"
             }
@@ -314,7 +314,7 @@
             "name": "origin",
             "in": "query",
             "required": false,
-            "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400.",
+            "description": "Host id of the daemon that owns the fiber or file, as a composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400.",
             "schema": {
               "type": "string"
             }
@@ -411,43 +411,53 @@
                 "type": "object",
                 "properties": {
                   "prompt": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The task for the new agent; must contain non-whitespace text. The agent files and claims its own constitution from it."
                   },
                   "project_dir": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Absolute directory on the selected host where the worker starts; it must already exist there."
                   },
                   "agent": {
                     "type": [
                       "string",
                       "null"
-                    ]
+                    ],
+                    "description": "Agent registry id; null or absent uses the registry default."
                   },
                   "effort": {
                     "type": [
                       "string",
                       "null"
-                    ]
+                    ],
+                    "description": "Effort level, a harness-native token such as low, medium or high; null or absent uses the agent's default."
                   },
                   "chrome": {
                     "type": "boolean",
-                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                    "description": "true launches the agent with the browser (chrome) axis enabled; any other value leaves it off."
                   },
                   "origin": {
                     "type": "string",
-                    "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400."
+                    "description": "Host id of the daemon that owns the fiber or file, as a composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400."
                   }
                 },
                 "required": [
                   "prompt",
                   "project_dir"
                 ]
+              },
+              "example": {
+                "prompt": "Read the README, list the open TODOs and file a plan for the first one.",
+                "project_dir": "/home/me/project",
+                "agent": "claude-opus",
+                "origin": "laptop"
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "The result.",
+            "description": "The worker launched; tmux_session names its terminal session. No fiber exists yet: the agent creates it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -457,7 +467,7 @@
             }
           },
           "400": {
-            "description": "The request is refused.",
+            "description": "prompt or project_dir is missing or blank, or origin names no known host.",
             "content": {
               "application/json": {
                 "schema": {
@@ -467,7 +477,7 @@
             }
           },
           "422": {
-            "description": "Invalid directory, agent axes or launch preflight refusal.",
+            "description": "project_dir does not exist on the host (reason project_dir_missing), the agent, effort and chrome combination is invalid (reason is the validation message), or a launch preflight refused (reason is the refusal tag, message says what to fix).",
             "content": {
               "application/json": {
                 "schema": {
@@ -477,7 +487,7 @@
             }
           },
           "500": {
-            "description": "Launch failed.",
+            "description": "The launch failed; reason describes the error.",
             "content": {
               "application/json": {
                 "schema": {
@@ -487,7 +497,7 @@
             }
           },
           "502": {
-            "description": "Forward failed.",
+            "description": "The request could not be forwarded to the owning host; reason is forward_failed and error the cause.",
             "content": {
               "application/json": {
                 "schema": {
@@ -497,7 +507,7 @@
             }
           },
           "503": {
-            "description": "Backend not ready or boot incomplete.",
+            "description": "The terminal backend is not ready (reason backend_not_ready, waiting and retryable true), or boot is incomplete.",
             "content": {
               "application/json": {
                 "schema": {
@@ -531,20 +541,24 @@
                 "type": "object",
                 "properties": {
                   "id": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Namespace path of the new fiber, relative and slash-separated (for example work/new-idea); not a UID. It is placed under its nearest existing ancestor; a new top-level fiber goes to the store holding shuttle.project_dir when that store is polled, else the primary store."
                   },
                   "name": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Display name; nonempty."
                   },
                   "body": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Markdown body; defaults to empty."
                   },
                   "uid": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "A canonical ULID to keep, for a fiber transferred from elsewhere; absent mints a new one. Refused if the owner already has it."
                   },
                   "origin": {
                     "type": "string",
-                    "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400."
+                    "description": "Host id of the daemon that owns the fiber or file, as a composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400."
                   },
                   "frontmatter": {
                     "type": "object",
@@ -555,48 +569,73 @@
                           "open",
                           "active",
                           "closed"
-                        ]
+                        ],
+                        "description": "open (a draft), active or closed; defaults to active, which arms a shuttle block."
                       },
                       "shuttle": {
                         "type": "object",
                         "properties": {
                           "project_dir": {
-                            "type": "string"
+                            "type": "string",
+                            "description": "Worker directory on the owning host; required, and must exist, when status is active."
                           },
                           "host": {
-                            "type": "string"
+                            "type": "string",
+                            "description": "Owning host id; absent is stamped with this daemon's id, any other host is refused."
                           }
-                        }
+                        },
+                        "description": "A Shuttle block. Its host is stamped with this daemon's id when absent and refused when it names another host; a role inside it moves to the top-level role."
                       },
                       "tags": {
                         "type": "array",
                         "items": {
                           "type": "string"
-                        }
+                        },
+                        "description": "Free-form tags; non-string items are dropped."
                       },
                       "outcome": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Outcome text."
                       },
                       "role": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Role (office or office/person)."
                       },
                       "due": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Due date, YYYY-MM-DD."
                       }
-                    }
+                    },
+                    "description": "Frontmatter for the new fiber. Unlisted keys are written verbatim. status defaults to active."
                   }
                 },
                 "required": [
                   "id",
                   "name"
                 ]
+              },
+              "example": {
+                "id": "work/try-the-new-parser",
+                "name": "Try the new parser",
+                "body": "Swap the parser and compare timings.",
+                "origin": "laptop",
+                "frontmatter": {
+                  "status": "open",
+                  "tags": [
+                    "parser"
+                  ],
+                  "shuttle": {
+                    "kind": "oneshot",
+                    "project_dir": "/home/me/project"
+                  }
+                }
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "The result.",
+            "description": "The fiber was written and read back; path is its file on the owner and uid its identity.",
             "content": {
               "application/json": {
                 "schema": {
@@ -606,7 +645,7 @@
             }
           },
           "400": {
-            "description": "Invalid input, placement, duplicate identity, or CLI write failure.",
+            "description": "Invalid id, name, uid, status or shuttle block; a duplicate uid or destination; no polled store; a felt write failure; or origin names no known host.",
             "content": {
               "application/json": {
                 "schema": {
@@ -616,7 +655,7 @@
             }
           },
           "502": {
-            "description": "Forward failed; includes origin and detail.",
+            "description": "The request could not be forwarded; error is forward_failed, with origin and detail.",
             "content": {
               "application/json": {
                 "schema": {
@@ -641,7 +680,7 @@
     "/dispatch": {
       "post": {
         "summary": "Launch or resume a fiber’s worker.",
-        "description": "Requests a dispatch now; force or ad_hoc bypasses normal eligibility, but never invents a project directory. resume_mode selects previous or fresh context (absent or unrecognized uses the owner’s heuristic); user_message and images ride the launch.",
+        "description": "Requests a launch of the constitution's worker now, on its owning host. The fiber is named by fiber_id (not fiber as on /lifecycle). Without force or ad_hoc the fiber must be eligible as for an autonomous dispatch; with either, only host ownership is checked. No flag supplies a missing project directory: a forced start of a block without one answers 422 arm_refused with needs project_dir, and is retried with project_dir. resume_mode chooses previous or fresh context; user_message and images ride the launch. Every response is a JSON object whose dispatched field says whether a worker launched or took the message.",
         "tags": [
           "core"
         ],
@@ -653,46 +692,50 @@
                 "type": "object",
                 "properties": {
                   "fiber_id": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The constitution to launch: its UID or namespace path. /dispatch, /deliver and /kill call this field fiber_id; /lifecycle calls it fiber."
                   },
                   "origin": {
                     "type": "string",
-                    "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400."
+                    "description": "Host id of the daemon that owns the fiber or file, as a composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400."
                   },
                   "force": {
                     "type": "boolean",
-                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                    "description": "Bypasses eligibility except host ownership: a closed, draft or not-yet-due constitution launches, and its cooldowns are ignored. Also accepts the strings \"true\" and \"1\"."
                   },
                   "ad_hoc": {
                     "type": "boolean",
-                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                    "description": "Implies force. A standing constitution's run is recorded as an ad hoc run outside its schedule."
                   },
                   "existing_only": {
                     "type": "boolean",
-                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                    "description": "Never launches. With resume_mode previous and a user_message, types the message into the live worker's terminal; otherwise answers 422 no_live_worker."
                   },
                   "release_launch_reservation": {
                     "type": "boolean",
-                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                    "description": "Before launching, releases the reservation an earlier unresolved launch attempt left (the 409 launch_reserved refusal), if the fiber is eligible."
                   },
                   "user_message": {
                     "type": [
                       "string",
                       "null"
-                    ]
+                    ],
+                    "description": "Text the worker receives as the human's message: in its launch prompt, or typed into the live terminal when resume_mode is previous and a worker is live. Blank counts as absent."
                   },
                   "resume_mode": {
                     "type": "string",
                     "enum": [
                       "previous",
                       "fresh"
-                    ]
+                    ],
+                    "description": "previous resumes the prior conversation, or types user_message into a live one; fresh starts a new conversation, stopping a live worker first. Absent or any other value lets the owner decide from how the last run ended."
                   },
                   "project_dir": {
                     "type": [
                       "string",
                       "null"
-                    ]
+                    ],
+                    "description": "A worker directory for a block that has none, as confirmed by the human: the owner resolves it on its host, saves it and arms the fiber before launching. Blank counts as absent."
                   },
                   "images": {
                     "type": "array",
@@ -710,19 +753,27 @@
                       "required": [
                         "data"
                       ]
-                    }
+                    },
+                    "description": "Images attached to user_message; the owner stores them on its host and names their paths in the message."
                   }
                 },
                 "required": [
                   "fiber_id"
                 ]
+              },
+              "example": {
+                "fiber_id": "01JABCDEF0123456789ABCDEFG",
+                "origin": "laptop",
+                "force": true,
+                "resume_mode": "previous",
+                "user_message": "Pick up from the plan in Status and run the tests."
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "The result.",
+            "description": "A worker launched or took the message. session_uuid is the conversation id when the harness reports it at launch, else null.",
             "content": {
               "application/json": {
                 "schema": {
@@ -732,7 +783,7 @@
             }
           },
           "400": {
-            "description": "The request is refused.",
+            "description": "fiber_id is missing, images are malformed or too large, or origin names no known host.",
             "content": {
               "application/json": {
                 "schema": {
@@ -742,7 +793,7 @@
             }
           },
           "404": {
-            "description": "Fiber missing.",
+            "description": "The owner has no fiber with that id (reason fiber_not_found).",
             "content": {
               "application/json": {
                 "schema": {
@@ -752,7 +803,7 @@
             }
           },
           "409": {
-            "description": "Worker already running or a launch reservation is unresolved.",
+            "description": "A worker is already running (reason already_running, with its session, agent and timestamps), or an earlier launch attempt is unresolved (reason launch_reserved; retry with release_launch_reservation).",
             "content": {
               "application/json": {
                 "schema": {
@@ -762,7 +813,7 @@
             }
           },
           "422": {
-            "description": "Not eligible, no live worker, arming refused or launch preflight refused.",
+            "description": "Nothing launched. reason is not_eligible (detail is homed_elsewhere, project_dir_missing, disabled, closed, no_shuttle_block or not_due_or_blocked), no_live_worker, arm_refused (needs names the field to supply), or a launch preflight's tag with message saying what to fix.",
             "content": {
               "application/json": {
                 "schema": {
@@ -772,7 +823,7 @@
             }
           },
           "500": {
-            "description": "Launch failed.",
+            "description": "The launch failed; reason describes the error.",
             "content": {
               "application/json": {
                 "schema": {
@@ -782,7 +833,7 @@
             }
           },
           "502": {
-            "description": "Forward failed.",
+            "description": "The request could not be forwarded to the owning host.",
             "content": {
               "application/json": {
                 "schema": {
@@ -792,7 +843,7 @@
             }
           },
           "503": {
-            "description": "Backend not ready or boot incomplete.",
+            "description": "The terminal backend is not ready (reason backend_not_ready, waiting and retryable true), or boot is incomplete.",
             "content": {
               "application/json": {
                 "schema": {
@@ -824,7 +875,7 @@
     "/deliver": {
       "post": {
         "summary": "Deliver text to a fiber’s worker.",
-        "description": "Messages a live worker or launches/resumes a dormant one with the text; delivery names which occurred and delivered=null means unconfirmed, not failure. context_only plus message_id queues without launching (202); unless_live refuses a live worker and otherwise marks queued_for_next_worker.",
+        "description": "Puts text in front of a constitution's worker on its owning host: a live worker is messaged, a dormant one resumes or launches with the text as its first message. The delivery field names which happened (message, input, resume, dispatch or context). delivered is true when the worker has the text, false when it did not get it, and null (with 202) when it was sent but arrival is unconfirmed; null is not a failure. Launch outcomes reuse the /dispatch envelope, so a launch refusal carries dispatched false and reason. context_only with message_id queues without launching (202). Error bodies vary: a validation refusal carries only error (and delivered false), a launch refusal the /dispatch fields, a forward failure reason and origin.",
         "tags": [
           "core"
         ],
@@ -836,86 +887,99 @@
                 "type": "object",
                 "properties": {
                   "fiber_id": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The constitution whose worker receives the text: its UID or namespace path. Named fiber_id as on /dispatch and /kill; /lifecycle calls it fiber."
                   },
                   "text": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The message; must contain non-whitespace text."
                   },
                   "origin": {
                     "type": "string",
-                    "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400."
+                    "description": "Host id of the daemon that owns the fiber or file, as a composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400."
                   },
                   "from": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Sender label shown to the worker, typically the sender's shuttle:// session address; blank or absent means \"shuttle\"."
                   },
                   "from_claim": {
-                    "type": "string"
-                  },
-                  "address": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Sender label, read only when from is \"unverified\"."
                   },
                   "context_only": {
                     "type": "boolean",
-                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                    "description": "Queues text in the fiber's context mailbox for its live or next worker instead of messaging or launching. Requires message_id; answers 202 with delivery context."
                   },
                   "message_id": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Idempotency key. Required with context_only, where the mailbox deduplicates by it; otherwise the receipt id when a live worker is messaged (absent generates one)."
                   },
                   "wake": {
                     "type": "boolean",
-                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                    "description": "With context_only: also starts a turn on a live worker (in a fresh session when that worker is at rest and costly to wake). Defaults to false, unlike /messages. Ignored without context_only."
                   },
                   "unless_live": {
                     "type": "boolean",
-                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                    "description": "With context_only: when the fiber has a live worker, answers 409 with live true and queues nothing; otherwise the queued answer carries status queued_for_next_worker."
                   },
                   "resume_mode": {
                     "type": "string",
                     "enum": [
                       "previous",
                       "fresh"
-                    ]
+                    ],
+                    "description": "previous forces resuming the prior conversation (a live worker is still messaged); fresh starts a new conversation, stopping a live worker. Absent lets the owner message a live worker, or else resume or start fresh by its own rule."
                   },
                   "message_after_launch": {
                     "type": "boolean",
-                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                    "description": "Sends text as a native message once the worker is up rather than in its launch prompt, launching first when none is live; waits up to 30 seconds for the worker's address."
                   },
                   "live_input": {
                     "type": "boolean",
-                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                    "description": "Types text into the worker's terminal as the human's next turn instead of messaging it; with no live worker, resumes or starts one with the text."
                   },
                   "reply_to": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "With context_only: the fiber the receiver should reply to."
                   },
                   "notify_address": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "With context_only: the session address that receives the idle notice; defaults to from."
                   },
                   "notify_when_idle": {
                     "type": "boolean",
-                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                    "description": "With context_only: subscribes notify_address (or from) to one notice when the receiving worker next goes idle or exits."
                   },
                   "notify_wake": {
                     "type": "boolean",
-                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                    "description": "With context_only and notify_when_idle: the idle notice starts a turn for the subscriber."
                   },
                   "thread_signal": {
-                    "type": "object"
+                    "type": "object",
+                    "description": "With context_only: a thread lifecycle signal (uid, verb, stamp, owner) checked at delivery; Shuttle's own sub-thread reporting sets it."
                   },
                   "retained_at": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "With context_only: the origin timestamp used to expire replayed thread context."
                   }
                 },
                 "required": [
                   "fiber_id",
                   "text"
                 ]
+              },
+              "example": {
+                "fiber_id": "01JABCDEF0123456789ABCDEFG",
+                "origin": "laptop",
+                "text": "The review is in: tighten the error handling, then close.",
+                "from": "shuttle://laptop/claude/0b6c9a52-3f1e-4c8d-9a7e-2d5f4b1c8e90"
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "The result.",
+            "description": "The worker has the text: messaged (delivery message, with the receipt), typed in (input), or launched with it (resume or dispatch).",
             "content": {
               "application/json": {
                 "schema": {
@@ -935,7 +999,7 @@
             }
           },
           "202": {
-            "description": "Queued context or unconfirmed delivery, including an owner timeout.",
+            "description": "Queued in the context mailbox (delivery context), or sent with arrival unconfirmed (delivered null), including an owner that did not answer in time (reason forward_timeout).",
             "content": {
               "application/json": {
                 "schema": {
@@ -958,7 +1022,7 @@
             }
           },
           "400": {
-            "description": "Missing fields, context message_id or unknown origin.",
+            "description": "fiber_id or text is missing or blank, context_only lacks message_id, or origin names no known host.",
             "content": {
               "application/json": {
                 "schema": {
@@ -968,7 +1032,7 @@
             }
           },
           "404": {
-            "description": "Fiber missing.",
+            "description": "The owner has no such fiber, or (with context_only) no such constitution.",
             "content": {
               "application/json": {
                 "schema": {
@@ -991,7 +1055,7 @@
             }
           },
           "409": {
-            "description": "Live-worker conflict or launch reservation.",
+            "description": "A live worker blocks unless_live (live true), the live worker has no addressable conversation yet or is no longer live, this daemon does not own the fiber, or a launch was refused as on /dispatch (already_running, launch_reserved).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1014,7 +1078,7 @@
             }
           },
           "422": {
-            "description": "Delivery, arming or preflight refused.",
+            "description": "The context mailbox write failed, or a launch was refused as on /dispatch (not_eligible, arm_refused, a preflight).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1037,7 +1101,7 @@
             }
           },
           "500": {
-            "description": "Launch failed.",
+            "description": "The launch failed.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1060,7 +1124,7 @@
             }
           },
           "502": {
-            "description": "Forward failure or worker rejected the message.",
+            "description": "The worker rejected the message (receipt status rejected), the owner's answer was not JSON, or the request could not be forwarded (reason forward_failed).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1090,7 +1154,7 @@
             }
           },
           "503": {
-            "description": "Backend not ready, CLI unavailable or boot incomplete.",
+            "description": "The terminal backend is not ready, the local shuttle CLI could not run, or boot is incomplete.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1120,7 +1184,7 @@
             }
           },
           "504": {
-            "description": "Launch or message timed out; inspect before retrying.",
+            "description": "The launch or message did not finish in time and may still happen; inspect the fiber before retrying.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1148,7 +1212,7 @@
     "/messages": {
       "post": {
         "summary": "Send an idempotent message to an exact session.",
-        "description": "address selects the host strictly; there is no origin parameter. wake defaults to true, while wake=false adds context without a task turn; reuse message_id with identical content to retry, and read receipt.status rather than treating HTTP 200 as proof of acceptance or model action.",
+        "description": "Sends text to one exact session on any host. The address selects the host; there is no origin field. wake defaults to true. Reuse message_id with identical content to retry safely. HTTP 200 means the request was processed, not that it was accepted: read receipt.status (accepted, submitted, queued, context_added and subscribed mean taken; rejected means refused; unknown means the outcome could not be confirmed and the same request may be retried). Validation refusals return a plain Error; refusals from the receiving harness return a receipt with status rejected.",
         "tags": [
           "core"
         ],
@@ -1160,59 +1224,72 @@
                 "type": "object",
                 "properties": {
                   "address": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The receiving session, exactly as /peers lists it: shuttle://HOST/HARNESS/NATIVE_ID in canonical form. HOST routes the request; there is no origin field."
                   },
                   "text": {
                     "type": "string",
                     "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
                   },
                   "message_id": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Idempotency key, nonempty, at most 256 bytes. Resending the same id with the same content returns the original receipt; with different content, 409."
                   },
                   "from": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Sender label, typically the sender's own shuttle:// address; one line, at most 1024 bytes, without [, ] or ;."
                   },
                   "from_claim": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Sender label, read only when from is \"unverified\"."
                   },
                   "reply_to": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The fiber the receiver should reply to; at most 1024 bytes."
                   },
                   "notify_address": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Session address that receives the idle notice requested by notify_when_idle; defaults to from."
                   },
                   "wake": {
                     "type": "boolean",
-                    "default": true
+                    "default": true,
+                    "description": "true delivers the text as a task that starts a turn; false adds it as context without starting a turn."
                   },
                   "context_if_busy": {
                     "type": "boolean",
-                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                    "description": "Requires wake=true. Lets a Claude session that is mid-turn take the text through its hook as context instead of a queued turn, and lets the daemon hold a message for an idle, costly-to-wake Claude session as context (receipt detail says so)."
                   },
                   "idle_only": {
                     "type": "boolean",
-                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                    "description": "Requires wake=true and a Claude or Codex session. Never steers an active turn: Claude queues the text for its next turn, and Codex refuses unless the session is idle."
                   },
                   "notify_when_idle": {
                     "type": "boolean",
-                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                    "description": "Subscribes notify_address (or from, which must then be a session address other than the receiver) to one notice when the receiver next goes idle or exits. text may then be empty."
                   },
                   "notify_wake": {
                     "type": "boolean",
-                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                    "description": "Requires notify_when_idle. The idle notice starts a turn for the subscriber."
                   }
                 },
                 "required": [
                   "address",
                   "message_id"
                 ]
+              },
+              "example": {
+                "address": "shuttle://laptop/claude/0b6c9a52-3f1e-4c8d-9a7e-2d5f4b1c8e90",
+                "message_id": "review-2026-11-13-a",
+                "text": "Tests pass on main; ready for your review.",
+                "from": "shuttle://laptop/codex/019a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Processed receipt, including rejected or unknown.",
+            "description": "Processed; the receipt's status says whether the message was taken, rejected or unknown.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1222,7 +1299,7 @@
             }
           },
           "400": {
-            "description": "Invalid request/address/host or preflight rejection.",
+            "description": "The request, address or host is invalid (Error), or the receiving side refused it (a receipt with status rejected).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1239,7 +1316,7 @@
             }
           },
           "409": {
-            "description": "message_id reused for different content.",
+            "description": "message_id was already used with different content.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1249,7 +1326,7 @@
             }
           },
           "502": {
-            "description": "Malformed receipt or unreachable owner; synthetic unknown receipt.",
+            "description": "The owning host was unreachable or answered with a malformed receipt; the synthetic receipt has status unknown.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1259,7 +1336,7 @@
             }
           },
           "503": {
-            "description": "Cannot run the local CLI.",
+            "description": "The local shuttle CLI could not run.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1269,7 +1346,7 @@
             }
           },
           "504": {
-            "description": "Local delivery timed out; unknown outcome.",
+            "description": "Local delivery timed out; the receipt has status unknown.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1301,7 +1378,7 @@
                   },
                   "origin": {
                     "type": "string",
-                    "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400."
+                    "description": "Host id of the daemon that owns the fiber or file, as a composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400."
                   },
                   "fiber_path": {
                     "type": "string",
@@ -1522,23 +1599,28 @@
                 "type": "object",
                 "properties": {
                   "fiber_id": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The constitution whose worker to stop: its UID or namespace path. /lifecycle calls this field fiber."
                   },
                   "origin": {
                     "type": "string",
-                    "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400."
+                    "description": "Host id of the daemon that owns the fiber or file, as a composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400."
                   }
                 },
                 "required": [
                   "fiber_id"
                 ]
+              },
+              "example": {
+                "fiber_id": "01JABCDEF0123456789ABCDEFG",
+                "origin": "laptop"
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "The result.",
+            "description": "killed is true with the stopped session, or false when no worker was tracked.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1548,7 +1630,7 @@
             }
           },
           "400": {
-            "description": "The request is refused.",
+            "description": "fiber_id is missing or not a string, or origin names no known host.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1558,7 +1640,7 @@
             }
           },
           "500": {
-            "description": "Worker stop failed.",
+            "description": "Stopping the worker failed; error says why.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1568,7 +1650,7 @@
             }
           },
           "502": {
-            "description": "Forward failed.",
+            "description": "The request could not be forwarded to the owning host.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1620,7 +1702,7 @@
             "name": "origin",
             "in": "query",
             "required": false,
-            "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400.",
+            "description": "Host id of the daemon that owns the fiber or file, as a composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400.",
             "schema": {
               "type": "string"
             }
@@ -1725,7 +1807,7 @@
             "name": "origin",
             "in": "query",
             "required": false,
-            "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400.",
+            "description": "Host id of the daemon that owns the fiber or file, as a composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400.",
             "schema": {
               "type": "string"
             }
@@ -1887,11 +1969,11 @@
           },
           "ok": {
             "type": "boolean",
-            "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+            "description": "false on the endpoints whose refusals carry it (an unknown origin on /fleet); absent elsewhere."
           },
           "retryable": {
             "type": "boolean",
-            "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+            "description": "true when the same request may be retried after a short wait."
           }
         },
         "required": [
@@ -1999,7 +2081,7 @@
               },
               "ready": {
                 "type": "boolean",
-                "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                "description": "true once boot has finished and the daemon serves every route; false while booting or held. Readiness does not mean fresh launches are released from the boot quarantine."
               },
               "boot_hold": {
                 "type": [
@@ -2076,7 +2158,7 @@
           },
           "stale": {
             "type": "boolean",
-            "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+            "description": "true when the rows for this origin are not current: a remote that did not answer its last poll, or a local cache that has not finished a full poll. Stale rows are still served."
           },
           "fiber_count": {
             "type": "integer"
@@ -2424,11 +2506,11 @@
         "properties": {
           "polled": {
             "type": "boolean",
-            "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+            "description": "true once this daemon has polled the remote at least once."
           },
           "stale": {
             "type": "boolean",
-            "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+            "description": "true when the remote has not answered its latest poll or has never been polled, so its cached state may be out of date."
           },
           "last_polled_at": {
             "type": [
@@ -2662,11 +2744,11 @@
           },
           "waiting": {
             "type": "boolean",
-            "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+            "description": "true when the terminal backend is still starting."
           },
           "retryable": {
             "type": "boolean",
-            "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+            "description": "true when the same request may be retried after a short wait."
           },
           "project_dir": {
             "type": "string"
@@ -2756,11 +2838,11 @@
           },
           "waiting": {
             "type": "boolean",
-            "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+            "description": "true when the terminal backend is still starting."
           },
           "retryable": {
             "type": "boolean",
-            "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+            "description": "true when the same request may be retried after a short wait."
           },
           "reservation": {
             "type": "object"
@@ -3023,11 +3105,11 @@
           },
           "queued": {
             "type": "boolean",
-            "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+            "description": "Whether the text was queued in the context mailbox; false on every refusal."
           },
           "live": {
             "type": "boolean",
-            "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+            "description": "true when the refusal is because the fiber has a live worker (context_only with unless_live)."
           },
           "fiber_id": {
             "type": "string"
@@ -3106,10 +3188,11 @@
           },
           "killed": {
             "type": "boolean",
-            "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+            "description": "true when a live worker was stopped; false when none was tracked, which is not an error."
           },
           "session": {
-            "type": "string"
+            "type": "string",
+            "description": "The stopped worker's terminal session name; present when killed is true."
           }
         },
         "required": [
