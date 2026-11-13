@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { KanbanSurfaceRenderer, restingOrder } from './KanbanSurfaces.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
-import { card, response } from './testFixtures.js'
+import { card, response, settle } from './testFixtures.js'
 
 function options(data: KanbanResponse) {
   return {
@@ -41,19 +41,21 @@ describe('a Resting line takes its verdicts', () => {
   const standing = resting({ id: 'standing', uid: 'U-STAND', shuttleKind: 'standing', status: 'active', shuttleSchedule: '0 8 * * *' })
   const todo = resting({ id: 'todo', uid: 'U-TODO' })
   const data = response({ stash: [once, standing, todo] })
-  it('offers Temper and Discard on a constitution at rest, Pause schedule and Retire on a standing one, none on a plain note', () => {
+  it('offers Temper and Discard on a constitution at rest, Pause schedule and Retire on a standing one, none on a plain note', async () => {
     const root = new KanbanSurfaceRenderer(options(data)).renderStashSection(restingOrder(data.stash), {})
     document.body.append(root)
-    const labels = (id: string) => {
+    const labels = async (id: string) => {
       root.querySelector<HTMLElement>(`[data-fiber-id="${id}"]`)!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+      await settle()
       const menu = document.querySelector('[role="menu"]')!
-      const labels = [...menu.querySelectorAll('button:not(:disabled)')].map(b => b.textContent)
+      const labels = [...menu.querySelectorAll('[role="menuitem"]:not([aria-disabled="true"])')].map(b => b.textContent)
       menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      await settle()
       return labels
     }
-    expect(labels('once')).toEqual(['Rest', 'Temper', 'Discard'])
-    expect(labels('standing')).toEqual(['Pause schedule', 'Retire'])
-    expect(labels('todo')).toEqual([])
+    expect(await labels('once')).toEqual(['Rest', 'Temper', 'Discard'])
+    expect(await labels('standing')).toEqual(['Pause schedule', 'Retire'])
+    expect(await labels('todo')).toEqual([])
     expect(root.querySelector<HTMLElement>('[data-fiber-id="once"] .kbn-cluster-item-verdicts')?.dataset.verdictKey).toBeTruthy()
   })
   it('keeps a Resting menu on its title line without pinned subentries or a tree', () => {
@@ -68,12 +70,14 @@ describe('a Resting line takes its verdicts', () => {
     expect(row.querySelector('.kbn-thread-subentries, .kbn-thread-pin')).toBeNull()
     expect(end.dataset.verdictKey).toBeTruthy()
   })
-  it('sends the verdict through the board transition, without opening the card', () => {
+  it('sends the verdict through the board transition, without opening the card', async () => {
     const o = options(data)
     const root = new KanbanSurfaceRenderer(o).renderStashSection(restingOrder(data.stash), {})
     document.body.append(root)
     root.querySelector<HTMLElement>('[data-fiber-id="once"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+    await settle()
     ;[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(b => b.textContent === 'Discard')!.click()
+    await settle()
     expect(o.transition).toHaveBeenCalledWith(expect.objectContaining({ id: 'once' }), 'composted')
     expect(o.openDetail).not.toHaveBeenCalled()
   })

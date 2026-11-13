@@ -30,9 +30,9 @@ const session = (label: string): HTMLButtonElement => band.el.querySelector(`.ws
 /** The fiber's acts the band draws where no row stands for it. */
 const actsOf = (view: Dock): HTMLElement => view.el.querySelector<HTMLElement>('.ws-band-head > .ws-fiber-acts')!
 /** The message box's verbs, then the band's lifecycle verbs, as drawn. */
-const shownVerbs = (view: Dock): string[] => [
+const shownVerbs = async (view: Dock): Promise<string[]> => [
   ...(view.el.querySelector<HTMLElement>('.ws-worker-acts')?.hidden ? [] : [...view.el.querySelectorAll<HTMLButtonElement>('.ws-worker-acts button')].filter(button => !button.hidden).map(button => button.dataset.verb!)),
-  ...(actsOf(view).hidden ? [] : offeredVerbs(actsOf(view))),
+  ...(actsOf(view).hidden ? [] : await offeredVerbs(actsOf(view))),
 ]
 /** The message box's field, and typing into it. */
 const messageField = (root: ParentNode = band.el): HTMLElement => root.querySelector<HTMLElement>('.ws-worker-message')!
@@ -162,18 +162,18 @@ describe('band header', () => {
     expect(actsOf(band).querySelector('.ws-acts-settings')).not.toBeNull()
   })
 
-  it('draws the verbs the lifecycle offers for each state', () => {
+  it('draws the verbs the lifecycle offers for each state', async () => {
     const controls = new Dock('', saved, undefined, undefined, { onRest: vi.fn() })
-    const visible = (patch: Partial<KanbanCard>): string[] => { controls.reset(); controls.open(task(patch)); return visibleVerbs(controls) }
-    expect(visible({ status: 'open' })).toEqual(['Start', 'Close for review', 'Rest', 'Temper', 'Discard'])
-    expect(visible({ status: 'active', workerState: 'running', sessionUuid: 'live', tmuxSession: 'worker' }))
+    const visible = async (patch: Partial<KanbanCard>): Promise<string[]> => { controls.reset(); controls.open(task(patch)); document.body.append(controls.el); return visibleVerbs(controls) }
+    expect(await visible({ status: 'open' })).toEqual(['Start', 'Close for review', 'Rest', 'Temper', 'Discard'])
+    expect(await visible({ status: 'active', workerState: 'running', sessionUuid: 'live', tmuxSession: 'worker' }))
       .toEqual(['Send', 'New session', 'Close for review', 'Rest', 'Temper', 'Discard'])
-    expect(visible({ status: 'active', sessionUuid: 'idle' })).toEqual(['Resume', 'New session', 'Close for review', 'Rest', 'Temper', 'Discard'])
+    expect(await visible({ status: 'active', sessionUuid: 'idle' })).toEqual(['Resume', 'New session', 'Close for review', 'Rest', 'Temper', 'Discard'])
     // Work awaiting review wears Temper on the verb button's face; the rest follow in its menu.
-    expect(visible({ status: 'closed', sessionUuid: 'review' })).toEqual(['Resume', 'New session', 'Temper', 'Rest', 'Discard'])
-    expect(visible({ status: 'open', effectiveHorizon: 'stashed', sessionUuid: 'resting' })).toEqual(['Resume', 'New session', 'Temper', 'Rest', 'Discard'])
-    expect(visible({ status: 'closed', tempered: true, sessionUuid: 'tempered' })).toEqual(['Resume', 'New session', 'Rest'])
-    expect(visible({ status: 'closed', tempered: false, sessionUuid: 'discarded' })).toEqual(['Resume', 'New session', 'Rest'])
+    expect(await visible({ status: 'closed', sessionUuid: 'review' })).toEqual(['Resume', 'New session', 'Temper', 'Rest', 'Discard'])
+    expect(await visible({ status: 'open', effectiveHorizon: 'stashed', sessionUuid: 'resting' })).toEqual(['Resume', 'New session', 'Temper', 'Rest', 'Discard'])
+    expect(await visible({ status: 'closed', tempered: true, sessionUuid: 'tempered' })).toEqual(['Resume', 'New session', 'Rest'])
+    expect(await visible({ status: 'closed', tempered: false, sessionUuid: 'discarded' })).toEqual(['Resume', 'New session', 'Rest'])
     controls.reset()
   })
 
@@ -201,7 +201,7 @@ describe('band header', () => {
     expect(band.el.dataset.column).toBe('awaitingReview')
   })
 
-  it('lays the band out as a head, its worker\'s line, its settings and its status', () => {
+  it('lays the band out as a head, its worker\'s line, its settings and its status', async () => {
     dock.reset()
     dock.open(task({ status: 'closed', sessionUuid: 'resume-me', name: 'A long and particular name' }))
     const children = [...band.el.querySelector('.ws-dock-body')!.children].map(child => child.className)
@@ -212,10 +212,10 @@ describe('band header', () => {
     expect(band.el.dataset.column).toBe('awaitingReview')
     expect(band.el.querySelector('.ws-band-title')?.textContent).toBe('A long and particular name')
     expect(band.el.querySelector('textarea, [contenteditable]:not(.ws-worker-message)')).toBeNull()
-    expect(visibleVerbs(band)).toEqual(['Resume', 'New session', 'Temper', 'Discard'])
+    expect(await visibleVerbs(band)).toEqual(['Resume', 'New session', 'Temper', 'Discard'])
     dock.syncRuntime(task({ status: 'active', workerState: 'running', sessionUuid: 'resume-me', tmuxSession: 't' }))
     expect(band.el.dataset.column).toBe('inFlight')
-    expect(visibleVerbs(band)).toEqual(['Send', 'New session', 'Close for review', 'Temper', 'Discard'])
+    expect(await visibleVerbs(band)).toEqual(['Send', 'New session', 'Close for review', 'Temper', 'Discard'])
   })
 
   it('offers named, keyboard-focusable icons in order without sheets', () => {
@@ -267,20 +267,20 @@ describe('band header', () => {
     }
   })
 
-  it('anchors Rest confirmation to its own button and leaves focus in the confirmation', () => {
+  it('anchors Rest confirmation to its own button and leaves focus in the confirmation', async () => {
     const confirm = document.createElement('button'); document.body.append(confirm)
     const rest = vi.fn(() => confirm.focus())
     dock.reset(); dock = band = new Dock('', saved, undefined, undefined, { onRest: rest })
     dock.open(task({ status: 'active' })); document.body.append(band.el)
-    pressVerb(actsOf(band), 'Rest')
+    await pressVerb(actsOf(band), 'Rest')
     expect(rest).toHaveBeenCalledWith(expect.objectContaining({ id: 'a/task' }), actsOf(band).querySelector('.ws-acts-verbs'))
     expect(document.activeElement).toBe(confirm)
   })
 
-  it.each([['open', 'open'], ['closed', 'closed']])('offers no verdicts on a %s fiber without a shuttle block', (_label, status) => {
+  it.each([['open', 'open'], ['closed', 'closed']])('offers no verdicts on a %s fiber without a shuttle block', async (_label, status) => {
     // A note or a role opened from a link is not on the Desk's lifecycle.
     dock.open(card({ id: 'roles/surveyor', uid: 'surveyor', status }))
-    expect(offeredVerbs(actsOf(band))).toEqual([])
+    expect(await offeredVerbs(actsOf(band))).toEqual([])
   })
 })
 
@@ -386,8 +386,8 @@ describe('shared verdict controls', () => {
     document.body.append(band.el)
     expect(band.el.dataset.part).toBe('act'); expect(band.el.dataset.act).toBe('band')
     expect(actsOf(band).dataset.part).toBe('acts'); expect(actsOf(band).dataset.verdictKey).toBeTruthy()
-    pressVerb(actsOf(band), 'Temper')
-    pressVerb(actsOf(band), 'Discard')
+    await pressVerb(actsOf(band), 'Temper')
+    await pressVerb(actsOf(band), 'Discard')
     expect(transition.mock.calls.map(([card, target]) => [card.uid, target])).toEqual([
       ['task-uid', 'tempered'], ['task-uid', 'composted'],
     ])
@@ -400,7 +400,7 @@ describe('shared verdict controls', () => {
     const band = new Dock('', saved, transition)
     band.open(task({ status: 'active', sessionUuid: 'review' }))
     document.body.append(band.el)
-    pressVerb(actsOf(band), 'Close for review')
+    await pressVerb(actsOf(band), 'Close for review')
     expect(transition.mock.calls.map(([card, target]) => [card.uid, target])).toEqual([['task-uid', 'awaitingReview']])
     band.reset()
     await settle()

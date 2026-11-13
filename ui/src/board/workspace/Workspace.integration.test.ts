@@ -841,9 +841,9 @@ describe('workspace reader integration', () => {
     press('s'); expect(onRest).toHaveBeenLastCalledWith(leaf, workspace.reader.el)
     const verbs = row.querySelector<HTMLElement>('.fp-verbs')!
     expect(verbs.querySelector<HTMLButtonElement>('.ws-verb-more')!.title).toBe('More: Rest (s), Temper (t), Discard (x)')
-    pressVerb(verbs, 'Rest'); expect(onRest).toHaveBeenLastCalledWith(leaf, verbs.querySelector('.ws-acts-verbs'))
+    await pressVerb(verbs, 'Rest'); expect(onRest).toHaveBeenLastCalledWith(leaf, verbs.querySelector('.ws-acts-verbs'))
     expect(verbs.querySelector<HTMLButtonElement>('.ws-verb-face')!.title).toBe('Close for review notch (a)')
-    pressVerb(verbs, 'Close for review')
+    await pressVerb(verbs, 'Close for review')
     expect(queue).toHaveBeenLastCalledWith(leaf, 'awaitingReview')
     const primary = document.querySelector<HTMLButtonElement>('.ws-worker-primary')!
     expect(primary.getAttribute('aria-label')).toBe('Resume Notch')
@@ -894,14 +894,14 @@ describe('workspace reader integration', () => {
     const verbs = row.querySelector<HTMLElement>('.fp-verbs')!
     expect(verbs.querySelector('.ws-verb-more')!.getAttribute('aria-label')).toBe('More verbs for notch: Rest (s), Discard (x)')
     vi.useFakeTimers()
-    pressVerb(verbs, 'Discard')
+    await pressVerb(verbs, 'Discard')
     expect(row.getAttribute('aria-selected')).toBe('true')
     expect(row.getAttribute('aria-expanded')).toBe('false')
     expect(row.querySelector('.fp-verbs .ws-verdict-undo')).not.toBeNull()
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', bubbles: true, cancelable: true }))
     vi.advanceTimersByTime(6000)
     expect(commit).not.toHaveBeenCalled()
-    pressVerb(verbs, 'Discard'); vi.advanceTimersByTime(4000)
+    await pressVerb(verbs, 'Discard'); vi.advanceTimersByTime(4000)
     expect(commit).toHaveBeenCalledExactlyOnceWith(leaf, 'composted')
   })
   it('lands a family\'s constitution on its page, first in its run, a leaf thread there too at its unfolded row, and one outside a family on its own page', async () => {

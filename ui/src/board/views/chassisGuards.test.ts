@@ -181,7 +181,7 @@ describe('blockingDialogOpen beside keystrokeIsSpokenFor', () => {
   })
 
   /** Attribute and class tokens, which is all the selector is allowed to be. */
-  const token = (): RegExp => /\[([\w-]+)="([^"]*)"\]|\.([\w-]+)/g
+  const token = (): RegExp => /\[([\w-]+)(?:="([^"]*)")?\]|\.([\w-]+)/g
 
   /**
    * Really evaluate `BLOCKING_DIALOG_SELECTOR` against the sketches rather than
@@ -201,7 +201,7 @@ describe('blockingDialogOpen beside keystrokeIsSpokenFor', () => {
       for (const [, attr, value, cls] of compound.matchAll(token())) {
         if (cls) {
           if (!node.classList.contains(cls)) return false
-        } else if (node.attrs[attr] !== value) return false
+        } else if (value === undefined ? !(attr in node.attrs) : node.attrs[attr] !== value) return false
       }
       return true
     })
@@ -227,6 +227,14 @@ describe('blockingDialogOpen beside keystrokeIsSpokenFor', () => {
   // A hand-rolled dialog: aria-modal, no data-state. M1's shape.
   const handRolled = el({ classes: ['hand-rolled-dialog'], attrs: { role: 'dialog', 'aria-modal': 'true' } })
   const searchBox = el({ tag: 'INPUT' })
+
+  it('both yield to an open SDK menu but not a closed one', () => {
+    stubDOM([boardRoot, el({ attrs: { 'data-slot': 'menu-content', 'data-open': '' } })])
+    expect(blockingDialogOpen()).toBe(true)
+    expect(keystrokeIsSpokenFor()).toBe(true)
+    stubDOM([boardRoot, el({ attrs: { 'data-slot': 'menu-content', 'data-closed': '' } })])
+    expect(blockingDialogOpen()).toBe(false)
+  })
 
   it('both read a bare board as free', () => {
     stubDOM([boardRoot])

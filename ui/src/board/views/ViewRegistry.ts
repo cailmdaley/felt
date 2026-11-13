@@ -200,13 +200,13 @@ export function isBlockingDialog(
  * aria-modal="true"` and no data-state, and without this clause `1`-`4` would
  * switch views out from under it. Matching on aria rather than on a library's
  * attribute means a dialog built outside AppDialog is covered without a code
- * change here.
+ * change here. Open SDK menus also own keys, despite being non-modal.
  */
 export const BLOCKING_DIALOG_SELECTOR =
-  '[role="dialog"][data-state="open"], [role="dialog"][aria-modal="true"]'
+  '[role="dialog"][data-state="open"], [role="dialog"][aria-modal="true"], [data-slot="menu-content"][data-open]'
 
 /**
- * Is a dialog currently layered over the board?
+ * Is a dialog or SDK menu currently taking keys away from the board?
  *
  * The second half of `keystrokeIsSpokenFor` on its own, because a modifier
  * CHORD wants this half without the first: `⌘,` is not typing, wherever the

@@ -1,141 +1,126 @@
+import '@ui-sdk/web/menu'
+import './conversationMenu.css'
 import { attachLongPress } from './longPress.js'
 import { conversationOpening, linkDestination, saveConversationOpening, resolveDestination, type ConversationDestination } from './conversationOpening.js'
 
 export interface ConversationAction {
   label: string; href?: string; run?: () => void; disabled?: boolean; checked?: boolean
-  /** Draws the item as a control drawn elsewhere (a header verb); the menu then styles it by that control's classes. */
+  /** Draws the item as a control drawn elsewhere (a header verb). */
   dress?: (item: HTMLButtonElement) => void
 }
 
 let dismissOpenMenu: (() => void) | undefined
 
-/** A temporary, anchored action menu owns its listeners only while visible. */
+/** Mount a temporary SDK menu outside the board's clickable rows. */
 export function openActionMenu(anchor: HTMLElement, actions: readonly ConversationAction[], label: string, point?: { x: number; y: number }): () => void {
   dismissOpenMenu?.()
-  const menu = document.createElement('div')
+  const root = document.createElement('ui-menu')
+  root.setAttribute('modal', 'false')
+  const menu = document.createElement('ui-menu-content')
   menu.className = 'kbn-conversation-menu'
-  menu.setAttribute('role', 'menu')
   menu.setAttribute('aria-label', label)
-  Object.assign(menu.style, {
-    position: 'fixed', zIndex: '10000', background: 'var(--kbn-form-paper)', color: 'var(--kbn-graphite)',
-    border: '1px solid color-mix(in srgb, var(--kbn-ink) 23%, var(--kbn-parchment))', borderRadius: '4px', padding: '5px',
-    boxShadow: '0 6px 20px color-mix(in srgb, var(--kbn-shade) 13.33%, transparent)', minWidth: '220px', fontFamily: 'var(--font-serif)',
-  })
-  const items: HTMLElement[] = []
+  menu.setAttribute('align', 'start')
+  menu.setAttribute('collision-padding', '8')
+  root.append(menu)
   const anchorBounds = anchor.getBoundingClientRect()
-  let closed = false
-  const dismiss = (restore = false): void => {
-    if (closed) return
-    closed = true
-    menu.remove()
-    window.removeEventListener('pointerdown', outside, true)
-    window.removeEventListener('keydown', keyboard, true)
+  const close = (): void => { root.api.close() }
+  const scrolled = (): void => {
+    // Queued scroll events need not mean the anchor moved.
+    const next = anchor.getBoundingClientRect()
+    if (next.left !== anchorBounds.left || next.top !== anchorBounds.top) close()
+  }
+  let selectedAction: ConversationAction | undefined
+  root.addEventListener('openchange', event => {
+    if (!event.detail.value && event.detail.reason === 'item-press') {
+      const target = event.detail.event?.target as HTMLElement | undefined
+      const index = target?.closest<HTMLElement>('[data-action-index]')?.dataset.actionIndex
+      if (index !== undefined) selectedAction = actions[Number(index)]
+    }
+  })
+  // A destination picker starts at the remembered choice once the SDK moves focus in.
+  menu.addEventListener('focusin', () => {
+    menu.querySelector<HTMLElement>('[role="menuitemradio"][aria-checked="true"]')?.focus({ preventScroll: true })
+  }, { once: true })
+  root.addEventListener('openchangecomplete', event => {
+    if (event.detail.value) return
+    anchor.setAttribute('aria-expanded', 'false')
     window.removeEventListener('resize', close)
     window.removeEventListener('scroll', scrolled, true)
     if (dismissOpenMenu === close) dismissOpenMenu = undefined
-    anchor.setAttribute('aria-expanded', 'false')
-    if (restore && anchor.isConnected) anchor.focus({ preventScroll: true })
+    // Let the popup finish its focus-return microtask before removing its tree or running a verb.
+    queueMicrotask(() => queueMicrotask(() => {
+      root.remove()
+      selectedAction?.run?.()
+    }))
+  })
+  // Menu keys and pointer presses belong to the popup, not the board below it.
+  menu.addEventListener('keydown', event => event.stopPropagation())
+  menu.addEventListener('pointerdown', event => event.stopPropagation())
+  let group: HTMLElement | undefined
+  if (actions.some(action => action.checked !== undefined)) {
+    const radio = document.createElement('ui-menu-radio-group')
+    const selected = actions.findIndex(action => action.checked)
+    if (selected >= 0) radio.setAttribute('default-value', String(selected))
+    group = radio
+    menu.append(group)
   }
-  const close = (): void => dismiss()
-  const scrolled = (): void => {
-    // A click can queue a scroll event before opening the menu. Only actual
-    // anchor movement invalidates its position, not delivery of that event.
-    const next = anchor.getBoundingClientRect()
-    if (next.left !== anchorBounds.left || next.top !== anchorBounds.top) dismiss()
-  }
-  const outside = (e: Event): void => {
-    // The portal must not trigger the card's click-away handling.
-    if (menu.contains(e.target as Node)) e.stopPropagation()
-    else dismiss()
-  }
-  const keyboard = (e: KeyboardEvent): void => {
-    if (e.key === 'Escape' || e.key === 'Tab') {
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation() }
-      dismiss(true)
-      return
-    }
-    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key) && items.length) {
-      e.preventDefault(); e.stopPropagation()
-      const current = items.indexOf(document.activeElement as HTMLElement)
-      const index = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1
-        : (current + (e.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length
-      items[index].focus({ preventScroll: true })
-    }
-    // Native Enter/Space activate the focused button; Desk verb keys stay beneath the menu.
-    if (menu.contains(e.target as Node)) e.stopPropagation()
-  }
-  for (const action of actions.length ? actions : [{ label: 'No actions available', disabled: true }]) {
+  let verbs = false
+  for (const [index, action] of (actions.length ? actions : [{ label: 'No actions available', disabled: true }]).entries()) {
+    const part = document.createElement(action.checked === undefined ? 'ui-menu-item' : 'ui-menu-radio-item')
+    part.setAttribute('as-child', '')
+    part.setAttribute('value', String(index))
+    part.setAttribute('label', action.label)
+    if (action.disabled) part.setAttribute('disabled', '')
+    if (action.checked !== undefined) part.setAttribute('close-on-select', '')
     const item = document.createElement(action.href ? 'a' : 'button')
+    item.dataset.actionIndex = String(index)
     if (item instanceof HTMLAnchorElement) linkDestination(item, action.href!)
-    else {
-      (item as HTMLButtonElement).type = 'button'
-      ;(item as HTMLButtonElement).disabled = !!action.disabled
-    }
+    else (item as HTMLButtonElement).type = 'button'
     if (action.checked === undefined) item.textContent = action.label
     else {
-      const mark = document.createElement('span')
+      const mark = document.createElement('ui-menu-item-indicator')
+      mark.setAttribute('keep-mounted', '')
       mark.setAttribute('aria-hidden', 'true')
-      mark.textContent = action.checked ? '✓' : ''
-      const label = document.createElement('span')
-      label.className = 'kbn-conversation-label'
-      label.textContent = action.label
-      item.append(mark, label)
-      item.setAttribute('aria-checked', String(action.checked))
+      mark.textContent = '✓'
+      const text = document.createElement('span')
+      text.className = 'kbn-conversation-label'
+      text.textContent = action.label
+      item.append(mark, text)
     }
-    item.setAttribute('role', action.checked === undefined ? 'menuitem' : 'menuitemradio')
-    item.tabIndex = -1
     if (action.dress && item instanceof HTMLButtonElement) {
       action.dress(item)
+      verbs = true
       menu.classList.add('kbn-verb-menu')
-      item.addEventListener('click', e => { e.stopPropagation(); dismiss(true); action.run?.() })
-      menu.append(item)
-      if (!action.disabled) items.push(item)
-      continue
-    }
-    if (menu.classList.contains('kbn-verb-menu')) {
-      // Beneath the verbs, a plain item is drawn in the verbs' type, its word aligned with theirs.
-      if (!menu.querySelector('.kbn-verb-menu-rule')) {
-        const rule = document.createElement('hr'); rule.className = 'kbn-verb-menu-rule'; menu.append(rule)
+    } else if (verbs) {
+      if (!menu.querySelector('ui-menu-separator')) {
+        const rule = document.createElement('ui-menu-separator')
+        rule.className = 'kbn-verb-menu-rule'
+        menu.append(rule)
       }
       item.classList.add('kbn-verb-menu-plain')
-      item.addEventListener('click', e => { e.stopPropagation(); dismiss(true); action.run?.() })
-      menu.append(item)
-      if (!action.disabled) items.push(item)
-      continue
     }
-    Object.assign(item.style, { display: action.checked === undefined ? 'block' : 'grid', gridTemplateColumns: '1em minmax(0, 1fr)', columnGap: '8px', width: '100%', boxSizing: 'border-box', textAlign: 'left', padding: '10px 12px', font: 'inherit', fontSize: 'var(--type-row)', color: 'inherit', background: 'transparent', border: '0', textDecoration: 'none', cursor: 'pointer', borderRadius: '2px' })
-    item.addEventListener('focus', () => { item.style.background = 'var(--kbn-form-band)' })
-    item.addEventListener('blur', () => { item.style.background = 'transparent' })
-    item.addEventListener('click', e => { e.stopPropagation(); dismiss(true); action.run?.() })
-    menu.append(item)
-    if (!action.disabled) items.push(item)
+    part.append(item)
+    ;(action.checked === undefined ? menu : group!).append(part)
+    item.addEventListener('click', event => event.stopPropagation())
   }
-  menu.tabIndex = -1
-  document.body.append(menu)
-  const bounds = menu.getBoundingClientRect()
-  const origin = point ?? { x: anchor.getBoundingClientRect().left, y: anchor.getBoundingClientRect().bottom }
-  menu.style.left = `${Math.max(8, Math.min(origin.x, window.innerWidth - bounds.width - 8))}px`
-  menu.style.top = `${Math.max(8, Math.min(origin.y, window.innerHeight - bounds.height - 8))}px`
+  document.body.append(root)
   anchor.setAttribute('aria-expanded', 'true')
   dismissOpenMenu = close
-  window.addEventListener('pointerdown', outside, true)
-  window.addEventListener('keydown', keyboard, true)
   window.addEventListener('resize', close)
   window.addEventListener('scroll', scrolled, true)
-  ;(items.find(item => item.getAttribute('aria-checked') === 'true') ?? items[0] ?? menu).focus({ preventScroll: true })
+  // Controller-opened popups return to the element focused when they open.
+  anchor.focus({ preventScroll: true })
+  void root.api.open({ anchor: point ?? anchor, focus: 'first' })
   return close
 }
 
-/** Touch and mouse share the same picker, including a single usable destination.
- *  Activating the anchor opens its destination, so it announces no popup; the picker
- *  is its context menu. The anchor refuses the platform's own link callout and selection. */
+/** Touch and mouse share the same picker. Activating the anchor opens its destination. */
 export function attachConversationPicker(anchor: HTMLElement, destinations: () => readonly ConversationDestination[]): () => void {
   anchor.classList.add('kbn-picker-anchor')
   const show = (point?: { x: number; y: number }): void => {
     const available = destinations()
     if (!available.length) return
-    const remembered = conversationOpening()
-    const selected = resolveDestination(available, remembered)
+    const selected = resolveDestination(available, conversationOpening())
     openActionMenu(anchor, available.map(destination => ({
       label: `Open in ${destination.label}`,
       href: destination.href,
@@ -152,10 +137,21 @@ export function attachConversationPicker(anchor: HTMLElement, destinations: () =
     if (anchor.getAttribute('aria-expanded') === 'true') return
     show(event.clientX || event.clientY ? { x: event.clientX, y: event.clientY } : undefined)
   }
+  const keyboard = (event: KeyboardEvent): void => {
+    if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
+    event.preventDefault(); event.stopPropagation()
+    show()
+  }
   anchor.addEventListener('contextmenu', context)
+  anchor.addEventListener('keydown', keyboard)
   // A pill nested in a Desk row owns the gesture, not the row's action menu.
   const down = (event: PointerEvent): void => event.stopPropagation()
   anchor.addEventListener('pointerdown', down)
   const detach = attachLongPress(anchor, { onFire: () => show() })
-  return () => { detach(); anchor.removeEventListener('contextmenu', context); anchor.removeEventListener('pointerdown', down) }
+  return () => {
+    detach()
+    anchor.removeEventListener('contextmenu', context)
+    anchor.removeEventListener('keydown', keyboard)
+    anchor.removeEventListener('pointerdown', down)
+  }
 }

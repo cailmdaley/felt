@@ -75,15 +75,13 @@ beforeEach(() => {
 })
 afterEach(() => { board?.unmount(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-// jsdom has no native button default action. Dispatch its click only when
-// the key is unconsumed, so an intercepted Enter/Space cannot pass this test.
-function activate(button: HTMLButtonElement, key: 'Enter' | ' '): void {
+// The SDK owns menu activation; jsdom only supplies an unhandled native button click.
+async function activate(button: HTMLButtonElement, key: 'Enter' | ' '): Promise<void> {
   const down = press(key, {}, button)
   const up = new KeyboardEvent('keyup', { key, bubbles: true, cancelable: true })
   button.dispatchEvent(up)
-  expect(down.defaultPrevented).toBe(false)
-  expect(up.defaultPrevented).toBe(false)
   if (!down.defaultPrevented && !up.defaultPrevented) button.click()
+  await settle()
 }
 
 it('repaints the Desk as the voice target changes', () => {
@@ -102,10 +100,13 @@ describe('Desk row menu', () => {
   const row = () => document.querySelector<HTMLElement>('[data-card-uid="review"]')!
   const menu = () => document.querySelector<HTMLElement>('[role="menu"]')
   const items = () => [...menu()!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
-  const rightClick = (el: HTMLElement) => el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 50 }))
-  it('a row carries no menu control; right-click opens the header verbs, drawn as the header draws them', () => {
+  const rightClick = async (el: HTMLElement) => {
+    el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 50 }))
+    await settle()
+  }
+  it('a row carries no menu control; right-click opens the header verbs, drawn as the header draws them', async () => {
     expect(document.querySelector('.kbn-card-menu')).toBeNull()
-    rightClick(row())
+    await rightClick(row())
     // The header's verbs, then what only the Desk adds: the touch path to a move.
     expect(items().map(i => i.textContent)).toEqual(['Rest', 'Temper', 'Discard', 'Move…'])
     expect(items().slice(0, 3).map(i => [...i.classList].filter(c => c.startsWith('kbn-ctl-') || c.startsWith('ws-header')))).toEqual([
@@ -113,12 +114,13 @@ describe('Desk row menu', () => {
     expect(items().slice(0, 3).every(i => i.querySelector('svg') && i.querySelector('.ws-header-word'))).toBe(true)
     expect(menu()!.classList.contains('kbn-verb-menu')).toBe(true)
   })
-  it.each(['Enter', ' '] as const)('Shift+F10 on the selected row opens it; arrows select, Escape restores the row, and %s gives a verdict', key => {
+  it.each(['Enter', ' '] as const)('Shift+F10 on the selected row opens it; arrows select, Escape restores the row, and %s gives a verdict', async key => {
     press('j')
     const selectedRow = document.querySelector<HTMLElement>('.kbn-key-selected')!
     expect(selectedRow).toBe(row())
     selectedRow.focus()
     expect(press('F10', { shiftKey: true }, selectedRow).defaultPrevented).toBe(true)
+    await settle()
     expect(row().getAttribute('aria-expanded')).toBe('true')
     expect(document.activeElement).toBe(items()[0])
     press('ArrowDown', {}, document.activeElement!)
@@ -131,24 +133,27 @@ describe('Desk row menu', () => {
     press('x', {}, document.activeElement!)
     expect(document.querySelector('.ws-verdict-undo')).toBeNull()
     press('Escape', {}, document.activeElement!)
+    await settle()
     expect(menu()).toBeNull()
     expect(document.activeElement).toBe(row())
     expect(selected()).toBe('review')
     press('ContextMenu', {}, row())
-    activate(items()[1], key)
+    await settle()
+    await activate(items()[1], key)
     expect(menu()).toBeNull()
     expect(document.activeElement?.getAttribute('aria-label')).toBe('Undo verdict on review')
     expect(document.querySelector('[data-card-uid="review"] .ws-verdict-undo')?.textContent).toBe('Tempered·undo z')
     expect(inside.workspace.isActive).toBe(false)
     press('z')
   })
-  it('Close for review from the menu enters the same undo window as the header and keys', () => {
+  it('Close for review from the menu enters the same undo window as the header and keys', async () => {
     const live = card({ id: 'live', uid: 'live', shuttleKind: 'oneshot', status: 'active', workerState: 'running', runtimePhase: 'waiting' })
     draw(response({ now: { drafts: [], inFlight: [live], awaitingReview: [] } }))
     vi.stubGlobal('confirm', () => true)
-    rightClick(document.querySelector<HTMLElement>('[data-card-uid="live"]')!)
+    await rightClick(document.querySelector<HTMLElement>('[data-card-uid="live"]')!)
     const review = items().find(i => i.getAttribute('aria-label') === 'Close for review')!
     review.click()
+    await settle()
     expect(menu()).toBeNull()
     expect(document.querySelector('[data-card-uid="live"] .ws-verdict-undo')?.textContent).toMatch(/undo/)
     press('z')
@@ -169,20 +174,22 @@ describe('Desk row menu', () => {
     expect(event.defaultPrevented).toBe(true)
     expect(menu()).toBeNull()
   })
-  it('never offers family expansion or folding in the row menu', () => {
+  it('never offers family expansion or folding in the row menu', async () => {
     const root = card({ id: 'family', uid: 'family', shuttleKind: 'oneshot' })
     const child = card({ id: 'family/child', orchestrator: 'family', status: 'active' })
     draw(response({ now: { drafts: [root], inFlight: [], awaitingReview: [] }, threads: [child] }))
-    rightClick(document.querySelector<HTMLElement>('[data-card-uid="family"]')!)
+    await rightClick(document.querySelector<HTMLElement>('[data-card-uid="family"]')!)
     expect(menu()?.textContent ?? '').not.toMatch(/Expand family|Fold family/)
     expect(inside.workspace.isActive).toBe(false)
   })
-  it('Tab dismisses the menu and a repaint removes its portal', () => {
-    rightClick(row())
+  it('Tab dismisses the menu and a repaint removes its portal', async () => {
+    await rightClick(row())
     press('Tab', {}, document.activeElement!)
+    await settle()
     expect(menu()).toBeNull()
-    rightClick(row())
+    await rightClick(row())
     draw(data())
+    await settle()
     expect(menu()).toBeNull()
   })
 })
@@ -222,7 +229,7 @@ describe('Rest controls', () => {
     inside.openDocumentChannel(finished)
     await settle()
     const acts = [...document.querySelectorAll<HTMLElement>('.ws-reader .ws-fiber-acts')].find(el => !el.closest('[hidden]'))!
-    expect(offeredVerbs(acts)).toEqual(['Rest'])
+    expect(await offeredVerbs(acts)).toEqual(['Rest'])
     expect([...document.querySelectorAll<HTMLButtonElement>('.ws-reader .ws-worker-acts button[data-verb]')].filter(button => !button.hidden).map(button => button.dataset.verb)).toEqual(['Resume', 'New session'])
     const target = document.querySelector<HTMLElement>('.ws-reader .ws-return')!
     target.focus()
@@ -236,12 +243,13 @@ describe('Rest controls', () => {
     expect(JSON.parse(String(calls[0][1]?.body))).toEqual({ action: 'rest', fiber: 'finished', origin: 'remote', until: '' })
   })
 
-  it("a Desk card's menu carries a Rest that opens the same popover", () => {
+  it("a Desk card's menu carries a Rest that opens the same popover", async () => {
     draw(response({ now: { drafts: [], inFlight: [], awaitingReview: [card({ id: 'review', uid: 'review', status: 'closed', shuttleKind: 'oneshot' }), card({ id: 'note', uid: 'note', status: 'closed' })] } }))
     document.querySelector<HTMLElement>('[data-card-uid="review"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+    await settle()
     const rest = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(b => b.textContent === 'Rest')!
     expect(rest).toBeDefined()
-    activate(rest, 'Enter')
+    await activate(rest, 'Enter')
     expect(document.querySelector('.kbn-rest-popover')).not.toBeNull()
   })
 })
@@ -251,8 +259,9 @@ describe('a standing constitution on the Desk', () => {
   const paused = card({ id: 'digest', uid: 'digest', status: 'open', effectiveHorizon: 'stashed', storedHorizon: 'stashed', shuttleKind: 'standing', shuttleSchedule: '0 7 * * *', scheduleText: 'daily at 07:00' })
   const desk = () => response({ stash: [armed, paused] })
   const lifecycle = () => vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/api/v1/lifecycle')).map(([, init]) => JSON.parse(String(init?.body)))
-  const menu = (uid: string) => {
+  const menu = async (uid: string) => {
     document.querySelector<HTMLElement>(`[data-card-uid="${uid}"]`)!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+    await settle()
     return [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
   }
 
@@ -265,8 +274,9 @@ describe('a standing constitution on the Desk', () => {
 
   it('pauses an armed schedule from its menu at once, posting rest with no wake day', async () => {
     draw(desk())
-    expect(menu('post').map(item => item.textContent)).toEqual(['Pause schedule', 'Retire', 'Move…'])
-    activate(menu('post').find(item => item.textContent === 'Pause schedule')!, 'Enter')
+    const entries = await menu('post')
+    expect(entries.map(item => item.textContent)).toEqual(['Pause schedule', 'Retire', 'Move…'])
+    await activate(entries.find(item => item.textContent === 'Pause schedule')!, 'Enter')
     await settle()
     expect(document.querySelector('.kbn-rest-popover')).toBeNull()
     expect(lifecycle()).toEqual([{ action: 'rest', fiber: 'post', origin: 'remote' }])
@@ -274,8 +284,9 @@ describe('a standing constitution on the Desk', () => {
 
   it('resumes a paused schedule from its menu', async () => {
     draw(desk())
-    expect(menu('digest').map(item => item.textContent)).toEqual(['Resume schedule', 'Retire', 'Move…'])
-    activate(menu('digest').find(item => item.textContent === 'Resume schedule')!, 'Enter')
+    const entries = await menu('digest')
+    expect(entries.map(item => item.textContent)).toEqual(['Resume schedule', 'Retire', 'Move…'])
+    await activate(entries.find(item => item.textContent === 'Resume schedule')!, 'Enter')
     await settle()
     expect(lifecycle()).toEqual([{ action: 'resume', fiber: 'digest', origin: 'local' }])
   })

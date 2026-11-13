@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
 import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
-import { card, response } from './testFixtures.js'
+import { card, response, settle } from './testFixtures.js'
 import { Verdicts } from './workspace/Verdicts.js'
 
 function renderer(): KanbanSurfaceRenderer {
@@ -17,7 +17,7 @@ function renderer(): KanbanSurfaceRenderer {
 }
 
 describe('verdict actions ride cards awaiting review and in flight', () => {
-  it('offers the header verbs on review and in-flight cards, none on a plain note', () => {
+  it('offers the header verbs on review and in-flight cards, none on a plain note', async () => {
     const data = response({ now: {
       drafts: [card({ id: 'draft' })],
       inFlight: [card({ id: 'flight', status: 'active', shuttleKind: 'oneshot' })],
@@ -30,11 +30,13 @@ describe('verdict actions ride cards awaiting review and in flight', () => {
       for (const id of ['draft', 'flight', 'review']) {
         expect(root.querySelector(`[data-fiber-id="${id}"] .kbn-card-menu`)).toBeNull()
         root.querySelector<HTMLElement>(`[data-fiber-id="${id}"]`)!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
-        const actions = document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')
+        await settle()
+        const actions = document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not([aria-disabled="true"])')
         // The header's verbs for each place: work in flight can also be closed for review; a plain note takes none.
         expect([...actions].map(button => button.textContent)).toEqual({ draft: [], flight: ['Close for review', 'Temper', 'Discard'], review: ['Temper', 'Discard'] }[id])
         expect([...actions].every(button => button.type === 'button')).toBe(true)
         surfaces.closeMenu()
+        await settle()
       }
     } finally { surfaces.closeMenu(); document.body.replaceChildren() }
   })

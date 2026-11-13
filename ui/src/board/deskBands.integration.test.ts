@@ -98,15 +98,17 @@ describe('cycle members at rest', () => {
 })
 
 describe('In flight bands', () => {
-  it('keeps the conversation in the action menu, never on the row', () => {
+  it('keeps the conversation in the action menu, never on the row', async () => {
     const data = workerFeed(['working']), open = vi.fn()
     const worker = data.now.inFlight[0]
     const root = renderer(data, vi.fn(), { can: () => true, open }).renderNowSection(data.now, {})
     document.body.append(root)
     root.querySelector<HTMLElement>('.kbn-card')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+    await new Promise(resolve => setTimeout(resolve, 0))
     const conversation = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(item => item.textContent === 'Open conversation')!
     expect(conversation).toBeDefined()
     conversation.click()
+    await new Promise(resolve => setTimeout(resolve, 0))
     expect(open).toHaveBeenCalledExactlyOnceWith(worker)
     root.remove()
   })
