@@ -32,6 +32,7 @@
  * same drag grips settle later. See {@link eraName} and `openEraComposer`.
  */
 
+import '@ui-sdk/web/autocomplete'
 import { registerView, type TemporalView, type ViewContext } from './ViewRegistry.js'
 import { createViewEmptyState, createViewPage } from './ViewPage.js'
 import {
@@ -315,7 +316,7 @@ class ChronicleView implements TemporalView {
 
   // ── Search ────────────────────────────────────────────────────────────────
   /** The head's search box, while mounted. */
-  private searchBox: { input: HTMLInputElement; list: HTMLElement } | null = null
+  private searchBox: { root: HTMLElementTagNameMap['ui-autocomplete']; list: HTMLElement; empty: HTMLElement; hits: Map<string, SearchHit> } | null = null
   /** What is typed, trimmed. The local half re-filters on it every keystroke. */
   private searchQuery = ''
   /** The daemon's body-search answer, and the query it answers — held together
@@ -432,8 +433,11 @@ class ChronicleView implements TemporalView {
     // closure over the mount-time context would search yesterday's cards.
     const current = (): ViewContext => this.ctx ?? mountCtx
 
-    const box = document.createElement('div')
+    const box = document.createElement('ui-autocomplete')
     box.className = 'chr-search'
+    box.setAttribute('filter', 'false')
+    box.setAttribute('modal', 'false')
+    box.setAttribute('open-on-focus', '')
 
     const input = document.createElement('input')
     input.type = 'search'
@@ -441,19 +445,42 @@ class ChronicleView implements TemporalView {
     input.placeholder = 'search the record'
     input.setAttribute('aria-label', 'Search every constitution, body text included')
 
-    const list = document.createElement('div')
-    list.className = 'chr-search-hits'
-    list.setAttribute('role', 'listbox')
-
-    box.append(input, list)
-    this.searchBox = { input, list }
-
-    input.addEventListener('input', () => {
-      this.searchQuery = input.value.trim()
+    const inputPart = document.createElement('ui-autocomplete-input')
+    inputPart.append(input)
+    const content = document.createElement('ui-autocomplete-content')
+    content.className = 'chr-search-hits'
+    content.setAttribute('align', 'end')
+    content.setAttribute('side-offset', '4')
+    // The SDK stashes the empty part's children while there are hits, so the
+    // message and its look live in one child that survives the stash.
+    const empty = document.createElement('ui-autocomplete-empty')
+    const emptyText = document.createElement('span')
+    emptyText.className = 'chr-search-none'
+    empty.append(emptyText)
+    const list = document.createElement('ui-autocomplete-list')
+    content.append(empty, list)
+    box.append(inputPart, content)
+    const hits = new Map<string, SearchHit>()
+    this.searchBox = { root: box, list, empty: emptyText, hits }
+    box.addEventListener('valuechange', event => {
+      if (event.detail.reason === 'item-press') {
+        // Choosing a record navigates without replacing the search text.
+        event.preventDefault()
+        const hit = hits.get(event.detail.value)
+        if (hit) this.jumpTo(hit, current())
+        return
+      }
+      this.searchQuery = event.detail.value.trim()
       // The local half is free, so it repaints on the keystroke; the record
       // half is a shell-out, so it waits for the hand to stop.
       this.paintHits(current())
       this.scheduleRecordSearch(current())
+    })
+    // Hits show while there is a query and the field has focus; choosing one
+    // leaves them up for the next.
+    box.addEventListener('openchange', event => {
+      const { value, reason } = event.detail
+      if (value ? !this.searchQuery : reason === 'item-press') event.preventDefault()
     })
     input.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return
@@ -463,12 +490,6 @@ class ChronicleView implements TemporalView {
       this.clearSearch(current())
       input.blur()
     })
-    // Focus decides whether the list is showing, EXCEPT while the pointer is
-    // going down on a hit — mousedown fires before blur, and without this the
-    // list would close out from under the click that was choosing from it.
-    list.addEventListener('mousedown', (e) => e.preventDefault())
-    input.addEventListener('focus', () => box.classList.add('chr-search-open'))
-    input.addEventListener('blur', () => box.classList.remove('chr-search-open'))
 
     return box
   }
@@ -515,7 +536,7 @@ class ChronicleView implements TemporalView {
 
   private clearSearch(ctx: ViewContext): void {
     this.resetSearch()
-    if (this.searchBox) this.searchBox.input.value = ''
+    if (this.searchBox) this.searchBox.root.value = ''
     this.setFound(null)
     this.paintHits(ctx)
   }
@@ -526,29 +547,27 @@ class ChronicleView implements TemporalView {
     const box = this.searchBox
     if (!box) return
     box.list.replaceChildren()
-    if (!this.searchQuery) return
+    box.hits.clear()
+    if (!this.searchQuery) { box.root.open = false; return }
 
     const boardIds = new Set(ctx.cards.map((c) => c.id))
     const record = this.recordHitsFor === this.searchQuery ? this.recordHits : []
     const hits = mergeHits(localHits(ctx.cards, this.searchQuery), record, boardIds)
 
-    if (hits.length === 0) {
-      const none = document.createElement('div')
-      none.className = 'chr-search-none'
-      none.textContent =
-        this.recordHitsFor === this.searchQuery ? 'nothing in the record' : 'searching the record…'
-      box.list.append(none)
-      return
+    box.empty.textContent =
+      this.recordHitsFor === this.searchQuery ? 'nothing in the record' : 'searching the record…'
+    for (const hit of hits) {
+      box.hits.set(hit.id, hit)
+      box.list.append(this.buildHit(hit))
     }
-
-    for (const hit of hits) box.list.append(this.buildHit(hit, ctx))
   }
 
-  private buildHit(hit: SearchHit, ctx: ViewContext): HTMLElement {
-    const el = document.createElement('button')
-    el.type = 'button'
+  private buildHit(hit: SearchHit): HTMLElement {
+    const el = document.createElement('ui-autocomplete-item')
+    // A choice reports its label, so the label is the id a pick jumps to.
+    el.setAttribute('value', hit.id)
+    el.setAttribute('label', hit.id)
     el.className = `chr-hit${hit.onBoard ? '' : ' chr-hit-off'}`
-    el.setAttribute('role', 'option')
 
     const name = document.createElement('span')
     name.className = 'chr-hit-name'
@@ -573,7 +592,6 @@ class ChronicleView implements TemporalView {
     el.title = hit.onBoard
       ? `${hit.id} — jump to its lifeline`
       : `${hit.id} — in the record, not on this board`
-    el.addEventListener('click', () => this.jumpTo(hit, ctx))
     return el
   }
 

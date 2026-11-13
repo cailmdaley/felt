@@ -1,3 +1,5 @@
+@layer ui-sdk;
+
 /* Chronicle — days across, fibers down.
 
    One CSS grid does the whole page: column 1 is the sticky row-label gutter,
@@ -1082,10 +1084,8 @@ button.chr-name:hover {
 
 /* A rule under a line of text rather than a boxed field: the page is a
    chronicle, and its search should read as a margin note you can type in, not
-   as a form. The hit list hangs off it, which is why the box is the
-   positioning context. */
+   as a form. */
 .chr-search {
-  position: relative;
   flex: 0 0 auto;
 }
 
@@ -1112,29 +1112,22 @@ button.chr-name:hover {
 /* WebKit's own clear affordance is a grey circle in a parchment margin. */
 .chr-search-input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
 
-/* The hits. Absolute, so opening the list never reflows the head or the grid
-   under it, and above everything the page positions (the sticky gutter sits at
-   z 3, the cycle inputs at 6). */
+/* The SDK places search hits in the top layer without reflowing the grid. */
 .chr-search-hits {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 20;
-  width: 380px;
-  max-height: 46vh;
+  width: min(380px, calc(100vw - 24px));
+  max-height: min(46vh, var(--available-height));
+  margin: 0;
+  padding: 0;
   overflow-y: auto;
+  color: var(--kbn-ink);
   background: color-mix(in srgb, var(--kbn-paper-bright) 99%, transparent);
   border: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 34%, transparent);
   border-radius: 3px;
   box-shadow: 0 3px 10px color-mix(in srgb, var(--kbn-shade) 14%, transparent);
 }
-/* Nothing typed, nothing found, nothing focused: no panel at all. `:empty`
-   carries the first two; the focus rule carries the third, so a list left open
-   behind a click elsewhere folds away. */
-.chr-search-hits:empty { display: none; }
-.chr-search:not(.chr-search-open) .chr-search-hits { display: none; }
 
 .chr-search-none {
+  display: block;
   padding: 8px 10px;
   font-family: var(--font-serif);
   font-style: italic;
@@ -1146,7 +1139,6 @@ button.chr-name:hover {
    were found in the body or the outcome — the passage they were found in. */
 .chr-hit {
   display: block;
-  width: 100%;
   padding: 6px 10px;
   border: 0;
   border-bottom: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 16%, transparent);
@@ -1155,7 +1147,7 @@ button.chr-name:hover {
   cursor: pointer;
 }
 .chr-hit:last-child { border-bottom: 0; }
-.chr-hit:hover { background: color-mix(in srgb, var(--kbn-owed-bright) 12%, transparent); }
+.chr-hit:is(:hover, [data-highlighted]) { background: color-mix(in srgb, var(--kbn-owed-bright) 12%, transparent); }
 
 .chr-hit-name {
   display: block;
