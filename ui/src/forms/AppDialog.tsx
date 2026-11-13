@@ -205,13 +205,7 @@ export function AppDialog({
 }: AppDialogProps): JSX.Element {
   injectAppDialogStyles()
   return (
-    <Dialog open={open} onOpenChange={(next, details) => {
-      if (details.reason === 'escape-key' && (details.event?.target as Element | null)?.getAttribute('aria-expanded') === 'true') {
-        details.cancel()
-        return
-      }
-      onOpenChange(next)
-    }}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogBackdrop style={appDialogOverlayStyles} />
       <DialogContent
         initialFocus={initialFocus}

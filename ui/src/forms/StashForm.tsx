@@ -31,6 +31,7 @@
 
 import type { JSX } from 'react'
 import { useEffect, useRef, useState } from 'react'
+import { Autocomplete, AutocompleteContent, AutocompleteEmpty, AutocompleteInput, AutocompleteItem, AutocompleteList } from '@ui-sdk/react/autocomplete'
 import { agentGroups, resolveEffort } from './agents'
 import { useAgentRegistry } from './useAgentRegistry'
 import { AppDialog } from './AppDialog'
@@ -45,8 +46,8 @@ import {
   HostProjectFields,
   injectFormKitStyles,
 } from './formKit'
-import { filterParentCandidates, type FiberSearchResult } from '../board/fiberSearch'
-import { fiberIndex } from '../board/wikilinks'
+import { filterParentCandidates } from '../board/fiberSearch'
+import { fiberIndex, type FiberIndexEntry } from '../board/wikilinks'
 import { daemonErrorMessage, postDaemonJson } from '../board/daemonApi'
 import type { Host, Project } from './projectModel'
 
@@ -158,125 +159,43 @@ interface ParentPickerProps {
 }
 
 function ParentPicker({ value, onChange, scopePrefix, shuttleBase }: ParentPickerProps): JSX.Element {
-  const [open, setOpen] = useState(false)
-  const [results, setResults] = useState<FiberSearchResult[]>([])
-  const [highlight, setHighlight] = useState(-1)
-  const wrapRef = useRef<HTMLDivElement | null>(null)
-  const inputRef = useRef<HTMLInputElement | null>(null)
-  const debounceRef = useRef<number | null>(null)
-
-  // Scope the daemon's (loom-relative) index to the selected project, then
-  // strip the loomPrefix so candidates are project-relative — exactly the id
-  // space the create endpoint expects for this project_dir.
-  const fetchResults = (query: string): void => {
-    fiberIndex(shuttleBase)
-      .then((all) => {
-        const scoped = scopePrefix
-          ? all
-              .filter((f) => f.id === scopePrefix || f.id.startsWith(scopePrefix + '/'))
-              .map((f) => ({ id: f.id.slice(scopePrefix.length).replace(/^\//, ''), name: f.name }))
-              .filter((f) => f.id) // drop the project-root fiber itself (id → '')
-          : all
-        setResults(filterParentCandidates(scoped, query, ''))
-        setHighlight(-1)
-        setOpen(true)
-      })
-      .catch(() => {})
-  }
-
+  const [index, setIndex] = useState<FiberIndexEntry[]>([])
   useEffect(() => {
-    if (!open) return
-    const onDocMouseDown = (e: MouseEvent): void => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', onDocMouseDown)
-    return () => document.removeEventListener('mousedown', onDocMouseDown)
-  }, [open])
+    let current = true
+    void fiberIndex(shuttleBase).then(all => { if (current) setIndex(all) }).catch(() => {})
+    return () => { current = false }
+  }, [shuttleBase])
 
-  const handleInput = (e: React.ChangeEvent<HTMLInputElement>): void => {
-    const v = e.target.value
-    onChange(v)
-    if (debounceRef.current !== null) window.clearTimeout(debounceRef.current)
-    debounceRef.current = window.setTimeout(() => fetchResults(v.trim()), 200)
-  }
-
-  const commit = (r: FiberSearchResult): void => {
-    onChange(r.id)
-    setOpen(false)
-    inputRef.current?.blur()
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      if (!open) {
-        fetchResults(value.trim())
-        return
-      }
-      setHighlight((h) => Math.min(results.length - 1, h + 1))
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      setHighlight((h) => Math.max(-1, h - 1))
-    } else if (e.key === 'Enter') {
-      if (open && highlight >= 0 && results[highlight]) {
-        e.preventDefault()
-        commit(results[highlight])
-      }
-    } else if (e.key === 'Escape') {
-      // The dialog leaves Escape to an expanded combobox (see AppDialog), so
-      // this closes only the dropdown.
-      if (open) {
-        e.preventDefault()
-        setOpen(false)
-      }
-    }
-  }
+  // The create endpoint takes project-relative ids, not loom-relative ones.
+  const scoped = scopePrefix
+    ? index.filter(f => f.id.startsWith(scopePrefix + '/'))
+        .map(f => ({ id: f.id.slice(scopePrefix.length + 1), name: f.name }))
+    : index
+  const results = filterParentCandidates(scoped, value.trim(), '')
 
   return (
-    <div className="stash-parent-picker" ref={wrapRef}>
-      <input
-        ref={inputRef}
-        type="text"
-        className="form-input"
-        value={value}
-        onChange={handleInput}
-        onFocus={() => fetchResults(value.trim())}
-        onKeyDown={handleKeyDown}
-        placeholder="standalone-kanban  ·  backend/…"
-        autoComplete="off"
-        aria-label="Parent fiber"
-        role="combobox"
-        aria-expanded={open}
-        aria-haspopup="listbox"
-      />
-      {open && (
-        <div className="stash-parent-dropdown" role="listbox">
-          {results.length === 0 ? (
-            <div className="stash-parent-option stash-parent-empty">
-              {value.trim() ? 'No matches' : 'No fibers in this project'}
-            </div>
-          ) : (
-            results.map((r, i) => (
-              <button
-                key={r.id}
-                type="button"
-                className={`stash-parent-option${i === highlight ? ' stash-parent-option-active' : ''}`}
-                data-depth={r.depth}
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  commit(r)
-                }}
-                onMouseEnter={() => setHighlight(i)}
-              >
+    <div className="stash-parent-picker">
+      <Autocomplete value={value} onValueChange={onChange} openOnFocus filter={false}>
+        <AutocompleteInput
+          className="form-input"
+          placeholder="standalone-kanban  ·  backend/…"
+          aria-label="Parent fiber"
+        />
+        <AutocompleteContent className="stash-parent-dropdown" sideOffset={4} align="start">
+          <AutocompleteEmpty className="stash-parent-empty">
+            {value.trim() ? 'No matches' : 'No fibers in this project'}
+          </AutocompleteEmpty>
+          <AutocompleteList aria-label="Parent fibers">
+            {results.map(r => (
+              <AutocompleteItem key={r.id} value={r.id} label={r.id}
+                className="stash-parent-option" data-depth={r.depth}>
                 <span className="stash-parent-option-name">{r.name}</span>
                 <span className="stash-parent-option-id">{r.id}</span>
-              </button>
-            ))
-          )}
-        </div>
-      )}
+              </AutocompleteItem>
+            ))}
+          </AutocompleteList>
+        </AutocompleteContent>
+      </Autocomplete>
     </div>
   )
 }
@@ -796,18 +715,19 @@ export function injectStashFormStyles(): void {
       position: relative;
     }
     .stash-parent-dropdown {
-      position: absolute;
-      top: calc(100% + 4px);
-      left: 0;
-      right: 0;
-      z-index: 10;
-      max-height: 240px;
+      width: var(--anchor-width);
+      max-height: min(240px, var(--available-height));
       overflow-y: auto;
       background: var(--kbn-blank);
       border: 1px solid color-mix(in srgb, var(--kbn-graphite) 18%, transparent);
       border-radius: 3px;
       box-shadow: 0 8px 18px color-mix(in srgb, var(--kbn-shade) 18%, transparent);
       padding: 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+    .stash-parent-dropdown [role="listbox"] {
       display: flex;
       flex-direction: column;
       gap: 1px;
@@ -826,10 +746,9 @@ export function injectStashFormStyles(): void {
       color: var(--kbn-graphite);
       text-align: left;
       cursor: pointer;
-      transition: background 100ms ease-out;
     }
     .stash-parent-option:hover,
-    .stash-parent-option-active {
+    .stash-parent-option[data-highlighted] {
       background: color-mix(in srgb, var(--kbn-owed) 18%, transparent);
       border-color: color-mix(in srgb, var(--kbn-owed) 40%, transparent);
     }
@@ -845,8 +764,11 @@ export function injectStashFormStyles(): void {
     .stash-parent-option[data-depth="1"] .stash-parent-option-name {
       font-weight: 600;
     }
-    .stash-parent-empty {
+    /* The empty message is a live region that stays mounted; it takes room
+       only while it says something. */
+    .stash-parent-empty:not(:empty) {
       padding: 8px 10px;
+      font-family: var(--font-serif);
       font-size: var(--type-meta);
       color: var(--kbn-graphite-muted);
       font-style: italic;
