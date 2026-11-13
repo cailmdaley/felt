@@ -1,20 +1,13 @@
+@layer ui-sdk;
+
 /* ── The move menu ────────────────────────────────────────────────────────
-   A document.body child, outside the card's scrolling column, so the fixed
-   menu is not clipped. Desktop is a popover beside its card; on a phone the
-   same list rises from the bottom edge, where the thumb is. */
-.kbn-move-scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 10500;
-  background: transparent;
-}
-/* The menu and its scrim live on `document.body`, OUTSIDE the Desk — so the
-   Desk's coarse-pointer opt-out (KanbanModal.css) does not reach them, and
-   iPadOS happily selects a row's label under the finger that is still holding
-   the press that opened it, callout and all. Unconditional, not behind a
-   media query: there is nothing in a menu of place names worth selecting on
-   any pointer. */
-.kbn-move-scrim,
+   An SDK menu in the top layer: a popover beside its card on desktop, a sheet
+   from the bottom edge on a phone. The SDK places, shows and slides it; these
+   rules give it the board's look. */
+
+/* The menu is outside the Desk, so the Desk's coarse-pointer selection opt-out
+   does not reach it, and iPadOS would select a row's label under the finger
+   still holding the press that opened it. Nothing here is worth selecting. */
 .kbn-move-menu,
 .kbn-move-menu * {
   -webkit-user-select: none;
@@ -22,14 +15,12 @@
   -webkit-touch-callout: none;
 }
 .kbn-move-menu {
-  position: fixed;
-  z-index: 10501;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   min-width: 232px;
   max-width: min(340px, calc(100vw - 16px));
-  max-height: min(70vh, 520px);
+  max-height: min(70vh, 520px, var(--available-height, 100vh));
   overflow-y: auto;
   padding: 6px 0 7px;
   background: var(--kbn-parchment);
@@ -41,6 +32,8 @@
     0 1px 0 color-mix(in srgb, var(--kbn-paper-bright) 60%, transparent) inset,
     0 16px 40px color-mix(in srgb, var(--kbn-shade) 26%, transparent);
 }
+/* The phone sheet takes focus on its surface, which is not a choice to ring. */
+.kbn-move-menu:focus-visible { outline: none; }
 .kbn-move-heading {
   display: flex;
   align-items: center;
@@ -99,22 +92,17 @@
   cursor: pointer;
 }
 .kbn-move-item:hover,
-.kbn-move-item:focus-visible {
+.kbn-move-item[data-highlighted] {
   background: color-mix(in srgb, var(--kbn-owed-bright) 14%, transparent);
 }
-.kbn-move-item:focus-visible { outline: none; }
+.kbn-move-item[data-highlighted] { outline: none; }
 .kbn-move-item-label { font-weight: 600; }
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   /* The move menu rises from the bottom edge. Same list, different arrival. */
-  .kbn-move-scrim {
-    background: color-mix(in srgb, var(--kbn-shade) 34%, transparent);
-  }
   .kbn-move-menu.kbn-move-sheet {
-    top: auto;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    --sheet-backdrop: color-mix(in srgb, var(--kbn-shade) 34%, transparent);
+    width: 100%;
     max-width: none;
     max-height: 76dvh;
     border-left: none;
@@ -123,7 +111,6 @@
     border-radius: 6px 6px 0 0;
     padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
     box-shadow: 0 -14px 40px color-mix(in srgb, var(--kbn-shade) 30%, transparent);
-    animation: kbn-move-rise 180ms cubic-bezier(0.22, 0.7, 0.3, 1);
   }
   .kbn-move-sheet .kbn-move-heading { padding: 8px 18px 8px; }
   .kbn-move-sheet .kbn-move-item {
@@ -132,7 +119,7 @@
     padding: 8px 18px;
     font-size: var(--type-row);
   }
-  .kbn-move-sheet .kbn-move-item + .kbn-move-item {
+  .kbn-move-sheet ui-menu-item + ui-menu-item .kbn-move-item {
     border-top: 1px solid color-mix(in srgb, var(--kbn-ink) 8%, transparent);
   }
   .kbn-move-sheet .kbn-move-rule {
@@ -144,10 +131,3 @@
   }
 }
 
-@keyframes kbn-move-rise {
-  from { transform: translateY(16px); opacity: 0; }
-  to { transform: none; opacity: 1; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .kbn-move-menu.kbn-move-sheet { animation: none; }
-}

@@ -10,14 +10,10 @@
  * to enforce is the obvious one — **a dismiss consumes the whole gesture, and
  * nothing beneath the overlay receives any part of it.**
  *
- * Two shapes, because overlays come in two kinds:
- *
- *   - a surface with a SCRIM of its own (`dismissOnScrim`) — the scrim can eat
- *     every event itself, and does;
- *   - a surface that watches the DOCUMENT for a click-away (`suppressNextClick`)
- *     — it cannot eat the pointer events without breaking scrolling and
- *     dragging on the page underneath, so it lets those through and swallows
- *     only the click that would have activated something.
+ * A surface that watches the DOCUMENT for a click-away (`suppressNextClick`)
+ * cannot eat the pointer events without breaking scrolling and dragging on the
+ * page underneath, so it lets those through and swallows only the click that
+ * would have activated something.
  *
  * Everything here takes its event target and its timers by injection, so the
  * rules are testable without a DOM (this repo has no jsdom).
@@ -99,33 +95,6 @@ export function suppressNextClick(scope: GestureScope, timers: GestureTimers = {
 
   scope.addEventListener('click', onClick, true)
   return stop
-}
-
-/**
- * Wire a scrim so that tapping it dismisses its surface and nothing else.
- *
- * The scrim eats `pointerdown`, `pointerup` and `click` outright. `dismiss`
- * runs on pointerdown — a menu that lingered until the finger lifted would feel
- * stuck — and the click that the browser sends afterwards is swallowed at the
- * window, because by then the scrim has been removed from the DOM and the
- * click's target is whatever was underneath it.
- *
- * `scope` is where that one-shot suppression is armed: the window, in practice.
- */
-export function dismissOnScrim(
-  scrim: GestureScope,
-  dismiss: () => void,
-  scope: GestureScope,
-  timers: GestureTimers = {},
-): void {
-  const swallow = (e: GestureEvent): void => cancel(e)
-  scrim.addEventListener('pointerup', swallow)
-  scrim.addEventListener('click', swallow)
-  scrim.addEventListener('pointerdown', (e: GestureEvent) => {
-    cancel(e)
-    suppressNextClick(scope, timers)
-    dismiss()
-  })
 }
 
 /**

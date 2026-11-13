@@ -5,7 +5,7 @@
 // none of which needs a layout engine to check.
 
 import { describe, expect, it } from 'vitest'
-import { dismissOnScrim, onPressRelease, suppressNextClick, type GestureEvent } from './dismissGesture'
+import { onPressRelease, suppressNextClick, type GestureEvent } from './dismissGesture'
 
 interface FakeEvent {
   defaultPrevented: boolean
@@ -99,43 +99,6 @@ describe('suppressNextClick', () => {
     stop()
     expect(win.count('click')).toBe(0)
     expect(clock.armed).toBe(0)
-  })
-})
-
-describe('dismissOnScrim', () => {
-  it('dismisses on pointerdown and lets nothing through the gesture', () => {
-    const scrim = scope()
-    const win = scope()
-    const clock = fakeClock()
-    let dismissed = 0
-    dismissOnScrim(scrim, () => { dismissed += 1 }, win, clock)
-
-    const down = scrim.fire('pointerdown')
-    expect(dismissed).toBe(1)
-    expect(down.defaultPrevented).toBe(true)
-    expect(down.propagationStopped).toBe(true)
-
-    // The scrim is removed by `dismiss`, so the click lands on the window with
-    // the card beneath as its target — that is the one this must swallow.
-    expect(win.fire('click').defaultPrevented).toBe(true)
-  })
-
-  it('swallows pointerup and click that land on the scrim itself', () => {
-    const scrim = scope()
-    const win = scope()
-    dismissOnScrim(scrim, () => {}, win, fakeClock())
-    expect(scrim.fire('pointerup').propagationStopped).toBe(true)
-    expect(scrim.fire('click').propagationStopped).toBe(true)
-  })
-
-  it('opens nothing on the tap after the dismissing one', () => {
-    const scrim = scope()
-    const win = scope()
-    const clock = fakeClock()
-    dismissOnScrim(scrim, () => {}, win, clock)
-    scrim.fire('pointerdown')
-    win.fire('click') // the dismissing gesture's own click, swallowed
-    expect(win.fire('click').defaultPrevented).toBe(false)
   })
 })
 

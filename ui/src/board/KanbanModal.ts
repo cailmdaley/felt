@@ -2248,10 +2248,6 @@ export class KanbanModal {
     perform: (card, action) => this.performMove(this.liveCard(card), action),
   }
 
-  /** Teardown for the open move menu. Non-null iff one is up — a second long
-   *  press replaces the first rather than stacking a second menu on it. */
-  private closeMoveMenu: (() => void) | null = null
-
   /**
    * A card held still under the thumb offers what a drag would offer.
    *
@@ -2261,12 +2257,8 @@ export class KanbanModal {
    * card is not broken, it is simply somewhere terminal.
    */
   private openMoveMenuFor(card: KanbanCard, anchor: HTMLElement): void {
-    this.closeMoveMenu?.()
-    this.closeMoveMenu = null
     if (this.moveBroker.destinations(card).length === 0) return
-    this.closeMoveMenu = openMoveMenu(card, anchor, this.moveBroker, () => {
-      this.closeMoveMenu = null
-    })
+    openMoveMenu(card, anchor, this.moveBroker)
   }
 
   /**

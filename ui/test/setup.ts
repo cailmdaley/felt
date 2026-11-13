@@ -12,6 +12,9 @@ if (typeof HTMLElement !== 'undefined') {
   Element.prototype.getAnimations ??= () => []
   ElementInternals.prototype.setFormValue ??= function () {}
   ElementInternals.prototype.setValidity ??= function () {}
+  Element.prototype.animate ??= () => Object.assign(new EventTarget(), {
+    finished: Promise.resolve(), currentTime: 0, pause() {}, cancel() {}, commitStyles() {},
+  }) as unknown as Animation
   HTMLElement.prototype.scrollIntoView ??= function () {}
   window.matchMedia ??= (media: string): MediaQueryList => ({
     matches: false, media, onchange: null,
