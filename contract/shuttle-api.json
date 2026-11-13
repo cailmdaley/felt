@@ -44,7 +44,7 @@
             "name": "origin",
             "in": "query",
             "required": false,
-            "description": "Host id of the daemon that owns the fiber or file, as a composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400.",
+            "description": "Host id of the daemon that should answer; for a fiber or its files, its owner, as the composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400.",
             "schema": {
               "type": "string"
             }
@@ -52,7 +52,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The result.",
+            "description": "This daemon's identity, build and readiness, or the named host's when origin is given (relayed with its own status).",
             "content": {
               "application/json": {
                 "schema": {
@@ -62,7 +62,7 @@
             }
           },
           "400": {
-            "description": "Unknown origin.",
+            "description": "origin names no known host.",
             "content": {
               "application/json": {
                 "schema": {
@@ -72,7 +72,7 @@
             }
           },
           "502": {
-            "description": "Owner version unavailable.",
+            "description": "The named host did not answer; detail says why.",
             "content": {
               "application/json": {
                 "schema": {
@@ -96,7 +96,7 @@
             "name": "origin",
             "in": "query",
             "required": false,
-            "description": "Host id of the daemon that owns the fiber or file, as a composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400.",
+            "description": "Host id of the daemon that should answer; for a fiber or its files, its owner, as the composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400.",
             "schema": {
               "type": "string"
             }
@@ -104,7 +104,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The result.",
+            "description": "The host's remotes. When the fleet file cannot be read, error says why and remotes is empty.",
             "content": {
               "application/json": {
                 "schema": {
@@ -114,7 +114,7 @@
             }
           },
           "400": {
-            "description": "Unknown origin; includes ok: false.",
+            "description": "origin names no known host; the body carries ok false.",
             "content": {
               "application/json": {
                 "schema": {
@@ -124,7 +124,7 @@
             }
           },
           "502": {
-            "description": "Forward failed.",
+            "description": "The request could not be forwarded to the named host.",
             "content": {
               "application/json": {
                 "schema": {
@@ -158,7 +158,7 @@
             "name": "local",
             "in": "query",
             "required": false,
-            "description": "Only query this daemon when true; defaults to false.",
+            "description": "\"true\" lists only this daemon's sessions; \"false\" or absent lists every reachable host's.",
             "schema": {
               "type": "string",
               "enum": [
@@ -170,7 +170,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The result.",
+            "description": "Sessions found, plus a gap for each host or harness that could not be listed.",
             "content": {
               "application/json": {
                 "schema": {
@@ -180,7 +180,7 @@
             }
           },
           "400": {
-            "description": "local is neither true nor false.",
+            "description": "local is neither \"true\" nor \"false\".",
             "content": {
               "application/json": {
                 "schema": {
@@ -212,7 +212,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The result.",
+            "description": "Every host's rows, each stamped with its origin, and the freshness of each origin. Carries an ETag.",
             "content": {
               "application/json": {
                 "schema": {
@@ -299,7 +299,7 @@
             "name": "body",
             "in": "query",
             "required": false,
-            "description": "Include Markdown body; defaults to false.",
+            "description": "\"true\" or \"1\" includes the Markdown body in fiber.body; any other value or absence omits it.",
             "schema": {
               "type": "string",
               "enum": [
@@ -314,7 +314,7 @@
             "name": "origin",
             "in": "query",
             "required": false,
-            "description": "Host id of the daemon that owns the fiber or file, as a composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400.",
+            "description": "Host id of the daemon that should answer; for a fiber or its files, its owner, as the composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400.",
             "schema": {
               "type": "string"
             }
@@ -323,7 +323,7 @@
             "name": "routed",
             "in": "query",
             "required": false,
-            "description": "Internal one-hop marker: 1 suppresses inferred owner routing on the receiving host.",
+            "description": "Set by a daemon forwarding the read: \"1\" or \"true\" answers from this host even when the fiber's shuttle.host names another. Clients omit it.",
             "schema": {
               "type": "string",
               "enum": [
@@ -337,7 +337,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The result.",
+            "description": "The fiber in a one-row envelope; fibers[0].fiber holds its frontmatter.",
             "content": {
               "application/json": {
                 "schema": {
@@ -347,7 +347,7 @@
             }
           },
           "400": {
-            "description": "Unknown origin.",
+            "description": "origin names no known host.",
             "content": {
               "application/json": {
                 "schema": {
@@ -357,7 +357,7 @@
             }
           },
           "404": {
-            "description": "Fiber missing on the named host.",
+            "description": "The host has no fiber with that identifier; error names the host.",
             "content": {
               "application/json": {
                 "schema": {
@@ -367,7 +367,7 @@
             }
           },
           "502": {
-            "description": "Forward failed.",
+            "description": "The request could not be forwarded to the owning host.",
             "content": {
               "application/json": {
                 "schema": {
@@ -377,7 +377,7 @@
             }
           },
           "503": {
-            "description": "Read failed or boot incomplete.",
+            "description": "felt could not read the stores (error felt_show_failed, with per-store errors in stores), or boot is incomplete.",
             "content": {
               "application/json": {
                 "schema": {
@@ -438,7 +438,7 @@
                   },
                   "origin": {
                     "type": "string",
-                    "description": "Host id of the daemon that owns the fiber or file, as a composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400."
+                    "description": "Host id of the daemon that should answer; for a fiber or its files, its owner, as the composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400."
                   }
                 },
                 "required": [
@@ -558,7 +558,7 @@
                   },
                   "origin": {
                     "type": "string",
-                    "description": "Host id of the daemon that owns the fiber or file, as a composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400."
+                    "description": "Host id of the daemon that should answer; for a fiber or its files, its owner, as the composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400."
                   },
                   "frontmatter": {
                     "type": "object",
@@ -697,7 +697,7 @@
                   },
                   "origin": {
                     "type": "string",
-                    "description": "Host id of the daemon that owns the fiber or file, as a composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400."
+                    "description": "Host id of the daemon that should answer; for a fiber or its files, its owner, as the composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400."
                   },
                   "force": {
                     "type": "boolean",
@@ -896,7 +896,7 @@
                   },
                   "origin": {
                     "type": "string",
-                    "description": "Host id of the daemon that owns the fiber or file, as a composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400."
+                    "description": "Host id of the daemon that should answer; for a fiber or its files, its owner, as the composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400."
                   },
                   "from": {
                     "type": "string",
@@ -1378,7 +1378,7 @@
                   },
                   "origin": {
                     "type": "string",
-                    "description": "Host id of the daemon that owns the fiber or file, as a composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400."
+                    "description": "Host id of the daemon that should answer; for a fiber or its files, its owner, as the composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400."
                   },
                   "fiber_path": {
                     "type": "string",
@@ -1604,7 +1604,7 @@
                   },
                   "origin": {
                     "type": "string",
-                    "description": "Host id of the daemon that owns the fiber or file, as a composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400."
+                    "description": "Host id of the daemon that should answer; for a fiber or its files, its owner, as the composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400."
                   }
                 },
                 "required": [
@@ -1684,7 +1684,7 @@
             "name": "uid",
             "in": "query",
             "required": true,
-            "description": "Fiber identifier used by the sent-files projection.",
+            "description": "The fiber's UID. Sends match when the worker's terminal session name embeds this UID or the session ledger attributes the sending session to it.",
             "schema": {
               "type": "string"
             }
@@ -1693,7 +1693,7 @@
             "name": "session",
             "in": "query",
             "required": false,
-            "description": "Nonempty native conversation ID; preserves repeated sends.",
+            "description": "A native conversation id. When given, returns only that conversation's sends, keeping repeated sends of a path; it must be nonempty.",
             "schema": {
               "type": "string"
             }
@@ -1702,7 +1702,7 @@
             "name": "origin",
             "in": "query",
             "required": false,
-            "description": "Host id of the daemon that owns the fiber or file, as a composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400.",
+            "description": "Host id of the daemon that should answer; for a fiber or its files, its owner, as the composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400.",
             "schema": {
               "type": "string"
             }
@@ -1719,11 +1719,22 @@
         ],
         "responses": {
           "200": {
-            "description": "The result.",
+            "description": "Up to 50 sends, newest first. Without session, each path appears once (its newest send). A fiber with no history has an empty files list.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "type": "object",
+                  "properties": {
+                    "files": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SentFile"
+                      }
+                    }
+                  },
+                  "required": [
+                    "files"
+                  ]
                 }
               }
             },
@@ -1754,7 +1765,7 @@
             }
           },
           "400": {
-            "description": "The request is refused.",
+            "description": "uid is missing, session is empty, or origin names no known host.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1764,7 +1775,7 @@
             }
           },
           "502": {
-            "description": "Forward failed.",
+            "description": "The request could not be forwarded to the owning host.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1798,7 +1809,7 @@
             "name": "path",
             "in": "query",
             "required": true,
-            "description": "Absolute host-local filename.",
+            "description": "Absolute filename on the selected host.",
             "schema": {
               "type": "string"
             }
@@ -1807,7 +1818,7 @@
             "name": "origin",
             "in": "query",
             "required": false,
-            "description": "Host id of the daemon that owns the fiber or file, as a composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400.",
+            "description": "Host id of the daemon that should answer; for a fiber or its files, its owner, as the composite row's origin carries it. Absent, empty, \"local\" or this daemon's own host id selects this daemon; any other value must name a remote this daemon knows (configured or discovered on the tailnet), and the request is forwarded there; an unknown name is refused with 400.",
             "schema": {
               "type": "string"
             }
@@ -1834,7 +1845,7 @@
             "name": "Range",
             "in": "header",
             "required": false,
-            "description": "One bytes=start-end, bytes=start- or suffix range.",
+            "description": "A single range: bytes=start-end, bytes=start- (at most 4 MiB from start) or bytes=-suffix. Other forms are ignored and the whole file is returned.",
             "schema": {
               "type": "string"
             }
@@ -1898,7 +1909,7 @@
             }
           },
           "400": {
-            "description": "The request is refused.",
+            "description": "path is missing or not absolute, or origin names no known host.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1921,7 +1932,7 @@
             "description": "Unsatisfiable byte range; empty body and Content-Range: bytes */size."
           },
           "502": {
-            "description": "Forward failed.",
+            "description": "The request could not be forwarded to the owning host.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2154,26 +2165,30 @@
             "enum": [
               "local",
               "remote"
-            ]
+            ],
+            "description": "local for this daemon's own rows, remote for a peer's cached rows."
           },
           "stale": {
             "type": "boolean",
             "description": "true when the rows for this origin are not current: a remote that did not answer its last poll, or a local cache that has not finished a full poll. Stale rows are still served."
           },
           "fiber_count": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Number of rows this origin contributes."
           },
           "last_polled_at": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "When a stale remote was last polled successfully; absent or null while fresh."
           },
           "last_error": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Why the last poll of a remote failed, or null."
           },
           "cache": {
             "type": [
@@ -2187,7 +2202,8 @@
             },
             "required": [
               "state"
-            ]
+            ],
+            "description": "The owner's document-cache state (state is cold, partial or fresh), or null when unknown."
           }
         },
         "required": [
@@ -2297,28 +2313,35 @@
         "type": "object",
         "properties": {
           "fiber": {
-            "$ref": "#/components/schemas/Fiber"
+            "$ref": "#/components/schemas/Fiber",
+            "description": "The fiber's frontmatter (and body when requested)."
           },
           "felt_store": {
-            "type": "string"
+            "type": "string",
+            "description": "The felt store holding the fiber, as a path on the owning host."
           },
           "path": {
-            "type": "string"
+            "type": "string",
+            "description": "The fiber's Markdown file, absolute on the owning host."
           },
           "dir": {
-            "type": "string"
+            "type": "string",
+            "description": "The fiber's directory, absolute on the owning host."
           },
           "report_path": {
-            "type": "string"
+            "type": "string",
+            "description": "The fiber's companion report file (felt's report path), absolute on the owning host, when one exists."
           },
           "origin": {
-            "type": "string"
+            "type": "string",
+            "description": "Host id of the daemon that owns the fiber; pass it as origin on owner-routed requests."
           },
           "orchestrator": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "UID of the nearest ancestor constitution that orchestrates this one, or null. Present on constitutions only."
           },
           "column": {
             "type": "string",
@@ -2331,7 +2354,8 @@
               "discarded",
               "resting",
               "roles"
-            ]
+            ],
+            "description": "The board column the owner computes for a constitution. Absent on fibers without a shuttle block."
           },
           "turn": {
             "type": "string",
@@ -2343,18 +2367,23 @@
               "starting",
               "no-signal",
               "none"
-            ]
+            ],
+            "description": "Whose move it is for a constitution: question, blocked and idle wait on the human; working and starting are the agent's; no-signal means a live worker reports nothing; none means no worker. Absent on fibers without a shuttle block."
           },
           "runtime": {
             "type": [
               "object",
               "null"
-            ]
+            ],
+            "description": "The live worker's runtime state (session, phase, timestamps); present only while a worker is tracked."
           },
           "pending_results": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Number of results and messages waiting for this constitution's next worker: context its mailbox holds that no worker has taken, plus results addressed to it in the owner's outbox. Absent when zero."
           },
-          "dispatch_error": {}
+          "dispatch_error": {
+            "description": "The last dispatch refusal or failure recorded for this constitution, when one is held."
+          }
         },
         "required": [
           "fiber",
@@ -2371,7 +2400,8 @@
             "type": "object",
             "properties": {
               "origin": {
-                "type": "string"
+                "type": "string",
+                "description": "Host id of the daemon that owns the fiber; always present on composite rows."
               }
             },
             "required": [
@@ -3287,6 +3317,40 @@
         "required": [
           "error",
           "retryable"
+        ]
+      },
+      "SentFile": {
+        "type": "object",
+        "description": "One file a worker sent to the human.",
+        "properties": {
+          "fullPath": {
+            "type": "string",
+            "description": "Absolute path of the file on the owning host; read its bytes with /file."
+          },
+          "basename": {
+            "type": "string",
+            "description": "The file name of fullPath."
+          },
+          "timestamp": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "When it was sent, in epoch milliseconds; null when the event carried none."
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The native conversation id that sent it."
+          }
+        },
+        "required": [
+          "fullPath",
+          "basename",
+          "timestamp",
+          "sessionId"
         ]
       }
     }
