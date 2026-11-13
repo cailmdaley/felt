@@ -180,7 +180,8 @@ describe('blockingDialogOpen beside keystrokeIsSpokenFor', () => {
     attrs: sketch.attrs ?? {},
   })
 
-  /** Attribute and class tokens, which is all the selector is allowed to be. */
+  /** An optional tag name, then attribute and class tokens: all the selector is allowed to be. */
+  const tag = /^[a-z]+/
   const token = (): RegExp => /\[([\w-]+)(?:="([^"]*)")?\]|\.([\w-]+)/g
 
   /**
@@ -195,9 +196,11 @@ describe('blockingDialogOpen beside keystrokeIsSpokenFor', () => {
   function matches(node: FakeEl, selector: string): boolean {
     return selector.split(',').some((group) => {
       const compound = group.trim()
-      if (compound === '' || compound.replace(token(), '') !== '') {
+      const name = compound.match(tag)?.[0]
+      if (compound === '' || compound.replace(tag, '').replace(token(), '') !== '') {
         throw new Error(`the test matcher does not understand "${compound}"`)
       }
+      if (name && node.tagName !== name.toUpperCase()) return false
       for (const [, attr, value, cls] of compound.matchAll(token())) {
         if (cls) {
           if (!node.classList.contains(cls)) return false
@@ -233,6 +236,14 @@ describe('blockingDialogOpen beside keystrokeIsSpokenFor', () => {
     expect(blockingDialogOpen()).toBe(true)
     expect(keystrokeIsSpokenFor()).toBe(true)
     stubDOM([boardRoot, el({ attrs: { 'data-slot': 'menu-content', 'data-closed': '' } })])
+    expect(blockingDialogOpen()).toBe(false)
+  })
+
+  it('both yield to an open native modal dialog but not a closed one', () => {
+    stubDOM([boardRoot, el({ tag: 'DIALOG', classes: ['ws-page-sheet'], attrs: { open: '' } })])
+    expect(blockingDialogOpen()).toBe(true)
+    expect(keystrokeIsSpokenFor()).toBe(true)
+    stubDOM([boardRoot, el({ tag: 'DIALOG', classes: ['ws-page-sheet'] }), el({ attrs: { open: '' } })])
     expect(blockingDialogOpen()).toBe(false)
   })
 

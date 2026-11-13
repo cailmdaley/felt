@@ -196,14 +196,15 @@ export function isBlockingDialog(
  *
  * `[data-state="open"]` is Radix's stamp — Stash, Capture and the settings
  * sheet all render through `AppDialog`. `[aria-modal="true"]` catches every
- * OTHER modal dialog: a hand-rolled one carries `role="dialog"
- * aria-modal="true"` and no data-state, and without this clause `1`-`4` would
- * switch views out from under it. Matching on aria rather than on a library's
- * attribute means a dialog built outside AppDialog is covered without a code
- * change here. Open SDK menus also own keys, despite being non-modal.
+ * OTHER modal dialog, an SDK dialog's content included: without this clause
+ * `1`-`4` would switch views out from under it. Matching on aria rather than on
+ * a library's attribute means a dialog built outside AppDialog is covered
+ * without a code change here. A native `<dialog>` the board opens with
+ * `showModal()` exposes its modality without the attribute, so `dialog[open]`
+ * names it. Open SDK menus also own keys, despite being non-modal.
  */
 export const BLOCKING_DIALOG_SELECTOR =
-  '[role="dialog"][data-state="open"], [role="dialog"][aria-modal="true"], [data-slot="menu-content"][data-open], [data-slot="dialog-content"][data-open]'
+  '[role="dialog"][data-state="open"], [role="dialog"][aria-modal="true"], [data-slot="menu-content"][data-open], dialog[open]'
 
 /**
  * Is a dialog or SDK menu currently taking keys away from the board?

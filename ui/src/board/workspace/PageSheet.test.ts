@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { buildChannel } from './documents.js'
 import { PageSheet } from './PageSheet.js'
+import { blockingDialogOpen } from '../views/ViewRegistry.js'
 
 const channel = (sent: { path: string; time: number }[]) =>
   buildChannel({ uid: 'task', owner: 'host-a', name: 'Task', path: '/notes/task.md', fiberDir: '/notes', body: '', sent })
@@ -40,6 +41,19 @@ it('stays closed with nothing to show, and says so when opened on no files', () 
     sheet.update(channel([]), '', new Set())
     sheet.show(opener)
     expect(sheet.el.querySelector('.ws-sent-files p')?.textContent).toBe('No files sent yet.')
+  } finally { sheet.dispose() }
+})
+it('yields board shortcuts to the native modal and closes through browser Back', async () => {
+  const sheet = new PageSheet('', vi.fn()), opener = document.createElement('button')
+  document.body.append(sheet.el, opener)
+  try {
+    sheet.update(channel([]), '', new Set())
+    sheet.show(opener)
+    expect(blockingDialogOpen()).toBe(true)
+    window.history.back()
+    await vi.waitFor(() => expect(sheet.isOpen).toBe(false))
+    expect(blockingDialogOpen()).toBe(false)
+    expect(document.activeElement).toBe(opener)
   } finally { sheet.dispose() }
 })
 it('folds past the newest four and expands in place', () => {
