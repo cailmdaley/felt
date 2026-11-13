@@ -21,9 +21,6 @@ func TestPluginDriftAppearsInSessionAndSync(t *testing.T) {
 				t.Fatal(err)
 			}
 			marker := pluginGenerationIdentity{Schema: 1, SourceKind: "local", Source: "/fixture", PluginVersion: "2.0.0", FeltBuild: "2.0.0", PayloadSHA256: "fixture", Harnesses: []string{harness}}
-			if harness == "codex" {
-				marker.CodexBundles = codexBundleNames
-			}
 			if err := writePluginGeneration(current, marker); err != nil {
 				t.Fatal(err)
 			}
@@ -56,14 +53,8 @@ func TestPluginDriftAppearsInSessionAndSync(t *testing.T) {
 			if got := a.pluginDriftNotes(); len(got) != 0 {
 				t.Fatalf("healthy config: %v", got)
 			}
-			if err := os.WriteFile(cfgPath, []byte(strings.ReplaceAll(config, "true", "false")), 0644); err != nil {
-				t.Fatal(err)
-			}
-			if got := a.pluginDriftNotes(); len(got) != 0 {
-				t.Fatalf("explicitly disabled plugin is not missing: %v", got)
-			}
 			// Losing either registration is enough to stop the plugin loading.
-			for _, damaged := range []string{strings.ReplaceAll(config, "felt@cailmdaley-felt", "other@cailmdaley-felt"), func() string {
+			for _, damaged := range []string{strings.ReplaceAll(config, "true", "false"), func() string {
 				if harness == "claude" {
 					return `{"enabledPlugins":{"felt@cailmdaley-felt":true}}`
 				}
@@ -100,45 +91,6 @@ func TestPluginDriftAppearsInSessionAndSync(t *testing.T) {
 				t.Fatalf("uninstalled harness: %v", got)
 			}
 		})
-	}
-}
-
-func TestCodexDriftChecksOnlyInstalledBundles(t *testing.T) {
-	t.Parallel()
-	env, _ := testEnv(t)
-	a := testApp(t, env)
-	runtimeDir, _ := a.pluginRuntimeDir()
-	current := filepath.Join(runtimeDir, pluginCurrentName)
-	if err := os.MkdirAll(current, 0755); err != nil {
-		t.Fatal(err)
-	}
-	marker := pluginGenerationIdentity{Schema: 1, SourceKind: "local", Source: "/fixture", PluginVersion: "2.0.0", FeltBuild: "2.0.0", PayloadSHA256: "fixture"}
-	if err := writePluginGeneration(current, marker); err != nil {
-		t.Fatal(err)
-	}
-	if err := setPluginHarness(current, "codex", true, []string{"felt"}); err != nil {
-		t.Fatal(err)
-	}
-	cfgPath, _ := a.homePath(".codex", "config.toml")
-	if err := os.MkdirAll(filepath.Dir(cfgPath), 0755); err != nil {
-		t.Fatal(err)
-	}
-	config := "[plugins.\"felt@cailmdaley-felt\"]\nenabled = false\n[marketplaces.cailmdaley-felt]\nsource = '/fixture'\n"
-	if err := os.WriteFile(cfgPath, []byte(config), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if got := a.pluginDriftNotes(); len(got) != 0 {
-		t.Fatalf("uninstalled skills bundle required: %v", got)
-	}
-	if err := setPluginHarness(current, "codex", true, []string{"felt-skills"}); err != nil {
-		t.Fatal(err)
-	}
-	if got := a.pluginDriftNotes(); len(got) != 1 {
-		t.Fatalf("installed skills bundle's disappearance was missed: %v", got)
-	}
-	identity, err := readPluginGeneration(filepath.Join(current, "claude-plugin"))
-	if err != nil || strings.Join(identity.CodexBundles, ",") != "felt,felt-skills" {
-		t.Fatalf("recorded bundles: %+v, %v", identity.CodexBundles, err)
 	}
 }
 

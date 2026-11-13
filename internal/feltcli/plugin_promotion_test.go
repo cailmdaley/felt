@@ -741,9 +741,6 @@ func TestSingleHarnessSetupRefreshesBothEnabledCaches(t *testing.T) {
 			if markerErr != nil || strings.Join(identity.Harnesses, ",") != "claude,codex" {
 				t.Fatalf("setup ownership lost across promotion: %+v, %v", identity.Harnesses, markerErr)
 			}
-			if strings.Join(identity.CodexBundles, ",") != "felt,felt-skills" {
-				t.Fatalf("installed bundles lost across promotion: %+v", identity.CodexBundles)
-			}
 			if err := f.a.verifyClaudeLoadedGeneration(current); err != nil {
 				t.Errorf("Claude stale: %v", err)
 			}

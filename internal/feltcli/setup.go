@@ -918,12 +918,10 @@ func (a *app) installCodexBundlesAtSource(marketplaceSource string, names []stri
 	if err != nil {
 		return err
 	}
-	var installedBundles []string
 	for _, name := range names {
 		if expected.CodexPayloadSHA256 == nil && name != "felt" {
 			continue
 		}
-		installedBundles = append(installedBundles, name)
 		ref := name + "@" + marketplaceName
 		if present && a.verifyCodexLoadedBundle(marketplaceSource, name) == nil {
 			fmt.Fprintf(a.env.Stdout, "✓ Codex %s payload unchanged; left installed bytes intact\n", name)
@@ -964,8 +962,8 @@ func (a *app) installCodexBundlesAtSource(marketplaceSource string, names []stri
 
 	fmt.Fprintln(a.env.Stdout)
 	a.refreshCodexHookTrust()
-	if len(installedBundles) > 0 {
-		return setPluginHarness(marketplaceSource, "codex", true, installedBundles)
+	if len(names) > 0 {
+		return setPluginHarness(marketplaceSource, "codex", true)
 	}
 	return nil
 }

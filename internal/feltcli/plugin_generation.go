@@ -23,7 +23,6 @@ const pluginGenerationMarkerName = ".felt-generation.json"
 type pluginGenerationIdentity struct {
 	Schema             int               `json:"schema"`
 	Harnesses          []string          `json:"harnesses,omitempty"`
-	CodexBundles       []string          `json:"codex_bundles,omitempty"`
 	SourceKind         string            `json:"source_kind"`
 	Source             string            `json:"source"`
 	RequestedRef       string            `json:"requested_ref,omitempty"`
@@ -75,16 +74,14 @@ func (a *app) buildPluginGeneration(kind, source, requestedRef, commit, candidat
 	if err != nil {
 		return pluginGenerationIdentity{}, err
 	}
-	var harnesses, codexBundles []string
+	var harnesses []string
 	if runtimeDir, err := a.pluginRuntimeDir(); err == nil {
 		if active, err := readPluginGeneration(filepath.Join(runtimeDir, pluginCurrentName, "claude-plugin")); err == nil {
 			harnesses = active.Harnesses
-			codexBundles = active.CodexBundles
 		}
 	}
 	return pluginGenerationIdentity{
 		Harnesses:          harnesses,
-		CodexBundles:       codexBundles,
 		Schema:             1,
 		SourceKind:         kind,
 		Source:             source,
