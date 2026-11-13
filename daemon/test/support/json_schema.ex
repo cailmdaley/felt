@@ -16,26 +16,42 @@ defmodule Shuttle.Test.JsonSchema do
   end
 
   defp keyword("$ref", "#/" <> pointer, _schema, value, doc, at) do
-    check(get_in(doc, String.split(pointer, "/")) || raise("unresolved $ref #{pointer}"), value, doc, at)
+    check(
+      get_in(doc, String.split(pointer, "/")) || raise("unresolved $ref #{pointer}"),
+      value,
+      doc,
+      at
+    )
   end
 
   defp keyword("type", types, _schema, value, _doc, at) do
     if Enum.any?(List.wrap(types), &type?(&1, value)),
       do: [],
-      else: ["#{at}: expected #{Enum.join(List.wrap(types), " or ")}, got #{inspect(value, limit: 5)}"]
+      else: [
+        "#{at}: expected #{Enum.join(List.wrap(types), " or ")}, got #{inspect(value, limit: 5)}"
+      ]
   end
 
   defp keyword("enum", allowed, _schema, value, _doc, at),
-    do: if(value in allowed, do: [], else: ["#{at}: #{inspect(value)} is not one of #{inspect(allowed)}"])
+    do:
+      if(value in allowed,
+        do: [],
+        else: ["#{at}: #{inspect(value)} is not one of #{inspect(allowed)}"]
+      )
 
   defp keyword("const", expected, _schema, value, _doc, at),
-    do: if(value == expected, do: [], else: ["#{at}: expected #{inspect(expected)}, got #{inspect(value)}"])
+    do:
+      if(value == expected,
+        do: [],
+        else: ["#{at}: expected #{inspect(expected)}, got #{inspect(value)}"]
+      )
 
   defp keyword("required", names, _schema, value, _doc, at) when is_map(value),
     do: for(name <- names, not Map.has_key?(value, name), do: "#{at}: missing #{name}")
 
   defp keyword("properties", properties, _schema, value, doc, at) when is_map(value) do
-    for {name, schema} <- properties, Map.has_key?(value, name),
+    for {name, schema} <- properties,
+        Map.has_key?(value, name),
         error <- check(schema, value[name], doc, "#{at}.#{name}"),
         do: error
   end
@@ -43,7 +59,8 @@ defmodule Shuttle.Test.JsonSchema do
   defp keyword("additionalProperties", extra, schema, value, doc, at) when is_map(value) do
     named = Map.keys(Map.get(schema, "properties", %{}))
 
-    for {name, item} <- value, name not in named,
+    for {name, item} <- value,
+        name not in named,
         error <- extra(extra, item, doc, "#{at}.#{name}"),
         do: error
   end
@@ -64,11 +81,16 @@ defmodule Shuttle.Test.JsonSchema do
     do: Enum.flat_map(schemas, &check(&1, value, doc, at))
 
   defp keyword(keyword, _arg, _schema, _value, _doc, _at)
-       when keyword in ~w(required properties additionalProperties items) or keyword in @annotations,
+       when keyword in ~w(required properties additionalProperties items) or
+              keyword in @annotations,
        do: []
 
   defp keyword(keyword, _arg, _schema, _value, _doc, at),
-    do: raise(ArgumentError, "#{at}: schema keyword #{inspect(keyword)} is outside the validated subset")
+    do:
+      raise(
+        ArgumentError,
+        "#{at}: schema keyword #{inspect(keyword)} is outside the validated subset"
+      )
 
   defp extra(false, _item, _doc, at), do: ["#{at}: unexpected property"]
   defp extra(true, _item, _doc, _at), do: []

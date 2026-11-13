@@ -10,7 +10,9 @@ defmodule Shuttle.ApiContract do
 
   @path Path.expand("../../../contract/shuttle-api.json", __DIR__)
   @external_resource @path
-  @json File.read!(@path)
+  @json (case Shuttle.FS.read(@path) do
+           {:ok, json} -> json
+         end)
   @level @json |> Jason.decode!() |> get_in(["info", "version"]) |> String.to_integer()
 
   @doc "The OpenAPI document as JSON text."

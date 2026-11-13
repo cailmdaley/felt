@@ -8,13 +8,17 @@ defmodule ShuttleWeb.ApiModulesTest do
   test "every /api/v1 route belongs to exactly one module" do
     served =
       for %{verb: verb, path: "/api/v1" <> path} <- ShuttleWeb.Router.__routes__(),
-          do: "#{verb |> Atom.to_string() |> String.upcase()} #{String.replace(path, ~r/[:*](\w+)/, "{\\1}")}"
+          do:
+            "#{verb |> Atom.to_string() |> String.upcase()} #{String.replace(path, ~r/[:*](\w+)/, "{\\1}")}"
 
     core =
-      for {path, operations} <- @document["paths"], {method, _} <- operations,
+      for {path, operations} <- @document["paths"],
+          {method, _} <- operations,
           do: "#{String.upcase(method)} #{path}"
 
-    classed = core ++ Enum.flat_map(@document["x-modules"], fn {_name, module} -> module["routes"] || [] end)
+    classed =
+      core ++
+        Enum.flat_map(@document["x-modules"], fn {_name, module} -> module["routes"] || [] end)
 
     assert classed -- Enum.uniq(classed) == [], "routes classed twice"
     assert Enum.sort(served -- classed) == [], "routes no module claims"
