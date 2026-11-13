@@ -2,13 +2,13 @@ import { hasLiveWorker, type KanbanCard, type KanbanResponse } from './KanbanTyp
 import { ascByKey, instantMs } from './civilDay.js'
 import { turnOf } from './turn.js'
 
-export type ThreadState = 'waiting' | 'to-review' | 'working' | 'drafts' | 'roles' | 'resting' | 'archived'
+export type ThreadState = 'waiting' | 'to-review' | 'with-orchestrator' | 'working' | 'drafts' | 'roles' | 'resting' | 'archived'
 export type ThreadSummary = NonNullable<KanbanCard['threadSummary']>
 /** What waits for a constitution's next worker, in full, as the launch roster and `shuttle threads` say it. */
 export const waitingWords = (n: number): string => `${n} waiting for its next worker`
 
 export const THREAD_LABEL: Record<ThreadState, string> = {
-  waiting: 'Waiting', 'to-review': 'To review', working: 'Working', drafts: 'Drafts', roles: 'Roles', resting: 'Resting', archived: 'Archived',
+  waiting: 'Waiting', 'to-review': 'To review', 'with-orchestrator': 'With orchestrator', working: 'Working', drafts: 'Drafts', roles: 'Roles', resting: 'Resting', archived: 'Archived',
 }
 /**
  * What a family needs from the human, most urgent first. Its lead sits
@@ -29,11 +29,13 @@ export interface Family {
 }
 /** The sections where a family's threads group beneath its root whatever the root's own state. */
 const SPLIT = ['waiting', 'working', 'to-review'] as const
-const STATE_ORDER: readonly ThreadState[] = ['waiting', 'to-review', 'working', 'drafts', 'roles', 'resting', 'archived']
+const STATE_ORDER: readonly ThreadState[] = ['waiting', 'to-review', 'with-orchestrator', 'working', 'drafts', 'roles', 'resting', 'archived']
 /**
  * A thread's state: its served Desk column, with In flight split by `turnOf`
  * into Waiting (the human's move) and Working (the worker's, including an
- * armed thread whose worker has not started). A verdict archives; a standing
+ * armed thread whose worker has not started). A closed thread its
+ * orchestrator reviews is With orchestrator, which asks nothing of the
+ * human; a thread marked for review is To review. A verdict archives; a standing
  * thread asleep on its cron rests; a seat at rest is among the Roles. The
  * family page and mention chips read this; the daemon's roster
  * (`Shuttle.Threads.thread_state/4`) reads the same column and turn.
@@ -42,6 +44,7 @@ export function threadState(card: KanbanCard): ThreadState {
   switch (card.column) {
     case 'tempered': case 'composted': return 'archived'
     case 'awaitingReview': return 'to-review'
+    case 'orchestratorReview': return 'with-orchestrator'
     case 'inFlight': return turnOf(card).yours ? 'waiting' : 'working'
     case 'drafts': return 'drafts'
     case 'roles': return 'roles'

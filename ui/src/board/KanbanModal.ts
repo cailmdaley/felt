@@ -2435,7 +2435,8 @@ export function applyOptimisticTransition(
   } else {
     // Patch the fields the destination's own rendering + the next classify
     // read, mirroring the committed verbs: drafts = reopen-as-draft/pause +
-    // park-on-desk; awaitingReview = close with the verdict cleared; inFlight
+    // park-on-desk; awaitingReview = close with the verdict cleared (a
+    // thread's close also marks it for the human; the refetch brings the mark); inFlight
     // = dispatch (the worker pill arrives with the refetch).
     if (target === 'drafts') {
       moved.status = 'open'

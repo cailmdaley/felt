@@ -319,6 +319,27 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     end
   end
 
+  test "close forwards a thread's mark for review" do
+    store = fixture_store!("shuttle-review-close-route", "tests/review-close", "Review close")
+    args_file = install_fake_cli!()
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/lifecycle",
+        Jason.encode!(%{
+          "action" => "close",
+          "fiber" => "tests/review-close",
+          "review" => "the fit moved"
+        })
+      )
+
+    assert conn.status == 200
+
+    assert File.read!(args_file) ==
+             "-C\n#{store}\nclose\ntests/review-close\n--review\nthe fit moved\n--fiber-path\ntests/review-close\n--local\n"
+  end
+
   # The daemon writes outside any harness session, so a caller's session rides
   # the request: the writer decides whether it is the thread's orchestrator.
   test "rest and close pass their caller's session to the writer" do

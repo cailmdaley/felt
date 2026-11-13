@@ -575,7 +575,9 @@ export class Workspace {
     if (!indexed && !state?.metadataKnown) return false
     const card = indexed ?? requested
     if (verdict === 'awaitingReview' && !reviewReachable(card)) return false
-    const review = card.column === 'awaitingReview'
+    // Closed work awaiting a review, the human's or a thread's orchestrator's.
+    const awaitsReview = (c: KanbanCard): boolean => c.column === 'awaitingReview' || c.column === 'orchestratorReview'
+    const review = awaitsReview(card)
     // Ask while the gesture is fresh; the undo window carries the answer to the write.
     if (!confirmWorkerStop(card, verdict)) return false
     const workerStopConfirmed = hasWorkerToStop(card)
@@ -592,7 +594,7 @@ export class Workspace {
         return
       }
       // A worker may start during the undo window; never stop it from a stale review.
-      if (review && live.column !== 'awaitingReview') {
+      if (review && !awaitsReview(live)) {
         showToast(`${live.name} no longer awaits review; verdict not written`, 'error')
         return
       }

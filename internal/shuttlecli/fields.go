@@ -35,7 +35,8 @@ func setTempered(f *felt.Felt, value *bool) error {
 }
 
 // unclose moves a fiber to status (open or active), clearing the review
-// verdict and closed-at: the card leaves Awaiting review entirely. Arming
+// verdict, a thread's mark for review and closed-at: the card leaves review
+// entirely. Arming
 // drops a rest (horizon: stashed), which belongs to an open fiber only, so a
 // fiber later paused lands in Drafts rather than back in Resting. Arming a
 // standing constitution also concludes its current run
@@ -50,6 +51,11 @@ func unclose(f *felt.Felt, status string) error {
 	f.ClosedAt = nil
 	if err := setTempered(f, nil); err != nil {
 		return err
+	}
+	if block, ok, _ := shuttle.BlockOf(f); ok && block.Review != nil {
+		if err := shuttle.SetNodeField(f, "review", nil); err != nil {
+			return err
+		}
 	}
 	if status == felt.StatusActive {
 		if err := f.SetExtraField("horizon", nil); err != nil {

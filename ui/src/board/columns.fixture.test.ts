@@ -21,7 +21,7 @@ const cases: Case[] = JSON.parse(source)
 
 // The rails' state words, from the board's own.
 const STATE: Record<ThreadState, string> = {
-  waiting: 'Waiting', working: 'Working', 'to-review': 'To review', drafts: 'Draft', archived: 'Archived', resting: 'Resting', roles: 'Resting',
+  waiting: 'Waiting', working: 'Working', 'to-review': 'To review', 'with-orchestrator': 'With orchestrator', drafts: 'Draft', archived: 'Archived', resting: 'Resting', roles: 'Resting',
 }
 
 describe('the mock owner serves every shared case as the daemon does', () => {

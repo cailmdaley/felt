@@ -43,7 +43,8 @@ export function runAwaitsHuman(card: KanbanCard): boolean {
   return standing(card) && card.status === 'active' && (hasLiveWorker(card) || !!card.ask?.text?.trim())
 }
 /** Unreviewed work in flight or awaiting review takes both verdicts, as do
- *  oneshot drafts and work put down. A standing constitution takes Discard as
+ *  oneshot drafts, work put down, and a thread with its orchestrator for
+ *  review, which the human may settle in its place. A standing constitution takes Discard as
  *  Retire, and Temper only while a run waits on the human: a run's exit
  *  re-arms it, and its review is the run's own ask. A seat at rest takes none. */
 export function verdictsFor(card: KanbanCard): Array<'temper' | 'discard'> {
@@ -51,7 +52,7 @@ export function verdictsFor(card: KanbanCard): Array<'temper' | 'discard'> {
   const column = card.column
   if (column === 'roles') return []
   if (standing(card)) return card.status === 'closed' ? [] : runAwaitsHuman(card) ? ['temper', 'discard'] : ['discard']
-  if (column === 'drafts' || column === 'inFlight' || column === 'awaitingReview') return ['temper', 'discard']
+  if (column === 'drafts' || column === 'inFlight' || column === 'awaitingReview' || column === 'orchestratorReview') return ['temper', 'discard']
   if (column !== 'resting' || card.shuttleSeat === true) return []
   return ['temper', 'discard']
 }
@@ -60,16 +61,19 @@ export function verdictReachable(card: KanbanCard): boolean {
   return verdictsFor(card).length > 0
 }
 /** Work still on its way, a draft or in flight, can be moved to Awaiting
- *  review; a standing constitution never waits there. */
+ *  review, and so can a thread with its orchestrator, which the move marks for
+ *  the human; a standing constitution never waits there. */
 export function reviewReachable(card: KanbanCard): boolean {
-  return constitution(card) && !standing(card) && (card.column === 'drafts' || card.column === 'inFlight')
+  return constitution(card) && !standing(card) && (card.column === 'drafts' || card.column === 'inFlight' || card.column === 'orchestratorReview')
 }
 /** The column's name for the page's status line, or a standing constitution's
- *  schedule state at rest; empty for a fiber with no column. */
+ *  schedule state at rest; empty for a fiber with no column. A thread marked
+ *  for review says why. */
 export function fiberPageKicker(card: KanbanCard): string {
   if (card.isCycle) return 'Cycle'
   if (!isAgentCard(card)) return ''
-  if (card.column === 'awaitingReview') return 'Awaiting your review'
+  if (card.column === 'awaitingReview') return card.reviewMark ? `Marked for your review: ${card.reviewMark.note}` : 'Awaiting your review'
+  if (card.column === 'orchestratorReview') return 'With its orchestrator for review'
   if (card.column === 'resting' && standing(card)) return schedulePaused(card) ? 'Schedule paused' : 'Scheduled'
   return DESK_COLUMN_TITLE[card.column]
 }

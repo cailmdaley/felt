@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/shuttle"
@@ -45,6 +47,45 @@ func (a *app) requireReviewReport(f *felt.Felt) error {
 	return fmt.Errorf("%s goes to the human, whose report is out of date.\n"+
 		"Rewrite %s so it describes the whole constitution as it stands, then run this again.\n"+
 		"Nothing here needs review? Use 'shuttle rest'.", f.ID, page)
+}
+
+// requireThreadsReviewed refuses a worker's own close for review while a
+// thread beneath its constitution waits on the worker's review: closed,
+// without a verdict, and not marked for the human. The orchestrator settles
+// each before it leaves, so none is left with no one to review it.
+func (a *app) requireThreadsReviewed(f *felt.Felt) error {
+	if !a.isOwnFiber(f) && !a.dispatchedHere(f) {
+		return nil
+	}
+	// Descendants are read from the store that holds the fiber, as
+	// requireReviewReport reads ancestry.
+	f, err := a.workerFiberAtPath(f.Path, f.UID)
+	if err != nil {
+		return err
+	}
+	st := felt.NewStorage(workerStoreRoot(f.Path))
+	fibers, err := st.ListMetadataHavingFrontmatterFields([]string{shuttle.FacetKey})
+	if err != nil {
+		return err
+	}
+	var pending []string
+	for _, below := range fibers {
+		if !strings.HasPrefix(below.ID, f.ID+"/") || below.Status != felt.StatusClosed || shuttle.Verdict(below) != "" {
+			continue
+		}
+		if block, ok, err := shuttle.BlockOf(below); err == nil && ok && block.ThreadParent != nil && block.Review == nil {
+			pending = append(pending, below.ID)
+		}
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+	slices.Sort(pending)
+	return fmt.Errorf("%s has threads waiting on your review:\n  %s\n"+
+		"Read each against its Desired State, then temper it (shuttle close <thread> --tempered=true), "+
+		"discard it (shuttle close <thread> --tempered=false) or mark it for the human "+
+		"(shuttle close <thread> --review \"<why>\"); then close again.",
+		f.ID, strings.Join(pending, "\n  "))
 }
 
 // dispatchedHere reports the daemon's launch path for this process. It covers a

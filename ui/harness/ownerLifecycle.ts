@@ -20,7 +20,12 @@ const STARTING_MS = 5 * 60_000
 export function ownerColumn(fiber: Row, live: boolean, nowMs = Date.now()): string {
   const shuttle = record(fiber.shuttle) ?? {}
   const status = fiber.status
-  if (status === 'closed') return fiber.tempered === true ? 'tempered' : fiber.tempered === false ? 'discarded' : 'awaiting_review'
+  if (status === 'closed') {
+    if (fiber.tempered === true) return 'tempered'
+    if (fiber.tempered === false) return 'discarded'
+    // An unmarked thread's review belongs to its orchestrator.
+    return record(shuttle.thread_parent) && shuttle.review == null ? 'orchestrator_review' : 'awaiting_review'
+  }
   if (live) return 'in_flight'
   const seat = shuttle.seat === true && typeof shuttle.role === 'string' && shuttle.role !== ''
   if (seat && (status !== 'active' || shuttle.kind === 'standing')) return 'roles'

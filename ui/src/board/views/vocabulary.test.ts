@@ -16,8 +16,8 @@ describe('cardState', () => {
     const states: Record<DeskColumn, LifecycleState> = {
       drafts: 'draft', inFlight: 'inFlight', awaitingReview: 'awaitingReview',
       tempered: 'tempered', composted: 'discarded',
-      // The two ways of being off the desk are one claim on a row: nothing owed now.
-      resting: 'resting', roles: 'resting',
+      // Off the desk, or a thread with its orchestrator, is one claim on a row: nothing owed now.
+      resting: 'resting', roles: 'resting', orchestratorReview: 'resting',
     }
     for (const [column, state] of Object.entries(states)) expect(cardState({ column: column as DeskColumn })).toBe(state)
   })

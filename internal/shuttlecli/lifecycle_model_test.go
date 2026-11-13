@@ -82,11 +82,14 @@ func lifecycleFacts(f *felt.Felt) string {
 		verdict = map[bool]string{true: "tempered", false: "discarded"}[*v]
 	}
 	stashed := horizonStashed(f)
-	ask := false
-	if block, ok, _ := shuttle.BlockOf(f); ok && block.Ask != nil && strings.TrimSpace(block.Ask.Text) != "" {
-		ask = true
+	ask, thread, marked := false, false, false
+	if block, ok, _ := shuttle.BlockOf(f); ok {
+		ask = block.Ask != nil && strings.TrimSpace(block.Ask.Text) != ""
+		thread = block.ThreadParent != nil
+		marked = block.Review != nil
 	}
-	return strings.Join([]string{"status=" + f.Status, "verdict=" + verdict, "stashed=" + map[bool]string{true: "yes", false: "no"}[stashed], "ask=" + map[bool]string{true: "yes", false: "no"}[ask]}, " ")
+	yes := map[bool]string{true: "yes", false: "no"}
+	return strings.Join([]string{"status=" + f.Status, "verdict=" + verdict, "stashed=" + yes[stashed], "ask=" + yes[ask], "thread=" + yes[thread], "marked=" + yes[marked]}, " ")
 }
 
 func docFacts(t *testing.T, doc map[string]any) string {

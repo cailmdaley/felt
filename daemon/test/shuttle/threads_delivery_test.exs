@@ -463,7 +463,16 @@ defmodule Shuttle.ThreadsDeliveryTest do
     assert [{_, %{"parent_uid" => uid}}] = Shuttle.ThreadOutbox.pending("test-host")
     assert uid == parent.fiber["uid"]
     Threads.deliver_results(entries, "test-host")
-    assert [%{"request" => %{"text" => "thread hub/child/deep closed: "}}] = pending(data)
+
+    assert [
+             %{
+               "request" => %{
+                 "text" =>
+                   "thread hub/child/deep closed:  (the verdict is yours: temper, discard, or shuttle close hub/child/deep --review \"<why>\")"
+               }
+             }
+           ] = pending(data)
+
     # Repeated delivery/polling does not manufacture a result for the hub.
     Threads.deliver_results(entries, "test-host")
     assert length(pending(data)) == 1
@@ -524,7 +533,8 @@ defmodule Shuttle.ThreadsDeliveryTest do
                "parent_uid" => ^archived_uid,
                "anchor_uid" => ^archived_uid,
                "parent_unresolved" => true,
-               "text" => "thread hub/child/deep closed: "
+               "text" =>
+                 "thread hub/child/deep closed:  (the verdict is yours: temper, discard, or shuttle close hub/child/deep --review \"<why>\")"
              }
            ] =
              Shuttle.ThreadOutbox.pending("test-host")
@@ -532,7 +542,12 @@ defmodule Shuttle.ThreadsDeliveryTest do
              |> Enum.sort_by(& &1["text"])
 
     Threads.deliver_results(entries, "test-host")
-    assert "thread hub/child/deep closed: " in Enum.map(pending(data), & &1["request"]["text"])
+
+    assert "thread hub/child/deep closed:  (the verdict is yours: temper, discard, or shuttle close hub/child/deep --review \"<why>\")" in Enum.map(
+             pending(data),
+             & &1["request"]["text"]
+           )
+
     assert Shuttle.ThreadOutbox.pending("test-host") == []
   end
 end

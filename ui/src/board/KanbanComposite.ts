@@ -46,8 +46,8 @@ import { TURN_WORD, type Turn } from './turn.js';
 
 /** The owner's `column`, in the board's names. */
 export const WIRE_COLUMN: Record<string, DeskColumn> = {
-  drafts: 'drafts', in_flight: 'inFlight', awaiting_review: 'awaitingReview', tempered: 'tempered',
-  discarded: 'composted', resting: 'resting', roles: 'roles',
+  drafts: 'drafts', in_flight: 'inFlight', awaiting_review: 'awaitingReview', orchestrator_review: 'orchestratorReview',
+  tempered: 'tempered', discarded: 'composted', resting: 'resting', roles: 'roles',
 };
 const TURNS = Object.keys(TURN_WORD) as Turn[];
 

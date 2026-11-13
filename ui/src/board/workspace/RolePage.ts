@@ -45,7 +45,7 @@ export function charterId(slug: string, catalogue: readonly Charter[]): string |
 }
 
 /** The Desk's reading order: work awaiting review, in flight, drafts, then the rest. */
-const HOLD_ORDER: DeskColumn[] = ['awaitingReview', 'inFlight', 'roles', 'drafts', 'resting', 'tempered', 'composted']
+const HOLD_ORDER: DeskColumn[] = ['awaitingReview', 'inFlight', 'roles', 'drafts', 'orchestratorReview', 'resting', 'tempered', 'composted']
 const LIVE: ReadonlySet<DeskColumn> = new Set(['awaitingReview', 'inFlight', 'drafts'])
 /** Rows shown before the rest fold behind "more"; live work is always shown whole. */
 const HOLDS_SHOWN = 5

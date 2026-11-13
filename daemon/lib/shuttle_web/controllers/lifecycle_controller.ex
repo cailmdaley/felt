@@ -195,6 +195,7 @@ defmodule ShuttleWeb.LifecycleController do
 
     {:ok,
      args
+     |> add_string_flag("--review", params["review"])
      |> add_bool_flag("--quiet", params["quiet"])
      |> add_string_flag("--actor", params["actor"])}
   end

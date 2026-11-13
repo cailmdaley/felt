@@ -16,8 +16,8 @@ export interface ConstitutionPickerOptions {
   onEscape?(): void
 }
 
-/** The word a closed card's row wears: tempered and discarded work is archived, review work awaits the human. */
-const CLOSED_STATE: Partial<Record<KanbanCard['column'], string>> = { tempered: 'tempered', composted: 'discarded', awaitingReview: 'awaiting review' }
+/** The word a closed card's row wears: tempered and discarded work is archived, review work awaits the human or a thread's orchestrator. */
+const CLOSED_STATE: Partial<Record<KanbanCard['column'], string>> = { tempered: 'tempered', composted: 'discarded', awaitingReview: 'awaiting review', orchestratorReview: 'with orchestrator' }
 
 /** The floating list of constitutions, filtered by Find. */
 export class ConstitutionPicker {

@@ -5,13 +5,16 @@ import { boardCards, threadIndexFor } from './KanbanSurfaces.js'
 import type { KanbanResponse } from './KanbanTypes.js'
 import { servedFeed } from './testFixtures.js'
 
-export type Row = { id: string; parent?: string; status: string; tempered?: boolean; horizon?: string; ask?: boolean; phase?: string; seat?: boolean; kind?: string }
+/** `threadOf` pins the constitution a thread was created under; `mark` is its mark for the human's review. */
+export type Row = { id: string; parent?: string; status: string; tempered?: boolean; horizon?: string; ask?: boolean; phase?: string; seat?: boolean; kind?: string; threadOf?: string; mark?: string }
 export function board(rows: Row[]): KanbanResponse {
   return buildKanbanResponseFromComposite(parseCompositeFeed(servedFeed({ host: 'owner', fibers: rows.map(row => ({
     origin: 'owner', felt_store: '/store', path: `${row.id}.md`, orchestrator: row.parent,
     fiber: { id: row.id, name: row.id, status: row.status, tempered: row.tempered, horizon: row.horizon,
       created_at: '2026-10-01T09:00:00Z', closed_at: row.status === 'closed' ? '2026-10-02T09:00:00Z' : undefined,
-      shuttle: { kind: row.kind ?? 'oneshot', seat: row.seat, role: row.seat ? 'chair' : undefined, ask: row.ask ? { text: 'Which cut?', at: '2026-10-02T09:00:00Z' } : undefined } },
+      shuttle: { kind: row.kind ?? 'oneshot', seat: row.seat, role: row.seat ? 'chair' : undefined, ask: row.ask ? { text: 'Which cut?', at: '2026-10-02T09:00:00Z' } : undefined,
+        thread_parent: row.threadOf ? { uid: `${row.threadOf}-uid`, host: 'owner', slug: row.threadOf, name: row.threadOf } : undefined,
+        review: row.mark ? { note: row.mark, at: '2026-10-02T10:00:00Z' } : undefined } },
     runtime: row.phase ? { state: 'running', phase: row.phase, session_uuid: `s-${row.id}` } : null,
   })) })))
 }
@@ -23,6 +26,24 @@ const named = (cards: KanbanResponse['stash']) => cards.map(c => c.deskSection ?
 const column = (b: KanbanResponse) => ({
   drafts: named(b.now.drafts), inFlight: named(b.now.inFlight), review: named(b.now.awaitingReview),
   resting: named(b.stash), roles: named(b.roles), past: named(b.timeline.past),
+})
+
+describe('a closed thread is its orchestrator\'s to review unless marked for the human', () => {
+  it('stays off Awaiting review with its orchestrator on the board, and a mark brings it there', () => {
+    const b = board([
+      { id: 'hub', status: 'active', phase: 'working' },
+      { id: 'hub/fit', parent: 'hub', threadOf: 'hub', status: 'closed' },
+      { id: 'hub/cut', parent: 'hub', threadOf: 'hub', status: 'closed', mark: 'the cut moved the fit' },
+    ])
+    expect(column(b)).toEqual({ drafts: [], inFlight: ['hub'], review: ['hub/cut'], resting: [], roles: [], past: [] })
+    expect(boardCards(b).find(c => c.id === 'hub/fit')?.column).toBe('orchestratorReview')
+    expect(boardCards(b).find(c => c.id === 'hub/cut')?.reviewMark?.note).toBe('the cut moved the fit')
+  })
+  it('falls to the human when no orchestrator is in sight', () => {
+    const b = board([{ id: 'gone/fit', parent: 'gone', threadOf: 'gone', status: 'closed' }])
+    expect(column(b).review).toEqual(['gone/fit'])
+    expect(b.now.awaitingReview[0].column).toBe('orchestratorReview')
+  })
 })
 
 describe('a family\'s root heads its threads in each section of work they stand in', () => {

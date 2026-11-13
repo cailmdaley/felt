@@ -69,6 +69,8 @@ export interface Fiber {
   shuttleHandedOffAt?: string;
   /** Non-blocking question raised by the worker for the human. */
   shuttleAsk?: { text: string; at: string };
+  /** A thread's mark for the human's review (`shuttle close --review`). */
+  shuttleReview?: { note: string; at: string };
   /** `shuttle.agent` — the agent identifier to dispatch with (e.g. `claude-opus`). */
   shuttleAgent?: string;
   /** `shuttle.effort` — reasoning-effort axis (harness-native token, e.g.
@@ -162,6 +164,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
   let shuttleDispatchedAt: string | undefined;
   let shuttleHandedOffAt: string | undefined;
   let shuttleAsk: Fiber['shuttleAsk'];
+  let shuttleReview: Fiber['shuttleReview'];
   let shuttleAgent: string | undefined;
   let shuttleEffort: string | undefined;
   let shuttleSchedule: { expr: string; tz: string } | undefined;
@@ -178,6 +181,12 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
       const ask = s.ask as Record<string, unknown>;
       if (typeof ask.text === 'string' && ask.text.trim() && typeof ask.at === 'string') {
         shuttleAsk = { text: ask.text, at: ask.at };
+      }
+    }
+    if (s.review && typeof s.review === 'object' && !Array.isArray(s.review)) {
+      const review = s.review as Record<string, unknown>;
+      if (typeof review.note === 'string' && review.note.trim() && typeof review.at === 'string') {
+        shuttleReview = { note: review.note.trim(), at: review.at };
       }
     }
     shuttleKind = s.kind === 'standing' ? 'standing' : 'oneshot';
@@ -286,6 +295,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     shuttleDispatchedAt,
     shuttleHandedOffAt,
     shuttleAsk,
+    shuttleReview,
     shuttleAgent,
     shuttleEffort,
     shuttleSchedule,

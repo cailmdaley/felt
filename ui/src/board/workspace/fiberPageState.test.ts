@@ -49,3 +49,20 @@ describe('Rest eligibility', () => {
     expect(restReachable({ ...note, isCycle: true })).toBe(false)
   })
 })
+
+describe('a thread with its orchestrator for review', () => {
+  const withOrchestrator = card({ id: 'hub/fit', shuttleKind: 'oneshot', status: 'closed', column: 'orchestratorReview' })
+  const marked = card({ id: 'hub/marked', shuttleKind: 'oneshot', status: 'closed', reviewMark: { note: 'the fit moved by 2 sigma', at: '2026-11-09T10:00:00Z' } })
+
+  it('says so, and the human can still settle it or move it to review', () => {
+    expect(fiberPageKicker(withOrchestrator)).toBe('With its orchestrator for review')
+    expect(verdictsFor(withOrchestrator)).toEqual(['temper', 'discard'])
+    expect(reviewReachable(withOrchestrator)).toBe(true)
+  })
+  it('a marked thread says why it reached the human', () => {
+    expect(marked.column).toBe('awaitingReview')
+    expect(fiberPageKicker(marked)).toBe('Marked for your review: the fit moved by 2 sigma')
+    expect(fiberPageKicker(card({ id: 'work', shuttleKind: 'oneshot', status: 'closed' }))).toBe('Awaiting your review')
+    expect(reviewReachable(marked)).toBe(false)
+  })
+})

@@ -91,9 +91,9 @@ defmodule Shuttle.Transition do
   # dispatch is refused by `Poller.dispatch_fiber`'s own `:already_running`,
   # which is the real guard.
   defp transition_local(fiber_id, target) do
-    with {:ok, %{id: action_id}} <- resolve(fiber_id, target),
+    with {:ok, %{id: action_id} = action} <- resolve(fiber_id, target),
          {:ok, felt_store} <- FeltStores.store_for_fiber(fiber_id),
-         :ok <- invoke_action(fiber_id, action_id, felt_store) do
+         :ok <- invoke_action(fiber_id, action, felt_store) do
       Poller.refresh_document(fiber_id)
       {:ok, action_id}
     end
@@ -122,6 +122,16 @@ defmodule Shuttle.Transition do
   # closed-at). The document carries the entire lifecycle (status + tempered) —
   # there is no runtime row to reset, so close/reopen are single document writes
   # and dispatch eligibility is recomputed from the document on the next poll.
+  defp invoke_action(
+         fiber_id,
+         %{id: "close-awaiting-review", invocation: invocation},
+         felt_store
+       ),
+       do: run_shuttle("close", fiber_id, review_args(invocation), felt_store)
+
+  defp invoke_action(fiber_id, %{id: action_id}, felt_store),
+    do: invoke_action(fiber_id, action_id, felt_store)
+
   defp invoke_action(fiber_id, "pause", felt_store),
     do: run_shuttle("pause", fiber_id, [], felt_store)
 
@@ -135,9 +145,6 @@ defmodule Shuttle.Transition do
   defp invoke_action(fiber_id, "reopen-draft", felt_store),
     do: run_shuttle("reopen", fiber_id, ["--as-draft"], felt_store)
 
-  defp invoke_action(fiber_id, "close-awaiting-review", felt_store),
-    do: run_shuttle("close", fiber_id, [], felt_store)
-
   defp invoke_action(fiber_id, "close-tempered", felt_store),
     do: run_shuttle("close", fiber_id, ["--tempered=true"], felt_store)
 
@@ -150,6 +157,10 @@ defmodule Shuttle.Transition do
       {:error, reason} -> {:error, reason}
     end
   end
+
+  # A thread moved to review carries the mark its invocation names.
+  defp review_args(%{review: note}), do: ["--review=" <> note]
+  defp review_args(_), do: []
 
   # Routed through the one audited write helper (`Shuttle.CLI`), bounded by
   # `Shuttle.Runner`'s timeout+SIGKILL reap instead of a bare `System.cmd/3`

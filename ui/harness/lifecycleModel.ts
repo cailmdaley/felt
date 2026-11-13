@@ -43,6 +43,13 @@ export type Seat = 'none' | 'seat' | 'pulsed'
  * cannot tell them apart; it learns which from the owner's answer.
  */
 export type Worker = 'none' | 'live' | 'gone' | 'unseen'
+/**
+ * Where a constitution's review goes. `top` is top-level work, reviewed by the
+ * human; `thread` is a thread, reviewed by its orchestrator; `marked` is a
+ * thread its orchestrator (or the human, moving it to review) marked for the
+ * human. Only a closed thread carries a mark: reopening clears it.
+ */
+export type Thread = 'top' | 'thread' | 'marked'
 
 export interface LifeState {
   kind: Kind
@@ -53,26 +60,33 @@ export interface LifeState {
   /** An outstanding `shuttle ask`; it counts only while the fiber is active. */
   ask: boolean
   worker: Worker
+  thread: Thread
 }
 
 const KINDS: readonly Kind[] = ['oneshot', 'standing']
 const LIVES: readonly Life[] = ['open', 'active', 'closed', 'tempered', 'discarded']
 const SEATS: readonly Seat[] = ['none', 'seat', 'pulsed']
 const WORKERS: readonly Worker[] = ['none', 'live', 'gone', 'unseen']
+/** The review a state can carry: threads are modeled as oneshots outside any office. */
+const threads = (kind: Kind, life: Life, seat: Seat): Thread[] =>
+  kind !== 'oneshot' || seat !== 'none' ? ['top'] : closedLife(life) ? ['top', 'thread', 'marked'] : ['top', 'thread']
 
 /** Every state the model distinguishes. */
 export const STATES: readonly LifeState[] = KINDS.flatMap(kind => LIVES.flatMap(life => [false, true].flatMap(stashed =>
-  SEATS.flatMap(seat => [false, true].flatMap(ask => WORKERS.map(worker => ({ kind, life, stashed, seat, ask, worker })))))))
+  SEATS.flatMap(seat => [false, true].flatMap(ask => WORKERS.flatMap(worker =>
+    threads(kind, life, seat).map(thread => ({ kind, life, stashed, seat, ask, worker, thread }))))))))
 
-/** A short stable name: `oneshot/active/stashed/seat/ask/live`. */
+/** A short stable name: `oneshot/active/stashed/seat/ask/live`, then `/thread` or `/marked` for a thread. */
 export function stateKey(s: LifeState): string {
-  return [s.kind, s.life, s.stashed ? 'stashed' : 'now', s.seat, s.ask ? 'ask' : 'quiet', s.worker].join('/')
+  return [s.kind, s.life, s.stashed ? 'stashed' : 'now', s.seat, s.ask ? 'ask' : 'quiet', s.worker, ...(s.thread === 'top' ? [] : [s.thread])].join('/')
 }
 
 export const ASK_TEXT = 'Which mock catalogue should the covariance use?'
 export const PULSE = '4h'
 /** Every modeled constitution has run before: this is its last session. */
 export const SESSION = 'model-session'
+/** The note a thread moved to review on the board carries (`Shuttle.Actions`). */
+export const BOARD_REVIEW_NOTE = 'Moved to review on the board'
 
 /** The fiber document a state stands for, as the owner reads its frontmatter. */
 export function lifeDoc(s: LifeState): Record<string, unknown> {
@@ -83,6 +97,8 @@ export function lifeDoc(s: LifeState): Record<string, unknown> {
     ...(s.seat !== 'none' ? { role: 'analyst', seat: true } : {}),
     ...(s.seat === 'pulsed' ? { pulse: PULSE } : {}),
     ...(s.ask ? { ask: { text: ASK_TEXT, at: '2026-11-09T09:00:00Z' } } : {}),
+    ...(s.thread !== 'top' ? { thread_parent: { uid: 'model-hub-uid', host: 'model-host', slug: 'model-hub', name: 'Model hub' } } : {}),
+    ...(s.thread === 'marked' ? { review: { note: BOARD_REVIEW_NOTE, at: '2026-11-09T10:00:00Z' } } : {}),
     runtime: { session_uuid: SESSION },
   }
   return {
@@ -162,7 +178,7 @@ export function requestKey(r: LifeRequest): string {
 export type Outcome = 'ok' | 'refused' | 'conflict'
 export interface Applied { outcome: Outcome; cli?: string[]; next: LifeState; delivered?: boolean }
 
-const closedLife = (life: Life): boolean => life === 'closed' || life === 'tempered' || life === 'discarded'
+function closedLife(life: Life): boolean { return life === 'closed' || life === 'tempered' || life === 'discarded' }
 const running = (s: LifeState): boolean => s.worker !== 'none'
 
 /** Arming moves an open or closed fiber to active: its verdict and its rest go, and so does a question nobody answered.
@@ -171,7 +187,14 @@ function armed(s: LifeState): LifeState {
   return { ...s, life: 'active', stashed: false, ask: false }
 }
 
+/** Every write that takes a fiber out of closed clears a thread's mark. */
 export function apply(s: LifeState, r: LifeRequest): Applied {
+  const applied = applyRequest(s, r)
+  const next = applied.next
+  return next.thread === 'marked' && !closedLife(next.life) ? { ...applied, next: { ...next, thread: 'thread' } } : applied
+}
+
+function applyRequest(s: LifeState, r: LifeRequest): Applied {
   const same = (outcome: Outcome): Applied => ({ outcome, next: s })
   switch (r.route) {
     case 'kill':
@@ -223,6 +246,10 @@ function transition(s: LifeState, target: TransitionTarget): Applied {
     return { outcome: 'ok', cli: ['close', '--tempered=true'], next: { ...s, ask: false } }
   }
   if (s.kind === 'standing' && (target === 'awaitingReview' || target === 'tempered')) return { outcome: 'refused', next: s }
+  // Moving a thread to review is the human asking to see it: the close marks it.
+  if (target === 'awaitingReview' && s.thread !== 'top') {
+    return { outcome: 'ok', cli: ['close', `--review=${BOARD_REVIEW_NOTE}`], next: { ...s, life: 'closed', thread: 'marked' } }
+  }
   if (target === 'awaitingReview') return close()
   if (target === 'tempered') return close(true)
   if (target === 'composted') return close(false)
@@ -288,7 +315,7 @@ const retired = (s: LifeState): boolean => s.kind === 'standing' && closedLife(s
 function verdictable(s: LifeState, nowMs = Date.now()): boolean {
   const column = constitutionColumn(s, nowMs)
   if (s.kind === 'standing') return false
-  if (column === 'drafts' || column === 'in_flight' || column === 'awaiting_review') return true
+  if (column === 'drafts' || column === 'in_flight' || column === 'awaiting_review' || column === 'orchestrator_review') return true
   return column === 'resting' && s.seat === 'none'
 }
 
@@ -299,9 +326,11 @@ function runAwaitsHuman(s: LifeState, nowMs = Date.now()): boolean {
 
 export const VERBS: Record<Verb, VerbSpec> = {
   review: {
-    offered: s => s.kind === 'oneshot' && ['drafts', 'in_flight'].includes(constitutionColumn(s, Date.now())),
-    label: () => 'Close for review',
-    reached: (_, after) => after.life === 'closed' && after.worker === 'none',
+    // A thread with its orchestrator can still be moved to the human's review.
+    offered: s => s.kind === 'oneshot' && ['drafts', 'in_flight', 'orchestrator_review'].includes(constitutionColumn(s, Date.now())),
+    label: s => constitutionColumn(s, Date.now()) === 'orchestrator_review' ? 'Move to review' : 'Close for review',
+    // A thread reaches the human's review only by its mark.
+    reached: (before, after) => after.life === 'closed' && after.worker === 'none' && (before.thread === 'top' || after.thread === 'marked'),
   },
   temper: {
     // On a standing constitution, Temper run: offered while an armed run waits

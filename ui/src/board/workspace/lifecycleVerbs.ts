@@ -30,6 +30,8 @@ export function verbSpec(verb: LifecycleVerb, card?: KanbanCard): LifecycleVerbS
     : { ...spec, label: 'Pause schedule', icon: 'pause' }
   if (verb === 'temper' && standing(card)) return { ...spec, label: 'Temper run' }
   if (verb === 'discard' && standing(card)) return { ...spec, label: 'Retire' }
+  // A thread already closed for its orchestrator moves to the human's review.
+  if (verb === 'review' && card.column === 'orchestratorReview') return { ...spec, label: 'Move to review' }
   return spec
 }
 
@@ -46,14 +48,15 @@ export function lifecycleVerbsFor(card: KanbanCard, canRest: boolean): Lifecycle
 
 /**
  * The verb a row's button wears on its face, of those it offers: Temper where
- * work waits on the human's review or a oneshot rests (opening its terminal is
+ * closed work waits on a review or a oneshot rests (opening its terminal is
  * how it resumes), else the first verb that moves the work on (Close for
  * review, then Rest or its schedule's pause and resume). Discard never leads;
  * undefined when it is all there is.
  */
 export function leadVerb(card: KanbanCard, offered: readonly LifecycleVerb[]): LifecycleVerb | undefined {
   const restingOneshot = card.effectiveHorizon === 'stashed' && !scheduled(card)
-  if (offered.includes('temper') && (card.column === 'awaitingReview' || runAwaitsHuman(card) || restingOneshot)) return 'temper'
+  const closedForReview = card.column === 'awaitingReview' || card.column === 'orchestratorReview'
+  if (offered.includes('temper') && (closedForReview || runAwaitsHuman(card) || restingOneshot)) return 'temper'
   return offered.find(verb => verb !== 'discard')
 }
 

@@ -4,10 +4,11 @@ import type { Turn } from './turn.js'
 export type ColumnKind = 'drafts' | 'inFlight' | 'awaitingReview' | 'tempered' | 'composted'
 /**
  * Where a card stands, as its owning daemon serves it (`Shuttle.Lifecycle`):
- * a lifecycle column, or at rest — put down, or a standing constitution
+ * a lifecycle column, a closed thread its orchestrator reviews
+ * (`orchestratorReview`), or at rest — put down, or a standing constitution
  * between firings (`resting`), or a seat (`roles`).
  */
-export type DeskColumn = ColumnKind | 'resting' | 'roles'
+export type DeskColumn = ColumnKind | 'orchestratorReview' | 'resting' | 'roles'
 export type HorizonKind = 'now' | 'stashed'
 
 /** The two shapes a shuttle block can take — the values `shuttle
@@ -103,6 +104,8 @@ export interface KanbanCard {
   runtimePhase?: string
   /** Non-blocking request for the human's view; the worker keeps working. */
   ask?: { text: string; at: string }
+  /** Why a thread's orchestrator sent it to the human's review, and when. */
+  reviewMark?: { note: string; at: string }
   /** Durable explanation for a blocked app launch. */
   launchError?: string
   /**

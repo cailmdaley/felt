@@ -13,9 +13,12 @@ defmodule Shuttle.Lifecycle do
   @starting_ms 5 * 60_000
 
   @doc """
-  The Desk column: `drafts`, `in_flight`, `awaiting_review`, `tempered`,
-  `discarded`, `resting` (a draft put down, or a standing constitution between
-  firings or with its schedule paused) or `roles` (a seat at rest). An armed
+  The Desk column: `drafts`, `in_flight`, `awaiting_review`,
+  `orchestrator_review`, `tempered`, `discarded`, `resting` (a draft put down,
+  or a standing constitution between firings or with its schedule paused) or
+  `roles` (a seat at rest). A closed constitution without a verdict awaits the
+  human's review when it is top-level or marked `shuttle.review`; an unmarked
+  thread is its orchestrator's to review. An armed
   standing constitution whose last run asked a question waits in flight, on
   the human's turn. `live?` is whether its worker runs;
   `today` is the civil day a `due:` is read against, this host's as
@@ -28,6 +31,7 @@ defmodule Shuttle.Lifecycle do
     cond do
       status == "closed" and fiber["tempered"] == true -> "tempered"
       status == "closed" and fiber["tempered"] == false -> "discarded"
+      status == "closed" and orchestrator_reviews?(shuttle) -> "orchestrator_review"
       status == "closed" -> "awaiting_review"
       live? -> "in_flight"
       seat_at_rest?(shuttle, status) -> "roles"
@@ -37,6 +41,10 @@ defmodule Shuttle.Lifecycle do
       true -> "drafts"
     end
   end
+
+  # An unmarked thread's review belongs to its orchestrator.
+  defp orchestrator_reviews?(shuttle),
+    do: is_map(shuttle["thread_parent"]) and is_nil(shuttle["review"])
 
   defp seat_at_rest?(shuttle, status) do
     shuttle["seat"] == true and is_binary(shuttle["role"]) and shuttle["role"] != "" and

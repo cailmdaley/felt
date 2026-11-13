@@ -29,7 +29,13 @@ defmodule Shuttle.ThreadsTest do
 
     assert to_hub["wake"] == false
     assert asker_id == id <> "-asker"
-    assert %{"session" => ^session, "text" => "thread hub/child closed: "} = to_asker
+
+    assert %{
+             "session" => ^session,
+             "text" =>
+               "thread hub/child closed:  (the verdict is yours: temper, discard, or shuttle close hub/child --review \"<why>\")"
+           } = to_asker
+
     refute Map.has_key?(to_asker, "parent_uid")
 
     # No such session is live: the refusal is final, and the hub keeps the result.
@@ -405,7 +411,7 @@ defmodule Shuttle.ThreadsTest do
     await(fn -> :sys.get_state(poller).document_cache_ready end)
 
     for {verb, expected_column} <- [
-          {:close, "awaiting_review"},
+          {:close, "orchestrator_review"},
           {:reopen, "in_flight"},
           {:rest, "resting"},
           {:resume, "in_flight"}
@@ -429,7 +435,7 @@ defmodule Shuttle.ThreadsTest do
     await(fn -> :sys.get_state(poller).document_cache_ready end)
 
     for {write, expected_column} <- [
-          {%{"action" => "close", "fiber" => "hub/child"}, "awaiting_review"},
+          {%{"action" => "close", "fiber" => "hub/child"}, "orchestrator_review"},
           {%{"action" => "reopen", "fiber" => "hub/child", "as_draft" => true}, "drafts"},
           {%{"action" => "resume", "fiber" => "hub/child"}, "in_flight"},
           {%{"action" => "rest", "fiber" => "hub/child"}, "resting"}

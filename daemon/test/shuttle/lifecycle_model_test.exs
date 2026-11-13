@@ -26,6 +26,7 @@ defmodule Shuttle.LifecycleModelTest do
   # dispatch writes nothing itself.
   defp write(%{verb: "dispatch"}), do: nil
   defp write(%{verb: "close", tempered: tempered}), do: ["close", "--tempered=#{tempered}"]
+  defp write(%{verb: "close", review: note}), do: ["close", "--review=#{note}"]
   defp write(%{verb: "reopen", as_draft: true}), do: ["reopen", "--as-draft"]
   defp write(%{verb: verb}), do: [verb]
 

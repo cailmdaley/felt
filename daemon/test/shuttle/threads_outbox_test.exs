@@ -929,11 +929,20 @@ defmodule Shuttle.ThreadsOutboxTest do
                {MapSet.new(["u-local"]), nil}
     end
 
-    defp thread(id, fiber, store \\ "/s"),
-      do: %{
+    # A nested id is a thread, created under the constitution that contains it.
+    defp thread(id, fiber, store \\ "/s") do
+      shuttle =
+        if String.contains?(id, "/"),
+          do: %{
+            "thread_parent" => %{"uid" => "u-" <> Path.dirname(id), "slug" => Path.dirname(id)}
+          },
+          else: %{}
+
+      %{
         felt_store: store,
-        fiber: Map.merge(%{"id" => id, "uid" => "u-" <> id, "shuttle" => %{}}, fiber)
+        fiber: Map.merge(%{"id" => id, "uid" => "u-" <> id, "shuttle" => shuttle}, fiber)
       }
+    end
 
     test "the roster files every fixture case by its served column and turn" do
       now = System.system_time(:millisecond)
@@ -967,7 +976,7 @@ defmodule Shuttle.ThreadsOutboxTest do
       assert [
                %{
                  "id" => "hub/a",
-                 "column" => "awaiting_review",
+                 "column" => "orchestrator_review",
                  "state" => "To review",
                  "outcome" => "Done.",
                  # The discarded b orchestrates nothing; its draft answers to a.
@@ -1012,6 +1021,14 @@ defmodule Shuttle.ThreadsOutboxTest do
         thread("hub/rest", %{"status" => "open", "horizon" => "stashed"}),
         thread("hub/draft", %{"status" => "open", "shuttle" => %{"enabled" => false}}),
         thread("hub/review", %{"status" => "closed", "outcome" => "Found it. Then more."}),
+        thread("hub/marked", %{
+          "status" => "closed",
+          "outcome" => "The fit moved.",
+          "shuttle" => %{
+            "thread_parent" => %{"uid" => "u-hub", "slug" => "hub"},
+            "review" => %{"note" => "a surprise", "at" => "t"}
+          }
+        }),
         thread("hub/live", %{"status" => "active"}),
         thread("hub/live/deep", %{"status" => "active"}),
         thread("hub/armed", %{"status" => "active", "shuttle" => %{"host" => "test-host"}}),
@@ -1036,10 +1053,12 @@ defmodule Shuttle.ThreadsOutboxTest do
         )
 
       assert prompt =~
-               "## Threads — 1 waiting · 1 to review · 2 working · 2 armed (1 on an unreachable host) · 1 draft · 1 resting · 2 archived — `shuttle threads hub`"
+               "## Threads — 1 waiting · 1 to review · 1 for the human · 2 working · 2 armed (1 on an unreachable host) · 1 draft · 1 resting · 2 archived — `shuttle threads hub`"
 
       assert prompt =~ "### Waiting (1)\n- asking — Which model?"
       assert prompt =~ "### To review (1)\n- review — Found it."
+      # A thread marked for the human waits on the human, not in the inbox.
+      refute prompt =~ "- marked"
       refute prompt =~ "hub/asking"
       refute prompt =~ "shuttle thread hub \"<ask>\""
 

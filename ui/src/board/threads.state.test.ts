@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import { card, conversations } from './testFixtures.js'
-import { ThreadIndex, threadState } from './threads.js'
+import { THREAD_LABEL, ThreadIndex, threadState } from './threads.js'
 import { constitutionMentions } from './workspace/bodyLinks.js'
 import { FamilyPage, placeAt } from './workspace/FamilyPage.js'
 import type { KanbanCard } from './KanbanTypes.js'
@@ -97,5 +97,28 @@ describe('a family sits where the most urgent need in its tree puts it', () => {
     const cards = [root(), yours('y'), working('w')]
     const index = new ThreadIndex(cards)
     for (const c of cards) expect(index.family(c).lead.id).toBe('cmbx/y')
+  })
+})
+
+describe('a thread with its orchestrator asks nothing of the human', () => {
+  const hub = thread({ id: 'hub', status: 'open' })
+  const withOrchestrator = thread({ id: 'hub/fit', orchestrator: 'hub', status: 'closed', column: 'orchestratorReview' })
+  const marked = thread({ id: 'hub/marked', orchestrator: 'hub', status: 'closed', reviewMark: { note: 'the fit moved', at: '2026-11-09T10:00:00Z' } })
+  const working = thread({ id: 'hub/live', orchestrator: 'hub', status: 'active', workerState: 'running', runtimePhase: 'working' })
+
+  it('is With orchestrator, unfinished but not to review', () => {
+    expect(threadState(withOrchestrator)).toBe('with-orchestrator')
+    expect(THREAD_LABEL['with-orchestrator']).toBe('With orchestrator')
+    expect(threadState(marked)).toBe('to-review')
+    expect(new ThreadIndex([hub, withOrchestrator]).summary(hub)).toMatchObject({ unfinished: 1, toReview: 0, waiting: 0, working: 0 })
+  })
+  it('never pulls its family into review: a quiet tree stays its root', () => {
+    expect(new ThreadIndex([hub, withOrchestrator]).family(hub)).toMatchObject({ need: null, lead: hub })
+    expect(new ThreadIndex([hub, withOrchestrator, marked]).family(hub)).toMatchObject({ need: 'review', lead: marked })
+    expect(new ThreadIndex([hub, withOrchestrator]).headers()).toEqual([])
+  })
+  it('sorts after the human\'s review and before work', () => {
+    const index = new ThreadIndex([hub, working, withOrchestrator, marked])
+    expect([working, withOrchestrator, marked].sort(index.compare).map(c => c.id)).toEqual(['hub/marked', 'hub/fit', 'hub/live'])
   })
 })

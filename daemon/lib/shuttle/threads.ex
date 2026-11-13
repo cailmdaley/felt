@@ -437,6 +437,7 @@ defmodule Shuttle.Threads do
     "Unknown",
     "Waiting",
     "To review",
+    "For the human",
     "Working",
     "Armed",
     "Draft",
@@ -446,6 +447,7 @@ defmodule Shuttle.Threads do
   @doc """
   The `## Threads` block for an orchestrator's launch prompt: counts for its
   direct threads in board order, then the Blocked, Waiting and To review inbox.
+  Threads For the human are counted but not listed: they wait on the human.
   `live` and `reachable` are as `tree/5` takes them.
   """
   def roster(fiber_id, felt_store, entries, live, reachable \\ nil) do
@@ -924,17 +926,20 @@ defmodule Shuttle.Threads do
 
   @doc """
   A thread's roster state, from its column (`Shuttle.Lifecycle.column/3`) and
-  turn (`Shuttle.Lifecycle.turn/5`): a verdict Archived, a closed run To
-  review, a draft Draft, an active constitution whose turn is blocked Blocked,
-  In flight split into Waiting (the human's move), Working (a live worker) and
-  Armed (no worker running), and a rest or a seat Resting. The board's rails
-  (`ui/src/board/threads.ts` `threadState`) read the same column and turn, and
-  file Armed as Working and Blocked as Waiting.
+  turn (`Shuttle.Lifecycle.turn/5`): a verdict Archived, a closed thread the
+  orchestrator reviews To review, a closed run that awaits the human (marked
+  for review) For the human, a draft Draft, an active constitution whose turn
+  is blocked Blocked, In flight split into Waiting (the human's move), Working
+  (a live worker) and Armed (no worker running), and a rest or a seat Resting.
+  The board's rails (`ui/src/board/threads.ts` `threadState`) read the same
+  column and turn: they draw To review as With orchestrator and For the human
+  as To review, and file Armed as Working and Blocked as Waiting.
   """
   def thread_state(fiber, column, turn, live?) do
     cond do
       column in ["tempered", "discarded"] -> "Archived"
-      column == "awaiting_review" -> "To review"
+      column == "orchestrator_review" -> "To review"
+      column == "awaiting_review" -> "For the human"
       column == "drafts" -> "Draft"
       turn == "blocked" and fiber["status"] == "active" -> "Blocked"
       column != "in_flight" -> "Resting"
@@ -1376,8 +1381,16 @@ defmodule Shuttle.Threads do
     case fiber["tempered"] do
       true -> (fiber["outcome"] || "") <> " (human verdict: tempered)"
       false -> (fiber["outcome"] || "") <> " (human verdict: discarded)"
-      _ -> fiber["outcome"] || ""
+      _ -> (fiber["outcome"] || "") <> review_clause(fiber)
     end
+  end
+
+  # A close that lands in the orchestrator's review says the verdict is theirs.
+  defp review_clause(fiber) do
+    if Lifecycle.column(fiber, false) == "orchestrator_review",
+      do:
+        " (the verdict is yours: temper, discard, or shuttle close #{address(fiber)} --review \"<why>\")",
+      else: ""
   end
 
   defp signals(fiber) do

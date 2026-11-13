@@ -699,18 +699,27 @@ func setRemoteProjectDirFlag(cmd *cobra.Command, raw string, f *felt.Felt, block
 // ---- close -----------------------------------------------------------------
 
 func (a *app) closeCmd() *cobra.Command {
-	var closeTempered, closeActor string
+	var closeTempered, closeActor, closeReview string
 	var closeQuiet bool
 	closeCmd := &cobra.Command{
 		Use:   "close [fiber]",
 		Short: "Close a shuttle-managed fiber and optionally set the human verdict",
 		Long: `Sets status: closed and stamps closed-at when missing. --tempered records a
-verdict; without it the fiber waits on Awaiting review. Use:
+verdict. Without one, top-level work waits on the human's Awaiting review and a
+thread waits on its orchestrator's review. Use:
 
   shuttle close <fiber>                   # close for review
-  shuttle close <fiber> --tempered=true   # human-accepted
+  shuttle close <fiber> --tempered=true   # tempered: accepted
   shuttle close <fiber> --tempered=false  # discarded
+  shuttle close <thread> --review "<why>" # mark a thread for the human's review
   shuttle close <fiber> --quiet           # context-only result for its orchestrator
+
+A closed thread is its orchestrator's to review: the orchestrator reads it
+against its Desired State and tempers it, discards it, or marks it for the
+human with --review, whose note says why it is worth the human's look. The
+mark closes the thread if it is open and puts it in Awaiting review; reopening
+clears it. A worker cannot mark its own constitution. --review and --tempered
+are mutually exclusive.
 
 A thread's close reaches its nearest orchestrator as context. It wakes only the
 session that asked for the thread with 'shuttle thread'; a thread nobody asked
@@ -727,7 +736,9 @@ rest' pauses the schedule instead.
 
 A worker closing its own top-level oneshot for review must have written the
 fiber's tapestry.html since it was dispatched; 'shuttle rest' leaves when
-nothing needs review. Threads, standing runs and verdicts are exempt.
+nothing needs review. Threads, standing runs and verdicts are exempt. A worker
+closing its own constitution for review must first settle its threads: every
+closed thread beneath it without a verdict is tempered, discarded or marked.
 
 The shuttle block stays installed. Closed oneshots wait for reopen.
 When closing your own fiber from tmux, this command ends your
@@ -743,9 +754,24 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 			if err != nil {
 				return fmt.Errorf("parsing --tempered: %w", err)
 			}
-			if tempered == nil {
-				if f, _, _, lookupErr := a.shuttleResolveFiberRef(args[0], true); lookupErr == nil {
+			marking := cmd.Flags().Changed("review")
+			if marking {
+				if tempered != nil {
+					return fmt.Errorf("--review and --tempered are mutually exclusive: a mark sends the thread to the human, a verdict archives it")
+				}
+				if strings.TrimSpace(closeReview) == "" {
+					return fmt.Errorf("--review needs a note saying why the thread is worth the human's look")
+				}
+			}
+			if f, _, _, lookupErr := a.shuttleResolveFiberRef(args[0], true); lookupErr == nil {
+				if marking && a.isOwnFiber(f) {
+					return fmt.Errorf("%s is your own constitution: whether the human reviews it is its orchestrator's decision; close it with 'shuttle close'", f.ID)
+				}
+				if tempered == nil && !marking {
 					if err := a.requireReviewReport(f); err != nil {
+						return err
+					}
+					if err := a.requireThreadsReviewed(f); err != nil {
 						return err
 					}
 				}
@@ -756,6 +782,9 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 					fields := map[string]any{}
 					if tempered != nil {
 						fields["tempered"] = *tempered
+					}
+					if marking {
+						fields["review"] = closeReview
 					}
 					if closeQuiet {
 						fields["quiet"] = true
@@ -793,6 +822,9 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 				if tempered != nil {
 					fields["tempered"] = *tempered
 				}
+				if marking {
+					fields["review"] = closeReview
+				}
 				if closeQuiet {
 					fields["quiet"] = true
 				}
@@ -817,6 +849,12 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 			f.Status = felt.StatusClosed
 			if err := setTempered(f, tempered); err != nil {
 				return err
+			}
+			if marking {
+				block.Review = &shuttle.Review{Note: strings.TrimSpace(closeReview), At: time.Now().UTC().Format(time.RFC3339Nano)}
+				if err := shuttle.SetNodeField(f, "review", block.Review); err != nil {
+					return err
+				}
 			}
 			if err := clearBlockedOn(f); err != nil {
 				return err
@@ -858,6 +896,8 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 			a.recordBoard(boardRecord{Kind: "closed", Fiber: f.UID, By: by, Verdict: verdict})
 			fmt.Fprintf(a.env.Stdout, "closed %s%s\n", args[0], ref.Location())
 			switch {
+			case marking:
+				fmt.Fprintf(a.env.Stdout, "  marked for the human's review: %s\n", block.Review.Note)
 			case tempered == nil:
 				fmt.Fprintln(a.env.Stdout, "  tempered: unset (awaiting review)")
 			case *tempered:
@@ -873,6 +913,7 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 	}
 	closeCmd.Flags().BoolVar(&closeQuiet, "quiet", false, "Deliver the outcome as context without waking the nearest orchestrator")
 	closeCmd.Flags().StringVar(&closeTempered, "tempered", "", "Set tempered verdict (true/false); omit to close for review")
+	closeCmd.Flags().StringVar(&closeReview, "review", "", "Mark a thread for the human's review, saying why it is worth their look")
 	closeCmd.Flags().Bool("local", false, localFlagUsage)
 	closeCmd.Flags().StringVar(&closeActor, "actor", "", actorFlagUsage)
 	_ = closeCmd.Flags().MarkHidden("actor")

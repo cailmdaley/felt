@@ -661,6 +661,52 @@ defmodule ShuttleWeb.APIControllerTest do
     assert "--tempered=true" in captured
   end
 
+  # Moving a thread to review is the human asking to see it: the close marks it.
+  @tag :capture_log
+  test "transition to review marks a thread for the human" do
+    with_actions_host()
+
+    MockRunner.set_shuttle(
+      "tests/transition-thread",
+      "kind: oneshot\nthread_parent:\n  uid: u-hub\n  host: h\n  slug: tests\n  name: Tests\n",
+      "closed"
+    )
+
+    argv_log =
+      Path.join(
+        System.tmp_dir!(),
+        "shuttle-transition-argv-#{System.unique_integer([:positive])}"
+      )
+
+    FakeCli.install!(%{
+      "felt" => """
+      #!/usr/bin/env bash
+      exec "#{FakeCli.real!("felt")}" "$@"
+      """,
+      "shuttle" => """
+      #!/usr/bin/env bash
+      printf '%s\\n' "$@" >> "$SHUTTLE_ARGV_LOG"
+      exit 0
+      """
+    })
+
+    Env.put_env("SHUTTLE_ARGV_LOG", argv_log)
+    on_exit(fn -> File.rm(argv_log) end)
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/transition",
+        Jason.encode!(%{fiber_id: "tests/transition-thread", target: "awaitingReview"})
+      )
+
+    assert conn.status == 200
+    assert Jason.decode!(conn.resp_body)["action"] == "close-awaiting-review"
+    captured = argv_log |> File.read!() |> String.split("\n", trim: true)
+    assert "close" in captured
+    assert "--review=Moved to review on the board" in captured
+  end
+
   test "transition for an unknown target returns 400" do
     with_actions_host()
     MockRunner.set_shuttle("tests/transition-bad-target", oneshot_shuttle())

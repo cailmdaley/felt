@@ -13,7 +13,7 @@ defmodule Shuttle.Actions do
   def actions_for(fiber, running? \\ false) when is_map(fiber) do
     fiber
     |> action_ids(running?)
-    |> Enum.map(&render_action/1)
+    |> Enum.map(&render_action(&1, fiber))
   end
 
   @spec resolve_transition(map(), String.t(), boolean()) ::
@@ -26,7 +26,7 @@ defmodule Shuttle.Actions do
 
     case action_for_target(fiber, target, running?) do
       nil -> {:error, :standing_unreviewed}
-      action -> {:ok, render_action(action)}
+      action -> {:ok, render_action(action, fiber)}
     end
   end
 
@@ -108,7 +108,8 @@ defmodule Shuttle.Actions do
       status == "closed" and target == "inFlight" ->
         :reopen
 
-      # A oneshot can return to Awaiting review by clearing its verdict.
+      # A oneshot can return to Awaiting review by clearing its verdict; a
+      # thread With its orchestrator moves there by its mark.
       status == "closed" and target == "awaitingReview" ->
         :close_awaiting_review
 
@@ -150,17 +151,28 @@ defmodule Shuttle.Actions do
     end
   end
 
-  defp render_action(id) do
-    %{id: Atom.to_string(id) |> String.replace("_", "-"), invocation: invocation(id)}
+  defp render_action(id, fiber) do
+    %{id: Atom.to_string(id) |> String.replace("_", "-"), invocation: invocation(id, fiber)}
   end
 
-  defp invocation(:pause), do: %{verb: "pause"}
-  defp invocation(:reopen), do: %{verb: "reopen"}
-  defp invocation(:reopen_draft), do: %{verb: "reopen", as_draft: true}
-  defp invocation(:dispatch_ad_hoc), do: %{verb: "dispatch", ad_hoc: true}
-  defp invocation(:close_awaiting_review), do: %{verb: "close"}
-  defp invocation(:close_tempered), do: %{verb: "close", tempered: true}
-  defp invocation(:close_composted), do: %{verb: "close", tempered: false}
+  # The note a thread carries when the human moves it to review on the board.
+  @board_review_note "Moved to review on the board"
+
+  defp invocation(:pause, _), do: %{verb: "pause"}
+  defp invocation(:reopen, _), do: %{verb: "reopen"}
+  defp invocation(:reopen_draft, _), do: %{verb: "reopen", as_draft: true}
+  defp invocation(:dispatch_ad_hoc, _), do: %{verb: "dispatch", ad_hoc: true}
+
+  # Moving a card to review is the human asking to see it. A thread's review
+  # otherwise belongs to its orchestrator, so the close marks it for the human.
+  defp invocation(:close_awaiting_review, fiber) do
+    if is_map(shuttle(fiber)["thread_parent"]),
+      do: %{verb: "close", review: @board_review_note},
+      else: %{verb: "close"}
+  end
+
+  defp invocation(:close_tempered, _), do: %{verb: "close", tempered: true}
+  defp invocation(:close_composted, _), do: %{verb: "close", tempered: false}
 
   defp normalize_target("active"), do: "inFlight"
   defp normalize_target(target), do: target

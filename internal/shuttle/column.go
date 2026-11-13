@@ -42,11 +42,14 @@ func Verdict(f *felt.Felt) string {
 }
 
 // Column is the Desk column a constitution sits in: drafts, in_flight,
-// awaiting_review, tempered, discarded, resting (a draft put down, or a
-// standing constitution between firings or with its schedule paused) or roles
-// (a seat at rest). An armed standing constitution whose last run asked a
-// question waits in flight, on the human's turn. live is whether its worker
-// runs; today is the civil day a due date is read against.
+// awaiting_review, orchestrator_review, tempered, discarded, resting (a draft
+// put down, or a standing constitution between firings or with its schedule
+// paused) or roles (a seat at rest). A closed constitution without a verdict
+// awaits the human's review when it is top-level or marked for review
+// (block.Review); an unmarked thread is its orchestrator's to review. An armed
+// standing constitution whose last run asked a question waits in flight, on
+// the human's turn. live is whether its worker runs; today is the civil day a
+// due date is read against.
 // The daemon, which holds the live runtime, serves the same column on every
 // board row (Shuttle.Lifecycle.column/3); daemon/test/fixtures/columns holds
 // the two equal.
@@ -54,6 +57,9 @@ func Column(f *felt.Felt, block *Block, live bool, today time.Time) string {
 	if f.Status == felt.StatusClosed {
 		if verdict := Verdict(f); verdict != "" {
 			return verdict
+		}
+		if block.ThreadParent != nil && block.Review == nil {
+			return "orchestrator_review"
 		}
 		return "awaiting_review"
 	}

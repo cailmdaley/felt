@@ -75,12 +75,15 @@ const sectionColumn = (card: KanbanCard): 'inFlight' | 'awaitingReview' => (card
 
 /**
  * Where a card is drawn: its served column, except that a cycle is drawn
- * among the cycles and a standing constitution asleep on its cron on the
- * timeline, placed by its next launch.
+ * among the cycles, a standing constitution asleep on its cron on the
+ * timeline, placed by its next launch, and a thread with its orchestrator
+ * that is a Desk row in Awaiting review: with no orchestrator on the board,
+ * its review falls to the human.
  */
-type Surface = DeskColumn | 'scheduled' | 'cycles';
+type Surface = Exclude<DeskColumn, 'orchestratorReview'> | 'scheduled' | 'cycles';
 function surfaceOf(card: KanbanCard): Surface {
   if (card.isCycle) return 'cycles';
+  if (card.column === 'orchestratorReview') return 'awaitingReview';
   return card.column === 'resting' && isSleepingOnSchedule(card) ? 'scheduled' : card.column;
 }
 
@@ -544,6 +547,7 @@ function toCard(
     heldSince,
     mirroredOrigins: entry.mirroredOrigins,
     ask: f.shuttleAsk,
+    reviewMark: f.shuttleReview,
     dispatchedAt: f.shuttleDispatchedAt,
     handedOffAt: f.shuttleHandedOffAt,
     shuttleAgent: f.shuttleAgent,

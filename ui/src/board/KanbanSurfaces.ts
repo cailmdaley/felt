@@ -60,8 +60,8 @@ export const COLUMN_TITLES: Record<ColumnKind, string> = {
   composted: 'Discarded',
 }
 
-/** Every column's name, the two at rest included. */
-export const DESK_COLUMN_TITLE: Record<DeskColumn, string> = { ...COLUMN_TITLES, resting: 'Resting', roles: 'Roles' }
+/** Every column's name, the two at rest and a thread's review by its orchestrator included. */
+export const DESK_COLUMN_TITLE: Record<DeskColumn, string> = { ...COLUMN_TITLES, orchestratorReview: 'With orchestrator', resting: 'Resting', roles: 'Roles' }
 
 type NowColumnKind = 'drafts' | 'inFlight' | 'awaitingReview'
 const NOW_COLUMN_ORDER: NowColumnKind[] = ['drafts', 'inFlight', 'awaitingReview']

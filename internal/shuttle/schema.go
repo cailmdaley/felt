@@ -43,9 +43,10 @@ type ThreadAsker struct {
 }
 
 // Block is the in-memory representation of a Shuttle facet. There is no
-// enabled flag and no review axis: a fiber is shuttle-managed iff it carries
-// this block, and it dispatches iff its status is "active". Lifecycle is status
-// plus tempered, uniform across kinds.
+// enabled flag: a fiber is shuttle-managed iff it carries this block, and it
+// dispatches iff its status is "active". Lifecycle is status plus tempered,
+// uniform across kinds. A closed thread without a verdict is its
+// orchestrator's to review unless Review marks it for the human.
 type Block struct {
 	ThreadParent *ThreadParent `json:"thread_parent,omitempty" yaml:"thread_parent,omitempty"`
 	Kind         string        `json:"kind" yaml:"kind"`
@@ -63,6 +64,9 @@ type Block struct {
 	Schedule *Schedule `json:"schedule,omitempty" yaml:"schedule,omitempty"`
 	Pulse    *Pulse    `json:"pulse,omitempty" yaml:"pulse,omitempty"`
 	Ask      *Ask      `json:"ask,omitempty" yaml:"ask,omitempty"`
+	// Review is an orchestrator's mark sending a closed thread to the human's
+	// review (`shuttle close --review`). Reopening clears it.
+	Review *Review `json:"review,omitempty" yaml:"review,omitempty"`
 	// Role is the constitution's role, `<office>` or `<office>/<person>`. It
 	// lives in the fiber's top-level `role:`; BlockOf fills it from there (see
 	// BlockOf) and SetConfig writes it back there.
@@ -78,6 +82,13 @@ type Block struct {
 // Ask is a worker's outstanding question to the human.
 type Ask struct {
 	Text string `json:"text" yaml:"text"`
+	At   string `json:"at" yaml:"at"`
+}
+
+// Review is the mark that sends a closed thread to the human: why it is
+// worth their look, and when it was marked.
+type Review struct {
+	Note string `json:"note" yaml:"note"`
 	At   string `json:"at" yaml:"at"`
 }
 
@@ -182,6 +193,15 @@ func Validate(b *Block, agents *AgentRegistry) ValidationErrors {
 		}
 		if _, err := time.Parse(time.RFC3339Nano, b.Ask.At); err != nil {
 			add("ask.at", "must be an RFC3339 timestamp")
+		}
+	}
+
+	if b.Review != nil {
+		if strings.TrimSpace(b.Review.Note) == "" {
+			add("review.note", "must be non-empty")
+		}
+		if _, err := time.Parse(time.RFC3339Nano, b.Review.At); err != nil {
+			add("review.at", "must be an RFC3339 timestamp")
 		}
 	}
 

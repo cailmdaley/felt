@@ -89,8 +89,9 @@ function standingOf(card: KanbanCard, index: ThreadIndex, fresh: boolean, lastMo
 }
 
 const WORD: Partial<Record<Standing, string>> = { question: 'question', blocked: 'blocked', new: 'new file', review: 'to review', turn: 'your turn' }
-/** What an in-flight thread with no worker is: held by the daemon, stopped after a run, or armed and yet to start. */
-const stillWord = (card: KanbanCard): string => card.held ? 'held' : card.dispatchedAt || card.sessionUuid ? 'stopped' : 'armed'
+/** What a thread with no worker and nothing asked of the human is: closed for its orchestrator's review, held by the daemon, stopped after a run, or armed and yet to start. */
+const stillWord = (card: KanbanCard): string => card.column === 'orchestratorReview' ? 'with orchestrator'
+  : card.held ? 'held' : card.dispatchedAt || card.sessionUuid ? 'stopped' : 'armed'
 
 /** The family under `root`, ready to draw: one model every drawing reads. */
 export function familyModel(index: ThreadIndex, root: KanbanCard, feeds: MapFeeds, now: number): FamilyModel {

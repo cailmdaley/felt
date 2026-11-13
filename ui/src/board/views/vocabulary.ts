@@ -30,9 +30,10 @@ export const MARK_GLYPH: Record<MarkKind, string> = { due: '◴', launch: '◐' 
  * Where a fiber stands in its life, as the temporal views need to say it.
  *
  * This is the card's served Desk column seen from the side. `resting` folds
- * the two columns off the desk — Resting (put down, or a standing
- * constitution between firings or with its schedule paused) and the Roles — because from a row on the
- * chronicle they are one claim: nothing is owed here now.
+ * the columns that owe the human nothing — Resting (put down, or a standing
+ * constitution between firings or with its schedule paused), the Roles, and
+ * a closed thread with its orchestrator for review — because from a row on
+ * the chronicle they are one claim: nothing is owed here now.
  *
  *   ◇ draft            written, not armed
  *   ▶ in flight        a worker is running, or the fiber is armed to run
@@ -86,6 +87,7 @@ const COLUMN_STATE: Record<DeskColumn, LifecycleState> = {
   drafts: 'draft',
   inFlight: 'inFlight',
   awaitingReview: 'awaitingReview',
+  orchestratorReview: 'resting',
   resting: 'resting',
   roles: 'resting',
   tempered: 'tempered',

@@ -657,6 +657,9 @@ func TestShuttleStatusProseFollowsTheColumn(t *testing.T) {
 	seedShuttleRole(t, storage, "proj/armed", felt.StatusActive, oneshot(), nil)
 	seedShuttleRole(t, storage, "proj/draft", felt.StatusOpen, oneshot(), nil)
 	seedShuttleRole(t, storage, "proj/rest", felt.StatusOpen, oneshot(), nil)
+	thread := oneshot()
+	thread["thread_parent"] = map[string]any{"uid": "01PARENT0000000000000000000", "host": "elsewhere", "slug": "proj", "name": "Proj"}
+	seedShuttleRole(t, storage, "proj/thread", felt.StatusClosed, thread, nil)
 	rest := mustRead(t, storage, "proj/rest")
 	if err := rest.SetExtraField("horizon", "stashed"); err != nil {
 		t.Fatal(err)
@@ -669,7 +672,8 @@ func TestShuttleStatusProseFollowsTheColumn(t *testing.T) {
 	for id, want := range map[string]string{
 		"proj/kept":    "→ Tempered — reviewed and archived; daemon will NOT dispatch. Use `shuttle reopen proj/kept`",
 		"proj/dropped": "→ Discarded — reviewed and archived",
-		"proj/review":  "→ To review — closed, awaiting a verdict",
+		"proj/review":  "→ Awaiting review — closed, awaiting the human's verdict",
+		"proj/thread":  "Its orchestrator tempers it (`shuttle close proj/thread --tempered=true`), discards it (`shuttle close proj/thread --tempered=false`) or marks it for the human (`shuttle close proj/thread --review \"<why>\"`)",
 		"proj/armed":   "→ Armed, but the block has no host",
 		"proj/draft":   "→ Draft (status: open). Use `shuttle resume proj/draft` to arm it.",
 		"proj/rest":    "→ Resting — put down (status: open, horizon: stashed); daemon will NOT dispatch. Use `shuttle resume proj/rest`",

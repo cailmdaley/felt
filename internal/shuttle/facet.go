@@ -175,8 +175,10 @@ func SetConfig(f *felt.Felt, block *Block) error {
 	// Surface is a legacy opaque value: preserve its source node without
 	// validating or rewriting it as part of current configuration.
 	felt.RemoveMappingKey(&encoded, "surface")
-	// Questions are worker state, not configuration; preserve the live node.
+	// Questions and review marks are lifecycle state, not configuration;
+	// preserve the live nodes.
 	felt.RemoveMappingKey(&encoded, "ask")
+	felt.RemoveMappingKey(&encoded, "review")
 	felt.RemoveMappingKey(&encoded, "role")
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)

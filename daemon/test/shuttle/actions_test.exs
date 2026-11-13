@@ -313,4 +313,35 @@ defmodule Shuttle.ActionsTest do
       assert offered == resolved
     end
   end
+
+  describe "a thread moved to review" do
+    # The human moving a thread to review asks to see it: the close marks it,
+    # since an unmarked thread's review belongs to its orchestrator.
+    @thread_parent %{"uid" => "u-hub", "host" => "h", "slug" => "hub", "name" => "Hub"}
+
+    test "marks a thread with the board's note, whether it is closed, armed or live" do
+      for {status, running?} <- [{"closed", false}, {"active", false}, {"active", true}] do
+        fiber = %{
+          "id" => "hub/t",
+          "status" => status,
+          "shuttle" => %{"kind" => "oneshot", "thread_parent" => @thread_parent}
+        }
+
+        assert {:ok,
+                %{
+                  id: "close-awaiting-review",
+                  invocation: %{verb: "close", review: "Moved to review on the board"}
+                }} = Actions.resolve_transition(fiber, "awaitingReview", running?)
+      end
+    end
+
+    test "leaves top-level work a plain close" do
+      fiber = %{"id" => "work", "status" => "active", "shuttle" => %{"kind" => "oneshot"}}
+
+      assert {:ok, %{id: "close-awaiting-review", invocation: %{verb: "close"} = invocation}} =
+               Actions.resolve_transition(fiber, "awaitingReview")
+
+      refute Map.has_key?(invocation, :review)
+    end
+  end
 end
