@@ -5,7 +5,11 @@
     "version": "1",
     "description": "The routes a UI other than the board can build on. `info.version` is the API level, the integer `GET /api/v1/version` reports as `api_level`: adding a route or an optional field leaves it alone, removing or renaming anything described here raises it by one. Response objects may carry fields this document does not name; a client ignores them. Everything under /api/v1 that is absent from this document is internal and moves with the board."
   },
-  "servers": [{ "url": "/api/v1" }],
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
   "paths": {
     "/contract": {
       "get": {
@@ -13,7 +17,1859 @@
         "responses": {
           "200": {
             "description": "The OpenAPI document.",
-            "content": { "application/json": { "schema": { "type": "object" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "core"
+        ],
+        "description": "Read the stable operations and shapes supported by this daemon. The document version is the API level reported by /version."
+      }
+    },
+    "/version": {
+      "get": {
+        "summary": "Read daemon identity and readiness.",
+        "description": "Reports the build, host, terminal backend, API level and independent CLI contract level, even during boot. With origin, reads that host instead; readiness does not imply fresh launches are released.",
+        "tags": [
+          "core"
+        ],
+        "parameters": [
+          {
+            "name": "origin",
+            "in": "query",
+            "required": false,
+            "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400.",
+            "schema": {
+              "type": "string",
+              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Version"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown origin.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Owner version unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fleet": {
+      "get": {
+        "summary": "Read a host’s configured and discovered remotes.",
+        "description": "Joins normalized remote configuration to cached reachability and remote build stamps, without probing hosts on demand. A configuration read failure is still 200 with error set and an empty remotes list.",
+        "tags": [
+          "core"
+        ],
+        "parameters": [
+          {
+            "name": "origin",
+            "in": "query",
+            "required": false,
+            "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400.",
+            "schema": {
+              "type": "string",
+              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Fleet"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown origin; includes ok: false.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Forward failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Boot is incomplete or held; no action is attempted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BootUnavailable"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/peers": {
+      "get": {
+        "summary": "Discover addressable sessions.",
+        "description": "Returns exact shuttle://HOST/HARNESS/NATIVE_ID addresses across the fleet, or only this host when local=true. Discovery failures become gaps in a 200 response rather than discarding successful sessions.",
+        "tags": [
+          "core"
+        ],
+        "parameters": [
+          {
+            "name": "local",
+            "in": "query",
+            "required": false,
+            "description": "Only query this daemon when true; defaults to false.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeerDirectory"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "local is neither true nor false.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fibers/composite": {
+      "get": {
+        "summary": "Read the cross-host fiber feed.",
+        "description": "Combines owner-published rows and per-origin freshness; unreachable owners retain stale cached rows. Carry a row’s origin into subsequent owner-routed requests; column and turn are present for Shuttle constitutions, not necessarily ordinary dated notes.",
+        "tags": [
+          "core"
+        ],
+        "parameters": [
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "description": "Send the ETag from a prior response. A match returns 304 with no body.",
+            "schema": {
+              "type": "string",
+              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "host": {
+                      "type": "string",
+                      "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                    },
+                    "fibers": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CompositeFiberRow"
+                      }
+                    },
+                    "origins": {
+                      "$ref": "#/components/schemas/Origins"
+                    }
+                  },
+                  "required": [
+                    "host",
+                    "fibers",
+                    "origins"
+                  ]
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string",
+                  "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                },
+                "description": "Weak validator over the visible feed."
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                },
+                "description": "no-cache"
+              }
+            }
+          },
+          "304": {
+            "description": "Unchanged representation; empty body.",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string",
+                  "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                },
+                "description": "Validator for the representation."
+              }
+            }
+          },
+          "503": {
+            "description": "Boot is incomplete or held; no action is attempted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BootUnavailable"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fibers/{id}": {
+      "get": {
+        "summary": "Read one fiber from its owner.",
+        "description": "The wildcard id accepts a UID or a slash-separated namespace path; encode each path segment separately. body=true includes Markdown in fiber.body; without an explicit origin a locally read shuttle.host can select a configured owner, otherwise the local copy is returned.",
+        "tags": [
+          "core"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Fiber UID or namespace path, including nested segments.",
+            "schema": {
+              "type": "string",
+              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            }
+          },
+          {
+            "name": "body",
+            "in": "query",
+            "required": false,
+            "description": "Include Markdown body; defaults to false.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false",
+                "1",
+                "0"
+              ]
+            }
+          },
+          {
+            "name": "origin",
+            "in": "query",
+            "required": false,
+            "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400.",
+            "schema": {
+              "type": "string",
+              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            }
+          },
+          {
+            "name": "routed",
+            "in": "query",
+            "required": false,
+            "description": "Internal one-hop marker: 1 suppresses inferred owner routing on the receiving host.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1",
+                "true",
+                "0",
+                "false"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FiberEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown origin.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Fiber missing on the named host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Forward failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Read failed or boot incomplete.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BootUnavailable"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/capture": {
+      "post": {
+        "summary": "Launch an agent from a prompt.",
+        "description": "Starts a terminal worker in project_dir on the selected host; the agent files and claims its constitution. The directory must exist on that host; agent and effort are registry selections and chrome requests the browser-enabled axis.",
+        "tags": [
+          "core"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "prompt": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "project_dir": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "agent": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "effort": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "chrome": {
+                    "type": "boolean",
+                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                  },
+                  "origin": {
+                    "type": "string",
+                    "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400."
+                  }
+                },
+                "required": [
+                  "prompt",
+                  "project_dir"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureSuccess"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid directory, agent axes or launch preflight refusal.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureRefusal"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Launch failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureRefusal"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Forward failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureRefusal"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Backend not ready or boot incomplete.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/CaptureRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BootUnavailable"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fiber/create": {
+      "post": {
+        "summary": "Create a fiber on its owning host.",
+        "description": "id is a namespace path, not a UID; uid optionally preserves a transferred intrinsic identity. frontmatter defaults to active status, and a Shuttle block is stamped with this host; an active block requires an existing project_dir, and duplicate identities or destinations are refused.",
+        "tags": [
+          "core"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "body": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "uid": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "origin": {
+                    "type": "string",
+                    "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400."
+                  },
+                  "frontmatter": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "open",
+                          "active",
+                          "closed"
+                        ]
+                      },
+                      "shuttle": {
+                        "type": "object",
+                        "properties": {
+                          "project_dir": {
+                            "type": "string",
+                            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                          },
+                          "host": {
+                            "type": "string",
+                            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                          }
+                        }
+                      },
+                      "tags": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                        }
+                      },
+                      "outcome": {
+                        "type": "string",
+                        "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                      },
+                      "role": {
+                        "type": "string",
+                        "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                      },
+                      "due": {
+                        "type": "string",
+                        "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedFiber"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input, placement, duplicate identity, or CLI write failure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Forward failed; includes origin and detail.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Boot is incomplete or held; no action is attempted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BootUnavailable"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dispatch": {
+      "post": {
+        "summary": "Launch or resume a fiber’s worker.",
+        "description": "Requests a dispatch now; force or ad_hoc bypasses normal eligibility, but never invents a project directory. resume_mode selects previous or fresh context (absent or unrecognized uses the owner’s heuristic); user_message and images ride the launch.",
+        "tags": [
+          "core"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "fiber_id": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "origin": {
+                    "type": "string",
+                    "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400."
+                  },
+                  "force": {
+                    "type": "boolean",
+                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                  },
+                  "ad_hoc": {
+                    "type": "boolean",
+                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                  },
+                  "existing_only": {
+                    "type": "boolean",
+                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                  },
+                  "release_launch_reservation": {
+                    "type": "boolean",
+                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                  },
+                  "user_message": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "resume_mode": {
+                    "type": "string",
+                    "enum": [
+                      "previous",
+                      "fresh"
+                    ]
+                  },
+                  "project_dir": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "images": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                        },
+                        "data": {
+                          "type": "string",
+                          "description": "Base64 PNG, JPEG, GIF or WebP bytes; at most eight images, 20 MB total."
+                        }
+                      },
+                      "required": [
+                        "data"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "fiber_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DispatchSuccess"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Fiber missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DispatchRefusal"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Worker already running or a launch reservation is unresolved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DispatchRefusal"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Not eligible, no live worker, arming refused or launch preflight refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DispatchRefusal"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Launch failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DispatchRefusal"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Forward failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForwardDispatchRefusal"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Backend not ready or boot incomplete.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DispatchRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BootUnavailable"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Poller did not answer; the launch may still occur. Inspect the fiber before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DispatchRefusal"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/deliver": {
+      "post": {
+        "summary": "Deliver text to a fiber’s worker.",
+        "description": "Messages a live worker or launches/resumes a dormant one with the text; delivery names which occurred and delivered=null means unconfirmed, not failure. context_only plus message_id queues without launching (202); unless_live refuses a live worker and otherwise marks queued_for_next_worker.",
+        "tags": [
+          "core"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "fiber_id": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "text": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "origin": {
+                    "type": "string",
+                    "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400."
+                  },
+                  "from": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "from_claim": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "address": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "context_only": {
+                    "type": "boolean",
+                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                  },
+                  "message_id": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "wake": {
+                    "type": "boolean",
+                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                  },
+                  "unless_live": {
+                    "type": "boolean",
+                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                  },
+                  "resume_mode": {
+                    "type": "string",
+                    "enum": [
+                      "previous",
+                      "fresh"
+                    ]
+                  },
+                  "message_after_launch": {
+                    "type": "boolean",
+                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                  },
+                  "live_input": {
+                    "type": "boolean",
+                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                  },
+                  "reply_to": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "notify_address": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "notify_when_idle": {
+                    "type": "boolean",
+                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                  },
+                  "notify_wake": {
+                    "type": "boolean",
+                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                  },
+                  "thread_signal": {
+                    "type": "object"
+                  },
+                  "retained_at": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "fiber_id",
+                  "text"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DeliveryMessage"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DeliveryLaunch"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DeliveryInput"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Queued context or unconfirmed delivery, including an owner timeout.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DeliveryMessage"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DeliveryInput"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DeliveryContext"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DeliveryForward"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing fields, context message_id or unknown origin.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Fiber missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DeliveryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DeliveryLaunchRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DeliveryMessage"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DeliveryInput"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Live-worker conflict or launch reservation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DeliveryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DeliveryLaunchRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DeliveryMessage"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DeliveryInput"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Delivery, arming or preflight refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DeliveryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DeliveryLaunchRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DeliveryMessage"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DeliveryInput"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Launch failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DeliveryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DeliveryLaunchRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DeliveryMessage"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DeliveryInput"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Forward failure or worker rejected the message.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/DeliveryError"
+                        },
+                        {
+                          "$ref": "#/components/schemas/DeliveryLaunchRefusal"
+                        },
+                        {
+                          "$ref": "#/components/schemas/DeliveryMessage"
+                        },
+                        {
+                          "$ref": "#/components/schemas/DeliveryInput"
+                        }
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/DeliveryForward"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Backend not ready, CLI unavailable or boot incomplete.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/DeliveryError"
+                        },
+                        {
+                          "$ref": "#/components/schemas/DeliveryLaunchRefusal"
+                        },
+                        {
+                          "$ref": "#/components/schemas/DeliveryMessage"
+                        },
+                        {
+                          "$ref": "#/components/schemas/DeliveryInput"
+                        }
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/BootUnavailable"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Launch or message timed out; inspect before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DeliveryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DeliveryLaunchRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DeliveryMessage"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DeliveryInput"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/messages": {
+      "post": {
+        "summary": "Send an idempotent message to an exact session.",
+        "description": "address selects the host strictly; there is no origin parameter. wake defaults to true, while wake=false adds context without a task turn; reuse message_id with identical content to retry, and read receipt.status rather than treating HTTP 200 as proof of acceptance or model action.",
+        "tags": [
+          "core"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "address": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "text": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "message_id": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "from": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "from_claim": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "reply_to": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "notify_address": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "wake": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "context_if_busy": {
+                    "type": "boolean",
+                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                  },
+                  "idle_only": {
+                    "type": "boolean",
+                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                  },
+                  "notify_when_idle": {
+                    "type": "boolean",
+                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                  },
+                  "notify_wake": {
+                    "type": "boolean",
+                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                  }
+                },
+                "required": [
+                  "address",
+                  "message_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Processed receipt, including rejected or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request/address/host or preflight rejection.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MessageReceipt"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "message_id reused for different content.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageReceipt"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Malformed receipt or unreachable owner; synthetic unknown receipt.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageReceipt"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Cannot run the local CLI.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Local delivery timed out; unknown outcome.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageReceipt"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/lifecycle": {
+      "post": {
+        "summary": "Apply a named lifecycle action.",
+        "description": "Uses fiber (not fiber_id), a UID or exact namespace path, and returns CLI output as plain text on success. repeat requires schedule; set-model requires agent, set-outcome requires outcome, role requires role or clear=true; install/repeat require project_dir when arming, and fiber_path is an optional exact-path identity hint.",
+        "tags": [
+          "core"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "fiber": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "origin": {
+                    "type": "string",
+                    "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400."
+                  },
+                  "fiber_path": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "project_dir": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "model": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "agent": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "effort": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "schedule": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "tz": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "until": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "review": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "actor": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "role": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "new_name": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "outcome": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "disabled": {
+                    "type": "boolean",
+                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                  },
+                  "no_kill": {
+                    "type": "boolean",
+                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                  },
+                  "tempered": {
+                    "type": "boolean",
+                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                  },
+                  "quiet": {
+                    "type": "boolean",
+                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                  },
+                  "as_draft": {
+                    "type": "boolean",
+                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                  },
+                  "chrome": {
+                    "type": "boolean",
+                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                  },
+                  "clear": {
+                    "type": "boolean",
+                    "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "install",
+                      "pause",
+                      "rest",
+                      "resume",
+                      "repeat",
+                      "reshape",
+                      "close",
+                      "reopen",
+                      "set-model",
+                      "set-agent",
+                      "role",
+                      "seat",
+                      "set-outcome",
+                      "uninstall"
+                    ]
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "oneshot",
+                      "standing"
+                    ]
+                  }
+                },
+                "required": [
+                  "fiber",
+                  "action"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "CLI output.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown action, missing fields, unknown origin or local validation refusal.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The owner lacks the fiber.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LifecycleMissing"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "CLI refusal: shuttle exited <status>: <message>.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Forward failed.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Uncertain serialized write, CLI unavailability, or boot incomplete. Check the fiber before retrying. Forwarded JSON refusals other than retryable ones can be relayed as text/plain.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LifecycleUncertain"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BootUnavailable"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/kill": {
+      "post": {
+        "summary": "Stop a fiber’s worker without changing its lifecycle.",
+        "description": "Hard-stops the owner’s live worker and tears down its runtime state, writing no verdict. Idempotent: a fiber with no tracked session returns killed=false with HTTP 200.",
+        "tags": [
+          "core"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "fiber_id": {
+                    "type": "string",
+                    "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                  },
+                  "origin": {
+                    "type": "string",
+                    "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400."
+                  }
+                },
+                "required": [
+                  "fiber_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KillSuccess"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Worker stop failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KillError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Forward failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Boot is incomplete or held; no action is attempted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BootUnavailable"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sent-files": {
+      "get": {
+        "summary": "Read a fiber’s sent-artifact trail.",
+        "description": "Reads the owner’s event projection newest-first; without session, repeated paths are deduplicated. With session, returns every send from that conversation; missing history is an empty files list.",
+        "tags": [
+          "core"
+        ],
+        "parameters": [
+          {
+            "name": "uid",
+            "in": "query",
+            "required": true,
+            "description": "Fiber identifier used by the sent-files projection.",
+            "schema": {
+              "type": "string",
+              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            }
+          },
+          {
+            "name": "session",
+            "in": "query",
+            "required": false,
+            "description": "Nonempty native conversation ID; preserves repeated sends.",
+            "schema": {
+              "type": "string",
+              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            }
+          },
+          {
+            "name": "origin",
+            "in": "query",
+            "required": false,
+            "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400.",
+            "schema": {
+              "type": "string",
+              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "description": "Send the ETag from a prior response. A match returns 304 with no body.",
+            "schema": {
+              "type": "string",
+              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Unchanged representation; empty body.",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string",
+                  "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                },
+                "description": "Validator for the representation."
+              }
+            }
+          },
+          "400": {
+            "description": "The request is refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Forward failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Boot is incomplete or held; no action is attempted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BootUnavailable"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/file": {
+      "get": {
+        "summary": "Read artifact bytes from their host.",
+        "description": "path must be absolute on the selected host, not relative to a fiber or confined to a felt store. Returns raw bytes with the file’s content type; conditional and byte-range requests are supported and forwarded to the owner.",
+        "tags": [
+          "core"
+        ],
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "description": "Absolute host-local filename.",
+            "schema": {
+              "type": "string",
+              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            }
+          },
+          {
+            "name": "origin",
+            "in": "query",
+            "required": false,
+            "description": "Owning host or configured remote name. Absent, empty, or local selects this daemon; an explicit unknown name is refused with 400.",
+            "schema": {
+              "type": "string",
+              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "description": "Send the ETag from a prior response. A match returns 304 with no body.",
+            "schema": {
+              "type": "string",
+              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            }
+          },
+          {
+            "name": "If-Modified-Since",
+            "in": "header",
+            "required": false,
+            "description": "Forwarded to the owner, but does not by itself produce 304; only If-None-Match decides unchanged content.",
+            "schema": {
+              "type": "string",
+              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            }
+          },
+          {
+            "name": "Range",
+            "in": "header",
+            "required": false,
+            "description": "One bytes=start-end, bytes=start- or suffix range.",
+            "schema": {
+              "type": "string",
+              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            }
+          },
+          {
+            "name": "If-Range",
+            "in": "header",
+            "required": false,
+            "description": "Use range only when the strong validator or date matches; weak tags cannot authorize it.",
+            "schema": {
+              "type": "string",
+              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Raw file bytes.",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          },
+          "206": {
+            "description": "Requested byte range.",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          },
+          "304": {
+            "description": "Unchanged representation; empty body.",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string",
+                  "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                },
+                "description": "Validator for the representation."
+              }
+            }
+          },
+          "400": {
+            "description": "The request is refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "File absent, unreadable or not regular.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "416": {
+            "description": "Unsatisfiable byte range; empty body and Content-Range: bytes */size."
+          },
+          "502": {
+            "description": "Forward failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Boot is incomplete or held; no action is attempted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BootUnavailable"
+                }
+              }
+            }
           }
         }
       }
@@ -22,13 +1878,1453 @@
   "components": {
     "schemas": {
       "Error": {
-        "description": "A refusal. Routes do not yet share one error shape: `error` is always present, as a short string or a structured value, and other fields vary by route.",
         "type": "object",
-        "required": ["error"],
         "properties": {
-          "error": {},
-          "message": { "type": "string" }
+          "error": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "message": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "detail": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "origin": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "stores": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "ok": {
+            "type": "boolean",
+            "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+          },
+          "retryable": {
+            "type": "boolean",
+            "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "BootUnavailable": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "enum": [
+              "booting",
+              "boot_hold"
+            ]
+          },
+          "ready": {
+            "const": false
+          },
+          "boot_hold": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "boot": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "pending": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            }
+          },
+          "elapsed_ms": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "error",
+          "ready",
+          "boot_hold",
+          "boot",
+          "pending",
+          "elapsed_ms"
+        ]
+      },
+      "Build": {
+        "type": "object",
+        "properties": {
+          "git_sha": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "git_short_sha": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "built_at": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "booted_at": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "mix_vsn": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "release_path": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          }
+        },
+        "required": [
+          "git_sha",
+          "git_short_sha",
+          "built_at",
+          "booted_at",
+          "mix_vsn",
+          "release_path"
+        ]
+      },
+      "Version": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Build"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "api_level": {
+                "type": "integer"
+              },
+              "contract_level": {
+                "type": "integer"
+              },
+              "host": {
+                "type": "string",
+                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              },
+              "terminal": {
+                "type": "string",
+                "enum": [
+                  "tmux",
+                  "rex"
+                ]
+              },
+              "ready": {
+                "type": "boolean",
+                "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+              },
+              "boot_hold": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "boot": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "boot_duration_ms": {
+                "type": "integer"
+              },
+              "listen": {
+                "type": "string",
+                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              },
+              "host_class": {
+                "type": "string",
+                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              },
+              "incarnation": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reconciliation_hold": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "contract": {
+                "type": "object"
+              },
+              "discovery": {
+                "type": "object"
+              },
+              "tailnet_dial": {
+                "type": "object"
+              },
+              "poller_publication": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "api_level",
+              "contract_level",
+              "host",
+              "terminal",
+              "ready",
+              "boot_hold",
+              "boot",
+              "boot_duration_ms",
+              "listen",
+              "host_class",
+              "contract",
+              "reconciliation_hold"
+            ]
+          }
+        ]
+      },
+      "Freshness": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "local",
+              "remote"
+            ]
+          },
+          "stale": {
+            "type": "boolean",
+            "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+          },
+          "fiber_count": {
+            "type": "integer"
+          },
+          "last_polled_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cache": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "state": {
+                "type": "string",
+                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "stale",
+          "fiber_count",
+          "cache"
+        ]
+      },
+      "Origins": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/Freshness"
         }
+      },
+      "Fiber": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "uid": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "slug": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "name": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "body": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "outcome": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "due": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "horizon": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            }
+          },
+          "created_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "closed_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "modified_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tempered": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "shuttle": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "FiberRow": {
+        "type": "object",
+        "properties": {
+          "fiber": {
+            "$ref": "#/components/schemas/Fiber"
+          },
+          "felt_store": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "path": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "dir": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "report_path": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "origin": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "orchestrator": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "column": {
+            "type": "string",
+            "enum": [
+              "drafts",
+              "in_flight",
+              "awaiting_review",
+              "orchestrator_review",
+              "tempered",
+              "discarded",
+              "resting",
+              "roles"
+            ]
+          },
+          "turn": {
+            "type": "string",
+            "enum": [
+              "question",
+              "blocked",
+              "idle",
+              "working",
+              "starting",
+              "no-signal",
+              "none"
+            ]
+          },
+          "runtime": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "pending_results": {
+            "type": "integer"
+          },
+          "dispatch_error": {}
+        },
+        "required": [
+          "fiber",
+          "felt_store",
+          "path"
+        ]
+      },
+      "CompositeFiberRow": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/FiberRow"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "origin": {
+                "type": "string",
+                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              }
+            },
+            "required": [
+              "origin"
+            ]
+          }
+        ]
+      },
+      "FiberEnvelope": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "felt_stores": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            }
+          },
+          "generated_at": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "fibers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FiberRow"
+            }
+          }
+        },
+        "required": [
+          "host",
+          "felt_stores",
+          "generated_at",
+          "fibers"
+        ]
+      },
+      "PeerSession": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "host": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "harness": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "id": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "title": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "cwd": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "state": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "capabilities": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+            }
+          },
+          "last_seen": {
+            "type": "integer"
+          },
+          "fiber": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "fiber_uid": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "transcript_id": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          }
+        },
+        "required": [
+          "address",
+          "host"
+        ],
+        "description": "Address and routing host are always present. Other fields depend on the owning daemon and harness; last_seen is epoch milliseconds."
+      },
+      "PeerDirectory": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "sessions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PeerSession"
+            }
+          },
+          "gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "host": {
+                  "type": "string",
+                  "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                },
+                "harness": {
+                  "type": "string",
+                  "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                },
+                "error": {
+                  "type": "string",
+                  "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+                }
+              },
+              "required": [
+                "host",
+                "error"
+              ]
+            }
+          }
+        },
+        "required": [
+          "host",
+          "sessions",
+          "gaps"
+        ]
+      },
+      "FleetHealth": {
+        "type": "object",
+        "properties": {
+          "polled": {
+            "type": "boolean",
+            "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+          },
+          "stale": {
+            "type": "boolean",
+            "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+          },
+          "last_polled_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "recovery": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "state": {
+                "type": "string",
+                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              },
+              "attempt": {
+                "type": "integer"
+              },
+              "last_error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "state",
+              "attempt",
+              "last_error"
+            ]
+          }
+        },
+        "required": [
+          "polled",
+          "stale",
+          "last_polled_at",
+          "last_error",
+          "recovery"
+        ]
+      },
+      "FleetRemote": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "url": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "port": {
+            "type": "integer"
+          },
+          "source": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "ssh": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "display": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "checkout": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "tunnel": {
+            "type": "object"
+          },
+          "tunnel_label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "health": {
+            "$ref": "#/components/schemas/FleetHealth"
+          },
+          "build": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "git_sha": {
+                "type": "string",
+                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              },
+              "git_short_sha": {
+                "type": "string",
+                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              },
+              "built_at": {
+                "type": "string",
+                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              },
+              "booted_at": {
+                "type": "string",
+                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              },
+              "mix_vsn": {
+                "type": "string",
+                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              },
+              "release_path": {
+                "type": "string",
+                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              }
+            }
+          }
+        },
+        "required": [
+          "name",
+          "health",
+          "build",
+          "tunnel_label"
+        ]
+      },
+      "Fleet": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "supervisor": {
+            "type": "string",
+            "enum": [
+              "launchd",
+              "systemd",
+              "none"
+            ]
+          },
+          "file": {
+            "type": "object"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "launchd_label_prefix": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "defaults": {
+            "type": "object"
+          },
+          "remotes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FleetRemote"
+            }
+          }
+        },
+        "required": [
+          "host",
+          "supervisor",
+          "file",
+          "error",
+          "launchd_label_prefix",
+          "defaults",
+          "remotes"
+        ]
+      },
+      "Worker": {
+        "type": "object",
+        "properties": {
+          "surface": {
+            "const": "cli"
+          },
+          "terminal": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "tmux",
+              "rex",
+              null
+            ],
+            "description": "Observed terminal holder; null when no holder has been remembered, including capture responses."
+          },
+          "tmux_session": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          }
+        },
+        "required": [
+          "surface",
+          "terminal",
+          "tmux_session"
+        ]
+      },
+      "CaptureSuccess": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Worker"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "spawned": {
+                "const": true
+              },
+              "agent": {
+                "type": "string",
+                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              },
+              "session_uuid": {
+                "type": "string",
+                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              }
+            },
+            "required": [
+              "spawned",
+              "agent"
+            ]
+          }
+        ]
+      },
+      "CaptureRefusal": {
+        "type": "object",
+        "properties": {
+          "spawned": {
+            "const": false
+          },
+          "reason": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "message": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "waiting": {
+            "type": "boolean",
+            "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+          },
+          "retryable": {
+            "type": "boolean",
+            "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+          },
+          "project_dir": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "origin": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "error": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          }
+        },
+        "required": [
+          "spawned",
+          "reason"
+        ]
+      },
+      "DispatchSuccess": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Worker"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "dispatched": {
+                "const": true
+              },
+              "fiber_id": {
+                "type": "string",
+                "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+              },
+              "session_uuid": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "dispatched",
+              "fiber_id",
+              "session_uuid"
+            ]
+          }
+        ]
+      },
+      "DispatchRefusal": {
+        "type": "object",
+        "properties": {
+          "dispatched": {
+            "const": false
+          },
+          "reason": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "fiber_id": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "error": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "message": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "detail": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "host": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "needs": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "fiber_host": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "daemon_host": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "project_dir": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "waiting": {
+            "type": "boolean",
+            "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+          },
+          "retryable": {
+            "type": "boolean",
+            "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+          },
+          "reservation": {
+            "type": "object"
+          },
+          "agent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "started_at": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "last_activity_at": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tmux_session": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "surface": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "terminal": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          }
+        },
+        "required": [
+          "dispatched",
+          "reason",
+          "fiber_id"
+        ]
+      },
+      "ForwardDispatchRefusal": {
+        "type": "object",
+        "properties": {
+          "dispatched": {
+            "const": false
+          },
+          "reason": {
+            "const": "forward_failed"
+          },
+          "origin": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "error": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          }
+        },
+        "required": [
+          "dispatched",
+          "reason",
+          "origin",
+          "error"
+        ]
+      },
+      "MessageReceipt": {
+        "type": "object",
+        "properties": {
+          "message_id": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "address": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "context_added",
+              "submitted",
+              "queued",
+              "subscribed",
+              "unknown",
+              "rejected"
+            ]
+          },
+          "transport": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "idle": {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "watching",
+                  "unsupported"
+                ]
+              },
+              "signal": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "detail": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "state",
+              "signal",
+              "detail"
+            ]
+          }
+        },
+        "required": [
+          "message_id",
+          "address",
+          "status",
+          "transport"
+        ]
+      },
+      "DeliveryMessage": {
+        "type": "object",
+        "properties": {
+          "delivery": {
+            "const": "message"
+          },
+          "delivered": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "fiber_id": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/MessageReceipt"
+          },
+          "detail": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "error": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          }
+        },
+        "required": [
+          "delivery",
+          "delivered",
+          "fiber_id",
+          "receipt"
+        ]
+      },
+      "DeliveryLaunch": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/DispatchSuccess"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "delivery": {
+                "type": "string",
+                "enum": [
+                  "resume",
+                  "dispatch"
+                ]
+              },
+              "delivered": {
+                "const": true
+              }
+            },
+            "required": [
+              "delivery",
+              "delivered"
+            ]
+          }
+        ]
+      },
+      "DeliveryInput": {
+        "type": "object",
+        "properties": {
+          "delivery": {
+            "const": "input"
+          },
+          "fiber_id": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "delivered": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "detail": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "error": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          }
+        },
+        "required": [
+          "delivery",
+          "fiber_id",
+          "delivered"
+        ]
+      },
+      "DeliveryContext": {
+        "type": "object",
+        "properties": {
+          "delivery": {
+            "const": "context"
+          },
+          "delivered": {
+            "const": false
+          },
+          "queued": {
+            "const": true
+          },
+          "fiber_id": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "status": {
+            "const": "queued_for_next_worker"
+          }
+        },
+        "required": [
+          "delivery",
+          "delivered",
+          "queued",
+          "fiber_id"
+        ]
+      },
+      "DeliveryError": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "delivery": {
+            "type": "string",
+            "enum": [
+              "message",
+              "context",
+              "input",
+              "dispatch",
+              "resume"
+            ]
+          },
+          "delivered": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "queued": {
+            "type": "boolean",
+            "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+          },
+          "live": {
+            "type": "boolean",
+            "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+          },
+          "fiber_id": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "DeliveryLaunchRefusal": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/DispatchRefusal"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "delivery": {
+                "type": "string",
+                "enum": [
+                  "resume",
+                  "dispatch"
+                ]
+              },
+              "delivered": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "delivery",
+              "delivered"
+            ]
+          }
+        ]
+      },
+      "DeliveryForward": {
+        "type": "object",
+        "properties": {
+          "delivered": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "forward_timeout",
+              "forward_failed"
+            ]
+          },
+          "origin": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "detail": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "error": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          }
+        },
+        "required": [
+          "delivered",
+          "reason",
+          "origin"
+        ]
+      },
+      "KillSuccess": {
+        "type": "object",
+        "properties": {
+          "fiber_id": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "killed": {
+            "type": "boolean",
+            "description": "Requires wake=true; permits busy Claude hook-context delivery. Downstream CLI validates this axis."
+          },
+          "session": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          }
+        },
+        "required": [
+          "fiber_id",
+          "killed"
+        ]
+      },
+      "KillError": {
+        "type": "object",
+        "properties": {
+          "fiber_id": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "killed": {
+            "const": false
+          },
+          "error": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          }
+        },
+        "required": [
+          "fiber_id",
+          "killed",
+          "error"
+        ]
+      },
+      "CreatedFiber": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "path": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "uid": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "host": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "active",
+              "closed"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "path",
+          "uid",
+          "host",
+          "status"
+        ]
+      },
+      "LifecycleMissing": {
+        "type": "object",
+        "properties": {
+          "error_code": {
+            "const": "fiber_not_found"
+          },
+          "host": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "fiber": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "error": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          }
+        },
+        "required": [
+          "error_code",
+          "host",
+          "fiber",
+          "error"
+        ]
+      },
+      "LifecycleUncertain": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "At most 65536 UTF-8 bytes, no NUL; nonempty unless notify_when_idle is true."
+          },
+          "retryable": {
+            "const": true
+          }
+        },
+        "required": [
+          "error",
+          "retryable"
+        ]
       }
     }
   }
