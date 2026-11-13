@@ -96,6 +96,38 @@ it('repaints the Desk as the voice target changes', () => {
   expect(band()).toBe('yourTurn')
 })
 
+it('moves through the view tabs by arrows, Home and End, and keeps the numeric hotkeys', async () => {
+  await settle()
+  const tabs = Array.from(document.querySelectorAll<HTMLElement>('[role="tablist"][aria-label="Board views"] [role="tab"]'))
+  expect(tabs).toHaveLength(4)
+  expect(tabs.map(tab => tab.tabIndex)).toEqual([0, -1, -1, -1])
+  tabs[0].focus()
+  // The tablist's own keys do not reach the Desk underneath it.
+  const before = selected()
+  press('ArrowRight', {}, document.activeElement!)
+  await settle()
+  expect(document.activeElement).toBe(tabs[1])
+  expect(tabs[1].getAttribute('aria-selected')).toBe('true')
+  expect(inside.activeViewId).toBe('chronicle')
+  expect(selected()).toBe(before)
+  press('End', {}, document.activeElement!)
+  await settle()
+  expect(document.activeElement).toBe(tabs[3])
+  press('ArrowRight', {}, document.activeElement!)
+  await settle()
+  expect(document.activeElement).toBe(tabs[0])
+  expect(inside.activeViewId).toBe('desk')
+  // Every other Desk key still works from a focused tab.
+  press('j', {}, document.activeElement!)
+  expect(selected()).not.toBe(before)
+  for (const [index, key] of ['1', '2', '3', '4'].entries()) {
+    press(key, {}, document.activeElement!)
+    await settle()
+    expect(tabs[index].getAttribute('aria-selected')).toBe('true')
+    expect(tabs.filter(tab => tab.tabIndex === 0)).toEqual([tabs[index]])
+  }
+})
+
 describe('Desk row menu', () => {
   const row = () => document.querySelector<HTMLElement>('[data-card-uid="review"]')!
   const menu = () => document.querySelector<HTMLElement>('[role="menu"]')

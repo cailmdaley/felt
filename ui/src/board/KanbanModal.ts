@@ -1,3 +1,5 @@
+import '@ui-sdk/web/tabs'
+
 /**
  * KanbanModal — the Desk, plus the chronological views it tabs between.
  *
@@ -73,7 +75,7 @@ import { buildKanbanResponseFromComposite, deriveCycleLens, surfaceTotals, proje
 import { threadKey } from './threads.js'
 import { dueBouncesFromResting, restingUntil } from './KanbanRules.js'
 import { sameCivilDue } from './civilDay.js'
-import { coarsePointer, isMobileViewport, onMobileChange } from './mobile.js'
+import { coarsePointer, onMobileChange } from './mobile.js'
 import { shouldRunVisiblePoll } from '../runtime/PageAttention'
 import { PhoneListening } from './phoneListening'
 import { Voice, constitutionFor } from './voice.js'
@@ -159,6 +161,7 @@ interface KanbanModalOptions {
 /** A host that refused its agent registry is asked again after this long. */
 const AGENT_RETRY_MS = 60_000
 const DESK_HOTKEY = '1'
+const TABLIST_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'Home', 'End'])
 
 interface KanbanScrollSnapshot {
   bodyLeft: number
@@ -184,7 +187,7 @@ export class KanbanModal {
   private stopMobileWatch: (() => void) | null = null
 
   /** The view tab strip — persistent chrome, built once in assembleChrome. */
-  private tabsEl: HTMLDivElement | null = null
+  private tabsEl: HTMLElement | null = null
   /**
    * Right-hand end of the tab strip, where the cycle lens chips live. The tabs
    * never fill their row, so the chips ride in the space already there rather
@@ -646,13 +649,18 @@ export class KanbanModal {
    * populated at import time, so the strip never needs to re-render; only the
    * selected tab's classes change.
    */
-  private buildViewTabs(): HTMLDivElement {
-    const strip = document.createElement('div')
+  private buildViewTabs(): HTMLElement {
+    const strip = document.createElement('ui-tabs')
+    strip.setAttribute('default-value', this.activeViewId)
+    // Arrows select through the tablist; a press goes through the tab's own
+    // click, which also reaches the selected tab (it closes the reader back to it).
+    strip.addEventListener('valuechange', event => {
+      if (event.detail.reason === 'list-navigation') this.setView(event.detail.value as BoardViewId)
+    })
     strip.className = 'kbn-viewtabs'
     // The tabs alone are the tablist; Find, the view's centre and Settings ride the same bar beside it.
-    const views = document.createElement('div')
+    const views = document.createElement('ui-tabs-list')
     views.className = 'kbn-viewtabs-views'
-    views.setAttribute('role', 'tablist')
     views.setAttribute('aria-label', 'Board views')
     strip.append(views)
 
@@ -670,7 +678,6 @@ export class KanbanModal {
       tab.type = 'button'
       tab.className = 'kbn-viewtab'
       tab.dataset.view = spec.id
-      tab.setAttribute('role', 'tab')
       tab.title = `${spec.label} (${spec.hotkey})`
 
       const labelEl = document.createElement('span')
@@ -682,7 +689,10 @@ export class KanbanModal {
       hotkeyEl.setAttribute('aria-hidden', 'true')
       tab.append(hotkeyEl, labelEl)
       tab.addEventListener('click', () => this.setView(spec.id))
-      views.append(tab)
+      const part = document.createElement('ui-tabs-tab')
+      part.setAttribute('value', spec.id)
+      part.append(tab)
+      views.append(part)
     }
 
     // Find follows the tabs: one field every view shares.
@@ -829,17 +839,11 @@ export class KanbanModal {
     // they engage only means anything on the Desk.
     if (this.lensSlotEl) this.lensSlotEl.style.display = onDesk ? '' : 'none'
     if (this.viewHostEl) this.viewHostEl.style.display = onDesk ? 'none' : ''
+    this.tabsEl?.setAttribute('value', this.activeViewId)
     for (const tab of this.tabsEl?.querySelectorAll<HTMLElement>('.kbn-viewtab') ?? []) {
       const selected = tab.dataset.view === this.activeViewId
       tab.classList.toggle('kbn-viewtab-active', selected)
-      tab.setAttribute('aria-selected', String(selected))
       this.labelOriginTab(tab, selected)
-      // On a phone the strip scrolls, so the tab you just chose can be off
-      // screen the moment it becomes current — a hotkey lands there. Bring it
-      // back into the run.
-      if (selected && isMobileViewport()) {
-        tab.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
-      }
     }
   }
 
@@ -2050,6 +2054,8 @@ export class KanbanModal {
     }
     if (this.handleSettingsHotkey(e)) return
     if (this.handleViewHotkey(e)) return
+    // A tablist's arrows, Home and End are its own (the view strip, the phone folio), not the active view's.
+    if (TABLIST_KEYS.has(e.key) && (e.target as HTMLElement | null)?.closest?.('[role="tablist"]')) return
     if (e.key === 'Escape' && this.activeViewId === 'board' && !keystrokeIsSpokenFor()) {
       if (this.workspace?.handleOverviewEscapeLayer()) { e.preventDefault(); e.stopPropagation(); return }
       e.preventDefault(); e.stopPropagation(); this.setView('desk'); return

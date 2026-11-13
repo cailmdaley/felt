@@ -891,7 +891,7 @@ for (const [origin, { other, open: openFrom }] of Object.entries(origins)) test(
     await poll(p, () => !!document.querySelector('.kbn-reader-open'))
     assert.deepEqual(await state(), { open: true, view: origin, selected: [origin] }, `the bar marks ${origin} as the origin`)
     assert.match(await barTab(p, origin).getAttribute('aria-label') ?? '', /^Close reader, back to (Desk|Board|Chronicle)$/, 'the origin tab says it closes the reader')
-    assert.deepEqual(await p.locator('.kbn-viewtabs [role="tablist"]').first().evaluate(list => [...list.children].map(el => el.getAttribute('role'))), ['tab', 'tab', 'tab', 'tab'], 'the bar\'s tablist holds its tabs alone')
+    assert.deepEqual(await p.locator('.kbn-viewtabs [role="tablist"]').first().evaluate(list => [...list.querySelectorAll('[role]')].map(el => el.getAttribute('role')).filter(role => role !== 'none')), ['tab', 'tab', 'tab', 'tab'], 'the bar\'s tablist holds its tabs alone')
   }
   await opened()
   await barTab(p, origin).click()
