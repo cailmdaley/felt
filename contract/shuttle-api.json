@@ -3,13 +3,129 @@
   "info": {
     "title": "Shuttle daemon API, stable tier",
     "version": "1",
-    "description": "The routes a UI other than the board can build on. `info.version` is the API level, the integer `GET /api/v1/version` reports as `api_level`: adding a route or an optional field leaves it alone, removing or renaming anything described here raises it by one. Response objects may carry fields this document does not name; a client ignores them. Everything under /api/v1 that is absent from this document is internal and moves with the board."
+    "description": "The routes a UI other than the board can build on. `info.version` is the API level, the integer `GET /api/v1/version` reports as `api_level`: adding a route or an optional field leaves it alone, removing or renaming anything described here raises it by one. Response objects may carry fields this document does not name; a client ignores them. `x-modules` classes every route the daemon serves under /api/v1: the stable `core` described here, the internal `board` and `fleet` modules, and optional extensions that need software beyond a plain daemon. A client builds on `core` and may ignore the rest."
   },
   "servers": [
     {
       "url": "/api/v1"
     }
   ],
+  "x-modules": {
+    "core": {
+      "stability": "stable",
+      "description": "Reading the fleet and its fibers and acting on them: what any UI builds on. Its routes are this document's `paths`."
+    },
+    "board": {
+      "stability": "internal",
+      "description": "What the board UI alone needs. These routes move with the board bundle.",
+      "routes": [
+        "POST /transition",
+        "POST /attach",
+        "POST /felt-edit",
+        "POST /felt-nest",
+        "GET /search",
+        "GET /transcripts/search",
+        "GET /agents",
+        "POST /agents/effort",
+        "GET /roles",
+        "GET /file-info",
+        "GET /file-assets/{origin}/{path}",
+        "GET /felt-stores",
+        "POST /felt-stores",
+        "GET /config",
+        "GET /config/{id}",
+        "POST /config/{id}",
+        "POST /fleet/remotes",
+        "POST /tunnels",
+        "POST /projects",
+        "POST /choose-folder",
+        "GET /board/marks",
+        "POST /board/open",
+        "GET /sent-files/all/composite",
+        "GET /activity/composite",
+        "GET /sessions/composite",
+        "GET /commits/composite",
+        "GET /sessions/links",
+        "GET /transcript/usage",
+        "GET /state/composite"
+      ]
+    },
+    "fleet": {
+      "stability": "internal",
+      "description": "Legs the shuttle CLI and other daemons call, and operator diagnostics. These routes move with the CLI.",
+      "routes": [
+        "POST /claim",
+        "POST /migrate",
+        "POST /sessions/resume",
+        "POST /sessions/input",
+        "POST /sessions/receiver",
+        "POST /sessions/prepare-terminal",
+        "POST /thread-signals/current",
+        "POST /messages/files",
+        "GET /state",
+        "GET /fibers",
+        "GET /threads/{id}",
+        "POST /project-dir/resolve",
+        "POST /document-changed",
+        "GET /board/family",
+        "GET /board",
+        "GET /sent-files/all",
+        "GET /activity",
+        "GET /sessions",
+        "GET /commits",
+        "GET /transcript",
+        "GET /transcript/raw",
+        "GET /debug/profile",
+        "POST /quarantine/release",
+        "POST /remotes/{name}/reset"
+      ]
+    },
+    "voice": {
+      "stability": "internal",
+      "extension": true,
+      "requires": "the hark recorder",
+      "description": "Listen, the spoken-day transcript and phone audio.",
+      "routes": [
+        "GET /voice",
+        "GET /voice/transcript",
+        "POST /voice",
+        "POST /voice/target",
+        "POST /voice/toggle",
+        "POST /voice/discard",
+        "GET /voice/events",
+        "GET /voice/audio"
+      ]
+    },
+    "speak": {
+      "stability": "internal",
+      "extension": true,
+      "requires": "pocket-tts and an audio player on the speaking host",
+      "description": "Spoken output.",
+      "routes": [
+        "GET /speak",
+        "GET /speak/voices",
+        "POST /speak"
+      ]
+    },
+    "rex": {
+      "stability": "internal",
+      "extension": true,
+      "requires": "the Rex terminal backend",
+      "description": "Bringing a worker's Rex window forward on its host.",
+      "routes": [
+        "POST /terminal/reveal"
+      ]
+    },
+    "remote-control": {
+      "stability": "internal",
+      "extension": true,
+      "requires": "Claude Remote Control",
+      "description": "The Remote Control bridge's status.",
+      "routes": [
+        "GET /remote_control"
+      ]
+    }
+  },
   "paths": {
     "/contract": {
       "get": {
