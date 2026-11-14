@@ -94,8 +94,8 @@ export const placeAt = (card: KanbanCard): MapPlace => ({ open: new Set(), selec
  * newest first) and its own threads, laid out the same way, and a second
  * click folds it. A document's chip unfolds that document under the row, full
  * width and at its full height, in the page's one scroll; a second click folds
- * it. A click moves Rex quietly to the thread's worker; only `c` opens a
- * conversation. It reads feeds and repaints only while its frame is selected in
+ * it. A click on a row moves Rex quietly to the thread's worker, a click on a
+ * document moves nothing, and only `c` opens a conversation. It reads feeds and repaints only while its frame is selected in
  * an open reader; its frame's eviction ends it.
  */
 export class FamilyPage {
@@ -547,8 +547,9 @@ export class FamilyPage {
     this.embedded.delete(key)
   }
   /**
-   * A chip's document unfolds under its row, selecting and entering the thread,
-   * and the page stays where it is: only a slot that would open wholly out of
+   * A chip's document unfolds under its row, selecting the thread without
+   * entering it, so a click reads it and leaves Rex and voice where they are
+   * (`l` enters, as it does on a row), and the page stays where it is: only a slot that would open wholly out of
    * view is scrolled into it. A document taking another's place keeps the page's
    * offset whatever its height; folding one moves nothing else.
    */
@@ -563,7 +564,6 @@ export class FamilyPage {
     if (replacing) this.hold()
     docs.set(thread.key, doc)
     this.select(thread.key)
-    this.enter(thread.key)
     this.paint()
     this.notice(thread, [this.leadOf(thread), ...thread.files].filter(file => file?.key === doc) as MapFile[])
     const sent = this.sentOf(thread).some(file => file.key === doc)
@@ -796,7 +796,7 @@ export class FamilyPage {
   }
   private unfold(thread: MapThread, held: DocKey): HTMLElement | undefined {
     if (this.place.docs!.get(thread.key) !== held) this.toggleDoc(thread, held)
-    else this.enter(thread.key)
+    this.enter(thread.key)
     return this.findDoc(thread.key, held) ?? this.row(thread.key)?.querySelector<HTMLElement>('.fp-back') ?? undefined
   }
   private findDoc(owner: string, held: string): HTMLElement | undefined {
