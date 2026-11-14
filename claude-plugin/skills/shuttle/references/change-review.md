@@ -30,7 +30,7 @@ The reader opens version 2 bundles.
 ## A story worth reading
 
 - **Open on the result and the judgment.** Say what this change produces, who uses it and what the human most needs to weigh.
-  The flags open the story, alongside the overview, without a separate attention box.
+  The flags open the story, alongside the overview.
 - **Use the same text in the PR.** The overview and chapter narratives should stand alone for someone who hasn't followed the work.
   Keep the PR body and the story in agreement as the branch moves.
 - **Draw structure.** Fenced `mermaid` diagrams render in both the reader and GitHub.
