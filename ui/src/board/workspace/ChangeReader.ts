@@ -324,7 +324,7 @@ export function mountChangeReader(
       const file = files.find((f) => f.path === stop.file)
       if (stop.stale) {
         const stale = el('aside', 'change-stale')
-        stale.append(el('strong', '', `Stale stop · ${stop.file}${stop.from ? `:${stop.from}–${stop.to}` : ''}`), prose(stop.note), el('p', '', stop.stale))
+        stale.append(el('strong', '', `Stale stop · ${stop.file}${stop.from ? `:${stop.from}–${stop.to}` : ''}`), storyProse(stop.note), el('p', '', stop.stale))
         part.append(stale)
       } else if (file) addFile(part, file, stop.hunks, `stop:${chapter.id}:${index}`, entry.ids, stop)
     }
