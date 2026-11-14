@@ -122,6 +122,9 @@ func TestDefaultChangeBaseFollowsTheRemote(t *testing.T) {
 	t.Parallel()
 	env, repo, git, _ := gitRepo(t)
 	git("commit", "--allow-empty", "-m", "base")
+	if _, err := DefaultChangeBase(env, t.TempDir()); err == nil || !strings.Contains(err.Error(), "is not a Git repository") {
+		t.Fatalf("plain directory: %v", err)
+	}
 	if _, err := DefaultChangeBase(env, repo); err == nil || !strings.Contains(err.Error(), "shuttle.change.base") {
 		t.Fatalf("no remote: %v", err)
 	}

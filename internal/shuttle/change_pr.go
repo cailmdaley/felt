@@ -1,6 +1,7 @@
 package shuttle
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -43,9 +44,11 @@ type ChangePR struct {
 func ResolveChangePR(env *sysenv.Env, repo string, number int) (*ChangePR, string, string, error) {
 	cmd := env.Command("gh", "pr", "view", fmt.Sprint(number), "--json", "number,title,body,url,headRefName,headRefOid,baseRefName,state,isDraft,mergeable,statusCheckRollup,mergeCommit")
 	cmd.Dir = repo
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, "", "", fmt.Errorf("gh pr view: %w", err)
+		return nil, "", "", fmt.Errorf("gh pr view %d: %s: %w", number, strings.TrimSpace(stderr.String()), err)
 	}
 	var raw struct {
 		Number                                                                   int

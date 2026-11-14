@@ -20,6 +20,9 @@ const untrackedLimit = 1 << 20
 // DefaultChangeBase is the remote's default branch: origin/HEAD's target,
 // else origin/main, else origin/master.
 func DefaultChangeBase(env *sysenv.Env, repo string) (string, error) {
+	if env.Command("git", "-C", repo, "rev-parse", "--git-dir").Run() != nil {
+		return "", fmt.Errorf("%s is not a Git repository", repo)
+	}
 	if out, err := env.Command("git", "-C", repo, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD").Output(); err == nil {
 		return strings.TrimSpace(string(out)), nil
 	}
