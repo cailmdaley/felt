@@ -19,7 +19,7 @@ defmodule Shuttle.Poller.StandingRoles do
 
   require Logger
 
-  alias Shuttle.{Dispatcher, LifecycleStore, StandingRole}
+  alias Shuttle.{LifecycleStore, StandingRole}
   alias Shuttle.Poller
   alias Shuttle.Poller.State
 
@@ -45,7 +45,11 @@ defmodule Shuttle.Poller.StandingRoles do
     # simply caught by the next healthy scan.
     case scan do
       {:ok, sessions} ->
-        live = MapSet.new(sessions)
+        live =
+          sessions
+          |> Enum.map(&Shuttle.ULID.from_tmux/1)
+          |> Enum.reject(&is_nil/1)
+          |> MapSet.new()
 
         Enum.reduce(candidates, state, fn fiber, acc ->
           maybe_mark_dead_standing_role(acc, fiber, live)
@@ -61,7 +65,7 @@ defmodule Shuttle.Poller.StandingRoles do
     end
   end
 
-  defp maybe_mark_dead_standing_role(%State{} = state, fiber, live_sessions) do
+  defp maybe_mark_dead_standing_role(%State{} = state, fiber, live_uids) do
     fiber_id = Map.get(fiber, "id", "")
     shuttle = Map.get(fiber, "shuttle", %{})
     status = Map.get(fiber, "status", "")
@@ -96,7 +100,7 @@ defmodule Shuttle.Poller.StandingRoles do
 
       # A live worker session means the worker is still up —
       # `reconcile_orphaned_sessions`/`adopt_orphans` will adopt it. Not dead.
-      MapSet.member?(live_sessions, Dispatcher.session_name(fiber_id, Map.get(fiber, "uid"))) ->
+      MapSet.member?(live_uids, Map.get(fiber, "uid")) ->
         state
 
       # The locked writer reads the current document. A stale candidate

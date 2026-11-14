@@ -127,6 +127,18 @@ defmodule Shuttle.StandingExitRegressionTest do
     end
   end
 
+  test "recovery preserves an untracked live standing run whose leaf changed", c do
+    original = Shuttle.Dispatcher.session_name("old-role", c.candidate["uid"])
+    before = File.read!(c.path)
+    assert c.state.running == %{}
+
+    assert StandingRoles.reconcile_dead_standing_roles(c.state, [c.candidate], {:ok, [original]}) ==
+             c.state
+
+    assert File.read!(c.path) == before
+    refute File.read!(c.path) =~ "handed_off_at:"
+  end
+
   test "recovery concludes a dead run at its dispatch instant and a missed tick still fires", c do
     StandingRoles.reconcile_dead_standing_roles(c.state, [c.candidate], {:ok, []})
 
