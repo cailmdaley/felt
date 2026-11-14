@@ -87,7 +87,10 @@ defmodule Shuttle.Terminal.Tmux do
     end
   end
 
-  @doc "Paste one multiline message with bracketed paste, then submit after the harness takes it."
+  @doc """
+  Paste one multiline message with bracketed paste, then submit after the harness takes it.
+  A failure from the paste onward is `{:error, {:unknown, reason}}`.
+  """
   @impl true
   def paste(runner, session, text) when is_binary(text) do
     with {:ok, target} <- pane_target(runner, session) do
@@ -106,23 +109,31 @@ defmodule Shuttle.Terminal.Tmux do
     try do
       runner.cmd("tmux", ["send-keys", "-t", target, "-X", "cancel"], stderr_to_stdout: true)
 
-      with {_, 0} <-
-             runner.cmd("tmux", ["load-buffer", "-b", buffer, path], stderr_to_stdout: true),
-           {_, 0} <-
-             runner.cmd("tmux", ["paste-buffer", "-p", "-d", "-b", buffer, "-t", target],
-               stderr_to_stdout: true
-             ),
-           :ok <- Process.sleep(Shuttle.Env.app(:paste_submit_delay_ms, 400)),
-           {_, 0} <-
-             runner.cmd("tmux", ["send-keys", "-t", target, "Enter"], stderr_to_stdout: true) do
-        :ok
-      else
-        {output, _status} -> {:error, "tmux: " <> String.trim(to_string(output))}
+      case runner.cmd("tmux", ["load-buffer", "-b", buffer, path], stderr_to_stdout: true) do
+        {_, 0} -> submit_buffer(runner, target, buffer)
+        {output, _status} -> {:error, tmux_error(output)}
       end
     after
       Shuttle.FS.rm(path)
     end
   end
+
+  # From paste-buffer on, a failure cannot show that the composer stayed empty.
+  defp submit_buffer(runner, target, buffer) do
+    with {_, 0} <-
+           runner.cmd("tmux", ["paste-buffer", "-p", "-d", "-b", buffer, "-t", target],
+             stderr_to_stdout: true
+           ),
+         :ok <- Process.sleep(Shuttle.Env.app(:paste_submit_delay_ms, 400)),
+         {_, 0} <-
+           runner.cmd("tmux", ["send-keys", "-t", target, "Enter"], stderr_to_stdout: true) do
+      :ok
+    else
+      {output, _status} -> {:error, {:unknown, tmux_error(output)}}
+    end
+  end
+
+  defp tmux_error(output), do: "tmux: " <> String.trim(to_string(output))
 
   @impl true
   def rename(_runner, name, name), do: :ok

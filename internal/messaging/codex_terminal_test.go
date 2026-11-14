@@ -42,6 +42,54 @@ func TestCodexIdleWakeUsesLocalTerminalInput(t *testing.T) {
 	}
 }
 
+func TestCodexTerminalInputReadsDaemonFailures(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		want   string
+		code   string
+	}{
+		{http.StatusBadGateway, StatusUnknown, "ambiguous_delivery"},
+		{http.StatusInternalServerError, StatusUnknown, "ambiguous_delivery"},
+		{http.StatusServiceUnavailable, StatusRejected, "preflight_failed"},
+		{http.StatusNotFound, StatusRejected, "preflight_failed"},
+	} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(tc.status)
+			_, _ = w.Write([]byte(`{"code":"terminal_input_ambiguous"}`))
+		}))
+		env := codexTestEnv(t)
+		env.Set("SHUTTLE_DAEMON_URL", server.URL)
+		request := Request{Address: "shuttle://host/codex/thread-fail", MessageID: "wake-fail", Text: "continue", Wake: true}
+		receipt, err := submitCodexTerminalInput(context.Background(), env, Address{Host: "host", Harness: "codex", ID: "thread-fail"}, request)
+		server.Close()
+		if receipt.Status != tc.want || ErrorCode(err) != tc.code {
+			t.Errorf("HTTP %d: send = %+v, %v", tc.status, receipt, err)
+		}
+	}
+}
+
+func TestCodexAmbiguousPasteIsNeverResent(t *testing.T) {
+	hits := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"code":"terminal_input_ambiguous"}`))
+	}))
+	defer server.Close()
+	env := codexTestEnv(t)
+	env.Set("SHUTTLE_DAEMON_URL", server.URL)
+	request := Request{Address: "shuttle://host/codex/thread-ambiguous", MessageID: "wake-ambiguous", Text: "continue", Wake: true}
+	for i := 0; i < 2; i++ {
+		receipt, err := Send(context.Background(), env, "host", request)
+		if receipt.Status != StatusUnknown || ErrorCode(err) != "ambiguous_delivery" {
+			t.Fatalf("send %d = %+v, %v", i, receipt, err)
+		}
+	}
+	if hits != 1 {
+		t.Fatalf("daemon received %d pastes for one message", hits)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

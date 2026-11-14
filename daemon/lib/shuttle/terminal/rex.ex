@@ -634,12 +634,21 @@ defmodule Shuttle.Terminal.Rex do
   @impl true
   def paste(runner, name, text) do
     with {:ok, b} <- resolve(runner, name),
-         {:ok, _} <- Rex.paste(runner, b["session_id"], b["block_id"], text),
+         {:paste, {:ok, _}} <- {:paste, Rex.paste(runner, b["session_id"], b["block_id"], text)},
          :ok <- Process.sleep(Env.app(:paste_submit_delay_ms, 400)),
-         {:ok, _} <- Rex.send_key(runner, b["session_id"], b["block_id"], "enter") do
+         {:submit, {:ok, _}} <-
+           {:submit, Rex.send_key(runner, b["session_id"], b["block_id"], "enter")} do
       :ok
     else
-      error -> {:error, "Rex paste failed: #{inspect(error)}"}
+      # Rex refused the paste outright: no block or no server took the text.
+      {:paste, {:error, reason} = error} when reason in [:not_found, :server_absent] ->
+        {:error, "Rex paste failed: #{inspect(error)}"}
+
+      {step, error} when step in [:paste, :submit] ->
+        {:error, {:unknown, "Rex paste failed: #{inspect(error)}"}}
+
+      error ->
+        {:error, "Rex paste failed: #{inspect(error)}"}
     end
   end
 

@@ -15,7 +15,9 @@ defmodule Shuttle.Terminal.Backend do
   @callback close(runner(), String.t()) :: :ok | :absent | {:error, String.t()}
   @doc "Give a claimed terminal back under `released_as`, so that `name` no longer finds it."
   @callback release(runner(), String.t(), String.t()) :: :ok | :absent | {:error, String.t()}
-  @callback paste(runner(), String.t(), String.t()) :: :ok | {:error, String.t()}
+  @doc "Tag failures after input may have reached the terminal {:error, {:unknown, reason}}; other errors confirm nothing was typed."
+  @callback paste(runner(), String.t(), String.t()) ::
+              :ok | {:error, String.t() | {:unknown, String.t()}}
   @callback rename(runner(), String.t(), String.t()) :: :ok | {:error, atom()}
   @callback owns_pane?(runner(), String.t(), String.t()) :: boolean()
   @callback identity(runner(), String.t()) :: {:ok, map()} | {:error, :backend_unobservable}

@@ -459,7 +459,7 @@ for context delivery, and use a supported live native endpoint for wake.
 An explicitly forced wake never silently becomes a context-only send. Pending native input
 or approval is handled by the harness, not by injecting terminal keystrokes.
 
-Codex workers run through the terminal harness. Native messaging addresses the exact terminal session; hook-only sessions support context-only delivery when registered. Shuttle does not paste messages into terminal input.
+Codex workers run through the terminal harness. Context-only messages wait in the session's hook mailbox for its next hook. A wake is pasted into the exact Codex terminal through the owning daemon's `POST /api/v1/sessions/input` and submitted. A paste the daemon refused before typing is `rejected`; one that failed after text may have reached the composer, or any other daemon fault, is `unknown` with `ambiguous_delivery`, and Shuttle does not send that message again.
 
 Receipts describe delivery evidence, not task completion. HTTP 200 carries a
 processed delivery receipt, including `rejected` and `unknown`. HTTP 400 reports

@@ -19,7 +19,12 @@ defmodule ShuttleWeb.SessionInputControllerTest do
 
     def cmd("tmux", args, _opts) do
       send(Shuttle.Env.app(:session_input_test), {:tmux, args})
-      Process.get(:session_input_tmux, {"", 0})
+
+      case Process.get({:session_input_tmux, hd(args)}) do
+        [reply | later] -> tap(reply, fn _ -> Process.put({:session_input_tmux, hd(args)}, later) end)
+        nil -> Process.get(:session_input_tmux, {"", 0})
+        reply -> reply
+      end
     end
   end
 
@@ -73,6 +78,47 @@ defmodule ShuttleWeb.SessionInputControllerTest do
                Jason.encode!(%{fiber: uid})
              )
              |> json_response(200)
+  end
+
+  for {step, status, code} <- [
+        {"load-buffer", 503, "terminal_input_failed"},
+        {"paste-buffer", 502, "terminal_input_ambiguous"},
+        {"send-keys", 502, "terminal_input_ambiguous"}
+      ] do
+    test "a paste failing at #{step} answers #{status} #{code}", %{path: path} do
+      session = "11111111-1111-4111-8111-111111111111"
+      record_session(path, session, "01ARZ3NDEKTSV4RRFFQ69G5FAV", "worker-shuttle")
+      Process.put({:session_input_tmux, unquote(step)}, {"tmux refused", 1})
+
+      assert %{"code" => unquote(code)} =
+               post(
+                 api_conn(),
+                 "/api/v1/sessions/input",
+                 Jason.encode!(%{session_uuid: session, text: "please continue"})
+               )
+               |> json_response(unquote(status))
+    end
+  end
+
+  test "a paste whose pane lookup fails answers 503 without typing", %{path: path} do
+    session = "11111111-1111-4111-8111-111111111111"
+    record_session(path, session, "01ARZ3NDEKTSV4RRFFQ69G5FAV", "$worker")
+
+    # The route's liveness probe and the paste's choice of backend each resolve
+    # the pane; the paste's own lookup then fails.
+    found = {"$7\t$worker\n", 0}
+    Process.put({:session_input_tmux, "ls"}, [found, found, {"no server running", 1}])
+
+    assert %{"code" => "terminal_input_failed"} =
+             post(
+               api_conn(),
+               "/api/v1/sessions/input",
+               Jason.encode!(%{session_uuid: session, text: "please continue"})
+             )
+             |> json_response(503)
+
+    refute_received {:tmux, ["load-buffer" | _]}
+    refute_received {:tmux, ["paste-buffer" | _]}
   end
 
   for {route, address, status} <- [

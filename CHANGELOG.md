@@ -10,6 +10,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `shuttle inbox put|pending|ls`: every inbox entry, for a fiber or a session, is created by one writer that records its delivery wishes (`source`, `turn`, `session`, `if_costly`, `not_before`) and refuses an unknown value. An entry waits until its `not_before` has passed. Contract level 38.
 
+### Fixed
+
+- A Codex wake whose terminal paste failed after text may have reached the composer is `unknown` (`ambiguous_delivery`) and is not sent again. The daemon's `/sessions/input` answers 502 `terminal_input_ambiguous` for it and 503 `terminal_input_failed` when nothing was typed.
+
 ## [2.0.0] — 2026-11-13
 
 ### Added

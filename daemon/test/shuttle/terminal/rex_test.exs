@@ -408,8 +408,15 @@ defmodule Shuttle.Terminal.RexTest do
     own_seed()
     assert :present = Rex.probe(FakeRex, @name)
     FakeRex.reply("block.event", {"timeout", 1})
-    assert {:error, _} = Rex.paste(FakeRex, @name, "message")
+    assert {:error, {:unknown, _}} = Rex.paste(FakeRex, @name, "message")
     refute Enum.any?(FakeRex.calls(), fn {_, args, _} -> "send-key" in args end)
+    FakeRex.reply("block.event", {"block not found", 3})
+    assert {:error, reason} = Rex.paste(FakeRex, @name, "message")
+    assert is_binary(reason)
+    FakeRex.clear_reply("block.event")
+    FakeRex.reply("send-key", {"timeout", 1})
+    assert {:error, {:unknown, _}} = Rex.paste(FakeRex, @name, "message")
+    FakeRex.clear_reply("send-key")
     assert :ok = Rex.close(FakeRex, @name)
     assert FakeRex.state().sessions == %{}
     assert :absent = Rex.close(FakeRex, @name)
@@ -671,7 +678,8 @@ defmodule Shuttle.Terminal.RexTest do
 
     assert :absent = Rex.probe(FakeRex, @name)
     assert :absent = Rex.probe(FakeRex, @name)
-    assert {:error, _} = Rex.paste(FakeRex, @name, "not for the human")
+    assert {:error, reason} = Rex.paste(FakeRex, @name, "not for the human")
+    assert is_binary(reason)
     assert :absent = Rex.close(FakeRex, @name)
 
     refute Enum.any?(FakeRex.calls(), fn {_, args, _} ->

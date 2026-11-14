@@ -127,7 +127,14 @@ func submitCodexTerminalInputWithClient(ctx context.Context, env *sysenv.Env, ad
 		if detail == "" {
 			detail = response.Status
 		}
-		return rejected(request, receipt.Transport, detail), errCode("preflight_failed", "terminal input refused: %s", detail)
+		// The daemon answers 4xx or 503 when nothing was typed. Any other 5xx,
+		// including 502 terminal_input_ambiguous, may follow a partial paste.
+		if response.StatusCode < 500 || response.StatusCode == http.StatusServiceUnavailable {
+			return rejected(request, receipt.Transport, detail), errCode("preflight_failed", "terminal input refused: %s", detail)
+		}
+		receipt.Status = StatusUnknown
+		receipt.Detail = "terminal input outcome is unknown: " + detail
+		return receipt, errCode("ambiguous_delivery", "%s", receipt.Detail)
 	}
 	var result struct {
 		Status string `json:"status"`

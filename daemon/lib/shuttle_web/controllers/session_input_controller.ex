@@ -1,5 +1,10 @@
 defmodule ShuttleWeb.SessionInputController do
-  @moduledoc "Submit a message to a Codex terminal session on its owning host."
+  @moduledoc """
+  Submit a message to a Codex terminal session on its owning host.
+
+  A 4xx or 503 answer means nothing was typed. A 502 `terminal_input_ambiguous`
+  means the paste failed after text may have reached the composer.
+  """
 
   use Phoenix.Controller, formats: [:json]
   import Plug.Conn
@@ -16,7 +21,8 @@ defmodule ShuttleWeb.SessionInputController do
           :alive ->
             case Terminal.paste(runner, terminal, text) do
               :ok -> json(conn, %{status: "submitted"})
-              {:error, reason} -> error(conn, 502, "terminal_input_failed", inspect(reason))
+              {:error, {:unknown, reason}} -> error(conn, 502, "terminal_input_ambiguous", reason)
+              {:error, reason} -> error(conn, 503, "terminal_input_failed", reason)
             end
 
           :gone ->
