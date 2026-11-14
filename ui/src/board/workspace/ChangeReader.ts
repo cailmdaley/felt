@@ -296,6 +296,11 @@ export function mountChangeReader(
         () => jumpToRange(flag),
       )
       const row = el('div', 'change-flag')
+      if (flag.stale) {
+        row.classList.add('change-stale')
+        jump.disabled = true
+        row.append(el('strong', '', 'Stale flag'), el('p', '', flag.stale))
+      }
       row.append(jump, storyProse(flag.text))
       box.append(row)
     }

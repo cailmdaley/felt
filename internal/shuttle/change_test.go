@@ -214,8 +214,8 @@ func TestValidateChange(t *testing.T) {
 		{name: "old deletion", story: `{"chapters":[{"stops":[{"file":"gone.go","from":1,"to":3,"side":"old","importance":"supporting"}]}]}`, covered: 3},
 		{name: "flags not coverage", story: `{"flags":[{"file":"main.go","from":10,"to":10}]}`},
 		{name: "metadata", story: `{"chapters":[{"stops":[{"file":"binary.bin","importance":"context"}]}],"roles":{"main.go":"generated"}}`},
-		{name: "every bad reference", story: `{"flags":[{"file":"unknown.go"},{"file":"main.go","from":99,"to":101}],"chapters":[{"stops":[{"file":"also-unknown.go","importance":"context"},{"file":"gone.go","from":1,"to":2,"importance":"context"},{"file":"added.go","from":1,"to":2,"side":"old","importance":"context"}]}]}`, errors: 2, fragments: []string{"flags[0]", "flags[1]", "chapters[0].stops[0]", "chapters[0].stops[1]", "chapters[0].stops[2]", "unknown.go", "new side", "old side"}},
-		{name: "bad shape", story: `{"flags":[{"file":"main.go","side":"both"},{"file":"main.go","from":10},{"file":"main.go","from":11,"to":10},{"file":"main.go","from":-1,"to":10}],"chapters":[{"stops":[{"file":"main.go","importance":"tiny"}]}],"roles":{"main.go":"other","unknown":"docs"}}`, covered: 12, errors: 7},
+		{name: "every bad reference", story: `{"flags":[{"file":"unknown.go"},{"file":"main.go","from":99,"to":101}],"chapters":[{"stops":[{"file":"also-unknown.go","importance":"context"},{"file":"gone.go","from":1,"to":2,"importance":"context"},{"file":"added.go","from":1,"to":2,"side":"old","importance":"context"}]}]}`, errors: 0, fragments: []string{"flags[0]", "flags[1]", "chapters[0].stops[0]", "chapters[0].stops[1]", "chapters[0].stops[2]", "unknown.go", "new side", "old side"}},
+		{name: "bad shape", story: `{"flags":[{"file":"main.go","side":"both"},{"file":"main.go","from":10},{"file":"main.go","from":11,"to":10},{"file":"main.go","from":-1,"to":10}],"chapters":[{"stops":[{"file":"main.go","importance":"tiny"}]}],"roles":{"main.go":"other","unknown":"docs"}}`, covered: 12, errors: 6},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

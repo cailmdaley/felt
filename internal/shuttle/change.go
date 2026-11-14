@@ -87,7 +87,8 @@ type ChangeRange struct {
 
 type ChangeFlag struct {
 	ChangeRange
-	Text string `json:"text"`
+	Stale string `json:"stale,omitempty"`
+	Text  string `json:"text"`
 }
 
 type ChangeChapter struct {
@@ -143,6 +144,7 @@ type ChangeReport struct {
 	Uncovered []ChangeHunk `json:"uncovered"`
 	Errors    []string     `json:"errors"`
 	Stale     []string     `json:"stale"`
+	Dropped   []string     `json:"dropped"`
 }
 
 // BuildChange invokes Git directly; refs resolve before any tree or log reads.
@@ -322,26 +324,27 @@ var changeHunkHeader = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+
 // ValidateChange checks every story reference and counts coverage from stops only.
 // Flags direct attention but do not remove hunks from Remaining.
 func ValidateChange(c *Change, hunks []ChangeHunk) ChangeReport {
-	report := ChangeReport{Valid: true, Uncovered: []ChangeHunk{}, Errors: []string{}, Stale: []string{}}
+	report := ChangeReport{Valid: true, Uncovered: []ChangeHunk{}, Errors: []string{}, Stale: []string{}, Dropped: []string{}}
 	files := map[string]int{}
 	for i, f := range c.Files {
 		files[f.Path] = i
 		c.Files[i].Remaining = []ChangeHunk{}
 	}
 	bad := func(s string) { report.Errors = append(report.Errors, s) }
-	check := func(label string, r ChangeRange) {
-		if _, ok := files[r.File]; !ok {
-			bad(fmt.Sprintf("%s: unknown file %q", label, r.File))
-			return
-		}
+	type referenceIssue struct {
+		reason string
+		drift  bool
+	}
+	check := func(label string, r ChangeRange) *referenceIssue {
 		if r.Side != "" && r.Side != "old" && r.Side != "new" {
-			bad(fmt.Sprintf("%s: invalid side %q (use old or new)", label, r.Side))
-			return
+			return &referenceIssue{reason: fmt.Sprintf("%s: invalid side %q (use old or new)", label, r.Side)}
 		}
 		whole := r.From == 0 && r.To == 0
 		if !whole && (r.From < 1 || r.To < r.From) {
-			bad(fmt.Sprintf("%s: invalid range %d..%d (supply both from and to, or neither)", label, r.From, r.To))
-			return
+			return &referenceIssue{reason: fmt.Sprintf("%s: invalid range %d..%d (supply both from and to, or neither)", label, r.From, r.To)}
+		}
+		if _, ok := files[r.File]; !ok {
+			return &referenceIssue{reason: fmt.Sprintf("%s: unknown file %q", label, r.File), drift: true}
 		}
 		overlaps := false
 		hasHunks := false
@@ -363,13 +366,24 @@ func ValidateChange(c *Change, hunks []ChangeHunk) ChangeReport {
 			if side == "" {
 				side = "new"
 			}
-			bad(fmt.Sprintf("%s: %s:%d..%d overlaps no hunk on %s side", label, r.File, r.From, r.To, side))
+			return &referenceIssue{reason: fmt.Sprintf("%s: %s:%d..%d overlaps no hunk on %s side", label, r.File, r.From, r.To, side), drift: true}
 		}
+		return nil
+	}
+	resolve := func(label string, r ChangeRange) string {
+		if issue := check(label, r); issue != nil {
+			if issue.drift {
+				report.Stale = append(report.Stale, issue.reason)
+				return issue.reason
+			}
+			bad(issue.reason)
+		}
+		return ""
 	}
 	if c.Story != nil {
 		ids := map[string]bool{}
 		for i, flag := range c.Story.Flags {
-			check(fmt.Sprintf("flags[%d]", i), flag.ChangeRange)
+			c.Story.Flags[i].Stale = resolve(fmt.Sprintf("flags[%d]", i), flag.ChangeRange)
 		}
 		for i, chapter := range c.Story.Chapters {
 			if ids[chapter.ID] {
@@ -389,18 +403,10 @@ func ValidateChange(c *Change, hunks []ChangeHunk) ChangeReport {
 				default:
 					bad(fmt.Sprintf("%s: invalid importance %q", label, stop.Importance))
 				}
-				before := len(report.Errors)
-				check(label, stop.ChangeRange)
 				resolved := &c.Story.Chapters[i].Stops[j]
-				resolved.Stale = ""
-				if len(report.Errors) > before {
-					reason := report.Errors[before]
-					if strings.Contains(reason, "unknown file") || strings.Contains(reason, "overlaps no hunk") {
-						resolved.Stale = reason
-						resolved.Hunks = []ChangeHunk{}
-						report.Stale = append(report.Stale, reason)
-						report.Errors = report.Errors[:before]
-					}
+				resolved.Stale = resolve(label, stop.ChangeRange)
+				if resolved.Stale != "" {
+					resolved.Hunks = []ChangeHunk{}
 				}
 			}
 		}
@@ -413,7 +419,8 @@ func ValidateChange(c *Change, hunks []ChangeHunk) ChangeReport {
 			role := c.Story.Roles[path]
 			i, ok := files[path]
 			if !ok {
-				bad(fmt.Sprintf("roles: unknown file %q", path))
+				delete(c.Story.Roles, path)
+				report.Dropped = append(report.Dropped, fmt.Sprintf("roles: file %q is no longer in the diff", path))
 				continue
 			}
 			switch role {

@@ -79,7 +79,7 @@ export interface ChangeBundle {
     title?: string
     areas?: ChangeArea[]
     overview: string
-    flags: (ChangeRange & { text: string })[]
+    flags: (ChangeRange & { text: string; stale?: string })[]
     chapters: ChangeChapter[]
     roles?: Record<string, ChangeRole>
   }

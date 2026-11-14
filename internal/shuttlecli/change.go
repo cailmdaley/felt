@@ -194,6 +194,9 @@ count as coverage. --check validates and reports without writing a companion.
 					}
 					fmt.Fprintf(a.env.Stdout, "Remaining: %s:%d\n", h.File, line)
 				}
+				for _, reason := range report.Dropped {
+					fmt.Fprintf(a.env.Stdout, "Dropped: %s\n", reason)
+				}
 				if report.Path != "" {
 					fmt.Fprintf(a.env.Stdout, "Wrote %s\n", report.Path)
 				}

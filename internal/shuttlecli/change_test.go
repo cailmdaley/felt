@@ -170,7 +170,7 @@ func TestChangeCommandRealGit(t *testing.T) {
 		}
 	}
 	// Invalid references are all returned, and cannot overwrite the valid bundle.
-	put(storyPath, `{"flags":[{"file":"unknown.go"},{"file":"main.go","from":90,"to":91}],"chapters":[{"stops":[{"file":"also-missing","importance":"context"}]}]}`)
+	put(storyPath, `{"flags":[{"file":"main.go","side":"both"},{"file":"main.go","from":91,"to":90}],"chapters":[{"stops":[{"file":"also-missing","importance":"context"}]}]}`)
 	out, err = run("review", "--base", base, "--story", storyPath, "--json")
 	if err == nil || !strings.Contains(err.Error(), "flags[0]") || !strings.Contains(err.Error(), "flags[1]") {
 		t.Fatalf("validation error: %v", err)

@@ -144,6 +144,16 @@ it('unlocks a refused send without dropping its draft', async () => {
   expect(state.root.querySelector<HTMLTextAreaElement>('.change-overall')?.value).toBe('Keep this draft')
   expect(state.root.querySelector<HTMLTextAreaElement>('.change-overall')?.disabled).toBe(false)
 })
+it('shows a drifted flag and its explanation without offering a code jump', () => {
+  const b = bundle()
+  b.story = { overview: '', chapters: [], flags: [{ file: 'gone.ts', text: 'Keep this judgment', stale: 'unknown file' }] }
+  const { root } = mount(b, 'stale-flag')
+  const flag = root.querySelector('.change-flag.change-stale')!
+  expect(flag.textContent).toContain('Stale flag')
+  expect(flag.textContent).toContain('unknown file')
+  expect(flag.textContent).toContain('Keep this judgment')
+  expect(flag.querySelector<HTMLButtonElement>('button')!.disabled).toBe(true)
+})
 it('keeps an unsupported story stop visible without mounting code', () => {
   const b = bundle()
   b.story = { overview: 'Still useful', flags: [], chapters: [{ id: 'stale', title: 'A retained stop', narrative: '', why_here: '', stops: [{ file: 'missing.ts', from: 10, to: 12, importance: 'important', note: 'The reasoning survives', stale: 'unknown file', hunks: [] }] }] }
