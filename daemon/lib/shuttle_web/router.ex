@@ -66,6 +66,10 @@ defmodule ShuttleWeb.Router do
     # feeds, concatenated with reconciled per-host liveness.
     get("/fibers/composite", FiberDocumentsController, :composite)
     get("/fibers/*id", FiberDocumentsController, :show)
+    # `POST /fibers/<id>/change`: bake the constitution's change into the
+    # owner's cache (owner-routed). A glob only ends a route, so the
+    # controller takes the trailing `change` segment off the id.
+    post("/fibers/*id", FiberChangeController, :create)
     # A constitution's threads, for `shuttle threads`.
     get("/threads/*id", ThreadsController, :show)
     post("/lifecycle", LifecycleController, :create)

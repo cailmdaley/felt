@@ -29,6 +29,7 @@
         "POST /agents/effort",
         "GET /roles",
         "GET /file-info",
+        "POST /fibers/{id}",
         "GET /file-assets/{origin}/{path}",
         "GET /felt-stores",
         "POST /felt-stores",
