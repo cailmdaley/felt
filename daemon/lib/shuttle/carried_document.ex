@@ -27,7 +27,7 @@ defmodule Shuttle.CarriedDocument do
     path =
       Path.join(System.tmp_dir!(), "shuttle-carried-#{System.unique_integer([:positive])}.md")
 
-    case File.write(path, document) do
+    case Shuttle.FS.write_private(path, document) do
       :ok ->
         try do
           LifecycleService.transition(
@@ -37,11 +37,11 @@ defmodule Shuttle.CarriedDocument do
             params["fiber_path"]
           )
         after
-          File.rm(path)
+          Shuttle.FS.rm(path)
         end
 
       {:error, reason} ->
-        {:error, "writing the carried document: #{:file.format_error(reason)}"}
+        {:error, "writing the carried document: #{Shuttle.FS.format_error(reason)}"}
     end
   end
 
