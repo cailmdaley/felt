@@ -102,14 +102,36 @@ count as coverage. --check validates and reports without writing a companion.
 				fiberPath = st.Path(f.ID)
 			}
 			sidecar := filepath.Join(filepath.Dir(fiberPath), name+".story.json")
+			path := filepath.Join(filepath.Dir(fiberPath), name+".change.json")
 			explicitStory := storyPath != ""
+			writeStory := explicitStory
+			var story *shuttle.ChangeStory
+			var storyData []byte
 			if !explicitStory {
 				if _, err := os.Stat(sidecar); err == nil {
 					storyPath = sidecar
+				} else if os.IsNotExist(err) {
+					data, err := os.ReadFile(path)
+					if err == nil {
+						var previous shuttle.Change
+						if err := json.Unmarshal(data, &previous); err != nil {
+							return fmt.Errorf("read existing bundle: %w", err)
+						}
+						story = previous.Story
+						if story != nil {
+							storyData, err = json.MarshalIndent(story, "", "  ")
+							if err != nil {
+								return err
+							}
+							writeStory = true
+						}
+					} else if !os.IsNotExist(err) {
+						return err
+					}
+				} else {
+					return err
 				}
 			}
-			var story *shuttle.ChangeStory
-			var storyData []byte
 			if storyPath != "" {
 				path, err := a.env.Abs(storyPath)
 				if err != nil {
@@ -143,9 +165,8 @@ count as coverage. --check validates and reports without writing a companion.
 				change.BaseRef = pr.BaseBranch
 			}
 			report := shuttle.ValidateChange(change, hunks)
-			path := filepath.Join(filepath.Dir(fiberPath), name+".change.json")
 			if report.Valid && !check {
-				if explicitStory {
+				if writeStory {
 					if err := atomicfile.Write(sidecar, storyData, 0644); err != nil {
 						return err
 					}

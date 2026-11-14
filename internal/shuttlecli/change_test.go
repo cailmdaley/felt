@@ -161,6 +161,23 @@ func TestChangeCommandRealGit(t *testing.T) {
 	if string(rebaked) != string(withStory) {
 		t.Fatal("rebake lost story")
 	}
+	sidecarPath := strings.TrimSuffix(bundlePath, ".change.json") + ".story.json"
+	if err := os.Remove(sidecarPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run("review", "--base", base, "--check"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(sidecarPath); !os.IsNotExist(err) {
+		t.Fatal("check seeded a sidecar")
+	}
+	if _, err := run("review", "--base", base); err != nil {
+		t.Fatal(err)
+	}
+	seeded, err := os.ReadFile(sidecarPath)
+	if err != nil || !strings.Contains(string(seeded), "Reason") {
+		t.Fatalf("embedded story not seeded: %s: %v", seeded, err)
+	}
 	entries, err := os.ReadDir(filepath.Dir(bundlePath))
 	if err != nil {
 		t.Fatal(err)
