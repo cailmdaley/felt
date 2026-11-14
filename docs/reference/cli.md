@@ -252,7 +252,10 @@ Terminal claims identify the current tmux pane or Rex session and block; `--tmux
 explicit existing session. App claims use `CODEX_THREAD_ID` or `--session`
 and require the daemon to verify the native conversation. The claimed host
 and surface must match the installed task. If verification fails, leave the
-constitution open; activating it could launch another worker.
+constitution open; activating it could launch another worker. A claim made
+from inside a harness (its session read from the environment) also names the
+harness process, so the worker ends when that process does, and the terminal
+is then given back to the human rather than closed.
 
 ### Read / inspect
 

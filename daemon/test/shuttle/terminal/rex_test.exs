@@ -479,6 +479,23 @@ defmodule Shuttle.Terminal.RexTest do
     assert FakeRex.state().sessions[sid()].label == "new-name"
   end
 
+  test "release unbinds a claimed block and relabels it so no probe recovers the worker" do
+    seed()
+    assert :ok = Rex.rename(FakeRex, sid(), "canonical")
+    assert :present = Rex.probe(FakeRex, "canonical")
+
+    assert :ok = Rex.release(FakeRex, "canonical", "leaf")
+    assert {:ok, %{"bindings" => bindings}} = RexBindings.read()
+    assert bindings == %{}
+    assert FakeRex.state().sessions[sid()].label == "leaf"
+    assert Enum.map(FakeRex.state().sessions[sid()].blocks, & &1["label"]) == ["leaf"]
+    assert :absent = Rex.probe(FakeRex, "canonical")
+    assert {:ok, []} = Rex.list(FakeRex)
+    assert Map.has_key?(FakeRex.state().sessions, sid())
+
+    assert :absent = Rex.release(FakeRex, "canonical", "leaf")
+  end
+
   test "a canonical rename is a no-op and preserves human display labels" do
     seed()
     assert :present = Rex.probe(FakeRex, @name)

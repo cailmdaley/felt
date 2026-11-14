@@ -632,6 +632,69 @@ defmodule Shuttle.PollerClaimTest do
            end)
   end
 
+  # The human's terminal outlives the harness that claimed it. The claim's
+  # process receipt ends the worker when that process does, and the terminal
+  # goes back under its own name: released, never closed.
+  test "a claimed harness that dies without a hook ends its worker and releases the terminal" do
+    id = "tests/claim-harness-exit"
+    MockRunner.set_fiber(id, make_fiber(id, %{"uid" => "01KTHDNZS287ZSSG8X8V59XKC9"}))
+    MockRunner.set_shuttle(id, oneshot_shuttle())
+    MockRunner.add_tmux_session("human-tab")
+    Env.put_app_env(:os_type, {:unix, :darwin})
+
+    port = Port.open({:spawn_executable, System.find_executable("sleep")}, [:binary, args: ["300"]])
+    {:os_pid, harness} = Port.info(port, :os_pid)
+    on_exit(fn -> System.cmd("kill", ["-KILL", Integer.to_string(harness)], stderr_to_stdout: true) end)
+
+    {:ok, poller} =
+      start_poller!(
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        heartbeat_interval_ms: 50,
+        boot_quarantine: true,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    await_boot_cycle!(poller)
+
+    assert {:ok, %{session: canonical}} =
+             Poller.claim_session(poller, id, "human-tab",
+               session_uuid: "uuid-harness-exit",
+               harness_pid: harness
+             )
+
+    assert canonical == "claim-harness-exit-01KTHDNZS287ZSSG8X8V59XKC9-shuttle"
+    assert {:ok, %{pid: ^harness, released_as: "human-tab"}} =
+             Shuttle.Terminal.Receipts.process_receipt(canonical)
+
+    assert Shuttle.Terminal.status(MockRunner, canonical) == :alive
+    assert %{} = Poller.worker_status(poller, id)
+    assert MockRunner.tmux_sessions() == [canonical]
+
+    {_, 0} = System.cmd("kill", ["-KILL", Integer.to_string(harness)])
+    assert wait_until(fn -> Shuttle.Terminal.status(MockRunner, canonical) == :gone end)
+
+    # The watcher sees the exit through the receipt while the terminal stays.
+    assert wait_until(fn -> Poller.worker_status(poller, id) == nil end)
+    assert MockRunner.tmux_sessions() == ["human-tab"]
+    assert Shuttle.Terminal.Receipts.process_receipt(canonical) == :none
+
+    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+             cmd == "tmux" and hd(args) == "kill-session"
+           end)
+
+    # The active oneshot then relaunches under its canonical name, beside the
+    # human's tab.
+    assert :ok = Poller.release_boot_quarantine(poller)
+    sync_poll_cycle!(poller)
+
+    assert wait_until(fn ->
+             Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+               cmd == "tmux" and hd(args) == "new-session" and Enum.at(args, 3) == canonical
+             end)
+           end)
+  end
+
   test "claim ledger records an explicit agent but never infers the fiber recipe" do
     id = "tests/claim-explicit-agent"
     MockRunner.set_fiber(id, make_fiber(id, %{"uid" => "01KTHDNZS287ZSSG8X8V59XKC2"}))

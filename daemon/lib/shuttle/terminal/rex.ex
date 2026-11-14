@@ -521,6 +521,20 @@ defmodule Shuttle.Terminal.Rex do
     end
   end
 
+  # The block keeps running the human's shell; only Shuttle's hold on it ends.
+  # The relabel matters: a block still labelled as the worker would be
+  # recovered under that name again at the next probe.
+  @impl true
+  def release(runner, name, released_as) do
+    with {:ok, b} <- resolve(runner, name),
+         :ok <- rename_labels(runner, b, released_as) do
+      close_binding(name, b, :ok)
+    else
+      {:error, reason} when reason in [:server_absent, :not_found] -> :absent
+      error -> {:error, "Rex release failed: #{inspect(error)}"}
+    end
+  end
+
   @doc "Retire empty daemon-created family sessions after observed worker or viewer exits."
   def sweep(runner) do
     with {:ok, doc} <- Bindings.read(),

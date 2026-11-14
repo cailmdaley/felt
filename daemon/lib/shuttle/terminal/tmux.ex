@@ -76,6 +76,14 @@ defmodule Shuttle.Terminal.Tmux do
     end
   end
 
+  @impl true
+  def release(runner, name, released_as) do
+    case rename(runner, name, released_as) do
+      :ok -> :ok
+      {:error, _} -> if probe(runner, name) == :absent, do: :absent, else: {:error, "tmux: rename failed"}
+    end
+  end
+
   @doc "Paste one multiline message with bracketed paste, then submit after the harness takes it."
   @impl true
   def paste(runner, session, text) when is_binary(text) do

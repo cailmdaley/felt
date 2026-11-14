@@ -218,9 +218,12 @@ background task to the model, whose follow-up turn's stop restates the count,
 and Codex decrements its child count on `SubagentStop`. A session with work
 still running is still working, however long the job takes. A task that hangs
 holds its card in Working, where the human sees it as running work rather than
-a question. A worker whose process dies is the dispatcher's to observe through
-its pane, not the event stream's, and a stale count from a lost event lasts at
-most until the 48-hour prune drops the session.
+a question. A worker whose process dies is the dispatcher's to observe, not
+the event stream's: a launched worker through its terminal, which ends with
+its run script, and a claimed worker through the harness process its claim
+recorded (`Shuttle.Terminal.Receipts`), since the human's terminal outlives
+it. A stale count from a lost event lasts at most until the 48-hour prune
+drops the session.
 
 ### Boot and incomplete histories
 

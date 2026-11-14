@@ -131,3 +131,54 @@ func TestClaimRexSendsExactNativeCoordinates(t *testing.T) {
 		t.Fatal("claim activated task")
 	}
 }
+
+func TestClaimNamesTheHarnessProcessOnlyForAnEnvironmentSession(t *testing.T) {
+	t.Parallel()
+	dir, storage := newStore(t)
+	env := testEnv(t)
+	env.Set("SHUTTLE_HOST", "test-host")
+	env.Set("CLAUDE_CODE_SESSION_ID", "claude-session")
+	seedShuttleRole(t, storage, "setup", "open", map[string]any{"kind": "oneshot", "agent": "claude-opus", "host": "test-host", "surface": "cli", "project_dir": dir}, nil)
+	stubWorkerExitTmux(t, env, "worker-session", storage.Path("setup"))
+	var bodies []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		bodies = append(bodies, body)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"claimed":true}`))
+	}))
+	defer server.Close()
+	env.Set("SHUTTLE_DAEMON_URL", server.URL)
+
+	a := newApp(env)
+	a.eventReceiverPID = func() int { return 4242 }
+	if _, stderr, err := executeApp(t, a, dir, "-C", dir, "claim", "setup"); err != nil {
+		t.Fatalf("claim %v %s", err, stderr)
+	}
+	a = newApp(env)
+	a.eventReceiverPID = func() int { t.Fatal("an explicit --session names no harness process"); return 0 }
+	if _, stderr, err := executeApp(t, a, dir, "-C", dir, "claim", "setup", "--session", "given-session"); err != nil {
+		t.Fatalf("claim --session %v %s", err, stderr)
+	}
+	a = newApp(env)
+	a.eventReceiverPID = func() int { return 0 }
+	if _, stderr, err := executeApp(t, a, dir, "-C", dir, "claim", "setup"); err != nil {
+		t.Fatalf("claim without a readable pid %v %s", err, stderr)
+	}
+
+	if len(bodies) != 3 {
+		t.Fatalf("claims %d", len(bodies))
+	}
+	if bodies[0]["harness_pid"] != float64(4242) || bodies[0]["session_uuid"] != "claude-session" {
+		t.Fatalf("environment claim %v", bodies[0])
+	}
+	if _, ok := bodies[1]["harness_pid"]; ok || bodies[1]["session_uuid"] != "given-session" {
+		t.Fatalf("explicit claim %v", bodies[1])
+	}
+	if _, ok := bodies[2]["harness_pid"]; ok {
+		t.Fatalf("unreadable pid claim %v", bodies[2])
+	}
+}

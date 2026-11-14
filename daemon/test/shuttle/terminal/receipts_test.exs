@@ -9,11 +9,23 @@ defmodule Shuttle.Terminal.ReceiptsTest do
 
   # tmux and ps answer from the process dictionary; kills are recorded.
   defmodule Runner do
+    # A rename takes the worker name off the session.
+    def cmd("tmux", ["rename-session" | _] = args, _opts) do
+      send(self(), {:tmux, args})
+      Process.put(:tmux, {"can't find session", 1})
+      {"", 0}
+    end
+
     def cmd("tmux", _args, _opts), do: Process.get(:tmux, {"no server running", 1})
 
     def cmd("ps", ["-ww", "-o", "args=", "-p", pid], _opts) do
       send(self(), {:ps_pid, pid})
       Process.get({:ps_pid, pid}, {"", 1})
+    end
+
+    def cmd("ps", ["-o", "lstart=", "-p", pid], opts) do
+      send(self(), {:ps_lstart, pid, Keyword.get(opts, :env)})
+      Process.get({:ps_lstart, pid}, {"", 1})
     end
 
     def cmd("ps", _args, _opts) do
@@ -165,6 +177,114 @@ defmodule Shuttle.Terminal.ReceiptsTest do
     assert_received {:kill, ["-TERM", "--", "-" <> ^p, ^p]}
     assert_received {:kill, ["-KILL", "--", "-" <> ^p, ^p]}
     refute_received :ps_scan
+  end
+
+  # A claim names the harness process itself: that process gone, or its pid
+  # reused by a younger process, ends the worker whatever its terminal shows.
+  describe "a claimed process" do
+    defp stat(dir, pid, start) do
+      path = Path.join([dir, "proc", Integer.to_string(pid)])
+      File.mkdir_p!(path)
+      # /proc/<pid>/stat: pid (comm) state ppid … starttime is field 22.
+      fields = Enum.map(4..21, fn _ -> "0" end) ++ [start, "7", "8"]
+      File.write!(Path.join(path, "stat"), "#{pid} (claude code) S " <> Enum.join(fields, " "))
+    end
+
+    defp claimed(dir, pid, start) do
+      name = "claimed-#{System.unique_integer([:positive])}-shuttle"
+      stat(dir, pid, start)
+      assert :ok = Receipts.claim(Runner, name, pid, "human-tab")
+      name
+    end
+
+    test "is running while the pid lives with its birth, exited once gone or reborn", %{dir: dir} do
+      pid = next_pid()
+      name = claimed(dir, pid, "12345")
+      assert {:ok, %{pid: ^pid, birth: "12345", released_as: "human-tab"}} =
+               Receipts.process_receipt(name)
+
+      assert Receipts.status(Runner, name) == :running
+      assert Receipts.running_pid(Runner, name) == pid
+
+      stat(dir, pid, "99999")
+      assert Receipts.status(Runner, name) == :exited
+
+      File.rm_rf!(Path.join([dir, "proc", Integer.to_string(pid)]))
+      assert Receipts.status(Runner, name) == :exited
+      assert Receipts.running_pid(Runner, name) == nil
+    end
+
+    test "a claim of a process that cannot be read records nothing", %{dir: dir} do
+      name = "unclaimable-#{System.unique_integer([:positive])}-shuttle"
+      assert {:error, :process_not_found} = Receipts.claim(Runner, name, next_pid(), "tab")
+      assert Receipts.process_receipt(name) == :none
+      assert Receipts.status(Runner, name) == :none
+      File.mkdir_p!(Path.join([dir, "proc", "1"]))
+    end
+
+    test "off Linux ps answers in one fixed locale and zone", %{dir: _dir} do
+      Env.put_app_env(:os_type, {:unix, :darwin})
+      name = "mac-#{System.unique_integer([:positive])}-shuttle"
+      Process.put({:ps_lstart, "77"}, {"Sat Nov 14 20:00:00 2026\n", 0})
+      assert :ok = Receipts.claim(Runner, name, 77, "tab")
+      assert_received {:ps_lstart, "77", [{"LC_ALL", "C"}, {"TZ", "UTC"}]}
+      assert Receipts.status(Runner, name) == :running
+
+      Process.put({:ps_lstart, "77"}, {"Sat Nov 14 21:00:00 2026\n", 0})
+      assert Receipts.status(Runner, name) == :exited
+      Process.put({:ps_lstart, "77"}, {"", 1})
+      assert Receipts.status(Runner, name) == :exited
+      Process.put({:ps_lstart, "77"}, {"", :timeout})
+      assert Receipts.status(Runner, name) == :none
+    end
+
+    test "exited makes a present terminal gone; running keeps it alive", %{dir: dir} do
+      pid = next_pid()
+      name = claimed(dir, pid, "500")
+      Process.put(:tmux, {"", 0})
+      assert Terminal.status(Runner, name) == :alive
+
+      File.rm_rf!(Path.join([dir, "proc", Integer.to_string(pid)]))
+      assert Terminal.status(Runner, name) == :gone
+      refute_received :ps_scan
+    end
+
+    test "a rename carries the process receipt", %{dir: dir} do
+      pid = next_pid()
+      name = claimed(dir, pid, "600")
+      assert :ok = Receipts.move(name, "renamed-shuttle")
+      assert Receipts.process_receipt(name) == :none
+      assert {:ok, %{pid: ^pid}} = Receipts.process_receipt("renamed-shuttle")
+      assert Receipts.status(Runner, "renamed-shuttle") == :running
+    end
+
+    test "release gives an exited claim's tmux session back under its own name and forgets it",
+         %{dir: dir} do
+      pid = next_pid()
+      name = claimed(dir, pid, "700")
+      Process.put(:tmux, {"", 0})
+
+      assert :ok = Terminal.release_exited(Runner, name)
+      refute_received {:tmux, _}
+
+      File.rm_rf!(Path.join([dir, "proc", Integer.to_string(pid)]))
+      assert :ok = Terminal.release_exited(Runner, name)
+      assert_received {:tmux, ["rename-session", "-t", "=" <> ^name, "human-tab"]}
+      assert Receipts.process_receipt(name) == :none
+      assert :ok = Terminal.release_exited(Runner, name)
+      refute_received {:tmux, _}
+    end
+
+    test "a stop releases an exited claim instead of closing the human's terminal", %{dir: dir} do
+      pid = next_pid()
+      name = claimed(dir, pid, "800")
+      File.rm_rf!(Path.join([dir, "proc", Integer.to_string(pid)]))
+      Process.put(:tmux, {"", 0})
+
+      assert {"", 0} = Terminal.stop(Runner, name)
+      assert_received {:tmux, ["rename-session", "-t", "=" <> ^name, "human-tab"]}
+      refute_received {:kill, _}
+    end
   end
 
   # Every combination of what the daemon can observe about one worker: its

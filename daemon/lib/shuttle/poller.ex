@@ -4751,6 +4751,8 @@ defmodule Shuttle.Poller do
         {state, error}
 
       {:ok, session} ->
+        record_claimed_process(state.runner, fiber_id, session, tmux_session, opts[:harness_pid])
+
         claim = %{
           source: tmux_session,
           identity: identity,
@@ -4767,6 +4769,30 @@ defmodule Shuttle.Poller do
         )
     end
   end
+
+  # The claimed terminal is the human's and outlives the harness: its receipt
+  # names that process, so the worker ends with it, and the terminal goes
+  # back under its own name (tmux) or the fiber's leaf as its Rex label.
+  defp record_claimed_process(runner, fiber_id, canonical, source, pid)
+       when is_integer(pid) and pid > 0 do
+    released_as =
+      if Shuttle.Terminal.native_ref?(source),
+        do: fiber_id |> String.split("/") |> List.last(),
+        else: source
+
+    case Shuttle.Terminal.Receipts.claim(runner, canonical, pid, released_as) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "claim #{fiber_id}: harness pid #{pid} not recorded (#{inspect(reason)}); " <>
+            "its exit will be seen only through the terminal"
+        )
+    end
+  end
+
+  defp record_claimed_process(_runner, _fiber_id, _canonical, _source, _pid), do: :ok
 
   defp rename_claim_terminal(runner, session, canonical, opts) do
     with {:ok, source} <- claim_terminal_source(runner, session, opts) do
@@ -5474,8 +5500,18 @@ defmodule Shuttle.Poller do
     max(state.max_concurrent_workers - map_size(state.running), 0)
   end
 
+  # A worker leaving the registry gives a claimed terminal back to the human
+  # once the harness in it has exited.
   defp remove_running(%State{} = state, runtime_key) do
-    if meta = state.running[runtime_key], do: persist_context_receiver(state, meta, nil)
+    if meta = state.running[runtime_key] do
+      persist_context_receiver(state, meta, nil)
+
+      case Shuttle.Terminal.release_exited(state.runner, meta.session) do
+        :ok -> :ok
+        {:error, message} -> Logger.warning(message)
+      end
+    end
+
     %{state | running: Map.delete(state.running, runtime_key)}
   end
 

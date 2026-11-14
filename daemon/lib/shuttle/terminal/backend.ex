@@ -13,6 +13,8 @@ defmodule Shuttle.Terminal.Backend do
   @callback probe(runner(), String.t()) :: probe()
   @callback list(runner()) :: {:ok, [String.t()]} | {:error, :unknown}
   @callback close(runner(), String.t()) :: :ok | :absent | {:error, String.t()}
+  @doc "Give a claimed terminal back under `released_as`, so that `name` no longer finds it."
+  @callback release(runner(), String.t(), String.t()) :: :ok | :absent | {:error, String.t()}
   @callback paste(runner(), String.t(), String.t()) :: :ok | {:error, String.t()}
   @callback rename(runner(), String.t(), String.t()) :: :ok | {:error, atom()}
   @callback owns_pane?(runner(), String.t(), String.t()) :: boolean()

@@ -48,14 +48,22 @@ If your session cannot be identified, leave the task as an open draft.`,
 				}
 				tmux, pane = ref.NativeSession, ref.NativePane
 			}
+			payload := map[string]any{"tmux_session": tmux, "tmux_pane": pane, "agent": block.Agent}
 			if session == "" {
+				// A session read from the environment means a harness is running
+				// this claim; its process is what the worker lives and dies with.
 				_, session = a.harnessSessionFromEnv()
+				if pid := a.eventReceiverPID(); session != "" && pid > 0 {
+					payload["harness_pid"] = pid
+				}
 			}
+			payload["session_uuid"] = session
 			id, err := a.canonicalFiberID(fiber.Path)
 			if err != nil {
 				return err
 			}
-			body, err := json.Marshal(map[string]any{"fiber_id": id, "tmux_session": tmux, "tmux_pane": pane, "session_uuid": session, "agent": block.Agent})
+			payload["fiber_id"] = id
+			body, err := json.Marshal(payload)
 			if err != nil {
 				return err
 			}

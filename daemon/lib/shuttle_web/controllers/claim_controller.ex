@@ -18,7 +18,9 @@ defmodule ShuttleWeb.ClaimController do
   for a multi-block session), `agent` (optional
   registry name; defaults to the fiber's shuttle.agent), `session_uuid`
   (optional harness transcript UUID — written into the dispatch-shaped felt
-  history event so Resume previous works on claimed sessions too).
+  history event so Resume previous works on claimed sessions too),
+  `harness_pid` (optional: the claiming harness's process, whose exit ends the
+  worker and gives the terminal back to the human).
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -59,7 +61,8 @@ defmodule ShuttleWeb.ClaimController do
         case Shuttle.Poller.claim_session(fiber_id, tmux_session,
                agent: Map.get(params, "agent"),
                tmux_pane: Map.get(params, "tmux_pane"),
-               session_uuid: Map.get(params, "session_uuid")
+               session_uuid: Map.get(params, "session_uuid"),
+               harness_pid: positive_integer(Map.get(params, "harness_pid"))
              ) do
           {:ok, %{session: session, agent_id: agent_id}} ->
             json(
@@ -83,6 +86,9 @@ defmodule ShuttleWeb.ClaimController do
         end
     end
   end
+
+  defp positive_integer(value) when is_integer(value) and value > 0, do: value
+  defp positive_integer(_), do: nil
 
   defp error_status(:not_found), do: {404, "not_found"}
   defp error_status(:closed), do: {422, "closed"}

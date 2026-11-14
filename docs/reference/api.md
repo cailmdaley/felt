@@ -579,6 +579,7 @@ here" rather than as a missing file.
 The six [ledger feeds](#ledger-feeds) below are fleet routes too.
 
 For Rex terminal claims, `tmux_session` and `tmux_pane` carry the native `session:` and `block:` references respectively.
+`harness_pid`, which `shuttle claim` sends when a harness runs it, names the claiming process: its exit ends the worker, and the daemon then gives the terminal back to the human under its own name (tmux) or the fiber's leaf as its Rex label, rather than closing it.
 
 `GET /api/v1/state` serves the Poller's latest published snapshot without waiting
 for its mailbox. It returns a generation ETag; a matching `If-None-Match`

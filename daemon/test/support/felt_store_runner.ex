@@ -332,6 +332,8 @@ defmodule Shuttle.Test.FeltStoreRunner do
 
   @linger_pid 4242
 
+  def tmux_sessions, do: Agent.get(server(), &MapSet.to_list(&1.tmux_sessions))
+
   def add_tmux_session(session) do
     Agent.update(server(), fn state ->
       identities = Map.get(state, :tmux_identities, %{})
@@ -731,6 +733,11 @@ defmodule Shuttle.Test.FeltStoreRunner do
           nil -> {"fiber not found", 1}
           fiber -> {Jason.encode!(for_cli(command, fiber)), 0}
         end
+
+      # A claimed process's birth is read from the real process table, so a
+      # test can claim a process it spawned and kill it.
+      command == "ps" and match?(["-o", "lstart=", "-p", _], args) ->
+        Shuttle.Runner.Default.cmd(command, args, opts)
 
       command == "ps" ->
         Agent.get_and_update(server(), fn state ->

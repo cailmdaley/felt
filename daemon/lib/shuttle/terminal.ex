@@ -12,6 +12,14 @@ defmodule Shuttle.Terminal do
   Unknown liveness retains a worker with launch evidence, but does not create
   one or prevent a fiber's first launch.
 
+  A claimed terminal is the human's, and outlives the harness that claimed
+  it: its receipt names that harness process, and the process exited makes
+  the worker `:gone` while its terminal is still present. `release_exited/2`
+  then gives the terminal back under its own name instead of closing it.
+  The worker's exit, a stop and the next launch under the name all release.
+  Only process receipts are read while a terminal is present; a launch
+  receipt is consulted only when none is.
+
   Backends own terminal primitives. This facade owns the process fallback,
   per-name launch serialization, run scripts, and the stop signal ladder.
   """
@@ -75,7 +83,7 @@ defmodule Shuttle.Terminal do
     )
 
     if :present in probes do
-      :alive
+      if claimed_exited?(runner, name), do: :gone, else: :alive
     else
       case Receipts.status(runner, name) do
         :exited -> :gone
@@ -85,9 +93,35 @@ defmodule Shuttle.Terminal do
     end
   end
 
+  defp claimed_exited?(runner, name), do: Receipts.process_status(runner, name) == :exited
+
+  @doc """
+  Give a claimed terminal whose harness has exited back to the human: the
+  worker name releases it (tmux: renamed back; Rex: unbound and relabelled)
+  and the receipt is dropped. Nothing happens for any other name.
+  """
+  def release_exited(runner, name) do
+    with {:ok, %{released_as: released_as}} <- Receipts.process_receipt(name),
+         :exited <- Receipts.process_status(runner, name) do
+      backend = holder(runner, name)
+
+      case backend.release(runner, name, released_as) do
+        result when result in [:ok, :absent] ->
+          Receipts.drop(name)
+          refresh_layout(runner, backend)
+          :ok
+
+        {:error, message} ->
+          {:error, "could not release #{name} to the human's terminal: #{message}"}
+      end
+    else
+      _ -> :ok
+    end
+  end
+
   defp unreachable(name, backend) do
     WorkerProcess.warn_once({:unreachable, name}, fn ->
-      "#{backend.id()} cannot see session #{name}, but its run script is running"
+      "#{backend.id()} cannot see session #{name}, but its process is running"
     end)
 
     :alive
@@ -275,7 +309,8 @@ defmodule Shuttle.Terminal do
   defp launch_ready(runner, name, cwd, script_text, opts) do
     backend = primary()
 
-    with :ok <- check_available(runner, name, opts),
+    with :ok <- release_exited(runner, name),
+         :ok <- check_available(runner, name, opts),
          :ok <- check_conversation(runner, opts[:conversation_uuid]),
          :ok <- if(opts[:preflighted], do: :ok, else: backend.ensure_ready(runner)),
          :ok <- LaunchAttempts.clear(name) do
@@ -319,6 +354,13 @@ defmodule Shuttle.Terminal do
 
   @doc "Hang up the terminal, then wait and signal its worker until positively gone."
   def stop(runner, name, opts \\ []) do
+    case release_exited(runner, name) do
+      :ok -> stop_held(runner, name, opts)
+      {:error, message} -> {message, 1}
+    end
+  end
+
+  defp stop_held(runner, name, opts) do
     backends = Keyword.get_lazy(opts, :backends, &backends/0)
 
     backend =
