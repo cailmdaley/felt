@@ -204,7 +204,7 @@ func TestFiberContextWorkerTransitions(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if len(got) != 1 || got[0].Text != "original" {
+			if len(got) != 1 || got[0].Text != hookRepeatWarning+"original" {
 				t.Fatalf("received: %+v", got)
 			}
 		})

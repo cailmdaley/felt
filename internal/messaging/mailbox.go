@@ -448,6 +448,12 @@ func offerMailboxWithAck(dir, conversation string, accepts func(Request) bool, e
 		if !entry.due(time.Now()) || !accepts(entry.Request) {
 			continue
 		}
+		if !each && entry.Attempt.open() && entry.AttemptAddress == "" && !entry.Attempt.Launch {
+			entry.closeAttempt(attemptAmbiguous)
+			if err := writeMailboxEntryKeepingTime(path, entry); err != nil {
+				return err
+			}
+		}
 		items = append(items, mailboxPendingItem{path, entry})
 	}
 	sortPendingItems(items)
@@ -519,22 +525,27 @@ func offerMailboxWithAck(dir, conversation string, accepts func(Request) bool, e
 			}
 			lifecycleSelected = true
 		}
-		limit, cost := 64<<10, len(it.entry.Request.Text)
+		emission := it.entry.Request
+		if !each {
+			emission = hookEmission(it.entry)
+		}
+		limit, cost := 64<<10, len(emission.Text)
 		if harness == "claude" {
 			limit = claudeHookBatchBytes
 			// Durable fiber context may have been queued before its receiving
 			// harness was known. Offer a retained file reference for a single
 			// oversized entry rather than acknowledging truncated context.
-			if len(Labeled(it.entry.Request))+2 > limit {
+			if len(Labeled(emission))+2 > limit {
 				it.entry.Request.Text = "Full message JSON (read request.text before acting): " + filepath.Join(dir, "offered", filepath.Base(it.path))
 			}
-			cost = len(Labeled(it.entry.Request)) + 2
+			emission = hookEmission(it.entry)
+			cost = len(Labeled(emission)) + 2
 		}
 		if size+cost > limit {
 			break
 		}
 		selected = append(selected, it)
-		batch = append(batch, it.entry.Request)
+		batch = append(batch, emission)
 		size += cost
 		if len(selected) == 16 {
 			break
@@ -562,7 +573,7 @@ func offerMailboxWithAck(dir, conversation string, accepts func(Request) bool, e
 			items = fresh
 			batch = batch[:0]
 			for _, it := range items {
-				batch = append(batch, it.entry.Request)
+				batch = append(batch, hookEmission(it.entry))
 			}
 		}
 		if len(items) == 0 {
@@ -608,6 +619,16 @@ func offerMailboxWithAck(dir, conversation string, accepts func(Request) bool, e
 		}
 	}
 	return errors.Join(validationErr, deliveryErr)
+}
+
+const hookRepeatWarning = "Possible repeat: an earlier hook offer had an unknown outcome.\n\n"
+
+func hookEmission(entry mailboxEntry) Request {
+	r := entry.Request
+	if entry.PossibleRepeat {
+		r.Text = hookRepeatWarning + r.Text
+	}
+	return r
 }
 
 func mailboxEntryExpired(entry mailboxEntry, now time.Time) bool {
