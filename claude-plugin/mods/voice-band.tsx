@@ -23,13 +23,12 @@
 // With voice unavailable there is no audio side.
 import type { EngineInterface, Register } from 'claude-code'
 
-type Ref = { fiber_id: string; name?: string } | null
+type Ref = { fiber_id: string; name?: string; cold?: boolean } | null
 type Voice = {
   available: boolean
   mode: 'off' | 'following' | 'pinned' | 'meeting'
   destination: Ref
   paused: boolean
-  cold?: boolean
   pending_words?: number
   sends_in_ms?: number | null
   preview?: { text: string } | null
@@ -87,7 +86,7 @@ function fate(v: Voice, n: number): { text: string; color?: string } | null {
     // The cut is marked once: a tail that opens on the transcript's own ellipsis keeps it.
     return { text: `“${words.length > TAIL && !/^(…|\.\.)/.test(tail) ? '…' : ''}${tail}”` }
   }
-  if (n && v.cold) return { text: 'asleep, say “send”', color: 'warning' }
+  if (n && v.destination?.cold) return { text: 'asleep, say “send”', color: 'warning' }
   if (n && v.sends_in_ms != null) return { text: `sends in ${Math.ceil(v.sends_in_ms / 1000)}s` }
   if (n || !v.last || now - Date.parse(v.last.at) > RECENT) return null
   const said = v.last.text ? plural(count(v.last.text)) : 'words'

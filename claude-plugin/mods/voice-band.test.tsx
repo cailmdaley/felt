@@ -107,7 +107,7 @@ test('quiet after words counts down to the send', ABOVE, async ($, on) => {
 })
 
 test('words for a card with no worker say they need "send"', ABOVE, async ($, on) => {
-  daemon(on, { ...HERE, destination: { fiber_id: 'a/voice-modes' }, cold: true, pending_words: 8, sends_in_ms: 3000 })
+  daemon(on, { ...HERE, destination: { fiber_id: 'a/voice-modes', cold: true }, pending_words: 8, sends_in_ms: 3000 })
   await start($)
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect((await ui.find({ type: 'Text', text: ' · asleep, say “send”' }))?.props.color).toBe('warning')
