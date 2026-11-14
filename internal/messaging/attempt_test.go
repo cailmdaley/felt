@@ -434,6 +434,35 @@ func TestAmbiguousWakeToALiveReceiverIsRetriedAfterTheBound(t *testing.T) {
 	}
 }
 
+func TestALiveConversationGetsOneRetry(t *testing.T) {
+	const a = "shuttle://host/codex/A"
+	env := testEnv(t)
+	request := Request{MessageID: "wake-always-unknown", Text: "continue", Wake: true}
+	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: request}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey(request.MessageID)+".json")
+	ids := map[string]bool{}
+	sender := func(_ context.Context, _ *sysenv.Env, _ string, req Request, _ string) (Receipt, error) {
+		ids[req.MessageID] = true
+		return Receipt{Status: StatusUnknown}, errCode("ambiguous_delivery", "lost reply")
+	}
+	for i := 0; i < 4; i++ {
+		if err := deliverFiberContextItemWith(context.Background(), env, "fiber", "host", a, request, sender); ErrorCode(err) != "ambiguous_delivery" {
+			t.Fatalf("delivery %d = %v", i, err)
+		}
+		entry := readEntry(t, path)
+		entry.Attempt.OpenedAt = time.Now().Add(-liveAttemptRetryAfter).UnixNano()
+		if err := writeMailboxEntry(path, entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entry := readEntry(t, path)
+	if len(ids) != 2 || !entry.Attempt.open() || entry.Attempt.Retry != 1 || entry.AttemptAddress != a {
+		t.Fatalf("transport ids %v, entry = %+v attempt %+v", ids, entry, entry.Attempt)
+	}
+}
+
 func TestAttemptAddressAloneStartsItsRetryWaitWhenFirstSeenUnknown(t *testing.T) {
 	const a = "shuttle://host/codex/A"
 	env := testEnv(t)

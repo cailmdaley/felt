@@ -39,7 +39,7 @@ type Attempt struct {
 
 // liveAttemptRetryAfter is how long direct delivery keeps an attempt open
 // while its conversation is alive and the transport reports the outcome
-// unknown, before it closes it ambiguous and tries again.
+// unknown, before it closes it ambiguous and tries once more.
 const liveAttemptRetryAfter = 5 * time.Minute
 
 const (

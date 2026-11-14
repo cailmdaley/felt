@@ -132,6 +132,7 @@ Both readers that select entries claim through it:
 
 An unconfirmed direct send leaves its attempt open and pinned, and the next delivery replays the conversation's stored receipt instead of sending again.
 When the pinned conversation rejects the entry, has ended with the outcome unknown, or has left it unknown for five minutes since `opened_at` while alive, direct delivery closes that attempt (`released` or `ambiguous`) and claims the entry for the fiber's current receiver in one write, with `retry` counted when that is the same conversation.
+A conversation gets one such retry: an attempt with `retry` set stays open and pinned while its conversation lives, however long its outcome stays unknown.
 An attempt read from `attempt_address` alone has no `opened_at`; its five minutes start when direct delivery first sees its outcome unknown.
 An unpinned claim, like a delivered close, keeps the file's modification time; a pinned claim and every other close write it afresh.
 

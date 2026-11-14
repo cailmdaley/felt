@@ -349,7 +349,9 @@ func deliverFiberContextItemWith(ctx context.Context, env *sysenv.Env, fiber, ho
 	unknown := receipt.Status == StatusUnknown
 	unknownEnded := unknown && address != selectedAddress && fiberContextSessionEnded(env, host, address)
 	unknownStale := false
-	if unknown && !unknownEnded && entry.Attempt.open() {
+	// One retry per conversation: a transport that reports every send unknown
+	// would otherwise repeat the entry for as long as the conversation lives.
+	if unknown && !unknownEnded && entry.Attempt.open() && entry.Attempt.Retry == 0 {
 		if entry.Attempt.OpenedAt == 0 {
 			// An attempt read from attempt_address alone starts its wait here.
 			entry.Attempt.OpenedAt = time.Now().UnixNano()
