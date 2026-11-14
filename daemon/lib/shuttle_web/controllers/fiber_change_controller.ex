@@ -1,6 +1,7 @@
 defmodule ShuttleWeb.FiberChangeController do
   @moduledoc """
-  Bake a constitution's change on open: `POST /api/v1/fibers/<id>/change`.
+  Bake a constitution's change on open, `POST /api/v1/fibers/<id>/change`, and
+  list the PRs it follows, `GET /api/v1/fibers/<id>/change`.
 
   The board's Change page posts here when it opens. The owning daemon shells
   `shuttle change <id> --cache --json [--pr N]`, which bakes the change the
@@ -18,8 +19,15 @@ defmodule ShuttleWeb.FiberChangeController do
   a Git repository, no base, a `gh` failure); 404 when the fiber is not on this
   host; 503 when Shuttle could not run.
 
-  Phoenix globs only end a route, so the route is `POST /fibers/*id` and the
-  last segment must be `change`.
+  The GET shells `shuttle change <id> --list --json`, reading each PR in the
+  fiber's `shuttle.change.prs` from GitHub without fetching or writing, and
+  answers 200 `{prs: [...]}` in the order named; a PR gh cannot read carries its
+  `error`. Its failures map as the bake's.
+
+  Phoenix globs only end a route, so the bake's route is `POST /fibers/*id` and
+  the last segment must be `change`; the list arrives through
+  `FiberDocumentsController.show`, which hands this controller a `GET
+  /fibers/*id` whose last segment is `change`.
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -35,6 +43,43 @@ defmodule ShuttleWeb.FiberChangeController do
     case Enum.split(segments, -1) do
       {[_ | _] = id, ["change"]} -> bake(conn, Enum.join(id, "/"), params)
       _ -> conn |> put_status(404) |> json(%{error: "not found"})
+    end
+  end
+
+  def index(conn, %{"id" => segments} = params) do
+    {id, ["change"]} = Enum.split(segments, -1)
+    id = Enum.join(id, "/")
+
+    case OriginRouter.route(Map.get(params, "origin")) do
+      {:error, {:unknown_origin, origin}} ->
+        RelayHelpers.unknown_origin(conn, origin)
+
+      {:remote, remote} ->
+        RelayHelpers.relay_bytes(
+          conn,
+          OriginRouter.forward_get(remote, change_path(id), %{},
+            forward_timeout_ms: @cli_timeout_ms + 5_000
+          )
+        )
+
+      :local ->
+        with {:ok, %{store: store, fiber_id: address}} <- FeltStores.resolve_request(id),
+             {:ok, output} <-
+               Shuttle.CLI.run_in_store(store, ["change", address, "--list", "--json"],
+                 timeout_ms: @cli_timeout_ms
+               ),
+             {:ok, prs} when is_list(prs) <- Jason.decode(output) do
+          json(conn, %{prs: prs})
+        else
+          {:ok, _} ->
+            error(conn, 502, "shuttle change --list answered without a list")
+
+          {:error, %Jason.DecodeError{}} ->
+            error(conn, 502, "shuttle change --list answered without a list")
+
+          other ->
+            respond(other, conn)
+        end
     end
   end
 
@@ -103,7 +148,7 @@ defmodule ShuttleWeb.FiberChangeController do
   end
 
   defp respond({:command_error, :timeout, _output}, conn),
-    do: error(conn, 503, "the bake did not finish within #{div(@cli_timeout_ms, 1000)}s")
+    do: error(conn, 503, "shuttle change did not finish within #{div(@cli_timeout_ms, 1000)}s")
 
   defp respond({:command_error, 127, _output}, conn),
     do: error(conn, 503, "shuttle is not on this daemon's PATH")

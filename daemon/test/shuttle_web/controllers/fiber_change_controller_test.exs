@@ -1,14 +1,14 @@
 defmodule ShuttleWeb.FiberChangeControllerTest do
   @moduledoc """
   `POST /api/v1/fibers/<id>/change` — the board's Change page bakes the
-  constitution's change on its owner. Real felt resolves the fiber's store;
+  constitution's change on its owner; `GET` lists the PRs it follows. Real felt resolves the fiber's store;
   a fake shuttle records the argv it is handed and answers as the test asks.
   """
   use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
   import Phoenix.ConnTest
 
-  alias Shuttle.Test.{Env, FakeCli, ForwardStub, StubPostClient}
+  alias Shuttle.Test.{Env, FakeCli, ForwardStub, StubGetFileClient, StubPostClient}
 
   @endpoint ShuttleWeb.Endpoint
 
@@ -125,5 +125,61 @@ defmodule ShuttleWeb.FiberChangeControllerTest do
 
     assert conn.status == 400
     refute File.exists?(args)
+  end
+
+  describe "GET: the PRs a constitution follows" do
+    test "a local list shells shuttle change --list and answers its PRs", %{
+      store: store,
+      args: args
+    } do
+      prs = [%{"number" => 12, "title" => "Open one"}, %{"number" => 404, "error" => "gh: no"}]
+      Env.put_env("SHUTTLE_FAKE_OUTPUT", Jason.encode!(prs))
+
+      conn = get(api_conn(), "/api/v1/fibers/tests/review/change")
+
+      assert conn.status == 200
+      assert Jason.decode!(conn.resp_body) == %{"prs" => prs}
+      assert File.read!(args) == "-C\n#{store}\nchange\ntests/review\n--list\n--json\n"
+    end
+
+    test "a failed list answers with shuttle's reason", %{args: args} do
+      Env.put_env(
+        "SHUTTLE_FAKE_OUTPUT",
+        "Error: fiber belongs to host \"fir\"; run shuttle change there\n"
+      )
+
+      Env.put_env("SHUTTLE_FAKE_STATUS", "1")
+
+      conn = get(api_conn(), "/api/v1/fibers/tests/review/change")
+
+      assert conn.status == 422
+      assert Jason.decode!(conn.resp_body)["error"] =~ "fiber belongs to host"
+      assert File.exists?(args)
+    end
+
+    test "the fiber itself still reads without the change segment", %{args: args} do
+      conn = get(api_conn(), "/api/v1/fibers/tests/review")
+
+      assert conn.status == 200
+      refute File.exists?(args)
+    end
+
+    test "a remote origin forwards to its owner, and nothing runs here", %{args: args} do
+      ForwardStub.stub_forward(
+        "candide",
+        "http://candide.example:4000",
+        {:ok, 200, "application/json; charset=utf-8", ~s({"prs":[{"number":3}]})}
+      )
+
+      conn = get(api_conn(), "/api/v1/fibers/tests/review/change?origin=candide")
+
+      assert conn.status == 200
+      assert Jason.decode!(conn.resp_body) == %{"prs" => [%{"number" => 3}]}
+
+      assert URI.parse(StubGetFileClient.last().url).path ==
+               "/api/v1/fibers/tests/review/change"
+
+      refute File.exists?(args)
+    end
   end
 end

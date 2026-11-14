@@ -401,7 +401,7 @@
     "/fibers/{id}": {
       "get": {
         "summary": "Read one fiber from its owner.",
-        "description": "Reads by UID or slash-separated namespace path; encode each path segment separately. body=true includes Markdown in fiber.body; omitted origin can infer a configured owner from shuttle.host, but local reads use felt’s convenient lookup, so a missing namespace path can resolve by its leaf name instead of returning 404.",
+        "description": "Reads by UID or slash-separated namespace path; encode each path segment separately. body=true includes Markdown in fiber.body; omitted origin can infer a configured owner from shuttle.host, but local reads use felt’s convenient lookup, so a missing namespace path can resolve by its leaf name instead of returning 404. A last segment `change` instead lists the PRs the fiber before it follows (see GET /fibers/<id>/change in the board routes), so a fiber whose own slug is `change` is read by its UID.",
         "tags": [
           "core"
         ],

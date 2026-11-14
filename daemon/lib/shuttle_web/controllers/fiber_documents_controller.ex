@@ -162,6 +162,10 @@ defmodule ShuttleWeb.FiberDocumentsController do
   triggers one bounded, rate-limited store sync and a retry, then returns 404
   naming this host. A failed sync with no match returns 503.
 
+  A last segment `change` asks for the change list of the fiber before it
+  (`ShuttleWeb.FiberChangeController.index/2`), so a fiber whose own slug is
+  `change` is read by its UID.
+
   **Owner-routed via `Shuttle.OriginRouter`, exactly like `/file`.** Only the
   daemon that owns a fiber's host can read its body off that host's filesystem.
   The composite board stamps each fiber with its `origin`; the document reader
@@ -182,6 +186,13 @@ defmodule ShuttleWeb.FiberDocumentsController do
   cannot bounce a request between them.
   """
   def show(conn, %{"id" => id_segments} = params) do
+    case Enum.split(List.wrap(id_segments), -1) do
+      {[_ | _], ["change"]} -> ShuttleWeb.FiberChangeController.index(conn, params)
+      _ -> show_fiber(conn, id_segments, params)
+    end
+  end
+
+  defp show_fiber(conn, id_segments, params) do
     id = id_segments |> List.wrap() |> Enum.join("/")
     with_body? = Map.get(params, "body") in ["1", "true", true]
     routed? = Map.get(params, "routed") in ["1", "true", true]
