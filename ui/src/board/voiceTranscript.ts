@@ -33,7 +33,7 @@ export function transcriptLine(row: VoiceTranscriptRow, slugOf: FiberSlug): stri
   return `${time} ${row.speaker} → ${slug}: ${row.text}`
 }
 
-/** A small reader over the day transcript; filtering never changes Listen's target. */
+/** A small reader over the day transcript, newest speech first; filtering never changes Listen's target. */
 export class TranscriptPanel {
   readonly el = document.createElement('dialog')
   private readonly lines = document.createElement('div')
@@ -60,7 +60,8 @@ export class TranscriptPanel {
         const transcript = await readVoiceTranscript(base, recorder, filter.checked ? fiber : undefined)
         if (revision !== this.revision) return
         this.heading.textContent = `Today's transcript · ${transcript.date}`
-        const rows = transcript.rows.map(row => {
+        // The newest speech leads; the day reads downward into the past.
+        const rows = [...transcript.rows].sort((a, b) => Date.parse(b.t) - Date.parse(a.t)).map(row => {
           const line = document.createElement('p'); line.textContent = transcriptLine(row, slugOf); return line
         })
         this.lines.replaceChildren(...rows)

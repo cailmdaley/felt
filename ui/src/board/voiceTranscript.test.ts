@@ -50,3 +50,14 @@ it('shows an empty day and a failed read without consulting /file', async () => 
   await vi.waitFor(() => expect(panel!.el.textContent).toContain('Recorder unreachable'))
   expect(fetcher.mock.calls.every(([url]) => url.includes('/voice/transcript'))).toBe(true)
 })
+it('lists the newest speech first', async () => {
+  const opener = document.createElement('button'); document.body.append(opener)
+  fetcher.mockResolvedValueOnce(Response.json({ date: '2026-11-07', rows: [
+    { ...row, t: '2026-11-07T18:30:04-08:00', text: 'First' },
+    { ...row, t: '2026-11-07T18:31:10-08:00', text: 'Second' },
+    { ...row, t: '2026-11-07T18:45:00-08:00', text: 'Third' },
+  ], recorder: 'audio-host' }))
+  panel = new TranscriptPanel('', 'audio-host', 'uid', slug, opener)
+  await vi.waitFor(() => expect(panel!.el.querySelectorAll('[role=log] p')).toHaveLength(3))
+  expect([...panel.el.querySelectorAll('[role=log] p')].map(p => p.textContent!.split(': ').at(-1))).toEqual(['Third', 'Second', 'First'])
+})
