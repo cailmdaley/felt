@@ -93,13 +93,17 @@ func HookPIDIsAncestor(pid int) bool {
 
 // mailboxEntry is one stored inbox entry. Its request carries the wake fields
 // that its inbox's readers act on (see Enqueue); a build that predates wishes
-// reads those fields and ignores the wishes, not_before included.
+// reads those fields and ignores the wishes, not_before included. A build that
+// predates the attempt record ignores it and reads attempt_address and
+// possible_repeat, which are written beside it.
 type mailboxEntry struct {
 	Request  Request `json:"request"`
 	Wishes   Wishes  `json:"wishes"`
 	QueuedAt int64   `json:"queued_at"`
 	// Fallback records native write ownership and bounded preflight retries.
 	Fallback *claudeFallback `json:"fallback,omitempty"`
+	// Attempt is the latest try at delivering the entry (see claimBatch).
+	Attempt *Attempt `json:"attempt,omitempty"`
 	// AttemptAddress pins a direct fiber-context send across a lost receipt
 	// and worker handoff. A retired destination may roll forward to its
 	// successor with PossibleRepeat when its outcome cannot be established.
@@ -360,8 +364,12 @@ func OfferMailbox(env *sysenv.Env, harness, id, host string, emit func([]Request
 	if !MailboxAvailable(env, harness, id, host) {
 		return nil
 	}
+	conversation, err := FormatAddress(host, harness, id)
+	if err != nil {
+		return err
+	}
 	offered := false
-	err := offerMailboxWithAck(mailboxDir(env, harness, id), func(r Request) bool {
+	err = offerMailboxWithAck(mailboxDir(env, harness, id), conversation, func(r Request) bool {
 		a, err := ParseAddress(r.Address)
 		return err == nil && a.Harness == harness && a.ID == id && a.Host == host
 	}, func(batch []Request) error {
@@ -380,7 +388,7 @@ func OfferMailbox(env *sysenv.Env, harness, id, host string, emit func([]Request
 // conversations: a later failure must not replay earlier successes to a
 // successor under a different transport deduplication key.
 func offerMailboxEachValidated(dir string, accepts func(Request) bool, current func(context.Context, Request) (bool, error), emit func(Request) error) error {
-	return offerMailboxWithAck(dir, accepts, func(batch []Request) error {
+	return offerMailboxWithAck(dir, "", accepts, func(batch []Request) error {
 		for _, request := range batch {
 			if err := emit(request); err != nil {
 				return err
@@ -390,7 +398,11 @@ func offerMailboxEachValidated(dir string, accepts func(Request) bool, current f
 	}, true, current, "")
 }
 
-func offerMailboxWithAck(dir string, accepts func(Request) bool, emit func([]Request) error, each bool, current func(context.Context, Request) (bool, error), harness string) error {
+// offerMailboxWithAck selects due, accepted entries under the inbox lock and
+// emits them. A batch offer (each false) claims the batch for conversation
+// before emitting it and closes the attempt delivered after; with each, the
+// emit claims each entry itself and a successful one is closed delivered.
+func offerMailboxWithAck(dir, conversation string, accepts func(Request) bool, emit func([]Request) error, each bool, current func(context.Context, Request) (bool, error), harness string) error {
 	lock, err := os.OpenFile(filepath.Join(dir, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return err
@@ -529,10 +541,6 @@ func offerMailboxWithAck(dir string, accepts func(Request) bool, emit func([]Req
 		}
 	}
 	items = selected
-	offeredDir := filepath.Join(dir, "offered")
-	if err := ensureDir(offeredDir, 0700); err != nil {
-		return err
-	}
 	if !each {
 		if current != nil {
 			fresh := items[:0]
@@ -560,18 +568,17 @@ func offerMailboxWithAck(dir string, accepts func(Request) bool, emit func([]Req
 		if len(items) == 0 {
 			return validationErr
 		}
+		paths := make([]string, len(items))
+		for i, it := range items {
+			paths[i] = it.path
+		}
+		if _, err := claimBatch(paths, conversation, false); err != nil {
+			return err
+		}
 		if err := emit(batch); err != nil {
 			return err
 		}
-		for _, it := range items {
-			if err := os.Rename(it.path, filepath.Join(offeredDir, filepath.Base(it.path))); err != nil {
-				return err
-			}
-		}
-		if err := syncDir(filepath.Join(dir, "pending")); err != nil {
-			return err
-		}
-		if err := syncDir(offeredDir); err != nil {
+		if err := closeAttempts(paths, attemptDelivered); err != nil {
 			return err
 		}
 		return validationErr
@@ -596,13 +603,7 @@ func offerMailboxWithAck(dir string, accepts func(Request) bool, emit func([]Req
 			}
 			continue
 		}
-		if err := os.Rename(it.path, filepath.Join(offeredDir, filepath.Base(it.path))); err != nil {
-			return err
-		}
-		if err := syncDir(filepath.Join(dir, "pending")); err != nil {
-			return err
-		}
-		if err := syncDir(offeredDir); err != nil {
+		if err := closeAttempts([]string{it.path}, attemptDelivered); err != nil {
 			return err
 		}
 	}

@@ -115,7 +115,9 @@ func (e mailboxEntry) due(now time.Time) bool {
 }
 
 // UnmarshalJSON gives an entry written without wishes the wishes its request
-// fields imply.
+// fields imply, and reads an attempt_address with no attempt record for that
+// address, as a build that predates the record writes it, as an open attempt
+// of that one entry to that address.
 func (e *mailboxEntry) UnmarshalJSON(data []byte) error {
 	type stored mailboxEntry
 	var s stored
@@ -124,6 +126,10 @@ func (e *mailboxEntry) UnmarshalJSON(data []byte) error {
 	}
 	*e = mailboxEntry(s)
 	e.Wishes = e.Wishes.withDefaults(e.Request)
+	if e.AttemptAddress != "" && (e.Attempt == nil || e.Attempt.Conversation != e.AttemptAddress) {
+		members := []string{e.Request.MessageID}
+		e.Attempt = &Attempt{BatchID: batchID(members), Conversation: e.AttemptAddress, Members: members}
+	}
 	return nil
 }
 
@@ -269,6 +275,8 @@ type PendingEntry struct {
 	NotBefore string    `json:"not_before,omitempty"`
 	QueuedAt  time.Time `json:"queued_at"`
 	From      string    `json:"from,omitempty"`
+	// Attempt is the entry's open attempt, if any.
+	Attempt *Attempt `json:"attempt,omitempty"`
 }
 
 // PendingEntries lists an address's pending entries, oldest first.
@@ -284,7 +292,11 @@ func PendingEntries(env *sysenv.Env, address string) ([]PendingEntry, error) {
 	out := make([]PendingEntry, 0, len(items))
 	for _, it := range items {
 		e := it.entry
-		out = append(out, PendingEntry{MessageID: e.Request.MessageID, Source: e.Wishes.Source, Turn: e.Wishes.Turn, NotBefore: e.Wishes.NotBefore, QueuedAt: time.Unix(0, e.QueuedAt), From: e.Request.From})
+		pending := PendingEntry{MessageID: e.Request.MessageID, Source: e.Wishes.Source, Turn: e.Wishes.Turn, NotBefore: e.Wishes.NotBefore, QueuedAt: time.Unix(0, e.QueuedAt), From: e.Request.From}
+		if e.Attempt.open() {
+			pending.Attempt = e.Attempt
+		}
+		out = append(out, pending)
 	}
 	return out, nil
 }

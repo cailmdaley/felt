@@ -11,7 +11,7 @@ import (
 )
 
 // inboxVerbs are the owner-local inbox verbs: put, pending and ls. An address
-// is a fiber key or a session's shuttle:// address.
+// is a fiber key (<felt store path>:<uid>) or a session's shuttle:// address.
 func (a *app) shuttleInboxCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "inbox",
@@ -33,7 +33,9 @@ func (a *app) inboxVerbs() []*cobra.Command {
 		Use:   "put <address> <message-id> <text>",
 		Short: "Enqueue an entry in an address's inbox on this host",
 		Long: `Enqueue an entry in the inbox of a fiber key or a session's shuttle:// address
-on this host. In a fiber's inbox, an id already there is a successful no-op
+on this host. A fiber's key is the path of its felt store and its uid, joined by
+a colon (/home/me/loom:01M7...); the daemon reads no other key for that fiber.
+In a fiber's inbox, an id already there is a successful no-op
 when its content and wishes match, or whatever they are with --derived;
 otherwise it is a message_id_conflict. A session's inbox refuses an id already
 pending, and a turn of force or idle. An unknown wish value is refused.`,

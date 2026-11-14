@@ -72,7 +72,7 @@ func TestClaudeHangingNoticeCannotStarveOtherMail(t *testing.T) {
 	}
 	receipt := rejected(req, "claude-native", "receiver refused")
 	entry.Fallback = &claudeFallback{WriteStarted: true, Receipt: &receipt, ErrorCode: "refused", ErrorMessage: "receiver refused"}
-	if err := writeClaudeEntry(path, entry); err != nil {
+	if err := writeMailboxEntry(path, entry); err != nil {
 		t.Fatal(err)
 	}
 	req.MessageID, req.Text = "young-mail", "young mail"

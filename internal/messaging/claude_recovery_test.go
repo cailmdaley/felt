@@ -62,7 +62,7 @@ func TestClaudeAbandonedFallbackRetriesOnlyBeforeWrite(t *testing.T) {
 				t.Fatal(err)
 			}
 			entry.Fallback = &claudeFallback{Attempts: 1, WriteStarted: started}
-			if err := writeClaudeEntry(path, entry); err != nil {
+			if err := writeMailboxEntry(path, entry); err != nil {
 				t.Fatal(err)
 			}
 			notices := 0

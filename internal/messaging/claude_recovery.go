@@ -2,7 +2,6 @@ package messaging
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -153,19 +152,19 @@ func recoverClaudeMessage(ctx context.Context, env *sysenv.Env, item mailboxPend
 			receipt, failure = rejected(req, "claude-native", "receiver exited before delivery"), errCode("receiver_exited", "receiver exited before delivery")
 		default:
 			attempt.Attempts++
-			if err := writeClaudeEntry(path, entry); err != nil {
+			if err := writeMailboxEntry(path, entry); err != nil {
 				return true, err
 			}
 			// This marker is published immediately before conn.Write.
 			sendCtx := context.WithValue(ctx, reservationDeadlinePublisherKey{}, func(time.Time) error {
 				attempt.WriteStarted = true
-				return writeClaudeEntry(path, entry)
+				return writeMailboxEntry(path, entry)
 			})
 			req.Wake, req.ContextIfBusy = true, false
 			receipt, failure, _ = sendClaudeNativeBrief(sendCtx, env, a, req)
 			if ErrorCode(failure) == "preflight_failed" && attempt.Attempts < claudeFallbackAttempts {
 				attempt.WriteStarted = false
-				if err := writeClaudeEntry(path, entry); err != nil {
+				if err := writeMailboxEntry(path, entry); err != nil {
 					return true, err
 				}
 				return true, renameClaudeMail(path, filepath.Join(dir, "pending", key))
@@ -175,7 +174,7 @@ func recoverClaudeMessage(ctx context.Context, env *sysenv.Env, item mailboxPend
 		if failure != nil {
 			attempt.ErrorCode, attempt.ErrorMessage = ErrorCode(failure), failure.Error()
 		}
-		if err := writeClaudeEntry(path, entry); err != nil {
+		if err := writeMailboxEntry(path, entry); err != nil {
 			return true, err
 		}
 	}
@@ -186,7 +185,7 @@ func recoverClaudeMessage(ctx context.Context, env *sysenv.Env, item mailboxPend
 		if attempt.NoticeAttempts < claudeFallbackAttempts {
 			attempt.NoticeAttempts++
 			attempt.NoticeAfter = now.Add(time.Minute).UnixNano()
-			if err := writeClaudeEntry(path, entry); err != nil {
+			if err := writeMailboxEntry(path, entry); err != nil {
 				return false, err
 			}
 			notice := Request{
@@ -208,14 +207,6 @@ func recoverClaudeMessage(ctx context.Context, env *sysenv.Env, item mailboxPend
 		}
 	}
 	return false, errors.Join(err, renameClaudeMail(path, filepath.Join(dir, "offered", key)))
-}
-
-func writeClaudeEntry(path string, entry mailboxEntry) error {
-	b, err := json.Marshal(entry)
-	if err != nil {
-		return err
-	}
-	return mailboxWrite(path, b, false)
 }
 
 func renameClaudeMail(from, to string) error {

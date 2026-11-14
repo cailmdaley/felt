@@ -9,6 +9,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - `shuttle inbox put|pending|ls`: every inbox entry, for a fiber or a session, is created by one writer that records its delivery wishes (`source`, `turn`, `session`, `if_costly`, `not_before`) and refuses an unknown value. An entry waits until its `not_before` has passed. Contract level 38.
+- Inbox entries carry an attempt record (`batch_id`, `conversation`, `epoch`, `members`, `opened_at`, `outcome`), written by one claim that the hook offer and direct fiber delivery both take entries through, and shown by `shuttle inbox ls --json` while it is open. `attempt_address` and `possible_repeat` are still written beside it, so delivery is unchanged on every host.
 
 ### Fixed
 

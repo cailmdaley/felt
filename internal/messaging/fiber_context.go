@@ -212,6 +212,10 @@ func offerLinkedFiberContext(env *sysenv.Env, harness, id, host string, emit fun
 	if err != nil {
 		return err
 	}
+	conversation, err := FormatAddress(host, harness, id)
+	if err != nil {
+		return err
+	}
 	var validationErrors []error
 	for _, entry := range entries {
 		bytes, err := readBounded(filepath.Join(dir, entry.Name()), 16384)
@@ -221,7 +225,7 @@ func offerLinkedFiberContext(env *sysenv.Env, harness, id, host string, emit fun
 		}
 		offered := false
 		root := mailboxDir(env, "fiber", link.Fiber)
-		err = offerMailboxWithAck(root, func(r Request) bool {
+		err = offerMailboxWithAck(root, conversation, func(r Request) bool {
 			return fiberContextHookEligible(root, r) && fiberReceiverMatches(root, Address{Host: host, Harness: harness, ID: id}) && MailboxAvailable(env, harness, id, host)
 		}, func(batch []Request) error {
 			offered = true
@@ -319,16 +323,18 @@ func deliverFiberContextItemWith(ctx context.Context, env *sysenv.Env, fiber, ho
 	// session queue whose lifetime can end before its next offer.
 	if selected.Harness == "codex" && !request.Wake {
 		if MailboxAvailable(env, selected.Harness, selected.ID, host) && entry.AttemptAddress != "" {
-			if err := writeFiberMailboxAttempt(path, entry, ""); err != nil {
+			if err := closeAttempts([]string{path}, attemptReleased); err != nil {
 				return err
 			}
 		}
 		return errCode("unconfirmed", "quiet Codex context awaits its fiber hook")
 	}
+	// A pinned attempt is retried to its own conversation with the same
+	// transport id; otherwise the entry is claimed for the selected one.
 	address := entry.AttemptAddress
 	if address == "" {
 		address = selectedAddress
-		if err := writeFiberMailboxAttempt(path, entry, address); err != nil {
+		if _, err := claimBatch([]string{path}, address, true); err != nil {
 			return err
 		}
 	}
@@ -345,26 +351,33 @@ func deliverFiberContextItemWith(ctx context.Context, env *sysenv.Env, fiber, ho
 		err = errCode("rejected", "context delivery was rejected")
 	}
 	if address == selectedAddress {
-		if clearErr := writeFiberMailboxAttempt(path, entry, ""); clearErr != nil {
-			return clearErr
+		if closeErr := closeAttempts([]string{path}, attemptReleased); closeErr != nil {
+			return closeErr
 		}
 		return err
 	}
 
-	// An ended receiver cannot finish an unknown attempt. Its successor gets
-	// a durable warning because the previous receiver may have taken it.
-	if unknownEnded && !entry.PossibleRepeat {
-		entry.PossibleRepeat = true
-		request.Text = possibleRepeatContext(request.Text)
+	// The pinned conversation rejected the entry or ended with its outcome
+	// unknown. Closing that attempt and claiming the entry for the selected
+	// conversation is one write, so a crash between them cannot unpin it. An
+	// ended receiver cannot finish an unknown attempt: its successor gets a
+	// durable warning because the previous receiver may have taken it.
+	outcome := attemptReleased
+	if unknownEnded {
+		outcome = attemptAmbiguous
+		if !entry.PossibleRepeat {
+			request.Text = possibleRepeatContext(request.Text)
+		}
 	}
-	entry.AttemptAddress = selectedAddress
-	if err := writeFiberMailboxAttempt(path, entry, selectedAddress); err != nil {
+	entry.closeAttempt(outcome)
+	entry.openAttempt(selectedAddress, receiverEpoch(root, selectedAddress), []string{entry.Request.MessageID}, true, time.Now())
+	if err := writeMailboxEntry(path, entry); err != nil {
 		return err
 	}
 	receipt, err = send(ctx, env, host, request, selectedAddress)
 	if receipt.Status == StatusRejected {
-		if clearErr := writeFiberMailboxAttempt(path, entry, ""); clearErr != nil {
-			return clearErr
+		if closeErr := closeAttempts([]string{path}, attemptReleased); closeErr != nil {
+			return closeErr
 		}
 	}
 	return err
@@ -407,15 +420,6 @@ func readFiberMailboxEntry(path string) (mailboxEntry, error) {
 		return mailboxEntry{}, err
 	}
 	return entry, nil
-}
-
-func writeFiberMailboxAttempt(path string, entry mailboxEntry, address string) error {
-	entry.AttemptAddress = address
-	bytes, err := json.Marshal(entry)
-	if err != nil {
-		return err
-	}
-	return mailboxWrite(path, bytes, false)
 }
 
 func currentThreadSignal(ctx context.Context, env *sysenv.Env, request Request) (bool, error) {

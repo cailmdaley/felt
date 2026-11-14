@@ -1,8 +1,11 @@
 # The inbox — internals
 
 An inbox holds text waiting for a worker on the host that owns its address.
-An address is a fiber, named by its key, or a session, named by its `shuttle://<host>/<harness>/<id>` address.
-This page describes the stored entry, the one function that creates entries, and the CLI verbs over it.
+An address is a fiber or a session.
+A fiber's address is its key: the path of the felt store that holds it and its uid (its id when it has no uid), joined by a colon, as in `/home/me/loom:01ARZ3NDEKTSV4RRFFQ69G5FAV`; the daemon builds it in `Shuttle.Delivery.context_key/1` and passes it to every `context-mailbox` verb.
+A session's address is `shuttle://<host>/<harness>/<id>`.
+Any other string names an inbox of its own: `shuttle inbox put` accepts it, and nothing reads it.
+This page describes the stored entry, the one function that creates entries, the attempt record and claim by which readers take entries, and the CLI verbs over it.
 
 ## The store
 
@@ -29,7 +32,7 @@ An entry is one JSON file:
 
 `request` is the message as `messaging.Request` defines it: id, text, sender, reply and idle-notification fields, thread signal and retention stamp.
 `queued_at` is Unix nanoseconds.
-Delivery bookkeeping (`attempt_address`, `possible_repeat`, and `fallback` on Claude entries) is written into the same file by the readers.
+Readers write delivery bookkeeping into the same file: `attempt`, `attempt_address` and `possible_repeat` ([Attempts and the claim](#attempts-and-the-claim)), and `fallback` on Claude entries.
 
 ### Delivery wishes
 
@@ -91,13 +94,55 @@ Every reader that selects pending entries for offer or delivery skips one whose 
 `OverdueFiberContext`, which `shuttle doctor` reports, measures an entry's age from the later of `queued_at` and `not_before`.
 `PendingCount` counts every pending entry, delayed ones included, because they still wait for a worker.
 
+## Attempts and the claim
+
+A reader takes pending entries by claiming them, under the inbox's `.lock` and before any side effect: `claimBatch` writes the same `attempt` into every entry of the batch.
+
+```json
+"attempt": {"batch_id": "<sha256>", "conversation": "shuttle://host/claude/A", "epoch": 3, "members": ["m-1", "m-2"], "opened_at": 1763190000000000000}
+```
+
+| Field | Records |
+|---|---|
+| `batch_id` | The SHA-256 of the batch's member ids, sorted and joined by NUL, so claiming the same batch again gives the same id |
+| `conversation` | The session the batch is going to |
+| `epoch` | The fiber receiver's epoch (`destination.json`) when `conversation` was the receiver at the claim; absent otherwise, as in a session inbox |
+| `members` | The batch's message ids, oldest first |
+| `opened_at` | When it was claimed, in Unix nanoseconds |
+| `outcome` | Absent while the attempt is open; then `delivered`, `released` or `ambiguous` |
+
+Claiming the same batch for the same conversation and epoch while its attempt is open keeps that attempt as it was opened, so a reader that died after its claim and is retried finds the batch id it first wrote.
+The claim is a field in the pending file, not a move, so a build that predates it still sees the entry as pending.
+
+Both readers that select entries claim through it:
+
+- **The hook offer** claims its batch (up to 16 entries and the harness's size limit, at most one thread lifecycle signal) for the hook's own session, emits it, then closes it `delivered`.
+  Its attempt is not pinned: a hook that dies after its claim leaves the entry pending with an open attempt, and the next hook or direct delivery that selects it claims it again.
+- **Direct fiber delivery** (`DeliverFiberContext`) claims each entry on its own, a batch of one, and pins it: the claim also writes `attempt_address`, and the entry is sent to that conversation, with the same transport id, until the attempt closes.
+
+`closeAttempts` closes an attempt with what the transport reported:
+
+| Outcome | The entry |
+|---|---|
+| `delivered` | moves to `offered/` with its attempt; `attempt_address` is left as it was |
+| `released` | stays pending, unpinned: `attempt_address` is cleared. Direct delivery releases an entry its conversation rejected, and quiet Codex context it hands back to the fiber hook |
+| `ambiguous` | stays pending, unpinned, with `possible_repeat` set, so its next direct emission starts "Possible repeat" |
+
+An unconfirmed direct send leaves its attempt open and pinned.
+When the pinned conversation rejects the entry, or has ended with the outcome unknown, direct delivery closes that attempt (`released` or `ambiguous`) and claims the entry for the fiber's current receiver in one write.
+
+Hosts upgrade at different times, so `attempt_address` and `possible_repeat` are written beside `attempt` wherever a pinned attempt is opened or closed, and a build that predates `attempt` acts on them.
+That build drops `attempt` from any entry it rewrites, and an `attempt_address` with no attempt record for that address reads as an open attempt of that one entry to that address.
+Which reader may select an entry is decided before the claim, by each reader's own rule: in a fiber inbox a hook offers only entries that do not ask for a wake and are not pinned, and direct delivery takes an entry that asks for a wake, a pinned one, and any entry when the receiver has no hook.
+The Claude native-wake fallback claims an entry by moving it into `fallback/`, under the same lock, and writes no attempt.
+
 ## Verbs
 
 | Command | Does |
 |---|---|
 | `shuttle inbox put <address> <message-id> <text>` | `Enqueue`, with `--source`, `--turn`, `--session`, `--if-costly`, `--not-before`, `--from` and `--derived`. Silent on success, including a deduplicated no-op in a fiber inbox |
 | `shuttle inbox pending <address>...` | One JSON object, address → pending count. An address whose inbox can't be read is named on stderr and left out |
-| `shuttle inbox ls <address>` | The address's pending entries, oldest first: id, source, turn, `not_before` (`-` when absent), queued time and sender. `--json` prints the same as an array of objects with `id`, `source`, `turn`, `not_before`, `queued_at` and `from` |
+| `shuttle inbox ls <address>` | The address's pending entries, oldest first: id, source, turn, `not_before` (`-` when absent), queued time and sender. `--json` prints the same as an array of objects with `id`, `source`, `turn`, `not_before`, `queued_at`, `from`, and `attempt` when the entry has an open attempt |
 
 The verbs act on this host's inbox only.
 The daemon-internal `shuttle context-mailbox put` and `pending` share their code with `inbox put` and `pending`; `context-mailbox put` has no wish flags and reads `--wake` as `turn: force`.
