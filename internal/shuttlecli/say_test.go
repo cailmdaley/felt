@@ -82,9 +82,31 @@ func TestVoicesMarksTheRolesHoldingThem(t *testing.T) {
 	}
 }
 
+func TestSayControls(t *testing.T) {
+	t.Parallel()
+	for _, action := range []string{"next", "stop"} {
+		t.Run(action, func(t *testing.T) {
+			env := testEnv(t)
+			var got map[string]any
+			serveDaemon(t, env, speechDaemon(t, "/api/v1/speak", 200, `{"held":[]}`, &got))
+			if _, _, err := executeIn(t, env, "", "say", "--"+action); err != nil {
+				t.Fatal(err)
+			}
+			if got["inbox"] != action {
+				t.Fatalf("request %v", got)
+			}
+		})
+	}
+	for _, args := range [][]string{{"say"}, {"say", "--held", "--play"}, {"say", "--play", "text"}, {"inbox"}} {
+		if _, _, err := executeIn(t, testEnv(t), "", args...); err == nil {
+			t.Fatalf("accepted %v", args)
+		}
+	}
+}
+
 const inboxState = `{"held":[{"fiber_id":"a/two","name":"Two card","n":2,"first":"one two three four five six seven eight nine"},{"fiber_id":"a/one","name":"One card","n":1,"first":"hello"}],"inbox":{"playing":false}}`
 
-func TestInboxListsHeldLinesByCard(t *testing.T) {
+func TestSayHeldListsLinesByCard(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -93,7 +115,7 @@ func TestInboxListsHeldLinesByCard(t *testing.T) {
 		}
 		_, _ = w.Write([]byte(inboxState))
 	}))
-	out, _, err := executeIn(t, env, "", "inbox")
+	out, _, err := executeIn(t, env, "", "say", "--held")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,12 +124,12 @@ func TestInboxListsHeldLinesByCard(t *testing.T) {
 	}
 }
 
-func TestInboxPlayOpensTheInbox(t *testing.T) {
+func TestSayPlayOpensTheInbox(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	var got map[string]any
 	serveDaemon(t, env, speechDaemon(t, "/api/v1/speak", 200, `{"held":[],"inbox":{"playing":true,"card":{"fiber_id":"a/two","name":"Two card"}}}`, &got))
-	out, _, err := executeIn(t, env, "", "inbox", "--play")
+	out, _, err := executeIn(t, env, "", "say", "--play")
 	if err != nil {
 		t.Fatal(err)
 	}
