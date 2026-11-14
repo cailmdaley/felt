@@ -264,7 +264,7 @@ is then given back to the human rather than closed.
 | `shuttle ls [query]` | Felt-compatible fiber listing/search with Shuttle's resolved facet in JSON output |
 | `shuttle show <id>` | Felt-compatible fiber read with Shuttle's resolved facet in JSON output |
 | `shuttle check` | Validate every `shuttle:` block in the selected store and report host drift |
-| `shuttle change <fiber> [--pr N \| --base B]` | Write a Git snapshot and optional reading story as a `.change.json` companion, or into the host cache with `--cache`; with neither `--pr` nor `--base`, the fiber's `shuttle.change` names the change (`--head`, `--repo`, `--story`, `--name`, `--check`, `--cache`, `--json`) |
+| `shuttle change <fiber> [--pr N \| --base B \| --list]` | Write a Git snapshot and optional reading story as a `.change.json` companion, or into the host cache with `--cache`; with neither `--pr` nor `--base`, the fiber's `shuttle.change` names the change; `--list` reads the PRs it follows from GitHub without baking (`--head`, `--repo`, `--story`, `--name`, `--check`, `--cache`, `--json`) |
 | `shuttle status [fiber]` | One line per shuttle-managed fiber, with remote state read from its owner; unavailable owners permit a labeled stale local copy, while authoritative not-found never does. `--all`/`--remote` include the complete owner inventory, including closed and rested constitutions absent from the local archive. Closed ones hidden from the table (`--closed` shows them; `--json` always includes them; `--all`, `--remote <name>` — mutually exclusive, `--include-orphans`); with a fiber, a detailed single-fiber report ending in a dispatch verdict: eligible on which host (status and host ownership, noting a missing `project_dir`), or the verb that makes it so. Its `--json` adds the board's `column` (`drafts`, `in_flight`, `awaiting_review`, `tempered`, `discarded`, `resting`, `roles`) and the review `verdict` (`tempered`, `discarded` or null), and for a rest that waits, `blocked_on` and the `until` name it reads as. A block naming an agent the registry does not know is flagged, `!` in the table with a line naming the fix, and `agent_problem` in `--json`; the daemon maps no other name to an agent, so such a block fails every dispatch until fixed |
 | `shuttle ps` | Live terminal worker sessions |
 | `shuttle snapshot` | Print the local daemon's state snapshot |
@@ -291,7 +291,7 @@ is then given back to the human rather than closed.
 `attach`, `session-name`, and fiber message targets require one exact match across
 configured stores; they refuse guessed paths and duplicate matches.
 
-### `shuttle change <fiber> [--pr N | --base B]`
+### `shuttle change <fiber> [--pr N | --base B | --list]`
 
 Bake a change on the host holding the fiber and worktree:
 
@@ -311,6 +311,7 @@ shuttle change review-task --base origin/main --head topic/change \
 | `--name NAME` | Companion filename stem, default slugified head ref, else fiber slug for detached `HEAD` |
 | `--check` | Validate and report without writing |
 | `--cache` | Write the bundle to `$XDG_CACHE_HOME/felt/changes/<fiber-uid>/<name>.change.json` (`~/.cache` when unset); read a story sidecar beside the fiber but write nothing there, and emit no file receipt |
+| `--list` | Read each PR in `shuttle.change.prs` through `gh pr view`, concurrently, and print it in the order named: number, title, head → base, state, checks and line counts, or gh's complaint for a PR it cannot read. Fetches no refs and writes nothing; `--json` prints the list (`[]` for none). Combines with none of `--pr`, `--base`, `--head`, `--story`, `--cache`, `--check` |
 | `--json`, `-j` | Output the validation and hunk-coverage report as JSON |
 
 The command resolves the supplied refs, finds their merge base and writes `<name>.change.json` atomically beside the fiber's Markdown file.
