@@ -2,6 +2,7 @@ package felt
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -394,6 +395,37 @@ func TestMoveSubtreePinsLinkTheMoveWouldCapture(t *testing.T) {
 	}
 	if !reflect.DeepEqual(result.Rewritten, []string{"a/sib"}) {
 		t.Fatalf("rewritten = %v", result.Rewritten)
+	}
+}
+
+// A journal can survive either side of the directory rename, before the
+// document gets its destination basename. Recovery must finish both steps.
+func TestMoveSubtreeRecoversLeafDocumentRename(t *testing.T) {
+	t.Parallel()
+	for _, directoryMoved := range []bool{false, true} {
+		t.Run(fmt.Sprint(directoryMoved), func(t *testing.T) {
+			t.Parallel()
+			s := newMoveFixture(t)
+			original := readFiberFile(t, s, "a/x")
+			if err := s.saveMove("a/x", "a/renamed", nil, nil); err != nil {
+				t.Fatal(err)
+			}
+			if directoryMoved {
+				if err := os.Rename(filepath.Join(s.Root(), "a/x"), filepath.Join(s.Root(), "a/renamed")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := s.MoveSubtree("a/x", "a/renamed"); err != nil {
+				t.Fatal(err)
+			}
+			if got := readFiberFile(t, s, "a/renamed"); got != original {
+				t.Fatalf("document changed: %s", got)
+			}
+			readFiberFile(t, s, "a/renamed/y")
+			if _, err := os.Stat(filepath.Join(s.Root(), "a/renamed/x.md")); !os.IsNotExist(err) {
+				t.Fatalf("old document remains: %v", err)
+			}
+		})
 	}
 }
 

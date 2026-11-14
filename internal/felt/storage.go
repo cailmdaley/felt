@@ -941,6 +941,14 @@ type MoveResult struct {
 // changes are written; a moved fiber's id is its location, not its content,
 // so the rename alone moves it.
 func (s *Storage) MoveSubtree(oldID, newID string) (*MoveResult, error) {
+	if path.Base(oldID) != path.Base(newID) {
+		companion := filepath.Join(s.root, filepath.FromSlash(oldID), path.Base(newID)+".md")
+		if _, err := os.Stat(companion); err == nil {
+			return nil, fmt.Errorf("destination document %s already exists as a companion file", companion)
+		} else if !os.IsNotExist(err) {
+			return nil, err
+		}
+	}
 	ensureGitignoreCoversSupportFiles(s.root)
 	unlock, err := LockFiberFile(s.moveJournalPath())
 	if err != nil {

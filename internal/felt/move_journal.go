@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 
@@ -89,7 +90,7 @@ func (s *Storage) AbandonMove() error {
 	return s.finishMove()
 }
 
-// An interrupted move is resumed by repeating the same nest command. A different
+// An interrupted move is resumed by repeating the same move command. A different
 // move is refused while its reference rewrites are pending.
 func (s *Storage) recoverMove(oldID, newID string) (*MoveResult, bool, error) {
 	data, err := os.ReadFile(s.moveJournalPath())
@@ -114,6 +115,18 @@ func (s *Storage) recoverMove(oldID, newID string) (*MoveResult, bool, error) {
 		}
 	} else if !os.IsNotExist(err) {
 		return nil, true, err
+	}
+	// A leaf change also changes the fiber document's basename. Keep this
+	// step replayable independently of the directory rename.
+	if path.Base(oldID) != path.Base(newID) {
+		oldDocument := filepath.Join(newRoot, path.Base(oldID)+".md")
+		if _, err := os.Stat(oldDocument); err == nil {
+			if err := os.Rename(oldDocument, s.Path(newID)); err != nil {
+				return nil, true, err
+			}
+		} else if !os.IsNotExist(err) {
+			return nil, true, err
+		}
 	}
 	s.forgetWalk()
 	result := &MoveResult{}
