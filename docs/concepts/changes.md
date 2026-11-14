@@ -54,7 +54,7 @@ The CLI runs Git directly and makes no model calls.
 Every constitution with a `shuttle.project_dir` has a **Change** page in its run of pages on the board, beside the fiber page.
 Opening it asks the owner daemon to bake the change (`POST /api/v1/fibers/<id>/change`), which runs `shuttle change <fiber> --cache --json`, then reads the bundle through `/file` like any other.
 Each opening bakes afresh, so the page shows the change as it stands.
-A bake writes nothing in the felt store: the bundle goes to `<user cache dir>/shuttle/changes/<fiber-uid>/<name>.change.json` (`~/Library/Caches` on macOS, `$XDG_CACHE_HOME` or `~/.cache` elsewhere), overwritten by the next bake.
+A bake writes nothing in the felt store: the bundle goes to `$XDG_CACHE_HOME/felt/changes/<fiber-uid>/<name>.change.json` (`~/.cache` when unset), overwritten by the next bake.
 An authored `<name>.story.json` beside the fiber is read, never written, and its relative images resolve against the fiber's directory.
 
 An optional `change` map in the `shuttle:` block names the change:

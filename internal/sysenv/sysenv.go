@@ -20,7 +20,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -179,22 +178,14 @@ func (e *Env) UserHomeDir() (string, error) {
 	return "", errors.New("$HOME is not defined")
 }
 
-// UserCacheDir is os.UserCacheDir read from e's variables.
-func (e *Env) UserCacheDir() (string, error) {
-	if e.live {
-		return os.UserCacheDir()
-	}
-	if runtime.GOOS != "darwin" {
-		if dir := e.Getenv("XDG_CACHE_HOME"); filepath.IsAbs(dir) {
-			return dir, nil
-		}
+// CacheDir is $XDG_CACHE_HOME, else ~/.cache, on every OS.
+func (e *Env) CacheDir() (string, error) {
+	if dir := e.Getenv("XDG_CACHE_HOME"); filepath.IsAbs(dir) {
+		return dir, nil
 	}
 	home, err := e.UserHomeDir()
 	if err != nil {
 		return "", err
-	}
-	if runtime.GOOS == "darwin" {
-		return filepath.Join(home, "Library", "Caches"), nil
 	}
 	return filepath.Join(home, ".cache"), nil
 }

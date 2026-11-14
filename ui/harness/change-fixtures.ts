@@ -79,7 +79,7 @@ export function addChangeFixtures(fixture: WorkspaceExample, now: number): void 
 export function bakeFixtureChange(fixture: WorkspaceExample, uid: string, owner: string) {
   const baked = plain as ChangeBundle
   const branch = uid === WORKSPACE_UID
-  const path = `/fixture-cache/shuttle/changes/${uid}/${branch ? 'calibrate-response' : 'main'}.change.json`
+  const path = `/fixture-cache/felt/changes/${uid}/${branch ? 'calibrate-response' : 'main'}.change.json`
   const change: ChangeBundle = branch
     ? { ...baked, title: 'Keep the family root visible', base_ref: 'origin/main', head_ref: 'calibrate-response',
       commits: [...baked.commits, { sha: 'c'.repeat(40), subject: 'Uncommitted changes', author: 'Repository contributor', time: baked.commits.at(-1)!.time }],

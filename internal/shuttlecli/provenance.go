@@ -731,13 +731,9 @@ func (a *app) transcriptCacheDir() (string, error) {
 	if dir := strings.TrimSpace(a.env.Getenv("SHUTTLE_TRANSCRIPT_CACHE_DIR")); dir != "" {
 		return dir, nil
 	}
-	base := strings.TrimSpace(a.env.Getenv("XDG_CACHE_HOME"))
-	if base == "" {
-		home, err := a.env.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("locating transcript cache: %w", err)
-		}
-		base = filepath.Join(home, ".cache")
+	base, err := a.env.CacheDir()
+	if err != nil {
+		return "", fmt.Errorf("locating transcript cache: %w", err)
 	}
 	return filepath.Join(base, "felt", "transcripts"), nil
 }

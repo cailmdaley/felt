@@ -100,12 +100,12 @@ describe('workspace file viewer hooks', () => {
     const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toBe('/api/v1/fibers/UID1/change')
     expect(JSON.parse(init.body as string)).toEqual({ origin: 'host-b' })
-    answer(new Response(JSON.stringify({ path: '/cache/shuttle/changes/UID1/topic.change.json', title: 'Topic', report: {} })))
+    answer(new Response(JSON.stringify({ path: '/cache/felt/changes/UID1/topic.change.json', title: 'Topic', report: {} })))
     await vi.waitFor(() => expect(watch.content).not.toBeNull())
     watch.content!(JSON.stringify({ version: 2, title: 'Topic', repo: { name: 'r', dir: '/r', forge_url: null }, base: 'a'.repeat(40), head: 'b'.repeat(40), base_ref: 'main', head_ref: 'topic', commits: [], files: [], story: null }))
     await vi.waitFor(() => expect(viewer.textContent).toBe('Topic'))
     const [, , identity, , , , , markdown] = changeRenderer.mount.mock.calls.at(-1)!
-    expect(identity).toBe('host-b:/cache/shuttle/changes/UID1/topic.change.json')
+    expect(identity).toBe('host-b:/cache/felt/changes/UID1/topic.change.json')
     expect(markdown).toEqual({ basePath: '/store/.felt/work/task', originId: 'host-b' })
     disposeFileViewer(viewer)
     expect(watch.stop).toHaveBeenCalled()

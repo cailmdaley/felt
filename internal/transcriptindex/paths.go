@@ -32,13 +32,9 @@ func DefaultPath(env *sysenv.Env) (string, error) {
 	if p := strings.TrimSpace(env.Getenv("SHUTTLE_TRANSCRIPT_INDEX")); p != "" {
 		return env.Resolve(p), nil
 	}
-	base := env.Getenv("XDG_CACHE_HOME")
-	if base == "" {
-		home, err := env.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		base = filepath.Join(home, ".cache")
+	base, err := env.CacheDir()
+	if err != nil {
+		return "", err
 	}
 	return env.Resolve(filepath.Join(base, "felt", "transcript-index.sqlite")), nil
 }

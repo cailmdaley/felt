@@ -131,11 +131,11 @@ count as coverage. --check validates and reports without writing a companion.
 			sidecar := filepath.Join(filepath.Dir(fiberPath), name+".story.json")
 			path := filepath.Join(filepath.Dir(fiberPath), name+".change.json")
 			if cache {
-				dir, err := a.env.UserCacheDir()
+				dir, err := a.env.CacheDir()
 				if err != nil {
 					return err
 				}
-				path = filepath.Join(dir, "shuttle", "changes", f.UID, name+".change.json")
+				path = filepath.Join(dir, "felt", "changes", f.UID, name+".change.json")
 			}
 			explicitStory := storyPath != ""
 			writeStory := explicitStory && !cache

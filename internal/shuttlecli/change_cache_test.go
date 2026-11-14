@@ -50,7 +50,7 @@ func TestChangeCommandBakesTheNamedChangeIntoTheCache(t *testing.T) {
 	seedFiber(t, st, "named", "", "open", map[string]any{"project_dir": repo, "host": "change-host"}, nil)
 	fiber, _ := st.Read("named")
 	fiberDir := filepath.Dir(st.Path("named"))
-	cacheDir, err := env.UserCacheDir()
+	cacheDir, err := env.CacheDir()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestChangeCommandBakesTheNamedChangeIntoTheCache(t *testing.T) {
 	before := besideFiber()
 
 	report, c := bake("named")
-	if report.Path != filepath.Join(cacheDir, "shuttle", "changes", fiber.UID, "topic.change.json") || report.Title != "Topic subject" {
+	if report.Path != filepath.Join(cacheDir, "felt", "changes", fiber.UID, "topic.change.json") || report.Title != "Topic subject" {
 		t.Fatalf("report: %+v", report)
 	}
 	if c.BaseRef != "origin/main" || c.HeadRef != "topic" || len(c.Commits) != 2 || c.Stats.Additions != 1 {

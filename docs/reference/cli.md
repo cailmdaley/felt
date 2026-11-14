@@ -307,7 +307,7 @@ shuttle change review-task --base origin/main --head topic/change \
 | `--story FILE` | Optional JSON reading story with chapters, stops, flags and role overrides |
 | `--name NAME` | Companion filename stem, default slugified head ref, else fiber slug for detached `HEAD` |
 | `--check` | Validate and report without writing |
-| `--cache` | Write the bundle to `<user cache dir>/shuttle/changes/<fiber-uid>/<name>.change.json`; read a story sidecar beside the fiber but write nothing there, and emit no file receipt |
+| `--cache` | Write the bundle to `$XDG_CACHE_HOME/felt/changes/<fiber-uid>/<name>.change.json` (`~/.cache` when unset); read a story sidecar beside the fiber but write nothing there, and emit no file receipt |
 | `--json`, `-j` | Output the validation and hunk-coverage report as JSON |
 
 The command resolves the supplied refs, finds their merge base and writes `<name>.change.json` atomically beside the fiber's Markdown file.
