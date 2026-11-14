@@ -161,17 +161,14 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 		if launching || !fresh {
 			return result, validationErr
 		}
-		var paths []string
+		var paths, members []string
 		for _, it := range due {
 			if it.entry.Wishes.Turn != "none" {
 				paths = append(paths, it.path)
+				members = append(members, it.entry.Request.MessageID)
 			}
 		}
-		attempt, err := claimBatch(paths, w.Address, false)
-		if err != nil {
-			return result, err
-		}
-		attempt.Launch = true
+		attempt := Attempt{BatchID: batchID(members), Conversation: w.Address, Epoch: w.Epoch, Members: members, OpenedAt: time.Now().UnixNano(), Launch: true}
 		bytes, err := json.Marshal(attempt)
 		if err != nil {
 			return result, err
@@ -189,7 +186,7 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 				return result, err
 			}
 		}
-		return Consumption{Action: "fresh", Members: attempt.Members}, validationErr
+		return Consumption{Action: "fresh", Members: attempt.Members}, nil
 	}
 	var selected []mailboxPendingItem
 	size, lifecycle := 0, false
@@ -229,7 +226,7 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 		return result, err
 	}
 	result, err = deliverConsumedBatch(ctx, env, root, host, w, &attempt, send)
-	return result, errors.Join(validationErr, err)
+	return result, err
 }
 
 func newConsumedAttempt(root string, w Worker, items []mailboxPendingItem) Attempt {
