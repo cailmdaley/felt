@@ -113,4 +113,18 @@ func TestConsumeBinaryCrashBeforeSend(t *testing.T) {
 	if injected.Load() != 1 {
 		t.Fatal("duplicate injection")
 	}
+
+	run("inbox", "put", "idle-fiber", "idle-entry", "Wait for idle", "--turn", "idle")
+	idleEpoch := strings.TrimSpace(run("context-mailbox", "receiver", "idle-fiber", "worker-A", "shuttle://host/pi/A"))
+	run("context-mailbox", "deliver", "idle-fiber", "shuttle://host/pi/A", idleEpoch)
+	if injected.Load() != 1 {
+		t.Fatal("compatibility deliver woke an idle-only entry")
+	}
+	if err := OfferMailbox(env, "pi", "A", "host", func(batch []Request) error { t.Fatalf("hook absorbed idle entry: %+v", batch); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	run("inbox", "consume", "idle-fiber", "shuttle://host/pi/A", idleEpoch, "--idle")
+	if injected.Load() != 2 {
+		t.Fatal("idle consume did not wake")
+	}
 }
