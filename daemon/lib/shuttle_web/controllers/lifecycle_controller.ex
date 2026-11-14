@@ -18,12 +18,19 @@ defmodule ShuttleWeb.LifecycleController do
   the daemon-owned `runtime:` keys. That is what lets a role sitting in
   Awaiting review (`status: closed`) be switched standing → oneshot, which a
   create verb refuses. `uninstall` remains for genuine removals.
+
+  A `resume` may carry the caller's copy of the constitution as `document` (the
+  raw fiber file text), with `carry: true` to insist on it. The owner adopts it
+  first (`Shuttle.CarriedDocument`): a copy this host already holds stands
+  unless `carry` is set, any other copy takes the caller's document, and
+  adopt's line comes before the resume's output. An adopt refusal stops the
+  resume. A fiber this host lacks answers 404 `fiber_not_found` either way.
   """
 
   use Phoenix.Controller, formats: [:json]
   import ShuttleWeb.RelayHelpers, only: [relay_text: 2, send_cli_result: 3]
 
-  alias Shuttle.{FeltStores, LifecycleService, OriginRouter, RemoteFiberRegistry}
+  alias Shuttle.{CarriedDocument, FeltStores, LifecycleService, OriginRouter, RemoteFiberRegistry}
 
   @allowed ~w(install pause rest resume repeat reshape close reopen set-model set-agent role seat set-outcome uninstall)
 
@@ -63,6 +70,7 @@ defmodule ShuttleWeb.LifecycleController do
 
   defp create_local(conn, params) do
     with {:ok, action} <- action(params),
+         {:ok, carried} <- carry(action, params),
          {:ok, output} <- execute(action, params) do
       # Every lifecycle verb here mutates the fiber doc (status/outcome/model/
       # shuttle block). Re-read it into the document cache so the kanban's
@@ -71,7 +79,7 @@ defmodule ShuttleWeb.LifecycleController do
 
       conn
       |> put_resp_content_type("text/plain")
-      |> send_resp(200, output)
+      |> send_resp(200, carried <> output)
     else
       {:error, :not_found, reason} ->
         conn
@@ -94,6 +102,11 @@ defmodule ShuttleWeb.LifecycleController do
   defp action(%{"action" => action}) when action in @allowed, do: {:ok, action}
   defp action(%{"action" => action}), do: {:error, "unknown lifecycle action #{inspect(action)}"}
   defp action(_), do: {:error, "missing lifecycle action"}
+
+  defp carry("resume", %{"fiber" => fiber} = params),
+    do: params |> CarriedDocument.adopt(fiber) |> clean_result()
+
+  defp carry(_action, _params), do: {:ok, ""}
 
   # Lifecycle transitions go through `Shuttle.LifecycleService`, which runs
   # Shuttle's writer inside the Poller, serialized with its state changes.

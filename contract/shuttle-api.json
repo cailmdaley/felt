@@ -873,6 +873,18 @@
                       ]
                     },
                     "description": "Images attached to user_message; the owner stores them on its host and names their paths in the message."
+                  },
+                  "document": {
+                    "type": "string",
+                    "description": "The caller's copy of the constitution, as raw fiber file text. Before dispatching, the owner adopts it: a copy the owner holds (its shuttle block names the owner) stands unless carry is true, and any other copy is replaced by this one. adopt's line returns as carried."
+                  },
+                  "carry": {
+                    "type": "boolean",
+                    "description": "With document: replaces the owner's copy even when the owner holds the constitution, keeping the owner's runtime."
+                  },
+                  "fiber_path": {
+                    "type": "string",
+                    "description": "With document: the exact namespace path of the fiber, consulted when fiber_id is a UID."
                   }
                 },
                 "required": [
@@ -911,7 +923,7 @@
             }
           },
           "404": {
-            "description": "The owner has no fiber with that id (reason fiber_not_found).",
+            "description": "The owner has no fiber with that id (reason fiber_not_found). A request carrying document also names error_code fiber_not_found and the owner's host.",
             "content": {
               "application/json": {
                 "schema": {
@@ -931,7 +943,7 @@
             }
           },
           "422": {
-            "description": "Nothing launched. reason is not_eligible (detail is homed_elsewhere, project_dir_missing, disabled, closed, no_shuttle_block or not_due_or_blocked), no_live_worker, arm_refused (needs names the field to supply), or a launch preflight's tag with message saying what to fix.",
+            "description": "Nothing launched. reason is not_eligible (detail is homed_elsewhere, project_dir_missing, disabled, closed, no_shuttle_block or not_due_or_blocked), no_live_worker, arm_refused (needs names the field to supply), or a launch preflight's tag with message saying what to fix, or adopt_refused when the owner refused a carried document (error says why).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1605,6 +1617,14 @@
                       "standing"
                     ],
                     "description": "For reshape: the target kind; absent or empty keeps the current kind."
+                  },
+                  "document": {
+                    "type": "string",
+                    "description": "For resume: the caller's copy of the constitution, as raw fiber file text. Before resuming, the owner adopts it: a copy the owner holds (its shuttle block names the owner) stands unless carry is true, and any other copy is replaced by this one. adopt's line precedes the resume's output; an adopt refusal is 422 and the resume does not run."
+                  },
+                  "carry": {
+                    "type": "boolean",
+                    "description": "For resume with document: replaces the owner's copy even when the owner holds the constitution, keeping the owner's runtime."
                   }
                 },
                 "required": [
@@ -2939,6 +2959,10 @@
                   "string",
                   "null"
                 ]
+              },
+              "carried": {
+                "type": "string",
+                "description": "With document: what the owner kept or took of the carried document, and what differed. Absent when adopt said nothing."
               }
             },
             "required": [

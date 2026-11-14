@@ -189,6 +189,12 @@ The error names the host and fiber identifier.
 Lifecycle identifiers are intrinsic ULIDs or exact enclosing-store-relative paths; an absent path never falls back to its last segment.
 The CLI forwards the ULID when the fiber has one.
 `resume` accepts `project_dir` in the same serialized write that arms the constitution.
+
+A `resume` may carry the caller's copy of the constitution: `document` (the raw fiber file text) and `carry: true` to insist on it.
+Before resuming, the owner runs `shuttle adopt <fiber> --document-file <file> [--carry]` in its Poller.
+A copy the owner holds (its `shuttle:` block names the owner) stands unless `carry` is set, and any other copy is replaced by the caller's document, keeping the owner's path and identity.
+adopt's line, which says what the owner kept or took and what differed, precedes the resume's output; an adopt refusal is 422 and the resume does not run.
+A request without `document` adopts nothing.
 No request runs Git or `felt sync`; remote creation writes the document through `POST /fiber/create`.
 
 ### Capture
@@ -202,7 +208,9 @@ To listen to a new topic, capture its card, then pin Listen to that card with `P
 ### Worker delivery
 
 `POST /dispatch` accepts `{fiber_id, force?, ad_hoc?, resume_mode?,
-user_message?, images?, project_dir?, release_launch_reservation?, existing_only?}` (plus `origin` to forward).
+user_message?, images?, project_dir?, release_launch_reservation?, existing_only?, document?, carry?, fiber_path?}` (plus `origin` to forward).
+`document`, `carry` and `fiber_path` carry the caller's copy of the constitution, which the owner adopts before dispatching as `/lifecycle` resume does.
+adopt's line returns as `carried` in the response body; an adopt refusal answers 422 `{dispatched: false, reason: "adopt_refused", fiber_id, error}` without dispatching, and a carried request for a fiber the owner lacks answers 404 with `reason` and `error_code` both `fiber_not_found`, plus `host`, `fiber` and `error`.
 `images` is up to 8 `{name, data}` objects, `data` base64 PNG, JPEG, GIF or WebP, 20 MB in all; the body may reach 32 MB.
 The owning daemon writes each to `<data dir>/images/<sha256>.<ext>` and appends one `[Image: <path>]` line per image to `user_message`; anything else answers 400 before a launch.
 With `existing_only: true`, only a `previous` message to a live worker is allowed.

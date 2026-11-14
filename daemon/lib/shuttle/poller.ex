@@ -730,7 +730,7 @@ defmodule Shuttle.Poller do
   end
 
   @doc """
-  Run Shuttle's `resume` / `rest` / `role` / `seat` writer (`Shuttle.LifecycleService.write/3`)
+  Run one of Shuttle's lifecycle writers (`Shuttle.LifecycleService.write/3`)
   inside the Poller, serialized with its state changes, then refresh the
   fiber's document-cache entry so the board reads the transition at once. A
   poll read in flight sees the old document or the new one, whose status and

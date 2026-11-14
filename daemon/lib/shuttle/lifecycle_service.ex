@@ -1,7 +1,7 @@
 defmodule Shuttle.LifecycleService do
   @moduledoc """
-  The daemon's serialized writers for `resume`, `reopen`, `close`, `pause`, `rest`, `role`, `seat`
-  and worker-question clearing.
+  The daemon's serialized writers for `resume`, `reopen`, `close`, `pause`, `rest`, `role`, `seat`,
+  worker-question clearing, and `adopt` (a carried document, `Shuttle.CarriedDocument`).
 
   `:clear_ask` shells `shuttle ask <fiber> --clear` through the same serialized
   write and document-cache refresh path as `resume`.
@@ -9,7 +9,8 @@ defmodule Shuttle.LifecycleService do
   Role and seat edits share the Poller's write boundary so they cannot overwrite a
   concurrent worker-exit lifecycle write.
 
-  Shuttle is their writer: `shuttle -C <store> <verb> <fiber> --local`.
+  Shuttle is their writer: `shuttle -C <store> <verb> <fiber> --local`; `adopt`,
+  which never routes, runs without `--local`.
   Resume arms the constitution; on a standing one it also concludes the run
   (`shuttle.runtime.handed_off_at = now`) in the same document write, so the
   poller never reads it armed without the stamp that rests it until its next
@@ -30,12 +31,12 @@ defmodule Shuttle.LifecycleService do
 
   alias Shuttle.{FeltStores, Poller}
 
-  @type verb :: :resume | :reopen | :close | :pause | :rest | :role | :seat | :clear_ask
+  @type verb :: :resume | :reopen | :close | :pause | :rest | :role | :seat | :clear_ask | :adopt
 
   @spec transition(verb(), String.t(), [String.t()], String.t() | nil) ::
           Shuttle.Felt.result() | {:error, :timeout, String.t()}
   def transition(verb, identifier, args \\ [], path_hint \\ nil)
-      when verb in [:resume, :reopen, :close, :pause, :rest, :role, :seat, :clear_ask] and
+      when verb in [:resume, :reopen, :close, :pause, :rest, :role, :seat, :clear_ask, :adopt] and
              is_binary(identifier) do
     with {:ok, %{store: felt_store, fiber_id: fiber_id} = resolved} <-
            FeltStores.resolve_request(identifier, path_hint) do
@@ -66,7 +67,7 @@ defmodule Shuttle.LifecycleService do
   end
 
   def write(verb, fiber_id, opts)
-      when verb in [:resume, :reopen, :close, :pause, :rest, :role, :seat] do
+      when verb in [:resume, :reopen, :close, :pause, :rest, :role, :seat, :adopt] do
     {args, opts} = Keyword.pop(opts, :args, [])
     Shuttle.CLI.run_lifecycle(Atom.to_string(verb), fiber_id, args, opts)
   end

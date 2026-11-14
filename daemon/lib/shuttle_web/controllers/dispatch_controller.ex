@@ -27,13 +27,23 @@ defmodule ShuttleWeb.DispatchController do
   (`shuttle reopen --project-dir`), and the worker starts in the directory the
   CLI saved. Nothing supplies a directory on the human's behalf: a forced start
   of a block without one answers 422 `arm_refused` with `needs: "project_dir"`.
+
+  A remote `shuttle dispatch` carries the caller's copy of the constitution as
+  `document` (the raw fiber file text, with `fiber_path` as its address hint),
+  and `carry: true` to insist on it. The owner adopts it before dispatching
+  (`Shuttle.CarriedDocument`): a copy this host already holds stands unless
+  `carry` is set, and any other copy takes the caller's document. adopt's
+  output rides back as `carried` when it said anything. A carried request for a
+  fiber this host lacks answers 404 `reason` and `error_code`
+  `"fiber_not_found"` with this host's id, and an adopt refusal answers 422
+  `adopt_refused` without dispatching.
   """
 
   use Phoenix.Controller, formats: [:json]
 
   import ShuttleWeb.RelayHelpers, only: [relay_json: 3]
 
-  alias Shuttle.OriginRouter
+  alias Shuttle.{CarriedDocument, OriginRouter}
 
   def create(conn, params) do
     case OriginRouter.route(Map.get(params, "origin")) do
@@ -60,6 +70,7 @@ defmodule ShuttleWeb.DispatchController do
     message = normalize_text(Map.get(params, "user_message"))
 
     with :ok <- if(is_nil(fiber_id), do: {:error, "fiber_id is required"}, else: :ok),
+         {:ok, carried} <- CarriedDocument.adopt(params, fiber_id),
          {:ok, message} <- Shuttle.DispatchImages.attach(message, Map.get(params, "images")) do
       result =
         Shuttle.Poller.dispatch_fiber(fiber_id,
@@ -74,11 +85,49 @@ defmodule ShuttleWeb.DispatchController do
         )
 
       {status, body} = ShuttleWeb.DispatchReply.render(fiber_id, result)
-      conn |> put_status(status) |> json(body)
+      conn |> put_status(status) |> json(with_carried(body, carried))
     else
-      {:error, reason} -> conn |> put_status(400) |> json(%{error: reason})
+      {:error, :not_found, reason} ->
+        conn
+        |> put_status(404)
+        |> json(%{
+          dispatched: false,
+          reason: "fiber_not_found",
+          fiber_id: fiber_id,
+          error_code: "fiber_not_found",
+          host: Shuttle.Poller.own_host_id(),
+          fiber: fiber_id,
+          error: reason
+        })
+
+      {:error, kind, reason} when kind in [:timeout, :unavailable] ->
+        conn
+        |> put_status(503)
+        |> json(%{
+          dispatched: false,
+          reason: "adopt_uncertain",
+          fiber_id: fiber_id,
+          error: reason,
+          retryable: true
+        })
+
+      {:command_error, status, output} ->
+        conn
+        |> put_status(422)
+        |> json(%{
+          dispatched: false,
+          reason: "adopt_refused",
+          fiber_id: fiber_id,
+          error: "shuttle exited #{status}: #{String.trim(output)}"
+        })
+
+      {:error, reason} ->
+        conn |> put_status(400) |> json(%{error: reason})
     end
   end
+
+  defp with_carried(body, ""), do: body
+  defp with_carried(body, carried), do: Map.put(body, :carried, String.trim_trailing(carried))
 
   defp dispatch_failed(name, reason),
     do: %{dispatched: false, reason: "forward_failed", origin: name, error: inspect(reason)}
