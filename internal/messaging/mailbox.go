@@ -91,9 +91,9 @@ func HookPIDIsAncestor(pid int) bool {
 	return false
 }
 
-// mailboxEntry is one stored inbox entry. Its request keeps the wake fields
-// that match its turn wish, so a build that predates wishes reads it the same
-// way.
+// mailboxEntry is one stored inbox entry. Its request carries the wake fields
+// that its inbox's readers act on (see Enqueue); a build that predates wishes
+// reads those fields and ignores the wishes, not_before included.
 type mailboxEntry struct {
 	Request  Request `json:"request"`
 	Wishes   Wishes  `json:"wishes"`
@@ -317,23 +317,7 @@ func MailboxState(env *sysenv.Env, harness, id, host string) (string, error) {
 
 func queueMailbox(env *sysenv.Env, a Address, r Request) (Receipt, error) {
 	transport := a.Harness + "-hook"
-	if a.Harness != "claude" && a.Harness != "codex" && a.Harness != "pi" {
-		return rejected(r, transport, "harness has no Shuttle message hook"), errCode("unavailable", "harness has no Shuttle message hook")
-	}
-	if reason := mailboxUnavailable(env, a.Harness, a.ID, a.Host); reason != "" {
-		return rejected(r, transport, reason), errCode("unavailable", "%s", reason)
-	}
-	if r.Wake {
-		return rejected(r, transport, "hook mailboxes cannot wake a session"), errCode("wake_required", "hook mailboxes cannot wake a session")
-	}
-	if requestExpired(r, time.Now()) {
-		return rejected(r, transport, "thread notice expired"), errCode("expired", "thread notice is outside the 14-day retention window")
-	}
-	address, err := FormatAddress(a.Host, a.Harness, a.ID)
-	if err == nil {
-		err = Enqueue(env, InboxEntry{Address: address, Request: r})
-	}
-	if err != nil {
+	if err := Enqueue(env, InboxEntry{Address: r.Address, Request: r}); err != nil {
 		return rejected(r, transport, err.Error()), err
 	}
 	detail := "queued for the session's next prompt or tool hook; no turn started"

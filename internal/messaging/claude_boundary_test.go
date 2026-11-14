@@ -10,20 +10,21 @@ import (
 	"time"
 )
 
-func TestClaudeQueueReplayIsQueuedOnceWithoutNativeWrite(t *testing.T) {
+func TestClaudeQueuePublicationErrorDoesNotChangeTransports(t *testing.T) {
 	env := testEnv(t)
 	req, sent := nativeClaudeFixture(t, env, func(frame map[string]any, f *os.File) { nativeRows(frame, f, false) })
 	req.ContextIfBusy = true
 	_ = SetMailboxState(env, "claude", "session", "host", "working")
 	queued := req
 	queued.Wake = false
-	// A published entry with no sender receipt models a replay after a lost receipt.
+	// A published entry with no sender receipt models an EEXIST replay or a
+	// post-publication durability failure, without needing an NFS mount.
 	if err := Enqueue(env, InboxEntry{Address: req.Address, Request: queued}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := Send(context.Background(), env, "host", req)
-	if err != nil || got.Status != StatusQueued || sent.Load() != 0 {
-		t.Fatalf("replay = %+v %v writes=%d", got, err, sent.Load())
+	if ErrorCode(err) != "ambiguous_delivery" || got.Status != StatusUnknown || sent.Load() != 0 {
+		t.Fatalf("publication error caused a native duplicate: %+v %v writes=%d", got, err, sent.Load())
 	}
 	offered := 0
 	if err := OfferMailbox(env, "claude", "session", "host", func(batch []Request) error { offered += len(batch); return nil }); err != nil {
@@ -31,22 +32,6 @@ func TestClaudeQueueReplayIsQueuedOnceWithoutNativeWrite(t *testing.T) {
 	}
 	if offered != 1 || sent.Load() != 0 {
 		t.Fatalf("hook=%d native=%d", offered, sent.Load())
-	}
-}
-
-func TestClaudeQueuePublicationErrorDoesNotChangeTransports(t *testing.T) {
-	env := testEnv(t)
-	req, sent := nativeClaudeFixture(t, env, func(frame map[string]any, f *os.File) { nativeRows(frame, f, false) })
-	req.ContextIfBusy = true
-	_ = SetMailboxState(env, "claude", "session", "host", "working")
-	// A file where the pending directory belongs fails publication after the
-	// queue was chosen, as a filesystem durability error does.
-	if err := os.WriteFile(filepath.Join(mailboxDir(env, "claude", "session"), "pending"), nil, 0600); err != nil {
-		t.Fatal(err)
-	}
-	got, err := Send(context.Background(), env, "host", req)
-	if ErrorCode(err) != "ambiguous_delivery" || got.Status != StatusUnknown || sent.Load() != 0 {
-		t.Fatalf("publication error caused a native duplicate: %+v %v writes=%d", got, err, sent.Load())
 	}
 }
 

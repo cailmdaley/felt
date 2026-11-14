@@ -29,9 +29,10 @@ func (a *app) inboxVerbs() []*cobra.Command {
 		Use:   "put <address> <message-id> <text>",
 		Short: "Enqueue an entry in an address's inbox on this host",
 		Long: `Enqueue an entry in the inbox of a fiber key or a session's shuttle:// address
-on this host. An id already in the inbox is a successful no-op when its content
-matches, or whatever its content with --derived; otherwise it is a
-message_id_conflict. An unknown wish value is refused.`,
+on this host. In a fiber's inbox, an id already there is a successful no-op
+when its content and wishes match, or whatever they are with --derived;
+otherwise it is a message_id_conflict. A session's inbox refuses an id already
+pending, and a turn of force or idle. An unknown wish value is refused.`,
 		Args: cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := messaging.ValidateSender(from); err != nil {

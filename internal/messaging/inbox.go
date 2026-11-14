@@ -48,16 +48,16 @@ type InboxEntry struct {
 	Derived bool
 }
 
-// legacyTurn reads the turn wish from a request's wake fields, which entries
-// carry so that every build can read them.
+// legacyTurn reads the turn wish from a request's wake fields, for an entry
+// written without wishes.
 func legacyTurn(r Request) string {
 	switch {
 	case r.IdleOnly:
 		return "idle"
-	case r.Wake:
-		return "force"
 	case r.ContextIfBusy:
 		return "ask"
+	case r.Wake:
+		return "force"
 	}
 	return "none"
 }
@@ -146,29 +146,23 @@ func inboxRoot(env *sysenv.Env, address string) (string, error) {
 // session needs that session's live hook registration on this host; an entry
 // for a fiber is kept whether or not the fiber has a worker.
 //
-// An id already pending, claimed or offered is a successful no-op when the
-// content matches or the entry is Derived; otherwise it is a
-// message_id_conflict. A thread notice past its retention is not stored.
+// The stored request carries only the wake fields its inbox's readers act on:
+// a fiber's force sets wake, and a Claude session's ask sets context_if_busy.
+// A session inbox cannot start a turn, so it refuses force and idle.
+//
+// In a fiber inbox, an id already pending, claimed or offered is a successful
+// no-op when the content and wishes match or the entry is Derived; otherwise it
+// is a message_id_conflict. A session inbox refuses an id already pending. A
+// thread notice past its retention is not stored for a fiber and refused as
+// expired for a session.
 func Enqueue(env *sysenv.Env, e InboxEntry) error {
-	r, w := e.Request, e.Wishes
+	r, w := e.Request, e.Wishes.withDefaults(e.Request)
 	session := strings.HasPrefix(e.Address, "shuttle://")
 	if r.MessageID == "" || len(r.Text) > 64<<10 || (!session && r.Text == "") {
 		return errCode("invalid_request", "an inbox entry requires a message id and text (at most 64 KiB)")
 	}
-	if legacy := legacyTurn(r); w.Turn != "" && legacy != "none" && legacy != w.Turn {
-		return errCode("invalid_request", "turn %q conflicts with the request's %s wake fields", w.Turn, legacy)
-	}
-	w = w.withDefaults(r)
 	if err := w.validate(); err != nil {
 		return err
-	}
-	switch w.Turn {
-	case "force":
-		r.Wake = true
-	case "ask":
-		r.ContextIfBusy = true
-	case "idle":
-		r.IdleOnly = true
 	}
 	if w.NotBefore != "" {
 		t, _ := time.Parse(time.RFC3339, w.NotBefore)
@@ -178,6 +172,7 @@ func Enqueue(env *sysenv.Env, e InboxEntry) error {
 	if err != nil {
 		return err
 	}
+	r.Wake, r.ContextIfBusy, r.IdleOnly = false, false, false
 	if session {
 		a, _ := ParseAddress(e.Address)
 		if a.Harness != "claude" && a.Harness != "codex" && a.Harness != "pi" {
@@ -186,8 +181,17 @@ func Enqueue(env *sysenv.Env, e InboxEntry) error {
 		if reason := mailboxUnavailable(env, a.Harness, a.ID, a.Host); reason != "" {
 			return errCode("unavailable", "%s", reason)
 		}
+		if w.Turn == "force" || w.Turn == "idle" {
+			return errCode("wake_required", "hook mailboxes cannot wake a session")
+		}
+		if requestExpired(r, time.Now()) {
+			return errCode("expired", "thread notice is outside the 14-day retention window")
+		}
 		r.Address = e.Address
+		r.ContextIfBusy = w.Turn == "ask" && a.Harness == "claude"
+		return enqueueMailbox(root, mailboxEntry{Request: r, Wishes: w, QueuedAt: time.Now().UnixNano()})
 	}
+	r.Wake = w.Turn == "force"
 	if err := ensureDir(root, 0700); err != nil {
 		return err
 	}
@@ -200,7 +204,7 @@ func Enqueue(env *sysenv.Env, e InboxEntry) error {
 		return err
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-	for _, state := range []string{"pending", "fallback", "offered"} {
+	for _, state := range []string{"pending", "offered"} {
 		stored, err := readFiberMailboxEntry(filepath.Join(root, state, mailboxKey(r.MessageID)+".json"))
 		if errors.Is(err, os.ErrNotExist) {
 			continue
@@ -208,7 +212,7 @@ func Enqueue(env *sysenv.Env, e InboxEntry) error {
 		if err != nil {
 			return err
 		}
-		if !e.Derived && fiberRequestIdentity(stored.Request) != fiberRequestIdentity(r) {
+		if !e.Derived && (fiberRequestIdentity(stored.Request) != fiberRequestIdentity(r) || !sameWishes(stored.Wishes, w, e.Wishes.Turn != "")) {
 			return errCode("message_id_conflict", "message id already names a different inbox entry")
 		}
 		return nil
@@ -220,6 +224,16 @@ func Enqueue(env *sysenv.Env, e InboxEntry) error {
 		return errCode("invalid_request", "thread signal requires uid, verb, stamp and owner")
 	}
 	return enqueueMailbox(root, mailboxEntry{Request: r, Wishes: w, QueuedAt: time.Now().UnixNano()})
+}
+
+// sameWishes compares two entries' wishes. A turn the caller left unsaid
+// follows the request's wake, which is routing and not content, so it counts
+// only when stated.
+func sameWishes(stored, w Wishes, turnStated bool) bool {
+	if !turnStated {
+		stored.Turn, w.Turn = "", ""
+	}
+	return stored == w
 }
 
 // PendingCount counts the entries an address's inbox holds that no worker has
