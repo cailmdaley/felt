@@ -381,7 +381,7 @@ func deliverFiberContextItemWith(ctx context.Context, env *sysenv.Env, fiber, ho
 }
 
 // freezeLegacyAttempt pins the old transport id and reconstructs the caveat
-// variant from the receipt's content hash when the entry predates payloads.
+// variant from the receipt's content hash when the payload is absent.
 func freezeLegacyAttempt(env *sysenv.Env, entry mailboxEntry, request Request) (mailboxEntry, error) {
 	request.ThreadSignal = nil
 	payload := attemptRequest(request, entry)

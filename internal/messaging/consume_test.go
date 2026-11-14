@@ -115,7 +115,7 @@ func TestConsumeFrozenBatchAcrossCrash(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			a := newConsumedAttempt(root, w, items)
+			a := newConsumedAttempt(w, items)
 			if err := pinConsumedBatch(root, &a); err != nil {
 				t.Fatal(err)
 			}
@@ -158,7 +158,7 @@ func TestConsumePartialClaimAndClose(t *testing.T) {
 			putWish(t, env, "two", "ask", "hold")
 			root := mailboxDir(env, "fiber", "fiber")
 			items, _ := pendingItems(root)
-			a := newConsumedAttempt(root, w, items)
+			a := newConsumedAttempt(w, items)
 			if err := pinConsumedBatch(root, &a); err != nil {
 				t.Fatal(err)
 			}

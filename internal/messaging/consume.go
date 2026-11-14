@@ -106,7 +106,7 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 			continue
 		}
 		if it.entry.Attempt.Variant == "" {
-			// Only pre-batch attempts use the single-entry transport identity.
+			// Single-entry attempts without a variant keep their transport identity.
 			checked, current, err := validateMailboxItem(root, it, func(c context.Context, r Request) (bool, error) { return currentThreadSignalWithBackoff(c, env, r) })
 			if err != nil || !current {
 				return result, err
@@ -119,9 +119,7 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 		}
 		return deliverConsumedBatch(ctx, env, root, host, w, it.entry.Attempt, send)
 	}
-	var due []mailboxPendingItem
-	var validationErr error
-	force, asking, fresh := false, false, false
+	var candidates []mailboxPendingItem
 	for _, it := range items {
 		if !it.entry.due(time.Now()) {
 			continue
@@ -132,15 +130,11 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 			}
 			continue
 		}
-		var current bool
-		it, current, err = validateMailboxItem(root, it, func(c context.Context, r Request) (bool, error) { return currentThreadSignalWithBackoff(c, env, r) })
-		if err != nil {
-			validationErr = errors.Join(validationErr, err)
-			continue
-		}
-		if !current {
-			continue
-		}
+		candidates = append(candidates, it)
+	}
+	due, validationErr := validateMailboxItems(root, candidates, func(c context.Context, r Request) (bool, error) { return currentThreadSignalWithBackoff(c, env, r) })
+	force, asking, fresh := false, false, false
+	for _, it := range due {
 		if it.entry.Attempt.open() && it.entry.Attempt.Launch && it.entry.Attempt.Conversation == w.Address && it.entry.Attempt.Epoch == w.Epoch && w.Costly {
 			launching = true
 		}
@@ -152,7 +146,6 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 			asking = true
 			fresh = fresh || it.entry.Wishes.IfCostly == "fresh"
 		}
-		due = append(due, it)
 	}
 	if !force && (!asking || !w.Idle) {
 		return result, validationErr
@@ -221,7 +214,7 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	if len(selected) == 0 {
 		return result, validationErr
 	}
-	attempt := newConsumedAttempt(root, w, selected)
+	attempt := newConsumedAttempt(w, selected)
 	if err := pinConsumedBatch(root, &attempt); err != nil {
 		return result, err
 	}
@@ -229,7 +222,7 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	return result, err
 }
 
-func newConsumedAttempt(root string, w Worker, items []mailboxPendingItem) Attempt {
+func newConsumedAttempt(w Worker, items []mailboxPendingItem) Attempt {
 	members := make([]string, len(items))
 	texts := make([]string, len(items))
 	repeat := false
@@ -251,8 +244,8 @@ func newConsumedAttempt(root string, w Worker, items []mailboxPendingItem) Attem
 	return a
 }
 
-// pinConsumedBatch repairs a partial multi-file claim from its first durable
-// member. The full payload and membership are stored before sending anything.
+// pinConsumedBatch records the complete payload and membership before pinning
+// member files. Its manifest repairs partial multi-file claims after a crash.
 func pinConsumedBatch(root string, a *Attempt) error {
 	bytes, err := json.Marshal(a)
 	if err != nil {

@@ -15,11 +15,12 @@ import (
 type Attempt struct {
 	// Payload pins the exact batch emission and its transport identity.
 	Payload *Request `json:"payload,omitempty"`
-	// BaseText includes the captured labels and staleness caveat, without a retry warning.
+	// BaseText is the captured text, including any labels and staleness caveat,
+	// without a retry warning.
 	BaseText string `json:"base_text,omitempty"`
 	// Launch reserves a fresh-session request without pinning hook context.
 	Launch bool `json:"launch,omitempty"`
-	// Variant separates warning text on a newly rolled single-entry attempt.
+	// Variant names the payload's plain, retry-1 or possible-repeat framing.
 	Variant string `json:"variant,omitempty"`
 	// BatchID is the hash of the batch's sorted member ids, so a retry of the
 	// same batch carries the same id.
@@ -47,7 +48,7 @@ type Attempt struct {
 
 // liveAttemptRetryAfter is how long direct delivery keeps an attempt open
 // while its conversation is alive and the transport reports the outcome
-// unknown, before it closes it ambiguous and tries once more.
+// unknown, before it makes one warning-marked retry.
 const liveAttemptRetryAfter = 5 * time.Minute
 
 const (
@@ -86,8 +87,8 @@ func (e *mailboxEntry) openAttempt(conversation string, epoch uint64, members []
 	}
 }
 
-// closeAttempt records outcome. Released and ambiguous unpin the entry, and
-// ambiguous marks its next emission "Possible repeat".
+// closeAttempt records outcome. Released and ambiguous unpin the entry.
+// Ambiguous outcomes and rejected retries preserve possible-repeat evidence.
 func (e *mailboxEntry) closeAttempt(outcome string) {
 	if e.Attempt != nil {
 		e.Attempt.Outcome = outcome
@@ -100,14 +101,10 @@ func (e *mailboxEntry) closeAttempt(outcome string) {
 	}
 }
 
-// claimBatch opens one attempt to conversation for the pending entries at
-// paths, oldest first, which form its batch, and returns it. The hook offer
-// and direct fiber delivery both take entries through it while holding the
-// inbox lock, which is what keeps two readers from taking one entry; the
-// claim records which batch and conversation took it. Direct delivery pins
-// its attempt; a hook's is not pinned, so an entry whose hook died after the
-// claim is offered again like any pending entry. An unpinned claim keeps the
-// file's modification time, from which offered/ retention runs.
+// claimBatch opens an attempt for a hook batch or a single-entry compatibility
+// delivery, under the inbox lock. The batch consumer pins through its durable
+// manifest instead. Unpinned hook claims preserve the file's modification time,
+// from which offered/ retention runs; an unfinished hook claim is ambiguous.
 func claimBatch(paths []string, conversation string, pin bool) (Attempt, error) {
 	entries := make([]mailboxEntry, len(paths))
 	members := make([]string, len(paths))

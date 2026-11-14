@@ -457,61 +457,7 @@ func offerMailboxWithAck(dir, conversation string, accepts func(Request) bool, e
 		items = append(items, mailboxPendingItem{path, entry})
 	}
 	sortPendingItems(items)
-	candidates := items
-	var validationErr error
-	if current != nil {
-		validationCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		type validation struct {
-			current bool
-			err     error
-		}
-		checks := make([]validation, len(candidates))
-		var wg sync.WaitGroup
-		for i, candidate := range candidates {
-			wg.Add(1)
-			go func(i int, request Request) {
-				defer wg.Done()
-				checks[i].current, checks[i].err = current(validationCtx, request)
-			}(i, candidate.entry.Request)
-		}
-		wg.Wait()
-		cancel()
-		items = []mailboxPendingItem{}
-		for i, it := range candidates {
-			isCurrent, err := checks[i].current, checks[i].err
-			if err != nil {
-				var skew threadSignalSkewError
-				if errors.As(err, &skew) {
-					it.entry.Request.Text = withStalenessCaveat(it.entry.Request.Text)
-					items = append(items, it)
-					continue
-				}
-				if validationErr == nil {
-					validationErr = err
-				}
-				continue
-			}
-			if !isCurrent {
-				offeredDir := filepath.Join(dir, "offered")
-				if err := ensureDir(offeredDir, 0700); err != nil {
-					return err
-				}
-				if err := os.Rename(it.path, filepath.Join(offeredDir, filepath.Base(it.path))); err != nil {
-					return err
-				}
-				if err := syncDir(filepath.Join(dir, "pending")); err != nil {
-					return err
-				}
-				if err := syncDir(offeredDir); err != nil {
-					return err
-				}
-				continue
-			}
-			items = append(items, it)
-		}
-	} else {
-		items = candidates
-	}
+	items, validationErr := validateMailboxItems(dir, items, current)
 	// Only accepted requests consume the output window. Unverifiable owners
 	// retain their entries without preventing newer, healthy notices from flowing.
 	selected := []mailboxPendingItem{}
@@ -641,6 +587,39 @@ func mailboxEntryExpired(entry mailboxEntry, now time.Time) bool {
 	}
 	const earliestRecordedQueue = int64(946684800000000000) // 2000-01-01 UTC
 	return entry.QueuedAt >= earliestRecordedQueue && now.Sub(time.Unix(0, entry.QueuedAt)) > mailboxRetention
+}
+
+// validateMailboxItems checks independent sources concurrently so an unavailable
+// owner consumes one validation window, not one window per pending entry.
+func validateMailboxItems(dir string, candidates []mailboxPendingItem, current func(context.Context, Request) (bool, error)) ([]mailboxPendingItem, error) {
+	if current == nil {
+		return candidates, nil
+	}
+	type check struct {
+		item    mailboxPendingItem
+		current bool
+		err     error
+	}
+	checks := make([]check, len(candidates))
+	var wg sync.WaitGroup
+	for i, item := range candidates {
+		wg.Add(1)
+		go func(i int, item mailboxPendingItem) {
+			defer wg.Done()
+			checks[i].item, checks[i].current, checks[i].err = validateMailboxItem(dir, item, current)
+		}(i, item)
+	}
+	wg.Wait()
+	var items []mailboxPendingItem
+	var err error
+	for _, check := range checks {
+		if check.err != nil {
+			err = errors.Join(err, check.err)
+		} else if check.current {
+			items = append(items, check.item)
+		}
+	}
+	return items, err
 }
 
 func validateMailboxItem(dir string, it mailboxPendingItem, current func(context.Context, Request) (bool, error)) (mailboxPendingItem, bool, error) {
