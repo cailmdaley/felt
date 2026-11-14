@@ -91,6 +91,10 @@ have intrinsic IDs and no host owner. A task's top-level `role` names its office
 marks whether the constitution is a seat of that office.
 Synchronizing a constitution does not change its `shuttle.host` dispatch gate.
 Armed cross-host creation writes through the owner daemon; dispatch never depends on archive synchronization.
+A remote `shuttle resume` or `shuttle dispatch` carries the caller's copy of the fiber, and the owner runs `shuttle adopt` on it before the verb.
+The owner holds a constitution when its copy has a `shuttle:` block naming the owner; a held copy stands, because the caller's mirror may lag the owner's worker-written state, unless the caller passes `--carry`.
+A copy with no block, or a block for another host, takes the caller's document, and an owner without the fiber has it created from the caller's copy.
+The command output says so whenever the two copies differ.
 The daemon never runs Git or `felt sync`, and a missing document returns not-found naming its host and identifier.
 Remote-owned live state comes from the owner daemon. An unreachable-owner
 fallback to an archive copy is explicitly marked stale.

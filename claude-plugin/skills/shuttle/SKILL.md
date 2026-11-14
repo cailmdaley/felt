@@ -47,6 +47,7 @@ Diagonal agrees to 3%. `validate/offdiag.py` loads the mocks; plotting is unfini
 - **`tapestry.html`** — beside the fiber: one page describing the whole constitution as it stands, never the latest stretch. It opens on one screen, drawn in code, that shows at a glance what the work is, where it stands and what needs the human; everything else sits below. Its form follows the work: findings with their figures, the talk's slides themselves, embedded PDFs for a paper review. Rewritten whole, never appended ([references/tapestry.md](references/tapestry.md)).
 
 Armed cross-host creation and control go through the owning daemon's existing routes.
+A remote `resume` or `dispatch` carries the caller's document; the owner's copy stands when it already holds the constitution, and `--carry` overrides.
 The owner writes its store directly; an unreachable owner fails without a local half-copy.
 `--disabled` supports local drafting, and `felt sync` remains explicit archive synchronization, outside daemon execution.
 
