@@ -458,7 +458,13 @@ defmodule Shuttle.Voice do
     {reply, snapshot} =
       case result do
         {:ok, next} ->
-          snapshot = %{next.snapshot | target: state.target}
+          # A target routed while the task ran keeps the coldness computed
+          # for it, so the snapshot never pairs the new card with the old one's.
+          snapshot =
+            if next.snapshot.target == state.target,
+              do: next.snapshot,
+              else: %{next.snapshot | target: state.target, cold: state.snapshot.cold}
+
           {{:ok, snapshot}, snapshot}
 
         :timeout ->

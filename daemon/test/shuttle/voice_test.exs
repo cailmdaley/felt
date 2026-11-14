@@ -245,6 +245,51 @@ defmodule Shuttle.VoiceTest do
     assert {:ok, %{destination: %{"fiber_id" => "a", "cold" => true}}} = Voice.update(%{})
   end
 
+  test "a switch during reconciliation keeps the coldness judged for the card it names", c do
+    stop_supervised!(Voice)
+    parent = self()
+
+    reconcile = fn _enabled, _opts ->
+      send(parent, {:reconciling, self()})
+
+      receive do
+        :go -> {:ok, Agent.get(c.observed, & &1)}
+      end
+    end
+
+    Env.start_scoped!({Voice, Keyword.put(c.opts, :reconcile, reconcile)})
+
+    warm = %{
+      fiber: %{"id" => "a", "shuttle" => %{"host" => "test-host"}},
+      runtime: %{phase: "waiting"}
+    }
+
+    Env.put_app_env(:voice_target_entries, fn -> [warm] end)
+    assert {:ok, %{destination: nil}} = release(Task.async(fn -> Voice.update(%{"enabled" => true}) end))
+    assert {:ok, %{destination: %{"fiber_id" => "a", "cold" => false}}} = Voice.target(%{"fiber_id" => "a"})
+
+    # The tick judges a as warm; b is routed before it finishes.
+    update = Task.async(fn -> Voice.update(%{}) end)
+    assert_receive {:reconciling, task}
+
+    assert {:ok, %{destination: %{"fiber_id" => "b", "cold" => true}}} =
+             Voice.target(%{"fiber_id" => "b"})
+
+    send(task, :go)
+    assert {:ok, %{destination: %{"fiber_id" => "b", "cold" => true}}} = release(update)
+  end
+
+  # Lets every reconciliation queued ahead of `update` run, then returns its reply.
+  defp release(update) do
+    receive do
+      {:reconciling, task} ->
+        send(task, :go)
+        release(update)
+    after
+      100 -> Task.await(update)
+    end
+  end
+
   test "partial words are a display-only preview pinned to the target they began under",
        c do
     transcript = Path.join(c.root, "voice.txt")
