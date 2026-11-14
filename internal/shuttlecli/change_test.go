@@ -196,7 +196,7 @@ func TestChangeCommandRealGit(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatal(err)
 	}
-	if report.Valid || len(report.Errors) != 2 || len(report.Stale) != 1 || report.Covered != 0 || len(report.Uncovered) != 1 {
+	if report.Valid || len(report.Errors) != 3 || len(report.Stale) != 0 || report.Covered != 0 || len(report.Uncovered) != 1 {
 		t.Fatalf("invalid report: %+v", report)
 	}
 	unchanged, err := os.ReadFile(bundlePath)
@@ -218,8 +218,18 @@ func TestChangeCommandRealGit(t *testing.T) {
 	}
 	// Unsupported stop ranges survive baking, but fail an iteration check.
 	put(storyPath, `{"overview":"Keep the explanation","chapters":[{"id":"kept","stops":[{"file":"main.go","from":90,"to":91,"importance":"context","note":"Keep this note"}]}]}`)
+	if _, err := run("review", "--base", base, "--story", storyPath); err == nil {
+		t.Fatal("explicit invalid range was accepted as drift")
+	}
+	put(filepath.Join(repo, "main.go"), strings.Repeat("line\n", 100))
+	git("commit", "-am", "support authored range")
 	if _, err := run("review", "--base", base, "--story", storyPath); err != nil {
 		t.Fatal(err)
+	}
+	put(filepath.Join(repo, "main.go"), "line\n")
+	git("commit", "-am", "remove authored range")
+	if out, err := run("review", "--base", base); err != nil || !strings.Contains(out, "Stale: chapters[0].stops[0]") {
+		t.Fatalf("stale bake: %s: %v", out, err)
 	}
 	staleBytes, _ := os.ReadFile(bundlePath)
 	if err := json.Unmarshal(staleBytes, &c); err != nil {
@@ -229,7 +239,7 @@ func TestChangeCommandRealGit(t *testing.T) {
 	if stop.Stale == "" || stop.Note != "Keep this note" || len(stop.Hunks) != 0 {
 		t.Fatalf("stale stop: %+v", stop)
 	}
-	if _, err := run("review", "--base", base, "--check"); err == nil || !strings.Contains(err.Error(), "stale stops") {
+	if _, err := run("review", "--base", base, "--check"); err == nil || !strings.Contains(err.Error(), "stale story references") {
 		t.Fatalf("stale check: %v", err)
 	}
 	put(filepath.Join(repo, "main.go"), strings.Repeat("line\n", 100))

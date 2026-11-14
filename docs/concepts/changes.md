@@ -33,7 +33,12 @@ Binary, mode-only and pure-rename changes have visible metadata markers even wit
 
 The authored story lives beside its bundle as `<name>.story.json`. `--story path` copies that source into the sidecar on a successful bake; a bake without `--story` automatically reuses it. `--check` writes neither file.
 
-A stop is stale when its file is absent or its range no longer overlaps a diff hunk on the selected side. It remains in the story with a `stale` reason and no resolved hunks, and the reader shows its note and reason. Stale stops do not count as coverage. A bake succeeds with stale stops; `--check` reports them and exits nonzero. Malformed ranges, sides, importance, duplicate chapter ids and invalid flags or role overrides remain validation errors.
+When reapplying a saved story, a stop or flag is stale when its file is absent or its range no longer overlaps a diff hunk on the selected side.
+It remains visible with a `stale` reason; stale stops have no resolved hunks and don't count as coverage.
+A bake succeeds with stale references; `--check` reports them and exits nonzero.
+A role override whose file has left the diff is dropped from the resolved story and reported.
+With explicit `--story`, unsupported references and unknown role paths are authoring errors, not stale references.
+Malformed ranges, sides, importance, duplicate chapter ids and invalid role values are always errors.
 
 Rebake after changing commits or the story.
 An open reader checks for rewritten bytes through the same conditional polling as other live documents.
@@ -167,7 +172,8 @@ Whole-file references also work for binary, mode-only and pure-rename changes.
 Files have one role: `implementation`, `test`, `generated`, `config` or `docs`.
 Classification uses paths, including test, e2e, harness and fixture directories and language test filenames.
 It doesn't inspect contents for generated-code comments.
-`story.roles` overrides by exact inventory path; unknown paths and roles fail validation.
+`story.roles` overrides by exact inventory path; unknown role values fail validation.
+Unknown paths fail for an explicit story and are dropped when reapplying a saved story.
 The resolved role is shown on the file in the reader.
 
 ## Coverage means shown
@@ -188,11 +194,12 @@ Line counts and coverage exclude every file Git classifies as binary, including 
 Binary, mode-only and pure-rename files have no text hunks, don't enter the denominator and remain visible in the inventory.
 
 `--check` never writes.
-Invalid story structure, flags and role overrides fail the command and leave an existing bundle untouched.
-Unsupported stop references are retained as stale; `--check` returns nonzero for them, while a normal bake writes them with their reasons.
+Invalid story structure and invalid explicit story references fail the command and leave an existing bundle untouched.
+Unsupported saved stop and flag references are retained as stale; `--check` returns nonzero for them, while a normal bake writes them with their reasons.
+Normal text output includes `Stale: …` and `Dropped: …` lines.
 Unshown lines do not fail validation: a story selects what matters, rather than exhausting the diff.
 Text output lists `Changed lines shown: N of M` and `Remaining: path:line` for each remaining excerpt.
-JSON output is a report with `valid`, `covered`, `total`, `uncovered` and `errors`, plus `path` on a successful write.
+JSON output is a report with `valid`, `covered`, `total`, `uncovered`, `errors`, `stale` and `dropped`, plus `path` on a successful write.
 `covered` and `total` count changed lines; `uncovered` contains the resolved Remaining excerpts.
 An invalid story returns `valid: false` and a nonzero exit status.
 

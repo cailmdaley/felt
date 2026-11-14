@@ -324,6 +324,15 @@ var changeHunkHeader = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+
 // ValidateChange checks every story reference and counts coverage from stops only.
 // Flags direct attention but do not remove hunks from Remaining.
 func ValidateChange(c *Change, hunks []ChangeHunk) ChangeReport {
+	return validateChange(c, hunks, false)
+}
+
+// ReapplyChange retains references invalidated by tree drift in an existing story.
+func ReapplyChange(c *Change, hunks []ChangeHunk) ChangeReport {
+	return validateChange(c, hunks, true)
+}
+
+func validateChange(c *Change, hunks []ChangeHunk, allowDrift bool) ChangeReport {
 	report := ChangeReport{Valid: true, Uncovered: []ChangeHunk{}, Errors: []string{}, Stale: []string{}, Dropped: []string{}}
 	files := map[string]int{}
 	for i, f := range c.Files {
@@ -372,7 +381,7 @@ func ValidateChange(c *Change, hunks []ChangeHunk) ChangeReport {
 	}
 	resolve := func(label string, r ChangeRange) string {
 		if issue := check(label, r); issue != nil {
-			if issue.drift {
+			if allowDrift && issue.drift {
 				report.Stale = append(report.Stale, issue.reason)
 				return issue.reason
 			}
@@ -419,8 +428,12 @@ func ValidateChange(c *Change, hunks []ChangeHunk) ChangeReport {
 			role := c.Story.Roles[path]
 			i, ok := files[path]
 			if !ok {
-				delete(c.Story.Roles, path)
-				report.Dropped = append(report.Dropped, fmt.Sprintf("roles: file %q is no longer in the diff", path))
+				if allowDrift {
+					delete(c.Story.Roles, path)
+					report.Dropped = append(report.Dropped, fmt.Sprintf("roles: file %q is no longer in the diff", path))
+				} else {
+					bad(fmt.Sprintf("roles: unknown file %q", path))
+				}
 				continue
 			}
 			switch role {

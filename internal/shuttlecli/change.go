@@ -164,7 +164,12 @@ count as coverage. --check validates and reports without writing a companion.
 				change.HeadRef = pr.HeadBranch
 				change.BaseRef = pr.BaseBranch
 			}
-			report := shuttle.ValidateChange(change, hunks)
+			var report shuttle.ChangeReport
+			if explicitStory {
+				report = shuttle.ValidateChange(change, hunks)
+			} else {
+				report = shuttle.ReapplyChange(change, hunks)
+			}
 			if report.Valid && !check {
 				if writeStory {
 					if err := atomicfile.Write(sidecar, storyData, 0644); err != nil {
@@ -215,6 +220,9 @@ count as coverage. --check validates and reports without writing a companion.
 					}
 					fmt.Fprintf(a.env.Stdout, "Remaining: %s:%d\n", h.File, line)
 				}
+				for _, reason := range report.Stale {
+					fmt.Fprintf(a.env.Stdout, "Stale: %s\n", reason)
+				}
 				for _, reason := range report.Dropped {
 					fmt.Fprintf(a.env.Stdout, "Dropped: %s\n", reason)
 				}
@@ -223,7 +231,7 @@ count as coverage. --check validates and reports without writing a companion.
 				}
 			}
 			if check && len(report.Stale) > 0 {
-				return fmt.Errorf("stale stops:\n  %s", strings.Join(report.Stale, "\n  "))
+				return fmt.Errorf("stale story references:\n  %s", strings.Join(report.Stale, "\n  "))
 			}
 			if !report.Valid {
 				return fmt.Errorf("invalid story:\n  %s", strings.Join(report.Errors, "\n  "))
