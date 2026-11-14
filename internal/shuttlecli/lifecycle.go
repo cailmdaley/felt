@@ -378,7 +378,7 @@ this host is killed.` + workerExitIdentityHelp,
 
 func (a *app) resumeCmd() *cobra.Command {
 	var resumeProjectDir string
-	var resumeLocal bool
+	var resumeLocal, resumeCarry bool
 	resumeCmd := &cobra.Command{
 		Use:   "resume <fiber>",
 		Short: "Arm a paused fiber (status: active)",
@@ -400,6 +400,14 @@ its owner, and the CLI never writes its Git mirror; a normal resume may stay
 pending while the owner is in boot quarantine. Every other closed fiber — a
 oneshot awaiting review, or any accepted or discarded close — is refused; use
 'shuttle reopen' to arm it.
+
+A remote resume carries this host's copy of the constitution. An owner whose
+own copy already holds the constitution (its shuttle: block names the owner)
+keeps that copy and says how this one differs; --carry sends this host's
+version anyway. An owner whose copy has no block, or a block for another host,
+takes this host's version before resuming. An owner without the fiber has it
+created from this host's armed copy: a draft (status: open) moves there, and
+any other copy stays here as well.
 
 Arming needs what an armed install needs: an agent the registry resolves and a
 project_dir. A draft installed without one is refused; --project-dir sets it
@@ -436,9 +444,18 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 				if cmd.Flags().Changed("project-dir") {
 					fields["project_dir"] = block.ProjectDir
 				}
+				if st != nil {
+					if err := carryDocument(fields, f, resumeCarry); err != nil {
+						return err
+					}
+				}
 				output, err := a.postOwnerLifecycle("resume", owner, f, fields)
 				if err != nil {
-					if st != nil && f.Status == felt.StatusOpen && ownerFiberMissing(err, owner) {
+					if st != nil && ownerFiberMissing(err, owner) {
+						if f.Status == felt.StatusClosed {
+							return fmt.Errorf("fiber %s has status: closed; use 'shuttle reopen %s' to clear verdict fields and arm it", args[0], args[0])
+						}
+						draft := f.Status == felt.StatusOpen
 						if err := a.checkArmable(args[0], "resume", block); err != nil {
 							return err
 						}
@@ -457,8 +474,15 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 						if err := shuttle.SetConfig(f, block); err != nil {
 							return err
 						}
-						if createErr := a.moveRemoteDraft(owner, f, block); createErr != nil {
-							return remoteRouteError(cmd, args, owner, createErr)
+						if draft {
+							if createErr := a.moveRemoteDraft(owner, f, block); createErr != nil {
+								return remoteRouteError(cmd, args, owner, createErr)
+							}
+						} else {
+							if createErr := a.createRemoteFiber(owner, f, block); createErr != nil {
+								return remoteRouteError(cmd, args, owner, createErr)
+							}
+							fmt.Fprintf(a.env.Stdout, "created %s on %s from this host's copy and armed it\n", f.ID, owner)
 						}
 						if a.ownerBootQuarantine(owner) {
 							a.printResumeHold(owner, f.ID)
@@ -514,6 +538,7 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 	}
 	resumeCmd.Flags().StringVar(&resumeProjectDir, "project-dir", "", "Set the worker cwd before arming (required when the block has none); remote paths are validated on the owner")
 	resumeCmd.Flags().BoolVar(&resumeLocal, "local", false, localFlagUsage)
+	resumeCmd.Flags().BoolVar(&resumeCarry, "carry", false, carryFlagUsage)
 	return resumeCmd
 }
 

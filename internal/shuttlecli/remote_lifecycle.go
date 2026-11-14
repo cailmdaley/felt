@@ -396,8 +396,39 @@ func (a *app) forwardDispatch(cmd *cobra.Command, args []string, owner string, f
 	if err != nil {
 		return true, remoteRouteError(cmd, args, owner, err)
 	}
-	a.printDaemonBody(body)
+	a.printDispatchBody(body)
 	return true, nil
+}
+
+// carryFlagUsage is the one description of --carry on the verbs that carry
+// this host's document to a remote owner.
+const carryFlagUsage = "Send this host's version of the constitution even when the owner holds its own"
+
+// carryDocument adds this host's copy of f to a remote resume or dispatch, so
+// the owner judges the constitution the caller sees: the owner adopts it unless
+// its own copy already holds the constitution, and carry insists.
+func carryDocument(fields map[string]any, f *felt.Felt, carry bool) error {
+	document, err := os.ReadFile(f.Path)
+	if err != nil {
+		return fmt.Errorf("reading %s to carry it to its owner: %w", f.ID, err)
+	}
+	fields["document"] = string(document)
+	if carry {
+		fields["carry"] = true
+	}
+	return nil
+}
+
+// printDispatchBody prints what the owner said of a carried document on its
+// own line, then the dispatch response.
+func (a *app) printDispatchBody(body []byte) {
+	var reply struct {
+		Carried string `json:"carried"`
+	}
+	if json.Unmarshal(body, &reply) == nil && reply.Carried != "" {
+		fmt.Fprintln(a.env.Stdout, reply.Carried)
+	}
+	a.printDaemonBody(body)
 }
 
 // readLaunchMessage implements the same bounded multiline input convention as

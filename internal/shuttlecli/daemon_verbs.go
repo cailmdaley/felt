@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/spf13/cobra"
 )
@@ -40,11 +41,19 @@ func (a *app) shuttleSnapshotCmd() *cobra.Command {
 func (a *app) shuttleDispatchCmd() *cobra.Command {
 	var dispatchMessage string
 	var dispatchMessageFile string
+	var dispatchCarry bool
 	shuttleDispatchCmd := &cobra.Command{
 		Use:   "dispatch <fiber>",
 		Short: "Ask the owning daemon to dispatch a fiber now",
 		Long: `Routes a remote-owned fiber through this host's daemon to the owner.
-Use --message or --message-file to add a launch directive (the From User prompt block).`,
+Use --message or --message-file to add a launch directive (the From User prompt block).
+
+A remote dispatch carries this host's copy of the constitution. An owner whose
+own copy already holds the constitution (its shuttle: block names the owner)
+keeps that copy and says how this one differs; --carry sends this host's
+version anyway. An owner whose copy has no block, or a block for another host,
+takes this host's version first. An owner without the fiber has it created
+from this host's copy, which stays here, and then dispatches it.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			adHoc, _ := cmd.Flags().GetBool("ad-hoc")
@@ -63,7 +72,7 @@ Use --message or --message-file to add a launch directive (the From User prompt 
 				fields["user_message"] = message
 			}
 			address := args[0]
-			if fiber, _, _, resolveErr := a.shuttleResolveFiberRef(args[0], true); resolveErr == nil {
+			if fiber, st, _, resolveErr := a.shuttleResolveFiberRef(args[0], true); resolveErr == nil {
 				address = fiberAddress(fiber)
 				if block, ok, blockErr := shuttle.BlockOf(fiber); blockErr != nil {
 					return blockErr
@@ -72,8 +81,12 @@ Use --message or --message-file to add a launch directive (the From User prompt 
 					if ownerErr != nil {
 						return ownerErr
 					}
-					if routed, routeErr := a.forwardDispatch(cmd, args, owner, fiber, fields); routed || routeErr != nil {
-						return routeErr
+					if owner != "" {
+						if st == nil {
+							_, err := a.forwardDispatch(cmd, args, owner, fiber, fields)
+							return err
+						}
+						return a.dispatchCarried(cmd, args, owner, fiber, block, fields, dispatchCarry)
 					}
 				}
 			}
@@ -101,7 +114,38 @@ Use --message or --message-file to add a launch directive (the From User prompt 
 	shuttleDispatchCmd.Flags().Bool("ad-hoc", false, "For standing constitutions, dispatch an ad-hoc run without consuming the scheduled occurrence")
 	shuttleDispatchCmd.Flags().StringVar(&dispatchMessage, "message", "", "Launch directive for the worker (the From User prompt block)")
 	shuttleDispatchCmd.Flags().StringVar(&dispatchMessageFile, "message-file", "", "Read the launch directive from a file, or - for stdin")
+	shuttleDispatchCmd.Flags().BoolVar(&dispatchCarry, "carry", false, carryFlagUsage)
 	return shuttleDispatchCmd
+}
+
+// dispatchCarried sends a remote dispatch carrying this host's document. An
+// owner without the fiber gets it created from this host's copy, which stays
+// here, and the dispatch is sent again.
+func (a *app) dispatchCarried(cmd *cobra.Command, args []string, owner string, fiber *felt.Felt, block *shuttle.Block, fields map[string]any, carry bool) error {
+	carried := map[string]any{"fiber_path": fiberPathHint(fiber)}
+	for key, value := range fields {
+		carried[key] = value
+	}
+	if err := carryDocument(carried, fiber, carry); err != nil {
+		return err
+	}
+	body, err := a.postOwnerDispatch(owner, fiber, carried)
+	if err != nil && ownerFiberMissing(err, owner) {
+		created := *fiber
+		if created.Status == "" {
+			created.Status = felt.StatusOpen
+		}
+		if err := a.createRemoteFiber(owner, &created, block); err != nil {
+			return remoteRouteError(cmd, args, owner, err)
+		}
+		fmt.Fprintf(a.env.Stdout, "created %s on %s from this host's copy\n", created.ID, owner)
+		body, err = a.postOwnerDispatch(owner, &created, fields)
+	}
+	if err != nil {
+		return remoteRouteError(cmd, args, owner, err)
+	}
+	a.printDispatchBody(body)
+	return nil
 }
 
 // printDaemonBody echoes a daemon response verbatim, adding the newline the
