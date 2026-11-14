@@ -226,6 +226,8 @@ export interface KanbanCard {
    * project path when absent.
    */
   shuttleProjectDir?: string
+  /** `shuttle.change.prs` — the GitHub PRs its Change page follows, in the order named. */
+  shuttleChangePRs?: number[]
   /**
    * The nearest ancestor's `shuttle.project_dir` on this card's owning host,
    * for a card whose block names none. A suggestion only: the board offers it

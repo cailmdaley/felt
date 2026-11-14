@@ -11,6 +11,31 @@
 .kbn-fileview-change { flex: 1; min-height: 0; min-width: 0; height: 100%; overflow: hidden; container-type: inline-size; }
 .change-bake-note { padding: 32px; font-size: var(--type-note); color: var(--ws-ink-muted); overflow-wrap: anywhere; }
 .change-bake-note[role='alert'] { color: var(--ws-stop); }
+/* A Change page that follows several PRs: their list, and the one open under a bar back to it. */
+.change-pr-list { height: 100%; overflow: auto; padding: 28px clamp(16px, 4cqi, 48px); box-sizing: border-box; }
+.change-pr-list > .change-section-note { margin: 0 0 12px; font-size: var(--type-note); color: var(--ws-ink-muted); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
+.change-pr-rows { display: flex; flex-direction: column; max-width: 860px; border-top: 1px solid var(--ws-hairline-soft); }
+.change-pr-row { display: flex; flex-direction: column; gap: 4px; padding: 10px 8px; border: 0; border-bottom: 1px solid var(--ws-hairline-soft); background: none; color: var(--ws-ink); font: inherit; text-align: left; cursor: pointer; }
+.change-pr-row:hover, .change-pr-row:focus-visible { background: var(--ws-hover); outline: none; }
+.change-pr-head { display: flex; gap: 10px; align-items: baseline; min-width: 0; }
+.change-pr-number { flex: none; font: var(--type-meta)/var(--leading-solid) var(--font-mono); color: var(--ws-ink-muted); }
+.change-pr-title { min-width: 0; overflow-wrap: anywhere; }
+.change-pr-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font: var(--type-meta)/var(--leading-ui) var(--font-mono); color: var(--ws-ink-soft); }
+.change-pr-branches { min-width: 0; overflow-wrap: anywhere; }
+.change-pr-state[data-state='merged'] { color: var(--ws-machine); }
+.change-pr-state[data-state='closed'], .change-pr-checks[data-checks='failed'], .change-pr-error { color: var(--ws-stop); }
+.change-pr-state[data-state='draft'], .change-pr-checks[data-checks='pending'], .change-pr-pending { color: var(--ws-ink-muted); }
+.change-pr-additions { color: var(--ws-verdict); }
+.change-pr-deletions { color: var(--ws-stop); }
+.change-pr-error { overflow-wrap: anywhere; }
+.change-pr-open { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.change-pr-bar { flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--ws-hairline-soft); min-width: 0; }
+.change-pr-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--type-note); color: var(--ws-ink); }
+.change-pr-back, .change-pr-step { flex: none; display: inline-flex; align-items: center; padding: 2px 6px; border: 1px solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: none; color: var(--ws-ink-soft); font: var(--type-meta)/var(--leading-solid) var(--font-mono); cursor: pointer; }
+.change-pr-step { border-color: transparent; }
+.change-pr-back:hover, .change-pr-back:focus-visible, .change-pr-step:not(:disabled):hover, .change-pr-step:focus-visible { border-color: var(--ws-ink-soft); background: var(--ws-hover); color: var(--ws-ink); outline: none; }
+.change-pr-step:disabled { opacity: .35; cursor: default; }
+.change-pr-slot { flex: 1; min-height: 0; display: flex; }
 
 .kbn-fileview-frame-wrap {
   position: relative;
@@ -201,6 +226,8 @@
 .kbn-fileview-thumbnail img, .kbn-fileview-thumbnail video { position: absolute; width: 100%; height: 100%; object-fit: contain; inset: 0; }
 .kbn-fileview-thumbnail audio { display: none; }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  .change-pr-row { min-height: var(--ws-phone-target); }
+  .change-pr-back, .change-pr-step { min-height: var(--ws-phone-target); min-width: var(--ws-phone-target); justify-content: center; }
   .kbn-fileview-media { padding: 24px 20px; }
   .kbn-fileview-video { padding: 12px; }
 }

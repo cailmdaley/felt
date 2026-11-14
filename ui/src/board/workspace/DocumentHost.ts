@@ -1,4 +1,4 @@
-import { isBaked, isDrawn, type WorkspaceDocument, type DocKey } from './documents.js'
+import { bakeOf, isBaked, isDrawn, type WorkspaceDocument, type DocKey } from './documents.js'
 import { keyIntent } from '../keymap.js'
 import { forwardDocumentKey, frameBridge, type DocumentKey } from './DocumentBridge.js'
 import type { SwipeSignal } from './PhoneGestures.js'
@@ -362,7 +362,7 @@ export class DocumentHost {
         reviewTarget: this.options.reviewTarget ? () => this.options.reviewTarget!(doc) : undefined,
         active: state.active,
         kind: doc.kind === 'fiber' || doc.kind === 'family' ? undefined : doc.kind,
-        bake: isBaked(doc) ? doc.key.slice(doc.key.lastIndexOf(':') + 1) : undefined,
+        bake: bakeOf(doc),
         decorateAudio: audio => {
           const page = new AudioPage(audio, doc, this.options.shuttleBase, this.options.onSelect,
             (peaks, duration) => {

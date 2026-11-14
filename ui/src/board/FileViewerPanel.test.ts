@@ -93,7 +93,7 @@ describe('workspace file viewer hooks', () => {
     const fetch = vi.fn(() => new Promise<Response>(resolve => { answer = resolve }))
     vi.stubGlobal('fetch', fetch)
     const onState = vi.fn()
-    const viewer = buildFileViewer('', '/store/.felt/work/task/task.md', 'host-b', undefined, undefined, { kind: 'change', bake: 'UID1', onState })
+    const viewer = buildFileViewer('', '/store/.felt/work/task/task.md', 'host-b', undefined, undefined, { kind: 'change', bake: { uid: 'UID1', prs: [] }, onState })
     document.body.append(viewer)
     expect(viewer.textContent).toBe('Baking…')
     expect(onState).toHaveBeenLastCalledWith({ status: 'ready' })
@@ -113,10 +113,71 @@ describe('workspace file viewer hooks', () => {
   it('says why a bake failed in one line in the page', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: '/work is not a Git repository' }), { status: 422 })))
     const onState = vi.fn()
-    const viewer = buildFileViewer('', '/store/.felt/work/task/task.md', 'host-a', undefined, undefined, { kind: 'change', bake: 'UID1', onState })
+    const viewer = buildFileViewer('', '/store/.felt/work/task/task.md', 'host-a', undefined, undefined, { kind: 'change', bake: { uid: 'UID1', prs: [] }, onState })
     await vi.waitFor(() => expect(viewer.querySelector('[role="alert"]')?.textContent).toBe('Could not bake this change: /work is not a Git repository'))
     expect(onState).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'error' }))
     disposeFileViewer(viewer)
+  })
+  it('bakes a constitution that follows one PR directly, leaving the PR to its owner', () => {
+    const fetch = vi.fn(() => new Promise<Response>(() => {}))
+    vi.stubGlobal('fetch', fetch)
+    const viewer = buildFileViewer('', '/store/.felt/work/task/task.md', 'host-a', undefined, undefined, { kind: 'change', bake: { uid: 'UID3', prs: [7] } })
+    expect(viewer.querySelector('.change-pr-list')).toBeNull()
+    expect(fetch).toHaveBeenCalledOnce()
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ origin: 'host-a' })
+    disposeFileViewer(viewer)
+  })
+  it('opens a constitution that follows several PRs on their list, and bakes the one a row opens', async () => {
+    changeRenderer.mount.mockImplementation((root: HTMLElement, bundle: { title: string }) => {
+      const scroller = document.createElement('div'); scroller.textContent = bundle.title; root.replaceChildren(scroller)
+      return { scroller, dispose: vi.fn() }
+    })
+    watch.content = null
+    const listings = [
+      { number: 12, title: 'Open one', head_branch: 'feat/a', base_branch: 'develop', state: 'OPEN', draft: false, checks: { total: 2, passed: 2, failed: 0, pending: 0 }, additions: 40, deletions: 3 },
+      { number: 404, error: 'gh pr view 404: not found' },
+      { number: 5, title: 'Merged one', head_branch: 'feat/b', base_branch: 'develop', state: 'MERGED', draft: false, checks: { total: 0, passed: 0, failed: 0, pending: 0 }, additions: 1, deletions: 9 },
+    ]
+    const fetch = vi.fn(async (_url: string, init?: RequestInit) => init?.method === 'POST'
+      ? new Response(JSON.stringify({ path: `/cache/pr-${JSON.parse(init.body as string).pr}.change.json`, report: {} }))
+      : new Response(JSON.stringify({ prs: listings })))
+    vi.stubGlobal('fetch', fetch)
+    const open = () => buildFileViewer('', '/store/.felt/work/steward/steward.md', 'host-b', undefined, undefined, { kind: 'change', bake: { uid: 'UID2', prs: [12, 404, 5] } })
+    const viewer = open()
+    document.body.append(viewer)
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(fetch.mock.calls[0][0]).toBe('/api/v1/fibers/UID2/change?origin=host-b')
+    await vi.waitFor(() => expect(viewer.querySelectorAll('.change-pr-row')[0].textContent).toContain('Open one'))
+    const rows = [...viewer.querySelectorAll<HTMLButtonElement>('.change-pr-row')]
+    expect(rows.map(row => row.dataset.pr)).toEqual(['12', '404', '5'])
+    expect(rows[0].textContent).toBe('#12Open onefeat/a → developOpen2 checks pass+40 −3')
+    expect(rows[1].textContent).toContain('gh pr view 404: not found')
+    expect(rows[2].querySelector('.change-pr-state')!.textContent).toBe('Merged')
+
+    rows[0].click()
+    const bake = fetch.mock.calls.find(([, init]) => init?.method === 'POST')!
+    expect(JSON.parse(bake[1]!.body as string)).toEqual({ origin: 'host-b', pr: 12 })
+    expect(viewer.querySelector('.change-pr-label')!.textContent).toBe('#12 Open one')
+    expect(viewer.querySelector<HTMLButtonElement>('[aria-label="Previous PR"]')!.disabled).toBe(true)
+    await vi.waitFor(() => expect(watch.content).not.toBeNull())
+    watch.content!(JSON.stringify({ version: 2, title: 'Open one', repo: { name: 'r', dir: '/r', forge_url: null }, base: 'a'.repeat(40), head: 'b'.repeat(40), base_ref: 'develop', head_ref: 'feat/a', commits: [], files: [], story: null }))
+    await vi.waitFor(() => expect(viewer.querySelector('.change-pr-slot')!.textContent).toBe('Open one'))
+
+    viewer.querySelector<HTMLButtonElement>('[aria-label="Next PR: #404"]')!.click()
+    expect(viewer.querySelector('.change-pr-label')!.textContent).toBe('#404')
+    expect(JSON.parse(fetch.mock.calls.at(-1)![1]!.body as string)).toEqual({ origin: 'host-b', pr: 404 })
+
+    disposeFileViewer(viewer)
+    // A rebuild, on Refresh or a return to the page, re-bakes the PR open.
+    const again = open()
+    expect(again.querySelector('.change-pr-label')!.textContent).toBe('#404')
+    expect(JSON.parse(fetch.mock.calls.at(-1)![1]!.body as string)).toEqual({ origin: 'host-b', pr: 404 })
+    again.querySelector<HTMLButtonElement>('.change-pr-back')!.click()
+    expect(again.querySelectorAll('.change-pr-row')).toHaveLength(3)
+    disposeFileViewer(again)
+    expect(open().querySelector('.change-pr-list'), 'back on the list, the next open starts there').not.toBeNull()
   })
   it('gives a live-arriving image its own full-resolution URL after the strip thumbnail', () => {
     const thumbnail = buildFileViewer('', '/growth.png', 'host-a', undefined, undefined, { thumbnail: true })

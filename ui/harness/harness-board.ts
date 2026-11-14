@@ -32,7 +32,7 @@
  * so the output directory is self-sufficient — nothing to copy in by hand.
  */
 import { addOutboxFixtures } from './outbox-fixtures.js'
-import { addChangeFixtures, bakeFixtureChange } from './change-fixtures.js'
+import { addChangeFixtures, bakeFixtureChange, listFixturePRs } from './change-fixtures.js'
 import { stampLifecycle } from './ownerLifecycle.js'
 import { addNavigationFixtures } from './nav-back-fixtures.js'
 import { addFamilyFixtures, addFrontierFixtures, addThreadFixtures, addThreadReviewFixtures } from './thread-fixtures.js'
@@ -1448,7 +1448,10 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   // A constitution's Change page asks its owner to bake the change.
   const bake = method === 'POST' ? /\/api\/v1\/fibers\/([^/?]+)\/change$/.exec(url) : null
-  if (workspaceFixture && bake) return json(bakeFixtureChange(workspaceFixture, decodeURIComponent(bake[1]), bodyOrigin()))
+  if (workspaceFixture && bake) return json(bakeFixtureChange(workspaceFixture, decodeURIComponent(bake[1]), bodyOrigin(), body().pr as number | undefined))
+  // A constitution that follows several PRs lists them first.
+  const listing = method === 'GET' ? /\/api\/v1\/fibers\/([^/?]+)\/change(\?|$)/.exec(url) : null
+  if (workspaceFixture && listing) return json(listFixturePRs(decodeURIComponent(listing[1])))
   // The board's composite feed.
   if (url.includes('/api/v1/fibers/composite')) return json(workspaceFixture?.feed ?? docsExample?.feed ?? MOCK_FEED)
   if (workspaceFixture && url.includes('/api/v1/fibers/') && url.includes('body=true')) {

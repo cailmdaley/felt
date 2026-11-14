@@ -91,6 +91,8 @@ export interface Fiber {
    * on kind/schedule reshapes (uninstall + reinstall) so the block survives
    * the round trip. */
   shuttleProjectDir?: string;
+  /** `shuttle.change.prs` — the GitHub PRs its Change page follows, in the order named. */
+  shuttleChangePRs?: number[];
   /** `shuttle.host` — the daemon that owns this fiber's dispatch. Drives strict
    * daemon affinity and owner-routed writes (`Shuttle.OriginRouter` on the
    * daemon). */
@@ -172,6 +174,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
   let shuttleScheduleText: string | undefined;
   let shuttlePulse: Fiber['shuttlePulse'];
   let shuttleProjectDir: string | undefined;
+  let shuttleChangePRs: number[] | undefined;
   let shuttleChrome: boolean | undefined;
   let shuttleHost: string | undefined;
 
@@ -214,6 +217,11 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     if (typeof s.effort === 'string' && s.effort.trim()) shuttleEffort = s.effort.trim();
     if (typeof s.project_dir === 'string' && s.project_dir.trim()) {
       shuttleProjectDir = s.project_dir.trim();
+    }
+    const change = s.change as { prs?: unknown } | undefined;
+    if (Array.isArray(change?.prs)) {
+      const prs = change.prs.filter((n): n is number => Number.isInteger(n) && n > 0);
+      if (prs.length) shuttleChangePRs = prs;
     }
 
     // shuttle.chrome — only surface `true`, collapsing everything else to
@@ -303,6 +311,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     shuttleScheduleText,
     shuttlePulse,
     shuttleProjectDir,
+    shuttleChangePRs,
     shuttleChrome,
     shuttleHost,
     parentId,

@@ -10,6 +10,9 @@ import { LONG_OUTCOME, WORKSPACE_EARLIER_SESSION, WORKSPACE_LATEST_SESSION } fro
 export const WORKSPACE_HOST = 'umber-workstation'
 export const WORKSPACE_REMOTE = 'basalt-login-02'
 export const WORKSPACE_UID = '01KVBR1F9BWBVKF97473PV67K8'
+/** The constitution whose Change page follows three PRs (`shuttle.change.prs`). */
+export const PR_FOLLOWER_UID = '01KVBR4J9EZGYPJ07734SY90P1'
+export const PR_FOLLOWER_PRS = [468, 471, 446]
 export const WORKSPACE_NAME = 'Calibrate the shear response'
 export const LONG_WORKSPACE_NAME = 'Calibrate the shear response across independent sky patches and validate each redshift bin'
 export const WORKSPACE_ID = 'research/workspace/calibration-report'
@@ -273,6 +276,7 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
           agent: 'claude-opus',
           effort: 'high',
           project_dir: project,
+          ...(fiber.uid === PR_FOLLOWER_UID ? { change: { prs: PR_FOLLOWER_PRS } } : {}),
           ...(fiber.id === WORKSPACE_ID ? { runtime: {
             session_uuid: WORKSPACE_LATEST_SESSION,
             dispatched_at: iso(-3 * 60 * minute),

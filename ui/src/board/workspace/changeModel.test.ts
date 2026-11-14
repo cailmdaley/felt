@@ -27,6 +27,10 @@ describe('CLI-resolved change lanes', () => {
     expect(reviewMessage(bundle(), { note: 'Check this', comments: [{ file: 'app.ts', line: 11, side: 'old', text: 'Why remove it?' }] }))
       .toBe('Base: base\n\nHead: head\n\nReview of A change\n\nCheck this\n\napp.ts:11 (old)\nWhy remove it?')
   })
+  it('names the PR first when the change is one', () => {
+    const pr = { number: 7, title: 'A PR', url: '', head_branch: 'topic', base_branch: 'main', state: 'OPEN', draft: false, mergeable: '', checks: { total: 0, passed: 0, failed: 0, pending: 0 } }
+    expect(reviewMessage({ ...bundle(), pr }, { note: 'Merge it', comments: [] }).split('\n\n')[0]).toBe('PR #7 A PR')
+  })
   it('resets viewed marks when the source changes', () => {
     expect(changeIdentity('bundle')).toBe(changeIdentity('bundle'))
     expect(changeIdentity('rebaked')).not.toBe(changeIdentity('bundle'))

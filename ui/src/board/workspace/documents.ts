@@ -12,8 +12,8 @@ type Provenance =
   | { kind: 'link'; title?: string }
   /** A page opened by its address before the channel's own reads list it. */
   | { kind: 'routed' }
-  /** A constitution's change, baked by its owner each time the page opens. */
-  | { kind: 'baked' }
+  /** A constitution's change, baked by its owner each time the page opens; with two or more PRs it opens on their list. */
+  | { kind: 'baked'; uid: string; prs: number[] }
 
 export interface WorkspaceDocument {
   key: DocKey
@@ -52,6 +52,8 @@ export interface ChannelInput {
   family?: boolean
   /** The constitution has a project, whose change its Change page bakes. */
   change?: boolean
+  /** The GitHub PRs its Change page follows, in the order named. */
+  changePRs?: number[]
   /** The fiber's genuine owner-daemon modification time, never its creation time. */
   modifiedAt?: string
   embeds?: { path: string; title?: string }[]
@@ -124,7 +126,11 @@ export function changeKey(owner: string, uid: string): DocKey {
   return `change:${owner}:${uid}`
 }
 /** A constitution's Change page: no file until its owner bakes one on open. */
-export const isBaked = (doc: Pick<WorkspaceDocument, 'provenance'>): boolean => doc.provenance.some(p => p.kind === 'baked')
+export const bakeOf = (doc: Pick<WorkspaceDocument, 'provenance'>): { uid: string; prs: number[] } | undefined => {
+  const baked = doc.provenance.find(p => p.kind === 'baked')
+  return baked?.kind === 'baked' ? { uid: baked.uid, prs: baked.prs } : undefined
+}
+export const isBaked = (doc: Pick<WorkspaceDocument, 'provenance'>): boolean => bakeOf(doc) !== undefined
 /** A page the board draws itself, with no file behind it. */
 export const isDrawn = (doc: Pick<WorkspaceDocument, 'kind'>): boolean => doc.kind === 'fiber' || doc.kind === 'family'
 
@@ -318,7 +324,7 @@ export function buildChannel(input: ChannelInput): Channel {
   documents.delete(prose.key)
   const arranged = arrangeDocuments(prose, documents.values(), declared)
   // The Change page sits right of the fiber page; its path is the fiber's, which places its story's links and its review.
-  const change: WorkspaceDocument = { key: changeKey(input.owner, input.uid), owner: input.owner, path: prose.path, name: 'Change', kind: 'change', provenance: [{ kind: 'baked' }] }
+  const change: WorkspaceDocument = { key: changeKey(input.owner, input.uid), owner: input.owner, path: prose.path, name: 'Change', kind: 'change', provenance: [{ kind: 'baked', uid: input.uid, prs: input.changePRs ?? [] }] }
   const pages = input.change ? arranged.flatMap(doc => doc === prose ? [prose, change] : [doc]) : arranged
   const run = input.family ? [{ key: familyKey(input.owner, input.uid), owner: input.owner, path: prose.path, name: 'Family', kind: 'family' as const, provenance: [{ kind: 'family' as const }] }, ...pages] : pages
   const channel: Channel = {

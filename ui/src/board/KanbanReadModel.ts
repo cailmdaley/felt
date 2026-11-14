@@ -566,6 +566,7 @@ function toCard(
       state: entry.pulse.state,
     } : undefined,
     shuttleProjectDir: f.shuttleProjectDir,
+    shuttleChangePRs: f.shuttleChangePRs,
     inheritedProjectDir: inheritedProjectDir(entry, dirs),
     // An armed standing constitution's next firing; nothing else launches on a clock.
     nextLaunchAt: f.shuttleKind === 'standing' && f.status === 'active' ? f.shuttleNextDue : undefined,

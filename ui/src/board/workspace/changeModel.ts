@@ -140,6 +140,7 @@ export function reviewMessage(bundle: ChangeBundle, draft: ChangeDraft): string 
       ? ''
       : `Earlier snapshot\nBase: ${base}\nHead: ${head}\n`
   return [
+    bundle.pr ? `PR #${bundle.pr.number} ${bundle.pr.title}` : '',
     `Base: ${bundle.base}`,
     `Head: ${bundle.head}`,
     `Review of ${bundle.title}`,

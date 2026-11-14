@@ -62,7 +62,7 @@ it('bakes a Change page afresh on every open and on refresh, beside its fiber', 
   host.setChannel(channel.documents, fiber.key)
   expect(render.calls.some(call => call.options.bake)).toBe(false)
   host.select(change.key)
-  const bakes = () => render.calls.filter(call => call.options.bake === 'U1')
+  const bakes = () => render.calls.filter(call => call.options.bake?.uid === 'U1')
   expect(bakes()).toHaveLength(1)
   expect(bakes()[0]).toMatchObject({ path: '/store/task/task.md', owner: 'host-a', options: { kind: 'change' } })
   host.refresh(change.key)

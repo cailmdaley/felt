@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   leadReceipt, channelLead, buildChannel, defaultSelection, docKey, documentKind, documentLabels, documentLabelMetadata, fallbackSelection,
-  changeKey, fiberKey, isBaked, normalizeAbsolutePath, parseDocKey, proseDocument, type ChannelInput, type WorkspaceDocument,
+  bakeOf, changeKey, fiberKey, isBaked, normalizeAbsolutePath, parseDocKey, proseDocument, type ChannelInput, type WorkspaceDocument,
 } from './documents.js'
 
 const base: ChannelInput = {
@@ -101,8 +101,9 @@ describe('buildChannel', () => {
       'host-a:/store/project/task/report.html', 'fiber:host-a:fiber-1', changeKey('host-a', 'fiber-1'), 'host-a:/store/project/task/notes.html',
     ])
     const change = channel.documents[2]
-    expect(change).toMatchObject({ kind: 'change', owner: 'host-a', path: '/store/project/task/task.md', provenance: [{ kind: 'baked' }] })
+    expect(change).toMatchObject({ kind: 'change', owner: 'host-a', path: '/store/project/task/task.md', provenance: [{ kind: 'baked', uid: 'fiber-1', prs: [] }] })
     expect(isBaked(change)).toBe(true)
+    expect(bakeOf(buildChannel({ ...base, isConstitution: true, change: true, changePRs: [12, 5] }).documents.find(isBaked)!)).toEqual({ uid: 'fiber-1', prs: [12, 5] })
     expect(channel.labels).toEqual(['Results', 'Constitution', 'Change', 'notes.html'])
     expect(documentLabelMetadata(change, 'Change', 'host-a')).toEqual({ title: 'Change', summary: 'baked on open' })
     expect(defaultSelection(buildChannel({ ...base, body: 'plain', isConstitution: true, change: true }))).toBe('fiber:host-a:fiber-1')

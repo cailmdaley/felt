@@ -19,7 +19,8 @@ import { thumbnailPreviews } from './workspace/thumbnailPreview.js'
 import { watchLiveFile, type LiveFileSubscription } from './LiveFileRefresh.js'
 import type { ReferenceTarget } from './workspace/ChannelReferences.js'
 import { fileKind } from './attachments.js'
-import { postDaemonJson } from './daemonApi.js'
+import { getDaemonJson, postDaemonJson } from './daemonApi.js'
+import { drawChangeList, type ChangePRListing } from './workspace/changeList.js'
 import { forgetText, head, peek, recallText, RESOURCE_PRIORITY, text as documentText, type Head, type ResourcePriority } from './documentResources.js'
 import { loadDuration } from './workspace/audioWaveform.js'
 import { connectDocumentFrame, frameBridge, DOCUMENT_SANDBOX, withWorkspaceKeyBridge, type DocumentKey, type FrameBridge } from './workspace/DocumentBridge.js'
@@ -50,10 +51,10 @@ export interface FileViewerOptions {
   /** The directory a change story's relative links resolve against; default the bundle's own. */
   basePath?: string
   /**
-   * The UID of a constitution whose change its owner bakes on open; the path
-   * is then the fiber's own (see `buildBakedChange`).
+   * A constitution whose change its owner bakes on open, and the PRs it
+   * follows; the path is then the fiber's own (see `buildBakedChange`).
    */
-  bake?: string
+  bake?: { uid: string; prs: number[] }
   /** Inert previews use the same kind dispatch within their host's load budget. */
   thumbnail?: boolean
   /** Captioned previews keep the filename outside the miniature page. */
@@ -460,16 +461,20 @@ export async function readThumbnailMetadata(src: string, signal: AbortSignal, on
   if (first && !signal.aborted) onSource(first.bytes, first.etag)
 }
 
+/** The PR each list-opening Change page has open, by owner and fiber, so a rebuild re-bakes it. */
+const openPRs = new Map<string, number>()
+
 /**
  * A constitution's change, baked on open: ask the fiber's owner to bake it
  * (`POST /fibers/<uid>/change`), then read the bundle the bake names through
  * `/file` in the ordinary change viewer. A story's relative links resolve
  * beside the fiber, where the story lives. A failed bake is a line in the
- * page, not a viewer error.
+ * page, not a viewer error. A constitution that follows two or more PRs opens
+ * on their list instead (`GET /fibers/<uid>/change`), each row baking its PR.
  */
 function buildBakedChange(
   shuttleBase: string,
-  uid: string,
+  bake: { uid: string; prs: number[] },
   fiberPath: string,
   originId: string,
   onTextPane?: (scroller: HTMLElement) => void,
@@ -477,28 +482,58 @@ function buildBakedChange(
 ): HTMLElement {
   const wrap = document.createElement('div')
   wrap.className = 'kbn-fileview-change'
-  const note = document.createElement('div')
-  note.className = 'change-bake-note'
-  note.textContent = 'Baking…'
-  wrap.append(note)
+  const route = `/api/v1/fibers/${encodeURIComponent(bake.uid)}/change`
   let viewer: HTMLElement | null = null
   let disposed = false
+  let generation = 0
   // The page shows its own progress and failures, so its host only ever sees it ready.
   const ready = (): void => options.onState?.({ status: 'ready' })
   ready()
-  postDaemonJson<{ path: string }>(shuttleBase, `/api/v1/fibers/${encodeURIComponent(uid)}/change`, { origin: originId }, 'Bake failed')
-    .then(({ path }) => {
-      if (disposed) return
-      viewer = buildFileViewer(shuttleBase, path, originId, undefined, onTextPane, {
-        ...options, kind: 'change', bake: undefined, basePath: fiberPath.slice(0, fiberPath.lastIndexOf('/')), onState: ready,
+  const note = (text: string): HTMLElement => {
+    const node = document.createElement('div')
+    node.className = 'change-bake-note'
+    node.textContent = text
+    return node
+  }
+  const bakeInto = (slot: HTMLElement, pr?: number): void => {
+    const at = ++generation
+    disposeFileViewer(viewer)
+    viewer = null
+    slot.replaceChildren(note('Baking…'))
+    postDaemonJson<{ path: string }>(shuttleBase, route, pr === undefined ? { origin: originId } : { origin: originId, pr }, 'Bake failed')
+      .then(({ path }) => {
+        if (disposed || at !== generation) return
+        viewer = buildFileViewer(shuttleBase, path, originId, undefined, onTextPane, {
+          ...options, kind: 'change', bake: undefined, basePath: fiberPath.slice(0, fiberPath.lastIndexOf('/')), onState: ready,
+        })
+        slot.replaceChildren(viewer)
       })
-      wrap.replaceChildren(viewer)
+      .catch((error: unknown) => {
+        if (disposed || at !== generation) return
+        const failed = note(`Could not bake this change: ${error instanceof Error ? error.message : String(error)}`)
+        failed.setAttribute('role', 'alert')
+        slot.replaceChildren(failed)
+      })
+  }
+  if (bake.prs.length < 2) bakeInto(wrap)
+  else {
+    const place = `${originId}:${bake.uid}`
+    const query = new URLSearchParams({ origin: originId })
+    drawChangeList(wrap, {
+      prs: bake.prs,
+      listings: getDaemonJson<{ prs: ChangePRListing[] }>(`${shuttleBase}${route}?${query}`, 'Could not list the PRs').then(answer => answer.prs),
+      opened: openPRs.get(place),
+      open: bakeInto,
+      moved: pr => {
+        if (pr === undefined) {
+          generation++
+          disposeFileViewer(viewer)
+          viewer = null
+          openPRs.delete(place)
+        } else openPRs.set(place, pr)
+      },
     })
-    .catch((error: unknown) => {
-      if (disposed) return
-      note.setAttribute('role', 'alert')
-      note.textContent = `Could not bake this change: ${error instanceof Error ? error.message : String(error)}`
-    })
+  }
   bindDrawnPage(wrap, {
     suspend: () => suspendFileViewer(viewer),
     resume: () => resumeFileViewer(viewer),

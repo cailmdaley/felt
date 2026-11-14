@@ -2,7 +2,7 @@ import dogfood from './generated/dogfood.change.json'
 import plain from './generated/dogfood-plain.change.json'
 import type { ChangeBundle } from '../src/board/workspace/changeModel.js'
 import imageData from './fixtures/figure.png?inline'
-import { WORKSPACE_HOST, WORKSPACE_ID, WORKSPACE_REPORT, WORKSPACE_UID, blobFor, type WorkspaceExample } from './workspace-fixtures.js'
+import { PR_FOLLOWER_PRS, PR_FOLLOWER_UID, WORKSPACE_HOST, WORKSPACE_ID, WORKSPACE_REPORT, WORKSPACE_UID, blobFor, type WorkspaceExample } from './workspace-fixtures.js'
 
 /** Real repository snapshot plus no-story and long-file reading probes. */
 export function addChangeFixtures(fixture: WorkspaceExample, now: number): void {
@@ -70,17 +70,34 @@ export function addChangeFixtures(fixture: WorkspaceExample, now: number): void 
   report.body = new Blob([`<!doctype html><html><head><title>Read the family change</title><style>body{font:18px/1.6 system-ui;max-width:680px;margin:80px auto;padding:24px;color:light-dark(#272720,#e2e2da);background:light-dark(#f6f5f0,#242421);color-scheme:light dark}a{color:inherit}li{margin:24px 0}small{opacity:.7}</style></head><body><small>FELT / CHANGE REVIEW</small><h1>A family’s root stays in sight.</h1><p>This small committed diff exercises family navigation. Read the story first, then check the tests and the edits the story doesn’t cover.</p><ul><li><a href="./family.change.json">Read the change →</a></li><li><a href="./plain.change.json">The same diff, without a story</a></li><li><a href="./large.change.json">The 5,000-line stress case</a></li></ul></body></html>`], { type: 'text/html' })
 }
 
+/** The PRs the follower constitution names, as GitHub lists them: open and passing, a draft failing a check, merged. */
+const FOLLOWED_PRS = [
+  { number: 468, title: 'Calibrate n(z) with the SOM', url: 'https://example.invalid/pull/468', head_branch: 'feat/som-nz-calibration', base_branch: 'develop', state: 'OPEN', draft: false, mergeable: 'MERGEABLE', checks: { total: 3, passed: 3, failed: 0, pending: 0 }, additions: 812, deletions: 64 },
+  { number: 471, title: 'Read the HATS catalogue lazily', url: 'https://example.invalid/pull/471', head_branch: 'feat/hats-reader', base_branch: 'feat/som-nz-calibration', state: 'OPEN', draft: true, mergeable: 'UNKNOWN', checks: { total: 3, passed: 2, failed: 1, pending: 0 }, additions: 147, deletions: 22 },
+  { number: 446, title: 'Mask the tile edges before the shear fit', url: 'https://example.invalid/pull/446', head_branch: 'fix/tile-edges', base_branch: 'develop', state: 'MERGED', draft: false, mergeable: 'UNKNOWN', checks: { total: 3, passed: 3, failed: 0, pending: 0 }, additions: 38, deletions: 11, merge_commit: 'd'.repeat(40) },
+].filter(pr => PR_FOLLOWER_PRS.includes(pr.number))
+
+/** The owner's answer to `GET /fibers/<uid>/change`: the PRs the constitution follows. */
+export function listFixturePRs(uid: string) {
+  return { prs: uid === PR_FOLLOWER_UID ? FOLLOWED_PRS : [] }
+}
+
 /**
  * The owner's answer to `POST /fibers/<uid>/change`: the workspace
  * constitution's branch as it stands, story-less and with uncommitted work,
- * and every other constitution's an empty change. The bundle lands at the
- * cache path the answer names, for `/file` to serve.
+ * a followed PR's change under its own number and title, and every other
+ * constitution's an empty change. The bundle lands at the cache path the
+ * answer names, for `/file` to serve.
  */
-export function bakeFixtureChange(fixture: WorkspaceExample, uid: string, owner: string) {
+export function bakeFixtureChange(fixture: WorkspaceExample, uid: string, owner: string, number?: number) {
   const baked = plain as ChangeBundle
   const branch = uid === WORKSPACE_UID
-  const path = `/fixture-cache/felt/changes/${uid}/${branch ? 'calibrate-response' : 'main'}.change.json`
-  const change: ChangeBundle = branch
+  const followed = FOLLOWED_PRS.find(pr => pr.number === (number ?? (uid === PR_FOLLOWER_UID ? FOLLOWED_PRS[0].number : undefined)))
+  const path = `/fixture-cache/felt/changes/${uid}/${followed ? `pr-${followed.number}` : branch ? 'calibrate-response' : 'main'}.change.json`
+  const change: ChangeBundle = followed
+    ? { ...baked, title: followed.title, base_ref: followed.base_branch, head_ref: followed.head_branch, head: String(followed.number).repeat(14).slice(0, 40), pr: followed,
+      description: `${followed.title}.\n\nThe fixture's PR body: what it changes and what wants your judgment.` }
+    : branch
     ? { ...baked, title: 'Keep the family root visible', base_ref: 'origin/main', head_ref: 'calibrate-response',
       commits: [...baked.commits, { sha: 'c'.repeat(40), subject: 'Uncommitted changes', author: 'Repository contributor', time: baked.commits.at(-1)!.time }],
       description: '**Keep the family root visible**\n\nThe family view drew its leads and lost the root once a request opened. `revealFamily` keeps the root beside every active child, and the README says so.\n\n**Uncommitted changes**' }
