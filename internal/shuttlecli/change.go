@@ -19,8 +19,9 @@ import (
 func (a *app) changeCmd() *cobra.Command {
 	var base, head, repo, storyPath, name string
 	var check bool
+	var prNumber int
 	cmd := &cobra.Command{
-		Use: "change <fiber> --base B", Short: "Bake a Git change and its reading story into a fiber companion",
+		Use: "change <fiber> (--pr N | --base B)", Short: "Bake a Git change and its reading story into a fiber companion",
 		Long: `Snapshot the change since merge-base(base, head) into <name>.change.json beside
 the fiber, like a pull request's three-dot diff. No common ancestor is an error.
 Runs Git on this host; no daemon or model is needed.
@@ -29,6 +30,12 @@ count as coverage. --check validates and reports without writing a companion.
 --json emits the validation and coverage report, not the change bundle.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed("pr") && (cmd.Flags().Changed("head") || cmd.Flags().Changed("base")) {
+				return fmt.Errorf("--pr cannot be combined with --base or --head")
+			}
+			if (cmd.Flags().Changed("pr") && prNumber < 1) || (prNumber == 0 && base == "") {
+				return fmt.Errorf("supply --pr N or --base B")
+			}
 			f, st, err := a.shuttleResolveFiber(args[0], true)
 			if err != nil {
 				return err
@@ -64,6 +71,16 @@ count as coverage. --check validates and reports without writing a companion.
 			if err != nil {
 				return err
 			}
+			var pr *shuttle.ChangePR
+			if prNumber != 0 {
+				pr, base, head, err = shuttle.ResolveChangePR(a.env, repo, prNumber)
+				if err != nil {
+					return err
+				}
+				if name == "" {
+					name = fmt.Sprintf("pr-%d", prNumber)
+				}
+			}
 			var story *shuttle.ChangeStory
 			if storyPath != "" {
 				path, err := a.env.Abs(storyPath)
@@ -89,6 +106,12 @@ count as coverage. --check validates and reports without writing a companion.
 			change, hunks, err := shuttle.BuildChange(a.env, repo, base, head, story)
 			if err != nil {
 				return err
+			}
+			if pr != nil {
+				change.PR = pr
+				change.Title = pr.Title
+				change.HeadRef = pr.HeadBranch
+				change.BaseRef = "origin/" + pr.BaseBranch
 			}
 			report := shuttle.ValidateChange(change, hunks)
 			if name == "" {
@@ -160,12 +183,12 @@ count as coverage. --check validates and reports without writing a companion.
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&base, "base", "", "Base commit or ref (required; comparison starts at its merge base with head)")
+	cmd.Flags().StringVar(&base, "base", "", "Base commit or ref (alternative to --pr; comparison starts at its merge base with head)")
 	cmd.Flags().StringVar(&head, "head", "HEAD", "Head commit or ref")
 	cmd.Flags().StringVar(&repo, "repo", "", "Worktree directory (fiber's shuttle.project_dir, else cwd)")
 	cmd.Flags().StringVar(&storyPath, "story", "", "JSON story with chapters, stops, flags and role overrides")
 	cmd.Flags().StringVar(&name, "name", "", "Companion filename stem (head ref, else fiber slug)")
 	cmd.Flags().BoolVar(&check, "check", false, "Validate and report without writing")
-	_ = cmd.MarkFlagRequired("base")
+	cmd.Flags().IntVar(&prNumber, "pr", 0, "GitHub PR number (alternative to --base and --head)")
 	return cmd
 }

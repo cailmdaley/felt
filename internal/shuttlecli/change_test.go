@@ -2,12 +2,14 @@ package shuttlecli
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/shuttle"
+	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
 func TestChangeCommandRealGit(t *testing.T) {
@@ -88,6 +90,27 @@ func TestChangeCommandRealGit(t *testing.T) {
 	}
 	if c.Story != nil || c.Repo.Dir != repo || c.HeadRef != "topic/change" || c.Base != base {
 		t.Fatalf("bundle: %+v", c)
+	}
+	git("remote", "add", "origin", repo)
+	sysenvtest.FakeCommand(t, env, "gh", fmt.Sprintf(`printf '%%s' '{"number":7,"title":"A first-class PR","headRefName":"topic/change","headRefOid":"%s","baseRefName":"main","state":"OPEN","statusCheckRollup":[]}'`, git("rev-parse", "HEAD")))
+	if _, err := run("review", "--pr", "7"); err != nil {
+		t.Fatal(err)
+	}
+	prBytes, err := os.ReadFile(filepath.Join(filepath.Dir(bundlePath), "pr-7.change.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var prBundle shuttle.Change
+	if err := json.Unmarshal(prBytes, &prBundle); err != nil {
+		t.Fatal(err)
+	}
+	if prBundle.PR == nil || prBundle.PR.Number != 7 || prBundle.Title != "A first-class PR" || prBundle.BaseRef != "origin/main" || prBundle.HeadRef != "topic/change" || prBundle.Stats.Additions != 1 {
+		t.Fatalf("PR bundle: %+v", prBundle)
+	}
+	for _, field := range []string{`"pr":`, `"stats":`} {
+		if strings.Index(string(prBytes), field) > strings.Index(string(prBytes), `"commits":`) {
+			t.Fatalf("%s follows commits", field)
+		}
 	}
 	storyPath := filepath.Join(t.TempDir(), "story.json")
 	put(storyPath, `{"title":"A reading order","overview":"Overview","flags":[{"file":"main.go","from":1,"to":1,"text":"Look here"}],"chapters":[{"id":"change","title":"Change","narrative":"Read it","why_here":"Start here","stops":[{"file":"main.go","from":1,"to":1,"importance":"critical","note":"Reason"}]}],"roles":{"main.go":"generated"}}`)
@@ -192,6 +215,9 @@ func TestChangeCommandRealGit(t *testing.T) {
 		want string
 	}{
 		{"required base", []string{"plain"}, "base"},
+		{"positive PR", []string{"plain", "--pr", "0"}, "supply"},
+		{"PR versus base", []string{"plain", "--pr", "3", "--base", base}, "cannot be combined"},
+		{"PR versus head", []string{"plain", "--pr", "3", "--head", "HEAD"}, "cannot be combined"},
 		{"unknown base", []string{"plain", "--base", "absent"}, "absent"},
 		{"unknown head", []string{"plain", "--base", base, "--head", "absent"}, "absent"},
 		{"name traversal", []string{"plain", "--base", base, "--name", "../escape"}, "filename stem"},

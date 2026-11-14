@@ -23,6 +23,8 @@ type Change struct {
 	Head    string         `json:"head"`
 	BaseRef string         `json:"base_ref"`
 	HeadRef string         `json:"head_ref"`
+	PR      *ChangePR      `json:"pr,omitempty"`
+	Stats   ChangeStats    `json:"stats"`
 	Commits []ChangeCommit `json:"commits"`
 	Patch   string         `json:"-"`
 	Files   []ChangeFile   `json:"files"`
@@ -274,6 +276,11 @@ func BuildChange(env *sysenv.Env, repo, base, head string, story *ChangeStory) (
 		return nil, nil, err
 	}
 	hunks, err := c.parsePatch()
+	c.Stats.Files = len(c.Files)
+	for _, f := range c.Files {
+		c.Stats.Additions += f.Additions
+		c.Stats.Deletions += f.Deletions
+	}
 	return c, hunks, err
 }
 
