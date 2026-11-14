@@ -4,14 +4,15 @@ import { familyModel, type FamilyModel, type MapFeeds, type MapFile, type MapThr
 import { htmlEl as el, markPath, markSvg } from '../family/drawing.js'
 import { age } from '../civilDay.js'
 import { ASIDE_SECTIONS, SECTION_WORD, opening, outline, tally, underAll, type AsideSection, type Line, type Under } from '../family/outline.js'
-import { bindDrawnPage } from '../FileViewerPanel.js'
+import { cacheDocumentTitle } from './DocumentTitles.js'
+import { bindDrawnPage, readThumbnailMetadata } from '../FileViewerPanel.js'
 import { basename, fileBytesUrl } from '../utils.js'
 import type { Conversations } from '../conversationOpening.js'
 import { threadKey, threadState, type ThreadIndex } from '../threads.js'
 import { fiberKey, parseDocKey, type DocKey } from './documents.js'
 import { slug } from '../threadOutline.js'
 import type { FiberActs } from './Dock.js'
-import { SENT_ICON, sendLines, type Send, type SentFile } from './sendLines.js'
+import { SENT_ICON, changeSendLabel, sendLines, type Send, type SentFile } from './sendLines.js'
 import { headerIcon, type HeaderIcon } from './headerIcon.js'
 import { Thumbnail } from './Thumbnail.js'
 import './family-page.css'
@@ -128,6 +129,7 @@ export class FamilyPage {
   private readonly embedded = new Map<string, EmbeddedDocument & { doc: DocKey }>()
   /** Each thread's sent figures, by file, kept while its list is open so going back to it draws them at once. */
   private readonly thumbs = new Map<string, Map<string, Thumbnail>>()
+  private readonly changeReceipts = new Map<string, number>()
 
   /**
    * `conversations` moves Rex quietly to a thread's existing window;
@@ -451,6 +453,19 @@ export class FamilyPage {
       item.toggleAttribute('data-unread', sent.file.unread)
       if (sent.mark === 'image') { item.classList.add('fp-file-image'); item.append(this.thumbOf(thread.key, sent).el) }
       else item.append(fileIcon(sent.mark), el('span', 'fp-file-name', sent.label))
+      const doc = parseDocKey(sent.file.key)
+      if (doc && /\.change\.json$/i.test(doc.path)) {
+        const prior = this.changeReceipts.get(sent.file.key)
+        const fresh = prior !== undefined && prior !== sent.file.at
+        this.changeReceipts.set(sent.file.key, sent.file.at)
+        void readThumbnailMetadata(fileBytesUrl(this.feeds.shuttleBase, doc.path, doc.owner), new AbortController().signal, (source, etag) => {
+          cacheDocumentTitle(sent.file.key, doc.path, typeof source === 'string' ? source : new TextDecoder().decode(source), etag)
+          const label = changeSendLabel(sent.file.key, basename(doc.path))
+          item.querySelector('.fp-file-name')!.textContent = label
+          item.title = label
+          item.setAttribute('aria-label', label)
+        }, undefined, fresh)
+      }
       return item
     }))
     return line

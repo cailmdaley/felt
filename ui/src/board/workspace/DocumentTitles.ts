@@ -1,5 +1,5 @@
 import { provesContent } from '../documentResources.js'
-export interface DocumentTitle { title?: string; preview: string; etag?: string }
+export interface DocumentTitle { title?: string; preview: string; etag?: string; change?: { branch?: string; number?: number; additions?: number; deletions?: number } }
 const titles = new Map<string, DocumentTitle>()
 const versions = new Map<string, DocumentTitle>()
 const listeners = new Set<(key: string) => void>()
@@ -68,7 +68,19 @@ export function extractDocumentTitle(path: string, whole: string | Uint8Array): 
   if (typeof source === 'string') {
     if (/\.change\.json$/i.test(path)) {
       const title = /"title"\s*:\s*("(?:\\.|[^"\\])*")/.exec(source)?.[1]
-      return { title: title ? clean(JSON.parse(title)) : undefined, preview: 'Change review' }
+      const pr = /"pr"\s*:\s*(\{[\s\S]*?\n?\s*\})/.exec(source)?.[1] ?? ''
+      const stats = /"stats"\s*:\s*(\{[^}]*\})/.exec(source)?.[1] ?? ''
+      const branch = /"head_branch"\s*:\s*("(?:\\.|[^"\\])*")/.exec(pr)?.[1]
+        ?? /"head_ref"\s*:\s*("(?:\\.|[^"\\])*")/.exec(source)?.[1]
+      const number = /"number"\s*:\s*(\d+)/.exec(pr)?.[1]
+      const additions = /"additions"\s*:\s*(\d+)/.exec(stats)?.[1]
+      const deletions = /"deletions"\s*:\s*(\d+)/.exec(stats)?.[1]
+      return { title: title ? clean(JSON.parse(title)) : undefined, preview: 'Change review', change: {
+        branch: branch ? JSON.parse(branch) : undefined,
+        number: number ? Number(number) : undefined,
+        additions: additions === undefined ? undefined : Number(additions),
+        deletions: deletions === undefined ? undefined : Number(deletions),
+      } }
     }
     if (/\.html?$/i.test(path)) {
       const parsed = new DOMParser().parseFromString(source, 'text/html')
@@ -147,6 +159,6 @@ export function cacheDocumentTitle(key: string, path: string, source: string | U
   if (current.size > 2000) current.delete(current.values().next().value!)
   touch(key, next)
   save()
-  if (held !== next && (held?.title !== next.title || held?.preview !== next.preview)) for (const listener of listeners) listener(key)
+  if (held !== next && (held?.title !== next.title || held?.preview !== next.preview || JSON.stringify(held?.change) !== JSON.stringify(next.change))) for (const listener of listeners) listener(key)
   return next
 }

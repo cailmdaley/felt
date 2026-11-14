@@ -49,6 +49,21 @@ const press = (el: Element, key: string): KeyboardEvent => { const event = new K
 afterEach(() => { document.body.replaceChildren(); vi.restoreAllMocks() })
 
 describe('the page', () => {
+  it('peeks a sent change for its PR label and rereads it when a rebake receipt arrives', async () => {
+    const change: MapFile = { key: 'labels:/review.change.json', name: 'review.change.json', at: now, unread: true }
+    let additions = 12
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify({ version: 2, title: 'A useful change', head_ref: 'topic', pr: { number: 42, head_branch: 'feat/stack' }, stats: { additions, deletions: 3 } }), { status: 206, headers: { etag: `W/"${additions}"` } }))
+    const ownFeeds = { ...feeds, lead: async () => undefined, files: (c: KanbanCard) => c.id === mid.id ? [change] : [], fiberAt: () => 'Wrong fiber label' }
+    const { family } = made({ feeds: ownFeeds })
+    click(row(family, 'Mid').querySelector('.fp-sent')!)
+    await vi.waitFor(() => expect(files(family, 'Mid')).toEqual(['#42 A useful change · feat/stack · +12 −3']))
+    additions = 27
+    change.at += 1000
+    family.update(root, new ThreadIndex(cards), now + 1000)
+    await vi.waitFor(() => expect(files(family, 'Mid')).toEqual(['#42 A useful change · feat/stack · +27 −3']))
+    expect(fetch).toHaveBeenCalledTimes(2)
+    family.dispose()
+  })
   it('announces keyboard selection without adding a live region to the page', async () => {
     const { family } = made()
     const first = row(family, 'hub')

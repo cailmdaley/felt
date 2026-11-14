@@ -29,7 +29,14 @@ export function addChangeFixtures(fixture: WorkspaceExample, now: number): void 
   }
   for (const [name, change] of [['family', bundle], ['plain', plain as ChangeBundle], ['large', large]] as const) {
     const path = `${dir}/${name}.change.json`
-    fixture.files.push({ owner: WORKSPACE_HOST, path, mime: 'application/json', body: new Blob([JSON.stringify(change)], { type: 'application/json' }) })
+    const number = name === 'family' ? 42 : name === 'plain' ? 43 : 44
+    const titled = { ...change, title: name === 'plain' ? 'Read a diff without a story' : change.title }
+    const metadata = {
+      version: 2, title: titled.title, head_ref: `feat/${name}-review`,
+      pr: { number, title: titled.title, url: `https://example.invalid/pull/${number}`, head_branch: `feat/${name}-review`, base_branch: 'main', state: 'OPEN', draft: false, mergeable: 'MERGEABLE', checks: { total: 1, passed: 1, failed: 0, pending: 0 } },
+      stats: { files: change.files.length, additions: change.files.reduce((n, f) => n + f.additions, 0), deletions: change.files.reduce((n, f) => n + f.deletions, 0) },
+    }
+    fixture.files.push({ owner: WORKSPACE_HOST, path, mime: 'application/json', body: new Blob([JSON.stringify({ ...metadata, ...titled, head_ref: metadata.head_ref, pr: metadata.pr, stats: metadata.stats })], { type: 'application/json' }) })
     fixture.receipts.push({ ...fixture.receipts[0], uid: WORKSPACE_UID, fiber: WORKSPACE_ID, host: WORKSPACE_HOST, fullPath: path, basename: `${name}.change.json`, timestamp: now - 15_000 })
   }
   fixture.files.push({ owner: WORKSPACE_HOST, path: `${dir}/figure.png`, mime: 'image/png', body: blobFor(imageData, 'image/png') })

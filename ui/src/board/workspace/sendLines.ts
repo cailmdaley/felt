@@ -1,6 +1,7 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import type { MapFile } from '../family/model.js'
 import type { HeaderIcon } from './headerIcon.js'
+import { declaredTitle } from './DocumentTitles.js'
 import { slug } from '../threadOutline.js'
 import { COMPANION_NAMES, documentKind, normalizeAbsolutePath, parseDocKey } from './documents.js'
 
@@ -19,6 +20,16 @@ const GENERIC = new Set<string>([...COMPANION_NAMES, 'index.html'])
 const LONG_NAME = 32
 
 const basename = (path: string): string => path.slice(path.lastIndexOf('/') + 1)
+
+export function changeSendLabel(key: string, fallback: string): string {
+  const metadata = declaredTitle(key)
+  const change = metadata?.change
+  return [
+    `${change?.number ? `#${change.number} ` : ''}${metadata?.title ?? fallback}`,
+    change?.branch,
+    change?.additions === undefined || change.deletions === undefined ? undefined : `+${change.additions} −${change.deletions}`,
+  ].filter(Boolean).join(' · ')
+}
 
 export function sentMark(path: string): SentMark {
   const kind = documentKind(path)
@@ -57,7 +68,7 @@ export function sendLines(files: readonly MapFile[], fiberAt: (path: string) => 
       if (!path) return { file, label: file.name, mark: sentMark(file.name) === 'image' ? 'other' : sentMark(file.name) }
       const name = basename(path), parent = basename(path.slice(0, path.lastIndexOf('/')))
       const alone = placed.filter(other => other.fiber === fiber).length === 1
-      const label = fiber ? (GENERIC.has(name.toLowerCase()) || alone ? fiber : name) : parent ? `${parent}/${name}` : name
+      const label = /\.change\.json$/i.test(name) ? changeSendLabel(file.key, name) : fiber ? (GENERIC.has(name.toLowerCase()) || alone ? fiber : name) : parent ? `${parent}/${name}` : name
       return { file, label, mark: sentMark(path) }
     })
     return { at, files: [...sent.filter(file => file.mark !== 'image'), ...sent.filter(file => file.mark === 'image')] }
