@@ -27,9 +27,35 @@ export function addChangeFixtures(fixture: WorkspaceExample, now: number): void 
         { kind: 'addition' as const, old: 0, new: index + 1, text: `export const value${index + 1} = ${index + 1};` },
       ]).flat(), hunks, remaining: hunks }],
   }
-  for (const [name, change] of [['family', bundle], ['plain', plain as ChangeBundle], ['large', large]] as const) {
+  const paths = [
+    ...['bins', 'catalog', 'density', 'sampling', 'weights'].map(name => `src/shear/nz_${name}.py`),
+    ...['reader', 'writer', 'schema', 'cache'].map(name => `src/shear/io/${name}.py`),
+    ...['estimate', 'response', 'selection'].map(name => `src/shear/calibration/core/${name}.py`),
+    'src/shear/obsolete.py', 'src/shear/pipeline.py', 'config/defaults.toml', 'docs/calibration.md',
+    ...['bins', 'catalog', 'density', 'sampling', 'weights', 'response', 'pipeline'].map(name => `tests/shear/test_${name}.py`),
+    'tests/fixtures/catalog.json', 'generated/schema.json',
+  ]
+  const treeFiles = paths.map((path, index) => {
+    const status = index < 5 ? 'added' : index === 12 ? 'deleted' : index === 13 ? 'renamed' : 'modified'
+    const role = path.startsWith('tests/') ? 'test' : path.startsWith('generated/') ? 'generated' : path.startsWith('docs/') ? 'docs' : path.startsWith('config/') ? 'config' : 'implementation'
+    const added = status === 'added', deleted = status === 'deleted'
+    const hunk = { file: path, old_from: added ? 0 : 1, old_lines: added ? 0 : 1, new_from: deleted ? 0 : 1, new_lines: deleted ? 0 : 1,
+      windows: [{ old_from: added ? 0 : 1, old_lines: added ? 0 : 1, new_from: deleted ? 0 : 1, new_lines: deleted ? 0 : 1, rows: added || deleted ? 1 : 2, start: 0 }] }
+    return { path, role, status, ...(status === 'renamed' ? { old_path: 'src/shear/run.py' } : {}),
+      additions: deleted ? 0 : 1, deletions: added ? 0 : 1,
+      header: `diff --git a/${path} b/${path}\n--- ${added ? '/dev/null' : `a/${path}`}\n+++ ${deleted ? '/dev/null' : `b/${path}`}\n`,
+      lines: [...(added ? [] : [{ kind: 'deletion' as const, old: 1, new: 0, text: 'value = 0' }]), ...(deleted ? [] : [{ kind: 'addition' as const, old: 0, new: 1, text: 'value = 1' }])],
+      hunks: [hunk], remaining: index === 0 ? [] : [hunk] }
+  }) satisfies ChangeBundle['files']
+  const tree: ChangeBundle = { ...bundle, title: 'Calibrate redshift distributions across the pipeline', head: '6'.repeat(40), files: treeFiles,
+    areas: [{ name: 'Redshift distributions', role: 'implementation', files: paths.slice(0, 16), lines: 25 }, { name: 'Tests', role: 'test', files: paths.slice(16, 24), lines: 16 }],
+    story: { overview: 'Five small redshift modules keep catalog selection, density estimation and sampling separate. The pipeline composes them; tests check each boundary.', flags: [],
+      chapters: [{ id: 'density', title: 'Start with the redshift bins', narrative: 'The bins define the shared coordinate system.', why_here: '',
+        stops: [{ file: paths[0], note: 'Build bins before estimating a distribution.', importance: 'important', hunks: treeFiles[0].hunks }] }] },
+  }
+  for (const [name, change] of [['family', bundle], ['plain', plain as ChangeBundle], ['large', large], ['tree', tree]] as const) {
     const path = `${dir}/${name}.change.json`
-    const number = name === 'family' ? 42 : name === 'plain' ? 43 : 44
+    const number = { family: 42, plain: 43, large: 44, tree: 45 }[name]
     const titled = { ...change, title: name === 'plain' ? 'Read a diff without a story' : change.title }
     const metadata = {
       version: 2, title: titled.title, head_ref: `feat/${name}-review`,

@@ -14,6 +14,7 @@ import { createChangeReview } from './changeReview.js'
 import { createChangeNavigation } from './changeNavigation.js'
 import { mountChangeWindow } from './changeWindow.js'
 import { changeMap } from './changeMap.js'
+import { changeTree } from './changeTree.js'
 import { changeFileLabel } from './changeFileLabel.js'
 import { readingAnchor, windowRows, type ChangeReadingState } from './changePosition.js'
 
@@ -308,6 +309,21 @@ export function mountChangeReader(
     }
     opening.prepend(box)
   }
+  const tree = changeTree(files, file => {
+    const view = views.find(view => view.file.path === file.path)
+    if (view) {
+      view.showAll()
+      reveal(view.card)
+    }
+  })
+  tree.dataset.windowId = 'file-tree'
+  main.append(tree)
+  navigation.onProgress(() => {
+    for (const row of tree.querySelectorAll<HTMLElement>('.change-tree-file')) {
+      const ids = views.filter(view => view.file.path === row.dataset.file).map(view => view.card.dataset.viewId!)
+      row.dataset.viewed = String(ids.length > 0 && ids.every(navigation.isViewed))
+    }
+  })
   const story = section(
     'Story',
     bundle.story
@@ -365,6 +381,7 @@ export function mountChangeReader(
   const anchor = reading.anchor
   const anchorHosts = () => [
     ...(map ? [map] : []),
+    tree,
     ...windows.keys(),
     ...views.map(view => view.card),
     ...sections.map((section) => section.element).reverse(),

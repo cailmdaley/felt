@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { mkdir } from 'node:fs/promises'
+import { join } from 'node:path'
 import { pageBack, showFile } from './familyNav.mjs'
 
 /** Runs with the workspace journeys, against the same owner-routed file harness. */
@@ -71,6 +73,45 @@ export function registerChangeJourneys(test) {
     assert.match(sends[0].user_message, /Does the root exclude itself/)
     assert.equal(await page.getByRole('textbox', { name: 'Overall review note' }).inputValue(), '')
   }, viewport)
+  for (const width of [1440, 390]) for (const colorScheme of ['light', 'dark']) test(`Change file tree groups and opens every lane (${width}px ${colorScheme})`, async page => {
+    await page.emulateMedia({ colorScheme })
+    await open(page)
+    await page.goto(page.url().replace('family.change.json', 'tree.change.json'))
+    const reader = page.locator('.ws-selected .change-reader')
+    const tree = reader.locator('.change-tree')
+    await tree.waitFor()
+    assert.equal(await tree.locator('.change-tree-file').count(), 25)
+    assert.equal(await tree.locator('[data-group="implementation"] .change-tree-file').count(), 16)
+    assert.equal(await tree.locator('[data-group="tests"] .change-tree-file').count(), 8)
+    assert.equal(await tree.locator('[data-group="generated"] .change-tree-file').count(), 1)
+    const text = await tree.innerText()
+    for (const label of [/src\/shear\//, /calibration\/core\//, /\bnew\b/, /renamed/, /deleted/, /from src\/shear\/run\.py/]) assert.match(text, label)
+    const order = await tree.locator('[data-group]').evaluateAll(groups => groups.map(group => group.dataset.group))
+    assert.deepEqual(order, ['implementation', 'tests', 'generated'])
+    const [opening, treeBox] = await Promise.all([reader.locator('.change-opening').boundingBox(), tree.boundingBox(), reader.locator('.change-chapter').first().waitFor()])
+    assert.ok(opening && treeBox && opening.y < treeBox.y, 'the story opening reads before the tree')
+    assert.ok(treeBox.y < (await reader.locator('.change-chapter').first().boundingBox()).y, 'the tree comes before the chapters')
+    assert.ok(await reader.locator('.change-scroll').evaluate(node => node.scrollWidth <= node.clientWidth + 1), 'tree fits the reader width')
+    if (process.env.CHANGE_SHOTS_DIR) {
+      await mkdir(process.env.CHANGE_SHOTS_DIR, { recursive: true })
+      await reader.locator('.change-heading').evaluate(node => node.scrollIntoView({ block: 'start' }))
+      await page.screenshot({ path: join(process.env.CHANGE_SHOTS_DIR, `change-tree-${width}-${colorScheme}.png`) })
+      await tree.evaluate(node => node.scrollIntoView({ block: 'start' }))
+      await tree.screenshot({ path: join(process.env.CHANGE_SHOTS_DIR, `change-tree-${width}-${colorScheme}-inventory.png`) })
+    }
+    for (const path of ['src/shear/nz_bins.py', 'tests/shear/test_bins.py', 'src/shear/pipeline.py']) {
+      await tree.locator(`button[data-file="${path}"]`).click()
+      const card = reader.locator(`.change-file[data-change-file="${path}"]`).first()
+      await card.locator('diffs-container [data-line-index]').first().waitFor()
+      assert.equal(await card.getAttribute('open'), '')
+      const [box, scroll] = await Promise.all([card.boundingBox(), reader.locator('.change-scroll').boundingBox()])
+      assert.ok(box && scroll && box.y >= scroll.y && box.y < scroll.y + scroll.height, 'tree link reveals the diff in its lane')
+    }
+    const row = tree.locator('button[data-file="src/shear/pipeline.py"]')
+    assert.equal(await row.getAttribute('data-viewed'), 'false')
+    await reader.locator('.change-file[data-change-file="src/shear/pipeline.py"] .change-viewed').click()
+    assert.equal(await row.getAttribute('data-viewed'), 'true')
+  }, { width, height: width === 390 ? 844 : 900 })
   test('A change without a story retains every file, and a large change mounts bounded diff windows', async page => {
     await open(page)
     const family = page.url()

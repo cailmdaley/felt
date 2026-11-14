@@ -41,6 +41,7 @@ export function createChangeNavigation(
     label: string
   }[] = []
   const marks = new Map<string, HTMLButtonElement[]>()
+  const progressListeners: (() => void)[] = []
   const updateProgress = (): void => {
     const ids = [...marks.keys()]
     progress.textContent = `${ids.filter((id) => viewed.has(id)).length}/${ids.length}`
@@ -54,6 +55,7 @@ export function createChangeNavigation(
         ? `${section.label}  ${section.ids.filter((id) => viewed.has(id)).length}/${section.ids.length}`
         : section.label
     }
+    for (const listener of progressListeners) listener()
     save(`${prefix}:viewed`, [...viewed])
   }
   const mark = (id: string): HTMLButtonElement => {
@@ -153,6 +155,7 @@ export function createChangeNavigation(
     sections,
     updateProgress,
     isViewed: (id: string) => viewed.has(id),
+    onProgress: (listener: () => void) => progressListeners.push(listener),
     anchor(element: () => Element | null | undefined, offset: number, ready: Promise<void>) {
       const target = { element, offset }
       destination = target
