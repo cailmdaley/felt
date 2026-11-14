@@ -3,13 +3,20 @@
 The story is the PR body: one text for the board and GitHub, opening on what the change produces and what most needs the human's judgment.
 The reader shows that story, with code folded until requested, then tests and the changed lines you left out.
 Comments come back to the worker as one message.
+The human can look before you have done any of this: every constitution with a `project_dir` has a Change page on the board, which bakes the checked-out branch as it stands, uncommitted work included, each time it is opened.
 The [changes concept](https://cailmdaley.github.io/felt/concepts/changes/) documents the CLI and bundle format.
 A store's review practice holds the project's judgment; this page holds the pass and its mechanics.
 
 ## The pass
 
-1. **Review the design and clean the branch.** Ask whether the change is as simple as possible, integrates into the existing design, reuses what exists and keeps the diff small.
-   Fix what doesn't meet those principles; commits read in order and tests pass.
+1. **Review the change against the principles and fix what you find.** This is the code review; it comes before any story.
+   - **As simple as possible.** Could it do the same with fewer parts, options or layers?
+   - **Integrated, not stapled on.** An addition reshapes the existing design as if it had always been there, rather than sitting beside it.
+   - **Existing code used.** No second helper for something the codebase already does.
+   - **A small diff.** Nothing unrelated rides along.
+   - **A clear design.** Someone new to the code can say what each part is for.
+
+   Commits read in order and tests pass.
 2. **Get an independent review.** A fresh reviewer of another model family reads the diff against those principles, not your story's conclusions.
    Fix what they find.
    Keep up to three facts needing the human's judgment in `flags`, including merge-time facts that the diff cannot show.
@@ -18,6 +25,7 @@ A store's review practice holds the project's judgment; this page holds the pass
 4. **Bake the PR.** Write the story beside the fiber as `pr-N.story.json`, then run `shuttle change <fiber> --pr N --story pr-N.story.json`.
    The CLI fetches the PR's exact head and its own base branch, including stacked PRs, and writes `pr-N.change.json`.
    The bundle appears in the fiber's sends by title, branch and line counts.
+   Name the PR in the constitution too (`shuttle.change.prs: [N]`), and its Change page bakes that PR with this story on every opening; a card that follows several PRs lists them there.
    A relative link from a tapestry opens it too.
 5. **Absorb the comments.** Each code comment names a `path:line` against a head SHA.
    Answer in the conversation, change the code and update the same story and PR body.
