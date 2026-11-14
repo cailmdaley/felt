@@ -73,7 +73,7 @@ func TestBuiltinRegistry_PiRefreshRoles(t *testing.T) {
 		"pi-haiku":       {provider: "anthropic", model: "claude-haiku-5-5"},
 		"pi-sonnet":      {provider: "anthropic", model: "claude-sonnet-5-5"},
 		"pi-opus":        {provider: "anthropic", model: "claude-opus-5-5"},
-		"pi-fable":       {provider: "anthropic", model: "claude-fable-5-1"},
+		"pi-fable":       {provider: "anthropic", model: "claude-fable-5-2"},
 	}
 	for id, expected := range want {
 		got, ok := reg.Find(id)

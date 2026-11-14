@@ -157,7 +157,7 @@
     "id": "pi-fable",
     "cli": "pi",
     "provider": "anthropic",
-    "model": "claude-fable-5-1",
+    "model": "claude-fable-5-2",
     "requires_model": true,
     "effort_levels": ["low", "medium", "high", "xhigh", "max"],
     "default_effort": "low",
