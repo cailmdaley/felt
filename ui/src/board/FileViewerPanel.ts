@@ -706,8 +706,9 @@ function buildHtmlViewer(
         }
       } else if (message.type === 'height' && options.fit && frame === iframe) {
         fit(message.payload.height as number)
-        // The page grown or shrunk to its rewrite's height: its reader returns beside their passage.
-        if (carried) { carried.scroller.scrollTop = carried.top; carried = null }
+        // The page grown or shrunk to its rewrite's height: its reader returns beside their passage, unless they have scrolled since.
+        if (carried && carried.scroller.scrollTop === carried.at) carried.scroller.scrollTop = carried.top
+        carried = null
       } else if (message.type === 'reveal' && options.fit && frame === iframe) {
         // The board's own scroller carries a fitted page: bring the fragment's
         // offset to its top, as the page would have scrolled itself.
@@ -749,7 +750,7 @@ function buildHtmlViewer(
   // grows by the same step on every report; it keeps the height it had.
   let fitted = 0, step = 0, coupled = false
   /** Where a fitted page's scroller stands after a rewrite, once the rewrite has its height. */
-  let carried: { scroller: HTMLElement; top: number } | null = null
+  let carried: { scroller: HTMLElement; top: number; at: number } | null = null
   const fit = (height: number): void => {
     if (coupled) return
     if (height > fitted && fitted && height - fitted === step) { coupled = true; return }
@@ -804,7 +805,7 @@ function buildHtmlViewer(
         if (scroller) {
           const y = scroller.getBoundingClientRect().top - wrap.getBoundingClientRect().top
           const top = scroller.scrollTop + carryReading(before, bridge.anchors, y) - y
-          carried = y > 0 && top !== scroller.scrollTop ? { scroller, top } : null
+          carried = y > 0 && top !== scroller.scrollTop ? { scroller, top, at: 0 } : null
         }
         currentBridge.command('pause')
         currentBridge.dispose()
@@ -821,7 +822,7 @@ function buildHtmlViewer(
         // where it will stay and the swap only removes its predecessor.
         iframe.remove()
         iframe = frame
-        if (carried) carried.scroller.scrollTop = carried.top
+        if (carried) { carried.scroller.scrollTop = carried.top; carried.at = carried.scroller.scrollTop }
         htmlWeight = frameWeights.get(frame) ?? byteWeights.get(frame) ?? 1
         publishWeight()
         bridge.command('pdf:scan')
