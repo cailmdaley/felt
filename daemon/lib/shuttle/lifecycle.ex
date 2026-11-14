@@ -47,9 +47,11 @@ defmodule Shuttle.Lifecycle do
 
   @doc """
   Whether a closed constitution's current worker launched after it closed: a
-  past session the human resumed on the card (`Shuttle.SessionResume`). A
-  closure ends the worker it finds running; a worker launched after it runs
-  until the human ends it, and the card stays closed.
+  past session the human resumed on the card (`Shuttle.SessionResume`). The
+  close that first stamped `closed_at` ends the worker it found running; a
+  worker launched after that stamp runs until the human ends it, and the card
+  stays closed. Closing the card again keeps the stamp, so it does not end
+  such a worker.
   """
   def launched_after_close?(fiber) do
     dispatched =

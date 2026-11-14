@@ -82,9 +82,10 @@ func Column(f *felt.Felt, block *Block, live bool, today time.Time) string {
 }
 
 // LaunchedAfterClose reports whether a closed fiber's current worker launched
-// after it closed: a past session the human resumed on the card. A closure
-// ends the worker it finds running; one launched after it leaves the card
-// closed and runs until the human ends it.
+// after it closed: a past session the human resumed on the card. The close
+// that first stamped closed_at ends the worker it found running; one launched
+// after that stamp leaves the card closed and runs until the human ends it,
+// and closing the card again keeps the stamp.
 func LaunchedAfterClose(f *felt.Felt) bool {
 	dispatched := DispatchedAt(f)
 	return f.Status == felt.StatusClosed && f.ClosedAt != nil && !dispatched.IsZero() &&
