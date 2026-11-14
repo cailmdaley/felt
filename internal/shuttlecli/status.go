@@ -439,16 +439,6 @@ func (a *app) runStatusOneFiber(query string) error {
 	return nil
 }
 
-// dispatchedAt is the current worker's launch stamp, zero when none is recorded.
-func dispatchedAt(f *felt.Felt) time.Time {
-	runtime := felt.MappingValueNode(f.ExtraFields[shuttle.FacetKey], shuttle.RuntimeKey)
-	stamp := felt.MappingValueNode(runtime, "dispatched_at")
-	if stamp == nil {
-		return time.Time{}
-	}
-	return shuttle.RuntimeTimestamp(stamp.Value)
-}
-
 // dispatchAssessment renders the one line a single-fiber report is really for:
 // where the board files the fiber (its Desk column, as --json reports it),
 // whether it is eligible for dispatch and on which host, and the verb that

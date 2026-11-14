@@ -6,8 +6,9 @@ defmodule Shuttle.Poller.SessionReconciliation do
   re-adopts them at boot (`adopt_orphans/1`) and on every poll
   (`reconcile_orphaned_sessions/3`). Terminal and process inventories map each
   worker back to its fiber by the intrinsic uid in its `<leaf>-<uid>-shuttle`
-  name, independent of the launch-time leaf. Open fibers acquire a watcher; closed fibers
-  have their worker stopped. Failed stops keep a watcher and retry at most
+  name, independent of the launch-time leaf. Open fibers acquire a watcher; a closed
+  fiber has its worker stopped unless the worker launched after the closure
+  (`Shuttle.Lifecycle.launched_after_close?/1`). Failed stops keep a watcher and retry at most
   once a minute. Unknown workers are left alone.
 
   Functions take the `Shuttle.Poller.State` struct and return updated state;
@@ -114,7 +115,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
             Logger.debug("Skipping adoption for #{fiber_id}: no positive worker evidence")
             state
 
-          Map.get(fiber, "status") != "closed" ->
+          not Shuttle.Lifecycle.closure_ends_worker?(fiber) ->
             adopt_live_session(state, fiber_id, fiber, uid, session)
 
           true ->
@@ -222,7 +223,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
         cond do
           length(open_ids) == 1 -> {:adopt, hd(open_ids)}
           length(open_ids) > 1 -> :ambiguous
-          length(closed_ids) == 1 -> {:kill_closed, hd(closed_ids)}
+          length(closed_ids) == 1 -> {:closed, hd(closed_ids)}
           length(closed_ids) > 1 -> :ambiguous
           true -> nil
         end
@@ -242,14 +243,10 @@ defmodule Shuttle.Poller.SessionReconciliation do
           adopt_session(state, fiber_id, session)
         end
 
-      {:kill_closed, fiber_id} ->
-        fiber =
-          case Poller.fetch_fiber_full(fiber_id, state) do
-            {:ok, fiber} -> fiber
-            {:error, _} -> nil
-          end
-
-        reap_closed_session(state, fiber_id, fiber, session)
+      # The full document decides: a worker launched after the closure is
+      # adopted, any other is stopped.
+      {:closed, fiber_id} ->
+        adopt_session(state, fiber_id, session)
 
       :ambiguous ->
         Logger.warning(
@@ -264,12 +261,13 @@ defmodule Shuttle.Poller.SessionReconciliation do
     end
   end
 
-  # A live session whose fiber is closed: the worker's deliberate exit (closed
-  # implies handoff), so stamp the clean-exit marker (when the fiber could be
-  # read) before killing the stale session.
+  # A live session whose fiber closed under it: the worker's deliberate exit
+  # (closed implies handoff), so stamp the clean-exit marker (when the fiber
+  # could be read) before killing the stale session. A worker launched after
+  # the closure (`Shuttle.Lifecycle.launched_after_close?/1`) is not one.
   @doc false
   def reap_closed_session(%State{} = state, fiber_id, fiber, session, runtime_key \\ nil) do
-    if is_map(fiber) and Map.get(fiber, "status") == "closed" and
+    if is_map(fiber) and Shuttle.Lifecycle.closure_ends_worker?(fiber) and
          Poller.host_owned?(Map.get(fiber, "shuttle", %{}), state.own_host_id) and
          closed_stop_due?(state, session) do
       runtime_key = runtime_key || Poller.runtime_key_for_fiber(fiber)

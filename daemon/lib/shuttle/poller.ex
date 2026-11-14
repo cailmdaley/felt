@@ -4211,6 +4211,9 @@ defmodule Shuttle.Poller do
   #      one, a closed fiber or a paused standing constitution is reopened
   #      (`shuttle reopen`). Arming a standing constitution concludes its run,
   #      so a start refused after the write leaves it armed for its next tick.
+  #      A human resuming one of the card's past sessions (`:resume_session`,
+  #      `Shuttle.SessionResume`) arms nothing: the card keeps its lifecycle
+  #      while that worker runs and after it ends.
   #
   # A refusal is `{:arm_refused, %{message, needs}}`. `needs: "project_dir"` is
   # set only from the directory checks in step 2, which the daemon made itself;
@@ -4230,7 +4233,7 @@ defmodule Shuttle.Poller do
           result =
             with :ok <- forced_eligibility(fiber, state, opts),
                  {:ok, directory} <- check_start_directory(state, fiber, opts) do
-              arm_start(state, fiber, directory)
+              if resumes_session?(opts), do: :ok, else: arm_start(state, fiber, directory)
             end
 
           case result do
@@ -4251,6 +4254,8 @@ defmodule Shuttle.Poller do
       {:ok, state}
     end
   end
+
+  defp resumes_session?(opts), do: is_binary(Keyword.get(opts, :resume_session))
 
   defp forced_eligibility(fiber, state, opts) do
     if dispatch_eligible?(fiber, state, opts),

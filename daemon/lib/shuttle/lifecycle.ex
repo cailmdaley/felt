@@ -18,7 +18,9 @@ defmodule Shuttle.Lifecycle do
   or a standing constitution between firings or with its schedule paused) or
   `roles` (a seat at rest). A closed constitution without a verdict awaits the
   human's review when it is top-level or marked `shuttle.review`; an unmarked
-  thread is its orchestrator's to review. An armed
+  thread is its orchestrator's to review, and a closed constitution whose live
+  worker launched after it closed (`launched_after_close?/1`) is in flight
+  until that worker ends. An armed
   standing constitution whose last run asked a question waits in flight, on
   the human's turn. `live?` is whether its worker runs;
   `today` is the civil day a `due:` is read against, this host's as
@@ -29,6 +31,7 @@ defmodule Shuttle.Lifecycle do
     status = fiber["status"]
 
     cond do
+      live? and launched_after_close?(fiber) -> "in_flight"
       status == "closed" and fiber["tempered"] == true -> "tempered"
       status == "closed" and fiber["tempered"] == false -> "discarded"
       status == "closed" and orchestrator_reviews?(shuttle) -> "orchestrator_review"
@@ -41,6 +44,26 @@ defmodule Shuttle.Lifecycle do
       true -> "drafts"
     end
   end
+
+  @doc """
+  Whether a closed constitution's current worker launched after it closed: a
+  past session the human resumed on the card (`Shuttle.SessionResume`). A
+  closure ends the worker it finds running; a worker launched after it runs
+  until the human ends it, and the card stays closed.
+  """
+  def launched_after_close?(fiber) do
+    dispatched =
+      Shuttle.Poller.iso_to_unix_ms(get_in(fiber, ["shuttle", "runtime", "dispatched_at"]))
+
+    closed = Shuttle.Poller.iso_to_unix_ms(fiber["closed_at"])
+
+    fiber["status"] == "closed" and is_integer(dispatched) and is_integer(closed) and
+      dispatched > closed
+  end
+
+  @doc "Whether the constitution's closure ends its live worker: closed, and not since relaunched."
+  def closure_ends_worker?(fiber),
+    do: fiber["status"] == "closed" and not launched_after_close?(fiber)
 
   # An unmarked thread's review belongs to its orchestrator.
   defp orchestrator_reviews?(shuttle),

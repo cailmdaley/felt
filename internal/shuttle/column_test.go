@@ -36,6 +36,15 @@ func TestColumnMatchesTheSharedCases(t *testing.T) {
 		for k, v := range c.Fiber {
 			front[k] = v
 		}
+		// The cases hold felt's JSON shape; frontmatter spells it closed-at.
+		if closed, ok := front["closed_at"].(string); ok {
+			delete(front, "closed_at")
+			stamp, err := time.Parse(time.RFC3339, closed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			front["closed-at"] = stamp
+		}
 		text, err := yaml.Marshal(front)
 		if err != nil {
 			t.Fatal(err)

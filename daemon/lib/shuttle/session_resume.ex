@@ -12,8 +12,11 @@ defmodule Shuttle.SessionResume do
   worker's own terminal, with nothing injected because the human takes the
   next turn. From then on it is an ordinary worker: the board shows it Working
   or Your turn, `shuttle.runtime.session_uuid` names it, a standing schedule
-  waits for it to end, and messages to the card reach it. Starting it arms the
-  card as any forced start does (`Shuttle.Poller`'s forced start).
+  waits for it to end, and messages to the card reach it. Resuming it leaves the
+  card's lifecycle as it was: a retired or paused card does not get its
+  schedule back, a closed or resting card is not armed for an autonomous
+  worker once the human leaves, and a closed card's closure does not end the
+  resumed worker (`Shuttle.Lifecycle.launched_after_close?/1`).
 
   While the card has a live worker, resuming that worker's session attaches
   to it, and resuming any other of its sessions is refused: a card has one
@@ -238,8 +241,6 @@ defmodule Shuttle.SessionResume do
     end
   end
 
-  # Every refusal comes before the launch, because a forced start arms the card
-  # (reopens a closed or paused one) before the dispatcher's own checks run.
   # A session already open in a terminal of its own (resumed before its card
   # ran resumes as workers) is that terminal.
   defp launch(session, fiber, opts) do

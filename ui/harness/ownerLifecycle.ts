@@ -20,7 +20,10 @@ const STARTING_MS = 5 * 60_000
 export function ownerColumn(fiber: Row, live: boolean, nowMs = Date.now()): string {
   const shuttle = record(fiber.shuttle) ?? {}
   const status = fiber.status
-  if (status === 'closed') {
+  // A session the human resumed on a closed card, after its close, is in flight while it runs.
+  const dispatched = Date.parse(String(record(shuttle.runtime)?.dispatched_at ?? ''))
+  const launchedAfterClose = dispatched > Date.parse(String(fiber.closed_at ?? ''))
+  if (status === 'closed' && !(live && launchedAfterClose)) {
     if (fiber.tempered === true) return 'tempered'
     if (fiber.tempered === false) return 'discarded'
     // An unmarked thread's review belongs to its orchestrator.

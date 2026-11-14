@@ -85,7 +85,8 @@ defmodule Shuttle.Dispatcher do
     * `:resume_session` — a conversation of this fiber the human resumes
       (`Shuttle.SessionResume`): the worker resumes exactly that session, with
       no injected prompt and no fresh fallback, because the human takes the
-      next turn. The caller has matched it to the agent's harness.
+      next turn. The caller has matched it to the agent's harness. A forced
+      resume of a session reopens nothing: the fiber keeps its lifecycle.
     * `:user_message` — the user's free-text directive for this dispatch,
       inlined into the prompt at launch (the "From User" block). Transient: it
       rides the dispatch call, never a persisted felt event.
@@ -109,7 +110,14 @@ defmodule Shuttle.Dispatcher do
          :ok <- check_host_owner(fiber, Keyword.get(opts, :own_host_id)),
          :ok <- validate_restoration_request(opts, fiber, prompt_context, force),
          :ok <- check_dispatchable(fiber, force),
-         {:ok, fiber} <- maybe_reopen_on_force(fiber_id, fiber, force, runner, felt_store),
+         {:ok, fiber} <-
+           maybe_reopen_on_force(
+             fiber_id,
+             fiber,
+             force and not is_binary(Keyword.get(opts, :resume_session)),
+             runner,
+             felt_store
+           ),
          {:ok, uid} <- check_uid(fiber_id, fiber),
          :ok <- Shuttle.Terminal.require_config(),
          :ok <- check_not_running(fiber, runner),
@@ -752,7 +760,8 @@ defmodule Shuttle.Dispatcher do
   # other status alike. Manual force-dispatch (the "New session" / "Resume"
   # buttons) explicitly opts in to dispatching a fiber that is not armed;
   # `maybe_reopen_on_force/5` then reopens the YAML so the kanban view
-  # actually reclassifies the card.
+  # actually reclassifies the card, except for a resumed session, which runs
+  # on the card as it stands (`Shuttle.Lifecycle.launched_after_close?/1`).
   defp check_dispatchable(_fiber, true), do: :ok
 
   defp check_dispatchable(fiber, _force) do

@@ -46,7 +46,9 @@ func Verdict(f *felt.Felt) string {
 // put down, or a standing constitution between firings or with its schedule
 // paused) or roles (a seat at rest). A closed constitution without a verdict
 // awaits the human's review when it is top-level or marked for review
-// (block.Review); an unmarked thread is its orchestrator's to review. An armed
+// (block.Review); an unmarked thread is its orchestrator's to review, and a
+// closed constitution whose live worker launched after it closed
+// (LaunchedAfterClose) is in flight until that worker ends. An armed
 // standing constitution whose last run asked a question waits in flight, on
 // the human's turn. live is whether its worker runs; today is the civil day a
 // due date is read against.
@@ -54,7 +56,7 @@ func Verdict(f *felt.Felt) string {
 // board row (Shuttle.Lifecycle.column/3); daemon/test/fixtures/columns holds
 // the two equal.
 func Column(f *felt.Felt, block *Block, live bool, today time.Time) string {
-	if f.Status == felt.StatusClosed {
+	if f.Status == felt.StatusClosed && !(live && LaunchedAfterClose(f)) {
 		if verdict := Verdict(f); verdict != "" {
 			return verdict
 		}
@@ -77,6 +79,27 @@ func Column(f *felt.Felt, block *Block, live bool, today time.Time) string {
 	default:
 		return "drafts"
 	}
+}
+
+// LaunchedAfterClose reports whether a closed fiber's current worker launched
+// after it closed: a past session the human resumed on the card. A closure
+// ends the worker it finds running; one launched after it leaves the card
+// closed and runs until the human ends it.
+func LaunchedAfterClose(f *felt.Felt) bool {
+	dispatched := DispatchedAt(f)
+	return f.Status == felt.StatusClosed && f.ClosedAt != nil && !dispatched.IsZero() &&
+		dispatched.After(*f.ClosedAt)
+}
+
+// DispatchedAt is the current worker's launch stamp (shuttle.runtime.dispatched_at),
+// zero when none is recorded.
+func DispatchedAt(f *felt.Felt) time.Time {
+	runtime := felt.MappingValueNode(f.ExtraFields[FacetKey], RuntimeKey)
+	stamp := felt.MappingValueNode(runtime, "dispatched_at")
+	if stamp == nil {
+		return time.Time{}
+	}
+	return RuntimeTimestamp(stamp.Value)
 }
 
 // stashed reports a fiber put down (horizon: stashed) that no due day which

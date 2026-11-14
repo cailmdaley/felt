@@ -33,7 +33,7 @@ func (a *app) requireReviewReport(f *felt.Felt) error {
 	if block, ok, err := shuttle.BlockOf(f); err != nil || !ok || block.Kind == "standing" {
 		return err
 	}
-	dispatched := dispatchedAt(f)
+	dispatched := shuttle.DispatchedAt(f)
 	if dispatched.IsZero() {
 		return nil
 	}
