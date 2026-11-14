@@ -1,6 +1,6 @@
 import { el } from './changeElements.js'
 
-/** One PR a constitution follows, as `GET /fibers/<id>/change` lists it: GitHub's metadata, or gh's error. */
+/** One PR a constitution follows, as `GET /changes/<id>` lists it: GitHub's metadata, or gh's error. */
 export interface ChangePRListing {
   number: number
   title?: string
@@ -41,7 +41,8 @@ export function drawChangeList(root: HTMLElement, options: ChangeListOptions): v
   let list: HTMLElement | null = null
   let label: HTMLElement | null = null
 
-  const showList = (): void => {
+  /** Draws the list, focusing the row of PR `focus` when one is named. */
+  const showList = (focus?: number): void => {
     shown = undefined
     options.moved(undefined)
     const page = el('div', 'change-pr-list')
@@ -51,9 +52,10 @@ export function drawChangeList(root: HTMLElement, options: ChangeListOptions): v
     page.append(rows)
     list = page
     root.replaceChildren(page)
-    rows.querySelector<HTMLElement>(`[data-pr="${previous ?? ''}"]`)?.focus({ preventScroll: true })
+    if (focus !== undefined) rows.querySelector<HTMLElement>(`[data-pr="${focus}"]`)?.focus({ preventScroll: true })
   }
-  const showPR = (n: number): void => {
+  /** Opens PR `n`; a step keeps the focus on the step taken, or on the way back once there is no step further. */
+  const showPR = (n: number, stepped?: -1 | 1): void => {
     previous = shown = n
     list = null
     options.moved(n)
@@ -62,24 +64,29 @@ export function drawChangeList(root: HTMLElement, options: ChangeListOptions): v
     const back = el('button', 'change-pr-back', '← PRs')
     back.type = 'button'
     back.title = 'Back to the list of PRs'
-    back.addEventListener('click', showList)
+    back.addEventListener('click', () => showList(previous))
     label = el('span', 'change-pr-label')
     paintLabel()
-    const step = (by: number, glyph: string, name: string): HTMLButtonElement => {
+    const step = (by: -1 | 1, glyph: string, name: string): HTMLButtonElement => {
       const to = options.prs[at + by]
       const node = el('button', 'change-pr-step', glyph)
       node.type = 'button'
       node.disabled = to === undefined
       node.title = to === undefined ? name : `${name}: #${to}`
       node.setAttribute('aria-label', node.title)
-      node.addEventListener('click', () => { if (to !== undefined) showPR(to) })
+      node.addEventListener('click', () => { if (to !== undefined) showPR(to, by) })
       return node
     }
-    bar.append(back, label, step(-1, '‹', 'Previous PR'), step(1, '›', 'Next PR'))
+    const before = step(-1, '‹', 'Previous PR'), after = step(1, '›', 'Next PR')
+    bar.append(back, label, before, after)
     const slot = el('div', 'change-pr-slot')
     const page = el('div', 'change-pr-open')
     page.append(bar, slot)
     root.replaceChildren(page)
+    if (stepped) {
+      const taken = stepped < 0 ? before : after
+      ;(taken.disabled ? back : taken).focus({ preventScroll: true })
+    }
     options.open(slot, n)
   }
   const paintLabel = (): void => {
@@ -91,13 +98,18 @@ export function drawChangeList(root: HTMLElement, options: ChangeListOptions): v
 
   if (options.opened !== undefined && options.prs.includes(options.opened)) showPR(options.opened)
   else showList()
+  /** The row holding the focus, which keeps it when the list is redrawn. */
+  const focused = (): number | undefined => {
+    const row = list?.contains(document.activeElement) ? (document.activeElement as HTMLElement).closest<HTMLElement>('[data-pr]') : null
+    return row ? Number(row.dataset.pr) : undefined
+  }
   void options.listings.then(listings => {
     for (const pr of listings) known.set(pr.number, pr)
-    if (list) showList()
+    if (list) showList(focused())
     else paintLabel()
   }, (error: unknown) => {
     for (const n of options.prs) known.set(n, { number: n, error: error instanceof Error ? error.message : String(error) })
-    if (list) showList()
+    if (list) showList(focused())
   })
 }
 

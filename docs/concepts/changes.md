@@ -69,10 +69,10 @@ shuttle:
 ```
 
 With one PR, the Change page bakes it, as `--pr` bakes it; an explicit `--pr N` bakes another.
-With two or more, the page opens on their list, read from GitHub through `shuttle change <fiber> --list` (`GET /api/v1/fibers/<id>/change`) without fetching or baking: each row gives the PR's number and title, head → base, its state (open, draft, merged, closed), its checks and its line counts, or the reason `gh` could not read it.
+With two or more, the page opens on their list, read from GitHub through `shuttle change <fiber> --list` (`GET /api/v1/changes/<id>`) without fetching or baking: each row gives the PR's number and title, head → base, its state (open, draft, merged, closed), its checks and its line counts, or the reason `gh` could not read it.
 A row bakes its PR in the page, under a bar that leads back to the list and steps to the previous and next PR; a rebuild of the page, on Refresh or a return to it, re-bakes the PR left open.
 A review sent from a PR's change opens by naming it, `PR #N <title>`, so the worker that follows several PRs knows which one it concerns.
-Without them, the change is the checkout's branch **as it stands**: its commits since the merge base with `base` — by default `origin/HEAD`'s target, else `origin/main`, else `origin/master` — plus its uncommitted work.
+A constitution that names no PRs has as its change the checkout's branch **as it stands**: its commits since the merge base with `base` — by default `origin/HEAD`'s target, else `origin/main`, else `origin/master` — plus its uncommitted work.
 Tracked edits and untracked files that `.gitignore` does not exclude, up to 1 MiB each, are staged into a copy of the index and committed with `git commit-tree` as one more commit, `Uncommitted changes`, on top of `HEAD`.
 The worktree's own index and refs are never touched; the commit object lands in the object store and is collected like any unreachable object.
 The snapshot commit takes `HEAD`'s identity and dates, so the same work bakes to the same commit and the reader keeps its viewed marks.

@@ -102,10 +102,14 @@ func viewChangePR(env *sysenv.Env, repo string, number int) (*ChangePR, prView, 
 func ListChangePRs(env *sysenv.Env, repo string, numbers []int) []ChangePRListing {
 	listings := make([]ChangePRListing, len(numbers))
 	var wg sync.WaitGroup
+	// At most eight gh processes run at once.
+	slots := make(chan struct{}, 8)
 	for i, number := range numbers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			slots <- struct{}{}
+			defer func() { <-slots }()
 			pr, view, err := viewChangePR(env, repo, number)
 			if err != nil {
 				listings[i] = ChangePRListing{ChangePR: ChangePR{Number: number}, Error: err.Error()}

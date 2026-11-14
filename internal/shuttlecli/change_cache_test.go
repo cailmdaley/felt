@@ -187,7 +187,7 @@ esac`)
 	if err != nil || !strings.Contains(out, "#12\tOpen one\tfeat/a → develop\tOPEN\tchecks 1/2\t+40 −3") || !strings.Contains(out, "#404\tgh pr view 404") {
 		t.Fatalf("table: %q %v", out, err)
 	}
-	for _, flag := range [][]string{{"--pr", "12"}, {"--cache"}, {"--base", "main"}, {"--check"}} {
+	for _, flag := range [][]string{{"--pr", "12"}, {"--cache"}, {"--base", "main"}, {"--check"}, {"--name", "x"}} {
 		if _, _, err := executeIn(t, env, dir, append([]string{"change", "followed", "--list"}, flag...)...); err == nil || !strings.Contains(err.Error(), "--list cannot be combined with "+flag[0]) {
 			t.Fatalf("%v: %v", flag, err)
 		}

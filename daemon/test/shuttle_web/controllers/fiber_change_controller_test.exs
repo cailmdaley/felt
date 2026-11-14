@@ -1,7 +1,8 @@
 defmodule ShuttleWeb.FiberChangeControllerTest do
   @moduledoc """
   `POST /api/v1/fibers/<id>/change` — the board's Change page bakes the
-  constitution's change on its owner; `GET` lists the PRs it follows. Real felt resolves the fiber's store;
+  constitution's change on its owner; `GET /api/v1/changes/<id>` lists the PRs
+  it follows. Real felt resolves the fiber's store;
   a fake shuttle records the argv it is handed and answers as the test asks.
   """
   use ExUnit.Case, async: true
@@ -135,7 +136,7 @@ defmodule ShuttleWeb.FiberChangeControllerTest do
       prs = [%{"number" => 12, "title" => "Open one"}, %{"number" => 404, "error" => "gh: no"}]
       Env.put_env("SHUTTLE_FAKE_OUTPUT", Jason.encode!(prs))
 
-      conn = get(api_conn(), "/api/v1/fibers/tests/review/change")
+      conn = get(api_conn(), "/api/v1/changes/tests/review")
 
       assert conn.status == 200
       assert Jason.decode!(conn.resp_body) == %{"prs" => prs}
@@ -150,17 +151,23 @@ defmodule ShuttleWeb.FiberChangeControllerTest do
 
       Env.put_env("SHUTTLE_FAKE_STATUS", "1")
 
-      conn = get(api_conn(), "/api/v1/fibers/tests/review/change")
+      conn = get(api_conn(), "/api/v1/changes/tests/review")
 
       assert conn.status == 422
       assert Jason.decode!(conn.resp_body)["error"] =~ "fiber belongs to host"
       assert File.exists?(args)
     end
 
-    test "the fiber itself still reads without the change segment", %{args: args} do
-      conn = get(api_conn(), "/api/v1/fibers/tests/review")
+    test "a fiber whose path ends in change reads as that fiber", %{store: store, args: args} do
+      dir = Path.join([store, ".felt", "tests", "review", "change"])
+      File.mkdir_p!(dir)
+      File.write!(Path.join(dir, "change.md"), "---\nname: A note named change\n---\n")
+
+      conn = get(api_conn(), "/api/v1/fibers/tests/review/change")
 
       assert conn.status == 200
+      assert [%{"fiber" => %{"name" => "A note named change"}}] =
+               Jason.decode!(conn.resp_body)["fibers"]
       refute File.exists?(args)
     end
 
@@ -171,13 +178,12 @@ defmodule ShuttleWeb.FiberChangeControllerTest do
         {:ok, 200, "application/json; charset=utf-8", ~s({"prs":[{"number":3}]})}
       )
 
-      conn = get(api_conn(), "/api/v1/fibers/tests/review/change?origin=candide")
+      conn = get(api_conn(), "/api/v1/changes/tests/review?origin=candide")
 
       assert conn.status == 200
       assert Jason.decode!(conn.resp_body) == %{"prs" => [%{"number" => 3}]}
 
-      assert URI.parse(StubGetFileClient.last().url).path ==
-               "/api/v1/fibers/tests/review/change"
+      assert URI.parse(StubGetFileClient.last().url).path == "/api/v1/changes/tests/review"
 
       refute File.exists?(args)
     end

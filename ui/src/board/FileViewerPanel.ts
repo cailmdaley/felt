@@ -470,7 +470,7 @@ const openPRs = new Map<string, number>()
  * `/file` in the ordinary change viewer. A story's relative links resolve
  * beside the fiber, where the story lives. A failed bake is a line in the
  * page, not a viewer error. A constitution that follows two or more PRs opens
- * on their list instead (`GET /fibers/<uid>/change`), each row baking its PR.
+ * on their list instead (`GET /changes/<uid>`), each row baking its PR.
  */
 function buildBakedChange(
   shuttleBase: string,
@@ -482,7 +482,8 @@ function buildBakedChange(
 ): HTMLElement {
   const wrap = document.createElement('div')
   wrap.className = 'kbn-fileview-change'
-  const route = `/api/v1/fibers/${encodeURIComponent(bake.uid)}/change`
+  const uid = encodeURIComponent(bake.uid)
+  const route = `/api/v1/fibers/${uid}/change`
   let viewer: HTMLElement | null = null
   let disposed = false
   let generation = 0
@@ -521,10 +522,12 @@ function buildBakedChange(
     const query = new URLSearchParams({ origin: originId })
     drawChangeList(wrap, {
       prs: bake.prs,
-      listings: getDaemonJson<{ prs: ChangePRListing[] }>(`${shuttleBase}${route}?${query}`, 'Could not list the PRs').then(answer => answer.prs),
+      listings: getDaemonJson<{ prs: ChangePRListing[] }>(`${shuttleBase}/api/v1/changes/${uid}?${query}`, 'Could not list the PRs').then(answer => answer.prs),
       opened: openPRs.get(place),
       open: bakeInto,
       moved: pr => {
+        // A disposed page's late list answer leaves the page that replaced it alone.
+        if (disposed) return
         if (pr === undefined) {
           generation++
           disposeFileViewer(viewer)

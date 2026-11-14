@@ -1,7 +1,7 @@
 defmodule ShuttleWeb.FiberChangeController do
   @moduledoc """
   Bake a constitution's change on open, `POST /api/v1/fibers/<id>/change`, and
-  list the PRs it follows, `GET /api/v1/fibers/<id>/change`.
+  list the PRs it follows, `GET /api/v1/changes/<id>`.
 
   The board's Change page posts here when it opens. The owning daemon shells
   `shuttle change <id> --cache --json [--pr N]`, which bakes the change the
@@ -25,9 +25,7 @@ defmodule ShuttleWeb.FiberChangeController do
   `error`. Its failures map as the bake's.
 
   Phoenix globs only end a route, so the bake's route is `POST /fibers/*id` and
-  the last segment must be `change`; the list arrives through
-  `FiberDocumentsController.show`, which hands this controller a `GET
-  /fibers/*id` whose last segment is `change`.
+  the last segment must be `change`.
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -47,8 +45,7 @@ defmodule ShuttleWeb.FiberChangeController do
   end
 
   def index(conn, %{"id" => segments} = params) do
-    {id, ["change"]} = Enum.split(segments, -1)
-    id = Enum.join(id, "/")
+    id = Enum.join(segments, "/")
 
     case OriginRouter.route(Map.get(params, "origin")) do
       {:error, {:unknown_origin, origin}} ->
@@ -57,7 +54,7 @@ defmodule ShuttleWeb.FiberChangeController do
       {:remote, remote} ->
         RelayHelpers.relay_bytes(
           conn,
-          OriginRouter.forward_get(remote, change_path(id), %{},
+          OriginRouter.forward_get(remote, list_path(id), %{},
             forward_timeout_ms: @cli_timeout_ms + 5_000
           )
         )
@@ -116,13 +113,13 @@ defmodule ShuttleWeb.FiberChangeController do
     |> respond(conn)
   end
 
-  defp change_path(id) do
-    encoded =
-      id
-      |> String.split("/")
-      |> Enum.map_join("/", &URI.encode(&1, fn c -> URI.char_unreserved?(c) end))
+  defp change_path(id), do: "/api/v1/fibers/" <> encode(id) <> "/change"
+  defp list_path(id), do: "/api/v1/changes/" <> encode(id)
 
-    "/api/v1/fibers/" <> encoded <> "/change"
+  defp encode(id) do
+    id
+    |> String.split("/")
+    |> Enum.map_join("/", &URI.encode(&1, fn c -> URI.char_unreserved?(c) end))
   end
 
   defp pr_args(nil), do: {:ok, []}

@@ -148,7 +148,7 @@ describe('workspace file viewer hooks', () => {
     const viewer = open()
     document.body.append(viewer)
     expect(fetch).toHaveBeenCalledOnce()
-    expect(fetch.mock.calls[0][0]).toBe('/api/v1/fibers/UID2/change?origin=host-b')
+    expect(fetch.mock.calls[0][0]).toBe('/api/v1/changes/UID2?origin=host-b')
     await vi.waitFor(() => expect(viewer.querySelectorAll('.change-pr-row')[0].textContent).toContain('Open one'))
     const rows = [...viewer.querySelectorAll<HTMLButtonElement>('.change-pr-row')]
     expect(rows.map(row => row.dataset.pr)).toEqual(['12', '404', '5'])
@@ -178,6 +178,85 @@ describe('workspace file viewer hooks', () => {
     expect(again.querySelectorAll('.change-pr-row')).toHaveLength(3)
     disposeFileViewer(again)
     expect(open().querySelector('.change-pr-list'), 'back on the list, the next open starts there').not.toBeNull()
+  })
+  describe('a Change page that lists several PRs', () => {
+    const listed = [
+      { number: 1, title: 'First', head_branch: 'a', base_branch: 'main', state: 'OPEN', draft: false, checks: { total: 0, passed: 0, failed: 0, pending: 0 }, additions: 1, deletions: 0 },
+      { number: 2, title: 'Second', head_branch: 'b', base_branch: 'main', state: 'OPEN', draft: false, checks: { total: 0, passed: 0, failed: 0, pending: 0 }, additions: 2, deletions: 0 },
+      { number: 3, title: 'Third', head_branch: 'c', base_branch: 'main', state: 'OPEN', draft: false, checks: { total: 0, passed: 0, failed: 0, pending: 0 }, additions: 3, deletions: 0 },
+    ]
+    /** A daemon whose list and bakes each answer only when the test says. */
+    const daemon = () => {
+      const lists: ((response: Response) => void)[] = [], bakes = new Map<number, (response: Response) => void>()
+      vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => new Promise<Response>(resolve => {
+        if (init?.method === 'POST') bakes.set(JSON.parse(init.body as string).pr, resolve)
+        else lists.push(resolve)
+      })))
+      return { lists, bakes }
+    }
+    const open = (uid: string) => {
+      const viewer = buildFileViewer('', '/store/.felt/work/steward/steward.md', 'host-c', undefined, undefined, { kind: 'change', bake: { uid, prs: [1, 2, 3] } })
+      document.body.append(viewer)
+      return viewer
+    }
+    const button = (viewer: HTMLElement, label: string) => viewer.querySelector<HTMLButtonElement>(`[aria-label^="${label}"]`)!
+
+    it("leaves the PR a replacing page has open when a disposed page's list arrives late", async () => {
+      const { lists } = daemon()
+      const old = open('STALE')
+      disposeFileViewer(old)
+      const page = open('STALE')
+      page.querySelector<HTMLButtonElement>('[data-pr="2"]')!.click()
+      lists[0](new Response(JSON.stringify({ prs: listed })))
+      await new Promise(resolve => setTimeout(resolve, 0))
+      disposeFileViewer(page)
+      expect(open('STALE').querySelector('.change-pr-label')?.textContent, 'the next open re-bakes the PR left open').toBe('#2')
+    })
+
+    it('keeps the focus on the step taken, and on the way back once there is no step further', () => {
+      daemon()
+      const viewer = open('FOCUS')
+      viewer.querySelector<HTMLButtonElement>('[data-pr="1"]')!.click()
+      button(viewer, 'Next PR').click()
+      expect(document.activeElement).toBe(button(viewer, 'Next PR'))
+      button(viewer, 'Next PR').click()
+      expect(viewer.querySelector('.change-pr-label')!.textContent).toBe('#3')
+      expect(document.activeElement, 'past the last PR the way back takes the focus').toBe(viewer.querySelector('.change-pr-back'))
+      button(viewer, 'Previous PR').click()
+      expect(document.activeElement).toBe(button(viewer, 'Previous PR'))
+      disposeFileViewer(viewer)
+    })
+
+    it('keeps the focus on its row when the list arrives', async () => {
+      const { lists } = daemon()
+      const viewer = open('ARRIVE')
+      viewer.querySelector<HTMLButtonElement>('[data-pr="2"]')!.focus()
+      lists[0](new Response(JSON.stringify({ prs: listed })))
+      await vi.waitFor(() => expect(viewer.querySelector('[data-pr="2"]')!.textContent).toContain('Second'))
+      expect(document.activeElement).toBe(viewer.querySelector('[data-pr="2"]'))
+      disposeFileViewer(viewer)
+    })
+
+    it("does not let a slow bake of one PR replace the next PR's reader", async () => {
+      changeRenderer.mount.mockImplementation((root: HTMLElement, bundle: { title: string }) => {
+        const scroller = document.createElement('div'); scroller.textContent = bundle.title; root.replaceChildren(scroller)
+        return { scroller, dispose: vi.fn() }
+      })
+      const { bakes } = daemon()
+      const viewer = open('RACE')
+      viewer.querySelector<HTMLButtonElement>('[data-pr="1"]')!.click()
+      button(viewer, 'Next PR').click()
+      watch.content = null
+      bakes.get(2)!(new Response(JSON.stringify({ path: '/cache/pr-2.change.json', report: {} })))
+      await vi.waitFor(() => expect(watch.content).not.toBeNull())
+      watch.content!(JSON.stringify({ version: 2, title: 'Second', repo: { name: 'r', dir: '/r', forge_url: null }, base: 'a'.repeat(40), head: 'b'.repeat(40), base_ref: 'main', head_ref: 'b', commits: [], files: [], story: null }))
+      await vi.waitFor(() => expect(viewer.querySelector('.change-pr-slot')!.textContent).toBe('Second'))
+      bakes.get(1)!(new Response(JSON.stringify({ path: '/cache/pr-1.change.json', report: {} })))
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(viewer.querySelector('.change-pr-label')!.textContent).toBe('#2')
+      expect(viewer.querySelector('.change-pr-slot')!.textContent).toBe('Second')
+      disposeFileViewer(viewer)
+    })
   })
   it('gives a live-arriving image its own full-resolution URL after the strip thumbnail', () => {
     const thumbnail = buildFileViewer('', '/growth.png', 'host-a', undefined, undefined, { thumbnail: true })

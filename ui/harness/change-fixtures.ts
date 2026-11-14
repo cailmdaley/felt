@@ -77,7 +77,7 @@ const FOLLOWED_PRS = [
   { number: 446, title: 'Mask the tile edges before the shear fit', url: 'https://example.invalid/pull/446', head_branch: 'fix/tile-edges', base_branch: 'develop', state: 'MERGED', draft: false, mergeable: 'UNKNOWN', checks: { total: 3, passed: 3, failed: 0, pending: 0 }, additions: 38, deletions: 11, merge_commit: 'd'.repeat(40) },
 ].filter(pr => PR_FOLLOWER_PRS.includes(pr.number))
 
-/** The owner's answer to `GET /fibers/<uid>/change`: the PRs the constitution follows. */
+/** The owner's answer to `GET /changes/<uid>`: the PRs the constitution follows. */
 export function listFixturePRs(uid: string) {
   return { prs: uid === PR_FOLLOWER_UID ? FOLLOWED_PRS : [] }
 }

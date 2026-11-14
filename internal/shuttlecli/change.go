@@ -21,7 +21,7 @@ func (a *app) changeCmd() *cobra.Command {
 	var check, cache, list bool
 	var prNumber int
 	cmd := &cobra.Command{
-		Use: "change <fiber> [--pr N | --base B]", Short: "Bake a Git change and its reading story into a fiber companion",
+		Use: "change <fiber> [--pr N | --base B | --list]", Short: "Bake a Git change and its reading story into a fiber companion",
 		Long: `Snapshot the change since merge-base(base, head) into <name>.change.json beside
 the fiber, like a pull request's three-dot diff. No common ancestor is an error.
 Runs Git on this host; no daemon or model is needed.
@@ -32,11 +32,12 @@ With --story, validate every stop and flag and report changed-line coverage. Fla
 count as coverage. --check validates and reports without writing a companion.
 --cache writes the bundle to this host's cache instead of beside the fiber.
 --list reads the PRs in shuttle.change.prs from GitHub and bakes nothing.
---json emits the validation and coverage report, not the change bundle.`,
+--json emits the validation and coverage report, not the change bundle; with --list,
+the list of PRs.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if list {
-				for _, flag := range []string{"pr", "base", "head", "story", "cache", "check"} {
+				for _, flag := range []string{"pr", "base", "head", "story", "cache", "check", "name"} {
 					if cmd.Flags().Changed(flag) {
 						return fmt.Errorf("--list cannot be combined with --%s", flag)
 					}

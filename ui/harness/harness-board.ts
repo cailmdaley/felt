@@ -1450,7 +1450,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const bake = method === 'POST' ? /\/api\/v1\/fibers\/([^/?]+)\/change$/.exec(url) : null
   if (workspaceFixture && bake) return json(bakeFixtureChange(workspaceFixture, decodeURIComponent(bake[1]), bodyOrigin(), body().pr as number | undefined))
   // A constitution that follows several PRs lists them first.
-  const listing = method === 'GET' ? /\/api\/v1\/fibers\/([^/?]+)\/change(\?|$)/.exec(url) : null
+  const listing = method === 'GET' ? /\/api\/v1\/changes\/([^/?]+)(\?|$)/.exec(url) : null
   if (workspaceFixture && listing) return json(listFixturePRs(decodeURIComponent(listing[1])))
   // The board's composite feed.
   if (url.includes('/api/v1/fibers/composite')) return json(workspaceFixture?.feed ?? docsExample?.feed ?? MOCK_FEED)

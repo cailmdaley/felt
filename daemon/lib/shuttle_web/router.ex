@@ -70,6 +70,9 @@ defmodule ShuttleWeb.Router do
     # owner's cache (owner-routed). A glob only ends a route, so the
     # controller takes the trailing `change` segment off the id.
     post("/fibers/*id", FiberChangeController, :create)
+    # `GET /changes/<id>`: the PRs a constitution follows, read from GitHub
+    # on its owner without baking.
+    get("/changes/*id", FiberChangeController, :index)
     # A constitution's threads, for `shuttle threads`.
     get("/threads/*id", ThreadsController, :show)
     post("/lifecycle", LifecycleController, :create)
