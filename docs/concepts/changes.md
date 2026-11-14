@@ -62,7 +62,7 @@ The bundle has these fields:
 | Field | Meaning |
 |---|---|
 | `version` | Schema version, `2`; other versions need a rebake |
-| `title` | The story's optional title, otherwise the head commit subject |
+| `title` | PR title with `--pr`; otherwise the story's optional title or head commit subject |
 | `repo` | `{name, dir, forge_url}`; `dir` is absolute and `forge_url` is an HTTPS forge address without credentials, query, fragment or `.git`, otherwise `null` |
 | `base`, `head` | Merge-base and resolved head SHAs |
 | `base_ref`, `head_ref` | Requested refs; attached `HEAD` becomes the short branch name |
@@ -143,10 +143,14 @@ Tests and Generated are quieter tiles.
 A tile's `chapter` jumps to that chapter; role tiles jump to their lane or first file.
 Files with no changed text lines remain in the area's inventory but add no rectangle area.
 
-`overview`, chapter `narrative` and stop `note` carry Markdown, rendered through the board's shared Markdown path, including math.
+`overview`, chapter `narrative` and stop `note` carry Markdown, including math and fenced `mermaid` diagrams.
+Mermaid loads only when a fence is present, in its own chunk with separate diagram engines.
+Diagrams take their colors from the board's paper, fill, ink and accent tokens and repaint with the workspace theme.
+The same Markdown fences render natively in a GitHub PR body.
 Chapters have unique ids and are ordered; `why_here` explains that order.
 Stop importance is `critical`, `important`, `supporting` or `context`.
-A flag uses the same file and range fields, plus `text` explaining what to inspect first.
+A flag uses the same file and range fields, plus `text` explaining a fact needing the human's judgment.
+Flags render at the head of the story's opening, before the overview, and their file links open the relevant code.
 Flags don't count toward coverage.
 Omitted flags, chapters and role overrides are allowed and become empty collections.
 Unknown JSON keys and duplicate chapter ids fail validation.
@@ -183,7 +187,8 @@ Line counts and coverage exclude every file Git classifies as binary, including 
 Binary, mode-only and pure-rename files have no text hunks, don't enter the denominator and remain visible in the inventory.
 
 `--check` never writes.
-Invalid references fail the command and leave an existing bundle untouched.
+Invalid story structure, flags and role overrides fail the command and leave an existing bundle untouched.
+Unsupported stop references are retained as stale; `--check` returns nonzero for them, while a normal bake writes them with their reasons.
 Unshown lines do not fail validation: a story selects what matters, rather than exhausting the diff.
 Text output lists `Changed lines shown: N of M` and `Remaining: path:line` for each remaining excerpt.
 JSON output is a report with `valid`, `covered`, `total`, `uncovered` and `errors`, plus `path` on a successful write.
@@ -192,13 +197,24 @@ An invalid story returns `valid: false` and a nonzero exit status.
 
 ## Write a story worth reading
 
-Aim for a ten-minute reading, in plain language. Select the lines that carry the meaning, usually fewer than 40 per stop, and explain why the reader is here. Walk a new file through several short stops in reading order rather than beginning at its imports and printing everything. Leave supporting machinery to Remaining on purpose; coverage is an honesty check, not a target to maximize. Added and deleted files use neutral code backgrounds with change markers in the gutter, while tokens stay theme-aware.
+The story is the PR body, written for someone who hasn't followed the work.
+Open on what the change produces, how it will be used and what most needs the human's judgment.
+Use the overview, flags and chapter narratives in the PR body, keeping one account in agreement across both surfaces.
+Mermaid diagrams carry relationships and handoffs using the same source in the reader and GitHub.
+
+Aim for a five-minute reading in plain language.
+Use a stop only where the code itself is the thing to look at, usually fewer than 40 lines, and say why.
+Never stop on documentation or a README; explain that material in the story.
+A chapter can have no stops.
+Leave supporting machinery to Remaining on purpose; coverage is an honesty check, not a target.
+Added and deleted files use neutral code backgrounds with change markers in the gutter, while tokens stay theme-aware.
 
 ## Review state and delivery
 
 File headers show status, a rename’s old path, mode or type changes, changed line counts, and explicit role overrides.
 Tests and Remaining start as compact file lists; opening a row mounts its diff lazily.
-Story stops start open.
+Story stops show their notes and `file:lines` with code folded until clicked or opened by keyboard.
+Opening code mounts it lazily; saved open rows stay open on return.
 Marking a file or stop viewed folds it to its header, and it stays folded on return.
 Unmark it or click its header to open it again.
 Folded rows retain their comment counts; flag jumps open the file they need.

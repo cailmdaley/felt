@@ -1,30 +1,51 @@
 # Preparing a change for review
 
-Before a branch becomes a PR, bake it into a change the human can read on the board. The reader shows your story first, then tests, then every changed line you left out, and their comments come back to you as one message. They open the PR when they are happy with it, not before. The bundle format and the CLI are in the [changes concept](https://cailmdaley.github.io/felt/concepts/changes/). Where your store has a practice for taking a feature to a PR, it holds the judgment; this page holds the mechanics.
+The story is the PR body: one text for the board and GitHub, opening on what the change produces and what most needs the human's judgment.
+The reader shows that story, with code folded until requested, then tests and the changed lines you left out.
+Comments come back to the worker as one message.
+The [changes concept](https://cailmdaley.github.io/felt/concepts/changes/) documents the CLI and bundle format.
+A store's review practice holds the project's judgment; this page holds the pass and its mechanics.
 
 ## The pass
 
-1. **Clean the branch.** Commits read in order, tests pass, nothing stray. Rebase on the base first.
-2. **Bake and write the story.** Write `story.json` beside your fiber and iterate with `shuttle change <fiber> --base origin/main --story story.json --check`.
-3. **Get flags from someone else.** A fresh reviewer of another model family reads the diff, not your story's conclusions, and names up to three places worth the human's eyes: what they would want to weigh in on, not a list of possible attacks. Their flags go in the story's `flags`.
-4. **Fix what the review found,** then rebake.
-5. **Ask.** `shuttle change <fiber> --base origin/main --story story.json`, then `shuttle ask` naming what you want their view on. Link the bundle from the tapestry with a relative link.
-6. **Absorb the comments.** Each arrives anchored `path:line` against a head SHA. Comments are the human's words, so answer them in the conversation, change the code, and rebake.
-7. **Open the PR only when they say so.** The story's overview and chapters are the raw material for the body, which is written for its own cold reader.
+1. **Review the design and clean the branch.** Ask whether the change is as simple as possible, integrates into the existing design, reuses what exists and keeps the diff small.
+   Fix what doesn't meet those principles; commits read in order and tests pass.
+2. **Get an independent review.** A fresh reviewer of another model family reads the diff against those principles, not your story's conclusions.
+   Fix what they find.
+   Keep up to three facts needing the human's judgment in `flags`, including merge-time facts that the diff cannot show.
+3. **Write the story and open the PR.** Use the overview, flags and chapter narratives as the PR body, preserving their Markdown and Mermaid source rather than writing another account.
+   Open the PR as soon as the pass is done; there is no waiting for the human to authorize opening it.
+4. **Bake the PR.** Write the story beside the fiber as `pr-N.story.json`, then run `shuttle change <fiber> --pr N --story pr-N.story.json`.
+   The CLI fetches the PR's exact head and its own base branch, including stacked PRs, and writes `pr-N.change.json`.
+   The bundle appears in the fiber's sends by title, branch and line counts.
+   A relative link from a tapestry opens it too.
+5. **Absorb the comments.** Each code comment names a `path:line` against a head SHA.
+   Answer in the conversation, change the code and update the same story and PR body.
+   Rebake with `shuttle change <fiber> --pr N`; the sidecar story is applied automatically.
+
+For a repository that lands directly on `main`, the same pass works on a branch before landing or on committed changes.
+Use `shuttle change <fiber> --base origin/main --story <name>.story.json --name <name>`; a change doesn't need a PR.
+The reader opens version 2 bundles.
 
 ## A story worth reading
 
-Name `areas` by concept, explaining where the change sits, its parts and what it adds, for a reader who has never seen the code.
+- **Open on the result and the judgment.** Say what this change produces, who uses it and what the human most needs to weigh.
+  The flags open the story, alongside the overview, without a separate attention box.
+- **Use the same text in the PR.** The overview and chapter narratives should stand alone for someone who hasn't followed the work.
+  Keep the PR body and the story in agreement as the branch moves.
+- **Draw structure.** Fenced `mermaid` diagrams render in both the reader and GitHub.
+  Use a flowchart for relationships or a sequence diagram for a handoff when it explains more quickly than prose.
+- **Order by understanding.** Chapters follow the explanation, not the file tree.
+  Each `why_here` explains the order; conceptual `areas` name the parts for someone new to the code.
+- **Use stops only when the code itself needs looking at.** A stop shows its note and `file:lines`; clicking opens the code.
+  Keep chosen ranges short, usually under 40 lines.
+  Never stop on documentation or a README: tell the reader the point in the story instead.
+  Tests have their own lane.
+- **Choose rather than exhaust.** A few chapters and a handful of stops should take about five minutes.
+  A chapter can explain a change without any stops.
+  Leave supporting machinery to Remaining on purpose.
 
-- **Tell what the change is.** What it adds, how it's meant to be used, how the parts fit. A reader finishes knowing the feature, not the bugs you fixed on the way.
-- **Order by understanding, not by file tree.** Each chapter's `why_here` says why it comes at that point.
-- **Stops are short.** The lines that carry the meaning, usually under 40. A new file gets several stops in reading order, or one, never the whole file. Anything you leave out stays in Remaining, on purpose.
-- **Three to five chapters, a handful of stops.** The story should take five minutes. If it can't, the change may want splitting.
-- **Plain language.** Say what the code does and why.
-- **Leave tests out.** They have their own lane.
-
-`shuttle change` reports how many changed lines the story shows. A low number is fine, and a story that shows everything is usually a story that chose nothing. Nothing can hide: every changed line appears in Story, Tests or Remaining.
-
-The reader opens version 2 bundles; rebake an older companion with `shuttle change`.
-
-For a repo that lands directly on `main`, such as felt, the same pass works on commits already landed, or on a branch just before landing. A change never needs a PR.
+`shuttle change <fiber> --pr N --check` reports changed-line coverage and stale stops without writing either the bundle or its sidecar.
+Coverage is an honesty check, not a target.
+A stop whose file or diff range no longer exists remains visible with a stale reason; a normal bake still succeeds.
+Repair those references while iterating, and use `--story path` to replace the sidecar deliberately.
