@@ -1,24 +1,41 @@
 defmodule Shuttle.SessionResume do
   @moduledoc """
-  Resume a past harness session in the host's primary terminal — the
-  card History's row action. Not a worker: shuttle neither dispatches, adopts
-  nor watches it.
+  Resume a past harness session from a card's History, or a card's last
+  session (`c` on a card with no worker).
 
-  `prepare/2` runs on the host that ran the session, since the transcript the
-  harness resumes from lives there. It starts (or finds) a terminal
-  running the harness's own resume for that session id; the caller then
-  opens it through `Shuttle.Opener.open/2`, using this host's display backend,
-  exactly as the Aloft pill opens a live worker.
+  ## A constitution's own session resumes as its worker
+
+  A session the ledger pairs with a constitution this host runs is that
+  card's conversation, so it resumes as the card's worker: the Poller
+  force-dispatches the fiber (`ad_hoc`, as a delivered message does) with
+  `resume_session`, and the dispatcher resumes exactly that session in the
+  worker's own terminal, with nothing injected because the human takes the
+  next turn. From then on it is an ordinary worker: the board shows it Working
+  or Your turn, `shuttle.runtime.session_uuid` names it, a standing schedule
+  waits for it to end, and messages to the card reach it. Starting it arms the
+  card as any forced start does (`Shuttle.Poller`'s forced start).
+
+  While the card has a live worker, resuming that worker's session attaches
+  to it, and resuming any other of its sessions is refused: a card has one
+  live conversation.
+
+  ## Any other session resumes in a terminal of its own
+
+  A session with no constitution here (none paired, or one homed on another
+  host) resumes in `resume-<session uuid>`, which no "is this a worker?"
+  predicate matches, so a second click finds it rather than starting a second
+  process on the transcript. `prepare/2` runs on the host that ran the
+  session, since the transcript the harness resumes from lives there.
 
   ## The command
 
   The resume invocation is `Shuttle.Agents.build_resume_command/3`, the one the
-  dispatcher uses to resume a worker, with no injected prompt: the human is the
-  next turn. The agent is the one this host's session ledger recorded for the
-  session, resolved through this host's registry (`shuttle agents
-  resolve`), so model, effort and flags match a dispatch. A ledger line with no
-  agent, or an agent that no longer resolves to the transcript's harness,
-  resumes with the bare harness CLI.
+  dispatcher uses to resume a worker, with no injected prompt. The agent is
+  the one this host's session ledger recorded for the session, resolved
+  through this host's registry (`shuttle agents resolve`), so model, effort and
+  flags match a dispatch. A ledger line with no agent, or an agent that no
+  longer resolves to the transcript's harness, resumes with the bare harness
+  CLI.
 
   ## The working directory
 
@@ -29,28 +46,13 @@ defmodule Shuttle.SessionResume do
   session resumes in the first recorded `cwd` whose encoding matches that
   directory; Codex in its `session_meta` payload's `cwd`; pi in its session
   header's `cwd`. A transcript with no usable cwd is refused rather than
-  resumed somewhere its harness would not find it.
-
-  ## The terminal name
-
-  `resume-<session uuid>`: one per conversation, so a second click finds the
-  first and attaches to it rather than starting a second resume of the same
-  conversation. It does not end in `-shuttle` and carries no fiber uid, so
-  every "is this a worker?" predicate (`Shuttle.Dispatcher.shuttle_session?/1`,
-  the poller's session listing) ignores it and it cannot collide with the
-  fiber's worker session.
-
-  ## The fiber's conversation
-
-  Reopening a card's own last session (`c` on a card with no worker) is still
-  that fiber's conversation, so it is addressed as one: the terminal exports
-  `SHUTTLE_FIBER_PATH` as a worker's does, and `reopened/1` hands delivery
-  (`Shuttle.Delivery`, voice) the open conversation while no worker runs.
+  resumed somewhere its harness would not find it. A worker resume runs there
+  too.
   """
 
   require Logger
 
-  alias Shuttle.{Agents, Dispatcher, SessionLedger, Terminal, Transcript, WorkerProcess}
+  alias Shuttle.{Agents, Dispatcher, Poller, SessionLedger, Terminal, Transcript, WorkerProcess}
 
   @prefix "resume-"
 
@@ -105,21 +107,32 @@ defmodule Shuttle.SessionResume do
   end
 
   @doc """
-  Start the resume of `session` in the primary terminal, unless it is already
-  running there. `{:ok, %{tmux_session: name, created: boolean}}`;
-  `{:error, {:live, message}}` when the session is a running worker's, or
-  another live process holds it (two harness processes must not share a
-  transcript); or `{:error, reason}`, including a process scan that could not
-  run.
+  Resume `session`: as its constitution's worker when this host runs one
+  (see the moduledoc), otherwise in the primary terminal unless it is already
+  running there. `{:ok, %{tmux_session: name, created: boolean}}` names the
+  terminal to open; `{:error, {:live, message}}` when the session is a running
+  worker's, the card already has a different live conversation, or another
+  live process holds it (two harness processes must not share a transcript);
+  or `{:error, reason}`, including a refused launch and a process scan that
+  could not run.
 
   Opts: as `plan/2`, plus `:live_sessions` (a 0-arity function standing in for
-  `live_sessions/0`).
+  `live_sessions/0`), and for the worker path `:own_host_id`, `:live_worker`
+  (`Shuttle.Poller.live_worker/1`) and `:dispatch`
+  (`Shuttle.Poller.dispatch_fiber/2`).
   """
   @spec prepare(String.t(), keyword()) ::
           {:ok, %{tmux_session: String.t(), created: boolean()}}
           | {:error, {:live, String.t()}}
           | {:error, String.t()}
   def prepare(session, opts \\ []) do
+    case worker_fiber(session, opts) do
+      %{} = fiber -> resume_as_worker(session, fiber, opts)
+      nil -> resume_in_terminal(session, opts)
+    end
+  end
+
+  defp resume_in_terminal(session, opts) do
     runner = Keyword.get(opts, :runner, Shuttle.Runner.Default)
     live = Keyword.get(opts, :live_sessions, &live_sessions/0)
 
@@ -179,53 +192,146 @@ defmodule Shuttle.SessionResume do
     :exit, _ -> []
   end
 
-  @doc """
-  The fiber's conversation a human reopened: its last session
-  (`shuttle.runtime.session_uuid`) running in `resume-<uuid>` on this host.
-  The shape of `Shuttle.Poller.live_worker/1`, so delivery addresses it as it
-  would a worker; `nil` when that terminal is not running.
+  # ── a constitution's own session ───────────────────────────────────────────
 
-  Opts: `:runner` (default: the app's `:session_resume_runner`), and the
-  transcript roots `Shuttle.Transcript.path/2` takes.
-  """
-  @spec reopened(String.t(), keyword()) :: map() | nil
-  def reopened(fiber_id, opts \\ []) when is_binary(fiber_id) do
-    runner = Keyword.get_lazy(opts, :runner, &runner/0)
-
-    with %{fiber: fiber} <- Enum.find(fiber_entries(), &(fiber_id in identities(&1.fiber))),
-         session when is_binary(session) <- get_in(fiber, ["shuttle", "runtime", "session_uuid"]),
-         tmux = tmux_name(session),
-         :alive <- Terminal.status(runner, tmux),
-         path when is_binary(path) <- Transcript.path(session, opts),
-         harness when is_binary(harness) <- Transcript.harness_for(path, opts) do
-      %{session: tmux, session_uuid: session, cli: cli_for(harness)}
+  # The constitution this host runs that the session belongs to, or nil.
+  defp worker_fiber(session, opts) do
+    with true <- Transcript.valid_session?(session),
+         %{fiber: %{"shuttle" => %{} = shuttle} = fiber} <- fiber_entry(session, opts),
+         own when is_binary(own) <- own_host_id(opts),
+         true <- Poller.host_owned?(shuttle, own) do
+      fiber
     else
       _ -> nil
     end
   end
 
+  defp own_host_id(opts) do
+    Keyword.get_lazy(opts, :own_host_id, &Poller.own_host_id/0)
+  rescue
+    _ -> nil
+  end
+
+  defp resume_as_worker(session, fiber, opts) do
+    address = fiber["uid"] || fiber["id"]
+    name = fiber["slug"] || fiber["id"] || address
+    live = Keyword.get(opts, :live_worker, &Poller.live_worker/1)
+
+    runner = Keyword.get(opts, :runner, runner())
+
+    case live.(address) do
+      %{session_uuid: ^session, session: tmux} ->
+        # A worker the Poller cannot see is not opened: the launch below lets
+        # the Poller reap it when it has ended, or refuse while it may not have.
+        if Terminal.locate(runner, tmux),
+          do: {:ok, %{tmux_session: tmux, created: false}},
+          else: launch(session, fiber, opts)
+
+      %{session_uuid: other} ->
+        {:error,
+         {:live,
+          "#{name} has a live worker (session #{other || "starting"}); attach to it, " <>
+            "or end it before resuming another of its sessions"}}
+
+      nil ->
+        launch(session, fiber, opts)
+    end
+  end
+
+  # Every refusal comes before the launch, because a forced start arms the card
+  # (reopens a closed or paused one) before the dispatcher's own checks run.
+  defp launch(session, fiber, opts) do
+    address = fiber["uid"] || fiber["id"]
+    name = fiber["slug"] || fiber["id"] || address
+    runner = Keyword.get(opts, :runner, runner())
+
+    with {:ok, plan} <- plan(session, opts),
+         :ok <- same_harness(plan, fiber, name),
+         :ok <- not_in_terminal(session, runner),
+         :ok <- not_held(session, runner) do
+      launch_worker(address, session, plan, opts)
+    end
+  end
+
+  # The worker runs the fiber's agent, which resumes only its own harness's
+  # transcripts.
+  defp same_harness(plan, fiber, name) do
+    agent_cli = get_in(fiber, ["shuttle", "resolved", "agent", "cli"])
+    cli = cli_for(plan.harness)
+
+    if agent_cli in [nil, cli],
+      do: :ok,
+      else:
+        {:error,
+         "session #{plan.session} ran under #{plan.harness}, but #{name}'s agent runs " <>
+           "#{agent_cli}; set its agent (`shuttle set-agent`) to resume it as the worker"}
+  end
+
+  # The session open in a terminal of its own, resumed before this card ran it
+  # as a worker.
+  defp not_in_terminal(session, runner) do
+    tmux = tmux_name(session)
+
+    case Terminal.status(runner, tmux) do
+      :gone -> :ok
+      _ -> {:error, {:live, "this session is open in terminal #{tmux}; attach to that instead"}}
+    end
+  end
+
+  defp launch_worker(address, session, plan, opts) do
+    dispatch = Keyword.get(opts, :dispatch, &Poller.dispatch_fiber/2)
+
+    result =
+      dispatch.(address,
+        force: true,
+        ad_hoc: true,
+        resume_mode: "previous",
+        resume_session: session,
+        work_dir: plan.cwd
+      )
+
+    case result do
+      {:ok, tmux} ->
+        Logger.info("Resume of #{session} as #{address}'s worker → #{tmux}")
+        Poller.refresh_document(address)
+        {:ok, %{tmux_session: tmux, created: true}}
+
+      error ->
+        {_status, body} = ShuttleWeb.DispatchReply.render(address, error)
+        {:error, body[:message] || body[:error] || "the worker did not start: #{body[:reason]}"}
+    end
+  end
+
   # The fiber that ran the session names its Rex session, tab and pane, and its
-  # document is the terminal's `SHUTTLE_FIBER_PATH`: the ledger's record, else
-  # the fiber whose runtime last held this session.
+  # document is the terminal's `SHUTTLE_FIBER_PATH`.
   defp fiber_of(session, opts) do
-    ledger =
-      case SessionLedger.latest_for_session(session,
-             path: Keyword.get(opts, :ledger_path, SessionLedger.default_path())
-           ) do
-        %{"fiber" => fiber} when is_binary(fiber) and fiber != "" -> fiber
-        _ -> nil
-      end
+    case fiber_entry(session, opts) do
+      %{fiber: fiber} = entry -> %{slug: fiber["slug"] || fiber["id"], path: entry[:path]}
+      nil -> nil
+    end
+  end
+
+  # The ledger's record, else the fiber whose runtime last held this session.
+  defp fiber_entry(session, opts) do
+    row =
+      SessionLedger.latest_for_session(session,
+        path: Keyword.get(opts, :ledger_path, SessionLedger.default_path())
+      ) || %{}
+
+    # The uid survives renames; the path-shaped name is the fallback.
+    ledger = Enum.find([row["uid"], row["fiber"]], &(is_binary(&1) and &1 != ""))
+    ledger_name = if is_binary(row["fiber"]) and row["fiber"] != "", do: row["fiber"]
 
     entry =
-      Enum.find(fiber_entries(), fn %{fiber: row} ->
+      Enum.find(fiber_entries(), fn %{fiber: fiber} ->
         if ledger,
-          do: ledger in identities(row),
-          else: get_in(row, ["shuttle", "runtime", "session_uuid"]) == session
+          do: ledger in identities(fiber),
+          else: get_in(fiber, ["shuttle", "runtime", "session_uuid"]) == session
       end)
 
     cond do
-      entry -> %{slug: entry.fiber["slug"] || entry.fiber["id"], path: entry[:path]}
-      ledger -> %{slug: ledger, path: nil}
+      entry -> entry
+      ledger_name -> %{fiber: %{"slug" => ledger_name}}
       true -> nil
     end
   end

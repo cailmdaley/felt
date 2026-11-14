@@ -2,9 +2,9 @@ defmodule Shuttle.Voice.Target do
   @moduledoc "Classifies voice targets from the owner's published worker activity."
 
   @doc """
-  A target is cold when it has no live conversation: no worker, and not the
-  fiber's own session reopened here by the human. A live worker idle at its
-  prompt is warm.
+  A target is cold when it has no live worker. A live worker idle at its
+  prompt is warm, and so is a session the human resumed from the card, which
+  runs as its worker (`Shuttle.SessionResume`).
   """
   def cold?(target) do
     # Only the worker's own host publishes its runtime; other stores carry
@@ -13,15 +13,8 @@ defmodule Shuttle.Voice.Target do
       Shuttle.Env.app(:voice_target_entries, &entries/0).()
       |> Enum.find_value(&(matches?(&1, target) && (&1[:runtime] || &1["runtime"])))
 
-    is_nil(worker) and not reopened?(target)
+    is_nil(worker)
   end
-
-  defp reopened?(%{"fiber_id" => fiber_id} = target) when is_binary(fiber_id) do
-    Shuttle.OriginRouter.local?(target["origin"]) and
-      Shuttle.SessionResume.reopened(fiber_id) != nil
-  end
-
-  defp reopened?(_target), do: false
 
   defp entries do
     local =

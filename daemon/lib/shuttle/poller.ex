@@ -4245,8 +4245,15 @@ defmodule Shuttle.Poller do
   defp check_start_directory(state, fiber, opts) do
     fiber_id = Map.get(fiber, "id", "")
 
-    case Keyword.get(opts, :project_dir) do
-      raw when is_binary(raw) ->
+    case {Keyword.get(opts, :project_dir), Keyword.get(opts, :work_dir)} do
+      # A resumed conversation runs where its transcript was filed, whatever
+      # the block declares; the block is left as it is.
+      {nil, work_dir} when is_binary(work_dir) ->
+        if Shuttle.FS.dir?(work_dir),
+          do: {:ok, :declared},
+          else: arm_refused(fiber_id, "#{work_dir} is not a directory on this host.", nil)
+
+      {raw, _} when is_binary(raw) ->
         case Shuttle.CLI.run(["resolve-dir", raw], runner: state.runner) do
           {:ok, _resolved} ->
             {:ok, {:confirmed, raw}}
@@ -4262,7 +4269,7 @@ defmodule Shuttle.Poller do
             arm_refused(fiber_id, "`shuttle resolve-dir` could not run: #{inspect(reason)}", nil)
         end
 
-      nil ->
+      {nil, nil} ->
         case declared_project_dir(Map.get(fiber, "shuttle")) do
           nil ->
             arm_refused(
@@ -4339,7 +4346,12 @@ defmodule Shuttle.Poller do
   defp do_dispatch_fiber(%State{} = state, fiber, opts \\ []) do
     fiber_id = Map.get(fiber, "id", "")
 
-    case project_dir_for_dispatch(fiber) do
+    project_dir =
+      if is_binary(Keyword.get(opts, :work_dir)),
+        do: {:ok, nil},
+        else: project_dir_for_dispatch(fiber)
+
+    case project_dir do
       {:error, reason} ->
         {record_dispatch_failure(state, fiber, reason), {:error, {:not_eligible, reason}}}
 
@@ -4360,8 +4372,10 @@ defmodule Shuttle.Poller do
         # The project_dir is the worker's cwd, so it loads that project's
         # CLAUDE.md; an autonomous worker without one starts in its felt store
         # (a forced start refused that case in `prepare_forced_start/5`).
+        # A resumed conversation runs where its transcript was filed (`:work_dir`),
+        # the only directory its harness finds it from.
         felt_store = owning_store(fiber_id, state)
-        work_dir = project_dir || felt_store
+        work_dir = Keyword.get(opts, :work_dir) || project_dir || felt_store
         spawn_worker(state, fiber, fiber_id, runtime_key, felt_store, work_dir, opts)
     end
   end
@@ -4387,6 +4401,7 @@ defmodule Shuttle.Poller do
            # message into the prompt at launch and honors resume_mode.
            user_message: Keyword.get(opts, :user_message),
            resume_mode: Keyword.get(opts, :resume_mode),
+           resume_session: Keyword.get(opts, :resume_session),
            restoration:
              not Keyword.get(opts, :force, false) and
                is_nil(Keyword.get(opts, :user_message)) and

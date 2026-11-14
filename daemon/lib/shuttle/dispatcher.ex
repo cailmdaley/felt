@@ -82,6 +82,10 @@ defmodule Shuttle.Dispatcher do
       parameter carried with the dispatch call: `"previous"` resumes the
       dispatch marker's session, `"fresh"` always starts new (unconditional —
       wins over the marker heuristic), absent → marker-decided.
+    * `:resume_session` — a conversation of this fiber the human resumes
+      (`Shuttle.SessionResume`): the worker resumes exactly that session, with
+      no injected prompt and no fresh fallback, because the human takes the
+      next turn. The caller has matched it to the agent's harness.
     * `:user_message` — the user's free-text directive for this dispatch,
       inlined into the prompt at launch (the "From User" block). Transient: it
       rides the dispatch call, never a persisted felt event.
@@ -114,13 +118,18 @@ defmodule Shuttle.Dispatcher do
          :ok <- check_work_dir(work_dir),
          :ok <- preflight_terminal(agent, work_dir, runner) do
       resume_intent =
-        if restoration?(opts, fiber, prompt_context, force) do
-          {:previous, Shuttle.Continuation.resumable_session_id(fiber)}
-        else
-          resolve_resume_intent(prompt_context, fiber,
-            force: force,
-            resume_mode: Keyword.get(opts, :resume_mode)
-          )
+        cond do
+          is_binary(Keyword.get(opts, :resume_session)) ->
+            {:previous, Keyword.get(opts, :resume_session)}
+
+          restoration?(opts, fiber, prompt_context, force) ->
+            {:previous, Shuttle.Continuation.resumable_session_id(fiber)}
+
+          true ->
+            resolve_resume_intent(prompt_context, fiber,
+              force: force,
+              resume_mode: Keyword.get(opts, :resume_mode)
+            )
         end
 
       previous_session = previous_session_info(fiber, uid)
@@ -150,6 +159,7 @@ defmodule Shuttle.Dispatcher do
             fiber: Map.get(fiber, "id") || fiber_id,
             run_id: prompt_context_run_id(prompt_context),
             user_message: Keyword.get(opts, :user_message),
+            resume_session: Keyword.get(opts, :resume_session),
             developer_instructions: Keyword.get(opts, :developer_instructions),
             runner: runner,
             restoration: restoration?(opts, fiber, prompt_context, force),
@@ -1172,7 +1182,13 @@ defmodule Shuttle.Dispatcher do
         agent
       end
 
-    resume_intent = effective_resume_intent(resume_intent, agent, opts)
+    # The human's own pick of a session was checked against the agent's harness
+    # before launch; the previous-session record describes a different one.
+    human_turn? = is_binary(Keyword.get(opts, :resume_session))
+
+    resume_intent =
+      if human_turn?, do: resume_intent, else: effective_resume_intent(resume_intent, agent, opts)
+
     session = session_name(fiber_id, Keyword.get(opts, :uid))
     felt_store = Keyword.get(opts, :felt_store, default_felt_store())
 
@@ -1201,7 +1217,11 @@ defmodule Shuttle.Dispatcher do
               "Resuming #{fiber_id} session #{session_id} via #{agent.id} → tmux #{session}"
             )
 
-            quiet? = Keyword.get(opts, :restoration) and quiet_restoration?(session_id, opts)
+            # The human resuming their own pick, or a restoration whose turn was
+            # not in flight, takes the next turn: nothing is injected.
+            quiet? =
+              human_turn? or
+                (Keyword.get(opts, :restoration) and quiet_restoration?(session_id, opts))
 
             resume_prompt =
               cond do
@@ -1216,7 +1236,7 @@ defmodule Shuttle.Dispatcher do
               end
 
             resume_agent =
-              if quiet? and agent.cli == "claude",
+              if quiet? and (agent.cli == "claude" or human_turn?),
                 do: Map.put(agent, :headless, false),
                 else: agent
 
@@ -1226,7 +1246,7 @@ defmodule Shuttle.Dispatcher do
             # including when it was mid-turn. A failed resume stays visible as
             # a blocked worker instead of waking a new conversation.
             fallback_command =
-              if Keyword.get(opts, :restoration) or agent.cli == "codex" do
+              if Keyword.get(opts, :restoration) or human_turn? or agent.cli == "codex" do
                 nil
               else
                 fresh_fallback_command(

@@ -29,6 +29,8 @@ export interface VoiceStatus {
   mode?: 'off' | 'following' | 'pinned' | 'meeting'
   /** Where words go right now. */
   destination?: RexMove | null
+  /** Following a card with no live worker: words stay in the transcript unless they end with “send”. */
+  cold?: boolean
   paused?: boolean
 }
 

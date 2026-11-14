@@ -13,12 +13,11 @@ defmodule Shuttle.Delivery do
   the resume and still messages a live worker; `"fresh"` starts a new session,
   cutting a live worker.
 
-  With no worker running, the fiber's own conversation reopened by a human
-  (`Shuttle.SessionResume.reopened/1`) takes the message in its place: live
-  input is typed into its terminal, anything else is a native message.
+  A conversation a human resumed from the card is its worker
+  (`Shuttle.SessionResume`), so it is addressed like any other.
   """
 
-  alias Shuttle.{Harnesses, Messaging, Poller, SessionLedger, SessionResume}
+  alias Shuttle.{Harnesses, Messaging, Poller, SessionLedger}
 
   @type result ::
           {:message, pos_integer(), map()}
@@ -29,25 +28,12 @@ defmodule Shuttle.Delivery do
   def deliver(fiber_id, text, opts \\ []) do
     worker = if opts[:resume_mode] != "fresh", do: Poller.live_worker(fiber_id)
 
-    reopened =
-      if is_nil(worker) and opts[:resume_mode] != "fresh", do: SessionResume.reopened(fiber_id)
-
     cond do
-      reopened && opts[:live_input] -> {:input, type_into(reopened, text)}
-      reopened -> message(reopened, text, opts)
       worker && opts[:live_input] -> input(fiber_id, text)
       worker && opts[:message_after_launch] -> await_message_address(fiber_id, text, opts)
       worker -> message(worker, text, opts)
       opts[:message_after_launch] -> launch_then_message(fiber_id, text, opts)
       true -> launch(fiber_id, text, opts)
-    end
-  end
-
-  # The human's next turn, typed as they would type it.
-  defp type_into(%{session: tmux}, text) do
-    case Shuttle.Terminal.paste(SessionResume.runner(), tmux, text) do
-      :ok -> {:ok, tmux}
-      {:error, reason} -> {:error, {:paste_failed, reason}}
     end
   end
 

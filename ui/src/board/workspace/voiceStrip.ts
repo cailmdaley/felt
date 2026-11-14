@@ -6,7 +6,13 @@ export interface VoiceLine {
   mode: ListenMode
   name: string
   paused: boolean
+  /** The card has no live session, so words are held in the transcript, not sent. */
+  held: boolean
 }
+
+/** What reaches a card with no live session. */
+export const heldWords = (name: string): string =>
+  `${name} has no live session: words stay in the transcript. End with “send” to start one.`
 
 /** A meeting is Listen pinned to a card with the computer's audio transcribed too. */
 export const listenMode = (voice: VoiceStatus | null): ListenMode =>
@@ -17,10 +23,10 @@ const SAYS: Record<ListenMode, string> = { off: '', following: 'Following you: w
 
 /** The slug spoken words reach, independent of the card showing the console. */
 export function voiceLine(voice: VoiceStatus | null, slugOf: FiberSlug): VoiceLine {
-  if (!voice?.enabled) return { mode: 'off', name: '', paused: false }
+  if (!voice?.enabled) return { mode: 'off', name: '', paused: false, held: false }
   const target = voice.destination ?? voice.target
   const name = target ? slugOf(target.fiber_id, target.origin) ?? target.fiber_id.split('/').at(-1) ?? target.name : ''
-  return { mode: listenMode(voice), name, paused: voice.muted }
+  return { mode: listenMode(voice), name, paused: voice.muted, held: !!voice.cold }
 }
 
 export class VoiceStrip {
@@ -35,7 +41,9 @@ export class VoiceStrip {
     this.el.hidden = !words
     this.el.dataset.mode = line.mode
     this.el.toggleAttribute('data-paused', line.paused)
+    this.el.toggleAttribute('data-held', line.held)
     if (this.el.textContent !== words) this.el.textContent = words
-    this.el.title = words ? `${SAYS[line.mode]} ${line.name}${line.paused ? ' once unmuted' : ''}` : ''
+    this.el.title = !words ? '' : line.held ? heldWords(line.name)
+      : `${SAYS[line.mode]} ${line.name}${line.paused ? ' once unmuted' : ''}`
   }
 }

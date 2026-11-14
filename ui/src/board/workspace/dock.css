@@ -98,6 +98,7 @@
 /* The destination's slug sits beside Listen; a pin stays visible while muted. */
 .ws-voice-strip { flex: 0 1 auto; min-width: 0; max-width: 18ch; margin-right: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-solid) var(--font-serif); }
 .ws-voice-strip[hidden] { display: none; }
+.ws-voice-strip[data-held] { text-decoration: line-through; text-decoration-color: var(--ws-voice-held); }
 
 /* Immediate actions use a shared stroke-icon grid and native keyboard focus. */
 :is(.ws-reader, .kbn-verb-menu) .ws-header-icon {

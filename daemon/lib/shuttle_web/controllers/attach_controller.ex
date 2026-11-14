@@ -154,12 +154,9 @@ defmodule ShuttleWeb.AttachController do
         case OriginRouter.forward(remote, "/api/v1/sessions/resume", %{"session" => session}) do
           {:forwarded, 200, body} ->
             case Jason.decode(body) do
-              {:ok, %{"tmux_session" => tmux}} when is_binary(tmux) ->
-                if tmux in [
-                     SessionResume.tmux_name(session)
-                   ],
-                   do: {:ok, tmux},
-                   else: {:error, 502, "#{remote.name} answered an unexpected tmux session"}
+              # The owner names the terminal: its resume, or the fiber's worker.
+              {:ok, %{"tmux_session" => tmux}} when is_binary(tmux) and tmux != "" ->
+                {:ok, tmux}
 
               _ ->
                 {:error, 502, "#{remote.name} answered the resume with no tmux session"}

@@ -547,7 +547,7 @@ here" rather than as a missing file.
 |---|---|---|
 | `POST /claim` | owner-routed | Register an already-live terminal session as a fiber's running worker |
 | `POST /migrate` | local owner | Move a live worker from one installed fiber to another on the same host, without ending its conversation — see [Worker migration](#worker-migration) |
-| `POST /sessions/resume` | local | Start (or find) a past session's terminal viewer; an active terminal Codex worker reuses its owned thread |
+| `POST /sessions/resume` | local | Resume a past session: a constitution's own session as its worker, any other in a terminal of its own; answers the terminal to open |
 | `POST /sessions/input` | host-addressed | Paste `{session_uuid, text}` into the live terminal of a Codex session this host owns, from the session ledger; answers `{status: "submitted"}`, 404 when the session is not running or not owned, 503 when terminal state is unknown |
 | `POST /sessions/receiver` | host-addressed | Resolve the live native Codex process for `{session_uuid}` and return `{session_uuid, pid, process_start}` from a kernel lifetime probe; 404 means absent or stale, 503 means process state is unknown |
 | `POST /sessions/prepare-terminal` | host-addressed | Prepare the terminal viewer of an owned Codex thread by fiber UID or recorded tmux name, without starting a turn |

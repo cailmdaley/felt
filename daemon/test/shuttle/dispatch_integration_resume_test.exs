@@ -182,6 +182,70 @@ defmodule Shuttle.DispatchIntegrationResumeTest do
     refute String.replace(script, Dispatcher.passthrough_block(), "") =~ " || "
   end
 
+  # A human resuming a standing card's session from its History: the Poller
+  # runs it as the card's worker, resuming exactly that session (not the
+  # latest), with nothing injected and no fresh fallback, so the board, the
+  # schedule and delivery all see it as the live worker. It runs where the
+  # transcript was filed, even when the declared checkout has gone.
+  test "a human-resumed session is the card's worker, on that very session", %{host: host} do
+    write_fiber(host, "tests/human-resume", """
+    ---
+    name: Human resume
+    status: active
+    tags:
+      - constitution
+    shuttle:
+      kind: standing
+      agent: claude-sonnet
+      host: test-host
+      project_dir: #{Path.join(host, "moved-away")}
+      schedule:
+        expr: 0 15 * * *
+        tz: Europe/Paris
+    ---
+    A standing card whose earlier run the human picks up again.
+    """)
+
+    picked = "c1a0e5e0-0000-4000-8000-0000000000a1"
+    write_dispatch_marker(host, "tests/human-resume", "c1a0e5e0-0000-4000-8000-0000000000b2")
+    write_handoff_marker(host, "tests/human-resume")
+    write_transcript(picked)
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_human_resume,
+        runner: IntegrationRunner,
+        poll_interval_ms: 600_000,
+        felt_stores: [host]
+      )
+
+    assert {:ok, tmux} =
+             Poller.dispatch_fiber(poller, "tests/human-resume",
+               force: true,
+               ad_hoc: true,
+               resume_mode: "previous",
+               resume_session: picked,
+               work_dir: host
+             )
+
+    assert tmux =~ ~r/-shuttle$/
+    script = read_run_script()
+    assert script =~ "--resume '#{picked}'"
+    refute script =~ "Mode: resume"
+    refute script =~ "From User"
+    refute String.replace(script, Dispatcher.passthrough_block(), "") =~ " || "
+    refute script =~ ~r/claude[^\n]* -p /
+
+    assert %{session_uuid: ^picked} = Poller.live_worker(poller, "tests/human-resume")
+
+    assert get_in(read_frontmatter(host, "tests/human-resume"), [
+             "shuttle",
+             "runtime",
+             "session_uuid"
+           ]) ==
+             picked
+  end
+
   test "resume previous dispatch reaches each harness-specific resume command", %{host: host} do
     matrix = [
       {"claude-sonnet", "claude-session-111", ["claude", "--resume 'claude-session-111'", "<<<"],

@@ -4,7 +4,7 @@ import type { PhoneListening, PhoneListeningAttempt } from '../phoneListening.js
 import { isMobileViewport } from '../mobile.js'
 import { TranscriptPanel } from '../voiceTranscript.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
-import { listenMode, type FiberSlug } from './voiceStrip.js'
+import { heldWords, listenMode, type FiberSlug } from './voiceStrip.js'
 
 export interface ListenOptions {
   /** The card a pin lands on: the band's highlighted thread, else its own. */
@@ -162,11 +162,11 @@ export class ListenControl {
   /** Where words go now, in words. */
   private route(): string {
     const state = this.opts.voice.status, target = state?.target
-    const name = target ? this.opts.fiberSlug(target.fiber_id, target.origin) ?? target.fiber_id.split('/').at(-1) : 'nothing yet'
+    const name = target ? this.opts.fiberSlug(target.fiber_id, target.origin) ?? target.fiber_id.split('/').at(-1) ?? target.fiber_id : 'nothing yet'
     switch (listenMode(state)) {
       case 'meeting': return `Meeting on ${name}`
       case 'pinned': return `Pinned to ${name}`
-      default: return `Following you: words go to ${name}`
+      default: return state?.cold ? `Following you: ${heldWords(name)}` : `Following you: words go to ${name}`
     }
   }
 

@@ -23,3 +23,13 @@ it('keeps the pin mark and destination while muted or failed', () => {
 it('uses the current destination and a path slug for a card outside the board', () => {
   expect(voiceLine(voiceStatus({ enabled: true, target, destination: { ...target, fiber_id: 'outside/other' } }), slug).name).toBe('other')
 })
+it('says when the followed card has no live session, so words are held rather than sent', () => {
+  const strip = new VoiceStrip()
+  strip.paint(voiceLine(voiceStatus({ enabled: true, target, cold: true }), slug))
+  expect(strip.el.textContent).toBe('the-card')
+  expect(strip.el.hasAttribute('data-held')).toBe(true)
+  expect(strip.el.title).toBe('the-card has no live session: words stay in the transcript. End with “send” to start one.')
+  strip.paint(voiceLine(voiceStatus({ enabled: true, target }), slug))
+  expect(strip.el.hasAttribute('data-held')).toBe(false)
+  expect(strip.el.title).toBe('Following you: words go to the-card')
+})

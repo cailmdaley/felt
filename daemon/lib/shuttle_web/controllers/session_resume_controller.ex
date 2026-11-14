@@ -1,10 +1,11 @@
 defmodule ShuttleWeb.SessionResumeController do
   @moduledoc """
-  `POST /api/v1/sessions/resume` — `{"session": "<uuid>"}`: start (or find) the
-  tmux session resuming that harness session on THIS host, and answer
-  `{"tmux_session": "resume-<uuid>", "created": bool}`. 409 when the session is
-  a running worker's (attach to it instead), 422 with `{error}` when there is no
-  transcript here to resume, 400 for a malformed id.
+  `POST /api/v1/sessions/resume` — `{"session": "<uuid>"}`: resume that harness
+  session on THIS host, as its constitution's worker or in a terminal of its
+  own (`Shuttle.SessionResume`), and answer `{"tmux_session": <terminal>,
+  "created": bool}`. 409 when the session is a running worker's or its card has
+  another live conversation, 422 with `{error}` when there is no transcript here
+  to resume or the worker did not start, 400 for a malformed id.
 
   Host-local by design: it is the leg `POST /api/v1/attach` forwards to the host
   that ran a session, which alone has its transcript. It opens no terminal; the

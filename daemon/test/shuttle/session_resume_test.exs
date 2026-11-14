@@ -351,36 +351,145 @@ defmodule Shuttle.SessionResumeTest do
       File.rm(script)
     end
 
-    test "is the fiber's live conversation while its terminal runs" do
-      assert SessionResume.reopened("f", runner: Runner) == nil
+    test "a fiber this host does not run keeps a terminal of its own" do
+      assert {:ok, %{tmux_session: "resume-" <> @claude}} =
+               SessionResume.prepare(@claude,
+                 runner: Runner,
+                 dispatch: fn _, _ -> flunk("a foreign fiber launched a worker") end
+               )
+    end
+  end
 
-      Runner.set_running(true)
-      tmux = "resume-" <> @claude
+  # A constitution this host runs: its own session resumes as its worker.
+  describe "a constitution's own session" do
+    setup %{project: project} do
+      Env.put_app_env(:session_resume_fibers, fn ->
+        [
+          %{
+            path: Path.join(project, "f.md"),
+            fiber: %{
+              "uid" => "U",
+              "id" => "f",
+              "slug" => "f",
+              "shuttle" => %{
+                "host" => "here",
+                "project_dir" => project,
+                "resolved" => %{"agent" => %{"cli" => "claude"}},
+                "runtime" => %{"session_uuid" => "00000000-0000-4000-8000-000000000000"}
+              }
+            }
+          }
+        ]
+      end)
 
-      for id <- ["U", "f"] do
-        assert %{session: ^tmux, session_uuid: @claude, cli: "claude"} =
-                 SessionResume.reopened(id, runner: Runner)
-      end
+      owner = self()
 
-      assert SessionResume.reopened("other", runner: Runner) == nil
+      opts = [
+        runner: Runner,
+        own_host_id: "here",
+        live_worker: fn _ -> nil end,
+        dispatch: fn fiber, opts ->
+          send(owner, {:dispatch, fiber, opts})
+          {:ok, "f-U-shuttle"}
+        end
+      ]
+
+      {:ok, opts: opts}
     end
 
-    test "voice to it is warm: words are not dropped for want of a worker" do
-      Env.put_app_env(:voice_target_entries, fn -> [] end)
-      assert Shuttle.Voice.Target.cold?(%{"fiber_id" => "U", "origin" => nil})
-      Runner.set_running(true)
-      refute Shuttle.Voice.Target.cold?(%{"fiber_id" => "U", "origin" => nil})
-      assert Shuttle.Voice.Target.cold?(%{"fiber_id" => "U", "origin" => "elsewhere"})
-    end
+    test "resumes as the card's worker: that session, the human's turn, where it ran", %{
+      opts: opts,
+      project: project
+    } do
+      assert {:ok, %{tmux_session: "f-U-shuttle", created: true}} =
+               SessionResume.prepare(@claude, opts)
 
-    test "live input is typed into its terminal instead of launching a worker" do
-      Runner.set_running(true)
-
-      assert {:input, {:ok, "resume-" <> @claude}} =
-               Shuttle.Delivery.deliver("U", "me: hello", live_input: true)
-
+      assert_received {:dispatch, "U", dispatch}
+      assert dispatch[:force] and dispatch[:ad_hoc]
+      assert dispatch[:resume_session] == @claude
+      assert dispatch[:work_dir] == project
+      refute Keyword.has_key?(dispatch, :project_dir)
+      refute Keyword.has_key?(dispatch, :user_message)
       refute Enum.any?(Runner.calls(), &match?({"tmux", ["new-session" | _]}, &1))
-      assert Enum.any?(Runner.calls(), &match?({"tmux", ["paste-buffer" | _]}, &1))
+    end
+
+    test "the live worker's own session attaches to it", %{opts: opts} do
+      Runner.set_running(true)
+
+      opts =
+        Keyword.put(opts, :live_worker, fn _ ->
+          %{session: "f-U-shuttle", session_uuid: @claude}
+        end)
+
+      assert {:ok, %{tmux_session: "f-U-shuttle", created: false}} =
+               SessionResume.prepare(@claude, opts)
+
+      refute_received {:dispatch, _, _}
+    end
+
+    test "another session while a worker is live is refused: one live conversation", %{
+      opts: opts
+    } do
+      opts =
+        Keyword.put(opts, :live_worker, fn _ ->
+          %{session: "f-U-shuttle", session_uuid: "other"}
+        end)
+
+      assert {:error, {:live, message}} = SessionResume.prepare(@claude, opts)
+      assert message =~ "live worker (session other)"
+      refute_received {:dispatch, _, _}
+    end
+
+    test "a session of another harness than the card's agent is refused", %{opts: opts} do
+      assert {:error, message} = SessionResume.prepare(@codex, opts)
+      assert message =~ "ran under codex"
+      refute_received {:dispatch, _, _}
+    end
+
+    test "a refused launch says why", %{opts: opts} do
+      opts =
+        Keyword.put(opts, :dispatch, fn _, _ ->
+          {:error, {:transcript_held, "pid 7 holds the transcript"}}
+        end)
+
+      assert {:error, "pid 7 holds the transcript"} = SessionResume.prepare(@claude, opts)
+    end
+
+    test "a session already open in a terminal of its own is refused before the card is armed",
+         %{opts: opts} do
+      Runner.set_running(true)
+      assert {:error, {:live, message}} = SessionResume.prepare(@claude, opts)
+      assert message =~ "open in terminal resume-#{@claude}"
+      refute_received {:dispatch, _, _}
+    end
+
+    test "the ledger's uid finds a renamed card, and a card that took its old name is not it",
+         %{opts: opts, project: project} do
+      Env.put_app_env(:session_resume_fibers, fn ->
+        [
+          %{
+            path: Path.join(project, "f.md"),
+            fiber: %{
+              "uid" => "OTHER",
+              "id" => "f",
+              "slug" => "f",
+              "shuttle" => %{"host" => "here", "resolved" => %{"agent" => %{"cli" => "claude"}}}
+            }
+          },
+          %{
+            path: Path.join(project, "renamed.md"),
+            fiber: %{
+              "uid" => "U",
+              "id" => "renamed",
+              "slug" => "renamed",
+              "shuttle" => %{"host" => "here", "resolved" => %{"agent" => %{"cli" => "claude"}}}
+            }
+          }
+        ]
+      end)
+
+      assert {:ok, %{tmux_session: "f-U-shuttle"}} = SessionResume.prepare(@claude, opts)
+      assert_received {:dispatch, "U", _}
     end
   end
 
