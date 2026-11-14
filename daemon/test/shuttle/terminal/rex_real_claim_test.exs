@@ -105,6 +105,62 @@ defmodule Shuttle.Terminal.RexRealClaimTest do
     assert {:ok, []} = Rex.windows(@runner, sid)
   end
 
+  # The human's shell outlives the harness it ran: the block stays, so only
+  # the claim's process receipt can end the worker, and the block is given
+  # back to the human rather than closed.
+  test "a claimed block whose harness is killed ends its worker and stays open, released", %{
+    root: root
+  } do
+    alias Shuttle.Test.{FeltStoreRunner, FiberUid}
+    FeltStoreRunner.start!()
+    store = FeltStoreRunner.felt_root()
+    on_exit(fn -> File.rm_rf(store) end)
+    Env.put_env("SHUTTLE_STORES", store)
+    Env.delete_env("SHUTTLE_SESSIONS_FILE")
+    Env.put_app_env(:terminal_backend, Backend)
+    FeltStoreRunner.set_fiber("released", make_fiber("released"))
+    FeltStoreRunner.set_shuttle("released", "kind: oneshot\nagent: claude-sonnet\n", "open")
+
+    {:ok, p} =
+      start_poller!(
+        runner: ClaimRunner,
+        own_host_id: "test-host",
+        felt_stores: [store],
+        poll_interval_ms: 600_000,
+        heartbeat_interval_ms: 50
+      )
+
+    await_boot_cycle!(p)
+    pid_file = Path.join(root, "harness.pid")
+    path = Path.join(root, "human.sh")
+    File.write!(path, "sleep 300 &\necho $! > #{pid_file}\nwait\nsleep 300\n")
+
+    assert {:ok, %{"session_id" => sid}} =
+             Rex.create(@runner, Backend.create_spec("probe-human", root, path))
+
+    await(fn -> File.exists?(pid_file) and File.read!(pid_file) =~ ~r/^\d+\n$/ end)
+    harness = pid_file |> File.read!() |> String.trim() |> String.to_integer()
+    canonical = FiberUid.session("released")
+
+    assert {:ok, %{session: ^canonical}} =
+             Shuttle.Poller.claim_session(p, "released", sid,
+               session_uuid: "released-uuid",
+               harness_pid: harness
+             )
+
+    assert Terminal.status(@runner, canonical, backends: [Backend]) == :alive
+    assert Shuttle.Poller.worker_status(p, "released")
+
+    {_, 0} = System.cmd("kill", ["-KILL", Integer.to_string(harness)])
+    await(fn -> Shuttle.Poller.worker_status(p, "released") == nil end)
+
+    assert {:ok, [%{"session_id" => ^sid}]} = Rex.sessions(@runner)
+    assert {:ok, [%{"label" => "released"} | _]} = Rex.blocks(@runner, sid)
+    assert {:ok, %{"bindings" => bindings}} = RexBindings.read()
+    refute Map.has_key?(bindings, canonical)
+    assert :absent = Backend.probe(@runner, canonical)
+  end
+
   test "an exited auto-closing block leaves an empty session which the backend removes", %{
     root: root
   } do
