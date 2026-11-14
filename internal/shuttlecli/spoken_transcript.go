@@ -40,6 +40,7 @@ func (a *app) spokenTranscript(cmd *cobra.Command) error {
 			Text    string    `json:"text"`
 			FiberID string    `json:"fiber_id"`
 			Slug    string    `json:"slug"`
+			Held    bool      `json:"held"`
 		} `json:"rows"`
 	}
 	if err := json.Unmarshal(body, &answer); err != nil {
@@ -53,8 +54,13 @@ func (a *app) spokenTranscript(cmd *cobra.Command) error {
 		} else if row.FiberID != "" {
 			card = row.FiberID[strings.LastIndex(row.FiberID, "/")+1:]
 		}
+		// Speech that reached nobody is held, drawn as the board draws it.
+		arrow := "→ " + card
+		if row.Held {
+			arrow = "⇢ " + card + " (held)"
+		}
 		text := lineBreaks.Replace(row.Text)
-		fmt.Fprintf(a.env.Stdout, "%s %s → %s: %s\n", row.Time.Format("15:04:05"), row.Speaker, card, text)
+		fmt.Fprintf(a.env.Stdout, "%s %s %s: %s\n", row.Time.Format("15:04:05"), row.Speaker, arrow, text)
 	}
 	return nil
 }
