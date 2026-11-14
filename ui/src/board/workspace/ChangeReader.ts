@@ -194,7 +194,6 @@ export function mountChangeReader(
     stop?: { note?: string; importance?: string; from?: number; to?: number; side?: string },
   ): void => {
     const card = el('details', 'change-file') as HTMLDetailsElement
-    card.open = false
     card.dataset.changeFile = file.path
     card.dataset.viewId = id
     card.dataset.windowId = `card:${id}`
@@ -261,7 +260,6 @@ export function mountChangeReader(
           body.replaceChildren()
         }
       })
-    if (card.open) addDiff(body, file, wholeFiles.has(id) ? file.hunks : hunks)
     if (!navigation.isViewed(id) && reading.expanded.includes(id)) {
       ;(card as HTMLDetailsElement).open = true
       view.showAll()
