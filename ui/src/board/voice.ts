@@ -64,6 +64,7 @@ export interface BoardOpen {
 }
 
 const observing = (status: VoiceStatus | null): boolean => !!status?.enabled
+const sightKey = (card: KanbanCard | null): string => card ? `${card.originId}\u0000${card.uid ?? card.id}` : ''
 
 export interface VoiceUpdate {
   enabled?: boolean
@@ -177,9 +178,16 @@ export class Voice {
     this.read?.abort()
     this.read = null
   }
-  /** The board now shows `card`, or no fiber at all. Voice follows once the view holds. */
+  /**
+   * The board now shows `card`, or no fiber at all. Voice follows once the view
+   * holds. A repaint of what the board already shows claims nothing: two boards
+   * that each re-sighted their page whenever the other moved the target would
+   * take it back and forth without end.
+   */
   see(card: KanbanCard | null): void {
+    const same = sightKey(card) === sightKey(this.sighted)
     this.sighted = card
+    if (same) return
     if (this.sightTimer !== null) window.clearTimeout(this.sightTimer)
     this.sightTimer = window.setTimeout(() => { this.sightTimer = null; this.claim() }, SIGHT_MS)
   }
