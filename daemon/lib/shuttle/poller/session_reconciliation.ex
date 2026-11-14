@@ -236,17 +236,15 @@ defmodule Shuttle.Poller.SessionReconciliation do
 
   defp adopt_known_orphan_session(%State{} = state, lookup, session) do
     case Map.get(lookup, Shuttle.ULID.from_tmux(session)) do
-      {:adopt, fiber_id} ->
+      # A fiber with a tracked worker keeps it. Otherwise the full document
+      # decides: an open card's worker is adopted, and so is a closed card's
+      # when it launched after the closure; any other is stopped.
+      {verb, fiber_id} when verb in [:adopt, :closed] ->
         if Poller.running_key(state, fiber_id) != nil do
           state
         else
           adopt_session(state, fiber_id, session)
         end
-
-      # The full document decides: a worker launched after the closure is
-      # adopted, any other is stopped.
-      {:closed, fiber_id} ->
-        adopt_session(state, fiber_id, session)
 
       :ambiguous ->
         Logger.warning(
