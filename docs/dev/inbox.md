@@ -111,7 +111,7 @@ The lock is what keeps two readers from taking one entry; the claim records whic
 | `members` | The batch's message ids, oldest first |
 | `opened_at` | When it was claimed, in Unix nanoseconds |
 | `outcome` | Absent while the attempt is open; then `delivered`, `released` or `ambiguous` |
-| `retry` | How many earlier attempts direct delivery made to the same conversation and closed `ambiguous`; absent for the first. A retry's transport id is the entry's message id with `-retry-<n>` before the address suffix, so the conversation's stored receipt for the earlier try is not replayed |
+| `retry` | How many sends direct delivery made to `conversation` after an earlier one stayed unknown; absent before the first. A retry's transport id is the entry's message id with `-retry-<n>` before the address suffix, so the conversation's stored receipt for the earlier send is not replayed. A later claim for the same conversation keeps the count |
 
 Claiming the same batch for the same conversation and epoch while its attempt is open keeps that attempt as it was opened, so a reader that died after its claim and is retried finds the batch id it first wrote.
 The claim is a field in the pending file, not a move, so a build that predates it still sees the entry as pending.
@@ -131,8 +131,11 @@ Both readers that select entries claim through it:
 | `ambiguous` | stays pending, unpinned, with `possible_repeat` set, so its next direct emission starts "Possible repeat" |
 
 An unconfirmed direct send leaves its attempt open and pinned, and the next delivery replays the conversation's stored receipt instead of sending again.
-When the pinned conversation rejects the entry, has ended with the outcome unknown, or has left it unknown for five minutes since `opened_at` while alive, direct delivery closes that attempt (`released` or `ambiguous`) and claims the entry for the fiber's current receiver in one write, with `retry` counted when that is the same conversation.
-A conversation gets one such retry: an attempt with `retry` set stays open and pinned while its conversation lives, however long its outcome stays unknown.
+When the pinned conversation rejects the entry, has ended with the outcome unknown, or is no longer the fiber's receiver and has left it unknown for five minutes since `opened_at`, direct delivery closes that attempt (`released` or `ambiguous`) and claims the entry for the fiber's current receiver in one write.
+When the pinned conversation is still the receiver and has left the outcome unknown for five minutes, the open attempt counts a `retry` and restarts `opened_at`, also in one write, and the entry is sent again under the retry's transport id, starting "Possible repeat". That does not set `possible_repeat`, so a build that predates `attempt` reads the entry as pinned and replays the first send's receipt.
+The five minutes are checked when a delivery runs, which the daemon does on each poll. A send held for the receiver's approval (`wake_held`) is not retried.
+The dedup layer keeps one receipt per transport id and refuses different text under it, so each text a conversation can be sent has its own id: the plain text and the `possible_repeat` warning go to different conversations under the entry's id, and a retry has its own.
+A conversation gets one retry: an attempt with `retry` set stays open and pinned while its conversation is the receiver, however long its outcome stays unknown.
 An attempt read from `attempt_address` alone has no `opened_at`; its five minutes start when direct delivery first sees its outcome unknown.
 An unpinned claim, like a delivered close, keeps the file's modification time; a pinned claim and every other close write it afresh.
 

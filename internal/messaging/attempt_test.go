@@ -425,12 +425,155 @@ func TestAmbiguousWakeToALiveReceiverIsRetriedAfterTheBound(t *testing.T) {
 		t.Fatalf("sends = %+v", sent)
 	}
 	entry = readEntry(t, path)
-	if !entry.Attempt.open() || entry.Attempt.Retry != 1 || entry.AttemptAddress != a || !entry.PossibleRepeat {
+	if !entry.Attempt.open() || entry.Attempt.Retry != 1 || entry.AttemptAddress != a || entry.PossibleRepeat {
 		t.Fatalf("after the retry, entry = %+v attempt %+v", entry, entry.Attempt)
 	}
 	// A crash after the retry's send retries with the retry's transport id.
 	if err := deliver(); err != nil || len(sent) != 2 {
 		t.Fatalf("replayed retry = %v, sends %d", err, len(sent))
+	}
+}
+
+// dedupSender sends through the dedup layer under direct delivery's
+// per-address transport id, with outcome deciding each new send.
+func dedupSender(sent *[]Request, outcome func(Request) (string, string)) func(context.Context, *sysenv.Env, string, Request, string) (Receipt, error) {
+	return func(ctx context.Context, env *sysenv.Env, host string, req Request, address string) (Receipt, error) {
+		req.Address = address
+		req.MessageID += "-" + mailboxKey(address)[:16]
+		return withDedup(ctx, env, req, func(context.Context) dedupSendResult {
+			*sent = append(*sent, req)
+			status, code := outcome(req)
+			result := dedupSendResult{Receipt: Receipt{Status: status, Transport: "codex-terminal"}}
+			if code != "" {
+				result.Err = errCode(code, "%s", code)
+			}
+			return result
+		})
+	}
+}
+
+func expireAttempt(t *testing.T, path string) {
+	t.Helper()
+	entry := readEntry(t, path)
+	entry.Attempt.OpenedAt = time.Now().Add(-liveAttemptRetryAfter).UnixNano()
+	if err := writeMailboxEntry(path, entry); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestARejectedRetryIsSentAgainUnderTheRetryID(t *testing.T) {
+	const a = "shuttle://host/codex/A"
+	env := testEnv(t)
+	request := Request{MessageID: "wake-retry-rejected", Text: "continue", Wake: true}
+	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: request}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey(request.MessageID)+".json")
+	var sent []Request
+	outcomes := []struct{ status, code string }{{StatusUnknown, "ambiguous_delivery"}, {StatusRejected, "preflight_failed"}, {StatusSubmitted, ""}}
+	sender := dedupSender(&sent, func(Request) (string, string) {
+		o := outcomes[len(sent)-1]
+		return o.status, o.code
+	})
+	deliver := func() error {
+		return deliverFiberContextItemWith(context.Background(), env, "fiber", "host", a, request, sender)
+	}
+	if err := deliver(); ErrorCode(err) != "ambiguous_delivery" {
+		t.Fatalf("first = %v", err)
+	}
+	expireAttempt(t, path)
+	if err := deliver(); ErrorCode(err) != "preflight_failed" {
+		t.Fatalf("rejected retry = %v", err)
+	}
+	if err := deliver(); err != nil {
+		t.Fatalf("retry after the rejection = %v", err)
+	}
+	if len(sent) != 3 || sent[1].MessageID != sent[2].MessageID || sent[1].Text != sent[2].Text || sent[0].MessageID == sent[1].MessageID {
+		t.Fatalf("sends = %+v", sent)
+	}
+}
+
+func TestAnOlderBuildsPossibleRepeatReplaysItsStoredReceipt(t *testing.T) {
+	const b = "shuttle://host/codex/B"
+	env := testEnv(t)
+	request := Request{MessageID: "wake-rolled", Text: "continue", Wake: true}
+	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: request}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey(request.MessageID)+".json")
+	var sent []Request
+	sender := dedupSender(&sent, func(Request) (string, string) { return StatusUnknown, "ambiguous_delivery" })
+	// The older build's send to successor B, stored unknown under its wording.
+	older := request
+	older.Text = "Possible repeat: delivery to a previous worker had an unknown outcome before its session ended.\n\n" + request.Text
+	if _, err := sender(context.Background(), env, "host", older, b); ErrorCode(err) != "ambiguous_delivery" {
+		t.Fatal(err)
+	}
+	entry := readEntry(t, path)
+	entry.PossibleRepeat = true
+	if err := writeFiberMailboxAttempt(path, entry, b); err != nil {
+		t.Fatal(err)
+	}
+	if err := deliverFiberContextItemWith(context.Background(), env, "fiber", "host", b, request, sender); ErrorCode(err) != "ambiguous_delivery" {
+		t.Fatalf("delivery = %v, want the stored receipt replayed", err)
+	}
+	if len(sent) != 1 {
+		t.Fatalf("transport saw %d sends, want 1", len(sent))
+	}
+}
+
+func TestAnOlderBuildReadsAMidRetryEntryAsPinnedWithoutAWarning(t *testing.T) {
+	const a = "shuttle://host/codex/A"
+	env := testEnv(t)
+	request := Request{MessageID: "wake-rollback", Text: "continue", Wake: true}
+	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: request}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey(request.MessageID)+".json")
+	var sent []Request
+	sender := dedupSender(&sent, func(Request) (string, string) { return StatusUnknown, "ambiguous_delivery" })
+	for i := 0; i < 2; i++ {
+		if err := deliverFiberContextItemWith(context.Background(), env, "fiber", "host", a, request, sender); ErrorCode(err) != "ambiguous_delivery" {
+			t.Fatal(err)
+		}
+		expireAttempt(t, path)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var old mainEntry
+	if err := json.Unmarshal(raw, &old); err != nil {
+		t.Fatal(err)
+	}
+	// The older build sends the plain text under the plain id, whose stored
+	// receipt it replays.
+	if len(sent) != 2 || old.AttemptAddress != a || old.PossibleRepeat {
+		t.Fatalf("sends %d, older build reads %+v", len(sent), old)
+	}
+}
+
+func TestAHeldApprovalIsNotRetried(t *testing.T) {
+	const a = "shuttle://host/claude/A"
+	env := testEnv(t)
+	request := Request{MessageID: "wake-held", Text: "continue", Wake: true}
+	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: request}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey(request.MessageID)+".json")
+	calls := 0
+	sender := func(context.Context, *sysenv.Env, string, Request, string) (Receipt, error) {
+		calls++
+		return Receipt{Status: StatusUnknown}, errCode("wake_held", "receiver approval is required")
+	}
+	for i := 0; i < 2; i++ {
+		if err := deliverFiberContextItemWith(context.Background(), env, "fiber", "host", a, request, sender); ErrorCode(err) != "wake_held" {
+			t.Fatal(err)
+		}
+		expireAttempt(t, path)
+	}
+	if entry := readEntry(t, path); entry.Attempt.Retry != 0 {
+		t.Fatalf("attempt = %+v", entry.Attempt)
 	}
 }
 

@@ -13,7 +13,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- A Codex wake whose terminal paste failed after text may have reached the composer is `unknown` (`ambiguous_delivery`) and is not pasted again at once. A direct fiber delivery whose outcome stays unknown for five minutes while its conversation is alive is closed ambiguous and sent once more, under a new transport id and marked "Possible repeat". The daemon's `/sessions/input` answers 502 `terminal_input_ambiguous` for it and 503 `terminal_input_failed` when nothing was typed.
+- A Codex wake whose terminal paste failed after text may have reached the composer is `unknown` (`ambiguous_delivery`) and is not pasted again at once. A direct fiber delivery whose outcome stays unknown for five minutes while its conversation is alive is sent once more, under a new transport id and marked "Possible repeat"; a send held for approval is not. The daemon's `/sessions/input` answers 502 `terminal_input_ambiguous` for it and 503 `terminal_input_failed` when nothing was typed.
 
 ## [2.0.0] — 2026-11-13
 

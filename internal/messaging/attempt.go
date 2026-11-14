@@ -2,7 +2,6 @@ package messaging
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -31,9 +30,10 @@ type Attempt struct {
 	// Outcome is empty while the attempt is open, then delivered, released or
 	// ambiguous.
 	Outcome string `json:"outcome,omitempty"`
-	// Retry counts the attempts to Conversation that direct delivery made
-	// before this one and closed ambiguous. A retry carries its own transport
-	// id, so the conversation's receipt for the earlier try is not replayed.
+	// Retry counts the sends direct delivery made to Conversation after an
+	// earlier one stayed unknown. A retry carries its own transport id, so
+	// the conversation's receipt for the earlier send is not replayed. A
+	// later claim for the same conversation keeps the count.
 	Retry int `json:"retry,omitempty"`
 }
 
@@ -63,7 +63,11 @@ func batchID(members []string) string {
 func (e *mailboxEntry) openAttempt(conversation string, epoch uint64, members []string, pin bool, now time.Time) {
 	id := batchID(members)
 	if !e.Attempt.open() || e.Attempt.BatchID != id || e.Attempt.Conversation != conversation || e.Attempt.Epoch != epoch {
-		e.Attempt = &Attempt{BatchID: id, Conversation: conversation, Epoch: epoch, Members: slices.Clone(members), OpenedAt: now.UnixNano()}
+		retry := 0
+		if e.Attempt != nil && e.Attempt.Conversation == conversation {
+			retry = e.Attempt.Retry
+		}
+		e.Attempt = &Attempt{BatchID: id, Conversation: conversation, Epoch: epoch, Members: slices.Clone(members), OpenedAt: now.UnixNano(), Retry: retry}
 	}
 	if pin {
 		e.AttemptAddress = conversation
@@ -192,14 +196,7 @@ func writeMailboxEntryKeepingTime(path string, entry mailboxEntry) error {
 	if err := writeMailboxEntry(path, entry); err != nil {
 		return err
 	}
-	return os.Chtimes(path, info.ModTime(), info.ModTime())
-}
-
-// transportRequest is request as direct delivery sends it under attempt: a
-// retry to the same conversation gets its own message id.
-func transportRequest(request Request, attempt *Attempt) Request {
-	if attempt != nil && attempt.Retry > 0 {
-		request.MessageID += fmt.Sprintf("-retry-%d", attempt.Retry)
-	}
-	return request
+	// The time only sets how long offered/ keeps the entry.
+	_ = os.Chtimes(path, info.ModTime(), info.ModTime())
+	return nil
 }
