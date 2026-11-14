@@ -560,6 +560,14 @@ func (a *app) shuttleSessionsCmd() *cobra.Command {
 fleet. Use --host or --harness to filter, and pass a returned address to
 'shuttle message'. Discovery gaps report unavailable hosts or transports.
 
+With --since, lists every Claude, Codex and Pi session on one host with a
+transcript message since that time, live or ended, newest first: its last
+activity, whether it is live, its harness, its address (shuttle show opens it
+on that host), and the fibers it worked on. --since takes what shuttle find
+--since takes (30d, 12h, an ISO date, or an RFC3339 time). It reads this host's
+transcript index, or another host's through --host, which asks that host's
+daemon; --harness narrows it.
+
 With a fiber or session argument, reads Shuttle's composite session ledger and reports the sessions that
 belong to a fiber UID, including historical fiber paths, host, harness, and explicit transcript
 availability. It does not read or search transcript content; use the native
@@ -580,10 +588,13 @@ and availability.`,
 				if sessionsMaterialize || sessionsDir != "" {
 					return fmt.Errorf("--materialize and --dir require a fiber, session UUID, or --commit <sha>")
 				}
+				if sessionsDiscovery.since != "" {
+					return a.runRecentSessions(cmd.Context(), &sessionsDiscovery)
+				}
 				return a.runShuttleSessionDiscovery(cmd.Context(), &sessionsDiscovery)
 			}
-			if sessionsDiscovery.local || sessionsDiscovery.host != "" || sessionsDiscovery.harness != "" {
-				return fmt.Errorf("--local, --host, and --harness apply only to no-argument live session discovery")
+			if sessionsDiscovery.local || sessionsDiscovery.host != "" || sessionsDiscovery.harness != "" || sessionsDiscovery.since != "" {
+				return fmt.Errorf("--local, --host, --harness, and --since apply only to no-argument session discovery")
 			}
 			ledger, err := a.fetchSessionLedger()
 			if err != nil {
@@ -707,8 +718,9 @@ and availability.`,
 	}
 	shuttleSessionsCmd.Flags().BoolVar(&sessionsDiscovery.local, "local", false, "query this host's native harness adapters directly")
 	_ = shuttleSessionsCmd.Flags().MarkHidden("local")
-	shuttleSessionsCmd.Flags().StringVar(&sessionsDiscovery.host, "host", "", "limit live session discovery to one host")
-	shuttleSessionsCmd.Flags().StringVar(&sessionsDiscovery.harness, "harness", "", "limit live session discovery to one harness")
+	shuttleSessionsCmd.Flags().StringVar(&sessionsDiscovery.host, "host", "", "limit session discovery to one host")
+	shuttleSessionsCmd.Flags().StringVar(&sessionsDiscovery.harness, "harness", "", "limit session discovery to one harness")
+	shuttleSessionsCmd.Flags().StringVar(&sessionsDiscovery.since, "since", "", "list this host's (or --host's) sessions active since a time, ended ones included (30d, 12h, YYYY-MM-DD or RFC3339)")
 	shuttleSessionsCmd.Flags().StringVar(&sessionsCommitSHA, "commit", "", "reverse lookup: resolve a commit SHA (prefix accepted) to its owning fiber via the commit ledger")
 	shuttleSessionsCmd.Flags().BoolVar(&sessionsMaterialize, "materialize", false, "resolve every available transcript to an ordinary local file and write manifest.json")
 	shuttleSessionsCmd.Flags().StringVar(&sessionsDir, "dir", "", "directory for the materialized manifest.json (default: the felt transcript cache, keyed by fiber UID); remote transcript copies always land in the shared felt cache")

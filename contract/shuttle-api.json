@@ -74,6 +74,7 @@
         "GET /sent-files/all",
         "GET /activity",
         "GET /sessions",
+        "GET /sessions/recent",
         "GET /commits",
         "GET /transcript",
         "GET /transcript/raw",

@@ -135,7 +135,7 @@ alone, with more filters.`,
 	}
 	feltcli.AddFindFlags(cmd, &fq)
 	cmd.Flags().Lookup("limit").Usage = "Cap on fibers printed from the enclosing store and on sessions (0 = fibers uncapped, 100 sessions)"
-	cmd.Flags().StringVar(&since, "since", "", "sessions: restrict by age (30d or YYYY-MM-DD)")
+	cmd.Flags().StringVar(&since, "since", "", "sessions: restrict by age (30d, 12h, YYYY-MM-DD or RFC3339)")
 	cmd.Flags().StringVar(&harness, "harness", "", "sessions: harness (claude, codex, pi)")
 	return cmd
 }

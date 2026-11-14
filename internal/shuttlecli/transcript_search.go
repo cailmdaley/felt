@@ -152,7 +152,7 @@ func (a *app) transcriptSearchCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&q.ExcludeSessions, "exclude-session", nil, "exclude session ID even with --include-self (repeatable)")
 	cmd.Flags().BoolVar(&q.IncludeSelf, "include-self", false, "disable automatic exclusion of the calling harness session")
 	cmd.Flags().StringVar(&q.Fiber, "fiber", "", "restrict to sessions linked to this fiber")
-	cmd.Flags().StringVar(&q.Since, "since", "", "restrict by age (30d or YYYY-MM-DD)")
+	cmd.Flags().StringVar(&q.Since, "since", "", "restrict by age (30d, 12h, YYYY-MM-DD or RFC3339)")
 	cmd.Flags().StringVar(&q.Project, "project", "", "project path prefix")
 	cmd.Flags().StringVar(&q.Harness, "harness", "", "harness (claude, codex, pi)")
 	cmd.Flags().IntVarP(&q.Limit, "limit", "n", 20, "maximum sessions (messages with --per-message)")
@@ -317,6 +317,9 @@ func parseTranscriptSince(value string, now time.Time) (string, error) {
 	if value == "" {
 		return "", nil
 	}
+	if at, err := time.Parse(time.RFC3339, value); err == nil {
+		return at.UTC().Format(time.RFC3339), nil
+	}
 	if day, err := time.Parse("2006-01-02", value); err == nil {
 		return day.UTC().Format(time.RFC3339), nil
 	}
@@ -329,7 +332,7 @@ func parseTranscriptSince(value string, now time.Time) (string, error) {
 	}
 	duration, err := time.ParseDuration(value)
 	if err != nil || duration <= 0 {
-		return "", fmt.Errorf("--since must be a duration such as 30d or an ISO date")
+		return "", fmt.Errorf("--since must be a duration such as 30d or 12h, an ISO date, or an RFC3339 time")
 	}
 	return now.Add(-duration).UTC().Format(time.RFC3339), nil
 }

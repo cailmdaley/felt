@@ -27,6 +27,7 @@ type sessionsDiscoveryOptions struct {
 	local   bool
 	host    string
 	harness string
+	since   string
 }
 
 // messageOptions are the flags of shuttle message.

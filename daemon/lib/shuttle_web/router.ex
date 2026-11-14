@@ -158,6 +158,10 @@ defmodule ShuttleWeb.Router do
     # this host recorded at dispatch / claim / resume. Host-scoped like
     # /activity.
     get("/sessions", SessionsController, :show)
+    # Every session on one host with transcript activity since a time, live or
+    # ended; shells `shuttle sessions --since --local --json` on the host named
+    # by `host=`, forwarding to that daemon when it is a remote.
+    get("/sessions/recent", RecentSessionsController, :show)
     # What the host that ran ledgered sessions knows of them — transcript present,
     # harness, a bridged Claude session's claude.ai URL — for the card's History.
     get("/sessions/links", SessionLinksController, :show)
