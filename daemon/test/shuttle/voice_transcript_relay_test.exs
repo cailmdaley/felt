@@ -1057,6 +1057,34 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     refute_receive {:delivery, _}, 20
   end
 
+  test "the day transcript marks the words a cold target dropped as held, and only those", c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "")
+    start_monitor(c, kind: "voice", routes: routes, cold: fn _ -> true end)
+
+    record(c.path, "2026-11-06T10:00:01Z", "Claude check the plot")
+    poll(c)
+    Agent.update(c.now, fn _ -> 5_000 end)
+    assert %{pending: nil} = poll(c)
+    record(c.path, "2026-11-06T10:00:02Z", "check the plot, send")
+    poll(c)
+    assert_receive {:delivery, %{fiber_id: "fiber-a"}}
+    sync_tasks(c)
+    # A replayed poll writes no second mark.
+    poll(c)
+
+    assert {:ok, %{rows: [held, sent]}} =
+             Shuttle.Voice.Transcript.read(%{"date" => "2026-11-06"})
+
+    assert %{"text" => "Claude check the plot", "fiber_id" => "fiber-a", "held" => true} = held
+    assert %{"text" => "check the plot, send", "fiber_id" => "fiber-a"} = sent
+    refute Map.has_key?(sent, "held")
+
+    lines = File.read!(Path.join([c.root, "transcripts", "2026-11-06.jsonl"]))
+    assert length(String.split(lines, "\n", trim: true)) == 3
+  end
+
   test "asking did you send never summons a cold target", c do
     routes = Path.join(c.root, "routes.jsonl")
     route(routes, "2026-11-06T10:00:00Z", "fiber-a")

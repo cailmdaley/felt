@@ -12,6 +12,8 @@ export interface VoiceTranscriptRow {
   name: string | null
   slug?: string | null
   launch: string
+  /** Routed to a card with no live session and dropped without “send”: it reached nobody. */
+  held?: boolean
 }
 export interface VoiceTranscript {
   date: string
@@ -30,7 +32,7 @@ export async function readVoiceTranscript(base: string, recorder?: string, fiber
 export function transcriptLine(row: VoiceTranscriptRow, slugOf: FiberSlug): string {
   const time = clockSeconds(Date.parse(row.t))
   const slug = row.fiber_id ? (row.slug ?? slugOf(row.fiber_id, row.origin) ?? row.fiber_id).split('/').at(-1) : '—'
-  return `${time} ${row.speaker} → ${slug}: ${row.text}`
+  return row.held ? `${time} ${row.speaker} ⇢ ${slug} (held): ${row.text}` : `${time} ${row.speaker} → ${slug}: ${row.text}`
 }
 
 /** A small reader over the day transcript, newest speech first; filtering never changes Listen's target. */

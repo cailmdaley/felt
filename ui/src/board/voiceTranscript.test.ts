@@ -25,6 +25,10 @@ it('renders time, speaker, slug and text, including speech with no route', () =>
   expect(transcriptLine({ ...row, fiber_id: 'outside/card' }, slug)).toContain('me → card:')
   expect(transcriptLine({ ...row, slug: 'outside/stored-card' }, () => undefined)).toContain('me → stored-card:')
 })
+it('draws held speech, which reached nobody, apart from speech sent to its card', () => {
+  expect(transcriptLine({ ...row, held: true }, slug)).toBe('18:30:04 me ⇢ a-card (held): A thought <not markup>')
+  expect(transcriptLine({ ...row, held: true }, slug)).not.toContain('→')
+})
 it('opens a readable day panel, filters only when asked, and treats speech as text', async () => {
   const opener = document.createElement('button'); document.body.append(opener)
   panel = new TranscriptPanel('', 'audio-host', 'uid', slug, opener)

@@ -21,16 +21,14 @@ export interface VoiceStatus {
   sources: Array<'desktop' | 'phone'>
   source: 'desktop' | 'phone'
   launch: string | null
-  /** Where live voice goes; `source` names what set it, when that was not a board or Rex. */
-  target: (RexMove & { source?: string }) | null
+  /** Where live voice goes; `source` names what set it, when that was not a board or Rex. A pushed route carries its `cold`. */
+  target: VoiceDestination & { source?: string } | null
   last: { fiber_id: string; at: string; status: 'delivered' | 'unconfirmed' | 'failed'; detail?: string } | null
   error: string | null
   /** Whether Listen follows the view, stays pinned to a card, or records a meeting there. */
   mode?: 'off' | 'following' | 'pinned' | 'meeting'
   /** Where words go right now. */
-  destination?: RexMove | null
-  /** Following a card with no live worker: words stay in the transcript unless they end with “send”. */
-  cold?: boolean
+  destination?: VoiceDestination | null
   paused?: boolean
 }
 
@@ -55,6 +53,15 @@ export interface RexMove {
   origin: string
   name: string
 }
+
+/** A card Listen sends to. `cold`: it has no live worker, so words stay in the transcript unless they end with “send”. */
+export interface VoiceDestination extends RexMove {
+  cold?: boolean
+}
+
+/** The card Listen's words reach now. */
+export const voiceDestination = (voice: VoiceStatus | null): VoiceDestination | null =>
+  voice?.destination ?? voice?.target ?? null
 
 /** A page of a fiber a session asked the board to show (`POST /api/v1/board/open`). */
 export interface BoardOpen {

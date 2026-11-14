@@ -1,5 +1,5 @@
 import type { KanbanCard } from '../KanbanTypes.js'
-import type { Voice, VoiceUpdate } from '../voice.js'
+import { voiceDestination, type Voice, type VoiceUpdate } from '../voice.js'
 import type { PhoneListening, PhoneListeningAttempt } from '../phoneListening.js'
 import { isMobileViewport } from '../mobile.js'
 import { TranscriptPanel } from '../voiceTranscript.js'
@@ -161,12 +161,12 @@ export class ListenControl {
 
   /** Where words go now, in words. */
   private route(): string {
-    const state = this.opts.voice.status, target = state?.target
+    const state = this.opts.voice.status, target = voiceDestination(state)
     const name = target ? this.opts.fiberSlug(target.fiber_id, target.origin) ?? target.fiber_id.split('/').at(-1) ?? target.fiber_id : 'nothing yet'
     switch (listenMode(state)) {
       case 'meeting': return `Meeting on ${name}`
       case 'pinned': return `Pinned to ${name}`
-      default: return state?.cold ? `Following you: ${heldWords(name)}` : `Following you: words go to ${name}`
+      default: return target?.cold ? `Following you: ${heldWords(name)}` : `Following you: words go to ${name}`
     }
   }
 

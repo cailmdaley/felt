@@ -46,6 +46,13 @@ defmodule Shuttle.Voice.Transcript do
     :ok
   end
 
+  @doc """
+  Marks appended rows held: routed to a card with no live session and dropped
+  without "send", so they reached nobody. Each mark is a line of its own, the
+  row with `held: true`, which `read/1` folds into the row it names.
+  """
+  def hold(rows), do: append(Enum.map(rows, &Map.put(&1, "held", true)))
+
   def read(params \\ %{}) do
     day = params["date"] || today()
 
@@ -57,6 +64,7 @@ defmodule Shuttle.Voice.Transcript do
         directory()
         |> Path.join(day <> ".jsonl")
         |> read_rows()
+        |> fold_held()
         |> Enum.filter(fn row ->
           (is_nil(fibers) or row["fiber_id"] in fibers or
              (is_binary(row["fiber_id"]) and Path.basename(row["fiber_id"]) in fibers)) and
@@ -91,6 +99,17 @@ defmodule Shuttle.Voice.Transcript do
     value = if byte_size(value) == 5, do: value <> ":00", else: value
     with {:ok, time} <- Time.from_iso8601(value), do: {:ok, Time.to_iso8601(time)}
   end
+
+  defp fold_held(rows) do
+    {marks, rows} = Enum.split_with(rows, &(&1["held"] == true))
+    held = MapSet.new(marks, &utterance/1)
+
+    Enum.map(rows, fn row ->
+      if MapSet.member?(held, utterance(row)), do: Map.put(row, "held", true), else: row
+    end)
+  end
+
+  defp utterance(row), do: Map.take(row, ~w(launch t speaker text))
 
   defp read_rows(path), do: path |> read_bytes() |> decode_rows()
 

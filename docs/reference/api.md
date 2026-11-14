@@ -743,7 +743,7 @@ Listen, the dictation relay, needs the hark recorder.
 | `POST /voice/target` | recorder-routed | Route following to `{fiber_id, origin?, name?}`, the board's view; returns voice state, unchanged unless following |
 | `POST /voice/toggle` | recorder-routed | Start Listen unmuted when off; otherwise flip mic mute |
 | `POST /voice/discard` | recorder-routed | Drop unsent buffered words and return the number discarded |
-| `GET /voice/events` | recorder-routed for `target`, local for `focus` | The board's one live stream: server-sent `target` events, and with `rex=1` `focus` events `{fiber_id, origin, name}` when Rex's worker changes, voice on or off; every stream carries `page` events from `POST /board/open` (not `open`, which EventSource reserves for the connection) |
+| `GET /voice/events` | recorder-routed for `target`, local for `focus` | The board's one live stream: server-sent `target` events (the new target with its `cold`), and with `rex=1` `focus` events `{fiber_id, origin, name}` when Rex's worker changes, voice on or off; every stream carries `page` events from `POST /board/open` (not `open`, which EventSource reserves for the connection) |
 | `GET /voice/audio` | recorder-addressed | Launch-bound phone PCM WebSocket, optionally relayed through a hub |
 
 Listen's recorder and the receiving worker's owner are separate addresses.
@@ -755,16 +755,16 @@ All recorder control forwarding is one-hop and single-attempt; an uncertain resp
 
 #### Listen
 
-`GET /voice` returns `{available, sources, enabled, muted, follow, system_audio, words, quiet_seconds, pinned_quiet_seconds, source, launch, state, mode, destination, paused, target, cold, pending, pending_words, sends_in_ms, preview, level, last, error, recorder}`.
+`GET /voice` returns `{available, sources, enabled, muted, follow, system_audio, words, quiet_seconds, pinned_quiet_seconds, source, launch, state, mode, destination, paused, target, pending, pending_words, sends_in_ms, preview, level, last, error, recorder}`.
 `recorder=<host>` selects the recording daemon independently of the worker's `origin`; without it, the receiving daemon answers locally.
 `sources` is `[]` without hark, `["desktop", "phone"]` on macOS, and `["phone"]` on other hosts.
 `source` is `desktop` or `phone`; `launch` is the active recorder's `voice-…` identity or null.
 `state` is `off`, `starting`, `listening`, or `failed`.
 `mode` is `off` when disabled, `meeting` while system audio is on, otherwise `following` or `pinned` according to `follow`.
 `target` is `{fiber_id, origin, name, slug, pinned, source?}` or null; the optional source names the view that selected it, such as `board` or `rex`.
-`destination` is `{fiber_id, origin, name}` while enabled and null otherwise.
+`destination` is `{fiber_id, origin, name, cold}` while enabled and null otherwise.
 `paused` reflects mic `muted` while enabled and is false when off.
-`cold` says whether the followed target lacks a live conversation, so its words are dropped unless they end with "send"; an idle live worker is warm, an unreadable owner is cold, and a pinned target is never cold.
+Its `cold` says whether that card lacks a live conversation, so its words are dropped unless they end with "send" (and the day transcript marks them `held`); an idle live worker is warm, an unreadable owner is cold, and a pinned target is never cold.
 `pending` is `{fiber_id, words, text}` or null, and `pending_words` totals finalized unsent words across buffers, excluding speaker labels.
 `sends_in_ms` is the time until the quiet gap sends the buffered words, or null with nothing buffered or while speech runs.
 `preview` is `{fiber_id, origin, text}` or null, pinned to the target where the in-progress partial began; it is display-only and clears when muted, disabled, empty or stopped.
@@ -845,7 +845,8 @@ A 202 with `delivered: null` or an interrupted delivery is unconfirmed; `last` e
 
 `GET /voice/transcript?recorder=<host>&date=YYYY-MM-DD&fiber=<id-or-slug>&since=HH:MM[:SS]` returns `{date, rows, recorder}` with `Cache-Control: no-store`.
 All filters are optional: `date` defaults to today on the recorder, `fiber` matches an id or slug, and `since` is an inclusive recorder-local time.
-Rows are `{t, speaker, text, fiber_id, origin, name, slug, launch}`; `t` is the spoken-start ISO 8601 timestamp and the four fiber fields are null when speech had no route.
+Rows are `{t, speaker, text, fiber_id, origin, name, slug, launch, held?}`; `t` is the spoken-start ISO 8601 timestamp and the four fiber fields are null when speech had no route.
+`held: true` marks speech routed to a card with no live session and dropped without "send": it reached nobody.
 `slug` is the resolved fiber path; transcript readers display its last segment.
 The recorder appends every ingested utterance, including cold-dropped and discarded speech, to `<Shuttle.data_dir()>/transcripts/YYYY-MM-DD.jsonl`, using its local date.
 Rows survive recording stops and launch changes.

@@ -1,4 +1,4 @@
-import type { VoiceStatus } from '../voice.js'
+import { voiceDestination, type VoiceStatus } from '../voice.js'
 
 export type FiberSlug = (fiber: string, origin?: string | null) => string | undefined
 export type ListenMode = 'off' | 'following' | 'pinned' | 'meeting'
@@ -24,9 +24,9 @@ const SAYS: Record<ListenMode, string> = { off: '', following: 'Following you: w
 /** The slug spoken words reach, independent of the card showing the console. */
 export function voiceLine(voice: VoiceStatus | null, slugOf: FiberSlug): VoiceLine {
   if (!voice?.enabled) return { mode: 'off', name: '', paused: false, held: false }
-  const target = voice.destination ?? voice.target
+  const target = voiceDestination(voice)
   const name = target ? slugOf(target.fiber_id, target.origin) ?? target.fiber_id.split('/').at(-1) ?? target.name : ''
-  return { mode: listenMode(voice), name, paused: voice.muted, held: !!voice.cold }
+  return { mode: listenMode(voice), name, paused: voice.muted, held: !!target?.cold }
 }
 
 export class VoiceStrip {

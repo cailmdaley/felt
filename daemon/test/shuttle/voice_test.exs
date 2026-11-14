@@ -216,19 +216,33 @@ defmodule Shuttle.VoiceTest do
     refute Target.cold?(%{"fiber_id" => "idle", "origin" => "owner"})
   end
 
-  test "the state says when the followed target is cold, so its words need \"send\"" do
-    Env.put_app_env(:voice_target_entries, fn -> [] end)
-    assert {:ok, %{cold: false}} = Voice.update(%{"enabled" => true})
-    assert {:ok, _} = Voice.target(%{"fiber_id" => "a"})
-    assert {:ok, %{cold: true}} = Voice.update(%{})
-
+  test "the destination says when its own card is cold, so its words need \"send\"" do
     warm = %{
       fiber: %{"id" => "a", "shuttle" => %{"host" => "test-host"}},
       runtime: %{phase: "waiting"}
     }
 
     Env.put_app_env(:voice_target_entries, fn -> [warm] end)
-    assert {:ok, %{cold: false}} = Voice.update(%{})
+    assert {:ok, %{destination: nil} = off} = Voice.update(%{"enabled" => true})
+    refute Map.has_key?(off, :cold)
+
+    assert {:ok, %{destination: %{"fiber_id" => "a", "cold" => false}}} =
+             Voice.target(%{"fiber_id" => "a"})
+
+    # A switch is judged for the card it names at once, not at the next tick,
+    # and the pushed route carries it.
+    {:ok, _} = Voice.subscribe()
+
+    assert {:ok, %{destination: %{"fiber_id" => "b", "cold" => true}}} =
+             Voice.target(%{"fiber_id" => "b"})
+
+    assert_receive {:voice_target, %{"fiber_id" => "b", "cold" => true}}
+
+    assert {:ok, %{destination: %{"fiber_id" => "a", "cold" => false}}} =
+             Voice.target(%{"fiber_id" => "a"})
+
+    Env.put_app_env(:voice_target_entries, fn -> [] end)
+    assert {:ok, %{destination: %{"fiber_id" => "a", "cold" => true}}} = Voice.update(%{})
   end
 
   test "partial words are a display-only preview pinned to the target they began under",

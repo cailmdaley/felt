@@ -873,11 +873,24 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
 
   # Waking a worker is deliberate: speech to a target with no live worker
   # becomes a batch only when it ended with "send" (a batch made at once by
-  # `@closing`), and is otherwise dropped here. The transcript keeps the words.
+  # `@closing`), and is otherwise dropped here. The transcript keeps the words,
+  # marked held.
   defp flush_buffer(config, buffer, state) do
-    if not buffer["pinned"] and state.cold.(buffer),
-      do: Map.put(config, "buffers", Enum.reject(config["buffers"], &same_target?(&1, buffer))),
-      else: make_batch(config, buffer)
+    if not buffer["pinned"] and state.cold.(buffer) do
+      :ok =
+        Shuttle.Voice.Transcript.hold(
+          for row <- buffer["voice_rows"] do
+            row
+            |> Map.take(~w(t speaker text))
+            |> Map.merge(Map.take(buffer, ~w(fiber_id origin)))
+            |> Map.put("launch", config["launch"])
+          end
+        )
+
+      Map.put(config, "buffers", Enum.reject(config["buffers"], &same_target?(&1, buffer)))
+    else
+      make_batch(config, buffer)
+    end
   end
 
   defp make_batch(config, buffer) do

@@ -25,7 +25,7 @@ it('uses the current destination and a path slug for a card outside the board', 
 })
 it('says when the followed card has no live session, so words are held rather than sent', () => {
   const strip = new VoiceStrip()
-  strip.paint(voiceLine(voiceStatus({ enabled: true, target, cold: true }), slug))
+  strip.paint(voiceLine(voiceStatus({ enabled: true, target, destination: { ...target, cold: true } }), slug))
   expect(strip.el.textContent).toBe('the-card')
   expect(strip.el.hasAttribute('data-held')).toBe(true)
   expect(strip.el.title).toBe('the-card has no live session: words stay in the transcript. End with “send” to start one.')
@@ -40,6 +40,13 @@ it('names no destination while following the card the box already messages, unle
   expect(strip.el.title).toBe('Following you: words go to the-card')
   strip.paint(voiceLine(voiceStatus({ enabled: true, follow: false, target }), slug), true)
   expect(strip.el.textContent).toBe('📌 the-card')
-  strip.paint(voiceLine(voiceStatus({ enabled: true, target, cold: true }), slug), true)
+  strip.paint(voiceLine(voiceStatus({ enabled: true, target, destination: { ...target, cold: true } }), slug), true)
   expect(strip.el.textContent).toBe('the-card')
+})
+it('marks words held for the card the strip names, not for a card voice has left', () => {
+  const other = { ...target, fiber_id: 'outside/other' }
+  expect(voiceLine(voiceStatus({ enabled: true, target: { ...target, cold: true }, destination: { ...other, cold: false } }), slug)).toMatchObject({ name: 'other', held: false })
+  expect(voiceLine(voiceStatus({ enabled: true, target, destination: { ...other, cold: true } }), slug)).toMatchObject({ name: 'other', held: true })
+  // A pushed route names its card and carries that card's coldness, before a destination is served.
+  expect(voiceLine(voiceStatus({ enabled: true, target: { ...other, cold: true } }), slug)).toMatchObject({ name: 'other', held: true })
 })

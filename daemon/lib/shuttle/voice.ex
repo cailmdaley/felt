@@ -289,16 +289,17 @@ defmodule Shuttle.Voice do
       case append_route(state.routes_path, state.route_bytes, row) do
         {:ok, route_bytes} ->
           Shuttle.Voice.TranscriptRelay.targets_changed()
+          cold = target_cold?(state.snapshot.enabled, target)
 
           Registry.dispatch(__MODULE__.Streams, :target, fn entries ->
-            for {pid, _} <- entries, do: send(pid, {:voice_target, target})
+            for {pid, _} <- entries, do: send(pid, {:voice_target, Map.put(target, "cold", cold)})
           end)
 
           state = %{
             state
             | target: target,
               route_bytes: route_bytes,
-              snapshot: %{state.snapshot | target: target}
+              snapshot: %{state.snapshot | target: target, cold: cold}
           }
 
           {:ok, state}
@@ -350,8 +351,18 @@ defmodule Shuttle.Voice do
     })
   end
 
+  # Words to a cold target are dropped unless they end with "send". The snapshot
+  # keeps `cold` beside the target it was computed for, and serves it on the
+  # destination, so a client never pairs one card's coldness with another card.
+  defp target_cold?(enabled, target),
+    do: enabled and not is_nil(target) and target["pinned"] != true and cold?(target)
+
   defp put_mode(%{enabled: true} = snapshot) do
-    destination = snapshot.target && Map.take(snapshot.target, ~w(fiber_id name origin))
+    destination =
+      snapshot.target &&
+        snapshot.target
+        |> Map.take(~w(fiber_id name origin))
+        |> Map.put("cold", snapshot.cold)
 
     mode =
       cond do
@@ -360,15 +371,16 @@ defmodule Shuttle.Voice do
         true -> "pinned"
       end
 
-    Map.merge(snapshot, %{
-      mode: mode,
-      destination: destination,
-      paused: snapshot.muted
-    })
+    snapshot
+    |> Map.delete(:cold)
+    |> Map.merge(%{mode: mode, destination: destination, paused: snapshot.muted})
   end
 
   defp put_mode(snapshot),
-    do: Map.merge(snapshot, %{mode: "off", destination: nil, paused: false})
+    do:
+      snapshot
+      |> Map.delete(:cold)
+      |> Map.merge(%{mode: "off", destination: nil, paused: false})
 
   @impl true
   def handle_cast({:focus_error, message}, state), do: {:noreply, %{state | focus_error: message}}
@@ -715,10 +727,7 @@ defmodule Shuttle.Voice do
           muted: Recorder.voice_muted?(state.capture_opts),
           state: phase,
           target: state.target,
-          # Words to a cold target are dropped unless they end with "send".
-          cold:
-            enabled and not is_nil(state.target) and state.target["pinned"] != true and
-              cold?(state.target),
+          cold: target_cold?(enabled, state.target),
           pending: status.pending,
           preview:
             if(words && preview_pin && preview_pin.target,
