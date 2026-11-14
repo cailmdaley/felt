@@ -242,68 +242,22 @@ func offerLinkedFiberContext(env *sysenv.Env, harness, id, host string, emit fun
 }
 
 func fiberContextHookEligible(root string, request Request) bool {
-	return !request.Wake && !fiberContextHasAttempt(root, request.MessageID)
-}
-
-func fiberContextHasAttempt(root, messageID string) bool {
-	path := filepath.Join(root, "pending", mailboxKey(messageID)+".json")
-	entry, err := readFiberMailboxEntry(path)
-	return err != nil || entry.AttemptAddress != ""
-}
-
-// DeliverFiberContext offers pending context to the current conversation. The
-// mailbox acknowledges only confirmed context receipts; retries retain each
-// message id so a crash after delivery cannot inject it twice.
-func DeliverFiberContext(ctx context.Context, env *sysenv.Env, fiber, host, address string, generation uint64) error {
-	var err error
-	a := Address{Host: host}
-	if address != "-" {
-		a, err = ParseAddress(address)
-	}
-	if err != nil {
-		return err
-	}
-	if a.Host != host {
-		return errCode("wrong_host", "fiber context belongs to another host")
-	}
-	root := mailboxDir(env, "fiber", fiber)
-	// Hooks offer the fiber queue itself, so replacing a conversation before
-	// its next hook cannot strand a result in a session-scoped pending queue.
-	if a.Harness == "codex" {
-		_ = discoverCodexTerminalReceiver(ctx, env, a)
-	}
-	hook := MailboxAvailable(env, a.Harness, a.ID, host)
-	if err := ensureDir(root, 0700); err != nil {
-		return err
-	}
-	if err := subscribeFiberReceiver(env, fiber, a, hook, generation); err != nil {
-		return err
-	}
-	if address == "-" {
-		return nil
-	}
-	// Selection revokes A even if B is not hook-ready yet. Never fall back to
-	// an old subscriber merely because the designated successor is unavailable.
-	if a.Harness == "claude" {
-		if reason := mailboxUnavailable(env, a.Harness, a.ID, host); reason != "" {
-			return errCode("unavailable", "%s", reason)
+	if active, err := readConsumedBatch(root); err == nil && !active.Launch {
+		for _, id := range active.Members {
+			if id == request.MessageID {
+				return false
+			}
 		}
 	}
-	return offerMailboxEachValidated(root, func(r Request) bool {
-		return fiberContextDirectEligible(root, r, generation, hook, a)
-	}, func(ctx context.Context, r Request) (bool, error) { return currentThreadSignalWithBackoff(ctx, env, r) }, func(req Request) error {
-		req.ThreadSignal = nil
-		return deliverFiberContextItem(ctx, env, fiber, host, address, req)
-	})
+	entry, err := readFiberMailboxEntry(filepath.Join(root, "pending", mailboxKey(request.MessageID)+".json"))
+	return err == nil && (entry.Wishes.Turn == "none" || entry.Wishes.Turn == "ask") && entry.AttemptAddress == ""
 }
 
-func fiberContextDirectEligible(root string, request Request, generation uint64, hook bool, address Address) bool {
-	receiver, err := readFiberReceiver(root)
-	return err == nil && receiver.Generation == generation && (request.Wake || !hook || fiberContextHasAttempt(root, request.MessageID)) && fiberReceiverMatches(root, address)
-}
-
-func deliverFiberContextItem(ctx context.Context, env *sysenv.Env, fiber, host, selectedAddress string, request Request) error {
-	return deliverFiberContextItemWith(ctx, env, fiber, host, selectedAddress, request, sendFiberContextAttempt)
+// DeliverFiberContext consumes with the turn state unknown. Only force entries
+// initiate a wake; none and ask remain available to the fiber's hook.
+func DeliverFiberContext(ctx context.Context, env *sysenv.Env, fiber, host, address string, generation uint64) error {
+	_, err := Consume(ctx, env, fiber, host, Worker{Address: address, Epoch: generation})
+	return err
 }
 
 type fiberContextSender func(context.Context, *sysenv.Env, string, Request, string) (Receipt, error)
@@ -342,14 +296,23 @@ func deliverFiberContextItemWith(ctx context.Context, env *sysenv.Env, fiber, ho
 		}
 	}
 
-	receipt, err := send(ctx, env, host, attemptRequest(request, entry), address)
+	if entry.Attempt.Payload == nil {
+		entry, err = freezeLegacyAttempt(env, entry, request)
+		if err != nil {
+			return err
+		}
+		if err := writeMailboxEntry(path, entry); err != nil {
+			return err
+		}
+	}
+	receipt, err := send(ctx, env, host, *entry.Attempt.Payload, address)
 	unknown := receipt.Status == StatusUnknown
 	unknownEnded := unknown && address != selectedAddress && fiberContextSessionEnded(env, host, address)
 	unknownStale := false
 	// A live conversation gets one retry: a transport that reports every send
 	// unknown would otherwise repeat the entry for as long as it lives. A
 	// held approval is not retried: the receiver still has the message.
-	if unknown && !unknownEnded && entry.Attempt.open() && entry.Attempt.Retry == 0 && ErrorCode(err) != "wake_held" {
+	if unknown && !unknownEnded && entry.Attempt.open() && (entry.Attempt.Retry == 0 || address != selectedAddress) && ErrorCode(err) != "wake_held" {
 		if entry.Attempt.OpenedAt == 0 {
 			// An attempt read from attempt_address alone starts its wait here.
 			entry.Attempt.OpenedAt = time.Now().UnixNano()
@@ -378,6 +341,7 @@ func deliverFiberContextItemWith(ctx context.Context, env *sysenv.Env, fiber, ho
 	// Otherwise the pinned conversation rejected the entry, ended, or was
 	// replaced: its attempt closes and the entry is claimed for the selected
 	// conversation, with a durable warning when the outcome was unknown.
+	baseText, payload := entry.Attempt.BaseText, *entry.Attempt.Payload
 	if address == selectedAddress {
 		entry.Attempt.Retry++
 		entry.Attempt.OpenedAt = time.Now().UnixNano()
@@ -389,10 +353,25 @@ func deliverFiberContextItemWith(ctx context.Context, env *sysenv.Env, fiber, ho
 		entry.closeAttempt(outcome)
 		entry.openAttempt(selectedAddress, receiverEpoch(root, selectedAddress), []string{entry.Request.MessageID}, true, time.Now())
 	}
+	if len(baseText) > (64<<10)-512 {
+		baseText = "Full message JSON (read request.text before acting): " + filepath.Join(root, "offered", filepath.Base(path))
+		if strings.Contains(payload.Text, staleThreadSignalCaveat) {
+			baseText = withStalenessCaveat(baseText)
+		}
+	}
+	entry.Attempt.BaseText, entry.Attempt.Payload = baseText, &payload
+	entry.Attempt.Variant = "plain"
+	if entry.Attempt.Retry > 0 {
+		entry.Attempt.Variant = "retry-1"
+	} else if entry.PossibleRepeat {
+		entry.Attempt.Variant = "possible-repeat"
+	}
+	payload = consumedVariant(*entry.Attempt)
+	entry.Attempt.Payload = &payload
 	if err := writeMailboxEntry(path, entry); err != nil {
 		return err
 	}
-	receipt, err = send(ctx, env, host, attemptRequest(request, entry), selectedAddress)
+	receipt, err = send(ctx, env, host, *entry.Attempt.Payload, selectedAddress)
 	if receipt.Status == StatusRejected {
 		if closeErr := closeAttempts([]string{path}, attemptReleased); closeErr != nil {
 			return closeErr
@@ -401,18 +380,45 @@ func deliverFiberContextItemWith(ctx context.Context, env *sysenv.Env, fiber, ho
 	return err
 }
 
-// attemptRequest is request as direct delivery sends it under the entry's
-// attempt. The dedup layer keeps one receipt per transport id and refuses
-// different text under it, so each text a conversation can be sent has its
-// own id: a retry carries a warning and a "-retry-<n>" id, and an entry moved
-// on from a conversation that may have taken it carries the possible_repeat
-// warning under the entry's plain id.
+// freezeLegacyAttempt pins the old transport id and reconstructs the caveat
+// variant from the receipt's content hash when the entry predates payloads.
+func freezeLegacyAttempt(env *sysenv.Env, entry mailboxEntry, request Request) (mailboxEntry, error) {
+	request.ThreadSignal = nil
+	payload := attemptRequest(request, entry)
+	address := entry.AttemptAddress
+	path := filepath.Join(dataDir(env), "messages", mailboxKey(payload.MessageID+"-"+mailboxKey(address)[:16])+".json")
+	stored, err := readDedupRecord(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return entry, err
+	}
+	if err == nil {
+		for _, text := range []string{strings.TrimPrefix(request.Text, staleThreadSignalCaveat), withStalenessCaveat(request.Text)} {
+			candidate := request
+			candidate.Text = text
+			candidate = attemptRequest(candidate, entry)
+			candidate.Address = address
+			if requestHash(candidate) == stored.Hash {
+				payload = candidate
+				request.Text = text
+				break
+			}
+		}
+	}
+	entry.Attempt.Payload, entry.Attempt.BaseText = &payload, request.Text
+	return entry, nil
+}
+
+// attemptRequest preserves single-entry transport identities for pinned
+// entries without a batch payload. New warning variants carry their own id.
 func attemptRequest(request Request, entry mailboxEntry) Request {
 	switch {
 	case entry.Attempt != nil && entry.Attempt.Retry > 0:
 		request.MessageID += fmt.Sprintf("-retry-%d", entry.Attempt.Retry)
 		request.Text = "Possible repeat: an earlier delivery of this message to this session had an unknown outcome.\n\n" + request.Text
 	case entry.PossibleRepeat:
+		if entry.Attempt != nil && entry.Attempt.Variant != "" {
+			request.MessageID += "-" + entry.Attempt.Variant
+		}
 		request.Text = "Possible repeat: delivery to a previous worker had an unknown outcome before its session ended.\n\n" + request.Text
 	}
 	return request

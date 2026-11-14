@@ -13,6 +13,14 @@ import (
 // conversation. Every member entry carries the same record in its pending
 // file, written under the inbox lock before any side effect.
 type Attempt struct {
+	// Payload pins the exact batch emission and its transport identity.
+	Payload *Request `json:"payload,omitempty"`
+	// BaseText includes the captured labels and staleness caveat, without a retry warning.
+	BaseText string `json:"base_text,omitempty"`
+	// Launch reserves a fresh-session request without pinning hook context.
+	Launch bool `json:"launch,omitempty"`
+	// Variant separates warning text on a newly rolled single-entry attempt.
+	Variant string `json:"variant,omitempty"`
 	// BatchID is the hash of the batch's sorted member ids, so a retry of the
 	// same batch carries the same id.
 	BatchID string `json:"batch_id"`
@@ -67,7 +75,11 @@ func (e *mailboxEntry) openAttempt(conversation string, epoch uint64, members []
 		if e.Attempt != nil && e.Attempt.Conversation == conversation {
 			retry = e.Attempt.Retry
 		}
+		previous := e.Attempt
 		e.Attempt = &Attempt{BatchID: id, Conversation: conversation, Epoch: epoch, Members: slices.Clone(members), OpenedAt: now.UnixNano(), Retry: retry}
+		if retry > 0 && previous.BatchID == id {
+			e.Attempt.Payload, e.Attempt.BaseText, e.Attempt.Variant = previous.Payload, previous.BaseText, previous.Variant
+		}
 	}
 	if pin {
 		e.AttemptAddress = conversation
@@ -83,7 +95,7 @@ func (e *mailboxEntry) closeAttempt(outcome string) {
 	if outcome == attemptReleased || outcome == attemptAmbiguous {
 		e.AttemptAddress = ""
 	}
-	if outcome == attemptAmbiguous {
+	if outcome == attemptAmbiguous || (outcome == attemptReleased && e.Attempt != nil && e.Attempt.Retry > 0) {
 		e.PossibleRepeat = true
 	}
 }

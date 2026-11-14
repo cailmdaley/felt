@@ -329,7 +329,7 @@ func TestFiberContextRestartRetriesPinnedDestinationAfterAcceptedSend(t *testing
 	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: request}); err != nil {
 		t.Fatal(err)
 	}
-	firstGeneration := transition(t, env, "execution-first", "shuttle://host/claude/first")
+	transition(t, env, "execution-first", "shuttle://host/claude/first")
 	var firstID string
 	accepted := func(_ context.Context, _ *sysenv.Env, _ string, req Request, address string) (Receipt, error) {
 		firstID = req.MessageID + "-" + mailboxKey(address)[:16]
@@ -346,14 +346,7 @@ func TestFiberContextRestartRetriesPinnedDestinationAfterAcceptedSend(t *testing
 	if fiberContextHookEligible(mailboxDir(env, "fiber", "fiber"), request) {
 		t.Fatal("hook path bypassed a pinned direct delivery attempt")
 	}
-	successorGeneration := transition(t, env, "execution-successor", "shuttle://host/claude/successor")
-	successorTarget, err := ParseAddress("shuttle://host/claude/successor")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !fiberContextDirectEligible(mailboxDir(env, "fiber", "fiber"), request, successorGeneration, true, successorTarget) {
-		t.Fatalf("direct recovery was fenced by selected generation %d (first was %d)", successorGeneration, firstGeneration)
-	}
+	transition(t, env, "execution-successor", "shuttle://host/claude/successor")
 
 	var successorAddress, successorID string
 	retry := func(_ context.Context, _ *sysenv.Env, _ string, req Request, address string) (Receipt, error) {

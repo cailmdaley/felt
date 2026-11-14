@@ -1,8 +1,10 @@
 package shuttlecli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"text/tabwriter"
 	"time"
 
@@ -95,7 +97,32 @@ pending, and a turn of force or idle. An unknown wish value is refused.`,
 			return w.Flush()
 		},
 	}
-	return []*cobra.Command{put, pending, ls}
+	var idle, costly bool
+	consume := &cobra.Command{Use: "consume <fiber-key> <address-or-dash> <epoch>", Args: cobra.ExactArgs(3), RunE: func(cmd *cobra.Command, args []string) error {
+		host, err := a.resolveOwnHost("")
+		if err != nil {
+			return err
+		}
+		epoch, err := strconv.ParseUint(args[2], 10, 64)
+		if err != nil || epoch == 0 {
+			return fmt.Errorf("positive receiver epoch required")
+		}
+		result, err := messaging.Consume(context.Background(), a.env, args[0], host, messaging.Worker{Address: args[1], Epoch: epoch, Idle: idle, Costly: costly})
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(a.env.Stdout).Encode(result)
+	}}
+	consume.Flags().BoolVar(&idle, "idle", false, "The live worker is idle")
+	consume.Flags().BoolVar(&costly, "costly", false, "Waking the live worker is costly")
+	turnPending := &cobra.Command{Use: "turn-pending <fiber-key>", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		pending, err := messaging.TurnPending(a.env, args[0])
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(a.env.Stdout).Encode(map[string]bool{"pending": pending})
+	}}
+	return []*cobra.Command{put, pending, ls, consume, turnPending}
 }
 
 // printPendingCounts prints one JSON object, key => pending count. A key
