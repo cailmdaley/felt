@@ -466,6 +466,8 @@ fan-in siblings of the fleet's [ledger feeds](#ledger-feeds):
 | `GET /sessions/composite` | local ledger + remote caches | Cross-host fiber/session pairings; `uid=` narrows to one fiber |
 | `GET /commits/composite` | local ledger + remote caches | Cross-host commit narration and shortstat counts |
 | `GET /sent-files/all/composite` | local feed + remote caches | Cross-host `SendUserFile` pushes |
+| `GET /outbox/dismissed` | local and remote board feeds | `{dismissed: [key…], reach_ms}` over the board's 14-day reach |
+| `POST /outbox/dismiss` | local CLI write | `{key, fiber?}` appends a `dismissed` board record; returns `{ok: true}` or a failed-write error |
 | `GET /board/marks` | session and commit composites | Each thread's launches and commits over the board's reach |
 | `POST /board/open` | every board in the fleet | `{fiber_id, origin?, page}` asks every board on a `/voice/events` stream to show that fiber's `constitution`, `tapestry` or `files` page; `origin` defaults to this host. The daemon tells its own boards and passes the request, marked `forwarded: true`, to every other daemon in the fleet, which tells only its own |
 

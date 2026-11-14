@@ -129,6 +129,8 @@ defmodule ShuttleWeb.Router do
     # pushed with SendUserFile on the card, read from the owning host's
     # events.jsonl hook stream. JSON-native, so it lives in the :api pipeline
     # (unlike /file, which serves raw bytes).
+    post("/outbox/dismiss", OutboxController, :dismiss)
+    get("/outbox/dismissed", OutboxController, :dismissed)
     get("/board/family", BoardController, :family)
     # Each thread's launches and commits over the board's reach, fleet-wide.
     get("/board/marks", BoardController, :marks)

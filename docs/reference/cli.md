@@ -590,6 +590,13 @@ See [Connect your machines](../shuttle/remotes.md#verify-work-across-the-connect
     `mark-runtime` serve daemon and fleet plumbing. An adopter running
     shuttle solo will not need them.
 
+### `shuttle outbox dismiss <key> [--fiber <uid>]`
+
+Dismiss one item in the human's Outbox. Writes a family-board record of kind
+`dismissed` with the item key as its text and, when supplied, the item's fiber
+uid. Dismissals reach every hub through the remote board feeds and are omitted
+from family-board reading.
+
 ### `shuttle board [fiber] [--since 2h|<RFC3339>] [--all] [--turns] [--json]`
 
 Read family activity from the local daemon, oldest first.

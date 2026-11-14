@@ -106,6 +106,7 @@ defmodule Shuttle.BoardFamily do
 
     rows =
       records
+      |> Enum.reject(&(&1["kind"] == "dismissed"))
       |> Enum.reduce(%{}, fn record, acc ->
         case record do
           %{"id" => id, "timestamp" => ts} when is_binary(id) and is_integer(ts) ->

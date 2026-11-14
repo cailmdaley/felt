@@ -292,6 +292,13 @@ func (a *app) boardCmd() *cobra.Command {
 		if err := json.Unmarshal(body, &response); err != nil {
 			return fmt.Errorf("parsing family board: %w", err)
 		}
+		visible := response.Records[:0]
+		for _, row := range response.Records {
+			if row.Kind != "dismissed" {
+				visible = append(visible, row)
+			}
+		}
+		response.Records = visible
 		rows := foldHumanTurns(response.Records)
 		if turns {
 			rows = rows[:0]

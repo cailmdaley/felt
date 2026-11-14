@@ -39,6 +39,8 @@
         "POST /tunnels",
         "POST /projects",
         "POST /choose-folder",
+        "GET /outbox/dismissed",
+        "POST /outbox/dismiss",
         "GET /board/marks",
         "POST /board/open",
         "GET /sent-files/all/composite",
