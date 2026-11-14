@@ -23,7 +23,7 @@ import { getDaemonJson, postDaemonJson } from './daemonApi.js'
 import { drawChangeList, type ChangePRListing } from './workspace/changeList.js'
 import { forgetText, head, peek, recallText, RESOURCE_PRIORITY, text as documentText, type Head, type ResourcePriority } from './documentResources.js'
 import { loadDuration } from './workspace/audioWaveform.js'
-import { connectDocumentFrame, frameBridge, DOCUMENT_SANDBOX, withWorkspaceKeyBridge, type DocumentKey, type FrameBridge } from './workspace/DocumentBridge.js'
+import { carryReading, connectDocumentFrame, frameBridge, DOCUMENT_SANDBOX, withWorkspaceKeyBridge, type DocumentKey, type FrameBridge } from './workspace/DocumentBridge.js'
 import type { SwipeSignal } from './workspace/PhoneGestures.js'
 import {
   AUDIO_EXTS,
@@ -706,6 +706,8 @@ function buildHtmlViewer(
         }
       } else if (message.type === 'height' && options.fit && frame === iframe) {
         fit(message.payload.height as number)
+        // The page grown or shrunk to its rewrite's height: its reader returns beside their passage.
+        if (carried) { carried.scroller.scrollTop = carried.top; carried = null }
       } else if (message.type === 'reveal' && options.fit && frame === iframe) {
         // The board's own scroller carries a fitted page: bring the fragment's
         // offset to its top, as the page would have scrolled itself.
@@ -746,6 +748,8 @@ function buildHtmlViewer(
   // A page whose height follows its frame's (a script sizing itself by the window)
   // grows by the same step on every report; it keeps the height it had.
   let fitted = 0, step = 0, coupled = false
+  /** Where a fitted page's scroller stands after a rewrite, once the rewrite has its height. */
+  let carried: { scroller: HTMLElement; top: number } | null = null
   const fit = (height: number): void => {
     if (coupled) return
     if (height > fitted && fitted && height - fitted === step) { coupled = true; return }
@@ -786,12 +790,22 @@ function buildHtmlViewer(
 
       stagingBridge?.dispose()
       stagingFrame?.remove()
+      // The page on show measures where its passages stand, for the rewrite to keep the reader beside theirs.
+      currentBridge.command('anchors')
       const currentGeneration = ++generation
       let loaded = false
       const next = createFrame((frame, bridge) => {
         if (loaded || currentGeneration !== generation) return
         loaded = true
         const position = initialLoadHandled ? currentBridge.position : undefined
+        // The reader stays beside the passage they were reading, whatever the rewrite changed around it.
+        const before = currentBridge.anchors
+        const scroller = options.fit && initialLoadHandled ? scrollingAncestor(wrap) : null
+        if (scroller) {
+          const y = scroller.getBoundingClientRect().top - wrap.getBoundingClientRect().top
+          const top = scroller.scrollTop + carryReading(before, bridge.anchors, y) - y
+          carried = y > 0 && top !== scroller.scrollTop ? { scroller, top } : null
+        }
         currentBridge.command('pause')
         currentBridge.dispose()
         for (const pdf of pdfs.values()) { pdf.controller.abort(); pdf.dispose?.(); pdf.element.remove() }
@@ -802,11 +816,12 @@ function buildHtmlViewer(
         bridge.command('active', { active: embedded.active })
         if (options.fit) bridge.command('fit')
         // The staged page has loaded at the size it will show at: a shorter one clamps.
-        if (position) bridge.command('restore', { ...position, clamp: true })
+        if (position) bridge.command('restore', { x: position.x, y: carryReading(before, bridge.anchors, position.y), clamp: true })
         // Moving a frame reloads its document, so the staged frame already sits
         // where it will stay and the swap only removes its predecessor.
         iframe.remove()
         iframe = frame
+        if (carried) carried.scroller.scrollTop = carried.top
         htmlWeight = frameWeights.get(frame) ?? byteWeights.get(frame) ?? 1
         publishWeight()
         bridge.command('pdf:scan')
@@ -856,6 +871,14 @@ function buildHtmlViewer(
     embeddedMediaViewers.delete(wrap)
   })
   return wrap
+}
+
+/** The element that scrolls a fitted page with the rest of its host. */
+function scrollingAncestor(el: HTMLElement): HTMLElement | null {
+  for (let at = el.parentElement; at; at = at.parentElement) {
+    if (at.scrollHeight > at.clientHeight && /auto|scroll/.test(getComputedStyle(at).overflowY)) return at
+  }
+  return document.scrollingElement as HTMLElement | null
 }
 
 /** Only fetch PDFs inside the current host's file-assets namespace. */

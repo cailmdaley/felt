@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { connectDocumentFrame, documentMessage, envelope, forwardDocumentKey } from './DocumentBridge.js'
+import { carryReading, connectDocumentFrame, documentMessage, envelope, forwardDocumentKey, type ReadingAnchor } from './DocumentBridge.js'
 
 afterEach(() => { document.body.replaceChildren(); vi.restoreAllMocks() })
 
@@ -119,5 +119,35 @@ describe('forwardDocumentKey', () => {
     expect(heard(frame)).toEqual(['c'])
     expect(heard(frame, 't'), 'verdicts never pass').toEqual([])
     frame.remove()
+  })
+})
+
+describe('carryReading', () => {
+  const page: ReadingAnchor[] = [['#c1', 0], ['#c2', 400], ['#c3', 800], ['#c4', 1200]]
+  it('keeps the reader beside their passage when the page above it grows or shrinks', () => {
+    const grown: ReadingAnchor[] = [['#new', 0], ['#c1', 300], ['#c2', 700], ['#c3', 1100], ['#c4', 1500]]
+    expect(carryReading(page, grown, 850)).toBe(1150)
+    const hidden: ReadingAnchor[] = [['#c1', 0], ['#c3', 400], ['#c4', 800]]
+    expect(carryReading(page, hidden, 850)).toBe(450)
+  })
+  it('moves to the nearest passage both pages hold when the one read is gone', () => {
+    expect(carryReading(page, [['#c1', 0], ['#c2', 400], ['#c4', 900]], 1150)).toBe(850)
+  })
+  it('passes over a passage whose key repeats, which names no one place', () => {
+    const before: ReadingAnchor[] = [['P|Note', 100], ['#c2', 400], ['P|Note', 820]]
+    const after: ReadingAnchor[] = [['P|Note', 100], ['P|Note', 300], ['#c2', 600], ['P|Note', 1020]]
+    expect(carryReading(before, after, 830)).toBe(1030)
+  })
+  it('leaves a reader at the top there, and one with nothing in common where they stood', () => {
+    expect(carryReading(page, [['#new', 0], ['#c1', 300]], 0)).toBe(0)
+    expect(carryReading(page, [['#other', 0]], 850)).toBe(850)
+    expect(carryReading([], page, 850)).toBe(850)
+  })
+  it('accepts a bounded anchors report and refuses a malformed one', () => {
+    expect(documentMessage(envelope('anchors'))).toBe(true)
+    expect(documentMessage(envelope('anchors', { items: [['#c1', 0], ['P|Text', 40]] }))).toBe(true)
+    expect(documentMessage(envelope('anchors', { items: Array(3001).fill(['#c', 0]) }))).toBe(false)
+    expect(documentMessage(envelope('anchors', { items: [['#c1']] }))).toBe(false)
+    expect(documentMessage(envelope('anchors', { items: [['#c1', 'top']] }))).toBe(false)
   })
 })

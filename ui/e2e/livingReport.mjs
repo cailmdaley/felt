@@ -15,6 +15,16 @@ async function serve(page, html) {
 const grown = html => html.replace('<h2 id="conclusions">', `<h2 id="grown">A new section</h2>${'<p>More of the report.</p>'.repeat(40)}<h2 id="conclusions">`)
 const shrunk = html => html.replace(/<p>Report line 21:[\s\S]*<\/body>/, '<p id="shrunk">The rest was cut.</p></body>')
 
+/** A rewrite that changes what stands above a reader: passages added under the title, the tall screenshot hidden. */
+const reworked = html => html
+  .replace('</h1>', `</h1>${Array.from({ length: 30 }, (_, n) => `<p id="added-${n}">An added finding, number ${n}, long enough to take a line of its own.</p>`).join('')}`)
+  .replace('<img id="oversized-report-image"', '<img hidden id="oversized-report-image"')
+/** The first report line still showing below a frame's reading edge `y`, and where it starts against that edge. */
+const passageAt = y => {
+  const line = [...document.querySelectorAll('p')].find(p => p.textContent.startsWith('Report line') && p.getBoundingClientRect().bottom > y)
+  return [line?.textContent?.slice(0, 16) ?? '-', Math.round((line?.getBoundingClientRect().top ?? 0) - y)]
+}
+
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads`
 const shots = process.env.WORKSPACE_SHOTS || '/tmp/workspace-say-once'
 const selected = page => page.locator('.ws-page.ws-selected')
@@ -91,6 +101,51 @@ export function registerLivingReportJourneys(test) {
     await page.waitForFunction(tall => document.querySelector('.ws-selected .fp-head .kbn-fileview-frame-wrap').getBoundingClientRect().height < tall / 2, tall, { polling: 40 })
     const [held] = await standing(), max = await scroller.evaluate(el => el.scrollHeight - el.clientHeight)
     assert.equal(held, Math.min(2500, max), 'a shorter report leaves the page at its offset, or clamped to its end')
+  }, { width: 1440, height: 900 }, 'reduce')
+  test('A live rewrite that adds and hides passages above the reader leaves them beside the passage they were reading', async page => {
+    await page.goto(url)
+    const original = await page.evaluate(suffix => window.__harness.files.find(file => file.path.endsWith(suffix)).body.text(), REPORT)
+    await page.locator('.kbn-desk .kbn-card[data-fiber-id="research/workspace/calibration-report"]:not(.kbn-card-header) .kbn-card-name').click()
+    await selected(page).waitFor()
+    await showFile(page, REPORT)
+    await frame(page).locator('#report-sentinel').waitFor()
+    const inner = async () => (await selected(page).locator(SHOWN).elementHandle()).contentFrame()
+    await (await inner()).evaluate(() => document.scrollingElement.scrollTo(0, 2500))
+    await page.waitForTimeout(400)
+    const read = async () => (await inner()).evaluate(passageAt, 1)
+    const before = await read()
+    assert.match(before[0], /^Report line/, `the reader stands in the report's lines (${before})`)
+    await serve(page, reworked(original))
+    await frame(page).locator('#added-0').waitFor({ timeout: 15_000 })
+    await page.waitForTimeout(400)
+    const after = await read()
+    assert.equal(after[0], before[0], 'the same passage stands at the top of the reader')
+    assert.ok(Math.abs(after[1] - before[1]) <= 2, `at the same place on screen (${before} → ${after})`)
+
+    // Unfolded on the family's page, the page's own scroller carries the passage.
+    await serve(page, original)
+    const head = (await familyTree(page)).locator('.fp-head')
+    await head.locator('.fp-lead').click()
+    const doc = head.locator('.fp-doc').frameLocator(SHOWN)
+    await doc.locator('#report-sentinel').waitFor()
+    await page.waitForFunction(() => document.querySelector('.ws-selected .fp-head .kbn-fileview-frame-wrap')?.getBoundingClientRect().height > 3000, undefined, { polling: 40 })
+    const scroller = selected(page).locator('.ws-family-scroll')
+    await scroller.evaluate(el => el.scrollTo(0, 2500))
+    await page.waitForTimeout(400)
+    const reading = async () => {
+      const edge = await scroller.evaluate(el => el.getBoundingClientRect().top + 1)
+      const shown = head.locator('.fp-doc ' + SHOWN)
+      const box = await shown.boundingBox()
+      return (await (await shown.elementHandle()).contentFrame()).evaluate(passageAt, edge - box.y)
+    }
+    const held = await reading()
+    assert.match(held[0], /^Report line/, `the family page stands in the report's lines (${held})`)
+    await serve(page, reworked(original))
+    await doc.locator('#added-0').waitFor({ timeout: 15_000 })
+    await page.waitForTimeout(400)
+    const moved = await reading()
+    assert.equal(moved[0], held[0], 'the same passage stands at the top of the family page')
+    assert.ok(Math.abs(moved[1] - held[1]) <= 2, `at the same place on screen (${held} → ${moved})`)
   }, { width: 1440, height: 900 }, 'reduce')
   for (const [device, viewport, phone] of [['desktop', { width: 1440, height: 900 }, false], ['phone', { width: 390, height: 844 }, true]]) {
     test(`Living report (${device}): band, fragments, reload ancestry, nested files, sends and family`, async page => {

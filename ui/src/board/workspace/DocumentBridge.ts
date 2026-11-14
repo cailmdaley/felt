@@ -33,6 +33,7 @@ export function envelope(type: string, payload: Record<string, unknown> = {}): D
   return { protocol: PROTOCOL, version: VERSION, type, payload }
 }
 const REFERENCE_LIMIT = 500
+const ANCHOR_LIMIT = 3000
 const REFERENCE_LENGTH = 256
 const REFERENCE_RATE = 4
 const KEY_FIELDS = ['key', 'altKey', 'ctrlKey', 'metaKey', 'shiftKey', 'repeat']
@@ -65,6 +66,9 @@ export function documentMessage(data: unknown): data is DocumentMessage {
     case 'fit': return fields(p, [])
     case 'height': return fields(p, ['height']) && coordinate(p.height) && p.height > 0
     case 'reveal': return fields(p, ['top']) && coordinate(p.top)
+    // The board's request carries nothing; the page's report, its bounded passages.
+    case 'anchors': return fields(p, []) || fields(p, ['items']) && Array.isArray(p.items) && p.items.length <= ANCHOR_LIMIT
+      && Array.from(p.items).every(item => Array.isArray(item) && item.length === 2 && shortString(item[0]) && coordinate(item[1]))
     case 'swipe':
       if (fields(p, ['phase']) && p.phase === 'cancel') return true
       if (fields(p, ['phase', 'dx']) && p.phase === 'move') return travel(p.dx)
@@ -85,6 +89,53 @@ export function documentMessage(data: unknown): data is DocumentMessage {
       && (item.width as number) > 0 && (item.height as number) > 0)
     default: return false
   }
+}
+
+/** A passage a reader's place holds to, by a key that survives a rewrite of its page, and its top in the page's scrolled coordinates. */
+export type ReadingAnchor = readonly [key: string, top: number]
+
+/**
+ * The page's passages, in document order: every element with an id, and the
+ * headings, paragraphs, list items, rows and blocks by their tag and opening
+ * text. Hidden elements hold no place. This function is serialized, so it
+ * reads only the DOM and its arguments.
+ */
+export function readingAnchors(scroller: Element | null, limit: number): [string, number][] {
+  const root = document.scrollingElement
+  const origin = !scroller || scroller === root ? -window.scrollY : scroller.getBoundingClientRect().top - scroller.scrollTop
+  const anchors: [string, number][] = []
+  for (const el of document.querySelectorAll('[id],h1,h2,h3,h4,h5,h6,p,li,dt,dd,tr,pre,blockquote,figcaption')) {
+    if (anchors.length >= limit) break
+    const box = el.getClientRects()[0]
+    if (!box) continue
+    const key = el.id ? `#${el.id}` : `${el.tagName}|${(el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 80)}`
+    anchors.push([key.slice(0, 256), Math.round(box.top - origin)])
+  }
+  return anchors
+}
+
+/**
+ * Where a reader standing at `y` in one layout of a page stands in another:
+ * beside the same passage, the nearest one to `y` that each layout holds
+ * exactly once, so what changed above and around it moves nothing on screen.
+ * A passage whose key repeats names no one place. A reader at the page's top
+ * stays there; with no passage in common, at `y`.
+ */
+export function carryReading(before: readonly ReadingAnchor[], after: readonly ReadingAnchor[], y: number): number {
+  if (y <= 0 || !before.length || !after.length) return Math.max(0, y)
+  const once = (anchors: readonly ReadingAnchor[]): Map<string, number> => {
+    const tops = new Map<string, number>(), repeated = new Set<string>()
+    for (const [key, top] of anchors) if (tops.has(key)) repeated.add(key); else tops.set(key, top)
+    for (const key of repeated) tops.delete(key)
+    return tops
+  }
+  const was = once(before), next = once(after)
+  const nearest = [...was].sort((a, b) => Math.abs(a[1] - y) - Math.abs(b[1] - y))
+  for (const [key, top] of nearest) {
+    const moved = next.get(key)
+    if (moved !== undefined) return Math.max(0, moved + y - top)
+  }
+  return y
 }
 
 /** This function is serialized, so every dependency arrives as an argument. */
@@ -155,7 +206,7 @@ function installEmbeddedPdfEmbeds(send: (type: string, payload?: Record<string, 
   }, { once: true })
 }
 
-function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForwardDocumentKey, bindings: typeof surfaceBindings, allowed: readonly KeyIntent[], limits: { count: number; length: number; interval: number }, references: typeof referenceRuntime, css: string, protocol: string, version: number, swipe: typeof installPageSwipe, swipeLimits: typeof SWIPE, mentions: typeof mentionRuntime, mentionCss: string, reportMentions: typeof reportMentionRuntime, embeddedPdfs: typeof installEmbeddedPdfEmbeds, boardOrigin: string, parseBoardRoute: typeof parseRoute): void {
+function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForwardDocumentKey, bindings: typeof surfaceBindings, allowed: readonly KeyIntent[], limits: { count: number; length: number; interval: number }, references: typeof referenceRuntime, css: string, protocol: string, version: number, swipe: typeof installPageSwipe, swipeLimits: typeof SWIPE, mentions: typeof mentionRuntime, mentionCss: string, reportMentions: typeof reportMentionRuntime, embeddedPdfs: typeof installEmbeddedPdfEmbeds, boardOrigin: string, parseBoardRoute: typeof parseRoute, anchors: typeof readingAnchors, anchorLimit: number): void {
   // Storage belongs to this document's lifetime, never the board's origin.
   // Decks and plotting libraries can keep preferences without escaping isolation.
   for (const name of ['localStorage', 'sessionStorage'] as const) {
@@ -229,6 +280,8 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
     const el = resolveScroller()
     send('scroll', { x: el?.scrollLeft ?? 0, y: el?.scrollTop ?? 0 })
   }
+  /** The page's passages as it lays them out now: asked of a page as its rewrite is staged, and sent by every page before it is ready. */
+  const reportAnchors = (): void => send('anchors', { items: anchors(resolveScroller(), anchorLimit) })
   const cancelRestore = (): void => { pendingRestore = null; clearTimeout(restoreTimer) }
   const restore = (clamp = false): void => {
     if (!pendingRestore) return
@@ -261,6 +314,7 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
         if (state && typeof state.candidate === 'string' && typeof state.playing === 'boolean' && Number.isFinite(state.progress)) links?.playback(state)
       }
     } else if (data.type === 'pause') pause()
+    else if (data.type === 'anchors') reportAnchors()
     else if (data.type === 'fit') {
       fitted = true
       // The host draws the page at its full height: report it whenever layout moves it.
@@ -376,6 +430,8 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
   window.addEventListener('load', () => {
     window.setTimeout(() => {
       if (!active) pause()
+      // A rewrite's page reports its passages before it is ready, so the board can keep the reader beside theirs.
+      reportAnchors()
       send('ready', { media: !!document.querySelector('audio,video') })
       links = references(document, candidates => send('references', { candidates: candidates.filter(candidate => candidate.length <= limits.length).slice(0, limits.count) }),
         (type, candidate) => { if (active) send(type, { candidate }) })
@@ -417,7 +473,7 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
 
 /** Inject after the doctype/base so standalone fragments keep standards mode. */
 export function withWorkspaceKeyBridge(html: string): string {
-  const bridge = `<script data-shuttle-workspace-bridge>(${documentRuntime.toString()})(${keyIntent.toString()},${shouldForwardDocumentKey.toString()},${JSON.stringify(surfaceBindings)},${JSON.stringify([...DOCUMENT_KEY_INTENTS, ...FOCUSED_DOCUMENT_KEY_INTENTS])},${JSON.stringify({ count: REFERENCE_LIMIT, length: REFERENCE_LENGTH, interval: Math.ceil(1000 / REFERENCE_RATE) + 10 })},${referenceRuntime.toString()},${JSON.stringify(referenceStyles)},${JSON.stringify(PROTOCOL)},${VERSION},${installPageSwipe.toString()},${JSON.stringify(SWIPE)},${mentionRuntime.toString()},${JSON.stringify(mentionStyles)},${reportMentionRuntime.toString()},${installEmbeddedPdfEmbeds.toString()},${JSON.stringify(window.location.origin)},${parseRoute.toString()});</script>`
+  const bridge = `<script data-shuttle-workspace-bridge>(${documentRuntime.toString()})(${keyIntent.toString()},${shouldForwardDocumentKey.toString()},${JSON.stringify(surfaceBindings)},${JSON.stringify([...DOCUMENT_KEY_INTENTS, ...FOCUSED_DOCUMENT_KEY_INTENTS])},${JSON.stringify({ count: REFERENCE_LIMIT, length: REFERENCE_LENGTH, interval: Math.ceil(1000 / REFERENCE_RATE) + 10 })},${referenceRuntime.toString()},${JSON.stringify(referenceStyles)},${JSON.stringify(PROTOCOL)},${VERSION},${installPageSwipe.toString()},${JSON.stringify(SWIPE)},${mentionRuntime.toString()},${JSON.stringify(mentionStyles)},${reportMentionRuntime.toString()},${installEmbeddedPdfEmbeds.toString()},${JSON.stringify(window.location.origin)},${parseRoute.toString()},${readingAnchors.toString()},${ANCHOR_LIMIT});</script>`
   let insertion = 0
   const doctype = /<!doctype\b[^>]*>/i.exec(html)
   if (doctype) insertion = doctype.index + doctype[0].length
@@ -431,6 +487,8 @@ export function withWorkspaceKeyBridge(html: string): string {
 export interface FrameBridge {
   readonly active: boolean
   position: ScrollPosition
+  /** The page's passages as it last laid them out. */
+  anchors: readonly ReadingAnchor[]
   command(type: string, payload?: Record<string, unknown>): void
   subscribeScroll(listener: (position: ScrollPosition) => void): () => void
   dispose(): void
@@ -448,6 +506,7 @@ export function connectDocumentFrame(frame: HTMLIFrameElement, receive: (message
   const bridge: FrameBridge = {
     get active() { return active },
     position: { x: 0, y: 0 },
+    anchors: [],
     command: (type, payload = {}) => {
       // Titles are presentation text, not identity; keep long titles within the wire budget.
       if (type === 'references:resolved' && Array.isArray(payload.targets)) payload = {
@@ -493,6 +552,7 @@ export function connectDocumentFrame(frame: HTMLIFrameElement, receive: (message
       bridge.position = { x: Math.max(0, x), y: Math.max(0, y) }
       for (const listener of listeners) listener(bridge.position)
     }
+    if (message.type === 'anchors') bridge.anchors = message.payload.items as ReadingAnchor[]
     receive(message)
   }
   bridges.set(frame, bridge)
