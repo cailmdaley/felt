@@ -18,23 +18,27 @@ import (
 
 func (a *app) changeCmd() *cobra.Command {
 	var base, head, repo, storyPath, name string
-	var check bool
+	var check, cache bool
 	var prNumber int
 	cmd := &cobra.Command{
-		Use: "change <fiber> (--pr N | --base B)", Short: "Bake a Git change and its reading story into a fiber companion",
+		Use: "change <fiber> [--pr N | --base B]", Short: "Bake a Git change and its reading story into a fiber companion",
 		Long: `Snapshot the change since merge-base(base, head) into <name>.change.json beside
 the fiber, like a pull request's three-dot diff. No common ancestor is an error.
 Runs Git on this host; no daemon or model is needed.
+Without --pr or --base, the fiber's shuttle.change names the change: its first PR,
+else the checked-out branch as it stands, uncommitted work included, against
+shuttle.change.base or the remote's default branch.
 With --story, validate every stop and flag and report changed-line coverage. Flags do not
 count as coverage. --check validates and reports without writing a companion.
+--cache writes the bundle to this host's cache instead of beside the fiber.
 --json emits the validation and coverage report, not the change bundle.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Flags().Changed("pr") && (cmd.Flags().Changed("head") || cmd.Flags().Changed("base")) {
 				return fmt.Errorf("--pr cannot be combined with --base or --head")
 			}
-			if (cmd.Flags().Changed("pr") && prNumber < 1) || (prNumber == 0 && base == "") {
-				return fmt.Errorf("supply --pr N or --base B")
+			if cmd.Flags().Changed("pr") && prNumber < 1 {
+				return fmt.Errorf("supply a positive --pr N")
 			}
 			f, st, err := a.shuttleResolveFiber(args[0], true)
 			if err != nil {
@@ -47,7 +51,11 @@ count as coverage. --check validates and reports without writing a companion.
 			if err != nil {
 				return err
 			}
+			var spec shuttle.ChangeSpec
 			if block != nil {
+				if block.Change != nil {
+					spec = *block.Change
+				}
 				if block.Host != "" {
 					own, err := a.resolveOwnHost("")
 					if err != nil {
@@ -57,8 +65,8 @@ count as coverage. --check validates and reports without writing a companion.
 						return fmt.Errorf("fiber belongs to host %q; run shuttle change there", block.Host)
 					}
 				}
-				if repo == "" {
-					repo = block.ProjectDir
+				if repo == "" && block.ProjectDir != "" {
+					repo = filepath.Join(block.ProjectDir, spec.Repo)
 				}
 			}
 			if repo == "" {
@@ -71,6 +79,11 @@ count as coverage. --check validates and reports without writing a companion.
 			if err != nil {
 				return err
 			}
+			// Neither --pr nor --base: the fiber names its change.
+			branchView := prNumber == 0 && base == ""
+			if branchView && len(spec.PRs) > 0 {
+				prNumber, branchView = spec.PRs[0], false
+			}
 			var pr *shuttle.ChangePR
 			if prNumber != 0 {
 				pr, base, head, err = shuttle.ResolveChangePR(a.env, repo, prNumber)
@@ -81,14 +94,28 @@ count as coverage. --check validates and reports without writing a companion.
 					name = fmt.Sprintf("pr-%d", prNumber)
 				}
 			}
-			if name == "" {
-				ref := head
-				if head == "HEAD" {
-					out, err := a.env.Command("git", "-C", repo, "symbolic-ref", "--quiet", "--short", "HEAD").Output()
-					if err == nil {
-						ref = strings.TrimSpace(string(out))
+			ref := head
+			if head == "HEAD" {
+				out, err := a.env.Command("git", "-C", repo, "symbolic-ref", "--quiet", "--short", "HEAD").Output()
+				if err == nil {
+					ref = strings.TrimSpace(string(out))
+				}
+			}
+			// The branch view compares the worktree as it stands.
+			revision := head
+			if branchView {
+				if base = spec.Base; base == "" {
+					if base, err = shuttle.DefaultChangeBase(a.env, repo); err != nil {
+						return err
 					}
 				}
+				if !cmd.Flags().Changed("head") {
+					if revision, err = shuttle.SnapshotWorktree(a.env, repo); err != nil {
+						return err
+					}
+				}
+			}
+			if name == "" {
 				name = felt.Slugify(strings.ReplaceAll(ref, "/", "-"))
 				if ref == "HEAD" || name == "" {
 					name = filepath.Base(f.ID)
@@ -103,14 +130,23 @@ count as coverage. --check validates and reports without writing a companion.
 			}
 			sidecar := filepath.Join(filepath.Dir(fiberPath), name+".story.json")
 			path := filepath.Join(filepath.Dir(fiberPath), name+".change.json")
+			if cache {
+				dir, err := a.env.UserCacheDir()
+				if err != nil {
+					return err
+				}
+				path = filepath.Join(dir, "shuttle", "changes", f.UID, name+".change.json")
+			}
 			explicitStory := storyPath != ""
-			writeStory := explicitStory
+			writeStory := explicitStory && !cache
 			var story *shuttle.ChangeStory
 			var storyData []byte
 			if !explicitStory {
 				if _, err := os.Stat(sidecar); err == nil {
 					storyPath = sidecar
-				} else if os.IsNotExist(err) {
+				} else if !os.IsNotExist(err) {
+					return err
+				} else if !cache {
 					data, err := os.ReadFile(path)
 					if err == nil {
 						var previous shuttle.Change
@@ -128,8 +164,6 @@ count as coverage. --check validates and reports without writing a companion.
 					} else if !os.IsNotExist(err) {
 						return err
 					}
-				} else {
-					return err
 				}
 			}
 			if storyPath != "" {
@@ -154,12 +188,22 @@ count as coverage. --check validates and reports without writing a companion.
 					return fmt.Errorf("story %s must be a JSON object", path)
 				}
 			}
-			change, hunks, err := shuttle.BuildChange(a.env, repo, base, head, story)
+			change, hunks, err := shuttle.BuildChange(a.env, repo, base, revision, story)
 			if err != nil {
 				return err
 			}
+			if revision != head {
+				// The snapshot commit stands for the branch; its last real commit names it.
+				change.HeadRef = ref
+				if n := len(change.Commits); n > 1 && (story == nil || story.Title == "") {
+					change.Title = change.Commits[n-2].Subject
+				}
+			}
 			if pr != nil {
 				change.PR = pr
+				if pr.Body != "" {
+					change.Description = pr.Body
+				}
 				change.Title = pr.Title
 				change.HeadRef = pr.HeadBranch
 				change.BaseRef = pr.BaseBranch
@@ -180,12 +224,18 @@ count as coverage. --check validates and reports without writing a companion.
 				if err != nil {
 					return err
 				}
+				if cache {
+					if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+						return err
+					}
+				}
 				if err := atomicfile.Write(path, append(data, '\n'), 0644); err != nil {
 					return fmt.Errorf("write change: %w", err)
 				}
 				// A fiber-addressed receipt needs no native session or worker attribution.
 				// SentFiles resolves a raw sessionId equal to the fiber UID directly.
-				if sink, enabled := a.eventsSink(); enabled {
+				// A cached bake is the board's own read, not a send.
+				if sink, enabled := a.eventsSink(); enabled && !cache {
 					origin, err := a.resolveOwnHost("")
 					if err != nil {
 						return err
@@ -203,7 +253,7 @@ count as coverage. --check validates and reports without writing a companion.
 						return fmt.Errorf("bundle saved but delivery receipt failed: %w", err)
 					}
 				}
-				report.Path = path
+				report.Path, report.Title = path, change.Title
 			}
 			if a.json {
 				enc := json.NewEncoder(a.env.Stdout)
@@ -239,12 +289,13 @@ count as coverage. --check validates and reports without writing a companion.
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&base, "base", "", "Base commit or ref (alternative to --pr; comparison starts at its merge base with head)")
+	cmd.Flags().StringVar(&base, "base", "", "Base commit or ref (alternative to --pr; comparison starts at its merge base with head; default shuttle.change)")
 	cmd.Flags().StringVar(&head, "head", "HEAD", "Head commit or ref")
-	cmd.Flags().StringVar(&repo, "repo", "", "Worktree directory (fiber's shuttle.project_dir, else cwd)")
+	cmd.Flags().StringVar(&repo, "repo", "", "Worktree directory (fiber's shuttle.project_dir with shuttle.change.repo, else cwd)")
 	cmd.Flags().StringVar(&storyPath, "story", "", "JSON story with chapters, stops, flags and role overrides")
 	cmd.Flags().StringVar(&name, "name", "", "Companion filename stem (head ref, else fiber slug)")
 	cmd.Flags().BoolVar(&check, "check", false, "Validate and report without writing")
 	cmd.Flags().IntVar(&prNumber, "pr", 0, "GitHub PR number (alternative to --base and --head)")
+	cmd.Flags().BoolVar(&cache, "cache", false, "Write the bundle to this host's cache, not beside the fiber")
 	return cmd
 }

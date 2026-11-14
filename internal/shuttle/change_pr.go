@@ -33,29 +33,31 @@ type ChangePR struct {
 	Checks     ChangeChecks `json:"checks"`
 	// MergeCommit is set once the PR has merged; the change then spans that commit's first parent to itself.
 	MergeCommit string `json:"merge_commit,omitempty"`
+	// Body is the PR description; the bundle carries it as its description.
+	Body string `json:"-"`
 }
 
 // ResolveChangePR fetches GitHub's exact head and the PR's base into explicit refs.
 // A merged PR's base already contains it, so its range is instead the merge commit's
 // first parent to the merge commit, which holds the PR's changes for merge and squash merges alike.
 func ResolveChangePR(env *sysenv.Env, repo string, number int) (*ChangePR, string, string, error) {
-	cmd := env.Command("gh", "pr", "view", fmt.Sprint(number), "--json", "number,title,url,headRefName,headRefOid,baseRefName,state,isDraft,mergeable,statusCheckRollup,mergeCommit")
+	cmd := env.Command("gh", "pr", "view", fmt.Sprint(number), "--json", "number,title,body,url,headRefName,headRefOid,baseRefName,state,isDraft,mergeable,statusCheckRollup,mergeCommit")
 	cmd.Dir = repo
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, "", "", fmt.Errorf("gh pr view: %w", err)
 	}
 	var raw struct {
-		Number                                                             int
-		Title, URL, HeadRefName, HeadRefOid, BaseRefName, State, Mergeable string
-		IsDraft                                                            bool
-		StatusCheckRollup                                                  []struct{ Status, Conclusion, State string }
-		MergeCommit                                                        *struct{ Oid string }
+		Number                                                                   int
+		Title, Body, URL, HeadRefName, HeadRefOid, BaseRefName, State, Mergeable string
+		IsDraft                                                                  bool
+		StatusCheckRollup                                                        []struct{ Status, Conclusion, State string }
+		MergeCommit                                                              *struct{ Oid string }
 	}
 	if err := json.Unmarshal(out, &raw); err != nil {
 		return nil, "", "", err
 	}
-	pr := &ChangePR{Number: raw.Number, Title: raw.Title, URL: raw.URL, HeadBranch: raw.HeadRefName, BaseBranch: raw.BaseRefName, State: raw.State, Draft: raw.IsDraft, Mergeable: raw.Mergeable}
+	pr := &ChangePR{Number: raw.Number, Title: raw.Title, Body: raw.Body, URL: raw.URL, HeadBranch: raw.HeadRefName, BaseBranch: raw.BaseRefName, State: raw.State, Draft: raw.IsDraft, Mergeable: raw.Mergeable}
 	for _, check := range raw.StatusCheckRollup {
 		pr.Checks.Total++
 		result := check.Conclusion

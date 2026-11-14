@@ -5,6 +5,7 @@ package shuttle
 
 import (
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -77,6 +78,21 @@ type Block struct {
 	// BlockedOn names what a resting constitution waits for: a fiber's uid, or
 	// free text. It orders nothing; its orchestrator hears when that fiber closes.
 	BlockedOn string `json:"blocked_on,omitempty" yaml:"blocked_on,omitempty"`
+	// Change names the change the constitution's Change page bakes. Without
+	// it, the change is project_dir's checked-out branch against the remote's
+	// default branch.
+	Change *ChangeSpec `json:"change,omitempty" yaml:"change,omitempty"`
+}
+
+// ChangeSpec names a constitution's change: the checkout holding it, the
+// branch view's base, and the GitHub PRs it follows.
+type ChangeSpec struct {
+	// Repo is a checkout relative to project_dir; empty is project_dir itself.
+	Repo string `json:"repo,omitempty" yaml:"repo,omitempty"`
+	// Base is the branch view's base; empty is the remote's default branch.
+	Base string `json:"base,omitempty" yaml:"base,omitempty"`
+	// PRs replace the branch view; the first is the change opened by default.
+	PRs []int `json:"prs,omitempty" yaml:"prs,omitempty"`
 }
 
 // Ask is a worker's outstanding question to the human.
@@ -234,6 +250,17 @@ func Validate(b *Block, agents *AgentRegistry) ValidationErrors {
 	}
 	if b.Seat && b.Role == "" {
 		add("seat", "requires a role")
+	}
+
+	if c := b.Change; c != nil {
+		if c.Repo != "" && !filepath.IsLocal(c.Repo) {
+			add("change.repo", fmt.Sprintf("must be a path inside project_dir, got %q", c.Repo))
+		}
+		for i, pr := range c.PRs {
+			if pr < 1 {
+				add(fmt.Sprintf("change.prs[%d]", i), fmt.Sprintf("must be a positive PR number, got %d", pr))
+			}
+		}
 	}
 
 	if b.Kind == "standing" {

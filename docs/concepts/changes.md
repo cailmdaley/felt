@@ -24,6 +24,9 @@ The write is atomic, and an invalid story leaves an existing bundle untouched.
 A fiber doesn't need a `shuttle:` block, but a block naming another host is refused.
 Run the command on the host holding that fiber and worktree.
 
+Without `--pr` or `--base`, the fiber names its change (see [The change on open](#the-change-on-open)).
+`--cache` writes the bundle to the host's cache instead of beside the fiber; the board's Change page bakes this way.
+
 The bundle appears among the fiber's sent documents on the board; no Markdown embed or link is needed.
 Open the fiber, then its **± change chip**.
 A relative link to `walkthrough.change.json` in an HTML report also opens it in the reader, with Back returning to the report.
@@ -46,13 +49,43 @@ The bundle is a snapshot, not a live branch view, and its line references descri
 It can contain private code; keep `*.change.json` out of a public fiber archive's Git history.
 The CLI runs Git directly and makes no model calls.
 
+## The change on open
+
+Every constitution with a `shuttle.project_dir` has a **Change** page in its run of pages on the board, beside the fiber page.
+Opening it asks the owner daemon to bake the change (`POST /api/v1/fibers/<id>/change`), which runs `shuttle change <fiber> --cache --json`, then reads the bundle through `/file` like any other.
+Each opening bakes afresh, so the page shows the change as it stands.
+A bake writes nothing in the felt store: the bundle goes to `<user cache dir>/shuttle/changes/<fiber-uid>/<name>.change.json` (`~/Library/Caches` on macOS, `$XDG_CACHE_HOME` or `~/.cache` elsewhere), overwritten by the next bake.
+An authored `<name>.story.json` beside the fiber is read, never written, and its relative images resolve against the fiber's directory.
+
+An optional `change` map in the `shuttle:` block names the change:
+
+```yaml
+shuttle:
+  project_dir: /path/to/checkout
+  change:
+    repo: code/sp_validation   # a checkout inside project_dir; default project_dir itself
+    base: origin/develop       # the branch view's base; default the remote's default branch
+    prs: [446]                 # GitHub PRs this card follows; replaces the branch view
+```
+
+With `prs`, the change is the first PR, baked as `--pr` bakes it; an explicit `--pr N` bakes another.
+Without them, the change is the checkout's branch **as it stands**: its commits since the merge base with `base` — by default `origin/HEAD`'s target, else `origin/main`, else `origin/master` — plus its uncommitted work.
+Tracked edits and untracked files that `.gitignore` does not exclude, up to 1 MiB each, are staged into a copy of the index and committed with `git commit-tree` as one more commit, `Uncommitted changes`, on top of `HEAD`.
+The worktree's own index and refs are never touched; the commit object lands in the object store and is collected like any unreachable object.
+The snapshot commit takes `HEAD`'s identity and dates, so the same work bakes to the same commit and the reader keeps its viewed marks.
+A worktree with no uncommitted work bakes `HEAD` itself.
+`shuttle check` refuses an absolute `repo` or one outside `project_dir`, and a PR number below 1.
+
+A change without a story opens on the text it already carries, its `description`: a PR's GitHub body, else the full messages of its commits, oldest first.
+A change with no changed lines says so in one sentence naming its branch, base and head.
+
 ## Snapshot boundary
 
 Git resolves the base and head to SHAs and finds their common ancestor with `git merge-base`.
 Files, hunks and commits all compare that ancestor to head, like a pull request's three-dot diff (`base...head`).
 Work added to the base after divergence doesn't appear reversed in the change.
 No common ancestor is an error.
-Dirty and untracked files are excluded.
+With `--base` or `--head`, dirty and untracked files are excluded; only the fiber-named branch view snapshots uncommitted work.
 
 Capture pins diff formatting, three context lines, Myers alignment, rename detection and `core.bigFileThreshold=512m`.
 A file-type change retains both Git sections, including a binary notice on either side.
@@ -68,7 +101,8 @@ The bundle has these fields:
 | Field | Meaning |
 |---|---|
 | `version` | Schema version, `2`; other versions need a rebake |
-| `title` | PR title with `--pr`; otherwise the story's optional title or head commit subject |
+| `title` | PR title with `--pr`; otherwise the story's optional title or head commit subject (the last real commit's subject for an uncommitted snapshot) |
+| `description` | Optional Markdown: the PR body with `--pr`, else the commits' full messages, oldest first |
 | `repo` | `{name, dir, forge_url}`; `dir` is absolute and `forge_url` is an HTTPS forge address without credentials, query, fragment or `.git`, otherwise `null` |
 | `base`, `head` | Merge-base and resolved head SHAs |
 | `base_ref`, `head_ref` | Requested refs; attached `HEAD` becomes the short branch name |

@@ -16,20 +16,23 @@ import (
 
 // Change is a self-contained snapshot of two committed Git trees and their story.
 type Change struct {
-	Version int            `json:"version"`
-	Title   string         `json:"title"`
-	Repo    ChangeRepo     `json:"repo"`
-	Base    string         `json:"base"`
-	Head    string         `json:"head"`
-	BaseRef string         `json:"base_ref"`
-	HeadRef string         `json:"head_ref"`
-	PR      *ChangePR      `json:"pr,omitempty"`
-	Stats   ChangeStats    `json:"stats"`
-	Commits []ChangeCommit `json:"commits"`
-	Patch   string         `json:"-"`
-	Files   []ChangeFile   `json:"files"`
-	Story   *ChangeStory   `json:"story"`
-	Areas   []ChangeArea   `json:"areas"`
+	Version int    `json:"version"`
+	Title   string `json:"title"`
+	// Description is the change's own text: a PR's body, else its commits'
+	// full messages, oldest first. It is Markdown.
+	Description string         `json:"description,omitempty"`
+	Repo        ChangeRepo     `json:"repo"`
+	Base        string         `json:"base"`
+	Head        string         `json:"head"`
+	BaseRef     string         `json:"base_ref"`
+	HeadRef     string         `json:"head_ref"`
+	PR          *ChangePR      `json:"pr,omitempty"`
+	Stats       ChangeStats    `json:"stats"`
+	Commits     []ChangeCommit `json:"commits"`
+	Patch       string         `json:"-"`
+	Files       []ChangeFile   `json:"files"`
+	Story       *ChangeStory   `json:"story"`
+	Areas       []ChangeArea   `json:"areas"`
 }
 
 type ChangeRepo struct {
@@ -138,6 +141,7 @@ type ChangeLine struct {
 
 type ChangeReport struct {
 	Path      string       `json:"path,omitempty"`
+	Title     string       `json:"title,omitempty"`
 	Valid     bool         `json:"valid"`
 	Covered   int          `json:"covered"`
 	Total     int          `json:"total"`
@@ -215,15 +219,22 @@ func BuildChange(env *sysenv.Env, repo, base, head string, story *ChangeStory) (
 			}
 		}
 	}
-	log, err := git("log", "--reverse", "--no-show-signature", "--no-notes", "--format=%H%x00%s%x00%an%x00%aI%x00", baseSHA+".."+headSHA, "--")
+	log, err := git("log", "--reverse", "--no-show-signature", "--no-notes", "--format=%H%x00%s%x00%an%x00%aI%x00%b%x00", baseSHA+".."+headSHA, "--")
 	if err != nil {
 		return nil, nil, err
 	}
 	fields := strings.Split(log, "\x00")
-	for len(fields) >= 4 {
+	var messages []string
+	for len(fields) >= 5 {
 		c.Commits = append(c.Commits, ChangeCommit{SHA: strings.TrimLeft(fields[0], "\n"), Subject: fields[1], Author: fields[2], Time: fields[3]})
-		fields = fields[4:]
+		message := "**" + fields[1] + "**"
+		if body := strings.TrimSpace(fields[4]); body != "" {
+			message += "\n\n" + body
+		}
+		messages = append(messages, message)
+		fields = fields[5:]
 	}
+	c.Description = strings.Join(messages, "\n\n")
 	// A bare capture repository ignores tree and worktree attributes.
 	// Its empty info/attributes and disabled global attributes leave classification to Git.
 	capture, err := os.MkdirTemp("", "shuttle-change-")

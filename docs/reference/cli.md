@@ -261,7 +261,7 @@ constitution open; activating it could launch another worker.
 | `shuttle ls [query]` | Felt-compatible fiber listing/search with Shuttle's resolved facet in JSON output |
 | `shuttle show <id>` | Felt-compatible fiber read with Shuttle's resolved facet in JSON output |
 | `shuttle check` | Validate every `shuttle:` block in the selected store and report host drift |
-| `shuttle change <fiber> --base B` | Write a committed Git snapshot and optional reading story as a `.change.json` companion (`--head`, `--repo`, `--story`, `--name`, `--check`, `--json`) |
+| `shuttle change <fiber> [--pr N \| --base B]` | Write a Git snapshot and optional reading story as a `.change.json` companion, or into the host cache with `--cache`; with neither `--pr` nor `--base`, the fiber's `shuttle.change` names the change (`--head`, `--repo`, `--story`, `--name`, `--check`, `--cache`, `--json`) |
 | `shuttle status [fiber]` | One line per shuttle-managed fiber, with remote state read from its owner; unavailable owners permit a labeled stale local copy, while authoritative not-found never does. `--all`/`--remote` include the complete owner inventory, including closed and rested constitutions absent from the local archive. Closed ones hidden from the table (`--closed` shows them; `--json` always includes them; `--all`, `--remote <name>` — mutually exclusive, `--include-orphans`); with a fiber, a detailed single-fiber report ending in a dispatch verdict: eligible on which host (status and host ownership, noting a missing `project_dir`), or the verb that makes it so. Its `--json` adds the board's `column` (`drafts`, `in_flight`, `awaiting_review`, `tempered`, `discarded`, `resting`, `roles`) and the review `verdict` (`tempered`, `discarded` or null), and for a rest that waits, `blocked_on` and the `until` name it reads as. A block naming an agent the registry does not know is flagged, `!` in the table with a line naming the fix, and `agent_problem` in `--json`; the daemon maps no other name to an agent, so such a block fails every dispatch until fixed |
 | `shuttle ps` | Live terminal worker sessions |
 | `shuttle snapshot` | Print the local daemon's state snapshot |
@@ -288,7 +288,7 @@ constitution open; activating it could launch another worker.
 `attach`, `session-name`, and fiber message targets require one exact match across
 configured stores; they refuse guessed paths and duplicate matches.
 
-### `shuttle change <fiber> --base B`
+### `shuttle change <fiber> [--pr N | --base B]`
 
 Bake a change on the host holding the fiber and worktree:
 
@@ -300,26 +300,28 @@ shuttle change review-task --base origin/main --head topic/change \
 
 | Option | Meaning |
 |---|---|
-| `--base B` | Required commit or ref; compare its merge base with head to head |
+| `--pr N` | GitHub PR number; bakes the PR's head against its base |
+| `--base B` | Commit or ref; compare its merge base with head to head. Without `--pr` or `--base`, the fiber's `shuttle.change` names the change: its first PR, else the checked-out branch as it stands, uncommitted work included, against `change.base` or the remote's default branch |
 | `--head H` | Head commit or ref, default `HEAD` |
-| `--repo DIR` | Git worktree directory, default fiber's `shuttle.project_dir`, else cwd |
+| `--repo DIR` | Git worktree directory, default fiber's `shuttle.project_dir` joined with `shuttle.change.repo`, else cwd |
 | `--story FILE` | Optional JSON reading story with chapters, stops, flags and role overrides |
 | `--name NAME` | Companion filename stem, default slugified head ref, else fiber slug for detached `HEAD` |
 | `--check` | Validate and report without writing |
+| `--cache` | Write the bundle to `<user cache dir>/shuttle/changes/<fiber-uid>/<name>.change.json`; read a story sidecar beside the fiber but write nothing there, and emit no file receipt |
 | `--json`, `-j` | Output the validation and hunk-coverage report as JSON |
 
 The command resolves the supplied refs, finds their merge base and writes `<name>.change.json` atomically beside the fiber's Markdown file.
 The patch, files, hunks, coverage and commits all describe the change from that common ancestor to head, like a pull request's three-dot diff.
 The bundle's `base` records the merge-base SHA; `base_ref` preserves the supplied base ref.
 No common ancestor is an error.
-Only committed content enters the snapshot; dirty and untracked files are excluded.
+Only committed content enters a `--base` or `--pr` snapshot; dirty and untracked files are excluded. The fiber-named branch view adds them as one `Uncommitted changes` commit, staged through a copy of the index (see [Changes](../concepts/changes.md#the-change-on-open)).
 `repo.name` comes from origin's repository path, falling back to the main worktree directory's basename.
 `repo.forge_url` normalizes HTTP(S) origins and scp-style GitHub/GitLab origins to HTTPS without credentials, query, fragment or `.git`; other origins produce `null`.
 The version 2 bundle contains commits and a file inventory with path-derived roles, one source-row table per file, and hunk/window references for Story and Remaining.
 Other bundle versions need a rebake.
 Go resolves each story stop's excerpt; the reader does not parse Git output or calculate coverage.
 Without a story, `story` is `null` and every changed line remains unshown.
-A successful bake emits a fiber-addressed file receipt, so the change appears among the fiber's sent files without an embed.
+A successful bake beside the fiber emits a fiber-addressed file receipt, so the change appears among the fiber's sent files without an embed.
 The title comes from the story's optional `title`, otherwise the head commit subject.
 A fiber doesn't need a Shuttle block; a block naming another host requires running the command there.
 The CLI invokes Git directly and makes no model calls.
