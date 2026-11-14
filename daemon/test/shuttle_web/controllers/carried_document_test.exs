@@ -100,6 +100,23 @@ defmodule ShuttleWeb.CarriedDocumentTest do
       refute File.read!(log) =~ "resume"
     end
 
+    test "a resume refused after the adopt still carries adopt's line" do
+      fixture_store!()
+      install_fake_cli!()
+      Shuttle.Test.Env.put_env("RESUME_FAIL", "1")
+
+      conn =
+        post_json("/api/v1/lifecycle", %{
+          "action" => "resume",
+          "fiber" => "tests/carry",
+          "document" => @document
+        })
+
+      assert conn.status == 422
+      assert conn.resp_body =~ "test-host took the caller's version"
+      assert conn.resp_body =~ "closed"
+    end
+
     test "a fiber this host lacks answers fiber_not_found" do
       fixture_store!()
       log = install_fake_cli!()
@@ -231,6 +248,7 @@ defmodule ShuttleWeb.CarriedDocumentTest do
         printf "test-host took the caller's version\\n"
         exit 0
       fi
+      if [ -n "$RESUME_FAIL" ]; then printf 'Error: closed\\n'; exit 1; fi
       printf 'resumed\\n'
       """
     })

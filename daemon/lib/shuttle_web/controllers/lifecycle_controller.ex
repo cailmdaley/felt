@@ -71,7 +71,7 @@ defmodule ShuttleWeb.LifecycleController do
   defp create_local(conn, params) do
     with {:ok, action} <- action(params),
          {:ok, carried} <- carry(action, params),
-         {:ok, output} <- execute(action, params) do
+         {:ok, output} <- action |> execute(params) |> after_carry(carried) do
       # Every lifecycle verb here mutates the fiber doc (status/outcome/model/
       # shuttle block). Re-read it into the document cache so the kanban's
       # post-action refetch reflects the change now, not after the next poll.
@@ -107,6 +107,12 @@ defmodule ShuttleWeb.LifecycleController do
     do: params |> CarriedDocument.adopt(fiber) |> clean_result()
 
   defp carry(_action, _params), do: {:ok, ""}
+
+  # A refusal after the owner took the caller's document still says it did.
+  defp after_carry({:command_error, status, output}, carried),
+    do: {:command_error, status, carried <> output}
+
+  defp after_carry(result, _carried), do: result
 
   # Lifecycle transitions go through `Shuttle.LifecycleService`, which runs
   # Shuttle's writer inside the Poller, serialized with its state changes.

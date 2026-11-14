@@ -21,7 +21,7 @@ import (
 // The owner holds a constitution when its copy carries a shuttle: block naming
 // this host. A held copy stands, since the caller's mirror is often older than
 // the owner's worker-written state; --carry replaces it anyway, keeping its
-// runtime. A copy the owner does not hold takes the caller's document.
+// runtime and lifecycle state. A copy the owner does not hold takes the caller's document.
 func (a *app) adoptCmd() *cobra.Command {
 	var documentFile string
 	var carry bool
@@ -89,6 +89,18 @@ func (a *app) adoptCmd() *cobra.Command {
 			carried.ID, carried.Path = local.ID, local.Path
 			if carried.UID == "" {
 				carried.UID = local.UID
+			}
+			if held {
+				// The owner's lifecycle is its own: --carry replaces what the
+				// constitution says, not where it stands.
+				carried.Status, carried.ClosedAt = local.Status, local.ClosedAt
+				for _, key := range []string{"horizon", "tempered"} {
+					if node := local.ExtraFields[key]; node != nil {
+						carried.ExtraFields[key] = node
+					} else {
+						delete(carried.ExtraFields, key)
+					}
+				}
 			}
 			facet := carried.ExtraFields[shuttle.FacetKey]
 			felt.RemoveMappingKey(facet, shuttle.RuntimeKey)

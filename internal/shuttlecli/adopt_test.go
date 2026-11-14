@@ -69,6 +69,7 @@ func TestAdopt(t *testing.T) {
 			localBlock: firBlock(map[string]any{"runtime": map[string]any{"session": "owner-session"}}),
 			carried: func(t *testing.T, f *felt.Felt) {
 				f.Body = "the caller's body"
+				f.Status = felt.StatusClosed
 				if err := shuttle.SetNodeField(f, "runtime", map[string]any{"session": "stale"}); err != nil {
 					t.Fatal(err)
 				}
@@ -79,6 +80,9 @@ func TestAdopt(t *testing.T) {
 			check: func(t *testing.T, got *felt.Felt) {
 				if session := shuttleRuntimeMap(t, got)["session"]; session != "owner-session" {
 					t.Fatalf("runtime session = %v, want the owner's", session)
+				}
+				if got.Status == felt.StatusClosed {
+					t.Fatal("the caller's status replaced the owner's")
 				}
 			},
 		},
