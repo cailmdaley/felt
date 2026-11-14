@@ -80,7 +80,7 @@ func TestMailboxRechecksThreadSignalImmediatelyBeforeEmit(t *testing.T) {
 	env := testEnv(t)
 	root := mailboxDir(env, "fiber", "fiber")
 	request := Request{MessageID: "thread-result", Text: "closed", ThreadSignal: &ThreadSignal{UID: "child", Verb: "closed", Stamp: time.Now().UTC().Format(time.RFC3339Nano), Owner: "owner"}}
-	if err := QueueFiberContext(env, "fiber", request); err != nil {
+	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: request}); err != nil {
 		t.Fatal(err)
 	}
 	checks := 0
@@ -95,7 +95,7 @@ func TestMailboxRechecksThreadSignalImmediatelyBeforeEmit(t *testing.T) {
 	if checks != 2 || emitted {
 		t.Fatalf("checks=%d emitted=%v; stale lifecycle notice escaped", checks, emitted)
 	}
-	if count, err := PendingFiberContext(env, "fiber"); err != nil || count != 0 {
+	if count, err := PendingCount(env, "fiber"); err != nil || count != 0 {
 		t.Fatalf("superseded pending count = %d (%v)", count, err)
 	}
 }
@@ -105,7 +105,7 @@ func TestMailboxRechecksLegacyThreadNoticeImmediatelyBeforeEmit(t *testing.T) {
 	env := testEnv(t)
 	root := mailboxDir(env, "fiber", "fiber")
 	request := Request{MessageID: "thread-legacy-close", Text: "thread parent/child closed: result"}
-	if err := QueueFiberContext(env, "fiber", request); err != nil {
+	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: request}); err != nil {
 		t.Fatal(err)
 	}
 	checks, emitted := 0, false
@@ -130,7 +130,7 @@ func TestSlowUnrelatedOwnerCannotMakeValidatedAskStaleAtEmit(t *testing.T) {
 		{MessageID: "thread-other", Text: "other", ThreadSignal: &ThreadSignal{UID: "other", Verb: "closed", Stamp: time.Now().UTC().Format(time.RFC3339Nano), Owner: "other-owner"}},
 	}
 	for _, request := range requests {
-		if err := QueueFiberContext(env, "fiber", request); err != nil {
+		if err := Enqueue(env, InboxEntry{Address: "fiber", Request: request}); err != nil {
 			t.Fatal(err)
 		}
 		path := filepath.Join(root, "pending", mailboxKey(request.MessageID)+".json")
@@ -238,7 +238,7 @@ func TestMailboxSkewedValidatorDeliversWithCaveat(t *testing.T) {
 	env := testEnv(t)
 	root := mailboxDir(env, "fiber", "fiber")
 	request := Request{MessageID: "thread-result", Text: "closed", ThreadSignal: &ThreadSignal{UID: "child", Verb: "closed", Stamp: time.Now().UTC().Format(time.RFC3339Nano), Owner: "owner"}}
-	if err := QueueFiberContext(env, "fiber", request); err != nil {
+	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: request}); err != nil {
 		t.Fatal(err)
 	}
 	check := func(context.Context, Request) (bool, error) {
@@ -285,10 +285,10 @@ func TestOfferedBodiesExpireAndExpiredReplayIsIgnored(t *testing.T) {
 		t.Fatalf("recent offered payload was pruned: %v", err)
 	}
 	request := Request{MessageID: "replayed", Text: "old result", RetainedAt: old.UTC().Format(time.RFC3339Nano)}
-	if err := QueueFiberContext(env, "fiber", request); err != nil {
+	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: request}); err != nil {
 		t.Fatal(err)
 	}
-	if count, err := PendingFiberContext(env, "fiber"); err != nil || count != 0 {
+	if count, err := PendingCount(env, "fiber"); err != nil || count != 0 {
 		t.Fatalf("expired replay pending count = %d (%v)", count, err)
 	}
 }

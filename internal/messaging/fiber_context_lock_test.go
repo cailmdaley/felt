@@ -17,7 +17,7 @@ func TestFiberContextTransitionWaitsForEmission(t *testing.T) {
 		}
 	}
 	epoch := transition(t, env, "A", "shuttle://host/claude/A")
-	if err := QueueFiberContext(env, "fiber", Request{MessageID: "first", Text: "first"}); err != nil {
+	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: Request{MessageID: "first", Text: "first"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := DeliverFiberContext(context.Background(), env, "fiber", "host", "shuttle://host/claude/A", epoch); err != nil {

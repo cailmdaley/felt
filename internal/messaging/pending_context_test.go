@@ -15,7 +15,7 @@ func TestOverdueFiberContextReportsOnlyPendingOlderThanThreshold(t *testing.T) {
 	}
 	for _, id := range []string{"old", "new", "acknowledged"} {
 		req := Request{MessageID: id, Text: id}
-		if err := QueueFiberContext(env, "fiber", req); err != nil {
+		if err := Enqueue(env, InboxEntry{Address: "fiber", Request: req}); err != nil {
 			t.Fatal(err)
 		}
 	}

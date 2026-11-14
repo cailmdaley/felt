@@ -20,46 +20,7 @@ type fiberMailboxLink struct {
 	Host  string `json:"host"`
 }
 
-// QueueFiberContext keeps context for a task across worker conversations. It
-// uses the hook mailbox storage and offer/ack protocol, keyed by durable fiber
-// identity instead of a harness process. Only the owning daemon calls it.
-func QueueFiberContext(env *sysenv.Env, fiber string, r Request) error {
-	if fiber == "" || r.MessageID == "" || r.Text == "" || len(r.Text) > 64<<10 {
-		return errCode("invalid_request", "fiber context requires a key, message id and text (at most 64 KiB)")
-	}
-	root := mailboxDir(env, "fiber", fiber)
-	if err := ensureDir(root, 0700); err != nil {
-		return err
-	}
-	lock, err := os.OpenFile(filepath.Join(root, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
-	if err != nil {
-		return err
-	}
-	defer lock.Close()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
-		return err
-	}
-	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-	for _, state := range []string{"pending", "offered"} {
-		if entry, err := readFiberMailboxEntry(filepath.Join(root, state, mailboxKey(r.MessageID)+".json")); err == nil {
-			if fiberRequestIdentity(entry.Request) != fiberRequestIdentity(r) {
-				return errCode("message_id_conflict", "message id already names different fiber context")
-			}
-			return nil
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-	}
-	if requestExpired(r, time.Now()) {
-		return nil
-	}
-	if r.ThreadSignal != nil && (r.ThreadSignal.UID == "" || r.ThreadSignal.Verb == "" || r.ThreadSignal.Stamp == "" || r.ThreadSignal.Owner == "") {
-		return errCode("invalid_request", "thread signal requires uid, verb, stamp and owner")
-	}
-	return enqueueMailbox(root, r)
-}
-
-// The fiber key supplies the destination; session aliases and refreshed
+// The inbox key supplies the destination; session aliases and refreshed
 // retention metadata do not change a retry's semantic identity.
 // Wake is owner-derived routing, dependent on worker liveness.
 func fiberRequestIdentity(r Request) string {
@@ -84,27 +45,6 @@ func requestExpired(request Request, now time.Time) bool {
 		}
 	}
 	return false
-}
-
-// PendingFiberContext counts the context a fiber's mailbox holds that no
-// worker has taken yet: thread results and messages queued for its next
-// worker. A fiber without a mailbox holds none. It reads only the directory
-// listing, so it never contends with a delivery holding the mailbox lock.
-func PendingFiberContext(env *sysenv.Env, fiber string) (int, error) {
-	entries, err := os.ReadDir(filepath.Join(mailboxDir(env, "fiber", fiber), "pending"))
-	if errors.Is(err, os.ErrNotExist) {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	n := 0
-	for _, entry := range entries {
-		if name := entry.Name(); !entry.IsDir() && !strings.HasPrefix(name, ".") && strings.HasSuffix(name, ".json") {
-			n++
-		}
-	}
-	return n, nil
 }
 
 // Worker transitions alone publish authority. Delivery and hook subscriptions

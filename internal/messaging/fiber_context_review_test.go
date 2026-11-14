@@ -23,7 +23,7 @@ func TestPinnedQuietCodexContextReturnsToFiberHook(t *testing.T) {
 			}
 			generation := transition(t, env, "execution-A", a)
 			request := Request{MessageID: "pinned", Text: "durable pinned context"}
-			if err := QueueFiberContext(env, "fiber", request); err != nil {
+			if err := Enqueue(env, InboxEntry{Address: "fiber", Request: request}); err != nil {
 				t.Fatal(err)
 			}
 			path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey(request.MessageID)+".json")
@@ -58,7 +58,7 @@ func TestPinnedQuietCodexContextReturnsToFiberHook(t *testing.T) {
 			if len(got) != 1 || got[0].Text != request.Text {
 				t.Fatalf("successor hook context = %+v", got)
 			}
-			if n, err := PendingFiberContext(env, "fiber"); err != nil || n != 0 {
+			if n, err := PendingCount(env, "fiber"); err != nil || n != 0 {
 				t.Fatalf("pending = %d, %v", n, err)
 			}
 		})
@@ -84,13 +84,13 @@ func TestFiberContextWakeWithoutCodexDiscovery(t *testing.T) {
 	env.Set("SHUTTLE_DAEMON_URL", server.URL)
 	const address = "shuttle://host/codex/worker"
 	generation := transition(t, env, "execution", address)
-	if err := QueueFiberContext(env, "fiber", Request{MessageID: "wake", Text: "wake result", Wake: true}); err != nil {
+	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: Request{MessageID: "wake", Text: "wake result", Wake: true}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := DeliverFiberContext(context.Background(), env, "fiber", "host", address, generation); err != nil {
 		t.Fatalf("wake failed: %v", err)
 	}
-	if n, err := PendingFiberContext(env, "fiber"); err != nil || n != 0 || inputs != 1 {
+	if n, err := PendingCount(env, "fiber"); err != nil || n != 0 || inputs != 1 {
 		t.Fatalf("pending=%d inputs=%d err=%v", n, inputs, err)
 	}
 }

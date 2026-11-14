@@ -149,7 +149,7 @@ These event and commit adapters are also installed by the felt plugin, but the
 | `shuttle hook handoff` | Offer the session's one-shot context-budget handoff reminder (see [Agents & Plugin](../agents.md)) |
 | `shuttle hook interrupted` | Record a human interrupt read from a harness transcript on the activity stream (`--session`, `--harness claude\|codex`, `--at` ms, `--id`, `--cwd`); the daemon calls it, no harness hook does |
 
-The hidden `shuttle context-mailbox` subcommands (`put`, `get`, `receiver`, `revoke`, `deliver`) are daemon-internal: they manage the owner-local durable context queue that `close --quiet` and `message --context-only` write into, and are not a user surface.
+The hidden `shuttle context-mailbox` subcommands (`put`, `pending`, `get`, `receiver`, `revoke`, `deliver`) are daemon-internal: they manage the owner-local durable context queue that `close --quiet` and `message --context-only` write into, and are not a user surface. Its `put` and `pending` share their code with `shuttle inbox put` and `pending`.
 
 ## `shuttle` (dispatch layer)
 
@@ -272,6 +272,9 @@ constitution open; activating it could launch another worker.
 | `shuttle say "<text>"` | Queue a spoken line on the speaker host, in the voice of the calling worker's role (its charter's `voice:`); playback waits behind queued lines and while the human talks, and a line whose card is out of view is held until its card is in view or `shuttle say --play` opens it. `--fiber` names the speaker from a plain terminal; `--voice` overrides the voice for this line. For voice conversations with the human only |
 | `shuttle voices` | List the voice bank and pocket-tts built-ins on the speaker host, each with the role whose charter claims it |
 | `shuttle say --held` | List spoken lines held because their card is out of view; `shuttle say --play` opens the card waiting longest (routes Listen to it and plays its lines), `--next` moves to the next card, `--stop` leaves the rest held |
+| `shuttle inbox put <address> <message-id> <text>` | Enqueue an entry in this host's inbox for a fiber key or a session's `shuttle://` address, with its delivery wishes (`--source`, `--turn`, `--session`, `--if-costly`, `--not-before`), `--from` and `--derived`; see [The inbox](../dev/inbox.md) |
+| `shuttle inbox pending <address>...` | Print one JSON object of each address's pending entry count |
+| `shuttle inbox ls <address>` | List an address's pending entries, oldest first: id, source, turn, not_before, queued time and sender (`--json`) |
 | `shuttle meeting start` | Start a meeting: Listen on, unmuted, pinned to the calling worker's card (`--fiber` names one from a terminal), transcribing the computer's audio as well as the mic. The meeting also ends when Listen stops, when Listen follows again, or after twenty minutes with nothing heard |
 | `shuttle meeting end` | End the meeting: stop transcribing the computer's audio and follow the view again; a no-op outside a meeting |
 | `shuttle transcript <session-id>` | Print the native transcript path when local, or verify and materialize an exact remote copy in the managed cache; inspect it with the harness's ordinary `jq`/`rg` recipes (`--json` for metadata and paths) |

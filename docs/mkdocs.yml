@@ -81,6 +81,7 @@ nav:
       - Dispatch internals: dev/dispatch.md
       - Operating the daemon: dev/operating.md
       - Event stream and ledgers: dev/event-stream.md
+      - The inbox: dev/inbox.md
       - Family board: dev/family-board.md
       - Releasing: dev/releasing.md
       - Codebase layout and tests: dev/layout.md

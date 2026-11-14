@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -99,8 +98,11 @@ func RecoverClaudeMail(ctx context.Context, env *sysenv.Env, host string, now ti
 		if entry.Fallback != nil && entry.Fallback.Receipt != nil && now.UnixNano() < entry.Fallback.NoticeAfter {
 			return nil
 		}
+		if state == "pending" && !entry.due(now) {
+			return nil
+		}
 		turn, _ := MailboxState(env, "claude", a.ID, host)
-		if state == "pending" && turn == "working" && now.Sub(time.Unix(0, entry.QueuedAt)) < claudeHookOfferWindow {
+		if state == "pending" && turn == "working" && now.Sub(entry.availableAt()) < claudeHookOfferWindow {
 			pending = true
 			return nil
 		}
@@ -110,12 +112,7 @@ func RecoverClaudeMail(ctx context.Context, env *sysenv.Env, host string, now ti
 	if err != nil {
 		failures = append(failures, err)
 	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].entry.QueuedAt == items[j].entry.QueuedAt {
-			return items[i].path < items[j].path
-		}
-		return items[i].entry.QueuedAt < items[j].entry.QueuedAt
-	})
+	sortPendingItems(items)
 	for _, item := range items {
 		if err := ctx.Err(); err != nil {
 			return true, errors.Join(append(failures, err)...)

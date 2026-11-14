@@ -289,7 +289,7 @@ func TestContextMailboxPendingCountsEachFiber(t *testing.T) {
 	env := testEnv(t)
 	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 	for _, id := range []string{"a", "b"} {
-		if err := messaging.QueueFiberContext(env, "store:WAITING", messaging.Request{MessageID: id, Text: "x"}); err != nil {
+		if err := messaging.Enqueue(env, messaging.InboxEntry{Address: "store:WAITING", Request: messaging.Request{MessageID: id, Text: "x"}}); err != nil {
 			t.Fatal(err)
 		}
 	}

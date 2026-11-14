@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
@@ -23,7 +22,9 @@ type PendingContext struct {
 }
 
 // OverdueFiberContext reads atomic queue records without locking delivery.
-// Age is an operator diagnostic, never evidence that a receiver has ended.
+// An entry's age counts from when it became deliverable: its not_before, when
+// that is later than its queueing. Age is an operator diagnostic, never
+// evidence that a receiver has ended.
 func OverdueFiberContext(env *sysenv.Env, now time.Time, after time.Duration) ([]PendingContext, error) {
 	root := filepath.Join(dataDir(env), "mailboxes", "fiber")
 	boxes, err := os.ReadDir(root)
@@ -39,30 +40,17 @@ func OverdueFiberContext(env *sysenv.Env, now time.Time, after time.Duration) ([
 			continue
 		}
 		mailbox := filepath.Join(root, box.Name())
-		entries, err := os.ReadDir(filepath.Join(mailbox, "pending"))
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
+		items, err := pendingItems(mailbox)
 		if err != nil {
 			return nil, err
 		}
-		for _, file := range entries {
-			if file.IsDir() || strings.HasPrefix(file.Name(), ".") || !strings.HasSuffix(file.Name(), ".json") {
-				continue
-			}
-			entry, err := readFiberMailboxEntry(filepath.Join(mailbox, "pending", file.Name()))
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			if err != nil {
-				return nil, err
-			}
-			queued := time.Unix(0, entry.QueuedAt)
-			age := now.Sub(queued)
+		for _, it := range items {
+			entry := it.entry
+			age := now.Sub(entry.availableAt())
 			if age < after {
 				continue
 			}
-			pending = append(pending, PendingContext{Mailbox: mailbox, MessageID: entry.Request.MessageID, QueuedAt: queued, AgeSeconds: int64(age / time.Second), AttemptAddress: entry.AttemptAddress, PossibleRepeat: entry.PossibleRepeat})
+			pending = append(pending, PendingContext{Mailbox: mailbox, MessageID: entry.Request.MessageID, QueuedAt: time.Unix(0, entry.QueuedAt), AgeSeconds: int64(age / time.Second), AttemptAddress: entry.AttemptAddress, PossibleRepeat: entry.PossibleRepeat})
 		}
 	}
 	sort.Slice(pending, func(i, j int) bool {

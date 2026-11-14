@@ -7,7 +7,6 @@ import (
 	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/spf13/cobra"
 	"strconv"
-	"time"
 )
 
 func (a *app) contextMailboxCmd() *cobra.Command {
@@ -37,7 +36,7 @@ func (a *app) contextMailboxCmd() *cobra.Command {
 			}
 			request.ThreadSignal = &signal
 		}
-		return messaging.QueueFiberContext(a.env, args[0], request)
+		return messaging.Enqueue(a.env, messaging.InboxEntry{Address: args[0], Request: request})
 	}}
 	put.Flags().BoolVar(&wake, "wake", false, "Start a turn in the live orchestrator")
 	put.Flags().StringVar(&from, "from", "", "Sender named in the message header")
@@ -49,21 +48,7 @@ func (a *app) contextMailboxCmd() *cobra.Command {
 	put.Flags().StringVar(&retainedAt, "retained-at", "", "Origin timestamp used to expire replayed thread context")
 	cmd.AddCommand(put)
 	cmd.AddCommand(&cobra.Command{Use: "pending <fiber-key>...", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		if err := messaging.PruneOfferedMailboxes(a.env, time.Now()); err != nil {
-			return err
-		}
-		// One JSON object, key => count. A key whose mailbox cannot be read
-		// names itself on stderr and is left out, so the others still count.
-		counts := make(map[string]int, len(args))
-		for _, key := range args {
-			n, err := messaging.PendingFiberContext(a.env, key)
-			if err != nil {
-				fmt.Fprintf(a.env.Stderr, "%s: %v\n", key, err)
-				continue
-			}
-			counts[key] = n
-		}
-		return json.NewEncoder(a.env.Stdout).Encode(counts)
+		return a.printPendingCounts(args)
 	}})
 	cmd.AddCommand(&cobra.Command{Use: "get <fiber-key>", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		receiver, err := messaging.ReadFiberReceiver(a.env, args[0])

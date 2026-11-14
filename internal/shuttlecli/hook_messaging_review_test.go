@@ -28,7 +28,7 @@ func TestHookOutputSurvivesSiblingValidationFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, request := range []messaging.Request{{MessageID: "plain", Text: "plain peer message"}, {MessageID: "thread-notice", Text: "thread child closed: result"}} {
-		if err := messaging.QueueFiberContext(env, "fiber", request); err != nil {
+		if err := messaging.Enqueue(env, messaging.InboxEntry{Address: "fiber", Request: request}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -40,7 +40,7 @@ func TestHookOutputSurvivesSiblingValidationFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("successful hook output returned error: %v", err)
 	}
-	if n, err := messaging.PendingFiberContext(env, "fiber"); err != nil || n != 1 {
+	if n, err := messaging.PendingCount(env, "fiber"); err != nil || n != 1 {
 		t.Fatalf("pending = %d, %v", n, err)
 	}
 }

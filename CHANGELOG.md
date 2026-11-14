@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Added
+
+- `shuttle inbox put|pending|ls`: every inbox entry, for a fiber or a session, is created by one writer that records its delivery wishes (`source`, `turn`, `session`, `if_costly`, `not_before`) and refuses an unknown value. An entry waits until its `not_before` has passed. Contract level 38.
+
 ## [2.0.0] — 2026-11-13
 
 ### Added

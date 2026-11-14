@@ -50,13 +50,13 @@ func TestFiberContextReachesCodexQuietResumeWithEndedHook(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := Request{MessageID: "fiber-context-resumed", Text: "context from fiber queue"}
-	if err := QueueFiberContext(env, "fiber-quiet-resume", request); err != nil {
+	if err := Enqueue(env, InboxEntry{Address: "fiber-quiet-resume", Request: request}); err != nil {
 		t.Fatal(err)
 	}
 	if err := DeliverFiberContext(context.Background(), env, "fiber-quiet-resume", "host", address, generation); err != nil {
 		t.Fatalf("deliver to quiet resumed Codex: %v", err)
 	}
-	if n, err := PendingFiberContext(env, "fiber-quiet-resume"); err != nil || n != 1 {
+	if n, err := PendingCount(env, "fiber-quiet-resume"); err != nil || n != 1 {
 		t.Fatalf("fiber context pending before hook = %d, %v", n, err)
 	}
 	if pendingMailboxText(t, env, "codex", id, request.Text) {
@@ -89,7 +89,7 @@ func TestFiberContextRejectsConflictingRetry(t *testing.T) {
 			t.Run(state+"/"+change, func(t *testing.T) {
 				env := testEnv(t)
 				request := Request{MessageID: "retry", Text: "original", From: "sender"}
-				if err := QueueFiberContext(env, "fiber", request); err != nil {
+				if err := Enqueue(env, InboxEntry{Address: "fiber", Request: request}); err != nil {
 					t.Fatal(err)
 				}
 				root := mailboxDir(env, "fiber", "fiber")
@@ -98,12 +98,12 @@ func TestFiberContextRejectsConflictingRetry(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				if err := QueueFiberContext(env, "fiber", request); err != nil {
+				if err := Enqueue(env, InboxEntry{Address: "fiber", Request: request}); err != nil {
 					t.Fatalf("identical retry: %v", err)
 				}
 				wakeRetry := request
 				wakeRetry.Wake = true
-				if err := QueueFiberContext(env, "fiber", wakeRetry); err != nil {
+				if err := Enqueue(env, InboxEntry{Address: "fiber", Request: wakeRetry}); err != nil {
 					t.Fatalf("effective-wake retry: %v", err)
 				}
 				changed := request
@@ -115,7 +115,7 @@ func TestFiberContextRejectsConflictingRetry(t *testing.T) {
 				case "signal":
 					changed.ThreadSignal = &ThreadSignal{UID: "child", Verb: "closed", Stamp: time.Now().UTC().Format(time.RFC3339Nano), Owner: "host"}
 				}
-				if err := QueueFiberContext(env, "fiber", changed); ErrorCode(err) != "message_id_conflict" {
+				if err := Enqueue(env, InboxEntry{Address: "fiber", Request: changed}); ErrorCode(err) != "message_id_conflict" {
 					t.Fatalf("conflicting retry = %v", err)
 				}
 				entry, err := readFiberMailboxEntry(filepath.Join(root, state, mailboxKey(request.MessageID)+".json"))
@@ -152,7 +152,7 @@ func TestFiberContextWorkerTransitions(t *testing.T) {
 			if err := DeliverFiberContext(context.Background(), env, "fiber", "host", a, first); err != nil {
 				t.Fatal(err)
 			}
-			if err := QueueFiberContext(env, "fiber", Request{MessageID: "result", Text: "original"}); err != nil {
+			if err := Enqueue(env, InboxEntry{Address: "fiber", Request: Request{MessageID: "result", Text: "original"}}); err != nil {
 				t.Fatal(err)
 			}
 			b, identity := "shuttle://host/claude/B", "execution-B:B"
@@ -200,7 +200,7 @@ func TestFiberContextWorkerTransitions(t *testing.T) {
 				if err := OfferMailbox(env, "claude", "B", "host", func(batch []Request) error { got = append(got, batch...); return nil }); err != nil {
 					t.Fatal(err)
 				}
-				if err := QueueFiberContext(env, "fiber", Request{MessageID: "result", Text: "original"}); err != nil {
+				if err := Enqueue(env, InboxEntry{Address: "fiber", Request: Request{MessageID: "result", Text: "original"}}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -242,7 +242,7 @@ func TestFiberContextWakeUsesNativeTurnAndDoesNotReplay(t *testing.T) {
 	epoch := transition(t, env, "execution:session", a)
 	req := Request{MessageID: "closed-result", Text: "thread child closed: measured", Wake: true}
 	for i := 0; i < 2; i++ {
-		if err := QueueFiberContext(env, "fiber", req); err != nil {
+		if err := Enqueue(env, InboxEntry{Address: "fiber", Request: req}); err != nil {
 			t.Fatal(err)
 		}
 		if err := DeliverFiberContext(context.Background(), env, "fiber", "host", a, epoch); err != nil {
@@ -254,18 +254,18 @@ func TestFiberContextWakeUsesNativeTurnAndDoesNotReplay(t *testing.T) {
 	}
 }
 
-func TestPendingFiberContextCountsWhatNoWorkerHasTaken(t *testing.T) {
+func TestPendingCountCountsWhatNoWorkerHasTaken(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
-	if n, err := PendingFiberContext(env, "fiber"); err != nil || n != 0 {
+	if n, err := PendingCount(env, "fiber"); err != nil || n != 0 {
 		t.Fatalf("a fiber with no mailbox holds %d (%v), want 0", n, err)
 	}
 	for _, id := range []string{"one", "two", "two"} {
-		if err := QueueFiberContext(env, "fiber", Request{MessageID: id, Text: "context " + id}); err != nil {
+		if err := Enqueue(env, InboxEntry{Address: "fiber", Request: Request{MessageID: id, Text: "context " + id}}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if n, err := PendingFiberContext(env, "fiber"); err != nil || n != 2 {
+	if n, err := PendingCount(env, "fiber"); err != nil || n != 2 {
 		t.Fatalf("pending = %d (%v), want 2", n, err)
 	}
 	if err := RegisterMailbox(env, "claude", "A", "host", t.TempDir(), os.Getpid(), true); err != nil {
@@ -280,7 +280,7 @@ func TestPendingFiberContextCountsWhatNoWorkerHasTaken(t *testing.T) {
 	if err := OfferMailbox(env, "claude", "A", "host", func([]Request) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := PendingFiberContext(env, "fiber"); err != nil || n != 0 {
+	if n, err := PendingCount(env, "fiber"); err != nil || n != 0 {
 		t.Fatalf("after its worker took them, pending = %d (%v), want 0", n, err)
 	}
 }
@@ -289,7 +289,7 @@ func TestFiberContextHandoffKeepsPerMessageAckAfterLaterFailure(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	for _, id := range []string{"first", "second"} {
-		if err := QueueFiberContext(env, "fiber", Request{MessageID: id, Text: id}); err != nil {
+		if err := Enqueue(env, InboxEntry{Address: "fiber", Request: Request{MessageID: id, Text: id}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -326,7 +326,7 @@ func TestFiberContextRestartRetriesPinnedDestinationAfterAcceptedSend(t *testing
 	t.Parallel()
 	env := testEnv(t)
 	request := Request{MessageID: "thread-accepted", Text: "thread hub/child closed: done"}
-	if err := QueueFiberContext(env, "fiber", request); err != nil {
+	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: request}); err != nil {
 		t.Fatal(err)
 	}
 	firstGeneration := transition(t, env, "execution-first", "shuttle://host/claude/first")
@@ -373,7 +373,7 @@ func TestFiberContextRetargetsAfterPinnedDestinationRejects(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	request := Request{MessageID: "thread-rejected", Text: "thread hub/child closed: done"}
-	if err := QueueFiberContext(env, "fiber", request); err != nil {
+	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: request}); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey(request.MessageID)+".json")
@@ -410,7 +410,7 @@ func TestThreadSignalMailboxDropsSupersededAndRetainsWhenCheckFails(t *testing.T
 	t.Parallel()
 	env := testEnv(t)
 	for _, id := range []string{"thread-superseded", "thread-unavailable", "thread-healthy"} {
-		if err := QueueFiberContext(env, "fiber", Request{MessageID: id, Text: "thread hub/child asked: question"}); err != nil {
+		if err := Enqueue(env, InboxEntry{Address: "fiber", Request: Request{MessageID: id, Text: "thread hub/child asked: question"}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -420,7 +420,7 @@ func TestThreadSignalMailboxDropsSupersededAndRetainsWhenCheckFails(t *testing.T
 	}, func([]Request) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := PendingFiberContext(env, "fiber"); err != nil || n != 2 {
+	if n, err := PendingCount(env, "fiber"); err != nil || n != 2 {
 		t.Fatalf("pending after superseded drop = %d (%v), want 2", n, err)
 	}
 	checkFailure := errors.New("validator unavailable")
@@ -449,7 +449,7 @@ func TestThreadSignalMailboxDropsSupersededAndRetainsWhenCheckFails(t *testing.T
 	if len(delivered) != 1 || delivered[0] != "thread-healthy" {
 		t.Fatalf("healthy notice delivery = %v", delivered)
 	}
-	if n, err := PendingFiberContext(env, "fiber"); err != nil || n != 1 {
+	if n, err := PendingCount(env, "fiber"); err != nil || n != 1 {
 		t.Fatalf("pending after unavailable check = %d (%v), want 1", n, err)
 	}
 }
@@ -525,7 +525,7 @@ func TestFiberContextUnknownRolloverRequiresEndedEvidence(t *testing.T) {
 			ended := evidence == "ended" || evidence == "killed" || evidence == "replaced"
 			env := testEnv(t)
 			request := Request{MessageID: "unknown-result", Text: "thread child closed: done"}
-			if err := QueueFiberContext(env, "fiber", request); err != nil {
+			if err := Enqueue(env, InboxEntry{Address: "fiber", Request: request}); err != nil {
 				t.Fatal(err)
 			}
 			first, next := "shuttle://host/claude/A", "shuttle://host/claude/B"

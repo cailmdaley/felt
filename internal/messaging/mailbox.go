@@ -91,8 +91,12 @@ func HookPIDIsAncestor(pid int) bool {
 	return false
 }
 
+// mailboxEntry is one stored inbox entry. Its request keeps the wake fields
+// that match its turn wish, so a build that predates wishes reads it the same
+// way.
 type mailboxEntry struct {
 	Request  Request `json:"request"`
+	Wishes   Wishes  `json:"wishes"`
 	QueuedAt int64   `json:"queued_at"`
 	// Fallback records native write ownership and bounded preflight retries.
 	Fallback *claudeFallback `json:"fallback,omitempty"`
@@ -325,7 +329,11 @@ func queueMailbox(env *sysenv.Env, a Address, r Request) (Receipt, error) {
 	if requestExpired(r, time.Now()) {
 		return rejected(r, transport, "thread notice expired"), errCode("expired", "thread notice is outside the 14-day retention window")
 	}
-	if err := enqueueMailbox(mailboxDir(env, a.Harness, a.ID), r); err != nil {
+	address, err := FormatAddress(a.Host, a.Harness, a.ID)
+	if err == nil {
+		err = Enqueue(env, InboxEntry{Address: address, Request: r})
+	}
+	if err != nil {
 		return rejected(r, transport, err.Error()), err
 	}
 	detail := "queued for the session's next prompt or tool hook; no turn started"
@@ -335,7 +343,7 @@ func queueMailbox(env *sysenv.Env, a Address, r Request) (Receipt, error) {
 	return Receipt{MessageID: r.MessageID, Address: r.Address, Status: StatusQueued, Transport: transport, Detail: detail}, nil
 }
 
-func enqueueMailbox(root string, r Request) error {
+func enqueueMailbox(root string, entry mailboxEntry) error {
 	dir := filepath.Join(root, "pending")
 	if err := ensureDir(dir, 0700); err != nil {
 		return err
@@ -352,11 +360,11 @@ func enqueueMailbox(root string, r Request) error {
 	if len(entries) >= 128 {
 		return errCode("queue_full", "mailbox is full")
 	}
-	b, err := json.Marshal(mailboxEntry{Request: r, QueuedAt: time.Now().UnixNano()})
+	b, err := json.Marshal(entry)
 	if err != nil {
 		return err
 	}
-	path := filepath.Join(dir, mailboxKey(r.MessageID)+".json")
+	path := filepath.Join(dir, mailboxKey(entry.Request.MessageID)+".json")
 	return mailboxWrite(path, b, true)
 }
 
@@ -441,17 +449,12 @@ func offerMailboxWithAck(dir string, accepts func(Request) bool, emit func([]Req
 			}
 			continue
 		}
-		if !accepts(entry.Request) {
+		if !entry.due(time.Now()) || !accepts(entry.Request) {
 			continue
 		}
 		items = append(items, mailboxPendingItem{path, entry})
 	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].entry.QueuedAt == items[j].entry.QueuedAt {
-			return items[i].path < items[j].path
-		}
-		return items[i].entry.QueuedAt < items[j].entry.QueuedAt
-	})
+	sortPendingItems(items)
 	candidates := items
 	var validationErr error
 	if current != nil {
