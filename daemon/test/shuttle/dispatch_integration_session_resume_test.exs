@@ -29,6 +29,21 @@ defmodule Shuttle.DispatchIntegrationSessionResumeTest do
     def cmd(command, args, opts), do: IntegrationRunner.cmd(command, args, opts)
   end
 
+  # Refuses the launch's runtime marker, so the card keeps its pre-close
+  # `dispatched_at` while the resumed worker runs.
+  defmodule NoMarkerRunner do
+    @behaviour Shuttle.Runner
+    alias Shuttle.Test.DispatchIntegrationCase.IntegrationRunner
+
+    def cmd("shuttle", args, opts) do
+      if "mark-runtime" in args and "--dispatched-at" in args,
+        do: {"refused", 1},
+        else: IntegrationRunner.cmd("shuttle", args, opts)
+    end
+
+    def cmd(command, args, opts), do: IntegrationRunner.cmd(command, args, opts)
+  end
+
   @picked "c1a0e5e0-0000-4000-8000-0000000000a1"
   @closed_at "2026-01-05T10:00:00+01:00"
 
@@ -212,5 +227,31 @@ defmodule Shuttle.DispatchIntegrationSessionResumeTest do
     assert File.read!(fiber_file(host, id)) == before
     assert reopens() == []
     assert launches() == 0
+  end
+
+  test "a resumed worker whose launch marker failed outlives its card's closure", %{host: host} do
+    id = "tests/unmarked-oneshot"
+    oneshot(host, id)
+
+    {:ok, _} =
+      Shuttle.CLI.run_lifecycle("mark-runtime", id, ["--dispatched-at", "2026-01-05T08:00:00Z"],
+        runner: IntegrationRunner,
+        felt_store: host
+      )
+
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", host)
+    write_transcript(@picked)
+
+    {:ok, poller} =
+      start_poller!(runner: NoMarkerRunner, poll_interval_ms: 600_000, felt_stores: [host])
+
+    assert {:ok, tmux} = resume(poller, id, host)
+
+    assert get_in(read_frontmatter(host, id), ["shuttle", "runtime", "dispatched_at"]) ==
+             "2026-01-05T08:00:00Z"
+
+    sync_poll_cycle!(poller)
+    assert %{session: ^tmux} = Poller.live_worker(poller, id)
+    refute Enum.any?(IntegrationRunner.commands(), &match?({"tmux", ["kill-session" | _]}, &1))
   end
 end
