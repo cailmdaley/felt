@@ -47,7 +47,8 @@
 .change-prose a { color: var(--ws-machine); }
 .change-opening-facts { margin: 20px 0; }
 .change-stale { border-left: 2px solid var(--ws-owed); padding-left: 16px; margin: 20px 0; color: var(--ws-ink-muted); }
-.change-stop-note { color: var(--ws-ink); font-size: var(--type-row); }
+.change-stop-intro { display: flex; align-items: start; gap: 12px; }
+.change-stop-note { flex: 1; min-width: 0; color: var(--ws-ink); font-size: var(--type-row); }
 .change-stop .change-file-head { flex-wrap: wrap; }
 .change-stop .change-file-identity { flex-basis: 100%; }
 .change-stop .change-file:not([open]) .change-file-name { white-space: normal; overflow-wrap: anywhere; }

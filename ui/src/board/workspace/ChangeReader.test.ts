@@ -46,6 +46,15 @@ it('renders the story prose and keeps metadata readable', () => {
   expect(note.closest('summary, details')).toBeNull()
   note.click()
   expect(stop.open).toBe(false)
+  const viewed = root.querySelector<HTMLButtonElement>('.change-stop-intro .change-viewed')!
+  expect(viewed.disabled).toBe(false)
+  viewed.click()
+  expect(viewed.textContent).toContain('Viewed')
+  expect(stop.open).toBe(false)
+  expect(root.querySelector('.change-diff-window')).toBeNull()
+  viewed.click()
+  expect(viewed.textContent).toBe('Mark viewed')
+  expect(stop.open).toBe(false)
   stop.open = true
   stop.dispatchEvent(new Event('toggle'))
   expect(root.querySelector('.change-metadata')?.textContent).toContain('no text hunks')

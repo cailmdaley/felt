@@ -210,10 +210,10 @@ export function mountChangeReader(
     const comments = el('span', 'change-file-comments')
     review.commentCount(file, comments)
     const viewedControl = mark(id)
-    viewedControl.disabled = !navigation.isViewed(id)
+    viewedControl.disabled = !stop && !navigation.isViewed(id)
     viewedControl.addEventListener('click', event => {
       event.preventDefault()
-      card.open = !navigation.isViewed(id)
+      if (!stop || navigation.isViewed(id)) card.open = !navigation.isViewed(id)
       if (card.open && !body.childNodes.length) addDiff(body, file, wholeFiles.has(id) ? file.hunks : hunks)
     })
     head.title = `${file.path} · ${changeFileLabel(file)}`
@@ -222,15 +222,17 @@ export function mountChangeReader(
       el('span', 'change-file-counts', `+${file.additions} −${file.deletions}`),
       el('span', 'change-role', [role, stop?.importance].filter(Boolean).join(' · ')),
       comments,
-      viewedControl,
     )
+    if (!stop) head.append(viewedControl)
     const host = stop ? el('div', 'change-stop') : parent
-    if (stop) parent.append(host)
+    const intro = el('div', 'change-stop-intro')
+    if (stop) { parent.append(host); host.append(intro) }
     if (stop?.note) {
       const note = storyProse(stop.note)
       note.classList.add('change-stop-note')
-      host.append(note)
+      intro.append(note)
     }
+    if (stop) intro.append(viewedControl)
     card.append(head)
     host.append(card)
     sectionIds.push(id)
