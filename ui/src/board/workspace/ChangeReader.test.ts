@@ -41,7 +41,11 @@ it('renders the story prose and keeps metadata readable', () => {
   expect(root.querySelector('.change-file-head .change-role')?.textContent).toBe('generated · important')
   const stop = root.querySelector<HTMLDetailsElement>('.change-file')!
   expect(stop.open).toBe(false)
-  expect(root.querySelector('.change-stop-note')?.textContent).toBeTruthy()
+  const note = root.querySelector<HTMLElement>('.change-stop-note')!
+  expect(note.textContent).toBeTruthy()
+  expect(note.closest('summary, details')).toBeNull()
+  note.click()
+  expect(stop.open).toBe(false)
   stop.open = true
   stop.dispatchEvent(new Event('toggle'))
   expect(root.querySelector('.change-metadata')?.textContent).toContain('no text hunks')

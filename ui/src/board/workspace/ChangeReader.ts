@@ -224,13 +224,15 @@ export function mountChangeReader(
       comments,
       viewedControl,
     )
+    const host = stop ? el('div', 'change-stop') : parent
+    if (stop) parent.append(host)
     if (stop?.note) {
       const note = storyProse(stop.note)
       note.classList.add('change-stop-note')
-      head.prepend(note)
+      host.append(note)
     }
     card.append(head)
-    parent.append(card)
+    host.append(card)
     sectionIds.push(id)
     const body = el('div', 'change-file-body')
     card.append(body)

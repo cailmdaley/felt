@@ -47,10 +47,10 @@
 .change-prose a { color: var(--ws-machine); }
 .change-opening-facts { margin: 20px 0; }
 .change-stale { border-left: 2px solid var(--ws-owed); padding-left: 16px; margin: 20px 0; color: var(--ws-ink-muted); }
-.change-file-head:has(.change-stop-note) { flex-wrap: wrap; }
-.change-stop-note { flex-basis: 100%; color: var(--ws-ink); font-size: var(--type-row); }
-.change-file-head:has(.change-stop-note) .change-file-identity { flex-basis: 100%; }
-.change-file:not([open]) .change-file-head:has(.change-stop-note) .change-file-name { white-space: normal; overflow-wrap: anywhere; }
+.change-stop-note { color: var(--ws-ink); font-size: var(--type-row); }
+.change-stop .change-file-head { flex-wrap: wrap; }
+.change-stop .change-file-identity { flex-basis: 100%; }
+.change-stop .change-file:not([open]) .change-file-name { white-space: normal; overflow-wrap: anywhere; }
 .change-flag > button { border: 0; color: var(--ws-owed); font: var(--type-meta)/var(--leading-prose) var(--font-mono); padding: 0 0 5px; overflow-wrap: anywhere; text-align: left; }
 .change-flag .change-prose { font-size: var(--type-row); }
 .change-section { padding-top: 28px; margin-top: 28px; border-top: 1px solid var(--ws-hairline); scroll-margin-top: 16px; }
