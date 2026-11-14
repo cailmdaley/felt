@@ -141,7 +141,6 @@ type ChangeLine struct {
 
 type ChangeReport struct {
 	Path      string       `json:"path,omitempty"`
-	Title     string       `json:"title,omitempty"`
 	Valid     bool         `json:"valid"`
 	Covered   int          `json:"covered"`
 	Total     int          `json:"total"`

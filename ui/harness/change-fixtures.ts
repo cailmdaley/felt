@@ -88,5 +88,5 @@ export function bakeFixtureChange(fixture: WorkspaceExample, uid: string, owner:
   if (!fixture.files.some(file => file.owner === owner && file.path === path)) {
     fixture.files.push({ owner, path, mime: 'application/json', body: new Blob([JSON.stringify(change)], { type: 'application/json' }) })
   }
-  return { path, title: change.title, report: { path, title: change.title, valid: true } }
+  return { path, report: { path, valid: true } }
 }

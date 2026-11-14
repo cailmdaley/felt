@@ -59,11 +59,11 @@ func SnapshotWorktree(env *sysenv.Env, repo string) (string, error) {
 		return strings.TrimSpace(string(out)), nil
 	}
 	// The real index's path, asked without GIT_INDEX_FILE, which would name the copy.
-	real, err := env.Command("git", "-C", repo, "rev-parse", "--path-format=absolute", "--git-path", "index").Output()
+	realIndex, err := env.Command("git", "-C", repo, "rev-parse", "--path-format=absolute", "--git-path", "index").Output()
 	if err != nil {
 		return "", fmt.Errorf("%s is not a Git repository: %w", repo, err)
 	}
-	if data, err := os.ReadFile(strings.TrimSpace(string(real))); err == nil {
+	if data, err := os.ReadFile(strings.TrimSpace(string(realIndex))); err == nil {
 		if err := os.WriteFile(index, data, 0600); err != nil {
 			return "", err
 		}
@@ -88,7 +88,8 @@ func SnapshotWorktree(env *sysenv.Env, repo string) (string, error) {
 		if path == "" {
 			continue
 		}
-		if info, err := os.Lstat(filepath.Join(top, path)); err == nil && info.Size() <= untrackedLimit {
+		// A nested repository lists as a directory; it is not part of this change.
+		if info, err := os.Lstat(filepath.Join(top, path)); err == nil && !info.IsDir() && info.Size() <= untrackedLimit {
 			small = append(small, path)
 		}
 	}
@@ -101,7 +102,7 @@ func SnapshotWorktree(env *sysenv.Env, repo string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	head, err := git("", "show", "-s", "--format=%T%x00%an%x00%ae%x00%ad%x00%cn%x00%ce%x00%cd", "--date=raw", "HEAD")
+	head, err := git("", "show", "-s", "--no-show-signature", "--format=%T%x00%an%x00%ae%x00%ad%x00%cn%x00%ce%x00%cd", "--date=raw", "HEAD")
 	if err != nil {
 		return "", err
 	}

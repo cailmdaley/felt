@@ -72,6 +72,10 @@ func TestSnapshotWorktreeTakesWorkAsItStands(t *testing.T) {
 	put("notes/small.txt", "small\n")
 	put("ignored.log", "ignored\n")
 	put("big.bin", strings.Repeat("x", 1<<20+1))
+	// A scratch repository with no commits lists as an untracked directory.
+	if out, err := env.Command("git", "init", "-q", filepath.Join(repo, "scratch")).CombinedOutput(); err != nil {
+		t.Fatalf("git init scratch: %v\n%s", err, out)
+	}
 	refs, status := git("show-ref"), git("status", "--porcelain")
 	cached := git("diff", "--cached", "--name-only")
 

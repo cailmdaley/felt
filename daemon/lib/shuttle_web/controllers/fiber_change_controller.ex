@@ -13,7 +13,7 @@ defmodule ShuttleWeb.FiberChangeController do
   remote-owned fiber forwards to the owner's identical route and its answer is
   relayed verbatim.
 
-  Answers 200 `{path, title, report}` with Shuttle's validation and coverage
+  Answers 200 `{path, report}` with Shuttle's validation and coverage
   report; 422 `{error}` with Shuttle's one-line reason when the bake fails (not
   a Git repository, no base, a `gh` failure); 404 when the fiber is not on this
   host; 503 when Shuttle could not run.
@@ -46,23 +46,38 @@ defmodule ShuttleWeb.FiberChangeController do
       {:remote, remote} ->
         relay_json(
           conn,
-          OriginRouter.forward(remote, "/api/v1/fibers/#{id}/change", Map.take(params, ["pr"]),
+          OriginRouter.forward(remote, change_path(id), Map.take(params, ["pr"]),
             forward_timeout_ms: @cli_timeout_ms + 5_000
           )
         )
 
       :local ->
-        with {:ok, pr} <- pr_args(params["pr"]),
-             {:ok, %{store: store, fiber_id: address}} <- FeltStores.resolve_request(id) do
-          store
-          |> Shuttle.CLI.run_in_store(["change", address, "--cache", "--json" | pr],
-            timeout_ms: @cli_timeout_ms
-          )
-          |> respond(conn)
-        else
-          error -> respond(error, conn)
+        case pr_args(params["pr"]) do
+          {:ok, pr} -> bake_local(conn, id, pr)
+          {:error, reason} -> error(conn, 400, reason)
         end
     end
+  end
+
+  # One bake per fiber and PR at a time: a page reopened while its bake runs shares the run.
+  defp bake_local(conn, id, pr) do
+    Shuttle.SingleFlight.run({:change_bake, id, pr}, fn ->
+      with {:ok, %{store: store, fiber_id: address}} <- FeltStores.resolve_request(id) do
+        Shuttle.CLI.run_in_store(store, ["change", address, "--cache", "--json" | pr],
+          timeout_ms: @cli_timeout_ms
+        )
+      end
+    end)
+    |> respond(conn)
+  end
+
+  defp change_path(id) do
+    encoded =
+      id
+      |> String.split("/")
+      |> Enum.map_join("/", &URI.encode(&1, fn c -> URI.char_unreserved?(c) end))
+
+    "/api/v1/fibers/" <> encoded <> "/change"
   end
 
   defp pr_args(nil), do: {:ok, []}
@@ -80,7 +95,7 @@ defmodule ShuttleWeb.FiberChangeController do
   defp respond({:ok, output}, conn) do
     case Jason.decode(output) do
       {:ok, %{"path" => path} = report} ->
-        json(conn, %{path: path, title: report["title"], report: report})
+        json(conn, %{path: path, report: report})
 
       _ ->
         conn |> put_status(502) |> json(%{error: "shuttle change answered without a bundle path"})
@@ -95,7 +110,7 @@ defmodule ShuttleWeb.FiberChangeController do
 
   defp respond({:command_error, _status, output}, conn), do: error(conn, 422, reason(output))
   defp respond({:error, :not_found, reason}, conn), do: error(conn, 404, reason)
-  defp respond({:error, reason}, conn) when is_binary(reason), do: error(conn, 400, reason)
+  defp respond({:error, reason}, conn) when is_binary(reason), do: error(conn, 503, reason)
   defp respond({:error, _kind, reason}, conn), do: error(conn, 503, reason)
 
   # A refused story prints its JSON report before the error; the error is the reason.

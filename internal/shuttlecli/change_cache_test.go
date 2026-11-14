@@ -89,7 +89,7 @@ func TestChangeCommandBakesTheNamedChangeIntoTheCache(t *testing.T) {
 	before := besideFiber()
 
 	report, c := bake("named")
-	if report.Path != filepath.Join(cacheDir, "felt", "changes", fiber.UID, "topic.change.json") || report.Title != "Topic subject" {
+	if report.Path != filepath.Join(cacheDir, "felt", "changes", fiber.UID, "topic.change.json") {
 		t.Fatalf("report: %+v", report)
 	}
 	if c.BaseRef != "origin/main" || c.HeadRef != "topic" || len(c.Commits) != 2 || c.Stats.Additions != 1 {
@@ -133,5 +133,10 @@ func TestChangeCommandBakesTheNamedChangeIntoTheCache(t *testing.T) {
 	report, c = bake("followed")
 	if filepath.Base(report.Path) != "pr-7.change.json" || c.PR == nil || c.PR.Number != 7 || c.Description != "The PR says why." {
 		t.Fatalf("PR bake: %+v %+v", report, c)
+	}
+	// An explicit --head asks for the branch view, whatever PRs the fiber follows.
+	report, c = bake("followed", "--head", "topic")
+	if filepath.Base(report.Path) != "topic.change.json" || c.PR != nil {
+		t.Fatalf("--head bake: %+v %+v", report, c)
 	}
 }

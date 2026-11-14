@@ -46,8 +46,7 @@ defmodule ShuttleWeb.FiberChangeControllerTest do
     args: args
   } do
     report = %{
-      "path" => "/cache/shuttle/changes/u/pr-7.change.json",
-      "title" => "A PR",
+      "path" => "/cache/felt/changes/u/pr-7.change.json",
       "valid" => true
     }
 
@@ -59,7 +58,6 @@ defmodule ShuttleWeb.FiberChangeControllerTest do
 
     assert Jason.decode!(conn.resp_body) == %{
              "path" => report["path"],
-             "title" => "A PR",
              "report" => report
            }
 
@@ -93,7 +91,7 @@ defmodule ShuttleWeb.FiberChangeControllerTest do
 
   test "a remote origin forwards to its owner, and nothing runs here", %{args: args} do
     reply =
-      Jason.encode!(%{"path" => "/remote/cache.change.json", "title" => "T", "report" => %{}})
+      Jason.encode!(%{"path" => "/remote/cache.change.json", "report" => %{}})
 
     ForwardStub.stub_forward(
       "candide",

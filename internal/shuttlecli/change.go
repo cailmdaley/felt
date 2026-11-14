@@ -81,7 +81,7 @@ count as coverage. --check validates and reports without writing a companion.
 			}
 			// Neither --pr nor --base: the fiber names its change.
 			branchView := prNumber == 0 && base == ""
-			if branchView && len(spec.PRs) > 0 {
+			if branchView && len(spec.PRs) > 0 && !cmd.Flags().Changed("head") {
 				prNumber, branchView = spec.PRs[0], false
 			}
 			var pr *shuttle.ChangePR
@@ -253,7 +253,7 @@ count as coverage. --check validates and reports without writing a companion.
 						return fmt.Errorf("bundle saved but delivery receipt failed: %w", err)
 					}
 				}
-				report.Path, report.Title = path, change.Title
+				report.Path = path
 			}
 			if a.json {
 				enc := json.NewEncoder(a.env.Stdout)
