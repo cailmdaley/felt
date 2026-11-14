@@ -266,6 +266,12 @@ export function registerMapViewJourneys(test) {
     await until(page, () => document.querySelector('.ws-page.ws-selected .fp-row[data-thread$="hub/pipeline-steward"]')?.hasAttribute('data-selected'))
     await head.locator('.fp-note').click()
     await until(page, () => document.querySelector('.ws-page.ws-selected .fp-head')?.hasAttribute('data-selected'))
+    // The pointer alone never opens a row's outcome.
+    const steward = tree(page).locator('.fp-row[data-thread$="hub/pipeline-steward"]')
+    await until(page, () => document.querySelector('.ws-page.ws-selected .fp-row[data-thread$="hub/pipeline-steward"] .fp-note')?.getBoundingClientRect().height === 0)
+    await steward.locator('.fp-name').hover()
+    await page.waitForTimeout(700)
+    assert.equal(await steward.locator('.fp-note').evaluate(note => note.getBoundingClientRect().height), 0)
     await head.locator('.fp-back').click()
     assert.equal(await head.locator('.fp-doc').isVisible(), false)
     // A file sent and since deleted says so in the same place.

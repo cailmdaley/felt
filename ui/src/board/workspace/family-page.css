@@ -32,15 +32,15 @@
 .fp-count:empty { display: none; }
 .fp-note { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; margin: 1px 0 0 var(--fp-text); overflow: hidden; color: var(--ws-ink-soft); font: var(--type-label)/var(--leading-ui) var(--font-serif); overflow-wrap: anywhere; }
 .fp-note[hidden], .fp-files[hidden] { display: none; }
-/* A thread row's outcome stays folded until the row is highlighted, at once,
-   or hovered a moment. Its row of the grid opens to the outcome's own height
-   while the words settle in with a little spring; folding is quick and plain. */
+/* A thread row's outcome stays folded until the row is highlighted, by keys
+   or a click; the pointer alone never opens it. Its row of the grid opens to
+   the outcome's own height while the words settle in with a little spring;
+   folding is quick and plain. */
 .fp-row:not(.fp-head) > .fp-line { display: grid; grid-template-rows: auto 0fr auto; transition: grid-template-rows .18s cubic-bezier(.4, 0, .2, 1); }
 .fp-line > .fp-title { grid-row: 1; } .fp-line > .fp-note { grid-row: 2; } .fp-line > .fp-count { grid-row: 3; }
 .fp-row:not(.fp-head) > .fp-line > .fp-note { min-height: 0; margin-top: 0; opacity: 0; transform: translateY(-6px); transition: opacity .12s ease-out, transform .18s ease-out; }
-.fp-row:not(.fp-head):is([data-selected], :focus-within, :hover) > .fp-line { grid-template-rows: auto 1fr auto; transition: grid-template-rows .36s cubic-bezier(.22, 1, .36, 1); }
-.fp-row:not(.fp-head):is([data-selected], :focus-within, :hover) > .fp-line > .fp-note { opacity: 1; transform: none; transition: opacity .24s ease-out .04s, transform .55s var(--fp-spring) .02s; }
-.fp-row:not(.fp-head):hover:not([data-selected], :focus-within) > .fp-line, .fp-row:not(.fp-head):hover:not([data-selected], :focus-within) > .fp-line > .fp-note { transition-delay: .25s; }
+.fp-row:not(.fp-head):is([data-selected], :focus-within) > .fp-line { grid-template-rows: auto 1fr auto; transition: grid-template-rows .36s cubic-bezier(.22, 1, .36, 1); }
+.fp-row:not(.fp-head):is([data-selected], :focus-within) > .fp-line > .fp-note { opacity: 1; transform: none; transition: opacity .24s ease-out .04s, transform .55s var(--fp-spring) .02s; }
 
 /* A row's acts (Dock.actsFor): the verb button, then the session pair, in a
    column of their own, the session pair at its right edge so the caret and
@@ -161,7 +161,7 @@
 @media (prefers-reduced-motion: reduce) {
   .fp-row:not(.fp-head) > .fp-line { transition: none; }
   .fp-row:not(.fp-head) > .fp-line > .fp-note { transition: none; }
-  .fp-row:not(.fp-head):is([data-selected], :focus-within, :hover) > .fp-line { transition: none; }
-  .fp-row:not(.fp-head):is([data-selected], :focus-within, :hover) > .fp-line > .fp-note { transition: none; }
+  .fp-row:not(.fp-head):is([data-selected], :focus-within) > .fp-line { transition: none; }
+  .fp-row:not(.fp-head):is([data-selected], :focus-within) > .fp-line > .fp-note { transition: none; }
   .fp-aside::before { transition: none; }
 }
