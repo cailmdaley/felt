@@ -99,7 +99,7 @@ export function registerChangeJourneys(test) {
     await head.locator('.fp-doc .change-map').waitFor()
     const scroll = await head.locator('.fp-doc .change-scroll').evaluate(el => el.getBoundingClientRect().height)
     assert.ok(scroll >= viewport.height / 2, `the unfolded reader shows its map, not only its tabs (${scroll}px of ${viewport.height}px)`)
-    const overview = head.locator('.fp-doc .change-main > .change-prose').first()
+    const overview = head.locator('.fp-doc .change-opening > .change-prose')
     await overview.locator('.change-mermaid svg').waitFor()
     await overview.locator('img[alt="The response figure"]').evaluate(img => img.complete && img.naturalWidth > 0 || new Promise((done, fail) => { img.onload = done; img.onerror = fail }))
   }, viewport)
