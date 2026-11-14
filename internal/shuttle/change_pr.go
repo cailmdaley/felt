@@ -31,11 +31,15 @@ type ChangePR struct {
 	Draft      bool         `json:"draft"`
 	Mergeable  string       `json:"mergeable"`
 	Checks     ChangeChecks `json:"checks"`
+	// MergeCommit is set once the PR has merged; the change then spans that commit's first parent to itself.
+	MergeCommit string `json:"merge_commit,omitempty"`
 }
 
 // ResolveChangePR fetches GitHub's exact head and the PR's base into explicit refs.
+// A merged PR's base already contains it, so its range is instead the merge commit's
+// first parent to the merge commit, which holds the PR's changes for merge and squash merges alike.
 func ResolveChangePR(env *sysenv.Env, repo string, number int) (*ChangePR, string, string, error) {
-	cmd := env.Command("gh", "pr", "view", fmt.Sprint(number), "--json", "number,title,url,headRefName,headRefOid,baseRefName,state,isDraft,mergeable,statusCheckRollup")
+	cmd := env.Command("gh", "pr", "view", fmt.Sprint(number), "--json", "number,title,url,headRefName,headRefOid,baseRefName,state,isDraft,mergeable,statusCheckRollup,mergeCommit")
 	cmd.Dir = repo
 	out, err := cmd.Output()
 	if err != nil {
@@ -46,6 +50,7 @@ func ResolveChangePR(env *sysenv.Env, repo string, number int) (*ChangePR, strin
 		Title, URL, HeadRefName, HeadRefOid, BaseRefName, State, Mergeable string
 		IsDraft                                                            bool
 		StatusCheckRollup                                                  []struct{ Status, Conclusion, State string }
+		MergeCommit                                                        *struct{ Oid string }
 	}
 	if err := json.Unmarshal(out, &raw); err != nil {
 		return nil, "", "", err
@@ -70,9 +75,19 @@ func ResolveChangePR(env *sysenv.Env, repo string, number int) (*ChangePR, strin
 	base := fmt.Sprintf("refs/shuttle/pr/%d/base", number)
 	baseRepo, _, _ := strings.Cut(raw.URL, "/pull/")
 	// Fetch by OID rather than a similarly named local or remote branch.
-	fetch := env.Command("git", "-C", repo, "fetch", baseRepo, "+"+raw.HeadRefOid+":"+head, "+refs/heads/"+raw.BaseRefName+":"+base)
+	refspecs := []string{"+" + raw.HeadRefOid + ":" + head, "+refs/heads/" + raw.BaseRefName + ":" + base}
+	if raw.State == "MERGED" && raw.MergeCommit != nil {
+		pr.MergeCommit = raw.MergeCommit.Oid
+		refspecs = []string{"+" + pr.MergeCommit + ":" + head}
+	}
+	fetch := env.Command("git", append([]string{"-C", repo, "fetch", baseRepo}, refspecs...)...)
 	if out, err := fetch.CombinedOutput(); err != nil {
 		return nil, "", "", fmt.Errorf("fetch PR: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	if pr.MergeCommit != "" {
+		if out, err := env.Command("git", "-C", repo, "update-ref", base, pr.MergeCommit+"^1").CombinedOutput(); err != nil {
+			return nil, "", "", fmt.Errorf("merged PR base: %s: %w", strings.TrimSpace(string(out)), err)
+		}
 	}
 	return pr, base, head, nil
 }

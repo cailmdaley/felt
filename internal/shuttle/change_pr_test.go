@@ -68,3 +68,68 @@ func TestChangePRFetchExactHeadAndStackedBase(t *testing.T) {
 		t.Fatalf("%+v", change.Stats)
 	}
 }
+
+func TestChangePRMergedBakesTheMergedRange(t *testing.T) {
+	t.Parallel()
+	for _, squash := range []bool{false, true} {
+		env := testEnv(t)
+		executable, err := exec.LookPath("git")
+		if err != nil {
+			t.Fatal(err)
+		}
+		env.Set("PATH", filepath.Dir(executable))
+		env.Set("GIT_CONFIG_NOSYSTEM", "1")
+		env.Set("GIT_CONFIG_GLOBAL", os.DevNull)
+		repo := t.TempDir()
+		git := func(args ...string) string {
+			t.Helper()
+			out, err := env.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput()
+			if err != nil {
+				t.Fatalf("%v: %s: %v", args, out, err)
+			}
+			return strings.TrimSpace(string(out))
+		}
+		git("init", "-b", "main")
+		git("config", "user.name", "Author")
+		git("config", "user.email", "author@example.invalid")
+		os.WriteFile(filepath.Join(repo, "code"), []byte("base\n"), 0644)
+		os.WriteFile(filepath.Join(repo, "other"), []byte("base\n"), 0644)
+		git("add", ".")
+		git("commit", "-m", "base")
+		git("checkout", "-b", "topic")
+		os.WriteFile(filepath.Join(repo, "code"), []byte("head\n"), 0644)
+		git("commit", "-am", "head")
+		head := git("rev-parse", "HEAD")
+		git("checkout", "main")
+		os.WriteFile(filepath.Join(repo, "other"), []byte("main moved\n"), 0644)
+		git("commit", "-am", "main moved before the merge")
+		if squash {
+			git("merge", "--squash", "topic")
+			git("commit", "-m", "squash")
+		} else {
+			git("merge", "--no-ff", "-m", "merge", "topic")
+		}
+		merge := git("rev-parse", "HEAD")
+		os.WriteFile(filepath.Join(repo, "other"), []byte("main moved again\n"), 0644)
+		git("commit", "-am", "main moved after the merge")
+		git("config", "url."+repo+".insteadOf", "https://example.invalid/upstream/repo")
+		sysenvtest.FakeCommand(t, env, "gh", fmt.Sprintf(`printf '%%s' '{"number":7,"title":"PR title","url":"https://example.invalid/upstream/repo/pull/7","headRefName":"topic","headRefOid":"%s","baseRefName":"main","state":"MERGED","isDraft":false,"mergeable":"UNKNOWN","statusCheckRollup":[],"mergeCommit":{"oid":"%s"}}'`, head, merge))
+		pr, b, h, err := ResolveChangePR(env, repo, 7)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pr.MergeCommit != merge || pr.State != "MERGED" {
+			t.Fatalf("squash=%v: %+v", squash, pr)
+		}
+		if git("rev-parse", h) != merge || git("rev-parse", b) != git("rev-parse", merge+"^1") {
+			t.Fatalf("squash=%v: wrong merged range", squash)
+		}
+		change, _, err := BuildChange(env, repo, b, h, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if change.Stats != (ChangeStats{Files: 1, Additions: 1, Deletions: 1}) || change.Files[0].Path != "code" {
+			t.Fatalf("squash=%v: %+v", squash, change.Stats)
+		}
+	}
+}

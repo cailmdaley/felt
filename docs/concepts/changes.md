@@ -16,7 +16,7 @@ shuttle change review-task --base origin/main --head topic/change \
 
 `--repo` defaults to the fiber's `shuttle.project_dir`, then the current directory.
 `--pr N` reads GitHub metadata through `gh pr view` and fetches from the PR's base repository, regardless of the checkout's remotes.
-The exact head OID goes into `refs/shuttle/pr/N/head` and the base branch into `refs/shuttle/pr/N/base`; remote-tracking refs are untouched. Stacked PRs compare against their own base branch. It defaults the name to `pr-N` and cannot be mixed with `--base` or `--head`.
+The exact head OID goes into `refs/shuttle/pr/N/head` and the base branch into `refs/shuttle/pr/N/base`; remote-tracking refs are untouched. Stacked PRs compare against their own base branch. A merged PR's base branch already contains it, so `--pr` then bakes the range it merged: the merge commit (`mergeCommit` from gh) into the head ref and its first parent into the base ref, which holds the PR's changes for merge and squash merges alike. It defaults the name to `pr-N` and cannot be mixed with `--base` or `--head`.
 `--head` defaults to `HEAD`.
 The filename defaults to the head ref with slashes replaced by hyphens and punctuation slugified; detached `HEAD` uses the fiber slug.
 `--name walkthrough` writes `walkthrough.change.json`.
@@ -72,7 +72,7 @@ The bundle has these fields:
 | `repo` | `{name, dir, forge_url}`; `dir` is absolute and `forge_url` is an HTTPS forge address without credentials, query, fragment or `.git`, otherwise `null` |
 | `base`, `head` | Merge-base and resolved head SHAs |
 | `base_ref`, `head_ref` | Requested refs; attached `HEAD` becomes the short branch name |
-| `pr` | Optional `{number, title, url, head_branch, base_branch, state, draft, mergeable, checks}`; checks counts `total`, `passed`, `failed`, `pending` |
+| `pr` | Optional `{number, title, url, head_branch, base_branch, state, draft, mergeable, checks, merge_commit}`; `merge_commit` is present once `state` is `MERGED`; checks counts `total`, `passed`, `failed`, `pending` |
 | `stats` | `{files, additions, deletions}` for the entire diff; this and `pr` precede the large arrays |
 | `commits` | Oldest first, each with `sha`, `subject`, `author` and RFC3339 author `time` |
 | `files` | Repository-relative inventory, with destination paths for renames and old paths for deletions |
