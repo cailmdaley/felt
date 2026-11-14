@@ -14,9 +14,9 @@ defmodule Shuttle.PollerPublicationTest do
   defmodule Runner do
     @behaviour Shuttle.Runner
 
-    def cmd("shuttle", ["context-mailbox", "deliver" | _] = args, _opts) do
+    def cmd("shuttle", ["inbox", "consume" | _] = args, _opts) do
       send(Shuttle.Env.app(:publication_test_pid), {:context_delivery, args})
-      {"delivered\n", 0}
+      {~s({"action":"wait"}) <> "\n", 0}
     end
 
     def cmd("shuttle", ["-C", _store, "resume" | _] = args, opts) do
@@ -94,12 +94,11 @@ defmodule Shuttle.PollerPublicationTest do
         assert [%{"fiber_id" => ^id}] = Jason.decode!(conn.resp_body)["running_detail"]
         assert Plug.Conn.get_resp_header(conn, "etag") == [response.etag]
 
-        assert {:ok, "delivered\n"} =
+        assert {:ok, ~s({"action":"wait"}) <> "\n"} =
                  Delivery.flush_context(%{felt_store: root, fiber: Store.fiber(id)})
       end)
 
-      assert_received {:context_delivery,
-                       ["context-mailbox", "deliver", key, ^address, generation]}
+      assert_received {:context_delivery, ["inbox", "consume", key, ^address, generation]}
 
       assert key == root <> ":" <> uid
       assert generation == Integer.to_string(epoch)

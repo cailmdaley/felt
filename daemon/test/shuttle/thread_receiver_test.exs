@@ -22,7 +22,14 @@ defmodule Shuttle.ThreadReceiverTest do
       if spy = Shuttle.Env.app(:receiver_spy, nil),
         do: if("context-mailbox" in args, do: send(spy, {:context_mailbox, args}))
 
+      if spy = Shuttle.Env.app(:receiver_spy, nil),
+        do: if("inbox" in args, do: send(spy, {:inbox_command, args}))
+
       cond do
+        Shuttle.Env.app(:receiver_wake_stub, false) and
+          match?(["inbox", "consume" | _], args) and "--costly" not in args ->
+          {~s({"action":"wake"}), 0}
+
         Shuttle.Env.app(:receiver_runtime_write_fails, false) and "mark-runtime" in args ->
           {"injected runtime write failure", 1}
 
@@ -580,6 +587,93 @@ defmodule Shuttle.ThreadReceiverTest do
   end
 
   defp mailbox_key(key), do: :crypto.hash(:sha256, key) |> Base.encode16(case: :lower)
+
+  test "a fresh consume reservation dispatches once while the Poller is busy", context do
+    {poller, parent} = costly_consumer!(context)
+    Env.put_app_env(:dispatch_call_timeout_ms, 10)
+    :sys.replace_state(poller, &%{&1 | reconciliation_hold: "test refusal after resume"})
+    :sys.suspend(poller)
+
+    try do
+      assert {:ok, output} = Delivery.flush_context(parent)
+      assert %{"action" => "fresh"} = Jason.decode!(output)
+
+      for _ <- 1..3 do
+        assert {:ok, output} = Delivery.flush_context(parent)
+        assert %{"action" => "wait"} = Jason.decode!(output)
+      end
+
+      {:messages, messages} = Process.info(poller, :messages)
+
+      assert [{:"$gen_call", _, {:dispatch, _, opts}}] =
+               Enum.filter(messages, &match?({:"$gen_call", _, {:dispatch, _, _}}, &1))
+
+      assert opts[:resume_mode] == "fresh"
+    after
+      :sys.resume(poller)
+    end
+  end
+
+  test "a refused fresh launch consumes again without the costly fact", context do
+    {poller, parent} = costly_consumer!(context)
+    :sys.replace_state(poller, &%{&1 | reconciliation_hold: "test refusal"})
+    Env.put_app_env(:receiver_spy, self())
+    Env.put_app_env(:receiver_wake_stub, true)
+    assert {:ok, output} = Delivery.flush_context(parent)
+    assert %{"action" => "wake"} = Jason.decode!(output)
+    assert_receive {:inbox_command, ["inbox", "consume", _, _, _, "--idle", "--costly"]}
+    assert_receive {:inbox_command, ["inbox", "consume", _, _, _, "--idle"]}
+  end
+
+  defp costly_consumer!(%{store: store, key: key}) do
+    native = "00000000-0000-4000-8000-000000000001"
+    start_tmux!("consumer")
+    poller = start_poller_for!(store)
+    await_boot_cycle!(poller)
+    assert {:ok, _} = Poller.claim_session(poller, "hub", "consumer", session_uuid: native)
+    register_receiver!(store, native)
+    projects = Path.join(store, "projects")
+    File.mkdir_p!(Path.join(projects, "p"))
+    Env.put_env("SHUTTLE_CLAUDE_PROJECTS_DIR", projects)
+
+    File.write!(
+      Path.join([projects, "p", native <> ".jsonl"]),
+      Jason.encode!(%{
+        type: "assistant",
+        timestamp: DateTime.utc_now() |> DateTime.add(-3, :hour) |> DateTime.to_iso8601(),
+        message: %{
+          model: "claude-opus-5-5",
+          usage: %{
+            input_tokens: 0,
+            cache_read_input_tokens: 412_000,
+            cache_creation_input_tokens: 0
+          }
+        }
+      }) <> "\n"
+    )
+
+    Env.put_app_env(:waiting_phases_source, fn ->
+      %{native => %{phase: "waiting", last_event_at: System.system_time(:millisecond)}}
+    end)
+
+    assert Poller.idle_worker?(poller, "hub")
+
+    assert {:ok, _} =
+             CLI.run([
+               "inbox",
+               "put",
+               key,
+               "fresh-result",
+               "Take this result",
+               "--turn",
+               "ask",
+               "--if-costly",
+               "fresh"
+             ])
+
+    assert {:ok, %{fibers: [parent]}} = FiberDocuments.get_shuttle("hub", felt_stores: [store])
+    {poller, parent}
+  end
 
   defp start_poller_for!(store) do
     {:ok, poller} =

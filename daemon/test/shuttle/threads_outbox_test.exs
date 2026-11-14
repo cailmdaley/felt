@@ -534,10 +534,15 @@ defmodule Shuttle.ThreadsOutboxTest do
     assert {:ok, _} = CLI.run_in_store(store, ["reopen", "hub/child", "--local"])
     assert {:ok, _} = CLI.run_in_store(store, ["ask", "hub/child", "Choose a kernel?"])
     send(poller, :run_poll_cycle)
+    await(fn -> pending(data) != [] end)
+    refute_receive {:wake, _}
+    File.write!(gate, "offer\n", [:raw])
 
     await(fn ->
       length(Path.wildcard(Path.join(data, "mailboxes/fiber/*/offered/*.json"))) == 2
     end)
+
+    assert File.read!(Path.join(store, "received")) =~ "thread hub/child asked: Choose a kernel?"
 
     assert {:ok, %{fibers: feed}} = Poller.cached_fiber_documents(poller)
 
@@ -548,8 +553,13 @@ defmodule Shuttle.ThreadsOutboxTest do
              }
            } = Enum.find(feed, &(Threads.address(&1.fiber) == "hub"))
 
-    assert_receive {:wake, ask_text}
-    assert ask_text =~ "thread hub/child asked: Choose a kernel?"
+    refute_receive {:wake, _}
+    File.rm!(Path.join(tasks_dir, "1.json"))
+
+    Env.put_app_env(:waiting_phases_source, fn ->
+      %{native => %{phase: "waiting", last_event_at: System.system_time(:millisecond)}}
+    end)
+
     assert {:ok, _} = CLI.run_in_store(store, ["reopen", "hub/child", "--local"])
     assert {:ok, _} = CLI.run_in_store(store, ["close", "hub/child", "--local"])
     assert {:ok, %{fibers: latest}} = FiberDocuments.list(felt_stores: [store])
@@ -562,7 +572,7 @@ defmodule Shuttle.ThreadsOutboxTest do
     File.write!(gate, "offer\n", [:raw])
 
     await(fn ->
-      length(String.split(File.read!(Path.join(store, "rounds")), "\n", trim: true)) == 2
+      length(String.split(File.read!(Path.join(store, "rounds")), "\n", trim: true)) == 3
     end)
 
     assert File.read!(Path.join(store, "received")) == received
@@ -588,8 +598,6 @@ defmodule Shuttle.ThreadsOutboxTest do
         }
       }) <> "\n"
     )
-
-    File.rm!(Path.join(tasks_dir, "1.json"))
 
     Env.put_app_env(:waiting_phases_source, fn ->
       %{native => %{phase: "waiting", last_event_at: System.system_time(:millisecond)}}

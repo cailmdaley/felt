@@ -161,13 +161,13 @@ defmodule Shuttle.Delivery do
     do: "deliver-" <> Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false)
 
   @doc """
-  Queue context in the owning fiber's hook mailbox without arming or launching
-  it. The mailbox keeps it, deduplicated by `message_id`, until a worker of the
-  fiber takes it: the live one, or the next one to launch.
+  Store context and its delivery wishes in the owning fiber's inbox, then
+  trigger consumption. The inbox keeps it, deduplicated by `message_id`, until
+  the live worker or a successor takes it.
 
-  Options: `:wake` starts a turn when a worker is live, in a fresh session when
-  that worker is at rest and costly to wake (`Shuttle.WakeCost`); `:from` labels the
-  sender (default `"shuttle"`); `:unless_live` refuses with
+  Options: `:wake` stores `turn: ask, if_costly: fresh`; consumption decides
+  whether to offer context, wake the worker or request a fresh session.
+  `:from` labels the sender (default `"shuttle"`); `:unless_live` refuses with
   `{:error, :live_worker}` while a worker is live, queueing nothing, so the
   sender messages that worker directly.
   """
@@ -180,18 +180,6 @@ defmodule Shuttle.Delivery do
         {:error, :live_worker}
 
       true ->
-        worker = live_context_worker(entry)
-        # A waking result for a worker that is costly to wake and at rest goes
-        # to a fresh session, launched first, which takes it from the mailbox.
-        fresh =
-          with true <- Keyword.get(opts, :wake, false) and worker != nil,
-               cost when is_map(cost) <- costly_at_rest(entry, worker) do
-            start_fresh(entry, worker, cost)
-          else
-            _ -> false
-          end
-
-        wake = Keyword.get(opts, :wake, false) and worker != nil and not fresh
         from = Keyword.get(opts, :from) || "shuttle"
         args = ["context-mailbox", "put", context_key(entry), message_id, text, "--from", from]
 
@@ -204,7 +192,11 @@ defmodule Shuttle.Delivery do
 
         args = if opts[:notify_when_idle], do: args ++ ["--notify-when-idle"], else: args
         args = if opts[:notify_wake], do: args ++ ["--notify-wake"], else: args
-        args = if wake, do: args ++ ["--wake"], else: args
+
+        args =
+          if opts[:wake],
+            do: args ++ ["--turn", "ask", "--if-costly", "fresh"],
+            else: args
 
         args =
           if opts[:thread_signal],
@@ -215,18 +207,9 @@ defmodule Shuttle.Delivery do
           if opts[:retained_at], do: args ++ ["--retained-at", opts[:retained_at]], else: args
 
         with {:ok, _} <- Shuttle.CLI.run(args) do
-          unless fresh, do: flush_context(entry)
+          flush_context(entry)
           {:ok, :queued}
         end
-    end
-  end
-
-  defp costly_at_rest(entry, worker) do
-    with cost when is_map(cost) <- Shuttle.WakeCost.costly(worker[:session_uuid]),
-         true <- Poller.idle_worker?(Shuttle.Threads.address(entry.fiber)) do
-      cost
-    else
-      _ -> nil
     end
   end
 
@@ -248,7 +231,7 @@ defmodule Shuttle.Delivery do
     match?({:ok, _}, result) or result == {:error, :poller_busy}
   end
 
-  @doc "Offer a fiber's pending context to its current live conversation."
+  @doc "Consume a fiber's inbox for its current live conversation."
   def flush_context(entry) do
     server = Shuttle.Env.server(Poller)
 
@@ -257,14 +240,46 @@ defmodule Shuttle.Delivery do
       # selecting or flushing a destination never changes authority.
       with {:ok, address, generation} <-
              Poller.context_receiver(server, Shuttle.Threads.address(entry.fiber)) do
-        Shuttle.CLI.run(
-          ["context-mailbox", "deliver", context_key(entry), address, to_string(generation)],
-          timeout_ms: 32_000
-        )
+        fiber_id = Shuttle.Threads.address(entry.fiber)
+        idle = Poller.idle_worker?(server, fiber_id)
+        worker = Poller.live_worker(fiber_id)
+
+        cost =
+          with true <- idle and turn_pending?(entry),
+               %{} <- worker do
+            Shuttle.WakeCost.costly(worker[:session_uuid])
+          else
+            _ -> nil
+          end
+
+        with {:ok, output} <- consume(entry, address, generation, idle, cost != nil),
+             {:ok, answer} <- Jason.decode(output) do
+          if answer["action"] == "fresh" and not start_fresh(entry, worker, cost) do
+            consume(entry, address, generation, idle, false)
+          else
+            {:ok, output}
+          end
+        end
       end
     else
       :ok
     end
+  end
+
+  defp turn_pending?(entry) do
+    with {:ok, output} <- Shuttle.CLI.run(["inbox", "turn-pending", context_key(entry)]),
+         {:ok, %{"pending" => pending}} <- Jason.decode(output) do
+      pending
+    else
+      _ -> false
+    end
+  end
+
+  defp consume(entry, address, generation, idle, costly) do
+    args = ["inbox", "consume", context_key(entry), address, to_string(generation)]
+    args = if idle, do: args ++ ["--idle"], else: args
+    args = if costly, do: args ++ ["--costly"], else: args
+    Shuttle.CLI.run(args, timeout_ms: 32_000)
   end
 
   defp live_context_worker(entry) do
