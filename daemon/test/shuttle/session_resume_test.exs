@@ -455,11 +455,11 @@ defmodule Shuttle.SessionResumeTest do
       assert {:error, "pid 7 holds the transcript"} = SessionResume.prepare(@claude, opts)
     end
 
-    test "a session already open in a terminal of its own is refused before the card is armed",
+    test "a session already open in a terminal of its own opens that, and arms nothing",
          %{opts: opts} do
       Runner.set_running(true)
-      assert {:error, {:live, message}} = SessionResume.prepare(@claude, opts)
-      assert message =~ "open in terminal resume-#{@claude}"
+      tmux = "resume-" <> @claude
+      assert {:ok, %{tmux_session: ^tmux, created: false}} = SessionResume.prepare(@claude, opts)
       refute_received {:dispatch, _, _}
     end
 

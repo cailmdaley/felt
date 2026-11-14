@@ -240,16 +240,23 @@ defmodule Shuttle.SessionResume do
 
   # Every refusal comes before the launch, because a forced start arms the card
   # (reopens a closed or paused one) before the dispatcher's own checks run.
+  # A session already open in a terminal of its own (resumed before its card
+  # ran resumes as workers) is that terminal.
   defp launch(session, fiber, opts) do
     address = fiber["uid"] || fiber["id"]
     name = fiber["slug"] || fiber["id"] || address
     runner = Keyword.get(opts, :runner, runner())
+    tmux = tmux_name(session)
 
-    with {:ok, plan} <- plan(session, opts),
-         :ok <- same_harness(plan, fiber, name),
-         :ok <- not_in_terminal(session, runner),
-         :ok <- not_held(session, runner) do
-      launch_worker(address, session, plan, opts)
+    if Terminal.locate(runner, tmux) do
+      {:ok, %{tmux_session: tmux, created: false}}
+    else
+      with {:ok, plan} <- plan(session, opts),
+           :ok <- same_harness(plan, fiber, name),
+           :ok <- not_in_terminal(tmux, runner),
+           :ok <- not_held(session, runner) do
+        launch_worker(address, session, plan, opts)
+      end
     end
   end
 
@@ -267,14 +274,12 @@ defmodule Shuttle.SessionResume do
            "#{agent_cli}; set its agent (`shuttle set-agent`) to resume it as the worker"}
   end
 
-  # The session open in a terminal of its own, resumed before this card ran it
-  # as a worker.
-  defp not_in_terminal(session, runner) do
-    tmux = tmux_name(session)
-
+  # A terminal of its own that exists but cannot be opened still holds the
+  # transcript.
+  defp not_in_terminal(tmux, runner) do
     case Terminal.status(runner, tmux) do
       :gone -> :ok
-      _ -> {:error, {:live, "this session is open in terminal #{tmux}; attach to that instead"}}
+      _ -> {:error, {:live, "this session is open in terminal #{tmux}, which cannot be reached"}}
     end
   end
 
