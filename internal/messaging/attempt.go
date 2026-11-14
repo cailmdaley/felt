@@ -2,6 +2,7 @@ package messaging
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -30,7 +31,16 @@ type Attempt struct {
 	// Outcome is empty while the attempt is open, then delivered, released or
 	// ambiguous.
 	Outcome string `json:"outcome,omitempty"`
+	// Retry counts the attempts to Conversation that direct delivery made
+	// before this one and closed ambiguous. A retry carries its own transport
+	// id, so the conversation's receipt for the earlier try is not replayed.
+	Retry int `json:"retry,omitempty"`
 }
+
+// liveAttemptRetryAfter is how long direct delivery keeps an attempt open
+// while its conversation is alive and the transport reports the outcome
+// unknown, before it closes it ambiguous and tries again.
+const liveAttemptRetryAfter = 5 * time.Minute
 
 const (
 	attemptDelivered = "delivered"
@@ -76,10 +86,12 @@ func (e *mailboxEntry) closeAttempt(outcome string) {
 
 // claimBatch opens one attempt to conversation for the pending entries at
 // paths, oldest first, which form its batch, and returns it. The hook offer
-// and direct fiber delivery both take entries through it, holding the inbox
-// lock, so an entry is in at most one open attempt. Direct delivery pins its
-// attempt; a hook's is not pinned, so an entry whose hook died after the
-// claim is offered again like any pending entry.
+// and direct fiber delivery both take entries through it while holding the
+// inbox lock, which is what keeps two readers from taking one entry; the
+// claim records which batch and conversation took it. Direct delivery pins
+// its attempt; a hook's is not pinned, so an entry whose hook died after the
+// claim is offered again like any pending entry. An unpinned claim keeps the
+// file's modification time, from which offered/ retention runs.
 func claimBatch(paths []string, conversation string, pin bool) (Attempt, error) {
 	entries := make([]mailboxEntry, len(paths))
 	members := make([]string, len(paths))
@@ -94,7 +106,11 @@ func claimBatch(paths []string, conversation string, pin bool) (Attempt, error) 
 	now := time.Now()
 	for i := range entries {
 		entries[i].openAttempt(conversation, epoch, members, pin, now)
-		if err := writeMailboxEntry(paths[i], entries[i]); err != nil {
+		write := writeMailboxEntryKeepingTime
+		if pin {
+			write = writeMailboxEntry
+		}
+		if err := write(paths[i], entries[i]); err != nil {
 			return Attempt{}, err
 		}
 	}
@@ -102,7 +118,8 @@ func claimBatch(paths []string, conversation string, pin bool) (Attempt, error) 
 }
 
 // closeAttempts records outcome in the entries at paths, all in one inbox. A
-// delivered entry moves to offered/; released and ambiguous ones stay pending.
+// delivered entry moves to offered/ with the modification time it had
+// pending; released and ambiguous ones stay pending.
 func closeAttempts(paths []string, outcome string) error {
 	if len(paths) == 0 {
 		return nil
@@ -121,7 +138,11 @@ func closeAttempts(paths []string, outcome string) error {
 		}
 		if outcome != attemptDelivered || entry.Attempt != nil {
 			entry.closeAttempt(outcome)
-			if err := writeMailboxEntry(path, entry); err != nil {
+			write := writeMailboxEntry
+			if outcome == attemptDelivered {
+				write = writeMailboxEntryKeepingTime
+			}
+			if err := write(path, entry); err != nil {
 				return err
 			}
 		}
@@ -159,4 +180,26 @@ func writeMailboxEntry(path string, entry mailboxEntry) error {
 		return err
 	}
 	return mailboxWrite(path, b, false)
+}
+
+// writeMailboxEntryKeepingTime rewrites an entry's bookkeeping without moving
+// its modification time.
+func writeMailboxEntryKeepingTime(path string, entry mailboxEntry) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if err := writeMailboxEntry(path, entry); err != nil {
+		return err
+	}
+	return os.Chtimes(path, info.ModTime(), info.ModTime())
+}
+
+// transportRequest is request as direct delivery sends it under attempt: a
+// retry to the same conversation gets its own message id.
+func transportRequest(request Request, attempt *Attempt) Request {
+	if attempt != nil && attempt.Retry > 0 {
+		request.MessageID += fmt.Sprintf("-retry-%d", attempt.Retry)
+	}
+	return request
 }

@@ -337,44 +337,66 @@ func deliverFiberContextItemWith(ctx context.Context, env *sysenv.Env, fiber, ho
 		if _, err := claimBatch([]string{path}, address, true); err != nil {
 			return err
 		}
+		if entry, err = readFiberMailboxEntry(path); err != nil {
+			return err
+		}
 	}
 
 	if entry.PossibleRepeat {
 		request.Text = possibleRepeatContext(request.Text)
 	}
-	receipt, err := send(ctx, env, host, request, address)
-	unknownEnded := receipt.Status == StatusUnknown && address != selectedAddress && fiberContextSessionEnded(env, host, address)
-	if receipt.Status != StatusRejected && !unknownEnded {
+	receipt, err := send(ctx, env, host, transportRequest(request, entry.Attempt), address)
+	unknown := receipt.Status == StatusUnknown
+	unknownEnded := unknown && address != selectedAddress && fiberContextSessionEnded(env, host, address)
+	unknownStale := false
+	if unknown && !unknownEnded && entry.Attempt.open() {
+		if entry.Attempt.OpenedAt == 0 {
+			// An attempt read from attempt_address alone starts its wait here.
+			entry.Attempt.OpenedAt = time.Now().UnixNano()
+			if writeErr := writeMailboxEntry(path, entry); writeErr != nil {
+				return writeErr
+			}
+		}
+		unknownStale = time.Since(time.Unix(0, entry.Attempt.OpenedAt)) >= liveAttemptRetryAfter
+	}
+	if receipt.Status != StatusRejected && !unknownEnded && !unknownStale {
 		return err
 	}
 	if err == nil {
 		err = errCode("rejected", "context delivery was rejected")
 	}
-	if address == selectedAddress {
+	if receipt.Status == StatusRejected && address == selectedAddress {
 		if closeErr := closeAttempts([]string{path}, attemptReleased); closeErr != nil {
 			return closeErr
 		}
 		return err
 	}
 
-	// The pinned conversation rejected the entry or ended with its outcome
-	// unknown. Closing that attempt and claiming the entry for the selected
-	// conversation is one write, so a crash between them cannot unpin it. An
-	// ended receiver cannot finish an unknown attempt: its successor gets a
-	// durable warning because the previous receiver may have taken it.
+	// The pinned conversation rejected the entry, ended with its outcome
+	// unknown, or has left it unknown past liveAttemptRetryAfter. Closing
+	// that attempt and claiming the entry for the selected conversation is
+	// one write, so a crash between them cannot unpin it. An unknown outcome
+	// may mean the conversation took the entry, so the next emission carries
+	// a durable warning; a retry to the same conversation gets a new
+	// transport id.
 	outcome := attemptReleased
-	if unknownEnded {
+	if unknownEnded || unknownStale {
 		outcome = attemptAmbiguous
 		if !entry.PossibleRepeat {
 			request.Text = possibleRepeatContext(request.Text)
 		}
 	}
+	retry := 0
+	if entry.Attempt != nil && address == selectedAddress {
+		retry = entry.Attempt.Retry + 1
+	}
 	entry.closeAttempt(outcome)
 	entry.openAttempt(selectedAddress, receiverEpoch(root, selectedAddress), []string{entry.Request.MessageID}, true, time.Now())
+	entry.Attempt.Retry = retry
 	if err := writeMailboxEntry(path, entry); err != nil {
 		return err
 	}
-	receipt, err = send(ctx, env, host, request, selectedAddress)
+	receipt, err = send(ctx, env, host, transportRequest(request, entry.Attempt), selectedAddress)
 	if receipt.Status == StatusRejected {
 		if closeErr := closeAttempts([]string{path}, attemptReleased); closeErr != nil {
 			return closeErr
@@ -384,7 +406,7 @@ func deliverFiberContextItemWith(ctx context.Context, env *sysenv.Env, fiber, ho
 }
 
 func possibleRepeatContext(text string) string {
-	return "Possible repeat: delivery to a previous worker had an unknown outcome before its session ended.\n\n" + text
+	return "Possible repeat: an earlier delivery of this message had an unknown outcome.\n\n" + text
 }
 
 func fiberContextSessionEnded(env *sysenv.Env, host, address string) bool {

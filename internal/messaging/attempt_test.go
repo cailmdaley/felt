@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
@@ -120,7 +122,11 @@ func TestHookThatDiesAfterItsClaimLeavesTheEntryOfferable(t *testing.T) {
 	}
 }
 
-func TestHookOfferAndDirectDeliveryTakeAnEntryOnce(t *testing.T) {
+// TestRacedReadersDeliverAnEntryOnceWithADeliveredAttempt races the hook
+// offer against direct delivery. The inbox lock keeps the loser from reading
+// pending/; the claim makes the entry reach offered/ with a delivered attempt
+// whichever reader took it.
+func TestRacedReadersDeliverAnEntryOnceWithADeliveredAttempt(t *testing.T) {
 	env := testEnv(t)
 	root := mailboxDir(env, "fiber", "fiber")
 	const a = "shuttle://host/claude/A"
@@ -325,5 +331,131 @@ func TestPendingEntriesShowAnOpenAttempt(t *testing.T) {
 	entries, err = PendingEntries(env, "fiber")
 	if err != nil || len(entries) != 1 || entries[0].Attempt != nil {
 		t.Fatalf("after release, pending = %+v, %v", entries, err)
+	}
+}
+
+func TestDeliveredEntryKeepsTheModificationTimeRetentionRunsFrom(t *testing.T) {
+	const a = "shuttle://host/claude/A"
+	old := time.Now().Add(-10 * 24 * time.Hour).Truncate(time.Second)
+	for _, tc := range []struct {
+		name    string
+		deliver func(t *testing.T, env *sysenv.Env, root, path string)
+	}{
+		{"hook offer keeps the enqueue time", func(t *testing.T, env *sysenv.Env, root, path string) {
+			if err := os.Chtimes(path, old, old); err != nil {
+				t.Fatal(err)
+			}
+			if err := offerMailboxWithAck(root, a, func(Request) bool { return true }, func([]Request) error { return nil }, false, nil, "claude"); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"direct delivery keeps the claim time", func(t *testing.T, env *sysenv.Env, root, path string) {
+			if _, err := claimBatch([]string{path}, a, true); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chtimes(path, old, old); err != nil {
+				t.Fatal(err)
+			}
+			if err := closeAttempts([]string{path}, attemptDelivered); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := testEnv(t)
+			root := mailboxDir(env, "fiber", "fiber")
+			transition(t, env, "execution-A", a)
+			path := enqueueFiber(t, env, "aged")[0]
+			tc.deliver(t, env, root, path)
+			info, err := os.Stat(filepath.Join(root, "offered", filepath.Base(path)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !info.ModTime().Equal(old) {
+				t.Fatalf("offered entry's mtime = %v, want %v", info.ModTime(), old)
+			}
+		})
+	}
+}
+
+func TestAmbiguousWakeToALiveReceiverIsRetriedAfterTheBound(t *testing.T) {
+	const a = "shuttle://host/codex/A"
+	env := testEnv(t)
+	root := mailboxDir(env, "fiber", "fiber")
+	request := Request{MessageID: "wake-ambiguous", Text: "please continue", Wake: true}
+	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: request}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "pending", mailboxKey(request.MessageID)+".json")
+	var sent []Request
+	sender := func(ctx context.Context, env *sysenv.Env, host string, req Request, address string) (Receipt, error) {
+		req.Address = address
+		req.MessageID += "-" + mailboxKey(address)[:16]
+		return withDedup(ctx, env, req, func(context.Context) dedupSendResult {
+			sent = append(sent, req)
+			if !strings.HasPrefix(req.Text, "Possible repeat:") {
+				return dedupSendResult{Receipt: Receipt{Status: StatusUnknown, Transport: "codex-terminal"}, Err: errCode("ambiguous_delivery", "paste outcome unknown")}
+			}
+			return dedupSendResult{Receipt: Receipt{Status: StatusSubmitted, Transport: "codex-terminal"}}
+		})
+	}
+	deliver := func() error {
+		return deliverFiberContextItemWith(context.Background(), env, "fiber", "host", a, request, sender)
+	}
+	for i := 0; i < 2; i++ {
+		if err := deliver(); ErrorCode(err) != "ambiguous_delivery" {
+			t.Fatalf("delivery %d = %v, want ambiguous_delivery", i, err)
+		}
+	}
+	if len(sent) != 1 {
+		t.Fatalf("within the bound the transport saw %d sends, want 1", len(sent))
+	}
+	entry := readEntry(t, path)
+	if !entry.Attempt.open() || entry.AttemptAddress != a {
+		t.Fatalf("within the bound, entry = %+v", entry)
+	}
+	entry.Attempt.OpenedAt = time.Now().Add(-liveAttemptRetryAfter).UnixNano()
+	if err := writeMailboxEntry(path, entry); err != nil {
+		t.Fatal(err)
+	}
+	if err := deliver(); err != nil {
+		t.Fatalf("retry = %v", err)
+	}
+	if len(sent) != 2 || sent[1].MessageID == sent[0].MessageID || !strings.HasPrefix(sent[1].Text, "Possible repeat:") {
+		t.Fatalf("sends = %+v", sent)
+	}
+	entry = readEntry(t, path)
+	if !entry.Attempt.open() || entry.Attempt.Retry != 1 || entry.AttemptAddress != a || !entry.PossibleRepeat {
+		t.Fatalf("after the retry, entry = %+v attempt %+v", entry, entry.Attempt)
+	}
+	// A crash after the retry's send retries with the retry's transport id.
+	if err := deliver(); err != nil || len(sent) != 2 {
+		t.Fatalf("replayed retry = %v, sends %d", err, len(sent))
+	}
+}
+
+func TestAttemptAddressAloneStartsItsRetryWaitWhenFirstSeenUnknown(t *testing.T) {
+	const a = "shuttle://host/codex/A"
+	env := testEnv(t)
+	root := mailboxDir(env, "fiber", "fiber")
+	request := Request{MessageID: "wake-old", Text: "continue", Wake: true}
+	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: request}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "pending", mailboxKey(request.MessageID)+".json")
+	if err := writeFiberMailboxAttempt(path, readEntry(t, path), a); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	sender := func(context.Context, *sysenv.Env, string, Request, string) (Receipt, error) {
+		calls++
+		return Receipt{Status: StatusUnknown}, errCode("ambiguous_delivery", "lost reply")
+	}
+	if err := deliverFiberContextItemWith(context.Background(), env, "fiber", "host", a, request, sender); ErrorCode(err) != "ambiguous_delivery" {
+		t.Fatalf("delivery = %v", err)
+	}
+	entry := readEntry(t, path)
+	if calls != 1 || !entry.Attempt.open() || entry.Attempt.OpenedAt == 0 || entry.Attempt.Retry != 0 || entry.PossibleRepeat {
+		t.Fatalf("calls %d, entry = %+v attempt %+v", calls, entry, entry.Attempt)
 	}
 }

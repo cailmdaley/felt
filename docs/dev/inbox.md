@@ -97,6 +97,7 @@ Every reader that selects pending entries for offer or delivery skips one whose 
 ## Attempts and the claim
 
 A reader takes pending entries by claiming them, under the inbox's `.lock` and before any side effect: `claimBatch` writes the same `attempt` into every entry of the batch.
+The lock is what keeps two readers from taking one entry; the claim records which batch and conversation took it.
 
 ```json
 "attempt": {"batch_id": "<sha256>", "conversation": "shuttle://host/claude/A", "epoch": 3, "members": ["m-1", "m-2"], "opened_at": 1763190000000000000}
@@ -110,6 +111,7 @@ A reader takes pending entries by claiming them, under the inbox's `.lock` and b
 | `members` | The batch's message ids, oldest first |
 | `opened_at` | When it was claimed, in Unix nanoseconds |
 | `outcome` | Absent while the attempt is open; then `delivered`, `released` or `ambiguous` |
+| `retry` | How many earlier attempts direct delivery made to the same conversation and closed `ambiguous`; absent for the first. A retry's transport id is the entry's message id with `-retry-<n>` before the address suffix, so the conversation's stored receipt for the earlier try is not replayed |
 
 Claiming the same batch for the same conversation and epoch while its attempt is open keeps that attempt as it was opened, so a reader that died after its claim and is retried finds the batch id it first wrote.
 The claim is a field in the pending file, not a move, so a build that predates it still sees the entry as pending.
@@ -124,12 +126,14 @@ Both readers that select entries claim through it:
 
 | Outcome | The entry |
 |---|---|
-| `delivered` | moves to `offered/` with its attempt; `attempt_address` is left as it was |
+| `delivered` | moves to `offered/` with its attempt and the modification time it had pending, from which the 14-day retention runs; `attempt_address` is left as it was |
 | `released` | stays pending, unpinned: `attempt_address` is cleared. Direct delivery releases an entry its conversation rejected, and quiet Codex context it hands back to the fiber hook |
 | `ambiguous` | stays pending, unpinned, with `possible_repeat` set, so its next direct emission starts "Possible repeat" |
 
-An unconfirmed direct send leaves its attempt open and pinned.
-When the pinned conversation rejects the entry, or has ended with the outcome unknown, direct delivery closes that attempt (`released` or `ambiguous`) and claims the entry for the fiber's current receiver in one write.
+An unconfirmed direct send leaves its attempt open and pinned, and the next delivery replays the conversation's stored receipt instead of sending again.
+When the pinned conversation rejects the entry, has ended with the outcome unknown, or has left it unknown for five minutes since `opened_at` while alive, direct delivery closes that attempt (`released` or `ambiguous`) and claims the entry for the fiber's current receiver in one write, with `retry` counted when that is the same conversation.
+An attempt read from `attempt_address` alone has no `opened_at`; its five minutes start when direct delivery first sees its outcome unknown.
+An unpinned claim, like a delivered close, keeps the file's modification time; a pinned claim and every other close write it afresh.
 
 Hosts upgrade at different times, so `attempt_address` and `possible_repeat` are written beside `attempt` wherever a pinned attempt is opened or closed, and a build that predates `attempt` acts on them.
 That build drops `attempt` from any entry it rewrites, and an `attempt_address` with no attempt record for that address reads as an open attempt of that one entry to that address.
