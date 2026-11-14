@@ -32,7 +32,7 @@
  * so the output directory is self-sufficient — nothing to copy in by hand.
  */
 import { addOutboxFixtures } from './outbox-fixtures.js'
-import { addChangeFixtures } from './change-fixtures.js'
+import { addChangeFixtures, bakeFixtureChange } from './change-fixtures.js'
 import { stampLifecycle } from './ownerLifecycle.js'
 import { addNavigationFixtures } from './nav-back-fixtures.js'
 import { addFamilyFixtures, addFrontierFixtures, addThreadFixtures, addThreadReviewFixtures } from './thread-fixtures.js'
@@ -1446,6 +1446,9 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     ]
     return json({ date: iso(0).slice(0, 10), rows: rows.filter(row => !filter || row.fiber_id === filter || (filter === WORKSPACE_UID && row.fiber_id === WORKSPACE_ID)), recorder: recorderHost })
   }
+  // A constitution's Change page asks its owner to bake the change.
+  const bake = method === 'POST' ? /\/api\/v1\/fibers\/([^/?]+)\/change$/.exec(url) : null
+  if (workspaceFixture && bake) return json(bakeFixtureChange(workspaceFixture, decodeURIComponent(bake[1]), bodyOrigin()))
   // The board's composite feed.
   if (url.includes('/api/v1/fibers/composite')) return json(workspaceFixture?.feed ?? docsExample?.feed ?? MOCK_FEED)
   if (workspaceFixture && url.includes('/api/v1/fibers/') && url.includes('body=true')) {

@@ -36,6 +36,7 @@
 .change-contents > .change-chapter-link { padding-left: 18px; color: var(--ws-ink-soft); }
 .change-scroll { container-type: size; overflow: auto; min-width: 0; height: 100%; overscroll-behavior-y: contain; }
 .change-main { max-width: 1080px; margin: 0 auto; padding: 36px clamp(18px, 4%, 56px) 100px; }
+.change-nothing > p { max-width: 1080px; margin: 0 auto; padding: 36px clamp(18px, 4%, 56px); font-size: var(--type-row); }
 .change-heading { margin-bottom: 28px; }
 .change-eyebrow { font-size: var(--type-note); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); color: var(--ws-ink-muted); }
 .change-heading h1 { font-size: var(--type-display); line-height: var(--leading-tight); font-weight: 500; margin: 10px 0 16px; text-wrap: balance; }

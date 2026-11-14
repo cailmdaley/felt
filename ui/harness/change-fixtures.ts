@@ -69,3 +69,24 @@ export function addChangeFixtures(fixture: WorkspaceExample, now: number): void 
   const report = fixture.files.find(file => file.path === WORKSPACE_REPORT)!
   report.body = new Blob([`<!doctype html><html><head><title>Read the family change</title><style>body{font:18px/1.6 system-ui;max-width:680px;margin:80px auto;padding:24px;color:light-dark(#272720,#e2e2da);background:light-dark(#f6f5f0,#242421);color-scheme:light dark}a{color:inherit}li{margin:24px 0}small{opacity:.7}</style></head><body><small>FELT / CHANGE REVIEW</small><h1>A family’s root stays in sight.</h1><p>This small committed diff exercises family navigation. Read the story first, then check the tests and the edits the story doesn’t cover.</p><ul><li><a href="./family.change.json">Read the change →</a></li><li><a href="./plain.change.json">The same diff, without a story</a></li><li><a href="./large.change.json">The 5,000-line stress case</a></li></ul></body></html>`], { type: 'text/html' })
 }
+
+/**
+ * The owner's answer to `POST /fibers/<uid>/change`: the workspace
+ * constitution's branch as it stands, story-less and with uncommitted work,
+ * and every other constitution's an empty change. The bundle lands at the
+ * cache path the answer names, for `/file` to serve.
+ */
+export function bakeFixtureChange(fixture: WorkspaceExample, uid: string, owner: string) {
+  const baked = plain as ChangeBundle
+  const branch = uid === WORKSPACE_UID
+  const path = `/fixture-cache/shuttle/changes/${uid}/${branch ? 'calibrate-response' : 'main'}.change.json`
+  const change: ChangeBundle = branch
+    ? { ...baked, title: 'Keep the family root visible', base_ref: 'origin/main', head_ref: 'calibrate-response',
+      commits: [...baked.commits, { sha: 'c'.repeat(40), subject: 'Uncommitted changes', author: 'Repository contributor', time: baked.commits.at(-1)!.time }],
+      description: '**Keep the family root visible**\n\nThe family view drew its leads and lost the root once a request opened. `revealFamily` keeps the root beside every active child, and the README says so.\n\n**Uncommitted changes**' }
+    : { ...baked, title: 'main', base: baked.head, base_ref: 'origin/main', head_ref: 'main', commits: [], files: [], areas: [], stats: { files: 0, additions: 0, deletions: 0 }, description: undefined }
+  if (!fixture.files.some(file => file.owner === owner && file.path === path)) {
+    fixture.files.push({ owner, path, mime: 'application/json', body: new Blob([JSON.stringify(change)], { type: 'application/json' }) })
+  }
+  return { path, title: change.title, report: { path, title: change.title, valid: true } }
+}
