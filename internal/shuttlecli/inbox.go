@@ -16,6 +16,10 @@ func (a *app) shuttleInboxCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "inbox",
 		Short: "Enqueue and list the entries waiting in an address's inbox",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return fmt.Errorf("expected put, pending or ls")
+		},
 	}
 	cmd.AddCommand(a.inboxVerbs()...)
 	return cmd

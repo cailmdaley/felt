@@ -76,4 +76,3 @@ func TestInboxVerbs(t *testing.T) {
 		}
 	}
 }
-
