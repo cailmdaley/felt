@@ -81,7 +81,7 @@ func (a *app) adoptCmd() *cobra.Command {
 			held := hasBlock && localBlock.Host == own
 			if held && !carry {
 				if len(differs) > 0 {
-					fmt.Fprintf(a.env.Stdout, "note: this host's copy of %s differs from the caller's (%s) and stands; --carry sends the caller's version\n", local.ID, strings.Join(differs, ", "))
+					fmt.Fprintf(a.env.Stdout, "note: %s's copy of %s differs from the caller's (%s) and stands; --carry sends the caller's version\n", own, local.ID, strings.Join(differs, ", "))
 				}
 				return nil
 			}

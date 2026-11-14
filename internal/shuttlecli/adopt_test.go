@@ -62,7 +62,7 @@ func TestAdopt(t *testing.T) {
 				f.Body = "the caller's body"
 				f.Outcome = "the caller's outcome"
 			},
-			wantOut: "note: this host's copy of task differs from the caller's (body, outcome) and stands; --carry sends the caller's version\n",
+			wantOut: "note: fir's copy of task differs from the caller's (body, outcome) and stands; --carry sends the caller's version\n",
 		},
 		{
 			name:       "held, carried with --carry",
