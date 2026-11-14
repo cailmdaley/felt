@@ -12,7 +12,7 @@ import { fileBytesUrl, showToast } from '../utils.js'
 import { instantStamp } from '../civilDay.js'
 import { DocumentHost, type DocumentFrame } from './DocumentHost.js'
 import { scrollHtmlViewer } from './DocumentBridge.js'
-import { documentLabels, documentLabelMetadata, isDrawn, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
+import { documentLabels, documentLabelMetadata, isBaked, isDrawn, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { DocumentSeen } from './DocumentSeen.js'
 import { declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
 import { probeDocumentTitles } from './titleProbe.js'
@@ -438,7 +438,7 @@ export class Reader {
     frame.label.append(back, glyph, title, provenance)
     // A drawn page has nothing to say about itself beyond what the band says.
     if (isDrawn(frame.doc)) frame.el.dataset.drawn = ''
-    else {
+    else if (!isBaked(frame.doc)) {
       const download = element('a', 'ws-icon-button ws-download')
       download.href = fileBytesUrl(this.opts.shuttleBase, frame.doc.path, frame.doc.owner); download.download = frame.doc.name
       download.innerHTML = headerIcon('download')

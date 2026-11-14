@@ -19,6 +19,7 @@ import { thumbnailPreviews } from './workspace/thumbnailPreview.js'
 import { watchLiveFile, type LiveFileSubscription } from './LiveFileRefresh.js'
 import type { ReferenceTarget } from './workspace/ChannelReferences.js'
 import { fileKind } from './attachments.js'
+import { postDaemonJson } from './daemonApi.js'
 import { forgetText, head, peek, recallText, RESOURCE_PRIORITY, text as documentText, type Head, type ResourcePriority } from './documentResources.js'
 import { loadDuration } from './workspace/audioWaveform.js'
 import { connectDocumentFrame, frameBridge, DOCUMENT_SANDBOX, withWorkspaceKeyBridge, type DocumentKey, type FrameBridge } from './workspace/DocumentBridge.js'
@@ -46,6 +47,13 @@ export interface FileViewerOptions {
   onReview?: (message: string) => Promise<void>
   canReview?: () => boolean
   reviewTarget?: () => string
+  /** The directory a change story's relative links resolve against; default the bundle's own. */
+  basePath?: string
+  /**
+   * The UID of a constitution whose change its owner bakes on open; the path
+   * is then the fiber's own (see `buildBakedChange`).
+   */
+  bake?: string
   /** Inert previews use the same kind dispatch within their host's load budget. */
   thumbnail?: boolean
   /** Captioned previews keep the filename outside the miniature page. */
@@ -103,9 +111,11 @@ export function buildFileViewer(
   const src = fileBytesUrl(shuttleBase, fullPath, originId)
   const classified = fileKind(fullPath)
   const kind = options.kind ?? (/\.change\.json$/i.test(fullPath) ? 'change' : classified === 'markdown' ? 'text' : classified)
+  if (options.bake) return buildBakedChange(shuttleBase, options.bake, fullPath, originId, onTextPane, options)
   if (options.thumbnail) return buildThumbnail(src, fullPath, kind, options)
 
   if (kind === 'change') {
+    const basePath = options.basePath ?? fullPath.slice(0, fullPath.lastIndexOf('/'))
     const wrap = document.createElement('div')
     wrap.className = 'kbn-fileview-change'
     let dispose: (() => void) | undefined
@@ -131,7 +141,7 @@ export function buildFileViewer(
         const bundle = parseChangeBundle(source)
         const digest = changeIdentity(source)
         dispose?.(); wrap.replaceChildren()
-        const mounted = mountChangeReader(wrap, bundle, `${originId}:${fullPath}`, digest, options.onReview, options.canReview, options.reviewTarget, { basePath: fullPath.slice(0, fullPath.lastIndexOf('/')), originId })
+        const mounted = mountChangeReader(wrap, bundle, `${originId}:${fullPath}`, digest, options.onReview, options.canReview, options.reviewTarget, { basePath, originId })
         dispose = mounted.dispose; scroller = mounted.scroller
         options.onThumbnailSource?.(source, recallText(src)?.etag)
         onTextPane?.(scroller)
@@ -448,6 +458,53 @@ export async function readThumbnailMetadata(src: string, signal: AbortSignal, on
   const first = await peek(src, priority, { fresh, signal })
   // Native playback and preview do not depend on metadata.
   if (first && !signal.aborted) onSource(first.bytes, first.etag)
+}
+
+/**
+ * A constitution's change, baked on open: ask the fiber's owner to bake it
+ * (`POST /fibers/<uid>/change`), then read the bundle the bake names through
+ * `/file` in the ordinary change viewer. A story's relative links resolve
+ * beside the fiber, where the story lives. A failed bake is a line in the
+ * page, not a viewer error.
+ */
+function buildBakedChange(
+  shuttleBase: string,
+  uid: string,
+  fiberPath: string,
+  originId: string,
+  onTextPane?: (scroller: HTMLElement) => void,
+  options: FileViewerOptions = {},
+): HTMLElement {
+  const wrap = document.createElement('div')
+  wrap.className = 'kbn-fileview-change'
+  const note = document.createElement('div')
+  note.className = 'change-bake-note'
+  note.textContent = 'Baking…'
+  wrap.append(note)
+  let viewer: HTMLElement | null = null
+  let disposed = false
+  // The page shows its own progress and failures, so its host only ever sees it ready.
+  const ready = (): void => options.onState?.({ status: 'ready' })
+  ready()
+  postDaemonJson<{ path: string }>(shuttleBase, `/api/v1/fibers/${encodeURIComponent(uid)}/change`, { origin: originId }, 'Bake failed')
+    .then(({ path }) => {
+      if (disposed) return
+      viewer = buildFileViewer(shuttleBase, path, originId, undefined, onTextPane, {
+        ...options, kind: 'change', bake: undefined, basePath: fiberPath.slice(0, fiberPath.lastIndexOf('/')), onState: ready,
+      })
+      wrap.replaceChildren(viewer)
+    })
+    .catch((error: unknown) => {
+      if (disposed) return
+      note.setAttribute('role', 'alert')
+      note.textContent = `Could not bake this change: ${error instanceof Error ? error.message : String(error)}`
+    })
+  bindDrawnPage(wrap, {
+    suspend: () => suspendFileViewer(viewer),
+    resume: () => resumeFileViewer(viewer),
+    dispose: () => { disposed = true; disposeFileViewer(viewer) },
+  })
+  return wrap
 }
 
 const liveViewSubscriptions = new WeakMap<HTMLElement, LiveFileSubscription>()

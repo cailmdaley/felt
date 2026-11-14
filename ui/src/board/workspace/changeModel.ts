@@ -68,6 +68,8 @@ export interface ChangeBundle {
   stats?: { files: number; additions: number; deletions: number }
   pr?: { number: number; title: string; url: string; head_branch: string; base_branch: string; state: string; draft: boolean; mergeable: string; checks: { total: number; passed: number; failed: number; pending: number } }
   title: string
+  /** The change's own Markdown: a PR's body, else its commits' full messages. */
+  description?: string
   repo: { name: string; dir: string; forge_url: string | null }
   base: string
   head: string

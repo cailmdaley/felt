@@ -7,7 +7,7 @@ vi.mock('@pierre/diffs', () => ({ registerCustomCSSVariableTheme() {}, disposeHi
 it('keeps a review draft readable but disables sending when no worker exists', () => {
   vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} })
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
-  const bundle: ChangeBundle = { version: 2, title: 'Review', repo: { name: 'test', dir: '/repo', forge_url: null }, base: 'a'.repeat(40), head: 'b'.repeat(40), base_ref: 'main', head_ref: 'topic', commits: [], files: [], story: null }
+  const bundle: ChangeBundle = { version: 2, title: 'Review', repo: { name: 'test', dir: '/repo', forge_url: null }, base: 'a'.repeat(40), head: 'b'.repeat(40), base_ref: 'main', head_ref: 'topic', commits: [], files: [{ path: 'app.ts', role: 'implementation', status: 'modified', additions: 0, deletions: 0, header: 'mode change', lines: [], hunks: [], remaining: [] }], story: null }
   const root = document.createElement('div'), send = vi.fn()
   const mounted = mountChangeReader(root, bundle, 'test', 'source-revision', send, () => false)
   const field = root.querySelector('textarea')!

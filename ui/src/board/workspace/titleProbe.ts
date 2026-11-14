@@ -3,7 +3,7 @@ import { liveFileWatched } from '../LiveFileRefresh.js'
 import { RESOURCE_PRIORITY } from '../documentResources.js'
 import { fileBytesUrl } from '../utils.js'
 import { cacheDocumentTitle, titleIsCurrent } from './DocumentTitles.js'
-import type { WorkspaceDocument } from './documents.js'
+import { isBaked, type WorkspaceDocument } from './documents.js'
 
 /**
  * Kinds whose first bytes can declare a title, most likely first: an HTML or
@@ -34,7 +34,7 @@ export function probeDocumentTitles(shuttleBase: string, documents: WorkspaceDoc
   const jobs: Array<{ rank: number; run: () => Promise<void> }> = []
   for (const doc of documents) {
     const rank = TITLED[doc.kind]
-    if (rank === undefined) continue
+    if (rank === undefined || isBaked(doc)) continue
     const version = documentVersion(doc)
     const seen = probed.get(doc.key)
     // A title read this session (by this probe or the page's own load) stands until the

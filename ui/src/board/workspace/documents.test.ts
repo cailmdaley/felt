@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   leadReceipt, channelLead, buildChannel, defaultSelection, docKey, documentKind, documentLabels, documentLabelMetadata, fallbackSelection,
-  fiberKey, normalizeAbsolutePath, parseDocKey, proseDocument, type ChannelInput, type WorkspaceDocument,
+  changeKey, fiberKey, isBaked, normalizeAbsolutePath, parseDocKey, proseDocument, type ChannelInput, type WorkspaceDocument,
 } from './documents.js'
 
 const base: ChannelInput = {
@@ -90,6 +90,22 @@ describe('buildChannel', () => {
     })
     expect(channel.labels).toEqual(['Results', 'Note'])
     expect(channel.documents[1].path).toBe('/store/project/task/task.md')
+  })
+
+  it('gives a constitution with a project a Change page beside its fiber page, baked rather than read', () => {
+    const sent = [{ path: '/store/project/task/notes.html', time: 100 }]
+    const without = buildChannel({ ...base, isConstitution: true, sent })
+    expect(without.documents.some(isBaked)).toBe(false)
+    const channel = buildChannel({ ...base, isConstitution: true, change: true, sent })
+    expect(channel.documents.map(d => d.key)).toEqual([
+      'host-a:/store/project/task/report.html', 'fiber:host-a:fiber-1', changeKey('host-a', 'fiber-1'), 'host-a:/store/project/task/notes.html',
+    ])
+    const change = channel.documents[2]
+    expect(change).toMatchObject({ kind: 'change', owner: 'host-a', path: '/store/project/task/task.md', provenance: [{ kind: 'baked' }] })
+    expect(isBaked(change)).toBe(true)
+    expect(channel.labels).toEqual(['Results', 'Constitution', 'Change', 'notes.html'])
+    expect(documentLabelMetadata(change, 'Change', 'host-a')).toEqual({ title: 'Change', summary: 'baked on open' })
+    expect(defaultSelection(buildChannel({ ...base, body: 'plain', isConstitution: true, change: true }))).toBe('fiber:host-a:fiber-1')
   })
 
   it('prefers tapestry.html over the legacy report.html companion', () => {

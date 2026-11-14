@@ -32,6 +32,13 @@ export function mountChangeReader(
   markdown: RenderMarkdownOptions = {},
 ) {
   const storyProse = (source: string) => prose(source, markdown)
+  if (!bundle.files.length) {
+    // Nothing to read: one sentence says what was compared.
+    const scroller = el('div', 'change-scroll change-nothing')
+    scroller.append(el('p', 'change-section-note', `No changes: ${revisionLabel(bundle.head_ref, bundle.head)} has the same files as its merge base with ${revisionLabel(bundle.base_ref, bundle.base)}.`))
+    root.append(scroller)
+    return { scroller, dispose: () => scroller.remove() }
+  }
   const files = bundle.files
   const lanes = assignLanes(bundle)
   const prefix = `shuttle:change:${JSON.stringify([identity, bundle.base, bundle.head, revision])}`
@@ -82,7 +89,8 @@ export function mountChangeReader(
   const opening = el('div', 'change-opening')
   main.append(opening)
   if (bundle.story) opening.append(storyProse(bundle.story.overview))
-  else
+  else {
+    if (bundle.description) opening.append(storyProse(bundle.description))
     main.append(
       el(
         'p',
@@ -90,6 +98,7 @@ export function mountChangeReader(
         'No authored story. Read implementation first, then configuration and documentation; tests stay together.',
       ),
     )
+  }
   const review = createChangeReview(
     shell,
     scroll,

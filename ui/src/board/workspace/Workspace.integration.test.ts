@@ -228,6 +228,17 @@ it('brings the constitution forward from the band and retraces to the page it le
   expect(workspace.reader.document?.name).toBe('report.html')
 })
 
+it('gives a constitution a Change page beside its fiber page only when it names a project', async () => {
+  const pages = (): (string | null)[] => [...document.querySelectorAll('.ws-page:not(.ws-parked)')].map(page => page.getAttribute('data-key'))
+  bodyCards = [{ ...cards[0], shuttleKind: 'oneshot' }, { ...cards[1], shuttleKind: 'oneshot', shuttleProjectDir: '/work/beta' }]
+  workspace.open(bodyCards[0], 'Desk'); await settle()
+  expect(pages().some(key => key?.startsWith('change:'))).toBe(false)
+  workspace.open(bodyCards[1], 'Desk'); await settle()
+  const fiber = pages().indexOf(`fiber:host-b:${bodyCards[1].uid}`)
+  expect(fiber).toBeGreaterThanOrEqual(0)
+  expect(pages()[fiber + 1]).toBe(`change:host-b:${bodyCards[1].uid}`)
+})
+
 it('takes a verdict key on a report without moving the page, its undo in the band', async () => {
   bodyCards = [{ ...cards[0], shuttleKind: 'oneshot', status: 'closed' }]
   workspace.open(bodyCards[0], 'Desk'); await settle()

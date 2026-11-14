@@ -15,7 +15,7 @@ import { normalizeSentFiles, type SentFile } from '../sentFiles.js'
 import { basename, fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
 import { deskCardKey, type DeskPlacement } from '../deskOrdering.js'
 import { head, RESOURCE_PRIORITY } from '../documentResources.js'
-import { COMPANION_NAMES, channelLead, documentActivity, familyKey, fiberKey, isDrawn, leadReceipt, buildChannel, normalizeAbsolutePath, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
+import { COMPANION_NAMES, channelLead, documentActivity, familyKey, fiberKey, isBaked, isDrawn, leadReceipt, buildChannel, normalizeAbsolutePath, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { conversationDevice } from '../conversationOpening.js'
 import { selectWorker } from '../sessionHistory.js'
 import { buildFiberProse } from './FiberProse.js'
@@ -774,7 +774,7 @@ export class Workspace {
     if (!state) {
       state = {
         card,
-        channel: buildChannel({ uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: '', outcome: card.outcome, isConstitution: card.shuttleKind !== undefined, family: this.hasMap(card), modifiedAt: card.modifiedAt }),
+        channel: buildChannel({ uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: '', outcome: card.outcome, isConstitution: card.shuttleKind !== undefined, family: this.hasMap(card), change: !!card.shuttleProjectDir, modifiedAt: card.modifiedAt }),
         links: [], fileModifiedAt: new Map(), loaded: false, runFinal: false, metadataKnown, mapPlace: placeAt(card),
       }
       this.channels.set(key, state)
@@ -1118,7 +1118,7 @@ export class Workspace {
    */
   private readFileMetadata(state: ChannelState): Promise<boolean> {
     if (state.metadataRead) return state.metadataRead
-    const files = state.channel.documents.filter(d => !isDrawn(d))
+    const files = state.channel.documents.filter(d => !isDrawn(d) && !isBaked(d))
     let changed = false
     const read = Promise.all(files.map(async doc => {
       const info = await head(fileBytesUrl(this.opts.shuttleBase, doc.path, doc.owner), RESOURCE_PRIORITY.neighbour, { fresh: true })
@@ -1148,7 +1148,7 @@ export class Workspace {
       : this.receipts.get(channelId(state.channel.uid, state.channel.owner))?.files ?? []
     const sent = receipts.map(f => ({ path: f.fullPath, owner: f.host ?? card.originId, session: f.sessionId, time: f.timestamp }))
     state.channel = buildChannel({
-      uid: before.uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: before.body, outcome: before.outcome, isConstitution: card.shuttleKind !== undefined, family: this.hasMap(card),
+      uid: before.uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: before.body, outcome: before.outcome, isConstitution: card.shuttleKind !== undefined, family: this.hasMap(card), change: !!card.shuttleProjectDir,
       sent, links: state.links, routed: provisional ? [provisional] : undefined, previous: before, modifiedAt: card.modifiedAt, fileModifiedAt: state.fileModifiedAt,
     })
     const awaitsFeed = state.selected === familyKey(state.channel.owner, state.channel.uid) && !this.opts.cards().length

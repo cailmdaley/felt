@@ -9,6 +9,8 @@
 :root[data-ws-appearance='dark'] iframe { color-scheme: dark; }
 
 .kbn-fileview-change { flex: 1; min-height: 0; min-width: 0; height: 100%; overflow: hidden; container-type: inline-size; }
+.change-bake-note { padding: 32px; font-size: var(--type-note); color: var(--ws-ink-muted); overflow-wrap: anywhere; }
+.change-bake-note[role='alert'] { color: var(--ws-stop); }
 
 .kbn-fileview-frame-wrap {
   position: relative;

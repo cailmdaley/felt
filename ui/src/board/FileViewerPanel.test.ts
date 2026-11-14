@@ -83,6 +83,41 @@ describe('workspace file viewer hooks', () => {
     expect(changeRenderer.release).toHaveBeenCalledOnce()
     expect(watch.stop).toHaveBeenCalled()
   })
+  it('bakes a constitution change on its owner, then reads the baked bundle with links beside the fiber', async () => {
+    changeRenderer.mount.mockImplementation((root: HTMLElement, bundle: { title: string }) => {
+      const scroller = document.createElement('div'); scroller.textContent = bundle.title; root.replaceChildren(scroller)
+      return { scroller, dispose: vi.fn() }
+    })
+    watch.content = null
+    let answer!: (response: Response) => void
+    const fetch = vi.fn(() => new Promise<Response>(resolve => { answer = resolve }))
+    vi.stubGlobal('fetch', fetch)
+    const onState = vi.fn()
+    const viewer = buildFileViewer('', '/store/.felt/work/task/task.md', 'host-b', undefined, undefined, { kind: 'change', bake: 'UID1', onState })
+    document.body.append(viewer)
+    expect(viewer.textContent).toBe('Baking…')
+    expect(onState).toHaveBeenLastCalledWith({ status: 'ready' })
+    const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('/api/v1/fibers/UID1/change')
+    expect(JSON.parse(init.body as string)).toEqual({ origin: 'host-b' })
+    answer(new Response(JSON.stringify({ path: '/cache/shuttle/changes/UID1/topic.change.json', title: 'Topic', report: {} })))
+    await vi.waitFor(() => expect(watch.content).not.toBeNull())
+    watch.content!(JSON.stringify({ version: 2, title: 'Topic', repo: { name: 'r', dir: '/r', forge_url: null }, base: 'a'.repeat(40), head: 'b'.repeat(40), base_ref: 'main', head_ref: 'topic', commits: [], files: [], story: null }))
+    await vi.waitFor(() => expect(viewer.textContent).toBe('Topic'))
+    const [, , identity, , , , , markdown] = changeRenderer.mount.mock.calls.at(-1)!
+    expect(identity).toBe('host-b:/cache/shuttle/changes/UID1/topic.change.json')
+    expect(markdown).toEqual({ basePath: '/store/.felt/work/task', originId: 'host-b' })
+    disposeFileViewer(viewer)
+    expect(watch.stop).toHaveBeenCalled()
+  })
+  it('says why a bake failed in one line in the page', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: '/work is not a Git repository' }), { status: 422 })))
+    const onState = vi.fn()
+    const viewer = buildFileViewer('', '/store/.felt/work/task/task.md', 'host-a', undefined, undefined, { kind: 'change', bake: 'UID1', onState })
+    await vi.waitFor(() => expect(viewer.querySelector('[role="alert"]')?.textContent).toBe('Could not bake this change: /work is not a Git repository'))
+    expect(onState).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'error' }))
+    disposeFileViewer(viewer)
+  })
   it('gives a live-arriving image its own full-resolution URL after the strip thumbnail', () => {
     const thumbnail = buildFileViewer('', '/growth.png', 'host-a', undefined, undefined, { thumbnail: true })
     const reader = buildFileViewer('', '/growth.png', 'host-a')

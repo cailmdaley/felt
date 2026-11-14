@@ -56,6 +56,23 @@ it('notifies the reader to recalculate page geometry when a viewer becomes ready
   expect(onViewerReady).toHaveBeenCalledOnce()
 })
 
+it('bakes a Change page afresh on every open and on refresh, beside its fiber', () => {
+  const channel = buildChannel({ uid: 'U1', owner: 'host-a', name: 'Task', path: 'task.md', fiberDir: '/store/task', body: '', isConstitution: true, change: true })
+  const [fiber, change] = channel.documents
+  host.setChannel(channel.documents, fiber.key)
+  expect(render.calls.some(call => call.options.bake)).toBe(false)
+  host.select(change.key)
+  const bakes = () => render.calls.filter(call => call.options.bake === 'U1')
+  expect(bakes()).toHaveLength(1)
+  expect(bakes()[0]).toMatchObject({ path: '/store/task/task.md', owner: 'host-a', options: { kind: 'change' } })
+  host.refresh(change.key)
+  expect(bakes()).toHaveLength(2)
+  host.select(fiber.key)
+  expect(host.get(change.key)?.viewer).toBeNull()
+  host.select(change.key)
+  expect(bakes()).toHaveLength(3)
+})
+
 it('mounts a change only when selected and disposes it on returning to the conversation', async () => {
   const change = { ...doc(1), kind: 'change' as const, path: '/review.change.json' }
   host.setChannel([docs[0], change, docs[2]], docs[0].key)

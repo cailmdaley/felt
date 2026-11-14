@@ -12,6 +12,8 @@ type Provenance =
   | { kind: 'link'; title?: string }
   /** A page opened by its address before the channel's own reads list it. */
   | { kind: 'routed' }
+  /** A constitution's change, baked by its owner each time the page opens. */
+  | { kind: 'baked' }
 
 export interface WorkspaceDocument {
   key: DocKey
@@ -48,6 +50,8 @@ export interface ChannelInput {
   isConstitution?: boolean
   /** The fiber belongs to a family of threads, whose view leads its run of pages. */
   family?: boolean
+  /** The constitution has a project, whose change its Change page bakes. */
+  change?: boolean
   /** The fiber's genuine owner-daemon modification time, never its creation time. */
   modifiedAt?: string
   embeds?: { path: string; title?: string }[]
@@ -116,6 +120,11 @@ export function fiberKey(owner: string, uid: string): DocKey {
 export function familyKey(owner: string, uid: string): DocKey {
   return `family:${owner}:${uid}`
 }
+export function changeKey(owner: string, uid: string): DocKey {
+  return `change:${owner}:${uid}`
+}
+/** A constitution's Change page: no file until its owner bakes one on open. */
+export const isBaked = (doc: Pick<WorkspaceDocument, 'provenance'>): boolean => doc.provenance.some(p => p.kind === 'baked')
 /** A page the board draws itself, with no file behind it. */
 export const isDrawn = (doc: Pick<WorkspaceDocument, 'kind'>): boolean => doc.kind === 'fiber' || doc.kind === 'family'
 
@@ -134,7 +143,7 @@ function provenanceKey(p: Provenance): string {
   switch (p.kind) {
     case 'fiber': case 'family': return p.kind
     case 'embed': case 'link': return JSON.stringify([p.kind, p.title ?? ''])
-    case 'routed': return 'routed'
+    case 'routed': case 'baked': return p.kind
     case 'sent': return JSON.stringify([p.kind, p.session ?? '', p.time, p.worker ?? ''])
   }
 }
@@ -307,7 +316,10 @@ export function buildChannel(input: ChannelInput): Channel {
   }
 
   documents.delete(prose.key)
-  const pages = arrangeDocuments(prose, documents.values(), declared)
+  const arranged = arrangeDocuments(prose, documents.values(), declared)
+  // The Change page sits right of the fiber page; its path is the fiber's, which places its story's links and its review.
+  const change: WorkspaceDocument = { key: changeKey(input.owner, input.uid), owner: input.owner, path: prose.path, name: 'Change', kind: 'change', provenance: [{ kind: 'baked' }] }
+  const pages = input.change ? arranged.flatMap(doc => doc === prose ? [prose, change] : [doc]) : arranged
   const run = input.family ? [{ key: familyKey(input.owner, input.uid), owner: input.owner, path: prose.path, name: 'Family', kind: 'family' as const, provenance: [{ kind: 'family' as const }] }, ...pages] : pages
   const channel: Channel = {
     uid: input.uid, owner: input.owner, name: input.name,
@@ -321,6 +333,7 @@ export function buildChannel(input: ChannelInput): Channel {
 export function documentLabelMetadata(doc: WorkspaceDocument, label: string, channelOwner: string, now = Date.now()): { title: string; summary: string } {
   const age = (time: number): string => ago(time, now)
   if (doc.kind === 'family') return { title: '', summary: '' }
+  if (isBaked(doc)) return { title: label, summary: 'baked on open' }
   if (doc.kind === 'fiber') {
     const time = doc.modifiedAt ? Date.parse(doc.modifiedAt) : NaN
     return { title: '', summary: Number.isFinite(time) ? `Last changed ${age(time)}` : 'Last changed unknown' }
@@ -371,6 +384,7 @@ export function documentLabels(documents: WorkspaceDocument[], isConstitution = 
     const labels: string[] = []
     const add = (label: string): void => { if (label && !labels.includes(label)) labels.push(label) }
     if (document.kind === 'family') return ['Family']
+    if (isBaked(document)) return ['Change']
     if (document.kind === 'fiber') {
       add(isConstitution ? 'Constitution' : 'Note')
       return labels
@@ -412,6 +426,7 @@ export function documentLabels(documents: WorkspaceDocument[], isConstitution = 
   const labelAt = (index: number): string => {
     const document = documents[index]
     if (document.kind === 'family') return 'Family'
+    if (isBaked(document)) return 'Change'
     if (fallback[index]) return document.kind === 'fiber'
       ? `${document.owner}:${isConstitution ? 'Constitution' : 'Note'}`
       : `${document.owner}:${document.path}`

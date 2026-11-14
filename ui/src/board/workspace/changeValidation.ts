@@ -4,6 +4,8 @@ export function validateChangeBundle(value: unknown): asserts value is ChangeBun
   if ((value as ChangeBundle)?.version !== 2) {
     throw new Error('This change needs to be rebaked with shuttle change (bundle version 2).')
   }
+  const description = (value as ChangeBundle).description
+  if (description !== undefined && typeof description !== 'string') throw new Error('A change description must be text.')
 }
 
 export function parseChangeBundle(source: string): ChangeBundle {
