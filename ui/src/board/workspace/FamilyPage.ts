@@ -356,7 +356,8 @@ export class FamilyPage {
     if (!tip) { tip = document.createElementNS('http://www.w3.org/2000/svg', 'title'); mark.prepend(tip) }
     tip.textContent = thread.word
     const name = row.querySelector<HTMLElement>('.fp-name')!
-    name.textContent = thread === model.root ? thread.name : slug(thread.card)
+    // The band's title names the family, so its head row gives the address instead: the fiber's whole path.
+    name.textContent = thread === model.root ? thread.card.id : slug(thread.card)
     name.title = thread.name
     row.querySelector('.fp-word')!.textContent = thread.tone === 'still' ? thread.word : ''
     row.querySelector('.fp-meta')!.textContent = age(model.now - (this.under.get(thread.key)?.lastMove ?? thread.lastMove))

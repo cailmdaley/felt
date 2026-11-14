@@ -121,8 +121,7 @@
 .fp-doc .kbn-fileview-change { height: 85vh; }
 .fp-head { padding-top: 12px; padding-bottom: 10px; margin-bottom: 6px; border-bottom: 1px solid var(--ws-hairline-soft); }
 
-/* The head row is the family the band's title already names, so its own name is read aloud but not drawn (on the phone the top bar names it). */
-.fp-head .fp-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.fp-head .fp-name { color: var(--ws-ink-soft); font-weight: 400; }
 .fp-head .fp-note { -webkit-line-clamp: 5; color: var(--ws-ink); font-size: var(--type-row); }
 /* An unfolded row, or the head once selected, reads its whole outcome. */
 .fp-row:not(.fp-head)[data-open] > .fp-line > .fp-note, .fp-head[data-selected] > .fp-line > .fp-note { display: block; -webkit-line-clamp: unset; }

@@ -358,7 +358,9 @@ export function registerHeaderBarJourneys(test) {
         await openThread(page, threadRow(page, await familyTree(page), name), name)
         await familyTree(page)
         assert.equal(await head().count(), 1)
-        assert.equal(await head().locator('.fp-name').innerText(), title)
+        // The band's title names the family; its head row gives the fiber's path.
+        assert.equal(await head().locator('.fp-name').getAttribute('title'), title)
+        assert.equal(await head().locator('.fp-name').innerText(), 'research/workspace/calibration-report')
         assert.ok(await head().locator('.fp-mark').isVisible())
         assert.equal(await threadRow(page, page.locator('.ws-page.ws-selected .fp-tree'), name).getAttribute('aria-selected'), 'true')
         if (process.env.WORKSPACE_SHOTS && name === 'Choose the response cut') {
