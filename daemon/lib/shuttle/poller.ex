@@ -5506,10 +5506,7 @@ defmodule Shuttle.Poller do
     if meta = state.running[runtime_key] do
       persist_context_receiver(state, meta, nil)
 
-      case Shuttle.Terminal.release_exited(state.runner, meta.session) do
-        :ok -> :ok
-        {:error, message} -> Logger.warning(message)
-      end
+      :ok = Shuttle.Terminal.release_exited(state.runner, meta.session)
     end
 
     %{state | running: Map.delete(state.running, runtime_key)}

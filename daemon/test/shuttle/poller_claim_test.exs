@@ -642,9 +642,14 @@ defmodule Shuttle.PollerClaimTest do
     MockRunner.add_tmux_session("human-tab")
     Env.put_app_env(:os_type, {:unix, :darwin})
 
-    port = Port.open({:spawn_executable, System.find_executable("sleep")}, [:binary, args: ["300"]])
+    port =
+      Port.open({:spawn_executable, System.find_executable("sleep")}, [:binary, args: ["300"]])
+
     {:os_pid, harness} = Port.info(port, :os_pid)
-    on_exit(fn -> System.cmd("kill", ["-KILL", Integer.to_string(harness)], stderr_to_stdout: true) end)
+
+    on_exit(fn ->
+      System.cmd("kill", ["-KILL", Integer.to_string(harness)], stderr_to_stdout: true)
+    end)
 
     {:ok, poller} =
       start_poller!(
@@ -664,6 +669,7 @@ defmodule Shuttle.PollerClaimTest do
              )
 
     assert canonical == "claim-harness-exit-01KTHDNZS287ZSSG8X8V59XKC9-shuttle"
+
     assert {:ok, %{pid: ^harness, released_as: "human-tab"}} =
              Shuttle.Terminal.Receipts.process_receipt(canonical)
 

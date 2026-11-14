@@ -496,6 +496,31 @@ defmodule Shuttle.Terminal.RexTest do
     assert :absent = Rex.release(FakeRex, "canonical", "leaf")
   end
 
+  defmodule ClaimRunner do
+    def cmd("ps", ["-o", "lstart=", "-p", _], _opts), do: Process.get(:lstart, {"", 1})
+    def cmd(bin, argv, opts), do: FakeRex.cmd(bin, argv, opts)
+  end
+
+  test "an exited claim's block is released through the facade, never closed" do
+    Env.put_app_env(:terminal_backend, Rex)
+    seed()
+    assert :ok = Rex.rename(FakeRex, sid(), "canonical")
+    Process.put(:lstart, {"Sat Nov 14 20:00:00 2026\n", 0})
+    assert :ok = Shuttle.Terminal.Receipts.claim(ClaimRunner, "canonical", 77, "leaf")
+
+    assert :ok = Shuttle.Terminal.release_exited(ClaimRunner, "canonical")
+    assert {:ok, %{"bindings" => %{"canonical" => _}}} = RexBindings.read()
+
+    Process.put(:lstart, {"", 1})
+    assert Shuttle.Terminal.status(ClaimRunner, "canonical", backends: [Rex]) == :gone
+    assert :ok = Shuttle.Terminal.release_exited(ClaimRunner, "canonical")
+    assert {:ok, %{"bindings" => bindings}} = RexBindings.read()
+    assert bindings == %{}
+    assert Enum.map(FakeRex.state().sessions[sid()].blocks, & &1["label"]) == ["leaf"]
+    assert Shuttle.Terminal.Receipts.process_receipt("canonical") == :none
+    refute Enum.any?(FakeRex.calls(), fn {_, argv, _} -> "session.destroy" in argv end)
+  end
+
   test "a canonical rename is a no-op and preserves human display labels" do
     seed()
     assert :present = Rex.probe(FakeRex, @name)

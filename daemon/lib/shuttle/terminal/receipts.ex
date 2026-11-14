@@ -84,6 +84,7 @@ defmodule Shuttle.Terminal.Receipts do
   def put(name, script, script_text) do
     target = path(name)
     _ = Shuttle.FS.rm(pid_path(name))
+    _ = Shuttle.FS.rm(process_path(name))
 
     with :ok <- Shuttle.FS.mkdir_p(Path.dirname(target)),
          :ok <- Shuttle.FS.write_atomic(target, script) do

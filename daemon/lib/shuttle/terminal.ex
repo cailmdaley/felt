@@ -24,6 +24,8 @@ defmodule Shuttle.Terminal do
   per-name launch serialization, run scripts, and the stop signal ladder.
   """
 
+  require Logger
+
   alias Shuttle.{Dispatcher, WorkerProcess}
   alias Shuttle.Terminal.{LaunchAttempts, Receipts, Tmux}
 
@@ -98,25 +100,27 @@ defmodule Shuttle.Terminal do
   @doc """
   Give a claimed terminal whose harness has exited back to the human: the
   worker name releases it (tmux: renamed back; Rex: unbound and relabelled)
-  and the receipt is dropped. Nothing happens for any other name.
+  and the receipt is dropped. A release the backend refuses is logged and the
+  receipt dropped anyway, leaving the terminal under the worker name. Nothing
+  happens for any other name.
   """
   def release_exited(runner, name) do
-    with {:ok, %{released_as: released_as}} <- Receipts.process_receipt(name),
-         :exited <- Receipts.process_status(runner, name) do
+    with {:ok, %{released_as: released_as} = receipt} <- Receipts.process_receipt(name),
+         :exited <- Receipts.process_status(runner, receipt) do
       backend = holder(runner, name)
 
       case backend.release(runner, name, released_as) do
         result when result in [:ok, :absent] ->
-          Receipts.drop(name)
           refresh_layout(runner, backend)
-          :ok
 
         {:error, message} ->
-          {:error, "could not release #{name} to the human's terminal: #{message}"}
+          Logger.warning("could not release #{name} to the human's terminal: #{message}")
       end
-    else
-      _ -> :ok
+
+      Receipts.drop(name)
     end
+
+    :ok
   end
 
   defp unreachable(name, backend) do
@@ -309,8 +313,9 @@ defmodule Shuttle.Terminal do
   defp launch_ready(runner, name, cwd, script_text, opts) do
     backend = primary()
 
-    with :ok <- release_exited(runner, name),
-         :ok <- check_available(runner, name, opts),
+    :ok = release_exited(runner, name)
+
+    with :ok <- check_available(runner, name, opts),
          :ok <- check_conversation(runner, opts[:conversation_uuid]),
          :ok <- if(opts[:preflighted], do: :ok, else: backend.ensure_ready(runner)),
          :ok <- LaunchAttempts.clear(name) do
@@ -354,13 +359,7 @@ defmodule Shuttle.Terminal do
 
   @doc "Hang up the terminal, then wait and signal its worker until positively gone."
   def stop(runner, name, opts \\ []) do
-    case release_exited(runner, name) do
-      :ok -> stop_held(runner, name, opts)
-      {:error, message} -> {message, 1}
-    end
-  end
-
-  defp stop_held(runner, name, opts) do
+    :ok = release_exited(runner, name)
     backends = Keyword.get_lazy(opts, :backends, &backends/0)
 
     backend =

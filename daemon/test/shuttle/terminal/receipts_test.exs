@@ -200,6 +200,7 @@ defmodule Shuttle.Terminal.ReceiptsTest do
     test "is running while the pid lives with its birth, exited once gone or reborn", %{dir: dir} do
       pid = next_pid()
       name = claimed(dir, pid, "12345")
+
       assert {:ok, %{pid: ^pid, birth: "12345", released_as: "human-tab"}} =
                Receipts.process_receipt(name)
 
@@ -247,6 +248,14 @@ defmodule Shuttle.Terminal.ReceiptsTest do
       File.rm_rf!(Path.join([dir, "proc", Integer.to_string(pid)]))
       assert Terminal.status(Runner, name) == :gone
       refute_received :ps_scan
+    end
+
+    test "a launch under the name replaces a claim's process receipt", %{dir: dir} do
+      name = claimed(dir, next_pid(), "650")
+      script = Path.join(dir, "shuttle-run-#{name}.2.sh")
+      {:ok, _} = Receipts.put(name, script, "#!/bin/bash\n")
+      assert Receipts.process_receipt(name) == :none
+      assert Receipts.status(Runner, name) == :none
     end
 
     test "a rename carries the process receipt", %{dir: dir} do
