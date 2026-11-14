@@ -92,7 +92,11 @@ func (piAdapter) discover(ctx context.Context, env *sysenv.Env, host string) ([]
 		if state == "" {
 			state = j.Status
 		}
-		conferSessions = append(conferSessions, Session{Address: addr, Host: host, Harness: "pi", ID: j.ID, Title: j.Name, CWD: j.CWD, State: state, Capabilities: []string{"wake"}})
+		transcript := j.PiSessionID
+		if transcript == "" {
+			transcript = j.SessionID
+		}
+		conferSessions = append(conferSessions, Session{Address: addr, Host: host, Harness: "pi", ID: j.ID, TranscriptID: transcript, Title: j.Name, CWD: j.CWD, State: state, Capabilities: []string{"wake"}})
 	}
 	return mergeSessions(ss, conferSessions), err
 }

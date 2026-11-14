@@ -486,7 +486,7 @@ func piFixture(t *testing.T, reply string, observe ...func([]byte)) (string, str
 	}()
 	jobs := filepath.Join(root, "project", "jobs")
 	os.MkdirAll(jobs, 0700)
-	job := map[string]any{"id": "job-1", "name": "worker", "status": "running", "phase": "idle", "cwd": "/work", "socketPath": sock}
+	job := map[string]any{"id": "job-1", "name": "worker", "status": "running", "phase": "idle", "cwd": "/work", "socketPath": sock, "piSessionId": "pi-session-1"}
 	b, _ := json.Marshal(job)
 	os.WriteFile(filepath.Join(jobs, "job-1.json"), b, 0600)
 	return root, sock
@@ -573,7 +573,7 @@ func TestPiDiscoveryReadsOnlyWorkspaceJobRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ss) != 1 || ss[0].ID != "job-1" || ss[0].State != "idle" || ss[0].Title != "worker" {
+	if len(ss) != 1 || ss[0].ID != "job-1" || ss[0].State != "idle" || ss[0].Title != "worker" || ss[0].TranscriptID != "pi-session-1" {
 		t.Fatalf("sessions = %#v", ss)
 	}
 	if _, err := findPi(context.Background(), env, "job-nested"); err == nil {

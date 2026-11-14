@@ -49,6 +49,9 @@ func (a *app) runRecentSessions(ctx context.Context, o *sessionsDiscoveryOptions
 	if err != nil {
 		return err
 	}
+	if o.local && o.host != "" && o.host != own {
+		return fmt.Errorf("--local lists this host (%s), not %s", own, o.host)
+	}
 	var result recentSessions
 	if o.local || o.host == "" || o.host == own {
 		result, err = a.localRecentSessions(ctx, own, since, harness)

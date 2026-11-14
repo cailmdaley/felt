@@ -2,6 +2,7 @@ package transcriptindex
 
 import (
 	"context"
+	"time"
 )
 
 // Activity is one session's indexed activity inside a window: its main
@@ -17,14 +18,21 @@ type Activity struct {
 }
 
 // Recent lists the sessions with a message at or after since (RFC3339),
-// newest activity first, optionally restricted to one harness.
+// newest activity first, optionally restricted to one harness. A file is
+// written after its messages' timestamps, so only files modified since then
+// are read: the CROSS JOIN keeps files the outer loop, so that filter
+// narrows the scan before any message is touched.
 func (i *Index) Recent(ctx context.Context, since, harness string) ([]Activity, error) {
+	at, err := time.Parse(time.RFC3339, since)
+	if err != nil {
+		return nil, err
+	}
 	sql := `SELECT f.session, max(f.harness), max(f.project),
  coalesce(max(CASE WHEN instr(f.path,'/subagents/')=0 THEN f.path END), max(f.path)),
  strftime('%Y-%m-%dT%H:%M:%SZ',max(julianday(m.timestamp))), count(*)
- FROM messages m JOIN files f ON f.id=m.file_id
- WHERE f.session != '' AND julianday(m.timestamp)>=julianday(?)`
-	args := []any{since}
+ FROM files f CROSS JOIN messages m ON m.file_id=f.id
+ WHERE f.session != '' AND f.mtime>=? AND julianday(m.timestamp)>=julianday(?)`
+	args := []any{at.UnixNano(), since}
 	if harness != "" {
 		sql += " AND f.harness=?"
 		args = append(args, harness)
