@@ -941,6 +941,13 @@ type MoveResult struct {
 // changes are written; a moved fiber's id is its location, not its content,
 // so the rename alone moves it.
 func (s *Storage) MoveSubtree(oldID, newID string) (*MoveResult, error) {
+	// Namespace entry points have no subtree directory to move. Refuse before
+	// creating recovery state rather than leaving their documents behind.
+	document := s.Path(oldID)
+	directoryDocument := filepath.Join(s.root, filepath.FromSlash(oldID), path.Base(oldID)+FileExt)
+	if document != directoryDocument {
+		return nil, fmt.Errorf("cannot move bare-form fiber %s: put its document in directory form before moving it", oldID)
+	}
 	if path.Base(oldID) != path.Base(newID) {
 		companion := filepath.Join(s.root, filepath.FromSlash(oldID), path.Base(newID)+".md")
 		if _, err := os.Stat(companion); err == nil {

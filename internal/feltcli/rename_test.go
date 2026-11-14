@@ -1,6 +1,7 @@
 package feltcli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -31,6 +32,46 @@ func storeBytes(t *testing.T, root string) map[string]string {
 		t.Fatal(err)
 	}
 	return result
+}
+
+func TestBareFormMovesRefuseBeforeJournaling(t *testing.T) {
+	t.Parallel()
+	for _, mounted := range []bool{false, true} {
+		for _, verb := range []string{"rename", "nest"} {
+			t.Run(fmt.Sprintf("%s/mounted=%t", verb, mounted), func(t *testing.T) {
+				t.Parallel()
+				dir, s := newStore(t)
+				documents := s
+				id, parent := "b", "parent"
+				if mounted {
+					_, documents = newStore(t)
+					if err := os.Symlink(documents.Root(), filepath.Join(s.Root(), "mount")); err != nil {
+						t.Fatal(err)
+					}
+					id, parent = "mount/b", "mount/parent"
+				}
+				if err := os.WriteFile(filepath.Join(documents.Root(), "b.md"), []byte("---\nname: Bare\n---\n\nBody\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				writeFixtureFelt(t, s, parent, "Parent")
+				if err := s.Write(&felt.Felt{ID: "ref", Name: "Ref", Body: "[[" + id + "]]"}); err != nil {
+					t.Fatal(err)
+				}
+				before, beforeDocuments := storeBytes(t, s.Root()), storeBytes(t, documents.Root())
+				target := "bb"
+				if verb == "nest" {
+					target = parent
+				}
+				out, err := runCommand(t, dir, verb, id, target)
+				if err == nil || !strings.Contains(err.Error(), "bare-form fiber "+id) {
+					t.Fatalf("expected bare-form refusal, got %v\n%s", err, out)
+				}
+				if !reflect.DeepEqual(before, storeBytes(t, s.Root())) || !reflect.DeepEqual(beforeDocuments, storeBytes(t, documents.Root())) {
+					t.Fatal("bare-form refusal changed documents, links, or recovery state")
+				}
+			})
+		}
+	}
 }
 
 func TestRenameRefusalsChangeNothing(t *testing.T) {

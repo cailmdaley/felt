@@ -48,6 +48,7 @@ running daemon's version when reachable, otherwise the local Mix release version
 | `felt recover-move [--abandon]` | Finish an interrupted subtree move's reference repairs; `--abandon` drops the journal without undoing the move or repairing remaining references |
 
 Live Shuttle workers keep their existing terminal names after a rename; the daemon identifies them by the intrinsic id, not the current leaf.
+Moves refuse bare-form namespace entry points (`.felt/<slug>.md` or `<mount>/<slug>.md`) before writing a journal; put their documents in directory form before moving them.
 Interrupted moves retain `.move-pending.json` in the store.
 Repeat the same `nest`, `unnest`, or `rename` command with either endpoint spelling of the child, or use `recover-move` there.
 A divergent reference document is refused rather than overwritten; resolve it before retrying, or abandon recovery and repair it by hand.
