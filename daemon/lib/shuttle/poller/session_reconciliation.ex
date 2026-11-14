@@ -106,6 +106,10 @@ defmodule Shuttle.Poller.SessionReconciliation do
         uid = Map.get(fiber, "uid")
 
         session = session || Poller.live_session_for_fiber(state, fiber_id, uid)
+        # The session's own launch record stands over a lagging document stamp,
+        # so the closure check and the adopted worker's observation both judge
+        # the worker that is actually running.
+        fiber = if session, do: with_session_launch(fiber, session), else: fiber
 
         cond do
           not Poller.host_owned?(Map.get(fiber, "shuttle", %{}), state.own_host_id) ->
@@ -126,6 +130,16 @@ defmodule Shuttle.Poller.SessionReconciliation do
         # Fiber not found — skip, don't kill (could be from another host or test)
         Logger.debug("Skipping orphan session for unknown fiber: #{inspect(session)}")
         state
+    end
+  end
+
+  defp with_session_launch(fiber, session) do
+    case Shuttle.Terminal.LaunchAttempts.get(session) do
+      {:ok, %{"dispatch" => %{"dispatched_at" => launched}}} ->
+        Poller.with_launch(fiber, launched)
+
+      _ ->
+        fiber
     end
   end
 

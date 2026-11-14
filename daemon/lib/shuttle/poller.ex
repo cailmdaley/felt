@@ -5050,12 +5050,22 @@ defmodule Shuttle.Poller do
   # The tracked worker's own launch time stands over a document whose
   # `dispatched_at` lags it (a launch whose runtime marker failed to write), so
   # the closure check judges the worker that is actually running.
-  defp with_run_launch(fiber, meta) do
-    launched = get_in(meta, [:run_observation, "shuttle", "runtime", "dispatched_at"])
+  defp with_run_launch(fiber, meta),
+    do:
+      with_launch(fiber, get_in(meta, [:run_observation, "shuttle", "runtime", "dispatched_at"]))
+
+  @doc false
+  # `fiber` with `launched` as its `dispatched_at` when that is the later stamp.
+  def with_launch(fiber, launched) do
     recorded = get_in(fiber, ["shuttle", "runtime", "dispatched_at"])
 
     if (iso_to_unix_ms(launched) || 0) > (iso_to_unix_ms(recorded) || 0),
-      do: put_in(fiber, [Access.key("shuttle", %{}), Access.key("runtime", %{}), "dispatched_at"], launched),
+      do:
+        put_in(
+          fiber,
+          [Access.key("shuttle", %{}), Access.key("runtime", %{}), "dispatched_at"],
+          launched
+        ),
       else: fiber
   end
 

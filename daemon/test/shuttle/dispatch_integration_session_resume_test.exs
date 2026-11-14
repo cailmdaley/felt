@@ -30,18 +30,18 @@ defmodule Shuttle.DispatchIntegrationSessionResumeTest do
   end
 
   # Refuses the launch's runtime marker, so the card keeps its pre-close
-  # `dispatched_at` while the resumed worker runs.
+  # `dispatched_at` while the resumed worker runs; lists live sessions for a
+  # restarted Poller.
   defmodule NoMarkerRunner do
     @behaviour Shuttle.Runner
-    alias Shuttle.Test.DispatchIntegrationCase.IntegrationRunner
 
     def cmd("shuttle", args, opts) do
       if "mark-runtime" in args and "--dispatched-at" in args,
         do: {"refused", 1},
-        else: IntegrationRunner.cmd("shuttle", args, opts)
+        else: ListingRunner.cmd("shuttle", args, opts)
     end
 
-    def cmd(command, args, opts), do: IntegrationRunner.cmd(command, args, opts)
+    def cmd(command, args, opts), do: ListingRunner.cmd(command, args, opts)
   end
 
   @picked "c1a0e5e0-0000-4000-8000-0000000000a1"
@@ -252,6 +252,16 @@ defmodule Shuttle.DispatchIntegrationSessionResumeTest do
 
     sync_poll_cycle!(poller)
     assert %{session: ^tmux} = Poller.live_worker(poller, id)
+
+    # A restarted Poller judges it by its own launch record, not the lagging
+    # document stamp.
+    GenServer.stop(poller)
+
+    {:ok, restarted} =
+      start_poller!(runner: NoMarkerRunner, poll_interval_ms: 600_000, felt_stores: [host])
+
+    sync_poll_cycle!(restarted)
+    assert %{session: ^tmux} = Poller.live_worker(restarted, id)
     refute Enum.any?(IntegrationRunner.commands(), &match?({"tmux", ["kill-session" | _]}, &1))
   end
 end
