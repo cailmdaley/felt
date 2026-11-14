@@ -225,6 +225,7 @@ The download (an arrow onto a tray) saves the file under its own name, its bytes
 The sent files toggle appears at every width when the constitution has sent files, on the phone in the top bar, and its first bullet swells while one is unread; it opens the sheet of sent files, as the document menu's Sent files does.
 In the reader, as on the Desk and Chronicle, the board bar's Find hangs a list of constitutions beneath itself, matching names, paths, filenames and transcripts. On the phone the title opens a switcher of constitutions instead.
 The fiber page anchors its body, embedded files, opened body links and sent documents.
+A constitution with a project directory has a **Change** page right of its fiber page: each time it opens, the owner bakes the project's [change](../concepts/changes.md#the-change-on-open) as it stands, showing Baking… meanwhile, or the reason a bake failed.
 Repeated sends of the same owner/path are one page with multiple receipts.
 Selection, constitution changes, and metadata polls preserve retained document instances and reading position.
 The board renders no conversation. Conversation lives in Rex, on the desktop and on the phone; the board keeps a constitution's threads, its tapestry and documents, its sent files, its change reader and its lifecycle.
