@@ -87,7 +87,7 @@ func (a *app) printRemainingPaths(storage *felt.Storage, oldID string) error {
 	}
 	patterns := make([]*regexp.Regexp, 0, len(spellings))
 	for _, spelling := range spellings {
-		patterns = append(patterns, regexp.MustCompile(regexp.QuoteMeta(spelling)+`($|[^a-zA-Z0-9_-])`))
+		patterns = append(patterns, regexp.MustCompile(`(^|[^a-zA-Z0-9_/-])`+regexp.QuoteMeta(spelling)+`($|[^a-zA-Z0-9_-])`))
 	}
 	fibers, err := storage.List()
 	if err != nil {
