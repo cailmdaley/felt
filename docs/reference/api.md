@@ -7,7 +7,7 @@ routes it can rely on and which it can ignore.
 | Module | What it is for | Stability | Routes |
 |---|---|---|---|
 | [Core](#core) | Reading the fleet and its fibers, and acting on them: what any UI builds on | Stable, described by an OpenAPI contract | 15 |
-| [Board](#board) | What the board UI alone needs | Internal: moves with the board bundle | 29 |
+| [Board](#board) | What the board UI alone needs | Internal: moves with the board bundle | 31 |
 | [Fleet](#fleet) | Legs the `shuttle` CLI and other daemons call, and operator diagnostics | Internal: moves with the CLI (`contract_level`) | 24 |
 | [Extensions](#extensions) | `voice`, `speak`, `rex` and `remote-control`, each needing software beyond a plain daemon | Internal; optional | 13 |
 
@@ -872,14 +872,14 @@ A request no host can speak answers 400.
 | `GET /speak/voices` | speaker-routed | `{voices: [{name, kind, role}]}`: the voice bank and pocket-tts built-ins, each with the role claiming it |
 | `POST /speak` | speaker-routed | Queue `{fiber_id, text, voice?}`, set `{muted}`, or drive the inbox with `{inbox: "play"\|"next"\|"stop"}` |
 
-`shuttle say`, `voices` and `inbox` drive the spoken outbox (`Shuttle.Speaker`).
+`shuttle say` (including `--held`, `--play`, `--next`, `--stop`) and `shuttle voices` drive the spoken outbox (`Shuttle.Speaker`).
 A request goes to the host that can speak: `recorder=<host>` addresses one, else the receiving daemon answers when it has `afplay`, else the first remote that reports `available`; 400 when none can.
 Every response names that host as `recorder`.
 Lines render with pocket-tts in the voice of their fiber's role (the charter's `voice:`, default `dylan_thomas`) and play one at a time in arrival order.
 While Listen has a target, only that constitution's lines play; the rest are `held` per card until it is in view.
 Playback pauses while the human is talking or the speaker is `muted`, and resumes from just before where it stopped.
 `POST /speak` with a line answers `{voice, ahead, held, recorder}`; `ahead` counts lines before it.
-`held` in `GET /speak` lists `{fiber_id, name, n, first}` per card, oldest first; `inbox` is `{playing, card}`.
+`held` in `GET /speak` lists `{fiber_id, name, n, first, at}` per card (`at` is the oldest line's queue time in epoch milliseconds), oldest first; `inbox` is `{playing, card}`.
 The queue and current line are journaled, so a daemon restart resumes rather than drops them.
 
 ### rex

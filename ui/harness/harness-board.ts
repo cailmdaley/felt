@@ -31,6 +31,7 @@
  * harness-board-dist/index.html via file://. The page ships with the bundle,
  * so the output directory is self-sufficient — nothing to copy in by hand.
  */
+import { addOutboxFixtures } from './outbox-fixtures.js'
 import { addChangeFixtures } from './change-fixtures.js'
 import { stampLifecycle } from './ownerLifecycle.js'
 import { addNavigationFixtures } from './nav-back-fixtures.js'
@@ -64,7 +65,7 @@ const search = new URLSearchParams(window.location.search)
 const example = search.get('example')
 const transcriptScenario = search.get('transcript')
 const docsExample = example === 'workshop' ? workshopExample(now) : null
-const workspaceFixture = example === 'change' || example === 'workspace' || example === 'music' || example === 'nav-back' || example === 'threads' || example === 'frontier' || example === 'families' || example === 'thread-review' ? workspaceExample(now, { music: example === 'music', transcriptScenario }) : null
+const workspaceFixture = example === 'change' || example === 'workspace' || example === 'music' || example === 'nav-back' || example === 'threads' || example === 'frontier' || example === 'families' || example === 'thread-review' || example === 'outbox' ? workspaceExample(now, { music: example === 'music', transcriptScenario }) : null
 if (workspaceFixture && search.has('long-title')) {
   const fiber = workspaceFixture.feed.fibers.find(row => (row.fiber as Record<string, unknown>).id === WORKSPACE_ID)!.fiber as Record<string, unknown>
   fiber.name = LONG_WORKSPACE_NAME
@@ -93,6 +94,7 @@ if (workspaceFixture && search.has('manyFiles')) {
     workspaceFixture.receipts.push({ ...first, fullPath, basename: fullPath.split('/').at(-1), timestamp: now - (40 + i * 7) * 60_000, sessionId: `many-files-${i}` })
   }
 }
+const outboxFixture = workspaceFixture && example === 'outbox' ? addOutboxFixtures(workspaceFixture, now) : null
 const nativeWorkspaceFiles = workspaceFixture ? installWorkspaceNativeURLs(workspaceFixture) : null
 if (docsExample || workspaceFixture) document.querySelectorAll('.sim-corner').forEach(element => element.remove())
 const iso = (offsetMs: number) => new Date(now + offsetMs).toISOString()
@@ -1665,6 +1667,13 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (docsExample) return json({ host: docsExample.feed.host, records: [], origins: docsExample.feed.origins })
     return json({ host: LOCAL_HOST, records: [], origins: MOCK_ORIGINS })
   }
+
+  if (url.includes('/api/v1/outbox/dismissed')) return json({ dismissed: outboxFixture?.dismissed ?? [], reach_ms: 14 * 86_400_000 })
+  if (url.includes('/api/v1/outbox/dismiss')) {
+    outboxFixture?.dismissed.push(String(body().key))
+    return json({ ok: true })
+  }
+  if (url.endsWith('/api/v1/speak')) return json({ held: outboxFixture?.held ?? [] })
 
   if (url.includes('/api/v1/board/marks')) {
     // The daemon's join, on the fixture's ledgers: every pairing a launch, each

@@ -416,7 +416,7 @@ export class KanbanModal {
       deskRows: () => this.workspaceCards(),
       deskPlacement: card => this.deskProjection.placements.get(deskCardKey(card)),
       threadIndex: () => threadIndexFor(this.deskResponse ?? this.lastResponse),
-      origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : this.activeViewId === 'globe' ? 'Globe' : 'Board',
+      origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : this.activeViewId === 'globe' ? 'Globe' : this.activeViewId === 'outbox' ? 'Outbox' : 'Board',
       onVisibility: (active) => { this.showWorkspace(active); if (!active) this.voice.see(null) },
       onSight: card => this.voice.see(card && constitutionFor(card, boardCards(this.lastResponse))),
       onReturnCard: card => {
@@ -933,6 +933,7 @@ export class KanbanModal {
       response,
       cards,
       workspace: this.workspace ?? undefined,
+      sends: this.fiberSends,
       shuttleBase: this.shuttleBase,
       // The fetchers ARE the context's temporal half — closures over their own
       // cache, so spreading them is the same object, not a rebind.
@@ -971,7 +972,7 @@ export class KanbanModal {
   }
 
   /**
-   * `1`–`4` switch views. Deliberately narrow: a bare digit only, so
+   * `1`–`5` switch views. Deliberately narrow: a bare digit only, so
    * `Cmd/Ctrl+1` stays the browser's tab switch, and only when the keystroke
    * is not going somewhere it matters — a focused text field, or a
    * dialog layered over the board. Returns true when the
@@ -980,7 +981,7 @@ export class KanbanModal {
   private handleViewHotkey(e: KeyboardEvent): boolean {
     const surface = this.workspace?.isActive ? 'reader' : this.activeViewId === 'board' ? 'overview' : 'desk'
     const intent = keyIntent(e, surface)
-    if (intent !== 'desk' && intent !== 'chronicle' && intent !== 'board' && intent !== 'globe') return false
+    if (intent !== 'desk' && intent !== 'chronicle' && intent !== 'board' && intent !== 'globe' && intent !== 'outbox') return false
     if (keystrokeIsSpokenFor()) return false
     e.preventDefault()
     e.stopPropagation()

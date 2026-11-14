@@ -1,0 +1,56 @@
+.kbn-outbox .kbn-view-body { display: block; }
+.kbn-outbox-keys, .kbn-outbox-note, .kbn-outbox-empty {
+  font: italic var(--type-note)/var(--leading-prose) var(--font-serif);
+  color: var(--kbn-ink-muted);
+}
+.kbn-outbox-note:empty { display: none; }
+.kbn-outbox-row {
+  display: flex;
+  align-items: center;
+  border-bottom: 0.5px solid var(--kbn-rule);
+  min-width: 0;
+}
+.kbn-outbox-open {
+  display: grid;
+  grid-template-columns: 22px minmax(120px, 24%) minmax(0, 1fr) 56px;
+  gap: 12px;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  padding: 10px 0;
+  border: 0;
+  background: none;
+  color: var(--kbn-ink);
+  text-align: left;
+  font: var(--type-row)/var(--leading-ui) var(--font-serif);
+  cursor: pointer;
+}
+.kbn-outbox-name, .kbn-outbox-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kbn-outbox-name { font-weight: 500; }
+.kbn-outbox-text { color: var(--kbn-ink-soft); }
+.kbn-outbox-age { color: var(--kbn-ink-muted); font-size: var(--type-note); text-align: right; white-space: nowrap; }
+.kbn-outbox-mark { display: flex; color: var(--kbn-owed-bright); }
+.kbn-outbox-mark svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
+.kbn-outbox-dismiss {
+  align-self: stretch;
+  width: 40px;
+  background: none;
+  border: 0;
+  color: var(--kbn-ink-muted);
+  font: var(--type-row) var(--font-serif);
+  cursor: pointer;
+}
+.kbn-outbox button:focus-visible { outline: 1px solid var(--kbn-you); outline-offset: -1px; }
+.kbn-outbox-file { width: min(1000px, 92vw); height: 88dvh; background: var(--kbn-paper); color: var(--kbn-ink); border: 1px solid var(--kbn-rule); padding: 12px; }
+.kbn-outbox-file .kbn-fileview-frame-wrap { height: calc(100% - 40px); }
+@media (max-width: 600px) {
+  .kbn-outbox { padding-inline: 8px; }
+  .kbn-outbox-keys { display: none; }
+  .kbn-outbox-open { grid-template-columns: 18px minmax(68px, 27%) minmax(0, 1fr) 38px; gap: 6px; min-height: 48px; font-size: var(--type-note); }
+  .kbn-outbox-mark svg { width: 17px; height: 17px; }
+  .kbn-outbox-dismiss { width: 36px; }
+}

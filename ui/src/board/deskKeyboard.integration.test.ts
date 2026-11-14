@@ -61,7 +61,7 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('requestAnimationFrame', () => 1)
   vi.stubGlobal('cancelAnimationFrame', vi.fn())
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ fibers: [], files: [] }))))
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ fibers: [], files: [], held: [], dismissed: [], reach_ms: 14 * 86_400_000 }))))
   Object.defineProperty(HTMLElement.prototype, 'scrollTo', { configurable: true, value: scroll })
   Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: intoView })
   window.history.replaceState(null, '', '/')
@@ -99,8 +99,8 @@ it('repaints the Desk as the voice target changes', () => {
 it('moves through the view tabs by arrows, Home and End, and keeps the numeric hotkeys', async () => {
   await settle()
   const tabs = Array.from(document.querySelectorAll<HTMLElement>('[role="tablist"][aria-label="Board views"] [role="tab"]'))
-  expect(tabs).toHaveLength(4)
-  expect(tabs.map(tab => tab.tabIndex)).toEqual([0, -1, -1, -1])
+  expect(tabs).toHaveLength(5)
+  expect(tabs.map(tab => tab.tabIndex)).toEqual([0, -1, -1, -1, -1])
   tabs[0].focus()
   // The tablist's own keys do not reach the Desk underneath it.
   const before = selected()
@@ -112,7 +112,7 @@ it('moves through the view tabs by arrows, Home and End, and keeps the numeric h
   expect(selected()).toBe(before)
   press('End', {}, document.activeElement!)
   await settle()
-  expect(document.activeElement).toBe(tabs[3])
+  expect(document.activeElement).toBe(tabs[4])
   press('ArrowRight', {}, document.activeElement!)
   await settle()
   expect(document.activeElement).toBe(tabs[0])
@@ -120,7 +120,7 @@ it('moves through the view tabs by arrows, Home and End, and keeps the numeric h
   // Every other Desk key still works from a focused tab.
   press('j', {}, document.activeElement!)
   expect(selected()).not.toBe(before)
-  for (const [index, key] of ['1', '2', '3', '4'].entries()) {
+  for (const [index, key] of ['1', '2', '3', '4', '5'].entries()) {
     press(key, {}, document.activeElement!)
     await settle()
     expect(tabs[index].getAttribute('aria-selected')).toBe('true')

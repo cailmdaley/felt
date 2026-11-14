@@ -118,6 +118,8 @@ defmodule Shuttle.SpeakerTest do
     fibers = [fibers: fn -> [%{"id" => "a/two", "uid" => "U2", "name" => "Two card"}] end]
     set(world, %{target: ["U1"]})
 
+    before = System.system_time(:millisecond)
+
     for text <- ["one", "two"] do
       {:ok, %{held: true}} =
         Speaker.speak(
@@ -126,7 +128,18 @@ defmodule Shuttle.SpeakerTest do
         )
     end
 
-    assert %{held: [%{fiber_id: "a/two", name: "Two card", n: 2}]} = Speaker.show(server)
+    assert %{held: [%{fiber_id: "a/two", name: "Two card", n: 2, first: "one", at: at}]} =
+             Speaker.show(server)
+
+    assert at >= before and at <= System.system_time(:millisecond)
+
+    {:ok, _} =
+      Speaker.speak(
+        %{"fiber_id" => "a/two", "text" => "three", "voice" => "jean"},
+        Keyword.merge(server, fibers)
+      )
+
+    assert %{held: [%{n: 3, at: ^at}]} = Speaker.show(server)
   end
 
   test "holds while the user talks and resumes just before where it stopped",

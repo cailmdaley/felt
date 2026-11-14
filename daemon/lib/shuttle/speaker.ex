@@ -297,6 +297,8 @@ defmodule Shuttle.Speaker do
     do: {:reply, {:error, "muted must be a boolean"}, state}
 
   def handle_call({:speak, item}, _from, state) do
+    item = Map.put(item, :at, state.wall.())
+
     ahead =
       :queue.len(state.queue) +
         Enum.count([state.current, state.ahead, state.render], &(not is_nil(&1)))
@@ -747,7 +749,13 @@ defmodule Shuttle.Speaker do
     |> Enum.group_by(& &1.fiber_id)
     |> Enum.map(fn {fiber_id, [first | _] = lines} ->
       {Enum.find_index(held, &(&1 == first)),
-       %{fiber_id: fiber_id, name: name_of(state, first), n: length(lines), first: first.text}}
+       %{
+         fiber_id: fiber_id,
+         name: name_of(state, first),
+         n: length(lines),
+         first: first.text,
+         at: Map.get(first, :at)
+       }}
     end)
     |> Enum.sort_by(&elem(&1, 0))
     |> Enum.map(&elem(&1, 1))
