@@ -142,7 +142,7 @@ committed ids rather than minting their own.`,
 }
 
 // retryMove recognizes either endpoint before ordinary resolution and checks.
-func (a *app) retryMove(storage *felt.Storage, args []string) (bool, error) {
+func (a *app) retryMove(storage *felt.Storage, args []string, rename bool) (bool, error) {
 	stores := []*felt.Storage{storage}
 	if ext := storage.ExternalRefs(); ext != nil {
 		stores = append(stores, felt.NewStorage(filepath.Dir(ext.Root())))
@@ -164,7 +164,12 @@ func (a *app) retryMove(storage *felt.Storage, args []string) (bool, error) {
 				continue
 			}
 			parent := ""
-			if len(args) == 2 {
+			if rename {
+				if path.Join(felt.ParentPath(oldID), args[1]) != newID {
+					continue
+				}
+				parent = felt.ParentPath(newID)
+			} else if len(args) == 2 {
 				ref, err := resolveNestParent(candidate, "", args[1])
 				if err != nil {
 					continue
@@ -177,6 +182,9 @@ func (a *app) retryMove(storage *felt.Storage, args []string) (bool, error) {
 			result, err := candidate.MoveSubtree(oldID, newID)
 			if result != nil {
 				a.printRewrittenRefs(candidate, result)
+			}
+			if err == nil && rename {
+				err = a.finishRename(candidate, oldID, newID)
 			}
 			return true, err
 		}
@@ -230,7 +238,8 @@ directory with no fiber of its own (roles/ is always the top-level roles
 namespace); any other <parent>, and the child, resolve like a fiber id, except
 that an id resolving only by its last segment or as a prefix completion is
 refused, naming the fiber it would have reached. When either side lives
-outside this view, the move happens in the enclosing store.`,
+outside this view, the move happens in the enclosing store.
+Use felt rename <id> <new-slug> to change the basename instead.`,
 		Example: `  felt nest covariance analysis`,
 		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -240,7 +249,7 @@ outside this view, the move happens in the enclosing store.`,
 			}
 			scopeID := felt.CommandScope(a.env, root, a.dir)
 
-			if handled, err := a.retryMove(storage, args); handled {
+			if handled, err := a.retryMove(storage, args, false); handled {
 				return err
 			}
 			childRef, err := felt.ResolveExactRef(storage, scopeID, args[0])
@@ -322,7 +331,7 @@ store's top level.`,
 			}
 			scopeID := felt.CommandScope(a.env, root, a.dir)
 
-			if handled, err := a.retryMove(storage, args); handled {
+			if handled, err := a.retryMove(storage, args, false); handled {
 				return err
 			}
 			child, err := felt.ResolveExactRef(storage, scopeID, args[0])

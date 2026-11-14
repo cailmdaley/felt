@@ -42,12 +42,14 @@ running daemon's version when reachable, otherwise the local Mix release version
 
 | Command | Purpose |
 |---|---|
-| `felt nest <child> <parent>` | Move a fiber subtree under a parent, rewriting every reference the move would break (wikilinks, markdown links, `inputs.from`), across the enclosing store too from a view; refuses a guessed id |
+| `felt nest <child> <parent>` | Move a fiber subtree under a parent, keeping its basename and rewriting every reference the move would break (wikilinks, markdown links, `inputs.from`), across the enclosing store too from a view; refuses a guessed id. Use `rename` to change the basename |
+| `felt rename <id> <new-slug>` | Change the directory and document basename, preserving the intrinsic id and carrying descendants and references, including across linked repositories. Refuses guessed ids, existing destinations, and companion-file collisions. Lists remaining old paths for manual review; does not rewrite prose or opaque project fields |
 | `felt unnest <child>` | Move a nested fiber subtree to the top level, rewriting and refusing as `nest` does |
 | `felt recover-move [--abandon]` | Finish an interrupted subtree move's reference repairs; `--abandon` drops the journal without undoing the move or repairing remaining references |
 
+Live Shuttle workers keep their existing terminal names after a rename; the daemon identifies them by the intrinsic id, not the current leaf.
 Interrupted moves retain `.move-pending.json` in the store.
-Repeat the same `nest` or `unnest` command with either endpoint spelling of the child, or use `recover-move` there.
+Repeat the same `nest`, `unnest`, or `rename` command with either endpoint spelling of the child, or use `recover-move` there.
 A divergent reference document is refused rather than overwritten; resolve it before retrying, or abandon recovery and repair it by hand.
 Store support files `*.md.lock`, `.*.tmp` and `.move-pending.json*` belong in `.felt/.gitignore`; `felt init` repairs those entries.
 

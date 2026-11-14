@@ -15,4 +15,7 @@ Before deleting fibers with possible historical value, merging where the synthes
 
 ## After reshaping
 
-Run `felt check` for broken links and layout problems (`felt nest` rewrites the links a move would break), and commit each reshape with a message that explains it. If `felt session` reports fibers outside the directory layout, `felt migrate --dry-run` shows how they would be folded in.
+Use `felt rename <id> <new-slug>` to change a basename, carrying descendants and links, including across linked repositories.
+Live Shuttle workers keep their terminal names; the daemon finds them by the intrinsic id, which survives a rename.
+Review the remaining old paths it lists: prose, code, and opaque project fields are not rewritten.
+Run `felt check` for broken links and layout problems (`felt nest` and `felt rename` rewrite the links a move would break), and commit each reshape with a message that explains it. If `felt session` reports fibers outside the directory layout, `felt migrate --dry-run` shows how they would be folded in.

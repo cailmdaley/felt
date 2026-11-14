@@ -117,6 +117,7 @@ Common paths:
   felt tree <id> -L 2               containment around a fiber
   felt edit <id> --set key=value    a scalar project field (--unset key)
   felt nest <child> <parent>        move a subtree, rewriting links it would break
+  felt rename <id> <new-slug>       change a basename, carrying links and descendants
 
 Editing: write bodies, outcomes longer than a sentence (outcome: |-), and
 structured YAML in the file directly; quotes and newlines are easier there
@@ -202,6 +203,7 @@ func (a *app) rootCmd() *cobra.Command {
 		a.initCmd(),
 		a.syncCmd(),
 		a.nestCmd(),
+		a.renameCmd(),
 		a.unnestCmd(),
 		a.recoverMoveCmd(),
 		a.migrateCmd(),
