@@ -140,3 +140,56 @@ func TestChangeCommandBakesTheNamedChangeIntoTheCache(t *testing.T) {
 		t.Fatalf("--head bake: %+v %+v", report, c)
 	}
 }
+
+func TestChangeListReadsEachFollowedPRWithoutBaking(t *testing.T) {
+	t.Parallel()
+	dir, st := newStore(t)
+	env := testEnv(t)
+	env.Set("SHUTTLE_HOST", "change-host")
+	repo := t.TempDir()
+	sysenvtest.FakeCommand(t, env, "gh", `case "$3" in
+12) printf '%s' '{"number":12,"title":"Open one","url":"https://example.invalid/r/pull/12","headRefName":"feat/a","headRefOid":"abc","baseRefName":"develop","state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","additions":40,"deletions":3,"statusCheckRollup":[{"conclusion":"SUCCESS"},{"conclusion":"FAILURE"}]}' ;;
+5) printf '%s' '{"number":5,"title":"Merged one","url":"https://example.invalid/r/pull/5","headRefName":"feat/b","headRefOid":"def","baseRefName":"develop","state":"MERGED","mergeCommit":{"oid":"0123"},"additions":1,"deletions":9,"statusCheckRollup":[]}' ;;
+*) echo "GraphQL: Could not resolve to a PullRequest with the number of $3." >&2; exit 1 ;;
+esac`)
+	seedFiber(t, st, "followed", "", "open", map[string]any{"project_dir": repo, "host": "change-host", "change": map[string]any{"prs": []int{12, 404, 5}}}, nil)
+	seedFiber(t, st, "branch", "", "open", map[string]any{"project_dir": repo, "host": "change-host"}, nil)
+
+	out, _, err := executeIn(t, env, dir, "change", "followed", "--list", "--json")
+	if err != nil {
+		t.Fatalf("list: %v\n%s", err, out)
+	}
+	var prs []shuttle.ChangePRListing
+	if err := json.Unmarshal([]byte(out), &prs); err != nil {
+		t.Fatalf("%s: %v", out, err)
+	}
+	if len(prs) != 3 || prs[0].Number != 12 || prs[1].Number != 404 || prs[2].Number != 5 {
+		t.Fatalf("order: %+v", prs)
+	}
+	if p := prs[0]; p.Title != "Open one" || p.HeadBranch != "feat/a" || p.BaseBranch != "develop" || p.Additions != 40 || p.Deletions != 3 || p.Checks.Passed != 1 || p.Checks.Failed != 1 || p.Error != "" {
+		t.Fatalf("open PR: %+v", p)
+	}
+	if p := prs[1]; p.Title != "" || !strings.Contains(p.Error, "Could not resolve to a PullRequest") {
+		t.Fatalf("failed PR: %+v", p)
+	}
+	if p := prs[2]; p.State != "MERGED" || p.MergeCommit != "0123" || p.Deletions != 9 {
+		t.Fatalf("merged PR: %+v", p)
+	}
+	if entries, _ := os.ReadDir(filepath.Dir(st.Path("followed"))); len(entries) != 1 {
+		t.Fatalf("list wrote beside the fiber: %v", entries)
+	}
+
+	out, _, err = executeIn(t, env, dir, "change", "branch", "--list", "--json")
+	if err != nil || strings.TrimSpace(out) != "[]" {
+		t.Fatalf("no PRs: %q %v", out, err)
+	}
+	out, _, err = executeIn(t, env, dir, "change", "followed", "--list")
+	if err != nil || !strings.Contains(out, "#12\tOpen one\tfeat/a → develop\tOPEN\tchecks 1/2\t+40 −3") || !strings.Contains(out, "#404\tgh pr view 404") {
+		t.Fatalf("table: %q %v", out, err)
+	}
+	for _, flag := range [][]string{{"--pr", "12"}, {"--cache"}, {"--base", "main"}, {"--check"}} {
+		if _, _, err := executeIn(t, env, dir, append([]string{"change", "followed", "--list"}, flag...)...); err == nil || !strings.Contains(err.Error(), "--list cannot be combined with "+flag[0]) {
+			t.Fatalf("%v: %v", flag, err)
+		}
+	}
+}

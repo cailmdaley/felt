@@ -18,7 +18,7 @@ import (
 
 func (a *app) changeCmd() *cobra.Command {
 	var base, head, repo, storyPath, name string
-	var check, cache bool
+	var check, cache, list bool
 	var prNumber int
 	cmd := &cobra.Command{
 		Use: "change <fiber> [--pr N | --base B]", Short: "Bake a Git change and its reading story into a fiber companion",
@@ -31,9 +31,17 @@ shuttle.change.base or the remote's default branch.
 With --story, validate every stop and flag and report changed-line coverage. Flags do not
 count as coverage. --check validates and reports without writing a companion.
 --cache writes the bundle to this host's cache instead of beside the fiber.
+--list reads the PRs in shuttle.change.prs from GitHub and bakes nothing.
 --json emits the validation and coverage report, not the change bundle.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if list {
+				for _, flag := range []string{"pr", "base", "head", "story", "cache", "check"} {
+					if cmd.Flags().Changed(flag) {
+						return fmt.Errorf("--list cannot be combined with --%s", flag)
+					}
+				}
+			}
 			if cmd.Flags().Changed("pr") && (cmd.Flags().Changed("head") || cmd.Flags().Changed("base")) {
 				return fmt.Errorf("--pr cannot be combined with --base or --head")
 			}
@@ -78,6 +86,9 @@ count as coverage. --check validates and reports without writing a companion.
 			repo, err = a.resolveProjectDirFlag(repo)
 			if err != nil {
 				return err
+			}
+			if list {
+				return a.listChangePRs(repo, spec.PRs)
 			}
 			// Neither --pr nor --base: the fiber names its change.
 			branchView := prNumber == 0 && base == ""
@@ -297,5 +308,28 @@ count as coverage. --check validates and reports without writing a companion.
 	cmd.Flags().BoolVar(&check, "check", false, "Validate and report without writing")
 	cmd.Flags().IntVar(&prNumber, "pr", 0, "GitHub PR number (alternative to --base and --head)")
 	cmd.Flags().BoolVar(&cache, "cache", false, "Write the bundle to this host's cache, not beside the fiber")
+	cmd.Flags().BoolVar(&list, "list", false, "List the PRs in shuttle.change.prs from GitHub without baking")
 	return cmd
+}
+
+// listChangePRs prints the PRs a fiber follows, in the order named.
+func (a *app) listChangePRs(repo string, numbers []int) error {
+	listings := shuttle.ListChangePRs(a.env, repo, numbers)
+	if a.json {
+		enc := json.NewEncoder(a.env.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(listings)
+	}
+	for _, pr := range listings {
+		if pr.Error != "" {
+			fmt.Fprintf(a.env.Stdout, "#%d\t%s\n", pr.Number, pr.Error)
+			continue
+		}
+		state := pr.State
+		if pr.Draft {
+			state = "DRAFT"
+		}
+		fmt.Fprintf(a.env.Stdout, "#%d\t%s\t%s → %s\t%s\tchecks %d/%d\t+%d −%d\n", pr.Number, pr.Title, pr.HeadBranch, pr.BaseBranch, state, pr.Checks.Passed, pr.Checks.Total, pr.Additions, pr.Deletions)
+	}
+	return nil
 }
