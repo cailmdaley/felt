@@ -545,7 +545,7 @@ describe('session verbs', () => {
     field.replaceChildren(document.createElement('br'))
     field.dispatchEvent(new Event('input'))
     expect(field.childNodes).toHaveLength(0)
-    expect(field.dataset.placeholder).toBe('Resume with…')
+    expect(field.title).toMatch(/^Resume .+ with a message$/)
   })
 
   it.each([
@@ -586,7 +586,7 @@ describe('session verbs', () => {
     dock.open(task({ status: 'active', workerState: 'running', sessionUuid: 'live', tmuxSession: 'worker' }))
     const field = messageField()
     expect(session('Send').disabled).toBe(true)
-    expect(field.dataset.placeholder).toBe('Message')
+    expect(field.title).toMatch(/^Message /)
     type(field, 'one more thing')
     expect(session('Send').disabled).toBe(false)
     vi.mocked(fetch).mockClear()
@@ -604,7 +604,7 @@ describe('session verbs', () => {
     vi.mocked(fetch).mockClear()
     vi.mocked(fetch).mockResolvedValue(response({}))
     const field = messageField(actions.el)
-    expect(field.dataset.placeholder).toBe('Resume with…')
+    expect(field.title).toBe('Resume Thread with a message')
     type(field, 'pick up the plots')
     field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     await settle()

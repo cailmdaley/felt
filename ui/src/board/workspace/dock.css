@@ -79,8 +79,8 @@
   white-space: pre-wrap; overflow-wrap: anywhere;
   color: var(--ws-ink); font: var(--type-label)/var(--leading-prose) var(--font-serif);
 }
-/* The placeholder keeps one line beside the tools, ending in an ellipsis. */
-.ws-worker-message:empty::before { content: attr(data-placeholder); display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--ws-ink-faint); pointer-events: none; }
+/* An empty box says nothing: a faint resting caret marks where typing goes, until the real one takes over. */
+.ws-worker-message:empty:not(:focus)::before { content: ''; display: block; width: 1px; height: 1lh; background: var(--ws-ink-faint); pointer-events: none; }
 .ws-worker-message[hidden] { display: none; }
 /* Pasted or dropped images wait under the text as thumbnails until the send. */
 .ws-worker-images { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 10px 8px; }

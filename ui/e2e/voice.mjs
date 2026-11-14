@@ -66,7 +66,8 @@ try {
   await menu(page)
   await shot(page, 'meeting-menu')
   await page.getByRole('menuitem', { name: 'End meeting', exact: true }).click()
-  await band(page).locator('.ws-voice-strip[data-mode=following]').waitFor()
+  // Following the card the box already messages, the strip names nothing.
+  await band(page).locator('.ws-voice-strip[data-mode=following]').waitFor({ state: 'hidden' })
   await menu(page)
   await page.getByRole('menuitem', { name: 'Pin to this card', exact: true }).click()
   await band(page).locator('.ws-voice-strip[data-mode=pinned]').waitFor()
@@ -85,7 +86,7 @@ try {
   await page.locator('.voice-transcript').waitFor({ state: 'detached' })
   await menu(page)
   await page.getByRole('menuitem', { name: 'Follow me', exact: true }).click()
-  await band(page).locator('.ws-voice-strip[data-mode=following]').waitFor()
+  await band(page).locator('.ws-voice-strip[data-mode=following]').waitFor({ state: 'hidden' })
   await mic(page).click()
   await band(page).locator('.listen-muted').waitFor()
   await menu(page)
