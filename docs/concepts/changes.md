@@ -15,7 +15,8 @@ shuttle change review-task --base origin/main --head topic/change \
 ```
 
 `--repo` defaults to the fiber's `shuttle.project_dir`, then the current directory.
-`--pr N` reads GitHub metadata through `gh pr view`, fetches the exact head OID into `refs/shuttle/pr/N/head` and the base branch into `refs/remotes/origin/<base>`. Stacked PRs compare against their own base branch. It defaults the name to `pr-N` and cannot be mixed with `--base` or `--head`.
+`--pr N` reads GitHub metadata through `gh pr view` and fetches from the PR's base repository, regardless of the checkout's remotes.
+The exact head OID goes into `refs/shuttle/pr/N/head` and the base branch into `refs/shuttle/pr/N/base`; remote-tracking refs are untouched. Stacked PRs compare against their own base branch. It defaults the name to `pr-N` and cannot be mixed with `--base` or `--head`.
 `--head` defaults to `HEAD`.
 The filename defaults to the head ref with slashes replaced by hyphens and punctuation slugified; detached `HEAD` uses the fiber slug.
 `--name walkthrough` writes `walkthrough.change.json`.

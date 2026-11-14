@@ -67,9 +67,10 @@ func ResolveChangePR(env *sysenv.Env, repo string, number int) (*ChangePR, strin
 		}
 	}
 	head := fmt.Sprintf("refs/shuttle/pr/%d/head", number)
-	base := "refs/remotes/origin/" + raw.BaseRefName
+	base := fmt.Sprintf("refs/shuttle/pr/%d/base", number)
+	baseRepo, _, _ := strings.Cut(raw.URL, "/pull/")
 	// Fetch by OID rather than a similarly named local or remote branch.
-	fetch := env.Command("git", "-C", repo, "fetch", "origin", "+"+raw.HeadRefOid+":"+head, "+refs/heads/"+raw.BaseRefName+":"+base)
+	fetch := env.Command("git", "-C", repo, "fetch", baseRepo, "+"+raw.HeadRefOid+":"+head, "+refs/heads/"+raw.BaseRefName+":"+base)
 	if out, err := fetch.CombinedOutput(); err != nil {
 		return nil, "", "", fmt.Errorf("fetch PR: %s: %w", strings.TrimSpace(string(out)), err)
 	}

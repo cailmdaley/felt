@@ -140,7 +140,7 @@ count as coverage. --check validates and reports without writing a companion.
 				change.PR = pr
 				change.Title = pr.Title
 				change.HeadRef = pr.HeadBranch
-				change.BaseRef = "origin/" + pr.BaseBranch
+				change.BaseRef = pr.BaseBranch
 			}
 			report := shuttle.ValidateChange(change, hunks)
 			path := filepath.Join(filepath.Dir(fiberPath), name+".change.json")

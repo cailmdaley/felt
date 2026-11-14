@@ -41,16 +41,21 @@ func TestChangePRFetchExactHeadAndStackedBase(t *testing.T) {
 	os.WriteFile(filepath.Join(repo, "code"), []byte("head\n"), 0644)
 	git("commit", "-am", "head")
 	head := git("rev-parse", "HEAD")
-	git("remote", "add", "origin", repo)
+	git("remote", "add", "origin", t.TempDir())
+	git("update-ref", "refs/remotes/origin/stack", head)
+	git("config", "url."+repo+".insteadOf", "https://example.invalid/upstream/repo")
 	// A misleading local PR branch must never select the base instead of head.
 	git("branch", "pr/7", base)
-	sysenvtest.FakeCommand(t, env, "gh", fmt.Sprintf(`printf '%%s' '{"number":7,"title":"PR title","url":"https://example.invalid/7","headRefName":"topic","headRefOid":"%s","baseRefName":"stack","state":"OPEN","isDraft":true,"mergeable":"MERGEABLE","statusCheckRollup":[{"conclusion":"SUCCESS"},{"state":"FAILURE"},{"status":"IN_PROGRESS"}]}'`, head))
+	sysenvtest.FakeCommand(t, env, "gh", fmt.Sprintf(`printf '%%s' '{"number":7,"title":"PR title","url":"https://example.invalid/upstream/repo/pull/7","headRefName":"topic","headRefOid":"%s","baseRefName":"stack","state":"OPEN","isDraft":true,"mergeable":"MERGEABLE","statusCheckRollup":[{"conclusion":"SUCCESS"},{"state":"FAILURE"},{"status":"IN_PROGRESS"}]}'`, head))
 	pr, b, h, err := ResolveChangePR(env, repo, 7)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if git("rev-parse", h) != head || git("rev-parse", b) != base {
 		t.Fatal("wrong fetched commits")
+	}
+	if b != "refs/shuttle/pr/7/base" || git("rev-parse", "refs/remotes/origin/stack") != head {
+		t.Fatal("fetch overwrote the fork's tracking ref")
 	}
 	if pr.Checks != (ChangeChecks{Total: 3, Passed: 1, Failed: 1, Pending: 1}) || !pr.Draft {
 		t.Fatalf("%+v", pr)

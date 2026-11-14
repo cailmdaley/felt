@@ -92,7 +92,8 @@ func TestChangeCommandRealGit(t *testing.T) {
 		t.Fatalf("bundle: %+v", c)
 	}
 	git("remote", "add", "origin", repo)
-	sysenvtest.FakeCommand(t, env, "gh", fmt.Sprintf(`printf '%%s' '{"number":7,"title":"A first-class PR","headRefName":"topic/change","headRefOid":"%s","baseRefName":"main","state":"OPEN","statusCheckRollup":[]}'`, git("rev-parse", "HEAD")))
+	git("config", "url."+repo+".insteadOf", "https://example.invalid/base/repo")
+	sysenvtest.FakeCommand(t, env, "gh", fmt.Sprintf(`printf '%%s' '{"number":7,"title":"A first-class PR","url":"https://example.invalid/base/repo/pull/7","headRefName":"topic/change","headRefOid":"%s","baseRefName":"main","state":"OPEN","statusCheckRollup":[]}'`, git("rev-parse", "HEAD")))
 	if _, err := run("review", "--pr", "7"); err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +105,7 @@ func TestChangeCommandRealGit(t *testing.T) {
 	if err := json.Unmarshal(prBytes, &prBundle); err != nil {
 		t.Fatal(err)
 	}
-	if prBundle.PR == nil || prBundle.PR.Number != 7 || prBundle.Title != "A first-class PR" || prBundle.BaseRef != "origin/main" || prBundle.HeadRef != "topic/change" || prBundle.Stats.Additions != 1 {
+	if prBundle.PR == nil || prBundle.PR.Number != 7 || prBundle.Title != "A first-class PR" || prBundle.BaseRef != "main" || prBundle.HeadRef != "topic/change" || prBundle.Stats.Additions != 1 {
 		t.Fatalf("PR bundle: %+v", prBundle)
 	}
 	for _, field := range []string{`"pr":`, `"stats":`} {
