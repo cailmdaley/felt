@@ -158,6 +158,9 @@ it('centers a flag on the requested plain row without syntax highlighting', asyn
   b.files[0].lines[0].text = 'x'.repeat(30_000)
   b.story = { overview: '', chapters: [], roles: {}, flags: [{ file: 'app.ts', from: 1, side: 'new', text: 'Here' }] }
   const { root, reader } = mount(b, 'plain-flag')
+  expect(root.querySelector('.change-flags')).toBeNull()
+  expect(root.querySelector('.change-opening')?.firstElementChild?.className).toBe('change-opening-facts')
+  expect(root.textContent).not.toContain('Look here first')
   expect(root.querySelector<HTMLDetailsElement>('.change-file')!.open).toBe(false)
   root.querySelector<HTMLButtonElement>('.change-flag button')!.click()
   expect(root.querySelector<HTMLDetailsElement>('.change-file')!.open).toBe(true)

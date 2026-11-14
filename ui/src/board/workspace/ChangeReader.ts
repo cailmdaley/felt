@@ -78,7 +78,9 @@ export function mountChangeReader(
   const chapterHosts = new Map<string, HTMLElement>()
   if (map) main.append(map)
   main.append(heading)
-  if (bundle.story) main.append(storyProse(bundle.story.overview))
+  const opening = el('div', 'change-opening')
+  main.append(opening)
+  if (bundle.story) opening.append(storyProse(bundle.story.overview))
   else
     main.append(
       el(
@@ -284,9 +286,7 @@ export function mountChangeReader(
   }
   const flags = bundle.story?.flags ?? []
   if (flags.length) {
-    const box = el('aside', 'change-flags')
-    box.setAttribute('aria-label', 'Look here first')
-    box.append(el('h2', '', 'Look here first'))
+    const box = el('div', 'change-opening-facts')
     for (const flag of flags) {
       const jump = button(
         `${flag.file}${flag.from ? `:${flag.from}${flag.side === 'old' ? ' (old)' : ''}` : ''}`,
@@ -296,7 +296,7 @@ export function mountChangeReader(
       row.append(jump, storyProse(flag.text))
       box.append(row)
     }
-    main.append(box)
+    opening.prepend(box)
   }
   const story = section(
     'Story',
