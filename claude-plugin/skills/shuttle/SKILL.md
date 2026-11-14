@@ -108,6 +108,8 @@ shuttle board                            # your family's board
 shuttle send-file <path>                 # put a file on the human's board (or your harness's own file tool)
 ```
 
+**Work the human asks for now starts now.** When you create a thread, or hand work to a fiber whose worker isn't live, launch it in the same step (`shuttle thread` arms by default; `shuttle dispatch <fiber> --message "…"` starts a worker with your request): a draft or a queued message waits for someone who may not come back. Leave it unlaunched only when the human says later, and then say on the card what it waits for.
+
 Messaging a fiber reaches its current worker, or queues for the next one. A busy Claude worker receives context on main-thread prompt submission or tool completion; unoffered mail falls back to native wake after 30 seconds, or sooner when the worker stops working.
 Fallback failures return a notice to the sender; native delivery still respects Claude's approval policy.
 
