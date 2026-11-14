@@ -234,6 +234,7 @@ func (a *app) rootCmd() *cobra.Command {
 		a.migrateCmd(),
 		a.migrateDocumentsCmd(),
 		a.standingTransitionCmd(),
+		a.adoptCmd(),
 		a.patchDocumentCmd(),
 		a.shuttleContractCmd(),
 		a.processIdentityCmd(),
