@@ -329,6 +329,12 @@ func TestCollectDaemonReceiptRequiresMatchingContract(t *testing.T) {
 			"boot_hold": map[string]any{"stage": "outbox_baseline", "reason": "corrupt /state/thread-outbox.json"},
 		}, receiptMismatch},
 		{"mismatch", map[string]any{"contract": map[string]any{"expected": 2, "observed": 1, "ok": false}}, receiptMismatch},
+		{"check could not run after a match", map[string]any{"contract": map[string]any{
+			"expected": 2, "observed": 2, "ok": true, "error": "shuttle contract could not run: eagain",
+		}}, receiptHealthy},
+		{"check never ran", map[string]any{"contract": map[string]any{
+			"expected": 2, "observed": nil, "ok": true, "error": "shuttle contract could not run: eagain",
+		}}, receiptMismatch},
 		{"booting ignores incomplete contract and listener evidence", map[string]any{
 			"ready": false, "listen": "tcp://127.0.0.1:4000", "host_class": "shared-multi-user",
 			"peer_gate": "none", "contract": map[string]any{"expected": 3, "observed": 4, "ok": false},
@@ -358,6 +364,12 @@ func TestCollectDaemonReceiptRequiresMatchingContract(t *testing.T) {
 				if status != receiptMismatch || repair == "" {
 					t.Fatalf("held daemon must not be downgraded to transient booting: %s %s", status, repair)
 				}
+			}
+			if strings.HasPrefix(tc.name, "check") && got.ContractError != "shuttle contract could not run: eagain" {
+				t.Fatalf("a check that could not run must say why: %+v", got)
+			}
+			if tc.name == "check never ran" && !strings.Contains(got.Repair, "has not run yet (shuttle contract could not run: eagain)") {
+				t.Fatalf("an unchecked contract must not read as a skew: %+v", got)
 			}
 			if tc.want == receiptHealthy && !got.Contract {
 				t.Fatal("matching daemon contract was not accepted")

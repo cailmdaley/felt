@@ -11,10 +11,12 @@ defmodule Shuttle.Contract do
   newer daemon shelling an older CLI fails every write that uses a flag the CLI
   does not know.
 
-  During the Poller's contract-check stage the daemon shells `shuttle contract` and
-  compares its bare-integer stdout against `expected_level/0` — catching a
-  stale CLI installed alongside a newer daemon (or vice versa) once at boot
-  instead of failing one shelled write at a time with "unknown flag".
+  The Poller shells `shuttle contract` at boot and periodically after, and
+  compares its bare-integer stdout against `expected_level/0`, catching a stale
+  CLI installed alongside a newer daemon (or vice versa) as a hold on fresh
+  dispatch instead of one shelled write failing at a time with "unknown flag".
+  A check that could not run is not a verdict: the previous one stands and the
+  check is retried.
   """
 
   require Logger
@@ -61,59 +63,55 @@ defmodule Shuttle.Contract do
   @spec expected_level() :: pos_integer()
   def expected_level, do: @expected_level
 
-  @doc """
-  Shell `shuttle contract` through `runner`, using its command timeout,
-  and compare its output to `expected_level/0`.
-
-  Always returns a map, never raises:
-
-      %{expected: 1, observed: 1, ok: true, reason: nil}
-      %{expected: 1, observed: 2, ok: false, reason: "expected contract level 1, CLI reports 2"}
-      %{expected: 1, observed: "unknown command \\"contract\\"...", ok: false, reason: "..."}
-
-  `ok: false` covers EVERY shape other than an exact match on stdout exactly
-  `"<expected_level>\\n"` at exit 0 — a mismatched level, unparseable/
-  multi-line stdout, or a nonzero exit (including a CLI that does not expose
-  `contract`: the daemon cannot determine its level, so it treats it as
-  incompatible, the same as an explicit mismatch).
+  @typedoc """
+  The daemon's standing contract reading. `observed`, `ok` and `reason` are
+  the verdict of the last check that ran; `error` says why the latest attempt
+  could not run, and is nil once one does.
   """
-  @spec check(module()) :: %{
+  @type reading :: %{
           expected: pos_integer(),
-          observed: integer() | String.t(),
+          observed: integer() | nil,
           ok: boolean(),
-          reason: String.t() | nil
+          reason: String.t() | nil,
+          error: String.t() | nil
         }
+
+  # The check runs inside the Poller. A wedged one is retried on the next
+  # interval, so it holds the Poller only briefly.
+  @check_timeout_ms 5_000
+
+  @doc "The reading before any check has run: no evidence of skew."
+  @spec unchecked() :: reading()
+  def unchecked,
+    do: %{expected: @expected_level, observed: nil, ok: true, reason: nil, error: nil}
+
+  @doc """
+  Shell `shuttle contract` through `runner` and classify the answer.
+
+  Only a CLI that ran and printed a level gives a verdict: `{:verdict, map}`,
+  with `ok: false` and the missing surfaces named when the level differs.
+  Everything else (a spawn failure such as `:eagain` under a pid cap, a
+  timeout, a nonzero exit, stdout that is not a level) is
+  `{:unavailable, reason}`: the check did not run, which is no evidence about
+  the CLI's level.
+  """
+  @spec check(module()) ::
+          {:verdict, %{observed: integer(), ok: boolean(), reason: String.t() | nil}}
+          | {:unavailable, String.t()}
   def check(runner) do
-    case Shuttle.CLI.run(["contract"], runner: runner) do
+    case Shuttle.CLI.run(["contract"], runner: runner, timeout_ms: @check_timeout_ms) do
       {:ok, output} ->
         parse_level(output)
 
       {:command_error, status, output} ->
-        trimmed = output |> to_string() |> String.trim()
-
-        %{
-          expected: @expected_level,
-          observed: trimmed,
-          ok: false,
-          reason: "shuttle contract exited #{inspect(status)}: #{trimmed}"
-        }
+        {:unavailable,
+         "shuttle contract exited #{inspect(status)}: #{output |> to_string() |> String.trim()}"}
 
       {:error, reason} ->
-        %{
-          expected: @expected_level,
-          observed: "error",
-          ok: false,
-          reason: "shuttle contract could not run: #{reason}"
-        }
+        {:unavailable, "shuttle contract could not run: #{reason}"}
     end
   rescue
-    e ->
-      %{
-        expected: @expected_level,
-        observed: "error",
-        ok: false,
-        reason: "shuttle contract raised: #{inspect(e)}"
-      }
+    e -> {:unavailable, "shuttle contract raised: #{Exception.message(e)}"}
   end
 
   defp parse_level(output) do
@@ -121,26 +119,20 @@ defmodule Shuttle.Contract do
 
     case Integer.parse(trimmed) do
       {level, ""} when level == @expected_level ->
-        %{expected: @expected_level, observed: level, ok: true, reason: nil}
+        {:verdict, %{observed: level, ok: true, reason: nil}}
 
       {level, ""} ->
-        %{
-          expected: @expected_level,
-          observed: level,
-          ok: false,
-          reason:
-            "expected contract level #{@expected_level}, CLI reports #{level}" <>
-              missing_surfaces(level)
-        }
+        {:verdict,
+         %{
+           observed: level,
+           ok: false,
+           reason:
+             "expected contract level #{@expected_level}, CLI reports #{level}" <>
+               missing_surfaces(level)
+         }}
 
       _ ->
-        %{
-          expected: @expected_level,
-          observed: trimmed,
-          ok: false,
-          reason:
-            "expected contract level #{@expected_level}, CLI stdout unparseable: #{inspect(trimmed)}"
-        }
+        {:unavailable, "shuttle contract printed no level: #{inspect(trimmed)}"}
     end
   end
 
@@ -159,26 +151,46 @@ defmodule Shuttle.Contract do
   defp missing_surfaces(_level), do: ""
 
   @doc """
-  Run `check/1` and log at the appropriate level: `debug` on a match, `error`
-  (loud, boot-visible) on skew — a stale CLI means every shelled write this
-  daemon makes is suspect.
+  Check again and fold the answer into `previous`. A verdict replaces the
+  previous one; a check that could not run keeps it and records why in
+  `error`. Logs only when the reading changes, so a periodic recheck stays
+  quiet while nothing moves.
   """
-  @spec check_and_log(module()) :: map()
-  def check_and_log(runner) do
-    result = check(runner)
+  @spec refresh(reading(), module()) :: reading()
+  def refresh(previous, runner) do
+    next =
+      case check(runner) do
+        {:verdict, verdict} -> previous |> Map.merge(verdict) |> Map.put(:error, nil)
+        {:unavailable, error} -> %{previous | error: error}
+      end
 
-    if result.ok do
-      Logger.debug(
-        "shuttle contract level #{result.observed} matches expected #{result.expected}"
-      )
-    else
-      Logger.error(
-        "CLI/daemon contract skew at boot: #{result.reason}. " <>
-          "Fresh dispatches are held until this is fixed and the daemon is restarted " <>
-          "(make daemon installs the matching CLI; see internal/shuttlecli/contract.go)."
-      )
-    end
-
-    result
+    log_change(previous, next)
+    next
   end
+
+  defp log_change(same, same), do: :ok
+
+  defp log_change(_previous, %{error: error, ok: ok}) when is_binary(error) do
+    Logger.warning(
+      "shuttle contract check could not run (#{error}); keeping the last verdict " <>
+        "(#{if ok, do: "no skew", else: "skew"}) and retrying"
+    )
+  end
+
+  defp log_change(previous, %{ok: false, reason: reason})
+       when previous.ok or previous.reason != reason do
+    Logger.error(
+      "CLI/daemon contract skew: #{reason}. Fresh dispatches are held until a check " <>
+        "matches (install the matching CLI; see internal/shuttlecli/contract.go)."
+    )
+  end
+
+  defp log_change(%{ok: false}, %{ok: true, observed: level}),
+    do: Logger.warning("CLI/daemon contract skew cleared: CLI reports level #{level}")
+
+  defp log_change(_previous, %{ok: true, observed: level}),
+    do: Logger.info("shuttle contract level #{level} matches expected #{@expected_level}")
+
+  defp log_change(_previous, %{reason: reason}),
+    do: Logger.error("shuttle contract check runs again; the skew stands: #{reason}")
 end

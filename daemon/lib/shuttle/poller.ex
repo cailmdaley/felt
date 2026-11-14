@@ -311,18 +311,17 @@ defmodule Shuttle.Poller do
       # Unknown boot observations defer completion to a healthy poll. The
       # auto-release judges continuity only after this boundary.
       adopted?: false,
-      # `Shuttle.Contract.check/1`'s result, probed once during boot: the
-      # daemon shells `shuttle contract` and compares it to
-      # `Shuttle.Contract.expected_level/0`. `ok: false` (a mismatched level,
-      # unparseable stdout, or a nonzero exit, including an unknown subcommand)
-      # means every shelled write this daemon makes is
-      # suspect, so the skew is caught once at boot instead of failing one
-      # shelled write at a time. Gates the autonomous
-      # dispatch tick the same way `boot_quarantine` does (park fresh, let
-      # already-observed work resume) — see `apply_poll_cycle/2`'s cond. No
-      # self-clearing: a restart is what re-probes, after the CLI/daemon pair
-      # is actually fixed.
-      contract_check: %{expected: 0, observed: nil, ok: true, reason: nil},
+      # The `Shuttle.Contract` reading: the daemon shells `shuttle contract` at
+      # boot and every `contract_check_interval_ms` after, and compares it to
+      # `Shuttle.Contract.expected_level/0`. `ok: false` means a CLI that ran
+      # reported a different level, so every shelled write this daemon makes
+      # is suspect. Gates the autonomous dispatch tick the same way
+      # `boot_quarantine` does (park fresh, let already-observed work resume),
+      # see `apply_poll_cycle/2`'s cond, until a later check matches. A check
+      # that could not run keeps the previous verdict and records why in
+      # `error`.
+      contract_check: Shuttle.Contract.unchecked(),
+      contract_check_interval_ms: 30_000,
       # Runtime keys this daemon has OBSERVED with a live worker under its own
       # uptime — the union of every key that ever entered `state.running` (boot
       # adoption, per-poll adoption, dispatch, claim). Durable for the daemon's
@@ -923,7 +922,9 @@ defmodule Shuttle.Poller do
          {:ok, state} <-
            step.("configuration", fn -> boot_state(opts, initial.self_ref, stores, auto) end),
          {:ok, contract} <-
-           step.("contract_check", fn -> Shuttle.Contract.check_and_log(state.runner) end),
+           step.("contract_check", fn ->
+             Shuttle.Contract.refresh(Shuttle.Contract.unchecked(), state.runner)
+           end),
          state = %{state | contract_check: contract},
          {:ok, previous} <-
            step.("heartbeat", fn -> DaemonHeartbeat.read(state.daemon_heartbeat_file) end),
@@ -949,7 +950,12 @@ defmodule Shuttle.Poller do
       state =
         state
         |> Map.put(:change_interval_ms, Keyword.get(opts, :change_interval_ms, 5_000))
+        |> Map.put(
+          :contract_check_interval_ms,
+          Keyword.get(opts, :contract_check_interval_ms, state.contract_check_interval_ms)
+        )
         |> schedule_change_scan()
+        |> schedule_contract_check()
         |> schedule_tick(0)
         |> initialize_publication()
 
@@ -1119,11 +1125,11 @@ defmodule Shuttle.Poller do
   # restart the daemon can PROVE was a fast bounce of a healthy incarnation (see
   # the `boot_quarantine` State field comment and `Shuttle.DaemonHeartbeat`).
   #
-  # A contract skew is NOT auto-releasable: it has no release endpoint by design,
-  # because a skewed CLI makes every shelled write suspect, so the daemon does
-  # not even ask for a verdict — the hold stands until the pair is fixed and the
-  # daemon restarted. Nothing here touches `contract_check`, so even a released
-  # quarantine keeps parking fresh launches while skewed.
+  # A contract skew is NOT auto-releasable: a skewed CLI makes every shelled
+  # write suspect, so the daemon does not even ask for a verdict. The skew's
+  # own hold clears when a later contract check matches. Nothing here touches
+  # `contract_check`, so even a released quarantine keeps parking fresh
+  # launches while skewed.
   defp maybe_auto_release_boot_quarantine(%State{boot_quarantine: false} = state, _hb), do: state
 
   defp maybe_auto_release_boot_quarantine(%State{quarantine_auto_release: false} = state, _hb) do
@@ -1802,6 +1808,16 @@ defmodule Shuttle.Poller do
   # is exactly what handling this message proves.
   defp transition_info(:write_daemon_heartbeat, state) do
     {:noreply, write_daemon_heartbeat(state)}
+  end
+
+  defp transition_info(:check_contract, state) do
+    contract = Shuttle.Contract.refresh(state.contract_check, state.runner)
+    next = schedule_contract_check(%{state | contract_check: contract})
+
+    # The heartbeat's `held` covers a skew: record a change in it at once.
+    if contract.ok == state.contract_check.ok,
+      do: {:noreply, next},
+      else: {:noreply, record_daemon_heartbeat(next)}
   end
 
   defp transition_info(:scan_changes, %{change_task: nil, reconciliation_hold: nil} = state) do
@@ -2738,8 +2754,8 @@ defmodule Shuttle.Poller do
           # contract skew rides the SAME gate: every shelled write is
           # suspect, so fresh launches are held the same way, but read-only
           # polling and already-observed resumes stay alive. Unlike boot
-          # quarantine, skew has no release endpoint — a restart (after the
-          # skew is actually fixed) is what re-probes and clears it.
+          # quarantine, skew has no release endpoint: it clears when the
+          # periodic contract check matches again.
           candidates
           |> filter_eligible(state)
           |> sort_candidates()
@@ -3567,7 +3583,7 @@ defmodule Shuttle.Poller do
     # restart that happens to straddle 09:00 must not silently eat the run
     # (the schedule is bounded — one occurrence, never a stale backlog).
     # Contract skew is the exception: there every shelled write is suspect,
-    # so the role holds like everything else until a restart clears it.
+    # so the role holds like everything else until a contract check matches.
     {resume, fresh} =
       Enum.split_with(dispatchable, fn fiber ->
         MapSet.member?(state.was_running, runtime_key_for_fiber(fiber)) or
@@ -6088,6 +6104,13 @@ defmodule Shuttle.Poller do
   # Uncertainty is not an empty host: reconciling callers must skip that pass.
   @doc false
   def list_shuttle_sessions(state), do: Shuttle.Terminal.list_workers(state.runner)
+
+  defp schedule_contract_check(%{contract_check_interval_ms: :infinity} = state), do: state
+
+  defp schedule_contract_check(state) do
+    Process.send_after(self(), :check_contract, state.contract_check_interval_ms)
+    state
+  end
 
   defp schedule_change_scan(%{change_interval_ms: :infinity} = state), do: state
 

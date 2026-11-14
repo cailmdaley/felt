@@ -43,6 +43,7 @@ type ReceiptDaemon struct {
 	Expected           any                 `json:"expected,omitempty"`
 	Observed           any                 `json:"observed,omitempty"`
 	Contract           bool                `json:"contract_ok"`
+	ContractError      string              `json:"contract_error,omitempty"`
 	ReconciliationHold string              `json:"reconciliation_hold,omitempty"`
 	BootHold           *ReceiptBootHold    `json:"boot_hold,omitempty"`
 	Ready              *bool               `json:"ready,omitempty"`
@@ -114,6 +115,9 @@ func (a *app) doctorCmd() *cobra.Command {
 				}
 			} else {
 				fmt.Fprintf(a.env.Stdout, "shuttle %s\ndaemon: %s\n", receipt.Status, receipt.Daemon.Status)
+				if receipt.Daemon.ContractError != "" {
+					fmt.Fprintf(a.env.Stdout, "contract check: could not run (%s); the daemon keeps its last verdict and retries\n", receipt.Daemon.ContractError)
+				}
 				a.printShuttleBinaryReceipt(receipt.ShuttleBinary)
 				a.printHostReceipt(receipt.Host)
 				a.printTailnetDialReceipt(receipt.Daemon.TailnetDial)
@@ -366,6 +370,7 @@ func (a *app) collectDaemonReceipt() ReceiptDaemon {
 			Expected json.RawMessage `json:"expected"`
 			Observed json.RawMessage `json:"observed"`
 			OK       *bool           `json:"ok"`
+			Error    string          `json:"error"`
 		} `json:"contract"`
 	}
 	decodeErr := json.Unmarshal(data, &response)
@@ -396,8 +401,12 @@ func (a *app) collectDaemonReceipt() ReceiptDaemon {
 	if response.Contract.OK != nil {
 		d.Contract = *response.Contract.OK
 	}
+	d.ContractError = response.Contract.Error
 	if d.Contract && fmt.Sprint(d.Expected) == fmt.Sprint(d.Observed) {
 		d.Status, d.Repair = receiptHealthy, ""
+	} else if d.Contract && d.Observed == nil {
+		d.Status = receiptMismatch
+		d.Repair = "the daemon's shuttle contract check has not run yet (" + d.ContractError + "); it retries every 30 seconds, so check that shuttle runs on the daemon's PATH and the host is not out of processes"
 	} else {
 		d.Status, d.Repair = receiptMismatch, "restart or upgrade the daemon and shuttle together so their contract levels match"
 	}

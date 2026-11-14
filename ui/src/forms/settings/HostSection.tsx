@@ -216,8 +216,15 @@ export function HostSection({ shuttleBase, host }: HostSectionProps): JSX.Elemen
             <div className="set-error" role="alert">
               This daemon and the felt CLI it shells disagree about the contract level
               {contract.reason ? `: ${contract.reason}` : ''}. Rebuild the CLI on this host —
-              daemon-shelled writes fail mid-dispatch when these skew.
+              daemon-shelled writes fail mid-dispatch when these skew. The hold lifts by itself
+              once a check matches.
             </div>
+          )}
+          {contract?.error && (
+            <p className="set-note">
+              The latest check could not run ({contract.error}). The daemon keeps its last
+              verdict and checks again every 30 seconds.
+            </p>
           )}
 
           <div className="set-section-label">Work</div>

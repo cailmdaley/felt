@@ -616,7 +616,8 @@ defmodule Shuttle.PollerQuarantineTest do
              expected: level,
              observed: level,
              ok: true,
-             reason: nil
+             reason: nil,
+             error: nil
            }
 
     sync_poll_cycle!(poller)
@@ -669,14 +670,55 @@ defmodule Shuttle.PollerQuarantineTest do
            end)
   end
 
-  test "unparseable contract output (unknown subcommand) is treated as skew, not a crash" do
-    # When `shuttle contract` is unavailable, the CLI exits nonzero with usage
-    # text on stdout. The daemon cannot determine the level, so it treats that
-    # shape as incompatible, just like an explicit mismatch.
-    MockRunner.set_contract_level("Error: unknown command \"contract\"", 1)
-    fiber_id = "tests/contract-garbage"
+  test "a contract check that cannot spawn is retried and does not hold dispatch" do
+    # fir, 10 Nov: the user slice hit its pid cap and the boot check failed
+    # with :eagain. That says nothing about the CLI's level.
+    MockRunner.set_contract_spawn_error(:eagain)
+    fiber_id = "tests/contract-eagain"
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
     MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_contract_eagain,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        contract_check_interval_ms: 20,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    level = Shuttle.Contract.expected_level()
+
+    assert %{expected: ^level, observed: nil, ok: true, reason: nil, error: error} =
+             Poller.snapshot(poller).contract
+
+    assert error =~ "eagain"
+
+    sync_poll_cycle!(poller)
+
+    assert_eventually(fn ->
+      assert Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+               cmd == "tmux" and hd(args) == "new-session"
+             end)
+    end)
+
+    assert Poller.snapshot(poller).pending_launch == []
+
+    MockRunner.set_contract_level(Integer.to_string(level))
+
+    assert_eventually(fn ->
+      assert Poller.snapshot(poller).contract == %{
+               expected: level,
+               observed: level,
+               ok: true,
+               reason: nil,
+               error: nil
+             }
+    end)
+  end
+
+  test "a nonzero exit from shuttle contract is not a skew" do
+    MockRunner.set_contract_level("Error: unknown command \"contract\"", 1)
 
     {:ok, poller} =
       start_poller!(
@@ -686,8 +728,24 @@ defmodule Shuttle.PollerQuarantineTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    level = Shuttle.Contract.expected_level()
-    assert %{expected: ^level, ok: false} = Poller.snapshot(poller).contract
+    assert %{ok: true, observed: nil, error: error} = Poller.snapshot(poller).contract
+    assert error =~ "exited 1"
+  end
+
+  test "a skew clears by itself when a later contract check matches" do
+    MockRunner.set_contract_level(Integer.to_string(skewed_contract_level()))
+    fiber_id = "tests/contract-skew-clears"
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_contract_skew_clears,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        contract_check_interval_ms: 20,
+        felt_stores: [MockRunner.felt_root()]
+      )
 
     sync_poll_cycle!(poller)
 
@@ -695,9 +753,26 @@ defmodule Shuttle.PollerQuarantineTest do
       assert [%{fiber_id: ^fiber_id}] = Poller.snapshot(poller).pending_launch
     end)
 
-    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-             cmd == "tmux" and hd(args) == "new-session"
-           end)
+    # A check that cannot run while skewed keeps the skew.
+    MockRunner.set_contract_spawn_error(:eagain)
+
+    assert_eventually(fn ->
+      assert %{ok: false, error: error} = Poller.snapshot(poller).contract
+      assert is_binary(error) and error =~ "eagain"
+    end)
+
+    MockRunner.set_contract_level(Integer.to_string(Shuttle.Contract.expected_level()))
+    assert_eventually(fn -> assert %{ok: true, error: nil} = Poller.snapshot(poller).contract end)
+
+    sync_poll_cycle!(poller)
+
+    assert_eventually(fn ->
+      assert Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+               cmd == "tmux" and hd(args) == "new-session"
+             end)
+    end)
+
+    assert Poller.snapshot(poller).pending_launch == []
   end
 
   test "a contract skew does not strand work observed running; a was-running fiber still resumes" do

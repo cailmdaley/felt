@@ -97,8 +97,8 @@ lsof -ti:4000 -sTCP:LISTEN | xargs kill
 The daemon shells `felt` for fiber content and generic writes, and `shuttle`
 for Shuttle-owned operations. The Shuttle CLI/daemon contract is versioned
 together: `shuttle contract` prints its integer level, and a daemon whose
-expected level differs holds at boot with a skew reported on `/api/v1/version`
-and `/api/v1/state`. `make daemon` therefore builds both Go CLIs first
+expected level differs holds fresh dispatch with a skew reported on
+`/api/v1/version` and `/api/v1/state` until a periodic recheck matches. `make daemon` therefore builds both Go CLIs first
 (`SKIP_CLI=1` trusts both on `PATH`). The Elixir suite shells both CLIs too, so
 run `make cli-install` before `make mix-test` after changing either boundary.
 Contract level 36 includes the CLI-owned locked writers `conclude-run` and `patch-document`, and `claude-mail-recover` for automatic message delivery.

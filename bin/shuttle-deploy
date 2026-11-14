@@ -535,6 +535,8 @@ try:
     contract=v.get("contract") or {}
     if contract.get("ok") is not True:
         print("contract: " + str(contract.get("reason") or "Poller receipt unavailable"))
+    elif contract.get("observed") != contract.get("expected"):
+        print("contract: no check has run yet: " + str(contract.get("error")))
     elif "reconciliation_hold" not in v:
         print("Poller reconciliation receipt unavailable")
     elif v["reconciliation_hold"] is not None:

@@ -147,7 +147,7 @@ The board's `resume` and `rest` run `shuttle <verb> <fiber> --local` inside the 
 `shuttle patch-document` refuses a patch whose source digest is stale.
 Migration applies its two document patches through `shuttle migrate-documents` and journals resource ownership before it changes the backend; an unresolved migration recovery holds every launch, including force, cron and previously observed workers (see [Worker migration](../reference/api.md#worker-migration)).
 
-At boot the daemon runs `shuttle contract` and compares the CLI's level with `@expected_level` in `daemon/lib/shuttle/contract.ex`; on a skew it holds dispatch and names the missing surfaces.
+At boot and every 30 seconds after, the daemon runs `shuttle contract` and compares the CLI's level with `@expected_level` in `daemon/lib/shuttle/contract.ex`. A CLI that reports a different level holds fresh dispatch, with the missing surfaces named, until a later check matches. A check that could not run (a spawn failure, a timeout, a nonzero exit) is no verdict: the daemon keeps the previous one, reports why in `contract.error`, and tries again.
 The boot quarantine's one automatic release, for an opted-in host's hard-killed and previously released daemon, is `Shuttle.DaemonHeartbeat`'s verdict; [Boot quarantine](../shuttle/lifecycle.md#boot-quarantine) gives its conditions.
 
 ## Uncertain launch reservations

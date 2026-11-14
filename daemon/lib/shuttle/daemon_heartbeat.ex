@@ -118,8 +118,8 @@ defmodule Shuttle.DaemonHeartbeat do
          threshold.
 
   The contract-skew gate (`contract_check.ok`) is deliberately outside all of
-  this: it has no release endpoint by design, so `Shuttle.Poller` does not even
-  ask for a verdict while skewed.
+  this: it clears only when a contract check matches, so `Shuttle.Poller` does
+  not even ask for a verdict while skewed.
   """
 
   require Logger

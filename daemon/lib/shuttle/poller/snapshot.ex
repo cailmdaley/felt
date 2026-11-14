@@ -77,11 +77,12 @@ defmodule Shuttle.Poller.Snapshot do
     # withholding — all of them, resumes included. First-class rows, not
     # `blocked`: nothing failed — the daemon is deliberately withholding
     # autonomous dispatch authority until a human releases it (quarantine) or
-    # fixes + restarts (skew). The kanban reads `boot_quarantine`/
+    # installs a matching CLI (skew). The kanban reads `boot_quarantine`/
     # `contract_skew` for its banner and these rows for the per-fiber
     # "parked" badge. Skew takes reason precedence when both are true — it's
     # the more actionable signal (quarantine self-explains via its own
-    # release button; skew needs the CLI/daemon pair fixed first).
+    # release button; skew needs the CLI/daemon pair fixed first, and clears
+    # when the next contract check matches).
     pending_reason =
       if state.contract_check.ok,
         do: "boot quarantine — awaiting release",
@@ -112,10 +113,11 @@ defmodule Shuttle.Poller.Snapshot do
       eligible: with_office(eligible, state),
       blocked: with_office(blocked, state),
       boot_quarantine: state.boot_quarantine,
-      # The boot-time `shuttle contract` handshake result — always
-      # present (not just on skew) so /api/v1/state and /api/v1/version can
-      # both show "what we expect" and "what we saw" even when they match.
-      contract: Map.take(state.contract_check, [:expected, :observed, :ok, :reason]),
+      # The `shuttle contract` reading — always present (not just on skew)
+      # so /api/v1/state and /api/v1/version show "what we expect" and "what
+      # we saw" even when they match, and `error` when the latest check could
+      # not run.
+      contract: Map.take(state.contract_check, [:expected, :observed, :ok, :reason, :error]),
       pending_launch: with_office(pending_launch, state),
       orphans: with_office(state.orphans, state),
       standing_roles:

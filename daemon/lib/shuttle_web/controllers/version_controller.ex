@@ -85,7 +85,8 @@ defmodule ShuttleWeb.VersionController do
         expected: Shuttle.Contract.expected_level(),
         observed: nil,
         ok: nil,
-        reason: reason
+        reason: reason,
+        error: nil
       },
       reconciliation_hold: nil
     }

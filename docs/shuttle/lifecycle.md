@@ -296,7 +296,9 @@ hold lifts by itself only when all of these hold:
 
 Anything else holds: a graceful stop, a stale heartbeat (a real outage), a crash
 loop, a missing or malformed file, a boot whose tmux scan failed, or a CLI/daemon
-contract skew — which has no release path at all, automatic or manual. The
+contract skew — which no release clears; its own hold lifts when a later
+contract check matches, and a quarantine it kept from auto-releasing still
+waits for `shuttle daemon release`. The
 daemon log records the verdict and its reason either way.
 
 ## CLI verbs

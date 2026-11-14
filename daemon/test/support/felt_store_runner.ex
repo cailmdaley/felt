@@ -405,17 +405,25 @@ defmodule Shuttle.Test.FeltStoreRunner do
         &Map.put(&1, :kill_session_failure, enabled && {"tmux: hung up", 1})
       )
 
-  # S2: override what `shuttle contract` reports, for tests exercising
-  # the boot-time contract handshake. Must be called BEFORE the poller
-  # starts (init/1 probes once, synchronously). `level` is the raw stdout
-  # string (a mismatched integer, or garbage to exercise "unparseable");
-  # `exit_status` defaults to 0 (a nonzero exit is a separate skew shape).
+  # Override what `shuttle contract` reports. The Poller checks at boot and
+  # every `contract_check_interval_ms` after, so a test sets this before the
+  # Poller starts and may change it to drive a later check. `level` is the raw
+  # stdout string; `exit_status` defaults to 0 (a nonzero exit is a check that
+  # could not run).
   def set_contract_level(level, exit_status \\ 0) when is_binary(level),
     do:
       Agent.update(
         server(),
-        &(&1 |> Map.put(:contract_level, level) |> Map.put(:contract_exit, exit_status))
+        &(&1
+          |> Map.put(:contract_level, level)
+          |> Map.put(:contract_exit, exit_status)
+          |> Map.delete(:contract_spawn_error))
       )
+
+  # Make `shuttle contract` fail to spawn the way the port does under a pid
+  # cap (an ErlangError such as `:eagain`).
+  def set_contract_spawn_error(reason) when is_atom(reason),
+    do: Agent.update(server(), &Map.put(&1, :contract_spawn_error, reason))
 
   # What `shuttle host --json` answers, for tests that clear SHUTTLE_HOST
   # so the Poller asks Shuttle for its identity. `output` is the raw stdout;
@@ -488,12 +496,6 @@ defmodule Shuttle.Test.FeltStoreRunner do
       command == "shuttle" and match?(["context-mailbox" | _], args) ->
         Shuttle.Runner.Default.cmd(command, args, opts)
 
-      # S2 boot-time contract handshake (`Shuttle.Poller.init/1`, via
-      # `Shuttle.Contract.check/1`). The mock reports the current expected
-      # level by default — matching, not skewed — so tests that don't care
-      # about S2 aren't silently quarantined by it. Tests that DO want a
-      # skew set `:contract_level`/`:contract_exit` before starting the
-      # poller — see the S2 tests.
       # The dispatcher's wrapper preflight. Resolves by default so every other
       # test dispatches as before; `set_wrapper_missing(true)` makes the login
       # shell find nothing, the shape a real missing wrapper produces.
@@ -504,7 +506,13 @@ defmodule Shuttle.Test.FeltStoreRunner do
           {"file\n", 0}
         end
 
+      # The Poller's contract check (`Shuttle.Contract.check/1`). The mock
+      # reports the expected level by default, so tests that don't care about
+      # the contract aren't held by it.
       command == "shuttle" and args == ["contract"] ->
+        if reason = Agent.get(server(), &Map.get(&1, :contract_spawn_error)),
+          do: :erlang.error(reason)
+
         level =
           Agent.get(
             server(),

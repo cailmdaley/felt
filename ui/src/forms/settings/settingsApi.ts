@@ -196,7 +196,7 @@ export interface HostState {
   /** Absent or null: the host has no worker cap. */
   max_concurrent?: number | null
   claimed_count?: number
-  contract?: { ok: boolean | null; expected: number | null; observed: number | null; reason: string | null }
+  contract?: { ok: boolean | null; expected: number | null; observed: number | null; reason: string | null; error?: string | null }
   poll_health?: { state: string; stalls: number; stall_timeout_ms: number; full_scan_budget_ms?: number; last_stalled_at: string | null }
   document_cache?: Record<string, unknown>
   standing_roles?: unknown[]
