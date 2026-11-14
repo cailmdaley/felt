@@ -53,12 +53,14 @@ try {
   await page.goto(`http://127.0.0.1:${server.address().port}/`)
   await page.waitForFunction(() => typeof window.__mountChange === 'function')
   await page.evaluate((bundle) => window.__mountChange(bundle), bundle)
-  await page.locator('diffs-container [data-line-index]').first().waitFor()
+  assert.equal(await page.locator('.change-file[open]').count(), 0, 'story code starts folded')
   assert.equal(await page.locator('h1').textContent(), bundle.title)
   assert.equal(await page.locator('.change-map').evaluate(map => {
     const box = map.getBoundingClientRect(), scroll = map.closest('.change-scroll').getBoundingClientRect()
     return box.top >= scroll.top && box.bottom <= scroll.bottom
   }), true, 'the whole map fits the visible scroller')
+  await page.locator('.change-file-head').first().click()
+  await page.locator('diffs-container [data-line-index]').first().waitFor()
   await page.getByRole('button', { name: /^Tests:/ }).click()
   assert.equal(await page.locator('.change-section').filter({ has: page.getByRole('heading', { name: 'Tests', exact: true }) }).evaluate(section => {
     const box = section.getBoundingClientRect(), scroll = section.closest('.change-scroll').getBoundingClientRect()
@@ -83,7 +85,7 @@ try {
     'dispose releases the shared highlighter',
   )
   await page.evaluate((bundle) => window.__mountChange(bundle), bundle)
-  await page.locator('diffs-container [data-line-index]').first().waitFor()
+  await page.locator('.change-reader').waitFor()
   assert.ok(Math.abs(await page.locator('.change-scroll').evaluate(scroll => scroll.scrollTop) - 100) < 2, 'reading position within the map survives remount')
   await page.evaluate(() => window.__disposeChange())
   if (process.env.MEASURE_MARKDOWN && bundle.story) {

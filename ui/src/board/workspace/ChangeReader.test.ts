@@ -39,6 +39,11 @@ it('renders the story prose and keeps metadata readable', () => {
   expect(root.querySelectorAll('.change-prose strong')).toHaveLength(4)
   expect(root.querySelector('.change-why')?.textContent).toBe('Read this first.')
   expect(root.querySelector('.change-file-head .change-role')?.textContent).toBe('generated · important')
+  const stop = root.querySelector<HTMLDetailsElement>('.change-file')!
+  expect(stop.open).toBe(false)
+  expect(root.querySelector('.change-stop-note')?.textContent).toBeTruthy()
+  stop.open = true
+  stop.dispatchEvent(new Event('toggle'))
   expect(root.querySelector('.change-metadata')?.textContent).toContain('no text hunks')
   const navigation = [...root.querySelectorAll('.change-contents button')].map(button => button.textContent)
   expect(root.querySelector('.change-review-dock .change-send')).not.toBeNull()

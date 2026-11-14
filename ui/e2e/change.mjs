@@ -12,6 +12,9 @@ export function registerChangeJourneys(test) {
     await page.locator('.ws-selected .change-reader').waitFor()
     await page.locator('.ws-selected .change-map').waitFor()
     await page.locator('.ws-selected .change-chapter-link').first().click()
+    assert.equal(await page.locator('.ws-selected .change-flags').count(), 0)
+    assert.equal(await page.locator('.ws-selected .change-file[open]').count(), 0)
+    await page.locator('.ws-selected .change-file-head').first().press('Enter')
     await page.locator('.ws-selected diffs-container [data-line-index]').first().waitFor()
   }
   for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) test(`A change opens, persists a review, and sends one owner-routed message (${viewport.width}px)`, async page => {

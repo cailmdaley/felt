@@ -193,9 +193,8 @@ export function mountChangeReader(
     sectionIds: string[],
     stop?: { note?: string; importance?: string; from?: number; to?: number; side?: string },
   ): void => {
-    const collapsed = !stop
     const card = el('details', 'change-file') as HTMLDetailsElement
-    card.open = !collapsed && !navigation.isViewed(id)
+    card.open = false
     card.dataset.changeFile = file.path
     card.dataset.viewId = id
     card.dataset.windowId = `card:${id}`
@@ -211,7 +210,7 @@ export function mountChangeReader(
     const comments = el('span', 'change-file-comments')
     review.commentCount(file, comments)
     const viewedControl = mark(id)
-    viewedControl.disabled = collapsed && !navigation.isViewed(id)
+    viewedControl.disabled = !navigation.isViewed(id)
     viewedControl.addEventListener('click', event => {
       event.preventDefault()
       card.open = !navigation.isViewed(id)
@@ -225,8 +224,12 @@ export function mountChangeReader(
       comments,
       viewedControl,
     )
+    if (stop?.note) {
+      const note = storyProse(stop.note)
+      note.classList.add('change-stop-note')
+      head.prepend(note)
+    }
     card.append(head)
-    if (stop?.note) card.append(storyProse(stop.note))
     parent.append(card)
     sectionIds.push(id)
     const body = el('div', 'change-file-body')
