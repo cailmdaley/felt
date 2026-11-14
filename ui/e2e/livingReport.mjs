@@ -19,7 +19,7 @@ const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?exa
 const shots = process.env.WORKSPACE_SHOTS || '/tmp/workspace-say-once'
 const selected = page => page.locator('.ws-page.ws-selected')
 const band = page => page.locator('.ws-stage-band')
-const named = (page, name) => page.waitForFunction(name => document.querySelector('.ws-stage-band .ws-band-title')?.textContent === name, name)
+const named = (page, name) => page.waitForFunction(name => document.querySelector('.ws-stage-band .ws-band-title')?.title === name, name)
 /** The report's frame on show; a live rewrite stages its successor beside it, unseen, until it loads. */
 const SHOWN = 'iframe:not([style*="opacity"])'
 const frame = page => selected(page).frameLocator(SHOWN)

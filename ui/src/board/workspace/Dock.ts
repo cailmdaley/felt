@@ -557,7 +557,10 @@ export class Dock {
 
   /** Repaint the destination beside Listen. */
   private paintVoice(): void {
-    this.voiceStrip?.paint(voiceLine(this.voice?.controller.status ?? null, (fiber, origin) => this.fiberSlug?.(fiber, origin)))
+    const status = this.voice?.controller.status ?? null
+    const spoken = status?.destination ?? status?.target, typed = this.actionCard ?? this.card
+    const here = !!spoken && !!typed && (spoken.fiber_id === typed.uid || spoken.fiber_id === typed.id) && (spoken.origin ?? null) === (typed.originId ?? null)
+    this.voiceStrip?.paint(voiceLine(status, (fiber, origin) => this.fiberSlug?.(fiber, origin)), here)
   }
 
   /**
@@ -997,7 +1000,7 @@ export class Dock {
     const title = document.createElement('h1')
     title.className = 'ws-band-title'
     title.dataset.part = 'fiber-title'
-    // A highlighted thread follows the band's name, as a path: the figures beside it are the thread's.
+    // A highlighted thread follows the band's name, as a path, under the slug its row draws: the figures beside it are the thread's.
     const titleRoot = document.createElement('span')
     const titleThread = document.createElement('span')
     titleThread.className = 'ws-band-thread'
@@ -1049,9 +1052,10 @@ export class Dock {
       const act = target()
       const same = (act.uid ?? act.id) === (card.uid ?? card.id) && act.originId === card.originId
       if (titleRoot.textContent !== card.name) titleRoot.textContent = card.name
-      const thread = same ? '' : ` / ${act.name}`
+      const thread = same ? '' : ` / ${slug(act)}`
       if (titleThread.textContent !== thread) titleThread.textContent = thread
-      title.title = card.name + thread
+      title.title = same ? card.name : `${card.name} / ${act.name}`
+      this.paintVoice()
       const usage = this.usage
       paintUsage(contextFact, cacheFact, usage, act.workerAgent ?? act.shuttleAgent)
       meter.hidden = contextFact.hidden && cacheFact.hidden

@@ -36,14 +36,16 @@ export class VoiceStrip {
     this.el.dataset.part = 'voice-strip'
     this.el.hidden = true
   }
-  paint(line: VoiceLine): void {
-    const words = line.mode === 'off' || !line.name ? '' : `${PREFIX[line.mode]}${line.name}`
+  /** `here`: the destination is the card this box already messages, named in the band's title above it. */
+  paint(line: VoiceLine, here = false): void {
+    const named = line.mode === 'off' || !line.name ? '' : `${PREFIX[line.mode]}${line.name}`
+    const words = here && line.mode === 'following' && !line.held ? '' : named
     this.el.hidden = !words
     this.el.dataset.mode = line.mode
     this.el.toggleAttribute('data-paused', line.paused)
     this.el.toggleAttribute('data-held', line.held)
     if (this.el.textContent !== words) this.el.textContent = words
-    this.el.title = !words ? '' : line.held ? heldWords(line.name)
+    this.el.title = !named ? '' : line.held ? heldWords(line.name)
       : `${SAYS[line.mode]} ${line.name}${line.paused ? ' once unmuted' : ''}`
   }
 }

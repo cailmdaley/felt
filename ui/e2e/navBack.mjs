@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url'
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=nav-back`
 const selected = page => page.locator('.ws-page.ws-selected')
 /** The band names a thread after its family's root, whose page it opens on. */
-const named = (page, name) => page.waitForFunction(name => document.querySelector('.ws-stage-band .ws-band-title')?.textContent.endsWith(name), name)
+const named = (page, name) => page.waitForFunction(name => document.querySelector('.ws-stage-band .ws-band-title')?.title.endsWith(name), name)
 
 export function registerNavigationJourneys(test) {
   for (const [device, viewport, phone] of [

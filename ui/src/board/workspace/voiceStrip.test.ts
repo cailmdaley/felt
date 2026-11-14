@@ -33,3 +33,13 @@ it('says when the followed card has no live session, so words are held rather th
   expect(strip.el.hasAttribute('data-held')).toBe(false)
   expect(strip.el.title).toBe('Following you: words go to the-card')
 })
+it('names no destination while following the card the box already messages, unless its words are held', () => {
+  const strip = new VoiceStrip()
+  strip.paint(voiceLine(voiceStatus({ enabled: true, target }), slug), true)
+  expect(strip.el.hidden).toBe(true)
+  expect(strip.el.title).toBe('Following you: words go to the-card')
+  strip.paint(voiceLine(voiceStatus({ enabled: true, follow: false, target }), slug), true)
+  expect(strip.el.textContent).toBe('📌 the-card')
+  strip.paint(voiceLine(voiceStatus({ enabled: true, target, cold: true }), slug), true)
+  expect(strip.el.textContent).toBe('the-card')
+})

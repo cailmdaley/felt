@@ -84,7 +84,7 @@ it('pins atomically to this card and resumes following without disabling Listen'
   item('Follow me').click()
   await vi.waitFor(() => expect(voice.status?.follow).toBe(true))
   expect(voice.status?.enabled).toBe(true)
-  expect(q('.ws-voice-strip').textContent).toBe('a')
+  expect(q('.ws-voice-strip').hidden).toBe(true)
 })
 it('offers pin here when pinned elsewhere, including another host with the same id', () => {
   mount({ enabled: true, follow: false, target: { ...target, origin: 'elsewhere' } }); dropdown()
@@ -123,11 +123,11 @@ it.each([true, false])('edits only the current quiet threshold on the recorder (
   expect(fetcher.mock.calls[0][0]).toBe('/api/v1/voice')
   expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ [follow ? 'quiet_seconds' : 'pinned_quiet_seconds']: 0.5, recorder: 'audio host' })
 })
-it('shows recorder and delivery failures in red without hiding mute or destination', () => {
+it('shows recorder and delivery failures in red without hiding mute', () => {
   mount({ enabled: true, muted: true, state: 'failed', error: 'Mic refused' })
   expect(q('.listen-control').classList.contains('listen-failed')).toBe(true)
   expect(mic().getAttribute('aria-label')).toBe('Unmute')
-  expect(q('.ws-voice-strip').textContent).toBe('a')
+  expect(q('.ws-voice-strip').hidden).toBe(true)
   dropdown(); expect(q('.voice-error').textContent).toBe('Mic refused')
   voice.status = { ...voice.status!, state: 'listening', error: null, last: { fiber_id: 'a', at: '', status: 'failed', detail: 'Worker gone' } }; notify()
   dropdown(); expect(q('.voice-error').textContent).toContain('Worker gone')

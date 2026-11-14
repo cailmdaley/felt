@@ -66,6 +66,6 @@ export function registerDeskThreadJourneys(test) {
     const thread = again.locator('.kbn-desk-threads .kbn-thread-row').first()
     const title = await thread.getAttribute('title')
     await thread.locator('.kbn-thread-name').click()
-    await page.waitForFunction(title => document.querySelector('.kbn-reader-open .ws-band-title, .kbn-reader-open .ws-page.ws-selected')?.textContent?.includes(title), title)
+    await page.waitForFunction(title => { const el = document.querySelector('.kbn-reader-open .ws-band-title, .kbn-reader-open .ws-page.ws-selected'); return !!el && (el.title.includes(title) || el.textContent.includes(title)) }, title)
   }, viewport)
 }

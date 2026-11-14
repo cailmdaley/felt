@@ -783,7 +783,7 @@ describe('workspace reader integration', () => {
     expect(title()).toBe('hub')
     // A thread with no page named lands on its row of the family's one page, under the family's name.
     workspace.open(feed[1], 'Desk'); await settle()
-    expect(title()).toBe('hub / hub/sub')
+    expect(title()).toBe('hub / sub')
     // b climbs the highlight to the orchestrator's row, the page staying put.
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true, cancelable: true }))
     await settle()
@@ -833,7 +833,7 @@ describe('workspace reader integration', () => {
     document.querySelector<HTMLElement>('.ws-selected .fp-head')!.focus()
     document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true }))
     expect(row.getAttribute('aria-selected')).toBe('true')
-    expect(document.querySelector('.ws-band-title')?.textContent).toBe('Hub / Notch')
+    expect(document.querySelector('.ws-band-title')?.textContent).toBe('Hub / notch')
     const press = (key: string): void => { document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) }
     press('a'); expect(queue).toHaveBeenLastCalledWith(leaf, 'awaitingReview')
     press('x'); expect(queue).toHaveBeenLastCalledWith(leaf, 'composted')
@@ -865,7 +865,7 @@ describe('workspace reader integration', () => {
     const queue = vi.spyOn(workspace, 'queueVerdict').mockReturnValue(true)
     const conversation = vi.spyOn(dock, 'openConversation').mockReturnValue(true)
     workspace.open(leaf, 'Desk'); await settle()
-    expect(document.querySelector('.ws-band-title')?.textContent).toBe('Hub / Leaf')
+    expect(document.querySelector('.ws-band-title')?.textContent).toBe('Hub / leaf')
     document.querySelector<HTMLElement>('.ws-selected .fp-head')!.click()
     expect(document.querySelector('.ws-band-title')?.textContent).toBe('Hub')
     const press = (key: string): void => { document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) }
@@ -880,7 +880,7 @@ describe('workspace reader integration', () => {
     send.click(); await settle()
     const dispatch = vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith('/api/v1/dispatch'))!
     expect(JSON.parse(String(dispatch[1]!.body))).toMatchObject({ fiber_id: 'hub/other', user_message: 'Hello', resume_mode: 'previous' })
-    expect(document.querySelector('.ws-band-title')?.textContent).toBe('Hub / Other')
+    expect(document.querySelector('.ws-band-title')?.textContent).toBe('Hub / other')
   })
   it('row verbs select their thread without unfolding it and share the undo queue', async () => {
     workspace.dispose()
@@ -950,7 +950,7 @@ describe('workspace reader integration', () => {
     expect(row('hub/b').getAttribute('aria-expanded')).toBe('true')
     scroller().scrollTop = 333
     scroller().dispatchEvent(new Event('scroll'))
-    expect(document.querySelector('.ws-stage-band .ws-band-title')?.textContent).toBe('hub / hub/b')
+    expect(document.querySelector('.ws-stage-band .ws-band-title')?.textContent).toBe('hub / b')
     workspace.open(feed[1], 'Desk', 'fiber:host-a:hub-a'); await settle()
     expect(document.querySelector('.ws-stage-band .ws-band-title')?.textContent).toBe('hub/a')
     workspace.open(feed[0], 'Desk'); await settle()
@@ -974,7 +974,7 @@ describe('workspace reader integration', () => {
     expect(selected()).toBe('family:host-a:hub')
     row('hub/mid').click(); await settle()
     expect(selected()).toBe('family:host-a:hub')
-    expect(document.querySelector('.ws-stage-band .ws-band-title')?.textContent).toBe('hub / hub/mid')
+    expect(document.querySelector('.ws-stage-band .ws-band-title')?.textContent).toBe('hub / mid')
     expect(chosen()).toBe('hub/mid')
     expect(row('hub/mid/leaf')).toBeDefined()
     row('hub/mid').click(); await settle()

@@ -7,9 +7,9 @@ import { hitBox, offeredVerbs, verbCaret, verbFace } from './verbs.mjs'
 
 const title = 'Calibrate the shear response across independent sky patches and validate each redshift bin'
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads&long-title`
-const named = (page, name) => page.waitForFunction(name => document.querySelector('.ws-stage-band .ws-band-title')?.textContent === name, name)
+const named = (page, name) => page.waitForFunction(name => document.querySelector('.ws-stage-band .ws-band-title')?.title === name, name)
 /** A thread's band names it after its family's root, whose page it opens on; a draft opens on its own. */
-const threadNamed = (page, name) => page.waitForFunction(names => names.includes(document.querySelector('.ws-stage-band .ws-band-title')?.textContent), [name, `${title} / ${name}`])
+const threadNamed = (page, name) => page.waitForFunction(names => names.includes(document.querySelector('.ws-stage-band .ws-band-title')?.title), [name, `${title} / ${name}`])
 const band = page => page.locator('.ws-stage-band')
 /**
  * The fiber's acts where they show: the band's, on a page with no row for the
