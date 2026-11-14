@@ -39,6 +39,22 @@ func shuttleTmuxSessionName(fiberID, uid string) string {
 	return fiberLeaf(fiberID) + "-" + uid + "-shuttle"
 }
 
+// resolveWorkerSessionName keeps the launch-time name of a live worker even
+// when its fiber's leaf has changed. Without a live match it returns the name
+// a fresh launch would use.
+func resolveWorkerSessionName(fiberID, uid string, live map[string]bool) string {
+	canonical := shuttleTmuxSessionName(fiberID, uid)
+	if canonical == "" || live[canonical] {
+		return canonical
+	}
+	for name, present := range live {
+		if present && fiberUIDFromTmuxSession(name) == uid {
+			return name
+		}
+	}
+	return canonical
+}
+
 // errFiberWithoutUID is the operator-facing error for a fiber that cannot have a
 // worker session because it carries no intrinsic id.
 func errFiberWithoutUID(fiberID string) error {

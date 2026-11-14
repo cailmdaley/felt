@@ -74,13 +74,16 @@ func TestAttachSummaryIsBackendNeutral(t *testing.T) {
 
 func TestRexAttachOpensThroughDaemonAndRejectsSSH(t *testing.T) {
 	t.Parallel()
-	for _, mode := range []string{"local", "ssh", "refused", "prepared-viewer"} {
+	for _, mode := range []string{"local", "ssh", "refused", "prepared-viewer", "renamed"} {
 		t.Run(mode, func(t *testing.T) {
 			env := testEnv(t)
 			dir, st := newStore(t)
 			seedShuttleRole(t, st, "task", "active", oneshot(), nil)
 			f := mustRead(t, st, "task")
 			name := shuttleTmuxSessionName(f.ID, f.UID)
+			if mode == "renamed" {
+				name = shuttleTmuxSessionName("old-task", f.UID)
+			}
 			if mode == "ssh" {
 				env.Set("SSH_CONNECTION", "remote connection")
 			}

@@ -159,8 +159,8 @@ The daemon's boot quarantine can still hold an eligible fiber until
 					}
 					continue
 				}
-				session := shuttleTmuxSessionName(entry.FiberID, entry.UID)
-				running := session != "" && live[session] && owners[session] == entry.FiberID
+				session := resolveWorkerSessionName(entry.FiberID, entry.UID, live)
+				running := session != "" && live[session] && owners[entry.UID] == entry.FiberID
 				if running {
 					seenSessions[session] = true
 				}
@@ -248,7 +248,7 @@ func (a *app) psCmd() *cobra.Command {
 			type row struct{ session, fiberID string }
 			rows := make([]row, 0, len(live))
 			for session := range live {
-				rows = append(rows, row{session: session, fiberID: owners[session]})
+				rows = append(rows, row{session: session, fiberID: owners[fiberUIDFromTmuxSession(session)]})
 			}
 			sort.Slice(rows, func(i, j int) bool { return rows[i].session < rows[j].session })
 
@@ -557,6 +557,14 @@ func (a *app) liveWorkerSession(f *felt.Felt) (string, bool, error) {
 	if present {
 		return session, true, nil
 	}
+	live, err := a.liveTerminalSessions()
+	if err != nil {
+		return "", false, fmt.Errorf("observing worker terminals: %w", err)
+	}
+	session = resolveWorkerSessionName(f.ID, f.UID, live)
+	if live[session] {
+		return session, true, nil
+	}
 	return "", false, nil
 }
 
@@ -676,24 +684,23 @@ func (a *app) listShuttleFibers(store string) ([]shuttleEntry, error) {
 	return entries, nil
 }
 
-// sessionOwnerMap maps each open fiber's worker session name back to its fiber
-// id. Closed fibers (no live worker to attribute) and fibers without a uid (no
+// sessionOwnerMap maps each open fiber's intrinsic uid back to its fiber id. Closed fibers (no live worker to attribute) and fibers without a uid (no
 // session name) are excluded. Two fibers carrying the same uid — a copied file —
 // drop out of the map rather than mis-attributing a live worker.
 func sessionOwnerMap(entries []shuttleEntry) map[string]string {
 	owners := map[string]string{}
 	collisions := map[string]bool{}
 	for _, entry := range entries {
-		session := shuttleTmuxSessionName(entry.FiberID, entry.UID)
-		if entry.Status == felt.StatusClosed || session == "" || collisions[session] {
+		uid := entry.UID
+		if entry.Status == felt.StatusClosed || !isSessionULID(uid) || collisions[uid] {
 			continue
 		}
-		if existing, ok := owners[session]; ok && existing != entry.FiberID {
-			delete(owners, session)
-			collisions[session] = true
+		if existing, ok := owners[uid]; ok && existing != entry.FiberID {
+			delete(owners, uid)
+			collisions[uid] = true
 			continue
 		}
-		owners[session] = entry.FiberID
+		owners[uid] = entry.FiberID
 	}
 	return owners
 }
