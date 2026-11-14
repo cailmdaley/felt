@@ -156,7 +156,7 @@ function renderImage(href: string, alt: string | undefined): string {
   return `<img src="${escapeAttr(href)}" alt="${escapeAttr(cleanAlt)}" loading="lazy" />`
 }
 
-interface RenderMarkdownOptions {
+export interface RenderMarkdownOptions {
   /** Base directory for resolving relative image paths (e.g. city path) */
   basePath?: string
   /** Origin ID for remote (owner-routed) file access */

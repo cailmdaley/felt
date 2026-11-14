@@ -1,4 +1,5 @@
-import { renderMarkdown } from '../utils.js'
+import { renderMarkdown, type RenderMarkdownOptions } from '../utils.js'
+import { drawMermaid } from './changeMermaid.js'
 
 export function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -10,9 +11,14 @@ export function el<K extends keyof HTMLElementTagNameMap>(
   if (text) node.textContent = text
   return node
 }
-export function prose(text: string): HTMLElement {
+/**
+ * A story's Markdown, trusted like a fiber body: agents wrote it for one reader.
+ * Relative images and links resolve beside the bundle, and mermaid fences draw.
+ */
+export function prose(text: string, markdown: RenderMarkdownOptions = {}): HTMLElement {
   const node = el('div', 'change-prose')
-  node.innerHTML = renderMarkdown(text, { untrusted: true })
+  node.innerHTML = renderMarkdown(text, markdown)
+  drawMermaid(node)
   return node
 }
 export function revisionLabel(ref: string, sha: string): string {

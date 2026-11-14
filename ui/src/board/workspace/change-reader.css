@@ -139,3 +139,6 @@
   .change-reader .change-review-dock textarea { min-height: 40px; height: 40px; flex: 1; width: 0; }
   .change-review-dock .change-send { padding: 0; max-width: 48%; }
 }
+.change-prose img { max-width: 100%; height: auto; }
+.change-mermaid { margin: 1.2em 0; overflow-x: auto; }
+.change-mermaid svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }

@@ -8,6 +8,7 @@ import {
   type ChangeWindow,
 } from './changeModel.js'
 import './change-reader.css'
+import type { RenderMarkdownOptions } from '../utils.js'
 import { el, prose, button, stored, save, revisionLabel } from './changeElements.js'
 import { createChangeReview } from './changeReview.js'
 import { createChangeNavigation } from './changeNavigation.js'
@@ -27,7 +28,9 @@ export function mountChangeReader(
   send?: (message: string) => Promise<void>,
   canSend = () => true,
   reviewTarget = () => 'this fiber',
+  markdown: RenderMarkdownOptions = {},
 ) {
+  const storyProse = (source: string) => prose(source, markdown)
   const files = bundle.files
   const lanes = assignLanes(bundle)
   const prefix = `shuttle:change:${JSON.stringify([identity, bundle.base, bundle.head, revision])}`
@@ -75,7 +78,7 @@ export function mountChangeReader(
   const chapterHosts = new Map<string, HTMLElement>()
   if (map) main.append(map)
   main.append(heading)
-  if (bundle.story) main.append(prose(bundle.story.overview))
+  if (bundle.story) main.append(storyProse(bundle.story.overview))
   else
     main.append(
       el(
@@ -221,7 +224,7 @@ export function mountChangeReader(
       viewedControl,
     )
     card.append(head)
-    if (stop?.note) card.append(prose(stop.note))
+    if (stop?.note) card.append(storyProse(stop.note))
     parent.append(card)
     sectionIds.push(id)
     const body = el('div', 'change-file-body')
@@ -290,7 +293,7 @@ export function mountChangeReader(
         () => jumpToRange(flag),
       )
       const row = el('div', 'change-flag')
-      row.append(jump, prose(flag.text))
+      row.append(jump, storyProse(flag.text))
       box.append(row)
     }
     main.append(box)
@@ -304,7 +307,7 @@ export function mountChangeReader(
   for (const [chapterIndex, chapter] of lanes.chapters.entries()) {
     const part = el('section', 'change-chapter')
     part.append(el('h3', '', `${String(chapterIndex + 1).padStart(2, '0')}  ${chapter.title}`))
-    part.append(prose(chapter.narrative))
+    part.append(storyProse(chapter.narrative))
     if (chapter.why_here) part.append(el('p', 'change-why', chapter.why_here))
     story.element.append(part)
     chapterHosts.set(chapter.id, part)

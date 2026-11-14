@@ -1,11 +1,15 @@
 import dogfood from './generated/dogfood.change.json'
 import plain from './generated/dogfood-plain.change.json'
 import type { ChangeBundle } from '../src/board/workspace/changeModel.js'
-import { WORKSPACE_HOST, WORKSPACE_ID, WORKSPACE_REPORT, WORKSPACE_UID, type WorkspaceExample } from './workspace-fixtures.js'
+import imageData from './fixtures/figure.png?inline'
+import { WORKSPACE_HOST, WORKSPACE_ID, WORKSPACE_REPORT, WORKSPACE_UID, blobFor, type WorkspaceExample } from './workspace-fixtures.js'
 
 /** Real repository snapshot plus no-story and long-file reading probes. */
 export function addChangeFixtures(fixture: WorkspaceExample, now: number): void {
-  const bundle = dogfood as ChangeBundle
+  const baked = dogfood as ChangeBundle
+  // A story carries its structure as a diagram and its figures beside the bundle, as a PR body does.
+  const figure = '\n\n```mermaid\nflowchart LR\n  desk[Desk row] --> reader[Change reader]\n  reader --> story[Story] & map[Map]\n```\n\n![The response figure](figure.png)\n'
+  const bundle: ChangeBundle = baked.story ? { ...baked, story: { ...baked.story, overview: baked.story.overview + figure } } : baked
   const owner = fixture.feed.fibers.find(row => (row.fiber as { id: string }).id === WORKSPACE_ID)!
   owner.runtime = { state: 'running', phase: 'waiting', tmux_session: 'fixture-review-worker', started_at: now - 60_000 }
   const dir = WORKSPACE_REPORT.slice(0, WORKSPACE_REPORT.lastIndexOf('/'))
@@ -28,6 +32,7 @@ export function addChangeFixtures(fixture: WorkspaceExample, now: number): void 
     fixture.files.push({ owner: WORKSPACE_HOST, path, mime: 'application/json', body: new Blob([JSON.stringify(change)], { type: 'application/json' }) })
     fixture.receipts.push({ ...fixture.receipts[0], uid: WORKSPACE_UID, fiber: WORKSPACE_ID, host: WORKSPACE_HOST, fullPath: path, basename: `${name}.change.json`, timestamp: now - 15_000 })
   }
+  fixture.files.push({ owner: WORKSPACE_HOST, path: `${dir}/figure.png`, mime: 'image/png', body: blobFor(imageData, 'image/png') })
   const report = fixture.files.find(file => file.path === WORKSPACE_REPORT)!
   report.body = new Blob([`<!doctype html><html><head><title>Read the family change</title><style>body{font:18px/1.6 system-ui;max-width:680px;margin:80px auto;padding:24px;color:light-dark(#272720,#e2e2da);background:light-dark(#f6f5f0,#242421);color-scheme:light dark}a{color:inherit}li{margin:24px 0}small{opacity:.7}</style></head><body><small>FELT / CHANGE REVIEW</small><h1>A family’s root stays in sight.</h1><p>This small committed diff exercises family navigation. Read the story first, then check the tests and the edits the story doesn’t cover.</p><ul><li><a href="./family.change.json">Read the change →</a></li><li><a href="./plain.change.json">The same diff, without a story</a></li><li><a href="./large.change.json">The 5,000-line stress case</a></li></ul></body></html>`], { type: 'text/html' })
 }

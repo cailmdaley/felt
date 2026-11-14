@@ -28,6 +28,7 @@
     "dompurify": "3.4.17",
     "katex": "0.19.0",
     "marked": "^17.0.1",
+    "mermaid": "12.2.0",
     "pdfjs-dist": "6.4.299",
     "react": "19.3.1",
     "react-dom": "19.3.1"
