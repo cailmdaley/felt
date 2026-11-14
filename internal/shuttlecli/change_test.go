@@ -153,6 +153,13 @@ func TestChangeCommandRealGit(t *testing.T) {
 	if c.Title != "A reading order" || c.Story == nil || c.Files[0].Role != "generated" || c.Story.Chapters[0].Stops[0].From != 1 {
 		t.Fatalf("story bundle: %+v", c)
 	}
+	if _, err := run("review", "--base", base); err != nil {
+		t.Fatal(err)
+	}
+	rebaked, _ := os.ReadFile(bundlePath)
+	if string(rebaked) != string(withStory) {
+		t.Fatal("rebake lost story")
+	}
 	entries, err := os.ReadDir(filepath.Dir(bundlePath))
 	if err != nil {
 		t.Fatal(err)
@@ -165,13 +172,13 @@ func TestChangeCommandRealGit(t *testing.T) {
 	// Invalid references are all returned, and cannot overwrite the valid bundle.
 	put(storyPath, `{"flags":[{"file":"unknown.go"},{"file":"main.go","from":90,"to":91}],"chapters":[{"stops":[{"file":"also-missing","importance":"context"}]}]}`)
 	out, err = run("review", "--base", base, "--story", storyPath, "--json")
-	if err == nil || !strings.Contains(err.Error(), "flags[0]") || !strings.Contains(err.Error(), "flags[1]") || !strings.Contains(err.Error(), "chapters[0].stops[0]") {
+	if err == nil || !strings.Contains(err.Error(), "flags[0]") || !strings.Contains(err.Error(), "flags[1]") {
 		t.Fatalf("validation error: %v", err)
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatal(err)
 	}
-	if report.Valid || len(report.Errors) != 3 || report.Covered != 0 || len(report.Uncovered) != 1 {
+	if report.Valid || len(report.Errors) != 2 || len(report.Stale) != 1 || report.Covered != 0 || len(report.Uncovered) != 1 {
 		t.Fatalf("invalid report: %+v", report)
 	}
 	unchanged, err := os.ReadFile(bundlePath)
@@ -188,8 +195,37 @@ func TestChangeCommandRealGit(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatal(err)
 	}
-	if !report.Valid || report.Total != 2 || report.Covered != 0 {
-		t.Fatalf("storyless check: %+v", report)
+	if !report.Valid || report.Total != 2 || report.Covered != 1 {
+		t.Fatalf("sidecar check: %+v", report)
+	}
+	// Unsupported stop ranges survive baking, but fail an iteration check.
+	put(storyPath, `{"overview":"Keep the explanation","chapters":[{"id":"kept","stops":[{"file":"main.go","from":90,"to":91,"importance":"context","note":"Keep this note"}]}]}`)
+	if _, err := run("review", "--base", base, "--story", storyPath); err != nil {
+		t.Fatal(err)
+	}
+	staleBytes, _ := os.ReadFile(bundlePath)
+	if err := json.Unmarshal(staleBytes, &c); err != nil {
+		t.Fatal(err)
+	}
+	stop := c.Story.Chapters[0].Stops[0]
+	if stop.Stale == "" || stop.Note != "Keep this note" || len(stop.Hunks) != 0 {
+		t.Fatalf("stale stop: %+v", stop)
+	}
+	if _, err := run("review", "--base", base, "--check"); err == nil || !strings.Contains(err.Error(), "stale stops") {
+		t.Fatalf("stale check: %v", err)
+	}
+	put(filepath.Join(repo, "main.go"), strings.Repeat("line\n", 100))
+	git("commit", "-am", "support the stop again")
+	if _, err := run("review", "--base", base); err != nil {
+		t.Fatal(err)
+	}
+	freshBytes, _ := os.ReadFile(bundlePath)
+	c = shuttle.Change{}
+	if err := json.Unmarshal(freshBytes, &c); err != nil {
+		t.Fatal(err)
+	}
+	if c.Story.Chapters[0].Stops[0].Stale != "" {
+		t.Fatal("stale marker survived a supported rebake")
 	}
 	// Explicit repo overrides project_dir; a plain fiber falls back to cwd.
 	seedFiber(t, st, "wrong-dir", "", "open", map[string]any{"project_dir": filepath.Join(repo, "missing")}, nil)

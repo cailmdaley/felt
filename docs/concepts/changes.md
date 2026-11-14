@@ -30,6 +30,10 @@ The reader has Story, Tests and Remaining lanes.
 File roles appear on each file; generated files start folded.
 Binary, mode-only and pure-rename changes have visible metadata markers even without text hunks.
 
+The authored story lives beside its bundle as `<name>.story.json`. `--story path` copies that source into the sidecar on a successful bake; a bake without `--story` automatically reuses it. `--check` writes neither file.
+
+A stop is stale when its file is absent or its range no longer overlaps a diff hunk on the selected side. It remains in the story with a `stale` reason and no resolved hunks, and the reader shows its note and reason. Stale stops do not count as coverage. A bake succeeds with stale stops; `--check` reports them and exits nonzero. Malformed ranges, sides, importance, duplicate chapter ids and invalid flags or role overrides remain validation errors.
+
 Rebake after changing commits or the story.
 An open reader checks for rewritten bytes through the same conditional polling as other live documents.
 The bundle is a snapshot, not a live branch view, and its line references describe the captured head.

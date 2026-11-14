@@ -144,6 +144,15 @@ it('unlocks a refused send without dropping its draft', async () => {
   expect(state.root.querySelector<HTMLTextAreaElement>('.change-overall')?.value).toBe('Keep this draft')
   expect(state.root.querySelector<HTMLTextAreaElement>('.change-overall')?.disabled).toBe(false)
 })
+it('keeps an unsupported story stop visible without mounting code', () => {
+  const b = bundle()
+  b.story = { overview: 'Still useful', flags: [], chapters: [{ id: 'stale', title: 'A retained stop', narrative: '', why_here: '', stops: [{ file: 'missing.ts', from: 10, to: 12, importance: 'important', note: 'The reasoning survives', stale: 'unknown file', hunks: [] }] }] }
+  const { root } = mount(b, 'stale-stop')
+  expect(root.querySelector('.change-stale')?.textContent).toContain('The reasoning survives')
+  expect(root.querySelector('.change-stale')?.textContent).toContain('missing.ts:10–12')
+  expect(root.querySelector('.change-stale')?.textContent).toContain('unknown file')
+  expect(root.querySelector('.change-stale .change-diff-window')).toBeNull()
+})
 it('centers a flag on the requested plain row without syntax highlighting', async () => {
   const b = bundle()
   b.files[0].lines[0].text = 'x'.repeat(30_000)

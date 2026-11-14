@@ -28,6 +28,7 @@ export interface ChangeHunk {
   windows: ChangeWindow[]
 }
 export interface ChangeStop extends ChangeRange {
+  stale?: string
   note: string
   importance: 'critical' | 'important' | 'supporting' | 'context'
   hunks: ChangeHunk[]

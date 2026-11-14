@@ -100,6 +100,7 @@ type ChangeChapter struct {
 
 type ChangeStop struct {
 	ChangeRange
+	Stale      string       `json:"stale,omitempty"`
 	Note       string       `json:"note"`
 	Importance string       `json:"importance"`
 	Hunks      []ChangeHunk `json:"hunks"`
@@ -141,6 +142,7 @@ type ChangeReport struct {
 	Total     int          `json:"total"`
 	Uncovered []ChangeHunk `json:"uncovered"`
 	Errors    []string     `json:"errors"`
+	Stale     []string     `json:"stale"`
 }
 
 // BuildChange invokes Git directly; refs resolve before any tree or log reads.
@@ -320,7 +322,7 @@ var changeHunkHeader = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+
 // ValidateChange checks every story reference and counts coverage from stops only.
 // Flags direct attention but do not remove hunks from Remaining.
 func ValidateChange(c *Change, hunks []ChangeHunk) ChangeReport {
-	report := ChangeReport{Valid: true, Uncovered: []ChangeHunk{}, Errors: []string{}}
+	report := ChangeReport{Valid: true, Uncovered: []ChangeHunk{}, Errors: []string{}, Stale: []string{}}
 	files := map[string]int{}
 	for i, f := range c.Files {
 		files[f.Path] = i
@@ -387,7 +389,19 @@ func ValidateChange(c *Change, hunks []ChangeHunk) ChangeReport {
 				default:
 					bad(fmt.Sprintf("%s: invalid importance %q", label, stop.Importance))
 				}
+				before := len(report.Errors)
 				check(label, stop.ChangeRange)
+				resolved := &c.Story.Chapters[i].Stops[j]
+				resolved.Stale = ""
+				if len(report.Errors) > before {
+					reason := report.Errors[before]
+					if strings.Contains(reason, "unknown file") || strings.Contains(reason, "overlaps no hunk") {
+						resolved.Stale = reason
+						resolved.Hunks = []ChangeHunk{}
+						report.Stale = append(report.Stale, reason)
+						report.Errors = report.Errors[:before]
+					}
+				}
 			}
 		}
 		paths := make([]string, 0, len(c.Story.Roles))
@@ -420,7 +434,7 @@ func ValidateChange(c *Change, hunks []ChangeHunk) ChangeReport {
 			if c.Story != nil {
 				for _, chapter := range c.Story.Chapters {
 					for _, stop := range chapter.Stops {
-						if stop.File == h.File && stop.includes(row) {
+						if stop.Stale == "" && stop.File == h.File && stop.includes(row) {
 							shown[i] = true
 						}
 					}

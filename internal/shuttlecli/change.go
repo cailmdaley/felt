@@ -81,7 +81,35 @@ count as coverage. --check validates and reports without writing a companion.
 					name = fmt.Sprintf("pr-%d", prNumber)
 				}
 			}
+			if name == "" {
+				ref := head
+				if head == "HEAD" {
+					out, err := a.env.Command("git", "-C", repo, "symbolic-ref", "--quiet", "--short", "HEAD").Output()
+					if err == nil {
+						ref = strings.TrimSpace(string(out))
+					}
+				}
+				name = felt.Slugify(strings.ReplaceAll(ref, "/", "-"))
+				if ref == "HEAD" || name == "" {
+					name = filepath.Base(f.ID)
+				}
+			}
+			if name == "." || name == ".." || strings.ContainsAny(name, "/\\") || strings.TrimSpace(name) == "" {
+				return fmt.Errorf("--name must be a filename stem, got %q", name)
+			}
+			fiberPath := f.Path
+			if fiberPath == "" {
+				fiberPath = st.Path(f.ID)
+			}
+			sidecar := filepath.Join(filepath.Dir(fiberPath), name+".story.json")
+			explicitStory := storyPath != ""
+			if !explicitStory {
+				if _, err := os.Stat(sidecar); err == nil {
+					storyPath = sidecar
+				}
+			}
 			var story *shuttle.ChangeStory
+			var storyData []byte
 			if storyPath != "" {
 				path, err := a.env.Abs(storyPath)
 				if err != nil {
@@ -91,6 +119,7 @@ count as coverage. --check validates and reports without writing a companion.
 				if err != nil {
 					return err
 				}
+				storyData = data
 				decoder := json.NewDecoder(bytes.NewReader(data))
 				decoder.DisallowUnknownFields()
 				if err := decoder.Decode(&story); err != nil {
@@ -114,21 +143,13 @@ count as coverage. --check validates and reports without writing a companion.
 				change.BaseRef = "origin/" + pr.BaseBranch
 			}
 			report := shuttle.ValidateChange(change, hunks)
-			if name == "" {
-				name = felt.Slugify(strings.ReplaceAll(change.HeadRef, "/", "-"))
-				if change.HeadRef == "HEAD" || name == "" {
-					name = filepath.Base(f.ID)
-				}
-			}
-			if name == "." || name == ".." || strings.ContainsAny(name, "/\\") || strings.TrimSpace(name) == "" {
-				return fmt.Errorf("--name must be a filename stem, got %q", name)
-			}
-			path := f.Path
-			if path == "" {
-				path = st.Path(f.ID)
-			}
-			path = filepath.Join(filepath.Dir(path), name+".change.json")
+			path := filepath.Join(filepath.Dir(fiberPath), name+".change.json")
 			if report.Valid && !check {
+				if explicitStory {
+					if err := atomicfile.Write(sidecar, storyData, 0644); err != nil {
+						return err
+					}
+				}
 				data, err := json.MarshalIndent(change, "", "  ")
 				if err != nil {
 					return err
@@ -176,6 +197,9 @@ count as coverage. --check validates and reports without writing a companion.
 				if report.Path != "" {
 					fmt.Fprintf(a.env.Stdout, "Wrote %s\n", report.Path)
 				}
+			}
+			if check && len(report.Stale) > 0 {
+				return fmt.Errorf("stale stops:\n  %s", strings.Join(report.Stale, "\n  "))
 			}
 			if !report.Valid {
 				return fmt.Errorf("invalid story:\n  %s", strings.Join(report.Errors, "\n  "))
