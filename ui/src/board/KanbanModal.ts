@@ -2062,8 +2062,8 @@ export class KanbanModal {
       e.preventDefault(); e.stopPropagation(); this.setView('desk'); return
     }
     if (this.activeView?.keydown?.(e)) { e.preventDefault(); e.stopPropagation(); return }
-    // Chronicle keeps its own record search in its head; `/` reaches the bar's Find there too, as on the Globe.
-    if ((this.activeViewId === 'chronicle' || this.activeViewId === 'globe') && !keystrokeIsSpokenFor() && keyIntent(e, 'desk') === 'find' && this.focusFind()) {
+    // Chronicle keeps its own record search in its head; `/` reaches the bar's Find there too, as on the Globe and the Outbox.
+    if ((this.activeViewId === 'chronicle' || this.activeViewId === 'globe' || this.activeViewId === 'outbox') && !keystrokeIsSpokenFor() && keyIntent(e, 'desk') === 'find' && this.focusFind()) {
       e.preventDefault(); e.stopPropagation()
       return
     }

@@ -1,13 +1,13 @@
 import type { KanbanCard } from './KanbanTypes.js'
 import type { SentFile } from './sentFiles.js'
-import { threadState } from './threads.js'
+import { cardNamed, threadState } from './threads.js'
 
 export interface HeldSpeech {
   fiber_id: string
   name: string
   n: number
   first: string
-  at: number
+  at?: number | null
 }
 interface Item {
   key: string
@@ -39,19 +39,19 @@ export function composeOutbox(input: {
   for (const card of real) {
     const fiber = card.uid ?? card.id
     const base = { fiber, card, name: card.name }
-    if (card.ask) add({ ...base, kind: 'ask', key: `ask:${fiber}:${card.ask.at}`, text: card.ask.text, at: Date.parse(card.ask.at) })
+    if (card.ask && card.status === 'active') add({ ...base, kind: 'ask', key: `ask:${fiber}:${card.ask.at}`, text: card.ask.text, at: Date.parse(card.ask.at) })
     if (threadState(card) === 'to-review') {
-      const at = card.reviewMark?.at ?? card.closedAt ?? ''
+      const at = card.closedAt ?? card.reviewMark?.at ?? ''
       add({ ...base, kind: 'review', key: `review:${fiber}:${at}`, text: card.reviewMark?.note || card.outcome || '', at: Date.parse(at) })
     }
   }
   for (const file of files) {
-    const card = file.uid ? real.find(card => (card.uid ?? card.id) === file.uid) : undefined
+    const card = file.uid ? cardNamed(real, file.uid, file.host ?? '') : undefined
     add({ kind: 'file', key: `file:${file.host ?? ''}:${file.fullPath}:${file.timestamp}`, name: card?.name ?? file.sessionId ?? file.host ?? 'Unattributed file', text: file.basename, at: file.timestamp, fiber: card?.uid ?? file.uid, card, file })
   }
   for (const speech of held) {
-    const card = real.find(card => (card.uid ?? card.id) === speech.fiber_id || card.id === speech.fiber_id)
-    add({ kind: 'spoken', key: `spoken:${speech.fiber_id}:${digest(speech.first)}`, name: card?.name ?? speech.name, text: speech.first, at: speech.at, fiber: card?.uid ?? speech.fiber_id, card })
+    const card = cardNamed(real, speech.fiber_id, '') ?? real.find(card => card.id === speech.fiber_id)
+    add({ kind: 'spoken', key: `spoken:${speech.fiber_id}:${digest(speech.first)}`, name: card?.name ?? speech.name, text: speech.first, at: speech.at ?? now, fiber: card?.uid ?? speech.fiber_id, card })
   }
   return [...items.values()].sort((a, b) => b.at - a.at || a.key.localeCompare(b.key))
 }

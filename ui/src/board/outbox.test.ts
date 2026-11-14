@@ -5,7 +5,7 @@ import type { SentFile } from './sentFiles.js'
 
 const now = Date.parse('2026-11-14T12:00:00Z'), reachMs = 14 * 86_400_000
 const at = (ago = 0): string => new Date(now - ago).toISOString()
-const ask = card({ id: 'ask', uid: 'A', ask: { text: 'Choose the cut?', at: at(2000) } })
+const ask = card({ id: 'ask', uid: 'A', status: 'active', ask: { text: 'Choose the cut?', at: at(2000) } })
 const review = card({ id: 'review', uid: 'R', column: 'awaitingReview', closedAt: at(3000), outcome: 'The cut is validated.' })
 const thread = card({ id: 'thread', uid: 'T', orchestrator: 'R', column: 'awaitingReview', reviewMark: { at: at(1000), note: 'Please check the plot.' } })
 const files: SentFile[] = [{ uid: 'R', host: 'host', fullPath: '/plot.png', basename: 'plot.png', timestamp: now - 4000 }]
@@ -24,6 +24,10 @@ describe('composeOutbox', () => {
   })
   it('cleared asks, reviewed closes, unmarked threads and played lines leave; files remain', () => {
     expect(composeOutbox({ ...input, cards: [{ ...ask, ask: undefined }, { ...review, column: 'tempered' }, { ...thread, column: 'orchestratorReview', reviewMark: undefined }], held: [] }).map(item => item.kind)).toStrictEqual(['file'])
+  })
+  it('counts an ask only on an active card, and keeps a held line queued before lines carried a time', () => {
+    expect(composeOutbox({ ...input, cards: [{ ...ask, status: 'closed' }], files: [], held: [] })).toHaveLength(0)
+    expect(composeOutbox({ ...input, cards: [], files: [], held: [{ ...held[0], at: null }] }).map(item => [item.kind, item.at])).toStrictEqual([['spoken', now]])
   })
   it('does not mistake a Desk section heading or an orchestrator-only close for human review', () => {
     const cards = [{ ...review, deskSection: 'to-review' as const }, { ...thread, column: 'orchestratorReview' as const, reviewMark: undefined }]

@@ -10,7 +10,7 @@ const views: OutboxView[] = []
 afterEach(() => { views.forEach(view => view.unmount()); views.length = 0; document.body.replaceChildren(); vi.unstubAllGlobals() })
 
 function mount() {
-  const ask = card({ id: 'ask', uid: 'A', ask: { text: 'Which mask?', at: new Date().toISOString() } })
+  const ask = card({ id: 'ask', uid: 'A', status: 'active', ask: { text: 'Which mask?', at: new Date().toISOString() } })
   const openFromDesk = vi.fn(), openPage = vi.fn()
   const ctx = { cards: [ask], response: response(), shuttleBase: '', workspace: { openFromDesk, openPage }, requestRefresh: vi.fn(), openCard: vi.fn() } as unknown as ViewContext
   const host = document.createElement('div'); document.body.append(host)
