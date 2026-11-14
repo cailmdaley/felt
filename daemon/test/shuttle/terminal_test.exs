@@ -89,6 +89,8 @@ defmodule Shuttle.TerminalTest do
         opts
       )
     end
+
+    def cmd(command, args, opts), do: Shuttle.Runner.Default.cmd(command, args, opts)
   end
 
   defmodule ClaimedTmuxRunner do
@@ -237,6 +239,33 @@ defmodule Shuttle.TerminalTest do
       File.chmod!(Path.join(dir, "tmux"), 0o755)
       Env.put_env("PATH", dir)
       :ok
+    end
+
+    test "a leaf rename finds the existing Rex worker by uid without changing its binding" do
+      uid = Shuttle.Test.FiberUid.for("rex-leaf-rename")
+      original = Shuttle.Dispatcher.session_name("tests/original", uid)
+      renamed = Shuttle.Dispatcher.session_name("tests/renamed", uid)
+      stub(@absent)
+
+      on_exit(fn ->
+        Path.wildcard(Path.join(System.tmp_dir!(), "shuttle-run-#{original}.*.sh"))
+        |> Enum.each(&File.rm/1)
+      end)
+
+      assert :ok = Terminal.launch(MixedRunner, original, "/tmp", "sleep 300\n")
+      assert {:ok, binding} = Shuttle.Terminal.Rex.locate(MixedRunner, original)
+      assert Terminal.worker_name(MixedRunner, renamed) == original
+
+      assert {:error, :already_running} =
+               Shuttle.Dispatcher.check_worker(
+                 %{"id" => "tests/renamed", "uid" => uid},
+                 MixedRunner
+               )
+
+      state = %Shuttle.Poller.State{runner: MixedRunner}
+      assert Shuttle.Poller.live_session_for_fiber(state, "tests/renamed", uid) == original
+      assert {:ok, ^binding} = Shuttle.Terminal.Rex.locate(MixedRunner, original)
+      assert :ok = Terminal.close(MixedRunner, original)
     end
 
     test "tmux is secondary only when its binary is resolvable" do
@@ -972,6 +1001,36 @@ defmodule Shuttle.TerminalTest do
     assert :present = Tmux.probe(IsolatedTmuxRunner, name)
     assert {listing, 0} = IsolatedTmuxRunner.cmd("tmux", ["ls", "-F", "\#{session_name}"], [])
     assert Enum.sort(String.split(listing, "\n", trim: true)) == Enum.sort(["sentinel", name])
+  end
+
+  @tag skip: is_nil(System.find_executable("tmux"))
+  test "a leaf rename finds a real tmux worker by uid and cannot duplicate it" do
+    socket = Path.join(System.tmp_dir!(), "rename-#{System.unique_integer([:positive])}.sock")
+    Env.put_app_env(:terminal_test_socket, socket)
+    on_exit(fn -> System.cmd("tmux", ["-S", socket, "kill-server"], stderr_to_stdout: true) end)
+    uid = Shuttle.Test.FiberUid.for("tmux-leaf-rename")
+    original = Shuttle.Dispatcher.session_name("tests/original", uid)
+    renamed = Shuttle.Dispatcher.session_name("tests/renamed", uid)
+
+    assert {_, 0} =
+             IsolatedTmuxRunner.cmd(
+               "tmux",
+               ["new-session", "-d", "-s", original, "sleep 300"],
+               []
+             )
+
+    assert Terminal.worker_name(IsolatedTmuxRunner, renamed) == original
+
+    assert {:error, :already_running} =
+             Shuttle.Dispatcher.check_worker(
+               %{"id" => "tests/renamed", "uid" => uid},
+               IsolatedTmuxRunner
+             )
+
+    state = %Shuttle.Poller.State{runner: IsolatedTmuxRunner}
+    assert Shuttle.Poller.live_session_for_fiber(state, "tests/renamed", uid) == original
+    assert :ok = Tmux.close(IsolatedTmuxRunner, original)
+    assert :gone = Terminal.status(IsolatedTmuxRunner, renamed)
   end
 
   @tag skip: is_nil(System.find_executable("tmux"))

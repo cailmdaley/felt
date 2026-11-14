@@ -4529,7 +4529,11 @@ defmodule Shuttle.Poller do
       case fetch_fiber_full(fiber_id, state) do
         {:ok, fiber} ->
           if not interrupted and Dispatcher.worker_present?(fiber, state.runner),
-            do: Dispatcher.session_name(fiber["id"], fiber["uid"])
+            do:
+              Shuttle.Terminal.worker_name(
+                state.runner,
+                Dispatcher.session_name(fiber["id"], fiber["uid"])
+              )
 
         {:error, _} ->
           nil
@@ -4539,7 +4543,7 @@ defmodule Shuttle.Poller do
       running != nil and Shuttle.Terminal.native_ref?(tmux_session) ->
         # Native addresses survive a claim's rename. Let the backend prove
         # that the canonical binding still belongs to this exact claimant.
-        with true <- running.session == Dispatcher.session_name(fiber_id, uid),
+        with true <- Shuttle.ULID.from_tmux(running.session) == uid,
              Shuttle.Terminal.Rex <- Shuttle.Terminal.locate(state.runner, running.session),
              {:ok, source} <- claim_terminal_source(state.runner, tmux_session, opts),
              :ok <- Shuttle.Terminal.rename(state.runner, source, running.session) do
@@ -5096,6 +5100,7 @@ defmodule Shuttle.Poller do
 
   defp untracked_session(state, _fiber, slug, uid) do
     session = Dispatcher.session_name(slug, uid)
+    session = session && Shuttle.Terminal.worker_name(state.runner, session)
     if session && already_running_session?(state, session), do: session
   end
 
@@ -5426,6 +5431,7 @@ defmodule Shuttle.Poller do
     session =
       Dispatcher.session_name(fiber_id, uid || metadata_uid(running_worker(state, fiber_id)))
 
+    session = session && Shuttle.Terminal.worker_name(state.runner, session)
     if session && Shuttle.Terminal.status(state.runner, session) == :alive, do: session
   end
 

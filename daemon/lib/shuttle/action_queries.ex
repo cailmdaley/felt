@@ -45,8 +45,13 @@ defmodule Shuttle.ActionQueries do
 
   defp live_session(fiber, opts) do
     case Dispatcher.session_name(fiber_address(fiber), Map.get(fiber, "uid")) do
-      nil -> nil
-      session -> if session_live?(session, opts), do: session
+      nil ->
+        nil
+
+      session ->
+        runner = Keyword.get(opts, :runner, default_runner())
+        session = Shuttle.Terminal.worker_name(runner, session)
+        if session_live?(session, opts), do: session
     end
   end
 

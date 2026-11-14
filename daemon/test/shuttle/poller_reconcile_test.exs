@@ -264,6 +264,8 @@ defmodule Shuttle.PollerReconcileTest do
   # shows running in its live session is the boot scan having recognized it.
   @adoptable_orphans [
     {"a fiber's worker", "tests/orphan", []},
+    {"a worker whose fiber leaf changed", "tests/renamed-orphan",
+     launch_id: "tests/original-orphan"},
     {"a uid-carrying fiber's worker under the uid-keyed session", "tests/orphan-uid",
      uid: "01KTHDNZS287ZSSG8X8V59XKWB"},
     {"uid workers when Shuttle listing warnings go to stderr", "life/french/daily-practice",
@@ -281,7 +283,7 @@ defmodule Shuttle.PollerReconcileTest do
     test "poller adopts on startup #{label}" do
       fiber_id = @fiber_id
       uid = Keyword.get(@row, :uid, FiberUid.for(fiber_id))
-      session = Dispatcher.session_name(fiber_id, uid)
+      session = Dispatcher.session_name(Keyword.get(@row, :launch_id, fiber_id), uid)
       MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"uid" => uid}))
       MockRunner.set_shuttle(fiber_id, Keyword.get(@row, :shuttle, oneshot_shuttle()))
       MockRunner.set_ls_stderr_warning(Keyword.get(@row, :ls_stderr_warning, false))
@@ -309,6 +311,50 @@ defmodule Shuttle.PollerReconcileTest do
                cmd == "tmux" and hd(args) == "new-session"
              end)
     end
+  end
+
+  test "a leaf change during a live assignment retains the worker and watcher by uid" do
+    original_id = "tests/live-original"
+    renamed_id = "tests/live-renamed"
+    uid = FiberUid.for(original_id)
+    session = Dispatcher.session_name(original_id, uid)
+
+    MockRunner.set_fiber(
+      original_id,
+      make_fiber(original_id, %{"uid" => uid, "status" => "active"})
+    )
+
+    MockRunner.set_shuttle(original_id, oneshot_shuttle(), "active")
+    MockRunner.add_tmux_session(session)
+
+    {:ok, poller} =
+      start_poller!(
+        runner: MockRunner,
+        felt_stores: [MockRunner.felt_root()],
+        boot_quarantine: true
+      )
+
+    assert_eventually(fn ->
+      assert %{session: ^session} = Poller.worker_status(poller, original_id)
+    end)
+
+    %{pid: watcher} = Poller.worker_status(poller, original_id)
+
+    MockRunner.delete_fiber(original_id)
+
+    MockRunner.set_fiber(
+      renamed_id,
+      make_fiber(renamed_id, %{"uid" => uid, "status" => "active"})
+    )
+
+    MockRunner.set_shuttle(renamed_id, oneshot_shuttle(), "active")
+    sync_poll_cycle!(poller)
+    assert %{pid: ^watcher, session: ^session} = Poller.worker_status(poller, renamed_id)
+    assert {:error, :already_running} = Poller.dispatch_fiber(poller, renamed_id, force: true)
+
+    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+             cmd == "tmux" and hd(args) == "new-session"
+           end)
   end
 
   test "a fiber without an intrinsic id is refused and shown blocked, naming the fix" do

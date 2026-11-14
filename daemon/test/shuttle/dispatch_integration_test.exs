@@ -525,9 +525,9 @@ defmodule Shuttle.DispatchIntegrationTest do
     end
 
     test "is refused when the scan cannot run", %{host: host} do
-      # First scan: the already-running check (tmux: "can't find session")
-      # finds no run script. Second: the transcript check cannot run.
-      IntegrationRunner.set_ps_results([{"", 0}, {"ps: boom", 1}])
+      # The exact-name probe, uid inventory, and availability probe find no
+      # worker. The following transcript-ownership scan cannot run.
+      IntegrationRunner.set_ps_results([{"", 0}, {"", 0}, {"", 0}, {"ps: boom", 1}])
 
       assert {:error, {:transcript_held, message}} = resume_held(host)
       assert message =~ "could not check"

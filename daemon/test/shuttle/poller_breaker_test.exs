@@ -223,7 +223,10 @@ defmodule Shuttle.PollerBreakerTest do
     assert {:error, {:tmux_server_unavailable, ^message}} =
              Poller.dispatch_fiber(poller, fiber_id, [])
 
-    assert Enum.count(MockRunner.commands(), &match?({"tmux", ["ls" | _]}, &1)) == probes_before
+    # One inventory checks for a worker under a different leaf with the same
+    # uid. The cooldown prevents a second server preflight.
+    assert Enum.count(MockRunner.commands(), &match?({"tmux", ["ls" | _]}, &1)) ==
+             probes_before + 1
 
     # Once a server exists, a dispatch succeeds and clears the entry.
     MockRunner.set_tmux_server_missing(false)

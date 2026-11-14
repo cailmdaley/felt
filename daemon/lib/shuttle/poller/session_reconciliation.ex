@@ -5,8 +5,8 @@ defmodule Shuttle.Poller.SessionReconciliation do
   Workers survive daemon restarts in their terminal backend. This module
   re-adopts them at boot (`adopt_orphans/1`) and on every poll
   (`reconcile_orphaned_sessions/3`). Terminal and process inventories map each
-  worker back to its fiber by its `<leaf>-<uid>-shuttle` name through
-  `candidate_session_lookup/1`. Open fibers acquire a watcher; closed fibers
+  worker back to its fiber by the intrinsic uid in its `<leaf>-<uid>-shuttle`
+  name, independent of the launch-time leaf. Open fibers acquire a watcher; closed fibers
   have their worker stopped. Failed stops keep a watcher and retry at most
   once a minute. Unknown workers are left alone.
 
@@ -16,7 +16,6 @@ defmodule Shuttle.Poller.SessionReconciliation do
 
   require Logger
 
-  alias Shuttle.Dispatcher
   alias Shuttle.Poller
   alias Shuttle.Poller.State
 
@@ -32,7 +31,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
     case Poller.list_shuttle_sessions(state) do
       {complete, sessions} when complete in [:ok, :partial] ->
         state = Shuttle.Poller.Discovery.boot_seed(state)
-        lookup = candidate_session_lookup(state)
+        lookup = candidate_uid_lookup(state)
 
         state =
           Enum.reduce(sessions, state, fn session, state_acc ->
@@ -86,7 +85,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
     if orphan_sessions == [] do
       state
     else
-      lookup = candidate_session_lookup(state)
+      lookup = candidate_uid_lookup(state)
 
       Enum.reduce(orphan_sessions, state, fn session, state_acc ->
         adopt_known_orphan_session(state_acc, lookup, session)
@@ -187,42 +186,35 @@ defmodule Shuttle.Poller.SessionReconciliation do
     end
   end
 
-  # Maps each candidate's worker session name (`<leaf>-<uid>-shuttle`) back to
-  # its fiber, so orphan adoption recognizes the workers it launched. A uid is
-  # unique to one fiber, so a name claimed by two fibers means a duplicated id
+  # Maps each candidate's intrinsic id back to its fiber, independent of the
+  # terminal's launch-time leaf. A uid claimed by two fibers means a duplicated id
   # (a copied file): it resolves to `:ambiguous` and is skipped rather than
   # mis-adopted. A candidate without a uid has no worker name and no entry.
-  defp candidate_session_lookup(%State{} = state) do
+  defp candidate_uid_lookup(%State{} = state) do
     state.last_known_listings
     |> Map.values()
     |> List.flatten()
     |> Enum.reduce(%{}, fn fiber, acc ->
       fiber_id = Map.get(fiber, "id")
 
-      session =
-        if is_binary(fiber_id) and fiber_id != "",
-          do: Dispatcher.session_name(fiber_id, Map.get(fiber, "uid"))
+      uid = Map.get(fiber, "uid")
 
-      if session do
+      if is_binary(fiber_id) and fiber_id != "" and Shuttle.ULID.valid?(uid) do
         bucket = if(Map.get(fiber, "status") == "closed", do: :closed, else: :open)
 
-        # Record fiber_id in `bucket` of the session's grouped sets. `Map.update/4`
-        # inserts the default VERBATIM when the key is absent — the function is NOT
-        # applied to it — so the default must already carry fiber_id. Without this,
-        # a session name seen exactly once (every name is unique to one fiber) keeps
-        # empty sets, resolves to nil below, and the live worker is never adopted —
-        # the daemon-restart-drops-all-adoptions bug.
+        # The initial bucket already contains fiber_id: Map.update/4 inserts
+        # its default verbatim when the uid is absent.
         add_to_bucket = fn grouped ->
           Map.update!(grouped, bucket, &MapSet.put(&1, fiber_id))
         end
 
         singleton = add_to_bucket.(%{open: MapSet.new(), closed: MapSet.new()})
-        Map.update(acc, session, singleton, add_to_bucket)
+        Map.update(acc, uid, singleton, add_to_bucket)
       else
         acc
       end
     end)
-    |> Enum.into(%{}, fn {session, grouped} ->
+    |> Enum.into(%{}, fn {uid, grouped} ->
       open_ids = Map.get(grouped, :open, MapSet.new()) |> MapSet.to_list()
       closed_ids = Map.get(grouped, :closed, MapSet.new()) |> MapSet.to_list()
 
@@ -235,14 +227,14 @@ defmodule Shuttle.Poller.SessionReconciliation do
           true -> nil
         end
 
-      {session, value}
+      {uid, value}
     end)
-    |> Enum.reject(fn {_session, value} -> is_nil(value) end)
+    |> Enum.reject(fn {_uid, value} -> is_nil(value) end)
     |> Map.new()
   end
 
   defp adopt_known_orphan_session(%State{} = state, lookup, session) do
-    case Map.get(lookup, session) do
+    case Map.get(lookup, Shuttle.ULID.from_tmux(session)) do
       {:adopt, fiber_id} ->
         if Poller.running_key(state, fiber_id) != nil do
           state
@@ -261,7 +253,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
 
       :ambiguous ->
         Logger.warning(
-          "Skipping orphan session whose name two fibers share (a duplicated id): #{session}"
+          "Skipping orphan session whose uid two fibers share (a duplicated id): #{session}"
         )
 
         state

@@ -899,7 +899,7 @@ defmodule Shuttle.Dispatcher do
         :ok
 
       session ->
-        Shuttle.Terminal.check_available(runner, session,
+        Shuttle.Terminal.check_available(runner, Shuttle.Terminal.worker_name(runner, session),
           launch_evidence: Shuttle.Continuation.launch_evidence?(fiber)
         )
     end

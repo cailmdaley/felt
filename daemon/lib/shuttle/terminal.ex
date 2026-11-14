@@ -139,6 +139,23 @@ defmodule Shuttle.Terminal do
     end
   end
 
+  @doc "Resolve a worker's terminal by intrinsic id; its launch-time leaf is only a label."
+  def worker_name(runner, name) do
+    uid = Shuttle.ULID.from_tmux(name)
+
+    if uid && status(runner, name) != :alive do
+      case list_workers(runner) do
+        {complete, names} when complete in [:ok, :partial] ->
+          Enum.find(names, name, &(Shuttle.ULID.from_tmux(&1) == uid))
+
+        {:error, :unknown} ->
+          name
+      end
+    else
+      name
+    end
+  end
+
   def check_available(runner, name, opts \\ []),
     do: availability(status(runner, name), name, opts)
 
