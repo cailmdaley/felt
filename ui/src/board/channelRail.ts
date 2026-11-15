@@ -28,7 +28,7 @@ const railPrimitive = definePrimitive({
 export interface RailReorder {
   /** The keys the rail shows, in its order. */
   set(keys: readonly string[]): void
-  /** Whether an item is picked up. */
+  /** Whether an entry is pressed or picked up, so the rail must not be rebuilt. */
   readonly moving: boolean
   /**
    * Makes a rail entry movable: a mouse drags it, a finger holds it still and
@@ -58,6 +58,8 @@ export function createRailReorder(on: {
   let was = false
   /** The item last picked up, so a hold that turned into a drag does not also ask for the menu. */
   let picked: string | null = null
+  /** A pointer is down on an entry: nothing is rebuilt under it until it lifts. */
+  let pressed = false
   // The draft's order is drawn with CSS `order`, so nothing is rebuilt under a moving item.
   const unsubscribe = rail.subscribe(() => {
     const now = state(), order = reorder.order(now)
@@ -74,28 +76,40 @@ export function createRailReorder(on: {
       keys = next
       rail.setOptions({ id, value: [...next], onValueChange: on.onOrder })
     },
-    get moving() { return !!state().moving },
+    get moving() { return pressed || !!state().moving },
     attach(pick, key, fixed) {
       picks.set(key, pick)
       const unbind = reorder.bind(pick, { key, props: { fixed } })
       let down: PointerEvent | null = null
       let armed = false
       const menu = (point?: { x: number; y: number }): void => on.onMenu(key, pick, point)
+      const finish = (): void => {
+        window.removeEventListener('pointerup', lift)
+        window.removeEventListener('pointercancel', finish)
+        armed = pressed = false
+        on.onSettled()
+      }
+      // A hold lifted without becoming a drag asks for the menu.
+      const lift = (): void => {
+        const ask = armed && picked !== key
+        finish()
+        if (ask) menu()
+      }
       const pointerdown = (event: PointerEvent): void => {
+        if (!event.isPrimary) return
         down = event
+        pressed = true
+        window.addEventListener('pointerup', lift)
+        window.addEventListener('pointercancel', finish)
         if (event.pointerType === 'mouse') reorder.pointerdown(event, key)
       }
-      // A finger that held still is picked up from where it first pressed; lifted without moving, it asks for the menu.
+      // A finger that held still is picked up from where it first pressed.
       const stopHold = attachLongPress(pick, {
         onFire: () => {
           if (!down) return
           armed = true
           picked = null
           if (!fixed) reorder.pointerdown(down, key)
-          window.addEventListener('pointerup', () => {
-            armed = false
-            if (picked !== key) menu()
-          }, { once: true })
         },
       })
       // Once held, the finger moves the item rather than scrolling the rail.
@@ -124,6 +138,8 @@ export function createRailReorder(on: {
       pick.addEventListener('keydown', keydown)
       return () => {
         if (picks.get(key) === pick) picks.delete(key)
+        window.removeEventListener('pointerup', lift)
+        window.removeEventListener('pointercancel', finish)
         unbind(); stopHold()
         pick.removeEventListener('pointerdown', pointerdown)
         pick.removeEventListener('touchmove', touchmove)

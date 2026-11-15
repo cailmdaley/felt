@@ -2,7 +2,7 @@ import { announce } from '@ui-sdk/core'
 import { ago } from '../civilDay.js'
 import { HumanMessageIds, repeatNotice } from '../humanMessageId.js'
 import { getDaemonJson, postDaemonJson } from '../daemonApi.js'
-import { head, peek, RESOURCE_PRIORITY } from '../documentResources.js'
+import { head, RESOURCE_PRIORITY, text } from '../documentResources.js'
 import { buildFileViewer, disposeFileViewer } from '../FileViewerPanel.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { boardCards, threadIndexFor } from '../KanbanSurfaces.js'
@@ -74,22 +74,39 @@ function lastSeen(key: string): number {
   const value = Number(stored(SEEN + key) ?? NaN)
   return Number.isFinite(value) ? value : -Infinity
 }
+/** A figure at least this many pixels on its shorter side; anything smaller is an icon or a sprite sheet. */
+const FIGURE_PX = 64
+const SVG = 'http://www.w3.org/2000/svg'
 /**
  * A tapestry page, collapsed to its title, its first paragraph and its first
  * figure: an image's path resolved against the page's folder (or its own
- * address when absolute), or an inline SVG as a data URL, drawn as an image
- * so nothing in it runs.
+ * address when absolute), or an outermost inline SVG as a data URL carrying
+ * the page's styles, drawn as an image so nothing in it runs.
  */
 export function collapse(html: string, dir = '/'): { title: string; lede: string; figure?: string } {
   const page = new DOMParser().parseFromString(html, 'text/html')
   const text = (node: Element | null | undefined): string => node?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
   const lede = [...page.querySelectorAll('p')].map(text).find(Boolean) ?? ''
-  const figure = page.body?.querySelector('img[src], svg')
-  const src = figure?.getAttribute('src')
-  const address = !figure ? undefined
-    : figure.localName === 'svg' ? `data:image/svg+xml,${encodeURIComponent(figure.outerHTML)}`
-    : /^(data|https?):/.test(src!) ? src!
-    : decodeURIComponent(new URL(src!, `file://${dir}/`).pathname)
+  // Its declared size, else its viewBox's; an image without either is taken at its word.
+  const side = (node: Element): number => {
+    const [width, height] = ['width', 'height'].map(name => parseFloat(node.getAttribute(name) ?? ''))
+    if (Number.isFinite(width) && Number.isFinite(height)) return Math.min(width, height)
+    const box = node.getAttribute('viewBox')?.trim().split(/[\s,]+/).map(Number)
+    return box?.length === 4 ? Math.min(box[2], box[3]) : Infinity
+  }
+  const figure = [...page.body?.querySelectorAll('img[src], svg') ?? []]
+    .find(node => !node.parentElement?.closest('svg') && side(node) >= FIGURE_PX)
+  let address: string | undefined
+  if (figure?.localName === 'svg') {
+    const drawn = figure.cloneNode(true) as Element
+    const styles = page.createElementNS(SVG, 'style')
+    styles.textContent = [...page.querySelectorAll('style')].map(style => style.textContent).join('\n')
+    drawn.prepend(styles)
+    address = `data:image/svg+xml,${encodeURIComponent(new XMLSerializer().serializeToString(drawn))}`
+  } else if (figure) {
+    const src = figure.getAttribute('src')!
+    address = /^(data|https?):/.test(src) ? src : decodeURIComponent(new URL(src, `file://${dir}/`).pathname)
+  }
   return { title: text(page.querySelector('h1')) || page.title.trim(), lede, figure: address }
 }
 
@@ -168,7 +185,7 @@ export class ChannelsView implements TemporalView {
   private readonly tempering = new Set<string>()
   /** When each channel was last read before this visit to it, for the marks of what is new. */
   private readonly before = new Map<string, number>()
-  private sigs: Record<Pane, string> = { channel: '', thread: '' }
+  private sigs: Record<Pane | 'rail', string> = { channel: '', thread: '', rail: '' }
   /** Each list follows its newest message while the reader is at its foot; a message that grows (an image arriving) keeps it there. */
   private readonly following: Record<Pane, boolean> = { channel: true, thread: true }
   /** Where each list was last scrolled to its foot, so growth beneath the reader is not taken for scrolling up. */
@@ -363,9 +380,10 @@ export class ChannelsView implements TemporalView {
         const path = `${card.fiberDir}/${name}`, src = fileBytesUrl(ctx.shuttleBase, path, card.originId)
         const found = await head(src, RESOURCE_PRIORITY.neighbour, { fresh: !!known })
         if (!found?.exists) continue
-        const bytes = await peek(src, RESOURCE_PRIORITY.neighbour, { fresh: !!known })
+        // The whole page, the reader's cached copy: a plot is often embedded whole and lies past any first read.
+        const body = await text(src, RESOURCE_PRIORITY.neighbour, { fresh: !!known })
         if (generation !== this.generation) return
-        const { title, lede, figure } = collapse(new TextDecoder().decode(bytes?.bytes ?? new Uint8Array()), card.fiberDir)
+        const { title, lede, figure } = collapse(body?.text ?? '', card.fiberDir)
         const at = Date.parse(found.modifiedAt ?? '') || Date.parse(card.modifiedAt ?? '') || Date.now()
         const shown = figure?.startsWith('/') ? fileBytesUrl(ctx.shuttleBase, figure, card.originId) : figure
         this.tapestries.set(id, { modified: card.modifiedAt, tapestry: { path, at, title: title || card.name, lede, figure: shown } })
@@ -497,9 +515,14 @@ export class ChannelsView implements TemporalView {
   private drawRail(): void {
     const list = this.list!, rail = this.rail!, listed = this.listed
     rail.set(listed.map(channel => channel.key))
-    // Nothing is rebuilt under an item picked up; it is drawn once it lands.
+    // Nothing is rebuilt under an entry pressed or picked up; it is drawn once it lands.
     this.railStale = rail.moving
     if (rail.moving) return
+    const unread = (channel: Channel): boolean => channel.key !== this.current && this.newestSaid(channel) > lastSeen(channel.key)
+    // A poll that changed nothing in the rail leaves it be.
+    const sig = JSON.stringify([this.query, this.current, listed.map(channel => [channel.key, channel.name, channel.title, channel.chaired, channel.waiting, !!channel.hidden, unread(channel)])])
+    if (sig === this.sigs.rail) { this.drawFound(); return }
+    this.sigs.rail = sig
     for (const unbind of this.railBindings) unbind()
     this.railBindings = []
     const items: HTMLLIElement[] = []
@@ -510,7 +533,7 @@ export class ChannelsView implements TemporalView {
       pick.dataset.channel = channel.key
       pick.dataset.item = `channel:${channel.key}`
       pick.toggleAttribute('data-lone', !channel.chaired)
-      pick.toggleAttribute('data-unread', channel.key !== this.current && this.newestSaid(channel) > lastSeen(channel.key))
+      pick.toggleAttribute('data-unread', unread(channel))
       pick.toggleAttribute('data-waiting', channel.waiting)
       pick.append(el('span', 'kbn-ch-pick-hash', channel.chaired ? '#' : '·'), el('span', 'kbn-ch-pick-name', channel.name))
       if (channel.hidden) pick.append(el('span', 'kbn-ch-pick-hidden', 'hidden'))
@@ -1095,7 +1118,7 @@ export class ChannelsView implements TemporalView {
     this.layout = this.channelEl = this.head = this.note = this.threadEl = this.threadHead = null
     this.list = null; this.found = null; this.jump = null; this.stream = null; this.threadList = null; this.railToggle = null
     this.channelReply = this.threadReply = null
-    this.sigs = { channel: '', thread: '' }
+    this.sigs = { channel: '', thread: '', rail: '' }
   }
 }
 

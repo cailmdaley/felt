@@ -159,7 +159,12 @@ it('opens a thread in the channel\'s place, with a way back, when the view is to
 
 it('collapses a tapestry to its title, lede and first figure, an inline SVG drawn as an image', () => {
   expect(collapse('<h1>κ × tSZ</h1><p>At 9σ.</p><figure><img src="plots/spectrum.png"></figure>', '/notes/tsz')).toStrictEqual({ title: 'κ × tSZ', lede: 'At 9σ.', figure: '/notes/tsz/plots/spectrum.png' })
-  expect(collapse('<h1>A</h1><svg onload="alert(1)"><path d="M0 0"/></svg>').figure).toMatch(/^data:image\/svg\+xml,/)
+  const drawn = collapse('<style>.line{stroke:red}</style><h1>A</h1><svg viewBox="-12 -12 24 24"><path/></svg><svg width="0" height="0"><defs/></svg><svg viewBox="0 0 600 300"><svg viewBox="0 0 10 10"/><path class="line" d="M0 0"/></svg>').figure!
+  // The icon and the sprite sheet are passed over; the plot carries the page's styles and its namespace.
+  expect(drawn).toMatch(/^data:image\/svg\+xml,/)
+  expect(decodeURIComponent(drawn)).toContain('viewBox="0 0 600 300"')
+  expect(decodeURIComponent(drawn)).toContain('.line{stroke:red}')
+  expect(decodeURIComponent(drawn)).toContain('xmlns="http://www.w3.org/2000/svg"')
   expect(collapse('<h1>A</h1><img src="https://example.org/a.png">').figure).toBe('https://example.org/a.png')
   expect(collapse('<title>T</title><p>Only words.</p>')).toStrictEqual({ title: 'T', lede: 'Only words.', figure: undefined })
 })
@@ -317,6 +322,28 @@ it('hides a channel by its menu; Jump to finds it, marked, and opening it brings
   await settle()
   expect(posts.at(-1)?.[1]).toMatchObject({ key: expect.stringMatching(/^show:fiber:R:\d+$/) })
   expect(rail(host)).toStrictEqual(['cmbx', 'Moving house'])
+})
+
+it('rebuilds nothing under a held entry: a poll during a hold waits, and the hold lifted opens the menu on it', async () => {
+  daemon()
+  const { view, ctx, host } = await mount()
+  const held = host.querySelector<HTMLButtonElement>('[data-channel="fiber:R"]')!
+  const press = (type: string) => new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: 10, clientY: 10 })
+  held.dispatchEvent(Object.assign(press('pointerdown'), { pointerId: 1, pointerType: 'touch', isPrimary: true }))
+  await new Promise(resolve => setTimeout(resolve, 500))
+  // A poll brings a new channel while the finger is still down.
+  ctx.response = board([chair, tsz, mask, beam, van, notes, card({ id: 'new', uid: 'NEW', name: 'Fresh', ...working(1) })])
+  view.refresh(ctx); await settle()
+  expect(held.isConnected).toBe(true)
+  expect(rail(host)).toStrictEqual(['cmbx', 'Moving house'])
+  window.dispatchEvent(Object.assign(press('pointerup'), { pointerId: 1, pointerType: 'touch', isPrimary: true }))
+  await settle()
+  expect([...document.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toStrictEqual(['Hide', 'Pin', 'Move to bottom'])
+  // Lifted, the rail takes the poll.
+  expect(rail(host)).toStrictEqual(['cmbx', 'Moving house', 'Fresh'])
+  ;(document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+  // The window swallows the click a fired hold sends for a moment; let it pass before the next test clicks.
+  await new Promise(resolve => setTimeout(resolve, 750))
 })
 
 it('brings a hidden channel back by itself when something in it begins waiting after the hide', async () => {
