@@ -637,7 +637,9 @@ defmodule Shuttle.Poller do
   `{:error, :running}` while a worker is tracked, `{:error, :held}` while the
   boot quarantine or a contract skew holds fresh launches (the fiber is then
   parked and drawn as held until the hold comes off), `{:error, :full}` while
-  the host runs as many workers as it allows,
+  the host runs as many workers as it allows, `{:error, :resume_loop}`,
+  `{:error, :preflight_cooldown}` or `{:error, :dispatch_cooldown}` while the
+  resume-loop breaker or a launch-refusal cooldown holds autonomous dispatch,
   `{:error, :reconciliation_required}`, or `{:error, :busy}` when the Poller
   does not answer in time. In memory only; the launch itself is
   `dispatch_fiber/3` with `inbox: true`, which checks again against a fresh
@@ -4189,6 +4191,18 @@ defmodule Shuttle.Poller do
 
       available_slots(state) <= 0 ->
         {:error, :full, state}
+
+      # A message must not keep relaunching a worker that dies on start or
+      # whose launch keeps being refused: the breaker and cooldowns that hold
+      # autonomous dispatch hold it too.
+      resume_loop_open?(state, runtime_key) ->
+        {:error, :resume_loop, state}
+
+      preflight_cooldown_open?(state, runtime_key) ->
+        {:error, :preflight_cooldown, state}
+
+      dispatch_failure_cooldown_open?(state, runtime_key) ->
+        {:error, :dispatch_cooldown, state}
 
       true ->
         {:ok, state}

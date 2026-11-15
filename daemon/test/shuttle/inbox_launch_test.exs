@@ -254,6 +254,53 @@ defmodule Shuttle.InboxLaunchTest do
     assert read_frontmatter(host, paused)["status"] == "open"
   end
 
+  test "an open resume-loop breaker or launch cooldown keeps the entries waiting", %{host: host} do
+    looping = armed(host, "tests/inbox-looping")
+    refused = armed(host, "tests/inbox-refused")
+    poller = poller!(host)
+    now = DateTime.utc_now()
+
+    :sys.replace_state(poller, fn state ->
+      %{
+        state
+        | resume_loop:
+            Map.put(state.resume_loop, entry(host, looping).fiber["uid"], %{
+              count: 3,
+              opened_at: now,
+              fiber_id: looping,
+              uid: entry(host, looping).fiber["uid"]
+            }),
+          dispatch_failures:
+            Map.put(state.dispatch_failures, entry(host, refused).fiber["uid"], %{
+              reason: {:project_dir_missing, host},
+              attempts: 1,
+              attempted_at: now,
+              first_attempted_at: now,
+              fiber_id: refused,
+              uid: entry(host, refused).fiber["uid"]
+            })
+      }
+    end)
+
+    for {id, why} <- [{looping, "resume-loop breaker is open"}, {refused, "launch was refused"}] do
+      assert {:ok, {:waiting, detail}} =
+               Delivery.context(entry(host, id), "keep trying", "m-" <> id, wake: true)
+
+      assert detail =~ why
+      assert %{} = pending(entry(host, id))
+
+      refute pending(entry(host, id))["m-" <> id]["attempt"],
+             "a refused launch reserved its entries"
+    end
+
+    for _ <- 1..2, do: poll!(poller)
+    assert launches(looping) == 0
+    assert launches(refused) == 0
+
+    assert %{opened_at: ^now} =
+             :sys.get_state(poller).resume_loop[entry(host, looping).fiber["uid"]]
+  end
+
   test "the boot quarantine holds an inbox launch, drawn as held, until it is released", %{
     host: host
   } do

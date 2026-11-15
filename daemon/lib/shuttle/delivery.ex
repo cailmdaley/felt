@@ -339,6 +339,18 @@ defmodule Shuttle.Delivery do
        :full ->
          "#{Poller.own_host_id()} runs as many workers as it allows; a session starts for the message when one ends"
 
+       :resume_loop ->
+         "#{fiber_id}'s workers keep dying on start, so its resume-loop breaker is open; " <>
+           "the message waits in its inbox until the breaker's cooldown ends"
+
+       :preflight_cooldown ->
+         "#{fiber_id}'s last launch was refused before it started (see its blocked card); " <>
+           "the message waits in its inbox until that cooldown ends"
+
+       :dispatch_cooldown ->
+         "#{fiber_id}'s launches keep failing, so they are paused for a cooldown; " <>
+           "the message waits in its inbox until it ends"
+
        :busy ->
          "#{Poller.own_host_id()}'s daemon was busy; the next poll starts a session for the message"
 
