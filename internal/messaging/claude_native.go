@@ -473,7 +473,13 @@ func observeClaudeTurn(ctx context.Context, f *os.File, path, sessionID, uuid, c
 				Attachment struct {
 					Type       string `json:"type"`
 					SourceUUID string `json:"source_uuid"`
+					Origin     struct {
+						MsgID string `json:"msg_id"`
+					} `json:"origin"`
 				} `json:"attachment"`
+				Origin struct {
+					MsgID string `json:"msg_id"`
+				} `json:"origin"`
 				Message struct {
 					Model string `json:"model"`
 					Role  string `json:"role"`
@@ -481,10 +487,10 @@ func observeClaudeTurn(ctx context.Context, f *os.File, path, sessionID, uuid, c
 			}
 			if json.Unmarshal(pending, &row) == nil && row.SessionID == sessionID {
 				switch {
-				case row.Type == "user" && row.UUID == uuid:
-					ancestry[uuid] = true
+				case row.Type == "user" && row.UUID != "" && (row.UUID == uuid || row.Origin.MsgID == uuid):
+					ancestry[row.UUID] = true
 					stage = advanceClaudeStage(stage, StatusSubmitted)
-				case row.Type == "attachment" && row.Attachment.Type == "queued_command" && row.Attachment.SourceUUID == uuid && row.UUID != "":
+				case row.Type == "attachment" && row.Attachment.Type == "queued_command" && (row.Attachment.SourceUUID == uuid || row.Attachment.Origin.MsgID == uuid) && row.UUID != "":
 					ancestry[row.UUID] = true
 					stage = advanceClaudeStage(stage, StatusSubmitted)
 				case row.Type == "queue-operation" && row.Operation == "enqueue" && nativeContentHash(row.Content) == contentHash:
