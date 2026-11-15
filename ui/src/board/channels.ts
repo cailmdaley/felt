@@ -1,4 +1,4 @@
-import type { KanbanCard } from './KanbanTypes.js'
+import { hasLiveWorker, type KanbanCard } from './KanbanTypes.js'
 import type { SentFile } from './sentFiles.js'
 import { cardNamed, threadState, type ThreadState } from './threads.js'
 import { turnOf } from './turn.js'
@@ -33,13 +33,19 @@ export interface Message {
 export interface Channel {
   /** `role:<office>`, or `fiber:<uid>` for a top-level constitution without one. */
   key: string
-  /** The office's charter name, else its slug; the constitution's name without one. */
+  /** The office's charter name before any ` · ` gloss, else its slug; the constitution's name without one. */
   name: string
+  /** The name in full, the charter's gloss included. */
+  title: string
   /** Whose tapestry is pinned and who a reply goes to by default: the office's seat, else its most recently active top-level. */
   seat: KanbanCard
   /** Every live constitution in it: its top-levels and their threads. */
   members: KanbanCard[]
-  /** Oldest first, as a channel reads: the newest at the bottom. */
+  /**
+   * Oldest first, as a channel reads: the newest at the bottom. Every line
+   * waiting on the human; of the quiet ones, those live now or updated in the
+   * last {@link QUIET_MS}.
+   */
   messages: Message[]
   /** When the newest wait began, or 0 when nothing waits. */
   newest: number
@@ -57,6 +63,8 @@ export interface Channel {
 
 /** A channel whose newest wait is older than this goes to the gone-cold shelf. */
 export const COLD_MS = 3 * 86_400_000
+/** A quiet line stays in its channel's feed while its card is live, or for this long after its last update. */
+export const QUIET_MS = 7 * 86_400_000
 
 /** The dismissal record that sets a channel aside until something newer waits in it. */
 export const setAsideKey = (channel: Pick<Channel, 'key' | 'newest'>): string => `office:${channel.key}:${channel.newest}`
@@ -66,9 +74,12 @@ export const unpinKey = (key: string, at: number): string => `pin:${key}:${at}`
 /** Constitutions a channel speaks for: everything not archived. */
 const LIVE: readonly ThreadState[] = ['waiting', 'to-review', 'with-orchestrator', 'working', 'drafts', 'roles', 'resting']
 const fiberOf = (card: KanbanCard): string => card.uid ?? card.id
+/** The first of `values` that names a real instant, else 0 (no time is known). */
 const instant = (...values: Array<string | number | undefined>): number =>
-  values.map(value => typeof value === 'number' ? value : Date.parse(value ?? '')).find(Number.isFinite) ?? 0
-const lastActive = (card: KanbanCard): number => instant(card.lastActivityAt, card.closedAt, card.createdAt)
+  values.map(value => typeof value === 'number' ? value : Date.parse(value ?? '')).find(value => Number.isFinite(value) && value > 0) ?? 0
+/** A card's last update: its worker's latest event or its file's last write, whichever is later. A card may carry no creation time. */
+const lastActive = (card: KanbanCard): number =>
+  Math.max(instant(card.lastActivityAt), instant(card.modifiedAt)) || instant(card.closedAt, card.createdAt)
 /** The office a role names: its first path segment. */
 export const officeOf = (role: string | undefined): string => role?.split('/')[0] ?? ''
 
@@ -79,13 +90,13 @@ export const officeOf = (role: string | undefined): string => role?.split('/')[0
  */
 export function waitingOn(card: KanbanCard): Message | undefined {
   const state = threadState(card)
-  if (card.ask && card.status === 'active') return { kind: 'ask', card, text: card.ask.text, at: instant(card.ask.at, card.lastActivityAt, card.dispatchedAt, card.createdAt) }
-  if (state === 'to-review') return { kind: 'review', card, text: card.reviewMark?.note || card.outcome || '', at: instant(card.closedAt, card.reviewMark?.at, card.createdAt) }
+  if (card.ask && card.status === 'active') return { kind: 'ask', card, text: card.ask.text, at: instant(card.ask.at, card.lastActivityAt, card.dispatchedAt, card.modifiedAt, card.createdAt) }
+  if (state === 'to-review') return { kind: 'review', card, text: card.reviewMark?.note || card.outcome || '', at: instant(card.closedAt, card.reviewMark?.at, card.modifiedAt, card.createdAt) }
   if (state !== 'waiting') return undefined
   const turn = turnOf(card)
   // What the worker has to say is its outcome; only a turn that could not start says why.
   const text = card.outcome || (turn.turn === 'blocked' ? turn.detail : '')
-  return { kind: turn.turn === 'question' ? 'ask' : 'turn', card, text, at: instant(turn.since, card.lastActivityAt, card.dispatchedAt, card.createdAt) }
+  return { kind: turn.turn === 'question' ? 'ask' : 'turn', card, text, at: instant(turn.since, card.lastActivityAt, card.dispatchedAt, card.modifiedAt, card.createdAt) }
 }
 
 /**
@@ -149,14 +160,22 @@ export function composeChannels(input: {
     const spoken = held.filter(line => members.some(card => card.uid === line.fiber_id || card.id === line.fiber_id))
     const said = (card: KanbanCard): boolean => sent.some(file => cardNamed([card], file.uid ?? '', file.host ?? ''))
       || spoken.some(line => line.fiber_id === card.uid || line.fiber_id === card.id)
-    const messages = members.flatMap<Message>(card => waitingOn(card)
-      ?? (card.outcome || said(card) ? [{ card, text: card.outcome ?? '', at: lastActive(card) }] : []))
-      .sort((a, b) => a.at - b.at)
-    const newest = Math.max(0, ...messages.filter(message => message.kind).map(message => message.at))
-    const waiting = newest > 0 && (setAside.get(key) ?? -Infinity) < newest
+    // A quiet line speaks for a card live now, or one updated lately; resting and stale cards stay in the files and Find.
+    const current = (card: KanbanCard, at: number): boolean => card.status === 'active' || hasLiveWorker(card) || now - at <= QUIET_MS
+    const messages = members.flatMap<Message>(card => {
+      const waits = waitingOn(card)
+      if (waits) return [waits]
+      const at = lastActive(card)
+      return (card.outcome || said(card)) && current(card, at) ? [{ card, text: card.outcome ?? '', at }] : []
+    }).sort((a, b) => a.at - b.at)
+    const waits = messages.filter(message => message.kind)
+    const newest = Math.max(0, ...waits.map(message => message.at))
+    const waiting = waits.length > 0 && (setAside.get(key) ?? -Infinity) < newest
+    const title = office ? names.get(office) ?? office : top.name
     channels.push({
       key,
-      name: office ? names.get(office) ?? office : top.name,
+      name: title.split(' · ')[0],
+      title,
       seat,
       members,
       messages,

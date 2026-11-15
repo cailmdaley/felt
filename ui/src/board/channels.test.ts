@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { COLD_MS, composeChannels, officeOf, setAsideKey, unpinKey, waitingOn, type HeldSpeech } from './channels.js'
+import { COLD_MS, QUIET_MS, composeChannels, officeOf, setAsideKey, unpinKey, waitingOn, type HeldSpeech } from './channels.js'
 import { inFlightBand } from './KanbanReadModel.js'
 import { card } from './testFixtures.js'
 import { ThreadIndex } from './threads.js'
@@ -123,6 +123,39 @@ describe('composeChannels', () => {
     expect(listed(all, { dismissed: [...dismissed, unpinKey('role:vizier', now - 2 * minute)], pinned })).toStrictEqual(['role:analyst', 'fiber:R', 'role:vizier'])
     const fresh = card({ id: 'fresh', uid: 'N', shuttleRole: 'vizier', status: 'active', ask: { text: 'One more?', at: new Date(now).toISOString() } })
     expect(listed([...all, fresh], { dismissed })[0]).toBe('role:vizier')
+  })
+
+  it('times a line by the card\'s last update, never by a time it does not carry', () => {
+    // Real cards may carry no creation time: a quiet line falls back to the file's last write, and a wait to it too.
+    const viewer = card({ id: 'viewer', uid: 'W', orchestrator: 'S', outcome: 'Served.', createdAt: '', modifiedAt: at(60) })
+    const stamp = card({ id: 'stamp', uid: 'P', orchestrator: 'S', status: 'active', ask: { text: 'Stamp it?', at: '' }, createdAt: '', modifiedAt: at(45) })
+    const bare = card({ id: 'bare', uid: 'N', orchestrator: 'S', status: 'active', outcome: 'Untimed.', createdAt: '' })
+    const analyst = compose([shear, viewer, stamp, bare]).find(channel => channel.key === 'role:analyst')!
+    const timed = Object.fromEntries(analyst.messages.map(message => [message.card.id, message.at]))
+    expect(timed.viewer).toBe(now - 60 * minute)
+    expect(timed.stamp).toBe(now - 45 * minute)
+    expect(timed.bare).toBe(0)
+    expect(analyst.waiting).toBe(true)
+    // The later of a worker's last event and the file's last write.
+    const moved = card({ id: 'moved', uid: 'O', orchestrator: 'S', outcome: 'Moved.', lastActivityAt: now - 300 * minute, modifiedAt: at(10) })
+    expect(compose([shear, moved])[0].messages.find(message => message.card.id === 'moved')!.at).toBe(now - 10 * minute)
+  })
+
+  it('keeps quiet lines for live cards and lately updated ones; stale resting cards leave the feed, waiting ones never do', () => {
+    const old = (minutes: number) => at(minutes), week = QUIET_MS / minute
+    const resting = card({ id: 'resting', uid: 'X', orchestrator: 'S', status: 'open', column: 'resting', outcome: 'Parked.', modifiedAt: old(week + 60) })
+    const fresh = card({ id: 'fresh', uid: 'Y', orchestrator: 'S', status: 'open', column: 'resting', outcome: 'Parked lately.', modifiedAt: old(week - 60) })
+    const running = card({ id: 'running', uid: 'U', orchestrator: 'S', status: 'active', outcome: 'Still going.', modifiedAt: old(4 * week) })
+    const asking = card({ id: 'asking', uid: 'K', orchestrator: 'S', status: 'active', ask: { text: 'Still there?', at: old(4 * week) } })
+    const ids = compose([shear, resting, fresh, running, asking])[0].messages.map(message => message.card.id)
+    expect(ids).toContain('fresh'); expect(ids).toContain('running'); expect(ids).toContain('asking')
+    expect(ids).not.toContain('resting')
+  })
+
+  it('names a channel by its charter\'s title before the gloss, and keeps the whole title', () => {
+    const chair = card({ id: 'cmbx', uid: 'H', shuttleRole: 'cmbx-chair', status: 'active', ask: { text: 'Merge?', at: at(3) } })
+    const [channel] = compose([chair], { names: new Map([['cmbx-chair', 'cmbx chair · the hub seat']]) })
+    expect([channel.name, channel.title]).toStrictEqual(['cmbx chair', 'cmbx chair · the hub seat'])
   })
 
   it('counts a mirrored fiber once and drops a desk header row', () => {

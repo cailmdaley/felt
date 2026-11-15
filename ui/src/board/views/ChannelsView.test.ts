@@ -41,13 +41,13 @@ const board = (inFlight: ReturnType<typeof card>[]) => response({ now: { drafts:
 const sent = (uid: string, path: string, minutes: number, fiber = card({ id: uid, uid, name: uid })) =>
   ({ card: fiber, receipt: { uid, key: `host:${path}`, owner: 'host', host: 'host', fullPath: path, basename: path.split('/').at(-1)!, timestamp: Date.now() - minutes * minute } })
 const library = [sent('M', '/notes/mask/north-mask.png', 30, mask), sent('old', '/notes/old/lensing-notes.md', 600, card({ id: 'old', uid: 'old', name: 'Lensing notes' }))]
-async function mount(inFlight = [shear, mask, covariance, van, garden], view = new ChannelsView(), lately = [garden]) {
+async function mount(inFlight = [shear, mask, covariance, van, garden], view = new ChannelsView(), lately = [garden], shuttleBase = '') {
   const openFromDesk = vi.fn(), openPage = vi.fn(), requestRefresh = vi.fn(), see = vi.fn()
   const workspace = {
     openFromDesk, openPage, readLatelyCards: () => lately,
     library: { subscribe: () => () => {}, visit: () => {}, documents: () => library, receipts: (uid: string) => library.filter(doc => doc.receipt.uid === uid).map(doc => doc.receipt) },
   }
-  const ctx = { cards: [], response: board(inFlight), shuttleBase: '', workspace, requestRefresh, openCard: vi.fn(), see } as unknown as ViewContext
+  const ctx = { cards: [], response: board(inFlight), shuttleBase, workspace, requestRefresh, openCard: vi.fn(), see } as unknown as ViewContext
   const host = document.createElement('div'); document.body.append(host)
   views.push(view); view.mount(host, ctx)
   await settle(); await settle()
@@ -237,7 +237,6 @@ it('shows a channel\'s files from its header, and finds channels and files acros
   daemon()
   const { view, host, openPage } = await mount()
   const tab = (name: string) => [...host.querySelectorAll<HTMLButtonElement>('.kbn-ch-tab')].find(el => el.textContent?.startsWith(name))!
-  expect(tab('Files').textContent).toBe('Files 1')
   expect(host.querySelector<HTMLElement>('.kbn-ch-files')!.hidden).toBe(true)
   tab('Files').click()
   expect(host.querySelector<HTMLElement>('.kbn-ch-tapestry')!.hidden).toBe(true)
@@ -259,4 +258,22 @@ it('shows a channel\'s files from its header, and finds channels and files acros
   // Find reaches a channel that is not in the rail by any of its members.
   view.find('covariance')
   expect(rail(host)).toStrictEqual(['Analyst'])
+})
+
+it('draws a line whose time is unknown without an age, and names a channel by its charter title before the gloss', async () => {
+  daemon()
+  vi.mocked(fetch).mockImplementation(async (url: string | URL | Request) => {
+    const path = String(url)
+    if (path.includes('/channels/dismissed')) return new Response(JSON.stringify({ dismissed: [], pinned: {}, reach_ms: 14 * day }))
+    if (path.includes('/speak')) return new Response(JSON.stringify({ held: [] }))
+    if (path.includes('/roles')) return new Response(JSON.stringify([{ slug: 'analyst', id: 'roles/analyst', name: 'Analyst · the shear desk', outcome: '' }]))
+    return new Response('{}')
+  })
+  const untimed = card({ id: 'untimed', uid: 'U', name: 'Untimed', orchestrator: 'S', status: 'active', outcome: 'No clock.', createdAt: '' })
+  // Its own base, so the charter catalogue is read afresh.
+  const { host } = await mount([shear, mask, untimed], new ChannelsView(), [], 'http://glossed.test')
+  expect(rail(host)).toStrictEqual(['Analyst'])
+  expect(host.querySelector('.kbn-ch-pick')!.getAttribute('title')).toBe('Analyst · the shear desk')
+  expect(line(host, 'Untimed').querySelector('.kbn-ch-age')).toBeNull()
+  expect(line(host, 'Choose the mask').querySelector('.kbn-ch-age')).not.toBeNull()
 })

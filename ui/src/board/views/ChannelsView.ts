@@ -231,7 +231,7 @@ export class ChannelsView implements TemporalView {
   private get listed(): Channel[] {
     if (!this.query) return this.channels.filter(channel => channel.listed || channel.key === this.current)
     const query = this.query.toLowerCase()
-    return this.channels.filter(channel => [channel.name, ...channel.members.flatMap(card => [card.name, card.path]),
+    return this.channels.filter(channel => [channel.title, ...channel.members.flatMap(card => [card.name, card.path]),
       ...this.documents(channel).flatMap(doc => [doc.name, doc.path])].some(text => text.toLowerCase().includes(query)))
   }
   /** Filters the rail by what Find holds, from the bar's field or the rail's own. */
@@ -255,7 +255,9 @@ export class ChannelsView implements TemporalView {
     const docs = new Map<DocKey, Doc>()
     for (const card of channel.members) for (const path of this.companions.get(`${card.originId}\0${fiberOf(card)}`) ?? []) {
       const key = docKey(card.originId, path, card.originId, card.fiberDir)
-      docs.set(key, { card, key, name: basename(path), path, at: 0 })
+      // A companion is named for what it is: its fiber's Tapestry, Artifact or Report.
+      const stem = basename(path).replace(/\.html$/i, '')
+      docs.set(key, { card, key, name: stem.charAt(0).toUpperCase() + stem.slice(1), path, at: 0 })
     }
     const sent = channel.members.flatMap(card => (library?.receipts(fiberOf(card)) ?? []).map(receipt => ({ card, receipt })))
       .sort((a, b) => b.receipt.timestamp - a.receipt.timestamp)
@@ -278,7 +280,7 @@ export class ChannelsView implements TemporalView {
         const found = paths.filter((path): path is string => !!path)
         if (!found.length) return
         this.companions.set(id, found)
-        this.drawFiles()
+        this.drawChannel()
       })
     }
   }
@@ -345,7 +347,8 @@ export class ChannelsView implements TemporalView {
       pick.toggleAttribute('data-waiting', channel.waiting && !channel.cold)
       pick.toggleAttribute('data-quiet', !channel.waiting || channel.cold)
       pick.append(el('span', 'kbn-ch-pick-name', channel.name))
-      if (channel.waiting) {
+      if (channel.title !== channel.name) pick.title = channel.title
+      if (channel.waiting && channel.newest > 0) {
         const age = el('span', 'kbn-ch-pick-age', ago(channel.newest, now))
         age.dataset.at = String(channel.newest)
         pick.append(age)
@@ -428,7 +431,9 @@ export class ChannelsView implements TemporalView {
       channel.files.map(file => [file.fullPath, file.timestamp]), channel.held.map(line => [line.fiber_id, line.n, line.first]), [...this.replied], [...this.tempering]])
     if (sig !== this.sig) {
       this.sig = sig
-      this.head.replaceChildren(el('h3', 'kbn-ch-name', channel.name), this.tabs!)
+      const name = el('h3', 'kbn-ch-name', channel.name)
+      if (channel.title !== channel.name) name.title = channel.title
+      this.head.replaceChildren(name, this.tabs!)
       this.feed.replaceChildren(...channel.messages.map(message => this.messageRow(channel, message, before, now)))
       if (!channel.messages.length) this.feed.append(el('li', 'kbn-ch-hush', 'Quiet.'))
       if (target === channel.seat) this.label.replaceChildren(el('span', '', channel.seat.name))
@@ -450,8 +455,7 @@ export class ChannelsView implements TemporalView {
       node.setAttribute('aria-pressed', String(this.pane === pane))
       return node
     }
-    const count = this.documents(channel).length
-    this.tabs!.replaceChildren(tab('tapestry', 'Tapestry'), tab('files', count ? `Files ${count}` : 'Files'))
+    this.tabs!.replaceChildren(tab('tapestry', 'Tapestry'), tab('files', 'Files'))
     if (!channel.listed) this.tabs!.append(button('kbn-ch-tab kbn-ch-pin', 'Pin', () => { void this.pin(channel); this.draw() }))
   }
   /** The channel's files, when they are the pane shown. */
@@ -478,9 +482,12 @@ export class ChannelsView implements TemporalView {
     who.append(el('span', 'kbn-ch-msg-name', card.name))
     const office = officeOf(card.shuttleRole)
     if (office && `role:${office}` !== channel.key) who.append(el('span', 'kbn-ch-msg-role', this.names.get(office) ?? office))
-    const age = el('span', 'kbn-ch-age', ago(message.at, now))
-    age.dataset.at = String(message.at)
-    who.append(age)
+    // A line whose time is unknown shows none.
+    if (message.at > 0) {
+      const age = el('span', 'kbn-ch-age', ago(message.at, now))
+      age.dataset.at = String(message.at)
+      who.append(age)
+    }
     pick.append(who)
     const words = message.text || (message.kind === 'review' ? 'Closed for your review.' : '')
     if (words) {
