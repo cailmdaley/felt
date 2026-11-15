@@ -57,7 +57,7 @@ The usual external-action gates still apply, including issues or PRs on repos wh
 Answering in the orchestrator's conversation lets it carry the decision to the relevant thread with `shuttle message <thread> "<decision>"` and keep the whole effort coherent.
 Answering inside a thread steers that worker directly; when the decision changes other threads or the parent's scope, tell the orchestrator too rather than assuming it sees every exchange.
 Every thread result reaches that thread's own orchestrator as context for its next turn.
-A close or ask also wakes, but only the session that asked for the thread (`shuttle thread` records it): the orchestrator when its own worker asked, or its next worker; a session outside the orchestrator is messaged directly.
+A close or ask also wakes, but only the session that asked for the thread (`shuttle thread` records it): the orchestrator when its own worker asked, starting a session for it when it has none and is open or active and not at rest; a session outside the orchestrator is messaged directly.
 A thread nobody asked for, such as one the human started from the board or took with `--take`, wakes no one.
 The orchestrator decides whether to pass a result further up; results never wake a chain of ancestors.
 Use `shuttle close <thread> --quiet` for wrap-ups that need no wake.
@@ -161,8 +161,8 @@ shuttle message <target> "…" --message-id <id>      # retry a send without ano
 
 A target is an address, a session id, or a fiber.
 An attachment-free context-only fiber send goes to its durable mailbox regardless of worker liveness; a live-worker idle-notification request uses session routing instead.
-A wake send messages the live worker or queues for its next worker when dormant.
-Mailbox receipts are `queued` for context-only sends and `queued_for_next_worker` for dormant wake sends; neither means delivered.
+A wake send messages the live worker. With none, the fiber's owner queues it in the fiber's inbox and starts a session that takes it, unless the fiber is closed, at rest, a paused or due standing schedule, or held by the owner's boot quarantine.
+Inbox receipts are `queued` for context-only sends, `starting` when a session is starting for a wake send, and `queued` with a detail saying what it waits for otherwise; none means delivered.
 A delivered message is its text under `[from <sender>]`. A worker's sender is its fiber: reply to the fiber so the answer follows the work across handoffs; a session address stays pinned to that one session. The receipt says how far delivery got (`accepted`: the harness took the input), never that the model replied. A plain message to a busy Claude session waits for main-thread prompt submission or tool completion as context; if unoffered after 30 seconds, or the worker stops working sooner, the owning daemon claims it for native wake.
 A daemon restart resumes recovery from disk.
 A Claude turn parked on background tasks is idle for message routing.

@@ -40,8 +40,8 @@ Readers also write `attempt`, `attempt_address` and `possible_repeat`, and `fall
 | Wish | Values | Meaning |
 |---|---|---|
 | `source` | `message`, `human`, `voice`, `thread`, `pulse`, `notice` | What produced the entry |
-| `turn` | `none`, `idle`, `ask`, `force` | Context only; a turn only at idle; a turn that cost may hold; or an unconditional wake |
-| `session` | `any`, `fresh`, `previous` | Recorded session preference; the live-worker consumer does not act on it |
+| `turn` | `none`, `idle`, `ask`, `force` | Context only; a turn only in a worker observed idle; a turn that cost may hold; or an unconditional wake. Any but `none` starts a session for a fiber with no worker when its gate allows |
+| `session` | `any`, `fresh`, `previous` | Recorded session preference; the consumer does not act on it |
 | `if_costly` | `hold`, `fresh` | Hold context or request a fresh session instead of waking a large, cold session |
 | `not_before` | RFC 3339 time, or absent | When readers may first take it |
 
@@ -87,30 +87,62 @@ Session native-wake recovery starts its 30-second hook window at that same later
 `messaging.Consume` takes the inbox lock and verifies the worker's conversation and receiver epoch.
 It first advances every open batch on its own, so a batch awaiting its outcome holds only its own members.
 It then decides from the due entries no open batch holds without checking thread lifecycle currency; only a reservation or a wake checks it, decides again over the current entries, and selects and claims a new batch before sending it.
-The daemon supplies `Idle` and `Costly`.
+The daemon supplies `Idle`, `Unknown` and `Costly`.
 It first consumes without them; only an answer with `"turn": true` (a due entry asks for a turn) makes it read the worker's turn state and wake cost and consume again.
 A worker is busy while a turn of its own is running, and idle when its turn ended with no task of its own pending or in progress.
 An idle worker is consumed with `Idle`, and `Costly` when waking it is costly.
-A worker whose turn ended with a task still open, or whose turn no hook has reported, is consumed with `Idle` and no cost check.
+A worker whose turn ended with a task still open, or whose turn no hook has reported, is consumed with `Unknown` (`--unknown`) and no cost check: it is woken for `ask` and `force`, and its `idle` entries wait for an observed idle, since an `idle` entry never interrupts.
 A busy worker is left to its hook.
-`Delivery.context` stores waking context as `turn: ask` while the fiber has a live worker, with `if_costly` defaulting by source; with none, it stores `turn: none`, read as context by the next worker.
+A tracked worker whose conversation is not yet known is consumed as `-` with its epoch, and waits.
+`Delivery.context` stores waking context as `turn: ask` (`force` for `--wake`), with `if_costly` defaulting by source, whether or not the fiber has a worker.
 `Threads.deliver_results` triggers the same consumer on each poll.
 
 | Entries and worker | Action |
 |---|---|
 | Only `none` | Wait for a hook; a receiver without a hook registration, other than Codex, takes them as context |
 | `ask`, busy or not observed idle | Wait for a hook, or the next idle consume |
-| `idle`, busy or not observed idle | Wait; never hook-offered |
+| `idle`, busy or not observed idle | Wait; hook-offered only to a session launched for it |
 | Any `force` | Wake regardless of cost or turn state |
 | `ask`/`idle`, idle, not costly | Wake |
 | `ask`/`idle`, idle, costly, any `if_costly: fresh`, no force | Reserve a fresh launch and return `fresh` |
 | `ask`/`idle`, idle, costly, only `hold` | Wait; `ask` remains hook-eligible |
+| `ask`/`idle`/`force`, no worker | Reserve a launch and return `launch`, when the fiber passes the gate below |
 
 A fresh reservation is written on its entries and leased for two minutes.
 Within the lease, consume answers `wait` for the reserving receiver while it stays costly, and a new receiver (the launched session) takes the entries through its hook instead of a wake.
 The daemon starts the session; when the Poller refuses the launch, it consumes again without `Costly`, waking the live worker.
 A launch that never arrives, including one a busy Poller accepted and later refused, is asked for again once the lease passes.
-This consumer does not start a worker for a fiber without one.
+
+### A fiber with no worker
+
+The daemon consumes a fiber with no worker as `shuttle inbox consume <fiber-key> - 0`.
+A due entry that asks for a turn (`ask`, `idle` or `force`), when no launch reservation is in its lease, makes it reserve those entries and answer `launch` with them as `members`; otherwise it answers `wait`.
+The reservation is the fresh one's: an attempt with `launch: true`, conversation `-` and epoch 0, leased for two minutes, so repeated consumes ask for one launch per lease.
+Quiet entries are not reserved, and open batches wait for the next receiver.
+
+Only some fibers may be started by an entry that is not the human's (`Delivery.inbox_gate/2`): a constitution this host owns, `open` or `active`, not at rest (`horizon: stashed`), and not a standing constitution whose schedule is paused (`open`) or whose scheduled run is due, since that run takes the entries.
+Entries for any other fiber wait for whichever worker comes next.
+The Poller then admits the launch (`Poller.admit_inbox_launch/2`) when nothing is tracked for the fiber, no reconciliation hold is on and the host has a free worker slot.
+While the boot quarantine or a contract skew holds fresh launches, it parks the fiber in `pending_launch`, drawn as held, without reserving anything, and the poll after the hold comes off starts it.
+Admitted, the daemon consumes, and on `launch` calls `Poller.dispatch_fiber/3` with `force`, `ad_hoc`, `inbox: true` and `resume_mode: "continue"`: the dispatcher's resume-or-fresh rule, with the gate checked again on a fresh read so a fiber closed meanwhile is never reopened.
+An `open` oneshot is armed `active` by the launch, as a forced start arms it.
+The launch prompt says messages are arriving and carries none of their text.
+
+The launched session takes the batch through its fiber hook.
+A fiber hook may take any entry, `idle` and `force` included, that a launch reservation from another receiver holds in its lease, and a receiver's link to the fiber inbox is written when it becomes the receiver, so a Claude session, whose conversation is known at launch, finds the batch at its first prompt.
+That hook claim is the delivery: an entry is delivered when the session takes it, never when its terminal started.
+A fresh Codex or Pi conversation becomes the receiver only once the daemon has captured it from the transcript the harness writes, usually after its first prompt: Codex then takes the batch at its next tool call, and Pi, whose hook offers only at a prompt, is woken with it once the lease passes.
+A session that dies before taking the batch, a launch the Poller refuses or holds after the reservation, or a lease that lapses leaves the entries pending, and the next consume of the fiber with no worker reserves them again.
+While a lease stands, a live worker other than the reserving one leaves the reserved entries to its hook; once it passes, they are consumed as any other.
+
+Each poll consumes every live worker's inbox and asks one `shuttle inbox pending --waking` call about every gated-in fiber with no worker.
+It counts the due entries that ask for a turn and that no open batch holds, and counts none while a launch reservation is in its lease; a fiber with a count is started as above.
+This catches an entry that became due by `not_before` or outlived a daemon restart.
+An enqueue through `Delivery.context` starts its fiber at once.
+
+A session started for messages on an armed standing constitution is an ad-hoc run with an `inbox-` run id.
+It starts only while no occurrence is due, and its own end, a handoff or a concluded exit, is not service: an occurrence that elapsed while it ran still fires after it ends.
+A temper, rest or re-arm of that run counts as usual.
 
 A receiver without a hook registration takes `none` entries directly, in a batch sent as context without a turn (`action: context`) whenever consume would otherwise wait.
 Codex leaves them to its fiber hook, and Claude without a registration is unavailable.
@@ -124,8 +156,8 @@ Thread lifecycle currency is checked before emission; an unverifiable publicatio
 
 ### Hooks
 
-A fiber hook offers only `none` and `ask` entries that are not pinned and that no open batch's manifest holds.
-It never takes `idle` or `force`.
+A fiber hook offers only `none` and `ask` entries that are not pinned and that no open batch's manifest holds, and any entry a launch reservation from another receiver holds in its lease.
+It never takes other `idle` or `force` entries.
 It uses the same inbox lock, the 16-entry and one-lifecycle-signal limits and the harness's byte limit; its budget counts each emission's possible-repeat warning but reserves nothing for framing.
 A hook takes context from the fiber inbox itself, so replacing the worker does not strand a session-scoped copy.
 
@@ -167,7 +199,7 @@ Quiet context pinned this way is released to a Codex receiver's fiber hook rathe
 
 A hook claim is unpinned.
 If a hook leaves its attempt open, the next reader under the inbox lock, a hook or the consumer, closes it ambiguous, and the entry carries “Possible repeat” wherever it goes next.
-A fresh-launch reservation is also unpinned, but has `launch: true`: it requests no emission and is not evidence of a possible repeat.
+A launch reservation, fresh or for a fiber with no worker, is also unpinned, but has `launch: true`: it requests no emission and is not evidence of a possible repeat.
 Unpinned claims and delivered closes preserve the entry's modification time, from which offered retention runs.
 The session-only Claude fallback claims by moving an entry into `fallback/` and writes no attempt.
 
@@ -176,9 +208,9 @@ The session-only Claude fallback claims by moving an entry into `fallback/` and 
 | Command | Does |
 |---|---|
 | `shuttle inbox put <address> <message-id> <text>` | Enqueue, with `--source`, `--turn`, `--session`, `--if-costly`, `--not-before`, `--from` and `--derived`; silent on success |
-| `shuttle inbox pending <address>...` | JSON address → pending count; unreadable addresses are named on stderr and omitted |
+| `shuttle inbox pending <address>... [--waking]` | JSON address → pending count, or with `--waking` the count a launch would be for; unreadable addresses are named on stderr and omitted |
 | `shuttle inbox ls <address>` | Pending entries oldest first; `--json` includes wishes, queued time, sender and open attempt |
-| `shuttle inbox consume <fiber-key> <address-or-dash> <epoch> [--idle] [--costly]` | Consume for the current receiver; one JSON object with `action` (`wait`, `wake`, `context`, `fresh`), the `members` sent or reserved, and `turn` when an entry asks for a turn the worker's facts would decide. The answer is printed even when an open batch's send fails, which exits nonzero |
+| `shuttle inbox consume <fiber-key> <address-or-dash> <epoch> [--idle] [--unknown] [--costly]` | Consume for the current receiver, or with `-` and epoch 0 for a fiber with no worker; one JSON object with `action` (`wait`, `wake`, `context`, `fresh`, `launch`), the `members` sent or reserved, and `turn` when an entry asks for a turn the worker's facts would decide. The answer is printed even when an open batch's send fails, which exits nonzero |
 
 All verbs act on this host's inbox only.
 `context-mailbox put` also accepts thread signals, reply and notification fields, `--turn` and `--derived`; its `--wake` means `turn: force`.

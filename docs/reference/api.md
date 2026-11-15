@@ -46,7 +46,7 @@ The routing column names one of the patterns in [How a route is routed](#how-a-r
 | `POST /capture` | owner-routed | Launch an agent from a free-text prompt to file and claim a constitution |
 | `POST /fiber/create` | owner-routed | Create a fiber |
 | `POST /dispatch` | owner-routed | Launch a worker for a fiber now, bypassing the poll |
-| `POST /deliver` | owner-routed | Put text in front of a fiber's worker: message a live session, else resume (or dispatch, if it never ran) with the text as From User. With `context_only` and a `message_id` it queues the text in the fiber's context mailbox instead; adding `unless_live` answers 409 `{live: true}` while a worker is live, else queues for the next worker (`status: queued_for_next_worker`) |
+| `POST /deliver` | owner-routed | Put text in front of a fiber's worker: message a live session, else resume (or dispatch, if it never ran) with the text as From User. With `context_only` and a `message_id` it queues the text in the fiber's inbox instead; `turn` (`ask`, `force`; `wake` means `ask`) makes it ask for a turn, and a fiber with no worker is then started for it when it may be (`status: starting`, else `status: queued` with a `detail` saying what it waits for); adding `unless_live` answers 409 `{live: true}` while a worker is live |
 | `POST /messages` | host-addressed | Deliver a durable, idempotent text message to an exact `shuttle://HOST/HARNESS/NATIVE_ID` address |
 | `POST /lifecycle` | owner-routed | Invoke a named lifecycle action on a fiber — see [below](#lifecycle-actions) |
 | `POST /kill` | owner-routed | Hard-kill a fiber's live worker session; writes no lifecycle verdict |

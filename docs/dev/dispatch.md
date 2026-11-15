@@ -95,6 +95,7 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   `schedule:`.
   Nothing due is stored: an armed (`active`) one is due when a cron occurrence has passed since it was last serviced — the latest of `shuttle.runtime.dispatched_at`, `handed_off_at` and the fiber's creation (`StandingRoles.standing_role_due?/1`).
   Scheduled run IDs name that most recent occurrence (`prev_due`); manual dispatch is ad-hoc (`adhoc-<ms>`).
+  A run started for messages in the inbox (`inbox-<ms>`, ad-hoc mode) starts only while no occurrence is due, and its handoff or concluded exit is not service, so an occurrence that elapsed while it ran still fires ([The inbox](inbox.md#a-fiber-with-no-worker)).
   A run's exit leaves the constitution `active`: a worker that handed off already stamped `handed_off_at`; for one that exited without, the daemon shells `shuttle conclude-run`, which stamps it under the document lock only if the observed run (owner, UID, run id, dispatch timestamp) is current, still armed and unconcluded, so newer runs and human pauses or retirements are preserved.
   The dead-orphan pass concludes a run whose worker exited while the daemon was down at its dispatch instant, so an occurrence missed meanwhile still fires once.
   An outstanding `ask` does not gate dispatch; the card waits In flight on the human's turn between runs.

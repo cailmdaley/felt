@@ -275,9 +275,9 @@ is then given back to the human rather than closed.
 | `shuttle say "<text>"` | Queue a spoken line on the speaker host, in the voice of the calling worker's role (its charter's `voice:`); playback waits behind queued lines and while the human talks, and a line whose card is out of view is held until its card is in view or `shuttle say --play` opens it. `--fiber` names the speaker from a plain terminal; `--voice` overrides the voice for this line. For voice conversations with the human only |
 | `shuttle voices` | List the voice bank and pocket-tts built-ins on the speaker host, each with the role whose charter claims it |
 | `shuttle say --held` | List spoken lines held because their card is out of view; `shuttle say --play` opens the card waiting longest (routes Listen to it and plays its lines), `--next` moves to the next card, `--stop` leaves the rest held |
-| `shuttle inbox consume <fiber-key> <address-or-dash> <epoch> [--idle] [--costly]` | Consume a fiber's inbox for its live worker; JSON action is `wait`, `wake`, `context` (quiet entries sent to a receiver without a hook) or `fresh`, with `turn` when the worker's idle and cost facts would decide |
+| `shuttle inbox consume <fiber-key> <address-or-dash> <epoch> [--idle] [--unknown] [--costly]` | Consume a fiber's inbox for its live worker, or with `-` and epoch 0 for a fiber with no worker; JSON action is `wait`, `wake`, `context` (quiet entries sent to a receiver without a hook), `fresh` or `launch` (a session to start for the reserved `members`), with `turn` when the worker's idle and cost facts would decide |
 | `shuttle inbox put <address> <message-id> <text>` | Enqueue an entry in this host's inbox for a fiber key or a session's `shuttle://` address, with its delivery wishes (`--source`, `--turn`, `--session`, `--if-costly`, `--not-before`), `--from` and `--derived`; see [The inbox](../dev/inbox.md) |
-| `shuttle inbox pending <address>...` | Print one JSON object of each address's pending entry count |
+| `shuttle inbox pending <address>... [--waking]` | Print one JSON object of each address's pending entry count; `--waking` counts only the due entries that ask for a turn, none while a launch reservation is in its lease |
 | `shuttle inbox ls <address>` | List an address's pending entries, oldest first: id, source, turn, not_before, queued time and sender (`--json`) |
 | `shuttle meeting start` | Start a meeting: Listen on, unmuted, pinned to the calling worker's card (`--fiber` names one from a terminal), transcribing the computer's audio as well as the mic. The meeting also ends when Listen stops, when Listen follows again, or after twenty minutes with nothing heard |
 | `shuttle meeting end` | End the meeting: stop transcribing the computer's audio and follow the view again; a no-op outside a meeting |
@@ -473,16 +473,20 @@ Other rejected receipts—including `session_unavailable`, `session_not_found`,
 `wake_required`, and `wake_refused`—return 200. HTTP 5xx means the Shuttle CLI did not
 provide a valid receipt or the owner could not be reached; the daemon may
 include a synthetic `unknown` receipt. `shuttle message` exits 0 for
-`accepted`, `submitted`, `queued`, `context_added`, and
-`queued_for_next_worker`; it exits 1 for `rejected`, `unknown`, or another
-command error.
+`accepted`, `submitted`, `queued`, `context_added`, and `starting`; it exits 1
+for `rejected`, `unknown`, or another command error.
 
 A fiber target with no live worker (a seat at rest, an unarmed thread, a
 closed constitution) is not rejected: its owning daemon queues the text in the
-fiber's durable context mailbox, the same one thread results wait in, and the
-receipt for a wake send reads `queued for <fiber>'s next worker` (`status: queued_for_next_worker` in `--json`).
+fiber's durable inbox, the same one thread results wait in.
+For a wake send, the owner starts a session when the fiber is open or active,
+not at rest, not a standing constitution whose schedule is paused or whose run
+is due, and the owner holds no boot quarantine; the session takes the text
+through its hook. The receipt reads `starting a session on <fiber> for it`
+(`status: starting` in `--json`), or `queued for <fiber>: <what it waits for>`
+(`status: queued`, with `detail`).
 A context-only send returns `queued` with a fiber-context receipt, whether or not a worker is live.
-Queued text is not delivered; a worker reads it through the fiber's context mailbox.
+Neither starting nor queued is delivered; a worker reads the text through the fiber's inbox.
 A wake send messages a worker that appeared before the enqueue check.
 Retrying with the same `--message-id` queues it once. Attachments cannot wait in the mailbox, so a message carrying them needs
 a live worker, and a fiber with no `shuttle:` block is still refused. A target that does not
