@@ -611,10 +611,11 @@ defmodule Shuttle.Poller do
   end
 
   @doc """
-  The turn state of `fiber_id`'s live worker: `:idle` when its turn ended and
-  no task of its own is pending or in progress, `:busy` while a turn, task or
-  human request is open, and `:unknown` when no hook has reported a phase the
-  harness can be judged at rest by. `nil` without a live, addressed worker.
+  The turn state of `fiber_id`'s live worker: `:busy` while a turn or human
+  request is running, `:idle` when its turn ended and no task of its own is
+  pending or in progress, and `:unknown` when its turn ended with a task still
+  open or no hook has reported a phase the harness can be judged at rest by.
+  `nil` without a live, addressed worker.
   """
   @spec worker_turn(GenServer.server(), String.t()) :: :idle | :busy | :unknown | nil
   def worker_turn(server \\ Shuttle.Env.server(__MODULE__), fiber_id) do
@@ -3003,8 +3004,11 @@ defmodule Shuttle.Poller do
       )
 
     cond do
-      open_task? or phase in ["working", "attention"] ->
+      phase in ["working", "attention"] ->
         :busy
+
+      open_task? ->
+        :unknown
 
       cli in ["claude", "codex"] and (phase == "waiting" or (cli == "codex" and is_nil(phase))) ->
         :idle

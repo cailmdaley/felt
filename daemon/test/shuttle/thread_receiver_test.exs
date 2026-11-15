@@ -647,6 +647,26 @@ defmodule Shuttle.ThreadReceiverTest do
     refute_receive {:inbox_command, _}, 100
   end
 
+  test "an idle worker with an open task is woken without a cost check", context do
+    {poller, parent} = costly_consumer!(context)
+    tasks = Path.join(context.tmp_dir, "claude-tasks")
+    Env.put_env("SHUTTLE_CLAUDE_TASKS_DIR", tasks)
+    File.mkdir_p!(Path.join(tasks, "00000000-0000-4000-8000-000000000001"))
+
+    File.write!(
+      Path.join([tasks, "00000000-0000-4000-8000-000000000001", "1.json"]),
+      Jason.encode!(%{id: "1", subject: "Await the thread results", status: "in_progress"})
+    )
+
+    assert Poller.worker_turn(poller, "hub") == :unknown
+    Env.put_app_env(:receiver_spy, self())
+    Env.put_app_env(:receiver_wake_stub, true)
+    assert {:ok, %{"action" => "wake"}} = Delivery.flush_context(parent)
+    assert_receive {:inbox_command, ["inbox", "consume", _, _, _]}
+    assert_receive {:inbox_command, ["inbox", "consume", _, _, _, "--idle"]}
+    refute_receive {:inbox_command, _}, 100
+  end
+
   test "waking context asks a live worker for a turn and keeps the first capture of a derived id",
        %{key: key} = context do
     {poller, parent} = costly_consumer!(context, "none")

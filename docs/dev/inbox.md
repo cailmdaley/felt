@@ -89,8 +89,9 @@ It first advances every open batch on its own, so a batch awaiting its outcome h
 It then decides from due, current entries that no open batch holds, and selects and claims a new batch before sending it.
 The daemon supplies `Idle` and `Costly`.
 It first consumes without them; only an answer with `"turn": true` (a due entry asks for a turn) makes it read the worker's turn state and wake cost and consume again.
+A worker is busy while a turn of its own is running, and idle when its turn ended with no task of its own pending or in progress.
 An idle worker is consumed with `Idle`, and `Costly` when waking it is costly.
-A worker whose turn no hook has reported is consumed with `Idle` and no cost check.
+A worker whose turn ended with a task still open, or whose turn no hook has reported, is consumed with `Idle` and no cost check.
 A busy worker is left to its hook.
 `Delivery.context` stores waking context as `turn: ask` while the fiber has a live worker, with `if_costly` defaulting by source; with none, it stores `turn: none`, read as context by the next worker.
 `Threads.deliver_results` triggers the same consumer on each poll.
