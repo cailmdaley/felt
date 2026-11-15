@@ -52,17 +52,17 @@ defmodule Shuttle.BoardUnblockTest do
     }
 
     entries = [parent, child, blocker]
-    assert :ok = Threads.capture_unblocks(entries, "host")
+    assert :ok = Threads.capture_results(entries, "host")
 
     assert_receive {:board,
                     %{"kind" => "unblocked", "fiber" => "child", "text" => "Blocker closed"},
                     true}
 
-    assert [{id, _}] = InboxPublications.pending("host")
-    assert :ok = Threads.capture_unblocks(entries, "host")
+    assert [{id, _}] = InboxPublications.pending()
+    assert :ok = Threads.capture_results(entries, "host")
     refute_receive {:board, _, _}, 20
-    InboxPublications.settle("host", id)
-    assert :ok = Threads.capture_unblocks(entries, "host")
+    InboxPublications.settle(id)
+    assert :ok = Threads.capture_results(entries, "host")
     refute_receive {:board, _, _}, 20
 
     Shuttle.Test.Env.put_app_env(:felt_runner, RaisingRunner)
@@ -70,10 +70,10 @@ defmodule Shuttle.BoardUnblockTest do
     blocker = put_in(blocker.fiber["closed_at"], later)
 
     assert ExUnit.CaptureLog.capture_log(fn ->
-             assert :ok = Threads.capture_unblocks([parent, child, blocker], "host")
+             assert :ok = Threads.capture_results([parent, child, blocker], "host")
            end) =~ "input unavailable"
 
-    assert [{_, _}] = InboxPublications.pending("host")
+    assert [{_, _}] = InboxPublications.pending()
   end
 
   test "runner reports an unavailable input directory without raising" do

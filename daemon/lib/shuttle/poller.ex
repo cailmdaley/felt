@@ -1005,9 +1005,7 @@ defmodule Shuttle.Poller do
       reason ->
         message = Exception.format(:error, reason, __STACKTRACE__)
 
-        if stage == "inbox_import" and
-             (is_struct(reason, Jason.DecodeError) or
-                is_struct(reason, Shuttle.Inbox.Corrupt)) do
+        if is_struct(reason, Shuttle.Inbox.Corrupt) do
           {:error, %{progress | reason: message}}
         else
           retry_boot_step(stage, fun, progress, message)
@@ -3559,13 +3557,11 @@ defmodule Shuttle.Poller do
     end)
   end
 
+  # Capture, routing and delivery shell the CLI, so they run on a task, never
+  # in the Poller: a failed capture is retried by the next poll's.
   defp deliver_thread_results(state) do
     {entries, _live, _reachable} = cached_thread_inputs(state)
-    own_host = state.own_host_id
-    # Commit observed lifecycle signals before scheduling fallible delivery.
-    Shuttle.Threads.capture_results(entries, own_host)
-    callers = Shuttle.Env.callers()
-    send(self(), {:deliver_thread_results, entries, own_host, callers})
+    send(self(), {:deliver_thread_results, entries, state.own_host_id, Shuttle.Env.callers()})
     state
   end
 

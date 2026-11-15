@@ -30,14 +30,14 @@ defmodule Shuttle.ThreadsInboxTest do
     assert :ok = Shuttle.Inbox.boot_import()
     refute File.exists?(Path.join(data, "thread-outbox.json"))
     refute File.exists?(Path.join(data, "thread-outbox"))
-    assert Shuttle.Inbox.thread_state()["baseline"] == "2025-01-01T00:00:00Z"
+    assert Shuttle.Test.InboxPublications.baseline() == "2025-01-01T00:00:00Z"
     assert :ok = Shuttle.Test.InboxPublications.capture([{"done", record}])
 
     assert [{"pending", %{"text" => "original"}}] =
-             Shuttle.Test.InboxPublications.pending("test-host")
+             Shuttle.Test.InboxPublications.pending()
 
-    Task.async(fn -> Threads.retry_results("test-host") end) |> Task.await(30_000)
-    assert Shuttle.Test.InboxPublications.pending("test-host") == []
+    Task.async(fn -> Threads.route_results() end) |> Task.await(30_000)
+    assert Shuttle.Test.InboxPublications.pending() == []
     assert [%{"request" => %{"text" => "original"}}] = pending(data)
   end
 
@@ -265,9 +265,10 @@ defmodule Shuttle.ThreadsInboxTest do
     monitor = Process.monitor(publisher)
     Process.exit(publisher, :kill)
     assert_receive {:DOWN, ^monitor, :process, ^publisher, :killed}
-    assert [_] = pending(data)
-    # The publisher died after the real CLI wrote the entry and before any
-    # delivery. The new daemon must route and consume that same disk entry.
+    assert [_] = Shuttle.Test.InboxPublications.pending()
+    assert pending(data) == []
+    # The publisher died after the real CLI captured the result and before any
+    # routing. The new daemon must place and deliver that same disk entry.
 
     assert {_, 0} =
              SocketRunner.cmd("tmux", ["new-session", "-d", "-s", "anchor", "sleep", "300"], [])
@@ -385,17 +386,21 @@ defmodule Shuttle.ThreadsInboxTest do
     send(poller, :run_poll_cycle)
 
     await(fn ->
-      Enum.any?(pending(data), fn entry ->
-        entry["request"]["text"] == "thread hub/child asked: Choose a kernel?" and
-          get_in(entry, ["routing", "local"]) == true
-      end)
+      Enum.any?(
+        pending(data),
+        &(&1["request"]["text"] == "thread hub/child asked: Choose a kernel?")
+      )
     end)
 
     refute_receive {:wake, _}
     File.write!(gate, "offer\n", [:raw])
 
+    routing = Shuttle.Test.InboxPublications.routing_dir(data)
+
     await(fn ->
-      length(Path.wildcard(Path.join(data, "mailboxes/fiber/*/offered/*.json"))) == 2
+      Path.wildcard(Path.join(data, "mailboxes/fiber/*/offered/*.json"))
+      |> Enum.reject(&String.starts_with?(&1, routing))
+      |> length() == 2
     end)
 
     assert File.read!(Path.join(store, "received")) =~ "thread hub/child asked: Choose a kernel?"

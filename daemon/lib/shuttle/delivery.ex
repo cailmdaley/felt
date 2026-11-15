@@ -221,27 +221,6 @@ defmodule Shuttle.Delivery do
         args =
           if opts[:retained_at], do: args ++ ["--retained-at", opts[:retained_at]], else: args
 
-        args =
-          if String.starts_with?(message_id, "thread-") do
-            record = %{
-              "owner" => Poller.own_host_id(),
-              "store" => entry.felt_store,
-              "parent_uid" => entry.fiber["uid"] || entry.fiber["id"],
-              "parent_host" => Poller.own_host_id(),
-              "local" => true,
-              "text" => text,
-              "from" => from,
-              "wake" => opts[:wake] == true,
-              "turn" => turn || "none",
-              "signal" => opts[:thread_signal],
-              "retained_at" => opts[:retained_at]
-            }
-
-            ["inbox", "thread-put", message_id, Jason.encode!(record)]
-          else
-            args
-          end
-
         with {:ok, _} <- Shuttle.CLI.run(args) do
           case flush_context(entry) do
             {:error, :no_worker} when turn != nil -> {:ok, start_for_inbox(entry)}

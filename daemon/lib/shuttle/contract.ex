@@ -63,7 +63,8 @@ defmodule Shuttle.Contract do
       "inbox consume - 0 and --unknown, inbox pending --waking " <>
         "(a session started for a dormant fiber's waking entries)",
     41 =>
-      "inbox thread-state/thread-put/routes/settle and consume --route-* (thread capture, import and forwarding)"
+      "inbox thread-state, thread-put, routes, route and settle " <>
+        "(thread results through the routing inbox)"
   }
 
   @doc "The daemon's expected `shuttle contract` level."

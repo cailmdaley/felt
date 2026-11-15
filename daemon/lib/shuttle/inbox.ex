@@ -3,20 +3,24 @@ defmodule Shuttle.Inbox.Corrupt do
 end
 
 defmodule Shuttle.Inbox do
-  @moduledoc "Boot import and durable thread capture policy owned by the inbox CLI."
+  @moduledoc """
+  The boot step for thread capture: `shuttle inbox thread-state` establishes
+  the capture window and imports a thread outbox an older daemon left behind
+  into the routing inbox. A corrupt outbox or state (the CLI's exit status 3)
+  raises `Shuttle.Inbox.Corrupt`, which holds boot; any other failure,
+  a timeout included, raises a retryable error, and the import repeats safely.
+  """
+
+  @corrupt 3
 
   def boot_import do
-    thread_state()
-    :ok
-  end
-
-  def thread_state do
     case Shuttle.CLI.run(["inbox", "thread-state"],
            runner: Shuttle.Runner.Default,
-           timeout_ms: 30_000
+           stderr_to_stdout: true
          ) do
-      {:ok, output} -> Jason.decode!(output)
-      error -> raise Shuttle.Inbox.Corrupt, "thread inbox import failed: #{inspect(error)}"
+      {:ok, _} -> :ok
+      {:command_error, @corrupt, output} -> raise Shuttle.Inbox.Corrupt, String.trim(output)
+      error -> raise "thread inbox import failed: #{inspect(error)}"
     end
   end
 end

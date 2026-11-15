@@ -1,6 +1,8 @@
 defmodule Shuttle.Threads do
   @moduledoc "Constitution containment and owner-local result delivery."
 
+  require Logger
+
   alias Shuttle.{Delivery, FiberDocuments, Lifecycle, OriginRouter, Remote}
 
   @doc """
@@ -813,30 +815,19 @@ defmodule Shuttle.Threads do
     end
   end
 
-  defp prepare_recipient(%{"parent_unresolved" => true} = record, entries, stores) do
-    with {:ok, parent} <- resolve_unresolved(record, entries, stores) do
-      resolved =
-        record
-        |> Map.put("parent_uid", parent.fiber["uid"])
-        |> Map.put("parent_host", get_in(parent.fiber, ["shuttle", "host"]))
-        |> Map.put("store", parent.felt_store)
-        |> Map.delete("parent_unresolved")
-        |> Map.put("resolved_from_uid", record["anchor_uid"])
+  # The recipient's authoritative document: past an archived parent for an
+  # unresolved one, never guessed from a slug; a resolved uid must still
+  # name it.
+  defp resolve_parent(%{"parent_unresolved" => true} = record, entries, stores),
+    do: resolve_unresolved(record, entries, stores)
 
-      {:ok, resolved, parent}
-    end
-  end
-
-  defp prepare_recipient(record, entries, stores) do
+  defp resolve_parent(record, entries, stores) do
     uid = record["parent_uid"]
 
     with uid when is_binary(uid) <- uid,
          {:ok, parent} <- resolve_recipient(uid, record["parent_host"], stores, entries),
          ^uid <- parent.fiber["uid"] do
-      {:ok,
-       record
-       |> Map.put("parent_host", get_in(parent.fiber, ["shuttle", "host"]))
-       |> Map.put("store", parent.felt_store), parent}
+      {:ok, parent}
     else
       error -> {:error, error}
     end
@@ -959,11 +950,14 @@ defmodule Shuttle.Threads do
 
   defp first_sentence(_), do: "(no outcome yet)"
 
-  @doc "Reconcile durable lifecycle signals. Only a child's owner publishes its results."
+  @doc """
+  Reconcile durable lifecycle signals: capture this poll's publications, route
+  what the routing inbox holds, and let every owned inbox's worker take what
+  waits for it. Only a child's owner publishes its results.
+  """
   def deliver_results(entries, own_host) do
     capture_results(entries, own_host)
-    capture_unblocks(entries, own_host)
-    retry_results(own_host, entries)
+    route_results(entries)
 
     # A parent can receive remote results while dormant: its live worker takes
     # them on this poll, and a dormant one is started for a waking result when
@@ -973,69 +967,93 @@ defmodule Shuttle.Threads do
     |> Delivery.flush_owned()
   end
 
-  @doc """
-  Persist immutable publications before any asynchronous network attempt.
+  # A routing inbox entry outlives neither its stamp's retention window nor
+  # an offered entry's, so a signal older than this is never shelled.
+  @retention_s 14 * 24 * 60 * 60
 
-  Every publication reaches the orchestrator's mailbox as context. A close or
-  ask wakes only the session that asked for the thread
+  @doc """
+  Capture this poll's publications into the routing inbox, in one `shuttle
+  inbox thread-put` call: each owned thread's close, ask, handoff, rest and
+  verdict, and an unblock note for each owned thread whose `blocked_on`
+  names a fiber that has closed. Signals older than the retention window are
+  skipped before any shell; the inbox refuses those at or before its capture
+  baseline, and the first capture of an id fixes its publication.
+
+  Every result reaches the orchestrator as context. A close or ask asks for a
+  turn only from the session that asked for the thread
   (`shuttle.thread_parent.asked_by`): the orchestrator, when its own worker
-  asked; otherwise the asking session itself, through its own durable inbox
-  entry and waking transport. A thread nobody asked for wakes no one.
+  asked; otherwise the asking session itself, through an asker notice
+  (`<id>-asker`). A thread nobody asked for, and an unblock note, wake no one.
+  An unblock note's board line is appended when its entry is first created. A
+  failed capture is logged, and the next poll captures the same signals again.
+  Reading a blocker outside the poller's cache shells felt, so this runs on the
+  delivery task, not the poll.
   """
   def capture_results(entries, own_host) do
+    now = DateTime.utc_now()
+    unblocks = unblock_publications(entries, own_host, now)
+
+    created =
+      publish(
+        result_publications(entries, own_host, now) ++
+          Enum.map(unblocks, fn {id, record, _board} -> {id, record} end)
+      )
+
+    for {id, _record, board} <- unblocks, MapSet.member?(created, id), do: append_board(board)
+    :ok
+  end
+
+  defp result_publications(entries, own_host, now) do
     index = index(entries)
-    {:ok, baseline, _} = DateTime.from_iso8601(Shuttle.Inbox.thread_state()["baseline"])
 
-    records =
-      for entry <- entries,
-          get_in(entry.fiber, ["shuttle", "host"]) == own_host,
-          parent = capture_parent(entry, index, own_host),
-          parent != nil,
-          {verb, stamp, text, wake} <- signals(entry.fiber),
-          after_baseline?(stamp, baseline) do
-        id =
-          "thread-" <>
-            digest({entry.felt_store, entry.fiber["uid"] || entry.fiber["id"], verb, stamp})
+    for entry <- entries,
+        get_in(entry.fiber, ["shuttle", "host"]) == own_host,
+        parent = capture_parent(entry, index, own_host),
+        parent != nil,
+        {verb, stamp, text, wake} <- signals(entry.fiber),
+        recent?(stamp, now),
+        publication <- result_publication(entry, parent, own_host, verb, stamp, text, wake),
+        do: publication
+  end
 
-        text = "thread #{address(entry.fiber)} #{verb}: #{text}"
-        parent_uid = Map.fetch!(parent.fiber, "uid")
-        asker = wake && asker(entry.fiber)
+  defp result_publication(entry, parent, own_host, verb, stamp, text, wake) do
+    id =
+      "thread-" <>
+        digest({entry.felt_store, entry.fiber["uid"] || entry.fiber["id"], verb, stamp})
 
-        {id,
-         %{
-           "owner" => own_host,
-           "store" => parent.felt_store,
-           "parent_uid" => parent_uid,
-           "parent_host" => get_in(parent.fiber, ["shuttle", "host"]),
-           "parent_unresolved" => Map.get(parent, :unresolved_parent, false),
-           "anchor_uid" => parent_uid,
-           "parent_slug" => address(parent.fiber),
-           "retained_at" => stamp,
-           "text" => text,
-           "wake" => is_map(asker) and asker["fiber"] == parent_uid,
-           "signal" => %{
-             "uid" => entry.fiber["uid"] || entry.fiber["id"],
-             "verb" => verb,
-             "stamp" => stamp,
-             "owner" => own_host
-           }
-         }, if(is_map(asker) and asker["fiber"] != parent_uid, do: asker["session"])}
-      end
+    text = "thread #{address(entry.fiber)} #{verb}: #{text}"
+    parent_uid = Map.fetch!(parent.fiber, "uid")
+    asker = wake && asker(entry.fiber)
 
-    records
-    |> Enum.flat_map(fn
-      {id, record, nil} ->
-        [{id, record}]
+    record = %{
+      "owner" => own_host,
+      "store" => parent.felt_store,
+      "parent_uid" => parent_uid,
+      "parent_host" => get_in(parent.fiber, ["shuttle", "host"]),
+      "parent_unresolved" => Map.get(parent, :unresolved_parent, false),
+      "anchor_uid" => parent_uid,
+      "parent_slug" => address(parent.fiber),
+      "retained_at" => stamp,
+      "text" => text,
+      "wake" => is_map(asker) and asker["fiber"] == parent_uid,
+      "signal" => %{
+        "uid" => entry.fiber["uid"] || entry.fiber["id"],
+        "verb" => verb,
+        "stamp" => stamp,
+        "owner" => own_host
+      }
+    }
 
-      {id, record, session} ->
-        told =
-          record
-          |> Map.take(["owner", "store", "retained_at", "text", "signal"])
-          |> Map.put("session", session)
+    if is_map(asker) and asker["fiber"] != parent_uid do
+      told =
+        record
+        |> Map.take(["owner", "store", "retained_at", "text", "signal"])
+        |> Map.put("session", asker["session"])
 
-        [{id, record}, {id <> "-asker", told}]
-    end)
-    |> Enum.each(fn {id, record} -> enqueue_result(id, record) end)
+      [{id, record}, {id <> "-asker", told}]
+    else
+      [{id, record}]
+    end
   end
 
   defp asker(fiber) do
@@ -1045,172 +1063,194 @@ defmodule Shuttle.Threads do
     end
   end
 
-  @doc """
-  Persist one context note for each owned thread whose `blocked_on` names a
-  fiber that has closed (any verdict), addressed to the thread's orchestrator:
-  `thread <id> unblocked: <name> closed`. It never wakes and arms nothing. A
-  cleared wait, free text, or a close at or before the capture baseline
-  publishes nothing; each close of the blocker publishes once. Reading a
-  blocker outside the poller's cache shells felt, so this runs on the delivery
-  task, not the poll.
-  """
-  def capture_unblocks(entries, own_host) do
+  # `thread <id> unblocked: <name> closed`, once per close of the blocker. A
+  # cleared wait or free text publishes nothing.
+  defp unblock_publications(entries, own_host, now) do
     index = index(entries)
     by_uid = by_uid(entries)
-    {:ok, baseline, _} = DateTime.from_iso8601(Shuttle.Inbox.thread_state()["baseline"])
 
-    records =
-      for entry <- entries,
-          get_in(entry.fiber, ["shuttle", "host"]) == own_host,
-          blocked = blocked_on(entry.fiber),
-          blocked != nil and fiber_ref?(blocked),
-          parent = capture_parent(entry, index, own_host),
-          parent != nil,
-          blocker = blocker(blocked, entry.felt_store, by_uid),
-          is_map(blocker) and blocker["status"] == "closed",
-          stamp = blocker["closed_at"],
-          is_binary(stamp) and after_baseline?(stamp, baseline) do
-        thread = entry.fiber["uid"] || entry.fiber["id"]
-        blocker_id = blocker["uid"] || address(blocker)
+    for entry <- entries,
+        get_in(entry.fiber, ["shuttle", "host"]) == own_host,
+        blocked = blocked_on(entry.fiber),
+        blocked != nil and fiber_ref?(blocked),
+        parent = capture_parent(entry, index, own_host),
+        parent != nil,
+        blocker = blocker(blocked, entry.felt_store, by_uid),
+        is_map(blocker) and blocker["status"] == "closed",
+        stamp = blocker["closed_at"],
+        is_binary(stamp) and recent?(stamp, now) do
+      thread = entry.fiber["uid"] || entry.fiber["id"]
+      blocker_id = blocker["uid"] || address(blocker)
+      text = "#{blocker["name"] || address(blocker)} closed"
 
-        text = "#{blocker["name"] || address(blocker)} closed"
-
-        {"thread-" <> digest({entry.felt_store, thread, "unblocked", blocker_id, stamp}),
-         %{
-           "owner" => own_host,
-           "store" => parent.felt_store,
-           "parent_uid" => Map.fetch!(parent.fiber, "uid"),
-           "parent_host" => get_in(parent.fiber, ["shuttle", "host"]),
-           "parent_unresolved" => Map.get(parent, :unresolved_parent, false),
-           "anchor_uid" => Map.fetch!(parent.fiber, "uid"),
-           "parent_slug" => address(parent.fiber),
-           "retained_at" => stamp,
-           "text" => "thread #{address(entry.fiber)} unblocked: #{text}",
-           "wake" => false
-         }, %{"kind" => "unblocked", "fiber" => thread, "text" => text}}
-      end
-
-    created =
-      records
-      |> Enum.flat_map(fn {id, record, _board} ->
-        if enqueue_result(id, record), do: [id], else: []
-      end)
-      |> MapSet.new()
-
-    Enum.each(records, fn {id, _record, board} ->
-      if MapSet.member?(created, id) do
-        result =
-          try do
-            Shuttle.CLI.run(["board", "append"],
-              input: Jason.encode!(board) <> "\n",
-              input_eof: true
-            )
-          rescue
-            error -> {:error, Exception.message(error)}
-          catch
-            :exit, reason -> {:error, {:exit, reason}}
-          end
-
-        case result do
-          {:ok, _} ->
-            :ok
-
-          error ->
-            require Logger
-            Logger.warning("Recording unblock on board failed: #{inspect(error)}")
-        end
-      end
-    end)
-
-    :ok
+      {"thread-" <> digest({entry.felt_store, thread, "unblocked", blocker_id, stamp}),
+       %{
+         "owner" => own_host,
+         "store" => parent.felt_store,
+         "parent_uid" => Map.fetch!(parent.fiber, "uid"),
+         "parent_host" => get_in(parent.fiber, ["shuttle", "host"]),
+         "parent_unresolved" => Map.get(parent, :unresolved_parent, false),
+         "anchor_uid" => Map.fetch!(parent.fiber, "uid"),
+         "parent_slug" => address(parent.fiber),
+         "retained_at" => stamp,
+         "text" => "thread #{address(entry.fiber)} unblocked: #{text}",
+         "wake" => false
+       }, %{"kind" => "unblocked", "fiber" => thread, "text" => text}}
+    end
   end
 
-  defp enqueue_result(id, record) do
-    with {:ok, output} <- Shuttle.CLI.run(["inbox", "thread-put", id, Jason.encode!(record)]),
+  defp recent?(stamp, now) do
+    case DateTime.from_iso8601(stamp) do
+      {:ok, time, _} -> DateTime.diff(now, time) <= @retention_s
+      _ -> false
+    end
+  end
+
+  # The ids this capture created. The CLI answers them also when a later
+  # publication failed, so a created unblock note still gets its board line.
+  defp publish([]), do: MapSet.new()
+
+  defp publish(publications) do
+    input =
+      Jason.encode!(Enum.map(publications, fn {id, record} -> %{id: id, record: record} end))
+
+    result =
+      Shuttle.CLI.run(["inbox", "thread-put"],
+        input: input,
+        input_eof: true,
+        stderr_to_stdout: false
+      )
+
+    with {status, output} when status in [:ok, :command_error] <- created_output(result),
          {:ok, %{"created" => created}} <- Jason.decode(output) do
-      created
+      unless status == :ok, do: Logger.warning("Thread capture failed: #{inspect(result)}")
+      MapSet.new(created)
     else
-      error -> raise "thread inbox enqueue failed: #{inspect(error)}"
+      _ ->
+        Logger.warning("Thread capture failed: #{inspect(result)}")
+        MapSet.new()
     end
   end
 
-  @doc "Consume routed inbox entries; only a confirmed durable forward finalizes the sender's entry."
-  def retry_results(own_host, entries \\ []) do
-    with {:ok, output} <- Shuttle.CLI.run(["inbox", "routes", own_host]),
-         {:ok, routes} when is_list(routes) <- Jason.decode(output) do
-      Enum.each(routes, &consume_result(&1, entries))
+  defp created_output({:ok, output}), do: {:ok, output}
+  defp created_output({:command_error, _status, output}), do: {:command_error, output}
+  defp created_output(error), do: error
+
+  defp append_board(board) do
+    result =
+      try do
+        Shuttle.CLI.run(["board", "append"], input: Jason.encode!(board) <> "\n", input_eof: true)
+      rescue
+        error -> {:error, Exception.message(error)}
+      catch
+        :exit, reason -> {:error, {:exit, reason}}
+      end
+
+    with {:error, _} = error <- result,
+         do: Logger.warning("Recording unblock on board failed: #{inspect(error)}")
+  end
+
+  @doc """
+  Route every publication the routing inbox holds (`shuttle inbox route`),
+  from the recipient's authoritative documents and the signal's fresh
+  currency. A local result is placed in its recipient's inbox by the CLI; a
+  remote one is forwarded to the owner's `/api/v1/deliver` and settled only on
+  a confirmed durable enqueue; an asker notice goes to the asking session's
+  transport and settles on any known outcome. An unresolved recipient, an
+  unknown currency or an unconfirmed handoff waits for the next poll.
+  """
+  def route_results(entries \\ []) do
+    case routes() do
+      {:ok, publications} -> Enum.each(publications, &route_result(&1, entries))
+      error -> Logger.warning("Listing routed thread results failed: #{inspect(error)}")
     end
 
     :ok
   end
 
-  defp consume_result(%{"address" => key, "id" => id, "record" => record}, entries) do
-    stores = Enum.uniq([record["store"] | Shuttle.FeltStores.configured_stores()])
+  defp routes do
+    with {:ok, output} <- Shuttle.CLI.run(["inbox", "routes"], stderr_to_stdout: false),
+         {:ok, publications} when is_list(publications) <- Jason.decode(output),
+         do: {:ok, publications}
+  end
 
-    {placement, locally_ready?} =
-      if is_binary(record["session"]) do
-        {[], false}
-      else
-        case prepare_recipient(record, entries, stores) do
-          {:ok, resolved, parent} ->
-            local? =
-              record["local"] == true and
-                get_in(parent.fiber, ["shuttle", "host"]) == Shuttle.Poller.own_host_id() and
-                Delivery.context_key(parent) == key
-
-            {[
-               "--route-record",
-               Jason.encode!(resolved),
-               "--route-owner",
-               get_in(parent.fiber, ["shuttle", "host"]),
-               "--route-key",
-               Delivery.context_key(parent)
-             ], local?}
-
-          _ ->
-            {[], record["local"] == true}
-        end
-      end
-
+  defp route_result(%{"id" => id, "record" => record}, entries) do
     current =
-      if locally_ready? do
-        "unknown"
-      else
-        case current_signal(record, id) do
-          {:ok, value} -> to_string(value)
-          _ -> "unknown"
-        end
+      case current_signal(record, id) do
+        {:ok, value} -> to_string(value)
+        _ -> "unknown"
       end
 
-    args =
-      ["inbox", "consume", key, "-", "0", "--route", id, "--route-current", current] ++ placement
+    args = ["inbox", "route", id, "--current", current] ++ recipient(record, entries)
 
-    with {:ok, output} <- Shuttle.CLI.run(args),
+    with {:ok, output} <- Shuttle.CLI.run(args, stderr_to_stdout: false),
          {:ok, decision} <- Jason.decode(output) do
       case decision do
-        %{"action" => "forward", "entry" => %{"record" => routed}} ->
-          if acknowledged?(forward_result(routed, id)), do: settle_result(key, id, "forwarded")
+        %{"action" => "forward", "record" => routed} ->
+          if acknowledged?(forward_result(routed, id)), do: settle(id, "forwarded")
 
         %{"action" => "session"} ->
-          result = tell_asker(record, id)
+          case tell_asker(record, id) do
+            {:error, status, _} when status in 400..499 -> settle(id, "undeliverable")
+            {:ok, _, %{"status" => "rejected"}} -> settle(id, "undeliverable")
+            {:ok, _, %{"status" => status}} when status != "unknown" -> settle(id, "delivered")
+            _ -> :ok
+          end
 
-          if told?(result), do: settle_result(key, id, asker_disposition(result))
-
-        %{"action" => "wait"} ->
+        _ ->
           :ok
       end
+    else
+      error -> Logger.warning("Routing thread result #{id} failed: #{inspect(error)}")
     end
   end
 
-  defp settle_result(key, id, disposition),
-    do: Shuttle.CLI.run(["inbox", "settle", key, id, disposition])
+  # The resolved recipient's routing facts, or none while it is unresolved
+  # or for an asker notice, whose recipient is its session.
+  defp recipient(%{"session" => session}, _entries) when is_binary(session), do: []
+
+  defp recipient(record, entries) do
+    stores = Enum.uniq([record["store"] | Shuttle.FeltStores.configured_stores()])
+
+    case resolve_parent(record, entries, stores) do
+      {:ok, parent} ->
+        host = get_in(parent.fiber, ["shuttle", "host"])
+
+        resolved =
+          %{
+            "parent_uid" => parent.fiber["uid"],
+            "parent_host" => host,
+            "store" => parent.felt_store
+          }
+          |> then(
+            &if(record["parent_unresolved"] == true,
+              do: Map.put(&1, "resolved_from_uid", record["anchor_uid"]),
+              else: &1
+            )
+          )
+
+        [
+          "--record",
+          Jason.encode!(resolved),
+          "--owner",
+          host,
+          "--key",
+          Delivery.context_key(parent)
+        ]
+
+      _ ->
+        []
+    end
+  end
+
+  defp settle(id, disposition), do: Shuttle.CLI.run(["inbox", "settle", id, disposition])
 
   @doc """
   What waits for each constitution this host owns, `%{uid_or_id => count}` with
-  zero counts left out: the context its mailbox holds that no worker has taken
-  (thread results and messages queued for its next worker), including results
-  addressed to it awaiting routing. One `shuttle inbox pending` call answers
-  every inbox; a failed call leaves the count unknown.
+  zero counts left out: the context its inbox holds that no worker has taken
+  (thread results and messages queued for its next worker), plus the results
+  addressed to it still in the routing inbox. One `shuttle inbox pending` call
+  answers every inbox; a failed call counts the routing inbox alone.
   """
   def pending_results(entries, own_host) do
     owned =
@@ -1219,51 +1259,46 @@ defmodule Shuttle.Threads do
           get_in(entry.fiber, ["shuttle", "host"]) == own_host,
           do: {Delivery.context_key(entry), entry.fiber["uid"] || entry.fiber["id"]}
 
-    with [_ | _] <- owned,
-         {:ok, output} <-
-           Shuttle.CLI.run(["inbox", "pending" | Enum.map(owned, &elem(&1, 0))],
-             stderr_to_stdout: false
-           ),
-         {:ok, counts} when is_map(counts) <- Jason.decode(output) do
-      for {key, id} <- owned, n = counts[key], is_integer(n), n > 0, into: %{}, do: {id, n}
-    else
-      _ -> %{}
+    queued =
+      with [_ | _] <- owned,
+           {:ok, output} <-
+             Shuttle.CLI.run(["inbox", "pending" | Enum.map(owned, &elem(&1, 0))],
+               stderr_to_stdout: false
+             ),
+           {:ok, counts} when is_map(counts) <- Jason.decode(output) do
+        for {key, id} <- owned, n = counts[key], is_integer(n), n > 0, into: %{}, do: {id, n}
+      else
+        _ -> %{}
+      end
+
+    ids = MapSet.new(owned, &elem(&1, 1))
+
+    case owned != [] and routes() do
+      {:ok, publications} ->
+        publications
+        |> Enum.map(& &1["record"]["parent_uid"])
+        |> Enum.filter(&MapSet.member?(ids, &1))
+        |> Enum.frequencies()
+        |> Map.merge(queued, fn _id, routed, waiting -> routed + waiting end)
+
+      _ ->
+        queued
     end
   end
 
   # The session that asked for a thread, when it is not the orchestrator's
-  # worker, hears the result as a waking message of its own.
+  # worker, hears the result as a waking message of its own, under the
+  # notice's id.
   defp tell_asker(record, id) do
-    text =
-      if record["possible_repeat"] == true,
-        do:
-          "Possible repeat: an earlier handoff of this thread notice may have reached this session.\n\n" <>
-            record["text"],
-        else: record["text"]
-
     Shuttle.Messaging.send_message(%{
       "address" => record["session"],
-      "text" => text,
+      "text" => record["text"],
       "from" => "shuttle",
       "wake" => true,
       "context_if_busy" => true,
-      "message_id" => id <> "-delivery"
+      "message_id" => id
     })
   end
-
-  defp asker_disposition({:error, status, _}) when status in 400..499, do: "undeliverable"
-  defp asker_disposition({:ok, _, %{"status" => "rejected"}}), do: "undeliverable"
-
-  defp asker_disposition({:ok, _, %{"status" => status}})
-       when status in ["accepted", "context_added", "submitted"], do: "delivered"
-
-  defp asker_disposition(_), do: "forwarded"
-
-  # A refusal is final: the asking session is gone, and the orchestrator's
-  # mailbox holds the same result. Only an unknown outcome is retried.
-  defp told?({:ok, _status, %{"status" => status}}), do: status != "unknown"
-  defp told?({:error, status, _}) when status in 400..499, do: true
-  defp told?(_), do: false
 
   defp acknowledged?({:forwarded, 202, body}) do
     case Jason.decode(body) do
@@ -1275,18 +1310,11 @@ defmodule Shuttle.Threads do
   defp acknowledged?(_), do: false
 
   defp forward_result(record, id) do
-    text =
-      if record["possible_repeat"] == true,
-        do:
-          record["text"] <>
-            "\n\nPossible repeat: delivery on the previous owner had an unknown outcome.",
-        else: record["text"]
-
     case OriginRouter.route_host(record["parent_host"]) do
       {:remote, remote} ->
         OriginRouter.forward(remote, "/api/v1/deliver", %{
           "fiber_id" => record["parent_uid"],
-          "text" => text,
+          "text" => record["text"],
           "context_only" => true,
           "wake" => record["wake"],
           "message_id" => id,
@@ -1428,13 +1456,6 @@ defmodule Shuttle.Threads do
           false
       end
     end)
-  end
-
-  defp after_baseline?(stamp, baseline) do
-    case DateTime.from_iso8601(stamp) do
-      {:ok, time, _} -> DateTime.compare(time, baseline) == :gt
-      _ -> false
-    end
   end
 
   defp close_verb(%{"tempered" => true}), do: "closed (tempered)"

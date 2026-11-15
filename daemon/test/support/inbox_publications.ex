@@ -1,34 +1,53 @@
 defmodule Shuttle.Test.InboxPublications do
-  @moduledoc "Thread fixtures read and written through the real inbox CLI."
+  @moduledoc "The routing inbox, read and written through the real inbox CLI."
 
-  def pending(owner) do
-    {:ok, output} = Shuttle.CLI.run(["inbox", "routes", owner], runner: Shuttle.Runner.Default)
+  def pending do
+    {:ok, output} =
+      Shuttle.CLI.run(["inbox", "routes"],
+        runner: Shuttle.Runner.Default,
+        stderr_to_stdout: false
+      )
 
-    for row <- Jason.decode!(output),
-        row["record"]["local"] != true,
-        do: {row["id"], Map.delete(row["record"], "inbox_address")}
+    for row <- Jason.decode!(output), do: {row["id"], row["record"]}
   end
 
   def capture(records) do
-    for {id, record} <- records do
-      {:ok, _} =
-        Shuttle.CLI.run(["inbox", "thread-put", id, Jason.encode!(record)],
-          runner: Shuttle.Runner.Default
-        )
-    end
+    input = Jason.encode!(for {id, record} <- records, do: %{id: id, record: record})
+
+    {:ok, _} =
+      Shuttle.CLI.run(["inbox", "thread-put"],
+        runner: Shuttle.Runner.Default,
+        input: input,
+        input_eof: true
+      )
 
     :ok
   end
 
-  def settle(owner, id) do
-    {:ok, output} = Shuttle.CLI.run(["inbox", "routes", owner], runner: Shuttle.Runner.Default)
-    row = Enum.find(Jason.decode!(output), &(&1["id"] == id))
-
+  def settle(id) do
     {:ok, _} =
-      Shuttle.CLI.run(["inbox", "settle", row["address"], id, "forwarded"],
-        runner: Shuttle.Runner.Default
-      )
+      Shuttle.CLI.run(["inbox", "settle", id, "forwarded"], runner: Shuttle.Runner.Default)
 
     :ok
+  end
+
+  def baseline do
+    {:ok, output} =
+      Shuttle.CLI.run(["inbox", "thread-state"],
+        runner: Shuttle.Runner.Default,
+        stderr_to_stdout: false
+      )
+
+    Jason.decode!(output)["baseline"]
+  end
+
+  @doc "The routing inbox's directory under `data`."
+  def routing_dir(data) do
+    Path.join([
+      data,
+      "mailboxes",
+      "fiber",
+      :crypto.hash(:sha256, "threads") |> Base.encode16(case: :lower)
+    ])
   end
 end

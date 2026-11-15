@@ -2533,7 +2533,7 @@
           },
           "pending_results": {
             "type": "integer",
-            "description": "Number of results and messages waiting for this constitution's next worker: context its mailbox holds that no worker has taken, plus results addressed to it in the owner's outbox. Absent when zero."
+            "description": "Number of results and messages waiting for this constitution's next worker: context its inbox holds that no worker has taken, plus results addressed to it still in the owner's routing inbox. Absent when zero."
           },
           "dispatch_error": {
             "description": "The last dispatch refusal or failure recorded for this constitution, when one is held."

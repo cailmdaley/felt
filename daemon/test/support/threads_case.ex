@@ -45,7 +45,7 @@ defmodule Shuttle.Test.ThreadsCase do
   end
 
   defmodule FailingMailboxRunner do
-    def cmd("shuttle", ["inbox", "consume" | _], _opts), do: {"inbox unavailable", 1}
+    def cmd("shuttle", ["inbox", "route" | _], _opts), do: {"inbox unavailable", 1}
     def cmd(command, args, opts), do: Shuttle.Runner.Default.cmd(command, args, opts)
   end
 
@@ -196,8 +196,13 @@ defmodule Shuttle.Test.ThreadsCase do
     end
   end
 
+  # Entries waiting in recipient fibers' inboxes; the routing inbox is
+  # `Shuttle.Test.InboxPublications.pending/0`.
   def pending(data) do
+    routing = Shuttle.Test.InboxPublications.routing_dir(data)
+
     Path.wildcard(Path.join(data, "mailboxes/fiber/*/pending/*.json"))
+    |> Enum.reject(&String.starts_with?(&1, routing <> "/"))
     |> Enum.map(&(&1 |> File.read!() |> Jason.decode!()))
     |> Enum.sort_by(& &1["request"]["message_id"])
   end

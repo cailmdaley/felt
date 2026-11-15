@@ -10,7 +10,7 @@ defmodule Shuttle.ThreadsTest do
       Threads.capture_results(entries, "test-host")
     end
 
-    assert [_, _] = pending = Shuttle.Test.InboxPublications.pending("test-host")
+    assert [_, _] = pending = Shuttle.Test.InboxPublications.pending()
     assert Enum.all?(pending, fn {_, record} -> record["wake"] == false end)
     refute Enum.any?(pending, fn {_, record} -> record["session"] end)
   end
@@ -25,7 +25,7 @@ defmodule Shuttle.ThreadsTest do
     Threads.capture_results(entries, "test-host")
 
     assert [{id, to_hub}, {asker_id, to_asker}] =
-             Enum.sort_by(Shuttle.Test.InboxPublications.pending("test-host"), &elem(&1, 0))
+             Enum.sort_by(Shuttle.Test.InboxPublications.pending(), &elem(&1, 0))
 
     assert to_hub["wake"] == false
     assert asker_id == id <> "-asker"
@@ -39,10 +39,10 @@ defmodule Shuttle.ThreadsTest do
     refute Map.has_key?(to_asker, "parent_uid")
 
     # No such session is live: the refusal is final, and the hub keeps the result.
-    Threads.retry_results("test-host", entries)
+    Threads.route_results(entries)
 
     refute Enum.any?(
-             Shuttle.Test.InboxPublications.pending("test-host"),
+             Shuttle.Test.InboxPublications.pending(),
              &(elem(&1, 0) == asker_id)
            )
   end
@@ -60,29 +60,31 @@ defmodule Shuttle.ThreadsTest do
     Threads.capture_results(entries, "test-host")
 
     {id, _} =
-      Enum.find(Shuttle.Test.InboxPublications.pending("test-host"), fn {id, _} ->
+      Enum.find(Shuttle.Test.InboxPublications.pending(), fn {id, _} ->
         String.ends_with?(id, "-asker")
       end)
 
     StubPostClient.set_response({:error, :unavailable})
-    Threads.retry_results("test-host")
+    Threads.route_results()
     first = StubPostClient.last().body
 
     Task.async(fn ->
       Shuttle.Inbox.boot_import()
-      Threads.retry_results("test-host")
+      Threads.route_results()
     end)
     |> Task.await(30_000)
 
     assert StubPostClient.last().body == first
     assert Jason.decode!(first)["wake"] == true
     assert Jason.decode!(first)["context_if_busy"] == true
-    assert Enum.any?(Shuttle.Test.InboxPublications.pending("test-host"), &(elem(&1, 0) == id))
+    # The transport id is the notice's own, as the outbox sent it.
+    assert Jason.decode!(first)["message_id"] == id
+    assert Enum.any?(Shuttle.Test.InboxPublications.pending(), &(elem(&1, 0) == id))
 
     StubPostClient.set_response(
       {:ok, 409,
        Jason.encode!(%{
-         message_id: id <> "-delivery",
+         message_id: id,
          address: String.replace(session, "asker-host", "local"),
          status: "rejected",
          transport: "claude-hook",
@@ -90,10 +92,10 @@ defmodule Shuttle.ThreadsTest do
        })}
     )
 
-    Threads.retry_results("test-host")
-    refute Enum.any?(Shuttle.Test.InboxPublications.pending("test-host"), &(elem(&1, 0) == id))
+    Threads.route_results()
+    refute Enum.any?(Shuttle.Test.InboxPublications.pending(), &(elem(&1, 0) == id))
     before = length(StubPostClient.posts())
-    Threads.retry_results("test-host")
+    Threads.route_results()
     assert length(StubPostClient.posts()) == before
   end
 
@@ -156,19 +158,19 @@ defmodule Shuttle.ThreadsTest do
       assert {:ok, _} = CLI.run_in_store(store, [verb, "hub/owner-only"] ++ extra)
       assert {:ok, %{fibers: latest}} = FiberDocuments.list(felt_stores: [store])
       Threads.capture_results(latest, "test-host")
-      assert [{id, record}] = Shuttle.Test.InboxPublications.pending("test-host")
+      assert [{id, record}] = Shuttle.Test.InboxPublications.pending()
       assert record["parent_uid"] == uid
       assert record["parent_unresolved"] == true
       assert record["anchor_uid"] == uid
       StubPostClient.set_get_response({:error, :unavailable})
-      Threads.retry_results("test-host")
-      assert [{^id, ^record}] = Shuttle.Test.InboxPublications.pending("test-host")
+      Threads.route_results()
+      assert [{^id, ^record}] = Shuttle.Test.InboxPublications.pending()
       StubPostClient.set_get_response({:ok, 200, Jason.encode!(%{fibers: [parent]})})
       StubPostClient.set_response({:ok, 202, ~s({"queued":true,"delivery":"context"})})
-      Task.async(fn -> Threads.retry_results("test-host") end) |> Task.await(30_000)
+      Task.async(fn -> Threads.route_results() end) |> Task.await(30_000)
       assert %{body: body} = StubPostClient.last()
       assert Jason.decode!(body)["fiber_id"] == uid
-      assert Shuttle.Test.InboxPublications.pending("test-host") == []
+      assert Shuttle.Test.InboxPublications.pending() == []
     end
 
     refute File.exists?(parent_path)
@@ -256,8 +258,8 @@ defmodule Shuttle.ThreadsTest do
     }
 
     assert :ok = Shuttle.Test.InboxPublications.capture([{"unblocked-archive", record}])
-    assert :ok = Threads.retry_results("test-host")
-    assert [{"unblocked-archive", resolved}] = Shuttle.Test.InboxPublications.pending("test-host")
+    assert :ok = Threads.route_results()
+    assert [{"unblocked-archive", resolved}] = Shuttle.Test.InboxPublications.pending()
     assert resolved["parent_uid"] == root_uid
     assert resolved["resolved_from_uid"] == parent_uid
     refute Map.has_key?(resolved, "parent_unresolved")
@@ -292,7 +294,7 @@ defmodule Shuttle.ThreadsTest do
     Threads.capture_results(entries, "test-host")
 
     record =
-      Enum.find_value(Shuttle.Test.InboxPublications.pending("test-host"), fn {_, candidate} ->
+      Enum.find_value(Shuttle.Test.InboxPublications.pending(), fn {_, candidate} ->
         if candidate["text"] =~ "thread upper/hub/child closed", do: candidate
       end)
 
@@ -343,7 +345,7 @@ defmodule Shuttle.ThreadsTest do
 
     assert {:ok, %{fibers: latest}} = FiberDocuments.list(felt_stores: [store])
     Threads.capture_results(latest, "test-host")
-    assert [{id, record}] = Shuttle.Test.InboxPublications.pending("test-host")
+    assert [{id, record}] = Shuttle.Test.InboxPublications.pending()
     assert record["anchor_uid"] == uid
     assert record["parent_unresolved"] == true
 
@@ -358,14 +360,14 @@ defmodule Shuttle.ThreadsTest do
 
     StubPostClient.set_get_response({:ok, 200, Jason.encode!(%{fibers: [fresh]})})
 
-    assert :ok = Threads.retry_results("test-host", [fresh])
+    assert :ok = Threads.route_results([fresh])
     assert %{url: get_url} = StubPostClient.last_get()
     assert get_url =~ "127.0.0.1:43211/api/v1/fibers/"
     assert StubPostClient.last().url =~ "127.0.0.1:43211/api/v1/deliver"
     assert Jason.decode!(StubPostClient.last().body)["fiber_id"] == uid
-    assert Shuttle.Test.InboxPublications.pending("test-host") == []
+    assert Shuttle.Test.InboxPublications.pending() == []
 
-    refute Enum.any?(Shuttle.Test.InboxPublications.pending("test-host"), fn {pending_id, _} ->
+    refute Enum.any?(Shuttle.Test.InboxPublications.pending(), fn {pending_id, _} ->
              pending_id == id
            end)
   end
@@ -379,7 +381,7 @@ defmodule Shuttle.ThreadsTest do
       assert {:ok, _} = CLI.run_in_store(store, ["close", "hub/child", "--local"])
       assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
       Threads.capture_results(entries, "test-host")
-      [{id, record}] = Shuttle.Test.InboxPublications.pending("test-host")
+      [{id, record}] = Shuttle.Test.InboxPublications.pending()
 
       assert {:ok, _} =
                CLI.run_in_store(store, ["close", "hub/child", "--tempered=#{verdict}", "--local"])
@@ -394,7 +396,7 @@ defmodule Shuttle.ThreadsTest do
       Threads.capture_results(latest, "test-host")
 
       reviewed =
-        Enum.find_value(Shuttle.Test.InboxPublications.pending("test-host"), fn {_, r} ->
+        Enum.find_value(Shuttle.Test.InboxPublications.pending(), fn {_, r} ->
           if r["text"] =~ "human verdict", do: r
         end)
 
@@ -405,7 +407,7 @@ defmodule Shuttle.ThreadsTest do
 
       assert reviewed["signal"]["verb"] =~ "closed ("
       Threads.deliver_results(latest, "test-host")
-      assert Shuttle.Test.InboxPublications.pending("test-host") == []
+      assert Shuttle.Test.InboxPublications.pending() == []
     end
   end
 
@@ -660,12 +662,12 @@ defmodule Shuttle.ThreadsTest do
       deliver(store)
 
       assert [{id, %{"text" => "thread hub/child unblocked: The mocks land closed"} = record}] =
-               Enum.filter(Shuttle.Test.InboxPublications.pending("test-host"), fn {_id, r} ->
+               Enum.filter(Shuttle.Test.InboxPublications.pending(), fn {_id, r} ->
                  r["text"] =~ "unblocked"
                end)
 
       refute record["wake"]
-      initial = Shuttle.Test.InboxPublications.pending("test-host")
+      initial = Shuttle.Test.InboxPublications.pending()
       assert [{rest_id, rest}] = Enum.reject(initial, fn {pending_id, _} -> pending_id == id end)
       assert rest["text"] == "thread hub/child rested: "
 
@@ -694,11 +696,11 @@ defmodule Shuttle.ThreadsTest do
 
       Task.async(fn ->
         Shuttle.Inbox.boot_import()
-        Threads.retry_results("test-host")
+        Threads.route_results()
       end)
       |> Task.await(30_000)
 
-      assert Shuttle.Test.InboxPublications.pending("test-host") == []
+      assert Shuttle.Test.InboxPublications.pending() == []
       assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
 
       retried =
@@ -713,8 +715,8 @@ defmodule Shuttle.ThreadsTest do
       assert sent["message_id"] == id
       assert sent["text"] == "thread hub/child unblocked: The mocks land closed"
       assert sent["context_only"] and not sent["wake"]
-      Threads.capture_unblocks(entries, "test-host")
-      assert Shuttle.Test.InboxPublications.pending("test-host") == []
+      Threads.capture_results(entries, "test-host")
+      assert Shuttle.Test.InboxPublications.pending() == []
     end
   end
 end
