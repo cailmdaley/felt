@@ -130,14 +130,15 @@ type ThreadRefusal struct {
 	Error string `json:"error"`
 }
 
-// CaptureThreads enqueues each publication into the routing inbox and answers
-// the ids this call created and the publications it refused; one refusal does
-// not stop the others. A publication captured before (pending or offered in
-// the routing inbox) or outside the capture window stores nothing, so the
-// first capture fixes the publication whatever a later poll renders.
-func CaptureThreads(env *sysenv.Env, publications []ThreadPublication) (created []string, refused []ThreadRefusal) {
-	created, refused = []string{}, []ThreadRefusal{}
-	for _, p := range publications {
+// CaptureThreads enqueues each publication into the routing inbox, calls
+// created with the index of each one this call stored as soon as it is
+// stored, and answers the publications it refused; one refusal does not stop
+// the others. A publication captured before (pending or offered in the
+// routing inbox) or outside the capture window stores nothing, so the first
+// capture fixes the publication whatever a later poll renders.
+func CaptureThreads(env *sysenv.Env, publications []ThreadPublication, created func(int)) []ThreadRefusal {
+	refused := []ThreadRefusal{}
+	for i, p := range publications {
 		entry, err := ThreadEntry(p.ID, p.Record)
 		made := false
 		entry.Created = &made
@@ -148,10 +149,10 @@ func CaptureThreads(env *sysenv.Env, publications []ThreadPublication) (created 
 		case err != nil:
 			refused = append(refused, ThreadRefusal{p.ID, err.Error()})
 		case made:
-			created = append(created, p.ID)
+			created(i)
 		}
 	}
-	return created, refused
+	return refused
 }
 
 // ThreadRoutes lists the routing inbox's pending publications.

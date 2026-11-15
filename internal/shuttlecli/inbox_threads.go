@@ -39,22 +39,40 @@ payload, or the state, is corrupt, leaving it untouched.`,
 	capture := &cobra.Command{
 		Use:   "thread-put",
 		Short: "Capture thread publications into the routing inbox",
-		Long: `Read a JSON array of {"id", "record"} thread publications on stdin and
-enqueue each into the routing inbox. Prints {"created": [ids], "refused":
-[{"id", "error"}]}: the ids this call stored and the publications the inbox
-did not take, each tried whatever the others' answers.`,
+		Long: `Read a JSON array of {"id", "record", "board"} thread publications on
+stdin and enqueue each into the routing inbox. A publication's optional board
+record is appended to the board as soon as this call creates its entry, and
+never for a publication captured before. Prints {"created": [ids], "refused":
+[{"id", "error"}], "board_errors": [{"id", "error"}]}: the ids this call
+stored, the publications the inbox did not take, each tried whatever the
+others' answers, and the board records that could not be appended.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var publications []messaging.ThreadPublication
+			var input []struct {
+				messaging.ThreadPublication
+				Board *boardRecord `json:"board"`
+			}
 			b, err := io.ReadAll(a.env.Stdin)
 			if err != nil {
 				return err
 			}
-			if err = json.Unmarshal(b, &publications); err != nil {
+			if err = json.Unmarshal(b, &input); err != nil {
 				return err
 			}
-			created, refused := messaging.CaptureThreads(a.env, publications)
-			return json.NewEncoder(a.env.Stdout).Encode(map[string]any{"created": created, "refused": refused})
+			publications := make([]messaging.ThreadPublication, len(input))
+			for i, p := range input {
+				publications[i] = p.ThreadPublication
+			}
+			created, boardErrors := []string{}, []messaging.ThreadRefusal{}
+			refused := messaging.CaptureThreads(a.env, publications, func(i int) {
+				created = append(created, input[i].ID)
+				if board := input[i].Board; board != nil {
+					if err := a.appendBoard(*board); err != nil {
+						boardErrors = append(boardErrors, messaging.ThreadRefusal{ID: input[i].ID, Error: err.Error()})
+					}
+				}
+			})
+			return json.NewEncoder(a.env.Stdout).Encode(map[string]any{"created": created, "refused": refused, "board_errors": boardErrors})
 		},
 	}
 	routes := &cobra.Command{

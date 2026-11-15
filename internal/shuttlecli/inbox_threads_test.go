@@ -28,7 +28,7 @@ func TestThreadInboxVerbsCaptureForwardSettleAndContract40Enqueue(t *testing.T) 
 	}
 	record := map[string]any{"owner": "sender", "store": "/sender", "parent_uid": "anchor", "parent_host": "owner", "parent_unresolved": true, "text": "thread hub/child unblocked: result", "retained_at": time.Now().UTC().Format(time.RFC3339Nano)}
 	batch, _ := json.Marshal([]map[string]any{{"id": "thread-1", "record": record}})
-	for i, want := range []string{`{"created":["thread-1"],"refused":[]}`, `{"created":[],"refused":[]}`} {
+	for i, want := range []string{`{"board_errors":[],"created":["thread-1"],"refused":[]}`, `{"board_errors":[],"created":[],"refused":[]}`} {
 		if out := run(string(batch), "inbox", "thread-put"); out != want {
 			t.Fatalf("capture %d: %s", i, out)
 		}
@@ -115,5 +115,39 @@ func TestThreadPutTriesEveryPublicationAndReportsTheRefused(t *testing.T) {
 		if len(got.Refused) != 2 || got.Refused[0].ID != "thread-big" || !strings.Contains(got.Refused[0].Error, "64 KiB") || got.Refused[1].ID != "thread-bad" {
 			t.Fatalf("poll %d refused %+v", poll, got.Refused)
 		}
+	}
+}
+
+// An unblock note's board line is appended in the step that creates its
+// entry, so no later loss of thread-put's output can drop it, and a
+// re-capture appends nothing.
+func TestThreadPutAppendsTheBoardLineWhenItCreatesTheEntry(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	env.Set("SHUTTLE_HOST", "host")
+	env.Set("SHUTTLE_EVENTS", "")
+	events := filepath.Join(t.TempDir(), "events.jsonl")
+	env.Set("SHUTTLE_EVENTS_FILE", events)
+	env.Set("SHUTTLE_DATA_DIR", filepath.Join(t.TempDir(), "data"))
+	var out bytes.Buffer
+	env.Stdout, env.Stderr = &out, &bytes.Buffer{}
+	if code := Run(env, []string{"inbox", "thread-state"}); code != 0 {
+		t.Fatal(code)
+	}
+	record := map[string]any{"owner": "host", "store": "/s", "parent_uid": "p", "text": "thread a unblocked: b closed", "retained_at": time.Now().UTC().Format(time.RFC3339Nano)}
+	batch, _ := json.Marshal([]map[string]any{
+		{"id": "thread-unblock", "record": record, "board": map[string]any{"kind": "unblocked", "fiber": "a", "text": "b closed"}},
+		{"id": "thread-quiet", "record": record},
+	})
+	for poll := 0; poll < 2; poll++ {
+		out.Reset()
+		env.Stdin = strings.NewReader(string(batch))
+		if code := Run(env, []string{"inbox", "thread-put"}); code != 0 {
+			t.Fatal(code, out.String())
+		}
+	}
+	records := readBoardRecords(t, events)
+	if len(records) != 1 || records[0].Kind != "unblocked" || records[0].Fiber != "a" || records[0].Text != "b closed" {
+		t.Fatalf("%+v", records)
 	}
 }

@@ -987,23 +987,25 @@ defmodule Shuttle.Threads do
   (`shuttle.thread_parent.asked_by`): the orchestrator, when its own worker
   asked; otherwise the asking session itself, through an asker notice
   (`<id>-asker`). A thread nobody asked for, and an unblock note, wake no one.
-  An unblock note's board line is appended when its entry is first created. A
-  failed capture is logged, and the next poll captures the same signals again.
+  An unblock note carries its board line, which `thread-put` appends in the
+  step that first creates its entry. A refused publication or a failed capture
+  is logged, and the next poll captures the same signals again.
   Reading a blocker outside the poller's cache shells felt, so this runs on the
   delivery task, not the poll.
   """
   def capture_results(entries, own_host) do
     now = DateTime.utc_now()
-    unblocks = unblock_publications(entries, own_host, now)
 
-    created =
-      publish(
-        result_publications(entries, own_host, now) ++
-          Enum.map(unblocks, fn {id, record, _board} -> {id, record} end)
-      )
-
-    for {id, _record, board} <- unblocks, MapSet.member?(created, id), do: append_board(board)
-    :ok
+    publish(
+      for(
+        {id, record} <- result_publications(entries, own_host, now),
+        do: %{id: id, record: record}
+      ) ++
+        for(
+          {id, record, board} <- unblock_publications(entries, own_host, now),
+          do: %{id: id, record: record, board: board}
+        )
+    )
   end
 
   defp result_publications(entries, own_host, now) do
@@ -1109,43 +1111,28 @@ defmodule Shuttle.Threads do
     end
   end
 
-  # The ids this capture created. Each publication is tried; the ones the
-  # inbox refused are logged, and the next poll offers them again.
-  defp publish([]), do: MapSet.new()
+  # Each publication is tried; the ones the inbox refused, and board lines
+  # that could not be appended, are logged.
+  defp publish([]), do: :ok
 
   defp publish(publications) do
-    input = Jason.encode!(for {id, record} <- publications, do: %{id: id, record: record})
-
     with {:ok, output} <-
            Shuttle.CLI.run(["inbox", "thread-put"],
-             input: input,
+             input: Jason.encode!(publications),
              input_eof: true,
              stderr_to_stdout: false
            ),
-         {:ok, %{"created" => created, "refused" => refused}} <- Jason.decode(output) do
+         {:ok, %{"refused" => refused, "board_errors" => board_errors}} <- Jason.decode(output) do
       for %{"id" => id, "error" => error} <- refused,
           do: Logger.warning("Thread capture refused #{id}: #{error}")
 
-      MapSet.new(created)
+      for %{"id" => id, "error" => error} <- board_errors,
+          do: Logger.warning("Recording unblock #{id} on board failed: #{error}")
+
+      :ok
     else
-      error ->
-        Logger.warning("Thread capture failed: #{inspect(error)}")
-        MapSet.new()
+      error -> Logger.warning("Thread capture failed: #{inspect(error)}")
     end
-  end
-
-  defp append_board(board) do
-    result =
-      try do
-        Shuttle.CLI.run(["board", "append"], input: Jason.encode!(board) <> "\n", input_eof: true)
-      rescue
-        error -> {:error, Exception.message(error)}
-      catch
-        :exit, reason -> {:error, {:exit, reason}}
-      end
-
-    with {:error, _} = error <- result,
-         do: Logger.warning("Recording unblock on board failed: #{inspect(error)}")
   end
 
   @doc """

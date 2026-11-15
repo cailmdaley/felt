@@ -3,77 +3,104 @@ defmodule Shuttle.BoardUnblockTest do
   alias Shuttle.Threads
   alias Shuttle.Test.InboxPublications
 
-  defmodule Runner do
-    def cmd("shuttle", ["board", "append"], opts) do
-      send(self(), {:board, Jason.decode!(opts[:input]), opts[:input_eof]})
-      {"", 0}
+  # Runs thread-put and loses its answer, as a timeout kill after the entries
+  # were created would.
+  defmodule LostAnswerRunner do
+    def cmd("shuttle", ["inbox", "thread-put"] = args, opts) do
+      Shuttle.Runner.Default.cmd("shuttle", args, opts)
+      {"", :timeout}
     end
 
     def cmd(command, args, opts), do: Shuttle.Runner.Default.cmd(command, args, opts)
   end
 
-  defmodule RaisingRunner do
-    def cmd("shuttle", ["board", "append"], _opts), do: raise("input unavailable")
-    def cmd(command, args, opts), do: Shuttle.Runner.Default.cmd(command, args, opts)
+  defp board(dir) do
+    case File.read(Path.join(dir, "events.jsonl")) do
+      {:ok, text} ->
+        for line <- String.split(text, "\n", trim: true),
+            record = Jason.decode!(line),
+            record["type"] == "board",
+            do: Map.take(record, ["kind", "fiber", "text"])
+
+      {:error, :enoent} ->
+        []
+    end
   end
 
-  test "a newly captured unblock posts exactly once, including after acknowledgement" do
+  defp family(dir, closed_at) do
+    [
+      %{
+        felt_store: dir,
+        fiber: %{"id" => "hub", "uid" => "root", "shuttle" => %{"host" => "host"}}
+      },
+      %{
+        felt_store: dir,
+        fiber: %{
+          "id" => "hub/child",
+          "uid" => "child",
+          "shuttle" => %{"host" => "host", "blocked_on" => "work/blocker"}
+        }
+      },
+      %{
+        felt_store: dir,
+        fiber: %{
+          "id" => "work/blocker",
+          "uid" => "blocker",
+          "name" => "Blocker",
+          "status" => "closed",
+          "closed_at" => closed_at
+        }
+      }
+    ]
+  end
+
+  defp later(seconds),
+    do: DateTime.utc_now() |> DateTime.add(seconds, :second) |> DateTime.to_iso8601()
+
+  setup do
     dir = Path.join(System.tmp_dir!(), "board-unblock-#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf(dir) end)
     Shuttle.Test.Env.put_env("SHUTTLE_DATA_DIR", dir)
-    Shuttle.Test.Env.put_app_env(:felt_runner, Runner)
     Shuttle.Inbox.boot_import()
-    stamp = DateTime.add(DateTime.utc_now(), 2, :second) |> DateTime.to_iso8601()
+    %{dir: dir}
+  end
 
-    parent = %{
-      felt_store: dir,
-      fiber: %{"id" => "hub", "uid" => "root", "shuttle" => %{"host" => "host"}}
-    }
-
-    child = %{
-      felt_store: dir,
-      fiber: %{
-        "id" => "hub/child",
-        "uid" => "child",
-        "shuttle" => %{"host" => "host", "blocked_on" => "work/blocker"}
-      }
-    }
-
-    blocker = %{
-      felt_store: dir,
-      fiber: %{
-        "id" => "work/blocker",
-        "uid" => "blocker",
-        "name" => "Blocker",
-        "status" => "closed",
-        "closed_at" => stamp
-      }
-    }
-
-    entries = [parent, child, blocker]
+  test "a newly captured unblock posts exactly once, including after acknowledgement", %{
+    dir: dir
+  } do
+    entries = family(dir, later(2))
     assert :ok = Threads.capture_results(entries, "host")
-
-    assert_receive {:board,
-                    %{"kind" => "unblocked", "fiber" => "child", "text" => "Blocker closed"},
-                    true}
+    unblocked = %{"kind" => "unblocked", "fiber" => "child", "text" => "Blocker closed"}
+    assert board(dir) == [unblocked]
 
     assert [{id, _}] = InboxPublications.pending()
     assert :ok = Threads.capture_results(entries, "host")
-    refute_receive {:board, _, _}, 20
     InboxPublications.settle(id)
     assert :ok = Threads.capture_results(entries, "host")
-    refute_receive {:board, _, _}, 20
+    assert board(dir) == [unblocked]
 
-    Shuttle.Test.Env.put_app_env(:felt_runner, RaisingRunner)
-    later = DateTime.add(DateTime.utc_now(), 5, :second) |> DateTime.to_iso8601()
-    blocker = put_in(blocker.fiber["closed_at"], later)
+    Shuttle.Test.Env.put_env("SHUTTLE_EVENTS", "off")
 
     assert ExUnit.CaptureLog.capture_log(fn ->
-             assert :ok = Threads.capture_results([parent, child, blocker], "host")
-           end) =~ "input unavailable"
+             assert :ok = Threads.capture_results(family(dir, later(5)), "host")
+           end) =~ "Recording unblock thread-"
 
     assert [{_, _}] = InboxPublications.pending()
+  end
+
+  test "an unblock whose thread-put answer is lost still posts once", %{dir: dir} do
+    Shuttle.Test.Env.put_app_env(:felt_runner, LostAnswerRunner)
+    entries = family(dir, later(2))
+
+    ExUnit.CaptureLog.capture_log(fn ->
+      assert :ok = Threads.capture_results(entries, "host")
+      assert :ok = Threads.capture_results(entries, "host")
+    end)
+
+    assert board(dir) == [
+             %{"kind" => "unblocked", "fiber" => "child", "text" => "Blocker closed"}
+           ]
   end
 
   test "runner reports an unavailable input directory without raising" do

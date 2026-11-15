@@ -28,7 +28,8 @@ func bootThread(t *testing.T, env *sysenv.Env) ThreadImport {
 
 func capture(t *testing.T, env *sysenv.Env, publications ...ThreadPublication) []string {
 	t.Helper()
-	created, refused := CaptureThreads(env, publications)
+	created := []string{}
+	refused := CaptureThreads(env, publications, func(i int) { created = append(created, publications[i].ID) })
 	if len(refused) != 0 {
 		t.Fatal(refused)
 	}
