@@ -369,14 +369,14 @@ export class ChannelsView implements TemporalView {
   /** The documents Find matches, across every channel and every fiber the fleet sent from. */
   private drawFound(): void {
     const found = this.found!, query = this.query.toLowerCase(), library = this.ctx?.workspace?.library
-    const channelOf = new Map(this.channels.flatMap(channel => channel.members.map(card => [fiberOf(card), channel.name] as const)))
+    const channelOf = new Map(this.channels.flatMap(channel => channel.members.map(card => [fiberOf(card), channel.title] as const)))
     const matches = !query || !library ? [] : library.documents().filter(({ card, receipt }) =>
       [receipt.basename, receipt.fullPath, declaredTitle(receipt.key)?.title ?? '', card.name, channelOf.get(fiberOf(card)) ?? ''].some(text => text.toLowerCase().includes(query)))
       .slice(0, FOUND_DOCUMENTS)
     found.hidden = !matches.length
     found.replaceChildren(el('h4', 'kbn-ch-shelf', 'Files'), this.docList(matches.map(({ card, receipt }) => ({
       card, key: receipt.key, name: declaredTitle(receipt.key)?.title ?? receipt.basename, path: receipt.fullPath, at: receipt.timestamp,
-    })), doc => channelOf.get(fiberOf(doc.card)) ?? doc.card.name))
+    })), doc => doc.card.name))
   }
   /** What was read lately in this session, while Find is not looking. */
   private drawLately(): void {

@@ -217,9 +217,9 @@ h4.kbn-ch-shelf { margin-top: 0; }
   /* The phone's bar has no Find: the rail carries its own. */
   .kbn-ch-finder { display: block; }
   .kbn-ch-layout { grid-template-columns: minmax(0, 1fr); }
-  /* The rail is a drawer over the channel, drawn in from the left edge. */
+  /* The rail is a drawer over the channel, drawn in from the left edge, above the phone's bottom bar. */
   .kbn-ch-rail {
-    position: fixed; inset: 0 auto 0 0; z-index: 20;
+    position: fixed; inset: 0 auto calc(57px + env(safe-area-inset-bottom, 0px)) 0; z-index: 20;
     width: min(82vw, 320px); padding: 16px 8px; overflow-y: auto;
     background: var(--kbn-sheet, var(--kbn-paper));
     border-right: 0.5px solid var(--kbn-rule-strong);

@@ -10,7 +10,7 @@ The board owns actions, presentation, the gestures that ask for a popup, and its
 | Keyboard help, role picker, rest calendar shell | `board/KeymapHelp.ts`, `RolePopover.ts`, `RestPopover.ts` | `@ui-sdk/web/dialog` |
 | Settings dropdown, Reader document menu | `board/workspace/SettingsMenu.ts`, `Reader.ts` | `@ui-sdk/web/popover` |
 | View tabs, phone folio strip | `board/KanbanModal.ts`, `KanbanSurfaces.ts` | `@ui-sdk/web/tabs` |
-| Dock Kind, Board grouping | `board/workspace/Dock.ts`, `Overview.ts` | `@ui-sdk/web/segmented-control` |
+| Dock Kind | `board/workspace/Dock.ts` | `@ui-sdk/web/segmented-control` |
 | Parent-fiber picker, Chronicle search | `board/workspace/Dock.ts`, `board/views/ChronicleView.ts` | `@ui-sdk/web/autocomplete` |
 | Screen-reader announcements | `announce` callers across the board | core `announce` |
 | Form dialog, parent picker, tag chips | `forms/AppDialog.tsx`, `forms/StashForm.tsx` | `@ui-sdk/react` dialog, autocomplete, combobox |

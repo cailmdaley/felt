@@ -22,10 +22,11 @@ const DAY = 1440
  * Channels as the Channels view draws them. The analyst office's cosmic-shear
  * orchestrator is idle at the end of its turn, with a thread asking, one
  * closed for review, one idle, quiet threads beside them (one of them an
- * editor's), a sent plot and report and a held spoken line. The vizier office
- * holds four top-level constitutions: the seat idle at the end of its turn, a
- * deed form asking, the morning post closed for review, and the dream at
- * work. The editor's paper section waits for review; the composer is idle;
+ * editor's), plots, a report and notes its threads sent (the channel's files,
+ * beside the tapestries of the seat and the mask thread) and a held spoken
+ * line. The vizier office holds four top-level constitutions: the seat idle
+ * at the end of its turn, a deed form asking, the morning post closed for
+ * review with reply drafts, and the dream at work. The editor's paper section waits for review; the composer is idle;
  * moving house (no office) last asked five days ago, so it has gone cold; the
  * garden plan waits on nothing but is pinned. The surveyor's question was set
  * aside.
@@ -81,7 +82,22 @@ export function addChannelsFixtures(example: WorkspaceExample, now: number): { h
     }
   }
   const sent = (ext: string, uid: string, minutes: number) => ({ ...example.receipts.find(file => String(file.fullPath).endsWith(ext))!, uid, host: WORKSPACE_HOST, timestamp: now - minutes * 60_000 })
-  example.receipts = [sent('.png', 'shear/cuts', 30), sent('.html', 'shear/cuts', 36), sent('.pdf', 'paper-section-4', 118)]
+  /** A file a thread wrote in its own folder and sent: a plot drawn as SVG, or a short note. */
+  const wrote = (uid: string, name: string, minutes: number, title: string) => {
+    const path = `${dir(uid)}/${name}`, svg = name.endsWith('.svg')
+    const body = svg
+      ? `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400" viewBox="0 0 640 400"><rect width="640" height="400" fill="#fbf6e9"/><text x="40" y="48" font-size="22" fill="#30291f">${title}</text><path d="M60 80V340H600" fill="none" stroke="#a39478"/><path d="M80 300C200 120 320 260 440 160S560 200 590 120" fill="none" stroke="#3f8278" stroke-width="3"/></svg>`
+      : `# ${title}\n\nWritten for the channel's files.\n`
+    example.files.push({ owner: WORKSPACE_HOST, path, mime: svg ? 'image/svg+xml' : 'text/markdown', body: new Blob([body], { type: svg ? 'image/svg+xml' : 'text/markdown' }) })
+    return { fullPath: path, basename: name, uid, host: WORKSPACE_HOST, sessionId: `session-${uid}`, timestamp: now - minutes * 60_000 }
+  }
+  example.receipts = [
+    sent('.png', 'shear/cuts', 30), sent('.html', 'shear/cuts', 36), sent('.pdf', 'paper-section-4', 118),
+    wrote('shear/mask', 'north-mask-residuals.svg', 26, 'Star–galaxy residual, north patch'),
+    wrote('shear/covariance', 'covariance-blocks.svg', 9, 'Covariance, tomographic blocks'),
+    wrote('shear/psf', 'psf-leakage.md', 96, 'PSF leakage'),
+    wrote('morning-post', 'reply-drafts.md', 140, 'Two replies to send'),
+  ]
   example.sessions = []; example.commits = []
   return {
     held: [{ fiber_id: 'shear/covariance', name: 'Covariance pipeline', n: 2, first: 'The final covariance is ready. One block of it is worth checking together.', at: now - 8 * 60_000 }],

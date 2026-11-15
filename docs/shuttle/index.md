@@ -76,11 +76,12 @@ The document stays readable even without Shuttle running.
 ## Follow the work on the board
 
 The daemon serves a browser board at `http://127.0.0.1:4000/` on a single-user machine.
-It has three views:
+It has four views:
 
 - **Desk:** task cards, running workers, and results awaiting your review.
 - **Chronicle:** activity, sessions, and commits over time.
-- **Board:** a document overview and reader for each fiber's channel. The band above the fiber page carries its controls; its console (›_) opens the conversation.
+- **Channels:** one channel per office or top-level constitution, holding what waits on you, each worker's latest word, and the channel's files. Any document opens in the reader, whose band above the fiber page carries its controls; its console (›_) opens the conversation.
+- **Globe:** all the work at once, on one sphere.
 
 [The board guide](board.md) covers editing, review, and the controls in each view.
 The command line also supports task lifecycle operations if you prefer working from a terminal.

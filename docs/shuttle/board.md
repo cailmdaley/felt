@@ -9,11 +9,11 @@ the host-local [ledgers](telemetry.md) — the board stores nothing of its own.
 |---|---|---|
 | `1` | **Desk** | What needs doing, and what is running right now |
 | `2` | **Chronicle** | What a stretch of weeks was about |
-| `3` | **Board** | What the work produced |
+| `3` | **Channels** | Who is waiting on you, and what the work produced |
 | `4` | **Globe** | Everything at once, as one place to move through |
 | `⌘,` | **Settings** | Every operator file, on any host in the fleet |
 
-`#/desk`, `#/chronicle`, `#/board` and `#/globe` deep-link the views.
+`#/desk`, `#/chronicle`, `#/channels` and `#/globe` deep-link the views; `#/board` opens Channels.
 A constitution uses `#/board/<uid>@<owner>/<document>`; browser Back returns to the view you opened it from.
 
 ## Desk — the kanban
@@ -156,14 +156,14 @@ that run and keeps the schedule. A drag to Awaiting review is refused. Its outco
 headline until the next run writes its own.
 
 Opening a Desk card enters its constitution's documents.
-The constitution's band (see [the reader](#board-what-the-work-produced)) carries its worker's line and Listen; the folded settings hold the next launch's agent, effort, surface and kind, plus the card's due day and parent.
+The constitution's band (see [the reader](#the-reader)) carries its worker's line and Listen; the folded settings hold the next launch's agent, effort, surface and kind, plus the card's due day and parent.
 The Desk also offers Stash and Capture dialogs and Attach.
 
 <a id="attach"></a>
 ### Open a worker
 
 The band's console (›_) opens the conversation of the constitution it holds, or of the thread highlighted on its page, on every layout, including phones, whenever a destination is available.
-`c` does the same from any view, and a Desk row's menu and a Board folio offer it too.
+`c` does the same from any view, and a Desk row's menu offers it too.
 Tap to open; long-press or right-click the console to choose a destination.
 A choice between alternatives is remembered; opening a sole destination leaves the preference unchanged.
 Fiber controls remain inline.
@@ -209,17 +209,21 @@ refresh control. Days already past are fetched once per open; scrolling back
 fetches only the days newly in view. Nothing on the board asks for temporal
 data while Chronicle is closed.
 
-## Board — what the work produced
+## Channels — who is waiting, and what the work produced
 
-Hotkey `3` opens a contact sheet of constitutions with documents sent in the last 30 days.
-A ribbon shows the twelve latest documents across the fleet.
-Beneath it, **Read lately** names the constitutions opened in the reader this session, most recent first; each opens in the reader.
-Below it, each fiber has a folio with a live thumbnail, name, outcome, document count and host marks.
-Recent work, Projects and Hosts regroup the sheet; Find filters names, paths and filenames.
-Thumbnails load near the viewport under a shared budget and cannot run scripts.
-Confirmed missing fibers' documents gather under **Unfiled** on their byte-owning host; an unreachable owner does not count as a missing fiber.
+Hotkey `3` opens Channels: one channel per office held by a top-level constitution (or per top-level constitution without one), with every thread under it.
+A channel reads like a chat: each worker is one line, oldest first, saying its ask, its review note or its latest outcome, with the files it sent and the lines it spoke under it; the lines waiting on you glow, and what is new since you last read the channel is marked.
+Beside the lines the seat's tapestry is pinned; the header's **Files** shows the channel's files in its place instead: each member's tapestry, artifact or report, then everything its threads sent in the last 30 days, newest first.
+A reply bar under the lines answers the seat, or the worker whose line you chose; **Not now** sets a waiting channel aside until something newer waits in it.
 
-Opening a folio or receipt enters the reader: one selected page, its neighbours waiting hidden, and no column beside it.
+The rail lists the channels waiting on you, newest wait first, then the ones you pinned, then the ones gone cold after three days; under them **Read lately** names the constitutions opened in the reader this session.
+`[`, the rail's button, or a sideways swipe hides and shows the rail; on a phone it is a drawer.
+The bar's Find (on a phone, the rail's own field) looks across every channel, matching its name, its members' names and paths and its files, and lists every sent document it matches beneath the channels, from any fiber; a quiet channel found is read in place, and **Pin** in its header keeps it in the rail for 14 days of disuse.
+Documents of a fiber the board does not hold are read from their owner; a fiber its owner confirms missing files its documents under **Unfiled** on their byte-owning host, and an unreachable owner does not count as a missing fiber.
+
+### The reader
+
+Opening a file, a line or a constitution enters the reader: one selected page, its neighbours waiting hidden, and no column beside it.
 The reader is one frame: beneath the board's bar, the selected page fills the window, with its header line on top and the document below it. The header line holds back, the page's name, its arrival, the sent files toggle, Expand, a file's download and the document menu.
 The download (an arrow onto a tray) saves the file under its own name, its bytes read through the owner-routed file route, so a file on another host downloads the same way; on the phone it lives in the document menu as Download.
 The sent files toggle appears at every width when the constitution has sent files, on the phone in the top bar, and its first bullet swells while one is unread; it opens the sheet of sent files, as the document menu's Sent files does.
@@ -248,7 +252,7 @@ A file open on any page is watched while you read it: when its worker rewrites i
 Media, PDF and unsupported viewers add no title or provenance block inside the page. Audio/video use native transport controls; retained media pauses when receded or parked.
 The ‹ button, browser Back and the phone's right swipe follow the pages you visited, across constitutions and linked files.
 The back control names the constitution across channels, or the page within the same channel: Constitution or the file's name.
-A direct address without a visited page behind it returns to its origin view (Desk, Chronicle, Board or Globe).
+A direct address without a visited page behind it returns to its origin view (Desk, Chronicle, Channels or Globe).
 Reloads retain this path in browser history.
 Ancestry links and `b` go up the thread tree separately.
 Opening a different page adds a history stop, including a link to a page just visited.
@@ -289,13 +293,13 @@ The page reads its feeds and repaints only while it is the selected page of an o
 ### Where voice goes
 
 With Follow me on, whichever of Rex and the board had focus last chooses the destination: Rex's selected worker, or the board's viewed card and its nearest constitution.
-Opening a thread or a Globe card moves the destination; hovering, moving a keyboard highlight, or viewing Desk, Chronicle or Board does not.
+Opening a thread or a Globe card moves the destination; hovering, moving a keyboard highlight, or viewing Desk, Chronicle or Channels does not.
 With Follow me off, the destination stays pinned while views continue to be remembered; turning it back on resumes the latest view seen while listening.
 Following sends after a short quiet, but words for a card without a live worker go nowhere unless they end with a standalone “send” clause (for example, “check the plot, send”; “sent” is taken as the same word), which starts the worker; pinned listening sends every batch and starts a worker when needed, using its own longer quiet threshold.
 The recorder's day transcript retains all speech, including unrouted or undelivered words, and every delivered batch points to its time in `shuttle transcript`.
 
 The receipt feed is `/api/v1/sent-files/all/composite`, which combines each host's event stream.
-The board reads its last thirty days at most once a minute, into one store the Desk's report marks, the Board and the family pages share; an unchanged feed answers 304.
+The board reads its last thirty days at most once a minute, into one store the Desk's report marks, Channels and the family pages share; an unchanged feed answers 304.
 A host without an event stream contributes no receipts — see [Telemetry](telemetry.md).
 
 ## Globe — everything on one sphere

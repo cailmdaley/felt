@@ -29,11 +29,12 @@ Open it to see **Set up Shuttle**, the task recording what your agent has done a
 When the running conversation can be attached, that card follows the setup session itself.
 Otherwise it stays a draft with an explanation; the agent won't pretend that the conversation is connected.
 
-The board has three views:
+The board has four views:
 
 - **Desk** shows tasks, running agents, and results awaiting review.
 - **Chronicle** shows activity over time.
-- **Board** holds files agents have sent, such as reports and plots.
+- **Channels** shows what waits on you, one channel per line of work, with the files agents have sent, such as reports and plots.
+- **Globe** shows all the work at once.
 
 Shuttle stores notes as ordinary Markdown files managed by **felt**.
 Each note is called a **fiber**.

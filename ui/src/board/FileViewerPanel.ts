@@ -1,5 +1,5 @@
 /**
- * Shared renderer for document workspace pages and Board overview thumbnails.
+ * Shared renderer for document workspace pages and their thumbnails.
  *
  * Images and audio use native elements, markdown and text render in a scrolling
  * pane, HTML renders in a scrollable iframe, and PDF uses the lazy PDF.js

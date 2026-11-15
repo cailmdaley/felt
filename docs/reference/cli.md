@@ -635,7 +635,7 @@ Recording works offline.
 
 ### `shuttle send-file <path> [path...]`
 
-Publish readable regular files to the Shuttle Board and the session/fiber sent-files
+Publish readable regular files to the Shuttle board and the session/fiber sent-files
 trail. Claude, Codex and Pi sessions use this command. Paths are resolved to absolute
 paths on the owning host; files must remain there for subsequent viewing.
 The command validates the whole batch before recording one `file_sent` event.
@@ -656,7 +656,7 @@ The daemon also reads `SendUserFile` hook events as sends.
 
 Hide a fiber's sent-files trail without deleting artifact files or changing body embeds.
 The command resolves the fiber's canonical UID and appends a `sent_files_cleared` event through the same host-local writer as `send-file`.
-Without `--path`, both the Desk gallery and the Board feed hide sends at or before the latest whole-fiber clear timestamp for that UID.
+Without `--path`, both the Desk gallery and Channels hide sends at or before the latest whole-fiber clear timestamp for that UID.
 With `--path`, the clear applies only to the exact absolute `fullPath`, leaving other files from the same send visible.
 The path must be a nonempty absolute path; the command doesn't expand `~`, resolve relative paths, normalize the path, or require the file to exist.
 Each path is hidden through the latest of its path-specific and whole-fiber cutoffs; a later resend appears normally.

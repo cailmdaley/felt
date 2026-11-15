@@ -1,6 +1,6 @@
 /**
  * The fleet's sent files over the last thirty days, from one throttled read of
- * the sent-files composite. The Desk's report marks, the Board's contact sheet
+ * the sent-files composite. The Desk's report marks, the document library
  * and the family map all draw from this one store; none reads the feed itself.
  */
 import { normalizeSentFiles, type SentFile } from './sentFiles.js'

@@ -9,11 +9,12 @@ const fits = async page => {
   assert.equal(await page.locator('.kbn-channels').evaluate(el => el.scrollWidth <= el.clientWidth), true)
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
 }
-const shot = async (page, name) => {
-  await page.waitForFunction(() => document.querySelector('.kbn-ch-tapestry iframe, .kbn-ch-tapestry .kbn-ch-prose'))
+const docs = (page, selector) => page.evaluate(within => [...document.querySelectorAll(`${within} .kbn-ch-doc-name`)].map(el => el.textContent), selector)
+const shot = async (page, name, prefix = 'channels') => {
+  await page.waitForFunction(() => document.querySelector('.kbn-ch-tapestry iframe, .kbn-ch-tapestry .kbn-ch-prose, .kbn-ch-files:not([hidden])'))
   await page.evaluate(() => { for (let node = document.querySelector('.kbn-channels'); node; node = node.parentElement) node.scrollTop = 0 })
   await page.waitForTimeout(400)
-  await page.screenshot({ path: resolve(`../channels-${name}.png`) })
+  await page.screenshot({ path: resolve(`../${prefix}-${name}.png`) })
 }
 const browser = await launchBrowser()
 try {
@@ -28,7 +29,7 @@ try {
     await page.evaluate(() => document.fonts.ready)
     // Newest wait first, then the pinned garden, then moving house gone cold; the set-aside surveyor stays out.
     assert.deepEqual(await page.evaluate(channels), ['Vizier', 'Analyst', 'Editor', 'Composer', 'Garden plan', 'Moving house'])
-    assert.equal(await page.locator('.kbn-ch-shelf').textContent(), 'Gone cold')
+    assert.equal(await page.locator('li.kbn-ch-shelf').textContent(), 'Gone cold')
     // The vizier office's four top-levels are one channel, its seat's tapestry pinned and replied to.
     if (phone) {
       // The rail is a drawer: choosing a channel puts it away.
@@ -52,6 +53,14 @@ try {
       for (const at of [60, 110, 170]) await touch('touchMove', at)
       await touch('touchEnd')
       await page.waitForFunction(() => !document.querySelector('.kbn-ch-layout[data-rail-hidden]'))
+      // The phone's bar has no Find: the rail's own finds channels and files.
+      await page.locator('.kbn-ch-finder').fill('north')
+      await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 2)
+      assert.deepEqual(await docs(page, '.kbn-ch-doclist'), ['north-mask-residuals.svg'])
+      await fits(page)
+      await page.waitForTimeout(400)
+      await page.screenshot({ path: resolve('../library-phone.png') })
+      await page.locator('.kbn-ch-finder').fill('')
     } else {
       await page.locator('.kbn-ch').focus()
       await page.keyboard.press('j')
@@ -60,7 +69,7 @@ try {
         ['Rho statistics', ''], ['Methods section', ''], ['PSF leakage', 'turn'], ['Magnitude-cut comparison', 'review'],
         ['Choose the survey mask', 'ask'], ['UNIONS cosmic shear', 'turn'], ['Covariance pipeline', ''],
       ])
-      assert.equal(await page.locator('.kbn-ch-file').count(), 2)
+      assert.equal(await page.locator('.kbn-ch-file').count(), 5)
       assert.equal(await page.locator('.kbn-ch-said').count(), 1)
       // The analyst's seat is its one top-level; a thread's own office is its label.
       assert.equal(await page.locator('.kbn-ch-reply-to').textContent(), 'UNIONS cosmic shear')
@@ -78,18 +87,45 @@ try {
       await fits(page)
       await shot(page, 'desktop-hidden')
       await page.locator('.kbn-ch-rail-toggle').click()
-      // Adding a channel pins it.
-      await page.locator('.kbn-ch-finder').fill('north')
-      assert.equal(await page.locator('.kbn-ch-found-pick').textContent(), 'Surveyor')
-      await page.keyboard.press('Enter')
+      // The header shows the channel's files in the tapestry's place: each member's companions, then what its threads sent, newest first.
+      assert.equal(await page.locator('.kbn-ch-finder').isVisible(), false)
+      await page.locator('.kbn-ch-tab', { hasText: 'Files' }).click()
+      await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-files .kbn-ch-doc').length === 7)
+      const files = await docs(page, '.kbn-ch-files')
+      assert.deepEqual(files.slice(0, 2), ['Tapestry', 'Tapestry'])
+      assert.equal(files[2], 'covariance-blocks.svg')
+      assert.ok(files.includes('north-mask-residuals.svg') && files.includes('psf-leakage.md'))
+      await fits(page)
+      await shot(page, 'files', 'library')
+      // A file opens in the reader; closing it comes back to the channel, and Read lately keeps it.
+      await page.locator('.kbn-ch-files .kbn-ch-doc', { hasText: 'north-mask-residuals.svg' }).click()
+      await page.waitForFunction(() => document.querySelector('.ws-selected')?.getAttribute('data-key')?.endsWith('north-mask-residuals.svg'))
+      await page.keyboard.press('Escape')
+      await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'UNIONS cosmic shear' || document.querySelector('.kbn-ch-name')?.textContent === 'Analyst')
+      assert.equal(new URL(page.url()).hash, '#/channels')
+      assert.deepEqual(await docs(page, '.kbn-ch-lately'), ['Choose the survey mask'])
+      // The bar's Find reaches every channel by its members and its files, and the files themselves.
+      await page.locator('.kbn-viewtabs-find input').fill('north')
+      await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 2)
+      assert.deepEqual(await page.evaluate(channels), ['Analyst', 'Surveyor'])
+      assert.deepEqual(await docs(page, '.kbn-ch-doclist'), ['north-mask-residuals.svg'])
+      await page.locator('.kbn-ch-tab', { hasText: 'Tapestry' }).click()
+      await fits(page)
+      await shot(page, 'desktop', 'library')
+      // A quiet channel found is read in place, and pinned from its header.
+      await page.locator('.kbn-ch-pick', { hasText: 'Surveyor' }).click()
       await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'Surveyor')
-      assert.equal(await page.locator('.kbn-ch-pick').count(), 7)
+      await page.locator('.kbn-ch-pin').click()
+      await page.locator('.kbn-viewtabs-find input').press('Escape')
+      await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 7)
     }
     await page.locator('.kbn-ch-pick', { hasText: 'Editor' }).click()
     await page.locator('.kbn-ch-later').click()
     await page.waitForFunction(() => ![...document.querySelectorAll('.kbn-ch-pick-name')].some(el => el.textContent === 'Editor'))
     assert.deepEqual(errors, [])
     await context.close()
-    console.log(`Channels ${name}: six channels in order with a pinned one and a cold shelf, the vizier office as one channel, lines oldest first with their files and held line, a line chosen and back, the rail hidden and shown, a channel added, no overflow, set aside; screenshots saved`)
+    console.log(`Channels ${name}: six channels in order with a pinned one and a cold shelf, the vizier office as one channel, ${phone
+      ? 'the rail a drawer put away and swiped back, the rail\'s own Find across channels and files'
+      : 'lines oldest first with their files and held line, a line chosen and back, the rail hidden and shown, a channel\'s files opened in the reader and back, the bar\'s Find across channels and files, a found channel pinned'}, no overflow, set aside; screenshots saved`)
   }
 } finally { await browser.close() }

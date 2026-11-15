@@ -47,34 +47,6 @@ try {
       await capture(page, `${theme}-${device}.png`, isLive ? 'live-vite' : 'fixture-harness', { uid, owner, theme })
       await context.close()
     }
-    for (const [device, viewport] of viewports) {
-      const context = await contextFor(viewport)
-      // A viewer-local last visit keeps the real-data news band focused on one day.
-      if (isLive) await context.addInitScript(() => {
-        if (window === window.top) localStorage.setItem('shuttle.workspace.overview.seen', String(Date.now() - 86400000))
-      })
-      const page = await context.newPage()
-      const url = new URL(base); url.hash = '/board'
-      await page.goto(url.href)
-      await page.locator('[data-view="board"]').click()
-      const finder = page.locator('.ws-overview-find')
-      if (isLive) await finder.fill('ai-futures/felt')
-      await page.locator('.ws-overview-folio:not([hidden])').nth(3).waitFor()
-      const uids = await page.locator('.ws-overview-folio:not([hidden])').evaluateAll(rows => rows.slice(0, 4).map(row => row.dataset.uid))
-      if (uids.length !== 4 || uids.some(uid => !uid)) throw new Error('Four real channel folios are required for a mixed-paper capture')
-      uids.forEach((uid, index) => url.searchParams.append('theme-preview', `${uid}:${themes[index]}`))
-      await page.goto(url.href)
-      await page.locator('[data-view="board"]').click()
-      if (isLive) await finder.fill('ai-futures/felt')
-      await page.getByRole('radio', { name: 'Projects', exact: true }).click()
-      await page.locator(`.ws-overview-folio[data-uid="${uids[3]}"][data-ws-theme-name="night-chart"]`).waitFor()
-      if (device === 'phone') await page.locator('.ws-overview').evaluate(el => {
-        const first = el.querySelector('.ws-overview-folio:not([hidden])')
-        if (first) el.scrollTop += first.getBoundingClientRect().top - el.getBoundingClientRect().top - 64
-      })
-      await capture(page, `mixed-folios-${device}.png`, isLive ? 'live-vite' : 'fixture-harness', { uids, themes, ...(isLive ? { viewerSeenWindowHours: 24 } : {}) })
-      await context.close()
-    }
   }
   if (mode !== 'bundled') for (const [device, viewport] of viewports) {
     const context = await contextFor(viewport)

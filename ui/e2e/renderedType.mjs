@@ -42,7 +42,7 @@ export async function renderedTypeViolations(page) {
       if (isCode) sizes.push(value('--type-code', parentSize))
       if (el.matches(initial) && [...text].length === 1 && el.dataset.letter === text) {
         const contextSize = parseFloat(getComputedStyle(el.parentElement).fontSize)
-        sizes = [value(el.closest('.kbn-col-title, .kbn-view-title, .ws-overview-heading') ? '--glyph-initial-heading' : '--glyph-initial', contextSize)]
+        sizes = [value(el.closest('.kbn-col-title, .kbn-view-title') ? '--glyph-initial-heading' : '--glyph-initial', contextSize)]
       }
       if (el.matches('.kbn-ctl-history-chevron') && text === '▾') sizes = [value('--glyph-small')]
       if (!sizes.some(role => near(size, role))) report('font-size', style.fontSize)
@@ -82,9 +82,9 @@ async function assertRendered(page, state, failures = []) {
 export function registerRenderedTypeJourneys(test, { open, choose, headerAction }) {
   for (const width of [1440, 390, 320]) test(`Rendered type and clock roles across views (${width})`, async page => {
     const failures = []
-    for (const view of ['desk', 'chronicle', 'board']) {
+    for (const view of ['desk', 'chronicle', 'channels']) {
       await page.locator(`.kbn-viewtab[data-view="${view}"]`).click()
-      await page.locator({ desk: '.kbn-desk', chronicle: '.chr-scroll', board: '.ws-overview-folio' }[view]).first().waitFor({ state: 'visible' })
+      await page.locator({ desk: '.kbn-desk', chronicle: '.chr-scroll', channels: '.kbn-ch-layout' }[view]).first().waitFor({ state: 'visible' })
       await page.evaluate(() => document.fonts.ready.then(() => {}))
       await frames(page)
       await assertRendered(page, `${width} ${view}`, failures)

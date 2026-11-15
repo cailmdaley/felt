@@ -3,7 +3,7 @@
  *
  * The parser has no DOM or network work. The document workspace lists declared
  * artifacts on the fiber page and keeps them distinct from sent-file receipts.
- * Extension sets from `utils` give the overview and reader one file taxonomy.
+ * Extension sets from `utils` give the thumbnails and reader one file taxonomy.
  */
 
 import {

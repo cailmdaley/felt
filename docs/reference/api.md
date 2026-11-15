@@ -471,7 +471,7 @@ are dropped, and a URL of any other shape is nulled. It is a sibling of
 
 #### Ledger composites
 
-The board reads Chronicle and the Board's document overview through these
+The board reads Chronicle and the fleet's documents through these
 fan-in siblings of the fleet's [ledger feeds](#ledger-feeds):
 
 | Route | Reads | Serves |
@@ -641,7 +641,7 @@ Ordinary human prompt records retain their prompt boundary even when their text 
 
 #### Ledger feeds
 
-The feeds behind Chronicle and the Board's document overview and reader. The
+The feeds behind Chronicle, Channels' files and the reader. The
 four host-scoped feeds each have a `/composite` fan-in sibling; `/sent-files`
 is owner-routed instead and has none. See [Telemetry and the
 ledgers](../shuttle/telemetry.md) for what writes the files underneath.

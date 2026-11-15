@@ -1,9 +1,9 @@
 // Measure the document workspace against a running board (live data or the
-// harness): Desk card → first page, page steps, channel switches, the Board
-// overview's first thumbnails, the phone reader, every /api request per phase
+// harness): Desk card → first page, page steps, channel switches, the phone
+// reader, every /api request per phase
 // (count, bytes, duplicate reads of one document, time queued before send) and
 // main-thread long tasks. Read-only: it clicks cards, steps pages and presses
-// j / 3 / Escape, never a verdict or launch.
+// j / Escape, never a verdict or launch.
 //
 //   node scripts/measure-workspace.mjs --base http://127.0.0.1:5198/ \
 //     --cards "Card name A" "Card name B" [--runs 3] [--json out.json]
@@ -137,25 +137,6 @@ async function switchChannel(page) {
   return timed(page, () => page.keyboard.press('j'))
 }
 
-async function overview(page) {
-  await page.keyboard.press('Escape')
-  await page.waitForSelector('.kbn-desk .kbn-card', { timeout: TIMEOUT })
-  await page.waitForTimeout(300)
-  const start = await page.evaluate(() => performance.now())
-  await page.keyboard.press('3')
-  await page.waitForSelector('.ws-overview-folio', { timeout: TIMEOUT })
-  const folios = (await page.evaluate(() => performance.now())) - start
-  let first = null
-  try {
-    await page.waitForSelector('.ws-thumbnail-ready', { timeout: 10_000 })
-    first = (await page.evaluate(() => performance.now())) - start
-  } catch { /* none within 10 s */ }
-  await page.waitForTimeout(Math.max(0, 3000 - ((await page.evaluate(() => performance.now())) - start)))
-  const at3s = await page.locator('.ws-thumbnail-ready').count()
-  const visible = await page.evaluate(() => [...document.querySelectorAll('.ws-thumbnail')].filter(t => { const r = t.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight && r.width > 0 }).length)
-  return { folios, first, at3s, visible }
-}
-
 function summarise(requests, phase) {
   const rs = requests.filter(r => r.phase === phase)
   const docs = new Map()
@@ -217,13 +198,8 @@ async function scenario(s, warm) {
   await page.waitForTimeout(2500)
   out.switchLong = await longTasks(page, t0)
 
-  if (device === 'desktop') {
-    t0 = await mark('overview')
-    out.overview = await overview(page)
-    out.overviewLong = await longTasks(page, t0)
-  }
   await page.waitForTimeout(500)
-  for (const phase of ['load', 'open', 'step', 'switch', 'overview']) out[`net_${phase}`] = summarise(s.requests, phase)
+  for (const phase of ['load', 'open', 'step', 'switch']) out[`net_${phase}`] = summarise(s.requests, phase)
   out.requests = s.requests.map(({ r, ...rest }) => ({ ...rest, doc: documentOf(rest.url) }))
   s.requests.length = 0
   return out
@@ -257,14 +233,13 @@ for (const device of devices) for (const temp of ['cold', 'warm']) {
     device, temp, runs: rs.length,
     deskMs: m(r => r.deskMs), openMs: m(r => r.openMs), stepMs: m(r => median(r.stepMs)), stepMaxMs: m(r => Math.max(...r.stepMs)),
     switchMs: m(r => r.switchMs),
-    overviewFoliosMs: m(r => r.overview?.folios), overviewFirstThumbMs: m(r => r.overview?.first), overviewReadyAt3s: m(r => r.overview?.at3s),
-    longOpen: m(r => r.openLong.total), longStep: m(r => r.stepLong.total), longSwitch: m(r => r.switchLong.total), longMax: m(r => Math.max(r.openLong.max, r.stepLong.max, r.switchLong.max, r.overviewLong?.max ?? 0)),
-    net: { load: net('load'), open: net('open'), step: net('step'), switch: net('switch'), overview: net('overview') },
+    longOpen: m(r => r.openLong.total), longStep: m(r => r.stepLong.total), longSwitch: m(r => r.switchLong.total), longMax: m(r => Math.max(r.openLong.max, r.stepLong.max, r.switchLong.max)),
+    net: { load: net('load'), open: net('open'), step: net('step'), switch: net('switch') },
   })
 }
 const fmt = x => x == null ? '—' : typeof x === 'number' ? String(Math.round(x)) : x
-console.log('device  temp  desk  open  step(med/max)  switch  ov-folios  ov-thumb  ov@3s  long(open/step/switch,max)')
-for (const r of rows) console.log([r.device, r.temp, fmt(r.deskMs), fmt(r.openMs), `${fmt(r.stepMs)}/${fmt(r.stepMaxMs)}`, fmt(r.switchMs), fmt(r.overviewFoliosMs), fmt(r.overviewFirstThumbMs), fmt(r.overviewReadyAt3s), `${fmt(r.longOpen)}/${fmt(r.longStep)}/${fmt(r.longSwitch)},${fmt(r.longMax)}`].join('  '))
+console.log('device  temp  desk  open  step(med/max)  switch  long(open/step/switch,max)')
+for (const r of rows) console.log([r.device, r.temp, fmt(r.deskMs), fmt(r.openMs), `${fmt(r.stepMs)}/${fmt(r.stepMaxMs)}`, fmt(r.switchMs), `${fmt(r.longOpen)}/${fmt(r.longStep)}/${fmt(r.longSwitch)},${fmt(r.longMax)}`].join('  '))
 console.log('\nnetwork per phase: requests · KB · docs · dup docs · extra GETs · HEADs · 304s · queued p50/max ms')
 for (const r of rows) for (const [phase, n] of Object.entries(r.net)) if (n.requests) console.log(`${r.device} ${r.temp} ${phase.padEnd(8)} ${fmt(n.requests)} · ${fmt(n.bytes / 1024)} · ${fmt(n.documents)} · ${fmt(n.duplicateDocs)} · ${fmt(n.extraGets)} · ${fmt(n.heads)} · ${fmt(n.status304)} · ${fmt(n.queuedP50)}/${fmt(n.queuedMax)}`)
 if (jsonOut) await writeFile(jsonOut, JSON.stringify({ base, cards, runs, results, rows }, null, 2))

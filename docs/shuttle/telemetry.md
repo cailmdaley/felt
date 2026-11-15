@@ -1,7 +1,7 @@
 # Telemetry and the ledgers
 
 The Desk needs only fibers and tmux. [Chronicle](board.md#chronicle-where-the-time-went)
-and the Board's receipt ribbon and folios need a record of what happened, and
+and Channels' files need a record of what happened, and
 that record is three append-only JSONL files in the daemon's state directory.
 
 | File | Written by | Carries |
@@ -48,7 +48,7 @@ The eight hook types collapse into three kinds, plus one facet laid over them:
   message counts, never both.
 
 The same stream feeds the in-flight idle ranking on the Desk and the
-[Board's document receipts](../concepts/companions.md#sent-files-shuttle-only).
+[the board's document receipts](../concepts/companions.md#sent-files-shuttle-only).
 
 ### Recording and rotation
 

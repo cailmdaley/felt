@@ -118,9 +118,9 @@ See [Changes](changes.md) for the schema, authoring format and validation workfl
 A shuttle worker can also push a file at you directly, with
 `shuttle send-file <path> [path...]`.
 `shuttle hook event` records that push on the host's event stream
-(`~/.shuttle/events.jsonl`). The Board overview shows recent sends in its
-receipt ribbon and folios; the reader groups repeated sends under each
-document's Receipts menu. See [the Board guide](../shuttle/board.md#board-what-the-work-produced).
+(`~/.shuttle/events.jsonl`). Channels lists recent sends as each channel's
+files and under each worker's line; the reader groups repeated sends under each
+document's Receipts menu. See [the board guide](../shuttle/board.md#channels-who-is-waiting-and-what-the-work-produced).
 
 The two channels overlap — the file a worker sends can also be the fiber's
 `tapestry.html` companion. What differs is durability.
