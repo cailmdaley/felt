@@ -3733,7 +3733,7 @@ defmodule Shuttle.Poller do
 
   # Eligibility for an explicit dispatch call (POST /api/v1/dispatch).
   #
-  # Two modes, in priority order:
+  # Three modes, in priority order:
   #
   #   1. `force: true` — manual human-triggered dispatch from the kanban
   #      "New session" / "Resume" buttons. Bypasses every condition except
@@ -3742,18 +3742,29 @@ defmodule Shuttle.Poller do
   #      Status, kind, schedule and the breaker cooldowns are all overridden:
   #      closed, draft and not-yet-due fibers dispatch on force.
   #
-  #   2. Default — the full `eligible?` check (host, status, liveness,
+  #   2. `inbox: true` — a session for messages in the fiber's inbox
+  #      (`Shuttle.Delivery.start_for_inbox/1`): the document must pass
+  #      `Shuttle.Delivery.inbox_gate/2` as it stands, since such a launch
+  #      never arms or reopens it. The Poller's own holds were checked by
+  #      `inbox_admission/3` in the same call.
+  #
+  #   3. Default — the full `eligible?` check (host, status, liveness,
   #      breakers, standing schedule).
   #
-  # There is no third `ad_hoc`-without-`force` mode: every caller that sets
-  # `ad_hoc` also sets `force` (the controller folds `force: force or ad_hoc`,
+  # `ad_hoc` alone selects no mode: every caller that sets it also sets `force`
+  # or `inbox` (the controller folds `force: force or ad_hoc`,
   # `Shuttle.Transition` passes both), and the autonomous tick reaches
   # `do_dispatch_fiber/2` directly without ever entering this call.
   defp dispatch_eligible?(fiber, state, opts) do
-    if Keyword.get(opts, :force, false) do
-      force_dispatch_eligible?(fiber, state)
-    else
-      eligible?(fiber, state)
+    cond do
+      Keyword.get(opts, :force, false) ->
+        force_dispatch_eligible?(fiber, state)
+
+      Keyword.get(opts, :inbox, false) ->
+        Shuttle.Delivery.inbox_gate(fiber, state.own_host_id) == :ok
+
+      true ->
+        eligible?(fiber, state)
     end
   end
 
@@ -3784,6 +3795,15 @@ defmodule Shuttle.Poller do
   # for a plain dispatch the fuller `eligible?` rules apply, so the reason is
   # computed against the same `force` intent the caller passed.
   defp dispatch_ineligible_reason(fiber, state, opts) do
+    if Keyword.get(opts, :inbox, false) and not Keyword.get(opts, :force, false) do
+      {:error, reason} = Shuttle.Delivery.inbox_gate(fiber, state.own_host_id)
+      reason
+    else
+      forced_or_plain_ineligible_reason(fiber, state, opts)
+    end
+  end
+
+  defp forced_or_plain_ineligible_reason(fiber, state, opts) do
     shuttle = Map.get(fiber, "shuttle")
     status = Map.get(fiber, "status", "")
     forced? = Keyword.get(opts, :force, false)
@@ -4139,9 +4159,10 @@ defmodule Shuttle.Poller do
              do: {:ok, state},
              else: {:error, :no_live_worker, state}
 
+        # An inbox launch prepares nothing: it arms no document, so it
+        # needs no forced-start preparation (`dispatch_eligible?/3`).
         Keyword.get(opts, :inbox, false) ->
-          with {:ok, state} <- admit_inbox_dispatch(state, fiber_id, runtime_key),
-               do: prepare_dispatch_start(state, fiber_id, runtime_key, uid, opts)
+          inbox_admission(state, fiber_id, runtime_key)
 
         true ->
           prepare_dispatch_start(state, fiber_id, runtime_key, uid, opts)
@@ -4150,8 +4171,14 @@ defmodule Shuttle.Poller do
     case preparation do
       {:ok, state} ->
         case dispatch_prepared(state, fiber_id, runtime_key, uid, opts) do
+          # A human's start answers the worker's question; a launch for the
+          # inbox leaves it for the human.
           {:reply, {:ok, _} = result, state} ->
-            {_, state} = write_lifecycle(state, :clear_ask, fiber_id)
+            {_, state} =
+              if Keyword.get(opts, :inbox, false),
+                do: {:ok, state},
+                else: write_lifecycle(state, :clear_ask, fiber_id)
+
             {:reply, result, state}
 
           other ->
@@ -4163,21 +4190,11 @@ defmodule Shuttle.Poller do
     end
   end
 
-  # A session for a fiber's inbox starts as a forced start does, but only
-  # where a non-human entry may start one: nothing is tracked, no hold is on,
-  # and a fresh read of the fiber passes `Shuttle.Delivery.inbox_gate/2`, so a
-  # fiber closed or put to rest since the caller looked is never reopened.
-  defp admit_inbox_dispatch(state, fiber_id, runtime_key) do
-    with {:ok, state} <- inbox_admission(state, fiber_id, runtime_key) do
-      with {:ok, fiber} <- fetch_fiber_full(fiber_id, state),
-           :ok <- Shuttle.Delivery.inbox_gate(fiber, state.own_host_id) do
-        {:ok, state}
-      else
-        {:error, reason} -> {:error, reason, state}
-      end
-    end
-  end
-
+  # Whether this host may start a session for a fiber's inbox now, from its
+  # own state alone: nothing is tracked, no hold is on, a worker slot is free,
+  # and no breaker or cooldown holds the fiber. The document's own gate
+  # (`Shuttle.Delivery.inbox_gate/2`) is checked on the final read
+  # (`dispatch_eligible?/3`) and again by the dispatcher.
   defp inbox_admission(state, fiber_id, runtime_key) do
     cond do
       tracked?(state, fiber_id, runtime_key) ->
@@ -4540,6 +4557,7 @@ defmodule Shuttle.Poller do
            prompt_context: prompt_context,
            felt_store: felt_store,
            force: Keyword.get(opts, :force, false),
+           inbox: Keyword.get(opts, :inbox, false),
            # The user's directive + continuation mode ride the dispatch
            # call (no persisted review-comment). The dispatcher inlines the
            # message into the prompt at launch and honors resume_mode.

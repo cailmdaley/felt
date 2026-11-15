@@ -75,9 +75,10 @@ defmodule Shuttle.Dispatcher do
       `{:standing_run, run_id}` / `{:standing_run, run_id, :ad_hoc}`.
     * `:force` — explicit manual dispatch override. When true, the dispatcher
       stops refusing closed fibers (the Poller already relaxes eligibility
-      under force) and `resolve_resume_intent` ignores the ad-hoc
-      short-circuit so the caller's `resume_mode` is honored regardless of
-      dispatch context.
+      under force) and reopens one that is not clean.
+    * `:inbox` — a session for messages in the fiber's inbox: the fresh read
+      must pass `Shuttle.Delivery.inbox_gate/2` against `:own_host_id`, and
+      nothing is reopened.
     * `:resume_mode` — the user's continuation directive, a transient dispatch
       parameter carried with the dispatch call: `"previous"` resumes the
       dispatch marker's session, `"fresh"` always starts new (unconditional —
@@ -109,7 +110,7 @@ defmodule Shuttle.Dispatcher do
     with {:ok, fiber} <- fetch_fiber(fiber_id, runner, felt_store),
          :ok <- check_host_owner(fiber, Keyword.get(opts, :own_host_id)),
          :ok <- validate_restoration_request(opts, fiber, prompt_context, force),
-         :ok <- check_dispatchable(fiber, force),
+         :ok <- check_dispatchable(fiber, force, opts),
          {:ok, fiber} <-
            maybe_reopen_on_force(
              fiber_id,
@@ -135,7 +136,6 @@ defmodule Shuttle.Dispatcher do
 
           true ->
             resolve_resume_intent(prompt_context, fiber,
-              force: force,
               resume_mode: Keyword.get(opts, :resume_mode)
             )
         end
@@ -240,27 +240,22 @@ defmodule Shuttle.Dispatcher do
   Decides whether this dispatch should resume a prior worker session or start
   fresh, given the prompt context and the user's continuation directive.
 
-  - Ad-hoc standing-role dispatches start fresh. Resuming would land the
-    worker in a transcript whose last assistant turn was "Run accepted.
-    Exiting" — it would idle instead of doing the new run. A forced dispatch
-    (the board's Resume button, a delivered message) skips this and goes
-    through `check_resume_intent/2`.
+  - Ad-hoc standing-role dispatches with no `resume_mode` start fresh.
+    Resuming would land the worker in a transcript whose last assistant turn
+    was "Run accepted. Exiting" — it would idle instead of doing the new run.
+    A caller that carries a `resume_mode` (the board's Resume button, a
+    delivered message, a session started for the inbox) goes through
+    `check_resume_intent/2`.
   - All other contexts defer to `check_resume_intent/2`.
 
   Options:
-    * `:force` — when true, the ad-hoc short-circuit is skipped.
     * `:resume_mode`, `:transcript`, `:now` — passed to `check_resume_intent/2`.
   """
   @spec resolve_resume_intent(any(), map(), keyword()) :: continuation()
   def resolve_resume_intent(prompt_context, fiber, opts \\ []) do
-    force? = Keyword.get(opts, :force, false)
-
-    case prompt_context do
-      {:standing_run, _, :ad_hoc} when not force? ->
-        :fresh
-
-      _ ->
-        check_resume_intent(fiber, Keyword.delete(opts, :force))
+    case {prompt_context, Keyword.get(opts, :resume_mode)} do
+      {{:standing_run, _, :ad_hoc}, nil} -> :fresh
+      _ -> check_resume_intent(fiber, opts)
     end
   end
 
@@ -757,14 +752,22 @@ defmodule Shuttle.Dispatcher do
   # An unforced dispatch launches only what this fresh read still finds
   # `active`. The tick that chose the fiber read it earlier, so a pause, rest
   # or close landing in between must stop the launch here: `closed` and every
-  # other status alike. Manual force-dispatch (the "New session" / "Resume"
-  # buttons) explicitly opts in to dispatching a fiber that is not armed;
-  # `maybe_reopen_on_force/5` then reopens the YAML so the kanban view
-  # actually reclassifies the card, except for a resumed session, which runs
-  # on the card as it stands (`Shuttle.Lifecycle.launched_after_close?/1`).
-  defp check_dispatchable(_fiber, true), do: :ok
+  # other status alike. A session for the inbox also needs the rest of its
+  # gate (not at rest, no scheduled run due) on this read. Manual
+  # force-dispatch (the "New session" / "Resume" buttons) explicitly opts in
+  # to dispatching a fiber that is not armed; `maybe_reopen_on_force/5` then
+  # reopens the YAML so the kanban view actually reclassifies the card, except
+  # for a resumed session, which runs on the card as it stands
+  # (`Shuttle.Lifecycle.launched_after_close?/1`).
+  defp check_dispatchable(_fiber, true, _opts), do: :ok
 
-  defp check_dispatchable(fiber, _force) do
+  defp check_dispatchable(fiber, false, opts) do
+    if Keyword.get(opts, :inbox, false),
+      do: Shuttle.Delivery.inbox_gate(fiber, Keyword.get(opts, :own_host_id)),
+      else: check_active(fiber)
+  end
+
+  defp check_active(fiber) do
     case Map.get(fiber, "status", "") do
       "active" -> :ok
       "closed" -> {:error, :closed}

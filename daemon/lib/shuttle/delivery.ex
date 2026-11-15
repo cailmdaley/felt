@@ -281,7 +281,6 @@ defmodule Shuttle.Delivery do
          :launch <- reserve(entry) do
       server
       |> Poller.dispatch_fiber(id,
-        force: true,
         ad_hoc: true,
         inbox: true,
         resume_mode: "continue",

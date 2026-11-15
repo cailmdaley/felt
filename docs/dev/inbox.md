@@ -127,7 +127,8 @@ Arming is the author's authorization, which a message or a thread result does no
 An outstanding `ask` does not matter; an armed oneshot with one is also dispatched by the Poller on its own, and its worker takes the entries.
 The Poller then admits the launch (`Poller.admit_inbox_launch/2`) when nothing is tracked for the fiber, no reconciliation hold is on, the host has a free worker slot, and neither the resume-loop breaker nor a launch-refusal cooldown that holds the fiber's autonomous dispatch is open, so a message never keeps relaunching a crash-looping worker; the receipt's detail names which one holds it.
 While the boot quarantine or a contract skew holds fresh launches, it parks the fiber in `pending_launch`, drawn as held, without reserving anything, and the poll after the hold comes off starts it.
-Admitted, the daemon consumes, and on `launch` calls `Poller.dispatch_fiber/3` with `force`, `ad_hoc`, `inbox: true` and `resume_mode: "continue"`: the dispatcher's resume-or-fresh rule, with the gate checked again on a fresh read so a fiber closed meanwhile is never reopened.
+Admitted, the daemon consumes, and on `launch` calls `Poller.dispatch_fiber/3` with `ad_hoc`, `inbox: true` and `resume_mode: "continue"`: the dispatcher's resume-or-fresh rule.
+An inbox launch is not a forced start: it arms and reopens nothing, leaves the worker's question for the human, and needs the gate on the Poller's final read of the fiber and again on the dispatcher's own, so a fiber closed or put to rest meanwhile is refused, never reopened.
 The launch prompt says messages are arriving and carries none of their text.
 
 The launched session takes the batch through its fiber hook.

@@ -1,3 +1,24 @@
+defmodule Shuttle.InboxLaunchTest.CloseAfterRead do
+  # The integration runner, closing the fiber the moment the nth full read
+  # (`shuttle show`) after the gate is armed returns: another writer's close
+  # landing between two reads of one dispatch.
+  alias Shuttle.Test.DispatchIntegrationCase.IntegrationRunner
+
+  def cmd(command, args, opts) do
+    result = IntegrationRunner.cmd(command, args, opts)
+
+    with "shuttle" <- command,
+         true <- "show" in args,
+         {gate, n, path} when not is_nil(gate) <- Shuttle.Env.app(:close_after_read) do
+      if Agent.get_and_update(gate, &{&1 + 1, &1 + 1}) == n,
+        do:
+          File.write!(path, String.replace(File.read!(path), "status: active", "status: closed"))
+    end
+
+    result
+  end
+end
+
 defmodule Shuttle.InboxLaunchTest do
   # A waking inbox entry for a fiber with no worker starts a session, through
   # the real felt and shuttle CLIs, an on-disk inbox and the real hook; tmux
@@ -104,6 +125,17 @@ defmodule Shuttle.InboxLaunchTest do
   defp pending(entry) do
     {:ok, output} = Shuttle.CLI.run(["inbox", "ls", Delivery.context_key(entry), "--json"])
     output |> Jason.decode!() |> Map.new(&{&1["id"], &1})
+  end
+
+  # What `shuttle inbox pending --waking` counts: zero while a reservation in
+  # its lease owes an entry.
+  defp waking(entry) do
+    key = Delivery.context_key(entry)
+
+    {:ok, output} =
+      Shuttle.CLI.run(["inbox", "pending", "--waking", key], stderr_to_stdout: false)
+
+    Jason.decode!(output)[key]
   end
 
   defp lapse_leases do
@@ -286,8 +318,7 @@ defmodule Shuttle.InboxLaunchTest do
       assert detail =~ why
       assert %{} = pending(entry(host, id))
 
-      refute pending(entry(host, id))["m-" <> id]["attempt"],
-             "a refused launch reserved its entries"
+      assert waking(entry(host, id)) == 1, "a refused launch reserved its entries"
     end
 
     for _ <- 1..2, do: poll!(poller)
@@ -308,7 +339,8 @@ defmodule Shuttle.InboxLaunchTest do
     assert detail =~ "boot quarantine"
     assert [%{fiber_id: ^id}] = Poller.snapshot(poller).pending_launch
     assert %{"m-held" => %{"turn" => "ask"} = held} = pending(parent)
-    refute held["attempt"], "a held launch reserved its entries"
+    refute held["attempt"]
+    assert waking(parent) == 1, "a held launch reserved its entries"
 
     for _ <- 1..2, do: poll!(poller)
     assert launches(id) == 0
@@ -481,5 +513,33 @@ defmodule Shuttle.InboxLaunchTest do
 
     poll!(poller)
     assert launches(id) == 1
+  end
+
+  # Another writer closes the constitution while its inbox launch is being
+  # dispatched: after the request's own read (the Poller's final read sees
+  # it), or after that final read (the dispatcher's read sees it). Either way
+  # the launch is refused and nothing reopens the document.
+  for n <- [1, 2] do
+    test "a close landing after read #{n} of an inbox dispatch is never undone", %{host: host} do
+      id = armed(host, "tests/inbox-closing")
+      poller = poller!(host, runner: Shuttle.InboxLaunchTest.CloseAfterRead)
+      parent = entry(host, id)
+      gate = start_supervised!({Agent, fn -> 0 end})
+      Shuttle.Test.Env.put_app_env(:close_after_read, {gate, unquote(n), fiber_file(host, id)})
+
+      assert {:ok, {:waiting, detail}} =
+               Delivery.context(parent, "a pending message", "m-closing", wake: true)
+
+      assert detail =~ "is closed"
+      assert Agent.get(gate, & &1) >= unquote(n)
+      assert read_frontmatter(host, id)["status"] == "closed"
+      refute Poller.live_worker(poller, id)
+      assert launches(id) == 0
+
+      refute Enum.any?(IntegrationRunner.commands(), fn {_, args} -> "reopen" in args end),
+             "an inbox launch reopened the document"
+
+      assert %{"m-closing" => %{"turn" => "ask"}} = pending(parent)
+    end
   end
 end
