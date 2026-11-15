@@ -40,7 +40,8 @@ try {
     await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 8)
     await page.evaluate(() => document.fonts.ready)
     // What waits on the human, the newest wait first, then the human's order; the hidden composer and old notes, idle three weeks, only by Jump to.
-    assert.deepEqual(await page.evaluate(channels), ['Vizier', 'cmbx', 'The Mill', 'UNIONS', 'Moving house', 'French', 'Science', 'Garden plan'])
+    // The Mill's workers are idle at the end of their turns: that waits on no one, so it keeps its place in the order.
+    assert.deepEqual(await page.evaluate(channels), ['cmbx', 'UNIONS', 'Vizier', 'Moving house', 'The Mill', 'French', 'Science', 'Garden plan'])
     if (phone) {
       // The rail is the first screen; choosing a channel fills it.
       assert.equal(await page.locator('.kbn-ch').isVisible(), false)
@@ -56,7 +57,7 @@ try {
       await page.mouse.up()
     }
     await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick-name')[5]?.textContent === 'Garden plan')
-    assert.deepEqual(await page.evaluate(channels), ['Vizier', 'cmbx', 'The Mill', 'UNIONS', 'Moving house', 'Garden plan', 'French', 'Science'])
+    assert.deepEqual(await page.evaluate(channels), ['cmbx', 'UNIONS', 'Vizier', 'Moving house', 'The Mill', 'Garden plan', 'French', 'Science'])
     // The drag opened nothing and asked for no menu.
     assert.equal(await page.locator('[role="menu"]').count(), 0)
     if (phone) assert.equal(await page.locator('.kbn-ch').isVisible(), false)
@@ -118,7 +119,7 @@ try {
       await page.locator('.kbn-ch-tapestry .kbn-ch-act', { hasText: 'Fold it' }).click()
       // UNIONS, busy and last read 45 minutes ago, rules off what is new.
       await page.locator('.kbn-ch').focus()
-      await page.keyboard.press('j'); await page.keyboard.press('j')
+      await page.keyboard.press('j')
       await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'UNIONS' && document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-msg').length === 13)
       assert.equal(await page.locator('.kbn-ch-new').count(), 1)
       await shot(page, 'desktop-busy')

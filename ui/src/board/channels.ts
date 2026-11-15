@@ -125,16 +125,15 @@ const lastActive = (card: KanbanCard): number =>
 export const officeOf = (role: string | undefined): string => role?.split('/')[0] ?? ''
 
 /**
- * When a card began waiting on the human, or 0 when it does not: an ask on an
- * active card, a close awaiting review, or the Desk's Your turn (`threadState`,
- * so the two never disagree). A wait whose time is unknown is 1.
+ * When a card began waiting on the human, or 0 when it does not. Waiting is
+ * something addressed to the human that they have not handled: an ask on an
+ * active card, or a close awaiting their review. A worker idle at the end of
+ * its turn waits on no one. A wait whose time is unknown is 1.
  */
 export function waitsSince(card: KanbanCard): number {
   if (card.ask && card.status === 'active') return instant(card.ask.at, card.lastActivityAt, card.dispatchedAt, card.modifiedAt, card.createdAt) || 1
-  const state = threadState(card)
-  if (state === 'to-review') return instant(card.closedAt, card.reviewMark?.at, card.modifiedAt, card.createdAt) || 1
-  if (state !== 'waiting') return 0
-  return instant(turnOf(card).since, card.lastActivityAt, card.dispatchedAt, card.modifiedAt, card.createdAt) || 1
+  if (threadState(card) === 'to-review') return instant(card.closedAt, card.reviewMark?.at, card.modifiedAt, card.createdAt) || 1
+  return 0
 }
 
 /**
@@ -397,8 +396,8 @@ export function composeMessages(input: {
       else said(card, 'review', note, waitsSince(card), { waiting: true })
     }
     const turn = turnOf(card)
-    // Your turn is a message only when the worker said why it stopped.
-    if (state === 'waiting' && turn.turn === 'blocked' && turn.detail) said(card, 'turn', turn.detail, waitsSince(card), { waiting: true })
+    // A worker stopped at the end of its turn says why when it said so; that waits on no one.
+    if (state === 'waiting' && turn.turn === 'blocked' && turn.detail) said(card, 'turn', turn.detail, instant(turn.since, card.lastActivityAt, card.modifiedAt, card.createdAt) || 1)
   }
   const speaking: readonly MessageKind[] = ['post', 'ask', 'review', 'turn']
   for (const file of [...sends.values()].sort((a, b) => b.timestamp - a.timestamp)) {
@@ -422,7 +421,7 @@ export const threadOf = (messages: readonly Message[], card: KanbanCard): Messag
 /** A worker's liveness, as its thread names it. */
 export function liveness(card: KanbanCard): 'working' | 'waiting' | 'resting' | 'closed' {
   const state = threadState(card)
-  if (state === 'waiting' || state === 'to-review' || (card.ask && card.status === 'active')) return 'waiting'
+  if (waitsSince(card)) return 'waiting'
   if (state === 'archived' || card.status === 'closed') return 'closed'
   return state === 'working' || turnOf(card).busy ? 'working' : 'resting'
 }

@@ -19,7 +19,7 @@ const tsz = card({ id: 'cmbx/tsz', uid: 'T', name: 'κ × tSZ', orchestrator: 'C
 const mask = card({ id: 'cmbx/mask', uid: 'M', name: 'Cluster mask', orchestrator: 'C', status: 'active', ask: { text: 'Mask at 5σ or 3σ?', at: at(20) } })
 const beam = card({ id: 'cmbx/beam', uid: 'B', name: 'Beam window', orchestrator: 'C', ...working(1) })
 // A lone constitution asking; a quiet one idle for weeks.
-const van = card({ id: 'van', uid: 'R', name: 'Moving house', status: 'active', ask: { text: 'Which van?', at: at(10) } })
+const van = card({ id: 'van', uid: 'R', name: 'Moving house', status: 'active', ask: { text: 'Which van?', at: at(30) } })
 const notes = card({ id: 'notes', uid: 'N', name: 'Old notes', status: 'open', modifiedAt: new Date(Date.now() - 20 * day).toISOString() })
 const record = (over: Partial<BoardRecord> & Pick<BoardRecord, 'id' | 'kind' | 'fiber'>, minutes: number): BoardRecord => ({ by: { fiber: over.fiber }, timestamp: Date.now() - minutes * minute, originName: 'local', ...over })
 const BOARD: Record<string, BoardRecord[]> = {
@@ -234,9 +234,9 @@ it('sets a waiting channel aside, pins and unpins from its menu, and restores a 
   // The channel's menu is an icon named by its tooltip.
   expect(host.querySelector('.kbn-ch-menu')!.closest('ui-tooltip')!.querySelector('.kbn-ch-tip')?.textContent).toBe('Channel menu')
   await choose('Not now')
-  // The newest wait is the chair's, idle at the end of its turn.
+  // The newest wait is the mask's ask; the chair, idle at the end of its turn, waits on no one.
   expect(posts[0][0]).toBe('/api/v1/channels/dismiss')
-  expect(posts[0][1]).toMatchObject({ key: `office:channel:cmbx:${chair.lastActivityAt}`, fiber: 'C' })
+  expect(posts[0][1]).toMatchObject({ key: `office:channel:cmbx:${Date.parse(mask.ask!.at!)}`, fiber: 'C' })
   // The mark clears; cmbx stays in the rail, active this week.
   expect(host.querySelector('[data-channel="channel:cmbx"]')!.hasAttribute('data-waiting')).toBe(false)
   host.querySelector<HTMLButtonElement>('.kbn-ch-menu')!.click()
@@ -355,11 +355,11 @@ it('rebuilds nothing under a held entry: a poll during a hold waits, and the hol
 })
 
 it('brings a hidden channel back by itself when something in it begins waiting after the hide', async () => {
-  daemon([], undefined, {}, { dismissed: [`hide:fiber:R:${Date.now() - 15 * minute}`] })
+  daemon([], undefined, {}, { dismissed: [`hide:fiber:R:${Date.now() - 35 * minute}`] })
   const { view, ctx, host } = await mount()
-  // The van asked ten minutes ago, after the hide.
+  // The van asked half an hour ago, after the hide.
   expect(rail(host)).toStrictEqual(['cmbx', 'Moving house'])
-  daemon([], undefined, {}, { dismissed: [`hide:fiber:R:${Date.now() - 5 * minute}`] })
+  daemon([], undefined, {}, { dismissed: [`hide:fiber:R:${Date.now() - 25 * minute}`] })
   view.refresh(ctx); await settle(); await settle()
   expect(rail(host)).toStrictEqual(['cmbx'])
 })

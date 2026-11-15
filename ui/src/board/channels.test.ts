@@ -106,18 +106,16 @@ describe('composeChannels', () => {
     expect([back.hidden, back.waiting, back.listed]).toStrictEqual([0, true, true])
   })
 
-  it('waits on exactly the cards the Desk puts in Your turn, with asks and reviews beside them', () => {
+  it('waits on what is addressed to the human: an open ask or a close for review, never a worker idle at the end of its turn', () => {
     const turns = [
       card({ id: 'idle', uid: 'I1', ...idle(3) }),
       card({ id: 'blocked', uid: 'I2', status: 'active', workerState: 'blocked', lastActivityAt: now - minute }),
       card({ id: 'prompt', uid: 'I3', status: 'active', workerState: 'running', runtimePhase: 'attention', lastActivityAt: now - minute }),
-      card({ id: 'working', uid: 'I4', ...working(1) }),
-      card({ id: 'followed', uid: 'I5', ...idle(3), followed: true }),
-      card({ id: 'unstarted', uid: 'I6', status: 'active' }),
+      card({ id: 'asking', uid: 'I4', ...idle(3), ask: { text: 'Which mask?', at: at(4) } }),
     ]
-    const yours = turns.filter(card => card.column === 'inFlight' && inFlightBand(card) === 'yourTurn').map(card => card.id)
-    expect(yours).toStrictEqual(['idle', 'blocked', 'prompt'])
-    expect(turns.filter(card => waitsSince(card) > 0).map(card => card.id)).toStrictEqual(yours)
+    // The Desk still puts the idle three in Your turn; none of them waits on the human here.
+    expect(turns.filter(card => card.column === 'inFlight' && inFlightBand(card) === 'yourTurn').map(card => card.id)).toEqual(expect.arrayContaining(['idle', 'blocked', 'prompt']))
+    expect(turns.map(waitsSince)).toStrictEqual([0, 0, 0, now - 4 * minute])
     expect(waitsSince(card({ id: 'review', column: 'awaitingReview', closedAt: at(90) }))).toBe(now - 90 * minute)
   })
 })
@@ -133,8 +131,9 @@ describe('the rail\'s order', () => {
   })
 
   it('floats what waits on the human, the newest wait first, above the human\'s order', () => {
-    expect(channels.filter(channel => channel.waiting).map(channel => [channel.key, channel.newest])).toStrictEqual([['channel:unions', now - 20 * minute], ['channel:vizier', now - 50 * minute], ['fiber:R', now - 10 * minute]])
-    expect(keys(railOrder(channels, ['fiber:O', 'channel:vizier', 'role:analyst', 'fiber:R', 'channel:unions']))).toStrictEqual(['fiber:R', 'channel:unions', 'channel:vizier', 'fiber:O', 'role:analyst'])
+    // The vizier's chair, idle at the end of its turn, waits on no one.
+    expect(channels.filter(channel => channel.waiting).map(channel => [channel.key, channel.newest])).toStrictEqual([['channel:unions', now - 20 * minute], ['fiber:R', now - 10 * minute]])
+    expect(keys(railOrder(channels, ['fiber:O', 'channel:vizier', 'role:analyst', 'fiber:R', 'channel:unions']))).toStrictEqual(['fiber:R', 'channel:unions', 'fiber:O', 'channel:vizier', 'role:analyst'])
     // Set aside, a wait no longer floats.
     const aside = compose(all, { dismissed: [setAsideKey(named(channels, 'fiber:R'))] })
     expect(keys(railOrder(aside, ['fiber:O', 'fiber:R', 'role:analyst']))).toStrictEqual(['channel:unions', 'channel:vizier', 'fiber:O', 'fiber:R', 'role:analyst'])
@@ -185,7 +184,7 @@ describe('composeMessages', () => {
       ['ask', 'pando/unions/modes', 'Open the PR?', true, []],
       ['review', 'cuts', 'The plot is attached.', true, ['cut.png']],
       ['reply', 'pando/unions', 'Keep going.', false, []],
-      ['turn', 'stuck', 'No allocation left.', true, []],
+      ['turn', 'stuck', 'No allocation left.', false, []],
       ['tapestry', 'pando/unions', 'S8 is measured.', false, []],
     ])
     // A worker with nothing to say is not in the stream; its outcome stays on its card.
@@ -210,8 +209,8 @@ describe('composeMessages', () => {
     expect(again.filter(message => message.kind === 'ask').map(message => [message.id, message.waiting])).toStrictEqual([['r2', false], ['r12', true]])
     const bare = composeMessages({ channel, records: [], files: [], now, reachMs })
     expect(bare.filter(message => message.waiting).map(message => [message.kind, message.card.id, message.at])).toStrictEqual([
-      ['review', 'cuts', now - 15 * minute], ['ask', 'pando/unions/modes', now - 20 * minute], ['turn', 'stuck', now - 3 * minute],
-    ].sort((a, b) => (a[2] as number) - (b[2] as number)))
+      ['ask', 'pando/unions/modes', now - 20 * minute], ['review', 'cuts', now - 15 * minute],
+    ])
   })
 
   it('keeps the channel short: the chair\'s every line, and each other worker once, its latest, marked when it waits, with its thread', () => {
@@ -223,14 +222,15 @@ describe('composeMessages', () => {
       ['review', 'cuts', true, 0, now - 15 * minute],
       ['post', 'pando/unions/modes', true, 2, now - 8 * minute],
       ['reply', 'pando/unions', false, 0, now - 5 * minute],
-      ['turn', 'stuck', true, 0, now - 3 * minute],
+      ['turn', 'stuck', false, 0, now - 3 * minute],
       ['tapestry', 'pando/unions', false, 0, now - 2 * minute],
     ])
   })
 
   it('names each worker\'s liveness', () => {
     expect([west, modes, cuts, stuck, unions, card({ id: 'rest', status: 'open' }), card({ id: 'gone', column: 'tempered', status: 'closed' })].map(liveness))
-      .toStrictEqual(['working', 'waiting', 'waiting', 'waiting', 'waiting', 'resting', 'closed'])
+      // Stopped or idle at the end of a turn, a worker waits on no one: it rests.
+      .toStrictEqual(['working', 'waiting', 'waiting', 'resting', 'resting', 'resting', 'closed'])
   })
 })
 
@@ -313,6 +313,22 @@ describe('the shapes live channels hold', () => {
       record({ id: 'd', kind: 'human', fiber: 'D1', by: { label: 'Sam' }, text: 'four' }, 9),
     ])
     expect(messages.map((message, index) => continues(messages[index - 1], message))).toStrictEqual([false, true, false, false])
+  })
+})
+
+describe('what waits on the human, as live channels hold it', () => {
+  // SPT on the live board: its paper chair and a thread both idle at the end of their turns, nothing asked, nothing for review.
+  const paper = card({ id: 'spt/paper', uid: 'SP', name: 'Polarization paper', shuttleChannel: 'SPT', shuttleSeat: true, ...idle(40) })
+  const bins = card({ id: 'spt/paper/bins', uid: 'SB', name: 'Bin correlations', orchestrator: 'SP', ...idle(12) })
+  // UNIONS beside it: a thread closed for review.
+  const review = card({ id: 'pando/unions/review', uid: 'UR', name: 'Covariance', orchestrator: 'U', column: 'awaitingReview', closedAt: at(30), reviewMark: { note: 'Validated.', at: at(30) } })
+
+  it('neither marks nor floats a channel whose workers are only idle, and keeps it hidden when one goes idle after the hide', () => {
+    const channels = compose([unions, review, paper, bins])
+    expect(channels.map(channel => [channel.name, channel.waiting])).toStrictEqual([['SPT', false], ['UNIONS', true]])
+    expect(railOrder(channels, ['channel:spt', 'channel:unions']).map(channel => channel.name)).toStrictEqual(['UNIONS', 'SPT'])
+    const hidden = named(compose([unions, review, paper, bins], { dismissed: [hideKey('channel:spt', now - 60 * minute)] }), 'channel:spt')
+    expect([hidden.hidden, hidden.listed]).toStrictEqual([now - 60 * minute, false])
   })
 })
 
