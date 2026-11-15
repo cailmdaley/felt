@@ -145,6 +145,46 @@ defmodule Shuttle.InboxLaunchTest do
     refute hook!(uuid) =~ "first message"
   end
 
+  test "/deliver answers what a waking message to a dormant fiber did", %{host: host} do
+    dormant = oneshot(host, "tests/inbox-route", "open")
+    closed = oneshot(host, "tests/inbox-route-closed", "closed")
+    _poller = poller!(host)
+
+    send = fn id, message_id, extra ->
+      ShuttleWeb.DeliverController.route(
+        id,
+        "hello",
+        nil,
+        "shuttle://test-host/claude/sender",
+        Map.merge(
+          %{
+            "context_only" => true,
+            "message_id" => message_id,
+            "wake" => true,
+            "turn" => "ask",
+            "unless_live" => true
+          },
+          extra
+        )
+      )
+    end
+
+    assert {202, %{status: "starting", queued: true, delivered: false}} =
+             send.(dormant, "r-1", %{})
+
+    assert launches(dormant) == 1
+    assert {409, %{live: true, queued: false}} = send.(dormant, "r-2", %{})
+    assert {202, %{status: "queued", detail: detail}} = send.(closed, "r-3", %{})
+    assert detail =~ "is closed"
+
+    # A quiet send queues and asks nothing of the closed fiber.
+    assert {202, %{status: "queued"} = quiet} =
+             send.(closed, "r-4", %{"wake" => false, "turn" => nil, "unless_live" => false})
+
+    refute Map.has_key?(quiet, :detail)
+    assert launches(closed) == 0
+  end
+
   test "a closed, resting or paused constitution keeps a waking entry without launching", %{
     host: host
   } do

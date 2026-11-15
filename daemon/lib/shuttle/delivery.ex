@@ -269,13 +269,15 @@ defmodule Shuttle.Delivery do
   """
   def start_for_inbox(entry) do
     server = Shuttle.Env.server(Poller)
+    # The uid resolves in the Poller's index without a store read.
+    id = entry.fiber["uid"] || Shuttle.Threads.address(entry.fiber)
     fiber_id = Shuttle.Threads.address(entry.fiber)
 
     with :ok <- inbox_gate(entry.fiber, Poller.own_host_id()),
-         :ok <- Poller.admit_inbox_launch(server, fiber_id),
+         :ok <- Poller.admit_inbox_launch(server, id),
          :launch <- reserve(entry) do
       server
-      |> Poller.dispatch_fiber(fiber_id,
+      |> Poller.dispatch_fiber(id,
         force: true,
         ad_hoc: true,
         inbox: true,
