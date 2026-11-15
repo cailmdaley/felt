@@ -8,7 +8,7 @@ import type { KanbanCard } from '../KanbanTypes.js'
 import { boardCards, threadIndexFor } from '../KanbanSurfaces.js'
 import { isMobileViewport } from '../mobile.js'
 import {
-  arranged, channelLines, composeChannels, composeMessages, fiberOf, hideKey, liveness, railOrder, reordered, sameFiber, setAsideKey, showKey, threadOf, unpinKey,
+  arranged, BOARD_LINE, channelLines, composeChannels, continues, composeMessages, fiberOf, hideKey, liveness, railOrder, reordered, sameFiber, setAsideKey, showKey, threadOf, unpinKey,
   type BoardRecord, type Channel, type Line, type Message, type Tapestry,
 } from '../channels.js'
 import { createRailReorder, type RailReorder } from '../channelRail.js'
@@ -43,10 +43,14 @@ const SIDE_BY_SIDE_PX = 1100
 const FOLD_LINES = 8
 type Pane = 'channel' | 'thread'
 
-/** One family's board records, read from its daemon a window at a time. */
-interface Feed { records: Map<string, BoardRecord>; cursor: number; pending: boolean }
+/** One family's board records, read from its daemon a window at a time; `failed` while its last read did not answer. */
+interface Feed { records: Map<string, BoardRecord>; cursor: number; pending: boolean; failed: boolean }
 /** A reply the human sent from here, shown until the board carries it. */
 interface Sent { fiber: string; text: string; at: number }
+/** A reply sent from here stands in for the board's record of it this long at most. */
+const ECHO_MS = 2 * 60_000
+/** Each read of a family asks again for this much before the newest record it holds, so a record written late is not missed. */
+const OVERLAP_MS = 60_000
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] => {
   const node = document.createElement(tag)
@@ -171,9 +175,11 @@ export class ChannelsView implements TemporalView {
   /** A poll arrived while an item was picked up: the rail is drawn once it lands. */
   private railStale = false
   private names = new Map<string, string>()
+  /** The charters' names were read, or a read is under way. */
+  private namesRead = false
   private reachMs = 14 * 86_400_000
   private readonly feeds = new Map<string, Feed>()
-  private readonly sent: Sent[] = []
+  private sent: Sent[] = []
   /** Each chair's tapestry, by fiber and the card's last write; null when it has none. */
   private readonly tapestries = new Map<string, { modified?: string; tapestry: Tapestry | null }>()
   /** Tapestries read in full in the stream, by message id, with their viewers. */
@@ -235,11 +241,19 @@ export class ChannelsView implements TemporalView {
     this.showRail()
     this.unsubscribe = ctx.sends?.subscribe(() => this.draw())
     this.unsubscribeLibrary = ctx.workspace?.library.subscribe(() => { if (this.query) this.drawRail() })
+    this.refresh(ctx)
+  }
+  /** Reads the charters' names once, and again on the next refresh after a read that failed. */
+  private readNames(): void {
+    const ctx = this.ctx
+    if (!ctx || this.namesRead) return
+    this.namesRead = true
+    const generation = this.generation
     void charters(ctx.shuttleBase).then(list => {
+      if (generation !== this.generation) return
       this.names = new Map(list.flatMap(charter => charter.name ? [[charter.slug, charter.name] as [string, string]] : []))
       this.draw()
-    }).catch(() => {})
-    this.refresh(ctx)
+    }, () => { this.namesRead = false })
   }
   private railEl(): HTMLElement {
     const rail = el('nav', 'kbn-ch-rail')
@@ -295,6 +309,7 @@ export class ChannelsView implements TemporalView {
   }
   refresh(ctx: ViewContext): void {
     this.ctx = ctx
+    this.readNames()
     this.draw()
     void ctx.sends?.refresh().catch(() => {})
     void this.read()
@@ -343,32 +358,48 @@ export class ChannelsView implements TemporalView {
     if (!ctx) return
     const generation = this.generation
     for (const uid of new Set(channels.flatMap(channel => channel.families))) {
-      const feed = this.feeds.get(uid) ?? this.feeds.set(uid, { records: new Map(), cursor: Date.now() - this.reachMs, pending: false }).get(uid)!
+      const feed = this.feeds.get(uid) ?? this.feeds.set(uid, { records: new Map(), cursor: Date.now() - this.reachMs + OVERLAP_MS, pending: false, failed: false }).get(uid)!
       if (feed.pending) continue
       feed.pending = true
-      void getDaemonJson<{ records?: BoardRecord[] }>(`${ctx.shuttleBase}/api/v1/board/family?fiber=${encodeURIComponent(uid)}&since_ms=${feed.cursor}`).then(body => {
+      void getDaemonJson<{ records?: BoardRecord[] }>(`${ctx.shuttleBase}/api/v1/board/family?fiber=${encodeURIComponent(uid)}&since_ms=${feed.cursor - OVERLAP_MS}`).then(body => {
         if (generation !== this.generation) return
-        const known = feed.records.size
+        const known = feed.records.size, failed = feed.failed, reach = Date.now() - this.reachMs
+        feed.failed = false
         for (const record of body.records ?? []) {
           feed.records.set(record.id, record)
           feed.cursor = Math.max(feed.cursor, record.received_at ?? record.timestamp)
         }
-        if (feed.records.size !== known) this.draw()
-      }).catch(() => {}).finally(() => { feed.pending = false })
+        // What fell out of the board's reach leaves with it.
+        for (const [id, record] of feed.records) if ((record.received_at ?? record.timestamp) < reach) feed.records.delete(id)
+        if (feed.records.size !== known || failed) this.draw()
+      }, () => {
+        if (generation !== this.generation || feed.failed) return
+        feed.failed = true
+        this.draw()
+      }).finally(() => { feed.pending = false })
     }
   }
-  /** A channel's messages: its families' records, the replies sent from here, its files and its chair's tapestry. */
+  /**
+   * A channel's messages: its families' records (a record two of its families
+   * share, once), the replies sent from here, its files and its chair's tapestry.
+   */
   private messages(channel: Channel): Message[] {
-    const records = channel.families.flatMap(uid => [...this.feeds.get(uid)?.records.values() ?? []])
-    // A reply sent from here stands for the board's own record of it.
-    const echoed = (record: BoardRecord): boolean => (record.kind === 'human' || record.kind === 'message') && !record.by?.fiber
-      && this.sent.some(sent => sent.fiber === record.fiber && !!record.text?.includes(sent.text) && record.timestamp >= sent.at - 60_000)
-    const replies = this.sent.map<BoardRecord>(sent => ({ id: `sent:${sent.fiber}:${sent.at}`, kind: 'message', timestamp: sent.at, fiber: sent.fiber, by: { label: 'human' }, text: sent.text }))
+    const records = new Map(channel.families.flatMap(uid => [...this.feeds.get(uid)?.records.values() ?? []]).map(record => [record.id, record]))
+    // A reply sent from here stands in for the board's record of it until that arrives, for two minutes at most.
+    const now = Date.now()
+    const said = (record: BoardRecord): string | undefined =>
+      record.kind === 'human' ? record.text : record.kind === 'answered' ? /\s—\sA:\s([\s\S]*)$/.exec(record.text ?? '')?.[1] : undefined
+    const recorded = (sent: Sent): boolean => [...records.values()].some(record => record.fiber === sent.fiber && said(record)?.trim() === sent.text)
+    const standing = this.sent.filter(sent => now - sent.at < ECHO_MS && !recorded(sent))
+    if (standing.length !== this.sent.length) this.sent = standing
+    const replies = standing.map<BoardRecord>(sent => ({ id: `${BOARD_LINE}sent:${sent.fiber}:${sent.at}`, kind: 'human', timestamp: sent.at, fiber: sent.fiber, by: { label: 'human' }, text: sent.text }))
     return composeMessages({
-      channel, records: [...records.filter(record => !echoed(record)), ...replies], files: this.ctx?.sends?.files ?? [],
-      tapestry: this.tapestries.get(fiberOf(channel.seat))?.tapestry, now: Date.now(), reachMs: this.reachMs,
+      channel, records: [...records.values(), ...replies], files: this.ctx?.sends?.files ?? [], cards: this.ctx ? boardCards(this.ctx.response) : undefined,
+      tapestry: this.tapestries.get(fiberOf(channel.seat))?.tapestry, now, reachMs: this.reachMs,
     })
   }
+  /** One of the channel's families could not be read on its last try. */
+  private historyFailed(channel: Channel): boolean { return channel.families.some(uid => this.feeds.get(uid)?.failed) }
   /** Reads a constitution's tapestry (or artifact, or report) once, and again when its card's file changes. */
   private readTapestry(card: KanbanCard): void {
     const id = fiberOf(card), known = this.tapestries.get(id), ctx = this.ctx
@@ -456,6 +487,8 @@ export class ChannelsView implements TemporalView {
   private open(key: string | null, focus: boolean, deliberate = focus): void {
     if (key !== this.current) {
       this.keepDrafts()
+      // Leaving a channel is having read it to now.
+      if (this.current) store(SEEN + this.current, String(Date.now()))
       this.current = key
       this.thread = null
       this.restoreDrafts()
@@ -558,7 +591,7 @@ export class ChannelsView implements TemporalView {
   /** When the newest thing a channel said, or began waiting on, arrived. */
   private newestSaid(channel: Channel): number {
     const said = this.messages(channel).filter(message => !message.quiet && !message.human)
-    return Math.max(channel.newest, ...said.map(message => message.at))
+    return Math.max(channel.newest, ...said.map(message => message.arrived))
   }
   /** The documents Jump to matches, across every channel and every fiber the fleet sent from. */
   private drawFound(): void {
@@ -594,10 +627,10 @@ export class ChannelsView implements TemporalView {
       return
     }
     this.readTapestry(channel.seat)
-    const now = Date.now(), lines = channelLines(this.messages(channel), channel)
+    const now = Date.now(), lines = channelLines(this.messages(channel), channel), failed = this.historyFailed(channel)
     for (const { message } of lines) this.readTapestry(message.card)
-    const sig = JSON.stringify([channel.key, channel.name, channel.seat.name, channel.waiting, channel.pinned, this.thread && fiberOf(this.thread), [...this.tempering], [...this.expanded.keys()], [...this.unfolded],
-      lines.map(({ message, replies, last }) => [message.id, message.kind, message.text, message.waiting, message.card.name, message.card.turn, message.files.map(file => file.fullPath), replies, last, this.embedded(message.card, 'channel')])])
+    const sig = JSON.stringify([channel.key, channel.name, channel.seat.name, channel.waiting, channel.pinned, failed, this.thread && fiberOf(this.thread), [...this.tempering], [...this.expanded.keys()], [...this.unfolded],
+      lines.map(({ message, replies, last, waiting }) => [message.id, message.kind, message.text, waiting, message.card.name, message.card.turn, message.files.map(file => file.fullPath), replies, last, this.embedded(message.card, 'channel')])])
     if (this.changed('channel', sig)) {
       const back = button('kbn-ch-back', '‹ Channels', () => this.setRail(false))
       const name = el('h3', 'kbn-ch-name', channel.name)
@@ -611,7 +644,7 @@ export class ChannelsView implements TemporalView {
         : button('kbn-ch-act kbn-ch-pin', 'Pin', () => { void this.pin(channel); this.draw() }))
       this.head.replaceChildren(back, name, chair, acts)
       this.fill(this.stream, lines, 'channel', channel, now)
-      if (!lines.length) this.stream.append(el('li', 'kbn-ch-hush', 'Nothing said here yet.'))
+      if (!lines.length) this.stream.append(el('li', 'kbn-ch-hush', failed ? 'This channel\'s history could not be read; trying again.' : 'Nothing said here yet.'))
     }
     this.tick()
     this.channelReply.to.textContent = channel.seat.name
@@ -627,9 +660,9 @@ export class ChannelsView implements TemporalView {
     // Following is the reader's choice, kept by their scrolling: growth beneath them is not a choice.
     const follow = this.following[pane] = this.landing[pane] || this.following[pane]
     const before = this.before.get(channel.key) ?? -Infinity
-    const rows: HTMLLIElement[] = lines.map(line => this.messageRow(line, pane, before, now))
-    // Like Slack, a rule marks where what arrived since the last visit begins.
-    const fresh = Number.isFinite(before) ? lines.findIndex(({ message }) => !message.human && message.at > before) : -1
+    // Like Slack, a rule marks where what arrived since the last visit begins, and a run of one sender's messages names it once.
+    const fresh = Number.isFinite(before) ? lines.findIndex(({ message }) => !message.human && message.arrived > before) : -1
+    const rows: HTMLLIElement[] = lines.map((line, index) => this.messageRow(line, pane, before, now, index === fresh ? undefined : lines[index - 1]?.message))
     if (fresh >= 0) {
       const rule = el('li', 'kbn-ch-new')
       rule.setAttribute('role', 'separator')
@@ -661,27 +694,35 @@ export class ChannelsView implements TemporalView {
   }
 
   /**
-   * One message: who said it, when, and what, whole, with its files. In the
-   * channel, choosing it opens its worker's thread; a close, a hand-off or
-   * another lifecycle line is one quiet line.
+   * One message: who said it, when, and what, whole, with its files. A message
+   * continuing its sender's run names no one; in a thread, its worker is who
+   * speaks unless another is named. In the channel, choosing it opens its
+   * worker's thread; a close, a hand-off or another lifecycle line is one quiet line.
    */
-  private messageRow({ message, replies, last }: Line, pane: Pane, before: number, now: number): HTMLLIElement {
+  private messageRow({ message, replies, last, waiting }: Line, pane: Pane, before: number, now: number, previous?: Message): HTMLLIElement {
     const card = message.card
     const row = el('li', 'kbn-ch-msg')
     row.dataset.kind = message.kind
-    row.toggleAttribute('data-waiting', message.waiting)
+    row.toggleAttribute('data-waiting', waiting)
     row.toggleAttribute('data-human', message.human)
     row.toggleAttribute('data-chosen', pane === 'channel' && !!this.thread && sameFiber(card, this.thread))
-    row.toggleAttribute('data-new', !message.human && message.at > before)
+    row.toggleAttribute('data-new', !message.human && message.arrived > before)
     const opens = pane === 'channel'
     const id = `${pane}:${message.id}`
-    const who = message.human ? 'You' : message.from?.name ?? message.label ?? card.name
-    const name = opens ? button('kbn-ch-msg-name', who, () => this.openThread(card)) : el('span', 'kbn-ch-msg-name', who)
-    name.dataset.item = id
-    if (opens) name.title = `Open ${card.name}'s thread`
+    const owner = pane === 'thread' ? this.threadCard : undefined
+    // The thread's own worker speaks unnamed, and names whom it wrote to.
+    const own = !!owner && !message.human && !message.label && sameFiber(message.from ?? card, owner)
+    const continued = own || continues(previous, message)
+    row.toggleAttribute('data-continued', continued)
     const byline = el('div', 'kbn-ch-msg-head')
-    byline.append(name)
-    if ((message.human && opens) || message.from || message.label) byline.append(el('span', 'kbn-ch-msg-to', `to ${card.name}`))
+    if (!continued) {
+      const who = message.human ? 'You' : message.from?.name ?? message.label ?? card.name
+      const name = opens ? button('kbn-ch-msg-name', who, () => this.openThread(card)) : el('span', 'kbn-ch-msg-name', who)
+      name.dataset.item = id
+      if (opens) name.title = `Open ${card.name}'s thread`
+      byline.append(name)
+    }
+    if (own && message.from) byline.append(el('span', 'kbn-ch-msg-to', `to ${card.name}`))
     const words = ({ closed: message.text ? `closed (${message.text})` : 'closed', handed_off: 'handed off', event: message.text } as Partial<Record<Message['kind'], string>>)[message.kind]
     if (words !== undefined) {
       row.classList.add('kbn-ch-line')
@@ -727,7 +768,7 @@ export class ChannelsView implements TemporalView {
       acts.append(temper)
       body.append(acts)
     }
-    const gutter = message.human ? el('span', 'kbn-ch-you') : stateDot(message.from ?? card, worker => this.openThread(worker))
+    const gutter = continued ? el('span', 'kbn-ch-you') : message.human ? el('span', 'kbn-ch-you') : stateDot(message.from ?? card, worker => this.openThread(worker))
     if (opens) {
       // The whole message opens its thread, save its links, its buttons and a selection.
       row.addEventListener('click', event => {
@@ -744,6 +785,13 @@ export class ChannelsView implements TemporalView {
     for (const file of message.files) {
       const item = `${id}:${file.fullPath}`
       const open = (): void => { this.returnTo = item; this.openFile(file, message.card) }
+      const chip = (gone: boolean): HTMLButtonElement => {
+        const node = button('kbn-ch-file', file.basename, open)
+        node.dataset.item = item
+        node.title = gone ? `${file.fullPath} could not be read` : file.fullPath
+        node.toggleAttribute('data-gone', gone)
+        return node
+      }
       if (IMAGE.test(file.basename)) {
         const figure = button('kbn-ch-image', '', open)
         figure.dataset.item = item
@@ -752,14 +800,13 @@ export class ChannelsView implements TemporalView {
         img.alt = file.basename
         img.loading = 'lazy'
         img.src = fileBytesUrl(base, file.fullPath, file.host ?? message.card.originId)
+        // An image its host no longer holds (a removed worktree, a cleared scratch folder) is named, not drawn as an empty frame.
+        img.addEventListener('error', () => figure.replaceWith(chip(true)))
         figure.append(img, el('span', 'kbn-ch-image-name', file.basename))
         box.append(figure)
         continue
       }
-      const chip = button('kbn-ch-file', file.basename, open)
-      chip.dataset.item = item
-      chip.title = file.fullPath
-      box.append(chip)
+      box.append(chip(false))
     }
     return box
   }
@@ -860,11 +907,14 @@ export class ChannelsView implements TemporalView {
         standing.push(conclusion)
       }
       if (tapestry) standing.push(this.embed(tapestry, card, `thread-embed:${fiberOf(card)}`))
+      // A closed fiber has no worker to hear a reply: reopening it from its page brings one back.
+      if (state === 'closed') standing.push(el('p', 'kbn-ch-hush kbn-ch-reopen', 'Closed. Reopen it from its page to reply.'))
       this.threadHead.replaceChildren(close, who, ...standing)
-      this.fill(this.threadList, messages.map(message => ({ message, replies: 0, last: message.at })), 'thread', channel, now)
+      this.fill(this.threadList, messages.map(message => ({ message, replies: 0, last: message.at, waiting: message.waiting })), 'thread', channel, now)
       if (!messages.length) this.threadList.append(el('li', 'kbn-ch-hush', 'Nothing said yet.'))
     }
     this.tick()
+    this.threadReply.form.hidden = state === 'closed'
     this.threadReply.to.textContent = card.name
   }
 
@@ -1023,7 +1073,8 @@ export class ChannelsView implements TemporalView {
       if (!from || !end) return
       const dx = end.clientX - from.x, dy = end.clientY - from.y
       if (Math.abs(dx) < SWIPE_PX || Math.abs(dy) > Math.abs(dx) || scrollsSideways(event.target as Element, root, -dx)) return
-      if (dx < 0) this.setRail(true)
+      // Leftward puts the rail away only for a channel to show.
+      if (dx < 0) { if (this.channel) this.setRail(true) }
       else back(from.on)
     }
     const wheel = (event: WheelEvent): void => {
@@ -1037,7 +1088,7 @@ export class ChannelsView implements TemporalView {
       if (Number.isNaN(travel)) return
       travel += event.deltaX
       if (Math.abs(travel) < SWIPE_PX) return
-      if (travel > 0) this.setRail(true)
+      if (travel > 0) { if (this.channel) this.setRail(true) }
       else back(on)
       travel = NaN
     }
@@ -1100,6 +1151,7 @@ export class ChannelsView implements TemporalView {
     // A document still being read from its owner does not open once Channels is left.
     this.ctx?.workspace?.library.cancelOpen()
     this.keepDrafts()
+    if (this.current) store(SEEN + this.current, String(Date.now()))
     this.query = ''
     for (const viewer of this.expanded.values()) disposeFileViewer(viewer)
     this.expanded.clear()
