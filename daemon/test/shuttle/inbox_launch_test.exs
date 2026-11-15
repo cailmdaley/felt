@@ -542,4 +542,70 @@ defmodule Shuttle.InboxLaunchTest do
       assert %{"m-closing" => %{"turn" => "ask"}} = pending(parent)
     end
   end
+
+  # An inbox launch is not a human's override: a retry after the breaker's
+  # cooldown keeps its count, so a worker that dies at once reopens it.
+  test "an inbox retry after the breaker's cooldown that dies at once reopens the breaker", %{
+    host: host
+  } do
+    id = oneshot(host, "tests/inbox-breaker", "active")
+    poller = poller!(host, max_concurrent_workers: 0)
+    key = entry(host, id).fiber["uid"]
+
+    :sys.replace_state(poller, fn state ->
+      %{
+        state
+        | max_concurrent_workers: 10,
+          resume_loop:
+            Map.put(state.resume_loop, key, %{
+              count: 5,
+              opened_at: DateTime.add(DateTime.utc_now(), -601, :second),
+              fiber_id: id,
+              uid: key
+            })
+      }
+    end)
+
+    assert {:ok, :starting} = Delivery.context(entry(host, id), "retry", "m-breaker", wake: true)
+    assert %{count: 5} = :sys.get_state(poller).resume_loop[key]
+
+    %{pid: watcher, session: session} = :sys.get_state(poller).running[key]
+    IntegrationRunner.remove_tmux_session(session)
+    send(poller, {:worker_exited, id, watcher, session, :normal_exit})
+
+    assert %{count: 6, opened_at: %DateTime{} = opened} =
+             :sys.get_state(poller).resume_loop[key]
+
+    assert DateTime.diff(DateTime.utc_now(), opened, :second) < 10
+  end
+
+  # A standing run started for messages is restarted outside the schedule, so
+  # its rapid exits count toward the breaker that then holds the next one.
+  test "rapid exits of standing runs started for messages open the breaker", %{host: host} do
+    id = armed(host, "tests/inbox-standing-loop")
+    poller = poller!(host)
+    key = entry(host, id).fiber["uid"]
+
+    :sys.replace_state(poller, fn state ->
+      %{
+        state
+        | resume_loop:
+            Map.put(state.resume_loop, key, %{count: 4, opened_at: nil, fiber_id: id, uid: key})
+      }
+    end)
+
+    assert {:ok, :starting} = Delivery.context(entry(host, id), "again", "m-loop-1", wake: true)
+    %{pid: watcher, session: session} = :sys.get_state(poller).running[key]
+    IntegrationRunner.remove_tmux_session(session)
+    send(poller, {:worker_exited, id, watcher, session, :normal_exit})
+    assert %{count: 5, opened_at: %DateTime{}} = :sys.get_state(poller).resume_loop[key]
+
+    lapse_leases()
+
+    assert {:ok, {:waiting, detail}} =
+             Delivery.context(entry(host, id), "and again", "m-loop-2", wake: true)
+
+    assert detail =~ "resume-loop breaker is open"
+    assert launches(id) == 1
+  end
 end

@@ -4524,7 +4524,9 @@ defmodule Shuttle.Poller do
 
         # A human force-dispatch ("New session" / "Resume" / drag-to-inFlight)
         # is an explicit "go" — clear any open resume-loop breaker so the worker
-        # spawns now rather than sitting out the cooldown.
+        # spawns now rather than sitting out the cooldown. A launch for the
+        # inbox is not forced: it keeps the breaker's count, so a retry after
+        # its cooldown that dies at once reopens it.
         state =
           if Keyword.get(opts, :force, false),
             do: clear_resume_loop(state, runtime_key),
@@ -5426,7 +5428,12 @@ defmodule Shuttle.Poller do
                   own_host_id: state.own_host_id
                 )
 
-                state
+                # A run started for messages is restarted outside the
+                # schedule, so its lifetime feeds the breaker that holds the
+                # next launch for the inbox (and the next scheduled run).
+                if StandingRole.inbox_run?(Map.get(meta, :run_id)),
+                  do: note_worker_lifetime(state, runtime_key, fiber, meta),
+                  else: state
 
               true ->
                 # A still-active ONESHOT continuation: the next poll re-picks
@@ -5449,8 +5456,9 @@ defmodule Shuttle.Poller do
 
   # Record a finished worker's lifetime against the breaker. A healthy run
   # (lived ≥ threshold) clears the fiber's loop count; a rapid death increments
-  # it and may open the circuit. Scoped to the still-active-oneshot exit branch
-  # — the only path that auto-re-dispatches, hence the only one that can loop.
+  # it and may open the circuit. Scoped to the exits that can be relaunched
+  # without a human: a still-active oneshot's, and a standing run started for
+  # messages.
   defp note_worker_lifetime(%State{} = state, runtime_key, fiber, meta) do
     if worker_lifetime_ms(meta) >= @resume_loop_rapid_exit_threshold_ms do
       %{state | resume_loop: Map.delete(state.resume_loop, runtime_key)}
