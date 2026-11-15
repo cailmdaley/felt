@@ -149,6 +149,7 @@ An enqueue through `Delivery.context` starts its fiber at once.
 A session started for messages on an armed standing constitution is an ad-hoc run with an `inbox-` run id.
 It starts only while no occurrence is due, and its own end, a handoff or a concluded exit, is not service: an occurrence that elapsed while it ran still fires after it ends.
 A temper, rest or re-arm of that run counts as usual.
+A daemon rolled back below contract 40 reads such a run's end as service, so an occurrence that elapsed while it ran is skipped once.
 
 A receiver without a hook registration takes `none` entries directly, in a batch sent as context without a turn (`action: context`) whenever consume would otherwise wait.
 Codex leaves them to its fiber hook, and Claude without a registration is unavailable.
