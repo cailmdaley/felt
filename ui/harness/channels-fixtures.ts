@@ -124,6 +124,8 @@ export function addChannelsFixtures(example: WorkspaceExample, now: number): Cha
     wrote('morning-post', 'reply-drafts.md', 140, 'Two replies to send'),
     wrote('old-notes', 'lensing-notes.md', 21 * DAY, 'Lensing notes'),
   ]
+  const deck = '/fixture-store/workspace/cmbx/kappa-tsz/deck.html'
+  example.files.push({ owner: WORKSPACE_HOST, path: deck, mime: 'text/html', body: new Blob(['<!doctype html><html><head><title>κ × tSZ</title><style>body{margin:0;background:#15232e;color:#f3eadc;font:32px Georgia}section{box-sizing:border-box;height:100vh;padding:9vh 8vw;display:flex;flex-direction:column;justify-content:center}h1{font-size:100px;margin:0 0 30px}p{color:#8fcebf}</style></head><body><section><p>CMB LENSING · NOVEMBER</p><h1>κ × tSZ at 9σ</h1><p>A new beam. Every null passes.</p></section></body></html>'], { type: 'text/html' }) })
   example.sessions = []; example.commits = []
   let n = 0
   const said = (fiber: string, kind: string, minutes: number, over: Partial<BoardRecord> = {}): BoardRecord & { root: string } =>
@@ -135,7 +137,7 @@ export function addChannelsFixtures(example: WorkspaceExample, now: number): Cha
     said('cmbx/kappa-tsz', 'message', 100, { by: { fiber: 'cmbx' }, to: { fiber: 'cmbx/kappa-tsz' }, text: 'Use the new beam window from the beam thread before the final pass.' }),
     said('cmbx/kappa-tsz', 'human', 60, { by: { label: 'Sam' }, text: 'Can you also show the null tests next to the spectrum?' }),
     said('cmbx/covariance', 'closed', 48),
-    said('cmbx/kappa-tsz', 'post', 30, { text: 'κ×tSZ is measured to **9σ** with the new beam. The spectrum and the null tests are attached; every null passes at p > 0.1.', files: [spectrum.fullPath, nulls.fullPath] }),
+    said('cmbx/kappa-tsz', 'post', 30, { text: 'κ×tSZ is measured to **9σ** with the new beam. The spectrum and the null tests are attached; every null passes at p > 0.1.', files: [deck, spectrum.fullPath, nulls.fullPath] }),
     said('cmbx/foregrounds', 'asked', 22, { text: ROWS.find(row => row.id === 'cmbx/foregrounds')!.ask }),
     said('cmbx', 'post', 12, { text: 'Two calls for you today: the cluster mask threshold and the covariance review. Everything else is moving.' }),
     // A line the human sent from the board, recorded under the id the board gave it.

@@ -157,6 +157,11 @@
 .kbn-ch-msg .constitution-state-dot { width: 20px; height: 1.5em; }
 .kbn-ch-you { display: block; width: 20px; }
 .kbn-ch-msg-body { min-width: 0; }
+.kbn-ch-html { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
+/* An HTML page a worker sent (a deck, a report): the page itself drawn small across the stream's full width, its first screen at 16:9. */
+.kbn-ch-html .ws-thumbnail { width: 100%; height: auto; aspect-ratio: 16 / 9; border: 0.5px solid var(--kbn-rule-strong); border-radius: 6px; }
+.kbn-ch-html:hover .ws-thumbnail { border-color: var(--kbn-ink-muted); }
+.kbn-ch-html .kbn-ch-image-name { display: block; margin-top: 4px; }
 .kbn-ch-msg-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; font: var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); }
 .kbn-ch-msg-name {
   padding: 0; border: 0; background: none; cursor: pointer; text-align: left;

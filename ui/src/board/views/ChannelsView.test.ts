@@ -469,6 +469,22 @@ it('attaches a file sent near a message to it, gives a file sent alone its own m
   expect(openPage).toHaveBeenLastCalledWith(beam, 'local:/notes/beam/beam.md')
 })
 
+it('previews an HTML file whole, the page drawn small, kept across redraws, and opens it in the reader', async () => {
+  daemon()
+  const sent: SentFile[] = [{ uid: 'B', host: 'local', fullPath: '/notes/beam/deck.html', basename: 'deck.html', timestamp: Date.now() - 3 * minute }]
+  const { view, ctx, host, openPage } = await mount(undefined, new ChannelsView(), sent)
+  const figure = (name = 'Beam window') => message(host, name).querySelector<HTMLButtonElement>('.kbn-ch-html')!
+  const face = figure().querySelector('.ws-thumbnail')
+  expect(face).not.toBeNull()
+  expect(figure().querySelector('.kbn-ch-image-name')?.textContent).toBe('deck.html')
+  expect(message(host, 'Beam window').querySelector('.kbn-ch-file')).toBeNull()
+  // A redraw of the stream keeps the live page rather than loading it again.
+  view.refresh({ ...ctx, response: board([chair, tsz, mask, { ...beam, name: 'Beam window, renamed' }, van, notes]) }); await settle()
+  expect(figure('Beam window, renamed').querySelector('.ws-thumbnail')).toBe(face)
+  figure('Beam window, renamed').click()
+  expect(openPage).toHaveBeenLastCalledWith(expect.objectContaining({ uid: 'B' }), 'local:/notes/beam/deck.html')
+})
+
 it('keeps focus on its item across a poll, draws nothing under the reader, and returns focus where the reader was opened', async () => {
   daemon()
   const { view, ctx, host, openPage, reply } = await mount()

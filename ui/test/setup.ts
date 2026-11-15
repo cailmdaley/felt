@@ -33,4 +33,10 @@ if (typeof HTMLElement !== 'undefined') {
     unobserve() {}
     disconnect() {}
   }
+  globalThis.IntersectionObserver ??= class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+    takeRecords() { return [] }
+  } as unknown as typeof IntersectionObserver
 }

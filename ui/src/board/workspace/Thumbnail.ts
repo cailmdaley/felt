@@ -15,6 +15,8 @@ export interface ThumbnailOptions {
   captioned?: boolean
   /** The face's title, when the caller names the document better than its declared title or file name. */
   title?(): string
+  /** The width a live page is laid out at before it is drawn to the box; a page drawn wide wants a wider layout to stay small. */
+  pageWidth?: number
   /** Visible candidates outrank the loading ring; zero suspends loading. */
   priority(): number
   distance(): number
@@ -188,7 +190,7 @@ export class Thumbnail {
     if (!content) return
     if (this.scaled?.content === content && this.scaled.width === this.boxWidth && this.scaled.height === this.boxHeight) return
     this.scaled = { content, width: this.boxWidth, height: this.boxHeight }
-    const width = content.tagName === 'IFRAME' ? 1040 : 760
+    const width = content.tagName === 'IFRAME' ? this.opts.pageWidth ?? 1040 : 760
     const scale = this.boxWidth / width
     content.style.width = `${width}px`; content.style.transform = `scale(${scale})`
     if (content.tagName === 'IFRAME') content.style.height = `${Math.ceil(this.boxHeight / scale)}px`

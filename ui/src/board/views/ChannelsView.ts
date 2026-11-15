@@ -21,6 +21,7 @@ import { fileBytesUrl, renderMarkdown } from '../utils.js'
 import { COMPANION_NAMES, docKey, type DocKey } from '../workspace/documents.js'
 import { headerIcon, type HeaderIcon } from '../workspace/headerIcon.js'
 import { declaredTitle } from '../workspace/DocumentTitles.js'
+import { LOAD_POLICY, Thumbnail, type ThumbnailFile } from '../workspace/Thumbnail.js'
 import { charters } from '../workspace/RolePage.js'
 import { createViewPage } from './ViewPage.js'
 import { isTypingTarget, keystrokeIsSpokenFor, registerView, type TemporalView, type ViewContext } from './ViewRegistry.js'
@@ -41,6 +42,9 @@ const FOLLOW_PX = 24
 /** Jump to lists at most this many documents beneath the channels it matches. */
 const FOUND_DOCUMENTS = 12
 const IMAGE = /\.(png|jpe?g|gif|svg|webp)$/i
+const HTML = /\.html?$/i
+/** The width an HTML file's page is laid out at for its preview: a desktop screen's. */
+const PAGE_WIDTH = 1440
 /** Narrower than this, the view shows a channel or a thread, not both: a thread opens one level deeper. */
 const SIDE_BY_SIDE_PX = 1100
 /** A message taller than this many lines folds, with Show more to unfold it in place. */
@@ -159,6 +163,10 @@ export class ChannelsView implements TemporalView {
   private channelEl: HTMLElement | null = null
   private head: HTMLElement | null = null
   private stream: HTMLOListElement | null = null
+  /** The live previews of HTML files in the lists, by item, kept across redraws so a poll never reloads a page. */
+  private readonly previews = new Map<string, Thumbnail>()
+  /** Which previews are near the view, and so worth a live body. */
+  private near: IntersectionObserver | null = null
   private channelReply: Reply | null = null
   private threadEl: HTMLElement | null = null
   private threadHead: HTMLElement | null = null
@@ -261,6 +269,12 @@ export class ChannelsView implements TemporalView {
       this.drawThread()
     })
     this.width.observe(this.layout)
+    this.near = new IntersectionObserver(entries => {
+      for (const { target, isIntersecting } of entries) {
+        const thumbnail = [...this.previews.values()].find(each => each.el === target)
+        if (thumbnail) { thumbnail.near = isIntersecting; thumbnail.schedule() }
+      }
+    }, { rootMargin: LOAD_POLICY.ring })
     this.railHidden = stored(RAIL) === '1'
     this.showRail()
     this.unsubscribe = ctx.sends?.subscribe(() => this.draw())
@@ -714,6 +728,7 @@ export class ChannelsView implements TemporalView {
       rows.splice(fresh, 0, rule)
     }
     this.rebuild(list, rows)
+    this.sweepPreviews()
     this.fold(list)
     for (const row of rows) this.sizes?.observe(row)
     if (follow) this.toFoot(list, pane)
@@ -841,7 +856,7 @@ export class ChannelsView implements TemporalView {
     row.append(el('span', 'kbn-ch-you'), body)
     return row
   }
-  /** A message's files: images drawn small inline, every other file a chip; each opens in the reader. */
+  /** A message's files: an HTML page as its live face and an image, each drawn small inline, every other file a chip; each opens in the reader. */
   private attachments(message: Message, id: string): HTMLElement {
     const box = el('div', 'kbn-ch-attached'), base = this.ctx?.shuttleBase ?? ''
     for (const file of message.files) {
@@ -853,6 +868,14 @@ export class ChannelsView implements TemporalView {
         node.title = gone ? `${file.fullPath} could not be read` : file.fullPath
         node.toggleAttribute('data-gone', gone)
         return node
+      }
+      if (HTML.test(file.basename)) {
+        const figure = button('kbn-ch-html', '', open)
+        figure.dataset.item = item
+        figure.title = `Open ${file.basename}`
+        figure.append(this.preview(item, { fullPath: file.fullPath, owner: file.host ?? message.card.originId, basename: file.basename }).el, el('span', 'kbn-ch-image-name', file.basename))
+        box.append(figure)
+        continue
       }
       if (IMAGE.test(file.basename)) {
         const figure = button('kbn-ch-image', '', open)
@@ -871,6 +894,30 @@ export class ChannelsView implements TemporalView {
       box.append(chip(false))
     }
     return box
+  }
+  /** An HTML file's live face, drawn small: the one already made for this item, else a new one. */
+  private preview(item: string, file: ThumbnailFile): Thumbnail {
+    const kept = this.previews.get(item)
+    if (kept) return kept
+    const thumbnail: Thumbnail = new Thumbnail({
+      key: item, shuttleBase: this.ctx?.shuttleBase ?? '', file, fallback: file.basename, captioned: true,
+      // Drawn across the stream, the page is laid out as a desktop shows it, and so drawn small.
+      pageWidth: PAGE_WIDTH,
+      priority: () => thumbnail.near ? 2 : 0,
+      distance: () => Math.abs(thumbnail.el.getBoundingClientRect().top),
+    })
+    this.previews.set(item, thumbnail)
+    this.near?.observe(thumbnail.el)
+    return thumbnail
+  }
+  /** Lets go of the previews no list draws any more. */
+  private sweepPreviews(): void {
+    for (const [item, thumbnail] of this.previews) {
+      if (thumbnail.el.isConnected) continue
+      this.near?.unobserve(thumbnail.el)
+      thumbnail.dispose()
+      this.previews.delete(item)
+    }
   }
   /** The chair's tapestry: its title and lede, read whole in place or opened in the reader. */
   private tapestryCard(message: Message): HTMLElement {
@@ -936,7 +983,7 @@ export class ChannelsView implements TemporalView {
     const channel = this.channel, card = channel && this.threadCard
     this.layout?.toggleAttribute('data-thread', !!card)
     this.threadEl.hidden = !card
-    if (!channel || !card) { this.sigs.thread = ''; this.threadList.replaceChildren(); return }
+    if (!channel || !card) { this.sigs.thread = ''; this.threadList.replaceChildren(); this.sweepPreviews(); return }
     // The open ask stands in the thread's head, so its history does not say it again.
     const now = Date.now(), messages = threadOf(this.messages(channel), card).filter(message => !(message.kind === 'ask' && message.waiting && sameFiber(message.card, card)))
     const state = liveness(card)
@@ -1268,6 +1315,9 @@ export class ChannelsView implements TemporalView {
     this.keepDrafts()
     if (this.current) store(SEEN + this.current, String(Date.now()))
     this.query = ''
+    this.near?.disconnect(); this.near = null
+    for (const thumbnail of this.previews.values()) thumbnail.dispose()
+    this.previews.clear()
     for (const viewer of this.expanded.values()) disposeFileViewer(viewer)
     this.expanded.clear()
     this.generation++
