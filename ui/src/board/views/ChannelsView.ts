@@ -959,6 +959,9 @@ export class ChannelsView implements TemporalView {
       const answer = await postDaemonJson<{ delivered?: boolean | null; error?: string; duplicate?: boolean; disposition?: string }>(ctx.shuttleBase, '/api/v1/deliver',
         { fiber_id: card.id, origin: card.originId, text, from: 'human', message_id: this.messageIds.for([card.originId, card.id, text].join('\0')) }, 'Reply failed')
       if (answer?.delivered === false) throw new Error(answer.error ?? `${card.name} did not receive it`)
+      this.messageIds.sent()
+      const notice = repeatNotice(answer)
+      if (notice) { this.status(notice); return false }
       this.sent.push({ fiber: fiberOf(card), text, at })
       this.drafts.delete(pane === 'channel' ? `channel:${channel}` : `thread:${fiberOf(card)}`)
       if (channel) this.renew(channel)
