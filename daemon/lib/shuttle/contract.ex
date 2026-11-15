@@ -66,8 +66,8 @@ defmodule Shuttle.Contract do
       "inbox thread-state, thread-put, routes, route and settle " <>
         "(thread results through the routing inbox)",
     42 =>
-      "inbox consume --busy/--message and session/followup/held/message answers; context-mailbox put --session/--attachments-stdin; " <>
-        "inbox human-begin/human-settle (typed human input record and dedup)"
+      "inbox consume --busy/--message and followup/held/message answers; context-mailbox put --attachments-stdin; " <>
+        "inbox record-begin/record-settle (typed human lines and agent fresh requests, recorded and deduplicated)"
   }
 
   @doc "The daemon's expected `shuttle contract` level."

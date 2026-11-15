@@ -1046,11 +1046,6 @@
                     "type": "string",
                     "description": "Sender label, read only when from is \"unverified\"."
                   },
-                  "session": {
-                    "type": "string",
-                    "enum": ["any", "fresh", "previous"],
-                    "description": "Agent session preference. Fresh replaces a live worker or starts a fresh dormant session under the inbox launch gates."
-                  },
                   "attachments": {
                     "type": "array",
                     "items": {"type": "object"},
@@ -1086,7 +1081,7 @@
                       "previous",
                       "fresh"
                     ],
-                    "description": "previous forces resuming the prior conversation (a live worker is still messaged); fresh starts a new conversation, stopping a live worker. Absent lets the owner message a live worker, or else resume or start fresh by its own rule."
+                    "description": "previous forces resuming the prior conversation (a live worker is still messaged); fresh starts a new conversation, stopping a live worker. From an agent, fresh is recorded under message_id and starts the session with the text in its launch prompt under the inbox launch gate: 200 delivery fresh with delivered true, 202 with delivered null when unconfirmed, 409 with reason and error when refused (the same id may be sent again), and a repeated id answers the stored outcome with duplicate true. Absent lets the owner message a live worker, or else resume or start fresh by its own rule."
                   },
                   "message_after_launch": {
                     "type": "boolean",
@@ -2973,6 +2968,7 @@
         "properties": {
           "dispatched": {"const": false},
           "duplicate": {"const": true},
+          "disposition": {"enum": ["unknown", "delivered", "undeliverable"], "description": "What became of the first submission under this id: delivered, or unknown when it may not have arrived."},
           "fiber_id": {"type": "string"},
           "message_id": {"type": "string"}
         },
@@ -3297,7 +3293,7 @@
           },
           "consumed": {
             "type": "object",
-            "description": "Consumer evidence for a live worker: action, members, session, followup, held, and message (this message's state after the pass: delivered, sent, reserved or pending)."
+            "description": "Consumer evidence for a live worker: action, members, followup, held, and message (this message's state after the pass: delivered, sent, reserved or pending)."
           },
           "queued": {
             "const": true

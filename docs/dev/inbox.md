@@ -43,7 +43,7 @@ A routing inbox entry also carries `routing`, its publication's routing record, 
 |---|---|---|
 | `source` | `message`, `human`, `voice`, `thread`, `pulse`, `notice` | What produced the entry |
 | `turn` | `none`, `idle`, `ask`, `force` | Context only; a turn only in a worker observed idle; a turn that cost may hold; or an unconditional wake. Any but `none` starts a session for a fiber with no worker when its gate allows |
-| `session` | `any`, `fresh`, `previous` | `fresh` reserves a replacement or a fresh dormant launch; other values keep the dispatcher's resume rule |
+| `session` | `any`, `fresh`, `previous` | Recorded session preference; the consumer does not act on it |
 | `if_costly` | `hold`, `fresh` | Hold context or request a fresh session instead of waking a large, cold session |
 | `not_before` | RFC 3339 time, or absent | When readers may first take it |
 
@@ -96,19 +96,15 @@ The owner's put, consumes and any launch share a 35-second budget, each command 
 A timeout leaves the entry durable; retry the same id.
 
 `--notify-when-idle` subscribes when a wake or a hook claim delivers the entry, using its publication id, so a repeated claim does not start another watcher.
-`--fresh` publishes `turn: force, session: fresh` under the sender's id.
-Consume reserves one replacement for it (or one fresh launch for a dormant fiber).
-The first receiver other than the requester to consume while the lease stands is recorded as the reservation's taker (`launch.json`'s `taker`): it takes the entry through its hook in the lease, or is woken with it after, and is never cut again for it.
-A receiver that first appears after the lease, such as the old conversation resumed once a fresh launch was refused, is replaced in turn.
-A dormant fresh launch is admitted like any inbox launch and never cuts a worker that appeared meanwhile.
-The previous conversation is named in the new prompt, and the text arrives through the fiber hook.
-A retry of that id does not cut again after the replacement takes the entry.
-An agent's fresh launch has the same armed-document, quarantine and runtime admission gates as a dormant inbox launch: it never reopens or arms a fiber.
-A refused replacement answers `queued` with the refusal's reason in `detail`; the entry waits in the inbox, and the consumer asks for the replacement again once the reservation's lease passes.
-A fresh request's `/deliver` answer is `delivered: null` until its replacement takes it, which a contract-41 CLI reports as an unconfirmed launch rather than an error to retry.
+`--fresh` is not an inbox entry. The sender's `/deliver` (`resume_mode: fresh`, its message id, its text) makes the owner write a record of it straight to the inbox's `offered/`, as a human line is (below), so no worker is ever offered its text, and then ask the Poller for a fresh session with the text in its launch prompt, headed `From <sender>:`. The new session is told where the previous conversation is.
+That launch is an inbox launch, so the agent gate holds it: a closed, resting or unarmed fiber, a due scheduled run, the boot quarantine, a full host, or a launch breaker or cooldown refuses it, and it never reopens or arms a fiber.
+A refusal answers 409 with its `reason` and an `error` that names it, and settles the record undeliverable, so the same id may be sent again once that changes; nothing about it waits in the inbox, and a later message to the fiber never carries its text.
+A launch answers 200 with `delivered: true` and settles the record delivered; a Poller that does not answer in time answers 202 with `delivered: null` and leaves it unknown.
+A repeated id starts nothing and answers the stored outcome: `delivered: true` for a started session, `delivered: null` for an unknown one, and `duplicate: true`.
+A contract-41 CLI sends the same request and reads these answers as it always has: started, launch unconfirmed, or an error with the reason.
 The human's fresh board action keeps forced-start authority.
 
-Channels replies, the Dock's send and review lines, and `/dispatch user_message` record the line first, as a `source: human` record.
+Channels replies, the Dock's send and review lines, and `/dispatch user_message` record the line first, as a `source: human` record (`Shuttle.InboxRecord`).
 The board keeps one `message_id` per composed message: a retry after a failed send reuses it, and a new message, or the same text after a send went through, gets a new one. The owner mints one for callers without it, such as `shuttle dispatch --message`.
 Images are written to disk and represented as `[Image: path]` lines before recording.
 The owner writes the record straight to the inbox's `offered/`, disposition unknown, under the inbox lock, so no reader ever offers it.
@@ -121,17 +117,16 @@ A repeated id does nothing, including for `existing_only` review input, unless i
 
 ### Contract 42 and rollback
 
-Contract 42 adds consume's `--busy` and `--message`, session/followup/held/message answers, `context-mailbox put --session/--attachments-stdin`, and `inbox human-begin/human-settle`.
+Contract 42 adds consume's `--busy` and `--message`, followup/held/message answers, `context-mailbox put --attachments-stdin`, and `inbox record-begin/record-settle`.
 The CLI uses these message semantics only when both its own daemon, which forwards only the fields it knows, and the owner answer `/version` at 42, asked live on each send with a 5-second limit; otherwise it uses the older wire, which a 42 owner still accepts.
-An owner below 42 receives the session-routing `unless_live` envelope and the forced `resume_mode: fresh` envelope; attachment sends retain session routing there.
-Those older fresh starts have forced-start authority and carry text in the launch prompt.
+An owner below 42 receives the session-routing `unless_live` envelope; attachment sends retain session routing there.
+`--fresh` sends one request to every owner; one below 42 starts the session with forced-start authority and no record.
 An older CLI can still send `unless_live` to a 42 owner: a live worker answers 409 so it follows the session path.
 Existing inbox entries and open delivery batches remain readable across deployment, and session traffic in flight retains its receipts.
 
-Rolling a host back to 41 leaves inbox text and attempts on disk, but its consumer ignores `session: fresh` and does not follow up busy Codex or Pi workers.
-A pending fresh entry can wake the old worker instead of replacing it, and an active replacement lease may delay delivery until it expires.
-Human entries already in offered remain deduplicated, but a 41 daemon does not use that dedup for typed requests: retrying a board request there can paste twice.
-Keep 42 deployed while any such requests or replacements are in flight; rolling forward resumes the recorded inbox state.
+Rolling a host back to 41 leaves inbox text and attempts on disk, but its consumer does not follow up busy Codex or Pi workers.
+Records already in offered remain, but a 41 daemon does not use them to deduplicate: retrying a board line there can paste twice, and retrying a `--fresh` id starts another session, with forced-start authority.
+Rolling forward resumes the recorded inbox state.
 
 ## Thread results and routing
 
@@ -228,15 +223,14 @@ A tracked worker whose conversation is not yet known is consumed as `-` with its
 | `ask`, not observed idle | Wake without a cost check |
 | `idle`, busy or not observed idle | Wait; hook-offered only to a session launched for it |
 | Any `force` | Wake regardless of cost or turn state, skipping the hook |
-| Any turn-asking `session: fresh` | Reserve a gated replacement, or a fresh dormant launch |
 | `ask`/`idle`, idle, not costly | Wake |
 | `ask`/`idle`, idle, costly, any `if_costly: fresh`, no force | Reserve a fresh launch and return `fresh` |
 | `ask`/`idle`, idle, costly, only `hold` | Wait; `ask` remains hook-eligible |
 | `ask`/`idle`/`force`, no worker | Reserve a launch and return `launch`, when the fiber passes the gate below |
 
-A launch reservation is kept apart from the entries' delivery attempts, in the inbox's `launch.json`: the reserving receiver (`-` and epoch 0 for a fiber with no worker), the asking entries it was requested for, when, leased for two minutes, and its taker, the first other receiver a consume saw in the lease.
+A launch reservation is kept apart from the entries' delivery attempts, in the inbox's `launch.json`: the reserving receiver (`-` and epoch 0 for a fiber with no worker), the asking entries it was requested for, and when, leased for two minutes.
 Reserving a launch never rewrites an entry's attempt or a batch's pinned payload.
-Within the lease, consume answers `wait` for an explicit fresh request's reserving receiver, or a cost-based reservation while it stays costly, and a new receiver (the launched session) takes the reserved entries through its hook instead of a wake.
+Within the lease, consume answers `wait` for a cost-based reservation's reserving receiver while it stays costly, and a new receiver (the launched session) takes the reserved entries through its hook instead of a wake.
 The daemon starts the session; when the Poller refuses the launch, it consumes again without `Costly`, waking the live worker.
 A launch that never arrives, including one a busy Poller accepted and later refused, is asked for again once the lease passes.
 
@@ -256,7 +250,7 @@ An outstanding `ask` does not matter; an armed oneshot with one is also dispatch
 The Poller then admits the launch (`Poller.admit_inbox_launch/2`) when nothing is tracked for the fiber, no reconciliation hold is on, the host has a free worker slot, and neither the resume-loop breaker nor a launch-refusal cooldown that holds the fiber's autonomous dispatch is open, so a message never keeps relaunching a crash-looping worker; the receipt's detail names which one holds it.
 Unlike a human's start, an inbox launch leaves the breaker's count as it was, so a retry after its cooldown that dies at once reopens it, and a short standing run started for messages counts as a oneshot's rapid exit when it failed its messages: it ended without a clean handoff, or with an entry that asks for a turn, queued before it started, still pending. A run that took its messages and handed off ends the sequence and clears the breaker, however short it was.
 While the boot quarantine or a contract skew holds fresh launches, it parks the fiber in `pending_launch`, drawn as held, without reserving anything, and the poll after the hold comes off starts it.
-Admitted, the daemon consumes, and on `launch` calls `Poller.dispatch_fiber/3` with `ad_hoc`, `inbox: true` and `resume_mode: "continue"` (the dispatcher's resume-or-fresh rule), or `"fresh"` when the entry requests it.
+Admitted, the daemon consumes, and on `launch` calls `Poller.dispatch_fiber/3` with `ad_hoc`, `inbox: true` and `resume_mode: "continue"` (the dispatcher's resume-or-fresh rule).
 An inbox launch is not a forced start: it arms and reopens nothing, leaves the worker's question for the human, and needs the gate on the Poller's final read of the fiber and again on the dispatcher's own, so a fiber closed or put to rest meanwhile is refused, never reopened.
 A refusal on the document's policy (closed, at rest, unarmed, a scheduled run due) is a wait wherever it is found, and is never recorded as a failed launch, so it opens no launch cooldown.
 The launch prompt says messages are arriving and carries none of their text.
@@ -356,10 +350,10 @@ The session-only Claude fallback claims by moving an entry into `fallback/` and 
 | `shuttle inbox route <id> --current true\|false\|unknown [--record <json> [--key <key>]]` | Advance one routing entry from the daemon's fresh facts: the resolved recipient's `record`, and its inbox `key` when the daemon owns it; print `action`: `wait`, `forward` or `session` with the entry's `record`, or the disposition it recorded (`placed`, `superseded`, `expired`) |
 | `shuttle inbox settle <id> forwarded\|delivered\|undeliverable` | Record a routing entry's confirmed handoff and move it to offered |
 
-`shuttle inbox human-begin <fiber-key> <id>` records typed human input, read from stdin, and prints `{"created": true|false}`.
-`shuttle inbox human-settle <fiber-key> <id> delivered|unknown|undeliverable` records its transport outcome.
+`shuttle inbox record-begin [--from <sender>] <fiber-key> <id>` records a line the daemon transports itself (typed human input, the default sender, or an agent's fresh request), read from stdin, and prints `{"created": true|false, "disposition": "unknown"|"delivered"|"undeliverable"}`: only the call that created it may transport it, and a repeat gets the stored disposition.
+`shuttle inbox record-settle <fiber-key> <id> delivered|unknown|undeliverable` records its transport outcome.
 All verbs act on this host's inbox only.
-`context-mailbox put` also accepts thread signals, reply and notification fields, `--turn`, `--session`, `--derived` and `--attachments-stdin` (a JSON attachment array); its `--wake` means `turn: force`.
+`context-mailbox put` also accepts thread signals, reply and notification fields, `--turn`, `--derived` and `--attachments-stdin` (a JSON attachment array); its `--wake` means `turn: force`.
 `context-mailbox deliver` is consume without turn facts: only force initiates a wake, ask remains hook context, and a receiver without a hook takes `none` entries as context.
 `context-mailbox pending` shares the inbox counting code.
 `shuttle inbox` with no subcommand is the speaker's held-lines inbox ([CLI reference](../reference/cli.md)).

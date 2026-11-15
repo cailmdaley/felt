@@ -5,8 +5,12 @@ defmodule ShuttleWeb.DeliverController do
   Body `{fiber_id, text, from?, origin?, context_only?, message_id?, wake?,
   unless_live?, resume_mode?}`. Puts `text`, from `from` or else Shuttle, in front
   of the fiber's worker on its owning host (`Shuttle.Delivery`). Agent text
-  goes through its inbox, defaulting to `turn: ask`; `resume_mode: fresh`
-  requests a gated fresh session. Human text is recorded there before typed
+  goes through its inbox, defaulting to `turn: ask`. An agent's
+  `resume_mode: fresh` is recorded there under its `message_id` and starts a
+  fresh session with the text in its launch prompt, under the agent gate
+  (`Shuttle.Delivery.fresh/3`): 200 `{delivery: "fresh", delivered: true}`,
+  202 with `delivered` null when the start is unconfirmed, or 409 with the
+  refusal's `reason` and `error`. Human text is recorded there before typed
   input or a From User launch prompt transports it. `live_input` and
   `message_after_launch` use the session delivery path. A request carrying
   `origin` is forwarded to that owner's identical route.
@@ -60,7 +64,6 @@ defmodule ShuttleWeb.DeliverController do
           "resume_mode",
           "wake",
           "turn",
-          "session",
           "unless_live",
           "thread_signal",
           "retained_at"
@@ -95,69 +98,72 @@ defmodule ShuttleWeb.DeliverController do
             remote |> OriginRouter.forward("/api/v1/deliver", payload) |> relay()
 
           :local ->
-            agent_inbox =
-              from != "human" and context["live_input"] != true and
-                context["message_after_launch"] != true
-
-            if context["context_only"] == true or agent_inbox do
-              fresh = context["session"] == "fresh" or context["resume_mode"] == "fresh"
-
-              turn =
-                cond do
-                  fresh ->
-                    "force"
-
-                  context["turn"] in ["ask", "force"] ->
-                    context["turn"]
-
-                  context["wake"] == true or (agent_inbox and context["context_only"] != true) ->
-                    "ask"
-
-                  true ->
-                    nil
-                end
-
-              id =
-                context["message_id"] ||
-                  if(context["context_only"] != true,
-                    do:
-                      "deliver-" <>
-                        Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false)
-                  )
-
-              context_reply(fiber_id, text, id,
-                attachments: context["attachments"],
-                wake: context["wake"] == true,
-                turn: turn,
-                session: if(fresh, do: "fresh", else: context["session"]),
-                retained_at: context["retained_at"],
-                thread_signal: context["thread_signal"],
-                unless_live: context["unless_live"] == true,
-                from: from,
-                reply_to: context["reply_to"],
-                notify_address: context["notify_address"],
-                notify_when_idle: context["notify_when_idle"] == true,
-                notify_wake: context["notify_wake"] == true
-              )
-            else
-              opts = [
-                from: from,
-                message_id: context["message_id"],
-                message_after_launch: context["message_after_launch"] == true,
-                live_input: context["live_input"] == true,
-                resume_mode: resume_mode(context["resume_mode"])
-              ]
-
-              result =
-                if from == "human" and not opts[:live_input] do
-                  Delivery.human(fiber_id, text, opts)
-                else
-                  Delivery.deliver(fiber_id, text, opts)
-                end
-
-              reply(result, fiber_id)
-            end
+            local(fiber_id, text, from, context)
         end
+    end
+  end
+
+  defp local(fiber_id, text, from, context) do
+    if from != "human" and context["resume_mode"] == "fresh" do
+      Delivery.fresh(fiber_id, text, from: from, message_id: context["message_id"])
+      |> reply(fiber_id)
+    else
+      agent_inbox =
+        from != "human" and context["live_input"] != true and
+          context["message_after_launch"] != true
+
+      if context["context_only"] == true or agent_inbox do
+        turn =
+          cond do
+            context["turn"] in ["ask", "force"] ->
+              context["turn"]
+
+            context["wake"] == true or (agent_inbox and context["context_only"] != true) ->
+              "ask"
+
+            true ->
+              nil
+          end
+
+        id =
+          context["message_id"] ||
+            if(context["context_only"] != true,
+              do:
+                "deliver-" <>
+                  Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false)
+            )
+
+        context_reply(fiber_id, text, id,
+          attachments: context["attachments"],
+          wake: context["wake"] == true,
+          turn: turn,
+          retained_at: context["retained_at"],
+          thread_signal: context["thread_signal"],
+          unless_live: context["unless_live"] == true,
+          from: from,
+          reply_to: context["reply_to"],
+          notify_address: context["notify_address"],
+          notify_when_idle: context["notify_when_idle"] == true,
+          notify_wake: context["notify_wake"] == true
+        )
+      else
+        opts = [
+          from: from,
+          message_id: context["message_id"],
+          message_after_launch: context["message_after_launch"] == true,
+          live_input: context["live_input"] == true,
+          resume_mode: resume_mode(context["resume_mode"])
+        ]
+
+        result =
+          if from == "human" and not opts[:live_input] do
+            Delivery.human(fiber_id, text, opts)
+          else
+            Delivery.deliver(fiber_id, text, opts)
+          end
+
+        reply(result, fiber_id)
+      end
     end
   end
 
@@ -189,14 +195,6 @@ defmodule ShuttleWeb.DeliverController do
           :queued ->
             Map.put(body, :status, "queued")
         end
-
-      # A fresh request stands in the inbox until its replacement takes it:
-      # not delivered yet, and not failed, which a contract-41 CLI's --fresh
-      # reads as "launch unconfirmed" rather than retrying under a new id.
-      body =
-        if opts[:session] == "fresh" and body.delivered == false,
-          do: %{body | delivered: nil},
-          else: body
 
       {202, body}
     else
@@ -253,8 +251,64 @@ defmodule ShuttleWeb.DeliverController do
   defp consumed(%{"held" => "cost"}, _sent?), do: %{status: "held", delivered: false}
   defp consumed(_answer, _sent?), do: %{status: "queued", delivered: false}
 
+  # An agent's fresh session: started (delivered), possibly started
+  # (delivered null: a busy Poller, or a repeat of one whose outcome is
+  # unknown), or refused with its reason, which the sender may send again
+  # under the same id once that changes. A contract-41 CLI reads these the
+  # same way.
+  defp reply({:fresh, {:ok, session}}, fiber_id),
+    do:
+      {200,
+       Map.merge(
+         %{delivery: "fresh", fiber_id: fiber_id, delivered: true},
+         Shuttle.WorkerBackend.wire(session)
+       )}
+
+  defp reply({:fresh, {:duplicate, id, "delivered"}}, fiber_id),
+    do:
+      {200,
+       %{delivery: "fresh", fiber_id: fiber_id, delivered: true, duplicate: true, message_id: id}}
+
+  defp reply({:fresh, {:duplicate, id, _unknown}}, fiber_id),
+    do:
+      {202,
+       %{
+         delivery: "fresh",
+         fiber_id: fiber_id,
+         delivered: nil,
+         duplicate: true,
+         message_id: id,
+         detail: "a fresh session was requested under this id; whether it started is unknown"
+       }}
+
+  defp reply({:fresh, {:error, :poller_busy}}, fiber_id),
+    do:
+      {202,
+       %{
+         delivery: "fresh",
+         fiber_id: fiber_id,
+         delivered: nil,
+         detail: "the owning daemon's poller is busy; the fresh session starts when it gets to it"
+       }}
+
+  defp reply({:fresh, {:error, {:inbox_record, error}}}, fiber_id),
+    do: {422, %{delivery: "fresh", fiber_id: fiber_id, delivered: false, error: inspect(error)}}
+
+  defp reply({:fresh, {:error, reason}}, fiber_id),
+    do:
+      {409,
+       %{
+         delivery: "fresh",
+         fiber_id: fiber_id,
+         delivered: false,
+         reason: inspect(reason),
+         error: Delivery.fresh_refusal(reason, fiber_id)
+       }}
+
   defp reply({:human, {:ok, _} = result}, fiber_id), do: reply({:input, result}, fiber_id)
-  defp reply({:human, {:duplicate, _} = result}, fiber_id), do: reply({:input, result}, fiber_id)
+
+  defp reply({:human, {:duplicate, _, _} = result}, fiber_id),
+    do: reply({:input, result}, fiber_id)
 
   defp reply({:human, {:error, :poller_busy} = result}, fiber_id),
     do: reply({:input, result}, fiber_id)
@@ -267,12 +321,19 @@ defmodule ShuttleWeb.DeliverController do
     {status, Map.merge(body, %{delivered: false, delivery: "input"})}
   end
 
-  defp reply({:input, {:duplicate, id}}, fiber_id),
+  defp reply({:input, {:duplicate, id, disposition}}, fiber_id),
     do:
       {200,
-       %{delivery: "input", fiber_id: fiber_id, delivered: nil, duplicate: true, message_id: id}}
+       %{
+         delivery: "input",
+         fiber_id: fiber_id,
+         delivered: nil,
+         duplicate: true,
+         disposition: disposition,
+         message_id: id
+       }}
 
-  defp reply({:input, {:error, {:human_inbox, error}}}, fiber_id),
+  defp reply({:input, {:error, {:inbox_record, error}}}, fiber_id),
     do: {422, %{delivery: "input", fiber_id: fiber_id, delivered: false, error: inspect(error)}}
 
   defp reply({:input, {:ok, _}}, fiber_id),

@@ -72,107 +72,107 @@ defmodule ShuttleWeb.DeliverControllerTest do
     MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
   end
 
-  test "an agent fresh id replaces a live worker once and keeps its text in the inbox" do
+  defp fresh_request(fiber, id, text \\ "start over") do
+    api_conn()
+    |> post(
+      "/api/v1/deliver",
+      Jason.encode!(%{
+        "fiber_id" => fiber,
+        "text" => text,
+        "from" => "shuttle://elsewhere/claude/sender",
+        "message_id" => id,
+        "resume_mode" => "fresh"
+      })
+    )
+  end
+
+  defp inbox_key(fiber) do
+    {:ok, %{fibers: [entry | _]}} = Shuttle.FiberDocuments.get_shuttle(fiber)
+    Shuttle.Delivery.context_key(entry)
+  end
+
+  defp inbox_ids(fiber) do
+    {:ok, output} = Shuttle.CLI.run(["inbox", "ls", inbox_key(fiber), "--json"])
+    output |> Jason.decode!() |> Enum.map(& &1["id"])
+  end
+
+  test "an agent fresh request replaces a live worker with its text in the launch prompt, once per id" do
     fiber = "tests/agent-fresh-once"
     uuid = message_live_worker(fiber)
+    before = launches()
 
-    {:ok, _} =
-      Shuttle.CLI.run(["hook", "event"],
-        runner: Shuttle.Runner.Default,
-        input_eof: true,
-        input:
-          Jason.encode!(%{
-            "harness" => "claude",
-            "hook_event_name" => "SessionStart",
-            "session_id" => uuid,
-            "cwd" => MockRunner.felt_root()
-          })
-      )
+    assert %{"delivery" => "fresh", "delivered" => true} =
+             fiber |> fresh_request("fresh-once", "fresh publication") |> json_response(200)
 
-    request = %{
-      "fiber_id" => fiber,
-      "text" => "fresh publication",
-      "message_id" => "fresh-once",
-      "resume_mode" => "fresh"
-    }
-
-    first = api_conn() |> post("/api/v1/deliver", Jason.encode!(request)) |> json_response(202)
-    assert first["status"] == "starting"
-    assert first["delivered"] == nil
+    assert launches() == before + 1
     refute Poller.live_worker(fiber).session_uuid == uuid
-    launches_before = launches()
-    api_conn() |> post("/api/v1/deliver", Jason.encode!(request)) |> json_response(202)
-    assert launches() == launches_before
-    refute run_script() =~ "fresh publication"
+    assert run_script() =~ "From shuttle://elsewhere/claude/sender:\nfresh publication"
+    refute run_script() =~ "From User"
+    refute "fresh-once" in inbox_ids(fiber)
+
+    # A repeated id answers the stored outcome and never cuts twice.
+    assert %{"delivered" => true, "duplicate" => true} =
+             fiber |> fresh_request("fresh-once", "fresh publication") |> json_response(200)
+
+    assert launches() == before + 1
   end
 
-  test "a fresh request refused for a live worker says why and reads as unconfirmed" do
+  test "a fresh request refused under quarantine is never swept into the old worker and is accepted under its id after release" do
     fiber = "tests/agent-fresh-refused"
     uuid = message_live_worker(fiber)
+    server = Shuttle.Env.server(Poller)
+    :sys.replace_state(server, &%{&1 | boot_quarantine: true})
+    before = launches()
 
-    {:ok, _} =
-      Shuttle.CLI.run(["hook", "event"],
-        runner: Shuttle.Runner.Default,
-        input_eof: true,
-        input:
-          Jason.encode!(%{
-            "harness" => "claude",
-            "hook_event_name" => "SessionStart",
-            "session_id" => uuid,
-            "cwd" => MockRunner.felt_root()
-          })
-      )
+    assert %{"delivered" => false, "reason" => ":held", "error" => error} =
+             fiber |> fresh_request("fresh-held") |> json_response(409)
 
-    :sys.replace_state(Shuttle.Env.server(Poller), &%{&1 | boot_quarantine: true})
-
-    # A contract-41 CLI's --fresh: resume_mode without context_only. It reads
-    # delivered null as "launch unconfirmed", not as a failure to retry.
-    assert %{"status" => "queued", "delivered" => nil, "detail" => detail} =
-             api_conn()
-             |> post(
-               "/api/v1/deliver",
-               Jason.encode!(%{
-                 "fiber_id" => fiber,
-                 "text" => "start over",
-                 "from" => "shuttle://elsewhere/claude/sender",
-                 "message_id" => "fresh-refused",
-                 "resume_mode" => "fresh"
-               })
-             )
-             |> json_response(202)
-
-    assert detail =~ "quarantine"
+    assert error =~ "quarantine" and error =~ "same message id"
+    assert launches() == before
     assert Poller.live_worker(fiber).session_uuid == uuid
+
+    # A waking message after the refusal reaches the old worker without the
+    # fresh text: the request is a record, never an inbox entry.
+    fiber |> queue_for_fiber("after-refusal", %{"unless_live" => false}) |> json_response(202)
+    refute "fresh-held" in inbox_ids(fiber)
+    refute_received {:message, %{"text" => "start over" <> _}}
+
+    for {"shuttle", ["context-mailbox", "put" | _] = args} <- MockRunner.commands(),
+        do: refute("start over" in args)
+
+    Poller.release_boot_quarantine(server)
+
+    assert %{"delivered" => true} = fiber |> fresh_request("fresh-held") |> json_response(200)
+    assert launches() == before + 1
+    refute Poller.live_worker(fiber).session_uuid == uuid
   end
 
-  test "a dormant agent fresh request waits for quarantine and starts once after release" do
+  test "a dormant agent fresh request refused under quarantine starts once after release under the same id" do
     fiber = "tests/agent-fresh-quarantine"
     put_constitution(fiber)
     server = Shuttle.Env.server(Poller)
     :sys.replace_state(server, &%{&1 | boot_quarantine: true})
-
-    request = %{
-      "fiber_id" => fiber,
-      "text" => "fresh after release",
-      "message_id" => "fresh-held",
-      "resume_mode" => "fresh"
-    }
-
     before = launches()
 
-    assert %{"status" => "queued", "detail" => detail} =
-             api_conn() |> post("/api/v1/deliver", Jason.encode!(request)) |> json_response(202)
+    assert %{"delivered" => false, "error" => error} =
+             fiber |> fresh_request("fresh-dormant", "fresh after release") |> json_response(409)
 
-    assert detail =~ "quarantine"
+    assert error =~ "quarantine"
     assert launches() == before
+    # The release may start the armed fiber on its own; the fresh request
+    # then replaces that worker.
     Poller.release_boot_quarantine(server)
 
-    assert %{"queued" => true} =
-             api_conn() |> post("/api/v1/deliver", Jason.encode!(request)) |> json_response(202)
+    assert %{"delivered" => true} =
+             fiber |> fresh_request("fresh-dormant", "fresh after release") |> json_response(200)
 
-    api_conn() |> post("/api/v1/deliver", Jason.encode!(request)) |> json_response(202)
-    assert launches() == before + 1
-    refute run_script() =~ "fresh after release"
+    assert run_script() =~ "fresh after release"
+    started = launches()
+
+    assert %{"duplicate" => true} =
+             fiber |> fresh_request("fresh-dormant", "fresh after release") |> json_response(200)
+
+    assert launches() == started
   end
 
   test "an agent fresh request does not reopen a closed fiber" do
@@ -182,20 +182,10 @@ defmodule ShuttleWeb.DeliverControllerTest do
     MockRunner.set_shuttle(fiber, oneshot_shuttle(), "closed")
     before = launches()
 
-    assert %{"status" => "queued", "detail" => detail} =
-             api_conn()
-             |> post(
-               "/api/v1/deliver",
-               Jason.encode!(%{
-                 "fiber_id" => fiber,
-                 "text" => "wait",
-                 "message_id" => "closed-fresh",
-                 "resume_mode" => "fresh"
-               })
-             )
-             |> json_response(202)
+    assert %{"delivered" => false, "error" => error} =
+             fiber |> fresh_request("closed-fresh", "wait") |> json_response(409)
 
-    assert detail =~ "closed"
+    assert error =~ "closed"
     assert launches() == before
   end
 

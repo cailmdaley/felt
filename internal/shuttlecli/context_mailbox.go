@@ -12,7 +12,7 @@ import (
 func (a *app) contextMailboxCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "context-mailbox", Hidden: true, Short: "Owner-local durable fiber context"}
 	var wake bool
-	var turn, session string
+	var turn string
 	var derived, attachmentsStdin bool
 	var from string
 	var threadSignal string
@@ -43,10 +43,9 @@ func (a *app) contextMailboxCmd() *cobra.Command {
 			}
 			request.ThreadSignal = &signal
 		}
-		return messaging.Enqueue(a.env, messaging.InboxEntry{Address: args[0], Request: request, Wishes: messaging.Wishes{Turn: turn, Session: session}, Derived: derived})
+		return messaging.Enqueue(a.env, messaging.InboxEntry{Address: args[0], Request: request, Wishes: messaging.Wishes{Turn: turn}, Derived: derived})
 	}}
 	put.Flags().BoolVar(&attachmentsStdin, "attachments-stdin", false, "Read attachment publications as JSON from stdin")
-	put.Flags().StringVar(&session, "session", "", "any, fresh or previous")
 	put.Flags().StringVar(&turn, "turn", "", "none, idle, ask or force")
 	put.Flags().BoolVar(&derived, "derived", false, "The id names the event it reports; the first capture wins")
 	put.Flags().BoolVar(&wake, "wake", false, "Start a turn in the live orchestrator")

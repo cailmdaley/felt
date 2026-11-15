@@ -238,10 +238,11 @@ in its queue and answers **202** `{dispatched: false, queued: true, reason:
 the caller does not send it again.
 
 `POST /deliver` accepts `{fiber_id, text, from?, message_id?}` (plus `origin` to forward).
-Agent text goes through the fiber inbox with `turn: ask`, or `force` with `session: fresh` when `resume_mode: fresh` is requested.
+Agent text goes through the fiber inbox with `turn: ask`.
+An agent's `resume_mode: fresh` is recorded under its id instead and starts a fresh session with the text in its launch prompt, under the inbox launch gate: 200 `{delivery: fresh, delivered: true}`, 202 with `delivered: null` when the start is unconfirmed, or 409 with `reason` and `error` when refused, after which the same id may be sent again; a repeated id answers the stored outcome with `duplicate: true`.
 The owner mints an id for a caller without one.
 A 202 answer carries `delivery: context`, `queued: true`, a status saying what became of this message (`woken`, `followed_up`, `delivered`, `held`, `starting`, `queued`) and, for a live worker, `consumed` with the consumer's action, evidence and this message's state.
-`delivered` is true once this message is delivered, null when it was sent and its outcome is unconfirmed, and false while it waits or a session starts for it; a fresh request answers null until its replacement takes it.
+`delivered` is true once this message is delivered, null when it was sent and its outcome is unconfirmed, and false while it waits or a session starts for it.
 With `context_only: true`, the entry is quiet unless `turn` or `wake` requests a turn; `message_id` is required.
 `unless_live` answers 409 with `live: true` for a live worker and queues nothing.
 `attachments` is an array of `{name, data, sha256}` publications (`data` is base64); the owner retains files and records references in the inbox.

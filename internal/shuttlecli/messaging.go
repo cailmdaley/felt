@@ -184,7 +184,8 @@ what became of this message: woken, followed_up in a turn, delivered (as context
 or before a retry), held as context for cost, starting or queued.
 --notify-when-idle subscribes when the worker takes the entry, by hook or wake.
 --fresh is deduplicated under the same id and obeys the launch gate; its text
-reaches the replacement through its hook, not as the launch directive.
+is the new session's launch prompt. A refusal fails with its reason, and the
+same --message-id may be sent again once that changes.
 With no live worker the owner starts a session that takes it through its hook
 (JSON status starting) when the fiber is armed (status active), not at rest,
 not a standing schedule whose run is due, the owner's boot quarantine is

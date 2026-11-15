@@ -32,10 +32,11 @@ defmodule Shuttle.ThreadReceiverTest do
           {:ok, _} = Shuttle.Poller.kill_session(Shuttle.Env.server(Shuttle.Poller), "hub")
           {~s({"action":"wait","turn":true}), 0}
 
-        # A fresh entry arrived between the first consume and the second.
-        Shuttle.Env.app(:receiver_fresh_stub, false) and
-          match?(["inbox", "consume" | _], args) and "--unknown" in args ->
-          {~s({"action":"fresh","members":["fresh-late"]}), 0}
+        # The worker waits once its costly replacement is refused.
+        Shuttle.Env.app(:receiver_refused_wait_stub, false) and
+          match?(["inbox", "consume" | _], args) and "--idle" in args and
+            "--costly" not in args ->
+          {~s({"action":"wait"}), 0}
 
         Shuttle.Env.app(:receiver_wake_stub, false) and
           match?(["inbox", "consume" | _], args) and
@@ -685,11 +686,9 @@ defmodule Shuttle.ThreadReceiverTest do
     assert {:ok, %{"action" => "wait", "turn" => true}} = Delivery.flush_context(parent)
   end
 
-  test "a fresh answer to the second consume starts the replacement or says why not",
-       context do
+  test "a refused costly replacement says why when the worker then waits", context do
     {_poller, parent} = costly_consumer!(context)
-    Env.put_app_env(:waiting_phases_source, fn -> %{} end)
-    Env.put_app_env(:receiver_fresh_stub, true)
+    Env.put_app_env(:receiver_refused_wait_stub, true)
 
     # The fixture's constitution is installed unarmed, so the gate refuses.
     assert {:ok, %{"action" => "wait", "refused" => detail}} = Delivery.flush_context(parent)

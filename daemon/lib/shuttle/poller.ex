@@ -4224,7 +4224,8 @@ defmodule Shuttle.Poller do
       state.boot_quarantine or not state.contract_check.ok ->
         {:error, :held, park_inbox_launch(state, fiber_id, runtime_key)}
 
-      available_slots(state) <= 0 and not replacing ->
+      # A replacement frees the slot of the worker it cuts.
+      available_slots(state) <= 0 and not (replacing and tracked?(state, fiber_id, runtime_key)) ->
         {:error, :full, state}
 
       # A message must not keep relaunching a worker that dies on start or
@@ -4582,6 +4583,7 @@ defmodule Shuttle.Poller do
            # call (no persisted review-comment). The dispatcher inlines the
            # message into the prompt at launch and honors resume_mode.
            user_message: Keyword.get(opts, :user_message),
+           user_message_from: Keyword.get(opts, :user_message_from),
            resume_mode: Keyword.get(opts, :resume_mode),
            resume_session: Keyword.get(opts, :resume_session),
            restoration:

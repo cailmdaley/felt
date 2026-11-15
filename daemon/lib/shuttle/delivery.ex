@@ -6,9 +6,11 @@ defmodule Shuttle.Delivery do
   context, wakes or follows up with a worker, or reserves a gated fresh or
   dormant launch. A launched worker takes the entries through its fiber hook.
 
-  The human's lines (`human/3`) are recorded and deduplicated in that inbox,
-  then transported as typed input or the From User launch prompt. Human
-  launches keep the board's forced-start authority. `deliver/3` handles voice
+  The human's lines (`human/3`) and an agent's fresh session request
+  (`fresh/3`) are recorded and deduplicated in that inbox
+  (`Shuttle.InboxRecord`), then transported as typed input or a launch
+  prompt. Human launches keep the board's forced-start authority; a fresh
+  request passes the agent gate. `deliver/3` handles voice
   and explicit launch-then-message callers through their session transports.
 
   A conversation a human resumed from the card is its worker
@@ -50,7 +52,7 @@ defmodule Shuttle.Delivery do
     end
 
     result =
-      Shuttle.HumanInput.submit(fiber_id, text, opts[:message_id], fn ->
+      Shuttle.InboxRecord.submit(fiber_id, text, opts[:message_id], "human", fn _entry ->
         mode =
           opts[:resume_mode] || if(Poller.live_worker(fiber_id), do: "previous", else: "continue")
 
@@ -63,6 +65,83 @@ defmodule Shuttle.Delivery do
       end)
 
     {:human, result}
+  end
+
+  @doc """
+  An agent's request for a fresh session: recorded under its `message_id`
+  (`Shuttle.InboxRecord`), then started with the text in its launch prompt,
+  replacing a live worker. The launch is an inbox launch, so the agent gate
+  holds it: a closed, resting or unarmed fiber, a due scheduled run, the boot
+  quarantine or a full host refuses it, and the record is settled
+  undeliverable so the same id may be sent again. A repeated id starts
+  nothing and answers the stored outcome.
+
+  Answers `{:fresh, {:ok, session}}`, `{:fresh, {:error, reason}}` or
+  `{:fresh, {:duplicate, id, disposition}}`.
+  """
+  def fresh(fiber_id, text, opts \\ []) do
+    from = opts[:from] || "shuttle"
+
+    result =
+      Shuttle.InboxRecord.submit(fiber_id, text, opts[:message_id], from, fn entry ->
+        Poller.dispatch_fiber(entry.fiber["uid"] || Shuttle.Threads.address(entry.fiber),
+          inbox: true,
+          inbox_replace: true,
+          ad_hoc: true,
+          resume_mode: "fresh",
+          user_message: text,
+          user_message_from: from
+        )
+      end)
+
+    {:fresh, result}
+  end
+
+  @doc "Why a fresh session request was refused, for its sender."
+  def fresh_refusal(reason, fiber_id) do
+    why =
+      case reason do
+        :not_owner ->
+          "#{Poller.own_host_id()} does not own #{fiber_id}"
+
+        :closed ->
+          "#{fiber_id} is closed"
+
+        :not_armed ->
+          "#{fiber_id} is not armed"
+
+        :paused ->
+          "#{fiber_id}'s schedule is paused"
+
+        :at_rest ->
+          "#{fiber_id} is at rest"
+
+        :run_due ->
+          "#{fiber_id}'s scheduled run is due"
+
+        :held ->
+          "#{Poller.own_host_id()} holds new sessions until its boot quarantine is released"
+
+        :full ->
+          "#{Poller.own_host_id()} runs as many workers as it allows"
+
+        :running ->
+          "a worker started on #{fiber_id} meanwhile"
+
+        :resume_loop ->
+          "#{fiber_id}'s workers keep dying on start"
+
+        :preflight_cooldown ->
+          "#{fiber_id}'s last launch was refused before it started"
+
+        :dispatch_cooldown ->
+          "#{fiber_id}'s launches keep failing"
+
+        reason ->
+          "the launch was refused (#{inspect(reason)})"
+      end
+
+    "no fresh session started: #{why}. Send it again under the same message id once that changes."
   end
 
   defp input(fiber_id, text) do
@@ -249,8 +328,6 @@ defmodule Shuttle.Delivery do
         args =
           if opts[:retained_at], do: args ++ ["--retained-at", opts[:retained_at]], else: args
 
-        args = if opts[:session], do: args ++ ["--session", opts[:session]], else: args
-
         {args, command_opts} =
           if opts[:attachments] not in [nil, []] do
             {args ++ ["--attachments-stdin"],
@@ -358,12 +435,12 @@ defmodule Shuttle.Delivery do
 
     with :ok <- inbox_gate(entry.fiber, Poller.own_host_id()),
          :ok <- Poller.admit_inbox_launch(server, id, remaining(deadline)),
-         {:launch, mode} <- reserve(entry, deadline) do
+         :launch <- reserve(entry, deadline) do
       server
       |> Poller.dispatch_fiber(id,
         ad_hoc: true,
         inbox: true,
-        resume_mode: mode,
+        resume_mode: "continue",
         user_message: @launch_note,
         call_timeout_ms: remaining(deadline)
       )
@@ -380,7 +457,7 @@ defmodule Shuttle.Delivery do
   # else because nothing asks for a turn any more.
   defp reserve(entry, deadline) do
     case consume(entry, "-", 0, [], min(32_000, remaining(deadline))) do
-      {:ok, %{"action" => "launch"} = answer} -> {:launch, answer["session"] || "continue"}
+      {:ok, %{"action" => "launch"}} -> :launch
       {:ok, %{"launching" => true}} -> :in_flight
       {:ok, %{"action" => _}} -> :nothing
       other -> {:error, {:consume, other}}
@@ -489,14 +566,14 @@ defmodule Shuttle.Delivery do
     end
   end
 
-  # A fresh answer starts the reserved replacement. A busy Poller keeps the
-  # request, and the reservation's lease asks again if it never arrives. When
-  # the Poller refuses it, `fallback` (a fresh for cost: consume again without
-  # the cost, waking the worker) answers instead; a wait then carries the
-  # refusal's reason as `"refused"`.
-  defp replace({:ok, %{"action" => "fresh"}} = answer, entry, server, cost, deadline, fallback) do
+  # A fresh answer (waking the worker is costly) starts the reserved
+  # replacement. A busy Poller keeps the request, and the reservation's lease
+  # asks again if it never arrives. When the Poller refuses it, `fallback`
+  # (consume again without the cost, waking the worker) answers instead; a
+  # wait then carries the refusal's reason as `"refused"`.
+  defp replace(answer, entry, server, worker, cost, deadline, fallback) do
     fiber_id = Shuttle.Threads.address(entry.fiber)
-    worker = Poller.live_worker(server, fiber_id)
+    previous = worker[:session_uuid]
 
     result =
       Poller.dispatch_fiber(server, fiber_id,
@@ -506,8 +583,9 @@ defmodule Shuttle.Delivery do
         resume_mode: "fresh",
         user_message:
           @launch_note <>
-            " Previous session: #{worker[:session_uuid]}. " <>
-            if(cost, do: Shuttle.WakeCost.describe(cost), else: "A fresh session was requested."),
+            " The previous session #{previous} was at rest with #{Shuttle.WakeCost.describe(cost)}; " <>
+            "waking it would have re-read all of that uncached. " <>
+            "Read Status first, then `shuttle show #{previous}` for what it holds that Status does not.",
         call_timeout_ms: remaining(deadline)
       )
 
@@ -516,7 +594,7 @@ defmodule Shuttle.Delivery do
         answer
 
       refusal ->
-        answer = if fallback, do: fallback.(), else: {:ok, %{"action" => "wait"}}
+        answer = fallback.()
 
         with {:waiting, detail} <- refusal,
              {:ok, %{"action" => "wait"} = wait} <- answer do
@@ -526,8 +604,6 @@ defmodule Shuttle.Delivery do
         end
     end
   end
-
-  defp replace(answer, _entry, _server, _cost, _deadline, _fallback), do: answer
 
   @doc """
   Consume a fiber's inbox for its current live conversation, answering the
@@ -558,11 +634,8 @@ defmodule Shuttle.Delivery do
         end
 
         case consume.([]) do
-          {:ok, %{"turn" => true}} ->
-            consume_turn(entry, server, fiber_id, consume, deadline)
-
-          answer ->
-            replace(answer, entry, server, nil, deadline, nil)
+          {:ok, %{"turn" => true}} -> consume_turn(entry, server, fiber_id, consume, deadline)
+          answer -> answer
         end
       end
     else
@@ -581,14 +654,19 @@ defmodule Shuttle.Delivery do
         worker = Poller.live_worker(server, fiber_id)
         cost = worker && Shuttle.WakeCost.costly(worker[:session_uuid])
 
-        consume.(if cost, do: ["--idle", "--costly"], else: ["--idle"])
-        |> replace(entry, server, cost, deadline, fn -> consume.(["--idle"]) end)
+        case consume.(if cost, do: ["--idle", "--costly"], else: ["--idle"]) do
+          {:ok, %{"action" => "fresh"}} = answer ->
+            replace(answer, entry, server, worker, cost, deadline, fn -> consume.(["--idle"]) end)
+
+          answer ->
+            answer
+        end
 
       :unknown ->
-        consume.(["--unknown"]) |> replace(entry, server, nil, deadline, nil)
+        consume.(["--unknown"])
 
       :busy ->
-        consume.(["--busy"]) |> replace(entry, server, nil, deadline, nil)
+        consume.(["--busy"])
 
       nil ->
         {:ok, %{"action" => "wait", "turn" => true}}

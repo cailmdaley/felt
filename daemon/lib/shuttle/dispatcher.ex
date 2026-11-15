@@ -91,6 +91,9 @@ defmodule Shuttle.Dispatcher do
     * `:user_message` — the user's free-text directive for this dispatch,
       inlined into the prompt at launch (the "From User" block). Transient: it
       rides the dispatch call, never a persisted felt event.
+    * `:user_message_from` — the agent that sent `:user_message` (an agent's
+      fresh session request), which heads the block as "From <sender>"
+      instead of "From User".
     * `:developer_instructions` — optional Codex developer text, combined with
       the agent record's instructions as a native CLI configuration override.
       On resume, an explicit value requests a native context override;
@@ -167,6 +170,7 @@ defmodule Shuttle.Dispatcher do
             fiber: Map.get(fiber, "id") || fiber_id,
             run_id: prompt_context_run_id(prompt_context),
             user_message: Keyword.get(opts, :user_message),
+            user_message_from: Keyword.get(opts, :user_message_from),
             resume_session: Keyword.get(opts, :resume_session),
             developer_instructions: Keyword.get(opts, :developer_instructions),
             runner: runner,
@@ -455,7 +459,7 @@ defmodule Shuttle.Dispatcher do
       message when is_binary(message) ->
         case String.trim(message) do
           "" -> ""
-          _ -> "From User:\n" <> message
+          _ -> "From #{Keyword.get(opts, :user_message_from) || "User"}:\n" <> message
         end
 
       _ ->

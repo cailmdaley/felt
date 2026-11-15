@@ -32,7 +32,7 @@ type fiberReceipt struct {
 // through its owner. Consumption decides context, follow-up, wake or a gated
 // launch. An owner below contract 42 keeps live waking traffic on the session
 // path. force records --wake. Attachments are retained as owner-local references.
-func (a *app) queueForFiber(request messaging.Request, force bool, session ...string) (*fiberReceipt, error) {
+func (a *app) queueForFiber(request messaging.Request, force bool) (*fiberReceipt, error) {
 	f, block := a.messageFiber(request.Address)
 	if f == nil {
 		return nil, nil
@@ -48,16 +48,12 @@ func (a *app) queueForFiber(request messaging.Request, force bool, session ...st
 			turn = "force"
 		}
 	}
-	modern := len(session) > 0 || a.inbox42(block.Host)
+	modern := a.inbox42(block.Host)
 	if len(request.Attachments) > 0 && !modern {
 		return nil, nil
 	}
 	if request.Text == "" && len(request.Attachments) > 0 {
 		request.Text = "Attached files."
-	}
-	preference := ""
-	if len(session) > 0 {
-		preference = session[0]
 	}
 	payload, err := json.Marshal(map[string]any{
 		"fiber_id":         fiberID,
@@ -73,7 +69,6 @@ func (a *app) queueForFiber(request messaging.Request, force bool, session ...st
 		"message_id":       request.MessageID,
 		"wake":             request.Wake,
 		"turn":             turn,
-		"session":          preference,
 		"context_only":     true,
 		"unless_live":      !modern && (request.Wake || request.NotifyWhenIdle),
 	})
@@ -175,20 +170,15 @@ func (a *app) messageFiber(target string) (*felt.Felt, *shuttle.Block) {
 	return f, block
 }
 
-// messageFresh asks the target fiber's inbox for a gated fresh session, which
-// takes the text through its hook. Owners below 42 use the launch envelope.
+// messageFresh asks the target fiber's owner for a fresh session with the
+// text in its launch prompt, replacing a live worker. The owner records the
+// request under its id, so a repeat never starts a second session, and a
+// launch it refuses (a closed or resting fiber, the boot quarantine) answers
+// with its reason; the same id may be sent again once that changes.
 func (a *app) messageFresh(request messaging.Request) error {
 	f, block := a.messageFiber(request.Address)
 	if f == nil {
 		return fmt.Errorf("--fresh needs a fiber with a shuttle: block; %q names none", request.Address)
-	}
-	if a.inbox42(block.Host) {
-		request.Wake = true
-		receipt, err := a.queueForFiber(request, true, "fresh")
-		if err != nil {
-			return err
-		}
-		return a.printFiberReceipt(receipt, true)
 	}
 	fiberID := f.UID
 	if fiberID == "" {
@@ -222,8 +212,8 @@ func (a *app) messageFresh(request messaging.Request) error {
 	}
 	_ = json.Unmarshal(body, &answer)
 	if resp.StatusCode == http.StatusAccepted && answer.Delivered == nil {
-		// The owner took the request without confirming the launch. A second
-		// --fresh would replace the session this one may still start.
+		// The owner took the request without confirming the launch. The same
+		// id sent again never starts a second session.
 		_, err = fmt.Fprintf(a.env.Stdout, "fresh session requested on %s, launch unconfirmed: %s (%s)\n", f.ID, answer.Detail, request.MessageID)
 		return err
 	}

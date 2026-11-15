@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -40,7 +39,6 @@ type Consumption struct {
 	Action  string   `json:"action"`
 	Members []string `json:"members,omitempty"`
 	Turn    bool     `json:"turn,omitempty"`
-	Session string   `json:"session,omitempty"`
 	Held    string   `json:"held,omitempty"`
 	// Followup marks a wake sent while the worker was busy in a turn.
 	Followup bool `json:"followup,omitempty"`
@@ -145,11 +143,6 @@ func consumePass(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	reservation, err := readLaunchReservation(root)
 	if err != nil {
 		return Consumption{}, err
-	}
-	if !dormant {
-		if err := recordTaker(root, &reservation, w, time.Now()); err != nil {
-			return Consumption{}, err
-		}
 	}
 	// Each open batch advances on its own, so one awaiting its outcome holds
 	// only its own members. A fiber without a worker has no conversation to
@@ -281,13 +274,7 @@ func consumePass(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 		if err := reserveLaunch(root, w, members, now); err != nil {
 			return Consumption{}, err
 		}
-		session := ""
-		for _, it := range due {
-			if it.entry.Wishes.Session == "fresh" {
-				session = "fresh"
-			}
-		}
-		return Consumption{Action: action, Members: members, Session: session}, errors.Join(errs...)
+		return Consumption{Action: action, Members: members}, errors.Join(errs...)
 	}
 	var selected []mailboxPendingItem
 	size, lifecycle := 0, false
@@ -408,7 +395,6 @@ func decideLaunch(due []mailboxPendingItem, held []string, inFlight bool) string
 // facts would decide the entries asking for a turn.
 func decideConsumption(due []mailboxPendingItem, w Worker, direct bool, reservation launchReservation, now time.Time) (action string, turn bool) {
 	force, asking, wants, fresh, launching, quiet := false, false, false, false, false, false
-	explicitFresh := false
 	for _, it := range due {
 		e := it.entry
 		// Within its lease, a reservation holds the reserving worker's wake
@@ -419,16 +405,10 @@ func decideConsumption(due []mailboxPendingItem, w Worker, direct bool, reservat
 				continue
 			}
 			launching = true
-			if e.Wishes.Session == "fresh" || e.Wishes.Turn == "force" {
+			if e.Wishes.Turn == "force" {
 				continue
 			}
 		}
-		// A fresh request a reservation launched for is satisfied, after its
-		// lease, only by the reservation's taker: the session it launched,
-		// not a receiver that arrived later, such as a resumed old
-		// conversation.
-		replaced := slices.Contains(reservation.Members, e.Request.MessageID) && reservation.takenBy(w)
-		explicitFresh = explicitFresh || (e.Wishes.Session == "fresh" && e.Wishes.Turn != "none" && !replaced)
 		// An idle entry starts a turn only in a worker observed idle.
 		wanted := e.Wishes.Turn == "ask" || (e.Wishes.Turn == "idle" && w.Idle && !w.Unknown)
 		switch e.Wishes.Turn {
@@ -444,8 +424,6 @@ func decideConsumption(due []mailboxPendingItem, w Worker, direct bool, reservat
 	}
 	action = "wait"
 	switch {
-	case explicitFresh:
-		return "fresh", false
 	case force:
 		return "wake", false
 	case !w.Idle:

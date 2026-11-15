@@ -87,7 +87,9 @@ defmodule ShuttleWeb.DispatchController do
 
       result =
         if message do
-          Shuttle.HumanInput.submit(fiber_id, message, params["message_id"], dispatch)
+          Shuttle.InboxRecord.submit(fiber_id, message, params["message_id"], "human", fn _ ->
+            dispatch.()
+          end)
         else
           dispatch.()
         end

@@ -276,8 +276,8 @@ is then given back to the human rather than closed.
 | `shuttle voices` | List the voice bank and pocket-tts built-ins on the speaker host, each with the role whose charter claims it |
 | `shuttle say --held` | List spoken lines held because their card is out of view; `shuttle say --play` opens the card waiting longest (routes Listen to it and plays its lines), `--next` moves to the next card, `--stop` leaves the rest held |
 | `shuttle inbox consume <fiber-key> <address-or-dash> <epoch> [--idle] [--unknown] [--busy] [--costly] [--message <id>]` | Consume a fiber's inbox for its live worker, or with `-` and epoch 0 for a fiber with no worker; JSON action is `wait`, `wake`, `context` (quiet entries sent to a receiver without a hook), `fresh` or `launch` (a session to start for the reserved `members`), with `turn` when the worker's idle and cost facts would decide, and `message`, the `--message` entry's state after the pass |
-| `shuttle inbox human-begin <fiber-key> <id>` | Record typed human input, read from stdin, before submission; JSON `created` permits only the first caller to submit |
-| `shuttle inbox human-settle <fiber-key> <id> delivered\|unknown\|undeliverable` | Settle typed human input without resending it |
+| `shuttle inbox record-begin [--from <sender>] <fiber-key> <id>` | Record a line the daemon transports itself (typed human input, an agent's fresh request), read from stdin; JSON `created` permits only the first caller to transport it, and `disposition` is the record's outcome |
+| `shuttle inbox record-settle <fiber-key> <id> delivered\|unknown\|undeliverable` | Settle a recorded line without resending it |
 | `shuttle inbox put <address> <message-id> <text>` | Enqueue an entry in this host's inbox for a fiber key or a session's `shuttle://` address, with its delivery wishes (`--source`, `--turn`, `--session`, `--if-costly`, `--not-before`), `--from` and `--derived`; see [The inbox](../dev/inbox.md) |
 | `shuttle inbox pending <address>... [--waking]` | Print one JSON object of each address's pending entry count; `--waking` counts only the due entries that ask for a turn, free or held by an open batch, and none while a launch reserved in its lease still owes one |
 | `shuttle inbox ls <address>` | List an address's pending entries, oldest first: id, source, turn, not_before, queued time and sender (`--json`) |
@@ -438,9 +438,10 @@ An interrupt while a sibling PostToolUse hook is still running can also discard 
 The stock sibling hook is short, but a slow third-party hook widens this window; acknowledgment isn't transcript confirmation.
 `--wake` forces the native wake path, including during a turn.
 An ordinary send (neither `--wake` nor `--context-only`) to a Claude session whose prompt cache is cold and whose context is at least 250k tokens is held as context: the receipt is `queued`, and its detail gives the context size, how long the cache has been cold, and the two ways to act now.
-`--fresh` enqueues a gated fresh-session request for a fiber, deduplicated by `--message-id`.
+`--fresh` asks the fiber's owner for a fresh session with the text in its launch prompt, deduplicated by `--message-id`.
 It replaces a live worker or starts a dormant one only while the constitution is armed and the owner's launch gates allow it; it never reopens a closed fiber or bypasses quarantine.
-The new session is told where the previous conversation is and takes the text through its fiber hook.
+A refusal fails with its reason, and the same `--message-id` may be sent again once that changes; a repeated id never starts a second session.
+The new session is told where the previous conversation is.
 `--context-only` or `--wake=false` queues context without starting a turn, regardless of state.
 Codex takes quiet context through its hook, never as terminal input.
 Hooks offer queued context when the receiver next prompts or uses a tool; Pi offers it before the next agent turn.
