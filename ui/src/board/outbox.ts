@@ -58,6 +58,8 @@ export const COLD_MS = 3 * 86_400_000
 
 /** The dismissal record that sets a channel aside until something newer waits in it. */
 export const setAsideKey = (channel: Pick<Channel, 'key' | 'newest'>): string => `office:${channel.key}:${channel.newest}`
+/** The dismissal record that unpins a channel: every pin up to `at` stops counting. */
+export const unpinKey = (key: string, at: number): string => `pin:${key}:${at}`
 
 /** Constitutions a channel speaks for: everything not archived. */
 const LIVE: readonly ThreadState[] = ['waiting', 'to-review', 'with-orchestrator', 'working', 'drafts', 'roles', 'resting']
@@ -75,7 +77,7 @@ export const officeOf = (role: string | undefined): string => role?.split('/')[0
  */
 export function waitingOn(card: KanbanCard): Message | undefined {
   const state = threadState(card)
-  if (card.ask && card.status === 'active') return { kind: 'ask', card, text: card.ask.text, at: instant(card.ask.at) }
+  if (card.ask && card.status === 'active') return { kind: 'ask', card, text: card.ask.text, at: instant(card.ask.at, card.lastActivityAt, card.dispatchedAt, card.createdAt) }
   if (state === 'to-review') return { kind: 'review', card, text: card.reviewMark?.note || card.outcome || '', at: instant(card.closedAt, card.reviewMark?.at, card.createdAt) }
   if (state !== 'waiting') return undefined
   const turn = turnOf(card)
@@ -87,9 +89,10 @@ export function waitingOn(card: KanbanCard): Message | undefined {
 /**
  * Every channel the board holds, the listed ones first: the waiting ones,
  * newest wait first, then the pinned quiet ones, then the waiting ones gone
- * cold. A card's top-level constitution is its topmost ancestor reached
- * through live (unarchived) constitutions, and the top-level's office names
- * the channel, whatever office a thread under it holds.
+ * cold. A card's top-level constitution is its topmost ancestor among every
+ * card the board holds, archived ones included, and the top-level's office
+ * names the channel, whatever office a thread under it holds. A pin counts
+ * until a later unpin.
  */
 export function composeChannels(input: {
   cards: readonly KanbanCard[]
@@ -109,30 +112,36 @@ export function composeChannels(input: {
     let top = tops.get(card)
     if (top) return top
     const parent = parentOf(card)
-    top = parent && threadState(parent) !== 'archived' ? topOf(parent) : card
+    top = parent ? topOf(parent) : card
     tops.set(card, top)
     return top
   }
   const seen = new Set<string>()
-  const groups = new Map<string, KanbanCard[]>()
+  const groups = new Map<string, { top: KanbanCard; members: KanbanCard[] }>()
   for (const card of cards) {
     // A uid names one fiber whichever host serves a copy of it.
     if (card.deskSection || card.isCycle || seen.has(fiberOf(card)) || !LIVE.includes(threadState(card))) continue
     seen.add(fiberOf(card))
     const top = topOf(card), office = officeOf(top.shuttleRole)
     const key = office ? `role:${office}` : `fiber:${fiberOf(top)}`
-    groups.set(key, [...(groups.get(key) ?? []), card])
+    const group = groups.get(key) ?? groups.set(key, { top, members: [] }).get(key)!
+    group.members.push(card)
   }
-  const setAside = new Map<string, number>()
+  // `office:<key>:<ms>` sets a channel aside until something waits after <ms>; `pin:<key>:<ms>` unpins the pins up to <ms>.
+  const setAside = new Map<string, number>(), unpinned = new Map<string, number>()
   for (const record of dismissed) {
-    const match = /^office:(.+):(\d+)$/.exec(record)
-    if (match) setAside.set(match[1], Math.max(setAside.get(match[1]) ?? 0, Number(match[2])))
+    const match = /^(office|pin):(.+):(\d+)$/.exec(record)
+    const into = match?.[1] === 'office' ? setAside : unpinned
+    if (match) into.set(match[2], Math.max(into.get(match[2]) ?? 0, Number(match[3])))
   }
   const channels: Channel[] = []
-  for (const [key, members] of groups) {
+  const recent = (list: KanbanCard[]): KanbanCard | undefined => [...list].sort((a, b) => lastActive(b) - lastActive(a))[0]
+  for (const [key, { top, members }] of groups) {
     const office = key.startsWith('role:') ? key.slice(5) : ''
     const tops = members.filter(card => fiberOf(topOf(card)) === fiberOf(card))
-    const seat = tops.find(card => card.shuttleSeat) ?? [...tops].sort((a, b) => lastActive(b) - lastActive(a))[0] ?? members[0]
+    // A family whose top-level is archived has no seat of its own: its most recently active member stands for it.
+    const seat = tops.find(card => card.shuttleSeat) ?? recent(tops) ?? recent(members)!
+    const pin = pinned.get(key) ?? -Infinity, isPinned = pin > (unpinned.get(key) ?? -Infinity)
     const sent = files.filter(file => file.uid && file.timestamp >= now - reachMs && cardNamed(members, file.uid, file.host ?? ''))
       .sort((a, b) => b.timestamp - a.timestamp)
     const spoken = held.filter(line => members.some(card => card.uid === line.fiber_id || card.id === line.fiber_id))
@@ -145,14 +154,14 @@ export function composeChannels(input: {
     const waiting = newest > 0 && (setAside.get(key) ?? -Infinity) < newest
     channels.push({
       key,
-      name: office ? names.get(office) ?? office : seat.name,
+      name: office ? names.get(office) ?? office : top.name,
       seat,
       messages,
       newest,
       waiting,
       cold: waiting && now - newest > COLD_MS,
-      pinned: pinned.has(key),
-      listed: waiting || pinned.has(key),
+      pinned: isPinned,
+      listed: waiting || isPinned,
       files: sent,
       held: spoken,
     })

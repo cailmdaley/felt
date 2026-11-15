@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { COLD_MS, composeChannels, officeOf, setAsideKey, waitingOn, type HeldSpeech } from './outbox.js'
+import { COLD_MS, composeChannels, officeOf, setAsideKey, unpinKey, waitingOn, type HeldSpeech } from './outbox.js'
 import { inFlightBand } from './KanbanReadModel.js'
 import { card } from './testFixtures.js'
 import { ThreadIndex } from './threads.js'
@@ -53,17 +53,26 @@ describe('composeChannels', () => {
       ['role:vizier', 'Vizier', 'life/vizier', true],
       ['role:analyst', 'Analyst', 'lensing', true],
       ['fiber:R', 'Moving house', 'move', true],
-      ['fiber:A', 'after', 'after', true],
       ['fiber:Q', 'Second movement', 'score', false],
     ])
     const analyst = channels[1]
     expect(analyst.messages.map(message => [message.kind, message.card.id, message.text])).toStrictEqual([
       [undefined, 'covariance', ''], ['review', 'cuts', 'The cut is validated.'], [undefined, 'methods', 'Written up.'],
-      ['ask', 'mask', 'Keep the conservative mask?'], ['ask', 'tail', 'Check the tail?'], ['turn', 'shear', 'The null passes.'],
+      ['turn', 'after', ''], ['ask', 'mask', 'Keep the conservative mask?'], ['ask', 'tail', 'Check the tail?'], ['turn', 'shear', 'The null passes.'],
     ])
     expect(analyst.newest).toBe(now - 4 * minute)
     expect(analyst.files.map(file => file.basename)).toStrictEqual(['cuts.png'])
     expect(analyst.held.map(line => line.first)).toStrictEqual(['The run finished.'])
+  })
+
+  it('keeps a thread under a closed parent in its top-level\'s channel, and an archived top-level names its own', () => {
+    const closedTop = card({ id: 'old', uid: 'O1', name: 'Old campaign', column: 'tempered', status: 'closed', closedAt: at(900) })
+    const orphaned = card({ id: 'orphaned', uid: 'O2', orchestrator: 'O1', shuttleRole: 'shipwright', status: 'active', ask: { text: 'Still on?', at: 'not a time' }, lastActivityAt: now - 7 * minute })
+    const channels = compose([closedTop, orphaned, after, done, shear])
+    expect(channels.map(channel => [channel.key, channel.name, channel.seat.id])).toStrictEqual([['role:analyst', 'Analyst', 'shear'], ['fiber:O1', 'Old campaign', 'orphaned']])
+    // An ask whose time does not parse falls back like the other kinds.
+    expect(channels[1].newest).toBe(now - 7 * minute)
+    expect(channels[0].messages.map(message => message.card.id)).toStrictEqual(['after', 'shear'])
   })
 
   it('lists a seat alone at the end of its turn as a channel, its own seat', () => {
@@ -98,7 +107,7 @@ describe('composeChannels', () => {
     const cold = card({ id: 'cold', uid: 'O', status: 'active', ask: { text: 'Still there?', at: new Date(now - COLD_MS - minute).toISOString() } })
     const channels = compose([...all, cold], { pinned: new Map([['fiber:Q', now]]) })
     expect(channels.filter(channel => channel.listed).map(channel => [channel.key, channel.waiting, channel.cold])).toStrictEqual([
-      ['role:vizier', true, false], ['role:analyst', true, false], ['fiber:R', true, false], ['fiber:A', true, false], ['fiber:Q', false, false], ['fiber:O', true, true],
+      ['role:vizier', true, false], ['role:analyst', true, false], ['fiber:R', true, false], ['fiber:Q', false, false], ['fiber:O', true, true],
     ])
   })
 
@@ -106,8 +115,12 @@ describe('composeChannels', () => {
     const vizierChannel = compose(all)[0]
     const dismissed = [setAsideKey(vizierChannel)]
     expect(dismissed).toStrictEqual([`office:role:vizier:${now - minute}`])
-    expect(listed(all, { dismissed })).toStrictEqual(['role:analyst', 'fiber:R', 'fiber:A'])
-    expect(listed(all, { dismissed, pinned: new Map([['role:vizier', now]]) })).toStrictEqual(['role:analyst', 'fiber:R', 'fiber:A', 'role:vizier'])
+    expect(listed(all, { dismissed })).toStrictEqual(['role:analyst', 'fiber:R'])
+    const pinned = new Map([['role:vizier', now - minute]])
+    expect(listed(all, { dismissed, pinned })).toStrictEqual(['role:analyst', 'fiber:R', 'role:vizier'])
+    // Unpinning voids every pin up to it; a later pin counts again.
+    expect(listed(all, { dismissed: [...dismissed, unpinKey('role:vizier', now - minute)], pinned })).toStrictEqual(['role:analyst', 'fiber:R'])
+    expect(listed(all, { dismissed: [...dismissed, unpinKey('role:vizier', now - 2 * minute)], pinned })).toStrictEqual(['role:analyst', 'fiber:R', 'role:vizier'])
     const fresh = card({ id: 'fresh', uid: 'N', shuttleRole: 'vizier', status: 'active', ask: { text: 'One more?', at: new Date(now).toISOString() } })
     expect(listed([...all, fresh], { dismissed })[0]).toBe('role:vizier')
   })
