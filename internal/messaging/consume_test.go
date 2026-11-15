@@ -339,12 +339,7 @@ func TestConsumeFreshReservationIsLeased(t *testing.T) {
 			t.Fatalf("got %+v %v, want %s", result, err, want)
 		}
 	}
-	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey("m")+".json")
-	e := readEntry(t, path)
-	e.Attempt.OpenedAt = time.Now().Add(-3 * time.Minute).UnixNano()
-	if err := writeMailboxEntry(path, e); err != nil {
-		t.Fatal(err)
-	}
+	lapseLease(t, env)
 	if result, err := consumeWith(context.Background(), env, "fiber", "host", w, never); err != nil || result.Action != "fresh" {
 		t.Fatalf("an unanswered reservation never asks again: %+v %v", result, err)
 	}
@@ -448,12 +443,7 @@ func TestConsumeLaunchedSessionTakesAReservationThroughItsHook(t *testing.T) {
 	if !fiberContextHookEligible(mailboxDir(env, "fiber", "fiber"), launched.Address, Request{MessageID: "m"}) {
 		t.Fatal("launched session's hook cannot take the reservation")
 	}
-	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey("m")+".json")
-	e := readEntry(t, path)
-	e.Attempt.OpenedAt = time.Now().Add(-3 * time.Minute).UnixNano()
-	if err := writeMailboxEntry(path, e); err != nil {
-		t.Fatal(err)
-	}
+	lapseLease(t, env)
 	if result, err := consumeWith(context.Background(), env, "fiber", "host", launched, sender); err != nil || result.Action != "wake" || sends != 1 {
 		t.Fatalf("an expired reservation still holds the entry: %+v %v", result, err)
 	}

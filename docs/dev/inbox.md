@@ -108,17 +108,19 @@ A tracked worker whose conversation is not yet known is consumed as `-` with its
 | `ask`/`idle`, idle, costly, only `hold` | Wait; `ask` remains hook-eligible |
 | `ask`/`idle`/`force`, no worker | Reserve a launch and return `launch`, when the fiber passes the gate below |
 
-A fresh reservation is written on its entries and leased for two minutes.
-Within the lease, consume answers `wait` for the reserving receiver while it stays costly, and a new receiver (the launched session) takes the entries through its hook instead of a wake.
+A launch reservation is kept apart from the entries' delivery attempts, in the inbox's `launch.json`: the reserving receiver (`-` and epoch 0 for a fiber with no worker), the asking entries it was requested for, and when, leased for two minutes.
+Reserving a launch never rewrites an entry's attempt or a batch's pinned payload.
+Within the lease, consume answers `wait` for the reserving receiver while it stays costly, and a new receiver (the launched session) takes the reserved entries through its hook instead of a wake.
 The daemon starts the session; when the Poller refuses the launch, it consumes again without `Costly`, waking the live worker.
 A launch that never arrives, including one a busy Poller accepted and later refused, is asked for again once the lease passes.
 
 ### A fiber with no worker
 
 The daemon consumes a fiber with no worker as `shuttle inbox consume <fiber-key> - 0`.
-A due entry that asks for a turn (`ask`, `idle` or `force`), when no launch reservation is in its lease, makes it reserve those entries and answer `launch` with them as `members`; otherwise it answers `wait`, with `"launching": true` while a reservation's lease stands.
-The reservation is the fresh one's: an attempt with `launch: true`, conversation `-` and epoch 0, leased for two minutes, so repeated consumes ask for one launch per lease.
-Quiet entries are not reserved, and open batches wait for the next receiver.
+A due entry that asks for a turn (`ask`, `idle` or `force`), whether free or held by an open batch, makes it reserve a launch for those entries and answer `launch` with them as `members`, unless a reservation in its lease still owes any pending entry; then it answers `wait` with `"launching": true`.
+Repeated consumes therefore ask for one launch per lease, and once the launched session has taken every reserved entry a new one may ask for another.
+Quiet entries are not reserved.
+An open batch is not advanced without a receiver, but one that asks for a turn asks for a launch: a batch pinned to a conversation that ended before its outcome was known starts a replacement, whose consume then resolves it by the batch rules below (the pinned payload is offered to the ended conversation under its transport id, then rolled forward to the replacement, marked as a possible repeat when the outcome stayed unknown).
 
 Only an armed fiber may be started by an entry that is not the human's (`Delivery.inbox_gate/2`): a constitution this host owns with `status: active`, not at rest (`horizon: stashed`), and not a standing constitution whose scheduled run is due, since that run takes the entries.
 Arming is the author's authorization, which a message or a thread result does not grant: a draft, a constitution at rest, a paused schedule and a closed constitution keep their entries for whoever arms or starts them next.
@@ -136,7 +138,7 @@ A session that dies before taking the batch, a launch the Poller refuses or hold
 While a lease stands, a live worker other than the reserving one leaves the reserved entries to its hook; once it passes, they are consumed as any other.
 
 Each poll consumes every live worker's inbox and asks one `shuttle inbox pending --waking` call about every gated-in fiber with no worker.
-It counts the due entries that ask for a turn and that no open batch holds, and counts none while a launch reservation is in its lease; a fiber with a count is started as above.
+It counts the due entries that ask for a turn, free or held by an open batch, and counts none while a reservation in its lease still owes one; a fiber with a count is started as above.
 This catches an entry that became due by `not_before` or outlived a daemon restart.
 An enqueue through `Delivery.context` starts its fiber at once.
 
@@ -199,7 +201,7 @@ Quiet context pinned this way is released to a Codex receiver's fiber hook rathe
 
 A hook claim is unpinned.
 If a hook leaves its attempt open, the next reader under the inbox lock, a hook or the consumer, closes it ambiguous, and the entry carries “Possible repeat” wherever it goes next.
-A launch reservation, fresh or for a fiber with no worker, is also unpinned, but has `launch: true`: it requests no emission and is not evidence of a possible repeat.
+A launch reservation is no attempt: it lives in `launch.json`, requests no emission and is not evidence of a possible repeat.
 Unpinned claims and delivered closes preserve the entry's modification time, from which offered retention runs.
 The session-only Claude fallback claims by moving an entry into `fallback/` and writes no attempt.
 

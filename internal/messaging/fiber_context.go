@@ -237,8 +237,8 @@ func offerLinkedFiberContext(env *sysenv.Env, harness, id, host string, emit fun
 
 // fiberContextHookEligible reports whether conversation's hook may take an
 // entry: one held by no open batch, and none or ask, or any entry a launch
-// reservation from another receiver holds in its lease, which the launched
-// session takes whole.
+// another receiver reserved holds in its lease, which the launched session
+// takes whole.
 func fiberContextHookEligible(root, conversation string, request Request) bool {
 	batches, err := readBatchManifests(root)
 	if err != nil {
@@ -256,8 +256,8 @@ func fiberContextHookEligible(root, conversation string, request Request) bool {
 	if entry.Wishes.Turn == "none" || entry.Wishes.Turn == "ask" {
 		return true
 	}
-	a := entry.Attempt
-	return a.open() && a.Launch && a.Conversation != conversation && time.Since(time.Unix(0, a.OpenedAt)) < launchLease
+	reservation, err := readLaunchReservation(root)
+	return err == nil && reservation.holds(request.MessageID, time.Now()) && reservation.Conversation != conversation
 }
 
 // DeliverFiberContext consumes without turn facts. Only force entries initiate

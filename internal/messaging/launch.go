@@ -1,0 +1,79 @@
+package messaging
+
+import (
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"slices"
+	"time"
+)
+
+// launchLease is how long a launch reservation stands. A launch that never
+// arrives, or that the Poller refuses or holds after the request, is asked for
+// again once it passes.
+const launchLease = 2 * time.Minute
+
+// launchReservation records the one session a fiber's inbox has asked the
+// daemon to start: a fresh session replacing the costly live worker
+// Conversation at Epoch, or a session for a fiber with no worker (Conversation
+// "-"). It lives beside the entries in the inbox's launch.json, apart from
+// their delivery attempts, so reserving a launch never rewrites a batch's
+// pinned payload or transport identity. Members are the asking entries the
+// launch was requested for, free or held by an open batch.
+type launchReservation struct {
+	Conversation string   `json:"conversation"`
+	Epoch        uint64   `json:"epoch,omitempty"`
+	Members      []string `json:"members"`
+	OpenedAt     int64    `json:"opened_at"`
+}
+
+func launchReservationPath(root string) string { return filepath.Join(root, "launch.json") }
+
+// readLaunchReservation reads the inbox's reservation; an inbox that never
+// reserved a launch has the zero reservation, which holds nothing.
+func readLaunchReservation(root string) (launchReservation, error) {
+	var r launchReservation
+	bytes, err := readBounded(launchReservationPath(root), 512<<10)
+	if errors.Is(err, os.ErrNotExist) {
+		return r, nil
+	}
+	if err == nil {
+		err = json.Unmarshal(bytes, &r)
+	}
+	return r, err
+}
+
+// reserveLaunch records a reservation for members, requested by the worker w
+// (Address "-" for a fiber with none), replacing any earlier one. Called under
+// the inbox lock.
+func reserveLaunch(root string, w Worker, members []string, now time.Time) error {
+	bytes, err := json.Marshal(launchReservation{Conversation: w.Address, Epoch: w.Epoch, Members: members, OpenedAt: now.UnixNano()})
+	if err != nil {
+		return err
+	}
+	return mailboxWrite(launchReservationPath(root), bytes, false)
+}
+
+// holds reports that the reservation is in its lease and was requested for
+// the entry id.
+func (r launchReservation) holds(id string, now time.Time) bool {
+	return r.OpenedAt != 0 && now.Sub(time.Unix(0, r.OpenedAt)) < launchLease && slices.Contains(r.Members, id)
+}
+
+// requestedBy reports that the live worker w requested the reservation.
+func (r launchReservation) requestedBy(w Worker) bool {
+	return r.Conversation == w.Address && r.Epoch == w.Epoch
+}
+
+// inFlight reports that the reservation's launch is in its lease and still
+// owes one of the pending items: once the launched session has taken them
+// all, a new entry may ask for another.
+func (r launchReservation) inFlight(items []mailboxPendingItem, now time.Time) bool {
+	for _, it := range items {
+		if r.holds(it.entry.Request.MessageID, now) {
+			return true
+		}
+	}
+	return false
+}

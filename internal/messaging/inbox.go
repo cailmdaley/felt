@@ -268,10 +268,10 @@ func PendingCount(env *sysenv.Env, address string) (int, error) {
 }
 
 // WakingCount counts the due entries in an address's inbox that ask for a
-// turn and that no open batch holds: what a session started for a fiber with
-// no worker would be started for. It is zero while a launch reservation is in
-// its lease, since that launch is already in flight. Like PendingCount, it
-// reads without the inbox lock.
+// turn, free or held by an open batch: what a session started for a fiber with
+// no worker would be started for. It is zero while a launch reservation in its
+// lease still owes any pending entry, since that launch is in flight. Like
+// PendingCount, it reads without the inbox lock.
 func WakingCount(env *sysenv.Env, address string) (int, error) {
 	root, err := inboxRoot(env, address)
 	if err != nil {
@@ -281,14 +281,17 @@ func WakingCount(env *sysenv.Env, address string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	reservation, err := readLaunchReservation(root)
+	if err != nil {
+		return 0, err
+	}
 	now := time.Now()
-	if launchInFlight(items, now) {
+	if reservation.inFlight(items, now) {
 		return 0, nil
 	}
 	n := 0
 	for _, it := range items {
-		e := it.entry
-		if e.Wishes.Turn != "none" && e.AttemptAddress == "" && e.due(now) {
+		if it.entry.Wishes.Turn != "none" && it.entry.due(now) {
 			n++
 		}
 	}

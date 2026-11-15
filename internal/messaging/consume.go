@@ -41,18 +41,15 @@ type Consumption struct {
 	Launching bool `json:"launching,omitempty"`
 }
 
-// launchLease is how long a launch reservation stands for its receiver. A
-// launch that never arrives, or that the Poller refuses or holds after the
-// request, is asked for again once it passes.
-const launchLease = 2 * time.Minute
-
 // Consume advances every open batch, then selects, claims and delivers one
-// turn under the fiber inbox lock. A fresh or launch answer reserves the
-// asking entries for launchLease: until the receiver changes, until the
-// caller retries without Costly after a refused fresh launch, or until the
-// launched session's hook takes them. A fiber without a worker (Address "-")
-// advances no batch and answers launch or wait; a tracked worker whose
-// conversation is not yet known (Address "-" with its epoch) waits.
+// turn under the fiber inbox lock. A fresh or launch answer reserves a launch
+// for the asking entries (launchReservation) for launchLease: until the
+// receiver changes, until the caller retries without Costly after a refused
+// fresh launch, or until the launched session takes them. A fiber without a
+// worker (Address "-") advances no batch and answers launch or wait; its
+// batches that ask for a turn ask for a launch too, and the launched session's
+// consume then advances them. A tracked worker whose conversation is not yet
+// known (Address "-" with its epoch) waits.
 func Consume(ctx context.Context, env *sysenv.Env, fiber, host string, worker Worker) (Consumption, error) {
 	return consumeWith(ctx, env, fiber, host, worker, sendFiberContextAttempt)
 }
@@ -104,6 +101,10 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 		return Consumption{}, err
 	}
 	current := func(c context.Context, r Request) (bool, error) { return currentThreadSignalWithBackoff(c, env, r) }
+	reservation, err := readLaunchReservation(root)
+	if err != nil {
+		return Consumption{}, err
+	}
 	// Each open batch advances on its own, so one awaiting its outcome holds
 	// only its own members. A fiber without a worker has no conversation to
 	// advance a batch to; its batches wait for the next receiver.
@@ -156,22 +157,40 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 			return Consumption{}, err
 		}
 	}
+	// A fiber without a worker launches for its batches that ask for a turn
+	// as for its free entries, unless a launch in its lease still owes any of
+	// them.
+	var held []string
+	inFlight := false
+	if dormant {
+		pending, err := pendingItems(root)
+		if err != nil {
+			return Consumption{}, err
+		}
+		held = heldAsking(pending, items, now)
+		inFlight = reservation.inFlight(pending, now)
+	}
 	// Deciding reads entries unchecked; only a reservation or a wake checks
 	// thread signals' currency, and decides again over the current ones.
 	// A receiver without a hook takes quiet context directly; Codex leaves it to
 	// its fiber hook.
 	direct := !dormant && !hook && a.Harness != "codex"
-	action, turn := decideConsumption(candidates, w, direct, now)
+	decide := func(due []mailboxPendingItem) (string, bool) {
+		if dormant {
+			return decideLaunch(due, held, inFlight), false
+		}
+		return decideConsumption(due, w, direct, reservation, now)
+	}
+	action, turn := decide(candidates)
 	if action == "wait" {
-		result.Turn = turn
-		result.Launching = dormant && launchInFlight(candidates, now)
+		result.Turn, result.Launching = turn, inFlight
 		return result, errors.Join(errs...)
 	}
 	due, validationErr := validateMailboxItems(root, candidates, current)
 	errs = append(errs, validationErr)
-	action, result.Turn = decideConsumption(due, w, direct, now)
+	action, result.Turn = decide(due)
 	if action == "wait" {
-		result.Launching = dormant && launchInFlight(due, now)
+		result.Launching = inFlight
 		return result, errors.Join(errs...)
 	}
 	if action == "fresh" || action == "launch" {
@@ -181,15 +200,9 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 				members = append(members, it.entry.Request.MessageID)
 			}
 		}
-		attempt := Attempt{BatchID: batchID(members), Conversation: w.Address, Epoch: w.Epoch, Members: members, OpenedAt: now.UnixNano(), Launch: true}
-		for _, it := range due {
-			if it.entry.Wishes.Turn == "none" {
-				continue
-			}
-			it.entry.Attempt = &attempt
-			if err := writeMailboxEntryKeepingTime(it.path, it.entry); err != nil {
-				return Consumption{}, err
-			}
+		members = append(members, held...)
+		if err := reserveLaunch(root, w, members, now); err != nil {
+			return Consumption{}, err
 		}
 		return Consumption{Action: action, Members: members}, errors.Join(errs...)
 	}
@@ -260,31 +273,53 @@ func verifyUnaddressedReceiver(env *sysenv.Env, fiber, host string, epoch uint64
 	return nil
 }
 
-// launchInFlight reports that a launch reservation among items is in its
-// lease.
-func launchInFlight(items []mailboxPendingItem, now time.Time) bool {
-	for _, it := range items {
-		if a := it.entry.Attempt; a.open() && a.Launch && now.Sub(time.Unix(0, a.OpenedAt)) < launchLease {
-			return true
+// heldAsking lists the due entries among pending that ask for a turn and that
+// an open batch holds (those not among free): a batch pinned to a conversation
+// that has since ended, waiting for a receiver to advance it.
+func heldAsking(pending, free []mailboxPendingItem, now time.Time) []string {
+	isFree := map[string]bool{}
+	for _, it := range free {
+		isFree[it.entry.Request.MessageID] = true
+	}
+	var held []string
+	for _, it := range pending {
+		if id := it.entry.Request.MessageID; !isFree[id] && it.entry.Wishes.Turn != "none" && it.entry.due(now) {
+			held = append(held, id)
 		}
 	}
-	return false
+	return held
 }
 
-// decideConsumption answers wait, fresh or wake for the due entries no open
-// batch holds, or context when it would wait and a direct receiver has quiet
-// entries; for a fiber without a worker, launch or wait. turn reports that the
-// worker's idle and cost facts would decide the entries asking for a turn.
-func decideConsumption(due []mailboxPendingItem, w Worker, direct bool, now time.Time) (action string, turn bool) {
+// decideLaunch answers launch or wait for a fiber without a worker: launch
+// when a due entry asks for a turn, free or held by an open batch, and no
+// launch is in flight.
+func decideLaunch(due []mailboxPendingItem, held []string, inFlight bool) string {
+	if inFlight {
+		return "wait"
+	}
+	asking := len(held) > 0
+	for _, it := range due {
+		asking = asking || it.entry.Wishes.Turn != "none"
+	}
+	if asking {
+		return "launch"
+	}
+	return "wait"
+}
+
+// decideConsumption answers wait, fresh or wake for a live worker over the due
+// entries no open batch holds, or context when it would wait and a direct
+// receiver has quiet entries. turn reports that the worker's idle and cost
+// facts would decide the entries asking for a turn.
+func decideConsumption(due []mailboxPendingItem, w Worker, direct bool, reservation launchReservation, now time.Time) (action string, turn bool) {
 	force, asking, wants, fresh, launching, quiet := false, false, false, false, false, false
 	for _, it := range due {
 		e := it.entry
-		// Within its lease, a reservation holds the reserving worker's wake,
-		// and any launch for a fiber without a worker, while the launch is in
-		// flight; it leaves a new receiver, the launched session, to take the
-		// entry through its hook.
-		if e.Attempt.open() && e.Attempt.Launch && now.Sub(time.Unix(0, e.Attempt.OpenedAt)) < launchLease {
-			if w.Address != "-" && (e.Attempt.Conversation != w.Address || e.Attempt.Epoch != w.Epoch) {
+		// Within its lease, a reservation holds the reserving worker's wake
+		// while the launch is in flight, and leaves a new receiver, the
+		// launched session, to take the entry through its hook.
+		if reservation.holds(e.Request.MessageID, now) {
+			if !reservation.requestedBy(w) {
 				continue
 			}
 			launching = true
@@ -304,11 +339,6 @@ func decideConsumption(due []mailboxPendingItem, w Worker, direct bool, now time
 	}
 	action = "wait"
 	switch {
-	case w.Address == "-":
-		if (force || asking) && !launching {
-			return "launch", false
-		}
-		return "wait", false
 	case force:
 		return "wake", false
 	case !w.Idle:
@@ -622,11 +652,11 @@ func readBatchManifests(root string) ([]Attempt, error) {
 	return batches, nil
 }
 
-// settleUnfinishedHookClaim closes an open, unpinned claim that is not a
-// launch reservation as ambiguous. Read under the inbox lock, such a claim
-// belongs to a hook that died between its output and its close.
+// settleUnfinishedHookClaim closes an open, unpinned claim as ambiguous. Read
+// under the inbox lock, such a claim belongs to a hook that died between its
+// output and its close.
 func settleUnfinishedHookClaim(it *mailboxPendingItem) error {
-	if !it.entry.Attempt.open() || it.entry.AttemptAddress != "" || it.entry.Attempt.Launch {
+	if !it.entry.Attempt.open() || it.entry.AttemptAddress != "" {
 		return nil
 	}
 	it.entry.closeAttempt(attemptAmbiguous)

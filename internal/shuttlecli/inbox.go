@@ -68,9 +68,10 @@ pending, and a turn of force or idle. An unknown wish value is refused.`,
 		Use:   "pending <address>...",
 		Short: "Count each address's pending entries, as one JSON object",
 		Long: `Count each address's pending entries, as one JSON object of address to count.
-With --waking, count only the due entries that ask for a turn and that no open
-batch holds, and count none while a launch reservation is in its lease: the
-entries a session started for a fiber with no worker would take.`,
+With --waking, count only the due entries that ask for a turn, free or held by
+an open batch, and count none while a launch reserved in its lease still owes
+one: the entries a session started for a fiber with no worker would be started
+for.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if waking {

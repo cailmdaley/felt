@@ -109,14 +109,11 @@ defmodule Shuttle.InboxLaunchTest do
   defp lapse_leases do
     for path <-
           Path.wildcard(
-            Path.join(Shuttle.Env.get("SHUTTLE_DATA_DIR"), "mailboxes/fiber/*/pending/*.json")
+            Path.join(Shuttle.Env.get("SHUTTLE_DATA_DIR"), "mailboxes/fiber/*/launch.json")
           ) do
-      entry = path |> File.read!() |> Jason.decode!()
-
-      if entry["attempt"] do
-        lapsed = System.os_time(:nanosecond) - 3 * 60 * 1_000_000_000
-        File.write!(path, Jason.encode!(put_in(entry, ["attempt", "opened_at"], lapsed)))
-      end
+      reservation = path |> File.read!() |> Jason.decode!()
+      lapsed = System.os_time(:nanosecond) - 3 * 60 * 1_000_000_000
+      File.write!(path, Jason.encode!(Map.put(reservation, "opened_at", lapsed)))
     end
   end
 
