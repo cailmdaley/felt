@@ -157,6 +157,28 @@ defmodule Shuttle.ThreadCaptureTest do
   end
 
   @tag first_boot: true
+  test "an outbox the import cannot clean up is logged, and every boot goes on", %{data: data} do
+    outbox = Path.join(data, "thread-outbox")
+    File.mkdir_p!(Path.join(outbox, "acked"))
+    File.write!(Path.join(outbox, "baseline"), "2026-10-22T19:33:11.470348Z")
+    key = :crypto.hash(:sha256, "thread-acked") |> Base.encode16(case: :lower)
+    File.write!(Path.join([outbox, "acked", key]), "thread-acked")
+    File.chmod!(Path.join([outbox, "acked", key]), 0o000)
+    File.write!(Path.join([outbox, "acked", ".nfs000000000123"]), "")
+    File.chmod!(Path.join(outbox, "acked"), 0o500)
+    imported = Path.join(data, "thread-outbox.imported/acked")
+    on_exit(fn -> File.chmod(imported, 0o700) end)
+
+    for _ <- 1..2 do
+      log = ExUnit.CaptureLog.capture_log(fn -> assert :ok = Shuttle.Inbox.boot_import() end)
+      assert log =~ "Removing the imported thread outbox failed"
+    end
+
+    assert Shuttle.Test.InboxPublications.baseline() == "2026-10-22T19:33:11.470348Z"
+    assert File.exists?(Path.join(Shuttle.Test.InboxPublications.routing_dir(data), "offered/#{key}.json"))
+  end
+
+  @tag first_boot: true
   test "an import that fails without corruption is retried, not held", %{data: data} do
     baseline = Path.join(data, "thread-outbox/baseline")
     File.mkdir_p!(Path.dirname(baseline))

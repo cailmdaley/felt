@@ -279,7 +279,7 @@ is then given back to the human rather than closed.
 | `shuttle inbox put <address> <message-id> <text>` | Enqueue an entry in this host's inbox for a fiber key or a session's `shuttle://` address, with its delivery wishes (`--source`, `--turn`, `--session`, `--if-costly`, `--not-before`), `--from` and `--derived`; see [The inbox](../dev/inbox.md) |
 | `shuttle inbox pending <address>... [--waking]` | Print one JSON object of each address's pending entry count; `--waking` counts only the due entries that ask for a turn, free or held by an open batch, and none while a launch reserved in its lease still owes one |
 | `shuttle inbox ls <address>` | List an address's pending entries, oldest first: id, source, turn, not_before, queued time and sender (`--json`) |
-| `shuttle inbox thread-state` | Establish the thread capture window and import an older daemon's thread outbox into the routing inbox; print the baseline and retention cutoff (exit 3 on a corrupt outbox) |
+| `shuttle inbox thread-state` | Establish the thread capture window and import an older daemon's thread outbox into the routing inbox; print the baseline and any cleanup error (exit 3 on a corrupt outbox) |
 | `shuttle inbox thread-put` | Capture a JSON array of `{id, record}` thread publications from stdin into the routing inbox; print the ids created |
 | `shuttle inbox routes` | List the routing inbox's pending thread publications |
 | `shuttle inbox route <id> --current true\|false\|unknown` | Advance one routing entry from the daemon's fresh facts (`--record`, `--owner`, `--key` once its recipient resolves): wait, place, settle as superseded or expired, or answer `forward` or `session` for the daemon's handoff |

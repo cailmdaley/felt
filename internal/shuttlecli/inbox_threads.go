@@ -19,18 +19,20 @@ func (a *app) threadInboxVerbs() []*cobra.Command {
 		Use:   "thread-state",
 		Short: "Import an older daemon's thread outbox and print the capture window",
 		Long: `Establish the thread capture window (baseline and retention cutoff) and
-import a thread-outbox left by an older daemon into the routing inbox. Exits 3
-when the outbox or the state is corrupt, leaving it untouched.`,
+import a thread-outbox left by an older daemon into the routing inbox. Prints
+{"baseline", "cleanup_error"}: a cleanup failure leaves the imported outbox for
+the next boot to remove. Exits 3 when the outbox's baseline or a pending
+payload, or the state, is corrupt, leaving it untouched.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			state, err := messaging.BootThreadInbox(a.env)
+			report, err := messaging.BootThreadInbox(a.env)
 			if messaging.ErrorCode(err) == "corrupt" {
 				return &cliExitError{code: exitCorrupt, err: err}
 			}
 			if err != nil {
 				return err
 			}
-			return json.NewEncoder(a.env.Stdout).Encode(state)
+			return json.NewEncoder(a.env.Stdout).Encode(report)
 		},
 	}
 	capture := &cobra.Command{

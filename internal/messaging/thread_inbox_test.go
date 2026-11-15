@@ -16,7 +16,7 @@ func threadRecord() map[string]any {
 	return map[string]any{"owner": "host", "store": "/store", "parent_uid": "anchor", "parent_host": "host", "parent_unresolved": true, "anchor_uid": "anchor", "text": "thread hub/child closed: done", "retained_at": time.Now().UTC().Format(time.RFC3339Nano), "wake": true}
 }
 
-func bootThread(t *testing.T, env *sysenv.Env) ThreadInboxState {
+func bootThread(t *testing.T, env *sysenv.Env) ThreadImport {
 	t.Helper()
 	s, err := BootThreadInbox(env)
 	if err != nil {
@@ -361,7 +361,7 @@ func TestThreadImportLeavesRecipientInboxesAlone(t *testing.T) {
 
 func TestThreadImportRefusesCorruptSourceAndKeepsIt(t *testing.T) {
 	t.Parallel()
-	for _, corrupt := range []string{"baseline", "pending", "snapshot", "missing baseline", "cutoff", "ack"} {
+	for _, corrupt := range []string{"baseline", "pending", "snapshot", "missing baseline", "cutoff"} {
 		t.Run(corrupt, func(t *testing.T) {
 			env := testEnv(t)
 			root := seedOutbox(t, env, oldBaseline)
@@ -376,8 +376,6 @@ func TestThreadImportRefusesCorruptSourceAndKeepsIt(t *testing.T) {
 				os.Remove(filepath.Join(root, "baseline"))
 			case "cutoff":
 				os.WriteFile(filepath.Join(root, "retention_cutoff"), []byte("bad"), 0600)
-			case "ack":
-				os.WriteFile(filepath.Join(root, "acked", mailboxKey("a")), []byte("b"), 0600)
 			}
 			if _, err := BootThreadInbox(env); ErrorCode(err) != "corrupt" {
 				t.Fatal("corrupt source accepted:", err)
@@ -404,6 +402,74 @@ func TestThreadImportIgnoresALeftoverAckTmpFile(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(routingRoot(env), "offered", mailboxKey("thread-torn")+".json")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("a torn tmp file was imported", err)
+	}
+}
+
+// An acknowledgment is its file name: the old daemon tolerated an ack it
+// could not read (Fir's Lustre client could not stat one), and so does the
+// import. Any other name in acked/ was never an acknowledgment.
+func TestThreadImportTakesAcknowledgmentsByNameAlone(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	root := seedOutbox(t, env, oldBaseline)
+	seedPending(t, root, "thread-acked", threadRecord())
+	seedAck(t, root, "thread-acked")
+	unreadable := filepath.Join(root, "acked", mailboxKey("thread-acked"))
+	if err := os.Chmod(unreadable, 0); err != nil {
+		t.Fatal(err)
+	}
+	seedAck(t, root, "thread-mismatched")
+	os.WriteFile(filepath.Join(root, "acked", mailboxKey("thread-mismatched")), []byte("other content"), 0600)
+	for _, stray := range []string{".nfs000000000123", ".DS_Store", "notes.txt"} {
+		os.WriteFile(filepath.Join(root, "acked", stray), []byte("thread-acked"), 0600)
+	}
+	if report := bootThread(t, env); report.Cleanup != "" {
+		t.Fatal(report)
+	}
+	if got := routes(t, env); len(got) != 0 {
+		t.Fatalf("the acknowledgment did not win: %+v", got)
+	}
+	for _, id := range []string{"thread-acked", "thread-mismatched"} {
+		if offeredRoute(t, env, id).Disposition != "acknowledged" {
+			t.Fatal(id)
+		}
+	}
+	offered, _ := os.ReadDir(filepath.Join(routingRoot(env), "offered"))
+	if len(offered) != 2 {
+		t.Fatalf("stray names were imported: %v", offered)
+	}
+}
+
+// A complete import whose cleanup cannot remove the source reports it and
+// boots; later boots do too, and import nothing again.
+func TestThreadImportCleanupFailureIsReportedNotHeld(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	root := seedOutbox(t, env, oldBaseline)
+	seedAck(t, root, "thread-a")
+	acked := filepath.Join(root, "acked")
+	if err := os.Chmod(acked, 0500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(filepath.Join(root+".imported", "acked"), 0700) })
+	for i := 0; i < 3; i++ {
+		report, err := BootThreadInbox(env)
+		if err != nil || report.Baseline != oldBaseline || report.Cleanup == "" {
+			t.Fatalf("boot %d: %+v %v", i, report, err)
+		}
+	}
+	if offeredRoute(t, env, "thread-a").Disposition != "acknowledged" {
+		t.Fatal("ack not imported")
+	}
+	if _, err := os.Stat(root); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("the imported source would import again", err)
+	}
+	os.Chmod(filepath.Join(root+".imported", "acked"), 0700)
+	if report := bootThread(t, env); report.Cleanup != "" {
+		t.Fatal(report)
+	}
+	if _, err := os.Stat(root + ".imported"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
 	}
 }
 
@@ -439,8 +505,9 @@ func TestThreadImportCutoffAdvancesAndRefusesOlderCaptures(t *testing.T) {
 	root := seedOutbox(t, env, oldBaseline)
 	cutoff := time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)
 	os.WriteFile(filepath.Join(root, "retention_cutoff"), []byte(cutoff), 0600)
-	if s := bootThread(t, env); s.Cutoff != cutoff {
-		t.Fatal(s)
+	bootThread(t, env)
+	if s, err := ReadThreadInboxState(env); err != nil || s.Cutoff != cutoff {
+		t.Fatal(s, err)
 	}
 	if got := capture(t, env, ThreadPublication{"thread-before-cutoff", threadRecord()}); len(got) != 0 {
 		t.Fatal(got)
