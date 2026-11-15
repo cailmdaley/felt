@@ -15,7 +15,6 @@ import { createRailReorder, type RailReorder } from '../channelRail.js'
 import { openActionMenu } from '../conversationMenu.js'
 import type { SentFile } from '../sentFiles.js'
 import { stateDot } from '../stateDot.js'
-import { turnOf } from '../turn.js'
 import { cardNamed } from '../threads.js'
 import { fileBytesUrl, renderMarkdown } from '../utils.js'
 import { COMPANION_NAMES, docKey, type DocKey } from '../workspace/documents.js'
@@ -816,6 +815,8 @@ export class ChannelsView implements TemporalView {
       const { message } = line, sig = this.rowSig(line, pane, before, whole, previous)
       const old = kept.get(message.id)
       const row = old?.sig === sig ? old.row : this.messageRow(line, pane, before, now, whole, previous)
+      // A kept row's state dot follows its worker's turn, which the row is not drawn again for.
+      if (row === old?.row) row.querySelector(':scope > .constitution-state-dot')?.replaceWith(stateDot(message.from ?? message.card, worker => this.openThread(worker)))
       drawn.set(message.id, { sig, row })
       row.toggleAttribute('data-chosen', pane === 'channel' && !!this.thread && sameFiber(message.card, this.thread))
       return row
@@ -851,15 +852,15 @@ export class ChannelsView implements TemporalView {
     for (const age of this.layout!.querySelectorAll<HTMLElement>('[data-at]')) age.textContent = ago(Number(age.dataset.at), now)
   }
 
-  /** Everything a message's row is drawn from, save the clock its ages follow and whether its thread is open. */
+  /** Everything a message's row is drawn from, save the clock its ages follow, its worker's turn and whether its thread is open. */
   private rowSig(line: Line, pane: Pane, before: number, whole: ReadonlySet<SentFile>, previous?: Message): string {
     const { message } = line
-    const who = (card: KanbanCard | undefined) => card && [fiberOf(card), card.name, turnOf(card).turn]
+    const who = (card: KanbanCard | undefined) => card && [fiberOf(card), card.name]
     return JSON.stringify([
       { ...message, card: who(message.card), from: who(message.from) }, line.replies, line.last, line.waiting, line.act,
       !message.human && message.arrived > before, continues(previous, message), message.files.map(file => whole.has(file)),
       this.tempering.has(`${fiberOf(message.card)}:${message.at}`), this.expanded.has(message.id), this.unfolded.has(message.id),
-      pane === 'channel' ? this.embedded(message.card, pane) : who(this.threadCard),
+      pane === 'channel' ? this.embedded(message.card, pane) : this.thread && fiberOf(this.thread),
     ])
   }
   /**

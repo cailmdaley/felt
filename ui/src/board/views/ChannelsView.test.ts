@@ -549,6 +549,12 @@ it('previews an HTML file whole, the page drawn small, kept across redraws, and 
   view.refresh({ ...ctx, response: board([chair, { ...tsz, name: 'κ × tSZ, renamed' }, mask, beam, van, notes]) }); await settle()
   expect(message(host, 'κ × tSZ, renamed')).not.toBeUndefined()
   expect(message(host, 'Beam window')).toBe(row)
+  // Its worker's turn changing redraws its dot, not the row.
+  const turn = () => row.querySelector<HTMLElement>(':scope > .constitution-state-dot')?.dataset.turn
+  const working = turn()
+  view.refresh({ ...ctx, response: board([chair, tsz, mask, { ...beam, turn: 'idle' as const }, van, notes]) }); await settle()
+  expect(message(host, 'Beam window')).toBe(row)
+  expect(turn()).not.toBe(working)
   // A redraw of its own message keeps the live page rather than making another.
   view.refresh({ ...ctx, response: board([chair, tsz, mask, { ...beam, name: 'Beam window, renamed' }, van, notes]) }); await settle()
   expect(figure('Beam window, renamed').querySelector('.ws-thumbnail')).toBe(face)
