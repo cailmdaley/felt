@@ -1,19 +1,18 @@
 /**
  * ViewRegistry — the contract between KanbanModal and the temporal views.
  *
- * The board is five full-page views behind one hotkey row:
+ * The board is four full-page views behind one hotkey row:
  *
  *   1  desk       the kanban page (Now board + Resting). Owned by
  *                 KanbanModal itself, NOT a TemporalView.
- *   2  chronicle  ┐
- *   3  board      │ registered views — each mounts into a full-width host
- *   4  globe      │
- *   5  channels     ┘ where the Desk surfaces would otherwise be.
+ *   2  chronicle  ┐ registered views — each mounts into a full-width host
+ *   3  channels   │ where the Desk surfaces would otherwise be.
+ *   4  globe      ┘
  *
- * Chronicle holds the record in time. Board is the document workspace's
- * contact sheet, grouped by recent work, project or host. The Globe is all
- * the work on a sphere. Channels has one channel per office, listed while
- * something in it waits on the human or he keeps it pinned.
+ * Chronicle holds the record in time. Channels has one channel per office,
+ * listed while something in it waits on the human or he keeps it pinned,
+ * each with its files; every channel and document is found from there. The
+ * Globe is all the work on a sphere.
  *
  * A view is a plain object with a three-call lifecycle. KanbanModal owns the
  * host element and the data; the view owns everything inside the host.
@@ -31,12 +30,13 @@
 
 import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
 import type { DocKey } from '../workspace/documents.js'
+import type { Library } from '../workspace/Library.js'
 import type { TemporalFetchers } from './TemporalData.js'
 import type { FiberSends } from '../fiberSends.js'
 import type { GlobeHost } from '../globe/GlobeStage.js'
 
 export interface TemporalView {
-  id: 'chronicle' | 'board' | 'globe' | 'channels'
+  id: 'chronicle' | 'globe' | 'channels'
   title: string
   hotkey: string
   mount(host: HTMLElement, ctx: ViewContext): void
@@ -46,6 +46,8 @@ export interface TemporalView {
   keydown?(event: KeyboardEvent): boolean
   /** Rex moved to this fiber: show it here, leaving Rex be; false to leave it to the reader. */
   reveal?(id: string, origin: string): boolean
+  /** The board bar's Find, when the view filters itself by it; '' lifts the filter. */
+  find?(query: string): void
 }
 
 /**
@@ -67,15 +69,17 @@ export interface ViewContext extends TemporalFetchers {
   /** The shared fleet sent-files store. */
   sends?: FiberSends
   response: KanbanResponse
-  /** Persistent document sheet, owned by the board's workspace controller. */
+  /** The board's document reader and the fleet's documents. */
   workspace?: {
-    mountOverview(host: HTMLElement): void
-    hideOverview(): void
     readonly isActive: boolean
     readonly dock: { openConversation(card: KanbanCard): boolean }
+    readonly library: Library
     reach(card: KanbanCard): Promise<boolean>
     openFromDesk(card: KanbanCard): void
-    openPage(card: KanbanCard, doc: DocKey): void
+    /** A fiber's page, or one of its documents; a fiber the board does not hold is read from its owner first. */
+    openPage(card: KanbanCard, doc?: DocKey): void
+    /** The constitutions opened in this session, most recent first. */
+    readLatelyCards(): KanbanCard[]
     readonly globeHost: GlobeHost
   }
   /**
@@ -163,7 +167,7 @@ export function viewFallbackKind(state: {
 
 // ── Hotkey guard ─────────────────────────────────────────────────────────────
 //
-// The chassis runs bare-key hotkeys — the 1-5 view switch and the bare `,` for
+// The chassis runs bare-key hotkeys — the 1-4 view switch and the bare `,` for
 // settings — and each must agree on when a keystroke is NOT theirs. These are
 // the shared predicates, so the next dialog added to the app is covered by
 // every bare key at once.
@@ -204,7 +208,7 @@ export function isBlockingDialog(
  * `[data-open]` is the SDK dialog's open stamp — Stash, Capture and the
  * settings sheet all render through `AppDialog`. `[aria-modal="true"]` catches
  * every modal dialog, a hand-rolled one included: without this clause
- * `1`-`5` would switch views out from under it. Matching on aria rather than on
+ * `1`-`4` would switch views out from under it. Matching on aria rather than on
  * a library's attribute means a dialog built outside AppDialog is covered
  * without a code change here. A native `<dialog>` the board opens with
  * `showModal()` exposes its modality without the attribute, so `dialog[open]`
@@ -259,7 +263,7 @@ export interface HotkeyLike {
  * Two openings, because the board is two things at once. On a keyboard it is
  * an application, and an application's preferences are `⌘,` — the one chord
  * a Mac user tries without being told. On the board itself every other page is
- * a BARE key (`1`–`5`), and a phone's keyboard has no `⌘` at all, so a bare `,`
+ * a BARE key (`1`–`4`), and a phone's keyboard has no `⌘` at all, so a bare `,`
  * opens it too. `,` is free: the chassis owns only the digits.
  *
  * Pure, and it deliberately does NOT consult the DOM — the two kinds are

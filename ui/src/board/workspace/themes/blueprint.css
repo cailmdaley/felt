@@ -98,34 +98,6 @@
   font-style: normal;
 }
 
-:scope[data-part="folio"] {
-  color: var(--ws-ink);
-  background-color: var(--ws-paper);
-  box-shadow: inset 0 0 0 1px var(--ws-hairline-soft);
-}
-:scope[data-part="folio"][data-density="full"] {
-  padding: 10px;
-  clip-path: polygon(0 var(--ws-page-cut), var(--ws-page-cut) 0, calc(100% - var(--ws-page-cut)) 0, 100% var(--ws-page-cut), 100% 100%, 0 100%);
-  background-image:
-    linear-gradient(var(--ws-blueprint-grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--ws-blueprint-grid) 1px, transparent 1px);
-  background-size: 24px 24px;
-}
-:scope[data-part="folio"][data-density="compact"] {
-  padding: 4px 6px;
-  clip-path: polygon(0 8px, 8px 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%);
-  background-image:
-    linear-gradient(var(--ws-blueprint-grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--ws-blueprint-grid) 1px, transparent 1px);
-  background-size: 24px 24px;
-}
-:scope[data-part="folio"][data-density="line"] {
-  padding: 0 4px;
-  clip-path: none;
-  background-image: none;
-  box-shadow: none;
-}
-
 [data-part="tab-strip"] { color: var(--ws-ink-muted); }
 .ws-thumbnail[data-part="thumbnail"] {
   background-color: var(--ws-paper);
@@ -141,24 +113,6 @@
   background-size: 12px 12px;
 }
 .ws-thumbnail [data-part="thumbnail-face"] .ws-thumbnail-kind { color: var(--ws-accent); }
-
-
-:scope[data-part="since-row"] {
-  color: var(--ws-ink);
-  background-color: var(--ws-paper);
-  background-image:
-    linear-gradient(var(--ws-blueprint-grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--ws-blueprint-grid) 1px, transparent 1px);
-  background-size: 24px 24px;
-  border-inline-start: 2px solid var(--ws-accent);
-  border-block-end-color: var(--ws-hairline-soft);
-}
-:scope[data-part="since-row"] .ws-overview-change-name {
-  color: var(--ws-ink);
-  font-family: var(--font-mono);
-}
-:scope[data-part="since-row"] .ws-overview-change-outcome { color: var(--ws-ink-soft); }
-:scope[data-part="since-row"] .ws-overview-change-summary { color: var(--ws-owed); }
 
 [data-part="page-sheet"] { color: var(--ws-ink); }
 [data-part="page-sheet"]::backdrop { background: rgb(0 0 0 / 38%); }
@@ -186,9 +140,6 @@
 [data-part="audio-waveform"] { color: var(--ws-accent); }
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  :scope[data-part="folio"][data-density="full"],
-  :scope[data-part="folio"][data-density="compact"] { padding: 14px 0; }
-  :scope[data-part="folio"][data-density="line"] { padding: 4px 0; }
   [data-part="phone-topbar"] {
     color: var(--ws-ink);
     background-color: var(--ws-paper);

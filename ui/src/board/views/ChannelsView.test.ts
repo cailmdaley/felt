@@ -37,14 +37,22 @@ function daemon(fail: string[] = [], stored = new Map<string, string>(), pinned:
   return { posts, stored }
 }
 const board = (inFlight: ReturnType<typeof card>[]) => response({ now: { drafts: [], inFlight, awaitingReview: [] } })
-async function mount(inFlight = [shear, mask, covariance, van, garden], view = new ChannelsView()) {
-  const openFromDesk = vi.fn(), requestRefresh = vi.fn(), see = vi.fn()
-  const ctx = { cards: [], response: board(inFlight), shuttleBase: '', workspace: { openFromDesk, openPage: vi.fn() }, requestRefresh, openCard: vi.fn(), see } as unknown as ViewContext
+/** Documents the fleet sent: a plot from the mask thread, a note from a fiber the board does not hold. */
+const sent = (uid: string, path: string, minutes: number, fiber = card({ id: uid, uid, name: uid })) =>
+  ({ card: fiber, receipt: { uid, key: `host:${path}`, owner: 'host', host: 'host', fullPath: path, basename: path.split('/').at(-1)!, timestamp: Date.now() - minutes * minute } })
+const library = [sent('M', '/notes/mask/north-mask.png', 30, mask), sent('old', '/notes/old/lensing-notes.md', 600, card({ id: 'old', uid: 'old', name: 'Lensing notes' }))]
+async function mount(inFlight = [shear, mask, covariance, van, garden], view = new ChannelsView(), lately = [garden]) {
+  const openFromDesk = vi.fn(), openPage = vi.fn(), requestRefresh = vi.fn(), see = vi.fn()
+  const workspace = {
+    openFromDesk, openPage, readLatelyCards: () => lately,
+    library: { subscribe: () => () => {}, visit: () => {}, documents: () => library, receipts: (uid: string) => library.filter(doc => doc.receipt.uid === uid).map(doc => doc.receipt) },
+  }
+  const ctx = { cards: [], response: board(inFlight), shuttleBase: '', workspace, requestRefresh, openCard: vi.fn(), see } as unknown as ViewContext
   const host = document.createElement('div'); document.body.append(host)
   views.push(view); view.mount(host, ctx)
   await settle(); await settle()
   const reply = host.querySelector<HTMLTextAreaElement>('.kbn-ch-reply-text')!
-  return { view, ctx, host, reply, openFromDesk, requestRefresh, see }
+  return { view, ctx, host, reply, openFromDesk, openPage, requestRefresh, see }
 }
 const rail = (host: HTMLElement) => [...host.querySelectorAll('.kbn-ch-pick-name')].map(el => el.textContent)
 const shown = (host: HTMLElement) => host.querySelector('.kbn-ch-name')?.textContent
@@ -142,16 +150,19 @@ it('sets a channel aside under a key that names it and its newest wait, and rest
   expect(rail(host)).toStrictEqual(['Moving house'])
 })
 
-it('adds a channel from the finder by pinning it, and renews a pin when a channel is used', async () => {
+it('finds a quiet channel, pins it from its header, and renews a pin when a channel is used', async () => {
   const { posts } = daemon([], new Map(), { 'role:analyst': Date.now() - 2 * day })
   const { view, host } = await mount()
   const finder = host.querySelector<HTMLInputElement>('.kbn-ch-finder')!
   finder.value = 'gard'
   finder.dispatchEvent(new Event('input'))
-  expect([...host.querySelectorAll('.kbn-ch-found-pick')].map(el => el.textContent)).toStrictEqual(['Garden plan'])
+  expect(rail(host)).toStrictEqual(['Garden plan'])
   finder.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }))
-  expect(rail(host)).toStrictEqual(['Analyst', 'Moving house', 'Garden plan'])
   expect(shown(host)).toBe('Garden plan')
+  view.find('')
+  expect(rail(host)).toStrictEqual(['Analyst', 'Moving house', 'Garden plan'])
+  host.querySelector<HTMLButtonElement>('.kbn-ch-pin')!.click()
+  expect(host.querySelector('.kbn-ch-pin')).toBeNull()
   expect(host.querySelector('.kbn-ch-msg-name')?.textContent).toBe('Garden plan')
   // Stepping through with j / k is not use; choosing the channel is.
   view.keydown(new KeyboardEvent('keydown', { key: 'k' }))
@@ -220,4 +231,32 @@ it('marks what is new since the channel was last read, and reads it again when m
   first.view.unmount(); views.length = 0
   const again = await mount(undefined, first.view)
   expect([...again.host.querySelectorAll('.kbn-ch-msg')].map(el => el.hasAttribute('data-new'))).toStrictEqual([false, false])
+})
+
+it('shows a channel\'s files from its header, and finds channels and files across every channel', async () => {
+  daemon()
+  const { view, host, openPage } = await mount()
+  const tab = (name: string) => [...host.querySelectorAll<HTMLButtonElement>('.kbn-ch-tab')].find(el => el.textContent?.startsWith(name))!
+  expect(tab('Files').textContent).toBe('Files 1')
+  expect(host.querySelector<HTMLElement>('.kbn-ch-files')!.hidden).toBe(true)
+  tab('Files').click()
+  expect(host.querySelector<HTMLElement>('.kbn-ch-tapestry')!.hidden).toBe(true)
+  expect([...host.querySelectorAll('.kbn-ch-files .kbn-ch-doc')].map(el => [el.querySelector('.kbn-ch-doc-name')?.textContent, el.querySelector('.kbn-ch-doc-meta')?.firstChild?.textContent]))
+    .toStrictEqual([['north-mask.png', 'Choose the mask']])
+  host.querySelector<HTMLButtonElement>('.kbn-ch-files .kbn-ch-doc')!.click()
+  expect(openPage).toHaveBeenLastCalledWith(mask, 'host:/notes/mask/north-mask.png')
+  // Read lately sits under the channels until Find looks for something.
+  expect([...host.querySelectorAll('.kbn-ch-lately .kbn-ch-doc-name')].map(el => el.textContent)).toStrictEqual(['Garden plan'])
+  // A file's name finds its channel and the file; a fiber outside every channel is found by its files.
+  view.find('north')
+  expect(rail(host)).toStrictEqual(['Analyst'])
+  expect([...host.querySelectorAll('.kbn-ch-doclist .kbn-ch-doc-name')].map(el => el.textContent)).toStrictEqual(['north-mask.png'])
+  expect(host.querySelector<HTMLElement>('[aria-label="Read lately"]')!.hidden).toBe(true)
+  view.find('lensing')
+  expect(rail(host)).toStrictEqual([])
+  host.querySelector<HTMLButtonElement>('.kbn-ch-doclist .kbn-ch-doc')!.click()
+  expect(openPage).toHaveBeenLastCalledWith(library[1].card, 'host:/notes/old/lensing-notes.md')
+  // Find reaches a channel that is not in the rail by any of its members.
+  view.find('covariance')
+  expect(rail(host)).toStrictEqual(['Analyst'])
 })

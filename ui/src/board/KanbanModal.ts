@@ -196,7 +196,7 @@ export class KanbanModal {
    * Desk by `syncViewChrome`, since a lens is a Desk posture.
    */
   private lensSlotEl: HTMLDivElement | null = null
-  /** The bar's Find: one field on every view (constitutions; the Board's folios). */
+  /** The bar's Find: one field on every view (constitutions; the channels and their documents on Channels). */
   private findEl: HTMLInputElement | null = null
   /**
    * Wrapper around the Desk surfaces (Now + Resting).
@@ -275,7 +275,7 @@ export class KanbanModal {
   private readonly dock: Dock
   private readonly voice: Voice
   private deskKeyboard: DeskKeyboard | null = null
-  /** The fleet's sent files: the rows' report marks, the Board's sheet and the family maps. */
+  /** The fleet's sent files: the rows' report marks, the library of documents and the family maps. */
   private readonly fiberSends: FiberSends
   private keymapHelp: KeymapHelp | null = null
   private workspaceReturnFocus: HTMLElement | null = null
@@ -407,7 +407,7 @@ export class KanbanModal {
     const wanted = new URLSearchParams(window.location.search).get('view') ?? viewOfHash(window.location.hash)
     if (wanted && listViews().some((v) => v.id === wanted)) this.setView(wanted as BoardViewId)
     this.keymapHelp = new KeymapHelp(
-      () => this.workspace?.isActive ? 'reader' : this.activeViewId === 'desk' ? 'desk' : 'overview',
+      () => this.workspace?.isActive ? 'reader' : this.activeViewId === 'desk' ? 'desk' : 'view',
     )
     this.workspace = new Workspace(this.container!, {
       sends: this.fiberSends,
@@ -416,7 +416,7 @@ export class KanbanModal {
       deskRows: () => this.workspaceCards(),
       deskPlacement: card => this.deskProjection.placements.get(deskCardKey(card)),
       threadIndex: () => threadIndexFor(this.deskResponse ?? this.lastResponse),
-      origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : this.activeViewId === 'globe' ? 'Globe' : this.activeViewId === 'channels' ? 'Channels' : 'Board',
+      origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : this.activeViewId === 'globe' ? 'Globe' : 'Channels',
       onVisibility: (active) => { this.showWorkspace(active); if (!active) this.voice.see(null) },
       onSight: card => this.voice.see(card && constitutionFor(card, boardCards(this.lastResponse))),
       onReturnCard: card => {
@@ -491,7 +491,6 @@ export class KanbanModal {
     if (this.resizeRaf !== null) return
     this.resizeRaf = window.requestAnimationFrame(() => {
       this.resizeRaf = null
-      this.placeVeil()
       this.placeReader()
     })
   }
@@ -611,7 +610,7 @@ export class KanbanModal {
       if (active) this.body.setAttribute('aria-hidden', 'true')
       else this.body.removeAttribute('aria-hidden')
     }
-    if (active) { this.workspace?.hideOverview(); return }
+    if (active) return
     if (this.pendingDeskData && this.activeViewId === 'desk') {
       const data = this.pendingDeskData
       this.pendingDeskData = null
@@ -702,8 +701,13 @@ export class KanbanModal {
     this.findEl.type = 'search'
     this.findEl.placeholder = 'Find'
     this.findEl.setAttribute('aria-label', 'Find a constitution or transcript')
-    this.findEl.addEventListener('focus', () => this.workspace?.find(this.activeViewId === 'board'))
-    this.findEl.addEventListener('input', () => this.workspace?.find(this.activeViewId === 'board'))
+    // A view that filters itself by Find (Channels) takes it; elsewhere it lists constitutions.
+    const serve = (): void => {
+      const view = this.activeView
+      this.workspace?.find(view?.find ? query => view.find?.(query) : undefined)
+    }
+    this.findEl.addEventListener('focus', serve)
+    this.findEl.addEventListener('input', serve)
     // Escape puts Find away whole: its list, its filter and the focus.
     this.findEl.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape' || e.isComposing) return
@@ -762,10 +766,7 @@ export class KanbanModal {
       this.workspace.returnToOrigin()
       return
     }
-    if (navigate && this.workspace) {
-      if (id === 'board') this.workspace.showBoard()
-      else this.workspace.suspend(id)
-    }
+    if (navigate && this.workspace) this.workspace.suspend(id)
     if (id === this.activeViewId) return
     this.workspace?.clearFind()
     if (!this.workspace?.isActive) this.voice.see(null)
@@ -822,19 +823,11 @@ export class KanbanModal {
   /** Paint the selected tab and show exactly one of Desk / view host. */
   private syncViewChrome(): void {
     const onDesk = this.activeViewId === 'desk'
-    // The Board's sheet is a vellum veil over the Desk, which stays drawn
-    // beneath it, untouchable and out of the accessibility tree.
-    const veiled = this.activeViewId === 'board'
     // Leaving the Desk mid-drag takes the horizon with it.
     if (!onDesk) this.syncDragHorizon(false)
     if (this.deskEl) {
-      this.deskEl.style.display = onDesk || veiled ? '' : 'none'
-      this.deskEl.inert = veiled
-      if (veiled) this.deskEl.setAttribute('aria-hidden', 'true')
-      else this.deskEl.removeAttribute('aria-hidden')
+      this.deskEl.style.display = onDesk ? '' : 'none'
     }
-    this.body?.classList.toggle('kbn-body-veiled', veiled)
-    this.placeVeil()
     // The chips ride in the tab strip, which every view shares — but the lens
     // they engage only means anything on the Desk.
     if (this.lensSlotEl) this.lensSlotEl.style.display = onDesk ? '' : 'none'
@@ -847,12 +840,6 @@ export class KanbanModal {
     }
   }
 
-  /** The veiled view host starts under the tab strip and covers the rest of the page. */
-  private placeVeil(): void {
-    if (!this.container || !this.tabsEl || this.activeViewId !== 'board') return
-    const top = this.tabsEl.getBoundingClientRect().bottom - this.container.getBoundingClientRect().top
-    this.container.style.setProperty('--kbn-veil-top', `${Math.max(0, Math.round(top))}px`)
-  }
 
   /**
    * Drive the active view's lifecycle from board data. Mounts on the first
@@ -980,9 +967,9 @@ export class KanbanModal {
    * key was consumed.
    */
   private handleViewHotkey(e: KeyboardEvent): boolean {
-    const surface = this.workspace?.isActive ? 'reader' : this.activeViewId === 'board' ? 'overview' : 'desk'
+    const surface = this.workspace?.isActive ? 'reader' : 'desk'
     const intent = keyIntent(e, surface)
-    if (intent !== 'desk' && intent !== 'chronicle' && intent !== 'board' && intent !== 'globe' && intent !== 'channels') return false
+    if (intent !== 'desk' && intent !== 'chronicle' && intent !== 'globe' && intent !== 'channels') return false
     if (keystrokeIsSpokenFor()) return false
     e.preventDefault()
     e.stopPropagation()
@@ -1694,16 +1681,11 @@ export class KanbanModal {
     // `deskEl` docstring true: the Desk that comes back is the one the user
     // left, scroll positions intact, repainted from fresh data at the moment
     // it can see what it is doing.
-    // The Board veils a Desk that must exist: its first paint happens beneath
-    // the veil, and later data waits for the Desk to be in front again.
-    const veiledFirstPaint = this.activeViewId === 'board' && !this.deskEl.hasChildNodes()
     if (this.activeViewId !== 'desk') {
       this.lastResponse = data
       this.mountOrRefreshActiveView()
-      if (!veiledFirstPaint) {
-        this.pendingDeskData = data
-        return
-      }
+      this.pendingDeskData = data
+      return
     }
     this.pendingDeskData = null
 
@@ -2058,10 +2040,6 @@ export class KanbanModal {
     if (this.handleViewHotkey(e)) return
     // A tablist's arrows, Home and End are its own (the view strip, the phone folio), not the active view's.
     if (TABLIST_KEYS.has(e.key) && (e.target as HTMLElement | null)?.closest?.('[role="tablist"]')) return
-    if (e.key === 'Escape' && this.activeViewId === 'board' && !keystrokeIsSpokenFor()) {
-      if (this.workspace?.handleOverviewEscapeLayer()) { e.preventDefault(); e.stopPropagation(); return }
-      e.preventDefault(); e.stopPropagation(); this.setView('desk'); return
-    }
     if (this.activeView?.keydown?.(e)) { e.preventDefault(); e.stopPropagation(); return }
     // Chronicle keeps its own record search in its head; `/` reaches the bar's Find there too, as on the Globe and Channels.
     if ((this.activeViewId === 'chronicle' || this.activeViewId === 'globe' || this.activeViewId === 'channels') && !keystrokeIsSpokenFor() && keyIntent(e, 'desk') === 'find' && this.focusFind()) {

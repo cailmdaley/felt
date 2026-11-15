@@ -37,6 +37,8 @@ export interface Channel {
   name: string
   /** Whose tapestry is pinned and who a reply goes to by default: the office's seat, else its most recently active top-level. */
   seat: KanbanCard
+  /** Every live constitution in it: its top-levels and their threads. */
+  members: KanbanCard[]
   /** Oldest first, as a channel reads: the newest at the bottom. */
   messages: Message[]
   /** When the newest wait began, or 0 when nothing waits. */
@@ -156,6 +158,7 @@ export function composeChannels(input: {
       key,
       name: office ? names.get(office) ?? office : top.name,
       seat,
+      members,
       messages,
       newest,
       waiting,

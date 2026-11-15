@@ -10,13 +10,14 @@ import { composeChannels, officeOf, setAsideKey, unpinKey, type Channel, type He
 import type { SentFile } from '../sentFiles.js'
 import { stateDot } from '../stateDot.js'
 import { cardNamed } from '../threads.js'
-import { fileBytesUrl, renderMarkdown } from '../utils.js'
-import { COMPANION_NAMES, docKey } from '../workspace/documents.js'
+import { basename, fileBytesUrl, renderMarkdown } from '../utils.js'
+import { COMPANION_NAMES, docKey, type DocKey } from '../workspace/documents.js'
+import { declaredTitle } from '../workspace/DocumentTitles.js'
 import { renderFiberMarkdown } from '../workspace/FiberProse.js'
 import { readFiber } from '../workspace/fiberSource.js'
 import { charters } from '../workspace/RolePage.js'
 import { createViewPage } from './ViewPage.js'
-import { keystrokeIsSpokenFor, registerView, type TemporalView, type ViewContext } from './ViewRegistry.js'
+import { isTypingTarget, keystrokeIsSpokenFor, registerView, type TemporalView, type ViewContext } from './ViewRegistry.js'
 import './ChannelsView.css'
 
 const SEEN = 'shuttle.channels.seen:'
@@ -25,6 +26,10 @@ const RAIL = 'shuttle.channels.rail-hidden'
 const RENEW_MS = 86_400_000
 /** How far a finger or a trackpad must travel sideways to open or close the rail. */
 const SWIPE_PX = 60
+/** Find lists at most this many documents beneath the channels it matches. */
+const FOUND_DOCUMENTS = 12
+/** One document of a channel, or one Find turned up: the fiber it belongs to, its page, its name and when it was sent (0 for a fiber's own companion). */
+interface Doc { card: KanbanCard; key: DocKey; name: string; path: string; at: number }
 const fiberOf = (card: KanbanCard): string => card.uid ?? card.id
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] => {
   const node = document.createElement(tag)
@@ -58,17 +63,23 @@ function lastSeen(key: string): number {
  * one), listed while something in it waits on the human or while he keeps
  * it pinned. A channel reads like a chat: each worker's line, oldest first,
  * the ones waiting on him lit, the seat's tapestry pinned beside them, and a
- * reply bar that answers the seat or the worker chosen.
+ * reply bar that answers the seat or the worker chosen. Beside the tapestry
+ * are the channel's files: every member's companions and sent documents.
+ * Find (the bar's, or the rail's own on a phone) reaches every channel and
+ * every document the fleet sent; the rail keeps what was read lately.
  */
 export class ChannelsView implements TemporalView {
   readonly id = 'channels' as const
   readonly title = 'Channels'
-  readonly hotkey = '5'
+  readonly hotkey = '3'
   private ctx: ViewContext | null = null
   private layout: HTMLElement | null = null
   private list: HTMLOListElement | null = null
   private finder: HTMLInputElement | null = null
-  private found: HTMLUListElement | null = null
+  private found: HTMLElement | null = null
+  private lately: HTMLElement | null = null
+  private tabs: HTMLElement | null = null
+  private filesEl: HTMLOListElement | null = null
   private railToggle: HTMLButtonElement | null = null
   private channelEl: HTMLElement | null = null
   private head: HTMLElement | null = null
@@ -82,6 +93,12 @@ export class ChannelsView implements TemporalView {
   private form: HTMLFormElement | null = null
   private channels: Channel[] = []
   private current: string | null = null
+  /** What Find is looking for; '' lists the channels as they wait. */
+  private query = ''
+  /** What the aside shows beside the lines: the pinned tapestry, or the channel's files. */
+  private pane: 'tapestry' | 'files' = 'tapestry'
+  /** Each member's own companions (tapestry, artifact, report), probed once its channel's files are shown. */
+  private readonly companions = new Map<string, string[]>()
   /** The worker chosen in the current channel; null is the seat. It stays chosen until the reader chooses again. */
   private chosen: KanbanCard | null = null
   /** What was typed in each channel's reply bar, kept while the reader is elsewhere. */
@@ -105,6 +122,7 @@ export class ChannelsView implements TemporalView {
   private readGeneration = 0
   private tapestryGeneration = 0
   private unsubscribe?: () => void
+  private unsubscribeLibrary?: () => void
   private stopGestures?: () => void
 
   mount(host: HTMLElement, ctx: ViewContext): void {
@@ -125,6 +143,8 @@ export class ChannelsView implements TemporalView {
     this.railHidden = stored(RAIL) === '1'
     this.showRail()
     this.unsubscribe = ctx.sends?.subscribe(() => this.draw())
+    this.unsubscribeLibrary = ctx.workspace?.library.subscribe(() => this.draw())
+    ctx.workspace?.library.visit()
     void charters(ctx.shuttleBase).then(list => {
       this.names = new Map(list.flatMap(charter => charter.name ? [[charter.slug, charter.name] as [string, string]] : []))
       this.draw()
@@ -137,25 +157,28 @@ export class ChannelsView implements TemporalView {
     rail.setAttribute('aria-label', 'Channels')
     this.railToggle!.setAttribute('aria-controls', rail.id)
     this.list = el('ol', 'kbn-ch-list')
-    const add = el('div', 'kbn-ch-add')
+    // The bar's Find serves the desktop; a phone's bar has none, so the rail carries its own.
     this.finder = el('input', 'kbn-ch-finder')
     this.finder.type = 'search'
-    this.finder.placeholder = 'Add a channel…'
-    this.finder.setAttribute('aria-label', 'Add a channel')
-    this.found = el('ul', 'kbn-ch-found')
-    this.finder.addEventListener('input', () => this.drawFound())
+    this.finder.placeholder = 'Find a channel or file…'
+    this.finder.setAttribute('aria-label', 'Find a channel or file')
+    this.finder.addEventListener('input', () => this.find(this.finder!.value))
     this.finder.addEventListener('keydown', event => {
-      if (event.key === 'Enter') { event.preventDefault(); this.found?.querySelector<HTMLButtonElement>('button')?.click() }
-      if (event.key === 'Escape' && this.finder!.value) { event.stopPropagation(); this.finder!.value = ''; this.drawFound() }
+      if (event.key === 'Enter') { event.preventDefault(); this.openFirst() }
+      if (event.key === 'Escape' && this.finder!.value) { event.stopPropagation(); this.find('') }
     })
-    add.append(this.finder, this.found)
-    rail.append(this.list, add)
+    this.found = el('section', 'kbn-ch-shelfed')
+    this.found.setAttribute('aria-label', 'Files found')
+    this.lately = el('section', 'kbn-ch-shelfed')
+    this.lately.setAttribute('aria-label', 'Read lately')
+    rail.append(this.finder, this.list, this.found, this.lately)
     return rail
   }
   private channelPane(): HTMLElement {
     this.channelEl = el('article', 'kbn-ch')
     this.channelEl.tabIndex = -1
     this.head = el('header', 'kbn-ch-head')
+    this.tabs = el('div', 'kbn-ch-tabs')
     const columns = el('div', 'kbn-ch-columns')
     const talk = el('section', 'kbn-ch-talk')
     this.feed = el('ol', 'kbn-ch-feed')
@@ -163,7 +186,8 @@ export class ChannelsView implements TemporalView {
     const canvas = el('aside', 'kbn-ch-canvas')
     this.label = el('p', 'kbn-ch-label')
     this.tapestry = el('div', 'kbn-ch-tapestry')
-    canvas.append(this.label, this.tapestry)
+    this.filesEl = el('ol', 'kbn-ch-files')
+    canvas.append(this.label, this.tapestry, this.filesEl)
     columns.append(talk, canvas)
     this.channelEl.append(this.head, columns)
     return this.channelEl
@@ -199,8 +223,65 @@ export class ChannelsView implements TemporalView {
   }
   private status(text: string): void { if (this.note) this.note.textContent = text }
 
-  /** The rail's channels: those listed, and the one being read, which stays until the reader moves on. */
-  private get listed(): Channel[] { return this.channels.filter(channel => channel.listed || channel.key === this.current) }
+  /**
+   * The rail's channels: while Find looks for something, every channel it
+   * matches; otherwise those listed, and the one being read, which stays
+   * until the reader moves on.
+   */
+  private get listed(): Channel[] {
+    if (!this.query) return this.channels.filter(channel => channel.listed || channel.key === this.current)
+    const query = this.query.toLowerCase()
+    return this.channels.filter(channel => [channel.name, ...channel.members.flatMap(card => [card.name, card.path]),
+      ...this.documents(channel).flatMap(doc => [doc.name, doc.path])].some(text => text.toLowerCase().includes(query)))
+  }
+  /** Filters the rail by what Find holds, from the bar's field or the rail's own. */
+  find(query: string): void {
+    this.query = query.trim()
+    if (this.finder && this.finder.value !== query) this.finder.value = query
+    this.drawRail()
+  }
+  /** Enter in Find opens the first channel it found, else the first document. */
+  private openFirst(): void {
+    const channel = this.listed[0]
+    if (channel) { this.open(channel.key, true); return }
+    this.found?.querySelector<HTMLButtonElement>('button')?.click()
+  }
+  /**
+   * A channel's documents: each member's own companions once probed, then
+   * everything its members sent, newest first, each document once.
+   */
+  private documents(channel: Channel): Doc[] {
+    const library = this.ctx?.workspace?.library
+    const docs = new Map<DocKey, Doc>()
+    for (const card of channel.members) for (const path of this.companions.get(`${card.originId}\0${fiberOf(card)}`) ?? []) {
+      const key = docKey(card.originId, path, card.originId, card.fiberDir)
+      docs.set(key, { card, key, name: basename(path), path, at: 0 })
+    }
+    const sent = channel.members.flatMap(card => (library?.receipts(fiberOf(card)) ?? []).map(receipt => ({ card, receipt })))
+      .sort((a, b) => b.receipt.timestamp - a.receipt.timestamp)
+    for (const { card, receipt } of sent) if (!docs.has(receipt.key)) {
+      docs.set(receipt.key, { card, key: receipt.key, name: declaredTitle(receipt.key)?.title ?? receipt.basename, path: receipt.fullPath, at: receipt.timestamp })
+    }
+    return [...docs.values()]
+  }
+  /** Probes each member's companions once, in the neighbour lane, redrawing the files as they turn up. */
+  private probeCompanions(channel: Channel): void {
+    const base = this.ctx?.shuttleBase ?? ''
+    for (const card of channel.members) {
+      const id = `${card.originId}\0${fiberOf(card)}`
+      if (!card.fiberDir || this.companions.has(id)) continue
+      this.companions.set(id, [])
+      void Promise.all(COMPANION_NAMES.map(async name => {
+        const path = `${card.fiberDir}/${name}`
+        return (await head(fileBytesUrl(base, path, card.originId), RESOURCE_PRIORITY.neighbour).catch(() => null))?.exists ? path : null
+      })).then(paths => {
+        const found = paths.filter((path): path is string => !!path)
+        if (!found.length) return
+        this.companions.set(id, found)
+        this.drawFiles()
+      })
+    }
+  }
   private draw(): void {
     const ctx = this.ctx
     if (!ctx || !this.list || !this.loaded) return
@@ -211,7 +292,6 @@ export class ChannelsView implements TemporalView {
     })
     if (!this.channels.some(channel => channel.key === this.current)) this.open(this.listed[0]?.key ?? null, false)
     this.drawRail()
-    this.drawFound()
     this.drawChannel()
   }
   /**
@@ -276,25 +356,57 @@ export class ChannelsView implements TemporalView {
       item.append(pick)
       items.push(item)
     }
+    if (this.query && !items.length) items.push(el('li', 'kbn-ch-hush kbn-ch-none', 'No channel matches.'))
     list.replaceChildren(...items)
     // A poll redraws the rail: the channel that had focus keeps it.
     if (focused) list.querySelector<HTMLElement>(`[data-channel="${CSS.escape(focused)}"]`)?.focus({ preventScroll: true })
+    this.drawFound()
+    this.drawLately()
   }
-  /** The channels not in the rail whose names match what is typed in the finder. */
+  /** The documents Find matches, across every channel and every fiber the fleet sent from. */
   private drawFound(): void {
-    if (!this.found || !this.finder) return
-    const query = this.finder.value.trim().toLowerCase()
-    const matches = query ? this.channels.filter(channel => !channel.listed && `${channel.name} ${channel.seat.name}`.toLowerCase().includes(query)).slice(0, 6) : []
-    this.found.replaceChildren(...matches.map(channel => {
+    const found = this.found!, query = this.query.toLowerCase(), library = this.ctx?.workspace?.library
+    const channelOf = new Map(this.channels.flatMap(channel => channel.members.map(card => [fiberOf(card), channel.name] as const)))
+    const matches = !query || !library ? [] : library.documents().filter(({ card, receipt }) =>
+      [receipt.basename, receipt.fullPath, declaredTitle(receipt.key)?.title ?? '', card.name, channelOf.get(fiberOf(card)) ?? ''].some(text => text.toLowerCase().includes(query)))
+      .slice(0, FOUND_DOCUMENTS)
+    found.hidden = !matches.length
+    found.replaceChildren(el('h4', 'kbn-ch-shelf', 'Files'), this.docList(matches.map(({ card, receipt }) => ({
+      card, key: receipt.key, name: declaredTitle(receipt.key)?.title ?? receipt.basename, path: receipt.fullPath, at: receipt.timestamp,
+    })), doc => channelOf.get(fiberOf(doc.card)) ?? doc.card.name))
+  }
+  /** What was read lately in this session, while Find is not looking. */
+  private drawLately(): void {
+    const cards = this.query ? [] : this.ctx?.workspace?.readLatelyCards() ?? []
+    this.lately!.hidden = !cards.length
+    const list = el('ol', 'kbn-ch-lately')
+    list.append(...cards.map(card => {
       const item = el('li', '')
-      item.append(button('kbn-ch-found-pick', channel.name, () => {
-        this.finder!.value = ''
-        void this.pin(channel)
-        this.draw()
-        this.open(channel.key, true)
-      }))
+      const pick = button('kbn-ch-doc', '', () => this.ctx?.workspace?.openPage(card))
+      pick.append(el('span', 'kbn-ch-doc-name', card.name))
+      pick.title = card.outcome ?? card.path
+      item.append(pick)
       return item
     }))
+    this.lately!.replaceChildren(el('h4', 'kbn-ch-shelf', 'Read lately'), list)
+  }
+  /** A quiet list of documents, each opening in the reader; `whose` says where each comes from. */
+  private docList(docs: Doc[], whose: (doc: Doc) => string): HTMLOListElement {
+    const list = el('ol', 'kbn-ch-doclist'), now = Date.now()
+    list.append(...docs.map(doc => {
+      const item = el('li', '')
+      const pick = button('kbn-ch-doc', '', () => this.ctx?.workspace?.openPage(doc.card, doc.key))
+      pick.title = doc.path
+      const meta = el('span', 'kbn-ch-doc-meta', whose(doc))
+      if (doc.at) {
+        const age = el('span', 'kbn-ch-age', ` · ${ago(doc.at, now)}`)
+        meta.append(age)
+      }
+      pick.append(el('span', 'kbn-ch-doc-name', doc.name), meta)
+      item.append(pick)
+      return item
+    }))
+    return list
   }
 
   private drawChannel(): void {
@@ -307,6 +419,7 @@ export class ChannelsView implements TemporalView {
       this.head.replaceChildren(el('p', 'kbn-ch-empty', 'Nobody is waiting on you.'))
       this.feed.replaceChildren()
       this.label.replaceChildren()
+      this.filesEl!.replaceChildren()
       this.dropTapestry()
       return
     }
@@ -315,7 +428,7 @@ export class ChannelsView implements TemporalView {
       channel.files.map(file => [file.fullPath, file.timestamp]), channel.held.map(line => [line.fiber_id, line.n, line.first]), [...this.replied], [...this.tempering]])
     if (sig !== this.sig) {
       this.sig = sig
-      this.head.replaceChildren(el('h3', 'kbn-ch-name', channel.name))
+      this.head.replaceChildren(el('h3', 'kbn-ch-name', channel.name), this.tabs!)
       this.feed.replaceChildren(...channel.messages.map(message => this.messageRow(channel, message, before, now)))
       if (!channel.messages.length) this.feed.append(el('li', 'kbn-ch-hush', 'Quiet.'))
       if (target === channel.seat) this.label.replaceChildren(el('span', '', channel.seat.name))
@@ -326,7 +439,31 @@ export class ChannelsView implements TemporalView {
     this.replyTo!.textContent = target.name
     this.later!.hidden = !channel.waiting && !channel.pinned
     this.later!.title = channel.waiting ? 'Set this channel aside until something new waits in it' : 'Unpin this channel'
+    this.drawTabs(channel)
     this.drawTapestry(target, channel)
+    this.drawFiles()
+  }
+  /** The header's choice of what stands beside the lines, and a pin for a channel that would otherwise leave the rail. */
+  private drawTabs(channel: Channel): void {
+    const tab = (pane: 'tapestry' | 'files', text: string): HTMLButtonElement => {
+      const node = button('kbn-ch-tab', text, () => { this.pane = pane; this.drawChannel() })
+      node.setAttribute('aria-pressed', String(this.pane === pane))
+      return node
+    }
+    const count = this.documents(channel).length
+    this.tabs!.replaceChildren(tab('tapestry', 'Tapestry'), tab('files', count ? `Files ${count}` : 'Files'))
+    if (!channel.listed) this.tabs!.append(button('kbn-ch-tab kbn-ch-pin', 'Pin', () => { void this.pin(channel); this.draw() }))
+  }
+  /** The channel's files, when they are the pane shown. */
+  private drawFiles(): void {
+    const channel = this.channel, files = this.pane === 'files' && channel
+    this.tapestry!.hidden = !!files
+    this.label!.hidden = !!files
+    this.filesEl!.hidden = !files
+    if (!files) return
+    this.probeCompanions(channel)
+    const docs = this.documents(channel)
+    this.filesEl!.replaceChildren(...(docs.length ? this.docList(docs, doc => doc.card.name).children : [el('li', 'kbn-ch-hush', 'No files yet.')]))
   }
   /** One worker's line: who, when, what, and what it sent; its actions show once it is chosen. */
   private messageRow(channel: Channel, message: Message, before: number, now: number): HTMLLIElement {
@@ -599,7 +736,10 @@ export class ChannelsView implements TemporalView {
   keydown(event: KeyboardEvent): boolean {
     if (event.metaKey || event.ctrlKey || event.altKey) return false
     if (event.key === 'Escape' && (document.activeElement === this.reply || document.activeElement === this.finder)) { this.channelEl?.focus({ preventScroll: true }); return true }
+    // Enter in the bar's Find opens what it found first.
+    if (event.key === 'Enter' && this.query && isTypingTarget(document.activeElement as HTMLElement | null) && document.activeElement !== this.reply && document.activeElement !== this.finder) { this.openFirst(); return true }
     if (keystrokeIsSpokenFor()) return false
+    if (event.key === '/' && this.finder?.getClientRects().length) { this.setRail(false); this.finder.focus({ preventScroll: true }); return true }
     if (event.key === 'j') { this.step(1); return true }
     if (event.key === 'k') { this.step(-1); return true }
     if (event.key === '[') { this.setRail(!this.railHidden); return true }
@@ -610,11 +750,13 @@ export class ChannelsView implements TemporalView {
     this.dropTapestry()
     this.readGeneration++
     this.unsubscribe?.(); this.unsubscribe = undefined
+    this.unsubscribeLibrary?.(); this.unsubscribeLibrary = undefined
     this.stopGestures?.(); this.stopGestures = undefined
     this.reading = false
     this.ctx = null
     this.layout = this.channelEl = this.head = this.label = this.tapestry = this.note = this.replyTo = null
-    this.list = null; this.found = null; this.finder = null; this.feed = null; this.railToggle = null; this.later = null
+    this.list = null; this.found = null; this.lately = null; this.finder = null; this.feed = null; this.railToggle = null; this.later = null
+    this.tabs = null; this.filesEl = null
     this.reply = null
     this.form = null
     this.sig = ''

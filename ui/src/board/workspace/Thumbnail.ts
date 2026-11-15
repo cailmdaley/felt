@@ -135,7 +135,7 @@ export class Thumbnail {
     this.el.dataset.part = 'thumbnail'
     this.el.setAttribute('aria-hidden', 'true'); this.el.inert = true
     const kind = opts.file ? documentKind(opts.file.fullPath) : 'fiber'
-    this.face = document.createElement('div'); this.face.className = 'ws-thumbnail-face ws-overview-thumb-face'
+    this.face = document.createElement('div'); this.face.className = 'ws-thumbnail-face'
     this.face.dataset.part = 'thumbnail-face'
     const glyph = document.createElement('span'); glyph.className = 'ws-thumbnail-kind'
     glyph.textContent = KIND_GLYPH[kind]
@@ -220,7 +220,7 @@ export class Thumbnail {
         if (this.documentKey && this.generation === generation) cacheDocumentTitle(this.documentKey, file.fullPath, source, etag)
       },
     })
-    this.body.classList.add('ws-thumbnail-body', 'ws-overview-thumb-body')
+    this.body.classList.add('ws-thumbnail-body')
     this.el.append(this.body)
     this.paintFace()
     const img = this.body.querySelector('img')

@@ -11,7 +11,7 @@ function event(key: string, init: KeyboardEventInit = {}, target?: HTMLElement):
 describe('shared keyboard table', () => {
   it('every declared binding yields its intent on its surface, unshadowed by an earlier binding', () => {
     const misses: string[] = []
-    for (const surface of ['desk', 'overview', 'reader'] as KeySurface[]) {
+    for (const surface of ['desk', 'view', 'reader'] as KeySurface[]) {
       for (const binding of surfaceBindings[surface]) {
         for (const key of binding.keys) {
           const label = `${surface}: ${binding.command ? 'Cmd+' : ''}${binding.alt ? 'Alt+' : ''}${key} → ${binding.intent}`
@@ -24,7 +24,7 @@ describe('shared keyboard table', () => {
   })
   it('the help guide explains every binding once per surface, showing each of its keys', () => {
     const missing: string[] = []
-    for (const surface of ['desk', 'overview', 'reader'] as KeySurface[]) {
+    for (const surface of ['desk', 'view', 'reader'] as KeySurface[]) {
       for (const binding of surfaceBindings[surface]) {
         const rows = helpSections.flatMap(section => section.rows).filter(row => row.covers.some(([s, i]) => s === surface && i === binding.intent))
         if (!rows.some(row => keyLabels(binding).every(label => row.keys.includes(label)))) missing.push(`${surface}: ${keyLabels(binding).join(' ')} → ${binding.intent}`)
@@ -46,22 +46,22 @@ describe('shared keyboard table', () => {
       [['c'], 'Open the highlighted thread in Rex'],
     ])
   })
-  it('routes 1·2·3·4·5 to the same view intents on every surface, without forwarding them into documents', () => {
-    const intents = ['desk', 'chronicle', 'board', 'globe', 'channels'] as const
-    for (const surface of ['desk', 'overview', 'reader'] as KeySurface[]) {
+  it('routes 1·2·3·4 to the same view intents on every surface, without forwarding them into documents', () => {
+    const intents = ['desk', 'chronicle', 'channels', 'globe'] as const
+    for (const surface of ['desk', 'view', 'reader'] as KeySurface[]) {
       for (const [index, intent] of intents.entries()) expect(keyIntent(event(String(index + 1)), surface)).toBe(intent)
     }
     expect(DOCUMENT_KEY_INTENTS).toContain('desk')
     expect(DOCUMENT_KEY_INTENTS).toContain('globe')
     expect(DOCUMENT_KEY_INTENTS).toContain('chronicle')
-    expect(DOCUMENT_KEY_INTENTS).toContain('board')
     expect(DOCUMENT_KEY_INTENTS).toContain('channels')
+    expect(keyIntent(event('5'), 'desk')).toBeNull()
     expect(keyIntent(event('Tab'), 'desk')).toBeNull()
   })
   it.each(['input', 'textarea', 'select'])('ignores typing in %s, including reader Alt-arrows', tag => {
     const field = document.createElement(tag)
     expect(keyIntent(event('j', {}, field), 'desk')).toBeNull()
-    for (const surface of ['desk', 'overview', 'reader'] as KeySurface[]) expect(keyIntent(event('/', {}, field), surface)).toBeNull()
+    for (const surface of ['desk', 'view', 'reader'] as KeySurface[]) expect(keyIntent(event('/', {}, field), surface)).toBeNull()
     expect(shouldForwardDocumentKey(event('/', {}, field))).toBe(false)
     expect(keyIntent(event('ArrowRight', { altKey: true }, field), 'reader')).toBeNull()
     expect(shouldForwardDocumentKey(event('ArrowRight', { altKey: true }, field))).toBe(false)

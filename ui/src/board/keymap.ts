@@ -1,12 +1,12 @@
 import { VERDICT_DELAY_MS } from './workspace/verdictDelay.js'
 
-export type KeySurface = 'desk' | 'overview' | 'reader'
-export type KeyIntent = 'desk' | 'chronicle' | 'board' | 'globe' | 'channels' | 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'nextGroup' | 'prevGroup' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward' | 'temper' | 'discard' | 'toReview' | 'undoVerdict' | 'conversation' | 'rest' | 'pin' | 'orchestrator' | 'tapestry'
+export type KeySurface = 'desk' | 'view' | 'reader'
+export type KeyIntent = 'desk' | 'chronicle' | 'channels' | 'globe' | 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'nextGroup' | 'prevGroup' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward' | 'temper' | 'discard' | 'toReview' | 'undoVerdict' | 'conversation' | 'rest' | 'pin' | 'orchestrator' | 'tapestry'
 /** Reports can request navigation only. New intents are excluded unless named here. */
 export const DOCUMENT_KEY_INTENTS: readonly KeyIntent[] = [
   'prev', 'next', 'prevChannel', 'nextChannel', 'prevGroup', 'nextGroup', 'first', 'last',
   'scrollDown', 'scrollUp', 'halfDown', 'halfUp', 'pageDown', 'pageUp',
-  'back', 'find', 'help', 'desk', 'chronicle', 'board', 'globe', 'channels', 'tapestry',
+  'back', 'find', 'help', 'desk', 'chronicle', 'channels', 'globe', 'tapestry',
 ]
 /**
  * Intents a document may pass up only while it holds the human's focus, so a
@@ -43,11 +43,16 @@ const constitutionBindings = (subject: string): KeyBinding[] => [
  * Empty regions are skipped; movement stops at the ends, never wraps. */
 export const DESK_REGION_SELECTORS = ['[data-column="drafts"]', '[data-column="inFlight"]', '[data-column="awaitingReview"]', '.kbn-section-stash', '.kbn-section-roles'] as const
 
+/** `1`–`4` switch views from every surface. */
+const VIEW_KEYS: KeyBinding[] = [
+  bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'channels', 'Switch to Channels'), bind(['4'], 'globe', 'Switch to Globe'),
+]
+
 /** The binding table is also the help overlay's source; surfaces consume intents,
  * not physical keys. Reader Alt-arrows remain guarded inside editable targets. */
 export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
   desk: [
-    bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'board', 'Switch to Board'), bind(['4'], 'globe', 'Switch to Globe'), bind(['5'], 'channels', 'Switch to Channels'),
+    ...VIEW_KEYS,
     bind(['/'], 'find', 'Find a card or constitution'),
     bind(['h', 'ArrowLeft'], 'back', 'Clear selection'),
     bind(['j', 'ArrowDown'], 'down', 'Next visible row'), bind(['k', 'ArrowUp'], 'up', 'Previous visible row'),
@@ -55,16 +60,9 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     ...constitutionBindings('the selected card'),
     bind(['l', 'ArrowRight', 'Enter', 'o'], 'open', 'Open constitution'), bind(['Escape'], 'back', 'Clear selection'), bind(['?'], 'help', 'Keyboard help'),
   ],
-  overview: [
-    bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'board', 'Switch to Board'), bind(['4'], 'globe', 'Switch to Globe'), bind(['5'], 'channels', 'Switch to Channels'),
-    bind(['/'], 'find', 'Find work or files'), bind(['Escape'], 'back', 'Return to Desk when nothing is open'),
-    bind(['h', 'ArrowLeft'], 'left', 'Move left'), bind(['l', 'ArrowRight'], 'right', 'Move right'),
-    bind(['j', 'ArrowDown'], 'down', 'Move down'), bind(['k', 'ArrowUp'], 'up', 'Move up'),
-    bind(['g'], 'first', 'First folio'), bind(['G'], 'last', 'Last folio'),
-    bind(['c', '.'], 'conversation', 'Open conversation'), bind(['Enter', 'o'], 'open', 'Open file'), bind(['?'], 'help', 'Keyboard help'),
-  ],
+  view: [...VIEW_KEYS, bind(['/'], 'find', 'Find'), bind(['?'], 'help', 'Keyboard help')],
   reader: [
-    bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'board', 'Switch to Board'), bind(['4'], 'globe', 'Switch to Globe'), bind(['5'], 'channels', 'Switch to Channels'),
+    ...VIEW_KEYS,
     bind(['p'], 'audioPlay', 'Audio: play / pause'),
     bind(['['], 'audioBack', 'Audio: back 5 seconds'),
     bind([']'], 'audioForward', 'Audio: forward 5 seconds'),
@@ -133,7 +131,7 @@ export interface HelpRow {
 export interface HelpSection { title: string; note?: string; rows: readonly HelpRow[] }
 
 const everywhere = (...intents: KeyIntent[]): Array<readonly [KeySurface, KeyIntent]> =>
-  (['desk', 'overview', 'reader'] as const).flatMap(surface => intents.map(intent => [surface, intent] as const))
+  (['desk', 'view', 'reader'] as const).flatMap(surface => intents.map(intent => [surface, intent] as const))
 const on = (surface: KeySurface, ...intents: KeyIntent[]): Array<readonly [KeySurface, KeyIntent]> => intents.map(intent => [surface, intent] as const)
 const row = (keys: string[], label: string, covers: Array<readonly [KeySurface, KeyIntent]>): HelpRow => ({ keys, label, covers })
 
@@ -142,21 +140,20 @@ const row = (keys: string[], label: string, covers: Array<readonly [KeySurface, 
  * covers its surface and intent and shows each of its keys. */
 export const helpSections: readonly HelpSection[] = [
   { title: 'Everywhere', rows: [
-    row(['1', '2', '3', '4', '5'], 'Desk, Chronicle, Board, Globe, Channels', everywhere('desk', 'chronicle', 'board', 'globe', 'channels')),
+    row(['1', '2', '3', '4'], 'Desk, Chronicle, Channels, Globe', everywhere('desk', 'chronicle', 'channels', 'globe')),
     row(['/'], 'Find', everywhere('find')),
-    row(['Esc'], 'Close a layer, then step back', everywhere('back')),
+    row(['Esc'], 'Close a layer, then step back', [...on('desk', 'back'), ...on('reader', 'back')]),
     row(['?'], 'This guide', everywhere('help')),
   ] },
-  { title: 'Moving', note: 'On the Desk and the Board.', rows: [
-    row(['j', 'k', '↓', '↑'], 'Next / previous card or folio', [...on('desk', 'down', 'up'), ...on('overview', 'down', 'up')]),
-    row(['h', 'l', '←', '→'], 'Board: move between folios', on('overview', 'left', 'right')),
-    row(['h', '←'], 'Desk: clear selection', on('desk', 'back')),
-    row(['g', 'G'], 'First / last in the column', [...on('desk', 'first', 'last'), ...on('overview', 'first', 'last')]),
-    row(['l', '→', 'Enter', 'o'], 'Desk: open the selected constitution', on('desk', 'open')),
-    row(['Enter', 'o'], 'Open; on a fiber page, expand it', [...on('overview', 'open'), ...on('reader', 'open')]),
+  { title: 'Moving', note: 'On the Desk.', rows: [
+    row(['j', 'k', '↓', '↑'], 'Next / previous card', on('desk', 'down', 'up')),
+    row(['h', '←'], 'Clear selection', on('desk', 'back')),
+    row(['g', 'G'], 'First / last in the column', on('desk', 'first', 'last')),
+    row(['l', '→', 'Enter', 'o'], 'Open the selected constitution', on('desk', 'open')),
+    row(['Enter', 'o'], 'On a fiber page, expand it', on('reader', 'open')),
   ] },
   { title: 'A constitution', note: `The selected card, or the open fiber. Verdicts write after ${VERDICT_UNDO}; z or Undo cancels the latest.`, rows: [
-    row(['c', '.'], 'Open its conversation', everywhere('conversation')),
+    row(['c', '.'], 'Open its conversation', [...on('desk', 'conversation'), ...on('reader', 'conversation')]),
     row(['t'], 'Temper', [...on('desk', 'temper'), ...on('reader', 'temper')]),
     row(['x'], 'Discard; retire a standing one', [...on('desk', 'discard'), ...on('reader', 'discard')]),
     row(['a'], 'Move to Awaiting review', [...on('desk', 'toReview'), ...on('reader', 'toReview')]),
@@ -179,7 +176,7 @@ export const helpSections: readonly HelpSection[] = [
     row(['Enter'], 'Unfold or fold a row, entering it', []),
     row(['c'], 'Open the highlighted thread in Rex', []),
   ] },
-  { title: 'Channels', note: 'One channel per office, listed while something in it waits on you or you keep it pinned.', rows: [
+  { title: 'Channels', note: 'One channel per office, listed while something in it waits on you or you keep it pinned. Its header shows its tapestry or its files; Find reaches every channel and file.', rows: [
     row(['j', 'k'], 'Next / previous channel', []),
     row(['['], 'Hide or show the channels; on a phone, swipe in from the left edge', []),
     row(['Enter'], 'Reply to the seat, or to the line chosen', []),

@@ -5,9 +5,10 @@ export type WorkspaceRoute =
   | { kind: 'overview'; hash?: string }
   | { kind: 'channel'; uid: string; owner: string; doc?: DocKey }
 
-const OVERVIEW_HASH = '#/board'
+/** The reader's addresses live under `#/board/`; `#/board` itself is an old address of Channels. */
+const BOARD_HASH = '#/board'
 const STATE_KEY = 'shuttleWorkspace'
-export type WorkspaceOriginView = 'desk' | 'chronicle' | 'board' | 'globe' | 'channels'
+export type WorkspaceOriginView = 'desk' | 'chronicle' | 'globe' | 'channels'
 interface HistoryPage { hash: string; label?: string; pageLabel?: string }
 interface RouteState {
   depth: number
@@ -25,27 +26,27 @@ function encode(value: string): string {
 }
 
 function isOriginView(value: unknown): value is WorkspaceOriginView {
-  return value === 'desk' || value === 'chronicle' || value === 'board' || value === 'globe' || value === 'channels'
+  return value === 'desk' || value === 'chronicle' || value === 'globe' || value === 'channels'
 }
 /** The board view a location hash addresses, or null for any other hash. */
 export function viewOfHash(hash: string): WorkspaceOriginView | null {
   if (hash === '#/desk') return 'desk'
   if (hash === '#/chronicle') return 'chronicle'
   if (hash === '#/globe') return 'globe'
-  if (hash === '#/channels') return 'channels'
-  if (hash === OVERVIEW_HASH || hash.startsWith(`${OVERVIEW_HASH}/`)) return 'board'
+  if (hash === '#/channels' || hash === BOARD_HASH || hash.startsWith(`${BOARD_HASH}/`)) return 'channels'
   return null
 }
-function hashFromOrigin(view: WorkspaceOriginView): string {
-  return view === 'board' ? OVERVIEW_HASH : `#/${view}`
+/** The address a view is shown at: `#/board` redirects to `#/channels`. */
+function canonical(hash: string): string {
+  return hash === BOARD_HASH ? '#/channels' : hash
 }
 
 /** Self-contained: the document bridge serializes it into each document's runtime. */
 export function parseRoute(hash: string): WorkspaceRoute | null {
-  const OVERVIEW_HASH = '#/board'
+  const BOARD_HASH = '#/board'
   const decode = (value: string): string | null => { try { return decodeURIComponent(value) } catch { return null } }
-  if (hash === OVERVIEW_HASH) return { kind: 'overview' }
-  const prefix = `${OVERVIEW_HASH}/`
+  if (hash === BOARD_HASH) return { kind: 'overview', hash: '#/channels' }
+  const prefix = `${BOARD_HASH}/`
   if (!hash.startsWith(prefix)) return null
   const addressAndDoc = hash.slice(prefix.length)
   const slash = addressAndDoc.indexOf('/')
@@ -64,9 +65,9 @@ export function parseRoute(hash: string): WorkspaceRoute | null {
 }
 
 export function formatRoute(route: WorkspaceRoute): string {
-  if (route.kind === 'overview') return OVERVIEW_HASH
+  if (route.kind === 'overview') return route.hash ?? '#/channels'
   if (!route.uid || !route.owner) throw new Error('Channel routes require a uid and owner')
-  return `${OVERVIEW_HASH}/${encode(route.uid)}@${encode(route.owner)}${route.doc === undefined ? '' : `/${encode(route.doc)}`}`
+  return `${BOARD_HASH}/${encode(route.uid)}@${encode(route.owner)}${route.doc === undefined ? '' : `/${encode(route.doc)}`}`
 }
 
 function stateObject(value: unknown): StateObject {
@@ -101,7 +102,7 @@ export class WorkspaceHistory {
   private depth = 0
   private base = false
   private baseHash = ''
-  private routeOrigin: WorkspaceOriginView = 'board'
+  private routeOrigin: WorkspaceOriginView = 'channels'
   private pendingOwnPop: string | null = null
   private backInFlight = false
   private queuedEnter: (Extract<WorkspaceRoute, { kind: 'channel' }> & { originView?: WorkspaceOriginView; replace: boolean }) | null = null
@@ -119,7 +120,7 @@ export class WorkspaceHistory {
     const sameChannel = this.current?.kind === 'channel' && route.uid === this.current.uid && route.owner === this.current.owner
     return (sameChannel ? back?.pageLabel : back?.label) ?? route.uid
   }
-  private get originLabel(): string { return { desk: 'Desk', chronicle: 'Chronicle', board: 'Board', globe: 'Globe', channels: 'Channels', map: 'Map' }[this.routeOrigin] }
+  private get originLabel(): string { return { desk: 'Desk', chronicle: 'Chronicle', globe: 'Globe', channels: 'Channels' }[this.routeOrigin] }
 
   /** Resolve this entry's page address and names without adding a visit. */
   name(label: string, pageLabel = label, doc = this.current?.kind === 'channel' ? this.current.doc : undefined): void {
@@ -160,6 +161,7 @@ export class WorkspaceHistory {
   start(): void {
     if (this.started) return
     this.started = true
+    this.redirect()
     this.currentHash = window.location.hash
     window.addEventListener('popstate', this.onPopState)
     window.addEventListener('hashchange', this.onHashChange)
@@ -206,15 +208,16 @@ export class WorkspaceHistory {
   }
 
   /** Establish an addressable view as the next channel stack's return point. */
-  view(hash = OVERVIEW_HASH): void {
+  view(address: string): void {
     this.ensureStarted()
+    const hash = canonical(address)
     if (hash === this.currentHash) return
     this.pendingOwnPop = null
     this.queuedEnter = null
     this.depth = 0
     this.base = true
     this.baseHash = hash
-    this.routeOrigin = viewOfHash(hash) ?? 'board'
+    this.routeOrigin = viewOfHash(hash) ?? 'channels'
     this.currentHash = hash
     this.current = { kind: 'overview', hash }
     window.history.pushState(withRouteState(window.history.state, { ...this.routeState(), label: undefined, pageLabel: undefined, back: undefined }), '', hash)
@@ -236,7 +239,7 @@ export class WorkspaceHistory {
       this.onRoute(overview)
       return
     }
-    const hash = hashFromOrigin(this.routeOrigin)
+    const hash = `#/${this.routeOrigin}`
     const overview: WorkspaceRoute = { kind: 'overview', hash }
     this.current = overview
     this.currentHash = hash
@@ -280,11 +283,18 @@ export class WorkspaceHistory {
     this.routeOrigin = saved?.originView
       ?? viewOfHash(saved?.baseHash ?? '')
       ?? viewOfHash(hash)
-      ?? (route.kind === 'channel' ? 'board' : this.routeOrigin)
+      ?? (route.kind === 'channel' ? 'channels' : this.routeOrigin)
+  }
+
+  /** An old `#/board` address is replaced by `#/channels` where it stands. */
+  private redirect(): void {
+    const hash = canonical(window.location.hash)
+    if (hash !== window.location.hash) window.history.replaceState(window.history.state, '', hash)
   }
 
   private handleLocation(state: unknown): void {
     this.backInFlight = false
+    this.redirect()
     const hash = window.location.hash
     const route = parseRoute(hash)
     if (this.pendingOwnPop === hash) {

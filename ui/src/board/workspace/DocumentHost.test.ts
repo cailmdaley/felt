@@ -116,7 +116,7 @@ describe('say it once label bars', () => {
     }
     try {
       const first = buildChannel(input)
-      reader.show(first, proseDocument(first)!.key, 'Board')
+      reader.show(first, proseDocument(first)!.key)
       const fiber = reader.host.get(proseDocument(first)!.key)!
       const page = fiber.viewer
       const report = reader.host.get(first.documents.find(d => d.name === 'report.html')!.key)!
@@ -131,7 +131,7 @@ describe('say it once label bars', () => {
       expect(reader.el.querySelector('.ws-labelbar .ws-agent')).toBeNull()
       const next = buildChannel({ ...input, modifiedAt: new Date(now - 120000).toISOString(),
         sent: [...input.sent, { path: '/report.html', time: now - 60000, worker: 'sol' }], previous: first })
-      reader.show(next, proseDocument(next)!.key, 'Board')
+      reader.show(next, proseDocument(next)!.key)
       expect(fiber.label.textContent).toContain('Last changed 2m ago')
       expect(report.label.querySelector('.ws-provenance')?.textContent).toBe('sent 1m ago · 2 receipts')
       expect(fiber.viewer).toBe(page)
@@ -139,7 +139,7 @@ describe('say it once label bars', () => {
       expect(prose).toHaveBeenCalledTimes(1)
       expect(render.calls).toHaveLength(calls)
       const unknown = buildChannel({ ...input, modifiedAt: undefined, previous: next })
-      reader.show(unknown, proseDocument(unknown)!.key, 'Board')
+      reader.show(unknown, proseDocument(unknown)!.key)
       expect(fiber.label.textContent).toContain('Last changed unknown')
       expect(fiber.viewer).toBe(page)
     } finally { reader.dispose() }
@@ -568,7 +568,7 @@ describe('report scrolling', () => {
     })
     document.body.append(reader.el)
     try {
-      reader.show(channel, report.key, 'Board')
+      reader.show(channel, report.key)
       const iframe = document.createElement('iframe')
       reader.host.get(report.key)!.viewer!.append(iframe)
       const bridge = connectDocumentFrame(iframe, () => {})

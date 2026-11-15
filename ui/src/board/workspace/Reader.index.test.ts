@@ -16,7 +16,7 @@ function setup(phone = false, sent = [{ path: '/plot.png', time: 1 }]) {
   document.body.append(reader.el)
   const channel = buildChannel({ uid: 'alpha', owner: 'host-a', name: 'Alpha', path: '/alpha.md', fiberDir: '/', body: '', isConstitution: true,
     embeds: [{ path: '/report.html' }, { path: '/detail.html' }], sent })
-  reader.show(channel, proseDocument(channel)!.key, 'Desk', alpha)
+  reader.show(channel, proseDocument(channel)!.key, alpha)
   return { channel, onReturn, onOrchestrator }
 }
 it('names a sent change from its head before it is opened', async () => {
@@ -44,7 +44,7 @@ it('seats the band over the stage and clears it where a page has none', () => {
   expect(band.hidden).toBe(false)
   expect([...band.children]).toEqual([first])
   expect(band.nextElementSibling).toBe(stage)
-  reader.show(channel, channel.documents.find(d => d.name === 'plot.png')!.key, 'Desk', alpha)
+  reader.show(channel, channel.documents.find(d => d.name === 'plot.png')!.key, alpha)
   expect(band.firstChild).toBe(first)
   reader.setBand(second)
   expect([...band.children]).toEqual([second])

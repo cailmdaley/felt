@@ -86,14 +86,14 @@ const pop = async (action: () => void): Promise<void> => {
   })
   await settle()
 }
-/** The Board's receipt feed has named alpha's report before the channel opens: the construction read lands, then a fresh read returns the new feed. */
+/** The library's receipt feed has named alpha's report before the channel opens: the construction read lands, then a fresh read returns the new feed. */
 const feedNamesReport = async (): Promise<void> => {
   await settle()
   const original = vi.mocked(fetch).getMockImplementation()!
   vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/sent-files/all/')
     ? new Response(JSON.stringify({ files: [{ fullPath: '/notes/alpha/report.html', uid: 'alpha', host: 'host-a', timestamp: Date.now(), sessionId: 'session-two' }] }))
     : original(input, init))
-  workspace.overview.refresh()
+  workspace.library.refresh()
   await settle()
 }
 const changed = vi.fn()
@@ -315,7 +315,7 @@ it('follows visited files after reload and returns a fresh deep link to its orig
   await settle()
   workspace.reader.back()
   expect(workspace.isActive).toBe(false)
-  expect(window.location.hash).toBe('#/board')
+  expect(window.location.hash).toBe('#/channels')
 })
 
 it('names the fiber page behind a file, and the constitution behind another channel', async () => {
@@ -362,7 +362,7 @@ describe('bar Find transcripts', () => {
   const type = (find: HTMLInputElement, text: string): void => {
     find.value = text
     find.dispatchEvent(new Event('input', { bubbles: true }))
-    workspace.find(false)
+    workspace.find()
   }
   const press = (el: HTMLElement, key: string): void => { el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) }
 
@@ -714,10 +714,10 @@ describe('workspace reader integration', () => {
     const returned = vi.fn()
     const grouped = [{ ...cards[0], status: 'closed', column: 'awaitingReview' as const }, { ...cards[1], status: 'active', column: 'inFlight' as const }]
     workspace = makeWorkspace(document.body, {
-      shuttleBase: '', cards: () => grouped, origin: () => 'Board', onVisibility: visibility,
+      shuttleBase: '', cards: () => grouped, origin: () => 'Channels', onVisibility: visibility,
       deskRows: () => [grouped[1], grouped[0]], onReturnCard: returned, dock: new Dock('', changed),
     })
-    workspace.open(grouped[0], 'Board'); await settle()
+    workspace.open(grouped[0], 'Channels'); await settle()
     expect(walked()).toEqual(['beta', 'alpha'])
     await step('k')
     expect(titled()).toBe('Beta')
@@ -1748,21 +1748,6 @@ describe('workspace reader integration', () => {
     expect(document.querySelector('.ws-dock-slot')).toBeNull()
     expect(document.querySelector('.ws-stage-band .ws-dock')).not.toBeNull()
     expect(document.querySelector('.ws-fiber-prose .ws-dock')).toBeNull()
-
-    workspace.returnToOrigin()
-    await settle()
-    workspace.mountOverview(document.body)
-    workspace.showBoard()
-    await settle()
-    const chat = document.querySelector<HTMLButtonElement>('.ws-overview-folio-conversation')!
-    expect(chat.hidden).toBe(false)
-    openWorker.mockClear()
-    chat.click()
-    expect(openWorker).toHaveBeenCalledWith('terminal-alpha', 'daemon-a', undefined)
-    openWorker.mockClear()
-    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'G', bubbles: true, cancelable: true }))
-    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: '.', bubbles: true, cancelable: true }))
-    expect(openWorker).toHaveBeenCalledWith('terminal-alpha', 'daemon-a', undefined)
   })
 
   it('keeps reordered tab DOM, labels, and selection aligned with the active fiber', async () => {
@@ -1900,7 +1885,7 @@ describe('workspace reader integration', () => {
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
   })
 
-  it('keeps a fresh deep-linked file addressable even outside the document index, returning directly to Board', async () => {
+  it('keeps a fresh deep-linked file addressable even outside the document index, returning directly to Channels', async () => {
     const gone = docKey('host-a', '/notes/alpha/gone.html', 'host-a')
     window.history.replaceState(null, '', `#/board/alpha@host-a/${encodeURIComponent(gone)}`)
     window.dispatchEvent(new HashChangeEvent('hashchange'))
@@ -1908,7 +1893,7 @@ describe('workspace reader integration', () => {
     expect(workspace.reader.document?.key).toBe(gone)
     workspace.reader.back()
     expect(workspace.isActive).toBe(false)
-    expect(window.location.hash).toBe('#/board')
+    expect(window.location.hash).toBe('#/channels')
   })
 
   it('keeps an explicit prose selection made while the body is loading', async () => {
@@ -1997,7 +1982,7 @@ describe('workspace reader integration', () => {
     document.body.replaceChildren()
     const onView = vi.fn()
     workspace = makeWorkspace(document.body, {
-      shuttleBase: '', cards: () => cards, origin: () => 'Board', onVisibility: visibility, onView,
+      shuttleBase: '', cards: () => cards, origin: () => 'Channels', onVisibility: visibility, onView,
       dock: new Dock('', changed),
     })
     await settle()
@@ -2006,16 +1991,15 @@ describe('workspace reader integration', () => {
     expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to Desk')
   })
 
-  it('restores the Board return for a file route after reload', async () => {
-    workspace.mountOverview(document.body)
-    workspace.showBoard()
+  it('restores the Channels return for a file route after reload', async () => {
+    workspace.suspend('channels')
     await settle()
     await feedNamesReport()
     const reportKey = docKey('host-a', '/notes/alpha/report.html', 'host-a')
-    workspace.overview.el.querySelector<HTMLButtonElement>('.ws-overview-folio[data-uid="alpha"] .ws-overview-folio-open')!.click()
+    workspace.open(cards[0], 'Channels', reportKey)
     await settle()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
-    expect(window.history.state).toMatchObject({ shuttleWorkspace: { originView: 'board', base: true } })
+    expect(window.history.state).toMatchObject({ shuttleWorkspace: { originView: 'channels', base: true } })
 
     workspace.dispose()
     document.body.replaceChildren()
@@ -2024,27 +2008,25 @@ describe('workspace reader integration', () => {
       shuttleBase: '', cards: () => boardCards, origin: () => 'Desk', onVisibility: visibility, onView,
       dock: new Dock('', changed),
     })
-    workspace.mountOverview(document.body)
     await settle()
-    expect(onView).toHaveBeenCalledWith('board')
+    expect(onView).toHaveBeenCalledWith('channels')
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
 
     const returned = new Promise<void>(resolve => window.addEventListener('popstate', () => resolve(), { once: true }))
     document.querySelector<HTMLButtonElement>('.ws-return')!.click()
     await returned
     await settle()
-    expect(window.location.hash).toBe('#/board')
-    expect(workspace.overview.el.hidden).toBe(false)
+    expect(window.location.hash).toBe('#/channels')
+    expect(workspace.reader.isActive).toBe(false)
   })
 
-  it('restores the Board return after reloading a nested file route', async () => {
-    workspace.mountOverview(document.body)
-    workspace.showBoard()
+  it('restores the Channels return after reloading a nested file route', async () => {
+    workspace.suspend('channels')
     await settle()
     await feedNamesReport()
     const reportKey = docKey('host-a', '/notes/alpha/report.html', 'host-a')
     const tableKey = docKey('host-a', '/notes/alpha/table.html', 'host-a')
-    workspace.overview.el.querySelector<HTMLButtonElement>('.ws-overview-folio[data-uid="alpha"] .ws-overview-folio-open')!.click()
+    workspace.open(cards[0], 'Channels', reportKey)
     await settle()
     expect(workspace.reader.host.get(tableKey)).toBeTruthy()
     workspace.reader.openDocument(tableKey)
@@ -2058,7 +2040,6 @@ describe('workspace reader integration', () => {
       shuttleBase: '', cards: () => boardCards, origin: () => 'Desk', onVisibility: visibility,
       dock: new Dock('', changed),
     })
-    workspace.mountOverview(document.body)
     await settle()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(tableKey)
 
@@ -2068,58 +2049,23 @@ describe('workspace reader integration', () => {
     workspace.reader.back()
     await returned
     await settle()
-    expect(window.location.hash).toBe('#/board')
-    expect(workspace.overview.el.hidden).toBe(false)
+    expect(window.location.hash).toBe('#/channels')
   })
 
-  it('restores overview scroll after returning from a channel opened on the Board', async () => {
-    workspace.mountOverview(document.body)
-    workspace.showBoard()
+  it('redirects the old Board address to Channels', async () => {
+    workspace.dispose()
+    window.history.replaceState(null, '', '#/board')
+    const onView = vi.fn()
+    workspace = makeWorkspace(document.body, {
+      shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, onView,
+      dock: new Dock('', changed),
+    })
     await settle()
-    await feedNamesReport()
-    workspace.overview.opened(cards[0])
-    const overview = workspace.overview.el
-    overview.scrollTop = 432
-    overview.querySelector<HTMLButtonElement>('.ws-overview-folio[data-uid="alpha"] .ws-overview-folio-open')!.click()
+    expect(window.location.hash).toBe('#/channels')
+    workspace.open(cards[0])
     await settle()
-    expect(workspace.reader.isActive).toBe(true)
-    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(docKey('host-a', '/notes/alpha/report.html', 'host-a'))
-    expect(overview.hidden).toBe(true)
-
-    overview.scrollTop = 0
-    const returned = new Promise<void>(resolve => window.addEventListener('popstate', () => resolve(), { once: true }))
-    document.querySelector<HTMLButtonElement>('.ws-return')!.click()
-    await returned
-    await settle()
-    expect(window.location.hash).toBe('#/board')
-    expect.soft(overview.hidden).toBe(false)
-    expect(overview.scrollTop).toBe(432)
-  })
-
-  it('resumes the last Board channel after Desk suspension, but not after an explicit return', async () => {
-    workspace.mountOverview(document.body)
-    workspace.showBoard()
-    await settle()
-    workspace.overview.opened(cards[0])
-    workspace.overview.el.querySelector<HTMLButtonElement>('.ws-overview-folio[data-uid="alpha"] .ws-overview-folio-open')!.click()
-    await settle()
-    expect(workspace.reader.isActive).toBe(true)
-    expect(document.querySelector('.ws-channel-title')?.textContent).toBe('Alpha')
-
-    workspace.suspend('desk')
-    expect(workspace.reader.isActive).toBe(false)
-    expect(window.location.hash).toBe('#/desk')
-    workspace.showBoard()
-    await settle()
-    expect(workspace.reader.isActive).toBe(true)
-    expect(document.querySelector('.ws-channel-title')?.textContent).toBe('Alpha')
-
-    await pop(() => document.querySelector<HTMLButtonElement>('.ws-return')!.click())
-    workspace.showBoard()
-    await settle()
-    expect(workspace.reader.isActive).toBe(false)
-    expect(workspace.overview.el.hidden).toBe(false)
-    expect(window.location.hash).toBe('#/board')
+    await pop(() => workspace.returnToOrigin())
+    expect(window.location.hash).toBe('#/channels')
   })
 })
 

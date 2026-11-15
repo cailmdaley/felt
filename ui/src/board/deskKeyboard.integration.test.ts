@@ -16,11 +16,11 @@ interface BoardInternals {
   workspace: Workspace
   deskEl: HTMLElement
   lensCycleId: string | null
-  activeViewId: 'desk' | 'chronicle' | 'board'
+  activeViewId: 'desk' | 'chronicle' | 'channels'
   voice: { status: VoiceStatus | null; notify(): void }
   deskKeyboard: { selection: { uid: string; origin: string } | null }
   workspaceColumn(card: typeof head): Array<{ card: typeof head }>
-  setView(view: 'desk' | 'chronicle' | 'board'): void
+  setView(view: 'desk' | 'chronicle' | 'channels'): void
   openDocumentChannel(card: typeof head): void
 }
 let board: KanbanModal
@@ -99,8 +99,8 @@ it('repaints the Desk as the voice target changes', () => {
 it('moves through the view tabs by arrows, Home and End, and keeps the numeric hotkeys', async () => {
   await settle()
   const tabs = Array.from(document.querySelectorAll<HTMLElement>('[role="tablist"][aria-label="Board views"] [role="tab"]'))
-  expect(tabs).toHaveLength(5)
-  expect(tabs.map(tab => tab.tabIndex)).toEqual([0, -1, -1, -1, -1])
+  expect(tabs.map(tab => tab.dataset.view ?? tab.querySelector<HTMLElement>('[data-view]')?.dataset.view)).toEqual(['desk', 'chronicle', 'channels', 'globe'])
+  expect(tabs.map(tab => tab.tabIndex)).toEqual([0, -1, -1, -1])
   tabs[0].focus()
   // The tablist's own keys do not reach the Desk underneath it.
   const before = selected()
@@ -112,7 +112,7 @@ it('moves through the view tabs by arrows, Home and End, and keeps the numeric h
   expect(selected()).toBe(before)
   press('End', {}, document.activeElement!)
   await settle()
-  expect(document.activeElement).toBe(tabs[4])
+  expect(document.activeElement).toBe(tabs[3])
   press('ArrowRight', {}, document.activeElement!)
   await settle()
   expect(document.activeElement).toBe(tabs[0])
@@ -120,7 +120,7 @@ it('moves through the view tabs by arrows, Home and End, and keeps the numeric h
   // Every other Desk key still works from a focused tab.
   press('j', {}, document.activeElement!)
   expect(selected()).not.toBe(before)
-  for (const [index, key] of ['1', '2', '3', '4', '5'].entries()) {
+  for (const [index, key] of ['1', '2', '3', '4'].entries()) {
     press(key, {}, document.activeElement!)
     await settle()
     expect(tabs[index].getAttribute('aria-selected')).toBe('true')
@@ -379,13 +379,13 @@ describe('Desk constitution keys', () => {
 
 describe('Desk keyboard selection', () => {
   it.each([
-    ['desk', 'desk'], ['desk', 'chronicle'], ['desk', 'board'],
-    ['overview', 'desk'], ['overview', 'chronicle'], ['overview', 'board'],
-    ['reader', 'desk'], ['reader', 'chronicle'], ['reader', 'board'],
+    ['desk', 'desk'], ['desk', 'chronicle'], ['desk', 'channels'],
+    ['view', 'desk'], ['view', 'chronicle'], ['view', 'channels'],
+    ['reader', 'desk'], ['reader', 'chronicle'], ['reader', 'channels'],
   ] as const)('%s switches with the numbered view key and keeps Desk selection when returning', async (from, to) => {
     press('j'); expect(selected()).toBe('review')
     expect(inside.deskKeyboard.selection?.uid).toBe('review')
-    if (from === 'overview') inside.setView('board')
+    if (from === 'view') inside.setView('channels')
     if (from === 'reader') {
       press('Enter')
       expect(inside.workspace.isActive).toBe(true)
@@ -398,19 +398,7 @@ describe('Desk keyboard selection', () => {
     await Promise.resolve()
   })
 
-  it('Escape returns an empty Overview and a root Reader to Desk, while peeling Overview layers first', async () => {
-    inside.setView('board')
-    expect(press('Escape').defaultPrevented).toBe(true)
-    expect(inside.activeViewId).toBe('desk')
-
-    inside.setView('board')
-    const latest = document.querySelector<HTMLDetailsElement>('.ws-overview-latest')!
-    latest.open = true
-    expect(press('Escape').defaultPrevented).toBe(true)
-    expect(latest.open).toBe(false)
-    expect(inside.activeViewId).toBe('board')
-
-    inside.setView('desk')
+  it('Escape returns a root Reader to Desk', async () => {
     press('j'); press('Enter')
     expect(inside.workspace.isActive).toBe(true)
     await pop(() => { expect(press('Escape').defaultPrevented).toBe(true) })
@@ -418,9 +406,9 @@ describe('Desk keyboard selection', () => {
     expect(inside.activeViewId).toBe('desk')
   })
 
-  it('1 returns to Desk and Escape returns to Board without replacing the Desk selection', async () => {
+  it('1 returns to Desk and Escape returns to Channels without replacing the Desk selection', async () => {
     press('j'); expect(selected()).toBe('review')
-    inside.setView('board')
+    inside.setView('channels')
     inside.openDocumentChannel(card({ id: 'd1', uid: 'd1' }))
     await settle()
     expect(inside.workspace.isActive).toBe(true)
@@ -429,31 +417,31 @@ describe('Desk keyboard selection', () => {
     expect(inside.deskKeyboard.selection?.uid).toBe('review')
     expect(selected()).toBe('review')
 
-    inside.setView('board')
+    inside.setView('channels')
     inside.openDocumentChannel(card({ id: 'd1', uid: 'd1' }))
     await settle()
     expect(inside.workspace.isActive).toBe(true)
     await pop(() => { expect(press('Escape').defaultPrevented).toBe(true) })
-    expect(inside.activeViewId).toBe('board')
+    expect(inside.activeViewId).toBe('channels')
     expect(inside.deskKeyboard.selection?.uid).toBe('review')
   })
 
   it.each([
     ['h', {}], ['ArrowLeft', {}], ['‹', {}], ['ArrowLeft', { altKey: true }],
   ] as const)('%s and Escape both return to the non-Desk origin', async (key, init) => {
-    inside.setView('board')
+    inside.setView('channels')
     inside.openDocumentChannel(card({ id: 'd1', uid: 'd1' }))
     await settle()
     expect(inside.workspace.isActive).toBe(true)
     await pop(() => { expect(press(key, init).defaultPrevented).toBe(true) })
     expect(inside.workspace.isActive).toBe(false)
-    expect(inside.activeViewId).toBe('board')
+    expect(inside.activeViewId).toBe('channels')
 
     inside.openDocumentChannel(card({ id: 'd1', uid: 'd1' }))
     await settle()
     await pop(() => { expect(press('Escape').defaultPrevented).toBe(true) })
     expect(inside.workspace.isActive).toBe(false)
-    expect(inside.activeViewId).toBe('board')
+    expect(inside.activeViewId).toBe('channels')
   })
 
   it.each([['n', ''], ['Enter', 'tomorrow']])('s on the focused constitution then %s rests through lifecycle', async (k, which) => {

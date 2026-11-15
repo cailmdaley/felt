@@ -1,8 +1,8 @@
 /* Channels: a rail of channels beside the channel read. A channel is a
    chat: each worker's line, oldest first, with what waits on the human lit in
-   the colour of what it wants, the seat's tapestry pinned beside it, and a
-   reply bar under the lines. Ink on parchment, red for what is new, and as
-   little else as it can do without. */
+   the colour of what it wants, the seat's tapestry pinned beside it (or the
+   channel's files in its place), and a reply bar under the lines. Ink on
+   parchment, red for what is new, and as little else as it can do without. */
 .kbn-channels { touch-action: pan-y; }
 .kbn-channels .kbn-view-body { display: block; min-height: 0; }
 .kbn-channels .kbn-view-titlerow { gap: 16px; }
@@ -13,14 +13,14 @@
 .kbn-ch-keys { margin-left: auto; }
 .kbn-ch-note { margin: 0 0 8px; }
 .kbn-ch-note:empty { display: none; }
-.kbn-ch-rail-toggle, .kbn-ch-act, .kbn-ch-later, .kbn-ch-back {
+.kbn-ch-rail-toggle, .kbn-ch-act, .kbn-ch-later, .kbn-ch-back, .kbn-ch-tab {
   padding: 0; border: 0; background: none; cursor: pointer;
   font: var(--type-meta)/var(--leading-ui) var(--font-serif);
   color: var(--kbn-ink-muted);
   text-decoration: underline; text-decoration-thickness: 0.5px; text-underline-offset: 3px;
   white-space: nowrap;
 }
-.kbn-ch-rail-toggle:hover, .kbn-ch-act:hover, .kbn-ch-later:hover, .kbn-ch-back:hover { color: var(--kbn-ink); }
+.kbn-ch-rail-toggle:hover, .kbn-ch-act:hover, .kbn-ch-later:hover, .kbn-ch-back:hover, .kbn-ch-tab:hover { color: var(--kbn-ink); }
 .kbn-ch-later[hidden] { display: none; }
 
 .kbn-ch-layout {
@@ -32,7 +32,9 @@
 .kbn-ch-layout[data-rail-hidden] { grid-template-columns: minmax(0, 1fr); }
 .kbn-ch-layout[data-rail-hidden] .kbn-ch-rail { display: none; }
 
-/* The rail: the waiting channels, then the pinned quiet ones, then the shelf gone cold, and the finder that adds one. */
+/* The rail: the waiting channels, then the pinned quiet ones, then the shelf
+   gone cold, then what was read lately; while Find looks, every channel and
+   file it matches. */
 .kbn-ch-rail { position: sticky; top: 0; display: flex; flex-direction: column; gap: 18px; padding-top: 4px; }
 .kbn-ch-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
 .kbn-ch-shelf {
@@ -71,22 +73,38 @@
 }
 .kbn-ch-pick[data-new] .kbn-ch-pick-name::after, .kbn-ch-msg[data-new] .kbn-ch-msg-name::after { margin-left: 6px; }
 .kbn-ch-finder {
+  display: none;
   width: 100%; padding: 4px 10px;
   border: 0; border-bottom: 0.5px solid var(--kbn-rule);
   background: none; color: var(--kbn-ink);
   font: italic var(--type-meta)/var(--leading-ui) var(--font-serif);
 }
 .kbn-ch-finder:focus { outline: none; border-bottom-color: var(--kbn-ink-muted); }
-.kbn-ch-found { list-style: none; margin: 4px 0 0; padding: 0; }
-.kbn-ch-found-pick {
+h4.kbn-ch-shelf { margin-top: 0; }
+.kbn-ch-shelfed[hidden] { display: none; }
+.kbn-ch-none { padding: 6px 10px; }
+
+/* Documents: a quiet list of names, each with where it comes from and when. */
+.kbn-ch-doclist, .kbn-ch-lately, .kbn-ch-files { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.kbn-ch-doc {
+  display: flex; flex-direction: column; gap: 0;
   width: 100%; padding: 4px 10px; border: 0; border-radius: 4px; background: none; text-align: left; cursor: pointer;
-  font: var(--type-row)/var(--leading-tight) var(--font-serif); color: var(--kbn-ink-soft);
+  color: var(--kbn-ink-soft);
 }
-.kbn-ch-found-pick:hover, .kbn-ch-found li:first-child .kbn-ch-found-pick { background: color-mix(in srgb, var(--kbn-ink) 5%, transparent); color: var(--kbn-ink); }
+.kbn-ch-doc:hover { color: var(--kbn-ink); background: color-mix(in srgb, var(--kbn-ink) 5%, transparent); }
+.kbn-ch-doc-name { font: var(--type-row)/var(--leading-tight) var(--font-serif); overflow-wrap: anywhere; }
+.kbn-ch-doc-meta { font: italic var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); overflow-wrap: anywhere; }
+.kbn-ch-files { padding-top: 2px; }
+.kbn-ch-files[hidden], .kbn-ch-tapestry[hidden] { display: none; }
+.kbn-ch-files .kbn-ch-doc { padding-inline: 0; }
+.kbn-ch-files .kbn-ch-doc:hover { background: none; }
 
 /* The channel. */
 .kbn-ch { min-width: 0; outline: none; }
-.kbn-ch-head { padding: 2px 0 12px; border-bottom: 0.5px solid var(--kbn-rule); }
+.kbn-ch-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 18px; padding: 2px 0 12px; border-bottom: 0.5px solid var(--kbn-rule); }
+/* What stands beside the lines: the tapestry or the files; the one shown is not underlined. */
+.kbn-ch-tabs { display: flex; gap: 14px; margin-left: auto; }
+.kbn-ch-tab[aria-pressed='true'] { color: var(--kbn-ink); text-decoration: none; cursor: default; }
 .kbn-ch-name { margin: 0; font: 500 var(--type-title)/var(--leading-tight) var(--font-serif); color: var(--kbn-ink); overflow-wrap: anywhere; }
 .kbn-ch-empty { margin: 40px 0; text-align: center; font: italic var(--type-prose)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink-muted); }
 .kbn-ch-columns {
@@ -196,6 +214,8 @@
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .kbn-channels { padding-inline: 8px; }
   .kbn-ch-keys { display: none; }
+  /* The phone's bar has no Find: the rail carries its own. */
+  .kbn-ch-finder { display: block; }
   .kbn-ch-layout { grid-template-columns: minmax(0, 1fr); }
   /* The rail is a drawer over the channel, drawn in from the left edge. */
   .kbn-ch-rail {

@@ -210,7 +210,7 @@ describe('minified production document keyboard bridge', () => {
     for (const key of ['x', 't', 'z', '.', 'c', 'r', 'p', ',', '>', 'Enter', 'o']) send(key)
     expect(app).not.toHaveBeenCalled()
     send('ArrowDown'); send('ArrowLeft', { altKey: true }); send('1'); send('2'); send('3'); send('4')
-    expect(app.mock.calls.map(([intent]) => intent)).toEqual(['scrollDown', 'back', 'desk', 'chronicle', 'board', 'globe'])
+    expect(app.mock.calls.map(([intent]) => intent)).toEqual(['scrollDown', 'back', 'desk', 'chronicle', 'channels', 'globe'])
   })
 
   it('does not forward an untrusted library-generated key event', async () => {
@@ -277,7 +277,7 @@ describe('minified production document keyboard bridge', () => {
     expect(app).toHaveBeenCalledExactlyOnceWith('back', expect.objectContaining({ key: 'Escape' }))
     win.consumeOne = false; win.consumeTwo = false
     press(frame, '1'); press(frame, '2'); press(frame, '3'); press(frame, '4')
-    expect(app.mock.calls.map(([intent]) => intent)).toEqual(['back', 'desk', 'chronicle', 'board', 'globe'])
+    expect(app.mock.calls.map(([intent]) => intent)).toEqual(['back', 'desk', 'chronicle', 'channels', 'globe'])
   })
 
   it('exits native fullscreen without forwarding, then sends Reveal Escape through the board chain', async () => {

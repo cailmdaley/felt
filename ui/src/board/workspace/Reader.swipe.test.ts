@@ -33,7 +33,7 @@ beforeEach(() => {
   Object.defineProperty(reader.stage, 'clientWidth', { configurable: true, value: 390 })
   Object.defineProperty(reader.stage, 'clientHeight', { configurable: true, value: 700 })
   document.body.append(reader.el)
-  reader.show(channel, documents[1].key, 'Desk', alpha)
+  reader.show(channel, documents[1].key, alpha)
 })
 afterEach(() => {
   reader.dispose()
@@ -70,7 +70,7 @@ describe('Reader page swipe', () => {
 
   it('drops a latched swipe when the channel is shown again or hidden', () => {
     swipe({ phase: 'move', dx: -60 })
-    reader.show(channel, documents[0].key, 'Desk', alpha)
+    reader.show(channel, documents[0].key, alpha)
     expect(swiping()).toBe(false)
     swipe({ phase: 'move', dx: -60 })
     reader.hide()

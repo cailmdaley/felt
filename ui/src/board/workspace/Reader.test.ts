@@ -46,7 +46,7 @@ function makeReader(current: KanbanCard = alpha, themes?: ChannelThemes, extra: 
     ...extra,
   })
   document.body.append(reader.el)
-  reader.show(channel(current), fiberKey(current), 'Board', current)
+  reader.show(channel(current), fiberKey(current), current)
   readers.push(reader)
   return reader
 }
@@ -246,7 +246,7 @@ describe('Reader', () => {
   it('marks owner identity even for equal UIDs and a channel absent from the list', () => {
     const other = { ...alpha, originId: 'host-other', name: 'Other Alpha' }
     const reader = makeReader(alpha, undefined, { pickerCards: () => [alpha, alpha] })
-    reader.show(channel(other), fiberKey(other), 'Board', other)
+    reader.show(channel(other), fiberKey(other), other)
     reader.el.querySelector<HTMLButtonElement>('.ws-channel-title')!.click()
     const selected = [...reader.el.querySelectorAll<HTMLElement>('.ws-switcher [aria-current="true"]')]
     expect(selected).toHaveLength(1)
@@ -290,10 +290,10 @@ describe('Reader', () => {
     const jump = (key: string): void => press(key, { shiftKey: true })
     jump('J')
     expect(onChannel).toHaveBeenLastCalledWith(gamma)
-    reader.show(channel(delta), fiberKey(delta), 'Board', delta)
+    reader.show(channel(delta), fiberKey(delta), delta)
     jump('K')
     expect(onChannel).toHaveBeenLastCalledWith(alpha)
-    reader.show(channel(beta), fiberKey(beta), 'Board', beta)
+    reader.show(channel(beta), fiberKey(beta), beta)
     jump('J')
     expect(onChannel).toHaveBeenLastCalledWith(delta)
     onChannel.mockClear()
@@ -339,7 +339,7 @@ describe('Reader', () => {
     const family: Channel = { ...channel(alpha), documents: [{ key: 'family:host-a:alpha', owner: 'host-a', path: alpha.path, name: 'Family', kind: 'family', provenance: [{ kind: 'family' }] }, ...channel(alpha).documents], labels: ['Family', 'Note'] }
     const page = document.createElement('div'); page.append(scroller)
     const reader = makeReader(alpha, undefined, { buildProse: doc => doc.kind === 'family' ? page : document.createElement('div') })
-    reader.show(family, 'family:host-a:alpha', 'Board', alpha)
+    reader.show(family, 'family:host-a:alpha', alpha)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true, cancelable: true }))
     expect(scroller.scrollBy).toHaveBeenCalledOnce()
   })
@@ -363,7 +363,7 @@ describe('Reader', () => {
       const reader = makeReader()
       const toggle = reader.el.querySelector<HTMLButtonElement>('.ws-navbar .ws-files-toggle')!
       expect(toggle.hidden).toBe(true)
-      reader.show(sent, sent.documents[0].key, 'Board', alpha)
+      reader.show(sent, sent.documents[0].key, alpha)
       expect(toggle.hidden).toBe(false)
       expect(toggle.closest('.ws-nav-trail')).not.toBeNull()
       openSheet(reader, () => { toggle.click(); expect(toggle.getAttribute('aria-expanded')).toBe('true') })
@@ -375,8 +375,8 @@ describe('Reader', () => {
         const reader = makeReader()
         const toggle = reader.el.querySelector<HTMLButtonElement>('.ws-files-toggle')!
         const fresh = buildChannel({ uid: 'alpha', owner: 'host-a', name: 'Alpha', path: '/notes/alpha.md', fiberDir: '/notes', body: '', sent: [{ path: `/notes/plot-${phone}.png`, time: Date.now() + 60_000 }] })
-        reader.show(fresh, fresh.documents[0].key, 'Board', alpha)
-        reader.show(buildChannel({ uid: 'alpha', owner: 'host-a', name: 'Alpha', path: '/notes/alpha.md', fiberDir: '/notes', body: '', previous: fresh, sent: [{ path: `/notes/plot-${phone}.png`, time: Date.now() + 120_000 }] }), fresh.documents[0].key, 'Board', alpha)
+        reader.show(fresh, fresh.documents[0].key, alpha)
+        reader.show(buildChannel({ uid: 'alpha', owner: 'host-a', name: 'Alpha', path: '/notes/alpha.md', fiberDir: '/notes', body: '', previous: fresh, sent: [{ path: `/notes/plot-${phone}.png`, time: Date.now() + 120_000 }] }), fresh.documents[0].key, alpha)
         expect(toggle.hasAttribute('data-attention')).toBe(true)
         disposeReader(reader)
       }
@@ -390,7 +390,7 @@ describe('Reader', () => {
     })
     const onReturn = vi.fn()
     const reader = makeReader(alpha, undefined, { onReturn })
-    reader.show(big, big.documents[0].key, 'Board', alpha)
+    reader.show(big, big.documents[0].key, alpha)
     expect(reader.el.querySelector('.ws-tabs,.ws-thumbbar')).toBeNull()
     const file = big.documents.at(-1)!
     reader.openDocument(file.key)

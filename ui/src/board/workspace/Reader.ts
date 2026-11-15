@@ -232,7 +232,7 @@ export class Reader {
   }
 
   /** Show the selected page; settled body and receipt reads enable the files sheet. */
-  show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true, ready = true, settled = ready): void {
+  show(channel: Channel, selected: DocKey, card?: KanbanCard, animate = true, ready = true, settled = ready): void {
     const switching = channel.uid !== this.channel?.uid || channel.owner !== this.channel?.owner || !this.active
     this.cancelSwipe()
     if (switching) { if (this.expanded) this.setExpanded(false); this.closeMenu(); this.pageSheet.hide(); this.settingsMenu.close() }
@@ -246,7 +246,7 @@ export class Reader {
     if (this.currentCard) { this.opts.themes?.bind(this.el, this.currentCard, 'reader'); this.rememberStop() }
     const arriving = !this.active
     this.active = true
-    if (arriving) this.arrive(origin === 'Board')
+    if (arriving) this.arrive()
     this.el.inert = false
     this.el.removeAttribute('aria-hidden')
     this.setBackDestination(this.backDestination)
@@ -269,9 +269,8 @@ export class Reader {
   }
 
   /**
-   * Leave the reader. Toward the Desk or Chronicle the veil lifts and the page
-   * sinks back as one motion before the pages park; toward the Board, whose
-   * sheet wears the same veil, it goes at once.
+   * Leave the reader. The veil lifts and the page sinks back as one motion
+   * before the pages park.
    */
   hide(animate = false): void {
     this.cancelSwipe()
@@ -292,26 +291,25 @@ export class Reader {
       this.el.classList.add('ws-dormant')
       this.el.classList.remove('ws-departing')
     }
-    this.el.classList.remove('ws-arriving', 'ws-veil-held')
+    this.el.classList.remove('ws-arriving')
     if (!animate || this.motion.matches || this.el.classList.contains('ws-dormant')) { settle(); return }
     this.el.classList.add('ws-departing')
     this.departure = setTimeout(settle, this.measure('crossing', 280))
   }
-  /** The veil fades in while the stage settles up; over the Board's veil only the stage moves. */
-  private arrive(veilHeld: boolean): void {
+  /** The veil fades in while the stage settles up. */
+  private arrive(): void {
     if (this.departure !== null) { clearTimeout(this.departure); this.departure = null }
     const fromRest = this.el.classList.contains('ws-dormant')
     this.el.classList.remove('ws-departing')
     if (!fromRest || this.motion.matches) { this.el.classList.remove('ws-dormant'); return }
     // Take the starting pose while dormant (no transitions), then wake and release it.
-    this.el.classList.toggle('ws-veil-held', veilHeld)
     this.el.classList.add('ws-arriving')
     void this.el.offsetWidth
     this.el.classList.remove('ws-dormant')
     cancelAnimationFrame(this.arrival)
     this.arrival = requestAnimationFrame(() => {
       this.arrival = 0
-      this.el.classList.remove('ws-arriving', 'ws-veil-held')
+      this.el.classList.remove('ws-arriving')
     })
   }
 

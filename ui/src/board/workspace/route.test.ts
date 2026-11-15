@@ -26,13 +26,14 @@ function nextPop(action: () => void): Promise<PopStateEvent> {
 describe('workspace routes', () => {
   it('round-trips channel ids and opaque document keys as encoded components', () => {
     const routes: WorkspaceRoute[] = [
-      { kind: 'overview' },
       { kind: 'channel', uid: 'project/fiber', owner: 'host@a' },
       { kind: 'channel', uid: 'project/fiber', owner: 'host@a', doc: 'host@a:/store/analysis/report.html' },
       { kind: 'channel', uid: 'uid', owner: 'host', doc: 'fiber:host:uid' },
     ]
     for (const route of routes) expect(parseRoute(formatRoute(route))).toEqual(route)
-    expect(formatRoute(routes[0])).toBe('#/board')
+    expect(formatRoute(routes[0])).toBe('#/board/project%2Ffiber@host%40a')
+    expect(formatRoute({ kind: 'overview' })).toBe('#/channels')
+    expect(parseRoute('#/board')).toEqual({ kind: 'overview', hash: '#/channels' })
   })
 
   it('rejects malformed, incomplete, and ambiguous hashes', () => {
@@ -44,13 +45,13 @@ describe('workspace routes', () => {
   })
 
   it('applies a valid initial address once and leaves an absent address untouched until navigation', () => {
-    resetHash('#/board')
+    resetHash(formatRoute({ kind: 'channel', uid: 'uid', owner: 'host' }))
     const onRoute = vi.fn()
     const history = create(onRoute)
     history.start()
     history.start()
     expect(onRoute).toHaveBeenCalledOnce()
-    expect(onRoute).toHaveBeenCalledWith({ kind: 'overview' })
+    expect(onRoute).toHaveBeenCalledWith({ kind: 'channel', uid: 'uid', owner: 'host' })
 
     resetHash('')
     const noInitialRoute = vi.fn()
@@ -132,7 +133,7 @@ describe('workspace routes', () => {
     await nextPop(() => history.back())
     expect(parseRoute(window.location.hash)).toMatchObject({ doc: 'report' })
     history.back()
-    expect(window.location.hash).toBe('#/board')
+    expect(window.location.hash).toBe('#/channels')
   })
 
   it('pops to the preceding Constitution instead of creating consecutive equal addresses', async () => {
@@ -229,8 +230,24 @@ describe('workspace routes', () => {
     expect(replace).not.toHaveBeenCalled()
   })
 
+  it('redirects the old Board address to Channels in place, at start and when it is navigated to', async () => {
+    resetHash('#/channels')
+    const onRoute = vi.fn()
+    const history = create(onRoute)
+    const push = vi.spyOn(window.history, 'pushState')
+    history.start()
+    expect(window.location.hash).toBe('#/channels')
+    expect(history.originView).toBe('channels')
+    expect(onRoute).not.toHaveBeenCalled()
+    history.enter('one', 'host')
+    history.view('#/board')
+    expect(window.location.hash).toBe('#/channels')
+    expect(onRoute).toHaveBeenLastCalledWith({ kind: 'overview', hash: '#/channels' })
+    expect(push).toHaveBeenCalledTimes(2)
+  })
+
   it('pushes different pages and leaves a reselection untouched', () => {
-    resetHash('#/board')
+    resetHash('#/channels')
     const onRoute = vi.fn()
     const history = create(onRoute)
     history.start()
@@ -244,7 +261,7 @@ describe('workspace routes', () => {
     expect(parseRoute(window.location.hash)).toEqual({
       kind: 'channel', uid: 'one', owner: 'host-a', doc: 'host-a:/store/report.html',
     })
-    expect(onRoute).toHaveBeenCalledTimes(3)
+    expect(onRoute).toHaveBeenCalledTimes(2)
   })
 
   it('pops when a step would duplicate the preceding channel address', async () => {
@@ -262,16 +279,16 @@ describe('workspace routes', () => {
   })
 
   it('establishes a view-key return point without retaining an older channel depth', async () => {
-    resetHash('#/board')
+    resetHash('#/channels')
     const history = create()
     history.start()
     history.enter('one', 'host')
     history.view('#/desk')
     expect(window.location.hash).toBe('#/desk')
-    history.view()
+    history.view('#/channels')
     history.enter('two', 'host')
     await nextPop(() => history.leave())
-    expect(window.location.hash).toBe('#/board')
+    expect(window.location.hash).toBe('#/channels')
   })
 
   it('restores the origin view from history state after reload and browser Back', async () => {
@@ -300,7 +317,7 @@ describe('workspace routes', () => {
     expect(onRoute).toHaveBeenLastCalledWith({ kind: 'overview', hash: '' })
   })
 
-  it.each(['desk', 'chronicle', 'board'] as const)('returns a directly loaded channel to %s when no managed base exists', originView => {
+  it.each(['desk', 'chronicle', 'channels'] as const)('returns a directly loaded channel to %s when no managed base exists', originView => {
     const hash = formatRoute({ kind: 'channel', uid: 'one', owner: 'host' })
     resetHash(hash)
     window.history.replaceState({ shuttleWorkspace: { depth: 0, base: false, baseHash: '', originView } }, '', hash)
@@ -315,7 +332,7 @@ describe('workspace routes', () => {
   })
 
   it('lets browser Back return to the previous channel rather than overview', async () => {
-    resetHash('#/board')
+    resetHash('#/channels')
     const onRoute = vi.fn()
     const history = create(onRoute)
     history.start()
@@ -327,22 +344,22 @@ describe('workspace routes', () => {
   })
 
   it('explicit leave unwinds managed channel depth to the overview and ignores its own pop', async () => {
-    resetHash('#/board')
+    resetHash('#/channels')
     const onRoute = vi.fn()
     const history = create(onRoute)
     history.start()
     history.enter('one', 'host')
     history.enter('two', 'host')
     const returned = nextPop(() => history.leave())
-    expect(onRoute).toHaveBeenLastCalledWith({ kind: 'overview', hash: '#/board' })
+    expect(onRoute).toHaveBeenLastCalledWith({ kind: 'overview', hash: '#/channels' })
     await returned
     await Promise.resolve()
-    expect(window.location.hash).toBe('#/board')
-    expect(onRoute).toHaveBeenCalledTimes(4)
+    expect(window.location.hash).toBe('#/channels')
+    expect(onRoute).toHaveBeenCalledTimes(3)
   })
 
   it('queues a new entry until leave finishes and carries its latest selection', async () => {
-    resetHash('#/board')
+    resetHash('#/channels')
     const onRoute = vi.fn()
     const history = create(onRoute)
     history.start()
@@ -358,7 +375,7 @@ describe('workspace routes', () => {
     expect(onRoute).toHaveBeenLastCalledWith({
       kind: 'channel', uid: 'three', owner: 'host', doc: 'host:/store/report.html',
     })
-    expect(onRoute).toHaveBeenCalledTimes(5)
+    expect(onRoute).toHaveBeenCalledTimes(4)
   })
 
   it('replaces a direct channel address on leave when no managed overview entry exists', () => {
@@ -369,8 +386,8 @@ describe('workspace routes', () => {
     const go = vi.spyOn(window.history, 'go')
     history.leave()
     expect(go).not.toHaveBeenCalled()
-    expect(window.location.hash).toBe('#/board')
-    expect(onRoute).toHaveBeenLastCalledWith({ kind: 'overview', hash: '#/board' })
+    expect(window.location.hash).toBe('#/channels')
+    expect(onRoute).toHaveBeenLastCalledWith({ kind: 'overview', hash: '#/channels' })
   })
 
 })

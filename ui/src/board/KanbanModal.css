@@ -1640,7 +1640,6 @@
   /* The phone's bar is its bottom nav; the reader covers it and keeps its own bars. */
   .kbn-viewtabs-find { display: none !important; }
   .kbn-reader-open .kbn-viewtabs { z-index: 20; }
-  .kbn-modal .kbn-body-veiled > .kbn-view-host { top: 0; bottom: calc(57px + env(safe-area-inset-bottom, 0px)); }
   .kbn-viewtabs { flex-wrap: nowrap; }
   .kbn-viewtabs-lens {
     display: block;

@@ -28,7 +28,7 @@ import { Reader } from './Reader.js'
 import { WorkspaceDepth } from './Depth.js'
 import { ConstitutionPicker } from './ConstitutionPicker.js'
 import { TranscriptResults } from './TranscriptResults.js'
-import { Overview } from './Overview.js'
+import { Library } from './Library.js'
 import { FamilyPage, placeAt, type EmbeddedDocument, type FamilyFeeds, type MapPlace } from './FamilyPage.js'
 import { fiberHolding } from './sendLines.js'
 import type { GlobeHost } from '../globe/GlobeStage.js'
@@ -37,7 +37,7 @@ import { FamilyActivity } from './familyActivity.js'
 import { markSeen, unseenSince } from './DocumentSeen.js'
 import { FiberSends } from '../fiberSends.js'
 import type { BoardOpen } from '../voice.js'
-import { parseRoute, WorkspaceHistory, type WorkspaceOriginView, type WorkspaceRoute } from './route.js'
+import { parseRoute, viewOfHash, WorkspaceHistory, type WorkspaceOriginView, type WorkspaceRoute } from './route.js'
 import { ChannelThemes } from './ChannelThemes.js'
 import { changeReviewTarget } from './changeReviewTarget.js'
 import { daemonFetch } from '../daemonApi.js'
@@ -93,9 +93,8 @@ interface ChannelState {
   error?: string
 }
 type WorkspaceView = WorkspaceOriginView
-const VIEW_HASHES: Record<string, WorkspaceView> = { '#/desk': 'desk', '#/chronicle': 'chronicle', '#/board': 'board', '#/globe': 'globe', '#/channels': 'channels' }
-const VIEW_LABELS: Record<WorkspaceView, string> = { desk: 'Desk', chronicle: 'Chronicle', board: 'Board', globe: 'Globe', channels: 'Channels' }
-const viewForOrigin = (origin: string): WorkspaceOriginView => origin === 'Desk' ? 'desk' : origin === 'Chronicle' ? 'chronicle' : origin === 'Globe' ? 'globe' : origin === 'Channels' ? 'channels' : 'board'
+const VIEW_LABELS: Record<WorkspaceView, string> = { desk: 'Desk', chronicle: 'Chronicle', globe: 'Globe', channels: 'Channels' }
+const viewForOrigin = (origin: string): WorkspaceOriginView => origin === 'Desk' ? 'desk' : origin === 'Chronicle' ? 'chronicle' : origin === 'Globe' ? 'globe' : 'channels'
 const channelId = (uid: string, owner: string): string => JSON.stringify([owner, uid])
 const pageLabel = (doc: WorkspaceDocument): string => doc.kind === 'fiber' ? 'Constitution' : doc.name
 const threadFamilyRevision = (card: KanbanCard, index: ThreadIndex): string => {
@@ -104,12 +103,12 @@ const threadFamilyRevision = (card: KanbanCard, index: ThreadIndex): string => {
   const scope = ancestry[0] ?? current
   return JSON.stringify({ card: current, ancestry, family: [scope, ...index.subtree(scope)], summary: index.summary(scope) })
 }
-/** The Board's Read lately shelf holds this many constitutions. */
+/** The Channels rail's Read lately holds this many constitutions. */
 const READ_LATELY = 8
 /** Routes, owner-addressed sources and per-channel selection for one reader. */
 export class Workspace {
   readonly reader: Reader
-  readonly overview: Overview
+  readonly library: Library
   readonly dock: Dock
   private readonly verdicts = new Verdicts()
   private readonly activity: FamilyActivity
@@ -129,7 +128,9 @@ export class Workspace {
   private current: ChannelState | null = null
   /** Constitutions opened in this session, most recent first. */
   private readLately: string[] = []
-  private origin = 'Board'
+  private origin = 'Channels'
+  /** The filter of the view the bar's Find serves, while it serves one. */
+  private filter?: (query: string) => void
   private readonly receipts = new Map<string, { files: SentFile[]; etag?: string }>()
   private readonly receiptsRead = new Map<string, Promise<void>>()
   private readonly loads = new Map<string, Promise<void>>()
@@ -137,7 +138,6 @@ export class Workspace {
   private timer: number | null = null
   private disposed = false
   private routeEpoch = 0
-  private lastBoardRoute: Extract<WorkspaceRoute, { kind: 'channel' }> | null = null
   private startPrompt: { card: KanbanCard; failure: DispatchFailureBody } | null = null
   /** The complete board-card payload used by the reader's thread and runtime surfaces. */
   private lastUpdateRevision = ''
@@ -188,29 +188,23 @@ export class Workspace {
     })
     this.dock.setVerdictQueue((card, verdict) => this.queueVerdict(card, verdict))
     this.themes = new ChannelThemes(opts.shuttleBase)
-    this.overview = new Overview({
+    this.library = new Library({
       shuttleBase: opts.shuttleBase,
       sends: this.sends,
-      themes: this.themes,
       cards: opts.cards,
-      onOpen: (card, doc) => this.open(card, 'Board', doc, this.overview.hasMetadata(card)),
-      onEscapeHome: opts.onEscapeHome,
-      onConversation: card => { this.dock.openConversation(card) },
-      hasConversation: card => this.dock.canOpenConversation(card),
-      onOrder: () => { this.reader?.refreshChannels(); this.picker?.refresh(); if (this.barPicker?.isOpen) this.barPicker.refresh() },
-      focusFind: () => opts.focusFind?.() ?? false,
-      readLately: () => this.readLatelyCards(),
+      onOpen: (card, doc) => this.open(card, this.opts.origin(), doc, this.library.hasMetadata(card)),
     })
+    this.library.subscribe(() => { this.reader?.refreshChannels(); this.picker?.refresh(); if (this.barPicker?.isOpen) this.barPicker.refresh() })
     const pickerOptions = {
       cards: () => {
-        const ordered = this.overview.orderedCards()
+        const ordered = this.library.orderedCards()
         return [...ordered, ...opts.cards().filter(card => !ordered.some(row => (row.uid ?? row.id) === (card.uid ?? card.id) && row.originId === card.originId))]
       },
-      files: (card: KanbanCard) => this.overview.fileNames(card),
+      files: (card: KanbanCard) => this.library.fileNames(card),
       onOpen: (card: KanbanCard) => {
         this.clearFind()
         if (!this.isActive && opts.reveal?.(card)) { opts.find?.blur(); return }
-        this.open(card, this.isActive ? this.origin : opts.origin(), undefined, this.overview.hasMetadata(card))
+        this.open(card, this.isActive ? this.origin : opts.origin(), undefined, this.library.hasMetadata(card))
       },
     }
     this.picker = new ConstitutionPicker(pickerOptions)
@@ -223,12 +217,12 @@ export class Workspace {
     this.reader = new Reader({
       shuttleBase: opts.shuttleBase,
       themes: this.themes,
-      cards: () => this.origin === 'Board' ? this.overview.orderedCards() : opts.cards(),
+      cards: opts.cards,
       threadIndex: () => opts.threadIndex?.() ?? new ThreadIndex(opts.cards()),
       deskCards: () => this.opts.deskRows(),
-      pickerCards: () => this.overview.orderedCards(),
+      pickerCards: () => this.library.orderedCards(),
       deskStop: card => this.deskStop(card),
-      files: card => this.overview.fileNames(card),
+      files: card => this.library.fileNames(card),
       onFind: () => opts.focusFind?.() ?? false,
       onExpand: expanded => opts.onExpand?.(expanded),
       onSelect: key => this.visit(key),
@@ -249,8 +243,8 @@ export class Workspace {
       onConversation: card => { this.dock.openConversation(card) },
       onRest: (card, anchor) => this.opts.onRest?.(card, anchor),
       onEscapeLayer: () => this.controls(this.current)?.handleEscape() || (this.mapPage(this.current)?.foldOut() ?? false),
-      onChannel: card => this.open(card, this.origin, undefined, this.overview.hasMetadata(card)),
-      onScan: card => this.open(card, this.origin, undefined, this.overview.hasMetadata(card), true),
+      onChannel: card => this.open(card, this.origin, undefined, this.library.hasMetadata(card)),
+      onScan: card => this.open(card, this.origin, undefined, this.library.hasMetadata(card), true),
       onOrchestrator: () => this.openOrchestrator(),
       onTapestry: () => this.toggleMap(),
       buildProse: doc => doc.kind === 'family' ? this.family() : this.prose(doc.key),
@@ -263,22 +257,24 @@ export class Workspace {
     })
     root.append(this.reader.el)
     this.history.start()
-    this.overview.refresh()
+    this.library.refresh()
     document.addEventListener('visibilitychange', this.visibility)
   }
 
   get isActive(): boolean { return this.reader.isActive }
   /**
-   * The board bar's Find, routed by what it serves now: the sheet's folios on
-   * the Board, and otherwise a list of constitutions hung beneath the field.
+   * The board bar's Find, routed by what it serves now: the filter of a view
+   * that filters itself by it (Channels), and otherwise a list of
+   * constitutions hung beneath the field.
    */
-  find(board: boolean): void {
+  find(filter?: (query: string) => void): void {
     const input = this.opts.find
     if (!input) return
-    if (!this.isActive && board) { this.overview.setQuery(input.value); return }
+    this.filter = this.isActive ? undefined : filter
+    if (this.filter) { this.barPicker.close(); this.filter(input.value); return }
     if (!this.barPicker.isOpen) this.barPicker.show(this.root, input)
     else this.barPicker.refresh()
-    this.overview.refresh()
+    this.library.refresh()
   }
   /** Close the Find's list, if it hangs open. */
   closeFind(): void { this.barPicker.close() }
@@ -288,12 +284,11 @@ export class Workspace {
     this.barPicker.close()
     if (!input?.value) return
     input.value = ''
-    this.overview.setQuery('')
+    this.filter?.('')
   }
   /** Return from the reader to the view it was opened from, as Escape does. */
   returnToOrigin(): void {
     if (!this.isActive) return
-    if (this.origin === 'Board') this.lastBoardRoute = null
     this.history.leave()
   }
   /** The header's close control returns to Desk, regardless of its origin view. */
@@ -301,7 +296,7 @@ export class Workspace {
   /** Opens over the Desk without navigating or waking the reader. */
   findConstitution(): void {
     this.picker.show(this.root)
-    this.overview.refresh()
+    this.library.refresh()
   }
   /** A refused Desk launch enters the document channel and exposes its recovery form. */
   openStartPrompt(card: KanbanCard, failure: DispatchFailureBody): void {
@@ -320,11 +315,11 @@ export class Workspace {
   }
   /** A file opens on its thread's channel, leaving the constitution's page where it stands. */
   private openFromMap(card: KanbanCard, doc?: DocKey): void {
-    this.open(card, this.origin, doc, this.overview.hasMetadata(card))
+    this.open(card, this.origin, doc, this.library.hasMetadata(card))
   }
-  /** One of a fiber's pages, opened from the view on show. */
-  openPage(card: KanbanCard, doc: DocKey): void {
-    this.open(card, this.opts.origin(), doc, this.overview.hasMetadata(card))
+  /** One of a fiber's pages, or its own page, opened from the view on show. */
+  openPage(card: KanbanCard, doc?: DocKey): void {
+    void this.library.open(card, doc)
   }
   /** A Desk or Chronicle click lands on the fiber's map, at its body, and reaches its worker. */
   openFromDesk(card: KanbanCard): void {
@@ -424,7 +419,7 @@ export class Workspace {
     if (page) return page.selectParent()
     const parent = this.current && this.isActive ? this.orchestrator(this.current.card) : undefined
     if (!parent) return false
-    this.open(parent, this.origin, undefined, this.overview.hasMetadata(parent))
+    this.open(parent, this.origin, undefined, this.library.hasMetadata(parent))
     return true
   }
 
@@ -453,7 +448,7 @@ export class Workspace {
     const id = deskCardKey(card)
     this.readLately = [id, ...this.readLately.filter(seen => seen !== id)].slice(0, READ_LATELY * 2)
     const state = this.ensure(card, authoritative)
-    this.overview.opened(card, state.metadataKnown)
+    this.library.opened(card, state.metadataKnown)
     this.history.enter(state.channel.uid, state.channel.owner, doc ?? state.selected, viewForOrigin(origin), scan)
   }
 
@@ -484,8 +479,8 @@ export class Workspace {
     if (!current || deskCardKey(current) !== deskCardKey(card)) return false
     return !this.opts.deskRows().some(row => deskCardKey(row) === deskCardKey(this.deskAnchor(card)))
   }
-  /** The constitutions opened in this session, most recent first, for the Board's Read lately shelf. */
-  private readLatelyCards(): KanbanCard[] {
+  /** The constitutions opened in this session, most recent first, for the Channels rail's Read lately. */
+  readLatelyCards(): KanbanCard[] {
     const live = new Map(this.opts.cards().map(card => [deskCardKey(card), card]))
     return this.readLately.flatMap(id => {
       const card = live.get(id) ?? this.channels.get(id)?.card
@@ -493,34 +488,16 @@ export class Workspace {
     }).slice(0, READ_LATELY)
   }
 
-  mountOverview(host: HTMLElement): void {
-    if (this.overview.el.parentElement !== host) host.append(this.overview.el)
-    this.depth.setActive(true)
-    this.overview.setVisible(!this.isActive)
-    this.overview.refresh()
-  }
-  hideOverview(): void {
-    this.overview.setVisible(false)
-    this.depth.setActive(this.isActive)
-  }
-  handleOverviewEscapeLayer(): boolean { return this.overview.handleEscapeLayer() }
-
-  /** View keys park the reader; Board restores its last unreturned channel. */
-  suspend(view: 'desk' | 'chronicle' | 'globe' | 'channels'): void {
+  /** View keys park the reader. */
+  suspend(view: WorkspaceOriginView): void {
     this.history.view(`#/${view}`)
-  }
-  showBoard(): void {
-    const remembered = this.lastBoardRoute
-    this.history.view()
-    this.origin = 'Board'
-    if (remembered) this.history.enter(remembered.uid, remembered.owner, remembered.doc)
   }
 
   /** Keep worker metadata current without rebuilding live file instruments. */
   update(): void {
     if (!this.current || !this.isActive) {
       this.mentions.refresh()
-      this.overview.cardsChanged()
+      this.library.cardsChanged()
       return
     }
     const cards = this.opts.cards()
@@ -537,14 +514,14 @@ export class Workspace {
     // A fiber outside the feed (a role, a note) keeps its card; a role page still follows its holds.
     if (!card) {
       this.mentions.refresh()
-      this.overview.cardsChanged()
+      this.library.cardsChanged()
       if (changed) this.reader.refreshChannels()
       this.refreshProse(this.current)
       return
     }
     if (!changed) return
     this.mentions.refresh()
-    this.overview.cardsChanged()
+    this.library.cardsChanged()
     if (threadFamilyRevision(card, this.opts.threadIndex?.() ?? new ThreadIndex(cards)) === this.lastRenderedFamilyRevision) {
       this.reader.refreshChannels()
       return
@@ -636,7 +613,7 @@ export class Workspace {
     dock.closeSettings = after => this.reader.closeSettings(after)
     dock.openFile = (path, title, owner) => this.openFile(path, title, owner)
     dock.setNav({
-      ancestry: ancestry.map(card => ({ name: card.name, open: () => this.reader.closeSettings(() => { if (this.isActive) this.open(card, this.origin, undefined, this.overview.hasMetadata(card)) }) })),
+      ancestry: ancestry.map(card => ({ name: card.name, open: () => this.reader.closeSettings(() => { if (this.isActive) this.open(card, this.origin, undefined, this.library.hasMetadata(card)) }) })),
       desk: () => this.escapeHome(),
       back: () => this.reader.back(),
       constitution: () => { const page = proseDocument(state.channel); if (page) this.visit(page.key) },
@@ -790,15 +767,12 @@ export class Workspace {
     this.picker.close()
     this.barPicker.close()
     if (route.kind === 'overview') {
-      const hash = route.hash ?? window.location.hash
-      const view = VIEW_HASHES[hash] ?? this.history.originView
+      const view = viewOfHash(route.hash ?? window.location.hash) ?? this.history.originView
       if (view === 'desk' && this.origin === 'Desk' && this.current && this.isActive) this.opts.onReturnCard?.(this.current.card)
-      this.reader.hide(view !== 'board')
-      if (view === 'board') this.lastBoardRoute = null
+      this.reader.hide(true)
       this.origin = VIEW_LABELS[view]
       this.opts.onView?.(view)
-      this.overview.setVisible(view === 'board')
-      this.depth.setActive(view === 'board')
+      this.depth.setActive(false)
       this.opts.onVisibility(false)
       this.stopTimer()
       return
@@ -828,15 +802,13 @@ export class Workspace {
       if (file && !state.links.some(link => link.path === file.path && (link.owner ?? state.card.originId) === file.owner)) state.links.push(file)
     }
     if (route.doc) this.rebuild(state)
-    if (this.origin === 'Board') this.lastBoardRoute = route
     // Document navigation shares an in-flight channel read without starting another.
     const bodyRead = sameChannel ? this.loads.get(channelId(route.uid, route.owner)) ?? Promise.resolve() : this.load(state)
-    // The switcher lists the overview's rows, so a channel entry reads them too.
+    // The switcher lists the library's fibers, so a channel entry reads them too.
     if (!sameChannel) {
-      this.overview.opened(state.card, state.metadataKnown)
-      this.overview.refresh()
+      this.library.opened(state.card, state.metadataKnown)
+      this.library.refresh()
     }
-    this.overview.setVisible(false)
     // Selection resolves before the first paint; data arriving later never moves it.
     // A constitution with threads lands on their view; any other on its report.
     const wanted = route.doc ?? state.selected ?? (state.leadLanding ? channelLead(state.channel)?.key : this.familyLanding(state)) ?? this.knownReport(state)
@@ -871,10 +843,10 @@ export class Workspace {
     state.routedFile = key
     this.rebuild(state)
   }
-  /** The report the Board's receipt feed already names for this channel, before the channel's own reads return. */
+  /** The report the library's receipt feed already names for this channel, before the channel's own reads return. */
   private knownReport(state: ChannelState): DocKey | undefined {
     const card = state.card
-    const receipts = this.overview.unfiledReceipts(state.channel.uid).filter(file => (file.host ?? card.originId) === card.originId)
+    const receipts = this.library.receipts(state.channel.uid).filter(file => (file.host ?? card.originId) === card.originId)
     const report = leadReceipt(receipts, card.fiberDir, file => file.fullPath)
     return report ? docKey(card.originId, report.fullPath, card.originId, card.fiberDir) : undefined
   }
@@ -892,10 +864,9 @@ export class Workspace {
     const selected = this.shown(state)
     this.refreshProse(state)
     this.namePage(state, selected)
-    this.reader.show(ch, selected, this.origin, state.card, animate, state.loaded && state.runFinal, state.runFinal)
+    this.reader.show(ch, selected, state.card, animate, state.loaded && state.runFinal, state.runFinal)
     this.nameBack()
     if (selected === this.familyDocument(state.card)) this.focusMap(state)
-    if (this.origin === 'Board') this.lastBoardRoute = { kind: 'channel', uid: ch.uid, owner: ch.owner, doc: selected }
     this.seatBand(state)
     this.sight(state)
   }
@@ -925,7 +896,6 @@ export class Workspace {
     this.steerBand(state)
     if (key === this.familyDocument(state.card)) this.focusMap(state)
     this.namePage(state, key)
-    if (this.origin === 'Board') this.lastBoardRoute = { kind: 'channel', uid: state.channel.uid, owner: state.channel.owner, doc: key }
   }
   private isBodyFile(state: ChannelState, key: DocKey): boolean {
     const template = document.createElement('template')
@@ -938,7 +908,7 @@ export class Workspace {
     if (!href) return
     const route = parseRoute(href)
     if (route?.kind === 'channel') { this.history.enter(route.uid, route.owner, route.doc); return }
-    if (route?.kind === 'overview' || href === '#/desk' || href === '#/chronicle') { this.history.view(href); return }
+    if (route?.kind === 'overview' || (viewOfHash(href) && !route)) { this.history.view(href); return }
     if (href.startsWith('#')) return
     let path: string, hash: string, owner = source.owner
     try {
@@ -963,7 +933,7 @@ export class Workspace {
     const key = docKey(owner ?? state.card.originId, path, state.card.originId, state.card.fiberDir)
     if (!state.links.some(link => docKey(link.owner ?? state.card.originId, link.path, state.card.originId, state.card.fiberDir) === key)) state.links.push({ path, title, owner })
     this.rebuild(state)
-    this.reader.show(state.channel, this.shown(state), this.origin, state.card, false, state.loaded, state.runFinal)
+    this.reader.show(state.channel, this.shown(state), state.card, false, state.loaded, state.runFinal)
     this.reader.openDocument(key)
     if (hash) this.reader.host.navigateFragment(key, hash)
     void this.readFileMetadata(state).then(() => {
@@ -1043,7 +1013,7 @@ export class Workspace {
     const key = channelId(state.channel.uid, state.channel.owner)
     const pending = this.loads.get(key)
     if (pending) return pending
-    this.overview.resolving(state.channel.uid, true)
+    this.library.resolving(state.channel.uid, true)
     const promise = (async () => {
       const controller = new AbortController()
       let timeout = 0
@@ -1075,7 +1045,7 @@ export class Workspace {
           if (live.workerState) metadata.sessionUuid = live.sessionUuid
           state.card = metadata
           state.metadataKnown = true
-          this.overview.resolved(metadata)
+          this.library.resolved(metadata)
         }
         // A body the run has not held yet reorders it, so the strip waits for the receipts too.
         if (!wasLoaded) state.runFinal = false
@@ -1107,7 +1077,7 @@ export class Workspace {
         this.refreshProse(state)
         if (this.current === state && this.isActive) this.show(state, false)
       })
-    })().finally(() => { this.loads.delete(key); this.overview.resolving(state.channel.uid, false) })
+    })().finally(() => { this.loads.delete(key); this.library.resolving(state.channel.uid, false) })
     this.loads.set(key, promise)
     return promise
   }
@@ -1144,7 +1114,7 @@ export class Workspace {
       state.routedFile = undefined
     }
     const provisional = state.routedFile ? parseDocKey(state.routedFile) : null
-    const receipts = state.channel.uid.startsWith('other:') ? this.overview.unfiledReceipts(state.channel.uid)
+    const receipts = state.channel.uid.startsWith('other:') ? this.library.receipts(state.channel.uid)
       : this.receipts.get(channelId(state.channel.uid, state.channel.owner))?.files ?? []
     const sent = receipts.map(f => ({ path: f.fullPath, owner: f.host ?? card.originId, session: f.sessionId, time: f.timestamp }))
     state.channel = buildChannel({
@@ -1185,7 +1155,7 @@ export class Workspace {
     this.picker.dispose()
     this.barPicker.dispose()
     this.reader.dispose()
-    this.overview.dispose()
+    this.library.dispose()
     this.stopSends()
     this.themes.dispose()
     this.depth.dispose()
