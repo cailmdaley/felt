@@ -258,7 +258,7 @@ defmodule Shuttle.ThreadsTest do
     }
 
     assert :ok = Shuttle.Test.InboxPublications.capture([{"unblocked-archive", record}])
-    assert :ok = Threads.route_results()
+    assert [_] = Threads.route_results()
     assert [{"unblocked-archive", resolved}] = Shuttle.Test.InboxPublications.pending()
     assert resolved["parent_uid"] == root_uid
     assert resolved["resolved_from_uid"] == parent_uid
@@ -360,7 +360,7 @@ defmodule Shuttle.ThreadsTest do
 
     StubPostClient.set_get_response({:ok, 200, Jason.encode!(%{fibers: [fresh]})})
 
-    assert :ok = Threads.route_results([fresh])
+    assert [] = Threads.route_results([fresh])
     assert %{url: get_url} = StubPostClient.last_get()
     assert get_url =~ "127.0.0.1:43211/api/v1/fibers/"
     assert StubPostClient.last().url =~ "127.0.0.1:43211/api/v1/deliver"

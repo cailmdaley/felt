@@ -13,23 +13,28 @@ defmodule Shuttle.ThreadsInboxTest do
     record = %{
       "owner" => "test-host",
       "store" => store,
-      "parent" => parent.fiber,
+      "parent_uid" => parent.fiber["uid"],
+      "parent_host" => "test-host",
       "text" => "original",
+      "retained_at" => DateTime.to_iso8601(DateTime.utc_now()),
       "wake" => false
     }
 
+    outbox = Path.join(data, "thread-outbox")
+    File.mkdir_p!(Path.join(outbox, "pending"))
+    File.mkdir_p!(Path.join(outbox, "acked"))
+    File.write!(Path.join(outbox, "baseline"), "2025-01-01T00:00:00Z")
+    key = &(:crypto.hash(:sha256, &1) |> Base.encode16(case: :lower))
+
     File.write!(
-      Path.join(data, "thread-outbox.json"),
-      Jason.encode!(%{
-        version: 2,
-        baseline: "2025-01-01T00:00:00Z",
-        records: %{"pending" => record, "done" => Map.put(record, "acked", true)}
-      })
+      Path.join([outbox, "pending", key.("pending") <> ".json"]),
+      Jason.encode!(%{id: "pending", record: record})
     )
 
+    File.write!(Path.join([outbox, "acked", key.("done")]), "done")
+
     assert :ok = Shuttle.Inbox.boot_import()
-    refute File.exists?(Path.join(data, "thread-outbox.json"))
-    refute File.exists?(Path.join(data, "thread-outbox"))
+    refute File.exists?(outbox)
     assert Shuttle.Test.InboxPublications.baseline() == "2025-01-01T00:00:00Z"
     assert :ok = Shuttle.Test.InboxPublications.capture([{"done", record}])
 

@@ -26,7 +26,8 @@ defmodule Shuttle.ThreadsDeliveryTest do
     hub = Enum.find(entries, &(Threads.address(&1.fiber) == "hub"))
     uid = hub.fiber["uid"]
 
-    assert Threads.pending_results(entries, "test-host") == %{}
+    routing = fn -> Enum.map(Shuttle.Test.InboxPublications.pending(), &elem(&1, 1)) end
+    assert Threads.pending_results(entries, "test-host", routing.()) == %{}
 
     for {id, text} <- [{"m-1", "one"}, {"m-2", "two"}, {"m-2", "two"}],
         do: assert({:ok, :queued} = Shuttle.Delivery.context(hub, text, id))
@@ -42,8 +43,8 @@ defmodule Shuttle.ThreadsDeliveryTest do
        }}
     ])
 
-    assert Threads.pending_results(entries, "test-host") == %{uid => 3}
-    assert Threads.pending_results(entries, "another-host") == %{}
+    assert Threads.pending_results(entries, "test-host", routing.()) == %{uid => 3}
+    assert Threads.pending_results(entries, "another-host", routing.()) == %{}
   end
 
   test "superseded close and ask publications are dropped after publisher restart", %{
@@ -174,7 +175,7 @@ defmodule Shuttle.ThreadsDeliveryTest do
       bytes = File.read!(path)
       File.rm!(path)
       Agent.update(Env.server!(StubPostClient), &Map.put(&1, :last, nil))
-      assert :ok = Threads.route_results()
+      assert [^record] = Threads.route_results()
       assert StubPostClient.last() == nil
       assert [{^message_id, ^record}] = Shuttle.Test.InboxPublications.pending()
       File.write!(path, bytes)

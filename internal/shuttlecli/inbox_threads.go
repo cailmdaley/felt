@@ -75,23 +75,20 @@ did not take, each tried whatever the others' answers.`,
 		Use:   "route <id>",
 		Short: "Advance one routing inbox entry from the daemon's fresh facts",
 		Long: `Decide one routing inbox entry from its lifecycle currency and, once its
-recipient resolves, the recipient's routing record, host and local inbox key.
+recipient resolves, the recipient's routing record and, when this host owns
+the recipient, its inbox key; a record without a key is forwarded.
 Prints {"action": ...}: wait; forward or session with the entry's record, for
 the daemon to hand off and settle; or placed, superseded or expired, which this
 call recorded. A placed result is enqueued in the recipient fiber's inbox.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			host, err := a.resolveOwnHost("")
-			if err != nil {
-				return err
-			}
 			facts.ID = args[0]
 			if record != "" {
 				if err := json.Unmarshal([]byte(record), &facts.Record); err != nil {
 					return err
 				}
 			}
-			decision, err := messaging.RouteThread(a.env, host, facts)
+			decision, err := messaging.RouteThread(a.env, facts)
 			if err != nil {
 				return err
 			}
@@ -100,8 +97,7 @@ call recorded. A placed result is enqueued in the recipient fiber's inbox.`,
 	}
 	route.Flags().StringVar(&facts.Current, "current", "unknown", "Fresh lifecycle currency: true, false or unknown")
 	route.Flags().StringVar(&record, "record", "", "The resolved recipient's routing fields as JSON")
-	route.Flags().StringVar(&facts.Owner, "owner", "", "The resolved recipient's host")
-	route.Flags().StringVar(&facts.Key, "key", "", "The resolved recipient's local inbox key")
+	route.Flags().StringVar(&facts.Key, "key", "", "The resolved recipient's inbox key, when this host owns it")
 	settle := &cobra.Command{
 		Use:   "settle <id> forwarded|delivered|undeliverable",
 		Short: "Record a routing inbox entry's confirmed handoff",

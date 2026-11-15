@@ -90,7 +90,8 @@ A re-capture finds the id pending or offered in the routing inbox and stores not
 `thread-put` answers the ids it created, so only a newly created unblock note appends its board line.
 
 An entry's `routing` record names its recipient fiber by `parent_uid`, marked `parent_unresolved` until the daemon resolves it, or, for an asker notice, the asking `session`.
-Each poll lists the routing inbox (`inbox routes`) and advances every entry with `inbox route`, passing the signal's fresh lifecycle currency and, once it resolves, the recipient the daemon read from authoritative documents: past an archived parent, never guessed from a slug.
+Each poll lists the routing inbox once (`inbox routes`) and advances every entry with `inbox route`, passing the signal's fresh lifecycle currency and, once it resolves, the recipient the daemon read from authoritative documents: past an archived parent, never guessed from a slug.
+The daemon decides whether it owns the recipient, against the host identity it froze at boot, and passes the recipient's inbox key only then; the CLI forwards a resolved recipient without one.
 A superseded or expired entry settles without a handoff.
 An unresolved recipient or an unknown currency waits, without holding up other entries.
 The first resolution is stored in the entry, even while currency is unknown; later facts may change the recipient's host and store but never its uid, so moving the child does not redirect the result.
@@ -109,7 +110,7 @@ When a different session asked, capture also writes that session an asker notice
 `inbox route` answers `session` for a current notice, and the daemon sends it through the waking session transport, with `wake` and `context_if_busy`, under the notice's own id.
 An unknown outcome leaves it for the next poll, across restarts; a known one settles it `delivered`, or `undeliverable` on a refusal, since the orchestrator's inbox holds the same result.
 
-`pending_results` counts a fiber's inbox entries no worker has taken plus the routing inbox's results whose `parent_uid` is that fiber.
+`pending_results` counts a fiber's inbox entries no worker has taken plus the routing entries, from the poll's one listing, that routing left waiting with that fiber's `parent_uid`.
 
 ### Boot import and compatibility
 
@@ -118,11 +119,11 @@ A host without an outbox establishes its baseline once; signals at or before it 
 An entry settles after its signal is stamped, and its offered entry expires 14 days after it settles; by then `Enqueue`'s 14-day window on the signal's stamp refuses a re-capture, so the signal cannot publish again.
 A `threads.json` an earlier build wrote with a `retention_cutoff` field reads as its baseline; an older daemon's `thread-outbox/retention_cutoff` is not imported.
 
-The same step imports the `thread-outbox/` directory, or a `thread-outbox.json` snapshot, that a contract-40 daemon left.
+The same step imports the `thread-outbox/` directory a contract-40 daemon left, under `thread-import.lock` in the data directory.
 Pending records become routing inbox entries with their recipients; acknowledgments become payload-free offered entries (`acknowledged`) that dedup a re-capture.
 An acknowledgment's file name is the hash of its publication's id, which is the routing inbox's key for it, so the import takes acknowledgments from their names and never reads them: an unreadable ack imports, and a name that is not 64 hex characters (an `acked/*.tmp` left by a hard-killed older daemon, an NFS `.nfs*` silly-rename, `.DS_Store`) is ignored.
 An acknowledgment wins over a pending copy of its id, including a copy an interrupted import left, and the import touches no recipient's inbox.
-The importer reads the source without changing it, enqueues idempotently, then removes the snapshot and renames the directory to `thread-outbox.imported` before deleting it, so a crash at any point repeats safely.
+The importer reads the source without changing it, enqueues idempotently, then renames the directory to `thread-outbox.imported` before deleting it, so a crash at any point repeats safely.
 A pending record the routing inbox can never accept (`invalid_request`, such as text over 64 KiB) is reported as `skipped`, which the daemon logs, and the rest import.
 Stamps are read as the older daemon's capture read them (ISO 8601 with a `T` or space separator and a `Z`, `+01:00`, `+0100` or `+01` offset) and kept as written, since currency compares them verbatim; a record with no stamp, which would never expire, or one that cannot be read is skipped.
 A cleanup failure is reported as `cleanup_error`, which the daemon logs; boot goes on, and the next boot removes what is left.
@@ -288,7 +289,7 @@ The session-only Claude fallback claims by moving an entry into `fallback/` and 
 | `shuttle inbox thread-state` | Establish the thread capture window and import an older daemon's thread outbox; print `baseline` and any `skipped` records and `cleanup_error`, or exit 3 on a corrupt outbox or state |
 | `shuttle inbox thread-put` | Capture a JSON array of `{id, record}` publications from stdin into the routing inbox; print `{"created": [ids], "refused": [{id, error}]}`, trying every publication |
 | `shuttle inbox routes` | List the routing inbox's pending publications as `{id, record}` |
-| `shuttle inbox route <id> --current true\|false\|unknown [--record <json> --owner <host> --key <key>]` | Advance one routing entry from the daemon's fresh facts; print `action`: `wait`, `forward` or `session` with the entry's `record`, or the disposition it recorded (`placed`, `superseded`, `expired`) |
+| `shuttle inbox route <id> --current true\|false\|unknown [--record <json> [--key <key>]]` | Advance one routing entry from the daemon's fresh facts: the resolved recipient's `record`, and its inbox `key` when the daemon owns it; print `action`: `wait`, `forward` or `session` with the entry's `record`, or the disposition it recorded (`placed`, `superseded`, `expired`) |
 | `shuttle inbox settle <id> forwarded\|delivered\|undeliverable` | Record a routing entry's confirmed handoff and move it to offered |
 
 All verbs act on this host's inbox only.

@@ -169,13 +169,13 @@ func ThreadRoutes(env *sysenv.Env) ([]ThreadPublication, error) {
 
 // RouteFacts are the daemon's fresh authoritative observations of one routing
 // entry: its lifecycle currency ("true", "false" or "unknown") and, once the
-// recipient resolves, its routing fields (Record), host (Owner) and local inbox
-// key (Key). An empty Owner leaves the recipient unresolved.
+// recipient resolves, its routing fields (Record) and, when this host owns
+// it, its inbox key (Key). No Record leaves the recipient unresolved; a
+// Record without a Key names a recipient another host owns.
 type RouteFacts struct {
 	ID      string
 	Current string
 	Record  map[string]any
-	Owner   string
 	Key     string
 }
 
@@ -193,7 +193,7 @@ type RouteDecision struct {
 // one waits, a resolved recipient's uid is stored and never changes, and a
 // current local result is placed: enqueued as an ordinary entry in the
 // recipient fiber's inbox before it settles here, so a repeat is a no-op.
-func RouteThread(env *sysenv.Env, host string, f RouteFacts) (RouteDecision, error) {
+func RouteThread(env *sysenv.Env, f RouteFacts) (RouteDecision, error) {
 	wait := RouteDecision{Action: "wait"}
 	root := routingRoot(env)
 	unlock, err := lockInbox(root)
@@ -225,7 +225,7 @@ func RouteThread(env *sysenv.Env, host string, f RouteFacts) (RouteDecision, err
 			return wait, nil
 		}
 		return RouteDecision{Action: "session", Record: e.Routing}, nil
-	case f.Owner == "":
+	case f.Record == nil:
 		return wait, nil
 	}
 	if e.Routing["parent_unresolved"] != true && routeString(f.Record, "parent_uid") != routeString(e.Routing, "parent_uid") {
@@ -252,7 +252,7 @@ func RouteThread(env *sysenv.Env, host string, f RouteFacts) (RouteDecision, err
 	switch {
 	case f.Current != "true":
 		return wait, nil
-	case f.Owner != host:
+	case f.Key == "":
 		return RouteDecision{Action: "forward", Record: e.Routing}, nil
 	}
 	if err := Enqueue(env, InboxEntry{Address: f.Key, Request: e.Request, Wishes: e.Wishes, Derived: true}); err != nil {
@@ -318,7 +318,10 @@ type ThreadImport struct {
 // acknowledgment wins over a pending copy of its id, and Enqueue keeps the
 // first pending publication.
 func BootThreadInbox(env *sysenv.Env) (ThreadImport, error) {
-	unlock, err := lockInbox(filepath.Join(dataDir(env), "mailboxes", ".thread-import"))
+	if err := ensureDir(dataDir(env), 0700); err != nil {
+		return ThreadImport{}, err
+	}
+	unlock, err := lockFile(filepath.Join(dataDir(env), "thread-import.lock"))
 	if err != nil {
 		return ThreadImport{}, err
 	}
@@ -397,9 +400,6 @@ func bootThreadInbox(env *sysenv.Env, imported func(string) error) (ThreadImport
 			}
 		}
 	}
-	if err = os.Remove(root + ".json"); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return report, err
-	}
 	// Everything is imported. Rename the source before recursive deletion, so
 	// a crash during cleanup cannot leave a partial outbox that reads as
 	// corrupt; whatever the cleanup cannot remove is reported, not retried
@@ -417,10 +417,10 @@ func bootThreadInbox(env *sysenv.Env, imported func(string) error) (ThreadImport
 	return report, nil
 }
 
-// outboxImage is an older daemon's thread outbox: thread-outbox/ (baseline,
-// pending/<key>.json payloads, acked/<key> files; its retention_cutoff is
-// dominated by Enqueue's 14-day window and not read) and the
-// thread-outbox.json snapshot that preceded it. acked holds keys.
+// outboxImage is an older daemon's thread outbox, thread-outbox/: its
+// baseline, pending/<key>.json payloads and acked/<key> files, held here by
+// key. Its retention_cutoff is not read: Enqueue's 14-day window on the
+// stamp refuses everything it would.
 type outboxImage struct {
 	baseline string
 	acked    map[string]bool
@@ -429,36 +429,6 @@ type outboxImage struct {
 
 func readOutbox(root string) (outboxImage, error) {
 	img := outboxImage{acked: map[string]bool{}, pending: map[string]map[string]any{}}
-	var legacy struct {
-		Version  int                       `json:"version"`
-		Baseline string                    `json:"baseline"`
-		Records  map[string]map[string]any `json:"records"`
-	}
-	b, err := os.ReadFile(root + ".json")
-	switch {
-	case err == nil:
-		if err = json.Unmarshal(b, &legacy); err != nil {
-			return img, errCode("corrupt", "thread outbox snapshot: %v", err)
-		}
-		if legacy.Version < 1 || legacy.Version > 3 || legacy.Records == nil {
-			return img, errCode("corrupt", "invalid thread outbox snapshot")
-		}
-		if _, err = time.Parse(time.RFC3339Nano, legacy.Baseline); legacy.Version > 1 && err != nil {
-			return img, errCode("corrupt", "thread outbox snapshot baseline: %v", err)
-		}
-		for id, record := range legacy.Records {
-			switch {
-			case record == nil:
-				return img, errCode("corrupt", "invalid thread outbox record %q", id)
-			case record["acked"] == true:
-				img.acked[mailboxKey(id)] = true
-			default:
-				img.pending[id] = migrateRecipient(record)
-			}
-		}
-	case !errors.Is(err, os.ErrNotExist):
-		return img, err
-	}
 	baseline, err := os.ReadFile(filepath.Join(root, "baseline"))
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return img, err
@@ -472,11 +442,9 @@ func readOutbox(root string) (outboxImage, error) {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return img, err
 	}
-	files := 0
 	for _, ack := range acks {
 		if outboxKey.MatchString(ack.Name()) {
 			img.acked[ack.Name()] = true
-			files++
 		}
 	}
 	payloads, err := filepath.Glob(filepath.Join(root, "pending", "*.json"))
@@ -492,33 +460,19 @@ func readOutbox(root string) (outboxImage, error) {
 		if err != nil {
 			return img, err
 		}
-		if json.Unmarshal(b, &payload) != nil || payload.ID == "" || payload.Record == nil || filepath.Base(path) != mailboxKey(payload.ID)+".json" {
+		if json.Unmarshal(b, &payload) != nil || payload.ID == "" || payload.Record == nil {
 			return img, errCode("corrupt", "invalid thread payload: %s", path)
 		}
-		img.pending[payload.ID] = migrateRecipient(payload.Record)
+		img.pending[payload.ID] = payload.Record
 	}
 	_, versionErr := os.Stat(filepath.Join(root, "version"))
-	switch {
-	case img.baseline == "" && (versionErr == nil || files+len(payloads) > 0):
+	if img.baseline == "" && (versionErr == nil || len(img.acked)+len(payloads) > 0) {
 		return img, errCode("corrupt", "missing thread outbox baseline")
-	case img.baseline == "":
-		img.baseline = legacy.Baseline
-	case legacy.Baseline != "" && legacy.Baseline != img.baseline:
-		return img, errCode("corrupt", "thread outbox baselines differ")
 	}
 	if _, err := parseStamp(img.baseline); img.baseline != "" && err != nil {
 		return img, errCode("corrupt", "thread outbox: %v", err)
 	}
 	return img, nil
-}
-
-// migrateRecipient reads an early record's embedded parent document as its uid.
-func migrateRecipient(record map[string]any) map[string]any {
-	if parent, ok := record["parent"].(map[string]any); ok && routeString(parent, "uid") != "" {
-		record["parent_uid"] = routeString(parent, "uid")
-		delete(record, "parent")
-	}
-	return record
 }
 
 // importThreadAck records an outbox acknowledgment, which means the old

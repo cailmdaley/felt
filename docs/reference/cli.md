@@ -282,7 +282,7 @@ is then given back to the human rather than closed.
 | `shuttle inbox thread-state` | Establish the thread capture window and import an older daemon's thread outbox into the routing inbox; print the baseline and any cleanup error (exit 3 on a corrupt outbox) |
 | `shuttle inbox thread-put` | Capture a JSON array of `{id, record}` thread publications from stdin into the routing inbox; print the ids created and the publications refused |
 | `shuttle inbox routes` | List the routing inbox's pending thread publications |
-| `shuttle inbox route <id> --current true\|false\|unknown` | Advance one routing entry from the daemon's fresh facts (`--record`, `--owner`, `--key` once its recipient resolves): wait, place, settle as superseded or expired, or answer `forward` or `session` for the daemon's handoff |
+| `shuttle inbox route <id> --current true\|false\|unknown` | Advance one routing entry from the daemon's fresh facts (`--record` once its recipient resolves, and `--key` when this host owns it): wait, place, settle as superseded or expired, or answer `forward` or `session` for the daemon's handoff |
 | `shuttle inbox settle <id> forwarded\|delivered\|undeliverable` | Record a routing entry's confirmed handoff |
 | `shuttle meeting start` | Start a meeting: Listen on, unmuted, pinned to the calling worker's card (`--fiber` names one from a terminal), transcribing the computer's audio as well as the mic. The meeting also ends when Listen stops, when Listen follows again, or after twenty minutes with nothing heard |
 | `shuttle meeting end` | End the meeting: stop transcribing the computer's audio and follow the view again; a no-op outside a meeting |

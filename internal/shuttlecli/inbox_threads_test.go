@@ -38,7 +38,7 @@ func TestThreadInboxVerbsCaptureForwardSettleAndContract40Enqueue(t *testing.T) 
 	}
 	resolved, _ := json.Marshal(map[string]any{"parent_uid": "parent", "parent_host": "owner", "store": "/owner"})
 	for i := 0; i < 2; i++ {
-		out := run("", "inbox", "route", "thread-1", "--current", "true", "--owner", "owner", "--key", "/owner:parent", "--record", string(resolved))
+		out := run("", "inbox", "route", "thread-1", "--current", "true", "--record", string(resolved))
 		var decision map[string]any
 		if err := json.Unmarshal([]byte(out), &decision); err != nil || decision["action"] != "forward" {
 			t.Fatalf("forward: %s %v", out, err)
@@ -67,7 +67,8 @@ func TestThreadStateExitsThreeOnACorruptOutbox(t *testing.T) {
 	if err := os.MkdirAll(data, 0700); err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(filepath.Join(data, "thread-outbox.json"), []byte("not json"), 0600)
+	os.MkdirAll(filepath.Join(data, "thread-outbox"), 0700)
+	os.WriteFile(filepath.Join(data, "thread-outbox", "baseline"), []byte("not a time"), 0600)
 	var out bytes.Buffer
 	env.Stdout, env.Stderr = &out, &out
 	if code := Run(env, []string{"inbox", "thread-state"}); code != exitCorrupt {

@@ -86,6 +86,26 @@ defmodule Shuttle.ThreadCaptureTest do
     IO.puts("capture of 200 closes outside retention (ms): #{div(micros, 1000)}")
   end
 
+  test "a poll's delivery and waiting count list the routing inbox once", %{store: store} do
+    [hub | _] = closed_family(store, 1, nil)
+
+    # Results whose currency cannot be read wait in the routing inbox.
+    Shuttle.Test.InboxPublications.capture(
+      for i <- 1..2 do
+        {"thread-unread-#{i}",
+         %{"owner" => "test-host", "store" => store, "parent_uid" => "u-load", "text" => "t"}}
+      end
+    )
+
+    Env.put_app_env(:capture_test_pid, self())
+    Env.put_app_env(:felt_runner, CountingRunner)
+    routing = Threads.deliver_results([hub], "test-host")
+
+    assert [%{"parent_uid" => "u-load"}, %{"parent_uid" => "u-load"}] = routing
+    assert Threads.pending_results([hub], "test-host", routing) == %{"u-load" => 2}
+    assert Enum.count(shuttle_calls(), &(&1 == ["inbox", "routes"])) == 1
+  end
+
   test "a close whose outcome is over 64 KiB is refused and logged, and the others are captured",
        %{store: store} do
     recent = DateTime.to_iso8601(DateTime.utc_now())
@@ -187,7 +207,11 @@ defmodule Shuttle.ThreadCaptureTest do
     File.write!(Path.join([outbox, "acked", ".nfs000000000123"]), "")
     File.chmod!(Path.join(outbox, "acked"), 0o500)
     imported = Path.join(data, "thread-outbox.imported/acked")
-    on_exit(fn -> File.chmod(imported, 0o700) end)
+
+    on_exit(fn ->
+      File.chmod(imported, 0o700)
+      File.rm_rf(Path.dirname(imported))
+    end)
 
     for _ <- 1..2 do
       log = ExUnit.CaptureLog.capture_log(fn -> assert :ok = Shuttle.Inbox.boot_import() end)
@@ -243,7 +267,8 @@ defmodule Shuttle.ThreadCaptureTest do
     assert :ok = Shuttle.Inbox.boot_import()
     assert Shuttle.Test.InboxPublications.baseline() == "2026-10-22T19:33:11.470348Z"
 
-    File.write!(Path.join(data, "thread-outbox.json"), "not json")
+    File.mkdir_p!(Path.join(data, "thread-outbox"))
+    File.write!(Path.join(data, "thread-outbox/baseline"), "not a time")
     assert_raise Shuttle.Inbox.Corrupt, fn -> Shuttle.Inbox.boot_import() end
   end
 end

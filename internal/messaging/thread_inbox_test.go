@@ -37,7 +37,7 @@ func capture(t *testing.T, env *sysenv.Env, publications ...ThreadPublication) [
 
 func route(t *testing.T, env *sysenv.Env, f RouteFacts) RouteDecision {
 	t.Helper()
-	got, err := RouteThread(env, "host", f)
+	got, err := RouteThread(env, f)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,8 +62,13 @@ func offeredRoute(t *testing.T, env *sysenv.Env, id string) mailboxEntry {
 	return e
 }
 
+// resolved is a resolved recipient on owner; this test host is "host".
 func resolved(owner string) RouteFacts {
-	return RouteFacts{Current: "true", Owner: owner, Key: "/store:parent", Record: map[string]any{"parent_uid": "parent", "parent_host": owner, "store": "/store", "resolved_from_uid": "anchor"}}
+	f := RouteFacts{Current: "true", Record: map[string]any{"parent_uid": "parent", "parent_host": owner, "store": "/store", "resolved_from_uid": "anchor"}}
+	if owner == "host" {
+		f.Key = "/store:parent"
+	}
+	return f
 }
 
 func TestThreadCaptureKeepsFirstPublicationInsideItsWindow(t *testing.T) {
@@ -134,7 +139,7 @@ func TestRouteForwardsAResolvedRemoteResultUntilSettled(t *testing.T) {
 	}
 	redirect := f
 	redirect.Record = map[string]any{"parent_uid": "other"}
-	if _, err := RouteThread(env, "host", redirect); ErrorCode(err) != "invalid_request" {
+	if _, err := RouteThread(env, redirect); ErrorCode(err) != "invalid_request" {
 		t.Fatal("a resolved recipient changed:", err)
 	}
 	if err := SettleThread(env, "thread-f", "forwarded"); err != nil {
@@ -188,7 +193,7 @@ func TestRouteIntoAFullRecipientWaitsWithoutLosingTheResult(t *testing.T) {
 	capture(t, env, ThreadPublication{"thread-full", threadRecord()})
 	f := resolved("host")
 	f.ID = "thread-full"
-	if _, err := RouteThread(env, "host", f); ErrorCode(err) != "queue_full" {
+	if _, err := RouteThread(env, f); ErrorCode(err) != "queue_full" {
 		t.Fatal(err)
 	}
 	if got := routes(t, env); len(got) != 1 {
@@ -362,7 +367,7 @@ func TestThreadImportLeavesRecipientInboxesAlone(t *testing.T) {
 
 func TestThreadImportRefusesCorruptSourceAndKeepsIt(t *testing.T) {
 	t.Parallel()
-	for _, corrupt := range []string{"baseline", "pending", "snapshot", "missing baseline"} {
+	for _, corrupt := range []string{"baseline", "pending", "missing baseline"} {
 		t.Run(corrupt, func(t *testing.T) {
 			env := testEnv(t)
 			root := seedOutbox(t, env, oldBaseline)
@@ -371,8 +376,6 @@ func TestThreadImportRefusesCorruptSourceAndKeepsIt(t *testing.T) {
 				os.WriteFile(filepath.Join(root, "baseline"), []byte("bad"), 0600)
 			case "pending":
 				os.WriteFile(filepath.Join(root, "pending", "bad.json"), []byte("{"), 0600)
-			case "snapshot":
-				os.WriteFile(root+".json", []byte("{"), 0600)
 			case "missing baseline":
 				os.Remove(filepath.Join(root, "baseline"))
 			}
@@ -595,7 +598,7 @@ func TestThreadInboxStateIsTheBaselineAlone(t *testing.T) {
 	}
 }
 
-func TestThreadImportBacklogInterruptedCleanupAndSnapshot(t *testing.T) {
+func TestThreadImportBacklogAndInterruptedCleanup(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	root := seedOutbox(t, env, oldBaseline)
@@ -616,18 +619,6 @@ func TestThreadImportBacklogInterruptedCleanupAndSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	env = testEnv(t)
-	record := threadRecord()
-	record["parent"] = map[string]any{"uid": "parent"}
-	delete(record, "parent_uid")
-	b, _ := json.Marshal(map[string]any{"version": 2, "baseline": oldBaseline, "records": map[string]any{"thread-p": record, "thread-a": map[string]any{"acked": true}}})
-	os.WriteFile(filepath.Join(dataDir(env), "thread-outbox.json"), b, 0600)
-	if s := bootThread(t, env); s.Baseline != oldBaseline {
-		t.Fatal(s)
-	}
-	if got := routes(t, env); len(got) != 1 || got[0].Record["parent_uid"] != "parent" {
-		t.Fatalf("%+v", got)
-	}
 }
 
 func TestFreshThreadInboxEstablishesItsBaselineOnce(t *testing.T) {

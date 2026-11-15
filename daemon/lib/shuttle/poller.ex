@@ -1666,8 +1666,12 @@ defmodule Shuttle.Poller do
 
     Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
       Shuttle.Env.adopt_callers(callers)
-      Shuttle.Threads.deliver_results(entries, own_host)
-      send(poller, {:pending_results, Shuttle.Threads.pending_results(entries, own_host)})
+      routing = Shuttle.Threads.deliver_results(entries, own_host)
+
+      send(
+        poller,
+        {:pending_results, Shuttle.Threads.pending_results(entries, own_host, routing)}
+      )
     end)
 
     {:noreply, state}

@@ -191,7 +191,8 @@ defmodule Shuttle.PollerBootTest do
     tmp_dir: root
   } do
     Shuttle.Test.Env.put_env("SHUTTLE_DATA_DIR", root)
-    File.write!(Path.join(root, "thread-outbox.json"), "not json")
+    File.mkdir_p!(Path.join(root, "thread-outbox"))
+    File.write!(Path.join(root, "thread-outbox/baseline"), "not a time")
     session = :trace.session_create(:held_publication, self(), [])
 
     :trace.function(
@@ -246,13 +247,14 @@ defmodule Shuttle.PollerBootTest do
   @tag :tmp_dir
   test "a corrupt outbox is a named hold and cannot be forced or released", %{tmp_dir: root} do
     Shuttle.Test.Env.put_env("SHUTTLE_DATA_DIR", root)
-    snapshot = Path.join(root, "thread-outbox.json")
-    File.write!(snapshot, "not json")
+    baseline = Path.join(root, "thread-outbox/baseline")
+    File.mkdir_p!(Path.dirname(baseline))
+    File.write!(baseline, "not a time")
     pid = start_supervised!({Poller, name: nil, own_host_id: "held-host", felt_stores: []})
     assert %{boot_hold: %{stage: "inbox_import"}, boot_quarantine: true} = :sys.get_state(pid)
     assert {:error, {:boot_hold, _}} = Poller.dispatch_fiber(pid, "anything", force: true)
     assert {:error, {:boot_hold, _}} = Poller.release_boot_quarantine(pid)
-    assert File.read!(snapshot) == "not json"
+    assert File.read!(baseline) == "not a time"
     assert Process.alive?(pid)
     assert %{ready: false, boot_hold: %{stage: "inbox_import"}} = Shuttle.Readiness.status()
   end

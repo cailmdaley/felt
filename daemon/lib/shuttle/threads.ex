@@ -953,11 +953,12 @@ defmodule Shuttle.Threads do
   @doc """
   Reconcile durable lifecycle signals: capture this poll's publications, route
   what the routing inbox holds, and let every owned inbox's worker take what
-  waits for it. Only a child's owner publishes its results.
+  waits for it. Only a child's owner publishes its results. Answers the
+  routing records still waiting, for `pending_results/3`.
   """
   def deliver_results(entries, own_host) do
     capture_results(entries, own_host)
-    route_results(entries)
+    waiting = route_results(entries)
 
     # A parent can receive remote results while dormant: its live worker takes
     # them on this poll, and a dormant one is started for a waking result when
@@ -965,6 +966,8 @@ defmodule Shuttle.Threads do
     entries
     |> Enum.filter(&(get_in(&1.fiber, ["shuttle", "host"]) == own_host))
     |> Delivery.flush_owned()
+
+    waiting
   end
 
   # The inbox's retention window: it stores no thread publication stamped
@@ -1153,22 +1156,24 @@ defmodule Shuttle.Threads do
   a confirmed durable enqueue; an asker notice goes to the asking session's
   transport and settles on any known outcome. An unresolved recipient, an
   unknown currency or an unconfirmed handoff waits for the next poll.
+
+  Answers the records of the entries still waiting, or nil when the routing
+  inbox could not be listed.
   """
   def route_results(entries \\ []) do
-    case routes() do
-      {:ok, publications} -> Enum.each(publications, &route_result(&1, entries))
-      error -> Logger.warning("Listing routed thread results failed: #{inspect(error)}")
-    end
-
-    :ok
-  end
-
-  defp routes do
     with {:ok, output} <- Shuttle.CLI.run(["inbox", "routes"], stderr_to_stdout: false),
-         {:ok, publications} when is_list(publications) <- Jason.decode(output),
-         do: {:ok, publications}
+         {:ok, publications} when is_list(publications) <- Jason.decode(output) do
+      for %{"record" => record} = publication <- publications,
+          route_result(publication, entries) == :waiting,
+          do: record
+    else
+      error ->
+        Logger.warning("Listing routed thread results failed: #{inspect(error)}")
+        nil
+    end
   end
 
+  # :settled once this step settled the entry, :waiting otherwise.
   defp route_result(%{"id" => id, "record" => record}, entries) do
     current =
       case current_signal(record, id) do
@@ -1182,26 +1187,34 @@ defmodule Shuttle.Threads do
          {:ok, decision} <- Jason.decode(output) do
       case decision do
         %{"action" => "forward", "record" => routed} ->
-          if acknowledged?(forward_result(routed, id)), do: settle(id, "forwarded")
+          if acknowledged?(forward_result(routed, id)),
+            do: settle(id, "forwarded"),
+            else: :waiting
 
         %{"action" => "session"} ->
           case tell_asker(record, id) do
             {:error, status, _} when status in 400..499 -> settle(id, "undeliverable")
             {:ok, _, %{"status" => "rejected"}} -> settle(id, "undeliverable")
             {:ok, _, %{"status" => status}} when status != "unknown" -> settle(id, "delivered")
-            _ -> :ok
+            _ -> :waiting
           end
 
+        %{"action" => "wait"} ->
+          :waiting
+
         _ ->
-          :ok
+          :settled
       end
     else
-      error -> Logger.warning("Routing thread result #{id} failed: #{inspect(error)}")
+      error ->
+        Logger.warning("Routing thread result #{id} failed: #{inspect(error)}")
+        :waiting
     end
   end
 
   # The resolved recipient's routing facts, or none while it is unresolved
-  # or for an asker notice, whose recipient is its session.
+  # or for an asker notice, whose recipient is its session. Only a recipient
+  # this daemon owns gets an inbox key; the CLI forwards one without.
   defp recipient(%{"session" => session}, _entries) when is_binary(session), do: []
 
   defp recipient(record, entries) do
@@ -1224,30 +1237,30 @@ defmodule Shuttle.Threads do
             )
           )
 
-        [
-          "--record",
-          Jason.encode!(resolved),
-          "--owner",
-          host,
-          "--key",
-          Delivery.context_key(parent)
-        ]
+        key = if OriginRouter.local?(host), do: ["--key", Delivery.context_key(parent)], else: []
+        ["--record", Jason.encode!(resolved)] ++ key
 
       _ ->
         []
     end
   end
 
-  defp settle(id, disposition), do: Shuttle.CLI.run(["inbox", "settle", id, disposition])
+  defp settle(id, disposition) do
+    case Shuttle.CLI.run(["inbox", "settle", id, disposition]) do
+      {:ok, _} -> :settled
+      _ -> :waiting
+    end
+  end
 
   @doc """
   What waits for each constitution this host owns, `%{uid_or_id => count}` with
   zero counts left out: the context its inbox holds that no worker has taken
   (thread results and messages queued for its next worker), plus the results
-  addressed to it still in the routing inbox. One `shuttle inbox pending` call
-  answers every inbox; a failed call counts the routing inbox alone.
+  addressed to it among `routing`, the routing records `route_results/1`
+  left waiting (nil when it could not list them). One `shuttle inbox pending`
+  call answers every inbox; a failed call counts the routing records alone.
   """
-  def pending_results(entries, own_host) do
+  def pending_results(entries, own_host, routing) do
     owned =
       for entry <- entries,
           is_map(entry.fiber["shuttle"]),
@@ -1268,17 +1281,11 @@ defmodule Shuttle.Threads do
 
     ids = MapSet.new(owned, &elem(&1, 1))
 
-    case owned != [] and routes() do
-      {:ok, publications} ->
-        publications
-        |> Enum.map(& &1["record"]["parent_uid"])
-        |> Enum.filter(&MapSet.member?(ids, &1))
-        |> Enum.frequencies()
-        |> Map.merge(queued, fn _id, routed, waiting -> routed + waiting end)
-
-      _ ->
-        queued
-    end
+    (routing || [])
+    |> Enum.map(& &1["parent_uid"])
+    |> Enum.filter(&MapSet.member?(ids, &1))
+    |> Enum.frequencies()
+    |> Map.merge(queued, fn _id, routed, waiting -> routed + waiting end)
   end
 
   # The session that asked for a thread, when it is not the orchestrator's
