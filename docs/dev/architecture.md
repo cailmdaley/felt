@@ -39,32 +39,26 @@ A child constitution publishes lifecycle results to its nearest ancestor constit
 Only the child's owning daemon publishes them.
 Results reach only that nearest orchestrator; each orchestrator decides what to pass on, with no automatic upward propagation.
 Every result is context in the orchestrator's inbox.
-A close or ask wakes only the session that asked for the thread, recorded by `shuttle thread` in `shuttle.thread_parent.asked_by` as the asking session and the constitution it worked: when that constitution is the orchestrator, its worker is woken; otherwise a second inbox entry addresses the asking session and retries its waking notice until its outcome is known.
+A close or ask wakes only the session that asked for the thread, recorded by `shuttle thread` in `shuttle.thread_parent.asked_by` as the asking session and the constitution it worked: when that constitution is the orchestrator, its worker is woken; otherwise the asking session gets a waking notice of its own, retried until its outcome is known.
 A thread with no recorded asker wakes no one, and `shuttle close --quiet` publishes context whoever asked.
-A wake is weighed against its cost (`Shuttle.WakeCost`: a Claude conversation with a cold prompt cache and at least 250k tokens of context is costly). An ordinary `shuttle message` to a costly conversation is delivered as context, with the cost in its receipt; a waking thread result for a costly worker at rest launches a fresh session, which takes the result from the mailbox. `shuttle message --wake` and `--fresh` are the explicit choices.
+A wake is weighed against its cost (`Shuttle.WakeCost`: a Claude conversation with a cold prompt cache and at least 250k tokens of context is costly). An ordinary `shuttle message` to a costly conversation is delivered as context, with the cost in its receipt; a waking thread result for a costly worker at rest launches a fresh session, which takes the result from the inbox. `shuttle message --wake` and `--fresh` are the explicit choices.
 A thread resting until a fiber (`shuttle.blocked_on`, set by `shuttle rest --until`) publishes `unblocked` as context when that fiber closes with any verdict; it never wakes and arms nothing.
 The quiet marker names its exact close timestamp and an ordinary close clears it, so it cannot affect a later publication.
-The inbox freezes the wake choice with the publication through retries and restarts.
-Before the first poll, the daemon establishes a durable first-deployment timestamp in the inbox's `mailboxes/threads.json` capture policy.
+The first capture freezes the wake choice with the publication through retries and restarts.
+Before the first poll, the daemon establishes a durable first-deployment timestamp, the capture baseline, in `mailboxes/threads.json`.
 Signals stamped at or before that baseline stay in fiber history and are never backfilled.
-The baseline survives restarts; invalid or unreadable state refuses startup rather than replaying historical results.
+The baseline survives restarts; a corrupt one holds boot rather than replaying historical results.
 
-The sender captures each new publication's immutable intended parent UID (felt's intrinsic frontmatter identity), text and message ID before attempting delivery.
-Every retry resolves that UID from a fresh document read and uses its current host, wherever the parent lived at capture.
-Cross-host delivery carries the UID, never a slug.
-Moving the child does not change a pending publication's recipient; a missing parent leaves it pending.
-Detection writes each publication directly through `messaging.Enqueue` into an inbox.
-An unresolved or remote-bound result stays in the sender's inbox for the captured parent, with its routing fields; an outside asker's notice lives in that session's inbox.
-Authoritative resolution may pass an archived parent, then freezes the recipient UID in the entry.
-The consumer decides forwarding before worker delivery; the daemon performs HTTP and finalizes the sender's entry as `forwarded` only after the owner confirms durable enqueue.
+The sender captures each publication, with its intended parent's UID (felt's intrinsic frontmatter identity), text and message ID, into its host's routing inbox before attempting delivery.
+That one inbox holds every publication the host has not yet placed; a placed result is an ordinary entry in its recipient's inbox, and no routed entry sits in a worker's inbox.
+Each poll resolves the UID from fresh authoritative documents, past an archived parent and never by slug, and uses the recipient's current host.
+The first resolution is frozen in the entry: moving the child does not change a pending publication's recipient, and a missing parent leaves it pending.
+A result for a fiber this host owns is placed in that fiber's inbox; one for another host's fiber is forwarded to its owner's `/api/v1/deliver` by UID, and settles only when the owner confirms a durable enqueue.
 A lost confirmation repeats the same enqueue, which stores nothing new.
 On the owner, the result stays pending until a worker takes it or currency checking drops it as superseded.
-Offered entries and imported acknowledgment-only entries retain dedup identity for 14 days; a monotonic signal cutoff prevents older lifecycle stamps from republishing after those entries expire.
-Boot imports `thread-outbox/` and its supported snapshots into inbox entries, preserving the baseline, retention cutoff and frozen recipients, with acknowledgments winning over pending outbox copies.
-The import preserves a result already enqueued for its worker, repeats safely after interruption, and removes the source only after all entries are durable.
-Corrupt capture policy or outbox input holds boot without discarding pending work.
-Restore the exact trusted baseline from backup rather than setting it to the current time.
-See [The inbox](inbox.md#thread-results-and-routing) for import and rollback details.
+Settled routing entries keep their ids for 14 days, so a re-capture stores nothing; a retention cutoff that only advances keeps an older lifecycle stamp from publishing again after they expire.
+Boot imports an older daemon's `thread-outbox/` into the routing inbox, keeping its baseline, retention cutoff, pending results and acknowledgments; a corrupt outbox holds boot without discarding anything.
+See [The inbox](inbox.md#thread-results-and-routing) for routing, the import and rollback.
 
 The parent Poller publishes one durable receiver identity and epoch synchronously with worker registration, recovery, removal and conversation rotation.
 A CLI claim binds its supplied conversation UUID in worker metadata before registration publishes authority, never borrowing the predecessor's runtime UUID.

@@ -130,7 +130,7 @@ owner's pair unchanged. Shuttle's resolved view under `fiber.shuttle.resolved`
 carries a standing schedule's `next_due` and, when it can be said plainly, its
 `schedule_text` (`weekdays 9:00`).
 
-An owned constitution entry with no live worker carries `pending_results` while something waits for its next worker: the number of pending entries in its inbox, including thread results awaiting routing.
+An owned constitution entry with no live worker carries `pending_results` while something waits for its next worker: the number of entries in its inbox that no worker has taken, plus thread results addressed to it still in the owner's routing inbox.
 The field is absent when nothing waits or a worker is live.
 The owner counts after each poll's delivery pass, so a count trails a new arrival by up to one poll; the composite carries each remote owner's count unchanged.
 
@@ -729,7 +729,7 @@ A cleared or replaced ask, a rearmed close, or an unreviewed close superseded by
 A reviewed close has a distinct quiet notice naming the verdict.
 Unreachable owners and failed reads return 503, so the mailbox retains the notice for retry.
 Existing notices without structured signal metadata are checked by their lifecycle message ID and the thread address in their text.
-Inbox consumption validates notices before forwarding or worker emission and records their delivery or supersession durably.
+Routing validates notices before placing or forwarding them, and inbox consumption again before worker emission; each records delivery or supersession durably.
 
 ## Extensions
 

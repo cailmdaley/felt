@@ -279,7 +279,7 @@ See [Thread review](lifecycle.md#thread-review).
 Its owner captures results durably even when the parent has no local archive copy.
 Delivery resolves the parent's current authority by identity; an unavailable authority retains the result for retry.
 
-Thread lifecycle notices are durable inbox entries, checked against the owning thread's current document before forwarding or worker emission.
+Thread lifecycle notices are durable inbox entries, checked against the owning thread's current document before they are placed or forwarded, and again before a worker receives them.
 An unresolved recipient waits; once authoritative resolution chooses the recipient UID, moving the child cannot redirect the result.
 A close tempered or discarded by the human supplies quiet context naming that verdict.
 It supersedes the unreviewed close notice and never wakes the orchestrator.
@@ -291,9 +291,9 @@ Healthy notices can pass deferred notices, so delivery order can differ from
 queue order.
 A recognizable missing validation endpoint allows delivery with a staleness caveat.
 An unresolved legacy notice allows delivery without validation.
-Offered entries, including imported acknowledgment-only entries, expire after 14 days.
+Settled and offered entries expire after 14 days.
 The originating signal timestamp and durable retention cutoff prevent an expired notice from returning after its dedup entry expires.
-An outside asker's waking notice is a separate session inbox entry; unknown outcomes are retried, while refusal is final because the orchestrator keeps the same result.
+An outside asker's waking notice is a separate entry; unknown outcomes are retried, while refusal is final because the orchestrator keeps the same result.
 
 A delivery with an unknown outcome stays pinned to its original conversation.
 When that conversation explicitly ends, a successor can receive it with a
