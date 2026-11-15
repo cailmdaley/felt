@@ -165,6 +165,158 @@ defmodule Shuttle.InboxLaunchTest do
     output
   end
 
+  test "a delayed entry is inert at enqueue and fires on one poll for a dormant fiber", %{
+    host: host
+  } do
+    id = armed(host, "tests/delayed-dormant")
+    poller = poller!(host)
+    parent = entry(host, id)
+
+    instant =
+      DateTime.add(DateTime.utc_now(), 2, :second)
+      |> DateTime.truncate(:second)
+      |> DateTime.to_iso8601()
+
+    assert {:ok, {:scheduled, ^instant}} =
+             Delivery.context(parent, "check converged", "later",
+               turn: "ask",
+               not_before: instant
+             )
+
+    assert launches(id) == 0
+    assert waking(parent) == 0
+    poll!(poller)
+    assert launches(id) == 0
+    assert %{scheduled_messages: scheduled} = :sys.get_state(poller)
+    assert [%{"id" => "later", "text" => "check converged"}] = scheduled[parent.fiber["uid"]]
+    Process.sleep(2100)
+    poll!(poller)
+    assert launches(id) == 1
+    %{session_uuid: uuid} = Poller.live_worker(poller, id)
+    assert hook!(uuid) =~ "check converged"
+    refute hook!(uuid) =~ "check converged"
+    poll!(poller)
+    assert launches(id) == 1
+    assert pending(parent) == %{}
+  end
+
+  test "a live worker never takes a future entry and its poll notices it when due", %{host: host} do
+    id = armed(host, "tests/delayed-live")
+    poller = poller!(host)
+    parent = entry(host, id)
+    assert {:ok, :starting} = Delivery.context(parent, "start", "start", turn: "force")
+    %{session_uuid: uuid} = Poller.live_worker(poller, id)
+    assert hook!(uuid) =~ "start"
+
+    instant =
+      DateTime.add(DateTime.utc_now(), 2, :second)
+      |> DateTime.truncate(:second)
+      |> DateTime.to_iso8601()
+
+    assert {:ok, {:scheduled, ^instant}} =
+             Delivery.context(parent, "live check", "live-later",
+               turn: "ask",
+               not_before: instant
+             )
+
+    refute hook!(uuid, "PostToolUse") =~ "live check"
+    poll!(poller)
+    refute hook!(uuid, "PostToolUse") =~ "live check"
+    Process.sleep(2100)
+    poll!(poller)
+    # Busy Claude keeps its hook window, and the first due hook takes it.
+    assert hook!(uuid, "PostToolUse") =~ "live check"
+    refute hook!(uuid, "PostToolUse") =~ "live check"
+    assert launches(id) == 1
+  end
+
+  test "a delayed entry that became due while down waits under boot quarantine", %{host: host} do
+    id = armed(host, "tests/delayed-boot")
+    parent = entry(host, id)
+    key = Delivery.context_key(parent)
+
+    instant =
+      DateTime.add(DateTime.utc_now(), 1, :second)
+      |> DateTime.truncate(:second)
+      |> DateTime.to_iso8601()
+
+    assert {:ok, _} =
+             Shuttle.CLI.run([
+               "inbox",
+               "put",
+               key,
+               "down",
+               "check after boot",
+               "--turn",
+               "ask",
+               "--not-before",
+               instant,
+               "--if-costly",
+               "fresh"
+             ])
+
+    Process.sleep(1100)
+    poller = poller!(host, boot_quarantine: true)
+    poll!(poller)
+    assert launches(id) == 0
+    assert %{"down" => _} = pending(parent)
+    :ok = Poller.release_boot_quarantine(poller)
+    poll!(poller)
+    assert launches(id) == 1
+    %{session_uuid: uuid} = Poller.live_worker(poller, id)
+    assert hook!(uuid) =~ "check after boot"
+    refute hook!(uuid) =~ "check after boot"
+  end
+
+  test "delayed enqueue keeps an outstanding ask and lists and cancels through the owner API", %{
+    host: host
+  } do
+    id = oneshot(host, "tests/delayed-ask", "open")
+    path = Path.join([host, ".felt", id, "delayed-ask.md"])
+
+    File.write!(
+      path,
+      String.replace(
+        File.read!(path),
+        "  kind: oneshot",
+        "  ask:\n    text: Which kernel?\n  kind: oneshot"
+      )
+    )
+
+    _poller = poller!(host)
+    parent = entry(host, id)
+    instant = DateTime.add(DateTime.utc_now(), 3600, :second) |> DateTime.to_iso8601()
+
+    assert {:ok, {:scheduled, ^instant}} =
+             Delivery.context(parent, "later", "ask-later",
+               from: "agent",
+               turn: "ask",
+               not_before: instant
+             )
+
+    Process.sleep(50)
+    assert File.read!(path) =~ "Which kernel?"
+
+    conn =
+      Phoenix.ConnTest.build_conn()
+      |> Plug.Conn.put_req_header("content-type", "application/json")
+
+    params = %{"fiber_id" => id, "action" => "list"}
+    response = ShuttleWeb.InboxController.create(conn, params)
+
+    assert %{"entries" => [%{"id" => "ask-later", "not_before" => ^instant}]} =
+             Jason.decode!(response.resp_body)
+
+    response =
+      ShuttleWeb.InboxController.create(
+        conn,
+        Map.merge(params, %{"action" => "cancel", "message_id" => "ask-later"})
+      )
+
+    assert response.status == 200
+    assert pending(parent) == %{}
+  end
+
   test "a waking message to a dormant constitution starts one session, whose first hook takes the batch",
        %{host: host} do
     id = armed(host, "tests/inbox-dormant")

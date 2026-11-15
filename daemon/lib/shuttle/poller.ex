@@ -232,6 +232,7 @@ defmodule Shuttle.Poller do
       # delivery task. The owner feed and the thread roster draw it on a
       # constitution with no live worker. Empty until the first report.
       pending_results: %{},
+      scheduled_messages: %{},
       # Memoized owner-feed filter+sort: `{document_cache_it_was_built_from,
       # base_rows}`, `nil` until first computed. `owner_feed_base/1` recomputes
       # iff `state.document_cache` is no longer the SAME term this was built
@@ -426,6 +427,7 @@ defmodule Shuttle.Poller do
         running: running,
         dispatch_failures: failures,
         pending_results: pending,
+        scheduled_messages: scheduled,
         pulses: pulses
       } ->
         entries =
@@ -433,7 +435,11 @@ defmodule Shuttle.Poller do
           |> Shuttle.Pulse.stamp(pulses)
           |> stamp_runtime(running)
           |> Snapshot.put_dispatch_errors(failures)
-          |> stamp_pending_results(%State{pending_results: pending, running: running})
+          |> stamp_pending_results(%State{
+            pending_results: pending,
+            running: running,
+            scheduled_messages: scheduled
+          })
 
         log_cold_feed_once(server, cache)
         stores = Keyword.get(opts, :felt_stores) || default_stores
@@ -1411,6 +1417,7 @@ defmodule Shuttle.Poller do
     Map.take(state, [
       :running,
       :standing_roles,
+      :scheduled_messages,
       :pulses,
       :pulse_jobs,
       :orphans,
@@ -1517,6 +1524,7 @@ defmodule Shuttle.Poller do
       running: state.running,
       dispatch_failures: state.dispatch_failures,
       pending_results: state.pending_results,
+      scheduled_messages: state.scheduled_messages,
       pulses: pulse_rows(state)
     }
 
@@ -1658,6 +1666,7 @@ defmodule Shuttle.Poller do
       :document_cache_stats,
       :task_reads,
       :pending_results,
+      :scheduled_messages,
       :pulses,
       :pulse_jobs,
       :fleet,
@@ -1673,6 +1682,7 @@ defmodule Shuttle.Poller do
     Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
       Shuttle.Env.adopt_callers(callers)
       routing = Shuttle.Threads.deliver_results(entries, own_host)
+      send(poller, {:scheduled_messages, Shuttle.InboxSchedule.entries(entries)})
 
       send(
         poller,
@@ -2102,6 +2112,9 @@ defmodule Shuttle.Poller do
       _ -> {:noreply, state}
     end
   end
+
+  defp transition_info({:scheduled_messages, entries}, state),
+    do: {:noreply, %{state | scheduled_messages: entries}}
 
   defp transition_info({:pending_results, counts}, state) when is_map(counts),
     do: {:noreply, %{state | pending_results: counts}}
@@ -3249,14 +3262,16 @@ defmodule Shuttle.Poller do
   # An owned row's `pending_results`, present only while something waits for
   # its next worker and none is live. A number on the wire; the board draws it
   # muted, and every other row is served exactly as cached.
-  defp stamp_pending_results(entries, %State{pending_results: pending})
-       when map_size(pending) == 0,
-       do: entries
-
-  defp stamp_pending_results(entries, %State{pending_results: pending, running: running}) do
+  defp stamp_pending_results(entries, %State{
+         pending_results: pending,
+         running: running,
+         scheduled_messages: scheduled
+       }) do
     Enum.map(entries, fn entry ->
       key = entry.fiber["uid"] || entry.fiber["id"]
       live? = Map.has_key?(running, key) or Map.has_key?(running, entry.fiber["slug"])
+
+      entry = Map.put(entry, :scheduled_messages, Map.get(scheduled, key, []))
 
       case Shuttle.Threads.waiting(pending_entry(entry, pending), live?) do
         0 -> entry

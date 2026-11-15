@@ -22,7 +22,7 @@ defmodule Shuttle.Contract do
   require Logger
 
   # Matches internal/shuttlecli/contract.go's ShuttleContractLevel.
-  @expected_level 44
+  @expected_level 45
 
   # The daemon-shelled surface each recent level introduced. A skew reason
   # names every surface above the CLI's level, so an operator sees which verb
@@ -69,7 +69,8 @@ defmodule Shuttle.Contract do
       "inbox consume --busy/--message and followup/held/message answers; context-mailbox put --attachments-stdin; " <>
         "inbox record-begin/record-settle (typed human lines and agent fresh requests, recorded and deduplicated)",
     43 => "channels order (the human's order of the Channels rail)",
-    44 => "inbox record-begin --source and message --recorded (pulse and voice records)"
+    44 => "inbox record-begin --source and message --recorded (pulse and voice records)",
+    45 => "delayed fiber messages, owner inbox listing and cancellation"
   }
 
   @doc "The daemon's expected `shuttle contract` level."

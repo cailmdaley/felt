@@ -154,6 +154,7 @@ func (a *app) shuttleMessageCmd() *cobra.Command { return a.messageCmd(&messageO
 
 // messageCmd is shuttle message with its flags bound into messageOpts.
 func (a *app) messageCmd(messageOpts *messageOptions) *cobra.Command {
+	var delay, at string
 	shuttleMessageCmd := &cobra.Command{
 		Use:   "message <address|session-id|fiber> [text|-]",
 		Short: "Send a message and files to a session or fiber",
@@ -179,6 +180,13 @@ Choose deliberately:
   --fresh starts a new session on the fiber with the text, replacing its live
     worker; the new session is told where the previous conversation is;
   --wake forces a native wake immediately, whatever it costs.
+
+Schedule a fiber message with --in 8h (Go durations plus d for days) or --at
+(RFC 3339, sender-local YYYY-MM-DD HH:MM, or next local HH:MM). With only text,
+a delayed send addresses your own fiber. The receipt prints the resolved local
+and UTC time; retry the same message id and schedule to keep that instant.
+Both daemons must speak contract 45. Delays refuse session addresses and --fresh.
+List with inbox ls <fiber> --scheduled; cancel with inbox cancel <fiber> <id>.
 
 A fiber send always uses its durable inbox; attachments become retained file references. The receipt says
 what became of this message: woken, followed_up in a turn, delivered (as context,
@@ -223,6 +231,18 @@ exit 1 means rejected, unknown, or another command error.`,
 			if messageOpts.notifyWake && !messageOpts.notifyIdle {
 				return fmt.Errorf("--notify-wake requires --notify-when-idle")
 			}
+			if delay != "" || at != "" {
+				if delay != "" && at != "" {
+					return fmt.Errorf("--in and --at are mutually exclusive")
+				}
+				if messageOpts.fresh {
+					return fmt.Errorf("--fresh cannot be combined with a delay")
+				}
+				if messageOpts.local || messageOpts.requestJSON {
+					return fmt.Errorf("a delayed message goes to a fiber through its owner")
+				}
+				return nil
+			}
 			if messageOpts.file == "" && len(args) != 2 && len(messageOpts.attachments) == 0 && !messageOpts.notifyIdle {
 				return fmt.Errorf("expected text, '-' for stdin, --file <path>, or --attach <path>")
 			}
@@ -235,9 +255,36 @@ exit 1 means rejected, unknown, or another command error.`,
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			delayed := delay != "" || at != ""
+			if delayed && len(args) == 1 {
+				f, err := a.currentWorkerFiber()
+				if err != nil || f == nil {
+					return fmt.Errorf("no fiber belongs to this session; give a fiber address explicitly")
+				}
+				args = []string{f.ID, args[0]}
+			}
 			request, err := a.buildMessageRequest(cmd.InOrStdin(), args, messageOpts)
 			if err != nil {
 				return err
+			}
+			if delayed {
+				f, block := a.messageFiber(request.Address)
+				if f == nil {
+					return fmt.Errorf("a delayed message goes to a fiber")
+				}
+				if err := a.requireDelayedContract(block.Host); err != nil {
+					return err
+				}
+				instant, err := a.messageSchedule(request.MessageID, delay, at)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.ErrOrStderr(), "scheduling %s for %s\n", request.MessageID, instant)
+				receipt, err := a.queueForFiber(request, request.Wake && cmd.Flags().Changed("wake"), instant)
+				if err != nil {
+					return err
+				}
+				return a.printFiberReceipt(receipt, request.Wake)
 			}
 			if messageOpts.fresh {
 				if err := a.messageFresh(request); err != nil {
@@ -362,6 +409,8 @@ exit 1 means rejected, unknown, or another command error.`,
 			return nil
 		},
 	}
+	shuttleMessageCmd.Flags().StringVar(&delay, "in", "", "Deliver later: Go duration, plus d for days (8h, 2d)")
+	shuttleMessageCmd.Flags().StringVar(&at, "at", "", "Deliver at RFC 3339, local YYYY-MM-DD HH:MM, or next HH:MM")
 	shuttleMessageCmd.Flags().StringVar(&messageOpts.file, "file", "", "read message text from a file ('-' for stdin)")
 	shuttleMessageCmd.Flags().StringArrayVar(&messageOpts.attachments, "attach", nil, "copy a file to the recipient's host (repeat for multiple files)")
 	shuttleMessageCmd.Flags().BoolVar(&messageOpts.wake, "wake", true, "force native wake (use --wake=false for context only)")

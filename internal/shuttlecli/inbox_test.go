@@ -61,7 +61,7 @@ func TestInboxVerbs(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if len(lines) != 2 || strings.Join(strings.Fields(lines[0])[:4], " ") != "later notice ask 2999-01-01T00:00:00Z" || !strings.HasSuffix(lines[0], "bob") || strings.Join(strings.Fields(lines[1])[:4], " ") != "now message none -" {
+	if len(lines) != 2 || strings.Join(strings.Fields(lines[0])[:4], " ") != "later notice ask 2999-01-01T00:00:00Z" || !strings.Contains(lines[0], "bob  wait for it") || strings.Join(strings.Fields(lines[1])[:4], " ") != "now message none -" {
 		t.Fatalf("ls text:\n%s", out)
 	}
 

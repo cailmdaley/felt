@@ -82,12 +82,13 @@ for.`,
 	}
 	pending.Flags().BoolVar(&waking, "waking", false, "Count only due entries that would start a session")
 
+	var scheduled bool
 	ls := &cobra.Command{
 		Use:   "ls <address>",
 		Short: "List an address's pending entries, oldest first",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			entries, err := messaging.PendingEntries(a.env, args[0])
+			entries, err := a.listInbox(args[0], scheduled)
 			if err != nil {
 				return err
 			}
@@ -103,11 +104,31 @@ for.`,
 				if from == "" {
 					from = "-"
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", e.MessageID, e.Source, e.Turn, notBefore, e.QueuedAt.UTC().Format(time.RFC3339), from)
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", e.MessageID, e.Source, e.Turn, notBefore, e.QueuedAt.UTC().Format(time.RFC3339), from, e.Text, e.Waiting)
 			}
 			return w.Flush()
 		},
 	}
+	ls.Flags().BoolVar(&scheduled, "scheduled", false, "Only pending entries with a delivery time, including overdue entries")
+	cancel := &cobra.Command{Use: "cancel <fiber-or-key> <message-id>", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+		f, _ := a.messageFiber(args[0])
+		if rawInboxKey(args[0]) || f == nil {
+			return messaging.CancelPending(a.env, args[0], args[1])
+		}
+		_, err := a.ownerInbox(args[0], "cancel", args[1])
+		return err
+	}}
+	batch := &cobra.Command{Use: "scheduled <key>...", Hidden: true, Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		result := map[string][]messaging.PendingEntry{}
+		for _, key := range args {
+			entries, err := messaging.PendingEntries(a.env, key)
+			if err != nil {
+				return err
+			}
+			result[key] = scheduledEntries(entries)
+		}
+		return a.outputJSON(result)
+	}}
 	var idle, unknown, costly, busy bool
 	var message string
 	consume := &cobra.Command{
@@ -148,7 +169,7 @@ to consume again with the worker's --idle, --unknown and --costly facts.`,
 	consume.Flags().BoolVar(&idle, "idle", false, "The live worker was observed idle")
 	consume.Flags().BoolVar(&unknown, "unknown", false, "The live worker's turn state is unknown: woken for ask, never for idle")
 	consume.Flags().BoolVar(&costly, "costly", false, "Waking the live worker is costly")
-	return append(append([]*cobra.Command{put, pending, ls, consume}, a.recordInboxVerbs()...), a.threadInboxVerbs()...)
+	return append(append([]*cobra.Command{put, pending, ls, consume, cancel, batch}, a.recordInboxVerbs()...), a.threadInboxVerbs()...)
 }
 
 // printPendingCounts prints one JSON object, key => pending count. A key

@@ -319,6 +319,11 @@ defmodule Shuttle.Delivery do
         args = if turn, do: args ++ ["--turn", turn], else: args
 
         args =
+          if opts[:not_before],
+            do: args ++ ["--not-before", opts[:not_before], "--if-costly", "fresh"],
+            else: args
+
+        args =
           if String.starts_with?(message_id, "thread-"), do: args ++ ["--derived"], else: args
 
         args =
@@ -345,7 +350,7 @@ defmodule Shuttle.Delivery do
         with {:ok, _} <- Shuttle.CLI.run(args, command_opts) do
           # Beside the delivery, outside its budget: the answer does not wait
           # on a lifecycle write.
-          if from != "shuttle" do
+          if from != "shuttle" and not future?(opts[:not_before]) do
             caller = self()
 
             Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
@@ -359,28 +364,41 @@ defmodule Shuttle.Delivery do
             end)
           end
 
-          case flush_context(entry, message: message_id, deadline: deadline) do
-            {:error, :no_worker} when turn != nil ->
-              {:ok, start_for_inbox(entry, deadline)}
+          if future?(opts[:not_before]) do
+            {:ok, {:scheduled, opts[:not_before]}}
+          else
+            case flush_context(entry, message: message_id, deadline: deadline) do
+              {:error, :no_worker} when turn != nil ->
+                {:ok, start_for_inbox(entry, deadline)}
 
-            {:ok, answer} ->
-              if answer["action"] == "wait" and answer["turn"] do
-                server = Shuttle.Env.server(Poller)
-                caller = self()
+              {:ok, answer} ->
+                if answer["action"] == "wait" and answer["turn"] do
+                  server = Shuttle.Env.server(Poller)
+                  caller = self()
 
-                Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
-                  Process.put(:"$callers", [caller])
-                  Process.sleep(30_000)
-                  flush_context(entry, server: server)
-                end)
-              end
+                  Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
+                    Process.put(:"$callers", [caller])
+                    Process.sleep(30_000)
+                    flush_context(entry, server: server)
+                  end)
+                end
 
-              {:ok, {:consumed, answer}}
+                {:ok, {:consumed, answer}}
 
-            _ ->
-              {:ok, :queued}
+              _ ->
+                {:ok, :queued}
+            end
           end
         end
+    end
+  end
+
+  defp future?(nil), do: false
+
+  defp future?(instant) do
+    case DateTime.from_iso8601(instant) do
+      {:ok, time, _} -> DateTime.compare(time, DateTime.utc_now()) == :gt
+      _ -> false
     end
   end
 

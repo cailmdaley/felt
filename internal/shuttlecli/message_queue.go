@@ -29,13 +29,14 @@ type fiberReceipt struct {
 	// subscribesIdle reports that the owner records a --notify-when-idle
 	// subscription when the worker takes the entry (contract 42).
 	subscribesIdle bool
+	NotBefore      string `json:"not_before,omitempty"`
 }
 
 // queueForFiber routes fiber messages to the fiber's inbox
 // through its owner. Consumption decides context, follow-up, wake or a gated
 // launch. An owner below contract 42 keeps live waking traffic on the session
 // path. force records --wake. Attachments are retained as owner-local references.
-func (a *app) queueForFiber(request messaging.Request, force bool) (*fiberReceipt, error) {
+func (a *app) queueForFiber(request messaging.Request, force bool, schedule ...string) (*fiberReceipt, error) {
 	f, block := a.messageFiber(request.Address)
 	if f == nil {
 		return nil, nil
@@ -51,7 +52,11 @@ func (a *app) queueForFiber(request messaging.Request, force bool) (*fiberReceip
 			turn = "force"
 		}
 	}
-	modern := a.inbox42(block.Host)
+	notBefore := ""
+	if len(schedule) > 0 {
+		notBefore = schedule[0]
+	}
+	modern := notBefore != "" || a.inbox42(block.Host)
 	if len(request.Attachments) > 0 && !modern {
 		return nil, nil
 	}
@@ -59,6 +64,7 @@ func (a *app) queueForFiber(request messaging.Request, force bool) (*fiberReceip
 		request.Text = "Attached files."
 	}
 	payload, err := json.Marshal(map[string]any{
+		"not_before":       notBefore,
 		"fiber_id":         fiberID,
 		"origin":           block.Host,
 		"address":          request.Address,
@@ -102,9 +108,10 @@ func (a *app) queueForFiber(request messaging.Request, force bool) (*fiberReceip
 	case resp.StatusCode < 300 && answer.Queued:
 		receipt := &fiberReceipt{MessageID: request.MessageID, Fiber: f.ID, Status: string(messaging.StatusQueued), Detail: answer.Detail, subscribesIdle: modern}
 		switch answer.Status {
-		case statusStarting, "woken", "followed_up", "delivered", "held":
+		case statusStarting, "woken", "followed_up", "delivered", "held", "scheduled":
 			receipt.Status = answer.Status
 		}
+		receipt.NotBefore = notBefore
 		if receipt.Detail == "" {
 			receipt.Detail = fmt.Sprintf("not delivered; queued in %s's inbox", f.ID)
 		}
@@ -127,6 +134,9 @@ func (a *app) printFiberReceipt(receipt *fiberReceipt, wake bool) error {
 	}
 	var err error
 	switch {
+	case receipt.Status == "scheduled":
+		t, _ := time.Parse(time.RFC3339, receipt.NotBefore)
+		_, err = fmt.Fprintf(a.env.Stdout, "scheduled for %s: %s (%s UTC; %s)\n", receipt.Fiber, t.Local().Format(time.RFC3339), t.UTC().Format("2006-01-02 15:04:05"), receipt.MessageID)
 	case receipt.Status == "woken":
 		_, err = fmt.Fprintf(a.env.Stdout, "woken %s (%s)\n", receipt.Fiber, receipt.MessageID)
 	case receipt.Status == "delivered":
@@ -148,7 +158,7 @@ func (a *app) printFiberReceipt(receipt *fiberReceipt, wake bool) error {
 // messageFiber is the one Shuttle-owned fiber a message target names, with its
 // block, or nil when the target is a session or names no such fiber.
 func (a *app) messageFiber(target string) (*felt.Felt, *shuttle.Block) {
-	if strings.HasPrefix(target, "shuttle://") || looksLikeNativeSessionID(target) {
+	if strings.HasPrefix(target, "shuttle://") {
 		return nil, nil
 	}
 	lookup, err := a.lookupShuttleAddressFibers(target)

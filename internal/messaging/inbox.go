@@ -344,6 +344,8 @@ type PendingEntry struct {
 	NotBefore string    `json:"not_before,omitempty"`
 	QueuedAt  time.Time `json:"queued_at"`
 	From      string    `json:"from,omitempty"`
+	Text      string    `json:"text"`
+	Waiting   string    `json:"waiting,omitempty"`
 	// Attempt is the entry's open attempt, if any.
 	Attempt *Attempt `json:"attempt,omitempty"`
 }
@@ -361,7 +363,7 @@ func PendingEntries(env *sysenv.Env, address string) ([]PendingEntry, error) {
 	out := make([]PendingEntry, 0, len(items))
 	for _, it := range items {
 		e := it.entry
-		pending := PendingEntry{MessageID: e.Request.MessageID, Source: e.Wishes.Source, Turn: e.Wishes.Turn, NotBefore: e.Wishes.NotBefore, QueuedAt: time.Unix(0, e.QueuedAt), From: e.Request.From}
+		pending := PendingEntry{MessageID: e.Request.MessageID, Source: e.Wishes.Source, Turn: e.Wishes.Turn, NotBefore: e.Wishes.NotBefore, QueuedAt: time.Unix(0, e.QueuedAt), From: e.Request.From, Text: strings.SplitN(e.Request.Text, "\n", 2)[0]}
 		if e.Attempt.open() {
 			pending.Attempt = e.Attempt
 		}
