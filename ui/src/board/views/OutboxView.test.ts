@@ -32,11 +32,11 @@ function daemon(fail: string[] = []) {
   }))
   return posts
 }
-async function mount() {
+async function mount(inFlight = [mask, tail, van], view = new OutboxView()) {
   const openFromDesk = vi.fn(), requestRefresh = vi.fn(), see = vi.fn()
-  const ctx = { cards: [], response: response({ now: { drafts: [], inFlight: [mask, tail, van], awaitingReview: [] } }), shuttleBase: '', workspace: { openFromDesk, openPage: vi.fn() }, requestRefresh, openCard: vi.fn(), see } as unknown as ViewContext
+  const ctx = { cards: [], response: response({ now: { drafts: [], inFlight, awaitingReview: [] } }), shuttleBase: '', workspace: { openFromDesk, openPage: vi.fn() }, requestRefresh, openCard: vi.fn(), see } as unknown as ViewContext
   const host = document.createElement('div'); document.body.append(host)
-  const view = new OutboxView(); views.push(view); view.mount(host, ctx)
+  views.push(view); view.mount(host, ctx)
   await settle(); await settle()
   const reply = host.querySelector<HTMLTextAreaElement>('.kbn-aud-reply-text')!
   return { view, ctx, host, reply, openFromDesk, requestRefresh, see }
@@ -108,4 +108,25 @@ it('marks what is new since the office was last read', async () => {
   const { host } = await mount()
   expect([...host.querySelectorAll('.kbn-aud-block')].map(el => el.hasAttribute('data-new'))).toStrictEqual([false, true])
   expect([...host.querySelectorAll('.kbn-aud-office')].map(el => el.hasAttribute('data-new'))).toStrictEqual([false, true])
+})
+
+it('answers the longest waiting block next once a chosen one is replied to, even in the last office', async () => {
+  const posts = daemon()
+  const { host, reply } = await mount([mask, tail])
+  ;[...host.querySelectorAll<HTMLButtonElement>('.kbn-aud-from')].find(el => el.textContent === 'tail')!.click()
+  reply.value = 'Yes.'
+  host.querySelector<HTMLFormElement>('.kbn-aud-reply')!.requestSubmit()
+  await settle()
+  expect(posts.map(([, body]) => body.fiber_id)).toStrictEqual(['tail'])
+  expect(shown(host)).toBe('Analyst')
+  expect(host.querySelector('.kbn-aud-reply-to')?.textContent).toBe('mask')
+})
+
+it('reads the office it shows again when it is mounted again', async () => {
+  daemon()
+  const first = await mount([mask, tail])
+  expect([...first.host.querySelectorAll('.kbn-aud-block')].map(el => el.hasAttribute('data-new'))).toStrictEqual([true, true])
+  first.view.unmount(); views.length = 0
+  const again = await mount([mask, tail], first.view)
+  expect([...again.host.querySelectorAll('.kbn-aud-block')].map(el => el.hasAttribute('data-new'))).toStrictEqual([false, false])
 })

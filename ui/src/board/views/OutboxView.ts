@@ -82,6 +82,8 @@ export class OutboxView implements TemporalView {
 
   mount(host: HTMLElement, ctx: ViewContext): void {
     this.ctx = ctx
+    // The view outlives its mounts: coming back to the office it showed is reading it again.
+    if (this.current) this.visit(this.current)
     const page = createViewPage('Outbox')
     page.root.classList.add('kbn-audience')
     const keys = el('span', 'kbn-aud-keys', 'j / k between offices · Enter to reply · Esc to leave it')
@@ -153,9 +155,13 @@ export class OutboxView implements TemporalView {
     if (key !== this.current) {
       this.current = key
       this.target = null
-      if (key) { this.before.set(key, lastSeen(key) ?? -Infinity); markSeen(key, Date.now()) }
+      if (key) this.visit(key)
     }
     if (focus) { this.drawRail(); this.drawLetter(); this.letter?.focus({ preventScroll: true }); this.letter?.scrollTo?.({ top: 0 }) }
+  }
+  private visit(key: string): void {
+    this.before.set(key, lastSeen(key) ?? -Infinity)
+    markSeen(key, Date.now())
   }
   private get office(): Office | undefined { return this.offices.find(office => office.key === this.current) }
   /** The block the reply answers: the one chosen in the letter, else the longest waiting. */
@@ -185,6 +191,7 @@ export class OutboxView implements TemporalView {
   }
 
   private drawLetter(): void {
+    if (!this.paper || !this.form) return
     const office = this.office, block = this.block
     if (!this.ctx?.workspace?.isActive) this.ctx?.see?.(block?.card ?? null)
     this.form!.hidden = !block
@@ -345,7 +352,9 @@ export class OutboxView implements TemporalView {
         { fiber_id: block.card.id, origin: block.card.originId, text, from: 'human' }, 'Reply failed')
       if (answer?.delivered === false) throw new Error(answer.error ?? `${block.card.name} did not receive it`)
       this.replied.add(blockKey(block))
-      this.reply!.value = ''
+      this.target = null
+      if (!this.reply) return
+      this.reply.value = ''
       this.status(answer?.delivered === null ? `Sent to ${block.card.name}; its arrival is not yet confirmed.` : `Sent to ${block.card.name}.`)
       announce(`Sent to ${block.card.name}.`)
       if (this.current === office) this.step(1)
@@ -378,11 +387,11 @@ export class OutboxView implements TemporalView {
     this.drawLetter()
     try {
       await postDaemonJson(ctx.shuttleBase, '/api/v1/transition', { fiber_id: block.card.id, target: 'tempered', origin: block.card.originId }, 'Temper failed')
+      // It stays disabled until the refreshed feed takes the block away.
       ctx.requestRefresh()
     } catch (error) {
-      this.status(`${block.card.name} was not tempered: ${error instanceof Error ? error.message : String(error)}`)
-    } finally {
       this.tempering.delete(key)
+      this.status(`${block.card.name} was not tempered: ${error instanceof Error ? error.message : String(error)}`)
       this.drawLetter()
     }
   }
