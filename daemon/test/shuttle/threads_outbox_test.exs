@@ -517,19 +517,10 @@ defmodule Shuttle.ThreadsOutboxTest do
     await_boot_cycle!(poller)
     assert %{session_uuid: ^native} = Poller.live_worker(poller, "hub")
     assert File.read!(authority_path) == authority
-    tasks_dir = Path.join([store, "tasks", native])
-    File.mkdir_p!(tasks_dir)
-    Env.put_env("SHUTTLE_CLAUDE_TASKS_DIR", Path.join(store, "tasks"))
-
-    File.write!(
-      Path.join(tasks_dir, "1.json"),
-      Jason.encode!(%{
-        id: "1",
-        subject: "Read the result",
-        activeForm: "Reading the result",
-        status: "in_progress"
-      })
-    )
+    # A running turn takes the asked result through its hook, not a wake.
+    Env.put_app_env(:waiting_phases_source, fn ->
+      %{native => %{phase: "working", last_event_at: System.system_time(:millisecond)}}
+    end)
 
     assert {:ok, _} = CLI.run_in_store(store, ["reopen", "hub/child", "--local"])
     assert {:ok, _} = CLI.run_in_store(store, ["ask", "hub/child", "Choose a kernel?"])
@@ -554,7 +545,6 @@ defmodule Shuttle.ThreadsOutboxTest do
            } = Enum.find(feed, &(Threads.address(&1.fiber) == "hub"))
 
     refute_receive {:wake, _}
-    File.rm!(Path.join(tasks_dir, "1.json"))
 
     Env.put_app_env(:waiting_phases_source, fn ->
       %{native => %{phase: "waiting", last_event_at: System.system_time(:millisecond)}}
