@@ -12,11 +12,14 @@ defmodule Shuttle.Inbox do
   """
 
   @corrupt 3
+  # The import's own bound, apart from the shelled-command default. A timeout
+  # retries, and each attempt keeps the durable progress of the one before.
+  @timeout_ms 120_000
 
   def boot_import do
     case Shuttle.CLI.run(["inbox", "thread-state"],
            runner: Shuttle.Runner.Default,
-           stderr_to_stdout: true
+           timeout_ms: @timeout_ms
          ) do
       {:ok, _} -> :ok
       {:command_error, @corrupt, output} -> raise Shuttle.Inbox.Corrupt, String.trim(output)
