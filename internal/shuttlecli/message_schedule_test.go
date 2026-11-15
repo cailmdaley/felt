@@ -41,6 +41,27 @@ func TestResolveMessageTime(t *testing.T) {
 	}
 }
 
+func TestMessageTimeAcrossClockChangesAndSubsecondDuration(t *testing.T) {
+	ny, _ := time.LoadLocation("America/New_York")
+	now := time.Date(2026, 11, 1, 5, 45, 0, 0, time.UTC)
+	got, err := resolveMessageTime("", "01:30", now, ny)
+	if err != nil || got.Format(time.RFC3339) != "2026-11-01T06:30:00Z" {
+		t.Fatalf("%s %v", got, err)
+	}
+	now = time.Date(2026, 3, 8, 6, 45, 0, 0, time.UTC)
+	got, err = resolveMessageTime("", "02:30", now, ny)
+	if err != nil || got.Format(time.RFC3339) != "2026-03-09T06:30:00Z" {
+		t.Fatalf("%s %v", got, err)
+	}
+	if _, err := resolveMessageTime("", "2026-03-08 02:30", now, ny); err == nil {
+		t.Fatal("nonexistent local time accepted")
+	}
+	got, err = resolveMessageTime("1ms", "", now, ny)
+	if err != nil || got.Sub(now) != time.Millisecond {
+		t.Fatalf("%s %v", got, err)
+	}
+}
+
 func TestMessageScheduleRetryKeepsInstant(t *testing.T) {
 	a := newApp(testEnv(t))
 	first, err := a.messageSchedule("same", "8h", "")

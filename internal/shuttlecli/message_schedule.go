@@ -55,15 +55,21 @@ func resolveMessageTime(delay, at string, now time.Time, zone *time.Location) (t
 		t, err = time.Parse(time.RFC3339, at)
 		if err != nil {
 			t, err = time.ParseInLocation("2006-01-02 15:04", at, zone)
+			if err == nil && t.In(zone).Format("2006-01-02 15:04") != at {
+				return time.Time{}, fmt.Errorf("delivery time does not exist in %s", zone)
+			}
 		}
 		if err != nil {
 			var clock time.Time
 			clock, err = time.Parse("15:04", at)
 			if err == nil {
-				local := now.In(zone)
-				t = time.Date(local.Year(), local.Month(), local.Day(), clock.Hour(), clock.Minute(), 0, 0, zone)
-				if !t.After(now) {
-					t = t.AddDate(0, 0, 1)
+				// Walk real minutes so a repeated wall-clock time can still be
+				// next today, and a skipped clock time waits until it exists.
+				for t = now.Truncate(time.Minute).Add(time.Minute); ; t = t.Add(time.Minute) {
+					local := t.In(zone)
+					if local.Hour() == clock.Hour() && local.Minute() == clock.Minute() {
+						break
+					}
 				}
 			}
 		}
@@ -71,7 +77,6 @@ func resolveMessageTime(delay, at string, now time.Time, zone *time.Location) (t
 	if err != nil {
 		return time.Time{}, fmt.Errorf("invalid delivery time: %w", err)
 	}
-	t = t.Truncate(time.Second)
 	if !t.After(now) {
 		return time.Time{}, fmt.Errorf("delivery time must be in the future")
 	}
@@ -110,7 +115,7 @@ func (a *app) messageSchedule(id, delay, at string) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return "", err
 	}
-	data, _ := json.Marshal(schedule{delay, at, instant.Format(time.RFC3339)})
+	data, _ := json.Marshal(schedule{delay, at, instant.Format(time.RFC3339Nano)})
 	if err := atomicfile.WriteNewUnsynced(path, data, 0600); err != nil && !os.IsExist(err) {
 		return "", err
 	}
