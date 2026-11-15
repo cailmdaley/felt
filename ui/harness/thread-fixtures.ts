@@ -87,6 +87,10 @@ export function addThreadFixtures(example: WorkspaceExample, now: number, many =
       orchestrator: parent ? `thread-${parent}` : WORKSPACE_UID,
       // A thread with no worker holds results and messages for its next one.
       pending_results: slug === 'review' ? 2 : undefined,
+      scheduled_messages: slug === 'analysis/checks/question' ? [
+        { id: 'fit-check', not_before: new Date(now + 8 * 3600000).toISOString(), from: 'analysis', text: 'Check the fit converged' },
+        { id: 'catalogue-check', not_before: new Date(now + 24 * 3600000).toISOString(), from: 'analysis', text: 'Inspect the new catalogue residuals' },
+      ] : undefined,
       fiber: { id, uid: `thread-${slug}`, name, status, tags: slug === 'review' ? ['pinned'] : undefined, horizon: slug === 'rest' ? 'stashed' : undefined, created_at: new Date(now - 3600000 + n * 60000).toISOString(),
         closed_at: status === 'closed' ? new Date(now - 60000).toISOString() : undefined,
         tempered: slug === 'archive' ? true : slug === 'discard' ? false : undefined,

@@ -84,7 +84,8 @@ Either kind of inbox refuses a 129th pending entry with `queue_full`, except the
 Plain sends ask for a turn, `--wake` forces one and `--context-only` never starts one.
 Attachments are retained under the owner's `message-files/`; the entry contains file references rather than binary frames.
 A plain agent `/deliver` does the same, minting an id when the caller supplies none.
-The owner clears the fiber's outstanding ask when an entry from a sender other than `shuttle` reaches its inbox, including a remote sender.
+The owner clears the fiber's outstanding ask when a due entry from a sender other than `shuttle` reaches its inbox, including a remote sender.
+A future entry clears nothing.
 Session-addressed messages and idle and mail-failure notices keep their direct transports and `messages/` receipts.
 Voice (`live_input`) uses human records and typed input; explicit `message_after_launch` requests use their session delivery paths.
 
@@ -163,6 +164,60 @@ Contract 42 ignores voice and pulse records for transport deduplication, so do n
 An interrupted 44 relay batch has no `attempted` flag, so a 42 relay can paste it again even though its owner's inbox holds an unknown record; do not resume such a relay on 42.
 Claude completion reservations remain readable by 42, but pulse transport there again writes `messages/` receipts.
 Rolling forward restores record-based deduplication; rollback is not transparent for in-flight voice.
+
+## Delayed messages (contract 45)
+
+`shuttle message [<fiber>] "check the fit converged" --in 8h` schedules a check-in that outlives the sending session.
+With only the text, the command finds the sender's own fiber through the same worker identity as `close` and `handoff`; a session with no fiber must name one.
+`--in` accepts Go durations and `d` for 24-hour days, such as `90m`, `8h` and `2d`.
+`--at` accepts RFC 3339, `YYYY-MM-DD HH:MM` in the sender's local zone, or `HH:MM` for its next occurrence in that zone.
+An explicit instant not in the future is refused.
+The flags are mutually exclusive.
+
+The CLI resolves the instant once to UTC RFC 3339 and keeps it under the message id in `message-schedules/` in its data directory.
+A retry with that id and the same schedule uses that instant, even after it passes; a different schedule conflicts.
+The receipt says `scheduled` and prints the sender-local time and UTC.
+`--wake` requests `turn: force`, `--context-only` requests `turn: none`, and the default requests `turn: ask` with `if_costly: fresh`.
+A large, cold idle session therefore gets a gated fresh replacement rather than holding a reminder indefinitely as context; when that replacement is refused, the existing worker is woken regardless of cost.
+`--attach` and `--notify-when-idle` retain their ordinary behavior; the idle subscription begins only when the entry is delivered.
+`--fresh` is refused with a delay because a fresh request records and launches rather than queues.
+Delayed messages accept fiber addresses only: the follow-up-timer proposal's session target is not supported, since a session inbox has no delayed-message consumer and a reminder should follow the work.
+
+The CLI requires both its local daemon and the owner to report contract 45 or higher, naming an older or unreachable host in its refusal.
+The `not_before` wish passes through `/api/v1/deliver` to the owner's `Enqueue`.
+A future entry causes no ask clear, family-board message row, launch reservation, consumption, transport emission or idle subscription at enqueue.
+Every poll consumes live workers and scans dormant fibers with `inbox pending --waking`, whose count excludes future entries.
+The first poll at or after the instant applies the ordinary consumer rule.
+Staleness age starts at the later of `queued_at` and `not_before`, not when the reminder was written.
+Retention never expires a pending entry before that time.
+
+The table describes a due default (`ask`) reminder, from `Delivery.flush_owned`, `Delivery.inbox_gate`, `Poller.inbox_admission` and `Consume`.
+A `force` reminder skips cost and hook windows; a `none` reminder waits as context and never starts a worker.
+
+| State when due | Behavior |
+|---|---|
+| Live worker busy | Codex terminal follow-up; Pi steering; Claude hook, then native wake after its 30-second hook window or when its turn ends |
+| Live idle, warm | Wake with the due batch |
+| Live idle, large and cold | Reserve a fresh session under the agent gate; if refused, wake the existing worker instead of holding for cost |
+| No worker, active oneshot | Start under the agent gate and capacity/breaker/cooldown admission; its hook takes the reserved batch |
+| Rested (`open`, `horizon: stashed`) | Keep pending; never arm or reopen; waits for the author to arm or a worker to start |
+| Draft | Keep pending until armed or a worker takes it |
+| Closed | Keep pending; never reopen; waits for a later worker |
+| Armed standing constitution between runs | Start an ad-hoc inbox run; this does not service a scheduled occurrence; a due occurrence takes the entry in its own run |
+| Boot quarantine held | No new dormant launch or reservation; wait until release and the next poll; existing live workers still consume; a refused cold-cache replacement wakes its existing worker |
+| Owner unreachable | Sending/listing/cancelling fails with the host named; an entry already accepted on that owner stays durable and is consumed when it returns, subject to quarantine |
+
+`shuttle inbox ls <fiber> --scheduled` shows all pending entries with a `not_before`, including overdue ones, with time, sender, first text line and an overdue wait reason.
+Fiber ids, slugs and uids resolve through the owner to its host-local `<store>:<uid>` key; raw keys remain owner-local.
+`shuttle inbox cancel <fiber> <message-id>` moves a pending entry to `offered/` with disposition `cancelled` under the inbox lock.
+An entry already in a transport attempt is refused as `in_flight`: cancellation cannot retract text already emitted.
+Both fiber-reference commands use the owner-routed `/api/v1/inbox` endpoint (`action: list|cancel`); an unreachable owner is an error, never an archive fallback.
+The owner's snapshot includes each fiber's scheduled count, next time and first lines, and its live feed carries the entries for the Desk's expandable scheduled chip.
+
+**Rollback below contract 45 is unsafe while delayed entries are pending.**
+An older daemon can ignore the delay and deliver a pending entry immediately.
+List and cancel pending delayed entries on 45 before rolling the owner back, or keep the owner stopped until their times have passed.
+The sender-side version check cannot protect an accepted entry from a later owner rollback.
 
 ## Thread results and routing
 
@@ -391,7 +446,7 @@ The session-only Claude fallback claims by moving an entry into `fallback/` and 
 
 `shuttle inbox record-begin [--from <sender>] [--source human|voice|pulse|message] [--fiber <uid> [--ask <question>]] <fiber-key> <id>` records a line the daemon transports itself (typed or spoken human input, a pulse tick, or an agent's fresh request), read from stdin, and with `--fiber` writes a human line's board row, and prints `{"created": true|false, "disposition": "unknown"|"delivered"|"undeliverable"}`: only the call that created it may transport it, and a repeat gets the stored disposition.
 `shuttle inbox record-settle <fiber-key> <id> delivered|unknown|undeliverable` records its transport outcome.
-All verbs act on this host's inbox only.
+Raw-key verbs act on this host's inbox only; `ls` and `cancel` with a fiber reference route to its owner.
 `context-mailbox put` also accepts thread signals, reply and notification fields, `--turn`, `--derived` and `--attachments-stdin` (a JSON attachment array); its `--wake` means `turn: force`.
 `context-mailbox deliver` is consume without turn facts: only force initiates a wake, ask remains hook context, and a receiver without a hook takes `none` entries as context.
 `context-mailbox pending` shares the inbox counting code.

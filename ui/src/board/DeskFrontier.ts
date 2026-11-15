@@ -5,6 +5,7 @@ import { turnOf } from './turn.js'
 import { rowLabel, sectionOutline, type OutlineRow } from './threadOutline.js'
 import { workerPlateFacts } from './workspace/workerPlate.js'
 import './deskFrontier.css'
+import { scheduledChip } from './ScheduledChip.js'
 
 const FOLDS_KEY = 'shuttle.desk.folds'
 /** The browser's folds by thread, true for shut; this page's own where the browser keeps none. */
@@ -41,6 +42,8 @@ export function installFrontierDetails(host: HTMLElement, end: HTMLElement, card
   if (card.deskSection) host.dataset.deskSection = card.deskSection
   const title = host.querySelector<HTMLElement>('.kbn-card-name, .kbn-cluster-item-title')
   if (title) { title.textContent = rowLabel(index, self); title.title = card.name }
+  const scheduled = scheduledChip(self)
+  if (scheduled) end.prepend(scheduled)
   const outline = sectionOutline(index, self, state)
   const { elapsed } = workerPlateFacts(card, now)
   const age = (): void => {

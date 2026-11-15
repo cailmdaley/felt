@@ -22,7 +22,10 @@ export interface InheritedProjectDir {
   from: string
 }
 
+export interface ScheduledMessage { id: string; not_before: string; text: string; from?: string }
+
 export interface KanbanCard {
+  scheduledMessages?: ScheduledMessage[]
   /** Nearest ancestor constitution; absent on older feeds and plain notes. */
   orchestrator?: string | null
   /** Thread results and messages waiting for its next worker while it has none. */

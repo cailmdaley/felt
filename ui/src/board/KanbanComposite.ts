@@ -41,7 +41,7 @@
 //   }
 
 import { mapFeltJsonToFiber, type Fiber } from './KanbanFiber.js';
-import type { DeskColumn } from './KanbanTypes.js';
+import type { DeskColumn, ScheduledMessage } from './KanbanTypes.js';
 import { TURN_WORD, type Turn } from './turn.js';
 
 /** The owner's `column`, in the board's names. */
@@ -102,6 +102,7 @@ export interface CompositeEntry {
   /** Thread results and messages waiting for this constitution's next worker
    * (the owner's `pending_results`); 0 while a worker is live. */
   pendingResults?: number;
+  scheduledMessages?: ScheduledMessage[];
   /** Owning felt store path on the owning host. */
   feltStore: string;
   /** Fiber path relative to the owning `.felt/` root. */
@@ -193,7 +194,8 @@ export function parseCompositeFeed(body: unknown): CompositeFeed {
     const dispatchError = typeof item.dispatch_error === 'string' && item.dispatch_error ? item.dispatch_error : undefined;
     const column = WIRE_COLUMN[String(item.column)] ?? 'drafts';
     const turn = TURNS.includes(item.turn as Turn) ? item.turn as Turn : 'none';
-    entries.push({ origin, orchestrator, pendingResults, feltStore, path, fiber, column, turn, runtime, pulse, dispatchError, held, heldSince, dir, reportPath });
+    const scheduledMessages = Array.isArray(item.scheduled_messages) ? item.scheduled_messages.filter((e): e is ScheduledMessage => isRecord(e) && typeof e.id === 'string' && typeof e.not_before === 'string' && typeof e.text === 'string') : undefined;
+    entries.push({ origin, orchestrator, pendingResults, scheduledMessages, feltStore, path, fiber, column, turn, runtime, pulse, dispatchError, held, heldSince, dir, reportPath });
   }
 
   const origins: Record<string, CompositeOrigin> = {};

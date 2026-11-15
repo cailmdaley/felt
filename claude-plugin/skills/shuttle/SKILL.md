@@ -109,6 +109,9 @@ shuttle board                            # your family's board
 shuttle send-file <path> --caption "…"   # put a file on the human's board, saying why (or your harness's file tool, with its caption)
 ```
 
+Schedule a check-in on your own fiber with `shuttle message "check the fit converged" --in 8h` (or `--at "2026-11-17 09:00"` in the sending host's local zone); it outlives your session, waits for its time and obeys the agent launch gate, and delayed messages accept fibers only, never `--fresh` or session addresses.
+Use `shuttle inbox ls <fiber> --scheduled` to see pending and overdue check-ins and `shuttle inbox cancel <fiber> <message-id>` to cancel one on its owner.
+
 **Work the human asks for now starts now.** When you create a thread, or hand work to a fiber whose worker isn't live, launch it in the same step (`shuttle thread` arms by default; `shuttle dispatch <fiber> --message "…"` starts a worker with your request): a draft or a queued message waits for someone who may not come back. Leave it unlaunched only when the human says later, and then say on the card what it waits for.
 
 Messaging a fiber reaches its current worker, or queues for the next one. A busy Claude worker receives context on main-thread prompt submission or tool completion; unoffered mail falls back to native wake after 30 seconds, or sooner when the worker stops working.

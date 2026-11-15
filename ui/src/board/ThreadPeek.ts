@@ -2,6 +2,7 @@ import type { KanbanCard } from './KanbanTypes.js'
 import { waitingWords, type ThreadIndex } from './threads.js'
 import { stateDot } from './stateDot.js'
 import './threads.css'
+import { scheduledChip } from './ScheduledChip.js'
 
 /** A row of the family page; pinning stays local to the page. */
 export function threadRow(card: KanbanCard, index: ThreadIndex, open: (card: KanbanCard) => void): HTMLDivElement {
@@ -13,6 +14,8 @@ export function threadRow(card: KanbanCard, index: ThreadIndex, open: (card: Kan
   row.title = index.ancestryTitle(card) || card.name
   const name = document.createElement('span'); name.className = 'kbn-thread-name'; name.textContent = card.name
   row.append(stateDot(card, open), name)
+  const scheduled = scheduledChip(card)
+  if (scheduled) row.append(scheduled)
   row.classList.toggle('kbn-thread-pinned', isPinned(card))
   row.addEventListener('click', event => { event.stopPropagation(); open(card) })
   row.addEventListener('pointerdown', event => event.stopPropagation())
