@@ -14,9 +14,12 @@ defmodule Shuttle.ThreadsInboxTest do
                %{"context_only" => true, "message_id" => "remote-answer"}
              )
 
-    assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
-    parent = Enum.find(entries, &(Threads.address(&1.fiber) == "hub"))
-    refute parent.fiber["shuttle"]["ask"]
+    # The ask is cleared beside the delivery, not before its answer.
+    assert Shuttle.Test.PollerCase.wait_until(fn ->
+             {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+             parent = Enum.find(entries, &(Threads.address(&1.fiber) == "hub"))
+             parent.fiber["shuttle"]["ask"] == nil
+           end)
   end
 
   @tag first_boot: true

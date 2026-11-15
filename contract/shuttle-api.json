@@ -3297,7 +3297,7 @@
           },
           "consumed": {
             "type": "object",
-            "description": "Consumer evidence for a live worker: action, members, session, followup, held and unconfirmed."
+            "description": "Consumer evidence for a live worker: action, members, session, followup, held, and message (this message's state after the pass: delivered, sent, reserved or pending)."
           },
           "queued": {
             "const": true

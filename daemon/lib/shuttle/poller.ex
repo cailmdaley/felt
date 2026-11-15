@@ -646,8 +646,12 @@ defmodule Shuttle.Poller do
   read of the fiber (`Shuttle.Delivery.inbox_gate/2`).
   """
   @spec admit_inbox_launch(GenServer.server(), String.t()) :: :ok | {:error, atom()}
-  def admit_inbox_launch(server \\ Shuttle.Env.server(__MODULE__), fiber_id) do
-    GenServer.call(server, {:admit_inbox_launch, fiber_id}, dispatch_call_timeout_ms())
+  def admit_inbox_launch(
+        server \\ Shuttle.Env.server(__MODULE__),
+        fiber_id,
+        timeout \\ dispatch_call_timeout_ms()
+      ) do
+    GenServer.call(server, {:admit_inbox_launch, fiber_id}, timeout)
   catch
     :exit, {:timeout, _} -> {:error, :busy}
   end
@@ -656,14 +660,16 @@ defmodule Shuttle.Poller do
   def dispatch_fiber(fiber_id, opts \\ []),
     do: dispatch_fiber(Shuttle.Env.server(__MODULE__), fiber_id, opts)
 
-  # A call that outlives `dispatch_call_timeout_ms/0` answers
-  # `{:error, :poller_busy}` instead of exiting the caller. The request stays in
+  # A call that outlives `dispatch_call_timeout_ms/0` (or the caller's
+  # `:call_timeout_ms`) answers `{:error, :poller_busy}` instead of exiting
+  # the caller. The request stays in
   # the Poller's mailbox and may still launch, so the answer is "unconfirmed",
   # never "refused".
   @spec dispatch_fiber(GenServer.server(), String.t(), keyword()) ::
           {:ok, String.t()} | {:error, atom()}
   def dispatch_fiber(server, fiber_id, opts) do
-    GenServer.call(server, {:dispatch, fiber_id, opts}, dispatch_call_timeout_ms())
+    {timeout, opts} = Keyword.pop(opts, :call_timeout_ms, dispatch_call_timeout_ms())
+    GenServer.call(server, {:dispatch, fiber_id, opts}, timeout)
   catch
     :exit, {:timeout, _} -> {:error, :poller_busy}
   end

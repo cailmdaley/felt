@@ -104,7 +104,7 @@ func (a *app) queueForFiber(request messaging.Request, force bool, session ...st
 	case resp.StatusCode < 300 && answer.Queued:
 		receipt := &fiberReceipt{MessageID: request.MessageID, Fiber: f.ID, Status: string(messaging.StatusQueued), Detail: answer.Detail}
 		switch answer.Status {
-		case statusStarting, "woken", "followed_up", "held":
+		case statusStarting, "woken", "followed_up", "delivered", "held":
 			receipt.Status = answer.Status
 		}
 		if receipt.Detail == "" {
@@ -131,6 +131,8 @@ func (a *app) printFiberReceipt(receipt *fiberReceipt, wake bool) error {
 	switch {
 	case receipt.Status == "woken":
 		_, err = fmt.Fprintf(a.env.Stdout, "woken %s (%s)\n", receipt.Fiber, receipt.MessageID)
+	case receipt.Status == "delivered":
+		_, err = fmt.Fprintf(a.env.Stdout, "delivered to %s (%s)\n", receipt.Fiber, receipt.MessageID)
 	case receipt.Status == "followed_up":
 		_, err = fmt.Fprintf(a.env.Stdout, "followed up in a turn on %s (%s)\n", receipt.Fiber, receipt.MessageID)
 	case receipt.Status == "held":

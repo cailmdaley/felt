@@ -88,11 +88,11 @@ The owner clears the fiber's outstanding ask when an entry from a sender other t
 Session-addressed messages and idle and mail-failure notices keep their direct transports and `messages/` receipts.
 Voice (`live_input`) and explicit `message_after_launch` requests use their session delivery paths.
 
-`/deliver` adds `consumed` for a live worker: the consumer's `action`, `members`, `followup`, `held: cost` and `unconfirmed` evidence.
-Its status is `woken`, `followed_up`, `held`, `starting` or `queued`, which the CLI prints.
-`delivered` is true for a confirmed transport, null for an unconfirmed emission, and false for entries still waiting or starting.
+`/deliver` adds `consumed` for a live worker: the consumer's `action`, `members`, `followup` and `held: cost`, and `message`, this message's state after the pass (`consume --message`): `delivered`, `sent` (its outcome not yet confirmed), `reserved` for a launch, or `pending`.
+The status describes this message, not whatever else the pass sent: `woken`, `followed_up`, `delivered` (as context, or before a retry), `held`, `starting` or `queued`, which the CLI prints.
+`delivered` is true once the message is delivered, null when it was sent and its outcome is unconfirmed, and false while it waits or a session starts for it.
 An enqueue reply is not a promise that the model read the text.
-The live consume ladder has a shared 40-second budget, with each command limited to 32 seconds, inside the CLI's 52-second `/deliver` timeout.
+The owner's put, consumes and any launch share a 35-second budget, each command limited to 32 seconds, so it answers inside a routing hub's 40-second forward and the CLI's 52-second `/deliver` timeout; clearing the ask runs beside them.
 A timeout leaves the entry durable; retry the same id.
 
 `--notify-when-idle` subscribes when a wake or a hook claim delivers the entry, using its publication id, so a repeated claim does not start another watcher.
@@ -102,6 +102,8 @@ A dormant fresh launch is admitted like any inbox launch and never cuts a worker
 The previous conversation is named in the new prompt, and the text arrives through the fiber hook.
 A retry of that id does not cut again after the replacement takes the entry.
 An agent's fresh launch has the same armed-document, quarantine and runtime admission gates as a dormant inbox launch: it never reopens or arms a fiber.
+A refused replacement answers `queued` with the refusal's reason in `detail`; the entry waits in the inbox, and the consumer asks for the replacement again once the reservation's lease passes.
+A fresh request's `/deliver` answer is `delivered: null` until its replacement takes it, which a contract-41 CLI reports as an unconfirmed launch rather than an error to retry.
 The human's fresh board action keeps forced-start authority.
 
 Channels replies, the Dock's send and review lines, and `/dispatch user_message` record the line first, as a `source: human` record.
@@ -117,7 +119,7 @@ A repeated id does nothing, including for `existing_only` review input, unless i
 
 ### Contract 42 and rollback
 
-Contract 42 adds consume's `--busy`, session/followup/held/unconfirmed answers, `context-mailbox put --session/--attachments-stdin`, and `inbox human-begin/human-settle`.
+Contract 42 adds consume's `--busy` and `--message`, session/followup/held/message answers, `context-mailbox put --session/--attachments-stdin`, and `inbox human-begin/human-settle`.
 The CLI checks the owner's live `/version`, not the routing hub's contract, before using these message semantics.
 An owner below 42 receives the session-routing `unless_live` envelope and the forced `resume_mode: fresh` envelope; attachment sends retain session routing there.
 Those older fresh starts have forced-start authority and carry text in the launch prompt.
@@ -345,7 +347,7 @@ The session-only Claude fallback claims by moving an entry into `fallback/` and 
 | `shuttle inbox put <address> <message-id> <text>` | Enqueue, with `--source`, `--turn`, `--session`, `--if-costly`, `--not-before`, `--from` and `--derived`; silent on success |
 | `shuttle inbox pending <address>... [--waking]` | JSON address → pending count, or with `--waking` the count a launch would be for; unreadable addresses are named on stderr and omitted |
 | `shuttle inbox ls <address>` | Pending entries oldest first; `--json` includes wishes, queued time, sender and open attempt |
-| `shuttle inbox consume <fiber-key> <address-or-dash> <epoch> [--idle] [--unknown] [--busy] [--costly]` | Consume for the current receiver, or with `-` and epoch 0 for a fiber with no worker; one JSON object with `action` (`wait`, `wake`, `context`, `fresh`, `launch`), the `members` sent or reserved, and `turn` when an entry asks for a turn the worker's facts would decide. The answer is printed even when an open batch's send fails, which exits nonzero |
+| `shuttle inbox consume <fiber-key> <address-or-dash> <epoch> [--idle] [--unknown] [--busy] [--costly] [--message <id>]` | Consume for the current receiver, or with `-` and epoch 0 for a fiber with no worker; one JSON object with `action` (`wait`, `wake`, `context`, `fresh`, `launch`), the `members` sent or reserved, `turn` when an entry asks for a turn the worker's facts would decide, and with `--message` that entry's state after the pass (`message`: `delivered`, `sent`, `reserved` or `pending`). The answer is printed even when an open batch's send fails, which exits nonzero |
 | `shuttle inbox thread-state` | Establish the thread capture window and import an older daemon's thread outbox; print `baseline` and any `skipped` records and `cleanup_error`, or exit 3 on a corrupt outbox or state |
 | `shuttle inbox thread-put` | Capture a JSON array of `{id, record, board}` publications from stdin into the routing inbox, storing a `board` record in that entry, then append every board line the routing inbox's entries owe, from the stored record; print `{"created": [ids], "refused": [{id, error}], "board_errors": [{id, error}]}`, trying every publication |
 | `shuttle inbox routes` | List the routing inbox's pending publications as `{id, record}` |

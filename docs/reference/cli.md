@@ -275,7 +275,7 @@ is then given back to the human rather than closed.
 | `shuttle say "<text>"` | Queue a spoken line on the speaker host, in the voice of the calling worker's role (its charter's `voice:`); playback waits behind queued lines and while the human talks, and a line whose card is out of view is held until its card is in view or `shuttle say --play` opens it. `--fiber` names the speaker from a plain terminal; `--voice` overrides the voice for this line. For voice conversations with the human only |
 | `shuttle voices` | List the voice bank and pocket-tts built-ins on the speaker host, each with the role whose charter claims it |
 | `shuttle say --held` | List spoken lines held because their card is out of view; `shuttle say --play` opens the card waiting longest (routes Listen to it and plays its lines), `--next` moves to the next card, `--stop` leaves the rest held |
-| `shuttle inbox consume <fiber-key> <address-or-dash> <epoch> [--idle] [--unknown] [--busy] [--costly]` | Consume a fiber's inbox for its live worker, or with `-` and epoch 0 for a fiber with no worker; JSON action is `wait`, `wake`, `context` (quiet entries sent to a receiver without a hook), `fresh` or `launch` (a session to start for the reserved `members`), with `turn` when the worker's idle and cost facts would decide |
+| `shuttle inbox consume <fiber-key> <address-or-dash> <epoch> [--idle] [--unknown] [--busy] [--costly] [--message <id>]` | Consume a fiber's inbox for its live worker, or with `-` and epoch 0 for a fiber with no worker; JSON action is `wait`, `wake`, `context` (quiet entries sent to a receiver without a hook), `fresh` or `launch` (a session to start for the reserved `members`), with `turn` when the worker's idle and cost facts would decide, and `message`, the `--message` entry's state after the pass |
 | `shuttle inbox human-begin <fiber-key> <id>` | Record typed human input, read from stdin, before submission; JSON `created` permits only the first caller to submit |
 | `shuttle inbox human-settle <fiber-key> <id> delivered\|unknown\|undeliverable` | Settle typed human input without resending it |
 | `shuttle inbox put <address> <message-id> <text>` | Enqueue an entry in this host's inbox for a fiber key or a session's `shuttle://` address, with its delivery wishes (`--source`, `--turn`, `--session`, `--if-costly`, `--not-before`), `--from` and `--derived`; see [The inbox](../dev/inbox.md) |
@@ -391,7 +391,7 @@ shuttle message <address> "Background for your next task" --context-only
 Shuttle fiber path, slug, or UID.
 Fiber targets require one exact match across configured stores; they refuse guesses and duplicate matches, and a slug naming several fibers is refused with their full paths.
 Fiber sends use the owner's durable inbox whether a worker is live or dormant; attachments become retained owner-local file references.
-The receipt says woken, followed up in a turn, held as context for cost, starting or queued.
+The receipt says what became of this message: woken, followed up in a turn, delivered (as context, or before a retry), held as context for cost, starting or queued.
 `--notify-when-idle` subscribes when a hook or wake delivers the entry.
 With an owner below contract 42, waking live sends and attachments keep session routing for compatibility.
 A session-routed send resolves to the worker in its newest dispatch, resume, or claim ledger row, which the owning host writes.

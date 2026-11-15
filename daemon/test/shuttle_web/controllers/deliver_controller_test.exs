@@ -98,11 +98,51 @@ defmodule ShuttleWeb.DeliverControllerTest do
 
     first = api_conn() |> post("/api/v1/deliver", Jason.encode!(request)) |> json_response(202)
     assert first["status"] == "starting"
+    assert first["delivered"] == nil
     refute Poller.live_worker(fiber).session_uuid == uuid
     launches_before = launches()
     api_conn() |> post("/api/v1/deliver", Jason.encode!(request)) |> json_response(202)
     assert launches() == launches_before
     refute run_script() =~ "fresh publication"
+  end
+
+  test "a fresh request refused for a live worker says why and reads as unconfirmed" do
+    fiber = "tests/agent-fresh-refused"
+    uuid = message_live_worker(fiber)
+
+    {:ok, _} =
+      Shuttle.CLI.run(["hook", "event"],
+        runner: Shuttle.Runner.Default,
+        input_eof: true,
+        input:
+          Jason.encode!(%{
+            "harness" => "claude",
+            "hook_event_name" => "SessionStart",
+            "session_id" => uuid,
+            "cwd" => MockRunner.felt_root()
+          })
+      )
+
+    :sys.replace_state(Shuttle.Env.server(Poller), &%{&1 | boot_quarantine: true})
+
+    # A contract-41 CLI's --fresh: resume_mode without context_only. It reads
+    # delivered null as "launch unconfirmed", not as a failure to retry.
+    assert %{"status" => "queued", "delivered" => nil, "detail" => detail} =
+             api_conn()
+             |> post(
+               "/api/v1/deliver",
+               Jason.encode!(%{
+                 "fiber_id" => fiber,
+                 "text" => "start over",
+                 "from" => "shuttle://elsewhere/claude/sender",
+                 "message_id" => "fresh-refused",
+                 "resume_mode" => "fresh"
+               })
+             )
+             |> json_response(202)
+
+    assert detail =~ "quarantine"
+    assert Poller.live_worker(fiber).session_uuid == uuid
   end
 
   test "a dormant agent fresh request waits for quarantine and starts once after release" do

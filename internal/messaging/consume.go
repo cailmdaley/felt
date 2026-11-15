@@ -26,6 +26,8 @@ type Worker struct {
 	Unknown bool
 	Costly  bool
 	Busy    bool
+	// Message names an entry whose state the answer reports (Consumption.Message).
+	Message string
 }
 
 // Consumption describes the action taken (wake, or context for quiet entries
@@ -35,16 +37,20 @@ type Worker struct {
 // entry asks for a turn, so the daemon's idle and cost facts would decide it.
 // A consumption that failed before it could decide has no Action.
 type Consumption struct {
-	Action      string   `json:"action"`
-	Members     []string `json:"members,omitempty"`
-	Turn        bool     `json:"turn,omitempty"`
-	Session     string   `json:"session,omitempty"`
-	Held        string   `json:"held,omitempty"`
-	Followup    bool     `json:"followup,omitempty"`
-	Unconfirmed bool     `json:"unconfirmed,omitempty"`
+	Action  string   `json:"action"`
+	Members []string `json:"members,omitempty"`
+	Turn    bool     `json:"turn,omitempty"`
+	Session string   `json:"session,omitempty"`
+	Held    string   `json:"held,omitempty"`
+	// Followup marks a wake sent while the worker was busy in a turn.
+	Followup bool `json:"followup,omitempty"`
 	// Launching marks a wait for a fiber with no worker while a launch
 	// reserved earlier is in its lease.
 	Launching bool `json:"launching,omitempty"`
+	// Message is the state of the worker's Message entry after the pass:
+	// delivered, sent (its send's outcome is not yet confirmed), reserved
+	// (a launch in its lease is for it), or pending.
+	Message string `json:"message,omitempty"`
 }
 
 // Consume advances every open batch, then selects, claims and delivers one
@@ -61,6 +67,32 @@ func Consume(ctx context.Context, env *sysenv.Env, fiber, host string, worker Wo
 }
 
 func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Worker, send fiberContextSender) (Consumption, error) {
+	result, err := consumePass(ctx, env, fiber, host, w, send)
+	if w.Message != "" && result.Action != "" {
+		result.Message = messageState(mailboxDir(env, "fiber", fiber), w.Message, time.Now())
+	}
+	return result, err
+}
+
+// messageState reads one entry's state after a pass (Consumption.Message).
+func messageState(root, id string, now time.Time) string {
+	e, err := readFiberMailboxEntry(filepath.Join(root, "pending", mailboxKey(id)+".json"))
+	if err != nil {
+		if _, err := os.Stat(filepath.Join(root, "offered", mailboxKey(id)+".json")); err == nil {
+			return "delivered"
+		}
+		return ""
+	}
+	if e.AttemptAddress != "" {
+		return "sent"
+	}
+	if r, err := readLaunchReservation(root); err == nil && r.holds(id, now) {
+		return "reserved"
+	}
+	return "pending"
+}
+
+func consumePass(ctx context.Context, env *sysenv.Env, fiber, host string, w Worker, send fiberContextSender) (Consumption, error) {
 	result := Consumption{Action: "wait"}
 	// "-" with an epoch is a tracked worker whose conversation is not yet
 	// known: nothing can reach it, so it waits. "-" with epoch 0 is a fiber
@@ -149,10 +181,9 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 		}
 		sent, err := deliverConsumedBatch(ctx, env, root, host, w, &batches[i], send)
 		if sent {
-			result.Unconfirmed = result.Unconfirmed || err != nil
 			result.Action, result.Members = "context", append(result.Members, batches[i].Members...)
 			if batches[i].Payload.Wake {
-				result.Action = "wake"
+				result.Action, result.Followup = "wake", w.Busy
 			}
 		}
 		errs = append(errs, err)
@@ -292,9 +323,8 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	}
 	sent, err := deliverConsumedBatch(ctx, env, root, host, w, &attempt, send)
 	if sent {
-		result.Unconfirmed = err != nil
 		result.Action, result.Members = action, append(result.Members, attempt.Members...)
-		result.Followup = w.Busy && action == "wake"
+		result.Followup = result.Followup || (w.Busy && action == "wake")
 	}
 	return result, errors.Join(append(errs, err)...)
 }

@@ -17,6 +17,10 @@ defmodule Shuttle.Delivery do
 
   alias Shuttle.{Harnesses, Messaging, Poller, SessionLedger}
 
+  # How long a delivery's put, consumes and launch may take together; see
+  # `context/4`.
+  @budget_ms 35_000
+
   @type result ::
           {:message, pos_integer(), map()}
           | {:launch, String.t(), term()}
@@ -36,16 +40,26 @@ defmodule Shuttle.Delivery do
   end
 
   def human(fiber_id, text, opts \\ []) do
+    dispatch = fn mode ->
+      Poller.dispatch_fiber(fiber_id,
+        force: true,
+        ad_hoc: true,
+        resume_mode: mode,
+        user_message: text
+      )
+    end
+
     result =
       Shuttle.HumanInput.submit(fiber_id, text, opts[:message_id], fn ->
-        Poller.dispatch_fiber(fiber_id,
-          force: true,
-          ad_hoc: true,
-          resume_mode:
-            opts[:resume_mode] ||
-              if(Poller.live_worker(fiber_id), do: "previous", else: "continue"),
-          user_message: text
-        )
+        mode =
+          opts[:resume_mode] || if(Poller.live_worker(fiber_id), do: "previous", else: "continue")
+
+        # A worker that appeared between the look and the launch takes the
+        # line as typed input.
+        case dispatch.(mode) do
+          {:error, :already_running} when mode == "continue" -> dispatch.("previous")
+          result -> result
+        end
       end)
 
     {:human, result}
@@ -191,9 +205,14 @@ defmodule Shuttle.Delivery do
 
   Answers `{:ok, {:consumed, answer}}` for a live worker, `{:ok, :queued}`,
   `{:ok, :starting}` when a session is starting, or
-  `{:ok, {:waiting, detail}}` saying what a waking entry waits for.
+  `{:ok, {:waiting, detail}}` saying what a waking entry waits for. The put,
+  consumes and any launch share a 35-second budget, so an
+  owner answers inside a routing hub's forward
+  (`Shuttle.OriginRouter.default_forward_timeout_ms/0`); clearing the ask runs
+  beside them.
   """
   def context(entry, text, message_id, opts \\ []) do
+    deadline = System.monotonic_time(:millisecond) + @budget_ms
     worker = live_context_worker(entry)
     turn = opts[:turn] || if(opts[:wake], do: "ask")
 
@@ -240,21 +259,31 @@ defmodule Shuttle.Delivery do
             {args, []}
           end
 
+        command_opts = [timeout_ms: remaining(deadline)] ++ command_opts
+
         # Text beginning with "-" is a positional after "--", never a flag.
         args = args ++ ["--", context_key(entry), message_id, text]
 
         with {:ok, _} <- Shuttle.CLI.run(args, command_opts) do
+          # Beside the delivery, outside its budget: the answer does not wait
+          # on a lifecycle write.
           if from != "shuttle" do
-            Shuttle.LifecycleService.transition(
-              :clear_ask,
-              entry.fiber["uid"] || entry.fiber["id"],
-              ["--answered-by", from]
-            )
+            caller = self()
+
+            Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
+              Process.put(:"$callers", [caller])
+
+              Shuttle.LifecycleService.transition(
+                :clear_ask,
+                entry.fiber["uid"] || entry.fiber["id"],
+                ["--answered-by", from]
+              )
+            end)
           end
 
-          case flush_context(entry) do
+          case flush_context(entry, message: message_id, deadline: deadline) do
             {:error, :no_worker} when turn != nil ->
-              {:ok, start_for_inbox(entry)}
+              {:ok, start_for_inbox(entry, deadline)}
 
             {:ok, answer} ->
               if answer["action"] == "wait" and answer["turn"] do
@@ -264,7 +293,7 @@ defmodule Shuttle.Delivery do
                 Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
                   Process.put(:"$callers", [caller])
                   Process.sleep(30_000)
-                  flush_context(entry, server)
+                  flush_context(entry, server: server)
                 end)
               end
 
@@ -321,21 +350,22 @@ defmodule Shuttle.Delivery do
   Answers `:starting`, `:queued` (a worker appeared and takes them, or
   nothing asks for a turn any more) or `{:waiting, detail}`.
   """
-  def start_for_inbox(entry) do
+  def start_for_inbox(entry, deadline \\ System.monotonic_time(:millisecond) + @budget_ms) do
     server = Shuttle.Env.server(Poller)
     # The uid resolves in the Poller's index without a store read.
     id = entry.fiber["uid"] || Shuttle.Threads.address(entry.fiber)
     fiber_id = Shuttle.Threads.address(entry.fiber)
 
     with :ok <- inbox_gate(entry.fiber, Poller.own_host_id()),
-         :ok <- Poller.admit_inbox_launch(server, id),
-         {:launch, mode} <- reserve(entry) do
+         :ok <- Poller.admit_inbox_launch(server, id, remaining(deadline)),
+         {:launch, mode} <- reserve(entry, deadline) do
       server
       |> Poller.dispatch_fiber(id,
         ad_hoc: true,
         inbox: true,
         resume_mode: mode,
-        user_message: @launch_note
+        user_message: @launch_note,
+        call_timeout_ms: remaining(deadline)
       )
       |> launched(fiber_id)
     else
@@ -348,8 +378,8 @@ defmodule Shuttle.Delivery do
   # The dormant consume reserves the asking entries and answers launch, or
   # wait: launching while an earlier reservation's launch is in its lease,
   # else because nothing asks for a turn any more.
-  defp reserve(entry) do
-    case consume(entry, "-", 0, []) do
+  defp reserve(entry, deadline) do
+    case consume(entry, "-", 0, [], min(32_000, remaining(deadline))) do
       {:ok, %{"action" => "launch"} = answer} -> {:launch, answer["session"] || "continue"}
       {:ok, %{"launching" => true}} -> :in_flight
       {:ok, %{"action" => _}} -> :nothing
@@ -459,12 +489,17 @@ defmodule Shuttle.Delivery do
     end
   end
 
-  # True when the fresh session launched, or may yet: a busy Poller keeps the
-  # request, and the reservation's lease asks again if it never arrives. Any
-  # refusal leaves the live worker to be woken as usual.
-  defp start_fresh(entry, worker, cost) do
+  # A fresh answer starts the reserved replacement. A busy Poller keeps the
+  # request, and the reservation's lease asks again if it never arrives. When
+  # the Poller refuses it, `fallback` (a fresh for cost: consume again without
+  # the cost, waking the worker) answers instead; a wait then carries the
+  # refusal's reason as `"refused"`.
+  defp replace({:ok, %{"action" => "fresh"}} = answer, entry, server, cost, deadline, fallback) do
+    fiber_id = Shuttle.Threads.address(entry.fiber)
+    worker = Poller.live_worker(server, fiber_id)
+
     result =
-      Poller.dispatch_fiber(Shuttle.Threads.address(entry.fiber),
+      Poller.dispatch_fiber(server, fiber_id,
         inbox: true,
         inbox_replace: true,
         ad_hoc: true,
@@ -472,41 +507,62 @@ defmodule Shuttle.Delivery do
         user_message:
           @launch_note <>
             " Previous session: #{worker[:session_uuid]}. " <>
-            if(cost, do: Shuttle.WakeCost.describe(cost), else: "A fresh session was requested.")
+            if(cost, do: Shuttle.WakeCost.describe(cost), else: "A fresh session was requested."),
+        call_timeout_ms: remaining(deadline)
       )
 
-    match?({:ok, _}, result) or result == {:error, :poller_busy}
+    case launched(result, fiber_id) do
+      :starting ->
+        answer
+
+      refusal ->
+        answer = if fallback, do: fallback.(), else: {:ok, %{"action" => "wait"}}
+
+        with {:waiting, detail} <- refusal,
+             {:ok, %{"action" => "wait"} = wait} <- answer do
+          {:ok, Map.put(wait, "refused", detail)}
+        else
+          _ -> answer
+        end
+    end
   end
+
+  defp replace(answer, _entry, _server, _cost, _deadline, _fallback), do: answer
 
   @doc """
   Consume a fiber's inbox for its current live conversation, answering the
   decoded consume result. The worker's turn state and wake cost are read only
-  when the inbox answers that a due entry asks for a turn.
+  when the inbox answers that a due entry asks for a turn. Options: `:server`
+  (the Poller), and `:message`, an entry id whose state the answer reports
+  (`"message"`: delivered, sent, reserved or pending).
   """
-  def flush_context(entry, server \\ Shuttle.Env.server(Poller)) do
+  def flush_context(entry, opts \\ []) do
+    server = opts[:server] || Shuttle.Env.server(Poller)
+    message = if opts[:message], do: ["--message", opts[:message]], else: []
+    deadline = opts[:deadline] || System.monotonic_time(:millisecond) + @budget_ms
+
     if is_pid(GenServer.whereis(server)) do
       fiber_id = Shuttle.Threads.address(entry.fiber)
 
       # Delivery carries the worker-owned epoch and the address it committed;
       # selecting or flushing a destination never changes authority.
       with {:ok, address, generation} <- Poller.context_receiver(server, fiber_id) do
-        deadline = System.monotonic_time(:millisecond) + 40_000
-
         consume = fn flags ->
-          remaining = max(1, deadline - System.monotonic_time(:millisecond))
-          consume(entry, address, generation, flags, min(32_000, remaining))
+          consume(
+            entry,
+            address,
+            generation,
+            flags ++ message,
+            min(32_000, remaining(deadline))
+          )
         end
 
         case consume.([]) do
           {:ok, %{"turn" => true}} ->
-            consume_turn(entry, server, fiber_id, consume)
-
-          {:ok, %{"action" => "fresh"}} = answer ->
-            worker = Poller.live_worker(server, fiber_id)
-            if start_fresh(entry, worker, nil), do: answer, else: {:ok, %{"action" => "wait"}}
+            consume_turn(entry, server, fiber_id, consume, deadline)
 
           answer ->
-            answer
+            replace(answer, entry, server, nil, deadline, nil)
         end
       end
     else
@@ -517,33 +573,34 @@ defmodule Shuttle.Delivery do
   # An idle worker is woken, or replaced by a fresh session when waking it is
   # costly. A worker whose turn no hook has reported is woken for ask entries
   # without a cost check; its idle entries wait for an observed idle. A busy
-  # one takes the entries through its hook.
-  defp consume_turn(entry, server, fiber_id, consume) do
+  # one gets the consumer's follow-up. A worker that ended since the first
+  # consume leaves the entries for the next pass.
+  defp consume_turn(entry, server, fiber_id, consume, deadline) do
     case Poller.worker_turn(server, fiber_id) do
       :idle ->
         worker = Poller.live_worker(server, fiber_id)
         cost = worker && Shuttle.WakeCost.costly(worker[:session_uuid])
 
-        case consume.(if cost, do: ["--idle", "--costly"], else: ["--idle"]) do
-          {:ok, %{"action" => "fresh"}} = answer ->
-            if start_fresh(entry, worker, cost), do: answer, else: consume.(["--idle"])
-
-          answer ->
-            answer
-        end
+        consume.(if cost, do: ["--idle", "--costly"], else: ["--idle"])
+        |> replace(entry, server, cost, deadline, fn -> consume.(["--idle"]) end)
 
       :unknown ->
-        consume.(["--unknown"])
+        consume.(["--unknown"]) |> replace(entry, server, nil, deadline, nil)
 
       :busy ->
-        consume.(["--busy"])
+        consume.(["--busy"]) |> replace(entry, server, nil, deadline, nil)
+
+      nil ->
+        {:ok, %{"action" => "wait", "turn" => true}}
     end
   end
+
+  defp remaining(deadline), do: max(1, deadline - System.monotonic_time(:millisecond))
 
   # The answer is the output's one JSON line, which a failed send of an open
   # batch prints before exiting nonzero. A consume that could not decide
   # prints none and stays an error.
-  defp consume(entry, address, generation, flags, timeout_ms \\ 32_000) do
+  defp consume(entry, address, generation, flags, timeout_ms) do
     args = ["inbox", "consume", context_key(entry), address, to_string(generation)] ++ flags
     result = Shuttle.CLI.run(args, timeout_ms: timeout_ms)
 

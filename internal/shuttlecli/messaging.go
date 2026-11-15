@@ -180,7 +180,8 @@ Choose deliberately:
   --wake forces a native wake immediately, whatever it costs.
 
 A fiber send always uses its durable inbox; attachments become retained file references. The receipt says
-woken, followed_up in a turn, held as context for cost, starting or queued.
+what became of this message: woken, followed_up in a turn, delivered (as context,
+or before a retry), held as context for cost, starting or queued.
 --notify-when-idle subscribes when the worker takes the entry, by hook or wake.
 --fresh is deduplicated under the same id and obeys the launch gate; its text
 reaches the replacement through its hook, not as the launch directive.
@@ -199,7 +200,7 @@ Prints
 "sending <message-id> to <resolved address>" to stderr before delivery, then prints the
 receipt status and message id. If interrupted, retry with the printed id using
 --message-id <id>. Exit 0 means accepted, submitted, queued, context_added, woken, followed_up,
-held or starting;
+delivered, held or starting;
 exit 1 means rejected, unknown, or another command error.`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if messageOpts.requestJSON {

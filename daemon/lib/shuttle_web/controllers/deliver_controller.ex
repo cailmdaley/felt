@@ -21,8 +21,10 @@ defmodule ShuttleWeb.DeliverController do
   messages it directly. `shuttle message <fiber>` sends this shape.
 
   A live inbox answer adds `consumed` (the consumer's action, members,
-  followup, held and unconfirmed fields). Its status is woken, followed_up,
-  held or queued; a replacement or dormant launch answers starting.
+  followup, held and this message's state). Its status says what became of
+  this message: woken, followed_up, delivered (sent as context, or delivered
+  before a retry), held, starting (a replacement is launching for it) or
+  queued (waiting, or sent with its arrival unconfirmed: `delivered` null).
 
   The session-path answer names what happened in `delivery`: `"message"` with the messaging
   `receipt`, or `"resume"` / `"dispatch"` with the `/dispatch` envelope.
@@ -180,28 +182,21 @@ defmodule ShuttleWeb.DeliverController do
             Map.merge(body, %{status: "queued", detail: detail})
 
           {:consumed, answer} ->
-            status =
-              cond do
-                answer["unconfirmed"] -> "queued"
-                answer["action"] == "fresh" -> "starting"
-                answer["followup"] -> "followed_up"
-                answer["action"] == "wake" -> "woken"
-                answer["held"] == "cost" -> "held"
-                true -> "queued"
-              end
-
-            delivered =
-              cond do
-                answer["unconfirmed"] -> nil
-                answer["action"] in ["wake", "context"] -> true
-                true -> false
-              end
-
-            Map.merge(body, %{status: status, consumed: answer, delivered: delivered})
+            body
+            |> Map.merge(consumed(answer, message_id in (answer["members"] || [])))
+            |> Map.put(:consumed, answer)
 
           :queued ->
             Map.put(body, :status, "queued")
         end
+
+      # A fresh request stands in the inbox until its replacement takes it:
+      # not delivered yet, and not failed, which a contract-41 CLI's --fresh
+      # reads as "launch unconfirmed" rather than retrying under a new id.
+      body =
+        if opts[:session] == "fresh" and body.delivered == false,
+          do: %{body | delivered: nil},
+          else: body
 
       {202, body}
     else
@@ -229,6 +224,34 @@ defmodule ShuttleWeb.DeliverController do
 
   defp context_reply(_fiber_id, _text, _id, _opts),
     do: {400, %{error: "message_id is required for context"}}
+
+  # What the consume did with this message, from its own state after the pass
+  # (`"message"`), not from whatever else the pass sent.
+  defp consumed(%{"refused" => detail}, _sent?),
+    do: %{status: "queued", delivered: false, detail: detail}
+
+  defp consumed(%{"message" => "delivered"} = answer, sent?) do
+    status =
+      cond do
+        not sent? -> "delivered"
+        answer["followup"] -> "followed_up"
+        answer["action"] == "wake" -> "woken"
+        true -> "delivered"
+      end
+
+    %{status: status, delivered: true}
+  end
+
+  defp consumed(%{"message" => "sent"}, _sent?),
+    do: %{
+      status: "queued",
+      delivered: nil,
+      detail: "sent to the worker; its arrival is not yet confirmed, and the inbox resends it"
+    }
+
+  defp consumed(%{"message" => "reserved"}, _sent?), do: %{status: "starting", delivered: false}
+  defp consumed(%{"held" => "cost"}, _sent?), do: %{status: "held", delivered: false}
+  defp consumed(_answer, _sent?), do: %{status: "queued", delivered: false}
 
   defp reply({:human, {:ok, _} = result}, fiber_id), do: reply({:input, result}, fiber_id)
   defp reply({:human, {:duplicate, _} = result}, fiber_id), do: reply({:input, result}, fiber_id)

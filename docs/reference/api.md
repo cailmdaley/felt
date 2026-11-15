@@ -240,8 +240,8 @@ the caller does not send it again.
 `POST /deliver` accepts `{fiber_id, text, from?, message_id?}` (plus `origin` to forward).
 Agent text goes through the fiber inbox with `turn: ask`, or `force` with `session: fresh` when `resume_mode: fresh` is requested.
 The owner mints an id for a caller without one.
-A 202 answer carries `delivery: context`, `queued: true`, a status (`woken`, `followed_up`, `held`, `starting`, `queued`) and, for a live worker, `consumed` with the consumer's action and evidence.
-`delivered` is true for a confirmed emission, null when unconfirmed, and false while waiting or starting.
+A 202 answer carries `delivery: context`, `queued: true`, a status saying what became of this message (`woken`, `followed_up`, `delivered`, `held`, `starting`, `queued`) and, for a live worker, `consumed` with the consumer's action, evidence and this message's state.
+`delivered` is true once this message is delivered, null when it was sent and its outcome is unconfirmed, and false while it waits or a session starts for it; a fresh request answers null until its replacement takes it.
 With `context_only: true`, the entry is quiet unless `turn` or `wake` requests a turn; `message_id` is required.
 `unless_live` answers 409 with `live: true` for a live worker and queues nothing.
 `attachments` is an array of `{name, data, sha256}` publications (`data` is base64); the owner retains files and records references in the inbox.
