@@ -184,13 +184,13 @@ Choose deliberately:
 Schedule a fiber message with --in 8h (Go durations plus d for days) or --at
 (RFC 3339, sender-local YYYY-MM-DD HH:MM, or next local HH:MM). With only text,
 a delayed send addresses your own fiber. The receipt prints the resolved local
-and UTC time; retry the same message id and schedule to keep that instant.
+and UTC time; retry with --message-id <id> --at <printed UTC instant>.
 Both daemons must speak contract 45. Delays refuse session addresses and --fresh.
 List with inbox ls <fiber> --scheduled; cancel with inbox cancel <fiber> <id>.
 
 A fiber send always uses its durable inbox; attachments become retained file references. The receipt says
 what became of this message: woken, followed_up in a turn, delivered (as context,
-or before a retry), held as context for cost, starting or queued.
+or before a retry), held as context for cost, starting, queued or scheduled.
 --notify-when-idle subscribes when the worker takes the entry, by hook or wake.
 --fresh is deduplicated under the same id and obeys the launch gate; its text
 is the new session's launch prompt. A refusal fails with its reason, and the
@@ -210,7 +210,7 @@ Prints
 "sending <message-id> to <resolved address>" to stderr before delivery, then prints the
 receipt status and message id. If interrupted, retry with the printed id using
 --message-id <id>. Exit 0 means accepted, submitted, queued, context_added, woken, followed_up,
-delivered, held or starting;
+delivered, held, starting or scheduled;
 exit 1 means rejected, unknown, or another command error.`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if messageOpts.recorded && !messageOpts.local {
@@ -231,17 +231,26 @@ exit 1 means rejected, unknown, or another command error.`,
 			if messageOpts.notifyWake && !messageOpts.notifyIdle {
 				return fmt.Errorf("--notify-wake requires --notify-when-idle")
 			}
-			if delay != "" || at != "" {
+			if cmd.Flags().Changed("in") || cmd.Flags().Changed("at") {
+				if delay == "" && at == "" {
+					return fmt.Errorf("--in and --at need a time")
+				}
 				if delay != "" && at != "" {
 					return fmt.Errorf("--in and --at are mutually exclusive")
 				}
 				if messageOpts.fresh {
 					return fmt.Errorf("--fresh cannot be combined with a delay")
 				}
-				if messageOpts.local || messageOpts.requestJSON {
+				if messageOpts.local {
 					return fmt.Errorf("a delayed message goes to a fiber through its owner")
 				}
-				return nil
+				// One argument with no other body is text for the sender's own fiber.
+				if len(args) == 1 && messageOpts.file == "" && len(messageOpts.attachments) == 0 {
+					if messageOpts.notifyIdle {
+						return fmt.Errorf("a delayed message needs text, --file or --attach")
+					}
+					return nil
+				}
 			}
 			if messageOpts.file == "" && len(args) != 2 && len(messageOpts.attachments) == 0 && !messageOpts.notifyIdle {
 				return fmt.Errorf("expected text, '-' for stdin, --file <path>, or --attach <path>")
@@ -256,7 +265,7 @@ exit 1 means rejected, unknown, or another command error.`,
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			delayed := delay != "" || at != ""
-			if delayed && len(args) == 1 {
+			if delayed && len(args) == 1 && messageOpts.file == "" && len(messageOpts.attachments) == 0 {
 				f, err := a.currentWorkerFiber()
 				if err != nil || f == nil {
 					return fmt.Errorf("no fiber belongs to this session; give a fiber address explicitly")
@@ -268,19 +277,23 @@ exit 1 means rejected, unknown, or another command error.`,
 				return err
 			}
 			if delayed {
-				f, block := a.messageFiber(request.Address)
-				if f == nil {
-					return fmt.Errorf("a delayed message goes to a fiber")
+				f, block, err := a.inboxFiber(request.Address)
+				if err == nil && f == nil {
+					err = fmt.Errorf("%s is not a fiber", request.Address)
+				}
+				if err != nil {
+					return fmt.Errorf("a delayed message goes to a fiber: %w", err)
 				}
 				if err := a.requireDelayedContract(block.Host); err != nil {
 					return err
 				}
-				instant, err := a.messageSchedule(request.MessageID, delay, at)
+				resolved, err := resolveMessageTime(delay, at, time.Now(), time.Local)
 				if err != nil {
 					return err
 				}
-				fmt.Fprintf(cmd.ErrOrStderr(), "scheduling %s for %s\n", request.MessageID, instant)
-				receipt, err := a.queueForFiber(request, request.Wake && cmd.Flags().Changed("wake"), instant)
+				instant := resolved.Format(time.RFC3339Nano)
+				fmt.Fprintf(cmd.ErrOrStderr(), "scheduling %s for %s; to retry, add --message-id %s --at %s\n", request.MessageID, instant, request.MessageID, instant)
+				receipt, err := a.queueInFiber(f, block, request, request.Wake && cmd.Flags().Changed("wake"), instant)
 				if err != nil {
 					return err
 				}

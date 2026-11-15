@@ -422,7 +422,7 @@ func TestThreadImportLeavesRecipientInboxesAlone(t *testing.T) {
 	seedPending(t, root, "thread-done", threadRecord())
 	seedAck(t, root, "thread-done")
 	bootThread(t, env)
-	if n, err := PendingCount(env, "/store:parent"); err != nil || n != 1 {
+	if n, err := pendingCount(env, "/store:parent"); err != nil || n != 1 {
 		t.Fatalf("recipient's result disturbed: %d %v", n, err)
 	}
 }

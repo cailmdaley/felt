@@ -40,7 +40,7 @@ func TestHookOutputSurvivesSiblingValidationFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("successful hook output returned error: %v", err)
 	}
-	if n, err := messaging.PendingCount(env, "fiber"); err != nil || n != 1 {
-		t.Fatalf("pending = %d, %v", n, err)
+	if entries, err := messaging.PendingEntries(env, "fiber"); err != nil || len(entries) != 1 {
+		t.Fatalf("pending = %v, %v", entries, err)
 	}
 }

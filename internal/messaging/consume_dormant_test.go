@@ -63,7 +63,7 @@ func TestConsumeWithoutAWorkerLaunchesOncePerLease(t *testing.T) {
 			if result, err := consumeWith(context.Background(), env, "fiber", "host", dormant, neverSend(t)); err != nil || result.Action != "launch" {
 				t.Fatalf("a lapsed launch was not asked for again: %+v %v", result, err)
 			}
-			if n, _ := PendingCount(env, "fiber"); n != 2 {
+			if n, _ := pendingCount(env, "fiber"); n != 2 {
 				t.Fatalf("pending = %d; a launch delivers nothing", n)
 			}
 		})
@@ -119,7 +119,7 @@ func TestTheLaunchedSessionsFirstHookTakesTheBatch(t *testing.T) {
 	if !slices.Equal(got, []string{"asked", "forced", "idle", "quiet"}) {
 		t.Fatalf("first hook took %v", got)
 	}
-	if n, _ := PendingCount(env, "fiber"); n != 0 {
+	if n, _ := pendingCount(env, "fiber"); n != 0 {
 		t.Fatalf("pending = %d after the claim", n)
 	}
 	e := readEntry(t, filepath.Join(mailboxDir(env, "fiber", "fiber"), "offered", mailboxKey("forced")+".json"))
@@ -323,7 +323,7 @@ func TestAPinnedWakeToAnEndedConversationLaunchesAReplacement(t *testing.T) {
 	if sent[1].MessageID == pinned.Payload.MessageID || !strings.HasPrefix(sent[1].Text, "Possible repeat:") || !strings.Contains(sent[1].Text, "text of wake") {
 		t.Fatalf("roll-forward to B = %+v", sent[1])
 	}
-	if n, _ := PendingCount(env, "fiber"); n != 0 {
+	if n, _ := pendingCount(env, "fiber"); n != 0 {
 		t.Fatalf("pending = %d after the roll-forward", n)
 	}
 	e := readEntry(t, filepath.Join(root, "offered", mailboxKey("wake")+".json"))
@@ -367,7 +367,7 @@ func TestALaunchedSessionsHookBeforeItIsTheReceiverLeavesTheBatchPending(t *test
 			if len(got) != 0 {
 				t.Fatalf("a session not yet the receiver took %v", got)
 			}
-			if n, _ := PendingCount(env, "fiber"); n != 2 {
+			if n, _ := pendingCount(env, "fiber"); n != 2 {
 				t.Fatalf("pending = %d after the early hook", n)
 			}
 			w := Worker{Address: "shuttle://host/claude/B", Epoch: transition(t, env, "launched", "shuttle://host/claude/B"), Idle: true}
@@ -393,7 +393,7 @@ func TestALaunchedSessionsHookBeforeItIsTheReceiverLeavesTheBatchPending(t *test
 					t.Fatalf("after the lease: %+v %v %q", result, err, text)
 				}
 			}
-			if n, _ := PendingCount(env, "fiber"); n != 0 {
+			if n, _ := pendingCount(env, "fiber"); n != 0 {
 				t.Fatalf("pending = %d", n)
 			}
 		})
@@ -460,7 +460,7 @@ func TestAHeldBatchLaunchesOnlyWhileUnresolvedAndCurrent(t *testing.T) {
 			if result.Action != "wait" {
 				t.Fatalf("a %s held batch started a session: %+v", held, result)
 			}
-			if n, _ := PendingCount(env, "fiber"); n != 0 {
+			if n, _ := pendingCount(env, "fiber"); n != 0 {
 				t.Fatalf("pending = %d", n)
 			}
 			if manifests, _ := readBatchManifests(root); len(manifests) != 0 {

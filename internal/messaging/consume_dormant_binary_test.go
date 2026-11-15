@@ -119,7 +119,7 @@ func TestDormantLaunchThroughTheRealCLI(t *testing.T) {
 	}
 	_ = b.Wait()
 	run("context-mailbox", "receiver", "fiber", "", "-")
-	if n, _ := PendingCount(env, "fiber"); n != 3 || answer().Action != "wait" {
+	if n, _ := pendingCount(env, "fiber"); n != 3 || answer().Action != "wait" {
 		t.Fatalf("pending = %d; the entries left the inbox or the lease ended early", n)
 	}
 
@@ -137,7 +137,7 @@ func TestDormantLaunchThroughTheRealCLI(t *testing.T) {
 			t.Fatalf("C's first prompt lacks %q: %s", text, out)
 		}
 	}
-	if n, _ := PendingCount(env, "fiber"); n != 0 {
+	if n, _ := pendingCount(env, "fiber"); n != 0 {
 		t.Fatalf("pending = %d after C's claim", n)
 	}
 	for _, id := range []string{"quiet", "asked", "forced"} {

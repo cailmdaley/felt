@@ -107,7 +107,7 @@ func TestConsumeBinaryCrashBeforeSend(t *testing.T) {
 	if receiptFiles[0].Name() != mailboxKey(wantID)+".json" {
 		t.Fatalf("changed transport id: %s", receiptFiles[0].Name())
 	}
-	if n, _ := PendingCount(env, "fiber"); n != 0 {
+	if n, _ := pendingCount(env, "fiber"); n != 0 {
 		t.Fatalf("pending=%d", n)
 	}
 	run(args...)

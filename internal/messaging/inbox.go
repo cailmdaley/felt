@@ -240,7 +240,18 @@ func Enqueue(env *sysenv.Env, e InboxEntry) error {
 			return err
 		}
 		if !e.Derived && (fiberRequestIdentity(stored.Request) != fiberRequestIdentity(r) || !sameWishes(stored.Wishes, w, e.Wishes.Turn != "")) {
+			if w.NotBefore != "" {
+				return errCode("message_id_conflict", "message id already names a different inbox entry; retry a delayed message with --at and the UTC instant it first printed")
+			}
 			return errCode("message_id_conflict", "message id already names a different inbox entry")
+		}
+		// A delayed retry of a settled entry schedules nothing, so it says so.
+		if w.NotBefore != "" && state == "offered" {
+			outcome := stored.Disposition
+			if outcome == "" {
+				outcome = "delivered"
+			}
+			return errCode("already_settled", "message %s was already %s; nothing is scheduled", r.MessageID, outcome)
 		}
 		return nil
 	}
@@ -278,36 +289,37 @@ func sameWishes(stored, w Wishes, turnStated bool) bool {
 	return stored == w
 }
 
-// PendingCount counts the entries an address's inbox holds that no worker has
-// taken, including those whose not_before has not passed. An address without
-// an inbox holds none. It reads only the directory listing, so it never
-// contends with a delivery holding the inbox lock.
-func PendingCount(env *sysenv.Env, address string) (int, error) {
-	root, err := inboxRoot(env, address)
-	if err != nil {
-		return 0, err
-	}
-	entries, err := os.ReadDir(filepath.Join(root, "pending"))
-	if errors.Is(err, os.ErrNotExist) {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	n := 0
+// PendingSummary is what an address's inbox holds that no worker has taken:
+// Count is the entries due now, Scheduled every entry with a delivery time,
+// overdue ones included.
+type PendingSummary struct {
+	Count     int            `json:"count"`
+	Scheduled []PendingEntry `json:"scheduled"`
+}
+
+// SummarizePending reads an address's inbox without its lock and settles
+// nothing, so it never contends with a delivery. An address without an inbox
+// holds none.
+func SummarizePending(env *sysenv.Env, address string) (PendingSummary, error) {
+	entries, err := PendingEntries(env, address)
+	summary := PendingSummary{Scheduled: []PendingEntry{}}
+	now := time.Now()
 	for _, entry := range entries {
-		if name := entry.Name(); !entry.IsDir() && !strings.HasPrefix(name, ".") && strings.HasSuffix(name, ".json") {
-			n++
+		if entry.NotBefore != "" {
+			summary.Scheduled = append(summary.Scheduled, entry)
+		}
+		if at, err := time.Parse(time.RFC3339, entry.NotBefore); err != nil || !at.After(now) {
+			summary.Count++
 		}
 	}
-	return n, nil
+	return summary, err
 }
 
 // WakingCount counts the due entries in an address's inbox that ask for a
 // turn, free or held by an open batch: what a session started for a fiber with
 // no worker would be started for. It is zero while a launch reservation in its
 // lease still owes any pending entry, since that launch is in flight. Like
-// PendingCount, it reads without the inbox lock and settles nothing, so it
+// SummarizePending, it reads without the inbox lock and settles nothing, so it
 // also counts a held batch that local records already resolve (a confirmed
 // receipt, a superseded thread result); consume settles those and decides.
 func WakingCount(env *sysenv.Env, address string) (int, error) {

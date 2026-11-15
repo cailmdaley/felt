@@ -13,15 +13,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// inboxVerbs operate on host-local keys; listing and cancellation also accept
-// fiber references, resolved through their owner daemon.
+// inboxVerbs are the inbox verbs: put, pending, ls, cancel and consume. An
+// address is a fiber key (<felt store path>:<uid>) or a session's shuttle://
+// address on this host; ls and cancel also take a fiber reference, answered
+// by the fiber's owner.
 func (a *app) shuttleInboxCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "inbox",
 		Short: "Enqueue and list the entries waiting in an address's inbox",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("expected put, pending, ls or consume")
+			return fmt.Errorf("expected put, pending, ls, cancel or consume")
 		},
 	}
 	cmd.AddCommand(a.inboxVerbs()...)
@@ -66,9 +68,10 @@ pending, and a turn of force or idle. An unknown wish value is refused.`,
 	var waking bool
 	pending := &cobra.Command{
 		Use:   "pending <address>...",
-		Short: "Count each address's pending entries, as one JSON object",
-		Long: `Count each address's pending entries, as one JSON object of address to count.
-With --waking, count only the due entries that ask for a turn, free or held by
+		Short: "Summarize each address's pending entries, as one JSON object",
+		Long: `Summarize each address's pending entries, as one JSON object of address to
+{count, scheduled}: count is the entries due now, scheduled every entry with a
+delivery time (not_before), overdue ones included. With --waking, count only the due entries that ask for a turn, free or held by
 an open batch, and count none while a launch reserved in its lease still owes
 one: the entries a session started for a fiber with no worker would be started
 for.`,
@@ -77,14 +80,14 @@ for.`,
 			if waking {
 				return a.printCounts(args, messaging.WakingCount)
 			}
-			return a.printPendingCounts(args)
+			return a.printPendingSummaries(args)
 		},
 	}
 	pending.Flags().BoolVar(&waking, "waking", false, "Count only due entries that would start a session")
 
 	var scheduled bool
 	ls := &cobra.Command{
-		Use:   "ls <address>",
+		Use:   "ls <fiber-or-key>",
 		Short: "List an address's pending entries, oldest first",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -110,25 +113,14 @@ for.`,
 		},
 	}
 	ls.Flags().BoolVar(&scheduled, "scheduled", false, "Only pending entries with a delivery time, including overdue entries")
-	cancel := &cobra.Command{Use: "cancel <fiber-or-key> <message-id>", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
-		f, _ := a.messageFiber(args[0])
-		if rawInboxKey(args[0]) || f == nil {
-			return messaging.CancelPending(a.env, args[0], args[1])
-		}
-		_, err := a.ownerInbox(args[0], "cancel", args[1])
-		return err
-	}}
-	batch := &cobra.Command{Use: "scheduled <key>...", Hidden: true, Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		result := map[string][]messaging.PendingEntry{}
-		for _, key := range args {
-			entries, err := messaging.PendingEntries(a.env, key)
-			if err != nil {
-				return err
-			}
-			result[key] = scheduledEntries(entries)
-		}
-		return a.outputJSON(result)
-	}}
+	cancel := &cobra.Command{
+		Use:   "cancel <fiber-or-key> <message-id>",
+		Short: "Cancel a pending entry, so it is never delivered",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.cancelInbox(args[0], args[1])
+		},
+	}
 	var idle, unknown, costly, busy bool
 	var message string
 	consume := &cobra.Command{
@@ -169,17 +161,26 @@ to consume again with the worker's --idle, --unknown and --costly facts.`,
 	consume.Flags().BoolVar(&idle, "idle", false, "The live worker was observed idle")
 	consume.Flags().BoolVar(&unknown, "unknown", false, "The live worker's turn state is unknown: woken for ask, never for idle")
 	consume.Flags().BoolVar(&costly, "costly", false, "Waking the live worker is costly")
-	return append(append([]*cobra.Command{put, pending, ls, consume, cancel, batch}, a.recordInboxVerbs()...), a.threadInboxVerbs()...)
+	return append(append([]*cobra.Command{put, pending, ls, consume, cancel}, a.recordInboxVerbs()...), a.threadInboxVerbs()...)
 }
 
-// printPendingCounts prints one JSON object, key => pending count. A key
+// printPendingSummaries prints one JSON object, key => its PendingSummary. A key
 // whose inbox cannot be read names itself on stderr and is left out, so the
 // others still count.
-func (a *app) printPendingCounts(keys []string) error {
+func (a *app) printPendingSummaries(keys []string) error {
 	if err := messaging.PruneOfferedMailboxes(a.env, time.Now()); err != nil {
 		return err
 	}
-	return a.printCounts(keys, messaging.PendingCount)
+	summaries := make(map[string]messaging.PendingSummary, len(keys))
+	for _, key := range keys {
+		summary, err := messaging.SummarizePending(a.env, key)
+		if err != nil {
+			fmt.Fprintf(a.env.Stderr, "%s: %v\n", key, err)
+			continue
+		}
+		summaries[key] = summary
+	}
+	return json.NewEncoder(a.env.Stdout).Encode(summaries)
 }
 
 // printCounts prints one JSON object, key => count. A key whose inbox cannot

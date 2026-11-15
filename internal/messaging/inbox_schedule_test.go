@@ -7,7 +7,9 @@ import (
 	"time"
 )
 
-func TestDelayedRetentionAndCancel(t *testing.T) {
+// A future entry is held through retention and counts, and leaves only by an
+// explicit cancel, after which a delayed retry of its id names that outcome.
+func TestDelayedEntryWaitsUntilCancelled(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	future := time.Now().Add(30 * 24 * time.Hour).UTC().Format(time.RFC3339)
@@ -21,12 +23,11 @@ func TestDelayedRetentionAndCancel(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.QueuedAt = time.Now().Add(-30 * 24 * time.Hour).UnixNano()
-	e.Request.RetainedAt = time.Now().Add(-30 * 24 * time.Hour).UTC().Format(time.RFC3339)
 	if err := writeFiberMailboxAttempt(path, e, ""); err != nil {
 		t.Fatal(err)
 	}
-	if mailboxEntryExpired(e, time.Now()) {
-		t.Fatal("future entry expired")
+	if summary, err := SummarizePending(env, "fiber"); err != nil || summary.Count != 0 || len(summary.Scheduled) != 1 {
+		t.Fatalf("%+v %v", summary, err)
 	}
 	if n, err := WakingCount(env, "fiber"); err != nil || n != 0 {
 		t.Fatalf("%d %v", n, err)
@@ -40,7 +41,7 @@ func TestDelayedRetentionAndCancel(t *testing.T) {
 	if err := CancelPending(env, "fiber", "later"); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := PendingCount(env, "fiber"); err != nil || n != 0 {
+	if n, err := pendingCount(env, "fiber"); err != nil || n != 0 {
 		t.Fatalf("%d %v", n, err)
 	}
 	offered, err := readFiberMailboxEntry(filepath.Join(root, "offered", mailboxKey("later")+".json"))
@@ -49,5 +50,8 @@ func TestDelayedRetentionAndCancel(t *testing.T) {
 	}
 	if err := CancelPending(env, "fiber", "later"); err == nil {
 		t.Fatal("cancelled nonpending entry")
+	}
+	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: Request{MessageID: "later", Text: "check the fit"}, Wishes: Wishes{Turn: "ask", NotBefore: future}}); ErrorCode(err) != "already_settled" {
+		t.Fatalf("a delayed retry of a cancelled id = %v, want already_settled", err)
 	}
 }

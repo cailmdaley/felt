@@ -36,11 +36,17 @@ type fiberReceipt struct {
 // through its owner. Consumption decides context, follow-up, wake or a gated
 // launch. An owner below contract 42 keeps live waking traffic on the session
 // path. force records --wake. Attachments are retained as owner-local references.
-func (a *app) queueForFiber(request messaging.Request, force bool, schedule ...string) (*fiberReceipt, error) {
+func (a *app) queueForFiber(request messaging.Request, force bool) (*fiberReceipt, error) {
 	f, block := a.messageFiber(request.Address)
 	if f == nil {
 		return nil, nil
 	}
+	return a.queueInFiber(f, block, request, force, "")
+}
+
+// queueInFiber sends a message to fiber f's inbox through its owner; a
+// notBefore instant (UTC RFC 3339) schedules it.
+func (a *app) queueInFiber(f *felt.Felt, block *shuttle.Block, request messaging.Request, force bool, notBefore string) (*fiberReceipt, error) {
 	fiberID := f.UID
 	if fiberID == "" {
 		fiberID = f.ID
@@ -52,10 +58,6 @@ func (a *app) queueForFiber(request messaging.Request, force bool, schedule ...s
 			turn = "force"
 		}
 	}
-	notBefore := ""
-	if len(schedule) > 0 {
-		notBefore = schedule[0]
-	}
 	modern := notBefore != "" || a.inbox42(block.Host)
 	if len(request.Attachments) > 0 && !modern {
 		return nil, nil
@@ -63,8 +65,7 @@ func (a *app) queueForFiber(request messaging.Request, force bool, schedule ...s
 	if request.Text == "" && len(request.Attachments) > 0 {
 		request.Text = "Attached files."
 	}
-	payload, err := json.Marshal(map[string]any{
-		"not_before":       notBefore,
+	fields := map[string]any{
 		"fiber_id":         fiberID,
 		"origin":           block.Host,
 		"address":          request.Address,
@@ -80,7 +81,11 @@ func (a *app) queueForFiber(request messaging.Request, force bool, schedule ...s
 		"turn":             turn,
 		"context_only":     true,
 		"unless_live":      !modern && (request.Wake || request.NotifyWhenIdle),
-	})
+	}
+	if notBefore != "" {
+		fields["not_before"] = notBefore
+	}
+	payload, err := json.Marshal(fields)
 	if err != nil {
 		return nil, err
 	}
@@ -158,9 +163,15 @@ func (a *app) printFiberReceipt(receipt *fiberReceipt, wake bool) error {
 // messageFiber is the one Shuttle-owned fiber a message target names, with its
 // block, or nil when the target is a session or names no such fiber.
 func (a *app) messageFiber(target string) (*felt.Felt, *shuttle.Block) {
-	if strings.HasPrefix(target, "shuttle://") {
+	if strings.HasPrefix(target, "shuttle://") || looksLikeNativeSessionID(target) {
 		return nil, nil
 	}
+	return a.lookupFiber(target)
+}
+
+// lookupFiber is the one Shuttle-owned fiber an id, slug or uid names, looked
+// up in this host's stores and then the owners' feed, with its block.
+func (a *app) lookupFiber(target string) (*felt.Felt, *shuttle.Block) {
 	lookup, err := a.lookupShuttleAddressFibers(target)
 	if err != nil || len(lookup.Ambiguous) > 0 {
 		return nil, nil

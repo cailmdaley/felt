@@ -187,8 +187,9 @@ defmodule Shuttle.InboxLaunchTest do
     assert waking(parent) == 0
     poll!(poller)
     assert launches(id) == 0
-    assert %{scheduled_messages: scheduled} = :sys.get_state(poller)
+    assert %{scheduled_messages: scheduled, pending_results: waiting} = :sys.get_state(poller)
     assert [%{"id" => "later", "text" => "check converged"}] = scheduled[parent.fiber["uid"]]
+    refute waiting[parent.fiber["uid"]], "a future entry is not yet waiting for a worker"
     Process.sleep(2100)
     poll!(poller)
     assert launches(id) == 1
@@ -315,6 +316,42 @@ defmodule Shuttle.InboxLaunchTest do
 
     assert response.status == 200
     assert pending(parent) == %{}
+
+    assert {:command_error, _, output} =
+             Delivery.context(parent, "later", "ask-later",
+               from: "agent",
+               turn: "ask",
+               not_before: instant
+             )
+
+    assert output =~ "ask-later was already cancelled"
+  end
+
+  test "an overdue entry lists what it waits for", %{host: host} do
+    closed = oneshot(host, "tests/overdue-closed", "closed")
+    held = oneshot(host, "tests/overdue-held", "active")
+    _poller = poller!(host, boot_quarantine: true)
+    instant = DateTime.add(DateTime.utc_now(), 1, :second) |> DateTime.truncate(:second)
+
+    for id <- [closed, held] do
+      key = Delivery.context_key(entry(host, id))
+      args = ["inbox", "put", key, "overdue", "check", "--turn", "ask"]
+
+      assert {:ok, _} =
+               Shuttle.CLI.run(args ++ ["--not-before", DateTime.to_iso8601(instant)])
+    end
+
+    Process.sleep(1100)
+
+    waiting = fn id ->
+      conn = Phoenix.ConnTest.build_conn()
+      response = ShuttleWeb.InboxController.create(conn, %{"fiber_id" => id, "action" => "list"})
+      assert %{"entries" => [%{"waiting" => waiting}]} = Jason.decode!(response.resp_body)
+      waiting
+    end
+
+    assert waiting.(closed) =~ "is closed"
+    assert waiting.(held) =~ "boot quarantine"
   end
 
   test "inbox list and cancel forward to the owner and name an unreachable owner", %{host: host} do
@@ -761,13 +798,21 @@ defmodule Shuttle.InboxLaunchTest do
   end
 
   # Short standing runs that each take their message and hand off are not a
-  # crash loop: each ends the sequence, so five in a row open no breaker.
+  # crash loop: each ends the sequence, so five in a row open no breaker. A
+  # check-in pending hours ahead is not a message they left waiting.
   test "standing runs that took their messages and handed off do not open the breaker", %{
     host: host
   } do
     id = armed(host, "tests/inbox-delivered")
     poller = poller!(host)
     key = entry(host, id).fiber["uid"]
+    later = DateTime.add(DateTime.utc_now(), 6 * 3600, :second) |> DateTime.to_iso8601()
+
+    assert {:ok, {:scheduled, _}} =
+             Delivery.context(entry(host, id), "check later", "later",
+               turn: "ask",
+               not_before: later
+             )
 
     for n <- 1..5 do
       parent = entry(host, id)
@@ -777,7 +822,7 @@ defmodule Shuttle.InboxLaunchTest do
 
       %{session_uuid: uuid} = Poller.live_worker(poller, id)
       assert hook!(uuid) =~ "message #{n}"
-      assert pending(parent) == %{}
+      assert Map.keys(pending(parent)) == ["later"]
       write_handoff_marker(host, id)
       %{pid: watcher, session: session} = :sys.get_state(poller).running[key]
       IntegrationRunner.remove_tmux_session(session)

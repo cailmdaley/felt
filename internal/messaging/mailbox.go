@@ -542,9 +542,6 @@ func hookEmission(entry mailboxEntry) Request {
 }
 
 func mailboxEntryExpired(entry mailboxEntry, now time.Time) bool {
-	if !entry.due(now) {
-		return false
-	}
 	if requestExpired(entry.Request, now) {
 		return true
 	}

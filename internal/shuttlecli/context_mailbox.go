@@ -60,7 +60,7 @@ func (a *app) contextMailboxCmd() *cobra.Command {
 	put.Flags().StringVar(&retainedAt, "retained-at", "", "Origin timestamp used to expire replayed thread context")
 	cmd.AddCommand(put)
 	cmd.AddCommand(&cobra.Command{Use: "pending <fiber-key>...", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		return a.printPendingCounts(args)
+		return a.printPendingSummaries(args)
 	}})
 	cmd.AddCommand(&cobra.Command{Use: "get <fiber-key>", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		receiver, err := messaging.ReadFiberReceiver(a.env, args[0])

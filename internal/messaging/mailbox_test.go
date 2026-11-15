@@ -95,7 +95,7 @@ func TestMailboxRechecksThreadSignalImmediatelyBeforeEmit(t *testing.T) {
 	if checks != 2 || emitted {
 		t.Fatalf("checks=%d emitted=%v; stale lifecycle notice escaped", checks, emitted)
 	}
-	if count, err := PendingCount(env, "fiber"); err != nil || count != 0 {
+	if count, err := pendingCount(env, "fiber"); err != nil || count != 0 {
 		t.Fatalf("superseded pending count = %d (%v)", count, err)
 	}
 }
@@ -176,7 +176,7 @@ func TestOfferedBodiesExpireAndExpiredReplayIsIgnored(t *testing.T) {
 	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: request}); err != nil {
 		t.Fatal(err)
 	}
-	if count, err := PendingCount(env, "fiber"); err != nil || count != 0 {
+	if count, err := pendingCount(env, "fiber"); err != nil || count != 0 {
 		t.Fatalf("expired replay pending count = %d (%v)", count, err)
 	}
 }

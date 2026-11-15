@@ -1,17 +1,10 @@
 package shuttlecli
 
 import (
-	"crypto/sha256"
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"time"
-
-	"github.com/cailmdaley/felt/internal/atomicfile"
-	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
 const delayedContract = 45
@@ -81,43 +74,4 @@ func resolveMessageTime(delay, at string, now time.Time, zone *time.Location) (t
 		return time.Time{}, fmt.Errorf("delivery time must be in the future")
 	}
 	return t.UTC(), nil
-}
-
-// Keep the resolved instant across CLI retries under one publication id.
-func (a *app) messageSchedule(id, delay, at string) (string, error) {
-	dir, err := shuttle.DataDir(a.env)
-	if err != nil {
-		return "", err
-	}
-	path := filepath.Join(dir, "message-schedules", fmt.Sprintf("%x.json", sha256.Sum256([]byte(id))))
-	type schedule struct{ Delay, At, Instant string }
-	read := func() (string, error) {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return "", err
-		}
-		var s schedule
-		if err := json.Unmarshal(data, &s); err != nil {
-			return "", err
-		}
-		if s.Delay != delay || s.At != at {
-			return "", fmt.Errorf("message_id_conflict: this id has a different schedule")
-		}
-		return s.Instant, nil
-	}
-	if instant, err := read(); !os.IsNotExist(err) {
-		return instant, err
-	}
-	instant, err := resolveMessageTime(delay, at, time.Now(), time.Local)
-	if err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return "", err
-	}
-	data, _ := json.Marshal(schedule{delay, at, instant.Format(time.RFC3339Nano)})
-	if err := atomicfile.WriteNewUnsynced(path, data, 0600); err != nil && !os.IsExist(err) {
-		return "", err
-	}
-	return read()
 }

@@ -4,9 +4,14 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 func runScheduledMessage(t *testing.T, a *app, args ...string) (string, string, error) {
@@ -62,21 +67,6 @@ func TestMessageTimeAcrossClockChangesAndSubsecondDuration(t *testing.T) {
 	}
 }
 
-func TestMessageScheduleRetryKeepsInstant(t *testing.T) {
-	a := newApp(testEnv(t))
-	first, err := a.messageSchedule("same", "8h", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := a.messageSchedule("same", "8h", "")
-	if err != nil || first != second {
-		t.Fatalf("%s %s %v", first, second, err)
-	}
-	if _, err := a.messageSchedule("same", "9h", ""); err == nil {
-		t.Fatal("changed publication accepted")
-	}
-}
-
 func TestDelayedMessageContractAndWire(t *testing.T) {
 	for _, levels := range [][2]int{{44, 45}, {45, 40}, {45, 45}} {
 		t.Run(fmt.Sprint(levels), func(t *testing.T) {
@@ -112,16 +102,86 @@ func TestDelayedMessageContractAndWire(t *testing.T) {
 	}
 }
 
-func TestDelayedMessageRefusals(t *testing.T) {
-	for _, args := range [][]string{
-		{"shuttle://hub/pi/session", "later", "--in", "8h"},
-		{"fiber", "later", "--in", "8h", "--fresh"},
-		{"later", "--in", "8h"},
-		{"fiber", "later", "--in", "8h", "--at", "18:00"},
-	} {
-		_, _, err := runScheduledMessage(t, newApp(testEnv(t)), args...)
-		if err == nil {
-			t.Fatal(args)
+// delayedSendEnv is a host whose store holds work/worker and work/own, both
+// owned by worker-node at contract 45, with a /deliver stub that records what
+// it is sent. own is work/own's file, for a sender that is its worker.
+func delayedSendEnv(t *testing.T) (env *sysenv.Env, own string, requests func() []map[string]any) {
+	t.Helper()
+	env = testEnv(t)
+	store, storage := newStore(t)
+	for _, f := range []struct{ id, uid string }{{"work/worker", messageTargetFiberUID}, {"work/own", "01BX5ZZKBKACTAV9WEVGEMMVRZ"}} {
+		fiber := &felt.Felt{ID: f.id, UID: f.uid, Name: f.id}
+		if err := fiber.SetExtraField("shuttle", map[string]any{"kind": "oneshot", "host": "worker-node", "agent": "claude-opus", "project_dir": t.TempDir()}); err != nil {
+			t.Fatal(err)
 		}
+		if err := storage.Write(fiber); err != nil {
+			t.Fatal(err)
+		}
+	}
+	matches, _ := filepath.Glob(filepath.Join(store, ".felt", "work", "own", "*.md"))
+	if len(matches) != 1 {
+		t.Fatalf("own fiber file: %v", matches)
+	}
+	isolateMessageFiberStore(env, store)
+	deliver, requests := dormantDeliverStub(202, `{"queued":true,"status":"scheduled"}`)
+	daemonStub(t, env, map[string]http.HandlerFunc{
+		"/api/v1/version": jsonBody(`{"host":"worker-node","contract_level":45}`),
+		"/api/v1/deliver": deliver,
+	})
+	return env, matches[0], requests
+}
+
+func TestDelayedMessageRefusals(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"shuttle://hub/pi/session", "later", "--in", "8h"}, "goes to a fiber"},
+		{[]string{"work/wroker", "later", "--in", "8h"}, `no fiber "work/wroker"`},
+		{[]string{"work/worker", "later", "--in", "8h", "--fresh"}, "--fresh"},
+		{[]string{"later", "--in", "8h"}, "no fiber belongs to this session"},
+		{[]string{"work/worker", "later", "--in", "8h", "--at", "18:00"}, "mutually exclusive"},
+		{[]string{"work/worker", "later", "--in", ""}, "need a time"},
+		{[]string{"work/worker", "--notify-when-idle", "--in", "8h"}, "needs text"},
+	} {
+		env, _, requests := delayedSendEnv(t)
+		_, _, err := runScheduledMessage(t, newApp(env), tc.args...)
+		if err == nil || !strings.Contains(err.Error(), tc.want) || len(requests()) != 0 {
+			t.Errorf("%v: err=%v sent=%v, want a refusal naming %q", tc.args, err, requests(), tc.want)
+		}
+	}
+}
+
+// A delayed send whose body comes from --file or --attach names its target in
+// its one argument, even from a worker session with a fiber of its own.
+func TestDelayedFileOrAttachmentKeepsItsTarget(t *testing.T) {
+	for _, flag := range []string{"--file", "--attach"} {
+		t.Run(flag, func(t *testing.T) {
+			env, own, requests := delayedSendEnv(t)
+			env.Set("SHUTTLE_FIBER_PATH", own)
+			note := filepath.Join(t.TempDir(), "note.md")
+			if err := os.WriteFile(note, []byte("check the fit converged"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := runScheduledMessage(t, newApp(env), "work/worker", flag, note, "--in", "8h"); err != nil {
+				t.Fatal(err)
+			}
+			got := requests()
+			if len(got) != 1 || got[0]["fiber_id"] != messageTargetFiberUID || got[0]["text"] == "work/worker" {
+				t.Fatalf("sent %v, want one message to work/worker (%s)", got, messageTargetFiberUID)
+			}
+		})
+	}
+}
+
+// With only text, a delayed send goes to the sender's own fiber.
+func TestDelayedTextAloneGoesToOwnFiber(t *testing.T) {
+	env, own, requests := delayedSendEnv(t)
+	env.Set("SHUTTLE_FIBER_PATH", own)
+	if _, _, err := runScheduledMessage(t, newApp(env), "check the fit", "--in", "8h"); err != nil {
+		t.Fatal(err)
+	}
+	if got := requests(); len(got) != 1 || got[0]["fiber_id"] != "01BX5ZZKBKACTAV9WEVGEMMVRZ" || got[0]["text"] != "check the fit" {
+		t.Fatalf("sent %v, want the text on work/own", got)
 	}
 }

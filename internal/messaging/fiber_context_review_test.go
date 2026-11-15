@@ -58,7 +58,7 @@ func TestPinnedQuietCodexContextReturnsToFiberHook(t *testing.T) {
 			if len(got) != 1 || got[0].Text != request.Text {
 				t.Fatalf("successor hook context = %+v", got)
 			}
-			if n, err := PendingCount(env, "fiber"); err != nil || n != 0 {
+			if n, err := pendingCount(env, "fiber"); err != nil || n != 0 {
 				t.Fatalf("pending = %d, %v", n, err)
 			}
 		})
@@ -90,7 +90,7 @@ func TestFiberContextWakeWithoutCodexDiscovery(t *testing.T) {
 	if err := DeliverFiberContext(context.Background(), env, "fiber", "host", address, generation); err != nil {
 		t.Fatalf("wake failed: %v", err)
 	}
-	if n, err := PendingCount(env, "fiber"); err != nil || n != 0 || inputs != 1 {
+	if n, err := pendingCount(env, "fiber"); err != nil || n != 0 || inputs != 1 {
 		t.Fatalf("pending=%d inputs=%d err=%v", n, inputs, err)
 	}
 }

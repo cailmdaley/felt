@@ -281,11 +281,16 @@ defmodule Shuttle.Delivery do
   (default `"shuttle"`); `:unless_live` refuses with `{:error, :live_worker}`
   while a worker is live, queueing nothing, so the sender messages that worker
   directly. A `thread-` id names the event it reports, so its first capture
-  stands whatever a retry states.
+  stands whatever a retry states. `:not_before` (UTC RFC 3339) is the
+  earliest instant the entry may be delivered; an entry that asks for a turn
+  then asks with `if_costly: fresh`, so a cold cache does not hold it.
 
   Answers `{:ok, {:consumed, answer}}` for a live worker, `{:ok, :queued}`,
-  `{:ok, :starting}` when a session is starting, or
-  `{:ok, {:waiting, detail}}` saying what a waking entry waits for. The put,
+  `{:ok, :starting}` when a session is starting,
+  `{:ok, {:waiting, detail}}` saying what a waking entry waits for, or
+  `{:ok, {:scheduled, not_before}}` for an entry not yet due, which is stored
+  and nothing more: no consumption, launch or ask clearing. A delayed retry of
+  an id the inbox has already delivered or cancelled is refused, naming which. The put,
   consumes and any launch share a 35-second budget, so an
   owner answers inside a routing hub's forward
   (`Shuttle.OriginRouter.default_forward_timeout_ms/0`); clearing the ask runs
@@ -480,6 +485,26 @@ defmodule Shuttle.Delivery do
       {:ok, %{"launching" => true}} -> :in_flight
       {:ok, %{"action" => _}} -> :nothing
       other -> {:error, {:consume, other}}
+    end
+  end
+
+  @doc """
+  What a due entry asking for a turn waits for in the inbox of `entry`, a
+  fiber with no worker: the refusal `start_for_inbox/2` would meet, worded as
+  its waiting detail, or nil when the next poll starts a session for it.
+  """
+  def inbox_wait(entry) do
+    id = entry.fiber["uid"] || Shuttle.Threads.address(entry.fiber)
+
+    with :ok <- inbox_gate(entry.fiber, Poller.own_host_id()),
+         :ok <- Poller.admit_inbox_launch(Shuttle.Env.server(Poller), id) do
+      nil
+    else
+      error ->
+        case launched(error, Shuttle.Threads.address(entry.fiber)) do
+          {:waiting, detail} -> detail
+          _ -> nil
+        end
     end
   end
 

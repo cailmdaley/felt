@@ -1,6 +1,6 @@
 defmodule ShuttleWeb.InboxController do
   use Phoenix.Controller, formats: [:json]
-  alias Shuttle.{CLI, Delivery, FiberDocuments, InboxSchedule, OriginRouter, Poller}
+  alias Shuttle.{CLI, Delivery, FiberDocuments, OriginRouter, Poller}
 
   def create(conn, params) do
     case OriginRouter.route(params["origin"]) do
@@ -40,7 +40,7 @@ defmodule ShuttleWeb.InboxController do
               case DateTime.from_iso8601(p["not_before"] || "") do
                 {:ok, time, _} ->
                   if DateTime.compare(time, DateTime.utc_now()) != :gt,
-                    do: Map.put(p, "waiting", InboxSchedule.waiting(entry, p)),
+                    do: Map.put(p, "waiting", waiting(entry, p)),
                     else: p
 
                 _ ->
@@ -61,6 +61,28 @@ defmodule ShuttleWeb.InboxController do
         conn
         |> put_status(404)
         |> json(%{error: "no owned fiber #{params["fiber_id"]} on #{Poller.own_host_id()}"})
+    end
+  end
+
+  # Why an overdue entry is still pending.
+  defp waiting(entry, publication) do
+    id = entry.fiber["uid"] || entry.fiber["id"]
+
+    cond do
+      publication["turn"] == "none" ->
+        "context only; waits for a worker's hook"
+
+      publication["attempt"] ->
+        "delivery in flight; awaits its outcome"
+
+      Poller.context_receiver(Shuttle.Env.server(Poller), id) != {:error, :no_worker} ->
+        "awaiting its worker's next hook or consume"
+
+      detail = Delivery.inbox_wait(entry) ->
+        detail
+
+      true ->
+        "awaiting the next poll, which starts a session for it"
     end
   end
 end

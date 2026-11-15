@@ -22,23 +22,23 @@ func TestInboxVerbs(t *testing.T) {
 		return out.String(), err
 	}
 
-	if _, err := run("inbox", "put", "store:FIBER", "later", "wait for it", "--source", "notice", "--turn", "ask", "--not-before", "2999-01-01T00:00:00Z", "--from", "bob"); err != nil {
+	if _, err := run("inbox", "put", "/store:FIBER", "later", "wait for it", "--source", "notice", "--turn", "ask", "--not-before", "2999-01-01T00:00:00Z", "--from", "bob"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := run("inbox", "put", "store:FIBER", "now", "context"); err != nil {
+	if _, err := run("inbox", "put", "/store:FIBER", "now", "context"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := run("inbox", "put", "store:FIBER", "bad", "x", "--turn", "later"); messaging.ErrorCode(err) != "invalid_request" {
+	if _, err := run("inbox", "put", "/store:FIBER", "bad", "x", "--turn", "later"); messaging.ErrorCode(err) != "invalid_request" {
 		t.Fatalf("unknown turn: %v", err)
 	}
-	if _, err := run("inbox", "put", "store:FIBER", "now", "other text"); messaging.ErrorCode(err) != "message_id_conflict" {
+	if _, err := run("inbox", "put", "/store:FIBER", "now", "other text"); messaging.ErrorCode(err) != "message_id_conflict" {
 		t.Fatalf("reused id: %v", err)
 	}
-	if _, err := run("inbox", "put", "store:FIBER", "now", "other text", "--derived"); err != nil {
+	if _, err := run("inbox", "put", "/store:FIBER", "now", "other text", "--derived"); err != nil {
 		t.Fatalf("derived recapture: %v", err)
 	}
 
-	out, err := run("inbox", "ls", "store:FIBER", "--json")
+	out, err := run("inbox", "ls", "/store:FIBER", "--json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestInboxVerbs(t *testing.T) {
 		t.Fatalf("plain entry = %+v", e)
 	}
 
-	out, err = run("inbox", "ls", "store:FIBER")
+	out, err = run("inbox", "ls", "/store:FIBER")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,12 +66,12 @@ func TestInboxVerbs(t *testing.T) {
 	}
 
 	for _, verb := range []string{"inbox", "context-mailbox"} {
-		out, err = run(verb, "pending", "store:FIBER", "store:EMPTY")
+		out, err = run(verb, "pending", "/store:FIBER", "store:EMPTY")
 		if err != nil {
 			t.Fatal(err)
 		}
-		var counts map[string]int
-		if err := json.Unmarshal([]byte(out), &counts); err != nil || counts["store:FIBER"] != 2 || counts["store:EMPTY"] != 0 {
+		var counts map[string]messaging.PendingSummary
+		if err := json.Unmarshal([]byte(out), &counts); err != nil || counts["/store:FIBER"].Count != 1 || counts["store:EMPTY"].Count != 0 || len(counts["/store:FIBER"].Scheduled) != 1 {
 			t.Fatalf("%s pending = %s (%v)", verb, out, err)
 		}
 	}

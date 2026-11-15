@@ -47,7 +47,7 @@ func TestIdleSubscriptionFromHookAndConsumeBinaries(t *testing.T) {
 		run(env, "", "context-mailbox", "receiver", "fiber", "ident-A", "shuttle://host/codex/A")
 		run(env, "", append(put, "fiber", "n1", "please look")...)
 		run(env, `{"harness":"codex","hook_event_name":"PreToolUse","session_id":"A","cwd":"`+cwd+`"}`, "hook", "event")
-		if n, _ := PendingCount(env, "fiber"); n != 0 {
+		if n, _ := pendingCount(env, "fiber"); n != 0 {
 			t.Fatalf("the hook did not claim the entry: pending=%d", n)
 		}
 		if records := subscribed(dataDir(env)); len(records) != 1 {

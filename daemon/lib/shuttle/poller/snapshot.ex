@@ -100,13 +100,6 @@ defmodule Shuttle.Poller.Snapshot do
 
     %{
       poll_at: now_ms,
-      scheduled_messages:
-        Map.new(state.scheduled_messages, fn {id, entries} ->
-          times = Enum.map(entries, & &1["not_before"])
-
-          {id,
-           %{count: length(entries), next_time: Enum.min(times, fn -> nil end), entries: entries}}
-        end),
       # Reflect the dispatch-filter identity, not just :inet.gethostname().
       # When SHUTTLE_HOST is set this matches the host operators read in logs
       # and use to author `shuttle.host:` pins on fibers.

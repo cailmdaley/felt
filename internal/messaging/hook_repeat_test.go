@@ -28,7 +28,7 @@ func TestReview3HookRecoveryMarksRepeatWithinLimit(t *testing.T) {
 	if len(got) != 1 || !strings.HasPrefix(got[0].Text, "Possible repeat:") || len(Labeled(got[0])) > claudeHookBatchBytes {
 		t.Fatalf("hook emission count=%d, repeat=%v", len(got), strings.HasPrefix(got[0].Text, "Possible repeat:"))
 	}
-	if n, _ := PendingCount(env, "shuttle://host/claude/A"); n != 1 {
+	if n, _ := pendingCount(env, "shuttle://host/claude/A"); n != 1 {
 		t.Fatalf("pending=%d", n)
 	}
 }

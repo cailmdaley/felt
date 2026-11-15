@@ -4,49 +4,77 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/cailmdaley/felt/internal/messaging"
 	"io"
 	"strings"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/messaging"
+	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
+// rawInboxKey reports whether ref is a host-local inbox key (a felt store
+// path and uid, a session address, or the routing inbox) rather than a fiber
+// reference.
 func rawInboxKey(ref string) bool {
 	return strings.HasPrefix(ref, "/") || strings.HasPrefix(ref, "shuttle://") || ref == "threads"
 }
-func scheduledEntries(entries []messaging.PendingEntry) []messaging.PendingEntry {
+
+// inboxFiber resolves the reference an inbox verb or a delayed send names:
+// nil for a raw inbox key, which this host reads itself, else the one fiber
+// it names, or an error saying it names none.
+func (a *app) inboxFiber(ref string) (*felt.Felt, *shuttle.Block, error) {
+	if rawInboxKey(ref) {
+		return nil, nil, nil
+	}
+	if f, block := a.lookupFiber(ref); f != nil {
+		return f, block, nil
+	}
+	return nil, nil, fmt.Errorf("no fiber %q with a shuttle: block; use a fiber id, slug, uid or raw inbox key", ref)
+}
+
+// listInbox lists a fiber's pending entries from its owner, or a raw key's
+// from this host; scheduled keeps only those with a delivery time.
+func (a *app) listInbox(ref string, scheduled bool) ([]messaging.PendingEntry, error) {
+	f, block, err := a.inboxFiber(ref)
+	if err != nil {
+		return nil, err
+	}
+	var entries []messaging.PendingEntry
+	if f == nil {
+		entries, err = messaging.PendingEntries(a.env, ref)
+	} else {
+		entries, err = a.ownerInbox(f, block, "list", "")
+	}
+	if !scheduled {
+		return entries, err
+	}
 	out := []messaging.PendingEntry{}
 	for _, e := range entries {
 		if e.NotBefore != "" {
 			out = append(out, e)
 		}
 	}
-	return out
+	return out, err
 }
-func (a *app) listInbox(ref string, scheduled bool) ([]messaging.PendingEntry, error) {
-	var entries []messaging.PendingEntry
-	var err error
-	f, _ := a.messageFiber(ref)
-	if rawInboxKey(ref) || f == nil {
-		entries, err = messaging.PendingEntries(a.env, ref)
-	} else {
-		entries, err = a.ownerInbox(ref, "list", "")
+
+// cancelInbox cancels a pending entry on a fiber's owner, or under a raw key
+// on this host.
+func (a *app) cancelInbox(ref, id string) error {
+	f, block, err := a.inboxFiber(ref)
+	if err != nil {
+		return err
 	}
-	if scheduled {
-		entries = scheduledEntries(entries)
-	}
-	for i := range entries {
-		at, parseErr := time.Parse(time.RFC3339, entries[i].NotBefore)
-		if parseErr == nil && !at.After(time.Now()) && entries[i].Waiting == "" {
-			entries[i].Waiting = "awaiting consumer or hook; use the fiber reference for its owner's launch-gate reason"
-		}
-	}
-	return entries, err
-}
-func (a *app) ownerInbox(ref, action, id string) ([]messaging.PendingEntry, error) {
-	f, block := a.messageFiber(ref)
 	if f == nil {
-		return nil, fmt.Errorf("no owned fiber %q; use a fiber id, slug, uid or raw inbox key", ref)
+		return messaging.CancelPending(a.env, ref, id)
 	}
+	_, err = a.ownerInbox(f, block, "cancel", id)
+	return err
+}
+
+// ownerInbox asks fiber f's owner, through the local daemon, to list or
+// cancel in its inbox.
+func (a *app) ownerInbox(f *felt.Felt, block *shuttle.Block, action, id string) ([]messaging.PendingEntry, error) {
 	uid := f.UID
 	if uid == "" {
 		uid = f.ID

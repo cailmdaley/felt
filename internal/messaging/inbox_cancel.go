@@ -1,7 +1,6 @@
 package messaging
 
 import (
-	"encoding/json"
 	"github.com/cailmdaley/felt/internal/sysenv"
 	"os"
 	"path/filepath"
@@ -30,15 +29,10 @@ func CancelPending(env *sysenv.Env, address, id string) error {
 	if e.Attempt.open() {
 		return errCode("in_flight", "message %s has a delivery in flight; it cannot be cancelled", id)
 	}
-	// Remove it from every reader's pending set before updating its verdict.
-	// A crash here leaves an offered record, never a retryable publication.
-	if err := moveToOffered(root, path); err != nil {
-		return err
-	}
+	// Marked before the move, so offered/ never reads as its delivery.
 	e.Disposition = "cancelled"
-	data, err := json.Marshal(e)
-	if err != nil {
+	if err := writeMailboxEntry(path, e); err != nil {
 		return err
 	}
-	return mailboxWrite(filepath.Join(root, "offered", filepath.Base(path)), data, false)
+	return moveToOffered(root, path)
 }

@@ -1276,12 +1276,15 @@ defmodule Shuttle.Threads do
   end
 
   @doc """
-  What waits for each constitution this host owns, `%{uid_or_id => count}` with
-  zero counts left out: the context its inbox holds that no worker has taken
-  (thread results and messages queued for its next worker), plus the results
-  addressed to it among `routing`, the routing records `route_results/1`
-  left waiting (nil when it could not list them). One `shuttle inbox pending`
-  call answers every inbox; a failed call counts the routing records alone.
+  What waits for each constitution this host owns, as `{counts, scheduled}`.
+  `counts` is `%{uid_or_id => count}` with zero counts left out: the due
+  context its inbox holds that no worker has taken (thread results and
+  messages queued for its next worker), plus the results addressed to it among
+  `routing`, the routing records `route_results/1` left waiting (nil when it
+  could not list them). `scheduled` is `%{uid_or_id => entries}`, its pending
+  entries with a delivery time, overdue ones included, where there are any.
+  One `shuttle inbox pending` call answers every inbox; a failed call counts
+  the routing records alone.
   """
   def pending_results(entries, own_host, routing) do
     owned =
@@ -1290,25 +1293,34 @@ defmodule Shuttle.Threads do
           get_in(entry.fiber, ["shuttle", "host"]) == own_host,
           do: {Delivery.context_key(entry), entry.fiber["uid"] || entry.fiber["id"]}
 
-    queued =
+    {queued, scheduled} =
       with [_ | _] <- owned,
            {:ok, output} <-
              Shuttle.CLI.run(["inbox", "pending" | Enum.map(owned, &elem(&1, 0))],
                stderr_to_stdout: false
              ),
-           {:ok, counts} when is_map(counts) <- Jason.decode(output) do
-        for {key, id} <- owned, n = counts[key], is_integer(n), n > 0, into: %{}, do: {id, n}
+           {:ok, summaries} when is_map(summaries) <- Jason.decode(output) do
+        for {key, id} <- owned,
+            %{"count" => n, "scheduled" => later} <- [summaries[key]],
+            reduce: {%{}, %{}} do
+          {queued, scheduled} ->
+            {if(n > 0, do: Map.put(queued, id, n), else: queued),
+             if(later == [], do: scheduled, else: Map.put(scheduled, id, later))}
+        end
       else
-        _ -> %{}
+        _ -> {%{}, %{}}
       end
 
     ids = MapSet.new(owned, &elem(&1, 1))
 
-    (routing || [])
-    |> Enum.map(& &1["parent_uid"])
-    |> Enum.filter(&MapSet.member?(ids, &1))
-    |> Enum.frequencies()
-    |> Map.merge(queued, fn _id, routed, waiting -> routed + waiting end)
+    counts =
+      (routing || [])
+      |> Enum.map(& &1["parent_uid"])
+      |> Enum.filter(&MapSet.member?(ids, &1))
+      |> Enum.frequencies()
+      |> Map.merge(queued, fn _id, routed, waiting -> routed + waiting end)
+
+    {counts, scheduled}
   end
 
   # The session that asked for a thread, when it is not the orchestrator's

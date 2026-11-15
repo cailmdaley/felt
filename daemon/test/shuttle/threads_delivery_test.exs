@@ -27,7 +27,7 @@ defmodule Shuttle.ThreadsDeliveryTest do
     uid = hub.fiber["uid"]
 
     routing = fn -> Enum.map(Shuttle.Test.InboxPublications.pending(), &elem(&1, 1)) end
-    assert Threads.pending_results(entries, "test-host", routing.()) == %{}
+    assert Threads.pending_results(entries, "test-host", routing.()) == {%{}, %{}}
 
     for {id, text} <- [{"m-1", "one"}, {"m-2", "two"}, {"m-2", "two"}],
         do: assert({:ok, :queued} = Shuttle.Delivery.context(hub, text, id))
@@ -43,8 +43,8 @@ defmodule Shuttle.ThreadsDeliveryTest do
        }}
     ])
 
-    assert Threads.pending_results(entries, "test-host", routing.()) == %{uid => 3}
-    assert Threads.pending_results(entries, "another-host", routing.()) == %{}
+    assert Threads.pending_results(entries, "test-host", routing.()) == {%{uid => 3}, %{}}
+    assert Threads.pending_results(entries, "another-host", routing.()) == {%{}, %{}}
   end
 
   test "superseded close and ask publications are dropped after publisher restart", %{
@@ -674,7 +674,7 @@ defmodule Shuttle.ThreadsDeliveryTest do
     assert Jason.decode!(out) == %{canonical => 1, view => 0}
     assert Shuttle.Test.InboxPublications.pending() == []
     hub_uid = parent.fiber["uid"]
-    assert Threads.pending_results(entries, "test-host", []) == %{hub_uid => 1}
+    assert Threads.pending_results(entries, "test-host", []) == {%{hub_uid => 1}, %{}}
     assert_receive {:flush_reached_admission, ^hub_uid}
   end
 

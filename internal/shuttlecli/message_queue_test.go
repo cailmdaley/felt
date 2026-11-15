@@ -333,11 +333,11 @@ func TestContextMailboxPendingCountsEachFiber(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	var got map[string]int
+	var got map[string]messaging.PendingSummary
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("%q: %v", stdout.String(), err)
 	}
-	if len(got) != 2 || got["store:WAITING"] != 2 || got["store:EMPTY"] != 0 {
+	if len(got) != 2 || got["store:WAITING"].Count != 2 || got["store:EMPTY"].Count != 0 {
 		t.Fatalf("pending = %v", got)
 	}
 }

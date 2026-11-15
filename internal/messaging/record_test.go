@@ -49,7 +49,7 @@ func TestRecordDedupAndSettlement(t *testing.T) {
 			t.Fatalf("created=%v err=%v", created, err)
 		}
 	}
-	if n, err := PendingCount(env, "fiber"); err != nil || n != 0 {
+	if n, err := pendingCount(env, "fiber"); err != nil || n != 0 {
 		t.Fatalf("a human record is never pending: %d %v", n, err)
 	}
 	root := mailboxDir(env, "fiber", "fiber")
@@ -109,7 +109,7 @@ func TestRecordFromAnAgentIsNeverOffered(t *testing.T) {
 	if created, _, err := BeginRecord(env, "fiber", "fresh-1", "shuttle://host/claude/A", "new session please"); err != nil || !created {
 		t.Fatalf("%v %v", created, err)
 	}
-	if n, err := PendingCount(env, "fiber"); err != nil || n != 0 {
+	if n, err := pendingCount(env, "fiber"); err != nil || n != 0 {
 		t.Fatalf("a record is never pending: %d %v", n, err)
 	}
 	e, err := readFiberMailboxEntry(filepath.Join(mailboxDir(env, "fiber", "fiber"), "offered", mailboxKey("fresh-1")+".json"))

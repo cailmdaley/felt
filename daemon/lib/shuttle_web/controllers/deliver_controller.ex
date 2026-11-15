@@ -150,8 +150,7 @@ defmodule ShuttleWeb.DeliverController do
           wake: context["wake"] == true,
           turn: turn,
           retained_at: context["retained_at"],
-          not_before:
-            if(context["not_before"] in [nil, ""], do: nil, else: context["not_before"]),
+          not_before: context["not_before"],
           thread_signal: context["thread_signal"],
           unless_live: context["unless_live"] == true,
           from: from,

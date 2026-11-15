@@ -54,7 +54,7 @@ func TestThreadInboxVerbsCaptureForwardSettleAndContract40Enqueue(t *testing.T) 
 	for i := 0; i < 2; i++ {
 		run("", "context-mailbox", "put", "/owner:parent", "thread-1", record["text"].(string), "--derived", "--retained-at", record["retained_at"].(string))
 	}
-	if out := run("", "inbox", "pending", "/owner:parent"); out != `{"/owner:parent":1}` {
+	if out := run("", "inbox", "pending", "/owner:parent"); out != `{"/owner:parent":{"count":1,"scheduled":[]}}` {
 		t.Fatal(out)
 	}
 }

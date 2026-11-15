@@ -56,7 +56,7 @@ func TestFiberContextReachesCodexQuietResumeWithEndedHook(t *testing.T) {
 	if err := DeliverFiberContext(context.Background(), env, "fiber-quiet-resume", "host", address, generation); err != nil {
 		t.Fatalf("deliver to quiet resumed Codex: %v", err)
 	}
-	if n, err := PendingCount(env, "fiber-quiet-resume"); err != nil || n != 1 {
+	if n, err := pendingCount(env, "fiber-quiet-resume"); err != nil || n != 1 {
 		t.Fatalf("fiber context pending before hook = %d, %v", n, err)
 	}
 	if pendingMailboxText(t, env, "codex", id, request.Text) {
@@ -257,7 +257,7 @@ func TestFiberContextWakeUsesNativeTurnAndDoesNotReplay(t *testing.T) {
 func TestPendingCountCountsWhatNoWorkerHasTaken(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
-	if n, err := PendingCount(env, "fiber"); err != nil || n != 0 {
+	if n, err := pendingCount(env, "fiber"); err != nil || n != 0 {
 		t.Fatalf("a fiber with no mailbox holds %d (%v), want 0", n, err)
 	}
 	for _, id := range []string{"one", "two", "two"} {
@@ -265,7 +265,7 @@ func TestPendingCountCountsWhatNoWorkerHasTaken(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if n, err := PendingCount(env, "fiber"); err != nil || n != 2 {
+	if n, err := pendingCount(env, "fiber"); err != nil || n != 2 {
 		t.Fatalf("pending = %d (%v), want 2", n, err)
 	}
 	if err := RegisterMailbox(env, "claude", "A", "host", t.TempDir(), os.Getpid(), true); err != nil {
@@ -280,7 +280,7 @@ func TestPendingCountCountsWhatNoWorkerHasTaken(t *testing.T) {
 	if err := OfferMailbox(env, "claude", "A", "host", func([]Request) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := PendingCount(env, "fiber"); err != nil || n != 0 {
+	if n, err := pendingCount(env, "fiber"); err != nil || n != 0 {
 		t.Fatalf("after its worker took them, pending = %d (%v), want 0", n, err)
 	}
 }
@@ -374,7 +374,7 @@ func TestThreadSignalMailboxDropsSupersededAndRetainsWhenCheckFails(t *testing.T
 	}, func([]Request) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := PendingCount(env, "fiber"); err != nil || n != 2 {
+	if n, err := pendingCount(env, "fiber"); err != nil || n != 2 {
 		t.Fatalf("pending after superseded drop = %d (%v), want 2", n, err)
 	}
 	checkFailure := errors.New("validator unavailable")
@@ -403,7 +403,7 @@ func TestThreadSignalMailboxDropsSupersededAndRetainsWhenCheckFails(t *testing.T
 	if len(delivered) != 1 || delivered[0] != "thread-healthy" {
 		t.Fatalf("healthy notice delivery = %v", delivered)
 	}
-	if n, err := PendingCount(env, "fiber"); err != nil || n != 1 {
+	if n, err := pendingCount(env, "fiber"); err != nil || n != 1 {
 		t.Fatalf("pending after unavailable check = %d (%v), want 1", n, err)
 	}
 }

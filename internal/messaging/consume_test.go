@@ -142,7 +142,7 @@ func TestConsumeFrozenBatchAcrossCrash(t *testing.T) {
 			if err != nil || injected != 1 || len(result.Members) != 3 {
 				t.Fatalf("%+v injected=%d err=%v", result, injected, err)
 			}
-			if n, _ := PendingCount(env, "fiber"); n != 1 {
+			if n, _ := pendingCount(env, "fiber"); n != 1 {
 				t.Fatalf("pending=%d", n)
 			}
 		})
@@ -184,7 +184,7 @@ func TestConsumePartialClaimAndClose(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if n, _ := PendingCount(env, "fiber"); n != 0 {
+			if n, _ := pendingCount(env, "fiber"); n != 0 {
 				t.Fatal(n)
 			}
 		})
@@ -315,7 +315,7 @@ func TestConsumeOpenBatchHoldsOnlyItsMembers(t *testing.T) {
 			if !strings.Contains(sent[len(sent)-1], "text of f") || strings.Contains(sent[len(sent)-1], "text of context") {
 				t.Fatalf("force entry behind an open batch: %+v sent %q", result, sent)
 			}
-			if n, _ := PendingCount(env, "fiber"); n != 2 {
+			if n, _ := pendingCount(env, "fiber"); n != 2 {
 				t.Fatalf("pending=%d, want the open batch's two members", n)
 			}
 			root := mailboxDir(env, "fiber", "fiber")

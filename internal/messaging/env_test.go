@@ -28,3 +28,10 @@ func testEnv(t testing.TB) *sysenv.Env {
 		"SHUTTLE_CONFER_STATE_DIR=" + filepath.Join(dir, "confer"),
 	})
 }
+
+// pendingCount counts the entries an address's inbox holds that no worker has
+// taken, future ones included.
+func pendingCount(env *sysenv.Env, address string) (int, error) {
+	entries, err := PendingEntries(env, address)
+	return len(entries), err
+}

@@ -114,7 +114,7 @@ defmodule Shuttle.ThreadCaptureTest do
     routing = Threads.deliver_results([hub], "test-host")
 
     assert [%{"parent_uid" => "u-load"}, %{"parent_uid" => "u-load"}] = routing
-    assert Threads.pending_results([hub], "test-host", routing) == %{"u-load" => 2}
+    assert Threads.pending_results([hub], "test-host", routing) == {%{"u-load" => 2}, %{}}
     assert Enum.count(shuttle_calls(), &(&1 == ["inbox", "routes"])) == 1
   end
 

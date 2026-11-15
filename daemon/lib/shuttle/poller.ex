@@ -1682,12 +1682,8 @@ defmodule Shuttle.Poller do
     Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
       Shuttle.Env.adopt_callers(callers)
       routing = Shuttle.Threads.deliver_results(entries, own_host)
-      send(poller, {:scheduled_messages, Shuttle.InboxSchedule.entries(entries)})
-
-      send(
-        poller,
-        {:pending_results, Shuttle.Threads.pending_results(entries, own_host, routing)}
-      )
+      {counts, scheduled} = Shuttle.Threads.pending_results(entries, own_host, routing)
+      send(poller, {:pending_results, counts, scheduled})
     end)
 
     {:noreply, state}
@@ -2113,11 +2109,8 @@ defmodule Shuttle.Poller do
     end
   end
 
-  defp transition_info({:scheduled_messages, entries}, state),
-    do: {:noreply, %{state | scheduled_messages: entries}}
-
-  defp transition_info({:pending_results, counts}, state) when is_map(counts),
-    do: {:noreply, %{state | pending_results: counts}}
+  defp transition_info({:pending_results, counts, scheduled}, state),
+    do: {:noreply, %{state | pending_results: counts, scheduled_messages: scheduled}}
 
   defp transition_info({:fleet, fleet}, state) when is_map(fleet),
     do: {:noreply, %{state | fleet: fleet}}
@@ -3260,8 +3253,17 @@ defmodule Shuttle.Poller do
   # runtime_key (uid when present), and we also index by the meta's address so a
   # uid-less fiber still matches. A row with no live worker carries no `:runtime`.
   # An owned row's `pending_results`, present only while something waits for
-  # its next worker and none is live. A number on the wire; the board draws it
-  # muted, and every other row is served exactly as cached.
+  # its next worker and none is live, a number on the wire the board draws
+  # muted; and its `scheduled_messages`, the pending entries with a delivery
+  # time, present while there are any. Every other row is served exactly as
+  # cached.
+  defp stamp_pending_results(entries, %State{
+         pending_results: pending,
+         scheduled_messages: scheduled
+       })
+       when map_size(pending) == 0 and map_size(scheduled) == 0,
+       do: entries
+
   defp stamp_pending_results(entries, %State{
          pending_results: pending,
          running: running,
@@ -5557,8 +5559,8 @@ defmodule Shuttle.Poller do
   # A standing run started for messages is restarted outside the schedule
   # while its messages wait, so a run that failed them feeds the breaker that
   # holds the next launch for the inbox (and the next scheduled run): one that
-  # ended without a clean handoff, or with a turn-asking entry queued before it
-  # started still pending. A run that took its messages and handed off ends
+  # ended without a clean handoff, or with a turn-asking entry that was due
+  # before it started still pending. A run that took its messages and handed off ends
   # the sequence, however short it was.
   defp note_inbox_run_exit(%State{} = state, runtime_key, fiber, meta) do
     if Shuttle.Continuation.clean_handoff_since_dispatch?(fiber) and
@@ -5568,7 +5570,7 @@ defmodule Shuttle.Poller do
   end
 
   # Whether the fiber's inbox still holds an entry asking for a turn that was
-  # queued before the worker started. An unreadable inbox counts as holding
+  # queued, and due, before the worker started. An unreadable inbox counts as holding
   # one.
   defp messages_left_waiting?(state, meta, fiber) do
     started = Map.get(meta, :started_at)
@@ -5579,15 +5581,18 @@ defmodule Shuttle.Poller do
          {:ok, entries} when is_list(entries) <- Jason.decode(output) do
       Enum.any?(entries, fn entry ->
         entry["turn"] != "none" and
-          (not match?(%DateTime{}, started) or queued_before?(entry["queued_at"], started))
+          (not match?(%DateTime{}, started) or
+             (not_after?(entry["queued_at"], started) and
+                not_after?(entry["not_before"], started)))
       end)
     else
       _ -> true
     end
   end
 
-  defp queued_before?(queued_at, started) do
-    case DateTime.from_iso8601(to_string(queued_at)) do
+  # Whether a stamp is no later than `started`; an absent or unreadable one is.
+  defp not_after?(stamp, started) do
+    case DateTime.from_iso8601(to_string(stamp)) do
       {:ok, at, _} -> DateTime.compare(at, started) != :gt
       _ -> true
     end

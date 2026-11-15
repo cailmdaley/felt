@@ -115,7 +115,7 @@ func TestSessionInboxRefusesTurnsItCannotStart(t *testing.T) {
 			t.Errorf("%s: err = %v", turn, err)
 		}
 	}
-	if n, err := PendingCount(env, "shuttle://host/codex/s"); err != nil || n != 0 {
+	if n, err := pendingCount(env, "shuttle://host/codex/s"); err != nil || n != 0 {
 		t.Fatalf("refused entries were stored: %d %v", n, err)
 	}
 }
@@ -135,7 +135,7 @@ func TestEnqueueRefusesUnknownWishes(t *testing.T) {
 			t.Errorf("%s: err = %v", name, err)
 		}
 	}
-	if n, err := PendingCount(env, "fiber"); err != nil || n != 0 {
+	if n, err := pendingCount(env, "fiber"); err != nil || n != 0 {
 		t.Fatalf("refused entries were stored: %d %v", n, err)
 	}
 }
@@ -176,7 +176,7 @@ func TestEnqueueDedupFirstCaptureAndConflict(t *testing.T) {
 	if err != nil || stored.Request.Text != "first" {
 		t.Fatalf("first capture lost: %+v %v", stored.Request, err)
 	}
-	if n, err := PendingCount(env, "fiber"); err != nil || n != 0 {
+	if n, err := pendingCount(env, "fiber"); err != nil || n != 0 {
 		t.Fatalf("recapture re-queued: %d %v", n, err)
 	}
 }
@@ -285,7 +285,7 @@ func TestReadersHonourNotBefore(t *testing.T) {
 		if len(offered) != 1 || offered[0] != "earlier" {
 			t.Fatalf("offered %v", offered)
 		}
-		if n, err := PendingCount(env, address); err != nil || n != 1 {
+		if n, err := pendingCount(env, address); err != nil || n != 1 {
 			t.Fatalf("delayed entry not left pending: %d %v", n, err)
 		}
 	})
