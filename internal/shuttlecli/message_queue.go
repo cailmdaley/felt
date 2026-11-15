@@ -48,7 +48,7 @@ func (a *app) queueForFiber(request messaging.Request, force bool, session ...st
 			turn = "force"
 		}
 	}
-	modern := len(session) > 0 || a.ownerInbox42(block.Host)
+	modern := len(session) > 0 || a.inbox42(block.Host)
 	if len(request.Attachments) > 0 && !modern {
 		return nil, nil
 	}
@@ -182,7 +182,7 @@ func (a *app) messageFresh(request messaging.Request) error {
 	if f == nil {
 		return fmt.Errorf("--fresh needs a fiber with a shuttle: block; %q names none", request.Address)
 	}
-	if a.ownerInbox42(block.Host) {
+	if a.inbox42(block.Host) {
 		request.Wake = true
 		receipt, err := a.queueForFiber(request, true, "fresh")
 		if err != nil {

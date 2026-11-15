@@ -120,7 +120,7 @@ A repeated id does nothing, including for `existing_only` review input, unless i
 ### Contract 42 and rollback
 
 Contract 42 adds consume's `--busy` and `--message`, session/followup/held/message answers, `context-mailbox put --session/--attachments-stdin`, and `inbox human-begin/human-settle`.
-The CLI checks the owner's live `/version`, not the routing hub's contract, before using these message semantics.
+The CLI uses these message semantics only when both its own daemon, which forwards only the fields it knows, and the owner answer `/version` at 42, asked live on each send with a 5-second limit; otherwise it uses the older wire, which a 42 owner still accepts.
 An owner below 42 receives the session-routing `unless_live` envelope and the forced `resume_mode: fresh` envelope; attachment sends retain session routing there.
 Those older fresh starts have forced-start authority and carry text in the launch prompt.
 An older CLI can still send `unless_live` to a 42 owner: a live worker answers 409 so it follows the session path.
