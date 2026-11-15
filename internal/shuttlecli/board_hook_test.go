@@ -356,3 +356,80 @@ func TestBoardDigestCombinedWithMailbox(t *testing.T) {
 		t.Fatalf("replayed: %s", out)
 	}
 }
+
+// A line the human sends from the board has one family-board row: the one
+// the owner writes when it records the line, which a repeated id replaces
+// and the worker's prompt hook, when the line is typed into its session,
+// rewrites under the same identity (as the question's one answered row when
+// it answers one). A line typed in the terminal keeps the hook's own row.
+func TestBoardLineKeepsOneRow(t *testing.T) {
+	for _, ask := range []bool{false, true} {
+		t.Run(fmt.Sprintf("ask=%v", ask), func(t *testing.T) {
+			env := messageHookEnv(t, "host")
+			env.Set("SHUTTLE_EVENTS", "")
+			sink := filepath.Join(t.TempDir(), "events.jsonl")
+			env.Set("SHUTTLE_EVENTS_FILE", sink)
+			env.Set("SHUTTLE_MESSAGES", "off")
+			env.Set("SHUTTLE_HUMAN", "Cail")
+			dir, st := newStore(t)
+			block := map[string]any{"kind": "oneshot", "host": "host", "project_dir": t.TempDir(), "runtime": map[string]any{"session_uuid": "session"}}
+			if ask {
+				block["ask"] = map[string]any{"text": "Which?", "at": "2026-10-28T10:00:00Z"}
+			}
+			seedShuttleRole(t, st, "f", felt.StatusActive, block, nil)
+			env.Set("SHUTTLE_STORES", dir)
+			fiber := mustRead(t, st, "f")
+			writeMessageIdentityLedger(t, env, []SessionProvenance{{Host: "host", Harness: "claude", Session: "session", Fiber: fiber.ID, UID: fiber.UID, FiberPath: fiber.Path, Kind: "dispatch", At: 1}})
+			daemonStub(t, env, map[string]http.HandlerFunc{"/api/v1/board/family": func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprint(w, `{"family":null,"viewer":null,"records":[]}`)
+			}})
+			key := dir + ":" + fiber.UID
+			if _, err := messaging.TransitionFiberReceiver(env, key, "host", "worker-1", "shuttle://host/claude/session"); err != nil {
+				t.Fatal(err)
+			}
+			begin := []string{"inbox", "record-begin", "--fiber", fiber.UID}
+			if ask {
+				begin = append(begin, "--ask", "Which?")
+			}
+			begin = append(begin, "--", key, "human-1")
+			for i := 0; i < 2; i++ {
+				env.Stdin = strings.NewReader("typed from the board")
+				env.Stdout = &bytes.Buffer{}
+				if code := Run(env, begin); code != 0 {
+					t.Fatalf("record-begin exit %d", code)
+				}
+			}
+			a := newApp(env)
+			prompt := func(text string) {
+				t.Helper()
+				b, _ := json.Marshal(eventHookInput{HookEventName: "UserPromptSubmit", Harness: "claude", SessionID: "session", Prompt: text})
+				if err := a.runEventAndMessageHook(bytes.NewReader(b), &bytes.Buffer{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			prompt("typed from the board")
+			rows := map[string]boardRecord{}
+			for _, r := range readBoardRecords(t, sink) {
+				rows[r.ID] = r
+			}
+			want := boardRecord{Kind: "human", Text: "typed from the board"}
+			if ask {
+				want = boardRecord{Kind: "answered", Text: "Q: Which? — A: typed from the board"}
+			}
+			if r, ok := rows["brd-human-1"]; len(rows) != 1 || !ok || r.Kind != want.Kind || r.Text != want.Text || r.Fiber != fiber.UID || r.By == nil || r.By.Label != "Cail" {
+				t.Fatalf("one row for the board line: %+v", rows)
+			}
+			if b, _, _ := shuttle.BlockOf(mustRead(t, st, "f")); b.Ask != nil {
+				t.Fatal("the typed line did not answer the question")
+			}
+			prompt("typed in the terminal")
+			rows = map[string]boardRecord{}
+			for _, r := range readBoardRecords(t, sink) {
+				rows[r.ID] = r
+			}
+			if len(rows) != 2 {
+				t.Fatalf("a terminal line keeps the hook's own row: %+v", rows)
+			}
+		})
+	}
+}

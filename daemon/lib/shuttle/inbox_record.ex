@@ -21,7 +21,8 @@ defmodule Shuttle.InboxRecord do
     with {:ok, %{fibers: [entry | _]}} <- Shuttle.FiberDocuments.get_shuttle(fiber_id),
          key = Shuttle.Delivery.context_key(entry),
          {:ok, output} <-
-           Shuttle.CLI.run(["inbox", "record-begin", "--from", from, "--", key, id],
+           Shuttle.CLI.run(
+             ["inbox", "record-begin", "--from", from] ++ board(from, entry) ++ ["--", key, id],
              input: text,
              input_eof: true
            ),
@@ -48,6 +49,18 @@ defmodule Shuttle.InboxRecord do
       error -> {:error, {:inbox_record, error}}
     end
   end
+
+  # A human line has one family-board row, written with its record under its
+  # id: "answered" when it answers the fiber's question, else "human". The
+  # worker's prompt hook, when the line is typed into its session, writes its
+  # row under the same id.
+  defp board("human", entry) do
+    ask = get_in(entry.fiber, ["shuttle", "ask", "text"])
+    uid = entry.fiber["uid"] || entry.fiber["id"]
+    ["--fiber", uid] ++ if(is_binary(ask) and ask != "", do: ["--ask", ask], else: [])
+  end
+
+  defp board(_from, _entry), do: []
 
   defp outcome({:ok, _}), do: "delivered"
   defp outcome({:error, {:paste_failed, {:unknown, _}}}), do: "unknown"

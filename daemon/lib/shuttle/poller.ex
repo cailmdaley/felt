@@ -4129,11 +4129,12 @@ defmodule Shuttle.Poller do
   end
 
   # Serialized question clearing refreshes the cached document after writing.
-  defp write_lifecycle(state, verb, slug) do
+  defp write_lifecycle(state, verb, slug, args \\ []) do
     result =
       LifecycleService.write(verb, slug,
         runner: state.runner,
-        felt_store: owning_store(slug, state)
+        felt_store: owning_store(slug, state),
+        args: args
       )
 
     state =
@@ -4190,12 +4191,20 @@ defmodule Shuttle.Poller do
             {:reply, result, state}
 
           # A human's start answers the worker's question; a launch for the
-          # inbox leaves it for the human.
+          # inbox leaves it for the human. A recorded human line has already
+          # written its board row, so the clear writes none.
           {:reply, {:ok, _} = result, state} ->
             {_, state} =
-              if Keyword.get(opts, :inbox, false),
-                do: {:ok, state},
-                else: write_lifecycle(state, :clear_ask, fiber_id)
+              cond do
+                Keyword.get(opts, :inbox, false) ->
+                  {:ok, state}
+
+                Keyword.get(opts, :line_recorded, false) ->
+                  write_lifecycle(state, :clear_ask, fiber_id, ["--no-board"])
+
+                true ->
+                  write_lifecycle(state, :clear_ask, fiber_id)
+              end
 
             {:reply, result, state}
 

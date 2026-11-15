@@ -9,7 +9,7 @@ import (
 )
 
 func (a *app) askCmd() *cobra.Command {
-	var askClear bool
+	var askClear, noBoard bool
 	var answeredBy string
 	askCmd := &cobra.Command{
 		Use:   "ask <fiber> [question]",
@@ -69,7 +69,7 @@ since it was dispatched.`,
 			// clears after every delivered message and every forced start.
 			if !askClear {
 				a.recordBoard(boardRecord{Kind: "asked", Fiber: f.UID, By: a.boardWorkerParty(), Text: args[1]})
-			} else if oldAsk != nil {
+			} else if oldAsk != nil && !noBoard {
 				kind, by := "cleared", a.boardWorkerParty()
 				if answeredBy != "" {
 					kind, by = "answered", a.boardMessageActor(answeredBy)
@@ -83,6 +83,9 @@ since it was dispatched.`,
 	askCmd.Flags().BoolVar(&askClear, "clear", false, "Remove the outstanding question")
 	askCmd.Flags().StringVar(&answeredBy, "answered-by", "", "Record the label of the person who answered")
 	_ = askCmd.Flags().MarkHidden("answered-by")
+	// A human line that answers the question has already written its row.
+	askCmd.Flags().BoolVar(&noBoard, "no-board", false, "Clear without a family-board row")
+	_ = askCmd.Flags().MarkHidden("no-board")
 	return askCmd
 }
 

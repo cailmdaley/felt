@@ -402,6 +402,62 @@ defmodule ShuttleWeb.DeliverControllerTest do
     assert clears.() == before
   end
 
+  test "a human line writes its one board row with its record, and a launch's ask clear writes none" do
+    begins = fn id ->
+      for {"shuttle", ["inbox", "record-begin" | _] = args} <- MockRunner.commands(),
+          id in args,
+          do: args
+    end
+
+    no_board_clears = fn ->
+      Enum.count(MockRunner.commands(), fn {_, args} ->
+        "--clear" in args and "--no-board" in args
+      end)
+    end
+
+    # Pasted into a live worker: the row is written with the record, keyed by
+    # its id; the worker's prompt hook rewrites it under the same id.
+    live = "tests/human-row-live"
+    put_constitution(live)
+    {:ok, _} = Poller.dispatch_fiber(live, force: true)
+    {:ok, %{fibers: [entry | _]}} = Shuttle.FiberDocuments.get_shuttle(live)
+
+    line = %{
+      "fiber_id" => live,
+      "text" => "a line",
+      "from" => "human",
+      "message_id" => "row-live"
+    }
+
+    api_conn() |> post("/api/v1/deliver", Jason.encode!(line)) |> json_response(200)
+    api_conn() |> post("/api/v1/deliver", Jason.encode!(line)) |> json_response(200)
+    assert [[_, _, _, _, "--fiber", uid | _]] = Enum.uniq(begins.("row-live"))
+    assert uid == entry.fiber["uid"]
+
+    # Launched with an outstanding question: the row is that question's answer,
+    # so the launch clears the question without a row of its own.
+    dormant = "tests/human-row-launch"
+    MockRunner.set_fiber(dormant, make_fiber(dormant))
+
+    MockRunner.set_shuttle(
+      dormant,
+      oneshot_shuttle() <> "ask:\n  text: Which?\n  at: \"2026-11-15T10:00:00Z\"\n"
+    )
+
+    before = no_board_clears.()
+
+    api_conn()
+    |> post(
+      "/api/v1/deliver",
+      Jason.encode!(%{line | "fiber_id" => dormant, "message_id" => "row-launch"})
+    )
+    |> json_response(200)
+
+    assert [args] = begins.("row-launch")
+    assert ["--ask", "Which?"] -- args == []
+    assert no_board_clears.() == before + 1
+  end
+
   test "a human line over the inbox limit is pasted" do
     fiber = "tests/human-long"
     put_constitution(fiber)

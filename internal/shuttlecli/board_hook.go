@@ -102,6 +102,11 @@ func (a *app) recordHumanPrompt(input eventHookInput) {
 		return
 	}
 	r := boardRecord{Kind: "human", Fiber: f.UID, By: &boardParty{Label: label}, Text: input.Prompt}
+	// A line the daemon typed in from the board already has its row; this one
+	// takes that row's identity, so the line keeps one row.
+	if id := messaging.HumanRecordFor(a.env, address.Harness, address.ID, host, input.Prompt, time.Hour); id != "" {
+		r.ID = "brd-" + id
+	}
 	block, ok, err := shuttle.BlockOf(f)
 	if err == nil && ok && block.Ask != nil && a.ensureOwnedHere(f, f.ID) == nil {
 		question := block.Ask.Text

@@ -47,7 +47,8 @@ defmodule Shuttle.Delivery do
         force: true,
         ad_hoc: true,
         resume_mode: mode,
-        user_message: text
+        user_message: text,
+        line_recorded: true
       )
     end
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
@@ -93,4 +94,46 @@ func SettleRecord(env *sysenv.Env, address, id, outcome string) error {
 
 func recordPath(root, id string) string {
 	return filepath.Join(root, "offered", mailboxKey(id)+".json")
+}
+
+// HumanRecordFor names the human record whose line a session's prompt is: a
+// record of the human's, written to a fiber inbox linked to the session within
+// the last window, with the same text. The prompt hook writes its board row
+// under that record's identity, so a line the daemon typed into the session
+// keeps the one row the daemon wrote for it. It answers "" for a line typed in
+// the terminal.
+func HumanRecordFor(env *sysenv.Env, harness, id, host, prompt string, window time.Duration) string {
+	links, err := os.ReadDir(filepath.Join(mailboxDir(env, harness, id), "fibers"))
+	if err != nil {
+		return ""
+	}
+	text := strings.TrimSpace(boundedInboxText(strings.TrimSpace(prompt)))
+	since := time.Now().Add(-window)
+	newest, found := int64(0), ""
+	for _, linkFile := range links {
+		bytes, err := readBounded(filepath.Join(mailboxDir(env, harness, id), "fibers", linkFile.Name()), 16384)
+		var link fiberMailboxLink
+		if err != nil || json.Unmarshal(bytes, &link) != nil || link.Fiber == "" || link.Host != host {
+			continue
+		}
+		offered := filepath.Join(mailboxDir(env, "fiber", link.Fiber), "offered")
+		files, err := os.ReadDir(offered)
+		if err != nil {
+			continue
+		}
+		for _, file := range files {
+			info, err := file.Info()
+			if err != nil || info.ModTime().Before(since) {
+				continue
+			}
+			e, err := readFiberMailboxEntry(filepath.Join(offered, file.Name()))
+			if err != nil || e.Wishes.Source != "human" || e.Disposition == "" || e.QueuedAt < since.UnixNano() || e.QueuedAt <= newest {
+				continue
+			}
+			if strings.TrimSpace(e.Request.Text) == text {
+				newest, found = e.QueuedAt, e.Request.MessageID
+			}
+		}
+	}
+	return found
 }

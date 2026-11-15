@@ -80,6 +80,7 @@ defmodule ShuttleWeb.DispatchController do
           release_launch_reservation:
             truthy?(Map.get(params, "release_launch_reservation", false)),
           user_message: message,
+          line_recorded: not is_nil(message),
           resume_mode: normalize_resume_mode(Map.get(params, "resume_mode")),
           project_dir: normalize_text(Map.get(params, "project_dir"))
         )

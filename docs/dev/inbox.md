@@ -109,7 +109,9 @@ The board keeps one `message_id` per composed message: a retry after a failed se
 Images are written to disk and represented as `[Image: path]` lines before recording.
 The owner writes the record straight to the inbox's `offered/`, disposition unknown, under the inbox lock, so no reader ever offers it.
 Only the call that writes the record may transport the line: typed terminal paste to a live worker, or the From User launch prompt to a dormant one.
-Typed input leaves the worker's question to its prompt hook, which clears it and records one `answered` board row with the question and the line; with no question it records a `human` row. A From User launch clears the question as any human start does.
+Writing the record also writes the line's one family-board row, `brd-<id>`, whichever harness the worker runs: `answered` (`Q: … — A: …`) when the fiber has a question, else `human`; a repeated id writes none.
+Typed input leaves the worker's question to its prompt hook, which clears it and writes its row under the same identity, replacing the owner's: the hook takes the identity of a human record with the same text written to one of its session's fiber inboxes within the last hour. A line typed in the terminal has no such record and gets the hook's own row.
+A From User launch clears the question as any human start does, without a row of its own (`ask --clear --no-board`).
 The record is settled delivered on paste or launch success, undeliverable on a definite refusal, and unknown on an ambiguous paste or a queued launch whose outcome is not known.
 Since it is unknown before the side effect, a daemon that dies before reporting the outcome never sends the line again, even if it died before typing.
 A line over the inbox's 64 KiB limit is transported whole and recorded cut short, as a thread result is.
@@ -355,7 +357,7 @@ The session-only Claude fallback claims by moving an entry into `fallback/` and 
 | `shuttle inbox route <id> --current true\|false\|unknown [--record <json> [--key <key>]]` | Advance one routing entry from the daemon's fresh facts: the resolved recipient's `record`, and its inbox `key` when the daemon owns it; print `action`: `wait`, `forward` or `session` with the entry's `record`, or the disposition it recorded (`placed`, `superseded`, `expired`) |
 | `shuttle inbox settle <id> forwarded\|delivered\|undeliverable` | Record a routing entry's confirmed handoff and move it to offered |
 
-`shuttle inbox record-begin [--from <sender>] <fiber-key> <id>` records a line the daemon transports itself (typed human input, the default sender, or an agent's fresh request), read from stdin, and prints `{"created": true|false, "disposition": "unknown"|"delivered"|"undeliverable"}`: only the call that created it may transport it, and a repeat gets the stored disposition.
+`shuttle inbox record-begin [--from <sender>] [--fiber <uid> [--ask <question>]] <fiber-key> <id>` records a line the daemon transports itself (typed human input, the default sender, or an agent's fresh request), read from stdin, and with `--fiber` writes a human line's board row, and prints `{"created": true|false, "disposition": "unknown"|"delivered"|"undeliverable"}`: only the call that created it may transport it, and a repeat gets the stored disposition.
 `shuttle inbox record-settle <fiber-key> <id> delivered|unknown|undeliverable` records its transport outcome.
 All verbs act on this host's inbox only.
 `context-mailbox put` also accepts thread signals, reply and notification fields, `--turn`, `--derived` and `--attachments-stdin` (a JSON attachment array); its `--wake` means `turn: force`.
