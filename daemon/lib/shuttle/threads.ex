@@ -987,8 +987,9 @@ defmodule Shuttle.Threads do
   (`shuttle.thread_parent.asked_by`): the orchestrator, when its own worker
   asked; otherwise the asking session itself, through an asker notice
   (`<id>-asker`). A thread nobody asked for, and an unblock note, wake no one.
-  An unblock note carries its board line, which `thread-put` appends in the
-  step that first creates its entry. A refused publication or a failed capture
+  An unblock note carries its board line, which its entry owes until
+  `thread-put` appends it; a line that could not be appended is logged and
+  tried again by the next capture. A refused publication or a failed capture
   is logged, and the next poll captures the same signals again.
   Reading a blocker outside the poller's cache shells felt, so this runs on the
   delivery task, not the poll.

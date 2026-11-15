@@ -87,7 +87,9 @@ Each poll's delivery task captures in one `shuttle inbox thread-put` call, after
 The producer keeps its exact lifecycle-derived ids.
 A re-capture finds the id pending or offered in the routing inbox and stores nothing, so the first capture fixes the publication and its wishes even when a later poll renders an edited outcome.
 `Enqueue` stores a routing entry only when its stamp is after the capture baseline (`mailboxes/threads.json`, below) and, like every inbox entry, at most 14 days old.
-An unblock note carries its board line, and `thread-put` appends it right after it creates the note's entry, in the same process, so a re-capture appends nothing and a lost answer (a timed-out `thread-put`) cannot drop it.
+An unblock note carries its board line, which its entry stores and owes until the line is appended: `thread-put` appends every line its publications' entries owe, pending or offered, then records it in the entry.
+A failed append, or a `thread-put` killed between creating the entry and appending, leaves the line owed, and the next capture of the same note appends it; the line's board id is `brd-<publication id>`, so a repeat after an append whose record was lost replaces the line rather than adding one.
+A note no poll captures again (its thread no longer waits on the blocker) keeps an owed line it never appends.
 
 An entry's `routing` record names its recipient fiber by `parent_uid`, marked `parent_unresolved` until the daemon resolves it, or, for an asker notice, the asking `session`.
 Each poll lists the routing inbox once (`inbox routes`) and advances every entry with `inbox route`, passing the signal's fresh lifecycle currency and, once it resolves, the recipient the daemon read from authoritative documents: past an archived parent, never guessed from a slug.

@@ -29,12 +29,11 @@ func bootThread(t *testing.T, env *sysenv.Env) ThreadImport {
 
 func capture(t *testing.T, env *sysenv.Env, publications ...ThreadPublication) []string {
 	t.Helper()
-	created := []string{}
-	refused := CaptureThreads(env, publications, func(i int) { created = append(created, publications[i].ID) })
-	if len(refused) != 0 {
-		t.Fatal(refused)
+	c := CaptureThreads(env, publications)
+	if len(c.Refused) != 0 {
+		t.Fatal(c.Refused)
 	}
-	return created
+	return c.Created
 }
 
 func route(t *testing.T, env *sysenv.Env, f RouteFacts) RouteDecision {

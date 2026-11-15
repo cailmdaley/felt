@@ -47,6 +47,8 @@ func boardText(text string) string {
 	return text + "…"
 }
 
+// appendBoard appends a board record to the event ledger, under its own ID
+// when it has one.
 func (a *app) appendBoard(record boardRecord) error {
 	now := a.eventNow()
 	id, err := ulid.New(ulid.Timestamp(now), a.boardEntropy)
@@ -57,7 +59,10 @@ func (a *app) appendBoard(record boardRecord) error {
 	if err != nil {
 		return err
 	}
-	record.ID, record.Type, record.Timestamp, record.OriginName = "brd-"+id.String(), "board", now.UnixMilli(), origin
+	if record.ID == "" {
+		record.ID = "brd-" + id.String()
+	}
+	record.Type, record.Timestamp, record.OriginName = "board", now.UnixMilli(), origin
 	record.Text = boardText(record.Text)
 	line, err := encodeJSONLine(record)
 	if err != nil {

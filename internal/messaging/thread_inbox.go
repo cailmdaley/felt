@@ -131,14 +131,24 @@ type ThreadRefusal struct {
 	Error string `json:"error"`
 }
 
-// CaptureThreads enqueues each publication into the routing inbox, calls
-// created with the index of each one this call stored as soon as it is
-// stored, and answers the publications it refused; one refusal does not stop
-// the others. A publication captured before (pending or offered in the
-// routing inbox) or outside the capture window stores nothing, so the first
-// capture fixes the publication whatever a later poll renders.
-func CaptureThreads(env *sysenv.Env, publications []ThreadPublication, created func(int)) []ThreadRefusal {
-	refused := []ThreadRefusal{}
+// ThreadCapture is a capture's answer: the ids this call stored, the indexes
+// of the publications whose entries owe their board line, and the
+// publications the routing inbox refused.
+type ThreadCapture struct {
+	Created []string
+	Owed    []int
+	Refused []ThreadRefusal
+}
+
+// CaptureThreads enqueues each publication into the routing inbox; one
+// refusal does not stop the others. A publication captured before (pending or
+// offered in the routing inbox) or outside the capture window stores nothing,
+// so the first capture fixes the publication whatever a later poll renders.
+// A record with a board line stores it in its entry, which owes the line
+// until BoardLineAppended records it, through every later capture of the same
+// publication.
+func CaptureThreads(env *sysenv.Env, publications []ThreadPublication) ThreadCapture {
+	c := ThreadCapture{Created: []string{}, Refused: []ThreadRefusal{}}
 	for i, p := range publications {
 		entry, err := ThreadEntry(p.ID, p.Record)
 		made := false
@@ -146,14 +156,61 @@ func CaptureThreads(env *sysenv.Env, publications []ThreadPublication, created f
 		if err == nil {
 			err = Enqueue(env, entry)
 		}
-		switch {
-		case err != nil:
-			refused = append(refused, ThreadRefusal{p.ID, err.Error()})
-		case made:
-			created(i)
+		if err == nil && p.Record["board"] != nil {
+			var owed bool
+			owed, err = owesBoardLine(env, p.ID)
+			if owed {
+				c.Owed = append(c.Owed, i)
+			}
+		}
+		if err != nil {
+			c.Refused = append(c.Refused, ThreadRefusal{p.ID, err.Error()})
+		} else if made {
+			c.Created = append(c.Created, p.ID)
 		}
 	}
-	return refused
+	return c
+}
+
+// routedEntry finds a routing inbox entry, pending or offered, by id.
+func routedEntry(root, id string) (string, mailboxEntry, error) {
+	for _, state := range []string{"pending", "offered"} {
+		path := filepath.Join(root, state, mailboxKey(id)+".json")
+		e, err := readFiberMailboxEntry(path)
+		if !errors.Is(err, os.ErrNotExist) {
+			return path, e, err
+		}
+	}
+	return "", mailboxEntry{}, os.ErrNotExist
+}
+
+func owesBoardLine(env *sysenv.Env, id string) (bool, error) {
+	_, e, err := routedEntry(routingRoot(env), id)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return err == nil && e.Routing["board"] != nil && e.Routing["board_appended"] != true, err
+}
+
+// BoardLineAppended records that a routing entry's board line is on the
+// board, pending or offered, so no later capture appends it again.
+func BoardLineAppended(env *sysenv.Env, id string) error {
+	root := routingRoot(env)
+	unlock, err := lockInbox(root)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	path, e, err := routedEntry(root, id)
+	if err != nil {
+		return err
+	}
+	e.Routing["board_appended"] = true
+	b, err := json.Marshal(e)
+	if err != nil {
+		return err
+	}
+	return mailboxWrite(path, b, false)
 }
 
 // ThreadRoutes lists the routing inbox's pending publications.
