@@ -123,16 +123,20 @@ defmodule ShuttleWeb.DispatchReply do
      }}
   end
 
+  # A loaded host's Poller can take longer than the call allows to reach a
+  # launch. The request stays in its queue and runs when the Poller gets there,
+  # so it is accepted, not failed: sending it again would launch twice.
   def render(fiber_id, {:error, :poller_busy}) do
-    {504,
+    {202,
      %{
        dispatched: false,
+       queued: true,
        reason: "poller_busy",
        fiber_id: fiber_id,
        message:
-         "The owning daemon's poller did not finish the launch within " <>
-           "#{div(Shuttle.Poller.dispatch_call_timeout_ms(), 1000)}s. The request is still " <>
-           "queued and may launch; check the fiber before retrying."
+         "Queued: the owning daemon's poller is busy and did not reach this launch within " <>
+           "#{div(Shuttle.Poller.dispatch_call_timeout_ms(), 1000)}s. It launches when the " <>
+           "poller gets to it; do not send it again."
      }}
   end
 

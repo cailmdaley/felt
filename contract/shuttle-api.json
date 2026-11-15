@@ -915,6 +915,16 @@
               }
             }
           },
+          "202": {
+            "description": "Queued: the Poller did not reach the launch within its call timeout. It launches when the Poller gets there; do not resend.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DispatchRefusal"
+                }
+              }
+            }
+          },
           "400": {
             "description": "fiber_id is missing, images are malformed or too large, or origin names no known host.",
             "content": {
@@ -988,16 +998,6 @@
                       "$ref": "#/components/schemas/BootUnavailable"
                     }
                   ]
-                }
-              }
-            }
-          },
-          "504": {
-            "description": "Poller did not answer; the launch may still occur. Inspect the fiber before retrying.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DispatchRefusal"
                 }
               }
             }
@@ -1132,7 +1132,7 @@
             }
           },
           "202": {
-            "description": "Queued in the context mailbox (delivery context), or sent with arrival unconfirmed (delivered null), including an owner that did not answer in time (reason forward_timeout).",
+            "description": "Queued in the context mailbox (delivery context), or sent with arrival unconfirmed (delivered null), including an owner that did not answer in time (reason forward_timeout), or a launch queued behind a busy Poller (reason poller_busy).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1148,6 +1148,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/DeliveryForward"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DeliveryLaunchRefusal"
                     }
                   ]
                 }
@@ -1317,16 +1320,13 @@
             }
           },
           "504": {
-            "description": "The launch or message did not finish in time and may still happen; inspect the fiber before retrying.",
+            "description": "The message did not finish in time and may still arrive; inspect the fiber before retrying.",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
                       "$ref": "#/components/schemas/DeliveryError"
-                    },
-                    {
-                      "$ref": "#/components/schemas/DeliveryLaunchRefusal"
                     },
                     {
                       "$ref": "#/components/schemas/DeliveryMessage"
@@ -2984,6 +2984,10 @@
           },
           "reason": {
             "type": "string"
+          },
+          "queued": {
+            "type": "boolean",
+            "description": "true with reason poller_busy: the launch waits in the Poller's queue and runs when it gets there."
           },
           "fiber_id": {
             "type": "string"

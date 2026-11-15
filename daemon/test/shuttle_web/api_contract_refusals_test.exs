@@ -56,7 +56,7 @@ defmodule ShuttleWeb.ApiContractRefusalsTest do
           {{:error, {:arm_refused, %{message: "directory needed", needs: "project_dir"}}}, 422},
           {{:error, :launch_failed}, 500},
           {{:error, {:backend_not_ready, "terminal starting"}}, 503},
-          {{:error, :poller_busy}, 504}
+          {{:error, :poller_busy}, 202}
         ],
         path <- ~w(/dispatch /deliver) do
       :ok = GenServer.call(poller, {:result, result})

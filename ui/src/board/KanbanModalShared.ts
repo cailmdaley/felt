@@ -48,9 +48,8 @@ export function dispatchFailureMessage(body: DispatchFailureBody, fallback: stri
     const reason = body.message.trim()
     return body.host ? `On ${body.host}: ${reason}` : reason
   }
-  // The owner may still act on both: a busy Poller keeps the request queued, and a
-  // failed forward can lose only the owner's answer.
-  if (body.reason === 'poller_busy' || body.reason === 'forward_failed') {
+  // The owner may still act on it: a failed forward can lose only the owner's answer.
+  if (body.reason === 'forward_failed') {
     return "Shuttle could not confirm this was delivered, and it may still arrive. Check the worker's conversation before sending again."
   }
   if (body.reason || body.detail || body.message) return dispatchIneligibleReason(body)

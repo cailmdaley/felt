@@ -84,11 +84,8 @@ describe('change review delivery', () => {
     answer.resolve(response({ reason: 'closed' }, 422))
     await expect(sent).rejects.toThrow('Fiber is closed')
   })
-  it.each([
-    ['a busy poller', { dispatched: false, reason: 'poller_busy', message: 'The request is still queued' }, 504],
-    ['a lost forward', { dispatched: false, reason: 'forward_failed', error: ':timeout' }, 502],
-  ])('never calls a review undelivered after %s', async (_name, body, status) => {
-    vi.mocked(fetch).mockResolvedValueOnce(response(body, status))
+  it('never calls a review undelivered after a lost forward', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(response({ dispatched: false, reason: 'forward_failed', error: ':timeout' }, 502))
     await expect(dock.sendReview(task({ workerState: 'running' }), 'Review')).rejects.toThrow('could not confirm this was delivered, and it may still arrive')
   })
   it('does not claim an unanswered review never arrived', async () => {

@@ -231,6 +231,10 @@ confirmed is not a directory there. Resend with `project_dir`, a directory a
 human confirmed: the daemon resolves it with `shuttle resolve-dir`, then saves
 it and arms the fiber in the same write (`shuttle reopen --project-dir`), and
 the worker starts in the directory the CLI saved.
+A launch the owning Poller does not reach within its call timeout (30 s) stays
+in its queue and answers **202** `{dispatched: false, queued: true, reason:
+"poller_busy", fiber_id, message}`: it launches when the Poller gets to it, so
+the caller does not send it again.
 
 `POST /deliver` accepts `{fiber_id, text, from?}` (plus `origin` to forward). A
 fiber with a live worker receives `text` through session messaging at

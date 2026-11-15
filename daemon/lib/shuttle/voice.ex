@@ -15,7 +15,13 @@ defmodule Shuttle.Voice do
   def start_link(opts \\ []),
     do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
 
-  def show(opts \\ []), do: GenServer.call(server(opts), :show)
+  @doc """
+  The full state with the live recording's drafts. Those are read here, in the
+  caller, so a relay slow to answer slows this read alone: Voice itself only
+  hands over its state, and every board and voice band polling at once never
+  queues behind another's wait.
+  """
+  def show(opts \\ []), do: server(opts) |> GenServer.call(:view) |> live()
 
   @doc "The switch, state and target alone, cheap enough to read on every Rex poll."
   def snapshot(opts \\ []),
@@ -24,7 +30,11 @@ defmodule Shuttle.Voice do
   @doc "Delivers `{:voice_target, target}` to the calling process on every new route."
   def subscribe, do: Registry.register(__MODULE__.Streams, :target, nil)
   def cold?(target), do: Shuttle.Voice.Target.cold?(target)
-  def update(params, opts \\ []), do: GenServer.call(server(opts), {:update, params}, 30_000)
+
+  def update(params, opts \\ []) do
+    with {:ok, view} <- GenServer.call(server(opts), {:update, params}, 30_000),
+         do: {:ok, live(view)}
+  end
 
   @doc "Off starts Listen unmuted; otherwise toggle the mic mute."
   def toggle(opts \\ []), do: update(GenServer.call(server(opts), :toggle), opts)
@@ -39,8 +49,10 @@ defmodule Shuttle.Voice do
   end
 
   @doc "Route to `params` while Follow me is on; otherwise a no-op."
-  def target(params, opts \\ []),
-    do: GenServer.call(server(opts), {:target, params, DateTime.utc_now()})
+  def target(params, opts \\ []) do
+    with {:ok, view} <- GenServer.call(server(opts), {:target, params, DateTime.utc_now()}),
+         do: {:ok, live(view)}
+  end
 
   def focus_error(message, opts \\ []),
     do: GenServer.cast(server(opts), {:focus_error, message})
@@ -111,14 +123,8 @@ defmodule Shuttle.Voice do
   end
 
   @impl true
-  def handle_call(:snapshot, _from, state),
-    do: {:reply, state.snapshot |> put_mode() |> put_pending_words(state), state}
-
-  def handle_call(:show, _from, state) do
-    state = name_target(state)
-    snapshot = live_drafts(state.snapshot, state)
-    {:reply, %{snapshot | error: snapshot.error || state.focus_error}, state}
-  end
+  def handle_call(:snapshot, _from, state), do: {:reply, put_mode(state.snapshot), state}
+  def handle_call(:view, _from, state), do: {:reply, view(state, state.snapshot), state}
 
   def handle_call(:toggle, _from, state) do
     plan =
@@ -149,7 +155,7 @@ defmodule Shuttle.Voice do
 
     case route_check(state, origin) do
       :not_following ->
-        {:reply, {:ok, put_mode(state.snapshot)}, state}
+        {:reply, {:ok, view(state, state.snapshot)}, state}
 
       {:error, {:routes, reason}} ->
         {:reply, {:error, reason}, state}
@@ -159,7 +165,7 @@ defmodule Shuttle.Voice do
 
       _ ->
         case write_target(state, params, received_at) do
-          {:ok, state} -> {:reply, {:ok, live_drafts(state.snapshot, state)}, state}
+          {:ok, state} -> {:reply, {:ok, view(state, state.snapshot)}, state}
           {:error, reason} -> {:reply, {:error, reason}, state}
         end
     end
@@ -321,16 +327,28 @@ defmodule Shuttle.Voice do
     state.snapshot.enabled and state.snapshot.follow
   end
 
-  defp live_drafts(snapshot, state) do
+  # What a caller needs to read the live drafts itself, away from this process.
+  defp view(state, snapshot) do
+    %{
+      snapshot: snapshot,
+      launch: state.launch,
+      monitor: state.monitor,
+      capture_opts: state.capture_opts,
+      focus_error: state.focus_error
+    }
+  end
+
+  defp live(%{snapshot: snapshot} = view) do
     preview =
       if snapshot.enabled && not snapshot.muted && snapshot.state == "listening",
         do: snapshot.preview
 
     snapshot
     |> Map.put(:preview, preview)
-    |> Map.put(:level, Recorder.mic_level(state.capture_opts))
+    |> Map.put(:level, Recorder.mic_level(view.capture_opts))
+    |> Map.update!(:error, &(&1 || view.focus_error))
     |> put_mode()
-    |> put_pending_words(state)
+    |> put_pending_words(view)
   end
 
   # What the live recording's relay holds unsent, read from the relay each time:
@@ -338,9 +356,9 @@ defmodule Shuttle.Voice do
   defp put_pending_words(snapshot, %{launch: nil}),
     do: Map.merge(snapshot, %{pending_words: 0, sends_in_ms: nil})
 
-  defp put_pending_words(snapshot, state) do
+  defp put_pending_words(snapshot, view) do
     status =
-      case state.monitor.(state.launch) do
+      case view.monitor.(view.launch) do
         %{pending_words: _} = status -> status
         _ -> %{pending_words: (snapshot[:pending] || %{})[:words] || 0}
       end
@@ -388,6 +406,7 @@ defmodule Shuttle.Voice do
   @impl true
   def handle_info(:tick, state) do
     Process.send_after(self(), :tick, state.poll_ms)
+    state = name_target(state)
 
     cond do
       state.task ->
@@ -499,7 +518,7 @@ defmodule Shuttle.Voice do
 
     reply =
       case reply do
-        {:ok, snapshot} -> {:ok, live_drafts(snapshot, state)}
+        {:ok, snapshot} -> {:ok, view(state, snapshot)}
         error -> error
       end
 
@@ -935,8 +954,8 @@ defmodule Shuttle.Voice do
     Shuttle.Voice.TranscriptRelay.start(row)
   end
 
-  # The relay can be slow while it checks a target's terminal, so Voice, which
-  # every board polls, waits briefly and falls back to what it last saw.
+  # The relay can be slow while it checks a target's terminal, so a reader
+  # waits briefly and falls back to what Voice last saw.
   defp monitor(launch), do: Shuttle.Voice.TranscriptRelay.status(launch, timeout: @monitor_ms)
 
   defp read_last do

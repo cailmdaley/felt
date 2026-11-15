@@ -265,8 +265,8 @@ defmodule ShuttleWeb.APIControllerTest do
 
     # The request waits on the Poller's dispatch call timeout, which clears
     # GenServer's 5 s default (PollerStoresTest pins that): shrunk below a spawn's
-    # duration, the Poller call runs out first and the request answers 504
-    # poller_busy rather than dropping the connection.
+    # duration, the Poller call runs out first and the request answers 202
+    # queued (poller_busy) rather than dropping the connection.
     late_id = "tests/api-late-dispatch"
     MockRunner.set_fiber(late_id, make_fiber(late_id))
     MockRunner.set_shuttle(late_id, oneshot_shuttle())
@@ -274,9 +274,10 @@ defmodule ShuttleWeb.APIControllerTest do
     MockRunner.set_new_session_delay(600)
 
     conn = post(api_conn(), "/api/v1/dispatch", Jason.encode!(%{"fiber_id" => late_id}))
-    assert conn.status == 504
+    assert conn.status == 202
     body = Jason.decode!(conn.resp_body)
     assert body["reason"] == "poller_busy"
+    assert body["queued"] == true
     assert body["dispatched"] == false
   end
 

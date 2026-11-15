@@ -265,8 +265,12 @@ defmodule Shuttle.VoiceTest do
     }
 
     Env.put_app_env(:voice_target_entries, fn -> [warm] end)
-    assert {:ok, %{destination: nil}} = release(Task.async(fn -> Voice.update(%{"enabled" => true}) end))
-    assert {:ok, %{destination: %{"fiber_id" => "a", "cold" => false}}} = Voice.target(%{"fiber_id" => "a"})
+
+    assert {:ok, %{destination: nil}} =
+             release(Task.async(fn -> Voice.update(%{"enabled" => true}) end))
+
+    assert {:ok, %{destination: %{"fiber_id" => "a", "cold" => false}}} =
+             Voice.target(%{"fiber_id" => "a"})
 
     # The tick judges a as warm; b is routed before it finishes.
     update = Task.async(fn -> Voice.update(%{}) end)
@@ -357,7 +361,7 @@ defmodule Shuttle.VoiceTest do
 
     start_voice(c)
     assert {:ok, %{mode: "following", pending_words: 7}} = Voice.update(%{"enabled" => true})
-    assert %{pending_words: 7} = Voice.snapshot()
+    assert %{pending_words: 7} = Voice.show()
 
     assert %{"discarded" => 7, "pending_words" => 0, "mode" => "following"} = discard.()
     assert_received {:discard, "meeting"}
@@ -550,7 +554,7 @@ defmodule Shuttle.VoiceTest do
     assert pinned == File.read!(Voice.routes_path())
   end
 
-  test "a target is named from served fibers, even when the lookup missed at the switch" do
+  test "a target is named from served fibers, even when the lookup missed at the switch", c do
     {:ok, served} = Agent.start_link(fn -> [] end)
     Env.put_app_env(:voice_fibers, fn -> Agent.get(served, & &1) end)
     assert {:ok, _} = Voice.update(%{"enabled" => true})
@@ -560,6 +564,7 @@ defmodule Shuttle.VoiceTest do
 
     card = %{"uid" => "01CARD", "name" => "The card", "shuttle" => %{"host" => host}}
     Agent.update(served, fn _ -> [card] end)
+    send(c.pid, :tick)
     assert %{target: %{"name" => "The card"}} = Voice.show()
 
     Agent.update(served, fn _ -> [] end)

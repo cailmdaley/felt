@@ -54,11 +54,11 @@ defmodule Shuttle.PollerCallTimeoutTest do
     assert reason =~ "Check the fiber after the poller settles or restarts"
   end
 
-  test "poller_busy renders as 504 with a message naming the uncertainty" do
+  test "poller_busy renders as 202 queued: the launch waits in the Poller's queue" do
     {status, body} = ShuttleWeb.DispatchReply.render("a/fiber", {:error, :poller_busy})
-    assert status == 504
-    assert body.reason == "poller_busy"
-    assert body.message =~ "may launch"
+    assert status == 202
+    assert %{reason: "poller_busy", queued: true, dispatched: false} = body
+    assert body.message =~ "do not send it again"
   end
 
   test "the default forward outlasts the owner's Poller call by the transit margin" do
