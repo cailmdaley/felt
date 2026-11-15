@@ -1,6 +1,6 @@
 import { announce } from '@ui-sdk/core'
 import { ago } from '../civilDay.js'
-import { HumanMessageIds } from '../humanMessageId.js'
+import { HumanMessageIds, repeatNotice } from '../humanMessageId.js'
 import { getDaemonJson, postDaemonJson } from '../daemonApi.js'
 import { head, peek, RESOURCE_PRIORITY } from '../documentResources.js'
 import { buildFileViewer, disposeFileViewer } from '../FileViewerPanel.js'
@@ -741,10 +741,12 @@ export class ChannelsView implements TemporalView {
     const ctx = this.ctx, channel = this.current
     if (!card || !ctx) return false
     try {
-      const answer = await postDaemonJson<{ delivered?: boolean | null; error?: string }>(ctx.shuttleBase, '/api/v1/deliver',
+      const answer = await postDaemonJson<{ delivered?: boolean | null; error?: string; duplicate?: boolean; disposition?: string }>(ctx.shuttleBase, '/api/v1/deliver',
         { fiber_id: card.id, origin: card.originId, text, from: 'human', message_id: this.messageIds.for([card.originId, card.id, text].join('\0')) }, 'Reply failed')
       if (answer?.delivered === false) throw new Error(answer.error ?? `${card.name} did not receive it`)
       this.messageIds.sent()
+      const notice = repeatNotice(answer)
+      if (notice) { this.status(notice); return false }
       this.sent.push({ fiber: fiberOf(card), text, at: Date.now() })
       this.drafts.delete(pane === 'channel' ? `channel:${channel}` : `thread:${fiberOf(card)}`)
       if (channel) this.renew(channel)

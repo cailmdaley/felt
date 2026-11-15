@@ -593,6 +593,32 @@ describe('session verbs', () => {
     expect(writes()).toEqual([expect.objectContaining({ resume_mode: 'previous', user_message: 'one more thing' })])
   })
 
+  it('reads a repeated line as sent only when its first send was delivered, else says it may not have arrived and sends it again as new', async () => {
+    dock.open(task({ status: 'active', workerState: 'running', sessionUuid: 'live', tmuxSession: 'worker' }))
+    const field = messageField()
+    type(field, 'one more thing')
+    vi.mocked(fetch).mockClear()
+    vi.mocked(fetch).mockResolvedValueOnce(response({ dispatched: false, duplicate: true, disposition: 'unknown', message_id: 'human-1' }))
+    session('Send').click()
+    await settle()
+    expect(saved).not.toHaveBeenCalled()
+    expect(band.el.textContent).toContain('may not have arrived')
+    vi.mocked(fetch).mockResolvedValueOnce(response({ dispatched: false, duplicate: true, disposition: 'delivered', message_id: 'human-2' }))
+    session('Send').click()
+    await settle()
+    expect(saved).toHaveBeenCalled()
+    const [first, second] = writes()
+    expect(second.message_id).not.toBe(first.message_id)
+  })
+
+  it('a repeated review whose first send may not have arrived is not reported delivered', async () => {
+    const live = task({ workerState: 'running' })
+    vi.mocked(fetch).mockResolvedValueOnce(response({ dispatched: false, duplicate: true, disposition: 'unknown' }))
+    await expect(dock.sendReview(live, 'Review')).rejects.toThrow('may not have arrived')
+    vi.mocked(fetch).mockResolvedValueOnce(response({ dispatched: false, duplicate: true, disposition: 'delivered' }))
+    await expect(dock.sendReview(live, 'Review')).resolves.toBeUndefined()
+  })
+
   it('serves a thread\'s worker from the same path, outside the band', async () => {
     dock.open(task())
     const thread = task({ id: 'a/task/thread', uid: 'thread-uid', name: 'Thread', sessionUuid: 'old' })

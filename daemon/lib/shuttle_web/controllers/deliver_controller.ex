@@ -321,13 +321,16 @@ defmodule ShuttleWeb.DeliverController do
     {status, Map.merge(body, %{delivered: false, delivery: "input"})}
   end
 
+  # A repeated id types nothing and answers what became of the first try: a
+  # line that was delivered, or one whose daemon died between recording and
+  # typing it (unknown), which may never have arrived.
   defp reply({:input, {:duplicate, id, disposition}}, fiber_id),
     do:
       {200,
        %{
          delivery: "input",
          fiber_id: fiber_id,
-         delivered: nil,
+         delivered: if(disposition == "delivered", do: true),
          duplicate: true,
          disposition: disposition,
          message_id: id

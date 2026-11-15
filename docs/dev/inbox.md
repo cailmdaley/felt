@@ -114,6 +114,8 @@ The record is settled delivered on paste or launch success, undeliverable on a d
 Since it is unknown before the side effect, a daemon that dies before reporting the outcome never sends the line again, even if it died before typing.
 A line over the inbox's 64 KiB limit is transported whole and recorded cut short, as a thread result is.
 A repeated id does nothing, including for `existing_only` review input, unless its record was settled undeliverable: that line never reached the worker, so it is transported again.
+Otherwise it answers `duplicate: true` with the record's `disposition`, and `/deliver`'s `delivered` is true only for `delivered`.
+The board reports such a repeat as sent only when it was delivered; for `unknown` (a daemon that died between recording and typing the line leaves it so) it tells the human the line may not have arrived, keeps it, and sends it again under a new id, as a new message, if they choose.
 
 ### Contract 42 and rollback
 

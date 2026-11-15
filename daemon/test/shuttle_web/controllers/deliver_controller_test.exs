@@ -260,10 +260,60 @@ defmodule ShuttleWeb.DeliverControllerTest do
 
     assert pastes.() == 1
 
-    assert %{"duplicate" => true} =
+    assert %{"duplicate" => true, "disposition" => "delivered", "delivered" => true} =
              api_conn() |> post("/api/v1/deliver", Jason.encode!(request)) |> json_response(200)
 
     assert pastes.() == 1
+  end
+
+  test "a line recorded by a daemon that died before typing it is never reported delivered on retry" do
+    fiber = "tests/human-crash"
+    put_constitution(fiber)
+    {:ok, _} = Poller.dispatch_fiber(fiber, force: true)
+    Env.put_app_env(:felt_runner, MessageRunner)
+
+    # The record a daemon leaves when it dies between recording and typing.
+    {:ok, _} =
+      Shuttle.CLI.run(["inbox", "record-begin", "--", inbox_key(fiber), "human-crash"],
+        input: "lost line",
+        input_eof: true
+      )
+
+    pastes = fn ->
+      Enum.count(MockRunner.commands(), &match?({"tmux", ["load-buffer" | _]}, &1))
+    end
+
+    before = pastes.()
+
+    # The Channels retry.
+    assert %{"duplicate" => true, "disposition" => "unknown", "delivered" => nil} =
+             api_conn()
+             |> post(
+               "/api/v1/deliver",
+               Jason.encode!(%{
+                 "fiber_id" => fiber,
+                 "text" => "lost line",
+                 "from" => "human",
+                 "message_id" => "human-crash"
+               })
+             )
+             |> json_response(200)
+
+    # The Dock retry.
+    assert %{"duplicate" => true, "disposition" => "unknown", "dispatched" => false} =
+             api_conn()
+             |> post(
+               "/api/v1/dispatch",
+               Jason.encode!(%{
+                 "fiber_id" => fiber,
+                 "user_message" => "lost line",
+                 "resume_mode" => "previous",
+                 "message_id" => "human-crash"
+               })
+             )
+             |> json_response(200)
+
+    assert pastes.() == before
   end
 
   test "a human line and a Dock line beginning with a dash are pasted as typed" do

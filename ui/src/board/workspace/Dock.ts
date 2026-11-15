@@ -1,5 +1,5 @@
 import '@ui-sdk/web/segmented-control'
-import { HumanMessageIds } from '../humanMessageId.js'
+import { HumanMessageIds, repeatNotice } from '../humanMessageId.js'
 import { paintAncestry, type Ancestor } from './ancestryTrail.js'
 import { headerIcon } from './headerIcon.js'
 import { attachConversationPicker, openActionMenu } from '../conversationMenu.js'
@@ -1581,8 +1581,14 @@ export class Dock {
     } catch (err: unknown) {
       throw new Error(`Shuttle did not answer (${(err as { message?: string })?.message ?? String(err)}), so this may still arrive. Check the worker's conversation before sending again.`)
     }
-    if (res.ok) { this.messageIds.sent(); this.onSaved(); return }
-    const body = (await res.json().catch(() => ({}))) as DispatchFailureBody
+    const body = (await res.json().catch(() => ({}))) as DispatchFailureBody & { duplicate?: boolean; disposition?: string }
+    if (res.ok) {
+      this.messageIds.sent()
+      const notice = repeatNotice(body)
+      if (notice) throw new Error(notice)
+      this.onSaved()
+      return
+    }
     throw new Error(res.status === 409 ? 'A worker is already running for this fiber.' : dispatchFailureMessage(body, `Requeue failed (${res.status})`, res.status))
   }
 
@@ -1620,7 +1626,7 @@ export class Dock {
         showError(`Shuttle did not answer (${(err as { message?: string })?.message ?? String(err)}). Check the board before trying again.`)
         return false
       }
-      const body = (await res.json().catch(() => ({}))) as DispatchFailureBody & { tmux_session?: string, terminal?: string | null }
+      const body = (await res.json().catch(() => ({}))) as DispatchFailureBody & { tmux_session?: string, terminal?: string | null, duplicate?: boolean, disposition?: string }
       // A 409 names the worker the daemon holds. With nothing to deliver, a
       // reachable one is where the human was going; anything said, or a
       // worker whose terminal the daemon cannot find, did not arrive.
@@ -1628,6 +1634,8 @@ export class Dock {
       const reachable = res.status === 409 && !!body.tmux_session && !!body.terminal
       if (res.ok || (reachable && !said)) {
         this.messageIds.sent()
+        const notice = repeatNotice(body)
+        if (notice) { showError(notice); return false }
         this.onSaved()
         if (body.tmux_session && !coarsePointer()) this.onOpenWorker?.(body.tmux_session, card.originId)
         return true

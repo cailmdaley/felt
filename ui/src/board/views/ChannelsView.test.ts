@@ -32,14 +32,14 @@ const BOARD: Record<string, BoardRecord[]> = {
 }
 
 /** A daemon that answers the Channels view's reads, records its writes, and fails the ones `fail` names. */
-function daemon(fail: string[] = [], stored = new Map<string, string>(), pinned: Record<string, number> = {}) {
+function daemon(fail: string[] = [], stored = new Map<string, string>(), pinned: Record<string, number> = {}, answer: Record<string, unknown> = { ok: true, delivered: true }) {
   const posts: Array<[string, Record<string, unknown>]> = [], families: string[] = []
   vi.stubGlobal('localStorage', { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value) })
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (init?.method === 'POST') {
       posts.push([url, JSON.parse(String(init.body))])
       if (fail.some(path => url.endsWith(path))) return new Response('{"error":"disk full"}', { status: 422 })
-      return new Response(JSON.stringify({ ok: true, delivered: true }))
+      return new Response(JSON.stringify(answer))
     }
     if (url.includes('/channels/dismissed')) return new Response(JSON.stringify({ dismissed: [], pinned, reach_ms: 14 * day }))
     if (url.includes('/board/family')) {
@@ -147,6 +147,31 @@ it('a retried reply keeps its id, so the owner types it at most once; another re
   expect(ids[0]).toMatch(/^human-[0-9a-f]{32}$/)
   expect(ids[1]).toBe(ids[0])
   expect(ids[2]).not.toBe(ids[0])
+})
+
+it('a repeated reply reads as sent only when its first send was delivered; else it may not have arrived, and sending again is a new message', async () => {
+  const send = async (reply: HTMLTextAreaElement, text: string) => {
+    reply.value = text
+    reply.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await settle()
+  }
+  {
+    daemon([], new Map(), {}, { delivery: 'input', duplicate: true, disposition: 'delivered', delivered: true })
+    const { host, reply } = await mount()
+    await send(reply, 'Keep it.')
+    expect(reply.value).toBe('')
+    expect(host.querySelector('.kbn-ch-note')?.textContent ?? '').not.toContain('may not have arrived')
+  }
+  document.body.replaceChildren()
+  const { posts } = daemon([], new Map(), {}, { delivery: 'input', duplicate: true, disposition: 'unknown', delivered: null })
+  const { host, reply } = await mount()
+  await send(reply, 'Keep it.')
+  expect(host.querySelector('.kbn-ch-note')?.textContent).toContain('may not have arrived')
+  expect(reply.value).toBe('Keep it.')
+  await send(reply, 'Keep it.')
+  const ids = posts.map(([, body]) => body.message_id)
+  expect(ids).toHaveLength(2)
+  expect(ids[1]).not.toBe(ids[0])
 })
 
 it('shows a closed fiber\'s outcome as its conclusion, and an open one\'s not at all', async () => {

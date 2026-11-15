@@ -248,7 +248,7 @@ With `context_only: true`, the entry is quiet unless `turn` or `wake` requests a
 `attachments` is an array of `{name, data, sha256}` publications (`data` is base64); the owner retains files and records references in the inbox.
 
 With `from: human`, the owner records and deduplicates the line before typed terminal paste or a From User launch prompt transports it, answering `delivery: input`.
-A repeated id answers `duplicate: true` and submits nothing.
+A repeated id submits nothing and answers `duplicate: true` with the first submission's `disposition`: `delivered` (and `delivered: true`), or `unknown` when it may not have arrived (`delivered: null`).
 `POST /dispatch` with `user_message` (including attached image references) uses the same human entry, including `existing_only` review requests.
 The board supplies ids; a caller without one gets an owner-minted id.
 The prompt hook still records the human row and clears the ask.
