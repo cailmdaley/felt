@@ -16,7 +16,8 @@ interface Row {
   state?: 'working' | 'idle'
   closed?: boolean
   minutes: number
-  tapestry?: { title: string; lede: string }
+  /** Its tapestry page; `figure` names a file in its folder the page shows first. */
+  tapestry?: { title: string; lede: string; figure?: string }
 }
 
 const DAY = 1440
@@ -36,7 +37,8 @@ const DAY = 1440
 const ROWS: Row[] = [
   { id: 'cmbx', name: 'cmbx chair', channel: 'cmbx', seat: true, state: 'idle', minutes: 9,
     tapestry: { title: 'CMB lensing × LSS, as it stands', lede: 'κ×tSZ is measured to 9σ on the full footprint; the foreground mask and the covariance are the two calls left before the joint fit.' } },
-  { id: 'cmbx/kappa-tsz', name: 'κ × tSZ cross-spectrum', parent: 'cmbx', state: 'working', minutes: 4 },
+  { id: 'cmbx/kappa-tsz', name: 'κ × tSZ cross-spectrum', parent: 'cmbx', state: 'working', minutes: 4,
+    tapestry: { title: 'κ × tSZ at 9σ', lede: 'The full-footprint cross-spectrum with the new beam window; every null passes at p > 0.1.', figure: 'kappa-tsz-spectrum.svg' } },
   { id: 'cmbx/foregrounds', name: 'Cluster foreground mask', parent: 'cmbx', minutes: 22, ask: 'Masking clusters at **5σ** keeps 94% of the area and leaves a 0.3σ residual in the 1-halo term; **3σ** removes it but costs 11% of the area. Which threshold?' },
   { id: 'cmbx/covariance', name: 'Joint covariance', parent: 'cmbx', closed: true, minutes: 48, review: 'The analytic and simulation covariances agree to 4% on every block; the comparison plot is attached.', outcome: 'The joint covariance is validated against 2000 simulations.' },
   { id: 'cmbx/beam', name: 'Beam window', parent: 'cmbx', state: 'working', minutes: 2 },
@@ -55,7 +57,8 @@ const ROWS: Row[] = [
   { id: 'pando/unions/photoz', name: 'Photo-z calibration', parent: 'pando/unions', state: 'working', minutes: 40 },
   { id: 'pando/unions/paper', name: 'Paper draft', parent: 'pando/unions', state: 'working', minutes: 28 },
   { id: 'life-vizier', name: 'Vizier', channel: 'Vizier', role: 'vizier', seat: true, state: 'idle', minutes: 6 },
-  { id: 'morning-post', name: 'Morning post', channel: 'Vizier', seat: true, standing: true, closed: true, minutes: 140, review: 'Two letters need your reply; drafts are attached.', outcome: 'Eleven letters sorted; two need a reply from you, the rest are filed.' },
+  { id: 'morning-post', name: 'Morning post', channel: 'Vizier', seat: true, standing: true, closed: true, minutes: 140, review: 'Two letters need your reply; drafts are attached.', outcome: 'Eleven letters sorted; two need a reply from you, the rest are filed.',
+    tapestry: { title: 'The morning post, sorted', lede: 'Eleven letters: two need your reply (the notary and the landlord), four are filed, five were newsletters.' } },
   { id: 'deed-form', name: 'Sign the deed form', parent: 'life-vizier', minutes: 50, ask: 'The notary needs the deed form back by Wednesday. Sign the scan in your Documents folder, or shall I book a slot to sign it in person?' },
   { id: 'mill', name: 'felt chair', channel: 'The Mill', seat: true, state: 'working', minutes: 1 },
   { id: 'mill/lander', name: 'Lander', parent: 'mill', state: 'idle', minutes: 15 },
@@ -95,7 +98,7 @@ export function addChannelsFixtures(example: WorkspaceExample, now: number): Cha
   for (const row of ROWS) {
     example.bodies[row.id] = `## Desired State\n\n${row.name}.\n\n## Status\n\n${row.outcome ?? row.ask ?? 'Under way.'}`
     if (row.tapestry) {
-      const page = `<!doctype html><html><head><meta charset="utf-8"><title>${row.tapestry.title}</title><style>body{font:17px/1.6 Georgia,serif;margin:28px;color:#30291f;background:#fbf6e9}.map{height:30vh;display:grid;place-items:center;background:#e4dcc8;border-radius:4px;color:#6b5d45}</style></head><body><h1>${row.tapestry.title}</h1><p>${row.tapestry.lede}</p><div class="map">κ × tSZ, 9σ</div><p>The cross-spectrum is flat to ℓ = 3000 and the 1-halo term carries most of the signal.</p></body></html>`
+      const page = `<!doctype html><html><head><meta charset="utf-8"><title>${row.tapestry.title}</title><style>body{font:17px/1.6 Georgia,serif;margin:28px;color:#30291f;background:#fbf6e9}.map{height:30vh;display:grid;place-items:center;background:#e4dcc8;border-radius:4px;color:#6b5d45}</style></head><body><h1>${row.tapestry.title}</h1><p>${row.tapestry.lede}</p>${row.tapestry.figure ? `<figure><img src="${row.tapestry.figure}" alt=""></figure>` : '<div class="map">κ × tSZ, 9σ</div>'}<p>The cross-spectrum is flat to ℓ = 3000 and the 1-halo term carries most of the signal.</p></body></html>`
       example.files.push({ owner: WORKSPACE_HOST, path: `${dir(row.id)}/tapestry.html`, mime: 'text/html', body: new Blob([page], { type: 'text/html' }) })
     }
   }

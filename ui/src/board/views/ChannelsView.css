@@ -212,6 +212,22 @@ button.kbn-ch-msg-name:hover { color: var(--kbn-ink-soft); }
 .kbn-ch-tapestry-title { margin: 0; font: 600 var(--type-prose)/var(--leading-tight) var(--font-serif); color: var(--kbn-ink); }
 .kbn-ch-tapestry-lede { margin: 4px 0 0; font: var(--type-row)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink-soft); }
 .kbn-ch-tapestry-page { margin-top: 10px; cursor: auto; }
+/* A worker's own tapestry under its line, and in its thread's head: the first figure, the title and the lede; it opens the page. */
+.kbn-ch-embed {
+  display: flex; gap: 12px; align-items: flex-start;
+  margin-top: 6px; padding: 8px 12px; width: 100%; max-width: 44rem;
+  border: 0.5px solid var(--kbn-rule-strong); border-left: 3px solid var(--kbn-owed-bright); border-radius: 6px;
+  background: var(--kbn-paper-bright, var(--kbn-paper)); color: inherit; text-align: left; font: inherit; cursor: pointer;
+}
+.kbn-ch-embed:hover { border-color: var(--kbn-ink-muted); border-left-color: var(--kbn-owed-bright); }
+.kbn-ch-embed-figure { flex: none; width: min(40%, 220px); max-height: 150px; object-fit: contain; border-radius: 3px; background: var(--kbn-paper); }
+.kbn-ch-embed-words { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.kbn-ch-embed-title { font: 600 var(--type-row)/var(--leading-tight) var(--font-serif); color: var(--kbn-ink); }
+.kbn-ch-embed-lede {
+  font: var(--type-meta)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink-soft);
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
+}
+@media (max-width: 700px) { .kbn-ch-embed { flex-direction: column; } .kbn-ch-embed-figure { width: 100%; } }
 .kbn-ch-tapestry-page .kbn-fileview-frame-wrap, .kbn-ch-tapestry-page > .kbn-fileview { height: min(70vh, 760px); }
 
 /* A thread: who, how it is, its outcome whole, then its history and the reply to it. */

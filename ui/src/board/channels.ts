@@ -54,8 +54,8 @@ export interface Message {
   title?: string
 }
 
-/** A chair's tapestry, collapsed to its title and lede. */
-export interface Tapestry { path: string; at: number; title: string; lede: string }
+/** A constitution's tapestry, collapsed to its title, its lede and the address of its first figure. */
+export interface Tapestry { path: string; at: number; title: string; lede: string; figure?: string }
 
 /**
  * One channel: the constitutions speaking in a named channel (`shuttle.channel`,

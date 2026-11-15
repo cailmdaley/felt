@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest'
-import { ChannelsView } from './ChannelsView.js'
+import { ChannelsView, collapse } from './ChannelsView.js'
 import type { ViewContext } from './ViewRegistry.js'
 import type { BoardRecord } from '../channels.js'
 import type { SentFile } from '../sentFiles.js'
@@ -31,6 +31,8 @@ const BOARD: Record<string, BoardRecord[]> = {
   ],
 }
 
+/** Tapestry pages the daemon serves, by path. */
+const PAGES = new Map<string, string>()
 /** A daemon that answers the Channels view's reads, records its writes, and fails the ones `fail` names. */
 function daemon(fail: string[] = [], stored = new Map<string, string>(), pinned: Record<string, number> = {}, kept: { dismissed?: string[]; order?: { keys: string[]; at: number } } = {}) {
   const posts: Array<[string, Record<string, unknown>]> = [], families: string[] = []
@@ -48,7 +50,9 @@ function daemon(fail: string[] = [], stored = new Map<string, string>(), pinned:
       return new Response(JSON.stringify({ records: (BOARD[params.get('fiber')!] ?? []).filter(each => each.timestamp >= Number(params.get('since_ms'))) }))
     }
     if (url.includes('/roles')) return new Response('[]')
-    if (url.includes('/file-info')) return new Response(JSON.stringify({ exists: false }))
+    const page = PAGES.get(new URL(url, 'http://test').searchParams.get('path') ?? '')
+    if (url.includes('/file-info')) return new Response(JSON.stringify(page ? { exists: true, size: page.length, modified_at: 1 } : { exists: false }))
+    if (page && url.includes('/api/v1/file?')) return new Response(page, { headers: { 'content-type': 'text/html' } })
     return new Response('{}')
   }))
   return { posts, stored, families }
@@ -151,6 +155,31 @@ it('opens a thread in the channel\'s place, with a way back, when the view is to
   widths.forEach(seen => seen([{ contentRect: { width: 1400 } }]))
   message(host, 'κ × tSZ').click()
   expect([layout.hasAttribute('data-narrow'), host.querySelector('.kbn-ch-thread-close')!.textContent]).toStrictEqual([false, 'Close'])
+})
+
+it('collapses a tapestry to its title, lede and first figure, an inline SVG drawn as an image', () => {
+  expect(collapse('<h1>κ × tSZ</h1><p>At 9σ.</p><figure><img src="plots/spectrum.png"></figure>', '/notes/tsz')).toStrictEqual({ title: 'κ × tSZ', lede: 'At 9σ.', figure: '/notes/tsz/plots/spectrum.png' })
+  expect(collapse('<h1>A</h1><svg onload="alert(1)"><path d="M0 0"/></svg>').figure).toMatch(/^data:image\/svg\+xml,/)
+  expect(collapse('<h1>A</h1><img src="https://example.org/a.png">').figure).toBe('https://example.org/a.png')
+  expect(collapse('<title>T</title><p>Only words.</p>')).toStrictEqual({ title: 'T', lede: 'Only words.', figure: undefined })
+})
+
+it('shows a worker\'s own tapestry under its line and in its thread\'s head, and opens it in the reader', async () => {
+  PAGES.set('/notes/tsz/tapestry.html', '<h1>κ × tSZ at 9σ</h1><p>Every null passes.</p><img src="spectrum.png">')
+  try {
+    daemon()
+    const { host, openPage } = await mount([chair, { ...tsz, fiberDir: '/notes/tsz' }, mask, beam, van, notes])
+    await settle(); await settle()
+    const embed = message(host, 'κ × tSZ').querySelector<HTMLButtonElement>('.kbn-ch-embed')!
+    expect([embed.querySelector('.kbn-ch-embed-title')?.textContent, embed.querySelector('.kbn-ch-embed-lede')?.textContent]).toStrictEqual(['κ × tSZ at 9σ', 'Every null passes.'])
+    expect(embed.querySelector('img')?.getAttribute('src')).toBe(`/api/v1/file?path=${encodeURIComponent('/notes/tsz/spectrum.png')}`)
+    embed.click()
+    expect(openPage).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'cmbx/tsz' }), 'local:/notes/tsz/tapestry.html')
+    message(host, 'κ × tSZ').querySelector<HTMLElement>('.kbn-ch-msg-name')!.click()
+    expect(host.querySelector('.kbn-ch-thread-head .kbn-ch-embed-title')?.textContent).toBe('κ × tSZ at 9σ')
+    // Inside the thread, its messages carry none.
+    expect(host.querySelectorAll('.kbn-ch-thread-list .kbn-ch-embed')).toHaveLength(0)
+  } finally { PAGES.clear() }
 })
 
 it('shows a closed fiber\'s outcome as its conclusion, and an open one\'s not at all', async () => {
