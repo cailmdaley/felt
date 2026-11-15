@@ -115,7 +115,7 @@ func TestConsumeFrozenBatchAcrossCrash(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			a := newConsumedAttempt(w, items)
+			a := newConsumedAttempt(w, items, true)
 			if err := pinConsumedBatch(root, &a); err != nil {
 				t.Fatal(err)
 			}
@@ -158,7 +158,7 @@ func TestConsumePartialClaimAndClose(t *testing.T) {
 			putWish(t, env, "two", "ask", "hold")
 			root := mailboxDir(env, "fiber", "fiber")
 			items, _ := pendingItems(root)
-			a := newConsumedAttempt(w, items)
+			a := newConsumedAttempt(w, items, true)
 			if err := pinConsumedBatch(root, &a); err != nil {
 				t.Fatal(err)
 			}
@@ -392,7 +392,7 @@ func TestConsumeSupersededMemberAfterTheBatchsReceipt(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			a := newConsumedAttempt(w, items)
+			a := newConsumedAttempt(w, items, true)
 			if err := pinConsumedBatch(root, &a); err != nil {
 				t.Fatal(err)
 			}
@@ -507,5 +507,43 @@ func TestConsumeChecksThreadSignalsOnlyToReserveOrWake(t *testing.T) {
 	offered, _ := os.ReadDir(filepath.Join(mailboxDir(env, "fiber", "fiber"), "offered"))
 	if len(offered) != 4 {
 		t.Fatalf("superseded notices offered: %d", len(offered))
+	}
+}
+
+func TestConsumeSendsQuietContextToAHooklessReceiver(t *testing.T) {
+	env := testEnv(t)
+	w := Worker{Address: "shuttle://host/pi/P", Epoch: transition(t, env, "P", "shuttle://host/pi/P")}
+	putWish(t, env, "quiet", "none", "hold")
+	putWish(t, env, "asked", "ask", "hold")
+	var sent []Request
+	sender := func(_ context.Context, _ *sysenv.Env, _ string, r Request, _ string) (Receipt, error) {
+		sent = append(sent, r)
+		return Receipt{Status: StatusAccepted}, nil
+	}
+	result, err := consumeWith(context.Background(), env, "fiber", "host", w, sender)
+	if err != nil || result.Action != "context" || !result.Turn || len(result.Members) != 1 || result.Members[0] != "quiet" {
+		t.Fatalf("hookless consume: %+v %v", result, err)
+	}
+	if len(sent) != 1 || sent[0].Wake || sent[0].Text != "text of quiet" {
+		t.Fatalf("sent %+v", sent)
+	}
+	w.Idle = true
+	result, err = consumeWith(context.Background(), env, "fiber", "host", w, sender)
+	if err != nil || result.Action != "wake" || len(sent) != 2 || !sent[1].Wake || sent[1].Text != "text of asked" {
+		t.Fatalf("idle consume: %+v %v, sent %+v", result, err, sent)
+	}
+}
+
+func TestConsumeLeavesQuietContextToAHooklessCodexReceiver(t *testing.T) {
+	env := testEnv(t)
+	w := Worker{Address: "shuttle://host/codex/C", Epoch: transition(t, env, "C", "shuttle://host/codex/C")}
+	putWish(t, env, "quiet", "none", "hold")
+	sender := func(_ context.Context, _ *sysenv.Env, _ string, r Request, _ string) (Receipt, error) {
+		t.Fatalf("sent %+v", r)
+		return Receipt{}, nil
+	}
+	result, err := consumeWith(context.Background(), env, "fiber", "host", w, sender)
+	if err != nil || result.Action != "wait" {
+		t.Fatalf("codex consume: %+v %v", result, err)
 	}
 }

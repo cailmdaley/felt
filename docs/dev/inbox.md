@@ -98,7 +98,7 @@ A busy worker is left to its hook.
 
 | Entries and worker | Action |
 |---|---|
-| Only `none` | Wait for a hook |
+| Only `none` | Wait for a hook; a receiver without a hook registration, other than Codex, takes them as context |
 | `ask`, busy or not observed idle | Wait for a hook, or the next idle consume |
 | `idle`, busy or not observed idle | Wait; never hook-offered |
 | Any `force` | Wake regardless of cost or turn state |
@@ -111,6 +111,9 @@ Within the lease, consume answers `wait` for the reserving receiver while it sta
 The daemon starts the session; when the Poller refuses the launch, it consumes again without `Costly`, waking the live worker.
 A launch that never arrives, including one a busy Poller accepted and later refused, is asked for again once the lease passes.
 This consumer does not start a worker for a fiber without one.
+
+A receiver without a hook registration takes `none` entries directly, in a batch sent as context without a turn (`action: context`) whenever consume would otherwise wait.
+Codex leaves them to its fiber hook, and Claude without a registration is unavailable.
 
 A wake is one message, oldest first, up to 16 entries and the harness's byte limit, with at most one thread lifecycle signal.
 It includes pending `none` entries and turn-asking entries; busy-worker `idle` entries remain excluded even when force triggers a batch.
@@ -175,7 +178,7 @@ The session-only Claude fallback claims by moving an entry into `fallback/` and 
 | `shuttle inbox put <address> <message-id> <text>` | Enqueue, with `--source`, `--turn`, `--session`, `--if-costly`, `--not-before`, `--from` and `--derived`; silent on success |
 | `shuttle inbox pending <address>...` | JSON address → pending count; unreadable addresses are named on stderr and omitted |
 | `shuttle inbox ls <address>` | Pending entries oldest first; `--json` includes wishes, queued time, sender and open attempt |
-| `shuttle inbox consume <fiber-key> <address-or-dash> <epoch> [--idle] [--costly]` | Consume for the current receiver; one JSON object with `action` (`wait`, `wake`, `fresh`), the `members` sent or reserved, and `turn` when an entry asks for a turn the worker's facts would decide. The answer is printed even when an open batch's send fails, which exits nonzero |
+| `shuttle inbox consume <fiber-key> <address-or-dash> <epoch> [--idle] [--costly]` | Consume for the current receiver; one JSON object with `action` (`wait`, `wake`, `context`, `fresh`), the `members` sent or reserved, and `turn` when an entry asks for a turn the worker's facts would decide. The answer is printed even when an open batch's send fails, which exits nonzero |
 
 All verbs act on this host's inbox only.
 `context-mailbox put` also accepts thread signals, reply and notification fields, `--turn` and `--derived`; its `--wake` means `turn: force`.

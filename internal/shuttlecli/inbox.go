@@ -102,7 +102,8 @@ pending, and a turn of force or idle. An unknown wish value is refused.`,
 		Use:   "consume <fiber-key> <address-or-dash> <epoch>",
 		Short: "Consume a fiber's inbox for its live conversation, as one JSON answer",
 		Long: `Consume a fiber's inbox for its live conversation: advance every open batch,
-then wake, reserve a fresh launch or wait. The JSON answer is printed whenever
+then wake, send quiet context to a receiver without a hook, reserve a fresh
+launch or wait. The JSON answer is printed whenever
 consume decided, including when an open batch's delivery failed, which then
 exits nonzero; "turn": true asks the caller to consume again with the worker's
 --idle and --costly facts.`,

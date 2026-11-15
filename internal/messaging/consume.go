@@ -22,8 +22,9 @@ type Worker struct {
 	Costly  bool
 }
 
-// Consumption describes the action taken, or the launch the daemon must
-// perform. Turn reports, for a worker not observed idle, that a due entry asks
+// Consumption describes the action taken (wake, or context for quiet entries
+// sent to a receiver without a hook), or the launch the daemon must perform
+// (fresh). Turn reports, for a worker not observed idle, that a due entry asks
 // for a turn, so the daemon's idle and cost facts would decide it. A
 // consumption that failed before it could decide has no Action.
 type Consumption struct {
@@ -109,7 +110,10 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 		}
 		sent, err := deliverConsumedBatch(ctx, env, root, host, w, &batches[i], send)
 		if sent {
-			result.Action, result.Members = "wake", append(result.Members, batches[i].Members...)
+			result.Action, result.Members = "context", append(result.Members, batches[i].Members...)
+			if batches[i].Payload.Wake {
+				result.Action = "wake"
+			}
 		}
 		errs = append(errs, err)
 	}
@@ -138,15 +142,18 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	}
 	// Deciding reads entries unchecked; only a reservation or a wake checks
 	// thread signals' currency, and decides again over the current ones.
-	action, turn := decideConsumption(candidates, w, now)
+	// A receiver without a hook takes quiet context directly; Codex leaves it to
+	// its fiber hook.
+	direct := !hook && a.Harness != "codex"
+	action, turn := decideConsumption(candidates, w, direct, now)
 	if action == "wait" {
 		result.Turn = turn
 		return result, errors.Join(errs...)
 	}
 	due, validationErr := validateMailboxItems(root, candidates, current)
 	errs = append(errs, validationErr)
-	if action, turn = decideConsumption(due, w, now); action == "wait" {
-		result.Turn = turn
+	action, result.Turn = decideConsumption(due, w, direct, now)
+	if action == "wait" {
 		return result, errors.Join(errs...)
 	}
 	if action == "fresh" {
@@ -177,7 +184,7 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	// Leave framing and a possible-repeat warning inside the harness limit.
 	limit -= 512
 	for _, it := range due {
-		if it.entry.Wishes.Turn == "idle" && !w.Idle {
+		if (action == "context" && it.entry.Wishes.Turn != "none") || (it.entry.Wishes.Turn == "idle" && !w.Idle) {
 			continue
 		}
 		if hasThreadSignalValidation(it.entry.Request) && lifecycle {
@@ -201,22 +208,23 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	if len(selected) == 0 {
 		return result, errors.Join(errs...)
 	}
-	attempt := newConsumedAttempt(w, selected)
+	attempt := newConsumedAttempt(w, selected, action == "wake")
 	if err := pinConsumedBatch(root, &attempt); err != nil {
 		return Consumption{}, err
 	}
 	sent, err := deliverConsumedBatch(ctx, env, root, host, w, &attempt, send)
 	if sent {
-		result.Action, result.Members = "wake", append(result.Members, attempt.Members...)
+		result.Action, result.Members = action, append(result.Members, attempt.Members...)
 	}
 	return result, errors.Join(append(errs, err)...)
 }
 
 // decideConsumption answers wait, fresh or wake for the due entries no open
-// batch holds. turn reports a wait that the worker's idle and cost facts would
-// decide.
-func decideConsumption(due []mailboxPendingItem, w Worker, now time.Time) (action string, turn bool) {
-	force, asking, fresh, launching := false, false, false, false
+// batch holds, or context when it would wait and a direct receiver has quiet
+// entries. turn reports that the worker's idle and cost facts would decide the
+// entries asking for a turn.
+func decideConsumption(due []mailboxPendingItem, w Worker, direct bool, now time.Time) (action string, turn bool) {
+	force, asking, fresh, launching, quiet := false, false, false, false, false
 	for _, it := range due {
 		e := it.entry
 		// Within its lease, a reservation holds the reserving worker's wake
@@ -234,21 +242,26 @@ func decideConsumption(due []mailboxPendingItem, w Worker, now time.Time) (actio
 		case "ask", "idle":
 			asking = true
 			fresh = fresh || e.Wishes.IfCostly == "fresh"
+		case "none":
+			quiet = true
 		}
 	}
+	action = "wait"
 	switch {
 	case force:
 		return "wake", false
 	case !w.Idle:
-		return "wait", asking
+		turn = asking
 	case !asking:
-		return "wait", false
 	case !w.Costly:
 		return "wake", false
-	case launching || !fresh:
-		return "wait", false
+	case !launching && fresh:
+		return "fresh", false
 	}
-	return "fresh", false
+	if direct && quiet {
+		action = "context"
+	}
+	return action, turn
 }
 
 // openBatches reads the pending entries no open batch holds, and every open
@@ -288,7 +301,7 @@ func openBatches(env *sysenv.Env, root string) ([]mailboxPendingItem, []Attempt,
 	return free, batches, nil
 }
 
-func newConsumedAttempt(w Worker, items []mailboxPendingItem) Attempt {
+func newConsumedAttempt(w Worker, items []mailboxPendingItem, wake bool) Attempt {
 	members := make([]string, len(items))
 	texts := make([]string, len(items))
 	repeat := false
@@ -297,7 +310,7 @@ func newConsumedAttempt(w Worker, items []mailboxPendingItem) Attempt {
 		texts[i] = Labeled(it.entry.Request)
 		repeat = repeat || it.entry.PossibleRepeat
 	}
-	req := Request{Text: strings.Join(texts, "\n\n"), From: "shuttle", Wake: true}
+	req := Request{Text: strings.Join(texts, "\n\n"), From: "shuttle", Wake: wake}
 	if len(items) == 1 {
 		// The transport's header names a lone member's own sender.
 		r := items[0].entry.Request
