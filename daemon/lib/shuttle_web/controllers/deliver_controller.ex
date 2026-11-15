@@ -104,9 +104,6 @@ defmodule ShuttleWeb.DeliverController do
     end
   end
 
-  defp local(fiber_id, text, from, %{"message_after_launch" => true} = context),
-    do: local_other(fiber_id, text, from, context)
-
   defp local(fiber_id, text, _from, %{"live_input" => true} = context) do
     Delivery.human(fiber_id, text,
       message_id: context["message_id"],
@@ -124,8 +121,7 @@ defmodule ShuttleWeb.DeliverController do
       |> reply(fiber_id)
     else
       agent_inbox =
-        from != "human" and context["live_input"] != true and
-          context["message_after_launch"] != true
+        from != "human" and context["message_after_launch"] != true
 
       if context["context_only"] == true or agent_inbox do
         turn =
@@ -166,12 +162,11 @@ defmodule ShuttleWeb.DeliverController do
           from: from,
           message_id: context["message_id"],
           message_after_launch: context["message_after_launch"] == true,
-          live_input: context["live_input"] == true,
           resume_mode: resume_mode(context["resume_mode"])
         ]
 
         result =
-          if from == "human" and not opts[:live_input] do
+          if from == "human" do
             Delivery.human(fiber_id, text, opts)
           else
             Delivery.deliver(fiber_id, text, opts)

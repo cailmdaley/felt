@@ -33,7 +33,6 @@ defmodule Shuttle.Delivery do
     worker = if opts[:resume_mode] != "fresh", do: Poller.live_worker(fiber_id)
 
     cond do
-      worker && opts[:live_input] -> input(fiber_id, text)
       worker && opts[:message_after_launch] -> await_message_address(fiber_id, text, opts)
       worker -> message(worker, text, opts)
       opts[:message_after_launch] -> launch_then_message(fiber_id, text, opts)
@@ -161,19 +160,6 @@ defmodule Shuttle.Delivery do
     "no fresh session started: #{why}. Send it again under the same message id once that changes."
   end
 
-  defp input(fiber_id, text) do
-    result =
-      Poller.dispatch_fiber(fiber_id,
-        force: true,
-        ad_hoc: true,
-        existing_only: true,
-        resume_mode: "previous",
-        user_message: text
-      )
-
-    {:input, result}
-  end
-
   # Explicit launch-then-message callers use native session messaging even
   # when the worker must start before its conversation can be addressed.
   defp launch_then_message(fiber_id, text, opts) do
@@ -225,8 +211,7 @@ defmodule Shuttle.Delivery do
         force: true,
         ad_hoc: true,
         user_message: text,
-        resume_mode:
-          opts[:resume_mode] || if(opts[:live_input], do: "resume_or_start", else: "continue")
+        resume_mode: opts[:resume_mode] || "continue"
       )
 
     # A worker that appeared between the look and the launch takes the message.

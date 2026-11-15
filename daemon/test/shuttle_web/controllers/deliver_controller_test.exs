@@ -561,25 +561,45 @@ defmodule ShuttleWeb.DeliverControllerTest do
            end) == 1
   end
 
-  test "voice to a dormant worker launches and still uses native messaging" do
-    fiber = "tests/voice-dormant"
-    put_constitution(fiber)
-    Env.put_app_env(:felt_runner, MessageRunner)
-    Env.put_app_env(:deliver_test_pid, self())
+  for after_launch <- [false, true] do
+    @after_launch after_launch
+    test "legacy voice records, deduplicates and writes one board row (message_after_launch=#{after_launch})" do
+      fiber = "tests/voice-dormant"
+      events = Path.join(MockRunner.felt_root(), "voice-events.jsonl")
+      Env.put_env("SHUTTLE_EVENTS_FILE", events)
+      put_constitution(fiber)
+      Env.put_app_env(:felt_runner, MessageRunner)
+      Env.put_app_env(:deliver_test_pid, self())
 
-    request = %{
-      "fiber_id" => fiber,
-      "text" => "me: Claude hello",
-      "message_id" => "voice-first",
-      "message_after_launch" => true,
-      "live_input" => true
-    }
+      request = %{
+        "fiber_id" => fiber,
+        "text" => "me: Claude hello",
+        "message_id" => "voice-first",
+        "message_after_launch" => @after_launch,
+        "live_input" => true
+      }
 
-    assert %{"delivered" => true, "delivery" => "message"} =
-             api_conn() |> post("/api/v1/deliver", Jason.encode!(request)) |> json_response(200)
+      assert %{"delivered" => true, "delivery" => "input"} =
+               api_conn() |> post("/api/v1/deliver", Jason.encode!(request)) |> json_response(200)
 
-    assert_receive {:message, %{"text" => "me: Claude hello", "message_id" => "voice-first"}}
-    refute run_script() =~ "me: Claude hello"
+      assert %{"duplicate" => true, "disposition" => "delivered"} =
+               api_conn() |> post("/api/v1/deliver", Jason.encode!(request)) |> json_response(200)
+
+      assert run_script() =~ "From User:\nme: Claude hello"
+      refute_received {:message, _}
+
+      records =
+        Path.wildcard(Path.join(Shuttle.data_dir(), "mailboxes/fiber/*/offered/*.json"))
+        |> Enum.map(&(File.read!(&1) |> Jason.decode!()))
+
+      assert [%{"disposition" => "delivered", "wishes" => %{"source" => "voice"}}] = records
+
+      rows =
+        events |> File.read!() |> String.split("\n", trim: true) |> Enum.map(&Jason.decode!/1)
+
+      assert [%{"id" => "brd-voice-first", "kind" => "human"}] =
+               Enum.filter(rows, &(&1["type"] == "board"))
+    end
   end
 
   test "voice records bypass quarantine and survive an owner restart without another paste" do
