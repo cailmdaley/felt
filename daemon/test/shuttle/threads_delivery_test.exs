@@ -502,6 +502,67 @@ defmodule Shuttle.ThreadsDeliveryTest do
     refute Map.has_key?(child.fiber, "closed_at")
   end
 
+  test "a result resolved past its archived asking parent wakes the asking session, not the orchestrator",
+       %{store: store, data: data} do
+    assert {:ok, _} = CLI.run_felt(["-C", store, "edit", "hub", "-s", "active"])
+    Env.put_server(Shuttle.Poller, start_supervised!({AdmissionProbe, self()}))
+
+    assert {:ok, _} =
+             CLI.run_in_store(store, [
+               "thread",
+               "hub/child",
+               "Leaf",
+               "--slug",
+               "leaf",
+               "--disabled"
+             ])
+
+    assert {:ok, %{fibers: before}} = FiberDocuments.list(felt_stores: [store])
+    child = Enum.find(before, &(Threads.address(&1.fiber) == "hub/child"))
+    hub = Enum.find(before, &(Threads.address(&1.fiber) == "hub"))
+    session = "shuttle://test-host/claude/11111111-1111-4111-8111-111111111111"
+    path = Path.join(store, ".felt/hub/child/leaf/leaf.md")
+
+    File.write!(
+      path,
+      String.replace(
+        File.read!(path),
+        "        name: Investigate\n",
+        "        name: Investigate\n        asked_by:\n            session: #{session}\n            fiber: #{child.fiber["uid"]}\n"
+      )
+    )
+
+    assert {:ok, _} =
+             CLI.run_in_store(store, ["close", "hub/child", "--tempered=true", "--local"])
+
+    assert {:ok, _} = CLI.run_in_store(store, ["close", "hub/child/leaf", "--local"])
+    assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+    Threads.capture_results(entries, "test-host")
+    Threads.route_results(entries)
+
+    assert [leaf] =
+             Enum.filter(
+               pending(data),
+               &String.starts_with?(&1["request"]["text"], "thread hub/child/leaf closed:")
+             )
+
+    assert leaf["wishes"]["turn"] == "none"
+    key = Shuttle.Delivery.context_key(hub)
+    assert {:ok, out} = CLI.run(["inbox", "pending", "--waking", key])
+    assert Jason.decode!(out)[key] == 0
+
+    assert [{id, %{"session" => ^session, "text" => "thread hub/child/leaf closed:" <> _}}] =
+             Enum.filter(
+               Shuttle.Test.InboxPublications.pending(),
+               &String.ends_with?(elem(&1, 0), "-asker")
+             )
+
+    assert id == leaf["request"]["message_id"] <> "-asker"
+    Threads.deliver_results(entries, "test-host")
+    hub_uid = hub.fiber["uid"]
+    refute_receive {:flush_reached_admission, ^hub_uid}, 200
+  end
+
   test "an archived constitution orchestrates nothing: its live threads report to the next one up",
        %{store: store, data: data} do
     assert {:ok, _} =

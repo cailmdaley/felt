@@ -109,6 +109,7 @@ The owner stores the result as an ordinary derived entry, which its live-worker 
 Only a close or ask requested by the orchestrator's own worker asks that fiber for a turn (`turn: ask`, `if_costly: fresh`).
 Results nobody asked for and unblock notes are quiet context.
 When a different session asked, capture also writes that session an asker notice, id `<id>-asker`, into the routing inbox.
+A waking result keeps its asking fiber and session (`asked_by`); when `inbox route` resolves the recipient past that fiber, as past an archived asking parent, it stores the asker notice and turns the result quiet before it places or forwards it.
 `inbox route` answers `session` for a current notice, and the daemon sends it through the waking session transport, with `wake` and `context_if_busy`, under the notice's own id.
 An unknown outcome leaves it for the next poll, across restarts; a known one settles it `delivered`, or `undeliverable` on a refusal, since the orchestrator's inbox holds the same result.
 

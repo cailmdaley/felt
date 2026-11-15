@@ -22,6 +22,7 @@ defmodule Shuttle.Test.ThreadsCase do
       alias Shuttle.Test.ThreadsCase.SocketRunner
       alias Shuttle.Test.ThreadsCase.FailingMailboxRunner
       alias Shuttle.Test.ThreadsCase.NoFiberReadsRunner
+      alias Shuttle.Test.ThreadsCase.AdmissionProbe
       import Shuttle.Test.ThreadsCase
     end
   end
@@ -47,6 +48,19 @@ defmodule Shuttle.Test.ThreadsCase do
   defmodule FailingMailboxRunner do
     def cmd("shuttle", ["inbox", "route" | _], _opts), do: {"inbox unavailable", 1}
     def cmd(command, args, opts), do: Shuttle.Runner.Default.cmd(command, args, opts)
+  end
+
+  # A Poller that tells its owner each inbox launch a flush asks it to admit,
+  # and admits none.
+  defmodule AdmissionProbe do
+    use GenServer
+    def start_link(owner), do: GenServer.start_link(__MODULE__, owner)
+    def init(owner), do: {:ok, owner}
+
+    def handle_call({:admit_inbox_launch, id}, _from, owner) do
+      send(owner, {:flush_reached_admission, id})
+      {:reply, {:error, :held}, owner}
+    end
   end
 
   defmodule NoFiberReadsRunner do

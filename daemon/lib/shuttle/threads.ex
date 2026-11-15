@@ -985,8 +985,9 @@ defmodule Shuttle.Threads do
   Every result reaches the orchestrator as context. A close or ask asks for a
   turn only from the session that asked for the thread
   (`shuttle.thread_parent.asked_by`): the orchestrator, when its own worker
-  asked; otherwise the asking session itself, through an asker notice
-  (`<id>-asker`). A thread nobody asked for, and an unblock note, wake no one.
+  asked and routing resolves the result to that fiber; otherwise the asking
+  session itself, through an asker notice (`<id>-asker`). A thread nobody
+  asked for, and an unblock note, wake no one.
   An unblock note carries its board line, which its entry owes until
   `thread-put` appends it; a line that could not be appended is logged and
   tried again by the next capture. A refused publication or a failed capture
@@ -1030,6 +1031,7 @@ defmodule Shuttle.Threads do
     text = bounded("thread #{address(entry.fiber)} #{verb}: #{text}")
     parent_uid = Map.fetch!(parent.fiber, "uid")
     asker = wake && asker(entry.fiber)
+    wake? = is_map(asker) and asker["fiber"] == parent_uid
 
     record = %{
       "owner" => own_host,
@@ -1041,7 +1043,7 @@ defmodule Shuttle.Threads do
       "parent_slug" => address(parent.fiber),
       "retained_at" => stamp,
       "text" => text,
-      "wake" => is_map(asker) and asker["fiber"] == parent_uid,
+      "wake" => wake?,
       "signal" => %{
         "uid" => entry.fiber["uid"] || entry.fiber["id"],
         "verb" => verb,
@@ -1049,6 +1051,14 @@ defmodule Shuttle.Threads do
         "owner" => own_host
       }
     }
+
+    # The asking fiber travels with a waking result: routing that resolves
+    # past it (an archived asking parent) turns the result quiet and wakes
+    # the asking session instead.
+    record =
+      if wake?,
+        do: Map.put(record, "asked_by", Map.take(asker, ["session", "fiber"])),
+        else: record
 
     if is_map(asker) and asker["fiber"] != parent_uid do
       told =

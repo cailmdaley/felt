@@ -299,6 +299,16 @@ func RouteThread(env *sysenv.Env, f RouteFacts) (RouteDecision, error) {
 			e.Routing[key], changed = value, true
 		}
 	}
+	// The asking fiber's worker was to be woken. A recipient resolved past it
+	// (an archived asking parent) takes the result as quiet context, and the
+	// asking session hears it through an asker notice, stored first so a
+	// crash before this entry is rewritten repeats it as a no-op.
+	if asked, _ := e.Routing["asked_by"].(map[string]any); e.Routing["wake"] == true && asked != nil && routeString(asked, "fiber") != routeString(e.Routing, "parent_uid") {
+		if err := storeAskerNotice(root, e, routeString(asked, "session")); err != nil {
+			return wait, err
+		}
+		e.Routing["wake"], e.Wishes.Turn, changed = false, "none", true
+	}
 	if changed {
 		b, err := json.Marshal(e)
 		if err != nil {
@@ -318,6 +328,27 @@ func RouteThread(env *sysenv.Env, f RouteFacts) (RouteDecision, error) {
 		return wait, err
 	}
 	return settle("placed")
+}
+
+// storeAskerNotice stores the asker notice for entry e, id <id>-asker, in the
+// routing inbox at root, whose lock the caller holds; one stored before is
+// kept.
+func storeAskerNotice(root string, e mailboxEntry, session string) error {
+	id := e.Request.MessageID + "-asker"
+	if _, _, err := routedEntry(root, id); !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	record := map[string]any{"session": session}
+	for _, key := range []string{"owner", "store", "retained_at", "text", "signal"} {
+		if value, ok := e.Routing[key]; ok {
+			record[key] = value
+		}
+	}
+	notice, err := ThreadEntry(id, record)
+	if err != nil {
+		return err
+	}
+	return enqueueMailbox(root, mailboxEntry{Request: notice.Request, Wishes: notice.Wishes.withDefaults(notice.Request), QueuedAt: time.Now().UnixNano(), Routing: record})
 }
 
 func finishRouted(root, path string, e mailboxEntry, disposition string) error {

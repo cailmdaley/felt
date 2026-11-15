@@ -191,6 +191,58 @@ func TestRoutePlacesALocalResultAsAnOrdinaryEntry(t *testing.T) {
 	}
 }
 
+// The asking fiber's worker asked, and the recipient resolved past that fiber
+// (it was archived). The orchestrator takes the result quietly, locally or
+// forwarded, and the asking session gets the waking notice. A recipient that
+// resolves to the asking fiber keeps the wake.
+func TestRouteResolvedPastTheAskingFiberWakesTheAskingSession(t *testing.T) {
+	t.Parallel()
+	for _, owner := range []string{"host", "peer"} {
+		env := testEnv(t)
+		bootThread(t, env)
+		r := threadRecord()
+		r["asked_by"] = map[string]any{"session": "shuttle://host/claude/asker", "fiber": "anchor"}
+		r["signal"] = map[string]any{"uid": "child", "verb": "closed", "stamp": r["retained_at"], "owner": "host"}
+		capture(t, env, ThreadPublication{"thread-a", r})
+		f := resolved(owner)
+		f.ID = "thread-a"
+		// A forward repeats until settled, and the repeat carries the stored
+		// quiet wish.
+		want := map[string][]string{"host": {"placed", "wait"}, "peer": {"forward", "forward"}}[owner]
+		for _, action := range want {
+			got := route(t, env, f)
+			if got.Action != action || (action == "forward" && got.Record["wake"] != false) {
+				t.Fatal(owner, got)
+			}
+		}
+		if owner == "host" {
+			if n, _ := WakingCount(env, "/store:parent"); n != 0 {
+				t.Fatal("the orchestrator was asked for a turn", n)
+			}
+		}
+		notice := pendingRoute(t, env, "thread-a-asker")
+		if notice.Routing["session"] != "shuttle://host/claude/asker" || notice.Wishes.Turn != "ask" || notice.Request.Text != r["text"] || notice.Request.ThreadSignal == nil || notice.Routing["store"] != "/store" {
+			t.Fatalf("%s %+v", owner, notice)
+		}
+		if got := route(t, env, RouteFacts{ID: "thread-a-asker", Current: "true"}); got.Action != "session" {
+			t.Fatal(got)
+		}
+	}
+	env := testEnv(t)
+	bootThread(t, env)
+	r := threadRecord()
+	r["asked_by"] = map[string]any{"session": "shuttle://host/claude/asker", "fiber": "parent"}
+	capture(t, env, ThreadPublication{"thread-b", r})
+	f := resolved("host")
+	f.ID = "thread-b"
+	if got := route(t, env, f); got.Action != "placed" {
+		t.Fatal(got)
+	}
+	if n, _ := WakingCount(env, "/store:parent"); n != 1 || len(routes(t, env)) != 0 {
+		t.Fatal("the asking orchestrator lost its wake", n)
+	}
+}
+
 func TestRouteIntoAFullRecipientWaitsWithoutLosingTheResult(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
