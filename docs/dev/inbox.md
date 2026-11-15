@@ -86,7 +86,7 @@ Each poll's delivery task captures in one `shuttle inbox thread-put` call, after
 `thread-put` tries every publication and reports the ones the inbox refused, such as a close whose text is over 64 KiB; the daemon logs each refusal, and one refused publication never stops the rest.
 The producer keeps its exact lifecycle-derived ids.
 A re-capture finds the id pending or offered in the routing inbox and stores nothing, so the first capture fixes the publication and its wishes even when a later poll renders an edited outcome.
-`Enqueue` stores a routing entry only when its stamp is after the capture baseline and not before the retention cutoff (`mailboxes/threads.json`, below).
+`Enqueue` stores a routing entry only when its stamp is after the capture baseline (`mailboxes/threads.json`, below) and, like every inbox entry, at most 14 days old.
 `thread-put` answers the ids it created, so only a newly created unblock note appends its board line.
 
 An entry's `routing` record names its recipient fiber by `parent_uid`, marked `parent_unresolved` until the daemon resolves it, or, for an asker notice, the asking `session`.
@@ -113,9 +113,10 @@ An unknown outcome leaves it for the next poll, across restarts; a known one set
 
 ### Boot import and compatibility
 
-The Poller's first boot step, `inbox thread-state`, establishes the capture window in `mailboxes/threads.json`: the baseline, which never changes, and a retention cutoff, which only advances.
+The Poller's first boot step, `inbox thread-state`, establishes the capture baseline in `mailboxes/threads.json`, which holds the baseline alone and never changes it.
 A host without an outbox establishes its baseline once; signals at or before it never backfill.
-The cutoff keeps a signal from publishing again after its offered entry expires at 14 days.
+An entry settles after its signal is stamped, and its offered entry expires 14 days after it settles; by then `Enqueue`'s 14-day window on the signal's stamp refuses a re-capture, so the signal cannot publish again.
+A `threads.json` an earlier build wrote with a `retention_cutoff` field reads as its baseline; an older daemon's `thread-outbox/retention_cutoff` is not imported.
 
 The same step imports the `thread-outbox/` directory, or a `thread-outbox.json` snapshot, that a contract-40 daemon left.
 Pending records become routing inbox entries with their recipients; acknowledgments become payload-free offered entries (`acknowledged`) that dedup a re-capture.

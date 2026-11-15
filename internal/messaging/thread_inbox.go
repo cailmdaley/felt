@@ -24,12 +24,12 @@ var outboxKey = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 func routingRoot(env *sysenv.Env) string { return mailboxDir(env, "fiber", ThreadRoutingAddress) }
 
-// ThreadInboxState is the capture window. Baseline never changes: a lifecycle
-// stamp at or before it is history this host does not publish. Cutoff only
-// advances, so a publication whose offered entry has expired cannot return.
+// ThreadInboxState is the capture window's baseline, which never changes: a
+// lifecycle stamp at or before it is history this host does not publish.
+// Enqueue's 14-day window on the stamp keeps a publication whose offered
+// entry has expired from returning.
 type ThreadInboxState struct {
 	Baseline string `json:"baseline"`
-	Cutoff   string `json:"retention_cutoff"`
 }
 
 func threadStatePath(env *sysenv.Env) string {
@@ -45,16 +45,14 @@ func ReadThreadInboxState(env *sysenv.Env) (ThreadInboxState, error) {
 	if err = json.Unmarshal(b, &s); err != nil {
 		return s, errCode("corrupt", "thread inbox state: %v", err)
 	}
-	for _, stamp := range []string{s.Baseline, s.Cutoff} {
-		if _, err := time.Parse(time.RFC3339Nano, stamp); err != nil {
-			return s, errCode("corrupt", "thread inbox state: %v", err)
-		}
+	if _, err := time.Parse(time.RFC3339Nano, s.Baseline); err != nil {
+		return s, errCode("corrupt", "thread inbox state: %v", err)
 	}
 	return s, nil
 }
 
-// admits reports whether a publication stamped at stamp is inside the
-// capture window. A record without a stamp has nothing to judge.
+// admits reports whether a publication stamped at stamp is after the
+// baseline. A record without a stamp has nothing to judge.
 func (s ThreadInboxState) admits(stamp string) bool {
 	if stamp == "" {
 		return true
@@ -64,8 +62,7 @@ func (s ThreadInboxState) admits(stamp string) bool {
 		return false
 	}
 	baseline, _ := time.Parse(time.RFC3339Nano, s.Baseline)
-	cutoff, _ := time.Parse(time.RFC3339Nano, s.Cutoff)
-	return t.After(baseline) && !t.Before(cutoff)
+	return t.After(baseline)
 }
 
 func lockInbox(root string) (func(), error) {
@@ -346,21 +343,13 @@ func bootThreadInbox(env *sysenv.Env, imported func(string) error) (ThreadImport
 	if err != nil {
 		return report, err
 	}
-	now := time.Now().UTC()
 	// An established inbox keeps its own baseline, also over an outbox an
 	// older daemon recreated after a rollback: what either daemon published
 	// dedups, and what happened between them is published.
 	if !established {
 		state.Baseline = src.baseline
 		if state.Baseline == "" {
-			state.Baseline = now.Format(time.RFC3339Nano)
-		}
-	}
-	for _, value := range []string{src.cutoff, now.Add(-mailboxRetention).Format(time.RFC3339Nano)} {
-		t, err := time.Parse(time.RFC3339Nano, value)
-		old, _ := time.Parse(time.RFC3339Nano, state.Cutoff)
-		if err == nil && t.After(old) {
-			state.Cutoff = value
+			state.Baseline = time.Now().UTC().Format(time.RFC3339Nano)
 		}
 	}
 	report.Baseline = state.Baseline
@@ -425,12 +414,13 @@ func bootThreadInbox(env *sysenv.Env, imported func(string) error) (ThreadImport
 }
 
 // outboxImage is an older daemon's thread outbox: thread-outbox/ (baseline,
-// retention_cutoff, pending/<key>.json payloads, acked/<key> files) and the
+// pending/<key>.json payloads, acked/<key> files; its retention_cutoff is
+// dominated by Enqueue's 14-day window and not read) and the
 // thread-outbox.json snapshot that preceded it. acked holds keys.
 type outboxImage struct {
-	baseline, cutoff string
-	acked            map[string]bool
-	pending          map[string]map[string]any
+	baseline string
+	acked    map[string]bool
+	pending  map[string]map[string]any
 }
 
 func readOutbox(root string) (outboxImage, error) {
@@ -470,11 +460,6 @@ func readOutbox(root string) (outboxImage, error) {
 		return img, err
 	}
 	img.baseline = string(baseline)
-	cutoff, err := os.ReadFile(filepath.Join(root, "retention_cutoff"))
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return img, err
-	}
-	img.cutoff = string(cutoff)
 	// An acknowledgment's file name is the hash of the publication's id, the
 	// routing inbox's key for it, so its content is never read. Any other
 	// name (an old daemon's <key>.<n>.tmp, an NFS silly-rename, .DS_Store)
@@ -517,10 +502,8 @@ func readOutbox(root string) (outboxImage, error) {
 	case legacy.Baseline != "" && legacy.Baseline != img.baseline:
 		return img, errCode("corrupt", "thread outbox baselines differ")
 	}
-	for _, stamp := range []string{img.baseline, img.cutoff} {
-		if _, err := time.Parse(time.RFC3339Nano, stamp); stamp != "" && err != nil {
-			return img, errCode("corrupt", "thread outbox: %v", err)
-		}
+	if _, err := time.Parse(time.RFC3339Nano, img.baseline); img.baseline != "" && err != nil {
+		return img, errCode("corrupt", "thread outbox: %v", err)
 	}
 	return img, nil
 }

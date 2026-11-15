@@ -18,8 +18,8 @@ func (a *app) threadInboxVerbs() []*cobra.Command {
 	state := &cobra.Command{
 		Use:   "thread-state",
 		Short: "Import an older daemon's thread outbox and print the capture window",
-		Long: `Establish the thread capture window (baseline and retention cutoff) and
-import a thread-outbox left by an older daemon into the routing inbox. Prints
+		Long: `Establish the thread capture baseline and import a thread-outbox left by
+an older daemon into the routing inbox. Prints
 {"baseline", "skipped", "cleanup_error"}: pending records the routing inbox
 can never accept are skipped, and a cleanup failure leaves the imported outbox
 for the next boot to remove. Exits 3 when the outbox's baseline or a pending

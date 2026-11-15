@@ -56,8 +56,8 @@ The first resolution is frozen in the entry: moving the child does not change a 
 A result for a fiber this host owns is placed in that fiber's inbox; one for another host's fiber is forwarded to its owner's `/api/v1/deliver` by UID, and settles only when the owner confirms a durable enqueue.
 A lost confirmation repeats the same enqueue, which stores nothing new.
 On the owner, the result stays pending until a worker takes it or currency checking drops it as superseded.
-Settled routing entries keep their ids for 14 days, so a re-capture stores nothing; a retention cutoff that only advances keeps an older lifecycle stamp from publishing again after they expire.
-Boot imports an older daemon's `thread-outbox/` into the routing inbox, keeping its baseline, retention cutoff, pending results and acknowledgments; a corrupt outbox holds boot without discarding anything.
+Settled routing entries keep their ids for 14 days, so a re-capture stores nothing; they settle after their signal is stamped, and the inbox refuses a stamp older than 14 days, so a signal cannot publish again after they expire.
+Boot imports an older daemon's `thread-outbox/` into the routing inbox, keeping its baseline, pending results and acknowledgments; a corrupt baseline or pending payload holds boot without discarding anything.
 See [The inbox](inbox.md#thread-results-and-routing) for routing, the import and rollback.
 
 The parent Poller publishes one durable receiver identity and epoch synchronously with worker registration, recovery, removal and conversation rotation.

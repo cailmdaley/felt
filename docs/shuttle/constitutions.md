@@ -292,7 +292,7 @@ queue order.
 A recognizable missing validation endpoint allows delivery with a staleness caveat.
 An unresolved legacy notice allows delivery without validation.
 Settled and offered entries expire after 14 days.
-The originating signal timestamp and durable retention cutoff prevent an expired notice from returning after its dedup entry expires.
+An entry settles after its signal is stamped, so by the time its dedup entry expires the signal is more than 14 days old, and the inbox refuses a stamp that old: an expired notice cannot return.
 An outside asker's waking notice is a separate entry; unknown outcomes are retried, while refusal is final because the orchestrator keeps the same result.
 
 A delivery with an unknown outcome stays pinned to its original conversation.

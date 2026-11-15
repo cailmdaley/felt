@@ -362,7 +362,7 @@ func TestThreadImportLeavesRecipientInboxesAlone(t *testing.T) {
 
 func TestThreadImportRefusesCorruptSourceAndKeepsIt(t *testing.T) {
 	t.Parallel()
-	for _, corrupt := range []string{"baseline", "pending", "snapshot", "missing baseline", "cutoff"} {
+	for _, corrupt := range []string{"baseline", "pending", "snapshot", "missing baseline"} {
 		t.Run(corrupt, func(t *testing.T) {
 			env := testEnv(t)
 			root := seedOutbox(t, env, oldBaseline)
@@ -375,8 +375,6 @@ func TestThreadImportRefusesCorruptSourceAndKeepsIt(t *testing.T) {
 				os.WriteFile(root+".json", []byte("{"), 0600)
 			case "missing baseline":
 				os.Remove(filepath.Join(root, "baseline"))
-			case "cutoff":
-				os.WriteFile(filepath.Join(root, "retention_cutoff"), []byte("bad"), 0600)
 			}
 			if _, err := BootThreadInbox(env); ErrorCode(err) != "corrupt" {
 				t.Fatal("corrupt source accepted:", err)
@@ -522,18 +520,32 @@ func TestThreadImportRollForwardAfterRollbackKeepsTheEarlierBaseline(t *testing.
 	}
 }
 
-func TestThreadImportCutoffAdvancesAndRefusesOlderCaptures(t *testing.T) {
+// The state holds the baseline alone; a state an earlier build wrote with a
+// retention cutoff reads as its baseline, and the 14-day window on the
+// stamp refuses what has expired.
+func TestThreadInboxStateIsTheBaselineAlone(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	root := seedOutbox(t, env, oldBaseline)
-	cutoff := time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)
-	os.WriteFile(filepath.Join(root, "retention_cutoff"), []byte(cutoff), 0600)
+	os.WriteFile(filepath.Join(root, "retention_cutoff"), []byte(time.Now().UTC().Format(time.RFC3339Nano)), 0600)
 	bootThread(t, env)
-	if s, err := ReadThreadInboxState(env); err != nil || s.Cutoff != cutoff {
-		t.Fatal(s, err)
+	if b, _ := os.ReadFile(threadStatePath(env)); string(b) != `{"baseline":"`+oldBaseline+`"}` {
+		t.Fatal(string(b))
 	}
-	if got := capture(t, env, ThreadPublication{"thread-before-cutoff", threadRecord()}); len(got) != 0 {
+	earlier := `{"baseline":"` + oldBaseline + `","retention_cutoff":"2999-01-01T00:00:00Z"}`
+	if err := os.WriteFile(threadStatePath(env), []byte(earlier), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := bootThread(t, env); got.Baseline != oldBaseline {
 		t.Fatal(got)
+	}
+	if got := capture(t, env, ThreadPublication{"thread-recent", threadRecord()}); len(got) != 1 {
+		t.Fatal("a recent stamp was refused", got)
+	}
+	expired := threadRecord()
+	expired["retained_at"] = time.Now().Add(-15 * 24 * time.Hour).UTC().Format(time.RFC3339Nano)
+	if got := capture(t, env, ThreadPublication{"thread-expired", expired}); len(got) != 0 {
+		t.Fatal("an expired stamp was captured", got)
 	}
 }
 

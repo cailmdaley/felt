@@ -167,7 +167,7 @@ func inboxRoot(env *sysenv.Env, address string) (string, error) {
 // is a message_id_conflict. A session inbox refuses an id already pending. A
 // thread notice past its retention is not stored for a fiber and refused as
 // expired for a session. A thread publication at or before the capture
-// baseline, or before the retention cutoff, is not stored.
+// baseline is not stored.
 func Enqueue(env *sysenv.Env, e InboxEntry) error {
 	r, w := e.Request, e.Wishes.withDefaults(e.Request)
 	session := strings.HasPrefix(e.Address, "shuttle://")
