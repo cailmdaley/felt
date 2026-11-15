@@ -108,7 +108,7 @@ for.`,
 			return w.Flush()
 		},
 	}
-	var idle, unknown, costly bool
+	var idle, unknown, costly, busy bool
 	consume := &cobra.Command{
 		Use:   "consume <fiber-key> <address-or-dash> <epoch>",
 		Short: "Consume a fiber's inbox for its worker, as one JSON answer",
@@ -132,7 +132,7 @@ to consume again with the worker's --idle, --unknown and --costly facts.`,
 			if err != nil || (epoch == 0 && args[1] != "-") {
 				return fmt.Errorf("a positive receiver epoch required, or - with epoch 0 for a fiber with no worker")
 			}
-			result, err := messaging.Consume(context.Background(), a.env, args[0], host, messaging.Worker{Address: args[1], Epoch: epoch, Idle: idle || unknown, Unknown: unknown, Costly: costly})
+			result, err := messaging.Consume(context.Background(), a.env, args[0], host, messaging.Worker{Address: args[1], Epoch: epoch, Idle: idle || unknown, Unknown: unknown, Costly: costly, Busy: busy})
 			if result.Action == "" {
 				return err
 			}
@@ -142,6 +142,7 @@ to consume again with the worker's --idle, --unknown and --costly facts.`,
 			return err
 		},
 	}
+	consume.Flags().BoolVar(&busy, "busy", false, "The live worker is in a turn; use its follow-up transport")
 	consume.Flags().BoolVar(&idle, "idle", false, "The live worker was observed idle")
 	consume.Flags().BoolVar(&unknown, "unknown", false, "The live worker's turn state is unknown: woken for ask, never for idle")
 	consume.Flags().BoolVar(&costly, "costly", false, "Waking the live worker is costly")

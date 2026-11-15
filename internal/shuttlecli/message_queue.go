@@ -54,6 +54,7 @@ func (a *app) queueForFiber(request messaging.Request, force bool) (*fiberReceip
 			turn = "force"
 		}
 	}
+	modern := a.ownerInbox42(block.Host)
 	payload, err := json.Marshal(map[string]any{
 		"fiber_id":         fiberID,
 		"origin":           block.Host,
@@ -68,7 +69,7 @@ func (a *app) queueForFiber(request messaging.Request, force bool) (*fiberReceip
 		"wake":             request.Wake,
 		"turn":             turn,
 		"context_only":     true,
-		"unless_live":      request.Wake || request.NotifyWhenIdle,
+		"unless_live":      !modern && (request.Wake || request.NotifyWhenIdle),
 	})
 	if err != nil {
 		return nil, err
@@ -96,8 +97,9 @@ func (a *app) queueForFiber(request messaging.Request, force bool) (*fiberReceip
 		return nil, nil
 	case resp.StatusCode < 300 && answer.Queued:
 		receipt := &fiberReceipt{MessageID: request.MessageID, Fiber: f.ID, Status: string(messaging.StatusQueued), Detail: answer.Detail}
-		if answer.Status == statusStarting {
-			receipt.Status = statusStarting
+		switch answer.Status {
+		case statusStarting, "woken", "followed_up", "held":
+			receipt.Status = answer.Status
 		}
 		if receipt.Detail == "" {
 			receipt.Detail = fmt.Sprintf("not delivered; queued in %s's inbox", f.ID)
@@ -121,6 +123,12 @@ func (a *app) printFiberReceipt(receipt *fiberReceipt, wake bool) error {
 	}
 	var err error
 	switch {
+	case receipt.Status == "woken":
+		_, err = fmt.Fprintf(a.env.Stdout, "woken %s (%s)\n", receipt.Fiber, receipt.MessageID)
+	case receipt.Status == "followed_up":
+		_, err = fmt.Fprintf(a.env.Stdout, "followed up in a turn on %s (%s)\n", receipt.Fiber, receipt.MessageID)
+	case receipt.Status == "held":
+		_, err = fmt.Fprintf(a.env.Stdout, "held as context for cost on %s (%s)\n", receipt.Fiber, receipt.MessageID)
 	case receipt.Status == statusStarting:
 		_, err = fmt.Fprintf(a.env.Stdout, "starting a session on %s for it (%s)\n", receipt.Fiber, receipt.MessageID)
 	case wake:

@@ -24,6 +24,7 @@ type Worker struct {
 	Idle    bool
 	Unknown bool
 	Costly  bool
+	Busy    bool
 }
 
 // Consumption describes the action taken (wake, or context for quiet entries
@@ -33,9 +34,12 @@ type Worker struct {
 // entry asks for a turn, so the daemon's idle and cost facts would decide it.
 // A consumption that failed before it could decide has no Action.
 type Consumption struct {
-	Action  string   `json:"action"`
-	Members []string `json:"members,omitempty"`
-	Turn    bool     `json:"turn,omitempty"`
+	Action   string   `json:"action"`
+	Members  []string `json:"members,omitempty"`
+	Turn     bool     `json:"turn,omitempty"`
+	Session  string   `json:"session,omitempty"`
+	Held     string   `json:"held,omitempty"`
+	Followup bool     `json:"followup,omitempty"`
 	// Launching marks a wait for a fiber with no worker while a launch
 	// reserved earlier is in its lease.
 	Launching bool `json:"launching,omitempty"`
@@ -199,11 +203,25 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 		if dormant {
 			return decideLaunch(due, held, inFlight), false
 		}
-		return decideConsumption(due, w, direct, reservation, now)
+		action, turn := decideConsumption(due, w, direct, reservation, now)
+		if action == "wait" && w.Busy {
+			for _, it := range due {
+				if it.entry.Wishes.Turn != "ask" || reservation.holds(it.entry.Request.MessageID, now) {
+					continue
+				}
+				if a.Harness != "claude" || now.Sub(time.Unix(0, it.entry.QueuedAt)) >= 30*time.Second {
+					return "wake", false
+				}
+			}
+		}
+		return action, turn
 	}
 	action, turn := decide(candidates)
 	if action == "wait" {
 		result.Turn, result.Launching = turn, inFlight
+		if w.Costly && turn == false {
+			result.Held = "cost"
+		}
 		return result, errors.Join(errs...)
 	}
 	due, validationErr := validateMailboxItems(root, candidates, current)
@@ -224,7 +242,13 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 		if err := reserveLaunch(root, w, members, now); err != nil {
 			return Consumption{}, err
 		}
-		return Consumption{Action: action, Members: members}, errors.Join(errs...)
+		session := ""
+		for _, it := range due {
+			if it.entry.Wishes.Session == "fresh" {
+				session = "fresh"
+			}
+		}
+		return Consumption{Action: action, Members: members, Session: session}, errors.Join(errs...)
 	}
 	var selected []mailboxPendingItem
 	size, lifecycle := 0, false
@@ -266,6 +290,7 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	sent, err := deliverConsumedBatch(ctx, env, root, host, w, &attempt, send)
 	if sent {
 		result.Action, result.Members = action, append(result.Members, attempt.Members...)
+		result.Followup = w.Busy && action == "wake"
 	}
 	return result, errors.Join(append(errs, err)...)
 }
@@ -344,6 +369,7 @@ func decideLaunch(due []mailboxPendingItem, held []string, inFlight bool) string
 // facts would decide the entries asking for a turn.
 func decideConsumption(due []mailboxPendingItem, w Worker, direct bool, reservation launchReservation, now time.Time) (action string, turn bool) {
 	force, asking, wants, fresh, launching, quiet := false, false, false, false, false, false
+	explicitFresh := false
 	for _, it := range due {
 		e := it.entry
 		// Within its lease, a reservation holds the reserving worker's wake
@@ -354,7 +380,11 @@ func decideConsumption(due []mailboxPendingItem, w Worker, direct bool, reservat
 				continue
 			}
 			launching = true
+			if e.Wishes.Session == "fresh" || e.Wishes.Turn == "force" {
+				continue
+			}
 		}
+		explicitFresh = explicitFresh || (e.Wishes.Session == "fresh" && e.Wishes.Turn != "none")
 		// An idle entry starts a turn only in a worker observed idle.
 		wanted := e.Wishes.Turn == "ask" || (e.Wishes.Turn == "idle" && w.Idle && !w.Unknown)
 		switch e.Wishes.Turn {
@@ -370,6 +400,8 @@ func decideConsumption(due []mailboxPendingItem, w Worker, direct bool, reservat
 	}
 	action = "wait"
 	switch {
+	case explicitFresh:
+		return "fresh", false
 	case force:
 		return "wake", false
 	case !w.Idle:

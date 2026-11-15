@@ -221,9 +221,20 @@ defmodule Shuttle.Delivery do
         args =
           if opts[:retained_at], do: args ++ ["--retained-at", opts[:retained_at]], else: args
 
+        args = if opts[:session], do: args ++ ["--session", opts[:session]], else: args
+
         with {:ok, _} <- Shuttle.CLI.run(args) do
+          if from != "shuttle" do
+            Shuttle.LifecycleService.transition(
+              :clear_ask,
+              entry.fiber["uid"] || entry.fiber["id"],
+              ["--answered-by", from]
+            )
+          end
+
           case flush_context(entry) do
             {:error, :no_worker} when turn != nil -> {:ok, start_for_inbox(entry)}
+            {:ok, answer} -> {:ok, {:consumed, answer}}
             _ -> {:ok, :queued}
           end
         end
@@ -282,12 +293,12 @@ defmodule Shuttle.Delivery do
 
     with :ok <- inbox_gate(entry.fiber, Poller.own_host_id()),
          :ok <- Poller.admit_inbox_launch(server, id),
-         :launch <- reserve(entry) do
+         {:launch, mode} <- reserve(entry) do
       server
       |> Poller.dispatch_fiber(id,
         ad_hoc: true,
         inbox: true,
-        resume_mode: "continue",
+        resume_mode: mode,
         user_message: @launch_note
       )
       |> launched(fiber_id)
@@ -303,7 +314,7 @@ defmodule Shuttle.Delivery do
   # else because nothing asks for a turn any more.
   defp reserve(entry) do
     case consume(entry, "-", 0, []) do
-      {:ok, %{"action" => "launch"}} -> :launch
+      {:ok, %{"action" => "launch"} = answer} -> {:launch, answer["session"] || "continue"}
       {:ok, %{"launching" => true}} -> :in_flight
       {:ok, %{"action" => _}} -> :nothing
       other -> {:error, {:consume, other}}
@@ -418,14 +429,13 @@ defmodule Shuttle.Delivery do
   defp start_fresh(entry, worker, cost) do
     result =
       Poller.dispatch_fiber(Shuttle.Threads.address(entry.fiber),
-        force: true,
+        inbox: true,
         ad_hoc: true,
         resume_mode: "fresh",
         user_message:
-          "Shuttle started this session to take a result that arrives as context. " <>
-            "The previous session #{worker[:session_uuid]} was at rest with " <>
-            "#{Shuttle.WakeCost.describe(cost)}; waking it would have re-read all of that uncached. " <>
-            "Read Status first, then `shuttle show #{worker[:session_uuid]}` for what it holds that Status does not."
+          @launch_note <>
+            " Previous session: #{worker[:session_uuid]}. " <>
+            if(cost, do: Shuttle.WakeCost.describe(cost), else: "A fresh session was requested.")
       )
 
     match?({:ok, _}, result) or result == {:error, :poller_busy}
@@ -445,11 +455,23 @@ defmodule Shuttle.Delivery do
       # Delivery carries the worker-owned epoch and the address it committed;
       # selecting or flushing a destination never changes authority.
       with {:ok, address, generation} <- Poller.context_receiver(server, fiber_id) do
-        consume = &consume(entry, address, generation, &1)
+        deadline = System.monotonic_time(:millisecond) + 40_000
+
+        consume = fn flags ->
+          remaining = max(1, deadline - System.monotonic_time(:millisecond))
+          consume(entry, address, generation, flags, min(32_000, remaining))
+        end
 
         case consume.([]) do
-          {:ok, %{"turn" => true}} -> consume_turn(entry, server, fiber_id, consume)
-          answer -> answer
+          {:ok, %{"turn" => true}} ->
+            consume_turn(entry, server, fiber_id, consume)
+
+          {:ok, %{"action" => "fresh"}} = answer ->
+            worker = Poller.live_worker(server, fiber_id)
+            if start_fresh(entry, worker, nil), do: answer, else: {:ok, %{"action" => "wait"}}
+
+          answer ->
+            answer
         end
       end
     else
@@ -478,17 +500,17 @@ defmodule Shuttle.Delivery do
       :unknown ->
         consume.(["--unknown"])
 
-      _ ->
-        {:ok, %{"action" => "wait", "turn" => true}}
+      :busy ->
+        consume.(["--busy"])
     end
   end
 
   # The answer is the output's one JSON line, which a failed send of an open
   # batch prints before exiting nonzero. A consume that could not decide
   # prints none and stays an error.
-  defp consume(entry, address, generation, flags) do
+  defp consume(entry, address, generation, flags, timeout_ms \\ 32_000) do
     args = ["inbox", "consume", context_key(entry), address, to_string(generation)] ++ flags
-    result = Shuttle.CLI.run(args, timeout_ms: 32_000)
+    result = Shuttle.CLI.run(args, timeout_ms: timeout_ms)
 
     output =
       case result do

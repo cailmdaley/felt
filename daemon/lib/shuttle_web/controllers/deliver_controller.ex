@@ -52,6 +52,7 @@ defmodule ShuttleWeb.DeliverController do
           "resume_mode",
           "wake",
           "turn",
+          "session",
           "unless_live",
           "thread_signal",
           "retained_at"
@@ -90,6 +91,8 @@ defmodule ShuttleWeb.DeliverController do
               context_reply(fiber_id, text, context["message_id"],
                 wake: context["wake"] == true,
                 turn: if(context["turn"] in ["ask", "force"], do: context["turn"]),
+                session:
+                  if(context["session"] in ["any", "fresh", "previous"], do: context["session"]),
                 retained_at: context["retained_at"],
                 thread_signal: context["thread_signal"],
                 unless_live: context["unless_live"] == true,
@@ -133,6 +136,18 @@ defmodule ShuttleWeb.DeliverController do
 
           {:waiting, detail} ->
             Map.merge(body, %{status: "queued", detail: detail})
+
+          {:consumed, answer} ->
+            status =
+              cond do
+                answer["action"] == "fresh" -> "starting"
+                answer["followup"] -> "followed_up"
+                answer["action"] == "wake" -> "woken"
+                answer["held"] == "cost" -> "held"
+                true -> "queued"
+              end
+
+            Map.merge(body, %{status: status, consumed: answer})
 
           :queued ->
             Map.put(body, :status, "queued")

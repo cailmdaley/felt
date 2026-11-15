@@ -4162,7 +4162,14 @@ defmodule Shuttle.Poller do
         # An inbox launch prepares nothing: it arms no document, so it
         # needs no forced-start preparation (`dispatch_eligible?/3`).
         Keyword.get(opts, :inbox, false) ->
-          inbox_admission(state, fiber_id, runtime_key)
+          replacing = Keyword.get(opts, :resume_mode) == "fresh"
+
+          with {:ok, fiber} <- fetch_fiber_full(fiber_id, state),
+               :ok <- Shuttle.Delivery.inbox_gate(fiber, state.own_host_id) do
+            inbox_admission(state, fiber_id, runtime_key, replacing)
+          else
+            {:error, reason} -> {:error, reason, state}
+          end
 
         true ->
           prepare_dispatch_start(state, fiber_id, runtime_key, uid, opts)
@@ -4195,9 +4202,9 @@ defmodule Shuttle.Poller do
   # and no breaker or cooldown holds the fiber. The document's own gate
   # (`Shuttle.Delivery.inbox_gate/2`) is checked on the final read
   # (`dispatch_eligible?/3`) and again by the dispatcher.
-  defp inbox_admission(state, fiber_id, runtime_key) do
+  defp inbox_admission(state, fiber_id, runtime_key, replacing \\ false) do
     cond do
-      tracked?(state, fiber_id, runtime_key) ->
+      tracked?(state, fiber_id, runtime_key) and not replacing ->
         {:error, :running, state}
 
       not is_nil(state.reconciliation_hold) ->
@@ -4206,7 +4213,7 @@ defmodule Shuttle.Poller do
       state.boot_quarantine or not state.contract_check.ok ->
         {:error, :held, park_inbox_launch(state, fiber_id, runtime_key)}
 
-      available_slots(state) <= 0 ->
+      available_slots(state) <= 0 and not replacing ->
         {:error, :full, state}
 
       # A message must not keep relaunching a worker that dies on start or
@@ -5935,7 +5942,8 @@ defmodule Shuttle.Poller do
   # A non-fresh force-dispatch resumes the in-flight transcript.
   defp cut_open_session_for_fresh(%State{} = state, fiber_id, runtime_key, uid, opts) do
     forced_fresh? =
-      Keyword.get(opts, :force, false) and Keyword.get(opts, :resume_mode) == "fresh"
+      (Keyword.get(opts, :force, false) or Keyword.get(opts, :inbox, false)) and
+        Keyword.get(opts, :resume_mode) == "fresh"
 
     if forced_fresh? and open_session?(state, fiber_id, runtime_key, uid) do
       cut_open_session(state, fiber_id, uid)
