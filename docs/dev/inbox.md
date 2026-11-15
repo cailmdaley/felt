@@ -18,8 +18,8 @@ Each address has one directory under the data directory:
 `offered/` holds entries with a final disposition for 14 days.
 `.lock` serializes writers, hooks and the consumer, including transport emission.
 A Claude session also has `fallback/`, where native-wake recovery claims a session entry.
-A fiber has `destination.json`, its worker-owned conversation and receiver epoch, and `active-batch.json`, the consumer's durable batch payload or fresh-launch reservation.
-The batch record lets recovery finish a claim or close interrupted between member-file writes.
+A fiber has `destination.json`, its worker-owned conversation and receiver epoch, and `batches/<batch_id>.json`, one manifest per open wake batch with its durable payload.
+A manifest lets recovery finish a claim or close interrupted between member-file writes.
 
 ## The entry
 
@@ -84,38 +84,45 @@ Session native-wake recovery starts its 30-second hook window at that same later
 
 ### The live fiber consumer
 
-`messaging.Consume` takes the inbox lock, verifies the worker's conversation and receiver epoch, and decides from due, current entries.
-The daemon supplies `Idle` and `Costly`; Go selects and claims the batch before sending it.
-`Delivery.context` enqueues waking context with `turn: ask, if_costly: fresh`, then triggers consumption.
+`messaging.Consume` takes the inbox lock and verifies the worker's conversation and receiver epoch.
+It first advances every open batch on its own, so a batch awaiting its outcome holds only its own members.
+It then decides from due, current entries that no open batch holds, and selects and claims a new batch before sending it.
+The daemon supplies `Idle` and `Costly`.
+It first consumes without them; only an answer with `"turn": true` (a due entry asks for a turn) makes it read the worker's turn state and wake cost and consume again.
+An idle worker is consumed with `Idle`, and `Costly` when waking it is costly.
+A worker whose turn no hook has reported is consumed with `Idle` and no cost check.
+A busy worker is left to its hook.
+`Delivery.context` stores waking context as `turn: ask` while the fiber has a live worker, with `if_costly` defaulting by source; with none, it stores `turn: none`, read as context by the next worker.
 `Threads.deliver_results` triggers the same consumer on each poll.
-The daemon reads wake cost only for an idle fiber with a due turn-asking entry.
 
 | Entries and worker | Action |
 |---|---|
 | Only `none` | Wait for a hook |
-| `ask`, busy or turn state unknown | Wait for a hook, or the next idle consume |
-| `idle`, busy or turn state unknown | Wait; never hook-offered |
+| `ask`, busy or not observed idle | Wait for a hook, or the next idle consume |
+| `idle`, busy or not observed idle | Wait; never hook-offered |
 | Any `force` | Wake regardless of cost or turn state |
 | `ask`/`idle`, idle, not costly | Wake |
 | `ask`/`idle`, idle, costly, any `if_costly: fresh`, no force | Reserve a fresh launch and return `fresh` |
 | `ask`/`idle`, idle, costly, only `hold` | Wait; `ask` remains hook-eligible |
 
-A fresh reservation is durable and returns `fresh` only once while that receiver remains current.
-The daemon starts the session; a refused launch triggers another consume without `Costly`, waking the live worker.
-A receiver change lets the entries flow to its successor.
+A fresh reservation is written on its entries and leased for two minutes.
+Within the lease, consume answers `wait` for the reserving receiver while it stays costly, and a new receiver (the launched session) takes the entries through its hook instead of a wake.
+The daemon starts the session; when the Poller refuses the launch, it consumes again without `Costly`, waking the live worker.
+A launch that never arrives, including one a busy Poller accepted and later refused, is asked for again once the lease passes.
 This consumer does not start a worker for a fiber without one.
 
 A wake is one message, oldest first, up to 16 entries and the harness's byte limit, with at most one thread lifecycle signal.
 It includes pending `none` entries and turn-asking entries; busy-worker `idle` entries remain excluded even when force triggers a batch.
+A batch of one carries its member's own sender header; a larger batch is sent from `shuttle` with each member's header inside.
 Oversized publications use a retained JSON file reference instead of truncation.
-The size budget includes framing and possible-repeat warnings.
+The size budget reserves 512 bytes for framing and a possible-repeat warning.
 Thread lifecycle currency is checked before emission; an unverifiable publication waits and a superseded one moves to offered without emission.
 
 ### Hooks
 
-A fiber hook offers only `none` and `ask` entries that are not in a pinned open attempt.
+A fiber hook offers only `none` and `ask` entries that are not pinned and that no open batch's manifest holds.
 It never takes `idle` or `force`.
-It uses the same inbox lock and the same limits as wake batching.
+It uses the same inbox lock, the 16-entry and one-lifecycle-signal limits and the harness's byte limit; its budget counts each emission's possible-repeat warning but reserves nothing for framing.
 A hook takes context from the fiber inbox itself, so replacing the worker does not strand a session-scoped copy.
 
 ## Attempts and the claim
@@ -134,9 +141,10 @@ Each selected entry carries the same attempt record:
 A wake attempt also stores `payload` (the exact request and transport id), `base_text` and `variant`.
 The transport id is a bounded, domain-separated hash of members, conversation and exact text variant.
 Plain text, a live retry, a possible-repeat warning and a staleness caveat cannot change text under one transport id.
-`active-batch.json` stores that complete record before any member is pinned or any message is sent.
+The batch's manifest stores that complete record before any member is pinned or any message is sent.
 Recovery repairs partial member writes and replays that same payload, even when new entries arrive.
 A partial close can replay the same payload against the transport's `messages/` receipt without injecting it again.
+Before a superseded member can change an open batch, the payload's `messages/` record decides: a confirmed receipt closes the batch `delivered`; no record or a rejection drops the superseded member and releases the rest; any other record closes it `ambiguous`.
 
 A wake claim writes `attempt_address` beside the attempt, pinning it to that conversation.
 A confirmed receipt closes the batch `delivered` and moves its pending members to offered.
@@ -147,13 +155,14 @@ When it is still the receiver, five minutes of unknown outcome permit one warnin
 Exhausting that retry does not prevent later roll-forward to another receiver.
 Approval-held messages (`wake_held`) are not retried.
 
-An attempt read from `attempt_address` alone is an open batch of one with no opening time; its five-minute wait starts on its first unknown result.
-Single-entry attempts without a stored payload retain their existing transport ids.
-Their staleness-caveat variant is reconstructed from the stored transport receipt's content hash and then pinned as a payload.
-New variants use hashed transport identities.
+An entry pinned without a manifest is an open batch of one, including one read from `attempt_address` alone; its five-minute wait starts when the consumer first reads it.
+Without a stored payload it keeps the transport id it was sent under.
+Its staleness-caveat variant is reconstructed from the stored transport receipt's content hash.
+Retries and roll-forwards use hashed transport identities.
+Quiet context pinned this way is released to a Codex receiver's fiber hook rather than sent.
 
 A hook claim is unpinned.
-If a hook leaves its attempt open, the next hook treats it as ambiguous and adds “Possible repeat” to its output, including that warning in the size budget.
+If a hook leaves its attempt open, the next reader under the inbox lock, a hook or the consumer, closes it ambiguous, and the entry carries “Possible repeat” wherever it goes next.
 A fresh-launch reservation is also unpinned, but has `launch: true`: it requests no emission and is not evidence of a possible repeat.
 Unpinned claims and delivered closes preserve the entry's modification time, from which offered retention runs.
 The session-only Claude fallback claims by moving an entry into `fallback/` and writes no attempt.
@@ -165,11 +174,10 @@ The session-only Claude fallback claims by moving an entry into `fallback/` and 
 | `shuttle inbox put <address> <message-id> <text>` | Enqueue, with `--source`, `--turn`, `--session`, `--if-costly`, `--not-before`, `--from` and `--derived`; silent on success |
 | `shuttle inbox pending <address>...` | JSON address → pending count; unreadable addresses are named on stderr and omitted |
 | `shuttle inbox ls <address>` | Pending entries oldest first; `--json` includes wishes, queued time, sender and open attempt |
-| `shuttle inbox consume <fiber-key> <address-or-dash> <epoch> [--idle] [--costly]` | Consume for the current receiver; one JSON object with `action` (`wait`, `wake`, `fresh`) and selected `members` when applicable |
-| `shuttle inbox turn-pending <fiber-key>` | Daemon-internal JSON `pending` boolean: whether a due turn-asking entry exists |
+| `shuttle inbox consume <fiber-key> <address-or-dash> <epoch> [--idle] [--costly]` | Consume for the current receiver; one JSON object with `action` (`wait`, `wake`, `fresh`), the `members` sent or reserved, and `turn` when an entry asks for a turn the worker's facts would decide. The answer is printed even when an open batch's send fails, which exits nonzero |
 
 All verbs act on this host's inbox only.
-`context-mailbox put` also accepts thread signals, reply and notification fields, and `--turn`/`--if-costly`; its `--wake` means `turn: force`.
+`context-mailbox put` also accepts thread signals, reply and notification fields, `--turn` and `--derived`; its `--wake` means `turn: force`.
 `context-mailbox deliver` is consume with the idle fact unknown: only force initiates a wake, while ask remains hook context.
 `context-mailbox pending` shares the inbox counting code.
 `shuttle inbox` with no subcommand is the speaker's held-lines inbox ([CLI reference](../reference/cli.md)).

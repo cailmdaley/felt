@@ -275,8 +275,7 @@ is then given back to the human rather than closed.
 | `shuttle say "<text>"` | Queue a spoken line on the speaker host, in the voice of the calling worker's role (its charter's `voice:`); playback waits behind queued lines and while the human talks, and a line whose card is out of view is held until its card is in view or `shuttle say --play` opens it. `--fiber` names the speaker from a plain terminal; `--voice` overrides the voice for this line. For voice conversations with the human only |
 | `shuttle voices` | List the voice bank and pocket-tts built-ins on the speaker host, each with the role whose charter claims it |
 | `shuttle say --held` | List spoken lines held because their card is out of view; `shuttle say --play` opens the card waiting longest (routes Listen to it and plays its lines), `--next` moves to the next card, `--stop` leaves the rest held |
-| `shuttle inbox consume <fiber-key> <address-or-dash> <epoch> [--idle] [--costly]` | Consume one live-worker batch; JSON action is `wait`, `wake` or `fresh` |
-| `shuttle inbox turn-pending <fiber-key>` | Daemon-internal JSON boolean reporting due turn-asking entries |
+| `shuttle inbox consume <fiber-key> <address-or-dash> <epoch> [--idle] [--costly]` | Consume a fiber's inbox for its live worker; JSON action is `wait`, `wake` or `fresh`, with `turn` when the worker's idle and cost facts would decide |
 | `shuttle inbox put <address> <message-id> <text>` | Enqueue an entry in this host's inbox for a fiber key or a session's `shuttle://` address, with its delivery wishes (`--source`, `--turn`, `--session`, `--if-costly`, `--not-before`), `--from` and `--derived`; see [The inbox](../dev/inbox.md) |
 | `shuttle inbox pending <address>...` | Print one JSON object of each address's pending entry count |
 | `shuttle inbox ls <address>` | List an address's pending entries, oldest first: id, source, turn, not_before, queued time and sender (`--json`) |
