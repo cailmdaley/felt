@@ -857,6 +857,8 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     assert_receive {:delivery, %{fiber_id: "fiber-a"}}
     stop_supervised!(TranscriptRelay)
     start_supervised!({TranscriptRelay, Keyword.put(c.opts, :deliver, deliver)})
+    # Recovery runs in handle_continue before the worker registers itself.
+    :sys.get_state(Module.concat(c.name, Coordinator))
 
     assert %{last: %{"status" => "unconfirmed"}} =
              TranscriptRelay.status("launch", server: c.name)

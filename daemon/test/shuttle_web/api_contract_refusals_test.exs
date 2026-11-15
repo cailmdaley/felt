@@ -70,7 +70,6 @@ defmodule ShuttleWeb.ApiContractRefusalsTest do
           Jason.encode!(%{
             fiber_id: "work/item",
             text: "Continue",
-            live_input: true,
             message_after_launch: true
           })
         )
