@@ -174,8 +174,10 @@ With only the text, the command finds the sender's own fiber through the same wo
 An explicit instant not in the future is refused.
 The flags are mutually exclusive.
 
-The CLI resolves the instant once to UTC RFC 3339 and keeps it under the message id in `message-schedules/` in its data directory.
-A retry with that id and the same schedule uses that instant, even after it passes; a different schedule conflicts.
+The CLI resolves the instant once per run to UTC RFC 3339 and prints it with the message id before sending.
+A retry that must name the same publication passes both: `--message-id <id> --at <that UTC instant>`.
+Repeating `--in 8h` resolves a new instant, which the owner refuses as a `message_id_conflict` that points at `--at`.
+A delayed retry of an id the owner has already delivered or cancelled is refused as `already_settled`, naming which.
 The receipt says `scheduled` and prints the sender-local time and UTC.
 `--wake` requests `turn: force`, `--context-only` requests `turn: none`, and the default requests `turn: ask` with `if_costly: fresh`.
 A large, cold idle session therefore gets a gated fresh replacement rather than holding a reminder indefinitely as context; when that replacement is refused, the existing worker is woken regardless of cost.
@@ -189,7 +191,7 @@ A future entry causes no ask clear, family-board message row, launch reservation
 Every poll consumes live workers and scans dormant fibers with `inbox pending --waking`, whose count excludes future entries.
 The first poll at or after the instant applies the ordinary consumer rule.
 Staleness age starts at the later of `queued_at` and `not_before`, not when the reminder was written.
-Retention never expires a pending entry before that time.
+Retention expires only thread notices, which are never delayed.
 
 The table describes a due default (`ask`) reminder, from `Delivery.flush_owned`, `Delivery.inbox_gate`, `Poller.inbox_admission` and `Consume`.
 A `force` reminder skips cost and hook windows; a `none` reminder waits as context and never starts a worker.
@@ -208,11 +210,12 @@ A `force` reminder skips cost and hook windows; a `none` reminder waits as conte
 | Owner unreachable | Sending/listing/cancelling fails with the host named; an entry already accepted on that owner stays durable and is consumed when it returns, subject to quarantine |
 
 `shuttle inbox ls <fiber> --scheduled` shows all pending entries with a `not_before`, including overdue ones, with time, sender, first text line and an overdue wait reason.
-Fiber ids, slugs and uids resolve through the owner to its host-local `<store>:<uid>` key; raw keys remain owner-local.
-`shuttle inbox cancel <fiber> <message-id>` moves a pending entry to `offered/` with disposition `cancelled` under the inbox lock.
+The reason is the one a `/deliver` receipt would give: the agent gate or launch admission refusal the next poll would meet, or the worker that has yet to take the entry.
+Fiber ids, slugs and uids resolve through the owner to its host-local `<store>:<uid>` key, and a reference that names no fiber is an error; a raw key (a store path and uid, a `shuttle://` address or `threads`) reads this host.
+`shuttle inbox cancel <fiber> <message-id>` marks a pending entry `cancelled` and moves it to `offered/`, under the inbox lock.
 An entry already in a transport attempt is refused as `in_flight`: cancellation cannot retract text already emitted.
 Both fiber-reference commands use the owner-routed `/api/v1/inbox` endpoint (`action: list|cancel`); an unreachable owner is an error, never an archive fallback.
-The owner's snapshot includes each fiber's scheduled count, next time and first lines, and its live feed carries the entries for the Desk's expandable scheduled chip.
+The poll's one `inbox pending` call reports each owned fiber's due count and its scheduled entries; the owner feed carries the entries to the Desk's expandable scheduled chip, and a future entry does not count as waiting for a worker.
 
 **Rollback below contract 45 is unsafe while delayed entries are pending.**
 An older daemon can ignore the delay and deliver a pending entry immediately.
@@ -292,7 +295,7 @@ Rolling forward keeps the inbox's earlier baseline and imports what contract 40 
 ## Readers
 
 Every reader skips entries whose `not_before` is in the future.
-`PendingCount` includes them; `OverdueFiberContext` measures age from the later of `queued_at` and `not_before`.
+`inbox pending` counts only due entries and lists the scheduled ones beside the count; `OverdueFiberContext` measures age from the later of `queued_at` and `not_before`.
 Session native-wake recovery starts its 30-second hook window at that same later time.
 
 ### The live fiber consumer
