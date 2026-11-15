@@ -582,11 +582,151 @@ defmodule ShuttleWeb.DeliverControllerTest do
     refute run_script() =~ "me: Claude hello"
   end
 
+  test "voice records bypass quarantine and survive an owner restart without another paste" do
+    fiber = "tests/voice-once"
+    put_constitution(fiber)
+    :sys.replace_state(Shuttle.Env.server(Poller), &%{&1 | boot_quarantine: true})
+    batch = %{fiber_id: fiber, origin: nil, message_id: "voice-once", text: "spoken command"}
+    assert {200, %{delivered: true}} = Shuttle.Voice.TranscriptRelay.Worker.deliver(batch)
+    assert run_script() =~ "From User:\nspoken command"
+
+    # The owner dies after recording the next line, before it can paste it.
+    assert {:ok, _} =
+             Shuttle.CLI.run(
+               [
+                 "inbox",
+                 "record-begin",
+                 "--source",
+                 "voice",
+                 "--",
+                 inbox_key(fiber),
+                 "voice-interrupted"
+               ],
+               input: "interrupted command",
+               input_eof: true
+             )
+
+    GenServer.stop(Shuttle.Env.server(Poller))
+
+    {:ok, poller} =
+      start_poller!(
+        runner: MockRunner,
+        poll_interval_ms: 600_000,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    await_boot_cycle!(poller)
+    before = MockRunner.commands()
+
+    assert {200, %{duplicate: true, disposition: "delivered"}} =
+             Shuttle.Voice.TranscriptRelay.Worker.deliver(batch)
+
+    assert {200, %{duplicate: true, disposition: "unknown", delivered: nil}} =
+             Shuttle.Voice.TranscriptRelay.Worker.deliver(%{
+               batch
+               | message_id: "voice-interrupted",
+                 text: "interrupted command"
+             })
+
+    assert Enum.count(MockRunner.commands() -- before, fn {cmd, args} ->
+             cmd == "tmux" and match?(["load-buffer" | _], args)
+           end) == 0
+  end
+
+  test "a 43 relay keeps the 42 voice envelope and waits to import until its owner upgrades" do
+    stub_forward(
+      "voice-owner",
+      "http://localhost:4002",
+      {:ok, 200, Jason.encode!(%{delivered: true, delivery: "input"})},
+      StubPostClient
+    )
+
+    StubPostClient.set_get_response({:ok, Jason.encode!(%{contract_level: 42})})
+
+    batch = %{
+      fiber_id: "frozen-fiber",
+      origin: "voice-owner",
+      message_id: "voice-mixed",
+      text: "words"
+    }
+
+    assert {200, _} = Shuttle.Voice.TranscriptRelay.Worker.deliver(batch)
+
+    assert Jason.decode!(StubPostClient.last().body) == %{
+             "fiber_id" => "frozen-fiber",
+             "text" => "words",
+             "from" => "shuttle",
+             "message_id" => "voice-mixed",
+             "message_after_launch" => false,
+             "live_input" => true
+           }
+
+    assert {200, %{duplicate: true}} = Shuttle.Voice.TranscriptRelay.Worker.deliver(batch)
+
+    assert {:retry, :owner_cannot_import_voice} =
+             Shuttle.Voice.TranscriptRelay.Worker.deliver(Map.put(batch, :record_only, true))
+
+    assert [_] = StubPostClient.posts()
+    StubPostClient.set_get_response({:ok, Jason.encode!(%{contract_level: 43})})
+
+    assert {200, _} =
+             Shuttle.Voice.TranscriptRelay.Worker.deliver(Map.put(batch, :record_only, true))
+
+    assert Jason.decode!(StubPostClient.last().body)["voice_record_only"] == true
+  end
+
+  test "a remote voice handoff interrupted after its record is never forwarded again" do
+    parent = self()
+
+    task =
+      Task.async(fn ->
+        Shuttle.InboxRecord.forward_voice("words", "voice-forward-crash", fn ->
+          send(parent, :forward_started)
+
+          receive do
+            :finish -> {200, %{delivered: true}}
+          end
+        end)
+      end)
+
+    assert_receive :forward_started
+    Task.shutdown(task, :brutal_kill)
+
+    assert {:duplicate, "voice-forward-crash", "unknown"} =
+             Shuttle.InboxRecord.forward_voice("words", "voice-forward-crash", fn ->
+               flunk("forwarded twice")
+             end)
+  end
+
+  test "an attempted voice batch imports an unknown record without pasting" do
+    fiber = "tests/voice-import"
+    put_constitution(fiber)
+
+    batch = %{
+      fiber_id: fiber,
+      origin: nil,
+      message_id: "voice-upgrade",
+      text: "old command",
+      record_only: true
+    }
+
+    assert {200, %{duplicate: true, disposition: "unknown"}} =
+             Shuttle.Voice.TranscriptRelay.Worker.deliver(batch)
+
+    assert {200, %{duplicate: true, disposition: "unknown"}} =
+             Shuttle.Voice.TranscriptRelay.Worker.deliver(Map.delete(batch, :record_only))
+
+    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+             cmd == "tmux" and
+               (match?(["load-buffer" | _], args) or match?(["new-session" | _], args))
+           end)
+  end
+
   test "voice delivery starts a never-run card with the same plain text as a composer send" do
     fiber = "tests/voice-fresh"
     put_constitution(fiber)
 
-    assert {200, %{delivered: true, delivery: "dispatch"}} =
+    assert {200, %{delivered: true, delivery: "input"}} =
              Shuttle.Voice.TranscriptRelay.Worker.deliver(%{
                fiber_id: fiber,
                origin: nil,
@@ -608,7 +748,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
 
     Env.put_app_env(:voice_target_entries, fn -> [] end)
 
-    assert {200, %{delivered: true, delivery: "resume"}} =
+    assert {200, %{delivered: true, delivery: "input"}} =
              Shuttle.Voice.TranscriptRelay.Worker.deliver(%{
                fiber_id: fiber,
                origin: nil,

@@ -23,7 +23,7 @@ import (
 // answering whether this call may transport it and the record's disposition.
 // Only the call that writes the record may; a repeated id answers false with
 // the stored disposition, unless its record was settled undeliverable, which
-// may be submitted again. Text over the inbox limit is recorded cut short; the
+// may be submitted again except for voice (a spoken id never pastes twice). Text over the inbox limit is recorded cut short; the
 // transport carries it whole.
 func BeginRecord(env *sysenv.Env, address, id, from, text string, sources ...string) (bool, string, error) {
 	root, err := inboxRoot(env, address)
@@ -37,7 +37,7 @@ func BeginRecord(env *sysenv.Env, address, id, from, text string, sources ...str
 	defer unlock()
 	path := recordPath(root, id)
 	stored, err := readFiberMailboxEntry(path)
-	if err == nil && stored.Disposition != "undeliverable" {
+	if err == nil && (stored.Disposition != "undeliverable" || stored.Wishes.Source == "voice") {
 		return false, stored.Disposition, nil
 	}
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -133,7 +133,7 @@ func HumanRecordFor(env *sysenv.Env, harness, id, host, prompt string, window ti
 				continue
 			}
 			e, err := readFiberMailboxEntry(filepath.Join(offered, file.Name()))
-			if err != nil || e.Wishes.Source != "human" || e.Disposition == "" || e.QueuedAt < since.UnixNano() || e.QueuedAt <= newest {
+			if err != nil || (e.Wishes.Source != "human" && e.Wishes.Source != "voice") || e.Disposition == "" || e.QueuedAt < since.UnixNano() || e.QueuedAt <= newest {
 				continue
 			}
 			if strings.TrimSpace(e.Request.Text) == text {

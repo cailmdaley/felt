@@ -403,7 +403,13 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
         "routes_path" => Path.join(c.root, "routes.jsonl"),
         "ended" => true,
         "outbox" => [
-          %{"fiber_id" => "fiber-a", "origin" => "owner", "text" => word, "message_id" => launch}
+          %{
+            "fiber_id" => "fiber-a",
+            "origin" => "owner",
+            "text" => word,
+            "message_id" => launch,
+            "attempted" => launch == "old"
+          }
         ]
       }
 
@@ -421,10 +427,10 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     end
 
     start_supervised!({TranscriptRelay, Keyword.put(c.opts, :deliver, deliver)})
-    assert_receive {:attempt, old, %{text: "old"}}
+    assert_receive {:attempt, old, %{text: "old", record_only: true}}
     refute_receive {:attempt, _, _}, 20
     send(old, :accept)
-    assert_receive {:attempt, new, %{text: "new"}}
+    assert_receive {:attempt, new, %{text: "new", record_only: false}}
     send(new, :accept)
   end
 
@@ -784,7 +790,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     assert text =~ "buffered words more words are added"
   end
 
-  test "a failed acknowledgement write does not replay voice after restart", c do
+  test "a failed acknowledgement write repeats the same inbox handoff after restart", c do
     routes = Path.join(c.root, "routes.jsonl")
     route(routes, "2026-11-06T10:00:00Z", "fiber-a")
     File.write!(c.path, "")
@@ -802,10 +808,9 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     File.rmdir!(Shuttle.Voice.last_path())
     start_supervised!({TranscriptRelay, c.opts})
 
-    assert %{last: %{"status" => "unconfirmed", "fiber_id" => "fiber-a"}} =
-             TranscriptRelay.status("launch", server: c.name)
-
-    refute_receive {:delivery, _}, 100
+    assert_receive {:delivery, recovered}
+    assert recovered.message_id == first.message_id
+    assert recovered.text == first.text
   end
 
   test "a delivery task exiting after its side effect leaves voice unconfirmed and is not replayed",

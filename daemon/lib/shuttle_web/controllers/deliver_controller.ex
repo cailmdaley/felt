@@ -11,8 +11,8 @@ defmodule ShuttleWeb.DeliverController do
   (`Shuttle.Delivery.fresh/3`): 200 `{delivery: "fresh", delivered: true}`,
   202 with `delivered` null when the start is unconfirmed, or 409 with the
   refusal's `reason` and `error`. Human text is recorded there before typed
-  input or a From User launch prompt transports it. `live_input` and
-  `message_after_launch` use the session delivery path. A request carrying
+  input or a From User launch prompt transports it. `live_input` records voice
+  as human input; explicit `message_after_launch` uses the session delivery path. A request carrying
   `origin` is forwarded to that owner's identical route.
 
   With `context_only` (and a `message_id`), `text` is queued in the fiber's
@@ -57,6 +57,7 @@ defmodule ShuttleWeb.DeliverController do
           "message_id",
           "message_after_launch",
           "live_input",
+          "voice_record_only",
           "notify_address",
           "notify_when_idle",
           "notify_wake",
@@ -103,7 +104,21 @@ defmodule ShuttleWeb.DeliverController do
     end
   end
 
-  defp local(fiber_id, text, from, context) do
+  defp local(fiber_id, text, from, %{"message_after_launch" => true} = context),
+    do: local_other(fiber_id, text, from, context)
+
+  defp local(fiber_id, text, _from, %{"live_input" => true} = context) do
+    Delivery.human(fiber_id, text,
+      message_id: context["message_id"],
+      source: "voice",
+      record_only: context["voice_record_only"] == true
+    )
+    |> reply(fiber_id)
+  end
+
+  defp local(fiber_id, text, from, context), do: local_other(fiber_id, text, from, context)
+
+  defp local_other(fiber_id, text, from, context) do
     if from != "human" and context["resume_mode"] == "fresh" do
       Delivery.fresh(fiber_id, text, from: from, message_id: context["message_id"])
       |> reply(fiber_id)

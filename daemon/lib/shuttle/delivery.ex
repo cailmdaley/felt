@@ -10,8 +10,8 @@ defmodule Shuttle.Delivery do
   (`fresh/3`) are recorded and deduplicated in that inbox
   (`Shuttle.InboxRecord`), then transported as typed input or a launch
   prompt. Human launches keep the board's forced-start authority; a fresh
-  request passes the agent gate. `deliver/3` handles voice
-  and explicit launch-then-message callers through their session transports.
+  request passes the agent gate. Voice uses `human/3` with source `voice`.
+  `deliver/3` handles explicit launch-then-message callers through their session transports.
 
   A conversation a human resumed from the card is its worker
   (`Shuttle.SessionResume`), so it is addressed like any other.
@@ -53,17 +53,33 @@ defmodule Shuttle.Delivery do
     end
 
     result =
-      Shuttle.InboxRecord.submit(fiber_id, text, opts[:message_id], "human", fn _entry ->
-        mode =
-          opts[:resume_mode] || if(Poller.live_worker(fiber_id), do: "previous", else: "continue")
+      Shuttle.InboxRecord.submit(
+        fiber_id,
+        text,
+        opts[:message_id],
+        "human",
+        fn _entry ->
+          mode =
+            opts[:resume_mode] ||
+              cond do
+                Poller.live_worker(fiber_id) -> "previous"
+                opts[:source] == "voice" -> "resume_or_start"
+                true -> "continue"
+              end
 
-        # A worker that appeared between the look and the launch takes the
-        # line as typed input.
-        case dispatch.(mode) do
-          {:error, :already_running} when mode == "continue" -> dispatch.("previous")
-          result -> result
-        end
-      end)
+          # A worker that appeared between the look and the launch takes the
+          # line as typed input.
+          case dispatch.(mode) do
+            {:error, :already_running} when mode in ["continue", "resume_or_start"] ->
+              dispatch.("previous")
+
+            result ->
+              result
+          end
+        end,
+        source: opts[:source],
+        record_only: opts[:record_only]
+      )
 
     {:human, result}
   end
@@ -158,9 +174,8 @@ defmodule Shuttle.Delivery do
     {:input, result}
   end
 
-  # A transcript batch is always a native message, including the first one to
-  # a dormant constitution. Its message_id therefore has the same durable
-  # receipt whether the daemon dies before or after the worker starts.
+  # Explicit launch-then-message callers use native session messaging even
+  # when the worker must start before its conversation can be addressed.
   defp launch_then_message(fiber_id, text, opts) do
     result =
       Poller.dispatch_fiber(fiber_id,

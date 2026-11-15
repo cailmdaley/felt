@@ -86,7 +86,7 @@ Attachments are retained under the owner's `message-files/`; the entry contains 
 A plain agent `/deliver` does the same, minting an id when the caller supplies none.
 The owner clears the fiber's outstanding ask when an entry from a sender other than `shuttle` reaches its inbox, including a remote sender.
 Session-addressed messages and idle and mail-failure notices keep their direct transports and `messages/` receipts.
-Voice (`live_input`) and explicit `message_after_launch` requests use their session delivery paths.
+Voice (`live_input`) uses human records and typed input; explicit `message_after_launch` requests use their session delivery paths.
 
 `/deliver` adds `consumed` for a live worker: the consumer's `action`, `members`, `followup` and `held: cost`, and `message`, this message's state after the pass (`consume --message`): `delivered`, `sent` (its outcome not yet confirmed), `reserved` for a launch, `pending`, or `unknown` when the inbox no longer holds it as delivered (it expired, which consume records on the offered entry as disposition `expired`, or was never stored), which `/deliver` answers as `queued` with `delivered: null`.
 The status describes this message, not whatever else the pass sent: `woken`, `followed_up`, `delivered` (as context, or before a retry), `held`, `starting` or `queued`, which the CLI prints.
@@ -132,7 +132,24 @@ Rolling a host back to 41 leaves inbox text and attempts on disk, but its consum
 Records already in offered remain, but a 41 daemon does not use them to deduplicate: retrying a board line there can paste twice, and retrying a `--fresh` id starts another session, with forced-start authority.
 Rolling forward resumes the recorded inbox state.
 
-### Pulses and contract 43
+### Voice, pulses and contract 43
+
+A spoken batch is a human line with source `voice` and the relay's stable `voice-…` id.
+It has the human's forced-start authority, including through quarantine, and reaches the frozen fiber's current worker as typed input, or a dormant conversation's From User launch prompt.
+The record writes the batch's one `human` or `answered` family-board row; `HumanRecordFor` matches voice as well as human records, so the prompt hook replaces that row instead of adding another.
+A voice record is never re-pasted under its id, even when settled undeliverable.
+The relay keeps ingestion checkpoints, buffers and frozen batches in per-fiber/origin order, but keeps no new `attempted` flags or delivery receipts.
+Recovery repeats the record handoff under the same id; the owner's record, not the relay, decides whether it may paste.
+An `attempted` batch from contract 42 imports as an unknown record without a paste, and the relay removes it only after the owner confirms that record.
+A failed import stays in the relay for another poll.
+
+Normal voice forwarding keeps contract 42's `live_input` envelope, so a 43 relay can send to a 42 owner.
+Before a remote handoff, the relay writes an offered voice record under the same id in its `voice-forwards` inbox, without a board row.
+That record keeps forwarding at-most-once even when the owner runs 42 and cannot record voice itself, and when the owner upgrades before a recovered handoff.
+A crash or lost reply leaves the forward unknown and never forwards that batch again.
+The owner's prompt hook supplies the board row on 42; a 43 owner writes it with the fiber's record.
+Import-only forwarding adds `voice_record_only` only after the owner answers `/version` with contract 43 or above; an older or unreachable owner leaves the attempted batch waiting without a paste.
+
 
 A pulse keeps its clock, busy-worker skips, cost-independent wake, window rollover and Claude completion reservation in `pulses.json` and `Shuttle.Pulse`.
 Its delivery is an offered inbox record, source `pulse`, sender `shuttle`, identified by the pulse key and reserved `next_tick`, not the send clock.
@@ -140,6 +157,13 @@ The daemon records before sending and settles from the transport outcome; an unk
 A tick for a dormant worker carries its text in the launch prompt.
 Pulse transport uses `message --recorded`, without a `messages/` receipt.
 Contract 43 adds that flag and `inbox record-begin --source`.
+
+To roll back to 42, stop voice capture and let relay batches drain while their owners still run 43; keep any attempted imports for older or unreachable owners on 43 until they can complete.
+Pause pulses before the rollback and retain `pulses.json` and the inbox directories.
+Contract 42 ignores voice and pulse records for transport deduplication, so do not retry an old voice id there: it can paste twice.
+An interrupted 43 relay batch has no `attempted` flag, so a 42 relay can paste it again even though its owner's inbox holds an unknown record; do not resume such a relay on 42.
+Claude completion reservations remain readable by 42, but pulse transport there again writes `messages/` receipts.
+Rolling forward restores record-based deduplication; rollback is not transparent for in-flight voice.
 
 ## Thread results and routing
 
@@ -366,7 +390,7 @@ The session-only Claude fallback claims by moving an entry into `fallback/` and 
 | `shuttle inbox route <id> --current true\|false\|unknown [--record <json> [--key <key>]]` | Advance one routing entry from the daemon's fresh facts: the resolved recipient's `record`, and its inbox `key` when the daemon owns it; print `action`: `wait`, `forward` or `session` with the entry's `record`, or the disposition it recorded (`placed`, `superseded`, `expired`) |
 | `shuttle inbox settle <id> forwarded\|delivered\|undeliverable` | Record a routing entry's confirmed handoff and move it to offered |
 
-`shuttle inbox record-begin [--from <sender>] [--fiber <uid> [--ask <question>]] <fiber-key> <id>` records a line the daemon transports itself (typed human input, the default sender, or an agent's fresh request), read from stdin, and with `--fiber` writes a human line's board row, and prints `{"created": true|false, "disposition": "unknown"|"delivered"|"undeliverable"}`: only the call that created it may transport it, and a repeat gets the stored disposition.
+`shuttle inbox record-begin [--from <sender>] [--source human|voice|pulse|message] [--fiber <uid> [--ask <question>]] <fiber-key> <id>` records a line the daemon transports itself (typed or spoken human input, a pulse tick, or an agent's fresh request), read from stdin, and with `--fiber` writes a human line's board row, and prints `{"created": true|false, "disposition": "unknown"|"delivered"|"undeliverable"}`: only the call that created it may transport it, and a repeat gets the stored disposition.
 `shuttle inbox record-settle <fiber-key> <id> delivered|unknown|undeliverable` records its transport outcome.
 All verbs act on this host's inbox only.
 `context-mailbox put` also accepts thread signals, reply and notification fields, `--turn`, `--derived` and `--attachments-stdin` (a JSON attachment array); its `--wake` means `turn: force`.

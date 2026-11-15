@@ -363,8 +363,12 @@ func TestBoardDigestCombinedWithMailbox(t *testing.T) {
 // rewrites under the same identity (as the question's one answered row when
 // it answers one). A line typed in the terminal keeps the hook's own row.
 func TestBoardLineKeepsOneRow(t *testing.T) {
-	for _, ask := range []bool{false, true} {
-		t.Run(fmt.Sprintf("ask=%v", ask), func(t *testing.T) {
+	for _, tc := range []struct {
+		source string
+		ask    bool
+	}{{"human", false}, {"human", true}, {"voice", false}, {"voice", true}} {
+		ask := tc.ask
+		t.Run(fmt.Sprintf("%s/ask=%v", tc.source, ask), func(t *testing.T) {
 			env := messageHookEnv(t, "host")
 			env.Set("SHUTTLE_EVENTS", "")
 			sink := filepath.Join(t.TempDir(), "events.jsonl")
@@ -387,7 +391,7 @@ func TestBoardLineKeepsOneRow(t *testing.T) {
 			if _, err := messaging.TransitionFiberReceiver(env, key, "host", "worker-1", "shuttle://host/claude/session"); err != nil {
 				t.Fatal(err)
 			}
-			begin := []string{"inbox", "record-begin", "--fiber", fiber.UID}
+			begin := []string{"inbox", "record-begin", "--source", tc.source, "--fiber", fiber.UID}
 			if ask {
 				begin = append(begin, "--ask", "Which?")
 			}

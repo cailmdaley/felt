@@ -65,7 +65,14 @@ defmodule ShuttleWeb.ApiContractRefusalsTest do
         post(
           api_conn(),
           "/api/v1" <> path,
-          Jason.encode!(%{fiber_id: "work/item", text: "Continue", live_input: true})
+          # Explicit session delivery reaches the scripted launcher without
+          # a human/voice record's document lookup.
+          Jason.encode!(%{
+            fiber_id: "work/item",
+            text: "Continue",
+            live_input: true,
+            message_after_launch: true
+          })
         )
 
       assert conn.status == status

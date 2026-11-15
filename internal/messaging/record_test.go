@@ -24,6 +24,23 @@ func TestPulseRecordSurvivesInterruptedSend(t *testing.T) {
 	}
 }
 
+func TestVoiceRecordNeverAuthorizesAnotherPaste(t *testing.T) {
+	env := testEnv(t)
+	created, _, err := BeginRecord(env, "fiber", "voice-1", "human", "words", "voice")
+	if err != nil || !created {
+		t.Fatalf("%v %v", created, err)
+	}
+	for _, outcome := range []string{"unknown", "delivered", "undeliverable"} {
+		if err := SettleRecord(env, "fiber", "voice-1", outcome); err != nil {
+			t.Fatal(err)
+		}
+		created, disposition, err := BeginRecord(env, "fiber", "voice-1", "human", "words", "voice")
+		if err != nil || created || disposition != outcome {
+			t.Fatalf("%v %s %v", created, disposition, err)
+		}
+	}
+}
+
 func TestRecordDedupAndSettlement(t *testing.T) {
 	env := testEnv(t)
 	for i := 0; i < 3; i++ {

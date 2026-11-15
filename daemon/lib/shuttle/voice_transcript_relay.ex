@@ -272,18 +272,14 @@ defmodule Shuttle.Voice.TranscriptRelay.Coordinator do
 
   defp reserve_batches(config, state) do
     Enum.reduce(config["outbox"] || [], state, fn batch, acc ->
-      if batch["attempted"] do
-        acc
-      else
-        message = Map.new(~w(fiber_id origin text message_id)a, &{&1, batch[Atom.to_string(&1)]})
-        key = {message.fiber_id, message.origin}
+      message = Map.new(~w(fiber_id origin text message_id)a, &{&1, batch[Atom.to_string(&1)]})
+      key = {message.fiber_id, message.origin}
 
-        Map.update!(
-          acc,
-          :lanes,
-          &Map.update(&1, key, [{nil, message}], fn lane -> lane ++ [{nil, message}] end)
-        )
-      end
+      Map.update!(
+        acc,
+        :lanes,
+        &Map.update(&1, key, [{nil, message}], fn lane -> lane ++ [{nil, message}] end)
+      )
     end)
   end
 
@@ -426,7 +422,6 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
       timer: nil
     }
 
-    state = recover_attempted(state)
     send(Keyword.fetch!(opts, :coordinator), {:worker_started, config["launch"], self()})
     send(self(), :poll)
     {:ok, state}
@@ -1002,7 +997,6 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
       if batch["message_id"] in busy do
         acc
       else
-        acc = mark_attempted(acc, batch)
         deliver = state.deliver
 
         task =
@@ -1011,7 +1005,8 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
               fiber_id: batch["fiber_id"],
               origin: batch["origin"],
               text: batch["text"],
-              message_id: batch["message_id"]
+              message_id: batch["message_id"],
+              record_only: batch["attempted"] == true
             })
           end)
 
@@ -1024,38 +1019,12 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
     end)
   end
 
-  # Persist before the side effect: a crash can lose a batch, but cannot paste it twice.
-  defp mark_attempted(state, batch) do
-    outbox =
-      Enum.map(state.config["outbox"], fn item ->
-        if item["message_id"] == batch["message_id"],
-          do: Map.put(item, "attempted", true),
-          else: item
-      end)
-
-    persist!(%{state | config: Map.put(state.config, "outbox", outbox)})
-  end
-
-  defp recover_attempted(state) do
-    {attempted, remaining} = Enum.split_with(state.config["outbox"], & &1["attempted"])
-
-    case List.last(attempted) do
-      nil ->
-        state
-
-      batch ->
-        last = %{
-          "fiber_id" => batch["fiber_id"],
-          "at" => DateTime.to_iso8601(DateTime.utc_now()),
-          "status" => "unconfirmed",
-          "detail" => "The message may have arrived. The transcript retains the words."
-        }
-
-        :ok = Shuttle.FS.mkdir_p(Shuttle.data_dir())
-        :ok = Shuttle.FS.write_atomic(Shuttle.Voice.last_path(), Jason.encode!(last))
-        config = state.config |> Map.put("outbox", remaining) |> Map.put("last", last)
-        persist!(%{state | config: config})
-    end
+  defp complete(state, ref, {:retry, _reason}) do
+    %{
+      state
+      | tasks: Map.delete(state.tasks, ref),
+        task_handles: Map.delete(state.task_handles, ref)
+    }
   end
 
   defp complete(state, ref, result) do
@@ -1141,11 +1110,69 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
     %{state | persisted: state.config}
   end
 
-  def deliver(%{fiber_id: fiber_id, text: text, origin: origin, message_id: id}) do
-    ShuttleWeb.DeliverController.route(fiber_id, text, origin, "shuttle", %{
-      "message_id" => id,
-      "message_after_launch" => false,
-      "live_input" => true
-    })
+  def deliver(%{fiber_id: fiber_id, text: text, origin: origin, message_id: id} = batch) do
+    record_only = Map.get(batch, :record_only, false)
+
+    if record_only and not record_owner?(origin) do
+      {:retry, :owner_cannot_import_voice}
+    else
+      context = %{"message_id" => id, "message_after_launch" => false, "live_input" => true}
+      context = if record_only, do: Map.put(context, "voice_record_only", true), else: context
+
+      route = fn ->
+        ShuttleWeb.DeliverController.route(fiber_id, text, origin, "shuttle", context)
+      end
+
+      result =
+        if not record_only and match?({:remote, _}, Shuttle.OriginRouter.route(origin)) do
+          case Shuttle.InboxRecord.forward_voice(text, id, route) do
+            {:duplicate, _, disposition} ->
+              {200,
+               %{
+                 duplicate: true,
+                 disposition: disposition,
+                 delivered: if(disposition == "delivered", do: true)
+               }}
+
+            {:error, _} = error ->
+              {:retry, error}
+
+            result ->
+              result
+          end
+        else
+          route.()
+        end
+
+      case result do
+        {status, _} when status in 200..299 -> result
+        _ when record_only -> {:retry, result}
+        _ -> result
+      end
+    end
+  end
+
+  # Normal batches keep the contract-42 live_input wire. Import-only requests
+  # must never reach an owner that would interpret them as a paste.
+  defp record_owner?(origin) do
+    case Shuttle.OriginRouter.route(origin) do
+      :local ->
+        true
+
+      {:remote, remote} ->
+        with {:ok, body} <-
+               Shuttle.OriginRouter.forward_client().get(
+                 Shuttle.Remote.url_for(remote, "/api/v1/version"),
+                 5_000
+               ),
+             {:ok, %{"contract_level" => level}} <- Jason.decode(body) do
+          level >= 43
+        else
+          _ -> false
+        end
+
+      {:error, _} ->
+        false
+    end
   end
 end
