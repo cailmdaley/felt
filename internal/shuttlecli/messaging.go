@@ -281,7 +281,6 @@ exit 1 means rejected, unknown, or another command error.`,
 				if hostErr != nil {
 					return hostErr
 				}
-				messaging.SpawnIdleWatcher = a.spawnIdleWatcher
 				receipt, err = messaging.Send(cmd.Context(), a.env, host, request)
 				originalDetail := receipt.Detail
 				receipt = a.enrichUnavailableSession(request, receipt)

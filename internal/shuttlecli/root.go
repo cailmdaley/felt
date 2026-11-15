@@ -308,7 +308,14 @@ func addShuttleCommand(root, command *cobra.Command) {
 	root.AddCommand(command)
 }
 
-func Execute() { os.Exit(Run(sysenv.OS(), os.Args[1:])) }
+// Execute runs the shuttle binary. Every process that can deliver an entry
+// asking for an idle notice (a send, a fiber hook's claim, a consume) starts
+// the notice's watcher.
+func Execute() {
+	env := sysenv.OS()
+	messaging.SpawnIdleWatcher = newApp(env).spawnIdleWatcher
+	os.Exit(Run(env, os.Args[1:]))
+}
 
 // Run executes one shuttle invocation with args in env and returns its exit
 // code, printing a failure to env's stderr.
