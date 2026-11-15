@@ -852,6 +852,7 @@ export class KanbanModal {
    * content also moves with the clock.
    */
   private mountOrRefreshActiveView(): void {
+    this.paintAttention(true)
     if (this.activeViewId === 'desk' || !this.viewHostEl) return
     const view = getView(this.activeViewId)
     if (!view) return
@@ -868,6 +869,20 @@ export class KanbanModal {
       view.mount(this.viewHostEl, ctx)
     } else {
       view.refresh(ctx)
+    }
+  }
+
+  /**
+   * A view's tab carries a dot while the view holds something for the human
+   * they have not seen, from any view and over the reader. `poll` is a fresh
+   * read of the board, which lets a view keep its own reads going.
+   */
+  private paintAttention(poll: boolean): void {
+    const ctx = this.viewContext()
+    if (!ctx) return
+    for (const tab of this.tabsEl?.querySelectorAll<HTMLElement>('.kbn-viewtab') ?? []) {
+      const view = tab.dataset.view === 'desk' ? undefined : getView(tab.dataset.view as TemporalView['id'])
+      if (view?.attention) tab.toggleAttribute('data-attention', view.attention(ctx, poll ? () => this.paintAttention(false) : undefined))
     }
   }
 

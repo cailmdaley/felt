@@ -411,6 +411,35 @@ it('marks unread channels bold, and rules off what arrived since the last visit'
   expect(host.querySelector('[data-channel="channel:cmbx"]')!.hasAttribute('data-unread')).toBe(false)
 })
 
+it('marks a channel with something unread by a quiet dot, and lights Channels\' tab for any channel but the one being read, from anywhere', async () => {
+  const french = card({ id: 'french', uid: 'F', name: 'French lessons', shuttleChannel: 'french', shuttleSeat: true, ...working(3) })
+  BOARD.F = [record({ id: 'f1', kind: 'post', fiber: 'F', text: 'La leçon est prête.' }, 10)]
+  try {
+    const stored = new Map([['shuttle.channels.seen:channel:cmbx', String(Date.now())], ['shuttle.channels.seen:channel:french', String(Date.now() - 20 * minute)]])
+    daemon([], stored)
+    const { view, ctx, host } = await mount([chair, tsz, french])
+    const pick = (key: string) => host.querySelector<HTMLElement>(`[data-channel="${key}"]`)!
+    pick('channel:cmbx').click(); await settle()
+    // French said something after it was last read: an ink dot, not the owed dot of waiting.
+    expect(pick('channel:french').querySelector('.kbn-ch-pick-unread')).not.toBeNull()
+    expect(pick('channel:french').querySelector('.kbn-ch-pick-mark')).toBeNull()
+    expect(pick('channel:cmbx').querySelector('.kbn-ch-pick-unread')).toBeNull()
+    expect(view.attention(ctx)).toBe(true)
+    // Reading French, nothing elsewhere is new.
+    pick('channel:french').click(); await settle()
+    expect(view.attention(ctx)).toBe(false)
+    // Away from Channels, a fresh post anywhere lights the tab, the channel last read included.
+    view.unmount()
+    const ring = vi.fn()
+    expect(view.attention(ctx, ring)).toBe(false)
+    BOARD.F.push(record({ id: 'f2', kind: 'post', fiber: 'F', text: 'Et les exercices.' }, -1))
+    expect(view.attention(ctx, ring)).toBe(false)
+    await settle(); await settle(); await settle()
+    expect(ring).toHaveBeenCalled()
+    expect(view.attention(ctx)).toBe(true)
+  } finally { delete BOARD.F }
+})
+
 it('hides and shows the rail by its button, by [ and by sideways swipes, closes a thread by a swipe, and remembers the rail', async () => {
   const { stored } = daemon()
   const { view, host } = await mount()

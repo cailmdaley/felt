@@ -1828,6 +1828,8 @@ try {
       return thumb.el
     },
     MOCK_FEED: workspaceFixture?.feed ?? docsExample?.feed ?? MOCK_FEED,
+    /** Channels' board records and dismissals, for a journey to post into. */
+    channels: channelsFixture,
     temporal: docsExample?.temporal ?? workspaceFixture?.temporal ?? MOCK_TEMPORAL,
     requests: mockRequests,
     handlers: mockHandlers,

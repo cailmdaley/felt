@@ -233,6 +233,8 @@ export class ChannelsView implements TemporalView {
   private width: ResizeObserver | null = null
   private loaded = false
   private reading = false
+  /** Asks the board's bar to read {@link attention} again, once something that could change it has arrived. */
+  private ring: (() => void) | null = null
   private generation = 0
   private unsubscribe?: () => void
   private unsubscribeLibrary?: () => void
@@ -374,10 +376,10 @@ export class ChannelsView implements TemporalView {
     void ctx.sends?.refresh().catch(() => {})
     void this.read()
   }
-  private async read(): Promise<void> {
-    if (this.reading || !this.ctx) return
+  private async read(ctx = this.ctx): Promise<void> {
+    if (this.reading || !ctx) return
     this.reading = true
-    const generation = this.generation, base = this.ctx.shuttleBase
+    const generation = this.generation, base = ctx.shuttleBase
     const records = await getDaemonJson<{ dismissed: string[]; pinned?: Record<string, number>; order?: { keys: string[]; at: number } | null; reach_ms: number }>(`${base}/api/v1/channels/dismissed`)
       .then(value => ({ ok: true as const, value }), () => ({ ok: false as const }))
     if (generation !== this.generation) return
@@ -396,10 +398,36 @@ export class ChannelsView implements TemporalView {
     }
     this.status(records.ok ? '' : 'Some channel sources are unavailable — showing the last read.')
     this.draw()
+    this.ring?.()
     if (records.ok) this.keep()
     // Every channel in the rail reads its families, for what is new in it.
-    this.readFamilies(this.channels.filter(channel => channel.listed || channel.key === this.current))
+    this.readFamilies(this.compose(ctx).filter(channel => channel.listed || channel.key === this.current), ctx)
   }
+  /** The channels the board's cards make, with what the daemon keeps of their order, pins and dismissals. */
+  private compose(ctx: ViewContext): Channel[] {
+    const index = threadIndexFor(ctx.response)
+    return composeChannels({
+      cards: boardCards(ctx.response), parentOf: card => index.parentOf(card), names: this.names,
+      dismissed: [...this.dismissed, ...this.pending], pinned: this.pinned, opened: lastSeen, now: Date.now(),
+    })
+  }
+  /**
+   * Whether a channel other than the one being read waits on the human or has
+   * said something since they last read it: the dot on Channels' tab. Away
+   * from Channels no channel is being read, and each poll (which passes
+   * `ring`) keeps the channels' reads going here, ringing once what arrives
+   * could change the answer.
+   */
+  attention(ctx: ViewContext, ring?: () => void): boolean {
+    if (ring) {
+      this.ring = ring
+      if (!this.ctx) void this.read(ctx)
+    }
+    const reading = this.ctx ? this.current : null
+    return this.compose(ctx).some(channel => channel.listed && channel.key !== reading && (channel.waiting || this.unread(channel, ctx)))
+  }
+  /** Something in the channel arrived after the human last read it; a channel that has said nothing has nothing unread. */
+  private unread(channel: Channel, ctx = this.ctx): boolean { return this.newestSaid(channel, ctx) > Math.max(0, lastSeen(channel.key)) }
   private status(text: string): void { if (this.note) this.note.textContent = text }
   /** The order and the hides lapse with the board's reach, so while they stand they are written again. */
   private keep(): void {
@@ -413,8 +441,7 @@ export class ChannelsView implements TemporalView {
    * reach the first time), and redraws when any arrived. A remote record is
    * placed by its arrival here, so a late host is never behind the cursor.
    */
-  private readFamilies(channels: Channel[]): void {
-    const ctx = this.ctx
+  private readFamilies(channels: Channel[], ctx = this.ctx): void {
     if (!ctx) return
     const generation = this.generation
     for (const uid of new Set(channels.flatMap(channel => channel.families))) {
@@ -431,7 +458,7 @@ export class ChannelsView implements TemporalView {
         }
         // What fell out of the board's reach leaves with it.
         for (const [id, record] of feed.records) if ((record.received_at ?? record.timestamp) < reach) feed.records.delete(id)
-        if (feed.records.size !== known || failed) this.draw()
+        if (feed.records.size !== known || failed) { this.draw(); this.ring?.() }
       }, () => {
         if (generation !== this.generation || feed.failed) return
         feed.failed = true
@@ -443,7 +470,7 @@ export class ChannelsView implements TemporalView {
    * A channel's messages: its families' records (a record two of its families
    * share, once), the replies sent from here, its files and its chair's tapestry.
    */
-  private messages(channel: Channel): Message[] {
+  private messages(channel: Channel, ctx = this.ctx): Message[] {
     const records = new Map(channel.families.flatMap(uid => [...this.feeds.get(uid)?.records.values() ?? []]).map(record => [record.id, record]))
     // A reply sent from here stands in for the board's record of it until that arrives, for two minutes at most.
     const now = Date.now()
@@ -459,7 +486,7 @@ export class ChannelsView implements TemporalView {
     if (standing.length !== this.sent.length) this.sent = standing
     const replies = standing.map<BoardRecord>(sent => ({ id: `${BOARD_LINE}sent:${sent.fiber}:${sent.at}`, kind: 'human', timestamp: sent.at, fiber: sent.fiber, by: { label: 'human' }, text: sent.text }))
     return composeMessages({
-      channel, records: [...records.values(), ...replies], files: this.ctx?.sends?.files ?? [], cards: this.ctx ? boardCards(this.ctx.response) : undefined,
+      channel, records: [...records.values(), ...replies], files: ctx?.sends?.files ?? [], cards: ctx ? boardCards(ctx.response) : undefined,
       tapestry: this.tapestries.get(fiberOf(channel.seat))?.tapestry, now, reachMs: this.reachMs,
     })
   }
@@ -519,11 +546,7 @@ export class ChannelsView implements TemporalView {
     if (ctx.workspace?.isActive) { this.away = true; return }
     const returning = this.away
     this.away = false
-    const index = threadIndexFor(ctx.response)
-    this.channels = composeChannels({
-      cards: boardCards(ctx.response), parentOf: card => index.parentOf(card), names: this.names,
-      dismissed: [...this.dismissed, ...this.pending], pinned: this.pinned, opened: lastSeen, now: Date.now(),
-    })
+    this.channels = this.compose(ctx)
     if (!this.channels.some(channel => channel.key === this.current)) this.resume()
     this.drawRail()
     this.drawChannel()
@@ -623,11 +646,13 @@ export class ChannelsView implements TemporalView {
     // Nothing is rebuilt under an entry pressed or picked up; it is drawn once it lands.
     this.railStale = rail.moving
     if (rail.moving) return
-    const unread = (channel: Channel): boolean => channel.key !== this.current && this.newestSaid(channel) > lastSeen(channel.key)
+    const unread = (channel: Channel): boolean => channel.key !== this.current && this.unread(channel)
     // A poll that changed nothing in the rail leaves it be.
     const sig = JSON.stringify([this.query, this.current, listed.map(channel => [channel.key, channel.name, channel.title, channel.chaired, channel.waiting, !!channel.hidden, unread(channel)])])
     if (sig === this.sigs.rail) { this.drawFound(); return }
     this.sigs.rail = sig
+    // What the rail marks is what Channels' tab reads.
+    this.ring?.()
     for (const unbind of this.railBindings) unbind()
     this.railBindings = []
     const items: HTMLLIElement[] = []
@@ -646,6 +671,10 @@ export class ChannelsView implements TemporalView {
         const mark = el('span', 'kbn-ch-pick-mark')
         mark.title = 'Waiting on you'
         pick.append(mark)
+      } else if (unread(channel)) {
+        const mark = el('span', 'kbn-ch-pick-unread')
+        mark.title = 'New since you read it'
+        pick.append(mark)
       }
       pick.title = channel.waiting ? `${channel.title} — waiting on you` : channel.title
       if (channel.key === this.current) pick.setAttribute('aria-current', 'true')
@@ -661,8 +690,8 @@ export class ChannelsView implements TemporalView {
     this.drawFound()
   }
   /** When the newest thing a channel said, or began waiting on, arrived. */
-  private newestSaid(channel: Channel): number {
-    const said = this.messages(channel).filter(message => !message.quiet && !message.human)
+  private newestSaid(channel: Channel, ctx = this.ctx): number {
+    const said = this.messages(channel, ctx).filter(message => !message.quiet && !message.human)
     return Math.max(channel.newest, ...said.map(message => message.arrived))
   }
   /** The documents Jump to matches, across every channel and every fiber the fleet sent from. */

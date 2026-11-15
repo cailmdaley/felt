@@ -184,4 +184,47 @@ try {
   assert.deepEqual(errors, [])
   await context.close()
   console.log('Channels at half a screen: a thread in the channel\'s place with a way back, a worker\'s tapestry under its line and in its thread, an ask said once; screenshots saved')
+  {
+    // Unread is seen from anywhere: a fresh post in a channel not being read lights its rail dot and Channels' tab.
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' })
+    const page = await context.newPage()
+    const errors = []
+    page.on('pageerror', error => errors.push(error.message))
+    await page.goto(`${pathToFileURL(resolve('harness-board-dist/index.html'))}?example=channels#/channels`)
+    await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 8)
+    const tab = page.locator('.kbn-viewtab[data-view="channels"]')
+    // Every wait set aside, every channel read, ending in cmbx.
+    while (await page.locator('.kbn-ch-pick[data-waiting]').count()) {
+      await page.locator('.kbn-ch-pick[data-waiting]').first().click({ button: 'right' })
+      await page.locator('[role="menuitem"]', { hasText: 'Not now' }).click()
+      await page.waitForTimeout(100)
+    }
+    for (const name of [...await page.evaluate(channels), 'cmbx']) { await pick(page, name).click(); await page.waitForTimeout(150) }
+    assert.equal(await page.locator('.kbn-ch-pick-unread').count(), 0, 'nothing unread once each channel is read')
+    await page.evaluate(() => window.__harness.modal.fetchAndRender())
+    await page.waitForFunction(() => !document.querySelector('.kbn-viewtab[data-view="channels"]').hasAttribute('data-attention'))
+    const post = async text => page.evaluate(text => {
+      const board = window.__harness.channels.board, like = board.find(record => record.root === 'french') ?? board[0]
+      board.push({ ...like, id: `brd-fresh-${board.length}`, kind: 'post', fiber: 'french', by: { fiber: 'french' }, root: 'french', timestamp: Date.now() + 1000, received_at: Date.now() + 1000, text, files: [] })
+    }, text)
+    // Inside Channels, on another channel: the rail's quiet dot, and the tab's.
+    await post('Leçon trois est prête.')
+    await page.evaluate(() => window.__harness.modal.fetchAndRender())
+    await pick(page, 'french').locator('.kbn-ch-pick-unread').waitFor()
+    assert.equal(await pick(page, 'french').locator('.kbn-ch-pick-mark').count(), 0, 'unread is not the owed dot of waiting')
+    await page.waitForFunction(() => document.querySelector('.kbn-viewtab[data-view="channels"]').hasAttribute('data-attention'))
+    await shot(page, 'unread-rail')
+    await pick(page, 'french').click()
+    await page.waitForFunction(() => !document.querySelector('.kbn-viewtab[data-view="channels"]').hasAttribute('data-attention'))
+    // From the Desk, the channel last read included.
+    await page.locator('.kbn-viewtab[data-view="desk"]').click()
+    await post('Et les exercices.')
+    await page.evaluate(() => window.__harness.modal.fetchAndRender())
+    await page.waitForFunction(() => document.querySelector('.kbn-viewtab[data-view="channels"]').hasAttribute('data-attention'))
+    await shot(page, 'unread-tab')
+    assert.ok(await tab.isVisible())
+    assert.deepEqual(errors, [])
+    await context.close()
+    console.log('Channels unread: a fresh post in a channel not being read lights its rail dot and the Channels tab, from inside Channels and from the Desk')
+  }
 } finally { await browser.close() }

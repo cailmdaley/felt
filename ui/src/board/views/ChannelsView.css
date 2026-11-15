@@ -93,6 +93,8 @@
 .kbn-ch-pick[data-lone] .kbn-ch-pick-hash { opacity: 0.6; }
 /* Waiting on the human: a dot. */
 .kbn-ch-pick-mark { flex: none; align-self: center; width: 7px; height: 7px; border-radius: 50%; background: var(--kbn-owed-bright); box-shadow: 0 0 0 2px color-mix(in srgb, var(--kbn-owed-bright) 25%, transparent); }
+/* Something said since the human last read it: a quieter dot, in the ink. */
+.kbn-ch-pick-unread { flex: none; align-self: center; width: 6px; height: 6px; border-radius: 50%; background: var(--kbn-ink-soft); }
 /* What waits on the human floats above the human's order, a little apart from it. */
 .kbn-ch-rail-item[data-waiting]:has(+ .kbn-ch-rail-item:not([data-waiting])) { margin-bottom: 8px; }
 .kbn-ch-pick-hidden { flex: none; font: italic var(--type-label)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); }

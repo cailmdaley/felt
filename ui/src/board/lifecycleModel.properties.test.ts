@@ -119,6 +119,7 @@ class ModelOwner {
         return row ? Response.json({ host: 'model-host', fibers: [{ ...row, fiber: { ...(row.fiber as object), body: '' } }] }) : Response.json({ fibers: [] }, { status: 404 })
       }
       if (route === 'roles') return Response.json([])
+      if (route === 'channels/dismissed') return Response.json({ dismissed: [], reach_ms: 14 * 86_400_000 })
       return Response.json({ fibers: [], files: [], entries: [] })
     }
     const body = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>
