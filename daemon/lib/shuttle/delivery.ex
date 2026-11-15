@@ -290,8 +290,8 @@ defmodule Shuttle.Delivery do
   `{:ok, {:waiting, detail}}` saying what a waking entry waits for, or
   `{:ok, {:scheduled, not_before}}` for an entry not yet due, which is stored
   and nothing more: no consumption, launch or ask clearing. A delayed retry of
-  an id the inbox has already delivered or cancelled is refused, naming which. The put,
-  consumes and any launch share a 35-second budget, so an
+  an id the inbox has already delivered or cancelled is refused, naming which.
+  The put, consumes and any launch share a 35-second budget, so an
   owner answers inside a routing hub's forward
   (`Shuttle.OriginRouter.default_forward_timeout_ms/0`); clearing the ask runs
   beside them.
