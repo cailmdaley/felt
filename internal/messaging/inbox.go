@@ -46,15 +46,12 @@ type InboxEntry struct {
 	Request Request
 	Wishes  Wishes
 	Derived bool
-	// Routing holds a thread publication awaiting authoritative placement.
+	// Routing is a thread publication's routing record (ThreadEntry). An
+	// entry that carries one goes to the routing inbox and is admitted only
+	// inside the capture window (ThreadInboxState).
 	Routing map[string]any
-	// Created is set only when this call creates the entry.
-	Created        *bool
-	PossibleRepeat bool
-	// localTransfer moves a routed publication between this host's inboxes.
-	localTransfer bool
-	// importing preserves a backlog larger than the admission limit.
-	importing bool
+	// Created, when set, reports whether this call stored the entry.
+	Created *bool
 }
 
 // legacyTurn reads the turn wish from a request's wake fields, for an entry
@@ -169,25 +166,9 @@ func inboxRoot(env *sysenv.Env, address string) (string, error) {
 // no-op when the content and wishes match or the entry is Derived; otherwise it
 // is a message_id_conflict. A session inbox refuses an id already pending. A
 // thread notice past its retention is not stored for a fiber and refused as
-// expired for a session. Routed thread notices use the same durable entry
-// without requiring a live session registration; their consumer owns the
-// handoff, and hooks cannot offer them before routing is resolved.
+// expired for a session. A thread publication at or before the capture
+// baseline, or before the retention cutoff, is not stored.
 func Enqueue(env *sysenv.Env, e InboxEntry) error {
-	if e.Created != nil {
-		*e.Created = false
-	}
-	threadPublication := e.Routing != nil || (strings.HasPrefix(e.Request.MessageID, "thread-") && !strings.HasPrefix(e.Address, "shuttle://"))
-	if e.Derived && threadPublication && !e.localTransfer {
-		unlock, err := lockInbox(filepath.Join(dataDir(env), "mailboxes"))
-		if err != nil {
-			return err
-		}
-		defer unlock()
-		found, err := publicationExists(env, e.Request.MessageID)
-		if err != nil || found {
-			return err
-		}
-	}
 	r, w := e.Request, e.Wishes.withDefaults(e.Request)
 	session := strings.HasPrefix(e.Address, "shuttle://")
 	if r.MessageID == "" || len(r.Text) > 64<<10 || (!session && r.Text == "") {
@@ -205,7 +186,7 @@ func Enqueue(env *sysenv.Env, e InboxEntry) error {
 		return err
 	}
 	r.Wake, r.ContextIfBusy, r.IdleOnly = false, false, false
-	if session && e.Routing == nil {
+	if session {
 		a, _ := ParseAddress(e.Address)
 		if a.Harness != "claude" && a.Harness != "codex" && a.Harness != "pi" {
 			return errCode("unavailable", "harness has no Shuttle message hook")
@@ -221,11 +202,7 @@ func Enqueue(env *sysenv.Env, e InboxEntry) error {
 		}
 		r.Address = e.Address
 		r.ContextIfBusy = w.Turn == "ask" && a.Harness == "claude"
-		err := enqueueMailbox(root, mailboxEntry{Request: r, Wishes: w, QueuedAt: time.Now().UnixNano()}, true)
-		if err == nil && e.Created != nil {
-			*e.Created = true
-		}
-		return err
+		return enqueueMailbox(root, mailboxEntry{Request: r, Wishes: w, QueuedAt: time.Now().UnixNano()})
 	}
 	r.Wake = w.Turn == "force"
 	if err := ensureDir(root, 0700); err != nil {
@@ -264,15 +241,17 @@ func Enqueue(env *sysenv.Env, e InboxEntry) error {
 		if err != nil {
 			return err
 		}
-		if stamp := threadStamp(e.Routing); stamp != "" && !state.retains(stamp) {
+		if !state.admits(threadStamp(e.Routing)) {
 			return nil
 		}
 	}
-	err = enqueueMailbox(root, mailboxEntry{Request: r, Wishes: w, QueuedAt: time.Now().UnixNano(), Routing: e.Routing, PossibleRepeat: e.PossibleRepeat}, !e.importing)
-	if err == nil && e.Created != nil {
+	if err := enqueueMailbox(root, mailboxEntry{Request: r, Wishes: w, QueuedAt: time.Now().UnixNano(), Routing: e.Routing}); err != nil {
+		return err
+	}
+	if e.Created != nil {
 		*e.Created = true
 	}
-	return err
+	return nil
 }
 
 // sameWishes compares two entries' wishes. A turn the caller left unsaid
@@ -336,7 +315,7 @@ func WakingCount(env *sysenv.Env, address string) (int, error) {
 	}
 	n := 0
 	for _, it := range items {
-		if !it.entry.routingPending() && it.entry.Wishes.Turn != "none" && it.entry.due(now) {
+		if it.entry.Wishes.Turn != "none" && it.entry.due(now) {
 			n++
 		}
 	}

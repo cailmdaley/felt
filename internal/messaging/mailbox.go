@@ -97,9 +97,12 @@ func HookPIDIsAncestor(pid int) bool {
 // predates the attempt record ignores it and reads attempt_address and
 // possible_repeat, which are written beside it.
 type mailboxEntry struct {
-	Request     Request        `json:"request"`
-	Wishes      Wishes         `json:"wishes"`
-	QueuedAt    int64          `json:"queued_at"`
+	Request  Request `json:"request"`
+	Wishes   Wishes  `json:"wishes"`
+	QueuedAt int64   `json:"queued_at"`
+	// Routing and Disposition belong to the routing inbox's entries
+	// (thread_inbox.go): the publication's routing record, and the final
+	// routing outcome written before the entry moves to offered.
 	Routing     map[string]any `json:"routing,omitempty"`
 	Disposition string         `json:"disposition,omitempty"`
 	// Fallback records native write ownership and bounded preflight retries.
@@ -111,13 +114,6 @@ type mailboxEntry struct {
 	// successor with PossibleRepeat when its outcome cannot be established.
 	AttemptAddress string `json:"attempt_address,omitempty"`
 	PossibleRepeat bool   `json:"possible_repeat,omitempty"`
-}
-
-// routingPending excludes entries from workers until this host's daemon has
-// established local ownership. Ready entries retain routing so an owner move
-// before consumption can still forward the same publication.
-func (e mailboxEntry) routingPending() bool {
-	return e.Routing != nil && e.Routing["local"] != true
 }
 
 type mailboxPendingItem struct {
@@ -340,7 +336,7 @@ func queueMailbox(env *sysenv.Env, a Address, r Request) (Receipt, error) {
 	return Receipt{MessageID: r.MessageID, Address: r.Address, Status: StatusQueued, Transport: transport, Detail: detail}, nil
 }
 
-func enqueueMailbox(root string, entry mailboxEntry, bounded bool) error {
+func enqueueMailbox(root string, entry mailboxEntry) error {
 	dir := filepath.Join(root, "pending")
 	if err := ensureDir(dir, 0700); err != nil {
 		return err
@@ -354,7 +350,9 @@ func enqueueMailbox(root string, entry mailboxEntry, bounded bool) error {
 	if scanErr != nil && !errors.Is(scanErr, io.EOF) {
 		return scanErr
 	}
-	if bounded && len(entries) >= 128 {
+	// The routing inbox is bounded by the retention window, not by a count:
+	// refusing a capture would only delay it to the next poll.
+	if len(entries) >= 128 && entry.Routing == nil {
 		return errCode("queue_full", "mailbox is full")
 	}
 	b, err := json.Marshal(entry)
@@ -441,7 +439,7 @@ func offerMailboxWithAck(dir, conversation string, accepts func(Request) bool, e
 			}
 			continue
 		}
-		if entry.routingPending() || !entry.due(time.Now()) || !accepts(entry.Request) {
+		if !entry.due(time.Now()) || !accepts(entry.Request) {
 			continue
 		}
 		it := mailboxPendingItem{path, entry}

@@ -2,44 +2,113 @@ package shuttlecli
 
 import (
 	"encoding/json"
+	"io"
 
 	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/spf13/cobra"
 )
 
+// exitCorrupt is thread-state's exit status for a corrupt outbox or state,
+// the one import failure the daemon holds boot for.
+const exitCorrupt = 3
+
+// threadInboxVerbs are the daemon's verbs for the routing inbox
+// (messaging.ThreadRoutingAddress).
 func (a *app) threadInboxVerbs() []*cobra.Command {
-	state := &cobra.Command{Use: "thread-state", Short: "Import thread publications and read durable capture cutoffs", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
-		state, err := messaging.BootThreadInbox(a.env)
-		if err != nil {
+	state := &cobra.Command{
+		Use:   "thread-state",
+		Short: "Import an older daemon's thread outbox and print the capture window",
+		Long: `Establish the thread capture window (baseline and retention cutoff) and
+import a thread-outbox left by an older daemon into the routing inbox. Exits 3
+when the outbox or the state is corrupt, leaving it untouched.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			state, err := messaging.BootThreadInbox(a.env)
+			if messaging.ErrorCode(err) == "corrupt" {
+				return &cliExitError{code: exitCorrupt, err: err}
+			}
+			if err != nil {
+				return err
+			}
+			return json.NewEncoder(a.env.Stdout).Encode(state)
+		},
+	}
+	capture := &cobra.Command{
+		Use:   "thread-put",
+		Short: "Capture thread publications into the routing inbox",
+		Long: `Read a JSON array of {"id", "record"} thread publications on stdin and
+enqueue each into the routing inbox. Prints {"created": [ids]}, the ids this
+call stored, also when a later publication failed and the command exits
+nonzero.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var publications []messaging.ThreadPublication
+			b, err := io.ReadAll(a.env.Stdin)
+			if err != nil {
+				return err
+			}
+			if err = json.Unmarshal(b, &publications); err != nil {
+				return err
+			}
+			created, err := messaging.CaptureThreads(a.env, publications)
+			if encodeErr := json.NewEncoder(a.env.Stdout).Encode(map[string][]string{"created": created}); encodeErr != nil {
+				return encodeErr
+			}
 			return err
-		}
-		return json.NewEncoder(a.env.Stdout).Encode(state)
-	}}
-	capture := &cobra.Command{Use: "thread-put <id> <record-json>", Short: "Enqueue a derived thread publication and report whether it was created", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
-		var record map[string]any
-		if err := json.Unmarshal([]byte(args[1]), &record); err != nil {
-			return err
-		}
-		entry, err := messaging.ThreadEntry(args[0], record)
-		if err != nil {
-			return err
-		}
-		created := false
-		entry.Created = &created
-		if err = messaging.Enqueue(a.env, entry); err != nil {
-			return err
-		}
-		return json.NewEncoder(a.env.Stdout).Encode(map[string]bool{"created": created})
-	}}
-	routes := &cobra.Command{Use: "routes <owner>", Short: "List pending thread publications and their routing on this host", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		entries, err := messaging.RoutedEntries(a.env, args[0])
-		if err != nil {
-			return err
-		}
-		return json.NewEncoder(a.env.Stdout).Encode(entries)
-	}}
-	settle := &cobra.Command{Use: "settle <address> <id> <disposition>", Short: "Finalize a confirmed forward or session outcome", Args: cobra.ExactArgs(3), RunE: func(cmd *cobra.Command, args []string) error {
-		return messaging.SettleRoute(a.env, args[0], args[1], args[2])
-	}}
-	return []*cobra.Command{state, capture, routes, settle}
+		},
+	}
+	routes := &cobra.Command{
+		Use:   "routes",
+		Short: "List the routing inbox's pending thread publications",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			publications, err := messaging.ThreadRoutes(a.env)
+			if err != nil {
+				return err
+			}
+			return json.NewEncoder(a.env.Stdout).Encode(publications)
+		},
+	}
+	var facts messaging.RouteFacts
+	var record string
+	route := &cobra.Command{
+		Use:   "route <id>",
+		Short: "Advance one routing inbox entry from the daemon's fresh facts",
+		Long: `Decide one routing inbox entry from its lifecycle currency and, once its
+recipient resolves, the recipient's routing record, host and local inbox key.
+Prints {"action": ...}: wait; forward or session with the entry's record, for
+the daemon to hand off and settle; or placed, superseded or expired, which this
+call recorded. A placed result is enqueued in the recipient fiber's inbox.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			host, err := a.resolveOwnHost("")
+			if err != nil {
+				return err
+			}
+			facts.ID = args[0]
+			if record != "" {
+				if err := json.Unmarshal([]byte(record), &facts.Record); err != nil {
+					return err
+				}
+			}
+			decision, err := messaging.RouteThread(a.env, host, facts)
+			if err != nil {
+				return err
+			}
+			return json.NewEncoder(a.env.Stdout).Encode(decision)
+		},
+	}
+	route.Flags().StringVar(&facts.Current, "current", "unknown", "Fresh lifecycle currency: true, false or unknown")
+	route.Flags().StringVar(&record, "record", "", "The resolved recipient's routing fields as JSON")
+	route.Flags().StringVar(&facts.Owner, "owner", "", "The resolved recipient's host")
+	route.Flags().StringVar(&facts.Key, "key", "", "The resolved recipient's local inbox key")
+	settle := &cobra.Command{
+		Use:   "settle <id> forwarded|delivered|undeliverable",
+		Short: "Record a routing inbox entry's confirmed handoff",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return messaging.SettleThread(a.env, args[0], args[1])
+		},
+	}
+	return []*cobra.Command{state, capture, routes, route, settle}
 }

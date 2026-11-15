@@ -1,9 +1,9 @@
 package messaging
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,19 +13,9 @@ import (
 )
 
 func threadRecord() map[string]any {
-	return map[string]any{"owner": "host", "store": "/store", "parent_uid": "parent", "parent_host": "host", "parent_unresolved": true, "text": "thread hub/child unblocked: done", "retained_at": time.Now().UTC().Format(time.RFC3339Nano), "wake": true}
+	return map[string]any{"owner": "host", "store": "/store", "parent_uid": "anchor", "parent_host": "host", "parent_unresolved": true, "anchor_uid": "anchor", "text": "thread hub/child closed: done", "retained_at": time.Now().UTC().Format(time.RFC3339Nano), "wake": true}
 }
-func enqueueThread(t *testing.T, env *sysenv.Env, id string, record map[string]any) InboxEntry {
-	t.Helper()
-	entry, err := ThreadEntry(id, record)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = Enqueue(env, entry); err != nil {
-		t.Fatal(err)
-	}
-	return entry
-}
+
 func bootThread(t *testing.T, env *sysenv.Env) ThreadInboxState {
 	t.Helper()
 	s, err := BootThreadInbox(env)
@@ -34,190 +24,241 @@ func bootThread(t *testing.T, env *sysenv.Env) ThreadInboxState {
 	}
 	return s
 }
-func routeConsume(t *testing.T, env *sysenv.Env, entry InboxEntry, f RouteFacts) Consumption {
+
+func capture(t *testing.T, env *sysenv.Env, publications ...ThreadPublication) []string {
 	t.Helper()
-	f.ID = entry.Request.MessageID
-	got, err := Consume(context.Background(), env, entry.Address, "host", Worker{Address: "-", Route: &f})
+	created, err := CaptureThreads(env, publications)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return created
+}
+
+func route(t *testing.T, env *sysenv.Env, f RouteFacts) RouteDecision {
+	t.Helper()
+	got, err := RouteThread(env, "host", f)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return got
 }
 
-func TestThreadCaptureCreatedFirstPublicationAndGlobalDedup(t *testing.T) {
+func routes(t *testing.T, env *sysenv.Env) []ThreadPublication {
+	t.Helper()
+	out, err := ThreadRoutes(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func offeredRoute(t *testing.T, env *sysenv.Env, id string) mailboxEntry {
+	t.Helper()
+	e, err := readFiberMailboxEntry(filepath.Join(routingRoot(env), "offered", mailboxKey(id)+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e
+}
+
+func resolved(owner string) RouteFacts {
+	return RouteFacts{Current: "true", Owner: owner, Key: "/store:parent", Record: map[string]any{"parent_uid": "parent", "parent_host": owner, "store": "/store", "resolved_from_uid": "anchor"}}
+}
+
+func TestThreadCaptureKeepsFirstPublicationInsideItsWindow(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
-	bootThread(t, env)
-	entry, _ := ThreadEntry("thread-id", threadRecord())
-	created := false
-	entry.Created = &created
-	if err := Enqueue(env, entry); err != nil || !created {
-		t.Fatalf("capture: %v %v", created, err)
+	state := bootThread(t, env)
+	record := threadRecord()
+	if got := capture(t, env, ThreadPublication{"thread-a", record}); len(got) != 1 {
+		t.Fatal(got)
 	}
-	entry.Request.Text = "edited outcome"
-	entry.Address = "/other:other-parent"
-	if err := Enqueue(env, entry); err != nil || created {
-		t.Fatalf("recapture: %v %v", created, err)
+	edited := threadRecord()
+	edited["text"] = "edited outcome"
+	if got := capture(t, env, ThreadPublication{"thread-a", edited}); len(got) != 0 {
+		t.Fatal("recapture created", got)
 	}
-	routes, err := RoutedEntries(env, "host")
-	if err != nil || len(routes) != 1 || routes[0].Record["text"] != "thread hub/child unblocked: done" {
-		t.Fatalf("routes: %+v %v", routes, err)
+	old := threadRecord()
+	old["retained_at"] = state.Baseline
+	if got := capture(t, env, ThreadPublication{"thread-history", old}); len(got) != 0 {
+		t.Fatal("a stamp at the baseline was captured", got)
+	}
+	got := routes(t, env)
+	if len(got) != 1 || got[0].ID != "thread-a" || got[0].Record["text"] != "thread hub/child closed: done" {
+		t.Fatalf("%+v", got)
+	}
+	items, _ := pendingItems(routingRoot(env))
+	if w := items[0].entry.Wishes; w.Turn != "ask" || w.IfCostly != "fresh" || w.Source != "thread" {
+		t.Fatal(w)
 	}
 }
 
-func TestThreadRoutingWaitForwardRetryConfirmAndFrozenRecipient(t *testing.T) {
+func TestRoutingInboxHasNoAdmissionCap(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	bootThread(t, env)
-	record := threadRecord()
-	entry := enqueueThread(t, env, "thread-forward", record)
-	if got := routeConsume(t, env, entry, RouteFacts{Current: "unknown"}); got.Action != "wait" {
+	var publications []ThreadPublication
+	for i := 0; i < 200; i++ {
+		publications = append(publications, ThreadPublication{fmt.Sprintf("thread-%d", i), threadRecord()})
+	}
+	if got := capture(t, env, publications...); len(got) != 200 {
+		t.Fatal(len(got))
+	}
+}
+
+func TestRouteForwardsAResolvedRemoteResultUntilSettled(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	bootThread(t, env)
+	capture(t, env, ThreadPublication{"thread-f", threadRecord()})
+	for _, f := range []RouteFacts{{ID: "thread-f", Current: "unknown"}, {ID: "thread-f", Current: "true"}} {
+		if got := route(t, env, f); got.Action != "wait" {
+			t.Fatal("unresolved", got)
+		}
+	}
+	// The resolution is stored even while currency is unknown.
+	f := resolved("remote")
+	f.ID, f.Current = "thread-f", "unknown"
+	if got := route(t, env, f); got.Action != "wait" {
 		t.Fatal(got)
 	}
-	if got := routeConsume(t, env, entry, RouteFacts{Current: "true"}); got.Action != "wait" {
-		t.Fatal(got)
+	if r := routes(t, env)[0].Record; r["parent_uid"] != "parent" || r["parent_unresolved"] != nil || r["resolved_from_uid"] != "anchor" {
+		t.Fatal(r)
 	}
-	facts := RouteFacts{Current: "true", Record: map[string]any{"parent_uid": "ancestor", "parent_host": "remote", "store": "/remote"}, Owner: "remote"}
+	f.Current = "true"
 	for i := 0; i < 2; i++ {
-		got := routeConsume(t, env, entry, facts)
-		if got.Action != "forward" || got.Entry.Record["parent_uid"] != "ancestor" {
+		if got := route(t, env, f); got.Action != "forward" || got.Record["parent_uid"] != "parent" || got.Record["parent_host"] != "remote" {
 			t.Fatal(got)
 		}
 	}
-	routes, err := RoutedEntries(env, "host")
-	if err != nil || len(routes) != 1 || routes[0].Address != entry.Address {
-		t.Fatalf("frozen physical address: %+v %v", routes, err)
+	redirect := f
+	redirect.Record = map[string]any{"parent_uid": "other"}
+	if _, err := RouteThread(env, "host", redirect); ErrorCode(err) != "invalid_request" {
+		t.Fatal("a resolved recipient changed:", err)
 	}
-	changed := facts
-	changed.Record = map[string]any{"parent_uid": "other"}
-	changed.ID = entry.Request.MessageID
-	if _, err = Consume(context.Background(), env, entry.Address, "host", Worker{Route: &changed}); ErrorCode(err) != "invalid_request" {
-		t.Fatalf("redirect: %v", err)
-	}
-	if err = SettleRoute(env, entry.Address, entry.Request.MessageID, "forwarded"); err != nil {
+	if err := SettleThread(env, "thread-f", "forwarded"); err != nil {
 		t.Fatal(err)
 	}
-	if got := routeConsume(t, env, entry, facts); got.Action != "wait" {
+	if offeredRoute(t, env, "thread-f").Disposition != "forwarded" || len(routes(t, env)) != 0 {
+		t.Fatal("not settled")
+	}
+	if got := capture(t, env, ThreadPublication{"thread-f", threadRecord()}); len(got) != 0 {
+		t.Fatal("a settled publication was captured again")
+	}
+}
+
+func TestRoutePlacesALocalResultAsAnOrdinaryEntry(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	bootThread(t, env)
+	capture(t, env, ThreadPublication{"thread-l", threadRecord()})
+	f := resolved("host")
+	f.ID = "thread-l"
+	if got := route(t, env, f); got.Action != "placed" {
 		t.Fatal(got)
 	}
-	enqueueThread(t, env, entry.Request.MessageID, record)
-	if n, _ := PendingCount(env, entry.Address); n != 0 {
-		t.Fatal(n)
+	items, err := pendingItems(mailboxDir(env, "fiber", "/store:parent"))
+	if err != nil || len(items) != 1 {
+		t.Fatal(items, err)
+	}
+	if e := items[0].entry; e.Routing != nil || e.Wishes.Turn != "ask" || e.Request.Text != "thread hub/child closed: done" {
+		t.Fatalf("%+v", e)
+	}
+	if n, _ := WakingCount(env, "/store:parent"); n != 1 {
+		t.Fatal("placed result does not ask its recipient", n)
+	}
+	if offeredRoute(t, env, "thread-l").Disposition != "placed" {
+		t.Fatal("not settled")
+	}
+	if got := route(t, env, f); got.Action != "wait" {
+		t.Fatal("repeat", got)
 	}
 }
 
-func TestThreadRoutingLocalTransferAndSupersession(t *testing.T) {
+func TestRouteIntoAFullRecipientWaitsWithoutLosingTheResult(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	bootThread(t, env)
-	for _, dest := range []string{"/store:parent", "/store:ancestor"} {
-		entry := enqueueThread(t, env, "thread-"+mailboxKey(dest), threadRecord())
-		facts := RouteFacts{Current: "true", Owner: "host", Destination: dest, Record: map[string]any{"parent_uid": "parent"}}
-		if dest != "/store:parent" {
-			facts.Record["parent_uid"] = "ancestor"
-		}
-		routeConsume(t, env, entry, facts)
-		items, err := pendingItems(mailboxDir(env, "fiber", dest))
-		if err != nil || len(items) != 1 || items[0].entry.routingPending() || items[0].entry.Routing["local"] != true {
-			t.Fatalf("local: %+v %v", items, err)
+	for i := 0; i < 128; i++ {
+		if err := Enqueue(env, InboxEntry{Address: "/store:parent", Request: Request{MessageID: fmt.Sprintf("m-%d", i), Text: "x"}}); err != nil {
+			t.Fatal(err)
 		}
 	}
-	entry := enqueueThread(t, env, "thread-stale", threadRecord())
-	routeConsume(t, env, entry, RouteFacts{Current: "false"})
-	root := mailboxDir(env, "fiber", entry.Address)
-	stored, err := readFiberMailboxEntry(filepath.Join(root, "offered", mailboxKey(entry.Request.MessageID)+".json"))
-	if err != nil || stored.Disposition != "superseded" {
-		t.Fatalf("superseded: %+v %v", stored, err)
+	capture(t, env, ThreadPublication{"thread-full", threadRecord()})
+	f := resolved("host")
+	f.ID = "thread-full"
+	if _, err := RouteThread(env, "host", f); ErrorCode(err) != "queue_full" {
+		t.Fatal(err)
 	}
-}
-
-func TestLocallyReadyThreadFollowsParentHostMoveBeforeConsumption(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	bootThread(t, env)
-	entry := enqueueThread(t, env, "thread-local-move", threadRecord())
-	routeConsume(t, env, entry, RouteFacts{Current: "true", Owner: "host", Destination: entry.Address, Record: map[string]any{"parent_uid": "parent", "parent_host": "host"}})
-	if n, _ := WakingCount(env, entry.Address); n != 1 {
-		t.Fatal(n)
-	}
-	got := routeConsume(t, env, entry, RouteFacts{Current: "true", Owner: "remote", Record: map[string]any{"parent_uid": "parent", "parent_host": "remote"}})
-	if got.Action != "forward" || got.Entry.Record["parent_uid"] != "parent" {
+	if got := routes(t, env); len(got) != 1 {
 		t.Fatal(got)
 	}
-	if n, _ := WakingCount(env, entry.Address); n != 0 {
-		t.Fatal("old host may still launch", n)
-	}
 }
 
-func TestMovingThreadSettlesPinnedBatchBeforeForwarding(t *testing.T) {
-	t.Parallel()
-	for _, confirmed := range []bool{false, true} {
-		t.Run(map[bool]string{false: "ambiguous", true: "confirmed"}[confirmed], func(t *testing.T) {
-			env := testEnv(t)
-			bootThread(t, env)
-			entry := enqueueThread(t, env, "thread-pinned-move", threadRecord())
-			routeConsume(t, env, entry, RouteFacts{Current: "true", Owner: "host", Destination: entry.Address, Record: map[string]any{"parent_uid": "parent", "parent_host": "host"}})
-			root := mailboxDir(env, "fiber", entry.Address)
-			items, err := pendingItems(root)
-			if err != nil {
-				t.Fatal(err)
-			}
-			batch := newConsumedAttempt(Worker{Address: "shuttle://host/codex/old", Epoch: 1}, items, true)
-			if err := pinConsumedBatch(root, &batch); err != nil {
-				t.Fatal(err)
-			}
-			if confirmed {
-				dir := filepath.Join(dataDir(env), "messages")
-				os.MkdirAll(dir, 0700)
-				b, _ := json.Marshal(record{State: "complete", Receipt: Receipt{Status: StatusAccepted}})
-				os.WriteFile(filepath.Join(dir, mailboxKey(batch.Payload.MessageID+"-"+mailboxKey(batch.Conversation)[:16])+".json"), b, 0600)
-			}
-			got := routeConsume(t, env, entry, RouteFacts{Current: "true", Owner: "remote", Record: map[string]any{"parent_uid": "parent", "parent_host": "remote"}})
-			if confirmed {
-				if got.Action != "wait" {
-					t.Fatal("confirmed batch forwarded", got)
-				}
-			} else if got.Action != "forward" || got.Entry.Record["possible_repeat"] != true {
-				t.Fatal(got)
-			}
-			if _, err := os.Stat(batchManifest(root, &batch)); !errors.Is(err, os.ErrNotExist) {
-				t.Fatal("old host batch still open", err)
-			}
-		})
-	}
-}
-
-func TestThreadAskerIsDurableSessionEntryNotHookEligible(t *testing.T) {
+func TestRouteSettlesSupersededAndExpiredWithoutHandoff(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	bootThread(t, env)
-	record := threadRecord()
-	record["session"] = "shuttle://host/claude/asker"
-	entry := enqueueThread(t, env, "thread-id-asker", record)
-	if entry.Address != record["session"] {
-		t.Fatal(entry)
+	capture(t, env, ThreadPublication{"thread-s", threadRecord()})
+	if got := route(t, env, RouteFacts{ID: "thread-s", Current: "false"}); got.Action != "superseded" {
+		t.Fatal(got)
 	}
-	// A live hook cannot race the daemon's waking notice.
-	if err := RegisterMailbox(env, "claude", "asker", "host", "/project", os.Getpid(), true); err != nil {
-		t.Fatal(err)
+	// An entry stored inside the window expires while it waits.
+	capture(t, env, ThreadPublication{"thread-e", threadRecord()})
+	path := filepath.Join(routingRoot(env), "pending", mailboxKey("thread-e")+".json")
+	e, _ := readFiberMailboxEntry(path)
+	e.Request.RetainedAt = time.Now().Add(-15 * 24 * time.Hour).UTC().Format(time.RFC3339Nano)
+	b, _ := json.Marshal(e)
+	os.WriteFile(path, b, 0600)
+	if got := route(t, env, RouteFacts{ID: "thread-e", Current: "true"}); got.Action != "expired" {
+		t.Fatal(got)
 	}
-	if err := OfferMailbox(env, "claude", "asker", "host", func([]Request) error { t.Fatal("routed notice offered by hook"); return nil }); err != nil {
-		t.Fatal(err)
+}
+
+func TestWaitingRouteDoesNotRewriteItsEntry(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	bootThread(t, env)
+	capture(t, env, ThreadPublication{"thread-w", threadRecord()})
+	f := resolved("remote")
+	f.ID, f.Current = "thread-w", "unknown"
+	route(t, env, f)
+	path := filepath.Join(routingRoot(env), "pending", mailboxKey("thread-w")+".json")
+	before, _ := os.Stat(path)
+	time.Sleep(20 * time.Millisecond)
+	route(t, env, f)
+	after, _ := os.Stat(path)
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Fatal("rewritten while waiting")
+	}
+}
+
+func TestAskerNoticeRoutesToItsSessionAndSettlesFinal(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	bootThread(t, env)
+	record := map[string]any{"owner": "host", "store": "/store", "session": "shuttle://remote/claude/asker", "text": "thread hub/child asked: which?", "retained_at": time.Now().UTC().Format(time.RFC3339Nano)}
+	capture(t, env, ThreadPublication{"thread-x-asker", record})
+	if got := route(t, env, RouteFacts{ID: "thread-x-asker", Current: "unknown"}); got.Action != "wait" {
+		t.Fatal(got)
 	}
 	for i := 0; i < 2; i++ {
-		if got := routeConsume(t, env, entry, RouteFacts{Current: "true"}); got.Action != "session" {
+		if got := route(t, env, RouteFacts{ID: "thread-x-asker", Current: "true"}); got.Action != "session" || got.Record["session"] != record["session"] {
 			t.Fatal(got)
 		}
 	}
-	if err := SettleRoute(env, entry.Address, entry.Request.MessageID, "undeliverable"); err != nil {
+	if err := SettleThread(env, "thread-x-asker", "undeliverable"); err != nil {
 		t.Fatal(err)
 	}
-	if routes, _ := RoutedEntries(env, "host"); len(routes) != 0 {
-		t.Fatal(routes)
+	if offeredRoute(t, env, "thread-x-asker").Disposition != "undeliverable" || len(routes(t, env)) != 0 {
+		t.Fatal("not settled")
+	}
+	if err := SettleThread(env, "thread-x-asker", "maybe"); ErrorCode(err) != "invalid_request" {
+		t.Fatal(err)
 	}
 }
 
-func seedOutbox(t *testing.T, env *sysenv.Env) string {
+func seedOutbox(t *testing.T, env *sysenv.Env, baseline string) string {
 	t.Helper()
 	root := filepath.Join(dataDir(env), "thread-outbox")
 	for _, dir := range []string{"pending", "acked"} {
@@ -225,14 +266,11 @@ func seedOutbox(t *testing.T, env *sysenv.Env) string {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(root, "baseline"), []byte("2020-01-01T00:00:00Z"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "version"), []byte("4"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	os.WriteFile(filepath.Join(root, "baseline"), []byte(baseline), 0600)
+	os.WriteFile(filepath.Join(root, "version"), []byte("4"), 0600)
 	return root
 }
+
 func seedPending(t *testing.T, root, id string, record map[string]any) {
 	t.Helper()
 	b, _ := json.Marshal(map[string]any{"id": id, "record": record})
@@ -240,50 +278,93 @@ func seedPending(t *testing.T, root, id string, record map[string]any) {
 		t.Fatal(err)
 	}
 }
-func TestThreadBootImportCrashReplayAckWinsAndBaselineSurvives(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	root := seedOutbox(t, env)
-	record := threadRecord()
-	record["parent_unresolved"] = false
-	record["parent_host"] = "remote"
-	seedPending(t, root, "pending", record)
-	seedPending(t, root, "acked", record)
-	if err := os.WriteFile(filepath.Join(root, "acked", mailboxKey("acked")), []byte("acked"), 0600); err != nil {
+
+func seedAck(t *testing.T, root, id string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, "acked", mailboxKey(id)), []byte(id), 0600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+const oldBaseline = "2020-01-01T00:00:00Z"
+
+func TestThreadImportCrashReplayAckWinsAndBaselineSurvives(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	root := seedOutbox(t, env, oldBaseline)
+	record := threadRecord()
+	seedPending(t, root, "thread-pending", record)
+	seedPending(t, root, "thread-acked", record)
+	seedAck(t, root, "thread-acked")
 	stopped := errors.New("daemon died")
 	if _, err := bootThreadInbox(env, func(string) error { return stopped }); !errors.Is(err, stopped) {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(root); err != nil {
-		t.Fatal("source removed before complete import", err)
+		t.Fatal("source removed before the import completed", err)
 	}
 	state := bootThread(t, env)
-	if state.Baseline != "2020-01-01T00:00:00Z" {
+	if state.Baseline != oldBaseline {
 		t.Fatal(state)
 	}
 	if _, err := os.Stat(root); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("source remains: %v", err)
 	}
-	routes, err := RoutedEntries(env, "host")
-	if err != nil || len(routes) != 1 || routes[0].ID != "pending" || routes[0].Record["parent_host"] != "remote" {
-		t.Fatalf("import: %+v %v", routes, err)
+	if got := routes(t, env); len(got) != 1 || got[0].ID != "thread-pending" {
+		t.Fatalf("%+v", got)
 	}
-	enqueueThread(t, env, "acked", record)
-	if routes, _ := RoutedEntries(env, "host"); len(routes) != 1 {
-		t.Fatal(routes)
+	if offeredRoute(t, env, "thread-acked").Disposition != "acknowledged" {
+		t.Fatal("acknowledgment not imported")
 	}
-	if got := bootThread(t, env); got.Baseline != state.Baseline {
+	if got := capture(t, env, ThreadPublication{"thread-acked", record}); len(got) != 0 {
+		t.Fatal("an acknowledged publication was captured again")
+	}
+	if got := bootThread(t, env); got.Baseline != oldBaseline {
 		t.Fatal(got)
 	}
 }
-func TestThreadImportPreservesCutoffAndCorruptSource(t *testing.T) {
+
+func TestThreadImportAckWinsOverACopyFromAnInterruptedImport(t *testing.T) {
 	t.Parallel()
-	for _, corrupt := range []string{"baseline", "pending", "snapshot", "missing baseline", "cutoff"} {
+	env := testEnv(t)
+	root := seedOutbox(t, env, oldBaseline)
+	seedPending(t, root, "thread-late", threadRecord())
+	stopped := errors.New("death after the pending write")
+	if _, err := bootThreadInbox(env, func(string) error { return stopped }); !errors.Is(err, stopped) {
+		t.Fatal(err)
+	}
+	if len(routes(t, env)) != 1 {
+		t.Fatal("pending not durable")
+	}
+	seedAck(t, root, "thread-late")
+	bootThread(t, env)
+	if got := routes(t, env); len(got) != 0 {
+		t.Fatalf("acknowledgment lost: %+v", got)
+	}
+}
+
+func TestThreadImportLeavesRecipientInboxesAlone(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	root := seedOutbox(t, env, oldBaseline)
+	// Contract 40 placed this result and acknowledged it before a worker took it.
+	if err := Enqueue(env, InboxEntry{Address: "/store:parent", Request: Request{MessageID: "thread-done", Text: "already placed"}, Derived: true}); err != nil {
+		t.Fatal(err)
+	}
+	seedPending(t, root, "thread-done", threadRecord())
+	seedAck(t, root, "thread-done")
+	bootThread(t, env)
+	if n, err := PendingCount(env, "/store:parent"); err != nil || n != 1 {
+		t.Fatalf("recipient's result disturbed: %d %v", n, err)
+	}
+}
+
+func TestThreadImportRefusesCorruptSourceAndKeepsIt(t *testing.T) {
+	t.Parallel()
+	for _, corrupt := range []string{"baseline", "pending", "snapshot", "missing baseline", "cutoff", "ack"} {
 		t.Run(corrupt, func(t *testing.T) {
 			env := testEnv(t)
-			root := seedOutbox(t, env)
+			root := seedOutbox(t, env, oldBaseline)
 			switch corrupt {
 			case "baseline":
 				os.WriteFile(filepath.Join(root, "baseline"), []byte("bad"), 0600)
@@ -295,96 +376,90 @@ func TestThreadImportPreservesCutoffAndCorruptSource(t *testing.T) {
 				os.Remove(filepath.Join(root, "baseline"))
 			case "cutoff":
 				os.WriteFile(filepath.Join(root, "retention_cutoff"), []byte("bad"), 0600)
+			case "ack":
+				os.WriteFile(filepath.Join(root, "acked", mailboxKey("a")), []byte("b"), 0600)
 			}
-			if _, err := BootThreadInbox(env); err == nil {
-				t.Fatal("corrupt source accepted")
+			if _, err := BootThreadInbox(env); ErrorCode(err) != "corrupt" {
+				t.Fatal("corrupt source accepted:", err)
 			}
 			if _, err := os.Stat(root); err != nil {
 				t.Fatal("corrupt source removed")
 			}
 		})
 	}
+}
+
+// The old daemon wrote acked/<key>.<n>.tmp and renamed it; a hard kill
+// between the two left the tmp file, which was never an acknowledgment.
+func TestThreadImportIgnoresALeftoverAckTmpFile(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
-	root := seedOutbox(t, env)
+	root := seedOutbox(t, env, oldBaseline)
+	seedAck(t, root, "thread-acked")
+	os.WriteFile(filepath.Join(root, "acked", mailboxKey("thread-acked")+".123.tmp"), []byte("thread-acked"), 0600)
+	os.WriteFile(filepath.Join(root, "acked", mailboxKey("thread-torn")+".456.tmp"), []byte("thread-to"), 0600)
+	bootThread(t, env)
+	if offeredRoute(t, env, "thread-acked").Disposition != "acknowledged" {
+		t.Fatal("acknowledgment lost")
+	}
+	if _, err := os.Stat(filepath.Join(routingRoot(env), "offered", mailboxKey("thread-torn")+".json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("a torn tmp file was imported", err)
+	}
+}
+
+// A daemon rolled back to contract 40 recreates thread-outbox with a later
+// baseline. Rolling forward keeps the inbox's earlier one and imports what the
+// older daemon captured; its acknowledgment settles the inbox's copy.
+func TestThreadImportRollForwardAfterRollbackKeepsTheEarlierBaseline(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	seedOutbox(t, env, oldBaseline)
+	first := bootThread(t, env)
+	capture(t, env, ThreadPublication{"thread-both", threadRecord()}, ThreadPublication{"thread-new", threadRecord()})
+	later := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano)
+	root := seedOutbox(t, env, later)
+	seedAck(t, root, "thread-both")
+	seedPending(t, root, "thread-old", threadRecord())
+	state, err := BootThreadInbox(env)
+	if err != nil || state.Baseline != first.Baseline {
+		t.Fatal(state, err)
+	}
+	ids := map[string]bool{}
+	for _, p := range routes(t, env) {
+		ids[p.ID] = true
+	}
+	if len(ids) != 2 || !ids["thread-new"] || !ids["thread-old"] {
+		t.Fatal(ids)
+	}
+}
+
+func TestThreadImportCutoffAdvancesAndRefusesOlderCaptures(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	root := seedOutbox(t, env, oldBaseline)
 	cutoff := time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)
 	os.WriteFile(filepath.Join(root, "retention_cutoff"), []byte(cutoff), 0600)
 	if s := bootThread(t, env); s.Cutoff != cutoff {
 		t.Fatal(s)
 	}
-	enqueueThread(t, env, "expired", threadRecord())
-	if routes, _ := RoutedEntries(env, "host"); len(routes) != 0 {
-		t.Fatal(routes)
-	}
-}
-func TestThreadImportSessionHandoffDisclosesPossibleRepeat(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	root := seedOutbox(t, env)
-	record := threadRecord()
-	record["session"] = "shuttle://remote/claude/asker"
-	seedPending(t, root, "thread-result-asker", record)
-	bootThread(t, env)
-	routes, err := RoutedEntries(env, "host")
-	if err != nil || len(routes) != 1 || routes[0].Address != record["session"] || routes[0].Record["possible_repeat"] != true {
-		t.Fatalf("imported session: %+v %v", routes, err)
+	if got := capture(t, env, ThreadPublication{"thread-before-cutoff", threadRecord()}); len(got) != 0 {
+		t.Fatal(got)
 	}
 }
 
-func TestThreadImportPendingWriteCrashThenAcknowledgmentWins(t *testing.T) {
+func TestThreadImportBacklogInterruptedCleanupAndSnapshot(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
-	root := seedOutbox(t, env)
-	seedPending(t, root, "acked", threadRecord())
-	stopped := errors.New("death after pending write")
-	if _, err := bootThreadInbox(env, func(string) error { return stopped }); !errors.Is(err, stopped) {
-		t.Fatal(err)
-	}
-	if routes, err := RoutedEntries(env, "host"); err != nil || len(routes) != 1 {
-		t.Fatalf("pending not durable: %+v %v", routes, err)
-	}
-	os.WriteFile(filepath.Join(root, "acked", mailboxKey("acked")), []byte("acked"), 0600)
-	bootThread(t, env)
-	if routes, err := RoutedEntries(env, "host"); err != nil || len(routes) != 0 {
-		t.Fatalf("ack lost: %+v %v", routes, err)
-	}
-	enqueueThread(t, env, "acked", threadRecord())
-	if routes, _ := RoutedEntries(env, "host"); len(routes) != 0 {
-		t.Fatal(routes)
-	}
-}
-
-func TestThreadImportKeepsAlreadyEnqueuedAcknowledgedResult(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	root := seedOutbox(t, env)
-	// Contract 40 acknowledged this inbox entry before its worker took it.
-	if err := Enqueue(env, InboxEntry{Address: "/store:parent", Request: Request{MessageID: "acked", Text: "already enqueued"}, Derived: true}); err != nil {
-		t.Fatal(err)
-	}
-	seedPending(t, root, "acked", threadRecord())
-	os.WriteFile(filepath.Join(root, "acked", mailboxKey("acked")), []byte("acked"), 0600)
-	bootThread(t, env)
-	if n, err := PendingCount(env, "/store:parent"); err != nil || n != 1 {
-		t.Fatalf("ack destroyed recipient's pending result: %d %v", n, err)
-	}
-}
-
-func TestThreadImportAcceptsLargeBacklogAndInterruptedCleanup(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	root := seedOutbox(t, env)
-	record := threadRecord()
+	root := seedOutbox(t, env, oldBaseline)
 	for i := 0; i < 140; i++ {
-		seedPending(t, root, time.Unix(int64(i), 0).String(), record)
+		seedPending(t, root, fmt.Sprintf("thread-%d", i), threadRecord())
 	}
 	state := bootThread(t, env)
-	if routes, err := RoutedEntries(env, "host"); err != nil || len(routes) != 140 {
-		t.Fatalf("backlog: %d %v", len(routes), err)
+	if got := routes(t, env); len(got) != 140 {
+		t.Fatal(len(got))
 	}
 	// Recursive deletion was interrupted after the completed source was renamed.
-	if err := os.MkdirAll(root+".imported/pending", 0700); err != nil {
-		t.Fatal(err)
-	}
+	os.MkdirAll(root+".imported/pending", 0700)
 	os.WriteFile(filepath.Join(root+".imported", "pending", "partial"), []byte("partial"), 0600)
 	if got := bootThread(t, env); got.Baseline != state.Baseline {
 		t.Fatal(got)
@@ -392,9 +467,22 @@ func TestThreadImportAcceptsLargeBacklogAndInterruptedCleanup(t *testing.T) {
 	if _, err := os.Stat(root + ".imported"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal(err)
 	}
+
+	env = testEnv(t)
+	record := threadRecord()
+	record["parent"] = map[string]any{"uid": "parent"}
+	delete(record, "parent_uid")
+	b, _ := json.Marshal(map[string]any{"version": 2, "baseline": oldBaseline, "records": map[string]any{"thread-p": record, "thread-a": map[string]any{"acked": true}}})
+	os.WriteFile(filepath.Join(dataDir(env), "thread-outbox.json"), b, 0600)
+	if s := bootThread(t, env); s.Baseline != oldBaseline {
+		t.Fatal(s)
+	}
+	if got := routes(t, env); len(got) != 1 || got[0].Record["parent_uid"] != "parent" {
+		t.Fatalf("%+v", got)
+	}
 }
 
-func TestFreshThreadInboxBaselineAndSnapshotImport(t *testing.T) {
+func TestFreshThreadInboxEstablishesItsBaselineOnce(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	before := time.Now()
@@ -403,18 +491,35 @@ func TestFreshThreadInboxBaselineAndSnapshotImport(t *testing.T) {
 	if err != nil || baseline.Before(before) {
 		t.Fatal(state, err)
 	}
-	if state.Baseline != bootThread(t, env).Baseline {
+	if bootThread(t, env).Baseline != state.Baseline {
 		t.Fatal("baseline reset")
 	}
-	env = testEnv(t)
-	record := threadRecord()
-	record["parent"] = map[string]any{"uid": "parent"}
-	delete(record, "parent_uid")
-	b, _ := json.Marshal(map[string]any{"version": 2, "baseline": "2020-01-01T00:00:00Z", "records": map[string]any{"pending": record, "acked": map[string]any{"acked": true}}})
-	os.WriteFile(filepath.Join(dataDir(env), "thread-outbox.json"), b, 0600)
+}
+
+// The import touches only the outbox and the routing inbox, so a host's
+// other inboxes cost it nothing. This tree has a busy laptop's shape.
+func TestThreadImportTimeDoesNotGrowWithTheMailboxTree(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	for harness, n := range map[string]int{"claude": 931, "pi": 1496, "codex": 95, "fiber": 217} {
+		for i := 0; i < n; i++ {
+			if err := os.MkdirAll(filepath.Join(dataDir(env), "mailboxes", harness, fmt.Sprintf("s%d", i), "pending"), 0700); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	root := seedOutbox(t, env, oldBaseline)
+	for i := 0; i < 236; i++ {
+		seedAck(t, root, fmt.Sprintf("thread-ack-%d", i))
+	}
+	for i := 0; i < 9; i++ {
+		seedPending(t, root, fmt.Sprintf("thread-pending-%d", i), threadRecord())
+	}
+	start := time.Now()
 	bootThread(t, env)
-	routes, err := RoutedEntries(env, "host")
-	if err != nil || len(routes) != 1 || routes[0].Record["parent_uid"] != "parent" {
-		t.Fatalf("snapshot: %+v %v", routes, err)
+	elapsed := time.Since(start)
+	t.Logf("import of 236 acknowledgments and 9 results: %v", elapsed)
+	if elapsed > 10*time.Second {
+		t.Fatalf("import took %v; the daemon's timeout is 60s", elapsed)
 	}
 }
