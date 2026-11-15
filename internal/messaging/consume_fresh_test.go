@@ -2,8 +2,11 @@ package messaging
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/cailmdaley/felt/internal/sysenv"
+	"os"
 	"testing"
+	"time"
 )
 
 func TestConsumeExplicitFreshReservedOnce(t *testing.T) {
@@ -39,6 +42,24 @@ func TestConsumeExplicitFreshReservedOnce(t *testing.T) {
 		}
 		if sends != 0 {
 			t.Fatal("fresh text sent to old conversation")
+		}
+		if err := RegisterMailbox(env, "claude", "B", "host", t.TempDir(), os.Getpid(), true); err != nil {
+			t.Fatal(err)
+		}
+		w = Worker{Address: "shuttle://host/claude/B", Epoch: transition(t, env, "B", "shuttle://host/claude/B")}
+		root := mailboxDir(env, "fiber", "fiber")
+		reservation, err := readLaunchReservation(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reservation.OpenedAt = time.Now().Add(-3 * time.Minute).UnixNano()
+		b, _ := json.Marshal(reservation)
+		if err := mailboxWrite(launchReservationPath(root), b, false); err != nil {
+			t.Fatal(err)
+		}
+		got, err := consumeWith(context.Background(), env, "fiber", "host", w, send)
+		if err != nil || got.Action != "wake" || sends != 1 {
+			t.Fatalf("replacement must take text, not be cut again: %+v %v sends=%d", got, err, sends)
 		}
 	}
 }

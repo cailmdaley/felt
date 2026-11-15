@@ -462,6 +462,7 @@ defmodule Shuttle.Delivery do
     result =
       Poller.dispatch_fiber(Shuttle.Threads.address(entry.fiber),
         inbox: true,
+        inbox_replace: true,
         ad_hoc: true,
         resume_mode: "fresh",
         user_message:

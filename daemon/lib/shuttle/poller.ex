@@ -4162,7 +4162,7 @@ defmodule Shuttle.Poller do
         # An inbox launch prepares nothing: it arms no document, so it
         # needs no forced-start preparation (`dispatch_eligible?/3`).
         Keyword.get(opts, :inbox, false) ->
-          replacing = Keyword.get(opts, :resume_mode) == "fresh"
+          replacing = Keyword.get(opts, :inbox_replace, false)
 
           with {:ok, fiber} <- fetch_fiber_full(fiber_id, state),
                :ok <- Shuttle.Delivery.inbox_gate(fiber, state.own_host_id) do
@@ -5942,7 +5942,7 @@ defmodule Shuttle.Poller do
   # A non-fresh force-dispatch resumes the in-flight transcript.
   defp cut_open_session_for_fresh(%State{} = state, fiber_id, runtime_key, uid, opts) do
     forced_fresh? =
-      (Keyword.get(opts, :force, false) or Keyword.get(opts, :inbox, false)) and
+      (Keyword.get(opts, :force, false) or Keyword.get(opts, :inbox_replace, false)) and
         Keyword.get(opts, :resume_mode) == "fresh"
 
     if forced_fresh? and open_session?(state, fiber_id, runtime_key, uid) do

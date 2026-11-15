@@ -105,6 +105,60 @@ defmodule ShuttleWeb.DeliverControllerTest do
     refute run_script() =~ "fresh publication"
   end
 
+  test "a dormant agent fresh request waits for quarantine and starts once after release" do
+    fiber = "tests/agent-fresh-quarantine"
+    put_constitution(fiber)
+    server = Shuttle.Env.server(Poller)
+    :sys.replace_state(server, &%{&1 | boot_quarantine: true})
+
+    request = %{
+      "fiber_id" => fiber,
+      "text" => "fresh after release",
+      "message_id" => "fresh-held",
+      "resume_mode" => "fresh"
+    }
+
+    before = launches()
+
+    assert %{"status" => "queued", "detail" => detail} =
+             api_conn() |> post("/api/v1/deliver", Jason.encode!(request)) |> json_response(202)
+
+    assert detail =~ "quarantine"
+    assert launches() == before
+    Poller.release_boot_quarantine(server)
+
+    assert %{"queued" => true} =
+             api_conn() |> post("/api/v1/deliver", Jason.encode!(request)) |> json_response(202)
+
+    api_conn() |> post("/api/v1/deliver", Jason.encode!(request)) |> json_response(202)
+    assert launches() == before + 1
+    refute run_script() =~ "fresh after release"
+  end
+
+  test "an agent fresh request does not reopen a closed fiber" do
+    fiber = "tests/agent-fresh-closed"
+    put_constitution(fiber)
+    MockRunner.set_fiber(fiber, Map.put(make_fiber(fiber), "status", "closed"))
+    MockRunner.set_shuttle(fiber, oneshot_shuttle(), "closed")
+    before = launches()
+
+    assert %{"status" => "queued", "detail" => detail} =
+             api_conn()
+             |> post(
+               "/api/v1/deliver",
+               Jason.encode!(%{
+                 "fiber_id" => fiber,
+                 "text" => "wait",
+                 "message_id" => "closed-fresh",
+                 "resume_mode" => "fresh"
+               })
+             )
+             |> json_response(202)
+
+    assert detail =~ "closed"
+    assert launches() == before
+  end
+
   test "a plain agent delivery is an inbox entry, not a launch directive" do
     fiber = "tests/plain-agent"
     put_constitution(fiber)

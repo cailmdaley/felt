@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -401,7 +402,10 @@ func decideConsumption(due []mailboxPendingItem, w Worker, direct bool, reservat
 				continue
 			}
 		}
-		explicitFresh = explicitFresh || (e.Wishes.Session == "fresh" && e.Wishes.Turn != "none")
+		// A fresh request a reservation already launched for is satisfied by
+		// any receiver other than the one that asked for it.
+		replaced := slices.Contains(reservation.Members, e.Request.MessageID) && !reservation.requestedBy(w)
+		explicitFresh = explicitFresh || (e.Wishes.Session == "fresh" && e.Wishes.Turn != "none" && !replaced)
 		// An idle entry starts a turn only in a worker observed idle.
 		wanted := e.Wishes.Turn == "ask" || (e.Wishes.Turn == "idle" && w.Idle && !w.Unknown)
 		switch e.Wishes.Turn {
