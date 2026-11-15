@@ -225,6 +225,7 @@ Right-click a channel, hold it and lift, or press the context-menu key or Shift+
 The order and the hides are kept by the daemon (`shuttle channels order` and `dismiss`), so every screen agrees.
 **Jump to** at its top (`/`, or the bar's Find) finds any channel by its name or its members' names and paths, hidden ones too, marked so, and lists every sent document it matches, from any fiber; opening a channel found brings it back to the rail.
 `[`, the rail's button, or a sideways swipe hides and shows the rail; on a phone the rail is the first screen, a channel and a thread each fill it, and a swipe or the back link returns.
+Where the view is narrower than about 1100 pixels, a half-screen window for one, a thread opens in the channel's place rather than beside it, and the back link or a rightward swipe returns to the channel.
 Documents of a fiber the board does not hold are read from their owner; a fiber its owner confirms missing files its documents under **Unfiled** on their byte-owning host, and an unreachable owner does not count as a missing fiber.
 
 ### The reader

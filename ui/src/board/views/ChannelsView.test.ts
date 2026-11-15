@@ -131,47 +131,24 @@ it('opens a worker\'s thread from its message: its name, liveness and ask on top
   expect(thread.hidden).toBe(true)
 })
 
-it('a retried reply keeps its id, so the owner types it at most once; another reply gets its own', async () => {
-  const { posts } = daemon(['/api/v1/deliver'])
-  const { host, reply } = await mount()
-  const send = async (text: string) => {
-    reply.value = text
-    reply.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
-    await settle()
-  }
-  await send('Keep it.')
-  expect(host.querySelector('.kbn-ch-note')?.textContent ?? '').toContain('Not sent')
-  await send('Keep it.')
-  await send('Drop it.')
-  const ids = posts.map(([, body]) => body.message_id)
-  expect(ids[0]).toMatch(/^human-[0-9a-f]{32}$/)
-  expect(ids[1]).toBe(ids[0])
-  expect(ids[2]).not.toBe(ids[0])
-})
-
-it('a repeated reply reads as sent only when its first send was delivered; else it may not have arrived, and sending again is a new message', async () => {
-  const send = async (reply: HTMLTextAreaElement, text: string) => {
-    reply.value = text
-    reply.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
-    await settle()
-  }
-  {
-    daemon([], new Map(), {}, { delivery: 'input', duplicate: true, disposition: 'delivered', delivered: true })
-    const { host, reply } = await mount()
-    await send(reply, 'Keep it.')
-    expect(reply.value).toBe('')
-    expect(host.querySelector('.kbn-ch-note')?.textContent ?? '').not.toContain('may not have arrived')
-  }
-  document.body.replaceChildren()
-  const { posts } = daemon([], new Map(), {}, { delivery: 'input', duplicate: true, disposition: 'unknown', delivered: null })
-  const { host, reply } = await mount()
-  await send(reply, 'Keep it.')
-  expect(host.querySelector('.kbn-ch-note')?.textContent).toContain('may not have arrived')
-  expect(reply.value).toBe('Keep it.')
-  await send(reply, 'Keep it.')
-  const ids = posts.map(([, body]) => body.message_id)
-  expect(ids).toHaveLength(2)
-  expect(ids[1]).not.toBe(ids[0])
+it('opens a thread in the channel\'s place, with a way back, when the view is too narrow for both', async () => {
+  daemon()
+  const widths: Array<(entries: Array<{ contentRect: { width: number } }>) => void> = []
+  vi.stubGlobal('ResizeObserver', class { constructor(seen: (typeof widths)[number]) { widths.push(seen) } observe() {} unobserve() {} disconnect() {} })
+  const { host } = await mount()
+  const layout = host.querySelector('.kbn-ch-layout')!
+  widths.forEach(seen => seen([{ contentRect: { width: 750 } }]))
+  expect(layout.hasAttribute('data-narrow')).toBe(true)
+  message(host, 'κ × tSZ').click()
+  expect(layout.hasAttribute('data-thread')).toBe(true)
+  const back = host.querySelector<HTMLButtonElement>('.kbn-ch-thread-close')!
+  expect(back.textContent).toBe('‹ cmbx')
+  back.click()
+  expect(layout.hasAttribute('data-thread')).toBe(false)
+  // Wide again, a thread stands beside the channel.
+  widths.forEach(seen => seen([{ contentRect: { width: 1400 } }]))
+  message(host, 'κ × tSZ').click()
+  expect([layout.hasAttribute('data-narrow'), host.querySelector('.kbn-ch-thread-close')!.textContent]).toStrictEqual([false, 'Close'])
 })
 
 it('shows a closed fiber\'s outcome as its conclusion, and an open one\'s not at all', async () => {

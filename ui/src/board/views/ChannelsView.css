@@ -35,6 +35,12 @@
 .kbn-ch-layout[data-rail-hidden] { grid-template-columns: minmax(0, 1fr); }
 .kbn-ch-layout[data-rail-hidden][data-thread] { grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr); }
 .kbn-ch-layout[data-rail-hidden] .kbn-ch-rail { display: none; }
+/* Too narrow for a channel and a thread side by side: a thread opens in the channel's place, with a way back. */
+.kbn-ch-layout[data-narrow][data-thread] { grid-template-columns: minmax(150px, 210px) minmax(0, 1fr); }
+.kbn-ch-layout[data-narrow][data-rail-hidden][data-thread] { grid-template-columns: minmax(0, 1fr); }
+.kbn-ch-layout[data-narrow][data-thread] > .kbn-ch { display: none; }
+.kbn-ch-layout[data-narrow] .kbn-ch-thread { border-left: 0; }
+.kbn-ch-layout[data-narrow] .kbn-ch-thread-close { align-self: flex-start; }
 
 /* The rail: Jump to, then the channels, the chaired ones above the lone constitutions. */
 .kbn-ch-rail {

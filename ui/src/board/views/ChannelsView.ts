@@ -37,6 +37,8 @@ const FOLLOW_PX = 24
 /** Jump to lists at most this many documents beneath the channels it matches. */
 const FOUND_DOCUMENTS = 12
 const IMAGE = /\.(png|jpe?g|gif|svg|webp)$/i
+/** Narrower than this, the view shows a channel or a thread, not both: a thread opens one level deeper. */
+const SIDE_BY_SIDE_PX = 1100
 /** A message taller than this many lines folds, with Show more to unfold it in place. */
 const FOLD_LINES = 8
 type Pane = 'channel' | 'thread'
@@ -161,6 +163,8 @@ export class ChannelsView implements TemporalView {
   /** Where each list was last scrolled to its foot, so growth beneath the reader is not taken for scrolling up. */
   private readonly footTop: Record<Pane, number> = { channel: 0, thread: 0 }
   private sizes: ResizeObserver | null = null
+  /** Follows the view's own width, for whether a thread opens beside the channel or in its place. */
+  private width: ResizeObserver | null = null
   private loaded = false
   private reading = false
   private generation = 0
@@ -192,6 +196,13 @@ export class ChannelsView implements TemporalView {
       onMenu: (key, pick, point) => this.railMenu(key, pick, point),
       onSettled: () => { if (this.railStale) this.drawRail() },
     })
+    this.width = new ResizeObserver(([entry]) => {
+      const narrow = entry.contentRect.width < SIDE_BY_SIDE_PX
+      if (narrow === this.layout?.hasAttribute('data-narrow')) return
+      this.layout?.toggleAttribute('data-narrow', narrow)
+      this.drawThread()
+    })
+    this.width.observe(this.layout)
     this.railHidden = stored(RAIL) === '1'
     this.showRail()
     this.unsubscribe = ctx.sends?.subscribe(() => this.draw())
@@ -753,10 +764,11 @@ export class ChannelsView implements TemporalView {
     if (!channel || !card) { this.sigs.thread = ''; this.threadList.replaceChildren(); return }
     const now = Date.now(), messages = threadOf(this.messages(channel), card)
     const state = liveness(card)
-    const sig = JSON.stringify([fiberOf(card), card.name, card.outcome, card.ask?.text, card.status, card.turn, state, isMobileViewport(), [...this.tempering], [...this.unfolded],
+    const deeper = this.drillsDown()
+    const sig = JSON.stringify([fiberOf(card), card.name, card.outcome, card.ask?.text, card.status, card.turn, state, deeper, [...this.tempering], [...this.unfolded],
       messages.map(message => [message.id, message.kind, message.text, message.waiting, message.files.map(file => file.fullPath)])])
     if (this.changed('thread', sig)) {
-      const close = button('kbn-ch-thread-close', isMobileViewport() ? `‹ ${channel.name}` : 'Close', () => this.openThread(null))
+      const close = button('kbn-ch-thread-close', deeper ? `‹ ${channel.name}` : 'Close', () => this.openThread(null))
       close.setAttribute('aria-label', 'Close the thread')
       const who = el('div', 'kbn-ch-thread-who')
       const id = `thread-name:${fiberOf(card)}`
@@ -893,6 +905,8 @@ export class ChannelsView implements TemporalView {
     }
   }
 
+  /** Whether a thread takes the channel's place rather than standing beside it: on a phone, or in a view too narrow for both. */
+  private drillsDown(): boolean { return isMobileViewport() || !!this.layout?.hasAttribute('data-narrow') }
   private railShown(): boolean { return isMobileViewport() ? this.phoneRail : !this.railHidden }
   /** Hides or shows the rail: remembered in this browser on a desktop; on a phone, the rail is the screen before a channel. */
   private setRail(hidden: boolean): void {
@@ -1025,6 +1039,7 @@ export class ChannelsView implements TemporalView {
     this.unsubscribeLibrary?.(); this.unsubscribeLibrary = undefined
     this.stopGestures?.(); this.stopGestures = undefined
     this.sizes?.disconnect(); this.sizes = null
+    this.width?.disconnect(); this.width = null
     for (const unbind of this.railBindings) unbind()
     this.railBindings = []
     this.rail?.destroy(); this.rail = null
