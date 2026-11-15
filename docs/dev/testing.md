@@ -158,8 +158,7 @@ operator document the daemon caches for a second writes it through
 `Shuttle.RuntimeDocuments.change/2`, which drops the cached snapshot, rather
 than sleeping the second out. Serialize daemon processes with
 `Shuttle.Lock.transaction/2`, never `:global.trans/2`: a `:global` lock
-answers contention with a random 0.25-8 s backoff, which once accounted for
-most of the time of the suites that exercise the thread outbox.
+answers contention with a random 0.25-8 s backoff, adding nondeterministic delay to concurrent tests.
 In Go, a loop that polls on a ticker takes its ticks as a channel, which
 production fills from a `time.Ticker` and a test fills one tick at a time:
 `watchHookIdle` in `internal/messaging` counts quiet polls rather than

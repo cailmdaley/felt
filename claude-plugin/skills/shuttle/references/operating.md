@@ -57,7 +57,8 @@ The usual external-action gates still apply, including issues or PRs on repos wh
 Answering in the orchestrator's conversation lets it carry the decision to the relevant thread with `shuttle message <thread> "<decision>"` and keep the whole effort coherent.
 Answering inside a thread steers that worker directly; when the decision changes other threads or the parent's scope, tell the orchestrator too rather than assuming it sees every exchange.
 Every thread result reaches that thread's own orchestrator as context for its next turn.
-A close or ask also wakes, but only the session that asked for the thread (`shuttle thread` records it): the orchestrator when its own worker asked, starting a session for it when it has none and is armed (`active`) and not at rest; a session outside the orchestrator is messaged directly.
+A close or ask also wakes, but only the session that asked for the thread (`shuttle thread` records it): the orchestrator when its own worker asked, starting a session for it when it has none and is armed (`active`) and not at rest; a session outside the orchestrator gets its own durable inbox notice through the waking session transport.
+Thread results remain in the inbox through unresolved routing, unreachable owners and daemon restarts; a remote handoff finalizes only when the owner confirms durable enqueue.
 A thread nobody asked for, such as one the human started from the board or took with `--take`, wakes no one.
 The orchestrator decides whether to pass a result further up; results never wake a chain of ancestors.
 Use `shuttle close <thread> --quiet` for wrap-ups that need no wake.

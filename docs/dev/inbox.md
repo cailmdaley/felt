@@ -34,6 +34,7 @@ A manifest lets recovery finish a claim or close interrupted between member-file
 `request` is the publication as `messaging.Request` defines it: id, text, sender, attachments, reply and idle-notification fields, thread signal and retention stamp.
 `queued_at` is Unix nanoseconds.
 Readers also write `attempt`, `attempt_address` and `possible_repeat`, and `fallback` on Claude session entries.
+Thread publications carry `routing` while pending, including the locally ready state; a routing outcome is written as `disposition` before the entry moves to offered.
 
 ### Delivery wishes
 
@@ -75,6 +76,69 @@ Different content is `message_id_conflict`, except for a `Derived` publication: 
 A thread notice beyond retention stores nothing.
 A supplied thread signal requires uid, verb, stamp and owner.
 Either kind of inbox refuses a 129th pending entry with `queue_full`.
+Boot import preserves an existing backlog even when it exceeds that admission limit.
+
+## Thread results and routing
+
+A thread's owner enqueues close, ask, handoff, rest, verdict and unblock publications directly through `shuttle inbox thread-put` and `Enqueue`.
+The producer keeps its exact lifecycle-derived ids; the first capture fixes the publication and its wishes, even if a later poll renders an edited outcome.
+`thread-put` answers `{"created": true|false}` so only a newly created unblock entry appends its board line.
+Derived ids deduplicate against pending and offered entries across this host's inboxes, including a changed placement after capture.
+There is no thread publication queue outside the inbox.
+
+The sender holds an unresolved or remote-bound result in its own inbox keyed by the captured parent's store and UID, with `routing` carrying the captured owner, parent anchor and whether resolution is still needed.
+This uses the ordinary fiber inbox key without treating the sender as that fiber's execution owner.
+The daemon reads authoritative documents to resolve past an archived parent, never guesses from a slug, and supplies the observations to `inbox consume --route`.
+An unresolved recipient waits.
+The consumer persists the resolved recipient UID in the same entry before any handoff, even when lifecycle currency cannot yet be checked.
+Later observations may change that recipient's host and store, never its UID; moving the child does not redirect the result.
+The entry's physical inbox address stays fixed while routing is pending.
+A locally resolved entry becomes worker-eligible with `routing.local: true`, or transfers durably to the resolved ancestor's inbox before its source is finalized.
+It keeps its recipient metadata until consumption, so a parent that moves host or store before its worker takes the result can still receive it.
+The owner also records this metadata on a thread entry received through `/deliver`.
+Hooks and ordinary worker consumes skip entries not yet locally ready, and `pending --waking` excludes them.
+A ready entry that stays on the same host and inbox leaves lifecycle validation to worker emission, rather than checking quiet context on every poll.
+
+Forwarding is the first consumer rule, before worker selection.
+For a current entry whose resolved recipient another host owns, consume answers `forward` with the entry; the daemon posts its existing `context_only`, `wake`, `message_id`, `thread_signal` and `retained_at` envelope to `/api/v1/deliver` using the frozen UID.
+Only a 202 answer with `delivery: context` and `queued: true` permits `inbox settle` to record `forwarded` here.
+An unreachable owner, ambiguous reply or lost confirmation leaves it pending and repeats the same enqueue on the next poll; the owner's derived-id dedup makes that a no-op.
+A superseded entry is finalized without emission; an unverifiable one waits without blocking independent entries.
+The owner consumes its accepted entry through the same live-worker and dormant-fiber rules below.
+Before moving a locally ready entry, routing settles any pinned batch from its recorded receipt: a confirmed delivery is final, while an unresolved batch closes ambiguous and releases its members.
+A forwarded notice whose old-owner attempt stayed unknown carries a possible-repeat warning, and no old-host batch remains open to retry it independently.
+
+Only a close or ask requested by the orchestrator's own worker asks that fiber for a turn (`turn: ask`, `if_costly: fresh`).
+Results nobody asked for and unblock notes are quiet context.
+When a different session asked, the owner's capture also writes `<id>-asker` into that session's inbox with its session address in the routing record, even if its hook is unavailable or the session is remote.
+Hooks leave that routed entry alone.
+Consume answers `session` for a current notice, and the daemon uses the existing waking session transport with `wake` and `context_if_busy`.
+Its transport id is `<id>-asker-delivery`, distinct from the held entry so the transport can enqueue hook context in the same inbox without colliding with it.
+An unknown outcome leaves the entry for retry across restarts; a known outcome finalizes it, with a refusal recorded as `undeliverable` because the orchestrator's inbox holds the same result.
+A confirmed enqueue into the session transport records `forwarded`; a confirmed take records `delivered`.
+`pending_results` reads inbox counts alone.
+
+### Boot import and compatibility
+
+Before polling, `inbox thread-state` imports `thread-outbox/` and supported `thread-outbox.json` snapshots.
+`mailboxes/threads.json` holds the original baseline and a monotonic retention cutoff, not pending text.
+A host without an outbox establishes its first baseline once; signals at or before it never backfill.
+The signal's timestamp and cutoff prevent recapture after offered entries expire at 14 days.
+The importer writes pending records as routed inbox entries with their frozen recipients, and acknowledgment ids as payload-free offered entries in the `thread-acknowledgments` inbox.
+An acknowledgment wins over a pending outbox copy of its id, including a routed copy from an interrupted import, but never deletes the actual recipient's already-enqueued context.
+The importer reads the source without modifying it, enqueues all entries idempotently, and removes the snapshot and directory only after they are durable.
+An imported pending asker notice carries a possible-repeat warning because a session handoff may already have arrived without confirmation under its outbox-era transport id.
+It atomically renames the completed directory before recursive cleanup so a crash during deletion is also safe to repeat.
+Malformed input or lost baseline in an established outbox holds boot; pending work is not discarded.
+
+Contract 41 adds the daemon's thread inbox verbs and routing flags.
+The `/deliver` wire envelope is unchanged: a contract-40 daemon can enqueue a forwarded result in either direction, and a duplicate remains a no-op.
+This is not a reversible on-disk migration.
+A daemon rolled back to contract 40 creates a new outbox baseline when the imported directory is absent and retries only that outbox, not inbox routing entries.
+Remote-bound results, unresolved recipients and staged asker notices can therefore remain stranded; an older hook also ignores routing metadata on a local fiber entry and may offer it before resolution.
+Already-resolved ordinary local inbox entries still use contract 40's consumer.
+Rolling forward preserves the inbox-only work; a recreated outbox whose baseline differs from the inbox's baseline holds re-import for operator reconciliation rather than silently resetting either cutoff.
+Do not treat rollback as restoring the deleted outbox or recovering its pending publications.
 
 ## Readers
 
@@ -224,6 +288,11 @@ The session-only Claude fallback claims by moving an entry into `fallback/` and 
 | `shuttle inbox pending <address>... [--waking]` | JSON address → pending count, or with `--waking` the count a launch would be for; unreadable addresses are named on stderr and omitted |
 | `shuttle inbox ls <address>` | Pending entries oldest first; `--json` includes wishes, queued time, sender and open attempt |
 | `shuttle inbox consume <fiber-key> <address-or-dash> <epoch> [--idle] [--unknown] [--costly]` | Consume for the current receiver, or with `-` and epoch 0 for a fiber with no worker; one JSON object with `action` (`wait`, `wake`, `context`, `fresh`, `launch`), the `members` sent or reserved, and `turn` when an entry asks for a turn the worker's facts would decide. The answer is printed even when an open batch's send fails, which exits nonzero |
+| `shuttle inbox thread-state` | Import the outbox if present and print `baseline` and `retention_cutoff` |
+| `shuttle inbox thread-put <id> <record-json>` | Enqueue the thread publication with its routing record; print `created` |
+| `shuttle inbox routes <owner>` | List pending thread entries, ready or awaiting placement, as `{address, id, record}` |
+| `shuttle inbox consume <address> - 0 --route <id> --route-current true\|false\|unknown [--route-record <json> --route-owner <host> --route-key <key>]` | Decide one routed entry from fresh currency and placement facts; `forward` and `session` include `entry`, while local resolution or a wait answers `wait` |
+| `shuttle inbox settle <address> <id> forwarded\|delivered\|undeliverable` | Record a confirmed routing outcome and move the entry to offered |
 
 All verbs act on this host's inbox only.
 `context-mailbox put` also accepts thread signals, reply and notification fields, `--turn` and `--derived`; its `--wake` means `turn: force`.

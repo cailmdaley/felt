@@ -31,7 +31,7 @@ func (a *app) threadInboxVerbs() []*cobra.Command {
 		}
 		return json.NewEncoder(a.env.Stdout).Encode(map[string]bool{"created": created})
 	}}
-	routes := &cobra.Command{Use: "routes <owner>", Short: "List the inbox entries awaiting routing on this host", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	routes := &cobra.Command{Use: "routes <owner>", Short: "List pending thread publications and their routing on this host", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		entries, err := messaging.RoutedEntries(a.env, args[0])
 		if err != nil {
 			return err
