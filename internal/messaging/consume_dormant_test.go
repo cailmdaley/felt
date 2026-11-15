@@ -49,7 +49,7 @@ func TestConsumeWithoutAWorkerLaunchesOncePerLease(t *testing.T) {
 				t.Fatalf("got %+v %v, want a launch for m", result, err)
 			}
 			for i := 0; i < 3; i++ {
-				if result, err := consumeWith(context.Background(), env, "fiber", "host", dormant, neverSend(t)); err != nil || result.Action != "wait" {
+				if result, err := consumeWith(context.Background(), env, "fiber", "host", dormant, neverSend(t)); err != nil || result.Action != "wait" || !result.Launching {
 					t.Fatalf("a launch in its lease was asked for again: %+v %v", result, err)
 				}
 			}
@@ -73,7 +73,7 @@ func TestConsumeWithoutAWorkerLaunchesOncePerLease(t *testing.T) {
 func TestConsumeWithoutAWorkerLeavesQuietEntries(t *testing.T) {
 	env := testEnv(t)
 	putWish(t, env, "quiet", "none", "hold")
-	if result, err := consumeWith(context.Background(), env, "fiber", "host", dormant, neverSend(t)); err != nil || result.Action != "wait" {
+	if result, err := consumeWith(context.Background(), env, "fiber", "host", dormant, neverSend(t)); err != nil || result.Action != "wait" || result.Launching {
 		t.Fatalf("quiet context launched a session: %+v %v", result, err)
 	}
 	if n, _ := WakingCount(env, "fiber"); n != 0 {

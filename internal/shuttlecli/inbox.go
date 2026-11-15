@@ -116,7 +116,8 @@ then wake, send quiet context to a receiver without a hook, reserve a fresh
 launch or wait. A worker whose conversation is not yet known (- with its
 epoch) waits. For a fiber with no worker, pass - and epoch 0: a due entry
 that asks for a turn reserves a launch ("action": "launch") once per two-minute
-lease, and the session launched for it takes the entries through its hook.
+lease (answering wait with "launching": true while the lease stands), and the
+session launched for it takes the entries through its hook.
 The JSON answer is printed whenever consume decided, including when an open
 batch's delivery failed, which then exits nonzero; "turn": true asks the caller
 to consume again with the worker's --idle, --unknown and --costly facts.`,

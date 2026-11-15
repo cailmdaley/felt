@@ -36,6 +36,9 @@ type Consumption struct {
 	Action  string   `json:"action"`
 	Members []string `json:"members,omitempty"`
 	Turn    bool     `json:"turn,omitempty"`
+	// Launching marks a wait for a fiber with no worker while a launch
+	// reserved earlier is in its lease.
+	Launching bool `json:"launching,omitempty"`
 }
 
 // launchLease is how long a launch reservation stands for its receiver. A
@@ -161,12 +164,14 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	action, turn := decideConsumption(candidates, w, direct, now)
 	if action == "wait" {
 		result.Turn = turn
+		result.Launching = dormant && launchInFlight(candidates, now)
 		return result, errors.Join(errs...)
 	}
 	due, validationErr := validateMailboxItems(root, candidates, current)
 	errs = append(errs, validationErr)
 	action, result.Turn = decideConsumption(due, w, direct, now)
 	if action == "wait" {
+		result.Launching = dormant && launchInFlight(due, now)
 		return result, errors.Join(errs...)
 	}
 	if action == "fresh" || action == "launch" {
@@ -253,6 +258,17 @@ func verifyUnaddressedReceiver(env *sysenv.Env, fiber, host string, epoch uint64
 		return errCode("stale_receiver", "superseded worker identity")
 	}
 	return nil
+}
+
+// launchInFlight reports that a launch reservation among items is in its
+// lease.
+func launchInFlight(items []mailboxPendingItem, now time.Time) bool {
+	for _, it := range items {
+		if a := it.entry.Attempt; a.open() && a.Launch && now.Sub(time.Unix(0, a.OpenedAt)) < launchLease {
+			return true
+		}
+	}
+	return false
 }
 
 // decideConsumption answers wait, fresh or wake for the due entries no open

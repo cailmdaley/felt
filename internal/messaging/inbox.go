@@ -282,12 +282,12 @@ func WakingCount(env *sysenv.Env, address string) (int, error) {
 		return 0, err
 	}
 	now := time.Now()
+	if launchInFlight(items, now) {
+		return 0, nil
+	}
 	n := 0
 	for _, it := range items {
 		e := it.entry
-		if a := e.Attempt; a.open() && a.Launch && now.Sub(time.Unix(0, a.OpenedAt)) < launchLease {
-			return 0, nil
-		}
 		if e.Wishes.Turn != "none" && e.AttemptAddress == "" && e.due(now) {
 			n++
 		}
