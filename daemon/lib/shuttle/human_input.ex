@@ -34,7 +34,7 @@ defmodule Shuttle.HumanInput do
   end
 
   defp outcome({:ok, _}), do: "delivered"
-  defp outcome({:error, {:paste_failed, _}}), do: "unknown"
+  defp outcome({:error, {:paste_failed, {:unknown, _}}}), do: "unknown"
   defp outcome({:error, :poller_busy}), do: "unknown"
   defp outcome({:error, _}), do: "undeliverable"
 end

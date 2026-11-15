@@ -295,17 +295,45 @@ defmodule ShuttleWeb.ApiContractWorkerTest do
              request("/dispatch", %{fiber_id: "absent/item"}, 404)
   end
 
+  test "a repeated human dispatch id submits nothing and has a typed duplicate answer" do
+    id = "work/human-repeat"
+    constitution(id)
+
+    payload = %{
+      fiber_id: id,
+      force: true,
+      ad_hoc: true,
+      resume_mode: "fresh",
+      user_message: "Human instruction",
+      message_id: "human-repeat"
+    }
+
+    assert %{"dispatched" => true} = request("/dispatch", payload, 200)
+
+    assert %{"dispatched" => false, "duplicate" => true, "message_id" => "human-repeat"} =
+             request("/dispatch", payload, 200)
+  end
+
   test "delivery launches fresh, messages the live session and can paste terminal input" do
     id = "work/deliver"
     constitution(id)
 
-    assert %{"delivery" => "dispatch", "delivered" => true, "dispatched" => true} =
-             request("/deliver", %{fiber_id: id, text: "Start here"}, 200)
+    assert %{"delivery" => "input", "delivered" => true} =
+             request(
+               "/deliver",
+               %{fiber_id: id, text: "Start here", from: "human", message_id: "human-start"},
+               200
+             )
 
     assert %{"delivery" => "message", "delivered" => true, "receipt" => %{"status" => "accepted"}} =
              request(
                "/deliver",
-               %{fiber_id: id, text: "Then this", message_id: "live-message"},
+               %{
+                 fiber_id: id,
+                 text: "Then this",
+                 message_id: "live-message",
+                 message_after_launch: true
+               },
                200
              )
 
@@ -330,8 +358,12 @@ defmodule ShuttleWeb.ApiContractWorkerTest do
 
     write_transcript(session, 30)
 
-    assert %{"delivery" => "resume", "delivered" => true} =
-             request("/deliver", %{fiber_id: id, text: "Continue", resume_mode: "previous"}, 200)
+    assert %{"delivery" => "input", "delivered" => true} =
+             request(
+               "/deliver",
+               %{fiber_id: id, text: "Continue", from: "human", resume_mode: "previous"},
+               200
+             )
   end
 
   test "delivery context queues for a dormant worker and refuses unless_live after launch" do

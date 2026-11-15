@@ -46,7 +46,7 @@ The routing column names one of the patterns in [How a route is routed](#how-a-r
 | `POST /capture` | owner-routed | Launch an agent from a free-text prompt to file and claim a constitution |
 | `POST /fiber/create` | owner-routed | Create a fiber |
 | `POST /dispatch` | owner-routed | Launch a worker for a fiber now, bypassing the poll |
-| `POST /deliver` | owner-routed | Put text in front of a fiber's worker: message a live session, else resume (or dispatch, if it never ran) with the text as From User. With `context_only` and a `message_id` it queues the text in the fiber's inbox instead; `turn` (`ask`, `force`; `wake` means `ask`) makes it ask for a turn, and a fiber with no worker is then started for it when it may be (`status: starting`, else `status: queued` with a `detail` saying what it waits for); adding `unless_live` answers 409 `{live: true}` while a worker is live |
+| `POST /deliver` | owner-routed | Enqueue agent text in a fiber's inbox, then consume it (`consumed` reports the live action); a dormant or fresh launch obeys its gates. Human lines are recorded before typed paste or a From User launch. `message_id` deduplicates; `unless_live` retains its 409 live-worker refusal. See [inbox internals](../dev/inbox.md) |
 | `POST /messages` | host-addressed | Deliver a durable, idempotent text message to an exact `shuttle://HOST/HARNESS/NATIVE_ID` address |
 | `POST /lifecycle` | owner-routed | Invoke a named lifecycle action on a fiber — see [below](#lifecycle-actions) |
 | `POST /kill` | owner-routed | Hard-kill a fiber's live worker session; writes no lifecycle verdict |
@@ -237,13 +237,23 @@ in its queue and answers **202** `{dispatched: false, queued: true, reason:
 "poller_busy", fiber_id, message}`: it launches when the Poller gets to it, so
 the caller does not send it again.
 
-`POST /deliver` accepts `{fiber_id, text, from?}` (plus `origin` to forward). A
-fiber with a live worker receives `text` through session messaging at
-`shuttle://<host>/<harness>/<session_uuid>`, woken, and the answer is
-`{delivered, delivery: "message", receipt}`. Otherwise the owner force-dispatches
-it with `text` as the From User: `delivery: "resume"` continues its previous
-conversation, `delivery: "dispatch"` starts one when it has none. These answer
-with `/dispatch`'s body and statuses plus `delivered` and `delivery`.
+`POST /deliver` accepts `{fiber_id, text, from?, message_id?}` (plus `origin` to forward).
+Agent text goes through the fiber inbox with `turn: ask`, or `force` with `session: fresh` when `resume_mode: fresh` is requested.
+The owner mints an id for a caller without one.
+A 202 answer carries `delivery: context`, `queued: true`, a status (`woken`, `followed_up`, `held`, `starting`, `queued`) and, for a live worker, `consumed` with the consumer's action and evidence.
+`delivered` is true for a confirmed emission, null when unconfirmed, and false while waiting or starting.
+With `context_only: true`, the entry is quiet unless `turn` or `wake` requests a turn; `message_id` is required.
+`unless_live` answers 409 with `live: true` for a live worker and queues nothing.
+`attachments` is an array of `{name, data, sha256}` publications (`data` is base64); the owner retains files and records references in the inbox.
+
+With `from: human`, the owner records and deduplicates the line before typed terminal paste or a From User launch prompt transports it, answering `delivery: input`.
+A repeated id answers `duplicate: true` and submits nothing.
+`POST /dispatch` with `user_message` (including attached image references) uses the same human entry, including `existing_only` review requests.
+The board supplies ids; a caller without one gets an owner-minted id.
+The prompt hook still records the human row and clears the ask.
+Ambiguous typed input is settled unknown and never re-sent automatically.
+Human launches keep forced-start authority; agent inbox launches, including fresh replacements, obey the armed-document and quarantine gates.
+`live_input: true` keeps voice's typed transport without recording a human entry.
 With `message_after_launch: true`, the owner instead starts the dormant worker without the text in its launch prompt, waits up to 30 s for its native conversation address, then sends the text as a message using `message_id`.
 This keeps transcript-batch deduplication identical for live and dormant workers.
 An address timeout returns **503** rather than claiming delivery.

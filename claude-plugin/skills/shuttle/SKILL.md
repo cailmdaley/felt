@@ -103,7 +103,7 @@ Does this exist, was it discussed, where did we put it: `shuttle find "<words>"`
 
 ```bash
 shuttle sessions --json                  # conversations across the fleet
-shuttle message <fiber|session> "…"      # --context-only never wakes; --fresh starts a new session; --wake forces a turn
+shuttle message <fiber|session> "…"      # --context-only never wakes; --fresh requests a gated fresh fiber session; --wake forces a turn
 shuttle post "…" [--file f]              # a short line to your channel, files attached; wakes no one
 shuttle board                            # your family's board
 shuttle send-file <path>                 # put a file on the human's board (or your harness's own file tool)
@@ -113,6 +113,8 @@ shuttle send-file <path>                 # put a file on the human's board (or y
 
 Messaging a fiber reaches its current worker, or queues for the next one. A busy Claude worker receives context on main-thread prompt submission or tool completion; unoffered mail falls back to native wake after 30 seconds, or sooner when the worker stops working.
 Fallback failures return a notice to the sender; native delivery still respects Claude's approval policy.
+
+**Fiber messages are durable inbox entries, whether the worker is live or dormant.** Their receipt says woken, followed up in a turn, held as context for cost, starting or queued. Busy Codex and Pi keep terminal follow-up and steering; Claude gets a hook window, then native wake. `--notify-when-idle` subscribes when a hook or wake delivers the entry. `--fresh` is deduplicated by message id and obeys the armed-document and quarantine gates: it never reopens a closed fiber. The replacement reads the text through its fiber hook. Session-addressed messages stay with that conversation.
 
 **A wake costs the recipient a read of its whole context, uncached once its cache is cold.** Before sending, ask whether the recipient has to act now. Usually it does not: send `--context-only`, which it reads on its next turn at no cost. An ordinary send to a session with a cold cache and 250k tokens or more of context is held as context anyway, and the receipt says what a wake would cost. When the recipient must act and its session is large and cold, prefer `--fresh`: a new session on the fiber takes the message, starting from Status and told where the old conversation is. `--wake` wakes the existing session whatever it costs.
 

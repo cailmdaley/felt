@@ -10,6 +10,11 @@ func TestHumanInputDedupAndSettlement(t *testing.T) {
 			t.Fatalf("created=%v err=%v", created, err)
 		}
 	}
+	root := mailboxDir(env, "fiber", "fiber")
+	before, err := readFiberMailboxEntry(root + "/offered/" + mailboxKey("human-1") + ".json")
+	if err != nil || before.Disposition != "unknown" {
+		t.Fatalf("interrupted submission: %+v %v", before, err)
+	}
 	if err := SettleHuman(env, "fiber", "human-1", "delivered"); err != nil {
 		t.Fatal(err)
 	}
@@ -17,7 +22,6 @@ func TestHumanInputDedupAndSettlement(t *testing.T) {
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("%+v %v", entries, err)
 	}
-	root := mailboxDir(env, "fiber", "fiber")
 	e, err := readFiberMailboxEntry(root + "/offered/" + mailboxKey("human-1") + ".json")
 	if err != nil || e.Wishes.Source != "human" || e.Disposition != "delivered" {
 		t.Fatalf("%+v %v", e, err)

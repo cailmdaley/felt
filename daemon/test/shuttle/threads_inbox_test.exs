@@ -2,6 +2,23 @@ defmodule Shuttle.ThreadsInboxTest do
   # The thread inbox across boots, and native receivers.
   use Shuttle.Test.ThreadsCase, async: true
 
+  test "the owner clears an ask when a remote sender reaches the fiber inbox", %{store: store} do
+    assert {:ok, _} = CLI.run_in_store(store, ["ask", "hub", "Which next?"])
+
+    assert {202, %{queued: true}} =
+             ShuttleWeb.DeliverController.route(
+               "hub",
+               "The next step",
+               nil,
+               "shuttle://other/pi/sender",
+               %{"context_only" => true, "message_id" => "remote-answer"}
+             )
+
+    assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+    parent = Enum.find(entries, &(Threads.address(&1.fiber) == "hub"))
+    refute parent.fiber["shuttle"]["ask"]
+  end
+
   @tag first_boot: true
   test "boot imports a pending result and acknowledged ids, retaining its baseline", %{
     store: store,
@@ -469,6 +486,7 @@ defmodule Shuttle.ThreadsInboxTest do
     end)
 
     assert Poller.worker_turn(poller, "hub") == :idle
+    Poller.release_boot_quarantine(poller)
     File.rm!(Path.join(store, "ready"))
     assert {:ok, _} = CLI.run_in_store(store, ["reopen", "hub/child", "--local"])
     assert {:ok, _} = CLI.run_in_store(store, ["close", "hub/child", "--local"])

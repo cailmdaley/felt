@@ -2,21 +2,14 @@ defmodule Shuttle.Delivery do
   @moduledoc """
   Puts a message in front of a fiber's worker on this host.
 
-  A live worker receives it through session messaging (`Shuttle.Messaging`),
-  woken as for any task request. A fiber with no live worker launches with the
-  message as its From User, under the dispatcher's `"continue"` rule: it
-  resumes a previous conversation that ended without a handoff when its
-  transcript is on this host and belongs to that dispatch; otherwise it starts
-  fresh — after a clean handoff, a missing transcript, or no previous run.
+  Agent messages reach the fiber's inbox (`context/4`): consumption offers
+  context, wakes or follows up with a worker, or reserves a gated fresh or
+  dormant launch. A launched worker takes the entries through its fiber hook.
 
-  A `resume_mode` option carries the board's explicit verb. `"previous"` forces
-  the resume and still messages a live worker; `"fresh"` starts a new session,
-  cutting a live worker.
-
-  Everything else reaches a worker through the fiber's inbox (`context/4`):
-  consumption offers it to a live worker as context, wakes it or replaces it
-  with a fresh session, and starts a session for a fiber with none when an
-  entry asks for a turn and `inbox_gate/2` allows it (`start_for_inbox/1`).
+  The human's lines (`human/3`) are recorded and deduplicated in that inbox,
+  then transported as typed input or the From User launch prompt. Human
+  launches keep the board's forced-start authority. `deliver/3` handles voice
+  and explicit launch-then-message callers through their session transports.
 
   A conversation a human resumed from the card is its worker
   (`Shuttle.SessionResume`), so it is addressed like any other.
@@ -55,7 +48,7 @@ defmodule Shuttle.Delivery do
         )
       end)
 
-    {:input, result}
+    {:human, result}
   end
 
   defp input(fiber_id, text) do
@@ -196,9 +189,9 @@ defmodule Shuttle.Delivery do
   directly. A `thread-` id names the event it reports, so its first capture
   stands whatever a retry states.
 
-  Answers `{:ok, :queued}`, `{:ok, :starting}` when a session is starting for
-  the entry, or `{:ok, {:waiting, detail}}` saying what a waking entry waits
-  for.
+  Answers `{:ok, {:consumed, answer}}` for a live worker, `{:ok, :queued}`,
+  `{:ok, :starting}` when a session is starting, or
+  `{:ok, {:waiting, detail}}` saying what a waking entry waits for.
   """
   def context(entry, text, message_id, opts \\ []) do
     worker = live_context_worker(entry)

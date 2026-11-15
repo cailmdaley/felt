@@ -674,10 +674,12 @@ defmodule Shuttle.ThreadReceiverTest do
     Env.put_app_env(:receiver_wake_stub, true)
     assert {:ok, _} = CLI.run(["inbox", "put", key, "thread-derived", "Take this result"])
 
-    assert {:ok, :queued} =
+    assert {:ok, {:consumed, %{"action" => "wait"}}} =
              Delivery.context(parent, "Take this result", "thread-derived", wake: true)
 
-    assert {:ok, :queued} = Delivery.context(parent, "A new result", "asked", wake: true)
+    assert {:ok, {:consumed, %{"action" => "wait"}}} =
+             Delivery.context(parent, "A new result", "asked", wake: true)
+
     assert {:ok, output} = CLI.run(["inbox", "ls", key, "--json"])
 
     assert %{"thread-derived" => "none", "asked" => "ask"} =

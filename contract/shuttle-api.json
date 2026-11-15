@@ -836,6 +836,10 @@
                     "type": "boolean",
                     "description": "Before launching, releases the reservation an earlier unresolved launch attempt left (the 409 launch_reserved refusal), if the fiber is eligible."
                   },
+                  "message_id": {
+                    "type": "string",
+                    "description": "Human input id minted by the board; repeated ids submit nothing. The owner mints one if absent."
+                  },
                   "user_message": {
                     "type": [
                       "string",
@@ -910,7 +914,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DispatchSuccess"
+                  "oneOf": [
+                    {"$ref": "#/components/schemas/DispatchSuccess"},
+                    {"$ref": "#/components/schemas/DispatchDuplicate"}
+                  ]
                 }
               }
             }
@@ -1008,7 +1015,7 @@
     "/deliver": {
       "post": {
         "summary": "Deliver text to a fiber’s worker.",
-        "description": "Puts text in front of a constitution's worker on its owning host: a live worker is messaged, a dormant one resumes or launches with the text as its first message. The delivery field names which happened (message, input, resume, dispatch or context). delivered is true when the worker has the text, false when it did not get it, and null (with 202) when it was sent but arrival is unconfirmed; null is not a failure. Launch outcomes reuse the /dispatch envelope, so a launch refusal carries dispatched false and reason. context_only with message_id queues without launching (202). Error bodies vary: a validation refusal carries only error (and delivered false), a launch refusal the /dispatch fields, a forward failure reason and origin.",
+        "description": "Agent text enqueues in the owning fiber's inbox before consumption. Human text is recorded and deduplicated there, then transported as typed input or a From User launch prompt. The delivery field names which happened (message, input, resume, dispatch or context). delivered is true when the worker has the text, false when it did not get it, and null (with 202) when it was sent but arrival is unconfirmed; null is not a failure. Launch outcomes reuse the /dispatch envelope, so a launch refusal carries dispatched false and reason. context_only with message_id queues without launching (202). Error bodies vary: a validation refusal carries only error (and delivered false), a launch refusal the /dispatch fields, a forward failure reason and origin.",
         "tags": [
           "core"
         ],
@@ -1039,17 +1046,27 @@
                     "type": "string",
                     "description": "Sender label, read only when from is \"unverified\"."
                   },
+                  "session": {
+                    "type": "string",
+                    "enum": ["any", "fresh", "previous"],
+                    "description": "Agent session preference. Fresh replaces a live worker or starts a fresh dormant session under the inbox launch gates."
+                  },
+                  "attachments": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "Attachment publications (name, base64 data, sha256), retained as owner-local file references."
+                  },
                   "context_only": {
                     "type": "boolean",
-                    "description": "Queues text in the fiber's inbox instead of messaging the worker or launching with the text. Requires message_id; answers 202 with delivery context."
+                    "description": "Enqueues without asking for a turn unless turn or wake requests one. Requires message_id; answers 202 with delivery context."
                   },
                   "message_id": {
                     "type": "string",
-                    "description": "Idempotency key. Required with context_only, where the mailbox deduplicates by it; otherwise the receipt id when a live worker is messaged (absent generates one)."
+                    "description": "Inbox idempotency key; required with context_only. The owner mints one for other callers that send none. A repeated human id submits nothing."
                   },
                   "wake": {
                     "type": "boolean",
-                    "description": "With context_only: the entry asks for a turn, as turn ask. Defaults to false, unlike /messages. Ignored without context_only."
+                    "description": "With context_only: the entry asks for a turn, as turn ask. Plain agent deliveries ask for a turn by default."
                   },
                   "turn": {
                     "type": "string",
@@ -2951,6 +2968,16 @@
           "reason"
         ]
       },
+      "DispatchDuplicate": {
+        "type": "object",
+        "properties": {
+          "dispatched": {"const": false},
+          "duplicate": {"const": true},
+          "fiber_id": {"type": "string"},
+          "message_id": {"type": "string"}
+        },
+        "required": ["dispatched", "duplicate", "fiber_id", "message_id"]
+      },
       "DispatchSuccess": {
         "allOf": [
           {
@@ -3266,7 +3293,11 @@
             "const": "context"
           },
           "delivered": {
-            "const": false
+            "type": ["boolean", "null"]
+          },
+          "consumed": {
+            "type": "object",
+            "description": "Consumer evidence for a live worker: action, members, session, followup, held and unconfirmed."
           },
           "queued": {
             "const": true
@@ -3278,9 +3309,12 @@
             "type": "string",
             "enum": [
               "queued",
-              "starting"
+              "starting",
+              "woken",
+              "followed_up",
+              "held"
             ],
-            "description": "starting: the fiber had no worker and a session is starting that takes the entry through its hook. queued: the entry waits in the inbox; detail says for what when it asked for a turn."
+            "description": "What consumption did: wake, busy follow-up, cost hold, gated launch or wait. Starting is not delivered; the launched worker takes the entry through its hook."
           },
           "detail": {
             "type": "string"

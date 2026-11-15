@@ -270,12 +270,14 @@ is then given back to the human rather than closed.
 | `shuttle snapshot` | Print the local daemon's state snapshot |
 | `shuttle dispatch <fiber>` | Ask the daemon to dispatch a fiber now (`--ad-hoc`); remote owners route through this host's daemon, carrying this host's copy (`--carry` insists on it over a copy the owner holds), and an owner without the fiber has it created from that copy first. `--message <text>` or `--message-file <path>` adds a launch directive |
 | `shuttle sessions [fiber\|session-uuid]` | With no argument, list live native sessions across the fleet (`--host`, `--harness`, `--json`); JSON rows include `fiber` when the host's session ledger records a pairing. With `--since <time>` (what `shuttle find --since` takes: `30d`, `12h`, a date, or an RFC3339 time), list every Claude, Codex and Pi session on this host — or on `--host <host>`, through that host's daemon — with a transcript message since then, live or ended, newest first: last activity, `live`, harness, the `shuttle show` address on that host, and the fibers it worked on (`--harness`, `--json`). With a fiber or session, show the composite ledger by UID, including historical paths, lifecycle events, hosts, harnesses, staleness, transcript availability, and a canonical `address` when the row can be addressed. A session UUID or `--commit <sha>` reverse-resolves the owning fiber and its disposition; `--materialize [--dir <d>]` resolves every available transcript to an ordinary local file and writes a `manifest.json` |
-| `shuttle message <target> [text\|-]` | Send to a full address, a unique native session ID, or a fiber path, slug, or UID, which resolves to its recorded worker session (`--attach`, `--file`, `--context-only`, `--notify-when-idle`, `--notify-wake`, `--from`, `--message-id`, `--json`). Session IDs resolve through live discovery and the session ledger; ambiguous IDs list their candidate addresses. `-` and `--file -` read multiline text; repeat `--attach <path>` to include binary files. Receipts print the resolved canonical address and message ID for a safe explicit retry |
+| `shuttle message <target> [text\|-]` | Send to a full address, a unique native session ID, or a fiber path, slug, or UID, which sends through its owner's durable inbox (`--attach`, `--file`, `--context-only`, `--notify-when-idle`, `--notify-wake`, `--from`, `--message-id`, `--json`). Session IDs resolve through live discovery and the session ledger; ambiguous IDs list their candidate addresses. `-` and `--file -` read multiline text; repeat `--attach <path>` to include binary files. Receipts print the resolved canonical address and message ID for a safe explicit retry |
 | `shuttle transcript [--date YYYY-MM-DD] [--fiber <id\|slug>] [--since HH:MM[:SS]] [--recorder HOST]` | Read the day's spoken transcript, including the card each line went to (`--json` for the daemon response) |
 | `shuttle say "<text>"` | Queue a spoken line on the speaker host, in the voice of the calling worker's role (its charter's `voice:`); playback waits behind queued lines and while the human talks, and a line whose card is out of view is held until its card is in view or `shuttle say --play` opens it. `--fiber` names the speaker from a plain terminal; `--voice` overrides the voice for this line. For voice conversations with the human only |
 | `shuttle voices` | List the voice bank and pocket-tts built-ins on the speaker host, each with the role whose charter claims it |
 | `shuttle say --held` | List spoken lines held because their card is out of view; `shuttle say --play` opens the card waiting longest (routes Listen to it and plays its lines), `--next` moves to the next card, `--stop` leaves the rest held |
-| `shuttle inbox consume <fiber-key> <address-or-dash> <epoch> [--idle] [--unknown] [--costly]` | Consume a fiber's inbox for its live worker, or with `-` and epoch 0 for a fiber with no worker; JSON action is `wait`, `wake`, `context` (quiet entries sent to a receiver without a hook), `fresh` or `launch` (a session to start for the reserved `members`), with `turn` when the worker's idle and cost facts would decide |
+| `shuttle inbox consume <fiber-key> <address-or-dash> <epoch> [--idle] [--unknown] [--busy] [--costly]` | Consume a fiber's inbox for its live worker, or with `-` and epoch 0 for a fiber with no worker; JSON action is `wait`, `wake`, `context` (quiet entries sent to a receiver without a hook), `fresh` or `launch` (a session to start for the reserved `members`), with `turn` when the worker's idle and cost facts would decide |
+| `shuttle inbox human-begin <fiber-key> <id> <text>` | Record typed human input before submission; JSON `created` permits only the first caller to submit |
+| `shuttle inbox human-settle <fiber-key> <id> delivered\|unknown\|undeliverable` | Settle typed human input without resending it |
 | `shuttle inbox put <address> <message-id> <text>` | Enqueue an entry in this host's inbox for a fiber key or a session's `shuttle://` address, with its delivery wishes (`--source`, `--turn`, `--session`, `--if-costly`, `--not-before`), `--from` and `--derived`; see [The inbox](../dev/inbox.md) |
 | `shuttle inbox pending <address>... [--waking]` | Print one JSON object of each address's pending entry count; `--waking` counts only the due entries that ask for a turn, free or held by an open batch, and none while a launch reserved in its lease still owes one |
 | `shuttle inbox ls <address>` | List an address's pending entries, oldest first: id, source, turn, not_before, queued time and sender (`--json`) |
@@ -388,8 +390,11 @@ shuttle message <address> "Background for your next task" --context-only
 `shuttle message` accepts that address, a unique native session ID, or a
 Shuttle fiber path, slug, or UID.
 Fiber targets require one exact match across configured stores; they refuse guesses and duplicate matches, and a slug naming several fibers is refused with their full paths.
-An attachment-free `--context-only` fiber send uses the durable fiber mailbox regardless of worker liveness, except that `--notify-when-idle` uses session routing while a worker is live.
-A wake send to a live worker, an idle subscription or a send with attachments resolves to the worker in its newest dispatch, resume, or claim ledger row, which the owning host writes.
+Fiber sends use the owner's durable inbox whether a worker is live or dormant; attachments become retained owner-local file references.
+The receipt says woken, followed up in a turn, held as context for cost, starting or queued.
+`--notify-when-idle` subscribes when a hook or wake delivers the entry.
+With an owner below contract 42, waking live sends and attachments keep session routing for compatibility.
+A session-routed send resolves to the worker in its newest dispatch, resume, or claim ledger row, which the owning host writes.
 When the fiber's
 `shuttle.runtime.session_uuid` or another live session registered for the
 fiber differs, the command notes it on stderr and still uses the ledger's
@@ -405,7 +410,9 @@ their candidate addresses. Addresses
 use `claude`, `codex`, and `pi`; the ledger spelling `claude-code` normalizes
 to `claude`.
 
-A plain `shuttle message` to Claude uses the hook mailbox when its latest lifecycle hook reports a working turn, a native fallback endpoint and sender return address are available, and the message fits the hook's context limit.
+For a fiber send, the [inbox consumer](../dev/inbox.md#the-live-fiber-consumer) decides delivery under its lock: a busy Codex worker gets terminal follow-up, Pi gets steering, and Claude gets hook context with native fallback after 30 seconds or when its turn ends.
+The following native-mailbox details describe session-addressed Claude sends.
+A plain session-addressed `shuttle message` to Claude uses the hook mailbox when its latest lifecycle hook reports a working turn, a native fallback endpoint and sender return address are available, and the message fits the hook's context limit.
 Idle or unknown state, a full mailbox, oversized mail, or a sender with no return address uses native delivery.
 Claude offers mail only on `UserPromptSubmit` and `PostToolUse`; `PreToolUse` context can be lost when a tool is interrupted.
 The main-thread hook records an offer by writing the message as context and acknowledging its mailbox entry.
@@ -431,10 +438,11 @@ An interrupt while a sibling PostToolUse hook is still running can also discard 
 The stock sibling hook is short, but a slow third-party hook widens this window; acknowledgment isn't transcript confirmation.
 `--wake` forces the native wake path, including during a turn.
 An ordinary send (neither `--wake` nor `--context-only`) to a Claude session whose prompt cache is cold and whose context is at least 250k tokens is held as context: the receipt is `queued`, and its detail gives the context size, how long the cache has been cold, and the two ways to act now.
-`--fresh` starts a new session on a fiber with the text as its launch directive, replacing a live worker; the new session is told where the previous conversation is. It needs a fiber target.
+`--fresh` enqueues a gated fresh-session request for a fiber, deduplicated by `--message-id`.
+It replaces a live worker or starts a dormant one only while the constitution is armed and the owner's launch gates allow it; it never reopens a closed fiber or bypasses quarantine.
+The new session is told where the previous conversation is and takes the text through its fiber hook.
 `--context-only` or `--wake=false` queues context without starting a turn, regardless of state.
-Pi and Codex retain their existing paths.
-An active Codex turn accepts context-only mail through native steering; an idle loaded thread receives persistent model context through `thread/inject_items`, without a separate visible TUI turn.
+Codex takes quiet context through its hook, never as terminal input.
 Hooks offer queued context when the receiver next prompts or uses a tool; Pi offers it before the next agent turn.
 
 `--notify-when-idle` subscribes the sending session to one notice when the

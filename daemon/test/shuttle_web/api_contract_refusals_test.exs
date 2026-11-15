@@ -65,7 +65,7 @@ defmodule ShuttleWeb.ApiContractRefusalsTest do
         post(
           api_conn(),
           "/api/v1" <> path,
-          Jason.encode!(%{fiber_id: "work/item", text: "Continue"})
+          Jason.encode!(%{fiber_id: "work/item", text: "Continue", live_input: true})
         )
 
       assert conn.status == status

@@ -4,14 +4,15 @@ defmodule ShuttleWeb.DeliverController do
 
   Body `{fiber_id, text, from?, origin?, context_only?, message_id?, wake?,
   unless_live?, resume_mode?}`. Puts `text`, from `from` or else Shuttle, in front
-  of the fiber's worker on its owning host (`Shuttle.Delivery`): a live worker is
-  messaged, a dormant one resumes (or dispatches, if it never ran) with `text` as
-  its From User. `resume_mode` (`"fresh"` or `"previous"`) names that choice instead, as
-  in `Shuttle.Delivery`. A request carrying `origin` is forwarded to that owner's identical
-  route.
+  of the fiber's worker on its owning host (`Shuttle.Delivery`). Agent text
+  goes through its inbox, defaulting to `turn: ask`; `resume_mode: fresh`
+  requests a gated fresh session. Human text is recorded there before typed
+  input or a From User launch prompt transports it. `live_input` and
+  `message_after_launch` use the session delivery path. A request carrying
+  `origin` is forwarded to that owner's identical route.
 
   With `context_only` (and a `message_id`), `text` is queued in the fiber's
-  inbox instead (`Shuttle.Delivery.context/4`): 202 `{delivery: "context",
+  inbox (`Shuttle.Delivery.context/4`): 202 `{delivery: "context",
   queued: true, status, detail?}`. `turn` (`"ask"` or `"force"`; `wake` means
   `"ask"`) makes the entry ask for a turn, and a fiber with no live worker is
   then started for it when it may be: `status` is `"starting"`, or `"queued"`
@@ -19,7 +20,11 @@ defmodule ShuttleWeb.DeliverController do
   `{live: true}` and queues nothing while a worker is live, so the sender
   messages it directly. `shuttle message <fiber>` sends this shape.
 
-  The answer names what happened in `delivery`: `"message"` with the messaging
+  A live inbox answer adds `consumed` (the consumer's action, members,
+  followup, held and unconfirmed fields). Its status is woken, followed_up,
+  held or queued; a replacement or dormant launch answers starting.
+
+  The session-path answer names what happened in `delivery`: `"message"` with the messaging
   `receipt`, or `"resume"` / `"dispatch"` with the `/dispatch` envelope.
   `delivered` is `true` when the worker has the text or its terminal took it
   as typed input, `false` when it did not
@@ -224,6 +229,20 @@ defmodule ShuttleWeb.DeliverController do
 
   defp context_reply(_fiber_id, _text, _id, _opts),
     do: {400, %{error: "message_id is required for context"}}
+
+  defp reply({:human, {:ok, _} = result}, fiber_id), do: reply({:input, result}, fiber_id)
+  defp reply({:human, {:duplicate, _} = result}, fiber_id), do: reply({:input, result}, fiber_id)
+
+  defp reply({:human, {:error, :poller_busy} = result}, fiber_id),
+    do: reply({:input, result}, fiber_id)
+
+  defp reply({:human, {:error, {:paste_failed, {:unknown, _}}} = result}, fiber_id),
+    do: reply({:input, result}, fiber_id)
+
+  defp reply({:human, result}, fiber_id) do
+    {status, body} = ShuttleWeb.DispatchReply.render(fiber_id, result)
+    {status, Map.merge(body, %{delivered: false, delivery: "input"})}
+  end
 
   defp reply({:input, {:duplicate, id}}, fiber_id),
     do:

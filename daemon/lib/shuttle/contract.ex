@@ -66,7 +66,7 @@ defmodule Shuttle.Contract do
       "inbox thread-state, thread-put, routes, route and settle " <>
         "(thread results through the routing inbox)",
     42 =>
-      "inbox consume --busy and session/followup/held answers; context-mailbox put --session; " <>
+      "inbox consume --busy and session/followup/held/unconfirmed answers; context-mailbox put --session/--attachments-stdin; " <>
         "inbox human-begin/human-settle (typed human input record and dedup)"
   }
 

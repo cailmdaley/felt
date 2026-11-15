@@ -85,6 +85,8 @@ defmodule ShuttleWeb.APIControllerTest do
   # ── POST /api/v1/dispatch ──
 
   test "existing-only review delivery cannot arm or launch a missing worker" do
+    Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
+    Env.put_app_env(:felt_runner, MockRunner)
     id = "tests/review-no-worker"
     MockRunner.set_fiber(id, make_fiber(id))
     MockRunner.set_shuttle(id, oneshot_shuttle())
