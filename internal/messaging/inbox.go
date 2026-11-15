@@ -271,7 +271,9 @@ func PendingCount(env *sysenv.Env, address string) (int, error) {
 // turn, free or held by an open batch: what a session started for a fiber with
 // no worker would be started for. It is zero while a launch reservation in its
 // lease still owes any pending entry, since that launch is in flight. Like
-// PendingCount, it reads without the inbox lock.
+// PendingCount, it reads without the inbox lock and settles nothing, so it
+// also counts a held batch that local records already resolve (a confirmed
+// receipt, a superseded thread result); consume settles those and decides.
 func WakingCount(env *sysenv.Env, address string) (int, error) {
 	root, err := inboxRoot(env, address)
 	if err != nil {

@@ -398,3 +398,77 @@ func TestALaunchedSessionsHookBeforeItIsTheReceiverLeavesTheBatchPending(t *test
 		})
 	}
 }
+
+// A held batch asks for a launch only while local records leave it
+// unresolved and current: one whose pinned payload has a recorded confirmed
+// receipt is closed delivered, and one whose thread result was superseded is
+// dropped, each without a session or an emission. A current one still
+// launches.
+func TestAHeldBatchLaunchesOnlyWhileUnresolvedAndCurrent(t *testing.T) {
+	for _, held := range []string{"confirmed", "superseded", "current"} {
+		t.Run(held, func(t *testing.T) {
+			env, w := consumeFixture(t)
+			scripts := t.TempDir()
+			calls := filepath.Join(scripts, "calls")
+			current := map[bool]string{true: "true", false: "false"}[held != "superseded"]
+			if err := os.WriteFile(filepath.Join(scripts, "shuttle"), []byte("#!/bin/sh\nprintf called >> '"+calls+"'\nprintf '{\"current\":"+current+"}\\n'\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			env.Set("PATH", scripts+string(os.PathListSeparator)+env.Getenv("PATH"))
+			signal := &ThreadSignal{UID: "child", Verb: "closed", Owner: "host", Stamp: time.Now().UTC().Format(time.RFC3339Nano)}
+			if err := Enqueue(env, InboxEntry{Address: "fiber", Request: Request{MessageID: "thread-m", Text: "thread child closed: result", ThreadSignal: signal}, Wishes: Wishes{Turn: "ask"}}); err != nil {
+				t.Fatal(err)
+			}
+			root := mailboxDir(env, "fiber", "fiber")
+			items, _ := pendingItems(root)
+			pinned := newConsumedAttempt(w, items, true)
+			if err := pinConsumedBatch(root, &pinned); err != nil {
+				t.Fatal(err)
+			}
+			if held == "confirmed" {
+				// The transport confirmed the batch; the consumer died before closing it.
+				req := *pinned.Payload
+				req.Address = w.Address
+				req.MessageID += "-" + mailboxKey(w.Address)[:16]
+				path := filepath.Join(dataDir(env), "messages", mailboxKey(req.MessageID)+".json")
+				if err := ensureDir(filepath.Dir(path), 0700); err != nil {
+					t.Fatal(err)
+				}
+				bytes, _ := json.Marshal(record{Hash: requestHash(req), State: "complete", Receipt: Receipt{Status: StatusAccepted}})
+				if err := mailboxWrite(path, bytes, false); err != nil {
+					t.Fatal(err)
+				}
+			}
+			transition(t, env, "", "-")
+			result, err := consumeWith(context.Background(), env, "fiber", "host", dormant, neverSend(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			checked, _ := os.ReadFile(calls)
+			switch held {
+			case "current":
+				if result.Action != "launch" || len(checked) == 0 {
+					t.Fatalf("a current held batch: %+v, checked %q", result, checked)
+				}
+				return
+			case "superseded":
+				if len(checked) == 0 {
+					t.Fatal("the held thread result's currency was not checked")
+				}
+			}
+			if result.Action != "wait" {
+				t.Fatalf("a %s held batch started a session: %+v", held, result)
+			}
+			if n, _ := PendingCount(env, "fiber"); n != 0 {
+				t.Fatalf("pending = %d", n)
+			}
+			if manifests, _ := readBatchManifests(root); len(manifests) != 0 {
+				t.Fatalf("the batch stayed open: %+v", manifests)
+			}
+			e := readEntry(t, filepath.Join(root, "offered", mailboxKey("thread-m")+".json"))
+			if held == "confirmed" && (e.Attempt.Outcome != attemptDelivered || e.PossibleRepeat) {
+				t.Fatalf("confirmed entry = %+v", e)
+			}
+		})
+	}
+}

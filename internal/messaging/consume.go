@@ -110,13 +110,18 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	}
 	// Each open batch advances on its own, so one awaiting its outcome holds
 	// only its own members. A fiber without a worker has no conversation to
-	// advance a batch to; its batches wait for the next receiver.
+	// advance a batch to: it settles only what local records decide (a
+	// confirmed receipt, a superseded member), and the rest wait for the next
+	// receiver.
 	errs := []error{}
 	_, batches, err := openBatches(env, root)
 	if err != nil {
 		return Consumption{}, err
 	}
 	if dormant {
+		for i := range batches {
+			errs = append(errs, settleHeldBatch(ctx, env, root, &batches[i]))
+		}
 		batches = nil
 	}
 	for i := range batches {
@@ -274,6 +279,17 @@ func verifyUnaddressedReceiver(env *sysenv.Env, fiber, host string, epoch uint64
 		return errCode("stale_receiver", "superseded worker identity")
 	}
 	return nil
+}
+
+// settleHeldBatch settles an open batch of a fiber with no worker from local
+// records alone (reconcileConsumedBatch), closing it delivered on a confirmed
+// receipt.
+func settleHeldBatch(ctx context.Context, env *sysenv.Env, root string, a *Attempt) error {
+	closed, confirmed, err := reconcileConsumedBatch(ctx, env, root, a)
+	if closed || err != nil || !confirmed {
+		return err
+	}
+	return closeDeliveredBatch(env, root, a)
 }
 
 // heldAsking lists the due entries among pending that ask for a turn and that
@@ -490,62 +506,74 @@ func pinConsumedBatch(root string, a *Attempt) error {
 	return nil
 }
 
+// reconcileConsumedBatch settles what an open batch's local records already
+// decide, without emitting anything: a recorded outcome closes it, and a
+// superseded member drops it, releasing the rest when the payload never
+// reached the conversation or holding them as ambiguous when it may have.
+// confirmed reports a locally recorded confirmed receipt for the pinned
+// payload, which delivered every member as sent; closed, that the batch is
+// closed.
+func reconcileConsumedBatch(ctx context.Context, env *sysenv.Env, root string, a *Attempt) (closed, confirmed bool, err error) {
+	if a.Outcome != "" {
+		return true, false, closeConsumedBatch(root, a, a.Outcome, nil)
+	}
+	stored, err := readDedupRecord(filepath.Join(dataDir(env), "messages", mailboxKey(a.Payload.MessageID+"-"+mailboxKey(a.Conversation)[:16])+".json"))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, false, err
+	}
+	unsent := err != nil || stored.Receipt.Status == StatusRejected
+	if stored.State == "complete" && stored.ErrorCode == "" && confirmedReceipt(stored.Receipt) {
+		return false, true, nil
+	}
+	var superseded []string
+	for _, id := range a.Members {
+		path := filepath.Join(root, "pending", mailboxKey(id)+".json")
+		e, err := readFiberMailboxEntry(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return false, false, err
+		}
+		if !hasThreadSignalValidation(e.Request) {
+			continue
+		}
+		checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		current, err := currentThreadSignalWithBackoff(checkCtx, env, e.Request)
+		cancel()
+		var skew threadSignalSkewError
+		if err != nil && !errors.As(err, &skew) {
+			return false, false, err
+		}
+		if err == nil && !current {
+			superseded = append(superseded, path)
+		}
+	}
+	if len(superseded) > 0 {
+		a.Outcome = attemptAmbiguous
+		if unsent {
+			a.Outcome = attemptReleased
+		}
+		bytes, _ := json.Marshal(a)
+		if err := mailboxWrite(batchManifest(root, a), bytes, false); err != nil {
+			return false, false, err
+		}
+		for _, path := range superseded {
+			if err := moveToOffered(root, path); err != nil {
+				return false, false, err
+			}
+		}
+		return true, false, closeConsumedBatch(root, a, a.Outcome, nil)
+	}
+	return false, false, nil
+}
+
 // deliverConsumedBatch sends an open batch's pinned payload and closes it on a
 // confirmed receipt. It reports whether the payload may have reached the
 // conversation: false when nothing was sent or the final send was rejected.
 func deliverConsumedBatch(ctx context.Context, env *sysenv.Env, root, host string, w Worker, a *Attempt, send fiberContextSender) (bool, error) {
-	if a.Outcome != "" {
-		return false, closeConsumedBatch(root, a, a.Outcome, nil)
-	}
-	// A confirmed receipt already delivered every member as sent; otherwise a
-	// superseded member is dropped, and the rest are released when the payload
-	// never reached the conversation or held as ambiguous when it may have.
-	stored, err := readDedupRecord(filepath.Join(dataDir(env), "messages", mailboxKey(a.Payload.MessageID+"-"+mailboxKey(a.Conversation)[:16])+".json"))
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	if closed, _, err := reconcileConsumedBatch(ctx, env, root, a); closed || err != nil {
 		return false, err
-	}
-	unsent := err != nil || stored.Receipt.Status == StatusRejected
-	if stored.State != "complete" || stored.ErrorCode != "" || !confirmedReceipt(stored.Receipt) {
-		var superseded []string
-		for _, id := range a.Members {
-			path := filepath.Join(root, "pending", mailboxKey(id)+".json")
-			e, err := readFiberMailboxEntry(path)
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			if err != nil {
-				return false, err
-			}
-			if !hasThreadSignalValidation(e.Request) {
-				continue
-			}
-			checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			current, err := currentThreadSignalWithBackoff(checkCtx, env, e.Request)
-			cancel()
-			var skew threadSignalSkewError
-			if err != nil && !errors.As(err, &skew) {
-				return false, err
-			}
-			if err == nil && !current {
-				superseded = append(superseded, path)
-			}
-		}
-		if len(superseded) > 0 {
-			a.Outcome = attemptAmbiguous
-			if unsent {
-				a.Outcome = attemptReleased
-			}
-			bytes, _ := json.Marshal(a)
-			if err := mailboxWrite(batchManifest(root, a), bytes, false); err != nil {
-				return false, err
-			}
-			for _, path := range superseded {
-				if err := moveToOffered(root, path); err != nil {
-					return false, err
-				}
-			}
-			return false, closeConsumedBatch(root, a, a.Outcome, nil)
-		}
 	}
 	if err := pinConsumedBatch(root, a); err != nil {
 		return false, err
@@ -580,16 +608,7 @@ func deliverConsumedBatch(ctx context.Context, env *sysenv.Env, root, host strin
 		*a = next
 	}
 	if err == nil && confirmedReceipt(receipt) {
-		for _, id := range a.Members {
-			e, readErr := readFiberMailboxEntry(filepath.Join(root, "pending", mailboxKey(id)+".json"))
-			if readErr == nil && e.Request.NotifyWhenIdle {
-				req := e.Request
-				req.Address = a.Conversation
-				address, _ := ParseAddress(a.Conversation)
-				subscribeIdle(env, address, req)
-			}
-		}
-		return true, closeConsumedBatch(root, a, attemptDelivered, nil)
+		return true, closeDeliveredBatch(env, root, a)
 	}
 	if err == nil {
 		err = errCode("unconfirmed", "batch delivery: %s", receipt.Status)
@@ -598,6 +617,22 @@ func deliverConsumedBatch(ctx context.Context, env *sysenv.Env, root, host strin
 		return false, closeConsumedBatch(root, a, attemptReleased, err)
 	}
 	return true, err
+}
+
+// closeDeliveredBatch closes a batch whose payload its conversation
+// confirmed, subscribing that conversation to the idle notices its members
+// asked for.
+func closeDeliveredBatch(env *sysenv.Env, root string, a *Attempt) error {
+	for _, id := range a.Members {
+		e, err := readFiberMailboxEntry(filepath.Join(root, "pending", mailboxKey(id)+".json"))
+		if err == nil && e.Request.NotifyWhenIdle {
+			req := e.Request
+			req.Address = a.Conversation
+			address, _ := ParseAddress(a.Conversation)
+			subscribeIdle(env, address, req)
+		}
+	}
+	return closeConsumedBatch(root, a, attemptDelivered, nil)
 }
 
 func confirmedReceipt(r Receipt) bool {

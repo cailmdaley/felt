@@ -120,7 +120,8 @@ The daemon consumes a fiber with no worker as `shuttle inbox consume <fiber-key>
 A due entry that asks for a turn (`ask`, `idle` or `force`), whether free or held by an open batch, makes it reserve a launch for those entries and answer `launch` with them as `members`, unless a reservation in its lease still owes any pending entry; then it answers `wait` with `"launching": true`.
 Repeated consumes therefore ask for one launch per lease, and once the launched session has taken every reserved entry a new one may ask for another.
 Quiet entries are not reserved.
-An open batch is not advanced without a receiver, but one that asks for a turn asks for a launch: a batch pinned to a conversation that ended before its outcome was known starts a replacement, whose consume then resolves it by the batch rules below (the pinned payload is offered to the ended conversation under its transport id, then rolled forward to the replacement, marked as a possible repeat when the outcome stayed unknown).
+An open batch is not sent anywhere without a receiver, but its local records are settled first, as the batch rules below settle them: a recorded confirmed receipt for its pinned payload closes it delivered, and a superseded thread result drops it, releasing or holding the rest.
+A batch left unresolved and current that asks for a turn asks for a launch: a batch pinned to a conversation that ended before its outcome was known starts a replacement, whose consume then resolves it by the batch rules below (the pinned payload is offered to the ended conversation under its transport id, then rolled forward to the replacement, marked as a possible repeat when the outcome stayed unknown).
 
 Only an armed fiber may be started by an entry that is not the human's (`Delivery.inbox_gate/2`): a constitution this host owns with `status: active`, not at rest (`horizon: stashed`), and not a standing constitution whose scheduled run is due, since that run takes the entries.
 Arming is the author's authorization, which a message or a thread result does not grant: a draft, a constitution at rest, a paused schedule and a closed constitution keep their entries for whoever arms or starts them next.
@@ -143,6 +144,7 @@ While a lease stands, a live worker other than the reserving one leaves the rese
 
 Each poll consumes every live worker's inbox and asks one `shuttle inbox pending --waking` call about every gated-in fiber with no worker.
 It counts the due entries that ask for a turn, free or held by an open batch, and counts none while a reservation in its lease still owes one; a fiber with a count is started as above.
+The count reads files only, so it includes held batches that a confirmed receipt or a superseded thread result has already resolved; the consume that follows settles them and answers `wait`, and the next poll counts none.
 This catches an entry that became due by `not_before` or outlived a daemon restart.
 An enqueue through `Delivery.context` starts its fiber at once.
 
