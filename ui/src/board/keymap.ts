@@ -179,9 +179,9 @@ export const helpSections: readonly HelpSection[] = [
     row(['Enter'], 'Unfold or fold a row, entering it', []),
     row(['c'], 'Open the highlighted thread in Rex', []),
   ] },
-  { title: 'Outbox', note: 'One channel per orchestrator with something waiting on you.', rows: [
+  { title: 'Outbox', note: 'One channel per office, listed while something in it waits on you or you keep it pinned.', rows: [
     row(['j', 'k'], 'Next / previous channel', []),
     row(['['], 'Hide or show the channels; on a phone, swipe in from the left edge', []),
-    row(['Enter'], 'Reply to the orchestrator, or to the thread chosen', []),
+    row(['Enter'], 'Reply to the seat, or to the line chosen', []),
   ] },
 ]
