@@ -762,7 +762,8 @@ export class ChannelsView implements TemporalView {
     this.layout?.toggleAttribute('data-thread', !!card)
     this.threadEl.hidden = !card
     if (!channel || !card) { this.sigs.thread = ''; this.threadList.replaceChildren(); return }
-    const now = Date.now(), messages = threadOf(this.messages(channel), card)
+    // The open ask stands in the thread's head, so its history does not say it again.
+    const now = Date.now(), messages = threadOf(this.messages(channel), card).filter(message => !(message.kind === 'ask' && message.waiting && sameFiber(message.card, card)))
     const state = liveness(card)
     const deeper = this.drillsDown()
     const sig = JSON.stringify([fiberOf(card), card.name, card.outcome, card.ask?.text, card.status, card.turn, state, deeper, [...this.tempering], [...this.unfolded],

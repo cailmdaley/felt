@@ -126,6 +126,8 @@ it('opens a worker\'s thread from its message: its name, liveness and ask on top
   // An asking worker's thread shows its ask on top; Escape closes the thread.
   message(host, 'Cluster mask').querySelector<HTMLElement>('.kbn-ch-msg-name')!.click()
   expect(thread.querySelector('.kbn-ch-thread-ask')?.textContent?.trim()).toBe('Mask at 5σ or 3σ?')
+  // Once: in the head, not again in the history.
+  expect(thread.querySelectorAll('.kbn-ch-thread-list .kbn-ch-msg[data-kind="ask"]')).toHaveLength(0)
   ;(document.activeElement as HTMLElement | null)?.blur()
   expect(view.keydown(new KeyboardEvent('keydown', { key: 'Escape' }))).toBe(true)
   expect(thread.hidden).toBe(true)
