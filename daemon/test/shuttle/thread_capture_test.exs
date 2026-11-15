@@ -106,24 +106,23 @@ defmodule Shuttle.ThreadCaptureTest do
     assert Enum.count(shuttle_calls(), &(&1 == ["inbox", "routes"])) == 1
   end
 
-  test "a close whose outcome is over 64 KiB is refused and logged, and the others are captured",
+  test "a close whose outcome is over 64 KiB is captured cut short, with the others",
        %{store: store} do
     recent = DateTime.to_iso8601(DateTime.utc_now())
     [hub, huge | rest] = closed_family(store, 3, recent)
-    huge = put_in(huge, [:fiber, "outcome"], String.duplicate("x", 65 * 1024))
+    huge = put_in(huge, [:fiber, "outcome"], String.duplicate("é", 40 * 1024))
 
     for _poll <- 1..2 do
-      log =
-        ExUnit.CaptureLog.capture_log(fn ->
-          assert :ok = Threads.capture_results([hub, huge | rest], "test-host")
-        end)
-
-      assert log =~ "Thread capture refused thread-"
-      assert log =~ "64 KiB"
+      assert :ok = Threads.capture_results([hub, huge | rest], "test-host")
     end
 
-    assert [_, _] = pending = Shuttle.Test.InboxPublications.pending()
-    assert Enum.all?(pending, fn {_id, record} -> record["text"] =~ ~r/Done [23]\./ end)
+    pending = Shuttle.Test.InboxPublications.pending()
+    assert length(pending) == 3
+    assert [cut] = Enum.filter(pending, fn {_id, r} -> byte_size(r["text"]) > 1000 end)
+    {_id, %{"text" => text}} = cut
+    assert String.valid?(text)
+    assert byte_size(text) <= 60_100
+    assert String.ends_with?(text, "(truncated)")
   end
 
   test "a refused capture is logged and retried by the next poll, never crashing the Poller",

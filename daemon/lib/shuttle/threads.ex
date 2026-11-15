@@ -1026,7 +1026,7 @@ defmodule Shuttle.Threads do
       "thread-" <>
         digest({entry.felt_store, entry.fiber["uid"] || entry.fiber["id"], verb, stamp})
 
-    text = "thread #{address(entry.fiber)} #{verb}: #{text}"
+    text = bounded("thread #{address(entry.fiber)} #{verb}: #{text}")
     parent_uid = Map.fetch!(parent.fiber, "uid")
     asker = wake && asker(entry.fiber)
 
@@ -1445,6 +1445,21 @@ defmodule Shuttle.Threads do
           false
       end
     end)
+  end
+
+  # The inbox refuses text over 64 KiB; a result whose outcome is that long is
+  # published cut short rather than refused on every poll.
+  @max_text 60_000
+  defp bounded(text) when byte_size(text) <= @max_text, do: text
+
+  defp bounded(text) do
+    prefix =
+      case :unicode.characters_to_binary(binary_part(text, 0, @max_text)) do
+        valid when is_binary(valid) -> valid
+        {_, valid, _} -> valid
+      end
+
+    prefix <> " … (truncated)"
   end
 
   defp close_verb(%{"tempered" => true}), do: "closed (tempered)"
