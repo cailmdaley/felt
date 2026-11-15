@@ -76,6 +76,16 @@ func Discover(ctx context.Context, env *sysenv.Env, host string) Directory {
 }
 
 func Send(ctx context.Context, env *sysenv.Env, host string, req Request) (Receipt, error) {
+	return send(ctx, env, host, req, false)
+}
+
+// SendRecorded transports a publication already claimed by an inbox record.
+// The record owns deduplication; no messages/ receipt is written.
+func SendRecorded(ctx context.Context, env *sysenv.Env, host string, req Request) (Receipt, error) {
+	return send(ctx, env, host, req, true)
+}
+
+func send(ctx context.Context, env *sysenv.Env, host string, req Request, recorded bool) (Receipt, error) {
 	addr, err := ParseAddress(req.Address)
 	if err != nil {
 		return rejected(req, "validation", err.Error()), err
@@ -92,7 +102,7 @@ func Send(ctx context.Context, env *sysenv.Env, host string, req Request) (Recei
 		err := errCode("unsupported_harness", "unsupported harness %q", addr.Harness)
 		return rejected(req, "none", err.Error()), err
 	}
-	return withDedup(ctx, env, req, func(sendCtx context.Context) dedupSendResult {
+	deliver := func(sendCtx context.Context) dedupSendResult {
 		if req.NotifyWhenIdle && req.Text == "" && len(req.Attachments) == 0 {
 			sub := subscribeIdle(env, addr, req)
 			receipt := Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusSubscribed, Transport: "idle-watch", Detail: sub.Detail, Idle: sub}
@@ -139,7 +149,12 @@ func Send(ctx context.Context, env *sysenv.Env, host string, req Request) (Recei
 			result.Receipt.Idle = subscribeIdle(env, addr, req)
 		}
 		return result
-	})
+	}
+	if recorded {
+		result := deliver(ctx)
+		return result.Receipt, result.Err
+	}
+	return withDedup(ctx, env, req, deliver)
 }
 
 func validateRequest(host string, r Request) error {

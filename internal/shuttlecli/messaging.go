@@ -39,6 +39,7 @@ type messageOptions struct {
 	from        string
 	id          string
 	requestJSON bool
+	recorded    bool
 	attachments []string
 	notifyIdle  bool
 	notifyWake  bool
@@ -285,7 +286,11 @@ exit 1 means rejected, unknown, or another command error.`,
 				if hostErr != nil {
 					return hostErr
 				}
-				receipt, err = messaging.Send(cmd.Context(), a.env, host, request)
+				if messageOpts.recorded {
+					receipt, err = messaging.SendRecorded(cmd.Context(), a.env, host, request)
+				} else {
+					receipt, err = messaging.Send(cmd.Context(), a.env, host, request)
+				}
 				originalDetail := receipt.Detail
 				receipt = a.enrichUnavailableSession(request, receipt)
 				if receipt.Detail != originalDetail && err != nil {
@@ -365,6 +370,7 @@ exit 1 means rejected, unknown, or another command error.`,
 	shuttleMessageCmd.Flags().StringVar(&messageOpts.id, "message-id", "", "supply an idempotency key for a safe retry")
 	shuttleMessageCmd.Flags().BoolVar(&messageOpts.local, "local", false, "send through this host's native adapter without daemon routing")
 	_ = shuttleMessageCmd.Flags().MarkHidden("local")
+	shuttleMessageCmd.Flags().BoolVar(&messageOpts.recorded, "recorded", false, "transport an inbox-recorded publication without a message receipt")
 	shuttleMessageCmd.Flags().BoolVar(&messageOpts.requestJSON, "request-json", false, "read one message request JSON frame from stdin")
 	_ = shuttleMessageCmd.Flags().MarkHidden("request-json")
 	return shuttleMessageCmd

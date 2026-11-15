@@ -2887,19 +2887,38 @@ defmodule Shuttle.Poller do
 
         if next.pulses == pulses and
              Shuttle.Pulse.in_window?(Shuttle.Pulse.config(fiber).window, now) do
-          {next, result} =
-            do_dispatch_fiber(next, fiber,
-              resume_mode: "pulse",
-              user_message: Shuttle.Pulse.message(row, now)
+          result =
+            Shuttle.InboxRecord.submit(
+              fiber_address(fiber),
+              Shuttle.Pulse.message(row, now),
+              Shuttle.Pulse.message_id(runtime_key_for_fiber(fiber), row),
+              "shuttle",
+              fn _entry ->
+                case do_dispatch_fiber(next, fiber,
+                       resume_mode: "pulse",
+                       user_message: Shuttle.Pulse.message(row, now)
+                     ) do
+                  {state, {:ok, _}} -> {:ok, state}
+                  {state, error} -> {:error, {state, error}}
+                end
+              end,
+              source: "pulse",
+              entry: %{fiber: fiber, felt_store: owning_store(fiber_address(fiber), next)}
             )
 
-          if match?({:ok, _}, result),
-            do:
+          case result do
+            {:ok, state} ->
               persist_pulses(
-                next,
-                Shuttle.Pulse.delivered(next.pulses, runtime_key_for_fiber(fiber), now)
-              ),
-            else: next
+                state,
+                Shuttle.Pulse.delivered(state.pulses, runtime_key_for_fiber(fiber), now)
+              )
+
+            {:error, {%State{} = state, _}} ->
+              state
+
+            _ ->
+              next
+          end
         else
           next
         end
@@ -2942,7 +2961,7 @@ defmodule Shuttle.Poller do
                 "from" => "shuttle",
                 "wake" => true,
                 "idle_only" => true,
-                "message_id" => "pulse-#{key}-#{DateTime.to_unix(now, :millisecond)}"
+                "message_id" => Shuttle.Pulse.message_id(key, row)
               }
 
               # Claude's native inbox defers a race with a new turn. Keep one durable
@@ -2961,10 +2980,23 @@ defmodule Shuttle.Poller do
                   Task.Supervisor.async_nolink(Shuttle.TaskSupervisor, fn ->
                     Shuttle.Env.adopt_callers(callers)
 
-                    case Shuttle.Env.app(:pulse_sender) do
-                      sender when is_function(sender, 1) -> sender.(payload)
-                      _ -> Shuttle.Messaging.send_message(payload)
-                    end
+                    Shuttle.InboxRecord.submit(
+                      fiber_address(fiber),
+                      payload["text"],
+                      payload["message_id"],
+                      "shuttle",
+                      fn _entry ->
+                        case Shuttle.Env.app(:pulse_sender) do
+                          sender when is_function(sender, 1) -> sender.(payload)
+                          _ -> Shuttle.Messaging.send_recorded(payload)
+                        end
+                      end,
+                      source: "pulse",
+                      entry: %{
+                        fiber: fiber,
+                        felt_store: owning_store(fiber_address(fiber), reserved_state)
+                      }
+                    )
                   end)
 
                 %{

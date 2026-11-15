@@ -132,6 +132,15 @@ Rolling a host back to 41 leaves inbox text and attempts on disk, but its consum
 Records already in offered remain, but a 41 daemon does not use them to deduplicate: retrying a board line there can paste twice, and retrying a `--fresh` id starts another session, with forced-start authority.
 Rolling forward resumes the recorded inbox state.
 
+### Pulses and contract 43
+
+A pulse keeps its clock, busy-worker skips, cost-independent wake, window rollover and Claude completion reservation in `pulses.json` and `Shuttle.Pulse`.
+Its delivery is an offered inbox record, source `pulse`, sender `shuttle`, identified by the pulse key and reserved `next_tick`, not the send clock.
+The daemon records before sending and settles from the transport outcome; an unknown record is not sent again.
+A tick for a dormant worker carries its text in the launch prompt.
+Pulse transport uses `message --recorded`, without a `messages/` receipt.
+Contract 43 adds that flag and `inbox record-begin --source`.
+
 ## Thread results and routing
 
 A thread's owner captures its close, ask, handoff, rest and verdict publications, and its unblock notes, into the host's routing inbox: the inbox at address `threads`, holding every thread publication this host captured and has not yet placed.

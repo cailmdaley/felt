@@ -6,6 +6,24 @@ import (
 	"testing"
 )
 
+func TestPulseRecordSurvivesInterruptedSend(t *testing.T) {
+	env := testEnv(t)
+	id := "pulse-key-2026-11-15T12:00:00Z"
+	created, _, err := BeginRecord(env, "fiber", id, "shuttle", "tick", "pulse")
+	if err != nil || !created {
+		t.Fatalf("%v %v", created, err)
+	}
+	// Recovery uses the reserved tick identity, not the recovery clock.
+	created, disposition, err := BeginRecord(env, "fiber", id, "shuttle", "tick", "pulse")
+	if err != nil || created || disposition != "unknown" {
+		t.Fatalf("%v %s %v", created, disposition, err)
+	}
+	e, err := readFiberMailboxEntry(recordPath(mailboxDir(env, "fiber", "fiber"), id))
+	if err != nil || e.Wishes.Source != "pulse" || e.Request.From != "shuttle" {
+		t.Fatalf("%+v %v", e, err)
+	}
+}
+
 func TestRecordDedupAndSettlement(t *testing.T) {
 	env := testEnv(t)
 	for i := 0; i < 3; i++ {

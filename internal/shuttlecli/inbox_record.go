@@ -13,13 +13,13 @@ import (
 // line beginning with "-" is never read as a flag and a long paste is not
 // bounded by the argument list.
 func (a *app) recordInboxVerbs() []*cobra.Command {
-	var from, fiber, ask string
+	var from, fiber, ask, source string
 	begin := &cobra.Command{Use: "record-begin <fiber-key> <message-id> < text", Short: "Record a line, read from stdin, before the daemon transports it", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
 		text, err := io.ReadAll(a.env.Stdin)
 		if err != nil {
 			return err
 		}
-		created, disposition, err := messaging.BeginRecord(a.env, args[0], args[1], from, string(text))
+		created, disposition, err := messaging.BeginRecord(a.env, args[0], args[1], from, string(text), source)
 		if err != nil {
 			return err
 		}
@@ -28,6 +28,7 @@ func (a *app) recordInboxVerbs() []*cobra.Command {
 		}
 		return json.NewEncoder(a.env.Stdout).Encode(map[string]any{"created": created, "disposition": disposition})
 	}}
+	begin.Flags().StringVar(&source, "source", "", "publication source: human, voice, pulse or message")
 	begin.Flags().StringVar(&from, "from", "human", "who the line is from")
 	begin.Flags().StringVar(&fiber, "fiber", "", "the fiber's uid, for the human line's family-board row")
 	begin.Flags().StringVar(&ask, "ask", "", "the question the human line answers, for its board row")

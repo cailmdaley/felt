@@ -82,6 +82,10 @@ defmodule Shuttle.Pulse do
 
   def due?(_, _), do: false
 
+  def message_id(key, row) do
+    "pulse-" <> key <> "-" <> row["next_tick"]
+  end
+
   def advance(pulses, fiber, now) do
     update_in(pulses[key(fiber)], fn row ->
       %{

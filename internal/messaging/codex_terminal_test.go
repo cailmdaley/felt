@@ -15,6 +15,39 @@ import (
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
+func TestRecordedPulseUsesInboxInsteadOfMessageReceipts(t *testing.T) {
+	hits := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		_, _ = w.Write([]byte(`{"status":"submitted"}`))
+	}))
+	defer server.Close()
+	env := codexTestEnv(t)
+	env.Set("SHUTTLE_DAEMON_URL", server.URL)
+	registerCodexState(t, env, "thread-pulse", "idle")
+	request := Request{Address: "shuttle://host/codex/thread-pulse", MessageID: "pulse-key-reserved-time", Text: "tick", From: "shuttle", Wake: true, IdleOnly: true}
+	for i := 0; i < 2; i++ {
+		created, _, err := BeginRecord(env, "fiber", request.MessageID, "shuttle", request.Text, "pulse")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if created {
+			r, err := SendRecorded(context.Background(), env, "host", request)
+			if err != nil || r.Status != StatusSubmitted {
+				t.Fatalf("%+v %v", r, err)
+			}
+			// Leave unknown, as if the caller died after the paste.
+		}
+	}
+	if hits != 1 {
+		t.Fatalf("%d terminal submissions", hits)
+	}
+	files, err := filepath.Glob(filepath.Join(dataDir(env), "messages", "*"))
+	if err != nil || len(files) != 0 {
+		t.Fatalf("message receipts: %v %v", files, err)
+	}
+}
+
 func TestCodexIdleWakeUsesLocalTerminalInput(t *testing.T) {
 	var got struct {
 		SessionUUID string `json:"session_uuid"`

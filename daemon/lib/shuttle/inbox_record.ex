@@ -14,15 +14,16 @@ defmodule Shuttle.InboxRecord do
   undeliverable on any other error, which lets the same id be sent again. A
   repeated id answers `{:duplicate, id, disposition}` and delivers nothing.
   """
-  def submit(fiber_id, text, message_id, from, deliver) do
+  def submit(fiber_id, text, message_id, from, deliver, opts \\ []) do
     id =
       message_id || "human-" <> Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false)
 
-    with {:ok, %{fibers: [entry | _]}} <- Shuttle.FiberDocuments.get_shuttle(fiber_id),
+    with {:ok, %{fibers: [entry | _]}} <- document(fiber_id, opts),
          key = Shuttle.Delivery.context_key(entry),
          {:ok, output} <-
            Shuttle.CLI.run(
-             ["inbox", "record-begin", "--from", from] ++ board(from, entry) ++ ["--", key, id],
+             ["inbox", "record-begin", "--from", from] ++
+               source(opts) ++ board(from, entry) ++ ["--", key, id],
              input: text,
              input_eof: true
            ),
@@ -46,7 +47,10 @@ defmodule Shuttle.InboxRecord do
           result
       end
     else
-      error -> {:error, {:inbox_record, error}}
+      error ->
+        require Logger
+        Logger.warning("Inbox record #{id}: #{inspect(error)}")
+        {:error, {:inbox_record, error}}
     end
   end
 
@@ -54,6 +58,17 @@ defmodule Shuttle.InboxRecord do
   # id: "answered" when it answers the fiber's question, else "human". The
   # worker's prompt hook, when the line is typed into its session, writes its
   # row under the same id.
+  defp document(fiber_id, opts) do
+    case opts[:entry] do
+      nil -> Shuttle.FiberDocuments.get_shuttle(fiber_id)
+      entry -> {:ok, %{fibers: [entry]}}
+    end
+  end
+
+  defp source(opts) do
+    if opts[:source], do: ["--source", opts[:source]], else: []
+  end
+
   defp board("human", entry) do
     ask = get_in(entry.fiber, ["shuttle", "ask", "text"])
     uid = entry.fiber["uid"] || entry.fiber["id"]
@@ -62,6 +77,15 @@ defmodule Shuttle.InboxRecord do
 
   defp board(_from, _entry), do: []
 
+  defp outcome({:ok, status, receipt}) do
+    cond do
+      status < 300 and receipt["status"] in ["accepted", "submitted", "queued"] -> "delivered"
+      receipt["status"] == "rejected" -> "undeliverable"
+      true -> "unknown"
+    end
+  end
+
+  defp outcome({:error, _status, _reason}), do: "undeliverable"
   defp outcome({:ok, _}), do: "delivered"
   defp outcome({:error, {:paste_failed, {:unknown, _}}}), do: "unknown"
   defp outcome({:error, :poller_busy}), do: "unknown"

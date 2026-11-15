@@ -25,7 +25,7 @@ import (
 // the stored disposition, unless its record was settled undeliverable, which
 // may be submitted again. Text over the inbox limit is recorded cut short; the
 // transport carries it whole.
-func BeginRecord(env *sysenv.Env, address, id, from, text string) (bool, string, error) {
+func BeginRecord(env *sysenv.Env, address, id, from, text string, sources ...string) (bool, string, error) {
 	root, err := inboxRoot(env, address)
 	if err != nil {
 		return false, "", err
@@ -49,6 +49,12 @@ func BeginRecord(env *sysenv.Env, address, id, from, text string) (bool, string,
 	source := "message"
 	if from == "human" {
 		source = "human"
+	}
+	if len(sources) > 0 && sources[0] != "" {
+		source = sources[0]
+	}
+	if source != "message" && source != "human" && source != "voice" && source != "pulse" {
+		return false, "", errCode("invalid_request", "invalid record source")
 	}
 	b, err := json.Marshal(mailboxEntry{
 		Request:     Request{MessageID: id, Text: boundedInboxText(text), From: from},

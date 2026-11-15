@@ -81,6 +81,14 @@ defmodule Shuttle.Messaging do
 
   def send_message(payload) when is_map(payload), do: send_message(payload, :text)
 
+  def send_recorded(payload) do
+    with {:ok, request} <- validate_message(payload, :text),
+         {:ok, address} <- parse_address(request.address),
+         request <- normalize_message_address(request, address) do
+      run_local(request, %{address | host: Poller.own_host_id()}, ["--recorded"])
+    end
+  end
+
   def send_message_with_files(payload) when is_map(payload),
     do: send_message(payload, :files)
 
@@ -375,7 +383,7 @@ defmodule Shuttle.Messaging do
        do: Shuttle.WakeCost.costly(address.native)
   end
 
-  defp run_local(request, address) do
+  defp run_local(request, address, flags \\ []) do
     payload = Map.put(request.raw, "address", build_address(address.host, address))
 
     frame = Jason.encode!(payload) <> "\n"
@@ -383,7 +391,7 @@ defmodule Shuttle.Messaging do
     timeout =
       if request.attachments == [], do: @local_message_timeout_ms, else: @local_files_timeout_ms
 
-    case CLI.run(["message", "--local", "--json", "--request-json"],
+    case CLI.run(["message", "--local", "--json", "--request-json"] ++ flags,
            timeout_ms: timeout,
            input: frame
          ) do
