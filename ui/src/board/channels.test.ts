@@ -36,14 +36,14 @@ describe('composeChannels', () => {
   it('groups by shuttle.channel, inherited through the orchestrator, else by office, else by top-level; chaired channels first by name', () => {
     const channels = compose(all)
     expect(channels.map(channel => [channel.key, channel.name, channel.chaired, channel.members.map(member => member.id)])).toStrictEqual([
-      ['role:analyst', 'Analyst', true, ['shear']],
-      ['channel:UNIONS', 'UNIONS', true, ['pando/unions', 'east-unions', 'west-unions', 'pando/unions/modes']],
-      ['channel:Vizier', 'Vizier', true, ['life/vizier', 'loom/email/morning-post']],
+      ['channel:analyst', 'Analyst', true, ['shear']],
+      ['channel:unions', 'UNIONS', true, ['pando/unions', 'east-unions', 'west-unions', 'pando/unions/modes']],
+      ['channel:vizier', 'Vizier', true, ['life/vizier', 'loom/email/morning-post']],
       ['fiber:R', 'Moving house', false, ['van']],
       ['fiber:O', 'Old notes', false, ['old']],
     ])
-    expect(named(channels, 'role:analyst').title).toBe('Analyst · the shear desk')
-    expect(named(channels, 'channel:UNIONS').families).toStrictEqual(['U'])
+    expect(named(channels, 'channel:analyst').title).toBe('Analyst · the shear desk')
+    expect(named(channels, 'channel:unions').families).toStrictEqual(['U'])
   })
 
   it('follows the orchestrator link, not where a fiber is filed, and a thread\'s own channel wins', () => {
@@ -51,18 +51,27 @@ describe('composeChannels', () => {
     const errand = card({ id: 'pando/unions/errand', uid: 'E', orchestrator: 'Z', status: 'active' })
     const paper = card({ id: 'pando/unions/paper', uid: 'Q', orchestrator: 'U', shuttleChannel: 'SPT', status: 'active' })
     const channels = compose([...all, errand, paper])
-    expect(named(channels, 'channel:Vizier').members.map(member => member.id)).toContain('pando/unions/errand')
-    expect(named(channels, 'channel:SPT').members.map(member => member.id)).toStrictEqual(['pando/unions/paper'])
+    expect(named(channels, 'channel:vizier').members.map(member => member.id)).toContain('pando/unions/errand')
+    expect(named(channels, 'channel:spt').members.map(member => member.id)).toStrictEqual(['pando/unions/paper'])
+  })
+
+  it('merges an office into the channel that shares its charter name', () => {
+    // The vizier's errand carries no channel; its office's charter is named "Vizier", so it speaks in Vizier.
+    const errand = card({ id: 'life/errand', uid: 'V', name: 'Errand', shuttleRole: 'vizier', status: 'active' })
+    const channels = compose([...all, errand], { names: new Map([['analyst', 'Analyst · the shear desk'], ['vizier', 'Vizier · first point of contact']]) })
+    expect(channels.filter(channel => channel.name === 'Vizier')).toHaveLength(1)
+    expect(named(channels, 'channel:vizier').title).toBe('Vizier')
+    expect(named(channels, 'channel:vizier').members.map(member => member.id)).toContain('life/errand')
   })
 
   it('chairs a channel with its topmost seat, a non-standing one first, then the most recently active', () => {
     const channels = compose(all)
-    expect(named(channels, 'channel:UNIONS').seat.id).toBe('pando/unions')
-    expect(named(channels, 'channel:Vizier').seat.id).toBe('life/vizier')
+    expect(named(channels, 'channel:unions').seat.id).toBe('pando/unions')
+    expect(named(channels, 'channel:vizier').seat.id).toBe('life/vizier')
     // Without a seat, the most recently active top-level.
     const lone = card({ id: 'lone', uid: 'L', shuttleChannel: 'French', ...working(40) })
     const lesson = card({ id: 'lesson', uid: 'L2', orchestrator: 'L', ...working(1) })
-    expect(named(compose([lone, lesson]), 'channel:French').seat.id).toBe('lone')
+    expect(named(compose([lone, lesson]), 'channel:french').seat.id).toBe('lone')
   })
 
   it('lists a channel waiting, pinned, or opened or active within a week; a set-aside clears its waiting mark', () => {
@@ -104,7 +113,7 @@ describe('composeMessages', () => {
   const stuck = card({ id: 'stuck', uid: 'K', name: 'Stuck', orchestrator: 'U', status: 'active', workerState: 'blocked', launchError: 'No allocation left.', lastActivityAt: now - 3 * minute })
   const quiet = card({ id: 'quiet', uid: 'Y', name: 'Quiet', orchestrator: 'U', ...working(1), outcome: 'Running the chains.' })
   const cards = [unions, east, west, modes, cuts, stuck, quiet]
-  const channel = named(compose(cards), 'channel:UNIONS')
+  const channel = named(compose(cards), 'channel:unions')
   const files: SentFile[] = [
     { uid: 'F', host: 'local', fullPath: '/west/run.log', basename: 'run.log', timestamp: now - 40 * minute },
     { uid: 'F', host: 'local', fullPath: '/west/s8.png', basename: 's8.png', timestamp: now - 40 * minute },

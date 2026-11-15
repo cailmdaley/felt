@@ -63,7 +63,7 @@ export interface Tapestry { path: string; at: number; title: string; lede: strin
  * their threads, else one top-level constitution with its threads.
  */
 export interface Channel {
-  /** `channel:<name>`, `role:<office>`, or `fiber:<uid>` for a lone top-level. */
+  /** `channel:<name, lowercased>` — a `shuttle.channel` or an office's charter name — or `fiber:<uid>` for a lone top-level. */
   key: string
   /** The channel's name; an office's charter name before any ` · ` gloss; the constitution's name. */
   name: string
@@ -161,12 +161,18 @@ export function composeChannels(input: {
     named.set(card, name)
     return name
   }
-  const keyOf = (card: KanbanCard): string => {
+  // A channel is keyed by its name, so an office whose charter shares a channel's name speaks in that channel.
+  const nameOf = (card: KanbanCard): string | null => {
     const name = channelOf(card)
-    if (name) return `channel:${name}`
-    const top = topOf(card), office = officeOf(top.shuttleRole)
-    return office ? `role:${office}` : `fiber:${fiberOf(top)}`
+    if (name) return name
+    const office = officeOf(topOf(card).shuttleRole)
+    return office ? (names.get(office) ?? office).split(' · ')[0] : null
   }
+  const keyOf = (card: KanbanCard): string => {
+    const name = nameOf(card)
+    return name ? `channel:${name.toLowerCase()}` : `fiber:${fiberOf(topOf(card))}`
+  }
+  const titles = new Map<string, string>()
   const seen = new Set<string>()
   const groups = new Map<string, { members: KanbanCard[]; everyone: KanbanCard[] }>()
   for (const card of cards) {
@@ -174,6 +180,9 @@ export function composeChannels(input: {
     if (card.deskSection || card.isCycle || seen.has(fiberOf(card))) continue
     seen.add(fiberOf(card))
     const key = keyOf(card)
+    // A channel's own spelling wins over an office's.
+    const office = officeOf(topOf(card).shuttleRole)
+    if (!titles.has(key) || channelOf(card)) titles.set(key, channelOf(card) ?? (office ? names.get(office) ?? office : ''))
     const group = groups.get(key) ?? groups.set(key, { members: [], everyone: [] }).get(key)!
     group.everyone.push(card)
     if (LIVE.includes(threadState(card))) group.members.push(card)
@@ -202,7 +211,7 @@ export function composeChannels(input: {
     const active = Math.max(0, ...members.map(lastActive))
     const isPinned = (pinned.get(key) ?? -Infinity) > (unpinned.get(key) ?? -Infinity)
     const waiting = newest > 0 && (setAside.get(key) ?? -Infinity) < newest
-    const title = key.startsWith('channel:') ? key.slice(8) : key.startsWith('role:') ? names.get(key.slice(5)) ?? key.slice(5) : seat.name
+    const title = titles.get(key) || seat.name
     channels.push({
       key, name: title.split(' · ')[0], title, chaired: !key.startsWith('fiber:'), seat, members, everyone,
       families: [...new Set(members.map(card => fiberOf(topOf(card))))],
