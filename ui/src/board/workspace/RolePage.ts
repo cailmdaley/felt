@@ -9,7 +9,7 @@ import { daemonFetch } from '../daemonApi.js'
  * lists them. The daemon reads the charter rule where it can see the links;
  * the board takes its answer rather than guessing from a path.
  */
-export interface Charter { slug: string; id: string }
+export interface Charter { slug: string; id: string; name?: string }
 
 /** One catalogue fetch per daemon base. A failed fetch is dropped so the next reader retries. */
 const catalogues = new Map<string, Promise<Charter[]>>()

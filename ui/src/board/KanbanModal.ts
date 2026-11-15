@@ -943,6 +943,7 @@ export class KanbanModal {
         if (card) this.openDocumentChannel(card)
       },
       requestRefresh: () => { void this.fetchAndRender() },
+      see: card => this.voice.see(card),
     }
   }
 

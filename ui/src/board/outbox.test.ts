@@ -1,47 +1,76 @@
 import { describe, expect, it } from 'vitest'
-import { composeOutbox, type HeldSpeech } from './outbox.js'
+import { composeAudience, setAsideKey, type HeldSpeech } from './outbox.js'
 import { card } from './testFixtures.js'
+import { ThreadIndex } from './threads.js'
+import type { KanbanCard } from './KanbanTypes.js'
 import type { SentFile } from './sentFiles.js'
 
-const now = Date.parse('2026-11-14T12:00:00Z'), reachMs = 14 * 86_400_000
-const at = (ago = 0): string => new Date(now - ago).toISOString()
-const ask = card({ id: 'ask', uid: 'A', status: 'active', ask: { text: 'Choose the cut?', at: at(2000) } })
-const review = card({ id: 'review', uid: 'R', column: 'awaitingReview', closedAt: at(3000), outcome: 'The cut is validated.' })
-const thread = card({ id: 'thread', uid: 'T', orchestrator: 'R', column: 'awaitingReview', reviewMark: { at: at(1000), note: 'Please check the plot.' } })
-const files: SentFile[] = [{ uid: 'R', host: 'host', fullPath: '/plot.png', basename: 'plot.png', timestamp: now - 4000 }]
-const held: HeldSpeech[] = [{ fiber_id: 'A', name: 'Speaker', n: 2, first: 'The plot is ready.', at: now - 5000 }]
-const input = { cards: [ask, review, thread], files, held, dismissed: new Set<string>(), now, reachMs }
+const now = Date.parse('2026-11-14T12:00:00Z'), reachMs = 14 * 86_400_000, minute = 60_000
+const at = (minutes: number): string => new Date(now - minutes * minute).toISOString()
 
-describe('composeOutbox', () => {
-  it('joins all four sources, attributes files and speech, and orders newest first', () => {
-    const items = composeOutbox(input)
-    expect(items.map(item => [item.kind, item.fiber, item.text])).toStrictEqual([
-      ['review', 'T', 'Please check the plot.'], ['ask', 'A', 'Choose the cut?'], ['review', 'R', 'The cut is validated.'], ['file', 'R', 'plot.png'], ['spoken', 'A', 'The plot is ready.'],
+// The analyst office: a seat, a thread asking, a closed thread for review, a working thread, and a grandchild with no role.
+const seat = card({ id: 'roles-seat', uid: 'S', name: 'Analyst seat', status: 'open', shuttleRole: 'analyst', shuttleSeat: true })
+const asking = card({ id: 'mask', uid: 'M', status: 'active', shuttleRole: 'analyst', ask: { text: 'Keep the conservative mask?', at: at(30) } })
+const review = card({ id: 'cuts', uid: 'C', orchestrator: 'S', column: 'awaitingReview', closedAt: at(90), outcome: 'The cut is validated.' })
+const working = card({ id: 'covariance', uid: 'V', orchestrator: 'S', status: 'active', workerState: 'running', runtimePhase: 'working' })
+const grandchild = card({ id: 'tail', uid: 'T', orchestrator: 'M', status: 'active', ask: { text: 'Check the tail?', at: at(5) } })
+// A root constitution with no office anywhere up its tree, whose thread asks.
+const root = card({ id: 'move', uid: 'R', name: 'Moving house', status: 'active' })
+const rootThread = card({ id: 'boxes', uid: 'B', orchestrator: 'R', status: 'active', ask: { text: 'Which van?', at: at(10) } })
+// An office with nothing blocked stays silent.
+const quiet = card({ id: 'score', uid: 'Q', status: 'active', shuttleRole: 'composer', workerState: 'running', runtimePhase: 'working' })
+
+const files: SentFile[] = [
+  { uid: 'C', host: 'local', fullPath: '/cuts.png', basename: 'cuts.png', timestamp: now - 20 * minute },
+  { uid: 'Q', host: 'local', fullPath: '/score.pdf', basename: 'score.pdf', timestamp: now - 20 * minute },
+  { uid: 'M', host: 'local', fullPath: '/old.png', basename: 'old.png', timestamp: now - reachMs - 1 },
+]
+const held: HeldSpeech[] = [{ fiber_id: 'V', name: 'covariance', n: 2, first: 'The run finished.', at: now - minute }]
+
+function compose(cards: KanbanCard[], over: Partial<Parameters<typeof composeAudience>[0]> = {}) {
+  const index = new ThreadIndex(cards)
+  return composeAudience({ cards, parentOf: card => index.parentOf(card), names: new Map([['analyst', 'Analyst · sound results']]), files, held, dismissed: [], now, reachMs, ...over })
+}
+const all = [seat, asking, review, working, grandchild, root, rootThread, quiet]
+
+describe('composeAudience', () => {
+  it('groups by role, else the nearest ancestor\'s, else the root, and admits only offices blocked on the human', () => {
+    const offices = compose(all)
+    expect(offices.map(office => [office.key, office.name, office.seat?.id])).toStrictEqual([
+      ['role:analyst', 'Analyst · sound results', 'roles-seat'],
+      ['fiber:R', 'Moving house', 'move'],
     ])
-    expect(items.map(item => item.key)).toStrictEqual([`review:T:${at(1000)}`, `ask:A:${at(2000)}`, `review:R:${at(3000)}`, `file:host:/plot.png:${now - 4000}`, expect.stringMatching(/^spoken:A:[0-9a-z]+$/)])
-    expect(items[3].name).toBe('review')
-    expect(items[4].name).toBe('ask')
+    const [analyst, move] = offices
+    expect(analyst.blocks.map(block => [block.kind, block.card.id, block.text])).toStrictEqual([
+      ['review', 'cuts', 'The cut is validated.'], ['ask', 'mask', 'Keep the conservative mask?'], ['ask', 'tail', 'Check the tail?'],
+    ])
+    expect([analyst.since, analyst.newest]).toStrictEqual([now - 90 * minute, now - 5 * minute])
+    expect(analyst.threads.map(card => card.id)).toStrictEqual(['covariance'])
+    expect(analyst.files.map(file => file.basename)).toStrictEqual(['cuts.png'])
+    expect(analyst.held.map(line => line.first)).toStrictEqual(['The run finished.'])
+    expect(move.blocks.map(block => block.card.id)).toStrictEqual(['boxes'])
   })
-  it('cleared asks, reviewed closes, unmarked threads and played lines leave; files remain', () => {
-    expect(composeOutbox({ ...input, cards: [{ ...ask, ask: undefined }, { ...review, column: 'tempered' }, { ...thread, column: 'orchestratorReview', reviewMark: undefined }], held: [] }).map(item => item.kind)).toStrictEqual(['file'])
+  it('orders offices by how long they have waited', () => {
+    const early = { ...rootThread, ask: { text: 'Which van?', at: at(600) } }
+    expect(compose([...all.filter(card => card !== rootThread), early]).map(office => office.key)).toStrictEqual(['fiber:R', 'role:analyst'])
   })
-  it('counts an ask only on an active card, and keeps a held line queued before lines carried a time', () => {
-    expect(composeOutbox({ ...input, cards: [{ ...ask, status: 'closed' }], files: [], held: [] })).toHaveLength(0)
-    expect(composeOutbox({ ...input, cards: [], files: [], held: [{ ...held[0], at: null }] }).map(item => [item.kind, item.at])).toStrictEqual([['spoken', now]])
+  it('reuses the item predicates: an ask only on an active card, a review only awaiting the human', () => {
+    const cards = [seat, { ...asking, status: 'closed', column: 'tempered' as const }, { ...review, column: 'orchestratorReview' as const }, { ...review, uid: 'D', id: 'desk-copy', deskSection: 'to-review' as const }]
+    expect(compose(cards)).toStrictEqual([])
+    const marked = card({ id: 'marked', uid: 'K', orchestrator: 'S', column: 'awaitingReview', reviewMark: { note: 'Look at the plot.', at: at(3) } })
+    expect(compose([seat, marked])[0].blocks.map(block => [block.kind, block.text, block.at])).toStrictEqual([['review', 'Look at the plot.', now - 3 * minute]])
   })
-  it('does not mistake a Desk section heading or an orchestrator-only close for human review', () => {
-    const cards = [{ ...review, deskSection: 'to-review' as const }, { ...thread, column: 'orchestratorReview' as const, reviewMark: undefined }]
-    expect(composeOutbox({ ...input, cards, files: [], held: [] })).toHaveLength(0)
+  it('sets an office aside until something newer blocks in it', () => {
+    const [analyst] = compose(all)
+    const dismissed = [setAsideKey(analyst)]
+    expect(compose(all, { dismissed }).map(office => office.key)).toStrictEqual(['fiber:R'])
+    const answered = all.map(card => card === grandchild ? { ...card, ask: undefined } : card)
+    expect(compose(answered, { dismissed }).map(office => office.key)).toStrictEqual(['fiber:R'])
+    const fresh = card({ id: 'fresh', uid: 'F', status: 'active', shuttleRole: 'analyst', ask: { text: 'One more?', at: at(1) } })
+    expect(compose([...all, fresh], { dismissed }).map(office => office.key)).toStrictEqual(['role:analyst', 'fiber:R'])
   })
-  it('keeps the cutoff itself, excludes older items of every kind and omits dismissed keys', () => {
-    const all = composeOutbox(input)
-    expect(composeOutbox({ ...input, dismissed: new Set(all.map(item => item.key)) })).toHaveLength(0)
-    expect(composeOutbox({ ...input, now: now + reachMs })).toHaveLength(0)
-    const boundary = { ...files[0], timestamp: now - reachMs }
-    expect(composeOutbox({ ...input, cards: [], files: [boundary, { ...boundary, fullPath: '/old', timestamp: boundary.timestamp - 1 }], held: [] }).map(item => item.text)).toStrictEqual(['plot.png'])
-  })
-  it('deduplicates mirrors and repeated feed records without hiding a new ask', () => {
-    const items = composeOutbox({ ...input, cards: [ask, ask, { ...ask, ask: { text: 'Another question', at: at() } }], files: [files[0], files[0]], held: [] })
-    expect(items.map(item => item.kind)).toStrictEqual(['ask', 'ask', 'file'])
+  it('names an office without a charter by its slug, and counts a mirrored fiber once', () => {
+    const offices = compose([asking, { ...asking, originId: 'local' }], { names: new Map() })
+    expect(offices.map(office => [office.name, office.blocks.length, office.seat])).toStrictEqual([['analyst', 1, undefined]])
   })
 })

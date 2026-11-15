@@ -2,76 +2,110 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { OutboxView } from './OutboxView.js'
 import type { ViewContext } from './ViewRegistry.js'
-import { FiberSends } from '../fiberSends.js'
-import { docKey } from '../workspace/documents.js'
 import { card, response, settle } from '../testFixtures.js'
 
 const views: OutboxView[] = []
 afterEach(() => { views.forEach(view => view.unmount()); views.length = 0; document.body.replaceChildren(); vi.unstubAllGlobals() })
 
-function mount() {
-  const ask = card({ id: 'ask', uid: 'A', status: 'active', ask: { text: 'Which mask?', at: new Date().toISOString() } })
-  const openFromDesk = vi.fn(), openPage = vi.fn()
-  const ctx = { cards: [ask], response: response(), shuttleBase: '', workspace: { openFromDesk, openPage }, requestRefresh: vi.fn(), openCard: vi.fn() } as unknown as ViewContext
+const minute = 60_000
+const at = (minutes: number): string => new Date(Date.now() - minutes * minute).toISOString()
+const mask = card({ id: 'mask', uid: 'M', status: 'active', shuttleRole: 'analyst', ask: { text: 'Keep the conservative mask?', at: at(40) } })
+const tail = card({ id: 'tail', uid: 'T', status: 'active', shuttleRole: 'analyst', ask: { text: 'Check the tail?', at: at(5) } })
+const van = card({ id: 'van', uid: 'V', name: 'Moving house', status: 'active', ask: { text: 'Which van?', at: at(20) } })
+
+/** A daemon that answers the Outbox's reads, records its writes, and fails the ones `fail` names. */
+function daemon(fail: string[] = []) {
+  const posts: Array<[string, Record<string, unknown>]> = []
+  const stored = new Map<string, string>()
+  vi.stubGlobal('localStorage', { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value) })
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (init?.method === 'POST') {
+      posts.push([url, JSON.parse(String(init.body))])
+      if (fail.some(path => url.endsWith(path))) return new Response('{"error":"disk full"}', { status: 422 })
+      return new Response(JSON.stringify({ ok: true, delivered: true }))
+    }
+    if (url.includes('/outbox/dismissed')) return new Response(JSON.stringify({ dismissed: [], reach_ms: 14 * 86_400_000 }))
+    if (url.includes('/speak')) return new Response(JSON.stringify({ held: [] }))
+    if (url.includes('/roles')) return new Response(JSON.stringify([{ slug: 'analyst', id: 'roles/analyst', name: 'Analyst', outcome: '' }]))
+    if (url.includes('/fibers/')) return new Response(JSON.stringify({ fibers: [] }), { status: 404 })
+    return new Response('{}')
+  }))
+  return posts
+}
+async function mount() {
+  const openFromDesk = vi.fn(), requestRefresh = vi.fn(), see = vi.fn()
+  const ctx = { cards: [], response: response({ now: { drafts: [], inFlight: [mask, tail, van], awaitingReview: [] } }), shuttleBase: '', workspace: { openFromDesk, openPage: vi.fn() }, requestRefresh, openCard: vi.fn(), see } as unknown as ViewContext
   const host = document.createElement('div'); document.body.append(host)
   const view = new OutboxView(); views.push(view); view.mount(host, ctx)
-  return { view, ctx, host, ask, openFromDesk, openPage }
+  await settle(); await settle()
+  const reply = host.querySelector<HTMLTextAreaElement>('.kbn-aud-reply-text')!
+  return { view, ctx, host, reply, openFromDesk, requestRefresh, see }
 }
+const rail = (host: HTMLElement) => [...host.querySelectorAll('.kbn-aud-office-name')].map(el => el.textContent)
+const shown = (host: HTMLElement) => host.querySelector('.kbn-aud-name')?.textContent
 
-it('opens the card by the Desk path, supports row keys, and keeps focus through a poll', async () => {
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(url.includes('dismissed') ? { dismissed: [], reach_ms: 14 * 86_400_000 } : { held: [] }))))
-  const { view, ctx, ask, openFromDesk, host } = mount()
-  await settle()
+it('reads one office at a time, longest waiting first, with its asks on top and voice on the card that asked', async () => {
+  daemon()
+  const { view, host, see } = await mount()
+  expect(rail(host)).toStrictEqual(['Analyst', 'Moving house'])
+  expect(shown(host)).toBe('Analyst')
+  expect([...host.querySelectorAll('.kbn-aud-text')].map(el => el.textContent?.trim())).toStrictEqual(['Keep the conservative mask?', 'Check the tail?'])
+  expect(host.querySelector('.kbn-aud-reply-to')?.textContent).toBe('mask')
+  expect(see).toHaveBeenLastCalledWith(mask)
   expect(view.keydown(new KeyboardEvent('keydown', { key: 'j' }))).toBe(true)
-  const focused = document.activeElement
-  view.refresh(ctx); await settle()
-  expect(document.activeElement).toBe(focused)
-  expect(view.keydown(new KeyboardEvent('keydown', { key: 'o' }))).toBe(true)
-  expect(openFromDesk).toHaveBeenCalledWith(ask)
-  expect(host.textContent).toContain('Which mask?')
+  expect(shown(host)).toBe('Moving house')
+  expect(view.keydown(new KeyboardEvent('keydown', { key: 'k' }))).toBe(true)
+  expect(shown(host)).toBe('Analyst')
 })
 
-it('opens an attributed file in its viewer and releases held speech by reaching its card', async () => {
-  let held = [{ fiber_id: 'A', name: 'Speaker', n: 2, first: 'Ready to discuss', at: Date.now() }]
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(url.includes('dismissed') ? { dismissed: [], reach_ms: 14 * 86_400_000 } : { held }))))
-  const { view, ctx, host, ask, openPage, openFromDesk } = mount()
+it('sends a reply to the chosen card through the delivery route, then comes to the next office', async () => {
+  const posts = daemon()
+  const { view, host, reply, requestRefresh } = await mount()
+  ;[...host.querySelectorAll<HTMLButtonElement>('.kbn-aud-from')].find(el => el.textContent === 'tail')!.click()
+  expect(host.querySelector('.kbn-aud-reply-to')?.textContent).toBe('tail')
+  expect(view.keydown(new KeyboardEvent('keydown', { key: 'Enter' }))).toBe(true)
+  expect(document.activeElement).toBe(reply)
+  expect(view.keydown(new KeyboardEvent('keydown', { key: 'Escape' }))).toBe(true)
+  expect(document.activeElement).toBe(host.querySelector('.kbn-aud-letter'))
+  reply.focus()
+  reply.value = 'Yes, check it.'
+  reply.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
   await settle()
-  const sends = new FiberSends('')
-  sends.files = [{ uid: 'A', host: 'host', fullPath: '/plot.png', basename: 'plot.png', timestamp: Date.now() }]
-  vi.spyOn(sends, 'refresh').mockResolvedValue()
-  ctx.sends = sends; view.refresh(ctx); await settle()
-  const file = [...host.querySelectorAll<HTMLButtonElement>('.kbn-outbox-open')].find(el => el.textContent?.includes('plot.png'))!
-  file.click()
-  expect(openPage).toHaveBeenCalledWith(ask, docKey('host', '/plot.png', ask.originId))
-  const spoken = [...host.querySelectorAll<HTMLButtonElement>('.kbn-outbox-open')].find(el => el.textContent?.includes('Ready to discuss'))!
-  spoken.click()
-  expect(openFromDesk).toHaveBeenCalledWith(ask)
-  held = []; view.refresh(ctx); await settle()
-  expect(host.textContent).not.toContain('Ready to discuss')
+  expect(posts).toStrictEqual([['/api/v1/deliver', { fiber_id: 'tail', origin: 'local', text: 'Yes, check it.', from: 'human' }]])
+  expect(requestRefresh).toHaveBeenCalled()
+  expect(shown(host)).toBe('Moving house')
+  expect(reply.value).toBe('')
 })
 
-it('dismisses immediately, restores a failed write, and confirms a successful write on refresh', async () => {
-  let finish!: (response: Response) => void
-  let dismissed: string[] = []
-  const fetcher = vi.fn((url: string, init?: RequestInit) => {
-    if (init?.method === 'POST') return new Promise<Response>(resolve => { finish = resolve })
-    return Promise.resolve(new Response(JSON.stringify(url.includes('dismissed') ? { dismissed, reach_ms: 14 * 86_400_000 } : { held: [] })))
-  })
-  vi.stubGlobal('fetch', fetcher)
-  const { view, ctx, host, ask } = mount()
+it('keeps the words when a reply fails', async () => {
+  daemon(['/api/v1/deliver'])
+  const { host, reply } = await mount()
+  reply.value = 'Keep it.'
+  host.querySelector<HTMLFormElement>('.kbn-aud-reply')!.requestSubmit()
   await settle()
-  host.querySelector<HTMLButtonElement>('.kbn-outbox-dismiss')!.click()
-  expect(host.textContent).not.toContain('Which mask?')
-  finish(new Response('{"error":"disk full"}', { status: 422 })); await settle()
-  expect(host.textContent).toContain('Which mask?')
-  view.keydown(new KeyboardEvent('keydown', { key: 'j' }))
-  view.keydown(new KeyboardEvent('keydown', { key: 'x' }))
-  expect(host.textContent).not.toContain('Which mask?')
-  const key = `ask:A:${ask.ask!.at}`
-  expect(JSON.parse(fetcher.mock.calls.at(-1)![1]!.body as string)).toStrictEqual({ key, fiber: 'A' })
-  finish(new Response('{"ok":true}')); await settle()
-  view.refresh(ctx); await settle()
-  expect(host.textContent).not.toContain('Which mask?')
-  dismissed = [key]; view.refresh(ctx); await settle()
-  expect(host.textContent).not.toContain('Which mask?')
+  expect(reply.value).toBe('Keep it.')
+  expect(shown(host)).toBe('Analyst')
+  expect(host.querySelector('.kbn-aud-note')?.textContent).toContain('Not sent')
+})
+
+it('sets an office aside under a key that names its newest block, and restores it when the write fails', async () => {
+  const posts = daemon()
+  const { host } = await mount()
+  host.querySelector<HTMLButtonElement>('.kbn-aud-later')!.click()
+  expect(rail(host)).toStrictEqual(['Moving house'])
+  await settle()
+  expect(posts).toStrictEqual([['/api/v1/outbox/dismiss', { key: `office:role:analyst:${Date.parse(tail.ask!.at)}` }]])
+  daemon(['/api/v1/outbox/dismiss'])
+  host.querySelector<HTMLButtonElement>('.kbn-aud-later')!.click()
+  expect(host.querySelector('.kbn-aud-empty')?.textContent).toBe('Nobody is waiting on you.')
+  await settle()
+  expect(rail(host)).toStrictEqual(['Moving house'])
+})
+
+it('marks what is new since the office was last read', async () => {
+  daemon()
+  localStorage.setItem('shuttle.outbox.office-seen:role:analyst', String(Date.parse(at(20))))
+  const { host } = await mount()
+  expect([...host.querySelectorAll('.kbn-aud-block')].map(el => el.hasAttribute('data-new'))).toStrictEqual([false, true])
+  expect([...host.querySelectorAll('.kbn-aud-office')].map(el => el.hasAttribute('data-new'))).toStrictEqual([false, true])
 })

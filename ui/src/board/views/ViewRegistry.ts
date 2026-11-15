@@ -12,7 +12,8 @@
  *
  * Chronicle holds the record in time. Board is the document workspace's
  * contact sheet, grouped by recent work, project or host. The Globe is all
- * the work on a sphere.
+ * the work on a sphere. The Outbox is an audience with the offices blocked
+ * on the human, one letter at a time.
  *
  * A view is a plain object with a three-call lifecycle. KanbanModal owns the
  * host element and the data; the view owns everything inside the host.
@@ -104,6 +105,8 @@ export interface ViewContext extends TemporalFetchers {
   openCard(cardId: string): void
   /** Re-fetch the board's own feed now, rather than on the next poll. */
   requestRefresh(): void
+  /** The card this view puts in front of the human, which voice may then address; null when none. */
+  see?(card: KanbanCard | null): void
 }
 
 /** A view's id, or `desk` for the kanban page KanbanModal renders itself. */
