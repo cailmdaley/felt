@@ -109,7 +109,7 @@ func transitionFiberReceiver(env *sysenv.Env, fiber, host, identity, address str
 			return 0, err
 		}
 		if old.Identity == identity && old.Address == a && old.Generation != 0 {
-			return old.Generation, nil
+			return old.Generation, linkFiberReceiver(env, fiber, a)
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return 0, err
@@ -122,7 +122,29 @@ func transitionFiberReceiver(env *sysenv.Env, fiber, host, identity, address str
 	if err != nil {
 		return 0, err
 	}
-	return next.Generation, mailboxWrite(path, bytes, false)
+	if err := mailboxWrite(path, bytes, false); err != nil {
+		return 0, err
+	}
+	return next.Generation, linkFiberReceiver(env, fiber, a)
+}
+
+// linkFiberReceiver points the receiver session's hooks at the fiber inbox,
+// so a session launched for the fiber finds its entries on its first prompt,
+// before it has registered a hook. Offering checks the fiber's receiver
+// authority each time, so a link left by a replaced receiver offers nothing.
+func linkFiberReceiver(env *sysenv.Env, fiber string, a Address) error {
+	if a.Harness == "" {
+		return nil
+	}
+	bytes, err := json.Marshal(fiberMailboxLink{Fiber: fiber, Host: a.Host})
+	if err != nil {
+		return err
+	}
+	dir := filepath.Join(mailboxDir(env, a.Harness, a.ID), "fibers")
+	if err := ensureDir(dir, 0700); err != nil {
+		return err
+	}
+	return mailboxWrite(filepath.Join(dir, mailboxKey(fiber)+".json"), bytes, false)
 }
 
 // ReadFiberReceiver reads the durable worker-owned authority for restart
@@ -165,35 +187,6 @@ func readFiberReceiver(root string) (FiberReceiver, error) {
 	return receiver, err
 }
 
-func subscribeFiberReceiver(env *sysenv.Env, fiber string, a Address, hook bool, generation uint64) error {
-	root := mailboxDir(env, "fiber", fiber)
-	lock, err := os.OpenFile(filepath.Join(root, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
-	if err != nil {
-		return err
-	}
-	defer lock.Close()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
-		return err
-	}
-	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-	receiver, err := readFiberReceiver(root)
-	if err != nil || generation == 0 || receiver.Generation != generation || receiver.Address != a {
-		return errCode("stale_receiver", "superseded worker identity")
-	}
-	if !hook {
-		return nil
-	}
-	bytes, err := json.Marshal(fiberMailboxLink{Fiber: fiber, Host: a.Host})
-	if err != nil {
-		return err
-	}
-	dir := filepath.Join(mailboxDir(env, a.Harness, a.ID), "fibers")
-	if err := ensureDir(dir, 0700); err != nil {
-		return err
-	}
-	return mailboxWrite(filepath.Join(dir, mailboxKey(fiber)+".json"), bytes, false)
-}
-
 // fiberReceiverMatches is called only while the fiber mailbox lock is held.
 // Missing or malformed authority fails closed; registration cannot restore it.
 func fiberReceiverMatches(root string, a Address) bool {
@@ -227,7 +220,7 @@ func offerLinkedFiberContext(env *sysenv.Env, harness, id, host string, emit fun
 		offered := false
 		root := mailboxDir(env, "fiber", link.Fiber)
 		err = offerMailboxWithAck(root, conversation, func(r Request) bool {
-			return fiberContextHookEligible(root, r) && fiberReceiverMatches(root, Address{Host: host, Harness: harness, ID: id}) && MailboxAvailable(env, harness, id, host)
+			return fiberContextHookEligible(root, conversation, r) && fiberReceiverMatches(root, Address{Host: host, Harness: harness, ID: id}) && MailboxAvailable(env, harness, id, host)
 		}, func(batch []Request) error {
 			offered = true
 			return emit(batch)
@@ -242,9 +235,11 @@ func offerLinkedFiberContext(env *sysenv.Env, harness, id, host string, emit fun
 	return errors.Join(validationErrors...)
 }
 
-// fiberContextHookEligible reports whether a fiber hook may take an entry:
-// none or ask, and held by no open batch.
-func fiberContextHookEligible(root string, request Request) bool {
+// fiberContextHookEligible reports whether conversation's hook may take an
+// entry: one held by no open batch, and none or ask, or any entry a launch
+// reservation from another receiver holds in its lease, which the launched
+// session takes whole.
+func fiberContextHookEligible(root, conversation string, request Request) bool {
 	batches, err := readBatchManifests(root)
 	if err != nil {
 		return false
@@ -255,13 +250,24 @@ func fiberContextHookEligible(root string, request Request) bool {
 		}
 	}
 	entry, err := readFiberMailboxEntry(filepath.Join(root, "pending", mailboxKey(request.MessageID)+".json"))
-	return err == nil && (entry.Wishes.Turn == "none" || entry.Wishes.Turn == "ask") && entry.AttemptAddress == ""
+	if err != nil || entry.AttemptAddress != "" {
+		return false
+	}
+	if entry.Wishes.Turn == "none" || entry.Wishes.Turn == "ask" {
+		return true
+	}
+	a := entry.Attempt
+	return a.open() && a.Launch && a.Conversation != conversation && time.Since(time.Unix(0, a.OpenedAt)) < launchLease
 }
 
-// DeliverFiberContext consumes without turn facts. Only force entries initiate
-// a wake; ask remains available to the fiber's hook, and none goes to the hook
-// or, for a receiver without one, as context.
+// DeliverFiberContext consumes for a live receiver without turn facts. Only
+// force entries initiate a wake; ask remains available to the fiber's hook,
+// and none goes to the hook or, for a receiver without one, as context. A
+// fiber without a receiver ("-") is left as it is.
 func DeliverFiberContext(ctx context.Context, env *sysenv.Env, fiber, host, address string, generation uint64) error {
+	if address == "-" {
+		return nil
+	}
 	_, err := Consume(ctx, env, fiber, host, Worker{Address: address, Epoch: generation})
 	return err
 }

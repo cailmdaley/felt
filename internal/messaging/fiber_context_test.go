@@ -304,7 +304,7 @@ func TestFiberContextRestartRetriesPinnedDestinationAfterAcceptedSend(t *testing
 	if err != nil || entry.AttemptAddress != "shuttle://host/claude/first" {
 		t.Fatalf("durable attempt = %+v, %v", entry, err)
 	}
-	if fiberContextHookEligible(mailboxDir(env, "fiber", "fiber"), request) {
+	if fiberContextHookEligible(mailboxDir(env, "fiber", "fiber"), "shuttle://host/claude/successor", request) {
 		t.Fatal("hook path bypassed a pinned direct delivery attempt")
 	}
 	transition(t, env, "execution-successor", "shuttle://host/claude/successor")

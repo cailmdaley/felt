@@ -67,7 +67,7 @@ func TestConsumeRule(t *testing.T) {
 						}
 					}
 					root := mailboxDir(env, "fiber", "fiber")
-					eligible := fiberContextHookEligible(root, Request{MessageID: "m"})
+					eligible := fiberContextHookEligible(root, w.Address, Request{MessageID: "m"})
 					if want == "wait" && eligible != (turn == "none" || turn == "ask") {
 						t.Fatalf("hook eligible=%v for %s", eligible, turn)
 					}
@@ -171,7 +171,7 @@ func TestConsumePartialClaimAndClose(t *testing.T) {
 				if err := writeMailboxEntry(items[1].path, e); err != nil {
 					t.Fatal(err)
 				}
-				if fiberContextHookEligible(root, e.Request) {
+				if fiberContextHookEligible(root, w.Address, e.Request) {
 					t.Fatal("hook stole a partially claimed member")
 				}
 			}
@@ -319,7 +319,7 @@ func TestConsumeOpenBatchHoldsOnlyItsMembers(t *testing.T) {
 				t.Fatalf("pending=%d, want the open batch's two members", n)
 			}
 			root := mailboxDir(env, "fiber", "fiber")
-			if fiberContextHookEligible(root, Request{MessageID: "context"}) {
+			if fiberContextHookEligible(root, w.Address, Request{MessageID: "context"}) {
 				t.Fatal("hook took a member of an open batch")
 			}
 		})
@@ -445,7 +445,7 @@ func TestConsumeLaunchedSessionTakesAReservationThroughItsHook(t *testing.T) {
 	if err != nil || result.Action != "wait" || result.Turn || sends != 0 {
 		t.Fatalf("launched session woken for its own reservation: %+v %v", result, err)
 	}
-	if !fiberContextHookEligible(mailboxDir(env, "fiber", "fiber"), Request{MessageID: "m"}) {
+	if !fiberContextHookEligible(mailboxDir(env, "fiber", "fiber"), launched.Address, Request{MessageID: "m"}) {
 		t.Fatal("launched session's hook cannot take the reservation")
 	}
 	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey("m")+".json")

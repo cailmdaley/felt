@@ -13,65 +13,67 @@ import (
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
-// Worker is the daemon's observation of the fiber's live conversation. Idle
-// false means busy or not observed: a result's Turn asks for the observation.
+// Worker is the daemon's observation of the fiber's live conversation, or
+// Address "-" when the fiber has no worker. Idle false means busy or not
+// observed: a result's Turn asks for the observation. Unknown marks an Idle
+// the daemon inferred rather than observed (a turn ended with a task still
+// open, or no hook has reported one): it wakes for ask, never for idle.
 type Worker struct {
 	Address string
 	Epoch   uint64
 	Idle    bool
+	Unknown bool
 	Costly  bool
 }
 
 // Consumption describes the action taken (wake, or context for quiet entries
-// sent to a receiver without a hook), or the launch the daemon must perform
-// (fresh). Turn reports, for a worker not observed idle, that a due entry asks
-// for a turn, so the daemon's idle and cost facts would decide it. A
-// consumption that failed before it could decide has no Action.
+// sent to a receiver without a hook), or the launch the daemon must perform:
+// fresh, a session replacing a costly live worker, or launch, a session for a
+// fiber with none. Turn reports, for a worker not observed idle, that a due
+// entry asks for a turn, so the daemon's idle and cost facts would decide it.
+// A consumption that failed before it could decide has no Action.
 type Consumption struct {
 	Action  string   `json:"action"`
 	Members []string `json:"members,omitempty"`
 	Turn    bool     `json:"turn,omitempty"`
 }
 
-// launchLease is how long a fresh-launch reservation stands for its receiver.
-// A launch that never arrives, or that the Poller refuses after accepting the
+// launchLease is how long a launch reservation stands for its receiver. A
+// launch that never arrives, or that the Poller refuses or holds after the
 // request, is asked for again once it passes.
 const launchLease = 2 * time.Minute
 
 // Consume advances every open batch, then selects, claims and delivers one
-// turn under the fiber inbox lock. A fresh answer reserves the asking entries
-// for launchLease, until the receiver changes, or until the caller retries
-// without Costly after a refused launch.
+// turn under the fiber inbox lock. A fresh or launch answer reserves the
+// asking entries for launchLease: until the receiver changes, until the
+// caller retries without Costly after a refused fresh launch, or until the
+// launched session's hook takes them. A fiber without a worker (Address "-")
+// advances no batch and answers launch or wait.
 func Consume(ctx context.Context, env *sysenv.Env, fiber, host string, worker Worker) (Consumption, error) {
 	return consumeWith(ctx, env, fiber, host, worker, sendFiberContextAttempt)
 }
 
 func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Worker, send fiberContextSender) (Consumption, error) {
 	result := Consumption{Action: "wait"}
-	a := Address{Host: host}
-	var err error
-	if w.Address != "-" {
-		a, err = ParseAddress(w.Address)
-	}
-	if err != nil {
-		return Consumption{}, err
-	}
-	if a.Host != host {
-		return Consumption{}, errCode("wrong_host", "fiber context belongs to another host")
+	dormant := w.Address == "-"
+	var a Address
+	hook := false
+	if !dormant {
+		var err error
+		if a, err = ParseAddress(w.Address); err != nil {
+			return Consumption{}, err
+		}
+		if a.Host != host {
+			return Consumption{}, errCode("wrong_host", "fiber context belongs to another host")
+		}
+		if a.Harness == "codex" {
+			_ = discoverCodexTerminalReceiver(ctx, env, a)
+		}
+		hook = MailboxAvailable(env, a.Harness, a.ID, host)
 	}
 	root := mailboxDir(env, "fiber", fiber)
-	if a.Harness == "codex" {
-		_ = discoverCodexTerminalReceiver(ctx, env, a)
-	}
-	hook := MailboxAvailable(env, a.Harness, a.ID, host)
 	if err := ensureDir(root, 0700); err != nil {
 		return Consumption{}, err
-	}
-	if err := subscribeFiberReceiver(env, fiber, a, hook, w.Epoch); err != nil {
-		return Consumption{}, err
-	}
-	if w.Address == "-" {
-		return result, nil
 	}
 	lock, err := os.OpenFile(filepath.Join(root, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
@@ -82,7 +84,7 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 		return Consumption{}, err
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-	if receiverEpoch(root, w.Address) != w.Epoch || !fiberReceiverMatches(root, a) {
+	if !dormant && (receiverEpoch(root, w.Address) != w.Epoch || !fiberReceiverMatches(root, a)) {
 		return Consumption{}, errCode("stale_receiver", "superseded worker identity")
 	}
 	if a.Harness == "claude" && !hook {
@@ -93,11 +95,15 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	}
 	current := func(c context.Context, r Request) (bool, error) { return currentThreadSignalWithBackoff(c, env, r) }
 	// Each open batch advances on its own, so one awaiting its outcome holds
-	// only its own members.
+	// only its own members. A fiber without a worker has no conversation to
+	// advance a batch to; its batches wait for the next receiver.
 	errs := []error{}
 	_, batches, err := openBatches(env, root)
 	if err != nil {
 		return Consumption{}, err
+	}
+	if dormant {
+		batches = nil
 	}
 	for i := range batches {
 		// Quiet context pinned before batches existed is taken by a Codex
@@ -144,7 +150,7 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	// thread signals' currency, and decides again over the current ones.
 	// A receiver without a hook takes quiet context directly; Codex leaves it to
 	// its fiber hook.
-	direct := !hook && a.Harness != "codex"
+	direct := !dormant && !hook && a.Harness != "codex"
 	action, turn := decideConsumption(candidates, w, direct, now)
 	if action == "wait" {
 		result.Turn = turn
@@ -156,7 +162,7 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	if action == "wait" {
 		return result, errors.Join(errs...)
 	}
-	if action == "fresh" {
+	if action == "fresh" || action == "launch" {
 		var members []string
 		for _, it := range due {
 			if it.entry.Wishes.Turn != "none" {
@@ -173,7 +179,7 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 				return Consumption{}, err
 			}
 		}
-		return Consumption{Action: "fresh", Members: members}, errors.Join(errs...)
+		return Consumption{Action: action, Members: members}, errors.Join(errs...)
 	}
 	var selected []mailboxPendingItem
 	size, lifecycle := 0, false
@@ -184,7 +190,7 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	// Leave framing and a possible-repeat warning inside the harness limit.
 	limit -= 512
 	for _, it := range due {
-		if (action == "context" && it.entry.Wishes.Turn != "none") || (it.entry.Wishes.Turn == "idle" && !w.Idle) {
+		if (action == "context" && it.entry.Wishes.Turn != "none") || (it.entry.Wishes.Turn == "idle" && (!w.Idle || w.Unknown)) {
 			continue
 		}
 		if hasThreadSignalValidation(it.entry.Request) && lifecycle {
@@ -221,38 +227,47 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 
 // decideConsumption answers wait, fresh or wake for the due entries no open
 // batch holds, or context when it would wait and a direct receiver has quiet
-// entries. turn reports that the worker's idle and cost facts would decide the
-// entries asking for a turn.
+// entries; for a fiber without a worker, launch or wait. turn reports that the
+// worker's idle and cost facts would decide the entries asking for a turn.
 func decideConsumption(due []mailboxPendingItem, w Worker, direct bool, now time.Time) (action string, turn bool) {
-	force, asking, fresh, launching, quiet := false, false, false, false, false
+	force, asking, wants, fresh, launching, quiet := false, false, false, false, false, false
 	for _, it := range due {
 		e := it.entry
-		// Within its lease, a reservation holds the reserving worker's wake
-		// while the launch is in flight, and leaves a new receiver, the
-		// launched session, to take the entry through its hook.
+		// Within its lease, a reservation holds the reserving worker's wake,
+		// and any launch for a fiber without a worker, while the launch is in
+		// flight; it leaves a new receiver, the launched session, to take the
+		// entry through its hook.
 		if e.Attempt.open() && e.Attempt.Launch && now.Sub(time.Unix(0, e.Attempt.OpenedAt)) < launchLease {
-			if e.Attempt.Conversation != w.Address || e.Attempt.Epoch != w.Epoch {
+			if w.Address != "-" && (e.Attempt.Conversation != w.Address || e.Attempt.Epoch != w.Epoch) {
 				continue
 			}
 			launching = true
 		}
+		// An idle entry starts a turn only in a worker observed idle.
+		wanted := e.Wishes.Turn == "ask" || (e.Wishes.Turn == "idle" && w.Idle && !w.Unknown)
 		switch e.Wishes.Turn {
 		case "force":
 			force = true
 		case "ask", "idle":
 			asking = true
-			fresh = fresh || e.Wishes.IfCostly == "fresh"
 		case "none":
 			quiet = true
 		}
+		wants = wants || wanted
+		fresh = fresh || (wanted && e.Wishes.IfCostly == "fresh")
 	}
 	action = "wait"
 	switch {
+	case w.Address == "-":
+		if (force || asking) && !launching {
+			return "launch", false
+		}
+		return "wait", false
 	case force:
 		return "wake", false
 	case !w.Idle:
 		turn = asking
-	case !asking:
+	case !wants:
 	case !w.Costly:
 		return "wake", false
 	case !launching && fresh:

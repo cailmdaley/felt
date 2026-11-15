@@ -267,6 +267,34 @@ func PendingCount(env *sysenv.Env, address string) (int, error) {
 	return n, nil
 }
 
+// WakingCount counts the due entries in an address's inbox that ask for a
+// turn and that no open batch holds: what a session started for a fiber with
+// no worker would be started for. It is zero while a launch reservation is in
+// its lease, since that launch is already in flight. Like PendingCount, it
+// reads without the inbox lock.
+func WakingCount(env *sysenv.Env, address string) (int, error) {
+	root, err := inboxRoot(env, address)
+	if err != nil {
+		return 0, err
+	}
+	items, err := pendingItems(root)
+	if err != nil {
+		return 0, err
+	}
+	now := time.Now()
+	n := 0
+	for _, it := range items {
+		e := it.entry
+		if a := e.Attempt; a.open() && a.Launch && now.Sub(time.Unix(0, a.OpenedAt)) < launchLease {
+			return 0, nil
+		}
+		if e.Wishes.Turn != "none" && e.AttemptAddress == "" && e.due(now) {
+			n++
+		}
+	}
+	return n, nil
+}
+
 // PendingEntry describes one pending inbox entry.
 type PendingEntry struct {
 	MessageID string    `json:"id"`

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/messaging"
+	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
 
@@ -20,7 +21,7 @@ func (a *app) shuttleInboxCmd() *cobra.Command {
 		Short: "Enqueue and list the entries waiting in an address's inbox",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("expected put, pending or ls")
+			return fmt.Errorf("expected put, pending, ls or consume")
 		},
 	}
 	cmd.AddCommand(a.inboxVerbs()...)
@@ -62,14 +63,23 @@ pending, and a turn of force or idle. An unknown wish value is refused.`,
 	put.Flags().StringVar(&from, "from", "", "Sender named in the message header")
 	put.Flags().BoolVar(&derived, "derived", false, "The id names the event it reports; the first capture wins")
 
+	var waking bool
 	pending := &cobra.Command{
 		Use:   "pending <address>...",
 		Short: "Count each address's pending entries, as one JSON object",
-		Args:  cobra.MinimumNArgs(1),
+		Long: `Count each address's pending entries, as one JSON object of address to count.
+With --waking, count only the due entries that ask for a turn and that no open
+batch holds, and count none while a launch reservation is in its lease: the
+entries a session started for a fiber with no worker would take.`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if waking {
+				return a.printCounts(args, messaging.WakingCount)
+			}
 			return a.printPendingCounts(args)
 		},
 	}
+	pending.Flags().BoolVar(&waking, "waking", false, "Count only due entries that would start a session")
 
 	ls := &cobra.Command{
 		Use:   "ls <address>",
@@ -97,16 +107,18 @@ pending, and a turn of force or idle. An unknown wish value is refused.`,
 			return w.Flush()
 		},
 	}
-	var idle, costly bool
+	var idle, unknown, costly bool
 	consume := &cobra.Command{
 		Use:   "consume <fiber-key> <address-or-dash> <epoch>",
-		Short: "Consume a fiber's inbox for its live conversation, as one JSON answer",
+		Short: "Consume a fiber's inbox for its worker, as one JSON answer",
 		Long: `Consume a fiber's inbox for its live conversation: advance every open batch,
 then wake, send quiet context to a receiver without a hook, reserve a fresh
-launch or wait. The JSON answer is printed whenever
-consume decided, including when an open batch's delivery failed, which then
-exits nonzero; "turn": true asks the caller to consume again with the worker's
---idle and --costly facts.`,
+launch or wait. For a fiber with no worker, pass - and epoch 0: a due entry
+that asks for a turn reserves a launch ("action": "launch") once per two-minute
+lease, and the session launched for it takes the entries through its hook.
+The JSON answer is printed whenever consume decided, including when an open
+batch's delivery failed, which then exits nonzero; "turn": true asks the caller
+to consume again with the worker's --idle, --unknown and --costly facts.`,
 		Args: cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			host, err := a.resolveOwnHost("")
@@ -114,10 +126,10 @@ exits nonzero; "turn": true asks the caller to consume again with the worker's
 				return err
 			}
 			epoch, err := strconv.ParseUint(args[2], 10, 64)
-			if err != nil || epoch == 0 {
-				return fmt.Errorf("positive receiver epoch required")
+			if err != nil || (epoch == 0) != (args[1] == "-") {
+				return fmt.Errorf("a positive receiver epoch required, or - with epoch 0 for a fiber with no worker")
 			}
-			result, err := messaging.Consume(context.Background(), a.env, args[0], host, messaging.Worker{Address: args[1], Epoch: epoch, Idle: idle, Costly: costly})
+			result, err := messaging.Consume(context.Background(), a.env, args[0], host, messaging.Worker{Address: args[1], Epoch: epoch, Idle: idle || unknown, Unknown: unknown, Costly: costly})
 			if result.Action == "" {
 				return err
 			}
@@ -127,7 +139,8 @@ exits nonzero; "turn": true asks the caller to consume again with the worker's
 			return err
 		},
 	}
-	consume.Flags().BoolVar(&idle, "idle", false, "The live worker is idle, or its turn state is unknown")
+	consume.Flags().BoolVar(&idle, "idle", false, "The live worker was observed idle")
+	consume.Flags().BoolVar(&unknown, "unknown", false, "The live worker's turn state is unknown: woken for ask, never for idle")
 	consume.Flags().BoolVar(&costly, "costly", false, "Waking the live worker is costly")
 	return []*cobra.Command{put, pending, ls, consume}
 }
@@ -139,9 +152,15 @@ func (a *app) printPendingCounts(keys []string) error {
 	if err := messaging.PruneOfferedMailboxes(a.env, time.Now()); err != nil {
 		return err
 	}
+	return a.printCounts(keys, messaging.PendingCount)
+}
+
+// printCounts prints one JSON object, key => count. A key whose inbox cannot
+// be read names itself on stderr and is left out, so the others still count.
+func (a *app) printCounts(keys []string, count func(*sysenv.Env, string) (int, error)) error {
 	counts := make(map[string]int, len(keys))
 	for _, key := range keys {
-		n, err := messaging.PendingCount(a.env, key)
+		n, err := count(a.env, key)
 		if err != nil {
 			fmt.Fprintf(a.env.Stderr, "%s: %v\n", key, err)
 			continue

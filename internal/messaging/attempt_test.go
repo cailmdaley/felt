@@ -91,7 +91,7 @@ func TestHookThatDiesAfterItsClaimLeavesTheEntryOfferable(t *testing.T) {
 	if !entry.Attempt.open() || entry.Attempt.Conversation != a || entry.AttemptAddress != "" {
 		t.Fatalf("after a failed emit, entry = %+v", entry)
 	}
-	if !fiberContextHookEligible(root, entry.Request) {
+	if !fiberContextHookEligible(root, a, entry.Request) {
 		t.Fatal("an unpinned hook attempt kept the entry from the next hook")
 	}
 	var got []string
@@ -136,7 +136,7 @@ func TestRacedReadersDeliverAnEntryOnceWithADeliveredAttempt(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			errs[0] = offerMailboxWithAck(root, w.Address, func(r Request) bool { return fiberContextHookEligible(root, r) }, func(batch []Request) error {
+			errs[0] = offerMailboxWithAck(root, w.Address, func(r Request) bool { return fiberContextHookEligible(root, w.Address, r) }, func(batch []Request) error {
 				takes.Add(int32(len(batch)))
 				return nil
 			}, nil, "claude")
