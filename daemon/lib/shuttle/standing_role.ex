@@ -183,6 +183,20 @@ defmodule Shuttle.StandingRole do
     "adhoc-#{DateTime.to_unix(now, :millisecond)}"
   end
 
+  @doc """
+  Run id for a run started for messages in the constitution's inbox
+  (`Shuttle.Delivery.start_for_inbox/1`). Such a run services no occurrence:
+  `Shuttle.Poller.StandingRoles.standing_role_due?/1` does not count its end.
+  """
+  @spec inbox_run_id(DateTime.t()) :: String.t()
+  def inbox_run_id(%DateTime{} = now) do
+    "inbox-#{DateTime.to_unix(now, :millisecond)}"
+  end
+
+  @doc "Whether `run_id` names a run started for messages (`inbox_run_id/1`)."
+  @spec inbox_run?(String.t() | nil) :: boolean()
+  def inbox_run?(run_id), do: is_binary(run_id) and String.starts_with?(run_id, "inbox-")
+
   @spec to_snapshot(t(), DateTime.t(), boolean()) :: map()
   def to_snapshot(%__MODULE__{} = role, now, running?) do
     %{

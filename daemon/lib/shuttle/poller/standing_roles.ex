@@ -220,10 +220,23 @@ defmodule Shuttle.Poller.StandingRoles do
   # run). The cron self-catching invariant hinges on this advancing each run: a
   # fresh dispatch writes a newer `dispatched_at`, so the next poll sees only the
   # next FUTURE occurrence.
+  #
+  # A run started for messages (`StandingRole.inbox_run?/1`) leaves the schedule
+  # as it found it. It starts only while no occurrence is due
+  # (`Shuttle.Delivery.inbox_gate/2`), so its dispatch passes over nothing; its
+  # own end, a handoff or a concluded exit, is not service, so an occurrence
+  # that elapsed while it ran still fires. A human's act on it (temper, rest,
+  # re-arm) stamps another exit verb and counts as usual.
   defp last_service_event_ms(fiber) do
+    handed_off_at =
+      if StandingRole.inbox_run?(Shuttle.Continuation.run_id(fiber)) and
+           get_in(fiber, ["shuttle", "runtime", "thread_exit_verb"]) in [nil, "handed off"],
+         do: nil,
+         else: Shuttle.Continuation.handed_off_at(fiber)
+
     [
       Shuttle.Continuation.dispatched_at(fiber),
-      Shuttle.Continuation.handed_off_at(fiber)
+      handed_off_at
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.map(&DateTime.to_unix(&1, :millisecond))

@@ -6246,13 +6246,18 @@ defmodule Shuttle.Poller do
         if StandingRole.standing?(role) do
           now = DateTime.utc_now()
 
-          if Keyword.get(opts, :ad_hoc, false) do
-            {:standing_run, StandingRole.ad_hoc_run_id(now), :ad_hoc}
-          else
-            # A resumed run keeps the awaiting run's id; only a fresh scheduled
-            # run mints a new id. The run id flows into the dispatch
-            # marker. See StandingRole.dispatch_run_id.
-            {:standing_run, StandingRole.dispatch_run_id(role, now)}
+          cond do
+            Keyword.get(opts, :inbox, false) ->
+              {:standing_run, StandingRole.inbox_run_id(now), :ad_hoc}
+
+            Keyword.get(opts, :ad_hoc, false) ->
+              {:standing_run, StandingRole.ad_hoc_run_id(now), :ad_hoc}
+
+            true ->
+              # A resumed run keeps the awaiting run's id; only a fresh scheduled
+              # run mints a new id. The run id flows into the dispatch
+              # marker. See StandingRole.dispatch_run_id.
+              {:standing_run, StandingRole.dispatch_run_id(role, now)}
           end
         else
           :constitution
