@@ -622,8 +622,8 @@ See [Connect your machines](../shuttle/remotes.md#verify-work-across-the-connect
 
 ### `shuttle channels dismiss <key> [--fiber <uid>]`
 
-Set a channel aside in the human's Channels view, hide or show it, or unpin
-it. Writes a family-board record of kind `dismissed` with the key as its text
+Set a channel aside in the human's Channels view, hide or show it, unpin it,
+or clear a worker's line in it. Writes a family-board record of kind `dismissed` with the key as its text
 and, when supplied, a fiber uid. A channel is keyed `channel:<name, lowercased>`
 or `fiber:<top-level uid>`. The board writes:
 
@@ -636,6 +636,12 @@ or `fiber:<top-level uid>`. The board writes:
   later than `<ms>`.
 - `show:<channel>:<ms>` to bring a hidden one back: it voids every hide up to
   `<ms>`.
+- `clear:<fiber uid>:<ms>` to clear a worker's line (its ✓): the line stays
+  out of its channel while its latest message is no newer than `<ms>`, and its
+  thread keeps everything. A close awaiting review is tempered instead, then
+  cleared at the close.
+- `unclear:<fiber uid>:<ms>` to undo a clear: it voids every clear of that
+  thread up to `<ms>`.
 
 Dismissals reach every hub through the remote board feeds and are omitted from
 family-board reading.

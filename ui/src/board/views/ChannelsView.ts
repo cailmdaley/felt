@@ -9,7 +9,7 @@ import type { KanbanCard } from '../KanbanTypes.js'
 import { boardCards, threadIndexFor } from '../KanbanSurfaces.js'
 import { isMobileViewport } from '../mobile.js'
 import {
-  arranged, BOARD_LINE, channelLines, composeChannels, continues, composeMessages, fiberOf, hideKey, liveness, railOrder, reordered, sameFiber, setAsideKey, showKey, threadOf, unpinKey,
+  arranged, BOARD_LINE, channelLines, clearKey, clearsOf, composeChannels, continues, composeMessages, fiberOf, hideKey, liveness, railOrder, reordered, sameFiber, setAsideKey, showKey, threadOf, unclearKey, unpinKey,
   type BoardRecord, type Channel, type Line, type Message, type Tapestry,
 } from '../channels.js'
 import { createRailReorder, type RailReorder } from '../channelRail.js'
@@ -45,6 +45,8 @@ const IMAGE = /\.(png|jpe?g|gif|svg|webp)$/i
 const SIDE_BY_SIDE_PX = 1100
 /** A message taller than this many lines folds, with Show more to unfold it in place. */
 const FOLD_LINES = 8
+/** A cleared line offers its Undo in its place this long. */
+const UNDO_MS = 10_000
 type Pane = 'channel' | 'thread'
 
 /** One family's board records, read from its daemon a window at a time; `failed` while its last read did not answer. */
@@ -206,6 +208,10 @@ export class ChannelsView implements TemporalView {
   /** Typed-input ids: a retried reply keeps its message's id. */
   private readonly messageIds = new HumanMessageIds()
   private readonly tempering = new Set<string>()
+  /** The line just cleared, drawn as Cleared · Undo in its place for {@link UNDO_MS}. */
+  private undo: { uid: string; name: string; at: number; timer: number } | null = null
+  /** The channel's lines as last drawn, for the key that clears the one in focus. */
+  private lines: Line[] = []
   /** When each channel was last read before this visit to it, for the marks of what is new. */
   private readonly before = new Map<string, number>()
   private sigs: Record<Pane | 'rail', string> = { channel: '', thread: '', rail: '' }
@@ -664,10 +670,13 @@ export class ChannelsView implements TemporalView {
       return
     }
     this.readTapestry(channel.seat)
-    const now = Date.now(), lines = channelLines(this.messages(channel)), failed = this.historyFailed(channel)
+    const now = Date.now(), failed = this.historyFailed(channel), undo = this.undo
+    const said = channelLines(this.messages(channel), clearsOf([...this.dismissed, ...this.pending]))
+    // A cleared line is gone, save the one just cleared, which offers its Undo in its place.
+    const lines = this.lines = said.filter(line => !line.cleared || fiberOf(line.message.card) === undo?.uid)
     for (const { message } of lines) this.readTapestry(message.card)
     const sig = JSON.stringify([channel.key, channel.name, failed, this.thread && fiberOf(this.thread), [...this.tempering], [...this.expanded.keys()], [...this.unfolded],
-      lines.map(({ message, replies, last, waiting }) => [message.id, message.kind, message.text, waiting, message.card.name, message.card.turn, message.files.map(file => file.fullPath), replies, last, this.embedded(message.card, 'channel')])])
+      lines.map(({ message, replies, last, waiting, act, cleared }) => [message.id, message.kind, message.text, waiting, act, cleared, message.card.name, message.card.turn, message.files.map(file => file.fullPath), replies, last, this.embedded(message.card, 'channel')])])
     if (this.changed('channel', sig)) {
       const back = iconButton('kbn-ch-back', 'back', 'Channels', () => this.setRail(false))
       const name = el('h3', 'kbn-ch-name', channel.name)
@@ -676,7 +685,7 @@ export class ChannelsView implements TemporalView {
       menu.button.setAttribute('aria-haspopup', 'menu')
       this.head.replaceChildren(back.root, name, menu.root)
       this.fill(this.stream, lines, 'channel', channel, now)
-      if (!lines.length) this.stream.append(el('li', 'kbn-ch-hush', failed ? 'This channel\'s history could not be read; trying again.' : 'Nothing said here yet.'))
+      if (!lines.length) this.stream.append(el('li', 'kbn-ch-hush', failed ? 'This channel\'s history could not be read; trying again.' : said.length ? 'All clear.' : 'Nothing said here yet.'))
     }
     this.tick()
     this.channelReply.to.textContent = channel.seat.name
@@ -731,9 +740,12 @@ export class ChannelsView implements TemporalView {
    * speaks unless another is named. In the channel, choosing it opens its
    * worker's thread; a close, a hand-off or another lifecycle line is one quiet line.
    */
-  private messageRow({ message, replies, last, waiting }: Line, pane: Pane, before: number, now: number, previous?: Message): HTMLLIElement {
+  private messageRow(line: Line, pane: Pane, before: number, now: number, previous?: Message): HTMLLIElement {
+    const { message, replies, last, waiting } = line
     const card = message.card
+    if (line.cleared) return this.clearedRow(card)
     const row = el('li', 'kbn-ch-msg')
+    if (pane === 'channel' && !message.human) row.dataset.fiber = fiberOf(card)
     row.dataset.kind = message.kind
     row.toggleAttribute('data-waiting', waiting)
     row.toggleAttribute('data-human', message.human)
@@ -791,10 +803,10 @@ export class ChannelsView implements TemporalView {
       link.append(el('span', 'kbn-ch-replies-last', ' · last '), age)
       body.append(link)
     }
+    const tempering = this.tempering.has(`${fiberOf(card)}:${message.at}`)
     if (message.kind === 'review' && message.waiting) {
-      const key = `${fiberOf(card)}:${message.at}`
-      const temper = button('kbn-ch-act', this.tempering.has(key) ? 'Tempering…' : 'Temper', () => { void this.temper(card, key) })
-      temper.disabled = this.tempering.has(key)
+      const temper = button('kbn-ch-act', tempering ? 'Tempering…' : 'Temper', () => this.clear(line))
+      temper.disabled = tempering
       temper.title = 'Accept the work as done'
       const acts = el('div', 'kbn-ch-acts')
       acts.append(temper)
@@ -809,6 +821,21 @@ export class ChannelsView implements TemporalView {
       })
     }
     row.append(gutter, body)
+    if (pane === 'channel' && line.act) {
+      const check = iconButton('kbn-ch-check', 'close', line.act === 'temper' ? 'Temper: accept the work as done' : 'Clear', () => this.clear(line))
+      check.button.dataset.item = `check:${fiberOf(card)}`
+      check.button.disabled = tempering
+      row.append(check.root)
+    }
+    return row
+  }
+  /** A line just cleared, in its place: Cleared, and Undo to bring it back. */
+  private clearedRow(card: KanbanCard): HTMLLIElement {
+    const row = el('li', 'kbn-ch-msg kbn-ch-cleared'), body = el('div', 'kbn-ch-msg-body')
+    const undo = button('kbn-ch-act', 'Undo', () => this.unclear())
+    undo.dataset.item = `undo:${fiberOf(card)}`
+    body.append(el('span', 'kbn-ch-line-text', `${card.name} cleared · `), undo)
+    row.append(el('span', 'kbn-ch-you'), body)
     return row
   }
   /** A message's files: images drawn small inline, every other file a chip; each opens in the reader. */
@@ -978,19 +1005,63 @@ export class ChannelsView implements TemporalView {
   }
   /** Writes a channel's set-aside (the waiting mark clears), unpin, hide or show, and restores it when the write fails. */
   private async setAside(channel: Channel, key: string): Promise<void> {
-    const ctx = this.ctx
-    if (!ctx) return
-    this.pending.push(key)
     if (key.startsWith('pin:')) this.pinned.delete(channel.key)
+    const done = ({ pin: 'unpinned', hide: 'hidden', show: 'brought back' } as Record<string, string>)[key.split(':')[0]] ?? 'set aside'
+    await this.dismiss(key, fiberOf(channel.seat), `${channel.name} could not be ${done}; it is as it was.`)
+  }
+  /** Writes a dismissal record, counting at once here; a write that fails is taken back and `failure` said. */
+  private async dismiss(key: string, fiber: string, failure: string): Promise<boolean> {
+    const ctx = this.ctx
+    if (!ctx) return false
+    this.pending.push(key)
     this.draw()
     try {
-      await postDaemonJson(ctx.shuttleBase, '/api/v1/channels/dismiss', { key, fiber: fiberOf(channel.seat) })
+      await postDaemonJson(ctx.shuttleBase, '/api/v1/channels/dismiss', { key, fiber })
+      return true
     } catch {
       this.pending = this.pending.filter(item => item !== key)
       this.draw()
-      const done = ({ pin: 'unpinned', hide: 'hidden', show: 'brought back' } as Record<string, string>)[key.split(':')[0]] ?? 'set aside'
-      this.status(`${channel.name} could not be ${done}; it is as it was.`)
+      this.status(failure)
+      return false
     }
+  }
+  /**
+   * A line's ✓: a close awaiting review is tempered, and once it is its line
+   * is cleared at the close; anything else is cleared at once, its Undo in its
+   * place for a moment.
+   */
+  private clear(line: Line): void {
+    const card = line.message.card, uid = fiberOf(card)
+    if (line.act === 'temper') {
+      void this.temper(card, `${uid}:${line.message.at}`).then(done => { if (done) void this.dismiss(clearKey(uid, line.message.at), uid, `${card.name} is tempered; its line could not be cleared.`) })
+      return
+    }
+    if (line.act !== 'clear') return
+    // A clear made after an undo of the same message stands above that undo.
+    const at = Math.max(line.message.at, (clearsOf([...this.dismissed, ...this.pending]).get(uid)?.unclear ?? -Infinity) + 1)
+    this.forgetUndo()
+    this.undo = { uid, name: card.name, at, timer: window.setTimeout(() => { this.forgetUndo(); this.drawChannel() }, UNDO_MS) }
+    void this.dismiss(clearKey(uid, at), uid, `${card.name}'s line could not be cleared; it is back.`).then(done => { if (!done && this.undo?.uid === uid) { this.forgetUndo(); this.drawChannel() } })
+    this.stream?.querySelector<HTMLElement>(`[data-item="undo:${CSS.escape(uid)}"]`)?.focus({ preventScroll: true })
+    announce(`${card.name} cleared.`)
+  }
+  private forgetUndo(): void {
+    if (this.undo) window.clearTimeout(this.undo.timer)
+    this.undo = null
+  }
+  /** Brings the line just cleared back. */
+  private unclear(): void {
+    const undo = this.undo
+    if (!undo) return
+    this.forgetUndo()
+    void this.dismiss(unclearKey(undo.uid, undo.at), undo.uid, `${undo.name}'s line could not be brought back.`)
+    this.stream?.querySelector<HTMLElement>(`[data-item="check:${CSS.escape(undo.uid)}"]`)?.focus({ preventScroll: true })
+  }
+  /** The line in focus, else the open thread's. */
+  private focusedLine(): Line | undefined {
+    const row = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.kbn-ch-msg[data-fiber]')
+    const uid = row && this.stream?.contains(row) ? row.dataset.fiber : this.thread && fiberOf(this.thread)
+    return this.lines.find(line => !line.message.human && !line.cleared && fiberOf(line.message.card) === uid)
   }
   /** A rail entry's menu: hide or bring back, pin or unpin, move to the bottom. */
   private railMenu(key: string, pick: HTMLElement, point?: { x: number; y: number }): void {
@@ -1043,19 +1114,21 @@ export class ChannelsView implements TemporalView {
     const channel = this.channels.find(each => each.key === key)
     if (channel?.pinned && Date.now() - (this.pinned.get(key) ?? 0) > RENEW_MS) void this.pin(channel)
   }
-  private async temper(card: KanbanCard, key: string): Promise<void> {
+  private async temper(card: KanbanCard, key: string): Promise<boolean> {
     const ctx = this.ctx
-    if (!ctx) return
+    if (!ctx) return false
     this.tempering.add(key)
     this.drawChannel(); this.drawThread()
     try {
       await postDaemonJson(ctx.shuttleBase, '/api/v1/transition', { fiber_id: card.id, target: 'tempered', origin: card.originId }, 'Temper failed')
       // It stays disabled until the refreshed board takes the review away.
       ctx.requestRefresh()
+      return true
     } catch (error) {
       this.tempering.delete(key)
       this.status(`${card.name} was not tempered: ${error instanceof Error ? error.message : String(error)}`)
       this.drawChannel(); this.drawThread()
+      return false
     }
   }
 
@@ -1175,6 +1248,11 @@ export class ChannelsView implements TemporalView {
     if (event.key === 'j') { this.step(1); return true }
     if (event.key === 'k') { this.step(-1); return true }
     if (event.key === '[') { this.setRail(this.railShown()); return true }
+    if (event.key === 'e') {
+      const line = this.focusedLine()
+      if (line?.act) this.clear(line)
+      return !!line?.act
+    }
     if (event.key === 'Enter' && !active?.closest('button, a, input') && this.channel) {
       (this.thread ? this.threadReply : this.channelReply)?.text.focus()
       return true
@@ -1200,6 +1278,7 @@ export class ChannelsView implements TemporalView {
     this.railBindings = []
     this.rail?.destroy(); this.rail = null
     this.reading = false
+    this.forgetUndo()
     this.ctx = null
     this.layout = this.channelEl = this.head = this.note = this.threadEl = this.threadHead = null
     this.list = null; this.found = null; this.jump = null; this.stream = null; this.threadList = null; this.railToggle = null

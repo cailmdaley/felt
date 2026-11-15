@@ -699,3 +699,75 @@ it('opens on the channel and thread last open on this device, and on the first c
   const fourth = await mount(undefined, new ChannelsView())
   expect(shown(fourth.host)).toBe('cmbx')
 })
+
+it('clears a worker\'s line by its ✓, offers Undo in its place, and keeps a clear across devices', async () => {
+  const { posts } = daemon()
+  const { host } = await mount()
+  const check = (name: string) => message(host, name)?.querySelector<HTMLButtonElement>('.kbn-ch-check')
+  // An ask needs an answer: no ✓. The ✓ is an icon named by its tooltip.
+  expect(check('Cluster mask')).toBeNull()
+  expect(check('κ × tSZ')!.closest('ui-tooltip')!.querySelector('.kbn-ch-tip')?.textContent).toBe('Clear')
+  check('κ × tSZ')!.click()
+  await settle()
+  const posted = BOARD.C[0].timestamp
+  expect(posts).toStrictEqual([['/api/v1/channels/dismiss', { key: `clear:T:${posted}`, fiber: 'T' }]])
+  // In its place, the line's Undo.
+  expect(stream(host).map(([name]) => name)).toStrictEqual([undefined, 'Cluster mask', 'cmbx chair'])
+  const cleared = host.querySelector<HTMLElement>('.kbn-ch-cleared')!
+  expect(cleared.textContent).toBe('κ × tSZ cleared · Undo')
+  expect(document.activeElement?.textContent).toBe('Undo')
+  // The channel still waits on the ask, not on what was cleared.
+  expect(host.querySelector('[data-channel="channel:cmbx"]')!.hasAttribute('data-waiting')).toBe(true)
+  cleared.querySelector<HTMLButtonElement>('button')!.click()
+  await settle()
+  expect(posts.at(-1)).toStrictEqual(['/api/v1/channels/dismiss', { key: `unclear:T:${posted}`, fiber: 'T' }])
+  expect(stream(host).map(([name]) => name)).toStrictEqual(['κ × tSZ', 'Cluster mask', 'cmbx chair'])
+  expect(host.querySelector('.kbn-ch-cleared')).toBeNull()
+  // Cleared again after the undo, the clear stands above it.
+  check('κ × tSZ')!.click()
+  await settle()
+  expect(posts.at(-1)).toStrictEqual(['/api/v1/channels/dismiss', { key: `clear:T:${posted + 1}`, fiber: 'T' }])
+  // Another device holds the clear: the line is gone, with no Undo.
+  views.forEach(view => view.unmount()); views.length = 0; document.body.replaceChildren()
+  daemon([], new Map(), {}, { dismissed: [`clear:T:${posted}`] })
+  const again = await mount()
+  expect(stream(again.host).map(([name]) => name)).toStrictEqual(['Cluster mask', 'cmbx chair'])
+  expect(again.host.querySelector('.kbn-ch-cleared')).toBeNull()
+})
+
+it('clears the line in focus, else the open thread\'s, by e; a failed write brings the line back and says so', async () => {
+  const { posts } = daemon(['/api/v1/channels/dismiss'])
+  const { view, host } = await mount()
+  message(host, 'cmbx chair').querySelector<HTMLButtonElement>('.kbn-ch-msg-name')!.focus()
+  expect(view.keydown(new KeyboardEvent('keydown', { key: 'e' }))).toBe(true)
+  expect(posts[0][1]).toMatchObject({ key: expect.stringMatching(/^clear:C:\d+$/), fiber: 'C' })
+  await settle()
+  expect(stream(host).map(([name]) => name)).toContain('cmbx chair')
+  expect(host.querySelector('.kbn-ch-cleared')).toBeNull()
+  expect(host.querySelector('.kbn-ch-note')?.textContent).toBe('cmbx chair\'s line could not be cleared; it is back.')
+  // With nothing focused, e clears the open thread's line; an asking thread's line has no clear.
+  message(host, 'Cluster mask').click()
+  ;(document.activeElement as HTMLElement | null)?.blur()
+  expect(view.keydown(new KeyboardEvent('keydown', { key: 'e' }))).toBe(false)
+  message(host, 'κ × tSZ').click()
+  ;(document.activeElement as HTMLElement | null)?.blur()
+  expect(view.keydown(new KeyboardEvent('keydown', { key: 'e' }))).toBe(true)
+  expect(posts.at(-1)![1]).toMatchObject({ key: expect.stringMatching(/^clear:T:\d+$/), fiber: 'T' })
+})
+
+it('signs off a close for review by its ✓: tempers it, then clears its line at the close', async () => {
+  const { posts } = daemon()
+  const cuts = card({ id: 'cmbx/cuts', uid: 'K', name: 'Depth cuts', orchestrator: 'C', column: 'awaitingReview', closedAt: at(15), reviewMark: { note: 'The plot is attached.', at: at(15) } })
+  const { host, requestRefresh } = await mount([chair, tsz, mask, cuts])
+  const check = message(host, 'Depth cuts').querySelector<HTMLButtonElement>('.kbn-ch-check')!
+  expect(check.closest('ui-tooltip')!.querySelector('.kbn-ch-tip')?.textContent).toBe('Temper: accept the work as done')
+  check.click()
+  await settle()
+  expect(posts).toStrictEqual([
+    ['/api/v1/transition', { fiber_id: 'cmbx/cuts', target: 'tempered', origin: 'local' }],
+    ['/api/v1/channels/dismiss', { key: `clear:K:${Date.parse(cuts.closedAt!)}`, fiber: 'K' }],
+  ])
+  expect(requestRefresh).toHaveBeenCalled()
+  // No Undo for a sign-off; the line goes once the board carries the temper.
+  expect(host.querySelector('.kbn-ch-cleared')).toBeNull()
+})

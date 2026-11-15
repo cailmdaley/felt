@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { RECENT_MS, arranged, channelLines, continues, composeChannels, composeMessages, hideKey, liveness, railOrder, reordered, setAsideKey, showKey, threadOf, unpinKey, waitsSince, type BoardRecord, type Channel } from './channels.js'
+import { RECENT_MS, arranged, channelLines, clearKey, clearsOf, continues, composeChannels, composeMessages, hideKey, liveness, railOrder, reordered, setAsideKey, showKey, threadOf, unclearKey, unpinKey, waitsSince, type BoardRecord, type Channel } from './channels.js'
 import { inFlightBand } from './KanbanReadModel.js'
 import { card } from './testFixtures.js'
 import { ThreadIndex } from './threads.js'
@@ -225,6 +225,41 @@ describe('composeMessages', () => {
       ['turn', 'stuck', false, 0, now - 3 * minute],
       ['tapestry', 'pando/unions', false, 2, now - 2 * minute],
     ])
+  })
+
+  it('gives each worker\'s line its ✓: a close for review tempers, an ask has none, anything else clears; the human\'s lines have none', () => {
+    const stream = channelLines(composeMessages({ channel, records, files, now, reachMs, tapestry: { path: '/t.html', at: now - 2 * minute, title: 'T', lede: '' } }))
+    expect(stream.map(line => [line.message.kind, line.message.card.id, line.act])).toStrictEqual([
+      ['file', 'east-unions', 'clear'],
+      ['post', 'west-unions', 'clear'],
+      ['ask', 'pando/unions/modes', undefined],
+      ['review', 'cuts', 'temper'],
+      ['reply', 'pando/unions', undefined],
+      ['turn', 'stuck', 'clear'],
+      ['tapestry', 'pando/unions', 'clear'],
+    ])
+  })
+
+  it('clears a line while its message is no newer than its thread\'s clear; the thread saying more, or an undo, brings it back', () => {
+    const west40 = now - 40 * minute
+    const linesWith = (dismissed: string[], more: BoardRecord[] = []) =>
+      channelLines(composeMessages({ channel, records: [...records, ...more], files, now, reachMs }), clearsOf(dismissed))
+    const cleared = (dismissed: string[], more: BoardRecord[] = []) =>
+      linesWith(dismissed, more).filter(line => line.cleared).map(line => line.message.card.id)
+    expect(cleared([])).toStrictEqual([])
+    expect(cleared([clearKey('F', west40)])).toStrictEqual(['west-unions'])
+    // An older clear does not reach a newer message.
+    expect(cleared([clearKey('F', west40 - 1)])).toStrictEqual([])
+    // The thread says something newer: back.
+    expect(cleared([clearKey('F', west40)], [record({ id: 'r14', kind: 'post', fiber: 'F', by: { fiber: 'F' }, text: 'One more plot.' }, 4)])).toStrictEqual([])
+    // An undo voids the clears up to it; a clear above the undo stands again.
+    expect(cleared([clearKey('F', west40), unclearKey('F', west40)])).toStrictEqual([])
+    expect(cleared([clearKey('F', west40), unclearKey('F', west40), clearKey('F', west40 + 1)])).toStrictEqual(['west-unions'])
+    // A clear never takes away what waits: the ask and the review stand.
+    expect(cleared([clearKey('W', now), clearKey('C', now)])).toStrictEqual([])
+    // Clear records leave the channel's waiting and rail alone.
+    const plain = compose(all), withClears = compose(all, { dismissed: [clearKey('W', now), clearKey('U', now)] })
+    expect(withClears.map(each => [each.key, each.waiting, each.newest, each.listed])).toStrictEqual(plain.map(each => [each.key, each.waiting, each.newest, each.listed]))
   })
 
   it('names each worker\'s liveness', () => {

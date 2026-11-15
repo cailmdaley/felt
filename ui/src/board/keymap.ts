@@ -181,6 +181,7 @@ export const helpSections: readonly HelpSection[] = [
     row(['['], 'Hide or show the channels', []),
     row(['/'], 'Jump to a channel or a file', []),
     row(['Enter'], 'Reply: to the open thread\'s worker, else to the channel\'s chair', []),
+    row(['e'], 'Clear the line in focus, else the open thread\'s: a close for review is tempered; Undo brings any other back', []),
     row(['Esc'], 'Close the thread', []),
     row(['⌥↑', '⌥↓'], 'Move the channel in the rail', []),
     row(['Menu', '⇧F10'], 'The channel\'s menu: not now, hide, pin, move to the bottom; a long press on a phone', []),

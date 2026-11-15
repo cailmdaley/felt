@@ -111,6 +111,29 @@ export const hideKey = (key: string, at: number): string => `hide:${key}:${at}`
 /** The dismissal record that brings a hidden channel back: every hide up to `at` stops counting. */
 export const showKey = (key: string, at: number): string => `show:${key}:${at}`
 
+/** The record that clears a worker's line in its channel: the line stays out while its message is no newer than `at`. */
+export const clearKey = (uid: string, at: number): string => `clear:${uid}:${at}`
+/** The record that undoes a clear: every clear of the thread up to `at` stops counting. */
+export const unclearKey = (uid: string, at: number): string => `unclear:${uid}:${at}`
+/** Each thread's newest clear and newest undo, by fiber uid, from the board's dismissal records. */
+export type Clears = ReadonlyMap<string, { clear: number; unclear: number }>
+export function clearsOf(records: readonly string[]): Clears {
+  const clears = new Map<string, { clear: number; unclear: number }>()
+  for (const record of records) {
+    const match = /^(clear|unclear):(.+):(\d+)$/.exec(record)
+    if (!match) continue
+    const entry = clears.get(match[2]) ?? clears.set(match[2], { clear: -Infinity, unclear: -Infinity }).get(match[2])!
+    const kind = match[1] as 'clear' | 'unclear'
+    entry[kind] = Math.max(entry[kind], Number(match[3]))
+  }
+  return clears
+}
+/** The time a thread's line stands cleared to, or -Infinity: its newest clear, unless an undo as new voids it. */
+export const clearedTo = (clears: Clears, uid: string): number => {
+  const entry = clears.get(uid)
+  return entry && entry.clear > entry.unclear ? entry.clear : -Infinity
+}
+
 /** Constitutions a channel speaks for: everything not archived. */
 const LIVE: readonly ThreadState[] = ['waiting', 'to-review', 'with-orchestrator', 'working', 'drafts', 'roles', 'resting']
 export const fiberOf = (card: KanbanCard): string => card.uid ?? card.id
@@ -430,7 +453,19 @@ export function liveness(card: KanbanCard): 'working' | 'waiting' | 'resting' | 
  * One line of a channel's stream, with its thread's size and latest time when
  * it stands for a worker, and whether anything in that thread waits on the human.
  */
-export interface Line { message: Message; replies: number; last: number; waiting: boolean }
+export interface Line {
+  message: Message
+  replies: number
+  last: number
+  waiting: boolean
+  /**
+   * What its ✓ does: `temper` signs off a close awaiting review, `clear`
+   * acknowledges anything else; none while an ask waits, nor on the human's lines.
+   */
+  act?: 'clear' | 'temper'
+  /** Cleared: its message is no newer than its thread's standing clear. */
+  cleared?: boolean
+}
 
 /** What a worker says to the human, as distinct from lifecycle lines and what others say to it. */
 const SPEAKING: readonly MessageKind[] = ['post', 'ask', 'review', 'turn', 'file', 'tapestry']
@@ -441,9 +476,10 @@ const SPEAKING: readonly MessageKind[] = ['post', 'ask', 'review', 'turn', 'file
  * page counting as that tapestry), marked waiting when something of its waits
  * on the human, with its thread's size and latest time; and the human's lines
  * to the chair. Oldest first, by each line's time. A worker that has said
- * nothing is not in it.
+ * nothing is not in it. A line its ✓ would clear is marked cleared while its
+ * message is no newer than its thread's standing clear.
  */
-export function channelLines(messages: readonly Message[]): Line[] {
+export function channelLines(messages: readonly Message[], clears: Clears = new Map()): Line[] {
   const lines: Line[] = []
   const workers = new Map<string, KanbanCard>()
   for (const message of messages) {
@@ -459,7 +495,13 @@ export function channelLines(messages: readonly Message[]): Line[] {
     const tapestry = said.filter(message => message.kind === 'tapestry').at(-1)
     const latest = said.filter(message => !(tapestry && message.kind === 'file' && message.files.length > 0
       && message.files.every(file => file.fullPath === tapestry.path || file.fullPath.endsWith('/tapestry.html')))).at(-1)
-    if (latest) lines.push({ message: latest, replies: thread.length - 1, last: Math.max(...thread.map(message => message.at)), waiting: said.some(message => message.waiting) })
+    if (!latest) continue
+    const open = said.filter(message => message.waiting)
+    const act = open.some(message => message.kind === 'ask') ? undefined : open.some(message => message.kind === 'review') ? 'temper' : 'clear'
+    lines.push({
+      message: latest, replies: thread.length - 1, last: Math.max(...thread.map(message => message.at)), waiting: open.length > 0,
+      act, cleared: act === 'clear' && latest.at <= clearedTo(clears, fiberOf(card)),
+    })
   }
   return lines.sort((a, b) => a.message.at - b.message.at || a.message.id.localeCompare(b.message.id))
 }

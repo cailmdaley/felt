@@ -144,7 +144,11 @@
   padding: 6px 20px 6px 14px;
   border-left: 2px solid transparent;
 }
-.kbn-ch .kbn-ch-msg { cursor: pointer; }
+.kbn-ch .kbn-ch-msg { cursor: pointer; grid-template-columns: 20px minmax(0, 1fr) 28px; }
+/* A line's ✓, at its right. */
+.kbn-ch-check:disabled { cursor: default; opacity: 0.4; }
+.kbn-ch .kbn-ch-msg.kbn-ch-cleared { cursor: default; padding-block: 2px; }
+.kbn-ch .kbn-ch-msg.kbn-ch-cleared:hover { background: none; }
 .kbn-ch .kbn-ch-msg:hover { background: color-mix(in srgb, var(--kbn-ink) 4%, transparent); }
 .kbn-ch-msg[data-chosen] { background: color-mix(in srgb, var(--kbn-ink) 6%, transparent); }
 .kbn-ch-msg[data-waiting] { border-left-color: var(--kbn-owed-bright); background: color-mix(in srgb, var(--kbn-owed-bright) 7%, transparent); }
