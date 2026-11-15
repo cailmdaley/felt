@@ -136,7 +136,7 @@ it('opens a worker\'s thread from its message: its name, liveness and ask on top
   expect(view.keydown(new KeyboardEvent('keydown', { key: 'Enter' }))).toBe(true)
   expect(document.activeElement).toBe(fieldOf(host, 'thread'))
   await say(host, 'thread', 'Show the nulls.')
-  expect(posts.filter(([url]) => url === '/api/v1/dispatch')).toStrictEqual([['/api/v1/dispatch', { fiber_id: 'cmbx/tsz', origin: 'local', force: true, ad_hoc: true, resume_mode: 'previous', user_message: 'Show the nulls.', message_id: expect.stringMatching(/^human-[0-9a-f]{32}$/) }]])
+  expect(posts.filter(([url]) => url === '/api/v1/dispatch')).toStrictEqual([['/api/v1/dispatch', { fiber_id: 'cmbx/tsz', origin: 'local', force: true, ad_hoc: true, resume_mode: 'continue', user_message: 'Show the nulls.', message_id: expect.stringMatching(/^human-[0-9a-f]{32}$/) }]])
   expect(requestRefresh).toHaveBeenCalled()
   expect(draft(host, 'thread')).toBe('')
   // The reply stands in the thread until the board carries it, and not in the channel.
@@ -255,6 +255,30 @@ it('replies in the channel to its chair; keeps each console\'s draft by whom it 
   view.keydown(new KeyboardEvent('keydown', { key: 'j' }))
   view.keydown(new KeyboardEvent('keydown', { key: 'k' }))
   expect(draft(host, 'channel')).toBe('')
+})
+
+it('spends the draft of whom a line went to, not of whom the console shows when the send lands', async () => {
+  daemon()
+  // The dispatch answers only when let through.
+  let through!: () => void
+  const gate = new Promise<void>(resolve => { through = resolve })
+  const answer = globalThis.fetch
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => url.endsWith('/api/v1/dispatch') ? gate.then(() => answer(url, init)) : answer(url, init)))
+  const { host } = await mount()
+  message(host, 'κ × tSZ').click()
+  write(host, 'thread', 'Show the nulls.')
+  fieldOf(host, 'thread').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+  await settle()
+  // While it is in flight the human turns to another thread and starts a line there.
+  message(host, 'Cluster mask').click()
+  write(host, 'thread', 'Mask at 5σ.')
+  through()
+  await settle(); await settle(); await settle()
+  expect(draft(host, 'thread')).toBe('Mask at 5σ.')
+  message(host, 'κ × tSZ').click()
+  expect(draft(host, 'thread')).toBe('')
+  message(host, 'Cluster mask').click()
+  expect(draft(host, 'thread')).toBe('Mask at 5σ.')
 })
 
 it('sets a waiting channel aside, pins and unpins from its menu, and restores a write that fails', async () => {

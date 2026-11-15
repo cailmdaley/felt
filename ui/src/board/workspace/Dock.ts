@@ -19,7 +19,7 @@ import { coarsePointer } from '../mobile.js'
 import { formatDue } from '../KanbanSurfaces.js'
 import { clockTime, dayClock, dueCivilDay, formatSpanMinutes, instantMs, instantStamp, isoDayLocal } from '../civilDay.js'
 import { dressAction, dressVerb, labelVerb, leadVerb, lifecycleVerbsFor, verbSpec, VERB_KEY, type LifecycleVerb } from './lifecycleVerbs.js'
-import { WorkerActions } from './workerActions.js'
+import { WorkerActions, type SessionMode } from './workerActions.js'
 import { SettingsMenu } from './SettingsMenu.js'
 import { VoiceStrip, voiceLine, type FiberSlug } from './voiceStrip.js'
 import { fetchTranscriptUsage, paintUsage, warmUntil, type TranscriptUsage } from './transcriptUsage.js'
@@ -32,7 +32,6 @@ import './tokens.css'
 import './dock.css'
 
 interface AgentAxes { agent: string; effort: string; chrome: boolean }
-export type SessionMode = 'fresh' | 'previous'
 
 export interface SessionWindow {
   text: string
@@ -389,9 +388,9 @@ export class Dock {
   private searchDebounce: number | null = null
   private fiberIndex: Promise<Array<{ id: string; name: string }>> | null = null
   private searchRenderToken = 0
-  /** Opens the band's fiber's own page, from the constitution button its acts carry. */
+  /** Opens the console's fiber's own page, from its menu's Constitution. */
   private openConstitution: (() => void) | null = null
-  /** The band stands over the page, so its settings sheet can open; the reader seats it. */
+  /** The reader seats the console under its page and opens its settings as a sheet; without a seat the acts draw no ⚙. */
   private seated = true
   /** Every fiber's acts drawn now, by its repaint: the band's and each row's. */
   private readonly liveActs = new Set<() => void>()
@@ -663,7 +662,7 @@ export class Dock {
    * opens it) and its settings sheet. The whole strip is the fiber's verdict
    * host, so an undo window takes its place.
    */
-  actsFor(target: () => KanbanCard, ): FiberActs {
+  actsFor(target: () => KanbanCard): FiberActs {
     const el = document.createElement('span')
     el.className = 'ws-fiber-acts'
     el.dataset.part = 'acts'
@@ -757,7 +756,7 @@ export class Dock {
 
   /** A worker's own line for an opening message, Resume and New session, for a page to seat beside that worker. */
   workerActionsFor(card: KanbanCard): WorkerActions {
-    return new WorkerActions(card, (target, mode, message, word, images) => this.startSession(target, mode, word, undefined, message, images))
+    return new WorkerActions(card, (target, mode, message, word, images) => this.startSession(target, mode, word, undefined, message, images), { emptyEnter: !this.keepPlace })
   }
 
   /** Retarget the band's figures, menu and message box without changing its identity or settings. */
@@ -822,7 +821,7 @@ export class Dock {
     this.actPaint?.()
   }
 
-  /** Whether the band stands over the page; without it the acts draw no ⚙. */
+  /** Whether the reader seats the console; without it the acts draw no ⚙. */
   setSeated(seated: boolean): void {
     if (this.seated === seated) return
     this.seated = seated
@@ -1631,7 +1630,7 @@ export class Dock {
     if (this.starting || (mode === 'fresh' && !this.confirmCut(card))) return false
     const epoch = this.epoch, at = Date.now()
     const original = word?.textContent ?? ''
-    if (word) word.textContent = mode === 'fresh' ? 'Starting…' : message || images.length ? 'Sending…' : 'Resuming…'
+    if (word) word.textContent = message || images.length ? 'Sending…' : mode === 'previous' ? 'Resuming…' : 'Starting…'
     this.starting = true
     this.actPaint?.()
     const inBand = (): boolean => {
@@ -1648,7 +1647,7 @@ export class Dock {
     try {
       let res: Response
       try {
-        res = await postForceDispatch(this.shuttleBase, card, { user_message: message, message_id: this.messageIds.for([mode, card.originId, card.id, message, ...images.map(image => `${image.name}:${image.data.length}`)].join('\0')), resume_mode: mode, ...(images.length ? { images } : {}), ...(projectDir ? { project_dir: projectDir } : {}) })
+        res = await postForceDispatch(this.shuttleBase, card, { user_message: message, message_id: this.messageIds.for([card.originId, card.id, message, ...images.map(image => `${image.name}:${image.data.length}`)].join('\0')), resume_mode: mode, ...(images.length ? { images } : {}), ...(projectDir ? { project_dir: projectDir } : {}) })
       } catch (err: unknown) {
         showError(`Shuttle did not answer (${(err as { message?: string })?.message ?? String(err)}). Check the board before trying again.`)
         return false

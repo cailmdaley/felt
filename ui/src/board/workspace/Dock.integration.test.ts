@@ -530,10 +530,10 @@ describe('session verbs', () => {
     expect(band.el.querySelector('.ws-worker-receipt')!.textContent).toBe('Only PNG, JPEG, GIF or WebP images')
     expect(paste([], ['text/plain']).defaultPrevented).toBe(false)
     type(field, 'look')
-    session('Resume').click()
+    session('Send').click()
     await vi.waitFor(() => expect(band.el.querySelector('.ws-worker-receipt')!.textContent).toBe('Sent'))
     const dispatch = vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith('/api/v1/dispatch'))!
-    expect(JSON.parse(String(dispatch[1]!.body))).toMatchObject({ user_message: 'look', resume_mode: 'previous', images: [{ name: 'shot.png', data: 'iVBORw==' }] })
+    expect(JSON.parse(String(dispatch[1]!.body))).toMatchObject({ user_message: 'look', resume_mode: 'continue', images: [{ name: 'shot.png', data: 'iVBORw==' }] })
     expect(band.el.querySelectorAll('.ws-worker-image')).toHaveLength(0)
     expect(field.textContent).toBe('')
   })
@@ -549,11 +549,11 @@ describe('session verbs', () => {
     field.replaceChildren(document.createElement('br'))
     field.dispatchEvent(new Event('input'))
     expect(field.childNodes).toHaveLength(0)
-    expect(field.title).toMatch(/^Resume .+ with a message$/)
+    expect(field.title).toMatch(/^Message .+/)
   })
 
   it.each([
-    ['Start', {}, 'fresh'],
+    ['Start', {}, 'continue'],
     ['New session', { sessionUuid: 'prior' }, 'fresh'],
     ['Resume', { sessionUuid: 'prior' }, 'previous'],
   ] as const)('%s dispatches with its resume mode and an empty message, then opens the worker', async (label, patch, mode) => {
@@ -569,9 +569,9 @@ describe('session verbs', () => {
   })
 
   it.each([
-    ['Enter', { sessionUuid: 'prior' }, 'previous'],
+    ['Enter', { sessionUuid: 'prior' }, 'continue'],
     ['New session', { sessionUuid: 'prior' }, 'fresh'],
-    ['Enter', {}, 'fresh'],
+    ['Enter', {}, 'continue'],
   ] as const)('%s carries the line as the opening message, then says it was sent', async (how, patch, mode) => {
     dock.open(task(patch))
     vi.mocked(fetch).mockClear()
@@ -586,6 +586,69 @@ describe('session verbs', () => {
     expect(band.el.querySelector('.ws-worker-receipt')?.textContent).toBe('Sent')
   })
 
+  it('sends a line for the daemon to place, even to a worker that handed off with its session, and keeps Resume and New session explicit', async () => {
+    dock.open(task({ sessionUuid: 'prior', dispatchedAt: '2026-11-15T09:00:00Z', handedOffAt: '2026-11-15T10:00:00Z' }))
+    vi.mocked(fetch).mockClear()
+    vi.mocked(fetch).mockResolvedValue(response({ dispatched: true }))
+    const field = messageField()
+    expect(session('Resume')).not.toBeNull()
+    type(field, 'pick it up')
+    // Said, the primary verb is Send: resuming the old session or starting afresh is the daemon's call.
+    expect(session('Resume')).toBeNull()
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await settle()
+    expect(writes()).toEqual([expect.objectContaining({ resume_mode: 'continue', user_message: 'pick it up' })])
+    session('Resume').click()
+    await settle()
+    session('New session').click()
+    await settle()
+    expect(writes().slice(1).map(body => body.resume_mode)).toEqual(['previous', 'fresh'])
+  })
+
+  it('never cuts a worker the card does not show yet: Start and a line let the daemon find it', async () => {
+    const confirm = vi.spyOn(window, 'confirm')
+    dock.open(task())
+    vi.mocked(fetch).mockClear()
+    vi.mocked(fetch).mockResolvedValue(response({ tmux_session: 'worker', terminal: 'rex' }, 409))
+    session('Start').click()
+    await settle()
+    type(messageField(), 'hello')
+    session('Send').click()
+    await settle()
+    expect(writes().map(body => body.resume_mode)).toEqual(['continue', 'continue'])
+    expect(confirm).not.toHaveBeenCalled()
+  })
+
+  it('keeps a line\'s message id across a retry, whatever the card shows by then', async () => {
+    dock.open(task())
+    vi.mocked(fetch).mockClear()
+    vi.mocked(fetch).mockRejectedValueOnce(new Error('timed out'))
+    const field = messageField()
+    type(field, 'look at the cut first')
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await settle()
+    // The send may have started the worker after all.
+    dock.syncRuntime(task({ status: 'active', workerState: 'running', sessionUuid: 'live', tmuxSession: 'worker' }))
+    vi.mocked(fetch).mockResolvedValue(response({ tmux_session: 'worker' }))
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await settle()
+    const [first, second] = writes()
+    expect(second.message_id).toBe(first.message_id)
+  })
+
+  it('takes no empty Enter in a console that keeps its place', async () => {
+    dock.reset(); dock = band = new Dock('', saved, undefined, openWorker, { keepPlace: true })
+    dock.open(task({ sessionUuid: 'prior' }))
+    document.body.append(band.el)
+    vi.mocked(fetch).mockClear()
+    messageField().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await settle()
+    expect(writes()).toEqual([])
+    session('Resume').click()
+    await settle()
+    expect(writes()).toEqual([expect.objectContaining({ resume_mode: 'previous' })])
+  })
+
   it('types into a live worker only with something to say', async () => {
     dock.open(task({ status: 'active', workerState: 'running', sessionUuid: 'live', tmuxSession: 'worker' }))
     const field = messageField()
@@ -597,7 +660,7 @@ describe('session verbs', () => {
     vi.mocked(fetch).mockResolvedValue(response({ tmux_session: 'worker' }))
     session('Send').click()
     await settle()
-    expect(writes()).toEqual([expect.objectContaining({ resume_mode: 'previous', user_message: 'one more thing' })])
+    expect(writes()).toEqual([expect.objectContaining({ resume_mode: 'continue', user_message: 'one more thing' })])
   })
 
   it('reads a repeated line as sent only when its first send was delivered, else says it may not have arrived and sends it again as new', async () => {
@@ -634,11 +697,11 @@ describe('session verbs', () => {
     vi.mocked(fetch).mockClear()
     vi.mocked(fetch).mockResolvedValue(response({}))
     const field = messageField(actions.el)
-    expect(field.title).toBe('Resume Thread with a message')
+    expect(field.title).toBe('Message Thread')
     type(field, 'pick up the plots')
     field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     await settle()
-    expect(writes()).toEqual([expect.objectContaining({ fiber_id: 'a/task/thread', resume_mode: 'previous', user_message: 'pick up the plots' })])
+    expect(writes()).toEqual([expect.objectContaining({ fiber_id: 'a/task/thread', resume_mode: 'continue', user_message: 'pick up the plots' })])
     actions.dispose()
   })
 
@@ -780,7 +843,7 @@ describe('session verbs', () => {
     expect(saved).not.toHaveBeenCalled()
     band.el.querySelector<HTMLButtonElement>('.kbn-start-prompt .kbn-ctl-send')!.click()
     await settle()
-    expect(writes()[1]).toMatchObject({ fiber_id: 'a/task', origin: 'owner', force: true, ad_hoc: true, resume_mode: 'fresh', user_message: '', project_dir: '/srv/checkout' })
+    expect(writes()[1]).toMatchObject({ fiber_id: 'a/task', origin: 'owner', force: true, ad_hoc: true, resume_mode: 'continue', user_message: '', project_dir: '/srv/checkout' })
     expect(saved).toHaveBeenCalledOnce()
     expect(openWorker).toHaveBeenCalledWith('worker', 'owner')
   })

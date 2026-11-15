@@ -892,7 +892,7 @@ describe('workspace reader integration', () => {
     expect(send.getAttribute('aria-label')).toBe('Send Other')
     send.click(); await settle()
     const dispatch = vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith('/api/v1/dispatch'))!
-    expect(JSON.parse(String(dispatch[1]!.body))).toMatchObject({ fiber_id: 'hub/other', user_message: 'Hello', resume_mode: 'previous' })
+    expect(JSON.parse(String(dispatch[1]!.body))).toMatchObject({ fiber_id: 'hub/other', user_message: 'Hello', resume_mode: 'continue' })
     expect(document.querySelector('.ws-band-title')?.textContent).toBe('Hub / other')
   })
   it('row verbs select their thread without unfolding it and share the undo queue', async () => {

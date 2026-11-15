@@ -5,7 +5,8 @@ import type { KanbanCard } from './KanbanTypes.js'
  * `force` + `ad_hoc`, owner-routed by `origin`. The daemon reopens a closed
  * lifecycle itself and launches on the owning host regardless of poll
  * eligibility. `resume_mode` is explicit on every launch — `fresh` starts a
- * new session, `previous` resumes the fiber's `shuttle.session_uuid` — and
+ * new session, `previous` resumes the fiber's `shuttle.session_uuid`, and
+ * `continue` lets the daemon choose by the worker's state — and
  * `user_message` rides inline into the worker's prompt. `project_dir` is a
  * directory a human confirmed after a start was refused for want of one
  * ({@link needsProjectDir}); the owning host's CLI validates and saves it.
@@ -18,7 +19,7 @@ export interface PastedImage { name: string; data: string }
 export function postForceDispatch(
   shuttleBase: string,
   card: Pick<KanbanCard, 'id' | 'originId'>,
-  fields: { resume_mode: 'fresh' | 'previous'; user_message?: string; message_id?: string; images?: PastedImage[]; project_dir?: string; existing_only?: boolean },
+  fields: { resume_mode: 'fresh' | 'previous' | 'continue'; user_message?: string; message_id?: string; images?: PastedImage[]; project_dir?: string; existing_only?: boolean },
 ): Promise<Response> {
   return fetch(`${shuttleBase}/api/v1/dispatch`, {
     method: 'POST',

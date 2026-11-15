@@ -3,7 +3,8 @@ import { isAgentCard, type PastedImage } from '../KanbanModalShared.js'
 import { onDesk } from './fiberPageState.js'
 import { headerIcon, type HeaderIcon } from './headerIcon.js'
 
-type SessionMode = 'fresh' | 'previous'
+/** `previous` resumes the session, `fresh` starts a new one, and `continue` lets the daemon choose by the worker's state. */
+export type SessionMode = 'fresh' | 'previous' | 'continue'
 
 /** Starts or resumes one worker with an opening message and its images; resolves true once the daemon took it. */
 export type StartWorker = (card: KanbanCard, mode: SessionMode, message: string, word: HTMLElement, images: PastedImage[]) => Promise<boolean>
@@ -25,11 +26,13 @@ const textOf = (field: HTMLElement): string => field.innerText ?? field.textCont
  * breaks a line), and at its first line's right, the tools seated into it (the
  * band seats Listen there), Send and New session. The tools float, so the
  * text's first line runs up to them and every later line takes the box's full
- * width beneath them. Enter takes the primary verb: it resumes the session the
- * worker has (typing into it when it is live) or starts its first; an empty
- * box resumes or starts with nothing said. After a send the box says so, and
- * nothing more. Images pasted or dropped onto it wait as thumbnails and go
- * with the send.
+ * width beneath them. Enter takes the primary verb. Something said is sent, and
+ * the daemon chooses where it goes: typed into a live worker, else a fresh
+ * session after a clean handoff, else the session resumed or started cold. An
+ * empty box offers Resume, the session the worker had, or Start; a box that
+ * keeps its place (Channels) takes no empty Enter, so a stray key starts
+ * nothing. After a send the box says so, and nothing more. Images pasted or
+ * dropped onto it wait as thumbnails and go with the send.
  *
  * The field is a plaintext editable block rather than a textarea: only a
  * block's line boxes wrap around a float, and the float sits outside the
@@ -52,10 +55,13 @@ export class WorkerActions {
   private receiptTimer: number | null = null
   private note = ''
   private readonly start: StartWorker
+  /** An empty Enter resumes or starts the worker. */
+  private readonly emptyEnter: boolean
 
-  constructor(card: KanbanCard, start: StartWorker) {
+  constructor(card: KanbanCard, start: StartWorker, { emptyEnter = true } = {}) {
     this.card = card
     this.start = start
+    this.emptyEnter = emptyEnter
     this.el.className = 'ws-worker-acts'
     this.el.dataset.part = 'worker-actions'
     this.compose.className = 'ws-worker-compose'
@@ -81,7 +87,7 @@ export class WorkerActions {
       event.preventDefault()
       this.focus()
     })
-    this.primary.addEventListener('click', () => { void this.send(this.resumes ? 'previous' : 'fresh', this.primary) })
+    this.primary.addEventListener('click', () => { void this.send(this.primary.dataset.verb === 'Resume' ? 'previous' : 'continue', this.primary) })
     this.fresh.addEventListener('click', () => { void this.send('fresh', this.fresh) })
     this.field.addEventListener('input', () => {
       // Emptied, the field drops the break a browser leaves behind, so its placeholder returns.
@@ -92,7 +98,10 @@ export class WorkerActions {
     this.field.addEventListener('keydown', event => {
       if (event.key === 'Escape') { this.field.blur(); return }
       event.stopPropagation()
-      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); this.primary.click() }
+      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+        event.preventDefault()
+        if (this.said || this.emptyEnter) this.primary.click()
+      }
     })
     // An image on the clipboard is held; text alongside it still pastes as text.
     this.field.addEventListener('paste', event => {
@@ -194,6 +203,9 @@ export class WorkerActions {
     }))
   }
 
+  /** Something typed or an image held, to go with the send. */
+  private get said(): boolean { return this.message.trim() !== '' || this.held.length > 0 }
+
   /** The worker is running, or has a session to go back to. */
   private get resumes(): boolean { return hasLiveWorker(this.card) || !!this.card.sessionUuid }
 
@@ -210,14 +222,14 @@ export class WorkerActions {
     this.field.hidden = !runnable
     this.primary.hidden = !runnable
     const live = hasLiveWorker(card)
-    const said = this.message.trim() !== '' || this.held.length > 0
-    const verb = !this.resumes ? 'Start' : live ? 'Send' : 'Resume'
+    const said = this.said
+    const verb = said || live ? 'Send' : this.resumes ? 'Resume' : 'Start'
     if (this.primary.dataset.verb !== verb) {
       this.primary.dataset.verb = verb
       this.primary.querySelector('svg')!.outerHTML = headerIcon(verb === 'Start' ? 'start' : verb === 'Send' ? 'send' : 'resume')
       word(this.primary).textContent = verb
     }
-    const title = live ? `Type this into ${card.name}'s conversation` : `${verb} ${card.name}${said ? ' with this message' : ''}`
+    const title = live ? `Type this into ${card.name}'s conversation` : said ? `Send this to ${card.name}, resuming its session or starting one` : `${verb} ${card.name}`
     this.primary.title = `${title} (Enter)${verb === 'Resume' && this.note ? ` · ${this.note}` : ''}`
     this.primary.setAttribute('aria-label', `${verb} ${card.name}`)
     this.primary.disabled = this.busy || (live && !said)
@@ -225,8 +237,8 @@ export class WorkerActions {
     this.fresh.disabled = this.busy
     this.fresh.title = `A new session for ${card.name}${said ? ', opening with this message' : ''}${live ? '; cuts the running one' : ''}`
     this.fresh.setAttribute('aria-label', `New session for ${card.name}`)
-    this.field.title = live ? `Message ${card.name}` : `${verb} ${card.name} with a message`
-    this.field.setAttribute('aria-label', live ? `Message to ${card.name}` : `Opening message for ${card.name}`)
+    this.field.title = `Message ${card.name}`
+    this.field.setAttribute('aria-label', `Message to ${card.name}`)
     this.paintShelf()
   }
 
@@ -239,11 +251,13 @@ export class WorkerActions {
     // The receipt says what is under way while the daemon answers.
     if (this.receiptTimer !== null) { window.clearTimeout(this.receiptTimer); this.receiptTimer = null }
     this.receipt.textContent = ''
-    const start = (images: PastedImage[]): Promise<boolean> => this.start(this.card, mode, message, this.receipt, images)
+    const card = this.card
+    const start = (images: PastedImage[]): Promise<boolean> => this.start(card, mode, message, this.receipt, images)
     const sending = held.length ? encode(held).then(start, () => { this.say('Could not read an image'); return false }) : start([])
     const ok = await sending.finally(() => { this.busy = false })
     if (ok) {
-      this.field.replaceChildren()
+      // A box turned to another worker meanwhile holds that worker's words, which stay.
+      if (sameCard(this.card, card)) this.field.replaceChildren()
       this.drop(held)
       this.say(message || held.length ? 'Sent' : mode === 'previous' ? 'Resumed' : 'Started')
     }
@@ -262,6 +276,8 @@ function button(cls: string, icon: HeaderIcon, label = ''): HTMLButtonElement {
   control.append(text)
   return control
 }
+
+const sameCard = (a: KanbanCard, b: KanbanCard): boolean => (a.uid ?? a.id) === (b.uid ?? b.id) && a.originId === b.originId
 
 const word = (control: HTMLButtonElement): HTMLElement => control.querySelector<HTMLElement>('.ws-header-word')!
 

@@ -1085,12 +1085,16 @@ export class ChannelsView implements TemporalView {
     this.seatConsole('thread', channel.seat, card, state !== 'closed')
   }
 
-  /** A console delivered a line: it stands in the stream until the board carries it, and its draft is spent. */
+  /**
+   * A console delivered a line to `card`: it stands in the stream until the
+   * board carries it, and the draft kept for `card` is spent, whatever the
+   * console shows by the time the send lands.
+   */
   private echo(pane: Pane, card: KanbanCard, text: string, at: number): void {
     this.sent.push({ fiber: fiberOf(card), text, at })
-    const key = this.draftKey(pane)
-    if (key) this.drafts.delete(key)
-    if (this.current) this.renew(this.current)
+    const channel = this.channels.find(each => sameFiber(each.seat, card)) ?? this.channels.find(each => each.everyone.some(member => sameFiber(member, card)))
+    this.drafts.delete(pane === 'channel' ? `channel:${channel?.key}` : `thread:${fiberOf(card)}`)
+    if (channel) this.renew(channel.key)
     this.landing[pane] = true
     announce(`Sent to ${card.name}.`)
     this.drawChannel(); this.drawThread()
