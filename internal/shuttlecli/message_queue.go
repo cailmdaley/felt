@@ -28,17 +28,11 @@ type fiberReceipt struct {
 	Detail    string `json:"detail"`
 }
 
-// queueForFiber routes attachment-free fiber messages to the fiber's inbox
-// through its owner. A waking or idle-notification request queues only
-// without a live worker, where the owner starts a session for it when the
-// fiber allows; otherwise the caller resolves and messages that worker. A
-// quiet one queues whether or not a worker is live. force records the
-// explicit --wake. Session targets and attachments always take the session
-// path.
+// queueForFiber routes fiber messages to the fiber's inbox
+// through its owner. Consumption decides context, follow-up, wake or a gated
+// launch. An owner below contract 42 keeps live waking traffic on the session
+// path. force records --wake. Attachments are retained as owner-local references.
 func (a *app) queueForFiber(request messaging.Request, force bool, session ...string) (*fiberReceipt, error) {
-	if len(request.Attachments) > 0 {
-		return nil, nil
-	}
 	f, block := a.messageFiber(request.Address)
 	if f == nil {
 		return nil, nil
@@ -54,7 +48,13 @@ func (a *app) queueForFiber(request messaging.Request, force bool, session ...st
 			turn = "force"
 		}
 	}
-	modern := a.ownerInbox42(block.Host)
+	modern := len(session) > 0 || a.ownerInbox42(block.Host)
+	if len(request.Attachments) > 0 && !modern {
+		return nil, nil
+	}
+	if request.Text == "" && len(request.Attachments) > 0 {
+		request.Text = "Attached files."
+	}
 	preference := ""
 	if len(session) > 0 {
 		preference = session[0]
@@ -64,6 +64,7 @@ func (a *app) queueForFiber(request messaging.Request, force bool, session ...st
 		"origin":           block.Host,
 		"address":          request.Address,
 		"text":             request.Text,
+		"attachments":      request.Attachments,
 		"from":             request.From,
 		"reply_to":         request.ReplyTo,
 		"notify_address":   request.NotifyAddress,
@@ -172,9 +173,8 @@ func (a *app) messageFiber(target string) (*felt.Felt, *shuttle.Block) {
 	return f, block
 }
 
-// messageFresh starts a new session on the target fiber with the message as
-// its launch directive, replacing a live worker. The owning daemon names the
-// previous session to the new one.
+// messageFresh asks the target fiber's inbox for a gated fresh session, which
+// takes the text through its hook. Owners below 42 use the launch envelope.
 func (a *app) messageFresh(request messaging.Request) error {
 	f, block := a.messageFiber(request.Address)
 	if f == nil {

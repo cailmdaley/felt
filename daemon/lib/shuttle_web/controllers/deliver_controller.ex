@@ -41,6 +41,7 @@ defmodule ShuttleWeb.DeliverController do
         Messaging.sender(params),
         Map.take(params, [
           "address",
+          "attachments",
           "context_only",
           "message_id",
           "message_after_launch",
@@ -118,6 +119,7 @@ defmodule ShuttleWeb.DeliverController do
                   )
 
               context_reply(fiber_id, text, id,
+                attachments: context["attachments"],
                 wake: context["wake"] == true,
                 turn: turn,
                 session: if(fresh, do: "fresh", else: context["session"]),

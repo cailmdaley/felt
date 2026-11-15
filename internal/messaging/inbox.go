@@ -171,6 +171,20 @@ func inboxRoot(env *sysenv.Env, address string) (string, error) {
 func Enqueue(env *sysenv.Env, e InboxEntry) error {
 	r, w := e.Request, e.Wishes.withDefaults(e.Request)
 	session := strings.HasPrefix(e.Address, "shuttle://")
+	if !session && len(r.Attachments) > 0 {
+		if err := validateAttachments(r.Attachments); err != nil {
+			return err
+		}
+		files, err := materializeAttachments(env, r.MessageID, r.Attachments)
+		if err != nil {
+			return err
+		}
+		r.Text, err = renderAttachmentText(r.Text, files)
+		if err != nil {
+			return err
+		}
+		r.Attachments = nil
+	}
 	if r.MessageID == "" || len(r.Text) > 64<<10 || (!session && r.Text == "") {
 		return errCode("invalid_request", "an inbox entry requires a message id and text (at most 64 KiB)")
 	}

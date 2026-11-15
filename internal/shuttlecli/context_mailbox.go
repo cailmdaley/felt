@@ -13,7 +13,7 @@ func (a *app) contextMailboxCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "context-mailbox", Hidden: true, Short: "Owner-local durable fiber context"}
 	var wake bool
 	var turn, session string
-	var derived bool
+	var derived, attachmentsStdin bool
 	var from string
 	var threadSignal string
 	var retainedAt string
@@ -31,6 +31,11 @@ func (a *app) contextMailboxCmd() *cobra.Command {
 			Wake:       wake, ReplyTo: replyTo, NotifyAddress: notifyAddress,
 			NotifyWhenIdle: notifyWhenIdle, NotifyWake: notifyWake,
 		}
+		if attachmentsStdin {
+			if err := json.NewDecoder(a.env.Stdin).Decode(&request.Attachments); err != nil {
+				return err
+			}
+		}
 		if threadSignal != "" {
 			var signal messaging.ThreadSignal
 			if err := json.Unmarshal([]byte(threadSignal), &signal); err != nil {
@@ -40,6 +45,7 @@ func (a *app) contextMailboxCmd() *cobra.Command {
 		}
 		return messaging.Enqueue(a.env, messaging.InboxEntry{Address: args[0], Request: request, Wishes: messaging.Wishes{Turn: turn, Session: session}, Derived: derived})
 	}}
+	put.Flags().BoolVar(&attachmentsStdin, "attachments-stdin", false, "Read attachment publications as JSON from stdin")
 	put.Flags().StringVar(&session, "session", "", "any, fresh or previous")
 	put.Flags().StringVar(&turn, "turn", "", "none, idle, ask or force")
 	put.Flags().BoolVar(&derived, "derived", false, "The id names the event it reports; the first capture wins")

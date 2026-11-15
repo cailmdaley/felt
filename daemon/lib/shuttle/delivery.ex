@@ -239,7 +239,15 @@ defmodule Shuttle.Delivery do
 
         args = if opts[:session], do: args ++ ["--session", opts[:session]], else: args
 
-        with {:ok, _} <- Shuttle.CLI.run(args) do
+        {args, command_opts} =
+          if opts[:attachments] not in [nil, []] do
+            {args ++ ["--attachments-stdin"],
+             [input: Jason.encode!(opts[:attachments]), input_eof: true]}
+          else
+            {args, []}
+          end
+
+        with {:ok, _} <- Shuttle.CLI.run(args, command_opts) do
           if from != "shuttle" do
             Shuttle.LifecycleService.transition(
               :clear_ask,

@@ -179,11 +179,12 @@ Choose deliberately:
     worker; the new session is told where the previous conversation is;
   --wake forces a native wake immediately, whatever it costs.
 
-An attachment-free --context-only fiber send uses its durable inbox regardless
-of worker liveness, except that --notify-when-idle uses session routing while a
-worker is live. Its receipt says queued as fiber context (JSON status queued).
-A wake send messages the live worker. With no live worker it waits in the
-fiber's inbox, and the owner starts a session that takes it through its hook
+A fiber send always uses its durable inbox; attachments become retained file references. The receipt says
+woken, followed_up in a turn, held as context for cost, starting or queued.
+--notify-when-idle subscribes when the worker takes the entry, by hook or wake.
+--fresh is deduplicated under the same id and obeys the launch gate; its text
+reaches the replacement through its hook, not as the launch directive.
+With no live worker the owner starts a session that takes it through its hook
 (JSON status starting) when the fiber is armed (status active), not at rest,
 not a standing schedule whose run is due, the owner's boot quarantine is
 released and it has a free worker slot; otherwise the receipt is queued and its detail says
@@ -191,14 +192,14 @@ what it waits for.
 Neither starting nor queued is delivered.
 Retrying with the same --message-id queues identical content once; conflicting
 fiber-inbox content is rejected through /deliver with HTTP 422.
-Attachments cannot wait, so a message carrying them needs a live worker. A
-fiber with no shuttle: block is refused.
+An owner below contract 42 keeps attachment sends on the live-session path.
+A fiber with no shuttle: block is refused.
 
 Prints
 "sending <message-id> to <resolved address>" to stderr before delivery, then prints the
 receipt status and message id. If interrupted, retry with the printed id using
---message-id <id>. Exit 0 means accepted, submitted, queued, context_added, or
-starting;
+--message-id <id>. Exit 0 means accepted, submitted, queued, context_added, woken, followed_up,
+held or starting;
 exit 1 means rejected, unknown, or another command error.`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if messageOpts.requestJSON {
