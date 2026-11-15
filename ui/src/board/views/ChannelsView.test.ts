@@ -61,14 +61,14 @@ const board = (inFlight: ReturnType<typeof card>[]) => response({ now: { drafts:
 const sentDoc = (uid: string, path: string, minutes: number, fiber = card({ id: uid, uid, name: uid })) =>
   ({ card: fiber, receipt: { uid, key: `host:${path}`, owner: 'host', host: 'host', fullPath: path, basename: path.split('/').at(-1)!, timestamp: Date.now() - minutes * minute } })
 const library = [sentDoc('old', '/notes/old/lensing-notes.md', 600, card({ id: 'old', uid: 'old', name: 'Lensing notes' }))]
-async function mount(inFlight = [chair, tsz, mask, beam, van, notes], view = new ChannelsView(), sent: SentFile[] = [], prepare?: (host: HTMLElement) => void) {
+async function mount(inFlight = [chair, tsz, mask, beam, van, notes], view = new ChannelsView(), sent: SentFile[] = [], prepare?: (host: HTMLElement) => void, shuttleBase = '') {
   const openFromDesk = vi.fn(), openPage = vi.fn(), requestRefresh = vi.fn(), see = vi.fn()
   const workspace = {
     openFromDesk, openPage,
     library: { subscribe: () => () => {}, visit: () => {}, cancelOpen: vi.fn(), documents: () => library, receipts: () => [] },
   }
   const sends = { files: sent, subscribe: () => () => {}, refresh: async () => {} }
-  const ctx = { cards: [], response: board(inFlight), shuttleBase: '', workspace, sends, requestRefresh, openCard: vi.fn(), see } as unknown as ViewContext
+  const ctx = { cards: [], response: board(inFlight), shuttleBase, workspace, sends, requestRefresh, openCard: vi.fn(), see } as unknown as ViewContext
   const host = document.createElement('div'); document.body.append(host)
   prepare?.(host)
   views.push(view); view.mount(host, ctx)
@@ -568,4 +568,88 @@ it('keeps a channel read to the moment it was left', async () => {
   view.keydown(new KeyboardEvent('keydown', { key: 'j' }))
   expect(Number(stored.get('shuttle.channels.seen:channel:cmbx'))).toBe(opened + 30 * minute)
   clock.mockRestore()
+})
+
+it('takes no older record with the same words for the board\'s record of a reply', async () => {
+  // A worker told "ok" a week ago: a new "ok" from here still shows until its own record arrives.
+  BOARD.C.push(record({ id: 'old-ok', kind: 'human', fiber: 'C', by: { label: 'Sam' }, text: 'ok' }, 7 * 24 * 60))
+  try {
+    daemon()
+    const { host, reply } = await mount()
+    reply.value = 'ok'
+    host.querySelector<HTMLFormElement>('.kbn-ch-reply')!.requestSubmit()
+    await settle()
+    expect([...host.querySelectorAll('.kbn-ch .kbn-ch-msg[data-human] .kbn-ch-msg-text')].map(el => el.textContent?.trim())).toStrictEqual(['ok'])
+  } finally { BOARD.C.pop() }
+})
+
+it('names each icon by its tooltip', async () => {
+  daemon()
+  const { host } = await mount()
+  for (const icon of host.querySelectorAll<HTMLButtonElement>('.kbn-ch-icon')) {
+    const tip = icon.closest('ui-tooltip')!.querySelector('.kbn-ch-tip')!
+    expect(icon.getAttribute('aria-labelledby')?.split(' ')).toContain(tip.id)
+  }
+})
+
+it('reads the charters\' names again after a read that failed', async () => {
+  daemon()
+  const fetcher = vi.mocked(fetch), real = fetcher.getMockImplementation()!
+  let roles = 0
+  fetcher.mockImplementation(async (url, init) => {
+    if (!String(url).includes('/roles')) return real(url, init)
+    return ++roles === 1 ? new Response('{"error":"down"}', { status: 502 }) : new Response(JSON.stringify([{ slug: 'first-contact', name: 'Vizier' }]))
+  })
+  const errand = card({ id: 'errand', uid: 'E', name: 'Errand', shuttleRole: 'first-contact', ...working(1) })
+  const { view, ctx, host } = await mount([chair, tsz, mask, beam, van, errand], new ChannelsView(), [], undefined, 'http://retry.test')
+  expect(rail(host)).toContain('first-contact')
+  view.refresh(ctx); await settle(); await settle()
+  expect(roles).toBe(2)
+  expect(rail(host)).toContain('Vizier')
+})
+
+it('lets go of records past the board\'s reach', async () => {
+  daemon()
+  const { view, ctx, host } = await mount()
+  expect(message(host, 'κ × tSZ')).toBeDefined()
+  // Fifteen days on, the post is out of reach.
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 15 * day)
+  view.refresh(ctx); await settle(); await settle()
+  expect(stream(host).map(([name]) => name)).not.toContain('κ × tSZ')
+  clock.mockRestore()
+})
+
+it('keeps the rail on a phone\'s first screen when swiped leftward with no channel chosen', async () => {
+  daemon()
+  const media = window.matchMedia
+  vi.stubGlobal('matchMedia', (query: string) => ({ ...media(query), matches: query.includes('max-width') }))
+  const { host } = await mount()
+  const layout = host.querySelector('.kbn-ch-layout')!
+  expect(layout.hasAttribute('data-channel')).toBe(false)
+  const rail = host.querySelector('.kbn-ch-rail')!
+  rail.dispatchEvent(Object.assign(new Event('touchstart', { bubbles: true }), { touches: [{ clientX: 300, clientY: 300 }] }))
+  rail.dispatchEvent(Object.assign(new Event('touchend', { bubbles: true }), { changedTouches: [{ clientX: 150, clientY: 305 }] }))
+  expect(layout.hasAttribute('data-rail-hidden')).toBe(false)
+})
+
+it('opens on the channel and thread last open on this device, and on the first channel when that one is gone', async () => {
+  const { stored } = daemon()
+  const first = await mount()
+  first.view.keydown(new KeyboardEvent('keydown', { key: 'j' }))
+  first.view.keydown(new KeyboardEvent('keydown', { key: 'k' }))
+  message(first.host, 'κ × tSZ').click()
+  first.view.unmount(); views.length = 0
+  // A reload: a new view on the same device.
+  const again = await mount(undefined, new ChannelsView())
+  expect(shown(again.host)).toBe('cmbx')
+  expect(again.host.querySelector('.kbn-ch-thread-name')?.textContent).toBe('κ × tSZ')
+  again.view.keydown(new KeyboardEvent('keydown', { key: 'Escape' }))
+  again.view.keydown(new KeyboardEvent('keydown', { key: 'j' }))
+  again.view.unmount(); views.length = 0
+  const third = await mount(undefined, new ChannelsView())
+  expect([shown(third.host), (third.host.querySelector('.kbn-ch-thread') as HTMLElement).hidden]).toStrictEqual(['Moving house', true])
+  third.view.unmount(); views.length = 0
+  stored.set('shuttle.channels.last', JSON.stringify({ channel: 'channel:gone', thread: 'T' }))
+  const fourth = await mount(undefined, new ChannelsView())
+  expect(shown(fourth.host)).toBe('cmbx')
 })

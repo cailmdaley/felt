@@ -312,9 +312,13 @@ export function composeMessages(input: {
   reachMs: number
 }): Message[] {
   const { channel, records, files, cards = channel.everyone, tapestry, now, reachMs } = input
-  const find = (list: readonly KanbanCard[], ref: string | undefined): KanbanCard | undefined =>
-    ref ? list.find(card => card.uid === ref || card.id === ref) : undefined
-  const cardOf = (ref: string | undefined): KanbanCard | undefined => find(channel.everyone, ref)
+  const lookup = (list: readonly KanbanCard[]): Map<string, KanbanCard> => {
+    const named = new Map<string, KanbanCard>()
+    for (const card of list) for (const ref of [card.uid, card.id]) if (ref && !named.has(ref)) named.set(ref, card)
+    return named
+  }
+  const members = lookup(channel.everyone), everyone = lookup(cards)
+  const cardOf = (ref: string | undefined): KanbanCard | undefined => ref ? members.get(ref) : undefined
   const messages: Message[] = []
   const said = (card: KanbanCard, kind: MessageKind, text: string, at: number, over: Partial<Message> = {}): Message => {
     const message: Message = { id: `${kind}:${fiberOf(card)}:${at}`, card, human: false, kind, text, at, arrived: at, files: [], waiting: false, quiet: false, ...over }
@@ -357,7 +361,7 @@ export function composeMessages(input: {
         said(card, 'handed_off', '', record.timestamp, { ...base, quiet: true })
         break
       case 'message': {
-        const from = find(cards, by.fiber)
+        const from = by.fiber ? members.get(by.fiber) ?? everyone.get(by.fiber) : undefined
         const label = from ? undefined : by.label ?? (by.fiber ? record.actor : undefined) ?? (sessionHost(by.session) ? `a session on ${sessionHost(by.session)}` : 'another session')
         said(card, 'chat', text, record.timestamp, { ...base, quiet: true, from, label })
         break

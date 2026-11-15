@@ -28,6 +28,8 @@ import './ChannelsView.css'
 
 const SEEN = 'shuttle.channels.seen:'
 const RAIL = 'shuttle.channels.rail-hidden'
+/** The channel, and the thread in it, the reader was last in on this device. */
+const LAST = 'shuttle.channels.last'
 /** A pin is renewed by use at most this often; it lapses with the board's reach. */
 const RENEW_MS = 86_400_000
 /** The rail's order and its hides are written again once this old, well inside the board's reach. */
@@ -131,15 +133,16 @@ export function collapse(html: string, dir = '/'): { title: string; lede: string
 /**
  * Channels, as Slack: a rail of the channels read lately, waiting on the human
  * or pinned, what waits floated to the top and the rest in the human's order,
- * each movable and with a menu to hide, pin or move it (Jump to finds the rest,
- * hidden ones too, and the fleet's documents); a channel's
+ * each movable and with a menu to hide, pin, set aside or move it (Jump to
+ * finds the rest, hidden ones too, and the fleet's documents); a channel's
  * stream, oldest first, kept short — every message of its chair, its tapestry
- * among them, and each other worker once, its wait or its latest message
- * whole with its files and a link to its thread; and beside it that thread,
- * the worker's whole history under its name, liveness, open ask or, once
- * closed, its conclusion. A reply in the channel goes to its chair, a reply in
- * a thread to that worker. On a phone the rail is the first screen, and a
- * channel and a thread each fill it.
+ * among them, and each other worker once, its latest message whole with its
+ * files and a link to its thread, marked while it waits on the human; and
+ * beside it that thread, the worker's whole history under its name, liveness,
+ * open ask or, once closed, its conclusion. A reply in the channel goes to its
+ * chair, a reply in a thread to that worker. On a phone the rail is the first
+ * screen, and a channel and a thread each fill it. Coming back, it opens on the
+ * channel and thread the reader was last in on this device.
  */
 export class ChannelsView implements TemporalView {
   readonly id = 'channels' as const
@@ -403,7 +406,9 @@ export class ChannelsView implements TemporalView {
     const now = Date.now()
     const said = (record: BoardRecord): string | undefined =>
       record.kind === 'human' ? record.text : record.kind === 'answered' ? /\s—\sA:\s([\s\S]*)$/.exec(record.text ?? '')?.[1] : undefined
-    const recorded = (sent: Sent): boolean => [...records.values()].some(record => record.fiber === sent.fiber && said(record)?.trim() === sent.text)
+    // The daemon records a line before it sends it, so its record is no older than the send began, give or take a clock's skew.
+    const recorded = (sent: Sent): boolean => [...records.values()].some(record =>
+      record.fiber === sent.fiber && (record.received_at ?? record.timestamp) >= sent.at - OVERLAP_MS && said(record)?.trim() === sent.text)
     const standing = this.sent.filter(sent => now - sent.at < ECHO_MS && !recorded(sent))
     if (standing.length !== this.sent.length) this.sent = standing
     const replies = standing.map<BoardRecord>(sent => ({ id: `${BOARD_LINE}sent:${sent.fiber}:${sent.at}`, kind: 'human', timestamp: sent.at, fiber: sent.fiber, by: { label: 'human' }, text: sent.text }))
@@ -473,7 +478,7 @@ export class ChannelsView implements TemporalView {
       cards: boardCards(ctx.response), parentOf: card => index.parentOf(card), names: this.names,
       dismissed: [...this.dismissed, ...this.pending], pinned: this.pinned, opened: lastSeen, now: Date.now(),
     })
-    if (!this.channels.some(channel => channel.key === this.current)) this.open(isMobileViewport() ? null : this.listed[0]?.key ?? null, false)
+    if (!this.channels.some(channel => channel.key === this.current)) this.resume()
     this.drawRail()
     this.drawChannel()
     this.drawThread()
@@ -506,7 +511,7 @@ export class ChannelsView implements TemporalView {
       this.current = key
       this.thread = null
       this.restoreDrafts()
-      if (key) this.visit(key)
+      if (key) { this.visit(key); this.remember() }
       this.landing.channel = true
       const channel = this.channel
       if (channel) this.readFamilies([channel])
@@ -523,9 +528,27 @@ export class ChannelsView implements TemporalView {
     this.channelEl?.focus({ preventScroll: true })
   }
   /** Opens a worker's thread beside the channel; null closes it. */
+  /**
+   * With no channel to show, the one the reader was last in on this device,
+   * and its thread if one was open; else the first listed (on a phone, the rail).
+   */
+  private resume(): void {
+    let last: { channel?: string; thread?: string } = {}
+    try { last = JSON.parse(stored(LAST) ?? '{}') ?? {} } catch { /* Nothing remembered. */ }
+    const channel = this.current === null ? this.channels.find(each => each.key === last.channel) : undefined
+    if (!channel) { this.open(isMobileViewport() ? null : this.listed[0]?.key ?? null, false); return }
+    this.open(channel.key, false)
+    this.thread = channel.everyone.find(card => fiberOf(card) === last.thread) ?? null
+    this.restoreDrafts()
+    if (isMobileViewport()) this.setRail(true)
+  }
+  private remember(): void {
+    store(LAST, JSON.stringify({ channel: this.current, thread: this.thread && fiberOf(this.thread) }))
+  }
   private openThread(card: KanbanCard | null): void {
     this.keepDrafts()
     this.thread = card
+    this.remember()
     this.restoreDrafts()
     this.landing.thread = true
     this.drawChannel(); this.drawThread()
@@ -930,16 +953,13 @@ export class ChannelsView implements TemporalView {
 
   /** Sends to a worker; the reply stands in the stream until the board carries it. */
   private async send(card: KanbanCard | undefined, text: string, pane: Pane): Promise<boolean> {
-    const ctx = this.ctx, channel = this.current
+    const ctx = this.ctx, channel = this.current, at = Date.now()
     if (!card || !ctx) return false
     try {
       const answer = await postDaemonJson<{ delivered?: boolean | null; error?: string; duplicate?: boolean; disposition?: string }>(ctx.shuttleBase, '/api/v1/deliver',
         { fiber_id: card.id, origin: card.originId, text, from: 'human', message_id: this.messageIds.for([card.originId, card.id, text].join('\0')) }, 'Reply failed')
       if (answer?.delivered === false) throw new Error(answer.error ?? `${card.name} did not receive it`)
-      this.messageIds.sent()
-      const notice = repeatNotice(answer)
-      if (notice) { this.status(notice); return false }
-      this.sent.push({ fiber: fiberOf(card), text, at: Date.now() })
+      this.sent.push({ fiber: fiberOf(card), text, at })
       this.drafts.delete(pane === 'channel' ? `channel:${channel}` : `thread:${fiberOf(card)}`)
       if (channel) this.renew(channel)
       this.landing[pane] = true

@@ -79,7 +79,7 @@ try {
     await pick(page, 'cmbx').click()
     await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'cmbx' && document.querySelector('.kbn-ch-tapestry'))
     if (phone) assert.equal(await page.locator('.kbn-ch-rail').isVisible(), false)
-    // Each worker once, its wait or its latest; the chair in full, its tapestry among its messages; the silent beam window absent.
+    // Each worker once, its latest, marked while it waits; the chair in full, its tapestry among its messages; the silent beam window absent.
     await page.waitForFunction(() => document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-msg').length === 7)
     assert.deepEqual(await page.evaluate(lines), [
       ['cmbx chair', 'post'], ['Joint covariance', 'review'], ['κ × tSZ cross-spectrum', 'post'], ['Cluster foreground mask', 'ask'],
