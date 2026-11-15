@@ -71,6 +71,10 @@ defmodule ShuttleWeb.OutboxControllerTest do
     assert api_conn() |> post("/api/v1/outbox/dismiss", %{}) |> json_response(400) == %{
              "error" => "key is required"
            }
+
+    assert api_conn() |> post("/api/v1/outbox/pin", %{key: ""}) |> json_response(400) == %{
+             "error" => "key is required"
+           }
   end
 
   @tag :tmp_dir

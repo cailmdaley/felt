@@ -58,7 +58,7 @@ func TestBoardRecordFixture(t *testing.T) {
 
 func TestBoardReadsDaemon(t *testing.T) {
 	env, _, _ := sendFileTestEnv(t)
-	const raw = `{"family":{"root_uid":"root","root_id":"work","name":"Work","label":"work"},"viewer":"member","records":[{"id":"brd-test","type":"board","timestamp":1793300000000,"kind":"post","fiber":"member","member":"work/member","actor":"member","delivered":false,"text":"hello","future_field":42},{"kind":"dismissed","text":"hidden-key"}],"future":true}`
+	const raw = `{"family":{"root_uid":"root","root_id":"work","name":"Work","label":"work"},"viewer":"member","records":[{"id":"brd-test","type":"board","timestamp":1793300000000,"kind":"post","fiber":"member","member":"work/member","actor":"member","delivered":false,"text":"hello","future_field":42},{"kind":"dismissed","text":"hidden-key"},{"kind":"pinned","text":"pinned-key"}],"future":true}`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/board/family" || r.URL.Query().Get("fiber") != "worker" {
 			t.Errorf("unexpected request %s", r.URL)
@@ -68,7 +68,7 @@ func TestBoardReadsDaemon(t *testing.T) {
 	defer server.Close()
 	env.Set("SHUTTLE_DAEMON_URL", server.URL)
 	out, _, err := executeIn(t, env, "", "board", "worker")
-	if err != nil || !strings.Contains(out, "work/member posted: hello") || strings.Contains(out, "hidden-key") {
+	if err != nil || !strings.Contains(out, "work/member posted: hello") || strings.Contains(out, "hidden-key") || strings.Contains(out, "pinned-key") {
 		t.Fatalf("board output %q: %v", out, err)
 	}
 	out, _, err = executeIn(t, env, "", "board", "worker", "--json")
