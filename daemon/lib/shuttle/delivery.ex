@@ -249,9 +249,25 @@ defmodule Shuttle.Delivery do
           end
 
           case flush_context(entry) do
-            {:error, :no_worker} when turn != nil -> {:ok, start_for_inbox(entry)}
-            {:ok, answer} -> {:ok, {:consumed, answer}}
-            _ -> {:ok, :queued}
+            {:error, :no_worker} when turn != nil ->
+              {:ok, start_for_inbox(entry)}
+
+            {:ok, answer} ->
+              if answer["action"] == "wait" and answer["turn"] do
+                server = Shuttle.Env.server(Poller)
+                caller = self()
+
+                Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
+                  Process.put(:"$callers", [caller])
+                  Process.sleep(30_000)
+                  flush_context(entry, server)
+                end)
+              end
+
+              {:ok, {:consumed, answer}}
+
+            _ ->
+              {:ok, :queued}
           end
         end
     end
@@ -462,9 +478,7 @@ defmodule Shuttle.Delivery do
   decoded consume result. The worker's turn state and wake cost are read only
   when the inbox answers that a due entry asks for a turn.
   """
-  def flush_context(entry) do
-    server = Shuttle.Env.server(Poller)
-
+  def flush_context(entry, server \\ Shuttle.Env.server(Poller)) do
     if is_pid(GenServer.whereis(server)) do
       fiber_id = Shuttle.Threads.address(entry.fiber)
 

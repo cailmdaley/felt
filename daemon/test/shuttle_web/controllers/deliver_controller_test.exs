@@ -72,9 +72,64 @@ defmodule ShuttleWeb.DeliverControllerTest do
     MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
   end
 
+  test "an agent fresh id replaces a live worker once and keeps its text in the inbox" do
+    fiber = "tests/agent-fresh-once"
+    uuid = message_live_worker(fiber)
+
+    {:ok, _} =
+      Shuttle.CLI.run(["hook", "event"],
+        runner: Shuttle.Runner.Default,
+        input_eof: true,
+        input:
+          Jason.encode!(%{
+            "harness" => "claude",
+            "hook_event_name" => "SessionStart",
+            "session_id" => uuid,
+            "cwd" => MockRunner.felt_root()
+          })
+      )
+
+    request = %{
+      "fiber_id" => fiber,
+      "text" => "fresh publication",
+      "message_id" => "fresh-once",
+      "resume_mode" => "fresh"
+    }
+
+    first = api_conn() |> post("/api/v1/deliver", Jason.encode!(request)) |> json_response(202)
+    assert first["status"] == "starting"
+    refute Poller.live_worker(fiber).session_uuid == uuid
+    launches_before = launches()
+    api_conn() |> post("/api/v1/deliver", Jason.encode!(request)) |> json_response(202)
+    assert launches() == launches_before
+    refute run_script() =~ "fresh publication"
+  end
+
+  test "a plain agent delivery is an inbox entry, not a launch directive" do
+    fiber = "tests/plain-agent"
+    put_constitution(fiber)
+
+    body =
+      api_conn()
+      |> post(
+        "/api/v1/deliver",
+        Jason.encode!(%{
+          "fiber_id" => fiber,
+          "text" => "agent publication",
+          "message_id" => "plain-agent"
+        })
+      )
+      |> json_response(202)
+
+    assert %{"delivery" => "context", "queued" => true, "status" => "starting"} = body
+    refute run_script() =~ "agent publication"
+    assert [_] = mailbox_puts()
+  end
+
   test "a human line is recorded and launches through quarantine once per id" do
     fiber = "tests/human-once"
     put_constitution(fiber)
+    :sys.replace_state(Shuttle.Env.server(Poller), &%{&1 | boot_quarantine: true})
 
     request = %{
       "fiber_id" => fiber,
@@ -134,11 +189,15 @@ defmodule ShuttleWeb.DeliverControllerTest do
       api_conn()
       |> post(
         "/api/v1/deliver",
-        Jason.encode!(%{"fiber_id" => "tests/deliver-fresh", "text" => "Meeting mode (call)."})
+        Jason.encode!(%{
+          "fiber_id" => "tests/deliver-fresh",
+          "text" => "Meeting mode (call).",
+          "from" => "human"
+        })
       )
       |> json_response(200)
 
-    assert %{"delivered" => true, "delivery" => "dispatch", "dispatched" => true} = body
+    assert %{"delivered" => true, "delivery" => "input"} = body
     script = run_script()
     assert script =~ "From User"
     assert script =~ "Meeting mode (call)."
@@ -250,7 +309,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
 
     write_transcript(session, 30)
     put_constitution(live)
-    assert %{"delivery" => "dispatch"} = deliver(live, "prepare receiver")
+    assert %{"delivery" => "input"} = deliver(live, "prepare receiver")
     assert is_map(Poller.live_worker(live))
     Env.put_app_env(:felt_runner, MessageRunner)
     Env.put_app_env(:deliver_test_pid, self())
@@ -377,7 +436,10 @@ defmodule ShuttleWeb.DeliverControllerTest do
 
   defp deliver(fiber_id, text) do
     api_conn()
-    |> post("/api/v1/deliver", Jason.encode!(%{"fiber_id" => fiber_id, "text" => text}))
+    |> post(
+      "/api/v1/deliver",
+      Jason.encode!(%{"fiber_id" => fiber_id, "text" => text, "from" => "human"})
+    )
     |> json_response(200)
   end
 
@@ -386,7 +448,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
     put_previous_run("tests/deliver-resume", session)
     write_transcript(session, 30)
 
-    assert %{"delivered" => true, "delivery" => "resume"} =
+    assert %{"delivered" => true, "delivery" => "input"} =
              deliver("tests/deliver-resume", "join the meeting")
 
     script = run_script()
@@ -403,7 +465,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
 
     write_transcript(session, 2 * 3600)
 
-    assert %{"delivered" => true, "delivery" => "resume"} =
+    assert %{"delivered" => true, "delivery" => "input"} =
              deliver("tests/deliver-cold", "join the meeting")
 
     script = run_script()
@@ -420,7 +482,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
 
     write_transcript(session, 30)
 
-    assert %{"delivered" => true, "delivery" => "dispatch"} =
+    assert %{"delivered" => true, "delivery" => "input"} =
              deliver("tests/deliver-handed-off", "join the meeting")
 
     script = run_script()
@@ -446,7 +508,8 @@ defmodule ShuttleWeb.DeliverControllerTest do
         Jason.encode!(%{
           "fiber_id" => fiber_id,
           "text" => "Meeting mode (call).",
-          "from" => "shuttle meeting"
+          "from" => "shuttle meeting",
+          "message_after_launch" => true
         })
       )
       |> json_response(200)
@@ -470,14 +533,15 @@ defmodule ShuttleWeb.DeliverControllerTest do
     fiber_id = "tests/deliver-fresh-live"
     session_uuid = message_live_worker(fiber_id)
 
-    assert %{"delivered" => true, "delivery" => "dispatch"} =
+    assert %{"delivered" => true, "delivery" => "input"} =
              api_conn()
              |> post(
                "/api/v1/deliver",
                Jason.encode!(%{
                  "fiber_id" => fiber_id,
                  "text" => "join the meeting",
-                 "resume_mode" => "fresh"
+                 "resume_mode" => "fresh",
+                 "from" => "human"
                })
              )
              |> json_response(200)
@@ -500,6 +564,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
                Jason.encode!(%{
                  "fiber_id" => fiber_id,
                  "text" => "join the meeting",
+                 "message_after_launch" => true,
                  "resume_mode" => "previous"
                })
              )
@@ -530,7 +595,11 @@ defmodule ShuttleWeb.DeliverControllerTest do
       api_conn()
       |> post(
         "/api/v1/deliver",
-        Jason.encode!(%{"fiber_id" => "tests/deliver-unconfirmed", "text" => "Meeting mode."})
+        Jason.encode!(%{
+          "fiber_id" => "tests/deliver-unconfirmed",
+          "text" => "Meeting mode.",
+          "message_after_launch" => true
+        })
       )
       |> json_response(202)
 
@@ -551,7 +620,11 @@ defmodule ShuttleWeb.DeliverControllerTest do
       api_conn()
       |> post(
         "/api/v1/deliver",
-        Jason.encode!(%{"fiber_id" => "tests/deliver-refused", "text" => "Meeting mode."})
+        Jason.encode!(%{
+          "fiber_id" => "tests/deliver-refused",
+          "text" => "Meeting mode.",
+          "message_after_launch" => true
+        })
       )
       |> json_response(502)
 

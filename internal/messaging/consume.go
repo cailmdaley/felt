@@ -34,12 +34,13 @@ type Worker struct {
 // entry asks for a turn, so the daemon's idle and cost facts would decide it.
 // A consumption that failed before it could decide has no Action.
 type Consumption struct {
-	Action   string   `json:"action"`
-	Members  []string `json:"members,omitempty"`
-	Turn     bool     `json:"turn,omitempty"`
-	Session  string   `json:"session,omitempty"`
-	Held     string   `json:"held,omitempty"`
-	Followup bool     `json:"followup,omitempty"`
+	Action      string   `json:"action"`
+	Members     []string `json:"members,omitempty"`
+	Turn        bool     `json:"turn,omitempty"`
+	Session     string   `json:"session,omitempty"`
+	Held        string   `json:"held,omitempty"`
+	Followup    bool     `json:"followup,omitempty"`
+	Unconfirmed bool     `json:"unconfirmed,omitempty"`
 	// Launching marks a wait for a fiber with no worker while a launch
 	// reserved earlier is in its lease.
 	Launching bool `json:"launching,omitempty"`
@@ -147,6 +148,7 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 		}
 		sent, err := deliverConsumedBatch(ctx, env, root, host, w, &batches[i], send)
 		if sent {
+			result.Unconfirmed = result.Unconfirmed || err != nil
 			result.Action, result.Members = "context", append(result.Members, batches[i].Members...)
 			if batches[i].Payload.Wake {
 				result.Action = "wake"
@@ -223,7 +225,7 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 				if it.entry.Wishes.Turn != "ask" || reservation.holds(it.entry.Request.MessageID, now) {
 					continue
 				}
-				if a.Harness != "claude" || now.Sub(time.Unix(0, it.entry.QueuedAt)) >= 30*time.Second {
+				if a.Harness != "claude" || now.Sub(it.entry.availableAt()) >= 30*time.Second {
 					return "wake", false
 				}
 			}
@@ -303,6 +305,7 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	}
 	sent, err := deliverConsumedBatch(ctx, env, root, host, w, &attempt, send)
 	if sent {
+		result.Unconfirmed = err != nil
 		result.Action, result.Members = action, append(result.Members, attempt.Members...)
 		result.Followup = w.Busy && action == "wake"
 	}

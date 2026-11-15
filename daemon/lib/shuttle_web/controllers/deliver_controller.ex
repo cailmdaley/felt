@@ -87,12 +87,40 @@ defmodule ShuttleWeb.DeliverController do
             remote |> OriginRouter.forward("/api/v1/deliver", payload) |> relay()
 
           :local ->
-            if context["context_only"] == true do
-              context_reply(fiber_id, text, context["message_id"],
+            agent_inbox =
+              from != "human" and context["live_input"] != true and
+                context["message_after_launch"] != true
+
+            if context["context_only"] == true or agent_inbox do
+              fresh = context["session"] == "fresh" or context["resume_mode"] == "fresh"
+
+              turn =
+                cond do
+                  fresh ->
+                    "force"
+
+                  context["turn"] in ["ask", "force"] ->
+                    context["turn"]
+
+                  context["wake"] == true or (agent_inbox and context["context_only"] != true) ->
+                    "ask"
+
+                  true ->
+                    nil
+                end
+
+              id =
+                context["message_id"] ||
+                  if(context["context_only"] != true,
+                    do:
+                      "deliver-" <>
+                        Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false)
+                  )
+
+              context_reply(fiber_id, text, id,
                 wake: context["wake"] == true,
-                turn: if(context["turn"] in ["ask", "force"], do: context["turn"]),
-                session:
-                  if(context["session"] in ["any", "fresh", "previous"], do: context["session"]),
+                turn: turn,
+                session: if(fresh, do: "fresh", else: context["session"]),
                 retained_at: context["retained_at"],
                 thread_signal: context["thread_signal"],
                 unless_live: context["unless_live"] == true,
@@ -147,6 +175,7 @@ defmodule ShuttleWeb.DeliverController do
           {:consumed, answer} ->
             status =
               cond do
+                answer["unconfirmed"] -> "queued"
                 answer["action"] == "fresh" -> "starting"
                 answer["followup"] -> "followed_up"
                 answer["action"] == "wake" -> "woken"
@@ -154,7 +183,14 @@ defmodule ShuttleWeb.DeliverController do
                 true -> "queued"
               end
 
-            Map.merge(body, %{status: status, consumed: answer})
+            delivered =
+              cond do
+                answer["unconfirmed"] -> nil
+                answer["action"] in ["wake", "context"] -> true
+                true -> false
+              end
+
+            Map.merge(body, %{status: status, consumed: answer, delivered: delivered})
 
           :queued ->
             Map.put(body, :status, "queued")

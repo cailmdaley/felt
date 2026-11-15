@@ -88,6 +88,7 @@ const env = {
   FELT_BIN: path.join(repo, "felt"),
   SHUTTLE_BIN: path.join(repo, "shuttle"),
   SHUTTLE_DATA_DIR: path.join(root, "data"),
+  SHUTTLE_STORES: root,
   TMPDIR: "/tmp",
   SHUTTLE_HOST: "test-host",
   SHUTTLE_HANDOFF_TOKENS: "750000",
@@ -106,6 +107,12 @@ async function until(predicate, label) {
 const quote = (value) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
 const tmux = path.join(root, "tmux.sock");
 const sid = "receipt-smoke";
+// All daemon tmux observations and writes stay on the fixture's server.
+const tools = path.join(root, "bin");
+fs.mkdirSync(tools);
+const realTmux = execFileSync("which", ["tmux"]).toString().trim();
+fs.writeFileSync(path.join(tools, "tmux"), `#!/bin/sh\nexec ${quote(realTmux)} -S ${quote(tmux)} "$@"\n`, { mode: 0o755 });
+env.PATH = tools + path.delimiter + env.PATH;
 // This extension exercises Pi's real input-handled path, not a fake socket.
 const dropExtension = path.join(root, "drop.ts");
 fs.writeFileSync(
@@ -145,6 +152,8 @@ await new Promise((resolve) =>
 );
 const daemonPort = daemonPortServer.address().port;
 await new Promise((resolve) => daemonPortServer.close(resolve));
+fs.mkdirSync(path.join(root, ".felt", "receipt-test"), { recursive: true });
+fs.writeFileSync(path.join(root, ".felt", "receipt-test", "receipt-test.md"), `---\nname: Receipt test\nstatus: active\nid: 01ARZ3NDEKTSV4RRFFQ69G5FAV\nshuttle:\n  host: test-host\n  kind: oneshot\n  agent: pi\n  project_dir: ${root}\n---\nPrivate receipt fixture.\n`);
 const daemonScript = path.join(root, "daemon.exs");
 fs.writeFileSync(
   daemonScript,
@@ -152,6 +161,17 @@ fs.writeFileSync(
 System.put_env("SHUTTLE_PORT", "${daemonPort}")
 System.put_env("SHUTTLE_HOST_CONFIG_FILE", "${root}/host.json")
 Application.put_env(:shuttle, ShuttleWeb.Endpoint, http: [ip: {127,0,0,1}, port: ${daemonPort}], server: true, secret_key_base: String.duplicate("x",64))
+defmodule ReceiptRunner do
+  def cmd("shuttle", ["inbox", "consume" | _] = args, opts) do
+    if File.exists?("${root}/pause-consume") do
+      File.write!("${root}/enqueue-barrier", "durable")
+      Process.sleep(:infinity)
+    end
+    Shuttle.Runner.Default.cmd("shuttle", args, opts)
+  end
+  def cmd(command, args, opts), do: Shuttle.Runner.Default.cmd(command, args, opts)
+end
+Application.put_env(:shuttle, :felt_runner, ReceiptRunner)
 {:ok, _} = Application.ensure_all_started(:shuttle)
 {:ok, poller} = Shuttle.Poller.start_link(felt_stores: [], poll_interval_ms: 600_000, change_interval_ms: :infinity, boot_quarantine: true)
 :sys.get_state(poller)
@@ -159,8 +179,10 @@ Process.sleep(2000)
 # Bind the private test fiber to the real terminal conversation. No dispatcher
 # launch, live store, watcher, or operator runtime state is involved.
 :sys.replace_state(poller, fn state ->
-  worker = %{session: "receipt", session_uuid: "${sid}", context_harness: "pi"}
-  :ets.insert(state.published_table, {:worker_views, %{"receipt-test" => %{worker: worker, fiber: %{}}}})
+  address = "shuttle://test-host/pi/${sid}"
+  {epoch, 0} = System.cmd("${repo}/shuttle", ["context-mailbox", "receiver", "${root}:01ARZ3NDEKTSV4RRFFQ69G5FAV", "receipt", address])
+  worker = %{session: "receipt", session_uuid: "${sid}", cli: "pi", context_harness: "pi"}
+  :ets.insert(state.published_table, {:worker_views, %{"receipt-test" => %{worker: worker, fiber: %{}, receiver: {:ok, address, String.to_integer(String.trim(epoch))}}}})
   state
 end)
 File.write!("${root}/daemon-ready", "ready")
@@ -223,7 +245,7 @@ try {
     MIX_HOME: process.env.MIX_HOME || path.join(os.homedir(), ".mix"),
     HEX_HOME: process.env.HEX_HOME || path.join(os.homedir(), ".hex"),
     MIX_ENV: "test",
-    SHUTTLE_STORES: "",
+    SHUTTLE_STORES: root,
     SHUTTLE_PROJECTS: "",
     SHUTTLE_PORT: String(daemonPort),
   };
@@ -252,7 +274,7 @@ try {
     "Pi registration",
   );
   await wait(1000);
-  assert.equal((await deliver("idle", "Idle receipt probe")).delivered, true);
+  assert.equal((await deliver("idle", "Idle receipt probe")).consumed.action, "wake");
   const concurrent = await Promise.all([
     deliver("concurrent-a", "Concurrent body a"),
     deliver("concurrent-b", "Concurrent body b"),
@@ -260,14 +282,13 @@ try {
   assert.ok(
     concurrent.every(
       (body) =>
-        body.delivered === true &&
-        ["accepted", "queued"].includes(body.receipt.status),
+        body.queued === true && body.delivery === "context",
     ),
   );
   for (const id of ["a", "b"]) {
     assert.equal(
-      (await deliver(`concurrent-${id}`, `Concurrent body ${id}`)).receipt.status,
-      "accepted",
+      (await deliver(`concurrent-${id}`, `Concurrent body ${id}`)).queued,
+      true,
     );
   }
   const started = new Promise((resolve) => (turnStarted = resolve));
@@ -275,8 +296,9 @@ try {
   const active = deliver("active", "Start a held model turn");
   await started;
   const steering = await deliver("mid-turn", "Message during the held turn");
-  assert.equal(steering.receipt.status, "queued");
-  assert.equal(steering.delivered, true);
+  assert.equal(steering.consumed.action, "wake");
+  assert.equal(steering.delivered, null);
+  assert.equal(steering.consumed.unconfirmed, true);
   assert.equal(
     entries().some(
       (e) =>
@@ -288,14 +310,13 @@ try {
   releaseTurn();
   assert.equal((await active).delivered, true);
   const admitted = await deliver("mid-turn", "Message during the held turn");
-  assert.equal(admitted.receipt.status, "accepted");
-  assert.equal(admitted.delivered, true);
+  assert.equal(admitted.queued, true);
   const dropped = await deliver(
     "dropped",
     "DROP_RECEIPT: Pi input handler consumes this without a user turn",
   );
   assert.equal(dropped.delivered, null);
-  assert.equal(dropped.receipt.status, "unknown");
+  assert.equal(dropped.consumed.unconfirmed, true);
   for (const body of [
     "Idle receipt probe",
     "Concurrent body a",
@@ -307,7 +328,7 @@ try {
       entries().filter(
         (e) =>
           e.message?.role === "user" &&
-          text(e).endsWith(`]\n${body}`),
+          text(e).includes(body),
       ).length,
       1,
       `one admitted row for ${body}`,
@@ -332,8 +353,27 @@ try {
   ).toString();
   fs.writeFileSync(path.join(root, "cli-receipt.json"), cli);
   assert.equal(JSON.parse(cli).status, "accepted");
+  // Kill the real daemon after the real CLI enqueues, before any consumer emission.
+  const fiberArgs = ["-C", root, "message", "receipt-test", "Survives daemon death", "--message-id", "crash-cli", "--from", "shuttle", "--json"];
+  const fiberEnv = { ...env, SHUTTLE_DAEMON_URL: base };
+  fs.writeFileSync(path.join(root, "pause-consume"), "pause");
+  const pendingCLI = spawn(path.join(repo, "shuttle"), fiberArgs, { cwd: root, env: fiberEnv, stdio: "ignore" });
+  await until(() => fs.existsSync(path.join(root, "enqueue-barrier")), "enqueue before death");
+  const dead = new Promise(resolve => daemon.once("exit", resolve));
+  daemon.kill("SIGKILL");
+  await dead;
+  await new Promise(resolve => pendingCLI.exitCode !== null ? resolve() : pendingCLI.once("exit", resolve));
+  fs.unlinkSync(path.join(root, "pause-consume"));
+  fs.unlinkSync(path.join(root, "daemon-ready"));
+  daemon = spawn("mix", ["run", "--no-start", daemonScript], { cwd: path.join(repo, "daemon"), env: daemonEnv, stdio: ["ignore", daemonLog, daemonLog] });
+  await until(() => fs.existsSync(path.join(root, "daemon-ready")), "daemon recovery");
+  const recovered = execFileSync(path.join(repo, "shuttle"), fiberArgs, { cwd: root, env: fiberEnv }).toString();
+  assert.equal(JSON.parse(recovered).status, "woken");
+  await until(() => entries().some(e => e.message?.role === "user" && text(e).includes("Survives daemon death")), "recovered inbox delivery");
+  execFileSync(path.join(repo, "shuttle"), fiberArgs, { cwd: root, env: fiberEnv });
+  assert.equal(entries().filter(e => e.message?.role === "user" && text(e).includes("Survives daemon death")).length, 1);
   console.log(
-    "PASS: real Pi TUI, private tmux + daemon; idle, concurrent, mid-turn, swallowed input and CLI receipts",
+    "PASS: real Pi TUI, private tmux + daemon; inbox delivery, busy steering, CLI retry across daemon death",
   );
   console.log(`Evidence: ${root}`);
 } finally {
