@@ -146,7 +146,7 @@ to consume again with the worker's --idle, --unknown and --costly facts.`,
 	consume.Flags().BoolVar(&idle, "idle", false, "The live worker was observed idle")
 	consume.Flags().BoolVar(&unknown, "unknown", false, "The live worker's turn state is unknown: woken for ask, never for idle")
 	consume.Flags().BoolVar(&costly, "costly", false, "Waking the live worker is costly")
-	return append([]*cobra.Command{put, pending, ls, consume}, a.threadInboxVerbs()...)
+	return append(append([]*cobra.Command{put, pending, ls, consume}, a.humanInboxVerbs()...), a.threadInboxVerbs()...)
 }
 
 // printPendingCounts prints one JSON object, key => pending count. A key

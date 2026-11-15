@@ -42,6 +42,22 @@ defmodule Shuttle.Delivery do
     end
   end
 
+  def human(fiber_id, text, opts \\ []) do
+    result =
+      Shuttle.HumanInput.submit(fiber_id, text, opts[:message_id], fn ->
+        Poller.dispatch_fiber(fiber_id,
+          force: true,
+          ad_hoc: true,
+          resume_mode:
+            opts[:resume_mode] ||
+              if(Poller.live_worker(fiber_id), do: "previous", else: "continue"),
+          user_message: text
+        )
+      end)
+
+    {:input, result}
+  end
+
   defp input(fiber_id, text) do
     result =
       Poller.dispatch_fiber(fiber_id,

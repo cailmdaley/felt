@@ -8,6 +8,14 @@ defmodule ShuttleWeb.DispatchReply do
   require Shuttle.Dispatcher
 
   @spec render(String.t(), term()) :: {pos_integer(), map()}
+  def render(fiber_id, {:duplicate, id}),
+    do: {200, %{dispatched: false, duplicate: true, fiber_id: fiber_id, message_id: id}}
+
+  def render(fiber_id, {:error, {:human_inbox, error}}),
+    do:
+      {422,
+       %{dispatched: false, fiber_id: fiber_id, reason: "human_inbox", error: inspect(error)}}
+
   def render(fiber_id, {:ok, session}) do
     # A forced dispatch may have re-armed the doc (status:active). Re-read it
     # into the document cache so the board's post-dispatch refetch moves the

@@ -47,6 +47,8 @@ defmodule ShuttleWeb.DeliverControllerTest do
     MockRunner.start!()
     MockRunner.reset()
     root = MockRunner.felt_root()
+    Env.put_env("SHUTTLE_STORES", root)
+    Env.put_app_env(:felt_runner, MockRunner)
     on_exit(fn -> File.rm_rf(root) end)
 
     {:ok, poller} =
@@ -68,6 +70,61 @@ defmodule ShuttleWeb.DeliverControllerTest do
   defp put_constitution(fiber_id) do
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
     MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
+  end
+
+  test "a human line is recorded and launches through quarantine once per id" do
+    fiber = "tests/human-once"
+    put_constitution(fiber)
+
+    request = %{
+      "fiber_id" => fiber,
+      "text" => "human instruction",
+      "from" => "human",
+      "message_id" => "human-once"
+    }
+
+    assert %{"delivered" => true, "delivery" => "input"} =
+             api_conn() |> post("/api/v1/deliver", Jason.encode!(request)) |> json_response(200)
+
+    assert run_script() =~ "human instruction"
+
+    assert %{"duplicate" => true} =
+             api_conn() |> post("/api/v1/deliver", Jason.encode!(request)) |> json_response(200)
+
+    assert Enum.count(MockRunner.commands(), fn {cmd, args} ->
+             cmd == "tmux" and match?(["new-session" | _], args)
+           end) == 1
+  end
+
+  test "a human line pastes only once and keeps the typed transport" do
+    fiber = "tests/human-paste-once"
+    put_constitution(fiber)
+    {:ok, _} = Poller.dispatch_fiber(fiber, force: true)
+    Env.put_app_env(:felt_runner, MessageRunner)
+    Env.put_app_env(:deliver_test_pid, self())
+
+    request = %{
+      "fiber_id" => fiber,
+      "text" => "typed line",
+      "from" => "human",
+      "message_id" => "human-paste-once"
+    }
+
+    assert %{"delivered" => true} =
+             api_conn() |> post("/api/v1/deliver", Jason.encode!(request)) |> json_response(200)
+
+    pastes = fn ->
+      Enum.count(MockRunner.commands(), fn {cmd, args} ->
+        cmd == "tmux" and match?(["load-buffer" | _], args)
+      end)
+    end
+
+    assert pastes.() == 1
+
+    assert %{"duplicate" => true} =
+             api_conn() |> post("/api/v1/deliver", Jason.encode!(request)) |> json_response(200)
+
+    assert pastes.() == 1
   end
 
   test "a never-run constitution dispatches fresh with the text as From User" do

@@ -161,6 +161,20 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	now := time.Now()
 	var candidates []mailboxPendingItem
 	for _, it := range items {
+		if it.entry.Wishes.Source == "human" {
+			it.entry.Disposition = "unknown"
+			b, err := json.Marshal(it.entry)
+			if err != nil {
+				return Consumption{}, err
+			}
+			if err := mailboxWrite(it.path, b, false); err != nil {
+				return Consumption{}, err
+			}
+			if err := moveToOffered(root, it.path); err != nil {
+				return Consumption{}, err
+			}
+			continue
+		}
 		if !it.entry.due(now) {
 			continue
 		}

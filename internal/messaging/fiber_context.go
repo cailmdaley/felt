@@ -287,7 +287,7 @@ func fiberContextHookEligible(root, conversation string, request Request) bool {
 		}
 	}
 	entry, err := readFiberMailboxEntry(filepath.Join(root, "pending", mailboxKey(request.MessageID)+".json"))
-	if err != nil || entry.AttemptAddress != "" {
+	if err != nil || entry.AttemptAddress != "" || entry.Wishes.Source == "human" {
 		return false
 	}
 	if entry.Wishes.Turn == "none" || entry.Wishes.Turn == "ask" {

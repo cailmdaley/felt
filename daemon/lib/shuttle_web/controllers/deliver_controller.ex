@@ -111,7 +111,14 @@ defmodule ShuttleWeb.DeliverController do
                 resume_mode: resume_mode(context["resume_mode"])
               ]
 
-              fiber_id |> Delivery.deliver(text, opts) |> reply(fiber_id)
+              result =
+                if from == "human" and not opts[:live_input] do
+                  Delivery.human(fiber_id, text, opts)
+                else
+                  Delivery.deliver(fiber_id, text, opts)
+                end
+
+              reply(result, fiber_id)
             end
         end
     end
@@ -179,6 +186,14 @@ defmodule ShuttleWeb.DeliverController do
 
   defp context_reply(_fiber_id, _text, _id, _opts),
     do: {400, %{error: "message_id is required for context"}}
+
+  defp reply({:input, {:duplicate, id}}, fiber_id),
+    do:
+      {200,
+       %{delivery: "input", fiber_id: fiber_id, delivered: nil, duplicate: true, message_id: id}}
+
+  defp reply({:input, {:error, {:human_inbox, error}}}, fiber_id),
+    do: {422, %{delivery: "input", fiber_id: fiber_id, delivered: false, error: inspect(error)}}
 
   defp reply({:input, {:ok, _}}, fiber_id),
     do: {200, %{delivery: "input", fiber_id: fiber_id, delivered: true}}

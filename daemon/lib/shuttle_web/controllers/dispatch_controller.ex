@@ -72,7 +72,7 @@ defmodule ShuttleWeb.DispatchController do
     with :ok <- if(is_nil(fiber_id), do: {:error, "fiber_id is required"}, else: :ok),
          {:ok, carried} <- CarriedDocument.adopt(params, fiber_id),
          {:ok, message} <- Shuttle.DispatchImages.attach(message, Map.get(params, "images")) do
-      result =
+      dispatch = fn ->
         Shuttle.Poller.dispatch_fiber(fiber_id,
           force: force or ad_hoc,
           existing_only: truthy?(Map.get(params, "existing_only", false)),
@@ -83,6 +83,14 @@ defmodule ShuttleWeb.DispatchController do
           resume_mode: normalize_resume_mode(Map.get(params, "resume_mode")),
           project_dir: normalize_text(Map.get(params, "project_dir"))
         )
+      end
+
+      result =
+        if message do
+          Shuttle.HumanInput.submit(fiber_id, message, params["message_id"], dispatch)
+        else
+          dispatch.()
+        end
 
       {status, body} = ShuttleWeb.DispatchReply.render(fiber_id, result)
       conn |> put_status(status) |> json(with_carried(body, carried))

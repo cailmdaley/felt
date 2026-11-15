@@ -117,7 +117,7 @@ it('opens a worker\'s thread from its message: its name, liveness and ask on top
   threadReply.value = 'Show the nulls.'
   threadReply.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
   await settle()
-  expect(posts).toStrictEqual([['/api/v1/deliver', { fiber_id: 'cmbx/tsz', origin: 'local', text: 'Show the nulls.', from: 'human' }]])
+  expect(posts).toStrictEqual([['/api/v1/deliver', { fiber_id: 'cmbx/tsz', origin: 'local', text: 'Show the nulls.', from: 'human', message_id: expect.stringMatching(/^human-[0-9a-f]{32}$/) }]])
   expect(requestRefresh).toHaveBeenCalled()
   expect(threadReply.value).toBe('')
   // The reply stands in the thread until the board carries it, and not in the channel.

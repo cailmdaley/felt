@@ -1,5 +1,6 @@
 import { announce } from '@ui-sdk/core'
 import { ago } from '../civilDay.js'
+import { humanMessageId } from '../humanMessageId.js'
 import { getDaemonJson, postDaemonJson } from '../daemonApi.js'
 import { head, peek, RESOURCE_PRIORITY } from '../documentResources.js'
 import { buildFileViewer, disposeFileViewer } from '../FileViewerPanel.js'
@@ -739,7 +740,7 @@ export class ChannelsView implements TemporalView {
     if (!card || !ctx) return false
     try {
       const answer = await postDaemonJson<{ delivered?: boolean | null; error?: string }>(ctx.shuttleBase, '/api/v1/deliver',
-        { fiber_id: card.id, origin: card.originId, text, from: 'human' }, 'Reply failed')
+        { fiber_id: card.id, origin: card.originId, text, from: 'human', message_id: humanMessageId() }, 'Reply failed')
       if (answer?.delivered === false) throw new Error(answer.error ?? `${card.name} did not receive it`)
       this.sent.push({ fiber: fiberOf(card), text, at: Date.now() })
       this.drafts.delete(pane === 'channel' ? `channel:${channel}` : `thread:${fiberOf(card)}`)

@@ -1,4 +1,5 @@
 import '@ui-sdk/web/segmented-control'
+import { humanMessageId } from '../humanMessageId.js'
 import { paintAncestry, type Ancestor } from './ancestryTrail.js'
 import { headerIcon } from './headerIcon.js'
 import { attachConversationPicker, openActionMenu } from '../conversationMenu.js'
@@ -1574,7 +1575,7 @@ export class Dock {
     if (!hasLiveWorker(card)) throw new Error('No live worker. Start or resume one before sending a review.')
     let res: Response
     try {
-      res = await postForceDispatch(this.shuttleBase, card, { user_message: message, resume_mode: 'previous', existing_only: true })
+      res = await postForceDispatch(this.shuttleBase, card, { user_message: message, message_id: humanMessageId(), resume_mode: 'previous', existing_only: true })
     } catch (err: unknown) {
       throw new Error(`Shuttle did not answer (${(err as { message?: string })?.message ?? String(err)}), so this may still arrive. Check the worker's conversation before sending again.`)
     }
@@ -1612,7 +1613,7 @@ export class Dock {
     try {
       let res: Response
       try {
-        res = await postForceDispatch(this.shuttleBase, card, { user_message: message, resume_mode: mode, ...(images.length ? { images } : {}), ...(projectDir ? { project_dir: projectDir } : {}) })
+        res = await postForceDispatch(this.shuttleBase, card, { user_message: message, message_id: humanMessageId(), resume_mode: mode, ...(images.length ? { images } : {}), ...(projectDir ? { project_dir: projectDir } : {}) })
       } catch (err: unknown) {
         showError(`Shuttle did not answer (${(err as { message?: string })?.message ?? String(err)}). Check the board before trying again.`)
         return false

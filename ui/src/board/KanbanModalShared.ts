@@ -18,7 +18,7 @@ export interface PastedImage { name: string; data: string }
 export function postForceDispatch(
   shuttleBase: string,
   card: Pick<KanbanCard, 'id' | 'originId'>,
-  fields: { resume_mode: 'fresh' | 'previous'; user_message?: string; images?: PastedImage[]; project_dir?: string; existing_only?: boolean },
+  fields: { resume_mode: 'fresh' | 'previous'; user_message?: string; message_id?: string; images?: PastedImage[]; project_dir?: string; existing_only?: boolean },
 ): Promise<Response> {
   return fetch(`${shuttleBase}/api/v1/dispatch`, {
     method: 'POST',
