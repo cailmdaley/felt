@@ -131,42 +131,25 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 		}
 		candidates = append(candidates, it)
 	}
-	due, validationErr := validateMailboxItems(root, candidates, current)
-	errs = append(errs, validationErr)
-	force, asking, fresh, launching := false, false, false, false
-	for i := range due {
-		if err := settleUnfinishedHookClaim(&due[i]); err != nil {
+	for i := range candidates {
+		if err := settleUnfinishedHookClaim(&candidates[i]); err != nil {
 			return Consumption{}, err
 		}
-		e := due[i].entry
-		// Within its lease, a reservation holds the reserving worker's wake
-		// while the launch is in flight, and leaves a new receiver, the
-		// launched session, to take the entry through its hook.
-		if e.Attempt.open() && e.Attempt.Launch && now.Sub(time.Unix(0, e.Attempt.OpenedAt)) < launchLease {
-			if e.Attempt.Conversation != w.Address || e.Attempt.Epoch != w.Epoch {
-				continue
-			}
-			launching = true
-		}
-		switch e.Wishes.Turn {
-		case "force":
-			force = true
-		case "ask", "idle":
-			asking = true
-			fresh = fresh || e.Wishes.IfCostly == "fresh"
-		}
 	}
-	if !force && !w.Idle {
-		result.Turn = asking
+	// Deciding reads entries unchecked; only a reservation or a wake checks
+	// thread signals' currency, and decides again over the current ones.
+	action, turn := decideConsumption(candidates, w, now)
+	if action == "wait" {
+		result.Turn = turn
 		return result, errors.Join(errs...)
 	}
-	if !force && !asking {
+	due, validationErr := validateMailboxItems(root, candidates, current)
+	errs = append(errs, validationErr)
+	if action, turn = decideConsumption(due, w, now); action == "wait" {
+		result.Turn = turn
 		return result, errors.Join(errs...)
 	}
-	if !force && w.Costly {
-		if launching || !fresh {
-			return result, errors.Join(errs...)
-		}
+	if action == "fresh" {
 		var members []string
 		for _, it := range due {
 			if it.entry.Wishes.Turn != "none" {
@@ -227,6 +210,45 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 		result.Action, result.Members = "wake", append(result.Members, attempt.Members...)
 	}
 	return result, errors.Join(append(errs, err)...)
+}
+
+// decideConsumption answers wait, fresh or wake for the due entries no open
+// batch holds. turn reports a wait that the worker's idle and cost facts would
+// decide.
+func decideConsumption(due []mailboxPendingItem, w Worker, now time.Time) (action string, turn bool) {
+	force, asking, fresh, launching := false, false, false, false
+	for _, it := range due {
+		e := it.entry
+		// Within its lease, a reservation holds the reserving worker's wake
+		// while the launch is in flight, and leaves a new receiver, the
+		// launched session, to take the entry through its hook.
+		if e.Attempt.open() && e.Attempt.Launch && now.Sub(time.Unix(0, e.Attempt.OpenedAt)) < launchLease {
+			if e.Attempt.Conversation != w.Address || e.Attempt.Epoch != w.Epoch {
+				continue
+			}
+			launching = true
+		}
+		switch e.Wishes.Turn {
+		case "force":
+			force = true
+		case "ask", "idle":
+			asking = true
+			fresh = fresh || e.Wishes.IfCostly == "fresh"
+		}
+	}
+	switch {
+	case force:
+		return "wake", false
+	case !w.Idle:
+		return "wait", asking
+	case !asking:
+		return "wait", false
+	case !w.Costly:
+		return "wake", false
+	case launching || !fresh:
+		return "wait", false
+	}
+	return "fresh", false
 }
 
 // openBatches reads the pending entries no open batch holds, and every open

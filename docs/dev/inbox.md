@@ -86,7 +86,7 @@ Session native-wake recovery starts its 30-second hook window at that same later
 
 `messaging.Consume` takes the inbox lock and verifies the worker's conversation and receiver epoch.
 It first advances every open batch on its own, so a batch awaiting its outcome holds only its own members.
-It then decides from due, current entries that no open batch holds, and selects and claims a new batch before sending it.
+It then decides from the due entries no open batch holds without checking thread lifecycle currency; only a reservation or a wake checks it, decides again over the current entries, and selects and claims a new batch before sending it.
 The daemon supplies `Idle` and `Costly`.
 It first consumes without them; only an answer with `"turn": true` (a due entry asks for a turn) makes it read the worker's turn state and wake cost and consume again.
 A worker is busy while a turn of its own is running, and idle when its turn ended with no task of its own pending or in progress.

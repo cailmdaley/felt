@@ -458,3 +458,54 @@ func TestConsumeLaunchedSessionTakesAReservationThroughItsHook(t *testing.T) {
 		t.Fatalf("an expired reservation still holds the entry: %+v %v", result, err)
 	}
 }
+
+func TestConsumeChecksThreadSignalsOnlyToReserveOrWake(t *testing.T) {
+	env, w := consumeFixture(t)
+	calls := filepath.Join(t.TempDir(), "calls")
+	scripts := t.TempDir()
+	if err := os.WriteFile(filepath.Join(scripts, "shuttle"), []byte("#!/bin/sh\necho call >> "+calls+"\nprintf '{\"current\":false}\\n'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	env.Set("PATH", scripts+string(os.PathListSeparator)+env.Getenv("PATH"))
+	put := func(id, turn string) {
+		t.Helper()
+		signal := &ThreadSignal{UID: id, Verb: "closed", Owner: "host", Stamp: time.Now().UTC().Format(time.RFC3339Nano)}
+		if err := Enqueue(env, InboxEntry{Address: "fiber", Request: Request{MessageID: "thread-" + id, Text: "thread " + id + " closed", ThreadSignal: signal}, Wishes: Wishes{Turn: turn}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	countCalls := func() int {
+		bytes, _ := os.ReadFile(calls)
+		return strings.Count(string(bytes), "call")
+	}
+	sends := 0
+	sender := func(_ context.Context, _ *sysenv.Env, _ string, r Request, _ string) (Receipt, error) {
+		sends++
+		return Receipt{Status: StatusAccepted}, nil
+	}
+	for _, id := range []string{"a", "b", "c"} {
+		put(id, "none")
+	}
+	put("d", "ask")
+	for i := 0; i < 5; i++ {
+		result, err := consumeWith(context.Background(), env, "fiber", "host", w, sender)
+		if err != nil || result.Action != "wait" || !result.Turn {
+			t.Fatalf("busy consume: %+v %v", result, err)
+		}
+	}
+	if n := countCalls(); n != 0 {
+		t.Fatalf("a waiting consume checked %d thread signals", n)
+	}
+	w.Idle = true
+	result, err := consumeWith(context.Background(), env, "fiber", "host", w, sender)
+	if err != nil || result.Action != "wait" || sends != 0 {
+		t.Fatalf("superseded wake: %+v %v, sends %d", result, err, sends)
+	}
+	if countCalls() == 0 {
+		t.Fatal("the wake path did not check its thread signals")
+	}
+	offered, _ := os.ReadDir(filepath.Join(mailboxDir(env, "fiber", "fiber"), "offered"))
+	if len(offered) != 4 {
+		t.Fatalf("superseded notices offered: %d", len(offered))
+	}
+}
