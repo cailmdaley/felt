@@ -205,11 +205,6 @@
   border-color: var(--kbn-you);
   background: color-mix(in srgb, var(--kbn-you) 6%, transparent);
 }
-/* Something in the view the human has not seen (a channel that waits on them or said something new): a dot after its name. */
-.kbn-viewtab[data-attention]::after {
-  content: ''; flex: none; width: 6px; height: 6px; margin-left: -2px; border-radius: 50%;
-  background: var(--kbn-you);
-}
 /* The hotkey rides as a keycap set into the tab's left edge — a tiny
    bordered square around the bare digit, legible as "press this key"
    without reading as part of the name. Quieter than the label at rest;

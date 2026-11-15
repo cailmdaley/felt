@@ -49,12 +49,6 @@ export interface TemporalView {
   reveal?(id: string, origin: string): boolean
   /** The board bar's Find, when the view filters itself by it; '' lifts the filter. */
   find?(query: string): void
-  /**
-   * Whether the view holds something for the human they have not seen, for a
-   * dot on its tab; asked on every poll, mounted or not. A poll passes `ring`,
-   * which the view calls to have the dot read again once it knows more.
-   */
-  attention?(ctx: ViewContext, ring?: () => void): boolean
 }
 
 /**

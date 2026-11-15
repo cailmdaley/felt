@@ -29,10 +29,6 @@ import { isTypingTarget, keystrokeIsSpokenFor, registerView, type TemporalView, 
 import './ChannelsView.css'
 
 const SEEN = 'shuttle.channels.seen:'
-/** When this board first looked for what is unread: a channel never opened counts as read up to then. */
-const SINCE = 'shuttle.channels.since'
-/** Away from Channels, the reads that keep its tab's dot current come at most this often. */
-const AWAY_READ_MS = 60_000
 const RAIL = 'shuttle.channels.rail-hidden'
 /** The channel, and the thread in it, the reader was last in on this device. */
 const LAST = 'shuttle.channels.last'
@@ -104,14 +100,6 @@ function scrollsSideways(node: Element | null, stop: Element, toward: number): b
 function lastSeen(key: string): number {
   const value = Number(stored(SEEN + key) ?? NaN)
   return Number.isFinite(value) ? value : -Infinity
-}
-/** When this board first looked for what is unread, marked the first time it asks. */
-function since(): number {
-  const value = Number(stored(SINCE))
-  if (value > 0) return value
-  const now = Date.now()
-  store(SINCE, String(now))
-  return now
 }
 /** Of every file the lines carry, the newest send of each path: a file sent again and again is drawn whole once, the earlier sends named. */
 function newestSends(lines: readonly Line[]): Set<SentFile> {
@@ -262,10 +250,6 @@ export class ChannelsView implements TemporalView {
   private width: ResizeObserver | null = null
   private loaded = false
   private reading = false
-  /** Asks the board's bar to read {@link attention} again, once something that could change it has arrived. */
-  private ring: (() => void) | null = null
-  /** When the reads for the tab's dot last ran away from Channels. */
-  private readAway = 0
   private generation = 0
   private unsubscribe?: () => void
   private unsubscribeLibrary?: () => void
@@ -429,7 +413,6 @@ export class ChannelsView implements TemporalView {
     }
     this.status(records.ok ? '' : 'Some channel sources are unavailable — showing the last read.')
     this.draw()
-    this.ring?.()
     if (records.ok) this.keep()
     // Every channel in the rail reads its families, for what is new in it.
     this.readFamilies(this.compose(ctx).filter(channel => channel.listed || channel.key === this.current), ctx)
@@ -442,30 +425,8 @@ export class ChannelsView implements TemporalView {
       dismissed: [...this.dismissed, ...this.pending], pinned: this.pinned, opened: lastSeen, now: Date.now(),
     })
   }
-  /**
-   * Whether a channel other than the one being read waits on the human or has
-   * said something since they last read it: the dot on Channels' tab. Away
-   * from Channels no channel is being read, and a poll (which passes
-   * `ring`) keeps the channels' reads going here, once a minute at most,
-   * ringing once what arrives could change the answer.
-   */
-  attention(ctx: ViewContext, ring?: () => void): boolean {
-    if (ring) {
-      this.ring = ring
-      if (!this.ctx && Date.now() - this.readAway >= AWAY_READ_MS) {
-        this.readAway = Date.now()
-        void this.read(ctx)
-      }
-    }
-    const reading = this.ctx ? this.current : null
-    return this.compose(ctx).some(channel => channel.listed && channel.key !== reading && (channel.waiting || this.unread(channel, ctx)))
-  }
-  /**
-   * Something in the channel arrived after the human last read it, or, for a
-   * channel never opened, since this board first looked; a channel that has
-   * said nothing has nothing unread.
-   */
-  private unread(channel: Channel, ctx = this.ctx): boolean { return this.newestSaid(channel, ctx) > Math.max(lastSeen(channel.key), since()) }
+  /** Something in the channel arrived after the human last read it, or ever, for a channel never opened; a channel that has said nothing has nothing unread. */
+  private unread(channel: Channel): boolean { return this.newestSaid(channel) > lastSeen(channel.key) }
   private status(text: string): void { if (this.note) this.note.textContent = text }
   /** The order and the hides lapse with the board's reach, so while they stand they are written again. */
   private keep(): void {
@@ -496,7 +457,7 @@ export class ChannelsView implements TemporalView {
         }
         // What fell out of the board's reach leaves with it.
         for (const [id, record] of feed.records) if ((record.received_at ?? record.timestamp) < reach) feed.records.delete(id)
-        if (feed.records.size !== known || failed) { this.draw(); this.ring?.() }
+        if (feed.records.size !== known || failed) this.draw()
       }, () => {
         if (generation !== this.generation || feed.failed) return
         feed.failed = true
@@ -695,8 +656,6 @@ export class ChannelsView implements TemporalView {
     const sig = JSON.stringify([this.query, this.current, listed.map(channel => [channel.key, channel.name, channel.title, channel.chaired, channel.waiting, !!channel.hidden, unread(channel)])])
     if (sig === this.sigs.rail) { this.drawFound(); return }
     this.sigs.rail = sig
-    // What the rail marks is what Channels' tab reads.
-    this.ring?.()
     for (const unbind of this.railBindings) unbind()
     this.railBindings = []
     const items: HTMLLIElement[] = []

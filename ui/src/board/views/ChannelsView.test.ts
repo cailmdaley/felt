@@ -439,50 +439,31 @@ it('marks a channel with something unread by a quiet dot, and lights Channels\' 
   const french = card({ id: 'french', uid: 'F', name: 'French lessons', shuttleChannel: 'french', shuttleSeat: true, ...working(3) })
   BOARD.F = [record({ id: 'f1', kind: 'post', fiber: 'F', text: 'La leçon est prête.' }, 10)]
   try {
-    const stored = new Map([['shuttle.channels.since', String(Date.now() - day)], ['shuttle.channels.seen:channel:cmbx', String(Date.now())], ['shuttle.channels.seen:channel:french', String(Date.now() - 20 * minute)]])
+    const stored = new Map([['shuttle.channels.seen:channel:cmbx', String(Date.now())], ['shuttle.channels.seen:channel:french', String(Date.now() - 20 * minute)]])
     daemon([], stored)
-    const { view, ctx, host } = await mount([chair, tsz, french])
+    const { host } = await mount([chair, tsz, french])
     const pick = (key: string) => host.querySelector<HTMLElement>(`[data-channel="${key}"]`)!
     pick('channel:cmbx').click(); await settle()
     // French said something after it was last read: an ink dot, not the owed dot of waiting.
     expect(pick('channel:french').querySelector('.kbn-ch-pick-unread')).not.toBeNull()
     expect(pick('channel:french').querySelector('.kbn-ch-pick-mark')).toBeNull()
     expect(pick('channel:cmbx').querySelector('.kbn-ch-pick-unread')).toBeNull()
-    expect(view.attention(ctx)).toBe(true)
-    // Reading French, nothing elsewhere is new.
+    // Read, French has nothing new.
     pick('channel:french').click(); await settle()
-    expect(view.attention(ctx)).toBe(false)
-    // Away from Channels, a fresh post anywhere lights the tab, the channel last read included.
-    view.unmount()
-    const ring = vi.fn()
-    expect(view.attention(ctx, ring)).toBe(false)
-    BOARD.F.push(record({ id: 'f2', kind: 'post', fiber: 'F', text: 'Et les exercices.' }, -1))
-    expect(view.attention(ctx, ring)).toBe(false)
-    await settle(); await settle(); await settle()
-    expect(ring).toHaveBeenCalled()
-    expect(view.attention(ctx)).toBe(true)
-    // A poll a moment later reads nothing more: away from Channels its reads come once a minute.
-    const reads = vi.mocked(fetch).mock.calls.length
-    view.attention(ctx, ring)
-    await settle()
-    expect(vi.mocked(fetch).mock.calls.length).toBe(reads)
+    pick('channel:cmbx').click(); await settle()
+    expect(pick('channel:french').querySelector('.kbn-ch-pick-unread')).toBeNull()
   } finally { delete BOARD.F }
 })
 
-it('counts a channel never opened as read up to the moment this board first looked, and what arrives after as unread', async () => {
+it('counts what a channel never opened has said as unread', async () => {
   const french = card({ id: 'french', uid: 'F', name: 'French lessons', shuttleChannel: 'french', shuttleSeat: true, ...working(3) })
   BOARD.F = [record({ id: 'f1', kind: 'post', fiber: 'F', text: 'La leçon est prête.' }, 10)]
   try {
     daemon()
-    const { view, ctx, host } = await mount([chair, tsz, french])
+    const { host } = await mount([chair, tsz, french])
     const pick = (key: string) => host.querySelector<HTMLElement>(`[data-channel="${key}"]`)!
     pick('channel:cmbx').click(); await settle()
-    expect(pick('channel:french').querySelector('.kbn-ch-pick-unread')).toBeNull()
-    expect(view.attention(ctx)).toBe(false)
-    BOARD.F.push(record({ id: 'f2', kind: 'post', fiber: 'F', text: 'Et les exercices.' }, -1))
-    view.refresh(ctx); await settle(); await settle(); await settle()
     expect(pick('channel:french').querySelector('.kbn-ch-pick-unread')).not.toBeNull()
-    expect(view.attention(ctx)).toBe(true)
   } finally { delete BOARD.F }
 })
 
