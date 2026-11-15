@@ -283,7 +283,7 @@ const EVENT_WORDS: Readonly<Record<string, string>> = {
   rested: 'rested', cleared: 'question cleared', run_tempered: 'run tempered', unblocked: 'unblocked',
 }
 
-/** A line the human sent from the board: the board mints its id, and the daemon keys its record by it. */
+/** A line the human sent through the daemon (from the board, the Dock or `shuttle dispatch --message`): its record is keyed by the line's `human-…` id. */
 export const BOARD_LINE = 'brd-human-'
 /** Consecutive messages from one sender this close together are one run, named once. */
 export const RUN_MS = 10 * 60_000
