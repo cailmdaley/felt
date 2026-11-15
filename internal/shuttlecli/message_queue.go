@@ -35,7 +35,7 @@ type fiberReceipt struct {
 // quiet one queues whether or not a worker is live. force records the
 // explicit --wake. Session targets and attachments always take the session
 // path.
-func (a *app) queueForFiber(request messaging.Request, force bool) (*fiberReceipt, error) {
+func (a *app) queueForFiber(request messaging.Request, force bool, session ...string) (*fiberReceipt, error) {
 	if len(request.Attachments) > 0 {
 		return nil, nil
 	}
@@ -55,6 +55,10 @@ func (a *app) queueForFiber(request messaging.Request, force bool) (*fiberReceip
 		}
 	}
 	modern := a.ownerInbox42(block.Host)
+	preference := ""
+	if len(session) > 0 {
+		preference = session[0]
+	}
 	payload, err := json.Marshal(map[string]any{
 		"fiber_id":         fiberID,
 		"origin":           block.Host,
@@ -68,6 +72,7 @@ func (a *app) queueForFiber(request messaging.Request, force bool) (*fiberReceip
 		"message_id":       request.MessageID,
 		"wake":             request.Wake,
 		"turn":             turn,
+		"session":          preference,
 		"context_only":     true,
 		"unless_live":      !modern && (request.Wake || request.NotifyWhenIdle),
 	})
@@ -174,6 +179,14 @@ func (a *app) messageFresh(request messaging.Request) error {
 	f, block := a.messageFiber(request.Address)
 	if f == nil {
 		return fmt.Errorf("--fresh needs a fiber with a shuttle: block; %q names none", request.Address)
+	}
+	if a.ownerInbox42(block.Host) {
+		request.Wake = true
+		receipt, err := a.queueForFiber(request, true, "fresh")
+		if err != nil {
+			return err
+		}
+		return a.printFiberReceipt(receipt, true)
 	}
 	fiberID := f.UID
 	if fiberID == "" {
