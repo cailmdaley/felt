@@ -251,7 +251,16 @@ func offerLinkedFiberContext(env *sysenv.Env, harness, id, host string, emit fun
 			return fiberContextHookEligible(root, conversation, r) && fiberReceiverMatches(root, Address{Host: host, Harness: harness, ID: id}) && MailboxAvailable(env, harness, id, host)
 		}, func(batch []Request) error {
 			offered = true
-			return emit(batch)
+			if err := emit(batch); err != nil {
+				return err
+			}
+			for _, req := range batch {
+				if req.NotifyWhenIdle {
+					req.Address = conversation
+					subscribeIdle(env, Address{Host: host, Harness: harness, ID: id}, req)
+				}
+			}
+			return nil
 		}, func(ctx context.Context, r Request) (bool, error) { return currentThreadSignalWithBackoff(ctx, env, r) }, harness)
 		if err != nil {
 			validationErrors = append(validationErrors, err)

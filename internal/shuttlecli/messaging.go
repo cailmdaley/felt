@@ -247,7 +247,7 @@ exit 1 means rejected, unknown, or another command error.`,
 				}
 				if queued != nil {
 					if request.NotifyWhenIdle {
-						fmt.Fprintf(a.env.Stderr, "idle subscription: unsupported — the fiber had no live worker to watch\n")
+						fmt.Fprintf(a.env.Stderr, "idle subscription: recorded when the worker takes the entry\n")
 					}
 					a.recordBoardMessage(args[0], request)
 					if err := a.clearMessagedFiberAsk(args[0], request.From); err != nil {
