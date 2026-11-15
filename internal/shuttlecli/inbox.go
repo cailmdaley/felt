@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// inboxVerbs are the owner-local inbox verbs: put, pending and ls. An address
+// inboxVerbs are the owner-local inbox verbs: put, pending, ls and consume. An address
 // is a fiber key (<felt store path>:<uid>) or a session's shuttle:// address.
 func (a *app) shuttleInboxCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -98,31 +98,33 @@ pending, and a turn of force or idle. An unknown wish value is refused.`,
 		},
 	}
 	var idle, costly bool
-	consume := &cobra.Command{Use: "consume <fiber-key> <address-or-dash> <epoch>", Args: cobra.ExactArgs(3), RunE: func(cmd *cobra.Command, args []string) error {
-		host, err := a.resolveOwnHost("")
-		if err != nil {
+	consume := &cobra.Command{
+		Use:   "consume <fiber-key> <address-or-dash> <epoch>",
+		Short: "Consume a fiber's inbox for its live conversation, as one JSON answer",
+		Long: `Consume a fiber's inbox for its live conversation: advance every open batch,
+then wake, reserve a fresh launch or wait. The JSON answer is printed even when
+an open batch's delivery fails, which then exits nonzero; "turn": true asks the
+caller to consume again with the worker's --idle and --costly facts.`,
+		Args: cobra.ExactArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			host, err := a.resolveOwnHost("")
+			if err != nil {
+				return err
+			}
+			epoch, err := strconv.ParseUint(args[2], 10, 64)
+			if err != nil || epoch == 0 {
+				return fmt.Errorf("positive receiver epoch required")
+			}
+			result, err := messaging.Consume(context.Background(), a.env, args[0], host, messaging.Worker{Address: args[1], Epoch: epoch, Idle: idle, Costly: costly})
+			if encodeErr := json.NewEncoder(a.env.Stdout).Encode(result); encodeErr != nil {
+				return encodeErr
+			}
 			return err
-		}
-		epoch, err := strconv.ParseUint(args[2], 10, 64)
-		if err != nil || epoch == 0 {
-			return fmt.Errorf("positive receiver epoch required")
-		}
-		result, err := messaging.Consume(context.Background(), a.env, args[0], host, messaging.Worker{Address: args[1], Epoch: epoch, Idle: idle, Costly: costly})
-		if err != nil {
-			return err
-		}
-		return json.NewEncoder(a.env.Stdout).Encode(result)
-	}}
-	consume.Flags().BoolVar(&idle, "idle", false, "The live worker is idle")
+		},
+	}
+	consume.Flags().BoolVar(&idle, "idle", false, "The live worker is idle, or its turn state is unknown")
 	consume.Flags().BoolVar(&costly, "costly", false, "Waking the live worker is costly")
-	turnPending := &cobra.Command{Use: "turn-pending <fiber-key>", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		pending, err := messaging.TurnPending(a.env, args[0])
-		if err != nil {
-			return err
-		}
-		return json.NewEncoder(a.env.Stdout).Encode(map[string]bool{"pending": pending})
-	}}
-	return []*cobra.Command{put, pending, ls, consume, turnPending}
+	return []*cobra.Command{put, pending, ls, consume}
 }
 
 // printPendingCounts prints one JSON object, key => pending count. A key

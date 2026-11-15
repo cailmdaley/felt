@@ -37,7 +37,7 @@ func TestLegacyReview4ReturningToADoesNotConflict(t *testing.T) {
 		if i > 0 {
 			expireAttempt(t, path)
 		}
-		if err := deliverFiberContextItemWith(context.Background(), env, "fiber", "host", address, r, sender); ErrorCode(err) != "ambiguous_delivery" {
+		if err := deliverPinned(t, env, address, r, sender); ErrorCode(err) != "ambiguous_delivery" {
 			t.Fatalf("returning conversation got %v", err)
 		}
 	}
@@ -56,10 +56,10 @@ func TestLegacyReview7MaxPublicationCanRetry(t *testing.T) {
 				t.Fatal(err)
 			}
 			sender := legacyReviewSender(t)
-			_ = deliverFiberContextItemWith(context.Background(), env, "fiber", "host", address, r, sender)
+			_ = deliverPinned(t, env, address, r, sender)
 			path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey(r.MessageID)+".json")
 			expireAttempt(t, path)
-			if err := deliverFiberContextItemWith(context.Background(), env, "fiber", "host", address, r, sender); ErrorCode(err) != "ambiguous_delivery" {
+			if err := deliverPinned(t, env, address, r, sender); ErrorCode(err) != "ambiguous_delivery" {
 				t.Fatalf("max publication retry: %v", err)
 			}
 		})
@@ -68,6 +68,7 @@ func TestLegacyReview7MaxPublicationCanRetry(t *testing.T) {
 
 func TestLegacyReview5CaveatReceiptVariant(t *testing.T) {
 	env := testEnv(t)
+	answerThreadSignalsCurrent(t, env)
 	address := "shuttle://host/codex/A"
 	transition(t, env, "A", address)
 	r := Request{MessageID: "thread-result", Text: "thread child closed: original", Wake: true}
@@ -77,8 +78,8 @@ func TestLegacyReview5CaveatReceiptVariant(t *testing.T) {
 	caveat := r
 	caveat.Text = withStalenessCaveat(r.Text)
 	sender := legacyReviewSender(t)
-	_ = deliverFiberContextItemWith(context.Background(), env, "fiber", "host", address, caveat, sender)
-	if err := deliverFiberContextItemWith(context.Background(), env, "fiber", "host", address, r, sender); ErrorCode(err) != "ambiguous_delivery" {
+	_ = deliverPinned(t, env, address, caveat, sender)
+	if err := deliverPinned(t, env, address, r, sender); ErrorCode(err) != "ambiguous_delivery" {
 		t.Fatalf("validation recovery changed the in-flight variant: %v", err)
 	}
 }
@@ -94,11 +95,11 @@ func TestLegacyReview8PublicationCannotOccupyRetryID(t *testing.T) {
 		if err := Enqueue(env, InboxEntry{Address: "fiber", Request: r}); err != nil {
 			t.Fatal(err)
 		}
-		_ = deliverFiberContextItemWith(context.Background(), env, "fiber", "host", address, r, sender)
+		_ = deliverPinned(t, env, address, r, sender)
 	}
 	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey("m")+".json")
 	expireAttempt(t, path)
-	if err := deliverFiberContextItemWith(context.Background(), env, "fiber", "host", address, original, sender); ErrorCode(err) != "ambiguous_delivery" {
+	if err := deliverPinned(t, env, address, original, sender); ErrorCode(err) != "ambiguous_delivery" {
 		t.Fatalf("retry collided with publication: %v", err)
 	}
 }

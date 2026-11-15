@@ -94,7 +94,7 @@ func TestFiberContextRejectsConflictingRetry(t *testing.T) {
 				}
 				root := mailboxDir(env, "fiber", "fiber")
 				if state == "offered" {
-					if err := offerMailboxEachValidated(root, func(Request) bool { return true }, nil, func(Request) error { return nil }); err != nil {
+					if err := offerMailbox(root, func(Request) bool { return true }, func([]Request) error { return nil }); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -285,60 +285,21 @@ func TestPendingCountCountsWhatNoWorkerHasTaken(t *testing.T) {
 	}
 }
 
-func TestFiberContextHandoffKeepsPerMessageAckAfterLaterFailure(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	for _, id := range []string{"first", "second"} {
-		if err := Enqueue(env, InboxEntry{Address: "fiber", Request: Request{MessageID: id, Text: id}}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	root := mailboxDir(env, "fiber", "fiber")
-	var firstWorker []string
-	failure := errors.New("later delivery failed")
-	err := offerMailboxEachValidated(root, func(Request) bool { return true }, nil, func(request Request) error {
-		firstWorker = append(firstWorker, request.MessageID)
-		if request.MessageID == "second" {
-			return failure
-		}
-		return nil
-	})
-	if !errors.Is(err, failure) {
-		t.Fatalf("first worker error = %v", err)
-	}
-	if len(firstWorker) != 2 || firstWorker[0] != "first" || firstWorker[1] != "second" {
-		t.Fatalf("first worker received %v", firstWorker)
-	}
-
-	var successor []string
-	if err := offerMailboxEachValidated(root, func(Request) bool { return true }, nil, func(request Request) error {
-		successor = append(successor, request.MessageID)
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if len(successor) != 1 || successor[0] != "second" {
-		t.Fatalf("successor received %v; acknowledged first message replayed", successor)
-	}
-}
-
 func TestFiberContextRestartRetriesPinnedDestinationAfterAcceptedSend(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
-	request := Request{MessageID: "thread-accepted", Text: "thread hub/child closed: done"}
+	request := Request{MessageID: "accepted", Text: "hub/child closed: done"}
 	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: request}); err != nil {
 		t.Fatal(err)
 	}
 	transition(t, env, "execution-first", "shuttle://host/claude/first")
-	var firstID string
-	accepted := func(_ context.Context, _ *sysenv.Env, _ string, req Request, address string) (Receipt, error) {
-		firstID = req.MessageID + "-" + mailboxKey(address)[:16]
-		return Receipt{Status: StatusContextAdded}, nil
-	}
-	if err := deliverFiberContextItemWith(context.Background(), env, "fiber", "host", "shuttle://host/claude/first", request, accepted); err != nil {
+	// A build before batch payloads pinned the entry, its send was accepted,
+	// and it died before the close.
+	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey(request.MessageID)+".json")
+	if _, err := claimBatch([]string{path}, "shuttle://host/claude/first", true); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey(request.MessageID)+".json")
+	firstID := request.MessageID + "-" + mailboxKey("shuttle://host/claude/first")[:16]
 	entry, err := readFiberMailboxEntry(path)
 	if err != nil || entry.AttemptAddress != "shuttle://host/claude/first" {
 		t.Fatalf("durable attempt = %+v, %v", entry, err)
@@ -354,7 +315,7 @@ func TestFiberContextRestartRetriesPinnedDestinationAfterAcceptedSend(t *testing
 		successorID = req.MessageID + "-" + mailboxKey(address)[:16]
 		return Receipt{Status: StatusContextAdded}, nil
 	}
-	if err := deliverFiberContextItemWith(context.Background(), env, "fiber", "host", "shuttle://host/claude/successor", request, retry); err != nil {
+	if err := deliverPinned(t, env, "shuttle://host/claude/successor", request, retry); err != nil {
 		t.Fatal(err)
 	}
 	if successorAddress != "shuttle://host/claude/first" || successorID != firstID {
@@ -365,7 +326,7 @@ func TestFiberContextRestartRetriesPinnedDestinationAfterAcceptedSend(t *testing
 func TestFiberContextRetargetsAfterPinnedDestinationRejects(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
-	request := Request{MessageID: "thread-rejected", Text: "thread hub/child closed: done"}
+	request := Request{MessageID: "rejected", Text: "hub/child closed: done"}
 	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: request}); err != nil {
 		t.Fatal(err)
 	}
@@ -387,15 +348,15 @@ func TestFiberContextRetargetsAfterPinnedDestinationRejects(t *testing.T) {
 		return Receipt{Status: StatusContextAdded}, nil
 	}
 	selected := "shuttle://host/claude/successor"
-	if err := deliverFiberContextItemWith(context.Background(), env, "fiber", "host", selected, request, sender); err != nil {
+	if err := deliverPinned(t, env, selected, request, sender); err != nil {
 		t.Fatal(err)
 	}
 	if len(addresses) != 2 || addresses[0] != first || addresses[1] != selected {
 		t.Fatalf("delivery attempts = %v, want rejected first then current successor", addresses)
 	}
-	entry, err = readFiberMailboxEntry(path)
-	if err != nil || entry.AttemptAddress != selected {
-		t.Fatalf("successor attempt = %+v, %v", entry, err)
+	entry, err = readFiberMailboxEntry(filepath.Join(mailboxDir(env, "fiber", "fiber"), "offered", filepath.Base(path)))
+	if err != nil || entry.Attempt.Conversation != selected || entry.Attempt.Outcome != attemptDelivered {
+		t.Fatalf("successor attempt = %+v, %v", entry.Attempt, err)
 	}
 }
 
@@ -534,10 +495,10 @@ func TestFiberContextUnknownRolloverRequiresEndedEvidence(t *testing.T) {
 					if !strings.Contains(req.Text, "Possible repeat:") {
 						t.Errorf("successor notice lacks repeat warning: %q", req.Text)
 					}
-					return dedupSendResult{Receipt: Receipt{Status: StatusContextAdded}}
+					return dedupSendResult{Receipt: Receipt{MessageID: req.MessageID, Status: StatusContextAdded}}
 				})
 			}
-			if err := deliverFiberContextItemWith(context.Background(), env, "fiber", "host", first, request, sender); err == nil {
+			if err := deliverPinned(t, env, first, request, sender); err == nil {
 				t.Fatal("unknown outcome acknowledged")
 			}
 			if evidence != "missing" {
@@ -569,7 +530,7 @@ func TestFiberContextUnknownRolloverRequiresEndedEvidence(t *testing.T) {
 				}
 			}
 			for i := 0; i < 2; i++ {
-				err := deliverFiberContextItemWith(context.Background(), env, "fiber", "host", next, request, sender)
+				err := deliverPinned(t, env, next, request, sender)
 				if ended && err != nil {
 					t.Fatal(err)
 				}

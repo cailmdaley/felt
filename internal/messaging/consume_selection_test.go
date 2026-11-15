@@ -76,7 +76,7 @@ func TestConsumeFreshAnswerSurvivesUnverifiableNeighbor(t *testing.T) {
 		t.Fatal("fresh request sent a wake")
 		return Receipt{}, nil
 	})
-	if err != nil || result.Action != "fresh" || len(result.Members) != 1 || result.Members[0] != "healthy" {
+	if err == nil || result.Action != "fresh" || len(result.Members) != 1 || result.Members[0] != "healthy" {
 		t.Fatalf("launch reservation lost behind validation error: %+v %v", result, err)
 	}
 }

@@ -163,7 +163,7 @@ func TestEnqueueDedupFirstCaptureAndConflict(t *testing.T) {
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("pending = %v %v", entries, err)
 	}
-	if err := offerMailboxEachValidated(root, func(Request) bool { return true }, nil, func(Request) error { return nil }); err != nil {
+	if err := offerMailbox(root, func(Request) bool { return true }, func([]Request) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if err := put("third", true); err != nil {

@@ -12,7 +12,8 @@ import (
 func (a *app) contextMailboxCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "context-mailbox", Hidden: true, Short: "Owner-local durable fiber context"}
 	var wake bool
-	var wishes messaging.Wishes
+	var turn string
+	var derived bool
 	var from string
 	var threadSignal string
 	var retainedAt string
@@ -37,10 +38,10 @@ func (a *app) contextMailboxCmd() *cobra.Command {
 			}
 			request.ThreadSignal = &signal
 		}
-		return messaging.Enqueue(a.env, messaging.InboxEntry{Address: args[0], Request: request, Wishes: wishes})
+		return messaging.Enqueue(a.env, messaging.InboxEntry{Address: args[0], Request: request, Wishes: messaging.Wishes{Turn: turn}, Derived: derived})
 	}}
-	put.Flags().StringVar(&wishes.Turn, "turn", "", "none, idle, ask or force")
-	put.Flags().StringVar(&wishes.IfCostly, "if-costly", "", "hold or fresh")
+	put.Flags().StringVar(&turn, "turn", "", "none, idle, ask or force")
+	put.Flags().BoolVar(&derived, "derived", false, "The id names the event it reports; the first capture wins")
 	put.Flags().BoolVar(&wake, "wake", false, "Start a turn in the live orchestrator")
 	put.Flags().StringVar(&from, "from", "", "Sender named in the message header")
 	put.Flags().StringVar(&replyTo, "reply-to", "", "Fiber reply target")

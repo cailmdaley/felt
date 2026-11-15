@@ -31,11 +31,11 @@ func TestReview1RejectedRetryPreservesOriginalAmbiguity(t *testing.T) {
 		}
 		return Receipt{Status: StatusUnknown}, errCode("ambiguous_delivery", "unknown")
 	}
-	_ = deliverFiberContextItemWith(context.Background(), env, "fiber", "host", a, r, sender)
+	_ = deliverPinned(t, env, a, r, sender)
 	expireAttempt(t, path)
-	_ = deliverFiberContextItemWith(context.Background(), env, "fiber", "host", a, r, sender)
+	_ = deliverPinned(t, env, a, r, sender)
 	transition(t, env, "B", b)
-	_ = deliverFiberContextItemWith(context.Background(), env, "fiber", "host", b, r, sender)
+	_ = deliverPinned(t, env, b, r, sender)
 	if !strings.HasPrefix(last.Text, "Possible repeat:") {
 		t.Fatalf("lost original ambiguity: %+v", last)
 	}
@@ -55,56 +55,49 @@ func TestReview2ExhaustedRetryStillRollsToLiveSuccessor(t *testing.T) {
 		addresses = append(addresses, address)
 		return Receipt{Status: StatusUnknown}, errCode("ambiguous_delivery", "unknown")
 	}
-	_ = deliverFiberContextItemWith(context.Background(), env, "fiber", "host", a, r, sender)
+	_ = deliverPinned(t, env, a, r, sender)
 	expireAttempt(t, path)
-	_ = deliverFiberContextItemWith(context.Background(), env, "fiber", "host", a, r, sender)
+	_ = deliverPinned(t, env, a, r, sender)
 	expireAttempt(t, path)
 	transition(t, env, "B", b)
-	_ = deliverFiberContextItemWith(context.Background(), env, "fiber", "host", b, r, sender)
+	_ = deliverPinned(t, env, b, r, sender)
 	if addresses[len(addresses)-1] != b {
 		t.Fatalf("stuck at exhausted predecessor: %v", addresses)
 	}
 }
 
 func TestReview5LegacyCaveatVariantSurvivesValidationRecovery(t *testing.T) {
-	for _, payloadStored := range []bool{false, true} {
-		t.Run(map[bool]string{false: "receipt reconstruction", true: "frozen payload"}[payloadStored], func(t *testing.T) {
-			env := testEnv(t)
-			r := Request{MessageID: "thread-result", Text: "thread child closed: original", Wake: true}
-			if err := Enqueue(env, InboxEntry{Address: "fiber", Request: r}); err != nil {
-				t.Fatal(err)
-			}
-			address := "shuttle://host/codex/A"
-			transition(t, env, "A", address)
-			path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey(r.MessageID)+".json")
-			if _, err := claimBatch([]string{path}, address, true); err != nil {
-				t.Fatal(err)
-			}
-			calls := 0
-			sender := func(ctx context.Context, env *sysenv.Env, _ string, r Request, address string) (Receipt, error) {
-				r.Address = address
-				r.MessageID += "-" + mailboxKey(address)[:16]
-				return withDedup(ctx, env, r, func(context.Context) dedupSendResult {
-					calls++
-					return dedupSendResult{Receipt: Receipt{Status: StatusUnknown}, Err: errCode("ambiguous_delivery", "unknown")}
-				})
-			}
-			caveat := r
-			caveat.Text = withStalenessCaveat(r.Text)
-			if payloadStored {
-				_ = deliverFiberContextItemWith(context.Background(), env, "fiber", "host", address, caveat, sender)
-			} else {
-				_, _ = sender(context.Background(), env, "host", caveat, address)
-			}
-			err := deliverFiberContextItemWith(context.Background(), env, "fiber", "host", address, r, sender)
-			if ErrorCode(err) != "ambiguous_delivery" || calls != 1 {
-				t.Fatalf("variant changed after upgrade: calls=%d err=%v", calls, err)
-			}
-			e := readEntry(t, path)
-			if e.Attempt.Payload == nil || !strings.HasPrefix(e.Attempt.Payload.Text, staleThreadSignalCaveat) {
-				t.Fatalf("caveat not pinned: %+v", e.Attempt)
-			}
+	env := testEnv(t)
+	answerThreadSignalsCurrent(t, env)
+	r := Request{MessageID: "thread-result", Text: "thread child closed: original", Wake: true}
+	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: r}); err != nil {
+		t.Fatal(err)
+	}
+	address := "shuttle://host/codex/A"
+	transition(t, env, "A", address)
+	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey(r.MessageID)+".json")
+	if _, err := claimBatch([]string{path}, address, true); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	sender := func(ctx context.Context, env *sysenv.Env, _ string, r Request, address string) (Receipt, error) {
+		r.Address = address
+		r.MessageID += "-" + mailboxKey(address)[:16]
+		return withDedup(ctx, env, r, func(context.Context) dedupSendResult {
+			calls++
+			return dedupSendResult{Receipt: Receipt{Status: StatusUnknown}, Err: errCode("ambiguous_delivery", "unknown")}
 		})
+	}
+	caveat := r
+	caveat.Text = withStalenessCaveat(r.Text)
+	_, _ = sender(context.Background(), env, "host", caveat, address)
+	err := deliverPinned(t, env, address, r, sender)
+	if ErrorCode(err) != "ambiguous_delivery" || calls != 1 {
+		t.Fatalf("variant changed after upgrade: calls=%d err=%v", calls, err)
+	}
+	e := readEntry(t, path)
+	if e.Attempt.Payload == nil || !strings.HasPrefix(e.Attempt.Payload.Text, staleThreadSignalCaveat) {
+		t.Fatalf("caveat not pinned: %+v", e.Attempt)
 	}
 }
 

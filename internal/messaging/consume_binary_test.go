@@ -26,7 +26,7 @@ func TestConsumeBinaryCrashBeforeSend(t *testing.T) {
 	root := mailboxDir(env, "fiber", "fiber")
 	gate := filepath.Join(t.TempDir(), "stopped")
 	scripts := t.TempDir()
-	wrapper := "#!/bin/sh\nif [ \"$1\" = thread-signal-current ]; then\n if [ -f '" + filepath.Join(root, "active-batch.json") + "' ] && [ ! -f '" + gate + "' ]; then\n kill -STOP \"$PPID\"\n touch '" + gate + "'\n fi\n printf '{\"current\":true}\\n'\nelse\n exec '" + bin + "' \"$@\"\nfi\n"
+	wrapper := "#!/bin/sh\nif [ \"$1\" = thread-signal-current ]; then\n if ls '" + filepath.Join(root, "batches") + "'/*.json >/dev/null 2>&1 && [ ! -f '" + gate + "' ]; then\n kill -STOP \"$PPID\"\n touch '" + gate + "'\n fi\n printf '{\"current\":true}\\n'\nelse\n exec '" + bin + "' \"$@\"\nfi\n"
 	if err := os.WriteFile(filepath.Join(scripts, "shuttle"), []byte(wrapper), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -83,10 +83,11 @@ func TestConsumeBinaryCrashBeforeSend(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	active, err := readConsumedBatch(root)
-	if err != nil {
-		t.Fatal(err)
+	batches, err := readBatchManifests(root)
+	if err != nil || len(batches) != 1 {
+		t.Fatalf("manifests=%v %v", batches, err)
 	}
+	active := batches[0]
 	if injected.Load() != 0 {
 		t.Fatal("transport ran before crash")
 	}

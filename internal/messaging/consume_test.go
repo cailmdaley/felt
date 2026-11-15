@@ -120,7 +120,7 @@ func TestConsumeFrozenBatchAcrossCrash(t *testing.T) {
 				t.Fatal(err)
 			}
 			// A newly queued item cannot change an open attempt's text or membership.
-			putWish(t, env, "later", "ask", "hold")
+			putWish(t, env, "later", "none", "hold")
 			receipts := map[string]string{}
 			injected := 0
 			sender := func(_ context.Context, _ *sysenv.Env, _ string, r Request, address string) (Receipt, error) {
@@ -290,5 +290,137 @@ func TestConsumeBatchSizeLimit(t *testing.T) {
 	})
 	if err != nil || len(result.Members) != 2 {
 		t.Fatalf("%+v %v", result, err)
+	}
+}
+
+func TestConsumeOpenBatchHoldsOnlyItsMembers(t *testing.T) {
+	for _, code := range []string{"wake_held", "ambiguous_delivery"} {
+		t.Run(code, func(t *testing.T) {
+			env, w := consumeFixture(t)
+			w.Idle = true
+			putWish(t, env, "stuck", "ask", "hold")
+			putWish(t, env, "context", "none", "hold")
+			var sent []string
+			sender := func(_ context.Context, _ *sysenv.Env, _ string, r Request, _ string) (Receipt, error) {
+				sent = append(sent, r.Text)
+				if strings.Contains(r.Text, "text of stuck") {
+					return Receipt{Status: StatusUnknown}, errCode(code, "outcome unknown")
+				}
+				return Receipt{Status: StatusAccepted}, nil
+			}
+			_, _ = consumeWith(context.Background(), env, "fiber", "host", w, sender)
+			putWish(t, env, "f", "force", "hold")
+			w.Idle = false
+			result, _ := consumeWith(context.Background(), env, "fiber", "host", w, sender)
+			if !strings.Contains(sent[len(sent)-1], "text of f") || strings.Contains(sent[len(sent)-1], "text of context") {
+				t.Fatalf("force entry behind an open batch: %+v sent %q", result, sent)
+			}
+			if n, _ := PendingCount(env, "fiber"); n != 2 {
+				t.Fatalf("pending=%d, want the open batch's two members", n)
+			}
+			root := mailboxDir(env, "fiber", "fiber")
+			if fiberContextHookEligible(root, Request{MessageID: "context"}) {
+				t.Fatal("hook took a member of an open batch")
+			}
+		})
+	}
+}
+
+func TestConsumeFreshReservationIsLeased(t *testing.T) {
+	env, w := consumeFixture(t)
+	w.Idle, w.Costly = true, true
+	putWish(t, env, "m", "ask", "fresh")
+	never := func(context.Context, *sysenv.Env, string, Request, string) (Receipt, error) {
+		t.Fatal("costly worker woken")
+		return Receipt{}, nil
+	}
+	for _, want := range []string{"fresh", "wait"} {
+		if result, err := consumeWith(context.Background(), env, "fiber", "host", w, never); err != nil || result.Action != want {
+			t.Fatalf("got %+v %v, want %s", result, err, want)
+		}
+	}
+	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey("m")+".json")
+	e := readEntry(t, path)
+	e.Attempt.OpenedAt = time.Now().Add(-3 * time.Minute).UnixNano()
+	if err := writeMailboxEntry(path, e); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := consumeWith(context.Background(), env, "fiber", "host", w, never); err != nil || result.Action != "fresh" {
+		t.Fatalf("an unanswered reservation never asks again: %+v %v", result, err)
+	}
+}
+
+func TestConsumeMarksAnUnfinishedHookClaimAsPossibleRepeat(t *testing.T) {
+	env, w := consumeFixture(t)
+	w.Idle = true
+	putWish(t, env, "m", "ask", "hold")
+	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey("m")+".json")
+	if _, err := claimBatch([]string{path}, w.Address, false); err != nil {
+		t.Fatal(err)
+	}
+	var text string
+	_, err := consumeWith(context.Background(), env, "fiber", "host", w, func(_ context.Context, _ *sysenv.Env, _ string, r Request, _ string) (Receipt, error) {
+		text = r.Text
+		return Receipt{Status: StatusAccepted}, nil
+	})
+	if err != nil || !strings.HasPrefix(text, "Possible repeat:") {
+		t.Fatalf("unfinished hook claim sent unmarked: %q %v", text, err)
+	}
+}
+
+func TestConsumeSupersededMemberAfterTheBatchsReceipt(t *testing.T) {
+	for _, sentBefore := range []bool{true, false} {
+		t.Run(fmt.Sprint(sentBefore), func(t *testing.T) {
+			env, w := consumeFixture(t)
+			w.Idle = true
+			scripts := t.TempDir()
+			script := filepath.Join(scripts, "shuttle")
+			current := func(answer string) {
+				if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '{\"current\":"+answer+"}\\n'\n"), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			current("true")
+			env.Set("PATH", scripts+string(os.PathListSeparator)+env.Getenv("PATH"))
+			signal := &ThreadSignal{UID: "child", Verb: "closed", Owner: "host", Stamp: time.Now().UTC().Format(time.RFC3339Nano)}
+			if err := Enqueue(env, InboxEntry{Address: "fiber", Request: Request{MessageID: "thread-m", Text: "thread child closed: result", ThreadSignal: signal}, Wishes: Wishes{Turn: "ask"}}); err != nil {
+				t.Fatal(err)
+			}
+			putWish(t, env, "plain", "ask", "hold")
+			root := mailboxDir(env, "fiber", "fiber")
+			items, err := pendingItems(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			a := newConsumedAttempt(w, items)
+			if err := pinConsumedBatch(root, &a); err != nil {
+				t.Fatal(err)
+			}
+			var texts []string
+			sender := func(ctx context.Context, env *sysenv.Env, _ string, r Request, address string) (Receipt, error) {
+				r.Address = address
+				r.MessageID += "-" + mailboxKey(address)[:16]
+				return withDedup(ctx, env, r, func(context.Context) dedupSendResult {
+					texts = append(texts, r.Text)
+					return dedupSendResult{Receipt: Receipt{MessageID: r.MessageID, Status: StatusAccepted}}
+				})
+			}
+			if sentBefore {
+				// The CLI died after a confirmed send and before the close.
+				_, _ = sender(context.Background(), env, "host", *a.Payload, w.Address)
+			}
+			current("false")
+			_, _ = consumeWith(context.Background(), env, "fiber", "host", w, sender)
+			plain := readEntry(t, filepath.Join(root, "offered", mailboxKey("plain")+".json"))
+			if plain.PossibleRepeat {
+				t.Fatalf("plain member marked as a possible repeat: %+v", plain)
+			}
+			if sentBefore && (len(texts) != 1 || plain.Attempt.Outcome != attemptDelivered) {
+				t.Fatalf("a delivered batch was sent again: %q %+v", texts, plain.Attempt)
+			}
+			if !sentBefore && (len(texts) != 1 || strings.Contains(texts[0], "thread child closed") || strings.Contains(texts[0], "Possible repeat")) {
+				t.Fatalf("never-sent batch: %q", texts)
+			}
+		})
 	}
 }

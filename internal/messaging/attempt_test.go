@@ -94,7 +94,7 @@ func TestHookThatDiesAfterItsClaimLeavesTheEntryOfferable(t *testing.T) {
 	root := mailboxDir(env, "fiber", "fiber")
 	const a = "shuttle://host/claude/A"
 	lost := errors.New("hook output lost")
-	if err := offerMailboxWithAck(root, a, func(Request) bool { return true }, func([]Request) error { return lost }, false, nil, "claude"); !errors.Is(err, lost) {
+	if err := offerMailboxWithAck(root, a, func(Request) bool { return true }, func([]Request) error { return lost }, nil, "claude"); !errors.Is(err, lost) {
 		t.Fatalf("offer = %v", err)
 	}
 	entry := readEntry(t, paths[0])
@@ -110,7 +110,7 @@ func TestHookThatDiesAfterItsClaimLeavesTheEntryOfferable(t *testing.T) {
 			got = append(got, r.MessageID)
 		}
 		return nil
-	}, false, nil, "claude"); err != nil {
+	}, nil, "claude"); err != nil {
 		t.Fatal(err)
 	}
 	if fmt.Sprint(got) != "[only]" {
@@ -123,21 +123,21 @@ func TestHookThatDiesAfterItsClaimLeavesTheEntryOfferable(t *testing.T) {
 }
 
 // TestRacedReadersDeliverAnEntryOnceWithADeliveredAttempt races the hook
-// offer against direct delivery. The inbox lock keeps the loser from reading
-// pending/; the claim makes the entry reach offered/ with a delivered attempt
-// whichever reader took it.
+// offer against the consumer's wake. The inbox lock keeps the loser from
+// reading pending/; the claim makes the entry reach offered/ with a delivered
+// attempt whichever reader took it.
 func TestRacedReadersDeliverAnEntryOnceWithADeliveredAttempt(t *testing.T) {
-	env := testEnv(t)
+	env, w := consumeFixture(t)
+	w.Idle = true
 	root := mailboxDir(env, "fiber", "fiber")
-	const a = "shuttle://host/claude/A"
-	transition(t, env, "execution-A", a)
 	for round := 0; round < 40; round++ {
 		id := fmt.Sprintf("raced-%d", round)
-		path := enqueueFiber(t, env, id)[0]
+		putWish(t, env, id, "ask", "hold")
+		path := filepath.Join(root, "pending", mailboxKey(id)+".json")
 		var takes atomic.Int32
 		sender := func(context.Context, *sysenv.Env, string, Request, string) (Receipt, error) {
 			takes.Add(1)
-			return Receipt{Status: StatusContextAdded}, nil
+			return Receipt{Status: StatusAccepted}, nil
 		}
 		start := make(chan struct{})
 		var wg sync.WaitGroup
@@ -146,17 +146,15 @@ func TestRacedReadersDeliverAnEntryOnceWithADeliveredAttempt(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			errs[0] = offerMailboxWithAck(root, a, func(Request) bool { return true }, func(batch []Request) error {
+			errs[0] = offerMailboxWithAck(root, w.Address, func(r Request) bool { return fiberContextHookEligible(root, r) }, func(batch []Request) error {
 				takes.Add(int32(len(batch)))
 				return nil
-			}, false, nil, "claude")
+			}, nil, "claude")
 		}()
 		go func() {
 			defer wg.Done()
 			<-start
-			errs[1] = offerMailboxEachValidated(root, func(Request) bool { return true }, nil, func(r Request) error {
-				return deliverFiberContextItemWith(context.Background(), env, "fiber", "host", a, r, sender)
-			})
+			_, errs[1] = consumeWith(context.Background(), env, "fiber", "host", w, sender)
 		}()
 		close(start)
 		wg.Wait()
@@ -308,7 +306,7 @@ func TestUnknownRolloverClosesAndReclaimsInOneEntry(t *testing.T) {
 		}
 		return Receipt{Status: StatusUnknown}, errCode("ambiguous_delivery", "lost again")
 	}
-	_ = deliverFiberContextItemWith(context.Background(), env, "fiber", "host", next, Request{MessageID: "rolled", Text: "text of rolled"}, sender)
+	_ = deliverPinned(t, env, next, Request{MessageID: "rolled", Text: "text of rolled"}, sender)
 	entry = readEntry(t, path)
 	if entry.AttemptAddress != next || !entry.PossibleRepeat || !entry.Attempt.open() || entry.Attempt.Conversation != next || entry.Attempt.Epoch != epoch {
 		t.Fatalf("after rolling forward, entry = %+v, attempt %+v", entry, entry.Attempt)
@@ -345,7 +343,7 @@ func TestDeliveredEntryKeepsTheModificationTimeRetentionRunsFrom(t *testing.T) {
 			if err := os.Chtimes(path, old, old); err != nil {
 				t.Fatal(err)
 			}
-			if err := offerMailboxWithAck(root, a, func(Request) bool { return true }, func([]Request) error { return nil }, false, nil, "claude"); err != nil {
+			if err := offerMailboxWithAck(root, a, func(Request) bool { return true }, func([]Request) error { return nil }, nil, "claude"); err != nil {
 				t.Fatal(err)
 			}
 		}},
@@ -396,11 +394,11 @@ func TestAmbiguousWakeToALiveReceiverIsRetriedAfterTheBound(t *testing.T) {
 			if !strings.HasPrefix(req.Text, "Possible repeat:") {
 				return dedupSendResult{Receipt: Receipt{Status: StatusUnknown, Transport: "codex-terminal"}, Err: errCode("ambiguous_delivery", "paste outcome unknown")}
 			}
-			return dedupSendResult{Receipt: Receipt{Status: StatusSubmitted, Transport: "codex-terminal"}}
+			return dedupSendResult{Receipt: Receipt{MessageID: req.MessageID, Status: StatusSubmitted, Transport: "codex-terminal"}}
 		})
 	}
 	deliver := func() error {
-		return deliverFiberContextItemWith(context.Background(), env, "fiber", "host", a, request, sender)
+		return deliverPinned(t, env, a, request, sender)
 	}
 	for i := 0; i < 2; i++ {
 		if err := deliver(); ErrorCode(err) != "ambiguous_delivery" {
@@ -414,23 +412,16 @@ func TestAmbiguousWakeToALiveReceiverIsRetriedAfterTheBound(t *testing.T) {
 	if !entry.Attempt.open() || entry.AttemptAddress != a {
 		t.Fatalf("within the bound, entry = %+v", entry)
 	}
-	entry.Attempt.OpenedAt = time.Now().Add(-liveAttemptRetryAfter).UnixNano()
-	if err := writeMailboxEntry(path, entry); err != nil {
-		t.Fatal(err)
-	}
+	expireAttempt(t, path)
 	if err := deliver(); err != nil {
 		t.Fatalf("retry = %v", err)
 	}
 	if len(sent) != 2 || sent[1].MessageID == sent[0].MessageID || !strings.HasPrefix(sent[1].Text, "Possible repeat:") {
 		t.Fatalf("sends = %+v", sent)
 	}
-	entry = readEntry(t, path)
-	if !entry.Attempt.open() || entry.Attempt.Retry != 1 || entry.AttemptAddress != a || entry.PossibleRepeat {
+	entry = readEntry(t, filepath.Join(root, "offered", filepath.Base(path)))
+	if entry.Attempt.Outcome != attemptDelivered || entry.Attempt.Retry != 1 || entry.PossibleRepeat {
 		t.Fatalf("after the retry, entry = %+v attempt %+v", entry, entry.Attempt)
-	}
-	// A crash after the retry's send retries with the retry's transport id.
-	if err := deliver(); err != nil || len(sent) != 2 {
-		t.Fatalf("replayed retry = %v, sends %d", err, len(sent))
 	}
 }
 
@@ -443,21 +434,12 @@ func dedupSender(sent *[]Request, outcome func(Request) (string, string)) func(c
 		return withDedup(ctx, env, req, func(context.Context) dedupSendResult {
 			*sent = append(*sent, req)
 			status, code := outcome(req)
-			result := dedupSendResult{Receipt: Receipt{Status: status, Transport: "codex-terminal"}}
+			result := dedupSendResult{Receipt: Receipt{MessageID: req.MessageID, Status: status, Transport: "codex-terminal"}}
 			if code != "" {
 				result.Err = errCode(code, "%s", code)
 			}
 			return result
 		})
-	}
-}
-
-func expireAttempt(t *testing.T, path string) {
-	t.Helper()
-	entry := readEntry(t, path)
-	entry.Attempt.OpenedAt = time.Now().Add(-liveAttemptRetryAfter).UnixNano()
-	if err := writeMailboxEntry(path, entry); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -476,7 +458,7 @@ func TestARejectedRetryIsSentAgainUnderTheRetryID(t *testing.T) {
 		return o.status, o.code
 	})
 	deliver := func() error {
-		return deliverFiberContextItemWith(context.Background(), env, "fiber", "host", a, request, sender)
+		return deliverPinned(t, env, a, request, sender)
 	}
 	if err := deliver(); ErrorCode(err) != "ambiguous_delivery" {
 		t.Fatalf("first = %v", err)
@@ -514,7 +496,7 @@ func TestAnOlderBuildsPossibleRepeatReplaysItsStoredReceipt(t *testing.T) {
 	if err := writeFiberMailboxAttempt(path, entry, b); err != nil {
 		t.Fatal(err)
 	}
-	if err := deliverFiberContextItemWith(context.Background(), env, "fiber", "host", b, request, sender); ErrorCode(err) != "ambiguous_delivery" {
+	if err := deliverPinned(t, env, b, request, sender); ErrorCode(err) != "ambiguous_delivery" {
 		t.Fatalf("delivery = %v, want the stored receipt replayed", err)
 	}
 	if len(sent) != 1 {
@@ -533,7 +515,7 @@ func TestAnOlderBuildReadsAMidRetryEntryAsPinnedWithoutAWarning(t *testing.T) {
 	var sent []Request
 	sender := dedupSender(&sent, func(Request) (string, string) { return StatusUnknown, "ambiguous_delivery" })
 	for i := 0; i < 2; i++ {
-		if err := deliverFiberContextItemWith(context.Background(), env, "fiber", "host", a, request, sender); ErrorCode(err) != "ambiguous_delivery" {
+		if err := deliverPinned(t, env, a, request, sender); ErrorCode(err) != "ambiguous_delivery" {
 			t.Fatal(err)
 		}
 		expireAttempt(t, path)
@@ -567,7 +549,7 @@ func TestAHeldApprovalIsNotRetried(t *testing.T) {
 		return Receipt{Status: StatusUnknown}, errCode("wake_held", "receiver approval is required")
 	}
 	for i := 0; i < 2; i++ {
-		if err := deliverFiberContextItemWith(context.Background(), env, "fiber", "host", a, request, sender); ErrorCode(err) != "wake_held" {
+		if err := deliverPinned(t, env, a, request, sender); ErrorCode(err) != "wake_held" {
 			t.Fatal(err)
 		}
 		expireAttempt(t, path)
@@ -591,14 +573,10 @@ func TestALiveConversationGetsOneRetry(t *testing.T) {
 		return Receipt{Status: StatusUnknown}, errCode("ambiguous_delivery", "lost reply")
 	}
 	for i := 0; i < 4; i++ {
-		if err := deliverFiberContextItemWith(context.Background(), env, "fiber", "host", a, request, sender); ErrorCode(err) != "ambiguous_delivery" {
+		if err := deliverPinned(t, env, a, request, sender); ErrorCode(err) != "ambiguous_delivery" {
 			t.Fatalf("delivery %d = %v", i, err)
 		}
-		entry := readEntry(t, path)
-		entry.Attempt.OpenedAt = time.Now().Add(-liveAttemptRetryAfter).UnixNano()
-		if err := writeMailboxEntry(path, entry); err != nil {
-			t.Fatal(err)
-		}
+		expireAttempt(t, path)
 	}
 	entry := readEntry(t, path)
 	if len(ids) != 2 || !entry.Attempt.open() || entry.Attempt.Retry != 1 || entry.AttemptAddress != a {
@@ -623,7 +601,7 @@ func TestAttemptAddressAloneStartsItsRetryWaitWhenFirstSeenUnknown(t *testing.T)
 		calls++
 		return Receipt{Status: StatusUnknown}, errCode("ambiguous_delivery", "lost reply")
 	}
-	if err := deliverFiberContextItemWith(context.Background(), env, "fiber", "host", a, request, sender); ErrorCode(err) != "ambiguous_delivery" {
+	if err := deliverPinned(t, env, a, request, sender); ErrorCode(err) != "ambiguous_delivery" {
 		t.Fatalf("delivery = %v", err)
 	}
 	entry := readEntry(t, path)

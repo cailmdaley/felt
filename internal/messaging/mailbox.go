@@ -375,7 +375,7 @@ func OfferMailbox(env *sysenv.Env, harness, id, host string, emit func([]Request
 	}, func(batch []Request) error {
 		offered = true
 		return emit(batch)
-	}, false, nil, harness)
+	}, nil, harness)
 	if err != nil || offered {
 		return err
 	}
@@ -383,26 +383,10 @@ func OfferMailbox(env *sysenv.Env, harness, id, host string, emit func([]Request
 	return offerLinkedFiberContext(env, harness, id, host, emit)
 }
 
-// offerMailboxEach acknowledges each request as soon as its individual
-// delivery succeeds. Fiber context uses this because delivery can cross
-// conversations: a later failure must not replay earlier successes to a
-// successor under a different transport deduplication key.
-func offerMailboxEachValidated(dir string, accepts func(Request) bool, current func(context.Context, Request) (bool, error), emit func(Request) error) error {
-	return offerMailboxWithAck(dir, "", accepts, func(batch []Request) error {
-		for _, request := range batch {
-			if err := emit(request); err != nil {
-				return err
-			}
-		}
-		return nil
-	}, true, current, "")
-}
-
-// offerMailboxWithAck selects due, accepted entries under the inbox lock and
-// emits them. A batch offer (each false) claims the batch for conversation
-// before emitting it and closes the attempt delivered after; with each, the
-// emit claims each entry itself and a successful one is closed delivered.
-func offerMailboxWithAck(dir, conversation string, accepts func(Request) bool, emit func([]Request) error, each bool, current func(context.Context, Request) (bool, error), harness string) error {
+// offerMailboxWithAck selects due, accepted entries under the inbox lock,
+// claims the batch for conversation, emits it and closes the attempt
+// delivered.
+func offerMailboxWithAck(dir, conversation string, accepts func(Request) bool, emit func([]Request) error, current func(context.Context, Request) (bool, error), harness string) error {
 	lock, err := os.OpenFile(filepath.Join(dir, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return err
@@ -448,13 +432,11 @@ func offerMailboxWithAck(dir, conversation string, accepts func(Request) bool, e
 		if !entry.due(time.Now()) || !accepts(entry.Request) {
 			continue
 		}
-		if !each && entry.Attempt.open() && entry.AttemptAddress == "" && !entry.Attempt.Launch {
-			entry.closeAttempt(attemptAmbiguous)
-			if err := writeMailboxEntryKeepingTime(path, entry); err != nil {
-				return err
-			}
+		it := mailboxPendingItem{path, entry}
+		if err := settleUnfinishedHookClaim(&it); err != nil {
+			return err
 		}
-		items = append(items, mailboxPendingItem{path, entry})
+		items = append(items, it)
 	}
 	sortPendingItems(items)
 	items, validationErr := validateMailboxItems(dir, items, current)
@@ -465,16 +447,13 @@ func offerMailboxWithAck(dir, conversation string, accepts func(Request) bool, e
 	size := 0
 	lifecycleSelected := false
 	for _, it := range items {
-		if !each && hasThreadSignalValidation(it.entry.Request) {
+		if hasThreadSignalValidation(it.entry.Request) {
 			if lifecycleSelected {
 				continue
 			}
 			lifecycleSelected = true
 		}
-		emission := it.entry.Request
-		if !each {
-			emission = hookEmission(it.entry)
-		}
+		emission := hookEmission(it.entry)
 		limit, cost := 64<<10, len(emission.Text)
 		if harness == "claude" {
 			limit = claudeHookBatchBytes
@@ -498,73 +477,46 @@ func offerMailboxWithAck(dir, conversation string, accepts func(Request) bool, e
 		}
 	}
 	items = selected
-	if !each {
-		if current != nil {
-			fresh := items[:0]
-			for _, it := range items {
-				if hasThreadSignalValidation(it.entry.Request) {
-					var currentNow bool
-					var checkErr error
-					it, currentNow, checkErr = validateMailboxItem(dir, it, current)
-					if checkErr != nil {
-						validationErr = errors.Join(validationErr, checkErr)
-						continue
-					}
-					if !currentNow {
-						continue
-					}
+	if current != nil {
+		fresh := items[:0]
+		for _, it := range items {
+			if hasThreadSignalValidation(it.entry.Request) {
+				var currentNow bool
+				var checkErr error
+				it, currentNow, checkErr = validateMailboxItem(dir, it, current)
+				if checkErr != nil {
+					validationErr = errors.Join(validationErr, checkErr)
+					continue
 				}
-				fresh = append(fresh, it)
+				if !currentNow {
+					continue
+				}
 			}
-			items = fresh
-			batch = batch[:0]
-			for _, it := range items {
-				batch = append(batch, hookEmission(it.entry))
-			}
+			fresh = append(fresh, it)
 		}
-		if len(items) == 0 {
-			return validationErr
+		items = fresh
+		batch = batch[:0]
+		for _, it := range items {
+			batch = append(batch, hookEmission(it.entry))
 		}
-		paths := make([]string, len(items))
-		for i, it := range items {
-			paths[i] = it.path
-		}
-		if _, err := claimBatch(paths, conversation, false); err != nil {
-			return err
-		}
-		if err := emit(batch); err != nil {
-			return err
-		}
-		if err := closeAttempts(paths, attemptDelivered); err != nil {
-			return err
-		}
+	}
+	if len(items) == 0 {
 		return validationErr
 	}
-	var deliveryErr error
-	for _, it := range items {
-		if current != nil && hasThreadSignalValidation(it.entry.Request) {
-			var currentNow bool
-			var checkErr error
-			it, currentNow, checkErr = validateMailboxItem(dir, it, current)
-			if checkErr != nil {
-				validationErr = errors.Join(validationErr, checkErr)
-				continue
-			}
-			if !currentNow {
-				continue
-			}
-		}
-		if err := emit([]Request{it.entry.Request}); err != nil {
-			if deliveryErr == nil {
-				deliveryErr = err
-			}
-			continue
-		}
-		if err := closeAttempts([]string{it.path}, attemptDelivered); err != nil {
-			return err
-		}
+	paths := make([]string, len(items))
+	for i, it := range items {
+		paths[i] = it.path
 	}
-	return errors.Join(validationErr, deliveryErr)
+	if _, err := claimBatch(paths, conversation, false); err != nil {
+		return err
+	}
+	if err := emit(batch); err != nil {
+		return err
+	}
+	if err := closeAttempts(paths, attemptDelivered); err != nil {
+		return err
+	}
+	return validationErr
 }
 
 const hookRepeatWarning = "Possible repeat: an earlier hook offer had an unknown outcome.\n\n"
