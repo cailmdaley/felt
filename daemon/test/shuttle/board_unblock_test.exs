@@ -103,6 +103,47 @@ defmodule Shuttle.BoardUnblockTest do
            ]
   end
 
+  test "a settled unblock's owed line is appended by the next poll without the wait", %{
+    dir: dir
+  } do
+    events = Path.join(dir, "events.jsonl")
+    Shuttle.Test.Env.put_env("SHUTTLE_HOST", "host")
+    Shuttle.Test.Env.put_env("SHUTTLE_EVENTS", "")
+    Shuttle.Test.Env.put_env("SHUTTLE_EVENTS_FILE", events)
+    entries = family(dir, later(2))
+    # The ledger cannot be opened as a file.
+    File.mkdir_p!(events)
+
+    assert ExUnit.CaptureLog.capture_log(fn ->
+             assert :ok = Threads.capture_results(entries, "host")
+           end) =~ "Recording unblock thread-"
+
+    assert [{id, _}] = InboxPublications.pending()
+    InboxPublications.settle(id)
+    File.rmdir!(events)
+
+    # The thread no longer waits on the blocker, so nothing is captured again.
+    unblocked =
+      Enum.map(entries, fn entry ->
+        update_in(entry, [:fiber, "shuttle"], fn
+          nil -> nil
+          shuttle -> Map.delete(shuttle, "blocked_on")
+        end)
+      end)
+
+    for _ <- 1..3, do: Threads.deliver_results(unblocked, "host")
+
+    assert board(dir) == [
+             %{"kind" => "unblocked", "fiber" => "child", "text" => "Blocker closed"}
+           ]
+
+    assert [%{"id" => "brd-" <> ^id}] =
+             events
+             |> File.read!()
+             |> String.split("\n", trim: true)
+             |> Enum.map(&Jason.decode!/1)
+  end
+
   test "runner reports an unavailable input directory without raising" do
     dir = Path.join(System.tmp_dir!(), "missing-#{System.unique_integer([:positive])}")
 

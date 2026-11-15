@@ -5,6 +5,7 @@ defmodule Shuttle.ThreadCaptureTest do
   defmodule CountingRunner do
     def cmd("shuttle", args, opts) do
       send(Shuttle.Env.app(:capture_test_pid), {:shuttle, args})
+      send(Shuttle.Env.app(:capture_test_pid), {:shuttle_input, opts[:input]})
       Shuttle.Runner.Default.cmd("shuttle", args, opts)
     end
 
@@ -49,6 +50,14 @@ defmodule Shuttle.ThreadCaptureTest do
     [hub | children]
   end
 
+  defp flush_inputs do
+    receive do
+      {:shuttle_input, _} -> flush_inputs()
+    after
+      0 -> :ok
+    end
+  end
+
   defp shuttle_calls(acc \\ []) do
     receive do
       {:shuttle, args} -> shuttle_calls([args | acc])
@@ -76,13 +85,16 @@ defmodule Shuttle.ThreadCaptureTest do
       "capture of 200 recent closes, first and repeat polls (ms): #{inspect(Enum.map(timings, &div(&1, 1000)))}"
     )
 
-    # Signals older than the retention window are skipped before any shell.
+    # Signals older than the retention window are skipped before the shell:
+    # the poll's one call captures nothing and appends any owed board lines.
     old = DateTime.utc_now() |> DateTime.add(-15 * 24 * 3600) |> DateTime.to_iso8601()
+    flush_inputs()
 
     {micros, :ok} =
       :timer.tc(fn -> Threads.capture_results(closed_family(store, 200, old), "test-host") end)
 
-    assert shuttle_calls() == []
+    assert shuttle_calls() == [["inbox", "thread-put"]]
+    assert_received {:shuttle_input, "[]"}
     IO.puts("capture of 200 closes outside retention (ms): #{div(micros, 1000)}")
   end
 

@@ -989,7 +989,7 @@ defmodule Shuttle.Threads do
   inbox thread-put` call: each owned thread's close, ask, handoff, rest and
   verdict, and an unblock note for each owned thread whose `blocked_on`
   names a fiber that has closed. Signals older than the retention window are
-  skipped before any shell; the inbox refuses those at or before its capture
+  skipped before the shell; the inbox refuses those at or before its capture
   baseline, and the first capture of an id fixes its publication.
 
   Every result reaches the orchestrator as context. A close or ask asks for a
@@ -999,8 +999,9 @@ defmodule Shuttle.Threads do
   session itself, through an asker notice (`<id>-asker`). A thread nobody
   asked for, and an unblock note, wake no one.
   An unblock note carries its board line, which its entry owes until
-  `thread-put` appends it; a line that could not be appended is logged and
-  tried again by the next capture. A refused publication or a failed capture
+  `thread-put` appends it; every call appends each line the routing inbox
+  owes, so a line that could not be appended is logged and tried again by the
+  next poll, whether or not the thread still waits on its blocker. A refused publication or a failed capture
   is logged, and the next poll captures the same signals again.
   Reading a blocker outside the poller's cache shells felt, so this runs on the
   delivery task, not the poll.
@@ -1133,9 +1134,8 @@ defmodule Shuttle.Threads do
   end
 
   # Each publication is tried; the ones the inbox refused, and board lines
-  # that could not be appended, are logged.
-  defp publish([]), do: :ok
-
+  # that could not be appended, are logged. The call runs on every poll, with
+  # nothing to capture too, since it appends the lines the routing inbox owes.
   defp publish(publications) do
     with {:ok, output} <-
            Shuttle.CLI.run(["inbox", "thread-put"],

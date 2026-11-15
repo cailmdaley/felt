@@ -153,71 +153,68 @@ func TestThreadPutAppendsTheBoardLineWhenItCreatesTheEntry(t *testing.T) {
 }
 
 // An unblock's entry owes its board line until the line is appended. An
-// append that failed (or a thread-put killed before it) is retried by the
-// next capture of the same publication, also after the entry is placed; the
-// line's identity is the publication's, so a repeat replaces it.
+// append that failed (or a thread-put killed before it) is retried by every
+// later thread-put, also after the entry is placed and whether or not the
+// publication is captured again; the retry appends the line the first capture
+// stored, under the publication's identity, so a repeat replaces it.
 func TestThreadPutRetriesAnOwedBoardLine(t *testing.T) {
 	t.Parallel()
-	env := testEnv(t)
-	events := filepath.Join(t.TempDir(), "events.jsonl")
-	env.Set("SHUTTLE_HOST", "host")
-	env.Set("SHUTTLE_DATA_DIR", filepath.Join(t.TempDir(), "data"))
-	env.Set("SHUTTLE_EVENTS", "")
-	env.Set("SHUTTLE_EVENTS_FILE", events)
-	var out bytes.Buffer
-	env.Stdout, env.Stderr = &out, &bytes.Buffer{}
-	run := func(input string, args ...string) string {
-		t.Helper()
-		out.Reset()
-		env.Stdin = strings.NewReader(input)
-		if code := Run(env, args); code != 0 {
-			t.Fatalf("%v: exit %d (%s)", args, code, out.String())
-		}
-		return strings.TrimSpace(out.String())
+	publication := func(text string) string {
+		batch, _ := json.Marshal([]map[string]any{{
+			"id":     "thread-unblock",
+			"record": map[string]any{"owner": "host", "store": "/s", "parent_uid": "p", "text": "thread a unblocked: " + text, "retained_at": time.Now().UTC().Format(time.RFC3339Nano)},
+			"board":  map[string]any{"kind": "unblocked", "fiber": "a", "text": text},
+		}})
+		return string(batch)
 	}
-	lines := func() []map[string]any {
-		t.Helper()
-		b, err := os.ReadFile(events)
-		if os.IsNotExist(err) {
-			return nil
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		var got []map[string]any
-		for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
-			var r map[string]any
-			if err := json.Unmarshal([]byte(line), &r); err != nil {
+	for name, retry := range map[string]string{
+		// The thread no longer waits on the blocker: nothing is captured.
+		"without a re-capture": "[]",
+		// The blocker was renamed after its close: the same publication renders
+		// edited text.
+		"from the first capture's record": publication("EDITED closed"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
+			events := filepath.Join(t.TempDir(), "events.jsonl")
+			env.Set("SHUTTLE_HOST", "host")
+			env.Set("SHUTTLE_DATA_DIR", filepath.Join(t.TempDir(), "data"))
+			env.Set("SHUTTLE_EVENTS", "")
+			env.Set("SHUTTLE_EVENTS_FILE", events)
+			var out bytes.Buffer
+			env.Stdout, env.Stderr = &out, &bytes.Buffer{}
+			run := func(input string, args ...string) string {
+				t.Helper()
+				out.Reset()
+				env.Stdin = strings.NewReader(input)
+				if code := Run(env, args); code != 0 {
+					t.Fatalf("%v: exit %d (%s)", args, code, out.String())
+				}
+				return strings.TrimSpace(out.String())
+			}
+			run("", "inbox", "thread-state")
+			// The ledger cannot be opened as a file.
+			if err := os.Mkdir(events, 0700); err != nil {
 				t.Fatal(err)
 			}
-			got = append(got, r)
-		}
-		return got
-	}
-	run("", "inbox", "thread-state")
-	batch, _ := json.Marshal([]map[string]any{{
-		"id":     "thread-unblock",
-		"record": map[string]any{"owner": "host", "store": "/s", "parent_uid": "p", "text": "thread a unblocked: b closed", "retained_at": time.Now().UTC().Format(time.RFC3339Nano)},
-		"board":  map[string]any{"kind": "unblocked", "fiber": "a", "text": "b closed"},
-	}})
-	// The ledger cannot be opened as a file.
-	if err := os.Mkdir(events, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if got := run(string(batch), "inbox", "thread-put"); !strings.Contains(got, `"created":["thread-unblock"]`) || !strings.Contains(got, `"board_errors":[{"id":"thread-unblock"`) {
-		t.Fatal(got)
-	}
-	if err := os.Remove(events); err != nil {
-		t.Fatal(err)
-	}
-	// Placed before the retry: the obligation follows the entry to offered.
-	run("", "inbox", "route", "thread-unblock", "--current", "true", "--record", `{"parent_uid":"p","parent_host":"host","store":"/s"}`, "--key", "/s:p")
-	for i := 0; i < 2; i++ {
-		if got := run(string(batch), "inbox", "thread-put"); got != `{"board_errors":[],"created":[],"refused":[]}` {
-			t.Fatalf("capture %d: %s", i, got)
-		}
-	}
-	if got := lines(); len(got) != 1 || got[0]["id"] != "brd-thread-unblock" || got[0]["kind"] != "unblocked" || got[0]["text"] != "b closed" {
-		t.Fatalf("%v", got)
+			if got := run(publication("b closed"), "inbox", "thread-put"); !strings.Contains(got, `"created":["thread-unblock"]`) || !strings.Contains(got, `"board_errors":[{"id":"thread-unblock"`) {
+				t.Fatal(got)
+			}
+			if err := os.Remove(events); err != nil {
+				t.Fatal(err)
+			}
+			// Placed before the retry: the obligation follows the entry to offered.
+			run("", "inbox", "route", "thread-unblock", "--current", "true", "--record", `{"parent_uid":"p","parent_host":"host","store":"/s"}`, "--key", "/s:p")
+			for i, input := range []string{retry, retry, "[]"} {
+				if got := run(input, "inbox", "thread-put"); got != `{"board_errors":[],"created":[],"refused":[]}` {
+					t.Fatalf("call %d: %s", i, got)
+				}
+			}
+			records := readBoardRecords(t, events)
+			if len(records) != 1 || records[0].ID != "brd-thread-unblock" || records[0].Kind != "unblocked" || records[0].Text != "b closed" {
+				t.Fatalf("%+v", records)
+			}
+		})
 	}
 }

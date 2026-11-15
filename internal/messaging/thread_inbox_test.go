@@ -760,3 +760,46 @@ func TestThreadImportTimeDoesNotGrowWithTheMailboxTree(t *testing.T) {
 		t.Fatalf("import took %v; the daemon's timeout is 60s", elapsed)
 	}
 }
+
+// An owed board line lives in its entry: recording the append keeps the
+// offered entry's retention clock, and an obligation still owed when the
+// offered entry expires is gone with it.
+func TestOwedBoardLineExpiresWithItsOfferedEntry(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	bootThread(t, env)
+	for _, id := range []string{"thread-owed", "thread-appended"} {
+		record := threadRecord()
+		record["board"] = map[string]any{"kind": "unblocked", "fiber": "a", "text": id}
+		capture(t, env, ThreadPublication{id, record})
+		f := resolved("host")
+		f.ID = id
+		route(t, env, f)
+	}
+	owed, err := OwedBoardLines(env)
+	if err != nil || len(owed) != 2 {
+		t.Fatal(owed, err)
+	}
+	settled := time.Now().Add(-mailboxRetention - time.Hour)
+	for _, id := range []string{"thread-owed", "thread-appended"} {
+		if err := os.Chtimes(filepath.Join(routingRoot(env), "offered", mailboxKey(id)+".json"), settled, settled); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := BoardLineAppended(env, "thread-appended"); err != nil {
+		t.Fatal(err)
+	}
+	owed, err = OwedBoardLines(env)
+	if err != nil || len(owed) != 1 || owed[0].ID != "thread-owed" || owed[0].Board.(map[string]any)["text"] != "thread-owed" {
+		t.Fatal(owed, err)
+	}
+	if err := pruneOffered(routingRoot(env), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if left, _ := os.ReadDir(filepath.Join(routingRoot(env), "offered")); len(left) != 0 {
+		t.Fatal("recording the append restarted retention", left)
+	}
+	if owed, err = OwedBoardLines(env); err != nil || len(owed) != 0 {
+		t.Fatal(owed, err)
+	}
+}

@@ -40,15 +40,16 @@ payload, or the state, is corrupt, leaving it untouched.`,
 		Use:   "thread-put",
 		Short: "Capture thread publications into the routing inbox",
 		Long: `Read a JSON array of {"id", "record", "board"} thread publications on
-stdin and enqueue each into the routing inbox. A publication's optional board
-record is stored in its entry, which owes the line until it is appended: this
-call appends each line its publications' entries owe, under an identity the
-publication fixes, so a repeat after a lost record of the append replaces the
-line rather than adding one. Prints {"created": [ids], "refused": [{"id",
-"error"}], "board_errors": [{"id", "error"}]}: the ids this call stored, the
-publications the inbox did not take, each tried whatever the others' answers,
-and the board lines that could not be appended, which the next capture of the
-same publication tries again.`,
+stdin, possibly empty, and enqueue each into the routing inbox. A
+publication's optional board record is stored in its entry, which owes the
+line until it is appended. Every call then appends each line the routing
+inbox's entries owe, pending or offered, from the record the first capture
+stored and under the identity brd-<id>, so a repeat after a lost record of
+the append replaces the line rather than adding one. Prints {"created":
+[ids], "refused": [{"id", "error"}], "board_errors": [{"id", "error"}]}: the
+ids this call stored, the publications the inbox did not take, each tried
+whatever the others' answers, and the owed lines that could not be appended,
+which the next call tries again.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var input []struct {
@@ -70,16 +71,18 @@ same publication tries again.`,
 				publications[i] = p.ThreadPublication
 			}
 			c := messaging.CaptureThreads(a.env, publications)
+			owed, err := messaging.OwedBoardLines(a.env)
+			if err != nil {
+				return err
+			}
 			boardErrors := []messaging.ThreadRefusal{}
-			for _, i := range c.Owed {
-				board := *input[i].Board
-				board.ID = "brd-" + input[i].ID
-				err := a.appendBoard(board)
+			for _, line := range owed {
+				err := a.appendOwedBoardLine(line)
 				if err == nil {
-					err = messaging.BoardLineAppended(a.env, input[i].ID)
+					err = messaging.BoardLineAppended(a.env, line.ID)
 				}
 				if err != nil {
-					boardErrors = append(boardErrors, messaging.ThreadRefusal{ID: input[i].ID, Error: err.Error()})
+					boardErrors = append(boardErrors, messaging.ThreadRefusal{ID: line.ID, Error: err.Error()})
 				}
 			}
 			return json.NewEncoder(a.env.Stdout).Encode(map[string]any{"created": c.Created, "refused": c.Refused, "board_errors": boardErrors})
@@ -135,4 +138,19 @@ call recorded. A placed result is enqueued in the recipient fiber's inbox.`,
 		},
 	}
 	return []*cobra.Command{state, capture, routes, route, settle}
+}
+
+// appendOwedBoardLine appends an owed line from the board record its entry
+// stored, under the publication's identity.
+func (a *app) appendOwedBoardLine(line messaging.OwedBoardLine) error {
+	b, err := json.Marshal(line.Board)
+	if err != nil {
+		return err
+	}
+	var board boardRecord
+	if err = json.Unmarshal(b, &board); err != nil {
+		return err
+	}
+	board.ID = "brd-" + line.ID
+	return a.appendBoard(board)
 }

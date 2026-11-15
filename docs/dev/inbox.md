@@ -82,14 +82,15 @@ Either kind of inbox refuses a 129th pending entry with `queue_full`, except the
 
 A thread's owner captures its close, ask, handoff, rest and verdict publications, and its unblock notes, into the host's routing inbox: the inbox at address `threads`, holding every thread publication this host captured and has not yet placed.
 There is no thread publication queue outside the inbox.
-Each poll's delivery task captures in one `shuttle inbox thread-put` call, after skipping signals older than the 14-day retention window; the Poller itself shells nothing for threads, and a failed capture is logged and repeated by the next poll.
+Each poll's delivery task captures in one `shuttle inbox thread-put` call, made even when it has nothing to capture, after skipping signals older than the 14-day retention window; the Poller itself shells nothing for threads, and a failed capture is logged and repeated by the next poll.
 `thread-put` tries every publication and reports the ones the inbox refused, such as a close whose text is over 64 KiB; the daemon logs each refusal, and one refused publication never stops the rest.
 The producer keeps its exact lifecycle-derived ids.
 A re-capture finds the id pending or offered in the routing inbox and stores nothing, so the first capture fixes the publication and its wishes even when a later poll renders an edited outcome.
 `Enqueue` stores a routing entry only when its stamp is after the capture baseline (`mailboxes/threads.json`, below) and, like every inbox entry, at most 14 days old.
-An unblock note carries its board line, which its entry stores and owes until the line is appended: `thread-put` appends every line its publications' entries owe, pending or offered, then records it in the entry.
-A failed append, or a `thread-put` killed between creating the entry and appending, leaves the line owed, and the next capture of the same note appends it; the line's board id is `brd-<publication id>`, so a repeat after an append whose record was lost replaces the line rather than adding one.
-A note no poll captures again (its thread no longer waits on the blocker) keeps an owed line it never appends.
+An unblock note carries its board line, which its entry stores and owes until the line is appended: every `thread-put` call, after capturing, appends each line the routing inbox's entries owe, pending or offered, then records it in the entry.
+The line appended is the board record the first capture stored, never a later poll's rendering, and its board id is `brd-<publication id>`, so a repeat after an append whose record was lost replaces the line rather than adding one.
+A failed append, or a `thread-put` killed between creating the entry and appending, leaves the line owed, and the next poll appends it, whether or not its thread still waits on the blocker; routing never waits for the append.
+Recording the append keeps the entry's modification time, so an offered entry still expires 14 days after it settles, and a line it still owes then expires with it.
 
 An entry's `routing` record names its recipient fiber by `parent_uid`, marked `parent_unresolved` until the daemon resolves it, or, for an asker notice, the asking `session`.
 Each poll lists the routing inbox once (`inbox routes`) and advances every entry with `inbox route`, passing the signal's fresh lifecycle currency and, once it resolves, the recipient the daemon read from authoritative documents: past an archived parent, never guessed from a slug.
@@ -293,7 +294,7 @@ The session-only Claude fallback claims by moving an entry into `fallback/` and 
 | `shuttle inbox ls <address>` | Pending entries oldest first; `--json` includes wishes, queued time, sender and open attempt |
 | `shuttle inbox consume <fiber-key> <address-or-dash> <epoch> [--idle] [--unknown] [--costly]` | Consume for the current receiver, or with `-` and epoch 0 for a fiber with no worker; one JSON object with `action` (`wait`, `wake`, `context`, `fresh`, `launch`), the `members` sent or reserved, and `turn` when an entry asks for a turn the worker's facts would decide. The answer is printed even when an open batch's send fails, which exits nonzero |
 | `shuttle inbox thread-state` | Establish the thread capture window and import an older daemon's thread outbox; print `baseline` and any `skipped` records and `cleanup_error`, or exit 3 on a corrupt outbox or state |
-| `shuttle inbox thread-put` | Capture a JSON array of `{id, record, board}` publications from stdin into the routing inbox, appending a `board` record when it creates that entry; print `{"created": [ids], "refused": [{id, error}], "board_errors": [{id, error}]}`, trying every publication |
+| `shuttle inbox thread-put` | Capture a JSON array of `{id, record, board}` publications from stdin into the routing inbox, storing a `board` record in that entry, then append every board line the routing inbox's entries owe, from the stored record; print `{"created": [ids], "refused": [{id, error}], "board_errors": [{id, error}]}`, trying every publication |
 | `shuttle inbox routes` | List the routing inbox's pending publications as `{id, record}` |
 | `shuttle inbox route <id> --current true\|false\|unknown [--record <json> [--key <key>]]` | Advance one routing entry from the daemon's fresh facts: the resolved recipient's `record`, and its inbox `key` when the daemon owns it; print `action`: `wait`, `forward` or `session` with the entry's `record`, or the disposition it recorded (`placed`, `superseded`, `expired`) |
 | `shuttle inbox settle <id> forwarded\|delivered\|undeliverable` | Record a routing entry's confirmed handoff and move it to offered |
