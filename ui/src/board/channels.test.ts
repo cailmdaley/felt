@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { RECENT_MS, arranged, channelLines, composeChannels, composeMessages, hideKey, liveness, railOrder, reordered, setAsideKey, showKey, threadOf, unpinKey, waitsSince, type BoardRecord, type Channel } from './channels.js'
+import { RECENT_MS, arranged, channelLines, continues, composeChannels, composeMessages, hideKey, liveness, railOrder, reordered, setAsideKey, showKey, threadOf, unpinKey, waitsSince, type BoardRecord, type Channel } from './channels.js'
 import { inFlightBand } from './KanbanReadModel.js'
 import { card } from './testFixtures.js'
 import { ThreadIndex } from './threads.js'
@@ -36,13 +36,13 @@ describe('composeChannels', () => {
   it('groups by shuttle.channel, inherited through the orchestrator, else by office, else by top-level; chaired channels first by name', () => {
     const channels = compose(all)
     expect(channels.map(channel => [channel.key, channel.name, channel.chaired, channel.members.map(member => member.id)])).toStrictEqual([
-      ['channel:analyst', 'Analyst', true, ['shear']],
+      ['role:analyst', 'Analyst', true, ['shear']],
       ['channel:unions', 'UNIONS', true, ['pando/unions', 'east-unions', 'west-unions', 'pando/unions/modes']],
       ['channel:vizier', 'Vizier', true, ['life/vizier', 'loom/email/morning-post']],
       ['fiber:R', 'Moving house', false, ['van']],
       ['fiber:O', 'Old notes', false, ['old']],
     ])
-    expect(named(channels, 'channel:analyst').title).toBe('Analyst · the shear desk')
+    expect(named(channels, 'role:analyst').title).toBe('Analyst · the shear desk')
     expect(named(channels, 'channel:unions').families).toStrictEqual(['U'])
   })
 
@@ -92,17 +92,17 @@ describe('composeChannels', () => {
   })
 
   it('hides a channel until a later show or something waiting after the hide', () => {
-    const hide = (dismissed: string[], cards = all) => named(compose(cards, { dismissed }), 'channel:analyst')
+    const hide = (dismissed: string[], cards = all) => named(compose(cards, { dismissed }), 'role:analyst')
     expect([hide([]).hidden, hide([]).listed]).toStrictEqual([0, true])
-    expect([hide([hideKey('channel:analyst', now - minute)]).hidden, hide([hideKey('channel:analyst', now - minute)]).listed]).toStrictEqual([now - minute, false])
+    expect([hide([hideKey('role:analyst', now - minute)]).hidden, hide([hideKey('role:analyst', now - minute)]).listed]).toStrictEqual([now - minute, false])
     // Pinned, it is still out of the rail.
-    expect(named(compose(all, { dismissed: [hideKey('channel:analyst', now - minute)], pinned: new Map([['channel:analyst', now]]) }), 'channel:analyst').listed).toBe(false)
-    expect(hide([hideKey('channel:analyst', now - 2 * minute), showKey('channel:analyst', now - minute)]).hidden).toBe(0)
-    expect(hide([showKey('channel:analyst', now - 2 * minute), hideKey('channel:analyst', now - minute)]).hidden).toBe(now - minute)
+    expect(named(compose(all, { dismissed: [hideKey('role:analyst', now - minute)], pinned: new Map([['role:analyst', now]]) }), 'role:analyst').listed).toBe(false)
+    expect(hide([hideKey('role:analyst', now - 2 * minute), showKey('role:analyst', now - minute)]).hidden).toBe(0)
+    expect(hide([showKey('role:analyst', now - 2 * minute), hideKey('role:analyst', now - minute)]).hidden).toBe(now - minute)
     // A wait older than the hide keeps it hidden; one that began after brings it back.
     const asking = (minutes: number) => [...all.filter(each => each !== shear), { ...shear, status: 'active' as const, ask: { text: 'Which mask?', at: at(minutes) } }]
-    expect(hide([hideKey('channel:analyst', now - 5 * minute)], asking(10)).hidden).toBe(now - 5 * minute)
-    const back = hide([hideKey('channel:analyst', now - 5 * minute)], asking(1))
+    expect(hide([hideKey('role:analyst', now - 5 * minute)], asking(10)).hidden).toBe(now - 5 * minute)
+    const back = hide([hideKey('role:analyst', now - 5 * minute)], asking(1))
     expect([back.hidden, back.waiting, back.listed]).toStrictEqual([0, true, true])
   })
 
@@ -128,28 +128,28 @@ describe('the rail\'s order', () => {
   const channels = compose(all)
 
   it('puts the channels an order does not name first, as composed, then the order\'s', () => {
-    expect(keys(arranged(channels, []))).toStrictEqual(['channel:analyst', 'channel:unions', 'channel:vizier', 'fiber:R', 'fiber:O'])
-    expect(keys(arranged(channels, ['fiber:O', 'channel:vizier', 'channel:gone', 'channel:analyst']))).toStrictEqual(['channel:unions', 'fiber:R', 'fiber:O', 'channel:vizier', 'channel:analyst'])
+    expect(keys(arranged(channels, []))).toStrictEqual(['role:analyst', 'channel:unions', 'channel:vizier', 'fiber:R', 'fiber:O'])
+    expect(keys(arranged(channels, ['fiber:O', 'channel:vizier', 'channel:gone', 'role:analyst']))).toStrictEqual(['channel:unions', 'fiber:R', 'fiber:O', 'channel:vizier', 'role:analyst'])
   })
 
   it('floats what waits on the human, the newest wait first, above the human\'s order', () => {
     expect(channels.filter(channel => channel.waiting).map(channel => [channel.key, channel.newest])).toStrictEqual([['channel:unions', now - 20 * minute], ['channel:vizier', now - 50 * minute], ['fiber:R', now - 10 * minute]])
-    expect(keys(railOrder(channels, ['fiber:O', 'channel:vizier', 'channel:analyst', 'fiber:R', 'channel:unions']))).toStrictEqual(['fiber:R', 'channel:unions', 'channel:vizier', 'fiber:O', 'channel:analyst'])
+    expect(keys(railOrder(channels, ['fiber:O', 'channel:vizier', 'role:analyst', 'fiber:R', 'channel:unions']))).toStrictEqual(['fiber:R', 'channel:unions', 'channel:vizier', 'fiber:O', 'role:analyst'])
     // Set aside, a wait no longer floats.
     const aside = compose(all, { dismissed: [setAsideKey(named(channels, 'fiber:R'))] })
-    expect(keys(railOrder(aside, ['fiber:O', 'fiber:R', 'channel:analyst']))).toStrictEqual(['channel:unions', 'channel:vizier', 'fiber:O', 'fiber:R', 'channel:analyst'])
+    expect(keys(railOrder(aside, ['fiber:O', 'fiber:R', 'role:analyst']))).toStrictEqual(['channel:unions', 'channel:vizier', 'fiber:O', 'fiber:R', 'role:analyst'])
   })
 
   it('rearranges only the channels shown, every other keeping its place', () => {
-    const order = ['channel:analyst', 'fiber:R', 'channel:unions', 'fiber:O', 'channel:vizier']
+    const order = ['role:analyst', 'fiber:R', 'channel:unions', 'fiber:O', 'channel:vizier']
     // Shown: analyst, unions, vizier (fiber:R waits, fiber:O is out of the rail); vizier is dragged to the top.
-    expect(reordered(order, ['channel:vizier', 'channel:analyst', 'channel:unions'])).toStrictEqual(['channel:vizier', 'fiber:R', 'channel:analyst', 'fiber:O', 'channel:unions'])
+    expect(reordered(order, ['channel:vizier', 'role:analyst', 'channel:unions'])).toStrictEqual(['channel:vizier', 'fiber:R', 'role:analyst', 'fiber:O', 'channel:unions'])
     expect(reordered(order, [])).toStrictEqual(order)
   })
 })
 
 describe('composeMessages', () => {
-  const record = (over: Partial<BoardRecord> & Pick<BoardRecord, 'id' | 'kind'>, minutes: number): BoardRecord => ({ timestamp: now - minutes * minute, ...over })
+  const record = (over: Partial<BoardRecord> & Pick<BoardRecord, 'id' | 'kind'>, minutes: number): BoardRecord => ({ timestamp: now - minutes * minute, originName: 'local', ...over })
   const cuts = card({ id: 'cuts', uid: 'C', name: 'Depth cuts', orchestrator: 'U', column: 'awaitingReview', closedAt: at(15), reviewMark: { note: 'The plot is attached.', at: at(15) }, outcome: 'Validated.' })
   const stuck = card({ id: 'stuck', uid: 'K', name: 'Stuck', orchestrator: 'U', status: 'active', workerState: 'blocked', launchError: 'No allocation left.', lastActivityAt: now - 3 * minute })
   const quiet = card({ id: 'quiet', uid: 'Y', name: 'Quiet', orchestrator: 'U', ...working(1), outcome: 'Running the chains.' })
@@ -169,7 +169,7 @@ describe('composeMessages', () => {
     record({ id: 'r4', kind: 'closed', fiber: 'N', by: { fiber: 'N' } }, 100),
     record({ id: 'r5', kind: 'handed_off', fiber: 'N', by: { fiber: 'N' } }, 90),
     record({ id: 'r6', kind: 'human', fiber: 'F', by: { label: 'Sam' }, text: 'me: how is the run going?' }, 50),
-    record({ id: 'r7', kind: 'message', fiber: 'U', by: { label: 'human' }, text: 'Keep going.' }, 5),
+    record({ id: 'brd-human-7', kind: 'human', fiber: 'U', by: { label: 'Sam' }, text: 'Keep going.' }, 5),
     record({ id: 'r8', kind: 'message', fiber: 'F', by: { fiber: 'U', session: 'shuttle://h/claude/1' }, to: { fiber: 'F' }, text: 'Rerun with the new mask.' }, 45),
     record({ id: 'r9', kind: 'message', fiber: 'N', by: { label: 'external' }, text: 'Job 6400 finished.' }, 80),
     record({ id: 'r10', kind: 'answered', fiber: 'W', by: { label: 'Sam' }, text: 'Q: Which mask? — A: The conservative one.' }, 25),
@@ -178,30 +178,29 @@ describe('composeMessages', () => {
   const messages = composeMessages({ channel, records, files, now, reachMs, tapestry: { path: '/unions/tapestry.html', at: now - 2 * minute, title: 'UNIONS, as it stands', lede: 'S8 is measured.' } })
   const stream = messages.filter(message => !message.quiet)
 
-  it('reads the stream oldest first: posts with their files, asks, reviews, the human\'s replies, files alone, the tapestry', () => {
+  it('reads the stream oldest first: posts with their files, asks, reviews, the human\'s lines to the chair, files alone, the tapestry', () => {
     expect(stream.map(message => [message.kind, message.card.id, message.text, message.waiting, message.files.map(file => file.basename)])).toStrictEqual([
       ['file', 'east-unions', '', false, ['chains.md']],
-      ['handed_off', 'east-unions', '', false, []],
       ['post', 'west-unions', 'S8 is in; the plot and the log are attached.', false, ['s8.png', 'run.log']],
-      ['reply', 'pando/unions/modes', 'The conservative one.', false, []],
       ['ask', 'pando/unions/modes', 'Open the PR?', true, []],
       ['review', 'cuts', 'The plot is attached.', true, ['cut.png']],
       ['reply', 'pando/unions', 'Keep going.', false, []],
       ['turn', 'stuck', 'No allocation left.', true, []],
       ['tapestry', 'pando/unions', 'S8 is measured.', false, []],
     ])
-    expect(stream.filter(message => message.human).map(message => message.card.id)).toStrictEqual(['pando/unions/modes', 'pando/unions'])
     // A worker with nothing to say is not in the stream; its outcome stays on its card.
     expect(messages.some(message => message.card.id === 'quiet')).toBe(false)
   })
 
-  it('keeps a worker\'s thread: its chat with the human, what others wrote to it, and its plain closes', () => {
-    expect(threadOf(messages, west).map(message => [message.kind, message.human, message.from?.id ?? message.label ?? ''])).toStrictEqual([
-      ['reply', true, ''], ['chat', false, 'pando/unions'], ['post', false, ''],
+  it('keeps a worker\'s thread: the human\'s lines to it, what others wrote to it, and its lifecycle', () => {
+    expect(threadOf(messages, west).map(message => [message.kind, message.human, message.quiet, message.from?.id ?? message.label ?? ''])).toStrictEqual([
+      ['reply', true, true, ''], ['chat', false, true, 'pando/unions'], ['post', false, false, ''],
     ])
     expect(threadOf(messages, east).map(message => [message.kind, message.quiet, message.label ?? ''])).toStrictEqual([
-      ['file', false, ''], ['closed', true, ''], ['handed_off', false, ''], ['chat', true, 'external'],
+      ['file', false, ''], ['closed', true, ''], ['handed_off', true, ''], ['chat', true, 'external'],
     ])
+    // The answer to a question in the worker's own chat is the human's, in its thread.
+    expect(threadOf(messages, modes).filter(message => message.human).map(message => [message.text, message.quiet])).toStrictEqual([['The conservative one.', true]])
     // A worker that wrote to another keeps that line in its own thread too.
     expect(threadOf(messages, unions).map(message => message.kind)).toStrictEqual(['chat', 'reply', 'tapestry'])
   })
@@ -215,22 +214,122 @@ describe('composeMessages', () => {
     ].sort((a, b) => (a[2] as number) - (b[2] as number)))
   })
 
-  it('keeps the channel short: the chair\'s every line, and each other worker once, its wait else its latest, with its thread', () => {
+  it('keeps the channel short: the chair\'s every line, and each other worker once, its latest, marked when it waits, with its thread', () => {
     const later = record({ id: 'r13', kind: 'post', fiber: 'W', by: { fiber: 'W' }, text: 'Drafted the PR body meanwhile.' }, 8)
     const lines = channelLines(composeMessages({ channel, records: [...records, later], files, now, reachMs, tapestry: { path: '/t.html', at: now - 2 * minute, title: 'T', lede: '' } }), channel)
-    expect(lines.map(line => [line.message.kind, line.message.card.id, line.replies, line.last])).toStrictEqual([
-      ['file', 'east-unions', 3, now - 80 * minute],
-      ['post', 'west-unions', 2, now - 40 * minute],
-      ['ask', 'pando/unions/modes', 2, now - 8 * minute],
-      ['review', 'cuts', 0, now - 15 * minute],
-      ['reply', 'pando/unions', 0, now - 5 * minute],
-      ['turn', 'stuck', 0, now - 3 * minute],
-      ['tapestry', 'pando/unions', 0, now - 2 * minute],
+    expect(lines.map(line => [line.message.kind, line.message.card.id, line.waiting, line.replies, line.last])).toStrictEqual([
+      ['file', 'east-unions', false, 3, now - 80 * minute],
+      ['post', 'west-unions', false, 2, now - 40 * minute],
+      ['review', 'cuts', true, 0, now - 15 * minute],
+      ['post', 'pando/unions/modes', true, 2, now - 8 * minute],
+      ['reply', 'pando/unions', false, 0, now - 5 * minute],
+      ['turn', 'stuck', true, 0, now - 3 * minute],
+      ['tapestry', 'pando/unions', false, 0, now - 2 * minute],
     ])
   })
 
   it('names each worker\'s liveness', () => {
     expect([west, modes, cuts, stuck, unions, card({ id: 'rest', status: 'open' }), card({ id: 'gone', column: 'tempered', status: 'closed' })].map(liveness))
       .toStrictEqual(['working', 'waiting', 'waiting', 'waiting', 'waiting', 'resting', 'closed'])
+  })
+})
+
+describe('the shapes live channels hold', () => {
+  const record = (over: Partial<BoardRecord> & Pick<BoardRecord, 'id' | 'kind'>, minutes: number): BoardRecord => ({ timestamp: now - minutes * minute, originName: 'local', ...over })
+  const send = (uid: string, path: string, minutes: number, host = 'local'): SentFile => ({ uid, host, fullPath: path, basename: path.split('/').at(-1)!, timestamp: now - minutes * minute })
+  // The Mill: a seated chair; a worker that posted, sent its screenshot, closed itself, and was tempered by another session.
+  const mill = card({ id: 'mill', uid: 'M', name: 'The Mill', shuttleChannel: 'The Mill', shuttleSeat: true, ...idle(5) })
+  const outbox = card({ id: 'mill/outbox', uid: 'O1', name: 'An outbox', orchestrator: 'M', column: 'tempered', status: 'closed', closedAt: at(60) })
+  const desk = card({ id: 'mill/desk', uid: 'D1', name: 'UI desk', orchestrator: 'M', ...working(1) })
+  const channel = named(compose([mill, outbox, desk]), 'channel:the mill')
+  const lines = (records: BoardRecord[], files: SentFile[] = [], cards?: KanbanCard[]) => {
+    const messages = composeMessages({ channel, records, files, cards, now, reachMs })
+    return { messages, lines: channelLines(messages, channel) }
+  }
+
+  it('keeps every close out of the stream: a worker\'s line is its last post, with the files it sent before closing', () => {
+    const { messages, lines: stream } = lines([
+      record({ id: 'p', kind: 'post', fiber: 'O1', by: { fiber: 'O1' }, text: 'Done; the phone shot is attached.' }, 70),
+      record({ id: 'c1', kind: 'closed', fiber: 'O1', by: { fiber: 'O1' } }, 62),
+      record({ id: 'c2', kind: 'closed', fiber: 'O1', by: { fiber: 'M' }, verdict: 'tempered' }, 60),
+    ], [send('O1', '/shots/phone.png', 63)])
+    expect(stream.map(line => [line.message.kind, line.message.text, line.message.files.map(file => file.basename), line.replies])).toStrictEqual([
+      ['post', 'Done; the phone shot is attached.', ['phone.png'], 2],
+    ])
+    expect(messages.filter(message => message.kind === 'closed').map(message => [message.text, message.quiet])).toStrictEqual([['', true], ['tempered', true]])
+  })
+
+  it('makes a burst of files from one sender one message, and a path sent again since its post a message of its own', () => {
+    const { lines: stream } = lines([
+      record({ id: 'p', kind: 'post', fiber: 'D1', by: { fiber: 'D1' }, text: 'Before and after.', files: ['/shots/before.png'] }, 120),
+    ], [
+      send('M', '/shots/a.png', 30), send('M', '/shots/b.png', 29.5), send('M', '/shots/c.png', 29),
+      send('D1', '/shots/before.png', 120), send('D1', '/shots/before.png', 10),
+      // The same home-directory path on two clusters is two files.
+      send('M', '/home/u/fig.png', 2, 'cluster-a'), send('M', '/home/u/fig.png', 2, 'cluster-b'),
+    ])
+    expect(stream.map(line => [line.message.card.id, line.message.kind, line.message.files.map(file => `${file.host}:${file.basename}`)])).toStrictEqual([
+      ['mill', 'file', ['local:a.png', 'local:b.png', 'local:c.png']],
+      ['mill/desk', 'file', ['local:before.png']],
+      ['mill', 'file', ['cluster-b:fig.png', 'cluster-a:fig.png']],
+    ])
+  })
+
+  it('names a sender from another channel, and a session no fiber answers for by its host', () => {
+    const hub = card({ id: 'hub', uid: 'H', name: 'UNIONS hub', shuttleChannel: 'UNIONS' })
+    const { messages } = lines([
+      record({ id: 'm1', kind: 'message', fiber: 'D1', by: { fiber: 'H', session: 'shuttle://h/claude/1' }, text: 'Context before you start.' }, 20),
+      record({ id: 'm2', kind: 'message', fiber: 'D1', by: { session: 'shuttle://cluster-a/claude/2' }, text: 'Numbers from the release.' }, 10),
+      record({ id: 'm3', kind: 'message', fiber: 'D1', by: { fiber: 'GONE', session: 'shuttle://h/claude/3' }, actor: 'felt/debug', text: 'Landing a change.' }, 5),
+    ], [], [mill, outbox, desk, hub])
+    expect(messages.map(message => [message.from?.name ?? message.label, message.card.id])).toStrictEqual([
+      ['UNIONS hub', 'mill/desk'], ['a session on cluster-a', 'mill/desk'], ['felt/debug', 'mill/desk'],
+    ])
+  })
+
+  it('makes the human\'s board line to the chair a channel line, and keeps their terminal and spoken lines in the thread', () => {
+    const { messages, lines: stream } = lines([
+      record({ id: 'brd-human-1', kind: 'human', fiber: 'M', by: { label: 'Sam' }, text: 'Ship it.' }, 9),
+      record({ id: 'brd-01TERMINAL', kind: 'human', fiber: 'M', by: { label: 'Sam' }, text: 'typed at the terminal' }, 8),
+      record({ id: 's1', kind: 'spoken', fiber: 'D1', by: { label: 'Sam' }, text: 'said aloud' }, 7),
+      record({ id: 'brd-human-2', kind: 'human', fiber: 'D1', by: { label: 'Sam' }, text: 'Thread reply.' }, 6),
+    ])
+    expect(messages.map(message => [message.text, message.human, message.quiet])).toStrictEqual([
+      ['Ship it.', true, false], ['typed at the terminal', true, true], ['said aloud', true, true], ['Thread reply.', true, true],
+    ])
+    expect(stream.map(line => line.message.text)).toStrictEqual(['Ship it.'])
+  })
+
+  it('judges what is new by when it arrived here, not by its writer\'s clock', () => {
+    const { messages } = lines([record({ id: 'late', kind: 'post', fiber: 'D1', by: { fiber: 'D1' }, received_at: now - minute, text: 'From a cluster.' }, 90)])
+    expect([messages[0].at, messages[0].arrived]).toStrictEqual([now - 90 * minute, now - minute])
+  })
+
+  it('names the run a message continues: one sender, within ten minutes', () => {
+    const { messages } = lines([
+      record({ id: 'a', kind: 'post', fiber: 'D1', by: { fiber: 'D1' }, text: 'one' }, 30),
+      record({ id: 'b', kind: 'post', fiber: 'D1', by: { fiber: 'D1' }, text: 'two' }, 25),
+      record({ id: 'c', kind: 'post', fiber: 'D1', by: { fiber: 'D1' }, text: 'three' }, 10),
+      record({ id: 'd', kind: 'human', fiber: 'D1', by: { label: 'Sam' }, text: 'four' }, 9),
+    ])
+    expect(messages.map((message, index) => continues(messages[index - 1], message))).toStrictEqual([false, true, false, false])
+  })
+})
+
+describe('a channel\'s key', () => {
+  it('stays the office\'s until a charter name joins it to a channel, and a thread with closed ancestors takes the channel filed above it', () => {
+    const errand = card({ id: 'life/errand', uid: 'V', name: 'Errand', shuttleRole: 'first-contact', status: 'active' })
+    const keys = (names: Map<string, string>) => compose([...all, errand], { names }).map(channel => channel.key)
+    expect(keys(new Map())).toContain('role:first-contact')
+    expect(keys(new Map([['first-contact', 'Vizier · first point of contact']]))).not.toContain('role:first-contact')
+    // The Lightcone desk is tempered; its live thread, under ancestors closed or absent, has no orchestrator.
+    const lightcone = card({ id: 'lc/desk', uid: 'LD', name: 'Lightcone desk', shuttleChannel: 'Lightcone', shuttleRole: 'lightcone-desk', column: 'tempered', status: 'closed' })
+    const glass = card({ id: 'lc/desk/paper-ii/run/glass-mocks', uid: 'G', name: 'Glass mocks', ...working(3) })
+    const unit = card({ id: 'lc/desk/unit-tests', uid: 'T', name: 'Unit tests', status: 'open' })
+    const near = card({ id: 'lc/desktop', uid: 'X', name: 'Not under the desk', ...working(3) })
+    const channels = compose([lightcone, glass, unit, near])
+    expect(named(channels, 'channel:lightcone').members.map(member => member.id)).toStrictEqual(['lc/desk/paper-ii/run/glass-mocks', 'lc/desk/unit-tests'])
+    expect(named(channels, 'channel:lightcone').name).toBe('Lightcone')
+    expect(named(channels, 'fiber:X').members.map(member => member.id)).toStrictEqual(['lc/desktop'])
   })
 })

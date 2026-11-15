@@ -18,6 +18,8 @@ export interface BoardRecord {
   to?: { fiber?: string; session?: string; label?: string }
   text?: string
   verdict?: string
+  /** Who the daemon says wrote it: a member's path, a label, or a session. */
+  actor?: string
   /** The absolute paths a post attaches, each also a sent file. */
   files?: string[]
   originName?: string
@@ -41,7 +43,10 @@ export interface Message {
   human: boolean
   kind: MessageKind
   text: string
+  /** When it was written, by its writer's clock: its place in the stream. */
   at: number
+  /** When it reached this daemon: what is new to the reader. */
+  arrived: number
   files: SentFile[]
   /** It waits on the human now. */
   waiting: boolean
@@ -63,7 +68,7 @@ export interface Tapestry { path: string; at: number; title: string; lede: strin
  * their threads, else one top-level constitution with its threads.
  */
 export interface Channel {
-  /** `channel:<name, lowercased>` — a `shuttle.channel` or an office's charter name — or `fiber:<uid>` for a lone top-level. */
+  /** `channel:<shuttle.channel, lowercased>`, `role:<office slug>` for an office's top-levels, or `fiber:<uid>` for a lone top-level. */
   key: string
   /** The channel's name; an office's charter name before any ` · ` gloss; the constitution's name. */
   name: string
@@ -134,9 +139,11 @@ export function waitsSince(card: KanbanCard): number {
 
 /**
  * Every channel the board holds, the chaired ones first, each shelf by name.
- * A card speaks in its own `shuttle.channel`, else its nearest ancestor's;
- * without one anywhere above it, its top-level constitution's office names
- * the channel, else that top-level is a channel of its own. A pin counts
+ * A card speaks in its own `shuttle.channel`, else its orchestrator's, else
+ * that of the nearest card filed above it; without one anywhere above it, its
+ * top-level constitution's office names the channel (the named channel that
+ * shares the office's charter name, when there is one), else that top-level
+ * is a channel of its own. A pin counts
  * until a later unpin; a set-aside clears the waiting mark until a later wait;
  * a hide counts until a later show or a later wait.
  */
@@ -161,24 +168,36 @@ export function composeChannels(input: {
     tops.set(card, top)
     return top
   }
+  const byId = new Map<string, KanbanCard>()
+  for (const card of cards) if (!byId.has(card.id)) byId.set(card.id, card)
+  // Without an orchestrator, the nearest card filed above it: closed ancestors are not orchestrators, but they still name a channel.
+  const filedUnder = (card: KanbanCard): KanbanCard | undefined => {
+    for (let id = card.id; id.includes('/');) {
+      id = id.slice(0, id.lastIndexOf('/'))
+      const above = byId.get(id)
+      if (above) return above
+    }
+    return undefined
+  }
   const channelOf = (card: KanbanCard): string | null => {
     if (named.has(card)) return named.get(card)!
-    const parent = parentOf(card)
-    const name = card.shuttleChannel ?? (parent ? channelOf(parent) : null)
+    named.set(card, null)
+    const above = parentOf(card) ?? filedUnder(card)
+    const name = card.shuttleChannel ?? (above ? channelOf(above) : null)
     named.set(card, name)
     return name
   }
-  // A channel is keyed by its name, so an office whose charter shares a channel's name speaks in that channel.
-  const nameOf = (card: KanbanCard): string | null => {
-    const name = channelOf(card)
-    if (name) return name
-    const office = officeOf(topOf(card).shuttleRole)
-    return office ? (names.get(office) ?? office).split(' · ')[0] : null
-  }
+  const officeName = (office: string): string => names.get(office) ?? office
+  // An office's channel merges into the named channel that shares its charter's name.
   const keyOf = (card: KanbanCard): string => {
-    const name = nameOf(card)
-    return name ? `channel:${name.toLowerCase()}` : `fiber:${fiberOf(topOf(card))}`
+    const name = channelOf(card)
+    if (name) return `channel:${name.toLowerCase()}`
+    const office = officeOf(topOf(card).shuttleRole)
+    if (!office) return `fiber:${fiberOf(topOf(card))}`
+    const merged = `channel:${officeName(office).split(' · ')[0].toLowerCase()}`
+    return channelNames.has(merged) ? merged : `role:${office}`
   }
+  const channelNames = new Set(cards.flatMap(card => { const name = channelOf(card); return name ? [`channel:${name.toLowerCase()}`] : [] }))
   const titles = new Map<string, string>()
   const seen = new Set<string>()
   const groups = new Map<string, { members: KanbanCard[]; everyone: KanbanCard[] }>()
@@ -189,7 +208,7 @@ export function composeChannels(input: {
     const key = keyOf(card)
     // A channel's own spelling wins over an office's.
     const office = officeOf(topOf(card).shuttleRole)
-    if (!titles.has(key) || channelOf(card)) titles.set(key, channelOf(card) ?? (office ? names.get(office) ?? office : ''))
+    if (!titles.has(key) || channelOf(card)) titles.set(key, channelOf(card) ?? (office ? officeName(office) : ''))
     const group = groups.get(key) ?? groups.set(key, { members: [], everyone: [] }).get(key)!
     group.everyone.push(card)
     if (LIVE.includes(threadState(card))) group.members.push(card)
@@ -264,70 +283,93 @@ const EVENT_WORDS: Readonly<Record<string, string>> = {
   rested: 'rested', cleared: 'question cleared', run_tempered: 'run tempered', unblocked: 'unblocked',
 }
 
+/** A line the human sent from the board: the board mints its id, and the daemon keys its record by it. */
+export const BOARD_LINE = 'brd-human-'
+/** Consecutive messages from one sender this close together are one run, named once. */
+export const RUN_MS = 10 * 60_000
+
+/** Who wrote `ref` (a session URI) when no fiber answers for it: the host it ran on. */
+const sessionHost = (ref: string | undefined): string | undefined => /^shuttle:\/\/([^/]+)\//.exec(ref ?? '')?.[1]
+
 /**
  * Everything a channel's constitutions said, oldest first: the family board's
  * records about its members, what their cards wait on that the board does not
- * hold, the files they sent (attached to a message close in time, else their
- * own), and the chair's tapestry. A message marked `quiet` belongs in its
- * worker's thread only: the human's chat in a worker's terminal, workers
- * writing to each other, and lifecycle lines other than a close or a hand-off.
+ * hold, the files they sent (attached to a message close in time, a burst of
+ * them one message, else their own), and the chair's tapestry. A message
+ * marked `quiet` belongs in its worker's thread only: the human's lines other
+ * than those sent from the board to the chair, workers writing to each other,
+ * and every lifecycle line (a close that waits on the human's review is a
+ * review, and speaks).
  */
 export function composeMessages(input: {
   channel: Channel
   records: readonly BoardRecord[]
   files: readonly SentFile[]
+  /** Every card on the board, for naming a sender from another channel. */
+  cards?: readonly KanbanCard[]
   tapestry?: Tapestry | null
   now: number
   reachMs: number
 }): Message[] {
-  const { channel, records, files, tapestry, now, reachMs } = input
-  const cardOf = (ref: string | undefined): KanbanCard | undefined =>
-    ref ? channel.everyone.find(card => card.uid === ref || card.id === ref) : undefined
+  const { channel, records, files, cards = channel.everyone, tapestry, now, reachMs } = input
+  const find = (list: readonly KanbanCard[], ref: string | undefined): KanbanCard | undefined =>
+    ref ? list.find(card => card.uid === ref || card.id === ref) : undefined
+  const cardOf = (ref: string | undefined): KanbanCard | undefined => find(channel.everyone, ref)
   const messages: Message[] = []
   const said = (card: KanbanCard, kind: MessageKind, text: string, at: number, over: Partial<Message> = {}): Message => {
-    const message: Message = { id: `${kind}:${fiberOf(card)}:${at}`, card, human: false, kind, text, at, files: [], waiting: false, quiet: false, ...over }
+    const message: Message = { id: `${kind}:${fiberOf(card)}:${at}`, card, human: false, kind, text, at, arrived: at, files: [], waiting: false, quiet: false, ...over }
     messages.push(message)
     return message
   }
-  const attached = new Set<string>()
+  const reach = now - reachMs
+  // Each send is one file, named by its host, path and time; the newest send of a path stands for the others.
+  const sends = new Map<string, SentFile>()
+  for (const file of files) {
+    if (file.timestamp < reach || !file.uid) continue
+    const key = `${file.host ?? ''}:${file.fullPath}`
+    if ((sends.get(key)?.timestamp ?? -Infinity) < file.timestamp) sends.set(key, file)
+  }
   for (const record of records) {
     const card = cardOf(record.fiber)
     if (!card) continue
     const by = record.by ?? {}, text = record.text?.trim() ?? ''
-    // The board writes the human's replies from `human`; a worker's chat hook labels them with the human's name.
-    const labelled = !by.fiber && !by.session && !!by.label
-    const base = { id: record.id }
+    const base = { id: record.id, arrived: record.received_at ?? record.timestamp }
+    // The human's line is a channel line when the board sent it to the chair; any other stays in its thread.
+    const yours = { ...base, human: true, quiet: !(record.id.startsWith(BOARD_LINE) && sameFiber(card, channel.seat)) }
     switch (record.kind) {
       case 'post': {
-        const sent = (record.files ?? []).map(path => {
-          attached.add(path)
-          return files.find(file => file.fullPath === path)
-            ?? { fullPath: path, basename: path.split('/').pop() ?? path, timestamp: record.timestamp, uid: fiberOf(card), host: record.originName }
+        // A post claims the send of each file it attaches, unless that path was sent again since.
+        const attached = (record.files ?? []).map(path => {
+          const key = `${record.originName ?? ''}:${path}`, send = sends.get(key)
+          if (send && send.timestamp <= record.timestamp + ATTACH_MS) { sends.delete(key); return send }
+          return { fullPath: path, basename: path.split('/').pop() ?? path, timestamp: record.timestamp, uid: fiberOf(card), host: record.originName }
         })
-        said(card, 'post', text, record.timestamp, { ...base, files: sent })
+        said(card, 'post', text, record.timestamp, { ...base, files: attached })
         break
       }
       case 'asked':
         said(card, 'ask', text, record.timestamp, base)
         break
       case 'closed':
-        // A close says something to the human when it carries a verdict or waits for review (below).
-        said(card, 'closed', record.verdict ?? '', record.timestamp, { ...base, quiet: !record.verdict })
+        said(card, 'closed', record.verdict ?? '', record.timestamp, { ...base, quiet: true })
         break
       case 'handed_off':
-        said(card, 'handed_off', '', record.timestamp, base)
+        said(card, 'handed_off', '', record.timestamp, { ...base, quiet: true })
         break
-      case 'message':
-        if (labelled && by.label === 'human') said(card, 'reply', text, record.timestamp, { ...base, human: true })
-        else said(card, 'chat', text, record.timestamp, { ...base, quiet: true, from: cardOf(by.fiber), label: labelled ? by.label : undefined })
+      case 'message': {
+        const from = find(cards, by.fiber)
+        const label = from ? undefined : by.label ?? (by.fiber ? record.actor : undefined) ?? (sessionHost(by.session) ? `a session on ${sessionHost(by.session)}` : 'another session')
+        said(card, 'chat', text, record.timestamp, { ...base, quiet: true, from, label })
         break
+      }
       case 'human':
-        said(card, 'reply', text, record.timestamp, { ...base, human: true, quiet: true })
+      case 'spoken':
+        said(card, 'reply', text, record.timestamp, yours)
         break
       case 'answered': {
-        // The human's answer in a worker's chat is recorded after the question it answers.
-        const answer = labelled ? /\s—\sA:\s([\s\S]*)$/.exec(text)?.[1] : undefined
-        if (answer) said(card, 'reply', answer, record.timestamp, { ...base, human: true })
+        // The human's answer is recorded with the question it answers.
+        const answer = !by.fiber && !by.session && by.label ? /\s—\sA:\s([\s\S]*)$/.exec(text)?.[1] : undefined
+        if (answer) said(card, 'reply', answer, record.timestamp, yours)
         else said(card, 'event', 'answered', record.timestamp, { ...base, quiet: true })
         break
       }
@@ -354,18 +396,16 @@ export function composeMessages(input: {
     // Your turn is a message only when the worker said why it stopped.
     if (state === 'waiting' && turn.turn === 'blocked' && turn.detail) said(card, 'turn', turn.detail, waitsSince(card), { waiting: true })
   }
-  const speaking: readonly MessageKind[] = ['post', 'ask', 'review', 'turn', 'closed']
-  const seen = new Set<string>()
-  for (const file of [...files].sort((a, b) => b.timestamp - a.timestamp)) {
-    if (attached.has(file.fullPath) || seen.has(file.fullPath) || file.timestamp < now - reachMs || !file.uid) continue
-    const card = cardNamed(channel.everyone, file.uid, file.host ?? '')
+  const speaking: readonly MessageKind[] = ['post', 'ask', 'review', 'turn']
+  for (const file of [...sends.values()].sort((a, b) => b.timestamp - a.timestamp)) {
+    const card = cardNamed(channel.everyone, file.uid!, file.host ?? '')
     if (!card) continue
-    // A file sent again is attached once, at its newest send.
-    seen.add(file.fullPath)
-    const near = messages.filter(message => message.card === card && speaking.includes(message.kind) && Math.abs(message.at - file.timestamp) <= ATTACH_MS)
+    const near = messages.filter(message => message.card === card && !message.quiet && speaking.includes(message.kind) && Math.abs(message.at - file.timestamp) <= ATTACH_MS)
       .sort((a, b) => Math.abs(a.at - file.timestamp) - Math.abs(b.at - file.timestamp))[0]
-    if (near) near.files.unshift(file)
-    else said(card, 'file', '', file.timestamp, { id: `file:${file.fullPath}:${file.timestamp}`, files: [file] })
+    // A burst of files sent together is one message: newest first here, so each joins the burst begun after it.
+    const burst = near ?? messages.find(message => message.card === card && message.kind === 'file' && message.files[0].timestamp - file.timestamp <= ATTACH_MS)
+    if (burst) burst.files.unshift(file)
+    else said(card, 'file', '', file.timestamp, { id: `file:${file.host ?? ''}:${file.fullPath}:${file.timestamp}`, files: [file] })
   }
   if (tapestry) said(channel.seat, 'tapestry', tapestry.lede, tapestry.at, { id: `tapestry:${tapestry.path}`, path: tapestry.path, title: tapestry.title })
   return messages.sort((a, b) => a.at - b.at || a.id.localeCompare(b.id))
@@ -383,32 +423,45 @@ export function liveness(card: KanbanCard): 'working' | 'waiting' | 'resting' | 
   return state === 'working' || turnOf(card).busy ? 'working' : 'resting'
 }
 
-/** One line of a channel's stream, with its thread's size and latest time when it stands for a worker. */
-export interface Line { message: Message; replies: number; last: number }
+/**
+ * One line of a channel's stream, with its thread's size and latest time when
+ * it stands for a worker, and whether anything in that thread waits on the human.
+ */
+export interface Line { message: Message; replies: number; last: number; waiting: boolean }
 
 /** What a worker says to the human, as distinct from lifecycle lines and what others say to it. */
 const SPEAKING: readonly MessageKind[] = ['post', 'ask', 'review', 'turn', 'file', 'tapestry']
 
 /**
  * A channel's stream, as Slack keeps a channel short: everything its chair
- * says, and the human's replies to it, each a line; every other worker one
- * line, what waits on the human from it else the latest thing it said, with
- * its thread's size and latest time. Oldest first, by each line's time. A
- * worker that has said nothing is not in it.
+ * says, and the human's lines to it, each a line; every other worker one line,
+ * the latest thing it said, marked waiting when something of its waits on the
+ * human, with its thread's size and latest time. Oldest first, by each line's
+ * time. A worker that has said nothing is not in it.
  */
 export function channelLines(messages: readonly Message[], channel: Channel): Line[] {
   const lines: Line[] = []
   const workers = new Map<string, KanbanCard>()
   for (const message of messages) {
     if (message.quiet) continue
-    if (sameFiber(message.card, channel.seat)) lines.push({ message, replies: 0, last: message.at })
+    if (sameFiber(message.card, channel.seat)) lines.push({ message, replies: 0, last: message.at, waiting: message.waiting })
     else workers.set(fiberOf(message.card), message.card)
   }
   for (const card of workers.values()) {
     const thread = threadOf(messages, card)
-    const said = thread.filter(message => message.card === card && !message.human && !message.quiet && (SPEAKING.includes(message.kind) || (message.kind === 'closed' && !!message.text)))
-    const shown = said.filter(message => message.waiting).at(-1) ?? said.at(-1)
-    if (shown) lines.push({ message: shown, replies: thread.length - 1, last: Math.max(...thread.map(message => message.at)) })
+    const said = thread.filter(message => message.card === card && !message.human && !message.quiet && SPEAKING.includes(message.kind))
+    const shown = said.at(-1)
+    if (shown) lines.push({ message: shown, replies: thread.length - 1, last: Math.max(...thread.map(message => message.at)), waiting: said.some(message => message.waiting) })
   }
   return lines.sort((a, b) => a.message.at - b.message.at || a.message.id.localeCompare(b.message.id))
+}
+
+/**
+ * Whether `message` continues the run `previous` began: the same sender, said
+ * within {@link RUN_MS}, so its sender is not named again.
+ */
+export function continues(previous: Message | undefined, message: Message): boolean {
+  if (!previous || message.at - previous.at > RUN_MS) return false
+  const sender = (each: Message): string => each.human ? 'human' : each.from ? fiberOf(each.from) : each.label ?? fiberOf(each.card)
+  return sender(previous) === sender(message)
 }
