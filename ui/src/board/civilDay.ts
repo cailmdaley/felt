@@ -152,11 +152,6 @@ export function hostZone(): Zone {
 }
 
 /** Format an instant's wall clock as zero-padded 24-hour HH:MM. */
-/** A scheduled delivery's date and clock in the reader's chosen zone. */
-export function scheduledTime(ms: number, z = hostZone()): string {
-  return new Intl.DateTimeFormat('en-GB', { timeZone: z.id, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(ms)
-}
-
 export function clockTime(ms: number, z = hostZone()): string {
   const d = wall(ms, z)
   return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
