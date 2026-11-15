@@ -1309,6 +1309,22 @@ describe('session usage', () => {
     expect(usageReads()).toHaveLength(3)
   })
 
+  it('reads nothing for a console no one can see', async () => {
+    answering(() => ({ context: 1000 }))
+    const pane = document.createElement('div')
+    pane.append(band.el)
+    document.body.append(pane)
+    dock.open(resting())
+    await settle()
+    expect(usageReads()).toHaveLength(1)
+    pane.hidden = true
+    vi.advanceTimersByTime(30_000)
+    expect(usageReads()).toHaveLength(1)
+    pane.hidden = false
+    vi.advanceTimersByTime(15_000)
+    expect(usageReads()).toHaveLength(2)
+  })
+
   it('drops a read that outlives its session', async () => {
     const answer = deferred<Response>()
     vi.mocked(fetch).mockImplementation(() => answer.promise)

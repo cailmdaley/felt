@@ -15,6 +15,7 @@ import { createRailReorder, type RailReorder } from '../channelRail.js'
 import { openActionMenu } from '../conversationMenu.js'
 import type { SentFile } from '../sentFiles.js'
 import { stateDot } from '../stateDot.js'
+import { turnOf } from '../turn.js'
 import { cardNamed } from '../threads.js'
 import { fileBytesUrl, renderMarkdown } from '../utils.js'
 import { COMPANION_NAMES, docKey, type DocKey } from '../workspace/documents.js'
@@ -29,6 +30,10 @@ import { isTypingTarget, keystrokeIsSpokenFor, registerView, type TemporalView, 
 import './ChannelsView.css'
 
 const SEEN = 'shuttle.channels.seen:'
+/** When this board first looked for what is unread: a channel never opened counts as read up to then. */
+const SINCE = 'shuttle.channels.since'
+/** Away from Channels, the reads that keep its tab's dot current come at most this often. */
+const AWAY_READ_MS = 60_000
 const RAIL = 'shuttle.channels.rail-hidden'
 /** The channel, and the thread in it, the reader was last in on this device. */
 const LAST = 'shuttle.channels.last'
@@ -100,6 +105,14 @@ function scrollsSideways(node: Element | null, stop: Element, toward: number): b
 function lastSeen(key: string): number {
   const value = Number(stored(SEEN + key) ?? NaN)
   return Number.isFinite(value) ? value : -Infinity
+}
+/** When this board first looked for what is unread, marked the first time it asks. */
+function since(): number {
+  const value = Number(stored(SINCE))
+  if (value > 0) return value
+  const now = Date.now()
+  store(SINCE, String(now))
+  return now
 }
 /** Of every file the lines carry, the newest send of each path: a file sent again and again is drawn whole once, the earlier sends named. */
 function newestSends(lines: readonly Line[]): Set<SentFile> {
@@ -175,10 +188,16 @@ export class ChannelsView implements TemporalView {
   private channelEl: HTMLElement | null = null
   private head: HTMLElement | null = null
   private stream: HTMLOListElement | null = null
-  /** The live previews of HTML files in the lists, by item, kept across redraws so a poll never reloads a page. */
+  /** The live previews of HTML files in the lists, by item, kept with their rows. */
   private readonly previews = new Map<string, Thumbnail>()
   /** Which previews are near the view, and so worth a live body. */
   private near: IntersectionObserver | null = null
+  /**
+   * Each list's message rows as last drawn, by message id, with what they were
+   * drawn from: a row whose message has not changed stays in place, so a live
+   * preview in it is never reloaded by a redraw.
+   */
+  private rows: Record<Pane, Map<string, { sig: string; row: HTMLLIElement }>> = { channel: new Map(), thread: new Map() }
   /** The console in the channel, to its chair, and the one in the thread, to its worker. */
   private consoles: Record<Pane, Dock | null> = { channel: null, thread: null }
   /** Whose draft each console holds: the draft key of what it was last opened on. */
@@ -246,6 +265,8 @@ export class ChannelsView implements TemporalView {
   private reading = false
   /** Asks the board's bar to read {@link attention} again, once something that could change it has arrived. */
   private ring: (() => void) | null = null
+  /** When the reads for the tab's dot last ran away from Channels. */
+  private readAway = 0
   private generation = 0
   private unsubscribe?: () => void
   private unsubscribeLibrary?: () => void
@@ -425,20 +446,27 @@ export class ChannelsView implements TemporalView {
   /**
    * Whether a channel other than the one being read waits on the human or has
    * said something since they last read it: the dot on Channels' tab. Away
-   * from Channels no channel is being read, and each poll (which passes
-   * `ring`) keeps the channels' reads going here, ringing once what arrives
-   * could change the answer.
+   * from Channels no channel is being read, and a poll (which passes
+   * `ring`) keeps the channels' reads going here, once a minute at most,
+   * ringing once what arrives could change the answer.
    */
   attention(ctx: ViewContext, ring?: () => void): boolean {
     if (ring) {
       this.ring = ring
-      if (!this.ctx) void this.read(ctx)
+      if (!this.ctx && Date.now() - this.readAway >= AWAY_READ_MS) {
+        this.readAway = Date.now()
+        void this.read(ctx)
+      }
     }
     const reading = this.ctx ? this.current : null
     return this.compose(ctx).some(channel => channel.listed && channel.key !== reading && (channel.waiting || this.unread(channel, ctx)))
   }
-  /** Something in the channel arrived after the human last read it; a channel that has said nothing has nothing unread. */
-  private unread(channel: Channel, ctx = this.ctx): boolean { return this.newestSaid(channel, ctx) > Math.max(0, lastSeen(channel.key)) }
+  /**
+   * Something in the channel arrived after the human last read it, or, for a
+   * channel never opened, since this board first looked; a channel that has
+   * said nothing has nothing unread.
+   */
+  private unread(channel: Channel, ctx = this.ctx): boolean { return this.newestSaid(channel, ctx) > Math.max(lastSeen(channel.key), since()) }
   private status(text: string): void { if (this.note) this.note.textContent = text }
   /** The order and the hides lapse with the board's reach, so while they stand they are written again. */
   private keep(): void {
@@ -571,12 +599,18 @@ export class ChannelsView implements TemporalView {
     if (item) item.focus({ preventScroll: true })
     else this.consoles[this.thread ? 'thread' : 'channel']?.focus()
   }
-  /** Fills `container` anew; the item that had focus in it keeps it. */
+  /**
+   * Fills `container` with `children`, leaving in place a child it already
+   * holds, which a live document in it would not survive being moved; the
+   * item that had focus in it keeps it.
+   */
   private rebuild(container: HTMLElement, children: Node[]): void {
     const focused = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('[data-item]')
     const item = focused && container.contains(focused) ? focused.dataset.item : undefined
-    container.replaceChildren(...children)
-    if (item) container.querySelector<HTMLElement>(`[data-item="${CSS.escape(item)}"]`)?.focus({ preventScroll: true })
+    const keep = new Set(children)
+    for (const node of [...container.childNodes]) if (!keep.has(node)) node.remove()
+    children.forEach((child, index) => { if (container.childNodes[index] !== child) container.insertBefore(child, container.childNodes[index] ?? null) })
+    if (item && !container.contains(document.activeElement)) container.querySelector<HTMLElement>(`[data-item="${CSS.escape(item)}"]`)?.focus({ preventScroll: true })
   }
   /**
    * Comes to a channel, with its own draft and no thread open; what it held
@@ -734,6 +768,7 @@ export class ChannelsView implements TemporalView {
     this.layout?.toggleAttribute('data-channel', !!channel)
     if (!channel) {
       this.sigs.channel = ''
+      this.rows.channel.clear()
       this.head.replaceChildren(el('p', 'kbn-ch-empty', this.channels.length ? 'Choose a channel.' : 'No channels yet.'), this.railToggle!.root)
       this.stream.replaceChildren()
       return
@@ -774,7 +809,17 @@ export class ChannelsView implements TemporalView {
     // Like Slack, a rule marks where what arrived since the last visit begins, and a run of one sender's messages names it once.
     const fresh = Number.isFinite(before) ? lines.findIndex(({ message }) => !message.human && message.arrived > before) : -1
     const whole = newestSends(lines)
-    const rows: HTMLLIElement[] = lines.map((line, index) => this.messageRow(line, pane, before, now, whole, index === fresh ? undefined : lines[index - 1]?.message))
+    const kept = this.rows[pane], drawn = this.rows[pane] = new Map<string, { sig: string; row: HTMLLIElement }>()
+    const rows: HTMLLIElement[] = lines.map((line, index) => {
+      const previous = index === fresh ? undefined : lines[index - 1]?.message
+      if (line.cleared) return this.messageRow(line, pane, before, now, whole, previous)
+      const { message } = line, sig = this.rowSig(line, pane, before, whole, previous)
+      const old = kept.get(message.id)
+      const row = old?.sig === sig ? old.row : this.messageRow(line, pane, before, now, whole, previous)
+      drawn.set(message.id, { sig, row })
+      row.toggleAttribute('data-chosen', pane === 'channel' && !!this.thread && sameFiber(message.card, this.thread))
+      return row
+    })
     if (fresh >= 0) {
       const rule = el('li', 'kbn-ch-new')
       rule.setAttribute('role', 'separator')
@@ -792,7 +837,7 @@ export class ChannelsView implements TemporalView {
   private fold(list: HTMLElement): void {
     for (const text of list.querySelectorAll<HTMLElement>('.kbn-ch-msg-text[data-id]')) {
       const id = text.dataset.id!
-      if (this.unfolded.has(id)) continue
+      if (this.unfolded.has(id) || text.hasAttribute('data-folded')) continue
       const line = parseFloat(getComputedStyle(text).lineHeight) || 0
       if (!line || text.scrollHeight <= line * (FOLD_LINES + 0.5)) continue
       text.toggleAttribute('data-folded', true)
@@ -806,6 +851,17 @@ export class ChannelsView implements TemporalView {
     for (const age of this.layout!.querySelectorAll<HTMLElement>('[data-at]')) age.textContent = ago(Number(age.dataset.at), now)
   }
 
+  /** Everything a message's row is drawn from, save the clock its ages follow and whether its thread is open. */
+  private rowSig(line: Line, pane: Pane, before: number, whole: ReadonlySet<SentFile>, previous?: Message): string {
+    const { message } = line
+    const who = (card: KanbanCard | undefined) => card && [fiberOf(card), card.name, turnOf(card).turn]
+    return JSON.stringify([
+      { ...message, card: who(message.card), from: who(message.from) }, line.replies, line.last, line.waiting, line.act,
+      !message.human && message.arrived > before, continues(previous, message), message.files.map(file => whole.has(file)),
+      this.tempering.has(`${fiberOf(message.card)}:${message.at}`), this.expanded.has(message.id), this.unfolded.has(message.id),
+      pane === 'channel' ? this.embedded(message.card, pane) : who(this.threadCard),
+    ])
+  }
   /**
    * One message: who said it, when, and what, whole, with its files. A message
    * continuing its sender's run names no one; in a thread, its worker is who
@@ -821,7 +877,6 @@ export class ChannelsView implements TemporalView {
     row.dataset.kind = message.kind
     row.toggleAttribute('data-waiting', waiting)
     row.toggleAttribute('data-human', message.human)
-    row.toggleAttribute('data-chosen', pane === 'channel' && !!this.thread && sameFiber(card, this.thread))
     row.toggleAttribute('data-new', !message.human && message.arrived > before)
     const opens = pane === 'channel'
     const id = `${pane}:${message.id}`
@@ -961,7 +1016,8 @@ export class ChannelsView implements TemporalView {
       key: item, shuttleBase: this.ctx?.shuttleBase ?? '', file, fallback: file.basename, captioned: true,
       // Drawn across the stream, the page is laid out as a desktop shows it, and so drawn small.
       pageWidth: PAGE_WIDTH,
-      priority: () => thumbnail.near ? 2 : 0,
+      // Under the reader nothing here is seen, so nothing here is worth a live body.
+      priority: () => thumbnail.near && !this.ctx?.workspace?.isActive ? 2 : 0,
       distance: () => Math.abs(thumbnail.el.getBoundingClientRect().top),
     })
     this.previews.set(item, thumbnail)
@@ -1041,7 +1097,7 @@ export class ChannelsView implements TemporalView {
     const channel = this.channel, card = channel && this.threadCard
     this.layout?.toggleAttribute('data-thread', !!card)
     this.threadEl.hidden = !card
-    if (!channel || !card) { this.sigs.thread = ''; this.threadList.replaceChildren(); this.sweepPreviews(); return }
+    if (!channel || !card) { this.sigs.thread = ''; this.rows.thread.clear(); this.threadList.replaceChildren(); this.sweepPreviews(); return }
     // The open ask stands in the thread's head, so its history does not say it again.
     const now = Date.now(), messages = threadOf(this.messages(channel), card).filter(message => !(message.kind === 'ask' && message.waiting && sameFiber(message.card, card)))
     const state = liveness(card)
@@ -1385,6 +1441,7 @@ export class ChannelsView implements TemporalView {
     this.consoles = { channel: null, thread: null }
     this.drafted.channel = this.drafted.thread = null
     this.sigs = { channel: '', thread: '', rail: '' }
+    this.rows = { channel: new Map(), thread: new Map() }
   }
 }
 

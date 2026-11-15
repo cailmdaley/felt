@@ -102,6 +102,8 @@ class ThumbnailBudget {
 }
 const budget = new ThumbnailBudget()
 export function pumpThumbnails(): void { budget.flush() }
+/** Ranks every thumbnail again on the next frame, after something their priorities read has changed. */
+export function scheduleThumbnails(): void { budget.schedule() }
 
 function thumbnailTitle(captioned: boolean | undefined, declared: string | undefined, fallback?: string): string {
   if (captioned) return ''

@@ -1035,7 +1035,8 @@ export class Dock {
     meter.className = 'ws-band-meter'
     meter.dataset.part = 'context-meter'
     meter.append(contextFact, cacheFact)
-    const usageRefresh = window.setInterval(() => { if (!document.hidden) void this.readUsage(target()) }, USAGE_REFRESH_MS)
+    // A console no one can see (a Channels pane closed or without a worker) reads nothing.
+    const usageRefresh = window.setInterval(() => { if (!document.hidden && !this.el.closest('[hidden]')) void this.readUsage(target()) }, USAGE_REFRESH_MS)
     this.disposers.push(() => window.clearInterval(usageRefresh))
     const back = this.back = document.createElement('button')
     back.type = 'button'

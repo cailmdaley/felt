@@ -5,6 +5,9 @@ import { FALLBACK_DEFAULT_AGENT, KanbanSurfaceRenderer, restingOrder } from './K
 import type { KanbanResponse } from './KanbanTypes.js'
 import { card, response } from './testFixtures.js'
 
+/** What the daemon keeps of the channels, which the board reads for Channels' tab from every view. */
+const CHANNELS = { dismissed: [], reach_ms: 14 * 86_400_000 }
+
 const fleetDefaults: Record<string, string> = {
   alpha: 'claude-opus',
   beta: 'claude-fable',
@@ -44,7 +47,7 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('requestAnimationFrame', () => 1)
   vi.stubGlobal('cancelAnimationFrame', vi.fn())
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({}))))
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(String(input).includes('/channels/dismissed') ? CHANNELS : {}))))
   window.history.replaceState(null, '', '/')
   board = new KanbanModal({ shuttleBase: '' })
   inside = board as unknown as BoardInternals
@@ -113,6 +116,7 @@ describe('agent names follow each owning fleet default', () => {
     const defaults: Record<string, string> = { alpha: 'claude-fable', beta: 'claude-opus' }
     const fetcher = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input), window.location.href)
+      if (url.pathname.endsWith('/channels/dismissed')) return new Response(JSON.stringify(CHANNELS))
       const origin = url.searchParams.get('origin') ?? ''
       return new Response(JSON.stringify([{ id: defaults[origin], default: true }]), {
         headers: { 'Content-Type': 'application/json' },

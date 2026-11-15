@@ -219,6 +219,8 @@ try {
     // From the Desk, the channel last read included.
     await page.locator('.kbn-viewtab[data-view="desk"]').click()
     await post('Et les exercices.')
+    // Away from Channels its reads come once a minute: let a minute pass.
+    await page.evaluate(() => { const now = Date.now; Date.now = () => now() + 61_000 })
     await page.evaluate(() => window.__harness.modal.fetchAndRender())
     await page.waitForFunction(() => document.querySelector('.kbn-viewtab[data-view="channels"]').hasAttribute('data-attention'))
     await shot(page, 'unread-tab')

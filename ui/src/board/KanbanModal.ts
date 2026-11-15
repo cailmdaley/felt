@@ -46,6 +46,7 @@ import './KanbanModal.css'
 import './deskRows.css'
 import { Workspace } from './workspace/Workspace.js'
 import { Dock, type ConsoleOptions } from './workspace/Dock.js'
+import { scheduleThumbnails } from './workspace/Thumbnail.js'
 import { confirmWorkerStop } from './workspace/Verdicts.js'
 import { constitutionAction, runAwaitsHuman, schedulePaused, scheduled } from './workspace/fiberPageState.js'
 import { DeskKeyboard } from './DeskKeyboard.js'
@@ -608,6 +609,8 @@ export class KanbanModal {
     if (active) this.placeReader()
     // Find serves one view at a time: entering or leaving the reader empties it and lifts its filter.
     if (was !== active) this.workspace?.clearFind()
+    // A view's previews under the reader give up their live bodies, and take them again when it closes.
+    if (was !== active) scheduleThumbnails()
     if (this.body) {
       this.body.inert = active
       if (active) this.body.setAttribute('aria-hidden', 'true')
