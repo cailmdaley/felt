@@ -124,6 +124,7 @@ An acknowledgment's file name is the hash of its publication's id, which is the 
 An acknowledgment wins over a pending copy of its id, including a copy an interrupted import left, and the import touches no recipient's inbox.
 The importer reads the source without changing it, enqueues idempotently, then removes the snapshot and renames the directory to `thread-outbox.imported` before deleting it, so a crash at any point repeats safely.
 A pending record the routing inbox can never accept (`invalid_request`, such as text over 64 KiB) is reported as `skipped`, which the daemon logs, and the rest import.
+Stamps are read as the older daemon's capture read them (ISO 8601 with a `T` or space separator and a `Z`, `+01:00`, `+0100` or `+01` offset) and kept as written, since currency compares them verbatim; a record with no stamp, which would never expire, or one that cannot be read is skipped.
 A cleanup failure is reported as `cleanup_error`, which the daemon logs; boot goes on, and the next boot removes what is left.
 A malformed baseline, a pending payload that cannot be parsed, or a malformed state exits 3 (`Shuttle.Inbox.Corrupt`) and holds boot without discarding anything; restore the exact trusted baseline from backup rather than setting it to the current time.
 Any other failure, a timeout included, retries the boot step.

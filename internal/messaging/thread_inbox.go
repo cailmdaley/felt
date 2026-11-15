@@ -45,7 +45,7 @@ func ReadThreadInboxState(env *sysenv.Env) (ThreadInboxState, error) {
 	if err = json.Unmarshal(b, &s); err != nil {
 		return s, errCode("corrupt", "thread inbox state: %v", err)
 	}
-	if _, err := time.Parse(time.RFC3339Nano, s.Baseline); err != nil {
+	if _, err := parseStamp(s.Baseline); err != nil {
 		return s, errCode("corrupt", "thread inbox state: %v", err)
 	}
 	return s, nil
@@ -57,11 +57,11 @@ func (s ThreadInboxState) admits(stamp string) bool {
 	if stamp == "" {
 		return true
 	}
-	t, err := time.Parse(time.RFC3339Nano, stamp)
+	t, err := parseStamp(stamp)
 	if err != nil {
 		return false
 	}
-	baseline, _ := time.Parse(time.RFC3339Nano, s.Baseline)
+	baseline, _ := parseStamp(s.Baseline)
 	return t.After(baseline)
 }
 
@@ -378,10 +378,14 @@ func bootThreadInbox(env *sysenv.Env, imported func(string) error) (ThreadImport
 			continue
 		}
 		entry, err := ThreadEntry(id, record)
+		if _, stampErr := parseStamp(threadStamp(record)); stampErr != nil {
+			err = errCode("invalid_request", "thread publication stamp: %v", stampErr)
+		}
 		if err == nil {
 			err = Enqueue(env, entry)
 		}
-		// Retrying cannot change an invalid record's answer.
+		// Retrying cannot change an invalid record's answer. A record without
+		// a stamp would never expire, so it is refused here too.
 		if ErrorCode(err) == "invalid_request" {
 			report.Skipped = append(report.Skipped, ThreadRefusal{id, err.Error()})
 		} else if err != nil {
@@ -502,7 +506,7 @@ func readOutbox(root string) (outboxImage, error) {
 	case legacy.Baseline != "" && legacy.Baseline != img.baseline:
 		return img, errCode("corrupt", "thread outbox baselines differ")
 	}
-	if _, err := time.Parse(time.RFC3339Nano, img.baseline); img.baseline != "" && err != nil {
+	if _, err := parseStamp(img.baseline); img.baseline != "" && err != nil {
 		return img, errCode("corrupt", "thread outbox: %v", err)
 	}
 	return img, nil

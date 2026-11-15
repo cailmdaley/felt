@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"syscall"
@@ -31,6 +32,32 @@ func fiberRequestIdentity(r Request) string {
 	return requestHash(r) + string(signal)
 }
 
+// iso8601Stamp is the ISO 8601 date-time the daemon's Elixir capture accepts
+// (DateTime.from_iso8601): a T or space separator, a fraction after . or ,
+// and a Z, +hh:mm, +hhmm or +hh offset.
+var iso8601Stamp = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:[.,](\d+))?(Z|[+-]\d{2}(?::?\d{2})?)$`)
+
+// parseStamp reads a lifecycle stamp in any form the daemon's capture
+// accepts. The stamp itself stays as written: the daemon compares it
+// verbatim with the fiber's.
+func parseStamp(stamp string) (time.Time, error) {
+	m := iso8601Stamp.FindStringSubmatch(stamp)
+	if m == nil {
+		return time.Time{}, fmt.Errorf("invalid ISO 8601 stamp %q", stamp)
+	}
+	offset := m[4]
+	if len(offset) == 3 {
+		offset += ":00"
+	} else if len(offset) == 5 {
+		offset = offset[:3] + ":" + offset[3:]
+	}
+	fraction := ""
+	if m[3] != "" {
+		fraction = "." + m[3]
+	}
+	return time.Parse(time.RFC3339Nano, m[1]+"T"+m[2]+fraction+offset)
+}
+
 func requestExpired(request Request, now time.Time) bool {
 	stamps := []string{request.RetainedAt}
 	if request.ThreadSignal != nil {
@@ -40,7 +67,7 @@ func requestExpired(request Request, now time.Time) bool {
 		if stamp == "" {
 			continue
 		}
-		retainedAt, err := time.Parse(time.RFC3339Nano, stamp)
+		retainedAt, err := parseStamp(stamp)
 		if err == nil && now.Sub(retainedAt) > mailboxRetention {
 			return true
 		}

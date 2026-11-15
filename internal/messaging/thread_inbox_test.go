@@ -426,6 +426,52 @@ func TestThreadImportSkipsARecordTheInboxCanNeverAccept(t *testing.T) {
 	}
 }
 
+// The import reads stamps the way the old daemon's capture did, keeps them
+// as written, and skips a record with no stamp or one it cannot read.
+func TestThreadImportReadsElixirStampsAndSkipsTheUnreadable(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	root := seedOutbox(t, env, oldBaseline)
+	hourAgo := time.Now().Add(-time.Hour)
+	stamps := map[string]string{
+		"thread-space":   hourAgo.UTC().Format("2006-01-02 15:04:05Z"),
+		"thread-offset":  hourAgo.In(time.FixedZone("", 3600)).Format("2006-01-02T15:04:05.000-0700"),
+		"thread-hours":   hourAgo.In(time.FixedZone("", -7200)).Format("2006-01-02T15:04:05-07"),
+		"thread-comma":   hourAgo.UTC().Format("2006-01-02T15:04:05") + ",25Z",
+		"thread-none":    "",
+		"thread-garbage": "yesterday",
+		"thread-old":     time.Now().Add(-15 * 24 * time.Hour).UTC().Format("2006-01-02 15:04:05Z"),
+	}
+	for id, stamp := range stamps {
+		r := threadRecord()
+		r["retained_at"] = stamp
+		if id == "thread-none" {
+			delete(r, "retained_at")
+		}
+		seedPending(t, root, id, r)
+	}
+	report := bootThread(t, env)
+	skipped := map[string]bool{}
+	for _, s := range report.Skipped {
+		skipped[s.ID] = true
+	}
+	if len(skipped) != 2 || !skipped["thread-none"] || !skipped["thread-garbage"] {
+		t.Fatalf("%+v", report.Skipped)
+	}
+	got := map[string]string{}
+	for _, p := range routes(t, env) {
+		got[p.ID] = p.Record["retained_at"].(string)
+	}
+	for _, id := range []string{"thread-space", "thread-offset", "thread-hours", "thread-comma"} {
+		if got[id] != stamps[id] {
+			t.Fatalf("%s: %q, want %q as written", id, got[id], stamps[id])
+		}
+	}
+	if len(got) != 4 {
+		t.Fatalf("an expired record was imported: %v", got)
+	}
+}
+
 // An acknowledgment is its file name: the old daemon tolerated an ack it
 // could not read (Fir's Lustre client could not stat one), and so does the
 // import. Any other name in acked/ was never an acknowledgment.
