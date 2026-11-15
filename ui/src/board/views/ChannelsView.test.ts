@@ -2,6 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { ChannelsView } from './ChannelsView.js'
 import type { ViewContext } from './ViewRegistry.js'
+import type { SentFile } from '../sentFiles.js'
 import { card, response, settle } from '../testFixtures.js'
 
 const views: ChannelsView[] = []
@@ -41,13 +42,14 @@ const board = (inFlight: ReturnType<typeof card>[]) => response({ now: { drafts:
 const sent = (uid: string, path: string, minutes: number, fiber = card({ id: uid, uid, name: uid })) =>
   ({ card: fiber, receipt: { uid, key: `host:${path}`, owner: 'host', host: 'host', fullPath: path, basename: path.split('/').at(-1)!, timestamp: Date.now() - minutes * minute } })
 const library = [sent('M', '/notes/mask/north-mask.png', 30, mask), sent('old', '/notes/old/lensing-notes.md', 600, card({ id: 'old', uid: 'old', name: 'Lensing notes' }))]
-async function mount(inFlight = [shear, mask, covariance, van, garden], view = new ChannelsView(), lately = [garden], shuttleBase = '', prepare?: (host: HTMLElement) => void) {
+async function mount(inFlight = [shear, mask, covariance, van, garden], view = new ChannelsView(), lately = [garden], shuttleBase = '', prepare?: (host: HTMLElement) => void, sent: SentFile[] = []) {
   const openFromDesk = vi.fn(), openPage = vi.fn(), requestRefresh = vi.fn(), see = vi.fn()
   const workspace = {
     openFromDesk, openPage, readLatelyCards: () => lately,
     library: { subscribe: () => () => {}, visit: () => {}, cancelOpen: vi.fn(), documents: () => library, receipts: (uid: string) => library.filter(doc => doc.receipt.uid === uid).map(doc => doc.receipt) },
   }
-  const ctx = { cards: [], response: board(inFlight), shuttleBase, workspace, requestRefresh, openCard: vi.fn(), see } as unknown as ViewContext
+  const sends = { files: sent, subscribe: () => () => {}, refresh: async () => {} }
+  const ctx = { cards: [], response: board(inFlight), shuttleBase, workspace, sends, requestRefresh, openCard: vi.fn(), see } as unknown as ViewContext
   const host = document.createElement('div'); document.body.append(host)
   prepare?.(host)
   views.push(view); view.mount(host, ctx)
@@ -351,42 +353,53 @@ it('probes a member\'s companions again after an unanswered probe and when its f
   expect(names()).toContain('Tapestry')
 })
 
-it('opens a channel on its newest line and follows new lines, unless the reader has scrolled up', async () => {
+it('opens a channel on its newest line and follows new lines, unless the reader has scrolled up; only the feed scrolls', async () => {
   daemon()
-  // The page scrolls in the host: 400 px in view, each line 100 px tall, the reply bar 50 px under the lines.
-  let top = 0
+  // The feed scrolls itself: 400 px in view, each line 100 px tall. The page around it must never move.
+  let top = 0, page = 0
   const prepare = (host: HTMLElement): void => {
-    host.style.overflowY = 'auto'
-    host.dataset.scroller = ''
-    Object.defineProperty(host, 'scrollTop', { get: () => top, set: (value: number) => { top = value } })
+    Object.defineProperty(host, 'scrollTop', { get: () => page, set: (value: number) => { page = value } })
   }
-  const rect = (bottom: number) => ({ bottom, top: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect
-  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
-    if (this.classList.contains('kbn-ch-feed')) return rect(100 * this.children.length - top)
-    return rect((this as HTMLElement).dataset?.scroller !== undefined ? 400 : 0)
+  const feedOnly = (get: (feed: HTMLElement) => number) => function (this: HTMLElement) { return this.classList.contains('kbn-ch-feed') ? get(this) : 0 }
+  vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(feedOnly(feed => 100 * feed.children.length))
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(feedOnly(() => 400))
+  vi.spyOn(Element.prototype, 'scrollTop', 'get').mockImplementation(function (this: Element) { return this.classList.contains('kbn-ch-feed') ? top : 0 })
+  vi.spyOn(Element.prototype, 'scrollTop', 'set').mockImplementation(function (this: Element, value: number) {
+    if (this.classList.contains('kbn-ch-feed')) top = Math.max(0, Math.min(value, 100 * this.children.length - 400))
   })
-  vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('kbn-ch-reply') ? 50 : 0 })
   const lines = Array.from({ length: 8 }, (_, i) => card({ id: `line${i}`, uid: `L${i}`, name: `Line ${i}`, orchestrator: 'S', status: 'active', workerState: 'running', runtimePhase: 'working', outcome: `Step ${i}.`, lastActivityAt: Date.now() - (60 - i) * minute }))
   const { view, ctx } = await mount([shear, mask, ...lines, van], undefined, [], '', prepare)
-  // Ten lines: 1000 px of feed and 50 of reply, 400 in view.
-  expect(top).toBe(650)
-  // A new line while at the bottom follows it.
+  // Ten lines, 1000 px, 400 in view.
+  expect(top).toBe(600)
   const arrive = async (n: number) => {
     const more = Array.from({ length: n }, (_, i) => card({ id: `new${i}`, uid: `N${i}`, name: `New ${i}`, orchestrator: 'S', status: 'active', ask: { text: `Question ${i}?`, at: at(1) } }))
     ctx.response = board([shear, mask, ...lines, ...more, van])
     view.refresh(ctx); await settle()
   }
+  // A new line while at the bottom follows it.
   await arrive(1)
-  expect(top).toBe(750)
-  // Scrolled up, the reader keeps their place when another arrives.
+  expect(top).toBe(700)
+  // Scrolled up, the reader keeps their place when more arrive.
   top = 200
   await arrive(2)
   expect(top).toBe(200)
-  // Another channel opens on its newest line too.
-  top = 0
+  // Another channel opens on its newest line too, and coming back lands on the newest again.
   view.keydown(new KeyboardEvent('keydown', { key: 'j' }))
   expect(top).toBe(0)
   view.keydown(new KeyboardEvent('keydown', { key: 'k' }))
-  // Back on the analyst's twelve lines: 1200 px of feed and 50 of reply, 400 in view.
-  expect(top).toBe(850)
+  expect(top).toBe(800)
+  expect(page).toBe(0)
+})
+
+it('shows a file sent several times once under its line, its newest send', async () => {
+  daemon()
+  const sends = [
+    { uid: 'M', host: '', fullPath: '/notes/mask/kappa.png', basename: 'kappa.png', timestamp: Date.now() - 3 * minute },
+    { uid: 'M', host: '', fullPath: '/runs/old/kappa.png', basename: 'kappa.png', timestamp: Date.now() - 30 * minute },
+    { uid: 'M', host: '', fullPath: '/notes/mask/tapestry.html', basename: 'tapestry.html', timestamp: Date.now() - 4 * minute },
+  ]
+  const view = new ChannelsView()
+  const { host } = await mount(undefined, view, [], '', undefined, sends)
+  expect([...line(host, 'Choose the mask').querySelectorAll('.kbn-ch-file')].map(el => [el.textContent, el.getAttribute('title')]))
+    .toStrictEqual([['kappa.png', 'Sent 3m ago'], ['tapestry.html', 'Sent 4m ago']])
 })

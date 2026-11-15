@@ -4,7 +4,8 @@
    channel's files in its place), and a reply bar under the lines. Ink on
    parchment, red for what is new, and as little else as it can do without. */
 .kbn-channels { touch-action: pan-y; }
-.kbn-channels .kbn-view-body { display: block; min-height: 0; }
+/* The page holds still: the rail, the feed and the tapestry each scroll on their own. */
+.kbn-channels .kbn-view-body { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 .kbn-channels .kbn-view-titlerow { gap: 16px; }
 .kbn-ch-keys, .kbn-ch-note {
   font: italic var(--type-note)/var(--leading-prose) var(--font-serif);
@@ -24,10 +25,11 @@
 .kbn-ch-later[hidden] { display: none; }
 
 .kbn-ch-layout {
+  flex: 1 1 auto;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(150px, 200px) minmax(0, 1fr);
   gap: 32px;
-  align-items: start;
 }
 .kbn-ch-layout[data-rail-hidden] { grid-template-columns: minmax(0, 1fr); }
 .kbn-ch-layout[data-rail-hidden] .kbn-ch-rail { display: none; }
@@ -35,7 +37,7 @@
 /* The rail: the waiting channels, then the pinned quiet ones, then the shelf
    gone cold, then what was read lately; while Find looks, every channel and
    file it matches. */
-.kbn-ch-rail { position: sticky; top: 0; display: flex; flex-direction: column; gap: 18px; padding-top: 4px; }
+.kbn-ch-rail { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; padding-top: 4px; }
 .kbn-ch-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
 .kbn-ch-shelf {
   margin: 14px 0 2px 10px;
@@ -100,7 +102,7 @@ h4.kbn-ch-shelf { margin-top: 0; }
 .kbn-ch-files .kbn-ch-doc:hover { background: none; }
 
 /* The channel. */
-.kbn-ch { min-width: 0; outline: none; }
+.kbn-ch { min-width: 0; min-height: 0; display: flex; flex-direction: column; outline: none; }
 .kbn-ch-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 18px; padding: 2px 0 12px; border-bottom: 0.5px solid var(--kbn-rule); }
 /* What stands beside the lines: the tapestry or the files; the one shown is not underlined. */
 .kbn-ch-tabs { display: flex; gap: 14px; margin-left: auto; }
@@ -108,20 +110,22 @@ h4.kbn-ch-shelf { margin-top: 0; }
 .kbn-ch-name { margin: 0; font: 500 var(--type-title)/var(--leading-tight) var(--font-serif); color: var(--kbn-ink); overflow-wrap: anywhere; }
 .kbn-ch-empty { margin: 40px 0; text-align: center; font: italic var(--type-prose)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink-muted); }
 .kbn-ch-columns {
+  flex: 1 1 auto;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 36px;
-  align-items: start;
 }
-.kbn-ch-talk { min-width: 0; max-width: 44rem; }
-.kbn-ch-canvas { min-width: 0; position: sticky; top: 0; padding-top: 18px; }
+/* The lines scroll above the reply bar, which stays put under them. */
+.kbn-ch-talk { min-width: 0; min-height: 0; max-width: 44rem; display: flex; flex-direction: column; }
+.kbn-ch-canvas { min-width: 0; min-height: 0; overflow-y: auto; padding-top: 18px; }
 .kbn-ch-label { margin: 0 0 8px; font: italic var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); }
 .kbn-ch-back { font-style: normal; }
 .kbn-ch-tapestry .kbn-fileview-frame-wrap, .kbn-ch-tapestry > .kbn-fileview { height: min(72vh, 780px); }
 .kbn-ch-prose { max-width: none; padding: 0; }
 
 /* The lines: a state dot, then who and when, then what. What waits on the human glows. */
-.kbn-ch-feed { list-style: none; margin: 0; padding: 16px 0 6px; display: flex; flex-direction: column; gap: 8px; }
+.kbn-ch-feed { flex: 1 1 auto; min-height: 0; overflow-y: auto; list-style: none; margin: 0; padding: 16px 0 6px; display: flex; flex-direction: column; gap: 8px; }
 .kbn-ch-hush { font: italic var(--type-row)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink-muted); }
 .kbn-ch-msg {
   --glow: transparent;
@@ -186,9 +190,7 @@ h4.kbn-ch-shelf { margin-top: 0; }
 .kbn-ch-file[data-new]::before { margin-right: 2px; }
 
 .kbn-ch-reply {
-  position: sticky;
-  bottom: 0;
-  z-index: 1;
+  flex: none;
   padding: 10px 0 4px;
   background: var(--kbn-sheet, var(--kbn-paper));
 }
@@ -225,8 +227,8 @@ h4.kbn-ch-shelf { margin-top: 0; }
     border-right: 0.5px solid var(--kbn-rule-strong);
     box-shadow: 8px 0 32px color-mix(in srgb, var(--kbn-ink) 22%, transparent);
   }
-  /* The lines and the reply first, then the tapestry. */
-  .kbn-ch-columns { grid-template-columns: minmax(0, 1fr); gap: 8px; }
-  .kbn-ch-canvas { position: static; }
+  /* The lines and the reply fill the channel; the tapestry is under them, a scroll away. */
+  .kbn-ch-columns { grid-template-columns: minmax(0, 1fr); grid-template-rows: 100% auto; gap: 8px; overflow-y: auto; }
+  .kbn-ch-canvas { overflow-y: visible; }
   .kbn-ch-tapestry .kbn-fileview-frame-wrap, .kbn-ch-tapestry > .kbn-fileview { height: 60vh; }
 }

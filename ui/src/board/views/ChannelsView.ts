@@ -360,16 +360,10 @@ export class ChannelsView implements TemporalView {
     this.drawRail(); this.drawChannel()
     this.channelEl?.focus({ preventScroll: true })
   }
-  /** What scrolls the channel: the nearest scrolling ancestor, else the page. */
-  private scroller(): HTMLElement | null {
-    for (let node = this.layout?.parentElement; node; node = node.parentElement) if (/auto|scroll/.test(getComputedStyle(node).overflowY)) return node
-    return document.scrollingElement as HTMLElement | null
-  }
-  /** How far the newest line, with the reply bar after it, sits below what is in view; zero or less when it shows. */
+  /** How far the feed's newest line sits below what it shows; zero when it shows. */
   private belowNewest(): number {
-    const scroller = this.scroller()
-    if (!scroller || !this.feed || !this.form) return 0
-    return this.feed.getBoundingClientRect().bottom + this.form.offsetHeight - scroller.getBoundingClientRect().bottom
+    const feed = this.feed
+    return feed ? feed.scrollHeight - feed.scrollTop - feed.clientHeight : 0
   }
   private visit(key: string): void {
     this.before.set(key, lastSeen(key))
@@ -494,8 +488,8 @@ export class ChannelsView implements TemporalView {
       this.head.replaceChildren(name, this.tabs!)
       this.feed.replaceChildren(...channel.messages.map(message => this.messageRow(channel, message, before, now)))
       if (!channel.messages.length) this.feed.append(el('li', 'kbn-ch-hush', 'Quiet.'))
-      const below = follow ? this.belowNewest() : 0, scroller = this.scroller()
-      if (below > 0 && scroller) scroller.scrollTop += below
+      // Only the feed moves: the page, the rail and the tapestry stay where they are.
+      if (follow) this.feed.scrollTop = this.feed.scrollHeight
       this.landing = false
       if (target === channel.seat) this.label.replaceChildren(el('span', '', channel.seat.name))
       else this.label.replaceChildren(button('kbn-ch-back', `← ${channel.seat.name}`, () => this.select(null)), el('span', '', ` › ${target.name}`))
@@ -577,7 +571,9 @@ export class ChannelsView implements TemporalView {
   /** The files a card sent and the lines it spoke while out of view. */
   private attachments(channel: Channel, card: KanbanCard, before: number, now: number): HTMLElement | null {
     const lines = channel.held.filter(line => line.fiber_id === card.uid || line.fiber_id === card.id)
+    // A file sent again is one chip, its newest send.
     const files = channel.files.filter(file => cardNamed([card], file.uid ?? '', file.host ?? ''))
+      .filter((file, at, all) => all.findIndex(other => other.basename === file.basename) === at)
     if (!lines.length && !files.length) return null
     const box = el('div', 'kbn-ch-attached')
     for (const line of lines) {
