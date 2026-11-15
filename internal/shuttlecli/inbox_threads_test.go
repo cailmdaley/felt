@@ -74,3 +74,26 @@ func TestThreadStateExitsThreeOnACorruptOutbox(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, out.String())
 	}
 }
+
+func TestThreadPutReportsCreatedIdsWhenALaterPublicationFails(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	env.Set("SHUTTLE_DATA_DIR", filepath.Join(t.TempDir(), "data"))
+	var out bytes.Buffer
+	env.Stdout, env.Stderr = &out, &bytes.Buffer{}
+	if code := Run(env, []string{"inbox", "thread-state"}); code != 0 {
+		t.Fatal(code)
+	}
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	good := map[string]any{"owner": "h", "store": "/s", "parent_uid": "p", "text": "thread a unblocked: b closed", "retained_at": stamp}
+	bad := map[string]any{"owner": "h", "store": "/s", "parent_uid": "p", "text": "thread a closed: x", "retained_at": stamp, "signal": map[string]any{"uid": "a"}}
+	batch, _ := json.Marshal([]map[string]any{{"id": "thread-good", "record": good}, {"id": "thread-bad", "record": bad}})
+	out.Reset()
+	env.Stdin = strings.NewReader(string(batch))
+	if code := Run(env, []string{"inbox", "thread-put"}); code == 0 {
+		t.Fatal("an invalid publication was accepted")
+	}
+	if got := strings.TrimSpace(out.String()); got != `{"created":["thread-good"]}` {
+		t.Fatal(got)
+	}
+}

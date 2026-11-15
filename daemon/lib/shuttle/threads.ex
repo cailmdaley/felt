@@ -967,8 +967,8 @@ defmodule Shuttle.Threads do
     |> Delivery.flush_owned()
   end
 
-  # A routing inbox entry outlives neither its stamp's retention window nor
-  # an offered entry's, so a signal older than this is never shelled.
+  # The inbox's retention window: it stores no thread publication stamped
+  # earlier, so capture never shells one.
   @retention_s 14 * 24 * 60 * 60
 
   @doc """
@@ -1106,13 +1106,12 @@ defmodule Shuttle.Threads do
     end
   end
 
-  # The ids this capture created. The CLI answers them also when a later
+  # The ids this capture created. The CLI prints them also when a later
   # publication failed, so a created unblock note still gets its board line.
   defp publish([]), do: MapSet.new()
 
   defp publish(publications) do
-    input =
-      Jason.encode!(Enum.map(publications, fn {id, record} -> %{id: id, record: record} end))
+    input = Jason.encode!(for {id, record} <- publications, do: %{id: id, record: record})
 
     result =
       Shuttle.CLI.run(["inbox", "thread-put"],
@@ -1121,20 +1120,21 @@ defmodule Shuttle.Threads do
         stderr_to_stdout: false
       )
 
-    with {status, output} when status in [:ok, :command_error] <- created_output(result),
-         {:ok, %{"created" => created}} <- Jason.decode(output) do
-      unless status == :ok, do: Logger.warning("Thread capture failed: #{inspect(result)}")
-      MapSet.new(created)
-    else
-      _ ->
-        Logger.warning("Thread capture failed: #{inspect(result)}")
-        MapSet.new()
+    unless match?({:ok, _}, result),
+      do: Logger.warning("Thread capture failed: #{inspect(result)}")
+
+    output =
+      case result do
+        {:ok, output} -> output
+        {:command_error, _status, output} -> output
+        {:error, _} -> ""
+      end
+
+    case Jason.decode(output) do
+      {:ok, %{"created" => created}} -> MapSet.new(created)
+      _ -> MapSet.new()
     end
   end
-
-  defp created_output({:ok, output}), do: {:ok, output}
-  defp created_output({:command_error, _status, output}), do: {:command_error, output}
-  defp created_output(error), do: error
 
   defp append_board(board) do
     result =
