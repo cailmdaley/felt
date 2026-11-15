@@ -46,5 +46,25 @@ defmodule Shuttle.MessagingRecordedTest do
 
     assert_receive {:transport, %{"address" => address, "idle_only" => true}}
     assert address == "shuttle://#{host}/codex/session"
+
+    assert {:error, 400, _} =
+             Shuttle.Messaging.send_recorded(%{
+               "address" => "shuttle://another-host/codex/session",
+               "message_id" => "pulse-wrong-host",
+               "text" => "tick",
+               "from" => "shuttle"
+             })
+
+    refute_received {:transport, _}
+
+    assert {:ok, 200, _} =
+             Shuttle.Messaging.send_recorded(%{
+               "address" => "shuttle://#{host}/codex/session",
+               "message_id" => "pulse-own-host",
+               "text" => "tick",
+               "from" => "shuttle"
+             })
+
+    assert_receive {:transport, %{"address" => ^address}}
   end
 end

@@ -85,7 +85,16 @@ defmodule Shuttle.Messaging do
     with {:ok, request} <- validate_message(payload, :text),
          {:ok, address} <- parse_address(request.address),
          request <- normalize_message_address(request, address) do
-      run_local(request, %{address | host: Poller.own_host_id()}, ["--recorded"])
+      cond do
+        address.host == "local" ->
+          run_local(request, %{address | host: Poller.own_host_id()}, ["--recorded"])
+
+        address.host == Poller.own_host_id() ->
+          run_local(request, address, ["--recorded"])
+
+        true ->
+          {:error, 400, "recorded messages require a local address"}
+      end
     end
   end
 

@@ -205,6 +205,9 @@ receipt status and message id. If interrupted, retry with the printed id using
 delivered, held or starting;
 exit 1 means rejected, unknown, or another command error.`,
 		Args: func(cmd *cobra.Command, args []string) error {
+			if messageOpts.recorded && !messageOpts.local {
+				return fmt.Errorf("--recorded requires --local")
+			}
 			if messageOpts.requestJSON {
 				if !messageOpts.local {
 					return fmt.Errorf("--request-json requires --local")
