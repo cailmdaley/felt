@@ -352,7 +352,7 @@ The session-only Claude fallback claims by moving an entry into `fallback/` and 
 | `shuttle inbox route <id> --current true\|false\|unknown [--record <json> [--key <key>]]` | Advance one routing entry from the daemon's fresh facts: the resolved recipient's `record`, and its inbox `key` when the daemon owns it; print `action`: `wait`, `forward` or `session` with the entry's `record`, or the disposition it recorded (`placed`, `superseded`, `expired`) |
 | `shuttle inbox settle <id> forwarded\|delivered\|undeliverable` | Record a routing entry's confirmed handoff and move it to offered |
 
-`shuttle inbox human-begin <fiber-key> <id> <text>` records typed human input and prints `{"created": true|false}`.
+`shuttle inbox human-begin <fiber-key> <id>` records typed human input, read from stdin, and prints `{"created": true|false}`.
 `shuttle inbox human-settle <fiber-key> <id> delivered|unknown|undeliverable` records its transport outcome.
 All verbs act on this host's inbox only.
 `context-mailbox put` also accepts thread signals, reply and notification fields, `--turn`, `--session`, `--derived` and `--attachments-stdin` (a JSON attachment array); its `--wake` means `turn: force`.

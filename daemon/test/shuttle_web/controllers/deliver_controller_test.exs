@@ -236,6 +236,67 @@ defmodule ShuttleWeb.DeliverControllerTest do
     assert pastes.() == 1
   end
 
+  test "a human line and a Dock line beginning with a dash are pasted as typed" do
+    fiber = "tests/human-dash"
+    put_constitution(fiber)
+    {:ok, _} = Poller.dispatch_fiber(fiber, force: true)
+
+    pastes = fn ->
+      Enum.count(MockRunner.commands(), &match?({"tmux", ["load-buffer" | _]}, &1))
+    end
+
+    assert %{"delivered" => true} =
+             api_conn()
+             |> post(
+               "/api/v1/deliver",
+               Jason.encode!(%{
+                 "fiber_id" => fiber,
+                 "text" => "- keep the mask\n- drop the cut",
+                 "from" => "human",
+                 "message_id" => "human-dash"
+               })
+             )
+             |> json_response(200)
+
+    assert pastes.() == 1
+
+    api_conn()
+    |> post(
+      "/api/v1/dispatch",
+      Jason.encode!(%{
+        "fiber_id" => fiber,
+        "user_message" => "-v is broken, rerun it",
+        "resume_mode" => "previous",
+        "force" => true,
+        "message_id" => "human-dock-dash"
+      })
+    )
+    |> json_response(200)
+
+    assert pastes.() == 2
+  end
+
+  test "an agent message beginning with a dash reaches the fiber inbox" do
+    fiber = "tests/agent-dash"
+    put_constitution(fiber)
+
+    assert %{"queued" => true} =
+             api_conn()
+             |> post(
+               "/api/v1/deliver",
+               Jason.encode!(%{
+                 "fiber_id" => fiber,
+                 "text" => "- keep the mask",
+                 "from" => "shuttle://elsewhere/claude/sender",
+                 "message_id" => "agent-dash"
+               })
+             )
+             |> json_response(202)
+
+    assert [args] = mailbox_puts()
+    assert Enum.take(args, -4) == ["--", Enum.at(args, -3), "agent-dash", "- keep the mask"]
+  end
+
   test "a never-run constitution dispatches fresh with the text as From User" do
     put_constitution("tests/deliver-fresh")
 

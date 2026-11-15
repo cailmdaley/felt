@@ -7,7 +7,11 @@ defmodule Shuttle.HumanInput do
 
     with {:ok, %{fibers: [entry | _]}} <- Shuttle.FiberDocuments.get_shuttle(fiber_id),
          key = Shuttle.Delivery.context_key(entry),
-         {:ok, output} <- Shuttle.CLI.run(["inbox", "human-begin", key, id, text]),
+         {:ok, output} <-
+           Shuttle.CLI.run(["inbox", "human-begin", "--", key, id],
+             input: text,
+             input_eof: true
+           ),
          {:ok, answer} <- Jason.decode(output) do
       case answer do
         %{"created" => false} ->
@@ -17,7 +21,7 @@ defmodule Shuttle.HumanInput do
           result = deliver.()
           outcome = outcome(result)
 
-          case Shuttle.CLI.run(["inbox", "human-settle", key, id, outcome]) do
+          case Shuttle.CLI.run(["inbox", "human-settle", "--", key, id, outcome]) do
             {:ok, _} ->
               :ok
 

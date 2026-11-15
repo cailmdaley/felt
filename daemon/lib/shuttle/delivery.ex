@@ -206,7 +206,7 @@ defmodule Shuttle.Delivery do
 
       true ->
         from = Keyword.get(opts, :from) || "shuttle"
-        args = ["context-mailbox", "put", context_key(entry), message_id, text, "--from", from]
+        args = ["context-mailbox", "put", "--from", from]
 
         args = if opts[:reply_to], do: args ++ ["--reply-to", opts[:reply_to]], else: args
 
@@ -239,6 +239,9 @@ defmodule Shuttle.Delivery do
           else
             {args, []}
           end
+
+        # Text beginning with "-" is a positional after "--", never a flag.
+        args = args ++ ["--", context_key(entry), message_id, text]
 
         with {:ok, _} <- Shuttle.CLI.run(args, command_opts) do
           if from != "shuttle" do
