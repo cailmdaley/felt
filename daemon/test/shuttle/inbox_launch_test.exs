@@ -317,6 +317,37 @@ defmodule Shuttle.InboxLaunchTest do
     assert pending(parent) == %{}
   end
 
+  test "inbox list and cancel forward to the owner and name an unreachable owner", %{host: host} do
+    alias Shuttle.Test.{Env, StubPostClient}
+    _poller = poller!(host)
+    StubPostClient.start!()
+    Env.put_app_env(:write_forward_client, StubPostClient)
+    Env.put_app_env(:remotes, [%{name: "owner-host", port: 43210}])
+
+    for action <- ["list", "cancel"] do
+      StubPostClient.set_response({:ok, 200, ~s({"entries":[]})})
+      conn = Phoenix.ConnTest.build_conn()
+
+      params = %{
+        "fiber_id" => "some-uid",
+        "origin" => "owner-host",
+        "action" => action,
+        "message_id" => "later"
+      }
+
+      response = ShuttleWeb.InboxController.create(conn, params)
+      assert response.status == 200
+      assert %{body: body} = StubPostClient.last()
+      forwarded = Jason.decode!(body)
+      assert forwarded["action"] == action
+      assert forwarded["fiber_id"] == "some-uid"
+      StubPostClient.set_response({:error, :unavailable})
+      response = ShuttleWeb.InboxController.create(conn, params)
+      assert response.status == 502
+      assert response.resp_body =~ "owner-host"
+    end
+  end
+
   test "a waking message to a dormant constitution starts one session, whose first hook takes the batch",
        %{host: host} do
     id = armed(host, "tests/inbox-dormant")

@@ -2,9 +2,36 @@ package shuttlecli
 
 import (
 	"encoding/json"
+	"github.com/cailmdaley/felt/internal/messaging"
 	"net/http"
 	"testing"
 )
+
+func TestInboxScheduledRawKeyAndCancel(t *testing.T) {
+	env := testEnv(t)
+	a := newApp(env)
+	for _, e := range []messaging.InboxEntry{
+		{Address: "store:raw", Request: messaging.Request{MessageID: "later", Text: "check the fit\nmore"}, Wishes: messaging.Wishes{NotBefore: "2999-01-01T00:00:00Z"}},
+		{Address: "store:raw", Request: messaging.Request{MessageID: "quiet", Text: "quiet"}},
+	} {
+		if err := messaging.Enqueue(env, e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, err := a.listInbox("store:raw", true)
+	if err != nil || len(entries) != 1 || entries[0].Text != "check the fit" {
+		t.Fatalf("%+v %v", entries, err)
+	}
+	cmd := a.shuttleInboxCmd()
+	cmd.SetArgs([]string{"cancel", "store:raw", "later"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	entries, err = a.listInbox("store:raw", true)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("%+v %v", entries, err)
+	}
+}
 
 func TestInboxFiberReferencesUseOwnerRoute(t *testing.T) {
 	env := testEnv(t)

@@ -11,10 +11,13 @@ defmodule Shuttle.InboxSchedule do
     else
       with {:ok, output} <- CLI.run(["inbox", "scheduled" | keys]),
            {:ok, by_key} <- Jason.decode(output) do
-        Map.new(owned, fn entry ->
+        owned
+        |> Enum.map(fn entry ->
           id = entry.fiber["uid"] || entry.fiber["id"]
           {id, Map.get(by_key, Delivery.context_key(entry), [])}
         end)
+        |> Enum.reject(fn {_id, entries} -> entries == [] end)
+        |> Map.new()
       else
         _ -> %{}
       end

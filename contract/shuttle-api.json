@@ -68,6 +68,7 @@
         "POST /sessions/prepare-terminal",
         "POST /thread-signals/current",
         "POST /messages/files",
+        "POST /inbox",
         "GET /state",
         "GET /fibers",
         "GET /threads/{id}",
@@ -1056,6 +1057,11 @@
                   "context_only": {
                     "type": "boolean",
                     "description": "Enqueues without asking for a turn unless turn or wake requests one. Requires message_id; answers 202 with delivery context."
+                  },
+                  "not_before": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "Earliest delivery instant for an agent fiber entry (contract 45). A future instant answers scheduled without consumption or launch."
                   },
                   "message_id": {
                     "type": "string",
@@ -3307,12 +3313,13 @@
             "type": "string",
             "enum": [
               "queued",
+              "scheduled",
               "starting",
               "woken",
               "followed_up",
               "held"
             ],
-            "description": "What consumption did: wake, busy follow-up, cost hold, gated launch or wait. Starting is not delivered; the launched worker takes the entry through its hook."
+            "description": "Scheduled before its not_before, or what consumption did: wake, busy follow-up, cost hold, gated launch or wait. Starting is not delivered; the launched worker takes the entry through its hook."
           },
           "detail": {
             "type": "string"

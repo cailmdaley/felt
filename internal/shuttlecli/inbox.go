@@ -13,8 +13,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// inboxVerbs are the owner-local inbox verbs: put, pending, ls and consume. An address
-// is a fiber key (<felt store path>:<uid>) or a session's shuttle:// address.
+// inboxVerbs operate on host-local keys; listing and cancellation also accept
+// fiber references, resolved through their owner daemon.
 func (a *app) shuttleInboxCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "inbox",

@@ -46,6 +46,7 @@ The routing column names one of the patterns in [How a route is routed](#how-a-r
 | `POST /capture` | owner-routed | Launch an agent from a free-text prompt to file and claim a constitution |
 | `POST /fiber/create` | owner-routed | Create a fiber |
 | `POST /dispatch` | owner-routed | Launch a worker for a fiber now, bypassing the poll |
+| `POST /inbox` | owner-routed | List or cancel pending fiber entries: `{fiber_id, origin?, action: "list"\|"cancel", message_id?}`. List answers `{entries: [...]}` with delay times, first lines and overdue wait reasons; cancel moves a pending entry to offered as cancelled, refusing a delivery in flight |
 | `POST /deliver` | owner-routed | Enqueue agent text in a fiber's inbox, then consume it (`consumed` reports the live action); a dormant or fresh launch obeys its gates. Human lines are recorded before typed paste or a From User launch. `message_id` deduplicates; `unless_live` retains its 409 live-worker refusal. See [inbox internals](../dev/inbox.md) |
 | `POST /messages` | host-addressed | Deliver a durable, idempotent text message to an exact `shuttle://HOST/HARNESS/NATIVE_ID` address |
 | `POST /lifecycle` | owner-routed | Invoke a named lifecycle action on a fiber — see [below](#lifecycle-actions) |
@@ -237,7 +238,9 @@ in its queue and answers **202** `{dispatched: false, queued: true, reason:
 "poller_busy", fiber_id, message}`: it launches when the Poller gets to it, so
 the caller does not send it again.
 
-`POST /deliver` accepts `{fiber_id, text, from?, message_id?}` (plus `origin` to forward).
+`POST /deliver` accepts `{fiber_id, text, from?, message_id?, not_before?}` (plus `origin` to forward).
+A future `not_before` (UTC RFC 3339) answers 202 with `status: scheduled`, `queued: true`, `delivered: false` and `not_before`, without clearing an ask or starting consumption or a launch.
+It needs contract 45 on every forwarding and consuming daemon; the CLI checks both its daemon and the owner.
 Agent text goes through the fiber inbox with `turn: ask`.
 An agent's `resume_mode: fresh` is recorded under its id instead and starts a fresh session with the text in its launch prompt, under the inbox launch gate: 200 `{delivery: fresh, delivered: true}`, 202 with `delivered: null` when the start is unconfirmed, or 409 with `reason` and `error` when refused, after which the same id may be sent again; a repeated id answers the stored outcome with `duplicate: true`.
 The owner mints an id for a caller without one.

@@ -3271,7 +3271,11 @@ defmodule Shuttle.Poller do
       key = entry.fiber["uid"] || entry.fiber["id"]
       live? = Map.has_key?(running, key) or Map.has_key?(running, entry.fiber["slug"])
 
-      entry = Map.put(entry, :scheduled_messages, Map.get(scheduled, key, []))
+      entry =
+        case Map.get(scheduled, key, []) do
+          [] -> entry
+          entries -> Map.put(entry, :scheduled_messages, entries)
+        end
 
       case Shuttle.Threads.waiting(pending_entry(entry, pending), live?) do
         0 -> entry
