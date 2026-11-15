@@ -563,6 +563,46 @@ defmodule Shuttle.ThreadsDeliveryTest do
     refute_receive {:flush_reached_admission, ^hub_uid}, 200
   end
 
+  test "a parent resolved through another store's symlinked view is placed in its own store's inbox",
+       %{store: store} do
+    asked_by(store, "shuttle://test-host/claude/11111111-1111-4111-8111-111111111111", :hub)
+    assert {:ok, _} = CLI.run_felt(["-C", store, "edit", "hub", "-s", "active"])
+    other = Path.join(store, "other")
+    File.mkdir_p!(other)
+    assert {:ok, _} = CLI.run_felt(["-C", other, "init"])
+    # The child moves to another registered store and keeps its pinned
+    # parent; that store also has a symlinked view of the parent's subtree.
+    File.rename!(Path.join(store, ".felt/hub/child"), Path.join(other, ".felt/child"))
+    File.ln_s!(Path.join(store, ".felt/hub"), Path.join(other, ".felt/hub"))
+    Env.put_env("SHUTTLE_STORES", other <> "," <> store)
+    assert {:ok, _} = CLI.run_in_store(other, ["close", "child", "--local"])
+
+    state = %Shuttle.Poller.State{
+      felt_stores: [other, store],
+      runner: SocketRunner,
+      full_scan_budget_ms: 10_000,
+      full_scan_min_interval_ms: 10_000
+    }
+
+    {candidates, stores, _, _, _} =
+      Shuttle.Poller.Discovery.discover(state, %{other => :full, store => :full})
+
+    {cache, _} = Shuttle.Poller.DocumentCache.refresh(%{document_cache: %{}}, candidates, stores)
+    entries = Enum.map(cache, fn {_, cached} -> cached.entry end)
+    Env.put_server(Shuttle.Poller, start_supervised!({AdmissionProbe, self()}))
+    parent = Enum.find(entries, &(Threads.address(&1.fiber) == "hub"))
+    assert parent.felt_store == store
+    Threads.deliver_results(entries, "test-host")
+    canonical = Shuttle.Delivery.context_key(parent)
+    view = other <> ":" <> parent.fiber["uid"]
+    assert {:ok, out} = CLI.run(["inbox", "pending", "--waking", canonical, view])
+    assert Jason.decode!(out) == %{canonical => 1, view => 0}
+    assert Shuttle.Test.InboxPublications.pending() == []
+    hub_uid = parent.fiber["uid"]
+    assert Threads.pending_results(entries, "test-host", []) == %{hub_uid => 1}
+    assert_receive {:flush_reached_admission, ^hub_uid}
+  end
+
   test "an archived constitution orchestrates nothing: its live threads report to the next one up",
        %{store: store, data: data} do
     assert {:ok, _} =

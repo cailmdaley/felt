@@ -94,6 +94,7 @@ A note no poll captures again (its thread no longer waits on the blocker) keeps 
 An entry's `routing` record names its recipient fiber by `parent_uid`, marked `parent_unresolved` until the daemon resolves it, or, for an asker notice, the asking `session`.
 Each poll lists the routing inbox once (`inbox routes`) and advances every entry with `inbox route`, passing the signal's fresh lifecycle currency and, once it resolves, the recipient the daemon read from authoritative documents: past an archived parent, never guessed from a slug.
 The daemon decides whether it owns the recipient, against the host identity it froze at boot, and passes the recipient's inbox key only then; the CLI forwards a resolved recipient without one.
+The key and the stored `store` name the store that physically holds the recipient, the one the Poller inventories it under and its worker reads, even when the daemon read it through another store's symlinked view; a recipient no configured store holds stays unresolved.
 A superseded or expired entry settles without a handoff.
 An unresolved recipient or an unknown currency waits, without holding up other entries.
 The first resolution is stored in the entry, even while currency is unknown; later facts may change the recipient's host and store but never its uid, so moving the child does not redirect the result.

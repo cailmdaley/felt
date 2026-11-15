@@ -483,10 +483,14 @@ defmodule Shuttle.FeltStores do
 
   defp resolved_from(_host, _fiber), do: nil
 
-  # The configured store that physically roots `path`: the one whose realpath
-  # `.felt/` is a prefix of felt's carried (symlink-resolved) path. nil when no
-  # configured store owns it (the caller keeps the queried store as a fallback).
-  defp owning_store(stores, path) do
+  @doc """
+  The store in `stores` that physically roots `path`, as its namespace root:
+  the one whose realpath `.felt/` is a prefix of felt's carried
+  (symlink-resolved) path, the store `Shuttle.Poller.Discovery` inventories
+  the fiber under. nil when none does.
+  """
+  @spec owning_store(store_list(), String.t()) :: String.t() | nil
+  def owning_store(stores, path) do
     case Enum.find(stores, fn store ->
            String.starts_with?(path, store_felt_realpath(store) <> "/")
          end) do

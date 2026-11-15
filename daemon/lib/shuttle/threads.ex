@@ -687,7 +687,7 @@ defmodule Shuttle.Threads do
             current = get_in(fiber, ["shuttle", "host"])
 
             if current == host,
-              do: {:ok, entry},
+              do: physical(entry, stores),
               else: fetch_authoritative(uid, current, stores, [host | visited])
 
           {:ok, %{fibers: []}} ->
@@ -722,6 +722,16 @@ defmodule Shuttle.Threads do
         else: fetch_authoritative(uid, current, stores, [host | visited])
     else
       error -> {:error, {:parent_unavailable, error}}
+    end
+  end
+
+  # A local document read through a symlinked view of its subtree in another
+  # store belongs to the store that physically holds it: the one Discovery
+  # inventories it under, and whose key its inbox and worker use.
+  defp physical(entry, stores) do
+    case Shuttle.FeltStores.owning_store(stores, entry.fiber["path"]) do
+      nil -> {:error, :parent_unowned}
+      store -> {:ok, %{entry | felt_store: store}}
     end
   end
 
