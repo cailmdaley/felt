@@ -281,7 +281,7 @@ func WakingCount(env *sysenv.Env, address string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	reservation, err := readLaunchReservation(root)
+	reservation, err := currentReservation(root, items)
 	if err != nil {
 		return 0, err
 	}

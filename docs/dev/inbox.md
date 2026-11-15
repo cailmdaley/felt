@@ -149,7 +149,7 @@ An enqueue through `Delivery.context` starts its fiber at once.
 A session started for messages on an armed standing constitution is an ad-hoc run with an `inbox-` run id.
 It starts only while no occurrence is due, and its own end, a handoff or a concluded exit, is not service: an occurrence that elapsed while it ran still fires after it ends.
 A temper, rest or re-arm of that run counts as usual.
-A daemon rolled back below contract 40 reads such a run's end as service, so an occurrence that elapsed while it ran is skipped once.
+A daemon rolled back below contract 40 reads such a run's end as service, so an occurrence that elapsed while it ran is skipped once, and a CLI rolled back below contract 40 does not read `launch.json`, so within a live lease it may answer `fresh` again and a second forced-fresh start kills the first replacement.
 
 A receiver without a hook registration takes `none` entries directly, in a batch sent as context without a turn (`action: context`) whenever consume would otherwise wait.
 Codex leaves them to its fiber hook, and Claude without a registration is unavailable.
@@ -207,6 +207,7 @@ Quiet context pinned this way is released to a Codex receiver's fiber hook rathe
 A hook claim is unpinned.
 If a hook leaves its attempt open, the next reader under the inbox lock, a hook or the consumer, closes it ambiguous, and the entry carries “Possible repeat” wherever it goes next.
 A launch reservation is no attempt: it lives in `launch.json`, requests no emission and is not evidence of a possible repeat.
+A contract-39 CLI wrote its reservation into the reserved entries' attempts (`launch: true`); the first reader under the inbox lock, a consume or a hook, moves the newest such record to `launch.json` with its receiver, epoch, members and opening time, and clears it from the entries.
 Unpinned claims and delivered closes preserve the entry's modification time, from which offered retention runs.
 The session-only Claude fallback claims by moving an entry into `fallback/` and writes no attempt.
 
