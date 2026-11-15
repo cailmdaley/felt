@@ -4184,6 +4184,11 @@ defmodule Shuttle.Poller do
     case preparation do
       {:ok, state} ->
         case dispatch_prepared(state, fiber_id, runtime_key, uid, opts) do
+          # Typed input answers the question through the worker's prompt
+          # hook, which records it as one "answered" row with the line.
+          {:pasted, result, state} ->
+            {:reply, result, state}
+
           # A human's start answers the worker's question; a launch for the
           # inbox leaves it for the human.
           {:reply, {:ok, _} = result, state} ->
@@ -4309,7 +4314,7 @@ defmodule Shuttle.Poller do
         # Resume with a message on a live terminal worker: the message is the
         # human's next turn, typed into the conversation as they would type it.
         case Shuttle.Terminal.paste(state.runner, paste_into, message) do
-          :ok -> {:reply, {:ok, paste_into}, state}
+          :ok -> {:pasted, {:ok, paste_into}, state}
           {:error, reason} -> {:reply, {:error, {:paste_failed, reason}}, state}
         end
 

@@ -113,7 +113,7 @@ The board mints `message_id`; the owner mints one for callers without it.
 Images are written to disk and represented as `[Image: path]` lines before recording.
 The owner writes the record straight to the inbox's `offered/`, disposition unknown, under the inbox lock, so no reader ever offers it.
 Only the call that writes the record may transport the line: typed terminal paste to a live worker, or the From User launch prompt to a dormant one.
-Those transports preserve the prompt hook's human board row and ask-clear.
+Typed input leaves the worker's question to its prompt hook, which clears it and records one `answered` board row with the question and the line; with no question it records a `human` row. A From User launch clears the question as any human start does.
 The record is settled delivered on paste or launch success, undeliverable on a definite refusal, and unknown on an ambiguous paste or a queued launch whose outcome is not known.
 Since it is unknown before the side effect, a daemon that dies before reporting the outcome never sends the line again, even if it died before typing.
 A line over the inbox's 64 KiB limit is transported whole and recorded cut short, as a thread result is.

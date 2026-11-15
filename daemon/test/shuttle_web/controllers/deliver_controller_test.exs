@@ -337,6 +337,31 @@ defmodule ShuttleWeb.DeliverControllerTest do
     assert Enum.take(args, -4) == ["--", Enum.at(args, -3), "agent-dash", "- keep the mask"]
   end
 
+  test "a human line typed into a live worker leaves its question to the prompt hook" do
+    fiber = "tests/human-answers"
+    put_constitution(fiber)
+    {:ok, _} = Poller.dispatch_fiber(fiber, force: true)
+    clears = fn -> Enum.count(MockRunner.commands(), fn {_, args} -> "--clear" in args end) end
+    before = clears.()
+
+    assert %{"delivered" => true} =
+             api_conn()
+             |> post(
+               "/api/v1/deliver",
+               Jason.encode!(%{
+                 "fiber_id" => fiber,
+                 "text" => "Keep it.",
+                 "from" => "human",
+                 "message_id" => "human-answers"
+               })
+             )
+             |> json_response(200)
+
+    # The hook clears it as one "answered" row (Q — A); a clear here first
+    # would leave the hook a plain human row beside a bare "cleared" one.
+    assert clears.() == before
+  end
+
   test "a human line over the inbox limit is pasted" do
     fiber = "tests/human-long"
     put_constitution(fiber)
