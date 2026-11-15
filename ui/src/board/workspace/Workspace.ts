@@ -72,6 +72,8 @@ export interface WorkspaceOptions {
   /** The fleet's sent files; a workspace without one reads its own. */
   sends?: FiberSends
 }
+/** Rex moves at most once in this span; looks within it wait, and only the last of them moves Rex. */
+const REX_HOLD_MS = 350
 /** A look's identity: the constitution and the worker it has, so a worker that starts later is still reached. */
 const rexKey = (card: KanbanCard | null): string =>
   card ? [card.originId, card.uid ?? card.id, card.shuttleHost ?? '', card.tmuxSession ?? ''].join('\u0000') : ''
@@ -142,6 +144,10 @@ export class Workspace {
   private disposed = false
   /** What the board last looked at, by its worker, and whether Rex moved there. */
   private looked: { key: string; moved: Promise<boolean> } = { key: '', moved: Promise.resolve(false) }
+  /** A Rex move waiting out the hold after the last one, and how to settle its answer if a later look supersedes it. */
+  private rexHold: { timer: number; resolve(moved: boolean): void } | null = null
+  /** The last move posted to Rex: when, and to which look. */
+  private rexMoved: { at: number; key: string; moved: Promise<boolean> } = { at: -Infinity, key: '', moved: Promise.resolve(false) }
   private routeEpoch = 0
   private startPrompt: { card: KanbanCard; failure: DispatchFailureBody } | null = null
   /** The complete board-card payload used by the reader's thread and runtime surfaces. */
@@ -714,7 +720,9 @@ export class Workspace {
    * voice follows it, and on the desktop Rex moves quietly to the window its
    * live worker already has. Nothing opens, is created or resumed, so a target
    * without a live worker leaves Rex be; opening is `c` or Open in Rex
-   * (`Dock.openConversation`). Looking again at the same target moves nothing.
+   * (`Dock.openConversation`). Looking again at the same target moves nothing;
+   * looks in quick succession, like paging with `j`, move Rex once, to the
+   * last of them; and Rex is left alone while the board lacks the keyboard.
    * Resolves true if Rex moved.
    */
   look(card: KanbanCard | null): Promise<boolean> {
@@ -722,11 +730,39 @@ export class Workspace {
     this.opts.onSight?.(target)
     const key = rexKey(target)
     if (key === this.looked.key) return this.looked.moved
-    const moved = target?.tmuxSession && conversationDevice().desktop
-      ? selectWorker(this.opts.shuttleBase, target.tmuxSession, target.shuttleHost)
-      : Promise.resolve(false)
+    this.dropRexHold()
+    if (key === this.rexMoved.key && Date.now() - this.rexMoved.at < REX_HOLD_MS) {
+      this.looked = { key, moved: this.rexMoved.moved }
+      return this.looked.moved
+    }
+    if (!target?.tmuxSession || !conversationDevice().desktop) {
+      this.looked = { key, moved: Promise.resolve(false) }
+      return this.looked.moved
+    }
+    // Rex is the human's while the board is behind it; the look is taken up once the board has the keyboard again.
+    if (!document.hasFocus()) {
+      this.looked = { key: '', moved: Promise.resolve(false) }
+      return this.looked.moved
+    }
+    const { tmuxSession, shuttleHost } = target
+    const move = (): Promise<boolean> => {
+      const moved = selectWorker(this.opts.shuttleBase, tmuxSession, shuttleHost)
+      this.rexMoved = { at: Date.now(), key, moved }
+      return moved
+    }
+    const wait = this.rexMoved.at + REX_HOLD_MS - Date.now()
+    const moved = wait <= 0 ? move() : new Promise<boolean>(resolve => {
+      this.rexHold = { resolve, timer: window.setTimeout(() => { this.rexHold = null; resolve(move()) }, wait) }
+    })
     this.looked = { key, moved }
     return moved
+  }
+  /** A later look supersedes a move still waiting out its hold: it never posts, and answers that Rex did not move. */
+  private dropRexHold(): void {
+    if (!this.rexHold) return
+    window.clearTimeout(this.rexHold.timer)
+    this.rexHold.resolve(false)
+    this.rexHold = null
   }
   /** Rex moved itself to this fiber's worker: looking at it now moves nothing. */
   rexAt(id: string, owner: string): void {
@@ -1163,6 +1199,7 @@ export class Workspace {
   private readonly visibility = (): void => { if (document.hidden) this.stopTimer(); else if (this.isActive) this.startTimer() }
   dispose(): void {
     this.mentions.dispose()
+    this.dropRexHold()
     this.disposed = true
     this.routeEpoch++
     this.stopTimer()

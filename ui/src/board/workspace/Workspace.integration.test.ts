@@ -100,6 +100,7 @@ const changed = vi.fn()
 const visibility = vi.fn<(active: boolean) => void>()
 
 beforeEach(() => {
+  vi.spyOn(document, 'hasFocus').mockReturnValue(true)
   vi.stubGlobal('innerWidth', 1440)
   const stored = new Map<string, string>()
   vi.stubGlobal('localStorage', { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value), clear: () => stored.clear() })
@@ -141,6 +142,8 @@ beforeEach(() => {
   visibility.mockClear()
   workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => boardCards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock("", changed) })
 })
+/** Lets Rex's hold between moves run out, on fake timers. */
+const holdOut = async (): Promise<void> => { vi.advanceTimersByTime(400); await settle() }
 /** What the board asked Rex to select: every select-only attach body. */
 const selections = (): Record<string, unknown>[] => vi.mocked(fetch).mock.calls
   .filter(([url]) => String(url).endsWith('/api/v1/attach'))
@@ -1120,20 +1123,22 @@ describe('workspace reader integration', () => {
     const feed = [thread({ id: 'hub', status: 'active' }), thread({ id: 'hub/mid', orchestrator: 'hub', status: 'active' }), thread({ id: 'hub/mid/leaf', orchestrator: 'hub-mid', status: 'active' })]
     bodyCards = feed
     workspace.dispose()
+    vi.useFakeTimers()
     const dock = new Dock('', changed), conversation = vi.spyOn(dock, 'openConversation')
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock })
     const row = (name: string): HTMLElement => [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')].find(el => el.querySelector<HTMLElement>('.fp-name')?.title === name)!
     workspace.openFromDesk(feed[0]); await settle()
     expect(selections()).toEqual([{ tmux_session: 'worker-hub', shuttle_host: null, select_only: true }])
-    row('hub/mid').click()
-    row('hub/mid/leaf').click()
+    await holdOut()
+    row('hub/mid').click(); await holdOut()
+    row('hub/mid/leaf').click(); await holdOut()
     expect(selections().map(selection => selection.tmux_session)).toEqual(['worker-hub', 'worker-hub/mid', 'worker-hub/mid/leaf'])
     row('hub/mid/leaf').click()
     row('hub/mid/leaf').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true }))
     row('hub/mid').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
     expect(row('hub/mid/leaf')).toBeUndefined()
     vi.spyOn(window.history, 'back').mockImplementation(() => {})
-    workspace.reader.back(); await settle()
+    workspace.reader.back(); await holdOut()
     expect(selections()).toHaveLength(3)
     expect(conversation).not.toHaveBeenCalled()
   })
@@ -1166,6 +1171,7 @@ describe('workspace reader integration', () => {
       const original = vi.mocked(fetch).getMockImplementation()!
       vi.mocked(fetch).mockImplementation(async (input, init) => String(input).endsWith('/api/v1/attach') ? Response.json({ moved, session: 'worker-hub' }) : original(input, init))
     }
+    vi.useFakeTimers()
     answer(true)
     expect(await workspace.look(worker)).toBe(true)
     expect(selections()).toEqual([{ tmux_session: 'worker-hub', shuttle_host: 'host-a', select_only: true }])
@@ -1177,6 +1183,7 @@ describe('workspace reader integration', () => {
     expect(await workspace.globeHost.converse(past)).toBe(false)
     expect(selections()).toHaveLength(1)
     expect(sight).toHaveBeenLastCalledWith(past)
+    await holdOut()
     expect(await workspace.globeHost.converse(worker)).toBe(false)
     expect(selections()).toHaveLength(2)
     expect(conversation).not.toHaveBeenCalled()
@@ -1191,27 +1198,57 @@ describe('workspace reader integration', () => {
     const dock = new Dock('', changed), sight = vi.fn()
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, origin: () => 'Desk', onVisibility: visibility, onSight: sight, dock })
     const rex = (): unknown[] => selections().map(body => body.tmux_session)
+    vi.useFakeTimers()
     // A fiber's own page, opened from anywhere: voice and Rex reach its worker.
-    workspace.open(other, 'Desk'); await settle()
+    workspace.open(other, 'Desk'); await holdOut()
     expect(sight).toHaveBeenLastCalledWith(other)
     expect(rex()).toEqual(['worker-other'])
     // A page of a fiber under a constitution speaks to that constitution: both follow it.
-    workspace.open(report, 'Desk'); await settle()
+    workspace.open(report, 'Desk'); await holdOut()
     expect(sight).toHaveBeenLastCalledWith(hub)
     expect(rex()).toEqual(['worker-other', 'worker-hub'])
     // Repaints of the same page post nothing more.
-    workspace.open(report, 'Desk'); await settle()
+    workspace.open(report, 'Desk'); await holdOut()
     expect(rex()).toEqual(['worker-other', 'worker-hub'])
+    // Looks in quick succession move Rex once more, to the last of them, and not at all when that is where it just went.
+    workspace.open(other, 'Desk'); await settle()
+    workspace.open(hub, 'Desk'); await settle()
+    workspace.open(report, 'Desk'); await settle()
+    expect(rex()).toEqual(['worker-other', 'worker-hub', 'worker-other'])
+    workspace.open(other, 'Desk'); await holdOut()
+    expect(rex()).toEqual(['worker-other', 'worker-hub', 'worker-other'])
+    // A tapestry or constitution page opened by name follows the same way.
+    void workspace.openFiber('hub', 'host-a', 'tapestry'); await holdOut()
+    expect(sight).toHaveBeenLastCalledWith(hub)
+    expect(rex()).toEqual(['worker-other', 'worker-hub', 'worker-other', 'worker-hub'])
     // Rex moved itself to a worker: the board following it there writes nothing back.
     workspace.rexAt('other', 'host-a')
-    workspace.open(other, 'Desk'); await settle()
+    workspace.follow('other', 'host-a'); await holdOut()
     expect(sight).toHaveBeenLastCalledWith(other)
-    expect(rex()).toEqual(['worker-other', 'worker-hub'])
-    // Leaving the reader looks at nothing; coming back reaches the worker again.
+    expect(rex()).toHaveLength(4)
+    // Without the keyboard the board leaves Rex be, and takes the look up once it has it again.
+    vi.mocked(document.hasFocus).mockReturnValue(false)
+    workspace.open(hub, 'Desk'); await holdOut()
+    expect(sight).toHaveBeenLastCalledWith(hub)
+    expect(rex()).toHaveLength(4)
+    vi.mocked(document.hasFocus).mockReturnValue(true)
+    void workspace.look(hub); await holdOut()
+    expect(rex()).toHaveLength(5)
+    // Leaving the reader looks at nothing.
+    vi.useRealTimers()
     await pop(() => workspace.returnToOrigin())
     expect(sight).toHaveBeenLastCalledWith(null)
-    workspace.open(other, 'Desk'); await settle()
-    expect(rex()).toEqual(['worker-other', 'worker-hub', 'worker-other'])
+  })
+  it('moves voice but never Rex on a phone', async () => {
+    const worker = card({ id: 'hub', uid: 'hub', originId: 'host-a', shuttleKind: 'oneshot', status: 'active', path: 'hub.md', tmuxSession: 'worker-hub', workerState: 'running' })
+    bodyCards = [worker]
+    workspace.dispose()
+    vi.stubGlobal('navigator', { ...navigator, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)' })
+    const sight = vi.fn()
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => [worker], origin: () => 'Desk', onVisibility: visibility, onSight: sight, dock: new Dock('', changed) })
+    expect(await workspace.look(worker)).toBe(false)
+    expect(sight).toHaveBeenLastCalledWith(worker)
+    expect(selections()).toEqual([])
   })
   it('tells voice what it shows: the thread the page has selected, the page elsewhere, and moves Rex quietly from a click', async () => {
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
@@ -1223,11 +1260,13 @@ describe('workspace reader integration', () => {
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, onSight: sight, dock })
     const row = (name: string): HTMLElement => [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')].find(el => el.querySelector<HTMLElement>('.fp-name')?.title === name)!
     const seen = (): string | undefined => (sight.mock.lastCall?.[0] as KanbanCard | undefined)?.id
-    workspace.openFromDesk(feed[0]); await settle()
+    vi.useFakeTimers()
+    workspace.openFromDesk(feed[0]); await holdOut()
     expect(seen()).toBe('hub')
     expect(selections().at(-1)?.tmux_session).toBe('worker-hub')
     row('hub/mid').click()
     expect(seen()).toBe('hub/mid')
+    await holdOut()
     expect(selections().at(-1)?.tmux_session).toBe('worker-hub/mid')
     row('hub').click()
     expect(seen()).toBe('hub')
