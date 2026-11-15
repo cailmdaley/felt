@@ -495,7 +495,8 @@ defmodule Shuttle.Test.FeltStoreRunner do
     cond do
       # Host-local mailbox state crosses the real CLI boundary even when
       # document discovery and harness execution use this store fixture.
-      command == "shuttle" and match?(["context-mailbox" | _], args) ->
+      command == "shuttle" and
+          (match?(["context-mailbox" | _], args) or match?(["inbox" | _], args)) ->
         Shuttle.Runner.Default.cmd(command, args, opts)
 
       # The dispatcher's wrapper preflight. Resolves by default so every other

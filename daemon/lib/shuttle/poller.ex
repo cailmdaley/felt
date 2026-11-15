@@ -936,7 +936,7 @@ defmodule Shuttle.Poller do
   def handle_continue({:boot, opts}, initial) do
     step = &boot_step/2
 
-    with {:ok, _} <- step.("outbox_baseline", &Shuttle.ThreadOutbox.boot_baseline/0),
+    with {:ok, _} <- step.("inbox_import", &Shuttle.Inbox.boot_import/0),
          {:ok, {stores, auto}} <-
            step.("store_inventory", fn ->
              case Keyword.fetch(opts, :felt_stores) do
@@ -1005,9 +1005,9 @@ defmodule Shuttle.Poller do
       reason ->
         message = Exception.format(:error, reason, __STACKTRACE__)
 
-        if stage == "outbox_baseline" and
+        if stage == "inbox_import" and
              (is_struct(reason, Jason.DecodeError) or
-                is_struct(reason, Shuttle.ThreadOutbox.Corrupt)) do
+                is_struct(reason, Shuttle.Inbox.Corrupt)) do
           {:error, %{progress | reason: message}}
         else
           retry_boot_step(stage, fun, progress, message)

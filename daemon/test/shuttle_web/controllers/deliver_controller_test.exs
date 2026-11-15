@@ -651,9 +651,9 @@ defmodule ShuttleWeb.DeliverControllerTest do
   defp launches,
     do: Enum.count(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
 
-  # The launch itself is exercised against the real CLI in
-  # `Shuttle.InboxLaunchTest`; this mock answers no consume, so none starts.
-  test "a waking message to a fiber with no live worker is queued asking for a turn" do
+  # Inbox writes and consumption cross the real CLI boundary; execution is
+  # the store fixture's terminal, so a waking entry can reserve one launch.
+  test "a waking message to a fiber with no live worker starts it through the inbox" do
     put_constitution("tests/deliver-dormant")
     Env.put_app_env(:felt_runner, MockRunner)
     before = launches()
@@ -664,21 +664,22 @@ defmodule ShuttleWeb.DeliverControllerTest do
              "delivery" => "context",
              "queued" => true,
              "delivered" => false,
-             "status" => "queued",
-             "detail" => "the inbox could not be read for a launch" <> _
+             "status" => "starting"
            } = body
 
     assert [args] = mailbox_puts()
     assert "msg-dormant-1" in args and "read this when you start" in args
     assert ["--from", "shuttle://elsewhere/claude/sender"] -- args == []
     assert ["--turn", "ask"] -- args == []
-    assert launches() == before
+    assert launches() == before + 1
 
     # The same message id queues once.
     assert %{"queued" => true} =
              "tests/deliver-dormant"
-             |> queue_for_fiber("msg-dormant-1")
+             |> queue_for_fiber("msg-dormant-1", %{"unless_live" => false})
              |> json_response(202)
+
+    assert launches() == before + 1
   end
 
   test "dormant context preserves the thread signal bound into sender evidence" do

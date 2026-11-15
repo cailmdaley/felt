@@ -20,7 +20,7 @@ defmodule Shuttle.ThreadsDeliveryTest do
     refute File.exists?(Path.join(Path.dirname(Path.dirname(path)), "batches"))
   end
 
-  test "a fiber's waiting count is its mailbox's undelivered context and its outbox's pending results",
+  test "a fiber's waiting count reads undelivered context and routed results from its inbox",
        %{store: store} do
     assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
     hub = Enum.find(entries, &(Threads.address(&1.fiber) == "hub"))
@@ -31,7 +31,7 @@ defmodule Shuttle.ThreadsDeliveryTest do
     for {id, text} <- [{"m-1", "one"}, {"m-2", "two"}, {"m-2", "two"}],
         do: assert({:ok, :queued} = Shuttle.Delivery.context(hub, text, id))
 
-    Shuttle.ThreadOutbox.capture([
+    Shuttle.Test.InboxPublications.capture([
       {"thread-unsent",
        %{
          "owner" => "test-host",
@@ -107,7 +107,7 @@ defmodule Shuttle.ThreadsDeliveryTest do
       task = Task.async(fn -> Threads.deliver_results(cleared, "test-host") end)
       Task.await(task, 30_000)
       assert StubPostClient.last() == nil
-      assert Shuttle.ThreadOutbox.pending("test-host") == []
+      assert Shuttle.Test.InboxPublications.pending("test-host") == []
       Agent.update(Env.server!(StubPostClient), &Map.put(&1, :last, nil))
       Threads.deliver_results(entries, "test-host")
       assert StubPostClient.last() == nil
@@ -157,7 +157,7 @@ defmodule Shuttle.ThreadsDeliveryTest do
       Env.put_app_env(:felt_runner, FailingMailboxRunner)
       Threads.deliver_results(entries, "test-host")
       Env.put_app_env(:felt_runner, Shuttle.Runner.Default)
-      assert [{message_id, record}] = Shuttle.ThreadOutbox.pending("test-host")
+      assert [{message_id, record}] = Shuttle.Test.InboxPublications.pending("test-host")
       assert {:ok, _} = CLI.run_felt(["-C", store, "add", "elsewhere", "Elsewhere"])
       assert {:ok, _} = CLI.run_felt(["-C", store, "nest", "hub/child", "elsewhere"])
       assert {:ok, _} = CLI.run_felt(["-C", store, "add", "group", "Group"])
@@ -176,7 +176,7 @@ defmodule Shuttle.ThreadsDeliveryTest do
       Agent.update(Env.server!(StubPostClient), &Map.put(&1, :last, nil))
       assert :ok = Threads.retry_results("test-host")
       assert StubPostClient.last() == nil
-      assert [{^message_id, ^record}] = Shuttle.ThreadOutbox.pending("test-host")
+      assert [{^message_id, ^record}] = Shuttle.Test.InboxPublications.pending("test-host")
       File.write!(path, bytes)
       assert {:ok, %{fibers: moved}} = FiberDocuments.list(felt_stores: [store])
       moved_parent = Enum.find(moved, &(&1.fiber["uid"] == uid))
@@ -193,7 +193,7 @@ defmodule Shuttle.ThreadsDeliveryTest do
                "text" => "thread hub/child asked: Keep the original text"
              } = Jason.decode!(body)
 
-      assert Shuttle.ThreadOutbox.pending("test-host") == []
+      assert Shuttle.Test.InboxPublications.pending("test-host") == []
     end
   end
 
@@ -220,21 +220,21 @@ defmodule Shuttle.ThreadsDeliveryTest do
       parent = Enum.find(entries, &(Threads.address(&1.fiber) == "hub"))
       StubPostClient.set_get_response({:ok, 200, Jason.encode!(%{fibers: [parent]})})
       Threads.deliver_results(entries, "test-host")
-      assert [{id, record}] = Shuttle.ThreadOutbox.pending("test-host")
+      assert [{id, record}] = Shuttle.Test.InboxPublications.pending("test-host")
       assert record["wake"] == expected_wake
       original = StubPostClient.last().body |> Jason.decode!()
       assert original["wake"] == expected_wake
       StubPostClient.set_response({:ok, 202, ~s({"queued":true,"delivery":"context"})})
 
       Task.async(fn ->
-        Shuttle.ThreadOutbox.boot_baseline()
+        Shuttle.Inbox.boot_import()
         Threads.retry_results("test-host")
       end)
       |> Task.await(30_000)
 
       assert StubPostClient.last().body |> Jason.decode!() == original
       assert original["message_id"] == id
-      assert Shuttle.ThreadOutbox.pending("test-host") == []
+      assert Shuttle.Test.InboxPublications.pending("test-host") == []
     end
   end
 
@@ -250,7 +250,7 @@ defmodule Shuttle.ThreadsDeliveryTest do
       assert {:ok, _} = CLI.run_in_store(store, [verb, "hub/child" | args])
       assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
       Threads.capture_results(entries, "test-host")
-      [{id, record}] = Shuttle.ThreadOutbox.pending("test-host")
+      [{id, record}] = Shuttle.Test.InboxPublications.pending("test-host")
       params = %{"signal" => record["signal"], "message_id" => id, "text" => record["text"]}
       assert {:ok, true} = Threads.signal_current(params, felt_stores: [store])
 
@@ -271,7 +271,7 @@ defmodule Shuttle.ThreadsDeliveryTest do
 
       # An old poll snapshot must not republish after the current document changed.
       Threads.deliver_results(entries, "test-host")
-      assert Shuttle.ThreadOutbox.pending("test-host") == []
+      assert Shuttle.Test.InboxPublications.pending("test-host") == []
     end
   end
 
@@ -287,7 +287,7 @@ defmodule Shuttle.ThreadsDeliveryTest do
       stamp = get_in(child.fiber, ["shuttle", "runtime", "handed_off_at"])
 
       [{id, record} | _] =
-        Enum.filter(Shuttle.ThreadOutbox.pending("test-host"), fn {_id, record} ->
+        Enum.filter(Shuttle.Test.InboxPublications.pending("test-host"), fn {_id, record} ->
           get_in(record, ["signal", "verb"]) == "handed off" and
             get_in(record, ["signal", "stamp"]) == stamp
         end)
@@ -330,9 +330,9 @@ defmodule Shuttle.ThreadsDeliveryTest do
     assert {:ok, _} = CLI.run_in_store(store, ["close", "hub/child", "--local"])
     assert {:ok, %{fibers: first_entries}} = FiberDocuments.list(felt_stores: [store])
     Threads.capture_results(first_entries, "test-host")
-    [{first_id, _}] = Shuttle.ThreadOutbox.pending("test-host")
+    [{first_id, _}] = Shuttle.Test.InboxPublications.pending("test-host")
     Threads.retry_results("test-host")
-    assert Shuttle.ThreadOutbox.pending("test-host") == []
+    assert Shuttle.Test.InboxPublications.pending("test-host") == []
 
     assert {:ok, _} = CLI.run_in_store(store, ["reopen", "hub/child", "--local"])
     assert {:ok, _} = CLI.run_in_store(store, ["close", "hub/child", "--local"])
@@ -340,14 +340,14 @@ defmodule Shuttle.ThreadsDeliveryTest do
     Threads.capture_results(second_entries, "test-host")
 
     assert [{second_id, %{"signal" => %{"verb" => "closed"}}}] =
-             Enum.reject(Shuttle.ThreadOutbox.pending("test-host"), fn {id, _} ->
+             Enum.reject(Shuttle.Test.InboxPublications.pending("test-host"), fn {id, _} ->
                id == first_id
              end)
 
     refute second_id == first_id
 
     Threads.retry_results("test-host")
-    assert Shuttle.ThreadOutbox.pending("test-host") == []
+    assert Shuttle.Test.InboxPublications.pending("test-host") == []
   end
 
   test "validation follows the child's owner and keeps unavailable signals pending", %{
@@ -360,14 +360,14 @@ defmodule Shuttle.ThreadsDeliveryTest do
     assert {:ok, _} = CLI.run_in_store(store, ["close", "hub/child", "--local"])
     assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
     Threads.capture_results(entries, "test-host")
-    [{id, record}] = Shuttle.ThreadOutbox.pending("test-host")
+    [{id, record}] = Shuttle.Test.InboxPublications.pending("test-host")
     child = Path.join(store, ".felt/hub/child/child.md")
     File.write!(child, String.replace(File.read!(child), "host: test-host", "host: child-host"))
     params = %{"signal" => record["signal"], "message_id" => id, "text" => record["text"]}
     StubPostClient.set_response({:error, :unavailable})
     assert {:error, _} = Threads.signal_current(params, felt_stores: [store])
     Threads.retry_results("test-host")
-    assert [{^id, pending_record}] = Shuttle.ThreadOutbox.pending("test-host")
+    assert [{^id, pending_record}] = Shuttle.Test.InboxPublications.pending("test-host")
     assert pending_record["parent_uid"] == record["parent_uid"]
     assert pending_record["text"] == record["text"]
     refute Map.has_key?(pending_record, "parent_unresolved")
@@ -376,7 +376,7 @@ defmodule Shuttle.ThreadsDeliveryTest do
     assert %{url: url} = StubPostClient.last()
     assert url =~ "/api/v1/thread-signals/current"
     Threads.retry_results("test-host")
-    assert Shuttle.ThreadOutbox.pending("test-host") == []
+    assert Shuttle.Test.InboxPublications.pending("test-host") == []
   end
 
   test "a missing mirror validates at the captured owner without a forwarding loop", %{
@@ -418,7 +418,7 @@ defmodule Shuttle.ThreadsDeliveryTest do
     assert {:ok, _} = CLI.run_in_store(store, ["close", "hub/child", "--local"])
     assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
     Threads.capture_results(entries, "test-host")
-    [{id, record}] = Shuttle.ThreadOutbox.pending("test-host")
+    [{id, record}] = Shuttle.Test.InboxPublications.pending("test-host")
     child = Path.join(store, ".felt/hub/child/child.md")
     File.write!(child, String.replace(File.read!(child), "host: test-host", "host: child-host"))
     StubPostClient.set_response({:ok, 404, "not found"})
@@ -478,7 +478,7 @@ defmodule Shuttle.ThreadsDeliveryTest do
     assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
     parent = Enum.find(entries, &(Threads.address(&1.fiber) == "hub/child"))
     Threads.capture_results(entries, "test-host")
-    assert [{_, %{"parent_uid" => uid}}] = Shuttle.ThreadOutbox.pending("test-host")
+    assert [{_, %{"parent_uid" => uid}}] = Shuttle.Test.InboxPublications.pending("test-host")
     assert uid == parent.fiber["uid"]
     Threads.deliver_results(entries, "test-host")
 
@@ -494,7 +494,7 @@ defmodule Shuttle.ThreadsDeliveryTest do
     # Repeated delivery/polling does not manufacture a result for the hub.
     Threads.deliver_results(entries, "test-host")
     assert length(pending(data)) == 1
-    assert Shuttle.ThreadOutbox.pending("test-host") == []
+    assert Shuttle.Test.InboxPublications.pending("test-host") == []
     assert {:ok, %{fibers: latest}} = FiberDocuments.list(felt_stores: [store])
     child = Enum.find(latest, &(Threads.address(&1.fiber) == "hub/child"))
     assert child.fiber["status"] == "open"
@@ -555,7 +555,7 @@ defmodule Shuttle.ThreadsDeliveryTest do
                  "thread hub/child/deep closed:  (the verdict is yours: temper, discard, or shuttle close hub/child/deep --review \"<why>\")"
              }
            ] =
-             Shuttle.ThreadOutbox.pending("test-host")
+             Shuttle.Test.InboxPublications.pending("test-host")
              |> Enum.map(&elem(&1, 1))
              |> Enum.sort_by(& &1["text"])
 
@@ -566,6 +566,6 @@ defmodule Shuttle.ThreadsDeliveryTest do
              & &1["request"]["text"]
            )
 
-    assert Shuttle.ThreadOutbox.pending("test-host") == []
+    assert Shuttle.Test.InboxPublications.pending("test-host") == []
   end
 end

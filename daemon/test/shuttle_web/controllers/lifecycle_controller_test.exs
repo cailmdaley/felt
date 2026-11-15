@@ -803,6 +803,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
       )
 
     real_felt = Shuttle.Test.FakeCli.real!("felt")
+    real_shuttle = Shuttle.Test.FakeCli.real!("shuttle")
 
     shuttle_body =
       shuttle_body ||
@@ -818,6 +819,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
       """,
       "shuttle" => """
       #!/bin/sh
+      if [ "$1" = inbox ]; then exec "#{real_shuttle}" "$@"; fi
       #{shuttle_body}
       """
     })

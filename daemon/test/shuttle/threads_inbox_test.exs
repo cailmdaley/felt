@@ -1,14 +1,14 @@
-defmodule Shuttle.ThreadsOutboxTest do
-  # The thread outbox across boots, and native receivers.
+defmodule Shuttle.ThreadsInboxTest do
+  # The thread inbox across boots, and native receivers.
   use Shuttle.Test.ThreadsCase, async: true
 
   @tag first_boot: true
-  test "snapshot migration preserves the cutoff, intended UID, pending text and acknowledgment dedup",
-       %{store: store, data: data} do
-    alias Shuttle.ThreadOutbox
+  test "boot imports a pending result and acknowledged ids, retaining its baseline", %{
+    store: store,
+    data: data
+  } do
     assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
     parent = Enum.find(entries, &(Threads.address(&1.fiber) == "hub"))
-    baseline = "2025-01-01T00:00:00Z"
 
     record = %{
       "owner" => "test-host",
@@ -22,182 +22,23 @@ defmodule Shuttle.ThreadsOutboxTest do
       Path.join(data, "thread-outbox.json"),
       Jason.encode!(%{
         version: 2,
-        baseline: baseline,
-        records: %{
-          "pending" => record,
-          "done" => record |> Map.put("acked", true) |> Map.put("text", "acked-only-secret")
-        }
+        baseline: "2025-01-01T00:00:00Z",
+        records: %{"pending" => record, "done" => Map.put(record, "acked", true)}
       })
     )
 
-    assert :ok = ThreadOutbox.boot_baseline()
-    assert ThreadOutbox.baseline() == baseline
+    assert :ok = Shuttle.Inbox.boot_import()
     refute File.exists?(Path.join(data, "thread-outbox.json"))
-    files = Path.wildcard(Path.join(data, "thread-outbox/**/*")) |> Enum.filter(&File.regular?/1)
-    refute Enum.any?(files, &String.contains?(File.read!(&1), "acked-only-secret"))
-    uid = parent.fiber["uid"]
+    refute File.exists?(Path.join(data, "thread-outbox"))
+    assert Shuttle.Inbox.thread_state()["baseline"] == "2025-01-01T00:00:00Z"
+    assert :ok = Shuttle.Test.InboxPublications.capture([{"done", record}])
 
-    assert [{"pending", %{"parent_uid" => ^uid, "text" => "original"} = migrated}] =
-             ThreadOutbox.pending("test-host")
+    assert [{"pending", %{"text" => "original"}}] =
+             Shuttle.Test.InboxPublications.pending("test-host")
 
-    refute Map.has_key?(migrated, "parent")
-    assert :ok = ThreadOutbox.capture([{"done", record}])
-    assert [{"pending", ^migrated}] = ThreadOutbox.pending("test-host")
     Task.async(fn -> Threads.retry_results("test-host") end) |> Task.await(30_000)
-    assert ThreadOutbox.pending("test-host") == []
-    assert ThreadOutbox.baseline() == baseline
-  end
-
-  @tag first_boot: true
-  test "corrupt baseline fails closed and migration retains pending outbox records", %{data: data} do
-    alias Shuttle.ThreadOutbox
-    path = Path.join(data, "thread-outbox.json")
-
-    record = %{
-      "owner" => "test-host",
-      "text" => "immutable",
-      "parent" => %{},
-      "store" => "store",
-      "wake" => true
-    }
-
-    File.write!(path, Jason.encode!(%{version: 1, records: %{"pending" => record}}))
-    assert :ok = ThreadOutbox.boot_baseline()
-    baseline = ThreadOutbox.baseline()
-    assert [{"pending", ^record}] = ThreadOutbox.pending("test-host")
-    assert :ok = ThreadOutbox.boot_baseline()
-    assert ThreadOutbox.baseline() == baseline
-
-    for corrupt <- [
-          "{",
-          ~s({"version":2,"records":{},"baseline":"not-a-date"}),
-          ~s({"version":2,"records":{}})
-        ] do
-      File.write!(path, corrupt)
-
-      try do
-        ThreadOutbox.boot_baseline()
-        flunk("corrupt baseline was accepted")
-      rescue
-        _ in [Jason.DecodeError, ThreadOutbox.Corrupt] -> :ok
-      end
-
-      assert File.read!(path) == corrupt
-    end
-  end
-
-  test "baseline corruption or loss refuses recovery without touching pending payloads", %{
-    data: data
-  } do
-    alias Shuttle.ThreadOutbox
-
-    assert :ok =
-             ThreadOutbox.capture([
-               {"pending", %{"owner" => "test-host", "text" => "preserve me"}}
-             ])
-
-    cutoff = ThreadOutbox.baseline()
-    baseline_path = Path.join(data, "thread-outbox/baseline")
-    [payload] = Path.wildcard(Path.join(data, "thread-outbox/pending/*.json"))
-    bytes = File.read!(payload)
-    File.write!(baseline_path, "corrupt")
-    assert_raise ThreadOutbox.Corrupt, fn -> ThreadOutbox.boot_baseline() end
-    assert File.read!(payload) == bytes
-    assert File.read!(baseline_path) == "corrupt"
-    File.rm!(baseline_path)
-    assert_raise ThreadOutbox.Corrupt, fn -> ThreadOutbox.boot_baseline() end
-    assert File.read!(payload) == bytes
-    # Operator restores the exact trusted cutoff, never a new current time.
-    File.write!(baseline_path, cutoff)
-    assert :ok = ThreadOutbox.boot_baseline()
-    assert [{"pending", %{"text" => "preserve me"}}] = ThreadOutbox.pending("test-host")
-    assert ThreadOutbox.baseline() == cutoff
-  end
-
-  test "acknowledged publications retain dedup identity without their payload", %{data: data} do
-    alias Shuttle.ThreadOutbox
-
-    record = %{
-      "owner" => "test-host",
-      "text" => "unique-acknowledged-payload",
-      "parent_uid" => "parent"
-    }
-
-    assert :ok = ThreadOutbox.capture([{"done", record}])
-    assert :ok = ThreadOutbox.acknowledge("done")
-    files = Path.wildcard(Path.join(data, "**/*")) |> Enum.filter(&File.regular?/1)
-    refute Enum.any?(files, &String.contains?(File.read!(&1), "unique-acknowledged-payload"))
-
-    Task.async(fn ->
-      ThreadOutbox.boot_baseline()
-      ThreadOutbox.capture([{"done", record}])
-    end)
-    |> Task.await(30_000)
-
-    assert ThreadOutbox.pending("test-host") == []
-  end
-
-  test "outbox compacts acknowledgments to IDs and changes only the addressed backlog files", %{
-    data: data
-  } do
-    alias Shuttle.ThreadOutbox
-
-    records =
-      for n <- 1..200,
-          do:
-            {"result-#{n}",
-             %{
-               "owner" => "test-host",
-               "text" => String.duplicate("payload-#{n}", 100),
-               "parent_uid" => "parent",
-               "store" => "store",
-               "wake" => false
-             }}
-
-    assert :ok = ThreadOutbox.capture(records)
-    # Payload storage is bounded by pending work, not accumulated history.
-    payload_paths = Path.wildcard(Path.join(data, "thread-outbox/pending/*.json"))
-    assert length(payload_paths) == 200
-    # Reads may update atime; only write-related metadata tests rewriting.
-    before =
-      Map.new(
-        payload_paths,
-        &{&1, {Map.take(File.stat!(&1), [:inode, :mtime, :ctime, :size]), File.read!(&1)}}
-      )
-
-    assert :ok = ThreadOutbox.acknowledge("result-1")
-    assert length(ThreadOutbox.pending("test-host")) == 199
-    after_paths = Path.wildcard(Path.join(data, "thread-outbox/pending/*.json"))
-    assert length(after_paths) == 199
-
-    for path <- after_paths,
-        do:
-          assert(
-            {Map.take(File.stat!(path), [:inode, :mtime, :ctime, :size]), File.read!(path)} ==
-              before[path]
-          )
-
-    [acked_path] = Path.wildcard(Path.join(data, "thread-outbox/acked/*"))
-    assert File.read!(acked_path) == "result-1"
-    refute File.read!(acked_path) =~ "payload"
-    ack_stat = Map.take(File.stat!(acked_path), [:inode, :mtime, :ctime, :size])
-    # Capture and ack do not decode old payloads or rewrite acknowledged history.
-    corrupt_path = hd(after_paths)
-    original = File.read!(corrupt_path)
-    File.write!(corrupt_path, "unreadable unrelated payload")
-    assert :ok = ThreadOutbox.capture([{"extra", %{"owner" => "test-host", "text" => "extra"}}])
-    assert :ok = ThreadOutbox.acknowledge("extra")
-    File.write!(corrupt_path, original)
-    assert Map.take(File.stat!(acked_path), [:inode, :mtime, :ctime, :size]) == ack_stat
-
-    Task.async(fn ->
-      ThreadOutbox.boot_baseline()
-      ThreadOutbox.capture(records)
-    end)
-    |> Task.await(30_000)
-
-    assert length(ThreadOutbox.pending("test-host")) == 199
-    assert Map.take(File.stat!(acked_path), [:inode, :mtime, :ctime, :size]) == ack_stat
+    assert Shuttle.Test.InboxPublications.pending("test-host") == []
+    assert [%{"request" => %{"text" => "original"}}] = pending(data)
   end
 
   @tag first_boot: true
@@ -410,8 +251,23 @@ defmodule Shuttle.ThreadsOutboxTest do
     assert {:ok, _} = CLI.run_in_store(store, ["set-model", "hub", "claude-opus", "--local"])
     assert {:ok, _} = CLI.run_in_store(store, ["close", "hub/child", "--local"])
     assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
-    Threads.deliver_results(entries, "test-host")
+    owner = self()
+
+    publisher =
+      spawn(fn ->
+        Shuttle.Env.adopt_callers([owner])
+        Threads.capture_results(entries, "test-host")
+        send(owner, :captured)
+        receive do: (:never -> :ok)
+      end)
+
+    assert_receive :captured
+    monitor = Process.monitor(publisher)
+    Process.exit(publisher, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^publisher, :killed}
     assert [_] = pending(data)
+    # The publisher died after the real CLI wrote the entry and before any
+    # delivery. The new daemon must route and consume that same disk entry.
 
     assert {_, 0} =
              SocketRunner.cmd("tmux", ["new-session", "-d", "-s", "anchor", "sleep", "300"], [])

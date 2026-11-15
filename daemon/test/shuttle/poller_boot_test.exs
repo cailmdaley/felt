@@ -206,7 +206,7 @@ defmodule Shuttle.PollerBootTest do
     {:ok, pid} = Poller.start_link(name: nil, own_host_id: "held-publication", felt_stores: [])
 
     try do
-      assert %{boot_hold: %{stage: "outbox_baseline"}} = :sys.get_state(pid)
+      assert %{boot_hold: %{stage: "inbox_import"}} = :sys.get_state(pid)
       ref = :trace.delivered(session, :all)
       assert_receive {:trace_delivered, :all, ^ref}
       events = trace_events(pid, [])
@@ -249,11 +249,11 @@ defmodule Shuttle.PollerBootTest do
     snapshot = Path.join(root, "thread-outbox.json")
     File.write!(snapshot, "not json")
     pid = start_supervised!({Poller, name: nil, own_host_id: "held-host", felt_stores: []})
-    assert %{boot_hold: %{stage: "outbox_baseline"}, boot_quarantine: true} = :sys.get_state(pid)
+    assert %{boot_hold: %{stage: "inbox_import"}, boot_quarantine: true} = :sys.get_state(pid)
     assert {:error, {:boot_hold, _}} = Poller.dispatch_fiber(pid, "anything", force: true)
     assert {:error, {:boot_hold, _}} = Poller.release_boot_quarantine(pid)
     assert File.read!(snapshot) == "not json"
     assert Process.alive?(pid)
-    assert %{ready: false, boot_hold: %{stage: "outbox_baseline"}} = Shuttle.Readiness.status()
+    assert %{ready: false, boot_hold: %{stage: "inbox_import"}} = Shuttle.Readiness.status()
   end
 end

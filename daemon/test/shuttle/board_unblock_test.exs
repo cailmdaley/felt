@@ -1,16 +1,20 @@
 defmodule Shuttle.BoardUnblockTest do
   use ExUnit.Case, async: true
-  alias Shuttle.{ThreadOutbox, Threads}
+  alias Shuttle.Threads
+  alias Shuttle.Test.InboxPublications
 
   defmodule Runner do
     def cmd("shuttle", ["board", "append"], opts) do
       send(self(), {:board, Jason.decode!(opts[:input]), opts[:input_eof]})
       {"", 0}
     end
+
+    def cmd(command, args, opts), do: Shuttle.Runner.Default.cmd(command, args, opts)
   end
 
   defmodule RaisingRunner do
     def cmd("shuttle", ["board", "append"], _opts), do: raise("input unavailable")
+    def cmd(command, args, opts), do: Shuttle.Runner.Default.cmd(command, args, opts)
   end
 
   test "a newly captured unblock posts exactly once, including after acknowledgement" do
@@ -19,7 +23,7 @@ defmodule Shuttle.BoardUnblockTest do
     on_exit(fn -> File.rm_rf(dir) end)
     Shuttle.Test.Env.put_env("SHUTTLE_DATA_DIR", dir)
     Shuttle.Test.Env.put_app_env(:felt_runner, Runner)
-    ThreadOutbox.boot_baseline()
+    Shuttle.Inbox.boot_import()
     stamp = DateTime.add(DateTime.utc_now(), 2, :second) |> DateTime.to_iso8601()
 
     parent = %{
@@ -54,10 +58,10 @@ defmodule Shuttle.BoardUnblockTest do
                     %{"kind" => "unblocked", "fiber" => "child", "text" => "Blocker closed"},
                     true}
 
-    assert [{id, _}] = ThreadOutbox.pending("host")
+    assert [{id, _}] = InboxPublications.pending("host")
     assert :ok = Threads.capture_unblocks(entries, "host")
     refute_receive {:board, _, _}, 20
-    ThreadOutbox.acknowledge(id)
+    InboxPublications.settle("host", id)
     assert :ok = Threads.capture_unblocks(entries, "host")
     refute_receive {:board, _, _}, 20
 
@@ -69,7 +73,7 @@ defmodule Shuttle.BoardUnblockTest do
              assert :ok = Threads.capture_unblocks([parent, child, blocker], "host")
            end) =~ "input unavailable"
 
-    assert [{_, _}] = ThreadOutbox.pending("host")
+    assert [{_, _}] = InboxPublications.pending("host")
   end
 
   test "runner reports an unavailable input directory without raising" do

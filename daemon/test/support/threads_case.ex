@@ -45,7 +45,7 @@ defmodule Shuttle.Test.ThreadsCase do
   end
 
   defmodule FailingMailboxRunner do
-    def cmd("shuttle", ["context-mailbox", "put" | _], _opts), do: {"mailbox unavailable", 1}
+    def cmd("shuttle", ["inbox", "consume" | _], _opts), do: {"inbox unavailable", 1}
     def cmd(command, args, opts), do: Shuttle.Runner.Default.cmd(command, args, opts)
   end
 
@@ -70,7 +70,7 @@ defmodule Shuttle.Test.ThreadsCase do
     claim_test_daemon_owner!(home)
     Env.put_env("SHUTTLE_HOST", "test-host")
     Env.put_env("SHUTTLE_STORES", dir)
-    unless context[:first_boot], do: Shuttle.ThreadOutbox.boot_baseline()
+    unless context[:first_boot], do: Shuttle.Inbox.boot_import()
     Env.put_app_env(:felt_runner, Shuttle.Runner.Default)
     assert {:ok, _} = CLI.run_felt(["-C", dir, "init"])
     assert {:ok, _} = CLI.run_felt(["-C", dir, "add", "hub", "Hub"])
