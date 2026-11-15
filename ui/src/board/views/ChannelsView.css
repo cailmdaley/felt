@@ -25,7 +25,6 @@
   font: var(--type-meta)/var(--leading-ui) var(--font-serif);
   pointer-events: none;
 }
-.kbn-ch-rail-toggle { margin-left: auto; }
 .kbn-ch-act {
   padding: 0; border: 0; background: none; cursor: pointer;
   font: var(--type-meta)/var(--leading-ui) var(--font-serif);
@@ -43,7 +42,6 @@
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(150px, 210px) minmax(0, 1fr);
-  border-top: 0.5px solid var(--kbn-rule);
 }
 .kbn-ch-layout[data-thread] { grid-template-columns: minmax(150px, 210px) minmax(0, 1fr) minmax(0, 0.8fr); }
 .kbn-ch-layout[data-rail-hidden] { grid-template-columns: minmax(0, 1fr); }
@@ -88,6 +86,8 @@
 .kbn-ch-pick[aria-current] { color: var(--kbn-ink); background: color-mix(in srgb, var(--kbn-owed-bright) 16%, transparent); }
 .kbn-ch-pick-hash { flex: none; width: 0.7em; color: var(--kbn-ink-muted); }
 .kbn-ch-pick-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+/* A chaired channel's name is written as Slack writes it: lowercase, in the monospace. */
+.kbn-ch-pick:not([data-lone]) .kbn-ch-pick-name { font-family: var(--font-mono); font-size: var(--type-code); }
 .kbn-ch-pick[data-unread] .kbn-ch-pick-name { font-weight: 700; color: var(--kbn-ink); }
 .kbn-ch-pick[data-lone] { font-size: var(--type-meta); color: var(--kbn-ink-muted); }
 .kbn-ch-pick[data-lone] .kbn-ch-pick-hash { opacity: 0.6; }
@@ -130,6 +130,7 @@
 .kbn-ch-back { display: none; }
 .kbn-ch-name { flex: 1; min-width: 0; margin: 0; font: 600 var(--type-title)/var(--leading-tight) var(--font-serif); color: var(--kbn-ink); overflow-wrap: anywhere; }
 .kbn-ch-name::before { content: '# '; color: var(--kbn-ink-muted); font-weight: 400; }
+.kbn-ch-handle { font-family: var(--font-mono); font-size: var(--type-code); font-weight: 500; }
 .kbn-ch-empty { margin: 40px 0; text-align: center; font: italic var(--type-prose)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink-muted); }
 
 .kbn-ch-stream {
@@ -293,7 +294,6 @@ button.kbn-ch-msg-name:hover { color: var(--kbn-ink-soft); }
 /* A phone: one screen at a time — the rail, a channel, or a thread — each full width. */
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .kbn-channels { padding-inline: 0; }
-  .kbn-channels .kbn-view-titlerow { padding-inline: 16px; }
   .kbn-ch-rail-toggle { display: none; }
   .kbn-ch-layout, .kbn-ch-layout[data-thread], .kbn-ch-layout[data-rail-hidden], .kbn-ch-layout[data-rail-hidden][data-thread],
   .kbn-ch-layout[data-narrow][data-thread], .kbn-ch-layout[data-narrow][data-rail-hidden][data-thread] { grid-template-columns: minmax(0, 1fr); }

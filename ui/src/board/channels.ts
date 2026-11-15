@@ -97,6 +97,10 @@ export interface Channel {
   listed: boolean
 }
 
+/** How a channel is written, as Slack writes one: a chaired channel's name lowercased, its spaces hyphens; a lone constitution's name as it is. */
+export const handle = (channel: Pick<Channel, 'name' | 'chaired'>): string =>
+  channel.chaired ? channel.name.toLowerCase().replace(/\s+/g, '-') : channel.name
+
 /** A channel opened or active within this long stays in the rail. */
 export const RECENT_MS = 7 * 86_400_000
 /** A file sent this close to a worker's message is attached to it. */

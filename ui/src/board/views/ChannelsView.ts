@@ -9,7 +9,7 @@ import type { KanbanCard } from '../KanbanTypes.js'
 import { boardCards, threadIndexFor } from '../KanbanSurfaces.js'
 import { isMobileViewport } from '../mobile.js'
 import {
-  arranged, BOARD_LINE, channelLines, clearKey, clearsOf, composeChannels, continues, composeMessages, fiberOf, hideKey, liveness, railOrder, reordered, sameFiber, setAsideKey, showKey, threadOf, unclearKey, unpinKey,
+  arranged, BOARD_LINE, channelLines, handle, clearKey, clearsOf, composeChannels, continues, composeMessages, fiberOf, hideKey, liveness, railOrder, reordered, sameFiber, setAsideKey, showKey, threadOf, unclearKey, unpinKey,
   type BoardRecord, type Channel, type Line, type Message, type Tapestry,
 } from '../channels.js'
 import { createRailReorder, type RailReorder } from '../channelRail.js'
@@ -236,8 +236,9 @@ export class ChannelsView implements TemporalView {
     if (this.current) this.visit(this.current)
     const page = createViewPage('Channels')
     page.root.classList.add('kbn-channels')
+    // The board's tab bar names the view: the channel's own head is the view's top row, the rail's toggle at its right.
+    page.titleRow.remove()
     this.railToggle = iconButton('kbn-ch-rail-toggle', 'rail', '', () => this.setRail(this.railShown()))
-    page.titleRow.append(this.railToggle.root)
     this.layout = el('div', 'kbn-ch-layout')
     this.layout.append(this.railEl(), this.channelPane(), this.threadPane())
     this.note = el('p', 'kbn-ch-note', 'Reading the channels…')
@@ -611,7 +612,7 @@ export class ChannelsView implements TemporalView {
       pick.toggleAttribute('data-lone', !channel.chaired)
       pick.toggleAttribute('data-unread', unread(channel))
       pick.toggleAttribute('data-waiting', channel.waiting)
-      pick.append(el('span', 'kbn-ch-pick-hash', channel.chaired ? '#' : '·'), el('span', 'kbn-ch-pick-name', channel.name))
+      pick.append(el('span', 'kbn-ch-pick-hash', channel.chaired ? '#' : '·'), el('span', 'kbn-ch-pick-name', handle(channel)))
       if (channel.hidden) pick.append(el('span', 'kbn-ch-pick-hidden', 'hidden'))
       if (channel.waiting) {
         const mark = el('span', 'kbn-ch-pick-mark')
@@ -665,7 +666,7 @@ export class ChannelsView implements TemporalView {
     this.layout?.toggleAttribute('data-channel', !!channel)
     if (!channel) {
       this.sigs.channel = ''
-      this.head.replaceChildren(el('p', 'kbn-ch-empty', this.channels.length ? 'Choose a channel.' : 'No channels yet.'))
+      this.head.replaceChildren(el('p', 'kbn-ch-empty', this.channels.length ? 'Choose a channel.' : 'No channels yet.'), this.railToggle!.root)
       this.stream.replaceChildren()
       return
     }
@@ -679,11 +680,13 @@ export class ChannelsView implements TemporalView {
       lines.map(({ message, replies, last, waiting, act, cleared }) => [message.id, message.kind, message.text, waiting, act, cleared, message.card.name, message.card.turn, message.files.map(file => file.fullPath), replies, last, this.embedded(message.card, 'channel')])])
     if (this.changed('channel', sig)) {
       const back = iconButton('kbn-ch-back', 'back', 'Channels', () => this.setRail(false))
-      const name = el('h3', 'kbn-ch-name', channel.name)
+      const name = el('h3', 'kbn-ch-name')
+      name.append(channel.chaired ? el('span', 'kbn-ch-handle', handle(channel)) : channel.name)
+      name.toggleAttribute('data-lone', !channel.chaired)
       if (channel.title !== channel.name) name.title = channel.title
       const menu: IconButton = iconButton('kbn-ch-menu', 'actions', 'Channel menu', () => this.railMenu(channel.key, menu.button))
       menu.button.setAttribute('aria-haspopup', 'menu')
-      this.head.replaceChildren(back.root, name, menu.root)
+      this.head.replaceChildren(back.root, name, menu.root, this.railToggle!.root)
       this.fill(this.stream, lines, 'channel', channel, now)
       if (!lines.length) this.stream.append(el('li', 'kbn-ch-hush', failed ? 'This channel\'s history could not be read; trying again.' : said.length ? 'All clear.' : 'Nothing said here yet.'))
     }

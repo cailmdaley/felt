@@ -41,14 +41,14 @@ try {
     await page.evaluate(() => document.fonts.ready)
     // What waits on the human, the newest wait first, then the human's order; the hidden composer and old notes, idle three weeks, only by Jump to.
     // The Mill's workers are idle at the end of their turns: that waits on no one, so it keeps its place in the order.
-    assert.deepEqual(await page.evaluate(channels), ['cmbx', 'UNIONS', 'Vizier', 'Moving house', 'The Mill', 'French', 'Science', 'Garden plan'])
+    assert.deepEqual(await page.evaluate(channels), ['cmbx', 'unions', 'vizier', 'Moving house', 'the-mill', 'french', 'science', 'Garden plan'])
     if (phone) {
       // The rail is the first screen; choosing a channel fills it.
       assert.equal(await page.locator('.kbn-ch').isVisible(), false)
     }
     await shot(page, `${name}-rail`)
     // The garden plan is dragged above French: by the mouse, or by a finger held still and then drawn.
-    const from = await middle(pick(page, 'Garden plan')), to = await middle(pick(page, 'French'))
+    const from = await middle(pick(page, 'Garden plan')), to = await middle(pick(page, 'french'))
     to.y -= 6
     if (phone) await hold(page, from, to)
     else {
@@ -57,13 +57,13 @@ try {
       await page.mouse.up()
     }
     await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick-name')[5]?.textContent === 'Garden plan')
-    assert.deepEqual(await page.evaluate(channels), ['cmbx', 'UNIONS', 'Vizier', 'Moving house', 'The Mill', 'Garden plan', 'French', 'Science'])
+    assert.deepEqual(await page.evaluate(channels), ['cmbx', 'unions', 'vizier', 'Moving house', 'the-mill', 'Garden plan', 'french', 'science'])
     // The drag opened nothing and asked for no menu.
     assert.equal(await page.locator('[role="menu"]').count(), 0)
     if (phone) assert.equal(await page.locator('.kbn-ch').isVisible(), false)
     // A right-click, or a finger held and lifted, opens an entry's menu; Hide takes it out of the rail.
-    if (phone) await hold(page, await middle(pick(page, 'Science')))
-    else await pick(page, 'Science').click({ button: 'right' })
+    if (phone) await hold(page, await middle(pick(page, 'science')))
+    else await pick(page, 'science').click({ button: 'right' })
     await page.waitForFunction(() => document.querySelectorAll('[role="menuitem"]').length === 3)
     assert.deepEqual(await page.locator('[role="menuitem"]').allTextContents(), ['Hide', 'Pin', 'Move to bottom'])
     await shot(page, `${name}-rail-menu`)
@@ -72,7 +72,7 @@ try {
     // Jump to finds a hidden channel, marked as such.
     await page.locator('.kbn-ch-jump').fill('compo')
     await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 1)
-    assert.deepEqual(await page.evaluate(channels), ['Composer'])
+    assert.deepEqual(await page.evaluate(channels), ['composer'])
     assert.equal(await page.locator('.kbn-ch-pick-hidden').textContent(), 'hidden')
     await shot(page, `${name}-jump-hidden`)
     await page.locator('.kbn-ch-jump').fill('')
@@ -120,7 +120,7 @@ try {
       // UNIONS, busy and last read 45 minutes ago, rules off what is new.
       await page.locator('.kbn-ch').focus()
       await page.keyboard.press('j')
-      await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'UNIONS' && document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-msg').length === 13)
+      await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'unions' && document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-msg').length === 13)
       assert.equal(await page.locator('.kbn-ch-new').count(), 1)
       await shot(page, 'desktop-busy')
       await page.keyboard.press('[')

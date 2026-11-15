@@ -11,6 +11,7 @@
  * `?transcript=live` to give its constitution a live worker, or
  * `?example=workspace&transcript=search` stages the bar Find's constitutions and grouped transcript hits for "mask".
  * `?identity=all` adds synthetic CLI workers with pending and failed session attribution.
+ * `?example=channels&illuminated=1` is a design experiment, not the board: each channel's head set in the illuminated capitals.
  *
  * The SETTINGS sheet is exercised the same way and is the one surface here
  * that is stateful: the stub keeps an in-memory copy of each host's operator
@@ -65,6 +66,26 @@ const now = Date.now()
 const search = new URLSearchParams(window.location.search)
 const example = search.get('example')
 const transcriptScenario = search.get('transcript')
+if (example === 'channels' && search.has('illuminated')) illuminateChannelNames()
+/** Sets each chaired channel's head, as drawn, letter by letter in the board's illuminated capitals. */
+function illuminateChannelNames(): void {
+  const style = document.createElement('style')
+  style.textContent = '.kbn-ch-name[data-illuminated] { font-family: var(--font-serif); letter-spacing: 0.02em; } .kbn-ch-name[data-illuminated] .kbn-cap { font-size: 1.45em; margin-right: 0.03em; }'
+  document.head.append(style)
+  new MutationObserver(() => {
+    for (const name of document.querySelectorAll<HTMLElement>('.kbn-ch-name:not([data-lone]):not([data-illuminated])')) {
+      const text = name.textContent ?? ''
+      name.dataset.illuminated = ''
+      name.replaceChildren(...[...text].map(letter => {
+        if (!/[a-z]/i.test(letter)) return document.createTextNode(letter)
+        const cap = document.createElement('span')
+        cap.className = 'kbn-cap'
+        cap.dataset.letter = cap.textContent = letter.toUpperCase()
+        return cap
+      }))
+    }
+  }).observe(document.body, { childList: true, subtree: true })
+}
 const docsExample = example === 'workshop' ? workshopExample(now) : null
 const workspaceFixture = example === 'change' || example === 'workspace' || example === 'music' || example === 'nav-back' || example === 'threads' || example === 'frontier' || example === 'families' || example === 'thread-review' || example === 'channels' ? workspaceExample(now, { music: example === 'music', transcriptScenario }) : null
 if (workspaceFixture && search.has('long-title')) {

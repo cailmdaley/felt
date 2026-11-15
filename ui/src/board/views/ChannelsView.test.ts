@@ -323,31 +323,31 @@ it('floats what waits above the human\'s order, and moves a channel by Alt and t
   const { posts } = daemon([], undefined, {}, { order: { keys: ['channel:science', 'channel:french'], at: Date.now() - day } })
   const { view, ctx, host } = await mount([chair, tsz, mask, beam, van, notes, science, french])
   // What waits on the human first, its newest wait first; then the stored order.
-  expect(rail(host)).toStrictEqual(['cmbx', 'Moving house', 'Science', 'French'])
+  expect(rail(host)).toStrictEqual(['cmbx', 'Moving house', 'science', 'french'])
   const pick = (name: string) => [...host.querySelectorAll<HTMLButtonElement>('.kbn-ch-pick')].find(el => el.querySelector('.kbn-ch-pick-name')?.textContent === name)!
   const press = (name: string, key: string, over: KeyboardEventInit = {}) => pick(name).dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...over }))
-  press('Science', 'ArrowDown', { altKey: true })
+  press('science', 'ArrowDown', { altKey: true })
   await settle()
   // Every channel's place is written, the ones out of the rail and the waiting ones keeping theirs.
   expect(posts.at(-1)).toStrictEqual(['/api/v1/channels/order', { keys: ['channel:cmbx', 'fiber:R', 'fiber:N', 'channel:french', 'channel:science'] }])
-  expect(rail(host)).toStrictEqual(['cmbx', 'Moving house', 'French', 'Science'])
+  expect(rail(host)).toStrictEqual(['cmbx', 'Moving house', 'french', 'science'])
   // Nothing moves above what waits, and a waiting channel does not move at all.
-  press('French', 'ArrowUp', { altKey: true })
+  press('french', 'ArrowUp', { altKey: true })
   press('cmbx', 'ArrowDown', { altKey: true })
   await settle()
   expect(posts.filter(([url]) => url.endsWith('/order'))).toHaveLength(1)
   // The context-menu key opens the entry's menu; Move to bottom puts it last.
-  press('French', 'ContextMenu')
+  press('french', 'ContextMenu')
   await settle()
   const items = () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
   expect(items().map(item => item.textContent)).toStrictEqual(['Hide', 'Pin', 'Move to bottom'])
   items()[2].click()
   await settle()
   expect(posts.at(-1)).toStrictEqual(['/api/v1/channels/order', { keys: ['channel:cmbx', 'fiber:R', 'fiber:N', 'channel:science', 'channel:french'] }])
-  expect(rail(host)).toStrictEqual(['cmbx', 'Moving house', 'Science', 'French'])
+  expect(rail(host)).toStrictEqual(['cmbx', 'Moving house', 'science', 'french'])
   // A poll keeps the order written here until the feed carries a newer one.
   view.refresh(ctx); await settle()
-  expect(rail(host)).toStrictEqual(['cmbx', 'Moving house', 'Science', 'French'])
+  expect(rail(host)).toStrictEqual(['cmbx', 'Moving house', 'science', 'french'])
 })
 
 it('hides a channel by its menu; Jump to finds it, marked, and opening it brings it back', async () => {
@@ -651,7 +651,7 @@ it('reads the charters\' names again after a read that failed', async () => {
   expect(rail(host)).toContain('first-contact')
   view.refresh(ctx); await settle(); await settle()
   expect(roles).toBe(2)
-  expect(rail(host)).toContain('Vizier')
+  expect(rail(host)).toContain('vizier')
 })
 
 it('lets go of records past the board\'s reach', async () => {
@@ -770,4 +770,22 @@ it('signs off a close for review by its ✓: tempers it, then clears its line at
   expect(requestRefresh).toHaveBeenCalled()
   // No Undo for a sign-off; the line goes once the board carries the temper.
   expect(host.querySelector('.kbn-ch-cleared')).toBeNull()
+})
+
+it('heads the view with the channel itself, its name written as Slack writes it, the rail\'s toggle at its right', async () => {
+  daemon()
+  const mill = card({ id: 'mill', uid: 'L', name: 'felt chair', shuttleChannel: 'The Mill', shuttleSeat: true, ...working(2) })
+  const { host } = await mount([chair, tsz, van, mill])
+  // The tab bar names the view: no page title of its own.
+  expect(host.querySelector('.kbn-view-title')).toBeNull()
+  expect(rail(host)).toStrictEqual(['Moving house', 'cmbx', 'the-mill'])
+  host.querySelector<HTMLButtonElement>('[data-channel="channel:the mill"]')!.click()
+  await settle()
+  const head = host.querySelector('.kbn-ch-head')!
+  expect(shown(host)).toBe('the-mill')
+  expect([...head.querySelectorAll('.kbn-ch-icon')].map(icon => icon.classList[1])).toStrictEqual(['kbn-ch-back', 'kbn-ch-menu', 'kbn-ch-rail-toggle'])
+  // A lone constitution keeps its own name.
+  host.querySelector<HTMLButtonElement>('[data-channel="fiber:R"]')!.click()
+  await settle()
+  expect([shown(host), host.querySelector('.kbn-ch-name')!.hasAttribute('data-lone')]).toStrictEqual(['Moving house', true])
 })
