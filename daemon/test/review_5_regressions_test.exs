@@ -250,6 +250,15 @@ defmodule Shuttle.PulseRecordFailureRegressionTest do
   alias Shuttle.Pulse
   alias Shuttle.Test.{Env, FeltStoreRunner}
 
+  defmodule RejectRecordRunner do
+    def cmd("shuttle", ["inbox", "record-begin" | _], _opts) do
+      send(Shuttle.Env.app(:record_failure_pid), :record_refused)
+      {"cannot write inbox record", 1}
+    end
+
+    def cmd(command, args, opts), do: FeltStoreRunner.cmd(command, args, opts)
+  end
+
   setup do
     FeltStoreRunner.start!()
 
@@ -298,15 +307,12 @@ defmodule Shuttle.PulseRecordFailureRegressionTest do
           )
       )
 
-  defp await(_, 0), do: flunk("no")
+  defp await(_, 0), do: flunk("pulse job did not finish")
 
   test "a failed record-begin releases an idle Claude worker's reservation",
        %{poller: poller} do
-    # Fiber inboxes cannot be created: `record-begin` fails.
-    mailboxes = Path.join(Shuttle.data_dir(), "mailboxes")
-    File.rm_rf!(Path.join(mailboxes, "fiber"))
-    File.mkdir_p!(mailboxes)
-    File.write!(Path.join(mailboxes, "fiber"), "not a directory")
+    Env.put_app_env(:felt_runner, RejectRecordRunner)
+    Env.put_app_env(:record_failure_pid, self())
 
     :sys.replace_state(poller, fn state ->
       [key] = Map.keys(state.pulses)
@@ -314,13 +320,12 @@ defmodule Shuttle.PulseRecordFailureRegressionTest do
     end)
 
     send(poller, :run_poll_cycle)
+    assert_receive :record_refused
 
     await(fn ->
       :sys.get_state(poller).poll_cycles > 0 and :sys.get_state(poller).pulse_jobs == %{}
     end)
 
-    Process.sleep(200)
-    await(fn -> :sys.get_state(poller).pulse_jobs == %{} end)
     refute_received {:pulse_sent, _, _}
     [row] = Map.values(Pulse.load())
     assert row["state"] == "scheduled"
