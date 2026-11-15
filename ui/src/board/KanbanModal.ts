@@ -61,7 +61,6 @@ import type {
   KanbanResponse,
 } from './KanbanTypes.js'
 import { hasWorkerToStop } from './KanbanTypes.js'
-import { humanMessageId } from './humanMessageId.js'
 import { dispatchFailureMessage, isAgentCard, needsProjectDir, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
 import { PINNED_TAG, THREAD_PIN, type ThreadPinRequest } from './ThreadPeek.js'
 import { COLUMN_TITLES, FALLBACK_DEFAULT_AGENT, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, threadIndexFor, findCardById, findCardColumn, formatDue } from './KanbanSurfaces.js'
@@ -1191,7 +1190,7 @@ export class KanbanModal {
   private async launchFromDrag(card: KanbanCard): Promise<boolean> {
     let res: Response
     try {
-      res = await postForceDispatch(this.shuttleBase, card, { resume_mode: 'fresh', message_id: humanMessageId() })
+      res = await postForceDispatch(this.shuttleBase, card, { resume_mode: 'fresh' })
     } catch (err: unknown) {
       throw new Error(`Couldn't reach the Shuttle daemon: ${errText(err)}`)
     }

@@ -131,6 +131,24 @@ it('opens a worker\'s thread from its message: its name, liveness and ask on top
   expect(thread.hidden).toBe(true)
 })
 
+it('a retried reply keeps its id, so the owner types it at most once; another reply gets its own', async () => {
+  const { posts } = daemon(['/api/v1/deliver'])
+  const { host, reply } = await mount()
+  const send = async (text: string) => {
+    reply.value = text
+    reply.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await settle()
+  }
+  await send('Keep it.')
+  expect(host.querySelector('.kbn-ch-note')?.textContent ?? '').toContain('Not sent')
+  await send('Keep it.')
+  await send('Drop it.')
+  const ids = posts.map(([, body]) => body.message_id)
+  expect(ids[0]).toMatch(/^human-[0-9a-f]{32}$/)
+  expect(ids[1]).toBe(ids[0])
+  expect(ids[2]).not.toBe(ids[0])
+})
+
 it('shows a closed fiber\'s outcome as its conclusion, and an open one\'s not at all', async () => {
   daemon()
   const done = card({ id: 'cmbx/cov', uid: 'V', name: 'Covariance', orchestrator: 'C', column: 'tempered', status: 'closed', closedAt: at(40), outcome: 'Validated against 2000 simulations.' })
@@ -160,7 +178,7 @@ it('replies in the channel to its chair; keeps each box\'s draft by whom it goes
   reply.value = 'Keep going.'
   host.querySelector<HTMLFormElement>('.kbn-ch-reply')!.requestSubmit()
   await settle()
-  expect(posts.at(-1)).toStrictEqual(['/api/v1/deliver', { fiber_id: 'cmbx', origin: 'local', text: 'Keep going.', from: 'human' }])
+  expect(posts.at(-1)).toStrictEqual(['/api/v1/deliver', { fiber_id: 'cmbx', origin: 'local', text: 'Keep going.', from: 'human', message_id: expect.stringMatching(/^human-[0-9a-f]{32}$/) }])
   expect(reply.value).toBe('Keep going.')
   expect(host.querySelector('.kbn-ch-note')?.textContent).toContain('Not sent')
 })

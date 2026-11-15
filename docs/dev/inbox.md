@@ -109,7 +109,7 @@ A fresh request's `/deliver` answer is `delivered: null` until its replacement t
 The human's fresh board action keeps forced-start authority.
 
 Channels replies, the Dock's send and review lines, and `/dispatch user_message` record the line first, as a `source: human` record.
-The board mints `message_id`; the owner mints one for callers without it.
+The board keeps one `message_id` per composed message: a retry after a failed send reuses it, and a new message, or the same text after a send went through, gets a new one. The owner mints one for callers without it, such as `shuttle dispatch --message`.
 Images are written to disk and represented as `[Image: path]` lines before recording.
 The owner writes the record straight to the inbox's `offered/`, disposition unknown, under the inbox lock, so no reader ever offers it.
 Only the call that writes the record may transport the line: typed terminal paste to a live worker, or the From User launch prompt to a dormant one.

@@ -1,5 +1,5 @@
 import '@ui-sdk/web/segmented-control'
-import { humanMessageId } from '../humanMessageId.js'
+import { HumanMessageIds } from '../humanMessageId.js'
 import { paintAncestry, type Ancestor } from './ancestryTrail.js'
 import { headerIcon } from './headerIcon.js'
 import { attachConversationPicker, openActionMenu } from '../conversationMenu.js'
@@ -397,6 +397,8 @@ export class Dock {
   private errorEl: HTMLElement | null = null
   /** A session verb is in flight; every verb holds until it lands. */
   private starting = false
+  /** Typed-input ids: a retried send keeps its message's id. */
+  private readonly messageIds = new HumanMessageIds()
   private actPaint: (() => void) | null = null
   private settingsSync: ((view: KanbanCard) => void) | null = null
   private historySync: (() => void) | null = null
@@ -1575,11 +1577,11 @@ export class Dock {
     if (!hasLiveWorker(card)) throw new Error('No live worker. Start or resume one before sending a review.')
     let res: Response
     try {
-      res = await postForceDispatch(this.shuttleBase, card, { user_message: message, message_id: humanMessageId(), resume_mode: 'previous', existing_only: true })
+      res = await postForceDispatch(this.shuttleBase, card, { user_message: message, message_id: this.messageIds.for(['review', card.originId, card.id, message].join('\0')), resume_mode: 'previous', existing_only: true })
     } catch (err: unknown) {
       throw new Error(`Shuttle did not answer (${(err as { message?: string })?.message ?? String(err)}), so this may still arrive. Check the worker's conversation before sending again.`)
     }
-    if (res.ok) { this.onSaved(); return }
+    if (res.ok) { this.messageIds.sent(); this.onSaved(); return }
     const body = (await res.json().catch(() => ({}))) as DispatchFailureBody
     throw new Error(res.status === 409 ? 'A worker is already running for this fiber.' : dispatchFailureMessage(body, `Requeue failed (${res.status})`, res.status))
   }
@@ -1613,7 +1615,7 @@ export class Dock {
     try {
       let res: Response
       try {
-        res = await postForceDispatch(this.shuttleBase, card, { user_message: message, message_id: humanMessageId(), resume_mode: mode, ...(images.length ? { images } : {}), ...(projectDir ? { project_dir: projectDir } : {}) })
+        res = await postForceDispatch(this.shuttleBase, card, { user_message: message, message_id: this.messageIds.for([mode, card.originId, card.id, message, ...images.map(image => `${image.name}:${image.data.length}`)].join('\0')), resume_mode: mode, ...(images.length ? { images } : {}), ...(projectDir ? { project_dir: projectDir } : {}) })
       } catch (err: unknown) {
         showError(`Shuttle did not answer (${(err as { message?: string })?.message ?? String(err)}). Check the board before trying again.`)
         return false
@@ -1625,6 +1627,7 @@ export class Dock {
       const said = !!message || images.length > 0
       const reachable = res.status === 409 && !!body.tmux_session && !!body.terminal
       if (res.ok || (reachable && !said)) {
+        this.messageIds.sent()
         this.onSaved()
         if (body.tmux_session && !coarsePointer()) this.onOpenWorker?.(body.tmux_session, card.originId)
         return true
