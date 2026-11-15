@@ -232,7 +232,7 @@ and add your test to its file.
 
 | Tier | What | Who runs it |
 |---|---|---|
-| the suites | `go test ./...`, `mix test`, `npm test` — all concurrent; each aims to finish in under a minute on a laptop, a target rather than a guarantee | every change, every lane |
+| the suites | `make go-test`, `make mix-test`, `make js-test` — each concurrent within itself and aiming to finish in under a minute on a laptop, a target rather than a guarantee; each holds the machine's one suite slot (`scripts/suite-slot.sh`), so workers sharing a host run them in turn, and one that finds the slot held waits or pushes and reads CI's result | every change, every lane |
 | full | `make test` plus `make test-linux` (CI's Ubuntu: dash as `/bin/sh`, `/proc`, systemd) | before pushing; CI |
 | browser | `npm run e2e`, on a headless Chrome of its own | changes to anything the board draws |
 | opt-in | real harness smoke, the stranger-bootstrap container, `integration`-tagged tests | when touching what they cover |

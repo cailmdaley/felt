@@ -203,25 +203,29 @@ endif
 	rm "$$generation/.assembling"
 
 # ── test ─────────────────────────────────────────────────────────────────
+# The three full suites and the Linux run each hold the machine's one suite
+# slot (scripts/suite-slot.sh), so workers sharing a host run them in turn.
+SUITE_SLOT := sh $(CURDIR)/scripts/suite-slot.sh
+
 test: go-test mix-test js-test plugin-hooks-test bootstrap-test migrate-test
 
 go-test:
-	go test ./...
+	$(SUITE_SLOT) go test ./...
 
 # The Go suite on Linux (dash as /bin/sh, as on CI) via Apple's `container`
 # or docker; see scripts/test-linux.sh.
 test-linux:
-	scripts/test-linux.sh
+	$(SUITE_SLOT) scripts/test-linux.sh
 
 # The full daemon suite, the production boot gate included (a bare
 # `mix test` leaves the gate out).
 mix-test:
-	cd daemon && MIX_ENV=test SHUTTLE_TEST_PRODUCTION_BOOT=1 $(MIX) do compile --warnings-as-errors + test
+	cd daemon && MIX_ENV=test SHUTTLE_TEST_PRODUCTION_BOOT=1 $(SUITE_SLOT) $(MIX) do compile --warnings-as-errors + test
 
 # The board's own suite, under a pinned TZ=America/Los_Angeles; the civil-day
 # properties inside it cover every other zone.
 js-test:
-	cd ui && npm test
+	cd ui && $(SUITE_SLOT) npm test
 
 # scripts/migrate-pinned.py's planning: liveness first, the owner's state,
 # and no plan when an owner cannot be vouched for.

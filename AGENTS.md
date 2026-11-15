@@ -203,11 +203,19 @@ To cycle a supervised daemon directly, use
 
 ```bash
 make test                  # go test ./... + mix test + the board suite + the plugin hooks
-go test ./...              # Go (felt and shuttle CLIs)
+make go-test               # Go (felt and shuttle CLIs)
 make test-linux            # the Go suite in a Linux container, as CI runs it
 make mix-test              # full Elixir suite (shells felt and shuttle: make cli-install first)
-cd ui && npm test          # vitest, once, under TZ=America/Los_Angeles
+make js-test               # the board's vitest, once, under TZ=America/Los_Angeles
 ```
+
+**One full suite per machine at a time.** `make go-test`, `make mix-test`,
+`make js-test` and `make test-linux` each hold the host's suite slot
+(`scripts/suite-slot.sh`, `~/.shuttle/suite.slot`), so workers sharing a
+machine run their suites in turn. Run a full suite through its make target,
+never bare; targeted tests (`go test ./internal/x -run Y`, one `mix test`
+file) run freely. A worker that finds the slot held waits, or pushes and
+reads CI's result instead.
 
 **macOS is not CI's platform.** `/bin/sh` is bash on macOS and dash on CI's
 Ubuntu runner, and `/proc`, systemd and tmux differ too, so shell scripts and
@@ -255,6 +263,7 @@ in `NOTICE` and `LICENSE-APACHE`.
 ## Landing changes
 
 Run the targeted local tests before pushing; use the full suite for broad changes.
+A full suite goes through its make target, which queues on the machine's suite slot; when the slot is held, pushing and reading CI's result is as good.
 CI is feedback, not a landing or deployment gate: do not wait for CI after pushing.
 The repo's SessionStart hook prints the cached latest completed main CI result when red and refreshes it in the background for the next session.
 
