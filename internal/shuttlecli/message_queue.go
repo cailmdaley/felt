@@ -26,6 +26,9 @@ type fiberReceipt struct {
 	Fiber     string `json:"fiber"`
 	Status    string `json:"status"`
 	Detail    string `json:"detail"`
+	// subscribesIdle reports that the owner records a --notify-when-idle
+	// subscription when the worker takes the entry (contract 42).
+	subscribesIdle bool
 }
 
 // queueForFiber routes fiber messages to the fiber's inbox
@@ -97,7 +100,7 @@ func (a *app) queueForFiber(request messaging.Request, force bool) (*fiberReceip
 	case resp.StatusCode == http.StatusConflict && answer.Live && (request.Wake || request.NotifyWhenIdle):
 		return nil, nil
 	case resp.StatusCode < 300 && answer.Queued:
-		receipt := &fiberReceipt{MessageID: request.MessageID, Fiber: f.ID, Status: string(messaging.StatusQueued), Detail: answer.Detail}
+		receipt := &fiberReceipt{MessageID: request.MessageID, Fiber: f.ID, Status: string(messaging.StatusQueued), Detail: answer.Detail, subscribesIdle: modern}
 		switch answer.Status {
 		case statusStarting, "woken", "followed_up", "delivered", "held":
 			receipt.Status = answer.Status

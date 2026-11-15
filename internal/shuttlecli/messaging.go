@@ -249,8 +249,10 @@ exit 1 means rejected, unknown, or another command error.`,
 					return err
 				}
 				if queued != nil {
-					if request.NotifyWhenIdle {
+					if request.NotifyWhenIdle && queued.subscribesIdle {
 						fmt.Fprintf(a.env.Stderr, "idle subscription: recorded when the worker takes the entry\n")
+					} else if request.NotifyWhenIdle {
+						fmt.Fprintf(a.env.Stderr, "idle subscription: unsupported — the owning host's shuttle predates subscribing when its worker takes the entry\n")
 					}
 					a.recordBoardMessage(args[0], request)
 					if err := a.clearMessagedFiberAsk(args[0], request.From); err != nil {

@@ -247,6 +247,14 @@ defmodule ShuttleWeb.DeliverController do
       detail: "sent to the worker; its arrival is not yet confirmed, and the inbox resends it"
     }
 
+  defp consumed(%{"message" => "unknown"}, _sent?),
+    do: %{
+      status: "queued",
+      delivered: nil,
+      detail:
+        "the inbox no longer holds this message (it expired, or was never stored); whether it arrived is unknown"
+    }
+
   defp consumed(%{"message" => "reserved"}, _sent?), do: %{status: "starting", delivered: false}
   defp consumed(%{"held" => "cost"}, _sent?), do: %{status: "held", delivered: false}
   defp consumed(_answer, _sent?), do: %{status: "queued", delivered: false}

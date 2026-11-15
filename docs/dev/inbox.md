@@ -88,7 +88,7 @@ The owner clears the fiber's outstanding ask when an entry from a sender other t
 Session-addressed messages and idle and mail-failure notices keep their direct transports and `messages/` receipts.
 Voice (`live_input`) and explicit `message_after_launch` requests use their session delivery paths.
 
-`/deliver` adds `consumed` for a live worker: the consumer's `action`, `members`, `followup` and `held: cost`, and `message`, this message's state after the pass (`consume --message`): `delivered`, `sent` (its outcome not yet confirmed), `reserved` for a launch, or `pending`.
+`/deliver` adds `consumed` for a live worker: the consumer's `action`, `members`, `followup` and `held: cost`, and `message`, this message's state after the pass (`consume --message`): `delivered`, `sent` (its outcome not yet confirmed), `reserved` for a launch, `pending`, or `unknown` when the inbox no longer holds it as delivered (it expired, which consume records on the offered entry as disposition `expired`, or was never stored), which `/deliver` answers as `queued` with `delivered: null`.
 The status describes this message, not whatever else the pass sent: `woken`, `followed_up`, `delivered` (as context, or before a retry), `held`, `starting` or `queued`, which the CLI prints.
 `delivered` is true once the message is delivered, null when it was sent and its outcome is unconfirmed, and false while it waits or a session starts for it.
 An enqueue reply is not a promise that the model read the text.
@@ -162,6 +162,9 @@ An unreachable owner, an ambiguous reply or a lost confirmation leaves the entry
 The owner stores the result as an ordinary derived entry, which its live-worker and dormant-fiber consumers below take.
 
 Only a close or ask requested by the orchestrator's own worker asks that fiber for a turn (`turn: ask`, `if_costly: fresh`).
+Such a result is consumed like any `ask` entry: a busy Codex or Pi orchestrator gets it in its turn as a terminal follow-up or steering, and a busy Claude orchestrator through its hook or, after 30 seconds without an offer, a native wake.
+When waking an idle orchestrator is costly, its fresh session is an inbox launch under the gate (`inbox_replace`): the boot quarantine, a full host, or a closed, resting or unarmed orchestrator refuses it, and the orchestrator is woken instead, whatever the cost.
+That session's launch prompt names the previous session and its cost, and says to read Status first, then `shuttle show` the previous session for what it holds that Status does not.
 Results nobody asked for and unblock notes are quiet context.
 When a different session asked, capture also writes that session an asker notice, id `<id>-asker`, into the routing inbox.
 A waking result keeps its asking fiber and session (`asked_by`); when `inbox route` resolves the recipient past that fiber, as past an archived asking parent, it stores the asker notice and turns the result quiet before it places or forwards it.
@@ -345,7 +348,7 @@ The session-only Claude fallback claims by moving an entry into `fallback/` and 
 | `shuttle inbox put <address> <message-id> <text>` | Enqueue, with `--source`, `--turn`, `--session`, `--if-costly`, `--not-before`, `--from` and `--derived`; silent on success |
 | `shuttle inbox pending <address>... [--waking]` | JSON address → pending count, or with `--waking` the count a launch would be for; unreadable addresses are named on stderr and omitted |
 | `shuttle inbox ls <address>` | Pending entries oldest first; `--json` includes wishes, queued time, sender and open attempt |
-| `shuttle inbox consume <fiber-key> <address-or-dash> <epoch> [--idle] [--unknown] [--busy] [--costly] [--message <id>]` | Consume for the current receiver, or with `-` and epoch 0 for a fiber with no worker; one JSON object with `action` (`wait`, `wake`, `context`, `fresh`, `launch`), the `members` sent or reserved, `turn` when an entry asks for a turn the worker's facts would decide, and with `--message` that entry's state after the pass (`message`: `delivered`, `sent`, `reserved` or `pending`). The answer is printed even when an open batch's send fails, which exits nonzero |
+| `shuttle inbox consume <fiber-key> <address-or-dash> <epoch> [--idle] [--unknown] [--busy] [--costly] [--message <id>]` | Consume for the current receiver, or with `-` and epoch 0 for a fiber with no worker; one JSON object with `action` (`wait`, `wake`, `context`, `fresh`, `launch`), the `members` sent or reserved, `turn` when an entry asks for a turn the worker's facts would decide, and with `--message` that entry's state after the pass (`message`: `delivered`, `sent`, `reserved`, `pending` or `unknown`). The answer is printed even when an open batch's send fails, which exits nonzero |
 | `shuttle inbox thread-state` | Establish the thread capture window and import an older daemon's thread outbox; print `baseline` and any `skipped` records and `cleanup_error`, or exit 3 on a corrupt outbox or state |
 | `shuttle inbox thread-put` | Capture a JSON array of `{id, record, board}` publications from stdin into the routing inbox, storing a `board` record in that entry, then append every board line the routing inbox's entries owe, from the stored record; print `{"created": [ids], "refused": [{id, error}], "board_errors": [{id, error}]}`, trying every publication |
 | `shuttle inbox routes` | List the routing inbox's pending publications as `{id, record}` |

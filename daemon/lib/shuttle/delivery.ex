@@ -610,7 +610,7 @@ defmodule Shuttle.Delivery do
   decoded consume result. The worker's turn state and wake cost are read only
   when the inbox answers that a due entry asks for a turn. Options: `:server`
   (the Poller), and `:message`, an entry id whose state the answer reports
-  (`"message"`: delivered, sent, reserved or pending).
+  (`"message"`: delivered, sent, reserved, pending or unknown).
   """
   def flush_context(entry, opts \\ []) do
     server = opts[:server] || Shuttle.Env.server(Poller)

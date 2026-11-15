@@ -3293,7 +3293,7 @@
           },
           "consumed": {
             "type": "object",
-            "description": "Consumer evidence for a live worker: action, members, followup, held, and message (this message's state after the pass: delivered, sent, reserved or pending)."
+            "description": "Consumer evidence for a live worker: action, members, followup, held, and message (this message's state after the pass: delivered, sent, reserved, pending or unknown)."
           },
           "queued": {
             "const": true

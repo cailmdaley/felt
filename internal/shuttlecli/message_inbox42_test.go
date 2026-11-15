@@ -51,7 +51,10 @@ func TestFreshIsOneLaunchRequestOnEveryOwner(t *testing.T) {
 	isolateMessageFiberStore(env, store)
 	deliver, requests := dormantDeliverStub(200, `{"delivered":true,"delivery":"fresh"}`)
 	daemonStub(t, env, map[string]http.HandlerFunc{
-		"/api/v1/version": func(w http.ResponseWriter, r *http.Request) { t.Error("asked for the owner's level"); w.WriteHeader(500) },
+		"/api/v1/version": func(w http.ResponseWriter, r *http.Request) {
+			t.Error("asked for the owner's level")
+			w.WriteHeader(500)
+		},
 		"/api/v1/deliver": deliver,
 	})
 	if err := newApp(env).messageFresh(messaging.Request{Address: "work/worker", Text: "publication", MessageID: "fresh1", From: "fixture"}); err != nil {
@@ -73,5 +76,37 @@ func TestFreshRefusedNamesTheReason(t *testing.T) {
 	err := newApp(env).messageFresh(messaging.Request{Address: "work/worker", Text: "publication", MessageID: "fresh2", From: "fixture"})
 	if err == nil || !strings.Contains(err.Error(), "boot quarantine") {
 		t.Fatalf("%v", err)
+	}
+}
+
+// The CLI promises an idle subscription on a queued fiber message only when
+// the owner makes one, which an owner below 42 does not.
+func TestQueuedIdleSubscriptionLineFollowsTheOwnerLevel(t *testing.T) {
+	for _, level := range []string{"41", "42"} {
+		env := testEnv(t)
+		store := writeMessageTargetFiber(t, map[string]any{"kind": "oneshot", "host": "hub", "agent": "claude-opus", "project_dir": t.TempDir()})
+		isolateMessageFiberStore(env, store)
+		deliver, _ := dormantDeliverStub(202, `{"queued":true,"status":"starting"}`)
+		daemonStub(t, env, map[string]http.HandlerFunc{
+			"/api/v1/version": versionStub(level),
+			"/api/v1/deliver": deliver,
+		})
+		app := newApp(env)
+		var stderr strings.Builder
+		app.env.Stderr = &stderr
+		var opts messageOptions
+		cmd := app.messageCmd(&opts)
+		opts.id, opts.from = "msg-idle", "test sender"
+		cmd.SetIn(strings.NewReader(""))
+		if err := cmd.ParseFlags([]string{"--notify-when-idle"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := cmd.RunE(cmd, []string{"work/worker", "publication"}); err != nil {
+			t.Fatal(err)
+		}
+		recorded := strings.Contains(stderr.String(), "idle subscription: recorded")
+		if recorded != (level == "42") || (level == "41" && !strings.Contains(stderr.String(), "idle subscription: unsupported")) {
+			t.Fatalf("level %s: %q", level, stderr.String())
+		}
 	}
 }

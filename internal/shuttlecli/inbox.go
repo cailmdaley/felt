@@ -144,7 +144,7 @@ to consume again with the worker's --idle, --unknown and --costly facts.`,
 		},
 	}
 	consume.Flags().BoolVar(&busy, "busy", false, "The live worker is in a turn; use its follow-up transport")
-	consume.Flags().StringVar(&message, "message", "", "Report this entry's state after the pass: delivered, sent, reserved or pending")
+	consume.Flags().StringVar(&message, "message", "", "Report this entry's state after the pass: delivered, sent, reserved, pending or unknown")
 	consume.Flags().BoolVar(&idle, "idle", false, "The live worker was observed idle")
 	consume.Flags().BoolVar(&unknown, "unknown", false, "The live worker's turn state is unknown: woken for ask, never for idle")
 	consume.Flags().BoolVar(&costly, "costly", false, "Waking the live worker is costly")

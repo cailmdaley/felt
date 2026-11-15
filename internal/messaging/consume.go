@@ -47,7 +47,8 @@ type Consumption struct {
 	Launching bool `json:"launching,omitempty"`
 	// Message is the state of the worker's Message entry after the pass:
 	// delivered, sent (its send's outcome is not yet confirmed), reserved
-	// (a launch in its lease is for it), or pending.
+	// (a launch in its lease is for it), pending, or unknown (it expired, or
+	// the inbox does not hold it).
 	Message string `json:"message,omitempty"`
 }
 
@@ -73,13 +74,15 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 }
 
 // messageState reads one entry's state after a pass (Consumption.Message).
+// An entry offered with no disposition was delivered; one that expired, or
+// that the inbox does not hold, is unknown.
 func messageState(root, id string, now time.Time) string {
 	e, err := readFiberMailboxEntry(filepath.Join(root, "pending", mailboxKey(id)+".json"))
 	if err != nil {
-		if _, err := os.Stat(filepath.Join(root, "offered", mailboxKey(id)+".json")); err == nil {
+		if offered, err := readFiberMailboxEntry(filepath.Join(root, "offered", mailboxKey(id)+".json")); err == nil && offered.Disposition == "" {
 			return "delivered"
 		}
-		return ""
+		return "unknown"
 	}
 	if e.AttemptAddress != "" {
 		return "sent"
@@ -197,6 +200,11 @@ func consumePass(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 			continue
 		}
 		if mailboxEntryExpired(it.entry, now) {
+			// Marked, so offered/ never reads as its delivery.
+			it.entry.Disposition = "expired"
+			if err := writeMailboxEntryKeepingTime(it.path, it.entry); err != nil {
+				return Consumption{}, err
+			}
 			if err := moveToOffered(root, it.path); err != nil {
 				return Consumption{}, err
 			}
