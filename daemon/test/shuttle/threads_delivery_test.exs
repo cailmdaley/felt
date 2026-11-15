@@ -563,6 +563,81 @@ defmodule Shuttle.ThreadsDeliveryTest do
     refute_receive {:flush_reached_admission, ^hub_uid}, 200
   end
 
+  # A remote owner that holds every forward until the test releases it.
+  defmodule SlowRemote do
+    def get(_url, _timeout),
+      do: {:ok, 200, Jason.encode!(%{fibers: [Shuttle.Env.app(:probe_remote_parent)]})}
+
+    def get_file(url, timeout) do
+      {:ok, status, body} = __MODULE__.get(url, timeout)
+      {:ok, status, "application/json", body}
+    end
+
+    def post(_url, _body, _type, _timeout) do
+      send(Shuttle.Env.app(:probe_owner), {:remote_blocked, self()})
+
+      receive do
+        :release_remote -> {:error, :timeout}
+      end
+    end
+  end
+
+  test "a placed local wake is consumed before a later slow remote handoff", %{store: store} do
+    assert {:ok, _} = CLI.run_felt(["-C", store, "edit", "hub", "-s", "active"])
+    assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+    parent = Enum.find(entries, &(Threads.address(&1.fiber) == "hub"))
+    Env.put_server(Shuttle.Poller, start_supervised!({AdmissionProbe, self()}))
+
+    Env.put_app_env(:probe_owner, self())
+
+    Env.put_app_env(:probe_remote_parent, %{
+      felt_store: "/remote",
+      fiber: %{"id" => "remote", "uid" => "remote-parent", "shuttle" => %{"host" => "peer"}}
+    })
+
+    Env.put_app_env(:write_forward_client, SlowRemote)
+    Env.put_app_env(:remotes, [%{name: "peer", port: 43210}])
+    remotes = Path.join(store, "remotes.json")
+
+    File.write!(
+      remotes,
+      Jason.encode!(%{
+        defaults: %{discover: false},
+        remotes: [%{name: "peer", url: "http://127.0.0.1:43210"}]
+      })
+    )
+
+    Env.put_env("SHUTTLE_REMOTES_FILE", remotes)
+    stamp = DateTime.to_iso8601(DateTime.utc_now())
+
+    Shuttle.Test.InboxPublications.capture([
+      {"local-first",
+       %{
+         "store" => store,
+         "parent_uid" => parent.fiber["uid"],
+         "parent_host" => "test-host",
+         "text" => "local",
+         "wake" => true,
+         "retained_at" => stamp
+       }},
+      {"remote-second",
+       %{
+         "store" => store,
+         "parent_uid" => "remote-parent",
+         "parent_host" => "peer",
+         "text" => "remote",
+         "retained_at" => stamp
+       }}
+    ])
+
+    task = Task.async(fn -> Threads.deliver_results([parent], "test-host") end)
+    assert_receive {:remote_blocked, remote}, 10_000
+    hub_uid = parent.fiber["uid"]
+    assert_receive {:flush_reached_admission, ^hub_uid}, 2_000
+    send(remote, :release_remote)
+    Task.await(task, 30_000)
+  end
+
   test "a parent resolved through another store's symlinked view is placed in its own store's inbox",
        %{store: store} do
     asked_by(store, "shuttle://test-host/claude/11111111-1111-4111-8111-111111111111", :hub)

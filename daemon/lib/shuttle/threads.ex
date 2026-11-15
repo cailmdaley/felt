@@ -1159,11 +1159,13 @@ defmodule Shuttle.Threads do
   @doc """
   Route every publication the routing inbox holds (`shuttle inbox route`),
   from the recipient's authoritative documents and the signal's fresh
-  currency. A local result is placed in its recipient's inbox by the CLI; a
-  remote one is forwarded to the owner's `/api/v1/deliver` and settled only on
-  a confirmed durable enqueue; an asker notice goes to the asking session's
-  transport and settles on any known outcome. An unresolved recipient, an
-  unknown currency or an unconfirmed handoff waits for the next poll.
+  currency. A local result is placed in its recipient's inbox by the CLI,
+  and its recipient's inbox is consumed (`Delivery.flush_owned/1`) before the
+  next entry is routed, so a slow handoff never delays it; a remote one is
+  forwarded to the owner's `/api/v1/deliver` and settled only on a confirmed
+  durable enqueue; an asker notice goes to the asking session's transport and
+  settles on any known outcome. An unresolved recipient, an unknown currency
+  or an unconfirmed handoff waits for the next poll.
 
   Answers the records of the entries still waiting, or nil when the routing
   inbox could not be listed.
@@ -1189,11 +1191,20 @@ defmodule Shuttle.Threads do
         _ -> "unknown"
       end
 
-    args = ["inbox", "route", id, "--current", current] ++ recipient(record, entries)
+    {facts, local} = recipient(record, entries)
+    args = ["inbox", "route", id, "--current", current] ++ facts
 
     with {:ok, output} <- Shuttle.CLI.run(args, stderr_to_stdout: false),
          {:ok, decision} <- Jason.decode(output) do
       case decision do
+        # Its worker takes it now, before a later entry's slow handoff.
+        %{"action" => "placed"} ->
+          entries
+          |> Enum.filter(&(local && Delivery.context_key(&1) == Delivery.context_key(local)))
+          |> Delivery.flush_owned()
+
+          :settled
+
         %{"action" => "forward", "record" => routed} ->
           if acknowledged?(forward_result(routed, id)),
             do: settle(id, "forwarded"),
@@ -1221,9 +1232,10 @@ defmodule Shuttle.Threads do
   end
 
   # The resolved recipient's routing facts, or none while it is unresolved
-  # or for an asker notice, whose recipient is its session. Only a recipient
-  # this daemon owns gets an inbox key; the CLI forwards one without.
-  defp recipient(%{"session" => session}, _entries) when is_binary(session), do: []
+  # or for an asker notice, whose recipient is its session, with the
+  # recipient when this daemon owns it. Only an owned recipient gets an inbox
+  # key; the CLI forwards one without.
+  defp recipient(%{"session" => session}, _entries) when is_binary(session), do: {[], nil}
 
   defp recipient(record, entries) do
     stores = Enum.uniq([record["store"] | Shuttle.FeltStores.configured_stores()])
@@ -1245,11 +1257,14 @@ defmodule Shuttle.Threads do
             )
           )
 
-        key = if OriginRouter.local?(host), do: ["--key", Delivery.context_key(parent)], else: []
-        ["--record", Jason.encode!(resolved)] ++ key
+        facts = ["--record", Jason.encode!(resolved)]
+
+        if OriginRouter.local?(host),
+          do: {facts ++ ["--key", Delivery.context_key(parent)], parent},
+          else: {facts, nil}
 
       _ ->
-        []
+        {[], nil}
     end
   end
 

@@ -100,6 +100,7 @@ An unresolved recipient or an unknown currency waits, without holding up other e
 The first resolution is stored in the entry, even while currency is unknown; later facts may change the recipient's host and store but never its uid, so moving the child does not redirect the result.
 
 A current result for a fiber this host owns is placed: `inbox route` enqueues it as an ordinary entry in the recipient's inbox, with the publication's text, signal and wishes, and then settles it `placed`.
+The daemon consumes the recipient's inbox as soon as the CLI answers `placed`, before it routes the next entry, so a slow handoff later in the listing never delays a local wake.
 A repeated placement is a dedup no-op, and a recipient inbox that refuses it (`queue_full`) leaves it pending for the next poll.
 A placed entry is ordinary: it does not follow a parent that later moves host or store.
 For a fiber another host owns, `inbox route` answers `forward` with the entry's record, and the daemon posts its `context_only`, `wake`, `message_id`, `thread_signal` and `retained_at` envelope to the owner's `/api/v1/deliver`, addressed by the stored uid.
