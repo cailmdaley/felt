@@ -179,13 +179,17 @@ Choose deliberately:
     worker; the new session is told where the previous conversation is;
   --wake forces a native wake immediately, whatever it costs.
 
-An attachment-free --context-only fiber send uses its durable mailbox regardless
+An attachment-free --context-only fiber send uses its durable inbox regardless
 of worker liveness, except that --notify-when-idle uses session routing while a
 worker is live. Its receipt says queued as fiber context (JSON status queued).
-A wake send messages the live worker; with no live worker, it queues as context
-for the next worker (JSON status queued_for_next_worker). Queued is not delivered.
+A wake send messages the live worker. With no live worker it waits in the
+fiber's inbox, and the owner starts a session that takes it through its hook
+(JSON status starting) when the fiber is open or active, not at rest, not a
+paused or due standing schedule, and the owner's boot quarantine is released;
+otherwise the receipt is queued and its detail says what it waits for.
+Neither starting nor queued is delivered.
 Retrying with the same --message-id queues identical content once; conflicting
-fiber-mailbox content is rejected through /deliver with HTTP 422.
+fiber-inbox content is rejected through /deliver with HTTP 422.
 Attachments cannot wait, so a message carrying them needs a live worker. A
 fiber with no shuttle: block is refused.
 
@@ -193,7 +197,7 @@ Prints
 "sending <message-id> to <resolved address>" to stderr before delivery, then prints the
 receipt status and message id. If interrupted, retry with the printed id using
 --message-id <id>. Exit 0 means accepted, submitted, queued, context_added, or
-queued_for_next_worker;
+starting;
 exit 1 means rejected, unknown, or another command error.`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if messageOpts.requestJSON {
@@ -236,19 +240,19 @@ exit 1 means rejected, unknown, or another command error.`,
 			}
 			notifyOnly := request.NotifyWhenIdle && request.Text == "" && len(request.Attachments) == 0
 			if !messageOpts.requestJSON && !messageOpts.local && !notifyOnly {
-				queued, err := a.queueForNextWorker(request)
+				queued, err := a.queueForFiber(request, request.Wake && cmd.Flags().Changed("wake"))
 				if err != nil {
 					return err
 				}
 				if queued != nil {
 					if request.NotifyWhenIdle {
-						fmt.Fprintf(a.env.Stderr, "idle subscription: unsupported — no live worker to watch; the message waits for the next one\n")
+						fmt.Fprintf(a.env.Stderr, "idle subscription: unsupported — the fiber had no live worker to watch\n")
 					}
 					a.recordBoardMessage(args[0], request)
 					if err := a.clearMessagedFiberAsk(args[0], request.From); err != nil {
 						fmt.Fprintf(a.env.Stderr, "message queued; couldn't clear the fiber's outstanding question: %v\n", err)
 					}
-					return a.printNextWorkerReceipt(queued)
+					return a.printFiberReceipt(queued, request.Wake)
 				}
 			}
 			if !messageOpts.requestJSON {

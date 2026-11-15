@@ -23,7 +23,7 @@ func TestQuietLiveFiberKeepsIdleSubscriptionRoute(t *testing.T) {
 		w.WriteHeader(http.StatusConflict)
 		_, _ = w.Write([]byte(`{"live":true}`))
 	}})
-	receipt, err := newApp(env).queueForNextWorker(messaging.Request{Address: "work/worker", MessageID: "idle", Text: "quiet context", NotifyWhenIdle: true})
+	receipt, err := newApp(env).queueForFiber(messaging.Request{Address: "work/worker", MessageID: "idle", Text: "quiet context", NotifyWhenIdle: true}, false)
 	if err != nil || receipt != nil {
 		t.Fatalf("live idle subscription must use session send: %+v, %v", receipt, err)
 	}

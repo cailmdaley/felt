@@ -14,25 +14,28 @@ import (
 	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
-// statusQueuedForNextWorker is the receipt status of a message that waits in
-// a fiber's mailbox because the fiber has no live worker. It never means
-// delivered: the next worker the fiber launches reads it as context.
-const statusQueuedForNextWorker = "queued_for_next_worker"
+// statusStarting is the receipt status of a waking message to a fiber with no
+// live worker, for which the fiber's owner is starting a session. It never
+// means delivered: the session takes the message through its hook.
+const statusStarting = "starting"
 
-// nextWorkerReceipt is shuttle message's answer for a message queued for a
-// fiber's next worker.
-type nextWorkerReceipt struct {
+// fiberReceipt is shuttle message's answer for a message the fiber's owner
+// queued in the fiber's inbox: starting, or queued with what it waits for.
+type fiberReceipt struct {
 	MessageID string `json:"message_id"`
 	Fiber     string `json:"fiber"`
 	Status    string `json:"status"`
 	Detail    string `json:"detail"`
 }
 
-// queueForNextWorker routes attachment-free fiber context to its durable
-// mailbox. Wake and idle-notification requests queue only without a live worker; otherwise the
-// caller resolves and messages that worker. Session targets and attachments
-// always take the session path.
-func (a *app) queueForNextWorker(request messaging.Request) (*nextWorkerReceipt, error) {
+// queueForFiber routes attachment-free fiber messages to the fiber's inbox
+// through its owner. A waking or idle-notification request queues only
+// without a live worker, where the owner starts a session for it when the
+// fiber allows; otherwise the caller resolves and messages that worker. A
+// quiet one queues whether or not a worker is live. force records the
+// explicit --wake. Session targets and attachments always take the session
+// path.
+func (a *app) queueForFiber(request messaging.Request, force bool) (*fiberReceipt, error) {
 	if len(request.Attachments) > 0 {
 		return nil, nil
 	}
@@ -43,6 +46,13 @@ func (a *app) queueForNextWorker(request messaging.Request) (*nextWorkerReceipt,
 	fiberID := f.UID
 	if fiberID == "" {
 		fiberID = f.ID
+	}
+	turn := ""
+	if request.Wake {
+		turn = "ask"
+		if force {
+			turn = "force"
+		}
 	}
 	payload, err := json.Marshal(map[string]any{
 		"fiber_id":         fiberID,
@@ -56,6 +66,7 @@ func (a *app) queueForNextWorker(request messaging.Request) (*nextWorkerReceipt,
 		"notify_wake":      request.NotifyWake,
 		"message_id":       request.MessageID,
 		"wake":             request.Wake,
+		"turn":             turn,
 		"context_only":     true,
 		"unless_live":      request.Wake || request.NotifyWhenIdle,
 	})
@@ -75,6 +86,8 @@ func (a *app) queueForNextWorker(request messaging.Request) (*nextWorkerReceipt,
 	var answer struct {
 		Queued bool   `json:"queued"`
 		Live   bool   `json:"live"`
+		Status string `json:"status"`
+		Detail string `json:"detail"`
 		Error  string `json:"error"`
 	}
 	_ = json.Unmarshal(body, &answer)
@@ -82,35 +95,39 @@ func (a *app) queueForNextWorker(request messaging.Request) (*nextWorkerReceipt,
 	case resp.StatusCode == http.StatusConflict && answer.Live && (request.Wake || request.NotifyWhenIdle):
 		return nil, nil
 	case resp.StatusCode < 300 && answer.Queued:
-		if !request.Wake {
-			return &nextWorkerReceipt{MessageID: request.MessageID, Fiber: f.ID, Status: string(messaging.StatusQueued), Detail: fmt.Sprintf("not delivered; queued as context in %s's fiber mailbox", f.ID)}, nil
+		receipt := &fiberReceipt{MessageID: request.MessageID, Fiber: f.ID, Status: string(messaging.StatusQueued), Detail: answer.Detail}
+		if answer.Status == statusStarting {
+			receipt.Status = statusStarting
 		}
-		return &nextWorkerReceipt{
-			MessageID: request.MessageID,
-			Fiber:     f.ID,
-			Status:    statusQueuedForNextWorker,
-			Detail:    fmt.Sprintf("%s has no live worker; not delivered, queued as context for its next worker", f.ID),
-		}, nil
+		if receipt.Detail == "" {
+			receipt.Detail = fmt.Sprintf("not delivered; queued in %s's inbox", f.ID)
+		}
+		return receipt, nil
 	default:
 		detail := answer.Error
 		if detail == "" {
 			detail = strings.TrimSpace(string(body))
 		}
-		return nil, fmt.Errorf("message %s: queueing for %s's next worker: daemon returned %d: %s", request.MessageID, f.ID, resp.StatusCode, detail)
+		return nil, fmt.Errorf("message %s: queueing in %s's inbox: daemon returned %d: %s", request.MessageID, f.ID, resp.StatusCode, detail)
 	}
 }
 
-// printNextWorkerReceipt reports a queued message: JSON with --json, else one
-// line naming the fiber and the message id a retry reuses.
-func (a *app) printNextWorkerReceipt(receipt *nextWorkerReceipt) error {
+// printFiberReceipt reports a message queued in a fiber's inbox: JSON with
+// --json, else one line naming the fiber, what happens next and the message
+// id a retry reuses.
+func (a *app) printFiberReceipt(receipt *fiberReceipt, wake bool) error {
 	if a.json {
 		return a.outputJSON(receipt)
 	}
-	if receipt.Status == string(messaging.StatusQueued) {
-		_, err := fmt.Fprintf(a.env.Stdout, "queued as context for %s (%s)\n", receipt.Fiber, receipt.MessageID)
-		return err
+	var err error
+	switch {
+	case receipt.Status == statusStarting:
+		_, err = fmt.Fprintf(a.env.Stdout, "starting a session on %s for it (%s)\n", receipt.Fiber, receipt.MessageID)
+	case wake:
+		_, err = fmt.Fprintf(a.env.Stdout, "queued for %s: %s (%s)\n", receipt.Fiber, receipt.Detail, receipt.MessageID)
+	default:
+		_, err = fmt.Fprintf(a.env.Stdout, "queued as context for %s (%s)\n", receipt.Fiber, receipt.MessageID)
 	}
-	_, err := fmt.Fprintf(a.env.Stdout, "queued for %s's next worker (%s)\n", receipt.Fiber, receipt.MessageID)
 	return err
 }
 

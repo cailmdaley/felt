@@ -46,36 +46,69 @@ func runMessage(t *testing.T, app *app, args ...string) (string, string, error) 
 	return stdout.String(), stderr.String(), err
 }
 
-func TestMessageToDormantFiberQueuesForNextWorker(t *testing.T) {
+// A waking message to a fiber with no live worker asks its owner to queue it
+// and start a session; the receipt says which happened, in the owner's words.
+func TestMessageToDormantFiberReportsWhatItsOwnerDid(t *testing.T) {
 	t.Parallel()
-	env := testEnv(t)
-	store := writeMessageTargetFiber(t, map[string]any{
-		"kind": "oneshot", "host": "worker-node", "agent": "claude-opus", "project_dir": t.TempDir(),
-	})
-	isolateMessageFiberStore(env, store)
-	deliver, requests := dormantDeliverStub(http.StatusAccepted,
-		`{"delivery":"context","queued":true,"delivered":false,"status":"queued_for_next_worker","fiber_id":"`+messageTargetFiberUID+`"}`)
-	daemonStub(t, env, map[string]http.HandlerFunc{"/api/v1/deliver": deliver})
+	for _, tc := range []struct {
+		name, flag, body, want, turn string
+	}{
+		{"starting", "", `{"delivery":"context","queued":true,"delivered":false,"status":"starting","detail":"work/worker has no live worker; a session is starting"}`,
+			"starting a session on work/worker for it (msg-next-worker)\n", "ask"},
+		{"forced", "--wake", `{"delivery":"context","queued":true,"delivered":false,"status":"starting"}`,
+			"starting a session on work/worker for it (msg-next-worker)\n", "force"},
+		{"gated", "", `{"delivery":"context","queued":true,"delivered":false,"status":"queued","detail":"work/worker is at rest; the message waits in its inbox for whoever next works on it"}`,
+			"queued for work/worker: work/worker is at rest; the message waits in its inbox for whoever next works on it (msg-next-worker)\n", "ask"},
+		{"held", "", `{"delivery":"context","queued":true,"delivered":false,"status":"queued","detail":"worker-node holds new sessions until its boot quarantine is released; one starts for the message then"}`,
+			"queued for work/worker: worker-node holds new sessions until its boot quarantine is released; one starts for the message then (msg-next-worker)\n", "ask"},
+		{"an older owner", "", `{"delivery":"context","queued":true,"delivered":false,"status":"queued_for_next_worker"}`,
+			"queued for work/worker: not delivered; queued in work/worker's inbox (msg-next-worker)\n", "ask"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
+			store := writeMessageTargetFiber(t, map[string]any{
+				"kind": "oneshot", "host": "worker-node", "agent": "claude-opus", "project_dir": t.TempDir(),
+			})
+			isolateMessageFiberStore(env, store)
+			deliver, requests := dormantDeliverStub(http.StatusAccepted, tc.body)
+			daemonStub(t, env, map[string]http.HandlerFunc{"/api/v1/deliver": deliver})
 
-	stdout, _, err := runMessage(t, newApp(env), "work/worker", "read this when you start")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := "queued for work/worker's next worker (msg-next-worker)\n"; stdout != want {
-		t.Fatalf("receipt = %q, want %q", stdout, want)
-	}
-	got := requests()
-	if len(got) != 1 {
-		t.Fatalf("deliver requests = %d, want 1", len(got))
-	}
-	want := map[string]any{
-		"fiber_id": messageTargetFiberUID, "origin": "worker-node", "text": "read this when you start",
-		"from": "test sender", "message_id": "msg-next-worker", "context_only": true, "unless_live": true, "wake": true,
-	}
-	for key, value := range want {
-		if got[0][key] != value {
-			t.Errorf("deliver %s = %v, want %v", key, got[0][key], value)
-		}
+			var stdout bytes.Buffer
+			app := newApp(env)
+			app.env.Stdout = &stdout
+			var opts messageOptions
+			cmd := app.messageCmd(&opts)
+			opts.id, opts.from = "msg-next-worker", "test sender"
+			args := []string{"work/worker", "read this when you start"}
+			if tc.flag != "" {
+				if err := cmd.Flags().Set("wake", "true"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cmd.SetIn(strings.NewReader(""))
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			if err := cmd.RunE(cmd, args); err != nil {
+				t.Fatal(err)
+			}
+			if stdout.String() != tc.want {
+				t.Fatalf("receipt = %q, want %q", stdout.String(), tc.want)
+			}
+			got := requests()
+			if len(got) != 1 {
+				t.Fatalf("deliver requests = %d, want 1", len(got))
+			}
+			want := map[string]any{
+				"fiber_id": messageTargetFiberUID, "origin": "worker-node", "text": "read this when you start",
+				"from": "test sender", "message_id": "msg-next-worker", "context_only": true, "unless_live": true, "wake": true, "turn": tc.turn,
+			}
+			for key, value := range want {
+				if got[0][key] != value {
+					t.Errorf("deliver %s = %v, want %v", key, got[0][key], value)
+				}
+			}
+		})
 	}
 }
 
@@ -92,7 +125,7 @@ func TestMessageToOwnerOnlyDormantFiberQueuesBeforeAnyWorkerBinding(t *testing.T
 	app := newApp(env)
 	app.messageResolveWait = 0
 	stdout, _, err := runMessage(t, app, "science/team/worker", "read this when you start")
-	if err != nil || !strings.Contains(stdout, "next worker") {
+	if err != nil || !strings.Contains(stdout, "queued for science/team/worker") {
 		t.Fatalf("owner-only queue receipt = %q, %v", stdout, err)
 	}
 	got := requests()
@@ -121,7 +154,7 @@ func TestMessageToDormantFiberJSONReceiptNeverClaimsDelivery(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &receipt); err != nil {
 		t.Fatalf("receipt %q: %v", stdout, err)
 	}
-	if receipt["status"] != "queued_for_next_worker" || receipt["fiber"] != "work/worker" || receipt["message_id"] != "msg-next-worker" {
+	if receipt["status"] != "queued" || receipt["fiber"] != "work/worker" || receipt["message_id"] != "msg-next-worker" {
 		t.Fatalf("receipt = %v", receipt)
 	}
 	if strings.Contains(stdout, "deliver") && !strings.Contains(stdout, "not delivered") {
@@ -147,15 +180,15 @@ func TestContextOnlyLiveFiberUsesDurableMailbox(t *testing.T) {
 			if payload["unless_live"] != false {
 				t.Error("quiet context bypassed the fiber mailbox for a live worker")
 			}
-			if payload["wake"] != false {
-				t.Error("quiet context requested a wake")
+			if payload["wake"] != false || payload["turn"] != "" {
+				t.Error("quiet context requested a turn")
 			}
 			w.WriteHeader(http.StatusAccepted)
 			_, _ = w.Write([]byte(`{"queued":true}`))
 		},
 	})
 	app := newApp(env)
-	receipt, err := app.queueForNextWorker(messaging.Request{Address: "work/worker", MessageID: "quiet", Text: "follow the fiber"})
+	receipt, err := app.queueForFiber(messaging.Request{Address: "work/worker", MessageID: "quiet", Text: "follow the fiber"}, false)
 	if err != nil || receipt == nil {
 		t.Fatalf("queue = %+v, %v", receipt, err)
 	}
