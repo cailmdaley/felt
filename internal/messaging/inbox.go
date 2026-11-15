@@ -46,6 +46,14 @@ type InboxEntry struct {
 	Request Request
 	Wishes  Wishes
 	Derived bool
+	// Routing holds a thread publication awaiting authoritative placement.
+	Routing map[string]any
+	// Created is set only when this call creates the entry.
+	Created *bool
+	// localTransfer moves a routed publication between this host's inboxes.
+	localTransfer bool
+	// importing preserves a backlog larger than the admission limit.
+	importing bool
 }
 
 // legacyTurn reads the turn wish from a request's wake fields, for an entry
@@ -162,6 +170,20 @@ func inboxRoot(env *sysenv.Env, address string) (string, error) {
 // thread notice past its retention is not stored for a fiber and refused as
 // expired for a session.
 func Enqueue(env *sysenv.Env, e InboxEntry) error {
+	if e.Created != nil {
+		*e.Created = false
+	}
+	if e.Derived && !e.localTransfer {
+		unlock, err := lockInbox(filepath.Join(dataDir(env), "mailboxes"))
+		if err != nil {
+			return err
+		}
+		defer unlock()
+		found, err := publicationExists(env, e.Request.MessageID)
+		if err != nil || found {
+			return err
+		}
+	}
 	r, w := e.Request, e.Wishes.withDefaults(e.Request)
 	session := strings.HasPrefix(e.Address, "shuttle://")
 	if r.MessageID == "" || len(r.Text) > 64<<10 || (!session && r.Text == "") {
@@ -179,7 +201,7 @@ func Enqueue(env *sysenv.Env, e InboxEntry) error {
 		return err
 	}
 	r.Wake, r.ContextIfBusy, r.IdleOnly = false, false, false
-	if session {
+	if session && e.Routing == nil {
 		a, _ := ParseAddress(e.Address)
 		if a.Harness != "claude" && a.Harness != "codex" && a.Harness != "pi" {
 			return errCode("unavailable", "harness has no Shuttle message hook")
@@ -195,7 +217,11 @@ func Enqueue(env *sysenv.Env, e InboxEntry) error {
 		}
 		r.Address = e.Address
 		r.ContextIfBusy = w.Turn == "ask" && a.Harness == "claude"
-		return enqueueMailbox(root, mailboxEntry{Request: r, Wishes: w, QueuedAt: time.Now().UnixNano()})
+		err := enqueueMailbox(root, mailboxEntry{Request: r, Wishes: w, QueuedAt: time.Now().UnixNano()}, true)
+		if err == nil && e.Created != nil {
+			*e.Created = true
+		}
+		return err
 	}
 	r.Wake = w.Turn == "force"
 	if err := ensureDir(root, 0700); err != nil {
@@ -229,7 +255,20 @@ func Enqueue(env *sysenv.Env, e InboxEntry) error {
 	if r.ThreadSignal != nil && (r.ThreadSignal.UID == "" || r.ThreadSignal.Verb == "" || r.ThreadSignal.Stamp == "" || r.ThreadSignal.Owner == "") {
 		return errCode("invalid_request", "thread signal requires uid, verb, stamp and owner")
 	}
-	return enqueueMailbox(root, mailboxEntry{Request: r, Wishes: w, QueuedAt: time.Now().UnixNano()})
+	if e.Routing != nil {
+		state, err := ReadThreadInboxState(env)
+		if err != nil {
+			return err
+		}
+		if stamp := threadStamp(e.Routing); stamp != "" && !state.retains(stamp) {
+			return nil
+		}
+	}
+	err = enqueueMailbox(root, mailboxEntry{Request: r, Wishes: w, QueuedAt: time.Now().UnixNano(), Routing: e.Routing}, !e.importing)
+	if err == nil && e.Created != nil {
+		*e.Created = true
+	}
+	return err
 }
 
 // sameWishes compares two entries' wishes. A turn the caller left unsaid
@@ -293,7 +332,7 @@ func WakingCount(env *sysenv.Env, address string) (int, error) {
 	}
 	n := 0
 	for _, it := range items {
-		if it.entry.Wishes.Turn != "none" && it.entry.due(now) {
+		if it.entry.Routing == nil && it.entry.Wishes.Turn != "none" && it.entry.due(now) {
 			n++
 		}
 	}

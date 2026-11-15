@@ -97,9 +97,11 @@ func HookPIDIsAncestor(pid int) bool {
 // predates the attempt record ignores it and reads attempt_address and
 // possible_repeat, which are written beside it.
 type mailboxEntry struct {
-	Request  Request `json:"request"`
-	Wishes   Wishes  `json:"wishes"`
-	QueuedAt int64   `json:"queued_at"`
+	Request     Request        `json:"request"`
+	Wishes      Wishes         `json:"wishes"`
+	QueuedAt    int64          `json:"queued_at"`
+	Routing     map[string]any `json:"routing,omitempty"`
+	Disposition string         `json:"disposition,omitempty"`
 	// Fallback records native write ownership and bounded preflight retries.
 	Fallback *claudeFallback `json:"fallback,omitempty"`
 	// Attempt is the latest try at delivering the entry (see claimBatch).
@@ -331,7 +333,7 @@ func queueMailbox(env *sysenv.Env, a Address, r Request) (Receipt, error) {
 	return Receipt{MessageID: r.MessageID, Address: r.Address, Status: StatusQueued, Transport: transport, Detail: detail}, nil
 }
 
-func enqueueMailbox(root string, entry mailboxEntry) error {
+func enqueueMailbox(root string, entry mailboxEntry, bounded bool) error {
 	dir := filepath.Join(root, "pending")
 	if err := ensureDir(dir, 0700); err != nil {
 		return err
@@ -345,7 +347,7 @@ func enqueueMailbox(root string, entry mailboxEntry) error {
 	if scanErr != nil && !errors.Is(scanErr, io.EOF) {
 		return scanErr
 	}
-	if len(entries) >= 128 {
+	if bounded && len(entries) >= 128 {
 		return errCode("queue_full", "mailbox is full")
 	}
 	b, err := json.Marshal(entry)
@@ -432,7 +434,7 @@ func offerMailboxWithAck(dir, conversation string, accepts func(Request) bool, e
 			}
 			continue
 		}
-		if !entry.due(time.Now()) || !accepts(entry.Request) {
+		if entry.Routing != nil || !entry.due(time.Now()) || !accepts(entry.Request) {
 			continue
 		}
 		it := mailboxPendingItem{path, entry}

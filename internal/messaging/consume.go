@@ -24,6 +24,8 @@ type Worker struct {
 	Idle    bool
 	Unknown bool
 	Costly  bool
+	// Route supplies authoritative placement and currency facts for one routed entry.
+	Route *RouteFacts
 }
 
 // Consumption describes the action taken (wake, or context for quiet entries
@@ -38,7 +40,8 @@ type Consumption struct {
 	Turn    bool     `json:"turn,omitempty"`
 	// Launching marks a wait for a fiber with no worker while a launch
 	// reserved earlier is in its lease.
-	Launching bool `json:"launching,omitempty"`
+	Launching bool         `json:"launching,omitempty"`
+	Entry     *RoutedEntry `json:"entry,omitempty"`
 }
 
 // Consume advances every open batch, then selects, claims and delivers one
@@ -55,6 +58,9 @@ func Consume(ctx context.Context, env *sysenv.Env, fiber, host string, worker Wo
 }
 
 func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Worker, send fiberContextSender) (Consumption, error) {
+	if w.Route != nil {
+		return consumeRoute(env, fiber, host, *w.Route)
+	}
 	result := Consumption{Action: "wait"}
 	// "-" with an epoch is a tracked worker whose conversation is not yet
 	// known: nothing can reach it, so it waits. "-" with epoch 0 is a fiber
@@ -157,7 +163,7 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	now := time.Now()
 	var candidates []mailboxPendingItem
 	for _, it := range items {
-		if !it.entry.due(now) {
+		if it.entry.Routing != nil || !it.entry.due(now) {
 			continue
 		}
 		if mailboxEntryExpired(it.entry, now) {

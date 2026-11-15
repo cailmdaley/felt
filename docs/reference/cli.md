@@ -279,6 +279,10 @@ is then given back to the human rather than closed.
 | `shuttle inbox put <address> <message-id> <text>` | Enqueue an entry in this host's inbox for a fiber key or a session's `shuttle://` address, with its delivery wishes (`--source`, `--turn`, `--session`, `--if-costly`, `--not-before`), `--from` and `--derived`; see [The inbox](../dev/inbox.md) |
 | `shuttle inbox pending <address>... [--waking]` | Print one JSON object of each address's pending entry count; `--waking` counts only the due entries that ask for a turn, free or held by an open batch, and none while a launch reserved in its lease still owes one |
 | `shuttle inbox ls <address>` | List an address's pending entries, oldest first: id, source, turn, not_before, queued time and sender (`--json`) |
+| `shuttle inbox thread-state` | Import a thread outbox if present and print the durable capture baseline and retention cutoff |
+| `shuttle inbox thread-put <id> <record-json>` | Enqueue a derived thread publication; JSON `created` distinguishes the first capture from a duplicate |
+| `shuttle inbox routes <owner>` | List pending thread entries awaiting routing, with their inbox addresses and frozen routing records |
+| `shuttle inbox settle <address> <id> <disposition>` | Finalize a confirmed forward or session notice as `forwarded`, `delivered` or `undeliverable` |
 | `shuttle meeting start` | Start a meeting: Listen on, unmuted, pinned to the calling worker's card (`--fiber` names one from a terminal), transcribing the computer's audio as well as the mic. The meeting also ends when Listen stops, when Listen follows again, or after twenty minutes with nothing heard |
 | `shuttle meeting end` | End the meeting: stop transcribing the computer's audio and follow the view again; a no-op outside a meeting |
 | `shuttle transcript <session-id>` | Print the native transcript path when local, or verify and materialize an exact remote copy in the managed cache; inspect it with the harness's ordinary `jq`/`rg` recipes (`--json` for metadata and paths) |
