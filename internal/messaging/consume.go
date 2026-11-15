@@ -118,9 +118,17 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	if err != nil {
 		return Consumption{}, err
 	}
+	// A batch whose members could not be checked does not authorize a launch
+	// on this pass; it stays pending for the next.
+	unverified := map[string]bool{}
 	if dormant {
 		for i := range batches {
-			errs = append(errs, settleHeldBatch(ctx, env, root, &batches[i]))
+			if err := settleHeldBatch(ctx, env, root, &batches[i]); err != nil {
+				errs = append(errs, err)
+				for _, id := range batches[i].Members {
+					unverified[id] = true
+				}
+			}
 		}
 		batches = nil
 	}
@@ -175,7 +183,11 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 		if err != nil {
 			return Consumption{}, err
 		}
-		held = heldAsking(pending, items, now)
+		for _, id := range heldAsking(pending, items, now) {
+			if !unverified[id] {
+				held = append(held, id)
+			}
+		}
 		inFlight = reservation.inFlight(pending, now)
 	}
 	// Deciding reads entries unchecked; only a reservation or a wake checks

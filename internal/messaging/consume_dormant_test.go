@@ -3,6 +3,7 @@ package messaging
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -468,6 +469,44 @@ func TestAHeldBatchLaunchesOnlyWhileUnresolvedAndCurrent(t *testing.T) {
 			e := readEntry(t, filepath.Join(root, "offered", mailboxKey("thread-m")+".json"))
 			if held == "confirmed" && (e.Attempt.Outcome != attemptDelivered || e.PossibleRepeat) {
 				t.Fatalf("confirmed entry = %+v", e)
+			}
+		})
+	}
+}
+
+// A thread result whose currency cannot be checked waits, whether it is free
+// or held by a batch whose receiver has gone: neither authorizes a launch.
+func TestAnUnverifiableThreadResultDoesNotLaunch(t *testing.T) {
+	for _, held := range []bool{false, true} {
+		t.Run(fmt.Sprint(held), func(t *testing.T) {
+			env, w := consumeFixture(t)
+			scripts := t.TempDir()
+			if err := os.WriteFile(filepath.Join(scripts, "shuttle"), []byte("#!/bin/sh\necho 'owner unavailable' >&2\nexit 1\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			env.Set("PATH", scripts+string(os.PathListSeparator)+env.Getenv("PATH"))
+			signal := &ThreadSignal{UID: "child", Verb: "closed", Owner: "remote-owner", Stamp: time.Now().UTC().Format(time.RFC3339Nano)}
+			if err := Enqueue(env, InboxEntry{Address: "fiber", Request: Request{MessageID: "thread-unknown", Text: "child closed", ThreadSignal: signal}, Wishes: Wishes{Turn: "ask"}}); err != nil {
+				t.Fatal(err)
+			}
+			root := mailboxDir(env, "fiber", "fiber")
+			if held {
+				items, _ := pendingItems(root)
+				a := newConsumedAttempt(w, items, true)
+				if err := pinConsumedBatch(root, &a); err != nil {
+					t.Fatal(err)
+				}
+			}
+			transition(t, env, "", "-")
+			c, err := consumeWith(context.Background(), env, "fiber", "host", dormant, neverSend(t))
+			if err == nil {
+				t.Fatal("the currency check did not fail")
+			}
+			if c.Action != "wait" {
+				t.Fatalf("answer = %+v, want wait", c)
+			}
+			if n, _ := pendingItems(root); len(n) != 1 {
+				t.Fatalf("pending = %d, want 1", len(n))
 			}
 		})
 	}
