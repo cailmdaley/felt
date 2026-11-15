@@ -6,7 +6,7 @@ import { buildFileViewer, disposeFileViewer } from '../FileViewerPanel.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { boardCards, threadIndexFor } from '../KanbanSurfaces.js'
 import { isMobileViewport } from '../mobile.js'
-import { composeChannels, officeOf, setAsideKey, type Channel, type HeldSpeech, type Message } from '../outbox.js'
+import { composeChannels, officeOf, setAsideKey, unpinKey, type Channel, type HeldSpeech, type Message } from '../outbox.js'
 import type { SentFile } from '../sentFiles.js'
 import { stateDot } from '../stateDot.js'
 import { cardNamed } from '../threads.js'
@@ -76,8 +76,10 @@ export class OutboxView implements TemporalView {
   private form: HTMLFormElement | null = null
   private channels: Channel[] = []
   private current: string | null = null
-  /** The worker chosen in the current channel, by fiber; null is the seat. */
-  private selected: string | null = null
+  /** The worker chosen in the current channel; null is the seat. It stays chosen until the reader chooses again. */
+  private chosen: KanbanCard | null = null
+  /** What was typed in each channel's reply bar, kept while the reader is elsewhere. */
+  private readonly drafts = new Map<string, string>()
   private railHidden = false
   private held: HeldSpeech[] = []
   private dismissed: string[] = []
@@ -191,7 +193,8 @@ export class OutboxView implements TemporalView {
   }
   private status(text: string): void { if (this.note) this.note.textContent = text }
 
-  private get listed(): Channel[] { return this.channels.filter(channel => channel.listed) }
+  /** The rail's channels: those listed, and the one being read, which stays until the reader moves on. */
+  private get listed(): Channel[] { return this.channels.filter(channel => channel.listed || channel.key === this.current) }
   private draw(): void {
     const ctx = this.ctx
     if (!ctx || !this.list || !this.loaded) return
@@ -200,20 +203,26 @@ export class OutboxView implements TemporalView {
       cards: boardCards(ctx.response), parentOf: card => index.parentOf(card), names: this.names, files: ctx.sends?.files ?? [], held: this.held,
       dismissed: [...this.dismissed, ...this.pending], pinned: this.pinned, now: Date.now(), reachMs: this.reachMs,
     })
-    if (!this.listed.some(channel => channel.key === this.current)) this.open(this.listed[0]?.key ?? null, false)
+    if (!this.channels.some(channel => channel.key === this.current)) this.open(this.listed[0]?.key ?? null, false)
     this.drawRail()
     this.drawFound()
     this.drawChannel()
   }
-  /** Comes to a channel, on its seat; what it held when last read is kept for this visit's marks. */
-  private open(key: string | null, chosen: boolean): void {
+  /**
+   * Comes to a channel, on its seat, with its own draft; what it held when
+   * last read is kept for this visit's marks. Choosing it deliberately (not
+   * stepping through with j / k) renews its pin.
+   */
+  private open(key: string | null, focus: boolean, deliberate = focus): void {
     if (key !== this.current) {
+      if (this.current && this.reply) this.drafts.set(this.current, this.reply.value)
       this.current = key
-      this.selected = null
+      this.chosen = null
+      if (this.reply) this.reply.value = (key && this.drafts.get(key)) || ''
       if (key) this.visit(key)
     }
-    if (!chosen) return
-    if (key) this.renew(key)
+    if (!focus) return
+    if (key && deliberate) this.renew(key)
     // On a phone the rail is a drawer over the channel: choosing one puts it away.
     if (isMobileViewport()) this.setRail(true)
     this.drawRail(); this.drawChannel()
@@ -225,15 +234,16 @@ export class OutboxView implements TemporalView {
     store(SEEN + key, String(Date.now()))
   }
   private get channel(): Channel | undefined { return this.channels.find(channel => channel.key === this.current) }
-  /** The card replied to: the worker chosen, else the seat. */
+  /** The card replied to: the worker chosen (its freshest copy, even once its line has gone), else the seat. */
   private get target(): KanbanCard | undefined {
-    const channel = this.channel
-    return channel?.messages.find(message => fiberOf(message.card) === this.selected)?.card ?? channel?.seat
+    const channel = this.channel, chosen = this.chosen
+    if (!channel || !chosen) return channel?.seat
+    return channel.messages.find(message => fiberOf(message.card) === fiberOf(chosen))?.card ?? chosen
   }
   /** Chooses a worker to read and answer; choosing it again, or the seat, comes back to the seat. */
   private select(card: KanbanCard | null): void {
-    const key = card && fiberOf(card) !== fiberOf(this.channel!.seat) ? fiberOf(card) : null
-    this.selected = key === this.selected ? null : key
+    const same = card && this.chosen && fiberOf(card) === fiberOf(this.chosen)
+    this.chosen = card && !same && fiberOf(card) !== fiberOf(this.channel!.seat) ? card : null
     this.drawChannel()
   }
 
@@ -295,7 +305,7 @@ export class OutboxView implements TemporalView {
       return
     }
     const now = Date.now(), before = this.before.get(channel.key) ?? -Infinity
-    const sig = JSON.stringify([channel.key, channel.name, this.selected, channel.messages.map(message => [fiberOf(message.card), message.kind, message.text, message.at, message.card.name]),
+    const sig = JSON.stringify([channel.key, channel.name, this.chosen && fiberOf(this.chosen), channel.messages.map(message => [fiberOf(message.card), message.kind, message.text, message.at, message.card.name]),
       channel.files.map(file => [file.fullPath, file.timestamp]), channel.held.map(line => [line.fiber_id, line.n, line.first]), [...this.replied], [...this.tempering]])
     if (sig !== this.sig) {
       this.sig = sig
@@ -308,12 +318,13 @@ export class OutboxView implements TemporalView {
     // Ages tick in place, so a channel being read is never rebuilt under the reader.
     for (const age of this.layout!.querySelectorAll<HTMLElement>('[data-at]')) age.textContent = ago(Number(age.dataset.at), now)
     this.replyTo!.textContent = target.name
-    this.later!.hidden = !channel.waiting
+    this.later!.hidden = !channel.waiting && !channel.pinned
+    this.later!.title = channel.waiting ? 'Set this channel aside until something new waits in it' : 'Unpin this channel'
     this.drawTapestry(target, channel)
   }
   /** One worker's line: who, when, what, and what it sent; its actions show once it is chosen. */
   private messageRow(channel: Channel, message: Message, before: number, now: number): HTMLLIElement {
-    const card = message.card, chosen = fiberOf(card) === (this.selected ?? fiberOf(channel.seat))
+    const card = message.card, chosen = fiberOf(card) === fiberOf(this.target!)
     const row = el('li', 'kbn-ch-msg')
     if (message.kind) row.dataset.kind = message.kind
     row.toggleAttribute('data-chosen', chosen)
@@ -421,7 +432,6 @@ export class OutboxView implements TemporalView {
     const send = el('button', 'kbn-ch-send', 'Send')
     send.type = 'submit'
     this.later = button('kbn-ch-later', 'Not now', () => { void this.setAside() })
-    this.later.title = 'Set this channel aside until something new waits in it'
     const top = el('div', 'kbn-ch-reply-top'), row = el('div', 'kbn-ch-reply-row')
     top.append(label, this.later)
     row.append(this.reply, send)
@@ -440,12 +450,11 @@ export class OutboxView implements TemporalView {
         { fiber_id: card.id, origin: card.originId, text, from: 'human' }, 'Reply failed')
       if (answer?.delivered === false) throw new Error(answer.error ?? `${card.name} did not receive it`)
       this.replied.add(fiberOf(card))
-      if (channel) this.renew(channel)
+      if (channel) { this.renew(channel); this.drafts.delete(channel) }
       if (!this.reply) return
-      this.reply.value = ''
+      if (this.current === channel) { this.reply.value = ''; this.chosen = null; this.drawChannel() }
       this.status(answer?.delivered === null ? `Sent to ${card.name}; its arrival is not yet confirmed.` : `Sent to ${card.name}.`)
       announce(`Sent to ${card.name}.`)
-      if (this.current === channel) { this.selected = null; this.drawChannel() }
       ctx.requestRefresh()
     } catch (error) {
       this.status(`Not sent: ${error instanceof Error ? error.message : String(error)}`)
@@ -453,19 +462,22 @@ export class OutboxView implements TemporalView {
       if (this.reply) this.reply.disabled = false
     }
   }
+  /** Not now: sets a waiting channel aside, or unpins a quiet pinned one, and moves on to the next. */
   private async setAside(): Promise<void> {
     const channel = this.channel, ctx = this.ctx
     if (!channel || !ctx) return
-    const key = setAsideKey(channel)
+    const key = channel.waiting ? setAsideKey(channel) : unpinKey(channel.key, Date.now())
+    const listed = this.listed, at = listed.indexOf(channel)
+    const next = listed.filter(each => each !== channel)[Math.min(at, listed.length - 2)]
     this.pending.push(key)
+    this.open(next?.key ?? null, true, false)
     this.draw()
-    this.open(this.current, true)
     try {
       await postDaemonJson(ctx.shuttleBase, '/api/v1/outbox/dismiss', { key, fiber: fiberOf(channel.seat) })
     } catch {
       this.pending = this.pending.filter(item => item !== key)
       this.draw()
-      this.status(`${channel.name} could not be set aside; it is still here.`)
+      this.status(`${channel.name} could not be ${channel.waiting ? 'set aside' : 'unpinned'}; it is still here.`)
     }
   }
   /** Pins a channel across the fleet; use renews it, and it lapses with the board's reach. */
@@ -480,8 +492,8 @@ export class OutboxView implements TemporalView {
     }
   }
   private renew(key: string): void {
-    const at = this.pinned.get(key), channel = this.channels.find(each => each.key === key)
-    if (at !== undefined && channel && Date.now() - at > RENEW_MS) void this.pin(channel)
+    const channel = this.channels.find(each => each.key === key)
+    if (channel?.pinned && Date.now() - (this.pinned.get(key) ?? 0) > RENEW_MS) void this.pin(channel)
   }
   private async temper(card: KanbanCard, key: string): Promise<void> {
     const ctx = this.ctx
@@ -569,7 +581,7 @@ export class OutboxView implements TemporalView {
     const listed = this.listed
     if (!listed.length) return
     const at = listed.findIndex(channel => channel.key === this.current)
-    this.open(listed[Math.max(0, Math.min(listed.length - 1, at + by))].key, true)
+    this.open(listed[Math.max(0, Math.min(listed.length - 1, at + by))].key, true, false)
   }
 
   keydown(event: KeyboardEvent): boolean {

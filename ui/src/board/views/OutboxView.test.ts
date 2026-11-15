@@ -36,9 +36,10 @@ function daemon(fail: string[] = [], stored = new Map<string, string>(), pinned:
   }))
   return { posts, stored }
 }
+const board = (inFlight: ReturnType<typeof card>[]) => response({ now: { drafts: [], inFlight, awaitingReview: [] } })
 async function mount(inFlight = [shear, mask, covariance, van, garden], view = new OutboxView()) {
   const openFromDesk = vi.fn(), requestRefresh = vi.fn(), see = vi.fn()
-  const ctx = { cards: [], response: response({ now: { drafts: [], inFlight, awaitingReview: [] } }), shuttleBase: '', workspace: { openFromDesk, openPage: vi.fn() }, requestRefresh, openCard: vi.fn(), see } as unknown as ViewContext
+  const ctx = { cards: [], response: board(inFlight), shuttleBase: '', workspace: { openFromDesk, openPage: vi.fn() }, requestRefresh, openCard: vi.fn(), see } as unknown as ViewContext
   const host = document.createElement('div'); document.body.append(host)
   views.push(view); view.mount(host, ctx)
   await settle(); await settle()
@@ -87,6 +88,36 @@ it('choosing a line retargets the reply and the tapestry; a sent reply comes bac
   expect(line(host, 'Choose the mask').querySelector('.kbn-ch-replied')).not.toBeNull()
 })
 
+it('keeps the reader on a channel that stops waiting, with its draft, and never carries a draft to another channel', async () => {
+  daemon()
+  const { view, ctx, host, reply } = await mount()
+  reply.value = 'Half a thought'
+  // The seat is answered and the mask's ask is withdrawn: nothing in the analyst office waits now.
+  view.refresh({ ...ctx, response: board([{ ...shear, workerState: 'running', runtimePhase: 'working', turn: 'working' }, { ...mask, ask: undefined, turn: 'none' }, covariance, van, garden]) })
+  await settle()
+  expect([shown(host), reply.value]).toStrictEqual(['Analyst', 'Half a thought'])
+  expect(host.querySelector('[data-channel="role:analyst"]')!.hasAttribute('data-quiet')).toBe(true)
+  // It sits quietly at the end of the rail until the reader moves on.
+  expect(rail(host)).toStrictEqual(['Moving house', 'Analyst'])
+  view.keydown(new KeyboardEvent('keydown', { key: 'k' }))
+  expect([shown(host), reply.value, rail(host)]).toStrictEqual(['Moving house', '', ['Moving house']])
+})
+
+it('keeps a chosen worker as the reply\'s target after its line goes, until the reader chooses again', async () => {
+  const { posts } = daemon()
+  const { view, ctx, host, reply } = await mount()
+  line(host, 'Choose the mask').querySelector<HTMLButtonElement>('.kbn-ch-msg-pick')!.click()
+  view.refresh({ ...ctx, response: board([shear, { ...mask, ask: undefined, turn: 'none' }, covariance, van, garden]) })
+  await settle()
+  expect(line(host, 'Choose the mask')).toBeUndefined()
+  expect(replyTo(host)).toBe('Choose the mask')
+  reply.value = 'Go ahead.'
+  host.querySelector<HTMLFormElement>('.kbn-ch-reply')!.requestSubmit()
+  await settle()
+  expect(posts.map(([url, body]) => [url, body.fiber_id])).toStrictEqual([['/api/v1/deliver', 'mask']])
+  expect(replyTo(host)).toBe('Cosmic shear')
+})
+
 it('keeps the words when a reply fails', async () => {
   daemon(['/api/v1/deliver'])
   const { host, reply } = await mount()
@@ -113,7 +144,7 @@ it('sets a channel aside under a key that names it and its newest wait, and rest
 
 it('adds a channel from the finder by pinning it, and renews a pin when a channel is used', async () => {
   const { posts } = daemon([], new Map(), { 'role:analyst': Date.now() - 2 * day })
-  const { host } = await mount()
+  const { view, host } = await mount()
   const finder = host.querySelector<HTMLInputElement>('.kbn-ch-finder')!
   finder.value = 'gard'
   finder.dispatchEvent(new Event('input'))
@@ -121,11 +152,22 @@ it('adds a channel from the finder by pinning it, and renews a pin when a channe
   finder.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }))
   expect(rail(host)).toStrictEqual(['Analyst', 'Moving house', 'Garden plan'])
   expect(shown(host)).toBe('Garden plan')
-  expect(host.querySelector('.kbn-ch-later')!.hasAttribute('hidden')).toBe(true)
   expect(host.querySelector('.kbn-ch-msg-name')?.textContent).toBe('Garden plan')
+  // Stepping through with j / k is not use; choosing the channel is.
+  view.keydown(new KeyboardEvent('keydown', { key: 'k' }))
+  view.keydown(new KeyboardEvent('keydown', { key: 'k' }))
+  expect(shown(host)).toBe('Analyst')
   host.querySelector<HTMLButtonElement>('[data-channel="role:analyst"]')!.click()
   await settle()
   expect(posts).toStrictEqual([['/api/v1/outbox/pin', { key: 'fiber:G', fiber: 'G' }], ['/api/v1/outbox/pin', { key: 'role:analyst', fiber: 'S' }]])
+  // Not now on a quiet pinned channel unpins it.
+  host.querySelector<HTMLButtonElement>('[data-channel="fiber:G"]')!.click()
+  expect(host.querySelector('.kbn-ch-later')!.getAttribute('title')).toBe('Unpin this channel')
+  host.querySelector<HTMLButtonElement>('.kbn-ch-later')!.click()
+  await settle()
+  expect(rail(host)).toStrictEqual(['Analyst', 'Moving house'])
+  expect(posts.at(-1)![0]).toBe('/api/v1/outbox/dismiss')
+  expect(posts.at(-1)![1].key).toMatch(/^pin:fiber:G:\d+$/)
 })
 
 it('hides and shows the rail by its button, by [ and by a sideways swipe, and remembers it', async () => {
