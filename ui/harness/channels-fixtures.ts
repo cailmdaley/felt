@@ -17,10 +17,12 @@ interface Row {
   closed?: boolean
   minutes: number
   /** Its tapestry page; `figure` names a file in its folder the page shows first. */
-  tapestry?: { title: string; lede: string; figure?: string }
+  tapestry?: { title: string; lede: string; figure?: string; slide?: boolean }
 }
 
 const DAY = 1440
+/** A deck's first slide drawn inline as a portrait page, as a tapestry built from slides shows it. */
+const SLIDE = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 794 1123" width="100%"><rect width="794" height="1123" fill="#fbf6e9"/><text x="60" y="140" font-size="54" fill="#30291f">UNIONS cosmic shear</text><text x="60" y="210" font-size="30" fill="#6b5d45">Paris SWG · Thursday</text><path d="M80 900V400H720" fill="none" stroke="#a39478" stroke-width="3"/><path d="M100 820C260 520 420 760 560 560S680 620 710 480" fill="none" stroke="#3f8278" stroke-width="6"/></svg>'
 
 /**
  * Channels as the board draws them. cmbx: its chair idle with a tapestry, an
@@ -55,7 +57,8 @@ const ROWS: Row[] = [
   { id: 'pando/unions/chains', name: 'Cosmology chains', parent: 'pando/unions', state: 'working', minutes: 95 },
   { id: 'pando/unions/ia', name: 'Intrinsic alignments', parent: 'pando/unions', state: 'working', minutes: 70 },
   { id: 'pando/unions/photoz', name: 'Photo-z calibration', parent: 'pando/unions', state: 'working', minutes: 40 },
-  { id: 'pando/unions/paper', name: 'Paper draft', parent: 'pando/unions', state: 'working', minutes: 28 },
+  { id: 'pando/unions/paper', name: 'Paper draft', parent: 'pando/unions', state: 'working', minutes: 28,
+    tapestry: { title: 'Paris SWG deck', lede: 'Twelve slides for Thursday: the null tests, the blinded S8 and what is left before unblinding.', slide: true } },
   { id: 'life-vizier', name: 'Vizier', channel: 'Vizier', role: 'vizier', seat: true, state: 'idle', minutes: 6 },
   { id: 'morning-post', name: 'Morning post', channel: 'Vizier', seat: true, standing: true, closed: true, minutes: 140, review: 'Two letters need your reply; drafts are attached.', outcome: 'Eleven letters sorted; two need a reply from you, the rest are filed.',
     tapestry: { title: 'The morning post, sorted', lede: 'Eleven letters: two need your reply (the notary and the landlord), four are filed, five were newsletters.' } },
@@ -98,7 +101,7 @@ export function addChannelsFixtures(example: WorkspaceExample, now: number): Cha
   for (const row of ROWS) {
     example.bodies[row.id] = `## Desired State\n\n${row.name}.\n\n## Status\n\n${row.outcome ?? row.ask ?? 'Under way.'}`
     if (row.tapestry) {
-      const page = `<!doctype html><html><head><meta charset="utf-8"><title>${row.tapestry.title}</title><style>body{font:17px/1.6 Georgia,serif;margin:28px;color:#30291f;background:#fbf6e9}.map{height:30vh;display:grid;place-items:center;background:#e4dcc8;border-radius:4px;color:#6b5d45}</style></head><body><h1>${row.tapestry.title}</h1><p>${row.tapestry.lede}</p>${row.tapestry.figure ? `<figure><img src="${row.tapestry.figure}" alt=""></figure>` : '<div class="map">κ × tSZ, 9σ</div>'}<p>The cross-spectrum is flat to ℓ = 3000 and the 1-halo term carries most of the signal.</p></body></html>`
+      const page = `<!doctype html><html><head><meta charset="utf-8"><title>${row.tapestry.title}</title><style>body{font:17px/1.6 Georgia,serif;margin:28px;color:#30291f;background:#fbf6e9}.map{height:30vh;display:grid;place-items:center;background:#e4dcc8;border-radius:4px;color:#6b5d45}</style></head><body><h1>${row.tapestry.title}</h1><p>${row.tapestry.lede}</p>${row.tapestry.slide ? SLIDE : row.tapestry.figure ? `<figure><img src="${row.tapestry.figure}" alt=""></figure>` : '<div class="map">κ × tSZ, 9σ</div>'}<p>The cross-spectrum is flat to ℓ = 3000 and the 1-halo term carries most of the signal.</p></body></html>`
       example.files.push({ owner: WORKSPACE_HOST, path: `${dir(row.id)}/tapestry.html`, mime: 'text/html', body: new Blob([page], { type: 'text/html' }) })
     }
   }

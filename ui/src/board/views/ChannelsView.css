@@ -234,15 +234,16 @@ button.kbn-ch-msg-name:hover { color: var(--kbn-ink-soft); }
 .kbn-ch-tapestry-title { margin: 0; font: 600 var(--type-prose)/var(--leading-tight) var(--font-serif); color: var(--kbn-ink); }
 .kbn-ch-tapestry-lede { margin: 4px 0 0; font: var(--type-row)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink-soft); }
 .kbn-ch-tapestry-page { margin-top: 10px; cursor: auto; }
-/* A worker's own tapestry under its line, and in its thread's head: the first figure, the title and the lede; it opens the page. */
+/* A worker's own tapestry under its line, and in its thread's head: a preview, its first figure in a fixed box beside the title and
+   the lede, one height whatever the figure's shape (a portrait page or a wide plot); it opens the page. */
 .kbn-ch-embed {
-  display: flex; gap: 12px; align-items: flex-start;
+  display: flex; gap: 12px; align-items: flex-start; overflow: hidden;
   margin-top: 6px; padding: 8px 12px; width: 100%; max-width: 44rem;
   border: 0.5px solid var(--kbn-rule-strong); border-left: 3px solid var(--kbn-owed-bright); border-radius: 6px;
   background: var(--kbn-paper-bright, var(--kbn-paper)); color: inherit; text-align: left; font: inherit; cursor: pointer;
 }
 .kbn-ch-embed:hover { border-color: var(--kbn-ink-muted); border-left-color: var(--kbn-owed-bright); }
-.kbn-ch-embed-figure { flex: none; width: min(40%, 220px); max-height: 150px; object-fit: contain; border-radius: 3px; background: var(--kbn-paper); }
+.kbn-ch-embed-figure { flex: none; display: block; width: min(40%, 220px); height: 160px; object-fit: contain; border-radius: 3px; background: var(--kbn-paper); }
 .kbn-ch-embed-words { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .kbn-ch-embed-title { font: 600 var(--type-row)/var(--leading-tight) var(--font-serif); color: var(--kbn-ink); }
 .kbn-ch-embed-lede {
@@ -309,7 +310,7 @@ button.kbn-ch-msg-name:hover { color: var(--kbn-ink-soft); }
   .kbn-ch-reply { padding: 8px 16px 10px; }
   .kbn-ch-tapestry-page .kbn-fileview-frame-wrap, .kbn-ch-tapestry-page > .kbn-fileview { height: 60vh; }
   .kbn-ch-embed { flex-direction: column; }
-  .kbn-ch-embed-figure { width: 100%; }
+  .kbn-ch-embed-figure { width: 100%; height: 140px; }
 }
 
 /* A long message folds after eight lines; Show more unfolds it in place. */
