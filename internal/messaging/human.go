@@ -5,28 +5,57 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"syscall"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
-// BeginHuman records typed input before the daemon submits it. Only the caller
-// that created the entry may paste or launch. Unknown is the durable default:
-// terminal input has no receipt with which to recover a lost answer.
+// The human's typed lines are records, not deliveries: the daemon transports
+// them as terminal input or a launch prompt. A record is written straight to
+// the fiber inbox's offered/, so no reader ever offers it, and its id
+// deduplicates a retried submission.
+
+// BeginHuman records typed input before the daemon submits it, answering
+// whether this call may paste or launch it. Only the call that writes the
+// record may; a repeated id answers false, unless its record was settled
+// undeliverable, which never reached the worker and may be submitted again.
+// The record's disposition is unknown until settled: terminal input has no
+// receipt with which to recover a lost answer. Text over the inbox limit is
+// recorded cut short; the transport carries it whole.
 func BeginHuman(env *sysenv.Env, address, id, text string) (bool, error) {
-	created := false
-	err := Enqueue(env, InboxEntry{Address: address, Request: Request{MessageID: id, Text: text, From: "human"}, Wishes: Wishes{Source: "human", Turn: "none"}, Created: &created})
+	root, err := inboxRoot(env, address)
 	if err != nil {
 		return false, err
 	}
-	if created {
-		err = SettleHuman(env, address, id, "unknown")
+	unlock, err := lockInbox(root)
+	if err != nil {
+		return false, err
 	}
-	return created, err
+	defer unlock()
+	path := humanRecordPath(root, id)
+	stored, err := readFiberMailboxEntry(path)
+	if err == nil && stored.Disposition != "undeliverable" {
+		return false, nil
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	if err := ensureDir(filepath.Dir(path), 0700); err != nil {
+		return false, err
+	}
+	b, err := json.Marshal(mailboxEntry{
+		Request:     Request{MessageID: id, Text: boundedInboxText(text), From: "human"},
+		Wishes:      Wishes{Source: "human", Turn: "none"},
+		QueuedAt:    time.Now().UnixNano(),
+		Disposition: "unknown",
+	})
+	if err != nil {
+		return false, err
+	}
+	return true, mailboxWrite(path, b, false)
 }
 
-// SettleHuman records the typed transport's outcome. Repeating an id never
-// submits it again, even when the process died before reporting its outcome.
+// SettleHuman records the typed transport's outcome on the record.
 func SettleHuman(env *sysenv.Env, address, id, outcome string) error {
 	if outcome != "unknown" && outcome != "delivered" && outcome != "undeliverable" {
 		return errCode("invalid_request", "invalid human outcome")
@@ -35,21 +64,13 @@ func SettleHuman(env *sysenv.Env, address, id, outcome string) error {
 	if err != nil {
 		return err
 	}
-	lock, err := os.OpenFile(filepath.Join(root, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
+	unlock, err := lockInbox(root)
 	if err != nil {
 		return err
 	}
-	defer lock.Close()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
-		return err
-	}
-	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-	path := filepath.Join(root, "pending", mailboxKey(id)+".json")
+	defer unlock()
+	path := humanRecordPath(root, id)
 	e, err := readFiberMailboxEntry(path)
-	if errors.Is(err, os.ErrNotExist) {
-		path = filepath.Join(root, "offered", mailboxKey(id)+".json")
-		e, err = readFiberMailboxEntry(path)
-	}
 	if err != nil {
 		return err
 	}
@@ -61,11 +82,9 @@ func SettleHuman(env *sysenv.Env, address, id, outcome string) error {
 	if err != nil {
 		return err
 	}
-	if err := mailboxWrite(path, b, false); err != nil {
-		return err
-	}
-	if filepath.Base(filepath.Dir(path)) == "pending" {
-		return moveToOffered(root, path)
-	}
-	return nil
+	return mailboxWrite(path, b, false)
+}
+
+func humanRecordPath(root, id string) string {
+	return filepath.Join(root, "offered", mailboxKey(id)+".json")
 }

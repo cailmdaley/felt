@@ -297,6 +297,27 @@ defmodule ShuttleWeb.DeliverControllerTest do
     assert Enum.take(args, -4) == ["--", Enum.at(args, -3), "agent-dash", "- keep the mask"]
   end
 
+  test "a human line over the inbox limit is pasted" do
+    fiber = "tests/human-long"
+    put_constitution(fiber)
+    {:ok, _} = Poller.dispatch_fiber(fiber, force: true)
+
+    assert %{"delivered" => true} =
+             api_conn()
+             |> post(
+               "/api/v1/deliver",
+               Jason.encode!(%{
+                 "fiber_id" => fiber,
+                 "text" => String.duplicate("log line\n", 8_000),
+                 "from" => "human",
+                 "message_id" => "human-long"
+               })
+             )
+             |> json_response(200)
+
+    assert Enum.count(MockRunner.commands(), &match?({"tmux", ["load-buffer" | _]}, &1)) == 1
+  end
+
   test "a fiber message carries a 7 MB attachment" do
     fiber = "tests/attach-7mb"
     put_constitution(fiber)

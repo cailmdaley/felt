@@ -491,7 +491,7 @@ func bootThreadInbox(env *sysenv.Env, imported func(string) error) (ThreadImport
 			continue
 		}
 		if text, ok := record["text"].(string); ok {
-			record["text"] = boundedThreadText(text)
+			record["text"] = boundedInboxText(text)
 		}
 		entry, err := ThreadEntry(id, record)
 		if _, stampErr := parseStamp(threadStamp(record)); stampErr != nil {
@@ -530,10 +530,11 @@ func bootThreadInbox(env *sysenv.Env, imported func(string) error) (ThreadImport
 	return report, nil
 }
 
-// An older daemon's outbox took any text. One over the inbox's 64 KiB limit
-// imports cut short, as the daemon captures a result whose outcome is that
-// long: its first 60,000 bytes, ending on a whole character.
-func boundedThreadText(text string) string {
+// boundedInboxText cuts text over the inbox's 64 KiB limit short: its first
+// 60,000 bytes, ending on a whole character, as the daemon captures a result
+// whose outcome is that long. An older daemon's outbox took any text, and a
+// human line's record holds what the transport carries whole.
+func boundedInboxText(text string) string {
 	if len(text) <= 64<<10 {
 		return text
 	}

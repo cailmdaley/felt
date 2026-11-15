@@ -104,15 +104,16 @@ A retry of that id does not cut again after the replacement takes the entry.
 An agent's fresh launch has the same armed-document, quarantine and runtime admission gates as a dormant inbox launch: it never reopens or arms a fiber.
 The human's fresh board action keeps forced-start authority.
 
-Channels replies, the Dock's send and review lines, and `/dispatch user_message` record a `source: human` entry first.
+Channels replies, the Dock's send and review lines, and `/dispatch user_message` record the line first, as a `source: human` record.
 The board mints `message_id`; the owner mints one for callers without it.
 Images are written to disk and represented as `[Image: path]` lines before recording.
-Only the call that creates the entry may transport it: typed terminal paste to a live worker, or the From User launch prompt to a dormant one.
+The owner writes the record straight to the inbox's `offered/`, disposition unknown, under the inbox lock, so no reader ever offers it.
+Only the call that writes the record may transport the line: typed terminal paste to a live worker, or the From User launch prompt to a dormant one.
 Those transports preserve the prompt hook's human board row and ask-clear.
-The entry is settled delivered on paste or launch success, undeliverable on a definite refusal, and unknown on an ambiguous paste or a queued launch whose outcome is not known.
-It defaults durably to unknown before the side effect: if the daemon dies before it reports the outcome, the entry is not sent again, even if it died before typing.
-A pending human record left between enqueue and that default settlement is moved to offered as unknown by consume, never hook-offered.
-A repeated id does nothing, including for `existing_only` review input; a new deliberate submission needs a new id.
+The record is settled delivered on paste or launch success, undeliverable on a definite refusal, and unknown on an ambiguous paste or a queued launch whose outcome is not known.
+Since it is unknown before the side effect, a daemon that dies before reporting the outcome never sends the line again, even if it died before typing.
+A line over the inbox's 64 KiB limit is transported whole and recorded cut short, as a thread result is.
+A repeated id does nothing, including for `existing_only` review input, unless its record was settled undeliverable: that line never reached the worker, so it is transported again.
 
 ### Contract 42 and rollback
 
@@ -126,7 +127,6 @@ Existing inbox entries and open delivery batches remain readable across deployme
 Rolling a host back to 41 leaves inbox text and attempts on disk, but its consumer ignores `session: fresh` and does not follow up busy Codex or Pi workers.
 A pending fresh entry can wake the old worker instead of replacing it, and an active replacement lease may delay delivery until it expires.
 Human entries already in offered remain deduplicated, but a 41 daemon does not use that dedup for typed requests: retrying a board request there can paste twice.
-A human record pending in the enqueue-to-settlement crash window can be hook-offered by a 41 reader, repeating typed input or losing its human framing.
 Keep 42 deployed while any such requests or replacements are in flight; rolling forward resumes the recorded inbox state.
 
 ## Thread results and routing
