@@ -28,7 +28,7 @@ defmodule ShuttleWeb.ChannelsControllerTest do
         %{
           "id" => "remote-pin",
           "type" => "board",
-          "timestamp" => now - 5,
+          "timestamp" => now - 60_000,
           "kind" => "pinned",
           "text" => "role:vizier"
         },
