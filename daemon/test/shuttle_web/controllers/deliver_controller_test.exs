@@ -989,6 +989,26 @@ defmodule ShuttleWeb.DeliverControllerTest do
     assert script =~ "join the meeting"
   end
 
+  test "a console send resumes a standing constitution's session cut off moments ago" do
+    fiber_id = "tests/console-standing"
+    session = "de11ae00-0000-4000-8000-000000000005"
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
+    MockRunner.set_shuttle(fiber_id, "enabled: true\nkind: standing\nschedule: \"0 9 * * *\"\n")
+
+    MockRunner.put_shuttle_fields(fiber_id, %{
+      "session_uuid" => session,
+      "dispatched_at" => DateTime.to_iso8601(DateTime.add(DateTime.utc_now(), -60))
+    })
+
+    Poller.refresh_document(fiber_id)
+    write_transcript(session, 30)
+
+    assert %{"dispatched" => true} =
+             console_send(fiber_id, "pick it up", "human-c3") |> json_response(200)
+
+    assert run_script() =~ "--resume '#{session}'"
+  end
+
   test "a console send to a live worker types the line and cuts nothing" do
     fiber_id = "tests/console-live"
     put_constitution(fiber_id)
