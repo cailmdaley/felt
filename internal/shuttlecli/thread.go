@@ -99,7 +99,7 @@ remote draft made with --disabled stays in this store while you write it;
 			if !ok {
 				return fmt.Errorf("parent %s has no shuttle: block", parent.ID)
 			}
-			block := &shuttle.Block{ThreadParent: &shuttle.ThreadParent{UID: parent.UID, Host: inherited.Host, Slug: parent.ID, Name: parent.Name}, Kind: "oneshot", Host: inherited.Host, ProjectDir: inherited.ProjectDir, Role: inherited.Role, Agent: inherited.Agent}
+			block := &shuttle.Block{ThreadParent: &shuttle.ThreadParent{UID: parent.UID, Host: inherited.Host, Slug: parent.ID, Name: parent.Name}, Kind: "oneshot", Host: inherited.Host, ProjectDir: inherited.ProjectDir, Role: inherited.Role, Channel: inherited.Channel, Agent: inherited.Agent}
 			if cmd.Flags().Changed("host") {
 				block.Host = host
 				if host != inherited.Host && !cmd.Flags().Changed("project-dir") {

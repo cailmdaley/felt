@@ -172,6 +172,15 @@ A stored `kind: pinned`, from before Resting held every constitution at rest,
 is still read, as `oneshot`; `shuttle check` warns about it, and
 `scripts/migrate-pinned.py` rewrites it.
 
+### Channels
+
+`shuttle.channel: <name>` names the board channel a constitution speaks in,
+such as `UNIONS` or `cmbx`. A channel is where the human reads and answers a
+body of work; it is independent of the constitution's role and of where the
+fiber is filed, so a paper filed under one project can speak in another's
+channel. `shuttle thread` copies the parent's channel to the thread. Set it by
+editing the `shuttle:` block.
+
 ### Seats
 
 A constitution names its office with its top-level `role: <office>` or

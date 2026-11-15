@@ -22,6 +22,7 @@ func TestThreadInheritanceAndOverrides(t *testing.T) {
 	parent := mustRead(t, st, "hub")
 	block, _, _ := shuttle.BlockOf(parent)
 	block.Role = "analyst"
+	block.Channel = "UNIONS"
 	if err := shuttle.SetConfig(parent, block); err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +48,7 @@ func TestThreadInheritanceAndOverrides(t *testing.T) {
 		t.Fatalf("uid = %q, child uid = %q", result.UID, child.UID)
 	}
 	b, _, _ := shuttle.BlockOf(child)
-	if b.Host != "testhost" || b.ProjectDir != pdir || b.Role != "analyst" || b.Agent != "claude-opus" || b.Kind != "oneshot" {
+	if b.Host != "testhost" || b.ProjectDir != pdir || b.Role != "analyst" || b.Channel != "UNIONS" || b.Agent != "claude-opus" || b.Kind != "oneshot" {
 		t.Fatalf("block = %+v", b)
 	}
 	if child.Status != felt.StatusActive || !child.HasTag("constitution") || child.Body != "Measure the covariance\n\n## Desired State\n\n## Status" {
