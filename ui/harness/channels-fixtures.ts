@@ -135,7 +135,8 @@ export function addChannelsFixtures(example: WorkspaceExample, now: number): Cha
     said('cmbx/kappa-tsz', 'post', 30, { text: 'κ×tSZ is measured to **9σ** with the new beam. The spectrum and the null tests are attached; every null passes at p > 0.1.', files: [spectrum.fullPath, nulls.fullPath] }),
     said('cmbx/foregrounds', 'asked', 22, { text: ROWS.find(row => row.id === 'cmbx/foregrounds')!.ask }),
     said('cmbx', 'post', 12, { text: 'Two calls for you today: the cluster mask threshold and the covariance review. Everything else is moving.' }),
-    said('cmbx', 'message', 10, { by: { label: 'human' }, text: 'Thanks — I will look after lunch.' }),
+    // A line the human sent from the board, recorded under the id the board gave it.
+    said('cmbx', 'human', 10, { id: 'brd-human-0001', by: { label: 'Sam' }, text: 'Thanks — I will look after lunch.' }),
     said('pando/unions/shear-2pt', 'post', 300, { text: 'ξ± measured on all 6 tomographic bins; the covariance from the GLASS mocks is attached next.' }),
     said('pando/unions/psf', 'post', 260, { text: 'Leakage α = 0.012 ± 0.004 after the new PSF model; the correction is applied.' }),
     said('pando/unions/rho', 'post', 230, { text: 'ρ₁ through ρ₅ are consistent with zero on every scale.' }),
@@ -168,7 +169,7 @@ export function addChannelsFixtures(example: WorkspaceExample, now: number): Cha
   // UNIONS was last read 45 minutes ago, so what came since sits under a New rule.
   try { localStorage.setItem('shuttle.channels.seen:channel:unions', String(ms(45))) } catch { /* The rule is a convenience. */ }
   return {
-    dismissed: [`hide:channel:composer:${ms(60)}`],
+    dismissed: [`hide:role:composer:${ms(60)}`],
     pinned: { 'fiber:garden': now - 3 * 86_400_000 },
     // The human put French above Science, and the garden plan last.
     order: { keys: ['channel:french', 'channel:science', 'fiber:garden'], at: ms(DAY) },

@@ -176,9 +176,13 @@ export const helpSections: readonly HelpSection[] = [
     row(['Enter'], 'Unfold or fold a row, entering it', []),
     row(['c'], 'Open the highlighted thread in Rex', []),
   ] },
-  { title: 'Channels', note: 'One channel per office, listed while something in it waits on you or you keep it pinned. Its header shows its tapestry or its files; Find reaches every channel and file.', rows: [
+  { title: 'Channels', note: 'A channel is a short stream, one line per worker; a line opens its worker\'s thread. On a phone, swipe sideways between the rail, a channel and a thread.', rows: [
     row(['j', 'k'], 'Next / previous channel', []),
-    row(['['], 'Hide or show the channels; on a phone, swipe in from the left edge', []),
-    row(['Enter'], 'Reply to the seat, or to the line chosen', []),
+    row(['['], 'Hide or show the channels', []),
+    row(['/'], 'Jump to a channel or a file', []),
+    row(['Enter'], 'Reply: to the open thread\'s worker, else to the channel\'s chair', []),
+    row(['Esc'], 'Close the thread', []),
+    row(['⌥↑', '⌥↓'], 'Move the channel in the rail', []),
+    row(['Menu', '⇧F10'], 'The channel\'s menu: not now, hide, pin, move to the bottom; a long press on a phone', []),
   ] },
 ]

@@ -148,13 +148,13 @@ it('opens a thread in the channel\'s place, with a way back, when the view is to
   message(host, 'κ × tSZ').click()
   expect(layout.hasAttribute('data-thread')).toBe(true)
   const back = host.querySelector<HTMLButtonElement>('.kbn-ch-thread-close')!
-  expect(back.textContent).toBe('‹ cmbx')
+  expect(host.querySelector('.kbn-ch-thread-head .kbn-ch-tip')?.textContent).toBe('Back to # cmbx')
   back.click()
   expect(layout.hasAttribute('data-thread')).toBe(false)
   // Wide again, a thread stands beside the channel.
   widths.forEach(seen => seen([{ contentRect: { width: 1400 } }]))
   message(host, 'κ × tSZ').click()
-  expect([layout.hasAttribute('data-narrow'), host.querySelector('.kbn-ch-thread-close')!.textContent]).toStrictEqual([false, 'Close'])
+  expect([layout.hasAttribute('data-narrow'), host.querySelector('.kbn-ch-thread-head .kbn-ch-tip')!.textContent]).toStrictEqual([false, 'Close the thread'])
 })
 
 it('collapses a tapestry to its title, lede and first figure, an inline SVG drawn as an image', () => {
@@ -221,24 +221,32 @@ it('replies in the channel to its chair; keeps each box\'s draft by whom it goes
   expect(host.querySelector('.kbn-ch-note')?.textContent).toContain('Not sent')
 })
 
-it('sets a waiting channel aside, pins and unpins, and restores a write that fails', async () => {
+it('sets a waiting channel aside, pins and unpins from its menu, and restores a write that fails', async () => {
   const { posts } = daemon()
   const { host } = await mount()
-  host.querySelector<HTMLButtonElement>('.kbn-ch-later')!.click()
-  await settle()
+  const items = () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+  const choose = async (label: string) => {
+    host.querySelector<HTMLButtonElement>('.kbn-ch-menu')!.click()
+    await settle()
+    items().find(item => item.textContent === label)!.click()
+    await settle()
+  }
+  // The channel's menu is an icon named by its tooltip.
+  expect(host.querySelector('.kbn-ch-menu')!.closest('ui-tooltip')!.querySelector('.kbn-ch-tip')?.textContent).toBe('Channel menu')
+  await choose('Not now')
   // The newest wait is the chair's, idle at the end of its turn.
   expect(posts[0][0]).toBe('/api/v1/channels/dismiss')
   expect(posts[0][1]).toMatchObject({ key: `office:channel:cmbx:${chair.lastActivityAt}`, fiber: 'C' })
   // The mark clears; cmbx stays in the rail, active this week.
   expect(host.querySelector('[data-channel="channel:cmbx"]')!.hasAttribute('data-waiting')).toBe(false)
-  expect(host.querySelector('.kbn-ch-later')).toBeNull()
-  host.querySelector<HTMLButtonElement>('.kbn-ch-pin')!.click()
+  host.querySelector<HTMLButtonElement>('.kbn-ch-menu')!.click()
+  await settle()
+  expect(items().map(item => item.textContent)).toStrictEqual(['Hide', 'Pin', 'Move to bottom'])
+  items()[1].click()
   await settle()
   expect(posts.at(-1)).toStrictEqual(['/api/v1/channels/pin', { key: 'channel:cmbx', fiber: 'C' }])
   daemon(['/api/v1/channels/dismiss'])
-  host.querySelector<HTMLButtonElement>('.kbn-ch-unpin')!.click()
-  expect(host.querySelector('.kbn-ch-pin')).not.toBeNull()
-  await settle()
+  await choose('Unpin')
   expect(host.querySelector('.kbn-ch-note')?.textContent).toContain('could not be unpinned')
 })
 
@@ -314,7 +322,7 @@ it('hides a channel by its menu; Jump to finds it, marked, and opening it brings
   // Its menu offers to bring it back.
   pick('Moving house').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 30 }))
   await settle()
-  expect([...document.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toStrictEqual(['Unhide', 'Pin', 'Move to bottom'])
+  expect([...document.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toStrictEqual(['Not now', 'Unhide', 'Pin', 'Move to bottom'])
   ;(document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
   await settle()
   expect(document.querySelector('[role="menu"]')).toBeNull()
@@ -338,7 +346,7 @@ it('rebuilds nothing under a held entry: a poll during a hold waits, and the hol
   expect(rail(host)).toStrictEqual(['cmbx', 'Moving house'])
   window.dispatchEvent(Object.assign(press('pointerup'), { pointerId: 1, pointerType: 'touch', isPrimary: true }))
   await settle()
-  expect([...document.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toStrictEqual(['Hide', 'Pin', 'Move to bottom'])
+  expect([...document.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toStrictEqual(['Not now', 'Hide', 'Pin', 'Move to bottom'])
   // Lifted, the rail takes the poll.
   expect(rail(host)).toStrictEqual(['cmbx', 'Moving house', 'Fresh'])
   ;(document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
@@ -371,9 +379,12 @@ it('hides and shows the rail by its button, by [ and by sideways swipes, closes 
   const { stored } = daemon()
   const { view, host } = await mount()
   const layout = host.querySelector('.kbn-ch-layout')!, toggle = host.querySelector<HTMLButtonElement>('.kbn-ch-rail-toggle')!
-  expect([layout.hasAttribute('data-rail-hidden'), toggle.textContent]).toStrictEqual([false, 'Hide channels'])
+  const tip = () => toggle.closest('ui-tooltip')!.querySelector('.kbn-ch-tip')!.textContent
+  expect([layout.hasAttribute('data-rail-hidden'), tip()]).toStrictEqual([false, 'Hide channels'])
+  // No key hints on the page: the keyboard help holds them.
+  expect(host.textContent).not.toContain('j / k')
   toggle.click()
-  expect([layout.hasAttribute('data-rail-hidden'), toggle.textContent, toggle.getAttribute('aria-expanded')]).toStrictEqual([true, 'Show channels', 'false'])
+  expect([layout.hasAttribute('data-rail-hidden'), tip(), toggle.getAttribute('aria-expanded')]).toStrictEqual([true, 'Show channels', 'false'])
   expect(stored.get('shuttle.channels.rail-hidden')).toBe('1')
   expect(view.keydown(new KeyboardEvent('keydown', { key: '[' }))).toBe(true)
   expect(layout.hasAttribute('data-rail-hidden')).toBe(false)

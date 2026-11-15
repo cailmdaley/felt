@@ -5,7 +5,8 @@ The board owns actions, presentation, the gestures that ask for a popup, and its
 
 | Widget | Where | SDK entry |
 |---|---|---|
-| Action, row and conversation menus, the Channels rail's entry menu | `board/conversationMenu.ts`, `views/ChannelsView.ts` | `@ui-sdk/web/menu` |
+| Action, row and conversation menus, the Channels rail's entry and channel menu | `board/conversationMenu.ts`, `views/ChannelsView.ts` | `@ui-sdk/web/menu` |
+| Channels' icon controls (rail, channel menu, back, close), each named by its tooltip | `views/ChannelsView.ts` | `@ui-sdk/web/tooltip` |
 | Channels rail reordering (mouse drag, touch hold-then-drag, Alt+↑/↓) | `board/channelRail.ts` | core `createReorder` on a `definePrimitive` instance |
 | Move menu | `board/MoveMenu.ts` | `@ui-sdk/web/menu` |
 | Keyboard help, role picker, rest calendar shell | `board/KeymapHelp.ts`, `RolePopover.ts`, `RestPopover.ts` | `@ui-sdk/web/dialog` |

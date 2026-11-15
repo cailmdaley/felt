@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url'
 import { launchBrowser } from './browser.mjs'
 
 const channels = () => [...document.querySelectorAll('.kbn-ch-pick-name')].map(el => el.textContent)
-const lines = () => [...document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-msg')].map(el => [el.querySelector('.kbn-ch-msg-name').textContent, el.dataset.kind])
+const lines = () => [...document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-msg')].map(el => [el.querySelector('.kbn-ch-msg-name')?.textContent ?? null, el.dataset.kind])
 const fits = async page => {
   assert.equal(await page.locator('.kbn-channels').evaluate(el => el.scrollWidth <= el.clientWidth), true)
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
@@ -95,7 +95,8 @@ try {
     await page.locator('.kbn-ch-msg', { hasText: '9σ' }).locator('.kbn-ch-replies').click()
     await page.waitForFunction(() => !document.querySelector('.kbn-ch-thread').hidden)
     assert.equal(await page.locator('.kbn-ch-liveness').textContent(), 'working')
-    assert.deepEqual(await page.locator('.kbn-ch-thread-list .kbn-ch-msg-name').allTextContents(), ['κ × tSZ cross-spectrum', 'cmbx chair', 'You', 'κ × tSZ cross-spectrum'])
+    // The thread's own worker speaks unnamed; others are named.
+    assert.deepEqual(await page.locator('.kbn-ch-thread-list .kbn-ch-msg-name').allTextContents(), ['cmbx chair', 'You'])
     assert.equal(await page.locator('.kbn-ch-thread .kbn-ch-reply-to').textContent(), 'κ × tSZ cross-spectrum')
     if (phone) assert.equal(await page.locator('.kbn-ch').isVisible(), false)
     await fits(page)
@@ -163,7 +164,7 @@ try {
   await page.locator('.kbn-ch-msg', { hasText: '9σ' }).locator('.kbn-ch-replies').click()
   await page.waitForFunction(() => !document.querySelector('.kbn-ch-thread').hidden)
   assert.equal(await page.locator('.kbn-ch').isVisible(), false)
-  assert.equal(await page.locator('.kbn-ch-thread-close').textContent(), '‹ cmbx')
+  assert.equal(await page.locator('.kbn-ch-thread-head .kbn-ch-tip').textContent(), 'Back to # cmbx')
   assert.equal(await page.locator('.kbn-ch-thread-head .kbn-ch-embed-title').textContent(), 'κ × tSZ at 9σ')
   await fits(page)
   await shot(page, 'half-thread')

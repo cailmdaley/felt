@@ -5,21 +5,35 @@
 /* The page holds still: the rail, the stream and the thread each scroll on their own. */
 .kbn-channels .kbn-view-body { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 .kbn-channels .kbn-view-titlerow { gap: 16px; }
-.kbn-ch-keys, .kbn-ch-note {
+.kbn-ch-note {
+  margin: 0 0 8px;
   font: italic var(--type-note)/var(--leading-prose) var(--font-serif);
   color: var(--kbn-ink-muted);
 }
-.kbn-ch-keys { margin-left: auto; }
-.kbn-ch-note { margin: 0 0 8px; }
 .kbn-ch-note:empty { display: none; }
-.kbn-ch-rail-toggle, .kbn-ch-act, .kbn-ch-back, .kbn-ch-thread-close {
+/* Chrome is icons, each named by its tooltip; the tooltip's wrappers take no box, so the button lays out in their place. */
+.kbn-channels ui-tooltip, .kbn-channels ui-tooltip-trigger { display: contents; }
+.kbn-ch-icon {
+  flex: none; display: inline-grid; place-items: center; width: 28px; height: 28px;
+  padding: 0; border: 0; border-radius: 6px; background: none; cursor: pointer;
+  color: var(--kbn-ink-muted);
+}
+.kbn-ch-icon:hover { color: var(--kbn-ink); background: color-mix(in srgb, var(--kbn-ink) 6%, transparent); }
+.kbn-ch-tip {
+  margin: 0; padding: 3px 8px; border: 0.5px solid var(--kbn-rule-strong); border-radius: 5px;
+  background: var(--kbn-ink); color: var(--kbn-paper);
+  font: var(--type-meta)/var(--leading-ui) var(--font-serif);
+  pointer-events: none;
+}
+.kbn-ch-rail-toggle { margin-left: auto; }
+.kbn-ch-act {
   padding: 0; border: 0; background: none; cursor: pointer;
   font: var(--type-meta)/var(--leading-ui) var(--font-serif);
   color: var(--kbn-ink-muted);
   text-decoration: underline; text-decoration-thickness: 0.5px; text-underline-offset: 3px;
   white-space: nowrap;
 }
-.kbn-ch-rail-toggle:hover, .kbn-ch-act:hover, .kbn-ch-back:hover, .kbn-ch-thread-close:hover { color: var(--kbn-ink); }
+.kbn-ch-act:hover { color: var(--kbn-ink); }
 .kbn-ch-act:disabled { cursor: default; text-decoration: none; }
 .kbn-ch-hush { list-style: none; font: italic var(--type-row)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink-muted); }
 .kbn-channels button:focus-visible { outline: 1px solid var(--kbn-you); outline-offset: 1px; }
@@ -40,7 +54,7 @@
 .kbn-ch-layout[data-narrow][data-rail-hidden][data-thread] { grid-template-columns: minmax(0, 1fr); }
 .kbn-ch-layout[data-narrow][data-thread] > .kbn-ch { display: none; }
 .kbn-ch-layout[data-narrow] .kbn-ch-thread { border-left: 0; }
-.kbn-ch-layout[data-narrow] .kbn-ch-thread-close { align-self: flex-start; }
+.kbn-ch-layout[data-narrow] .kbn-ch-thread-close { align-self: flex-start; margin-left: -6px; }
 
 /* The rail: Jump to, then the channels, the chaired ones above the lone constitutions. */
 .kbn-ch-rail {
@@ -109,15 +123,13 @@
 .kbn-ch-thread { border-left: 0.5px solid var(--kbn-rule); }
 .kbn-ch-thread[hidden] { display: none; }
 .kbn-ch-head {
-  display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px;
-  padding: 10px 20px 10px;
+  display: flex; align-items: center; gap: 2px 8px;
+  padding: 8px 14px 8px 20px;
   border-bottom: 0.5px solid var(--kbn-rule);
 }
 .kbn-ch-back { display: none; }
-.kbn-ch-name { margin: 0; font: 600 var(--type-title)/var(--leading-tight) var(--font-serif); color: var(--kbn-ink); overflow-wrap: anywhere; }
+.kbn-ch-name { flex: 1; min-width: 0; margin: 0; font: 600 var(--type-title)/var(--leading-tight) var(--font-serif); color: var(--kbn-ink); overflow-wrap: anywhere; }
 .kbn-ch-name::before { content: '# '; color: var(--kbn-ink-muted); font-weight: 400; }
-.kbn-ch-chair { font: italic var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); }
-.kbn-ch-head-acts { display: flex; gap: 14px; margin-left: auto; }
 .kbn-ch-empty { margin: 40px 0; text-align: center; font: italic var(--type-prose)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink-muted); }
 
 .kbn-ch-stream {
@@ -197,6 +209,12 @@ button.kbn-ch-msg-name:hover { color: var(--kbn-ink-soft); }
 }
 .kbn-ch-file::before { content: '▤'; color: var(--kbn-ink-muted); }
 .kbn-ch-file:hover { color: var(--kbn-ink); border-color: var(--kbn-ink-muted); }
+/* A file its host no longer holds. */
+.kbn-ch-file[data-gone] { border-style: dashed; color: var(--kbn-ink-muted); }
+/* A run of one sender's messages names it once; the rest sit closer under it. */
+.kbn-ch-msg[data-continued] { padding-top: 0; }
+.kbn-ch-msg[data-continued] .kbn-ch-msg-head:not(:has(.kbn-ch-line-text, .kbn-ch-msg-to)) .kbn-ch-age { display: none; }
+.kbn-ch-reopen { margin: 0; font-size: var(--type-meta); }
 
 /* The chair's tapestry, posted: its title and lede, read whole in place. */
 .kbn-ch-tapestry {
@@ -231,7 +249,7 @@ button.kbn-ch-msg-name:hover { color: var(--kbn-ink-soft); }
 
 /* A thread: who, how it is, its outcome whole, then its history and the reply to it. */
 .kbn-ch-thread-head { padding: 10px 20px 12px; border-bottom: 0.5px solid var(--kbn-rule); display: flex; flex-direction: column; gap: 6px; }
-.kbn-ch-thread-close { align-self: flex-end; }
+.kbn-ch-thread-close { align-self: flex-end; margin-right: -6px; }
 .kbn-ch-thread-who { display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; }
 .kbn-ch-thread-name {
   padding: 0; border: 0; background: none; cursor: pointer; text-align: left;
@@ -271,7 +289,7 @@ button.kbn-ch-msg-name:hover { color: var(--kbn-ink-soft); }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .kbn-channels { padding-inline: 0; }
   .kbn-channels .kbn-view-titlerow { padding-inline: 16px; }
-  .kbn-ch-keys, .kbn-ch-rail-toggle { display: none; }
+  .kbn-ch-rail-toggle { display: none; }
   .kbn-ch-layout, .kbn-ch-layout[data-thread], .kbn-ch-layout[data-rail-hidden], .kbn-ch-layout[data-rail-hidden][data-thread],
   .kbn-ch-layout[data-narrow][data-thread], .kbn-ch-layout[data-narrow][data-rail-hidden][data-thread] { grid-template-columns: minmax(0, 1fr); }
   .kbn-ch-layout:not([data-rail-hidden]) > :not(.kbn-ch-rail) { display: none; }
@@ -279,9 +297,8 @@ button.kbn-ch-msg-name:hover { color: var(--kbn-ink-soft); }
   .kbn-ch-rail { padding: 12px 16px; border-right: 0; }
   .kbn-ch-pick { padding: 9px 10px; font-size: var(--type-prose); }
   .kbn-ch-thread { border-left: 0; }
-  .kbn-ch-back { display: inline; }
-  .kbn-ch-head { padding: 8px 16px; }
-  .kbn-ch-head-acts { margin-left: auto; }
+  .kbn-ch-back { display: inline-grid; margin-left: -6px; }
+  .kbn-ch-head { padding: 6px 10px 6px 16px; }
   .kbn-ch-msg { padding: 6px 16px 6px 10px; }
   .kbn-ch-thread-head { padding: 8px 16px 10px; }
   .kbn-ch-thread-close { align-self: flex-start; }

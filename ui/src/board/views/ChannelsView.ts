@@ -1,4 +1,5 @@
 import { announce } from '@ui-sdk/core'
+import '@ui-sdk/web/tooltip'
 import { ago } from '../civilDay.js'
 import { HumanMessageIds, repeatNotice } from '../humanMessageId.js'
 import { getDaemonJson, postDaemonJson } from '../daemonApi.js'
@@ -18,6 +19,7 @@ import { stateDot } from '../stateDot.js'
 import { cardNamed } from '../threads.js'
 import { fileBytesUrl, renderMarkdown } from '../utils.js'
 import { COMPANION_NAMES, docKey, type DocKey } from '../workspace/documents.js'
+import { headerIcon, type HeaderIcon } from '../workspace/headerIcon.js'
 import { declaredTitle } from '../workspace/DocumentTitles.js'
 import { charters } from '../workspace/RolePage.js'
 import { createViewPage } from './ViewPage.js'
@@ -63,6 +65,18 @@ const button = (className: string, text: string, onClick: () => void): HTMLButto
   node.type = 'button'
   node.addEventListener('click', onClick)
   return node
+}
+/** A control drawn as an icon, named by its tooltip. */
+interface IconButton { root: HTMLElement; button: HTMLButtonElement; name: (label: string) => void }
+function iconButton(className: string, icon: HeaderIcon, label: string, onClick: () => void): IconButton {
+  const root = document.createElement('ui-tooltip'), trigger = document.createElement('ui-tooltip-trigger'), tip = document.createElement('ui-tooltip-content')
+  const node = button(`kbn-ch-icon ${className}`, '', onClick)
+  node.innerHTML = headerIcon(icon)
+  tip.className = 'kbn-ch-tip'
+  tip.textContent = label
+  trigger.append(node)
+  root.append(trigger, tip)
+  return { root, button: node, name: text => { tip.textContent = text } }
 }
 const stored = (key: string): string | null => { try { return localStorage.getItem(key) } catch { return null } }
 const store = (key: string, value: string): void => { try { localStorage.setItem(key, value) } catch { /* A convenience only. */ } }
@@ -136,7 +150,7 @@ export class ChannelsView implements TemporalView {
   private list: HTMLOListElement | null = null
   private jump: HTMLInputElement | null = null
   private found: HTMLElement | null = null
-  private railToggle: HTMLButtonElement | null = null
+  private railToggle: IconButton | null = null
   private channelEl: HTMLElement | null = null
   private head: HTMLElement | null = null
   private stream: HTMLOListElement | null = null
@@ -213,8 +227,8 @@ export class ChannelsView implements TemporalView {
     if (this.current) this.visit(this.current)
     const page = createViewPage('Channels')
     page.root.classList.add('kbn-channels')
-    this.railToggle = button('kbn-ch-rail-toggle', '', () => this.setRail(this.railShown()))
-    page.titleRow.append(el('span', 'kbn-ch-keys', 'j / k channels · [ the rail · / jump · Enter to reply'), this.railToggle)
+    this.railToggle = iconButton('kbn-ch-rail-toggle', 'rail', '', () => this.setRail(this.railShown()))
+    page.titleRow.append(this.railToggle.root)
     this.layout = el('div', 'kbn-ch-layout')
     this.layout.append(this.railEl(), this.channelPane(), this.threadPane())
     this.note = el('p', 'kbn-ch-note', 'Reading the channels…')
@@ -253,13 +267,13 @@ export class ChannelsView implements TemporalView {
       if (generation !== this.generation) return
       this.names = new Map(list.flatMap(charter => charter.name ? [[charter.slug, charter.name] as [string, string]] : []))
       this.draw()
-    }, () => { this.namesRead = false })
+    }).catch(() => { this.namesRead = false })
   }
   private railEl(): HTMLElement {
     const rail = el('nav', 'kbn-ch-rail')
     rail.id = `kbn-ch-rail-${Math.random().toString(36).slice(2)}`
     rail.setAttribute('aria-label', 'Channels')
-    this.railToggle!.setAttribute('aria-controls', rail.id)
+    this.railToggle!.button.setAttribute('aria-controls', rail.id)
     this.jump = el('input', 'kbn-ch-jump')
     this.jump.type = 'search'
     this.jump.placeholder = 'Jump to…'
@@ -629,20 +643,15 @@ export class ChannelsView implements TemporalView {
     this.readTapestry(channel.seat)
     const now = Date.now(), lines = channelLines(this.messages(channel), channel), failed = this.historyFailed(channel)
     for (const { message } of lines) this.readTapestry(message.card)
-    const sig = JSON.stringify([channel.key, channel.name, channel.seat.name, channel.waiting, channel.pinned, failed, this.thread && fiberOf(this.thread), [...this.tempering], [...this.expanded.keys()], [...this.unfolded],
+    const sig = JSON.stringify([channel.key, channel.name, failed, this.thread && fiberOf(this.thread), [...this.tempering], [...this.expanded.keys()], [...this.unfolded],
       lines.map(({ message, replies, last, waiting }) => [message.id, message.kind, message.text, waiting, message.card.name, message.card.turn, message.files.map(file => file.fullPath), replies, last, this.embedded(message.card, 'channel')])])
     if (this.changed('channel', sig)) {
-      const back = button('kbn-ch-back', '‹ Channels', () => this.setRail(false))
+      const back = iconButton('kbn-ch-back', 'back', 'Channels', () => this.setRail(false))
       const name = el('h3', 'kbn-ch-name', channel.name)
       if (channel.title !== channel.name) name.title = channel.title
-      const chair = el('span', 'kbn-ch-chair', channel.seat.name)
-      chair.title = 'Its chair: a reply here goes to it'
-      const acts = el('span', 'kbn-ch-head-acts')
-      if (channel.waiting) acts.append(button('kbn-ch-act kbn-ch-later', 'Not now', () => { void this.setAside(channel, setAsideKey(channel)) }))
-      acts.append(channel.pinned
-        ? button('kbn-ch-act kbn-ch-unpin', 'Unpin', () => { void this.setAside(channel, unpinKey(channel.key, Date.now())) })
-        : button('kbn-ch-act kbn-ch-pin', 'Pin', () => { void this.pin(channel); this.draw() }))
-      this.head.replaceChildren(back, name, chair, acts)
+      const menu: IconButton = iconButton('kbn-ch-menu', 'actions', 'Channel menu', () => this.railMenu(channel.key, menu.button))
+      menu.button.setAttribute('aria-haspopup', 'menu')
+      this.head.replaceChildren(back.root, name, menu.root)
       this.fill(this.stream, lines, 'channel', channel, now)
       if (!lines.length) this.stream.append(el('li', 'kbn-ch-hush', failed ? 'This channel\'s history could not be read; trying again.' : 'Nothing said here yet.'))
     }
@@ -712,17 +721,17 @@ export class ChannelsView implements TemporalView {
     const owner = pane === 'thread' ? this.threadCard : undefined
     // The thread's own worker speaks unnamed, and names whom it wrote to.
     const own = !!owner && !message.human && !message.label && sameFiber(message.from ?? card, owner)
-    const continued = own || continues(previous, message)
+    const continued = continues(previous, message), named = !own && !continued
     row.toggleAttribute('data-continued', continued)
     const byline = el('div', 'kbn-ch-msg-head')
-    if (!continued) {
+    if (named) {
       const who = message.human ? 'You' : message.from?.name ?? message.label ?? card.name
       const name = opens ? button('kbn-ch-msg-name', who, () => this.openThread(card)) : el('span', 'kbn-ch-msg-name', who)
       name.dataset.item = id
       if (opens) name.title = `Open ${card.name}'s thread`
       byline.append(name)
     }
-    if (own && message.from) byline.append(el('span', 'kbn-ch-msg-to', `to ${card.name}`))
+    if (own && message.from && !sameFiber(card, owner!)) byline.append(el('span', 'kbn-ch-msg-to', `to ${card.name}`))
     const words = ({ closed: message.text ? `closed (${message.text})` : 'closed', handed_off: 'handed off', event: message.text } as Partial<Record<Message['kind'], string>>)[message.kind]
     if (words !== undefined) {
       row.classList.add('kbn-ch-line')
@@ -768,7 +777,7 @@ export class ChannelsView implements TemporalView {
       acts.append(temper)
       body.append(acts)
     }
-    const gutter = continued ? el('span', 'kbn-ch-you') : message.human ? el('span', 'kbn-ch-you') : stateDot(message.from ?? card, worker => this.openThread(worker))
+    const gutter = !named || message.human ? el('span', 'kbn-ch-you') : stateDot(message.from ?? card, worker => this.openThread(worker))
     if (opens) {
       // The whole message opens its thread, save its links, its buttons and a selection.
       row.addEventListener('click', event => {
@@ -884,8 +893,9 @@ export class ChannelsView implements TemporalView {
     const sig = JSON.stringify([fiberOf(card), card.name, card.outcome, card.ask?.text, card.status, card.turn, state, deeper, tapestry, [...this.tempering], [...this.unfolded],
       messages.map(message => [message.id, message.kind, message.text, message.waiting, message.files.map(file => file.fullPath)])])
     if (this.changed('thread', sig)) {
-      const close = button('kbn-ch-thread-close', deeper ? `‹ ${channel.name}` : 'Close', () => this.openThread(null))
-      close.setAttribute('aria-label', 'Close the thread')
+      const close = deeper
+        ? iconButton('kbn-ch-thread-close', 'back', `Back to # ${channel.name}`, () => this.openThread(null))
+        : iconButton('kbn-ch-thread-close', 'leave', 'Close the thread', () => this.openThread(null))
       const who = el('div', 'kbn-ch-thread-who')
       const id = `thread-name:${fiberOf(card)}`
       const name = button('kbn-ch-thread-name', card.name, () => this.openPage(id, card))
@@ -909,7 +919,7 @@ export class ChannelsView implements TemporalView {
       if (tapestry) standing.push(this.embed(tapestry, card, `thread-embed:${fiberOf(card)}`))
       // A closed fiber has no worker to hear a reply: reopening it from its page brings one back.
       if (state === 'closed') standing.push(el('p', 'kbn-ch-hush kbn-ch-reopen', 'Closed. Reopen it from its page to reply.'))
-      this.threadHead.replaceChildren(close, who, ...standing)
+      this.threadHead.replaceChildren(close.root, who, ...standing)
       this.fill(this.threadList, messages.map(message => ({ message, replies: 0, last: message.at, waiting: message.waiting })), 'thread', channel, now)
       if (!messages.length) this.threadList.append(el('li', 'kbn-ch-hush', 'Nothing said yet.'))
     }
@@ -965,6 +975,7 @@ export class ChannelsView implements TemporalView {
     if (!channel) return
     const now = Date.now()
     openActionMenu(pick, [
+      ...channel.waiting ? [{ label: 'Not now', run: () => { void this.setAside(channel, setAsideKey(channel)) } }] : [],
       channel.hidden
         ? { label: 'Unhide', run: () => { void this.setAside(channel, showKey(key, now)) } }
         : { label: 'Hide', run: () => { void this.setAside(channel, hideKey(key, now)); announce(`${channel.name} hidden; Jump to finds it.`) } },
@@ -1042,8 +1053,8 @@ export class ChannelsView implements TemporalView {
     const shown = this.railShown()
     this.layout?.toggleAttribute('data-rail-hidden', !shown)
     if (!this.railToggle) return
-    this.railToggle.textContent = shown ? 'Hide channels' : 'Show channels'
-    this.railToggle.setAttribute('aria-expanded', String(shown))
+    this.railToggle.name(shown ? 'Hide channels' : 'Show channels')
+    this.railToggle.button.setAttribute('aria-expanded', String(shown))
   }
   /**
    * Sideways gestures while Channels is the surface shown: drawn rightward
