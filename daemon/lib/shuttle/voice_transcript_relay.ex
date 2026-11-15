@@ -1019,14 +1019,6 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
     end)
   end
 
-  defp complete(state, ref, {:retry, _reason}) do
-    %{
-      state
-      | tasks: Map.delete(state.tasks, ref),
-        task_handles: Map.delete(state.task_handles, ref)
-    }
-  end
-
   defp complete(state, ref, result) do
     case Map.pop(state.tasks, ref) do
       {nil, _} ->
@@ -1114,42 +1106,27 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
     record_only = Map.get(batch, :record_only, false)
 
     if record_only and not record_owner?(origin) do
-      {:retry, :owner_cannot_import_voice}
+      unconfirmed_import(id, :owner_cannot_import_voice)
     else
       context = %{"message_id" => id, "message_after_launch" => false, "live_input" => true}
       context = if record_only, do: Map.put(context, "voice_record_only", true), else: context
 
-      route = fn ->
-        ShuttleWeb.DeliverController.route(fiber_id, text, origin, "shuttle", context)
-      end
-
-      result =
-        if not record_only and match?({:remote, _}, Shuttle.OriginRouter.route(origin)) do
-          case Shuttle.InboxRecord.forward_voice(text, id, route) do
-            {:duplicate, _, disposition} ->
-              {200,
-               %{
-                 duplicate: true,
-                 disposition: disposition,
-                 delivered: if(disposition == "delivered", do: true)
-               }}
-
-            {:error, _} = error ->
-              {:retry, error}
-
-            result ->
-              result
-          end
-        else
-          route.()
-        end
+      result = ShuttleWeb.DeliverController.route(fiber_id, text, origin, "shuttle", context)
 
       case result do
         {status, _} when status in 200..299 -> result
-        _ when record_only -> {:retry, result}
+        _ when record_only -> unconfirmed_import(id, result)
         _ -> result
       end
     end
+  end
+
+  defp unconfirmed_import(id, reason) do
+    Logger.warning(
+      "Finishing attempted voice import #{id} without confirmation: #{inspect(reason)}"
+    )
+
+    {200, %{delivered: nil, disposition: "unknown"}}
   end
 
   # Normal batches keep the contract-42 live_input wire. Import-only requests

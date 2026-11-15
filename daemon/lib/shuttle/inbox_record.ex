@@ -27,17 +27,11 @@ defmodule Shuttle.InboxRecord do
         from,
         fn -> deliver.(entry) end,
         opts,
-        board(from, entry)
+        if(opts[:record_only], do: [], else: board(from, entry))
       )
     else
       error -> {:error, {:inbox_record, error}}
     end
-  end
-
-  # A remote voice handoff must also be at-most-once when its owner predates
-  # voice records. These offered records hold no board row or pending queue.
-  def forward_voice(text, id, deliver) do
-    record("voice-forwards", text, id, "human", deliver, [source: "voice"], [])
   end
 
   defp record(key, text, id, from, deliver, opts, board) do

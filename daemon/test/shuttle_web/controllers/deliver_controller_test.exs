@@ -633,7 +633,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
            end) == 0
   end
 
-  test "a 43 relay keeps the 42 voice envelope and waits to import until its owner upgrades" do
+  test "a relay keeps the 42 voice envelope and finishes imports an older owner cannot record" do
     stub_forward(
       "voice-owner",
       "http://localhost:4002",
@@ -661,41 +661,18 @@ defmodule ShuttleWeb.DeliverControllerTest do
              "live_input" => true
            }
 
-    assert {200, %{duplicate: true}} = Shuttle.Voice.TranscriptRelay.Worker.deliver(batch)
+    assert {200, _} = Shuttle.Voice.TranscriptRelay.Worker.deliver(batch)
 
-    assert {:retry, :owner_cannot_import_voice} =
+    assert {200, %{delivered: nil}} =
              Shuttle.Voice.TranscriptRelay.Worker.deliver(Map.put(batch, :record_only, true))
 
-    assert [_] = StubPostClient.posts()
-    StubPostClient.set_get_response({:ok, Jason.encode!(%{contract_level: 43})})
+    assert [_, _] = StubPostClient.posts()
+    StubPostClient.set_get_response({:ok, Jason.encode!(%{contract_level: 44})})
 
     assert {200, _} =
              Shuttle.Voice.TranscriptRelay.Worker.deliver(Map.put(batch, :record_only, true))
 
     assert Jason.decode!(StubPostClient.last().body)["voice_record_only"] == true
-  end
-
-  test "a remote voice handoff interrupted after its record is never forwarded again" do
-    parent = self()
-
-    task =
-      Task.async(fn ->
-        Shuttle.InboxRecord.forward_voice("words", "voice-forward-crash", fn ->
-          send(parent, :forward_started)
-
-          receive do
-            :finish -> {200, %{delivered: true}}
-          end
-        end)
-      end)
-
-    assert_receive :forward_started
-    Task.shutdown(task, :brutal_kill)
-
-    assert {:duplicate, "voice-forward-crash", "unknown"} =
-             Shuttle.InboxRecord.forward_voice("words", "voice-forward-crash", fn ->
-               flunk("forwarded twice")
-             end)
   end
 
   test "an attempted voice batch imports an unknown record without pasting" do

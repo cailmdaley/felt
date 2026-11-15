@@ -3090,6 +3090,7 @@ defmodule Shuttle.Poller do
 
   defp pulse_rejected?({:ok, _status, %{"status" => "rejected"}}), do: true
   defp pulse_rejected?({:error, _status, _reason}), do: true
+  defp pulse_rejected?({:error, {:inbox_record, _}}), do: true
   defp pulse_rejected?(_), do: false
 
   # ── Orphan Resurrection ──
