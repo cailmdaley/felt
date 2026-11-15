@@ -386,7 +386,7 @@ func (a *app) postCmd() *cobra.Command {
 		var files []string
 		if len(attach) > 0 {
 			var err error
-			if files, err = a.sendFiles(attach, ""); err != nil {
+			if files, err = a.sendFiles(attach, "", ""); err != nil {
 				return err
 			}
 		}

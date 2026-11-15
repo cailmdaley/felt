@@ -309,6 +309,24 @@ describe('the shapes live channels hold', () => {
     ])
   })
 
+  it('says a file message\'s captions as its words, a burst\'s distinct ones joined; a post\'s own words stand', () => {
+    const captioned = (file: SentFile, caption: string): SentFile => ({ ...file, caption })
+    const { messages } = lines([
+      record({ id: 'p', kind: 'post', fiber: 'D1', by: { fiber: 'D1' }, text: 'Before and after.', files: ['/shots/before.png'] }, 120),
+    ], [
+      captioned(send('D1', '/shots/before.png', 120), 'The old layout.'),
+      captioned(send('M', '/deck/slides.pdf', 30), 'The SWG deck, for Thursday.'),
+      captioned(send('M', '/deck/notes.md', 29.5), 'The SWG deck, for Thursday.'),
+      captioned(send('M', '/deck/tapestry.html', 29), 'Its tapestry, rebuilt.'),
+      send('D1', '/shots/plain.png', 5),
+    ])
+    expect(messages.map(message => [message.kind, message.card.id, message.text])).toStrictEqual([
+      ['post', 'mill/desk', 'Before and after.'],
+      ['file', 'mill', 'The SWG deck, for Thursday.\n\nIts tapestry, rebuilt.'],
+      ['file', 'mill/desk', ''],
+    ])
+  })
+
   it('names a sender from another channel, and a session no fiber answers for by its host', () => {
     const hub = card({ id: 'hub', uid: 'H', name: 'UNIONS hub', shuttleChannel: 'UNIONS' })
     const { messages } = lines([

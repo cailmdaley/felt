@@ -84,6 +84,55 @@ defmodule Shuttle.SentFilesProjectionTest do
     end
   end
 
+  test "each entry carries its send's caption, from send-file or SendUserFile; none when blank or absent",
+       %{events: events, ledger: ledger} do
+    append(
+      events,
+      sent_line(ts: 10, files: ["/tmp/deck.pdf", "/tmp/notes.md"])
+      |> Jason.decode!()
+      |> Map.put("caption", "The SWG deck, for Thursday.")
+      |> Jason.encode!()
+    )
+
+    append(
+      events,
+      Jason.encode!(%{
+        "tool" => "SendUserFile",
+        "sessionId" => @session,
+        "tmuxSession" => "morning-post-#{@match_ulid}-shuttle",
+        "timestamp" => 20,
+        "cwd" => "/tmp",
+        "toolInput" => %{"files" => ["shot.png"], "caption" => "The phone layout, fixed."}
+      })
+    )
+
+    append(
+      events,
+      sent_line(ts: 30, files: ["/tmp/blank.md"])
+      |> Jason.decode!()
+      |> Map.put("caption", "  ")
+      |> Jason.encode!()
+    )
+
+    append(events, sent_line(ts: 40, files: ["/tmp/plain.md"]))
+    name = start_stream(events)
+
+    for opts <- [followed(events, ledger, name), scanned(events, ledger)] do
+      captions = fn entries -> Enum.map(entries, &{&1.fullPath, Map.get(&1, :caption, :none)}) end
+
+      expected = [
+        {"/tmp/deck.pdf", "The SWG deck, for Thursday."},
+        {"/tmp/notes.md", "The SWG deck, for Thursday."},
+        {"/tmp/shot.png", "The phone layout, fixed."},
+        {"/tmp/blank.md", :none},
+        {"/tmp/plain.md", :none}
+      ]
+
+      assert captions.(SentFiles.all_since(0, opts)) == expected
+      assert Enum.sort(captions.(SentFiles.for_uid(@match_ulid, opts))) == Enum.sort(expected)
+    end
+  end
+
   test "a session trail keeps repeated paths and excludes other sessions", %{
     events: events,
     ledger: ledger

@@ -5,9 +5,11 @@ defmodule Shuttle.SentFiles do
 
   The standalone Shuttle board shows artifacts registered with
   `shuttle send-file`. The command writes `file_sent` events with top-level
-  `files`, `sessionId`, `tmuxSession`, `cwd`, and `timestamp`. A harness's
-  `SendUserFile` tool call, recorded by the hook, carries its paths in
-  `toolInput.files`.
+  `files`, `sessionId`, `tmuxSession`, `cwd`, `timestamp`, and an optional
+  `caption`. A harness's `SendUserFile` tool call, recorded by the hook, carries
+  its paths in `toolInput.files` and its words in `toolInput.caption`. Each
+  entry carries its send's `caption` when it had one; the key is absent
+  otherwise.
   Paths are absolute or resolved against the owning host's recorded `cwd`.
   A worker's tmux-embedded ULID associates the delivery with its fiber. Native
   sessions without a tmux name use the session ledger's fiber claim; an
@@ -84,6 +86,7 @@ defmodule Shuttle.SentFiles do
             paths: [String.t()],
             session_id: String.t() | nil,
             tmux_session: String.t() | nil,
+            caption: String.t() | nil,
             timestamp: term()
           }
           | %{cleared_uid: String.t(), cleared_path: String.t() | nil, timestamp: integer()}
@@ -187,6 +190,7 @@ defmodule Shuttle.SentFiles do
                 paths: paths,
                 session_id: copy(event["sessionId"]),
                 tmux_session: copy(event["tmuxSession"]),
+                caption: caption(event),
                 timestamp: event["timestamp"]
               }
             ]
@@ -199,6 +203,23 @@ defmodule Shuttle.SentFiles do
 
   defp copy(value) when is_binary(value), do: :binary.copy(value)
   defp copy(value), do: value
+
+  # The words a send came with, blank ones none.
+  defp caption(event) do
+    words =
+      case event do
+        %{"type" => "file_sent", "caption" => caption} -> caption
+        %{"toolInput" => %{"caption" => caption}} -> caption
+        _ -> nil
+      end
+
+    if is_binary(words) and String.trim(words) != "", do: :binary.copy(words)
+  end
+
+  defp with_caption(entry, %{caption: caption}) when is_binary(caption),
+    do: Map.put(entry, :caption, caption)
+
+  defp with_caption(entry, _event), do: entry
 
   # The projected events in file order (oldest-first — `dedupe_newest/1`
   # depends on it).
@@ -247,12 +268,15 @@ defmodule Shuttle.SentFiles do
 
     if matches_session and uid in event_uids(event, session_uids) do
       for full_path <- event.paths do
-        %{
-          fullPath: full_path,
-          basename: Path.basename(full_path),
-          timestamp: event.timestamp,
-          sessionId: event.session_id
-        }
+        with_caption(
+          %{
+            fullPath: full_path,
+            basename: Path.basename(full_path),
+            timestamp: event.timestamp,
+            sessionId: event.session_id
+          },
+          event
+        )
       end
     else
       []
@@ -267,13 +291,16 @@ defmodule Shuttle.SentFiles do
     uid = event_uid(event, session_uids)
 
     for full_path <- event.paths do
-      %{
-        fullPath: full_path,
-        basename: Path.basename(full_path),
-        timestamp: ts,
-        sessionId: event.session_id,
-        uid: uid
-      }
+      with_caption(
+        %{
+          fullPath: full_path,
+          basename: Path.basename(full_path),
+          timestamp: ts,
+          sessionId: event.session_id,
+          uid: uid
+        },
+        event
+      )
     end
   end
 

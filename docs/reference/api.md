@@ -361,6 +361,11 @@ host that owns the fiber; it carries a weak `ETag` and honors
 `If-None-Match` with a 304, and a forwarded read relays the owner's validators.
 `/sent-files/all` is the host-scoped feed with the composite.
 
+Each entry of both routes is `{fullPath, basename, timestamp, sessionId}`
+(`/sent-files/all` adds `uid`), plus `caption` when its send had one: the
+`--caption` of `shuttle send-file`, or a `SendUserFile` call's caption. The key
+is absent when a send had none.
+
 `/sent-files` takes `uid` (required; 400 without it) and `origin`. Its `ETag`
 covers the `events.jsonl` pair and the session ledger. The trail is whatever
 `events.jsonl.1` and `events.jsonl` hold, so a send survives one rotation and is

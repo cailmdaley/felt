@@ -37,7 +37,7 @@ func sendFileTestEnv(t *testing.T) (env *sysenv.Env, sink, artifact string) {
 func TestSendFilesRecordsExplicitDelivery(t *testing.T) {
 	t.Parallel()
 	env, sink, artifact := sendFileTestEnv(t)
-	files, err := newApp(env).sendFiles([]string{artifact, artifact}, "")
+	files, err := newApp(env).sendFiles([]string{artifact, artifact}, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,6 +63,34 @@ func TestSendFilesRecordsExplicitDelivery(t *testing.T) {
 	}
 }
 
+func TestSendFilesRecordsCaptionWhenGiven(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ caption, want string }{
+		{"  The SWG deck, for Thursday. ", "The SWG deck, for Thursday."},
+		{"", ""},
+	} {
+		env, sink, artifact := sendFileTestEnv(t)
+		if _, err := newApp(env).sendFiles([]string{artifact}, "", tc.caption); err != nil {
+			t.Fatal(err)
+		}
+		raw, err := os.ReadFile(sink)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var event map[string]any
+		if err := json.Unmarshal(raw, &event); err != nil {
+			t.Fatal(err)
+		}
+		caption, present := event["caption"]
+		if tc.want == "" && present {
+			t.Fatalf("blank caption recorded: %s", raw)
+		}
+		if tc.want != "" && caption != tc.want {
+			t.Fatalf("caption = %v, want %q: %s", caption, tc.want, raw)
+		}
+	}
+}
+
 func TestSendFilesNativeBindingOverridesInheritedPane(t *testing.T) {
 	t.Parallel()
 	for _, mode := range []string{"app", "different-terminal", "unbound", "manual-explicit-session"} {
@@ -83,7 +111,7 @@ func TestSendFilesNativeBindingOverridesInheritedPane(t *testing.T) {
 				explicit = "human-selected-session"
 				wantTmux = "unrelated-inherited-shuttle"
 			}
-			if _, err := newApp(env).sendFiles([]string{artifact}, explicit); err != nil {
+			if _, err := newApp(env).sendFiles([]string{artifact}, explicit, ""); err != nil {
 				t.Fatal(err)
 			}
 			raw, err := os.ReadFile(sink)
@@ -125,7 +153,7 @@ func TestSendFilesFailuresNeverRecord(t *testing.T) {
 			case "unwritable":
 				env.Set("SHUTTLE_EVENTS_FILE", artifact+"/events.jsonl")
 			}
-			if _, err := newApp(env).sendFiles(paths, ""); err == nil {
+			if _, err := newApp(env).sendFiles(paths, "", ""); err == nil {
 				t.Fatal("expected error")
 			}
 			if _, err := os.Stat(sink); !os.IsNotExist(err) {
@@ -144,7 +172,7 @@ func TestSendFilesLedgerAndExplicitSession(t *testing.T) {
 	if err := os.WriteFile(env.Getenv("SHUTTLE_SESSIONS_FILE"), []byte(ledger), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := newApp(env).sendFiles([]string{artifact}, ""); err != nil {
+	if _, err := newApp(env).sendFiles([]string{artifact}, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(sink)
@@ -179,7 +207,7 @@ func TestSendFilesIdentityPrecedence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			files, err := newApp(env).sendFiles([]string{relative}, tc.explicit)
+			files, err := newApp(env).sendFiles([]string{relative}, tc.explicit, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -207,7 +235,7 @@ func TestSendFilesRejectsFIFOWithoutBlocking(t *testing.T) {
 	}
 	result := make(chan error, 1)
 	a := newApp(env)
-	go func() { _, err := a.sendFiles([]string{fifo}, "test-session"); result <- err }()
+	go func() { _, err := a.sendFiles([]string{fifo}, "test-session", ""); result <- err }()
 	// The rejection returns at once; the bound only names a send that opened
 	// the FIFO and is waiting for a writer that never comes.
 	select {

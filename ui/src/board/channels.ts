@@ -317,7 +317,8 @@ const sessionHost = (ref: string | undefined): string | undefined => /^shuttle:\
  * Everything a channel's constitutions said, oldest first: the family board's
  * records about its members, what their cards wait on that the board does not
  * hold, the files they sent (attached to a message close in time, a burst of
- * them one message, else their own), and the chair's tapestry. A message
+ * them one message, else their own; one without words of its own says its
+ * files' captions), and the chair's tapestry. A message
  * marked `quiet` belongs in its worker's thread only: the human's lines other
  * than those sent from the board to the chair, workers writing to each other,
  * and every lifecycle line (a close that waits on the human's review is a
@@ -432,6 +433,11 @@ export function composeMessages(input: {
     const burst = near ?? messages.find(message => message.card === card && message.kind === 'file' && message.files[0].timestamp - file.timestamp <= ATTACH_MS)
     if (burst) burst.files.unshift(file)
     else said(card, 'file', '', file.timestamp, { id: `file:${file.host ?? ''}:${file.fullPath}:${file.timestamp}`, files: [file] })
+  }
+  // A file message, or a post, with no words of its own says what its files were sent with.
+  for (const message of messages) {
+    if (message.text || !(message.kind === 'file' || message.kind === 'post')) continue
+    message.text = [...new Set(message.files.flatMap(file => file.caption ?? []))].join('\n\n')
   }
   if (tapestry) said(channel.seat, 'tapestry', tapestry.lede, tapestry.at, { id: `tapestry:${tapestry.path}`, path: tapestry.path, title: tapestry.title })
   return messages.sort((a, b) => a.at - b.at || a.id.localeCompare(b.id))

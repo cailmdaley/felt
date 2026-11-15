@@ -4,7 +4,7 @@ defmodule ShuttleWeb.SentFilesController do
   An optional `session` query parameter returns every send from that native
   conversation, including repeated paths.
 
-  Returns `{"files": [{"fullPath", "basename", "timestamp", "sessionId"}]}` —
+  Returns `{"files": [{"fullPath", "basename", "timestamp", "sessionId", "caption"?}]}` —
   newest-first and capped — the artifacts a worker pushed with `SendUserFile`
   on the card whose fiber id is `uid`. Without `session`, entries are deduped
   by `fullPath`; a session-scoped response preserves repeated sends. Source is the owning

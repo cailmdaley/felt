@@ -684,6 +684,8 @@ trail. Claude, Codex and Pi sessions use this command. Paths are resolved to abs
 paths on the owning host; files must remain there for subsequent viewing.
 The command validates the whole batch before recording one `file_sent` event.
 It fails visibly if attribution or recording is unavailable.
+`--caption "<text>"` records why the files are sent on that event; the board
+shows it as the words of a file message that has none of its own.
 
 Session identity comes from `--session`; else `PI_SESSION_ID` when
 `AI_AGENT=pi` (Pi's own marker, so Pi nested under another harness is
@@ -694,7 +696,7 @@ automatic `--from` the same way. A worker's tmux name identifies its
 fiber. Outside a harness, pass `--session <native-session-id>`.
 The event stream uses the same configuration as `shuttle hook event`; recording
 works offline and confirms registration, not a completed client download.
-The daemon also reads `SendUserFile` hook events as sends.
+The daemon also reads `SendUserFile` hook events as sends, with their `caption`.
 
 ### `shuttle sent-files clear <fiber> [--path <file>]`
 

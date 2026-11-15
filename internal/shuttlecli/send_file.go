@@ -21,12 +21,14 @@ Session attribution uses --session; else PI_SESSION_ID when AI_AGENT=pi;
 else the first of CODEX_THREAD_ID, CLAUDE_CODE_SESSION_ID, CLAUDE_SESSION_ID,
 PI_SESSION_ID; else this tmux session's latest local session-ledger entry. A Shuttle worker's tmux
 name also associates the delivery with its fiber. Outside a harness, supply
---session explicitly. Recording works while the daemon is offline; it does not
+--session explicitly. --caption records why the files are sent; the board
+shows it with them. Recording works while the daemon is offline; it does not
 acknowledge that a client has downloaded the file.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			session, _ := cmd.Flags().GetString("session")
-			files, err := a.sendFiles(args, session)
+			caption, _ := cmd.Flags().GetString("caption")
+			files, err := a.sendFiles(args, session, caption)
 			if err != nil {
 				return err
 			}
@@ -37,10 +39,11 @@ acknowledge that a client has downloaded the file.`,
 		},
 	}
 	shuttleSendFileCmd.Flags().String("session", "", "Native session ID (otherwise detected from environment or tmux ledger)")
+	shuttleSendFileCmd.Flags().String("caption", "", "Why these files are sent, shown with them")
 	return shuttleSendFileCmd
 }
 
-func (a *app) sendFiles(paths []string, session string) ([]string, error) {
+func (a *app) sendFiles(paths []string, session, caption string) ([]string, error) {
 	files := make([]string, 0, len(paths))
 	seen := map[string]bool{}
 	for _, path := range paths {
@@ -97,12 +100,13 @@ func (a *app) sendFiles(paths []string, session string) ([]string, error) {
 	timestamp := a.eventNow().UnixMilli()
 	event := struct {
 		eventLine
-		Files []string `json:"files"`
+		Files   []string `json:"files"`
+		Caption string   `json:"caption,omitempty"`
 	}{eventLine: eventLine{
 		ID:        session + "-" + strconv.FormatInt(timestamp, 10) + "-" + strconv.Itoa(a.eventRand()),
 		Timestamp: timestamp, Type: "file_sent", SessionID: session,
 		CWD: cwd, TmuxSession: tmux, OriginName: origin,
-	}, Files: files}
+	}, Files: files, Caption: strings.TrimSpace(caption)}
 	line, err := encodeJSONLine(event)
 	if err != nil {
 		return nil, err

@@ -19,6 +19,13 @@ describe('normalizeSentFiles', () => {
     ])
   })
 
+  it('keeps a send\'s caption, and none that is blank', () => {
+    const files = normalizeSentFiles({ files: [
+      { fullPath: '/a/deck.pdf', caption: ' The SWG deck. ' }, { fullPath: '/a/b.png', caption: '  ' }, { fullPath: '/a/c.png' },
+    ] })
+    expect(files.map(file => file.caption)).toStrictEqual(['The SWG deck.', undefined, undefined])
+  })
+
   it('parses a timestamp written as an ISO string', () => {
     const [file] = normalizeSentFiles({ files: [
       { fullPath: '/a/x.png', timestamp: new Date(at(9)).toISOString() },
