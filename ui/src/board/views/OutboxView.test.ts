@@ -170,9 +170,9 @@ it('adds a channel from the finder by pinning it, and renews a pin when a channe
   expect(posts.at(-1)![1].key).toMatch(/^pin:fiber:G:\d+$/)
 })
 
-it('hides and shows the rail by its button, by [ and by a sideways swipe, and remembers it', async () => {
+it('hides and shows the rail by its button, by [ and by a sideways swipe over the lines, and remembers it', async () => {
   const { stored } = daemon()
-  const { view, host } = await mount()
+  const { view, ctx, host } = await mount()
   const layout = host.querySelector('.kbn-ch-layout')!, toggle = host.querySelector<HTMLButtonElement>('.kbn-ch-rail-toggle')!
   expect([layout.hasAttribute('data-rail-hidden'), toggle.textContent]).toStrictEqual([false, 'Hide channels'])
   toggle.click()
@@ -180,18 +180,31 @@ it('hides and shows the rail by its button, by [ and by a sideways swipe, and re
   expect(stored.get('shuttle.outbox.rail-hidden')).toBe('1')
   expect(view.keydown(new KeyboardEvent('keydown', { key: '[' }))).toBe(true)
   expect(layout.hasAttribute('data-rail-hidden')).toBe(false)
-  const swipe = (from: number, to: number) => {
-    document.dispatchEvent(Object.assign(new Event('touchstart'), { touches: [{ clientX: from, clientY: 300 }] }))
-    document.dispatchEvent(Object.assign(new Event('touchend'), { changedTouches: [{ clientX: to, clientY: 310 }] }))
+  const swipe = (on: Element, from: number, to: number) => {
+    on.dispatchEvent(Object.assign(new Event('touchstart', { bubbles: true }), { touches: [{ clientX: from, clientY: 300 }] }))
+    on.dispatchEvent(Object.assign(new Event('touchend', { bubbles: true }), { changedTouches: [{ clientX: to, clientY: 310 }] }))
   }
-  swipe(300, 180)
+  const feed = host.querySelector('.kbn-ch-feed')!, tapestry = host.querySelector('.kbn-ch-tapestry')!
+  swipe(feed, 300, 180)
   expect(layout.hasAttribute('data-rail-hidden')).toBe(true)
-  // Only a touch that starts at the left edge draws it back.
-  swipe(200, 320)
+  // The tapestry is never a gesture surface; the lines are, from anywhere across them.
+  swipe(tapestry, 100, 320)
   expect(layout.hasAttribute('data-rail-hidden')).toBe(true)
-  swipe(6, 120)
+  swipe(feed, 200, 320)
   expect(layout.hasAttribute('data-rail-hidden')).toBe(false)
-  host.querySelector('.kbn-outbox')!.dispatchEvent(Object.assign(new Event('wheel', { cancelable: true }), { deltaX: 80, deltaY: 2 }))
+  // Nothing while the reader covers the Outbox, nor on content that scrolls sideways.
+  ;(ctx as { workspace: { isActive?: boolean } }).workspace.isActive = true
+  swipe(feed, 300, 180)
+  expect(layout.hasAttribute('data-rail-hidden')).toBe(false)
+  ;(ctx as { workspace: { isActive?: boolean } }).workspace.isActive = false
+  const wide = feed.querySelector('.kbn-ch-msg-text')!
+  Object.defineProperties(wide, { scrollWidth: { value: 900 }, clientWidth: { value: 300 }, scrollLeft: { value: 0, writable: true } })
+  ;(wide as HTMLElement).style.overflowX = 'auto'
+  const wheel = (on: Element, deltaX: number) => { const event = Object.assign(new Event('wheel', { bubbles: true, cancelable: true }), { deltaX, deltaY: 2 }); on.dispatchEvent(event); return event.defaultPrevented }
+  expect(wheel(wide, 80)).toBe(false)
+  expect(wheel(tapestry, 80)).toBe(false)
+  expect(layout.hasAttribute('data-rail-hidden')).toBe(false)
+  expect(wheel(feed, 80)).toBe(true)
   expect(layout.hasAttribute('data-rail-hidden')).toBe(true)
   view.unmount(); views.length = 0
   const again = await mount(undefined, new OutboxView())

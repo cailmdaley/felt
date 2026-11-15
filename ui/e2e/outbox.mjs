@@ -44,11 +44,12 @@ try {
       const [talk, canvas] = await Promise.all(['.kbn-ch-talk', '.kbn-ch-canvas'].map(s => page.locator(s).boundingBox()))
       assert.ok(talk.y < canvas.y)
       await shot(page, 'phone')
-      // A real touch drawn in from the left edge brings the rail back.
+      // A real touch drawn rightward across the lines brings the rail back.
       const cdp = await context.newCDPSession(page)
-      const touch = async (type, x) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y: 400 }] })
-      await touch('touchStart', 4)
-      for (const x of [40, 90, 150]) await touch('touchMove', x)
+      const { x, y } = await page.locator('.kbn-ch-msg').first().boundingBox()
+      const touch = async (type, at) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x: x + at, y: y + 10 }] })
+      await touch('touchStart', 20)
+      for (const at of [60, 110, 170]) await touch('touchMove', at)
       await touch('touchEnd')
       await page.waitForFunction(() => !document.querySelector('.kbn-ch-layout[data-rail-hidden]'))
     } else {

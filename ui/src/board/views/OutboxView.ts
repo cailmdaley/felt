@@ -25,8 +25,6 @@ const RAIL = 'shuttle.outbox.rail-hidden'
 const RENEW_MS = 86_400_000
 /** How far a finger or a trackpad must travel sideways to open or close the rail. */
 const SWIPE_PX = 60
-/** A touch that begins this close to the screen's left edge can draw the rail open. */
-const EDGE_PX = 28
 const fiberOf = (card: KanbanCard): string => card.uid ?? card.id
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] => {
   const node = document.createElement(tag)
@@ -42,6 +40,14 @@ const button = (className: string, text: string, onClick: () => void): HTMLButto
 }
 const stored = (key: string): string | null => { try { return localStorage.getItem(key) } catch { return null } }
 const store = (key: string, value: string): void => { try { localStorage.setItem(key, value) } catch { /* A convenience only. */ } }
+/** Whether anything from `node` up to `stop` can still scroll sideways by `toward` (positive: rightward). */
+function scrollsSideways(node: Element | null, stop: Element, toward: number): boolean {
+  for (; node && node !== stop; node = node.parentElement) {
+    if (node.scrollWidth <= node.clientWidth || !/auto|scroll/.test(getComputedStyle(node).overflowX)) continue
+    if (toward > 0 ? node.scrollLeft + node.clientWidth < node.scrollWidth : node.scrollLeft > 0) return true
+  }
+  return false
+}
 function lastSeen(key: string): number {
   const value = Number(stored(SEEN + key) ?? NaN)
   return Number.isFinite(value) ? value : -Infinity
@@ -525,26 +531,33 @@ export class OutboxView implements TemporalView {
     this.railToggle.setAttribute('aria-expanded', String(!this.railHidden))
   }
   /**
-   * Sideways gestures while the Outbox is shown: a touch drawn in from the
-   * left edge opens the rail and one drawn leftward closes it; a two-finger
-   * trackpad swipe does the same, back to open and forward to close.
+   * Sideways gestures over the channel's lines or the rail, while the Outbox
+   * is the surface shown: a touch drawn rightward from the lines opens the
+   * rail and one drawn leftward closes it; a two-finger trackpad swipe does
+   * the same, back to open and forward to close. Content that scrolls
+   * sideways keeps the gesture, and the tapestry is never a gesture surface.
    */
   private gestures(root: HTMLElement): () => void {
-    let start: Pick<Touch, 'clientX' | 'clientY'> | null = null
+    const surface = (target: EventTarget | null): Element | null =>
+      this.ctx?.workspace?.isActive ? null : (target as Element | null)?.closest?.('.kbn-ch-talk, .kbn-ch-rail') ?? null
+    let start: { x: number; y: number; on: Element } | null = null
     let travel = 0, last = 0
-    const down = (event: TouchEvent): void => { start = event.touches.length === 1 ? event.touches[0] : null }
+    const down = (event: TouchEvent): void => {
+      const on = event.touches.length === 1 ? surface(event.target) : null
+      start = on ? { x: event.touches[0].clientX, y: event.touches[0].clientY, on } : null
+    }
     const up = (event: TouchEvent): void => {
-      const end = event.changedTouches[0]
-      if (!start || !end) return
-      const dx = end.clientX - start.clientX, dy = end.clientY - start.clientY, edge = start.clientX < EDGE_PX
+      const end = event.changedTouches[0], from = start
       start = null
-      if (Math.abs(dx) < SWIPE_PX || Math.abs(dy) > Math.abs(dx)) return
-      if (dx > 0 && edge) this.setRail(false)
-      else if (dx < 0) this.setRail(true)
+      if (!from || !end) return
+      const dx = end.clientX - from.x, dy = end.clientY - from.y
+      if (Math.abs(dx) < SWIPE_PX || Math.abs(dy) > Math.abs(dx) || scrollsSideways(event.target as Element, root, -dx)) return
+      if (dx < 0) this.setRail(true)
+      else if (from.on.classList.contains('kbn-ch-talk')) this.setRail(false)
     }
     const wheel = (event: WheelEvent): void => {
-      if (Math.abs(event.deltaX) <= Math.abs(event.deltaY)) return
-      // The page has no sideways scroll; taking the gesture keeps the browser from going back a page.
+      if (Math.abs(event.deltaX) <= Math.abs(event.deltaY) || !surface(event.target) || scrollsSideways(event.target as Element, root, event.deltaX)) return
+      // Taking the gesture keeps the browser from going back a page.
       event.preventDefault()
       // One swipe is a burst of wheel events: it acts once, and a pause starts the next.
       if (event.timeStamp - last > 300) travel = 0
@@ -556,13 +569,12 @@ export class OutboxView implements TemporalView {
       travel = NaN
     }
     // Touch events, not pointer events: the browser cancels a pointer it starts panning, but a touch still ends.
-    // A touch at the screen's edge can begin outside the page's own margins.
-    document.addEventListener('touchstart', down, { passive: true })
-    document.addEventListener('touchend', up, { passive: true })
+    root.addEventListener('touchstart', down, { passive: true })
+    root.addEventListener('touchend', up, { passive: true })
     root.addEventListener('wheel', wheel, { passive: false })
     return () => {
-      document.removeEventListener('touchstart', down)
-      document.removeEventListener('touchend', up)
+      root.removeEventListener('touchstart', down)
+      root.removeEventListener('touchend', up)
       root.removeEventListener('wheel', wheel)
     }
   }
