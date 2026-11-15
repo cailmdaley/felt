@@ -41,7 +41,7 @@ const board = (inFlight: ReturnType<typeof card>[]) => response({ now: { drafts:
 const sent = (uid: string, path: string, minutes: number, fiber = card({ id: uid, uid, name: uid })) =>
   ({ card: fiber, receipt: { uid, key: `host:${path}`, owner: 'host', host: 'host', fullPath: path, basename: path.split('/').at(-1)!, timestamp: Date.now() - minutes * minute } })
 const library = [sent('M', '/notes/mask/north-mask.png', 30, mask), sent('old', '/notes/old/lensing-notes.md', 600, card({ id: 'old', uid: 'old', name: 'Lensing notes' }))]
-async function mount(inFlight = [shear, mask, covariance, van, garden], view = new ChannelsView(), lately = [garden], shuttleBase = '') {
+async function mount(inFlight = [shear, mask, covariance, van, garden], view = new ChannelsView(), lately = [garden], shuttleBase = '', prepare?: (host: HTMLElement) => void) {
   const openFromDesk = vi.fn(), openPage = vi.fn(), requestRefresh = vi.fn(), see = vi.fn()
   const workspace = {
     openFromDesk, openPage, readLatelyCards: () => lately,
@@ -49,6 +49,7 @@ async function mount(inFlight = [shear, mask, covariance, van, garden], view = n
   }
   const ctx = { cards: [], response: board(inFlight), shuttleBase, workspace, requestRefresh, openCard: vi.fn(), see } as unknown as ViewContext
   const host = document.createElement('div'); document.body.append(host)
+  prepare?.(host)
   views.push(view); view.mount(host, ctx)
   await settle(); await settle()
   const reply = host.querySelector<HTMLTextAreaElement>('.kbn-ch-reply-text')!
@@ -348,4 +349,44 @@ it('probes a member\'s companions again after an unanswered probe and when its f
   view.refresh(ctx); await settle(); await settle()
   expect(probes.filter(url => url.includes('/notes/mask/')).length).toBe(3 * asked)
   expect(names()).toContain('Tapestry')
+})
+
+it('opens a channel on its newest line and follows new lines, unless the reader has scrolled up', async () => {
+  daemon()
+  // The page scrolls in the host: 400 px in view, each line 100 px tall, the reply bar 50 px under the lines.
+  let top = 0
+  const prepare = (host: HTMLElement): void => {
+    host.style.overflowY = 'auto'
+    host.dataset.scroller = ''
+    Object.defineProperty(host, 'scrollTop', { get: () => top, set: (value: number) => { top = value } })
+  }
+  const rect = (bottom: number) => ({ bottom, top: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    if (this.classList.contains('kbn-ch-feed')) return rect(100 * this.children.length - top)
+    return rect((this as HTMLElement).dataset?.scroller !== undefined ? 400 : 0)
+  })
+  vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('kbn-ch-reply') ? 50 : 0 })
+  const lines = Array.from({ length: 8 }, (_, i) => card({ id: `line${i}`, uid: `L${i}`, name: `Line ${i}`, orchestrator: 'S', status: 'active', workerState: 'running', runtimePhase: 'working', outcome: `Step ${i}.`, lastActivityAt: Date.now() - (60 - i) * minute }))
+  const { view, ctx } = await mount([shear, mask, ...lines, van], undefined, [], '', prepare)
+  // Ten lines: 1000 px of feed and 50 of reply, 400 in view.
+  expect(top).toBe(650)
+  // A new line while at the bottom follows it.
+  const arrive = async (n: number) => {
+    const more = Array.from({ length: n }, (_, i) => card({ id: `new${i}`, uid: `N${i}`, name: `New ${i}`, orchestrator: 'S', status: 'active', ask: { text: `Question ${i}?`, at: at(1) } }))
+    ctx.response = board([shear, mask, ...lines, ...more, van])
+    view.refresh(ctx); await settle()
+  }
+  await arrive(1)
+  expect(top).toBe(750)
+  // Scrolled up, the reader keeps their place when another arrives.
+  top = 200
+  await arrive(2)
+  expect(top).toBe(200)
+  // Another channel opens on its newest line too.
+  top = 0
+  view.keydown(new KeyboardEvent('keydown', { key: 'j' }))
+  expect(top).toBe(0)
+  view.keydown(new KeyboardEvent('keydown', { key: 'k' }))
+  // Back on the analyst's twelve lines: 1200 px of feed and 50 of reply, 400 in view.
+  expect(top).toBe(850)
 })

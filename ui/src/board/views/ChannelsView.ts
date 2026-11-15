@@ -26,6 +26,8 @@ const RAIL = 'shuttle.channels.rail-hidden'
 const RENEW_MS = 86_400_000
 /** How far a finger or a trackpad must travel sideways to open or close the rail. */
 const SWIPE_PX = 60
+/** A feed within this many pixels of its newest line counts as following it. */
+const FOLLOW_PX = 24
 /** Find lists at most this many documents beneath the channels it matches. */
 const FOUND_DOCUMENTS = 12
 /** One document of a channel, or one Find turned up: the fiber it belongs to, its page, its name and when it was sent (0 for a fiber's own companion). */
@@ -107,6 +109,8 @@ export class ChannelsView implements TemporalView {
   private returnTo: string | null = null
   /** The reader stands over Channels: nothing redraws beneath it. */
   private away = false
+  /** A channel just came into view: its feed opens on the newest line. */
+  private landing = true
   /** The worker chosen in the current channel; null is the seat. It stays chosen until the reader chooses again. */
   private chosen: KanbanCard | null = null
   /** What was typed in each channel's reply bar, kept while the reader is elsewhere. */
@@ -135,6 +139,7 @@ export class ChannelsView implements TemporalView {
 
   mount(host: HTMLElement, ctx: ViewContext): void {
     this.ctx = ctx
+    this.landing = true
     // The view outlives its mounts: coming back to the channel it showed is reading it again.
     if (this.current) this.visit(this.current)
     const page = createViewPage('Channels')
@@ -346,6 +351,7 @@ export class ChannelsView implements TemporalView {
       this.chosen = null
       if (this.reply) this.reply.value = (key && this.drafts.get(key)) || ''
       if (key) this.visit(key)
+      this.landing = true
     }
     if (!focus) return
     if (key && deliberate) this.renew(key)
@@ -353,7 +359,17 @@ export class ChannelsView implements TemporalView {
     if (isMobileViewport()) this.setRail(true)
     this.drawRail(); this.drawChannel()
     this.channelEl?.focus({ preventScroll: true })
-    this.form?.scrollIntoView?.({ block: 'nearest' })
+  }
+  /** What scrolls the channel: the nearest scrolling ancestor, else the page. */
+  private scroller(): HTMLElement | null {
+    for (let node = this.layout?.parentElement; node; node = node.parentElement) if (/auto|scroll/.test(getComputedStyle(node).overflowY)) return node
+    return document.scrollingElement as HTMLElement | null
+  }
+  /** How far the newest line, with the reply bar after it, sits below what is in view; zero or less when it shows. */
+  private belowNewest(): number {
+    const scroller = this.scroller()
+    if (!scroller || !this.feed || !this.form) return 0
+    return this.feed.getBoundingClientRect().bottom + this.form.offsetHeight - scroller.getBoundingClientRect().bottom
   }
   private visit(key: string): void {
     this.before.set(key, lastSeen(key))
@@ -471,11 +487,16 @@ export class ChannelsView implements TemporalView {
       channel.files.map(file => [file.fullPath, file.timestamp]), channel.held.map(line => [line.fiber_id, line.n, line.first]), [...this.replied], [...this.tempering]])
     if (sig !== this.sig) {
       this.sig = sig
+      // Like a chat, the feed opens on its newest line and stays there as lines arrive, unless the reader has scrolled up.
+      const follow = this.landing || this.belowNewest() <= FOLLOW_PX
       const name = el('h3', 'kbn-ch-name', channel.name)
       if (channel.title !== channel.name) name.title = channel.title
       this.head.replaceChildren(name, this.tabs!)
       this.feed.replaceChildren(...channel.messages.map(message => this.messageRow(channel, message, before, now)))
       if (!channel.messages.length) this.feed.append(el('li', 'kbn-ch-hush', 'Quiet.'))
+      const below = follow ? this.belowNewest() : 0, scroller = this.scroller()
+      if (below > 0 && scroller) scroller.scrollTop += below
+      this.landing = false
       if (target === channel.seat) this.label.replaceChildren(el('span', '', channel.seat.name))
       else this.label.replaceChildren(button('kbn-ch-back', `← ${channel.seat.name}`, () => this.select(null)), el('span', '', ` › ${target.name}`))
     }
