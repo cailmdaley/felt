@@ -227,7 +227,6 @@ button.kbn-ch-msg-name:hover { color: var(--kbn-ink-soft); }
   font: var(--type-meta)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink-soft);
   display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
 }
-@media (max-width: 700px) { .kbn-ch-embed { flex-direction: column; } .kbn-ch-embed-figure { width: 100%; } }
 .kbn-ch-tapestry-page .kbn-fileview-frame-wrap, .kbn-ch-tapestry-page > .kbn-fileview { height: min(70vh, 760px); }
 
 /* A thread: who, how it is, its outcome whole, then its history and the reply to it. */
@@ -287,6 +286,8 @@ button.kbn-ch-msg-name:hover { color: var(--kbn-ink-soft); }
   .kbn-ch-thread-close { align-self: flex-start; }
   .kbn-ch-reply { padding: 8px 16px 10px; }
   .kbn-ch-tapestry-page .kbn-fileview-frame-wrap, .kbn-ch-tapestry-page > .kbn-fileview { height: 60vh; }
+  .kbn-ch-embed { flex-direction: column; }
+  .kbn-ch-embed-figure { width: 100%; }
 }
 
 /* A long message folds after eight lines; Show more unfolds it in place. */
