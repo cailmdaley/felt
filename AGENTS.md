@@ -14,7 +14,7 @@ One repo, one checkout, four artifacts:
   exposes a `:4000` snapshot/control API, and watches each worker.
 - **the board UI** (TypeScript, `ui/`) — four full-page views over the fiber
   tree and the fleet's session/commit ledgers (Desk kanban, Chronicle, the
-  human's Channels with every channel's files, and the Globe of the whole fleet), plus a settings sheet on `⌘,` over every host's
+  human's Channels — a Slack-like stream per channel, a thread per worker — and the Globe of the whole fleet), plus a settings sheet on `⌘,` over every host's
   operator files. It keeps the map and renders no conversation: that lives in
   Rex. The daemon serves it at `http://127.0.0.1:4000/`.
 

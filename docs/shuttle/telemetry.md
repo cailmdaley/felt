@@ -1,7 +1,7 @@
 # Telemetry and the ledgers
 
 The Desk needs only fibers and tmux. [Chronicle](board.md#chronicle-where-the-time-went)
-and Channels' files need a record of what happened, and
+and Channels need a record of what happened, and
 that record is three append-only JSONL files in the daemon's state directory.
 
 | File | Written by | Carries |

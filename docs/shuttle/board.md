@@ -9,7 +9,7 @@ the host-local [ledgers](telemetry.md) — the board stores nothing of its own.
 |---|---|---|
 | `1` | **Desk** | What needs doing, and what is running right now |
 | `2` | **Chronicle** | What a stretch of weeks was about |
-| `3` | **Channels** | Who is waiting on you, and what the work produced |
+| `3` | **Channels** | Where the work talks to you: a channel per line of work, a thread per worker |
 | `4` | **Globe** | Everything at once, as one place to move through |
 | `⌘,` | **Settings** | Every operator file, on any host in the fleet |
 
@@ -209,16 +209,18 @@ refresh control. Days already past are fetched once per open; scrolling back
 fetches only the days newly in view. Nothing on the board asks for temporal
 data while Chronicle is closed.
 
-## Channels — who is waiting, and what the work produced
+## Channels — where the work talks to you
 
-Hotkey `3` opens Channels: one channel per office held by a top-level constitution (or per top-level constitution without one), with every thread under it.
-A channel reads like a chat: each worker is one line, oldest first, saying its ask, its review note or its latest outcome, with the files it sent and the lines it spoke under it; the lines waiting on you glow, and what is new since you last read the channel is marked.
-Beside the lines the seat's tapestry is pinned; the header's **Files** shows the channel's files in its place instead: each member's tapestry, artifact or report, then everything its threads sent in the last 30 days, newest first.
-A reply bar under the lines answers the seat, or the worker whose line you chose; **Not now** sets a waiting channel aside until something newer waits in it.
+Hotkey `3` opens Channels, which reads like Slack. A constitution speaks in its own `shuttle.channel`, else in its orchestrator's; without one anywhere above it, the channel is its top-level constitution's office, or that top-level alone, drawn quieter at the foot of the rail.
+A channel's chair is its topmost seat, a non-standing one first, then the most recently active; without a seat, its most recently active top-level. The chair's tapestry is posted into the channel, and a reply in the channel goes to the chair.
 
-The rail lists the channels waiting on you, newest wait first, then the ones you pinned, then the ones gone cold after three days; under them **Read lately** names the constitutions opened in the reader this session.
-`[`, the rail's button, or a sideways swipe hides and shows the rail; on a phone it is a drawer.
-The bar's Find (on a phone, the rail's own field) looks across every channel, matching its name, its members' names and paths and its files, and lists every sent document it matches beneath the channels, from any fiber; a quiet channel found is read in place, and **Pin** in its header keeps it in the rail for 14 days of disuse.
+A channel is a stream, oldest first, kept short: every message of its chair, its tapestry among them (title and lede, read whole in place with **Read it here**), the replies you sent it, and each other worker once — what waits on you from it, else the latest thing it said — whole, with the files it attached or sent beside it and a link to its thread, **N replies · last …**. A worker that has said nothing is not in it. What arrived since your last visit sits under a **New** rule.
+A message opens its worker's thread, beside the stream on a desktop and over it on a phone: its name (opening its page), its liveness (working, waiting, resting or closed), its open question, or once it is closed, its outcome as its conclusion; then its whole history from the family board — its posts, asks, files, hand-offs and closes, what other workers wrote to it, and your replies, including your chat in its terminal. A reply in the thread goes to that worker.
+**Not now** clears a channel's waiting mark until something newer waits in it; **Pin** keeps a channel in the rail, and **Unpin** lets it go.
+
+The rail lists the channels waiting on you (a dot), pinned, or opened or active in the last week, the chaired ones by name, then the lone constitutions; a channel with something new since you read it is bold.
+**Jump to** at its top (`/`, or the bar's Find) finds any channel by its name or its members' names and paths, and lists every sent document it matches, from any fiber; opening a channel found brings it back to the rail.
+`[`, the rail's button, or a sideways swipe hides and shows the rail; on a phone the rail is the first screen, a channel and a thread each fill it, and a swipe or the back link returns.
 Documents of a fiber the board does not hold are read from their owner; a fiber its owner confirms missing files its documents under **Unfiled** on their byte-owning host, and an unreachable owner does not count as a missing fiber.
 
 ### The reader

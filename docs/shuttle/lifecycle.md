@@ -153,7 +153,7 @@ views behind a hotkey row.
 |---|---|---|
 | `1` | **Desk** | What needs doing, and what is running right now — the kanban |
 | `2` | **Chronicle** | What a stretch of weeks was about, under a strip of cycle bands |
-| `3` | **Channels** | Who is waiting on you, and the documents the work produced |
+| `3` | **Channels** | Where the work talks to you: a channel per line of work, a thread per worker |
 | `4` | **Globe** | Everything at once, as one place to move through |
 
 Any document opens in the reader, whose band above the fiber page carries its controls; its console (›_) opens the conversation.

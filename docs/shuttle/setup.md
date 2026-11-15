@@ -33,7 +33,7 @@ The board has four views:
 
 - **Desk** shows tasks, running agents, and results awaiting review.
 - **Chronicle** shows activity over time.
-- **Channels** shows what waits on you, one channel per line of work, with the files agents have sent, such as reports and plots.
+- **Channels** shows what the work says to you, one channel per line of work, with the files agents attach and send, such as reports and plots, and a thread per worker.
 - **Globe** shows all the work at once.
 
 Shuttle stores notes as ordinary Markdown files managed by **felt**.
