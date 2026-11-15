@@ -960,7 +960,7 @@ export class KanbanModal {
   }
 
   /**
-   * `1`–`5` switch views. Deliberately narrow: a bare digit only, so
+   * `1`–`4` switch views. Deliberately narrow: a bare digit only, so
    * `Cmd/Ctrl+1` stays the browser's tab switch, and only when the keystroke
    * is not going somewhere it matters — a focused text field, or a
    * dialog layered over the board. Returns true when the

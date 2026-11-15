@@ -22,7 +22,7 @@
 .ws-stage { transition: transform var(--ws-veil-time) var(--ws-ease); }
 .ws-reader.ws-arriving .ws-veil, .ws-reader.ws-departing .ws-veil,
 .ws-reader.ws-arriving .ws-navbar, .ws-reader.ws-departing .ws-navbar,
-.ws-reader.ws-arriving .ws-stage-column, .ws-reader.ws-departing .ws-stage-column,
+.ws-reader.ws-arriving .ws-stage-column, .ws-reader.ws-departing .ws-stage-column { opacity: 1; transition: none; }
 .ws-reader.ws-dormant .ws-veil, .ws-reader.ws-dormant .ws-navbar, .ws-reader.ws-dormant .ws-stage-column,
 .ws-reader.ws-dormant .ws-stage { transition: none; }
 .ws-reader.ws-arriving .ws-stage, .ws-reader.ws-departing .ws-stage { transform: var(--ws-settle); }

@@ -2604,6 +2604,16 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
 
 registerNavigationJourneys(test)
 registerDeskThreadJourneys(test)
+test('A Globe file thumbnail shows an audio file\'s duration, a video\'s paused first frame and a PDF\'s face', async p => {
+  for (const file of ['tone.mp3', 'test.mp4', 'response.pdf']) assert.ok(await p.evaluate(file => !!window.__harness.thumbnail(file), file), `${file} is a fixture send`)
+  const thumb = file => p.locator(`[data-harness-thumb="${file}"]`)
+  await poll(p, () => /\d+:\d\d/.test(document.querySelector('[data-harness-thumb="tone.mp3"] .kbn-thumbnail-audio')?.textContent ?? ''))
+  await poll(p, () => { const v = document.querySelector('[data-harness-thumb="test.mp4"] video'); return !!v && v.readyState >= 2 && v.videoWidth > 0 })
+  assert.ok(await thumb('test.mp4').locator('video').evaluate(v => v.muted && !v.controls && v.paused && v.currentTime === 0), 'the video holds its first frame, muted and paused')
+  await thumb('response.pdf').locator('.kbn-thumbnail-pdf').waitFor({ state: 'attached' })
+  assert.equal(await thumb('response.pdf').locator('iframe').count(), 0, 'a PDF draws a face, not the native viewer')
+})
+
 registerMapViewJourneys(test)
 registerLivingReportJourneys(test)
 registerHeaderBarJourneys(test)

@@ -38,6 +38,7 @@ import { addNavigationFixtures } from './nav-back-fixtures.js'
 import { addFamilyFixtures, addFrontierFixtures, addThreadFixtures, addThreadReviewFixtures } from './thread-fixtures.js'
 import { KanbanModal } from '../src/board/KanbanModal.js'
 import { scopeTheme } from '../src/board/workspace/themeScope.js'
+import { Thumbnail } from '../src/board/workspace/Thumbnail.js'
 import { workshopExample } from './workshop-example.js'
 import { installWorkspaceNativeURLs, NOTE_FIBERS, WORKSPACE_HOST, WORKSPACE_ID, WORKSPACE_UID, LONG_WORKSPACE_NAME, workspaceExample } from './workspace-fixtures.js'
 import { WORKSPACE_LATEST_SESSION, transcriptSearchHits } from './transcript-fixtures.js'
@@ -1782,6 +1783,21 @@ try {
   ;(window as unknown as { __harness: unknown }).__harness = {
     modal,
     scopeTheme,
+    /** Lays a sent file's thumbnail on the page as the Globe lays one on a file tile, to read what it draws. */
+    thumbnail(basename: string): HTMLElement | null {
+      const sent = workspaceFixture?.receipts.find(file => String(file.basename) === basename)
+      if (!sent) return null
+      const thumb = new Thumbnail({
+        key: `globe:${basename}`, shuttleBase: '', className: 'globe-preview-thumb', fallback: basename, captioned: false,
+        file: { fullPath: String(sent.fullPath), owner: String(sent.host), basename },
+        priority: () => 2, distance: () => 0,
+      })
+      thumb.el.style.cssText = 'position:fixed; right:16px; bottom:16px; width:320px; height:200px; z-index:9999'
+      thumb.el.dataset.harnessThumb = basename
+      document.body.append(thumb.el)
+      thumb.schedule()
+      return thumb.el
+    },
     MOCK_FEED: workspaceFixture?.feed ?? docsExample?.feed ?? MOCK_FEED,
     temporal: docsExample?.temporal ?? workspaceFixture?.temporal ?? MOCK_TEMPORAL,
     requests: mockRequests,
