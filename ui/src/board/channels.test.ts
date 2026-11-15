@@ -167,7 +167,7 @@ describe('composeMessages', () => {
     record({ id: 'r3', kind: 'closed', fiber: 'C', by: { fiber: 'C' } }, 15),
     record({ id: 'r4', kind: 'closed', fiber: 'N', by: { fiber: 'N' } }, 100),
     record({ id: 'r5', kind: 'handed_off', fiber: 'N', by: { fiber: 'N' } }, 90),
-    record({ id: 'r6', kind: 'human', fiber: 'F', by: { label: 'Sam' }, text: 'me: how is the run going?' }, 50),
+    record({ id: 'brd-human-6', kind: 'human', fiber: 'F', by: { label: 'Sam' }, text: 'me: how is the run going?' }, 50),
     record({ id: 'brd-human-7', kind: 'human', fiber: 'U', by: { label: 'Sam' }, text: 'Keep going.' }, 5),
     record({ id: 'r8', kind: 'message', fiber: 'F', by: { fiber: 'U', session: 'shuttle://h/claude/1' }, to: { fiber: 'F' }, text: 'Rerun with the new mask.' }, 45),
     record({ id: 'r9', kind: 'message', fiber: 'N', by: { label: 'external' }, text: 'Job 6400 finished.' }, 80),
@@ -213,9 +213,9 @@ describe('composeMessages', () => {
     ])
   })
 
-  it('keeps the channel short: the chair\'s every line, and each other worker once, its latest, marked when it waits, with its thread', () => {
+  it('keeps the channel short: each thread once, the chair\'s too, its latest, marked when it waits, with its thread; the human\'s words to the chair stand', () => {
     const later = record({ id: 'r13', kind: 'post', fiber: 'W', by: { fiber: 'W' }, text: 'Drafted the PR body meanwhile.' }, 8)
-    const lines = channelLines(composeMessages({ channel, records: [...records, later], files, now, reachMs, tapestry: { path: '/t.html', at: now - 2 * minute, title: 'T', lede: '' } }), channel)
+    const lines = channelLines(composeMessages({ channel, records: [...records, later], files, now, reachMs, tapestry: { path: '/t.html', at: now - 2 * minute, title: 'T', lede: '' } }))
     expect(lines.map(line => [line.message.kind, line.message.card.id, line.waiting, line.replies, line.last])).toStrictEqual([
       ['file', 'east-unions', false, 3, now - 80 * minute],
       ['post', 'west-unions', false, 2, now - 40 * minute],
@@ -223,7 +223,7 @@ describe('composeMessages', () => {
       ['post', 'pando/unions/modes', true, 2, now - 8 * minute],
       ['reply', 'pando/unions', false, 0, now - 5 * minute],
       ['turn', 'stuck', false, 0, now - 3 * minute],
-      ['tapestry', 'pando/unions', false, 0, now - 2 * minute],
+      ['tapestry', 'pando/unions', false, 2, now - 2 * minute],
     ])
   })
 
@@ -244,7 +244,7 @@ describe('the shapes live channels hold', () => {
   const channel = named(compose([mill, outbox, desk]), 'channel:the mill')
   const lines = (records: BoardRecord[], files: SentFile[] = [], cards?: KanbanCard[]) => {
     const messages = composeMessages({ channel, records, files, cards, now, reachMs })
-    return { messages, lines: channelLines(messages, channel) }
+    return { messages, lines: channelLines(messages) }
   }
 
   it('keeps every close out of the stream: a worker\'s line is its last post, with the files it sent before closing', () => {
@@ -269,7 +269,6 @@ describe('the shapes live channels hold', () => {
       send('M', '/home/u/fig.png', 2, 'cluster-a'), send('M', '/home/u/fig.png', 2, 'cluster-b'),
     ])
     expect(stream.map(line => [line.message.card.id, line.message.kind, line.message.files.map(file => `${file.host}:${file.basename}`)])).toStrictEqual([
-      ['mill', 'file', ['local:a.png', 'local:b.png', 'local:c.png']],
       ['mill/desk', 'file', ['local:before.png']],
       ['mill', 'file', ['cluster-b:fig.png', 'cluster-a:fig.png']],
     ])
@@ -287,7 +286,7 @@ describe('the shapes live channels hold', () => {
     ])
   })
 
-  it('makes the human\'s board line to the chair a channel line, and keeps their terminal and spoken lines in the thread', () => {
+  it('makes the human\'s board line to the chair a channel line, keeps their other board lines in the thread, and leaves terminal and spoken lines to Rex', () => {
     const { messages, lines: stream } = lines([
       record({ id: 'brd-human-1', kind: 'human', fiber: 'M', by: { label: 'Sam' }, text: 'Ship it.' }, 9),
       record({ id: 'brd-01TERMINAL', kind: 'human', fiber: 'M', by: { label: 'Sam' }, text: 'typed at the terminal' }, 8),
@@ -295,7 +294,7 @@ describe('the shapes live channels hold', () => {
       record({ id: 'brd-human-2', kind: 'human', fiber: 'D1', by: { label: 'Sam' }, text: 'Thread reply.' }, 6),
     ])
     expect(messages.map(message => [message.text, message.human, message.quiet])).toStrictEqual([
-      ['Ship it.', true, false], ['typed at the terminal', true, true], ['said aloud', true, true], ['Thread reply.', true, true],
+      ['Ship it.', true, false], ['Thread reply.', true, true],
     ])
     expect(stream.map(line => line.message.text)).toStrictEqual(['Ship it.'])
   })
@@ -310,7 +309,7 @@ describe('the shapes live channels hold', () => {
       record({ id: 'a', kind: 'post', fiber: 'D1', by: { fiber: 'D1' }, text: 'one' }, 30),
       record({ id: 'b', kind: 'post', fiber: 'D1', by: { fiber: 'D1' }, text: 'two' }, 25),
       record({ id: 'c', kind: 'post', fiber: 'D1', by: { fiber: 'D1' }, text: 'three' }, 10),
-      record({ id: 'd', kind: 'human', fiber: 'D1', by: { label: 'Sam' }, text: 'four' }, 9),
+      record({ id: 'brd-human-d', kind: 'human', fiber: 'D1', by: { label: 'Sam' }, text: 'four' }, 9),
     ])
     expect(messages.map((message, index) => continues(messages[index - 1], message))).toStrictEqual([false, true, false, false])
   })

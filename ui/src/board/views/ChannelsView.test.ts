@@ -25,7 +25,7 @@ const record = (over: Partial<BoardRecord> & Pick<BoardRecord, 'id' | 'kind' | '
 const BOARD: Record<string, BoardRecord[]> = {
   C: [
     record({ id: 'b1', kind: 'post', fiber: 'T', text: 'κ×tSZ is measured to **9σ**.', files: ['/notes/tsz/spectrum.png'] }, 30),
-    record({ id: 'b2', kind: 'human', fiber: 'T', by: { label: 'Sam' }, text: 'Show the nulls too?' }, 25),
+    record({ id: 'brd-human-b2', kind: 'human', fiber: 'T', by: { label: 'Sam' }, text: 'Show the nulls too?' }, 25),
     record({ id: 'b3', kind: 'asked', fiber: 'M', text: 'Mask at 5σ or 3σ?' }, 20),
     record({ id: 'b4', kind: 'post', fiber: 'C', text: 'Two calls for you today.' }, 12),
   ],
@@ -577,13 +577,14 @@ it('draws a record two families share once, asks again a minute before its newes
   } finally { delete BOARD.V; delete BOARD.D }
 })
 
-it('names a run of one sender once, and lets a thread\'s worker speak unnamed', async () => {
+it('shows the chair once, by its latest line, however many it sent', async () => {
   BOARD.C.push(record({ id: 'b5', kind: 'post', fiber: 'C', text: 'And one more thing.' }, 8))
   try {
     daemon()
     const { host } = await mount()
     const rows = [...host.querySelectorAll('.kbn-ch .kbn-ch-msg')].map(el => [el.querySelector('.kbn-ch-msg-name')?.textContent ?? null, el.hasAttribute('data-continued')])
-    expect(rows).toStrictEqual([['κ × tSZ', false], ['Cluster mask', false], ['cmbx chair', false], [null, true]])
+    expect(rows).toStrictEqual([['κ × tSZ', false], ['Cluster mask', false], ['cmbx chair', false]])
+    expect(message(host, 'cmbx chair').textContent).toContain('And one more thing.')
   } finally { BOARD.C.pop() }
 })
 
@@ -614,15 +615,15 @@ it('keeps a channel read to the moment it was left', async () => {
 })
 
 it('takes no older record with the same words for the board\'s record of a reply', async () => {
-  // A worker told "ok" a week ago: a new "ok" from here still shows until its own record arrives.
-  BOARD.C.push(record({ id: 'old-ok', kind: 'human', fiber: 'C', by: { label: 'Sam' }, text: 'ok' }, 7 * 24 * 60))
+  // The chair was told "ok" from here a week ago: a new "ok" still shows beside it until its own record arrives.
+  BOARD.C.push(record({ id: 'brd-human-old-ok', kind: 'human', fiber: 'C', by: { label: 'Sam' }, text: 'ok' }, 7 * 24 * 60))
   try {
     daemon()
     const { host, reply } = await mount()
     reply.value = 'ok'
     host.querySelector<HTMLFormElement>('.kbn-ch-reply')!.requestSubmit()
     await settle()
-    expect([...host.querySelectorAll('.kbn-ch .kbn-ch-msg[data-human] .kbn-ch-msg-text')].map(el => el.textContent?.trim())).toStrictEqual(['ok'])
+    expect([...host.querySelectorAll('.kbn-ch .kbn-ch-msg[data-human] .kbn-ch-msg-text')].map(el => el.textContent?.trim())).toStrictEqual(['ok', 'ok'])
   } finally { BOARD.C.pop() }
 })
 

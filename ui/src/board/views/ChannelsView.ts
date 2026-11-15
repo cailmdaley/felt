@@ -14,6 +14,8 @@ import {
 } from '../channels.js'
 import { createRailReorder, type RailReorder } from '../channelRail.js'
 import { openActionMenu } from '../conversationMenu.js'
+import { conversationDevice } from '../conversationOpening.js'
+import { selectWorker } from '../sessionHistory.js'
 import type { SentFile } from '../sentFiles.js'
 import { stateDot } from '../stateDot.js'
 import { cardNamed } from '../threads.js'
@@ -552,6 +554,8 @@ export class ChannelsView implements TemporalView {
     this.restoreDrafts()
     this.landing.thread = true
     this.drawChannel(); this.drawThread()
+    // Rex moves quietly to the window the thread's live worker already has; nothing opens.
+    if (card?.tmuxSession && this.ctx && conversationDevice().desktop) void selectWorker(this.ctx.shuttleBase, card.tmuxSession, card.shuttleHost)
     if (card) this.threadEl?.focus({ preventScroll: true })
     else this.channelEl?.focus({ preventScroll: true })
   }
@@ -664,7 +668,7 @@ export class ChannelsView implements TemporalView {
       return
     }
     this.readTapestry(channel.seat)
-    const now = Date.now(), lines = channelLines(this.messages(channel), channel), failed = this.historyFailed(channel)
+    const now = Date.now(), lines = channelLines(this.messages(channel)), failed = this.historyFailed(channel)
     for (const { message } of lines) this.readTapestry(message.card)
     const sig = JSON.stringify([channel.key, channel.name, failed, this.thread && fiberOf(this.thread), [...this.tempering], [...this.expanded.keys()], [...this.unfolded],
       lines.map(({ message, replies, last, waiting }) => [message.id, message.kind, message.text, waiting, message.card.name, message.card.turn, message.files.map(file => file.fullPath), replies, last, this.embedded(message.card, 'channel')])])

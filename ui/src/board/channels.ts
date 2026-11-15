@@ -337,7 +337,7 @@ export function composeMessages(input: {
     if (!card) continue
     const by = record.by ?? {}, text = record.text?.trim() ?? ''
     const base = { id: record.id, arrived: record.received_at ?? record.timestamp }
-    // The human's line is a channel line when the board sent it to the chair; any other stays in its thread.
+    // The human's board line is a channel line when it went to the chair; any other stays in its thread.
     const yours = { ...base, human: true, quiet: !(record.id.startsWith(BOARD_LINE) && sameFiber(card, channel.seat)) }
     switch (record.kind) {
       case 'post': {
@@ -366,8 +366,8 @@ export function composeMessages(input: {
         break
       }
       case 'human':
-      case 'spoken':
-        said(card, 'reply', text, record.timestamp, yours)
+        // Lines typed or spoken in the worker's own terminal belong to that conversation, which Rex shows; the board keeps the ones sent from it.
+        if (record.id.startsWith(BOARD_LINE)) said(card, 'reply', text, record.timestamp, yours)
         break
       case 'answered': {
         // The human's answer is recorded with the question it answers.
@@ -436,25 +436,30 @@ export interface Line { message: Message; replies: number; last: number; waiting
 const SPEAKING: readonly MessageKind[] = ['post', 'ask', 'review', 'turn', 'file', 'tapestry']
 
 /**
- * A channel's stream, as Slack keeps a channel short: everything its chair
- * says, and the human's lines to it, each a line; every other worker one line,
- * the latest thing it said, marked waiting when something of its waits on the
- * human, with its thread's size and latest time. Oldest first, by each line's
- * time. A worker that has said nothing is not in it.
+ * A channel's stream, as Slack keeps a channel short: every worker, its chair
+ * included, one line, the latest thing it said (a send of its own tapestry
+ * page counting as that tapestry), marked waiting when something of its waits
+ * on the human, with its thread's size and latest time; and the human's lines
+ * to the chair. Oldest first, by each line's time. A worker that has said
+ * nothing is not in it.
  */
-export function channelLines(messages: readonly Message[], channel: Channel): Line[] {
+export function channelLines(messages: readonly Message[]): Line[] {
   const lines: Line[] = []
   const workers = new Map<string, KanbanCard>()
   for (const message of messages) {
     if (message.quiet) continue
-    if (sameFiber(message.card, channel.seat)) lines.push({ message, replies: 0, last: message.at, waiting: message.waiting })
+    // The human's own words to the chair stand in the channel; every thread, the chair's included, shows only its latest.
+    if (message.human) lines.push({ message, replies: 0, last: message.at, waiting: message.waiting })
     else workers.set(fiberOf(message.card), message.card)
   }
   for (const card of workers.values()) {
     const thread = threadOf(messages, card)
     const said = thread.filter(message => message.card === card && !message.human && !message.quiet && SPEAKING.includes(message.kind))
-    const shown = said.at(-1)
-    if (shown) lines.push({ message: shown, replies: thread.length - 1, last: Math.max(...thread.map(message => message.at)), waiting: said.some(message => message.waiting) })
+    // A send of the worker's own tapestry page is that tapestry again, not a message of its own.
+    const tapestry = said.filter(message => message.kind === 'tapestry').at(-1)
+    const latest = said.filter(message => !(tapestry && message.kind === 'file' && message.files.length > 0
+      && message.files.every(file => file.fullPath === tapestry.path || file.fullPath.endsWith('/tapestry.html')))).at(-1)
+    if (latest) lines.push({ message: latest, replies: thread.length - 1, last: Math.max(...thread.map(message => message.at)), waiting: said.some(message => message.waiting) })
   }
   return lines.sort((a, b) => a.message.at - b.message.at || a.message.id.localeCompare(b.message.id))
 }
