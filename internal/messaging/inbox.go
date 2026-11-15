@@ -168,12 +168,15 @@ func inboxRoot(env *sysenv.Env, address string) (string, error) {
 // no-op when the content and wishes match or the entry is Derived; otherwise it
 // is a message_id_conflict. A session inbox refuses an id already pending. A
 // thread notice past its retention is not stored for a fiber and refused as
-// expired for a session.
+// expired for a session. Routed thread notices use the same durable entry
+// without requiring a live session registration; their consumer owns the
+// handoff, and hooks cannot offer them before routing is resolved.
 func Enqueue(env *sysenv.Env, e InboxEntry) error {
 	if e.Created != nil {
 		*e.Created = false
 	}
-	if e.Derived && !e.localTransfer {
+	threadPublication := e.Routing != nil || (strings.HasPrefix(e.Request.MessageID, "thread-") && !strings.HasPrefix(e.Address, "shuttle://"))
+	if e.Derived && threadPublication && !e.localTransfer {
 		unlock, err := lockInbox(filepath.Join(dataDir(env), "mailboxes"))
 		if err != nil {
 			return err

@@ -68,26 +68,36 @@ func lockInbox(root string) (func(), error) {
 // entries, not another receipt store: imported ack-only entries live in offered.
 // The mailboxes lock serializes derived writers; readers may only finalize them.
 func publicationExists(env *sysenv.Env, id string) (bool, error) {
-	paths, err := filepath.Glob(filepath.Join(dataDir(env), "mailboxes", "*", "*", "*", mailboxKey(id)+".json"))
+	roots, err := filepath.Glob(filepath.Join(dataDir(env), "mailboxes", "*", "*"))
 	if err != nil {
 		return false, err
 	}
-	for _, path := range paths {
-		state := filepath.Base(filepath.Dir(path))
-		if state != "pending" && state != "offered" {
-			continue
-		}
-		st, err := os.Stat(path)
+	for _, root := range roots {
+		info, err := os.Stat(root)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
 		if err != nil {
 			return false, err
 		}
-		if state == "offered" && time.Since(st.ModTime()) > mailboxRetention {
+		if !info.IsDir() {
 			continue
 		}
-		return true, nil
+		// Check pending before offered, so a concurrent finalization's rename
+		// cannot fall between two directory scans and hide the publication.
+		for _, state := range []string{"pending", "offered"} {
+			st, err := os.Stat(filepath.Join(root, state, mailboxKey(id)+".json"))
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return false, err
+			}
+			if state == "offered" && time.Since(st.ModTime()) > mailboxRetention {
+				continue
+			}
+			return true, nil
+		}
 	}
 	return false, nil
 }
@@ -305,7 +315,7 @@ func SettleRoute(env *sysenv.Env, address, id, disposition string) error {
 // interrupted import is safe: acknowledgments win, and Enqueue keeps the first
 // pending publication. The state file survives removal and future boots.
 func BootThreadInbox(env *sysenv.Env) (ThreadInboxState, error) {
-	unlock, err := lockInbox(filepath.Join(dataDir(env), "thread-import"))
+	unlock, err := lockInbox(filepath.Join(dataDir(env), "mailboxes", ".thread-import"))
 	if err != nil {
 		return ThreadInboxState{}, err
 	}
@@ -469,6 +479,12 @@ func bootThreadInbox(env *sysenv.Env, imported func(string) error) (ThreadInboxS
 				delete(record, "parent")
 			}
 		}
+		// A pending session handoff may already have reached a remote session
+		// without a confirmation. Its transport identity changes when it moves
+		// into the session inbox, so the next emission must disclose that risk.
+		if routeString(record, "session") != "" {
+			record["possible_repeat"] = true
+		}
 		entry, err := ThreadEntry(id, record)
 		if err != nil {
 			return state, err
@@ -522,10 +538,25 @@ func importThreadAck(env *sysenv.Env, id string) error {
 			return err
 		}
 	}
-	// An interrupted earlier import may have installed a pending copy first.
+	// Remove only routed copies from an interrupted import. An ordinary
+	// pending entry is the durable handoff the old outbox acknowledged: it
+	// still belongs to its worker and must not be mistaken for an outbox copy.
 	paths, _ := filepath.Glob(filepath.Join(dataDir(env), "mailboxes", "*", "*", "pending", mailboxKey(id)+".json"))
 	for _, path := range paths {
+		entry, readErr := readFiberMailboxEntry(path)
+		if errors.Is(readErr, os.ErrNotExist) {
+			continue
+		}
+		if readErr != nil {
+			return readErr
+		}
+		if entry.Routing == nil {
+			continue
+		}
 		if err = os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err = syncDir(filepath.Dir(path)); err != nil {
 			return err
 		}
 	}

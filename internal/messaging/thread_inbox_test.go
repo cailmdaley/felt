@@ -260,6 +260,84 @@ func TestThreadImportPreservesCutoffAndCorruptSource(t *testing.T) {
 		t.Fatal(routes)
 	}
 }
+func TestThreadImportSessionHandoffDisclosesPossibleRepeat(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	root := seedOutbox(t, env)
+	record := threadRecord()
+	record["session"] = "shuttle://remote/claude/asker"
+	seedPending(t, root, "thread-result-asker", record)
+	bootThread(t, env)
+	routes, err := RoutedEntries(env, "host")
+	if err != nil || len(routes) != 1 || routes[0].Address != record["session"] || routes[0].Record["possible_repeat"] != true {
+		t.Fatalf("imported session: %+v %v", routes, err)
+	}
+}
+
+func TestThreadImportPendingWriteCrashThenAcknowledgmentWins(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	root := seedOutbox(t, env)
+	seedPending(t, root, "acked", threadRecord())
+	stopped := errors.New("death after pending write")
+	if _, err := bootThreadInbox(env, func(string) error { return stopped }); !errors.Is(err, stopped) {
+		t.Fatal(err)
+	}
+	if routes, err := RoutedEntries(env, "host"); err != nil || len(routes) != 1 {
+		t.Fatalf("pending not durable: %+v %v", routes, err)
+	}
+	os.WriteFile(filepath.Join(root, "acked", mailboxKey("acked")), []byte("acked"), 0600)
+	bootThread(t, env)
+	if routes, err := RoutedEntries(env, "host"); err != nil || len(routes) != 0 {
+		t.Fatalf("ack lost: %+v %v", routes, err)
+	}
+	enqueueThread(t, env, "acked", threadRecord())
+	if routes, _ := RoutedEntries(env, "host"); len(routes) != 0 {
+		t.Fatal(routes)
+	}
+}
+
+func TestThreadImportKeepsAlreadyEnqueuedAcknowledgedResult(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	root := seedOutbox(t, env)
+	// Contract 40 acknowledged this inbox entry before its worker took it.
+	if err := Enqueue(env, InboxEntry{Address: "/store:parent", Request: Request{MessageID: "acked", Text: "already enqueued"}, Derived: true}); err != nil {
+		t.Fatal(err)
+	}
+	seedPending(t, root, "acked", threadRecord())
+	os.WriteFile(filepath.Join(root, "acked", mailboxKey("acked")), []byte("acked"), 0600)
+	bootThread(t, env)
+	if n, err := PendingCount(env, "/store:parent"); err != nil || n != 1 {
+		t.Fatalf("ack destroyed recipient's pending result: %d %v", n, err)
+	}
+}
+
+func TestThreadImportAcceptsLargeBacklogAndInterruptedCleanup(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	root := seedOutbox(t, env)
+	record := threadRecord()
+	for i := 0; i < 140; i++ {
+		seedPending(t, root, time.Unix(int64(i), 0).String(), record)
+	}
+	state := bootThread(t, env)
+	if routes, err := RoutedEntries(env, "host"); err != nil || len(routes) != 140 {
+		t.Fatalf("backlog: %d %v", len(routes), err)
+	}
+	// Recursive deletion was interrupted after the completed source was renamed.
+	if err := os.MkdirAll(root+".imported/pending", 0700); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(root+".imported", "pending", "partial"), []byte("partial"), 0600)
+	if got := bootThread(t, env); got.Baseline != state.Baseline {
+		t.Fatal(got)
+	}
+	if _, err := os.Stat(root + ".imported"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
+}
+
 func TestFreshThreadInboxBaselineAndSnapshotImport(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
