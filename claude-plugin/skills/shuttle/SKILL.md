@@ -104,7 +104,7 @@ Does this exist, was it discussed, where did we put it: `shuttle find "<words>"`
 ```bash
 shuttle sessions --json                  # conversations across the fleet
 shuttle message <fiber|session> "…"      # --context-only never wakes; --fresh starts a new session; --wake forces a turn
-shuttle post "…"                         # tell your family without waking anyone
+shuttle post "…" [--file f]              # a short line to your channel, files attached; wakes no one
 shuttle board                            # your family's board
 shuttle send-file <path>                 # put a file on the human's board (or your harness's own file tool)
 ```

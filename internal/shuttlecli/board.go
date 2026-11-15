@@ -33,6 +33,8 @@ type boardRecord struct {
 	Text       string      `json:"text,omitempty"`
 	Wake       bool        `json:"wake,omitempty"`
 	Verdict    string      `json:"verdict,omitempty"`
+	// Files are the absolute paths a post attaches, each also recorded as a sent file.
+	Files []string `json:"files,omitempty"`
 }
 
 func boardText(text string) string {
@@ -349,6 +351,7 @@ func (a *app) boardCmd() *cobra.Command {
 
 func (a *app) postCmd() *cobra.Command {
 	var fiber string
+	var attach []string
 	cmd := &cobra.Command{Use: "post <text|->", Short: "Post to a family board without waking a worker", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		var uid string
 		if fiber != "" {
@@ -378,8 +381,16 @@ func (a *app) postCmd() *cobra.Command {
 		if strings.TrimSpace(text) == "" {
 			return fmt.Errorf("post text is empty")
 		}
-		return a.appendBoard(boardRecord{Kind: "post", Fiber: uid, By: &boardParty{Fiber: uid}, Text: text})
+		var files []string
+		if len(attach) > 0 {
+			var err error
+			if files, err = a.sendFiles(attach, ""); err != nil {
+				return err
+			}
+		}
+		return a.appendBoard(boardRecord{Kind: "post", Fiber: uid, By: &boardParty{Fiber: uid}, Text: text, Files: files})
 	}}
 	cmd.Flags().StringVar(&fiber, "fiber", "", "Post as the named family member")
+	cmd.Flags().StringArrayVar(&attach, "file", nil, "Attach a file to the post (repeatable); it is also recorded as a sent file")
 	return cmd
 }

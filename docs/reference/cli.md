@@ -637,10 +637,11 @@ Read family activity from the local daemon, oldest first.
 Omit the fiber inside a worker to use its own family; `--all` reads across families.
 Each stretch of the human's turns, typed or spoken, reads as one line counting them per worker; `--turns` lists them in full, and `--json` always carries them.
 
-### `shuttle post <text|-> [--fiber <id>]`
+### `shuttle post <text|-> [--fiber <id>] [--file <path>]...`
 
-Post to a family board without waking a worker.
+Post to a family board without waking a worker. A post is a line in its channel on the board.
 The current worker identifies the member, or `--fiber` selects one explicitly; `-` reads the text from stdin.
+Each `--file` attaches a readable regular file: it is recorded as a sent file, as `shuttle send-file` records it, and the post lists its absolute path in `files`.
 Recording works offline.
 
 ### `shuttle send-file <path> [path...]`

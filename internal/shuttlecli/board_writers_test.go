@@ -146,6 +146,32 @@ func TestBoardAppendAndPost(t *testing.T) {
 	}
 }
 
+func TestPostAttachesFiles(t *testing.T) {
+	env := testEnv(t)
+	env.Set("SHUTTLE_HOST", "host")
+	env.Set("SHUTTLE_EVENTS", "")
+	env.Set("CLAUDE_CODE_SESSION_ID", "worker-session")
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	env.Set("SHUTTLE_EVENTS_FILE", path)
+	dir, st := newStore(t)
+	seedShuttleRole(t, st, "f", felt.StatusActive, map[string]any{"kind": "oneshot", "host": "host", "project_dir": t.TempDir()}, nil)
+	plot := filepath.Join(t.TempDir(), "plot.png")
+	if err := os.WriteFile(plot, []byte("png"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, stderr, err := executeIn(t, env, dir, "post", "--fiber", "f", "--file", plot, "here is the plot"); err != nil {
+		t.Fatalf("post: %v %s", err, stderr)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(raw), `"type":"file_sent"`) {
+		t.Fatalf("file not recorded as sent: %v %s", err, raw)
+	}
+	records := readBoardRecords(t, path)
+	if len(records) != 1 || records[0].Kind != "post" || len(records[0].Files) != 1 || records[0].Files[0] != plot {
+		t.Fatalf("records %+v", records)
+	}
+}
+
 func TestBoardMessageClearsAsk(t *testing.T) {
 	env := testEnv(t)
 	env.Set("SHUTTLE_HOST", "host")
