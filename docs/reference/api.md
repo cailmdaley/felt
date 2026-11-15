@@ -215,6 +215,9 @@ user_message?, images?, project_dir?, release_launch_reservation?, existing_only
 adopt's line returns as `carried` in the response body; an adopt refusal answers 422 `{dispatched: false, reason: "adopt_refused", fiber_id, error}` without dispatching, and a carried request for a fiber the owner lacks answers 404 with `reason` and `error_code` both `fiber_not_found`, plus `host`, `fiber` and `error`.
 `images` is up to 8 `{name, data}` objects, `data` base64 PNG, JPEG, GIF or WebP, 20 MB in all; the body may reach 32 MB.
 The owning daemon writes each to `<data dir>/images/<sha256>.<ext>` and appends one `[Image: <path>]` line per image to `user_message`; anything else answers 400 before a launch.
+`resume_mode` is `previous` (resume the fiber's session), `fresh` (a new session, cutting a live one), `continue`, or absent (the autonomous rule).
+`continue` lets the worker's state choose, as a human line through `/deliver` does: a live worker has the message typed into it, otherwise the session starts fresh after a clean handoff and is resumed (or started cold) when it ended without one.
+The board console's plain send uses `continue`.
 With `existing_only: true`, only a `previous` message to a live worker is allowed.
 A missing worker returns 422 `no_live_worker` without arming, reopening or launching anything.
 The change reader uses this form.

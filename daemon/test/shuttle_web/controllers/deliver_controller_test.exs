@@ -954,6 +954,60 @@ defmodule ShuttleWeb.DeliverControllerTest do
     assert script =~ "join the meeting"
   end
 
+  # The board console's plain send: `/dispatch` with `resume_mode: continue`
+  # lets the worker's state choose, as a human line through `/deliver` does.
+  defp console_send(fiber_id, text, id) do
+    api_conn()
+    |> post(
+      "/api/v1/dispatch",
+      Jason.encode!(%{
+        "fiber_id" => fiber_id,
+        "force" => true,
+        "ad_hoc" => true,
+        "resume_mode" => "continue",
+        "user_message" => text,
+        "message_id" => id
+      })
+    )
+  end
+
+  test "a console send after a clean handoff starts fresh carrying the line" do
+    session = "de11ae00-0000-4000-8000-000000000004"
+
+    put_previous_run("tests/console-handed-off", session, %{
+      "handed_off_at" => DateTime.to_iso8601(DateTime.utc_now())
+    })
+
+    write_transcript(session, 30)
+
+    assert %{"dispatched" => true} =
+             console_send("tests/console-handed-off", "join the meeting", "human-c1")
+             |> json_response(200)
+
+    script = run_script()
+    refute script =~ "--resume"
+    assert script =~ "join the meeting"
+  end
+
+  test "a console send to a live worker types the line and cuts nothing" do
+    fiber_id = "tests/console-live"
+    put_constitution(fiber_id)
+    assert {:ok, session} = Poller.dispatch_fiber(fiber_id, force: true)
+
+    count = fn verb ->
+      Enum.count(MockRunner.commands(), fn {cmd, args} -> cmd == "tmux" and hd(args) == verb end)
+    end
+
+    launches = count.("new-session")
+
+    assert %{"tmux_session" => ^session} =
+             console_send(fiber_id, "one more thing", "human-c2") |> json_response(200)
+
+    assert count.("load-buffer") == 1
+    assert count.("new-session") == launches
+    assert Poller.live_worker(fiber_id).session == session
+  end
+
   test "a live worker is messaged at its conversation instead of relaunched" do
     fiber_id = "tests/deliver-live"
     session_uuid = message_live_worker(fiber_id)

@@ -58,29 +58,40 @@ defmodule Shuttle.Delivery do
         opts[:message_id],
         "human",
         fn _entry ->
-          mode =
-            opts[:resume_mode] ||
-              cond do
-                Poller.live_worker(fiber_id) -> "previous"
-                opts[:source] == "voice" -> "resume_or_start"
-                true -> "continue"
-              end
-
-          # A worker that appeared between the look and the launch takes the
-          # line as typed input.
-          case dispatch.(mode) do
-            {:error, :already_running} when mode in ["continue", "resume_or_start"] ->
-              dispatch.("previous")
-
-            result ->
-              result
-          end
+          if opts[:resume_mode],
+            do: dispatch.(opts[:resume_mode]),
+            else: human_launch(fiber_id, dispatch, opts[:source])
         end,
         source: opts[:source],
         record_only: opts[:record_only]
       )
 
     {:human, result}
+  end
+
+  @doc """
+  Dispatches a human's line in the mode the worker's state chooses, through
+  `dispatch` (a function of the resume mode): typed into a live worker
+  (`previous`), else `continue` (`resume_or_start` for voice), which starts
+  fresh after a clean handoff and otherwise resumes the session or starts
+  cold. A worker that appeared between the look and the launch takes the line
+  as typed input.
+  """
+  def human_launch(fiber_id, dispatch, source \\ nil) do
+    mode =
+      cond do
+        Poller.live_worker(fiber_id) -> "previous"
+        source == "voice" -> "resume_or_start"
+        true -> "continue"
+      end
+
+    case dispatch.(mode) do
+      {:error, :already_running} when mode in ["continue", "resume_or_start"] ->
+        dispatch.("previous")
+
+      result ->
+        result
+    end
   end
 
   @doc """
