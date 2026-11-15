@@ -74,7 +74,8 @@ export interface ViewContext extends TemporalFetchers {
     readonly isActive: boolean
     readonly dock: { openConversation(card: KanbanCard): boolean }
     readonly library: Library
-    reach(card: KanbanCard): Promise<boolean>
+    /** The board looks at a fiber, or at none: voice and Rex follow it together (`Workspace.look`). */
+    look(card: KanbanCard | null): Promise<boolean>
     openFromDesk(card: KanbanCard): void
     /** A fiber's page, or one of its documents; a fiber the board does not hold is read from its owner first. */
     openPage(card: KanbanCard, doc?: DocKey): void
@@ -109,8 +110,6 @@ export interface ViewContext extends TemporalFetchers {
   openCard(cardId: string): void
   /** Re-fetch the board's own feed now, rather than on the next poll. */
   requestRefresh(): void
-  /** The card this view puts in front of the human, which voice may then address; null when none. */
-  see?(card: KanbanCard | null): void
 }
 
 /** A view's id, or `desk` for the kanban page KanbanModal renders itself. */

@@ -1167,15 +1167,51 @@ describe('workspace reader integration', () => {
       vi.mocked(fetch).mockImplementation(async (input, init) => String(input).endsWith('/api/v1/attach') ? Response.json({ moved, session: 'worker-hub' }) : original(input, init))
     }
     answer(true)
-    expect(await workspace.reach(worker)).toBe(true)
+    expect(await workspace.look(worker)).toBe(true)
     expect(selections()).toEqual([{ tmux_session: 'worker-hub', shuttle_host: 'host-a', select_only: true }])
     expect(sight).toHaveBeenLastCalledWith(worker)
+    // Looking again at what the board looks at moves nothing, and answers as the first look did.
     answer(false)
-    expect(await workspace.globeHost.converse(worker)).toBe(false)
+    expect(await workspace.globeHost.converse(worker)).toBe(true)
+    expect(selections()).toHaveLength(1)
     expect(await workspace.globeHost.converse(past)).toBe(false)
-    expect(selections()).toHaveLength(2)
+    expect(selections()).toHaveLength(1)
     expect(sight).toHaveBeenLastCalledWith(past)
+    expect(await workspace.globeHost.converse(worker)).toBe(false)
+    expect(selections()).toHaveLength(2)
     expect(conversation).not.toHaveBeenCalled()
+  })
+  it('moves voice and Rex together from every page the board shows, to the constitution a page speaks to, once per target', async () => {
+    const hub = card({ id: 'hub', uid: 'hub', originId: 'host-a', shuttleHost: 'host-a', shuttleKind: 'oneshot', status: 'active', path: 'hub.md', tmuxSession: 'worker-hub', workerState: 'running' })
+    const report = card({ id: 'hub/report', uid: 'hub-report', originId: 'host-a', status: 'open', path: 'hub/report.md' })
+    const other = card({ id: 'other', uid: 'other', originId: 'host-a', shuttleHost: 'host-a', shuttleKind: 'oneshot', status: 'active', path: 'other.md', tmuxSession: 'worker-other', workerState: 'running' })
+    const feed = [hub, report, other]
+    bodyCards = feed
+    workspace.dispose()
+    const dock = new Dock('', changed), sight = vi.fn()
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, origin: () => 'Desk', onVisibility: visibility, onSight: sight, dock })
+    const rex = (): unknown[] => selections().map(body => body.tmux_session)
+    // A fiber's own page, opened from anywhere: voice and Rex reach its worker.
+    workspace.open(other, 'Desk'); await settle()
+    expect(sight).toHaveBeenLastCalledWith(other)
+    expect(rex()).toEqual(['worker-other'])
+    // A page of a fiber under a constitution speaks to that constitution: both follow it.
+    workspace.open(report, 'Desk'); await settle()
+    expect(sight).toHaveBeenLastCalledWith(hub)
+    expect(rex()).toEqual(['worker-other', 'worker-hub'])
+    // Repaints of the same page post nothing more.
+    workspace.open(report, 'Desk'); await settle()
+    expect(rex()).toEqual(['worker-other', 'worker-hub'])
+    // Rex moved itself to a worker: the board following it there writes nothing back.
+    workspace.rexAt('other', 'host-a')
+    workspace.open(other, 'Desk'); await settle()
+    expect(sight).toHaveBeenLastCalledWith(other)
+    expect(rex()).toEqual(['worker-other', 'worker-hub'])
+    // Leaving the reader looks at nothing; coming back reaches the worker again.
+    await pop(() => workspace.returnToOrigin())
+    expect(sight).toHaveBeenLastCalledWith(null)
+    workspace.open(other, 'Desk'); await settle()
+    expect(rex()).toEqual(['worker-other', 'worker-hub', 'worker-other'])
   })
   it('tells voice what it shows: the thread the page has selected, the page elsewhere, and moves Rex quietly from a click', async () => {
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>

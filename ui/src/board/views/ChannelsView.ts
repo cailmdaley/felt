@@ -14,8 +14,6 @@ import {
 } from '../channels.js'
 import { createRailReorder, type RailReorder } from '../channelRail.js'
 import { openActionMenu } from '../conversationMenu.js'
-import { conversationDevice } from '../conversationOpening.js'
-import { selectWorker } from '../sessionHistory.js'
 import type { SentFile } from '../sentFiles.js'
 import { stateDot } from '../stateDot.js'
 import { cardNamed } from '../threads.js'
@@ -554,8 +552,6 @@ export class ChannelsView implements TemporalView {
     this.restoreDrafts()
     this.landing.thread = true
     this.drawChannel(); this.drawThread()
-    // Rex moves quietly to the window the thread's live worker already has; nothing opens.
-    if (card?.tmuxSession && this.ctx && conversationDevice().desktop) void selectWorker(this.ctx.shuttleBase, card.tmuxSession, card.shuttleHost)
     if (card) this.threadEl?.focus({ preventScroll: true })
     else this.channelEl?.focus({ preventScroll: true })
   }
@@ -658,7 +654,7 @@ export class ChannelsView implements TemporalView {
   private drawChannel(): void {
     if (!this.head || !this.stream || !this.channelReply) return
     const channel = this.channel
-    if (!this.ctx?.workspace?.isActive) this.ctx?.see?.(this.threadCard ?? channel?.seat ?? null)
+    if (!this.ctx?.workspace?.isActive) void this.ctx?.workspace?.look(this.threadCard ?? channel?.seat ?? null)
     this.channelReply.form.hidden = !channel
     this.layout?.toggleAttribute('data-channel', !!channel)
     if (!channel) {

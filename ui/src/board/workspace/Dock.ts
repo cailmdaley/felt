@@ -585,7 +585,7 @@ export class Dock {
    * Take the human to the conversation ({@link conversationRoute}). A reopening
    * sends nothing and starts no turn, and it leaves the card's lifecycle alone,
    * so it holds in every column. This is the explicit act (`c`, the band's
-   * console, a Desk row's menu); a click on a row calls `Workspace.reach` instead.
+   * console, a Desk row's menu); a click on a row calls `Workspace.look` instead.
    */
   openConversation(card: KanbanCard): boolean {
     const route = this.conversationRoute(card)

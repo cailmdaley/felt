@@ -17,13 +17,11 @@ import './globe.css'
 export interface GlobeHost {
   feeds: MapFeeds & { refresh(): void; lead(card: KanbanCard): Promise<MapFile | undefined> }
   openDocument(card: KanbanCard, doc: string): void
-  /** A click's quiet move of Rex to the thread's existing window (`Workspace.reach`); true once Rex moved. */
+  /** The board looks at a thread (`Workspace.look`): voice follows it and Rex moves quietly to its existing window; true once Rex moved. */
   converse(card: KanbanCard): Promise<boolean>
   constitutionKey(card: KanbanCard): string
   /** The daemon's base, which previews read files from. */
   shuttleBase: string
-  /** The thread a surface has come to rest on, which voice follows; null for none. */
-  see?(card: KanbanCard | null): void
   /** Heard when a feed lands. */
   onFeeds?: () => void
 }

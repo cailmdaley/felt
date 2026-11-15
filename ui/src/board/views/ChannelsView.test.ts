@@ -62,13 +62,13 @@ const sentDoc = (uid: string, path: string, minutes: number, fiber = card({ id: 
   ({ card: fiber, receipt: { uid, key: `host:${path}`, owner: 'host', host: 'host', fullPath: path, basename: path.split('/').at(-1)!, timestamp: Date.now() - minutes * minute } })
 const library = [sentDoc('old', '/notes/old/lensing-notes.md', 600, card({ id: 'old', uid: 'old', name: 'Lensing notes' }))]
 async function mount(inFlight = [chair, tsz, mask, beam, van, notes], view = new ChannelsView(), sent: SentFile[] = [], prepare?: (host: HTMLElement) => void, shuttleBase = '') {
-  const openFromDesk = vi.fn(), openPage = vi.fn(), requestRefresh = vi.fn(), see = vi.fn()
+  const openFromDesk = vi.fn(), openPage = vi.fn(), requestRefresh = vi.fn(), see = vi.fn(async () => false)
   const workspace = {
-    openFromDesk, openPage,
+    openFromDesk, openPage, look: see,
     library: { subscribe: () => () => {}, visit: () => {}, cancelOpen: vi.fn(), documents: () => library, receipts: () => [] },
   }
   const sends = { files: sent, subscribe: () => () => {}, refresh: async () => {} }
-  const ctx = { cards: [], response: board(inFlight), shuttleBase, workspace, sends, requestRefresh, openCard: vi.fn(), see } as unknown as ViewContext
+  const ctx = { cards: [], response: board(inFlight), shuttleBase, workspace, sends, requestRefresh, openCard: vi.fn() } as unknown as ViewContext
   const host = document.createElement('div'); document.body.append(host)
   prepare?.(host)
   views.push(view); view.mount(host, ctx)
@@ -104,13 +104,15 @@ it('lists the recent channels, the newest wait first, and reads a channel as a s
 
 it('opens a worker\'s thread from its message: its name, liveness and ask on top, its history, a reply to it', async () => {
   const { posts } = daemon()
-  const { view, host, threadReply, openPage, requestRefresh } = await mount()
+  const { view, host, threadReply, openPage, requestRefresh, see } = await mount()
   const thread = host.querySelector<HTMLElement>('.kbn-ch-thread')!
   expect(thread.hidden).toBe(true)
   message(host, 'κ × tSZ').querySelector<HTMLElement>('.kbn-ch-msg-body')!.click()
   expect(thread.hidden).toBe(false)
   expect(host.querySelector('.kbn-ch-layout')!.hasAttribute('data-thread')).toBe(true)
   expect([thread.querySelector('.kbn-ch-thread-name')?.textContent, thread.querySelector('.kbn-ch-liveness')?.textContent]).toStrictEqual(['κ × tSZ', 'working'])
+  // Opening the thread is the board looking at it: voice and Rex follow its worker.
+  expect(see).toHaveBeenLastCalledWith(tsz)
   expect([...thread.querySelectorAll('.kbn-ch-msg')].map(el => [el.querySelector('.kbn-ch-msg-name')?.textContent, el.getAttribute('data-kind')])).toStrictEqual([[undefined, 'post'], ['You', 'reply']])
   expect(thread.querySelector('.kbn-ch-thread-ask, .kbn-ch-conclusion')).toBeNull()
   thread.querySelector<HTMLButtonElement>('.kbn-ch-thread-name')!.click()

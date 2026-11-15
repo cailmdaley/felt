@@ -78,7 +78,7 @@ import { sameCivilDue } from './civilDay.js'
 import { coarsePointer, onMobileChange } from './mobile.js'
 import { shouldRunVisiblePoll } from '../runtime/PageAttention'
 import { PhoneListening } from './phoneListening'
-import { Voice, constitutionFor } from './voice.js'
+import { Voice } from './voice.js'
 import type { WorkerOpener } from './conversationOpening.js'
 import {
   collectCards,
@@ -417,8 +417,8 @@ export class KanbanModal {
       deskPlacement: card => this.deskProjection.placements.get(deskCardKey(card)),
       threadIndex: () => threadIndexFor(this.deskResponse ?? this.lastResponse),
       origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : this.activeViewId === 'globe' ? 'Globe' : 'Channels',
-      onVisibility: (active) => { this.showWorkspace(active); if (!active) this.voice.see(null) },
-      onSight: card => this.voice.see(card && constitutionFor(card, boardCards(this.lastResponse))),
+      onVisibility: (active) => this.showWorkspace(active),
+      onSight: card => this.voice.see(card),
       onReturnCard: card => {
         this.workspaceReturnCard = { id: card.id, origin: card.originId }
         this.workspaceReturnFocus = null
@@ -434,6 +434,7 @@ export class KanbanModal {
       onExpand: (expanded) => { this.container?.classList.toggle('kbn-reader-expanded', expanded); this.placeReader() },
     })
     this.voice.onRex = ({ fiber_id: id, origin }) => {
+      this.workspace?.rexAt(id, origin)
       if (!this.workspace?.isActive && this.activeView?.reveal?.(id, origin)) return
       this.workspace?.follow(id, origin)
     }
@@ -769,7 +770,7 @@ export class KanbanModal {
     if (navigate && this.workspace) this.workspace.suspend(id)
     if (id === this.activeViewId) return
     this.workspace?.clearFind()
-    if (!this.workspace?.isActive) this.voice.see(null)
+    if (!this.workspace?.isActive) void this.workspace?.look(null)
     this.activeView?.unmount()
     this.activeView = null
     if (this.viewHostEl) this.viewHostEl.innerHTML = ''
@@ -930,7 +931,6 @@ export class KanbanModal {
         if (card) this.openDocumentChannel(card)
       },
       requestRefresh: () => { void this.fetchAndRender() },
-      see: card => this.voice.see(card),
     }
   }
 

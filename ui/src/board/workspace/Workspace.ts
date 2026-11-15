@@ -36,7 +36,7 @@ import type { MapFile } from '../family/model.js'
 import { FamilyActivity } from './familyActivity.js'
 import { markSeen, unseenSince } from './DocumentSeen.js'
 import { FiberSends } from '../fiberSends.js'
-import type { BoardOpen } from '../voice.js'
+import { constitutionFor, type BoardOpen } from '../voice.js'
 import { parseRoute, viewOfHash, WorkspaceHistory, type WorkspaceOriginView, type WorkspaceRoute } from './route.js'
 import { ChannelThemes } from './ChannelThemes.js'
 import { changeReviewTarget } from './changeReviewTarget.js'
@@ -53,7 +53,7 @@ export interface WorkspaceOptions {
   deskPlacement?(card: KanbanCard): DeskPlacement | undefined
   origin(): string
   onVisibility(active: boolean): void
-  /** The fiber the page shows, which voice follows. */
+  /** The constitution the board looks at, or none: voice follows it (`Workspace.look`). */
   onSight?(card: KanbanCard | null): void
   onReturnCard?(card: KanbanCard): void
   onEscapeHome?(): void
@@ -72,6 +72,9 @@ export interface WorkspaceOptions {
   /** The fleet's sent files; a workspace without one reads its own. */
   sends?: FiberSends
 }
+/** A look's identity: the constitution and the worker it has, so a worker that starts later is still reached. */
+const rexKey = (card: KanbanCard | null): string =>
+  card ? [card.originId, card.uid ?? card.id, card.shuttleHost ?? '', card.tmuxSession ?? ''].join('\u0000') : ''
 interface ChannelState {
   card: KanbanCard
   channel: Channel
@@ -137,6 +140,8 @@ export class Workspace {
   private readonly mentions: ReturnType<typeof bindConstitutionMentions>
   private timer: number | null = null
   private disposed = false
+  /** What the board last looked at, by its worker, and whether Rex moved there. */
+  private looked: { key: string; moved: Promise<boolean> } = { key: '', moved: Promise.resolve(false) }
   private routeEpoch = 0
   private startPrompt: { card: KanbanCard; failure: DispatchFailureBody } | null = null
   /** The complete board-card payload used by the reader's thread and runtime surfaces. */
@@ -169,10 +174,9 @@ export class Workspace {
     this.globeHost = {
       feeds: this.mapFeeds,
       openDocument: (card, doc) => this.openFromMap(card, doc),
-      converse: card => this.reach(card),
+      converse: card => this.look(card),
       constitutionKey: card => fiberKey(card.originId, card.uid ?? card.id),
       shuttleBase: opts.shuttleBase,
-      see: card => this.opts.onSight?.(card),
     }
     this.mentions = bindConstitutionMentions(root, opts.cards, (id, origin) => { void this.openFiber(id, origin) }, {
       shuttleBase: opts.shuttleBase, frameActive: frame => frameBridge(frame)?.active ?? null,
@@ -327,7 +331,7 @@ export class Workspace {
     if (map) this.enter(map.root, undefined, map.page)
     else if (card.status === 'active' && isQuestion(card)) this.openQuestion(card)
     else this.open(card)
-    void this.reach(card)
+    void this.look(card)
   }
   /**
    * Readies a fiber of a family to land on its root's page, at its row, and
@@ -705,19 +709,33 @@ export class Workspace {
     return page
   }
   /**
-   * What every click on a thread does to Rex: voice follows the thread, and Rex
-   * moves quietly to the window its live worker already has. Nothing opens, is
-   * created or resumed, so a thread without one leaves Rex be; opening is `c`
-   * or Open in Rex (`Dock.openConversation`). Resolves true if Rex moved.
+   * The board looks at `card`, or at no fiber: the one act every surface that
+   * changes what is looked at goes through. Its constitution is the target:
+   * voice follows it, and on the desktop Rex moves quietly to the window its
+   * live worker already has. Nothing opens, is created or resumed, so a target
+   * without a live worker leaves Rex be; opening is `c` or Open in Rex
+   * (`Dock.openConversation`). Looking again at the same target moves nothing.
+   * Resolves true if Rex moved.
    */
-  reach(card: KanbanCard): Promise<boolean> {
-    this.opts.onSight?.(card)
-    if (!card.tmuxSession || !conversationDevice().desktop) return Promise.resolve(false)
-    return selectWorker(this.opts.shuttleBase, card.tmuxSession, card.shuttleHost)
+  look(card: KanbanCard | null): Promise<boolean> {
+    const target = card && constitutionFor(card, this.opts.cards())
+    this.opts.onSight?.(target)
+    const key = rexKey(target)
+    if (key === this.looked.key) return this.looked.moved
+    const moved = target?.tmuxSession && conversationDevice().desktop
+      ? selectWorker(this.opts.shuttleBase, target.tmuxSession, target.shuttleHost)
+      : Promise.resolve(false)
+    this.looked = { key, moved }
+    return moved
   }
-  /** Voice follows the page: on a constitution's page, the thread it has selected; anywhere else, the page's fiber. */
+  /** Rex moved itself to this fiber's worker: looking at it now moves nothing. */
+  rexAt(id: string, owner: string): void {
+    const card = cardNamed(this.opts.cards(), id, owner)
+    if (card) this.looked = { key: rexKey(constitutionFor(card, this.opts.cards())), moved: Promise.resolve(true) }
+  }
+  /** On a constitution's page the board looks at the thread it has entered; anywhere else, at the page's fiber. */
   private sight(state: ChannelState): void {
-    this.opts.onSight?.(this.mapPage(state)?.settled ?? state.card)
+    void this.look(this.mapPage(state)?.settled ?? state.card)
   }
   /** Lifecycle and conversation acts follow the highlighted thread, else the page's card. */
   private actionCard(card: KanbanCard): KanbanCard {
@@ -729,7 +747,7 @@ export class Workspace {
   }
   private family(): HTMLElement {
     const state = this.current!
-    state.familyPage ??= new FamilyPage({ reach: card => this.reach(card) }, this.mapFeeds, state.mapPlace,
+    state.familyPage ??= new FamilyPage({ reach: card => this.look(card) }, this.mapFeeds, state.mapPlace,
       () => { state.familyPage = undefined },
       () => { if (this.current === state) this.sight(state) },
       () => { if (this.current === state && this.isActive) this.steerBand(state) },
@@ -774,6 +792,7 @@ export class Workspace {
       this.opts.onView?.(view)
       this.depth.setActive(false)
       this.opts.onVisibility(false)
+      void this.look(null)
       this.stopTimer()
       return
     }
