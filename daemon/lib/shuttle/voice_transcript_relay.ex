@@ -1166,7 +1166,7 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
                  5_000
                ),
              {:ok, %{"contract_level" => level}} <- Jason.decode(body) do
-          level >= 43
+          level >= 44
         else
           _ -> false
         end
