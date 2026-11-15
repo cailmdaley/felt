@@ -1,10 +1,8 @@
-/* Channels: a rail of channels beside the channel read. A channel is a
-   chat: each worker's line, oldest first, with what waits on the human lit in
-   the colour of what it wants, the seat's tapestry pinned beside it (or the
-   channel's files in its place), and a reply bar under the lines. Ink on
-   parchment, red for what is new, and as little else as it can do without. */
+/* Channels: a rail of channels, a channel's stream of short messages, and a
+   worker's thread beside it. Ink on parchment, the serif throughout; red marks
+   what is new, the owed gold what waits on the human. */
 .kbn-channels { touch-action: pan-y; }
-/* The page holds still: the rail, the feed and the tapestry each scroll on their own. */
+/* The page holds still: the rail, the stream and the thread each scroll on their own. */
 .kbn-channels .kbn-view-body { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 .kbn-channels .kbn-view-titlerow { gap: 16px; }
 .kbn-ch-keys, .kbn-ch-note {
@@ -14,41 +12,49 @@
 .kbn-ch-keys { margin-left: auto; }
 .kbn-ch-note { margin: 0 0 8px; }
 .kbn-ch-note:empty { display: none; }
-.kbn-ch-rail-toggle, .kbn-ch-act, .kbn-ch-later, .kbn-ch-back, .kbn-ch-tab {
+.kbn-ch-rail-toggle, .kbn-ch-act, .kbn-ch-back, .kbn-ch-thread-close {
   padding: 0; border: 0; background: none; cursor: pointer;
   font: var(--type-meta)/var(--leading-ui) var(--font-serif);
   color: var(--kbn-ink-muted);
   text-decoration: underline; text-decoration-thickness: 0.5px; text-underline-offset: 3px;
   white-space: nowrap;
 }
-.kbn-ch-rail-toggle:hover, .kbn-ch-act:hover, .kbn-ch-later:hover, .kbn-ch-back:hover, .kbn-ch-tab:hover { color: var(--kbn-ink); }
-.kbn-ch-later[hidden] { display: none; }
+.kbn-ch-rail-toggle:hover, .kbn-ch-act:hover, .kbn-ch-back:hover, .kbn-ch-thread-close:hover { color: var(--kbn-ink); }
+.kbn-ch-act:disabled { cursor: default; text-decoration: none; }
+.kbn-ch-hush { list-style: none; font: italic var(--type-row)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink-muted); }
+.kbn-channels button:focus-visible { outline: 1px solid var(--kbn-you); outline-offset: 1px; }
 
 .kbn-ch-layout {
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(150px, 200px) minmax(0, 1fr);
-  gap: 32px;
+  grid-template-columns: minmax(150px, 210px) minmax(0, 1fr);
+  border-top: 0.5px solid var(--kbn-rule);
 }
+.kbn-ch-layout[data-thread] { grid-template-columns: minmax(150px, 210px) minmax(0, 1fr) minmax(0, 0.8fr); }
 .kbn-ch-layout[data-rail-hidden] { grid-template-columns: minmax(0, 1fr); }
+.kbn-ch-layout[data-rail-hidden][data-thread] { grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr); }
 .kbn-ch-layout[data-rail-hidden] .kbn-ch-rail { display: none; }
 
-/* The rail: the waiting channels, then the pinned quiet ones, then the shelf
-   gone cold, then what was read lately; while Find looks, every channel and
-   file it matches. */
-.kbn-ch-rail { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; padding-top: 4px; }
-.kbn-ch-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
-.kbn-ch-shelf {
-  margin: 14px 0 2px 10px;
-  font: 500 var(--type-label)/var(--leading-ui) var(--font-serif);
-  font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker);
-  color: var(--kbn-ink-muted);
+/* The rail: Jump to, then the channels, the chaired ones above the lone constitutions. */
+.kbn-ch-rail {
+  min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px 10px 12px 0;
+  border-right: 0.5px solid var(--kbn-rule);
 }
+.kbn-ch-jump {
+  width: 100%; padding: 5px 10px;
+  border: 0.5px solid var(--kbn-rule-strong); border-radius: 6px;
+  background: var(--kbn-paper-bright, var(--kbn-paper)); color: var(--kbn-ink);
+  font: italic var(--type-meta)/var(--leading-ui) var(--font-serif);
+}
+.kbn-ch-jump:focus { outline: 1px solid var(--kbn-you); outline-offset: -1px; }
+.kbn-ch-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
 .kbn-ch-pick {
-  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  display: flex; align-items: baseline; gap: 6px;
   width: 100%;
-  padding: 6px 10px;
+  padding: 4px 10px;
   border: 0; border-radius: 4px;
   background: none;
   color: var(--kbn-ink-soft);
@@ -57,178 +63,224 @@
   cursor: pointer;
 }
 .kbn-ch-pick:hover { color: var(--kbn-ink); background: color-mix(in srgb, var(--kbn-ink) 5%, transparent); }
-.kbn-ch-pick[aria-current] { color: var(--kbn-ink); background: color-mix(in srgb, var(--kbn-owed-bright) 14%, transparent); }
-.kbn-ch-pick[data-waiting] .kbn-ch-pick-name { font-weight: 600; color: var(--kbn-ink); }
-.kbn-ch-pick[data-quiet]:not([aria-current]) { color: var(--kbn-ink-muted); }
-.kbn-ch-pick-name { min-width: 0; overflow-wrap: anywhere; }
-.kbn-ch-pick-age { flex: none; font: italic var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); }
-.kbn-ch-pick[data-new] .kbn-ch-pick-name::after,
-.kbn-ch-msg[data-new] .kbn-ch-msg-name::after,
-.kbn-ch-said[data-new]::before,
-.kbn-ch-file[data-new]::before {
-  content: '';
-  display: inline-block;
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: var(--kbn-you);
-  vertical-align: 0.18em;
+.kbn-ch-pick[aria-current] { color: var(--kbn-ink); background: color-mix(in srgb, var(--kbn-owed-bright) 16%, transparent); }
+.kbn-ch-pick-hash { flex: none; width: 0.7em; color: var(--kbn-ink-muted); }
+.kbn-ch-pick-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.kbn-ch-pick[data-unread] .kbn-ch-pick-name { font-weight: 700; color: var(--kbn-ink); }
+.kbn-ch-pick[data-lone] { font-size: var(--type-meta); color: var(--kbn-ink-muted); }
+.kbn-ch-pick[data-lone] .kbn-ch-pick-hash { opacity: 0.6; }
+/* Waiting on the human: a dot. */
+.kbn-ch-pick-mark { flex: none; align-self: center; width: 7px; height: 7px; border-radius: 50%; background: var(--kbn-owed-bright); box-shadow: 0 0 0 2px color-mix(in srgb, var(--kbn-owed-bright) 25%, transparent); }
+.kbn-ch-pick[data-lone] + * { margin-top: 0; }
+.kbn-ch-rail-item:has(.kbn-ch-pick[data-lone]):not(.kbn-ch-rail-item:has(.kbn-ch-pick[data-lone]) ~ *) { margin-top: 10px; }
+.kbn-ch-none { padding: 4px 10px; }
+.kbn-ch-shelf {
+  margin: 4px 0 2px 10px;
+  font: 500 var(--type-label)/var(--leading-ui) var(--font-serif);
+  font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker);
+  color: var(--kbn-ink-muted);
 }
-.kbn-ch-pick[data-new] .kbn-ch-pick-name::after, .kbn-ch-msg[data-new] .kbn-ch-msg-name::after { margin-left: 6px; }
-.kbn-ch-finder {
-  display: none;
-  width: 100%; padding: 4px 10px;
-  border: 0; border-bottom: 0.5px solid var(--kbn-rule);
-  background: none; color: var(--kbn-ink);
-  font: italic var(--type-meta)/var(--leading-ui) var(--font-serif);
-}
-.kbn-ch-finder:focus { outline: none; border-bottom-color: var(--kbn-ink-muted); }
-h4.kbn-ch-shelf { margin-top: 0; }
-.kbn-ch-shelfed[hidden] { display: none; }
-.kbn-ch-none { padding: 6px 10px; }
-
-/* Documents: a quiet list of names, each with where it comes from and when. */
-.kbn-ch-doclist, .kbn-ch-lately, .kbn-ch-files { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.kbn-ch-found[hidden] { display: none; }
+.kbn-ch-doclist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
 .kbn-ch-doc {
-  display: flex; flex-direction: column; gap: 0;
+  display: flex; flex-direction: column;
   width: 100%; padding: 4px 10px; border: 0; border-radius: 4px; background: none; text-align: left; cursor: pointer;
   color: var(--kbn-ink-soft);
 }
 .kbn-ch-doc:hover { color: var(--kbn-ink); background: color-mix(in srgb, var(--kbn-ink) 5%, transparent); }
 .kbn-ch-doc-name { font: var(--type-row)/var(--leading-tight) var(--font-serif); overflow-wrap: anywhere; }
 .kbn-ch-doc-meta { font: italic var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); overflow-wrap: anywhere; }
-.kbn-ch-files { padding-top: 2px; }
-.kbn-ch-files[hidden], .kbn-ch-tapestry[hidden] { display: none; }
-.kbn-ch-files .kbn-ch-doc { padding-inline: 0; }
-.kbn-ch-files .kbn-ch-doc:hover { background: none; }
 
-/* The channel. */
-.kbn-ch { min-width: 0; min-height: 0; display: flex; flex-direction: column; outline: none; }
-.kbn-ch-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 18px; padding: 2px 0 12px; border-bottom: 0.5px solid var(--kbn-rule); }
-/* What stands beside the lines: the tapestry or the files; the one shown is not underlined. */
-.kbn-ch-tabs { display: flex; gap: 14px; margin-left: auto; }
-.kbn-ch-tab[aria-pressed='true'] { color: var(--kbn-ink); text-decoration: none; cursor: default; }
-.kbn-ch-name { margin: 0; font: 500 var(--type-title)/var(--leading-tight) var(--font-serif); color: var(--kbn-ink); overflow-wrap: anywhere; }
+/* A channel: its name and chair, its stream, the reply to the chair. */
+.kbn-ch, .kbn-ch-thread { min-width: 0; min-height: 0; display: flex; flex-direction: column; outline: none; }
+.kbn-ch-thread { border-left: 0.5px solid var(--kbn-rule); }
+.kbn-ch-thread[hidden] { display: none; }
+.kbn-ch-head {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px;
+  padding: 10px 20px 10px;
+  border-bottom: 0.5px solid var(--kbn-rule);
+}
+.kbn-ch-back { display: none; }
+.kbn-ch-name { margin: 0; font: 600 var(--type-title)/var(--leading-tight) var(--font-serif); color: var(--kbn-ink); overflow-wrap: anywhere; }
+.kbn-ch-name::before { content: '# '; color: var(--kbn-ink-muted); font-weight: 400; }
+.kbn-ch-chair { font: italic var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); }
+.kbn-ch-head-acts { display: flex; gap: 14px; margin-left: auto; }
 .kbn-ch-empty { margin: 40px 0; text-align: center; font: italic var(--type-prose)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink-muted); }
-.kbn-ch-columns {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 36px;
-}
-/* The lines scroll above the reply bar, which stays put under them. */
-.kbn-ch-talk { min-width: 0; min-height: 0; max-width: 44rem; display: flex; flex-direction: column; }
-.kbn-ch-canvas { min-width: 0; min-height: 0; overflow-y: auto; padding-top: 18px; }
-.kbn-ch-label { margin: 0 0 8px; font: italic var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); }
-.kbn-ch-back { font-style: normal; }
-.kbn-ch-tapestry .kbn-fileview-frame-wrap, .kbn-ch-tapestry > .kbn-fileview { height: min(72vh, 780px); }
-.kbn-ch-prose { max-width: none; padding: 0; }
 
-/* The lines: a state dot, then who and when, then what. What waits on the human glows. */
-.kbn-ch-feed { flex: 1 1 auto; min-height: 0; overflow-y: auto; list-style: none; margin: 0; padding: 16px 0 6px; display: flex; flex-direction: column; gap: 8px; }
-.kbn-ch-hush { font: italic var(--type-row)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink-muted); }
+.kbn-ch-stream {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  list-style: none; margin: 0; padding: 12px 0 8px;
+  display: flex; flex-direction: column;
+}
+.kbn-ch-stream > .kbn-ch-hush { padding: 4px 20px; }
+/* A message: the worker's dot in the gutter, then who and when, then what, whole. */
 .kbn-ch-msg {
-  --glow: transparent;
-  display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 0 6px;
-  padding: 5px 12px 5px 4px;
-  border-radius: 8px;
-  border: 0.5px solid transparent;
+  display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 0 8px;
+  padding: 6px 20px 6px 14px;
+  border-left: 2px solid transparent;
 }
-.kbn-ch-msg .constitution-state-dot { width: 18px; height: 1.6em; }
-.kbn-ch-msg[data-kind] {
-  --glow: var(--kbn-owed-bright);
-  border-color: color-mix(in srgb, var(--glow) 40%, transparent);
-  background: color-mix(in srgb, var(--glow) 6%, transparent);
-  box-shadow: 0 0 16px color-mix(in srgb, var(--glow) 20%, transparent);
-}
-.kbn-ch-msg[data-kind='review'] { --glow: var(--kbn-agent); }
-.kbn-ch-msg[data-kind='turn'] { --glow: color-mix(in srgb, var(--kbn-owed-bright) 55%, var(--kbn-ink-muted)); }
-.kbn-ch-msg:hover { border-color: color-mix(in srgb, var(--kbn-ink) 18%, transparent); }
-.kbn-ch-msg[data-kind]:hover { border-color: var(--glow); }
-.kbn-ch-msg[data-chosen] { border-color: color-mix(in srgb, var(--kbn-ink) 30%, transparent); }
-.kbn-ch-msg[data-kind][data-chosen] { border-color: var(--glow); box-shadow: 0 0 0 0.5px var(--glow), 0 0 22px color-mix(in srgb, var(--glow) 38%, transparent); }
-.kbn-ch-msg-pick {
-  display: flex; flex-direction: column; gap: 1px; width: 100%;
-  padding: 0; border: 0; background: none; text-align: left; cursor: pointer; color: inherit;
-}
+.kbn-ch .kbn-ch-msg { cursor: pointer; }
+.kbn-ch .kbn-ch-msg:hover { background: color-mix(in srgb, var(--kbn-ink) 4%, transparent); }
+.kbn-ch-msg[data-chosen] { background: color-mix(in srgb, var(--kbn-ink) 6%, transparent); }
+.kbn-ch-msg[data-waiting] { border-left-color: var(--kbn-owed-bright); background: color-mix(in srgb, var(--kbn-owed-bright) 7%, transparent); }
+.kbn-ch-msg[data-waiting][data-kind='review'] { border-left-color: var(--kbn-agent); background: color-mix(in srgb, var(--kbn-agent) 4%, transparent); }
+.kbn-ch-msg .constitution-state-dot { width: 20px; height: 1.5em; }
+.kbn-ch-you { display: block; width: 20px; }
+.kbn-ch-msg-body { min-width: 0; }
 .kbn-ch-msg-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; font: var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); }
-.kbn-ch-msg-name { font: 600 var(--type-row)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink); overflow-wrap: anywhere; }
-.kbn-ch-msg-role { font-style: italic; }
+.kbn-ch-msg-name {
+  padding: 0; border: 0; background: none; cursor: pointer; text-align: left;
+  font: 700 var(--type-row)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink); overflow-wrap: anywhere;
+}
+span.kbn-ch-msg-name { cursor: default; }
+button.kbn-ch-msg-name:hover { text-decoration: underline; text-decoration-thickness: 0.5px; text-underline-offset: 3px; }
+.kbn-ch-msg[data-human] .kbn-ch-msg-name { color: var(--kbn-ink-soft); }
+/* Where what arrived since the last visit begins. */
+.kbn-ch-new { display: flex; align-items: center; gap: 8px; margin: 4px 20px 2px 14px; color: var(--kbn-you); }
+.kbn-ch-new::before, .kbn-ch-new::after { content: ''; flex: 1; border-top: 0.5px solid currentColor; }
+.kbn-ch-new::before { flex: 0 0 22px; }
+.kbn-ch-new span { font: 600 var(--type-label)/var(--leading-ui) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
+.kbn-ch-msg-to { font-style: italic; }
 .kbn-ch-age { font-style: italic; }
 .kbn-ch-msg-text {
   font: var(--type-row)/var(--leading-prose) var(--font-serif);
-  color: var(--kbn-ink-soft);
+  color: var(--kbn-ink);
   overflow-wrap: anywhere;
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
 }
-.kbn-ch-msg[data-kind] .kbn-ch-msg-text { color: var(--kbn-ink); }
-.kbn-ch-msg[data-chosen] .kbn-ch-msg-text { -webkit-line-clamp: unset; line-clamp: none; }
+.kbn-ch-msg[data-human] .kbn-ch-msg-text { color: var(--kbn-ink-soft); }
+.kbn-ch-msg-text[data-label]::before {
+  content: attr(data-label) ' · ';
+  font: 600 var(--type-label)/var(--leading-ui) var(--font-serif);
+  font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker);
+  color: var(--kbn-owed-deep, var(--kbn-ink-muted));
+}
 .kbn-ch-msg-text > * { margin: 0; }
 .kbn-ch-msg-text > * + * { margin-top: 0.5em; }
-/* A line's actions show once it is chosen or holds focus. */
-.kbn-ch-acts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin-top: 6px; }
-.kbn-ch-msg:not([data-chosen]):not(:focus-within) .kbn-ch-acts { display: none; }
-.kbn-ch-act:disabled { cursor: default; text-decoration: none; }
-.kbn-ch-replied { display: block; margin-top: 4px; font: italic var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-tempered-ink); }
+.kbn-ch-msg-text > p:first-child { display: inline; }
+/* A close, a hand-off or another lifecycle line: one quiet line. */
+.kbn-ch-msg.kbn-ch-line { padding-block: 2px; }
+.kbn-ch-line .kbn-ch-msg-name { font-weight: 500; font-size: var(--type-meta); color: var(--kbn-ink-soft); }
+.kbn-ch-line .constitution-state-dot { height: 1.3em; }
+.kbn-ch-line-text { font-style: italic; color: var(--kbn-ink-soft); }
+.kbn-ch-acts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin-top: 4px; }
 
-/* What a worker sent, under its line: held spoken lines and file chips. */
-.kbn-ch-attached { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-.kbn-ch-said {
-  flex-basis: 100%;
-  padding: 0; border: 0; background: none; text-align: left; cursor: pointer;
-  font: italic var(--type-meta)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink-soft);
+/* Files: images drawn small, every other file a chip. */
+.kbn-ch-attached { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin-top: 6px; }
+.kbn-ch-image {
+  display: flex; flex-direction: column; gap: 2px; max-width: min(320px, 100%);
+  padding: 0; border: 0; background: none; cursor: zoom-in; text-align: left;
 }
-.kbn-ch-said[data-new]::before { margin-right: 6px; }
+.kbn-ch-image img {
+  display: block; height: 150px; width: auto; max-width: 100%; object-fit: contain;
+  border: 0.5px solid var(--kbn-rule-strong); border-radius: 6px; background: var(--kbn-paper-bright, var(--kbn-paper));
+}
+.kbn-ch-image-name { font: var(--type-meta)/var(--leading-ui) var(--font-mono); color: var(--kbn-ink-muted); overflow-wrap: anywhere; }
 .kbn-ch-file {
   display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
-  padding: 2px 9px; border: 0.5px solid var(--kbn-rule-strong); border-radius: 999px;
+  padding: 3px 10px; border: 0.5px solid var(--kbn-rule-strong); border-radius: 6px;
   background: color-mix(in srgb, var(--kbn-paper) 60%, transparent);
   font: var(--type-meta)/var(--leading-ui) var(--font-mono); color: var(--kbn-ink-soft);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
 }
+.kbn-ch-file::before { content: '▤'; color: var(--kbn-ink-muted); }
 .kbn-ch-file:hover { color: var(--kbn-ink); border-color: var(--kbn-ink-muted); }
-.kbn-ch-file[data-new]::before { margin-right: 2px; }
 
-.kbn-ch-reply {
-  flex: none;
-  padding: 10px 0 4px;
-  background: var(--kbn-sheet, var(--kbn-paper));
+/* The chair's tapestry, posted: its title and lede, read whole in place. */
+.kbn-ch-tapestry {
+  margin-top: 6px; padding: 10px 14px;
+  max-width: 44rem;
+  border: 0.5px solid var(--kbn-rule-strong); border-left: 3px solid var(--kbn-owed-bright); border-radius: 6px;
+  background: var(--kbn-paper-bright, var(--kbn-paper));
 }
+.kbn-ch-tapestry-kicker {
+  margin: 0; font: 600 var(--type-label)/var(--leading-ui) var(--font-serif);
+  font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); color: var(--kbn-ink-muted);
+}
+.kbn-ch-tapestry-title { margin: 0; font: 600 var(--type-prose)/var(--leading-tight) var(--font-serif); color: var(--kbn-ink); }
+.kbn-ch-tapestry-lede { margin: 4px 0 0; font: var(--type-row)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink-soft); }
+.kbn-ch-tapestry-page { margin-top: 10px; cursor: auto; }
+.kbn-ch-tapestry-page .kbn-fileview-frame-wrap, .kbn-ch-tapestry-page > .kbn-fileview { height: min(70vh, 760px); }
+
+/* A thread: who, how it is, its outcome whole, then its history and the reply to it. */
+.kbn-ch-thread-head { padding: 10px 20px 12px; border-bottom: 0.5px solid var(--kbn-rule); display: flex; flex-direction: column; gap: 6px; }
+.kbn-ch-thread-close { align-self: flex-end; }
+.kbn-ch-thread-who { display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; }
+.kbn-ch-thread-name {
+  padding: 0; border: 0; background: none; cursor: pointer; text-align: left;
+  font: 600 var(--type-title)/var(--leading-tight) var(--font-serif); color: var(--kbn-ink); overflow-wrap: anywhere;
+}
+.kbn-ch-thread-name:hover { text-decoration: underline; text-decoration-thickness: 0.5px; text-underline-offset: 4px; }
+.kbn-ch-liveness {
+  padding: 0 8px; border-radius: 999px;
+  font: italic var(--type-meta)/1.6 var(--font-serif); color: var(--kbn-ink-muted);
+  border: 0.5px solid var(--kbn-rule-strong);
+}
+.kbn-ch-liveness[data-state='working'] { color: var(--kbn-agent); border-color: color-mix(in srgb, var(--kbn-agent) 50%, transparent); }
+.kbn-ch-liveness[data-state='waiting'] { color: var(--kbn-owed-deep, var(--kbn-ink)); border-color: var(--kbn-owed-bright); background: color-mix(in srgb, var(--kbn-owed-bright) 12%, transparent); }
+.kbn-ch-status { font: var(--type-row)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink-soft); overflow-wrap: anywhere; }
+.kbn-ch-status > * { margin: 0; }
+.kbn-ch-status > * + * { margin-top: 0.5em; }
+
+.kbn-ch-reply { flex: none; padding: 8px 20px 12px; background: var(--kbn-sheet, var(--kbn-paper)); }
 .kbn-ch-reply[hidden] { display: none; }
-.kbn-ch-reply-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
-.kbn-ch-reply-label { min-width: 0; font: italic var(--type-row)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); }
-.kbn-ch-reply-to { font-style: normal; font-weight: 600; color: var(--kbn-ink); }
-.kbn-ch-reply-row { display: flex; align-items: flex-end; gap: 10px; }
+.kbn-ch-reply-label { display: block; margin-bottom: 4px; font: italic var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); }
+.kbn-ch-reply-to { font-style: normal; font-weight: 600; color: var(--kbn-ink-soft); }
+.kbn-ch-reply-row { display: flex; align-items: flex-end; gap: 8px; }
 .kbn-ch-reply-text {
-  flex: 1; min-width: 0; resize: vertical; min-height: 2.6em;
-  padding: 8px 10px; border: 0.5px solid var(--kbn-rule-strong); border-radius: 6px;
+  flex: 1; min-width: 0; resize: none; field-sizing: content; min-height: 2.4em; max-height: 40vh;
+  padding: 7px 10px; border: 0.5px solid var(--kbn-rule-strong); border-radius: 8px;
   background: var(--kbn-paper-bright, var(--kbn-paper)); color: var(--kbn-ink);
   font: var(--type-row)/var(--leading-prose) var(--font-serif);
 }
 .kbn-ch-reply-text:focus { outline: 1px solid var(--kbn-you); outline-offset: -1px; }
 .kbn-ch-send {
-  padding: 6px 14px; border: 0.5px solid var(--kbn-ink-muted); border-radius: 6px;
+  padding: 6px 14px; border: 0.5px solid var(--kbn-ink-muted); border-radius: 8px;
   background: var(--kbn-ink); color: var(--kbn-paper);
   font: 500 var(--type-row)/var(--leading-ui) var(--font-serif); cursor: pointer;
 }
-.kbn-channels button:focus-visible { outline: 1px solid var(--kbn-you); outline-offset: 1px; }
 
+/* A phone: one screen at a time — the rail, a channel, or a thread — each full width. */
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .kbn-channels { padding-inline: 8px; }
-  .kbn-ch-keys { display: none; }
-  /* The phone's bar has no Find: the rail carries its own. */
-  .kbn-ch-finder { display: block; }
-  .kbn-ch-layout { grid-template-columns: minmax(0, 1fr); }
-  /* The rail is a drawer over the channel, drawn in from the left edge, above the phone's bottom bar. */
-  .kbn-ch-rail {
-    position: fixed; inset: 0 auto calc(57px + env(safe-area-inset-bottom, 0px)) 0; z-index: 20;
-    width: min(82vw, 320px); padding: 16px 8px; overflow-y: auto;
-    background: var(--kbn-sheet, var(--kbn-paper));
-    border-right: 0.5px solid var(--kbn-rule-strong);
-    box-shadow: 8px 0 32px color-mix(in srgb, var(--kbn-ink) 22%, transparent);
-  }
-  /* The lines and the reply fill the channel; the tapestry is under them, a scroll away. */
-  .kbn-ch-columns { grid-template-columns: minmax(0, 1fr); grid-template-rows: 100% auto; gap: 8px; overflow-y: auto; }
-  .kbn-ch-canvas { overflow-y: visible; }
-  .kbn-ch-tapestry .kbn-fileview-frame-wrap, .kbn-ch-tapestry > .kbn-fileview { height: 60vh; }
+  .kbn-channels { padding-inline: 0; }
+  .kbn-channels .kbn-view-titlerow { padding-inline: 16px; }
+  .kbn-ch-keys, .kbn-ch-rail-toggle { display: none; }
+  .kbn-ch-layout, .kbn-ch-layout[data-thread], .kbn-ch-layout[data-rail-hidden], .kbn-ch-layout[data-rail-hidden][data-thread] { grid-template-columns: minmax(0, 1fr); }
+  .kbn-ch-layout:not([data-rail-hidden]) > :not(.kbn-ch-rail) { display: none; }
+  .kbn-ch-layout[data-rail-hidden][data-thread] > .kbn-ch { display: none; }
+  .kbn-ch-rail { padding: 12px 16px; border-right: 0; }
+  .kbn-ch-pick { padding: 9px 10px; font-size: var(--type-prose); }
+  .kbn-ch-thread { border-left: 0; }
+  .kbn-ch-back { display: inline; }
+  .kbn-ch-head { padding: 8px 16px; }
+  .kbn-ch-head-acts { margin-left: auto; }
+  .kbn-ch-msg { padding: 6px 16px 6px 10px; }
+  .kbn-ch-thread-head { padding: 8px 16px 10px; }
+  .kbn-ch-thread-close { align-self: flex-start; }
+  .kbn-ch-reply { padding: 8px 16px 10px; }
+  .kbn-ch-tapestry-page .kbn-fileview-frame-wrap, .kbn-ch-tapestry-page > .kbn-fileview { height: 60vh; }
 }
+
+/* A long message folds after eight lines; Show more unfolds it in place. */
+.kbn-ch-msg-text[data-folded] {
+  max-height: calc(8 * 1lh); overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 1.6lh), transparent);
+}
+.kbn-ch-more { display: block; margin-top: 2px; }
+/* A worker's thread, from its line in the channel. */
+.kbn-ch-replies {
+  display: inline-block; margin-top: 4px; padding: 0; border: 0; background: none; cursor: pointer; text-align: left;
+  font: 600 var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-agent);
+}
+.kbn-ch-replies .kbn-ch-replies-last, .kbn-ch-replies .kbn-ch-age { font-weight: 400; color: var(--kbn-ink-muted); }
+.kbn-ch-replies:hover { text-decoration: underline; text-decoration-thickness: 0.5px; text-underline-offset: 3px; }
+/* What a thread waits on, and a closed fiber's conclusion, each labelled. */
+.kbn-ch-thread-ask, .kbn-ch-conclusion { padding: 6px 10px; border-radius: 6px; }
+.kbn-ch-thread-ask { border-left: 2px solid var(--kbn-owed-bright); background: color-mix(in srgb, var(--kbn-owed-bright) 8%, transparent); color: var(--kbn-ink); }
+.kbn-ch-thread-ask::before, .kbn-ch-conclusion::before {
+  display: block;
+  font: 600 var(--type-label)/var(--leading-ui) var(--font-serif);
+  font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); color: var(--kbn-ink-muted);
+}
+.kbn-ch-thread-ask::before { content: 'Asks'; }
+.kbn-ch-conclusion { border-left: 2px solid var(--kbn-rule-strong); background: color-mix(in srgb, var(--kbn-ink) 4%, transparent); }
+.kbn-ch-conclusion::before { content: 'Conclusion'; }

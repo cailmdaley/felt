@@ -1685,7 +1685,10 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (channelsFixture) channelsFixture.pinned[String(body().key)] = Date.now()
     return json({ ok: true })
   }
-  if (url.endsWith('/api/v1/speak')) return json({ held: channelsFixture?.held ?? [] })
+  if (url.includes('/api/v1/board/family')) {
+    const params = new URL(url, 'http://harness').searchParams, since = Number(params.get('since_ms') ?? 0)
+    return json({ records: (channelsFixture?.board ?? []).filter(record => record.root === params.get('fiber') && record.timestamp >= since), reach_ms: 14 * 86_400_000 })
+  }
 
   if (url.includes('/api/v1/board/marks')) {
     // The daemon's join, on the fixture's ledgers: every pairing a launch, each

@@ -1,20 +1,21 @@
 import { announce } from '@ui-sdk/core'
 import { ago } from '../civilDay.js'
 import { getDaemonJson, postDaemonJson } from '../daemonApi.js'
-import { head, RESOURCE_PRIORITY } from '../documentResources.js'
+import { head, peek, RESOURCE_PRIORITY } from '../documentResources.js'
 import { buildFileViewer, disposeFileViewer } from '../FileViewerPanel.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { boardCards, threadIndexFor } from '../KanbanSurfaces.js'
 import { isMobileViewport } from '../mobile.js'
-import { composeChannels, officeOf, setAsideKey, unpinKey, type Channel, type HeldSpeech, type Message } from '../channels.js'
+import {
+  channelLines, composeChannels, composeMessages, fiberOf, liveness, sameFiber, setAsideKey, threadOf, unpinKey,
+  type BoardRecord, type Channel, type Line, type Message, type Tapestry,
+} from '../channels.js'
 import type { SentFile } from '../sentFiles.js'
 import { stateDot } from '../stateDot.js'
 import { cardNamed } from '../threads.js'
-import { basename, fileBytesUrl, renderMarkdown } from '../utils.js'
+import { fileBytesUrl, renderMarkdown } from '../utils.js'
 import { COMPANION_NAMES, docKey, type DocKey } from '../workspace/documents.js'
 import { declaredTitle } from '../workspace/DocumentTitles.js'
-import { renderFiberMarkdown } from '../workspace/FiberProse.js'
-import { readFiber } from '../workspace/fiberSource.js'
 import { charters } from '../workspace/RolePage.js'
 import { createViewPage } from './ViewPage.js'
 import { isTypingTarget, keystrokeIsSpokenFor, registerView, type TemporalView, type ViewContext } from './ViewRegistry.js'
@@ -24,15 +25,22 @@ const SEEN = 'shuttle.channels.seen:'
 const RAIL = 'shuttle.channels.rail-hidden'
 /** A pin is renewed by use at most this often; it lapses with the board's reach. */
 const RENEW_MS = 86_400_000
-/** How far a finger or a trackpad must travel sideways to open or close the rail. */
+/** How far a finger or a trackpad must travel sideways to move between the rail, a channel and a thread. */
 const SWIPE_PX = 60
-/** A feed within this many pixels of its newest line counts as following it. */
+/** A list within this many pixels of its newest message counts as following it. */
 const FOLLOW_PX = 24
-/** Find lists at most this many documents beneath the channels it matches. */
+/** Jump to lists at most this many documents beneath the channels it matches. */
 const FOUND_DOCUMENTS = 12
-/** One document of a channel, or one Find turned up: the fiber it belongs to, its page, its name and when it was sent (0 for a fiber's own companion). */
-interface Doc { card: KanbanCard; key: DocKey; name: string; path: string; at: number }
-const fiberOf = (card: KanbanCard): string => card.uid ?? card.id
+const IMAGE = /\.(png|jpe?g|gif|svg|webp)$/i
+/** A message taller than this many lines folds, with Show more to unfold it in place. */
+const FOLD_LINES = 8
+type Pane = 'channel' | 'thread'
+
+/** One family's board records, read from its daemon a window at a time. */
+interface Feed { records: Map<string, BoardRecord>; cursor: number; pending: boolean }
+/** A reply the human sent from here, shown until the board carries it. */
+interface Sent { fiber: string; text: string; at: number }
+
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] => {
   const node = document.createElement(tag)
   node.className = className
@@ -59,16 +67,24 @@ function lastSeen(key: string): number {
   const value = Number(stored(SEEN + key) ?? NaN)
   return Number.isFinite(value) ? value : -Infinity
 }
+/** A chair's page, collapsed to its title and its first paragraph. */
+export function collapse(html: string): { title: string; lede: string } {
+  const page = new DOMParser().parseFromString(html, 'text/html')
+  const text = (node: Element | null | undefined): string => node?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+  const lede = [...page.querySelectorAll('p')].map(text).find(Boolean) ?? ''
+  return { title: text(page.querySelector('h1')) || page.title.trim(), lede }
+}
 
 /**
- * Channels: a channel per office (or per top-level constitution without
- * one), listed while something in it waits on the human or while he keeps
- * it pinned. A channel reads like a chat: each worker's line, oldest first,
- * the ones waiting on him lit, the seat's tapestry pinned beside them, and a
- * reply bar that answers the seat or the worker chosen. Beside the tapestry
- * are the channel's files: every member's companions and sent documents.
- * Find (the bar's, or the rail's own on a phone) reaches every channel and
- * every document the fleet sent; the rail keeps what was read lately.
+ * Channels, as Slack: a rail of the channels read lately, waiting on the human
+ * or pinned (Jump to finds the rest, and the fleet's documents); a channel's
+ * stream, oldest first, kept short — every message of its chair, its tapestry
+ * among them, and each other worker once, its wait or its latest message
+ * whole with its files and a link to its thread; and beside it that thread,
+ * the worker's whole history under its name, liveness, open ask or, once
+ * closed, its conclusion. A reply in the channel goes to its chair, a reply in
+ * a thread to that worker. On a phone the rail is the first screen, and a
+ * channel and a thread each fill it.
  */
 export class ChannelsView implements TemporalView {
   readonly id = 'channels' as const
@@ -77,87 +93,85 @@ export class ChannelsView implements TemporalView {
   private ctx: ViewContext | null = null
   private layout: HTMLElement | null = null
   private list: HTMLOListElement | null = null
-  private finder: HTMLInputElement | null = null
+  private jump: HTMLInputElement | null = null
   private found: HTMLElement | null = null
-  private lately: HTMLElement | null = null
-  private tabs: HTMLElement | null = null
-  private filesEl: HTMLOListElement | null = null
   private railToggle: HTMLButtonElement | null = null
   private channelEl: HTMLElement | null = null
   private head: HTMLElement | null = null
-  private feed: HTMLOListElement | null = null
-  private label: HTMLElement | null = null
-  private tapestry: HTMLElement | null = null
-  private reply: HTMLTextAreaElement | null = null
-  private replyTo: HTMLElement | null = null
-  private later: HTMLButtonElement | null = null
+  private stream: HTMLOListElement | null = null
+  private channelReply: Reply | null = null
+  private threadEl: HTMLElement | null = null
+  private threadHead: HTMLElement | null = null
+  private threadList: HTMLOListElement | null = null
+  private threadReply: Reply | null = null
   private note: HTMLElement | null = null
-  private form: HTMLFormElement | null = null
   private channels: Channel[] = []
   private current: string | null = null
-  /** What Find is looking for; '' lists the channels as they wait. */
+  /** The worker whose thread is open beside the channel. */
+  private thread: KanbanCard | null = null
+  /** What Jump to is looking for; '' lists the rail. */
   private query = ''
-  /** What the aside shows beside the lines: the pinned tapestry, or the channel's files. */
-  private pane: 'tapestry' | 'files' = 'tapestry'
-  /**
-   * Each member's own companions (tapestry, artifact, report), probed while
-   * its channel's files are shown: again when the card's file changes, and
-   * again after a probe that could not reach the owner.
-   */
-  private readonly companions = new Map<string, { modified?: string; paths: string[]; settled: boolean; pending: boolean }>()
   /** The item a document or card was opened from, which takes focus again when the reader closes. */
   private returnTo: string | null = null
   /** The reader stands over Channels: nothing redraws beneath it. */
   private away = false
-  /** A channel just came into view: its feed opens on the newest line. */
-  private landing = true
-  /** The worker chosen in the current channel; null is the seat. It stays chosen until the reader chooses again. */
-  private chosen: KanbanCard | null = null
-  /** What was typed in each channel's reply bar, kept while the reader is elsewhere. */
+  /** A channel or thread just came into view: it opens on its newest message. */
+  private landing: Record<Pane, boolean> = { channel: true, thread: true }
+  /** What was typed in each reply box, by whom it goes to, kept while the reader is elsewhere. */
   private readonly drafts = new Map<string, string>()
   private railHidden = false
-  private held: HeldSpeech[] = []
+  /** A phone shows the rail until a channel is chosen. */
+  private phoneRail = true
   private dismissed: string[] = []
   private pending: string[] = []
   private pinned = new Map<string, number>()
   private names = new Map<string, string>()
   private reachMs = 14 * 86_400_000
-  private readonly replied = new Set<string>()
+  private readonly feeds = new Map<string, Feed>()
+  private readonly sent: Sent[] = []
+  /** Each chair's tapestry, by fiber and the card's last write; null when it has none. */
+  private readonly tapestries = new Map<string, { modified?: string; tapestry: Tapestry | null }>()
+  /** Tapestries read in full in the stream, by message id, with their viewers. */
+  private readonly expanded = new Map<string, HTMLElement>()
+  /** Long messages unfolded, by message id. */
+  private readonly unfolded = new Set<string>()
   private readonly tempering = new Set<string>()
   /** When each channel was last read before this visit to it, for the marks of what is new. */
   private readonly before = new Map<string, number>()
-  private sig = ''
-  private tapestryFor = ''
-  private viewer: HTMLElement | null = null
+  private sigs: Record<Pane, string> = { channel: '', thread: '' }
+  /** Each list follows its newest message while the reader is at its foot; a message that grows (an image arriving) keeps it there. */
+  private readonly following: Record<Pane, boolean> = { channel: true, thread: true }
+  private sizes: ResizeObserver | null = null
   private loaded = false
   private reading = false
-  private readGeneration = 0
-  private tapestryGeneration = 0
+  private generation = 0
   private unsubscribe?: () => void
   private unsubscribeLibrary?: () => void
   private stopGestures?: () => void
 
   mount(host: HTMLElement, ctx: ViewContext): void {
     this.ctx = ctx
-    this.landing = true
+    this.landing = { channel: true, thread: true }
     // The view outlives its mounts: coming back to the channel it showed is reading it again.
     if (this.current) this.visit(this.current)
     const page = createViewPage('Channels')
     page.root.classList.add('kbn-channels')
-    this.railToggle = button('kbn-ch-rail-toggle', '', () => this.setRail(!this.railHidden))
-    page.titleRow.append(el('span', 'kbn-ch-keys', 'j / k channels · [ the rail · Enter to reply'), this.railToggle)
+    this.railToggle = button('kbn-ch-rail-toggle', '', () => this.setRail(this.railShown()))
+    page.titleRow.append(el('span', 'kbn-ch-keys', 'j / k channels · [ the rail · / jump · Enter to reply'), this.railToggle)
     this.layout = el('div', 'kbn-ch-layout')
-    this.layout.append(this.railEl(), this.channelPane())
+    this.layout.append(this.railEl(), this.channelPane(), this.threadPane())
     this.note = el('p', 'kbn-ch-note', 'Reading the channels…')
     this.note.setAttribute('role', 'status')
     page.body.append(this.note, this.layout)
     host.append(page.root)
     this.stopGestures = this.gestures(page.root)
+    this.sizes = new ResizeObserver(() => {
+      for (const [pane, list] of [['channel', this.stream], ['thread', this.threadList]] as const) if (list && this.following[pane]) list.scrollTop = list.scrollHeight
+    })
     this.railHidden = stored(RAIL) === '1'
     this.showRail()
     this.unsubscribe = ctx.sends?.subscribe(() => this.draw())
-    this.unsubscribeLibrary = ctx.workspace?.library.subscribe(() => this.draw())
-    ctx.workspace?.library.visit()
+    this.unsubscribeLibrary = ctx.workspace?.library.subscribe(() => { if (this.query) this.drawRail() })
     void charters(ctx.shuttleBase).then(list => {
       this.names = new Map(list.flatMap(charter => charter.name ? [[charter.slug, charter.name] as [string, string]] : []))
       this.draw()
@@ -169,41 +183,45 @@ export class ChannelsView implements TemporalView {
     rail.id = `kbn-ch-rail-${Math.random().toString(36).slice(2)}`
     rail.setAttribute('aria-label', 'Channels')
     this.railToggle!.setAttribute('aria-controls', rail.id)
-    this.list = el('ol', 'kbn-ch-list')
-    // The bar's Find serves the desktop; a phone's bar has none, so the rail carries its own.
-    this.finder = el('input', 'kbn-ch-finder')
-    this.finder.type = 'search'
-    this.finder.placeholder = 'Find a channel or file…'
-    this.finder.setAttribute('aria-label', 'Find a channel or file')
-    this.finder.addEventListener('input', () => this.find(this.finder!.value))
-    this.finder.addEventListener('keydown', event => {
+    this.jump = el('input', 'kbn-ch-jump')
+    this.jump.type = 'search'
+    this.jump.placeholder = 'Jump to…'
+    this.jump.setAttribute('aria-label', 'Jump to a channel or file')
+    this.jump.addEventListener('input', () => this.find(this.jump!.value))
+    this.jump.addEventListener('keydown', event => {
       if (event.key === 'Enter') { event.preventDefault(); this.openFirst() }
-      if (event.key === 'Escape' && this.finder!.value) { event.stopPropagation(); this.find('') }
+      if (event.key === 'Escape' && this.jump!.value) { event.stopPropagation(); this.find('') }
     })
-    this.found = el('section', 'kbn-ch-shelfed')
+    this.list = el('ol', 'kbn-ch-list')
+    this.found = el('section', 'kbn-ch-found')
     this.found.setAttribute('aria-label', 'Files found')
-    this.lately = el('section', 'kbn-ch-shelfed')
-    this.lately.setAttribute('aria-label', 'Read lately')
-    rail.append(this.finder, this.list, this.found, this.lately)
+    rail.append(this.jump, this.list, this.found)
     return rail
   }
   private channelPane(): HTMLElement {
     this.channelEl = el('article', 'kbn-ch')
     this.channelEl.tabIndex = -1
     this.head = el('header', 'kbn-ch-head')
-    this.tabs = el('div', 'kbn-ch-tabs')
-    const columns = el('div', 'kbn-ch-columns')
-    const talk = el('section', 'kbn-ch-talk')
-    this.feed = el('ol', 'kbn-ch-feed')
-    talk.append(this.feed, this.replyBar())
-    const canvas = el('aside', 'kbn-ch-canvas')
-    this.label = el('p', 'kbn-ch-label')
-    this.tapestry = el('div', 'kbn-ch-tapestry')
-    this.filesEl = el('ol', 'kbn-ch-files')
-    canvas.append(this.label, this.tapestry, this.filesEl)
-    columns.append(talk, canvas)
-    this.channelEl.append(this.head, columns)
+    this.stream = el('ol', 'kbn-ch-stream')
+    this.channelReply = new Reply(text => this.send(this.channel?.seat, text, 'channel'))
+    this.follow(this.stream, 'channel')
+    this.channelEl.append(this.head, this.stream, this.channelReply.form)
     return this.channelEl
+  }
+  private threadPane(): HTMLElement {
+    this.threadEl = el('aside', 'kbn-ch-thread')
+    this.threadEl.tabIndex = -1
+    this.threadEl.setAttribute('aria-label', 'Thread')
+    this.threadHead = el('header', 'kbn-ch-thread-head')
+    this.threadList = el('ol', 'kbn-ch-stream kbn-ch-thread-list')
+    this.threadReply = new Reply(text => this.send(this.threadCard, text, 'thread'))
+    this.follow(this.threadList, 'thread')
+    this.threadEl.append(this.threadHead, this.threadList, this.threadReply.form)
+    return this.threadEl
+  }
+  /** Keeps a list's following in step with the reader's scrolling. */
+  private follow(list: HTMLOListElement, pane: Pane): void {
+    list.addEventListener('scroll', () => { this.following[pane] = list.scrollHeight - list.scrollTop - list.clientHeight <= FOLLOW_PX }, { passive: true })
   }
   refresh(ctx: ViewContext): void {
     this.ctx = ctx
@@ -214,15 +232,13 @@ export class ChannelsView implements TemporalView {
   private async read(): Promise<void> {
     if (this.reading || !this.ctx) return
     this.reading = true
-    const generation = this.readGeneration, base = this.ctx.shuttleBase
-    const [records, speech] = await Promise.allSettled([
-      getDaemonJson<{ dismissed: string[]; pinned?: Record<string, number>; reach_ms: number }>(`${base}/api/v1/channels/dismissed`),
-      getDaemonJson<{ held: HeldSpeech[] }>(`${base}/api/v1/speak`),
-    ])
-    if (generation !== this.readGeneration) return
+    const generation = this.generation, base = this.ctx.shuttleBase
+    const records = await getDaemonJson<{ dismissed: string[]; pinned?: Record<string, number>; reach_ms: number }>(`${base}/api/v1/channels/dismissed`)
+      .then(value => ({ ok: true as const, value }), () => ({ ok: false as const }))
+    if (generation !== this.generation) return
     this.reading = false
     this.loaded = true
-    if (records.status === 'fulfilled') {
+    if (records.ok) {
       this.dismissed = records.value.dismissed
       this.reachMs = records.value.reach_ms
       this.pending = this.pending.filter(key => !this.dismissed.includes(key))
@@ -230,78 +246,88 @@ export class ChannelsView implements TemporalView {
       for (const [key, at] of Object.entries(records.value.pinned ?? {})) this.pinned.set(key, Math.max(at, this.pinned.get(key) ?? 0))
       for (const [key, at] of this.pinned) if (Date.now() - at > this.reachMs) this.pinned.delete(key)
     }
-    if (speech.status === 'fulfilled') this.held = speech.value.held
-    this.status(records.status === 'rejected' || speech.status === 'rejected' ? 'Some channel sources are unavailable — showing the last read.' : '')
+    this.status(records.ok ? '' : 'Some channel sources are unavailable — showing the last read.')
     this.draw()
+    // Every channel in the rail reads its families, for what is new in it.
+    this.readFamilies(this.channels.filter(channel => channel.listed || channel.key === this.current))
   }
   private status(text: string): void { if (this.note) this.note.textContent = text }
 
   /**
-   * The rail's channels: while Find looks for something, every channel it
-   * matches; otherwise those listed, and the one being read, which stays
-   * until the reader moves on.
+   * Reads each family's board records since the newest it holds (the board's
+   * reach the first time), and redraws when any arrived. A remote record is
+   * placed by its arrival here, so a late host is never behind the cursor.
    */
+  private readFamilies(channels: Channel[]): void {
+    const ctx = this.ctx
+    if (!ctx) return
+    const generation = this.generation
+    for (const uid of new Set(channels.flatMap(channel => channel.families))) {
+      const feed = this.feeds.get(uid) ?? this.feeds.set(uid, { records: new Map(), cursor: Date.now() - this.reachMs, pending: false }).get(uid)!
+      if (feed.pending) continue
+      feed.pending = true
+      void getDaemonJson<{ records?: BoardRecord[] }>(`${ctx.shuttleBase}/api/v1/board/family?fiber=${encodeURIComponent(uid)}&since_ms=${feed.cursor}`).then(body => {
+        if (generation !== this.generation) return
+        const known = feed.records.size
+        for (const record of body.records ?? []) {
+          feed.records.set(record.id, record)
+          feed.cursor = Math.max(feed.cursor, record.received_at ?? record.timestamp)
+        }
+        if (feed.records.size !== known) this.draw()
+      }).catch(() => {}).finally(() => { feed.pending = false })
+    }
+  }
+  /** A channel's messages: its families' records, the replies sent from here, its files and its chair's tapestry. */
+  private messages(channel: Channel): Message[] {
+    const records = channel.families.flatMap(uid => [...this.feeds.get(uid)?.records.values() ?? []])
+    // A reply sent from here stands for the board's own record of it.
+    const echoed = (record: BoardRecord): boolean => (record.kind === 'human' || record.kind === 'message') && !record.by?.fiber
+      && this.sent.some(sent => sent.fiber === record.fiber && !!record.text?.includes(sent.text) && record.timestamp >= sent.at - 60_000)
+    const replies = this.sent.map<BoardRecord>(sent => ({ id: `sent:${sent.fiber}:${sent.at}`, kind: 'message', timestamp: sent.at, fiber: sent.fiber, by: { label: 'human' }, text: sent.text }))
+    return composeMessages({
+      channel, records: [...records.filter(record => !echoed(record)), ...replies], files: this.ctx?.sends?.files ?? [],
+      tapestry: this.tapestries.get(fiberOf(channel.seat))?.tapestry, now: Date.now(), reachMs: this.reachMs,
+    })
+  }
+  /** Reads the chair's tapestry (or artifact, or report) once, and again when its card's file changes. */
+  private readTapestry(card: KanbanCard): void {
+    const id = fiberOf(card), known = this.tapestries.get(id), ctx = this.ctx
+    if (!ctx || !card.fiberDir || (known && known.modified === card.modifiedAt)) return
+    this.tapestries.set(id, { modified: card.modifiedAt, tapestry: known?.tapestry ?? null })
+    const generation = this.generation
+    void (async () => {
+      for (const name of COMPANION_NAMES) {
+        const path = `${card.fiberDir}/${name}`, src = fileBytesUrl(ctx.shuttleBase, path, card.originId)
+        const found = await head(src, RESOURCE_PRIORITY.neighbour, { fresh: !!known })
+        if (!found?.exists) continue
+        const bytes = await peek(src, RESOURCE_PRIORITY.neighbour, { fresh: !!known })
+        if (generation !== this.generation) return
+        const { title, lede } = collapse(new TextDecoder().decode(bytes?.bytes ?? new Uint8Array()))
+        const at = Date.parse(found.modifiedAt ?? '') || Date.parse(card.modifiedAt ?? '') || Date.now()
+        this.tapestries.set(id, { modified: card.modifiedAt, tapestry: { path, at, title: title || card.name, lede } })
+        this.draw()
+        return
+      }
+    })().catch(() => {})
+  }
+
+  /** The rail's channels: while Jump to looks for something, every channel it matches; otherwise those listed and the one being read. */
   private get listed(): Channel[] {
     if (!this.query) return this.channels.filter(channel => channel.listed || channel.key === this.current)
     const query = this.query.toLowerCase()
-    return this.channels.filter(channel => [channel.title, ...channel.members.flatMap(card => [card.name, card.path]),
-      ...this.documents(channel).flatMap(doc => [doc.name, doc.path])].some(text => text.toLowerCase().includes(query)))
+    return this.channels.filter(channel => [channel.title, ...channel.members.flatMap(card => [card.name, card.path])].some(text => text.toLowerCase().includes(query)))
   }
-  /** Filters the rail by what Find holds, from the bar's field or the rail's own. */
+  /** Filters the rail by what Jump to holds, from the rail's field or the bar's Find. */
   find(query: string): void {
     this.query = query.trim()
-    if (this.finder && this.finder.value !== query) this.finder.value = query
+    if (this.jump && this.jump.value !== query) this.jump.value = query
     this.drawRail()
   }
-  /** Enter in Find opens the first channel it found, else the first document. */
+  /** Enter in Jump to opens the first channel it found, else the first document. */
   private openFirst(): void {
     const channel = this.listed[0]
     if (channel) { this.open(channel.key, true); return }
     this.found?.querySelector<HTMLButtonElement>('button')?.click()
-  }
-  /**
-   * A channel's documents: each member's own companions once probed, then
-   * everything its members sent, newest first, each document once.
-   */
-  private documents(channel: Channel): Doc[] {
-    const library = this.ctx?.workspace?.library
-    const docs = new Map<DocKey, Doc>()
-    for (const card of channel.members) for (const path of this.companions.get(`${card.originId}\0${fiberOf(card)}`)?.paths ?? []) {
-      const key = docKey(card.originId, path, card.originId, card.fiberDir)
-      // A companion is named for what it is: its fiber's Tapestry, Artifact or Report.
-      const stem = basename(path).replace(/\.html$/i, '')
-      docs.set(key, { card, key, name: stem.charAt(0).toUpperCase() + stem.slice(1), path, at: 0 })
-    }
-    const sent = channel.members.flatMap(card => (library?.receipts(fiberOf(card)) ?? []).map(receipt => ({ card, receipt })))
-      .sort((a, b) => b.receipt.timestamp - a.receipt.timestamp)
-    for (const { card, receipt } of sent) if (!docs.has(receipt.key)) {
-      docs.set(receipt.key, { card, key: receipt.key, name: declaredTitle(receipt.key)?.title ?? receipt.basename, path: receipt.fullPath, at: receipt.timestamp })
-    }
-    return [...docs.values()]
-  }
-  /**
-   * Probes each member's companions in the neighbour lane, redrawing the files
-   * as they turn up: once, again when the card's file changes, and again
-   * after any probe its owner did not answer.
-   */
-  private probeCompanions(channel: Channel): void {
-    const base = this.ctx?.shuttleBase ?? ''
-    for (const card of channel.members) {
-      const id = `${card.originId}\0${fiberOf(card)}`, known = this.companions.get(id)
-      if (!card.fiberDir || known?.pending || (known?.settled && known.modified === card.modifiedAt)) continue
-      const paths = known?.paths ?? []
-      this.companions.set(id, { modified: card.modifiedAt, paths, settled: false, pending: true })
-      void Promise.all(COMPANION_NAMES.map(async name => {
-        const path = `${card.fiberDir}/${name}`
-        const answer = await head(fileBytesUrl(base, path, card.originId), RESOURCE_PRIORITY.neighbour, { fresh: !!known }).catch(() => null)
-        return { path, answer }
-      })).then(answers => {
-        const found = answers.filter(({ answer }) => answer?.exists).map(({ path }) => path)
-        // A probe the owner did not answer is asked again on the next draw of the files.
-        this.companions.set(id, { modified: card.modifiedAt, paths: found, settled: answers.every(({ answer }) => answer), pending: false })
-        if (found.join() !== paths.join() && !this.away) this.drawChannel()
-      })
-    }
   }
   private draw(): void {
     const ctx = this.ctx
@@ -312,25 +338,21 @@ export class ChannelsView implements TemporalView {
     this.away = false
     const index = threadIndexFor(ctx.response)
     this.channels = composeChannels({
-      cards: boardCards(ctx.response), parentOf: card => index.parentOf(card), names: this.names, files: ctx.sends?.files ?? [], held: this.held,
-      dismissed: [...this.dismissed, ...this.pending], pinned: this.pinned, now: Date.now(), reachMs: this.reachMs,
+      cards: boardCards(ctx.response), parentOf: card => index.parentOf(card), names: this.names,
+      dismissed: [...this.dismissed, ...this.pending], pinned: this.pinned, opened: lastSeen, now: Date.now(),
     })
-    if (!this.channels.some(channel => channel.key === this.current)) this.open(this.listed[0]?.key ?? null, false)
+    if (!this.channels.some(channel => channel.key === this.current)) this.open(isMobileViewport() ? null : this.listed[0]?.key ?? null, false)
     this.drawRail()
     this.drawChannel()
+    this.drawThread()
     if (returning) this.returnFocus()
   }
-  /** The item the reader was opened from, else the reply box. */
+  /** The item the reader was opened from, else the reply box in view. */
   private returnFocus(): void {
     const item = this.returnTo && this.layout?.querySelector<HTMLElement>(`[data-item="${CSS.escape(this.returnTo)}"]`)
     this.returnTo = null
     if (item) item.focus({ preventScroll: true })
-    else this.reply?.focus({ preventScroll: true })
-  }
-  /** Opens a fiber's page, or one of its documents, from the item named `from`. */
-  private openPage(from: string, card: KanbanCard, key?: DocKey): void {
-    this.returnTo = from
-    this.ctx?.workspace?.openPage(card, key)
+    else (this.thread ? this.threadReply : this.channelReply)?.text.focus({ preventScroll: true })
   }
   /** Fills `container` anew; the item that had focus in it keeps it. */
   private rebuild(container: HTMLElement, children: Node[]): void {
@@ -340,69 +362,82 @@ export class ChannelsView implements TemporalView {
     if (item) container.querySelector<HTMLElement>(`[data-item="${CSS.escape(item)}"]`)?.focus({ preventScroll: true })
   }
   /**
-   * Comes to a channel, on its seat, with its own draft; what it held when
-   * last read is kept for this visit's marks. Choosing it deliberately (not
-   * stepping through with j / k) renews its pin.
+   * Comes to a channel, with its own draft and no thread open; what it held
+   * when last read is kept for this visit's marks, and its families are read.
+   * Choosing it deliberately (not stepping through with j / k) renews its pin.
    */
   private open(key: string | null, focus: boolean, deliberate = focus): void {
     if (key !== this.current) {
-      if (this.current && this.reply) this.drafts.set(this.current, this.reply.value)
+      this.keepDrafts()
       this.current = key
-      this.chosen = null
-      if (this.reply) this.reply.value = (key && this.drafts.get(key)) || ''
+      this.thread = null
+      this.restoreDrafts()
       if (key) this.visit(key)
-      this.landing = true
+      this.landing.channel = true
+      const channel = this.channel
+      if (channel) this.readFamilies([channel])
     }
     if (!focus) return
     if (key && deliberate) this.renew(key)
-    // On a phone the rail is a drawer over the channel: choosing one puts it away.
     if (isMobileViewport()) this.setRail(true)
-    this.drawRail(); this.drawChannel()
+    this.drawRail(); this.drawChannel(); this.drawThread()
     this.channelEl?.focus({ preventScroll: true })
   }
-  /** How far the feed's newest line sits below what it shows; zero when it shows. */
-  private belowNewest(): number {
-    const feed = this.feed
-    return feed ? feed.scrollHeight - feed.scrollTop - feed.clientHeight : 0
+  /** Opens a worker's thread beside the channel; null closes it. */
+  private openThread(card: KanbanCard | null): void {
+    this.keepDrafts()
+    this.thread = card
+    this.restoreDrafts()
+    this.landing.thread = true
+    this.drawChannel(); this.drawThread()
+    if (card) this.threadEl?.focus({ preventScroll: true })
+    else this.channelEl?.focus({ preventScroll: true })
+  }
+  private draftKey(pane: Pane): string | null {
+    return pane === 'channel' ? this.current && `channel:${this.current}` : this.thread && `thread:${fiberOf(this.thread)}`
+  }
+  private replies(): Array<[Pane, Reply | null]> { return [['channel', this.channelReply], ['thread', this.threadReply]] }
+  private keepDrafts(): void {
+    for (const [pane, reply] of this.replies()) {
+      const key = this.draftKey(pane)
+      if (key && reply) this.drafts.set(key, reply.text.value)
+    }
+  }
+  private restoreDrafts(): void {
+    for (const [pane, reply] of this.replies()) {
+      const key = this.draftKey(pane)
+      if (reply) reply.text.value = (key && this.drafts.get(key)) || ''
+    }
   }
   private visit(key: string): void {
     this.before.set(key, lastSeen(key))
     store(SEEN + key, String(Date.now()))
   }
   private get channel(): Channel | undefined { return this.channels.find(channel => channel.key === this.current) }
-  /** The card replied to: the worker chosen (its freshest copy, even once its line has gone), else the seat. */
-  private get target(): KanbanCard | undefined {
-    const channel = this.channel, chosen = this.chosen
-    if (!channel || !chosen) return channel?.seat
-    return channel.messages.find(message => fiberOf(message.card) === fiberOf(chosen))?.card ?? chosen
-  }
-  /** Chooses a worker to read and answer; choosing it again, or the seat, comes back to the seat. */
-  private select(card: KanbanCard | null): void {
-    const same = card && this.chosen && fiberOf(card) === fiberOf(this.chosen)
-    this.chosen = card && !same && fiberOf(card) !== fiberOf(this.channel!.seat) ? card : null
-    this.drawChannel()
+  /** The open thread's worker, at its freshest copy. */
+  private get threadCard(): KanbanCard | undefined {
+    const thread = this.thread
+    return thread ? this.channel?.everyone.find(card => sameFiber(card, thread)) ?? thread : undefined
   }
 
   private drawRail(): void {
-    const list = this.list!, now = Date.now()
+    const list = this.list!
     const items: HTMLLIElement[] = []
     for (const channel of this.listed) {
-      if (channel.cold && !items.some(item => item.classList.contains('kbn-ch-shelf'))) items.push(el('li', 'kbn-ch-shelf', 'Gone cold'))
       const item = el('li', 'kbn-ch-rail-item')
-      const pick = button('kbn-ch-pick', '', () => this.open(channel.key, true))
+      const pick = button('kbn-ch-pick', '', () => { this.find(''); this.open(channel.key, true) })
       pick.dataset.channel = channel.key
       pick.dataset.item = `channel:${channel.key}`
-      pick.toggleAttribute('data-waiting', channel.waiting && !channel.cold)
-      pick.toggleAttribute('data-quiet', !channel.waiting || channel.cold)
-      pick.append(el('span', 'kbn-ch-pick-name', channel.name))
-      if (channel.title !== channel.name) pick.title = channel.title
-      if (channel.waiting && channel.newest > 0) {
-        const age = el('span', 'kbn-ch-pick-age', ago(channel.newest, now))
-        age.dataset.at = String(channel.newest)
-        pick.append(age)
+      pick.toggleAttribute('data-lone', !channel.chaired)
+      pick.toggleAttribute('data-unread', channel.key !== this.current && this.newestSaid(channel) > lastSeen(channel.key))
+      pick.toggleAttribute('data-waiting', channel.waiting)
+      pick.append(el('span', 'kbn-ch-pick-hash', channel.chaired ? '#' : '·'), el('span', 'kbn-ch-pick-name', channel.name))
+      if (channel.waiting) {
+        const mark = el('span', 'kbn-ch-pick-mark')
+        mark.title = 'Waiting on you'
+        pick.append(mark)
       }
-      const seen = lastSeen(channel.key)
-      pick.toggleAttribute('data-new', channel.key !== this.current && (channel.newest > seen || channel.files.some(file => file.timestamp > seen)))
+      pick.title = channel.waiting ? `${channel.title} — waiting on you` : channel.title
       if (channel.key === this.current) pick.setAttribute('aria-current', 'true')
       item.append(pick)
       items.push(item)
@@ -411,282 +446,319 @@ export class ChannelsView implements TemporalView {
     // A poll redraws the rail: the channel that had focus keeps it.
     this.rebuild(list, items)
     this.drawFound()
-    this.drawLately()
   }
-  /** The documents Find matches, across every channel and every fiber the fleet sent from. */
+  /** When the newest thing a channel said, or began waiting on, arrived. */
+  private newestSaid(channel: Channel): number {
+    const said = this.messages(channel).filter(message => !message.quiet && !message.human)
+    return Math.max(channel.newest, ...said.map(message => message.at))
+  }
+  /** The documents Jump to matches, across every channel and every fiber the fleet sent from. */
   private drawFound(): void {
     const found = this.found!, query = this.query.toLowerCase(), library = this.ctx?.workspace?.library
-    const channelOf = new Map(this.channels.flatMap(channel => channel.members.map(card => [fiberOf(card), channel.title] as const)))
     const matches = !query || !library ? [] : library.documents().filter(({ card, receipt }) =>
-      [receipt.basename, receipt.fullPath, declaredTitle(receipt.key)?.title ?? '', card.name, channelOf.get(fiberOf(card)) ?? ''].some(text => text.toLowerCase().includes(query)))
+      [receipt.basename, receipt.fullPath, declaredTitle(receipt.key)?.title ?? '', card.name].some(text => text.toLowerCase().includes(query)))
       .slice(0, FOUND_DOCUMENTS)
     found.hidden = !matches.length
-    this.rebuild(found, [el('h4', 'kbn-ch-shelf', 'Files'), this.docList('found', matches.map(({ card, receipt }) => ({
-      card, key: receipt.key, name: declaredTitle(receipt.key)?.title ?? receipt.basename, path: receipt.fullPath, at: receipt.timestamp,
-    })), doc => doc.card.name)])
-  }
-  /** What was read lately in this session, while Find is not looking. */
-  private drawLately(): void {
-    const cards = this.query ? [] : this.ctx?.workspace?.readLatelyCards() ?? []
-    this.lately!.hidden = !cards.length
-    const list = el('ol', 'kbn-ch-lately')
-    list.append(...cards.map(card => {
-      const item = el('li', '')
-      const id = `read:${card.originId}:${fiberOf(card)}`
-      const pick = button('kbn-ch-doc', '', () => this.openPage(id, card))
+    const now = Date.now(), list = el('ol', 'kbn-ch-doclist')
+    list.append(...matches.map(({ card, receipt }) => {
+      const item = el('li', ''), id = `found:${receipt.key}`
+      const pick = button('kbn-ch-doc', '', () => this.openPage(id, card, receipt.key))
       pick.dataset.item = id
-      pick.append(el('span', 'kbn-ch-doc-name', card.name))
-      pick.title = card.outcome ?? card.path
+      pick.title = receipt.fullPath
+      const meta = el('span', 'kbn-ch-doc-meta', `${card.name} · ${ago(receipt.timestamp, now)}`)
+      pick.append(el('span', 'kbn-ch-doc-name', declaredTitle(receipt.key)?.title ?? receipt.basename), meta)
       item.append(pick)
       return item
     }))
-    this.rebuild(this.lately!, [el('h4', 'kbn-ch-shelf', 'Read lately'), list])
-  }
-  /** A quiet list of documents, each opening in the reader; `whose` says where each comes from, `kind` which list it is. */
-  private docList(kind: string, docs: Doc[], whose: (doc: Doc) => string): HTMLOListElement {
-    const list = el('ol', 'kbn-ch-doclist'), now = Date.now()
-    list.append(...docs.map(doc => {
-      const item = el('li', ''), id = `${kind}:${doc.key}`
-      const pick = button('kbn-ch-doc', '', () => this.openPage(id, doc.card, doc.key))
-      pick.dataset.item = id
-      pick.title = doc.path
-      const meta = el('span', 'kbn-ch-doc-meta', whose(doc))
-      if (doc.at) {
-        const age = el('span', 'kbn-ch-age', ` · ${ago(doc.at, now)}`)
-        meta.append(age)
-      }
-      pick.append(el('span', 'kbn-ch-doc-name', doc.name), meta)
-      item.append(pick)
-      return item
-    }))
-    return list
+    this.rebuild(found, [el('h4', 'kbn-ch-shelf', 'Files'), list])
   }
 
   private drawChannel(): void {
-    if (!this.head || !this.feed || !this.form || !this.label) return
-    const channel = this.channel, target = this.target
-    if (!this.ctx?.workspace?.isActive) this.ctx?.see?.(target ?? null)
-    this.form.hidden = !channel
-    if (!channel || !target) {
-      this.sig = ''
-      this.head.replaceChildren(el('p', 'kbn-ch-empty', 'Nobody is waiting on you.'))
-      this.feed.replaceChildren()
-      this.label.replaceChildren()
-      this.filesEl!.replaceChildren()
-      this.dropTapestry()
+    if (!this.head || !this.stream || !this.channelReply) return
+    const channel = this.channel
+    if (!this.ctx?.workspace?.isActive) this.ctx?.see?.(this.threadCard ?? channel?.seat ?? null)
+    this.channelReply.form.hidden = !channel
+    this.layout?.toggleAttribute('data-channel', !!channel)
+    if (!channel) {
+      this.sigs.channel = ''
+      this.head.replaceChildren(el('p', 'kbn-ch-empty', this.channels.length ? 'Choose a channel.' : 'No channels yet.'))
+      this.stream.replaceChildren()
       return
     }
-    const now = Date.now(), before = this.before.get(channel.key) ?? -Infinity
-    const sig = JSON.stringify([channel.key, channel.name, this.chosen && fiberOf(this.chosen), channel.messages.map(message => [fiberOf(message.card), message.kind, message.text, message.at, message.card.name]),
-      channel.files.map(file => [file.fullPath, file.timestamp]), channel.held.map(line => [line.fiber_id, line.n, line.first]), [...this.replied], [...this.tempering]])
-    if (sig !== this.sig) {
-      this.sig = sig
-      // Like a chat, the feed opens on its newest line and stays there as lines arrive, unless the reader has scrolled up.
-      const follow = this.landing || this.belowNewest() <= FOLLOW_PX
+    this.readTapestry(channel.seat)
+    const now = Date.now(), lines = channelLines(this.messages(channel), channel)
+    const sig = JSON.stringify([channel.key, channel.name, channel.seat.name, channel.waiting, channel.pinned, this.thread && fiberOf(this.thread), [...this.tempering], [...this.expanded.keys()], [...this.unfolded],
+      lines.map(({ message, replies, last }) => [message.id, message.kind, message.text, message.waiting, message.card.name, message.card.turn, message.files.map(file => file.fullPath), replies, last])])
+    if (this.changed('channel', sig)) {
+      const back = button('kbn-ch-back', '‹ Channels', () => this.setRail(false))
       const name = el('h3', 'kbn-ch-name', channel.name)
       if (channel.title !== channel.name) name.title = channel.title
-      this.head.replaceChildren(name, this.tabs!)
-      this.feed.replaceChildren(...channel.messages.map(message => this.messageRow(channel, message, before, now)))
-      if (!channel.messages.length) this.feed.append(el('li', 'kbn-ch-hush', 'Quiet.'))
-      // Only the feed moves: the page, the rail and the tapestry stay where they are.
-      if (follow) this.feed.scrollTop = this.feed.scrollHeight
-      this.landing = false
-      if (target === channel.seat) this.label.replaceChildren(el('span', '', channel.seat.name))
-      else this.label.replaceChildren(button('kbn-ch-back', `← ${channel.seat.name}`, () => this.select(null)), el('span', '', ` › ${target.name}`))
+      const chair = el('span', 'kbn-ch-chair', channel.seat.name)
+      chair.title = 'Its chair: a reply here goes to it'
+      const acts = el('span', 'kbn-ch-head-acts')
+      if (channel.waiting) acts.append(button('kbn-ch-act kbn-ch-later', 'Not now', () => { void this.setAside(setAsideKey(channel)) }))
+      acts.append(channel.pinned
+        ? button('kbn-ch-act kbn-ch-unpin', 'Unpin', () => { void this.setAside(unpinKey(channel.key, Date.now())) })
+        : button('kbn-ch-act kbn-ch-pin', 'Pin', () => { void this.pin(channel); this.draw() }))
+      this.head.replaceChildren(back, name, chair, acts)
+      this.fill(this.stream, lines, 'channel', channel, now)
+      if (!lines.length) this.stream.append(el('li', 'kbn-ch-hush', 'Nothing said here yet.'))
     }
-    // Ages tick in place, so a channel being read is never rebuilt under the reader.
+    this.tick()
+    this.channelReply.to.textContent = channel.seat.name
+  }
+  /** Whether a pane's signature changed, keeping the new one. */
+  private changed(pane: Pane, sig: string): boolean {
+    const old = this.sigs[pane]
+    this.sigs[pane] = sig
+    return old !== sig
+  }
+  /** Fills a list with messages, following its newest unless the reader has scrolled up. */
+  private fill(list: HTMLOListElement, lines: Line[], pane: Pane, channel: Channel, now: number): void {
+    const follow = this.following[pane] = this.landing[pane] || list.scrollHeight - list.scrollTop - list.clientHeight <= FOLLOW_PX
+    const before = this.before.get(channel.key) ?? -Infinity
+    const rows: HTMLLIElement[] = lines.map(line => this.messageRow(line, pane, before, now))
+    // Like Slack, a rule marks where what arrived since the last visit begins.
+    const fresh = Number.isFinite(before) ? lines.findIndex(({ message }) => !message.human && message.at > before) : -1
+    if (fresh >= 0) {
+      const rule = el('li', 'kbn-ch-new')
+      rule.setAttribute('role', 'separator')
+      rule.append(el('span', '', 'New'))
+      rows.splice(fresh, 0, rule)
+    }
+    this.rebuild(list, rows)
+    this.fold(list)
+    for (const row of rows) this.sizes?.observe(row)
+    if (follow) list.scrollTop = list.scrollHeight
+    this.landing[pane] = false
+  }
+  /** Folds each message taller than {@link FOLD_LINES} lines, unless the reader unfolded it. */
+  private fold(list: HTMLElement): void {
+    for (const text of list.querySelectorAll<HTMLElement>('.kbn-ch-msg-text[data-id]')) {
+      const id = text.dataset.id!
+      if (this.unfolded.has(id)) continue
+      const line = parseFloat(getComputedStyle(text).lineHeight) || 0
+      if (!line || text.scrollHeight <= line * (FOLD_LINES + 0.5)) continue
+      text.toggleAttribute('data-folded', true)
+      const more = button('kbn-ch-act kbn-ch-more', 'Show more', () => { this.unfolded.add(id); text.removeAttribute('data-folded'); more.remove() })
+      text.after(more)
+    }
+  }
+  /** Ages tick in place, so nothing is rebuilt under the reader. */
+  private tick(): void {
+    const now = Date.now()
     for (const age of this.layout!.querySelectorAll<HTMLElement>('[data-at]')) age.textContent = ago(Number(age.dataset.at), now)
-    this.replyTo!.textContent = target.name
-    this.later!.hidden = !channel.waiting && !channel.pinned
-    this.later!.title = channel.waiting ? 'Set this channel aside until something new waits in it' : 'Unpin this channel'
-    this.drawTabs(channel)
-    this.drawTapestry(target, channel)
-    this.drawFiles()
   }
-  /** The header's choice of what stands beside the lines, and a pin for a channel that would otherwise leave the rail. */
-  private drawTabs(channel: Channel): void {
-    const tab = (pane: 'tapestry' | 'files', text: string): HTMLButtonElement => {
-      const node = button('kbn-ch-tab', text, () => { this.pane = pane; this.drawChannel() })
-      node.setAttribute('aria-pressed', String(this.pane === pane))
-      return node
-    }
-    this.tabs!.replaceChildren(tab('tapestry', 'Tapestry'), tab('files', 'Files'))
-    if (!channel.listed) this.tabs!.append(button('kbn-ch-tab kbn-ch-pin', 'Pin', () => { void this.pin(channel); this.draw() }))
-  }
-  /** The channel's files, when they are the pane shown. */
-  private drawFiles(): void {
-    const channel = this.channel, files = this.pane === 'files' && channel
-    this.tapestry!.hidden = !!files
-    this.label!.hidden = !!files
-    this.filesEl!.hidden = !files
-    if (!files) return
-    this.probeCompanions(channel)
-    const docs = this.documents(channel)
-    this.rebuild(this.filesEl!, docs.length ? [...this.docList('file', docs, doc => doc.card.name).children] : [el('li', 'kbn-ch-hush', 'No files yet.')])
-  }
-  /** One worker's line: who, when, what, and what it sent; its actions show once it is chosen. */
-  private messageRow(channel: Channel, message: Message, before: number, now: number): HTMLLIElement {
-    const card = message.card, chosen = fiberOf(card) === fiberOf(this.target!)
+
+  /**
+   * One message: who said it, when, and what, whole, with its files. In the
+   * channel, choosing it opens its worker's thread; a close, a hand-off or
+   * another lifecycle line is one quiet line.
+   */
+  private messageRow({ message, replies, last }: Line, pane: Pane, before: number, now: number): HTMLLIElement {
+    const card = message.card
     const row = el('li', 'kbn-ch-msg')
-    if (message.kind) row.dataset.kind = message.kind
-    row.toggleAttribute('data-chosen', chosen)
-    row.toggleAttribute('data-new', !!message.kind && message.at > before)
-    const body = el('div', 'kbn-ch-msg-body')
-    const pick = button('kbn-ch-msg-pick', '', () => this.select(card))
-    pick.dataset.item = `line:${fiberOf(card)}`
-    const who = el('span', 'kbn-ch-msg-head')
-    who.append(el('span', 'kbn-ch-msg-name', card.name))
-    const office = officeOf(card.shuttleRole)
-    if (office && `role:${office}` !== channel.key) who.append(el('span', 'kbn-ch-msg-role', this.names.get(office) ?? office))
-    // A line whose time is unknown shows none.
-    if (message.at > 0) {
+    row.dataset.kind = message.kind
+    row.toggleAttribute('data-waiting', message.waiting)
+    row.toggleAttribute('data-human', message.human)
+    row.toggleAttribute('data-chosen', pane === 'channel' && !!this.thread && sameFiber(card, this.thread))
+    row.toggleAttribute('data-new', !message.human && message.at > before)
+    const opens = pane === 'channel'
+    const id = `${pane}:${message.id}`
+    const who = message.human ? 'You' : message.from?.name ?? message.label ?? card.name
+    const name = opens ? button('kbn-ch-msg-name', who, () => this.openThread(card)) : el('span', 'kbn-ch-msg-name', who)
+    name.dataset.item = id
+    if (opens) name.title = `Open ${card.name}'s thread`
+    const byline = el('div', 'kbn-ch-msg-head')
+    byline.append(name)
+    if ((message.human && opens) || message.from || message.label) byline.append(el('span', 'kbn-ch-msg-to', `to ${card.name}`))
+    const words = ({ closed: message.text ? `closed (${message.text})` : 'closed', handed_off: 'handed off', event: message.text } as Partial<Record<Message['kind'], string>>)[message.kind]
+    if (words !== undefined) {
+      row.classList.add('kbn-ch-line')
+      byline.append(el('span', 'kbn-ch-line-text', words))
+    }
+    if (message.at > 1) {
       const age = el('span', 'kbn-ch-age', ago(message.at, now))
       age.dataset.at = String(message.at)
-      who.append(age)
+      age.title = new Date(message.at).toLocaleString()
+      byline.append(age)
     }
-    pick.append(who)
-    const words = message.text || (message.kind === 'review' ? 'Closed for your review.' : '')
-    if (words) {
-      const text = el('div', 'kbn-ch-msg-text')
-      text.innerHTML = renderMarkdown(words)
-      pick.append(text)
+    const body = el('div', 'kbn-ch-msg-body')
+    body.append(byline)
+    if (message.kind === 'tapestry') body.append(this.tapestryCard(message))
+    else if (words === undefined) {
+      const said = message.text || (message.kind === 'review' ? 'Closed for your review.' : '')
+      if (said) {
+        const text = el('div', 'kbn-ch-msg-text')
+        const label = ({ ask: 'Asks', review: 'For review', turn: 'Stopped' } as Partial<Record<Message['kind'], string>>)[message.kind]
+        if (label && message.waiting) text.dataset.label = label
+        text.dataset.id = message.id
+        text.innerHTML = renderMarkdown(said)
+        body.append(text)
+      }
     }
-    body.append(pick)
-    const attached = this.attachments(channel, card, before, now)
-    if (attached) body.append(attached)
-    const acts = el('div', 'kbn-ch-acts')
-    acts.append(button('kbn-ch-act', 'Open', () => { this.returnTo = `line:${fiberOf(card)}`; this.openCard(card) }))
-    if (message.kind === 'review') {
+    if (message.files.length) body.append(this.attachments(message, id))
+    if (replies > 0) {
+      const link = button('kbn-ch-replies', `${replies} ${replies === 1 ? 'reply' : 'replies'}`, () => this.openThread(card))
+      link.dataset.item = `replies:${fiberOf(card)}`
+      const age = el('span', 'kbn-ch-age', ago(last, now))
+      age.dataset.at = String(last)
+      link.append(el('span', 'kbn-ch-replies-last', ' · last '), age)
+      body.append(link)
+    }
+    if (message.kind === 'review' && message.waiting) {
       const key = `${fiberOf(card)}:${message.at}`
       const temper = button('kbn-ch-act', this.tempering.has(key) ? 'Tempering…' : 'Temper', () => { void this.temper(card, key) })
       temper.disabled = this.tempering.has(key)
       temper.title = 'Accept the work as done'
+      const acts = el('div', 'kbn-ch-acts')
       acts.append(temper)
+      body.append(acts)
     }
-    body.append(acts)
-    if (this.replied.has(fiberOf(card))) body.append(el('span', 'kbn-ch-replied', 'Replied'))
-    row.append(stateDot(card, card => this.openCard(card)), body)
+    const gutter = message.human ? el('span', 'kbn-ch-you') : stateDot(message.from ?? card, worker => this.openThread(worker))
+    if (opens) {
+      // The whole message opens its thread, save its links, its buttons and a selection.
+      row.addEventListener('click', event => {
+        if ((event.target as Element).closest('a, button, input, .kbn-ch-tapestry-page') || getSelection()?.toString()) return
+        this.openThread(card)
+      })
+    }
+    row.append(gutter, body)
     return row
   }
-  /** The files a card sent and the lines it spoke while out of view. */
-  private attachments(channel: Channel, card: KanbanCard, before: number, now: number): HTMLElement | null {
-    const lines = channel.held.filter(line => line.fiber_id === card.uid || line.fiber_id === card.id)
-    // A file sent again is one chip, its newest send.
-    const files = channel.files.filter(file => cardNamed([card], file.uid ?? '', file.host ?? ''))
-      .filter((file, at, all) => all.findIndex(other => other.basename === file.basename) === at)
-    if (!lines.length && !files.length) return null
-    const box = el('div', 'kbn-ch-attached')
-    for (const line of lines) {
-      const said = button('kbn-ch-said', `“${line.first}”`, () => this.openCard(card))
-      said.toggleAttribute('data-new', (line.at ?? now) > before)
-      said.title = line.n > 1 ? `${line.n} lines held — hear them on its card` : 'Hear it on its card'
-      box.append(said)
-    }
-    for (const file of files.slice(0, 8)) {
-      const chip = button('kbn-ch-file', file.basename, () => { this.returnTo = `chip:${file.fullPath}`; this.openFile(file) })
-      chip.dataset.item = `chip:${file.fullPath}`
-      chip.toggleAttribute('data-new', file.timestamp > before)
-      chip.title = `Sent ${ago(file.timestamp, now)}`
+  /** A message's files: images drawn small inline, every other file a chip; each opens in the reader. */
+  private attachments(message: Message, id: string): HTMLElement {
+    const box = el('div', 'kbn-ch-attached'), base = this.ctx?.shuttleBase ?? ''
+    for (const file of message.files) {
+      const item = `${id}:${file.fullPath}`
+      const open = (): void => { this.returnTo = item; this.openFile(file, message.card) }
+      if (IMAGE.test(file.basename)) {
+        const figure = button('kbn-ch-image', '', open)
+        figure.dataset.item = item
+        figure.title = file.fullPath
+        const img = el('img', '')
+        img.alt = file.basename
+        img.loading = 'lazy'
+        img.src = fileBytesUrl(base, file.fullPath, file.host ?? message.card.originId)
+        figure.append(img, el('span', 'kbn-ch-image-name', file.basename))
+        box.append(figure)
+        continue
+      }
+      const chip = button('kbn-ch-file', file.basename, open)
+      chip.dataset.item = item
+      chip.title = file.fullPath
       box.append(chip)
     }
     return box
   }
-
-  /** The shown card's tapestry (or report), else its constitution. Redrawn only when the card changes. */
-  private drawTapestry(card: KanbanCard, channel: Channel): void {
-    const key = `${card.originId}\0${fiberOf(card)}`
-    if (key === this.tapestryFor) return
-    this.dropTapestry()
-    this.tapestryFor = key
-    const generation = ++this.tapestryGeneration, base = this.ctx!.shuttleBase
-    void (async () => {
-      let path: string | undefined
-      for (const name of card.fiberDir ? COMPANION_NAMES : []) {
-        const found = await head(fileBytesUrl(base, `${card.fiberDir}/${name}`, card.originId), RESOURCE_PRIORITY.neighbour)
-        if (found?.exists) { path = `${card.fiberDir}/${name}`; break }
-      }
-      path ??= channel.files.find(file => /^(tapestry|report)\.html$/i.test(file.basename) && cardNamed([card], file.uid ?? '', file.host ?? ''))?.fullPath
-      if (generation !== this.tapestryGeneration) return
-      if (path) {
-        this.viewer = buildFileViewer(base, path, card.originId, undefined, undefined, { active: true })
-        this.tapestry!.append(this.viewer)
-        return
-      }
-      const entry = await readFiber(base, card.id, card.originId).catch(() => null)
-      if (generation !== this.tapestryGeneration || !entry) return
-      const prose = el('div', 'kbn-ch-prose ws-prose kbn-detail-prose')
-      prose.innerHTML = renderFiberMarkdown(entry.fiber.body ?? '', '', card).html
-      this.tapestry!.append(prose)
-    })()
-  }
-  private dropTapestry(): void {
-    this.tapestryGeneration++
-    disposeFileViewer(this.viewer)
-    this.viewer = null
-    this.tapestryFor = ''
-    this.tapestry?.replaceChildren()
-  }
-
-  private replyBar(): HTMLElement {
-    const form = this.form = el('form', 'kbn-ch-reply')
-    const label = el('label', 'kbn-ch-reply-label', 'Reply to ')
-    this.replyTo = el('span', 'kbn-ch-reply-to')
-    label.append(this.replyTo)
-    this.reply = el('textarea', 'kbn-ch-reply-text')
-    this.reply.rows = 2
-    label.htmlFor = this.reply.id = `kbn-ch-reply-${Math.random().toString(36).slice(2)}`
-    this.reply.addEventListener('keydown', event => {
-      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); form.requestSubmit() }
+  /** The chair's tapestry: its title and lede, read whole in place or opened in the reader. */
+  private tapestryCard(message: Message): HTMLElement {
+    const box = el('div', 'kbn-ch-tapestry')
+    const viewer = this.expanded.get(message.id)
+    box.append(el('p', 'kbn-ch-tapestry-kicker', 'Tapestry'), el('p', 'kbn-ch-tapestry-title', message.title ?? ''))
+    if (message.text) box.append(el('p', 'kbn-ch-tapestry-lede', message.text))
+    const acts = el('div', 'kbn-ch-acts')
+    const toggle = button('kbn-ch-act', viewer ? 'Fold it' : 'Read it here', () => this.toggleTapestry(message))
+    toggle.setAttribute('aria-expanded', String(!!viewer))
+    toggle.dataset.item = `tapestry:${message.id}`
+    const open = button('kbn-ch-act', 'Open', () => {
+      this.returnTo = `tapestry-open:${message.id}`
+      this.openFile({ fullPath: message.path!, basename: message.path!.split('/').pop()!, timestamp: message.at }, message.card)
     })
-    const send = el('button', 'kbn-ch-send', 'Send')
-    send.type = 'submit'
-    this.later = button('kbn-ch-later', 'Not now', () => { void this.setAside() })
-    const top = el('div', 'kbn-ch-reply-top'), row = el('div', 'kbn-ch-reply-row')
-    top.append(label, this.later)
-    row.append(this.reply, send)
-    form.append(top, row)
-    form.addEventListener('submit', event => { event.preventDefault(); void this.send() })
-    return form
+    open.dataset.item = `tapestry-open:${message.id}`
+    acts.append(toggle, open)
+    if (viewer) {
+      const page = el('div', 'kbn-ch-tapestry-page')
+      page.append(viewer)
+      box.append(page)
+    }
+    box.append(acts)
+    return box
   }
-  /** Sends to the card replied to, then comes back to the seat; the channel stays. */
-  private async send(): Promise<void> {
-    const card = this.target, text = this.reply?.value.trim(), ctx = this.ctx
-    if (!card || !text || !ctx) return
-    const channel = this.current
-    this.reply!.disabled = true
+  private toggleTapestry(message: Message): void {
+    const viewer = this.expanded.get(message.id)
+    if (viewer) { disposeFileViewer(viewer); this.expanded.delete(message.id) }
+    else this.expanded.set(message.id, buildFileViewer(this.ctx!.shuttleBase, message.path!, message.card.originId, undefined, undefined, { active: true }))
+    this.drawChannel()
+  }
+
+  /** The open thread: its worker's name and liveness, its open ask or a closed fiber's conclusion, what it said and what was said to it. */
+  private drawThread(): void {
+    if (!this.threadEl || !this.threadHead || !this.threadList || !this.threadReply) return
+    const channel = this.channel, card = channel && this.threadCard
+    this.layout?.toggleAttribute('data-thread', !!card)
+    this.threadEl.hidden = !card
+    if (!channel || !card) { this.sigs.thread = ''; this.threadList.replaceChildren(); return }
+    const now = Date.now(), messages = threadOf(this.messages(channel), card)
+    const state = liveness(card)
+    const sig = JSON.stringify([fiberOf(card), card.name, card.outcome, card.ask?.text, card.status, card.turn, state, isMobileViewport(), [...this.tempering], [...this.unfolded],
+      messages.map(message => [message.id, message.kind, message.text, message.waiting, message.files.map(file => file.fullPath)])])
+    if (this.changed('thread', sig)) {
+      const close = button('kbn-ch-thread-close', isMobileViewport() ? `‹ ${channel.name}` : 'Close', () => this.openThread(null))
+      close.setAttribute('aria-label', 'Close the thread')
+      const who = el('div', 'kbn-ch-thread-who')
+      const id = `thread-name:${fiberOf(card)}`
+      const name = button('kbn-ch-thread-name', card.name, () => this.openPage(id, card))
+      name.dataset.item = id
+      name.title = 'Open its page'
+      const word = el('span', 'kbn-ch-liveness', state)
+      word.dataset.state = state
+      who.append(stateDot(card, worker => this.openCard(worker)), name, word)
+      const standing: HTMLElement[] = []
+      if (card.ask && card.status === 'active') {
+        const ask = el('div', 'kbn-ch-status kbn-ch-thread-ask')
+        ask.innerHTML = renderMarkdown(card.ask.text)
+        standing.push(ask)
+      }
+      // The outcome is a closed fiber's conclusion; an open one shows only what it waits on.
+      if (state === 'closed' && card.outcome) {
+        const conclusion = el('div', 'kbn-ch-status kbn-ch-conclusion')
+        conclusion.innerHTML = renderMarkdown(card.outcome)
+        standing.push(conclusion)
+      }
+      this.threadHead.replaceChildren(close, who, ...standing)
+      this.fill(this.threadList, messages.map(message => ({ message, replies: 0, last: message.at })), 'thread', channel, now)
+      if (!messages.length) this.threadList.append(el('li', 'kbn-ch-hush', 'Nothing said yet.'))
+    }
+    this.tick()
+    this.threadReply.to.textContent = card.name
+  }
+
+  /** Sends to a worker; the reply stands in the stream until the board carries it. */
+  private async send(card: KanbanCard | undefined, text: string, pane: Pane): Promise<boolean> {
+    const ctx = this.ctx, channel = this.current
+    if (!card || !ctx) return false
     try {
       const answer = await postDaemonJson<{ delivered?: boolean | null; error?: string }>(ctx.shuttleBase, '/api/v1/deliver',
         { fiber_id: card.id, origin: card.originId, text, from: 'human' }, 'Reply failed')
       if (answer?.delivered === false) throw new Error(answer.error ?? `${card.name} did not receive it`)
-      this.replied.add(fiberOf(card))
-      if (channel) { this.renew(channel); this.drafts.delete(channel) }
-      if (!this.reply) return
-      if (this.current === channel) { this.reply.value = ''; this.chosen = null; this.drawChannel() }
-      this.status(answer?.delivered === null ? `Sent to ${card.name}; its arrival is not yet confirmed.` : `Sent to ${card.name}.`)
+      this.sent.push({ fiber: fiberOf(card), text, at: Date.now() })
+      this.drafts.delete(pane === 'channel' ? `channel:${channel}` : `thread:${fiberOf(card)}`)
+      if (channel) this.renew(channel)
+      this.landing[pane] = true
+      this.status(answer?.delivered === null ? `Sent to ${card.name}; its arrival is not yet confirmed.` : '')
       announce(`Sent to ${card.name}.`)
+      this.drawChannel(); this.drawThread()
       ctx.requestRefresh()
+      return true
     } catch (error) {
       this.status(`Not sent: ${error instanceof Error ? error.message : String(error)}`)
-    } finally {
-      if (this.reply) this.reply.disabled = false
+      return false
     }
   }
-  /** Not now: sets a waiting channel aside, or unpins a quiet pinned one, and moves on to the next. */
-  private async setAside(): Promise<void> {
+  /** Writes a set-aside (the waiting mark clears) or an unpin, and restores it when the write fails. */
+  private async setAside(key: string): Promise<void> {
     const channel = this.channel, ctx = this.ctx
     if (!channel || !ctx) return
-    const key = channel.waiting ? setAsideKey(channel) : unpinKey(channel.key, Date.now())
-    const listed = this.listed, at = listed.indexOf(channel)
-    const next = listed.filter(each => each !== channel)[Math.min(at, listed.length - 2)]
     this.pending.push(key)
-    this.open(next?.key ?? null, true, false)
+    if (key.startsWith('pin:')) this.pinned.delete(channel.key)
     this.draw()
     try {
       await postDaemonJson(ctx.shuttleBase, '/api/v1/channels/dismiss', { key, fiber: fiberOf(channel.seat) })
     } catch {
       this.pending = this.pending.filter(item => item !== key)
       this.draw()
-      this.status(`${channel.name} could not be ${channel.waiting ? 'set aside' : 'unpinned'}; it is still here.`)
+      this.status(`${channel.name} could not be ${key.startsWith('pin:') ? 'unpinned' : 'set aside'}; it is as it was.`)
     }
   }
   /** Pins a channel across the fleet; use renews it, and it lapses with the board's reach. */
@@ -708,41 +780,52 @@ export class ChannelsView implements TemporalView {
     const ctx = this.ctx
     if (!ctx) return
     this.tempering.add(key)
-    this.drawChannel()
+    this.drawChannel(); this.drawThread()
     try {
       await postDaemonJson(ctx.shuttleBase, '/api/v1/transition', { fiber_id: card.id, target: 'tempered', origin: card.originId }, 'Temper failed')
-      // It stays disabled until the refreshed feed takes the review away.
+      // It stays disabled until the refreshed board takes the review away.
       ctx.requestRefresh()
     } catch (error) {
       this.tempering.delete(key)
       this.status(`${card.name} was not tempered: ${error instanceof Error ? error.message : String(error)}`)
-      this.drawChannel()
+      this.drawChannel(); this.drawThread()
     }
   }
 
-  /** Hides or shows the rail, remembered in this browser. */
+  private railShown(): boolean { return isMobileViewport() ? this.phoneRail : !this.railHidden }
+  /** Hides or shows the rail: remembered in this browser on a desktop; on a phone, the rail is the screen before a channel. */
   private setRail(hidden: boolean): void {
-    if (hidden === this.railHidden) return
-    this.railHidden = hidden
-    store(RAIL, hidden ? '1' : '0')
+    if (isMobileViewport()) this.phoneRail = !hidden
+    else {
+      if (hidden === this.railHidden) return
+      this.railHidden = hidden
+      store(RAIL, hidden ? '1' : '0')
+    }
     this.showRail()
   }
   private showRail(): void {
-    this.layout?.toggleAttribute('data-rail-hidden', this.railHidden)
+    const shown = this.railShown()
+    this.layout?.toggleAttribute('data-rail-hidden', !shown)
     if (!this.railToggle) return
-    this.railToggle.textContent = this.railHidden ? 'Show channels' : 'Hide channels'
-    this.railToggle.setAttribute('aria-expanded', String(!this.railHidden))
+    this.railToggle.textContent = shown ? 'Hide channels' : 'Show channels'
+    this.railToggle.setAttribute('aria-expanded', String(shown))
   }
   /**
-   * Sideways gestures over the channel's lines or the rail, while the Channels
-   * view is the surface shown: a touch drawn rightward from the lines opens the
-   * rail and one drawn leftward closes it; a two-finger trackpad swipe does
-   * the same, back to open and forward to close. Content that scrolls
-   * sideways keeps the gesture, and the tapestry is never a gesture surface.
+   * Sideways gestures while Channels is the surface shown: drawn rightward
+   * across a thread it closes the thread, across a channel it brings the rail;
+   * drawn leftward it puts the rail away. A two-finger trackpad swipe does the
+   * same. Content that scrolls sideways, and a tapestry read in place, keep it.
    */
   private gestures(root: HTMLElement): () => void {
-    const surface = (target: EventTarget | null): Element | null =>
-      this.ctx?.workspace?.isActive ? null : (target as Element | null)?.closest?.('.kbn-ch-talk, .kbn-ch-rail') ?? null
+    const surface = (target: EventTarget | null): Element | null => {
+      const node = target as Element | null
+      if (this.ctx?.workspace?.isActive || node?.closest?.('.kbn-ch-tapestry-page')) return null
+      return node?.closest?.('.kbn-ch-thread, .kbn-ch, .kbn-ch-rail') ?? null
+    }
+    const back = (on: Element): void => {
+      if (on.classList.contains('kbn-ch-thread')) this.openThread(null)
+      else if (on.classList.contains('kbn-ch')) this.setRail(false)
+    }
     let start: { x: number; y: number; on: Element } | null = null
     let travel = 0, last = 0
     const down = (event: TouchEvent): void => {
@@ -756,10 +839,11 @@ export class ChannelsView implements TemporalView {
       const dx = end.clientX - from.x, dy = end.clientY - from.y
       if (Math.abs(dx) < SWIPE_PX || Math.abs(dy) > Math.abs(dx) || scrollsSideways(event.target as Element, root, -dx)) return
       if (dx < 0) this.setRail(true)
-      else if (from.on.classList.contains('kbn-ch-talk')) this.setRail(false)
+      else back(from.on)
     }
     const wheel = (event: WheelEvent): void => {
-      if (Math.abs(event.deltaX) <= Math.abs(event.deltaY) || !surface(event.target) || scrollsSideways(event.target as Element, root, event.deltaX)) return
+      const on = surface(event.target)
+      if (Math.abs(event.deltaX) <= Math.abs(event.deltaY) || !on || scrollsSideways(event.target as Element, root, event.deltaX)) return
       // Taking the gesture keeps the browser from going back a page.
       event.preventDefault()
       // One swipe is a burst of wheel events: it acts once, and a pause starts the next.
@@ -768,7 +852,8 @@ export class ChannelsView implements TemporalView {
       if (Number.isNaN(travel)) return
       travel += event.deltaX
       if (Math.abs(travel) < SWIPE_PX) return
-      this.setRail(travel > 0)
+      if (travel > 0) this.setRail(true)
+      else back(on)
       travel = NaN
     }
     // Touch events, not pointer events: the browser cancels a pointer it starts panning, but a touch still ends.
@@ -782,15 +867,21 @@ export class ChannelsView implements TemporalView {
     }
   }
 
+  /** Opens a fiber's page, or one of its documents, from the item named `from`. */
+  private openPage(from: string, card: KanbanCard, key?: DocKey): void {
+    this.returnTo = from
+    this.ctx?.workspace?.openPage(card, key)
+  }
   /** openFromDesk reaches the card as the Desk does, so voice's in-view target releases its held lines. */
   private openCard(card: KanbanCard): void {
     if (this.ctx?.workspace) this.ctx.workspace.openFromDesk(card)
     else this.ctx?.openCard(card.id)
   }
-  private openFile(file: SentFile): void {
-    const card = file.uid ? cardNamed(this.ctx ? boardCards(this.ctx.response) : [], file.uid, file.host ?? '') : undefined
-    if (card && this.ctx?.workspace) this.ctx.workspace.openPage(card, docKey(file.host ?? '', file.fullPath, card.originId, card.fiberDir))
-    else if (card) this.openCard(card)
+  /** Opens a sent file in the reader, under the fiber that sent it. */
+  private openFile(file: SentFile, sender: KanbanCard): void {
+    const card = (file.uid && this.ctx ? cardNamed(boardCards(this.ctx.response), file.uid, file.host ?? '') : undefined) ?? sender
+    if (this.ctx?.workspace) this.ctx.workspace.openPage(card, docKey(file.host ?? card.originId, file.fullPath, card.originId, card.fiberDir))
+    else this.openCard(card)
   }
   private step(by: number): void {
     const listed = this.listed
@@ -801,34 +892,70 @@ export class ChannelsView implements TemporalView {
 
   keydown(event: KeyboardEvent): boolean {
     if (event.metaKey || event.ctrlKey || event.altKey) return false
-    if (event.key === 'Escape' && (document.activeElement === this.reply || document.activeElement === this.finder)) { this.channelEl?.focus({ preventScroll: true }); return true }
+    const active = document.activeElement as HTMLElement | null
+    const replying = active === this.channelReply?.text || active === this.threadReply?.text
+    if (event.key === 'Escape' && (replying || active === this.jump)) { (this.thread ? this.threadEl : this.channelEl)?.focus({ preventScroll: true }); return true }
     // Enter in the bar's Find opens what it found first.
-    if (event.key === 'Enter' && this.query && isTypingTarget(document.activeElement as HTMLElement | null) && document.activeElement !== this.reply && document.activeElement !== this.finder) { this.openFirst(); return true }
+    if (event.key === 'Enter' && this.query && isTypingTarget(active) && !replying && active !== this.jump) { this.openFirst(); return true }
     if (keystrokeIsSpokenFor()) return false
-    if (event.key === '/' && this.finder?.getClientRects().length) { this.setRail(false); this.finder.focus({ preventScroll: true }); return true }
+    if (event.key === 'Escape' && this.thread) { this.openThread(null); return true }
+    if (event.key === '/' && this.jump) { this.setRail(false); this.jump.focus({ preventScroll: true }); return true }
     if (event.key === 'j') { this.step(1); return true }
     if (event.key === 'k') { this.step(-1); return true }
-    if (event.key === '[') { this.setRail(!this.railHidden); return true }
-    if (event.key === 'Enter' && !(document.activeElement as HTMLElement | null)?.closest('button, a, input') && this.channel) { this.reply?.focus(); return true }
+    if (event.key === '[') { this.setRail(this.railShown()); return true }
+    if (event.key === 'Enter' && !active?.closest('button, a, input') && this.channel) {
+      (this.thread ? this.threadReply : this.channelReply)?.text.focus()
+      return true
+    }
     return false
   }
   unmount(): void {
     // A document still being read from its owner does not open once Channels is left.
     this.ctx?.workspace?.library.cancelOpen()
+    this.keepDrafts()
     this.query = ''
-    this.dropTapestry()
-    this.readGeneration++
+    for (const viewer of this.expanded.values()) disposeFileViewer(viewer)
+    this.expanded.clear()
+    this.generation++
+    for (const feed of this.feeds.values()) feed.pending = false
     this.unsubscribe?.(); this.unsubscribe = undefined
     this.unsubscribeLibrary?.(); this.unsubscribeLibrary = undefined
     this.stopGestures?.(); this.stopGestures = undefined
+    this.sizes?.disconnect(); this.sizes = null
     this.reading = false
     this.ctx = null
-    this.layout = this.channelEl = this.head = this.label = this.tapestry = this.note = this.replyTo = null
-    this.list = null; this.found = null; this.lately = null; this.finder = null; this.feed = null; this.railToggle = null; this.later = null
-    this.tabs = null; this.filesEl = null
-    this.reply = null
-    this.form = null
-    this.sig = ''
+    this.layout = this.channelEl = this.head = this.note = this.threadEl = this.threadHead = null
+    this.list = null; this.found = null; this.jump = null; this.stream = null; this.threadList = null; this.railToggle = null
+    this.channelReply = this.threadReply = null
+    this.sigs = { channel: '', thread: '' }
+  }
+}
+
+/** A reply box: who it goes to, the words, and Send; Enter sends and Shift+Enter breaks the line. */
+class Reply {
+  readonly form = el('form', 'kbn-ch-reply')
+  readonly text = el('textarea', 'kbn-ch-reply-text')
+  readonly to = el('span', 'kbn-ch-reply-to')
+  constructor(send: (text: string) => Promise<boolean>) {
+    const label = el('label', 'kbn-ch-reply-label', 'To ')
+    label.append(this.to)
+    this.text.rows = 1
+    label.htmlFor = this.text.id = `kbn-ch-reply-${Math.random().toString(36).slice(2)}`
+    this.text.addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); this.form.requestSubmit() }
+    })
+    const submit = el('button', 'kbn-ch-send', 'Send')
+    submit.type = 'submit'
+    const row = el('div', 'kbn-ch-reply-row')
+    row.append(this.text, submit)
+    this.form.append(label, row)
+    this.form.addEventListener('submit', event => {
+      event.preventDefault()
+      const words = this.text.value.trim()
+      if (!words) return
+      this.text.disabled = true
+      void send(words).then(sent => { if (sent) this.text.value = '' }).finally(() => { this.text.disabled = false })
+    })
   }
 }
 registerView(new ChannelsView())
