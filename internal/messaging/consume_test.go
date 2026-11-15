@@ -424,3 +424,37 @@ func TestConsumeSupersededMemberAfterTheBatchsReceipt(t *testing.T) {
 		})
 	}
 }
+
+func TestConsumeLaunchedSessionTakesAReservationThroughItsHook(t *testing.T) {
+	env, w := consumeFixture(t)
+	w.Idle, w.Costly = true, true
+	putWish(t, env, "m", "ask", "fresh")
+	sends := 0
+	sender := func(context.Context, *sysenv.Env, string, Request, string) (Receipt, error) {
+		sends++
+		return Receipt{Status: StatusAccepted}, nil
+	}
+	if result, _ := consumeWith(context.Background(), env, "fiber", "host", w, sender); result.Action != "fresh" {
+		t.Fatalf("got %+v", result)
+	}
+	if err := RegisterMailbox(env, "claude", "B", "host", t.TempDir(), os.Getpid(), true); err != nil {
+		t.Fatal(err)
+	}
+	launched := Worker{Address: "shuttle://host/claude/B", Epoch: transition(t, env, "B", "shuttle://host/claude/B"), Idle: true}
+	result, err := consumeWith(context.Background(), env, "fiber", "host", launched, sender)
+	if err != nil || result.Action != "wait" || result.Turn || sends != 0 {
+		t.Fatalf("launched session woken for its own reservation: %+v %v", result, err)
+	}
+	if !fiberContextHookEligible(mailboxDir(env, "fiber", "fiber"), Request{MessageID: "m"}) {
+		t.Fatal("launched session's hook cannot take the reservation")
+	}
+	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey("m")+".json")
+	e := readEntry(t, path)
+	e.Attempt.OpenedAt = time.Now().Add(-3 * time.Minute).UnixNano()
+	if err := writeMailboxEntry(path, e); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := consumeWith(context.Background(), env, "fiber", "host", launched, sender); err != nil || result.Action != "wake" || sends != 1 {
+		t.Fatalf("an expired reservation still holds the entry: %+v %v", result, err)
+	}
+}

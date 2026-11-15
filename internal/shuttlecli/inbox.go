@@ -102,9 +102,10 @@ pending, and a turn of force or idle. An unknown wish value is refused.`,
 		Use:   "consume <fiber-key> <address-or-dash> <epoch>",
 		Short: "Consume a fiber's inbox for its live conversation, as one JSON answer",
 		Long: `Consume a fiber's inbox for its live conversation: advance every open batch,
-then wake, reserve a fresh launch or wait. The JSON answer is printed even when
-an open batch's delivery fails, which then exits nonzero; "turn": true asks the
-caller to consume again with the worker's --idle and --costly facts.`,
+then wake, reserve a fresh launch or wait. The JSON answer is printed whenever
+consume decided, including when an open batch's delivery failed, which then
+exits nonzero; "turn": true asks the caller to consume again with the worker's
+--idle and --costly facts.`,
 		Args: cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			host, err := a.resolveOwnHost("")
@@ -116,6 +117,9 @@ caller to consume again with the worker's --idle and --costly facts.`,
 				return fmt.Errorf("positive receiver epoch required")
 			}
 			result, err := messaging.Consume(context.Background(), a.env, args[0], host, messaging.Worker{Address: args[1], Epoch: epoch, Idle: idle, Costly: costly})
+			if result.Action == "" {
+				return err
+			}
 			if encodeErr := json.NewEncoder(a.env.Stdout).Encode(result); encodeErr != nil {
 				return encodeErr
 			}

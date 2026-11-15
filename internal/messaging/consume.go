@@ -24,7 +24,8 @@ type Worker struct {
 
 // Consumption describes the action taken, or the launch the daemon must
 // perform. Turn reports, for a worker not observed idle, that a due entry asks
-// for a turn, so the daemon's idle and cost facts would decide it.
+// for a turn, so the daemon's idle and cost facts would decide it. A
+// consumption that failed before it could decide has no Action.
 type Consumption struct {
 	Action  string   `json:"action"`
 	Members []string `json:"members,omitempty"`
@@ -52,10 +53,10 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 		a, err = ParseAddress(w.Address)
 	}
 	if err != nil {
-		return result, err
+		return Consumption{}, err
 	}
 	if a.Host != host {
-		return result, errCode("wrong_host", "fiber context belongs to another host")
+		return Consumption{}, errCode("wrong_host", "fiber context belongs to another host")
 	}
 	root := mailboxDir(env, "fiber", fiber)
 	if a.Harness == "codex" {
@@ -63,31 +64,31 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	}
 	hook := MailboxAvailable(env, a.Harness, a.ID, host)
 	if err := ensureDir(root, 0700); err != nil {
-		return result, err
+		return Consumption{}, err
 	}
 	if err := subscribeFiberReceiver(env, fiber, a, hook, w.Epoch); err != nil {
-		return result, err
+		return Consumption{}, err
 	}
 	if w.Address == "-" {
 		return result, nil
 	}
 	lock, err := os.OpenFile(filepath.Join(root, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
-		return result, err
+		return Consumption{}, err
 	}
 	defer lock.Close()
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
-		return result, err
+		return Consumption{}, err
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
 	if receiverEpoch(root, w.Address) != w.Epoch || !fiberReceiverMatches(root, a) {
-		return result, errCode("stale_receiver", "superseded worker identity")
+		return Consumption{}, errCode("stale_receiver", "superseded worker identity")
 	}
 	if a.Harness == "claude" && !hook {
-		return result, errCode("unavailable", "%s", mailboxUnavailable(env, a.Harness, a.ID, host))
+		return Consumption{}, errCode("unavailable", "%s", mailboxUnavailable(env, a.Harness, a.ID, host))
 	}
 	if err := pruneOffered(root, time.Now()); err != nil {
-		return result, err
+		return Consumption{}, err
 	}
 	current := func(c context.Context, r Request) (bool, error) { return currentThreadSignalWithBackoff(c, env, r) }
 	// Each open batch advances on its own, so one awaiting its outcome holds
@@ -95,7 +96,7 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	errs := []error{}
 	_, batches, err := openBatches(env, root)
 	if err != nil {
-		return result, err
+		return Consumption{}, err
 	}
 	for i := range batches {
 		// Quiet context pinned before batches existed is taken by a Codex
@@ -114,7 +115,7 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	}
 	items, _, err := openBatches(env, root)
 	if err != nil {
-		return result, err
+		return Consumption{}, err
 	}
 	now := time.Now()
 	var candidates []mailboxPendingItem
@@ -124,7 +125,7 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 		}
 		if mailboxEntryExpired(it.entry, now) {
 			if err := moveToOffered(root, it.path); err != nil {
-				return result, err
+				return Consumption{}, err
 			}
 			continue
 		}
@@ -135,10 +136,16 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	force, asking, fresh, launching := false, false, false, false
 	for i := range due {
 		if err := settleUnfinishedHookClaim(&due[i]); err != nil {
-			return result, err
+			return Consumption{}, err
 		}
 		e := due[i].entry
-		if e.Attempt.open() && e.Attempt.Launch && e.Attempt.Conversation == w.Address && e.Attempt.Epoch == w.Epoch && now.Sub(time.Unix(0, e.Attempt.OpenedAt)) < launchLease {
+		// Within its lease, a reservation holds the reserving worker's wake
+		// while the launch is in flight, and leaves a new receiver, the
+		// launched session, to take the entry through its hook.
+		if e.Attempt.open() && e.Attempt.Launch && now.Sub(time.Unix(0, e.Attempt.OpenedAt)) < launchLease {
+			if e.Attempt.Conversation != w.Address || e.Attempt.Epoch != w.Epoch {
+				continue
+			}
 			launching = true
 		}
 		switch e.Wishes.Turn {
@@ -173,7 +180,7 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 			}
 			it.entry.Attempt = &attempt
 			if err := writeMailboxEntryKeepingTime(it.path, it.entry); err != nil {
-				return result, err
+				return Consumption{}, err
 			}
 		}
 		return Consumption{Action: "fresh", Members: members}, errors.Join(errs...)
@@ -213,7 +220,7 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	}
 	attempt := newConsumedAttempt(w, selected)
 	if err := pinConsumedBatch(root, &attempt); err != nil {
-		return result, err
+		return Consumption{}, err
 	}
 	sent, err := deliverConsumedBatch(ctx, env, root, host, w, &attempt, send)
 	if sent {
