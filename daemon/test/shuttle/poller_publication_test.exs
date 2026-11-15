@@ -94,7 +94,7 @@ defmodule Shuttle.PollerPublicationTest do
         assert [%{"fiber_id" => ^id}] = Jason.decode!(conn.resp_body)["running_detail"]
         assert Plug.Conn.get_resp_header(conn, "etag") == [response.etag]
 
-        assert {:ok, ~s({"action":"wait"}) <> "\n"} =
+        assert {:ok, %{"action" => "wait"}} =
                  Delivery.flush_context(%{felt_store: root, fiber: Store.fiber(id)})
       end)
 

@@ -27,7 +27,8 @@ defmodule Shuttle.ThreadReceiverTest do
 
       cond do
         Shuttle.Env.app(:receiver_wake_stub, false) and
-          match?(["inbox", "consume" | _], args) and "--costly" not in args ->
+          match?(["inbox", "consume" | _], args) and "--idle" in args and
+            "--costly" not in args ->
           {~s({"action":"wake"}), 0}
 
         Shuttle.Env.app(:receiver_runtime_write_fails, false) and "mark-runtime" in args ->
@@ -595,12 +596,10 @@ defmodule Shuttle.ThreadReceiverTest do
     :sys.suspend(poller)
 
     try do
-      assert {:ok, output} = Delivery.flush_context(parent)
-      assert %{"action" => "fresh"} = Jason.decode!(output)
+      assert {:ok, %{"action" => "fresh"}} = Delivery.flush_context(parent)
 
       for _ <- 1..3 do
-        assert {:ok, output} = Delivery.flush_context(parent)
-        assert %{"action" => "wait"} = Jason.decode!(output)
+        assert {:ok, %{"action" => "wait"}} = Delivery.flush_context(parent)
       end
 
       {:messages, messages} = Process.info(poller, :messages)
@@ -619,13 +618,53 @@ defmodule Shuttle.ThreadReceiverTest do
     :sys.replace_state(poller, &%{&1 | reconciliation_hold: "test refusal"})
     Env.put_app_env(:receiver_spy, self())
     Env.put_app_env(:receiver_wake_stub, true)
-    assert {:ok, output} = Delivery.flush_context(parent)
-    assert %{"action" => "wake"} = Jason.decode!(output)
+    assert {:ok, %{"action" => "wake"}} = Delivery.flush_context(parent)
+    assert_receive {:inbox_command, ["inbox", "consume", _, _, _]}
     assert_receive {:inbox_command, ["inbox", "consume", _, _, _, "--idle", "--costly"]}
     assert_receive {:inbox_command, ["inbox", "consume", _, _, _, "--idle"]}
   end
 
-  defp costly_consumer!(%{store: store, key: key}) do
+  test "a poll with nothing asking for a turn is one consume and no turn read", context do
+    {_poller, parent} = costly_consumer!(context, "none")
+    Env.put_app_env(:receiver_spy, self())
+    # A turn read would find this transcript missing; the poll never looks.
+    File.rm_rf!(Path.join(context.store, "projects"))
+    assert {:ok, %{"action" => "wait"} = answer} = Delivery.flush_context(parent)
+    refute Map.has_key?(answer, "turn")
+    assert_receive {:inbox_command, ["inbox", "consume", _, _, _]}
+    refute_receive {:inbox_command, _}, 100
+  end
+
+  test "a worker whose turn no hook reported is woken without a cost check", context do
+    {poller, parent} = costly_consumer!(context)
+    Env.put_app_env(:waiting_phases_source, fn -> %{} end)
+    assert Poller.worker_turn(poller, "hub") == :unknown
+    Env.put_app_env(:receiver_spy, self())
+    Env.put_app_env(:receiver_wake_stub, true)
+    assert {:ok, %{"action" => "wake"}} = Delivery.flush_context(parent)
+    assert_receive {:inbox_command, ["inbox", "consume", _, _, _]}
+    assert_receive {:inbox_command, ["inbox", "consume", _, _, _, "--idle"]}
+    refute_receive {:inbox_command, _}, 100
+  end
+
+  test "waking context asks a live worker for a turn and keeps the first capture of a derived id",
+       %{key: key} = context do
+    {poller, parent} = costly_consumer!(context, "none")
+    :sys.replace_state(poller, &%{&1 | reconciliation_hold: "test refusal"})
+    Env.put_app_env(:receiver_wake_stub, true)
+    assert {:ok, _} = CLI.run(["inbox", "put", key, "thread-derived", "Take this result"])
+
+    assert {:ok, :queued} =
+             Delivery.context(parent, "Take this result", "thread-derived", wake: true)
+
+    assert {:ok, :queued} = Delivery.context(parent, "A new result", "asked", wake: true)
+    assert {:ok, output} = CLI.run(["inbox", "ls", key, "--json"])
+
+    assert %{"thread-derived" => "none", "asked" => "ask"} =
+             output |> Jason.decode!() |> Map.new(&{&1["id"], &1["turn"]})
+  end
+
+  defp costly_consumer!(%{store: store, key: key}, turn \\ "ask") do
     native = "00000000-0000-4000-8000-000000000001"
     start_tmux!("consumer")
     poller = start_poller_for!(store)
@@ -666,7 +705,7 @@ defmodule Shuttle.ThreadReceiverTest do
                "fresh-result",
                "Take this result",
                "--turn",
-               "ask",
+               turn,
                "--if-costly",
                "fresh"
              ])

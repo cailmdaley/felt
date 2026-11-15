@@ -165,18 +165,22 @@ defmodule Shuttle.Delivery do
   trigger consumption. The inbox keeps it, deduplicated by `message_id`, until
   the live worker or a successor takes it.
 
-  Options: `:wake` stores `turn: ask, if_costly: fresh`; consumption decides
-  whether to offer context, wake the worker or request a fresh session.
+  Options: `:wake` stores `turn: ask` while a worker is live, and consumption
+  decides whether to offer it as context, wake the worker or request a fresh
+  session; with no live worker the next worker reads it as context.
   `:from` labels the sender (default `"shuttle"`); `:unless_live` refuses with
   `{:error, :live_worker}` while a worker is live, queueing nothing, so the
-  sender messages that worker directly.
+  sender messages that worker directly. A `thread-` id names the event it
+  reports, so its first capture stands whatever a retry states.
   """
   def context(entry, text, message_id, opts \\ []) do
+    worker = live_context_worker(entry)
+
     cond do
       get_in(entry.fiber, ["shuttle", "host"]) != Poller.own_host_id() ->
         {:error, :not_owner}
 
-      Keyword.get(opts, :unless_live, false) and live_context_worker(entry) != nil ->
+      Keyword.get(opts, :unless_live, false) and worker != nil ->
         {:error, :live_worker}
 
       true ->
@@ -192,11 +196,10 @@ defmodule Shuttle.Delivery do
 
         args = if opts[:notify_when_idle], do: args ++ ["--notify-when-idle"], else: args
         args = if opts[:notify_wake], do: args ++ ["--notify-wake"], else: args
+        args = if opts[:wake] && worker, do: args ++ ["--turn", "ask"], else: args
 
         args =
-          if opts[:wake],
-            do: args ++ ["--turn", "ask", "--if-costly", "fresh"],
-            else: args
+          if String.starts_with?(message_id, "thread-"), do: args ++ ["--derived"], else: args
 
         args =
           if opts[:thread_signal],
@@ -214,7 +217,8 @@ defmodule Shuttle.Delivery do
   end
 
   # True when the fresh session launched, or may yet: a busy Poller keeps the
-  # request. Any refusal leaves the live worker to be woken as usual.
+  # request, and the reservation's lease asks again if it never arrives. Any
+  # refusal leaves the live worker to be woken as usual.
   defp start_fresh(entry, worker, cost) do
     result =
       Poller.dispatch_fiber(Shuttle.Threads.address(entry.fiber),
@@ -231,34 +235,25 @@ defmodule Shuttle.Delivery do
     match?({:ok, _}, result) or result == {:error, :poller_busy}
   end
 
-  @doc "Consume a fiber's inbox for its current live conversation."
+  @doc """
+  Consume a fiber's inbox for its current live conversation, answering the
+  decoded consume result. The worker's turn state and wake cost are read only
+  when the inbox answers that a due entry asks for a turn.
+  """
   def flush_context(entry) do
     server = Shuttle.Env.server(Poller)
 
     if is_pid(GenServer.whereis(server)) do
+      fiber_id = Shuttle.Threads.address(entry.fiber)
+
       # Delivery carries the worker-owned epoch and the address it committed;
       # selecting or flushing a destination never changes authority.
-      with {:ok, address, generation} <-
-             Poller.context_receiver(server, Shuttle.Threads.address(entry.fiber)) do
-        fiber_id = Shuttle.Threads.address(entry.fiber)
-        idle = Poller.idle_worker?(server, fiber_id)
-        worker = Poller.live_worker(fiber_id)
+      with {:ok, address, generation} <- Poller.context_receiver(server, fiber_id) do
+        consume = &consume(entry, address, generation, &1)
 
-        cost =
-          with true <- idle and turn_pending?(entry),
-               %{} <- worker do
-            Shuttle.WakeCost.costly(worker[:session_uuid])
-          else
-            _ -> nil
-          end
-
-        with {:ok, output} <- consume(entry, address, generation, idle, cost != nil),
-             {:ok, answer} <- Jason.decode(output) do
-          if answer["action"] == "fresh" and not start_fresh(entry, worker, cost) do
-            consume(entry, address, generation, idle, false)
-          else
-            {:ok, output}
-          end
+        case consume.([]) do
+          {:ok, %{"turn" => true}} -> consume_turn(entry, server, fiber_id, consume)
+          answer -> answer
         end
       end
     else
@@ -266,20 +261,53 @@ defmodule Shuttle.Delivery do
     end
   end
 
-  defp turn_pending?(entry) do
-    with {:ok, output} <- Shuttle.CLI.run(["inbox", "turn-pending", context_key(entry)]),
-         {:ok, %{"pending" => pending}} <- Jason.decode(output) do
-      pending
-    else
-      _ -> false
+  # An idle worker is woken, or replaced by a fresh session when waking it is
+  # costly. A worker whose turn no hook has reported is woken without a cost
+  # check. A busy one takes the entries through its hook.
+  defp consume_turn(entry, server, fiber_id, consume) do
+    case Poller.worker_turn(server, fiber_id) do
+      :idle ->
+        worker = Poller.live_worker(server, fiber_id)
+        cost = worker && Shuttle.WakeCost.costly(worker[:session_uuid])
+
+        case consume.(if cost, do: ["--idle", "--costly"], else: ["--idle"]) do
+          {:ok, %{"action" => "fresh"}} = answer ->
+            if start_fresh(entry, worker, cost), do: answer, else: consume.(["--idle"])
+
+          answer ->
+            answer
+        end
+
+      :unknown ->
+        consume.(["--idle"])
+
+      _ ->
+        {:ok, %{"action" => "wait", "turn" => true}}
     end
   end
 
-  defp consume(entry, address, generation, idle, costly) do
-    args = ["inbox", "consume", context_key(entry), address, to_string(generation)]
-    args = if idle, do: args ++ ["--idle"], else: args
-    args = if costly, do: args ++ ["--costly"], else: args
-    Shuttle.CLI.run(args, timeout_ms: 32_000)
+  # The answer is the output's one JSON line, which a failed send of an open
+  # batch prints before exiting nonzero. A consume that could not decide
+  # prints none and stays an error.
+  defp consume(entry, address, generation, flags) do
+    args = ["inbox", "consume", context_key(entry), address, to_string(generation)] ++ flags
+    result = Shuttle.CLI.run(args, timeout_ms: 32_000)
+
+    output =
+      case result do
+        {:ok, output} -> output
+        {:command_error, _status, output} -> output
+        _ -> ""
+      end
+
+    output
+    |> String.split("\n")
+    |> Enum.find_value(result, fn line ->
+      case Jason.decode(line) do
+        {:ok, %{"action" => _} = answer} -> {:ok, answer}
+        _ -> nil
+      end
+    end)
   end
 
   defp live_context_worker(entry) do

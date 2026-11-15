@@ -2,7 +2,7 @@ defmodule Shuttle.ThreadsDeliveryTest do
   # Thread results: supersession, owner validation and delivery.
   use Shuttle.Test.ThreadsCase, async: true
 
-  test "waking context stores ask and fresh wishes without launching a missing worker", %{
+  test "waking context for a fiber with no live worker is stored for its next worker", %{
     store: store,
     data: data
   } do
@@ -12,12 +12,12 @@ defmodule Shuttle.ThreadsDeliveryTest do
     [path] = Path.wildcard(Path.join(data, "mailboxes/fiber/*/pending/*.json"))
 
     assert %{
-             "wishes" => %{"turn" => "ask", "if_costly" => "fresh"},
+             "wishes" => %{"turn" => "none", "if_costly" => "hold"},
              "request" => %{"wake" => false}
            } =
              path |> File.read!() |> Jason.decode!()
 
-    refute File.exists?(Path.join(Path.dirname(Path.dirname(path)), "active-batch.json"))
+    refute File.exists?(Path.join(Path.dirname(Path.dirname(path)), "batches"))
   end
 
   test "a fiber's waiting count is its mailbox's undelivered context and its outbox's pending results",

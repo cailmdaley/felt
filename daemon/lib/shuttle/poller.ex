@@ -611,21 +611,30 @@ defmodule Shuttle.Poller do
   end
 
   @doc """
-  Whether `fiber_id`'s live worker is at rest: its turn ended and no task of
-  its own is pending or in progress. False without a live worker.
+  The turn state of `fiber_id`'s live worker: `:idle` when its turn ended and
+  no task of its own is pending or in progress, `:busy` while a turn, task or
+  human request is open, and `:unknown` when no hook has reported a phase the
+  harness can be judged at rest by. `nil` without a live, addressed worker.
   """
-  @spec idle_worker?(GenServer.server(), String.t()) :: boolean()
-  def idle_worker?(server \\ Shuttle.Env.server(__MODULE__), fiber_id) do
+  @spec worker_turn(GenServer.server(), String.t()) :: :idle | :busy | :unknown | nil
+  def worker_turn(server \\ Shuttle.Env.server(__MODULE__), fiber_id) do
     case published_worker_view(server, fiber_id) do
       %{worker: worker, fiber: fiber} ->
         uuid = worker_session_uuid(worker, fiber)
         cli = worker_cli(worker, fiber)
-        is_binary(uuid) and at_rest?(uuid, cli, elem(Shuttle.HarnessTasks.read(cli, uuid), 0))
+
+        if is_binary(uuid),
+          do: turn_state(uuid, cli, elem(Shuttle.HarnessTasks.read(cli, uuid), 0))
 
       _ ->
-        false
+        nil
     end
   end
+
+  @doc "Whether `fiber_id`'s live worker is at rest (`worker_turn/2` is `:idle`)."
+  @spec idle_worker?(GenServer.server(), String.t()) :: boolean()
+  def idle_worker?(server \\ Shuttle.Env.server(__MODULE__), fiber_id),
+    do: worker_turn(server, fiber_id) == :idle
 
   @spec dispatch_fiber(String.t(), keyword()) :: {:ok, String.t()} | {:error, atom()}
   def dispatch_fiber(fiber_id, opts \\ []),
@@ -2982,15 +2991,27 @@ defmodule Shuttle.Poller do
       at_rest?(uuid, worker_cli(worker, fiber), get_in(state.task_reads, [uuid, :tasks]) || [])
   end
 
-  defp at_rest?(uuid, cli, tasks) do
+  defp at_rest?(uuid, cli, tasks), do: turn_state(uuid, cli, tasks) == :idle
+
+  defp turn_state(uuid, cli, tasks) do
     phase = get_in(session_activity(), [uuid, :phase])
 
-    cli in ["claude", "codex"] and
-      (phase == "waiting" or (cli == "codex" and is_nil(phase))) and
-      not Enum.any?(
+    open_task? =
+      Enum.any?(
         tasks,
         &(&1["status"] in ["pending", "in_progress"] or &1[:status] in ["pending", "in_progress"])
       )
+
+    cond do
+      open_task? or phase in ["working", "attention"] ->
+        :busy
+
+      cli in ["claude", "codex"] and (phase == "waiting" or (cli == "codex" and is_nil(phase))) ->
+        :idle
+
+      true ->
+        :unknown
+    end
   end
 
   defp pulse_delivered?({:ok, status, receipt}),
