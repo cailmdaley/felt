@@ -181,7 +181,8 @@ export function composeChannels(input: {
       messages,
       newest,
       waiting,
-      cold: waiting && now - newest > COLD_MS,
+      // A wait whose time is unknown is never taken for cold.
+      cold: waiting && newest > 0 && now - newest > COLD_MS,
       pinned: isPinned,
       listed: waiting || isPinned,
       files: sent,

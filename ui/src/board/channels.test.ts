@@ -152,6 +152,12 @@ describe('composeChannels', () => {
     expect(ids).not.toContain('resting')
   })
 
+  it('never shelves a wait of unknown time as cold', () => {
+    const untimed = card({ id: 'untimed', uid: 'J', name: 'Untimed', status: 'active', ask: { text: 'When?', at: '' }, createdAt: '' })
+    const [channel] = compose([untimed])
+    expect([channel.waiting, channel.cold, channel.newest]).toStrictEqual([true, false, 0])
+  })
+
   it('names a channel by its charter\'s title before the gloss, and keeps the whole title', () => {
     const chair = card({ id: 'cmbx', uid: 'H', shuttleRole: 'cmbx-chair', status: 'active', ask: { text: 'Merge?', at: at(3) } })
     const [channel] = compose([chair], { names: new Map([['cmbx-chair', 'cmbx chair · the hub seat']]) })

@@ -138,6 +138,9 @@ export class Library {
     this.opts.onOpen(target, key)
   }
 
+  /** Drops any open still waiting on an owner's read: the surface that asked for it has gone. */
+  cancelOpen(): void { this.navigation++ }
+
   dispose(): void {
     if (this.disposed) return
     this.disposed = true

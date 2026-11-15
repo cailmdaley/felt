@@ -229,6 +229,14 @@ describe('Library metadata recovery and navigation', () => {
     expect(fiberReads()).toHaveLength(7)
     expect(new Set(fiberReads()).size).toBe(7)
   })
+  it('drops a deferred open once the surface that asked for it is left', async () => {
+    files = [receipt('alpha')]
+    const pending = deferred<Response>()
+    reads.mockImplementation(url => url.includes('/sent-files/all/') ? Promise.resolve(json({ files })) : pending.promise)
+    sheet().refresh(); await settle(); open('alpha'); library!.cancelOpen()
+    pending.resolve(json(envelope('alpha'))); await settle()
+    expect(opens).not.toHaveBeenCalled()
+  })
   it('keeps an unreachable clicked placeholder provisional and retryable', async () => {
     files = [receipt('alpha')]
     reads.mockImplementation(async url => url.includes('/sent-files/all/') ? json({ files }) : json({}, 503))
