@@ -258,8 +258,9 @@ func fiberContextHookEligible(root string, request Request) bool {
 	return err == nil && (entry.Wishes.Turn == "none" || entry.Wishes.Turn == "ask") && entry.AttemptAddress == ""
 }
 
-// DeliverFiberContext consumes without observing the turn state. Only force entries
-// initiate a wake; none and ask remain available to the fiber's hook.
+// DeliverFiberContext consumes without turn facts. Only force entries initiate
+// a wake; ask remains available to the fiber's hook, and none goes to the hook
+// or, for a receiver without one, as context.
 func DeliverFiberContext(ctx context.Context, env *sysenv.Env, fiber, host, address string, generation uint64) error {
 	_, err := Consume(ctx, env, fiber, host, Worker{Address: address, Epoch: generation})
 	return err
@@ -269,7 +270,8 @@ type fiberContextSender func(context.Context, *sysenv.Env, string, Request, stri
 
 // freezeLegacyAttempt pins the old transport id and reconstructs the caveat
 // variant from the receipt's content hash when the payload is absent.
-func freezeLegacyAttempt(env *sysenv.Env, entry mailboxEntry, request Request) (mailboxEntry, error) {
+func freezeLegacyAttempt(env *sysenv.Env, entry mailboxEntry) (mailboxEntry, error) {
+	request := entry.Request
 	request.ThreadSignal = nil
 	payload := attemptRequest(request, entry)
 	address := entry.AttemptAddress

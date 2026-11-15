@@ -42,49 +42,39 @@ func readEntry(t *testing.T, path string) mailboxEntry {
 
 func TestClaimAfterCrashReturnsTheSameBatch(t *testing.T) {
 	const a, b = "shuttle://host/claude/A", "shuttle://host/claude/B"
-	for _, tc := range []struct {
-		name string
-		pin  bool
-	}{{"hook offer", false}, {"direct delivery", true}} {
-		t.Run(tc.name, func(t *testing.T) {
-			env := testEnv(t)
-			paths := enqueueFiber(t, env, "first", "second")
-			epoch := transition(t, env, "execution-A", a)
+	env := testEnv(t)
+	paths := enqueueFiber(t, env, "first", "second")
+	epoch := transition(t, env, "execution-A", a)
 
-			first, err := claimBatch(paths, a, tc.pin)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if first.Conversation != a || first.Epoch != epoch || first.Outcome != "" || first.OpenedAt == 0 || fmt.Sprint(first.Members) != "[first second]" || first.BatchID != batchID([]string{"second", "first"}) {
-				t.Fatalf("claimed attempt = %+v (epoch %d)", first, epoch)
-			}
-			// The process dies here: the attempt is never closed.
-			for _, path := range paths {
-				entry := readEntry(t, path)
-				if !entry.Attempt.open() || entry.Attempt.BatchID != first.BatchID {
-					t.Fatalf("after the crash, %s holds %+v", path, entry.Attempt)
-				}
-				if pinned := entry.AttemptAddress == a; pinned != tc.pin {
-					t.Fatalf("attempt_address = %q, pinned want %v", entry.AttemptAddress, tc.pin)
-				}
-			}
+	first, err := claimBatch(paths, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Conversation != a || first.Epoch != epoch || first.Outcome != "" || first.OpenedAt == 0 || fmt.Sprint(first.Members) != "[first second]" || first.BatchID != batchID([]string{"second", "first"}) {
+		t.Fatalf("claimed attempt = %+v (epoch %d)", first, epoch)
+	}
+	// The process dies here: the attempt is never closed.
+	for _, path := range paths {
+		entry := readEntry(t, path)
+		if !entry.Attempt.open() || entry.Attempt.BatchID != first.BatchID || entry.AttemptAddress != "" {
+			t.Fatalf("after the crash, %s holds %+v at %q", path, entry.Attempt, entry.AttemptAddress)
+		}
+	}
 
-			again, err := claimBatch([]string{paths[1], paths[0]}, a, tc.pin)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if again.BatchID != first.BatchID || again.OpenedAt != first.OpenedAt || fmt.Sprint(again.Members) != fmt.Sprint(first.Members) {
-				t.Fatalf("reclaim for the same conversation = %+v, want the open attempt %+v", again, first)
-			}
+	again, err := claimBatch([]string{paths[1], paths[0]}, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.BatchID != first.BatchID || again.OpenedAt != first.OpenedAt || fmt.Sprint(again.Members) != fmt.Sprint(first.Members) {
+		t.Fatalf("reclaim for the same conversation = %+v, want the open attempt %+v", again, first)
+	}
 
-			other, err := claimBatch(paths, b, tc.pin)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if other.Conversation != b || other.Epoch != 0 || other.BatchID != first.BatchID {
-				t.Fatalf("claim for a conversation that is not the receiver = %+v", other)
-			}
-		})
+	other, err := claimBatch(paths, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if other.Conversation != b || other.Epoch != 0 || other.BatchID != first.BatchID {
+		t.Fatalf("claim for a conversation that is not the receiver = %+v", other)
 	}
 }
 
@@ -206,22 +196,22 @@ func TestEntriesThisBuildWritesReadTheSameToAnOlderBuild(t *testing.T) {
 		wantRepeat  bool
 		wantPending bool
 	}{
-		{"direct claim", func(p []string) error { _, err := claimBatch(p, a, true); return err }, a, false, true},
-		{"hook claim", func(p []string) error { _, err := claimBatch(p, a, false); return err }, "", false, true},
+		{"direct claim", func(p []string) error { return pinClaim(p, a) }, a, false, true},
+		{"hook claim", func(p []string) error { _, err := claimBatch(p, a); return err }, "", false, true},
 		{"released", func(p []string) error {
-			if _, err := claimBatch(p, a, true); err != nil {
+			if err := pinClaim(p, a); err != nil {
 				return err
 			}
 			return closeAttempts(p, attemptReleased)
 		}, "", false, true},
 		{"ambiguous", func(p []string) error {
-			if _, err := claimBatch(p, a, true); err != nil {
+			if err := pinClaim(p, a); err != nil {
 				return err
 			}
 			return closeAttempts(p, attemptAmbiguous)
 		}, "", true, true},
 		{"delivered", func(p []string) error {
-			if _, err := claimBatch(p, a, true); err != nil {
+			if err := pinClaim(p, a); err != nil {
 				return err
 			}
 			return closeAttempts(p, attemptDelivered)
@@ -256,7 +246,7 @@ func TestEntriesAnOlderBuildRewritesReadAsItLeftThem(t *testing.T) {
 	const a, b = "shuttle://host/claude/A", "shuttle://host/claude/B"
 	env := testEnv(t)
 	path := enqueueFiber(t, env, "m")[0]
-	if _, err := claimBatch([]string{path}, a, true); err != nil {
+	if err := pinClaim([]string{path}, a); err != nil {
 		t.Fatal(err)
 	}
 	for _, pin := range []string{"", b} {
@@ -316,7 +306,7 @@ func TestUnknownRolloverClosesAndReclaimsInOneEntry(t *testing.T) {
 func TestPendingEntriesShowAnOpenAttempt(t *testing.T) {
 	env := testEnv(t)
 	path := enqueueFiber(t, env, "m")[0]
-	if _, err := claimBatch([]string{path}, "shuttle://host/claude/A", true); err != nil {
+	if err := pinClaim([]string{path}, "shuttle://host/claude/A"); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := PendingEntries(env, "fiber")
@@ -348,7 +338,7 @@ func TestDeliveredEntryKeepsTheModificationTimeRetentionRunsFrom(t *testing.T) {
 			}
 		}},
 		{"direct delivery keeps the claim time", func(t *testing.T, env *sysenv.Env, root, path string) {
-			if _, err := claimBatch([]string{path}, a, true); err != nil {
+			if err := pinClaim([]string{path}, a); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.Chtimes(path, old, old); err != nil {
@@ -443,13 +433,14 @@ func dedupSender(sent *[]Request, outcome func(Request) (string, string)) func(c
 	}
 }
 
-func TestARejectedRetryIsSentAgainUnderTheRetryID(t *testing.T) {
+func TestARejectedRetryIsSentAgainAsAPossibleRepeat(t *testing.T) {
 	const a = "shuttle://host/codex/A"
 	env := testEnv(t)
 	request := Request{MessageID: "wake-retry-rejected", Text: "continue", Wake: true}
 	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: request}); err != nil {
 		t.Fatal(err)
 	}
+	epoch := transition(t, env, "A", a)
 	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey(request.MessageID)+".json")
 	var sent []Request
 	outcomes := []struct{ status, code string }{{StatusUnknown, "ambiguous_delivery"}, {StatusRejected, "preflight_failed"}, {StatusSubmitted, ""}}
@@ -467,10 +458,12 @@ func TestARejectedRetryIsSentAgainUnderTheRetryID(t *testing.T) {
 	if err := deliver(); ErrorCode(err) != "preflight_failed" {
 		t.Fatalf("rejected retry = %v", err)
 	}
-	if err := deliver(); err != nil {
-		t.Fatalf("retry after the rejection = %v", err)
+	// The rejection released the entry; the next batch warns of the earlier
+	// unknown outcome under its own transport id.
+	if result, err := consumeWith(context.Background(), env, "fiber", "host", Worker{Address: a, Epoch: epoch, Idle: true}, sender); err != nil || result.Action != "wake" {
+		t.Fatalf("consume after the rejection = %+v, %v", result, err)
 	}
-	if len(sent) != 3 || sent[1].MessageID != sent[2].MessageID || sent[1].Text != sent[2].Text || sent[0].MessageID == sent[1].MessageID {
+	if len(sent) != 3 || sent[2].MessageID == sent[1].MessageID || sent[0].MessageID == sent[1].MessageID || !strings.HasPrefix(sent[2].Text, "Possible repeat: an earlier delivery of this message had an unknown outcome.") {
 		t.Fatalf("sends = %+v", sent)
 	}
 }

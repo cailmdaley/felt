@@ -252,7 +252,7 @@ func TestConsumeOldPinUsesOldTransportID(t *testing.T) {
 			putWish(t, env, "old", "force", "hold")
 			path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey("old")+".json")
 			if oldRecord {
-				_, err := claimBatch([]string{path}, w.Address, true)
+				err := pinClaim([]string{path}, w.Address)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -355,7 +355,7 @@ func TestConsumeMarksAnUnfinishedHookClaimAsPossibleRepeat(t *testing.T) {
 	w.Idle = true
 	putWish(t, env, "m", "ask", "hold")
 	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey("m")+".json")
-	if _, err := claimBatch([]string{path}, w.Address, false); err != nil {
+	if _, err := claimBatch([]string{path}, w.Address); err != nil {
 		t.Fatal(err)
 	}
 	var text string
@@ -545,5 +545,37 @@ func TestConsumeLeavesQuietContextToAHooklessCodexReceiver(t *testing.T) {
 	result, err := consumeWith(context.Background(), env, "fiber", "host", w, sender)
 	if err != nil || result.Action != "wait" {
 		t.Fatalf("codex consume: %+v %v", result, err)
+	}
+}
+
+func TestConsumeReportsNoWakeForARejectedSend(t *testing.T) {
+	env, w := consumeFixture(t)
+	w.Idle = true
+	putWish(t, env, "m", "force", "hold")
+	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey("m")+".json")
+	statuses := []string{}
+	sender := func(_ context.Context, _ *sysenv.Env, _ string, r Request, _ string) (Receipt, error) {
+		status := statuses[0]
+		statuses = statuses[1:]
+		if status == StatusRejected {
+			return Receipt{Status: status}, errCode("preflight_failed", "rejected")
+		}
+		return Receipt{Status: status}, errCode("ambiguous_delivery", "unknown")
+	}
+	statuses = []string{StatusRejected}
+	result, err := consumeWith(context.Background(), env, "fiber", "host", w, sender)
+	if ErrorCode(err) != "preflight_failed" || result.Action != "wait" || len(result.Members) != 0 {
+		t.Fatalf("rejected send: %+v %v", result, err)
+	}
+	statuses = []string{StatusUnknown}
+	if result, _ = consumeWith(context.Background(), env, "fiber", "host", w, sender); result.Action != "wake" {
+		t.Fatalf("unknown send: %+v", result)
+	}
+	// The stale batch's retry is rejected, and so is the next batch.
+	expireAttempt(t, path)
+	statuses = []string{StatusUnknown, StatusRejected, StatusRejected}
+	result, err = consumeWith(context.Background(), env, "fiber", "host", w, sender)
+	if len(statuses) != 0 || result.Action != "wait" || len(result.Members) != 0 {
+		t.Fatalf("rejected retry: %+v %v, unsent %v", result, err, statuses)
 	}
 }

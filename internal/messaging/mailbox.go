@@ -507,7 +507,7 @@ func offerMailboxWithAck(dir, conversation string, accepts func(Request) bool, e
 	for i, it := range items {
 		paths[i] = it.path
 	}
-	if _, err := claimBatch(paths, conversation, false); err != nil {
+	if _, err := claimBatch(paths, conversation); err != nil {
 		return err
 	}
 	if err := emit(batch); err != nil {
@@ -519,7 +519,9 @@ func offerMailboxWithAck(dir, conversation string, accepts func(Request) bool, e
 	return validationErr
 }
 
-const hookRepeatWarning = "Possible repeat: an earlier hook offer had an unknown outcome.\n\n"
+// hookRepeatWarning marks an entry whose earlier hook offer or wake send had an
+// unknown outcome.
+const hookRepeatWarning = "Possible repeat: an earlier delivery of this message had an unknown outcome.\n\n"
 
 func hookEmission(entry mailboxEntry) Request {
 	r := entry.Request

@@ -337,7 +337,7 @@ func legacyBatch(env *sysenv.Env, root string, it mailboxPendingItem) (Attempt, 
 	if e.Attempt.Payload != nil {
 		return *e.Attempt, nil
 	}
-	e, err := freezeLegacyAttempt(env, e, e.Request)
+	e, err := freezeLegacyAttempt(env, e)
 	if err != nil {
 		return Attempt{}, err
 	}
@@ -397,7 +397,8 @@ func pinConsumedBatch(root string, a *Attempt) error {
 }
 
 // deliverConsumedBatch sends an open batch's pinned payload and closes it on a
-// confirmed receipt. It reports whether it sent anything.
+// confirmed receipt. It reports whether the payload may have reached the
+// conversation: false when nothing was sent or the final send was rejected.
 func deliverConsumedBatch(ctx context.Context, env *sysenv.Env, root, host string, w Worker, a *Attempt, send fiberContextSender) (bool, error) {
 	if a.Outcome != "" {
 		return false, closeConsumedBatch(root, a, a.Outcome, nil)
@@ -461,7 +462,7 @@ func deliverConsumedBatch(ctx context.Context, env *sysenv.Env, root, host strin
 	stale := unknown && ErrorCode(err) != "wake_held" && time.Since(time.Unix(0, a.OpenedAt)) >= liveAttemptRetryAfter
 	if receipt.Status == StatusRejected || ended || (stale && (a.Conversation != w.Address || a.Retry == 0)) {
 		if a.Conversation == w.Address && receipt.Status == StatusRejected {
-			return true, closeConsumedBatch(root, a, attemptReleased, err)
+			return false, closeConsumedBatch(root, a, attemptReleased, err)
 		}
 		next := *a
 		next.Conversation, next.Epoch, next.OpenedAt = w.Address, w.Epoch, time.Now().UnixNano()
@@ -500,7 +501,7 @@ func deliverConsumedBatch(ctx context.Context, env *sysenv.Env, root, host strin
 		err = errCode("unconfirmed", "batch delivery: %s", receipt.Status)
 	}
 	if receipt.Status == StatusRejected {
-		return true, closeConsumedBatch(root, a, attemptReleased, err)
+		return false, closeConsumedBatch(root, a, attemptReleased, err)
 	}
 	return true, err
 }

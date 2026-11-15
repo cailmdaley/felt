@@ -593,7 +593,7 @@ defmodule Shuttle.ThreadsOutboxTest do
       %{native => %{phase: "waiting", last_event_at: System.system_time(:millisecond)}}
     end)
 
-    assert Poller.idle_worker?(poller, "hub")
+    assert Poller.worker_turn(poller, "hub") == :idle
     File.rm!(Path.join(store, "ready"))
     assert {:ok, _} = CLI.run_in_store(store, ["reopen", "hub/child", "--local"])
     assert {:ok, _} = CLI.run_in_store(store, ["close", "hub/child", "--local"])

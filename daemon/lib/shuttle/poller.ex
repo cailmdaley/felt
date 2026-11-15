@@ -632,11 +632,6 @@ defmodule Shuttle.Poller do
     end
   end
 
-  @doc "Whether `fiber_id`'s live worker is at rest (`worker_turn/2` is `:idle`)."
-  @spec idle_worker?(GenServer.server(), String.t()) :: boolean()
-  def idle_worker?(server \\ Shuttle.Env.server(__MODULE__), fiber_id),
-    do: worker_turn(server, fiber_id) == :idle
-
   @spec dispatch_fiber(String.t(), keyword()) :: {:ok, String.t()} | {:error, atom()}
   def dispatch_fiber(fiber_id, opts \\ []),
     do: dispatch_fiber(Shuttle.Env.server(__MODULE__), fiber_id, opts)

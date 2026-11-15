@@ -32,3 +32,10 @@ func TestReview3HookRecoveryMarksRepeatWithinLimit(t *testing.T) {
 		t.Fatalf("pending=%d", n)
 	}
 }
+
+func TestHookRepeatWarningNamesAnyEarlierDelivery(t *testing.T) {
+	got := hookEmission(mailboxEntry{Request: Request{Text: "result"}, PossibleRepeat: true}).Text
+	if got != "Possible repeat: an earlier delivery of this message had an unknown outcome.\n\nresult" {
+		t.Fatalf("hook warning = %q", got)
+	}
+}

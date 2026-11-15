@@ -41,8 +41,7 @@ type Attempt struct {
 	Outcome string `json:"outcome,omitempty"`
 	// Retry counts the sends direct delivery made to Conversation after an
 	// earlier one stayed unknown. A retry carries its own transport id, so
-	// the conversation's receipt for the earlier send is not replayed. A
-	// later claim for the same conversation keeps the count.
+	// the conversation's receipt for the earlier send is not replayed.
 	Retry int `json:"retry,omitempty"`
 }
 
@@ -67,23 +66,11 @@ func batchID(members []string) string {
 
 // openAttempt records an open attempt to conversation for a batch of members.
 // An attempt already open for the same batch, conversation and epoch is kept
-// as it was opened. A pinned attempt also writes attempt_address, which keeps
-// direct fiber delivery with that conversation until the attempt closes.
-func (e *mailboxEntry) openAttempt(conversation string, epoch uint64, members []string, pin bool, now time.Time) {
+// as it was opened.
+func (e *mailboxEntry) openAttempt(conversation string, epoch uint64, members []string, now time.Time) {
 	id := batchID(members)
 	if !e.Attempt.open() || e.Attempt.BatchID != id || e.Attempt.Conversation != conversation || e.Attempt.Epoch != epoch {
-		retry := 0
-		if e.Attempt != nil && e.Attempt.Conversation == conversation {
-			retry = e.Attempt.Retry
-		}
-		previous := e.Attempt
-		e.Attempt = &Attempt{BatchID: id, Conversation: conversation, Epoch: epoch, Members: slices.Clone(members), OpenedAt: now.UnixNano(), Retry: retry}
-		if retry > 0 && previous.BatchID == id {
-			e.Attempt.Payload, e.Attempt.BaseText, e.Attempt.Variant = previous.Payload, previous.BaseText, previous.Variant
-		}
-	}
-	if pin {
-		e.AttemptAddress = conversation
+		e.Attempt = &Attempt{BatchID: id, Conversation: conversation, Epoch: epoch, Members: slices.Clone(members), OpenedAt: now.UnixNano()}
 	}
 }
 
@@ -101,11 +88,11 @@ func (e *mailboxEntry) closeAttempt(outcome string) {
 	}
 }
 
-// claimBatch opens an attempt for a hook batch or a single-entry compatibility
-// delivery, under the inbox lock. The batch consumer pins through its durable
-// manifest instead. Unpinned hook claims preserve the file's modification time,
-// from which offered/ retention runs; an unfinished hook claim is ambiguous.
-func claimBatch(paths []string, conversation string, pin bool) (Attempt, error) {
+// claimBatch opens an unpinned attempt for a hook batch under the inbox lock.
+// The batch consumer pins through its durable manifest instead. A claim
+// preserves the file's modification time, from which offered/ retention runs;
+// an unfinished claim is ambiguous.
+func claimBatch(paths []string, conversation string) (Attempt, error) {
 	entries := make([]mailboxEntry, len(paths))
 	members := make([]string, len(paths))
 	for i, path := range paths {
@@ -118,12 +105,8 @@ func claimBatch(paths []string, conversation string, pin bool) (Attempt, error) 
 	epoch := receiverEpoch(filepath.Dir(filepath.Dir(paths[0])), conversation)
 	now := time.Now()
 	for i := range entries {
-		entries[i].openAttempt(conversation, epoch, members, pin, now)
-		write := writeMailboxEntryKeepingTime
-		if pin {
-			write = writeMailboxEntry
-		}
-		if err := write(paths[i], entries[i]); err != nil {
+		entries[i].openAttempt(conversation, epoch, members, now)
+		if err := writeMailboxEntryKeepingTime(paths[i], entries[i]); err != nil {
 			return Attempt{}, err
 		}
 	}

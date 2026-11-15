@@ -76,7 +76,7 @@ func TestReview5LegacyCaveatVariantSurvivesValidationRecovery(t *testing.T) {
 	address := "shuttle://host/codex/A"
 	transition(t, env, "A", address)
 	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey(r.MessageID)+".json")
-	if _, err := claimBatch([]string{path}, address, true); err != nil {
+	if err := pinClaim([]string{path}, address); err != nil {
 		t.Fatal(err)
 	}
 	calls := 0

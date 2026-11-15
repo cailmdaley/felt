@@ -182,6 +182,6 @@ The session-only Claude fallback claims by moving an entry into `fallback/` and 
 
 All verbs act on this host's inbox only.
 `context-mailbox put` also accepts thread signals, reply and notification fields, `--turn` and `--derived`; its `--wake` means `turn: force`.
-`context-mailbox deliver` is consume with the idle fact unknown: only force initiates a wake, while ask remains hook context.
+`context-mailbox deliver` is consume without turn facts: only force initiates a wake, ask remains hook context, and a receiver without a hook takes `none` entries as context.
 `context-mailbox pending` shares the inbox counting code.
 `shuttle inbox` with no subcommand is the speaker's held-lines inbox ([CLI reference](../reference/cli.md)).

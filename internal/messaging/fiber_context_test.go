@@ -296,7 +296,7 @@ func TestFiberContextRestartRetriesPinnedDestinationAfterAcceptedSend(t *testing
 	// A build before batch payloads pinned the entry, its send was accepted,
 	// and it died before the close.
 	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey(request.MessageID)+".json")
-	if _, err := claimBatch([]string{path}, "shuttle://host/claude/first", true); err != nil {
+	if err := pinClaim([]string{path}, "shuttle://host/claude/first"); err != nil {
 		t.Fatal(err)
 	}
 	firstID := request.MessageID + "-" + mailboxKey("shuttle://host/claude/first")[:16]

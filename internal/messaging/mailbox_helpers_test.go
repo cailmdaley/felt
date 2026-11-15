@@ -28,6 +28,25 @@ func writeFiberMailboxAttempt(path string, entry mailboxEntry, address string) e
 	return writeMailboxEntry(path, entry)
 }
 
+// pinClaim claims entries for conversation and pins them there, the way a
+// build before batch payloads claimed a direct delivery.
+func pinClaim(paths []string, conversation string) error {
+	if _, err := claimBatch(paths, conversation); err != nil {
+		return err
+	}
+	for _, path := range paths {
+		entry, err := readFiberMailboxEntry(path)
+		if err != nil {
+			return err
+		}
+		entry.AttemptAddress = conversation
+		if err := writeMailboxEntry(path, entry); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // deliverPinned advances the fiber inbox's open batches for the worker at
 // selected, as consume's first step does, after pinning r to selected the way
 // a build before batch payloads claimed an entry when it is not pinned yet.
@@ -36,7 +55,7 @@ func deliverPinned(t *testing.T, env *sysenv.Env, selected string, r Request, se
 	root := mailboxDir(env, "fiber", "fiber")
 	path := filepath.Join(root, "pending", mailboxKey(r.MessageID)+".json")
 	if e, err := readFiberMailboxEntry(path); err == nil && e.AttemptAddress == "" {
-		if _, err := claimBatch([]string{path}, selected, true); err != nil {
+		if err := pinClaim([]string{path}, selected); err != nil {
 			t.Fatal(err)
 		}
 	}

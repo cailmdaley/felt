@@ -715,7 +715,7 @@ defmodule Shuttle.ThreadReceiverTest do
       %{native => %{phase: "waiting", last_event_at: System.system_time(:millisecond)}}
     end)
 
-    assert Poller.idle_worker?(poller, "hub")
+    assert Poller.worker_turn(poller, "hub") == :idle
 
     assert {:ok, _} =
              CLI.run([
