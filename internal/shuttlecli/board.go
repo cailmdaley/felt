@@ -294,7 +294,7 @@ func (a *app) boardCmd() *cobra.Command {
 		}
 		visible := response.Records[:0]
 		for _, row := range response.Records {
-			if row.Kind != "dismissed" {
+			if row.Kind != "dismissed" && row.Kind != "pinned" {
 				visible = append(visible, row)
 			}
 		}

@@ -12,39 +12,43 @@ export interface HeldSpeech {
   at?: number | null
 }
 
+/** What a card is waiting on the human for: an ask, a close awaiting review, or the Desk's Your turn. */
+export type WaitKind = 'ask' | 'review' | 'turn'
+
 /**
- * One card waiting on the human: an outstanding ask, a close awaiting his
- * review, or the Desk's Your turn (a worker idle, blocked or stopped on a
- * prompt at the end of its turn).
+ * One worker's line in a channel: its ask, review note or latest outcome.
+ * `kind` is set when it waits on the human.
  */
-export interface Waiting {
-  kind: 'ask' | 'review' | 'turn'
+export interface Message {
   card: KanbanCard
+  kind?: WaitKind
   text: string
-  /** When the wait began. */
   at: number
 }
 
 /**
- * One orchestrator's channel: a top-level constitution (no live ancestor)
- * and every live constitution under it, listed while anything in it waits
- * on the human.
+ * One channel: an office and every top-level constitution holding it, or a
+ * top-level constitution with no office, together with all their live threads.
  */
 export interface Channel {
-  /** The orchestrator's fiber uid (its id when felt gave it none). */
+  /** `role:<office>`, or `fiber:<uid>` for a top-level constitution without one. */
   key: string
-  root: KanbanCard
-  /** Its role's charter name, when the board has the charter and it is not the orchestrator's own. */
-  role?: string
-  /** Newest first. */
-  waiting: Waiting[]
-  /** When the newest wait began: the channel's place in the order, and what a set-aside is measured against. */
+  /** The office's charter name, else its slug; the constitution's name without one. */
+  name: string
+  /** Whose tapestry is pinned and who a reply goes to by default: the office's seat, else its most recently active top-level. */
+  seat: KanbanCard
+  /** Oldest first, as a channel reads: the newest at the bottom. */
+  messages: Message[]
+  /** When the newest wait began, or 0 when nothing waits. */
   newest: number
-  /** Nothing has begun waiting in it for {@link COLD_MS}. */
+  /** Something waits on the human and it has not been set aside. */
+  waiting: boolean
+  /** It waits, and its newest wait is older than {@link COLD_MS}. */
   cold: boolean
-  /** The family's other live constitutions, the orchestrator excepted, in state order. */
-  threads: KanbanCard[]
-  /** Files the family sent within the board's reach, newest first. */
+  pinned: boolean
+  /** Listed in the rail: waiting, or pinned. */
+  listed: boolean
+  /** Files the channel's constitutions sent within the board's reach, newest first. */
   files: SentFile[]
   held: HeldSpeech[]
 }
@@ -53,20 +57,23 @@ export interface Channel {
 export const COLD_MS = 3 * 86_400_000
 
 /** The dismissal record that sets a channel aside until something newer waits in it. */
-export const setAsideKey = (channel: Pick<Channel, 'key' | 'newest'>): string => `office:fiber:${channel.key}:${channel.newest}`
+export const setAsideKey = (channel: Pick<Channel, 'key' | 'newest'>): string => `office:${channel.key}:${channel.newest}`
 
-/** Thread states the quiet list shows: work going on, not work at rest or archived. */
-const LIVE: readonly ThreadState[] = ['waiting', 'to-review', 'with-orchestrator', 'working', 'drafts']
+/** Constitutions a channel speaks for: everything not archived. */
+const LIVE: readonly ThreadState[] = ['waiting', 'to-review', 'with-orchestrator', 'working', 'drafts', 'roles', 'resting']
 const fiberOf = (card: KanbanCard): string => card.uid ?? card.id
 const instant = (...values: Array<string | number | undefined>): number =>
   values.map(value => typeof value === 'number' ? value : Date.parse(value ?? '')).find(Number.isFinite) ?? 0
+const lastActive = (card: KanbanCard): number => instant(card.lastActivityAt, card.closedAt, card.createdAt)
+/** The office a role names: its first path segment. */
+export const officeOf = (role: string | undefined): string => role?.split('/')[0] ?? ''
 
 /**
  * What a card is waiting on the human for, if anything. Your turn reads the
  * Desk's own `threadState` (In flight split by `turnOf`), so the two can
  * never disagree; an ask counts on any active card.
  */
-export function waitingOn(card: KanbanCard): Waiting | undefined {
+export function waitingOn(card: KanbanCard): Message | undefined {
   const state = threadState(card)
   if (card.ask && card.status === 'active') return { kind: 'ask', card, text: card.ask.text, at: instant(card.ask.at) }
   if (state === 'to-review') return { kind: 'review', card, text: card.reviewMark?.note || card.outcome || '', at: instant(card.closedAt, card.reviewMark?.at, card.createdAt) }
@@ -76,9 +83,11 @@ export function waitingOn(card: KanbanCard): Waiting | undefined {
 }
 
 /**
- * The channels waiting on the human, newest wait first; the cold ones fall
- * to the end by that same order. A card's channel is its topmost ancestor
- * reached through live (unarchived) constitutions.
+ * Every channel the board holds, the listed ones first: the waiting ones,
+ * newest wait first, then the pinned quiet ones, then the waiting ones gone
+ * cold. A card's top-level constitution is its topmost ancestor reached
+ * through live (unarchived) constitutions, and the top-level's office names
+ * the channel, whatever office a thread under it holds.
  */
 export function composeChannels(input: {
   cards: readonly KanbanCard[]
@@ -87,55 +96,65 @@ export function composeChannels(input: {
   files: readonly SentFile[]
   held: readonly HeldSpeech[]
   dismissed: readonly string[]
+  /** Pinned channel keys, each with its latest pin. */
+  pinned: ReadonlyMap<string, number>
   now: number
   reachMs: number
 }): Channel[] {
-  const { cards, parentOf, names, files, held, dismissed, now, reachMs } = input
-  const roots = new Map<KanbanCard, KanbanCard>()
-  const rootOf = (card: KanbanCard): KanbanCard => {
-    let root = roots.get(card)
-    if (root) return root
+  const { cards, parentOf, names, files, held, dismissed, pinned, now, reachMs } = input
+  const tops = new Map<KanbanCard, KanbanCard>()
+  const topOf = (card: KanbanCard): KanbanCard => {
+    let top = tops.get(card)
+    if (top) return top
     const parent = parentOf(card)
-    root = parent && threadState(parent) !== 'archived' ? rootOf(parent) : card
-    roots.set(card, root)
-    return root
+    top = parent && threadState(parent) !== 'archived' ? topOf(parent) : card
+    tops.set(card, top)
+    return top
   }
   const seen = new Set<string>()
-  const families = new Map<string, { root: KanbanCard; members: KanbanCard[] }>()
+  const groups = new Map<string, KanbanCard[]>()
   for (const card of cards) {
     // A uid names one fiber whichever host serves a copy of it.
-    if (card.deskSection || card.isCycle || seen.has(fiberOf(card))) continue
+    if (card.deskSection || card.isCycle || seen.has(fiberOf(card)) || !LIVE.includes(threadState(card))) continue
     seen.add(fiberOf(card))
-    const root = rootOf(card), key = fiberOf(root)
-    const family = families.get(key) ?? families.set(key, { root, members: [] }).get(key)!
-    family.members.push(card)
+    const top = topOf(card), office = officeOf(top.shuttleRole)
+    const key = office ? `role:${office}` : `fiber:${fiberOf(top)}`
+    groups.set(key, [...(groups.get(key) ?? []), card])
   }
   const setAside = new Map<string, number>()
   for (const record of dismissed) {
-    const match = /^office:fiber:(.+):(\d+)$/.exec(record)
+    const match = /^office:(.+):(\d+)$/.exec(record)
     if (match) setAside.set(match[1], Math.max(setAside.get(match[1]) ?? 0, Number(match[2])))
   }
   const channels: Channel[] = []
-  for (const [key, { root, members }] of families) {
-    const waiting = members.flatMap(card => waitingOn(card) ?? []).sort((a, b) => b.at - a.at)
-    if (!waiting.length) continue
-    const newest = waiting[0].at
-    if ((setAside.get(key) ?? -Infinity) >= newest) continue
-    const waits = new Set(waiting.map(item => item.card))
-    const rank = (card: KanbanCard): number => LIVE.indexOf(threadState(card))
+  for (const [key, members] of groups) {
+    const office = key.startsWith('role:') ? key.slice(5) : ''
+    const tops = members.filter(card => fiberOf(topOf(card)) === fiberOf(card))
+    const seat = tops.find(card => card.shuttleSeat) ?? [...tops].sort((a, b) => lastActive(b) - lastActive(a))[0] ?? members[0]
+    const sent = files.filter(file => file.uid && file.timestamp >= now - reachMs && cardNamed(members, file.uid, file.host ?? ''))
+      .sort((a, b) => b.timestamp - a.timestamp)
+    const spoken = held.filter(line => members.some(card => card.uid === line.fiber_id || card.id === line.fiber_id))
+    const said = (card: KanbanCard): boolean => sent.some(file => cardNamed([card], file.uid ?? '', file.host ?? ''))
+      || spoken.some(line => line.fiber_id === card.uid || line.fiber_id === card.id)
+    const messages = members.flatMap<Message>(card => waitingOn(card)
+      ?? (card.outcome || said(card) ? [{ card, text: card.outcome ?? '', at: lastActive(card) }] : []))
+      .sort((a, b) => a.at - b.at)
+    const newest = Math.max(0, ...messages.filter(message => message.kind).map(message => message.at))
+    const waiting = newest > 0 && (setAside.get(key) ?? -Infinity) < newest
     channels.push({
       key,
-      root,
-      role: [names.get(root.shuttleRole ?? '')].find(name => name && name !== root.name),
-      waiting,
+      name: office ? names.get(office) ?? office : seat.name,
+      seat,
+      messages,
       newest,
-      cold: now - newest > COLD_MS,
-      threads: members.filter(card => fiberOf(card) !== key && !waits.has(card) && rank(card) >= 0)
-        .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name)),
-      files: files.filter(file => file.uid && file.timestamp >= now - reachMs && cardNamed(members, file.uid, file.host ?? ''))
-        .sort((a, b) => b.timestamp - a.timestamp),
-      held: held.filter(line => members.some(card => card.uid === line.fiber_id || card.id === line.fiber_id)),
+      waiting,
+      cold: waiting && now - newest > COLD_MS,
+      pinned: pinned.has(key),
+      listed: waiting || pinned.has(key),
+      files: sent,
+      held: spoken,
     })
   }
-  return channels.sort((a, b) => b.newest - a.newest || a.key.localeCompare(b.key))
+  const shelf = (channel: Channel): number => !channel.listed ? 3 : channel.cold ? 2 : channel.waiting ? 0 : 1
+  return channels.sort((a, b) => shelf(a) - shelf(b) || b.newest - a.newest || a.name.localeCompare(b.name))
 }

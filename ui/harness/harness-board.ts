@@ -1602,6 +1602,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.includes('/api/v1/roles')) return json([
     { slug: 'analyst', id: 'roles/analyst', name: 'Analyst', outcome: 'Keeps scientific results sound and reproducible.' },
     { slug: 'editor', id: 'roles/editor', name: 'Editor', outcome: 'Keeps the writing clear, current and useful.' },
+    { slug: 'composer', id: 'roles/composer', name: 'Composer', outcome: 'Writes and arranges the music.' },
     { slug: 'surveyor', id: 'roles/surveyor', name: 'Surveyor', outcome: 'Runs long campaigns and reports what the data says.' },
     { slug: 'vizier', id: 'roles/vizier', name: 'Vizier', outcome: 'Keeps the personal desk and its commitments in view.' },
   ])
@@ -1674,9 +1675,13 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     return json({ host: LOCAL_HOST, records: [], origins: MOCK_ORIGINS })
   }
 
-  if (url.includes('/api/v1/outbox/dismissed')) return json({ dismissed: outboxFixture?.dismissed ?? [], reach_ms: 14 * 86_400_000 })
+  if (url.includes('/api/v1/outbox/dismissed')) return json({ dismissed: outboxFixture?.dismissed ?? [], pinned: outboxFixture?.pinned ?? {}, reach_ms: 14 * 86_400_000 })
   if (url.includes('/api/v1/outbox/dismiss')) {
     outboxFixture?.dismissed.push(String(body().key))
+    return json({ ok: true })
+  }
+  if (url.includes('/api/v1/outbox/pin')) {
+    if (outboxFixture) outboxFixture.pinned[String(body().key)] = Date.now()
     return json({ ok: true })
   }
   if (url.endsWith('/api/v1/speak')) return json({ held: outboxFixture?.held ?? [] })

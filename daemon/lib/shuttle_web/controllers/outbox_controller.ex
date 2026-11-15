@@ -1,11 +1,14 @@
 defmodule ShuttleWeb.OutboxController do
-  @moduledoc "Durable Outbox dismissals carried by the fleet's board feeds."
+  @moduledoc "Durable Outbox dismissals and channel pins carried by the fleet's board feeds."
   use Phoenix.Controller, formats: [:json]
 
   alias Shuttle.{Board, CLI, RemoteTemporalRegistry}
 
-  def dismiss(conn, %{"key" => key} = params) when is_binary(key) and key != "" do
-    args = ["outbox", "dismiss", key]
+  def dismiss(conn, params), do: write(conn, "dismiss", params)
+  def pin(conn, params), do: write(conn, "pin", params)
+
+  defp write(conn, verb, %{"key" => key} = params) when is_binary(key) and key != "" do
+    args = ["outbox", verb, key]
     args = if params["fiber"] in [nil, ""], do: args, else: args ++ ["--fiber", params["fiber"]]
 
     case CLI.run(args) do
@@ -20,7 +23,8 @@ defmodule ShuttleWeb.OutboxController do
     end
   end
 
-  def dismiss(conn, _params), do: conn |> put_status(400) |> json(%{error: "key is required"})
+  defp write(conn, _verb, _params),
+    do: conn |> put_status(400) |> json(%{error: "key is required"})
 
   def dismissed(conn, _params) do
     reach = Board.retention_ms()
@@ -33,13 +37,25 @@ defmodule ShuttleWeb.OutboxController do
       |> Enum.filter(&is_integer(&1["received_at"]))
       |> Enum.filter(&(&1["received_at"] >= since))
 
+    records = Board.all_since(since) ++ remote
+
     keys =
-      (Board.all_since(since) ++ remote)
+      records
       |> Enum.filter(&(&1["kind"] == "dismissed"))
       |> Enum.map(& &1["text"])
       |> Enum.uniq()
       |> Enum.sort()
 
-    json(conn, %{dismissed: keys, reach_ms: reach})
+    # Each pinned channel with its latest pin: a pin lapses once that leaves the reach.
+    pinned =
+      records
+      |> Enum.filter(
+        &(&1["kind"] == "pinned" and is_binary(&1["text"]) and is_integer(&1["timestamp"]))
+      )
+      |> Enum.reduce(%{}, fn record, acc ->
+        Map.update(acc, record["text"], record["timestamp"], &max(&1, record["timestamp"]))
+      end)
+
+    json(conn, %{dismissed: keys, pinned: pinned, reach_ms: reach})
   end
 end

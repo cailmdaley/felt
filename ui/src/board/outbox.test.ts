@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { COLD_MS, composeChannels, setAsideKey, waitingOn, type HeldSpeech } from './outbox.js'
+import { COLD_MS, composeChannels, officeOf, setAsideKey, waitingOn, type HeldSpeech } from './outbox.js'
 import { inFlightBand } from './KanbanReadModel.js'
 import { card } from './testFixtures.js'
 import { ThreadIndex } from './threads.js'
@@ -10,19 +10,24 @@ const now = Date.parse('2026-11-14T12:00:00Z'), reachMs = 14 * 86_400_000, minut
 const at = (minutes: number): string => new Date(now - minutes * minute).toISOString()
 const idle = (minutes: number) => ({ status: 'active' as const, workerState: 'running' as const, runtimePhase: 'waiting' as const, lastActivityAt: now - minutes * minute })
 
-// The shear family: an idle orchestrator with a role, a thread asking, a closed thread for review,
-// a working thread, and a grandchild that asks; a thread under it was archived, and its child still hangs from it.
-const shear = card({ id: 'shear', uid: 'S', name: 'Cosmic shear', shuttleRole: 'analyst', outcome: 'The null passes.', ...idle(4) })
+// The analyst office: an idle top-level with threads (one asking, one for review, one working, an editor's,
+// a grandchild asking, and one under an archived thread), and a second analyst top-level at work.
+const shear = card({ id: 'shear', uid: 'S', name: 'Cosmic shear', shuttleRole: 'analyst/cail', outcome: 'The null passes.', ...idle(4) })
 const mask = card({ id: 'mask', uid: 'M', orchestrator: 'S', status: 'active', ask: { text: 'Keep the conservative mask?', at: at(30) } })
 const cuts = card({ id: 'cuts', uid: 'C', orchestrator: 'S', column: 'awaitingReview', closedAt: at(90), outcome: 'The cut is validated.' })
 const covariance = card({ id: 'covariance', uid: 'V', orchestrator: 'S', status: 'active', workerState: 'running', runtimePhase: 'working' })
+const methods = card({ id: 'methods', uid: 'E', orchestrator: 'S', shuttleRole: 'editor', status: 'active', workerState: 'running', runtimePhase: 'working', outcome: 'Written up.', lastActivityAt: now - 60 * minute })
 const tail = card({ id: 'tail', uid: 'T', orchestrator: 'M', status: 'active', ask: { text: 'Check the tail?', at: at(5) } })
 const done = card({ id: 'done', uid: 'D', orchestrator: 'S', column: 'tempered', status: 'closed', closedAt: at(900) })
 const after = card({ id: 'after', uid: 'A', orchestrator: 'D', ...idle(50) })
-// A family that waits only on its thread, and a quiet one.
+const lensing = card({ id: 'lensing', uid: 'L', shuttleRole: 'analyst', status: 'active', workerState: 'running', runtimePhase: 'working', lastActivityAt: now - 2 * minute })
+// The vizier office: a seat alone, at the end of its turn, and a second top-level of the office asking.
+const vizier = card({ id: 'life/vizier', uid: 'Z', name: 'Vizier', shuttleRole: 'vizier', shuttleSeat: true, ...idle(1) })
+const deed = card({ id: 'deed', uid: 'F', shuttleRole: 'vizier', status: 'active', ask: { text: 'Sign it?', at: at(20) } })
+// A top-level without an office, waiting through its thread; a quiet one.
 const move = card({ id: 'move', uid: 'R', name: 'Moving house', status: 'active' })
 const van = card({ id: 'van', uid: 'B', orchestrator: 'R', status: 'active', ask: { text: 'Which van?', at: at(10) } })
-const score = card({ id: 'score', uid: 'Q', status: 'active', workerState: 'running', runtimePhase: 'working' })
+const score = card({ id: 'score', uid: 'Q', name: 'Second movement', status: 'active', workerState: 'running', runtimePhase: 'working' })
 
 const files: SentFile[] = [
   { uid: 'C', host: 'local', fullPath: '/cuts.png', basename: 'cuts.png', timestamp: now - 20 * minute },
@@ -31,28 +36,39 @@ const files: SentFile[] = [
 ]
 const held: HeldSpeech[] = [{ fiber_id: 'V', name: 'covariance', n: 2, first: 'The run finished.', at: now - minute }]
 
-function compose(cards: KanbanCard[], over: Partial<Parameters<typeof composeChannels>[0]> = {}) {
+type Input = Parameters<typeof composeChannels>[0]
+function compose(cards: KanbanCard[], over: Partial<Input> = {}) {
   const index = new ThreadIndex(cards)
-  return composeChannels({ cards, parentOf: card => index.parentOf(card), names: new Map([['analyst', 'Analyst · sound results']]), files, held, dismissed: [], now, reachMs, ...over })
+  const input: Input = { cards, parentOf: card => index.parentOf(card), names: new Map([['analyst', 'Analyst'], ['vizier', 'Vizier'], ['editor', 'Editor']]), files, held, dismissed: [], pinned: new Map(), now, reachMs }
+  return composeChannels({ ...input, ...over })
 }
-const all = [shear, mask, cuts, covariance, tail, done, after, move, van, score]
+const listed = (cards: KanbanCard[], over: Partial<Input> = {}) => compose(cards, over).filter(channel => channel.listed).map(channel => channel.key)
+const all = [shear, mask, cuts, covariance, methods, tail, done, after, lensing, vizier, deed, move, van, score]
 
 describe('composeChannels', () => {
-  it('gathers a family under its topmost live ancestor and lists it only while something in it waits', () => {
+  it('keys a channel by its top-level constitutions\' office, else by the top-level, whatever office a thread holds', () => {
+    expect(officeOf('cmbx-chair/cail')).toBe('cmbx-chair')
     const channels = compose(all)
-    expect(channels.map(channel => [channel.key, channel.root.name, channel.role])).toStrictEqual([
-      ['S', 'Cosmic shear', 'Analyst · sound results'],
-      ['R', 'Moving house', undefined],
-      ['A', 'after', undefined],
+    expect(channels.map(channel => [channel.key, channel.name, channel.seat.id, channel.listed])).toStrictEqual([
+      ['role:vizier', 'Vizier', 'life/vizier', true],
+      ['role:analyst', 'Analyst', 'lensing', true],
+      ['fiber:R', 'Moving house', 'move', true],
+      ['fiber:A', 'after', 'after', true],
+      ['fiber:Q', 'Second movement', 'score', false],
     ])
-    const [family] = channels
-    expect(family.waiting.map(item => [item.kind, item.card.id, item.text])).toStrictEqual([
-      ['turn', 'shear', 'The null passes.'], ['ask', 'tail', 'Check the tail?'], ['ask', 'mask', 'Keep the conservative mask?'], ['review', 'cuts', 'The cut is validated.'],
+    const analyst = channels[1]
+    expect(analyst.messages.map(message => [message.kind, message.card.id, message.text])).toStrictEqual([
+      [undefined, 'covariance', ''], ['review', 'cuts', 'The cut is validated.'], [undefined, 'methods', 'Written up.'],
+      ['ask', 'mask', 'Keep the conservative mask?'], ['ask', 'tail', 'Check the tail?'], ['turn', 'shear', 'The null passes.'],
     ])
-    expect(family.newest).toBe(now - 4 * minute)
-    expect(family.threads.map(card => card.id)).toStrictEqual(['covariance'])
-    expect(family.files.map(file => file.basename)).toStrictEqual(['cuts.png'])
-    expect(family.held.map(line => line.first)).toStrictEqual(['The run finished.'])
+    expect(analyst.newest).toBe(now - 4 * minute)
+    expect(analyst.files.map(file => file.basename)).toStrictEqual(['cuts.png'])
+    expect(analyst.held.map(line => line.first)).toStrictEqual(['The run finished.'])
+  })
+
+  it('lists a seat alone at the end of its turn as a channel, its own seat', () => {
+    const [channel] = compose([vizier])
+    expect([channel.key, channel.seat, channel.waiting, channel.messages.map(message => message.kind)]).toStrictEqual(['role:vizier', vizier, true, ['turn']])
   })
 
   it('waits on exactly the cards the Desk puts in Your turn, with asks and reviews beside them', () => {
@@ -74,25 +90,26 @@ describe('composeChannels', () => {
     expect(waitingOn({ ...cuts, reviewMark: { note: 'Look at the plot.', at: at(3) } })).toMatchObject({ kind: 'review', text: 'Look at the plot.', at: now - 90 * minute })
   })
 
-  it('orders channels by their newest wait and shelves the ones gone cold', () => {
+  it('orders by newest wait, then the pinned quiet channels, then the ones gone cold', () => {
     const cold = card({ id: 'cold', uid: 'O', status: 'active', ask: { text: 'Still there?', at: new Date(now - COLD_MS - minute).toISOString() } })
-    const channels = compose([...all, cold])
-    expect(channels.map(channel => [channel.key, channel.cold])).toStrictEqual([['S', false], ['R', false], ['A', false], ['O', true]])
-    const sooner = { ...van, ask: { text: 'Which van?', at: at(1) } }
-    expect(compose([...all.filter(card => card !== van), sooner]).map(channel => channel.key)).toStrictEqual(['R', 'S', 'A'])
+    const channels = compose([...all, cold], { pinned: new Map([['fiber:Q', now]]) })
+    expect(channels.filter(channel => channel.listed).map(channel => [channel.key, channel.waiting, channel.cold])).toStrictEqual([
+      ['role:vizier', true, false], ['role:analyst', true, false], ['fiber:R', true, false], ['fiber:A', true, false], ['fiber:Q', false, false], ['fiber:O', true, true],
+    ])
   })
 
-  it('sets a channel aside until something newer waits in it', () => {
-    const [family] = compose(all)
-    const dismissed = [setAsideKey(family)]
-    expect(dismissed).toStrictEqual([`office:fiber:S:${now - 4 * minute}`])
-    expect(compose(all, { dismissed }).map(channel => channel.key)).toStrictEqual(['R', 'A'])
-    const fresh = card({ id: 'fresh', uid: 'F', orchestrator: 'S', status: 'active', ask: { text: 'One more?', at: at(1) } })
-    expect(compose([...all, fresh], { dismissed }).map(channel => channel.key)).toStrictEqual(['S', 'R', 'A'])
+  it('sets a channel aside until something newer waits in it; a pinned one stays, quiet', () => {
+    const vizierChannel = compose(all)[0]
+    const dismissed = [setAsideKey(vizierChannel)]
+    expect(dismissed).toStrictEqual([`office:role:vizier:${now - minute}`])
+    expect(listed(all, { dismissed })).toStrictEqual(['role:analyst', 'fiber:R', 'fiber:A'])
+    expect(listed(all, { dismissed, pinned: new Map([['role:vizier', now]]) })).toStrictEqual(['role:analyst', 'fiber:R', 'fiber:A', 'role:vizier'])
+    const fresh = card({ id: 'fresh', uid: 'N', shuttleRole: 'vizier', status: 'active', ask: { text: 'One more?', at: new Date(now).toISOString() } })
+    expect(listed([...all, fresh], { dismissed })[0]).toBe('role:vizier')
   })
 
   it('counts a mirrored fiber once and drops a desk header row', () => {
     const channels = compose([move, van, { ...van, originId: 'mirror' }, { ...move, deskSection: 'waiting' as const }])
-    expect(channels.map(channel => [channel.key, channel.waiting.length])).toStrictEqual([['R', 1]])
+    expect(channels.map(channel => [channel.key, channel.messages.length])).toStrictEqual([['fiber:R', 1]])
   })
 })

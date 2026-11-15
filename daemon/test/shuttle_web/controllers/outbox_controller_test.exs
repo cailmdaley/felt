@@ -26,6 +26,13 @@ defmodule ShuttleWeb.OutboxControllerTest do
           "text" => "file:remote:plot.png:1"
         },
         %{
+          "id" => "remote-pin",
+          "type" => "board",
+          "timestamp" => now - 5,
+          "kind" => "pinned",
+          "text" => "role:vizier"
+        },
+        %{
           "id" => "post",
           "type" => "board",
           "timestamp" => now,
@@ -48,6 +55,12 @@ defmodule ShuttleWeb.OutboxControllerTest do
            |> json_response(200) == %{"ok" => true}
 
     assert_receive {:cli, ["outbox", "dismiss", "ask:U:1", "--fiber", "U"]}
+
+    assert api_conn()
+           |> post("/api/v1/outbox/pin", %{key: "role:vizier"})
+           |> json_response(200) == %{"ok" => true}
+
+    assert_receive {:cli, ["outbox", "pin", "role:vizier"]}
     Env.put_app_env(:outbox_test_reply, {"cannot write", 1})
 
     assert api_conn()
@@ -69,6 +82,9 @@ defmodule ShuttleWeb.OutboxControllerTest do
       for {id, at, kind, text} <- [
             {"local", now, "dismissed", "ask:U:1"},
             {"old", now - Shuttle.Board.retention_ms() - 1, "dismissed", "expired"},
+            {"pin", now - 10, "pinned", "role:vizier"},
+            {"pin-again", now, "pinned", "role:vizier"},
+            {"lapsed", now - Shuttle.Board.retention_ms() - 1, "pinned", "fiber:OLD"},
             {"post", now, "post", "not a dismissal"}
           ],
           do: %{id: id, timestamp: at, type: "board", kind: kind, text: text}
@@ -88,15 +104,24 @@ defmodule ShuttleWeb.OutboxControllerTest do
     Env.put_server(Shuttle.RemoteTemporalRegistry, registry)
     assert %{items: [_ | _]} = Shuttle.RemoteTemporalRegistry.entries(registry, :board)["remote"]
 
-    assert %{"dismissed" => ["ask:U:1", "file:remote:plot.png:1"], "reach_ms" => reach} =
+    assert %{
+             "dismissed" => ["ask:U:1", "file:remote:plot.png:1"],
+             "pinned" => pinned,
+             "reach_ms" => reach
+           } =
              api_conn() |> get("/api/v1/outbox/dismissed") |> json_response(200)
+
+    assert pinned == %{"role:vizier" => now}
 
     assert reach == Shuttle.Board.retention_ms()
 
     assert %{records: []} =
              Shuttle.BoardFamily.compose(
                [],
-               [%{"id" => "d", "timestamp" => now, "kind" => "dismissed", "text" => "ask:U:1"}],
+               [
+                 %{"id" => "d", "timestamp" => now, "kind" => "dismissed", "text" => "ask:U:1"},
+                 %{"id" => "p", "timestamp" => now, "kind" => "pinned", "text" => "role:vizier"}
+               ],
                %{},
                "host",
                %{"all" => "true"}

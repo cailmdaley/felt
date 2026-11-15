@@ -605,10 +605,19 @@ See [Connect your machines](../shuttle/remotes.md#verify-work-across-the-connect
 
 Set something aside in the human's Outbox. Writes a family-board record of kind
 `dismissed` with the key as its text and, when supplied, a fiber uid. The board
-sets a channel aside with `office:fiber:<orchestrator uid>:<ms>`, where `<ms>`
-is when the newest wait in the orchestrator's family began; the channel returns
-once something in it begins waiting later than that. Dismissals reach
-every hub through the remote board feeds and are omitted from family-board
+sets a channel aside with `office:<channel>:<ms>`, where `<channel>` is
+`role:<office>` or `fiber:<top-level uid>` and `<ms>` is when the newest wait
+in the channel began; the channel returns once something in it begins waiting
+later than that. Dismissals reach every hub through the remote board feeds and
+are omitted from family-board reading.
+
+### `shuttle outbox pin <key> [--fiber <uid>]`
+
+Pin a channel in the human's Outbox, keyed `role:<office>` or
+`fiber:<top-level uid>`. Writes a family-board record of kind `pinned`; the
+channel stays in the Outbox while its latest pin is within the board's 14-day
+reach, and the board pins it again whenever the human opens or answers it.
+Pins reach every hub as dismissals do and are omitted from family-board
 reading.
 
 ### `shuttle board [fiber] [--since 2h|<RFC3339>] [--all] [--turns] [--json]`

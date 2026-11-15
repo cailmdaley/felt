@@ -22,6 +22,14 @@ func (a *app) outboxCmd() *cobra.Command {
 		},
 	}
 	dismiss.Flags().StringVar(&fiber, "fiber", "", "Item's fiber uid")
-	cmd.AddCommand(dismiss)
+	var pinFiber string
+	pin := &cobra.Command{
+		Use: "pin <key>", Short: "Pin an Outbox channel across the fleet; it lapses with the board's reach unless pinned again", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.appendBoard(boardRecord{Kind: "pinned", Text: args[0], Fiber: pinFiber})
+		},
+	}
+	pin.Flags().StringVar(&pinFiber, "fiber", "", "Channel's fiber uid")
+	cmd.AddCommand(dismiss, pin)
 	return cmd
 }

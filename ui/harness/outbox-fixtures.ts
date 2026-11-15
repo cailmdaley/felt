@@ -19,12 +19,16 @@ interface Row {
 const DAY = 1440
 
 /**
- * Six families, five of them waiting on the human. The cosmic-shear
+ * Channels as the Outbox draws them. The analyst office's cosmic-shear
  * orchestrator is idle at the end of its turn, with a thread asking, one
- * closed for review, one idle, and quiet threads beside them, a sent plot and
- * report and a held spoken line. The vizier's thread asks; the paper section
- * waits for review; the composer is idle; moving house last asked five days
- * ago, so it has gone cold. The survey campaign's question was set aside.
+ * closed for review, one idle, quiet threads beside them (one of them an
+ * editor's), a sent plot and report and a held spoken line. The vizier office
+ * holds four top-level constitutions: the seat idle at the end of its turn, a
+ * deed form asking, the morning post closed for review, and the dream at
+ * work. The editor's paper section waits for review; the composer is idle;
+ * moving house (no office) last asked five days ago, so it has gone cold; the
+ * garden plan waits on nothing but is pinned. The surveyor's question was set
+ * aside.
  */
 const ROWS: Row[] = [
   { id: 'shear', name: 'UNIONS cosmic shear', role: 'analyst', state: 'idle', minutes: 12,
@@ -36,21 +40,24 @@ const ROWS: Row[] = [
   { id: 'shear/cuts', name: 'Magnitude-cut comparison', parent: 'shear', outcome: 'The shift stays below 0.2σ for every cut.', review: 'The depth cut is ready for your eyes; the plot is attached.', minutes: 34 },
   { id: 'shear/psf', name: 'PSF leakage', parent: 'shear', state: 'idle', minutes: 95, outcome: 'Leakage α is 0.012 ± 0.004; the correction is applied and the residual is flat.' },
   { id: 'shear/covariance', name: 'Covariance pipeline', parent: 'shear', state: 'working', minutes: 8 },
+  { id: 'shear/methods', name: 'Methods section', role: 'editor', parent: 'shear', state: 'working', minutes: 160, outcome: 'The estimator and the blinding are written up; the mask paragraph waits on the mask.' },
   { id: 'shear/redshifts', name: 'Redshift calibration', parent: 'shear', state: 'draft', minutes: 600 },
-  { id: 'shear/blinding', name: 'Blinding scheme', parent: 'shear', state: 'working', minutes: 3 },
   { id: 'shear/rho', name: 'Rho statistics', parent: 'shear', outcome: 'ρ₁ through ρ₅ are consistent with zero.', minutes: 300 },
-  { id: 'vizier', name: 'Vizier', role: 'vizier', seat: true, minutes: 9000 },
-  { id: 'vizier/dentist', name: 'Book the dentist', parent: 'vizier', minutes: 55, ask: 'Thursday at 9:30 or Friday at 14:00? Friday collides with the group meeting.' },
-  { id: 'vizier/accounts', name: 'Weekly accounts', parent: 'vizier', state: 'working', minutes: 12 },
+  { id: 'life-vizier', name: 'Vizier', role: 'vizier', seat: true, state: 'idle', minutes: 6, outcome: 'Your week: the dentist is booked for Thursday; rent goes out Monday; two forms need you.',
+    tapestry: 'The week at a glance: Thursday the dentist at 9:30, Friday the group meeting, Monday the rent. Two forms wait on a signature.' },
+  { id: 'deed-form', name: 'Sign the deed form', role: 'vizier', minutes: 50, ask: 'The notary needs the deed form back by Wednesday. Sign the scan I put in your Documents folder, or shall I book a slot to sign it in person?' },
+  { id: 'morning-post', name: 'Morning post', role: 'vizier', outcome: 'Eleven letters sorted; two need a reply from you, the rest are filed.', review: 'Two letters need your reply; drafts are attached.', minutes: 140 },
+  { id: 'dream', name: 'Dream', role: 'vizier', state: 'working', minutes: 20 },
   { id: 'paper-section-4', name: 'Paper II, section 4', role: 'editor', outcome: 'Section 4 is rewritten around the null tests; every number is generated from the pipeline.', minutes: 120 },
   { id: 'score', name: 'Second movement', role: 'composer', state: 'idle', minutes: 200, outcome: 'The development section is drafted; the modulation to the relative minor is the open question.' },
   { id: 'move', name: 'Moving house', minutes: 30 * DAY },
   { id: 'move/van', name: 'Find a van', parent: 'move', minutes: 5 * DAY, ask: 'The 12 m³ van is free on Saturday; the 20 m³ only on Sunday. Which one?' },
   { id: 'move/boxes', name: 'Order boxes', parent: 'move', state: 'working', minutes: 40 },
+  { id: 'garden', name: 'Garden plan', state: 'working', minutes: 70, outcome: 'Tomatoes go in after the last frost; the seed order is drafted.' },
   { id: 'campaign', name: 'North-field campaign', role: 'surveyor', minutes: 300, ask: 'Extend the campaign by a night?' },
 ]
 
-export function addOutboxFixtures(example: WorkspaceExample, now: number): { held: HeldSpeech[]; dismissed: string[] } {
+export function addOutboxFixtures(example: WorkspaceExample, now: number): { held: HeldSpeech[]; dismissed: string[]; pinned: Record<string, number> } {
   const iso = (minutes: number): string => new Date(now - minutes * 60_000).toISOString()
   const dir = (id: string): string => `/fixture-store/workspace/${id}`
   example.feed.fibers = ROWS.map(row => {
@@ -78,6 +85,7 @@ export function addOutboxFixtures(example: WorkspaceExample, now: number): { hel
   example.sessions = []; example.commits = []
   return {
     held: [{ fiber_id: 'shear/covariance', name: 'Covariance pipeline', n: 2, first: 'The final covariance is ready. One block of it is worth checking together.', at: now - 8 * 60_000 }],
-    dismissed: [`office:fiber:campaign:${Date.parse(iso(300))}`],
+    dismissed: [`office:role:surveyor:${Date.parse(iso(300))}`],
+    pinned: { 'fiber:garden': now - 3 * 86_400_000 },
   }
 }
