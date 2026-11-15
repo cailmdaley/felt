@@ -26,6 +26,11 @@ describe('mapFeltJsonToFiber reads shuttle.seat', () => {
     expect(f?.shuttleSeat).toBe(true)
   })
 
+  it('reads shuttle.channel, the board channel a constitution speaks in', () => {
+    expect(mapFeltJsonToFiber({ id: 'pando/unions', shuttle: { kind: 'oneshot', channel: ' UNIONS ' } })?.shuttleChannel).toBe('UNIONS')
+    expect(mapFeltJsonToFiber({ id: 'pando/unions', shuttle: { kind: 'oneshot', channel: '' } })?.shuttleChannel).toBeUndefined()
+  })
+
   it('reads scalar and windowed pulse configuration without deriving a clock', () => {
     expect(mapFeltJsonToFiber({ id: 'a', shuttle: { pulse: '59m' } })?.shuttlePulse).toEqual({ every: '59m' })
     expect(mapFeltJsonToFiber({ id: 'a', shuttle: { pulse: {

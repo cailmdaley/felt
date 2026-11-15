@@ -51,6 +51,8 @@ export interface Fiber {
   shuttlePerson?: string;
   /** `shuttle.seat` — an office seat, drawn among the Roles when at rest. */
   shuttleSeat?: boolean;
+  /** `shuttle.channel` — the board channel this constitution speaks in. */
+  shuttleChannel?: string;
   /** `shuttle.blocked_on` — what a resting constitution waits for: a fiber uid, or text. */
   shuttleBlockedOn?: string;
   /** `shuttle.runtime.session_uuid` — the harness session UUID of the worker the
@@ -161,6 +163,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
   let shuttleRole: string | undefined;
   let shuttlePerson: string | undefined;
   let shuttleSeat: boolean | undefined;
+  let shuttleChannel: string | undefined;
   let shuttleBlockedOn: string | undefined;
   let shuttleSessionUuid: string | undefined;
   let shuttleDispatchedAt: string | undefined;
@@ -197,6 +200,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     if (typeof s.role === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(s.role)) shuttleRole = s.role;
     if (shuttleRole && typeof s.person === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(s.person)) shuttlePerson = s.person;
     if (typeof s.seat === 'boolean') shuttleSeat = s.seat;
+    if (typeof s.channel === 'string' && s.channel.trim()) shuttleChannel = s.channel.trim();
     if (typeof s.blocked_on === 'string' && s.blocked_on.trim()) shuttleBlockedOn = s.blocked_on.trim();
 
 
@@ -298,6 +302,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     shuttleRole,
     shuttlePerson,
     shuttleSeat,
+    shuttleChannel,
     shuttleBlockedOn,
     shuttleSessionUuid,
     shuttleDispatchedAt,

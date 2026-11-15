@@ -195,6 +195,8 @@ export interface KanbanCard {
    * standing constitution's like any other.
    */
   shuttleSeat?: boolean
+  /** `shuttle.channel` — the board channel this constitution speaks in; a thread inherits its parent's. */
+  shuttleChannel?: string
   /** `shuttle.blocked_on` — what a resting constitution waits for: a fiber uid, or text. */
   shuttleBlockedOn?: string
   /** `shuttle.role` — the office's slug, its charter's (`roles/<slug>`). */

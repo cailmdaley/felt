@@ -556,6 +556,7 @@ function toCard(
     shuttleHost: f.shuttleHost,
     shuttleKind: f.shuttleKind,
     shuttleSeat: f.shuttleSeat,
+    shuttleChannel: f.shuttleChannel,
     shuttleBlockedOn: f.shuttleBlockedOn,
     shuttleSchedule: f.shuttleSchedule?.expr,
     shuttleTz: f.shuttleSchedule?.tz,
