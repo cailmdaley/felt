@@ -481,8 +481,8 @@ closed constitution) is not rejected: its owning daemon queues the text in the
 fiber's durable inbox, the same one thread results wait in.
 For a wake send, the owner starts a session when the fiber is open or active,
 not at rest, not a standing constitution whose schedule is paused or whose run
-is due, and the owner holds no boot quarantine; the session takes the text
-through its hook. The receipt reads `starting a session on <fiber> for it`
+is due, and the owner holds no boot quarantine and has a free worker slot;
+the session takes the text through its hook. The receipt reads `starting a session on <fiber> for it`
 (`status: starting` in `--json`), or `queued for <fiber>: <what it waits for>`
 (`status: queued`, with `detail`).
 A context-only send returns `queued` with a fiber-context receipt, whether or not a worker is live.

@@ -161,7 +161,7 @@ shuttle message <target> "…" --message-id <id>      # retry a send without ano
 
 A target is an address, a session id, or a fiber.
 An attachment-free context-only fiber send goes to its durable mailbox regardless of worker liveness; a live-worker idle-notification request uses session routing instead.
-A wake send messages the live worker. With none, the fiber's owner queues it in the fiber's inbox and starts a session that takes it, unless the fiber is closed, at rest, a paused or due standing schedule, or held by the owner's boot quarantine.
+A wake send messages the live worker. With none, the fiber's owner queues it in the fiber's inbox and starts a session that takes it, unless the fiber is closed, at rest, a paused or due standing schedule, held by the owner's boot quarantine, or the owner is at its worker limit.
 Inbox receipts are `queued` for context-only sends, `starting` when a session is starting for a wake send, and `queued` with a detail saying what it waits for otherwise; none means delivered.
 A delivered message is its text under `[from <sender>]`. A worker's sender is its fiber: reply to the fiber so the answer follows the work across handoffs; a session address stays pinned to that one session. The receipt says how far delivery got (`accepted`: the harness took the input), never that the model replied. A plain message to a busy Claude session waits for main-thread prompt submission or tool completion as context; if unoffered after 30 seconds, or the worker stops working sooner, the owning daemon claims it for native wake.
 A daemon restart resumes recovery from disk.
