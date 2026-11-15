@@ -124,7 +124,8 @@ Pending records become routing inbox entries with their recipients; acknowledgme
 An acknowledgment's file name is the hash of its publication's id, which is the routing inbox's key for it, so the import takes acknowledgments from their names and never reads them: an unreadable ack imports, and a name that is not 64 hex characters (an `acked/*.tmp` left by a hard-killed older daemon, an NFS `.nfs*` silly-rename, `.DS_Store`) is ignored.
 An acknowledgment wins over a pending copy of its id, including a copy an interrupted import left, and the import touches no recipient's inbox.
 The importer reads the source without changing it, enqueues idempotently, then renames the directory to `thread-outbox.imported` before deleting it, so a crash at any point repeats safely.
-A pending record the routing inbox can never accept (`invalid_request`, such as text over 64 KiB) is reported as `skipped`, which the daemon logs, and the rest import.
+A pending record whose text is over 64 KiB, which the older daemon's outbox took, imports cut short as capture cuts a long outcome, keeping its id, stamp, recipient and wishes.
+A pending record the routing inbox can never accept (`invalid_request`, such as a malformed signal) is reported as `skipped`, which the daemon logs, and the rest import.
 Stamps are read as the older daemon's capture read them (ISO 8601 with a `T` or space separator and a `Z`, `+01:00`, `+0100` or `+01` offset) and kept as written, since currency compares them verbatim; a record with no stamp, which would never expire, or one that cannot be read is skipped.
 A cleanup failure is reported as `cleanup_error`, which the daemon logs; boot goes on, and the next boot removes what is left.
 A malformed baseline, a pending payload that cannot be parsed, or a malformed state exits 3 (`Shuttle.Inbox.Corrupt`) and holds boot without discarding anything; restore the exact trusted baseline from backup rather than setting it to the current time.

@@ -230,25 +230,29 @@ defmodule Shuttle.ThreadCaptureTest do
     File.mkdir_p!(Path.join(outbox, "pending"))
     File.write!(Path.join(outbox, "baseline"), "2026-10-22T19:33:11.470348Z")
 
-    for {id, text} <- [{"thread-big", String.duplicate("x", 65 * 1024)}, {"thread-ok", "done"}] do
+    for {id, extra} <- [{"thread-bad", %{"signal" => %{"uid" => "a"}}}, {"thread-ok", %{}}] do
       key = :crypto.hash(:sha256, id) |> Base.encode16(case: :lower)
 
       File.write!(
         Path.join([outbox, "pending", key <> ".json"]),
         Jason.encode!(%{
           id: id,
-          record: %{
-            "owner" => "test-host",
-            "parent_uid" => "p",
-            "text" => text,
-            "retained_at" => DateTime.to_iso8601(DateTime.utc_now())
-          }
+          record:
+            Map.merge(
+              %{
+                "owner" => "test-host",
+                "parent_uid" => "p",
+                "text" => "done",
+                "retained_at" => DateTime.to_iso8601(DateTime.utc_now())
+              },
+              extra
+            )
         })
       )
     end
 
     log = ExUnit.CaptureLog.capture_log(fn -> assert :ok = Shuttle.Inbox.boot_import() end)
-    assert log =~ "Thread outbox import skipped thread-big"
+    assert log =~ "Thread outbox import skipped thread-bad"
     assert [{"thread-ok", _}] = Shuttle.Test.InboxPublications.pending()
     refute File.exists?(outbox)
   end

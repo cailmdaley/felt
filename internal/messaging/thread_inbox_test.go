@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
@@ -57,6 +58,15 @@ func routes(t *testing.T, env *sysenv.Env) []ThreadPublication {
 func offeredRoute(t *testing.T, env *sysenv.Env, id string) mailboxEntry {
 	t.Helper()
 	e, err := readFiberMailboxEntry(filepath.Join(routingRoot(env), "offered", mailboxKey(id)+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e
+}
+
+func pendingRoute(t *testing.T, env *sysenv.Env, id string) mailboxEntry {
+	t.Helper()
+	e, err := readFiberMailboxEntry(filepath.Join(routingRoot(env), "pending", mailboxKey(id)+".json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,18 +418,18 @@ func TestThreadImportIgnoresALeftoverAckTmpFile(t *testing.T) {
 	}
 }
 
-// A pending record the routing inbox can never accept (the old outbox stored
-// any text) is skipped and reported; the rest import.
+// A pending record the routing inbox can never accept is skipped and
+// reported; the rest import.
 func TestThreadImportSkipsARecordTheInboxCanNeverAccept(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	root := seedOutbox(t, env, oldBaseline)
-	big := threadRecord()
-	big["text"] = "thread hub/child closed: " + strings.Repeat("x", 65<<10)
-	seedPending(t, root, "thread-big", big)
+	bad := threadRecord()
+	bad["signal"] = map[string]any{"uid": "child"}
+	seedPending(t, root, "thread-bad", bad)
 	seedPending(t, root, "thread-ok", threadRecord())
 	report := bootThread(t, env)
-	if len(report.Skipped) != 1 || report.Skipped[0].ID != "thread-big" || !strings.Contains(report.Skipped[0].Error, "64 KiB") {
+	if len(report.Skipped) != 1 || report.Skipped[0].ID != "thread-bad" || !strings.Contains(report.Skipped[0].Error, "thread signal") {
 		t.Fatalf("%+v", report)
 	}
 	if got := routes(t, env); len(got) != 1 || got[0].ID != "thread-ok" {
@@ -427,6 +437,42 @@ func TestThreadImportSkipsARecordTheInboxCanNeverAccept(t *testing.T) {
 	}
 	if _, err := os.Stat(root); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("source remains", err)
+	}
+}
+
+// An older daemon captured a close whose text is over the inbox's limit. It
+// imports cut short, with its id, stamp, recipient and wishes, so a later
+// capture of an edited outcome under the same id stores nothing.
+func TestThreadImportKeepsAnOversizedPublicationCutShort(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	root := seedOutbox(t, env, oldBaseline)
+	original := threadRecord()
+	original["text"] = "thread hub/child closed: original! " + strings.Repeat("é", 33<<10)
+	seedPending(t, root, "thread-big", original)
+	if report := bootThread(t, env); len(report.Skipped) != 0 {
+		t.Fatalf("%+v", report)
+	}
+	edited := threadRecord()
+	edited["retained_at"] = original["retained_at"]
+	edited["text"] = "thread hub/child closed: edited after first capture"
+	if created := capture(t, env, ThreadPublication{"thread-big", edited}); len(created) != 0 {
+		t.Fatal(created)
+	}
+	got := routes(t, env)
+	if len(got) != 1 {
+		t.Fatalf("%+v", got)
+	}
+	r := got[0].Record
+	text := routeString(r, "text")
+	if !strings.HasPrefix(text, "thread hub/child closed: original! ") || !strings.HasSuffix(text, " … (truncated)") || len(text) > 64<<10 || !utf8.ValidString(text) {
+		t.Fatalf("text %d bytes: %q…", len(text), text[:40])
+	}
+	if r["retained_at"] != original["retained_at"] || r["parent_uid"] != "anchor" || r["wake"] != true {
+		t.Fatalf("%+v", r)
+	}
+	if e := pendingRoute(t, env, "thread-big"); e.Request.Text != text || e.Wishes.Turn != "ask" {
+		t.Fatalf("%+v", e)
 	}
 }
 

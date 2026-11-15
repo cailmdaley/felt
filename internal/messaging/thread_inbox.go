@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
@@ -381,6 +382,9 @@ func bootThreadInbox(env *sysenv.Env, imported func(string) error) (ThreadImport
 		if src.acked[mailboxKey(id)] {
 			continue
 		}
+		if text, ok := record["text"].(string); ok {
+			record["text"] = boundedThreadText(text)
+		}
 		entry, err := ThreadEntry(id, record)
 		if _, stampErr := parseStamp(threadStamp(record)); stampErr != nil {
 			err = errCode("invalid_request", "thread publication stamp: %v", stampErr)
@@ -416,6 +420,20 @@ func bootThreadInbox(env *sysenv.Env, imported func(string) error) (ThreadImport
 		report.Cleanup = err.Error()
 	}
 	return report, nil
+}
+
+// An older daemon's outbox took any text. One over the inbox's 64 KiB limit
+// imports cut short, as the daemon captures a result whose outcome is that
+// long: its first 60,000 bytes, ending on a whole character.
+func boundedThreadText(text string) string {
+	if len(text) <= 64<<10 {
+		return text
+	}
+	cut := text[:60_000]
+	for !utf8.ValidString(cut) {
+		cut = cut[:len(cut)-1]
+	}
+	return cut + " … (truncated)"
 }
 
 // outboxImage is an older daemon's thread outbox, thread-outbox/: its
