@@ -61,6 +61,8 @@
   text-align: left;
   font: var(--type-row)/var(--leading-tight) var(--font-serif);
   cursor: pointer;
+  /* A held finger picks the entry up, so it raises no selection or callout. */
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
 }
 .kbn-ch-pick:hover { color: var(--kbn-ink); background: color-mix(in srgb, var(--kbn-ink) 5%, transparent); }
 .kbn-ch-pick[aria-current] { color: var(--kbn-ink); background: color-mix(in srgb, var(--kbn-owed-bright) 16%, transparent); }
@@ -71,8 +73,13 @@
 .kbn-ch-pick[data-lone] .kbn-ch-pick-hash { opacity: 0.6; }
 /* Waiting on the human: a dot. */
 .kbn-ch-pick-mark { flex: none; align-self: center; width: 7px; height: 7px; border-radius: 50%; background: var(--kbn-owed-bright); box-shadow: 0 0 0 2px color-mix(in srgb, var(--kbn-owed-bright) 25%, transparent); }
-.kbn-ch-pick[data-lone] + * { margin-top: 0; }
-.kbn-ch-rail-item:has(.kbn-ch-pick[data-lone]):not(.kbn-ch-rail-item:has(.kbn-ch-pick[data-lone]) ~ *) { margin-top: 10px; }
+/* What waits on the human floats above the human's order, a little apart from it. */
+.kbn-ch-rail-item[data-waiting]:has(+ .kbn-ch-rail-item:not([data-waiting])) { margin-bottom: 8px; }
+.kbn-ch-pick-hidden { flex: none; font: italic var(--type-label)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); }
+/* Picked up: the entry marks where it would land, and its copy follows the pointer. */
+.kbn-ch-pick[data-moving]:not([data-drag-preview]) { opacity: 0.35; }
+/* The SDK writes the copy's computed colours inline; an entry's own background is clear, so the copy takes the paper's. */
+.kbn-ch-pick[data-drag-preview] { background-color: var(--kbn-paper) !important; box-shadow: 0 6px 18px color-mix(in srgb, var(--kbn-ink) 22%, transparent); }
 .kbn-ch-none { padding: 4px 10px; }
 .kbn-ch-shelf {
   margin: 4px 0 2px 10px;

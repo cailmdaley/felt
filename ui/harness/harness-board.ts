@@ -1676,7 +1676,11 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     return json({ host: LOCAL_HOST, records: [], origins: MOCK_ORIGINS })
   }
 
-  if (url.includes('/api/v1/channels/dismissed')) return json({ dismissed: channelsFixture?.dismissed ?? [], pinned: channelsFixture?.pinned ?? {}, reach_ms: 14 * 86_400_000 })
+  if (url.includes('/api/v1/channels/dismissed')) return json({ dismissed: channelsFixture?.dismissed ?? [], pinned: channelsFixture?.pinned ?? {}, order: channelsFixture?.order ?? null, reach_ms: 14 * 86_400_000 })
+  if (url.includes('/api/v1/channels/order')) {
+    if (channelsFixture) channelsFixture.order = { keys: body().keys as string[], at: Date.now() }
+    return json({ ok: true })
+  }
   if (url.includes('/api/v1/channels/dismiss')) {
     channelsFixture?.dismissed.push(String(body().key))
     return json({ ok: true })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { RECENT_MS, channelLines, composeChannels, composeMessages, liveness, setAsideKey, threadOf, unpinKey, waitsSince, type BoardRecord, type Channel } from './channels.js'
+import { RECENT_MS, arranged, channelLines, composeChannels, composeMessages, hideKey, liveness, railOrder, reordered, setAsideKey, showKey, threadOf, unpinKey, waitsSince, type BoardRecord, type Channel } from './channels.js'
 import { inFlightBand } from './KanbanReadModel.js'
 import { card } from './testFixtures.js'
 import { ThreadIndex } from './threads.js'
@@ -91,6 +91,21 @@ describe('composeChannels', () => {
     expect(again.waiting).toBe(true)
   })
 
+  it('hides a channel until a later show or something waiting after the hide', () => {
+    const hide = (dismissed: string[], cards = all) => named(compose(cards, { dismissed }), 'channel:analyst')
+    expect([hide([]).hidden, hide([]).listed]).toStrictEqual([0, true])
+    expect([hide([hideKey('channel:analyst', now - minute)]).hidden, hide([hideKey('channel:analyst', now - minute)]).listed]).toStrictEqual([now - minute, false])
+    // Pinned, it is still out of the rail.
+    expect(named(compose(all, { dismissed: [hideKey('channel:analyst', now - minute)], pinned: new Map([['channel:analyst', now]]) }), 'channel:analyst').listed).toBe(false)
+    expect(hide([hideKey('channel:analyst', now - 2 * minute), showKey('channel:analyst', now - minute)]).hidden).toBe(0)
+    expect(hide([showKey('channel:analyst', now - 2 * minute), hideKey('channel:analyst', now - minute)]).hidden).toBe(now - minute)
+    // A wait older than the hide keeps it hidden; one that began after brings it back.
+    const asking = (minutes: number) => [...all.filter(each => each !== shear), { ...shear, status: 'active' as const, ask: { text: 'Which mask?', at: at(minutes) } }]
+    expect(hide([hideKey('channel:analyst', now - 5 * minute)], asking(10)).hidden).toBe(now - 5 * minute)
+    const back = hide([hideKey('channel:analyst', now - 5 * minute)], asking(1))
+    expect([back.hidden, back.waiting, back.listed]).toStrictEqual([0, true, true])
+  })
+
   it('waits on exactly the cards the Desk puts in Your turn, with asks and reviews beside them', () => {
     const turns = [
       card({ id: 'idle', uid: 'I1', ...idle(3) }),
@@ -104,6 +119,32 @@ describe('composeChannels', () => {
     expect(yours).toStrictEqual(['idle', 'blocked', 'prompt'])
     expect(turns.filter(card => waitsSince(card) > 0).map(card => card.id)).toStrictEqual(yours)
     expect(waitsSince(card({ id: 'review', column: 'awaitingReview', closedAt: at(90) }))).toBe(now - 90 * minute)
+  })
+})
+
+describe('the rail\'s order', () => {
+  const keys = (channels: Channel[]) => channels.map(channel => channel.key)
+  // Moving house, UNIONS (its thread asks) and Vizier (its chair is idle) wait on the human; the van's ask is the newest.
+  const channels = compose(all)
+
+  it('puts the channels an order does not name first, as composed, then the order\'s', () => {
+    expect(keys(arranged(channels, []))).toStrictEqual(['channel:analyst', 'channel:unions', 'channel:vizier', 'fiber:R', 'fiber:O'])
+    expect(keys(arranged(channels, ['fiber:O', 'channel:vizier', 'channel:gone', 'channel:analyst']))).toStrictEqual(['channel:unions', 'fiber:R', 'fiber:O', 'channel:vizier', 'channel:analyst'])
+  })
+
+  it('floats what waits on the human, the newest wait first, above the human\'s order', () => {
+    expect(channels.filter(channel => channel.waiting).map(channel => [channel.key, channel.newest])).toStrictEqual([['channel:unions', now - 20 * minute], ['channel:vizier', now - 50 * minute], ['fiber:R', now - 10 * minute]])
+    expect(keys(railOrder(channels, ['fiber:O', 'channel:vizier', 'channel:analyst', 'fiber:R', 'channel:unions']))).toStrictEqual(['fiber:R', 'channel:unions', 'channel:vizier', 'fiber:O', 'channel:analyst'])
+    // Set aside, a wait no longer floats.
+    const aside = compose(all, { dismissed: [setAsideKey(named(channels, 'fiber:R'))] })
+    expect(keys(railOrder(aside, ['fiber:O', 'fiber:R', 'channel:analyst']))).toStrictEqual(['channel:unions', 'channel:vizier', 'fiber:O', 'fiber:R', 'channel:analyst'])
+  })
+
+  it('rearranges only the channels shown, every other keeping its place', () => {
+    const order = ['channel:analyst', 'fiber:R', 'channel:unions', 'fiber:O', 'channel:vizier']
+    // Shown: analyst, unions, vizier (fiber:R waits, fiber:O is out of the rail); vizier is dragged to the top.
+    expect(reordered(order, ['channel:vizier', 'channel:analyst', 'channel:unions'])).toStrictEqual(['channel:vizier', 'fiber:R', 'channel:analyst', 'fiber:O', 'channel:unions'])
+    expect(reordered(order, [])).toStrictEqual(order)
   })
 })
 

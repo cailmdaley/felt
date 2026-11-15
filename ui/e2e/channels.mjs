@@ -9,6 +9,21 @@ const fits = async page => {
   assert.equal(await page.locator('.kbn-channels').evaluate(el => el.scrollWidth <= el.clientWidth), true)
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
 }
+const pick = (page, name) => page.locator('.kbn-ch-pick', { has: page.locator('.kbn-ch-pick-name', { hasText: new RegExp(`^${name}$`) }) })
+const middle = async locator => { const box = await locator.boundingBox(); return { x: box.x + box.width / 2, y: box.y + box.height / 2 } }
+/** A finger held still on `from` until it is picked up, then drawn to `to` and lifted; without `to`, lifted where it held. */
+const hold = async (page, from, to) => {
+  const cdp = await page.context().newCDPSession(page)
+  const touch = (type, points) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points })
+  await touch('touchStart', [from])
+  await page.waitForTimeout(600)
+  for (let step = 1; to && step <= 12; step++) {
+    await touch('touchMove', [{ x: from.x + (to.x - from.x) * step / 12, y: from.y + (to.y - from.y) * step / 12 }])
+    await page.waitForTimeout(30)
+  }
+  await touch('touchEnd', [])
+  await cdp.detach()
+}
 const shot = async (page, name) => {
   await page.waitForTimeout(400)
   await page.screenshot({ path: resolve(`../channels-${name}.png`) })
@@ -22,16 +37,46 @@ try {
     const errors = []
     page.on('pageerror', error => errors.push(error.message))
     await page.goto(`${pathToFileURL(resolve('harness-board-dist/index.html'))}?example=channels#/channels`)
-    await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 7)
+    await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 8)
     await page.evaluate(() => document.fonts.ready)
-    // The chaired channels by name, then the lone constitutions; old notes, idle three weeks, only by Jump to.
-    assert.deepEqual(await page.evaluate(channels), ['cmbx', 'Composer', 'The Mill', 'UNIONS', 'Vizier', 'Garden plan', 'Moving house'])
+    // What waits on the human, the newest wait first, then the human's order; the hidden composer and old notes, idle three weeks, only by Jump to.
+    assert.deepEqual(await page.evaluate(channels), ['Vizier', 'cmbx', 'The Mill', 'UNIONS', 'Moving house', 'French', 'Science', 'Garden plan'])
     if (phone) {
       // The rail is the first screen; choosing a channel fills it.
       assert.equal(await page.locator('.kbn-ch').isVisible(), false)
-      await shot(page, 'phone-rail')
     }
-    await page.locator('.kbn-ch-pick', { hasText: 'cmbx' }).click()
+    await shot(page, `${name}-rail`)
+    // The garden plan is dragged above French: by the mouse, or by a finger held still and then drawn.
+    const from = await middle(pick(page, 'Garden plan')), to = await middle(pick(page, 'French'))
+    to.y -= 6
+    if (phone) await hold(page, from, to)
+    else {
+      await page.mouse.move(from.x, from.y); await page.mouse.down()
+      for (let step = 1; step <= 10; step++) await page.mouse.move(from.x, from.y + (to.y - from.y) * step / 10)
+      await page.mouse.up()
+    }
+    await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick-name')[5]?.textContent === 'Garden plan')
+    assert.deepEqual(await page.evaluate(channels), ['Vizier', 'cmbx', 'The Mill', 'UNIONS', 'Moving house', 'Garden plan', 'French', 'Science'])
+    // The drag opened nothing and asked for no menu.
+    assert.equal(await page.locator('[role="menu"]').count(), 0)
+    if (phone) assert.equal(await page.locator('.kbn-ch').isVisible(), false)
+    // A right-click, or a finger held and lifted, opens an entry's menu; Hide takes it out of the rail.
+    if (phone) await hold(page, await middle(pick(page, 'Science')))
+    else await pick(page, 'Science').click({ button: 'right' })
+    await page.waitForFunction(() => document.querySelectorAll('[role="menuitem"]').length === 3)
+    assert.deepEqual(await page.locator('[role="menuitem"]').allTextContents(), ['Hide', 'Pin', 'Move to bottom'])
+    await shot(page, `${name}-rail-menu`)
+    await page.locator('[role="menuitem"]', { hasText: 'Hide' }).click()
+    await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 7)
+    // Jump to finds a hidden channel, marked as such.
+    await page.locator('.kbn-ch-jump').fill('compo')
+    await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 1)
+    assert.deepEqual(await page.evaluate(channels), ['Composer'])
+    assert.equal(await page.locator('.kbn-ch-pick-hidden').textContent(), 'hidden')
+    await shot(page, `${name}-jump-hidden`)
+    await page.locator('.kbn-ch-jump').fill('')
+    await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 7)
+    await pick(page, 'cmbx').click()
     await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'cmbx' && document.querySelector('.kbn-ch-tapestry'))
     if (phone) assert.equal(await page.locator('.kbn-ch-rail').isVisible(), false)
     // Each worker once, its wait or its latest; the chair in full, its tapestry among its messages; the silent beam window absent.
@@ -72,7 +117,7 @@ try {
       await page.locator('.kbn-ch-tapestry .kbn-ch-act', { hasText: 'Fold it' }).click()
       // UNIONS, busy and last read 45 minutes ago, rules off what is new.
       await page.locator('.kbn-ch').focus()
-      await page.keyboard.press('j'); await page.keyboard.press('j'); await page.keyboard.press('j')
+      await page.keyboard.press('j'); await page.keyboard.press('j')
       await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'UNIONS' && document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-msg').length === 13)
       assert.equal(await page.locator('.kbn-ch-new').count(), 1)
       await shot(page, 'desktop-busy')
@@ -94,7 +139,7 @@ try {
     await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 8)
     assert.deepEqual(errors, [])
     await context.close()
-    console.log(`Channels ${name}: the recent channels in order, a short stream with each worker once and the chair's tapestry, a worker's thread, ${phone
+    console.log(`Channels ${name}: the recent channels with what waits floated, a channel dragged into place, its menu, a hidden channel found by Jump to, a short stream with each worker once and the chair's tapestry, a worker's thread, ${phone
       ? 'one screen at a time with back to the rail'
       : 'a closed thread\'s conclusion, the tapestry read in place, a busy channel ruled off since the last visit, the rail hidden and shown'}, Jump to finding a hidden channel and a document and bringing the channel back, no overflow; screenshots saved`)
   }

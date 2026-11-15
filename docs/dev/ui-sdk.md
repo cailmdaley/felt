@@ -5,7 +5,8 @@ The board owns actions, presentation, the gestures that ask for a popup, and its
 
 | Widget | Where | SDK entry |
 |---|---|---|
-| Action, row and conversation menus | `board/conversationMenu.ts` | `@ui-sdk/web/menu` |
+| Action, row and conversation menus, the Channels rail's entry menu | `board/conversationMenu.ts`, `views/ChannelsView.ts` | `@ui-sdk/web/menu` |
+| Channels rail reordering (mouse drag, touch hold-then-drag, Alt+↑/↓) | `board/channelRail.ts` | core `createReorder` on a `definePrimitive` instance |
 | Move menu | `board/MoveMenu.ts` | `@ui-sdk/web/menu` |
 | Keyboard help, role picker, rest calendar shell | `board/KeymapHelp.ts`, `RolePopover.ts`, `RestPopover.ts` | `@ui-sdk/web/dialog` |
 | Settings dropdown, Reader document menu | `board/workspace/SettingsMenu.ts`, `Reader.ts` | `@ui-sdk/web/popover` |
@@ -30,6 +31,8 @@ These stay the board's own, each for a reason that still holds:
 
 Use a shipped `@ui-sdk/web/<component>` when its composition fits, including imperative opens and point anchors.
 Use public core behaviours with `definePrimitive` when the interaction is genuinely bespoke, not to reproduce a shipped component with fewer tags.
+A behaviour that needs only state can run on a primitive instance called directly, without custom elements: `channelRail.ts` calls its primitive, binds each rail entry with `reorder.bind(el, { key, props })` and draws the draft's order with CSS `order`, so a poll never rebuilds the rail under a moving entry.
+It binds the entry's own button, because a pointer captured by an ancestor turns the button's click into the ancestor's.
 Keep domain code such as the Chronicle's civil days, document-frame forwarding and lifecycle actions outside the SDK.
 Never import `@ui-sdk/core/internal/*`.
 Read the installed package's `docs/llms.txt`, the component page and the relevant shared guides before adopting another widget.

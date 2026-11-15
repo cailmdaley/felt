@@ -28,8 +28,10 @@ const DAY = 1440
  * the chair's own posts. UNIONS, busy: a seated chair over two seated hubs, a
  * thread asking and ten more posting, last read 45 minutes ago. Vizier: two seats (the oneshot one chairs), a form asking,
  * the morning post for review. The Mill posts long. An office without a
- * channel (the composer's), moving house asking for five days, a pinned
- * garden plan, and old notes idle three weeks, found only by Jump to.
+ * channel (the composer's), hidden from the rail an hour ago; Science and
+ * French at work with nothing waiting, in the human's order below what waits;
+ * moving house asking for five days, a pinned garden plan, and old notes idle
+ * three weeks, found only by Jump to.
  */
 const ROWS: Row[] = [
   { id: 'cmbx', name: 'cmbx chair', channel: 'cmbx', seat: true, state: 'idle', minutes: 9,
@@ -58,12 +60,19 @@ const ROWS: Row[] = [
   { id: 'mill', name: 'felt chair', channel: 'The Mill', seat: true, state: 'working', minutes: 1 },
   { id: 'mill/lander', name: 'Lander', parent: 'mill', state: 'idle', minutes: 15 },
   { id: 'score', name: 'Second movement', role: 'composer', state: 'idle', minutes: 200 },
+  { id: 'science', name: 'Science desk', channel: 'Science', seat: true, state: 'working', minutes: 12 },
+  { id: 'french', name: 'French lessons', channel: 'French', state: 'working', minutes: 90 },
   { id: 'move', name: 'Moving house', minutes: 5 * DAY, ask: 'The 12 m³ van is free on Saturday; the 20 m³ only on Sunday. Which one?' },
   { id: 'garden', name: 'Garden plan', minutes: 12 * DAY, outcome: 'Tomatoes go in after the last frost; the seed order is drafted.' },
   { id: 'old-notes', name: 'Old lensing notes', minutes: 21 * DAY },
 ]
 
-export interface ChannelsFixture { dismissed: string[]; pinned: Record<string, number>; board: Array<BoardRecord & { root: string }> }
+export interface ChannelsFixture {
+  dismissed: string[]
+  pinned: Record<string, number>
+  order: { keys: string[]; at: number } | null
+  board: Array<BoardRecord & { root: string }>
+}
 
 export function addChannelsFixtures(example: WorkspaceExample, now: number): ChannelsFixture {
   const iso = (minutes: number): string => new Date(now - minutes * 60_000).toISOString()
@@ -154,10 +163,12 @@ export function addChannelsFixtures(example: WorkspaceExample, now: number): Cha
     said('mill/lander', 'post', 15, { text: 'Landed 58bda2a3d on main.' }),
   ]
   // UNIONS was last read 45 minutes ago, so what came since sits under a New rule.
-  try { localStorage.setItem('shuttle.channels.seen:channel:UNIONS', String(ms(45))) } catch { /* The rule is a convenience. */ }
+  try { localStorage.setItem('shuttle.channels.seen:channel:unions', String(ms(45))) } catch { /* The rule is a convenience. */ }
   return {
-    dismissed: [],
+    dismissed: [`hide:channel:composer:${ms(60)}`],
     pinned: { 'fiber:garden': now - 3 * 86_400_000 },
+    // The human put French above Science, and the garden plan last.
+    order: { keys: ['channel:french', 'channel:science', 'fiber:garden'], at: ms(DAY) },
     board,
   }
 }

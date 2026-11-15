@@ -8,9 +8,11 @@ import type { KanbanCard } from '../KanbanTypes.js'
 import { boardCards, threadIndexFor } from '../KanbanSurfaces.js'
 import { isMobileViewport } from '../mobile.js'
 import {
-  channelLines, composeChannels, composeMessages, fiberOf, liveness, sameFiber, setAsideKey, threadOf, unpinKey,
+  arranged, channelLines, composeChannels, composeMessages, fiberOf, hideKey, liveness, railOrder, reordered, sameFiber, setAsideKey, showKey, threadOf, unpinKey,
   type BoardRecord, type Channel, type Line, type Message, type Tapestry,
 } from '../channels.js'
+import { createRailReorder, type RailReorder } from '../channelRail.js'
+import { openActionMenu } from '../conversationMenu.js'
 import type { SentFile } from '../sentFiles.js'
 import { stateDot } from '../stateDot.js'
 import { cardNamed } from '../threads.js'
@@ -26,6 +28,8 @@ const SEEN = 'shuttle.channels.seen:'
 const RAIL = 'shuttle.channels.rail-hidden'
 /** A pin is renewed by use at most this often; it lapses with the board's reach. */
 const RENEW_MS = 86_400_000
+/** The rail's order and its hides are written again once this old, well inside the board's reach. */
+const KEEP_MS = 7 * 86_400_000
 /** How far a finger or a trackpad must travel sideways to move between the rail, a channel and a thread. */
 const SWIPE_PX = 60
 /** A list within this many pixels of its newest message counts as following it. */
@@ -78,7 +82,9 @@ export function collapse(html: string): { title: string; lede: string } {
 
 /**
  * Channels, as Slack: a rail of the channels read lately, waiting on the human
- * or pinned (Jump to finds the rest, and the fleet's documents); a channel's
+ * or pinned, what waits floated to the top and the rest in the human's order,
+ * each movable and with a menu to hide, pin or move it (Jump to finds the rest,
+ * hidden ones too, and the fleet's documents); a channel's
  * stream, oldest first, kept short — every message of its chair, its tapestry
  * among them, and each other worker once, its wait or its latest message
  * whole with its files and a link to its thread; and beside it that thread,
@@ -126,6 +132,14 @@ export class ChannelsView implements TemporalView {
   private dismissed: string[] = []
   private pending: string[] = []
   private pinned = new Map<string, number>()
+  /** The human's order of the channels, and when it was written. */
+  private order: string[] = []
+  private orderAt = 0
+  private rail: RailReorder | null = null
+  /** The rail's entries, each made movable, undone when they are drawn again. */
+  private railBindings: Array<() => void> = []
+  /** A poll arrived while an item was picked up: the rail is drawn once it lands. */
+  private railStale = false
   private names = new Map<string, string>()
   private reachMs = 14 * 86_400_000
   private readonly feeds = new Map<string, Feed>()
@@ -172,6 +186,11 @@ export class ChannelsView implements TemporalView {
     this.stopGestures = this.gestures(page.root)
     this.sizes = new ResizeObserver(() => {
       for (const [pane, list] of [['channel', this.stream], ['thread', this.threadList]] as const) if (list && this.following[pane]) this.toFoot(list, pane)
+    })
+    this.rail = createRailReorder({
+      onOrder: keys => this.reorder(keys),
+      onMenu: (key, pick, point) => this.railMenu(key, pick, point),
+      onSettled: () => { if (this.railStale) this.drawRail() },
     })
     this.railHidden = stored(RAIL) === '1'
     this.showRail()
@@ -245,7 +264,7 @@ export class ChannelsView implements TemporalView {
     if (this.reading || !this.ctx) return
     this.reading = true
     const generation = this.generation, base = this.ctx.shuttleBase
-    const records = await getDaemonJson<{ dismissed: string[]; pinned?: Record<string, number>; reach_ms: number }>(`${base}/api/v1/channels/dismissed`)
+    const records = await getDaemonJson<{ dismissed: string[]; pinned?: Record<string, number>; order?: { keys: string[]; at: number } | null; reach_ms: number }>(`${base}/api/v1/channels/dismissed`)
       .then(value => ({ ok: true as const, value }), () => ({ ok: false as const }))
     if (generation !== this.generation) return
     this.reading = false
@@ -257,13 +276,23 @@ export class ChannelsView implements TemporalView {
       // A pin made here stands until the feed carries one as new.
       for (const [key, at] of Object.entries(records.value.pinned ?? {})) this.pinned.set(key, Math.max(at, this.pinned.get(key) ?? 0))
       for (const [key, at] of this.pinned) if (Date.now() - at > this.reachMs) this.pinned.delete(key)
+      // An order written here stands until the feed carries one as new.
+      const order = records.value.order
+      if (order && order.at >= this.orderAt) { this.order = order.keys; this.orderAt = order.at }
     }
     this.status(records.ok ? '' : 'Some channel sources are unavailable — showing the last read.')
     this.draw()
+    if (records.ok) this.keep()
     // Every channel in the rail reads its families, for what is new in it.
     this.readFamilies(this.channels.filter(channel => channel.listed || channel.key === this.current))
   }
   private status(text: string): void { if (this.note) this.note.textContent = text }
+  /** The order and the hides lapse with the board's reach, so while they stand they are written again. */
+  private keep(): void {
+    const now = Date.now()
+    if (this.order.length && now - this.orderAt > KEEP_MS) void this.writeOrder(this.order)
+    for (const channel of this.channels) if (channel.hidden && now - channel.hidden > KEEP_MS) void this.setAside(channel, hideKey(channel.key, now))
+  }
 
   /**
    * Reads each family's board records since the newest it holds (the board's
@@ -323,11 +352,16 @@ export class ChannelsView implements TemporalView {
     })().catch(() => {})
   }
 
-  /** The rail's channels: while Jump to looks for something, every channel it matches; otherwise those listed and the one being read. */
+  /**
+   * The rail's channels, what waits on the human first and then in the human's
+   * order: while Jump to looks for something, every channel it matches, hidden
+   * ones too; otherwise those listed and the one being read, unless it is hidden.
+   */
   private get listed(): Channel[] {
-    if (!this.query) return this.channels.filter(channel => channel.listed || channel.key === this.current)
+    const rail = railOrder(this.channels, this.order)
+    if (!this.query) return rail.filter(channel => channel.listed || (channel.key === this.current && !channel.hidden))
     const query = this.query.toLowerCase()
-    return this.channels.filter(channel => [channel.title, ...channel.members.flatMap(card => [card.name, card.path])].some(text => text.toLowerCase().includes(query)))
+    return rail.filter(channel => [channel.title, ...channel.members.flatMap(card => [card.name, card.path])].some(text => text.toLowerCase().includes(query)))
   }
   /** Filters the rail by what Jump to holds, from the rail's field or the bar's Find. */
   find(query: string): void {
@@ -390,7 +424,12 @@ export class ChannelsView implements TemporalView {
       if (channel) this.readFamilies([channel])
     }
     if (!focus) return
-    if (key && deliberate) this.renew(key)
+    if (key && deliberate) {
+      this.renew(key)
+      // Opening a hidden channel brings it back to the rail.
+      const channel = this.channels.find(each => each.key === key)
+      if (channel?.hidden) void this.setAside(channel, showKey(key, Date.now()))
+    }
     if (isMobileViewport()) this.setRail(true)
     this.drawRail(); this.drawChannel(); this.drawThread()
     this.channelEl?.focus({ preventScroll: true })
@@ -433,10 +472,17 @@ export class ChannelsView implements TemporalView {
   }
 
   private drawRail(): void {
-    const list = this.list!
+    const list = this.list!, rail = this.rail!, listed = this.listed
+    rail.set(listed.map(channel => channel.key))
+    // Nothing is rebuilt under an item picked up; it is drawn once it lands.
+    this.railStale = rail.moving
+    if (rail.moving) return
+    for (const unbind of this.railBindings) unbind()
+    this.railBindings = []
     const items: HTMLLIElement[] = []
-    for (const channel of this.listed) {
+    for (const channel of listed) {
       const item = el('li', 'kbn-ch-rail-item')
+      item.toggleAttribute('data-waiting', channel.waiting)
       const pick = button('kbn-ch-pick', '', () => { this.find(''); this.open(channel.key, true) })
       pick.dataset.channel = channel.key
       pick.dataset.item = `channel:${channel.key}`
@@ -444,6 +490,7 @@ export class ChannelsView implements TemporalView {
       pick.toggleAttribute('data-unread', channel.key !== this.current && this.newestSaid(channel) > lastSeen(channel.key))
       pick.toggleAttribute('data-waiting', channel.waiting)
       pick.append(el('span', 'kbn-ch-pick-hash', channel.chaired ? '#' : '·'), el('span', 'kbn-ch-pick-name', channel.name))
+      if (channel.hidden) pick.append(el('span', 'kbn-ch-pick-hidden', 'hidden'))
       if (channel.waiting) {
         const mark = el('span', 'kbn-ch-pick-mark')
         mark.title = 'Waiting on you'
@@ -451,8 +498,11 @@ export class ChannelsView implements TemporalView {
       }
       pick.title = channel.waiting ? `${channel.title} — waiting on you` : channel.title
       if (channel.key === this.current) pick.setAttribute('aria-current', 'true')
+      pick.setAttribute('aria-haspopup', 'menu')
       item.append(pick)
       items.push(item)
+      // What waits on the human stays on top, and Jump to's matches are not the rail's order.
+      this.railBindings.push(rail.attach(pick, channel.key, channel.waiting || !!this.query))
     }
     if (this.query && !items.length) items.push(el('li', 'kbn-ch-hush kbn-ch-none', 'No channel matches.'))
     // A poll redraws the rail: the channel that had focus keeps it.
@@ -508,9 +558,9 @@ export class ChannelsView implements TemporalView {
       const chair = el('span', 'kbn-ch-chair', channel.seat.name)
       chair.title = 'Its chair: a reply here goes to it'
       const acts = el('span', 'kbn-ch-head-acts')
-      if (channel.waiting) acts.append(button('kbn-ch-act kbn-ch-later', 'Not now', () => { void this.setAside(setAsideKey(channel)) }))
+      if (channel.waiting) acts.append(button('kbn-ch-act kbn-ch-later', 'Not now', () => { void this.setAside(channel, setAsideKey(channel)) }))
       acts.append(channel.pinned
-        ? button('kbn-ch-act kbn-ch-unpin', 'Unpin', () => { void this.setAside(unpinKey(channel.key, Date.now())) })
+        ? button('kbn-ch-act kbn-ch-unpin', 'Unpin', () => { void this.setAside(channel, unpinKey(channel.key, Date.now())) })
         : button('kbn-ch-act kbn-ch-pin', 'Pin', () => { void this.pin(channel); this.draw() }))
       this.head.replaceChildren(back, name, chair, acts)
       this.fill(this.stream, lines, 'channel', channel, now)
@@ -761,10 +811,10 @@ export class ChannelsView implements TemporalView {
       return false
     }
   }
-  /** Writes a set-aside (the waiting mark clears) or an unpin, and restores it when the write fails. */
-  private async setAside(key: string): Promise<void> {
-    const channel = this.channel, ctx = this.ctx
-    if (!channel || !ctx) return
+  /** Writes a channel's set-aside (the waiting mark clears), unpin, hide or show, and restores it when the write fails. */
+  private async setAside(channel: Channel, key: string): Promise<void> {
+    const ctx = this.ctx
+    if (!ctx) return
     this.pending.push(key)
     if (key.startsWith('pin:')) this.pinned.delete(channel.key)
     this.draw()
@@ -773,7 +823,43 @@ export class ChannelsView implements TemporalView {
     } catch {
       this.pending = this.pending.filter(item => item !== key)
       this.draw()
-      this.status(`${channel.name} could not be ${key.startsWith('pin:') ? 'unpinned' : 'set aside'}; it is as it was.`)
+      const done = ({ pin: 'unpinned', hide: 'hidden', show: 'brought back' } as Record<string, string>)[key.split(':')[0]] ?? 'set aside'
+      this.status(`${channel.name} could not be ${done}; it is as it was.`)
+    }
+  }
+  /** A rail entry's menu: hide or bring back, pin or unpin, move to the bottom. */
+  private railMenu(key: string, pick: HTMLElement, point?: { x: number; y: number }): void {
+    const channel = this.channels.find(each => each.key === key)
+    if (!channel) return
+    const now = Date.now()
+    openActionMenu(pick, [
+      channel.hidden
+        ? { label: 'Unhide', run: () => { void this.setAside(channel, showKey(key, now)) } }
+        : { label: 'Hide', run: () => { void this.setAside(channel, hideKey(key, now)); announce(`${channel.name} hidden; Jump to finds it.`) } },
+      channel.pinned
+        ? { label: 'Unpin', run: () => { void this.setAside(channel, unpinKey(key, now)) } }
+        : { label: 'Pin', run: () => { void this.pin(channel); this.draw() } },
+      { label: 'Move to bottom', run: () => { void this.writeOrder([...this.arrangement().filter(each => each !== key), key]) } },
+    ], channel.name, point)
+  }
+  /** Every channel's key in the human's order. */
+  private arrangement(): string[] { return arranged(this.channels, this.order).map(channel => channel.key) }
+  /** A move landed in the rail: the channels it shows that do not wait take the order they were dropped in. */
+  private reorder(keys: string[]): void {
+    const waiting = new Set(this.channels.filter(channel => channel.waiting).map(channel => channel.key))
+    void this.writeOrder(reordered(this.arrangement(), keys.filter(key => !waiting.has(key))))
+  }
+  /** Keeps the human's order here at once and across the fleet once the daemon has it. */
+  private async writeOrder(keys: string[]): Promise<void> {
+    const ctx = this.ctx
+    if (!ctx) return
+    this.order = keys
+    this.orderAt = Date.now()
+    this.drawRail()
+    try {
+      await postDaemonJson(ctx.shuttleBase, '/api/v1/channels/order', { keys }, 'Order failed')
+    } catch (error) {
+      this.status(`The channels' order is kept here only: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
   /** Pins a channel across the fleet; use renews it, and it lapses with the board's reach. */
@@ -906,6 +992,8 @@ export class ChannelsView implements TemporalView {
   }
 
   keydown(event: KeyboardEvent): boolean {
+    // An item picked up in the rail owns the keys until it lands.
+    if (this.rail?.moving) return true
     if (event.metaKey || event.ctrlKey || event.altKey) return false
     const active = document.activeElement as HTMLElement | null
     const replying = active === this.channelReply?.text || active === this.threadReply?.text
@@ -937,6 +1025,9 @@ export class ChannelsView implements TemporalView {
     this.unsubscribeLibrary?.(); this.unsubscribeLibrary = undefined
     this.stopGestures?.(); this.stopGestures = undefined
     this.sizes?.disconnect(); this.sizes = null
+    for (const unbind of this.railBindings) unbind()
+    this.railBindings = []
+    this.rail?.destroy(); this.rail = null
     this.reading = false
     this.ctx = null
     this.layout = this.channelEl = this.head = this.note = this.threadEl = this.threadHead = null

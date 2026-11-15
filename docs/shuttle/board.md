@@ -211,15 +211,19 @@ data while Chronicle is closed.
 
 ## Channels — where the work talks to you
 
-Hotkey `3` opens Channels, which reads like Slack. A constitution speaks in its own `shuttle.channel`, else in its orchestrator's; without one anywhere above it, the channel is its top-level constitution's office, or that top-level alone, drawn quieter at the foot of the rail.
+Hotkey `3` opens Channels, which reads like Slack. A constitution speaks in its own `shuttle.channel`, else in its orchestrator's; without one anywhere above it, the channel is its top-level constitution's office, or that top-level alone, drawn quieter in the rail.
 A channel's chair is its topmost seat, a non-standing one first, then the most recently active; without a seat, its most recently active top-level. The chair's tapestry is posted into the channel, and a reply in the channel goes to the chair.
 
 A channel is a stream, oldest first, kept short: every message of its chair, its tapestry among them (title and lede, read whole in place with **Read it here**), the replies you sent it, and each other worker once — what waits on you from it, else the latest thing it said — whole, with the files it attached or sent beside it and a link to its thread, **N replies · last …**. A worker that has said nothing is not in it. What arrived since your last visit sits under a **New** rule.
 A message opens its worker's thread, beside the stream on a desktop and over it on a phone: its name (opening its page), its liveness (working, waiting, resting or closed), its open question, or once it is closed, its outcome as its conclusion; then its whole history from the family board — its posts, asks, files, hand-offs and closes, what other workers wrote to it, and your replies, including your chat in its terminal. A reply in the thread goes to that worker.
 **Not now** clears a channel's waiting mark until something newer waits in it; **Pin** keeps a channel in the rail, and **Unpin** lets it go.
 
-The rail lists the channels waiting on you (a dot), pinned, or opened or active in the last week, the chaired ones by name, then the lone constitutions; a channel with something new since you read it is bold.
-**Jump to** at its top (`/`, or the bar's Find) finds any channel by its name or its members' names and paths, and lists every sent document it matches, from any fiber; opening a channel found brings it back to the rail.
+The rail lists the channels waiting on you (a dot), pinned, or opened or active in the last week; a channel with something new since you read it is bold.
+What waits on you floats to the top, the newest wait first; everything else follows in your order.
+Drag a channel to move it (on a phone, hold it still, then drag), or focus it and press Alt+↑ or Alt+↓.
+Right-click a channel, hold it and lift, or press the context-menu key or Shift+F10 on it for its menu: **Hide** takes it out of the rail until something new waits in it, **Pin** or **Unpin**, and **Move to bottom**.
+The order and the hides are kept by the daemon (`shuttle channels order` and `dismiss`), so every screen agrees.
+**Jump to** at its top (`/`, or the bar's Find) finds any channel by its name or its members' names and paths, hidden ones too, marked so, and lists every sent document it matches, from any fiber; opening a channel found brings it back to the rail.
 `[`, the rail's button, or a sideways swipe hides and shows the rail; on a phone the rail is the first screen, a channel and a thread each fill it, and a swipe or the back link returns.
 Documents of a fiber the board does not hold are read from their owner; a fiber its owner confirms missing files its documents under **Unfiled** on their byte-owning host, and an unreachable owner does not count as a missing fiber.
 

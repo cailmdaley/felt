@@ -32,7 +32,7 @@ const BOARD: Record<string, BoardRecord[]> = {
 }
 
 /** A daemon that answers the Channels view's reads, records its writes, and fails the ones `fail` names. */
-function daemon(fail: string[] = [], stored = new Map<string, string>(), pinned: Record<string, number> = {}, answer: Record<string, unknown> = { ok: true, delivered: true }) {
+function daemon(fail: string[] = [], stored = new Map<string, string>(), pinned: Record<string, number> = {}, kept: { dismissed?: string[]; order?: { keys: string[]; at: number } } = {}) {
   const posts: Array<[string, Record<string, unknown>]> = [], families: string[] = []
   vi.stubGlobal('localStorage', { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value) })
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
@@ -41,7 +41,7 @@ function daemon(fail: string[] = [], stored = new Map<string, string>(), pinned:
       if (fail.some(path => url.endsWith(path))) return new Response('{"error":"disk full"}', { status: 422 })
       return new Response(JSON.stringify(answer))
     }
-    if (url.includes('/channels/dismissed')) return new Response(JSON.stringify({ dismissed: [], pinned, reach_ms: 14 * day }))
+    if (url.includes('/channels/dismissed')) return new Response(JSON.stringify({ dismissed: kept.dismissed ?? [], pinned, order: kept.order ?? null, reach_ms: 14 * day }))
     if (url.includes('/board/family')) {
       const params = new URL(url, 'http://test').searchParams
       families.push(params.get('fiber')!)
@@ -78,7 +78,7 @@ const stream = (host: HTMLElement) => [...host.querySelectorAll('.kbn-ch .kbn-ch
 const message = (host: HTMLElement, name: string) => [...host.querySelectorAll<HTMLElement>('.kbn-ch .kbn-ch-msg')].find(el => el.querySelector('.kbn-ch-msg-name')?.textContent === name)!
 const to = (form: number, host: HTMLElement) => host.querySelectorAll('.kbn-ch-reply-to')[form]?.textContent
 
-it('lists the recent channels, chaired first, and reads a channel as a short stream: each worker once, the chair in full', async () => {
+it('lists the recent channels, the newest wait first, and reads a channel as a short stream: each worker once, the chair in full', async () => {
   const { families } = daemon()
   const { view, host, see } = await mount()
   expect(rail(host)).toStrictEqual(['cmbx', 'Moving house'])
@@ -249,6 +249,76 @@ it('jumps to a channel the rail no longer lists, and to the fleet\'s documents; 
   const again = await mount(undefined, new ChannelsView())
   expect(rail(again.host)).toStrictEqual(['cmbx', 'Moving house', 'Old notes'])
   expect(again.host.querySelector<HTMLInputElement>('.kbn-ch-jump')!.value).toBe('')
+})
+
+it('floats what waits above the human\'s order, and moves a channel by Alt and the arrows, by its menu and to the bottom', async () => {
+  const science = card({ id: 'science', uid: 'S', name: 'Science desk', shuttleChannel: 'Science', ...working(3) })
+  const french = card({ id: 'french', uid: 'F', name: 'French lessons', shuttleChannel: 'French', ...working(4) })
+  const { posts } = daemon([], undefined, {}, { order: { keys: ['channel:science', 'channel:french'], at: Date.now() - day } })
+  const { view, ctx, host } = await mount([chair, tsz, mask, beam, van, notes, science, french])
+  // What waits on the human first, its newest wait first; then the stored order.
+  expect(rail(host)).toStrictEqual(['cmbx', 'Moving house', 'Science', 'French'])
+  const pick = (name: string) => [...host.querySelectorAll<HTMLButtonElement>('.kbn-ch-pick')].find(el => el.querySelector('.kbn-ch-pick-name')?.textContent === name)!
+  const press = (name: string, key: string, over: KeyboardEventInit = {}) => pick(name).dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...over }))
+  press('Science', 'ArrowDown', { altKey: true })
+  await settle()
+  // Every channel's place is written, the ones out of the rail and the waiting ones keeping theirs.
+  expect(posts.at(-1)).toStrictEqual(['/api/v1/channels/order', { keys: ['channel:cmbx', 'fiber:R', 'fiber:N', 'channel:french', 'channel:science'] }])
+  expect(rail(host)).toStrictEqual(['cmbx', 'Moving house', 'French', 'Science'])
+  // Nothing moves above what waits, and a waiting channel does not move at all.
+  press('French', 'ArrowUp', { altKey: true })
+  press('cmbx', 'ArrowDown', { altKey: true })
+  await settle()
+  expect(posts.filter(([url]) => url.endsWith('/order'))).toHaveLength(1)
+  // The context-menu key opens the entry's menu; Move to bottom puts it last.
+  press('French', 'ContextMenu')
+  await settle()
+  const items = () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+  expect(items().map(item => item.textContent)).toStrictEqual(['Hide', 'Pin', 'Move to bottom'])
+  items()[2].click()
+  await settle()
+  expect(posts.at(-1)).toStrictEqual(['/api/v1/channels/order', { keys: ['channel:cmbx', 'fiber:R', 'fiber:N', 'channel:science', 'channel:french'] }])
+  expect(rail(host)).toStrictEqual(['cmbx', 'Moving house', 'Science', 'French'])
+  // A poll keeps the order written here until the feed carries a newer one.
+  view.refresh(ctx); await settle()
+  expect(rail(host)).toStrictEqual(['cmbx', 'Moving house', 'Science', 'French'])
+})
+
+it('hides a channel by its menu; Jump to finds it, marked, and opening it brings it back', async () => {
+  const { posts } = daemon()
+  const { view, host } = await mount()
+  const pick = (name: string) => [...host.querySelectorAll<HTMLButtonElement>('.kbn-ch-pick')].find(el => el.querySelector('.kbn-ch-pick-name')?.textContent === name)!
+  pick('Moving house').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 30 }))
+  await settle()
+  ;[...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Hide')!.click()
+  await settle()
+  expect(posts.at(-1)?.[0]).toBe('/api/v1/channels/dismiss')
+  expect(posts.at(-1)?.[1]).toMatchObject({ key: expect.stringMatching(/^hide:fiber:R:\d+$/), fiber: 'R' })
+  expect(rail(host)).toStrictEqual(['cmbx'])
+  view.find('mov')
+  expect(rail(host)).toStrictEqual(['Moving house'])
+  expect(pick('Moving house').querySelector('.kbn-ch-pick-hidden')?.textContent).toBe('hidden')
+  // Its menu offers to bring it back.
+  pick('Moving house').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 30 }))
+  await settle()
+  expect([...document.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toStrictEqual(['Unhide', 'Pin', 'Move to bottom'])
+  ;(document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+  await settle()
+  expect(document.querySelector('[role="menu"]')).toBeNull()
+  pick('Moving house').click()
+  await settle()
+  expect(posts.at(-1)?.[1]).toMatchObject({ key: expect.stringMatching(/^show:fiber:R:\d+$/) })
+  expect(rail(host)).toStrictEqual(['cmbx', 'Moving house'])
+})
+
+it('brings a hidden channel back by itself when something in it begins waiting after the hide', async () => {
+  daemon([], undefined, {}, { dismissed: [`hide:fiber:R:${Date.now() - 15 * minute}`] })
+  const { view, ctx, host } = await mount()
+  // The van asked ten minutes ago, after the hide.
+  expect(rail(host)).toStrictEqual(['cmbx', 'Moving house'])
+  daemon([], undefined, {}, { dismissed: [`hide:fiber:R:${Date.now() - 5 * minute}`] })
+  view.refresh(ctx); await settle(); await settle()
+  expect(rail(host)).toStrictEqual(['cmbx'])
 })
 
 it('marks unread channels bold, and rules off what arrived since the last visit', async () => {

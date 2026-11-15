@@ -86,7 +86,9 @@ export interface Channel {
   /** Its members' latest activity. */
   active: number
   pinned: boolean
-  /** In the rail: waiting, pinned, or opened or active within {@link RECENT_MS}. */
+  /** When it was taken out of the rail, nothing having begun waiting in it since; 0 when it is not hidden. */
+  hidden: number
+  /** In the rail: not hidden, and waiting, pinned, or opened or active within {@link RECENT_MS}. */
   listed: boolean
 }
 
@@ -99,6 +101,10 @@ export const ATTACH_MS = 10 * 60_000
 export const setAsideKey = (channel: Pick<Channel, 'key' | 'newest'>): string => `office:${channel.key}:${channel.newest}`
 /** The dismissal record that unpins a channel: every pin up to `at` stops counting. */
 export const unpinKey = (key: string, at: number): string => `pin:${key}:${at}`
+/** The dismissal record that takes a channel out of the rail at `at`, until something begins waiting in it later. */
+export const hideKey = (key: string, at: number): string => `hide:${key}:${at}`
+/** The dismissal record that brings a hidden channel back: every hide up to `at` stops counting. */
+export const showKey = (key: string, at: number): string => `show:${key}:${at}`
 
 /** Constitutions a channel speaks for: everything not archived. */
 const LIVE: readonly ThreadState[] = ['waiting', 'to-review', 'with-orchestrator', 'working', 'drafts', 'roles', 'resting']
@@ -131,7 +137,8 @@ export function waitsSince(card: KanbanCard): number {
  * A card speaks in its own `shuttle.channel`, else its nearest ancestor's;
  * without one anywhere above it, its top-level constitution's office names
  * the channel, else that top-level is a channel of its own. A pin counts
- * until a later unpin; a set-aside clears the waiting mark until a later wait.
+ * until a later unpin; a set-aside clears the waiting mark until a later wait;
+ * a hide counts until a later show or a later wait.
  */
 export function composeChannels(input: {
   cards: readonly KanbanCard[]
@@ -187,13 +194,15 @@ export function composeChannels(input: {
     group.everyone.push(card)
     if (LIVE.includes(threadState(card))) group.members.push(card)
   }
-  // `office:<key>:<ms>` clears a channel's waiting mark until something waits after <ms>; `pin:<key>:<ms>` unpins the pins up to <ms>.
-  const setAside = new Map<string, number>(), unpinned = new Map<string, number>()
+  // `office:<key>:<ms>` clears a channel's waiting mark until something waits after <ms>; `pin:<key>:<ms>` unpins the pins up to <ms>;
+  // `hide:<key>:<ms>` takes it out of the rail until something waits after <ms>; `show:<key>:<ms>` voids the hides up to <ms>.
+  const latest: Record<string, Map<string, number>> = { office: new Map(), pin: new Map(), hide: new Map(), show: new Map() }
   for (const record of dismissed) {
-    const match = /^(office|pin):(.+):(\d+)$/.exec(record)
-    const into = match?.[1] === 'office' ? setAside : unpinned
-    if (match) into.set(match[2], Math.max(into.get(match[2]) ?? 0, Number(match[3])))
+    const match = /^(office|pin|hide|show):(.+):(\d+)$/.exec(record)
+    const into = match && latest[match[1]]
+    if (into) into.set(match[2], Math.max(into.get(match[2]) ?? 0, Number(match[3])))
   }
+  const since = (kind: string, key: string): number => latest[kind].get(key) ?? -Infinity
   const recent = (list: KanbanCard[]): KanbanCard | undefined => [...list].sort((a, b) => lastActive(b) - lastActive(a))[0]
   const channels: Channel[] = []
   for (const [key, { members, everyone }] of groups) {
@@ -209,17 +218,45 @@ export function composeChannels(input: {
     const seat = recent(seats.filter(card => card.shuttleKind !== 'standing')) ?? recent(seats) ?? recent(heads) ?? recent(members)!
     const newest = Math.max(0, ...members.map(waitsSince))
     const active = Math.max(0, ...members.map(lastActive))
-    const isPinned = (pinned.get(key) ?? -Infinity) > (unpinned.get(key) ?? -Infinity)
-    const waiting = newest > 0 && (setAside.get(key) ?? -Infinity) < newest
+    const isPinned = (pinned.get(key) ?? -Infinity) > since('pin', key)
+    const waiting = newest > 0 && since('office', key) < newest
+    const hidden = since('hide', key) > Math.max(since('show', key), newest) ? since('hide', key) : 0
     const title = titles.get(key) || seat.name
     channels.push({
       key, name: title.split(' · ')[0], title, chaired: !key.startsWith('fiber:'), seat, members, everyone,
       families: [...new Set(members.map(card => fiberOf(topOf(card))))],
-      newest, waiting, active, pinned: isPinned,
-      listed: waiting || isPinned || now - Math.max(active, opened(key)) <= RECENT_MS,
+      newest, waiting, active, pinned: isPinned, hidden,
+      listed: !hidden && (waiting || isPinned || now - Math.max(active, opened(key)) <= RECENT_MS),
     })
   }
   return channels.sort((a, b) => Number(b.chaired) - Number(a.chaired) || a.name.localeCompare(b.name))
+}
+
+/**
+ * Every channel in the human's order: those the order does not name first, as
+ * given, then the order's.
+ */
+export function arranged(channels: readonly Channel[], order: readonly string[]): Channel[] {
+  const place = new Map(order.map((key, index) => [key, index]))
+  const rank = (channel: Channel): number => place.get(channel.key) ?? -1
+  return [...channels].sort((a, b) => rank(a) - rank(b))
+}
+
+/** The rail's order: what waits on the human first, the newest wait first, then everything else in the human's order. */
+export function railOrder(channels: readonly Channel[], order: readonly string[]): Channel[] {
+  const all = arranged(channels, order)
+  return [...all.filter(channel => channel.waiting).sort((a, b) => b.newest - a.newest), ...all.filter(channel => !channel.waiting)]
+}
+
+/**
+ * The human's order once the channels `shown` were rearranged among
+ * themselves: each place they held in `order` takes the next of them, and
+ * every other channel (waiting, hidden or out of the rail) keeps its place.
+ */
+export function reordered(order: readonly string[], shown: readonly string[]): string[] {
+  const moving = new Set(shown)
+  let next = 0
+  return order.map(key => moving.has(key) ? shown[next++] : key)
 }
 
 /** Lifecycle lines a thread keeps, by what they say. */
