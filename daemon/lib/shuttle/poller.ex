@@ -632,6 +632,24 @@ defmodule Shuttle.Poller do
     end
   end
 
+  @doc """
+  Whether a session may start now for `fiber_id`'s inbox: `:ok`, or
+  `{:error, :running}` while a worker is tracked, `{:error, :held}` while the
+  boot quarantine or a contract skew holds fresh launches (the fiber is then
+  parked and drawn as held until the hold comes off), `{:error, :full}` while
+  the host runs as many workers as it allows,
+  `{:error, :reconciliation_required}`, or `{:error, :busy}` when the Poller
+  does not answer in time. In memory only; the launch itself is
+  `dispatch_fiber/3` with `inbox: true`, which checks again against a fresh
+  read of the fiber (`Shuttle.Delivery.inbox_gate/2`).
+  """
+  @spec admit_inbox_launch(GenServer.server(), String.t()) :: :ok | {:error, atom()}
+  def admit_inbox_launch(server \\ Shuttle.Env.server(__MODULE__), fiber_id) do
+    GenServer.call(server, {:admit_inbox_launch, fiber_id}, dispatch_call_timeout_ms())
+  catch
+    :exit, {:timeout, _} -> {:error, :busy}
+  end
+
   @spec dispatch_fiber(String.t(), keyword()) :: {:ok, String.t()} | {:error, atom()}
   def dispatch_fiber(fiber_id, opts \\ []),
     do: dispatch_fiber(Shuttle.Env.server(__MODULE__), fiber_id, opts)
@@ -1366,6 +1384,7 @@ defmodule Shuttle.Poller do
       {:refresh_created_document, _, _} -> true
       {:lifecycle_transition, _, _, _} -> true
       {:dispatch, _, _} -> true
+      {:admit_inbox_launch, _} -> true
       {:claim_session, _, _, _} -> true
       {:migrate, _, _, _} -> true
       {:kill_session, _} -> true
@@ -2357,6 +2376,15 @@ defmodule Shuttle.Poller do
   defp transition_call({:dispatch, _, _}, _from, %{reconciliation_hold: hold} = state)
        when not is_nil(hold),
        do: {:reply, {:error, :reconciliation_required}, state}
+
+  defp transition_call({:admit_inbox_launch, fiber_id}, _from, state) do
+    {runtime_key, fiber_id} = resolve_identity(state, fiber_id)
+
+    case inbox_admission(state, fiber_id, runtime_key) do
+      {:ok, state} -> {:reply, :ok, state}
+      {:error, reason, state} -> {:reply, {:error, reason}, state}
+    end
+  end
 
   defp transition_call({:dispatch, fiber_id, opts}, _from, state) do
     case fetch_request_fiber(fiber_id, state) do
@@ -3612,6 +3640,12 @@ defmodule Shuttle.Poller do
                 StandingRoles.standing_role_due?(fiber)))
       end)
 
+    inbox =
+      for {key, %{inbox: true} = entry} <- state.parked_launches,
+          not Map.has_key?(state.running, key),
+          into: %{},
+          do: {key, entry}
+
     parked =
       Map.new(fresh, fn fiber ->
         key = runtime_key_for_fiber(fiber)
@@ -3621,7 +3655,7 @@ defmodule Shuttle.Poller do
            %{fiber_id: fiber_address(fiber), uid: metadata_uid(fiber), parked_at: now}}
       end)
 
-    {resume, %{state | parked_launches: parked}}
+    {resume, %{state | parked_launches: Map.merge(inbox, parked)}}
   end
 
   # A STANDING (cron-driven) constitution's exit concludes its run and leaves it
@@ -4095,14 +4129,20 @@ defmodule Shuttle.Poller do
     uid = resolved_uid(state, fiber_id, runtime_key)
 
     preparation =
-      if Keyword.get(opts, :existing_only, false) do
-        if Keyword.get(opts, :resume_mode) == "previous" and
-             is_binary(Keyword.get(opts, :user_message)) and
-             is_binary(live_tmux_session(state, fiber_id, uid)),
-           do: {:ok, state},
-           else: {:error, :no_live_worker, state}
-      else
-        prepare_dispatch_start(state, fiber_id, runtime_key, uid, opts)
+      cond do
+        Keyword.get(opts, :existing_only, false) ->
+          if Keyword.get(opts, :resume_mode) == "previous" and
+               is_binary(Keyword.get(opts, :user_message)) and
+               is_binary(live_tmux_session(state, fiber_id, uid)),
+             do: {:ok, state},
+             else: {:error, :no_live_worker, state}
+
+        Keyword.get(opts, :inbox, false) ->
+          with {:ok, state} <- admit_inbox_dispatch(state, fiber_id, runtime_key),
+               do: prepare_dispatch_start(state, fiber_id, runtime_key, uid, opts)
+
+        true ->
+          prepare_dispatch_start(state, fiber_id, runtime_key, uid, opts)
       end
 
     case preparation do
@@ -4119,6 +4159,55 @@ defmodule Shuttle.Poller do
       {:error, reason, state} ->
         {:reply, {:error, reason}, state}
     end
+  end
+
+  # A session for a fiber's inbox starts as a forced start does, but only
+  # where a non-human entry may start one: nothing is tracked, no hold is on,
+  # and a fresh read of the fiber passes `Shuttle.Delivery.inbox_gate/2`, so a
+  # fiber closed or put to rest since the caller looked is never reopened.
+  defp admit_inbox_dispatch(state, fiber_id, runtime_key) do
+    with {:ok, state} <- inbox_admission(state, fiber_id, runtime_key) do
+      with {:ok, fiber} <- fetch_fiber_full(fiber_id, state),
+           :ok <- Shuttle.Delivery.inbox_gate(fiber, state.own_host_id) do
+        {:ok, state}
+      else
+        {:error, reason} -> {:error, reason, state}
+      end
+    end
+  end
+
+  defp inbox_admission(state, fiber_id, runtime_key) do
+    cond do
+      tracked?(state, fiber_id, runtime_key) ->
+        {:error, :running, state}
+
+      not is_nil(state.reconciliation_hold) ->
+        {:error, :reconciliation_required, state}
+
+      state.boot_quarantine or not state.contract_check.ok ->
+        {:error, :held, park_inbox_launch(state, fiber_id, runtime_key)}
+
+      available_slots(state) <= 0 ->
+        {:error, :full, state}
+
+      true ->
+        {:ok, state}
+    end
+  end
+
+  # A held inbox launch is drawn as parked, like the fresh autonomous work the
+  # same hold keeps back, and stays parked across polls until the hold comes
+  # off or a worker starts (`note_running/2`).
+  defp park_inbox_launch(state, fiber_id, runtime_key) do
+    parked =
+      Map.put_new(state.parked_launches, runtime_key, %{
+        fiber_id: fiber_id,
+        uid: if(runtime_key != fiber_id, do: runtime_key),
+        parked_at: DateTime.utc_now(),
+        inbox: true
+      })
+
+    %{state | parked_launches: parked}
   end
 
   defp prepare_dispatch_start(state, fiber_id, runtime_key, uid, opts) do

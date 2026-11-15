@@ -1041,7 +1041,7 @@
                   },
                   "context_only": {
                     "type": "boolean",
-                    "description": "Queues text in the fiber's context mailbox for its live or next worker instead of messaging or launching. Requires message_id; answers 202 with delivery context."
+                    "description": "Queues text in the fiber's inbox instead of messaging the worker or launching with the text. Requires message_id; answers 202 with delivery context."
                   },
                   "message_id": {
                     "type": "string",
@@ -1049,11 +1049,19 @@
                   },
                   "wake": {
                     "type": "boolean",
-                    "description": "With context_only: also starts a turn on a live worker (in a fresh session when that worker is at rest and costly to wake). Defaults to false, unlike /messages. Ignored without context_only."
+                    "description": "With context_only: the entry asks for a turn, as turn ask. Defaults to false, unlike /messages. Ignored without context_only."
+                  },
+                  "turn": {
+                    "type": "string",
+                    "enum": [
+                      "ask",
+                      "force"
+                    ],
+                    "description": "With context_only: the entry asks for a turn. A live worker is woken (ask may be held as context when waking it is costly, or replaced by a fresh session); a fiber with no worker is started for it when it is open or active, not at rest, not a paused or due standing schedule, and the owner holds no boot quarantine. Ignored without context_only."
                   },
                   "unless_live": {
                     "type": "boolean",
-                    "description": "With context_only: when the fiber has a live worker, answers 409 with live true and queues nothing; otherwise the queued answer carries status queued_for_next_worker."
+                    "description": "With context_only: when the fiber has a live worker, answers 409 with live true and queues nothing."
                   },
                   "resume_mode": {
                     "type": "string",
@@ -3267,7 +3275,15 @@
             "type": "string"
           },
           "status": {
-            "const": "queued_for_next_worker"
+            "type": "string",
+            "enum": [
+              "queued",
+              "starting"
+            ],
+            "description": "starting: the fiber had no worker and a session is starting that takes the entry through its hook. queued: the entry waits in the inbox; detail says for what when it asked for a turn."
+          },
+          "detail": {
+            "type": "string"
           }
         },
         "required": [

@@ -345,7 +345,7 @@ defmodule ShuttleWeb.ApiContractWorkerTest do
                202
              )
 
-    assert %{"status" => "queued_for_next_worker"} =
+    assert %{"status" => "queued"} =
              request(
                "/deliver",
                %{

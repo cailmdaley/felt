@@ -962,12 +962,12 @@ defmodule Shuttle.Threads do
     capture_unblocks(entries, own_host)
     retry_results(own_host, entries)
 
-    # A parent can receive remote results while dormant. Its next live worker
-    # drains the same mailbox, even when no child changes during this poll.
-    Enum.each(entries, fn entry ->
-      if get_in(entry.fiber, ["shuttle", "host"]) == own_host,
-        do: Delivery.flush_context(entry)
-    end)
+    # A parent can receive remote results while dormant: its live worker takes
+    # them on this poll, and a dormant one is started for a waking result when
+    # it may be, even when no child changes during this poll.
+    entries
+    |> Enum.filter(&(get_in(&1.fiber, ["shuttle", "host"]) == own_host))
+    |> Delivery.flush_owned()
   end
 
   @doc """
@@ -1199,7 +1199,7 @@ defmodule Shuttle.Threads do
   defp told?({:error, status, _}) when status in 400..499, do: true
   defp told?(_), do: false
 
-  defp acknowledged?({:ok, :queued}), do: true
+  defp acknowledged?({:ok, _queued}), do: true
 
   defp acknowledged?({:forwarded, 202, body}) do
     case Jason.decode(body) do

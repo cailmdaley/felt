@@ -27,8 +27,8 @@ defmodule Shuttle.ThreadReceiverTest do
 
       cond do
         Shuttle.Env.app(:receiver_wake_stub, false) and
-          match?(["inbox", "consume" | _], args) and "--idle" in args and
-            "--costly" not in args ->
+          match?(["inbox", "consume" | _], args) and
+          ("--idle" in args or "--unknown" in args) and "--costly" not in args ->
           {~s({"action":"wake"}), 0}
 
         Shuttle.Env.app(:receiver_runtime_write_fails, false) and "mark-runtime" in args ->
@@ -635,7 +635,7 @@ defmodule Shuttle.ThreadReceiverTest do
     refute_receive {:inbox_command, _}, 100
   end
 
-  test "a worker whose turn no hook reported is woken without a cost check", context do
+  test "a worker whose turn no hook reported is woken for ask without a cost check", context do
     {poller, parent} = costly_consumer!(context)
     Env.put_app_env(:waiting_phases_source, fn -> %{} end)
     assert Poller.worker_turn(poller, "hub") == :unknown
@@ -643,11 +643,11 @@ defmodule Shuttle.ThreadReceiverTest do
     Env.put_app_env(:receiver_wake_stub, true)
     assert {:ok, %{"action" => "wake"}} = Delivery.flush_context(parent)
     assert_receive {:inbox_command, ["inbox", "consume", _, _, _]}
-    assert_receive {:inbox_command, ["inbox", "consume", _, _, _, "--idle"]}
+    assert_receive {:inbox_command, ["inbox", "consume", _, _, _, "--unknown"]}
     refute_receive {:inbox_command, _}, 100
   end
 
-  test "an idle worker with an open task is woken without a cost check", context do
+  test "an idle worker with an open task is woken for ask without a cost check", context do
     {poller, parent} = costly_consumer!(context)
     tasks = Path.join(context.tmp_dir, "claude-tasks")
     Env.put_env("SHUTTLE_CLAUDE_TASKS_DIR", tasks)
@@ -663,7 +663,7 @@ defmodule Shuttle.ThreadReceiverTest do
     Env.put_app_env(:receiver_wake_stub, true)
     assert {:ok, %{"action" => "wake"}} = Delivery.flush_context(parent)
     assert_receive {:inbox_command, ["inbox", "consume", _, _, _]}
-    assert_receive {:inbox_command, ["inbox", "consume", _, _, _, "--idle"]}
+    assert_receive {:inbox_command, ["inbox", "consume", _, _, _, "--unknown"]}
     refute_receive {:inbox_command, _}, 100
   end
 

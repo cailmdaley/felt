@@ -22,7 +22,7 @@ defmodule Shuttle.Contract do
   require Logger
 
   # Matches internal/shuttlecli/contract.go's ShuttleContractLevel.
-  @expected_level 39
+  @expected_level 40
 
   # The daemon-shelled surface each recent level introduced. A skew reason
   # names every surface above the CLI's level, so an operator sees which verb
@@ -57,7 +57,11 @@ defmodule Shuttle.Contract do
       "conclude-run (standing runs re-arm on exit); reopen --occurrence and --conclude-run and accept removed",
     37 => "close --review (a thread marked for the human's review)",
     38 => "inbox put/pending/ls (one writer for every inbox entry, with delivery wishes)",
-    39 => "inbox consume and context-mailbox put --turn/--derived (live-worker batch consumption)"
+    39 =>
+      "inbox consume and context-mailbox put --turn/--derived (live-worker batch consumption)",
+    40 =>
+      "inbox consume - 0 and --unknown, inbox pending --waking " <>
+        "(a session started for a dormant fiber's waking entries)"
   }
 
   @doc "The daemon's expected `shuttle contract` level."

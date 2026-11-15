@@ -13,6 +13,11 @@ defmodule Shuttle.Delivery do
   the resume and still messages a live worker; `"fresh"` starts a new session,
   cutting a live worker.
 
+  Everything else reaches a worker through the fiber's inbox (`context/4`):
+  consumption offers it to a live worker as context, wakes it or replaces it
+  with a fresh session, and starts a session for a fiber with none when an
+  entry asks for a turn and `inbox_gate/2` allows it (`start_for_inbox/1`).
+
   A conversation a human resumed from the card is its worker
   (`Shuttle.SessionResume`), so it is addressed like any other.
   """
@@ -163,18 +168,25 @@ defmodule Shuttle.Delivery do
   @doc """
   Store context and its delivery wishes in the owning fiber's inbox, then
   trigger consumption. The inbox keeps it, deduplicated by `message_id`, until
-  the live worker or a successor takes it.
+  a worker takes it.
 
-  Options: `:wake` stores `turn: ask` while a worker is live, and consumption
-  decides whether to offer it as context, wake the worker or request a fresh
-  session; with no live worker the next worker reads it as context.
-  `:from` labels the sender (default `"shuttle"`); `:unless_live` refuses with
-  `{:error, :live_worker}` while a worker is live, queueing nothing, so the
-  sender messages that worker directly. A `thread-` id names the event it
-  reports, so its first capture stands whatever a retry states.
+  Options: `:turn` (`"ask"` or `"force"`; `:wake` means `"ask"`) makes the
+  entry ask for a turn. Consumption decides whether a live worker is offered
+  it as context, woken or replaced by a fresh session; a fiber with no worker
+  is started for it when it may be (`start_for_inbox/1`). Without a turn the
+  entry is context for whichever worker comes next. `:from` labels the sender
+  (default `"shuttle"`); `:unless_live` refuses with `{:error, :live_worker}`
+  while a worker is live, queueing nothing, so the sender messages that worker
+  directly. A `thread-` id names the event it reports, so its first capture
+  stands whatever a retry states.
+
+  Answers `{:ok, :queued}`, `{:ok, :starting}` when a session is starting for
+  the entry, or `{:ok, {:waiting, detail}}` saying what a waking entry waits
+  for.
   """
   def context(entry, text, message_id, opts \\ []) do
     worker = live_context_worker(entry)
+    turn = opts[:turn] || if(opts[:wake], do: "ask")
 
     cond do
       get_in(entry.fiber, ["shuttle", "host"]) != Poller.own_host_id() ->
@@ -196,7 +208,7 @@ defmodule Shuttle.Delivery do
 
         args = if opts[:notify_when_idle], do: args ++ ["--notify-when-idle"], else: args
         args = if opts[:notify_wake], do: args ++ ["--notify-wake"], else: args
-        args = if opts[:wake] && worker, do: args ++ ["--turn", "ask"], else: args
+        args = if turn, do: args ++ ["--turn", turn], else: args
 
         args =
           if String.starts_with?(message_id, "thread-"), do: args ++ ["--derived"], else: args
@@ -210,9 +222,167 @@ defmodule Shuttle.Delivery do
           if opts[:retained_at], do: args ++ ["--retained-at", opts[:retained_at]], else: args
 
         with {:ok, _} <- Shuttle.CLI.run(args) do
-          flush_context(entry)
-          {:ok, :queued}
+          case flush_context(entry) do
+            {:error, :no_worker} when turn != nil -> {:ok, start_for_inbox(entry)}
+            _ -> {:ok, :queued}
+          end
         end
+    end
+  end
+
+  @doc """
+  Whether a non-human inbox entry may start a session on `fiber`: a
+  constitution `own_host` owns, open or active, not at rest, and not a
+  standing constitution whose schedule is paused or whose scheduled run is due
+  (that run takes the entries). Answers `:ok` or `{:error, reason}`; entries
+  for a fiber refused here wait for whichever worker comes next.
+  """
+  def inbox_gate(fiber, own_host) do
+    standing? = Poller.fiber_kind(fiber) == "standing"
+
+    cond do
+      get_in(fiber, ["shuttle", "host"]) != own_host -> {:error, :not_owner}
+      fiber["status"] not in ["open", "active"] -> {:error, :closed}
+      standing? and fiber["status"] != "active" -> {:error, :paused}
+      fiber["horizon"] == "stashed" -> {:error, :at_rest}
+      standing? and Shuttle.Poller.StandingRoles.standing_role_due?(fiber) -> {:error, :run_due}
+      true -> :ok
+    end
+  end
+
+  @launch_note "Shuttle started this session because messages are waiting in this fiber's inbox. " <>
+                 "They reach you as Shuttle context beside this prompt or at your first tool call, " <>
+                 "or as a message within a few minutes; read them before you decide what to do."
+
+  @doc """
+  Start a session for a fiber with no worker whose inbox holds a due entry
+  that asks for a turn, when `inbox_gate/2` and the Poller admit it. The inbox
+  reserves the entries for a two-minute lease (`shuttle inbox consume <key> -
+  0`), so repeated calls launch once; the launched session takes them through
+  its fiber hook, and that claim delivers them. A refused or held launch, or a
+  session that dies first, leaves them pending for the next call once the
+  lease lapses. The launch prompt says messages are arriving and carries none
+  of their text.
+
+  Answers `:starting`, `:queued` (a worker appeared and takes them) or
+  `{:waiting, detail}`.
+  """
+  def start_for_inbox(entry) do
+    server = Shuttle.Env.server(Poller)
+    fiber_id = Shuttle.Threads.address(entry.fiber)
+
+    with :ok <- inbox_gate(entry.fiber, Poller.own_host_id()),
+         :ok <- Poller.admit_inbox_launch(server, fiber_id),
+         :launch <- reserve(entry) do
+      server
+      |> Poller.dispatch_fiber(fiber_id,
+        force: true,
+        ad_hoc: true,
+        inbox: true,
+        resume_mode: "continue",
+        user_message: @launch_note
+      )
+      |> launched(fiber_id)
+    else
+      :in_flight -> :starting
+      error -> launched(error, fiber_id)
+    end
+  end
+
+  # The dormant consume reserves the asking entries and answers launch, or
+  # wait while an earlier reservation's launch is in its lease.
+  defp reserve(entry) do
+    case consume(entry, "-", 0, []) do
+      {:ok, %{"action" => "launch"}} -> :launch
+      {:ok, %{"action" => _}} -> :in_flight
+      other -> {:error, {:consume, other}}
+    end
+  end
+
+  defp launched({:ok, _session}, _fiber_id), do: :starting
+  # A busy Poller keeps the request and may yet launch.
+  defp launched({:error, :poller_busy}, _fiber_id), do: :starting
+
+  defp launched({:error, reason}, _fiber_id) when reason in [:running, :already_running],
+    do: :queued
+
+  defp launched({:error, reason}, fiber_id) do
+    {:waiting,
+     case reason do
+       :closed ->
+         "#{fiber_id} is closed; the message waits in its inbox for whoever next works on it"
+
+       :paused ->
+         "#{fiber_id}'s schedule is paused; the message waits in its inbox for whoever next works on it"
+
+       :at_rest ->
+         "#{fiber_id} is at rest; the message waits in its inbox for whoever next works on it"
+
+       :run_due ->
+         "#{fiber_id}'s scheduled run is due; the message waits in its inbox for that run"
+
+       :held ->
+         "#{Poller.own_host_id()} holds new sessions until its boot quarantine is released " <>
+           "(`shuttle daemon release`); one starts for the message then"
+
+       :full ->
+         "#{Poller.own_host_id()} runs as many workers as it allows; a session starts for the message when one ends"
+
+       :busy ->
+         "#{Poller.own_host_id()}'s daemon was busy; the next poll starts a session for the message"
+
+       {:consume, result} ->
+         "the inbox could not be read for a launch (#{inspect(result)}); the next poll tries again"
+
+       reason ->
+         "the launch was refused (#{inspect(reason)}); it is tried again in two minutes"
+     end}
+  end
+
+  @doc """
+  Consume the inbox of each fiber in `entries` (this host's) on a poll. Each
+  fiber with a live worker is consumed as `flush_context/1` does. Fibers with
+  none cost one `shuttle inbox pending --waking` call between them, and each
+  it finds holding a due entry that asks for a turn is started
+  (`start_for_inbox/1`), including one that became due by `not_before` or
+  outlived a daemon restart.
+  """
+  def flush_owned(entries) do
+    server = Shuttle.Env.server(Poller)
+
+    if is_pid(GenServer.whereis(server)) do
+      own_host = Poller.own_host_id()
+
+      {dormant, live} =
+        Enum.split_with(entries, fn entry ->
+          Poller.context_receiver(server, Shuttle.Threads.address(entry.fiber)) ==
+            {:error, :no_worker}
+        end)
+
+      Enum.each(live, &flush_context/1)
+
+      dormant
+      |> Enum.filter(&(inbox_gate(&1.fiber, own_host) == :ok))
+      |> waking()
+      |> Enum.each(&start_for_inbox/1)
+    end
+
+    :ok
+  end
+
+  defp waking([]), do: []
+
+  defp waking(entries) do
+    by_key = Map.new(entries, &{context_key(&1), &1})
+
+    with {:ok, output} <-
+           Shuttle.CLI.run(["inbox", "pending", "--waking" | Map.keys(by_key)],
+             stderr_to_stdout: false
+           ),
+         {:ok, counts} when is_map(counts) <- Jason.decode(output) do
+      for {key, n} <- counts, is_integer(n), n > 0, entry = by_key[key], do: entry
+    else
+      _ -> []
     end
   end
 
@@ -262,8 +432,9 @@ defmodule Shuttle.Delivery do
   end
 
   # An idle worker is woken, or replaced by a fresh session when waking it is
-  # costly. A worker whose turn no hook has reported is woken without a cost
-  # check. A busy one takes the entries through its hook.
+  # costly. A worker whose turn no hook has reported is woken for ask entries
+  # without a cost check; its idle entries wait for an observed idle. A busy
+  # one takes the entries through its hook.
   defp consume_turn(entry, server, fiber_id, consume) do
     case Poller.worker_turn(server, fiber_id) do
       :idle ->
@@ -279,7 +450,7 @@ defmodule Shuttle.Delivery do
         end
 
       :unknown ->
-        consume.(["--idle"])
+        consume.(["--unknown"])
 
       _ ->
         {:ok, %{"action" => "wait", "turn" => true}}

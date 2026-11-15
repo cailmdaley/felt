@@ -11,11 +11,13 @@ defmodule ShuttleWeb.DeliverController do
   route.
 
   With `context_only` (and a `message_id`), `text` is queued in the fiber's
-  context mailbox instead (`Shuttle.Delivery.context/4`): 202 `{delivery:
-  "context", queued: true}`, launching nothing. `unless_live` makes that queue
-  the next worker's: a fiber with a live worker answers 409 `{live: true}` and
-  queues nothing, and a queued answer carries `status:
-  "queued_for_next_worker"`. `shuttle message <fiber>` sends this shape.
+  inbox instead (`Shuttle.Delivery.context/4`): 202 `{delivery: "context",
+  queued: true, status, detail?}`. `turn` (`"ask"` or `"force"`; `wake` means
+  `"ask"`) makes the entry ask for a turn, and a fiber with no live worker is
+  then started for it when it may be: `status` is `"starting"`, or `"queued"`
+  with a `detail` saying what the entry waits for. `unless_live` answers 409
+  `{live: true}` and queues nothing while a worker is live, so the sender
+  messages it directly. `shuttle message <fiber>` sends this shape.
 
   The answer names what happened in `delivery`: `"message"` with the messaging
   `receipt`, or `"resume"` / `"dispatch"` with the `/dispatch` envelope.
@@ -49,6 +51,7 @@ defmodule ShuttleWeb.DeliverController do
           "reply_to",
           "resume_mode",
           "wake",
+          "turn",
           "unless_live",
           "thread_signal",
           "retained_at"
@@ -86,6 +89,7 @@ defmodule ShuttleWeb.DeliverController do
             if context["context_only"] == true do
               context_reply(fiber_id, text, context["message_id"],
                 wake: context["wake"] == true,
+                turn: if(context["turn"] in ["ask", "force"], do: context["turn"]),
                 retained_at: context["retained_at"],
                 thread_signal: context["thread_signal"],
                 unless_live: context["unless_live"] == true,
@@ -116,12 +120,23 @@ defmodule ShuttleWeb.DeliverController do
   defp context_reply(fiber_id, text, message_id, opts)
        when is_binary(message_id) and message_id != "" do
     with {:ok, %{fibers: [entry | _]}} <- Shuttle.FiberDocuments.get_shuttle(fiber_id),
-         {:ok, :queued} <- Delivery.context(entry, text, message_id, opts) do
+         {:ok, outcome} <- Delivery.context(entry, text, message_id, opts) do
       body = %{delivery: "context", delivered: false, queued: true, fiber_id: fiber_id}
 
-      # Asked to queue only for a dormant fiber, the queue is its next worker's.
       body =
-        if opts[:unless_live], do: Map.put(body, :status, "queued_for_next_worker"), else: body
+        case outcome do
+          :starting ->
+            Map.merge(body, %{
+              status: "starting",
+              detail: "#{fiber_id} has no live worker; a session is starting and takes it"
+            })
+
+          {:waiting, detail} ->
+            Map.merge(body, %{status: "queued", detail: detail})
+
+          :queued ->
+            Map.put(body, :status, "queued")
+        end
 
       {202, body}
     else

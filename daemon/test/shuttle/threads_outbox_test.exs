@@ -326,7 +326,6 @@ defmodule Shuttle.ThreadsOutboxTest do
         {Bandit, plug: {ScopedAPI, self()}, port: 0, ip: {127, 0, 0, 1}, startup_log: false}
       )
 
-    asked_by(store, "shuttle://test-host/claude/11111111-1111-4111-8111-111111111111", :hub)
     {:ok, {_, api_port}} = ThousandIsland.listener_info(api)
     Env.put_env("SHUTTLE_DAEMON_URL", "http://127.0.0.1:#{api_port}")
     socket = Path.join(System.tmp_dir!(), "th-#{System.unique_integer([:positive])}.sock")
@@ -504,6 +503,9 @@ defmodule Shuttle.ThreadsOutboxTest do
     native = File.read!(Path.join(store, "ready")) |> String.trim()
     authority = File.read!(authority_path)
     GenServer.stop(poller)
+    # From here the hub's own worker asked for the thread, so its results ask
+    # for a turn.
+    asked_by(store, "shuttle://test-host/claude/11111111-1111-4111-8111-111111111111", :hub)
 
     {:ok, poller} =
       start_poller!(

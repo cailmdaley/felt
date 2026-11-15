@@ -618,7 +618,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
 
   # `shuttle message <fiber>`'s request: context unless a worker is live. The
   # context path reads the fiber from the configured stores.
-  defp queue_for_next_worker(fiber_id, id, extra \\ %{}) do
+  defp queue_for_fiber(fiber_id, id, extra \\ %{}) do
     Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
     api_conn()
@@ -651,29 +651,33 @@ defmodule ShuttleWeb.DeliverControllerTest do
   defp launches,
     do: Enum.count(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
 
-  test "a message to a fiber with no live worker waits in its mailbox for the next worker" do
+  # The launch itself is exercised against the real CLI in
+  # `Shuttle.InboxLaunchTest`; this mock answers no consume, so none starts.
+  test "a waking message to a fiber with no live worker is queued asking for a turn" do
     put_constitution("tests/deliver-dormant")
     Env.put_app_env(:felt_runner, MockRunner)
     before = launches()
 
-    body = "tests/deliver-dormant" |> queue_for_next_worker("msg-dormant-1") |> json_response(202)
+    body = "tests/deliver-dormant" |> queue_for_fiber("msg-dormant-1") |> json_response(202)
 
     assert %{
              "delivery" => "context",
              "queued" => true,
              "delivered" => false,
-             "status" => "queued_for_next_worker"
+             "status" => "queued",
+             "detail" => "the inbox could not be read for a launch" <> _
            } = body
 
     assert [args] = mailbox_puts()
     assert "msg-dormant-1" in args and "read this when you start" in args
     assert ["--from", "shuttle://elsewhere/claude/sender"] -- args == []
+    assert ["--turn", "ask"] -- args == []
     assert launches() == before
 
     # The same message id queues once.
     assert %{"queued" => true} =
              "tests/deliver-dormant"
-             |> queue_for_next_worker("msg-dormant-1")
+             |> queue_for_fiber("msg-dormant-1")
              |> json_response(202)
   end
 
@@ -689,7 +693,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
     }
 
     "tests/deliver-signal"
-    |> queue_for_next_worker("msg-signal", %{"thread_signal" => signal})
+    |> queue_for_fiber("msg-signal", %{"thread_signal" => signal})
     |> json_response(202)
 
     assert [args] = mailbox_puts()
@@ -710,7 +714,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
 
     for id <- ["msg-waiting-1", "msg-waiting-2"] do
       assert %{"queued" => true} =
-               "tests/deliver-waiting" |> queue_for_next_worker(id) |> json_response(202)
+               "tests/deliver-waiting" |> queue_for_fiber(id) |> json_response(202)
     end
 
     Poller.refresh_document("tests/deliver-waiting")
@@ -736,7 +740,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
     message_live_worker("tests/deliver-live-queue")
 
     body =
-      "tests/deliver-live-queue" |> queue_for_next_worker("msg-live-1") |> json_response(409)
+      "tests/deliver-live-queue" |> queue_for_fiber("msg-live-1") |> json_response(409)
 
     assert %{"live" => true, "queued" => false} = body
     assert mailbox_puts() == []

@@ -2,7 +2,7 @@ defmodule Shuttle.ThreadsDeliveryTest do
   # Thread results: supersession, owner validation and delivery.
   use Shuttle.Test.ThreadsCase, async: true
 
-  test "waking context for a fiber with no live worker is stored for its next worker", %{
+  test "waking context for a fiber with no live worker keeps its wish", %{
     store: store,
     data: data
   } do
@@ -12,7 +12,7 @@ defmodule Shuttle.ThreadsDeliveryTest do
     [path] = Path.wildcard(Path.join(data, "mailboxes/fiber/*/pending/*.json"))
 
     assert %{
-             "wishes" => %{"turn" => "none", "if_costly" => "hold"},
+             "wishes" => %{"turn" => "ask", "if_costly" => "hold"},
              "request" => %{"wake" => false}
            } =
              path |> File.read!() |> Jason.decode!()
