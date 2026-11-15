@@ -492,9 +492,10 @@ fan-in siblings of the fleet's [ledger feeds](#ledger-feeds):
 | `GET /sessions/composite` | local ledger + remote caches | Cross-host fiber/session pairings; `uid=` narrows to one fiber |
 | `GET /commits/composite` | local ledger + remote caches | Cross-host commit narration and shortstat counts |
 | `GET /sent-files/all/composite` | local feed + remote caches | Cross-host `SendUserFile` pushes |
-| `GET /channels/dismissed` | local and remote board feeds | `{dismissed: [key…], pinned: {key: latest pin ms}, reach_ms}` over the board's 14-day reach |
+| `GET /channels/dismissed` | local and remote board feeds | `{dismissed: [key…], pinned: {key: latest pin ms}, order: {keys: [key…], at: ms} \| null, reach_ms}` over the board's 14-day reach; `order` is the newest `ordered` record |
 | `POST /channels/dismiss` | local CLI write | `{key, fiber?}` appends a `dismissed` board record; returns `{ok: true}` or a failed-write error |
 | `POST /channels/pin` | local CLI write | `{key, fiber?}` appends a `pinned` board record, which keeps a channel listed until it leaves the reach; same replies as dismiss |
+| `POST /channels/order` | local CLI write | `{keys: [key…]}` appends an `ordered` board record, the human's order of the rail; same replies as dismiss |
 | `GET /board/marks` | session and commit composites | Each thread's launches and commits over the board's reach |
 | `POST /board/open` | every board in the fleet | `{fiber_id, origin?, page}` asks every board on a `/voice/events` stream to show that fiber's `constitution`, `tapestry` or `files` page; `origin` defaults to this host. The daemon tells its own boards and passes the request, marked `forwarded: true`, to every other daemon in the fleet, which tells only its own |
 

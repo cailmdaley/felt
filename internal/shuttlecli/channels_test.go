@@ -1,6 +1,9 @@
 package shuttlecli
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestChannelsDismissWritesBoardRecord(t *testing.T) {
 	t.Parallel()
@@ -22,6 +25,19 @@ func TestChannelsPinWritesBoardRecord(t *testing.T) {
 	}
 	records := readBoardRecords(t, sink)
 	if len(records) != 1 || records[0].Kind != "pinned" || records[0].Text != "role:vizier" || records[0].Fiber != "UID" || records[0].ID == "" {
+		t.Fatalf("records: %+v", records)
+	}
+}
+
+func TestChannelsOrderWritesBoardRecord(t *testing.T) {
+	t.Parallel()
+	env, sink, _ := sendFileTestEnv(t)
+	if _, _, err := executeIn(t, env, "", "channels", "order", "channel:the mill", "fiber:UID", "channel:spt"); err != nil {
+		t.Fatal(err)
+	}
+	records := readBoardRecords(t, sink)
+	want := []string{"channel:the mill", "fiber:UID", "channel:spt"}
+	if len(records) != 1 || records[0].Kind != "ordered" || records[0].Text != "" || records[0].ID == "" || !slices.Equal(records[0].Keys, want) {
 		t.Fatalf("records: %+v", records)
 	}
 }

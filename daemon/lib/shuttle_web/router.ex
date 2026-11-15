@@ -138,6 +138,7 @@ defmodule ShuttleWeb.Router do
     # (unlike /file, which serves raw bytes).
     post("/channels/dismiss", ChannelsController, :dismiss)
     post("/channels/pin", ChannelsController, :pin)
+    post("/channels/order", ChannelsController, :order)
     get("/channels/dismissed", ChannelsController, :dismissed)
     get("/board/family", BoardController, :family)
     # Each thread's launches and commits over the board's reach, fleet-wide.

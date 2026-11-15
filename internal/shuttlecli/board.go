@@ -35,6 +35,8 @@ type boardRecord struct {
 	Verdict    string      `json:"verdict,omitempty"`
 	// Files are the absolute paths a post attaches, each also recorded as a sent file.
 	Files []string `json:"files,omitempty"`
+	// Keys are the channel keys an `ordered` record lists, in the human's order.
+	Keys []string `json:"keys,omitempty"`
 }
 
 func boardText(text string) string {

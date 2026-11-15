@@ -622,15 +622,23 @@ See [Connect your machines](../shuttle/remotes.md#verify-work-across-the-connect
 
 ### `shuttle channels dismiss <key> [--fiber <uid>]`
 
-Set a channel aside in the human's Channels view, or unpin it. Writes a
-family-board record of kind `dismissed` with the key as its text and, when
-supplied, a fiber uid. A channel is keyed `role:<office>` or
-`fiber:<top-level uid>`. The board sets one aside with `office:<channel>:<ms>`,
-where `<ms>` is when the newest wait in the channel began; the channel returns
-once something in it begins waiting later than that. It unpins one with
-`pin:<channel>:<ms>`, which voids every pin up to `<ms>`. Dismissals reach
-every hub through the remote board feeds and are omitted from family-board
-reading.
+Set a channel aside in the human's Channels view, hide or show it, or unpin
+it. Writes a family-board record of kind `dismissed` with the key as its text
+and, when supplied, a fiber uid. A channel is keyed `channel:<name, lowercased>`
+or `fiber:<top-level uid>`. The board writes:
+
+- `office:<channel>:<ms>` to set one aside, where `<ms>` is when the newest
+  wait in the channel began; the channel returns once something in it begins
+  waiting later than that.
+- `pin:<channel>:<ms>` to unpin one: it voids every pin up to `<ms>`.
+- `hide:<channel>:<ms>` to take one out of the rail at `<ms>`. It stays
+  findable through Jump to, and comes back once something in it begins waiting
+  later than `<ms>`.
+- `show:<channel>:<ms>` to bring a hidden one back: it voids every hide up to
+  `<ms>`.
+
+Dismissals reach every hub through the remote board feeds and are omitted from
+family-board reading.
 
 ### `shuttle channels pin <key> [--fiber <uid>]`
 
@@ -639,6 +647,16 @@ kind `pinned`; the channel stays listed while its latest pin is within the
 board's 14-day reach and later than any unpin, and the board pins it again
 when the human opens or answers it. Pins reach every hub as dismissals do and
 are omitted from family-board reading.
+
+### `shuttle channels order <key>...`
+
+Order the rail of the human's Channels view. Writes a family-board record of
+kind `ordered` whose `keys` lists channel keys in the human's order. The
+newest record wins across the fleet; channels it does not name come before
+the ordered ones, and channels waiting on the human float above both. The
+board writes the order when the human moves a channel, and writes it again
+while it stands, so it does not lapse with the board's 14-day reach. Orders
+reach every hub as dismissals do and are omitted from family-board reading.
 
 ### `shuttle board [fiber] [--since 2h|<RFC3339>] [--all] [--turns] [--json]`
 

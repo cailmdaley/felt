@@ -65,9 +65,7 @@ defmodule Shuttle.Contract do
     41 =>
       "inbox thread-state, thread-put, routes, route and settle " <>
         "(thread results through the routing inbox)",
-    42 =>
-      "inbox consume --busy/--message and followup/held/message answers; context-mailbox put --attachments-stdin; " <>
-        "inbox record-begin/record-settle (typed human lines and agent fresh requests, recorded and deduplicated)"
+    42 => "channels order (the human's order of the Channels rail)"
   }
 
   @doc "The daemon's expected `shuttle contract` level."

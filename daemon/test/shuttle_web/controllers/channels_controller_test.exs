@@ -33,6 +33,13 @@ defmodule ShuttleWeb.ChannelsControllerTest do
           "text" => "role:vizier"
         },
         %{
+          "id" => "remote-order",
+          "type" => "board",
+          "timestamp" => now - 30_000,
+          "kind" => "ordered",
+          "keys" => ["fiber:REMOTE"]
+        },
+        %{
           "id" => "post",
           "type" => "board",
           "timestamp" => now,
@@ -77,6 +84,33 @@ defmodule ShuttleWeb.ChannelsControllerTest do
            }
   end
 
+  test "order writes the full key list through the CLI" do
+    Env.put_app_env(:felt_runner, Runner)
+    Env.put_app_env(:channels_test_owner, self())
+
+    assert api_conn()
+           |> put_req_header("content-type", "application/json")
+           |> post(
+             "/api/v1/channels/order",
+             Jason.encode!(%{keys: ["channel:the mill", "fiber:U"]})
+           )
+           |> json_response(200) == %{"ok" => true}
+
+    assert_receive {:cli, ["channels", "order", "channel:the mill", "fiber:U"]}
+
+    assert api_conn()
+           |> put_req_header("content-type", "application/json")
+           |> post("/api/v1/channels/order", Jason.encode!(%{keys: []}))
+           |> json_response(400) == %{"error" => "keys are required"}
+
+    assert api_conn()
+           |> put_req_header("content-type", "application/json")
+           |> post("/api/v1/channels/order", Jason.encode!(%{keys: ["fiber:U", 3]}))
+           |> json_response(400) == %{"error" => "keys must be channel keys"}
+
+    refute_received {:cli, _}
+  end
+
   @tag :tmp_dir
   test "dismissed merges local and remote board feeds over the reach", %{tmp_dir: dir} do
     now = System.system_time(:millisecond)
@@ -92,6 +126,25 @@ defmodule ShuttleWeb.ChannelsControllerTest do
             {"post", now, "post", "not a dismissal"}
           ],
           do: %{id: id, timestamp: at, type: "board", kind: kind, text: text}
+
+    rows =
+      rows ++
+        [
+          %{
+            id: "order-old",
+            timestamp: now - 60_000,
+            type: "board",
+            kind: "ordered",
+            keys: ["fiber:OLD"]
+          },
+          %{
+            id: "order",
+            timestamp: now - 10,
+            type: "board",
+            kind: "ordered",
+            keys: ["channel:spt", "fiber:U"]
+          }
+        ]
 
     File.write!(path, Enum.map_join(rows, "\n", &Jason.encode!/1) <> "\n")
     Shuttle.Test.EventFiles.scope!(path)
@@ -111,11 +164,13 @@ defmodule ShuttleWeb.ChannelsControllerTest do
     assert %{
              "dismissed" => ["ask:U:1", "file:remote:plot.png:1"],
              "pinned" => pinned,
+             "order" => order,
              "reach_ms" => reach
            } =
              api_conn() |> get("/api/v1/channels/dismissed") |> json_response(200)
 
     assert pinned == %{"role:vizier" => now}
+    assert order == %{"keys" => ["channel:spt", "fiber:U"], "at" => now - 10}
 
     assert reach == Shuttle.Board.retention_ms()
 
@@ -124,7 +179,8 @@ defmodule ShuttleWeb.ChannelsControllerTest do
                [],
                [
                  %{"id" => "d", "timestamp" => now, "kind" => "dismissed", "text" => "ask:U:1"},
-                 %{"id" => "p", "timestamp" => now, "kind" => "pinned", "text" => "role:vizier"}
+                 %{"id" => "p", "timestamp" => now, "kind" => "pinned", "text" => "role:vizier"},
+                 %{"id" => "o", "timestamp" => now, "kind" => "ordered", "keys" => ["fiber:U"]}
                ],
                %{},
                "host",
