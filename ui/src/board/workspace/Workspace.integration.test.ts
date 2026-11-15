@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
-import { pressVerb } from './testActs.js'
+import { consoleActs, pressConsoleAct, pressVerb } from './testActs.js'
 import { card, servedFeed, settle } from '../testFixtures.js'
 import type { ColumnKind, KanbanCard } from '../KanbanTypes.js'
 import type { Turn } from '../turn.js'
@@ -38,10 +38,10 @@ vi.mock('../FileViewerPanel.js', () => ({
 }))
 
 let workspace: Workspace
-type WorkspaceTestOptions = Omit<WorkspaceOptions, 'deskRows'> & { deskRows?: WorkspaceOptions['deskRows'] }
+type WorkspaceTestOptions = Omit<WorkspaceOptions, 'deskRows' | 'console'> & Partial<Pick<WorkspaceOptions, 'deskRows' | 'console'>>
 /** Every refresh reads the sent-file feed, so a test's changed answer is seen at its next step. */
 function makeWorkspace(root: HTMLElement, opts: WorkspaceTestOptions): Workspace {
-  return new Workspace(root, { sends: new FiberSends(opts.shuttleBase, { intervalMs: 0 }), ...opts, deskRows: opts.deskRows ?? opts.cards })
+  return new Workspace(root, { sends: new FiberSends(opts.shuttleBase, { intervalMs: 0 }), console: options => new Dock(opts.shuttleBase, vi.fn(), undefined, undefined, options), ...opts, deskRows: opts.deskRows ?? opts.cards })
 }
 /** The turn an owner serves for a live worker's phase. */
 const TURN_OF_PHASE: Record<string, Turn> = { working: 'working', waiting: 'idle', attention: 'question', blocked: 'blocked' }
@@ -223,8 +223,7 @@ it('brings the constitution forward from the band and retraces to the page it le
   workspace.open(bodyCards[0], 'Desk'); await settle()
   workspace.open(bodyCards[1], 'Desk'); await settle()
   workspace.reader.openDocument(docKey('host-b', '/notes/beta/report.html', 'host-b')); await settle()
-  document.querySelector<HTMLButtonElement>('.ws-stage-band .ws-band-constitution')!.click()
-  await settle()
+  await pressConsoleAct(document.querySelector('.ws-stage-band')!, 'Constitution')
   expect(workspace.reader.document?.kind).toBe('fiber')
   expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to report.html')
   await pop(() => workspace.reader.back())
@@ -787,9 +786,9 @@ describe('workspace reader integration', () => {
     const title = (): string | null | undefined => document.querySelector('.ws-stage-band .ws-band-title')?.textContent
     workspace.open(feed[0], 'Desk'); await settle()
     expect(title()).toBe('hub')
-    // The band leaves the fiber's acts to its row on the family page.
+    // The family page draws the fiber's acts on its row; the console keeps them in its menu.
     expect(document.querySelector('.ws-selected .fp-head .fp-verbs .ws-acts-settings')).not.toBeNull()
-    expect(document.querySelector<HTMLElement>('.ws-stage-band .ws-band-head > .ws-fiber-acts')!.hidden).toBe(true)
+    expect(document.querySelector('.ws-stage-band .ws-band-head .ws-fiber-acts')).toBeNull()
     // A root has no orchestrator: no way back on its line, and b does nothing.
     expect(document.querySelector<HTMLElement>('.ws-stage-band .ws-settings-ancestry')?.hidden).toBe(true)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true, cancelable: true }))
@@ -1636,13 +1635,11 @@ describe('workspace reader integration', () => {
     expect(workspace.reader.document?.name).toBe('report.html')
     const band = document.querySelector<HTMLElement>('.ws-stage-band')!
     expect(band.hidden).toBe(false)
-    expect(band.nextElementSibling?.classList.contains('ws-stage')).toBe(true)
+    // The console is docked under the stage.
+    expect(band.previousElementSibling?.classList.contains('ws-stage')).toBe(true)
     expect(document.querySelector('.ws-tab,.ws-thumbbar')).toBeNull()
 
-    const constitution = band.querySelector<HTMLButtonElement>('.ws-band-constitution')!
-    expect(constitution.hidden).toBe(false)
-    expect(constitution.getAttribute('aria-label')).toBe('Constitution')
-    constitution.click()
+    await pressConsoleAct(band, 'Constitution')
     expect(document.querySelector('.ws-page.ws-selected .ws-fiber-prose')).not.toBeNull()
     expect(workspace.reader.document?.kind).toBe('fiber')
     const article = document.querySelector<HTMLElement>('.ws-fiber-prose')!
@@ -1708,7 +1705,7 @@ describe('workspace reader integration', () => {
       workerState: 'running', tmuxSession: 'new-worker', sessionUuid: 'new-session', runtimePhase: 'working', turn: 'working', column: 'inFlight' }]
     workspace.update()
     expect(document.querySelector('.ws-stage-band .ws-dock')).toBe(band)
-    expect(band.querySelector<HTMLElement>('.ws-acts-console')!.hidden).toBe(false)
+    expect(await consoleActs(band)).toContain('Open conversation')
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const fresh = band.querySelector<HTMLButtonElement>('.ws-worker-acts button[data-verb="New session"]')!
     fresh.click()
@@ -1809,11 +1806,9 @@ describe('workspace reader integration', () => {
     })
     workspace.open(live)
     await settle()
-    // The band's console and c reach the conversation; the top bar draws no second opener.
+    // The console's menu and c reach the conversation; the top bar draws no second opener.
     expect(document.querySelector('.ws-navbar .ws-acts-console')).toBeNull()
-    const opener = document.querySelectorAll<HTMLElement>('.ws-acts-console')
-    expect(opener).toHaveLength(1)
-    opener[0].click()
+    await pressConsoleAct(document.querySelector('.ws-stage-band')!, 'Open conversation')
     expect(openWorker).toHaveBeenLastCalledWith('terminal-alpha', 'daemon-a', undefined)
     openWorker.mockClear()
     expect(document.querySelector('.ws-dock-slot')).toBeNull()

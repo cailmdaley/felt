@@ -1,7 +1,6 @@
 import { announce } from '@ui-sdk/core'
 import '@ui-sdk/web/tooltip'
 import { ago } from '../civilDay.js'
-import { HumanMessageIds, repeatNotice } from '../humanMessageId.js'
 import { getDaemonJson, postDaemonJson } from '../daemonApi.js'
 import { head, RESOURCE_PRIORITY, text } from '../documentResources.js'
 import { buildFileViewer, disposeFileViewer } from '../FileViewerPanel.js'
@@ -23,6 +22,8 @@ import { headerIcon, type HeaderIcon } from '../workspace/headerIcon.js'
 import { declaredTitle } from '../workspace/DocumentTitles.js'
 import { LOAD_POLICY, Thumbnail, type ThumbnailFile } from '../workspace/Thumbnail.js'
 import { charters } from '../workspace/RolePage.js'
+import { onDesk } from '../workspace/fiberPageState.js'
+import type { Dock } from '../workspace/Dock.js'
 import { createViewPage } from './ViewPage.js'
 import { isTypingTarget, keystrokeIsSpokenFor, registerView, type TemporalView, type ViewContext } from './ViewRegistry.js'
 import './ChannelsView.css'
@@ -167,11 +168,13 @@ export class ChannelsView implements TemporalView {
   private readonly previews = new Map<string, Thumbnail>()
   /** Which previews are near the view, and so worth a live body. */
   private near: IntersectionObserver | null = null
-  private channelReply: Reply | null = null
+  /** The console in the channel, to its chair, and the one in the thread, to its worker. */
+  private consoles: Record<Pane, Dock | null> = { channel: null, thread: null }
+  /** Whose draft each console holds: the draft key of what it was last opened on. */
+  private readonly drafted: Record<Pane, string | null> = { channel: null, thread: null }
   private threadEl: HTMLElement | null = null
   private threadHead: HTMLElement | null = null
   private threadList: HTMLOListElement | null = null
-  private threadReply: Reply | null = null
   private note: HTMLElement | null = null
   private channels: Channel[] = []
   private current: string | null = null
@@ -213,8 +216,6 @@ export class ChannelsView implements TemporalView {
   private readonly expanded = new Map<string, HTMLElement>()
   /** Long messages unfolded, by message id. */
   private readonly unfolded = new Set<string>()
-  /** Typed-input ids: a retried reply keeps its message's id. */
-  private readonly messageIds = new HumanMessageIds()
   private readonly tempering = new Set<string>()
   /** The line just cleared, drawn as Cleared · Undo in its place for {@link UNDO_MS}. */
   private undo: { uid: string; name: string; at: number; timer: number } | null = null
@@ -318,9 +319,8 @@ export class ChannelsView implements TemporalView {
     this.channelEl.tabIndex = -1
     this.head = el('header', 'kbn-ch-head')
     this.stream = el('ol', 'kbn-ch-stream')
-    this.channelReply = new Reply(text => this.send(this.channel?.seat, text, 'channel'))
     this.follow(this.stream, 'channel')
-    this.channelEl.append(this.head, this.stream, this.channelReply.form)
+    this.channelEl.append(this.head, this.stream, this.console('channel'))
     return this.channelEl
   }
   private threadPane(): HTMLElement {
@@ -329,10 +329,32 @@ export class ChannelsView implements TemporalView {
     this.threadEl.setAttribute('aria-label', 'Thread')
     this.threadHead = el('header', 'kbn-ch-thread-head')
     this.threadList = el('ol', 'kbn-ch-stream kbn-ch-thread-list')
-    this.threadReply = new Reply(text => this.send(this.threadCard, text, 'thread'))
     this.follow(this.threadList, 'thread')
-    this.threadEl.append(this.threadHead, this.threadList, this.threadReply.form)
+    this.threadEl.append(this.threadHead, this.threadList, this.console('thread'))
     return this.threadEl
+  }
+  /** A pane's console, docked under its list; what it sends stands in the stream until the board records it. */
+  private console(pane: Pane): HTMLElement {
+    const dock = this.consoles[pane] = this.ctx!.workspace!.console({ keepPlace: true, onSent: (card, text, at) => this.echo(pane, card, text, at) })
+    dock.el.hidden = true
+    return dock.el
+  }
+  /**
+   * Opens a pane's console on the channel's chair, aimed at `card` (the chair
+   * itself, or the thread's worker), with the draft kept for whom it goes to.
+   * A fiber with no worker to run, or a closed one, has no console.
+   */
+  private seatConsole(pane: Pane, seat: KanbanCard | undefined, card: KanbanCard | undefined, shown = true): void {
+    const dock = this.consoles[pane]
+    if (!dock) return
+    dock.el.hidden = !seat || !card || !shown || !onDesk(card)
+    if (!seat || !card || dock.el.hidden) return
+    const key = this.draftKey(pane), was = this.drafted[pane]
+    if (was !== key && was) this.drafts.set(was, dock.draft)
+    dock.open(seat)
+    dock.setActionCard(card)
+    dock.setNav({ constitution: () => this.openPage(`console:${pane}`, card) })
+    if (was !== key) { dock.draft = (key && this.drafts.get(key)) || ''; this.drafted[pane] = key }
   }
   /** Keeps a list's following in step with the reader's scrolling. */
   private follow(list: HTMLOListElement, pane: Pane): void {
@@ -428,8 +450,11 @@ export class ChannelsView implements TemporalView {
     const said = (record: BoardRecord): string | undefined =>
       record.kind === 'human' ? record.text : record.kind === 'answered' ? /\s—\sA:\s([\s\S]*)$/.exec(record.text ?? '')?.[1] : undefined
     // The daemon records a line before it sends it, so its record is no older than the send began, give or take a clock's skew.
-    const recorded = (sent: Sent): boolean => [...records.values()].some(record =>
-      record.fiber === sent.fiber && (record.received_at ?? record.timestamp) >= sent.at - OVERLAP_MS && said(record)?.trim() === sent.text)
+    // Images sent with a line are recorded after it, one `[Image: path]` line each.
+    const recorded = (sent: Sent): boolean => [...records.values()].some(record => {
+      const text = said(record)?.trim()
+      return record.fiber === sent.fiber && (record.received_at ?? record.timestamp) >= sent.at - OVERLAP_MS && (text === sent.text || !!text?.startsWith(`${sent.text}\n\n[Image: `))
+    })
     const standing = this.sent.filter(sent => now - sent.at < ECHO_MS && !recorded(sent))
     if (standing.length !== this.sent.length) this.sent = standing
     const replies = standing.map<BoardRecord>(sent => ({ id: `${BOARD_LINE}sent:${sent.fiber}:${sent.at}`, kind: 'human', timestamp: sent.at, fiber: sent.fiber, by: { label: 'human' }, text: sent.text }))
@@ -510,7 +535,7 @@ export class ChannelsView implements TemporalView {
     const item = this.returnTo && this.layout?.querySelector<HTMLElement>(`[data-item="${CSS.escape(this.returnTo)}"]`)
     this.returnTo = null
     if (item) item.focus({ preventScroll: true })
-    else (this.thread ? this.threadReply : this.channelReply)?.text.focus({ preventScroll: true })
+    else this.consoles[this.thread ? 'thread' : 'channel']?.focus()
   }
   /** Fills `container` anew; the item that had focus in it keeps it. */
   private rebuild(container: HTMLElement, children: Node[]): void {
@@ -526,12 +551,10 @@ export class ChannelsView implements TemporalView {
    */
   private open(key: string | null, focus: boolean, deliberate = focus): void {
     if (key !== this.current) {
-      this.keepDrafts()
       // Leaving a channel is having read it to now.
       if (this.current) store(SEEN + this.current, String(Date.now()))
       this.current = key
       this.thread = null
-      this.restoreDrafts()
       if (key) { this.visit(key); this.remember() }
       this.landing.channel = true
       const channel = this.channel
@@ -560,17 +583,14 @@ export class ChannelsView implements TemporalView {
     if (!channel) { this.open(isMobileViewport() ? null : this.listed[0]?.key ?? null, false); return }
     this.open(channel.key, false)
     this.thread = channel.everyone.find(card => fiberOf(card) === last.thread) ?? null
-    this.restoreDrafts()
     if (isMobileViewport()) this.setRail(true)
   }
   private remember(): void {
     store(LAST, JSON.stringify({ channel: this.current, thread: this.thread && fiberOf(this.thread) }))
   }
   private openThread(card: KanbanCard | null): void {
-    this.keepDrafts()
     this.thread = card
     this.remember()
-    this.restoreDrafts()
     this.landing.thread = true
     this.drawChannel(); this.drawThread()
     if (card) this.threadEl?.focus({ preventScroll: true })
@@ -579,17 +599,11 @@ export class ChannelsView implements TemporalView {
   private draftKey(pane: Pane): string | null {
     return pane === 'channel' ? this.current && `channel:${this.current}` : this.thread && `thread:${fiberOf(this.thread)}`
   }
-  private replies(): Array<[Pane, Reply | null]> { return [['channel', this.channelReply], ['thread', this.threadReply]] }
+  /** Keeps what each console holds as the draft for whom it goes to. */
   private keepDrafts(): void {
-    for (const [pane, reply] of this.replies()) {
-      const key = this.draftKey(pane)
-      if (key && reply) this.drafts.set(key, reply.text.value)
-    }
-  }
-  private restoreDrafts(): void {
-    for (const [pane, reply] of this.replies()) {
-      const key = this.draftKey(pane)
-      if (reply) reply.text.value = (key && this.drafts.get(key)) || ''
+    for (const pane of ['channel', 'thread'] as const) {
+      const dock = this.consoles[pane], key = this.drafted[pane]
+      if (dock && key) this.drafts.set(key, dock.draft)
     }
   }
   private visit(key: string): void {
@@ -673,10 +687,10 @@ export class ChannelsView implements TemporalView {
   }
 
   private drawChannel(): void {
-    if (!this.head || !this.stream || !this.channelReply) return
+    if (!this.head || !this.stream) return
     const channel = this.channel
     if (!this.ctx?.workspace?.isActive) void this.ctx?.workspace?.look(this.threadCard ?? channel?.seat ?? null)
-    this.channelReply.form.hidden = !channel
+    this.seatConsole('channel', channel?.seat, channel?.seat)
     this.layout?.toggleAttribute('data-channel', !!channel)
     if (!channel) {
       this.sigs.channel = ''
@@ -705,7 +719,6 @@ export class ChannelsView implements TemporalView {
       if (!lines.length) this.stream.append(el('li', 'kbn-ch-hush', failed ? 'This channel\'s history could not be read; trying again.' : said.length ? 'All clear.' : 'Nothing said here yet.'))
     }
     this.tick()
-    this.channelReply.to.textContent = channel.seat.name
   }
   /** Whether a pane's signature changed, keeping the new one. */
   private changed(pane: Pane, sig: string): boolean {
@@ -979,7 +992,7 @@ export class ChannelsView implements TemporalView {
 
   /** The open thread: its worker's name and liveness, its open ask or a closed fiber's conclusion, what it said and what was said to it. */
   private drawThread(): void {
-    if (!this.threadEl || !this.threadHead || !this.threadList || !this.threadReply) return
+    if (!this.threadEl || !this.threadHead || !this.threadList) return
     const channel = this.channel, card = channel && this.threadCard
     this.layout?.toggleAttribute('data-thread', !!card)
     this.threadEl.hidden = !card
@@ -1024,34 +1037,18 @@ export class ChannelsView implements TemporalView {
       if (!messages.length) this.threadList.append(el('li', 'kbn-ch-hush', 'Nothing said yet.'))
     }
     this.tick()
-    this.threadReply.form.hidden = state === 'closed'
-    this.threadReply.to.textContent = card.name
+    this.seatConsole('thread', channel.seat, card, state !== 'closed')
   }
 
-  /** Sends to a worker; the reply stands in the stream until the board carries it. */
-  private async send(card: KanbanCard | undefined, text: string, pane: Pane): Promise<boolean> {
-    const ctx = this.ctx, channel = this.current, at = Date.now()
-    if (!card || !ctx) return false
-    try {
-      const answer = await postDaemonJson<{ delivered?: boolean | null; error?: string; duplicate?: boolean; disposition?: string }>(ctx.shuttleBase, '/api/v1/deliver',
-        { fiber_id: card.id, origin: card.originId, text, from: 'human', message_id: this.messageIds.for([card.originId, card.id, text].join('\0')) }, 'Reply failed')
-      if (answer?.delivered === false) throw new Error(answer.error ?? `${card.name} did not receive it`)
-      this.messageIds.sent()
-      const notice = repeatNotice(answer)
-      if (notice) { this.status(notice); return false }
-      this.sent.push({ fiber: fiberOf(card), text, at })
-      this.drafts.delete(pane === 'channel' ? `channel:${channel}` : `thread:${fiberOf(card)}`)
-      if (channel) this.renew(channel)
-      this.landing[pane] = true
-      this.status(answer?.delivered === null ? `Sent to ${card.name}; its arrival is not yet confirmed.` : '')
-      announce(`Sent to ${card.name}.`)
-      this.drawChannel(); this.drawThread()
-      ctx.requestRefresh()
-      return true
-    } catch (error) {
-      this.status(`Not sent: ${error instanceof Error ? error.message : String(error)}`)
-      return false
-    }
+  /** A console delivered a line: it stands in the stream until the board carries it, and its draft is spent. */
+  private echo(pane: Pane, card: KanbanCard, text: string, at: number): void {
+    this.sent.push({ fiber: fiberOf(card), text, at })
+    const key = this.draftKey(pane)
+    if (key) this.drafts.delete(key)
+    if (this.current) this.renew(this.current)
+    this.landing[pane] = true
+    announce(`Sent to ${card.name}.`)
+    this.drawChannel(); this.drawThread()
   }
   /** Writes a channel's set-aside (the waiting mark clears), unpin, hide or show, and restores it when the write fails. */
   private async setAside(channel: Channel, key: string): Promise<void> {
@@ -1288,7 +1285,7 @@ export class ChannelsView implements TemporalView {
     if (this.rail?.moving) return true
     if (event.metaKey || event.ctrlKey || event.altKey) return false
     const active = document.activeElement as HTMLElement | null
-    const replying = active === this.channelReply?.text || active === this.threadReply?.text
+    const replying = !!active?.closest('.ws-dock')
     if (event.key === 'Escape' && (replying || active === this.jump)) { (this.thread ? this.threadEl : this.channelEl)?.focus({ preventScroll: true }); return true }
     // Enter in the bar's Find opens what it found first.
     if (event.key === 'Enter' && this.query && isTypingTarget(active) && !replying && active !== this.jump) { this.openFirst(); return true }
@@ -1304,7 +1301,7 @@ export class ChannelsView implements TemporalView {
       return !!line?.act
     }
     if (event.key === 'Enter' && !active?.closest('button, a, input') && this.channel) {
-      (this.thread ? this.threadReply : this.channelReply)?.text.focus()
+      this.consoles[this.thread ? 'thread' : 'channel']?.focus()
       return true
     }
     return false
@@ -1335,36 +1332,11 @@ export class ChannelsView implements TemporalView {
     this.ctx = null
     this.layout = this.channelEl = this.head = this.note = this.threadEl = this.threadHead = null
     this.list = null; this.found = null; this.jump = null; this.stream = null; this.threadList = null; this.railToggle = null
-    this.channelReply = this.threadReply = null
+    for (const dock of Object.values(this.consoles)) dock?.reset()
+    this.consoles = { channel: null, thread: null }
+    this.drafted.channel = this.drafted.thread = null
     this.sigs = { channel: '', thread: '', rail: '' }
   }
 }
 
-/** A reply box: who it goes to, the words, and Send; Enter sends and Shift+Enter breaks the line. */
-class Reply {
-  readonly form = el('form', 'kbn-ch-reply')
-  readonly text = el('textarea', 'kbn-ch-reply-text')
-  readonly to = el('span', 'kbn-ch-reply-to')
-  constructor(send: (text: string) => Promise<boolean>) {
-    const label = el('label', 'kbn-ch-reply-label', 'To ')
-    label.append(this.to)
-    this.text.rows = 1
-    label.htmlFor = this.text.id = `kbn-ch-reply-${Math.random().toString(36).slice(2)}`
-    this.text.addEventListener('keydown', event => {
-      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); this.form.requestSubmit() }
-    })
-    const submit = el('button', 'kbn-ch-send', 'Send')
-    submit.type = 'submit'
-    const row = el('div', 'kbn-ch-reply-row')
-    row.append(this.text, submit)
-    this.form.append(label, row)
-    this.form.addEventListener('submit', event => {
-      event.preventDefault()
-      const words = this.text.value.trim()
-      if (!words) return
-      this.text.disabled = true
-      void send(words).then(sent => { if (sent) this.text.value = '' }).finally(() => { this.text.disabled = false })
-    })
-  }
-}
 registerView(new ChannelsView())

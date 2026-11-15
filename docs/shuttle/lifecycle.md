@@ -156,7 +156,7 @@ views behind a hotkey row.
 | `3` | **Channels** | Where the work talks to you: a channel per line of work, a thread per worker |
 | `4` | **Globe** | Everything at once, as one place to move through |
 
-Any document opens in the reader, whose band above the fiber page carries its controls; its console (›_) opens the conversation.
+Any document opens in the reader, whose console docked under the fiber page carries its controls and opens the conversation.
 The board holds no state of its own. It views the same fibers the daemon polls,
 plus tmux liveness and the host-local [ledgers](telemetry.md).
 

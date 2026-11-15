@@ -5,18 +5,19 @@ import type { ViewContext } from './ViewRegistry.js'
 import type { BoardRecord } from '../channels.js'
 import type { SentFile } from '../sentFiles.js'
 import { card, response, settle } from '../testFixtures.js'
+import { Dock, type ConsoleOptions } from '../workspace/Dock.js'
 
 const views: ChannelsView[] = []
 afterEach(() => { views.forEach(view => view.unmount()); views.length = 0; document.body.replaceChildren(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
 const minute = 60_000, day = 86_400_000
 const at = (minutes: number): string => new Date(Date.now() - minutes * minute).toISOString()
-const working = (minutes: number) => ({ status: 'active' as const, workerState: 'running' as const, runtimePhase: 'working' as const, lastActivityAt: Date.now() - minutes * minute })
-const idle = (minutes: number) => ({ status: 'active' as const, workerState: 'running' as const, runtimePhase: 'waiting' as const, lastActivityAt: Date.now() - minutes * minute })
+const working = (minutes: number) => ({ status: 'active' as const, workerState: 'running' as const, runtimePhase: 'working' as const, shuttleKind: 'oneshot' as const, sessionUuid: 'session', lastActivityAt: Date.now() - minutes * minute })
+const idle = (minutes: number) => ({ status: 'active' as const, workerState: 'running' as const, runtimePhase: 'waiting' as const, shuttleKind: 'oneshot' as const, sessionUuid: 'session', lastActivityAt: Date.now() - minutes * minute })
 // cmbx: a seated chair, an expert that posted, one asking, one at work saying nothing.
 const chair = card({ id: 'cmbx', uid: 'C', name: 'cmbx chair', shuttleChannel: 'cmbx', shuttleSeat: true, ...idle(5) })
 const tsz = card({ id: 'cmbx/tsz', uid: 'T', name: 'κ × tSZ', orchestrator: 'C', ...working(2) })
-const mask = card({ id: 'cmbx/mask', uid: 'M', name: 'Cluster mask', orchestrator: 'C', status: 'active', ask: { text: 'Mask at 5σ or 3σ?', at: at(20) } })
+const mask = card({ id: 'cmbx/mask', uid: 'M', name: 'Cluster mask', orchestrator: 'C', shuttleKind: 'oneshot', status: 'active', ask: { text: 'Mask at 5σ or 3σ?', at: at(20) } })
 const beam = card({ id: 'cmbx/beam', uid: 'B', name: 'Beam window', orchestrator: 'C', ...working(1) })
 // A lone constitution asking; a quiet one idle for weeks.
 const van = card({ id: 'van', uid: 'R', name: 'Moving house', status: 'active', ask: { text: 'Which van?', at: at(30) } })
@@ -65,6 +66,7 @@ async function mount(inFlight = [chair, tsz, mask, beam, van, notes], view = new
   const openFromDesk = vi.fn(), openPage = vi.fn(), requestRefresh = vi.fn(), see = vi.fn(async () => false)
   const workspace = {
     openFromDesk, openPage, look: see,
+    console: (options: ConsoleOptions) => new Dock(shuttleBase, requestRefresh, undefined, undefined, options),
     library: { subscribe: () => () => {}, visit: () => {}, cancelOpen: vi.fn(), documents: () => library, receipts: () => [] },
   }
   const sends = { files: sent, subscribe: () => () => {}, refresh: async () => {} }
@@ -73,14 +75,26 @@ async function mount(inFlight = [chair, tsz, mask, beam, van, notes], view = new
   prepare?.(host)
   views.push(view); view.mount(host, ctx)
   await settle(); await settle(); await settle()
-  const [reply, threadReply] = host.querySelectorAll<HTMLTextAreaElement>('.kbn-ch-reply-text')
-  return { view, ctx, host, reply, threadReply, openFromDesk, openPage, requestRefresh, see }
+  return { view, ctx, host, openFromDesk, openPage, requestRefresh, see }
 }
 const rail = (host: HTMLElement) => [...host.querySelectorAll('.kbn-ch-pick-name')].map(el => el.textContent)
 const shown = (host: HTMLElement) => host.querySelector('.kbn-ch-name')?.textContent
 const stream = (host: HTMLElement) => [...host.querySelectorAll('.kbn-ch .kbn-ch-msg')].map(el => [el.querySelector('.kbn-ch-msg-name')?.textContent, el.getAttribute('data-kind'), el.hasAttribute('data-waiting')])
 const message = (host: HTMLElement, name: string) => [...host.querySelectorAll<HTMLElement>('.kbn-ch .kbn-ch-msg')].find(el => el.querySelector('.kbn-ch-msg-name')?.textContent === name)!
-const to = (form: number, host: HTMLElement) => host.querySelectorAll('.kbn-ch-reply-to')[form]?.textContent
+type Pane = 'channel' | 'thread'
+/** A pane's console, docked under its list. */
+const consoleOf = (host: HTMLElement, pane: Pane) => host.querySelector<HTMLElement>(pane === 'channel' ? '.kbn-ch > .ws-dock' : '.kbn-ch-thread > .ws-dock')!
+const fieldOf = (host: HTMLElement, pane: Pane) => consoleOf(host, pane).querySelector<HTMLElement>('.ws-worker-message')!
+/** Whom a pane's console speaks to, as its head names it. */
+const to = (pane: Pane, host: HTMLElement) => consoleOf(host, pane).querySelector('.ws-band-title')?.textContent
+const draft = (host: HTMLElement, pane: Pane) => fieldOf(host, pane).textContent
+const write = (host: HTMLElement, pane: Pane, text: string) => { const field = fieldOf(host, pane); field.textContent = text; field.dispatchEvent(new Event('input')) }
+/** Types a line into a pane's console and sends it with Enter. */
+const say = async (host: HTMLElement, pane: Pane, text: string) => {
+  write(host, pane, text)
+  fieldOf(host, pane).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+  await settle(); await settle()
+}
 
 it('lists the recent channels, the newest wait first, and reads a channel as a short stream: each worker once, the chair in full', async () => {
   const { families } = daemon()
@@ -95,7 +109,7 @@ it('lists the recent channels, the newest wait first, and reads a channel as a s
   expect(post.querySelector('.kbn-ch-msg-text strong')?.textContent).toBe('9σ')
   expect(post.querySelector('.kbn-ch-image img')?.getAttribute('src')).toContain('spectrum.png')
   expect(post.querySelector('.kbn-ch-replies')?.textContent).toMatch(/^1 reply · last /)
-  expect(to(0, host)).toBe('cmbx chair')
+  expect(to('channel', host)).toBe('cmbx chair')
   expect(see).toHaveBeenLastCalledWith(chair)
   expect(view.keydown(new KeyboardEvent('keydown', { key: 'j' }))).toBe(true)
   expect(shown(host)).toBe('Moving house')
@@ -104,7 +118,7 @@ it('lists the recent channels, the newest wait first, and reads a channel as a s
 
 it('opens a worker\'s thread from its message: its name, liveness and ask on top, its history, a reply to it', async () => {
   const { posts } = daemon()
-  const { view, host, threadReply, openPage, requestRefresh, see } = await mount()
+  const { view, host, openPage, requestRefresh, see } = await mount()
   const thread = host.querySelector<HTMLElement>('.kbn-ch-thread')!
   expect(thread.hidden).toBe(true)
   message(host, 'κ × tSZ').querySelector<HTMLElement>('.kbn-ch-msg-body')!.click()
@@ -117,15 +131,14 @@ it('opens a worker\'s thread from its message: its name, liveness and ask on top
   expect(thread.querySelector('.kbn-ch-thread-ask, .kbn-ch-conclusion')).toBeNull()
   thread.querySelector<HTMLButtonElement>('.kbn-ch-thread-name')!.click()
   expect(openPage).toHaveBeenLastCalledWith(tsz, undefined)
-  expect(to(1, host)).toBe('κ × tSZ')
+  // The thread's console speaks to its worker, under the channel's chair.
+  expect(to('thread', host)).toBe('cmbx chair / tsz')
   expect(view.keydown(new KeyboardEvent('keydown', { key: 'Enter' }))).toBe(true)
-  expect(document.activeElement).toBe(threadReply)
-  threadReply.value = 'Show the nulls.'
-  threadReply.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
-  await settle()
-  expect(posts).toStrictEqual([['/api/v1/deliver', { fiber_id: 'cmbx/tsz', origin: 'local', text: 'Show the nulls.', from: 'human', message_id: expect.stringMatching(/^human-[0-9a-f]{32}$/) }]])
+  expect(document.activeElement).toBe(fieldOf(host, 'thread'))
+  await say(host, 'thread', 'Show the nulls.')
+  expect(posts.filter(([url]) => url === '/api/v1/dispatch')).toStrictEqual([['/api/v1/dispatch', { fiber_id: 'cmbx/tsz', origin: 'local', force: true, ad_hoc: true, resume_mode: 'previous', user_message: 'Show the nulls.', message_id: expect.stringMatching(/^human-[0-9a-f]{32}$/) }]])
   expect(requestRefresh).toHaveBeenCalled()
-  expect(threadReply.value).toBe('')
+  expect(draft(host, 'thread')).toBe('')
   // The reply stands in the thread until the board carries it, and not in the channel.
   expect([...thread.querySelectorAll('.kbn-ch-msg[data-human] .kbn-ch-msg-text')].map(el => el.textContent?.trim())).toContain('Show the nulls.')
   expect(stream(host).map(([name]) => name)).not.toContain('You')
@@ -190,46 +203,18 @@ it('shows a worker\'s own tapestry under its line and in its thread\'s head, and
 })
 
 it('a retried reply keeps its id, so the owner types it at most once; another reply gets its own', async () => {
-  const { posts } = daemon(['/api/v1/deliver'])
-  const { host, reply } = await mount()
-  const send = async (text: string) => {
-    reply.value = text
-    reply.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
-    await settle()
-  }
-  await send('Keep it.')
-  expect(host.querySelector('.kbn-ch-note')?.textContent ?? '').toContain('Not sent')
-  await send('Keep it.')
-  await send('Drop it.')
-  const ids = posts.filter(([url]) => url === '/api/v1/deliver').map(([, body]) => body.message_id)
+  const { posts } = daemon(['/api/v1/dispatch'])
+  const { host } = await mount()
+  await say(host, 'channel', 'Keep it.')
+  // The console says why, and keeps the words to send again.
+  expect(consoleOf(host, 'channel').querySelector('.kbn-detail-error')?.textContent).toContain('disk full')
+  expect(draft(host, 'channel')).toBe('Keep it.')
+  await say(host, 'channel', 'Keep it.')
+  await say(host, 'channel', 'Drop it.')
+  const ids = posts.filter(([url]) => url === '/api/v1/dispatch').map(([, body]) => body.message_id)
   expect(ids[0]).toMatch(/^human-[0-9a-f]{32}$/)
   expect(ids[1]).toBe(ids[0])
   expect(ids[2]).not.toBe(ids[0])
-})
-
-it('a repeated reply reads as sent only when its first send was delivered; else it may not have arrived, and sending again is a new message', async () => {
-  const send = async (reply: HTMLTextAreaElement, text: string) => {
-    reply.value = text
-    reply.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
-    await settle()
-  }
-  {
-    daemon([], new Map(), {}, {}, { delivery: 'input', duplicate: true, disposition: 'delivered', delivered: true })
-    const { host, reply } = await mount()
-    await send(reply, 'Keep it.')
-    expect(reply.value).toBe('')
-    expect(host.querySelector('.kbn-ch-note')?.textContent ?? '').not.toContain('may not have arrived')
-  }
-  document.body.replaceChildren()
-  const { posts } = daemon([], new Map(), {}, {}, { delivery: 'input', duplicate: true, disposition: 'unknown', delivered: null })
-  const { host, reply } = await mount()
-  await send(reply, 'Keep it.')
-  expect(host.querySelector('.kbn-ch-note')?.textContent).toContain('may not have arrived')
-  expect(reply.value).toBe('Keep it.')
-  await send(reply, 'Keep it.')
-  const ids = posts.filter(([url]) => url === '/api/v1/deliver').map(([, body]) => body.message_id)
-  expect(ids).toHaveLength(2)
-  expect(ids[1]).not.toBe(ids[0])
 })
 
 it('shows a closed fiber\'s outcome as its conclusion, and an open one\'s not at all', async () => {
@@ -246,24 +231,30 @@ it('shows a closed fiber\'s outcome as its conclusion, and an open one\'s not at
   } finally { BOARD.C.pop() }
 })
 
-it('replies in the channel to its chair; keeps each box\'s draft by whom it goes to; keeps the words when a reply fails', async () => {
-  const { posts } = daemon(['/api/v1/deliver'])
-  const { view, host, reply, threadReply } = await mount()
-  reply.value = 'Half a thought'
+it('replies in the channel to its chair; keeps each console\'s draft by whom it goes to', async () => {
+  const { posts } = daemon()
+  const { view, host } = await mount()
+  write(host, 'channel', 'Half a thought')
   message(host, 'κ × tSZ').click()
-  threadReply.value = 'For the thread'
+  write(host, 'thread', 'For the thread')
+  // Moving house has no worker to run, so no console.
   view.keydown(new KeyboardEvent('keydown', { key: 'j' }))
-  expect([reply.value, threadReply.value]).toStrictEqual(['', ''])
+  expect(consoleOf(host, 'channel').hidden).toBe(true)
   view.keydown(new KeyboardEvent('keydown', { key: 'k' }))
-  expect(reply.value).toBe('Half a thought')
+  expect(draft(host, 'channel')).toBe('Half a thought')
   message(host, 'κ × tSZ').click()
-  expect(threadReply.value).toBe('For the thread')
-  reply.value = 'Keep going.'
-  host.querySelector<HTMLFormElement>('.kbn-ch-reply')!.requestSubmit()
-  await settle()
-  expect(posts.at(-1)).toStrictEqual(['/api/v1/deliver', { fiber_id: 'cmbx', origin: 'local', text: 'Keep going.', from: 'human', message_id: expect.stringMatching(/^human-[0-9a-f]{32}$/) }])
-  expect(reply.value).toBe('Keep going.')
-  expect(host.querySelector('.kbn-ch-note')?.textContent).toContain('Not sent')
+  expect(draft(host, 'thread')).toBe('For the thread')
+  message(host, 'Cluster mask').click()
+  expect(draft(host, 'thread')).toBe('')
+  message(host, 'κ × tSZ').click()
+  expect(draft(host, 'thread')).toBe('For the thread')
+  await say(host, 'channel', 'Keep going.')
+  expect(posts.at(-1)).toStrictEqual(['/api/v1/dispatch', expect.objectContaining({ fiber_id: 'cmbx', user_message: 'Keep going.' })])
+  // A sent line spends its draft.
+  expect(draft(host, 'channel')).toBe('')
+  view.keydown(new KeyboardEvent('keydown', { key: 'j' }))
+  view.keydown(new KeyboardEvent('keydown', { key: 'k' }))
+  expect(draft(host, 'channel')).toBe('')
 })
 
 it('sets a waiting channel aside, pins and unpins from its menu, and restores a write that fails', async () => {
@@ -487,7 +478,7 @@ it('previews an HTML file whole, the page drawn small, kept across redraws, and 
 
 it('keeps focus on its item across a poll, draws nothing under the reader, and returns focus where the reader was opened', async () => {
   daemon()
-  const { view, ctx, host, openPage, reply } = await mount()
+  const { view, ctx, host, openPage } = await mount()
   const workspace = ctx.workspace as unknown as { isActive: boolean }
   const image = () => host.querySelector<HTMLButtonElement>('.kbn-ch .kbn-ch-image')!
   image().focus()
@@ -504,7 +495,7 @@ it('keeps focus on its item across a poll, draws nothing under the reader, and r
   view.refresh(ctx)
   expect(document.activeElement).toBe(image())
   workspace.isActive = true; view.refresh(ctx); workspace.isActive = false; view.refresh(ctx)
-  expect(document.activeElement).toBe(reply)
+  expect(document.activeElement).toBe(fieldOf(host, 'channel'))
 })
 
 it('opens a channel on its newest message and follows new ones, unless the reader has scrolled up; only the stream scrolls', async () => {
@@ -544,11 +535,9 @@ it('opens a channel on its newest message and follows new ones, unless the reade
 
 it('shows a reply sent from here until the board records it, once, or for two minutes at most', async () => {
   daemon()
-  const { view, ctx, host, reply } = await mount()
+  const { view, ctx, host } = await mount()
   const yours = () => [...host.querySelectorAll('.kbn-ch .kbn-ch-msg[data-human] .kbn-ch-msg-text')].map(el => el.textContent?.trim())
-  reply.value = 'Ship it.'
-  host.querySelector<HTMLFormElement>('.kbn-ch-reply')!.requestSubmit()
-  await settle()
+  await say(host, 'channel', 'Ship it.')
   expect(yours()).toStrictEqual(['Ship it.'])
   // The daemon records the board's line as `human`, keyed by the line's id: it takes the echo's place.
   BOARD.C.push(record({ id: 'brd-human-1', kind: 'human', fiber: 'C', by: { label: 'Sam' }, text: 'Ship it.' }, 0))
@@ -557,10 +546,15 @@ it('shows a reply sent from here until the board records it, once, or for two mi
     expect(yours()).toStrictEqual(['Ship it.'])
   } finally { BOARD.C.pop() }
   // Unrecorded (a daemon that writes no such record), it stands two minutes.
+  // A line sent with images is recorded with a line for each image after it: that record is its own too.
+  await say(host, 'channel', 'With the plot.')
+  BOARD.C.push(record({ id: 'brd-human-2', kind: 'human', fiber: 'C', by: { label: 'Sam' }, text: 'With the plot.\n\n[Image: /data/images/a.png]' }, 0))
+  try {
+    view.refresh(ctx); await settle(); await settle()
+    expect(yours().filter(text => text?.startsWith('With the plot.'))).toHaveLength(1)
+  } finally { BOARD.C.pop() }
   const clock = vi.spyOn(Date, 'now')
-  reply.value = 'And the nulls.'
-  host.querySelector<HTMLFormElement>('.kbn-ch-reply')!.requestSubmit()
-  await settle()
+  await say(host, 'channel', 'And the nulls.')
   expect(yours()).toContain('And the nulls.')
   const later = Date.now() + 2 * minute + 1
   clock.mockReturnValue(later)
@@ -608,7 +602,7 @@ it('shows the chair once, by its latest line, however many it sent', async () =>
 
 it('offers no reply to a closed worker, and names an image its host no longer holds', async () => {
   daemon()
-  const done = card({ id: 'cmbx/done', uid: 'X', name: 'Done', orchestrator: 'C', column: 'tempered', status: 'closed', closedAt: at(30), outcome: 'Measured.' })
+  const done = card({ id: 'cmbx/done', uid: 'X', name: 'Done', orchestrator: 'C', shuttleKind: 'oneshot', column: 'tempered', status: 'closed', closedAt: at(30), outcome: 'Measured.' })
   BOARD.C.push(record({ id: 'b6', kind: 'post', fiber: 'X', text: 'Finished.', files: ['/gone/shot.png'] }, 40))
   try {
     const { host } = await mount([chair, tsz, mask, beam, done])
@@ -616,8 +610,7 @@ it('offers no reply to a closed worker, and names an image its host no longer ho
     image.dispatchEvent(new Event('error'))
     expect(message(host, 'Done').querySelector('.kbn-ch-file[data-gone]')?.textContent).toBe('shot.png')
     message(host, 'Done').click()
-    const forms = host.querySelectorAll<HTMLFormElement>('.kbn-ch-reply')
-    expect(forms[1].hidden).toBe(true)
+    expect(consoleOf(host, 'thread').hidden).toBe(true)
     expect(host.querySelector('.kbn-ch-reopen')?.textContent).toBe('Closed. Reopen it from its page to reply.')
   } finally { BOARD.C.pop() }
 })
@@ -637,10 +630,8 @@ it('takes no older record with the same words for the board\'s record of a reply
   BOARD.C.push(record({ id: 'brd-human-old-ok', kind: 'human', fiber: 'C', by: { label: 'Sam' }, text: 'ok' }, 7 * 24 * 60))
   try {
     daemon()
-    const { host, reply } = await mount()
-    reply.value = 'ok'
-    host.querySelector<HTMLFormElement>('.kbn-ch-reply')!.requestSubmit()
-    await settle()
+    const { host } = await mount()
+    await say(host, 'channel', 'ok')
     expect([...host.querySelectorAll('.kbn-ch .kbn-ch-msg[data-human] .kbn-ch-msg-text')].map(el => el.textContent?.trim())).toStrictEqual(['ok', 'ok'])
   } finally { BOARD.C.pop() }
 })

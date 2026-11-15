@@ -120,7 +120,7 @@ export class Reader {
   private readonly title: HTMLButtonElement
   private readonly returnButton: HTMLButtonElement
   private backDestination = 'Desk'
-  /** The band over the stage, seated by the workspace for a fiber on the Desk's lifecycle. */
+  /** The console docked under the stage, seated by the workspace for a fiber on the Desk's lifecycle. */
   private readonly band = element('div', 'ws-stage-band')
   /** The one worker control: the card's own pill, drawn bare in the head's right end. */
   private readonly topbar = new PhoneTopbar(hidden => this.el.classList.toggle('ws-topbar-hidden', this.phone.matches && hidden))
@@ -189,7 +189,7 @@ export class Reader {
     })
     const column = element('div', 'ws-stage-column')
     this.band.hidden = true
-    column.append(this.band, this.stage)
+    column.append(this.stage, this.band)
     this.el.append(this.veil, this.navbar, column, this.pageSheet.el, this.menu)
     this.host = new DocumentHost(this.track, {
       shuttleBase: opts.shuttleBase,
@@ -326,7 +326,7 @@ export class Reader {
   /** Back, Escape and the phone swipe follow the same visited path. */
   back(): void { this.opts.onReturn() }
   closeSettings(after: () => void): void { this.settingsMenu.close(after) }
-  /** Seat the band over the stage, or clear it where the page has none. */
+  /** Seat the console under the stage, or clear it where the page has none. */
   setBand(el: HTMLElement | null): void {
     if (el ? this.band.firstChild === el : !this.band.firstChild) return
     this.band.replaceChildren(...(el ? [el] : []))

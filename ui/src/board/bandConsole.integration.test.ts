@@ -4,6 +4,7 @@ import type { KanbanCard } from './KanbanTypes.js'
 import { card } from './testFixtures.js'
 import { Dock } from './workspace/Dock.js'
 import { saveConversationOpening } from './conversationOpening.js'
+import { pressConsoleAct } from './workspace/testActs.js'
 
 const worker = (over: Partial<KanbanCard> = {}): KanbanCard => card({
   id: 'debug', uid: 'debug-uid', originId: 'host-a', status: 'active',
@@ -25,7 +26,9 @@ beforeEach(() => {
 afterEach(() => { dock.reset(); vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.replaceChildren() })
 function consoleFor(current: KanbanCard): HTMLAnchorElement {
   dock.open(current)
-  const found = dock.el.querySelectorAll<HTMLAnchorElement>('.ws-acts-console')
+  const acts = dock.actsFor(() => current)
+  document.body.append(acts.el)
+  const found = acts.el.querySelectorAll<HTMLAnchorElement>('.ws-acts-console')
   expect(found.length).toBe(1)
   return found[0]
 }
@@ -82,11 +85,10 @@ describe("the band's console opens the conversation, as c does", () => {
     expect(opener.hidden).toBe(true)
     expect(dock.canOpenConversation(worker({ workerState: undefined, tmuxSession: undefined, status: 'closed' }))).toBe(false)
   })
-  it('follows the highlighted thread, as the verbs beside it do', () => {
-    const opener = consoleFor(worker())
+  it('follows the highlighted thread from the console\'s menu, as the verbs beside it do', async () => {
+    dock.open(worker())
     dock.setActionCard(worker({ id: 'lander', uid: 'lander-uid', tmuxSession: 'shuttle-lander' }))
-    expect(opener.getAttribute('aria-label')).toBe("Open lander's conversation in Terminal (c)")
-    opener.click()
+    await pressConsoleAct(dock.el, 'Open conversation')
     expect(openWorker.mock.calls).toEqual([['shuttle-lander', 'host-a', undefined]])
   })
 })

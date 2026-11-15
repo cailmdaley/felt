@@ -14,7 +14,7 @@ import { registerHeaderBarJourneys } from './headerBar.mjs'
 import { familySends, familyTree, pageBack, showFile } from './familyNav.mjs'
 import { registerCapGeometryJourneys } from './capGeometry.mjs'
 import { registerRenderedTypeJourneys } from './renderedType.mjs'
-import { closeVerbMenu, hitBox, offeredVerbs, pressVerb, verbCaret, verbControl, verbFace } from './verbs.mjs'
+import { closeVerbMenu, consoleAct, consoleMenu, hitBox, offeredVerbs, pressVerb, verbCaret, verbControl, verbFace } from './verbs.mjs'
 
 const browser = await launchBrowser()
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=workspace`
@@ -48,19 +48,22 @@ async function open(p, expected = 'calibration-report') {
   await land(p)
   await choose(p, expected)
 }
+/** The highlighted row's strip of acts on its family's page. */
+const rowActs = p => selected(p).locator('.fp-row[data-selected] > .fp-line .fp-verbs > .ws-fiber-acts')
+/** The console's acts: its menu, and where a verdict's undo stands. */
+const consoleActs = p => band(p).locator('.ws-band-head .ws-band-acts')
 /**
- * The fiber's acts where they show: the band's, on a page with no row for the
- * fiber (a report, a document, the constitution's own page); otherwise the
- * highlighted row's on its family's page.
+ * The fiber's acts where they show: the highlighted row's on its family's
+ * page; on a page with no row for the fiber (a report, a document, the
+ * constitution's own page), the console's menu.
  */
-const acts = p => band(p).locator('.ws-band-head[data-acts] > .ws-fiber-acts')
-  .or(selected(p).locator('.fp-row[data-selected] > .fp-line .fp-verbs > .ws-fiber-acts'))
+const acts = p => p.locator('.ws-reader:not(:has(.ws-page.ws-selected .fp-row[data-selected] .ws-fiber-acts)) .ws-stage-band .ws-band-head .ws-band-acts').or(rowActs(p))
 async function headerAction(p, label) {
-  if (label === 'Settings') { await acts(p).locator('.ws-acts-settings').click(); return }
+  const row = await rowActs(p).isVisible()
+  if (label === 'Settings') { await (row ? rowActs(p).locator('.ws-acts-settings') : await consoleAct(consoleActs(p), 'Settings')).click(); return }
   if (label === 'Constitution') {
-    // The band's constitution button opens the constitution's page where the band carries the acts; from the family's page, its receded page.
-    const page = band(p).locator('.ws-band-head[data-acts] .ws-band-constitution')
-    if (await page.isVisible()) await page.click()
+    // The console's menu opens the constitution's page where no row stands for the fiber; from the family's page, its receded page.
+    if (!row) await (await consoleAct(consoleActs(p), 'Constitution')).click()
     else await pageFor(p, 'Constitution').dispatchEvent('click')
     return
   }
@@ -291,7 +294,9 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   await choose(p, 'Constitution')
   if (device === 'desktop') await type('.ws-selected .ws-fiber-prose h1', 'display', 'EB Garamond')
   assert.equal(await selected(p).locator('.kbn-detail-lede').count(), 1, 'the constitution leads with its outcome')
-  await type('.ws-stage-band .ws-header-word', 'label', 'EB Garamond')
+  await consoleMenu(consoleActs(p)).click()
+  await type('[role="menu"].kbn-verb-menu .ws-header-word', 'label', 'EB Garamond')
+  await closeVerbMenu(p)
   await bandMenu(p, 'Settings')
   await type('.ws-stage-band .kbn-ctl-strip', 'meta', 'IBM Plex Mono')
   await p.keyboard.press('Escape')
@@ -1007,20 +1012,21 @@ test('Wide reader scans Desk cards and returns the last viewed card with one Esc
   assert.equal(await p.locator('.kbn-key-selected .kbn-card-name').getAttribute('title'), next)
 })
 
-test('On a report the band carries the fiber\'s acts, with the undo line in their place; keys reach them', async p => {
+test('On a report the console\'s menu carries the fiber\'s acts, with the undo line in its place; keys reach them', async p => {
   await open(p)
   assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper, .kbn-ctl-discard)').count(), 0)
-  const pair = band(p).getByRole('group', { name: "calibration-report's acts", exact: true })
-  // Work awaiting review wears Temper on its verb button's face; the caret names the rest with their keys.
-  assert.ok(await pair.getByRole('button', { name: 'Temper calibration-report (t)', exact: true }).isVisible())
-  assert.ok(await pair.getByRole('button', { name: 'More verbs for calibration-report: Rest (s), Discard (x)', exact: true }).isVisible())
+  const pair = consoleActs(p)
+  assert.ok(await pair.getByRole('button', { name: "calibration-report's acts", exact: true }).isVisible())
+  // Work awaiting review leads with Temper; each verb names its key.
   assert.deepEqual(await offeredVerbs(pair), ['Temper', 'Rest', 'Discard'])
+  assert.equal(await (await consoleAct(pair, 'Temper')).getAttribute('aria-keyshortcuts'), 't')
+  await closeVerbMenu(p)
   await choose(p, 'calibration-report')
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
   await appFocus(p); await p.keyboard.press('t')
   assert.equal(await isSelected(p, 'calibration-report'), true, 'the page stays where it is')
-  await band(p).locator('.ws-fiber-acts > .ws-verdict-undo').waitFor()
-  assert.equal(await band(p).locator('.ws-fiber-acts > .ws-verdict-undo').count(), 1)
+  await consoleActs(p).locator('.ws-verdict-undo').waitFor()
+  assert.equal(await consoleActs(p).locator('.ws-verdict-undo').count(), 1)
   assert.equal((await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition')).length, 0)
   await p.clock.runFor(6000)
   await poll(p, () => window.__harness.requests.some(r => r.method === 'POST' && r.url.includes('/transition')))
@@ -1053,20 +1059,21 @@ for (const theme of [null, 'night-chart']) test(`Verdict verbs wear one pigment 
   if (theme) { const themed = new URL(url); themed.searchParams.set('theme-preview', `01KVBR1F9BWBVKF97473PV67K8:${theme}`); await p.goto(themed.href) }
   await open(p)
   const looks = {}
-  // Temper on the verb button's face, its mark in the pigment; Discard in its caret's menu.
+  // Temper's mark in the pigment, on a row's verb face or in the console's menu; Discard in a menu.
   const verdicts = async strip => {
-    const temper = await verdictLook(verbFace(strip).and(p.locator('.kbn-ctl-temper')).locator('svg'))
+    const temper = await verdictLook((await verbControl(strip, 'Temper')).and(p.locator('.kbn-ctl-temper')).locator('svg'))
+    await closeVerbMenu(p)
     const discard = await verdictLook(await verbControl(strip, 'Discard'))
     await closeVerbMenu(p)
     return [temper, discard]
   }
-  looks.act = await verdicts(band(p).locator('.ws-fiber-acts'))
+  looks.act = await verdicts(consoleActs(p))
   await familyTree(p)
   looks.row = await verdicts(acts(p))
   await choose(p, 'calibration-report')
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
-  await pressVerb(band(p).locator('.ws-fiber-acts'), 'Discard')
-  looks.line = [await verdictLook(band(p).locator('.ws-fiber-acts > .ws-verdict-undo .ws-verdict-word'))]
+  await pressVerb(consoleActs(p), 'Discard')
+  looks.line = [await verdictLook(consoleActs(p).locator('.ws-verdict-undo .ws-verdict-word'))]
   for (const [surface, [temper, discard]] of Object.entries(looks)) {
     if (temper && discard) { assert.ok(tealish(temper.color), `${surface} Temper ink is verdigris: ${temper.color}`); assert.ok(reddish(discard.color), `${surface} Discard ink is red: ${discard.color}`) }
     for (const look of [temper, discard].filter(Boolean)) assert.ok(look.ratio >= 4.5, `${surface} verdict ink ${look.color} on ${look.fill}: ${look.ratio.toFixed(2)}:1`)
@@ -1145,16 +1152,13 @@ test('Landscape phone keeps a one-row top bar while the fiber awaits review', as
   assert.ok(bar.height <= title.height + 12, `one row: navbar ${bar.height}px for a ${title.height}px title`)
   await headerAction(p, 'Settings')
   await p.locator('.ws-settings-menu:not([hidden])').waitFor()
-  const settings = await acts(p).locator('.ws-acts-settings').boundingBox()
-  // The verb button stands as tall as the band's other icons; its face (Temper) and its caret (Discard and the rest) each answer a full-height tap.
-  const pill = await acts(p).locator('.ws-acts-verbs').boundingBox()
-  assert.equal(pill.height, settings.height, `the verb button is as tall as the band's other icons: ${JSON.stringify({ pill, settings })}`)
-  for (const [part, control] of [['Temper', verbFace(acts(p))], ['the caret', verbCaret(acts(p))]]) {
-    const box = await hitBox(control)
-    assert.ok(box.height >= 44, `${part} is a full-height target: ${JSON.stringify(box)}`)
-  }
-  assert.equal(await verbFace(acts(p)).getAttribute('data-verb'), 'Temper')
-  assert.ok((await offeredVerbs(acts(p))).includes('Discard'), 'Discard is a menu away')
+  await p.keyboard.press('Escape')
+  // The console's menu answers a full-height tap and leads with Temper; Discard is in it too.
+  const box = await hitBox(consoleMenu(consoleActs(p)))
+  assert.ok(box.height >= 44, `the console's menu is a full-height target: ${JSON.stringify(box)}`)
+  const verbs = await offeredVerbs(consoleActs(p))
+  assert.equal(verbs[0], 'Temper')
+  assert.ok(verbs.includes('Discard'), 'Discard is a menu away')
 }, { width: 844, height: 390 }, 'reduce', true)
 
 test('A key discard waits on the constitution in place of the pair; undo, then Temper, makes one delayed write', async p => {
@@ -1162,13 +1166,13 @@ test('A key discard waits on the constitution in place of the pair; undo, then T
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
   await appFocus(p); await p.keyboard.press('x')
   assert.equal(await isSelected(p, 'calibration-report'), true, 'the key leaves the page in place')
-  const pair = band(p).locator('.ws-fiber-acts')
+  const pair = consoleActs(p)
   assert.match(await pair.locator('.ws-verdict-undo').innerText(), /^DISCARDED/i)
-  assert.ok(await pair.locator('.kbn-ctl-temper').isHidden(), 'the acts give way to the line')
+  assert.ok(await consoleMenu(pair).isHidden(), 'the menu gives way to the line')
   await p.clock.runFor(3000)
   await pair.getByRole('button', { name: `Undo verdict on ${name}`, exact: true }).click()
-  await pair.locator('.kbn-ctl-temper').click()
-  assert.equal(await band(p).locator('.ws-fiber-acts .ws-verdict-undo').count(), 1)
+  await pressVerb(pair, 'Temper')
+  assert.equal(await consoleActs(p).locator('.ws-verdict-undo').count(), 1)
   assert.match(await pair.locator('.ws-verdict-undo').innerText(), /^TEMPERED/i)
   await p.clock.runFor(3999)
   assert.equal((await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition')).length, 0)
@@ -1213,7 +1217,7 @@ for (const surface of ['Desk', 'fiber']) test(`${surface} verdict buttons delay 
   if (surface === 'fiber') { await open(p) }
   const controls = surface === 'Desk'
     ? p.getByRole('menu')
-    : band(p).locator('.ws-fiber-acts')
+    : consoleActs(p)
   if (surface === 'Desk') await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${name}"])`).click({ button: 'right' })
   if (surface === 'Desk') await controls.getByRole('menuitem', { name: /Discard/ }).click()
   else await pressVerb(controls, 'Discard')
@@ -1239,7 +1243,7 @@ test('Verdict keys delay writes, guard typing, undo, and commit after leaving th
   }
   assert.equal(await p.locator('.ws-verdict-undo').count(), 0)
   await p.keyboard.press('t')
-  assert.equal(await band(p).locator('.ws-fiber-acts .ws-verdict-undo').textContent(), 'Tempered·undo z')
+  assert.equal(await consoleActs(p).locator('.ws-verdict-undo').textContent(), 'Tempered·undo z')
   await p.clock.runFor(100)
   assert.equal(await p.locator('[role="status"][aria-live="polite"]').filter({ hasText: 'undo z' }).textContent(), 'Tempered Calibrate the shear response · undo z')
   assert.equal((await posts()).length, 0)
@@ -2237,7 +2241,7 @@ test('Theme URLs allow only data, Google Fonts and relative resources inside the
 
 test('Escaped theme imports cannot load unscoped CSS or target the act zone', async p => {
   await open(p); await choose(p, 'Constitution')
-  const control = band(p).locator('.ws-band-head[data-acts] .ws-acts-settings')
+  const control = consoleMenu(consoleActs(p))
   await control.waitFor()
   const before = await control.evaluate(element => getComputedStyle(element).color)
   const requests = []
@@ -2333,7 +2337,7 @@ test('Act zone stops broad button rules and resets theme fonts, sizes and pigmen
     probe.remove()
     return color
   }), 'rgb(255, 0, 0)', 'the broad rule is active in the reading zone')
-  const temper = band(p).locator('.ws-band-head[data-acts] .kbn-ctl-temper')
+  const temper = await verbControl(consoleActs(p), 'Temper')
   const style = await temper.evaluate(el => ({ color: getComputedStyle(el).color, font: getComputedStyle(el).fontFamily, height: getComputedStyle(el).getPropertyValue('--ws-control-height').trim(), agent: getComputedStyle(el).getPropertyValue('--ws-agent').trim(), transform: getComputedStyle(el).textTransform, pigment: getComputedStyle(el).getPropertyValue('--kbn-agent').trim(), mono: getComputedStyle(el).getPropertyValue('--font-mono').trim() }))
   assert.notEqual(style.color, 'rgb(255, 0, 0)', 'button { color: red } cannot reach Temper')
   assert.ok(!style.font.includes('fantasy'))
@@ -2342,6 +2346,7 @@ test('Act zone stops broad button rules and resets theme fonts, sizes and pigmen
   assert.equal(style.transform, 'none', 'inherited theme typography also stops at the act zone')
   assert.notEqual(style.pigment, 'red', 'theme aliases cannot change a control pigment')
   assert.ok(!style.mono.includes('fantasy'), 'theme aliases cannot change a control font')
+  await closeVerbMenu(p)
   assert.equal(await band(p).locator('.ws-dock').getAttribute('data-part'), 'act')
   // A row's acts on the family's page are controls too: the theme's broad rules stop short of them.
   await familyTree(p)
@@ -2428,9 +2433,9 @@ test('Theme refresh uses ETag on the ordinary cadence, not on selection frames',
 test('Protected verdict plate and its undo line hold without author CSS', async p => {
   await open(p)
   await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
-  const plate = band(p).locator('.ws-fiber-acts')
+  const plate = consoleActs(p)
   assert.equal(await plate.evaluate(el => el.closest('[data-part="act"]')?.dataset.act), 'band')
-  assert.notEqual(await plate.locator('.kbn-ctl-temper').evaluate(el => getComputedStyle(el).color), 'rgb(255, 0, 0)')
+  assert.notEqual(await consoleMenu(plate).evaluate(el => getComputedStyle(el).color), 'rgb(255, 0, 0)')
   await appFocus(p); await p.keyboard.press('t')
   const undo = plate.locator('.ws-verdict-undo button')
   await undo.waitFor()
@@ -2512,7 +2517,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   await open(p)
   await band(p).locator('.ws-band-head').waitFor()
   if (phone) await settleTransitions(p, '.ws-navbar')
-  if (!phone) for (const control of ['.ws-worker-acts button:not([hidden])', '.ws-acts-settings']) await still(p, `hovering ${control}`, () => band(p).locator(control).first().hover(), { allow: [`.ws-stage-band ${control}`] })
+  if (!phone) for (const control of ['.ws-worker-acts button:not([hidden])', '.ws-band-menu']) await still(p, `hovering ${control}`, () => band(p).locator(control).first().hover(), { allow: [`.ws-stage-band ${control}`] })
   await still(p, 'a poll repaint under the band', () => repaint(p))
   await bandMenu(p, 'Settings')
   if (!phone) {
@@ -2552,7 +2557,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
     })
     await repaint(p)
   }, settle: 100 }).then(moved => device === 'narrow' ? moved.filter(({ dh, dy }) => !dh && !dy) : moved), [], 'a worker starting leaves the open report still')
-  await still(p, 'hovering Settings', () => band(p).locator('.ws-acts-settings').hover(), { allow: ['.ws-acts-settings'] })
+  await still(p, 'hovering the console\'s menu', () => band(p).locator('.ws-band-menu').hover(), { allow: ['.ws-band-menu'] })
   await still(p, 'a band worker-state change', async () => {
     await p.evaluate(() => {
       const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Calibrate the shear response')

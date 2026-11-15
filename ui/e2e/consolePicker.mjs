@@ -3,6 +3,7 @@ import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { launchBrowser } from './browser.mjs'
+import { consoleAct } from './verbs.mjs'
 
 const browser = await launchBrowser()
 const base = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=workspace`
@@ -95,13 +96,12 @@ try {
     // The row's console opens the same place, on both surfaces.
     assert.match(await opener(p).getAttribute('aria-label'), /^Open [\w-]+'s conversation in Claude browser \(c\)$/, 'the console names its destination and key')
     assert.equal(await opener(p).getAttribute('href'), 'https://claude.ai/code/session_fixture', 'a web destination is a native link')
-    // On a page with no row for the fiber, the band carries the same console.
-    const rowLabel = await opener(p).getAttribute('aria-label')
+    // On a page with no row for the fiber, the console's menu opens the same place.
     await p.locator('.ws-page[data-key$="/report.html"]').first().dispatchEvent('click')
-    const bandConsole = band(p).locator('.ws-band-head[data-acts] .ws-acts-console')
-    await bandConsole.waitFor()
-    assert.equal(await bandConsole.getAttribute('aria-label'), rowLabel)
-    assert.equal(await bandConsole.getAttribute('href'), 'https://claude.ai/code/session_fixture')
+    const links = await p.evaluate(() => window.__conversationLinks.length)
+    await (await consoleAct(band(p), 'Open conversation')).click()
+    await p.waitForFunction(links => window.__conversationLinks.length > links, links)
+    assert.equal(await p.evaluate(() => window.__conversationLinks.at(-1)), 'https://claude.ai/code/session_fixture')
     await p.evaluate(() => document.activeElement?.blur()); await p.keyboard.press('l')
     await lit(p).locator('.ws-fiber-acts').waitFor({ state: 'visible' })
     if (phone) {

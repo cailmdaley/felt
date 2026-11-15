@@ -80,25 +80,29 @@ try {
     await pick(page, 'cmbx').click()
     await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'cmbx' && document.querySelector('.kbn-ch-tapestry'))
     if (phone) assert.equal(await page.locator('.kbn-ch-rail').isVisible(), false)
-    // Each worker once, its latest, marked while it waits; the chair in full, its tapestry among its messages; the silent beam window absent.
-    await page.waitForFunction(() => document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-msg').length === 7)
+    // Each worker once, its latest, marked while it waits; the chair once too, by its latest line, here its tapestry; the silent beam window absent.
+    await page.waitForFunction(() => document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-msg').length === 5)
     assert.deepEqual(await page.evaluate(lines), [
-      ['cmbx chair', 'post'], ['Joint covariance', 'review'], ['κ × tSZ cross-spectrum', 'post'], ['Cluster foreground mask', 'ask'],
-      ['cmbx chair', 'post'], ['You', 'reply'], ['cmbx chair', 'tapestry'],
+      ['Joint covariance', 'review'], ['κ × tSZ cross-spectrum', 'post'], ['Cluster foreground mask', 'ask'], ['You', 'reply'], ['cmbx chair', 'tapestry'],
     ])
-    assert.equal(await page.locator('.kbn-ch-reply-to').first().textContent(), 'cmbx chair')
-    assert.equal(await page.locator('.kbn-ch-msg', { hasText: '9σ' }).locator('.kbn-ch-image').count(), 1)
+    // The channel's console speaks to its chair.
+    assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-band-title').textContent(), 'cmbx chair')
+    const spectrum = page.locator('.kbn-ch-msg[data-fiber="cmbx/kappa-tsz"]')
+    assert.equal(await spectrum.locator('.kbn-ch-image').count(), 1)
+    // Its deck is previewed whole, the page drawn small.
+    assert.equal(await spectrum.locator('.kbn-ch-html .ws-thumbnail').count(), 1)
     // The stream opens on its newest message, and stays there as images arrive.
     await page.waitForFunction(() => { const el = document.querySelector('.kbn-ch > .kbn-ch-stream'); return el.scrollHeight - el.scrollTop - el.clientHeight <= 24 }, null, { timeout: 5000 })
     await fits(page)
     await shot(page, `${name}-channel`)
     // A message opens its worker's thread: its history, its liveness, a reply to it.
-    await page.locator('.kbn-ch-msg', { hasText: '9σ' }).locator('.kbn-ch-replies').click()
+    await spectrum.locator('.kbn-ch-replies').click()
     await page.waitForFunction(() => !document.querySelector('.kbn-ch-thread').hidden)
     assert.equal(await page.locator('.kbn-ch-liveness').textContent(), 'working')
     // The thread's own worker speaks unnamed; others are named.
-    assert.deepEqual(await page.locator('.kbn-ch-thread-list .kbn-ch-msg-name').allTextContents(), ['cmbx chair', 'You'])
-    assert.equal(await page.locator('.kbn-ch-thread .kbn-ch-reply-to').textContent(), 'κ × tSZ cross-spectrum')
+    assert.deepEqual(await page.locator('.kbn-ch-thread-list .kbn-ch-msg-name').allTextContents(), ['cmbx chair'])
+    // The thread's console speaks to its worker, under the chair's name.
+    assert.equal(await page.locator('.kbn-ch-thread > .ws-dock .ws-band-title').textContent(), 'cmbx chair / kappa-tsz')
     if (phone) assert.equal(await page.locator('.kbn-ch').isVisible(), false)
     await fits(page)
     await shot(page, `${name}-thread`)
@@ -162,7 +166,7 @@ try {
   await spectrum.scrollIntoViewIfNeeded()
   await fits(page)
   await shot(page, 'half-channel')
-  await page.locator('.kbn-ch-msg', { hasText: '9σ' }).locator('.kbn-ch-replies').click()
+  await page.locator('[data-item="replies:cmbx/kappa-tsz"]').click()
   await page.waitForFunction(() => !document.querySelector('.kbn-ch-thread').hidden)
   assert.equal(await page.locator('.kbn-ch').isVisible(), false)
   assert.equal(await page.locator('.kbn-ch-thread-head .kbn-ch-tip').textContent(), 'Back to # cmbx')

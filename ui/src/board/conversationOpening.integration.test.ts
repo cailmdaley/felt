@@ -26,8 +26,9 @@ afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); document.body.rep
 const bandConsole = (current: KanbanCard, openWorker?: WorkerOpener): HTMLAnchorElement => {
   const dock = new Dock('', vi.fn(), undefined, openWorker)
   dock.open(current)
-  document.body.append(dock.el)
-  return dock.el.querySelector<HTMLAnchorElement>('.ws-acts-console')!
+  const acts = dock.actsFor(() => current)
+  document.body.append(dock.el, acts.el)
+  return acts.el.querySelector<HTMLAnchorElement>('.ws-acts-console')!
 }
 const opensInPlace = (opener: HTMLAnchorElement): boolean => !opener.hidden && !opener.hasAttribute('href')
 

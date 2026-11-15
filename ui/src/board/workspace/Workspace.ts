@@ -1,7 +1,7 @@
 import { slug } from '../threadOutline.js'
 import { ThreadIndex, cardNamed } from '../threads.js'
 import { hasWorkerToStop, type KanbanCard } from '../KanbanTypes.js'
-import type { Dock } from './Dock.js'
+import type { ConsoleOptions, Dock } from './Dock.js'
 import { Verdicts, confirmWorkerStop, type Verdict } from './Verdicts.js'
 import { fiberPageKicker, onDesk, reviewReachable, verdictReachable } from './fiberPageState.js'
 import { type Charter, charters, holdsRevision, mayBeCharter, roleHolds, roleSlug } from './RolePage.js'
@@ -60,6 +60,8 @@ export interface WorkspaceOptions {
   /** A history entry addressed a board view or channel origin; switch to it without pushing. */
   onView?(view: WorkspaceView): void
   dock: Dock
+  /** A console of its own for a surface beside the reader (a Channels pane), built as the reader's is. */
+  console(options: ConsoleOptions): Dock
   /** The board bar's Find field, shared by every view on the desktop. */
   find?: HTMLInputElement
   /** Focus the board bar's Find; false where the bar has none (the phone). */
@@ -190,13 +192,7 @@ export class Workspace {
     this.depth = new WorkspaceDepth(root)
     this.origin = opts.origin()
     this.history = new WorkspaceHistory(route => { void this.applyRoute(route) })
-    this.dock = opts.dock
-    this.dock.setFiberSlug((fiber, origin) => {
-      const cards = this.opts.cards().filter(card => card.id === fiber || card.uid === fiber)
-      const card = cards.find(card => card.originId === origin) ?? cards[0]
-      return card && slug(card)
-    })
-    this.dock.setVerdictQueue((card, verdict) => this.queueVerdict(card, verdict))
+    this.dock = this.wire(opts.dock)
     this.themes = new ChannelThemes(opts.shuttleBase)
     this.library = new Library({
       shuttleBase: opts.shuttleBase,
@@ -597,6 +593,17 @@ export class Workspace {
     })
     return true
   }
+  /** A console for a surface beside the reader: its voice names fibers and its verdicts wait out the undo window as the reader's do. */
+  console(options: ConsoleOptions): Dock { return this.wire(this.opts.console(options)) }
+  private wire(dock: Dock): Dock {
+    dock.setFiberSlug((fiber, origin) => {
+      const cards = this.opts.cards().filter(card => card.id === fiber || card.uid === fiber)
+      const card = cards.find(card => card.originId === origin) ?? cards[0]
+      return card && slug(card)
+    })
+    dock.setVerdictQueue((card, verdict) => this.queueVerdict(card, verdict))
+    return dock
+  }
   /** The band belongs to fibers on the Desk's lifecycle; a note or role has none. */
   private controls(state: ChannelState | null): Dock | undefined {
     if (!state?.metadataKnown || state.channel.uid.startsWith('other:') || !onDesk(state.card)) return undefined
@@ -621,7 +628,6 @@ export class Workspace {
     for (let parent = this.orchestrator(state.card); parent; parent = this.orchestrator(parent)) ancestry.unshift(parent)
     dock.openSettings = (content, opener) => this.reader.showSettings(content, opener, dock.el)
     dock.closeSettings = after => this.reader.closeSettings(after)
-    dock.openFile = (path, title, owner) => this.openFile(path, title, owner)
     dock.setNav({
       ancestry: ancestry.map(card => ({ name: card.name, open: () => this.reader.closeSettings(() => { if (this.isActive) this.open(card, this.origin, undefined, this.library.hasMetadata(card)) }) })),
       desk: () => this.escapeHome(),
@@ -777,9 +783,9 @@ export class Workspace {
   private actionCard(card: KanbanCard): KanbanCard {
     return this.mapPage(this.current)?.selection ?? card
   }
-  /** The band follows the highlighted fiber, and leaves its acts to the rows while the family page draws them. */
+  /** The band follows the highlighted fiber. */
   private steerBand(state: ChannelState): void {
-    this.dock.setActionCard(this.actionCard(state.card), this.mapPage(state) !== undefined)
+    this.dock.setActionCard(this.actionCard(state.card))
   }
   private family(): HTMLElement {
     const state = this.current!

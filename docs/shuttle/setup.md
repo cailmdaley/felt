@@ -43,7 +43,7 @@ You can add project-specific collections later.
 
 ## 3. Choose how conversations open
 
-In **Settings**, choose where the console (›_) in the band over a constitution should open its conversation.
+In **Settings**, choose where a constitution's conversation opens from the console and the rows' conversation icon (›_).
 The choices depend on the agent and the connections it supports; [Opening conversations](conversations.md) explains them.
 A terminal worker keeps running in tmux when you close its window, but the machine itself must stay awake.
 

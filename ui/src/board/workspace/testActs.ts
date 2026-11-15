@@ -37,3 +37,22 @@ export async function pressVerb(acts: Element, label: string): Promise<void> {
   item.click()
   await settle()
 }
+
+/** The acts a console's menu offers, each as it names itself: its lifecycle verbs, then its conversation, page and settings. */
+export async function consoleActs(console: Element): Promise<string[]> {
+  console.querySelector<HTMLButtonElement>('.ws-band-menu')!.click()
+  await settle()
+  const acts = menuItems().map(item => item.dataset.verb ?? item.getAttribute('aria-label')!)
+  await dismiss()
+  return acts
+}
+
+/** Presses the act a console's menu names `label`. */
+export async function pressConsoleAct(console: Element, label: string): Promise<void> {
+  console.querySelector<HTMLButtonElement>('.ws-band-menu')!.click()
+  await settle()
+  const item = menuItems().find(item => (item.dataset.verb ?? item.getAttribute('aria-label')) === label)
+  if (!item) { await dismiss(); throw new Error(`no act ${label} among ${(await consoleActs(console)).join(', ')}`) }
+  item.click()
+  await settle()
+}

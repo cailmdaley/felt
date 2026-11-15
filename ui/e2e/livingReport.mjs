@@ -3,6 +3,7 @@ import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { familySends, familyTree, openThread, pageBack, sentFiles, showFile, threadRow } from './familyNav.mjs'
+import { consoleAct, consoleMenu } from './verbs.mjs'
 
 const REPORT = '/calibration-report/report.html'
 /** The report's bytes as its owner serves them; the board's watcher finds a change on its next poll. */
@@ -167,8 +168,7 @@ export function registerLivingReportJourneys(test) {
       await band(page).locator('.ws-dock').waitFor()
       assert.equal(await page.locator('.ws-tabs,.ws-head-index,.ws-thumbbar,.ws-page-choice').count(), 0)
       await shot(page, `${device}-landing`)
-      // The family's page draws the root's row, so the band leaves its acts (and its constitution button) to it; the receded constitution's page is a click away.
-      assert.equal(await band(page).locator('.ws-band-constitution').isVisible(), false)
+      // The family's page draws the root's row; the receded constitution's page is a click away.
       await page.locator('.ws-page[data-key^="fiber:"]').first().dispatchEvent('click')
       await selected(page).locator('.ws-fiber-prose').waitFor()
       await shot(page, `${device}-top`)
@@ -227,14 +227,14 @@ export function registerLivingReportJourneys(test) {
         await page.keyboard.press('Escape')
         await page.locator('.ws-page-sheet[open]').waitFor({ state: 'hidden' })
       } else {
-        const settings = band(page).locator('.ws-band-head[data-acts] .ws-acts-settings')
-        await settings.click()
+        const settings = consoleMenu(band(page))
+        await (await consoleAct(band(page), 'Settings')).click()
         const menu = page.locator('.ws-settings-menu:not([hidden])')
         await menu.waitFor()
         assert.ok(await menu.locator('.kbn-ctl-history').count() > 0, 'sessions live in settings')
         assert.equal(await menu.locator('.ws-sent-file, .ws-family').count(), 0, 'settings hold no threads or sent files')
         const box = await menu.boundingBox(), header = await band(page).locator('.ws-band-head').boundingBox()
-        assert.ok(Math.abs(box.y - (header.y + header.height)) < 16, 'the dropdown leaves both header rows clear')
+        assert.ok(Math.abs(box.y + box.height - header.y) < 16, 'the dropdown opens above the console, clear of it')
         await shot(page, 'desktop-settings')
         await page.keyboard.press('Escape')
         await menu.waitFor({ state: 'hidden' })

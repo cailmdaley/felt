@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { alreadyRunningMessage, bandFacts, Dock, stripFacts } from './Dock.js'
-import { offeredVerbs, pressVerb } from './testActs.js'
+import { consoleActs, offeredVerbs, pressConsoleAct, pressVerb } from './testActs.js'
 import { clockTime } from '../civilDay.js'
 import { CLAUDE_OPENING_KEY } from '../conversationOpening.js'
 import { card, settle } from '../testFixtures.js'
@@ -27,13 +27,20 @@ const saved = vi.fn()
 const writes = (): Array<Record<string, unknown>> => vi.mocked(fetch).mock.calls
   .filter(([, options]) => options?.method === 'POST').map(([, options]) => JSON.parse(String(options?.body)))
 const session = (label: string): HTMLButtonElement => band.el.querySelector(`.ws-worker-acts button[data-verb="${label}"]`)!
-/** The fiber's acts the band draws where no row stands for it. */
-const actsOf = (view: Dock): HTMLElement => view.el.querySelector<HTMLElement>('.ws-band-head > .ws-fiber-acts')!
-/** The message box's verbs, then the band's lifecycle verbs, as drawn. */
+/** A row's strip of the fiber's acts, as the family page draws it from the console. */
+const rowActs = (view: Dock, card: KanbanCard): HTMLElement => {
+  const acts = view.actsFor(() => card)
+  document.body.append(acts.el)
+  return acts.el
+}
+/** What the console's menu holds besides the lifecycle verbs. */
+const PLACES = ['Open conversation', 'Constitution', 'Settings']
+/** The message box's verbs, then the lifecycle verbs in the console's menu. */
 const shownVerbs = async (view: Dock): Promise<string[]> => [
   ...(view.el.querySelector<HTMLElement>('.ws-worker-acts')?.hidden ? [] : [...view.el.querySelectorAll<HTMLButtonElement>('.ws-worker-acts button')].filter(button => !button.hidden).map(button => button.dataset.verb!)),
-  ...(actsOf(view).hidden ? [] : await offeredVerbs(actsOf(view))),
+  ...(await consoleActs(view.el)).filter(act => !PLACES.includes(act)),
 ]
+const menuOf = (view: Dock): HTMLButtonElement => view.el.querySelector<HTMLButtonElement>('.ws-band-head .ws-band-menu')!
 /** The message box's field, and typing into it. */
 const messageField = (root: ParentNode = band.el): HTMLElement => root.querySelector<HTMLElement>('.ws-worker-message')!
 const type = (field: HTMLElement, text: string): void => { field.textContent = text; field.dispatchEvent(new Event('input')) }
@@ -121,42 +128,40 @@ describe('band header', () => {
     expect(transition).not.toHaveBeenCalled()
     expect(saved).not.toHaveBeenCalled()
     expect(writes()).toEqual([])
-    // No lifecycle verb is drawn as ×.
-    for (const verb of actsOf(band).querySelectorAll('.ws-acts-verbs button svg path')) expect(verb.getAttribute('d')).not.toBe('m4 4 8 8m0-8-8 8')
   })
 
-  it('draws the lifecycle verb on its button\'s face with its word, as the worker line draws its verbs', () => {
+  it('names its session verbs by their words, and leads its menu with the lifecycle verb that fits', async () => {
     dock.reset()
     dock.open(task({ status: 'active', sessionUuid: 'words' }))
     const words = (selector: string) => [...band.el.querySelectorAll<HTMLButtonElement>(selector)].filter(button => !button.hidden).map(button => button.querySelector('.ws-header-word')?.textContent)
     expect(words('.ws-worker-acts button')).toEqual(['Resume', 'New session'])
     expect(band.el.querySelector('.ws-band-head .ws-header-word')).toBeNull()
-    expect(band.el.querySelector<HTMLButtonElement>('.ws-verb-face')!.textContent).toBe('Close for review')
+    expect((await consoleActs(band.el))[0]).toBe('Close for review')
   })
 
-  it('draws its first line as identity and navigation, and the acts only where no row stands for the fiber', () => {
+  it('draws its first line as identity and navigation, with the fiber\'s acts behind one menu', async () => {
     dock.reset(); dock = band = new Dock('', saved, undefined, undefined, { onRest: vi.fn() })
     dock.open(task({ status: 'active', sessionUuid: 'narrow' }))
+    document.body.append(band.el)
     const header = band.el.querySelector<HTMLElement>('.ws-band-head')!
-    expect([...header.children].map(child => child.className)).toEqual(['ws-band-identity', 'ws-fiber-acts', 'ws-header-icon ws-band-leave'])
-    expect(actsOf(band).hidden).toBe(false)
-    expect(header.hasAttribute('data-acts')).toBe(true)
-    // A family page beneath draws the fiber's row, and its acts with it.
-    band.setActionCard(task({ status: 'active', sessionUuid: 'narrow' }), true)
-    expect(actsOf(band).hidden).toBe(true)
-    expect(header.hasAttribute('data-acts')).toBe(false)
-    band.setActionCard(task({ status: 'active', sessionUuid: 'narrow' }))
-    expect(actsOf(band).hidden).toBe(false)
+    expect([...header.children].map(child => child.className)).toEqual(['ws-band-identity', 'ws-band-acts', 'ws-header-icon ws-band-leave'])
+    expect(menuOf(band).getAttribute('aria-label')).toBe("task's acts")
+    expect(menuOf(band).getAttribute('aria-haspopup')).toBe('menu')
+    expect(await consoleActs(band.el)).toEqual(['Close for review', 'Rest', 'Temper', 'Discard', 'Open conversation', 'Settings'])
+    // The menu follows a highlighted thread.
+    band.setActionCard(task({ id: 'a/task/thread', uid: 'thread-uid', status: 'closed' }))
+    expect(menuOf(band).getAttribute('aria-label')).toBe("thread's acts")
+    expect(await consoleActs(band.el)).toEqual(['Temper', 'Rest', 'Discard', 'Settings'])
   })
 
-  it('seats its verbs and settings in the acts, and Listen\'s place in the message box', () => {
+  it('seats its verbs and settings in the acts, and Listen\'s place in the message box', async () => {
     const header = band.el.querySelector<HTMLElement>('.ws-band-head')!
     expect(header.querySelector('.ws-worker-primary, .ws-worker-fresh, .ws-worker-message')).toBeNull()
     const tools = band.el.querySelector<HTMLElement>('.ws-worker-acts .ws-worker-tools')!
     expect([...tools.children].map(child => child.className)).toEqual(['ws-worker-receipt', 'ws-header-icon ws-worker-primary', 'ws-header-icon ws-worker-fresh'])
     // The tools float before the text, so the text's lines wrap round them.
     expect(tools.nextElementSibling).toBe(messageField())
-    expect(actsOf(band).querySelector('.ws-acts-settings')).not.toBeNull()
+    expect(await consoleActs(band.el)).toContain('Settings')
   })
 
   it('draws the verbs the lifecycle offers for each state', async () => {
@@ -184,6 +189,8 @@ describe('band header', () => {
     expect(offered({ status: 'open', sessionUuid: 's' })).toEqual(['Resume', 'New session'])
     expect(offered({ status: 'open', effectiveHorizon: 'stashed', sessionUuid: 's' })).toEqual(['Resume', 'New session'])
     expect(offered({ status: 'active', workerState: 'running', sessionUuid: 's', tmuxSession: 't' })).toEqual(['Send', 'New session'])
+    // A running worker whose session id its owner has not read yet is still typed into, never started over.
+    expect(offered({ status: 'active', workerState: 'running', tmuxSession: 't' })).toEqual(['Send', 'New session'])
     dock.reset(); dock.open(card({ id: 'notes/plain', uid: 'plain', status: 'open' }))
     expect(band.el.querySelector<HTMLElement>('.ws-worker-acts')!.hidden).toBe(true)
   })
@@ -203,9 +210,8 @@ describe('band header', () => {
     dock.open(task({ status: 'closed', sessionUuid: 'resume-me', name: 'A long and particular name' }))
     const children = [...band.el.querySelector('.ws-dock-body')!.children].map(child => child.className)
     expect(children).toEqual(['ws-band-head', 'ws-worker-acts', 'ws-band-drawer', 'kbn-ctl-foot ws-band-status'])
-    expect(band.el.querySelector('.ws-band-head')!.contains(actsOf(band))).toBe(true)
-    expect(actsOf(band).querySelector(':scope > .ws-acts-verbs')).not.toBeNull()
-    expect(actsOf(band).dataset.verdictKey).toBeTruthy()
+    expect(band.el.querySelector('.ws-band-head > .ws-band-acts > .ws-band-menu')).not.toBeNull()
+    expect(band.el.querySelector<HTMLElement>('.ws-band-acts')!.dataset.verdictKey).toBeTruthy()
     expect(band.el.dataset.column).toBe('awaitingReview')
     expect(band.el.querySelector('.ws-band-title')?.textContent).toBe('A long and particular name')
     expect(band.el.querySelector('textarea, [contenteditable]:not(.ws-worker-message)')).toBeNull()
@@ -215,14 +221,15 @@ describe('band header', () => {
     expect(await visibleVerbs(band)).toEqual(['Send', 'New session', 'Close for review', 'Temper', 'Discard'])
   })
 
-  it('offers named, keyboard-focusable icons in order without sheets', () => {
+  it('offers named, keyboard-focusable icons in order without sheets on a row', () => {
     dock.reset(); dock = band = new Dock('', saved, undefined, undefined, { onRest: vi.fn() })
     dock.open(task({ status: 'active', sessionUuid: 's' }))
     document.body.append(band.el)
-    const pill = [...actsOf(band).querySelectorAll<HTMLButtonElement>('.ws-acts-verbs > button')]
+    const acts = rowActs(band, task({ status: 'active', sessionUuid: 's' }))
+    const pill = [...acts.querySelectorAll<HTMLButtonElement>('.ws-acts-verbs > button')]
     expect(pill.map(b => b.getAttribute('aria-label'))).toEqual(['Close for review task (a)', 'More verbs for task: Rest (s), Temper (t), Discard (x)'])
     expect(pill.map(b => b.getAttribute('aria-haspopup'))).toEqual([null, 'menu'])
-    const buttons = [...actsOf(band).querySelectorAll<HTMLButtonElement>('.ws-acts-session .ws-header-icon')].filter(button => !button.hidden)
+    const buttons = [...acts.querySelectorAll<HTMLButtonElement>('.ws-acts-session .ws-header-icon')].filter(button => !button.hidden)
     expect(buttons.map(b => b.getAttribute('aria-label'))).toEqual(["Reopen task's last session on owner (c)", 'Settings for task'])
     for (const button of buttons) {
       expect(button.title).toBe(button.getAttribute('aria-label'))
@@ -239,14 +246,14 @@ describe('band header', () => {
       expect(button.textContent).toBe('')
       button.focus(); expect(document.activeElement).toBe(button)
     }
-    expect(actsOf(band).querySelector('details, summary, [role="dialog"]')).toBeNull()
+    expect(acts.querySelector('details, summary, [role="dialog"]')).toBeNull()
   })
 
   it.each([
     { phone: true, sessionLink: undefined, visible: false },
     { phone: true, sessionLink: 'https://claude.ai/code/session_abc', visible: true },
     { phone: false, sessionLink: undefined, visible: true },
-  ])('opens the conversation only with an actionable destination: %j', ({ phone, sessionLink, visible }) => {
+  ])('opens the conversation only with an actionable destination: %j', async ({ phone, sessionLink, visible }) => {
     vi.stubGlobal('matchMedia', () => ({ matches: phone, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
     const openWorker = vi.fn()
     dock.reset(); dock = band = new Dock('', saved, undefined, openWorker)
@@ -254,7 +261,8 @@ describe('band header', () => {
     dock.open(worker)
     document.body.append(band.el)
     expect(dock.canOpenConversation(worker)).toBe(visible)
-    expect(actsOf(band).querySelector<HTMLElement>('.ws-acts-console')!.hidden).toBe(!visible)
+    expect(rowActs(band, worker).querySelector<HTMLElement>('.ws-acts-console')!.hidden).toBe(!visible)
+    expect((await consoleActs(band.el)).includes('Open conversation')).toBe(visible)
     if (!phone) {
       expect(dock.openConversation(worker)).toBe(true)
       expect(openWorker).toHaveBeenCalledWith('terminal-worker', 'owner', undefined)
@@ -264,53 +272,53 @@ describe('band header', () => {
     }
   })
 
-  it('anchors Rest confirmation to its own button and leaves focus in the confirmation', async () => {
+  it('anchors Rest confirmation to the control that asked and leaves focus in the confirmation', async () => {
     const confirm = document.createElement('button'); document.body.append(confirm)
     const rest = vi.fn(() => confirm.focus())
     dock.reset(); dock = band = new Dock('', saved, undefined, undefined, { onRest: rest })
     dock.open(task({ status: 'active' })); document.body.append(band.el)
-    await pressVerb(actsOf(band), 'Rest')
-    expect(rest).toHaveBeenCalledWith(expect.objectContaining({ id: 'a/task' }), actsOf(band).querySelector('.ws-acts-verbs'))
+    await pressConsoleAct(band.el, 'Rest')
+    expect(rest).toHaveBeenCalledWith(expect.objectContaining({ id: 'a/task' }), menuOf(band))
     expect(document.activeElement).toBe(confirm)
+    const acts = rowActs(band, task({ status: 'active' }))
+    await pressVerb(acts, 'Rest')
+    expect(rest).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'a/task' }), acts.querySelector('.ws-acts-verbs'))
   })
 
   it.each([['open', 'open'], ['closed', 'closed']])('offers no verdicts on a %s fiber without a shuttle block', async (_label, status) => {
     // A note or a role opened from a link is not on the Desk's lifecycle.
     dock.open(card({ id: 'roles/surveyor', uid: 'surveyor', status }))
-    expect(await offeredVerbs(actsOf(band))).toEqual([])
+    expect((await consoleActs(band.el)).filter(act => !PLACES.includes(act))).toEqual([])
+    expect(await offeredVerbs(rowActs(band, card({ id: 'roles/surveyor', uid: 'surveyor', status })))).toEqual([])
   })
 })
 
 describe('band settings', () => {
-  it('opens configuration and sessions together, and Escape folds it', () => {
+  it('opens configuration and sessions together in a dropdown above the console', async () => {
     dock.reset()
     dock.open(task({ status: 'active', workerState: 'running', sessionUuid: 's' }))
     const drawer = band.el.querySelector<HTMLElement>('.ws-band-drawer')!
     expect(drawer.hidden).toBe(true)
-    actsOf(band).querySelector<HTMLButtonElement>('.ws-acts-settings')!.click()
+    await pressConsoleAct(band.el, 'Settings')
     expect(drawer.hidden).toBe(false)
+    expect(drawer.closest('.ws-settings-menu')?.getAttribute('side')).toBe('top')
     expect(drawer.querySelector<HTMLElement>('.kbn-ctl-ledger')!.hidden).toBe(false)
-    expect(band.handleEscape()).toBe(true)
-    expect(drawer.hidden).toBe(true)
-    expect(band.handleEscape()).toBe(false)
+    expect(drawer.querySelector('.kbn-ctl-history')).not.toBeNull()
   })
 
-  it('hands its one sheet to the reader', () => {
+  it('hands its one sheet to the reader', async () => {
     dock.reset()
     dock.open(task({ status: 'active', sessionUuid: 's', outcome: 'Seed 3000 agrees.' }))
     const settings = vi.fn(); band.openSettings = settings
-    const opener = actsOf(band).querySelector<HTMLButtonElement>('.ws-acts-settings')!
-    opener.click()
-    expect(settings).toHaveBeenCalledWith(band.el.querySelector('.ws-band-drawer'), opener)
+    await pressConsoleAct(band.el, 'Settings')
+    expect(settings).toHaveBeenCalledWith(band.el.querySelector('.ws-band-drawer'), menuOf(band))
     expect(band.el.querySelector('.ws-band-drawer .kbn-ctl-history')).not.toBeNull()
   })
 
-  it('follows the highlighted thread: its gear opens that thread\'s settings and writes to it', async () => {
+  it('follows the highlighted thread: its Settings opens that thread\'s settings and writes to it', async () => {
     const page = task(), thread = task({ id: 'a/task/thread', uid: 'thread', name: 'The thread', shuttleAgent: 'codex-luna', shuttleEffort: 'low' })
     dock.reset(); dock.open(page); dock.setActionCard(thread)
-    const gear = actsOf(band).querySelector<HTMLButtonElement>('.ws-acts-settings')!
-    expect(gear.getAttribute('aria-label')).toBe('Settings for thread')
-    gear.click(); await settle()
+    await pressConsoleAct(band.el, 'Settings')
     const name = band.el.querySelector<HTMLElement>('.ws-band-sheet-name')!
     expect(name.hidden).toBe(false)
     expect(name.textContent).toBe('The thread')
@@ -320,8 +328,7 @@ describe('band settings', () => {
     change('Effort', 'high'); await settle()
     expect(writes()).toEqual([{ action: 'set-agent', origin: 'owner', fiber: 'a/task/thread', effort: 'high' }])
     dock.setActionCard(page)
-    expect(gear.getAttribute('aria-label')).toBe('Settings for task')
-    gear.click(); await settle()
+    await pressConsoleAct(band.el, 'Settings')
     expect(name.hidden).toBe(true)
     expect(band.el.querySelector('.ws-band-drawer')!.hasAttribute('data-thread')).toBe(false)
     expect(select('Agent').value).toBe('codex-sol')
@@ -354,16 +361,16 @@ describe('band settings', () => {
     })
     const slot = document.createElement('div'); document.body.append(slot)
     band.openSettings = drawer => { drawer.hidden = false; slot.replaceChildren(drawer) }
-    const open = (): void => actsOf(band).querySelector<HTMLButtonElement>('.ws-acts-settings')!.click()
+    const open = (): Promise<void> => pressConsoleAct(band.el, 'Settings')
     const rows = (): string[] => [...slot.querySelectorAll<HTMLElement>('[data-session]')].map(row => row.dataset.session!)
-    open(); await settle()
+    await open(); await settle()
     expect(rows()).toEqual(['a-first-session'])
     dock.open(task({ id: 'b/task', uid: 'other-uid' }))
-    open(); await settle()
+    await open(); await settle()
     expect(rows()).toEqual(['b-session'])
     session = 'a-next-session'
     dock.open(task({ sessionUuid: session }))
-    open(); await settle()
+    await open(); await settle()
     expect(rows()).toEqual(['a-next-session'])
     const fold = (): HTMLButtonElement => slot.querySelector('.kbn-ctl-history-toggle')!
     fold().click()
@@ -382,9 +389,9 @@ describe('shared verdict controls', () => {
     band.open(task({ status: 'closed' }))
     document.body.append(band.el)
     expect(band.el.dataset.part).toBe('act'); expect(band.el.dataset.act).toBe('band')
-    expect(actsOf(band).dataset.part).toBe('acts'); expect(actsOf(band).dataset.verdictKey).toBeTruthy()
-    await pressVerb(actsOf(band), 'Temper')
-    await pressVerb(actsOf(band), 'Discard')
+    expect(band.el.querySelector<HTMLElement>('.ws-band-acts')!.dataset.verdictKey).toBeTruthy()
+    await pressConsoleAct(band.el, 'Temper')
+    await pressVerb(rowActs(band, task({ status: 'closed' })), 'Discard')
     expect(transition.mock.calls.map(([card, target]) => [card.uid, target])).toEqual([
       ['task-uid', 'tempered'], ['task-uid', 'composted'],
     ])
@@ -397,7 +404,7 @@ describe('shared verdict controls', () => {
     const band = new Dock('', saved, transition)
     band.open(task({ status: 'active', sessionUuid: 'review' }))
     document.body.append(band.el)
-    await pressVerb(actsOf(band), 'Close for review')
+    await pressConsoleAct(band.el, 'Close for review')
     expect(transition.mock.calls.map(([card, target]) => [card.uid, target])).toEqual([['task-uid', 'awaitingReview']])
     band.reset()
     await settle()
@@ -654,6 +661,22 @@ describe('session verbs', () => {
     expect(saved).toHaveBeenCalledOnce()
   })
 
+  it('tells a surface that keeps its place what it delivered, and opens no terminal there', async () => {
+    const sent = vi.fn()
+    dock.reset(); dock = band = new Dock('', saved, undefined, openWorker, { onSent: sent, keepPlace: true })
+    dock.open(task({ sessionUuid: 'prior', workerState: 'running', tmuxSession: 'worker' }))
+    document.body.append(band.el)
+    vi.mocked(fetch).mockResolvedValue(response({ tmux_session: 'worker', terminal: 'rex' }))
+    const before = Date.now()
+    type(messageField(), 'one more thing')
+    session('Send').click()
+    await settle()
+    expect(sent).toHaveBeenCalledWith(expect.objectContaining({ id: 'a/task' }), 'one more thing', expect.any(Number))
+    expect(sent.mock.calls[0][2]).toBeGreaterThanOrEqual(before)
+    expect(openWorker).not.toHaveBeenCalled()
+    expect(saved).toHaveBeenCalledOnce()
+  })
+
   it('says a held worker it cannot reach received nothing', async () => {
     dock.open(task({ sessionUuid: 'prior' }))
     vi.mocked(fetch).mockResolvedValue(response({ tmux_session: 'phantom', terminal: null }, 409))
@@ -897,8 +920,7 @@ describe('Dock settings queue', () => {
   })
 
   it('names the active parent option while arrows keep focus in the search, and Escape returns to the value', async () => {
-    actsOf(band).querySelector<HTMLButtonElement>('.ws-acts-settings')!.click()
-    await settle()
+    await pressConsoleAct(band.el, 'Settings')
     vi.mocked(fetch).mockImplementation(async () => response({ fibers: [
       { fiber: { id: 'a/b', name: 'Beta' } }, { fiber: { id: 'a/c', name: 'Gamma' } }, { fiber: { id: 'a/d', name: 'Delta' } },
     ] }))
@@ -1050,7 +1072,7 @@ describe('Dock poll reconciliation', () => {
     dock.syncRuntime(task({ shuttleAgent: 'codex-luna', shuttleKind: 'standing', shuttleSchedule: '0 9 * * *' }))
     expect(cron.value).toBe('my half typed expression')
     expect(select('Agent').value).toBe('codex-sol')
-    actsOf(band).querySelector<HTMLButtonElement>('.ws-acts-settings')!.focus()
+    menuOf(band).focus()
     await settle()
     dock.syncRuntime(task({ shuttleAgent: 'codex-luna', shuttleKind: 'standing', shuttleSchedule: '0 9 * * *' }))
     expect(select('Agent').value).toBe('codex-luna')

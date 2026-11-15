@@ -31,6 +31,7 @@
 import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
 import type { DocKey } from '../workspace/documents.js'
 import type { Library } from '../workspace/Library.js'
+import type { ConsoleOptions, Dock } from '../workspace/Dock.js'
 import type { TemporalFetchers } from './TemporalData.js'
 import type { FiberSends } from '../fiberSends.js'
 import type { GlobeHost } from '../globe/GlobeStage.js'
@@ -73,6 +74,8 @@ export interface ViewContext extends TemporalFetchers {
   workspace?: {
     readonly isActive: boolean
     readonly dock: { openConversation(card: KanbanCard): boolean }
+    /** A console of the view's own, built and wired as the reader's (`Workspace.console`). */
+    console(options: ConsoleOptions): Dock
     readonly library: Library
     /** The board looks at a fiber, or at none: voice and Rex follow it together (`Workspace.look`). */
     look(card: KanbanCard | null): Promise<boolean>

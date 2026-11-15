@@ -1,6 +1,7 @@
 /**
- * Reading and pressing a fiber's lifecycle verbs as a person does: the verb
- * button's face, and the rest by opening its caret's menu (Escape closes it).
+ * Reading and pressing a fiber's lifecycle verbs as a person does: on a row's
+ * strip, the verb button's face, and the rest by opening its caret's menu; on
+ * the console (`.ws-band-acts`), every verb from its menu (Escape closes it).
  * The journeys' counterpart of src/board/workspace/testActs.ts.
  */
 
@@ -11,11 +12,21 @@ export const verbFace = acts => acts.locator('.ws-acts-verbs > .ws-verb-face')
 /** The caret on the same pill, which opens the rest. */
 export const verbCaret = acts => acts.locator('.ws-acts-verbs > .ws-verb-more')
 
+/** The console's menu button, where the console holds the acts. */
+export const consoleMenu = acts => acts.locator('.ws-band-menu')
+const onConsole = async acts => await consoleMenu(acts).count() > 0
+
 async function openMenu(acts) {
   const menu = verbMenu(acts.page())
-  if (!await menu.isVisible()) await verbCaret(acts).click()
+  if (!await menu.isVisible()) await (await onConsole(acts) ? consoleMenu(acts) : verbCaret(acts)).click()
   await menu.waitFor()
   return menu
+}
+
+/** The console menu's item named `label` (Open conversation, Constitution, Settings, or a verb), which this opens. */
+export async function consoleAct(acts, label) {
+  const menu = await openMenu(acts)
+  return menu.locator(`[role="menuitem"]:is([data-verb="${label}"], [aria-label="${label}"])`)
 }
 
 /** Closes an open verb menu with Escape. */
@@ -28,6 +39,12 @@ export async function closeVerbMenu(page) {
 
 /** The verbs the acts offer, the face's first, as each names itself. */
 export async function offeredVerbs(acts) {
+  if (await onConsole(acts)) {
+    const menu = await openMenu(acts)
+    const verbs = await menu.locator('[role="menuitem"][data-verb]').evaluateAll(items => items.map(item => item.dataset.verb))
+    await closeVerbMenu(acts.page())
+    return verbs
+  }
   const verbs = []
   const face = verbFace(acts)
   if (await face.isVisible()) verbs.push(await face.getAttribute('data-verb'))
@@ -43,6 +60,7 @@ export async function offeredVerbs(acts) {
  * else its item in the caret's menu, which this opens.
  */
 export async function verbControl(acts, word) {
+  if (await onConsole(acts)) return consoleAct(acts, word)
   const face = verbFace(acts)
   if (await face.isVisible() && await face.getAttribute('data-verb') === word) return face
   const menu = await openMenu(acts)

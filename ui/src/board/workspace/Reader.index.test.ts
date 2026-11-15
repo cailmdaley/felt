@@ -34,7 +34,7 @@ it('shows a run of pages with no inset, strip, tabs or bottom page chooser', () 
   expect(reader.el.querySelector('.ws-report-inset')).toBeNull()
   expect(reader.el.querySelector('.ws-tabs,.ws-head-index,.ws-thumbbar,.ws-page-choice')).toBeNull()
 })
-it('seats the band over the stage and clears it where a page has none', () => {
+it('seats the band under the stage and clears it where a page has none', () => {
   const { channel } = setup()
   const band = reader.el.querySelector<HTMLElement>('.ws-stage-band')!
   const stage = band.parentElement!.querySelector('.ws-stage')
@@ -43,7 +43,7 @@ it('seats the band over the stage and clears it where a page has none', () => {
   reader.setBand(first)
   expect(band.hidden).toBe(false)
   expect([...band.children]).toEqual([first])
-  expect(band.nextElementSibling).toBe(stage)
+  expect(band.previousElementSibling).toBe(stage)
   reader.show(channel, channel.documents.find(d => d.name === 'plot.png')!.key, alpha)
   expect(band.firstChild).toBe(first)
   reader.setBand(second)

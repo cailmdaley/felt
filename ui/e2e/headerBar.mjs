@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { familySends, familyTree, openThread, sentFiles, threadRow } from './familyNav.mjs'
-import { hitBox, offeredVerbs, verbCaret, verbFace } from './verbs.mjs'
+import { closeVerbMenu, consoleAct, consoleMenu, hitBox, offeredVerbs, verbCaret, verbFace, verbMenu } from './verbs.mjs'
 
 const title = 'Calibrate the shear response across independent sky patches and validate each redshift bin'
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads&long-title`
@@ -11,12 +11,14 @@ const named = (page, name) => page.waitForFunction(name => document.querySelecto
 /** A thread's band names it after its family's root, whose page it opens on; a draft opens on its own. */
 const threadNamed = (page, name) => page.waitForFunction(names => names.includes(document.querySelector('.ws-stage-band .ws-band-title')?.title), [name, `${title} / ${name}`])
 const band = page => page.locator('.ws-stage-band')
+/** The console's acts: its menu, and where a verdict's undo stands. */
+const consoleActs = page => band(page).locator('.ws-band-head .ws-band-acts')
 /**
- * The fiber's acts where they show: the band's, on a page with no row for the
- * fiber (a draft's own page, a report); otherwise the highlighted row's on its
- * family's page.
+ * The fiber's acts where they show: the highlighted row's on its family's
+ * page; on a page with no row for the fiber (a draft's own page, a report),
+ * the console's menu.
  */
-const acts = page => band(page).locator('.ws-band-head[data-acts] > .ws-fiber-acts')
+const acts = page => page.locator('.ws-reader:not(:has(.ws-page.ws-selected .fp-row[data-selected] .ws-fiber-acts)) .ws-stage-band .ws-band-head .ws-band-acts')
   .or(page.locator('.ws-page.ws-selected .fp-row[data-selected] > .fp-line .fp-verbs > .ws-fiber-acts'))
 async function openRoot(page) {
   // Click the row's own name: its crumb leads to the root.
@@ -26,7 +28,7 @@ async function openRoot(page) {
   await band(page).locator('.ws-dock').waitFor()
   // A family's Desk row opens its frontier; these journeys exercise the root.
   if (await band(page).locator('.ws-band-title').textContent() !== title) {
-    await acts(page).locator('.ws-acts-settings').click()
+    await (await consoleAct(consoleActs(page), 'Settings')).click()
     await page.locator('.ws-settings-menu:not([hidden]) .ws-ancestry-link').first().click()
   }
   await named(page, title)
@@ -56,7 +58,10 @@ const assertLifecycleInk = async (page, scheme) => {
   }))
   assert.equal(renderedTheme.appearance, scheme, `the document resolves to ${scheme}: ${JSON.stringify(renderedTheme)}`)
   assert.equal(renderedTheme.pageTheme, scheme === 'dark' ? 'night-chart' : 'portolan', `the selected page uses the ${scheme} bundled theme: ${JSON.stringify(renderedTheme)}`)
-  const verbs = await strip.locator('.ws-acts-verbs > button').evaluateAll(buttons => buttons
+  // A row draws its verbs on its strip; the console in its menu.
+  const onConsole = await consoleMenu(strip).count() > 0
+  if (onConsole) { await consoleMenu(strip).click(); await verbMenu(page).waitFor() }
+  const verbs = await (onConsole ? verbMenu(page).locator('[role="menuitem"][data-verb]') : strip.locator('.ws-acts-verbs > button')).evaluateAll(buttons => buttons
     .filter(button => button.checkVisibility())
     .map(button => {
       const style = getComputedStyle(button)
@@ -64,10 +69,12 @@ const assertLifecycleInk = async (page, scheme) => {
         label: button.dataset.verb,
         pigment: style.getPropertyValue('--verdict-pigment').trim(),
         color: style.color,
+        // The menu's highlighted item is inked up for the keyboard, as hover inks any act.
+        highlighted: !!button.closest('[data-highlighted]'),
       }
     }))
-  // Neutral ink as the strip resolves it, in the same zone as its verbs.
-  const neutral = await strip.evaluate(el => {
+  // Neutral ink as the strip or menu resolves it, in the same zone as its verbs.
+  const neutral = await (onConsole ? verbMenu(page).locator('[role="menuitem"][data-verb]').first() : strip).evaluate(el => {
     const sample = document.createElement('span')
     sample.style.cssText = 'position:fixed;left:-9999px;color:var(--ws-ink-muted)'
     el.append(sample)
@@ -75,12 +82,13 @@ const assertLifecycleInk = async (page, scheme) => {
     sample.remove()
     return color
   })
+  if (onConsole) await closeVerbMenu(page)
   for (const verb of verbs) {
     if (['Temper', 'Discard'].includes(verb.label)) {
       assert.ok(verb.pigment, `${verb.label} carries verdict pigment`)
     } else {
       assert.equal(verb.pigment, '', `${verb.label} has no verdict pigment: ${JSON.stringify(verb)}`)
-      assert.equal(verb.color, neutral, `${verb.label} uses the shared neutral ink: ${JSON.stringify(verb)}`)
+      if (!verb.highlighted) assert.equal(verb.color, neutral, `${verb.label} uses the shared neutral ink: ${JSON.stringify(verb)}`)
     }
   }
 }
@@ -119,7 +127,7 @@ export function registerHeaderBarJourneys(test) {
       for (const [name, verbs, worker] of visits) {
         await visitChannel(page, name)
         assert.deepEqual(await shownVerbs(page), verbs, `${name} draws the verbs its state offers`)
-        if (name === 'Draft the validation plan') assert.equal(await band(page).locator('.ws-band-head[data-acts] .ws-fiber-acts').isVisible(), true, "the band carries a draft's acts")
+        if (name === 'Draft the validation plan') assert.equal(await acts(page).evaluate(el => el.classList.contains('ws-band-acts')), true, "the console's menu carries a draft's acts")
         assert.deepEqual(await workerVerbs(page), worker, `${name} offers its worker's verbs`)
         await assertLifecycleInk(page, scheme)
       }
@@ -191,7 +199,7 @@ export function registerHeaderBarJourneys(test) {
     const header = page.locator('.ws-stage-band .ws-band-head')
     const assertRow = async (expected, width = 390) => {
       assert.deepEqual(await shownVerbs(page), expected)
-      assert.equal(await header.isVisible(), false, "the top bar names the page; the band's head stands only where it carries acts")
+      assert.equal(await header.locator('.ws-band-back').isVisible(), false, "the top bar goes back; the console's head names whom it speaks to")
       const strip = acts(page)
       const row = await strip.boundingBox()
       assert.ok(row.x >= 0 && row.x + row.width <= width, `the acts fit the phone: ${JSON.stringify(row)}`)
@@ -391,7 +399,7 @@ export function registerHeaderBarJourneys(test) {
         assert.ok(geometry.barHeight <= 96, JSON.stringify(geometry))
         assert.ok(geometry.left >= 0 && geometry.right <= viewport.width, JSON.stringify(geometry))
       } else {
-        assert.equal(await header.isVisible(), false, "the top bar names the page; the family's rows carry the acts")
+        assert.equal(await header.locator('.ws-band-back').isVisible(), false, 'the top bar goes back; the console draws no back of its own')
         const dock = await band(page).locator('.ws-dock').boundingBox()
         assert.ok(dock.x >= 0 && dock.x + dock.width <= viewport.width, JSON.stringify(dock))
       }
@@ -469,8 +477,9 @@ export function registerHeaderBarJourneys(test) {
     await openThread(page, tree.locator('.fp-head'), title)
     const root = acts(page).locator('.ws-acts-settings')
     await root.click(); await menu.waitFor(); await under(root, 'root')
-    const head = await band(page).locator('.ws-band-head').boundingBox()
-    assert.ok((await menu.boundingBox()).y >= head.y + head.height, 'Settings opened on the title row keeps both header rows clear')
+    const console = await band(page).locator('.ws-dock').boundingBox()
+    const opened = await menu.boundingBox()
+    assert.ok(opened.y + opened.height <= console.y + 0.5, 'Settings opened on the title row keeps the console clear')
     // A row clear of the open menu shows its acts under the pointer.
     const thread = threadRow(page, tree, 'Discarded pilot')
     await thread.hover()

@@ -2,9 +2,9 @@ import '@ui-sdk/web/popover'
 import './settings-menu.css'
 
 /**
- * The settings dropdown: a non-modal SDK popover beneath the header, holding
+ * The settings dropdown: a non-modal SDK popover against the header line, holding
  * only the settings content. Escape, a press outside or focus leaving closes
- * it; focus returns to the ⚙ that opened it.
+ * it; focus returns to the control that opened it.
  */
 export class SettingsMenu {
   readonly el = document.createElement('ui-popover')
@@ -45,7 +45,8 @@ export class SettingsMenu {
     content.hidden = false
     this.panel.replaceChildren(content)
     opener.setAttribute('aria-expanded', 'true')
-    // Beneath the whole header when the ⚙ sits in it, aligned with the ⚙.
+    // Against the whole header line when the opener sits in it, aligned with the opener: above a console docked at the bottom, beneath anything else.
+    this.panel.setAttribute('side', opener.closest('.ws-band-head') ? 'top' : 'bottom')
     const anchor = {
       getBoundingClientRect: (): DOMRect => {
         const own = opener.getBoundingClientRect()

@@ -15,6 +15,7 @@ The board owns actions, presentation, the gestures that ask for a popup, and its
 | Dock Kind | `board/workspace/Dock.ts` | `@ui-sdk/web/segmented-control` |
 | Parent-fiber picker, Chronicle search | `board/workspace/Dock.ts`, `board/views/ChronicleView.ts` | `@ui-sdk/web/autocomplete` |
 | Screen-reader announcements | `announce` callers across the board | core `announce` |
+| The console above a phone's on-screen keyboard | `board/workspace/Dock.ts` | core `bindAvoidKeyboard` |
 | Form dialog, parent picker, tag chips | `forms/AppDialog.tsx`, `forms/StashForm.tsx` | `@ui-sdk/react` dialog, autocomplete, combobox |
 
 These stay the board's own, each for a reason that still holds:

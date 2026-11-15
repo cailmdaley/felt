@@ -45,7 +45,7 @@ import { watchAppearance } from './appearance.js'
 import './KanbanModal.css'
 import './deskRows.css'
 import { Workspace } from './workspace/Workspace.js'
-import { Dock } from './workspace/Dock.js'
+import { Dock, type ConsoleOptions } from './workspace/Dock.js'
 import { confirmWorkerStop } from './workspace/Verdicts.js'
 import { constitutionAction, runAwaitsHuman, schedulePaused, scheduled } from './workspace/fiberPageState.js'
 import { DeskKeyboard } from './DeskKeyboard.js'
@@ -352,18 +352,7 @@ export class KanbanModal {
       targetKey = key
       if (this.container && this.lastResponse) this.render(this.lastResponse)
     })
-    this.dock = new Dock(
-      this.shuttleBase,
-      () => { void this.fetchAndRender() },
-      // Expired verdicts enter the optimistic lifecycle path exactly once.
-      (card, target) => this.transition(card, target, { verdictCommitted: true }),
-      this.openWorkerAfterGesture,
-      {
-        voice: { controller: this.voice },
-        phone: this.phoneAudio,
-        onRest: card => this.rest(card),
-      },
-    )
+    this.dock = this.console()
     this.fiberSends = new FiberSends(this.shuttleBase)
     this.surfaces = new KanbanSurfaceRenderer({
       getDragSourceId: () => this.dragSourceId,
@@ -383,6 +372,18 @@ export class KanbanModal {
       onStashClick: this.onStashClick,
       onNewIdeaClick: this.onNewIdeaClick,
     })
+  }
+
+  /** A console: the reader's own, or one a view beside it seats. */
+  private console(options: ConsoleOptions = {}): Dock {
+    return new Dock(
+      this.shuttleBase,
+      () => { void this.fetchAndRender() },
+      // Expired verdicts enter the optimistic lifecycle path exactly once.
+      (card, target) => this.transition(card, target, { verdictCommitted: true }),
+      this.openWorkerAfterGesture,
+      { voice: { controller: this.voice }, phone: this.phoneAudio, onRest: card => this.rest(card), ...options },
+    )
   }
 
   /**
@@ -427,6 +428,7 @@ export class KanbanModal {
       onEscapeHome: () => this.workspace?.escapeHome(),
       onView: (view) => this.setView(view, false),
       dock: this.dock,
+      console: options => this.console(options),
       find: this.findEl ?? undefined,
       focusFind: () => this.focusFind(),
       reveal: card => !!this.activeView?.reveal?.(card.uid ?? card.id, card.originId),

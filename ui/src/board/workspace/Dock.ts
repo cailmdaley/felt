@@ -1,8 +1,9 @@
 import '@ui-sdk/web/segmented-control'
+import { bindAvoidKeyboard } from '@ui-sdk/core'
 import { HumanMessageIds, repeatNotice } from '../humanMessageId.js'
 import { paintAncestry, type Ancestor } from './ancestryTrail.js'
-import { headerIcon } from './headerIcon.js'
-import { attachConversationPicker, openActionMenu } from '../conversationMenu.js'
+import { headerIcon, type HeaderIcon } from './headerIcon.js'
+import { attachConversationPicker, openActionMenu, type ConversationAction } from '../conversationMenu.js'
 import { canOpenDesktopApp } from '../conversationLinks.js'
 import { confirmWorkerStop, markVerdictHost, type Verdict } from './Verdicts.js'
 import { CONVERSATION_OPENING_CHANGED, conversationDestinations, conversationDevice, conversationOpening, linkDestination, resolveDestination, openDestination, type ConversationDestination, type WorkerOpener } from '../conversationOpening.js'
@@ -17,8 +18,9 @@ import { showToast } from '../utils.js'
 import { coarsePointer } from '../mobile.js'
 import { formatDue } from '../KanbanSurfaces.js'
 import { clockTime, dayClock, dueCivilDay, formatSpanMinutes, instantMs, instantStamp, isoDayLocal } from '../civilDay.js'
-import { dressVerb, labelVerb, leadVerb, lifecycleVerbsFor, verbSpec, VERB_KEY, type LifecycleVerb } from './lifecycleVerbs.js'
+import { dressAction, dressVerb, labelVerb, leadVerb, lifecycleVerbsFor, verbSpec, VERB_KEY, type LifecycleVerb } from './lifecycleVerbs.js'
 import { WorkerActions } from './workerActions.js'
+import { SettingsMenu } from './SettingsMenu.js'
 import { VoiceStrip, voiceLine, type FiberSlug } from './voiceStrip.js'
 import { fetchTranscriptUsage, paintUsage, warmUntil, type TranscriptUsage } from './transcriptUsage.js'
 import { slug } from '../threadOutline.js'
@@ -324,7 +326,7 @@ export interface BandNav {
   desk?: () => void
   /** Back where the reader was opened from; `nameBack` names it. */
   back?: () => void
-  /** Opens the constitution's own page: the band's acts carry it where no row's constitution segment does. */
+  /** Opens the constitution's own page, from the console's menu. */
   constitution?: () => void
 }
 
@@ -351,18 +353,27 @@ export interface DockOptions {
   phone?: PhoneListening
   /** Opens the Rest popover on the button that asked for it. */
   onRest?: (card: KanbanCard, anchor: HTMLElement) => void
+  /** A message the console delivered, with when its send began, for a surface that shows the line until the board records it. */
+  onSent?: (card: KanbanCard, message: string, at: number) => void
+  /** The surface shows the conversation itself: a send keeps the human here rather than opening the worker's terminal. */
+  keepPlace?: boolean
 }
+
+/** What a surface beside the reader asks of its own console. */
+export type ConsoleOptions = Pick<DockOptions, 'onSent' | 'keepPlace'>
 
 /** A warm cache dot drains on this cadence, and the figures follow the session's turns. */
 const USAGE_REFRESH_MS = 15_000
 
 /**
- * The band above a constitution's pages, two lines that stay in place while
- * the pages beneath change. The first is identity and navigation: back, the
- * name (with the highlighted thread's after it), the context meter, and ×.
- * The second is the message box, with Listen, Send and New session inside it.
- * A fiber's verbs live on its row ({@link actsFor}); only where no row stands
- * for the fiber (a page other than its family's) does the band draw them.
+ * The console: the one chat bar of the board, docked at the bottom of the
+ * reader under a constitution's pages and of each Channels pane. Two lines
+ * that stay in place while what is above them changes. The first is identity
+ * and navigation: back, the name (with the highlighted thread's after it), the
+ * context meter, the menu of the fiber's acts (its lifecycle verbs, its
+ * conversation, its page and its settings), and ×. The second is the message
+ * box, with Listen, Send and New session inside it. A row that stands for a
+ * fiber draws the same acts as a strip ({@link actsFor}).
  */
 export class Dock {
   private root: HTMLElement | null = null
@@ -371,16 +382,13 @@ export class Dock {
   private back: HTMLButtonElement | null = null
   private backLabel = ''
   private ancestry: HTMLElement | null = null
-  private drawerClose: (() => boolean) | null = null
+  /** The settings dropdown of a console the reader does not seat. */
+  private settingsMenu: SettingsMenu | null = null
   private card: KanbanCard | null = null
   private actionCard: KanbanCard | null = null
   private searchDebounce: number | null = null
   private fiberIndex: Promise<Array<{ id: string; name: string }>> | null = null
   private searchRenderToken = 0
-  /** Opens a file in the reader's viewer; the workspace seats it. */
-  openFile?: (path: string, title?: string, owner?: string) => void
-  /** The family page draws a row for the band's fiber, so the band leaves the verbs to it. */
-  private rows = false
   /** Opens the band's fiber's own page, from the constitution button its acts carry. */
   private openConstitution: (() => void) | null = null
   /** The band stands over the page, so its settings sheet can open; the reader seats it. */
@@ -400,6 +408,7 @@ export class Dock {
   /** Typed-input ids: a retried send keeps its message's id. */
   private readonly messageIds = new HumanMessageIds()
   private actPaint: (() => void) | null = null
+  private worker: WorkerActions | null = null
   private settingsSync: ((view: KanbanCard) => void) | null = null
   private historySync: (() => void) | null = null
   private usage: TranscriptUsage | null = null
@@ -417,6 +426,8 @@ export class Dock {
   private readonly phone: PhoneListening | undefined
   private readonly voice: DockOptions['voice']
   private readonly onRest?: (card: KanbanCard, anchor: HTMLElement) => void
+  private readonly onSent?: (card: KanbanCard, message: string, at: number) => void
+  private readonly keepPlace: boolean
   private fiberSlug?: FiberSlug
 
   constructor(
@@ -433,6 +444,8 @@ export class Dock {
     this.phone = opts.phone
     this.voice = opts.voice
     this.onRest = opts.onRest
+    this.onSent = opts.onSent
+    this.keepPlace = opts.keepPlace ?? false
   }
 
   setFiberSlug(fiberSlug: FiberSlug): void { this.fiberSlug = fiberSlug }
@@ -548,15 +561,22 @@ export class Dock {
     this.saveTail = Promise.resolve()
     this.root?.replaceChildren()
     this.ancestry = this.leave = this.back = null
-    this.drawerClose = null
+    this.worker = null
+    this.settingsMenu?.dispose()
+    this.settingsMenu = null
   }
 
   handleEscape(): boolean {
     if (this.listen?.dismiss()) return true
     if (dismissSelectPicker()) return true
-    if (this.dismissConversation?.() || this.dismissParent?.()) return true
-    return this.drawerClose?.() ?? false
+    return !!(this.dismissConversation?.() || this.dismissParent?.())
   }
+
+  /** What is typed in the message box, for a caller that keeps drafts by whom they go to. */
+  get draft(): string { return this.worker?.message ?? '' }
+  set draft(text: string) { if (this.worker) this.worker.message = text }
+  /** Puts the caret in the message box. */
+  focus(): void { this.worker?.focus() }
 
   /** Repaint the destination beside Listen. */
   private paintVoice(): void {
@@ -643,7 +663,7 @@ export class Dock {
    * opens it) and its settings sheet. The whole strip is the fiber's verdict
    * host, so an undo window takes its place.
    */
-  actsFor(target: () => KanbanCard, constitution?: () => (() => void) | null): FiberActs {
+  actsFor(target: () => KanbanCard, ): FiberActs {
     const el = document.createElement('span')
     el.className = 'ws-fiber-acts'
     el.dataset.part = 'acts'
@@ -660,18 +680,7 @@ export class Dock {
     settings.addEventListener('click', () => this.settingsFor?.(target(), settings))
     const session = document.createElement('span')
     session.className = 'ws-acts-session'
-    session.append(conversation.el)
-    // A row's own constitution segment unfolds it; the band's acts open the page instead.
-    const page = constitution && document.createElement('button')
-    if (page) {
-      page.type = 'button'
-      page.className = 'ws-header-icon ws-band-constitution'
-      page.innerHTML = headerIcon('constitution')
-      page.title = 'Constitution'; page.setAttribute('aria-label', 'Constitution')
-      page.addEventListener('click', () => constitution!()?.())
-      session.append(page)
-    }
-    session.append(settings)
+    session.append(conversation.el, settings)
     el.append(verbs.el, session)
     const paint = (): void => {
       const card = target(), who = slug(card)
@@ -679,7 +688,6 @@ export class Dock {
       el.setAttribute('aria-label', `${who}'s acts`)
       verbs.paint(card, who)
       conversation.paint()
-      if (page) page.hidden = !constitution!()
       settings.hidden = !this.seated || !this.settingsFor
       settings.title = `Settings for ${who}`
       settings.setAttribute('aria-label', settings.title)
@@ -752,13 +760,8 @@ export class Dock {
     return new WorkerActions(card, (target, mode, message, word, images) => this.startSession(target, mode, word, undefined, message, images))
   }
 
-  /**
-   * Retarget the band's figures and message box without changing its identity
-   * or settings. `rows` says a family page beneath draws the fiber's row, and
-   * with it the fiber's acts.
-   */
-  setActionCard(card: KanbanCard, rows = false): void {
-    this.rows = rows
+  /** Retarget the band's figures, menu and message box without changing its identity or settings. */
+  setActionCard(card: KanbanCard): void {
     const previous = this.actionCard ?? this.card
     if (previous && ((previous.uid ?? previous.id) !== (card.uid ?? card.id) || previous.originId !== card.originId) && this.errorEl) {
       this.errorEl.replaceChildren()
@@ -835,6 +838,25 @@ export class Dock {
     this.root?.querySelectorAll('.kbn-ctl-history').forEach((history) => {
       history.dispatchEvent(new Event(CONVERSATION_OPENING_CHANGED))
     })
+  }
+
+  /** The console menu's acts for a fiber: its lifecycle verbs, the one that fits its state first, then its conversation, its page and its settings. */
+  private bandActions(card: KanbanCard, anchor: HTMLElement): ConversationAction[] {
+    const offered = lifecycleVerbsFor(card, !!this.onRest), lead = leadVerb(card, offered)
+    const verbs = lead ? [lead, ...offered.filter(verb => verb !== lead)] : offered
+    const actions: ConversationAction[] = verbs.map(verb => ({
+      label: verbSpec(verb, card).label,
+      dress: (item: HTMLButtonElement) => { dressVerb(item, verb, card) },
+      run: () => { if (verb === 'rest') this.onRest?.(card, anchor); else this.verdict(card, VERB_VERDICT[verb]) },
+    }))
+    const action = (label: string, icon: HeaderIcon, run: () => void): ConversationAction =>
+      ({ label, dress: item => { dressAction(item, icon, label) }, run })
+    if (this.conversationRoute(card)) actions.push(action('Open conversation', 'console', () => { this.openConversation(card) }))
+    const page = this.openConstitution
+    if (page) actions.push(action('Constitution', 'constitution', page))
+    const settings = this.settingsFor
+    if (settings) actions.push(action('Settings', 'settings', () => settings(card, anchor)))
+    return actions
   }
 
   private buildControls(card: KanbanCard, shuttleManaged: boolean): HTMLElement {
@@ -945,11 +967,10 @@ export class Dock {
     foot.className = 'kbn-ctl-foot ws-band-status'
     foot.append(errorEl, statusEl)
     const target = (): KanbanCard => this.actionCard ?? card
-    const worker = this.workerActionsFor(card)
+    const worker = this.worker = this.workerActionsFor(card)
     this.disposers.push(() => worker.dispose())
-    // Where no row stands for the fiber, the band draws its acts.
-    const acts = this.actsFor(target, () => this.openConstitution)
-    this.disposers.push(acts.dispose)
+    // The keyboard of a phone rises over the bottom of the screen; the console stays above it.
+    this.disposers.push(bindAvoidKeyboard(this.el))
 
     // A single settings sheet owns configuration and history.
     const drawer = document.createElement('div')
@@ -968,7 +989,6 @@ export class Dock {
     const firstHistory = sheet.history()
     if (firstHistory) sessionsSection.append(firstHistory)
     drawer.append(settingsSection, sessionsSection)
-    let drawerOpener: HTMLElement | null = null
     // The sheet is drawn for the fiber whose ⚙ asked; the band's own card keeps its sheet in step with runtime polls.
     this.settingsFor = (act, opener) => {
       if ((act.uid ?? act.id) !== (sheetCard.uid ?? sheetCard.id) || act.originId !== sheetCard.originId) {
@@ -987,13 +1007,8 @@ export class Dock {
       if (sheet.ledger.hidden) sheet.toggle.click()
       const unfold = sessionsSection.querySelector<HTMLButtonElement>('.kbn-ctl-history-toggle')
       if (unfold?.getAttribute('aria-expanded') !== 'true') unfold?.click()
-      if (this.openSettings) { this.openSettings(drawer, opener); return }
-      drawerOpener = opener
-      drawer.hidden = !drawer.hidden
-    }
-    this.drawerClose = () => {
-      if (this.openSettings || drawer.hidden) return false
-      drawer.hidden = true; drawerOpener?.focus({ preventScroll: true }); return true
+      if (this.openSettings) this.openSettings(drawer, opener)
+      else (this.settingsMenu ??= new SettingsMenu()).show(drawer, opener, this.el)
     }
     const facts = document.createElement('p'); facts.className = 'ws-header-facts'
     drawer.append(facts)
@@ -1036,6 +1051,21 @@ export class Dock {
     leave.className = 'ws-header-icon ws-band-leave'
     leave.hidden = true
     leave.innerHTML = headerIcon('leave')
+    // The fiber's acts wait behind one control, which is also where a verdict's undo stands.
+    const acts = document.createElement('span')
+    acts.className = 'ws-band-acts'
+    const menu = document.createElement('button')
+    menu.type = 'button'
+    menu.className = 'ws-header-icon ws-band-menu'
+    menu.dataset.part = 'band-menu'
+    menu.innerHTML = headerIcon('actions')
+    menu.setAttribute('aria-haspopup', 'menu')
+    menu.setAttribute('aria-expanded', 'false')
+    menu.addEventListener('click', () => {
+      const act = target()
+      openActionMenu(menu, this.bandActions(act, menu), `${slug(act)}'s acts`)
+    })
+    acts.append(menu)
     if (this.voice && shuttleManaged) {
       this.listen = new ListenControl({
         card: () => this.actionCard ?? card, voice: this.voice.controller, phone: this.phone, shuttleBase: this.shuttleBase,
@@ -1048,7 +1078,8 @@ export class Dock {
     if (unsubscribe) this.disposers.push(unsubscribe)
     this.paintVoice()
     if (this.listen) worker.seat(this.listen.el, voiceStrip.el)
-    header.append(identity, acts.el, leave)
+    header.append(identity, acts, leave)
+    // The settings sheet waits hidden in the console until its dropdown opens on it.
     body.append(header, worker.el, drawer, foot)
     this.actPaint = () => {
       this.el.dataset.column = card.column
@@ -1069,9 +1100,9 @@ export class Dock {
       facts.title = hit === undefined ? '' : `The session's recent turns read ${hit}% of their context tokens from the prompt cache`
       facts.hidden = !facts.textContent
       worker.update(act, warm !== undefined ? `cache warm until ${clockTime(warm)}` : '')
-      acts.el.hidden = this.rows
-      if (!this.rows) acts.paint()
-      header.toggleAttribute('data-acts', !this.rows)
+      markVerdictHost(acts, act)
+      menu.title = `${slug(act)}'s acts`
+      menu.setAttribute('aria-label', menu.title)
     }
     this.actPaint()
     this.repaintActs()
@@ -1102,7 +1133,6 @@ export class Dock {
     col.className = 'kbn-ctl-fields'
 
     const agentSelect = document.createElement('select')
-    agentSelect.id = 'kbn-detail-agent'
     agentSelect.className = 'kbn-ctl-select kbn-ctl-agent-select'
     agentSelect.setAttribute('aria-label', 'Agent')
     // Until the registry answers, the select holds the card's own agent — the
@@ -1114,14 +1144,12 @@ export class Dock {
     // to the registry's `default_effort`, so the control always names the
     // level dispatch will actually use.
     const effortSelect = document.createElement('select')
-    effortSelect.id = 'kbn-detail-effort'
     effortSelect.className = 'kbn-ctl-select kbn-ctl-effort-select'
     effortSelect.setAttribute('aria-label', 'Effort')
     if (card.shuttleEffort) effortSelect.append(new Option(card.shuttleEffort, card.shuttleEffort))
     this.disposers.push(anchorSelect(agentSelect), anchorSelect(effortSelect))
 
     const chrome = ctlToggle('Chrome', 'kbn-ctl-chrome')
-    chrome.input.id = 'kbn-detail-chrome'
     chrome.input.checked = card.shuttleChrome === true
     // Until the registry says which agents take it, show Chrome where it is on.
     chrome.label.hidden = !chrome.input.checked
@@ -1196,7 +1224,6 @@ export class Dock {
 
     const cronInput = document.createElement('input')
     cronInput.type = 'text'
-    cronInput.id = 'kbn-detail-schedule'
     cronInput.className = 'kbn-ctl-input kbn-ctl-cron'
     cronInput.placeholder = '0 9 * * 1-5'
     cronInput.value = baseline.schedule
@@ -1602,7 +1629,7 @@ export class Dock {
    */
   private async startSession(card: KanbanCard, mode: SessionMode, word?: HTMLElement, projectDir?: string, message = '', images: PastedImage[] = []): Promise<boolean> {
     if (this.starting || (mode === 'fresh' && !this.confirmCut(card))) return false
-    const epoch = this.epoch
+    const epoch = this.epoch, at = Date.now()
     const original = word?.textContent ?? ''
     if (word) word.textContent = mode === 'fresh' ? 'Starting…' : message || images.length ? 'Sending…' : 'Resuming…'
     this.starting = true
@@ -1636,8 +1663,9 @@ export class Dock {
         this.messageIds.sent()
         const notice = repeatNotice(body)
         if (notice) { showError(notice); return false }
+        if (message) this.onSent?.(card, message, at)
         this.onSaved()
-        if (body.tmux_session && !coarsePointer()) this.onOpenWorker?.(body.tmux_session, card.originId)
+        if (body.tmux_session && !coarsePointer() && !this.keepPlace) this.onOpenWorker?.(body.tmux_session, card.originId)
         return true
       }
       if (res.status === 409) showError(alreadyRunningMessage(body, said))

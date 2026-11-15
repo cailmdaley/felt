@@ -120,8 +120,12 @@ export class WorkerActions {
     this.paint()
   }
 
-  /** The message as typed. */
+  /** The message as typed; setting it puts a kept draft back. */
   get message(): string { return textOf(this.field) }
+  set message(text: string) {
+    this.field.textContent = text
+    this.paint()
+  }
 
   focus(): void {
     this.field.focus({ preventScroll: true })
@@ -190,8 +194,8 @@ export class WorkerActions {
     }))
   }
 
-  /** The worker has a session to go back to. */
-  private get resumes(): boolean { return !!this.card.sessionUuid }
+  /** The worker is running, or has a session to go back to. */
+  private get resumes(): boolean { return hasLiveWorker(this.card) || !!this.card.sessionUuid }
 
   /** Only a Shuttle constitution on the Desk's lifecycle has a worker to run. */
   private get runnable(): boolean { return isAgentCard(this.card) && onDesk(this.card) }
