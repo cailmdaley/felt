@@ -79,7 +79,9 @@ export function waitingOn(card: KanbanCard): Message | undefined {
   if (state === 'to-review') return { kind: 'review', card, text: card.reviewMark?.note || card.outcome || '', at: instant(card.closedAt, card.reviewMark?.at, card.createdAt) }
   if (state !== 'waiting') return undefined
   const turn = turnOf(card)
-  return { kind: turn.turn === 'question' ? 'ask' : 'turn', card, text: card.outcome || turn.detail, at: instant(turn.since, card.lastActivityAt, card.dispatchedAt, card.createdAt) }
+  // What the worker has to say is its outcome; only a turn that could not start says why.
+  const text = card.outcome || (turn.turn === 'blocked' ? turn.detail : '')
+  return { kind: turn.turn === 'question' ? 'ask' : 'turn', card, text, at: instant(turn.since, card.lastActivityAt, card.dispatchedAt, card.createdAt) }
 }
 
 /**

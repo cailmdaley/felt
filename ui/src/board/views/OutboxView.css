@@ -103,12 +103,12 @@
 .kbn-ch-prose { max-width: none; padding: 0; }
 
 /* The lines: a state dot, then who and when, then what. What waits on the human glows. */
-.kbn-ch-feed { list-style: none; margin: 0; padding: 18px 0 6px; display: flex; flex-direction: column; gap: 14px; }
+.kbn-ch-feed { list-style: none; margin: 0; padding: 16px 0 6px; display: flex; flex-direction: column; gap: 8px; }
 .kbn-ch-hush { font: italic var(--type-row)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink-muted); }
 .kbn-ch-msg {
   --glow: transparent;
   display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 0 6px;
-  padding: 8px 12px 8px 4px;
+  padding: 5px 12px 5px 4px;
   border-radius: 8px;
   border: 0.5px solid transparent;
 }
@@ -126,7 +126,7 @@
 .kbn-ch-msg[data-chosen] { border-color: color-mix(in srgb, var(--kbn-ink) 30%, transparent); }
 .kbn-ch-msg[data-kind][data-chosen] { border-color: var(--glow); box-shadow: 0 0 0 0.5px var(--glow), 0 0 22px color-mix(in srgb, var(--glow) 38%, transparent); }
 .kbn-ch-msg-pick {
-  display: flex; flex-direction: column; gap: 3px; width: 100%;
+  display: flex; flex-direction: column; gap: 1px; width: 100%;
   padding: 0; border: 0; background: none; text-align: left; cursor: pointer; color: inherit;
 }
 .kbn-ch-msg-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; font: var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); }
@@ -137,7 +137,7 @@
   font: var(--type-row)/var(--leading-prose) var(--font-serif);
   color: var(--kbn-ink-soft);
   overflow-wrap: anywhere;
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
 }
 .kbn-ch-msg[data-kind] .kbn-ch-msg-text { color: var(--kbn-ink); }
 .kbn-ch-msg[data-chosen] .kbn-ch-msg-text { -webkit-line-clamp: unset; line-clamp: none; }

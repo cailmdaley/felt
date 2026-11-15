@@ -84,6 +84,10 @@ describe('composeChannels', () => {
     expect(yours).toStrictEqual(['idle', 'blocked', 'prompt'])
     expect(turns.filter(card => waitingOn(card)).map(card => card.id)).toStrictEqual(yours)
     expect(turns.map(card => waitingOn(card)?.kind)).toStrictEqual(['turn', 'turn', 'ask', undefined, undefined, undefined])
+    // A turn says what the worker has to say, its outcome; only one that could not start says why.
+    expect(waitingOn(turns[0])?.text).toBe('')
+    expect(waitingOn({ ...turns[0], outcome: 'Done.' })?.text).toBe('Done.')
+    expect(waitingOn(turns[1])?.text).toBe('The worker could not start its turn.')
     // An ask counts only on an active card; a review only when it waits on the human, a mark's note first.
     expect(waitingOn({ ...mask, status: 'closed', column: 'tempered' })).toBeUndefined()
     expect(waitingOn({ ...cuts, column: 'orchestratorReview' })).toBeUndefined()
