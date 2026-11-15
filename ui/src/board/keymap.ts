@@ -179,4 +179,9 @@ export const helpSections: readonly HelpSection[] = [
     row(['Enter'], 'Unfold or fold a row, entering it', []),
     row(['c'], 'Open the highlighted thread in Rex', []),
   ] },
+  { title: 'Outbox', note: 'One channel per orchestrator with something waiting on you.', rows: [
+    row(['j', 'k'], 'Next / previous channel', []),
+    row(['['], 'Hide or show the channels; on a phone, swipe in from the left edge', []),
+    row(['Enter'], 'Reply to the orchestrator, or to the thread chosen', []),
+  ] },
 ]

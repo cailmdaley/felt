@@ -605,9 +605,9 @@ See [Connect your machines](../shuttle/remotes.md#verify-work-across-the-connect
 
 Set something aside in the human's Outbox. Writes a family-board record of kind
 `dismissed` with the key as its text and, when supplied, a fiber uid. The board
-sets an office aside with `office:<office>:<ms>`, where `<office>` is
-`role:<slug>` or `fiber:<root uid>` and `<ms>` is when its newest block began;
-the office returns once something blocks in it later than that. Dismissals reach
+sets a channel aside with `office:fiber:<orchestrator uid>:<ms>`, where `<ms>`
+is when the newest wait in the orchestrator's family began; the channel returns
+once something in it begins waiting later than that. Dismissals reach
 every hub through the remote board feeds and are omitted from family-board
 reading.
 

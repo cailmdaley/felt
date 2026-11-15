@@ -857,7 +857,7 @@ test('The board bar holds its tabs, Find and Settings to the pixel on every view
   await p.waitForTimeout(350)
   assert.deepEqual(await bar(), desk, 'on the Globe')
   await barTab(p, 'outbox').click()
-  await p.locator('.kbn-audience').waitFor()
+  await p.locator('.kbn-outbox').waitFor()
   await p.waitForTimeout(350)
   assert.deepEqual(await bar(), desk, 'on the Outbox')
 })

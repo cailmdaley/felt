@@ -12,8 +12,8 @@
  *
  * Chronicle holds the record in time. Board is the document workspace's
  * contact sheet, grouped by recent work, project or host. The Globe is all
- * the work on a sphere. The Outbox is an audience with the offices blocked
- * on the human, one letter at a time.
+ * the work on a sphere. The Outbox has one channel per orchestrator with
+ * something waiting on the human.
  *
  * A view is a plain object with a three-call lifecycle. KanbanModal owns the
  * host element and the data; the view owns everything inside the host.

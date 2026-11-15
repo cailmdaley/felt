@@ -688,7 +688,7 @@ describe('keyboard help', () => {
     const dialog = document.querySelector('[role="dialog"][aria-label="Keyboard shortcuts"]')!
     expect(dialog.getAttribute('aria-modal')).toBe('true')
     await vi.waitFor(() => expect(focus.closest('[inert]')).not.toBeNull())
-    expect([...dialog.querySelectorAll('h3')].map(el => el.textContent)).toEqual(['Everywhere', 'Moving', 'A constitution', 'Fiber page', "A constitution's page"])
+    expect([...dialog.querySelectorAll('h3')].map(el => el.textContent)).toEqual(['Everywhere', 'Moving', 'A constitution', 'Fiber page', "A constitution's page", 'Outbox'])
     press('j'); expect(selected()).toBeUndefined()
     document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
     expect(dialog.contains(document.activeElement)).toBe(true)
