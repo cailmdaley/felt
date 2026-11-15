@@ -229,3 +229,21 @@ func TestAnIdleEntryWaitsForAnObservedIdle(t *testing.T) {
 		t.Fatalf("force batch = %q", text)
 	}
 }
+
+// A tracked worker whose conversation is not yet known ("-" with its epoch)
+// waits, as it did before a fiber without a worker could launch.
+func TestAnUnaddressedWorkerWaits(t *testing.T) {
+	env := testEnv(t)
+	putWish(t, env, "forced", "force", "hold")
+	epoch := transition(t, env, "worker:-", "-")
+	result, err := consumeWith(context.Background(), env, "fiber", "host", Worker{Address: "-", Epoch: epoch}, neverSend(t))
+	if err != nil || result.Action != "wait" {
+		t.Fatalf("got %+v %v", result, err)
+	}
+	if e := readEntry(t, filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey("forced")+".json")); e.Attempt != nil {
+		t.Fatalf("an unaddressed worker reserved a launch: %+v", e.Attempt)
+	}
+	if _, err := consumeWith(context.Background(), env, "fiber", "host", Worker{Address: "-", Epoch: epoch + 1}, neverSend(t)); ErrorCode(err) != "stale_receiver" {
+		t.Fatalf("a superseded epoch = %v", err)
+	}
+}

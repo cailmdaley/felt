@@ -260,14 +260,10 @@ func fiberContextHookEligible(root, conversation string, request Request) bool {
 	return a.open() && a.Launch && a.Conversation != conversation && time.Since(time.Unix(0, a.OpenedAt)) < launchLease
 }
 
-// DeliverFiberContext consumes for a live receiver without turn facts. Only
-// force entries initiate a wake; ask remains available to the fiber's hook,
-// and none goes to the hook or, for a receiver without one, as context. A
-// fiber without a receiver ("-") is left as it is.
+// DeliverFiberContext consumes without turn facts. Only force entries initiate
+// a wake; ask remains available to the fiber's hook, and none goes to the hook
+// or, for a receiver without one, as context.
 func DeliverFiberContext(ctx context.Context, env *sysenv.Env, fiber, host, address string, generation uint64) error {
-	if address == "-" {
-		return nil
-	}
 	_, err := Consume(ctx, env, fiber, host, Worker{Address: address, Epoch: generation})
 	return err
 }

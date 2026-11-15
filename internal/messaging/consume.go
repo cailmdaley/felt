@@ -48,14 +48,21 @@ const launchLease = 2 * time.Minute
 // asking entries for launchLease: until the receiver changes, until the
 // caller retries without Costly after a refused fresh launch, or until the
 // launched session's hook takes them. A fiber without a worker (Address "-")
-// advances no batch and answers launch or wait.
+// advances no batch and answers launch or wait; a tracked worker whose
+// conversation is not yet known (Address "-" with its epoch) waits.
 func Consume(ctx context.Context, env *sysenv.Env, fiber, host string, worker Worker) (Consumption, error) {
 	return consumeWith(ctx, env, fiber, host, worker, sendFiberContextAttempt)
 }
 
 func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Worker, send fiberContextSender) (Consumption, error) {
 	result := Consumption{Action: "wait"}
-	dormant := w.Address == "-"
+	// "-" with an epoch is a tracked worker whose conversation is not yet
+	// known: nothing can reach it, so it waits. "-" with epoch 0 is a fiber
+	// with no worker.
+	dormant := w.Address == "-" && w.Epoch == 0
+	if w.Address == "-" && !dormant {
+		return result, verifyUnaddressedReceiver(env, fiber, host, w.Epoch)
+	}
 	var a Address
 	hook := false
 	if !dormant {
@@ -223,6 +230,29 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 		result.Action, result.Members = action, append(result.Members, attempt.Members...)
 	}
 	return result, errors.Join(append(errs, err)...)
+}
+
+// verifyUnaddressedReceiver checks that the fiber's receiver is still the
+// tracked worker at epoch whose conversation is unknown.
+func verifyUnaddressedReceiver(env *sysenv.Env, fiber, host string, epoch uint64) error {
+	root := mailboxDir(env, "fiber", fiber)
+	if err := ensureDir(root, 0700); err != nil {
+		return err
+	}
+	lock, err := os.OpenFile(filepath.Join(root, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	receiver, err := readFiberReceiver(root)
+	if err != nil || receiver.Generation != epoch || receiver.Address != (Address{Host: host}) {
+		return errCode("stale_receiver", "superseded worker identity")
+	}
+	return nil
 }
 
 // decideConsumption answers wait, fresh or wake for the due entries no open

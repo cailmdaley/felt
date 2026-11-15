@@ -113,7 +113,8 @@ entries a session started for a fiber with no worker would take.`,
 		Short: "Consume a fiber's inbox for its worker, as one JSON answer",
 		Long: `Consume a fiber's inbox for its live conversation: advance every open batch,
 then wake, send quiet context to a receiver without a hook, reserve a fresh
-launch or wait. For a fiber with no worker, pass - and epoch 0: a due entry
+launch or wait. A worker whose conversation is not yet known (- with its
+epoch) waits. For a fiber with no worker, pass - and epoch 0: a due entry
 that asks for a turn reserves a launch ("action": "launch") once per two-minute
 lease, and the session launched for it takes the entries through its hook.
 The JSON answer is printed whenever consume decided, including when an open
@@ -126,7 +127,7 @@ to consume again with the worker's --idle, --unknown and --costly facts.`,
 				return err
 			}
 			epoch, err := strconv.ParseUint(args[2], 10, 64)
-			if err != nil || (epoch == 0) != (args[1] == "-") {
+			if err != nil || (epoch == 0 && args[1] != "-") {
 				return fmt.Errorf("a positive receiver epoch required, or - with epoch 0 for a fiber with no worker")
 			}
 			result, err := messaging.Consume(context.Background(), a.env, args[0], host, messaging.Worker{Address: args[1], Epoch: epoch, Idle: idle || unknown, Unknown: unknown, Costly: costly})
