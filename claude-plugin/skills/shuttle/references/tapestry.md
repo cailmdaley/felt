@@ -2,6 +2,8 @@
 
 The tapestry is the constitution's one page: what this work is, whole, as it stands. It says what was built or found, how the parts fit, how it is used and where it stands. It describes the work, never the latest stretch of it: a reader who has never seen the fiber should leave with the mental model, and one back after a week should find the same picture with its present state. Its form follows the work: a visual index to sub-fibers and findings, the slides of a talk being built, PDFs side by side for a paper review. The constitution's chat header shows its thumbnail; clicking opens it full-size.
 
+**When the human asks for a page to be embedded, the tapestry is that page and nothing else.** "Embed the slides", "make it the deck" or "just show the PDF" means pass the page through unchanged, filling the frame: no header, caption, strip of thumbnails, status or stamp above or below it, since each one takes space from the thing they asked to see. A deck built as one HTML file becomes `tapestry.html` itself; anything else gets a bare full-frame iframe. The rest of this reference applies when you compose the page, not when the human has named it.
+
 ## The first screen
 
 **A tapestry opens on one screen that can be read at a glance.** The human comes back after hours or days away, with hundreds of chat lines unread, and this screen is what fills their display. Without scrolling, it tells them what this work is, where it stands, and what needs them, if anything.
