@@ -133,7 +133,7 @@
   font: 700 var(--type-row)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink); overflow-wrap: anywhere;
 }
 span.kbn-ch-msg-name { cursor: default; }
-button.kbn-ch-msg-name:hover { text-decoration: underline; text-decoration-thickness: 0.5px; text-underline-offset: 3px; }
+button.kbn-ch-msg-name:hover { color: var(--kbn-ink-soft); }
 .kbn-ch-msg[data-human] .kbn-ch-msg-name { color: var(--kbn-ink-soft); }
 /* Where what arrived since the last visit begins. */
 .kbn-ch-new { display: flex; align-items: center; gap: 8px; margin: 4px 20px 2px 14px; color: var(--kbn-you); }
@@ -209,10 +209,10 @@ button.kbn-ch-msg-name:hover { text-decoration: underline; text-decoration-thick
   padding: 0; border: 0; background: none; cursor: pointer; text-align: left;
   font: 600 var(--type-title)/var(--leading-tight) var(--font-serif); color: var(--kbn-ink); overflow-wrap: anywhere;
 }
-.kbn-ch-thread-name:hover { text-decoration: underline; text-decoration-thickness: 0.5px; text-underline-offset: 4px; }
+.kbn-ch-thread-name:hover { color: var(--kbn-ink-soft); }
 .kbn-ch-liveness {
   padding: 0 8px; border-radius: 999px;
-  font: italic var(--type-meta)/1.6 var(--font-serif); color: var(--kbn-ink-muted);
+  font: italic var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted);
   border: 0.5px solid var(--kbn-rule-strong);
 }
 .kbn-ch-liveness[data-state='working'] { color: var(--kbn-agent); border-color: color-mix(in srgb, var(--kbn-agent) 50%, transparent); }
@@ -263,7 +263,7 @@ button.kbn-ch-msg-name:hover { text-decoration: underline; text-decoration-thick
 /* A long message folds after eight lines; Show more unfolds it in place. */
 .kbn-ch-msg-text[data-folded] {
   max-height: calc(8 * 1lh); overflow: hidden;
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 1.6lh), transparent);
+  mask-image: linear-gradient(to bottom, currentColor calc(100% - 1.6lh), transparent);
 }
 .kbn-ch-more { display: block; margin-top: 2px; }
 /* A worker's thread, from its line in the channel. */
@@ -272,7 +272,7 @@ button.kbn-ch-msg-name:hover { text-decoration: underline; text-decoration-thick
   font: 600 var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-agent);
 }
 .kbn-ch-replies .kbn-ch-replies-last, .kbn-ch-replies .kbn-ch-age { font-weight: 400; color: var(--kbn-ink-muted); }
-.kbn-ch-replies:hover { text-decoration: underline; text-decoration-thickness: 0.5px; text-underline-offset: 3px; }
+.kbn-ch-replies:hover { color: var(--kbn-ink); }
 /* What a thread waits on, and a closed fiber's conclusion, each labelled. */
 .kbn-ch-thread-ask, .kbn-ch-conclusion { padding: 6px 10px; border-radius: 6px; }
 .kbn-ch-thread-ask { border-left: 2px solid var(--kbn-owed-bright); background: color-mix(in srgb, var(--kbn-owed-bright) 8%, transparent); color: var(--kbn-ink); }

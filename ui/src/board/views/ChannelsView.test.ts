@@ -25,7 +25,7 @@ const record = (over: Partial<BoardRecord> & Pick<BoardRecord, 'id' | 'kind' | '
 const BOARD: Record<string, BoardRecord[]> = {
   C: [
     record({ id: 'b1', kind: 'post', fiber: 'T', text: 'κ×tSZ is measured to **9σ**.', files: ['/notes/tsz/spectrum.png'] }, 30),
-    record({ id: 'b2', kind: 'human', fiber: 'T', by: { label: 'Cail' }, text: 'Show the nulls too?' }, 25),
+    record({ id: 'b2', kind: 'human', fiber: 'T', by: { label: 'Sam' }, text: 'Show the nulls too?' }, 25),
     record({ id: 'b3', kind: 'asked', fiber: 'M', text: 'Mask at 5σ or 3σ?' }, 20),
     record({ id: 'b4', kind: 'post', fiber: 'C', text: 'Two calls for you today.' }, 12),
   ],

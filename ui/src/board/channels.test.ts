@@ -13,8 +13,8 @@ const working = (minutes: number) => ({ status: 'active' as const, workerState: 
 
 // UNIONS: a seated chair with two seated hubs under it, and a thread under a hub that names no channel of its own.
 const unions = card({ id: 'pando/unions', uid: 'U', name: 'UNIONS', shuttleChannel: 'UNIONS', shuttleSeat: true, ...idle(30) })
-const nibi = card({ id: 'nibi-unions', uid: 'N', orchestrator: 'U', shuttleSeat: true, shuttleKind: 'standing', ...working(2) })
-const fir = card({ id: 'fir-unions', uid: 'F', orchestrator: 'U', shuttleSeat: true, ...working(1) })
+const east = card({ id: 'east-unions', uid: 'N', orchestrator: 'U', shuttleSeat: true, shuttleKind: 'standing', ...working(2) })
+const west = card({ id: 'west-unions', uid: 'F', orchestrator: 'U', shuttleSeat: true, ...working(1) })
 const modes = card({ id: 'pando/unions/modes', uid: 'W', name: 'n(z) modes', orchestrator: 'F', status: 'active', ask: { text: 'Open the PR?', at: at(20) } })
 // Vizier: two seats, one standing and fresher; the oneshot one chairs.
 const vizier = card({ id: 'life/vizier', uid: 'Z', name: 'Vizier', shuttleChannel: 'Vizier', shuttleSeat: true, shuttleRole: 'vizier', ...idle(50) })
@@ -24,7 +24,7 @@ const shear = card({ id: 'shear', uid: 'S', name: 'Cosmic shear', shuttleRole: '
 const van = card({ id: 'van', uid: 'R', name: 'Moving house', status: 'active', ask: { text: 'Which van?', at: at(10) } })
 const old = card({ id: 'old', uid: 'O', name: 'Old notes', status: 'open', modifiedAt: new Date(now - RECENT_MS - day).toISOString() })
 
-const all = [unions, nibi, fir, modes, vizier, post, shear, van, old]
+const all = [unions, east, west, modes, vizier, post, shear, van, old]
 type Input = Parameters<typeof composeChannels>[0]
 function compose(cards: KanbanCard[], over: Partial<Input> = {}): Channel[] {
   const index = new ThreadIndex(cards)
@@ -37,7 +37,7 @@ describe('composeChannels', () => {
     const channels = compose(all)
     expect(channels.map(channel => [channel.key, channel.name, channel.chaired, channel.members.map(member => member.id)])).toStrictEqual([
       ['role:analyst', 'Analyst', true, ['shear']],
-      ['channel:UNIONS', 'UNIONS', true, ['pando/unions', 'nibi-unions', 'fir-unions', 'pando/unions/modes']],
+      ['channel:UNIONS', 'UNIONS', true, ['pando/unions', 'east-unions', 'west-unions', 'pando/unions/modes']],
       ['channel:Vizier', 'Vizier', true, ['life/vizier', 'loom/email/morning-post']],
       ['fiber:R', 'Moving house', false, ['van']],
       ['fiber:O', 'Old notes', false, ['old']],
@@ -103,26 +103,26 @@ describe('composeMessages', () => {
   const cuts = card({ id: 'cuts', uid: 'C', name: 'Depth cuts', orchestrator: 'U', column: 'awaitingReview', closedAt: at(15), reviewMark: { note: 'The plot is attached.', at: at(15) }, outcome: 'Validated.' })
   const stuck = card({ id: 'stuck', uid: 'K', name: 'Stuck', orchestrator: 'U', status: 'active', workerState: 'blocked', launchError: 'No allocation left.', lastActivityAt: now - 3 * minute })
   const quiet = card({ id: 'quiet', uid: 'Y', name: 'Quiet', orchestrator: 'U', ...working(1), outcome: 'Running the chains.' })
-  const cards = [unions, nibi, fir, modes, cuts, stuck, quiet]
+  const cards = [unions, east, west, modes, cuts, stuck, quiet]
   const channel = named(compose(cards), 'channel:UNIONS')
   const files: SentFile[] = [
-    { uid: 'F', host: 'local', fullPath: '/fir/run.log', basename: 'run.log', timestamp: now - 40 * minute },
-    { uid: 'F', host: 'local', fullPath: '/fir/s8.png', basename: 's8.png', timestamp: now - 40 * minute },
+    { uid: 'F', host: 'local', fullPath: '/west/run.log', basename: 'run.log', timestamp: now - 40 * minute },
+    { uid: 'F', host: 'local', fullPath: '/west/s8.png', basename: 's8.png', timestamp: now - 40 * minute },
     { uid: 'C', host: 'local', fullPath: '/cuts/cut.png', basename: 'cut.png', timestamp: now - 16 * minute },
-    { uid: 'N', host: 'local', fullPath: '/nibi/chains.md', basename: 'chains.md', timestamp: now - 300 * minute },
-    { uid: 'N', host: 'local', fullPath: '/nibi/old.md', basename: 'old.md', timestamp: now - reachMs - 1 },
+    { uid: 'N', host: 'local', fullPath: '/east/chains.md', basename: 'chains.md', timestamp: now - 300 * minute },
+    { uid: 'N', host: 'local', fullPath: '/east/old.md', basename: 'old.md', timestamp: now - reachMs - 1 },
   ]
   const records: BoardRecord[] = [
-    record({ id: 'r1', kind: 'post', fiber: 'F', by: { fiber: 'F' }, text: 'S8 is in; the plot and the log are attached.', files: ['/fir/s8.png', '/fir/run.log'] }, 40),
+    record({ id: 'r1', kind: 'post', fiber: 'F', by: { fiber: 'F' }, text: 'S8 is in; the plot and the log are attached.', files: ['/west/s8.png', '/west/run.log'] }, 40),
     record({ id: 'r2', kind: 'asked', fiber: 'W', by: { fiber: 'W' }, text: 'Open the PR?' }, 20),
     record({ id: 'r3', kind: 'closed', fiber: 'C', by: { fiber: 'C' } }, 15),
     record({ id: 'r4', kind: 'closed', fiber: 'N', by: { fiber: 'N' } }, 100),
     record({ id: 'r5', kind: 'handed_off', fiber: 'N', by: { fiber: 'N' } }, 90),
-    record({ id: 'r6', kind: 'human', fiber: 'F', by: { label: 'Cail' }, text: 'me: how is the run going?' }, 50),
+    record({ id: 'r6', kind: 'human', fiber: 'F', by: { label: 'Sam' }, text: 'me: how is the run going?' }, 50),
     record({ id: 'r7', kind: 'message', fiber: 'U', by: { label: 'human' }, text: 'Keep going.' }, 5),
     record({ id: 'r8', kind: 'message', fiber: 'F', by: { fiber: 'U', session: 'shuttle://h/claude/1' }, to: { fiber: 'F' }, text: 'Rerun with the new mask.' }, 45),
     record({ id: 'r9', kind: 'message', fiber: 'N', by: { label: 'external' }, text: 'Job 6400 finished.' }, 80),
-    record({ id: 'r10', kind: 'answered', fiber: 'W', by: { label: 'Cail' }, text: 'Q: Which mask? — A: The conservative one.' }, 25),
+    record({ id: 'r10', kind: 'answered', fiber: 'W', by: { label: 'Sam' }, text: 'Q: Which mask? — A: The conservative one.' }, 25),
     record({ id: 'r11', kind: 'post', fiber: 'Elsewhere', by: { fiber: 'Elsewhere' }, text: 'Not a member.' }, 3),
   ]
   const messages = composeMessages({ channel, records, files, now, reachMs, tapestry: { path: '/unions/tapestry.html', at: now - 2 * minute, title: 'UNIONS, as it stands', lede: 'S8 is measured.' } })
@@ -130,9 +130,9 @@ describe('composeMessages', () => {
 
   it('reads the stream oldest first: posts with their files, asks, reviews, the human\'s replies, files alone, the tapestry', () => {
     expect(stream.map(message => [message.kind, message.card.id, message.text, message.waiting, message.files.map(file => file.basename)])).toStrictEqual([
-      ['file', 'nibi-unions', '', false, ['chains.md']],
-      ['handed_off', 'nibi-unions', '', false, []],
-      ['post', 'fir-unions', 'S8 is in; the plot and the log are attached.', false, ['s8.png', 'run.log']],
+      ['file', 'east-unions', '', false, ['chains.md']],
+      ['handed_off', 'east-unions', '', false, []],
+      ['post', 'west-unions', 'S8 is in; the plot and the log are attached.', false, ['s8.png', 'run.log']],
       ['reply', 'pando/unions/modes', 'The conservative one.', false, []],
       ['ask', 'pando/unions/modes', 'Open the PR?', true, []],
       ['review', 'cuts', 'The plot is attached.', true, ['cut.png']],
@@ -146,10 +146,10 @@ describe('composeMessages', () => {
   })
 
   it('keeps a worker\'s thread: its chat with the human, what others wrote to it, and its plain closes', () => {
-    expect(threadOf(messages, fir).map(message => [message.kind, message.human, message.from?.id ?? message.label ?? ''])).toStrictEqual([
+    expect(threadOf(messages, west).map(message => [message.kind, message.human, message.from?.id ?? message.label ?? ''])).toStrictEqual([
       ['reply', true, ''], ['chat', false, 'pando/unions'], ['post', false, ''],
     ])
-    expect(threadOf(messages, nibi).map(message => [message.kind, message.quiet, message.label ?? ''])).toStrictEqual([
+    expect(threadOf(messages, east).map(message => [message.kind, message.quiet, message.label ?? ''])).toStrictEqual([
       ['file', false, ''], ['closed', true, ''], ['handed_off', false, ''], ['chat', true, 'external'],
     ])
     // A worker that wrote to another keeps that line in its own thread too.
@@ -169,8 +169,8 @@ describe('composeMessages', () => {
     const later = record({ id: 'r13', kind: 'post', fiber: 'W', by: { fiber: 'W' }, text: 'Drafted the PR body meanwhile.' }, 8)
     const lines = channelLines(composeMessages({ channel, records: [...records, later], files, now, reachMs, tapestry: { path: '/t.html', at: now - 2 * minute, title: 'T', lede: '' } }), channel)
     expect(lines.map(line => [line.message.kind, line.message.card.id, line.replies, line.last])).toStrictEqual([
-      ['file', 'nibi-unions', 3, now - 80 * minute],
-      ['post', 'fir-unions', 2, now - 40 * minute],
+      ['file', 'east-unions', 3, now - 80 * minute],
+      ['post', 'west-unions', 2, now - 40 * minute],
       ['ask', 'pando/unions/modes', 2, now - 8 * minute],
       ['review', 'cuts', 0, now - 15 * minute],
       ['reply', 'pando/unions', 0, now - 5 * minute],
@@ -180,7 +180,7 @@ describe('composeMessages', () => {
   })
 
   it('names each worker\'s liveness', () => {
-    expect([fir, modes, cuts, stuck, unions, card({ id: 'rest', status: 'open' }), card({ id: 'gone', column: 'tempered', status: 'closed' })].map(liveness))
+    expect([west, modes, cuts, stuck, unions, card({ id: 'rest', status: 'open' }), card({ id: 'gone', column: 'tempered', status: 'closed' })].map(liveness))
       .toStrictEqual(['working', 'waiting', 'waiting', 'waiting', 'waiting', 'resting', 'closed'])
   })
 })

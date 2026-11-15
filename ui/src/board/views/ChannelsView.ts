@@ -590,7 +590,6 @@ export class ChannelsView implements TemporalView {
     if (message.at > 1) {
       const age = el('span', 'kbn-ch-age', ago(message.at, now))
       age.dataset.at = String(message.at)
-      age.title = new Date(message.at).toLocaleString()
       byline.append(age)
     }
     const body = el('div', 'kbn-ch-msg-body')
