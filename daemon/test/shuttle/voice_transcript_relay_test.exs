@@ -845,11 +845,22 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     record(c.path, "2026-11-06T10:00:01Z", "once, send")
     parent = self()
 
-    deliver = fn message ->
-      send(parent, {:delivery, message})
+    recorded = start_supervised!({Agent, fn -> MapSet.new() end})
 
-      receive do
-        :finish -> {200, %{delivered: true}}
+    deliver = fn message ->
+      duplicate =
+        Agent.get_and_update(recorded, fn ids ->
+          {MapSet.member?(ids, message.message_id), MapSet.put(ids, message.message_id)}
+        end)
+
+      if duplicate do
+        {200, %{delivered: nil, duplicate: true}}
+      else
+        send(parent, {:delivery, message})
+
+        receive do
+          :finish -> {200, %{delivered: true}}
+        end
       end
     end
 
@@ -857,8 +868,9 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     assert_receive {:delivery, %{fiber_id: "fiber-a"}}
     stop_supervised!(TranscriptRelay)
     start_supervised!({TranscriptRelay, Keyword.put(c.opts, :deliver, deliver)})
-    # Recovery runs in handle_continue before the worker registers itself.
     :sys.get_state(Module.concat(c.name, Coordinator))
+    poll(c)
+    sync_tasks(c)
 
     assert %{last: %{"status" => "unconfirmed"}} =
              TranscriptRelay.status("launch", server: c.name)
