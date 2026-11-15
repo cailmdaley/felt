@@ -5437,11 +5437,8 @@ defmodule Shuttle.Poller do
                   own_host_id: state.own_host_id
                 )
 
-                # A run started for messages is restarted outside the
-                # schedule, so its lifetime feeds the breaker that holds the
-                # next launch for the inbox (and the next scheduled run).
                 if StandingRole.inbox_run?(Map.get(meta, :run_id)),
-                  do: note_worker_lifetime(state, runtime_key, fiber, meta),
+                  do: note_inbox_run_exit(state, runtime_key, fiber, meta),
                   else: state
 
               true ->
@@ -5473,6 +5470,45 @@ defmodule Shuttle.Poller do
       %{state | resume_loop: Map.delete(state.resume_loop, runtime_key)}
     else
       bump_resume_loop(state, runtime_key, fiber)
+    end
+  end
+
+  # A standing run started for messages is restarted outside the schedule
+  # while its messages wait, so a run that failed them feeds the breaker that
+  # holds the next launch for the inbox (and the next scheduled run): one that
+  # ended without a clean handoff, or with a turn-asking entry queued before it
+  # started still pending. A run that took its messages and handed off ends
+  # the sequence, however short it was.
+  defp note_inbox_run_exit(%State{} = state, runtime_key, fiber, meta) do
+    if Shuttle.Continuation.clean_handoff_since_dispatch?(fiber) and
+         not messages_left_waiting?(state, meta, fiber),
+       do: clear_resume_loop(state, runtime_key),
+       else: note_worker_lifetime(state, runtime_key, fiber, meta)
+  end
+
+  # Whether the fiber's inbox still holds an entry asking for a turn that was
+  # queued before the worker started. An unreadable inbox counts as holding
+  # one.
+  defp messages_left_waiting?(state, meta, fiber) do
+    started = Map.get(meta, :started_at)
+    key = context_receiver_key(state, meta, fiber)
+
+    with {:ok, output} <-
+           Shuttle.CLI.run(["inbox", "ls", key, "--json"], stderr_to_stdout: false),
+         {:ok, entries} when is_list(entries) <- Jason.decode(output) do
+      Enum.any?(entries, fn entry ->
+        entry["turn"] != "none" and
+          (not match?(%DateTime{}, started) or queued_before?(entry["queued_at"], started))
+      end)
+    else
+      _ -> true
+    end
+  end
+
+  defp queued_before?(queued_at, started) do
+    case DateTime.from_iso8601(to_string(queued_at)) do
+      {:ok, at, _} -> DateTime.compare(at, started) != :gt
+      _ -> true
     end
   end
 

@@ -577,6 +577,34 @@ defmodule Shuttle.InboxLaunchTest do
     assert launches(id) == 0
   end
 
+  # Short standing runs that each take their message and hand off are not a
+  # crash loop: each ends the sequence, so five in a row open no breaker.
+  test "standing runs that took their messages and handed off do not open the breaker", %{
+    host: host
+  } do
+    id = armed(host, "tests/inbox-delivered")
+    poller = poller!(host)
+    key = entry(host, id).fiber["uid"]
+
+    for n <- 1..5 do
+      parent = entry(host, id)
+
+      assert {:ok, :starting} =
+               Delivery.context(parent, "message #{n}", "m-delivered-#{n}", wake: true)
+
+      %{session_uuid: uuid} = Poller.live_worker(poller, id)
+      assert hook!(uuid) =~ "message #{n}"
+      assert pending(parent) == %{}
+      write_handoff_marker(host, id)
+      %{pid: watcher, session: session} = :sys.get_state(poller).running[key]
+      IntegrationRunner.remove_tmux_session(session)
+      send(poller, {:worker_exited, id, watcher, session, :normal_exit})
+      refute :sys.get_state(poller).resume_loop[key]
+    end
+
+    assert :ok = Poller.admit_inbox_launch(poller, key)
+  end
+
   # An inbox launch is not a human's override: a retry after the breaker's
   # cooldown keeps its count, so a worker that dies at once reopens it.
   test "an inbox retry after the breaker's cooldown that dies at once reopens the breaker", %{
