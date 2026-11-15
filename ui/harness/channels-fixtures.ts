@@ -133,7 +133,8 @@ export function addChannelsFixtures(example: WorkspaceExample, now: number): Cha
   const board = [
     said('cmbx', 'post', 300, { text: 'Three experts are on the joint fit this week: κ×tSZ, the cluster mask and the covariance. The plan is attached.', files: ['/fixture-store/workspace/cmbx/weekly-plan.md'] }),
     said('cmbx/covariance', 'post', 180, { text: 'Started the 2000-simulation run; first comparison in about two hours.' }),
-    said('cmbx/kappa-tsz', 'post', 120, { text: 'First pass on the full footprint: 7σ, before the new beam.' }),
+    // The deck was sent before, and again with the final numbers: only its newest send is drawn whole.
+    said('cmbx/kappa-tsz', 'post', 120, { text: 'First pass on the full footprint: 7σ, before the new beam.', files: [deck] }),
     said('cmbx/kappa-tsz', 'message', 100, { by: { fiber: 'cmbx' }, to: { fiber: 'cmbx/kappa-tsz' }, text: 'Use the new beam window from the beam thread before the final pass.' }),
     said('cmbx/kappa-tsz', 'human', 60, { by: { label: 'Sam' }, text: 'Can you also show the null tests next to the spectrum?' }),
     said('cmbx/covariance', 'closed', 48),

@@ -505,6 +505,35 @@ it('previews an HTML file whole, the page drawn small, kept across redraws, and 
   expect(openPage).toHaveBeenLastCalledWith(expect.objectContaining({ uid: 'B' }), 'local:/notes/beam/deck.html')
 })
 
+it('previews only the newest send of a file sent again and again; the earlier sends are named, and every message stays', async () => {
+  daemon()
+  const deck = '/notes/tsz/deck.html'
+  BOARD.C.push(
+    record({ id: 'd1', kind: 'post', fiber: 'T', text: 'Deck, first cut.', files: [deck] }, 9),
+    record({ id: 'd2', kind: 'post', fiber: 'T', text: 'Deck, with the nulls.', files: [deck] }, 7),
+    record({ id: 'd3', kind: 'post', fiber: 'T', text: 'Deck, final, and the spectrum again.', files: [deck, '/notes/tsz/spectrum.png'] }, 5),
+  )
+  try {
+    const { host, openPage } = await mount()
+    message(host, 'κ × tSZ').click()
+    const thread = host.querySelector<HTMLElement>('.kbn-ch-thread-list')!
+    const posts = [...thread.querySelectorAll<HTMLElement>('.kbn-ch-msg[data-kind="post"]')]
+    expect(posts).toHaveLength(4)
+    const drawn = (post: HTMLElement) => [...post.querySelectorAll('.kbn-ch-html, .kbn-ch-image, .kbn-ch-file')].map(el => `${el.className.split(' ')[0]}:${(el.querySelector('.kbn-ch-image-name') ?? el).textContent}`)
+    expect(posts.map(drawn)).toStrictEqual([
+      ['kbn-ch-file:spectrum.png'],
+      ['kbn-ch-file:deck.html'],
+      ['kbn-ch-file:deck.html'],
+      ['kbn-ch-html:deck.html', 'kbn-ch-image:spectrum.png'],
+    ])
+    // An earlier send stays openable.
+    posts[1].querySelector<HTMLButtonElement>('.kbn-ch-file')!.click()
+    expect(openPage).toHaveBeenLastCalledWith(expect.objectContaining({ uid: 'T' }), 'local:/notes/tsz/deck.html')
+    // The channel's line is the thread's latest message, its files drawn whole.
+    expect(drawn(message(host, 'κ × tSZ'))).toStrictEqual(['kbn-ch-html:deck.html', 'kbn-ch-image:spectrum.png'])
+  } finally { BOARD.C.splice(-3) }
+})
+
 it('keeps focus on its item across a poll, draws nothing under the reader, and returns focus where the reader was opened', async () => {
   daemon()
   const { view, ctx, host, openPage } = await mount()

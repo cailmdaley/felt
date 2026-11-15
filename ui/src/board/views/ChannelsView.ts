@@ -101,6 +101,17 @@ function lastSeen(key: string): number {
   const value = Number(stored(SEEN + key) ?? NaN)
   return Number.isFinite(value) ? value : -Infinity
 }
+/** Of every file the lines carry, the newest send of each path: a file sent again and again is drawn whole once, the earlier sends named. */
+function newestSends(lines: readonly Line[]): Set<SentFile> {
+  const seen = new Set<string>(), newest = new Set<SentFile>()
+  for (const { message } of [...lines].reverse()) for (const file of message.files) {
+    const path = `${file.host ?? message.card.originId}:${file.fullPath}`
+    if (seen.has(path)) continue
+    seen.add(path)
+    newest.add(file)
+  }
+  return newest
+}
 /** A figure at least this many pixels on its shorter side; anything smaller is an icon or a sprite sheet. */
 const FIGURE_PX = 64
 const SVG = 'http://www.w3.org/2000/svg'
@@ -762,7 +773,8 @@ export class ChannelsView implements TemporalView {
     const before = this.before.get(channel.key) ?? -Infinity
     // Like Slack, a rule marks where what arrived since the last visit begins, and a run of one sender's messages names it once.
     const fresh = Number.isFinite(before) ? lines.findIndex(({ message }) => !message.human && message.arrived > before) : -1
-    const rows: HTMLLIElement[] = lines.map((line, index) => this.messageRow(line, pane, before, now, index === fresh ? undefined : lines[index - 1]?.message))
+    const whole = newestSends(lines)
+    const rows: HTMLLIElement[] = lines.map((line, index) => this.messageRow(line, pane, before, now, whole, index === fresh ? undefined : lines[index - 1]?.message))
     if (fresh >= 0) {
       const rule = el('li', 'kbn-ch-new')
       rule.setAttribute('role', 'separator')
@@ -800,7 +812,7 @@ export class ChannelsView implements TemporalView {
    * speaks unless another is named. In the channel, choosing it opens its
    * worker's thread; a close, a hand-off or another lifecycle line is one quiet line.
    */
-  private messageRow(line: Line, pane: Pane, before: number, now: number, previous?: Message): HTMLLIElement {
+  private messageRow(line: Line, pane: Pane, before: number, now: number, whole: ReadonlySet<SentFile>, previous?: Message): HTMLLIElement {
     const { message, replies, last, waiting } = line
     const card = message.card
     if (line.cleared) return this.clearedRow(card)
@@ -851,7 +863,7 @@ export class ChannelsView implements TemporalView {
         body.append(text)
       }
     }
-    if (message.files.length) body.append(this.attachments(message, id))
+    if (message.files.length) body.append(this.attachments(message, id, whole))
     // A worker's line in the channel carries its own tapestry; the chair's is a message of its own.
     const tapestry = pane === 'channel' ? this.embedded(card, pane) : null
     if (tapestry) body.append(this.embed(tapestry, card, `embed:${id}`))
@@ -898,8 +910,12 @@ export class ChannelsView implements TemporalView {
     row.append(el('span', 'kbn-ch-you'), body)
     return row
   }
-  /** A message's files: an HTML page as its live face and an image, each drawn small inline, every other file a chip; each opens in the reader. */
-  private attachments(message: Message, id: string): HTMLElement {
+  /**
+   * A message's files: an HTML page as its live face and an image, each drawn
+   * small inline when it is the newest send of its path in the list (`whole`),
+   * every other file a chip; each opens in the reader.
+   */
+  private attachments(message: Message, id: string, whole: ReadonlySet<SentFile>): HTMLElement {
     const box = el('div', 'kbn-ch-attached'), base = this.ctx?.shuttleBase ?? ''
     for (const file of message.files) {
       const item = `${id}:${file.fullPath}`
@@ -911,7 +927,7 @@ export class ChannelsView implements TemporalView {
         node.toggleAttribute('data-gone', gone)
         return node
       }
-      if (HTML.test(file.basename)) {
+      if (whole.has(file) && HTML.test(file.basename)) {
         const figure = button('kbn-ch-html', '', open)
         figure.dataset.item = item
         figure.title = `Open ${file.basename}`
@@ -919,7 +935,7 @@ export class ChannelsView implements TemporalView {
         box.append(figure)
         continue
       }
-      if (IMAGE.test(file.basename)) {
+      if (whole.has(file) && IMAGE.test(file.basename)) {
         const figure = button('kbn-ch-image', '', open)
         figure.dataset.item = item
         figure.title = file.fullPath
