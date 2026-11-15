@@ -20,8 +20,9 @@ func (a *app) threadInboxVerbs() []*cobra.Command {
 		Short: "Import an older daemon's thread outbox and print the capture window",
 		Long: `Establish the thread capture window (baseline and retention cutoff) and
 import a thread-outbox left by an older daemon into the routing inbox. Prints
-{"baseline", "cleanup_error"}: a cleanup failure leaves the imported outbox for
-the next boot to remove. Exits 3 when the outbox's baseline or a pending
+{"baseline", "skipped", "cleanup_error"}: pending records the routing inbox
+can never accept are skipped, and a cleanup failure leaves the imported outbox
+for the next boot to remove. Exits 3 when the outbox's baseline or a pending
 payload, or the state, is corrupt, leaving it untouched.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -39,9 +40,9 @@ payload, or the state, is corrupt, leaving it untouched.`,
 		Use:   "thread-put",
 		Short: "Capture thread publications into the routing inbox",
 		Long: `Read a JSON array of {"id", "record"} thread publications on stdin and
-enqueue each into the routing inbox. Prints {"created": [ids]}, the ids this
-call stored, also when a later publication failed and the command exits
-nonzero.`,
+enqueue each into the routing inbox. Prints {"created": [ids], "refused":
+[{"id", "error"}]}: the ids this call stored and the publications the inbox
+did not take, each tried whatever the others' answers.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var publications []messaging.ThreadPublication
@@ -52,11 +53,8 @@ nonzero.`,
 			if err = json.Unmarshal(b, &publications); err != nil {
 				return err
 			}
-			created, err := messaging.CaptureThreads(a.env, publications)
-			if encodeErr := json.NewEncoder(a.env.Stdout).Encode(map[string][]string{"created": created}); encodeErr != nil {
-				return encodeErr
-			}
-			return err
+			created, refused := messaging.CaptureThreads(a.env, publications)
+			return json.NewEncoder(a.env.Stdout).Encode(map[string]any{"created": created, "refused": refused})
 		},
 	}
 	routes := &cobra.Command{

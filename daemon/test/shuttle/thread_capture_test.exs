@@ -86,6 +86,26 @@ defmodule Shuttle.ThreadCaptureTest do
     IO.puts("capture of 200 closes outside retention (ms): #{div(micros, 1000)}")
   end
 
+  test "a close whose outcome is over 64 KiB is refused and logged, and the others are captured",
+       %{store: store} do
+    recent = DateTime.to_iso8601(DateTime.utc_now())
+    [hub, huge | rest] = closed_family(store, 3, recent)
+    huge = put_in(huge, [:fiber, "outcome"], String.duplicate("x", 65 * 1024))
+
+    for _poll <- 1..2 do
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert :ok = Threads.capture_results([hub, huge | rest], "test-host")
+        end)
+
+      assert log =~ "Thread capture refused thread-"
+      assert log =~ "64 KiB"
+    end
+
+    assert [_, _] = pending = Shuttle.Test.InboxPublications.pending()
+    assert Enum.all?(pending, fn {_id, record} -> record["text"] =~ ~r/Done [23]\./ end)
+  end
+
   test "a refused capture is logged and retried by the next poll, never crashing the Poller",
        %{store: store, data: data} do
     import Shuttle.Test.PollerHelpers
@@ -175,7 +195,39 @@ defmodule Shuttle.ThreadCaptureTest do
     end
 
     assert Shuttle.Test.InboxPublications.baseline() == "2026-10-22T19:33:11.470348Z"
-    assert File.exists?(Path.join(Shuttle.Test.InboxPublications.routing_dir(data), "offered/#{key}.json"))
+
+    assert File.exists?(
+             Path.join(Shuttle.Test.InboxPublications.routing_dir(data), "offered/#{key}.json")
+           )
+  end
+
+  @tag first_boot: true
+  test "an outbox record the inbox can never accept is logged and skipped", %{data: data} do
+    outbox = Path.join(data, "thread-outbox")
+    File.mkdir_p!(Path.join(outbox, "pending"))
+    File.write!(Path.join(outbox, "baseline"), "2026-10-22T19:33:11.470348Z")
+
+    for {id, text} <- [{"thread-big", String.duplicate("x", 65 * 1024)}, {"thread-ok", "done"}] do
+      key = :crypto.hash(:sha256, id) |> Base.encode16(case: :lower)
+
+      File.write!(
+        Path.join([outbox, "pending", key <> ".json"]),
+        Jason.encode!(%{
+          id: id,
+          record: %{
+            "owner" => "test-host",
+            "parent_uid" => "p",
+            "text" => text,
+            "retained_at" => DateTime.to_iso8601(DateTime.utc_now())
+          }
+        })
+      )
+    end
+
+    log = ExUnit.CaptureLog.capture_log(fn -> assert :ok = Shuttle.Inbox.boot_import() end)
+    assert log =~ "Thread outbox import skipped thread-big"
+    assert [{"thread-ok", _}] = Shuttle.Test.InboxPublications.pending()
+    refute File.exists?(outbox)
   end
 
   @tag first_boot: true

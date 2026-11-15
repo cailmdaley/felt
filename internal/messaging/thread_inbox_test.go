@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,9 +28,9 @@ func bootThread(t *testing.T, env *sysenv.Env) ThreadImport {
 
 func capture(t *testing.T, env *sysenv.Env, publications ...ThreadPublication) []string {
 	t.Helper()
-	created, err := CaptureThreads(env, publications)
-	if err != nil {
-		t.Fatal(err)
+	created, refused := CaptureThreads(env, publications)
+	if len(refused) != 0 {
+		t.Fatal(refused)
 	}
 	return created
 }
@@ -402,6 +403,28 @@ func TestThreadImportIgnoresALeftoverAckTmpFile(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(routingRoot(env), "offered", mailboxKey("thread-torn")+".json")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("a torn tmp file was imported", err)
+	}
+}
+
+// A pending record the routing inbox can never accept (the old outbox stored
+// any text) is skipped and reported; the rest import.
+func TestThreadImportSkipsARecordTheInboxCanNeverAccept(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	root := seedOutbox(t, env, oldBaseline)
+	big := threadRecord()
+	big["text"] = "thread hub/child closed: " + strings.Repeat("x", 65<<10)
+	seedPending(t, root, "thread-big", big)
+	seedPending(t, root, "thread-ok", threadRecord())
+	report := bootThread(t, env)
+	if len(report.Skipped) != 1 || report.Skipped[0].ID != "thread-big" || !strings.Contains(report.Skipped[0].Error, "64 KiB") {
+		t.Fatalf("%+v", report)
+	}
+	if got := routes(t, env); len(got) != 1 || got[0].ID != "thread-ok" {
+		t.Fatalf("%+v", got)
+	}
+	if _, err := os.Stat(root); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("source remains", err)
 	}
 }
 

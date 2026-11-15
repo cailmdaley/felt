@@ -1106,33 +1106,28 @@ defmodule Shuttle.Threads do
     end
   end
 
-  # The ids this capture created. The CLI prints them also when a later
-  # publication failed, so a created unblock note still gets its board line.
+  # The ids this capture created. Each publication is tried; the ones the
+  # inbox refused are logged, and the next poll offers them again.
   defp publish([]), do: MapSet.new()
 
   defp publish(publications) do
     input = Jason.encode!(for {id, record} <- publications, do: %{id: id, record: record})
 
-    result =
-      Shuttle.CLI.run(["inbox", "thread-put"],
-        input: input,
-        input_eof: true,
-        stderr_to_stdout: false
-      )
+    with {:ok, output} <-
+           Shuttle.CLI.run(["inbox", "thread-put"],
+             input: input,
+             input_eof: true,
+             stderr_to_stdout: false
+           ),
+         {:ok, %{"created" => created, "refused" => refused}} <- Jason.decode(output) do
+      for %{"id" => id, "error" => error} <- refused,
+          do: Logger.warning("Thread capture refused #{id}: #{error}")
 
-    unless match?({:ok, _}, result),
-      do: Logger.warning("Thread capture failed: #{inspect(result)}")
-
-    output =
-      case result do
-        {:ok, output} -> output
-        {:command_error, _status, output} -> output
-        {:error, _} -> ""
-      end
-
-    case Jason.decode(output) do
-      {:ok, %{"created" => created}} -> MapSet.new(created)
-      _ -> MapSet.new()
+      MapSet.new(created)
+    else
+      error ->
+        Logger.warning("Thread capture failed: #{inspect(error)}")
+        MapSet.new()
     end
   end
 

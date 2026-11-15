@@ -9,7 +9,8 @@ defmodule Shuttle.Inbox do
   into the routing inbox. A corrupt outbox or state (the CLI's exit status 3)
   raises `Shuttle.Inbox.Corrupt`, which holds boot; any other failure,
   a timeout included, raises a retryable error, and the import repeats safely.
-  A failure to clean up an imported outbox is logged, and boot goes on.
+  A pending record the routing inbox can never accept is logged and skipped,
+  and a failure to clean up an imported outbox is logged; boot goes on.
   """
 
   require Logger
@@ -31,12 +32,18 @@ defmodule Shuttle.Inbox do
   end
 
   defp log_report(output) do
-    case Jason.decode(output) do
-      {:ok, %{"cleanup_error" => error}} ->
-        Logger.warning("Removing the imported thread outbox failed: #{error}")
+    report =
+      case Jason.decode(output) do
+        {:ok, report} when is_map(report) -> report
+        _ -> %{}
+      end
 
-      _ ->
-        :ok
-    end
+    for %{"id" => id, "error" => error} <- report["skipped"] || [],
+        do: Logger.warning("Thread outbox import skipped #{id}: #{error}")
+
+    with error when is_binary(error) <- report["cleanup_error"],
+         do: Logger.warning("Removing the imported thread outbox failed: #{error}")
+
+    :ok
   end
 end

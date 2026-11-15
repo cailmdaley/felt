@@ -83,6 +83,7 @@ Either kind of inbox refuses a 129th pending entry with `queue_full`, except the
 A thread's owner captures its close, ask, handoff, rest and verdict publications, and its unblock notes, into the host's routing inbox: the inbox at address `threads`, holding every thread publication this host captured and has not yet placed.
 There is no thread publication queue outside the inbox.
 Each poll's delivery task captures in one `shuttle inbox thread-put` call, after skipping signals older than the 14-day retention window; the Poller itself shells nothing for threads, and a failed capture is logged and repeated by the next poll.
+`thread-put` tries every publication and reports the ones the inbox refused, such as a close whose text is over 64 KiB; the daemon logs each refusal, and one refused publication never stops the rest.
 The producer keeps its exact lifecycle-derived ids.
 A re-capture finds the id pending or offered in the routing inbox and stores nothing, so the first capture fixes the publication and its wishes even when a later poll renders an edited outcome.
 `Enqueue` stores a routing entry only when its stamp is after the capture baseline and not before the retention cutoff (`mailboxes/threads.json`, below).
@@ -121,6 +122,7 @@ Pending records become routing inbox entries with their recipients; acknowledgme
 An acknowledgment's file name is the hash of its publication's id, which is the routing inbox's key for it, so the import takes acknowledgments from their names and never reads them: an unreadable ack imports, and a name that is not 64 hex characters (an `acked/*.tmp` left by a hard-killed older daemon, an NFS `.nfs*` silly-rename, `.DS_Store`) is ignored.
 An acknowledgment wins over a pending copy of its id, including a copy an interrupted import left, and the import touches no recipient's inbox.
 The importer reads the source without changing it, enqueues idempotently, then removes the snapshot and renames the directory to `thread-outbox.imported` before deleting it, so a crash at any point repeats safely.
+A pending record the routing inbox can never accept (`invalid_request`, such as text over 64 KiB) is reported as `skipped`, which the daemon logs, and the rest import.
 A cleanup failure is reported as `cleanup_error`, which the daemon logs; boot goes on, and the next boot removes what is left.
 A malformed baseline, a pending payload that cannot be parsed, or a malformed state exits 3 (`Shuttle.Inbox.Corrupt`) and holds boot without discarding anything; restore the exact trusted baseline from backup rather than setting it to the current time.
 Any other failure, a timeout included, retries the boot step.
@@ -281,8 +283,8 @@ The session-only Claude fallback claims by moving an entry into `fallback/` and 
 | `shuttle inbox pending <address>... [--waking]` | JSON address → pending count, or with `--waking` the count a launch would be for; unreadable addresses are named on stderr and omitted |
 | `shuttle inbox ls <address>` | Pending entries oldest first; `--json` includes wishes, queued time, sender and open attempt |
 | `shuttle inbox consume <fiber-key> <address-or-dash> <epoch> [--idle] [--unknown] [--costly]` | Consume for the current receiver, or with `-` and epoch 0 for a fiber with no worker; one JSON object with `action` (`wait`, `wake`, `context`, `fresh`, `launch`), the `members` sent or reserved, and `turn` when an entry asks for a turn the worker's facts would decide. The answer is printed even when an open batch's send fails, which exits nonzero |
-| `shuttle inbox thread-state` | Establish the thread capture window and import an older daemon's thread outbox; print `baseline` and any `cleanup_error`, or exit 3 on a corrupt outbox or state |
-| `shuttle inbox thread-put` | Capture a JSON array of `{id, record}` publications from stdin into the routing inbox; print `{"created": [ids]}`, also when a later publication failed |
+| `shuttle inbox thread-state` | Establish the thread capture window and import an older daemon's thread outbox; print `baseline` and any `skipped` records and `cleanup_error`, or exit 3 on a corrupt outbox or state |
+| `shuttle inbox thread-put` | Capture a JSON array of `{id, record}` publications from stdin into the routing inbox; print `{"created": [ids], "refused": [{id, error}]}`, trying every publication |
 | `shuttle inbox routes` | List the routing inbox's pending publications as `{id, record}` |
 | `shuttle inbox route <id> --current true\|false\|unknown [--record <json> --owner <host> --key <key>]` | Advance one routing entry from the daemon's fresh facts; print `action`: `wait`, `forward` or `session` with the entry's `record`, or the disposition it recorded (`placed`, `superseded`, `expired`) |
 | `shuttle inbox settle <id> forwarded\|delivered\|undeliverable` | Record a routing entry's confirmed handoff and move it to offered |

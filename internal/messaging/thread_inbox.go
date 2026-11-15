@@ -112,12 +112,12 @@ func ThreadEntry(id string, record map[string]any) (InboxEntry, error) {
 	req := Request{MessageID: id, Text: routeString(record, "text"), From: "shuttle", RetainedAt: routeString(record, "retained_at")}
 	if signal := record["signal"]; signal != nil {
 		b, err := json.Marshal(signal)
-		if err != nil {
-			return InboxEntry{}, err
+		if err == nil {
+			req.ThreadSignal = &ThreadSignal{}
+			err = json.Unmarshal(b, req.ThreadSignal)
 		}
-		req.ThreadSignal = &ThreadSignal{}
-		if err := json.Unmarshal(b, req.ThreadSignal); err != nil {
-			return InboxEntry{}, err
+		if err != nil {
+			return InboxEntry{}, errCode("invalid_request", "thread signal: %v", err)
 		}
 	}
 	turn := "none"
@@ -127,28 +127,34 @@ func ThreadEntry(id string, record map[string]any) (InboxEntry, error) {
 	return InboxEntry{Address: ThreadRoutingAddress, Request: req, Wishes: Wishes{Source: "thread", Turn: turn, IfCostly: "fresh"}, Derived: true, Routing: record}, nil
 }
 
-// CaptureThreads enqueues publications into the routing inbox and answers the
-// ids this call created, up to the first failure. A publication captured
-// before (pending or offered in the routing inbox) or outside the capture
-// window stores nothing, so the first capture fixes the publication whatever
-// a later poll renders.
-func CaptureThreads(env *sysenv.Env, publications []ThreadPublication) ([]string, error) {
-	created := []string{}
+// ThreadRefusal names a publication the routing inbox did not take and why.
+type ThreadRefusal struct {
+	ID    string `json:"id"`
+	Error string `json:"error"`
+}
+
+// CaptureThreads enqueues each publication into the routing inbox and answers
+// the ids this call created and the publications it refused; one refusal does
+// not stop the others. A publication captured before (pending or offered in
+// the routing inbox) or outside the capture window stores nothing, so the
+// first capture fixes the publication whatever a later poll renders.
+func CaptureThreads(env *sysenv.Env, publications []ThreadPublication) (created []string, refused []ThreadRefusal) {
+	created, refused = []string{}, []ThreadRefusal{}
 	for _, p := range publications {
 		entry, err := ThreadEntry(p.ID, p.Record)
-		if err != nil {
-			return created, err
-		}
 		made := false
 		entry.Created = &made
-		if err = Enqueue(env, entry); err != nil {
-			return created, err
+		if err == nil {
+			err = Enqueue(env, entry)
 		}
-		if made {
+		switch {
+		case err != nil:
+			refused = append(refused, ThreadRefusal{p.ID, err.Error()})
+		case made:
 			created = append(created, p.ID)
 		}
 	}
-	return created, nil
+	return created, refused
 }
 
 // ThreadRoutes lists the routing inbox's pending publications.
@@ -297,13 +303,15 @@ func SettleThread(env *sysenv.Env, id, disposition string) error {
 	return finishRouted(root, path, e, disposition)
 }
 
-// ThreadImport is a boot's report: the capture window's baseline and the
+// ThreadImport is a boot's report: the capture window's baseline, the pending
+// records the routing inbox can never accept, which the import skips, and the
 // cleanup failure, if any, of an imported outbox. A failed cleanup leaves the
 // renamed outbox behind for the next boot to remove; it is never imported
 // again.
 type ThreadImport struct {
-	Baseline string `json:"baseline"`
-	Cleanup  string `json:"cleanup_error,omitempty"`
+	Baseline string          `json:"baseline"`
+	Skipped  []ThreadRefusal `json:"skipped,omitempty"`
+	Cleanup  string          `json:"cleanup_error,omitempty"`
 }
 
 // BootThreadInbox establishes the capture window and imports a thread outbox
@@ -381,10 +389,13 @@ func bootThreadInbox(env *sysenv.Env, imported func(string) error) (ThreadImport
 			continue
 		}
 		entry, err := ThreadEntry(id, record)
-		if err != nil {
-			return report, err
+		if err == nil {
+			err = Enqueue(env, entry)
 		}
-		if err = Enqueue(env, entry); err != nil {
+		// Retrying cannot change an invalid record's answer.
+		if ErrorCode(err) == "invalid_request" {
+			report.Skipped = append(report.Skipped, ThreadRefusal{id, err.Error()})
+		} else if err != nil {
 			return report, err
 		}
 		if imported != nil {

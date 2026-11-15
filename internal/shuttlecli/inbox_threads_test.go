@@ -28,7 +28,7 @@ func TestThreadInboxVerbsCaptureForwardSettleAndContract40Enqueue(t *testing.T) 
 	}
 	record := map[string]any{"owner": "sender", "store": "/sender", "parent_uid": "anchor", "parent_host": "owner", "parent_unresolved": true, "text": "thread hub/child unblocked: result", "retained_at": time.Now().UTC().Format(time.RFC3339Nano)}
 	batch, _ := json.Marshal([]map[string]any{{"id": "thread-1", "record": record}})
-	for i, want := range []string{`{"created":["thread-1"]}`, `{"created":[]}`} {
+	for i, want := range []string{`{"created":["thread-1"],"refused":[]}`, `{"created":[],"refused":[]}`} {
 		if out := run(string(batch), "inbox", "thread-put"); out != want {
 			t.Fatalf("capture %d: %s", i, out)
 		}
@@ -75,7 +75,7 @@ func TestThreadStateExitsThreeOnACorruptOutbox(t *testing.T) {
 	}
 }
 
-func TestThreadPutReportsCreatedIdsWhenALaterPublicationFails(t *testing.T) {
+func TestThreadPutTriesEveryPublicationAndReportsTheRefused(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	env.Set("SHUTTLE_DATA_DIR", filepath.Join(t.TempDir(), "data"))
@@ -85,15 +85,34 @@ func TestThreadPutReportsCreatedIdsWhenALaterPublicationFails(t *testing.T) {
 		t.Fatal(code)
 	}
 	stamp := time.Now().UTC().Format(time.RFC3339Nano)
-	good := map[string]any{"owner": "h", "store": "/s", "parent_uid": "p", "text": "thread a unblocked: b closed", "retained_at": stamp}
-	bad := map[string]any{"owner": "h", "store": "/s", "parent_uid": "p", "text": "thread a closed: x", "retained_at": stamp, "signal": map[string]any{"uid": "a"}}
-	batch, _ := json.Marshal([]map[string]any{{"id": "thread-good", "record": good}, {"id": "thread-bad", "record": bad}})
-	out.Reset()
-	env.Stdin = strings.NewReader(string(batch))
-	if code := Run(env, []string{"inbox", "thread-put"}); code == 0 {
-		t.Fatal("an invalid publication was accepted")
+	record := func(text string) map[string]any {
+		return map[string]any{"owner": "h", "store": "/s", "parent_uid": "p", "text": text, "retained_at": stamp}
 	}
-	if got := strings.TrimSpace(out.String()); got != `{"created":["thread-good"]}` {
-		t.Fatal(got)
+	bad := record("thread a closed: x")
+	bad["signal"] = map[string]any{"uid": "a"}
+	batch, _ := json.Marshal([]map[string]any{
+		{"id": "thread-big", "record": record("thread a closed: " + strings.Repeat("x", 65<<10))},
+		{"id": "thread-bad", "record": bad},
+		{"id": "thread-good", "record": record("thread b unblocked: c closed")},
+	})
+	for poll := 0; poll < 2; poll++ {
+		out.Reset()
+		env.Stdin = strings.NewReader(string(batch))
+		if code := Run(env, []string{"inbox", "thread-put"}); code != 0 {
+			t.Fatal(code, out.String())
+		}
+		var got struct {
+			Created []string
+			Refused []struct{ ID, Error string }
+		}
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if want := map[int][]string{0: {"thread-good"}, 1: {}}[poll]; strings.Join(got.Created, ",") != strings.Join(want, ",") {
+			t.Fatalf("poll %d created %v", poll, got.Created)
+		}
+		if len(got.Refused) != 2 || got.Refused[0].ID != "thread-big" || !strings.Contains(got.Refused[0].Error, "64 KiB") || got.Refused[1].ID != "thread-bad" {
+			t.Fatalf("poll %d refused %+v", poll, got.Refused)
+		}
 	}
 }
