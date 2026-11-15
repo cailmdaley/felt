@@ -185,3 +185,20 @@ func TestDelayedTextAloneGoesToOwnFiber(t *testing.T) {
 		t.Fatalf("sent %v, want the text on work/own", got)
 	}
 }
+
+// A retry that replaces --in with --at and the printed instant names the same
+// publication, and a fiber's uid is a delayed target like its id.
+func TestDelayedRetryWithPrintedInstant(t *testing.T) {
+	env, _, requests := delayedSendEnv(t)
+	if _, _, err := runScheduledMessage(t, newApp(env), "work/worker", "check", "--in", "8h", "--message-id", "X"); err != nil {
+		t.Fatal(err)
+	}
+	instant, _ := requests()[0]["not_before"].(string)
+	if _, _, err := runScheduledMessage(t, newApp(env), messageTargetFiberUID, "check", "--at", instant, "--message-id", "X"); err != nil {
+		t.Fatal(err)
+	}
+	got := requests()
+	if len(got) != 2 || got[1]["not_before"] != instant || got[1]["fiber_id"] != messageTargetFiberUID {
+		t.Fatalf("sent %v, want the retry to carry %s to %s", got, instant, messageTargetFiberUID)
+	}
+}
