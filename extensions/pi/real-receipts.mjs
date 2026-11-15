@@ -298,7 +298,7 @@ try {
   const steering = await deliver("mid-turn", "Message during the held turn");
   assert.equal(steering.consumed.action, "wake");
   assert.equal(steering.delivered, null);
-  assert.equal(steering.consumed.unconfirmed, true);
+  assert.equal(steering.consumed.message, "sent");
   assert.equal(
     entries().some(
       (e) =>
@@ -316,7 +316,7 @@ try {
     "DROP_RECEIPT: Pi input handler consumes this without a user turn",
   );
   assert.equal(dropped.delivered, null);
-  assert.equal(dropped.consumed.unconfirmed, true);
+  assert.equal(dropped.consumed.message, "sent");
   for (const body of [
     "Idle receipt probe",
     "Concurrent body a",
