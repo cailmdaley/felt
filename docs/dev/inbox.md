@@ -133,7 +133,9 @@ An inbox launch is not a forced start: it arms and reopens nothing, leaves the w
 The launch prompt says messages are arriving and carries none of their text.
 
 The launched session takes the batch through its fiber hook.
-A fiber hook may take any entry, `idle` and `force` included, that a launch reservation from another receiver holds in its lease, and a receiver's link to the fiber inbox is written when it becomes the receiver, so a Claude session, whose conversation is known at launch, finds the batch at its first prompt.
+A fiber hook may take any entry, `idle` and `force` included, that a launch another receiver reserved holds in its lease, and a receiver's link to the fiber inbox is written when it becomes the receiver.
+A Claude session's conversation is known at launch, and it becomes the receiver when the daemon records the launch, a moment after its terminal starts and usually before Claude submits its first prompt, whose hook then takes the batch.
+Nothing holds that first prompt back, though: a hook that runs before the session is the receiver takes nothing and leaves the batch pending, for the session's first tool call or next prompt, or, once the lease passes, a wake that sends it as a message.
 That hook claim is the delivery: an entry is delivered when the session takes it, never when its terminal started.
 A fresh Codex or Pi conversation becomes the receiver only once the daemon has captured it from the transcript the harness writes, usually after its first prompt: Codex then takes the batch at its next tool call, and Pi, whose hook offers only at a prompt, is woken with it once the lease passes.
 A session that dies before taking the batch, a launch the Poller refuses or holds after the reservation, or a lease that lapses leaves the entries pending, and the next consume of the fiber with no worker reserves them again.

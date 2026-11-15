@@ -129,9 +129,10 @@ func transitionFiberReceiver(env *sysenv.Env, fiber, host, identity, address str
 }
 
 // linkFiberReceiver points the receiver session's hooks at the fiber inbox,
-// so a session launched for the fiber finds its entries on its first prompt,
-// before it has registered a hook. Offering checks the fiber's receiver
-// authority each time, so a link left by a replaced receiver offers nothing.
+// so a session launched for the fiber finds its entries at its first hook
+// after it became the receiver, without waiting for a consume. Offering
+// checks the fiber's receiver authority each time, so a link left by a
+// replaced receiver offers nothing.
 func linkFiberReceiver(env *sysenv.Env, fiber string, a Address) error {
 	if a.Harness == "" {
 		return nil

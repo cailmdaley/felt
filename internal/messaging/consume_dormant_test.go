@@ -330,3 +330,71 @@ func TestAPinnedWakeToAnEndedConversationLaunchesAReplacement(t *testing.T) {
 		t.Fatalf("delivered attempt = %+v", e)
 	}
 }
+
+// A launched Claude session whose first prompt's hook runs before the daemon
+// has made it the receiver takes nothing then, and loses nothing: the batch
+// stays pending, and its next hook (a tool call or a prompt) after it became
+// the receiver takes it. One that never runs another hook is woken with it
+// once the lease passes.
+func TestALaunchedSessionsHookBeforeItIsTheReceiverLeavesTheBatchPending(t *testing.T) {
+	for _, later := range []string{"hook", "wake"} {
+		t.Run(later, func(t *testing.T) {
+			env := testEnv(t)
+			putWish(t, env, "forced", "force", "hold")
+			putWish(t, env, "quiet", "none", "hold")
+			if result, err := consumeWith(context.Background(), env, "fiber", "host", dormant, neverSend(t)); err != nil || result.Action != "launch" {
+				t.Fatalf("got %+v %v", result, err)
+			}
+			// The terminal started the harness; the daemon has not yet recorded
+			// the launch and made it the receiver.
+			if err := RegisterMailbox(env, "claude", "B", "host", t.TempDir(), os.Getpid(), true); err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			offer := func() {
+				t.Helper()
+				if err := OfferMailbox(env, "claude", "B", "host", func(batch []Request) error {
+					for _, r := range batch {
+						got = append(got, r.MessageID)
+					}
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			offer()
+			if len(got) != 0 {
+				t.Fatalf("a session not yet the receiver took %v", got)
+			}
+			if n, _ := PendingCount(env, "fiber"); n != 2 {
+				t.Fatalf("pending = %d after the early hook", n)
+			}
+			w := Worker{Address: "shuttle://host/claude/B", Epoch: transition(t, env, "launched", "shuttle://host/claude/B"), Idle: true}
+			switch later {
+			case "hook":
+				offer()
+				slices.Sort(got)
+				if !slices.Equal(got, []string{"forced", "quiet"}) {
+					t.Fatalf("the next hook took %v", got)
+				}
+			case "wake":
+				// Within the lease the reserved entries are left to the hook.
+				if result, err := consumeWith(context.Background(), env, "fiber", "host", w, neverSend(t)); err != nil || result.Action != "wait" {
+					t.Fatalf("woken within the lease: %+v %v", result, err)
+				}
+				lapseLease(t, env)
+				var text string
+				result, err := consumeWith(context.Background(), env, "fiber", "host", w, func(_ context.Context, _ *sysenv.Env, _ string, r Request, _ string) (Receipt, error) {
+					text = r.Text
+					return Receipt{Status: StatusAccepted}, nil
+				})
+				if err != nil || result.Action != "wake" || !strings.Contains(text, "text of forced") || !strings.Contains(text, "text of quiet") {
+					t.Fatalf("after the lease: %+v %v %q", result, err, text)
+				}
+			}
+			if n, _ := PendingCount(env, "fiber"); n != 0 {
+				t.Fatalf("pending = %d", n)
+			}
+		})
+	}
+}
