@@ -297,6 +297,34 @@ defmodule ShuttleWeb.DeliverControllerTest do
     assert Enum.take(args, -4) == ["--", Enum.at(args, -3), "agent-dash", "- keep the mask"]
   end
 
+  test "a fiber message carries a 7 MB attachment" do
+    fiber = "tests/attach-7mb"
+    put_constitution(fiber)
+    data = :binary.copy("a", 7 * 1024 * 1024)
+
+    assert %{"queued" => true} =
+             api_conn()
+             |> post(
+               "/api/v1/deliver",
+               Jason.encode!(%{
+                 "fiber_id" => fiber,
+                 "text" => "see attached",
+                 "from" => "shuttle://elsewhere/claude/sender",
+                 "message_id" => "attach-7mb",
+                 "context_only" => true,
+                 "turn" => "ask",
+                 "attachments" => [
+                   %{
+                     "name" => "data.bin",
+                     "data" => Base.encode64(data),
+                     "sha256" => :crypto.hash(:sha256, data) |> Base.encode16(case: :lower)
+                   }
+                 ]
+               })
+             )
+             |> json_response(202)
+  end
+
   test "a never-run constitution dispatches fresh with the text as From User" do
     put_constitution("tests/deliver-fresh")
 

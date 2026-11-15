@@ -8,6 +8,7 @@ defmodule ShuttleWeb.LargeBodyParser do
   alone, so the two never both read a body.
 
     * `/api/v1/messages/files` — message envelopes with attachments (32 MB).
+    * `/api/v1/deliver` — a fiber message with attachments (32 MB).
     * `/api/v1/dispatch` — a start or resume with pasted images (32 MB).
 
   It also waits up to `read_timeout/0` for each socket read instead of the
@@ -20,6 +21,7 @@ defmodule ShuttleWeb.LargeBodyParser do
 
   @limits %{
     "/api/v1/messages/files" => 32 * 1024 * 1024,
+    "/api/v1/deliver" => 32 * 1024 * 1024,
     "/api/v1/dispatch" => 32 * 1024 * 1024
   }
 
