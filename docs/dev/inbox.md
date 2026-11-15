@@ -97,7 +97,9 @@ A timeout leaves the entry durable; retry the same id.
 
 `--notify-when-idle` subscribes when a wake or a hook claim delivers the entry, using its publication id, so a repeated claim does not start another watcher.
 `--fresh` publishes `turn: force, session: fresh` under the sender's id.
-Consume reserves one replacement for it (or one fresh launch for a dormant fiber); any receiver other than the one that asked for the reservation satisfies it, so the replacement takes the entry rather than being cut again, even after the lease lapses.
+Consume reserves one replacement for it (or one fresh launch for a dormant fiber).
+The first receiver other than the requester to consume while the lease stands is recorded as the reservation's taker (`launch.json`'s `taker`): it takes the entry through its hook in the lease, or is woken with it after, and is never cut again for it.
+A receiver that first appears after the lease, such as the old conversation resumed once a fresh launch was refused, is replaced in turn.
 A dormant fresh launch is admitted like any inbox launch and never cuts a worker that appeared meanwhile.
 The previous conversation is named in the new prompt, and the text arrives through the fiber hook.
 A retry of that id does not cut again after the replacement takes the entry.
@@ -232,7 +234,7 @@ A tracked worker whose conversation is not yet known is consumed as `-` with its
 | `ask`/`idle`, idle, costly, only `hold` | Wait; `ask` remains hook-eligible |
 | `ask`/`idle`/`force`, no worker | Reserve a launch and return `launch`, when the fiber passes the gate below |
 
-A launch reservation is kept apart from the entries' delivery attempts, in the inbox's `launch.json`: the reserving receiver (`-` and epoch 0 for a fiber with no worker), the asking entries it was requested for, and when, leased for two minutes.
+A launch reservation is kept apart from the entries' delivery attempts, in the inbox's `launch.json`: the reserving receiver (`-` and epoch 0 for a fiber with no worker), the asking entries it was requested for, when, leased for two minutes, and its taker, the first other receiver a consume saw in the lease.
 Reserving a launch never rewrites an entry's attempt or a batch's pinned payload.
 Within the lease, consume answers `wait` for an explicit fresh request's reserving receiver, or a cost-based reservation while it stays costly, and a new receiver (the launched session) takes the reserved entries through its hook instead of a wake.
 The daemon starts the session; when the Poller refuses the launch, it consumes again without `Costly`, waking the live worker.

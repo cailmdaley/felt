@@ -21,12 +21,17 @@ const launchLease = 2 * time.Minute
 // "-"). It lives beside the entries in the inbox's launch.json, apart from
 // their delivery attempts, so reserving a launch never rewrites a batch's
 // pinned payload or transport identity. Members are the asking entries the
-// launch was requested for, free or held by an open batch.
+// launch was requested for, free or held by an open batch. Taker is the first
+// other receiver a consume saw while the lease stood, at TakerEpoch: the
+// launched session, which alone satisfies a fresh request once the lease has
+// passed.
 type launchReservation struct {
 	Conversation string   `json:"conversation"`
 	Epoch        uint64   `json:"epoch,omitempty"`
 	Members      []string `json:"members"`
 	OpenedAt     int64    `json:"opened_at"`
+	Taker        string   `json:"taker,omitempty"`
+	TakerEpoch   uint64   `json:"taker_epoch,omitempty"`
 }
 
 func launchReservationPath(root string) string { return filepath.Join(root, "launch.json") }
@@ -65,6 +70,26 @@ func (r launchReservation) holds(id string, now time.Time) bool {
 // requestedBy reports that the live worker w requested the reservation.
 func (r launchReservation) requestedBy(w Worker) bool {
 	return r.Conversation == w.Address && r.Epoch == w.Epoch
+}
+
+// takenBy reports that w is the reservation's taker.
+func (r launchReservation) takenBy(w Worker) bool {
+	return r.Taker != "" && r.Taker == w.Address && r.TakerEpoch == w.Epoch
+}
+
+// recordTaker records the live worker w as the reservation's taker when it is
+// the first receiver other than the requester to consume while the lease
+// stands. Called under the inbox lock.
+func recordTaker(root string, r *launchReservation, w Worker, now time.Time) error {
+	if r.OpenedAt == 0 || now.Sub(time.Unix(0, r.OpenedAt)) >= launchLease || r.requestedBy(w) || r.Taker != "" {
+		return nil
+	}
+	r.Taker, r.TakerEpoch = w.Address, w.Epoch
+	bytes, err := json.Marshal(r)
+	if err != nil {
+		return err
+	}
+	return mailboxWrite(launchReservationPath(root), bytes, false)
 }
 
 // inFlight reports that the reservation's launch is in its lease and still

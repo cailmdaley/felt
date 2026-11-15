@@ -146,6 +146,11 @@ func consumePass(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	if err != nil {
 		return Consumption{}, err
 	}
+	if !dormant {
+		if err := recordTaker(root, &reservation, w, time.Now()); err != nil {
+			return Consumption{}, err
+		}
+	}
 	// Each open batch advances on its own, so one awaiting its outcome holds
 	// only its own members. A fiber without a worker has no conversation to
 	// advance a batch to: it settles only what local records decide (a
@@ -418,9 +423,11 @@ func decideConsumption(due []mailboxPendingItem, w Worker, direct bool, reservat
 				continue
 			}
 		}
-		// A fresh request a reservation already launched for is satisfied by
-		// any receiver other than the one that asked for it.
-		replaced := slices.Contains(reservation.Members, e.Request.MessageID) && !reservation.requestedBy(w)
+		// A fresh request a reservation launched for is satisfied, after its
+		// lease, only by the reservation's taker: the session it launched,
+		// not a receiver that arrived later, such as a resumed old
+		// conversation.
+		replaced := slices.Contains(reservation.Members, e.Request.MessageID) && reservation.takenBy(w)
 		explicitFresh = explicitFresh || (e.Wishes.Session == "fresh" && e.Wishes.Turn != "none" && !replaced)
 		// An idle entry starts a turn only in a worker observed idle.
 		wanted := e.Wishes.Turn == "ask" || (e.Wishes.Turn == "idle" && w.Idle && !w.Unknown)

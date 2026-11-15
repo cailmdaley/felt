@@ -47,19 +47,52 @@ func TestConsumeExplicitFreshReservedOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 		w = Worker{Address: "shuttle://host/claude/B", Epoch: transition(t, env, "B", "shuttle://host/claude/B")}
-		root := mailboxDir(env, "fiber", "fiber")
-		reservation, err := readLaunchReservation(root)
-		if err != nil {
-			t.Fatal(err)
+		// Within the lease the replacement leaves the entry to its hook.
+		if got, err := consumeWith(context.Background(), env, "fiber", "host", w, send); err != nil || got.Action != "wait" {
+			t.Fatalf("in lease: %+v %v", got, err)
 		}
-		reservation.OpenedAt = time.Now().Add(-3 * time.Minute).UnixNano()
-		b, _ := json.Marshal(reservation)
-		if err := mailboxWrite(launchReservationPath(root), b, false); err != nil {
-			t.Fatal(err)
-		}
+		expireReservation(t, env)
 		got, err := consumeWith(context.Background(), env, "fiber", "host", w, send)
 		if err != nil || got.Action != "wake" || sends != 1 {
 			t.Fatalf("replacement must take text, not be cut again: %+v %v sends=%d", got, err, sends)
 		}
+	}
+}
+
+// A receiver that first consumes after the lease, such as the old
+// conversation resumed once a dormant fresh launch was refused, did not
+// replace anything: the fresh request asks for a replacement of it.
+func TestConsumeFreshNotSatisfiedByALaterReceiver(t *testing.T) {
+	env, _ := consumeFixture(t)
+	dormant := Worker{Address: "-"}
+	entry := InboxEntry{Address: "fiber", Request: Request{MessageID: "fresh", Text: "new session"}, Wishes: Wishes{Turn: "force", Session: "fresh"}}
+	if err := Enqueue(env, entry); err != nil {
+		t.Fatal(err)
+	}
+	send := func(context.Context, *sysenv.Env, string, Request, string) (Receipt, error) {
+		t.Fatal("fresh text sent to a later receiver")
+		return Receipt{}, nil
+	}
+	if got, err := consumeWith(context.Background(), env, "fiber", "host", dormant, send); err != nil || got.Action != "launch" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	expireReservation(t, env)
+	resumed := Worker{Address: "shuttle://host/claude/A", Epoch: transition(t, env, "A", "shuttle://host/claude/A")}
+	if got, err := consumeWith(context.Background(), env, "fiber", "host", resumed, send); err != nil || got.Action != "fresh" {
+		t.Fatalf("a later receiver took the fresh request: %+v %v", got, err)
+	}
+}
+
+func expireReservation(t *testing.T, env *sysenv.Env) {
+	t.Helper()
+	root := mailboxDir(env, "fiber", "fiber")
+	reservation, err := readLaunchReservation(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation.OpenedAt = time.Now().Add(-3 * time.Minute).UnixNano()
+	b, _ := json.Marshal(reservation)
+	if err := mailboxWrite(launchReservationPath(root), b, false); err != nil {
+		t.Fatal(err)
 	}
 }
