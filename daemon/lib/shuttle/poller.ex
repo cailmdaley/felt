@@ -4633,17 +4633,26 @@ defmodule Shuttle.Poller do
         Logger.debug("Dispatch waiting for #{fiber_id}: #{message}")
         {record_dispatch_failure(state, fiber, reason), {:error, reason}}
 
+      # The dispatcher's own read refused an inbox launch on the document's
+      # policy (closed, at rest, unarmed, a scheduled run due): the entries
+      # wait for it to change, as when the Poller's read refused it. No launch
+      # failed, so nothing is recorded toward a cooldown.
       {:error, reason} ->
-        # Each retry of an unchanged refusal is the same news; it is logged once.
-        previous = Map.get(state.dispatch_failures, runtime_key_for_fiber(fiber))
-
-        if previous && dispatch_failure_key(previous.reason) == dispatch_failure_key(reason),
-          do: Logger.debug("Dispatch still failing for #{fiber_id}: #{inspect(reason)}"),
-          else: Logger.warning("Dispatch failed for #{fiber_id}: #{inspect(reason)}")
-
-        state = record_dispatch_failure(state, fiber, reason)
-        {state, {:error, reason}}
+        if Keyword.get(opts, :inbox, false) and Shuttle.Delivery.gate_refusal?(reason),
+          do: {state, {:error, reason}},
+          else: {failed_dispatch(state, fiber, fiber_id, reason), {:error, reason}}
     end
+  end
+
+  # Each retry of an unchanged refusal is the same news; it is logged once.
+  defp failed_dispatch(state, fiber, fiber_id, reason) do
+    previous = Map.get(state.dispatch_failures, runtime_key_for_fiber(fiber))
+
+    if previous && dispatch_failure_key(previous.reason) == dispatch_failure_key(reason),
+      do: Logger.debug("Dispatch still failing for #{fiber_id}: #{inspect(reason)}"),
+      else: Logger.warning("Dispatch failed for #{fiber_id}: #{inspect(reason)}")
+
+    record_dispatch_failure(state, fiber, reason)
   end
 
   # What an orchestrator's roster is computed from: the cached constitutions,

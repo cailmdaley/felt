@@ -131,6 +131,7 @@ Unlike a human's start, an inbox launch leaves the breaker's count as it was, so
 While the boot quarantine or a contract skew holds fresh launches, it parks the fiber in `pending_launch`, drawn as held, without reserving anything, and the poll after the hold comes off starts it.
 Admitted, the daemon consumes, and on `launch` calls `Poller.dispatch_fiber/3` with `ad_hoc`, `inbox: true` and `resume_mode: "continue"`: the dispatcher's resume-or-fresh rule.
 An inbox launch is not a forced start: it arms and reopens nothing, leaves the worker's question for the human, and needs the gate on the Poller's final read of the fiber and again on the dispatcher's own, so a fiber closed or put to rest meanwhile is refused, never reopened.
+A refusal on the document's policy (closed, at rest, unarmed, a scheduled run due) is a wait wherever it is found, and is never recorded as a failed launch, so it opens no launch cooldown.
 The launch prompt says messages are arriving and carries none of their text.
 
 The launched session takes the batch through its fiber hook.

@@ -253,6 +253,10 @@ defmodule Shuttle.Delivery do
     end
   end
 
+  @doc "Whether `reason` is an `inbox_gate/2` refusal: the document's policy, not a failed launch."
+  def gate_refusal?(reason),
+    do: reason in [:not_owner, :closed, :paused, :at_rest, :not_armed, :run_due]
+
   @launch_note "Shuttle started this session because messages are waiting in this fiber's inbox. " <>
                  "They reach you as Shuttle context beside this prompt or at your first tool call, " <>
                  "or as a message within a few minutes; read them before you decide what to do."

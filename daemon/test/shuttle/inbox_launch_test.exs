@@ -516,10 +516,11 @@ defmodule Shuttle.InboxLaunchTest do
   end
 
   # Another writer closes the constitution while its inbox launch is being
-  # dispatched: after the request's own read (the Poller's final read sees
-  # it), or after that final read (the dispatcher's read sees it). Either way
-  # the launch is refused and nothing reopens the document.
-  for n <- [1, 2] do
+  # dispatched: after the request's own read (the first of the Poller's three
+  # reads; its final read sees it), or after the Poller's final read (the
+  # dispatcher's read sees it). Either way the launch is refused and nothing
+  # reopens the document.
+  for n <- [1, 3] do
     test "a close landing after read #{n} of an inbox dispatch is never undone", %{host: host} do
       id = armed(host, "tests/inbox-closing")
       poller = poller!(host, runner: Shuttle.InboxLaunchTest.CloseAfterRead)
@@ -541,6 +542,39 @@ defmodule Shuttle.InboxLaunchTest do
 
       assert %{"m-closing" => %{"turn" => "ask"}} = pending(parent)
     end
+  end
+
+  # A close the dispatcher's own read finds refuses the launch on policy: the
+  # entries wait, and no failure is recorded, so repeated refusals open no
+  # launch cooldown once the author arms the fiber again.
+  test "a policy refusal from the dispatcher's read is a wait, not a launch failure", %{
+    host: host
+  } do
+    id = armed(host, "tests/inbox-policy")
+    poller = poller!(host, runner: Shuttle.InboxLaunchTest.CloseAfterRead)
+    key = entry(host, id).fiber["uid"]
+    gate = start_supervised!({Agent, fn -> 0 end})
+    Shuttle.Test.Env.put_app_env(:close_after_read, {gate, 3, fiber_file(host, id)})
+
+    for n <- 1..2 do
+      Agent.update(gate, fn _ -> 0 end)
+
+      assert {:ok, {:waiting, detail}} =
+               Delivery.context(entry(host, id), "message #{n}", "m-policy-#{n}", wake: true)
+
+      assert detail =~ "is closed"
+      assert read_frontmatter(host, id)["status"] == "closed"
+      refute :sys.get_state(poller).dispatch_failures[key]
+
+      # The author arms it again before any poll sees it closed.
+      path = fiber_file(host, id)
+      File.write!(path, String.replace(File.read!(path), "status: closed", "status: active"))
+      lapse_leases()
+    end
+
+    Shuttle.Test.Env.put_app_env(:close_after_read, nil)
+    assert :ok = Poller.admit_inbox_launch(poller, key)
+    assert launches(id) == 0
   end
 
   # An inbox launch is not a human's override: a retry after the breaker's
