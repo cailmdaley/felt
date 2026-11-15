@@ -97,8 +97,16 @@ export class ChannelsView implements TemporalView {
   private query = ''
   /** What the aside shows beside the lines: the pinned tapestry, or the channel's files. */
   private pane: 'tapestry' | 'files' = 'tapestry'
-  /** Each member's own companions (tapestry, artifact, report), probed once its channel's files are shown. */
-  private readonly companions = new Map<string, string[]>()
+  /**
+   * Each member's own companions (tapestry, artifact, report), probed while
+   * its channel's files are shown: again when the card's file changes, and
+   * again after a probe that could not reach the owner.
+   */
+  private readonly companions = new Map<string, { modified?: string; paths: string[]; settled: boolean; pending: boolean }>()
+  /** The item a document or card was opened from, which takes focus again when the reader closes. */
+  private returnTo: string | null = null
+  /** The reader stands over Channels: nothing redraws beneath it. */
+  private away = false
   /** The worker chosen in the current channel; null is the seat. It stays chosen until the reader chooses again. */
   private chosen: KanbanCard | null = null
   /** What was typed in each channel's reply bar, kept while the reader is elsewhere. */
@@ -253,7 +261,7 @@ export class ChannelsView implements TemporalView {
   private documents(channel: Channel): Doc[] {
     const library = this.ctx?.workspace?.library
     const docs = new Map<DocKey, Doc>()
-    for (const card of channel.members) for (const path of this.companions.get(`${card.originId}\0${fiberOf(card)}`) ?? []) {
+    for (const card of channel.members) for (const path of this.companions.get(`${card.originId}\0${fiberOf(card)}`)?.paths ?? []) {
       const key = docKey(card.originId, path, card.originId, card.fiberDir)
       // A companion is named for what it is: its fiber's Tapestry, Artifact or Report.
       const stem = basename(path).replace(/\.html$/i, '')
@@ -266,27 +274,37 @@ export class ChannelsView implements TemporalView {
     }
     return [...docs.values()]
   }
-  /** Probes each member's companions once, in the neighbour lane, redrawing the files as they turn up. */
+  /**
+   * Probes each member's companions in the neighbour lane, redrawing the files
+   * as they turn up: once, again when the card's file changes, and again
+   * after any probe its owner did not answer.
+   */
   private probeCompanions(channel: Channel): void {
     const base = this.ctx?.shuttleBase ?? ''
     for (const card of channel.members) {
-      const id = `${card.originId}\0${fiberOf(card)}`
-      if (!card.fiberDir || this.companions.has(id)) continue
-      this.companions.set(id, [])
+      const id = `${card.originId}\0${fiberOf(card)}`, known = this.companions.get(id)
+      if (!card.fiberDir || known?.pending || (known?.settled && known.modified === card.modifiedAt)) continue
+      const paths = known?.paths ?? []
+      this.companions.set(id, { modified: card.modifiedAt, paths, settled: false, pending: true })
       void Promise.all(COMPANION_NAMES.map(async name => {
         const path = `${card.fiberDir}/${name}`
-        return (await head(fileBytesUrl(base, path, card.originId), RESOURCE_PRIORITY.neighbour).catch(() => null))?.exists ? path : null
-      })).then(paths => {
-        const found = paths.filter((path): path is string => !!path)
-        if (!found.length) return
-        this.companions.set(id, found)
-        this.drawChannel()
+        const answer = await head(fileBytesUrl(base, path, card.originId), RESOURCE_PRIORITY.neighbour, { fresh: !!known }).catch(() => null)
+        return { path, answer }
+      })).then(answers => {
+        const found = answers.filter(({ answer }) => answer?.exists).map(({ path }) => path)
+        // A probe the owner did not answer is asked again on the next draw of the files.
+        this.companions.set(id, { modified: card.modifiedAt, paths: found, settled: answers.every(({ answer }) => answer), pending: false })
+        if (found.join() !== paths.join() && !this.away) this.drawChannel()
       })
     }
   }
   private draw(): void {
     const ctx = this.ctx
     if (!ctx || !this.list || !this.loaded) return
+    // Nothing redraws under the reader; coming back draws once and returns focus where the reader was opened from.
+    if (ctx.workspace?.isActive) { this.away = true; return }
+    const returning = this.away
+    this.away = false
     const index = threadIndexFor(ctx.response)
     this.channels = composeChannels({
       cards: boardCards(ctx.response), parentOf: card => index.parentOf(card), names: this.names, files: ctx.sends?.files ?? [], held: this.held,
@@ -295,6 +313,26 @@ export class ChannelsView implements TemporalView {
     if (!this.channels.some(channel => channel.key === this.current)) this.open(this.listed[0]?.key ?? null, false)
     this.drawRail()
     this.drawChannel()
+    if (returning) this.returnFocus()
+  }
+  /** The item the reader was opened from, else the reply box. */
+  private returnFocus(): void {
+    const item = this.returnTo && this.layout?.querySelector<HTMLElement>(`[data-item="${CSS.escape(this.returnTo)}"]`)
+    this.returnTo = null
+    if (item) item.focus({ preventScroll: true })
+    else this.reply?.focus({ preventScroll: true })
+  }
+  /** Opens a fiber's page, or one of its documents, from the item named `from`. */
+  private openPage(from: string, card: KanbanCard, key?: DocKey): void {
+    this.returnTo = from
+    this.ctx?.workspace?.openPage(card, key)
+  }
+  /** Fills `container` anew; the item that had focus in it keeps it. */
+  private rebuild(container: HTMLElement, children: Node[]): void {
+    const focused = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('[data-item]')
+    const item = focused && container.contains(focused) ? focused.dataset.item : undefined
+    container.replaceChildren(...children)
+    if (item) container.querySelector<HTMLElement>(`[data-item="${CSS.escape(item)}"]`)?.focus({ preventScroll: true })
   }
   /**
    * Comes to a channel, on its seat, with its own draft; what it held when
@@ -337,13 +375,13 @@ export class ChannelsView implements TemporalView {
 
   private drawRail(): void {
     const list = this.list!, now = Date.now()
-    const focused = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.kbn-ch-pick')?.dataset.channel
     const items: HTMLLIElement[] = []
     for (const channel of this.listed) {
       if (channel.cold && !items.some(item => item.classList.contains('kbn-ch-shelf'))) items.push(el('li', 'kbn-ch-shelf', 'Gone cold'))
       const item = el('li', 'kbn-ch-rail-item')
       const pick = button('kbn-ch-pick', '', () => this.open(channel.key, true))
       pick.dataset.channel = channel.key
+      pick.dataset.item = `channel:${channel.key}`
       pick.toggleAttribute('data-waiting', channel.waiting && !channel.cold)
       pick.toggleAttribute('data-quiet', !channel.waiting || channel.cold)
       pick.append(el('span', 'kbn-ch-pick-name', channel.name))
@@ -360,9 +398,8 @@ export class ChannelsView implements TemporalView {
       items.push(item)
     }
     if (this.query && !items.length) items.push(el('li', 'kbn-ch-hush kbn-ch-none', 'No channel matches.'))
-    list.replaceChildren(...items)
     // A poll redraws the rail: the channel that had focus keeps it.
-    if (focused) list.querySelector<HTMLElement>(`[data-channel="${CSS.escape(focused)}"]`)?.focus({ preventScroll: true })
+    this.rebuild(list, items)
     this.drawFound()
     this.drawLately()
   }
@@ -374,9 +411,9 @@ export class ChannelsView implements TemporalView {
       [receipt.basename, receipt.fullPath, declaredTitle(receipt.key)?.title ?? '', card.name, channelOf.get(fiberOf(card)) ?? ''].some(text => text.toLowerCase().includes(query)))
       .slice(0, FOUND_DOCUMENTS)
     found.hidden = !matches.length
-    found.replaceChildren(el('h4', 'kbn-ch-shelf', 'Files'), this.docList(matches.map(({ card, receipt }) => ({
+    this.rebuild(found, [el('h4', 'kbn-ch-shelf', 'Files'), this.docList('found', matches.map(({ card, receipt }) => ({
       card, key: receipt.key, name: declaredTitle(receipt.key)?.title ?? receipt.basename, path: receipt.fullPath, at: receipt.timestamp,
-    })), doc => doc.card.name))
+    })), doc => doc.card.name)])
   }
   /** What was read lately in this session, while Find is not looking. */
   private drawLately(): void {
@@ -385,20 +422,23 @@ export class ChannelsView implements TemporalView {
     const list = el('ol', 'kbn-ch-lately')
     list.append(...cards.map(card => {
       const item = el('li', '')
-      const pick = button('kbn-ch-doc', '', () => this.ctx?.workspace?.openPage(card))
+      const id = `read:${card.originId}:${fiberOf(card)}`
+      const pick = button('kbn-ch-doc', '', () => this.openPage(id, card))
+      pick.dataset.item = id
       pick.append(el('span', 'kbn-ch-doc-name', card.name))
       pick.title = card.outcome ?? card.path
       item.append(pick)
       return item
     }))
-    this.lately!.replaceChildren(el('h4', 'kbn-ch-shelf', 'Read lately'), list)
+    this.rebuild(this.lately!, [el('h4', 'kbn-ch-shelf', 'Read lately'), list])
   }
-  /** A quiet list of documents, each opening in the reader; `whose` says where each comes from. */
-  private docList(docs: Doc[], whose: (doc: Doc) => string): HTMLOListElement {
+  /** A quiet list of documents, each opening in the reader; `whose` says where each comes from, `kind` which list it is. */
+  private docList(kind: string, docs: Doc[], whose: (doc: Doc) => string): HTMLOListElement {
     const list = el('ol', 'kbn-ch-doclist'), now = Date.now()
     list.append(...docs.map(doc => {
-      const item = el('li', '')
-      const pick = button('kbn-ch-doc', '', () => this.ctx?.workspace?.openPage(doc.card, doc.key))
+      const item = el('li', ''), id = `${kind}:${doc.key}`
+      const pick = button('kbn-ch-doc', '', () => this.openPage(id, doc.card, doc.key))
+      pick.dataset.item = id
       pick.title = doc.path
       const meta = el('span', 'kbn-ch-doc-meta', whose(doc))
       if (doc.at) {
@@ -467,7 +507,7 @@ export class ChannelsView implements TemporalView {
     if (!files) return
     this.probeCompanions(channel)
     const docs = this.documents(channel)
-    this.filesEl!.replaceChildren(...(docs.length ? this.docList(docs, doc => doc.card.name).children : [el('li', 'kbn-ch-hush', 'No files yet.')]))
+    this.rebuild(this.filesEl!, docs.length ? [...this.docList('file', docs, doc => doc.card.name).children] : [el('li', 'kbn-ch-hush', 'No files yet.')])
   }
   /** One worker's line: who, when, what, and what it sent; its actions show once it is chosen. */
   private messageRow(channel: Channel, message: Message, before: number, now: number): HTMLLIElement {
@@ -478,6 +518,7 @@ export class ChannelsView implements TemporalView {
     row.toggleAttribute('data-new', !!message.kind && message.at > before)
     const body = el('div', 'kbn-ch-msg-body')
     const pick = button('kbn-ch-msg-pick', '', () => this.select(card))
+    pick.dataset.item = `line:${fiberOf(card)}`
     const who = el('span', 'kbn-ch-msg-head')
     who.append(el('span', 'kbn-ch-msg-name', card.name))
     const office = officeOf(card.shuttleRole)
@@ -499,7 +540,7 @@ export class ChannelsView implements TemporalView {
     const attached = this.attachments(channel, card, before, now)
     if (attached) body.append(attached)
     const acts = el('div', 'kbn-ch-acts')
-    acts.append(button('kbn-ch-act', 'Open', () => this.openCard(card)))
+    acts.append(button('kbn-ch-act', 'Open', () => { this.returnTo = `line:${fiberOf(card)}`; this.openCard(card) }))
     if (message.kind === 'review') {
       const key = `${fiberOf(card)}:${message.at}`
       const temper = button('kbn-ch-act', this.tempering.has(key) ? 'Tempering…' : 'Temper', () => { void this.temper(card, key) })
@@ -525,7 +566,8 @@ export class ChannelsView implements TemporalView {
       box.append(said)
     }
     for (const file of files.slice(0, 8)) {
-      const chip = button('kbn-ch-file', file.basename, () => this.openFile(file))
+      const chip = button('kbn-ch-file', file.basename, () => { this.returnTo = `chip:${file.fullPath}`; this.openFile(file) })
+      chip.dataset.item = `chip:${file.fullPath}`
       chip.toggleAttribute('data-new', file.timestamp > before)
       chip.title = `Sent ${ago(file.timestamp, now)}`
       box.append(chip)
@@ -754,6 +796,9 @@ export class ChannelsView implements TemporalView {
     return false
   }
   unmount(): void {
+    // A document still being read from its owner does not open once Channels is left.
+    this.ctx?.workspace?.library.cancelOpen()
+    this.query = ''
     this.dropTapestry()
     this.readGeneration++
     this.unsubscribe?.(); this.unsubscribe = undefined

@@ -45,7 +45,7 @@ async function mount(inFlight = [shear, mask, covariance, van, garden], view = n
   const openFromDesk = vi.fn(), openPage = vi.fn(), requestRefresh = vi.fn(), see = vi.fn()
   const workspace = {
     openFromDesk, openPage, readLatelyCards: () => lately,
-    library: { subscribe: () => () => {}, visit: () => {}, documents: () => library, receipts: (uid: string) => library.filter(doc => doc.receipt.uid === uid).map(doc => doc.receipt) },
+    library: { subscribe: () => () => {}, visit: () => {}, cancelOpen: vi.fn(), documents: () => library, receipts: (uid: string) => library.filter(doc => doc.receipt.uid === uid).map(doc => doc.receipt) },
   }
   const ctx = { cards: [], response: board(inFlight), shuttleBase, workspace, requestRefresh, openCard: vi.fn(), see } as unknown as ViewContext
   const host = document.createElement('div'); document.body.append(host)
@@ -276,4 +276,76 @@ it('draws a line whose time is unknown without an age, and names a channel by it
   expect(host.querySelector('.kbn-ch-pick')!.getAttribute('title')).toBe('Analyst · the shear desk')
   expect(line(host, 'Untimed').querySelector('.kbn-ch-age')).toBeNull()
   expect(line(host, 'Choose the mask').querySelector('.kbn-ch-age')).not.toBeNull()
+})
+
+it('forgets its Find and drops a document still being read from its owner when Channels is left', async () => {
+  daemon()
+  const { view, ctx, host } = await mount()
+  view.find('gard')
+  expect(rail(host)).toStrictEqual(['Garden plan'])
+  view.unmount()
+  expect(ctx.workspace!.library.cancelOpen).toHaveBeenCalled()
+  const again = await mount(undefined, view)
+  expect(rail(again.host)).toStrictEqual(['Analyst', 'Moving house'])
+  expect(again.host.querySelector<HTMLInputElement>('.kbn-ch-finder')!.value).toBe('')
+})
+
+it('keeps focus on its item across a poll, draws nothing under the reader, and returns focus where the reader was opened', async () => {
+  daemon()
+  const { view, ctx, host, openPage, reply } = await mount()
+  const workspace = ctx.workspace as unknown as { isActive: boolean }
+  const files = () => host.querySelector<HTMLButtonElement>('.kbn-ch-files .kbn-ch-doc')!
+  ;[...host.querySelectorAll<HTMLButtonElement>('.kbn-ch-tab')].find(el => el.textContent === 'Files')!.click()
+  files().focus()
+  view.refresh(ctx); await settle()
+  expect(document.activeElement).toBe(files())
+  // Opening a file puts the reader over Channels: a poll beneath it rebuilds nothing.
+  files().click()
+  expect(openPage).toHaveBeenLastCalledWith(mask, 'host:/notes/mask/north-mask.png')
+  workspace.isActive = true
+  const shown = files()
+  view.refresh(ctx); await settle()
+  expect(files()).toBe(shown)
+  // The reader closes: focus comes back to the file it was opened from.
+  ;(document.activeElement as HTMLElement | null)?.blur()
+  workspace.isActive = false
+  view.refresh(ctx)
+  expect((document.activeElement as HTMLElement).dataset.item).toBe('file:host:/notes/mask/north-mask.png')
+  // Without an item to come back to, the reply box takes focus.
+  workspace.isActive = true; view.refresh(ctx); workspace.isActive = false; view.refresh(ctx)
+  expect(document.activeElement).toBe(reply)
+})
+
+it('probes a member\'s companions again after an unanswered probe and when its file changes', async () => {
+  daemon()
+  const base = 'http://probe.test', probes: string[] = []
+  let answer: 'down' | 'none' | 'tapestry' = 'down'
+  const original = vi.mocked(fetch).getMockImplementation()!
+  vi.mocked(fetch).mockImplementation(async (url, init) => {
+    const path = String(url)
+    if (!path.includes('/file-info?')) return original(url, init)
+    probes.push(decodeURIComponent(path))
+    if (answer === 'down') return new Response('unreachable', { status: 502 })
+    return new Response(JSON.stringify({ exists: answer === 'tapestry' && path.includes('tapestry.html') }))
+  })
+  const thread = card({ id: 'mask', uid: 'M', name: 'Choose the mask', orchestrator: 'S', status: 'active', ask: { text: 'Keep it?', at: at(40) }, fiberDir: '/notes/mask', modifiedAt: at(40) })
+  const { view, ctx, host } = await mount([shear, thread], new ChannelsView(), [], base)
+  const names = () => [...host.querySelectorAll('.kbn-ch-files .kbn-ch-doc-name')].map(el => el.textContent)
+  ;[...host.querySelectorAll<HTMLButtonElement>('.kbn-ch-tab')].find(el => el.textContent === 'Files')!.click()
+  await settle(); await settle()
+  const asked = probes.filter(url => url.includes('/notes/mask/')).length
+  expect(asked).toBe(3)
+  // The owner did not answer: the next draw of the files asks again, and finds nothing yet.
+  answer = 'none'
+  view.refresh(ctx); await settle(); await settle()
+  expect(probes.filter(url => url.includes('/notes/mask/')).length).toBe(2 * asked)
+  expect(names()).not.toContain('Tapestry')
+  // Settled and unchanged, it is not asked again; once its file changes, it is, and its tapestry shows.
+  view.refresh(ctx); await settle(); await settle()
+  expect(probes.filter(url => url.includes('/notes/mask/')).length).toBe(2 * asked)
+  answer = 'tapestry'
+  ctx.response = board([shear, { ...thread, modifiedAt: at(1) }])
+  view.refresh(ctx); await settle(); await settle()
+  expect(probes.filter(url => url.includes('/notes/mask/')).length).toBe(3 * asked)
+  expect(names()).toContain('Tapestry')
 })
