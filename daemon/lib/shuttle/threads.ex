@@ -1147,30 +1147,39 @@ defmodule Shuttle.Threads do
   defp consume_result(%{"address" => key, "id" => id, "record" => record}, entries) do
     stores = Enum.uniq([record["store"] | Shuttle.FeltStores.configured_stores()])
 
-    placement =
+    {placement, locally_ready?} =
       if is_binary(record["session"]) do
-        []
+        {[], false}
       else
         case prepare_recipient(record, entries, stores) do
           {:ok, resolved, parent} ->
-            [
-              "--route-record",
-              Jason.encode!(resolved),
-              "--route-owner",
-              get_in(parent.fiber, ["shuttle", "host"]),
-              "--route-key",
-              Delivery.context_key(parent)
-            ]
+            local? =
+              record["local"] == true and
+                get_in(parent.fiber, ["shuttle", "host"]) == Shuttle.Poller.own_host_id() and
+                Delivery.context_key(parent) == key
+
+            {[
+               "--route-record",
+               Jason.encode!(resolved),
+               "--route-owner",
+               get_in(parent.fiber, ["shuttle", "host"]),
+               "--route-key",
+               Delivery.context_key(parent)
+             ], local?}
 
           _ ->
-            []
+            {[], record["local"] == true}
         end
       end
 
     current =
-      case current_signal(record, id) do
-        {:ok, value} -> to_string(value)
-        _ -> "unknown"
+      if locally_ready? do
+        "unknown"
+      else
+        case current_signal(record, id) do
+          {:ok, value} -> to_string(value)
+          _ -> "unknown"
+        end
       end
 
     args =
@@ -1266,11 +1275,18 @@ defmodule Shuttle.Threads do
   defp acknowledged?(_), do: false
 
   defp forward_result(record, id) do
+    text =
+      if record["possible_repeat"] == true,
+        do:
+          record["text"] <>
+            "\n\nPossible repeat: delivery on the previous owner had an unknown outcome.",
+        else: record["text"]
+
     case OriginRouter.route_host(record["parent_host"]) do
       {:remote, remote} ->
         OriginRouter.forward(remote, "/api/v1/deliver", %{
           "fiber_id" => record["parent_uid"],
-          "text" => record["text"],
+          "text" => text,
           "context_only" => true,
           "wake" => record["wake"],
           "message_id" => id,

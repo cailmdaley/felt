@@ -118,7 +118,7 @@ func TestThreadRoutingLocalTransferAndSupersession(t *testing.T) {
 		}
 		routeConsume(t, env, entry, facts)
 		items, err := pendingItems(mailboxDir(env, "fiber", dest))
-		if err != nil || len(items) != 1 || items[0].entry.Routing != nil {
+		if err != nil || len(items) != 1 || items[0].entry.routingPending() || items[0].entry.Routing["local"] != true {
 			t.Fatalf("local: %+v %v", items, err)
 		}
 	}
@@ -128,6 +128,62 @@ func TestThreadRoutingLocalTransferAndSupersession(t *testing.T) {
 	stored, err := readFiberMailboxEntry(filepath.Join(root, "offered", mailboxKey(entry.Request.MessageID)+".json"))
 	if err != nil || stored.Disposition != "superseded" {
 		t.Fatalf("superseded: %+v %v", stored, err)
+	}
+}
+
+func TestLocallyReadyThreadFollowsParentHostMoveBeforeConsumption(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	bootThread(t, env)
+	entry := enqueueThread(t, env, "thread-local-move", threadRecord())
+	routeConsume(t, env, entry, RouteFacts{Current: "true", Owner: "host", Destination: entry.Address, Record: map[string]any{"parent_uid": "parent", "parent_host": "host"}})
+	if n, _ := WakingCount(env, entry.Address); n != 1 {
+		t.Fatal(n)
+	}
+	got := routeConsume(t, env, entry, RouteFacts{Current: "true", Owner: "remote", Record: map[string]any{"parent_uid": "parent", "parent_host": "remote"}})
+	if got.Action != "forward" || got.Entry.Record["parent_uid"] != "parent" {
+		t.Fatal(got)
+	}
+	if n, _ := WakingCount(env, entry.Address); n != 0 {
+		t.Fatal("old host may still launch", n)
+	}
+}
+
+func TestMovingThreadSettlesPinnedBatchBeforeForwarding(t *testing.T) {
+	t.Parallel()
+	for _, confirmed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "ambiguous", true: "confirmed"}[confirmed], func(t *testing.T) {
+			env := testEnv(t)
+			bootThread(t, env)
+			entry := enqueueThread(t, env, "thread-pinned-move", threadRecord())
+			routeConsume(t, env, entry, RouteFacts{Current: "true", Owner: "host", Destination: entry.Address, Record: map[string]any{"parent_uid": "parent", "parent_host": "host"}})
+			root := mailboxDir(env, "fiber", entry.Address)
+			items, err := pendingItems(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			batch := newConsumedAttempt(Worker{Address: "shuttle://host/codex/old", Epoch: 1}, items, true)
+			if err := pinConsumedBatch(root, &batch); err != nil {
+				t.Fatal(err)
+			}
+			if confirmed {
+				dir := filepath.Join(dataDir(env), "messages")
+				os.MkdirAll(dir, 0700)
+				b, _ := json.Marshal(record{State: "complete", Receipt: Receipt{Status: StatusAccepted}})
+				os.WriteFile(filepath.Join(dir, mailboxKey(batch.Payload.MessageID+"-"+mailboxKey(batch.Conversation)[:16])+".json"), b, 0600)
+			}
+			got := routeConsume(t, env, entry, RouteFacts{Current: "true", Owner: "remote", Record: map[string]any{"parent_uid": "parent", "parent_host": "remote"}})
+			if confirmed {
+				if got.Action != "wait" {
+					t.Fatal("confirmed batch forwarded", got)
+				}
+			} else if got.Action != "forward" || got.Entry.Record["possible_repeat"] != true {
+				t.Fatal(got)
+			}
+			if _, err := os.Stat(batchManifest(root, &batch)); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("old host batch still open", err)
+			}
+		})
 	}
 }
 

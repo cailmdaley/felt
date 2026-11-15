@@ -113,6 +113,13 @@ type mailboxEntry struct {
 	PossibleRepeat bool   `json:"possible_repeat,omitempty"`
 }
 
+// routingPending excludes entries from workers until this host's daemon has
+// established local ownership. Ready entries retain routing so an owner move
+// before consumption can still forward the same publication.
+func (e mailboxEntry) routingPending() bool {
+	return e.Routing != nil && e.Routing["local"] != true
+}
+
 type mailboxPendingItem struct {
 	path  string
 	entry mailboxEntry
@@ -434,7 +441,7 @@ func offerMailboxWithAck(dir, conversation string, accepts func(Request) bool, e
 			}
 			continue
 		}
-		if entry.Routing != nil || !entry.due(time.Now()) || !accepts(entry.Request) {
+		if entry.routingPending() || !entry.due(time.Now()) || !accepts(entry.Request) {
 			continue
 		}
 		it := mailboxPendingItem{path, entry}

@@ -383,7 +383,14 @@ defmodule Shuttle.ThreadsInboxTest do
     assert {:ok, _} = CLI.run_in_store(store, ["reopen", "hub/child", "--local"])
     assert {:ok, _} = CLI.run_in_store(store, ["ask", "hub/child", "Choose a kernel?"])
     send(poller, :run_poll_cycle)
-    await(fn -> pending(data) != [] end)
+
+    await(fn ->
+      Enum.any?(pending(data), fn entry ->
+        entry["request"]["text"] == "thread hub/child asked: Choose a kernel?" and
+          get_in(entry, ["routing", "local"]) == true
+      end)
+    end)
+
     refute_receive {:wake, _}
     File.write!(gate, "offer\n", [:raw])
 

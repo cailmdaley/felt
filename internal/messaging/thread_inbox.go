@@ -1,11 +1,14 @@
 package messaging
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"syscall"
 	"time"
 
@@ -118,7 +121,11 @@ func ThreadEntry(id string, record map[string]any) (InboxEntry, error) {
 	if address == "" {
 		address = routeString(record, "store") + ":" + routeString(record, "parent_uid")
 	}
-	req := Request{MessageID: id, Text: routeString(record, "text"), From: "shuttle", RetainedAt: routeString(record, "retained_at")}
+	from := routeString(record, "from")
+	if from == "" {
+		from = "shuttle"
+	}
+	req := Request{MessageID: id, Text: routeString(record, "text"), From: from, RetainedAt: routeString(record, "retained_at")}
 	if signal := record["signal"]; signal != nil {
 		b, err := json.Marshal(signal)
 		if err != nil {
@@ -129,11 +136,14 @@ func ThreadEntry(id string, record map[string]any) (InboxEntry, error) {
 			return InboxEntry{}, err
 		}
 	}
-	turn := "none"
-	if record["wake"] == true || routeString(record, "session") != "" {
-		turn = "ask"
+	turn := routeString(record, "turn")
+	if turn == "" {
+		turn = "none"
+		if record["wake"] == true || routeString(record, "session") != "" {
+			turn = "ask"
+		}
 	}
-	return InboxEntry{Address: address, Request: req, Wishes: Wishes{Source: "thread", Turn: turn, IfCostly: "fresh"}, Derived: true, Routing: record}, nil
+	return InboxEntry{Address: address, Request: req, Wishes: Wishes{Source: "thread", Turn: turn, IfCostly: "fresh"}, Derived: true, Routing: record, PossibleRepeat: record["possible_repeat"] == true}, nil
 }
 
 type RoutedEntry struct {
@@ -186,7 +196,7 @@ type RouteFacts struct {
 	Owner       string
 }
 
-func consumeRoute(env *sysenv.Env, address, host string, f RouteFacts) (Consumption, error) {
+func consumeRoute(ctx context.Context, env *sysenv.Env, address, host string, f RouteFacts) (Consumption, error) {
 	result := Consumption{Action: "wait"}
 	root, err := inboxRoot(env, address)
 	if err != nil {
@@ -215,6 +225,16 @@ func consumeRoute(env *sysenv.Env, address, host string, f RouteFacts) (Consumpt
 		return result, finishRouted(root, path, e, "expired")
 	}
 	if f.Current == "false" {
+		if err := releaseRoutedAttempt(ctx, env, root, f.ID); err != nil {
+			return Consumption{}, err
+		}
+		e, err = readFiberMailboxEntry(path)
+		if errors.Is(err, os.ErrNotExist) {
+			return result, nil
+		}
+		if err != nil {
+			return Consumption{}, err
+		}
 		return result, finishRouted(root, path, e, "superseded")
 	}
 	if routeString(e.Routing, "session") != "" {
@@ -225,6 +245,25 @@ func consumeRoute(env *sysenv.Env, address, host string, f RouteFacts) (Consumpt
 	}
 	if f.Record == nil || f.Owner == "" {
 		return result, nil
+	}
+	moving := f.Owner != host || f.Destination != address
+	if moving {
+		// Settle confirmed attempts before changing hosts. An unresolved
+		// batch is released as ambiguous so no old-host retry can race the
+		// forward, and the receiving worker is warned about possible repeats.
+		if err := releaseRoutedAttempt(ctx, env, root, f.ID); err != nil {
+			return Consumption{}, err
+		}
+		e, err = readFiberMailboxEntry(path)
+		if errors.Is(err, os.ErrNotExist) {
+			return result, nil
+		}
+		if err != nil {
+			return Consumption{}, err
+		}
+		if e.PossibleRepeat {
+			e.Routing["possible_repeat"] = true
+		}
 	}
 	if e.Routing["parent_unresolved"] != true && routeString(e.Routing, "parent_uid") != routeString(f.Record, "parent_uid") {
 		return Consumption{}, errCode("invalid_request", "a resolved thread recipient is immutable")
@@ -237,12 +276,18 @@ func consumeRoute(env *sysenv.Env, address, host string, f RouteFacts) (Consumpt
 	}
 	delete(e.Routing, "parent_unresolved")
 	e.Routing["inbox_address"] = address
+	if moving {
+		delete(e.Routing, "local")
+	}
 	b, err := json.Marshal(e)
 	if err != nil {
 		return Consumption{}, err
 	}
 	if err = mailboxWrite(path, b, false); err != nil {
 		return Consumption{}, err
+	}
+	if !moving && e.Routing["local"] == true {
+		return result, nil
 	}
 	if f.Current != "true" {
 		return result, nil
@@ -254,7 +299,7 @@ func consumeRoute(env *sysenv.Env, address, host string, f RouteFacts) (Consumpt
 		return result, nil
 	}
 	if f.Destination == address {
-		e.Routing = nil
+		e.Routing["local"] = true
 		b, err := json.Marshal(e)
 		if err != nil {
 			return Consumption{}, err
@@ -263,11 +308,43 @@ func consumeRoute(env *sysenv.Env, address, host string, f RouteFacts) (Consumpt
 	}
 	// A local archived anchor resolves to another inbox. The destination is
 	// durable before the source is finalized, and a repeated transfer is a no-op.
-	err = Enqueue(env, InboxEntry{Address: f.Destination, Request: e.Request, Wishes: e.Wishes, Derived: true, localTransfer: true})
+	destinationRouting := maps.Clone(e.Routing)
+	destinationRouting["local"], destinationRouting["inbox_address"] = true, f.Destination
+	err = Enqueue(env, InboxEntry{Address: f.Destination, Request: e.Request, Wishes: e.Wishes, Derived: true, Routing: destinationRouting, localTransfer: true, PossibleRepeat: e.PossibleRepeat})
 	if err != nil {
 		return Consumption{}, err
 	}
 	return result, finishRouted(root, path, e, "forwarded")
+}
+
+func releaseRoutedAttempt(ctx context.Context, env *sysenv.Env, root, id string) error {
+	_, batches, err := openBatches(env, root)
+	if err != nil {
+		return err
+	}
+	for i := range batches {
+		if !slices.Contains(batches[i].Members, id) {
+			continue
+		}
+		if err := settleHeldBatch(ctx, env, root, &batches[i]); err != nil {
+			return err
+		}
+		if _, err := os.Stat(batchManifest(root, &batches[i])); err == nil {
+			if err := closeConsumedBatch(root, &batches[i], attemptAmbiguous, nil); err != nil {
+				return err
+			}
+		}
+	}
+	path := filepath.Join(root, "pending", mailboxKey(id)+".json")
+	e, err := readFiberMailboxEntry(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	it := mailboxPendingItem{path, e}
+	return settleUnfinishedHookClaim(&it)
 }
 
 func finishRouted(root, path string, e mailboxEntry, disposition string) error {
@@ -550,7 +627,7 @@ func importThreadAck(env *sysenv.Env, id string) error {
 		if readErr != nil {
 			return readErr
 		}
-		if entry.Routing == nil {
+		if !entry.routingPending() {
 			continue
 		}
 		if err = os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {

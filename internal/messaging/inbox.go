@@ -49,7 +49,8 @@ type InboxEntry struct {
 	// Routing holds a thread publication awaiting authoritative placement.
 	Routing map[string]any
 	// Created is set only when this call creates the entry.
-	Created *bool
+	Created        *bool
+	PossibleRepeat bool
 	// localTransfer moves a routed publication between this host's inboxes.
 	localTransfer bool
 	// importing preserves a backlog larger than the admission limit.
@@ -267,7 +268,7 @@ func Enqueue(env *sysenv.Env, e InboxEntry) error {
 			return nil
 		}
 	}
-	err = enqueueMailbox(root, mailboxEntry{Request: r, Wishes: w, QueuedAt: time.Now().UnixNano(), Routing: e.Routing}, !e.importing)
+	err = enqueueMailbox(root, mailboxEntry{Request: r, Wishes: w, QueuedAt: time.Now().UnixNano(), Routing: e.Routing, PossibleRepeat: e.PossibleRepeat}, !e.importing)
 	if err == nil && e.Created != nil {
 		*e.Created = true
 	}
@@ -335,7 +336,7 @@ func WakingCount(env *sysenv.Env, address string) (int, error) {
 	}
 	n := 0
 	for _, it := range items {
-		if it.entry.Routing == nil && it.entry.Wishes.Turn != "none" && it.entry.due(now) {
+		if !it.entry.routingPending() && it.entry.Wishes.Turn != "none" && it.entry.due(now) {
 			n++
 		}
 	}

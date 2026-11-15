@@ -46,6 +46,48 @@ defmodule Shuttle.ThreadsDeliveryTest do
     assert Threads.pending_results(entries, "another-host") == %{}
   end
 
+  test "locally accepted and forwarded thread entries follow a parent that moves host before consumption",
+       %{store: store, data: data} do
+    alias Shuttle.Test.StubPostClient
+    StubPostClient.start!()
+    Env.put_app_env(:write_forward_client, StubPostClient)
+    Env.put_app_env(:remotes, [%{name: "parent-host", port: 43210}])
+    assert {:ok, _} = CLI.run_in_store(store, ["close", "hub/child", "--local"])
+    assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+    Threads.deliver_results(entries, "test-host")
+    assert [%{"routing" => %{"local" => true}}] = pending(data)
+    stamp = DateTime.to_iso8601(DateTime.utc_now())
+
+    assert %{"queued" => true} =
+             api_conn()
+             |> post("/api/v1/deliver", %{
+               "fiber_id" => "hub",
+               "text" => "thread hub/other unblocked: done",
+               "context_only" => true,
+               "message_id" => "thread-incoming",
+               "retained_at" => stamp
+             })
+             |> json_response(202)
+
+    assert [_, _] = pending(data)
+    path = Path.join(store, ".felt/hub/hub.md")
+    File.write!(path, String.replace(File.read!(path), "host: test-host", "host: parent-host"))
+    assert {:ok, %{fibers: moved}} = FiberDocuments.list(felt_stores: [store])
+    parent = Enum.find(moved, &(Threads.address(&1.fiber) == "hub"))
+    StubPostClient.set_get_response({:ok, 200, Jason.encode!(%{fibers: [parent]})})
+    StubPostClient.set_response({:error, :unavailable})
+    Threads.retry_results("test-host")
+    assert [_, _] = pending(data)
+    assert Enum.all?(pending(data), &(&1["routing"]["local"] != true))
+    StubPostClient.set_response({:ok, 202, ~s({"delivery":"context","queued":true})})
+    Task.async(fn -> Threads.retry_results("test-host") end) |> Task.await(30_000)
+    assert pending(data) == []
+
+    assert Enum.any?(StubPostClient.posts(), fn post ->
+             Jason.decode!(post.body)["message_id"] == "thread-incoming"
+           end)
+  end
+
   test "superseded close and ask publications are dropped after publisher restart", %{
     store: store
   } do

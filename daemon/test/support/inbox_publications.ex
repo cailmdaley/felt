@@ -3,7 +3,10 @@ defmodule Shuttle.Test.InboxPublications do
 
   def pending(owner) do
     {:ok, output} = Shuttle.CLI.run(["inbox", "routes", owner], runner: Shuttle.Runner.Default)
-    for row <- Jason.decode!(output), do: {row["id"], Map.delete(row["record"], "inbox_address")}
+
+    for row <- Jason.decode!(output),
+        row["record"]["local"] != true,
+        do: {row["id"], Map.delete(row["record"], "inbox_address")}
   end
 
   def capture(records) do

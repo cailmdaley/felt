@@ -59,7 +59,7 @@ func Consume(ctx context.Context, env *sysenv.Env, fiber, host string, worker Wo
 
 func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Worker, send fiberContextSender) (Consumption, error) {
 	if w.Route != nil {
-		return consumeRoute(env, fiber, host, *w.Route)
+		return consumeRoute(ctx, env, fiber, host, *w.Route)
 	}
 	result := Consumption{Action: "wait"}
 	// "-" with an epoch is a tracked worker whose conversation is not yet
@@ -163,7 +163,7 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	now := time.Now()
 	var candidates []mailboxPendingItem
 	for _, it := range items {
-		if it.entry.Routing != nil || !it.entry.due(now) {
+		if it.entry.routingPending() || !it.entry.due(now) {
 			continue
 		}
 		if mailboxEntryExpired(it.entry, now) {
