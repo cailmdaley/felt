@@ -232,19 +232,22 @@ defmodule Shuttle.Delivery do
 
   @doc """
   Whether a non-human inbox entry may start a session on `fiber`: a
-  constitution `own_host` owns, open or active, not at rest, and not a
-  standing constitution whose schedule is paused or whose scheduled run is due
-  (that run takes the entries). Answers `:ok` or `{:error, reason}`; entries
-  for a fiber refused here wait for whichever worker comes next.
+  constitution `own_host` owns that its author has armed (`status: active`),
+  not at rest, and not a standing constitution whose scheduled run is due
+  (that run takes the entries). Arming is the author's to give, so a draft or
+  a constitution at rest keeps its entries for whoever arms it next; an
+  outstanding `ask` does not matter. Answers `:ok` or `{:error, reason}`.
   """
   def inbox_gate(fiber, own_host) do
     standing? = Poller.fiber_kind(fiber) == "standing"
+    status = fiber["status"]
 
     cond do
       get_in(fiber, ["shuttle", "host"]) != own_host -> {:error, :not_owner}
-      fiber["status"] not in ["open", "active"] -> {:error, :closed}
-      standing? and fiber["status"] != "active" -> {:error, :paused}
+      status == "closed" -> {:error, :closed}
+      standing? and status != "active" -> {:error, :paused}
       fiber["horizon"] == "stashed" -> {:error, :at_rest}
+      status != "active" -> {:error, :not_armed}
       standing? and Shuttle.Poller.StandingRoles.standing_role_due?(fiber) -> {:error, :run_due}
       true -> :ok
     end
@@ -264,8 +267,8 @@ defmodule Shuttle.Delivery do
   lease lapses. The launch prompt says messages are arriving and carries none
   of their text.
 
-  Answers `:starting`, `:queued` (a worker appeared and takes them) or
-  `{:waiting, detail}`.
+  Answers `:starting`, `:queued` (a worker appeared and takes them, or
+  nothing asks for a turn any more) or `{:waiting, detail}`.
   """
   def start_for_inbox(entry) do
     server = Shuttle.Env.server(Poller)
@@ -287,16 +290,19 @@ defmodule Shuttle.Delivery do
       |> launched(fiber_id)
     else
       :in_flight -> :starting
+      :nothing -> :queued
       error -> launched(error, fiber_id)
     end
   end
 
   # The dormant consume reserves the asking entries and answers launch, or
-  # wait while an earlier reservation's launch is in its lease.
+  # wait: launching while an earlier reservation's launch is in its lease,
+  # else because nothing asks for a turn any more.
   defp reserve(entry) do
     case consume(entry, "-", 0, []) do
       {:ok, %{"action" => "launch"}} -> :launch
-      {:ok, %{"action" => _}} -> :in_flight
+      {:ok, %{"launching" => true}} -> :in_flight
+      {:ok, %{"action" => _}} -> :nothing
       other -> {:error, {:consume, other}}
     end
   end
@@ -313,6 +319,9 @@ defmodule Shuttle.Delivery do
      case reason do
        :closed ->
          "#{fiber_id} is closed; the message waits in its inbox for whoever next works on it"
+
+       :not_armed ->
+         "#{fiber_id} is not armed; the message waits in its inbox for whoever arms it"
 
        :paused ->
          "#{fiber_id}'s schedule is paused; the message waits in its inbox for whoever next works on it"

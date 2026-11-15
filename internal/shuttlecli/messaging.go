@@ -184,9 +184,9 @@ of worker liveness, except that --notify-when-idle uses session routing while a
 worker is live. Its receipt says queued as fiber context (JSON status queued).
 A wake send messages the live worker. With no live worker it waits in the
 fiber's inbox, and the owner starts a session that takes it through its hook
-(JSON status starting) when the fiber is open or active, not at rest, not a
-paused or due standing schedule, the owner's boot quarantine is released and
-it has a free worker slot; otherwise the receipt is queued and its detail says
+(JSON status starting) when the fiber is armed (status active), not at rest,
+not a standing schedule whose run is due, the owner's boot quarantine is
+released and it has a free worker slot; otherwise the receipt is queued and its detail says
 what it waits for.
 Neither starting nor queued is delivered.
 Retrying with the same --message-id queues identical content once; conflicting

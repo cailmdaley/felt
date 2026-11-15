@@ -116,16 +116,16 @@ A launch that never arrives, including one a busy Poller accepted and later refu
 ### A fiber with no worker
 
 The daemon consumes a fiber with no worker as `shuttle inbox consume <fiber-key> - 0`.
-A due entry that asks for a turn (`ask`, `idle` or `force`), when no launch reservation is in its lease, makes it reserve those entries and answer `launch` with them as `members`; otherwise it answers `wait`.
+A due entry that asks for a turn (`ask`, `idle` or `force`), when no launch reservation is in its lease, makes it reserve those entries and answer `launch` with them as `members`; otherwise it answers `wait`, with `"launching": true` while a reservation's lease stands.
 The reservation is the fresh one's: an attempt with `launch: true`, conversation `-` and epoch 0, leased for two minutes, so repeated consumes ask for one launch per lease.
 Quiet entries are not reserved, and open batches wait for the next receiver.
 
-Only some fibers may be started by an entry that is not the human's (`Delivery.inbox_gate/2`): a constitution this host owns, `open` or `active`, not at rest (`horizon: stashed`), and not a standing constitution whose schedule is paused (`open`) or whose scheduled run is due, since that run takes the entries.
-Entries for any other fiber wait for whichever worker comes next.
+Only an armed fiber may be started by an entry that is not the human's (`Delivery.inbox_gate/2`): a constitution this host owns with `status: active`, not at rest (`horizon: stashed`), and not a standing constitution whose scheduled run is due, since that run takes the entries.
+Arming is the author's authorization, which a message or a thread result does not grant: a draft, a constitution at rest, a paused schedule and a closed constitution keep their entries for whoever arms or starts them next.
+An outstanding `ask` does not matter; an armed oneshot with one is also dispatched by the Poller on its own, and its worker takes the entries.
 The Poller then admits the launch (`Poller.admit_inbox_launch/2`) when nothing is tracked for the fiber, no reconciliation hold is on and the host has a free worker slot.
 While the boot quarantine or a contract skew holds fresh launches, it parks the fiber in `pending_launch`, drawn as held, without reserving anything, and the poll after the hold comes off starts it.
 Admitted, the daemon consumes, and on `launch` calls `Poller.dispatch_fiber/3` with `force`, `ad_hoc`, `inbox: true` and `resume_mode: "continue"`: the dispatcher's resume-or-fresh rule, with the gate checked again on a fresh read so a fiber closed meanwhile is never reopened.
-An `open` oneshot is armed `active` by the launch, as a forced start arms it.
 The launch prompt says messages are arriving and carries none of their text.
 
 The launched session takes the batch through its fiber hook.

@@ -1057,7 +1057,7 @@
                       "ask",
                       "force"
                     ],
-                    "description": "With context_only: the entry asks for a turn. A live worker is woken (ask may be held as context when waking it is costly, or replaced by a fresh session); a fiber with no worker is started for it when it is open or active, not at rest, not a paused or due standing schedule, and the owner holds no boot quarantine and has a free worker slot. Ignored without context_only."
+                    "description": "With context_only: the entry asks for a turn. A live worker is woken (ask may be held as context when waking it is costly, or replaced by a fresh session); a fiber with no worker is started for it when it is armed (status active), not at rest, not a standing schedule whose run is due, and the owner holds no boot quarantine and has a free worker slot. Ignored without context_only."
                   },
                   "unless_live": {
                     "type": "boolean",

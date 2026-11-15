@@ -33,6 +33,28 @@ defmodule Shuttle.InboxLaunchTest do
     """)
   end
 
+  # An armed standing constitution between runs: active, its next tick hours
+  # away and its last one served, so only a message starts it.
+  defp armed(host, id) do
+    later = DateTime.add(DateTime.utc_now(), 6 * 3600, :second)
+
+    constitution(host, id, """
+    status: active
+    shuttle:
+      kind: standing
+      host: test-host
+      agent: claude-sonnet
+      project_dir: "#{host}"
+      schedule:
+        expr: "#{later.minute} #{later.hour} * * *"
+        tz: UTC
+    """)
+
+    write_dispatch_marker(host, id, "12345678-1234-4000-8000-000000000042", ago(120))
+    write_handoff_marker(host, id, ago(60))
+    id
+  end
+
   defp entry(host, id) do
     {:ok, %{fibers: [entry]}} = FiberDocuments.get_shuttle(id, felt_stores: [host])
     entry
@@ -116,7 +138,7 @@ defmodule Shuttle.InboxLaunchTest do
 
   test "a waking message to a dormant constitution starts one session, whose first hook takes the batch",
        %{host: host} do
-    id = oneshot(host, "tests/inbox-dormant", "open")
+    id = armed(host, "tests/inbox-dormant")
     poller = poller!(host)
     parent = entry(host, id)
 
@@ -146,7 +168,7 @@ defmodule Shuttle.InboxLaunchTest do
   end
 
   test "/deliver answers what a waking message to a dormant fiber did", %{host: host} do
-    dormant = oneshot(host, "tests/inbox-route", "open")
+    dormant = armed(host, "tests/inbox-route")
     closed = oneshot(host, "tests/inbox-route-closed", "closed")
     _poller = poller!(host)
 
@@ -185,9 +207,11 @@ defmodule Shuttle.InboxLaunchTest do
     assert launches(closed) == 0
   end
 
-  test "a closed, resting or paused constitution keeps a waking entry without launching", %{
-    host: host
-  } do
+  test "a draft, closed, resting or paused constitution keeps a waking entry without launching",
+       %{
+         host: host
+       } do
+    draft = oneshot(host, "tests/inbox-draft", "open")
     closed = oneshot(host, "tests/inbox-closed", "closed")
     resting = oneshot(host, "tests/inbox-resting", "open", "horizon: stashed")
 
@@ -207,6 +231,7 @@ defmodule Shuttle.InboxLaunchTest do
     poller = poller!(host)
 
     for {id, why} <- [
+          {draft, "is not armed"},
           {closed, "is closed"},
           {resting, "is at rest"},
           {paused, "schedule is paused"}
@@ -222,7 +247,8 @@ defmodule Shuttle.InboxLaunchTest do
     end
 
     for _ <- 1..2, do: poll!(poller)
-    assert Enum.map([closed, resting, paused], &launches/1) == [0, 0, 0]
+    assert Enum.map([draft, closed, resting, paused], &launches/1) == [0, 0, 0, 0]
+    assert read_frontmatter(host, draft)["status"] == "open"
     assert read_frontmatter(host, closed)["status"] == "closed"
     assert read_frontmatter(host, resting)["horizon"] == "stashed"
     assert read_frontmatter(host, paused)["status"] == "open"
@@ -231,7 +257,7 @@ defmodule Shuttle.InboxLaunchTest do
   test "the boot quarantine holds an inbox launch, drawn as held, until it is released", %{
     host: host
   } do
-    id = oneshot(host, "tests/inbox-held", "active")
+    id = armed(host, "tests/inbox-held")
     poller = poller!(host, boot_quarantine: true)
     parent = entry(host, id)
     assert {:ok, {:waiting, detail}} = Delivery.context(parent, "hold me", "m-held", wake: true)
@@ -253,8 +279,8 @@ defmodule Shuttle.InboxLaunchTest do
 
   test "an entry queued before a restart launches on the first poll; a reservation the old daemon left waits out its lease",
        %{host: host} do
-    queued = oneshot(host, "tests/inbox-queued", "open")
-    id = oneshot(host, "tests/inbox-restart", "open")
+    queued = armed(host, "tests/inbox-queued")
+    id = armed(host, "tests/inbox-restart")
     key = Delivery.context_key(entry(host, id))
 
     # Queued while no daemon ran.
@@ -377,5 +403,39 @@ defmodule Shuttle.InboxLaunchTest do
     refute Poller.StandingRoles.standing_role_due?(fiber.("adhoc-1", "handed off"))
     refute Poller.StandingRoles.standing_role_due?(fiber.("inbox-1", "rearmed"))
     refute Poller.StandingRoles.standing_role_due?(fiber.("inbox-1", "tempered"))
+  end
+
+  # An armed oneshot whose worker asked the human and ended passes the gate,
+  # ask and all. An outstanding ask does not gate autonomous dispatch either:
+  # the Poller starts the oneshot on its own, and the message reaches that
+  # worker.
+  test "an armed oneshot with an outstanding ask passes the gate and is dispatched anyway", %{
+    host: host
+  } do
+    id =
+      constitution(host, "tests/inbox-asking", """
+      status: active
+      shuttle:
+        kind: oneshot
+        host: test-host
+        agent: claude-sonnet
+        project_dir: "#{host}"
+        ask:
+          text: Which kernel?
+          at: "#{DateTime.to_iso8601(ago(60))}"
+      """)
+
+    write_dispatch_marker(host, id, "12345678-1234-4000-8000-000000000043", ago(120))
+    write_handoff_marker(host, id, ago(60))
+    assert %{"text" => "Which kernel?"} = get_in(entry(host, id).fiber, ["shuttle", "ask"])
+    assert :ok = Delivery.inbox_gate(entry(host, id).fiber, "test-host")
+    poller = poller!(host)
+    assert launches(id) == 1
+
+    assert {:ok, :queued} =
+             Delivery.context(entry(host, id), "the kernel", "m-answer", wake: true)
+
+    poll!(poller)
+    assert launches(id) == 1
   end
 end
