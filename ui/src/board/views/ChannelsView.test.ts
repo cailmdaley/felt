@@ -300,7 +300,7 @@ it('opens a channel on its newest message and follows new ones, unless the reade
   vi.spyOn(Element.prototype, 'scrollTop', 'set').mockImplementation(function (this: Element, value: number) {
     if (this.matches('.kbn-ch > .kbn-ch-stream')) top = Math.max(0, Math.min(value, 100 * this.children.length - 200))
   })
-  const { view, ctx } = await mount(undefined, new ChannelsView(), [], prepare)
+  const { view, ctx, host } = await mount(undefined, new ChannelsView(), [], prepare)
   // Three messages, 300 px, 200 in view.
   expect(top).toBe(100)
   const arrive = async (n: number) => {
@@ -310,7 +310,9 @@ it('opens a channel on its newest message and follows new ones, unless the reade
   }
   await arrive(1)
   expect(top).toBe(200)
+  // The reader scrolls up: they keep their place as more arrive.
   top = 50
+  host.querySelector('.kbn-ch > .kbn-ch-stream')!.dispatchEvent(new Event('scroll'))
   await arrive(2)
   expect(top).toBe(50)
   view.keydown(new KeyboardEvent('keydown', { key: 'j' }))

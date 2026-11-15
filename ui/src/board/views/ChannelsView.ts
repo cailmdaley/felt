@@ -141,6 +141,8 @@ export class ChannelsView implements TemporalView {
   private sigs: Record<Pane, string> = { channel: '', thread: '' }
   /** Each list follows its newest message while the reader is at its foot; a message that grows (an image arriving) keeps it there. */
   private readonly following: Record<Pane, boolean> = { channel: true, thread: true }
+  /** Where each list was last scrolled to its foot, so growth beneath the reader is not taken for scrolling up. */
+  private readonly footTop: Record<Pane, number> = { channel: 0, thread: 0 }
   private sizes: ResizeObserver | null = null
   private loaded = false
   private reading = false
@@ -166,7 +168,7 @@ export class ChannelsView implements TemporalView {
     host.append(page.root)
     this.stopGestures = this.gestures(page.root)
     this.sizes = new ResizeObserver(() => {
-      for (const [pane, list] of [['channel', this.stream], ['thread', this.threadList]] as const) if (list && this.following[pane]) list.scrollTop = list.scrollHeight
+      for (const [pane, list] of [['channel', this.stream], ['thread', this.threadList]] as const) if (list && this.following[pane]) this.toFoot(list, pane)
     })
     this.railHidden = stored(RAIL) === '1'
     this.showRail()
@@ -221,7 +223,14 @@ export class ChannelsView implements TemporalView {
   }
   /** Keeps a list's following in step with the reader's scrolling. */
   private follow(list: HTMLOListElement, pane: Pane): void {
-    list.addEventListener('scroll', () => { this.following[pane] = list.scrollHeight - list.scrollTop - list.clientHeight <= FOLLOW_PX }, { passive: true })
+    list.addEventListener('scroll', () => {
+      this.following[pane] = list.scrollHeight - list.scrollTop - list.clientHeight <= FOLLOW_PX || (this.following[pane] && list.scrollTop >= this.footTop[pane] - 1)
+    }, { passive: true })
+  }
+  /** Scrolls a list to its newest message. */
+  private toFoot(list: HTMLOListElement, pane: Pane): void {
+    list.scrollTop = list.scrollHeight
+    this.footTop[pane] = list.scrollTop
   }
   refresh(ctx: ViewContext): void {
     this.ctx = ctx
@@ -515,7 +524,8 @@ export class ChannelsView implements TemporalView {
   }
   /** Fills a list with messages, following its newest unless the reader has scrolled up. */
   private fill(list: HTMLOListElement, lines: Line[], pane: Pane, channel: Channel, now: number): void {
-    const follow = this.following[pane] = this.landing[pane] || list.scrollHeight - list.scrollTop - list.clientHeight <= FOLLOW_PX
+    // Following is the reader's choice, kept by their scrolling: growth beneath them is not a choice.
+    const follow = this.following[pane] = this.landing[pane] || this.following[pane]
     const before = this.before.get(channel.key) ?? -Infinity
     const rows: HTMLLIElement[] = lines.map(line => this.messageRow(line, pane, before, now))
     // Like Slack, a rule marks where what arrived since the last visit begins.
@@ -529,7 +539,7 @@ export class ChannelsView implements TemporalView {
     this.rebuild(list, rows)
     this.fold(list)
     for (const row of rows) this.sizes?.observe(row)
-    if (follow) list.scrollTop = list.scrollHeight
+    if (follow) this.toFoot(list, pane)
     this.landing[pane] = false
   }
   /** Folds each message taller than {@link FOLD_LINES} lines, unless the reader unfolded it. */
@@ -711,7 +721,7 @@ export class ChannelsView implements TemporalView {
         standing.push(ask)
       }
       // The outcome is a closed fiber's conclusion; an open one shows only what it waits on.
-      if (state === 'closed' && card.outcome) {
+      if (card.status === 'closed' && card.outcome) {
         const conclusion = el('div', 'kbn-ch-status kbn-ch-conclusion')
         conclusion.innerHTML = renderMarkdown(card.outcome)
         standing.push(conclusion)

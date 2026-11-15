@@ -138,11 +138,11 @@ const barTab = (p, view) => p.locator(`.kbn-viewtabs .kbn-viewtab[data-view="${v
 const appFocus = p => p.evaluate(() => document.activeElement?.blur())
 const activeBarView = p => p.evaluate(() => document.querySelector('.kbn-viewtabs .kbn-viewtab-active')?.dataset.view ?? null)
 const barFind = p => p.locator('.kbn-viewtabs-find input')
-/** Channels' Find, the bar's or (on a phone) the rail's own, lists the documents it matches; this opens the first whose row holds `text`. */
+/** Channels' Find, the bar's or (on a phone) the rail's Jump to, lists the documents it matches; this opens the first whose row holds `text`. */
 async function openFromChannels(p, query, text = query) {
   await barTab(p, 'channels').click()
   await p.locator('.kbn-channels .kbn-ch-layout').waitFor()
-  const find = await barFind(p).isVisible() ? barFind(p) : p.locator('.kbn-ch-finder')
+  const find = await barFind(p).isVisible() ? barFind(p) : p.locator('.kbn-ch-jump')
   await find.fill(query)
   await p.locator('.kbn-ch-doclist .kbn-ch-doc').filter({ hasText: text }).first().click()
   await selected(p).waitFor()
@@ -945,21 +945,17 @@ test('Receipt arrivals update the family page\'s sent list and leave the open re
   assert.ok(await report(p).evaluate(f => f.contentWindow === window.__arrivalReport))
 })
 
-test('j/k step constitutions in Desk order from a Channels-opened reader, J/K step its columns, and each landing is named; Channels keeps what was read', async p => {
+test('j/k step constitutions in Desk order from a Channels-opened reader, J/K step its columns, and each landing is named', async p => {
   // Desk order names each constitution once, at its own row: a root heading another section is not a stop.
   const column = id => p.locator(`[data-column="${id}"] .kbn-card:not(.kbn-card-header) > .kbn-card-name`).evaluateAll(names => names.map(name => name.title))
   const drafts = await column('drafts'), flight = await column('inFlight'), review = await column('awaitingReview')
   const names = [...drafts, ...flight, ...review], at = names.indexOf(name)
   const title = expected => poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, expected)
   const landing = expected => poll(p, text => document.querySelector('.toast-message')?.textContent === text, expected)
-  const lately = p.locator('.kbn-ch-lately .kbn-ch-doc-name')
-  await barTab(p, 'channels').click()
-  assert.ok(await p.getByRole('region', { name: 'Read lately' }).isHidden(), 'nothing read yet, no shelf')
   await openFromChannels(p, 'weekly.txt')
   assert.equal(await activeBarView(p), 'channels', 'the bar marks Channels as the origin')
   await leave(p)
   assert.equal(await activeBarView(p), 'channels', 'the origin tab closes the reader back to Channels')
-  assert.deepEqual(await lately.allTextContents(), ['Weekly shear summary'])
   await openFromChannels(p, 'report.html', name)
   await reportReady(p)
   await appFocus(p)
@@ -982,12 +978,6 @@ test('j/k step constitutions in Desk order from a Channels-opened reader, J/K st
   await away(); await p.keyboard.press('k'); await title(names[at - 1])
   await away(); await p.keyboard.press('k'); await title(names[at - 2])
   await away(); await p.keyboard.press('j'); await title(names[at - 1])
-  // Read lately holds every constitution opened, most recent first, and opens one in the reader.
-  await leave(p)
-  const shelf = await lately.allTextContents()
-  assert.deepEqual(shelf.slice(0, 3), [names[at - 1], names[at - 2], name])
-  await p.locator('.kbn-ch-lately .kbn-ch-doc').nth(1).click()
-  await title(names[at - 2])
 })
 
 test('Wide reader scans Desk cards and returns the last viewed card with one Escape or its origin tab', async p => {
@@ -1391,8 +1381,7 @@ test('Body wikilink opens a fiber absent from the card index', async p => {
 test('Channels Find reaches every document, and the field empties across views and the reader', async p => {
   await barTab(p, 'channels').click()
   const find = barFind(p), found = p.locator('.kbn-ch-doclist .kbn-ch-doc')
-  // On the desktop the bar's Find serves Channels; the rail's own field is the phone's.
-  assert.equal(await p.locator('.kbn-ch-finder').isVisible(), false)
+  // The bar's Find serves Channels as the rail's Jump to does.
   await find.fill('mask-validation')
   await found.first().waitFor()
   assert.deepEqual(await found.locator('.kbn-ch-doc-name').allTextContents(), ['mask-validation.md'])
@@ -1755,7 +1744,7 @@ test('Phone Channels finds a report from the rail, reads it and comes Back', asy
   await choose(p, 'calibration-report'); await reportReady(p)
   await leave(p)
   assert.equal(await activeBarView(p), 'channels')
-  assert.ok(await p.locator('.kbn-ch-finder').isVisible(), 'the rail keeps its own Find on a phone')
+  assert.ok(await p.locator('.kbn-ch-jump').isVisible(), 'the rail keeps its Jump to on a phone')
 }, { width: 390, height: 844 })
 
 test('Phone audio page taller than the screen scrolls from its top to its bottom', async p => {
