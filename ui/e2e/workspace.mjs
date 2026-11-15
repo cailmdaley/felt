@@ -831,7 +831,7 @@ test('Desk-opened channel reload and Back restore its Desk origin in the bar', a
 })
 
 // The bar stands in one place on every view: its tabs, Find and Settings
-// never move between the Desk, the reader, the Board and the Chronicle.
+// never move between the Desk, the reader, the Board, the Chronicle, the Globe and the Outbox.
 test('The board bar holds its tabs, Find and Settings to the pixel on every view and over the reader', async p => {
   const bar = () => p.evaluate(() => {
     const box = el => { const r = el.getBoundingClientRect(); return [r.x, r.y, r.width, r.height].map(v => +v.toFixed(2)) }
@@ -839,7 +839,7 @@ test('The board bar holds its tabs, Find and Settings to the pixel on every view
       gear: box(document.querySelector('.kbn-viewtabs-settings')) }
   })
   const desk = await bar()
-  assert.equal(desk.tabs.length, 4)
+  assert.equal(desk.tabs.length, 5)
   await open(p); await reportReady(p)
   await p.waitForTimeout(350)
   assert.deepEqual(await bar(), desk, 'over the reader')
@@ -856,6 +856,10 @@ test('The board bar holds its tabs, Find and Settings to the pixel on every view
   await p.locator('.globe-canvas').waitFor()
   await p.waitForTimeout(350)
   assert.deepEqual(await bar(), desk, 'on the Globe')
+  await barTab(p, 'outbox').click()
+  await p.locator('.kbn-outbox').waitFor()
+  await p.waitForTimeout(350)
+  assert.deepEqual(await bar(), desk, 'on the Outbox')
 })
 
 // While the reader is open the bar marks the view it came from: that tab (or
@@ -891,7 +895,7 @@ for (const [origin, { other, open: openFrom }] of Object.entries(origins)) test(
     await poll(p, () => !!document.querySelector('.kbn-reader-open'))
     assert.deepEqual(await state(), { open: true, view: origin, selected: [origin] }, `the bar marks ${origin} as the origin`)
     assert.match(await barTab(p, origin).getAttribute('aria-label') ?? '', /^Close reader, back to (Desk|Board|Chronicle)$/, 'the origin tab says it closes the reader')
-    assert.deepEqual(await p.locator('.kbn-viewtabs [role="tablist"]').first().evaluate(list => [...list.querySelectorAll('[role]')].map(el => el.getAttribute('role')).filter(role => role !== 'none')), ['tab', 'tab', 'tab', 'tab'], 'the bar\'s tablist holds its tabs alone')
+    assert.deepEqual(await p.locator('.kbn-viewtabs [role="tablist"]').first().evaluate(list => [...list.querySelectorAll('[role]')].map(el => el.getAttribute('role')).filter(role => role !== 'none')), ['tab', 'tab', 'tab', 'tab', 'tab'], 'the bar\'s tablist holds its tabs alone')
   }
   await opened()
   await barTab(p, origin).click()
