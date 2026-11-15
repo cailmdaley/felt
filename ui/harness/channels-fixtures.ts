@@ -1,5 +1,5 @@
 import { WORKSPACE_HOST, type WorkspaceExample } from './workspace-fixtures.js'
-import type { HeldSpeech } from '../src/board/outbox.js'
+import type { HeldSpeech } from '../src/board/channels.js'
 
 interface Row {
   id: string
@@ -19,7 +19,7 @@ interface Row {
 const DAY = 1440
 
 /**
- * Channels as the Outbox draws them. The analyst office's cosmic-shear
+ * Channels as the Channels view draws them. The analyst office's cosmic-shear
  * orchestrator is idle at the end of its turn, with a thread asking, one
  * closed for review, one idle, quiet threads beside them (one of them an
  * editor's), a sent plot and report and a held spoken line. The vizier office
@@ -57,7 +57,7 @@ const ROWS: Row[] = [
   { id: 'campaign', name: 'North-field campaign', role: 'surveyor', minutes: 300, ask: 'Extend the campaign by a night?' },
 ]
 
-export function addOutboxFixtures(example: WorkspaceExample, now: number): { held: HeldSpeech[]; dismissed: string[]; pinned: Record<string, number> } {
+export function addChannelsFixtures(example: WorkspaceExample, now: number): { held: HeldSpeech[]; dismissed: string[]; pinned: Record<string, number> } {
   const iso = (minutes: number): string => new Date(now - minutes * 60_000).toISOString()
   const dir = (id: string): string => `/fixture-store/workspace/${id}`
   example.feed.fibers = ROWS.map(row => {

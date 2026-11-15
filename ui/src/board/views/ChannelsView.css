@@ -1,11 +1,11 @@
-/* The Outbox: a rail of channels beside the channel read. A channel is a
+/* Channels: a rail of channels beside the channel read. A channel is a
    chat: each worker's line, oldest first, with what waits on the human lit in
    the colour of what it wants, the seat's tapestry pinned beside it, and a
    reply bar under the lines. Ink on parchment, red for what is new, and as
    little else as it can do without. */
-.kbn-outbox { touch-action: pan-y; }
-.kbn-outbox .kbn-view-body { display: block; min-height: 0; }
-.kbn-outbox .kbn-view-titlerow { gap: 16px; }
+.kbn-channels { touch-action: pan-y; }
+.kbn-channels .kbn-view-body { display: block; min-height: 0; }
+.kbn-channels .kbn-view-titlerow { gap: 16px; }
 .kbn-ch-keys, .kbn-ch-note {
   font: italic var(--type-note)/var(--leading-prose) var(--font-serif);
   color: var(--kbn-ink-muted);
@@ -191,10 +191,10 @@
   background: var(--kbn-ink); color: var(--kbn-paper);
   font: 500 var(--type-row)/var(--leading-ui) var(--font-serif); cursor: pointer;
 }
-.kbn-outbox button:focus-visible { outline: 1px solid var(--kbn-you); outline-offset: 1px; }
+.kbn-channels button:focus-visible { outline: 1px solid var(--kbn-you); outline-offset: 1px; }
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .kbn-outbox { padding-inline: 8px; }
+  .kbn-channels { padding-inline: 8px; }
   .kbn-ch-keys { display: none; }
   .kbn-ch-layout { grid-template-columns: minmax(0, 1fr); }
   /* The rail is a drawer over the channel, drawn in from the left edge. */

@@ -8,11 +8,11 @@
  *   2  chronicle  ┐
  *   3  board      │ registered views — each mounts into a full-width host
  *   4  globe      │
- *   5  outbox     ┘ where the Desk surfaces would otherwise be.
+ *   5  channels     ┘ where the Desk surfaces would otherwise be.
  *
  * Chronicle holds the record in time. Board is the document workspace's
  * contact sheet, grouped by recent work, project or host. The Globe is all
- * the work on a sphere. The Outbox has one channel per office, listed while
+ * the work on a sphere. Channels has one channel per office, listed while
  * something in it waits on the human or he keeps it pinned.
  *
  * A view is a plain object with a three-call lifecycle. KanbanModal owns the
@@ -36,7 +36,7 @@ import type { FiberSends } from '../fiberSends.js'
 import type { GlobeHost } from '../globe/GlobeStage.js'
 
 export interface TemporalView {
-  id: 'chronicle' | 'board' | 'globe' | 'outbox'
+  id: 'chronicle' | 'board' | 'globe' | 'channels'
   title: string
   hotkey: string
   mount(host: HTMLElement, ctx: ViewContext): void

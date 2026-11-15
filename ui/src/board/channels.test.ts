@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { COLD_MS, composeChannels, officeOf, setAsideKey, unpinKey, waitingOn, type HeldSpeech } from './outbox.js'
+import { COLD_MS, composeChannels, officeOf, setAsideKey, unpinKey, waitingOn, type HeldSpeech } from './channels.js'
 import { inFlightBand } from './KanbanReadModel.js'
 import { card } from './testFixtures.js'
 import { ThreadIndex } from './threads.js'

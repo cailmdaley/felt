@@ -1,5 +1,5 @@
-defmodule ShuttleWeb.OutboxController do
-  @moduledoc "Durable Outbox dismissals and channel pins carried by the fleet's board feeds."
+defmodule ShuttleWeb.ChannelsController do
+  @moduledoc "Durable channel dismissals and pins for the human's Channels view, carried by the fleet's board feeds."
   use Phoenix.Controller, formats: [:json]
 
   alias Shuttle.{Board, CLI, RemoteTemporalRegistry}
@@ -8,7 +8,7 @@ defmodule ShuttleWeb.OutboxController do
   def pin(conn, params), do: write(conn, "pin", params)
 
   defp write(conn, verb, %{"key" => key} = params) when is_binary(key) and key != "" do
-    args = ["outbox", verb, key]
+    args = ["channels", verb, key]
     args = if params["fiber"] in [nil, ""], do: args, else: args ++ ["--fiber", params["fiber"]]
 
     case CLI.run(args) do

@@ -831,7 +831,7 @@ test('Desk-opened channel reload and Back restore its Desk origin in the bar', a
 })
 
 // The bar stands in one place on every view: its tabs, Find and Settings
-// never move between the Desk, the reader, the Board, the Chronicle, the Globe and the Outbox.
+// never move between the Desk, the reader, the Board, the Chronicle, the Globe and Channels.
 test('The board bar holds its tabs, Find and Settings to the pixel on every view and over the reader', async p => {
   const bar = () => p.evaluate(() => {
     const box = el => { const r = el.getBoundingClientRect(); return [r.x, r.y, r.width, r.height].map(v => +v.toFixed(2)) }
@@ -856,10 +856,10 @@ test('The board bar holds its tabs, Find and Settings to the pixel on every view
   await p.locator('.globe-canvas').waitFor()
   await p.waitForTimeout(350)
   assert.deepEqual(await bar(), desk, 'on the Globe')
-  await barTab(p, 'outbox').click()
-  await p.locator('.kbn-outbox').waitFor()
+  await barTab(p, 'channels').click()
+  await p.locator('.kbn-channels').waitFor()
   await p.waitForTimeout(350)
-  assert.deepEqual(await bar(), desk, 'on the Outbox')
+  assert.deepEqual(await bar(), desk, 'on Channels')
 })
 
 // While the reader is open the bar marks the view it came from: that tab (or

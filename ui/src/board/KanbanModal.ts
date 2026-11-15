@@ -416,7 +416,7 @@ export class KanbanModal {
       deskRows: () => this.workspaceCards(),
       deskPlacement: card => this.deskProjection.placements.get(deskCardKey(card)),
       threadIndex: () => threadIndexFor(this.deskResponse ?? this.lastResponse),
-      origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : this.activeViewId === 'globe' ? 'Globe' : this.activeViewId === 'outbox' ? 'Outbox' : 'Board',
+      origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : this.activeViewId === 'globe' ? 'Globe' : this.activeViewId === 'channels' ? 'Channels' : 'Board',
       onVisibility: (active) => { this.showWorkspace(active); if (!active) this.voice.see(null) },
       onSight: card => this.voice.see(card && constitutionFor(card, boardCards(this.lastResponse))),
       onReturnCard: card => {
@@ -982,7 +982,7 @@ export class KanbanModal {
   private handleViewHotkey(e: KeyboardEvent): boolean {
     const surface = this.workspace?.isActive ? 'reader' : this.activeViewId === 'board' ? 'overview' : 'desk'
     const intent = keyIntent(e, surface)
-    if (intent !== 'desk' && intent !== 'chronicle' && intent !== 'board' && intent !== 'globe' && intent !== 'outbox') return false
+    if (intent !== 'desk' && intent !== 'chronicle' && intent !== 'board' && intent !== 'globe' && intent !== 'channels') return false
     if (keystrokeIsSpokenFor()) return false
     e.preventDefault()
     e.stopPropagation()
@@ -2063,8 +2063,8 @@ export class KanbanModal {
       e.preventDefault(); e.stopPropagation(); this.setView('desk'); return
     }
     if (this.activeView?.keydown?.(e)) { e.preventDefault(); e.stopPropagation(); return }
-    // Chronicle keeps its own record search in its head; `/` reaches the bar's Find there too, as on the Globe and the Outbox.
-    if ((this.activeViewId === 'chronicle' || this.activeViewId === 'globe' || this.activeViewId === 'outbox') && !keystrokeIsSpokenFor() && keyIntent(e, 'desk') === 'find' && this.focusFind()) {
+    // Chronicle keeps its own record search in its head; `/` reaches the bar's Find there too, as on the Globe and Channels.
+    if ((this.activeViewId === 'chronicle' || this.activeViewId === 'globe' || this.activeViewId === 'channels') && !keystrokeIsSpokenFor() && keyIntent(e, 'desk') === 'find' && this.focusFind()) {
       e.preventDefault(); e.stopPropagation()
       return
     }

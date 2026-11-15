@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest'
-import { OutboxView } from './OutboxView.js'
+import { ChannelsView } from './ChannelsView.js'
 import type { ViewContext } from './ViewRegistry.js'
 import { card, response, settle } from '../testFixtures.js'
 
-const views: OutboxView[] = []
+const views: ChannelsView[] = []
 afterEach(() => { views.forEach(view => view.unmount()); views.length = 0; document.body.replaceChildren(); vi.unstubAllGlobals() })
 
 const minute = 60_000, day = 86_400_000
@@ -18,7 +18,7 @@ const covariance = card({ id: 'covariance', uid: 'V', name: 'Covariance', orches
 const van = card({ id: 'van', uid: 'R', name: 'Moving house', status: 'active', ask: { text: 'Which van?', at: at(20) } })
 const garden = card({ id: 'garden', uid: 'G', name: 'Garden plan', status: 'active', workerState: 'running', runtimePhase: 'working', outcome: 'Seeds ordered.' })
 
-/** A daemon that answers the Outbox's reads, records its writes, and fails the ones `fail` names. */
+/** A daemon that answers the Channels view's reads, records its writes, and fails the ones `fail` names. */
 function daemon(fail: string[] = [], stored = new Map<string, string>(), pinned: Record<string, number> = {}) {
   const posts: Array<[string, Record<string, unknown>]> = []
   vi.stubGlobal('localStorage', { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value) })
@@ -28,7 +28,7 @@ function daemon(fail: string[] = [], stored = new Map<string, string>(), pinned:
       if (fail.some(path => url.endsWith(path))) return new Response('{"error":"disk full"}', { status: 422 })
       return new Response(JSON.stringify({ ok: true, delivered: true }))
     }
-    if (url.includes('/outbox/dismissed')) return new Response(JSON.stringify({ dismissed: [], pinned, reach_ms: 14 * day }))
+    if (url.includes('/channels/dismissed')) return new Response(JSON.stringify({ dismissed: [], pinned, reach_ms: 14 * day }))
     if (url.includes('/speak')) return new Response(JSON.stringify({ held: [] }))
     if (url.includes('/roles')) return new Response(JSON.stringify([{ slug: 'analyst', id: 'roles/analyst', name: 'Analyst', outcome: '' }]))
     if (url.includes('/fibers/')) return new Response(JSON.stringify({ fibers: [] }), { status: 404 })
@@ -37,7 +37,7 @@ function daemon(fail: string[] = [], stored = new Map<string, string>(), pinned:
   return { posts, stored }
 }
 const board = (inFlight: ReturnType<typeof card>[]) => response({ now: { drafts: [], inFlight, awaitingReview: [] } })
-async function mount(inFlight = [shear, mask, covariance, van, garden], view = new OutboxView()) {
+async function mount(inFlight = [shear, mask, covariance, van, garden], view = new ChannelsView()) {
   const openFromDesk = vi.fn(), requestRefresh = vi.fn(), see = vi.fn()
   const ctx = { cards: [], response: board(inFlight), shuttleBase: '', workspace: { openFromDesk, openPage: vi.fn() }, requestRefresh, openCard: vi.fn(), see } as unknown as ViewContext
   const host = document.createElement('div'); document.body.append(host)
@@ -134,8 +134,8 @@ it('sets a channel aside under a key that names it and its newest wait, and rest
   host.querySelector<HTMLButtonElement>('.kbn-ch-later')!.click()
   expect(rail(host)).toStrictEqual(['Moving house'])
   await settle()
-  expect(posts).toStrictEqual([['/api/v1/outbox/dismiss', { key: `office:role:analyst:${shear.lastActivityAt}`, fiber: 'S' }]])
-  daemon(['/api/v1/outbox/dismiss'])
+  expect(posts).toStrictEqual([['/api/v1/channels/dismiss', { key: `office:role:analyst:${shear.lastActivityAt}`, fiber: 'S' }]])
+  daemon(['/api/v1/channels/dismiss'])
   host.querySelector<HTMLButtonElement>('.kbn-ch-later')!.click()
   expect(host.querySelector('.kbn-ch-empty')?.textContent).toBe('Nobody is waiting on you.')
   await settle()
@@ -159,14 +159,14 @@ it('adds a channel from the finder by pinning it, and renews a pin when a channe
   expect(shown(host)).toBe('Analyst')
   host.querySelector<HTMLButtonElement>('[data-channel="role:analyst"]')!.click()
   await settle()
-  expect(posts).toStrictEqual([['/api/v1/outbox/pin', { key: 'fiber:G', fiber: 'G' }], ['/api/v1/outbox/pin', { key: 'role:analyst', fiber: 'S' }]])
+  expect(posts).toStrictEqual([['/api/v1/channels/pin', { key: 'fiber:G', fiber: 'G' }], ['/api/v1/channels/pin', { key: 'role:analyst', fiber: 'S' }]])
   // Not now on a quiet pinned channel unpins it.
   host.querySelector<HTMLButtonElement>('[data-channel="fiber:G"]')!.click()
   expect(host.querySelector('.kbn-ch-later')!.getAttribute('title')).toBe('Unpin this channel')
   host.querySelector<HTMLButtonElement>('.kbn-ch-later')!.click()
   await settle()
   expect(rail(host)).toStrictEqual(['Analyst', 'Moving house'])
-  expect(posts.at(-1)![0]).toBe('/api/v1/outbox/dismiss')
+  expect(posts.at(-1)![0]).toBe('/api/v1/channels/dismiss')
   expect(posts.at(-1)![1].key).toMatch(/^pin:fiber:G:\d+$/)
 })
 
@@ -177,7 +177,7 @@ it('hides and shows the rail by its button, by [ and by a sideways swipe over th
   expect([layout.hasAttribute('data-rail-hidden'), toggle.textContent]).toStrictEqual([false, 'Hide channels'])
   toggle.click()
   expect([layout.hasAttribute('data-rail-hidden'), toggle.textContent, toggle.getAttribute('aria-expanded')]).toStrictEqual([true, 'Show channels', 'false'])
-  expect(stored.get('shuttle.outbox.rail-hidden')).toBe('1')
+  expect(stored.get('shuttle.channels.rail-hidden')).toBe('1')
   expect(view.keydown(new KeyboardEvent('keydown', { key: '[' }))).toBe(true)
   expect(layout.hasAttribute('data-rail-hidden')).toBe(false)
   const swipe = (on: Element, from: number, to: number) => {
@@ -192,7 +192,7 @@ it('hides and shows the rail by its button, by [ and by a sideways swipe over th
   expect(layout.hasAttribute('data-rail-hidden')).toBe(true)
   swipe(feed, 200, 320)
   expect(layout.hasAttribute('data-rail-hidden')).toBe(false)
-  // Nothing while the reader covers the Outbox, nor on content that scrolls sideways.
+  // Nothing while the reader covers the view, nor on content that scrolls sideways.
   ;(ctx as { workspace: { isActive?: boolean } }).workspace.isActive = true
   swipe(feed, 300, 180)
   expect(layout.hasAttribute('data-rail-hidden')).toBe(false)
@@ -207,12 +207,12 @@ it('hides and shows the rail by its button, by [ and by a sideways swipe over th
   expect(wheel(feed, 80)).toBe(true)
   expect(layout.hasAttribute('data-rail-hidden')).toBe(true)
   view.unmount(); views.length = 0
-  const again = await mount(undefined, new OutboxView())
+  const again = await mount(undefined, new ChannelsView())
   expect(again.host.querySelector('.kbn-ch-layout')!.hasAttribute('data-rail-hidden')).toBe(true)
 })
 
 it('marks what is new since the channel was last read, and reads it again when mounted again', async () => {
-  const stored = new Map([['shuttle.outbox.channel-seen:role:analyst', String(Date.parse(at(20)))]])
+  const stored = new Map([['shuttle.channels.seen:role:analyst', String(Date.parse(at(20)))]])
   daemon([], stored)
   const first = await mount()
   expect([...first.host.querySelectorAll('.kbn-ch-msg')].map(el => el.hasAttribute('data-new'))).toStrictEqual([false, true])

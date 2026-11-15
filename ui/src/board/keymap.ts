@@ -1,12 +1,12 @@
 import { VERDICT_DELAY_MS } from './workspace/verdictDelay.js'
 
 export type KeySurface = 'desk' | 'overview' | 'reader'
-export type KeyIntent = 'desk' | 'chronicle' | 'board' | 'globe' | 'outbox' | 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'nextGroup' | 'prevGroup' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward' | 'temper' | 'discard' | 'toReview' | 'undoVerdict' | 'conversation' | 'rest' | 'pin' | 'orchestrator' | 'tapestry'
+export type KeyIntent = 'desk' | 'chronicle' | 'board' | 'globe' | 'channels' | 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'nextGroup' | 'prevGroup' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward' | 'temper' | 'discard' | 'toReview' | 'undoVerdict' | 'conversation' | 'rest' | 'pin' | 'orchestrator' | 'tapestry'
 /** Reports can request navigation only. New intents are excluded unless named here. */
 export const DOCUMENT_KEY_INTENTS: readonly KeyIntent[] = [
   'prev', 'next', 'prevChannel', 'nextChannel', 'prevGroup', 'nextGroup', 'first', 'last',
   'scrollDown', 'scrollUp', 'halfDown', 'halfUp', 'pageDown', 'pageUp',
-  'back', 'find', 'help', 'desk', 'chronicle', 'board', 'globe', 'outbox', 'tapestry',
+  'back', 'find', 'help', 'desk', 'chronicle', 'board', 'globe', 'channels', 'tapestry',
 ]
 /**
  * Intents a document may pass up only while it holds the human's focus, so a
@@ -47,7 +47,7 @@ export const DESK_REGION_SELECTORS = ['[data-column="drafts"]', '[data-column="i
  * not physical keys. Reader Alt-arrows remain guarded inside editable targets. */
 export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
   desk: [
-    bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'board', 'Switch to Board'), bind(['4'], 'globe', 'Switch to Globe'), bind(['5'], 'outbox', 'Switch to Outbox'),
+    bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'board', 'Switch to Board'), bind(['4'], 'globe', 'Switch to Globe'), bind(['5'], 'channels', 'Switch to Channels'),
     bind(['/'], 'find', 'Find a card or constitution'),
     bind(['h', 'ArrowLeft'], 'back', 'Clear selection'),
     bind(['j', 'ArrowDown'], 'down', 'Next visible row'), bind(['k', 'ArrowUp'], 'up', 'Previous visible row'),
@@ -56,7 +56,7 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['l', 'ArrowRight', 'Enter', 'o'], 'open', 'Open constitution'), bind(['Escape'], 'back', 'Clear selection'), bind(['?'], 'help', 'Keyboard help'),
   ],
   overview: [
-    bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'board', 'Switch to Board'), bind(['4'], 'globe', 'Switch to Globe'), bind(['5'], 'outbox', 'Switch to Outbox'),
+    bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'board', 'Switch to Board'), bind(['4'], 'globe', 'Switch to Globe'), bind(['5'], 'channels', 'Switch to Channels'),
     bind(['/'], 'find', 'Find work or files'), bind(['Escape'], 'back', 'Return to Desk when nothing is open'),
     bind(['h', 'ArrowLeft'], 'left', 'Move left'), bind(['l', 'ArrowRight'], 'right', 'Move right'),
     bind(['j', 'ArrowDown'], 'down', 'Move down'), bind(['k', 'ArrowUp'], 'up', 'Move up'),
@@ -64,7 +64,7 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['c', '.'], 'conversation', 'Open conversation'), bind(['Enter', 'o'], 'open', 'Open file'), bind(['?'], 'help', 'Keyboard help'),
   ],
   reader: [
-    bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'board', 'Switch to Board'), bind(['4'], 'globe', 'Switch to Globe'), bind(['5'], 'outbox', 'Switch to Outbox'),
+    bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'board', 'Switch to Board'), bind(['4'], 'globe', 'Switch to Globe'), bind(['5'], 'channels', 'Switch to Channels'),
     bind(['p'], 'audioPlay', 'Audio: play / pause'),
     bind(['['], 'audioBack', 'Audio: back 5 seconds'),
     bind([']'], 'audioForward', 'Audio: forward 5 seconds'),
@@ -142,7 +142,7 @@ const row = (keys: string[], label: string, covers: Array<readonly [KeySurface, 
  * covers its surface and intent and shows each of its keys. */
 export const helpSections: readonly HelpSection[] = [
   { title: 'Everywhere', rows: [
-    row(['1', '2', '3', '4', '5'], 'Desk, Chronicle, Board, Globe, Outbox', everywhere('desk', 'chronicle', 'board', 'globe', 'outbox')),
+    row(['1', '2', '3', '4', '5'], 'Desk, Chronicle, Board, Globe, Channels', everywhere('desk', 'chronicle', 'board', 'globe', 'channels')),
     row(['/'], 'Find', everywhere('find')),
     row(['Esc'], 'Close a layer, then step back', everywhere('back')),
     row(['?'], 'This guide', everywhere('help')),
@@ -179,7 +179,7 @@ export const helpSections: readonly HelpSection[] = [
     row(['Enter'], 'Unfold or fold a row, entering it', []),
     row(['c'], 'Open the highlighted thread in Rex', []),
   ] },
-  { title: 'Outbox', note: 'One channel per office, listed while something in it waits on you or you keep it pinned.', rows: [
+  { title: 'Channels', note: 'One channel per office, listed while something in it waits on you or you keep it pinned.', rows: [
     row(['j', 'k'], 'Next / previous channel', []),
     row(['['], 'Hide or show the channels; on a phone, swipe in from the left edge', []),
     row(['Enter'], 'Reply to the seat, or to the line chosen', []),

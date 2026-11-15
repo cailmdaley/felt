@@ -601,24 +601,25 @@ See [Connect your machines](../shuttle/remotes.md#verify-work-across-the-connect
     `mark-runtime` serve daemon and fleet plumbing. An adopter running
     shuttle solo will not need them.
 
-### `shuttle outbox dismiss <key> [--fiber <uid>]`
+### `shuttle channels dismiss <key> [--fiber <uid>]`
 
-Set something aside in the human's Outbox. Writes a family-board record of kind
-`dismissed` with the key as its text and, when supplied, a fiber uid. The board
-sets a channel aside with `office:<channel>:<ms>`, where `<channel>` is
-`role:<office>` or `fiber:<top-level uid>` and `<ms>` is when the newest wait
-in the channel began; the channel returns once something in it begins waiting
-later than that. Dismissals reach every hub through the remote board feeds and
-are omitted from family-board reading.
-
-### `shuttle outbox pin <key> [--fiber <uid>]`
-
-Pin a channel in the human's Outbox, keyed `role:<office>` or
-`fiber:<top-level uid>`. Writes a family-board record of kind `pinned`; the
-channel stays in the Outbox while its latest pin is within the board's 14-day
-reach, and the board pins it again whenever the human opens or answers it.
-Pins reach every hub as dismissals do and are omitted from family-board
+Set a channel aside in the human's Channels view, or unpin it. Writes a
+family-board record of kind `dismissed` with the key as its text and, when
+supplied, a fiber uid. A channel is keyed `role:<office>` or
+`fiber:<top-level uid>`. The board sets one aside with `office:<channel>:<ms>`,
+where `<ms>` is when the newest wait in the channel began; the channel returns
+once something in it begins waiting later than that. It unpins one with
+`pin:<channel>:<ms>`, which voids every pin up to `<ms>`. Dismissals reach
+every hub through the remote board feeds and are omitted from family-board
 reading.
+
+### `shuttle channels pin <key> [--fiber <uid>]`
+
+Pin a channel in the human's Channels view. Writes a family-board record of
+kind `pinned`; the channel stays listed while its latest pin is within the
+board's 14-day reach and later than any unpin, and the board pins it again
+when the human opens or answers it. Pins reach every hub as dismissals do and
+are omitted from family-board reading.
 
 ### `shuttle board [fiber] [--since 2h|<RFC3339>] [--all] [--turns] [--json]`
 

@@ -6,7 +6,7 @@ import { buildFileViewer, disposeFileViewer } from '../FileViewerPanel.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { boardCards, threadIndexFor } from '../KanbanSurfaces.js'
 import { isMobileViewport } from '../mobile.js'
-import { composeChannels, officeOf, setAsideKey, unpinKey, type Channel, type HeldSpeech, type Message } from '../outbox.js'
+import { composeChannels, officeOf, setAsideKey, unpinKey, type Channel, type HeldSpeech, type Message } from '../channels.js'
 import type { SentFile } from '../sentFiles.js'
 import { stateDot } from '../stateDot.js'
 import { cardNamed } from '../threads.js'
@@ -17,10 +17,10 @@ import { readFiber } from '../workspace/fiberSource.js'
 import { charters } from '../workspace/RolePage.js'
 import { createViewPage } from './ViewPage.js'
 import { keystrokeIsSpokenFor, registerView, type TemporalView, type ViewContext } from './ViewRegistry.js'
-import './OutboxView.css'
+import './ChannelsView.css'
 
-const SEEN = 'shuttle.outbox.channel-seen:'
-const RAIL = 'shuttle.outbox.rail-hidden'
+const SEEN = 'shuttle.channels.seen:'
+const RAIL = 'shuttle.channels.rail-hidden'
 /** A pin is renewed by use at most this often; it lapses with the board's reach. */
 const RENEW_MS = 86_400_000
 /** How far a finger or a trackpad must travel sideways to open or close the rail. */
@@ -54,15 +54,15 @@ function lastSeen(key: string): number {
 }
 
 /**
- * The Outbox: a channel per office (or per top-level constitution without
+ * Channels: a channel per office (or per top-level constitution without
  * one), listed while something in it waits on the human or while he keeps
  * it pinned. A channel reads like a chat: each worker's line, oldest first,
  * the ones waiting on him lit, the seat's tapestry pinned beside them, and a
  * reply bar that answers the seat or the worker chosen.
  */
-export class OutboxView implements TemporalView {
-  readonly id = 'outbox' as const
-  readonly title = 'Outbox'
+export class ChannelsView implements TemporalView {
+  readonly id = 'channels' as const
+  readonly title = 'Channels'
   readonly hotkey = '5'
   private ctx: ViewContext | null = null
   private layout: HTMLElement | null = null
@@ -111,13 +111,13 @@ export class OutboxView implements TemporalView {
     this.ctx = ctx
     // The view outlives its mounts: coming back to the channel it showed is reading it again.
     if (this.current) this.visit(this.current)
-    const page = createViewPage('Outbox')
-    page.root.classList.add('kbn-outbox')
+    const page = createViewPage('Channels')
+    page.root.classList.add('kbn-channels')
     this.railToggle = button('kbn-ch-rail-toggle', '', () => this.setRail(!this.railHidden))
     page.titleRow.append(el('span', 'kbn-ch-keys', 'j / k channels · [ the rail · Enter to reply'), this.railToggle)
     this.layout = el('div', 'kbn-ch-layout')
     this.layout.append(this.railEl(), this.channelPane())
-    this.note = el('p', 'kbn-ch-note', 'Reading the Outbox…')
+    this.note = el('p', 'kbn-ch-note', 'Reading the channels…')
     this.note.setAttribute('role', 'status')
     page.body.append(this.note, this.layout)
     host.append(page.root)
@@ -179,7 +179,7 @@ export class OutboxView implements TemporalView {
     this.reading = true
     const generation = this.readGeneration, base = this.ctx.shuttleBase
     const [records, speech] = await Promise.allSettled([
-      getDaemonJson<{ dismissed: string[]; pinned?: Record<string, number>; reach_ms: number }>(`${base}/api/v1/outbox/dismissed`),
+      getDaemonJson<{ dismissed: string[]; pinned?: Record<string, number>; reach_ms: number }>(`${base}/api/v1/channels/dismissed`),
       getDaemonJson<{ held: HeldSpeech[] }>(`${base}/api/v1/speak`),
     ])
     if (generation !== this.readGeneration) return
@@ -194,7 +194,7 @@ export class OutboxView implements TemporalView {
       for (const [key, at] of this.pinned) if (Date.now() - at > this.reachMs) this.pinned.delete(key)
     }
     if (speech.status === 'fulfilled') this.held = speech.value.held
-    this.status(records.status === 'rejected' || speech.status === 'rejected' ? 'Some Outbox sources are unavailable — showing the last read.' : '')
+    this.status(records.status === 'rejected' || speech.status === 'rejected' ? 'Some channel sources are unavailable — showing the last read.' : '')
     this.draw()
   }
   private status(text: string): void { if (this.note) this.note.textContent = text }
@@ -479,7 +479,7 @@ export class OutboxView implements TemporalView {
     this.open(next?.key ?? null, true, false)
     this.draw()
     try {
-      await postDaemonJson(ctx.shuttleBase, '/api/v1/outbox/dismiss', { key, fiber: fiberOf(channel.seat) })
+      await postDaemonJson(ctx.shuttleBase, '/api/v1/channels/dismiss', { key, fiber: fiberOf(channel.seat) })
     } catch {
       this.pending = this.pending.filter(item => item !== key)
       this.draw()
@@ -492,7 +492,7 @@ export class OutboxView implements TemporalView {
     if (!ctx) return
     this.pinned.set(channel.key, Date.now())
     try {
-      await postDaemonJson(ctx.shuttleBase, '/api/v1/outbox/pin', { key: channel.key, fiber: fiberOf(channel.seat) }, 'Pin failed')
+      await postDaemonJson(ctx.shuttleBase, '/api/v1/channels/pin', { key: channel.key, fiber: fiberOf(channel.seat) }, 'Pin failed')
     } catch (error) {
       this.status(`${channel.name} is pinned here only: ${error instanceof Error ? error.message : String(error)}`)
     }
@@ -531,8 +531,8 @@ export class OutboxView implements TemporalView {
     this.railToggle.setAttribute('aria-expanded', String(!this.railHidden))
   }
   /**
-   * Sideways gestures over the channel's lines or the rail, while the Outbox
-   * is the surface shown: a touch drawn rightward from the lines opens the
+   * Sideways gestures over the channel's lines or the rail, while the Channels
+   * view is the surface shown: a touch drawn rightward from the lines opens the
    * rail and one drawn leftward closes it; a two-finger trackpad swipe does
    * the same, back to open and forward to close. Content that scrolls
    * sideways keeps the gesture, and the tapestry is never a gesture surface.
@@ -620,4 +620,4 @@ export class OutboxView implements TemporalView {
     this.sig = ''
   }
 }
-registerView(new OutboxView())
+registerView(new ChannelsView())

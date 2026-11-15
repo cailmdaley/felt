@@ -6,12 +6,12 @@ import { launchBrowser } from './browser.mjs'
 const channels = () => [...document.querySelectorAll('.kbn-ch-pick-name')].map(el => el.textContent)
 const lines = () => [...document.querySelectorAll('.kbn-ch-msg')].map(el => [el.querySelector('.kbn-ch-msg-name').textContent, el.dataset.kind ?? ''])
 const fits = async page => {
-  assert.equal(await page.locator('.kbn-outbox').evaluate(el => el.scrollWidth <= el.clientWidth), true)
+  assert.equal(await page.locator('.kbn-channels').evaluate(el => el.scrollWidth <= el.clientWidth), true)
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
 }
 const shot = async (page, name) => {
   await page.waitForFunction(() => document.querySelector('.kbn-ch-tapestry iframe, .kbn-ch-tapestry .kbn-ch-prose'))
-  await page.evaluate(() => { for (let node = document.querySelector('.kbn-outbox'); node; node = node.parentElement) node.scrollTop = 0 })
+  await page.evaluate(() => { for (let node = document.querySelector('.kbn-channels'); node; node = node.parentElement) node.scrollTop = 0 })
   await page.waitForTimeout(400)
   await page.screenshot({ path: resolve(`../channels-${name}.png`) })
 }
@@ -23,7 +23,7 @@ try {
     const page = await context.newPage()
     const errors = []
     page.on('pageerror', error => errors.push(error.message))
-    await page.goto(`${pathToFileURL(resolve('harness-board-dist/index.html'))}?example=outbox#/outbox`)
+    await page.goto(`${pathToFileURL(resolve('harness-board-dist/index.html'))}?example=channels#/channels`)
     await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 6)
     await page.evaluate(() => document.fonts.ready)
     // Newest wait first, then the pinned garden, then moving house gone cold; the set-aside surveyor stays out.
@@ -90,6 +90,6 @@ try {
     await page.waitForFunction(() => ![...document.querySelectorAll('.kbn-ch-pick-name')].some(el => el.textContent === 'Editor'))
     assert.deepEqual(errors, [])
     await context.close()
-    console.log(`Outbox ${name}: six channels in order with a pinned one and a cold shelf, the vizier office as one channel, lines oldest first with their files and held line, a line chosen and back, the rail hidden and shown, a channel added, no overflow, set aside; screenshots saved`)
+    console.log(`Channels ${name}: six channels in order with a pinned one and a cold shelf, the vizier office as one channel, lines oldest first with their files and held line, a line chosen and back, the rail hidden and shown, a channel added, no overflow, set aside; screenshots saved`)
   }
 } finally { await browser.close() }

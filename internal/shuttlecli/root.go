@@ -227,7 +227,7 @@ func (a *app) rootCmd() *cobra.Command {
 		feltcli.NewRolesCmd(a.env, a.shuttleViewOptions()),
 		a.askCmd(),
 		a.boardCmd(),
-		a.outboxCmd(),
+		a.channelsCmd(),
 		a.postCmd(),
 		a.shuttleCheckCmd(),
 		a.claimCmd(),

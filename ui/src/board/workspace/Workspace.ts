@@ -93,9 +93,9 @@ interface ChannelState {
   error?: string
 }
 type WorkspaceView = WorkspaceOriginView
-const VIEW_HASHES: Record<string, WorkspaceView> = { '#/desk': 'desk', '#/chronicle': 'chronicle', '#/board': 'board', '#/globe': 'globe', '#/outbox': 'outbox' }
-const VIEW_LABELS: Record<WorkspaceView, string> = { desk: 'Desk', chronicle: 'Chronicle', board: 'Board', globe: 'Globe', outbox: 'Outbox' }
-const viewForOrigin = (origin: string): WorkspaceOriginView => origin === 'Desk' ? 'desk' : origin === 'Chronicle' ? 'chronicle' : origin === 'Globe' ? 'globe' : origin === 'Outbox' ? 'outbox' : 'board'
+const VIEW_HASHES: Record<string, WorkspaceView> = { '#/desk': 'desk', '#/chronicle': 'chronicle', '#/board': 'board', '#/globe': 'globe', '#/channels': 'channels' }
+const VIEW_LABELS: Record<WorkspaceView, string> = { desk: 'Desk', chronicle: 'Chronicle', board: 'Board', globe: 'Globe', channels: 'Channels' }
+const viewForOrigin = (origin: string): WorkspaceOriginView => origin === 'Desk' ? 'desk' : origin === 'Chronicle' ? 'chronicle' : origin === 'Globe' ? 'globe' : origin === 'Channels' ? 'channels' : 'board'
 const channelId = (uid: string, owner: string): string => JSON.stringify([owner, uid])
 const pageLabel = (doc: WorkspaceDocument): string => doc.kind === 'fiber' ? 'Constitution' : doc.name
 const threadFamilyRevision = (card: KanbanCard, index: ThreadIndex): string => {
@@ -506,7 +506,7 @@ export class Workspace {
   handleOverviewEscapeLayer(): boolean { return this.overview.handleEscapeLayer() }
 
   /** View keys park the reader; Board restores its last unreturned channel. */
-  suspend(view: 'desk' | 'chronicle' | 'globe' | 'outbox'): void {
+  suspend(view: 'desk' | 'chronicle' | 'globe' | 'channels'): void {
     this.history.view(`#/${view}`)
   }
   showBoard(): void {

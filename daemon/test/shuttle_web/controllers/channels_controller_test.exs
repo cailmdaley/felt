@@ -1,4 +1,4 @@
-defmodule ShuttleWeb.OutboxControllerTest do
+defmodule ShuttleWeb.ChannelsControllerTest do
   use ExUnit.Case, async: true
   import Phoenix.ConnTest
   import Plug.Conn
@@ -8,8 +8,8 @@ defmodule ShuttleWeb.OutboxControllerTest do
 
   defmodule Runner do
     def cmd("shuttle", args, _) do
-      send(Shuttle.Env.app(:outbox_test_owner), {:cli, args})
-      Shuttle.Env.app(:outbox_test_reply, {"", 0})
+      send(Shuttle.Env.app(:channels_test_owner), {:cli, args})
+      Shuttle.Env.app(:channels_test_reply, {"", 0})
     end
   end
 
@@ -47,32 +47,32 @@ defmodule ShuttleWeb.OutboxControllerTest do
 
   test "dismiss writes through the CLI, and reports a failed write" do
     Env.put_app_env(:felt_runner, Runner)
-    Env.put_app_env(:outbox_test_owner, self())
+    Env.put_app_env(:channels_test_owner, self())
 
     assert api_conn()
            |> put_req_header("content-type", "application/json")
-           |> post("/api/v1/outbox/dismiss", Jason.encode!(%{key: "ask:U:1", fiber: "U"}))
+           |> post("/api/v1/channels/dismiss", Jason.encode!(%{key: "ask:U:1", fiber: "U"}))
            |> json_response(200) == %{"ok" => true}
 
-    assert_receive {:cli, ["outbox", "dismiss", "ask:U:1", "--fiber", "U"]}
+    assert_receive {:cli, ["channels", "dismiss", "ask:U:1", "--fiber", "U"]}
 
     assert api_conn()
-           |> post("/api/v1/outbox/pin", %{key: "role:vizier"})
+           |> post("/api/v1/channels/pin", %{key: "role:vizier"})
            |> json_response(200) == %{"ok" => true}
 
-    assert_receive {:cli, ["outbox", "pin", "role:vizier"]}
-    Env.put_app_env(:outbox_test_reply, {"cannot write", 1})
+    assert_receive {:cli, ["channels", "pin", "role:vizier"]}
+    Env.put_app_env(:channels_test_reply, {"cannot write", 1})
 
     assert api_conn()
-           |> post("/api/v1/outbox/dismiss", %{key: "file:x"})
+           |> post("/api/v1/channels/dismiss", %{key: "file:x"})
            |> json_response(422)
            |> Map.has_key?("error")
 
-    assert api_conn() |> post("/api/v1/outbox/dismiss", %{}) |> json_response(400) == %{
+    assert api_conn() |> post("/api/v1/channels/dismiss", %{}) |> json_response(400) == %{
              "error" => "key is required"
            }
 
-    assert api_conn() |> post("/api/v1/outbox/pin", %{key: ""}) |> json_response(400) == %{
+    assert api_conn() |> post("/api/v1/channels/pin", %{key: ""}) |> json_response(400) == %{
              "error" => "key is required"
            }
   end
@@ -113,7 +113,7 @@ defmodule ShuttleWeb.OutboxControllerTest do
              "pinned" => pinned,
              "reach_ms" => reach
            } =
-             api_conn() |> get("/api/v1/outbox/dismissed") |> json_response(200)
+             api_conn() |> get("/api/v1/channels/dismissed") |> json_response(200)
 
     assert pinned == %{"role:vizier" => now}
 
