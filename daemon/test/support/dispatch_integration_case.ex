@@ -874,6 +874,86 @@ defmodule Shuttle.Test.DispatchIntegrationCase do
     ])
   end
 
+  # A live Claude session `uuid` as its harness presents it: a long-lived
+  # harness process whose `SessionStart` hook registered it with the native
+  # messaging socket `native_socket!/3` answers. Answers the harness, for
+  # `harness_hook!/4`.
+  def claude_session!(uuid, mode \\ :answer) do
+    transcript = Path.join(System.tmp_dir!(), "native-#{System.unique_integer([:positive])}.jsonl")
+    File.write!(transcript, "")
+    socket = native_socket!(uuid, transcript, mode)
+    harness = start_harness!([{"CLAUDE_CODE_MESSAGING_SOCKET", socket}])
+    harness_hook!(harness, uuid, "SessionStart", %{transcript_path: transcript})
+    harness
+  end
+
+  # A Claude session's native messaging socket. Each frame Claude Code would
+  # receive is reported to the test. With `:answer` the socket takes it as
+  # Claude Code does, into the session's transcript, and sends the test
+  # `{:wake, text}`. With `:hold` it sends `{:native_frame, receiver, frame}`
+  # and waits for the test's `{:fate, :answer | :drop}`; `:drop` never answers.
+  def native_socket!(uuid, transcript, mode \\ :answer) do
+    dir = Path.join(System.tmp_dir!(), "ns-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    File.chmod!(dir, 0o700)
+    socket = Path.join(dir, "s")
+
+    {:ok, listener} =
+      :gen_tcp.listen(0, [:binary, active: false, packet: :line, ifaddr: {:local, socket}])
+
+    File.chmod!(socket, 0o600)
+    test = self()
+
+    start_supervised!(
+      {Task, fn -> receive_frames(listener, uuid, transcript, test, mode) end},
+      id: make_ref()
+    )
+
+    on_exit(fn ->
+      :gen_tcp.close(listener)
+      File.rm_rf(dir)
+    end)
+
+    socket
+  end
+
+  defp receive_frames(listener, uuid, transcript, test, mode) do
+    with {:ok, conn} <- :gen_tcp.accept(listener) do
+      with {:ok, line} <- :gen_tcp.recv(conn, 0, 10_000) do
+        frame = Jason.decode!(line)
+
+        fate =
+          case mode do
+            :answer ->
+              :answer
+
+            :hold ->
+              send(test, {:native_frame, self(), frame})
+              receive do: ({:fate, fate} -> fate)
+          end
+
+        if fate == :answer do
+          rows = [
+            %{type: "user", sessionId: uuid, uuid: frame["uuid"]},
+            %{
+              type: "assistant",
+              sessionId: uuid,
+              uuid: "reply-" <> frame["uuid"],
+              parentUuid: frame["uuid"],
+              message: %{role: "assistant", model: "claude-test"}
+            }
+          ]
+
+          File.write!(transcript, Enum.map(rows, &(Jason.encode!(&1) <> "\n")), [:append])
+          if mode == :answer, do: send(test, {:wake, frame["message"]["content"]})
+        end
+      end
+
+      :gen_tcp.close(conn)
+      receive_frames(listener, uuid, transcript, test, mode)
+    end
+  end
+
   def harness_hook!(harness, uuid, event, frame \\ %{}) do
     frame =
       Map.merge(

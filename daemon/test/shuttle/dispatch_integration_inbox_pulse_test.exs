@@ -1,14 +1,18 @@
 defmodule Shuttle.DispatchIntegrationInboxPulseTest do
   # A pulse tick from the outside: the daemon's own poll over a constitution
   # with a `pulse:`, and what reaches its idle Claude worker's native
-  # messaging socket, registered by the worker's real hooks. The inbox
-  # promises a tick at most once: a tick its daemon died sending is never sent
-  # again, while the next one is.
+  # messaging socket, registered by the worker's real hooks. A tick is sent at
+  # most once. What guards that across a death is the pulse clock: the daemon
+  # moves it past a tick and persists it before sending, so a tick whose
+  # daemon died sending it is never due again. The tick in flight then keeps
+  # the fiber's pulse reserved until the worker is next seen idle, after which
+  # the next tick goes out.
   #
   # Staged, not driven: the pulse interval's floor is a minute with no knob,
   # so `make_tick_due!/0` moves the clock the daemon persists into the past
   # while no daemon runs; and the worker's turn state comes from the
-  # `:waiting_phases_source` seam, since the suite runs no event stream.
+  # `:waiting_phases_source` seam, since the suite runs no event stream. Each
+  # idle event the seam reports is one the worker's hooks reported.
   use Shuttle.Test.DispatchIntegrationCase, async: true
 
   # Staged: the next tick of every pulse in this daemon's clock is due.
@@ -25,59 +29,14 @@ defmodule Shuttle.DispatchIntegrationInboxPulseTest do
     File.write!(path, Jason.encode!(pulses))
   end
 
-  # The session's native messaging socket. Each frame Claude Code would
-  # receive is sent to the test, which answers its fate: `:answer` takes it
-  # as Claude Code does (into the transcript), `:drop` never answers.
-  defp native_socket!(uuid, transcript) do
-    dir = Path.join(System.tmp_dir!(), "pn-#{System.unique_integer([:positive])}")
-    File.mkdir_p!(dir)
-    File.chmod!(dir, 0o700)
-    socket = Path.join(dir, "s")
+  # Staged: the worker `uuid` ended a turn, and is idle, now.
+  defp idle!(harness, uuid, transcript) do
+    harness_hook!(harness, uuid, "Stop", %{transcript_path: transcript})
+    at = System.system_time(:millisecond)
 
-    {:ok, listener} =
-      :gen_tcp.listen(0, [:binary, active: false, packet: :line, ifaddr: {:local, socket}])
-
-    File.chmod!(socket, 0o600)
-    test = self()
-    start_supervised!({Task, fn -> receive_frames(listener, uuid, transcript, test) end})
-
-    on_exit(fn ->
-      :gen_tcp.close(listener)
-      File.rm_rf(dir)
+    Shuttle.Test.Env.put_app_env(:waiting_phases_source, fn ->
+      %{uuid => %{phase: "waiting", last_event_at: at}}
     end)
-
-    socket
-  end
-
-  defp receive_frames(listener, uuid, transcript, test) do
-    with {:ok, conn} <- :gen_tcp.accept(listener) do
-      with {:ok, line} <- :gen_tcp.recv(conn, 0, 10_000) do
-        frame = Jason.decode!(line)
-        send(test, {:native_frame, self(), frame})
-
-        receive do
-          {:fate, :answer} ->
-            rows = [
-              %{type: "user", sessionId: uuid, uuid: frame["uuid"]},
-              %{
-                type: "assistant",
-                sessionId: uuid,
-                uuid: "reply-" <> frame["uuid"],
-                parentUuid: frame["uuid"],
-                message: %{role: "assistant", model: "claude-test"}
-              }
-            ]
-
-            File.write!(transcript, Enum.map(rows, &(Jason.encode!(&1) <> "\n")), [:append])
-
-          {:fate, :drop} ->
-            :ok
-        end
-      end
-
-      :gen_tcp.close(conn)
-      receive_frames(listener, uuid, transcript, test)
-    end
   end
 
   # A daemon over `host`, booted as every daemon boots, under the boot
@@ -97,7 +56,8 @@ defmodule Shuttle.DispatchIntegrationInboxPulseTest do
     poller
   end
 
-  test "a tick its daemon died sending is never sent again, and the next one is", %{host: host} do
+  test "a tick lost in its daemon's death is never due again; the next goes out once the worker is idle",
+       %{host: host} do
     id = oneshot(host, "tests/pulse", "active", "")
     path = fiber_file(host, id)
 
@@ -109,7 +69,8 @@ defmodule Shuttle.DispatchIntegrationInboxPulseTest do
     serve_api!(host)
     TransportRunner.start!(self())
 
-    # The first daemon starts the worker and its pulse clock.
+    # The first daemon starts the worker and its pulse clock; the worker ends
+    # its first turn.
     poller = daemon!(host)
 
     assert eventually(fn ->
@@ -119,19 +80,14 @@ defmodule Shuttle.DispatchIntegrationInboxPulseTest do
     %{session_uuid: uuid} = Poller.live_worker(poller, id)
     transcript = Path.join(host, "native.jsonl")
     File.write!(transcript, "")
-    socket = native_socket!(uuid, transcript)
+    socket = native_socket!(uuid, transcript, :hold)
     harness = start_harness!([{"CLAUDE_CODE_MESSAGING_SOCKET", socket}])
     harness_hook!(harness, uuid, "SessionStart", %{transcript_path: transcript})
-    harness_hook!(harness, uuid, "Stop", %{transcript_path: transcript})
-
-    Shuttle.Test.Env.put_app_env(:waiting_phases_source, fn ->
-      %{uuid => %{phase: "waiting", last_event_at: System.system_time(:millisecond)}}
-    end)
-
+    idle!(harness, uuid, transcript)
     kill_daemon!(poller)
 
-    # A tick is due; the next daemon sends it and dies before it is known to
-    # have arrived.
+    # A tick is due; the next daemon sends it and dies sending it. The worker
+    # never receives it.
     make_tick_due!()
     poller = daemon!(host)
     sync_poll_cycle!(poller)
@@ -140,13 +96,17 @@ defmodule Shuttle.DispatchIntegrationInboxPulseTest do
     kill_daemon!(poller, [], work: true)
     send(receiver, {:fate, :drop})
 
-    # The daemon after it never sends that tick again.
+    # The daemon after it never sends that tick again: its clock had already
+    # moved on.
     poller = daemon!(host)
     for _ <- 1..3, do: poll!(poller)
     refute_receive {:native_frame, _, _}
-    kill_daemon!(poller)
 
-    # The next tick is sent, under its own identity, and taken.
+    # The worker is next seen idle, which ends the lost tick's reservation;
+    # the next tick is sent, under its own identity, and taken.
+    idle!(harness, uuid, transcript)
+    poll!(poller)
+    kill_daemon!(poller)
     make_tick_due!()
     poller = daemon!(host)
     sync_poll_cycle!(poller)
