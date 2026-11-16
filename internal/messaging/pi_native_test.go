@@ -369,8 +369,8 @@ func TestConsumeConfirmsAQueuedPiBatchFromItsTranscript(t *testing.T) {
 	var sends atomic.Int32
 	var text string
 	socket, closeFixture := piNativeFixture(t, func(frame map[string]any) any {
-		sends.Add(1)
 		text = frame["message"].(string)
+		sends.Add(1)
 		return map[string]any{"requestId": frame["requestId"], "sessionId": frame["sessionId"], "delivery": "steer", "ok": true, "queued": true}
 	})
 	defer closeFixture()
@@ -388,6 +388,9 @@ func TestConsumeConfirmsAQueuedPiBatchFromItsTranscript(t *testing.T) {
 		if _, err := Consume(context.Background(), env, "fiber", "host", w); ErrorCode(err) != "unconfirmed" {
 			t.Fatalf("pass %d: %v", i, err)
 		}
+	}
+	if sends.Load() != 1 {
+		t.Fatalf("sends = %d before the transcript row", sends.Load())
 	}
 	appendPiUserRow(t, transcript, text)
 	if _, err := Consume(context.Background(), env, "fiber", "host", w); err != nil {

@@ -233,7 +233,7 @@ func observeClaudeNative(env *sysenv.Env, req Request, offset int64, stored Rece
 	case (err != nil && !errors.Is(err, context.Canceled)) || claudeStageRank(stage) <= claudeStageRank(stored.Status):
 		return stored, code
 	}
-	stored.Status, stored.Detail = stage, claudeStageReceipt(req, stage).Detail
+	stored.Status, stored.Transport, stored.Detail = stage, claudeNativeTransport, claudeStageReceipt(req, stage).Detail
 	return stored, ""
 }
 

@@ -604,24 +604,28 @@ func advanceBatch(ctx context.Context, env *sysenv.Env, root, host string, w Wor
 
 // observeBatch reads the batch's conversation transcript again, from where it
 // ended before the send to where it ends now, without waiting, and records the
-// furthest stage it shows in the receipt. It reports whether the receipt
-// changed.
+// furthest stage it shows in the receipt, including for a send whose receipt
+// was never recorded. It reports whether the receipt changed.
 func observeBatch(env *sysenv.Env, a *Attempt) bool {
-	if a.Receipt == nil || a.TranscriptOffset == nil || a.confirmed() {
+	if a.TranscriptOffset == nil || a.confirmed() {
 		return false
 	}
 	req := *a.Payload
 	req.Address = a.Conversation
-	receipt, code := *a.Receipt, a.ErrorCode
-	switch receipt.Transport {
-	case claudeNativeTransport:
+	before := Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusUnknown}
+	if a.Receipt != nil {
+		before = *a.Receipt
+	}
+	receipt, code := before, a.ErrorCode
+	switch address, _ := ParseAddress(a.Conversation); address.Harness {
+	case "claude":
 		receipt, code = observeClaudeNative(env, req, *a.TranscriptOffset, receipt, code)
-	case piNativeTransport:
+	case "pi":
 		if observePiNative(env, req, *a.TranscriptOffset) {
 			receipt, code = piTranscriptReceipt(req), ""
 		}
 	}
-	if receipt.Status == a.Receipt.Status && receipt.Detail == a.Receipt.Detail && code == a.ErrorCode {
+	if receipt.Status == before.Status && receipt.Detail == before.Detail && code == a.ErrorCode {
 		return false
 	}
 	a.Receipt, a.ErrorCode = &receipt, code

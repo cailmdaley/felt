@@ -71,7 +71,7 @@ func TestAQueuedBatchRollsForwardOnceItsConversationEnded(t *testing.T) {
 	}
 }
 
-// The batch an earlier build pinned on the Mac, shaped as it is on disk: a
+// A batch an earlier build pinned, shaped as such a batch is on disk: a
 // quiet payload under its plain message id, pinned to a conversation that has
 // ended and been replaced, its outcome in messages/ as a Claude hook queue's
 // receipt, and its member carrying a copy of the attempt. The first consume of
@@ -81,7 +81,7 @@ func TestAQuietBatchPinnedByAnEarlierBuildIsReleasedToTheCurrentReceiver(t *test
 	env := testEnv(t)
 	const old, current = "shuttle://host/claude/A", "shuttle://host/claude/B"
 	const id = "msg-0123456789abcdef0123456789abcdef"
-	const text = "The night's digest changed; read it before the almanac."
+	const text = "text of m"
 	root := mailboxDir(env, "fiber", "fiber")
 	if err := RegisterMailbox(env, "claude", "A", "host", "", os.Getpid(), true); err != nil {
 		t.Fatal(err)
@@ -94,19 +94,19 @@ func TestAQuietBatchPinnedByAnEarlierBuildIsReleasedToTheCurrentReceiver(t *test
 	}
 	b := Worker{Address: current, Epoch: transition(t, env, "B", current)}
 
-	payload := map[string]any{"address": old, "text": text, "from": "shuttle://host/claude/sender", "reply_to": "proj/sender", "wake": false, "message_id": id}
-	opened := time.Now().Add(-21 * time.Hour).UnixNano()
+	payload := map[string]any{"address": old, "text": text, "from": "shuttle://host/claude/sender", "reply_to": "work/sender", "wake": false, "message_id": id}
+	opened := time.Now().Add(-time.Hour).UnixNano()
 	attempt := map[string]any{"payload": payload, "base_text": text, "variant": "plain", "batch_id": batchID([]string{id}), "conversation": old, "members": []string{id}, "opened_at": opened}
 	writeJSON(t, filepath.Join(root, "batches", batchID([]string{id})+".json"), attempt)
 	writeJSON(t, filepath.Join(root, "pending", mailboxKey(id)+".json"), map[string]any{
-		"request":         map[string]any{"address": "", "text": text, "from": "shuttle://host/claude/sender", "reply_to": "proj/sender", "wake": false, "message_id": id},
+		"request":         map[string]any{"address": "", "text": text, "from": "shuttle://host/claude/sender", "reply_to": "work/sender", "wake": false, "message_id": id},
 		"wishes":          map[string]any{"source": "message", "turn": "none", "session": "any", "if_costly": "hold"},
 		"queued_at":       opened - int64(2*24*time.Hour),
 		"attempt":         attempt,
 		"attempt_address": old,
 	})
 	transport := id + "-" + mailboxKey(old)[:16]
-	sent := Request{Address: old, Text: text, From: "shuttle://host/claude/sender", ReplyTo: "proj/sender", MessageID: transport}
+	sent := Request{Address: old, Text: text, From: "shuttle://host/claude/sender", ReplyTo: "work/sender", MessageID: transport}
 	writeJSON(t, filepath.Join(dataDir(env), "messages", mailboxKey(transport)+".json"), map[string]any{
 		"hash":    requestHash(sent),
 		"state":   "complete",

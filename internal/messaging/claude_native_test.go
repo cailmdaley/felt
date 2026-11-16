@@ -422,6 +422,44 @@ func TestConsumeReobservesAClaudeBatch(t *testing.T) {
 	}
 }
 
+// A consume killed after its native write and before it recorded the receipt
+// leaves a manifest with a transcript offset and no receipt; the next consume
+// confirms it from the transcript, sending nothing.
+func TestConsumeConfirmsAClaudeBatchWhoseReceiptWasNeverRecorded(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	_, sent := nativeClaudeFixture(t, env, func(map[string]any, *os.File) {})
+	const conversation = "shuttle://host/claude/session"
+	w := Worker{Address: conversation, Epoch: transition(t, env, "session", conversation)}
+	putWish(t, env, "m", "ask", "hold")
+	root := mailboxDir(env, "fiber", "fiber")
+	batch := newBatch(t, []string{filepath.Join(root, "pending", mailboxKey("m")+".json")}, conversation)
+	batch.TranscriptOffset = transcriptEnd(env, conversation)
+	if err := writeBatch(root, &batch); err != nil {
+		t.Fatal(err)
+	}
+	registration, err := readClaudeNative(env, "session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	transcript, err := os.OpenFile(registration.Transcript, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := *batch.Payload
+	req.Address = conversation
+	nativeRows(map[string]any{"uuid": claudeNativeUUID(req)}, transcript, false)
+	if err := transcript.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := consumeWith(context.Background(), env, "fiber", "host", w, neverSend(t)); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := pendingCount(env, "fiber"); n != 0 || sent.Load() != 0 || batchOf(t, root, "m") != nil {
+		t.Fatalf("pending = %d, socket writes = %d", n, sent.Load())
+	}
+}
+
 func TestClaudeNativeMidTurnAbsorptionIsAccepted(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)

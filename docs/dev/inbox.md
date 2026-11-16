@@ -431,7 +431,7 @@ Each later pass advances an open batch from its record alone, never sending its 
 | `outcome` recorded | Finish the close |
 | Confirmed receipt, or one the conversation's transcript now confirms | Close it delivered, subscribing the idle notices its members asked for |
 | A thread member superseded | Move that member to offered and close the batch ambiguous |
-| Unconfirmed, sent to W | Read W's transcript from `transcript_offset` to its end, without waiting, and keep waiting; after five minutes of an `unknown` outcome, one retry, warning-marked, under its own transport id |
+| Unconfirmed, sent to W | Keep waiting; after five minutes of an `unknown` outcome, one retry, warning-marked, under its own transport id |
 | Unconfirmed, sent to W but held for approval (`wake_held`) | Wait; no retry |
 | Unconfirmed, sent to a conversation that has ended | Roll forward to W at once, warning-marked |
 | Unconfirmed, sent to a conversation W has replaced for five minutes | Roll forward to W, warning-marked |
@@ -439,9 +439,10 @@ Each later pass advances an open batch from its record alone, never sending its 
 | A hook's claim | Close it ambiguous |
 
 “Unconfirmed” is every outcome but a confirmation: `unknown`, a Claude `queued` or `submitted`, a Pi `queued`, and no receipt at all.
+Each pass reads a Claude or Pi conversation's transcript again from `transcript_offset` to its end and stops there, without waiting, whether or not the send's receipt was recorded.
 A `queued` send to a conversation that is still the receiver waits for its transcript rather than retrying, since the receiver holds it.
 Exhausting the retry does not prevent a later roll-forward to another receiver.
-A fiber with no worker settles only the first three rows and leaves the rest to the next receiver.
+A fiber with no worker settles only the first three rows and hook claims, and leaves the rest to the next receiver.
 
 ### Contract 47 and rollback
 
