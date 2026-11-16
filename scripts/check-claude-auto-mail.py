@@ -193,18 +193,19 @@ def probe(args, mode):
         if mode == "fiber-context":
             session = json_lines(root / "hooks.jsonl")[0]["input"]["session_id"]
             address = f"shuttle://probe/claude/{session}"
-            def mailbox(*argv):
-                result = subprocess.run([str(args.shuttle), "context-mailbox", *argv], env=env, capture_output=True, text=True, timeout=120)
+            def shuttle(*argv):
+                result = subprocess.run([str(args.shuttle), *argv], env=env, capture_output=True, text=True, timeout=120)
                 assert result.returncode == 0, result.stderr
                 return result.stdout.strip()
-            generation = mailbox("receiver", "private-fiber", "probe-worker", address)
-            mailbox("put", "private-fiber", "oversized", "x" * (20 << 10) + " " + server.token)
-            mailbox("deliver", "private-fiber", address, generation)
+            generation = shuttle("context-mailbox", "receiver", "private-fiber", "probe-worker", address)
+            shuttle("context-mailbox", "put", "private-fiber", "oversized", "x" * (20 << 10) + " " + server.token)
+            shuttle("inbox", "consume", "private-fiber", address, generation)
             (root / "release").touch()
             wait_for(lambda: any(r.get("type") == "assistant" and server.token in text_of(r.get("message", {}).get("content")) for r in json_lines(root / "output.jsonl")), "full retained message read and reply", child)
             offers = [h for h in json_lines(root / "hook-output.jsonl") if "Full message JSON" in json.dumps(h)]
             assert len(offers) == 1 and len(json.dumps(offers[0])) < 8 << 10, offers
-            assert mailbox("pending", "private-fiber") == '{"private-fiber":0}'
+            pending = json.loads(shuttle("inbox", "pending", "private-fiber"))
+            assert pending["private-fiber"]["count"] == 0, pending
             print(json.dumps({"mode": mode, "hook_offers": 1, "full_tail_seen": True, "hook_bytes": len(json.dumps(offers[0]))}), flush=True)
             return
         if mode == "default-policy":
