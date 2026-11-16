@@ -64,6 +64,9 @@ import { FiberSends } from './fiberSends.js'
 import { viewOfHash } from './workspace/route.js'
 import type { DocKey } from './workspace/documents.js'
 
+/** Who the ledger names for a rest, a pause or a resume given on the board. */
+const BOARD_ACTOR = 'board'
+
 /** The message a thrown/rejected value carries, for a banner or an announce. */
 const errText = (err: unknown): string => (err as { message?: string })?.message ?? String(err)
 
@@ -1300,7 +1303,7 @@ export class KanbanModal {
     this.closeRestPopover = restPopover(card, async until => {
       try {
         await postDaemonJson(this.shuttleBase, '/api/v1/lifecycle', {
-          action: 'rest', fiber: card.id, origin: card.originId, until,
+          action: 'rest', fiber: card.id, origin: card.originId, until, actor: BOARD_ACTOR,
         }, 'Rest failed')
         await this.fetchAndRender()
       } catch (error) {
@@ -1314,7 +1317,7 @@ export class KanbanModal {
     const verb = resume ? 'Resume schedule' : 'Pause schedule'
     try {
       await postDaemonJson(this.shuttleBase, '/api/v1/lifecycle', {
-        action: resume ? 'resume' : 'rest', fiber: card.id, origin: card.originId,
+        action: resume ? 'resume' : 'rest', fiber: card.id, origin: card.originId, actor: BOARD_ACTOR,
       }, `${verb} failed`)
       this.announce(resume ? `Resumed “${card.name}”'s schedule.` : `Paused “${card.name}”'s schedule.`)
     } catch (error) {

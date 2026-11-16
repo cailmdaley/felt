@@ -257,7 +257,8 @@ export class Workspace {
       onRest: (card, anchor) => this.opts.onRest?.(card, anchor),
       onEscapeLayer: () => this.controls(this.current)?.handleEscape() ?? false,
       onChannel: card => this.open(card, this.origin, undefined, this.library.hasMetadata(card)),
-      onScan: card => this.open(card, this.origin, undefined, this.library.hasMetadata(card), true),
+      // A step to the next constitution is a scan, not a look: it moves neither voice nor Rex.
+      onScan: card => this.quietly(() => this.open(card, this.origin, undefined, this.library.hasMetadata(card), true)),
       onOrchestrator: () => this.openOrchestrator(),
       onTapestry: () => this.toggleMap(),
       buildProse: doc => doc.kind === 'family' ? this.family() : this.prose(doc.key),

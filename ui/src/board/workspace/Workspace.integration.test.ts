@@ -1010,6 +1010,28 @@ describe('workspace reader integration', () => {
     expect(await workspace.look(drawn)).toBe(true)
     expect(selections()).toEqual([{ tmux_session: 'worker-hub', shuttle_host: 'host-a', select_only: true }])
   })
+  it('steps to the next constitution with j, k or Alt-Down quietly: a scan moves neither voice nor Rex, a click after it does', async () => {
+    const hub = card({ id: 'hub', uid: 'hub', originId: 'host-a', shuttleHost: 'host-a', shuttleKind: 'oneshot', status: 'active', path: 'hub.md', tmuxSession: 'worker-hub', workerState: 'running' })
+    const other = card({ id: 'other', uid: 'other', originId: 'host-a', shuttleHost: 'host-a', shuttleKind: 'oneshot', status: 'active', path: 'other.md', tmuxSession: 'worker-other', workerState: 'running' })
+    const feed = [hub, other]
+    bodyCards = feed
+    workspace.dispose()
+    const sight = vi.fn()
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, deskRows: () => feed, origin: () => 'Desk', onVisibility: visibility, onSight: sight, dock: new Dock('', changed) })
+    const rex = (): unknown[] => selections().map(body => body.tmux_session)
+    vi.useFakeTimers()
+    const seen = (): unknown[] => [...new Set(sight.mock.calls.map(([target]) => target?.id))]
+    workspace.openFromDesk(hub); await holdOut()
+    expect([seen(), rex()]).toEqual([['hub'], ['worker-hub']])
+    for (const [key, alt] of [['j', false], ['k', false], ['ArrowDown', true]] as const) {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key, altKey: alt, bubbles: true, cancelable: true })); await holdOut()
+    }
+    expect(document.querySelector('.ws-channel-title')?.textContent).toBe('other')
+    expect([seen(), rex()]).toEqual([['hub'], ['worker-hub']])
+    workspace.openFromDesk(other); await holdOut()
+    expect(sight).toHaveBeenLastCalledWith(other)
+    expect(rex()).toEqual(['worker-hub', 'worker-other'])
+  })
   it('moves voice and Rex together from every page the board shows, to the constitution a page speaks to, once per target', async () => {
     const hub = card({ id: 'hub', uid: 'hub', originId: 'host-a', shuttleHost: 'host-a', shuttleKind: 'oneshot', status: 'active', path: 'hub.md', tmuxSession: 'worker-hub', workerState: 'running' })
     const report = card({ id: 'hub/report', uid: 'hub-report', originId: 'host-a', status: 'open', path: 'hub/report.md' })

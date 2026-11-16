@@ -140,7 +140,26 @@ describe('Reader Rest lifecycle', () => {
     const calls = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/api/v1/lifecycle'))
     expect(calls).toHaveLength(1)
     expect(calls[0][1]?.method).toBe('POST')
-    expect(JSON.parse(String(calls[0][1]?.body))).toEqual({ action: 'rest', fiber: 'finished', origin: 'remote', until: '' })
+    expect(JSON.parse(String(calls[0][1]?.body))).toEqual({ action: 'rest', fiber: 'finished', origin: 'remote', until: '', actor: 'board' })
+  })
+})
+
+describe('a standing constitution\'s schedule', () => {
+  it.each([
+    ['active', { action: 'rest', fiber: 'post', origin: 'remote', actor: 'board' }],
+    ['open', { action: 'resume', fiber: 'post', origin: 'remote', actor: 'board' }],
+  ] as const)('s in the view of a %s one pauses or resumes it at once, as the board', async (status, body) => {
+    const post = card({ id: 'post', uid: 'post', originId: 'remote', status, shuttleKind: 'standing', shuttleSchedule: '0 9 * * 1-5', effectiveHorizon: status === 'open' ? 'stashed' : 'now' })
+    draw(response({ stash: [post] }))
+    inside.openDocumentChannel(post)
+    await settle()
+    const target = document.querySelector<HTMLElement>('.ws-reader .ws-return')!
+    target.focus()
+    press('s', {}, target)
+    await settle()
+    expect(document.querySelector('.kbn-rest-popover')).toBeNull()
+    const calls = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/api/v1/lifecycle'))
+    expect(calls.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([body])
   })
 })
 
@@ -163,7 +182,7 @@ describe('Rest controls', () => {
     await Promise.resolve(); await Promise.resolve()
     const calls = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/api/v1/lifecycle'))
     expect(calls).toHaveLength(1)
-    expect(JSON.parse(String(calls[0][1]?.body))).toEqual({ action: 'rest', fiber: 'finished', origin: 'remote', until: '' })
+    expect(JSON.parse(String(calls[0][1]?.body))).toEqual({ action: 'rest', fiber: 'finished', origin: 'remote', until: '', actor: 'board' })
   })
 
 })

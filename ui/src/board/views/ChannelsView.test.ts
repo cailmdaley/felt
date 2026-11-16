@@ -445,3 +445,38 @@ it('says nothing for a closing post, its words being the outcome', async () => {
   expect([close.dataset.kind, close.hasAttribute('data-waiting'), close.querySelector('.kbn-ch-item-text')]).toStrictEqual(['close', true, null])
   expect(host.textContent).not.toContain('2000')
 })
+
+/** What the board asked of the daemon after `from`: each request's path and method. */
+const requestsSince = (from: number): Array<[string, string]> => vi.mocked(fetch).mock.calls.slice(from).map(([url, init]) => [String(url), init?.method ?? 'GET'])
+const LIFECYCLE = /\/api\/v1\/(transition|lifecycle|kill|dispatch)\b/
+
+it('clears a waiting post with its ✓ and does nothing else: one write, the dismissal, and no lifecycle request', async () => {
+  const human = { label: 'Sam' }, posted = Date.now() - 4 * minute
+  const { posts } = daemon([], undefined, {}, { board: { C: [...BOARD.C, { ...record({ id: 'b5', kind: 'post', fiber: 'C', to: human, text: 'Two calls for you today.' }, 4), timestamp: posted }] }, waiting: { C: { id: 'b5', at: posted } } })
+  // The chair is active and was never closed.
+  const { host } = await mount([chair, tsz, beam])
+  expect([chair.status, chair.closedAt]).toStrictEqual(['active', undefined])
+  const from = vi.mocked(fetch).mock.calls.length
+  item(host, 'cmbx').querySelector<HTMLButtonElement>('.kbn-ch-clear')!.click()
+  await settle(); await settle()
+  const asked = requestsSince(from)
+  expect(asked.filter(([, method]) => method === 'POST')).toStrictEqual([['/api/v1/channels/dismiss', 'POST']])
+  expect(asked.filter(([url]) => LIFECYCLE.test(url))).toStrictEqual([])
+  expect(posts.at(-1)?.[1]).toStrictEqual({ key: `clear:C:${posted}`, fiber: 'C' })
+  expect(item(host, 'cmbx').hasAttribute('data-waiting')).toBe(false)
+  expect(host.querySelector('[data-channel="channel:cmbx"]')!.hasAttribute('data-waiting')).toBe(false)
+})
+
+it('hides a channel and does nothing else: one write, the dismissal, and no lifecycle request', async () => {
+  daemon()
+  const { host } = await mount()
+  const pick = [...host.querySelectorAll<HTMLButtonElement>('.kbn-ch-pick')].find(el => el.querySelector('.kbn-ch-pick-name')?.textContent === 'van')!
+  const from = vi.mocked(fetch).mock.calls.length
+  pick.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 30 }))
+  await settle()
+  ;[...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(entry => entry.textContent === 'Hide')!.click()
+  await settle(); await settle()
+  const asked = requestsSince(from)
+  expect(asked.filter(([, method]) => method === 'POST')).toStrictEqual([['/api/v1/channels/dismiss', 'POST']])
+  expect(asked.filter(([url]) => LIFECYCLE.test(url))).toStrictEqual([])
+})
