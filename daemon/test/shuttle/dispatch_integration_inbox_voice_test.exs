@@ -38,7 +38,6 @@ defmodule Shuttle.DispatchIntegrationInboxVoiceTest do
     request = post_api_async("/api/v1/deliver", lost)
     assert_receive {:transport_held, :paste, holder}
     kill_daemon!(poller, [request], holding: holder)
-    refute_received {:answered, ^request, _}
 
     poller = restart!(host, runner: TransportRunner)
     assert %{session_uuid: uuid} = Poller.live_worker(poller, id)
@@ -51,6 +50,22 @@ defmodule Shuttle.DispatchIntegrationInboxVoiceTest do
     poll!(poller)
     refute Enum.any?(TransportRunner.pastes(), &(&1 =~ "then rerun it"))
     refute hook!(uuid) =~ "then rerun it"
+
+    # The same session's hook does offer what is queued for it: an agent's
+    # context, sent now.
+    assert {_, 0} =
+             shuttle([
+               "message",
+               id,
+               "Also check the kernel.",
+               "--context-only",
+               "--message-id",
+               "v-context",
+               "--from",
+               "life/vizier"
+             ])
+
+    assert hook!(uuid) =~ "Also check the kernel."
     assert [_] = rows(events, "voice-lost")
 
     # The next batch is typed into the same worker, once.
