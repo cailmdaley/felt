@@ -110,7 +110,7 @@
 .kbn-ch-pick-unread { flex: none; align-self: center; width: 6px; height: 6px; border-radius: 50%; background: var(--kbn-ink-soft); }
 /* What waits on the human floats above the human's order, a little apart from it. */
 .kbn-ch-rail-item[data-waiting]:has(+ .kbn-ch-rail-item:not([data-waiting])) { margin-bottom: 8px; }
-.kbn-ch-pick-hidden { flex: none; font: italic var(--type-label)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); }
+.kbn-ch-pick-hidden { flex: none; font: var(--type-label)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); }
 /* Picked up: the entry marks where it would land, and its copy follows the pointer. */
 .kbn-ch-pick[data-moving]:not([data-drag-preview]) { opacity: 0.35; }
 /* The SDK writes the copy's computed colours inline; an entry's own background is clear, so the copy takes the paper's. */
@@ -131,7 +131,7 @@
 }
 .kbn-ch-doc:hover { color: var(--kbn-ink); background: color-mix(in srgb, var(--kbn-ink) 5%, transparent); }
 .kbn-ch-doc-name { font: var(--type-row)/var(--leading-tight) var(--font-serif); overflow-wrap: anywhere; }
-.kbn-ch-doc-meta { font: italic var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); overflow-wrap: anywhere; }
+.kbn-ch-doc-meta { font: var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); overflow-wrap: anywhere; }
 
 /* A channel: its name, its stream, the console to its chair. */
 .kbn-ch, .kbn-ch-thread { min-width: 0; min-height: 0; display: flex; flex-direction: column; outline: none; }
@@ -189,8 +189,6 @@ button.kbn-ch-msg-name:hover { color: var(--kbn-ink-soft); }
 .kbn-ch-new::before, .kbn-ch-new::after { content: ''; flex: 1; border-top: 0.5px solid currentColor; }
 .kbn-ch-new::before { flex: 0 0 22px; }
 .kbn-ch-new span { font: 600 var(--type-label)/var(--leading-ui) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
-.kbn-ch-msg-to { font-style: italic; }
-.kbn-ch-age { font-style: italic; }
 .kbn-ch-msg-text {
   font: var(--type-row)/var(--leading-prose) var(--font-serif);
   color: var(--kbn-ink);
@@ -210,7 +208,7 @@ button.kbn-ch-msg-name:hover { color: var(--kbn-ink-soft); }
 .kbn-ch-msg.kbn-ch-line { padding-block: 2px; }
 .kbn-ch-line .kbn-ch-msg-name { font-weight: 500; font-size: var(--type-meta); color: var(--kbn-ink-soft); }
 .kbn-ch-line .constitution-state-dot { height: 1.3em; }
-.kbn-ch-line-text { font-style: italic; color: var(--kbn-ink-soft); }
+.kbn-ch-line-text { color: var(--kbn-ink-soft); }
 .kbn-ch-acts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin-top: 4px; }
 
 /* Files: images drawn small, every other file a chip. */
@@ -286,7 +284,7 @@ button.kbn-ch-msg-name:hover { color: var(--kbn-ink-soft); }
 .kbn-ch-thread-name:hover { color: var(--kbn-ink-soft); }
 .kbn-ch-liveness {
   padding: 0 8px; border-radius: 999px;
-  font: italic var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted);
+  font: var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted);
   border: 0.5px solid var(--kbn-rule-strong);
 }
 .kbn-ch-liveness[data-state='working'] { color: var(--kbn-agent); border-color: color-mix(in srgb, var(--kbn-agent) 50%, transparent); }
