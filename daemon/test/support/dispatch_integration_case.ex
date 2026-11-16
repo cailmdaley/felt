@@ -26,6 +26,7 @@ defmodule Shuttle.Test.DispatchIntegrationCase do
       alias Shuttle.Test.DispatchIntegrationCase.RealRexRunner
       alias Shuttle.Test.DispatchIntegrationCase.PausedListingRunner
       alias Shuttle.Test.DispatchIntegrationCase.ScopedAPI
+      alias Shuttle.Test.DispatchIntegrationCase.TransportRunner
 
       unless System.find_executable("felt") && System.find_executable("shuttle") do
         @moduletag skip: "felt and shuttle binaries are required for this CLI integration suite"
@@ -141,6 +142,67 @@ defmodule Shuttle.Test.DispatchIntegrationCase do
     def cmd(cmd, args, _opts) do
       Agent.update(server(), fn s -> %{s | commands: s.commands ++ [{cmd, args}]} end)
       {"", 0}
+    end
+  end
+
+  # The integration runner with its terminal's input made visible: every text
+  # pasted into a worker's terminal is kept (`pastes/0`), and a gate armed by
+  # `gate/1` stops the first paste or launch at the terminal, before
+  # it happens, and tells the test which process holds it there.
+  defmodule TransportRunner do
+    @behaviour Shuttle.Runner
+    alias Shuttle.Test.DispatchIntegrationCase.IntegrationRunner
+
+    def start!(owner) do
+      Shuttle.Test.Env.start_scoped!(
+        %{
+          id: __MODULE__,
+          start: {Agent, :start_link, [fn -> %{owner: owner, pastes: [], gate: nil} end]}
+        },
+        __MODULE__
+      )
+    end
+
+    defp server, do: Shuttle.Test.Env.server!(__MODULE__)
+
+    def pastes, do: Agent.get(server(), &Enum.reverse(&1.pastes))
+
+    def gate(kind) when kind in [:paste, :launch],
+      do: Agent.update(server(), &%{&1 | gate: kind})
+
+    @impl true
+    def cmd("tmux", ["load-buffer", "-b", _buffer, path] = args, opts) do
+      hold(:paste)
+      text = File.read!(path)
+      Agent.update(server(), &%{&1 | pastes: [text | &1.pastes]})
+      IntegrationRunner.cmd("tmux", args, opts)
+    end
+
+    def cmd("tmux", ["new-session" | _] = args, opts) do
+      hold(:launch)
+      IntegrationRunner.cmd("tmux", args, opts)
+    end
+
+    # The terminal's sessions outlive a daemon, and the next one lists them.
+    def cmd("tmux", ["ls", "-F", "\#{session_name}"] = args, opts) do
+      IntegrationRunner.cmd("tmux", args, opts)
+      {Enum.join(IntegrationRunner.tmux_sessions(), "\n"), 0}
+    end
+
+    def cmd(command, args, opts), do: IntegrationRunner.cmd(command, args, opts)
+
+    # A held transport never resumes: the process holding it is killed.
+    defp hold(kind) do
+      owner =
+        Agent.get_and_update(server(), fn
+          %{gate: ^kind, owner: owner} = state -> {owner, %{state | gate: nil}}
+          state -> {nil, state}
+        end)
+
+      if owner do
+        send(owner, {:transport_held, kind, self()})
+        Process.sleep(:infinity)
+      end
     end
   end
 
@@ -537,15 +599,15 @@ defmodule Shuttle.Test.DispatchIntegrationCase do
   end
 
   # An armed standing constitution between runs: active, its next tick hours
-  # away and its last one served, so only a message starts it.
-  def armed(host, id, extra \\ "") do
+  # away and its last one served, so only a message starts it. `shuttle`
+  # adds lines to its `shuttle:` block, indented as they belong there.
+  def armed(host, id, shuttle \\ "") do
     later = DateTime.add(DateTime.utc_now(), 6 * 3600, :second)
 
     constitution(host, id, """
     status: active
-    #{extra}
     shuttle:
-      kind: standing
+    #{shuttle}  kind: standing
       host: test-host
       agent: claude-sonnet
       project_dir: "#{host}"
@@ -708,6 +770,30 @@ defmodule Shuttle.Test.DispatchIntegrationCase do
     url = "http://127.0.0.1:#{port}"
     Shuttle.Test.Env.put_env("SHUTTLE_DAEMON_URL", url)
     url
+  end
+
+  # A request to this test's daemon's HTTP API, as the board sends it:
+  # answers the status and decoded body.
+  def post_api(path, body) do
+    conn =
+      Phoenix.ConnTest.build_conn(:post, path, Jason.encode!(body))
+      |> Map.merge(%{host: "127.0.0.1", port: 4000})
+      |> Plug.Conn.put_req_header("accept", "application/json")
+      |> Plug.Conn.put_req_header("content-type", "application/json")
+      |> ShuttleWeb.Endpoint.call(ShuttleWeb.Endpoint.init([]))
+
+    {conn.status, Jason.decode!(conn.resp_body)}
+  end
+
+  # The same request from a process of its own, which answers the test with
+  # `{:answered, pid, answer}` unless it is killed first. Answers its pid.
+  def post_api_async(path, body) do
+    test = self()
+
+    spawn(fn ->
+      Shuttle.Env.adopt_callers([test])
+      send(test, {:answered, self(), post_api(path, body)})
+    end)
   end
 
   # The real `shuttle` CLI as a sender runs it, in this test's scope: answers
