@@ -1132,23 +1132,33 @@
         },
         "responses": {
           "200": {
-            "description": "The worker has the human's line: typed in, or launched with it (delivery input).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DeliveryInput"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "Queued in the fiber's inbox (delivery context), or sent with arrival unconfirmed (delivered null), including input or a launch queued behind a busy Poller and an owner that did not answer in time (reason forward_timeout).",
+            "description": "The worker has the human's line, typed in or launched with it (delivery input), or an agent's fresh session started with the text (delivery fresh, with the worker's terminal fields). A repeated message_id answers duplicate true with the stored outcome: delivered true, or for a human line whose first try may not have arrived, delivered null with disposition unknown.",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
                       "$ref": "#/components/schemas/DeliveryInput"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DeliveryFresh"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Queued in the fiber's inbox (delivery context), or sent with arrival unconfirmed (delivered null), including input, a launch or a fresh session queued behind a busy Poller, a repeated fresh id whose start is unknown (duplicate true), and an owner that did not answer in time (reason forward_timeout).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DeliveryInput"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DeliveryFresh"
                     },
                     {
                       "$ref": "#/components/schemas/DeliveryContext"
@@ -3156,6 +3166,51 @@
             "type": "string"
           },
           "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "delivery",
+          "fiber_id",
+          "delivered"
+        ]
+      },
+      "DeliveryFresh": {
+        "type": "object",
+        "description": "An agent's resume_mode fresh request: the session started (delivered true, with the worker's terminal fields), or its start is unconfirmed (delivered null, with detail).",
+        "properties": {
+          "delivery": {
+            "const": "fresh"
+          },
+          "fiber_id": {
+            "type": "string"
+          },
+          "delivered": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "duplicate": {
+            "type": "boolean",
+            "description": "true when message_id repeats an earlier request; nothing new starts."
+          },
+          "message_id": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "surface": {
+            "const": "cli"
+          },
+          "terminal": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tmux_session": {
             "type": "string"
           }
         },

@@ -330,6 +330,14 @@ defmodule ShuttleWeb.ApiContractWorkerTest do
 
     assert %{"error" => "text is required", "delivered" => false} =
              request("/deliver", %{fiber_id: id}, 400)
+
+    fresh = %{fiber_id: id, text: "Begin anew", resume_mode: "fresh", message_id: "agent-fresh"}
+
+    assert %{"delivery" => "fresh", "delivered" => true, "tmux_session" => _} =
+             request("/deliver", fresh, 200)
+
+    assert %{"delivery" => "fresh", "delivered" => true, "duplicate" => true} =
+             request("/deliver", fresh, 200)
   end
 
   test "delivery can resume a prior conversation" do
