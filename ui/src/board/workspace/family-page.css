@@ -8,22 +8,22 @@
 .ov-up { display: flex; flex-direction: column; padding: 4px 0 0; border-bottom: 1px solid var(--ws-hairline-soft); background: color-mix(in srgb, var(--ws-ink) 3%, var(--ws-paper, var(--kbn-paper))); }
 .ov-up:empty { display: none; }
 .ov-ancestor {
-  --ov-step: 14px; display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0 var(--ov-gutter) 0 0; cursor: pointer; outline: none;
+  --ov-step: 14px; position: relative; display: flex; align-items: center; gap: 6px; min-width: 0; cursor: pointer; outline: none;
+  padding: 0 var(--ov-gutter) 0 calc(var(--ov-gutter) - 6px + var(--ov-depth) * var(--ov-step));
   font: var(--type-meta)/var(--leading-ui) var(--font-mono); color: var(--ws-ink-soft); white-space: nowrap;
 }
 .ov-ancestor:is(:hover, :focus-visible) { background: var(--ws-hover); }
 .ov-ancestor:is(:hover, :focus-visible) .ov-slug { color: var(--ws-ink); text-decoration: underline; text-underline-offset: 3px; }
-.ov-rules { flex: none; align-self: stretch; display: flex; padding-left: calc(var(--ov-gutter) - 2px); }
+/* Its rule: from its dot's centre down to the foot of the stack, under the dot; the deepest strip draws none. */
 .ov-rule {
-  --ov-rule: var(--ws-hairline); width: var(--ov-step);
-  background: linear-gradient(var(--ov-rule), var(--ov-rule)) calc(var(--ov-step) / 2 - 1px) 0 / 2px 100% no-repeat;
+  --ov-rule: var(--ws-hairline); position: absolute; z-index: 0; top: 50%; width: 2px; pointer-events: none;
+  left: calc(var(--ov-gutter) - 6px + var(--ov-depth) * var(--ov-step) + 9px); height: calc(50% + var(--ov-below) * 100%);
+  background: var(--ov-rule);
 }
 .ov-rule[data-attention='waiting'] { --ov-rule: var(--kbn-owed-bright); }
 .ov-rule[data-attention='working'] { --ov-rule: var(--kbn-agent); }
-/* Its own level's rule starts at its dot, which stands on it, and runs down into the strips below. */
-.ov-rule:last-child { background-size: 2px 50%; background-position: calc(var(--ov-step) / 2 - 1px) 100%; }
-.ov-ancestor:last-child .ov-rule:last-child { background-size: 0 0; }
-.ov-ancestor .constitution-state-dot { margin-left: calc(var(--ov-step) / -2 - 16px); height: 22px; }
+.ov-ancestor:last-child .ov-rule { display: none; }
+.ov-ancestor .constitution-state-dot { position: relative; z-index: 1; height: 22px; }
 .ov-ancestor .ov-slug { flex: none; color: var(--ws-ink-soft); }
 .ov-strip-said { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ws-ink-soft); font: var(--type-meta)/var(--leading-ui) var(--font-serif); }
 .ov-title { grid-area: path; display: flex; align-items: center; min-width: 0; font: var(--type-label)/var(--leading-tight) var(--font-mono); }

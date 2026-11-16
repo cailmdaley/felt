@@ -225,26 +225,24 @@ export class FamilyPage {
     return row
   }
   /**
-   * An orchestrator above, one strip of the pinned stack: a rule for each
-   * level above it and its own, each in that level's state colour, then its
-   * dot, slug, run at a glance and the last thing it posted, on one line.
+   * An orchestrator above, one strip of the pinned stack, indented to its
+   * depth: its dot, slug, run at a glance and the last thing it posted, on one
+   * line, and its rule in its state colour from its dot down through the
+   * strips below it, so each level's rule passes every deeper strip.
    */
   private ancestor(card: KanbanCard, depth: number, above: readonly KanbanCard[], now: number): HTMLElement {
     const strip = this.opener(card, 'ov-ancestor'), waits = this.feeds.waits()
     strip.style.setProperty('--ov-depth', String(depth))
-    const rules = el('span', 'ov-rules')
-    rules.setAttribute('aria-hidden', 'true')
-    rules.append(...above.slice(0, depth + 1).map(level => {
-      const rule = el('span', 'ov-rule')
-      rule.dataset.attention = attentionOf(level, waits)
-      return rule
-    }))
+    strip.style.setProperty('--ov-below', String(above.length - 1 - depth))
+    const rule = el('span', 'ov-rule')
+    rule.setAttribute('aria-hidden', 'true')
+    rule.dataset.attention = attentionOf(card, waits)
     // Its words as plain text: a link here would both follow and open the view.
     const said = this.feeds.said(card), words = el('div')
     if (said) words.innerHTML = renderMarkdown(said.text)
     const text = el('span', 'ov-strip-said', words.textContent?.replace(/\s+/g, ' ').trim() ?? '')
     text.title = text.textContent ?? ''
-    strip.append(rules, stateDot(card, waits, () => this.feeds.view(card)), el('span', 'ov-slug', slug(card)), time(card, now), text)
+    strip.append(rule, stateDot(card, waits, () => this.feeds.view(card)), el('span', 'ov-slug', slug(card)), time(card, now), text)
     return strip
   }
   /**

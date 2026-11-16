@@ -52,7 +52,7 @@ export function registerMapViewJourneys(test) {
     await head(page, 'Response analysis').waitFor()
     await asks(page, quiet.length + 1)
     assert.deepEqual(await asked(page), [...quiet, 'select:session-analysis'])
-    assert.match(await page.locator('.ws-stage-band .ws-band-title').textContent(), / \/ analysis$/)
+    assert.match(await page.locator('.ws-stage-band .ws-band-title').textContent(), /\/analysis$/)
     // Its orchestrators stand above its head.
     const scroller = view(page).locator('.ws-family-scroll')
     assert.deepEqual(await view(page).locator('.ov-ancestor').evaluateAll(rows => rows.map(row => row.title)), [rootName])

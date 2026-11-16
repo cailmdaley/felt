@@ -24,7 +24,7 @@
 .uf-count { min-width: 5ch; text-align: center; font-variant-numeric: tabular-nums; }
 .uf-control {
   min-width: 24px; height: 24px; padding: 0 6px; border: 0; border-radius: 3px; background: none; cursor: pointer;
-  color: var(--ws-ink-soft); font: var(--type-meta)/1 var(--font-serif);
+  color: var(--ws-ink-soft); font: var(--type-meta)/var(--leading-solid) var(--font-serif);
 }
 .uf-control:disabled { opacity: .35; cursor: default; }
 .uf-control:not(:disabled):is(:hover, :focus-visible) { color: var(--ws-ink); background: var(--ws-hover); outline: none; }

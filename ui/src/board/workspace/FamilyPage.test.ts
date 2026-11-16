@@ -119,10 +119,10 @@ describe('a constitution\'s view', () => {
     const { page } = made(root, { waits: () => new Map([['hub/mid/a', { id: 'p', at: now - hour, kind: 'post', text: 'The leaf is cut.' }]]) })
     expect(threads(page)).toStrictEqual([['q', 'Which one?'], ['mid', ''], ['↳ a', 'The leaf is cut.'], ['w', '']])
     expect(page.el.querySelector<HTMLElement>('.ov-thread[data-fiber="hub/mid"] .ov-open')!.textContent).toBe('›')
-    // Its orchestrators, one strip each above it, a rule per level down to its own.
+    // Its orchestrators, one strip each above it, each with its own rule.
     const strips = [...made(leaf).page.el.querySelectorAll<HTMLElement>('.ov-up .ov-ancestor')]
     expect(strips.map(strip => [strip.querySelector('.ov-slug')!.textContent, strip.getAttribute('title'), strip.querySelectorAll('.ov-rule').length, strip.querySelector('.ov-strip-said')!.textContent!.trim()]))
-      .toStrictEqual([['hub', 'hub', 1, ''], ['mid', 'Mid', 2, 'Posted the cut.']])
+      .toStrictEqual([['hub', 'hub', 1, ''], ['mid', 'Mid', 1, 'Posted the cut.']])
   })
 
   it('opens a thread\'s view from its row, and its orchestrators\' from the heads above it', () => {
