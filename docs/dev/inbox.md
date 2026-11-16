@@ -10,10 +10,28 @@ Any other string names an inbox of its own: `shuttle inbox put` accepts it, and 
 
 ## The delivery guarantee
 
-A message to a fiber, a thread result and a delayed message are inbox entries, and the entry, with the manifest of the batch that holds it, is the source of truth across a daemon, CLI or worker death: it stays pending until a worker's confirmed receipt or its hook's emission delivers it, so a death drops nothing, and only a cancel, a superseded thread result or its retention (a thread result or notice, 14 days after its stamp) settles it undelivered.
-A death, or a receiver that never confirms, can leave a delivery whose outcome is unknown; the inbox then delivers the entry again, by the [batch rules](#batches-and-the-claim), and every such repeat opens with “Possible repeat”.
-A message to a session that asks for a turn is not an entry: it goes once to the session's own transport (Claude's native socket, Codex's terminal, Pi's native inbox), its sender's receipt says what that transport answered, and a repeat of its id answers that receipt without sending again, unless the first send was refused before anything was written; the exception is a Claude session that is idle and costly to wake, whose owner holds the ask as an entry in the session's inbox, context for its hook (receipt `queued` on `claude-hook`); a quiet one (`--context-only`) is an entry there too, which only that session's hook reads.
-Lines the daemon transports itself are at most once: the human's typed and spoken lines, a pulse tick and an agent's `--fresh` request are recorded before their one transport, only the call that created the record transports it, and a record left `unknown` is never sent again; one settled `undeliverable` never reached a worker and may be transported again under its id, unless it was spoken.
+An *entry* is a message an inbox holds in `pending/` until a worker takes it.
+A worker takes entries in one of two ways: its *hook* (the harness hook Shuttle installs, which adds pending entries to the conversation as context at a prompt or tool call) emits them, or the *consumer* (`shuttle inbox consume`, which the daemon runs) sends them to the conversation as one message, a *batch*.
+Each batch has a *manifest* in `batches/` naming its entries and the conversation it went to ([Batches and the claim](#batches-and-the-claim)).
+An entry is *delivered* when its transport confirms the batch or a hook emits it; neither proves that the model read it.
+
+A message to a fiber, a thread result and a delayed message are entries, delivered exactly once, with a possible repeat always marked.
+The entry, with the manifest of the batch that holds it, is the source of truth across a daemon, CLI or worker death: it stays pending until it is delivered, so a death drops nothing.
+Only a cancel, a superseded thread result or retention (a thread result or notice, 14 days after its stamp) settles an entry undelivered.
+A death, or a receiver that never confirms, can leave a send whose outcome is unknown; the inbox then sends the entry again, once more to the same conversation or on to the one that replaces it, and every such repeat opens with “Possible repeat”.
+Its id makes a second enqueue a no-op while the entry is pending and for 14 days after it settles.
+
+Lines the daemon transports itself are at most once: the human's typed and spoken lines, a pulse tick and an agent's `--fresh` request.
+Each is recorded in the fiber's inbox before its one transport, and only the call that created the record transports it; a record left `unknown` is never transported again.
+A record settled `undeliverable` never reached a worker, and its id may be transported again, unless it was spoken.
+A pulse tick is also guarded by its clock, which the daemon moves past the tick before sending it.
+
+A message to a session address is not an entry when it asks for a turn: it goes once to the session's own transport (Claude's native socket, Codex's terminal, Pi's native inbox), and its sender's receipt says what that transport answered.
+A repeat of its id answers that receipt without sending again, unless the first send was refused before anything was written.
+Two session messages are entries, in the session's own inbox, which only that session's hook reads: a quiet one (`--context-only`), and an ordinary ask to an idle Claude session that is costly to wake, which the owner holds as context (receipt `queued` on `claude-hook`).
+
+The fourteen outside-in tests `daemon/test/shuttle/dispatch_integration_inbox_*_test.exs` pin this guarantee with the real CLI and hooks, most of them against a daemon that dies at the worst moment:
+`message` (a fiber message enqueued before its owner dies is delivered once), `cross_host` (the same, forwarded to another owner), `delayed` (a delayed message, once and not before its time), `launch_death` (the message whose launch its owner died starting), `roll_forward` (a batch whose conversation ended unanswered is carried once, marked, to its replacement), `thread` and `thread_waking` (quiet and waking thread results), `notify_idle` (a notify-only subscription is no entry), `human`, `voice`, `fresh` and `pulse` (a line, spoken line, fresh request or tick its owner died transporting is never transported again), and `session` and `session_busy` (a session message is sent once under its receipt, and a busy Claude session's ask goes to its native socket, never its inbox).
 
 ## The store
 
@@ -41,7 +59,6 @@ A fiber has `destination.json`, its worker-owned conversation and receiver epoch
 `request` is the publication as `messaging.Request` defines it: id, text, sender, attachments, reply and idle-notification fields, thread signal and retention stamp.
 `queued_at` is Unix nanoseconds.
 Readers also write `possible_repeat` when an entry settles back to pending after a batch that may have delivered it.
-Entries written by earlier builds may also carry `attempt`, `attempt_address` and `fallback`; nothing reads them.
 A routing inbox entry also carries `routing`, its publication's routing record, and the `disposition` it settled with, written before it moves to offered.
 
 ### Delivery wishes
@@ -53,11 +70,10 @@ A routing inbox entry also carries `routing`, its publication's routing record, 
 | `if_costly` | `hold`, `fresh` | Hold context or request a fresh session instead of waking a large, cold session |
 | `not_before` | RFC 3339 time, or absent | When readers may first take it |
 
-Fiber readers select from `turn`, not the request's wake fields.
-`Enqueue` also sets `request.wake` for `force`, so a reader that does not understand wishes can still wake for it.
+Readers select from `turn`; the request's wake fields decide nothing for an entry that has wishes.
 Session entries are context for the session's hook.
 Session inboxes refuse `ask`, `force` and `idle` with `wake_required`: a session's turn comes from its own transport, never its inbox.
-A busy fiber's Claude `ask` remains hook-eligible for 30 seconds, then consume uses its native wake; the daemon schedules a consume at that deadline and also consumes on polls.
+A busy fiber's Claude `ask` is hook-eligible for 30 seconds, then consume wakes the worker natively; the daemon schedules a consume at that deadline and also consumes on polls.
 
 An entry without wishes reads as the wishes its request implies.
 `turn` comes from `idle_only`, then `context_if_busy`, then `wake`, else `none`.
@@ -69,7 +85,7 @@ The id prefixes `thread-`, `pulse-` and `voice-` imply sources `thread`, `pulse`
 `messaging.Enqueue(env, InboxEntry{Address, Request, Wishes, Derived})` is the only function that creates entries.
 The session hook queue, `context-mailbox put` and `inbox put` call it.
 It requires a message id, text of at most 64 KiB (nonempty for a fiber), valid wish values and an RFC 3339 `not_before` when supplied.
-It fills unsaid wishes and sets the request's compatibility wake fields.
+It fills unsaid wishes and clears the request's wake fields, setting `wake` only for a fiber entry's `force`.
 
 A session entry requires a supported harness and live local hook registration.
 An already-pending id is an error; an offered id can be queued again.
@@ -91,8 +107,9 @@ Attachments are retained under the owner's `message-files/`; the entry contains 
 A plain agent `/deliver` does the same, minting an id when the caller supplies none.
 The owner clears the fiber's outstanding ask when a due entry from a sender other than `shuttle` reaches its inbox, including a remote sender.
 A future entry clears nothing.
-Session-addressed messages and idle notices keep their direct transports and `messages/` receipts.
+Session-addressed messages, idle notices included, go to the session's own transport under a receipt in the data directory's `messages/`.
 A session message that asks for a turn goes to the session's native transport whatever its turn state: a busy Claude session's native inbox queues it behind the running turn, which takes it in at its next model call or, if none comes, runs it as the next turn, and a held, refused or failed send answers its sender in the receipt.
+The one exception is an ordinary ask (not `--wake`) to a Claude session that has ended its turn and is costly to wake: the owner sends it as context instead, an entry in the session's inbox for its next hook, and the receipt's detail says what a wake would cost.
 A receipt is created exclusively before the side effect, as a reservation carrying a random nonce that tells a network filesystem's replayed link from a competing sender, and completed with the transport's answer after it.
 A repeat of the id answers the receipt as recorded; a reservation without an answer, whether its send is still running or stopped mid-delivery, answers `ambiguous_delivery` at once and is never sent again; and different content under the id is `message_id_conflict`.
 A transport that refused before writing anything (`preflight_failed`) releases its reservation, so a retry sends.
@@ -113,8 +130,9 @@ That launch is an inbox launch, so the agent gate holds it: a closed, resting or
 A refusal answers 409 with its `reason` and an `error` that names it, and settles the record undeliverable, so the same id may be sent again once that changes; nothing about it waits in the inbox, and a later message to the fiber never carries its text.
 A launch answers 200 with `delivered: true` and settles the record delivered; a Poller that does not answer in time answers 202 with `delivered: null` and leaves it unknown.
 A repeated id starts nothing and answers the stored outcome: `delivered: true` for a started session, `delivered: null` for an unknown one, and `duplicate: true`.
-A contract-41 CLI sends the same request and reads these answers as it always has: started, launch unconfirmed, or an error with the reason.
-The human's fresh board action keeps forced-start authority.
+The human's fresh board action has forced-start authority.
+
+### The human's lines
 
 Channels replies, the Dock's send and review lines, and `/dispatch user_message` record the line first, as a `source: human` record (`Shuttle.InboxRecord`).
 `/dispatch` with `user_message` and `/deliver` with `from: human` are one implementation, `Shuttle.Delivery.human/3`; `/dispatch` adds its own launch options (`force`, `existing_only`, `project_dir`, images) and, without `resume_mode`, lets the dispatcher choose, where `/deliver` lets the worker's state choose.
@@ -132,60 +150,23 @@ A repeated id does nothing, including for `existing_only` review input, unless i
 Otherwise it answers `duplicate: true` with the record's `disposition`, and `/deliver`'s `delivered` is true only for `delivered`.
 The board reports such a repeat as sent only when it was delivered; for `unknown` (a daemon that died between recording and typing the line leaves it so) it tells the human the line may not have arrived, keeps it, and sends it again under a new id, as a new message, if they choose.
 
-### Contract 42 and rollback
+### Voice and pulses
 
-Contract 42 adds consume's `--busy` and `--message`, followup/held/message answers, `context-mailbox put --attachments-stdin`, and `inbox record-begin/record-settle`.
-Every fiber message, attachments and `--notify-when-idle` with text included, goes to the owner's inbox; the CLI never asks an owner's level. A `--notify-when-idle` with no text is no message and never enters the inbox: the owner subscribes the fiber's live worker, as described above.
-Existing inbox entries and open delivery batches remain readable across deployment, and session traffic in flight retains its receipts.
-
-Rolling a host back to 41 leaves inbox text and attempts on disk, but its consumer does not follow up busy Codex or Pi workers.
-Records already in offered remain, but a 41 daemon does not use them to deduplicate: retrying a board line there can paste twice, and retrying a `--fresh` id starts another session, with forced-start authority.
-Rolling forward resumes the recorded inbox state.
-
-### API level 3 and rollback
-
-API level 3 removes `/deliver`'s `unless_live` and its 409 `live` answer, and lets `/deliver` take `notify_when_idle` with no `text`.
-The CLI contract level does not change: no verb the daemon shells changed its arguments or output.
-During a deploy, peers on the previous build and on this one meet in both directions:
-
-- A previous CLI that fails its `/version` probe still sends `unless_live`; this daemon ignores it and queues the message, answering 202 as for any fiber message.
-- A notify-only `--notify-when-idle` to a fiber, from this CLI to a daemon or owner on the previous build, is refused with 400 `text is required`; nothing is stored, and the same command succeeds once the owner runs this build. A previous CLI resolves the fiber to its worker and posts `/messages`, which this daemon still serves.
-- This daemon answers a failed consume with `delivered: null` and a `detail`; a previous CLI prints the detail after `queued for`.
-- Entries this build writes carry no `session` wish; a previous build reads them as `any`.
-- A previous CLI clears a messaged fiber's question itself as well as its owner; whichever runs second finds none.
-
-Rolling a host back one landing loses nothing on disk: this build writes no new state.
-The rolled-back daemon answers a failed consume as plain `queued` again, and a CLI of this build elsewhere is refused a notify-only fiber subscription to that host until it rolls forward.
-
-### Voice, pulses and contract 44
-
-A spoken batch is a human line with source `voice` and the relay's stable `voice-…` id.
+A spoken batch is a human line with source `voice` and the relay's stable `voice-…` id, forwarded to the owner's `/deliver` as `live_input`.
 It has the human's forced-start authority, including through quarantine, and reaches the frozen fiber's current worker as typed input, or a dormant conversation's From User launch prompt.
 The record writes the batch's one `human` or `answered` family-board row; `HumanRecordFor` matches voice as well as human records, so the prompt hook replaces that row instead of adding another.
 A voice record is never re-pasted under its id, even when settled undeliverable.
-The relay keeps ingestion checkpoints, buffers and frozen batches in per-fiber/origin order, but no attempt flags or delivery receipts.
+The relay (`Shuttle.Voice.TranscriptRelay`) keeps ingestion checkpoints, buffers and frozen batches in per-fiber/origin order; whether a batch was delivered is the owner's record alone, and the relay writes no record of its own.
 Recovery repeats the record handoff under the same id; the owner's record, not the relay, decides whether it may paste.
 The relay finishes a batch after one attempt, even without a 2xx or when its delivery task crashes: it removes the batch and records the outcome as its last, so nothing queues behind it.
-
-Voice forwarding keeps contract 42's `live_input` envelope, so a 44 relay can send to a 42 owner.
-Only the owner records and deduplicates the batch; the relay writes no forwarding record.
-During a mixed-version deploy, a relay crash mid-forward to a 42 owner can therefore paste twice on recovery.
-The owner's prompt hook supplies the board row on 42; a 44 owner writes it with the fiber's record.
 
 A pulse keeps its clock, busy-worker skips, cost-independent wake, window rollover and Claude completion reservation in `pulses.json` and `Shuttle.Pulse`.
 Its delivery is an offered inbox record, source `pulse`, sender `shuttle`, identified by the pulse key and reserved `next_tick`, not the send clock.
 The daemon records before sending and settles from the transport outcome; an unknown record is not sent again.
 A tick for a dormant worker carries its text in the launch prompt.
-Pulse transport uses `message --recorded`, without a `messages/` receipt.
-Contract 44 adds that flag and `inbox record-begin --source`.
+Pulse transport uses `message --recorded`, which writes no `messages/` receipt: the record deduplicates it.
 
-To roll back to 42, stop voice capture and let relay batches drain while their owners still run 44.
-Contract 42 ignores voice and pulse records for transport deduplication, so do not retry an old voice id there: it can paste twice.
-An interrupted 44 relay batch has no `attempted` flag, so a 42 relay can paste it again even though its owner's inbox holds an unknown record; do not resume such a relay on 42.
-Claude completion reservations remain readable by 42, but pulse transport there again writes `messages/` receipts.
-Rolling forward restores record-based deduplication; rollback is not transparent for in-flight voice.
-
-## Delayed messages (contract 45)
+## Delayed messages
 
 `shuttle message [<fiber>] "check the fit converged" --in 8h` schedules a check-in that outlives the sending session.
 With only the text, the command finds the sender's own fiber through the same worker identity as `close` and `handoff`; a session with no fiber must name one.
@@ -203,7 +184,7 @@ The receipt says `scheduled` and prints the sender-local time and UTC.
 A large, cold idle session therefore gets a gated fresh replacement rather than holding a reminder indefinitely as context; when that replacement is refused, the existing worker is woken regardless of cost.
 `--attach` and `--notify-when-idle` retain their ordinary behavior; the idle subscription begins only when the entry is delivered.
 `--fresh` is refused with a delay because a fresh request records and launches rather than queues.
-Delayed messages accept fiber addresses only: the follow-up-timer proposal's session target is not supported, since a session inbox has no delayed-message consumer and a reminder should follow the work.
+Delayed messages accept fiber addresses only: a session inbox has no delayed-message consumer, and a reminder should follow the work.
 
 The `not_before` wish passes through `/api/v1/deliver` to the owner's `Enqueue`.
 A future entry causes no ask clear, family-board message row, launch reservation, consumption, transport emission or idle subscription at enqueue.
@@ -235,10 +216,6 @@ Fiber ids, slugs and uids resolve through the owner to its host-local `<store>:<
 An entry an open batch holds is refused as `in_flight`: cancellation cannot retract text already emitted.
 Both fiber-reference commands use the owner-routed `/api/v1/inbox` endpoint (`action: list|cancel`); an unreachable owner is an error, never an archive fallback.
 The poll's one `inbox pending` call reports each owned fiber's due count and its scheduled entries; the owner feed carries the entries to the Desk's expandable scheduled chip, and a future entry does not count as waiting for a worker.
-
-**Rollback below contract 45 is unsafe while delayed entries are pending.**
-An older daemon can ignore the delay and deliver a pending entry immediately.
-List and cancel pending delayed entries on 45 before rolling the owner back, or keep the owner stopped until their times have passed.
 
 ## Thread results and routing
 
@@ -291,14 +268,6 @@ A host without a baseline records the current time once; signals at or before it
 An entry settles after its signal is stamped, and its offered entry expires 14 days after it settles; by then `Enqueue`'s 14-day window on the signal's stamp refuses a re-capture, so the signal cannot publish again.
 A malformed state exits 3 (`Shuttle.Inbox.Corrupt`) and holds boot without discarding anything; restore the exact trusted baseline from backup rather than setting it to the current time.
 Any other failure, a timeout included, retries the boot step.
-
-Contract 41 adds `inbox thread-state`, `thread-put`, `routes`, `route` and `settle`.
-The `/deliver` wire envelope is unchanged, so contract-40 and contract-41 daemons forward results to each other in both directions, and a repeated forward is a no-op on either.
-A daemon rolled back to contract 40 never reads the routing inbox: results bound for another host, unresolved or not yet current, and asker notices, wait there until the host rolls forward.
-What it captures meanwhile goes to its own outbox, which no later daemon reads.
-Rolled forward again, the daemon captures every signal still on an owned thread, stamped after the baseline and under 14 days old, into the routing inbox again, so a result the contract-40 daemon captured but never delivered is not lost.
-One it already delivered is not delivered twice: placing or forwarding it puts the same `thread-<digest>` id into the recipient fiber's inbox, which still holds that id (offered entries outlive the 14-day window), and an asker notice reuses its `<id>-asker` message id, which the sending host's message ledger answers from its stored receipt.
-An unblock note's board line is the exception: its new routing entry owes the line, so the board shows it a second time.
 
 ## Readers
 
@@ -378,7 +347,6 @@ An enqueue through `Delivery.context` starts its fiber at once.
 A session started for messages on an armed standing constitution is an ad-hoc run with an `inbox-` run id.
 It starts only while no occurrence is due, and its own end, a handoff or a concluded exit, is not service: an occurrence that elapsed while it ran still fires after it ends.
 A temper, rest or re-arm of that run counts as usual.
-A daemon rolled back below contract 40 reads such a run's end as service, so an occurrence that elapsed while it ran is skipped once, and a CLI rolled back below contract 40 does not read `launch.json`, so within a live lease it may answer `fresh` again and a second forced-fresh start kills the first replacement.
 
 A receiver without a hook registration takes `none` entries directly, in a batch sent as context without a turn (`action: context`) whenever consume would otherwise wait.
 Codex leaves them to its fiber hook, and Claude without a registration is unavailable.
@@ -454,28 +422,36 @@ A `queued` or `submitted` send to a conversation that is still the receiver usua
 After its one retry, a batch whose outcome stays unconfirmed is not sent again to that conversation: it waits for as long as the receiver lives, and rolls forward once the conversation ends or is replaced.
 A fiber with no worker settles only the first three rows and hook claims, and leaves the rest to the next receiver.
 
-### Contract 47 and rollback
+## Rollback
 
-Contract 47 keeps a batch's receipt in its manifest, claims hook emissions with manifests, and never sends an open batch's payload again.
-A CLI rolled back to 46 reads a consumer's manifest as its own, but not its receipt, and does not read a hook's claim:
-- for a consumer's batch it finds no `messages/` receipt under the batch's transport id and sends the payload again, once, to the conversation the manifest names; a batch still unconfirmed at rollback can reach that conversation twice, without a “Possible repeat” line when its variant was plain;
-- a hook's claim (`.hook`) left by a hook that died is invisible to it: its members read as free, the next hook or consume offers them once more without the mark, and the claim stays on disk until a 47 reader closes it.
+The current build is CLI contract 48 and HTTP API level 3.
+`bin/shuttle-deploy --ref` rolls a host back to an earlier build, and the deploy keeps the previous live release for it; the notes below cover the recent levels such a rollback reaches, newest first.
+Every level reads the inbox files a newer one wrote, and rolling forward again resumes from the recorded inbox state.
+The daemon and its CLI deploy together: either one rolled back alone is a contract skew that holds fresh dispatch.
 
-Before rolling a host back, let its consumer batches settle, so that no `mailboxes/fiber/*/batches/*.json` remains, or accept those repeats.
-Entries a 47 build settled read the same on 46, and rolling forward again reads a manifest 46 left open, which carries no receipt, as a send of unknown outcome.
-
-### Contract 48 and rollback
-
-Contract 48 removes `claude-mail-recover`: a Claude session message that asks for a turn goes to the native socket, never to the session's hook.
-Entries already in a Claude session's `pending/` stay there as context for that session's hook; nothing wakes the session with them.
-Nothing reads `fallback/`: an entry left there is never sent or offered, and no inspected host had one.
-
-The daemon and its CLI deploy together, and either one rolled back alone is a contract skew that holds fresh dispatch.
+**Below contract 48.**
+Contract 48 sends a Claude session's ask straight to its native socket, never to the session's hook, and has no `claude-mail-recover` verb; it writes no new state.
 - A 47 daemon with a 48 CLI shells `claude-mail-recover`, which the CLI lacks: every pass fails, and the daemon retries it every second, logging a warning each time, until the CLI is rolled back too. Session messages it sends through the 48 CLI go to the native socket.
 - A 48 daemon with a 47 CLI never shells `claude-mail-recover`: an ask to a busy Claude session, from a sender with a session return address, is queued for that session's hook, and nothing wakes the session with it if no hook offers it.
+- Across hosts, a sender on 48 that reaches a 47 owner may get that owner's `queued` `claude-hook` receipt for such an ask, and the 47 owner wakes the session natively if its hook has not offered it within 30 seconds.
 
-Across hosts, a sender on 48 that reaches a 47 owner may get that owner's `queued` `claude-hook` receipt for such an ask, and the 47 owner wakes the session natively if its hook has not offered it within 30 seconds.
-Rolling a host back one landing leaves nothing to migrate: 48 writes no new state.
+**Below contract 47.**
+Contract 47 keeps a batch's receipt in its manifest, claims hook emissions with `.hook` manifests, and never sends an open batch's payload again.
+A 46 CLI reads a consumer's manifest as its own, but not its receipt, and does not read a hook's claim:
+- for a consumer's batch it finds no `messages/` receipt under the batch's transport id and sends the payload again, once, to the conversation the manifest names; a batch still unconfirmed at rollback can reach that conversation twice, without a “Possible repeat” line when its variant was plain;
+- a hook's claim left by a hook that died is invisible to it: its members read as free, the next hook or consume offers them once more without the mark, and the claim stays on disk until a 47 reader closes it.
+
+Before rolling a host back below 47, let its consumer batches settle, so that no `mailboxes/fiber/*/batches/*.json` remains, or accept those repeats.
+Rolling forward reads a manifest a 46 CLI left open, which carries no receipt, as a send of unknown outcome.
+
+**Below API level 3.**
+API level 3 came with a contract 46 build: `/deliver` takes `notify_when_idle` with no `text` and has no `unless_live`.
+A daemon on the build before it refuses a notify-only `--notify-when-idle` to one of its fibers with 400 `text is required`, storing nothing, until it rolls forward; it answers a failed consume as plain `queued`, and reads an entry without a `session` wish as `any`.
+Its CLI sends `unless_live` to current owners, which ignore it and queue the message.
+
+**Below contract 45, and further back.**
+Rollback below 45 is unsafe while delayed entries are pending: an older daemon can deliver a pending entry at once, ignoring its delay, so list and cancel them on 45 first (`shuttle inbox ls <fiber> --scheduled`, `shuttle inbox cancel`), or keep the owner stopped until their times have passed.
+Further back, deduplication thins out: below 44 a voice batch in flight can paste twice, so stop voice capture and let relay batches drain before rolling back, and never retry a voice id there; below 42 a retried board line can paste twice and a retried `--fresh` id starts another session; below 41 the routing inbox is not read, so thread results wait in it until the host rolls forward, when an unblock note's board line shows a second time.
 
 ## Verbs
 
