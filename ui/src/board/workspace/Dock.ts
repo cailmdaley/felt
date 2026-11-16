@@ -736,6 +736,9 @@ export class Dock {
     return new WorkerActions(card, (target, mode, message, word, images) => this.startSession(target, mode, word, undefined, message, images), { emptyEnter: !this.keepPlace })
   }
 
+  /** The page above already carries the target's page and acts (a constitution's view): the console shows none of its own, save a verdict's undo. */
+  setEchoed(echoed: boolean): void { this.el.toggleAttribute('data-echoed', echoed) }
+
   /** Retarget the band's figures, menu and message box without changing its identity or settings. */
   setActionCard(card: KanbanCard): void {
     const previous = this.actionCard ?? this.card

@@ -882,6 +882,11 @@ export class Workspace {
     this.nameBack()
     if (selected === this.familyDocument(state.card)) this.focusMap(state)
     this.seatBand(state)
+    this.echo(state, selected)
+  }
+  /** Over a constitution's view, whose head carries its pages and acts, the console does not repeat them. */
+  private echo(state: ChannelState, key: DocKey): void {
+    this.dock.setEchoed(key === this.familyDocument(state.card))
   }
   /** The map takes the keys as it lands, unless a control in the reader already holds them. */
   private focusMap(state: ChannelState): void {
@@ -908,6 +913,7 @@ export class Workspace {
     state.routedFile = undefined
     this.reader.select(key)
     this.steerBand(state)
+    this.echo(state, key)
     if (key === this.familyDocument(state.card)) this.focusMap(state)
     this.namePage(state, key)
   }

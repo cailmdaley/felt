@@ -157,7 +157,7 @@ export function registerHeaderBarJourneys(test) {
       assert.deepEqual(await shownVerbs(page), ['Temper', 'Rest', 'Discard'], `Awaiting review draws its verbs in its view's head at ${width}`)
     }
   }, { width: 1440, height: 900 })
-  test('The band keeps its title and controls on one line, and the view\'s head its acts, inside open desktop columns', async page => {
+  test('The band keeps its title and controls on one line, and the view\'s head its acts, which the band does not repeat, inside open desktop columns', async page => {
     await page.goto(url)
     await openRoot(page)
     const header = page.locator('.ws-stage-band .ws-band-head')
@@ -165,7 +165,9 @@ export function registerHeaderBarJourneys(test) {
     const check = async () => {
       const sizes = await header.locator('.ws-header-icon').evaluateAll(els => els.filter(el => el.checkVisibility()).map(el => el.getBoundingClientRect().height))
       labelSize ??= sizes[0]
-      assert.ok(sizes.length >= 1 && sizes.every(size => size === labelSize), `every band control keeps one height: ${sizes}`)
+      assert.ok(sizes.every(size => size === labelSize), `every band control keeps one height: ${sizes}`)
+      // Over the view, whose head carries them, the console repeats none of its pages and acts.
+      assert.equal(await page.locator('.ws-stage-band .ws-band-acts > :is(.ws-band-buttons, .ws-band-menu):visible').count(), 0)
       const centres = await header.locator('.ws-header-icon, h1').evaluateAll(els => els.filter(el => el.checkVisibility()).map(el => { const r = el.getBoundingClientRect(); return r.top + r.height / 2 }))
       assert.ok(Math.max(...centres) - Math.min(...centres) < 1.5, `the band's head keeps one centre line: ${centres}`)
       assert.ok(await header.locator('h1').evaluate(el => el.clientHeight <= parseFloat(getComputedStyle(el).lineHeight) + 1))

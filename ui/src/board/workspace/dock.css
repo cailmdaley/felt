@@ -382,3 +382,4 @@
 /* The console's acts as buttons where its head has room; the menu (⋯) holds them where it is short. */
 @container dock (min-width: 621px) { .ws-dock .ws-band-acts > .ws-band-menu { display: none; } }
 @container dock (max-width: 620px) { .ws-dock .ws-band-acts > .ws-band-buttons { display: none; } }
+.ws-dock[data-echoed] .ws-band-acts > :is(.ws-band-buttons, .ws-band-menu) { display: none; }
