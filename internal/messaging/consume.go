@@ -65,10 +65,19 @@ func Consume(ctx context.Context, env *sysenv.Env, fiber, host string, worker Wo
 	return consumeWith(ctx, env, fiber, host, worker, sendFiberContextAttempt)
 }
 
+// A pass that fails before it decides, as for a receiver whose process is
+// gone, still answers wait for a Message already delivered.
 func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Worker, send fiberContextSender) (Consumption, error) {
 	result, err := consumePass(ctx, env, fiber, host, w, send)
-	if w.Message != "" && result.Action != "" {
-		result.Message = messageState(mailboxDir(env, "fiber", fiber), w.Message, time.Now())
+	if w.Message == "" {
+		return result, err
+	}
+	state := messageState(mailboxDir(env, "fiber", fiber), w.Message, time.Now())
+	if result.Action == "" && state == "delivered" {
+		result.Action = "wait"
+	}
+	if result.Action != "" {
+		result.Message = state
 	}
 	return result, err
 }
@@ -77,14 +86,14 @@ func consumeWith(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 // An entry offered with no disposition was delivered; one that expired, or
 // that the inbox does not hold, is unknown.
 func messageState(root, id string, now time.Time) string {
-	e, err := readFiberMailboxEntry(filepath.Join(root, "pending", mailboxKey(id)+".json"))
+	_, err := readFiberMailboxEntry(filepath.Join(root, "pending", mailboxKey(id)+".json"))
 	if err != nil {
 		if offered, err := readFiberMailboxEntry(filepath.Join(root, "offered", mailboxKey(id)+".json")); err == nil && offered.Disposition == "" {
 			return "delivered"
 		}
 		return "unknown"
 	}
-	if e.AttemptAddress != "" {
+	if pinned, _ := pinnedBy(root); pinned[id] != nil && !pinned[id].Hook {
 		return "sent"
 	}
 	if r, err := readLaunchReservation(root); err == nil && r.holds(id, now) {
@@ -145,10 +154,10 @@ func consumePass(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 		return Consumption{}, err
 	}
 	// Each open batch advances on its own, so one awaiting its outcome holds
-	// only its own members. A fiber without a worker has no conversation to
-	// advance a batch to: it settles only what local records decide (a
-	// confirmed receipt, a superseded member), and the rest wait for the next
-	// receiver.
+	// only its own members. A hook's claim left open is closed ambiguous. A
+	// fiber without a worker has no conversation to advance a batch to: it
+	// settles only what the batch's own records decide (a confirmed receipt, a
+	// superseded member), and the rest wait for the next receiver.
 	errs := []error{}
 	_, batches, err := openBatches(root)
 	if err != nil {
@@ -157,26 +166,28 @@ func consumePass(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	// A batch whose members could not be checked does not authorize a launch
 	// on this pass; it stays pending for the next.
 	unverified := map[string]bool{}
-	if dormant {
-		for i := range batches {
-			if err := settleHeldBatch(ctx, env, root, &batches[i]); err != nil {
+	for i := range batches {
+		b := &batches[i]
+		switch {
+		case b.Hook:
+			errs = append(errs, closeBatch(root, b, attemptAmbiguous))
+		case dormant:
+			if _, err := reconcileConsumedBatch(ctx, env, root, b); err != nil {
 				errs = append(errs, err)
-				for _, id := range batches[i].Members {
+				for _, id := range b.Members {
 					unverified[id] = true
 				}
 			}
-		}
-		batches = nil
-	}
-	for i := range batches {
-		sent, err := deliverConsumedBatch(ctx, env, root, host, w, &batches[i], send)
-		if sent {
-			result.Action, result.Members = "context", append(result.Members, batches[i].Members...)
-			if batches[i].Payload.Wake {
-				result.Action, result.Followup = "wake", w.Busy
+		default:
+			sent, err := advanceBatch(ctx, env, root, host, w, b, send)
+			if sent {
+				result.Action, result.Members = "context", append(result.Members, b.Members...)
+				if b.Payload.Wake {
+					result.Action, result.Followup = "wake", w.Busy
+				}
 			}
+			errs = append(errs, err)
 		}
-		errs = append(errs, err)
 	}
 	items, _, err := openBatches(root)
 	if err != nil {
@@ -200,11 +211,6 @@ func consumePass(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 			continue
 		}
 		candidates = append(candidates, it)
-	}
-	for i := range candidates {
-		if err := settleUnfinishedHookClaim(&candidates[i]); err != nil {
-			return Consumption{}, err
-		}
 	}
 	// A fiber without a worker launches for its batches that ask for a turn
 	// as for its free entries, unless a launch in its lease still owes any of
@@ -307,10 +313,7 @@ func consumePass(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 		return result, errors.Join(errs...)
 	}
 	attempt := newConsumedAttempt(w, selected, action == "wake")
-	if err := pinConsumedBatch(root, &attempt); err != nil {
-		return Consumption{}, err
-	}
-	sent, err := deliverConsumedBatch(ctx, env, root, host, w, &attempt, send)
+	sent, err := sendBatch(ctx, env, root, host, &attempt, send)
 	if sent {
 		result.Action, result.Members = action, append(result.Members, attempt.Members...)
 		result.Followup = result.Followup || (w.Busy && action == "wake")
@@ -339,17 +342,6 @@ func verifyUnaddressedReceiver(env *sysenv.Env, fiber, host string, epoch uint64
 		return errCode("stale_receiver", "superseded worker identity")
 	}
 	return nil
-}
-
-// settleHeldBatch settles an open batch of a fiber with no worker from local
-// records alone (reconcileConsumedBatch), closing it delivered on a confirmed
-// receipt.
-func settleHeldBatch(ctx context.Context, env *sysenv.Env, root string, a *Attempt) error {
-	closed, confirmed, err := reconcileConsumedBatch(ctx, env, root, a)
-	if closed || err != nil || !confirmed {
-		return err
-	}
-	return closeDeliveredBatch(env, root, a)
 }
 
 // heldAsking lists the due entries among pending that ask for a turn and that
@@ -490,58 +482,50 @@ func newConsumedAttempt(w Worker, items []mailboxPendingItem, wake bool) Attempt
 	return a
 }
 
-// pinConsumedBatch records the batch's manifest, with its complete payload and
-// membership, before pinning member files. The manifest repairs partial
-// multi-file claims after a crash.
-func pinConsumedBatch(root string, a *Attempt) error {
-	bytes, err := json.Marshal(a)
+// sendBatch records the batch's manifest, with where its conversation's
+// transcript ends, before sending its payload, and records the transport's
+// receipt in it after. A confirmed receipt closes the batch delivered and a
+// rejection releases it. It reports whether the payload may have reached the
+// conversation.
+func sendBatch(ctx context.Context, env *sysenv.Env, root, host string, a *Attempt, send fiberContextSender) (bool, error) {
+	a.Receipt, a.ErrorCode, a.TranscriptOffset = nil, "", transcriptEnd(env, a.Conversation)
+	if err := writeBatch(root, a); err != nil {
+		return false, err
+	}
+	receipt, err := send(ctx, env, host, *a.Payload, a.Conversation)
+	a.Receipt = &receipt
 	if err != nil {
-		return err
+		a.ErrorCode = ErrorCode(err)
 	}
-	if err := ensureDir(filepath.Join(root, "batches"), 0700); err != nil {
-		return err
+	if a.confirmed() {
+		return true, closeDeliveredBatch(env, root, a)
 	}
-	if err := mailboxWrite(batchManifest(root, a), bytes, false); err != nil {
-		return err
+	if err == nil {
+		err = a.sendError()
 	}
-	for _, id := range a.Members {
-		path := filepath.Join(root, "pending", mailboxKey(id)+".json")
-		e, err := readFiberMailboxEntry(path)
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		e.Attempt, e.AttemptAddress = a, a.Conversation
-		if a.Variant == "possible-repeat" {
-			e.PossibleRepeat = true
-		}
-		if err := writeMailboxEntry(path, e); err != nil {
-			return err
-		}
+	if a.status() == StatusRejected {
+		return false, errors.Join(err, closeBatch(root, a, attemptReleased))
 	}
-	return nil
+	return true, errors.Join(err, writeBatch(root, a))
 }
 
-// reconcileConsumedBatch settles what an open batch's local records already
-// decide, without emitting anything: a recorded outcome closes it, and a
-// superseded member drops it, releasing the rest when the payload never
-// reached the conversation or holding them as ambiguous when it may have.
-// confirmed reports a locally recorded confirmed receipt for the pinned
-// payload, which delivered every member as sent; closed, that the batch is
-// closed.
-func reconcileConsumedBatch(ctx context.Context, env *sysenv.Env, root string, a *Attempt) (closed, confirmed bool, err error) {
+// reconcileConsumedBatch settles what an open batch's own records decide,
+// sending nothing: a recorded outcome finishes its close; its receipt,
+// observed again from the conversation's transcript, closes it delivered once
+// confirmed; and a superseded member drops it, returning the rest to the inbox
+// as ambiguous, since the payload may have arrived. It reports whether the
+// batch closed.
+func reconcileConsumedBatch(ctx context.Context, env *sysenv.Env, root string, a *Attempt) (bool, error) {
 	if a.Outcome != "" {
-		return true, false, closeConsumedBatch(root, a, a.Outcome, nil)
+		return true, closeBatch(root, a, a.Outcome)
 	}
-	stored, err := readDedupRecord(filepath.Join(dataDir(env), "messages", mailboxKey(a.Payload.MessageID+"-"+mailboxKey(a.Conversation)[:16])+".json"))
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return false, false, err
+	if observeBatch(env, a) {
+		if err := writeBatch(root, a); err != nil {
+			return false, err
+		}
 	}
-	unsent := err != nil || stored.Receipt.Status == StatusRejected
-	if stored.State == "complete" && stored.ErrorCode == "" && confirmedReceipt(stored.Receipt) {
-		return false, true, nil
+	if a.confirmed() {
+		return true, closeDeliveredBatch(env, root, a)
 	}
 	var superseded []string
 	for _, id := range a.Members {
@@ -551,7 +535,7 @@ func reconcileConsumedBatch(ctx context.Context, env *sysenv.Env, root string, a
 			continue
 		}
 		if err != nil {
-			return false, false, err
+			return false, err
 		}
 		if !hasThreadSignalValidation(e.Request) {
 			continue
@@ -560,80 +544,118 @@ func reconcileConsumedBatch(ctx context.Context, env *sysenv.Env, root string, a
 		current, err := currentThreadSignalWithBackoff(checkCtx, env, e.Request)
 		cancel()
 		if err != nil {
-			return false, false, err
+			return false, err
 		}
 		if !current {
 			superseded = append(superseded, path)
 		}
 	}
-	if len(superseded) > 0 {
-		a.Outcome = attemptAmbiguous
-		if unsent {
-			a.Outcome = attemptReleased
-		}
-		bytes, _ := json.Marshal(a)
-		if err := mailboxWrite(batchManifest(root, a), bytes, false); err != nil {
-			return false, false, err
-		}
-		for _, path := range superseded {
-			if err := moveToOffered(root, path); err != nil {
-				return false, false, err
-			}
-		}
-		return true, false, closeConsumedBatch(root, a, a.Outcome, nil)
+	if len(superseded) == 0 {
+		return false, nil
 	}
-	return false, false, nil
+	a.Outcome = attemptAmbiguous
+	if err := writeBatch(root, a); err != nil {
+		return false, err
+	}
+	for _, path := range superseded {
+		if err := moveToOffered(root, path); err != nil {
+			return false, err
+		}
+	}
+	return true, closeBatch(root, a, a.Outcome)
 }
 
-// deliverConsumedBatch sends an open batch's pinned payload and closes it on a
-// confirmed receipt. It reports whether the payload may have reached the
-// conversation: false when nothing was sent or the final send was rejected.
-func deliverConsumedBatch(ctx context.Context, env *sysenv.Env, root, host string, w Worker, a *Attempt, send fiberContextSender) (bool, error) {
-	if closed, _, err := reconcileConsumedBatch(ctx, env, root, a); closed || err != nil {
+// advanceBatch advances an open batch for the live worker w, never sending
+// the same payload twice. Its own records settle it first
+// (reconcileConsumedBatch); what remains is a send whose outcome is not
+// confirmed. It rolls forward to w once its conversation has ended, or has
+// been replaced by w for liveAttemptRetryAfter; and to a conversation still w
+// whose outcome stayed unknown that long, it makes one warning-marked retry.
+// A receiver holding it for approval is not retried, and a quiet payload is
+// never sent again: its members return to the fiber's hooks marked
+// possible_repeat. It reports whether the payload may have reached the
+// conversation.
+func advanceBatch(ctx context.Context, env *sysenv.Env, root, host string, w Worker, a *Attempt, send fiberContextSender) (bool, error) {
+	if closed, err := reconcileConsumedBatch(ctx, env, root, a); closed || err != nil {
 		return false, err
 	}
-	if err := pinConsumedBatch(root, a); err != nil {
-		return false, err
+	replaced := a.Conversation != w.Address
+	stale := a.ErrorCode != "wake_held" && time.Since(time.Unix(0, a.OpenedAt)) >= liveAttemptRetryAfter
+	retry := !replaced && stale && a.status() == StatusUnknown && a.Retry == 0
+	roll := replaced && (stale || fiberContextSessionEnded(env, host, a.Conversation))
+	if !retry && !roll {
+		return true, a.sendError()
 	}
-	receipt, err := send(ctx, env, host, *a.Payload, a.Conversation)
-	unknown := receipt.Status == StatusUnknown
-	ended := unknown && a.Conversation != w.Address && fiberContextSessionEnded(env, host, a.Conversation)
-	stale := unknown && ErrorCode(err) != "wake_held" && time.Since(time.Unix(0, a.OpenedAt)) >= liveAttemptRetryAfter
-	if receipt.Status == StatusRejected || ended || (stale && (a.Conversation != w.Address || a.Retry == 0)) {
-		if a.Conversation == w.Address && receipt.Status == StatusRejected {
-			return false, closeConsumedBatch(root, a, attemptReleased, err)
+	if !a.Payload.Wake {
+		return false, closeBatch(root, a, attemptAmbiguous)
+	}
+	next := *a
+	next.Conversation, next.Epoch, next.OpenedAt = w.Address, w.Epoch, time.Now().UnixNano()
+	next.Retry, next.Variant = 0, "possible-repeat"
+	if retry {
+		next.Retry, next.Variant = 1, "retry-1"
+	}
+	req := consumedVariant(next)
+	next.Payload = &req
+	*a = next
+	return sendBatch(ctx, env, root, host, a, send)
+}
+
+// observeBatch reads the batch's conversation transcript again, from where it
+// ended before the send to where it ends now, without waiting, and records the
+// furthest stage it shows in the receipt. It reports whether the receipt
+// changed.
+func observeBatch(env *sysenv.Env, a *Attempt) bool {
+	if a.Receipt == nil || a.TranscriptOffset == nil || a.confirmed() {
+		return false
+	}
+	req := *a.Payload
+	req.Address = a.Conversation
+	receipt, code := *a.Receipt, a.ErrorCode
+	switch receipt.Transport {
+	case claudeNativeTransport:
+		receipt, code = observeClaudeNative(env, req, *a.TranscriptOffset, receipt, code)
+	case piNativeTransport:
+		if observePiNative(env, req, *a.TranscriptOffset) {
+			receipt, code = piTranscriptReceipt(req), ""
 		}
-		next := *a
-		next.Conversation, next.Epoch, next.OpenedAt = w.Address, w.Epoch, time.Now().UnixNano()
-		if a.Conversation == w.Address {
-			next.Retry++
-			next.Variant = "retry-1"
-		} else {
-			next.Retry = 0
-			if unknown || a.Retry > 0 || a.Variant == "possible-repeat" {
-				next.Variant = "possible-repeat"
-			} else {
-				next.Variant = "plain"
-			}
+	}
+	if receipt.Status == a.Receipt.Status && receipt.Detail == a.Receipt.Detail && code == a.ErrorCode {
+		return false
+	}
+	a.Receipt, a.ErrorCode = &receipt, code
+	return true
+}
+
+// transcriptEnd is where the registered transcript of a Claude or Pi
+// conversation ends now, zero when it does not exist yet, and nil when the
+// conversation has none.
+func transcriptEnd(env *sysenv.Env, conversation string) *int64 {
+	a, err := ParseAddress(conversation)
+	if err != nil {
+		return nil
+	}
+	var path string
+	switch a.Harness {
+	case "claude":
+		r, err := readClaudeNative(env, a.ID)
+		if err == nil {
+			path = r.Transcript
 		}
-		req := consumedVariant(next)
-		next.Payload = &req
-		if err := pinConsumedBatch(root, &next); err != nil {
-			return true, err
+	case "pi":
+		r, err := readPiNative(env, a.ID)
+		if err == nil {
+			path = r.Transcript
 		}
-		receipt, err = send(ctx, env, host, req, w.Address)
-		*a = next
 	}
-	if err == nil && confirmedReceipt(receipt) {
-		return true, closeDeliveredBatch(env, root, a)
+	if path == "" {
+		return nil
 	}
-	if err == nil {
-		err = errCode("unconfirmed", "batch delivery: %s", receipt.Status)
+	var end int64
+	if info, err := os.Stat(path); err == nil {
+		end = info.Size()
 	}
-	if receipt.Status == StatusRejected {
-		return false, closeConsumedBatch(root, a, attemptReleased, err)
-	}
-	return true, err
+	return &end
 }
 
 // closeDeliveredBatch closes a batch whose payload its conversation
@@ -649,73 +671,16 @@ func closeDeliveredBatch(env *sysenv.Env, root string, a *Attempt) error {
 			subscribeIdle(env, address, req)
 		}
 	}
-	return closeConsumedBatch(root, a, attemptDelivered, nil)
+	return closeBatch(root, a, attemptDelivered)
+}
+
+// confirmed reports a receipt that delivered every member as sent.
+func (a *Attempt) confirmed() bool {
+	return a.Receipt != nil && a.ErrorCode == "" && confirmedReceipt(*a.Receipt)
 }
 
 func confirmedReceipt(r Receipt) bool {
 	return r.Status == StatusAccepted || r.Status == StatusContextAdded || (r.Status == StatusSubmitted && r.Transport == "codex-terminal")
-}
-
-func closeConsumedBatch(root string, a *Attempt, outcome string, sendErr error) error {
-	var paths []string
-	for _, id := range a.Members {
-		path := filepath.Join(root, "pending", mailboxKey(id)+".json")
-		if _, err := os.Stat(path); err == nil {
-			paths = append(paths, path)
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-	}
-	if err := closeAttempts(paths, outcome); err != nil {
-		return errors.Join(sendErr, err)
-	}
-	if err := os.Remove(batchManifest(root, a)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return errors.Join(sendErr, syncDir(filepath.Join(root, "batches")))
-}
-
-func batchManifest(root string, a *Attempt) string {
-	return filepath.Join(root, "batches", a.BatchID+".json")
-}
-
-// readBatchManifests reads every open batch's manifest.
-func readBatchManifests(root string) ([]Attempt, error) {
-	dir := filepath.Join(root, "batches")
-	files, err := os.ReadDir(dir)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	var batches []Attempt
-	for _, file := range files {
-		if file.IsDir() || strings.HasPrefix(file.Name(), ".") || !strings.HasSuffix(file.Name(), ".json") {
-			continue
-		}
-		bytes, err := readBounded(filepath.Join(dir, file.Name()), 512<<10)
-		var a Attempt
-		if err == nil {
-			err = json.Unmarshal(bytes, &a)
-		}
-		if err != nil {
-			return nil, err
-		}
-		batches = append(batches, a)
-	}
-	return batches, nil
-}
-
-// settleUnfinishedHookClaim closes an open, unpinned claim as ambiguous. Read
-// under the inbox lock, such a claim belongs to a hook that died between its
-// output and its close.
-func settleUnfinishedHookClaim(it *mailboxPendingItem) error {
-	if !it.entry.Attempt.open() || it.entry.AttemptAddress != "" {
-		return nil
-	}
-	it.entry.closeAttempt(attemptAmbiguous)
-	return writeMailboxEntryKeepingTime(it.path, it.entry)
 }
 
 // batchTransportID is a bounded, domain-separated identity for the ordered

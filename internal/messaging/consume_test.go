@@ -102,56 +102,54 @@ func TestConsumeOneBatchAndLimits(t *testing.T) {
 	}
 }
 
+// A consumer that died after recording its batch, before or after the send,
+// leaves a manifest without a receipt. The next consume never sends that
+// payload again: within the bound its members stay held, and after it the one
+// retry carries the frozen text and membership with its warning, whatever was
+// queued since.
 func TestConsumeFrozenBatchAcrossCrash(t *testing.T) {
-	for _, afterSend := range []bool{false, true} {
-		t.Run(fmt.Sprint(afterSend), func(t *testing.T) {
-			env, w := consumeFixture(t)
-			w.Idle = true
-			for _, id := range []string{"one", "two", "three"} {
-				putWish(t, env, id, "ask", "hold")
-			}
-			root := mailboxDir(env, "fiber", "fiber")
-			items, err := pendingItems(root)
-			if err != nil {
-				t.Fatal(err)
-			}
-			a := newConsumedAttempt(w, items, true)
-			if err := pinConsumedBatch(root, &a); err != nil {
-				t.Fatal(err)
-			}
-			// A newly queued item cannot change an open attempt's text or membership.
-			putWish(t, env, "later", "none", "hold")
-			receipts := map[string]string{}
-			injected := 0
-			sender := func(_ context.Context, _ *sysenv.Env, _ string, r Request, address string) (Receipt, error) {
-				key := address + "/" + r.MessageID
-				if text, ok := receipts[key]; ok {
-					if text != r.Text {
-						t.Fatal("transport id reused with different text")
-					}
-				} else {
-					receipts[key] = r.Text
-					injected++
-				}
-				return Receipt{Status: StatusAccepted}, nil
-			}
-			if afterSend {
-				_, _ = sender(context.Background(), env, "host", *a.Payload, w.Address)
-			}
-			result, err := consumeWith(context.Background(), env, "fiber", "host", w, sender)
-			if err != nil || injected != 1 || len(result.Members) != 3 {
-				t.Fatalf("%+v injected=%d err=%v", result, injected, err)
-			}
-			if n, _ := pendingCount(env, "fiber"); n != 1 {
-				t.Fatalf("pending=%d", n)
-			}
-		})
+	env, w := consumeFixture(t)
+	w.Idle = true
+	for _, id := range []string{"one", "two", "three"} {
+		putWish(t, env, id, "ask", "hold")
+	}
+	root := mailboxDir(env, "fiber", "fiber")
+	items, err := pendingItems(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := newConsumedAttempt(w, items, true)
+	if err := writeBatch(root, &a); err != nil {
+		t.Fatal(err)
+	}
+	putWish(t, env, "later", "none", "hold")
+	var sent []Request
+	sender := func(_ context.Context, _ *sysenv.Env, _ string, r Request, _ string) (Receipt, error) {
+		sent = append(sent, r)
+		return Receipt{Status: StatusAccepted}, nil
+	}
+	result, err := consumeWith(context.Background(), env, "fiber", "host", w, sender)
+	if ErrorCode(err) != "ambiguous_delivery" || len(sent) != 0 || len(result.Members) != 3 {
+		t.Fatalf("%+v sent=%d err=%v", result, len(sent), err)
+	}
+	expireAttempt(t, items[0].path)
+	if _, err := consumeWith(context.Background(), env, "fiber", "host", w, sender); err != nil {
+		t.Fatal(err)
+	}
+	if len(sent) != 1 || sent[0].Text != "Possible repeat: an earlier delivery of this message to this session had an unknown outcome.\n\n"+a.BaseText || sent[0].MessageID == a.Payload.MessageID {
+		t.Fatalf("retry = %+v", sent)
+	}
+	if n, _ := pendingCount(env, "fiber"); n != 1 {
+		t.Fatalf("pending=%d", n)
 	}
 }
 
-func TestConsumePartialClaimAndClose(t *testing.T) {
-	for _, partialClose := range []bool{false, true} {
-		t.Run(fmt.Sprint(partialClose), func(t *testing.T) {
+// A consumer that died while closing a batch, after recording its outcome or
+// its confirmed receipt, leaves members on both sides. The next consume
+// finishes the close and sends nothing.
+func TestConsumeFinishesAnInterruptedClose(t *testing.T) {
+	for _, recorded := range []string{"outcome", "receipt"} {
+		t.Run(recorded, func(t *testing.T) {
 			env, w := consumeFixture(t)
 			w.Idle = true
 			putWish(t, env, "one", "ask", "hold")
@@ -159,38 +157,29 @@ func TestConsumePartialClaimAndClose(t *testing.T) {
 			root := mailboxDir(env, "fiber", "fiber")
 			items, _ := pendingItems(root)
 			a := newConsumedAttempt(w, items, true)
-			if err := pinConsumedBatch(root, &a); err != nil {
-				t.Fatal(err)
-			}
-			if partialClose {
-				if err := closeAttempts([]string{items[0].path}, attemptDelivered); err != nil {
-					t.Fatal(err)
-				}
+			if recorded == "outcome" {
+				a.Outcome = attemptDelivered
 			} else {
-				e := items[1].entry
-				if err := writeMailboxEntry(items[1].path, e); err != nil {
-					t.Fatal(err)
-				}
-				if fiberContextHookEligible(root, w.Address, e.Request) {
-					t.Fatal("hook stole a partially claimed member")
-				}
+				a.Receipt = &Receipt{Status: StatusAccepted}
 			}
-			_, err := consumeWith(context.Background(), env, "fiber", "host", w, func(_ context.Context, _ *sysenv.Env, _ string, r Request, _ string) (Receipt, error) {
-				if r.Text != a.Payload.Text || r.MessageID != a.Payload.MessageID {
-					t.Fatal("changed frozen emission")
-				}
-				return Receipt{Status: StatusAccepted}, nil
-			})
-			if err != nil {
+			if err := writeBatch(root, &a); err != nil {
 				t.Fatal(err)
 			}
-			if n, _ := pendingCount(env, "fiber"); n != 0 {
-				t.Fatal(n)
+			if err := moveToOffered(root, items[0].path); err != nil {
+				t.Fatal(err)
+			}
+			if fiberContextHookEligible(root, w.Address, items[1].entry.Request) {
+				t.Fatal("hook stole a member of an open batch")
+			}
+			if _, err := consumeWith(context.Background(), env, "fiber", "host", w, neverSend(t)); err != nil {
+				t.Fatal(err)
+			}
+			if n, _ := pendingCount(env, "fiber"); n != 0 || batchOf(t, root, "two") != nil {
+				t.Fatalf("pending=%d", n)
 			}
 		})
 	}
 }
-
 func TestConsumeRollForwardABAAndRetry(t *testing.T) {
 	env, w := consumeFixture(t)
 	w.Idle = true
@@ -215,7 +204,7 @@ func TestConsumeRollForwardABAAndRetry(t *testing.T) {
 			t.Fatal(err)
 		}
 		a.OpenedAt = time.Now().Add(-liveAttemptRetryAfter).UnixNano()
-		if err := pinConsumedBatch(root, &a); err != nil {
+		if err := writeBatch(root, &a); err != nil {
 			t.Fatal(err)
 		}
 		if err := RegisterMailbox(env, "claude", id, "host", t.TempDir(), os.Getpid(), true); err != nil {
@@ -230,14 +219,14 @@ func TestConsumeRollForwardABAAndRetry(t *testing.T) {
 	}
 	a, _ := readConsumedBatch(root)
 	a.OpenedAt = time.Now().Add(-liveAttemptRetryAfter).UnixNano()
-	_ = pinConsumedBatch(root, &a)
+	_ = writeBatch(root, &a)
 	_, _ = consumeWith(context.Background(), env, "fiber", "host", w, sender)
 	a, _ = readConsumedBatch(root)
 	if a.Retry != 1 {
 		t.Fatalf("retry=%d", a.Retry)
 	}
 	a.OpenedAt = time.Now().Add(-liveAttemptRetryAfter).UnixNano()
-	_ = pinConsumedBatch(root, &a)
+	_ = writeBatch(root, &a)
 	before := len(texts)
 	_, _ = consumeWith(context.Background(), env, "fiber", "host", w, sender)
 	if len(texts) != before {
@@ -320,8 +309,9 @@ func TestConsumeMarksAnUnfinishedHookClaimAsPossibleRepeat(t *testing.T) {
 	env, w := consumeFixture(t)
 	w.Idle = true
 	putWish(t, env, "m", "ask", "hold")
-	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey("m")+".json")
-	if _, err := claimBatch([]string{path}, w.Address); err != nil {
+	root := mailboxDir(env, "fiber", "fiber")
+	items, _ := pendingItems(root)
+	if _, err := claimBatch(root, items, w.Address); err != nil {
 		t.Fatal(err)
 	}
 	var text string
@@ -334,9 +324,13 @@ func TestConsumeMarksAnUnfinishedHookClaimAsPossibleRepeat(t *testing.T) {
 	}
 }
 
+// A thread result superseded while its batch is open: a confirmed receipt
+// still closes the batch delivered, sending nothing; a send whose outcome is
+// unknown drops the superseded member and returns the rest to the inbox
+// marked as possible repeats.
 func TestConsumeSupersededMemberAfterTheBatchsReceipt(t *testing.T) {
-	for _, sentBefore := range []bool{true, false} {
-		t.Run(fmt.Sprint(sentBefore), func(t *testing.T) {
+	for _, confirmed := range []bool{true, false} {
+		t.Run(fmt.Sprint(confirmed), func(t *testing.T) {
 			env, w := consumeFixture(t)
 			w.Idle = true
 			scripts := t.TempDir()
@@ -359,33 +353,26 @@ func TestConsumeSupersededMemberAfterTheBatchsReceipt(t *testing.T) {
 				t.Fatal(err)
 			}
 			a := newConsumedAttempt(w, items, true)
-			if err := pinConsumedBatch(root, &a); err != nil {
+			if confirmed {
+				// The CLI died after a confirmed send and before the close.
+				a.Receipt = &Receipt{Status: StatusAccepted}
+			}
+			if err := writeBatch(root, &a); err != nil {
 				t.Fatal(err)
 			}
 			var texts []string
-			sender := func(ctx context.Context, env *sysenv.Env, _ string, r Request, address string) (Receipt, error) {
-				r.Address = address
-				r.MessageID += "-" + mailboxKey(address)[:16]
-				return withDedup(ctx, env, r, func(context.Context) dedupSendResult {
-					texts = append(texts, r.Text)
-					return dedupSendResult{Receipt: Receipt{MessageID: r.MessageID, Status: StatusAccepted}}
-				})
-			}
-			if sentBefore {
-				// The CLI died after a confirmed send and before the close.
-				_, _ = sender(context.Background(), env, "host", *a.Payload, w.Address)
+			sender := func(_ context.Context, _ *sysenv.Env, _ string, r Request, _ string) (Receipt, error) {
+				texts = append(texts, r.Text)
+				return Receipt{MessageID: r.MessageID, Status: StatusAccepted}, nil
 			}
 			current("false")
 			_, _ = consumeWith(context.Background(), env, "fiber", "host", w, sender)
 			plain := readEntry(t, filepath.Join(root, "offered", mailboxKey("plain")+".json"))
-			if plain.PossibleRepeat {
-				t.Fatalf("plain member marked as a possible repeat: %+v", plain)
+			if confirmed && (len(texts) != 0 || plain.PossibleRepeat) {
+				t.Fatalf("a delivered batch was sent again: %q %+v", texts, plain)
 			}
-			if sentBefore && (len(texts) != 1 || plain.Attempt.Outcome != attemptDelivered) {
-				t.Fatalf("a delivered batch was sent again: %q %+v", texts, plain.Attempt)
-			}
-			if !sentBefore && (len(texts) != 1 || strings.Contains(texts[0], "thread child closed") || strings.Contains(texts[0], "Possible repeat")) {
-				t.Fatalf("never-sent batch: %q", texts)
+			if !confirmed && (len(texts) != 1 || strings.Contains(texts[0], "thread child closed") || !strings.HasPrefix(texts[0], "Possible repeat:") || !plain.PossibleRepeat) {
+				t.Fatalf("unknown batch: %q %+v", texts, plain)
 			}
 		})
 	}
@@ -534,7 +521,7 @@ func TestConsumeReportsNoWakeForARejectedSend(t *testing.T) {
 	}
 	// The stale batch's retry is rejected, and so is the next batch.
 	expireAttempt(t, path)
-	statuses = []string{StatusUnknown, StatusRejected, StatusRejected}
+	statuses = []string{StatusRejected, StatusRejected}
 	result, err = consumeWith(context.Background(), env, "fiber", "host", w, sender)
 	if len(statuses) != 0 || result.Action != "wait" || len(result.Members) != 0 {
 		t.Fatalf("rejected retry: %+v %v, unsent %v", result, err, statuses)

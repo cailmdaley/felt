@@ -243,6 +243,43 @@ func refreshClaudeNativeReceipt(ctx context.Context, env *sysenv.Env, req Reques
 	return nativeReceiptRefresh{Receipt: upgraded}, true
 }
 
+const claudeTurnFailed = "the receiver took the message but its turn ended in an error without a model reply"
+
+// observeClaudeNative reads a Claude conversation's transcript from offset to
+// its end, without waiting, for the native message req, and answers stored,
+// with its error code, advanced to the furthest stage the transcript shows.
+func observeClaudeNative(env *sysenv.Env, req Request, offset int64, stored Receipt, code string) (Receipt, string) {
+	address, err := ParseAddress(req.Address)
+	if err != nil {
+		return stored, code
+	}
+	registration, err := readClaudeNative(env, address.ID)
+	if err != nil || registration.ID != address.ID || registration.Host != address.Host {
+		return stored, code
+	}
+	f, err := openClaudeTranscript(registration.Transcript, false)
+	if err != nil {
+		return stored, code
+	}
+	defer f.Close()
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return stored, code
+	}
+	// A done context reads to the end of the transcript and stops there.
+	done, cancel := context.WithCancel(context.Background())
+	cancel()
+	stage, err := observeClaudeTurn(done, f, registration.Transcript, address.ID, claudeNativeUUID(req), nativeContentHash(labeled(req)), nil)
+	switch {
+	case errors.Is(err, errClaudeReceiverTurnFailed):
+		stored.Status, stored.Detail = StatusUnknown, claudeTurnFailed
+		return stored, "receiver_turn_failed"
+	case (err != nil && !errors.Is(err, context.Canceled)) || claudeStageRank(stage) <= claudeStageRank(stored.Status):
+		return stored, code
+	}
+	stored.Status, stored.Detail = stage, claudeStageReceipt(req, stage).Detail
+	return stored, ""
+}
+
 // claudeNativeLive verifies that the registered receiver still owns its bound
 // endpoint. SessionEnd hooks use this when no generation identity is available.
 func claudeNativeLive(env *sysenv.Env, id, host string) bool {

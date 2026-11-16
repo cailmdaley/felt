@@ -286,7 +286,7 @@ func fiberContextHookEligible(root, conversation string, request Request) bool {
 		}
 	}
 	entry, err := readFiberMailboxEntry(filepath.Join(root, "pending", mailboxKey(request.MessageID)+".json"))
-	if err != nil || entry.AttemptAddress != "" {
+	if err != nil {
 		return false
 	}
 	if entry.Wishes.Turn == "none" || entry.Wishes.Turn == "ask" {
@@ -303,12 +303,12 @@ func fiberContextSessionEnded(env *sysenv.Env, host, address string) bool {
 	return err == nil && a.Host == host && mailboxReceiverEnded(env, a.Harness, a.ID, host)
 }
 
+// sendFiberContextAttempt sends a batch's payload to address under its
+// transport id. The batch's manifest records the outcome, so no messages/
+// receipt is written.
 func sendFiberContextAttempt(ctx context.Context, env *sysenv.Env, host string, request Request, address string) (Receipt, error) {
 	request.Address = address
-	// Keep one stable dedup key for retries to a destination, with an
-	// independent key when a rejected or authoritatively ended destination is replaced.
-	request.MessageID += "-" + mailboxKey(address)[:16]
-	receipt, err := Send(ctx, env, host, request)
+	receipt, err := SendRecorded(ctx, env, host, request)
 	if err != nil {
 		return receipt, err
 	}

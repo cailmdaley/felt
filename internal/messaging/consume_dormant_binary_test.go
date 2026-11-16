@@ -141,9 +141,9 @@ func TestDormantLaunchThroughTheRealCLI(t *testing.T) {
 		t.Fatalf("pending = %d after C's claim", n)
 	}
 	for _, id := range []string{"quiet", "asked", "forced"} {
-		e := readEntry(t, filepath.Join(mailboxDir(env, "fiber", "fiber"), "offered", mailboxKey(id)+".json"))
-		if e.Attempt == nil || e.Attempt.Outcome != attemptDelivered || e.Attempt.Conversation != "shuttle://host/claude/C" {
-			t.Fatalf("%s attempt = %+v", id, e.Attempt)
+		root := mailboxDir(env, "fiber", "fiber")
+		if e := readEntry(t, filepath.Join(root, "offered", mailboxKey(id)+".json")); e.Disposition != "" || batchOf(t, root, id) != nil {
+			t.Fatalf("%s offered = %+v", id, e)
 		}
 	}
 	if c := answer(); c.Action != "wait" {

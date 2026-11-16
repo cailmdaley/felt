@@ -39,10 +39,6 @@ func TestObserveClaudeTurnMatchesOriginMsgIDOnUserRow(t *testing.T) {
 	}
 }
 
-// What an open batch whose native receipt stays `queued` does to a live
-// worker, a fiber whose worker ended, and the replacement it launches. The
-// sender stands in for withDedup: the pinned transport id replays its stored
-
 func TestObserveClaudeTurnMatchesOriginMsgIDOnQueuedCommand(t *testing.T) {
 	const native = "57379fbd-a537-5ccb-8c8f-b6128f01ccc4"
 	rows := []map[string]any{
@@ -64,5 +60,3 @@ func TestObserveClaudeTurnMatchesOriginMsgIDOnQueuedCommand(t *testing.T) {
 		t.Fatalf("absorbed 2.1.325 peer message observes as %q (%v)", stage, err)
 	}
 }
-
-// The same consequences through the real sender (sendFiberContextAttempt →

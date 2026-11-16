@@ -408,6 +408,27 @@ func refreshPiNativeReceipt(ctx context.Context, env *sysenv.Env, req Request, s
 	return nativeReceiptRefresh{Receipt: upgraded}, true
 }
 
+// observePiNative reads a Pi conversation's transcript from offset to its
+// end, without waiting, for the user message req.
+func observePiNative(env *sysenv.Env, req Request, offset int64) bool {
+	address, err := ParseAddress(req.Address)
+	if err != nil {
+		return false
+	}
+	registration, err := readPiNative(env, address.ID)
+	if err != nil || registration.ID != address.ID || registration.Host != address.Host {
+		return false
+	}
+	f := openPiReceiptTranscript(registration.Transcript, address.ID)
+	if f != nil {
+		defer f.Close()
+		if _, err := f.Seek(offset, io.SeekStart); err != nil {
+			return false
+		}
+	}
+	return observePiReceipt(context.Background(), f, registration.Transcript, address.ID, nativeContentHash(labeled(req)), time.Now())
+}
+
 func piTranscriptReceipt(req Request) Receipt {
 	return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusAccepted, Transport: piNativeTransport, Detail: "Pi transcript recorded this user message"}
 }

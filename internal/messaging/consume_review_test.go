@@ -88,7 +88,7 @@ func TestReview7And8BatchTransportIDsAndRetryBounds(t *testing.T) {
 	root := mailboxDir(env, "fiber", "fiber")
 	a, _ := readConsumedBatch(root)
 	a.OpenedAt = time.Now().Add(-liveAttemptRetryAfter).UnixNano()
-	_ = pinConsumedBatch(root, &a)
+	_ = writeBatch(root, &a)
 	_, _ = consumeWith(context.Background(), env, "fiber", "host", w, sender)
 	if len(seen) != 2 {
 		t.Fatalf("variants=%v", seen)

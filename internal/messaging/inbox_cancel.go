@@ -26,7 +26,11 @@ func CancelPending(env *sysenv.Env, address, id string) error {
 	if err != nil {
 		return err
 	}
-	if e.Attempt.open() {
+	pinned, err := pinnedBy(root)
+	if err != nil {
+		return err
+	}
+	if pinned[id] != nil {
 		return errCode("in_flight", "message %s has a delivery in flight; it cannot be cancelled", id)
 	}
 	// Marked before the move, so offered/ never reads as its delivery.

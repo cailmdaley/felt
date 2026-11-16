@@ -122,9 +122,9 @@ func TestTheLaunchedSessionsFirstHookTakesTheBatch(t *testing.T) {
 	if n, _ := pendingCount(env, "fiber"); n != 0 {
 		t.Fatalf("pending = %d after the claim", n)
 	}
-	e := readEntry(t, filepath.Join(mailboxDir(env, "fiber", "fiber"), "offered", mailboxKey("forced")+".json"))
-	if e.Attempt == nil || e.Attempt.Outcome != attemptDelivered || e.Attempt.Conversation != "shuttle://host/claude/B" {
-		t.Fatalf("delivered attempt = %+v", e.Attempt)
+	root := mailboxDir(env, "fiber", "fiber")
+	if e := readEntry(t, filepath.Join(root, "offered", mailboxKey("forced")+".json")); e.Disposition != "" || batchOf(t, root, "forced") != nil {
+		t.Fatalf("delivered entry = %+v", e)
 	}
 }
 
@@ -250,10 +250,9 @@ func TestAnUnaddressedWorkerWaits(t *testing.T) {
 
 // A waking batch pinned to a conversation that ended before its outcome was
 // known asks for a launch like a free entry. Reserving the launch leaves the
-// batch's manifest and pins as they were; the launched session's consume then
-// resolves it: the ended conversation is asked again under the pinned
-// transport id, and the batch rolls forward to the new receiver marked as a
-// possible repeat.
+// batch's manifest as it was; the launched session's consume then resolves
+// it: the pinned payload, whose outcome is unknown, is not sent again, and the
+// batch rolls forward to the new receiver marked as a possible repeat.
 func TestAPinnedWakeToAnEndedConversationLaunchesAReplacement(t *testing.T) {
 	env, w := consumeFixture(t)
 	putWish(t, env, "wake", "ask", "hold")
@@ -266,7 +265,7 @@ func TestAPinnedWakeToAnEndedConversationLaunchesAReplacement(t *testing.T) {
 	// The consumer pinned the batch, then died before the transport emitted it.
 	pinned := newConsumedAttempt(w, items, true)
 	pinned.OpenedAt = time.Now().Add(-time.Hour).UnixNano()
-	if err := pinConsumedBatch(root, &pinned); err != nil {
+	if err := writeBatch(root, &pinned); err != nil {
 		t.Fatal(err)
 	}
 	// Its receiver exited.
@@ -289,14 +288,8 @@ func TestAPinnedWakeToAnEndedConversationLaunchesAReplacement(t *testing.T) {
 		t.Fatalf("waking count = %d during the lease", n)
 	}
 	manifests, err := readBatchManifests(root)
-	if err != nil || len(manifests) != 1 || manifests[0].Payload.MessageID != pinned.Payload.MessageID {
+	if err != nil || len(manifests) != 1 || manifests[0].Payload.MessageID != pinned.Payload.MessageID || manifests[0].Conversation != w.Address {
 		t.Fatalf("reserving a launch changed the batch: %+v %v", manifests, err)
-	}
-	for _, id := range pinned.Members {
-		e := readEntry(t, filepath.Join(root, "pending", mailboxKey(id)+".json"))
-		if e.AttemptAddress != w.Address || e.Attempt.Payload.MessageID != pinned.Payload.MessageID {
-			t.Fatalf("reserving a launch changed %s's pin: %+v", id, e)
-		}
 	}
 
 	// The launched session becomes the receiver; its consume advances the batch.
@@ -317,18 +310,18 @@ func TestAPinnedWakeToAnEndedConversationLaunchesAReplacement(t *testing.T) {
 	if err != nil || result.Action != "wake" {
 		t.Fatalf("the launched session's consume: %+v %v", result, err)
 	}
-	if len(sent) != 2 || to[0] != w.Address || sent[0].MessageID != pinned.Payload.MessageID || to[1] != launched.Address {
-		t.Fatalf("sent %d to %v, want the pinned payload to A then its successor to B", len(sent), to)
+	if len(sent) != 1 || to[0] != launched.Address {
+		t.Fatalf("sent %d to %v, want only the successor B", len(sent), to)
 	}
-	if sent[1].MessageID == pinned.Payload.MessageID || !strings.HasPrefix(sent[1].Text, "Possible repeat:") || !strings.Contains(sent[1].Text, "text of wake") {
-		t.Fatalf("roll-forward to B = %+v", sent[1])
+	if sent[0].MessageID == pinned.Payload.MessageID || !strings.HasPrefix(sent[0].Text, "Possible repeat:") || !strings.Contains(sent[0].Text, "text of wake") {
+		t.Fatalf("roll-forward to B = %+v", sent[0])
 	}
 	if n, _ := pendingCount(env, "fiber"); n != 0 {
 		t.Fatalf("pending = %d after the roll-forward", n)
 	}
 	e := readEntry(t, filepath.Join(root, "offered", mailboxKey("wake")+".json"))
-	if e.Attempt.Outcome != attemptDelivered || e.Attempt.Conversation != launched.Address || !e.PossibleRepeat {
-		t.Fatalf("delivered attempt = %+v", e)
+	if e.Disposition != "" || batchOf(t, root, "wake") != nil {
+		t.Fatalf("delivered entry = %+v", e)
 	}
 }
 
@@ -423,22 +416,12 @@ func TestAHeldBatchLaunchesOnlyWhileUnresolvedAndCurrent(t *testing.T) {
 			root := mailboxDir(env, "fiber", "fiber")
 			items, _ := pendingItems(root)
 			pinned := newConsumedAttempt(w, items, true)
-			if err := pinConsumedBatch(root, &pinned); err != nil {
-				t.Fatal(err)
-			}
 			if held == "confirmed" {
 				// The transport confirmed the batch; the consumer died before closing it.
-				req := *pinned.Payload
-				req.Address = w.Address
-				req.MessageID += "-" + mailboxKey(w.Address)[:16]
-				path := filepath.Join(dataDir(env), "messages", mailboxKey(req.MessageID)+".json")
-				if err := ensureDir(filepath.Dir(path), 0700); err != nil {
-					t.Fatal(err)
-				}
-				bytes, _ := json.Marshal(record{Hash: requestHash(req), State: "complete", Receipt: Receipt{Status: StatusAccepted}})
-				if err := mailboxWrite(path, bytes, false); err != nil {
-					t.Fatal(err)
-				}
+				pinned.Receipt = &Receipt{Status: StatusAccepted}
+			}
+			if err := writeBatch(root, &pinned); err != nil {
+				t.Fatal(err)
 			}
 			transition(t, env, "", "-")
 			result, err := consumeWith(context.Background(), env, "fiber", "host", dormant, neverSend(t))
@@ -467,7 +450,7 @@ func TestAHeldBatchLaunchesOnlyWhileUnresolvedAndCurrent(t *testing.T) {
 				t.Fatalf("the batch stayed open: %+v", manifests)
 			}
 			e := readEntry(t, filepath.Join(root, "offered", mailboxKey("thread-m")+".json"))
-			if held == "confirmed" && (e.Attempt.Outcome != attemptDelivered || e.PossibleRepeat) {
+			if held == "confirmed" && (e.Disposition != "" || e.PossibleRepeat) {
 				t.Fatalf("confirmed entry = %+v", e)
 			}
 		})
@@ -493,7 +476,7 @@ func TestAnUnverifiableThreadResultDoesNotLaunch(t *testing.T) {
 			if held {
 				items, _ := pendingItems(root)
 				a := newConsumedAttempt(w, items, true)
-				if err := pinConsumedBatch(root, &a); err != nil {
+				if err := writeBatch(root, &a); err != nil {
 					t.Fatal(err)
 				}
 			}

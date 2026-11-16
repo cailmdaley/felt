@@ -93,9 +93,8 @@ func HookPIDIsAncestor(pid int) bool {
 
 // mailboxEntry is one stored inbox entry. Its request carries the wake fields
 // that its inbox's readers act on (see Enqueue); a build that predates wishes
-// reads those fields and ignores the wishes, not_before included. A build that
-// predates the attempt record ignores it and reads attempt_address and
-// possible_repeat, which are written beside it.
+// reads those fields and ignores the wishes, not_before included. The batch
+// that holds an entry pinned is recorded in its manifest, not here.
 type mailboxEntry struct {
 	Request  Request `json:"request"`
 	Wishes   Wishes  `json:"wishes"`
@@ -107,13 +106,9 @@ type mailboxEntry struct {
 	Disposition string         `json:"disposition,omitempty"`
 	// Fallback records native write ownership and bounded preflight retries.
 	Fallback *claudeFallback `json:"fallback,omitempty"`
-	// Attempt is the latest try at delivering the entry (see claimBatch).
-	Attempt *Attempt `json:"attempt,omitempty"`
-	// AttemptAddress pins a direct fiber-context send across a lost receipt
-	// and worker handoff. A retired destination may roll forward to its
-	// successor with PossibleRepeat when its outcome cannot be established.
-	AttemptAddress string `json:"attempt_address,omitempty"`
-	PossibleRepeat bool   `json:"possible_repeat,omitempty"`
+	// PossibleRepeat marks an entry an earlier batch may have delivered: its
+	// next emission carries a warning.
+	PossibleRepeat bool `json:"possible_repeat,omitempty"`
 }
 
 type mailboxPendingItem struct {
@@ -406,6 +401,19 @@ func offerMailboxWithAck(dir, conversation string, accepts func(Request) bool, e
 	if err := pruneOffered(dir, time.Now()); err != nil {
 		return err
 	}
+	// Under the lock, a hook's claim left open belongs to a hook that died
+	// between its output and its close.
+	batches, err := readBatchManifests(dir)
+	if err != nil {
+		return err
+	}
+	for i := range batches {
+		if batches[i].Hook {
+			if err := closeBatch(dir, &batches[i], attemptAmbiguous); err != nil {
+				return err
+			}
+		}
+	}
 	entries, err := os.ReadDir(filepath.Join(dir, "pending"))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -439,11 +447,7 @@ func offerMailboxWithAck(dir, conversation string, accepts func(Request) bool, e
 		if !entry.due(time.Now()) || !accepts(entry.Request) {
 			continue
 		}
-		it := mailboxPendingItem{path, entry}
-		if err := settleUnfinishedHookClaim(&it); err != nil {
-			return err
-		}
-		items = append(items, it)
+		items = append(items, mailboxPendingItem{path, entry})
 	}
 	sortPendingItems(items)
 	items, validationErr := validateMailboxItems(dir, items, current)
@@ -510,17 +514,14 @@ func offerMailboxWithAck(dir, conversation string, accepts func(Request) bool, e
 	if len(items) == 0 {
 		return validationErr
 	}
-	paths := make([]string, len(items))
-	for i, it := range items {
-		paths[i] = it.path
-	}
-	if _, err := claimBatch(paths, conversation); err != nil {
+	claim, err := claimBatch(dir, items, conversation)
+	if err != nil {
 		return err
 	}
 	if err := emit(batch); err != nil {
 		return err
 	}
-	if err := closeAttempts(paths, attemptDelivered); err != nil {
+	if err := closeBatch(dir, &claim, attemptDelivered); err != nil {
 		return err
 	}
 	return validationErr

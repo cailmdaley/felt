@@ -12,6 +12,7 @@ import (
 
 // PendingContext describes a notice waiting for a fiber's worker. Mailbox is
 // the local durable queue path, including when no receiver has registered yet.
+// AttemptAddress is the conversation an open batch holding it was sent to.
 type PendingContext struct {
 	Mailbox        string    `json:"mailbox"`
 	MessageID      string    `json:"message_id"`
@@ -44,13 +45,21 @@ func OverdueFiberContext(env *sysenv.Env, now time.Time, after time.Duration) ([
 		if err != nil {
 			return nil, err
 		}
+		pinned, err := pinnedBy(mailbox)
+		if err != nil {
+			return nil, err
+		}
 		for _, it := range items {
 			entry := it.entry
 			age := now.Sub(entry.availableAt())
 			if age < after {
 				continue
 			}
-			pending = append(pending, PendingContext{Mailbox: mailbox, MessageID: entry.Request.MessageID, QueuedAt: time.Unix(0, entry.QueuedAt), AgeSeconds: int64(age / time.Second), AttemptAddress: entry.AttemptAddress, PossibleRepeat: entry.PossibleRepeat})
+			context := PendingContext{Mailbox: mailbox, MessageID: entry.Request.MessageID, QueuedAt: time.Unix(0, entry.QueuedAt), AgeSeconds: int64(age / time.Second), PossibleRepeat: entry.PossibleRepeat}
+			if b := pinned[entry.Request.MessageID]; b != nil {
+				context.AttemptAddress = b.Conversation
+			}
+			pending = append(pending, context)
 		}
 	}
 	sort.Slice(pending, func(i, j int) bool {

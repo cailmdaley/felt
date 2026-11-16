@@ -11,8 +11,8 @@ import (
 )
 
 // A pass's answer reports the requested entry's own state, whatever else the
-// pass sent: an earlier batch re-sent on this pass does not make an entry
-// held for cost read as delivered, and a retried id that was delivered
+// pass advanced: an earlier batch still open on this pass does not make an
+// entry held for cost read as delivered, and a retried id that was delivered
 // before reads as delivered.
 func TestConsumeReportsTheRequestedMessage(t *testing.T) {
 	env, w := consumeFixture(t)
@@ -33,10 +33,17 @@ func TestConsumeReportsTheRequestedMessage(t *testing.T) {
 		return Receipt{Status: StatusAccepted}, nil
 	}
 	second, err := consumeWith(context.Background(), env, "fiber", "host", w, accepted)
-	if err != nil || !slices.Equal(second.Members, []string{"m1"}) || second.Held != "cost" || second.Message != "pending" {
+	if ErrorCode(err) != "unconfirmed" || !slices.Equal(second.Members, []string{"m1"}) || second.Held != "cost" || second.Message != "pending" {
 		t.Fatalf("second=%+v err=%v", second, err)
 	}
 
+	// The conversation confirms m1's batch.
+	root := mailboxDir(env, "fiber", "fiber")
+	batch := batchOf(t, root, "m1")
+	batch.Receipt.Status = StatusAccepted
+	if err := writeBatch(root, batch); err != nil {
+		t.Fatal(err)
+	}
 	w.Message = "m1"
 	retry, err := consumeWith(context.Background(), env, "fiber", "host", w, accepted)
 	if err != nil || len(retry.Members) != 0 || retry.Message != "delivered" {

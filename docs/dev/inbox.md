@@ -18,9 +18,9 @@ Each address has one directory under the data directory:
 `pending/<sha256(message id)>.json` holds entries no worker has taken.
 `offered/` holds entries with a final disposition for 14 days.
 `.lock` serializes writers, hooks and the consumer, including transport emission.
+`batches/<batch_id>.json` holds one manifest per open batch, the batch's one claim record ([below](#batches-and-the-claim)).
 A Claude session also has `fallback/`, where native-wake recovery claims a session entry.
-A fiber has `destination.json`, its worker-owned conversation and receiver epoch, and `batches/<batch_id>.json`, one manifest per open wake batch with its durable payload.
-A manifest lets recovery finish a claim or close interrupted between member-file writes.
+A fiber has `destination.json`, its worker-owned conversation and receiver epoch.
 
 ## The entry
 
@@ -34,7 +34,8 @@ A manifest lets recovery finish a claim or close interrupted between member-file
 
 `request` is the publication as `messaging.Request` defines it: id, text, sender, attachments, reply and idle-notification fields, thread signal and retention stamp.
 `queued_at` is Unix nanoseconds.
-Readers also write `attempt`, `attempt_address` and `possible_repeat`, and `fallback` on Claude session entries.
+Readers also write `possible_repeat` when an entry settles back to pending after a batch that may have delivered it, and `fallback` on Claude session entries.
+Entries written by earlier builds may also carry `attempt` and `attempt_address`; nothing reads them.
 A routing inbox entry also carries `routing`, its publication's routing record, and the `disposition` it settled with, written before it moves to offered.
 
 ### Delivery wishes
@@ -222,7 +223,7 @@ A `force` reminder skips cost and hook windows; a `none` reminder waits as conte
 The reason is the one a `/deliver` receipt would give: the agent gate or launch admission refusal the next poll would meet, or the worker that has yet to take the entry.
 Fiber ids, slugs and uids resolve through the owner to its host-local `<store>:<uid>` key, and a reference that names no fiber is an error; a raw key (a store path and uid, a `shuttle://` address or `threads`) reads this host.
 `shuttle inbox cancel <fiber> <message-id>` marks a pending entry `cancelled` and moves it to `offered/`, under the inbox lock.
-An entry already in a transport attempt is refused as `in_flight`: cancellation cannot retract text already emitted.
+An entry an open batch holds is refused as `in_flight`: cancellation cannot retract text already emitted.
 Both fiber-reference commands use the owner-routed `/api/v1/inbox` endpoint (`action: list|cancel`); an unreachable owner is an error, never an archive fallback.
 The poll's one `inbox pending` call reports each owned fiber's due count and its scheduled entries; the owner feed carries the entries to the Desk's expandable scheduled chip, and a future entry does not count as waiting for a worker.
 
@@ -322,8 +323,8 @@ A tracked worker whose conversation is not yet known is consumed as `-` with its
 | `ask`/`idle`, idle, costly, only `hold` | Wait; `ask` remains hook-eligible |
 | `ask`/`idle`/`force`, no worker | Reserve a launch and return `launch`, when the fiber passes the gate below |
 
-A launch reservation is kept apart from the entries' delivery attempts, in the inbox's `launch.json`: the reserving receiver (`-` and epoch 0 for a fiber with no worker), the asking entries it was requested for, and when, leased for two minutes.
-Reserving a launch never rewrites an entry's attempt or a batch's pinned payload.
+A launch reservation is kept apart from the batches, in the inbox's `launch.json`: the reserving receiver (`-` and epoch 0 for a fiber with no worker), the asking entries it was requested for, and when, leased for two minutes.
+Reserving a launch never rewrites a batch's manifest.
 Within the lease, consume answers `wait` for a cost-based reservation's reserving receiver while it stays costly, and a new receiver (the launched session) takes the reserved entries through its hook instead of a wake.
 The daemon starts the session; when the Poller refuses the launch, it consumes again without `Costly`, waking the live worker.
 A launch that never arrives, including one a busy Poller accepted and later refused, is asked for again once the lease passes.
@@ -334,9 +335,9 @@ The daemon consumes a fiber with no worker as `shuttle inbox consume <fiber-key>
 A due entry that asks for a turn (`ask`, `idle` or `force`), whether free or held by an open batch, makes it reserve a launch for those entries and answer `launch` with them as `members`, unless a reservation in its lease still owes any pending entry; then it answers `wait` with `"launching": true`.
 Repeated consumes therefore ask for one launch per lease, and once the launched session has taken every reserved entry a new one may ask for another.
 Quiet entries are not reserved.
-An open batch is not sent anywhere without a receiver, but its local records are settled first, as the batch rules below settle them: a recorded confirmed receipt for its pinned payload closes it delivered, and a superseded thread result drops it, releasing or holding the rest.
+An open batch is not sent anywhere without a receiver, but what its own record decides is settled first, as the batch rules below settle it: a confirmed receipt, recorded or read from the conversation's transcript, closes it delivered, and a superseded thread result drops it, holding the rest as ambiguous.
 A batch whose currency could not be checked waits for a later consume, as a free entry does.
-A batch left unresolved and current that asks for a turn asks for a launch: a batch pinned to a conversation that ended before its outcome was known starts a replacement, whose consume then resolves it by the batch rules below (the pinned payload is offered to the ended conversation under its transport id, then rolled forward to the replacement, marked as a possible repeat when the outcome stayed unknown).
+A batch left unresolved and current that asks for a turn asks for a launch: a batch sent to a conversation that ended before its outcome was confirmed starts a replacement, whose consume then rolls it forward to the replacement, marked as a possible repeat, by the batch rules below.
 
 Only an armed fiber may be started by an entry that is not the human's (`Delivery.inbox_gate/2`): a constitution this host owns with `status: active`, not at rest (`horizon: stashed`), and not a standing constitution whose scheduled run is due, since that run takes the entries.
 Arming is the author's authorization, which a message or a thread result does not grant: a draft, a constitution at rest, a paused schedule and a closed constitution keep their entries for whoever arms or starts them next.
@@ -382,48 +383,62 @@ Thread lifecycle currency is checked before emission; an unverifiable publicatio
 
 ### Hooks
 
-A fiber hook offers only `none` and `ask` entries that are not pinned and that no open batch's manifest holds, and any entry a launch reservation from another receiver holds in its lease.
+A fiber hook offers only `none` and `ask` entries that no open batch's manifest holds, and any entry a launch reservation from another receiver holds in its lease.
 It never takes other `idle` or `force` entries.
 It uses the same inbox lock, the 16-entry and one-lifecycle-signal limits and the harness's byte limit; its budget counts each emission's possible-repeat warning but reserves nothing for framing.
 A hook takes context from the fiber inbox itself, so replacing the worker does not strand a session-scoped copy.
 
-## Attempts and the claim
+## Batches and the claim
 
-Each selected entry carries the same attempt record:
+A batch is claimed once, in its manifest, `batches/<batch_id>.json`:
 
 ```json
-"attempt": {"batch_id": "<sha256>", "conversation": "shuttle://host/claude/A", "epoch": 3, "members": ["m-1", "m-2"], "opened_at": 1763190000000000000}
+{"batch_id": "<sha256>", "conversation": "shuttle://host/claude/A", "epoch": 3, "members": ["m-1", "m-2"], "opened_at": 1763190000000000000,
+ "payload": {"message_id": "batch-…", "text": "…", "wake": true}, "base_text": "…", "variant": "plain",
+ "transcript_offset": 18233, "receipt": {"status": "queued", "transport": "claude-native"}, "error_code": ""}
 ```
+
+An entry is pinned exactly while a manifest names it.
+Member entries are rewritten only when they settle: a delivered member moves to `offered/` with the modification time it had pending, from which offered retention runs; a released or ambiguous one stays pending, marked `possible_repeat` when the batch may have reached a conversation (an ambiguous close, or the release of a retry or roll-forward), and carries “Possible repeat” wherever it goes next.
 
 `batch_id` hashes sorted member ids joined by NUL; `members` keeps emission order.
 `epoch` is the receiver's epoch at the claim, or zero for a session inbox.
-`outcome` is absent while open, then `delivered`, `released` or `ambiguous`.
+`outcome` is absent while open, then `delivered`, `released` or `ambiguous`, recorded before the members settle, so a close interrupted midway finishes on the next pass.
 `retry` counts the single bounded retry to that conversation.
 
-A wake attempt also stores `payload` (the exact request and transport id), `base_text` and `variant`.
+The consumer's batch stores `payload` (the exact request, under its transport id), `base_text` and `variant`.
 The transport id is a bounded, domain-separated hash of members, conversation and exact text variant.
 Plain text, a live retry and a possible-repeat warning cannot change text under one transport id.
-The batch's manifest stores that complete record before any member is pinned or any message is sent.
-Recovery repairs partial member writes and replays that same payload, even when new entries arrive.
-A partial close can replay the same payload against the transport's `messages/` receipt without injecting it again.
-Before a superseded member can change an open batch, the payload's `messages/` record decides: a confirmed receipt closes the batch `delivered`; no record or a rejection drops the superseded member and releases the rest; any other record closes it `ambiguous`.
+The consumer writes the manifest before the send, with `transcript_offset`, where a Claude or Pi conversation's transcript ends, and after the send records the transport's `receipt` and `error_code` in it.
+The send writes no `messages/` receipt.
+A manifest without a receipt is a send whose outcome is unknown, whether the consumer died before the send, during it or before recording it; its payload is never sent again.
 
-A wake claim writes `attempt_address` beside the attempt, pinning it to that conversation.
-A confirmed receipt closes the batch `delivered` and moves its pending members to offered.
-An unconfirmed send leaves it pinned and open.
-A clean rejection releases it; any earlier unknown send remains recorded as possible-repeat evidence.
-When a pinned conversation ends, or stays unknown for five minutes after another receiver replaces it, the batch rolls forward with a possible-repeat warning.
-When it is still the receiver, five minutes of unknown outcome permit one warning-marked retry under a distinct transport id.
-Exhausting that retry does not prevent later roll-forward to another receiver.
-Approval-held messages (`wake_held`) are not retried.
+A hook claims its emission with a manifest of its own, marked `hook`, with no payload, and removes it when it closes the batch delivered.
+The next reader under the inbox lock, a hook or the consumer, live or dormant, closes a hook manifest it finds ambiguous: its hook died between output and close.
+A launch reservation is no claim: it lives in `launch.json`, requests no emission and is not evidence of a possible repeat.
+The session-only Claude fallback claims by moving an entry into `fallback/` and writes no manifest.
 
-Retries and roll-forwards use hashed transport identities.
+Consume sends a new batch once.
+A confirmed receipt (`accepted`, `context_added`, or a Codex terminal `submitted`) closes it delivered; a rejection releases it at once.
+Any other answer leaves it open.
+Each later pass advances an open batch from its record alone, never sending its payload again:
 
-A hook claim is unpinned.
-If a hook leaves its attempt open, the next reader under the inbox lock, a hook or the consumer, closes it ambiguous, and the entry carries “Possible repeat” wherever it goes next.
-A launch reservation is no attempt: it lives in `launch.json`, requests no emission and is not evidence of a possible repeat.
-Unpinned claims and delivered closes preserve the entry's modification time, from which offered retention runs.
-The session-only Claude fallback claims by moving an entry into `fallback/` and writes no attempt.
+| The batch's record | Consume for the live worker W |
+|---|---|
+| `outcome` recorded | Finish the close |
+| Confirmed receipt, or one the conversation's transcript now confirms | Close it delivered, subscribing the idle notices its members asked for |
+| A thread member superseded | Move that member to offered and close the batch ambiguous |
+| Unconfirmed, sent to W | Read W's transcript from `transcript_offset` to its end, without waiting, and keep waiting; after five minutes of an `unknown` outcome, one retry, warning-marked, under its own transport id |
+| Unconfirmed, sent to W but held for approval (`wake_held`) | Wait; no retry |
+| Unconfirmed, sent to a conversation that has ended | Roll forward to W at once, warning-marked |
+| Unconfirmed, sent to a conversation W has replaced for five minutes | Roll forward to W, warning-marked |
+| A quiet payload that would be retried or rolled forward | Close it ambiguous; its members return to the fiber's hooks marked |
+| A hook's claim | Close it ambiguous |
+
+“Unconfirmed” is every outcome but a confirmation: `unknown`, a Claude `queued` or `submitted`, a Pi `queued`, and no receipt at all.
+A `queued` send to a conversation that is still the receiver waits for its transcript rather than retrying, since the receiver holds it.
+Exhausting the retry does not prevent a later roll-forward to another receiver.
+A fiber with no worker settles only the first three rows and leaves the rest to the next receiver.
 
 ## Verbs
 
@@ -431,7 +446,7 @@ The session-only Claude fallback claims by moving an entry into `fallback/` and 
 |---|---|
 | `shuttle inbox put <address> <message-id> <text>` | Enqueue, with `--source`, `--turn`, `--if-costly`, `--not-before`, `--from` and `--derived`; silent on success |
 | `shuttle inbox pending <address>... [--waking]` | JSON address → pending count, or with `--waking` the count a launch would be for; unreadable addresses are named on stderr and omitted |
-| `shuttle inbox ls <address>` | Pending entries oldest first; `--json` includes wishes, queued time, sender and open attempt |
+| `shuttle inbox ls <address>` | Pending entries oldest first; `--json` includes wishes, queued time, sender and the open batch that holds it (`attempt`) |
 | `shuttle inbox consume <fiber-key> <address-or-dash> <epoch> [--idle] [--unknown] [--busy] [--costly] [--message <id>]` | Consume for the current receiver, or with `-` and epoch 0 for a fiber with no worker; one JSON object with `action` (`wait`, `wake`, `context`, `fresh`, `launch`), the `members` sent or reserved, `turn` when an entry asks for a turn the worker's facts would decide, and with `--message` that entry's state after the pass (`message`: `delivered`, `sent`, `reserved`, `pending` or `unknown`). The answer is printed even when an open batch's send fails, which exits nonzero |
 | `shuttle inbox thread-state` | Establish the thread capture window and print its `baseline`, or exit 3 on a corrupt state |
 | `shuttle inbox thread-put` | Capture a JSON array of `{id, record, board}` publications from stdin into the routing inbox, storing a `board` record in that entry, then append every board line the routing inbox's entries owe, from the stored record; print `{"created": [ids], "refused": [{id, error}], "board_errors": [{id, error}]}`, trying every publication |

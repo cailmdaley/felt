@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"testing"
 	"time"
 
@@ -22,8 +21,19 @@ func offerMailboxValidated(dir string, accepts func(Request) bool, current func(
 }
 
 // pinBatch claims the entries at paths as one open wake batch pinned to
-// conversation, manifest first, as consume claims a batch, and returns it.
+// conversation, as consume's claim records it before its send, and returns
+// it. Its send has no recorded outcome yet, so it reads as unknown.
 func pinBatch(t *testing.T, paths []string, conversation string) Attempt {
+	t.Helper()
+	root := filepath.Dir(filepath.Dir(paths[0]))
+	a := newBatch(t, paths, conversation)
+	if err := writeBatch(root, &a); err != nil {
+		t.Fatal(err)
+	}
+	return a
+}
+
+func newBatch(t *testing.T, paths []string, conversation string) Attempt {
 	t.Helper()
 	root := filepath.Dir(filepath.Dir(paths[0]))
 	items := make([]mailboxPendingItem, len(paths))
@@ -32,30 +42,21 @@ func pinBatch(t *testing.T, paths []string, conversation string) Attempt {
 		items[i] = mailboxPendingItem{path: path, entry: readEntry(t, path)}
 		wake = wake || items[i].entry.Request.Wake
 	}
-	a := newConsumedAttempt(Worker{Address: conversation, Epoch: receiverEpoch(root, conversation)}, items, wake)
-	if err := pinConsumedBatch(root, &a); err != nil {
-		t.Fatal(err)
-	}
-	return a
+	return newConsumedAttempt(Worker{Address: conversation, Epoch: receiverEpoch(root, conversation)}, items, wake)
 }
 
-// deliverBatch advances the fiber inbox's open batches for the worker at
-// selected, as consume's first step does, after claiming r for selected in a
-// batch of its own when no open batch holds it yet.
+// deliverBatch claims r for selected in a batch of its own and sends it, as
+// consume claims a batch, when no open batch holds it yet; otherwise it
+// advances the fiber inbox's open batches for the worker at selected, as
+// consume's first step does.
 func deliverBatch(t *testing.T, env *sysenv.Env, selected string, r Request, send fiberContextSender) error {
 	t.Helper()
 	root := mailboxDir(env, "fiber", "fiber")
 	path := filepath.Join(root, "pending", mailboxKey(r.MessageID)+".json")
-	batches, err := readBatchManifests(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	held := false
-	for _, b := range batches {
-		held = held || slices.Contains(b.Members, r.MessageID)
-	}
-	if _, err := os.Stat(path); err == nil && !held {
-		pinBatch(t, []string{path}, selected)
+	if _, err := os.Stat(path); err == nil && batchOf(t, root, r.MessageID) == nil {
+		a := newBatch(t, []string{path}, selected)
+		_, err := sendBatch(context.Background(), env, root, "host", &a, send)
+		return err
 	}
 	return advanceBatches(t, env, selected, send)
 }
@@ -71,29 +72,34 @@ func advanceBatches(t *testing.T, env *sysenv.Env, selected string, send fiberCo
 	w := Worker{Address: selected, Epoch: receiverEpoch(root, selected)}
 	var errs []error
 	for i := range batches {
-		_, err := deliverConsumedBatch(context.Background(), env, root, "host", w, &batches[i], send)
+		_, err := advanceBatch(context.Background(), env, root, "host", w, &batches[i], send)
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }
 
-// expireAttempt ages an entry's open attempt, and its batch's manifest, past
+// batchOf reads the open batch that holds the entry id, or nil.
+func batchOf(t *testing.T, root, id string) *Attempt {
+	t.Helper()
+	pinned, err := pinnedBy(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pinned[id]
+}
+
+// expireAttempt ages the open batch holding the entry at path past
 // liveAttemptRetryAfter.
 func expireAttempt(t *testing.T, path string) {
 	t.Helper()
-	entry := readEntry(t, path)
-	entry.Attempt.OpenedAt = time.Now().Add(-liveAttemptRetryAfter).UnixNano()
-	if err := writeMailboxEntry(path, entry); err != nil {
-		t.Fatal(err)
-	}
-	if entry.Attempt.Payload == nil {
+	root := filepath.Dir(filepath.Dir(path))
+	a := batchOf(t, root, readEntry(t, path).Request.MessageID)
+	if a == nil {
 		return
 	}
-	root := filepath.Dir(filepath.Dir(path))
-	if _, err := os.Stat(batchManifest(root, entry.Attempt)); err == nil {
-		if err := pinConsumedBatch(root, entry.Attempt); err != nil {
-			t.Fatal(err)
-		}
+	a.OpenedAt = time.Now().Add(-liveAttemptRetryAfter).UnixNano()
+	if err := writeBatch(root, a); err != nil {
+		t.Fatal(err)
 	}
 }
 
