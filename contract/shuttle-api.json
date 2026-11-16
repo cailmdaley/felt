@@ -1127,7 +1127,7 @@
         },
         "responses": {
           "200": {
-            "description": "A notify-only subscription was made (the MessageReceipt of a session message with no text, status subscribed), or the worker has the human's line, typed in or launched with it (delivery input), or an agent's fresh session started with the text (delivery fresh, with the worker's terminal fields). A repeated message_id answers duplicate true with the stored outcome: delivered true, or for a human line whose first try may not have arrived, delivered null with disposition unknown.",
+            "description": "A notify-only subscription was answered with the MessageReceipt of a session message with no text: status subscribed when it was made, or rejected (with detail) when the live worker cannot take it, such as a Claude session with no native inbox. Or the worker has the human's line, typed in or launched with it (delivery input), or an agent's fresh session started with the text (delivery fresh, with the worker's terminal fields). A repeated message_id answers duplicate true with the stored outcome: delivered true, or for a human line whose first try may not have arrived, delivered null with disposition unknown.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1170,7 +1170,7 @@
             }
           },
           "400": {
-            "description": "fiber_id is missing or blank, text is missing or blank without notify_when_idle, context_only lacks message_id, or origin names no known host.",
+            "description": "fiber_id is missing or blank, text is missing or blank (only an absent or null text with notify_when_idle is a notify-only subscription), a notify-only subscription or context_only lacks message_id, or origin names no known host.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1197,7 +1197,7 @@
             }
           },
           "409": {
-            "description": "A notify-only subscription found no live worker to watch, this daemon does not own the fiber, a fresh session was refused (reason), or a launch was refused as on /dispatch (already_running, launch_reserved).",
+            "description": "A notify-only subscription found no live worker to watch, or a live worker whose delivery address is not yet confirmed; this daemon does not own the fiber; a fresh session was refused (reason); or a launch was refused as on /dispatch (already_running, launch_reserved).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1248,7 +1248,7 @@
             }
           },
           "502": {
-            "description": "The owner's answer was not JSON, or the request could not be forwarded (reason forward_failed).",
+            "description": "The owner's answer was not JSON, the request could not be forwarded (reason forward_failed), or a notify-only subscription's outcome is unknown (a MessageReceipt with status unknown; retry with the same message_id).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1265,6 +1265,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/DeliveryForward"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MessageReceipt"
                     }
                   ]
                 }
@@ -1296,7 +1299,7 @@
             }
           },
           "504": {
-            "description": "The message did not finish in time and may still arrive; inspect the fiber before retrying.",
+            "description": "The message did not finish in time and may still arrive; inspect the fiber before retrying. A notify-only subscription that timed out answers a MessageReceipt with status unknown; retry with the same message_id.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1306,6 +1309,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/DeliveryInput"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MessageReceipt"
                     }
                   ]
                 }
