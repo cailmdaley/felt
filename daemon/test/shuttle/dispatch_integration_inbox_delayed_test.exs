@@ -30,7 +30,7 @@ defmodule Shuttle.DispatchIntegrationInboxDelayedTest do
                id,
                "check the fit converged",
                "--in",
-               "3s",
+               "5s",
                "--message-id",
                "later",
                "--from",
@@ -52,8 +52,12 @@ defmodule Shuttle.DispatchIntegrationInboxDelayedTest do
 
     polls = polls_until_launch(poller, id, [])
     assert [{ended, 1} | waiting] = polls
-    assert DateTime.compare(ended, due) != :lt
-    assert Enum.any?(waiting, fn {ended, 0} -> DateTime.compare(ended, due) == :lt end)
+
+    assert DateTime.compare(ended, due) != :lt,
+           "a poll that ended at #{ended} started a session for a message due at #{due}"
+
+    assert Enum.any?(waiting, fn {ended, 0} -> DateTime.compare(ended, due) == :lt end),
+           "no poll ended before #{due}, so nothing showed the message held until due"
 
     %{session_uuid: uuid} = Poller.live_worker(poller, id)
     session = claude_session!(uuid)
