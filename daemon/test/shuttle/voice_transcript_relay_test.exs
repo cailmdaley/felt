@@ -407,8 +407,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
             "fiber_id" => "fiber-a",
             "origin" => "owner",
             "text" => word,
-            "message_id" => launch,
-            "attempted" => launch == "old"
+            "message_id" => launch
           }
         ]
       }
@@ -427,10 +426,10 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     end
 
     start_supervised!({TranscriptRelay, Keyword.put(c.opts, :deliver, deliver)})
-    assert_receive {:attempt, old, %{text: "old", record_only: true}}
+    assert_receive {:attempt, old, %{text: "old"}}
     refute_receive {:attempt, _, _}, 20
     send(old, :accept)
-    assert_receive {:attempt, new, %{text: "new", record_only: false}}
+    assert_receive {:attempt, new, %{text: "new"}}
     send(new, :accept)
   end
 

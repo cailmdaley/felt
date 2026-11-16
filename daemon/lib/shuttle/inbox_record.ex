@@ -12,8 +12,8 @@ defmodule Shuttle.InboxRecord do
   `deliver` with the fiber's entry and settles the record by its result:
   delivered on `{:ok, _}`, unknown when the transport may have happened,
   undeliverable on a definite refusal, which lets a non-voice id be sent again.
-  Voice ids are never re-pasted. `record_only` imports an unknown record without
-  delivering it. A repeated id answers `{:duplicate, id, disposition}`.
+  Voice ids are never re-pasted. A repeated id answers
+  `{:duplicate, id, disposition}`.
   """
   def submit(fiber_id, text, message_id, from, deliver, opts \\ []) do
     id =
@@ -27,7 +27,7 @@ defmodule Shuttle.InboxRecord do
         from,
         fn -> deliver.(entry) end,
         opts,
-        if(opts[:record_only], do: [], else: board(from, entry))
+        board(from, entry)
       )
     else
       error -> {:error, {:inbox_record, error}}
@@ -43,14 +43,9 @@ defmodule Shuttle.InboxRecord do
              input_eof: true
            ),
          {:ok, answer} <- Jason.decode(output) do
-      record_only = opts[:record_only] == true
-
       case answer do
         %{"created" => false} ->
           {:duplicate, id, answer["disposition"] || "unknown"}
-
-        %{"created" => true} when record_only ->
-          {:duplicate, id, "unknown"}
 
         %{"created" => true} ->
           result = deliver.()

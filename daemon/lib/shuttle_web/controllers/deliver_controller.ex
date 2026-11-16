@@ -54,7 +54,6 @@ defmodule ShuttleWeb.DeliverController do
           "context_only",
           "message_id",
           "live_input",
-          "voice_record_only",
           "notify_address",
           "notify_when_idle",
           "notify_wake",
@@ -103,11 +102,7 @@ defmodule ShuttleWeb.DeliverController do
   end
 
   defp local(fiber_id, text, _from, %{"live_input" => true} = context) do
-    Delivery.human(fiber_id, text,
-      message_id: context["message_id"],
-      source: "voice",
-      record_only: context["voice_record_only"] == true
-    )
+    Delivery.human(fiber_id, text, message_id: context["message_id"], source: "voice")
     |> reply(fiber_id)
   end
 

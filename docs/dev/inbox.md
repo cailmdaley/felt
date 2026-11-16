@@ -139,17 +139,14 @@ A spoken batch is a human line with source `voice` and the relay's stable `voice
 It has the human's forced-start authority, including through quarantine, and reaches the frozen fiber's current worker as typed input, or a dormant conversation's From User launch prompt.
 The record writes the batch's one `human` or `answered` family-board row; `HumanRecordFor` matches voice as well as human records, so the prompt hook replaces that row instead of adding another.
 A voice record is never re-pasted under its id, even when settled undeliverable.
-The relay keeps ingestion checkpoints, buffers and frozen batches in per-fiber/origin order, but keeps no new `attempted` flags or delivery receipts.
+The relay keeps ingestion checkpoints, buffers and frozen batches in per-fiber/origin order, but no attempt flags or delivery receipts.
 Recovery repeats the record handoff under the same id; the owner's record, not the relay, decides whether it may paste.
-An `attempted` batch from contract 42 imports as an unknown record without a paste or a family-board row.
-The relay finishes the batch after this one attempt, even without a 2xx answer: it removes the batch, logs the failure and leaves its last outcome unconfirmed, just as 42 finished attempted batches.
-Nothing retries the import or queues behind it.
+The relay finishes a batch after one answered attempt, even without a 2xx: it removes the batch and records the outcome as its last, so nothing queues behind it.
 
 Normal voice forwarding keeps contract 42's `live_input` envelope, so a 44 relay can send to a 42 owner.
 Only the owner records and deduplicates the batch; the relay writes no forwarding record.
 During a mixed-version deploy, a relay crash mid-forward to a 42 owner can therefore paste twice on recovery.
 The owner's prompt hook supplies the board row on 42; a 44 owner writes it with the fiber's record.
-Import-only forwarding adds `voice_record_only` only after the owner answers `/version` with contract 44 or above; an older or unreachable owner finishes the attempted batch unconfirmed, without a paste.
 
 A pulse keeps its clock, busy-worker skips, cost-independent wake, window rollover and Claude completion reservation in `pulses.json` and `Shuttle.Pulse`.
 Its delivery is an offered inbox record, source `pulse`, sender `shuttle`, identified by the pulse key and reserved `next_tick`, not the send clock.
@@ -159,7 +156,6 @@ Pulse transport uses `message --recorded`, without a `messages/` receipt.
 Contract 44 adds that flag and `inbox record-begin --source`.
 
 To roll back to 42, stop voice capture and let relay batches drain while their owners still run 44.
-Attempted imports that receive no 2xx finish unconfirmed and need no further drain.
 Contract 42 ignores voice and pulse records for transport deduplication, so do not retry an old voice id there: it can paste twice.
 An interrupted 44 relay batch has no `attempted` flag, so a 42 relay can paste it again even though its owner's inbox holds an unknown record; do not resume such a relay on 42.
 Claude completion reservations remain readable by 42, but pulse transport there again writes `messages/` receipts.

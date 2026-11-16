@@ -1005,8 +1005,7 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
               fiber_id: batch["fiber_id"],
               origin: batch["origin"],
               text: batch["text"],
-              message_id: batch["message_id"],
-              record_only: batch["attempted"] == true
+              message_id: batch["message_id"]
             })
           end)
 
@@ -1102,54 +1101,8 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
     %{state | persisted: state.config}
   end
 
-  def deliver(%{fiber_id: fiber_id, text: text, origin: origin, message_id: id} = batch) do
-    record_only = Map.get(batch, :record_only, false)
-
-    if record_only and not record_owner?(origin) do
-      unconfirmed_import(id, :owner_cannot_import_voice)
-    else
-      context = %{"message_id" => id, "live_input" => true}
-      context = if record_only, do: Map.put(context, "voice_record_only", true), else: context
-
-      result = ShuttleWeb.DeliverController.route(fiber_id, text, origin, "shuttle", context)
-
-      case result do
-        {status, _} when status in 200..299 -> result
-        _ when record_only -> unconfirmed_import(id, result)
-        _ -> result
-      end
-    end
-  end
-
-  defp unconfirmed_import(id, reason) do
-    Logger.warning(
-      "Finishing attempted voice import #{id} without confirmation: #{inspect(reason)}"
-    )
-
-    {200, %{delivered: nil, disposition: "unknown"}}
-  end
-
-  # Normal batches keep the contract-42 live_input wire. Import-only requests
-  # must never reach an owner that would interpret them as a paste.
-  defp record_owner?(origin) do
-    case Shuttle.OriginRouter.route(origin) do
-      :local ->
-        true
-
-      {:remote, remote} ->
-        with {:ok, body} <-
-               Shuttle.OriginRouter.forward_client().get(
-                 Shuttle.Remote.url_for(remote, "/api/v1/version"),
-                 5_000
-               ),
-             {:ok, %{"contract_level" => level}} <- Jason.decode(body) do
-          level >= 44
-        else
-          _ -> false
-        end
-
-      {:error, _} ->
-        false
-    end
+  def deliver(%{fiber_id: fiber_id, text: text, origin: origin, message_id: id}) do
+    context = %{"message_id" => id, "live_input" => true}
+    ShuttleWeb.DeliverController.route(fiber_id, text, origin, "shuttle", context)
   end
 end

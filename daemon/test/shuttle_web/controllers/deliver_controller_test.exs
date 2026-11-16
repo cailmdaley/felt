@@ -611,15 +611,13 @@ defmodule ShuttleWeb.DeliverControllerTest do
            end) == 0
   end
 
-  test "a relay keeps the 42 voice envelope and finishes imports an older owner cannot record" do
+  test "a relay forwards a voice batch to its owner in the live_input envelope" do
     stub_forward(
       "voice-owner",
       "http://localhost:4002",
       {:ok, 200, Jason.encode!(%{delivered: true, delivery: "input"})},
       StubPostClient
     )
-
-    StubPostClient.set_get_response({:ok, Jason.encode!(%{contract_level: 42})})
 
     batch = %{
       fiber_id: "frozen-fiber",
@@ -637,43 +635,6 @@ defmodule ShuttleWeb.DeliverControllerTest do
              "message_id" => "voice-mixed",
              "live_input" => true
            }
-
-    assert {200, _} = Shuttle.Voice.TranscriptRelay.Worker.deliver(batch)
-
-    assert {200, %{delivered: nil}} =
-             Shuttle.Voice.TranscriptRelay.Worker.deliver(Map.put(batch, :record_only, true))
-
-    assert [_, _] = StubPostClient.posts()
-    StubPostClient.set_get_response({:ok, Jason.encode!(%{contract_level: 44})})
-
-    assert {200, _} =
-             Shuttle.Voice.TranscriptRelay.Worker.deliver(Map.put(batch, :record_only, true))
-
-    assert Jason.decode!(StubPostClient.last().body)["voice_record_only"] == true
-  end
-
-  test "an attempted voice batch imports an unknown record without pasting" do
-    fiber = "tests/voice-import"
-    put_constitution(fiber)
-
-    batch = %{
-      fiber_id: fiber,
-      origin: nil,
-      message_id: "voice-upgrade",
-      text: "old command",
-      record_only: true
-    }
-
-    assert {200, %{duplicate: true, disposition: "unknown"}} =
-             Shuttle.Voice.TranscriptRelay.Worker.deliver(batch)
-
-    assert {200, %{duplicate: true, disposition: "unknown"}} =
-             Shuttle.Voice.TranscriptRelay.Worker.deliver(Map.delete(batch, :record_only))
-
-    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-             cmd == "tmux" and
-               (match?(["load-buffer" | _], args) or match?(["new-session" | _], args))
-           end)
   end
 
   test "voice delivery starts a never-run card with the same plain text as a composer send" do

@@ -1,4 +1,4 @@
-defmodule ShuttleWeb.VoiceImportRegressionTest do
+defmodule ShuttleWeb.VoiceForwardRegressionTest do
   use ExUnit.Case, async: true
 
   import Shuttle.Test.ForwardStub
@@ -23,60 +23,6 @@ defmodule ShuttleWeb.VoiceImportRegressionTest do
     :ok
   end
 
-  defp put_constitution(fiber_id, shuttle \\ oneshot_shuttle()) do
-    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
-    MockRunner.set_shuttle(fiber_id, shuttle)
-  end
-
-  test "an import for a missing local fiber finishes unconfirmed" do
-    batch = %{
-      fiber_id: "tests/gone",
-      origin: nil,
-      message_id: "voice-gone",
-      text: "old words\n",
-      record_only: true
-    }
-
-    result = Worker.deliver(batch)
-    assert {200, %{delivered: nil}} = result
-  end
-
-  test "an import for an unknown origin finishes unconfirmed" do
-    batch = %{
-      fiber_id: "tests/x",
-      origin: "decommissioned-host",
-      message_id: "voice-orphan",
-      text: "old words\n",
-      record_only: true
-    }
-
-    result = Worker.deliver(batch)
-    assert {200, %{delivered: nil}} = result
-  end
-
-  test "an attempted-batch import writes no board row" do
-    fiber = "tests/voice-import-row"
-    put_constitution(fiber)
-    before = MockRunner.commands()
-
-    assert {200, %{duplicate: true, disposition: "unknown"}} =
-             Worker.deliver(%{
-               fiber_id: fiber,
-               origin: nil,
-               message_id: "voice-import-row",
-               text: "old words\n",
-               record_only: true
-             })
-
-    begin =
-      Enum.find(MockRunner.commands() -- before, fn {cmd, args} ->
-        cmd == "shuttle" and match?(["inbox", "record-begin" | _], args)
-      end)
-
-    assert {"shuttle", args} = begin
-    refute "--fiber" in args
-  end
-
   test "an obsolete relay-side record cannot prevent forwarding to the owner" do
     stub_forward(
       "voice-owner",
@@ -84,8 +30,6 @@ defmodule ShuttleWeb.VoiceImportRegressionTest do
       {:ok, 200, Jason.encode!(%{delivered: true, delivery: "input"})},
       StubPostClient
     )
-
-    StubPostClient.set_get_response({:ok, Jason.encode!(%{contract_level: 44})})
 
     # The relay died after `record-begin` in voice-forwards, before the POST.
     assert {:ok, out} =
@@ -121,10 +65,9 @@ defmodule ShuttleWeb.VoiceImportRegressionTest do
   end
 end
 
-defmodule Shuttle.VoiceImportLaneRegressionTest do
+defmodule Shuttle.VoiceFailureLaneRegressionTest do
   use ExUnit.Case, async: true
   alias Shuttle.Voice.TranscriptRelay
-  alias Shuttle.Voice.TranscriptRelay.Worker
   alias Shuttle.Test.Env
   @moduletag :tmp_dir
 
@@ -142,7 +85,6 @@ defmodule Shuttle.VoiceImportLaneRegressionTest do
       "created_at" => "2026-11-06T10:00:00Z",
       "kind" => "voice",
       "transcript" => transcript,
-      "offset" => 0,
       "routes_path" => Path.join(root, "routes.jsonl"),
       "ended" => true,
       "outbox" => outbox
@@ -151,12 +93,12 @@ defmodule Shuttle.VoiceImportLaneRegressionTest do
     File.write!(Path.join(directory, digest <> ".json"), Jason.encode!(config))
     {:ok, attempts} = Agent.start_link(fn -> [] end)
 
-    # The attempted import's owner is unavailable.
+    # The first batch's owner is unavailable.
     deliver = fn message ->
       Agent.update(attempts, &[message.message_id | &1])
 
-      if message[:record_only],
-        do: Worker.deliver(message),
+      if message.message_id == "voice-a",
+        do: {502, %{delivered: false, reason: "forward_failed"}},
         else: {200, %{delivered: true}}
     end
 
@@ -200,8 +142,7 @@ defmodule Shuttle.VoiceImportLaneRegressionTest do
              fiber_id: "fiber-a",
              origin: "owner",
              text: "later\n",
-             message_id: "voice-c",
-             record_only: false
+             message_id: "voice-c"
            }},
           1_000
         )
@@ -217,8 +158,7 @@ defmodule Shuttle.VoiceImportLaneRegressionTest do
     "fiber_id" => "fiber-a",
     "origin" => "owner",
     "text" => "first\n",
-    "message_id" => "voice-a",
-    "attempted" => true
+    "message_id" => "voice-a"
   }
   @b %{
     "fiber_id" => "fiber-a",
@@ -227,7 +167,7 @@ defmodule Shuttle.VoiceImportLaneRegressionTest do
     "message_id" => "voice-b"
   }
 
-  test "a failed import finishes after one attempt", %{tmp_dir: root} do
+  test "a failed delivery finishes after one attempt", %{tmp_dir: root} do
     {counts, outbox, completed, lanes} = run_relay(root, [@a])
     assert counts == %{"voice-a" => 1}
     assert outbox == []
@@ -235,7 +175,7 @@ defmodule Shuttle.VoiceImportLaneRegressionTest do
     assert lanes == %{}
   end
 
-  test "a failed import releases recovered and later batches in its lane", %{tmp_dir: root} do
+  test "a failed delivery releases recovered and later batches in its lane", %{tmp_dir: root} do
     {counts, outbox, completed, lanes} = run_relay(root, [@a, @b])
     assert counts == %{"voice-a" => 1, "voice-b" => 1}
     assert outbox == []

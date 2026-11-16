@@ -44,8 +44,7 @@ defmodule Shuttle.Delivery do
             do: dispatch.(opts[:resume_mode]),
             else: human_launch(fiber_id, dispatch, opts[:source])
         end,
-        source: opts[:source],
-        record_only: opts[:record_only]
+        source: opts[:source]
       )
 
     {:human, result}
