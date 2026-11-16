@@ -69,7 +69,7 @@ func legacyTurn(r Request) string {
 func (w Wishes) withDefaults(r Request) Wishes {
 	if w.Source == "" {
 		w.Source = "message"
-		for prefix, source := range map[string]string{"thread-": "thread", "pulse-": "pulse", "voice-": "voice"} {
+		for prefix, source := range map[string]string{"thread-": "thread", "pulse-": "pulse", "voice-": "voice", "claude-mail-failure-": "notice"} {
 			if strings.HasPrefix(r.MessageID, prefix) {
 				w.Source = source
 			}

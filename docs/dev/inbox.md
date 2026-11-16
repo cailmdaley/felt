@@ -55,7 +55,7 @@ A busy fiber's Claude `ask` remains hook-eligible for 30 seconds, then consume u
 
 An entry without wishes reads as the wishes its request implies.
 `turn` comes from `idle_only`, then `context_if_busy`, then `wake`, else `none`.
-The id prefixes `thread-`, `pulse-` and `voice-` imply sources `thread`, `pulse` and `voice`; other ids imply `message`.
+The id prefixes `thread-`, `pulse-`, `voice-` and `claude-mail-failure-` imply sources `thread`, `pulse`, `voice` and `notice`; other ids imply `message`.
 `if_costly` defaults to `fresh` for thread results and `hold` otherwise.
 
 ## Enqueue

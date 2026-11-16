@@ -22,6 +22,7 @@ func TestEntryWithoutWishesReadsAsItsEquivalentWishes(t *testing.T) {
 		{"wake if idle", `{"request":{"address":"","text":"x","wake":true,"context_if_busy":true,"message_id":"m"},"queued_at":1}`, Wishes{Source: "message", Turn: "ask", IfCostly: "hold"}},
 		{"idle only", `{"request":{"address":"","text":"x","wake":true,"idle_only":true,"message_id":"pulse-k-1"},"queued_at":1}`, Wishes{Source: "pulse", Turn: "idle", IfCostly: "hold"}},
 		{"thread result", `{"request":{"address":"","text":"x","wake":true,"message_id":"thread-closed-abc"},"queued_at":1,"attempt_address":"shuttle://h/codex/s"}`, Wishes{Source: "thread", Turn: "force", IfCostly: "fresh"}},
+		{"mail failure notice", `{"request":{"address":"","text":"x","wake":false,"message_id":"claude-mail-failure-abc"},"queued_at":1}`, Wishes{Source: "notice", Turn: "none", IfCostly: "hold"}},
 	} {
 		path := filepath.Join(dir, tc.name+".json")
 		if err := os.WriteFile(path, []byte(tc.file), 0600); err != nil {
