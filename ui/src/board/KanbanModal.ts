@@ -86,13 +86,13 @@ interface KanbanModalOptions {
    */
   onOpenWorker?: WorkerOpener
   /**
-   * Called when the user clicks the Desk head's `+` stash button. The host
+   * Called when the user clicks the Desk's `+` stash button. The host
    * (main.ts) opens the StashForm modal. Omit to hide the button (e.g.
    * read-only contexts).
    */
   onStashClick?: () => void
   /**
-   * Called when the user clicks the Desk head's `✶` new-idea button. The host
+   * Called when the user clicks the Desk's `✶` new-idea button. The host
    * opens the CaptureForm modal — a chat-first capture that POSTs the yap to
    * Shuttle's `/api/v1/capture`, which spawns a background session that
    * crystallizes it into a fiber. Omit to hide the button.

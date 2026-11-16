@@ -508,7 +508,7 @@
   margin-left: 8px;
 }
 
-/* ── The Desk head's two actions ─────────────────────────────────────────
+/* ── The Desk's two actions ───────────────────────────────────────────
    Stash and New idea are bare glyphs in a tinted disc; the verb lives in the
    button's accessible name and tooltip. */
 .kbn-col-action {
@@ -955,6 +955,6 @@
   .kbn-now-board { grid-template-columns: minmax(0, 1fr); align-items: start; }
   .kbn-now-board .kbn-col { max-height: none; }
   .kbn-now-board .kbn-col-list { overflow: visible; }
-  .kbn-now-board .kbn-col-title { font-size: var(--type-title); white-space: nowrap; }
+  .kbn-now-board .kbn-col-title { white-space: nowrap; }
 }
 

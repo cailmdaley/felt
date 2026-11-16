@@ -61,7 +61,7 @@ A line opens that member's view; anywhere else on the card opens the top-level's
 Waiting on you and Awaiting review are ordered newest wait first, Roles & standing by slug, and the rest by latest activity.
 On a phone the three columns are leaves of a pager under a folio of three tabs (Waiting, Working, Review), and the shelf stands below it.
 
-The Desk's head row carries `+`, which stashes a new draft, and `✶`, which captures an idea by voice.
+Waiting on you's head carries `+`, which stashes a new draft, and Working's carries `✶`, which captures an idea by voice; on a phone both stand beside the folio's tabs.
 Nothing on the Desk is dragged and it has no context menu: every act on a constitution lives in [its view](#a-constitutions-view).
 
 <a id="attach"></a>

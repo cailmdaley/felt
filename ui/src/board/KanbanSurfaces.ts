@@ -38,10 +38,10 @@ export interface DeskRendererOptions {
 /**
  * The Desk: three columns, Waiting on you, Working and Awaiting review, and
  * under them a shelf of three, Drafts, Resting and Roles & standing; each a
- * list of family cards, every family once, in its section (`deskOrder`). Its
- * head row carries the two ways to make something new. On a phone the
- * columns are leaves of a pager under a folio of three tabs, and the shelf
- * stands below it. Nothing on it is dragged, and it has no context menu: a
+ * list of family cards, every family once, in its section (`deskOrder`). The
+ * two ways to make something new stand in column heads: `+` in Waiting on
+ * you's, `✶` in Working's. On a phone the columns are leaves of a pager under
+ * a folio of three tabs, which carries both, and the shelf stands below it. Nothing on it is dragged, and it has no context menu: a
  * card or a line opens a constitution's view, and a waiting post's ✓ clears it.
  */
 export class KanbanSurfaceRenderer {
@@ -66,7 +66,7 @@ export class KanbanSurfaceRenderer {
     const head = document.createElement('div')
     head.className = 'kbn-desk-head'
     const folio = this.folio(board, DESK_COLUMNS.map(column => order.sections[column].length))
-    head.append(folio, ...this.actions())
+    head.append(folio, ...this.actions(['draft', 'idea']))
     section.append(head, board)
     const shelf = document.createElement('div')
     shelf.className = 'kbn-desk-shelf'
@@ -76,8 +76,8 @@ export class KanbanSurfaceRenderer {
     return desk
   }
 
-  /** The head row's `+` and `✶`, once each. */
-  private actions(): HTMLButtonElement[] {
+  /** The `+` (`draft`) and `✶` (`idea`) buttons asked for, those with a handler. */
+  private actions(which: readonly ('draft' | 'idea')[]): HTMLButtonElement[] {
     const make = (glyph: string, modifier: string, label: string, run?: () => void): HTMLButtonElement[] => {
       if (!run) return []
       const button = document.createElement('button')
@@ -89,7 +89,9 @@ export class KanbanSurfaceRenderer {
       button.addEventListener('click', run)
       return [button]
     }
-    return [...make('+', 'draft', 'Stash a new draft', this.o.onStashClick), ...make('✶', 'idea', 'New idea — speak it into a card', this.o.onNewIdeaClick)]
+    return which.flatMap(kind => kind === 'draft'
+      ? make('+', 'draft', 'Stash a new draft', this.o.onStashClick)
+      : make('✶', 'idea', 'New idea — speak it into a card', this.o.onNewIdeaClick))
   }
 
   private column(column: DeskSection, families: DeskFamily[], index: ThreadIndex): HTMLElement {
@@ -110,7 +112,7 @@ export class KanbanSurfaceRenderer {
     count.className = 'kbn-col-count'
     count.textContent = String(families.length)
     label.append(name, count)
-    head.append(label)
+    head.append(label, ...this.actions(column === 'waiting' ? ['draft'] : column === 'working' ? ['idea'] : []))
     const list = document.createElement('div')
     list.className = 'kbn-col-list'
     list.setAttribute('role', 'list')

@@ -7,7 +7,7 @@
    enters the reader. */
 :root { --kbn-desk-row: 22px; }
 .kbn-desk-sections { display: contents; }
-.kbn-desk-head { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-height: 28px; }
+.kbn-desk-head { display: none; align-items: center; justify-content: flex-end; gap: 8px; min-height: 28px; }
 .kbn-desk-head > .kbn-folio { flex: 1 1 auto; min-width: 0; }
 .kbn-col-list { gap: 6px; padding: 6px; }
 .kbn-family {
@@ -43,15 +43,14 @@
 .kbn-col-working .kbn-cap { color: var(--kbn-agent); }
 .kbn-col-waiting { border-color: color-mix(in srgb, var(--kbn-owed-bright) 55%, transparent); }
 
-/* The shelf: Drafts, Resting and Roles & standing side by side, in the recess, under smaller heads. */
+/* The shelf: Drafts, Resting and Roles & standing side by side, in the recess. */
 .kbn-desk-shelf { flex: 0 0 auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: start; }
 .kbn-desk-shelf > .kbn-col { background: var(--kbn-recess); max-height: 40vh; }
-.kbn-desk-shelf .kbn-col-title { font-size: var(--type-title); }
 .kbn-desk-shelf .kbn-family-name { font: var(--type-note)/var(--leading-ui) var(--font-serif); }
 .kbn-desk-shelf .kbn-family-meta { font-size: var(--type-note); }
 .kbn-desk-shelf .kbn-empty { padding: 8px; }
 
-/* The head row's two ways to make something new. */
+/* The two ways to make something new, in the columns' heads and the phone's folio row. */
 .kbn-col-action-draft { background: var(--kbn-owed-bright); border: 1px solid var(--kbn-owed-deep); }
 .kbn-col-action-draft:hover { background: color-mix(in srgb, var(--kbn-owed-bright) 90%, var(--kbn-paper)); }
 .kbn-col-action-draft:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--kbn-owed-bright) 40%, transparent); }
@@ -61,7 +60,7 @@
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   :root { --kbn-desk-row: 32px; }
-  .kbn-desk-head { gap: 6px; }
+  .kbn-desk-head { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-height: 28px; }
   .kbn-folio .kbn-folio-seg { gap: 6px; color: var(--kbn-ink-muted); }
   .kbn-folio .kbn-folio-tab { gap: 6px; }
   .kbn-folio .kbn-folio-seg.kbn-folio-seg-active { color: var(--kbn-ink); }
