@@ -71,10 +71,16 @@ func (a *app) resolveMessageTarget(target string) (string, error) {
 		return sessionCandidates[0].Address, nil
 	}
 	if len(fiberLookup.Fibers) == 1 {
-		if _, ok, _ := shuttle.BlockOf(fiberLookup.Fibers[0]); ok {
-			return "", fmt.Errorf("fiber %q takes messages through its owner, not --local", fiberLookup.Fibers[0].ID)
+		f := fiberLookup.Fibers[0]
+		block, ok, _ := shuttle.BlockOf(f)
+		switch {
+		case !ok:
+			return "", fmt.Errorf("fiber %q has no shuttle block, so it has no inbox", f.ID)
+		case block.Host == "":
+			return "", fmt.Errorf("fiber %q has no shuttle.host, so no owner holds its inbox", f.ID)
+		default:
+			return "", fmt.Errorf("fiber %q takes messages through its owner, not --local", f.ID)
 		}
-		return "", fmt.Errorf("fiber %q has no shuttle block, so it has no inbox", fiberLookup.Fibers[0].ID)
 	}
 	if len(lookupErrors) > 0 {
 		return "", fmt.Errorf("message target %q did not resolve (%s)", target, strings.Join(lookupErrors, "; "))

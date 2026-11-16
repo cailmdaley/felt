@@ -221,8 +221,8 @@ defmodule ShuttleWeb.DeliverController do
               status: "queued",
               delivered: nil,
               detail:
-                "#{fiber_id}'s inbox holds it, but could not be consumed for the live worker now " <>
-                  "(#{detail}); the worker's hook or the next poll takes it, unless it was delivered before"
+                "#{fiber_id}'s inbox holds it, but could not be consumed for the live worker " <>
+                  "(#{detail}); whether it was delivered before is not known"
             })
 
           :queued ->

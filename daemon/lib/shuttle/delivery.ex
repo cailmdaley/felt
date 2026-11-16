@@ -292,7 +292,13 @@ defmodule Shuttle.Delivery do
     end
   end
 
-  defp consume_failure({:command_error, _status, output}), do: String.trim(output)
+  defp consume_failure({:command_error, status, output}) do
+    case String.trim(output) do
+      "" -> "shuttle inbox consume ended #{inspect(status)}"
+      text -> text
+    end
+  end
+
   defp consume_failure(failure), do: inspect(failure)
 
   defp future?(nil), do: false

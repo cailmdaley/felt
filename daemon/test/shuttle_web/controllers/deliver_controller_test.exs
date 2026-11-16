@@ -1198,6 +1198,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
 
       assert detail =~ "could not be consumed for the live worker"
       assert detail =~ "has not registered a Shuttle message hook"
+      assert detail =~ "whether it was delivered before is not known"
     end
 
     assert [args, _] = mailbox_puts()

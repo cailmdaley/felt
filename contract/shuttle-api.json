@@ -1147,7 +1147,7 @@
             }
           },
           "202": {
-            "description": "Queued in the fiber's inbox (delivery context), or sent with arrival unconfirmed (delivered null), including input, a launch or a fresh session queued behind a busy Poller, a repeated fresh id whose start is unknown (duplicate true), and an owner that did not answer in time (reason forward_timeout).",
+            "description": "Queued in the fiber's inbox (delivery context), with delivered null and a detail when consuming it for the live worker failed, or sent with arrival unconfirmed (delivered null), including input, a launch or a fresh session queued behind a busy Poller, a repeated fresh id whose start is unknown (duplicate true), and an owner that did not answer in time (reason forward_timeout).",
             "content": {
               "application/json": {
                 "schema": {
