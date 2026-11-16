@@ -518,7 +518,7 @@ func TestClaudeNativeQueuedBehindTurnReportsQueueAdmission(t *testing.T) {
 	responded := make(chan struct{}, 1)
 	req, _ := nativeClaudeFixture(t, env, func(frame map[string]any, f *os.File) { busyReceiverRows(frame, f, false); notify(responded) })
 	r, err := sendUntilSettled(env, req, responded, observationSettle)
-	if err != nil || r.Status != StatusQueued || r.Detail != "queued behind the receiver's current turn; it runs when that turn ends" {
+	if err != nil || r.Status != StatusQueued || r.Detail != "queued behind the receiver's current turn; the turn takes it in at its next model call, or it runs as the next turn" {
 		t.Fatalf("%+v %v", r, err)
 	}
 }

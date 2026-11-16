@@ -191,7 +191,7 @@ func claudeStageReceipt(req Request, stage string) Receipt {
 	detail := "native message sent; no correlated receiver turn observed"
 	switch stage {
 	case StatusQueued:
-		detail = "queued behind the receiver's current turn; it runs when that turn ends"
+		detail = "queued behind the receiver's current turn; the turn takes it in at its next model call, or it runs as the next turn"
 	case StatusSubmitted:
 		detail = "the receiver took this message as a user turn; no model reply observed yet"
 	case StatusAccepted:
