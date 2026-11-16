@@ -7,7 +7,7 @@ import { anchorPopover, type Release } from './anchoredPopover.js'
 import { heldWords, listenMode, type FiberSlug } from './voiceStrip.js'
 
 export interface ListenOptions {
-  /** The card a pin lands on: the band's highlighted thread, else its own. */
+  /** The card a pin lands on: the band's own. */
   card: () => KanbanCard
   voice: Voice
   phone?: PhoneListening

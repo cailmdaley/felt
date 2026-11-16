@@ -197,4 +197,24 @@ try {
     await context.close()
     console.log('Channels unread: something fresh addressed to the human in a channel not being read lights its rail dot, and reading it clears the dot')
   }
+  {
+    // A close to the human with its closing post: the stream draws its tapestry, and neither it nor the view draws the outcome.
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' })
+    const page = await context.newPage()
+    const errors = []
+    page.on('pageerror', error => errors.push(error.message))
+    await page.goto(`${pathToFileURL(resolve('harness-board-dist/index.html'))}?example=channels#/channels`)
+    await pick(page, 'vizier').click()
+    const close = page.locator('.kbn-ch-item[data-fiber="morning-post"]')
+    await close.locator('[data-item$=":lead"] .ws-thumbnail').waitFor()
+    const outcome = 'Eleven letters sorted'
+    assert.equal(await close.getByText(outcome).count(), 0)
+    await close.locator('.kbn-ch-who').click()
+    await page.waitForFunction(() => document.querySelector('.ws-selected .ov-name')?.textContent === 'morning-post')
+    await page.locator('.ws-selected .ov-figure .ws-thumbnail').waitFor()
+    assert.equal(await page.locator('.ws-selected .ws-family-page').getByText(outcome).count(), 0)
+    assert.deepEqual(errors, [])
+    await context.close()
+    console.log('Channels close: its tapestry drawn, its outcome nowhere, in the stream or its view')
+  }
 } finally { await browser.close() }

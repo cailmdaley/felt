@@ -229,11 +229,10 @@ export class FamilyPage {
   private paintFigure(card: KanbanCard): void {
     const figure = this.figure
     void this.feeds.lead(card).then(lead => {
-      const shown = lead ?? this.feeds.files(card)[0], doc = shown?.key
-      const file = doc && parseDocKey(doc)
-      if (this.card?.originId !== card.originId || (this.card.uid ?? this.card.id) !== (card.uid ?? card.id)) return
-      figure.hidden = !shown || !doc || !file
-      if (!shown || !doc || !file) return
+      const shown = lead ?? this.feeds.files(card)[0], file = shown && parseDocKey(shown.key)
+      figure.hidden = !file
+      if (!shown || !file) return
+      const doc = shown.key
       // Shown here, it is seen: its thread's row stops saying "new file".
       if (shown.unread) this.feeds.seen(shown)
       if (this.thumb?.doc !== doc) {

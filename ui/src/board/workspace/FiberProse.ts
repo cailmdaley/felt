@@ -105,8 +105,6 @@ export function buildFiberProse(
     /** On a role charter, the constitutions assigned to the office in Desk order; absent elsewhere. */
     holds?: KanbanCard[]
     onCard?: (card: KanbanCard) => void
-    /** Drawn under its own row on a constitution's page, which already shows its name and outcome. */
-    embedded?: boolean
   },
 ): HTMLElement {
   const scroller = document.createElement('div')
@@ -114,24 +112,20 @@ export function buildFiberProse(
   const article = document.createElement('article')
   article.className = 'ws-prose ws-fiber-prose kbn-detail-prose'
   article.dataset.part = 'prose'
-  // The title line: the name, then its office beside it. Unfolded under its
-  // own row, the row already names the fiber and says what it came to, so
-  // only the office stays.
+  // The title line: the name, then its office beside it.
   const header = document.createElement('header')
   header.className = 'ws-prose-header'
   header.dataset.part = 'fiber-header'
-  if (!opts.embedded) {
-    const title = document.createElement('h1')
-    title.textContent = channel.name
-    title.dataset.part = 'fiber-title'
-    header.append(title)
-  }
+  const title = document.createElement('h1')
+  title.textContent = channel.name
+  title.dataset.part = 'fiber-title'
+  header.append(title)
   // An office named like the fiber itself would only say the name twice.
   const kebab = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
   const roles = card.shuttleRole && kebab(card.shuttleRole) !== kebab(channel.name) ? roleChip(card.shuttleRole, card.shuttlePerson, opts) : null
   if (roles) header.append(roles)
   const outcome = document.createElement('div')
-  const outcomeText = opts.embedded ? '' : channel.outcome ?? card.outcome ?? ''
+  const outcomeText = channel.outcome ?? card.outcome ?? ''
   outcome.innerHTML = ledeHtml(outcomeText)
   const body = document.createElement('div')
   body.className = 'ws-prose-body'

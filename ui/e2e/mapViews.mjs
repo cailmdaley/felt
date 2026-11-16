@@ -56,8 +56,6 @@ export function registerMapViewJourneys(test) {
     // Its orchestrators stand above its head.
     const scroller = view(page).locator('.ws-family-scroll')
     assert.deepEqual(await view(page).locator('.ov-ancestor').evaluateAll(rows => rows.map(row => row.title)), [rootName])
-    // No outcome anywhere on the view.
-    assert.equal(await view(page).locator('.fp-note, .kbn-ch-outcome').count(), 0)
     // Keys move the focus among the rows, and neither they nor scrolling move Rex.
     await view(page).locator('.ov-head').focus()
     await page.keyboard.press('k')

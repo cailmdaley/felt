@@ -4,7 +4,6 @@ import type { KanbanCard } from './KanbanTypes.js'
 import { card } from './testFixtures.js'
 import { Dock } from './workspace/Dock.js'
 import { saveConversationOpening } from './conversationOpening.js'
-import { pressConsoleAct } from './workspace/testActs.js'
 
 const worker = (over: Partial<KanbanCard> = {}): KanbanCard => card({
   id: 'debug', uid: 'debug-uid', originId: 'host-a', status: 'active',
@@ -84,11 +83,5 @@ describe("the band's console opens the conversation, as c does", () => {
     const opener = consoleFor(worker({ workerState: undefined, tmuxSession: undefined, workerAgent: undefined, status: 'closed' }))
     expect(opener.hidden).toBe(true)
     expect(dock.canOpenConversation(worker({ workerState: undefined, tmuxSession: undefined, status: 'closed' }))).toBe(false)
-  })
-  it('follows the highlighted thread from the console\'s menu, as the verbs beside it do', async () => {
-    dock.open(worker())
-    dock.setActionCard(worker({ id: 'lander', uid: 'lander-uid', tmuxSession: 'shuttle-lander' }))
-    await pressConsoleAct(dock.el, 'Open conversation')
-    expect(openWorker.mock.calls).toEqual([['shuttle-lander', 'host-a', undefined]])
   })
 })

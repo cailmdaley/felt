@@ -108,8 +108,6 @@ const threadFamilyRevision = (card: KanbanCard, index: ThreadIndex): string => {
   const scope = ancestry[0] ?? current
   return JSON.stringify({ card: current, ancestry, family: [scope, ...index.subtree(scope)], summary: index.summary(scope) })
 }
-/** The Channels rail's Read lately holds this many constitutions. */
-const READ_LATELY = 8
 /** Routes, owner-addressed sources and per-channel selection for one reader. */
 export class Workspace {
   readonly reader: Reader
@@ -132,7 +130,6 @@ export class Workspace {
   private catalogue: Charter[] = []
   private current: ChannelState | null = null
   /** Constitutions opened in this session, most recent first. */
-  private readLately: string[] = []
   private origin = 'Channels'
   /** The filter of the view the bar's Find serves, while it serves one. */
   private filter?: (query: string) => void
@@ -460,8 +457,6 @@ export class Workspace {
   /** Opens a fiber at one of its pages; with none named, it comes back to the page it was left on, else its view. */
   open(card: KanbanCard, origin = this.opts.origin(), doc?: DocKey, authoritative = true, scan = false): void {
     this.origin = origin
-    const id = deskCardKey(card)
-    this.readLately = [id, ...this.readLately.filter(seen => seen !== id)].slice(0, READ_LATELY * 2)
     const state = this.ensure(card, authoritative)
     this.library.opened(card, state.metadataKnown)
     this.history.enter(state.channel.uid, state.channel.owner, doc ?? state.selected, viewForOrigin(origin), scan)
@@ -493,14 +488,6 @@ export class Workspace {
     const current = this.current?.card
     if (!current || deskCardKey(current) !== deskCardKey(card)) return false
     return !this.opts.deskRows().some(row => deskCardKey(row) === deskCardKey(this.deskAnchor(card)))
-  }
-  /** The constitutions opened in this session, most recent first, for the Channels rail's Read lately. */
-  readLatelyCards(): KanbanCard[] {
-    const live = new Map(this.opts.cards().map(card => [deskCardKey(card), card]))
-    return this.readLately.flatMap(id => {
-      const card = live.get(id) ?? this.channels.get(id)?.card
-      return card ? [card] : []
-    }).slice(0, READ_LATELY)
   }
 
   /** View keys park the reader. */
@@ -618,7 +605,6 @@ export class Workspace {
   private controls(state: ChannelState | null): Dock | undefined {
     if (!state?.metadataKnown || state.channel.uid.startsWith('other:') || !onDesk(state.card)) return undefined
     this.dock.open(state.card)
-    this.steerBand(state)
     return this.dock
   }
   /** The reader's way back names where the visited path leads. */
@@ -657,10 +643,9 @@ export class Workspace {
   private proseRevision(state: ChannelState): string {
     return JSON.stringify([state.channel.body, state.channel.outcome, state.channel.labels, state.channel.documents.map(d => d.key), state.card.status, state.card.tempered, state.card.workerState, state.card.effectiveHorizon, state.card.shuttleAgent, state.card.shuttleRole, state.card.shuttlePerson, state.card.shuttleSeat, roleSlug(state.card, this.catalogue), holdsRevision(this.holds(state) ?? []), state.error, state.loaded, state.metadataKnown])
   }
-  private drawProse(state: ChannelState, embedded = false): HTMLElement {
+  private drawProse(state: ChannelState): HTMLElement {
     this.readCatalogue(state)
     return buildFiberProse(state.card, state.channel, {
-      embedded,
       shuttleBase: this.opts.shuttleBase,
       onFiber: id => { void this.openFiber(id, state.card.originId) },
       onFile: (path, title, owner?: string) => this.openFile(path, title, owner),
@@ -712,7 +697,7 @@ export class Workspace {
       this.looked = { key, moved: Promise.resolve(false) }
       return this.looked.moved
     }
-    // Rex is the human's while the board is behind it; the look is taken up once the board has the keyboard again.
+    // Rex is the human's while the board is behind it: a look without the keyboard moves nothing.
     if (!document.hasFocus()) {
       this.looked = { key: '', moved: Promise.resolve(false) }
       return this.looked.moved
@@ -745,10 +730,6 @@ export class Workspace {
   rexAt(id: string, owner: string): void {
     const card = cardNamed(this.opts.cards(), id, owner)
     if (card) this.looked = { key: rexKey(constitutionFor(card, this.opts.cards())), moved: Promise.resolve(true) }
-  }
-  /** The band speaks to the page's own fiber. */
-  private steerBand(state: ChannelState): void {
-    this.dock.setActionCard(state.card)
   }
   private family(): HTMLElement {
     const state = this.current!
@@ -920,7 +901,6 @@ export class Workspace {
     state.selected = key
     state.routedFile = undefined
     this.reader.select(key)
-    this.steerBand(state)
     this.echo(state, key)
     if (key === this.familyDocument(state.card)) this.focusMap(state)
     this.namePage(state, key)

@@ -83,8 +83,6 @@ export interface ViewContext extends TemporalFetchers {
     openFromDesk(card: KanbanCard): void
     /** A fiber's page, or one of its documents; a fiber the board does not hold is read from its owner first. */
     openPage(card: KanbanCard, doc?: DocKey): void
-    /** The constitutions opened in this session, most recent first. */
-    readLatelyCards(): KanbanCard[]
     readonly globeHost: GlobeHost
     /** The family board's records, which Channels reads its streams from. */
     readonly board: BoardFeed

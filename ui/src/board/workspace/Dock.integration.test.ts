@@ -128,10 +128,6 @@ describe('band header', () => {
     expect(menuOf(band).getAttribute('aria-label')).toBe("task's acts")
     expect(menuOf(band).getAttribute('aria-haspopup')).toBe('menu')
     expect(await consoleActs(band.el)).toEqual(['Close for review', 'Rest', 'Temper', 'Discard', 'Open conversation', 'Settings'])
-    // The menu follows a highlighted thread.
-    band.setActionCard(task({ id: 'a/task/thread', uid: 'thread-uid', status: 'closed' }))
-    expect(menuOf(band).getAttribute('aria-label')).toBe("thread's acts")
-    expect(await consoleActs(band.el)).toEqual(['Temper', 'Rest', 'Discard', 'Settings'])
   })
 
   it('seats its verbs and settings in the acts, and Listen\'s place in the message box', async () => {
@@ -303,10 +299,11 @@ describe('band settings', () => {
     expect(band.el.querySelector('.ws-band-drawer .kbn-ctl-history')).not.toBeNull()
   })
 
-  it('follows the highlighted thread: its Settings opens that thread\'s settings and writes to it', async () => {
+  it('opens a thread\'s settings from its own acts, writing to it, and the band\'s own again from the band', async () => {
     const page = task(), thread = task({ id: 'a/task/thread', uid: 'thread', name: 'The thread', shuttleAgent: 'codex-luna', shuttleEffort: 'low' })
-    dock.reset(); dock.open(page); dock.setActionCard(thread)
-    await pressConsoleAct(band.el, 'Settings')
+    dock.reset(); dock.open(page)
+    rowActs(band, thread).querySelector<HTMLButtonElement>('.ws-acts-settings')!.click()
+    await settle()
     const name = band.el.querySelector<HTMLElement>('.ws-band-sheet-name')!
     expect(name.hidden).toBe(false)
     expect(name.textContent).toBe('The thread')
@@ -315,7 +312,6 @@ describe('band settings', () => {
     vi.mocked(fetch).mockClear()
     change('Effort', 'high'); await settle()
     expect(writes()).toEqual([{ action: 'set-agent', origin: 'owner', fiber: 'a/task/thread', effort: 'high' }])
-    dock.setActionCard(page)
     await pressConsoleAct(band.el, 'Settings')
     expect(name.hidden).toBe(true)
     expect(band.el.querySelector('.ws-band-drawer')!.hasAttribute('data-thread')).toBe(false)
@@ -832,19 +828,6 @@ describe('session verbs', () => {
     expect(openWorker).toHaveBeenCalledWith('worker', 'owner')
   })
 
-  it('repairs a highlighted thread\'s refused start in the band, and clears its prompt on retargeting', async () => {
-    const page = task(), thread = task({ id: 'a/task/thread', uid: 'thread', inheritedProjectDir: { path: '/srv/thread', from: 'work' } })
-    dock.open(page); dock.setActionCard(thread)
-    vi.mocked(fetch).mockClear()
-    vi.mocked(fetch).mockResolvedValueOnce(response({ reason: 'arm_refused', needs: 'project_dir', host: 'owner' }, 422))
-      .mockResolvedValueOnce(response({ dispatched: true }))
-    session('Start').click(); await settle()
-    expect(band.el.querySelector<HTMLInputElement>('.kbn-start-prompt-input')?.value).toBe('/srv/thread')
-    band.el.querySelector<HTMLButtonElement>('.kbn-start-prompt .kbn-ctl-send')!.click(); await settle()
-    expect(writes()[1]).toMatchObject({ fiber_id: 'a/task/thread', project_dir: '/srv/thread' })
-    dock.setActionCard(page)
-    expect(band.el.querySelector('.kbn-start-prompt')).toBeNull()
-  })
 
   it('shows any other refused start as its reason, with no prompt', async () => {
     const message = 'cannot arm: agent claude-retired is not in the registry (shuttle set-agent to pick a current one)'
@@ -1194,24 +1177,6 @@ describe('session usage', () => {
     expect(usageReads()).toEqual([`/api/v1/transcript/usage?session=${id}&host=candide`])
   })
 
-  it('follows a thread it is aimed at: its channel\'s handle and its slug, its figures and its cache', async () => {
-    const thread = '99999999-2222-3333-4444-555555555555'
-    answering(url => ({ context: url.includes(thread) ? 40_000 : 182_340 }))
-    const root = resting({ name: 'Unions' })
-    dock.setChannelOf(() => 'unions')
-    dock.open(root)
-    await settle()
-    expect(part('context').textContent).toBe('182k')
-    dock.setActionCard(task({ id: 'a/task/sub', uid: 'sub', name: 'Sub', status: 'closed', sessionUuid: thread, shuttleHost: 'cineca' }))
-    await settle()
-    expect(part('fiber-title').textContent).toBe('unions / sub')
-    expect(part('context').textContent).toBe('40k')
-    expect(usageReads().at(-1)).toBe(`/api/v1/transcript/usage?session=${thread}&host=cineca`)
-    dock.setActionCard(root)
-    await settle()
-    expect(part('fiber-title').textContent).toBe(`unions / ${root.id.split('/').pop()}`)
-    expect(part('context').textContent).toBe('182k')
-  })
 
   it('reads a recorded window against the figure', async () => {
     answering(() => ({ context: 129_500, window: 259_000 }))

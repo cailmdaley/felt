@@ -261,7 +261,6 @@ export class ChannelsView implements TemporalView {
     const was = this.drafted
     if (was && was !== channel.key) this.drafts.set(was, dock.draft)
     dock.open(channel.seat)
-    dock.setActionCard(channel.seat)
     if (was !== channel.key) { dock.draft = this.drafts.get(channel.key) ?? ''; this.drafted = channel.key }
   }
   refresh(ctx: ViewContext): void {

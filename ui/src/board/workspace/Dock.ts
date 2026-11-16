@@ -363,7 +363,7 @@ const USAGE_REFRESH_MS = 15_000
  * The console: the one chat bar of the board, docked at the bottom of the
  * reader under a constitution's pages and of each Channels pane. Two lines
  * that stay in place while what is above them changes. The first is identity
- * and navigation: back, the name (with the highlighted thread's after it), the
+ * and navigation: back, the name (its channel's handle before its slug), the
  * context meter, the menu of the fiber's acts (its lifecycle verbs, its
  * conversation, its page and its settings), and ×. The second is the message
  * box, with Listen, Send and New session inside it. A row that stands for a
@@ -376,6 +376,7 @@ export class Dock {
   /** The settings dropdown of a console the reader does not seat. */
   private settingsMenu: SettingsMenu | null = null
   private card: KanbanCard | null = null
+  /** The card as the board last gave it, whole: what the acts, the figures and Listen read. */
   private actionCard: KanbanCard | null = null
   private searchDebounce: number | null = null
   private fiberIndex: Promise<Array<{ id: string; name: string }>> | null = null
@@ -500,7 +501,7 @@ export class Dock {
     this.card = { ...card }
     const view = this.card
     this.el.append(this.buildControls(view, isAgentCard(view)))
-    this.syncRuntime(view)
+    this.syncRuntime(card)
   }
 
   /** Forget the card and its controls. */
@@ -556,7 +557,7 @@ export class Dock {
   /** Repaint the destination beside Listen. */
   private paintVoice(): void {
     const status = this.voice?.controller.status ?? null
-    const spoken = status?.destination ?? status?.target, typed = this.actionCard ?? this.card
+    const spoken = status?.destination ?? status?.target, typed = this.actionCard
     const here = !!spoken && !!typed && (spoken.fiber_id === typed.uid || spoken.fiber_id === typed.id) && (spoken.origin ?? null) === (typed.originId ?? null)
     this.voiceStrip?.paint(voiceLine(status, (fiber, origin) => this.fiberSlug?.(fiber, origin)), here)
   }
@@ -591,7 +592,7 @@ export class Dock {
   }
 
   /**
-   * The band's console: opens the highlighted card's conversation as `c` does.
+   * The band's console: opens the card's conversation as `c` does.
    * A destination with an address is a native link, so app schemes and web
    * links keep their gesture semantics; long-press or right-click picks
    * another destination.
@@ -739,18 +740,6 @@ export class Dock {
   /** The page above already carries the target's page and acts (a constitution's view): the console shows none of its own, save a verdict's undo. */
   setEchoed(echoed: boolean): void { this.el.toggleAttribute('data-echoed', echoed) }
 
-  /** Retarget the band's figures, menu and message box without changing its identity or settings. */
-  setActionCard(card: KanbanCard): void {
-    const previous = this.actionCard ?? this.card
-    if (previous && ((previous.uid ?? previous.id) !== (card.uid ?? card.id) || previous.originId !== card.originId) && this.errorEl) {
-      this.errorEl.replaceChildren()
-      this.errorEl.style.display = 'none'
-    }
-    this.actionCard = card
-    this.followUsage()
-    this.actPaint?.()
-  }
-
   /** The band shares the workspace's identity-keyed undo queue. */
   setVerdictQueue(queue?: (card: KanbanCard, target: Verdict) => void): void {
     this.queueVerdict = queue
@@ -770,7 +759,7 @@ export class Dock {
   syncRuntime(card: KanbanCard | null): void {
     if (!card || !this.card ||
       (this.card.uid ?? this.card.id) !== (card.uid ?? card.id) || this.card.originId !== card.originId) return
-    const incoming = card
+    const incoming = this.actionCard = card
     for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir', 'sessionUuid', 'tmuxSession', 'terminalBackend', 'rexSession', 'sessionLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status', 'tempered', 'column', 'turn', 'effectiveHorizon', 'outcome', 'ask', 'workerStartedAt', 'originStale', 'tags'] as const) {
       Object.assign(this.card, { [key]: card[key] })
     }
@@ -781,9 +770,9 @@ export class Dock {
     this.actPaint?.()
   }
 
-  /** The figures follow the highlighted card's session, as the verbs do. */
+  /** The figures follow the card's session, as the verbs do. */
   private followUsage(): void {
-    const card = this.actionCard ?? this.card
+    const card = this.actionCard
     if (!card || card.sessionUuid === this.usageSession) return
     this.usageSession = card.sessionUuid
     this.usage = null
@@ -997,7 +986,6 @@ export class Dock {
     const title = document.createElement('h1')
     title.className = 'ws-band-title'
     title.dataset.part = 'fiber-title'
-    // A highlighted thread follows the band's name, as a path, under the slug its row draws: the figures beside it are the thread's.
     const titleRoot = document.createElement('span')
     titleRoot.className = 'ws-band-channel'
     const titleThread = document.createElement('span')
@@ -1622,7 +1610,7 @@ export class Dock {
     this.starting = true
     this.actPaint?.()
     const inBand = (): boolean => {
-      const target = this.actionCard ?? this.card
+      const target = this.actionCard
       return !!target && (target.uid ?? target.id) === (card.uid ?? card.id) && target.originId === card.originId
     }
     const showError = (message: string): void => {
