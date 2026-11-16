@@ -84,6 +84,17 @@ export function registerMapViewJourneys(test) {
     await asks(page, pulled.length + 1)
   }, { width: 800, height: 1000 })
 
+  test('A view without threads draws no column for them: its preview takes the width', async page => {
+    await page.goto(url.replace('example=threads', 'example=families'))
+    await page.locator('.kbn-desk .kbn-card').first().waitFor()
+    await page.evaluate(() => { location.hash = '#/board/hub@umber-workstation/family%3Aumber-workstation%3Ahub' })
+    await view(page).locator('.ov-thread[data-fiber="hub/psf-coupling"]').click()
+    await view(page).locator('.ov-figure .ws-thumbnail').waitFor()
+    assert.equal(await view(page).locator('.ov-threads').isVisible(), false)
+    const [body, figure] = await Promise.all(['.ov-body', '.ov-figure'].map(part => view(page).locator(part).boundingBox()))
+    assert.ok(figure.width > body.width * .9, `the preview spans the view (${figure.width} of ${body.width})`)
+  })
+
   test('The view\'s strip: what it last posted beside its tapestry, which opens in the reader', async page => {
     await page.goto(url.replace('example=threads', 'example=families'))
     await page.locator('.kbn-desk .kbn-card').first().waitFor()

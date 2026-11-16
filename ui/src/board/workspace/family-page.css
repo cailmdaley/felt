@@ -61,7 +61,7 @@
 
 /* The last thing it posted, under the head. */
 .ov-said { margin: 0 var(--ov-gutter) 8px calc(var(--ov-gutter) + 30px); min-width: 0; }
-.ov-said[hidden], .ov-figure[hidden] { display: none; }
+.ov-said[hidden], .ov-figure[hidden], .ov-threads[hidden] { display: none; }
 .ov-said-age { display: block; color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-ui) var(--font-serif); }
 .ov-said-text {
   margin: 1px 0 0; color: var(--ws-ink); font: var(--type-row)/var(--leading-prose) var(--font-serif); overflow-wrap: anywhere;
@@ -84,6 +84,8 @@
   position: sticky; top: 8px; align-self: stretch; min-height: 340px; max-height: calc(100vh - 220px);
   margin: 8px var(--ov-gutter) 0 0; padding: 0; border: 0; background: none; cursor: pointer;
 }
+/* Without threads, the preview takes the whole width. */
+.ov-threads[hidden] + .ov-figure { grid-column: 1 / -1; margin-left: var(--ov-gutter); }
 .ov-figure:focus-visible { outline: none; }
 .ov-thumb.ws-thumbnail { width: 100%; height: 100%; border-radius: 4px; box-shadow: 0 0 0 1px var(--ws-hairline-soft); }
 .ov-figure:is(:hover, :focus-visible) .ov-thumb { box-shadow: 0 0 0 1px var(--ws-ink-soft); }
