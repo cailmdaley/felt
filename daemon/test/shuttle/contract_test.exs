@@ -17,17 +17,6 @@ defmodule Shuttle.ContractTest do
     assert result.reason =~ "context-mailbox put --from"
   end
 
-  defmodule Level17Runner do
-    @behaviour Shuttle.Runner
-    def cmd("shuttle", ["contract"], _opts), do: {"17\n", 0}
-  end
-
-  test "a CLI at level 17 cannot count what waits for a fiber's next worker" do
-    {:verdict, result} = Shuttle.Contract.check(Level17Runner)
-    refute result.ok
-    assert result.reason =~ "context-mailbox pending"
-  end
-
   defmodule Level18Runner do
     @behaviour Shuttle.Runner
     def cmd("shuttle", ["contract"], _opts), do: {"18\n", 0}
@@ -70,7 +59,7 @@ defmodule Shuttle.ContractTest do
     {:verdict, result} = Shuttle.Contract.check(LevelRunner)
     refute result.ok
     assert result.observed == 14
-    assert result.reason =~ "context-mailbox get/receiver/revoke/put/deliver"
+    assert result.reason =~ "context-mailbox get/receiver/revoke/put (thread receiver authority)"
     assert result.reason =~ "close --quiet"
   end
 

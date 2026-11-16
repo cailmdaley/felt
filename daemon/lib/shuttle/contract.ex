@@ -30,11 +30,10 @@ defmodule Shuttle.Contract do
   @level_surfaces %{
     14 => "hook interrupted (Shuttle.InterruptWatcher)",
     15 =>
-      "context-mailbox get/receiver/revoke/put/deliver (thread receiver authority), " <>
+      "context-mailbox get/receiver/revoke/put (thread receiver authority), " <>
         "close --quiet (lifecycle API)",
     16 => "rest/close --actor (an orchestrator's own acts on its threads)",
     17 => "context-mailbox put --from (a message queued for a fiber's next worker)",
-    18 => "context-mailbox pending (what waits for each constitution's next worker)",
     19 => "process-identity PID (kernel lifetime evidence for hook receivers)",
     20 => "migrate (live conversation assignment and native hook ledger binding)",
     21 => "migrate-documents (locked, conditional assignment patches and recovery)",
