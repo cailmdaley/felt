@@ -196,10 +196,8 @@ export function registerHeaderBarJourneys(test) {
     })
     await page.goto(url)
     await openRoot(page)
-    const header = page.locator('.ws-stage-band .ws-band-head')
     const assertRow = async (expected, width = 390) => {
       assert.deepEqual(await shownVerbs(page), expected)
-      assert.equal(await header.locator('.ws-band-back').isVisible(), false, "the top bar goes back; the console's head names whom it speaks to")
       const strip = acts(page)
       const row = await strip.boundingBox()
       assert.ok(row.x >= 0 && row.x + row.width <= width, `the acts fit the phone: ${JSON.stringify(row)}`)
@@ -280,7 +278,7 @@ export function registerHeaderBarJourneys(test) {
     assert.ok(await page.getByRole('menuitem', { name: 'Stop listening', exact: true }).isEnabled())
     assert.ok(await page.getByRole('menuitem', { name: "Today's transcript", exact: true }).isEnabled())
     await page.keyboard.press('Escape')
-    await page.locator('.ws-band-leave').click()
+    await page.locator('.kbn-viewtab[data-view="desk"]').click()
     await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
     const foreign = page.locator('.ws-stage-band')
     assert.equal(await foreign.locator('.ws-voice-strip').getAttribute('data-mode'), 'pinned')
@@ -309,18 +307,6 @@ export function registerHeaderBarJourneys(test) {
     const posts = await page.evaluate(() => window.__harness.requests.filter(r => r.method === 'POST' && r.url.endsWith('/api/v1/voice')).map(r => JSON.parse(r.body)))
     assert.deepEqual(posts, [{ enabled: true, muted: false, source: 'desktop', recorder: 'local' }, { muted: true, recorder: 'local' }, { enabled: false, recorder: 'local' }])
   }, { width: 1000, height: 900 })
-  test('× leaves the band for the Desk and writes nothing', async page => {
-    await page.goto(url)
-    await openRoot(page)
-    const header = page.locator('.ws-stage-band .ws-band-head')
-    await header.waitFor()
-    const posts = () => page.evaluate(() => window.__harness.requests.filter(r => r.method !== 'GET').length)
-    const before = await posts()
-    await header.locator('.ws-band-leave').click()
-    await page.locator('.kbn-desk .kbn-card[data-fiber-id="research/workspace/calibration-report"]:not(.kbn-card-header)').waitFor({ state: 'visible' })
-    await page.locator('.ws-reader.ws-dormant').waitFor({ state: 'attached' })
-    assert.equal(await posts(), before, '× sends no write')
-  }, { width: 1440, height: 900 })
   test('Thread rows own Enter and Space while body focus keeps expand and paging shortcuts', async page => {
     await page.goto(url)
     await openRoot(page)
@@ -399,7 +385,6 @@ export function registerHeaderBarJourneys(test) {
         assert.ok(geometry.barHeight <= 96, JSON.stringify(geometry))
         assert.ok(geometry.left >= 0 && geometry.right <= viewport.width, JSON.stringify(geometry))
       } else {
-        assert.equal(await header.locator('.ws-band-back').isVisible(), false, 'the top bar goes back; the console draws no back of its own')
         const dock = await band(page).locator('.ws-dock').boundingBox()
         assert.ok(dock.x >= 0 && dock.x + dock.width <= viewport.width, JSON.stringify(dock))
       }

@@ -1337,7 +1337,7 @@ describe('workspace reader integration', () => {
     await press('h')
     expect(workspace.isActive).toBe(false)
   })
-  it('draws the map with no header line or document menu under its band', async () => {
+  it('draws the map under its label bar, whose back is the way back, with no document menu', async () => {
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
       card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, ...over })
     const feed = [thread({ id: 'hub', status: 'active' }), thread({ id: 'hub/a', orchestrator: 'hub', status: 'active' })]
@@ -1345,10 +1345,10 @@ describe('workspace reader integration', () => {
     workspace.dispose()
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     workspace.open(feed[0], 'Desk'); await settle()
-    expect(document.querySelector('.ws-selected')?.hasAttribute('data-drawn')).toBe(true)
     expect(document.querySelector('.ws-selected .ws-menu-button')).toBeNull()
     expect(document.querySelector('.ws-selected .ws-expand-button')).toBeNull()
-    expect(document.querySelector<HTMLElement>('.ws-stage-band [data-part="band-back"]')?.hidden).toBe(false)
+    expect(document.querySelector('.ws-stage-band .ws-band-back, .ws-stage-band .ws-band-leave')).toBeNull()
+    expect(document.querySelector('.ws-selected .ws-labelbar .ws-document-back')).not.toBeNull()
   })
   it('unfolds a family row on a page that was one constitution until the family formed', async () => {
     workspace.dispose()

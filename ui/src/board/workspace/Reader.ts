@@ -434,9 +434,8 @@ export class Reader {
     back.append(element('span', 'ws-back-label', this.backDestination))
     back.title = `Back to ${this.backDestination}`
     frame.label.append(back, glyph, title, provenance)
-    // A drawn page has nothing to say about itself beyond what the band says.
-    if (isDrawn(frame.doc)) frame.el.dataset.drawn = ''
-    else if (!isBaked(frame.doc)) {
+    // A drawn page is no file: nothing to download, no document menu.
+    if (!isDrawn(frame.doc) && !isBaked(frame.doc)) {
       const download = element('a', 'ws-icon-button ws-download')
       download.href = fileBytesUrl(this.opts.shuttleBase, frame.doc.path, frame.doc.owner); download.download = frame.doc.name
       download.innerHTML = headerIcon('download')

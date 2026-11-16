@@ -322,9 +322,6 @@ interface AgentRecord {
 /** The band's links: settings holds the thread's ancestry, the family's head first. */
 export interface BandNav {
   ancestry?: readonly Ancestor[]
-  desk?: () => void
-  /** Back where the reader was opened from; `nameBack` names it. */
-  back?: () => void
   /** Opens the constitution's own page, from the console's menu. */
   constitution?: () => void
 }
@@ -377,9 +374,6 @@ const USAGE_REFRESH_MS = 15_000
 export class Dock {
   private root: HTMLElement | null = null
   /** The band's × returns directly to the Desk, never a lifecycle write. */
-  private leave: HTMLButtonElement | null = null
-  private back: HTMLButtonElement | null = null
-  private backLabel = ''
   private ancestry: HTMLElement | null = null
   /** The settings dropdown of a console the reader does not seat. */
   private settingsMenu: SettingsMenu | null = null
@@ -465,28 +459,11 @@ export class Dock {
   openSettings?: (content: HTMLElement, opener: HTMLElement) => void
   closeSettings?: (after: () => void) => void
 
-  /** Names where the band's back goes, as the visited path changes under it. */
-  nameBack(label: string): void {
-    this.backLabel = label
-    if (!this.back) return
-    this.back.title = `Back to ${label}`
-    this.back.setAttribute('aria-label', this.back.title)
-  }
   setNav(nav: BandNav): void {
     if (!this.ancestry) return
     paintAncestry(this.ancestry, nav.ancestry ?? [])
     this.openConstitution = nav.constitution ?? null
     this.actPaint?.()
-    if (this.back) {
-      this.back.hidden = !nav.back
-      this.back.onclick = nav.back ?? null
-      this.nameBack(this.backLabel)
-    }
-    if (this.leave) {
-      this.leave.hidden = !nav.desk
-      this.leave.onclick = nav.desk ?? null
-      this.leave.title = 'Return to Desk'; this.leave.setAttribute('aria-label', 'Return to Desk')
-    }
   }
 
   private later(fn: () => void, ms: number): number {
@@ -559,7 +536,7 @@ export class Dock {
     this.savesPending = 0
     this.saveTail = Promise.resolve()
     this.root?.replaceChildren()
-    this.ancestry = this.leave = this.back = null
+    this.ancestry = null
     this.worker = null
     this.settingsMenu?.dispose()
     this.settingsMenu = null
@@ -1038,19 +1015,8 @@ export class Dock {
     // A console no one can see (a Channels pane closed or without a worker) reads nothing.
     const usageRefresh = window.setInterval(() => { if (!document.hidden && !this.el.closest('[hidden]')) void this.readUsage(target()) }, USAGE_REFRESH_MS)
     this.disposers.push(() => window.clearInterval(usageRefresh))
-    const back = this.back = document.createElement('button')
-    back.type = 'button'
-    back.className = 'ws-header-icon ws-band-back'
-    back.dataset.part = 'band-back'
-    back.hidden = true
-    back.innerHTML = headerIcon('back')
     const identity = document.createElement('div'); identity.className = 'ws-band-identity'
-    identity.append(back, title, meter)
-    const leave = this.leave = document.createElement('button')
-    leave.type = 'button'
-    leave.className = 'ws-header-icon ws-band-leave'
-    leave.hidden = true
-    leave.innerHTML = headerIcon('leave')
+    identity.append(title, meter)
     // The fiber's acts wait behind one control, which is also where a verdict's undo stands.
     const acts = document.createElement('span')
     acts.className = 'ws-band-acts'
@@ -1078,7 +1044,7 @@ export class Dock {
     if (unsubscribe) this.disposers.push(unsubscribe)
     this.paintVoice()
     if (this.listen) worker.seat(this.listen.el, voiceStrip.el)
-    header.append(identity, acts, leave)
+    header.append(identity, acts)
     // The settings sheet waits hidden in the console until its dropdown opens on it.
     body.append(header, worker.el, drawer, foot)
     this.actPaint = () => {

@@ -611,11 +611,9 @@ export class Workspace {
     this.steerBand(state)
     return this.dock
   }
-  /** The reader's and the band's way back name where the visited path leads. */
+  /** The reader's way back names where the visited path leads. */
   private nameBack(): void {
-    const label = this.history.backLabel
-    this.reader.setBackDestination(label)
-    this.dock.nameBack(label)
+    this.reader.setBackDestination(this.history.backLabel)
   }
   /** Seat the band over the channel's pages, with its links. */
   private seatBand(state: ChannelState): void {
@@ -630,8 +628,6 @@ export class Workspace {
     dock.closeSettings = after => this.reader.closeSettings(after)
     dock.setNav({
       ancestry: ancestry.map(card => ({ name: card.name, open: () => this.reader.closeSettings(() => { if (this.isActive) this.open(card, this.origin, undefined, this.library.hasMetadata(card)) }) })),
-      desk: () => this.escapeHome(),
-      back: () => this.reader.back(),
       constitution: () => { const page = proseDocument(state.channel); if (page) this.visit(page.key) },
     })
   }

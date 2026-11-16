@@ -110,26 +110,6 @@ describe('change review delivery', () => {
 describe('band header', () => {
   const visibleVerbs = shownVerbs
 
-  it('× returns directly to Desk and writes nothing', () => {
-    const transition = vi.fn()
-    dock.reset(); dock = band = new Dock('', saved, transition)
-    dock.open(task({ status: 'active', sessionUuid: 'leave' }))
-    document.body.append(band.el)
-    const leave = band.el.querySelector<HTMLButtonElement>('.ws-band-head > .ws-band-leave')!
-    expect(leave.hidden).toBe(true)
-    const desk = vi.fn()
-    band.setNav({ desk })
-    expect(leave.hidden).toBe(false)
-    expect(leave.getAttribute('aria-label')).toBe('Return to Desk')
-    expect(leave.querySelector('svg path')!.getAttribute('d')).toBe('m4 4 8 8m0-8-8 8')
-    vi.mocked(fetch).mockClear()
-    leave.click()
-    expect(desk).toHaveBeenCalledTimes(1)
-    expect(transition).not.toHaveBeenCalled()
-    expect(saved).not.toHaveBeenCalled()
-    expect(writes()).toEqual([])
-  })
-
   it('names its session verbs by their words, and leads its menu with the lifecycle verb that fits', async () => {
     dock.reset()
     dock.open(task({ status: 'active', sessionUuid: 'words' }))
@@ -139,12 +119,12 @@ describe('band header', () => {
     expect((await consoleActs(band.el))[0]).toBe('Close for review')
   })
 
-  it('draws its first line as identity and navigation, with the fiber\'s acts behind one menu', async () => {
+  it('draws its first line as identity, with the fiber\'s acts behind one menu', async () => {
     dock.reset(); dock = band = new Dock('', saved, undefined, undefined, { onRest: vi.fn() })
     dock.open(task({ status: 'active', sessionUuid: 'narrow' }))
     document.body.append(band.el)
     const header = band.el.querySelector<HTMLElement>('.ws-band-head')!
-    expect([...header.children].map(child => child.className)).toEqual(['ws-band-identity', 'ws-band-acts', 'ws-header-icon ws-band-leave'])
+    expect([...header.children].map(child => child.className)).toEqual(['ws-band-identity', 'ws-band-acts'])
     expect(menuOf(band).getAttribute('aria-label')).toBe("task's acts")
     expect(menuOf(band).getAttribute('aria-haspopup')).toBe('menu')
     expect(await consoleActs(band.el)).toEqual(['Close for review', 'Rest', 'Temper', 'Discard', 'Open conversation', 'Settings'])
@@ -198,7 +178,7 @@ describe('band header', () => {
   it('says no state word beside the title, and marks the state for colour, kept current', () => {
     dock.reset()
     dock.open(task({ status: 'active', sessionUuid: 's', workerState: 'running', tmuxSession: 't', runtimePhase: 'working' }))
-    expect([...band.el.querySelector('.ws-band-identity')!.children].map(child => child.className)).toEqual(['ws-header-icon ws-band-back', 'ws-band-title', 'ws-band-meter'])
+    expect([...band.el.querySelector('.ws-band-identity')!.children].map(child => child.className)).toEqual(['ws-band-title', 'ws-band-meter'])
     expect(band.el.querySelector('.ws-band-head [data-part="lifecycle"]')).toBeNull()
     expect(band.el.dataset.column).toBe('inFlight')
     dock.open(task({ status: 'closed', sessionUuid: 's' }))

@@ -15,8 +15,6 @@
   color: var(--ws-ink); font: 500 var(--type-title)/var(--leading-tight) var(--font-serif);
 }
 .ws-band-thread { color: var(--ws-ink-muted); }
-/* Back sits at the name's left, the way out of the page the band heads. */
-.ws-band-back { flex: none; margin: 0 -6px 0 -8px; }
 /* One context figure and the cache's warmth: a verdigris dot draining clockwise
    as the entry ages; cold, an alarm-red ring. Context carries its own tint (paintUsage). */
 .ws-band-meter { flex: none; align-self: center; display: inline-flex; align-items: center; gap: 6px; color: var(--ws-ink-muted); white-space: nowrap; font: var(--type-label)/var(--leading-prose) var(--font-mono); }
@@ -149,7 +147,6 @@
   .ws-acts-verbs > button::before { content: ''; position: absolute; inset: calc((100% - var(--ws-phone-target)) / 2) 0; }
   .ws-band-head { gap: 6px; min-height: 0; padding: 2px 4px 0 12px; }
   .ws-band-title { font-size: var(--type-prose); }
-  .ws-reader .ws-band-back { display: none; }
   .ws-dock .ws-worker-acts { --ws-box-line: var(--ws-phone-target); margin: 4px 8px 6px; }
   .ws-dock .ws-worker-tools .listen-dropdown { width: 32px; }
 }

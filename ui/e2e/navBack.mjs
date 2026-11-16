@@ -20,12 +20,13 @@ export function registerNavigationJourneys(test) {
       await page.screenshot({ path: resolve(process.env.NAV_BACK_SHOTS, `${device}-${name}.png`) })
     }
     const checkBack = async label => {
-      // The phone's top bar spells the destination out; the band's back names it to the pointer and to assistive tech.
-      const control = phone ? page.locator('.ws-return') : page.locator('.ws-stage-band [data-part="band-back"]')
+      // The way back stands at the top: the phone's top bar, or the page's label bar.
+      const control = phone ? page.locator('.ws-return') : selected(page).locator('.ws-document-back')
       assert.equal(await control.getAttribute('aria-label'), `Back to ${label}`)
       assert.equal(await control.getAttribute('title'), `Back to ${label}`)
       assert.ok(await control.isVisible())
-      if (!phone) assert.equal(await selected(page).locator('.ws-document-back').isVisible(), false, 'the band holds the only way back')
+      assert.equal(await page.locator('.ws-return:visible, .ws-page.ws-selected .ws-document-back:visible').count(), 1, 'one way back')
+      assert.equal(await page.locator('.ws-stage-band .ws-band-back, .ws-stage-band .ws-band-leave').count(), 0, 'the console draws no way back')
       if (phone) {
         assert.equal(await control.locator('.ws-back-label').textContent(), label)
         assert.ok(await control.locator('.ws-back-label').isVisible())

@@ -364,7 +364,7 @@ export function registerMapViewJourneys(test) {
     await page.waitForTimeout(300)
     const place = await box(report)
     await clickOn(page, report)
-    await page.locator('.ws-stage-band [data-part="band-back"]').waitFor()
+    await page.locator('.kbn-reader-open').waitFor({ state: 'attached' })
     assert.equal(await page.locator('.kbn-viewtabs .kbn-viewtab-active').getAttribute('data-view'), 'globe', 'the file stands over the Globe')
     await pageBack(page)
     await until(page, () => !document.querySelector('.kbn-reader-open'))
