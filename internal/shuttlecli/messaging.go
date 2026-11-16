@@ -321,9 +321,6 @@ exit 1 means rejected, unknown, or another command error.`,
 					fmt.Fprintf(a.env.Stderr, "idle subscription: recorded when the worker takes the entry\n")
 				}
 				a.recordBoardMessage(args[0], request)
-				if err := a.clearMessagedFiberAsk(args[0], request.From); err != nil {
-					fmt.Fprintf(a.env.Stderr, "message queued; couldn't clear the fiber's outstanding question: %v\n", err)
-				}
 				return a.printFiberReceipt(queued, request.Wake)
 			}
 			if !messageOpts.requestJSON && fiber == nil {
@@ -414,11 +411,6 @@ exit 1 means rejected, unknown, or another command error.`,
 			}
 			if receipt.Idle != nil && receipt.Idle.State != messaging.IdleWatching && receipt.Status != messaging.StatusRejected {
 				fmt.Fprintf(a.env.Stderr, "message delivered; idle subscription %s: %s\n", receipt.Idle.State, receipt.Idle.Detail)
-			}
-			if !messageOpts.requestJSON && len(args) > 0 && receipt.Status != messaging.StatusSubscribed {
-				if err := a.clearMessagedFiberAsk(args[0], request.From); err != nil {
-					fmt.Fprintf(a.env.Stderr, "message delivered; couldn't clear the fiber's outstanding question: %v\n", err)
-				}
 			}
 			return nil
 		},

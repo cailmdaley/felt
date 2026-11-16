@@ -64,9 +64,7 @@ func TestAskWriteResolveAndClear(t *testing.T) {
 		case "reopen":
 			_, err = runCommand(t, dir, "reopen", "f", "--local")
 		case "message":
-			a := testApp(t)
-			a.dir = dir
-			err = a.clearMessagedFiberAsk("f")
+			_, err = runCommand(t, dir, "ask", "f", "--clear", "--answered-by", "life/vizier")
 		}
 		if err != nil {
 			t.Fatalf("%s: %v", action, err)
@@ -75,25 +73,5 @@ func TestAskWriteResolveAndClear(t *testing.T) {
 		if err != nil || b.Ask != nil {
 			t.Fatalf("%s left ask: %+v (%v)", action, b, err)
 		}
-	}
-}
-
-func TestClearMessagedFiberAskSkipsRemoteOwner(t *testing.T) {
-	env := testEnv(t)
-	ownHost(t, env, "sender-host")
-	store, st := newStore(t)
-	seedShuttleRole(t, st, "work/worker", felt.StatusActive, map[string]any{
-		"kind": "oneshot", "host": "owner-host", "project_dir": t.TempDir(),
-		"ask": map[string]any{"text": "Already answered?", "at": "2026-10-28T10:00:00Z"},
-	}, nil)
-	env.Set("SHUTTLE_STORES", store)
-
-	if err := newApp(env).clearMessagedFiberAsk("work/worker"); err != nil {
-		t.Fatalf("clearing a remote fiber's ask should be handled by its owner: %v", err)
-	}
-	f := mustRead(t, st, "work/worker")
-	block, _, err := shuttle.BlockOf(f)
-	if err != nil || block.Ask == nil {
-		t.Fatalf("remote ask changed locally: %+v (%v)", block, err)
 	}
 }

@@ -193,36 +193,6 @@ func TestContextOnlyLiveFiberUsesDurableMailbox(t *testing.T) {
 	}
 }
 
-func TestMessageToRemoteFiberSucceedsWhenLocalAskCleanupCannotResolveIt(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	ownHost(t, env, "sender-node")
-	project, _ := newStore(t)
-	env.Chdir(project)
-	store := writeMessageTargetFiber(t, map[string]any{
-		"kind": "oneshot", "host": "worker-node", "agent": "claude-opus", "project_dir": t.TempDir(),
-		"ask":     map[string]any{"text": "Already answered?", "at": "2026-10-28T10:00:00Z"},
-		"runtime": map[string]any{"session_uuid": messageTargetSession},
-	})
-	isolateMessageFiberStore(env, store)
-	deliver, _ := dormantDeliverStub(http.StatusAccepted, `{"delivery":"context","queued":true,"status":"woken"}`)
-	daemonStub(t, env, map[string]http.HandlerFunc{"/api/v1/deliver": deliver})
-
-	// The shared store resolves the remote fiber, but this checkout's project
-	// scope cannot load it after delivery.
-	app := newApp(env)
-	stdout, stderr, err := runMessage(t, app, "work/worker", "steer now")
-	if err != nil {
-		t.Fatalf("successful delivery was reported as failure: %v", err)
-	}
-	if strings.Contains(stderr, "couldn't clear the fiber's outstanding question") {
-		t.Fatalf("remote fiber received a local cleanup warning: %q", stderr)
-	}
-	if !strings.HasPrefix(stdout, "woken ") {
-		t.Fatalf("receipt = %q", stdout)
-	}
-}
-
 func TestMessageToFiberWithoutShuttleBlockIsStillAnError(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)

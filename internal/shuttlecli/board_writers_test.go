@@ -181,10 +181,8 @@ func TestBoardMessageClearsAsk(t *testing.T) {
 	dir, st := newStore(t)
 	seedShuttleRole(t, st, "f", felt.StatusActive, map[string]any{"kind": "oneshot", "host": "host", "project_dir": t.TempDir(), "ask": map[string]any{"text": "why?", "at": "2026-10-28T10:00:00Z"}}, nil)
 	env.Set("SHUTTLE_STORES", dir)
-	a := newApp(env)
-	a.dir = dir
-	if err := a.clearMessagedFiberAsk("f", "Alice"); err != nil {
-		t.Fatal(err)
+	if _, stderr, err := executeIn(t, env, dir, "ask", "f", "--clear", "--answered-by", "Alice"); err != nil {
+		t.Fatalf("ask --clear: %v %s", err, stderr)
 	}
 	records := readBoardRecords(t, path)
 	if len(records) != 1 || records[0].Kind != "answered" || records[0].By == nil || records[0].By.Label != "Alice" || records[0].Text != "why?" {
