@@ -855,12 +855,14 @@ defmodule Shuttle.Test.DispatchIntegrationCase do
   end
 
   # The real `shuttle` CLI as a sender runs it, in this test's scope: answers
-  # its combined output and exit status.
+  # its combined output and exit status. It runs in a directory inside no felt
+  # store, so it reaches the test's store only through `SHUTTLE_STORES` and
+  # never the checkout's own.
   def shuttle(args, opts \\ []) do
     Shuttle.Env.cmd(
       Shuttle.Env.find_executable("shuttle"),
       args,
-      Keyword.merge([stderr_to_stdout: true], opts)
+      Keyword.merge([stderr_to_stdout: true, cd: System.tmp_dir!()], opts)
     )
   end
 
