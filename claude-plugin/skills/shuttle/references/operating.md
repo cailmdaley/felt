@@ -161,9 +161,9 @@ shuttle message <target> "…" --message-id <id>      # retry a send without ano
 ```
 
 A target is an address, a session id, or a fiber.
-An attachment-free context-only fiber send goes to its durable mailbox regardless of worker liveness; a live-worker idle-notification request uses session routing instead.
-A wake send messages the live worker. With none, the fiber's owner queues it in the fiber's inbox and starts a session that takes it, unless the fiber is not armed (`active`), is at rest, is a standing schedule whose run is due, is held by the owner's boot quarantine, or the owner is at its worker limit; a draft keeps it for whoever arms it.
-Inbox receipts are `queued` for context-only sends, `starting` when a session is starting for a wake send, and `queued` with a detail saying what it waits for otherwise; none means delivered.
+Every fiber message, attachments and `--notify-when-idle` included, goes to the fiber's durable inbox through its owner, whether its worker is live or dormant. `--notify-when-idle` with no text is no message: the owner subscribes the fiber's live worker at once, and a fiber with no live worker refuses it.
+A wake send is offered to the live worker at once. With none, the owner starts a session that takes it, unless the fiber is not armed (`active`), is at rest, is a standing schedule whose run is due, is held by the owner's boot quarantine, or the owner is at its worker limit; a draft keeps it for whoever arms it.
+Inbox receipts say what became of the message: `woken`, `followed up`, `delivered`, `held as context` for cost, `starting` when a session is starting for it, or `queued`, with a detail for a wake send saying what it waits for; `queued` and `starting` mean not yet delivered.
 A delivered message is its text under `[from <sender>]`. A worker's sender is its fiber: reply to the fiber so the answer follows the work across handoffs; a session address stays pinned to that one session. The receipt says how far delivery got (`accepted`: the harness took the input), never that the model replied. A plain message to a busy Claude session waits for main-thread prompt submission or tool completion as context; if unoffered after 30 seconds, or the worker stops working sooner, the owning daemon claims it for native wake.
 A daemon restart resumes recovery from disk.
 A Claude turn parked on background tasks is idle for message routing.

@@ -125,7 +125,7 @@ The board reports such a repeat as sent only when it was delivered; for `unknown
 ### Contract 42 and rollback
 
 Contract 42 adds consume's `--busy` and `--message`, followup/held/message answers, `context-mailbox put --attachments-stdin`, and `inbox record-begin/record-settle`.
-Every fiber message, attachments and `--notify-when-idle` included, goes to the owner's inbox; the CLI never asks an owner's level.
+Every fiber message, attachments and `--notify-when-idle` with text included, goes to the owner's inbox; the CLI never asks an owner's level. A `--notify-when-idle` with no text is no message and never enters the inbox: the owner subscribes the fiber's live worker, as described above.
 Existing inbox entries and open delivery batches remain readable across deployment, and session traffic in flight retains its receipts.
 
 Rolling a host back to 41 leaves inbox text and attempts on disk, but its consumer does not follow up busy Codex or Pi workers.
