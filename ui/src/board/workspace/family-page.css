@@ -26,7 +26,7 @@
 .ov-ancestor .ov-slug { color: var(--ws-ink-soft); }
 .ov-word { color: var(--fm-text, var(--ws-ink-muted)); font-family: var(--font-serif); font-style: italic; white-space: nowrap; }
 .ov-time, .ov-count { color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-ui) var(--font-serif); white-space: nowrap; }
-.ov-open { color: var(--ws-ink-muted); font-family: var(--font-serif); font-size: 16px; line-height: 1; opacity: .45; }
+.ov-open { color: var(--ws-ink-muted); font: var(--type-row)/var(--leading-solid) var(--font-serif); opacity: .45; }
 .ov-thread:is(:hover, :focus-visible) .ov-open { opacity: 1; color: var(--ws-ink); }
 
 /* The head: its dot and slug, whether it needs the human and its run, then its pages and its acts. */
