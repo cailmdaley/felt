@@ -78,7 +78,6 @@ The probe sends a session message that asks for a turn during a tool, during inf
 Transport cases explicitly allow native inbound messages.
 The subagent case checks that no child inference request contains the parent's mail.
 A separate default-policy case omits `crossSessionInbound` and checks that headless Claude holds a native message for approval and Shuttle reports the hold rather than claiming delivery.
-Daemon tests also run the production recovery CLI against a private mailbox; Go tests exercise bounded retries, crash ownership, sender notices, order and context limits.
 The replies come from the deterministic stub, not a public model; this tests the installed harness's transport behavior, not authenticated inference.
 Use `--mode` to select cases and `--output` to retain API requests, hook inputs/outputs and receipts at a chosen path.
 

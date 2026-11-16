@@ -73,7 +73,9 @@ defmodule Shuttle.Contract do
     46 => "close --post and --attached (the closing post, written as the outcome)",
     47 =>
       "inbox consume reads a batch's receipt from its manifest and never resends an open batch",
-    48 => "claude-mail-recover removed (a Claude session's ask goes to its native socket)"
+    48 =>
+      "message --local sending a Claude session's ask straight to its native socket " <>
+        "(this daemon shells no claude-mail-recover)"
   }
 
   @doc "The daemon's expected `shuttle contract` level."
