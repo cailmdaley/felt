@@ -1190,10 +1190,14 @@ defmodule Shuttle.Threads do
             do: settle(id, "forwarded"),
             else: :waiting
 
+        # A 2xx answer is the session transport's recorded outcome, which
+        # sending again would only replay; only the daemon's own 502 or 504
+        # unknown, where the CLI may not have run, waits for the next poll.
         %{"action" => "session"} ->
           case tell_asker(record, id) do
             {:error, status, _} when status in 400..499 -> settle(id, "undeliverable")
             {:ok, _, %{"status" => "rejected"}} -> settle(id, "undeliverable")
+            {:ok, http, _} when http in 200..299 -> settle(id, "delivered")
             {:ok, _, %{"status" => status}} when status != "unknown" -> settle(id, "delivered")
             _ -> :waiting
           end

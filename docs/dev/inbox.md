@@ -273,7 +273,8 @@ Results nobody asked for and unblock notes are quiet context.
 When a different session asked, capture also writes that session an asker notice, id `<id>-asker`, into the routing inbox.
 A waking result keeps its asking fiber and session (`asked_by`); when `inbox route` resolves the recipient past that fiber, as past an archived asking parent, it stores the asker notice and turns the result quiet before it places or forwards it.
 `inbox route` answers `session` for a current notice, and the daemon sends it through the waking session transport, with `wake` and `context_if_busy`, under the notice's own id.
-An unknown outcome leaves it for the next poll, across restarts; a known one settles it `delivered`, or `undeliverable` on a refusal, since the orchestrator's inbox holds the same result.
+A refusal settles it `undeliverable`; any other answer the session transport recorded settles it `delivered`, an `unknown` one included, since sending the notice again under its id would only replay that record and the orchestrator's inbox holds the same result.
+Only an unknown answer the daemon made itself (a 502 or 504: the CLI timed out, failed without a receipt, or a remote owner could not be reached) leaves it for the next poll, across restarts.
 
 `pending_results` counts a fiber's inbox entries no worker has taken plus the routing entries, from the poll's one listing, that routing left waiting with that fiber's `parent_uid`.
 

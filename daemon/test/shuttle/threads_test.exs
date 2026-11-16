@@ -99,6 +99,43 @@ defmodule Shuttle.ThreadsTest do
     assert length(StubPostClient.posts()) == before
   end
 
+  test "an asker notice whose send the shuttle CLI answered unknown settles and is not sent again",
+       %{store: store} do
+    alias Shuttle.Test.StubPostClient
+    StubPostClient.start!()
+    Env.put_app_env(:write_forward_client, StubPostClient)
+    Env.put_app_env(:remotes, [%{name: "asker-host", port: 43210}])
+    session = "shuttle://asker-host/claude/11111111-1111-4111-8111-111111111111"
+    asked_by(store, session, nil)
+    assert {:ok, _} = CLI.run_in_store(store, ["close", "hub/child", "--local"])
+    assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+    Threads.capture_results(entries, "test-host")
+
+    {id, _} =
+      Enum.find(Shuttle.Test.InboxPublications.pending(), fn {id, _} ->
+        String.ends_with?(id, "-asker")
+      end)
+
+    # The owner's CLI recorded the send's outcome as unknown; repeating the
+    # send could only replay that record.
+    StubPostClient.set_response(
+      {:ok, 200,
+       Jason.encode!(%{
+         message_id: id,
+         address: String.replace(session, "asker-host", "local"),
+         status: "unknown",
+         transport: "claude-native",
+         detail: "native message sent; no correlated receiver turn observed"
+       })}
+    )
+
+    Threads.route_results()
+    refute Enum.any?(Shuttle.Test.InboxPublications.pending(), &(elem(&1, 0) == id))
+    before = length(StubPostClient.posts())
+    Threads.route_results()
+    assert length(StubPostClient.posts()) == before
+  end
+
   test "created owner-only thread keeps lineage and retries close and ask to parent authority", %{
     store: store
   } do
