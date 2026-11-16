@@ -81,7 +81,7 @@ export function registerMapViewJourneys(test) {
     await page.evaluate(() => { location.hash = '#/board/hub@umber-workstation/family%3Aumber-workstation%3Ahub' })
     await view(page).locator('.ov-thread[data-fiber="hub/pipeline-steward"]').click()
     await view(page).locator('.ov-head .ov-needs').getByText('asks', { exact: true }).waitFor()
-    assert.equal(await view(page).locator('.ov-said-text').textContent(), 'Should the workflow rewrite land before the cut, or after it?')
+    assert.equal((await view(page).locator('.ov-said-text').textContent()).trim(), 'Should the workflow rewrite land before the cut, or after it?')
     const figure = view(page).locator('.ov-figure')
     await figure.locator('.ws-thumbnail').waitFor()
     await figure.click()
