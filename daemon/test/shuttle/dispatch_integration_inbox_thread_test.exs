@@ -3,7 +3,8 @@ defmodule Shuttle.DispatchIntegrationInboxThreadTest do
   # CLI, the daemon's own poll, and what the orchestrator's next worker is
   # offered by its real hook. The inbox promises a thread result is delivered
   # exactly once, even when the daemon dies after taking it and before any
-  # worker has it.
+  # worker has it. These results are quiet: nobody asked for them, so they
+  # wait as context (`…_thread_waking_test.exs` has the waking kind).
   use Shuttle.Test.DispatchIntegrationCase, async: true
 
   defp thread!(host, slug) do
@@ -33,10 +34,21 @@ defmodule Shuttle.DispatchIntegrationInboxThreadTest do
     assert {_, 0} = shuttle(["-C", host, "ask", asker, "Which kernel?"])
     assert {_, 0} = shuttle(["-C", host, "close", closer, "--local"])
 
-    # The daemon takes both results on its poll; nobody asked for them, so
-    # they wait for the orchestrator's next worker. Then it dies.
+    # The daemon takes both results on its poll and places them in the
+    # orchestrator's inbox; nobody asked for them, so they wait there, quiet,
+    # for its next worker. Then it dies.
     poll!(poller)
     assert launches(hub) == 0
+
+    asked = "thread #{asker} asked: Which kernel?"
+    closed = "thread #{closer} closed"
+
+    assert [
+             %{"source" => "thread", "turn" => "none", "text" => ^asked},
+             %{"source" => "thread", "turn" => "none", "text" => ^closed <> _}
+           ] = inbox(hub)
+
+    assert inbox("threads") == []
     kill_daemon!(poller)
 
     # The next daemon's worker on the orchestrator is offered each result by

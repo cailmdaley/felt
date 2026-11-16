@@ -1044,6 +1044,12 @@ defmodule Shuttle.Test.DispatchIntegrationCase do
     )
   end
 
+  # The address's pending entries, as the real `shuttle inbox ls` lists them.
+  def inbox(address) do
+    {out, 0} = shuttle(["inbox", "ls", address, "--json"])
+    Jason.decode!(out)
+  end
+
   # The family-board rows the real CLIs wrote to this test's events file.
   def board_rows(events) do
     case File.read(events) do
