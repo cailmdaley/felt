@@ -49,30 +49,18 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
      root: root}
   end
 
-  test "boot moves existing checkpoints without replaying the live launch", c do
+  test "boot keeps existing checkpoints without replaying the live launch", c do
     File.write!(c.path, "")
     record(c.path, "2026-11-06T10:00:01Z", "already delivered, send")
     start_monitor(c)
     assert_receive {:delivery, _}
     sync_tasks(c)
     stop_supervised!(TranscriptRelay)
-    old = Path.join(c.root, "meeting-transcript-relays")
-    File.rename!(Path.join(c.root, "relays"), old)
     start_supervised!({TranscriptRelay, c.opts})
     assert %{error: nil} = TranscriptRelay.status("launch", server: c.name)
     assert %{error: nil} = poll(c)
-    refute File.exists?(old)
     assert File.exists?(relay_path(c, "launch"))
     refute_receive {:delivery, _}, 50
-  end
-
-  test "boot leaves existing destination checkpoints intact", c do
-    old = Path.join(c.root, "meeting-transcript-relays")
-    File.mkdir_p!(old)
-    File.write!(Path.join(old, "marker"), "old")
-    File.mkdir_p!(Path.join(c.root, "relays"))
-    start_supervised!({TranscriptRelay, c.opts})
-    assert File.read!(Path.join(old, "marker")) == "old"
   end
 
   test "the speaker's own line, heard back, is neither delivered nor transcribed", c do
@@ -399,7 +387,6 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
         "created_at" => at,
         "kind" => "voice",
         "transcript" => c.path,
-        "offset" => 0,
         "routes_path" => Path.join(c.root, "routes.jsonl"),
         "ended" => true,
         "outbox" => [
@@ -703,8 +690,8 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
 
   for {label, bytes} <- [
         {"JSON", "{"},
-        {"outbox", ~s({"launch":"broken","transcript":"ignored","offset":0,"outbox":[42]})},
-        {"buffers", ~s({"launch":"broken","transcript":"ignored","offset":0,"buffers":{}})}
+        {"outbox", ~s({"launch":"broken","transcript":"ignored","outbox":[42]})},
+        {"buffers", ~s({"launch":"broken","transcript":"ignored","buffers":{}})}
       ] do
     test "malformed durable #{label} is isolated during recovery and start returns an error", c do
       File.mkdir_p!(Path.join(c.root, "relays"))
@@ -938,7 +925,6 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
           "created_at" => at,
           "transcript" => c.path,
           "routes_path" => routes,
-          "offset" => 0,
           "ended" => launch == "new",
           "outbox" => [
             %{

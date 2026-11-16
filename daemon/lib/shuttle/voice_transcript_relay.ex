@@ -81,14 +81,9 @@ defmodule Shuttle.Voice.TranscriptRelay.Coordinator do
   @impl true
   def init(opts) do
     Process.flag(:trap_exit, true)
-    directory = Keyword.fetch!(opts, :directory)
-    old = Path.join(Path.dirname(directory), "meeting-transcript-relays")
-
-    if not Shuttle.FS.exists?(directory) and Shuttle.FS.exists?(old),
-      do: :ok = Shuttle.FS.rename(old, directory)
 
     state = %{
-      directory: directory,
+      directory: Keyword.fetch!(opts, :directory),
       dynamic: Keyword.fetch!(opts, :dynamic),
       options: opts,
       workers: %{},
@@ -580,19 +575,7 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
         config
       )
 
-    config
-    |> Map.drop(~w(offset end_seen))
-    |> Map.update!("routes", &bound_routes(&1, config["started_at"]))
-    |> Map.update!("buffers", fn buffers when is_list(buffers) ->
-      Enum.map(buffers, fn buffer ->
-        buffer
-        |> Map.delete("lines")
-        |> Map.put(
-          "words",
-          Enum.sum(Enum.map(buffer["voice_rows"], &length(String.split(&1["text"]))))
-        )
-      end)
-    end)
+    Map.update!(config, "routes", &bound_routes(&1, config["started_at"]))
   end
 
   defp read_routes(%{"ended" => true} = config, _state), do: config
