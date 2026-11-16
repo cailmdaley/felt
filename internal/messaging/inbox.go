@@ -148,7 +148,7 @@ func inboxRoot(env *sysenv.Env, address string) (string, error) {
 //
 // The stored request carries only the wake field its inbox's readers act on:
 // a fiber's force sets wake. A session inbox is context for the session's
-// hook and cannot start a turn, so it refuses force and idle.
+// hook and nothing in it starts a turn, so it refuses every turn but none.
 //
 // In a fiber inbox, an id already pending, claimed or offered is a successful
 // no-op when the content and wishes match or the entry is Derived; otherwise it
@@ -196,7 +196,7 @@ func Enqueue(env *sysenv.Env, e InboxEntry) error {
 		if reason := mailboxUnavailable(env, a.Harness, a.ID, a.Host); reason != "" {
 			return errCode("unavailable", "%s", reason)
 		}
-		if w.Turn == "force" || w.Turn == "idle" {
+		if w.Turn != "none" {
 			return errCode("wake_required", "hook mailboxes cannot wake a session")
 		}
 		if requestExpired(r, time.Now()) {

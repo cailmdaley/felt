@@ -68,8 +68,7 @@ func TestEnqueuedEntryCarriesTheWakeFieldsAnOlderBuildReads(t *testing.T) {
 		{"fiber", "ask", [3]bool{}},
 		{"fiber", "idle", [3]bool{}},
 		{"shuttle://host/claude/s", "none", [3]bool{}},
-		{"shuttle://host/claude/s", "ask", [3]bool{}},
-		{"shuttle://host/codex/s", "ask", [3]bool{}},
+		{"shuttle://host/codex/s", "none", [3]bool{}},
 	} {
 		name := tc.address + " " + tc.turn
 		if err := Enqueue(env, InboxEntry{Address: tc.address, Request: Request{MessageID: tc.turn, Text: "text " + tc.turn}, Wishes: Wishes{Turn: tc.turn}}); err != nil {
@@ -103,20 +102,25 @@ func TestEnqueuedEntryCarriesTheWakeFieldsAnOlderBuildReads(t *testing.T) {
 	}
 }
 
+// Nothing wakes a session inbox, so it takes only context: an ask, force or
+// idle entry would sit unwoken.
 func TestSessionInboxRefusesTurnsItCannotStart(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
-	if err := RegisterMailbox(env, "codex", "s", "host", "/project", os.Getpid(), true); err != nil {
-		t.Fatal(err)
-	}
-	for _, turn := range []string{"force", "idle"} {
-		err := Enqueue(env, InboxEntry{Address: "shuttle://host/codex/s", Request: Request{MessageID: turn, Text: "x"}, Wishes: Wishes{Turn: turn}})
-		if ErrorCode(err) != "wake_required" {
-			t.Errorf("%s: err = %v", turn, err)
+	for _, harness := range []string{"claude", "codex", "pi"} {
+		if err := RegisterMailbox(env, harness, "s", "host", "/project", os.Getpid(), true); err != nil {
+			t.Fatal(err)
 		}
-	}
-	if n, err := pendingCount(env, "shuttle://host/codex/s"); err != nil || n != 0 {
-		t.Fatalf("refused entries were stored: %d %v", n, err)
+		address := "shuttle://host/" + harness + "/s"
+		for _, turn := range []string{"ask", "force", "idle"} {
+			err := Enqueue(env, InboxEntry{Address: address, Request: Request{MessageID: turn, Text: "x"}, Wishes: Wishes{Turn: turn}})
+			if ErrorCode(err) != "wake_required" {
+				t.Errorf("%s %s: err = %v", harness, turn, err)
+			}
+		}
+		if n, err := pendingCount(env, address); err != nil || n != 0 {
+			t.Fatalf("%s: refused entries were stored: %d %v", harness, n, err)
+		}
 	}
 }
 

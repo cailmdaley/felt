@@ -55,8 +55,8 @@ A routing inbox entry also carries `routing`, its publication's routing record, 
 
 Fiber readers select from `turn`, not the request's wake fields.
 `Enqueue` also sets `request.wake` for `force`, so a reader that does not understand wishes can still wake for it.
-Session `ask` and `none` entries are context for the session's hook.
-Session inboxes refuse `force` and `idle` with `wake_required`.
+Session entries are context for the session's hook.
+Session inboxes refuse `ask`, `force` and `idle` with `wake_required`: a session's turn comes from its own transport, never its inbox.
 A busy fiber's Claude `ask` remains hook-eligible for 30 seconds, then consume uses its native wake; the daemon schedules a consume at that deadline and also consumes on polls.
 
 An entry without wishes reads as the wishes its request implies.
