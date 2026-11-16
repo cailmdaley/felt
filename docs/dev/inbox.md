@@ -429,7 +429,6 @@ Quiet context pinned this way is released to a Codex receiver's fiber hook rathe
 A hook claim is unpinned.
 If a hook leaves its attempt open, the next reader under the inbox lock, a hook or the consumer, closes it ambiguous, and the entry carries “Possible repeat” wherever it goes next.
 A launch reservation is no attempt: it lives in `launch.json`, requests no emission and is not evidence of a possible repeat.
-A contract-39 CLI wrote its reservation into the reserved entries' attempts (`launch: true`); the first reader under the inbox lock, a consume or a hook, moves the newest such record to `launch.json` with its receiver, epoch, members and opening time, and clears it from the entries.
 Unpinned claims and delivered closes preserve the entry's modification time, from which offered retention runs.
 The session-only Claude fallback claims by moving an entry into `fallback/` and writes no attempt.
 

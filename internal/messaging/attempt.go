@@ -18,10 +18,6 @@ type Attempt struct {
 	// BaseText is the captured text, including any labels and staleness caveat,
 	// without a retry warning.
 	BaseText string `json:"base_text,omitempty"`
-	// Launch marks a launch reservation a contract-39 CLI wrote into the
-	// entries it reserved, rather than a delivery attempt. Under the inbox
-	// lock it moves to the inbox's launch.json (migrateEntryReservations).
-	Launch bool `json:"launch,omitempty"`
 	// Variant names the payload's plain, retry-1 or possible-repeat framing.
 	Variant string `json:"variant,omitempty"`
 	// BatchID is the hash of the batch's sorted member ids, so a retry of the

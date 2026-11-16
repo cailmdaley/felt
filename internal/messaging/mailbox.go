@@ -406,9 +406,6 @@ func offerMailboxWithAck(dir, conversation string, accepts func(Request) bool, e
 	if err := pruneOffered(dir, time.Now()); err != nil {
 		return err
 	}
-	if err := migrateEntryReservations(dir); err != nil {
-		return err
-	}
 	entries, err := os.ReadDir(filepath.Join(dir, "pending"))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil

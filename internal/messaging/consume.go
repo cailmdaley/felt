@@ -139,9 +139,6 @@ func consumePass(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	if err := pruneOffered(root, time.Now()); err != nil {
 		return Consumption{}, err
 	}
-	if err := migrateEntryReservations(root); err != nil {
-		return Consumption{}, err
-	}
 	current := func(c context.Context, r Request) (bool, error) { return currentThreadSignalWithBackoff(c, env, r) }
 	reservation, err := readLaunchReservation(root)
 	if err != nil {
