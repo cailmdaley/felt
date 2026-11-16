@@ -134,6 +134,8 @@ it('opens a worker\'s thread from its message: its name, liveness and ask on top
   expect(openPage).toHaveBeenLastCalledWith(tsz, undefined)
   // The thread's console speaks to its worker, under the channel's chair.
   expect(to('thread', host)).toBe('cmbx chair / tsz')
+  // Each box names whom a line typed into it goes to: the chair in the channel, the worker in its thread.
+  expect([fieldOf(host, 'channel').dataset.placeholder, fieldOf(host, 'thread').dataset.placeholder]).toStrictEqual(['Message cmbx chair', 'Message κ × tSZ'])
   expect(view.keydown(new KeyboardEvent('keydown', { key: 'Enter' }))).toBe(true)
   expect(document.activeElement).toBe(fieldOf(host, 'thread'))
   await say(host, 'thread', 'Show the nulls.')

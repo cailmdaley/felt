@@ -78,8 +78,9 @@
   white-space: pre-wrap; overflow-wrap: anywhere;
   color: var(--ws-ink); font: var(--type-label)/var(--leading-prose) var(--font-serif);
 }
-/* An empty box says nothing: a faint chevron marks where typing goes, until the caret takes over. */
-.ws-worker-message:empty:not(:focus)::before { content: '›'; color: var(--ws-ink-faint); pointer-events: none; }
+/* An empty box names whom a line goes to, faint, on one line, until something is typed. */
+.ws-worker-message:empty { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-worker-message:empty::before { content: attr(data-placeholder); color: var(--ws-ink-faint); pointer-events: none; }
 .ws-worker-message[hidden] { display: none; }
 /* Pasted or dropped images wait under the text as thumbnails until the send. */
 .ws-worker-images { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 10px 8px; }

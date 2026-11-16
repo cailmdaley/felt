@@ -238,6 +238,7 @@ export class WorkerActions {
     this.fresh.title = `A new session for ${card.name}${said ? ', opening with this message' : ''}${live ? '; cuts the running one' : ''}`
     this.fresh.setAttribute('aria-label', `New session for ${card.name}`)
     this.field.title = `Message ${card.name}`
+    this.field.dataset.placeholder = `Message ${card.name}`
     this.field.setAttribute('aria-label', `Message to ${card.name}`)
     this.paintShelf()
   }
