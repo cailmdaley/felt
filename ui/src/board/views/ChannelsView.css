@@ -53,6 +53,19 @@
 .kbn-ch-layout[data-narrow][data-thread] > .kbn-ch { display: none; }
 .kbn-ch-layout[data-narrow] .kbn-ch-thread { border-left: 0; }
 .kbn-ch-layout[data-narrow] .kbn-ch-thread-close { align-self: flex-start; margin-left: -6px; }
+/* Narrow, the rail is a drawer drawn in over the stream from the left, ending where the console begins; the stream keeps its width. */
+.kbn-ch-layout[data-drawer] { position: relative; }
+.kbn-ch-layout[data-drawer], .kbn-ch-layout[data-drawer][data-thread] { grid-template-columns: minmax(0, 1fr); }
+.kbn-ch-layout[data-drawer] .kbn-ch-rail {
+  display: flex; position: absolute; z-index: 3; top: 0; left: 0; bottom: var(--kbn-ch-console, 0px);
+  width: min(260px, 85%); padding-left: 10px;
+  background: var(--kbn-paper);
+  box-shadow: 6px 0 18px color-mix(in srgb, var(--kbn-ink) 14%, transparent);
+  transform: translateX(-105%); visibility: hidden;
+  transition: transform 180ms ease, visibility 0s linear 180ms;
+}
+.kbn-ch-layout[data-drawer]:not([data-rail-hidden]) .kbn-ch-rail { transform: none; visibility: visible; transition: transform 180ms ease; }
+@media (prefers-reduced-motion: reduce) { .kbn-ch-layout[data-drawer] .kbn-ch-rail, .kbn-ch-layout[data-drawer]:not([data-rail-hidden]) .kbn-ch-rail { transition: none; } }
 
 /* The rail: Jump to, then the channels, the chaired ones above the lone constitutions. */
 .kbn-ch-rail {

@@ -173,6 +173,24 @@ it('opens a thread in the channel\'s place, with a way back, when the view is to
   expect([layout.hasAttribute('data-narrow'), host.querySelector('.kbn-ch-thread-head .kbn-ch-tip')!.textContent]).toStrictEqual([false, 'Close the thread'])
 })
 
+it('draws the rail in over the stream where the view is narrow, put away by default and once a channel is chosen, its column remembered as it was', async () => {
+  const { stored } = daemon()
+  const widths: Array<(entries: Array<{ contentRect: { width: number } }>) => void> = []
+  vi.stubGlobal('ResizeObserver', class { constructor(seen: (typeof widths)[number]) { widths.push(seen) } observe() {} unobserve() {} disconnect() {} })
+  const { view, host } = await mount()
+  const layout = host.querySelector('.kbn-ch-layout')!
+  widths.forEach(seen => seen([{ contentRect: { width: 900 } }]))
+  expect([layout.hasAttribute('data-drawer'), layout.hasAttribute('data-rail-hidden')]).toStrictEqual([true, true])
+  expect(view.keydown(new KeyboardEvent('keydown', { key: '[' }))).toBe(true)
+  expect(layout.hasAttribute('data-rail-hidden')).toBe(false)
+  host.querySelector<HTMLButtonElement>('[data-channel="channel:cmbx"]')!.click()
+  expect(layout.hasAttribute('data-rail-hidden')).toBe(true)
+  expect(stored.has('shuttle.channels.rail-hidden')).toBe(false)
+  // Wide again, the rail is the column it was.
+  widths.forEach(seen => seen([{ contentRect: { width: 1400 } }]))
+  expect([layout.hasAttribute('data-drawer'), layout.hasAttribute('data-rail-hidden')]).toStrictEqual([false, false])
+})
+
 it('collapses a tapestry to its title, lede and first figure, an inline SVG drawn as an image', () => {
   expect(collapse('<h1>κ × tSZ</h1><p>At 9σ.</p><figure><img src="plots/spectrum.png"></figure>', '/notes/tsz')).toStrictEqual({ title: 'κ × tSZ', lede: 'At 9σ.', figure: '/notes/tsz/plots/spectrum.png' })
   const drawn = collapse('<style>.line{stroke:red}</style><h1>A</h1><svg viewBox="-12 -12 24 24"><path/></svg><svg width="0" height="0"><defs/></svg><svg viewBox="0 0 600 300"><svg viewBox="0 0 10 10"/><path class="line" d="M0 0"/></svg>').figure!

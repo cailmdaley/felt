@@ -214,6 +214,8 @@ export class ChannelsView implements TemporalView {
   private railHidden = false
   /** A phone shows the rail until a channel is chosen. */
   private phoneRail = true
+  /** Where the view is narrow, the rail is a drawer drawn in over the stream, put away once a channel is chosen. */
+  private drawer = false
   private dismissed: string[] = []
   private pending: string[] = []
   private pinned = new Map<string, number>()
@@ -250,8 +252,10 @@ export class ChannelsView implements TemporalView {
   /** Where each list was last scrolled to its foot, so growth beneath the reader is not taken for scrolling up. */
   private readonly footTop: Record<Pane, number> = { channel: 0, thread: 0 }
   private sizes: ResizeObserver | null = null
-  /** Follows the view's own width, for whether a thread opens beside the channel or in its place. */
+  /** Follows the view's own width, for whether a thread opens beside the channel or in its place, and the rail is a column or a drawer. */
   private width: ResizeObserver | null = null
+  /** Follows the consoles' height, which a drawn-in rail ends above. */
+  private docks: ResizeObserver | null = null
   private loaded = false
   private reading = false
   private generation = 0
@@ -286,12 +290,25 @@ export class ChannelsView implements TemporalView {
       onSettled: () => { if (this.railStale) this.drawRail() },
     })
     this.width = new ResizeObserver(([entry]) => {
-      const narrow = entry.contentRect.width < SIDE_BY_SIDE_PX
-      if (narrow === this.layout?.hasAttribute('data-narrow')) return
-      this.layout?.toggleAttribute('data-narrow', narrow)
+      const layout = this.layout!, narrow = entry.contentRect.width < SIDE_BY_SIDE_PX, drawer = narrow && !isMobileViewport()
+      if (narrow === layout.hasAttribute('data-narrow') && drawer === layout.hasAttribute('data-drawer')) return
+      layout.toggleAttribute('data-narrow', narrow)
+      layout.toggleAttribute('data-drawer', drawer)
+      this.showRail()
       this.drawChannel(); this.drawThread()
     })
     this.width.observe(this.layout)
+    // A drawn-in rail ends where the console begins.
+    this.docks = new ResizeObserver(() => {
+      const height = Math.max(...Object.values(this.consoles).map(dock => dock?.el.offsetHeight ?? 0))
+      this.layout?.style.setProperty('--kbn-ch-console', `${height}px`)
+    })
+    for (const dock of Object.values(this.consoles)) if (dock) this.docks.observe(dock.el)
+    // A press outside the drawn-in rail puts it away.
+    this.layout.addEventListener('pointerdown', event => {
+      const target = event.target as Element
+      if (this.overDrawer() && !target.closest('.kbn-ch-rail, .kbn-ch-rail-toggle')) this.setRail(true)
+    })
     this.near = new IntersectionObserver(entries => {
       for (const { target, isIntersecting } of entries) {
         const thumbnail = [...this.previews.values()].find(each => each.el === target)
@@ -603,7 +620,7 @@ export class ChannelsView implements TemporalView {
       const channel = this.channels.find(each => each.key === key)
       if (channel?.hidden) void this.setAside(channel, showKey(key, Date.now()))
     }
-    if (isMobileViewport()) this.setRail(true)
+    if (isMobileViewport() || this.drawn) this.setRail(true)
     this.drawRail(); this.drawChannel(); this.drawThread()
     this.channelEl?.focus({ preventScroll: true })
   }
@@ -1267,10 +1284,19 @@ export class ChannelsView implements TemporalView {
 
   /** Whether a thread takes the channel's place rather than standing beside it: on a phone, or in a view too narrow for both. */
   private drillsDown(): boolean { return isMobileViewport() || !!this.layout?.hasAttribute('data-narrow') }
-  private railShown(): boolean { return isMobileViewport() ? this.phoneRail : !this.railHidden }
-  /** Hides or shows the rail: remembered in this browser on a desktop; on a phone, the rail is the screen before a channel. */
+  /** Whether the rail is a drawer: the view is narrow, not a phone's. */
+  private get drawn(): boolean { return !!this.layout?.hasAttribute('data-drawer') }
+  /** The rail is drawn in over the stream. */
+  private overDrawer(): boolean { return this.drawn && this.drawer }
+  private railShown(): boolean { return isMobileViewport() ? this.phoneRail : this.drawn ? this.drawer : !this.railHidden }
+  /**
+   * Hides or shows the rail: remembered in this browser where it is a column;
+   * a drawer in a narrow view, put away by default; on a phone, the rail is the
+   * screen before a channel.
+   */
   private setRail(hidden: boolean): void {
     if (isMobileViewport()) this.phoneRail = !hidden
+    else if (this.drawn) this.drawer = !hidden
     else {
       if (hidden === this.railHidden) return
       this.railHidden = hidden
@@ -1376,6 +1402,7 @@ export class ChannelsView implements TemporalView {
     // Enter in the bar's Find opens what it found first.
     if (event.key === 'Enter' && this.query && isTypingTarget(active) && !replying && active !== this.jump) { this.openFirst(); return true }
     if (keystrokeIsSpokenFor()) return false
+    if (event.key === 'Escape' && this.overDrawer()) { this.setRail(true); return true }
     if (event.key === 'Escape' && this.thread) { this.openThread(null); return true }
     if (event.key === '/' && this.jump) { this.setRail(false); this.jump.focus({ preventScroll: true }); return true }
     if (event.key === 'j') { this.step(1); return true }
@@ -1411,6 +1438,7 @@ export class ChannelsView implements TemporalView {
     this.stopGestures?.(); this.stopGestures = undefined
     this.sizes?.disconnect(); this.sizes = null
     this.width?.disconnect(); this.width = null
+    this.docks?.disconnect(); this.docks = null
     for (const unbind of this.railBindings) unbind()
     this.railBindings = []
     this.rail?.destroy(); this.rail = null
