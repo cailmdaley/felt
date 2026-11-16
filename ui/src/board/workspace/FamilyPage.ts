@@ -21,8 +21,8 @@ export interface ViewFeeds extends MapFeeds, DocFeeds {
   refresh(): void
   /** The last thing a constitution posted (a post, an ask or a review note), with when; undefined when it said nothing. */
   said(card: KanbanCard): { text: string; at: number } | undefined
-  /** Opens a constitution's view, as a click on it does: Rex and voice follow. */
-  view(card: KanbanCard): void
+  /** Opens a constitution's view, as a click on it does: Rex and voice follow, unless it opens `quiet`. */
+  view(card: KanbanCard, quiet?: boolean): void
   /** The human has seen this file as it stood: it is no longer new. */
   seen(file: MapFile): void
 }
@@ -35,14 +35,15 @@ const needs = (card: KanbanCard): string => card.ask && card.status === 'active'
 
 /**
  * One view of a constitution, the same from the Desk, a channel, a role or a
- * thread: its orchestrators above as compact heads (pulling the page down
- * past its top opens the nearest one's view, as choosing one does); its head
- * (state dot, slug, whether it needs the human, its run, its pages and its
- * acts); the last thing it posted; then its sub-threads as a narrow column
- * of rows (dot, slug, a word of state, its run, how many threads it has of
- * its own, and a chevron: each opens the same view one level down) beside a
- * large preview of its tapestry or newest sent file, which counts as seen.
- * Its orchestrators read as a path back up. No outcome is drawn. It reads feeds and repaints only while its frame is selected in an
+ * thread: its orchestrators above as a path back up, each step its dot and
+ * slug (choosing one opens its view; pulling the page down past its top opens
+ * the nearest one's, moving neither Rex nor voice); its head (state dot,
+ * slug, whether it needs the human, its run, its pages and its acts); the
+ * last thing it posted; then its sub-threads as a narrow column of rows (dot,
+ * slug, a word of state, its run, how many threads it has of its own, and a
+ * chevron: each opens the same view one level down) beside a large preview
+ * of its tapestry or newest sent file, which counts as seen. No outcome is
+ * drawn. It reads feeds and repaints only while its frame is selected in an
  * open reader; its frame's eviction ends it.
  */
 export class FamilyPage {
@@ -251,14 +252,14 @@ export class FamilyPage {
       figure.onclick = () => this.feeds.open(card, doc)
     })
   }
-  /** Pulled past its top: its orchestrator's view opens. */
+  /** Pulled past its top: its orchestrator's view opens, quietly, for a scroll is not a click. */
   private pulled(by: number): void {
     if (this.scroller.scrollTop > 0 || by <= 0) { this.pull = 0; return }
     this.pull += by
     if (this.pull < PULL_PX) return
     this.pull = 0
     const parent = this.ancestors().at(-1)
-    if (parent) this.feeds.view(parent)
+    if (parent) this.feeds.view(parent, true)
   }
   /**
    * j and k (or down and up) move among the orchestrators and the threads;

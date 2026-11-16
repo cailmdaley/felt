@@ -128,7 +128,7 @@ describe('a constitution\'s view', () => {
     expect(leave).toHaveBeenCalledOnce()
   })
 
-  it('opens its orchestrator\'s view when pulled down past its top', () => {
+  it('opens its orchestrator\'s view quietly when pulled down past its top', () => {
     const { page, feeds } = made(mid)
     const scroller = page.el.querySelector('.ws-family-scroll')!
     const wheel = (at: number) => { const event = new WheelEvent('wheel', { deltaY: -50 }); Object.defineProperty(event, 'timeStamp', { value: at }); scroller.dispatchEvent(event) }
@@ -137,9 +137,9 @@ describe('a constitution\'s view', () => {
     wheel(1000); scroller.scrollTop = 0
     for (let n = 1; n < 6; n++) wheel(1000 + n * 50)
     expect(feeds.view).not.toHaveBeenCalled()
-    // A gesture begun at the top does.
+    // A gesture begun at the top does, moving neither Rex nor voice.
     for (let n = 0; n < 3; n++) wheel(2000 + n * 50)
-    expect(feeds.view).toHaveBeenLastCalledWith(root)
+    expect(feeds.view).toHaveBeenLastCalledWith(root, true)
   })
 
   it('draws its acts in its head, as the lifecycle offers them', async () => {

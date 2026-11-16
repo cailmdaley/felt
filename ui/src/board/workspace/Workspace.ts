@@ -190,7 +190,7 @@ export class Workspace {
       lead: card => this.mapLead(card),
       open: (card, doc) => this.openDocument(card, doc),
       said: card => this.said(card),
-      view: card => this.openFromDesk(card),
+      view: (card, quiet) => this.openFromDesk(card, quiet),
       seen: file => markSeen([file]),
       shuttleBase: opts.shuttleBase,
     }
@@ -342,11 +342,15 @@ export class Workspace {
   openPage(card: KanbanCard, doc?: DocKey): void {
     void this.library.open(card, doc)
   }
-  /** A click on a constitution, from any surface: its view opens, and Rex and voice follow it. */
-  openFromDesk(card: KanbanCard): void {
+  /** A click on a constitution, from any surface: its view opens, and Rex and voice follow it; a `quiet` opening moves neither. */
+  openFromDesk(card: KanbanCard, quiet = false): void {
     const view = this.familyDocument(card)
-    if (!view && card.status === 'active' && isQuestion(card)) this.openQuestion(card)
-    else this.open(card, this.isActive ? this.origin : this.opts.origin(), view)
+    const open = (): void => {
+      if (!view && card.status === 'active' && isQuestion(card)) this.openQuestion(card)
+      else this.open(card, this.isActive ? this.origin : this.opts.origin(), view)
+    }
+    if (quiet) { this.quietly(open); return }
+    open()
     void this.look(card)
   }
   /** What a constitution last posted: its newest post, question or close note the family board holds, its open question, or its review note; never its outcome. */

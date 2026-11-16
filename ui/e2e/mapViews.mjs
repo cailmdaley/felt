@@ -42,6 +42,11 @@ export function registerMapViewJourneys(test) {
   test('A constitution\'s view: a thread\'s row opens its view one level down and moves Rex; its orchestrators stand above, opened by a click or a pull past the top; keys move nothing', async page => {
     await landed(page)
     const rootName = await view(page).locator('.ov-head').getAttribute('title')
+    // The root has a worker too, so a pull that left Rex alone did so by choice.
+    await page.evaluate(async name => {
+      window.__harness.MOCK_FEED.fibers.find(entry => entry.fiber.name === name).runtime = { state: 'running', phase: 'waiting', session_uuid: 'session-root', tmux_session: 'session-root' }
+      await window.__harness.modal.fetchAndRender()
+    }, rootName)
     const quiet = await asked(page)
     await view(page).locator('.ov-thread[title="Response analysis"]').click()
     await head(page, 'Response analysis').waitFor()
@@ -59,20 +64,24 @@ export function registerMapViewJourneys(test) {
     assert.equal(await page.evaluate(() => document.activeElement?.title), rootName)
     await scroller.evaluate(el => { el.scrollTop = 0 })
     assert.deepEqual(await asked(page), [...quiet, 'select:session-analysis'])
-    // Pulled past the top, the orchestrator's view opens.
+    // Pulled past the top, the orchestrator's view opens; a pull is no click, so Rex stays.
+    const pulled = await asked(page)
     for (let n = 0; n < 4 && !await head(page, rootName).count(); n++) {
       await scroller.hover()
       await page.mouse.wheel(0, -100)
       await page.waitForTimeout(60)
     }
     await head(page, rootName).waitFor()
+    await page.waitForTimeout(500)
+    assert.deepEqual(await asked(page), pulled)
     // Back returns to the thread's view.
     await pageBack(page)
     await head(page, 'Response analysis').waitFor()
-    // A click on an orchestrator's head opens its view too.
+    // A click on an orchestrator's step opens its view too, and moves Rex to its worker.
     await scroller.evaluate(el => { el.scrollTop = 0 })
     await view(page).locator('.ov-ancestor').first().click()
     await head(page, rootName).waitFor()
+    await asks(page, pulled.length + 1)
   }, { width: 800, height: 1000 })
 
   test('The view\'s strip: what it last posted beside its tapestry, which opens in the reader', async page => {
