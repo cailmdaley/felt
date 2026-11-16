@@ -55,11 +55,6 @@ describe('turnOf', () => {
     expect(turnOf({ ...frozen, ask: ASK }, NOW)).toMatchObject({ turn: 'question', yours: true, busy: false })
   })
 
-  it('reads the conversation the human follows as working', () => {
-    expect(turnOf(live({ turn: 'idle', runtimePhase: 'waiting', followed: true }), NOW)).toMatchObject({ turn: 'working', yours: false })
-    expect(turnOf(card({ id: 'x', status: 'active', turn: 'question', ask: ASK, followed: true }), NOW).turn).toBe('question')
-  })
-
   it('counts an ask only on an active card', () => {
     expect(turnOf(card({ id: 'x', status: 'closed', ask: ASK }), NOW).turn).toBe('none')
     expect(turnOf(card({ id: 'x', status: 'active', ask: ASK }), NOW)).toMatchObject({ turn: 'question', yours: true })

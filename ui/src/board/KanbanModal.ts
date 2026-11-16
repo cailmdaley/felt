@@ -72,7 +72,7 @@ import { openMoveMenu } from './MoveMenu.js'
 import { parseCompositeFeed, type CompositeFeed } from './KanbanComposite.js'
 import { restPopover } from './RestPopover.js'
 import { rolePopover, type RoleChoice, type RoleProfile } from './RolePopover.js'
-import { buildKanbanResponseFromComposite, deriveCycleLens, surfaceTotals, projectDeskFrontier, projectDeskFollowing } from './KanbanReadModel.js'
+import { buildKanbanResponseFromComposite, deriveCycleLens, surfaceTotals, projectDeskFrontier } from './KanbanReadModel.js'
 import { threadKey } from './threads.js'
 import { dueBouncesFromResting, restingUntil } from './KanbanRules.js'
 import { sameCivilDue } from './civilDay.js'
@@ -344,21 +344,13 @@ export class KanbanModal {
     this.temporal = options.temporalFetchers ?? createTemporalFetchers(this.shuttleBase)
     this.voice = new Voice(this.shuttleBase)
     this.phoneAudio = new PhoneListening(this.shuttleBase)
-    let targetKey = ''
-    this.voice.subscribe(() => {
-      this.phoneAudio.observe(this.voice.status)
-      const target = this.voice.status?.target
-      const key = target ? JSON.stringify([target.origin, target.fiber_id]) : ''
-      if (key === targetKey) return
-      targetKey = key
-      if (this.container && this.lastResponse) this.render(this.lastResponse)
-    })
+    this.voice.subscribe(() => this.phoneAudio.observe(this.voice.status))
     this.dock = this.console()
     this.fiberSends = new FiberSends(this.shuttleBase)
     this.surfaces = new KanbanSurfaceRenderer({
       getDragSourceId: () => this.dragSourceId,
       setDragSourceId: (id) => { this.dragSourceId = id },
-      getLastResponse: () => this.deskResponse ?? this.lastResponse,
+      getLastResponse: () => this.lastResponse,
       stopDragAutoScroll: () => this.stopDragAutoScroll(),
       transition: (card, target) => this.transition(card, target),
       verdict: (card, verdict) => { if (this.workspace) this.workspace.queueVerdict(card, verdict); else this.transition(card, verdict) },
@@ -414,10 +406,10 @@ export class KanbanModal {
     this.workspace = new Workspace(this.container!, {
       sends: this.fiberSends,
       shuttleBase: this.shuttleBase,
-      cards: () => boardCards(this.deskResponse ?? this.lastResponse),
+      cards: () => boardCards(this.lastResponse),
       deskRows: () => this.workspaceCards(),
       deskPlacement: card => this.deskProjection.placements.get(deskCardKey(card)),
-      threadIndex: () => threadIndexFor(this.deskResponse ?? this.lastResponse),
+      threadIndex: () => threadIndexFor(this.lastResponse),
       origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : this.activeViewId === 'globe' ? 'Globe' : 'Channels',
       onVisibility: (active) => this.showWorkspace(active),
       onSight: card => this.voice.see(card),
@@ -1666,8 +1658,7 @@ export class KanbanModal {
   private render(data: KanbanResponse): void {
     this.surfaces.closeMenu()
     if (!this.body || !this.deskEl) return
-    this.deskResponse = projectDeskFollowing(data, this.voice.status?.target)
-    const order = deskOrder(this.deskResponse)
+    const order = deskOrder(data)
     this.deskProjection = order
     this.ensureFleetMetadata(data)
     this.syncWorkspaceRuntime()
@@ -1801,7 +1792,6 @@ export class KanbanModal {
 
   /** Stash the latest response so drop handlers can resolve cards by id. */
   private lastResponse: KanbanResponse | null = null
-  private deskResponse: KanbanResponse | null = null
   private deskProjection: DeskOrder = deskOrder(null)
   /** The last parsed composite feed, redrawn when the hub's terminal is learned. */
   private lastFeed: CompositeFeed | null = null

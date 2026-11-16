@@ -84,16 +84,14 @@ async function activate(button: HTMLButtonElement, key: 'Enter' | ' '): Promise<
   await settle()
 }
 
-it('repaints the Desk as the voice target changes', () => {
+it('leaves an idle worker in Your turn when a look moves the voice target onto it', () => {
   const band = () => document.querySelector<HTMLElement>('[data-card-uid="head-uid"]')!.closest<HTMLElement>('[data-flight-band]')!.dataset.flightBand
   expect(band()).toBe('yourTurn')
   inside.voice.status = voiceStatus({ target: { fiber_id: 'head-uid', origin: head.originId, name: head.name } })
   inside.voice.notify()
-  expect(band()).toBe('working')
-  expect(document.querySelector('[data-card-uid="head-uid"] .constitution-state-dot')?.getAttribute('data-turn')).toBe('working')
-  inside.voice.status = { ...inside.voice.status, target: null }
-  inside.voice.notify()
+  draw(data())
   expect(band()).toBe('yourTurn')
+  expect(document.querySelector('[data-card-uid="head-uid"] .constitution-state-dot')?.getAttribute('data-turn')).toBe('idle')
 })
 
 it('moves through the view tabs by arrows, Home and End, and keeps the numeric hotkeys', async () => {

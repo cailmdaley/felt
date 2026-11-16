@@ -74,13 +74,12 @@ function instant(value: string | undefined): number | undefined {
 }
 
 /** What a card must carry for its turn to be read. */
-export type TurnInput = Pick<KanbanCard, 'turn' | 'status' | 'ask' | 'workerState' | 'runtimePhase' | 'launchError' | 'lastActivityAt' | 'workerStartedAt' | 'dispatchedAt' | 'originStale' | 'followed'>
+export type TurnInput = Pick<KanbanCard, 'turn' | 'status' | 'ask' | 'workerState' | 'runtimePhase' | 'launchError' | 'lastActivityAt' | 'workerStartedAt' | 'dispatchedAt' | 'originStale'>
 
 /**
  * The card's turn: the owner-served `turn`, with what only this board knows
- * laid over it, and the words and age every surface draws. A conversation
- * the human follows is working; an unreachable owner's runtime is frozen at
- * its last poll, so a live worker's turn is unknown and only the synced ask
+ * laid over it, and the words and age every surface draws. An unreachable
+ * owner's runtime is frozen at its last poll, so a live worker's turn is unknown and only the synced ask
  * is still owed. An `ask` counts only on an active card.
  */
 export function turnOf(
@@ -95,7 +94,6 @@ export function turnOf(
     ({ turn, yours: YOURS.includes(turn), busy, word: TURN_WORD[turn], detail, since })
   const asked = (): TurnState => state('question', `The worker asked: ${ask?.text}`, instant(ask?.at))
 
-  if (card.followed && live) return state('working', 'You are following this conversation.', card.lastActivityAt)
   if (card.originStale) {
     if (ask) return asked()
     if (live) {

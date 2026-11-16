@@ -35,7 +35,6 @@ import { hasLiveWorker } from './KanbanTypes.js';
 import { ascByKey, descByKey, dueCivilDay, dueSortMs, instantMs } from './civilDay.js';
 import { turnOf } from './turn.js';
 import { adoptThreadIndex, ThreadIndex, threadKey, threadState } from './threads.js';
-import type { RexMove } from './voice.js';
 
 export interface BuildKanbanResponseOptions {
   /** Reference instant for due-drift and the response `generatedAt`. Defaults
@@ -85,18 +84,6 @@ function surfaceOf(card: KanbanCard): Surface {
   if (card.isCycle) return 'cycles';
   if (card.column === 'orchestratorReview') return 'awaitingReview';
   return card.column === 'resting' && isSleepingOnSchedule(card) ? 'scheduled' : card.column;
-}
-
-/** The followed live conversation is working in the Desk's projection, not waiting on the human. */
-export function projectDeskFollowing(response: KanbanResponse, target: RexMove | null | undefined): KanbanResponse {
-  if (!target) return response;
-  const mark = (cards: KanbanCard[]) => cards.map(card => card.originId === target.origin && (card.uid === target.fiber_id || card.id === target.fiber_id)
-    ? { ...card, followed: true } : card);
-  return projectDeskFrontier({ ...response,
-    now: { drafts: mark(response.now.drafts), inFlight: mark(response.now.inFlight), awaitingReview: mark(response.now.awaitingReview) },
-    stash: mark(response.stash), roles: mark(response.roles), threads: mark(response.threads ?? []),
-    timeline: { ...response.timeline, futureDated: mark(response.timeline.futureDated), past: mark(response.timeline.past) },
-  });
 }
 
 /** Reproject optimistic lifecycle edits through the same frontier as a fresh feed. */
