@@ -89,8 +89,8 @@ try {
     assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-band-title').textContent(), 'cmbx chair')
     const spectrum = page.locator('.kbn-ch-msg[data-fiber="cmbx/kappa-tsz"]')
     assert.equal(await spectrum.locator('.kbn-ch-image').count(), 1)
-    // Its deck is previewed whole, the page drawn small.
-    assert.equal(await spectrum.locator('.kbn-ch-html .ws-thumbnail').count(), 1)
+    // Its deck is a card, its starting page drawn small.
+    assert.equal(await spectrum.locator('.kbn-ch-embed .ws-thumbnail').count(), 1)
     // The stream opens on its newest message, and stays there as images arrive.
     await page.waitForFunction(() => { const el = document.querySelector('.kbn-ch > .kbn-ch-stream'); return el.scrollHeight - el.scrollTop - el.clientHeight <= 24 }, null, { timeout: 5000 })
     await fits(page)
@@ -160,7 +160,7 @@ try {
   assert.equal(await page.locator('.kbn-ch-layout[data-narrow]').count(), 1)
   await shot(page, 'half-rail')
   await pick(page, 'cmbx').click()
-  const spectrum = page.locator('.kbn-ch-msg', { hasText: '9σ' }).locator('.kbn-ch-embed')
+  const spectrum = page.locator('.kbn-ch-msg', { hasText: '9σ' }).locator('.kbn-ch-embed', { hasText: 'Tapestry' })
   await spectrum.locator('img').waitFor()
   assert.equal(await spectrum.locator('.kbn-ch-embed-title').textContent(), 'κ × tSZ at 9σ')
   await spectrum.scrollIntoViewIfNeeded()

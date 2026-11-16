@@ -6,6 +6,7 @@ import type { BoardRecord } from '../channels.js'
 import type { SentFile } from '../sentFiles.js'
 import { card, response, settle } from '../testFixtures.js'
 import { Dock, type ConsoleOptions } from '../workspace/Dock.js'
+import { cacheDocumentTitle } from '../workspace/DocumentTitles.js'
 
 const views: ChannelsView[] = []
 afterEach(() => { views.forEach(view => view.unmount()); views.length = 0; document.body.replaceChildren(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
@@ -210,8 +211,8 @@ it('draws a worker\'s sent tapestry once, as its card, and keeps the line\'s oth
     const { host } = await mount([chair, { ...tsz, fiberDir: '/notes/tsz' }, mask, beam, van, notes])
     await settle(); await settle()
     const line = message(host, 'κ × tSZ')
-    expect(line.querySelectorAll('.kbn-ch-embed')).toHaveLength(1)
-    expect([...line.querySelectorAll('.kbn-ch-html, .kbn-ch-file')].map(el => el.querySelector('.kbn-ch-image-name')?.textContent ?? el.textContent)).toStrictEqual(['deck.html'])
+    // The deck, a page that is not the tapestry, is drawn as a card of its own.
+    expect([...line.querySelectorAll('.kbn-ch-embed-title')].map(el => el.textContent)).toStrictEqual(['deck.html', 'κ × tSZ at 9σ'])
   } finally { PAGES.clear(); BOARD.C.splice(-1) }
 })
 
@@ -529,15 +530,20 @@ it('attaches a file sent near a message to it, gives a file sent alone its own m
   expect(openPage).toHaveBeenLastCalledWith(beam, 'local:/notes/beam/beam.md')
 })
 
-it('previews an HTML file whole, the page drawn small, kept across redraws, and opens it in the reader', async () => {
+it('draws a sent HTML page as a card: its starting page as the figure and its declared title, kept across redraws, opened in the reader', async () => {
   daemon()
   const sent: SentFile[] = [{ uid: 'B', host: 'local', fullPath: '/notes/beam/deck.html', basename: 'deck.html', timestamp: Date.now() - 3 * minute }]
   const { view, ctx, host, openPage } = await mount(undefined, new ChannelsView(), sent)
-  const figure = (name = 'Beam window') => message(host, name).querySelector<HTMLButtonElement>('.kbn-ch-html')!
-  const face = figure().querySelector('.ws-thumbnail')
+  const figure = (name = 'Beam window') => message(host, name).querySelector<HTMLButtonElement>('.kbn-ch-embed')!
+  const face = figure().querySelector('.kbn-ch-embed-figure.ws-thumbnail')
   expect(face).not.toBeNull()
-  expect(figure().querySelector('.kbn-ch-image-name')?.textContent).toBe('deck.html')
+  // A page not yet read is named by its file, and by no caption under it.
+  expect([figure().querySelector('.kbn-ch-embed-title')?.textContent, figure().querySelector('.kbn-ch-tapestry-kicker, .kbn-ch-image-name')]).toStrictEqual(['deck.html', null])
   expect(message(host, 'Beam window').querySelector('.kbn-ch-file')).toBeNull()
+  // Once read, it is named by the title it declares, its first heading if it declares none.
+  cacheDocumentTitle('local:/notes/beam/deck.html', '/notes/beam/deck.html', '<html><body><h1>Beam window, final</h1></body></html>')
+  expect(figure().querySelector('.kbn-ch-embed-title')?.textContent).toBe('Beam window, final')
+  expect(figure().querySelector('.kbn-ch-embed-figure')).toBe(face)
   // A redraw for another message leaves this one's row, and so its live page, where it is.
   const row = message(host, 'Beam window')
   view.refresh({ ...ctx, response: board([chair, { ...tsz, name: 'κ × tSZ, renamed' }, mask, beam, van, notes]) }); await settle()
@@ -552,6 +558,7 @@ it('previews an HTML file whole, the page drawn small, kept across redraws, and 
   // A redraw of its own message keeps the live page rather than making another.
   view.refresh({ ...ctx, response: board([chair, tsz, mask, { ...beam, name: 'Beam window, renamed' }, van, notes]) }); await settle()
   expect(figure('Beam window, renamed').querySelector('.ws-thumbnail')).toBe(face)
+  expect(figure('Beam window, renamed').querySelector('.kbn-ch-embed-title')?.textContent).toBe('Beam window, final')
   figure('Beam window, renamed').click()
   expect(openPage).toHaveBeenLastCalledWith(expect.objectContaining({ uid: 'B' }), 'local:/notes/beam/deck.html')
 })
@@ -570,18 +577,18 @@ it('previews only the newest send of a file sent again and again; the earlier se
     const thread = host.querySelector<HTMLElement>('.kbn-ch-thread-list')!
     const posts = [...thread.querySelectorAll<HTMLElement>('.kbn-ch-msg[data-kind="post"]')]
     expect(posts).toHaveLength(4)
-    const drawn = (post: HTMLElement) => [...post.querySelectorAll('.kbn-ch-html, .kbn-ch-image, .kbn-ch-file')].map(el => `${el.className.split(' ')[0]}:${(el.querySelector('.kbn-ch-image-name') ?? el).textContent}`)
+    const drawn = (post: HTMLElement) => [...post.querySelectorAll('.kbn-ch-embed, .kbn-ch-image, .kbn-ch-file')].map(el => `${el.className.split(' ')[0]}:${(el.querySelector('.kbn-ch-image-name, .kbn-ch-embed-title') ?? el).textContent}`)
     expect(posts.map(drawn)).toStrictEqual([
       ['kbn-ch-file:spectrum.png'],
       ['kbn-ch-file:deck.html'],
       ['kbn-ch-file:deck.html'],
-      ['kbn-ch-html:deck.html', 'kbn-ch-image:spectrum.png'],
+      ['kbn-ch-embed:deck.html', 'kbn-ch-image:spectrum.png'],
     ])
     // An earlier send stays openable.
     posts[1].querySelector<HTMLButtonElement>('.kbn-ch-file')!.click()
     expect(openPage).toHaveBeenLastCalledWith(expect.objectContaining({ uid: 'T' }), 'local:/notes/tsz/deck.html')
     // The channel's line is the thread's latest message, its files drawn whole.
-    expect(drawn(message(host, 'κ × tSZ'))).toStrictEqual(['kbn-ch-html:deck.html', 'kbn-ch-image:spectrum.png'])
+    expect(drawn(message(host, 'κ × tSZ'))).toStrictEqual(['kbn-ch-embed:deck.html', 'kbn-ch-image:spectrum.png'])
   } finally { BOARD.C.splice(-3) }
 })
 

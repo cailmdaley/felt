@@ -19,7 +19,7 @@ import { cardNamed } from '../threads.js'
 import { fileBytesUrl, renderMarkdown } from '../utils.js'
 import { COMPANION_NAMES, docKey, type DocKey } from '../workspace/documents.js'
 import { headerIcon, type HeaderIcon } from '../workspace/headerIcon.js'
-import { declaredTitle } from '../workspace/DocumentTitles.js'
+import { declaredTitle, watchDocumentTitles } from '../workspace/DocumentTitles.js'
 import { LOAD_POLICY, Thumbnail, type ThumbnailFile } from '../workspace/Thumbnail.js'
 import { charters } from '../workspace/RolePage.js'
 import { onDesk } from '../workspace/fiberPageState.js'
@@ -44,7 +44,7 @@ const FOLLOW_PX = 24
 const FOUND_DOCUMENTS = 12
 const IMAGE = /\.(png|jpe?g|gif|svg|webp)$/i
 const HTML = /\.html?$/i
-/** The width an HTML file's page is laid out at for its preview: a desktop screen's. */
+/** The width an HTML file's page is laid out at for its card's figure: a desktop screen's. */
 const PAGE_WIDTH = 1440
 /** Narrower than this, the view shows a channel or a thread, not both: a thread opens one level deeper. */
 const SIDE_BY_SIDE_PX = 1100
@@ -112,6 +112,10 @@ function newestSends(lines: readonly Line[]): Set<SentFile> {
   }
   return newest
 }
+/** A sent page's title: the one it declares, once read, else its file name. */
+const pageTitle = (file: SentFile, owner: string): string => declaredTitle(docKey(owner, file.fullPath, owner))?.title || file.basename
+/** What a sent file is drawn from, for a list's signature: its path, and a page's title. */
+const drawnAs = (file: SentFile, sender: KanbanCard): string => HTML.test(file.basename) ? `${file.fullPath} ${pageTitle(file, file.host ?? sender.originId)}` : file.fullPath
 /** A figure at least this many pixels on its shorter side; anything smaller is an icon or a sprite sheet. */
 const FIGURE_PX = 64
 const SVG = 'http://www.w3.org/2000/svg'
@@ -253,6 +257,7 @@ export class ChannelsView implements TemporalView {
   private generation = 0
   private unsubscribe?: () => void
   private unsubscribeLibrary?: () => void
+  private unsubscribeTitles?: () => void
   private stopGestures?: () => void
 
   mount(host: HTMLElement, ctx: ViewContext): void {
@@ -297,6 +302,8 @@ export class ChannelsView implements TemporalView {
     this.showRail()
     this.unsubscribe = ctx.sends?.subscribe(() => this.draw())
     this.unsubscribeLibrary = ctx.workspace?.library.subscribe(() => { if (this.query) this.drawRail() })
+    // A sent page's card is named by its declared title once the page is read.
+    this.unsubscribeTitles = watchDocumentTitles(() => this.draw())
     this.refresh(ctx)
   }
   /** Reads the charters' names once, and again on the next refresh after a read that failed. */
@@ -738,7 +745,7 @@ export class ChannelsView implements TemporalView {
     const lines = this.lines = said.filter(line => !line.cleared || fiberOf(line.message.card) === undo?.uid)
     for (const { message } of lines) this.readTapestry(message.card)
     const sig = JSON.stringify([channel.key, channel.name, failed, this.thread && fiberOf(this.thread), [...this.tempering], [...this.expanded.keys()], [...this.unfolded],
-      lines.map(({ message, replies, last, waiting, act, cleared }) => [message.id, message.kind, message.text, waiting, act, cleared, message.card.name, message.card.turn, message.files.map(file => file.fullPath), replies, last, this.embedded(message.card, 'channel')])])
+      lines.map(({ message, replies, last, waiting, act, cleared }) => [message.id, message.kind, message.text, waiting, act, cleared, message.card.name, message.card.turn, message.files.map(file => drawnAs(file, message.card)), replies, last, this.embedded(message.card, 'channel')])])
     if (this.changed('channel', sig)) {
       const back = iconButton('kbn-ch-back', 'back', 'Channels', () => this.setRail(false))
       const name = el('h3', 'kbn-ch-name')
@@ -817,7 +824,7 @@ export class ChannelsView implements TemporalView {
     const who = (card: KanbanCard | undefined) => card && [fiberOf(card), card.name]
     return JSON.stringify([
       { ...message, card: who(message.card), from: who(message.from) }, line.replies, line.last, line.waiting, line.act,
-      !message.human && message.arrived > before, continues(previous, message), message.files.map(file => whole.has(file)),
+      !message.human && message.arrived > before, continues(previous, message), message.files.map(file => whole.has(file) && drawnAs(file, message.card)),
       this.tempering.has(`${fiberOf(message.card)}:${message.at}`), this.expanded.has(message.id), this.unfolded.has(message.id),
       pane === 'channel' ? this.embedded(message.card, pane) : this.thread && fiberOf(this.thread),
     ])
@@ -883,7 +890,7 @@ export class ChannelsView implements TemporalView {
     const tapestry = pane === 'channel' ? this.embedded(card, pane) : null
     const files = message.files.filter(file => file.fullPath !== tapestry?.path)
     if (files.length) body.append(this.attachments(message, files, id, whole))
-    if (tapestry) body.append(this.embed(tapestry, card, `embed:${id}`))
+    if (tapestry) body.append(this.tapestryEmbed(tapestry, card, `embed:${id}`))
     if (replies > 0) {
       const link = button('kbn-ch-replies', `${replies} ${replies === 1 ? 'reply' : 'replies'}`, () => this.openThread(card))
       link.dataset.item = `replies:${fiberOf(card)}`
@@ -928,14 +935,14 @@ export class ChannelsView implements TemporalView {
     return row
   }
   /**
-   * A message's files: an HTML page as its live face and an image, each drawn
-   * small inline when it is the newest send of its path in the list (`whole`),
-   * every other file a chip; each opens in the reader.
+   * A message's files, each opening in the reader: the newest send of a path
+   * in the list (`whole`) drawn whole, an HTML page as a card of its starting
+   * page and its title and an image small inline; every other file a chip.
    */
   private attachments(message: Message, files: readonly SentFile[], id: string, whole: ReadonlySet<SentFile>): HTMLElement {
     const box = el('div', 'kbn-ch-attached'), base = this.ctx?.shuttleBase ?? ''
     for (const file of files) {
-      const item = `${id}:${file.fullPath}`
+      const item = `${id}:${file.fullPath}`, owner = file.host ?? message.card.originId
       const open = (): void => { this.returnTo = item; this.openFile(file, message.card) }
       const chip = (gone: boolean): HTMLButtonElement => {
         const node = button('kbn-ch-file', file.basename, open)
@@ -945,11 +952,7 @@ export class ChannelsView implements TemporalView {
         return node
       }
       if (whole.has(file) && HTML.test(file.basename)) {
-        const figure = button('kbn-ch-html', '', open)
-        figure.dataset.item = item
-        figure.title = `Open ${file.basename}`
-        figure.append(this.preview(item, { fullPath: file.fullPath, owner: file.host ?? message.card.originId, basename: file.basename }).el, el('span', 'kbn-ch-image-name', file.basename))
-        box.append(figure)
+        box.append(this.embed(item, open, pageTitle(file, owner), this.preview(item, { fullPath: file.fullPath, owner, basename: file.basename }).el))
         continue
       }
       if (whole.has(file) && IMAGE.test(file.basename)) {
@@ -959,7 +962,7 @@ export class ChannelsView implements TemporalView {
         const img = el('img', '')
         img.alt = file.basename
         img.loading = 'lazy'
-        img.src = fileBytesUrl(base, file.fullPath, file.host ?? message.card.originId)
+        img.src = fileBytesUrl(base, file.fullPath, owner)
         // An image its host no longer holds (a removed worktree, a cleared scratch folder) is named, not drawn as an empty frame.
         img.addEventListener('error', () => figure.replaceWith(chip(true)))
         figure.append(img, el('span', 'kbn-ch-image-name', file.basename))
@@ -975,8 +978,8 @@ export class ChannelsView implements TemporalView {
     const kept = this.previews.get(item)
     if (kept) return kept
     const thumbnail: Thumbnail = new Thumbnail({
-      key: item, shuttleBase: this.ctx?.shuttleBase ?? '', file, fallback: file.basename, captioned: true,
-      // Drawn across the stream, the page is laid out as a desktop shows it, and so drawn small.
+      key: item, shuttleBase: this.ctx?.shuttleBase ?? '', file, fallback: file.basename, captioned: true, className: 'kbn-ch-embed-figure',
+      // The page is laid out as a desktop shows it, and so drawn small.
       pageWidth: PAGE_WIDTH,
       // Under the reader nothing here is seen, so nothing here is worth a live body.
       priority: () => thumbnail.near && !this.ctx?.workspace?.isActive ? 2 : 0,
@@ -1024,25 +1027,32 @@ export class ChannelsView implements TemporalView {
     if (pane === 'channel' && this.channel && sameFiber(card, this.channel.seat)) return null
     return this.tapestries.get(fiberOf(card))?.tapestry ?? null
   }
-  /** A tapestry drawn small: its first figure, title and lede; choosing it opens the page in the reader. */
-  private embed(tapestry: Tapestry, card: KanbanCard, item: string): HTMLElement {
-    const box = button('kbn-ch-embed', '', () => {
-      this.returnTo = item
-      this.openFile({ fullPath: tapestry.path, basename: tapestry.path.split('/').pop()!, timestamp: tapestry.at }, card)
-    })
-    box.dataset.item = item
-    box.title = `Open ${tapestry.title}`
+  /** A tapestry drawn as its card: its first figure, title and lede; choosing it opens the page in the reader. */
+  private tapestryEmbed(tapestry: Tapestry, card: KanbanCard, item: string): HTMLElement {
+    let figure: HTMLImageElement | undefined
     if (tapestry.figure) {
-      const figure = el('img', 'kbn-ch-embed-figure')
+      figure = el('img', 'kbn-ch-embed-figure')
       figure.alt = ''
       figure.loading = 'lazy'
       figure.src = tapestry.figure
-      figure.addEventListener('error', () => figure.remove())
-      box.append(figure)
+      figure.addEventListener('error', () => figure!.remove())
     }
+    const open = (): void => {
+      this.returnTo = item
+      this.openFile({ fullPath: tapestry.path, basename: tapestry.path.split('/').pop()!, timestamp: tapestry.at }, card)
+    }
+    return this.embed(item, open, tapestry.title, figure, 'Tapestry', tapestry.lede)
+  }
+  /** A page drawn as a card: its figure, then its kicker, title and lede; choosing it opens the page. */
+  private embed(item: string, open: () => void, title: string, figure?: HTMLElement, kicker?: string, lede?: string): HTMLButtonElement {
+    const box = button('kbn-ch-embed', '', open)
+    box.dataset.item = item
+    box.title = `Open ${title}`
+    if (figure) box.append(figure)
     const words = el('span', 'kbn-ch-embed-words')
-    words.append(el('span', 'kbn-ch-tapestry-kicker', 'Tapestry'), el('span', 'kbn-ch-embed-title', tapestry.title))
-    if (tapestry.lede) words.append(el('span', 'kbn-ch-embed-lede', tapestry.lede))
+    if (kicker) words.append(el('span', 'kbn-ch-tapestry-kicker', kicker))
+    words.append(el('span', 'kbn-ch-embed-title', title))
+    if (lede) words.append(el('span', 'kbn-ch-embed-lede', lede))
     box.append(words)
     return box
   }
@@ -1067,7 +1077,7 @@ export class ChannelsView implements TemporalView {
     this.readTapestry(card)
     const tapestry = this.embedded(card, 'thread')
     const sig = JSON.stringify([fiberOf(card), card.name, card.outcome, card.ask?.text, card.status, card.turn, state, deeper, tapestry, [...this.tempering], [...this.unfolded],
-      messages.map(message => [message.id, message.kind, message.text, message.waiting, message.files.map(file => file.fullPath)])])
+      messages.map(message => [message.id, message.kind, message.text, message.waiting, message.files.map(file => drawnAs(file, message.card))])])
     if (this.changed('thread', sig)) {
       const close = deeper
         ? iconButton('kbn-ch-thread-close', 'back', `Back to # ${channel.name}`, () => this.openThread(null))
@@ -1092,7 +1102,7 @@ export class ChannelsView implements TemporalView {
         conclusion.innerHTML = renderMarkdown(card.outcome)
         standing.push(conclusion)
       }
-      if (tapestry) standing.push(this.embed(tapestry, card, `thread-embed:${fiberOf(card)}`))
+      if (tapestry) standing.push(this.tapestryEmbed(tapestry, card, `thread-embed:${fiberOf(card)}`))
       // A closed fiber has no worker to hear a reply: reopening it from its page brings one back.
       if (state === 'closed') standing.push(el('p', 'kbn-ch-hush kbn-ch-reopen', 'Closed. Reopen it from its page to reply.'))
       this.threadHead.replaceChildren(close.root, who, ...standing)
@@ -1388,6 +1398,7 @@ export class ChannelsView implements TemporalView {
     for (const feed of this.feeds.values()) feed.pending = false
     this.unsubscribe?.(); this.unsubscribe = undefined
     this.unsubscribeLibrary?.(); this.unsubscribeLibrary = undefined
+    this.unsubscribeTitles?.(); this.unsubscribeTitles = undefined
     this.stopGestures?.(); this.stopGestures = undefined
     this.sizes?.disconnect(); this.sizes = null
     this.width?.disconnect(); this.width = null
