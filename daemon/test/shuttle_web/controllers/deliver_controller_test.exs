@@ -1221,6 +1221,51 @@ defmodule ShuttleWeb.DeliverControllerTest do
              |> json_response(400)
   end
 
+  defp notify_only(fiber_id) do
+    api_conn()
+    |> post(
+      "/api/v1/deliver",
+      Jason.encode!(%{
+        "fiber_id" => fiber_id,
+        "notify_when_idle" => true,
+        "from" => "shuttle://elsewhere/claude/sender",
+        "message_id" => "n-#{System.unique_integer([:positive])}"
+      })
+    )
+  end
+
+  # A notify-only request reaches only the fiber's owner, as every other
+  # delivery does: a daemon that does not own it says so.
+  test "a notify-only request to a daemon that does not own the fiber is refused as such" do
+    MockRunner.set_fiber("tests/notify-elsewhere", make_fiber("tests/notify-elsewhere"))
+    MockRunner.set_shuttle("tests/notify-elsewhere", "kind: oneshot\nhost: elsewhere\n")
+
+    assert %{"error" => "this daemon does not own the fiber"} =
+             "tests/notify-elsewhere" |> notify_only() |> json_response(409)
+  end
+
+  # A live worker whose delivery address is not confirmed is reported as that,
+  # not as a fiber with no live worker; nothing is subscribed.
+  test "a notify-only request to a live worker with no confirmed delivery address says so" do
+    message_live_worker("tests/notify-unconfirmed")
+    poller = GenServer.whereis(Shuttle.Env.server(Poller))
+
+    :sys.replace_state(poller, fn state ->
+      key = Poller.running_key(state, "tests/notify-unconfirmed")
+      update_in(state.running[key], &Map.merge(&1, %{context_epoch: nil, context_address: nil}))
+    end)
+
+    # Any handled message republishes the readers' view of the workers.
+    Poller.refresh_document("tests/notify-unconfirmed")
+    :sys.get_state(poller)
+
+    assert %{"error" => error} =
+             "tests/notify-unconfirmed" |> notify_only() |> json_response(409)
+
+    assert error =~ "has no confirmed delivery address"
+    refute_received {:message, _}
+  end
+
   # Only a request with no text is notify-only; whitespace text is refused as
   # on any other request, and subscribes nobody.
   test "whitespace text with notify_when_idle is refused, not a subscription" do

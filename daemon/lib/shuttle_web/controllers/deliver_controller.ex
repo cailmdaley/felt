@@ -15,10 +15,13 @@ defmodule ShuttleWeb.DeliverController do
   as human input. A request carrying `origin` is forwarded to that owner's
   identical route.
 
-  `notify_when_idle` with no `text` subscribes `from` (or `notify_address`)
-  to one idle notice from the fiber's live worker and answers that
-  subscription's message receipt (status `subscribed`); a fiber with no live
-  worker answers 409.
+  `notify_when_idle` with no `text` (absent or null; whitespace text is
+  refused as any blank text is) subscribes `from` (or `notify_address`) to one
+  idle notice from the fiber's live worker and answers that subscription's
+  message receipt: 200 with status `subscribed`, or `rejected` when the worker
+  cannot take the subscription. It needs a `message_id`. A daemon that does
+  not own the fiber, a fiber with no live worker, and a live worker whose
+  delivery address is not yet confirmed answer 409 saying which.
 
   With `context_only` (and a `message_id`), `text` is queued in the fiber's
   inbox (`Shuttle.Delivery.context/4`): 202 `{delivery: "context",
@@ -170,8 +173,11 @@ defmodule ShuttleWeb.DeliverController do
 
   # A notify-only request subscribes `from` to one idle notice from the
   # fiber's live worker, as a session-addressed message with no text would.
+  # The worker must have a published delivery address, the one inbox
+  # delivery uses.
   defp subscribe_idle(fiber_id, from, context) do
     with {:ok, %{fibers: [entry | _]}} <- Shuttle.FiberDocuments.get_shuttle(fiber_id),
+         :ok <- owned(entry),
          {:ok, address, _epoch} <-
            Shuttle.Poller.context_receiver(Shuttle.Threads.address(entry.fiber)),
          {:ok, status, receipt} <-
@@ -186,10 +192,34 @@ defmodule ShuttleWeb.DeliverController do
            |> Shuttle.Messaging.send_message() do
       {status, receipt}
     else
-      {:ok, %{fibers: []}} -> {404, %{error: "no constitution #{fiber_id} here"}}
-      {:error, status, error} when is_integer(status) -> {status, %{error: error}}
-      _ -> {409, %{error: "#{fiber_id} has no live worker to watch"}}
+      {:ok, %{fibers: []}} ->
+        {404, %{error: "no constitution #{fiber_id} here"}}
+
+      {:error, :not_owner} ->
+        {409, %{error: "this daemon does not own the fiber"}}
+
+      {:error, :no_worker} ->
+        {409, %{error: "#{fiber_id} has no live worker to watch"}}
+
+      {:error, :authority_unknown} ->
+        {409,
+         %{
+           error:
+             "#{fiber_id}'s live worker has no confirmed delivery address yet; send the same request again shortly"
+         }}
+
+      {:error, status, error} when is_integer(status) ->
+        {status, %{error: error}}
+
+      error ->
+        {422, %{error: inspect(error)}}
     end
+  end
+
+  defp owned(entry) do
+    if get_in(entry.fiber, ["shuttle", "host"]) == Shuttle.Poller.own_host_id(),
+      do: :ok,
+      else: {:error, :not_owner}
   end
 
   defp resume_mode(mode) when mode in ["fresh", "previous"], do: mode
