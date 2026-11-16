@@ -68,7 +68,8 @@ defmodule Shuttle.StandingExitRegressionTest do
       text =
         File.read!(c.path) |> String.replace("Worker result.", "Concurrent committed result.")
 
-      File.write!(c.path, text)
+      File.write!(c.path <> ".tmp", text)
+      File.rename!(c.path <> ".tmp", c.path)
       Port.command(port, "\n")
       assert {:ok, "concluded" <> _} = Task.await(task, 30_000)
       assert File.read!(c.path) =~ "Concurrent committed result."

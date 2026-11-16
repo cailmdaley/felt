@@ -24,6 +24,7 @@ defmodule Shuttle.FiberDoc do
       # A wedged felt is not absence — say so, never "not found" (a caller
       # acting on "not found" would write against the wrong store).
       {:error, :timeout} -> {:error, "felt timed out resolving #{fiber_id}"}
+      {:error, {:resolution_failed, message}} -> {:error, message}
     end
   end
 
