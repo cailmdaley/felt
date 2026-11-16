@@ -1170,11 +1170,18 @@
             }
           },
           "400": {
-            "description": "fiber_id is missing or blank, text is missing or blank (only an absent or null text with notify_when_idle is a notify-only subscription), a notify-only subscription or context_only lacks message_id, or origin names no known host.",
+            "description": "fiber_id is missing or blank, text is missing or blank (only an absent or null text with notify_when_idle is a notify-only subscription), a notify-only subscription or context_only lacks message_id, or origin names no known host. A notify-only subscription the live worker's address or the request makes invalid answers a MessageReceipt with status rejected.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DeliveryError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DeliveryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MessageReceipt"
+                    }
+                  ]
                 }
               }
             }
@@ -1197,7 +1204,7 @@
             }
           },
           "409": {
-            "description": "A notify-only subscription found no live worker to watch, or a live worker whose delivery address is not yet confirmed; this daemon does not own the fiber; a fresh session was refused (reason); or a launch was refused as on /dispatch (already_running, launch_reserved).",
+            "description": "A notify-only subscription found no live worker to watch, or a live worker whose delivery address is not yet confirmed, or its message_id already names a different message (a MessageReceipt with status rejected); this daemon does not own the fiber; a fresh session was refused (reason); or a launch was refused as on /dispatch (already_running, launch_reserved).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1207,6 +1214,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/DeliveryInput"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MessageReceipt"
                     }
                   ]
                 }
