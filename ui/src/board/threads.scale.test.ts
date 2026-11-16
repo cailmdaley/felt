@@ -5,6 +5,7 @@ import { buildKanbanResponseFromComposite } from './KanbanReadModel.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { boardCards, KanbanSurfaceRenderer, threadIndexFor } from './KanbanSurfaces.js'
 import { FamilyPage } from './workspace/FamilyPage.js'
+import { deskOrder } from './deskOrdering.js'
 import { servedFeed } from './testFixtures.js'
 
 const N = 472
@@ -49,29 +50,26 @@ function counted<T extends object>(target: T, names: readonly (keyof T)[], run: 
 /** Growing the input fourfold grows linear work about fourfold; a quadratic regression gives about sixteen. */
 const LINEAR = 6
 
-describe('a family splits across the sections its threads stand in', () => {
-  // A root in Your turn over ten working threads; a working root over twelve threads in Your turn; a waiting hub over twelve waiting threads.
+describe('a family is one card on the Desk', () => {
   const family = (rootPhase: string, threadPhase: string, n: number) => parseCompositeFeed(servedFeed({ host: 'owner', fibers: [['cmbx', null, rootPhase], ...Array.from({ length: n }, (_, k) => [`cmbx/t${k}`, 'cmbx', threadPhase])]
     .map(([id, parent, phase]) => ({ origin: 'owner', felt_store: '/store', path: `${id}.md`, orchestrator: parent,
       fiber: { id, name: id, status: 'active', created_at: '2026-10-01T09:00:00Z', shuttle: { kind: 'oneshot' } },
       runtime: { state: 'running', phase, session_uuid: `s-${id}` } })) }))
-  const draw = (board: ReturnType<typeof buildKanbanResponseFromComposite>) => new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, waits: () => new Map(), getLastResponse: () => board,
-    stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: () => {} }).renderNowSection(board.now, {})
-  it('threads in another state group beneath their root heading that section, named by slug', () => {
-    const desk = draw(buildKanbanResponseFromComposite(family('waiting', 'working', 10)))
-    expect([...desk.querySelectorAll('.kbn-card')].map(el => [el.querySelector('.kbn-card-name')!.textContent, el.classList.contains('kbn-card-header')])).toEqual([['cmbx', false], ['cmbx', true]])
-    expect(desk.querySelector('.kbn-card-header .kbn-count-working')!.textContent).toBe('10 working')
+  const draw = (board: ReturnType<typeof buildKanbanResponseFromComposite>) => {
+    const index = threadIndexFor(board)
+    return new KanbanSurfaceRenderer({ waits: () => new Map(), openDetail: () => {}, clear: () => {} }).renderDesk(deskOrder(index, new Map()), index)
+  }
+  it('draws every member that waits as a line of the one card, uncapped, and counts the rest that work', () => {
+    const desk = draw(buildKanbanResponseFromComposite(family('working', 'attention', 12)))
+    expect(desk.querySelectorAll('.kbn-family')).toHaveLength(1)
+    expect(desk.querySelectorAll('[data-column="waiting"] .kbn-family-wait')).toHaveLength(12)
+    expect(desk.querySelector('.kbn-family-meta')!.textContent).toBe('1 working')
   })
-  it('threads in the row\'s own state hang beneath it, open where they need you', () => {
-    const desk = draw(buildKanbanResponseFromComposite(family('waiting', 'waiting', 12)))
-    expect(desk.querySelectorAll('.kbn-card')).toHaveLength(1)
-    expect([...desk.querySelectorAll('.kbn-desk-threads .kbn-thread-name')].map(el => el.textContent)).toEqual(Array.from({ length: 12 }, (_, k) => `t${k}`).sort())
-    expect(desk.querySelector('.kbn-count-needs')!.textContent).toBe('13 need you')
-  })
-  it('working threads beneath a working row stay folded until opened', () => {
-    const desk = draw(buildKanbanResponseFromComposite(family('working', 'working', 3)))
-    expect(desk.querySelector('.kbn-count-working')!.textContent).toBe('4 working')
-    expect(desk.querySelector<HTMLElement>('.kbn-desk-threads')!.hidden).toBe(true)
+  it('puts a family whose workers are idle in Working, with no line', () => {
+    const desk = draw(buildKanbanResponseFromComposite(family('waiting', 'waiting', 3)))
+    expect(desk.querySelectorAll('[data-column="working"] .kbn-family')).toHaveLength(1)
+    expect(desk.querySelector('.kbn-family-wait')).toBeNull()
+    expect(desk.querySelector('.kbn-family-meta')!.textContent).toBe('4 working')
   })
 })
 
@@ -86,12 +84,11 @@ describe('thread read model at fleet scale', () => {
       const before = threadIndexBuilds()
       board = buildKanbanResponseFromComposite(input)
       expect(threadIndexBuilds()).toBe(before + 1)
-      const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, waits: () => new Map(), getLastResponse: () => board,
-        stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: () => {} })
-      const desk = renderer.renderNowSection(board.now, {})
-      // Each family's root, and its header in each other section of work.
-      expect(desk.querySelectorAll('.kbn-card')).toHaveLength(board.now.inFlight.length)
-      expect(desk.querySelector('.kbn-thread-tree')).toBeNull()
+      const renderer = new KanbanSurfaceRenderer({ waits: () => new Map(), openDetail: () => {}, clear: () => {} })
+      const index = threadIndexFor(board)
+      const desk = renderer.renderDesk(deskOrder(index, new Map()), index)
+      // Each family once.
+      expect(desk.querySelectorAll('.kbn-family')).toHaveLength(index.roots().length)
       expect(threadIndexFor(board)).toBe(threadIndexFor(board))
       expect(threadIndexBuilds()).toBe(before + 1)
     })
@@ -104,12 +101,10 @@ describe('thread read model at fleet scale', () => {
     }
     expect(work(N) / work(N / 4)).toBeLessThan(LINEAR)
   })
-  it('projects the frontier and reads every family in linear work for a deep chain', () => {
+  it('places every family on the Desk in linear work for a deep chain', () => {
     const work = (size: number) => counted(Map.prototype, ['get', 'set', 'has', 'delete'], () => {
       const board = buildKanbanResponseFromComposite(feed(chain(size)))
-      const index = threadIndexFor(board)
-      index.frontier()
-      for (const card of boardCards(board)) index.family(card)
+      deskOrder(threadIndexFor(board), new Map())
     })
     expect(work(N) / work(N / 4)).toBeLessThan(LINEAR)
   })

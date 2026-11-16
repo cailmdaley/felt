@@ -28,9 +28,8 @@ export interface KanbanCard {
   scheduledMessages?: ScheduledMessage[]
   /** Nearest ancestor constitution; absent on older feeds and plain notes. */
   orchestrator?: string | null
-  /** The Desk section this copy of a family's root heads, its own state being another. */
-  deskSection?: 'waiting' | 'working' | 'to-review'
-  threadSummary?: { unfinished: number; waiting: number; working: number; toReview: number; drafts: number; archived: number }
+  /** Its orchestrator is named but not on the board, so its review falls to the human. */
+  orphan?: boolean
   id: string
   /** Intrinsic frontmatter ULID when present. */
   uid?: string
@@ -250,8 +249,6 @@ export interface KanbanCard {
   effectiveHorizon: HorizonKind
   /** True when imminent `due:` promotes legacy deferred storage into Now. */
   drifted: boolean
-  /** Top-level `cold:` flag; held-open cluster marker on stashed cards. */
-  cold?: boolean
   /**
    * Other hosts that also serve this fiber (a git-synced store mirrored across
    * daemons). The board renders ONE card — the locally-owned or freshest row,

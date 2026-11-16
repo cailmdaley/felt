@@ -1,33 +1,12 @@
-import { hasLiveWorker, type KanbanCard, type KanbanResponse } from './KanbanTypes.js'
+import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { ascByKey, instantMs } from './civilDay.js'
 import { turnOf } from './turn.js'
 
 export type ThreadState = 'waiting' | 'to-review' | 'with-orchestrator' | 'working' | 'drafts' | 'roles' | 'resting' | 'archived'
-export type ThreadSummary = NonNullable<KanbanCard['threadSummary']>
 
 export const THREAD_LABEL: Record<ThreadState, string> = {
   waiting: 'Waiting', 'to-review': 'To review', 'with-orchestrator': 'With orchestrator', working: 'Working', drafts: 'Drafts', roles: 'Roles', resting: 'Resting', archived: 'Archived',
 }
-/**
- * What a family needs from the human, most urgent first. Its lead sits
- * where the most urgent need in the tree puts it, beside the root's own row.
- */
-export type FamilyNeed = 'yours' | 'review' | 'working'
-const FAMILY_NEEDS: readonly FamilyNeed[] = ['yours', 'review', 'working']
-export interface Family {
-  root: KanbanCard
-  /** The row: the node that set the family's column, the root when the tree is quiet. */
-  lead: KanbanCard
-  /** The family's most urgent need, or null when the tree asks nothing and the root rests where it rests. */
-  need: FamilyNeed | null
-  /** Every node sharing a need of the human's, lead first; the lead alone for Working and a quiet tree. */
-  askers: KanbanCard[]
-  /** Every node of the tree but the row, by need. */
-  others: Record<FamilyNeed, number>
-}
-/** The sections where a family's threads group beneath its root whatever the root's own state. */
-const SPLIT = ['waiting', 'working', 'to-review'] as const
-const STATE_ORDER: readonly ThreadState[] = ['waiting', 'to-review', 'with-orchestrator', 'working', 'drafts', 'roles', 'resting', 'archived']
 /**
  * A thread's state: its served Desk column, with In flight split by `turnOf`
  * into Waiting (the human's move) and Working (the worker's, including an
@@ -55,26 +34,20 @@ export const threadKey = (card: Pick<KanbanCard, 'originId' | 'feltStore' | 'id'
 /** The card of a fiber a host names: that host's copy, else the fiber's one row, which a mirror's uid still reaches. */
 export const cardNamed = <T extends Pick<KanbanCard, 'originId' | 'id' | 'uid'>>(cards: readonly T[], id: string, origin: string): T | undefined =>
   cards.find(card => (card.uid === id || card.id === id) && card.originId === origin) ?? cards.find(card => card.uid === id)
-const EMPTY: ThreadSummary = Object.freeze({ unfinished: 0, waiting: 0, working: 0, toReview: 0, drafts: 0, archived: 0 })
 let builds = 0
 /** How many indexes have been built in this page — the scale tests' witness that nothing rebuilds per card. */
 export function threadIndexBuilds(): number { return builds }
 
 /**
  * The containment forest of one board response, built once: each card's
- * resolved orchestrator, its children in feed order, its state, and its
- * descendants' counts, summed bottom-up. Every thread surface reads this
- * rather than re-deriving the graph.
+ * resolved orchestrator, its children in feed order, and its state. Every
+ * thread surface reads this rather than re-deriving the graph.
  */
 export class ThreadIndex {
   private readonly cards = new Map<string, KanbanCard>()
   private readonly parents = new Map<string, KanbanCard>()
   private readonly kids = new Map<string, KanbanCard[]>()
   private readonly states = new Map<string, ThreadState>()
-  private readonly ancestryTitles = new Map<string, string>()
-  private readonly sums = new Map<string, ThreadSummary>()
-  private readonly families = new Map<string, Family>()
-  private heads: KanbanCard[] | null = null
   /** A UID proves mirrored identity; without it, host/store/path stays distinct. */
   private readonly firstOf = new Map<string, string>()
 
@@ -111,8 +84,6 @@ export class ThreadIndex {
       if (list) list.push(this.cards.get(key)!)
       else this.kids.set(ownerKey, [this.cards.get(key)!])
     }
-    this.summarize()
-    this.gather()
   }
 
   /** A malformed feed can name a loop; the edge that closes it is dropped, so every walk ends. */
@@ -130,72 +101,6 @@ export class ThreadIndex {
       }
       for (const visited of path) done.add(visited)
     }
-  }
-
-  /** Pre-order from the roots, then reversed: every child is summed before its parent. */
-  private summarize(): void {
-    const order: string[] = []
-    const pending = [...this.states.keys()].filter(key => !this.parents.has(key))
-    while (pending.length) {
-      const key = pending.pop()!
-      order.push(key)
-      for (const child of this.kids.get(key) ?? []) pending.push(this.key(child))
-    }
-    for (let n = order.length - 1; n >= 0; n--) {
-      const key = order[n]
-      const children = this.kids.get(key)
-      if (!children) continue
-      const sum = { ...EMPTY }
-      for (const child of children) {
-        const childKey = this.key(child), below = this.sums.get(childKey) ?? EMPTY
-        sum.unfinished += below.unfinished; sum.waiting += below.waiting; sum.working += below.working
-        sum.toReview += below.toReview; sum.drafts += below.drafts; sum.archived += below.archived
-        const state = this.states.get(childKey)!
-        if (state === 'archived') sum.archived++
-        else {
-          sum.unfinished++
-          if (state === 'waiting') sum.waiting++
-          else if (state === 'working') sum.working++
-          else if (state === 'to-review') sum.toReview++
-          else if (state === 'drafts') sum.drafts++
-        }
-      }
-      this.sums.set(key, sum)
-    }
-  }
-
-  /**
-   * One family per tree, placed by what the whole tree needs from the human:
-   * Your turn, then a verdict, then a live worker; a quiet tree is its root.
-   * Every node of the tree reads the same family.
-   */
-  private gather(): void {
-    for (const rootKey of this.states.keys()) {
-      if (this.parents.has(rootKey)) continue
-      const root = this.cards.get(rootKey)!
-      const nodes = [root, ...this.subtree(root)]
-      const needs = nodes.map(node => this.need(node))
-      const need = FAMILY_NEEDS.find(n => needs.includes(n)) ?? null
-      const askers = need ? nodes.filter((_, n) => needs[n] === need) : [root]
-      // The root names its family whenever it asks, so it is never both crumb and sub-line;
-      // among threads a question leads Your turn, as it leads the band; tree order otherwise.
-      const rank = (node: KanbanCard): number => node === root ? 0 : need === 'yours' && turnOf(node).turn === 'question' ? 1 : 2
-      askers.sort((a, b) => rank(a) - rank(b))
-      const lead = need === 'working' && needs[0] !== 'working' && this.state(root) === 'working' && !root.held ? root : askers[0]
-      const others: Record<FamilyNeed, number> = { yours: 0, review: 0, working: 0 }
-      nodes.forEach((node, n) => { const each = needs[n]; if (each && node !== lead) others[each]++ })
-      // Working asks nothing of the human: its other workers are a count, not lines.
-      const shown = need === 'working' ? [lead] : askers
-      const family: Family = { root, lead, need, askers: shown, others }
-      for (const node of nodes) this.families.set(this.key(node), family)
-    }
-  }
-  /** What one node asks of the human, if anything: an armed thread without a worker asks nothing. */
-  private need(card: KanbanCard): FamilyNeed | null {
-    const state = this.state(card)
-    if (state === 'waiting') return 'yours'
-    if (state === 'to-review') return 'review'
-    return state === 'working' && hasLiveWorker(card) ? 'working' : null
   }
 
   /** The card for a fiber named by uid, or by id when felt gave it none. */
@@ -224,45 +129,15 @@ export class ThreadIndex {
     }
     return result
   }
-  summary(card: KanbanCard): ThreadSummary { return this.sums.get(this.key(card)) ?? EMPTY }
-  /** The family a node belongs to: its tree's root, the row that stands for it, and who in it is asking. */
-  family(card: KanbanCard): Family {
-    return this.families.get(this.key(card)) ?? { root: card, lead: card, need: null, askers: [card], others: { yours: 0, review: 0, working: 0 } }
+  /** The top-level constitution a node's family is named by: its topmost orchestrator, or itself. */
+  rootOf(card: KanbanCard): KanbanCard {
+    let root = this.card(card)
+    for (let parent = this.parentOf(root); parent; parent = this.parentOf(parent)) root = parent
+    return root
   }
-  /** The Desk's own rows: every family's root, in the section its own state puts it. */
-  frontier(): KanbanCard[] {
+  /** Every family's top-level: each node with no orchestrator on the board. */
+  roots(): KanbanCard[] {
     return [...this.states.keys()].filter(key => !this.parents.has(key)).map(key => this.cards.get(key)!)
-  }
-  /** A root heads each other work section with several threads; a lone thread stands on its own. */
-  headers(): KanbanCard[] {
-    if (this.heads) return this.heads
-    this.heads = []
-    for (const root of this.frontier()) {
-      const own = this.state(root), threads = this.subtree(root)
-      for (const section of SPLIT) {
-        if (section === own) continue
-        const held = threads.filter(card => this.state(card) === section)
-        if (held.length === 1) this.heads.push(held[0])
-        else if (held.length > 1) this.heads.push({ ...root, deskSection: section })
-      }
-    }
-    return this.heads
-  }
-  /** Cached parent-chain tooltips keep deep family pages linear in graph reads. */
-  ancestryTitle(card: KanbanCard): string {
-    const key = this.key(card)
-    if (this.ancestryTitles.has(key)) return this.ancestryTitles.get(key)!
-    const chain: KanbanCard[] = []
-    let next: KanbanCard | undefined = card
-    while (next && !this.ancestryTitles.has(this.key(next))) {
-      chain.push(next); next = this.parentOf(next)
-    }
-    while (chain.length) {
-      const child = chain.pop()!, parent = this.parentOf(child)
-      const prefix = parent ? this.ancestryTitles.get(this.key(parent)) : ''
-      this.ancestryTitles.set(this.key(child), parent ? `${prefix ? `${prefix} › ` : ''}${parent.name}` : '')
-    }
-    return this.ancestryTitles.get(key)!
   }
   /** Known ancestry is navigable; missing ancestry is only a path, never a guessed identity. */
   ancestry(card: KanbanCard): Array<{ name: string; card?: KanbanCard }> {
@@ -272,12 +147,7 @@ export class ThreadIndex {
     const missing = this.isOrphan(first) ? first.id.split('/').slice(0, -1).map(name => ({ name })) : []
     return [...missing, ...ancestors.map(card => ({ name: card.name, card }))]
   }
-  /** Descendants, archived included. */
-  size(card: KanbanCard): number { const s = this.summary(card); return s.unfinished + s.archived }
   state(card: KanbanCard): ThreadState { return this.states.get(this.key(card)) ?? threadState(card) }
-  /** Waiting first, then review, work, drafts, rest, archive; then name. */
-  readonly compare = (a: KanbanCard, b: KanbanCard): number =>
-    STATE_ORDER.indexOf(this.state(a)) - STATE_ORDER.indexOf(this.state(b)) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id)
 }
 
 export interface TreeNode { card: KanbanCard; depth: number; hasActiveDescendant: boolean; children: TreeNode[] }

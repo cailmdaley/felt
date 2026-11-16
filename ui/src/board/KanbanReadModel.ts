@@ -19,8 +19,6 @@ import type {
 } from './KanbanComposite.js';
 import type { Fiber } from './KanbanFiber.js';
 import {
-  cycleMembership,
-  cycleSpan,
   effectiveHorizon,
   isCycleFiber,
 } from './KanbanRules.js';
@@ -33,8 +31,7 @@ import type {
 } from './KanbanTypes.js';
 import { hasLiveWorker } from './KanbanTypes.js';
 import { ascByKey, descByKey, dueCivilDay, dueSortMs, instantMs } from './civilDay.js';
-import { turnOf } from './turn.js';
-import { adoptThreadIndex, ThreadIndex, threadKey, threadState } from './threads.js';
+import { adoptThreadIndex, ThreadIndex, threadKey } from './threads.js';
 
 export interface BuildKanbanResponseOptions {
   /** Reference instant for due-drift and the response `generatedAt`. Defaults
@@ -69,15 +66,11 @@ function shouldIncludeInKanban(fiber: Fiber): boolean {
   return isCycleFiber(fiber);
 }
 
-/** The Desk column a family section stands in. */
-const sectionColumn = (card: KanbanCard): 'inFlight' | 'awaitingReview' => (card.deskSection ?? threadState(card)) === 'to-review' ? 'awaitingReview' : 'inFlight';
-
 /**
- * Where a card is drawn: its served column, except that a cycle is drawn
- * among the cycles, a standing constitution asleep on its cron on the
- * timeline, placed by its next launch, and a thread with its orchestrator
- * that is a Desk row in Awaiting review: with no orchestrator on the board,
- * its review falls to the human.
+ * Where a family's top-level is filed: its served column, except that a
+ * cycle is filed among the cycles, a standing constitution asleep on its
+ * cron on the timeline, placed by its next launch, and a thread whose
+ * orchestrator is not on the board with the work awaiting review.
  */
 type Surface = Exclude<DeskColumn, 'orchestratorReview'> | 'scheduled' | 'cycles';
 function surfaceOf(card: KanbanCard): Surface {
@@ -86,22 +79,18 @@ function surfaceOf(card: KanbanCard): Surface {
   return card.column === 'resting' && isSleepingOnSchedule(card) ? 'scheduled' : card.column;
 }
 
-/** Reproject optimistic lifecycle edits through the same frontier as a fresh feed. */
-export function projectDeskFrontier(response: KanbanResponse): KanbanResponse {
-  const candidates = [...response.now.drafts, ...response.now.inFlight, ...response.now.awaitingReview,
+/** The same response with one card's fields patched, filed again as a fresh feed would file it. */
+export function withPatchedCard(response: KanbanResponse, cardId: string, patch: (card: KanbanCard) => Partial<KanbanCard>): KanbanResponse | null {
+  const all = [...response.now.drafts, ...response.now.inFlight, ...response.now.awaitingReview,
     ...response.stash, ...response.roles, ...response.timeline.futureDated, ...response.timeline.past, ...(response.threads ?? [])];
   const seen = new Set<string>();
-  const cards = candidates.filter(card => { const key = threadKey(card); if (card.deskSection || seen.has(key)) return false; seen.add(key); return true });
-  const index = new ThreadIndex(cards);
-  const visible = new Set(index.frontier());
-  const rows = cards.filter(card => visible.has(card)).map(card => ({ ...card, threadSummary: index.summary(card) }));
-  const headers = index.headers();
-  const at = (surface: Surface) => [...rows.filter(card => surfaceOf(card) === surface), ...headers.filter(card => sectionColumn(card) === surface)];
-  const now = { drafts: at('drafts').sort(byCreatedAtDesc), inFlight: at('inFlight').sort(byInFlightBand), awaitingReview: at('awaitingReview').sort(byClosedAtDesc) };
-  const stash = at('resting'), roles = at('roles');
-  const timeline = { ...response.timeline, futureDated: at('scheduled').sort(byDueAtAsc), past: [...at('tempered'), ...at('composted')].sort(byClosedAtDesc) };
-  const result = { ...response, now, stash, roles, timeline, threads: cards.filter(card => !visible.has(card)), totals: surfaceTotals({ now, stash, roles, timeline }) };
-  adoptThreadIndex(result, index);
+  const cards = all.filter(card => { const key = threadKey(card); if (seen.has(key)) return false; seen.add(key); return true });
+  const at = cards.findIndex(card => card.id === cardId);
+  if (at < 0) return null;
+  cards[at] = { ...cards[at], ...patch(cards[at]) };
+  const { threadIndex, cycles: _cycles, ...filed } = assembleSurfaces(cards);
+  const result: KanbanResponse = { ...response, ...filed, totals: surfaceTotals(filed) };
+  adoptThreadIndex(result, threadIndex);
   return result;
 }
 
@@ -126,7 +115,13 @@ export function buildKanbanResponseFromComposite(
     const o = feed.origins[origin];
     return o && o.kind !== 'local' && o.stale ? { since: o.lastPolledAt } : undefined;
   };
-  const surfaces = assembleSurfaces(eligible, projectDirIndex(eligible), nowMs, staleOrigin);
+  const dirs = projectDirIndex(eligible);
+  const surfaces = assembleSurfaces(eligible.map((entry) => {
+    const card = toCard(entry, dirs, nowMs);
+    const originStale = staleOrigin(entry.origin);
+    if (originStale) card.originStale = originStale;
+    return card;
+  }));
 
   const response: KanbanResponse = {
     feltHost: feed.host,
@@ -261,35 +256,22 @@ type AssembledSurfaces = {
 };
 
 /**
- * The route-and-order pass: build each entry's card, file it on the surface
- * its served column names (`surfaceOf`), and sort each surface. Only a
- * family's root is a Desk row; its threads stay reachable on `threads`.
+ * The route-and-order pass: file each family's top-level on the surface its
+ * served column names (`surfaceOf`), and sort each surface. A family's
+ * threads stay reachable on `threads`.
  */
-function assembleSurfaces(
-  entries: CompositeEntry[],
-  dirs: ProjectDirIndex,
-  nowMs: number,
-  staleOrigin: (origin: string) => KanbanCard['originStale'] = () => undefined,
-): AssembledSurfaces {
+function assembleSurfaces(allCards: KanbanCard[]): AssembledSurfaces {
   const buckets: Record<Surface, KanbanCard[]> = {
     drafts: [], inFlight: [], awaitingReview: [], tempered: [], composted: [],
     resting: [], roles: [], scheduled: [], cycles: [],
   };
-  const allCards = entries.map((entry) => {
-    const card = toCard(entry, dirs, nowMs);
-    const originStale = staleOrigin(entry.origin);
-    if (originStale) card.originStale = originStale;
-    return card;
-  });
   const threadIndex = new ThreadIndex(allCards);
-  const frontier = new Set(threadIndex.frontier());
-  for (const card of allCards) card.threadSummary = threadIndex.summary(card);
-  // Keep every non-row available to the constitution view and its family page.
-  const threads = allCards.filter(card => !frontier.has(card));
+  for (const card of allCards) if (threadIndex.isOrphan(card)) card.orphan = true;
+  const roots = new Set(threadIndex.roots());
+  const threads = allCards.filter(card => !roots.has(card));
   for (const card of allCards) {
-    if (frontier.has(card)) buckets[surfaceOf(card)].push(card);
+    if (roots.has(card)) buckets[surfaceOf(card)].push(card);
   }
-  for (const header of threadIndex.headers()) buckets[sectionColumn(header)].push(header);
 
   // Desk has no persisted human arrangement; drafts and the work put down use
   // creation order. Neither activity nor a renamed path moves them.
@@ -298,10 +280,7 @@ function assembleSurfaces(
   // Seats read like a shelf of offices: alphabetical, so a launcher stays
   // where the hand expects it whatever was used last.
   buckets.roles.sort(byNameAsc);
-  // A card moves only when it crosses the Your turn / Working seam, or when a
-  // question is raised or answered inside Your turn. Activity age does not
-  // move it.
-  buckets.inFlight.sort(byInFlightBand);
+  buckets.inFlight.sort(byCreatedAtDesc);
   buckets.awaitingReview.sort(byClosedAtDesc);
   buckets.tempered.sort(byClosedAtDesc);
   buckets.composted.sort(byClosedAtDesc);
@@ -333,36 +312,10 @@ function byNameAsc(a: KanbanCard, b: KanbanCard): number {
 }
 
 /**
- * EVERYTHING AT REST, in one list — what the Resting region actually draws.
- *
- * Two kinds of waiting, joined here because the human sees one region:
- *
- *   • SNOOZED work — `horizon:stashed`, on `resp.stash`. Put down on purpose,
- *     returning on its `due:` day.
- *   • A STANDING ROLE BETWEEN RUNS — `status:active` + a cron. Its column is
- *     `resting`, and the read model files it on the timeline surface at its
- *     next launch (`surfaceOf`). The Desk draws no timeline cards (the timeline is
- *     only the drag horizon), so without this join an armed monthly role
- *     would be in the board's data and on no surface the human could see.
- *
- * A role asleep on its cron is resting in every sense that matters to a person
- * reading the desk — it is not gone, it is not waiting on them, it comes back
- * on a day. So it is drawn in Resting, wearing its schedule and next launch
- * ("weekdays at 09:00 · next Aug 12") rather than a snooze's "wakes".
- *
- * The response shape is untouched: `timeline.futureDated` keeps carrying these
- * cards (drag resolution reads them through `findCardById`), and this is the
- * JOIN, done at render time, not a second home for the card.
- *
- * A standing constitution whose schedule is paused (`status:open`) is served
- * `resting` too, and arrives on `resp.stash` with the snoozed work: it does
- * not fire, and no `due:` wakes it; only a resume does.
- *
- * Two standing states that are NOT here:
- *   a running standing constitution → the liveness branch sends it to `inFlight`.
- *   an armed one whose run asked something → its owner serves it `inFlight`,
- *                            the human's turn; answering the ask clears it
- *                            and it returns here.
+ * Every top-level at rest, in one list: work put down (`horizon: stashed`,
+ * or a standing constitution whose schedule is paused, on `resp.stash`) and
+ * standing constitutions asleep between runs (on `resp.timeline.futureDated`,
+ * filed by their next launch).
  */
 export function restingCards(resp: KanbanResponse | null): KanbanCard[] {
   if (!resp) return [];
@@ -374,83 +327,6 @@ export function restingCards(resp: KanbanResponse | null): KanbanCard[] {
  *  a snooze, and `nextLaunchAt` is the day it names. */
 export function isSleepingOnSchedule(card: KanbanCard): boolean {
   return card.shuttleKind === 'standing' && card.status === 'active' && !hasLiveWorker(card);
-}
-
-/** The Desk columns a lensed member can appear in. */
-type LensColumn = 'drafts' | 'inFlight' | 'awaitingReview';
-
-/** A member the lens has to CONJURE: it belongs to the cycle but is not on any
- *  Desk column right now (resting, or snoozed until a day inside the span). */
-interface CycleLensGhost {
-  card: KanbanCard;
-  /** The column the card would sit in if it were on the desk. */
-  column: LensColumn;
-}
-
-/** One cycle, resolved into what the Desk has to draw differently. */
-export interface CycleLens {
-  cycleId: string;
-  name: string;
-  /** Every member, on the desk or off it. Non-members are everything else. */
-  memberIds: Set<string>;
-  ghosts: CycleLensGhost[];
-  /** What the chip says — members on the desk plus ghosts. */
-  count: number;
-}
-
-/**
- * Resolve one cycle into a lens over a board response: who belongs, and which
- * of them the Desk is not currently showing.
- *
- * Membership is `cycleMembership` — derived, never assigned: `due:` inside the
- * span, or "in flight right now".
- *
- * GHOSTS come from Resting and Roles. A resting card is off the desk by choice, but if it
- * is due inside the cycle you are looking at, it is part of that chapter's
- * work and hiding it would make the lens lie about its own count.
- */
-export function deriveCycleLens(
-  resp: KanbanResponse | null,
-  cycleId: string | null,
-  nowMs: number = Date.now(),
-): CycleLens | null {
-  if (!resp || !cycleId) return null;
-  const cycle = resp.cycles.find((c) => c.id === cycleId);
-  if (!cycle) return null;
-  const span = cycleSpan({ start: cycle.cycleStart ?? undefined, due: cycle.due }, nowMs);
-  if (!span) return null;
-
-  const memberIds = new Set<string>();
-  const columns: LensColumn[] = ['drafts', 'inFlight', 'awaitingReview'];
-  for (const column of columns) {
-    for (const card of resp.now[column]) {
-      const reason = cycleMembership({ due: card.due, inFlight: column === 'inFlight' }, span, nowMs);
-      if (reason) memberIds.add(card.id);
-    }
-  }
-
-  // Both resting bands contribute ghosts. A standing constitution joins a
-  // cycle only if it carries a `due:` of its own — a cron is a cadence, not a
-  // commitment to a chapter.
-  const ghosts: CycleLensGhost[] = [];
-  for (const card of [...restingCards(resp), ...resp.roles]) {
-    // A resting card is never in flight — that is what resting means — so only
-    // the `due:` rung can admit it.
-    if (!cycleMembership({ due: card.due }, span, nowMs)) continue;
-    memberIds.add(card.id);
-    ghosts.push({ card, column: ghostColumn(card) });
-  }
-
-  return { cycleId, name: cycle.name, memberIds, ghosts, count: memberIds.size };
-}
-
-/**
- * The column a card at rest would surface in: an armed standing constitution
- * between firings in In flight, a draft put down or a seat in Drafts. Nothing
- * closed or live is ever at rest.
- */
-function ghostColumn(card: KanbanCard): LensColumn {
-  return card.status === 'active' ? 'inFlight' : 'drafts';
 }
 
 /**
@@ -562,7 +438,6 @@ function toCard(
     storedHorizon: horizon.storedHorizon,
     effectiveHorizon: horizon.effectiveHorizon,
     drifted: horizon.drifted,
-    cold: typeof f.cold === 'boolean' ? f.cold : undefined,
     isCycle,
     // Normalized to a bare civil day here, once, so no view re-derives it (and
     // no view re-parses it as an instant and loses a day). `cycleSpan` fills in
@@ -684,40 +559,6 @@ export function byCardIdentity(a: KanbanCard, b: KanbanCard): number {
 
 export function byCreatedAtDesc(a: KanbanCard, b: KanbanCard): number {
   return descByKey(instantMs(a.createdAt), instantMs(b.createdAt)) || byCardIdentity(a, b);
-}
-
-export type InFlightBand = 'yourTurn' | 'working' | 'held';
-
-/** In flight's bands in drawn order, with the caption each surface gives them. */
-export const IN_FLIGHT_BANDS: ReadonlyArray<readonly [InFlightBand, string]> = [['yourTurn', 'Your turn'], ['working', 'Working'], ['held', 'Held']];
-
-/**
- * A card whose worker needs an answer: an outstanding `ask` or a harness
- * prompt. Questions lead the Your turn band and are drawn heavier than an
- * idle or blocked turn.
- */
-export function isQuestion(card: KanbanCard): boolean {
-  return turnOf(card).turn === 'question';
-}
-
-/**
- * Whose move it is, read from the card's own turn derivation (`turnOf`).
- * Descendants contribute counts, never a borrowed band. A launch the daemon
- * holds in boot quarantine is nobody's work yet: it sits in
- * Held, after Working, until it is released.
- */
-export function inFlightBand(card: KanbanCard): InFlightBand {
-  if (card.deskSection) return card.deskSection === 'waiting' ? 'yourTurn' : 'working';
-  if (turnOf(card).yours) return 'yourTurn';
-  return card.held ? 'held' : 'working';
-}
-
-/** Your turn, then Working, then Held; within Your turn, questions first; then newest first. */
-export function byInFlightBand(a: KanbanCard, b: KanbanCard): number {
-  const order: Record<InFlightBand, number> = { yourTurn: 0, working: 1, held: 2 };
-  return order[inFlightBand(a)] - order[inFlightBand(b)]
-    || Number(isQuestion(b)) - Number(isQuestion(a))
-    || byCreatedAtDesc(a, b);
 }
 
 export function byClosedAtDesc(a: KanbanCard, b: KanbanCard): number {

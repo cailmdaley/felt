@@ -6,14 +6,12 @@ import {
   byClosedAtDesc,
   byCreatedAtDesc,
   byDueAtAsc,
-  byInFlightBand,
   dedupeMirroredRows,
-  inFlightBand,
-  isQuestion,
 } from './KanbanReadModel.js'
-import { clusterStashCards, sortDatedByReturn, splitStashByReturn } from './KanbanSurfaces.js'
+import { deskOrder } from './deskOrdering.js'
+import { ThreadIndex } from './threads.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
-import { dueCivilDay, instantMs, zone } from './civilDay.js'
+import { dueCivilDay, instantMs } from './civilDay.js'
 import { boardFrom, card, served, type FeedOf, type FeedRow } from './testFixtures.js'
 
 const NOW = Date.parse('2026-10-05T12:00:00Z')
@@ -61,12 +59,6 @@ function surfaceOrder(r: KanbanResponse): unknown {
     past: identities(r.timeline.past), future: identities(r.timeline.futureDated),
     stash: identities(r.stash),
   }
-}
-
-function clusterOrder(cards: KanbanCard[], dated = false): unknown {
-  const clusters = clusterStashCards(cards)
-  return (dated ? sortDatedByReturn(clusters) : clusters)
-    .map((c) => ({ key: c.key, cold: c.cold, cards: identities(c.cards) }))
 }
 
 describe('Desk comparators', () => {
@@ -133,37 +125,6 @@ describe('Desk comparators', () => {
     expect(dueCivilDay('2026-02-30T00:00:00+02:00')).toBeUndefined()
     expect(dueCivilDay('2026-13-01')).toBeUndefined()
     expect(dueCivilDay('2024-02-29')).toBe('2024-02-29')
-  })
-
-  it('ranks questions first in Your turn, then keeps creation order regardless of activity age', () => {
-    const workers = [
-      card({ id: 'waiting-new', status: 'active', workerState: 'running', runtimePhase: 'waiting', createdAt: NEW, lastActivityAt: NOW }),
-      card({ id: 'attention-old', status: 'active', workerState: 'running', runtimePhase: 'attention', createdAt: OLD, lastActivityAt: 1 }),
-      card({ id: 'asked-old', status: 'active', workerState: 'running', runtimePhase: 'working', ask: { text: 'Which?', at: OLD }, createdAt: OLD, uid: 'z', lastActivityAt: 1 }),
-      card({ id: 'working-new', status: 'active', workerState: 'running', runtimePhase: 'working', createdAt: NEW, lastActivityAt: 1 }),
-      card({ id: 'unobserved-old', createdAt: OLD, status: 'active' }),
-    ]
-    const expected = ['attention-old', 'asked-old', 'waiting-new', 'working-new', 'unobserved-old']
-    for (let seed = 1; seed <= 40; seed++) {
-      expect(ids(shuffled(workers, seed).sort(byInFlightBand))).toEqual(expected)
-      const aged = workers.map((c) => ({ ...c, lastActivityAt: seed * 100 }))
-      expect(ids(shuffled(aged, seed).sort(byInFlightBand))).toEqual(expected)
-    }
-    expect(workers.map(inFlightBand)).toEqual(['yourTurn', 'yourTurn', 'yourTurn', 'working', 'working'])
-    expect(workers.map(isQuestion)).toEqual([false, true, true, false, false])
-    // An idle turn joins Your turn below the questions; a question raised on it lifts it to the top.
-    Object.assign(workers[3], { runtimePhase: 'waiting', turn: 'idle' })
-    expect(ids([...workers].sort(byInFlightBand)))
-      .toEqual(['attention-old', 'asked-old', 'waiting-new', 'working-new', 'unobserved-old'])
-    Object.assign(workers[3], { ask: { text: 'Choose the next slice?', at: NEW }, turn: 'question' })
-    expect(ids([...workers].sort(byInFlightBand))[0]).toBe('working-new')
-    Object.assign(workers[3], { ask: undefined, turn: 'idle' })
-    expect(ids([...workers].sort(byInFlightBand)))
-      .toEqual(['attention-old', 'asked-old', 'waiting-new', 'working-new', 'unobserved-old'])
-    // A blocked turn is the human's move but not a question: it stays below them.
-    Object.assign(workers[3], { runtimePhase: 'blocked', turn: 'blocked' })
-    expect(inFlightBand(workers[3])).toBe('yourTurn')
-    expect(ids([...workers].sort(byInFlightBand)).slice(0, 2)).toEqual(['attention-old', 'asked-old'])
   })
 })
 
@@ -248,61 +209,54 @@ describe('mirrored row survivor determinism', () => {
   })
 })
 
-describe('Resting group order', () => {
-  const resting = [
-    card({ id: 'warm-a/new', uid: 'a', createdAt: NEW }),
-    card({ id: 'warm-a/equal', uid: 'b', createdAt: SAME }),
-    card({ id: 'warm-a/old', uid: 'c', createdAt: OLD }),
-    card({ id: 'warm-b/new', uid: 'd', createdAt: NEW }),
-    card({ id: 'warm-c/missing', uid: 'e', createdAt: '' }),
-    card({ id: 'warm-c/invalid', uid: 'f', createdAt: 'bad' }),
-    card({ id: 'cold-a/new', uid: 'g', createdAt: NEW, cold: true }),
+describe('the Desk: every family once, in the column of its most urgent member', () => {
+  const at = (minutes: number): string => new Date(NOW - minutes * 60_000).toISOString()
+  const node = (id: string, over: Partial<KanbanCard> = {}): KanbanCard =>
+    card({ id, uid: id, shuttleKind: 'oneshot', orchestrator: id.includes('/') ? id.slice(0, id.lastIndexOf('/')) : undefined, createdAt: at(600), ...over })
+  // cmbx waits twice, three levels down, and works besides; pipe only works; notes rest; plan is a draft; done was tempered.
+  const cards = [
+    node('cmbx', { status: 'active', workerState: 'running', runtimePhase: 'working', lastActivityAt: NOW - 60_000 }),
+    node('cmbx/kappa', { status: 'active', workerState: 'running', runtimePhase: 'working' }),
+    node('cmbx/kappa/beam', { status: 'active', workerState: 'running', runtimePhase: 'waiting' }),
+    node('cmbx/kappa/beam/mask', { status: 'active', ask: { text: 'Which threshold?', at: at(5) } }),
+    node('cmbx/kappa/beam/cov', { status: 'closed', closedAt: at(30) }),
+    node('pipe', { status: 'active', workerState: 'running', runtimePhase: 'waiting', lastActivityAt: NOW - 120_000 }),
+    node('notes', { status: 'open', effectiveHorizon: 'stashed', modifiedAt: at(10) }),
+    node('plan', { status: 'open', modifiedAt: at(20) }),
+    node('done', { status: 'closed', tempered: true, closedAt: at(1) }),
   ]
+  const index = new ThreadIndex(cards)
 
-  it('keeps warm before cold, newest-created within each cluster and identity ties across clusters', () => {
-    const baseline = clusterOrder(resting)
-    expect(clusterStashCards(resting).map((c) => c.key)).toEqual(['warm-a', 'warm-b', 'warm-c', 'cold-a'])
-    expect(ids(clusterStashCards(resting)[0].cards)).toEqual(['warm-a/new', 'warm-a/equal', 'warm-a/old'])
-    for (let seed = 1; seed <= 40; seed++) expect(clusterOrder(shuffled(resting, seed))).toEqual(baseline)
+  it('draws each family once, where its most urgent member puts it, with every waiting member at any depth, the newest first', () => {
+    const order = deskOrder(index, new Map())
+    expect(Object.fromEntries(Object.entries(order.columns).map(([column, families]) => [column, families.map(family => family.root.id)])))
+      .toStrictEqual({ waiting: ['cmbx'], working: ['pipe'], quiet: ['notes', 'plan'] })
+    const [cmbx] = order.columns.waiting
+    expect(cmbx.waits.map(wait => [wait.card.id, wait.want.kind, wait.want.text])).toStrictEqual([
+      ['cmbx/kappa/beam/mask', 'ask', 'Which threshold?'],
+      ['cmbx/kappa/beam/cov', 'review', 'for review'],
+    ])
+    // The idle worker asked nothing: it works.
+    expect(cmbx.working).toBe(3)
   })
 
-  it('keeps dated warm before cold, then earliest return, then creation within equal-return groups', () => {
-    const dated = resting.map((c) => ({
-      ...c, due: c.cold ? '2026-10-06' : c.id.startsWith('warm-a') ? '2026-10-08T00:00:00+02:00'
-        : c.id.startsWith('warm-b') ? '2026-10-07' : 'bad',
-    }))
-    const baseline = clusterOrder(dated, true)
-    expect(sortDatedByReturn(clusterStashCards(dated)).map((c) => c.key))
-      .toEqual(['warm-b', 'warm-a', 'warm-c', 'cold-a'])
-    for (let seed = 1; seed <= 40; seed++) expect(clusterOrder(shuffled(dated, seed), true)).toEqual(baseline)
-    const groups = splitStashByReturn([...resting, ...dated])
-    expect(groups.undated).toHaveLength(resting.length)
-    expect(groups.dated).toHaveLength(dated.length)
+  it('moves a family to Waiting on you for a post the board names, and orders that column by its newest wait', () => {
+    const order = deskOrder(index, new Map([['pipe', { id: 'p', at: NOW - 60_000, kind: 'post', text: 'Read this.' }]]))
+    expect(order.columns.waiting.map(family => family.root.id)).toStrictEqual(['pipe', 'cmbx'])
+    expect(order.columns.working).toStrictEqual([])
   })
 
-  it('orders distinct returns within a cluster, creation breaks tied return instants', () => {
-    const dated = [
-      card({ id: 'project/old-soon', uid: 'a', createdAt: OLD, due: '2026-10-07' }),
-      card({ id: 'project/new-soon', uid: 'b', createdAt: NEW, due: '2026-10-07T00:00:00+02:00' }),
-      card({ id: 'project/new-later', uid: 'c', createdAt: NEW, due: '2026-10-08' }),
-      card({ id: 'project/invalid', uid: 'd', due: 'bad' }),
-      card({ id: 'project/cold', uid: 'e', due: '2026-10-06', cold: true }),
-      card({ id: 'project/cron', uid: 'f', shuttleKind: 'standing', status: 'active',
-        nextLaunchAt: '2026-10-06T22:00:00-07:00' }),
-    ]
-    // The cron is before Oct 7's midnight in Los Angeles, after it in Paris:
-    // a due sorts at the start of its civil day in the reader's zone, a cron
-    // at its instant.
-    const expectedWarm = {
-      'America/Los_Angeles': ['project/cron', 'project/new-soon', 'project/old-soon', 'project/new-later', 'project/invalid'],
-      'Europe/Paris': ['project/new-soon', 'project/old-soon', 'project/cron', 'project/new-later', 'project/invalid'],
-    }
-    for (const [id, warm] of Object.entries(expectedWarm)) {
-      for (let seed = 1; seed <= 40; seed++) {
-        const clusters = sortDatedByReturn(clusterStashCards(shuffled(dated, seed)), zone(id))
-        expect(ids(clusters[0].cards)).toEqual(warm)
-        expect(ids(clusters[1].cards)).toEqual(['project/cold'])
-      }
-    }
+  it('keeps a top-level with a verdict off the Desk unless something in it still waits or works', () => {
+    expect(deskOrder(index, new Map()).rows.map(row => row.id)).not.toContain('done')
+    const under = new ThreadIndex([...cards, node('done/late', { status: 'active', workerState: 'running', runtimePhase: 'working' })])
+    expect(deskOrder(under, new Map()).columns.working.map(family => family.root.id)).toContain('done')
+  })
+
+  it('walks the reader through each family\'s top-level, then its waiting members, column by column', () => {
+    const order = deskOrder(index, new Map())
+    expect(order.rows.map(row => [row.id, order.placements.get(JSON.stringify([row.originId, row.uid]))?.group])).toStrictEqual([
+      ['cmbx', 'Waiting on you'], ['cmbx/kappa/beam/mask', 'Waiting on you'], ['cmbx/kappa/beam/cov', 'Waiting on you'],
+      ['pipe', 'Working'], ['notes', 'Quiet'], ['plan', 'Quiet'],
+    ])
   })
 })

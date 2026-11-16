@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { KanbanModal } from './KanbanModal.js'
 import { type KanbanResponse } from './KanbanTypes.js'
-import { card, response } from './testFixtures.js'
+import { card, response, settle } from './testFixtures.js'
 import type { Workspace } from './workspace/Workspace.js'
 import { MOBILE_MEDIA } from './mobile.js'
 
@@ -17,15 +17,18 @@ interface Internals {
 let board: KanbanModal, inside: Internals
 let mobile = false
 const head = card({ id: 'hub', uid: 'hub-uid', status: 'active', workerState: 'running', runtimePhase: 'working' })
-const ask = card({ id: 'hub/work', uid: 'ask-uid', orchestrator: 'hub-uid', status: 'active', workerState: 'running', runtimePhase: 'working', tags: ['pinned'] })
+const ask = card({ id: 'hub/work', uid: 'ask-uid', orchestrator: 'hub-uid', status: 'active', ask: { text: 'Which cut?', at: '2026-11-15T10:00:00Z' } })
 const after = card({ id: 'after', uid: 'after-uid', status: 'active', workerState: 'running', runtimePhase: 'working' })
 const data = () => response({ now: { drafts: [], inFlight: [head, after], awaitingReview: [] }, threads: [ask] })
 function draw(): void { inside.lastResponse = data(); inside.render(inside.lastResponse) }
 function press(key: string, target: EventTarget = document): void {
   target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
 }
-const selected = () => document.querySelector<HTMLElement>('.kbn-key-selected')?.dataset.cardUid
-const row = () => document.querySelector<HTMLElement>('.kbn-card[data-card-uid="hub-uid"]')!
+const selected = () => {
+  const el = document.querySelector<HTMLElement>('.kbn-key-selected')
+  return el && `${el.dataset.cardUid}${el.hasAttribute('data-desk-line') ? ' line' : ''}`
+}
+const family = () => document.querySelector<HTMLElement>('.kbn-family[data-card-uid="hub-uid"]')!
 beforeEach(() => {
   mobile = false
   const stored = new Map<string, string>()
@@ -45,59 +48,56 @@ beforeEach(() => {
 })
 afterEach(() => { board?.unmount(); document.body.replaceChildren(); Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal'); Reflect.deleteProperty(HTMLDialogElement.prototype, 'close'); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-it.each(['Enter', 'l', 'ArrowRight'])('%s opens the selected constitution on the first press', key => {
+it.each(['Enter', 'l', 'ArrowRight'])('%s opens the selected family\'s top-level on the first press', key => {
   const open = vi.spyOn(inside, 'openDocumentChannel').mockImplementation(() => {})
-  press('j'); press(key, row())
+  press('j'); press(key, family())
   expect(open).toHaveBeenCalledExactlyOnceWith(head)
-  expect(row().querySelector('.kbn-thread-peek')).toBeNull()
 })
-it('l opens a selected nested thread, not its family root', () => {
+it('l opens a selected waiting line\'s constitution, not its family\'s top-level', () => {
   const open = vi.spyOn(inside, 'openDocumentChannel').mockImplementation(() => {})
-  row().querySelector<HTMLButtonElement>('.kbn-thread-count')!.click()
-  press('j'); expect(selected()).toBe('ask-uid')
+  press('j'); press('j'); expect(selected()).toBe('ask-uid line')
   press('l')
   expect(open).toHaveBeenCalledExactlyOnceWith(ask)
 })
-it.each([false, true])('the state dot opens the constitution once on phone=%s, without pills or glyphs', phone => {
+it.each([false, true])('the state dot opens the top-level once on phone=%s, and a click on a line opens its member', phone => {
   mobile = phone; draw()
   const open = vi.spyOn(inside, 'openDocumentChannel').mockImplementation(() => {})
-  row().querySelector<HTMLButtonElement>('.constitution-state-dot')!.click()
+  family().querySelector<HTMLButtonElement>('.kbn-family-head .constitution-state-dot')!.click()
   expect(open).toHaveBeenCalledExactlyOnceWith(head)
-  expect(row().querySelector('.kbn-card-glyph')).toBeNull()
+  family().querySelector<HTMLElement>('.kbn-family-want')!.click()
+  expect(open).toHaveBeenLastCalledWith(ask)
+  family().querySelector<HTMLElement>('.kbn-family-name')!.click()
+  expect(open).toHaveBeenLastCalledWith(head)
 })
-it('arrows navigate and Escape clears selection without family state', () => {
+it('j and k walk cards and their waiting lines across the columns; h and Escape clear the selection', () => {
   press('j'); expect(selected()).toBe('hub-uid')
+  press('j'); expect(selected()).toBe('ask-uid line')
   press('j'); expect(selected()).toBe('after-uid')
-  press('k'); expect(selected()).toBe('hub-uid')
-  press('ArrowLeft'); expect(selected()).toBeUndefined()
+  press('k'); expect(selected()).toBe('ask-uid line')
+  press('ArrowLeft'); expect(selected()).toBeNull()
   press('j'); expect(selected()).toBe('hub-uid')
-  press('Escape'); expect(selected()).toBeUndefined()
-  expect(document.querySelector('.kbn-thread-peek, .kbn-thread-subentries')).toBeNull()
+  press('Escape'); expect(selected()).toBeNull()
 })
-it('a poll preserves card selection without exposing pinned or waiting subentries', () => {
-  press('j'); draw()
-  expect(selected()).toBe('hub-uid')
-  expect(document.querySelectorAll('.kbn-key-selected')).toHaveLength(1)
-  expect(document.querySelector('[data-card-uid="ask-uid"]')).toBeNull()
-  press('j'); expect(selected()).toBe('after-uid')
-})
-it('Tab reaches the dot and the count, with no menu control and no hidden family stops', () => {
-  press('j'); row().focus(); press('Tab', row())
-  expect(document.activeElement).toBe(row().querySelector('.constitution-state-dot'))
-  press('Tab', document.activeElement!)
-  expect(document.activeElement).toBe(row().querySelector('.kbn-thread-count'))
-  expect(row().querySelector('.kbn-card-menu')).toBeNull()
-})
-it.each([false, true])('the count folds the family\'s threads open and shut, remembered across polls, on phone=%s', phone => {
-  mobile = phone; draw()
-  const shown = () => [...row().querySelectorAll<HTMLElement>('.kbn-desk-threads .kbn-thread-row')].map(r => r.dataset.cardUid)
-  expect(shown()).toEqual([])
-  row().querySelector<HTMLButtonElement>('.kbn-thread-count')!.click()
-  expect(shown()).toEqual(['ask-uid'])
+it('comes back from a waiting line\'s view to that line, and walks on from it', async () => {
+  press('j'); press('j'); expect(selected()).toBe('ask-uid line')
+  press('l')
+  await settle()
+  expect(inside.workspace.isActive).toBe(true)
+  await new Promise<void>(resolve => { window.addEventListener('popstate', () => resolve(), { once: true }); press('Escape') })
   expect(inside.workspace.isActive).toBe(false)
-  draw()
-  expect(shown()).toEqual(['ask-uid'])
-  expect(selected()).toBe('hub-uid'); press('j'); expect(selected()).toBe('ask-uid')
-  row().querySelector<HTMLButtonElement>('.kbn-thread-count')!.click()
-  expect(shown()).toEqual([])
+  expect(selected()).toBe('ask-uid line')
+  press('j'); expect(selected()).toBe('after-uid')
+})
+it('a poll keeps the selected line', () => {
+  press('j'); press('j'); draw()
+  expect(selected()).toBe('ask-uid line')
+  expect(document.querySelectorAll('.kbn-key-selected')).toHaveLength(1)
+  press('j'); expect(selected()).toBe('after-uid')
+})
+it('the Desk has no context menu and nothing to drag', () => {
+  const menu = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+  family().dispatchEvent(menu)
+  expect(menu.defaultPrevented).toBe(false)
+  expect(document.querySelector('.kbn-desk [draggable="true"]')).toBeNull()
+  expect(document.querySelector('[role="menu"]')).toBeNull()
 })

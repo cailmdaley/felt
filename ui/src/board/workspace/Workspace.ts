@@ -1,19 +1,18 @@
+import { turnOf } from '../turn.js'
 import { slug } from '../threadOutline.js'
 import { ThreadIndex, cardNamed } from '../threads.js'
 import { hasWorkerToStop, type KanbanCard } from '../KanbanTypes.js'
 import type { ConsoleOptions, Dock } from './Dock.js'
 import { Verdicts, confirmWorkerStop, type Verdict } from './Verdicts.js'
-import { fiberPageKicker, onDesk, reviewReachable, verdictReachable } from './fiberPageState.js'
+import { onDesk, reviewReachable, verdictReachable } from './fiberPageState.js'
 import { type Charter, charters, holdsRevision, mayBeCharter, roleHolds, roleSlug } from './RolePage.js'
 import type { DispatchFailureBody } from '../KanbanModalShared.js'
 import { readFiber } from './fiberSource.js'
 import { inLane } from '../requestLanes.js'
-import { cardFromCompositeEntry, isQuestion } from '../KanbanReadModel.js'
-import { ownColumn } from '../deskColumn.js'
-import { DESK_COLUMN_TITLE } from '../KanbanSurfaces.js'
+import { cardFromCompositeEntry } from '../KanbanReadModel.js'
 import { normalizeSentFiles, type SentFile } from '../sentFiles.js'
 import { fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
-import { deskCardKey, type DeskPlacement } from '../deskOrdering.js'
+import type { DeskPlacement } from '../deskOrdering.js'
 import { head, RESOURCE_PRIORITY } from '../documentResources.js'
 import { COMPANION_NAMES, channelLead, documentActivity, familyKey, fiberKey, isBaked, isDrawn, leadReceipt, buildChannel, normalizeAbsolutePath, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { conversationDevice } from '../conversationOpening.js'
@@ -106,7 +105,7 @@ const threadFamilyRevision = (card: KanbanCard, index: ThreadIndex): string => {
   const current = index.card(card)
   const ancestry = index.ancestry(current).flatMap(entry => entry.card ? [index.card(entry.card)] : [])
   const scope = ancestry[0] ?? current
-  return JSON.stringify({ card: current, ancestry, family: [scope, ...index.subtree(scope)], summary: index.summary(scope) })
+  return JSON.stringify({ card: current, ancestry, family: [scope, ...index.subtree(scope)] })
 }
 /** Routes, owner-addressed sources and per-channel selection for one reader. */
 export class Workspace {
@@ -344,7 +343,7 @@ export class Workspace {
   openFromDesk(clicked: KanbanCard, quiet = false): void {
     const card = this.live(clicked), view = this.familyDocument(card)
     const open = (): void => {
-      if (!view && card.status === 'active' && isQuestion(card)) this.openQuestion(card)
+      if (!view && card.status === 'active' && turnOf(card).turn === 'question') this.openQuestion(card)
       else this.open(card, this.isActive ? this.origin : this.opts.origin(), view)
     }
     if (quiet) { this.quietly(open); return }
@@ -353,7 +352,7 @@ export class Workspace {
   }
   /** What a constitution last posted: its newest post, question or close note the family board holds, its open question, or its review note; never its outcome. */
   private said(card: KanbanCard): { text: string; at: number } | undefined {
-    const index = this.graph(), root = index.family(index.card(card)).root, uid = card.uid ?? card.id, outcome = card.outcome?.trim()
+    const index = this.graph(), root = index.rootOf(card), uid = card.uid ?? card.id, outcome = card.outcome?.trim()
     this.board.read([root.uid ?? root.id])
     // A closing post's line carries the outcome as its text.
     const posts = this.board.records([root.uid ?? root.id])
@@ -463,32 +462,11 @@ export class Workspace {
     this.history.enter(state.channel.uid, state.channel.owner, doc ?? state.selected, viewForOrigin(origin), scan)
   }
 
-  /** The family's Desk row: its root's, or its lead's while the root itself rests. */
-  private deskAnchor(card: KanbanCard): KanbanCard {
-    const index = this.opts.threadIndex?.()
-    if (!index) return card
-    const { root, lead } = index.family(index.card(card))
-    const onDesk = (candidate: KanbanCard) => this.opts.deskRows().some(row => deskCardKey(row) === deskCardKey(candidate))
-    return [ownColumn(root) ? root : lead, root].find(onDesk) ?? lead
-  }
-  /**
-   * The Desk column a card stands in, whichever view opened the reader:
-   * Drafts, In flight, Awaiting review, Resting, then Roles. A page outside
-   * the Desk gets its own stop.
-   */
+  /** The Desk column a card stands in, its family's when it is not drawn itself; a page off the Desk is Open. */
   private deskStop(card: KanbanCard): string {
-    const root = this.deskAnchor(card)
-    const placement = this.opts.deskPlacement?.(root)
-    if (!placement && this.isOpenPage(card)) return 'Open'
-    const column = placement?.column ?? root.column
-    if (column !== 'tempered' && column !== 'composted' && !root.isCycle) return DESK_COLUMN_TITLE[column]
-    return fiberPageKicker(card) || 'Reading'
-  }
-  /** The current Reader page is outside the drawn Desk projection. */
-  private isOpenPage(card: KanbanCard): boolean {
-    const current = this.current?.card
-    if (!current || deskCardKey(current) !== deskCardKey(card)) return false
-    return !this.opts.deskRows().some(row => deskCardKey(row) === deskCardKey(this.deskAnchor(card)))
+    const index = this.opts.threadIndex?.()
+    const placement = this.opts.deskPlacement?.(card) ?? (index && this.opts.deskPlacement?.(index.rootOf(card)))
+    return placement?.group ?? 'Open'
   }
 
   /** View keys park the reader. */
@@ -1052,7 +1030,6 @@ export class Workspace {
           // The feed owns office metadata between body reads.
           if (feed) {
             metadata.orchestrator = feed.orchestrator
-            metadata.threadSummary = feed.threadSummary
             metadata.shuttleRole = feed.shuttleRole
             metadata.shuttlePerson = feed.shuttlePerson
             metadata.shuttleSeat = feed.shuttleSeat

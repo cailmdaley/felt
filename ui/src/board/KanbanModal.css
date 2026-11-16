@@ -71,22 +71,6 @@
   background-clip: text;
   opacity: 0.66;
 }
-/* Per-column F2 body tinting. Each live column's initial wears its own
-   pigment, and cinnabar stays out of the row (it carries the masthead K, the
-   fleuron and the section-strip dropcaps):
-
-     Drafts          ochre      what is owed: a draft waits on you
-     In Flight       cobalt     the machine at work
-     Awaiting        verdigris  the verdict axis
-
-   The F1 vine (.kbn-cap::before) is the same across all three — iron gall on
-   paper, gilt on dark stock — so the row reads as one hand.
-
-   There is no Tempered or Discarded column styling: those columns feed the
-   timeline, and renderColumn/renderCard only ever take the three Now kinds. */
-.kbn-col-drafts .kbn-cap { color: var(--kbn-owed-bright); }       /* ochre */
-.kbn-col-inFlight .kbn-cap { color: var(--kbn-agent); }                 /* cobalt */
-.kbn-col-awaitingReview .kbn-cap { color: var(--kbn-tempered); }  /* verdigris — the verdict axis */
 
 /* Fills the host element the board is mounted into (`#app`, from main.ts):
    the host gives a positioning context, and the kanban stretches to inset:0
@@ -133,8 +117,7 @@
   border-color: color-mix(in srgb, var(--kbn-you) 50%, transparent);
   color: color-mix(in srgb, var(--kbn-you) 88%, var(--kbn-ink));
 }
-/* The page's column of sections. The board scrolls vertically; each
-   lifecycle cell handles its own dense card stack. */
+/* The page's column. The board scrolls vertically; each Desk column scrolls its own cards. */
 .kbn-body {
   flex: 1;
   display: flex;
@@ -247,30 +230,19 @@
   .kbn-desk { transition: none; }
 }
 
-/* ── Section layout: Now → Resting ──────────────────────────────────────── */
-/* Only Resting carries a section head (the layout reads on its own; Resting
-   names a surface whose meaning isn't self-evident). */
+/* ── The Desk: a head row, then its three columns ──────────────────────── */
 .kbn-section {
   position: relative;
   display: flex;
   flex-direction: column;
   border-radius: 3px;
   transition: background 140ms ease;
-  /* Spacing between sections lives on `.kbn-body { gap }` — no margin
-     here so the sections sit flush in their vertical rhythm. */
 }
-.kbn-section-drop {
-  background: color-mix(in srgb, var(--kbn-owed-bright) 8%, transparent);
-  outline: 1px dashed color-mix(in srgb, var(--kbn-owed-bright) 45%, transparent);
-  outline-offset: -2px;
-}
+/* The columns take the Desk's whole height; each scrolls on its own. */
 .kbn-section-now {
-  /* Now claims most of the height and Resting sits under it: 220px is
-     enough for a full row of Resting clusters, so the whole Desk fits on a
-     normal viewport and Resting is never a place you scroll to find. Falls
-     back to plain `flex: 1` on a short viewport. */
   flex: 1 1 auto;
-  min-height: min(64vh, calc(100% - 220px));
+  min-height: 0;
+  gap: 6px;
 }
 .kbn-now-board {
   display: grid;
@@ -279,252 +251,6 @@
   flex: 1 1 auto;
   min-height: 0;
 }
-
-/* ── Band head ────────────────────────────────────────────────────────────
-   The heading voice for the Desk's named band, Resting.
-   Same hand as `.kbn-col-title` and `.kbn-view-title` — EB Garamond small
-   caps carrying the layered F2/F1 dropcap on its leading letter — a size
-   down again, because a band label sits beside its own contents rather than
-   above a lane (33px) or a whole view page (28px).
-
-   No dropcap here, deliberately. The layered F2/F1 initial is sized as a
-   fraction of its title (0.73em), so at band scale the flourish falls below
-   the size where its detail strokes read — it looks like a smudge rather than
-   an illumination. Illumination is reserved for the two heads big enough to
-   carry it: the column title and the view-page title. The bands get the same
-   hand, plain — marginalia, not rubrication. */
-.kbn-bandhead {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  flex-wrap: wrap;
-  min-width: 0;
-}
-.kbn-bandhead-title {
-  margin: 0;
-  font-family: var(--font-serif);
-  font-size: var(--type-title);
-  line-height: var(--leading-solid);
-  font-weight: 500;
-  font-variant-caps: all-small-caps;
-  letter-spacing: var(--track-kicker);
-  text-transform: none;
-  color: var(--kbn-ink);
-  white-space: nowrap;
-}
-/* Count in the column-count idiom — same mono, same muted ink, same offset. */
-.kbn-bandhead-count {
-  font-family: var(--font-mono);
-  font-size: var(--type-note);
-  color: var(--kbn-ink-muted);
-}
-/* ── Drag-reveal horizon ─────────────────────────────────────────────────────
-   The Desk keeps no permanent time axis: the chronicle tells the
-   past-and-future story, and the room goes to Resting. What the
-   Desk needs from a day axis is the GESTURE — dropping a card on a date — so
-   the axis appears for exactly as long as a card is in the air.
-
-   Height, not display, is what animates: a zero-height overflow-hidden band
-   that grows to one row. `display:none` can't be transitioned.
-   Emptied on close (see syncDragHorizon), so it costs nothing at rest.
-
-   THE STRIP MUST NOT MOVE THE BOARD. It appears at `dragstart` — after the
-   press, after the human has aimed — so any layout space it takes is stolen
-   from under a cursor that is already committed: the card you lifted slides
-   ~61px down and the pixel you aimed at belongs to something else. (That is
-   the shift `stackClaimsDrop`'s dwell rule in KanbanRules was written to
-   survive.) So the strip lives OUT OF FLOW: the host is a permanent
-   zero-height anchor in the body's flex column — holding the strip's place
-   under the tab strip — and the inner band is absolutely positioned against
-   it, growing downward OVER the top of the Now board. Nothing below reflows,
-   at any scroll position, in any column. It floats: opaque ground and a soft
-   shadow, so the column heads it covers for the length of the drag read as
-   behind it rather than mixed into it. */
-.kbn-draghorizon {
-  flex: 0 0 auto;
-  height: 0;
-  position: relative;
-  /* Above the desk it hangs over — sections are positioned but z-index:auto. */
-  z-index: 5;
-}
-.kbn-draghorizon-inner {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 0;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  transition: height 130ms cubic-bezier(0.22, 0.61, 0.36, 1);
-  /* Opaque, because it hangs over the board rather than sitting in the column
-     of it. The parchment ground is `.kbn-modal`'s own. */
-  background: var(--kbn-parchment);
-  border-radius: 3px;
-  box-shadow: 0 6px 14px color-mix(in srgb, var(--kbn-shade) 14%, transparent);
-}
-.kbn-draghorizon-open .kbn-draghorizon-inner {
-  height: 60px;
-}
-/* The aim readout — a fixed line under the strip naming the target under the
-   cursor. It holds its height whether or not it has words, so the strip does
-   not jump as you cross from cell to cell. */
-.kbn-draghorizon-aim {
-  height: 18px;
-  box-sizing: border-box;
-  padding: 3px 4px;
-  font-family: var(--font-serif);
-  font-style: italic;
-  font-size: var(--type-meta);
-  line-height: var(--leading-solid);
-  color: var(--kbn-ink-faint);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.kbn-draghorizon-aim-live { color: var(--kbn-owed-umber); }
-.kbn-draghorizon-wrap {
-  height: 40px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  -webkit-overflow-scrolling: touch;
-  background: color-mix(in srgb, var(--kbn-parchment) 55%, transparent);
-  border: 1px solid color-mix(in srgb, var(--kbn-owed) 30%, transparent);
-  border-radius: 3px;
-}
-/* Cells share the width and only scroll when they cannot fit — a wide board
-   gets generous targets, a narrow one keeps all three weeks reachable (with
-   the drag edge-scroll in installEdgeScroll). */
-.kbn-draghorizon-row {
-  display: flex;
-  align-items: stretch;
-  height: 100%;
-  min-width: min-content;
-}
-.kbn-draghorizon-day {
-  flex: 1 1 auto;
-  min-width: 58px;
-}
-
-/* Day cells: a small-caps serif weekday, an oldstyle numeral, and a
-   gold-leaf today. */
-.kbn-timeline-day {
-  display: flex;
-  flex-direction: row;
-  align-items: baseline;
-  justify-content: center;
-  gap: 5px;
-  padding: 1px 1px 2px;
-  border-right: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 18%, transparent);
-  position: relative;
-  line-height: var(--leading-solid);
-}
-.kbn-timeline-day-weekend { background: color-mix(in srgb, var(--kbn-shade) 4%, transparent); }
-.kbn-timeline-day-today {
-  background: color-mix(in srgb, var(--kbn-owed) 14%, transparent);
-  border-left: 1.5px solid var(--kbn-owed);
-  border-right: 1.5px solid var(--kbn-owed);
-}
-.kbn-timeline-day-week-boundary {
-  border-right: 1px solid color-mix(in srgb, var(--kbn-ink-muted) 45%, transparent);
-}
-/* Day-of-week label — set as small caps in the serif rather than the
-   technical mono, so the strip reads as a manuscript almanac. */
-.kbn-timeline-day-dow {
-  font-size: var(--type-note);
-  font-family: var(--font-serif);
-  font-variant-caps: all-small-caps;
-  color: var(--kbn-ink-faint);
-  letter-spacing: var(--track-kicker);
-}
-.kbn-timeline-day-num {
-  font-size: var(--type-note);
-  font-family: var(--font-serif);
-  font-weight: 500;
-  color: var(--kbn-ink-sepia);
-  font-feature-settings: "onum";
-}
-.kbn-timeline-day-today .kbn-timeline-day-num,
-.kbn-timeline-day-today .kbn-timeline-day-dow {
-  color: var(--kbn-owed);
-  font-weight: 600;
-}
-/* Hovered drop target. The day cell IS the drop column, so the fill below and
-   the outline on `.kbn-timeline-dropcol-active` compose on one element; a cycle
-   chip taking the same drop wears only the outline.
-
-   The hovered target has to win against a card ghost passing over it, so it
-   is a filled block with a solid gold edge, not a dashed hint. Its unhovered
-   neighbours step back (see the :has rule below) so the candidate is the only
-   lit thing on the strip. */
-.kbn-timeline-day.kbn-timeline-dropcol-active {
-  background: color-mix(in srgb, var(--kbn-owed-bright) 42%, transparent);
-}
-.kbn-timeline-day.kbn-timeline-dropcol-active .kbn-timeline-day-num,
-.kbn-timeline-day.kbn-timeline-dropcol-active .kbn-timeline-day-dow {
-  color: var(--kbn-owed-sepia);
-  font-weight: 600;
-}
-.kbn-timeline-dropcol-active {
-  outline: 2px solid var(--kbn-owed);
-  outline-offset: -2px;
-  z-index: 1;
-}
-/* Quiet the field while one target is lit. Pure CSS so nothing has to track
-   which sibling is active; if :has is unavailable the strip simply stays at
-   full strength. */
-.kbn-draghorizon-row:has(.kbn-timeline-dropcol-active)
-  .kbn-timeline-dropcol:not(.kbn-timeline-dropcol-active) {
-  opacity: 0.42;
-}
-
-/* The two inner spans below (.kbn-cyclechip-name / -span) are SHARED with the
-   Desk's cycle lens row: a chip that names a cycle wears the same clothes
-   wherever it stands. Only the plate around them differs. */
-
-.kbn-cyclechip-name {
-  font-family: var(--font-serif);
-  font-style: italic;
-  font-size: var(--type-note);
-  line-height: var(--leading-solid);
-  color: var(--kbn-owed-umber);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.kbn-cyclechip-span {
-  font-family: var(--font-serif);
-  font-variant-caps: all-small-caps;
-  font-feature-settings: "onum";
-  font-size: var(--type-note);
-  letter-spacing: var(--track-kicker);
-  line-height: var(--leading-solid);
-  color: var(--kbn-ink-faint);
-  white-space: nowrap;
-}
-
-/* ── The cycle lens row ──────────────────────────────────────────────────────
-   A quiet line above the columns: one chip per live chapter. It is chrome that
-   should be invisible until wanted, so at rest the chips are barely tinted and
-   the row carries no rule, no heading, no count of its own. */
-.kbn-lensbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 5px;
-  padding: 0;
-}
-/* Cycles take their own line under the tabs, present only while any exist. */
-.kbn-viewtabs-lens {
-  order: 1;
-  flex: 1 0 100%;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  overflow: hidden;
-}
-.kbn-viewtabs-lens:empty { display: none; }
-.kbn-viewtabs-lens .kbn-lensbar { min-width: 0; }
 
 /* The tabs keep the bar's spacing inside their own tablist. */
 .kbn-viewtabs-views { flex: none; display: flex; align-items: center; gap: 6px; }
@@ -553,14 +279,12 @@
   .kbn-viewtabs-views { gap: 4px; }
   .kbn-viewtabs-find { margin-left: 2px; }
 }
-/* The centre holds the Desk's lens chips, at its right end. It always spans
-   Find to Settings, so the gear stands still across views. */
+/* The centre always spans Find to Settings, so the gear stands still across views. */
 .kbn-viewtabs-centre { flex: 1 1 0; min-width: 0; align-self: stretch; display: flex; align-items: center; position: relative; }
 .kbn-reader-open .kbn-viewtabs { z-index: calc(var(--ws-reader-layer, 9000) + 2); }
-.kbn-reader-open .kbn-viewtabs-lens { display: none !important; }
 /* Expand takes the whole window; the bar steps aside until it is restored. */
 .kbn-reader-expanded .kbn-viewtabs { visibility: hidden; }
-/* The settings gear closes the strip past the lens. Not a tab, and shaped so:
+/* The settings gear closes the strip. Not a tab, and shaped so:
    no keycap, no name, a square of chrome rather than a page you can be on. It
    is iron gall like every other piece of machinery here, and it never takes a
    pigment — opening a settings sheet is not a claim about the work. */
@@ -597,193 +321,8 @@
   outline: 1px dashed color-mix(in srgb, var(--kbn-you) 55%, transparent);
   outline-offset: 2px;
 }
-.kbn-lens-chip {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  max-width: 260px;
-  padding: 2px 8px;
-  border: 0.5px solid color-mix(in srgb, var(--kbn-owed) 30%, transparent);
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--kbn-owed-bright) 7%, transparent);
-  cursor: pointer;
-  overflow: hidden;
-  transition: background 120ms ease, border-color 120ms ease;
-}
-.kbn-lens-chip:hover { background: color-mix(in srgb, var(--kbn-owed-bright) 16%, transparent); }
-/* The chapter we are living in reads a shade warmer than the ones ahead. */
-.kbn-lens-chip-running { border-color: color-mix(in srgb, var(--kbn-owed) 52%, transparent); }
-/* Engaged: filled ochre, the same loud step a drop target takes when it is
-   the one under the cursor — one visual grammar for "this is the live one". */
-.kbn-lens-chip-active {
-  background: color-mix(in srgb, var(--kbn-owed-bright) 42%, transparent);
-  border-color: var(--kbn-owed);
-}
-.kbn-lens-chip-active .kbn-cyclechip-name { color: var(--kbn-owed-sepia); }
-.kbn-lens-chip-active .kbn-cyclechip-span { color: var(--kbn-owed-umber); }
-.kbn-lens-chip-count {
-  font: var(--type-meta)/var(--leading-solid) var(--font-mono);
-  font-variant-caps: normal;
-  letter-spacing: 0;
-  color: var(--kbn-ink-dun);
-}
-.kbn-lens-chip-active .kbn-lens-chip-count { color: var(--kbn-owed-sepia); }
-.kbn-lens-chip-release {
-  font-size: var(--type-meta);
-  color: var(--kbn-owed-umber);
-}
-/* ARMED: a lens chip under the cursor mid-drag. The same loud step as a day
-   cell, in the chip's own clothes: filled ochre, solid edge, and a small lift
-   so it reads through a ghost passing over it. */
-.kbn-lens-chip.kbn-timeline-dropcol-active {
-  background: color-mix(in srgb, var(--kbn-owed-bright) 50%, transparent);
-  border-color: var(--kbn-owed);
-  transform: scale(1.05);
-}
-.kbn-lens-chip.kbn-timeline-dropcol-active .kbn-cyclechip-name { color: var(--kbn-owed-sepia); }
-.kbn-lens-chip.kbn-timeline-dropcol-active .kbn-cyclechip-span { color: var(--kbn-owed-umber); }
-.kbn-lens-chip.kbn-timeline-dropcol-active .kbn-lens-chip-count { color: var(--kbn-owed-sepia); }
 
-/* What the lens does to the columns. A receded card is DIMMED, never hidden and
-   never disabled — it still takes clicks and still drags, because the lens is a
-   way of looking and the desk underneath is unchanged. */
-.kbn-card--lens-off {
-  opacity: 0.35;
-  transition: opacity 140ms ease;
-}
-
-/* A ghost is a member the desk was not showing — resting, due inside the span.
-   Dashed plate, no fill: present, but plainly not standing on this column. */
-.kbn-card--lens-ghost {
-  border-style: dashed;
-  border-color: color-mix(in srgb, var(--kbn-owed) 55%, transparent);
-  background: transparent;
-  box-shadow: none;
-  opacity: 0.82;
-}
-
-/* Pager chip — the resting-cluster overflow control (.kbn-cluster-more). A
-   slim gold-leaf pill that reads as a manuscript catchword rather than a UI
-   scrollbar; click cycles pages. */
-.kbn-tl-pager {
-  align-self: start;
-  justify-self: start;
-  margin: 1px 2px 0;
-  padding: 0 6px;
-  height: 18px;
-  background: transparent;
-  border: 0.5px solid color-mix(in srgb, var(--kbn-owed) 35%, transparent);
-  border-radius: 8px;
-  font-family: var(--font-serif);
-  font-size: var(--type-meta);
-  color: color-mix(in srgb, var(--kbn-owed-bright) 60%, var(--kbn-ink));
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
-}
-.kbn-tl-pager:hover {
-  background: color-mix(in srgb, var(--kbn-owed) 14%, transparent);
-  border-color: color-mix(in srgb, var(--kbn-owed) 60%, transparent);
-  color: color-mix(in srgb, var(--kbn-owed-bright) 42%, var(--kbn-ink));
-}
-.kbn-tl-pager:focus-visible {
-  outline: 1px dashed var(--kbn-owed);
-  outline-offset: 2px;
-}
-/* Roles — seats at rest (`shuttle.seat`), a slim launcher band between the Now
-   board and Resting. A launcher, not a monitor: you arrive meaning to sit in
-   an office, so it reads as a dense row of chips on the section substrate, not
-   a lane competing with the board. The head sits at the left of the row with
-   the column head's hairline rule turned ninety degrees to follow the band. */
-.kbn-section-roles {
-  flex: 0 0 auto;
-  flex-direction: row;
-  align-items: center;
-  border: 1px solid color-mix(in srgb, var(--kbn-ink) 10%, transparent);
-  background: color-mix(in srgb, var(--kbn-parchment) 45%, transparent);
-  border-radius: 3px;
-  padding: 5px 10px;
-  gap: 10px;
-}
-.kbn-section-roles .kbn-bandhead {
-  flex: 0 0 auto;
-  align-self: stretch;
-  align-items: center;
-  flex-wrap: nowrap;
-  padding-right: 10px;
-  border-right: 1px solid color-mix(in srgb, var(--kbn-owed-bright) 32%, transparent);
-}
-/* Every seat shows: chips wrap to as many rows as there are seats, in name
-   order, with no pager. */
-.kbn-roles-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  align-content: flex-start;
-  gap: 6px;
-  min-width: 0;
-  flex: 1 1 auto;
-  padding: 1px 0;
-}
-/* The chip wears `.kbn-card`'s plate — a seat is the same object as a card on
-   the board, standing still — in one dense row: dot · name · hint. */
-.kbn-role-chip {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 260px;
-  margin: 0;
-  padding: 3px 8px;
-  background: var(--kbn-paper);
-  border: 1px solid color-mix(in srgb, var(--kbn-ink) 12%, transparent);
-  border-radius: 3px;
-  font-family: var(--font-serif);
-  color: var(--kbn-ink);
-  cursor: pointer;
-  user-select: none;
-  -webkit-user-select: none;
-  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease, opacity 120ms ease;
-}
-.kbn-role-chip:hover {
-  background: var(--kbn-paper-bright);
-  border-color: color-mix(in srgb, var(--kbn-ink) 22%, transparent);
-}
-.kbn-role-chip:focus-visible {
-  outline: 1px dashed color-mix(in srgb, var(--kbn-you) 55%, transparent);
-  outline-offset: -2px;
-}
-.kbn-role-chip.kbn-card-dragging { opacity: 0.4; }
-.kbn-role-chip.kbn-card--stale { opacity: 0.5; cursor: default; }
-.kbn-role-chip-dot {
-  flex: 0 0 auto;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--kbn-ink-muted) 40%, transparent);
-}
-.kbn-role-chip-dot-held { background: var(--kbn-owed-bright); }
-.kbn-role-chip-dot-stale { background: color-mix(in srgb, var(--kbn-ink-muted) 35%, transparent); }
-.kbn-role-chip-name {
-  /* A notch under `.kbn-card-name` (14.5px): the same object, quieter. */
-  font-size: var(--type-note);
-  line-height: var(--leading-solid);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.kbn-role-chip-hint {
-  flex: 0 0 auto;
-  font-family: var(--font-serif);
-  font-size: var(--type-meta);
-  color: color-mix(in srgb, var(--kbn-ink-muted) 75%, transparent);
-}
-
-/* Resting (the surface stored as `horizon: stashed`) — the board's section
-   substrate itself, which is what makes it read as standing furniture rather
-   than another lane: no shadow, no lift. The head names what the bottom of the page
-   means; the gloss is there so a card down here doesn't read as one that
-   failed. Under the head, the column head's own hairline rule. */
+/* The Rest dialog: a scrim over the board, and a calendar to choose a return day. */
 .kbn-rest-scrim {
   position: fixed;
   inset: 0;
@@ -805,51 +344,6 @@
   box-shadow: 0 18px 60px color-mix(in srgb, var(--kbn-shade) 45%, transparent);
   outline: none;
 }
-.kbn-role-scrim { position: fixed; inset: 0; z-index: 10600; }
-.kbn-role-popover {
-  position: fixed;
-  width: min(380px, calc(100vw - 32px));
-  box-sizing: border-box;
-  max-height: calc(100vh - 32px);
-  overflow-y: auto;
-  gap: 10px;
-  padding: 18px;
-}
-.kbn-role-popover input {
-  box-sizing: border-box;
-  width: 100%;
-  padding: 8px 10px;
-  font: inherit;
-  color: inherit;
-  background: color-mix(in srgb, var(--kbn-ink) 4%, transparent);
-  border: 1px solid color-mix(in srgb, var(--kbn-ink) 25%, transparent);
-  border-radius: 5px;
-}
-.kbn-role-options { display: grid; max-height: 210px; overflow-y: auto; }
-.kbn-role-option, .kbn-role-cancel {
-  border: 0;
-  border-radius: 5px;
-  padding: 9px 8px;
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.kbn-role-option { display: grid; gap: 3px; }
-.kbn-role-option span, .kbn-role-message, .kbn-role-new label {
-  font-size: var(--type-note);
-  color: var(--kbn-ink-muted);
-}
-.kbn-role-message { margin: 0; }
-.kbn-role-message:empty { display: none; }
-.kbn-role-option:hover, .kbn-role-option:focus-visible, .kbn-role-cancel:hover {
-  background: color-mix(in srgb, var(--kbn-owed-bright) 12%, transparent);
-}
-.kbn-role-new { display: grid; gap: 10px; }
-.kbn-role-new[hidden] { display: none; }
-.kbn-role-new label { display: grid; gap: 4px; }
-.kbn-role-popover :focus-visible { outline: 2px solid var(--kbn-owed-bright); outline-offset: 1px; }
 .kbn-rest-title { margin: 0; font-size: var(--type-title); font-weight: 400; }
 .kbn-rest-subject {
   margin: -8px 0 0;
@@ -928,171 +422,11 @@
   cursor: pointer;
 }
 
-.kbn-section-stash {
-  flex: 0 0 auto;
-  border: 1px solid color-mix(in srgb, var(--kbn-ink) 10%, transparent);
-  background: color-mix(in srgb, var(--kbn-parchment) 45%, transparent);
-  border-radius: 3px;
-  padding: 5px 10px 10px;
-}
-.kbn-section-stash .kbn-bandhead {
-  padding-bottom: 4px;
-  margin-bottom: 8px;
-  border-bottom: 1px solid color-mix(in srgb, var(--kbn-owed-bright) 32%, transparent);
-}
-.kbn-cluster-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 10px;
-}
-/* A cluster is a small column: a rag sheet with a ruled head over a list. It
-   wears `.kbn-col`'s plate — same var(--kbn-sheet) ground, same ochre hairline, same
-   ruled head — at cluster scale. What makes Resting read as asleep is not a
-   different container but the register of its contents (flattened list lines
-   instead of card plates) and the `-cold` variation below. */
-.kbn-cluster {
-  background: var(--kbn-sheet);
-  border: 1px solid color-mix(in srgb, var(--kbn-owed-bright) 22%, transparent);
-  border-radius: 3px;
-  padding: 4px 8px 8px;
-}
-.kbn-cluster-cold {
-  background: color-mix(in srgb, var(--kbn-recess) 40%, transparent);
-  border-color: color-mix(in srgb, var(--kbn-owed-bright) 12%, transparent);
-}
-.kbn-cluster-head {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  margin-bottom: 6px;
-  padding-bottom: 3px;
-  border-bottom: 1px solid color-mix(in srgb, var(--kbn-owed-bright) 32%, transparent);
-}
-.kbn-cluster-cold .kbn-cluster-head { border-bottom-color: color-mix(in srgb, var(--kbn-owed-bright) 18%, transparent); }
-/* Containment path. Mono and small so a split key (`science/unions`) stays
-   scannable at a glance; the parent segments recede so the eye lands on the
-   segment that distinguishes this cluster from its siblings. */
-.kbn-cluster-name {
-  font-family: var(--font-serif);
-  font-size: var(--type-meta);
-  color: var(--kbn-ink);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.kbn-cluster-name-parents { color: var(--kbn-ink-faint); }
-.kbn-cluster-name-leaf { font-weight: 600; }
-.kbn-cluster-cold .kbn-cluster-name { color: var(--kbn-ink-muted); }
-.kbn-cluster-cold .kbn-cluster-name-parents { color: var(--kbn-graphite-pale); }
-/* "+N more" on a cluster that could not be split any deeper. Sits flush left
-   under the four it does show. */
-.kbn-cluster-more {
-  margin-top: 3px;
-  margin-left: 0;
-}
-.kbn-cluster-count {
-  font-family: var(--font-mono);
-  font-size: var(--type-meta);
-  color: var(--kbn-ink-faint);
-}
-.kbn-cluster-tag {
-  font-family: var(--font-mono);
-  font-size: var(--type-meta);
-  color: var(--kbn-you);
-  opacity: 0.7;
-  margin-left: auto;
-}
-.kbn-cluster-cold .kbn-cluster-tag { color: var(--kbn-ink-faint); }
-.kbn-cluster-divider {
-  grid-column: 1 / -1;
-  text-align: center;
-  font-family: var(--font-serif);
-  font-style: italic;
-  font-size: var(--type-meta);
-  color: var(--kbn-ink-faint);
-  padding: 6px 0;
-}
-/* The seam between Resting's two halves — undated (watch list) above,
-   dated (already scheduled to return) below. Same quiet idiom as the
-   held-open divider, with a hairline above it so the two temperatures of
-   Resting still read as one region split, not a second section. */
-.kbn-cluster-divider-group {
-  border-top: 1px solid var(--kbn-hairline);
-  margin-top: 4px;
-  padding-top: 10px;
-}
-.kbn-cluster-empty {
-  line-height: var(--leading-ui);
-  grid-column: 1 / -1;
-  text-align: center;
-  font-family: var(--font-serif);
-  font-style: italic;
-  font-size: var(--type-meta);
-  color: var(--kbn-ink-faint);
-  padding: 14px 0;
-}
-.kbn-cluster-item {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 3px 2px;
-  font-family: var(--font-serif);
-  /* A notch under the column card's 14.5px title: the same object in a
-     quieter register. */
-  font-size: var(--type-note);
-  color: var(--kbn-ink-sepia);
-  cursor: pointer;
-  line-height: var(--leading-tight);
-}
-/* `display: flex` above outranks the UA's `[hidden] { display: none }`, so the
-   overflow items past "+N more" stayed visible while reporting themselves
-   hidden. Restate it at matching specificity. */
-.kbn-cluster-item[hidden] { display: none; }
-/* Hover in the card's own direction — brighter rag ground, ink firming up —
-   at the weight a plateless list line can carry, and on the board's single
-   3px radius. */
-.kbn-cluster-item:hover {
-  color: var(--kbn-ink);
-  background: var(--kbn-paper);
-}
-.kbn-cluster-cold .kbn-cluster-item {
-  color: var(--kbn-ink-muted);
-  font-style: italic;
-}
-.kbn-cluster-item-title {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-/* A standing constitution at rest, armed or paused, carries a hairline slate
-   left edge, so schedule-driven rows are findable in a cluster at a glance. */
-.kbn-cluster-item-standing { box-shadow: inset 1.5px 0 0 color-mix(in srgb, var(--kbn-slate) 32%, transparent); }
-/* A standing constitution's schedule: when it next fires, or that it is paused. */
-.kbn-cluster-item-schedule {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--type-meta);
-  font-style: normal;
-  color: var(--kbn-ink-muted);
-}
-.kbn-cluster-item[data-schedule="paused"] .kbn-cluster-item-schedule { font-style: italic; }
-
 .kbn-col {
   display: flex;
   flex-direction: column;
   min-height: 0;
   min-width: 0;
-  /* Cap kept as a ceiling for the case where Now is the only expanded row
-     and there's plenty of vertical room; without it a single tall column
-     can stretch unboundedly. The horizon-row's flex:1 still ensures the
-     row fills the board height. */
-  max-height: min(72vh, 760px);
   /* Each column reads as a sheet of rag laid on the parchment desk — a
      touch warmer-bright than the page beneath, with a hairline ochre
      rule rather than the previous near-invisible ink border. */
@@ -1107,72 +441,23 @@
     0 1px 0 color-mix(in srgb, var(--kbn-paper-bright) 55%, transparent) inset,
     0 1px 3px color-mix(in srgb, var(--kbn-shade) 4%, transparent);
 }
-.kbn-col-awaitingReview {
-  border-color: color-mix(in srgb, var(--kbn-owed-bright) 55%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--kbn-owed-bright) 18%, transparent);
-}
-.kbn-col-drafts {
-  background: var(--kbn-recess);
-  border-style: dashed;
-  opacity: 0.92;
-}
-/* On dark stock the recess is sunk below the desk and shadowed from its
-   upper edge, the way a well reads under a lamp. */
-:root[data-ws-appearance='dark'] .kbn-col-drafts {
-  opacity: 1;
-  box-shadow: inset 0 2px 10px color-mix(in srgb, var(--kbn-shade) 55%, transparent);
-}
-/* Drafts body stays in default iron-gall — only the D dropcap is
-   illuminated; the title body never wears pigment. */
-/* Active drop target while a drag is in progress. */
-.kbn-col-drop {
-  background: color-mix(in srgb, var(--kbn-owed-bright) 10%, transparent);
-  border-color: color-mix(in srgb, var(--kbn-owed-bright) 55%, transparent);
-  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--kbn-owed-bright) 45%, transparent);
-}
 .kbn-col-head {
-  /* The label cluster (title + count, baseline-aligned within
-     .kbn-col-head-label) sits left; the per-lane round action centers at the
-     right edge. align-items:center so the 28px button centers against the
-     illuminated title rather than hanging from its baseline. */
+  /* The title and its count, on one baseline, over a hairline rule; the
+     padding keeps the illuminated initial's flourish clear of the rule. */
   display: flex; align-items: center; justify-content: space-between;
   width: 100%;
-  /* border-box so the side padding sits INSIDE the 100% width. Without it the
-     content-box head measures 100% + 28px (its own h-padding) — wider than the
-     column — so the right-aligned round action hangs ~28px past the column edge
-     and `.kbn-col`'s `overflow:hidden` slices it into a half-moon. With
-     border-box the action seats against the right padding, fully inside the
-     clip box. */
   box-sizing: border-box;
-  /* Padding hugs the illuminated character — top/bottom just enough to
-     keep the F1 flourish overlay from clipping the hairline rule or the
-     column edge above. The right pad is widened to 12px so the 28px circle
-     clears its 2-4px drop shadow + the 1.06 hover scale without touching the
-     column's clip edge; left stays generous so the rule reads as ruled. */
   padding: 4px 12px 3px 14px;
   border: none;
-  /* Single hairline rule under the head — a touch warmer than the
-     previous near-invisible setting so it reads as a deliberate stroke,
-     not a soft fade. */
   border-bottom: 1px solid color-mix(in srgb, var(--kbn-owed-bright) 32%, transparent);
   background: transparent;
   color: inherit;
   font-family: inherit;
-  cursor: pointer;
-  outline: none;
 }
-/* Title + count cluster — keeps the dropcap and the count on a shared
-   baseline regardless of the head's center alignment for the round action. */
+/* Title + count cluster — keeps the dropcap and the count on a shared baseline. */
 .kbn-col-head-label {
   display: flex; align-items: baseline; gap: 0;
   min-width: 0;
-}
-.kbn-col-head:focus { outline: none; }
-.kbn-col-head:focus-visible {
-  /* Manuscript focus — cinnabar dashed inset so it reads as a ruled
-     mark rather than a browser-default selection ring. */
-  outline: 1px dashed color-mix(in srgb, var(--kbn-you) 55%, transparent);
-  outline-offset: -2px;
 }
 /* Column title — small caps in EB Garamond rather than uppercase, so
    the head reads as a section in a manuscript header rather than a
@@ -1185,32 +470,9 @@
      the dropcap's visible height. EB Garamond's small-cap ratio runs
      ~0.73, and the cap is set at 0.73em, so the two land together for
      a uniform "D-R-A-F-T-S" rhythm rather than a dropcap-above-small-
-     trailer feel. That ratio is fixed; this number scales both.
-
-     33px → 38px fills the vertical slack the head was carrying. The
-     head band is 41px tall (4 + 33 line box + 3 + rule) and at 33px
-     the ink only spanned 9.4px→31.6px from the band's top, leaving
-     ~9px of air above the caps and ~9px below the baseline. At 38px
-     the ink spans 8.5px→34.0px: 8.5px clear of the column edge, 6px
-     clear of the head rule. Nothing clips.
-
-     The ceiling is set by width, not height. The longest title,
-     "Awaiting review", measures 8.85em of advance in EB Garamond
-     Medium small caps (dropcap included, with the 0.06em tracking),
-     so a column head needs 8.85 × font-size + 73px of chrome (side
-     padding, count, round action) and the board needs three of those
-     plus its gaps: a minimum board width of 26.5 × font-size + 263px.
-     At 33px that was 1139px; at 38px it is 1272px, which a maximized
-     window on any current laptop clears. Past ~40px the longest title
-     starts wrapping the head to two lines on a 1280px board — which
-     would grow the very box this is meant to fill. */
+     trailer feel. That ratio is fixed; this number scales both. */
   font-size: var(--type-display);
-  /* Pins the line box at the 33px it occupied when the type was 33px
-     at line-height 1.0, so the head's height is unchanged: 33/38.
-     The strut governs both edges of the line box (the cap's inline
-     block runs from the baseline to 0.60em above it, inside the
-     strut's own ascent), so line-height alone holds the box — the
-     larger type spends its extra size on ink, not on chrome. */
+  /* The line box is held below the type size, so the size goes to ink, not chrome. */
   line-height: var(--leading-display);
   font-weight: 500;
   font-variant-caps: all-small-caps;
@@ -1235,9 +497,7 @@
   margin-right: 0.04em;
   line-height: var(--leading-initial);
 }
-/* Awaiting title bodies stay default iron-gall too — only the dropcap
-   carries the column pigment, like a rubricated initial on otherwise plain
-   manuscript text. The pigment is the dropcap's job; the body is the body's. */
+/* Only the initial carries the column's pigment, like a rubricated initial on plain text. */
 .kbn-col-count {
   line-height: var(--leading-ui);
   font-family: var(--font-mono);
@@ -1246,10 +506,9 @@
   margin-left: 8px;
 }
 
-/* ── Per-lane head actions ────────────────────────────────────────────────
+/* ── The Desk head's two actions ─────────────────────────────────────────
    Stash and New idea are bare glyphs in a tinted disc; the verb lives in the
-   button's accessible name and tooltip. Polling and ⌘R keep the board
-   current without a third lane action. */
+   button's accessible name and tooltip. */
 .kbn-col-action {
   flex-shrink: 0;
   width: 28px;
@@ -1269,37 +528,16 @@
 }
 .kbn-col-action:focus { outline: none; }
 .kbn-col-action:focus-visible {
-  /* Manuscript focus ring — a soft tinted halo in the lane's own accent. */
+  /* Manuscript focus ring — a soft tinted halo in the action's own accent. */
   transform: scale(1.06);
   outline: none;
 }
-/* Drafts → Stash `+`, ochre. */
-.kbn-col-action-drafts {
-  background: var(--kbn-owed-bright);
-  border: 1px solid var(--kbn-owed-deep);
-}
-.kbn-col-action-drafts:hover { background: color-mix(in srgb, var(--kbn-owed-bright) 90%, var(--kbn-paper)); }
-.kbn-col-action-drafts:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--kbn-owed-bright) 40%, transparent); }
-/* In flight → New idea `✶`, cobalt. */
-.kbn-col-action-inFlight {
-  background: var(--kbn-agent);
-  border: 1px solid var(--kbn-agent-deep);
-}
-.kbn-col-action-inFlight:hover { background: color-mix(in srgb, var(--kbn-agent) 93%, var(--kbn-blank)); }
-.kbn-col-action-inFlight:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--kbn-agent) 40%, transparent); }
-.kbn-col-action-glyph { flex: 0 0 auto; line-height: var(--leading-solid); }
 .kbn-col-list {
   flex: 1;
   overflow-y: auto;
   padding: 8px;
   display: flex; flex-direction: column;
   gap: 8px;
-}
-/* Quiet captions mark the ordering seams inside In flight. All bands
-   share one scroller and retain the cards' own attention/status signals. */
-.kbn-flight-band {
-  flex: 0 0 auto;
-  min-width: 0;
 }
 .kbn-flight-caption {
   line-height: var(--leading-ui);
@@ -1310,19 +548,6 @@
   font-variant-caps: all-small-caps;
   letter-spacing: var(--track-kicker);
   color: var(--kbn-ink-muted);
-}
-.kbn-flight-band[data-flight-band="yourTurn"] .kbn-flight-caption {
-  color: var(--kbn-owed-ink);
-}
-.kbn-flight-band + .kbn-flight-band {
-  margin-top: 4px;
-  padding-top: 8px;
-  border-top: 1px solid color-mix(in srgb, var(--kbn-ink) 14%, transparent);
-}
-.kbn-flight-band-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
 }
 /* Empty column — a quiet marginal line, set in italic with a small
    fleuron to make absence feel intentional rather than missing. */
@@ -1347,54 +572,6 @@
   opacity: 0.55;
   font-style: normal;
 }
-/* Card — a slip of rag laid on the sheet. Kind differentiation rides
-   the background tint and border style on .kbn-card-* modifiers; the
-   column signals lifecycle, and worker and dispatch chips carry live state. */
-.kbn-card {
-  background: var(--kbn-paper);
-  border: 1px solid color-mix(in srgb, var(--kbn-ink) 12%, transparent);
-  border-radius: 3px;
-  padding: 10px 12px;
-  text-align: left;
-  cursor: grab;
-  font-family: inherit;
-  color: inherit;
-  display: flex; flex-direction: column;
-  gap: 6px;
-  /* Kanban cards are draggable and meant to be grabbed, not text-selected.
-     Without this, mousedown-and-drag selects the card's title/outcome
-     text instead of starting an HTML5 drag — WKWebView's selectable-text
-     heuristic wins over `draggable=true` when the cursor lands on a
-     text node. Chromium has the same theoretical risk; we just hadn't
-     hit it because Chromium's HTML5 DnD detection fires more eagerly.
-     `kbn-card-name-input` keeps text-selection enabled for the inline
-     rename input (handled below). */
-  user-select: none;
-  -webkit-user-select: none;
-  /* Cards are sized to their natural content. Short outcomes leave the
-     card compact; long outcomes are line-clamped to N lines on the
-     outcome itself, so the card never exceeds the natural height of
-     "header + name + slug + N-line outcome + meta." flex-grow is off
-     intentionally — empty space at the bottom of a partial column is
-     less ugly than a single short-outcome card stretched to full
-     viewport height. */
-  flex-grow: 0;
-  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease, opacity 120ms ease;
-}
-.kbn-card:hover {
-  background: var(--kbn-paper-bright);
-  border-color: color-mix(in srgb, var(--kbn-ink) 22%, transparent);
-}
-.kbn-card:active { cursor: grabbing; }
-/* The long press, while it is being held: the card settles a little, the way a
-   physical thing does under a thumb. It is the only feedback touch gets that
-   the gesture has been noticed at all — the menu is still 450ms away. iOS also
-   wants telling twice that a held finger is not a text selection: `user-select`
-   above stops the selection, `-webkit-touch-callout` stops the callout bubble
-   that would otherwise rise over the menu. */
-.kbn-card {
-  -webkit-touch-callout: none;
-}
 /* Console and worker pills hold for their conversation picker. As links they
    would otherwise raise iOS's link preview over it. */
 .kbn-picker-anchor {
@@ -1414,61 +591,6 @@
     -webkit-touch-callout: none;
   }
 }
-.kbn-card.kbn-longpress-held {
-  transform: scale(0.985);
-  background: color-mix(in srgb, var(--kbn-paper) 68%, var(--kbn-plate));
-  border-color: color-mix(in srgb, var(--kbn-owed) 42%, transparent);
-}
-.kbn-card-dragging {
-  opacity: 0.45;
-  transform: scale(0.98);
-  cursor: grabbing;
-}
-/* The drag image (see attachDragGhost). Offscreen at rest — the browser only
-   needs it rendered long enough to snapshot it. A single translucent line of
-   title, so the drop target underneath stays readable. */
-.kbn-drag-ghost {
-  position: fixed;
-  top: 0;
-  left: -10000px;
-  pointer-events: none;
-  opacity: 0.5;
-  padding: 3px 8px;
-  border: 1px solid color-mix(in srgb, var(--kbn-owed) 55%, transparent);
-  border-radius: 3px;
-  background: var(--kbn-paper-bright);
-  font-family: var(--font-serif);
-  font-size: var(--type-meta);
-  line-height: var(--leading-tight);
-  color: var(--kbn-ink-sepia);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.kbn-card-awaitingReview {
-  border-color: color-mix(in srgb, var(--kbn-owed-bright) 45%, transparent);
-}
-.kbn-card-header {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
-}
-/* Plain text: clicking the card opens the workspace reader, so the card's own
-   cursor applies. */
-.kbn-card-name {
-  flex: 1;
-  font-size: var(--type-note);
-  font-weight: 600;
-  line-height: var(--leading-tight);
-  text-align: left;
-  color: inherit;
-}
-.kbn-card-meta {
-  display: flex; align-items: center;
-  gap: 4px;
-  margin-top: 2px;
-  flex-wrap: wrap;
-}
 /* THE VERDICT PLATE — only Temper and Discard carry pigment. Their ink, tint
    and border are mixed against the paper and ink in force, so the fiber page
    stays legible in every theme. */
@@ -1480,31 +602,7 @@
   --verdict-tint-strong: color-mix(in srgb, var(--verdict-pigment) 24%, var(--ws-paper, var(--kbn-paper)));
   --verdict-edge: color-mix(in srgb, var(--verdict-pigment) 55%, var(--ws-paper, var(--kbn-paper)));
 }
-/* Subtler card style inside the drafts column. */
-.kbn-card-drafts {
-  background: var(--kbn-recess);
-  border-style: dashed;
-}
 @keyframes kbn-worker-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
-
-/* Stale-origin card: the originating agent is disconnected. The
-   snapshot is preserved (last-known-good) so the card still reads
-   and opens in the workspace reader, but drag is disabled because
-   mutation has nowhere to land until reconnect. Visual signal
-   is a desaturated dim plus a not-allowed cursor on the drag
-   handle. */
-.kbn-card--stale {
-  opacity: 0.62;
-  background: var(--kbn-parchment);
-  border-style: dashed;
-  cursor: default;
-}
-.kbn-card--stale:hover {
-  background: var(--kbn-parchment);
-  border-color: color-mix(in srgb, var(--kbn-ink) 18%, transparent);
-}
-.kbn-card--stale:active { cursor: default; }
-.kbn-card--stale .kbn-card-name { color: color-mix(in srgb, var(--kbn-ink) 34%, var(--kbn-ink-muted)); }
 /* The waiting badge is runtime-state
    info that depends on connection, not on fiber content. Cool grey-blue
    distinguishes "stale" from the teal of "worker running." */
@@ -1558,12 +656,6 @@
 .kbn-error-retry:disabled { opacity: 0.6; cursor: default; }
 .kbn-error-retry:focus-visible { outline: 1px dashed var(--kbn-owed); outline-offset: 2px; }
 
-/* A verdict given from the Desk waits out its undo window on the card's
-   foot: the meta row keeps its chips' height and gives way to the undo line
-   (workspace/verdicts.css), set in the actor chip's size. */
-.kbn-card-meta[data-verdict-pending] { min-height: 19px; }
-.kbn-card-meta > .ws-verdict-undo { font-size: var(--type-note); }
-
 /* ══════════════════════════════════════════════════════════════════════════
    THE DESK AT PHONE WIDTH
    ══════════════════════════════════════════════════════════════════════════
@@ -1576,18 +668,12 @@
    additionally gives up.
 
    The move is a change of BOOK, not a change of style. Three columns side by
-   side is a desk you stand over; a phone is a codex you hold, so the Now triad
-   becomes three leaves you turn with your thumb, marked by a folio strip, and
-   the two standing bands below fold shut like gatherings you open when you
-   want them. Everything keeps the same hand — the rag sheets, the ochre
-   hairlines, the illuminated initials, the mono slugs.
+   side is a desk you stand over; a phone is a codex you hold, so the three
+   columns become three leaves you turn with your thumb, marked by a folio
+   strip. Everything keeps the same hand — the rag sheets, the ochre
+   hairlines, the illuminated initials, the mono slugs. */
 
-   `(pointer: coarse)` is asked separately and only about INTERACTION: drag has
-   no touch backend, a terminal-attach pill has nothing to open, and a finger
-   needs 44px. A narrow window on a laptop gets the layout and keeps the
-   mouse's affordances. */
-
-/* The folio strip exists in every DOM (see `buildFolioStrip`) and has a box in
+/* The folio strip exists in every DOM (see `KanbanSurfaceRenderer.folio`) and has a box in
    exactly one. On the wide board the three columns are all on screen, so a row
    naming them would label what you are already looking at. */
 .kbn-folio {
@@ -1609,9 +695,8 @@
     gap: 8px;
   }
 
-  /* The three views stay together at the bottom; the Desk's cycle chips get
-     their own scrollport between them and Settings, never passing underneath
-     the gear. The bar is opaque so scrolling pages cannot show through it. */
+  /* The views stay together at the bottom, Settings at the bar's end. The bar
+     is opaque so scrolling pages cannot show through it. */
   .kbn-viewtabs {
     position: fixed;
     z-index: 20;
@@ -1641,26 +726,6 @@
   .kbn-viewtabs-find { display: none !important; }
   .kbn-reader-open .kbn-viewtabs { z-index: 20; }
   .kbn-viewtabs { flex-wrap: nowrap; }
-  .kbn-viewtabs-lens {
-    display: block;
-    order: 0;
-    flex: 1 1 0;
-    min-width: 0;
-    margin-left: 4px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    overscroll-behavior-x: contain;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-  }
-  .kbn-viewtabs-lens::-webkit-scrollbar { display: none; }
-  .kbn-viewtabs-lens .kbn-lensbar {
-    flex-wrap: nowrap;
-    justify-content: flex-start;
-    width: max-content;
-    min-width: 100%;
-  }
-  .kbn-viewtabs-lens .kbn-lens-chip { flex: 0 0 auto; }
   .kbn-viewtabs-settings {
     position: static;
     box-sizing: border-box;
@@ -1679,8 +744,7 @@
      rises onto the rule and breaks it — the same trick a tabbed gathering
      plays in a bound book — while the two you are not sit flat on the desk
      in iron gall. The illuminated initial is the segment's mark and keeps
-     the column's own pigment, so the strip is legible as the triad even
-     before you read the names. */
+     the column's own pigment, so the strip is legible before you read the names. */
   .kbn-folio {
     display: block;
     flex: 0 0 auto;
@@ -1709,8 +773,7 @@
     color: color-mix(in srgb, var(--kbn-ink-soft) 53%, var(--kbn-plate));
     transition: color 140ms ease, background 140ms ease, border-color 140ms ease;
   }
-  /* The tab holds the name and count; its ::after spreads its press over the
-     whole segment, under the action glyph that rides beside it. */
+  /* The tab holds the name and count; its ::after spreads its press over the whole segment. */
   .kbn-folio-tab {
     appearance: none;
     display: flex;
@@ -1753,10 +816,9 @@
     font-size: var(--type-meta);
     color: var(--kbn-ink-muted);
   }
-  /* The initial rides at the strip's own size; the F1 flourish still reads at
-     ~22px, which is why the segment gets the illumination and the two band
-     heads below do not. Inactive segments hold the pigment but drop back —
-     the illumination dims, it doesn't change colour. */
+  /* The initial rides at the strip's own size, where the F1 flourish still
+     reads. Inactive segments hold the pigment but drop back — the
+     illumination dims, it doesn't change colour. */
   .kbn-folio-name .kbn-cap {
     font-size: var(--type-label);
     line-height: var(--leading-solid);
@@ -1804,131 +866,13 @@
     touch-action: pan-x pan-y;
   }
 
-  /* The head folds into the strip. The folio segment names the leaf and carries
-     its count; `adoptColumnActions` puts that lane's named action in the active
-     segment. */
+  /* The head folds into the strip: the folio segment names the leaf and carries its count. */
   .kbn-col-head { display: none; }
-  /* In flight keeps its Map on the leaf, on the line of its first caption, so
-     the tab strip's room stays the tabs' own. */
-  .kbn-col-inFlight { position: relative; }
-  .kbn-col-inFlight .kbn-col-head { position: absolute; top: 8px; right: 12px; z-index: 1; display: block; width: auto; padding: 0; border: 0; }
-  .kbn-col-inFlight .kbn-col-head :is(.kbn-col-title, .kbn-col-count) { display: none; }
   .kbn-col-list { padding-top: 8px; }
-  /* Only the active leaf carries its action; the other segments remain page
-     marks instead of turning the strip into a toolbar. */
-  .kbn-folio-seg .kbn-col-action { display: none; }
-  .kbn-folio-seg-active .kbn-col-action {
-    position: relative;
-    display: inline-flex;
-    flex: 0 0 auto;
-    width: 26px;
-    height: 26px;
-    margin-left: 2px;
-  }
-
-  /* ── Cards, compact ────────────────────────────────────────────────────
-     Title, path on one line, the opening line of the outcome, then agent and
-     badges in a single row. A phone card is an index entry you tap; its
-     document opens in the workspace reader, and its actions live on the fiber page. */
-  .kbn-card {
-    padding: 9px 11px;
-    gap: 5px;
-    min-height: 44px;
-    touch-action: pan-x pan-y;
-    /* A leaf holds more cards than fit its 58vh. The list is what scrolls;
-       every card keeps its own height. */
-    flex-shrink: 0;
-  }
-  .kbn-card-name {
-    font-size: var(--type-note);
-    line-height: var(--leading-tight);
-  }
-  /* The row clips sideways only, so a verdict's touch target can reach past its plate vertically. */
-  .kbn-card-meta {
-    flex-wrap: nowrap;
-    overflow-x: clip;
-    overflow-y: visible;
-    gap: 5px;
-  }
-
-  /* Roles and Resting take the full width under the pager. */
-  .kbn-section-roles,
-  .kbn-section-stash {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0;
-    padding: 0;
-    border: 1px solid color-mix(in srgb, var(--kbn-ink) 10%, transparent);
-    background: color-mix(in srgb, var(--kbn-parchment) 45%, transparent);
-    border-radius: 3px;
-  }
-  .kbn-section-roles .kbn-bandhead,
-  .kbn-section-stash .kbn-bandhead {
-    flex: 0 0 auto;
-    align-items: center;
-    flex-wrap: nowrap;
-    min-height: 44px;
-    padding: 0 12px;
-    border-right: 0;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .kbn-section-roles .kbn-bandhead:focus-visible,
-  .kbn-section-stash .kbn-bandhead:focus-visible {
-    outline: 1px dashed color-mix(in srgb, var(--kbn-you) 55%, transparent);
-    outline-offset: -3px;
-  }
-  /* The fold mark sits at the far right of the head. */
-  .kbn-bandhead-fold {
-    display: block;
-    margin-left: auto;
-    flex: 0 0 auto;
-    color: color-mix(in srgb, var(--kbn-owed-bright) 85%, transparent);
-    font-size: var(--type-meta);
-    line-height: var(--leading-solid);
-    transition: transform 160ms ease;
-  }
-  .kbn-bandhead-fold::before { content: '▾'; }
-  .kbn-band-folded .kbn-bandhead-fold { transform: rotate(-90deg); }
-  .kbn-cluster-grid {
-    padding: 0 8px 8px;
-  }
-  .kbn-cluster-grid { gap: 8px; }
-  /* A 44px row is tap area, not air. The cluster's own bottom padding and the
-     row's inner padding both sat UNDER that box and read as dead space at the
-     foot of every cluster, so they go — the row's own height is the spacing. */
-  .kbn-cluster { padding: 4px 8px 3px; }
-  .kbn-cluster-head { margin-bottom: 2px; padding-bottom: 2px; }
-  /* Full-width rows, thumb-sized: each one is its own line. */
-  .kbn-cluster-item {
-    max-width: none;
-    width: 100%;
-    min-height: 44px;
-    box-sizing: border-box;
-    /* The row grew to a thumb; its text should ride the middle of it rather
-       than sitting on the baseline it had when the row was 20px tall. */
-    align-items: center;
-    align-content: center;
-  }
-  .kbn-cluster-item { padding: 0 4px; }
-  /* A launcher chip capped at 260px becomes a stub on a phone: each seat is
-     its own thumb-sized line, and the band reads as a list of offices. */
-  .kbn-roles-row { flex-direction: column; align-items: stretch; padding: 0 8px 8px; }
-  .kbn-role-chip { max-width: none; width: 100%; min-height: 44px; box-sizing: border-box; }
 }
 
 @media (max-width: 430px) {
   .kbn-viewtab { font-size: var(--type-note); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
-}
-
-/* ── Touch, wherever it happens ────────────────────────────────────────────
-   Asked about the input, not the viewport. */
-@media (pointer: coarse) {
-  /* Drag is off on touch (`coarsePointer()` clears `draggable`); the grab
-     cursor and the lift-on-press would be promising a gesture that isn't
-     there. */
-  .kbn-card,
-  .kbn-cluster-item { cursor: pointer; }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -1937,21 +881,20 @@
    A phone turned landscape is 874x402: wider than the desk expects and half
    as tall as anything else we design for. Every rule above already applies
    (the second clause of the mobile threshold catches this shape), so the
-   codex is already a codex — three leaves, a folio strip, folded bands. What
-   is left to settle is the one thing width cannot buy back, which is HEIGHT.
+   codex is already a codex — three leaves and a folio strip. What is left to
+   settle is the one thing width cannot buy back, which is HEIGHT.
 
    The whole argument is a budget. Portrait spends about 90px of 844 on chrome
    and nobody notices; the same 90px out of 402 is a quarter of the page
    before a single card. So the strip and the tabs give up their air — not
    their targets, they stay tappable — and the leaf claims every pixel they
    release: it stops being a fixed 58vh block on a scrolling page and becomes
-   the page, with Resting waiting just below the fold exactly where
-   a thumb expects to find them.
+   the page.
 
    Note the leaf is now WIDE — one column across 874px is a generous measure,
    which is the compensation landscape actually offers. Nothing here narrows
-   it back down to a portrait column: a wide leaf holds more of each card's
-   outcome line, and that is the trade the rotation is for. */
+   it back down to a portrait column: a wide leaf holds more of each line,
+   and that is the trade the rotation is for. */
 @media (max-height: 500px) and (pointer: coarse) {
   /* Sides keep their gutter; the vertical padding is what the page cannot
      afford. The safe-area insets are still honoured by `.kbn-modal` above —
@@ -1974,8 +917,8 @@
     font-size: var(--type-note);
   }
 
-  /* The folio strip loses its air and keeps its anatomy: initial, name,
-     count, and the active leaf's action glyph. 34px is under the 44 we hold
+  /* The folio strip loses its air and keeps its anatomy: initial, name and
+     count. 34px is under the 44 we hold
      everywhere else, and it is deliberate — the segment spans a third of an
      874px screen, so the target is enormous in the axis that is scarce for a
      thumb and small only in the axis that is scarce for the page. */
@@ -1994,25 +937,16 @@
      `dvh` rather than `vh` because mobile Safari collapses its toolbars as
      you scroll and `vh` keeps sizing to the tall state, stranding the leaf's
      foot under the chrome. The leaf is a fixed box on purpose: the list
-     inside scrolls, and Resting lands exactly one fold below, which
-     is what makes the swipe-down gesture mean something. */
+     inside scrolls. */
   .kbn-section-now { min-height: 0; }
   .kbn-now-board { align-items: stretch; }
   .kbn-now-board > .kbn-col {
     height: calc(100dvh - 86px);
     min-height: 140px;
   }
-
-  /* Two lines of title is a luxury of a tall page. The card keeps its outcome
-     line — that is the sentence you are actually reading the board for — and
-     gives up the padding around it. */
-  .kbn-card {
-    padding: 7px 10px;
-    gap: 4px;
-  }
 }
 
-/* Half a screen, beside Rex: the Desk scrolls in section order. */
+/* Half a screen, beside Rex: the three columns stack, and the Desk scrolls. */
 @media (min-width: 701px) and (max-width: 1180px) {
   .kbn-section-now { flex: none; min-height: 0; }
   .kbn-now-board { grid-template-columns: minmax(0, 1fr); align-items: start; }
@@ -2020,16 +954,4 @@
   .kbn-now-board .kbn-col-list { overflow: visible; }
   .kbn-now-board .kbn-col-title { font-size: var(--type-title); white-space: nowrap; }
 }
-/* Each heading folds its own contents on every screen. */
-.kbn-col > [hidden], .kbn-section-roles > [hidden], .kbn-section-stash > [hidden] { display: none !important; }
-.kbn-col-head, .kbn-bandhead { cursor: pointer; }
-.kbn-bandhead-fold { display: inline-block; margin-left: auto; color: var(--kbn-ink-muted); transition: transform 160ms ease; }
-/* A lane's round action stands at the head's far right, beside its fold. */
-.kbn-col-head > .kbn-col-action { margin-left: auto; }
-.kbn-col-head > .kbn-col-action + .kbn-bandhead-fold { margin-left: 10px; }
-.kbn-bandhead-fold::before { content: '▾'; }
-.kbn-band-folded .kbn-bandhead-fold { transform: rotate(-90deg); }
-@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .kbn-col-head, .kbn-col-inFlight .kbn-col-head { display: flex; position: static; width: auto; }
-  .kbn-col-inFlight .kbn-col-head :is(.kbn-col-title, .kbn-col-count) { display: initial; }
-}
+

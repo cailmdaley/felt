@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { card } from '../testFixtures.js'
-import { fiberPageKicker, restReachable, reviewReachable, verdictsFor } from './fiberPageState.js'
+import { restReachable, reviewReachable, verdictsFor } from './fiberPageState.js'
 
 it('offers a standing constitution Retire, and Temper only while an armed run waits on the human', () => {
   for (const status of ['open', 'active'])
@@ -23,12 +23,6 @@ it('offers no verdicts for an idle standing seat, whether paused or armed; a run
     expect(verdictsFor(seat)).toEqual([])
   }
   expect(verdictsFor(card({ id: 'seat', status: 'active', shuttleKind: 'standing', shuttleSeat: true, shuttleRole: 'warden', workerState: 'running' }))).toEqual(['temper', 'discard'])
-})
-
-it('names a standing constitution at rest by its schedule', () => {
-  expect(fiberPageKicker(card({ id: 'armed', status: 'active', shuttleKind: 'standing' }))).toBe('Scheduled')
-  expect(fiberPageKicker(card({ id: 'paused', status: 'open', shuttleKind: 'standing' }))).toBe('Schedule paused')
-  expect(fiberPageKicker(card({ id: 'put-down', status: 'open', shuttleKind: 'oneshot', effectiveHorizon: 'stashed' }))).toBe('Resting')
 })
 
 describe('Rest eligibility', () => {
@@ -54,15 +48,12 @@ describe('a thread with its orchestrator for review', () => {
   const withOrchestrator = card({ id: 'hub/fit', shuttleKind: 'oneshot', status: 'closed', column: 'orchestratorReview' })
   const marked = card({ id: 'hub/marked', shuttleKind: 'oneshot', status: 'closed', reviewMark: { note: 'the fit moved by 2 sigma', at: '2026-11-09T10:00:00Z' } })
 
-  it('says so, and the human can still settle it or move it to review', () => {
-    expect(fiberPageKicker(withOrchestrator)).toBe('With its orchestrator for review')
+  it('the human can still settle it or move it to review', () => {
     expect(verdictsFor(withOrchestrator)).toEqual(['temper', 'discard'])
     expect(reviewReachable(withOrchestrator)).toBe(true)
   })
-  it('a marked thread says why it reached the human', () => {
+  it('a marked thread awaits the human\'s review, and cannot be moved there again', () => {
     expect(marked.column).toBe('awaitingReview')
-    expect(fiberPageKicker(marked)).toBe('Marked for your review: the fit moved by 2 sigma')
-    expect(fiberPageKicker(card({ id: 'work', shuttleKind: 'oneshot', status: 'closed' }))).toBe('Awaiting your review')
     expect(reviewReachable(marked)).toBe(false)
   })
 })

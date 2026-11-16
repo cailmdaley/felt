@@ -484,26 +484,6 @@ export function ascByKey(a: number | undefined, b: number | undefined): number {
   return a - b
 }
 
-/**
- * Do two `due:` values name the SAME CIVIL DAY? The board's drop guard —
- * "already in this surface, nothing to write" — asks this, and it must ask it
- * in civil days, not in raw strings: the card carries felt's serialization
- * (`2026-07-30T00:00:00Z`, or `…+02:00` from a machine that was in Paris) while
- * the drop supplies the bare `2026-07-30` the timeline column names. As a
- * string compare those look like a real change, so a genuine no-op ran a write
- * and the board flickered through an optimistic move it then had to undo.
- * `next === null` means "clear the due" and matches only a card with none.
- */
-export function sameCivilDue(
-  cardDue: string | undefined,
-  next: string | null,
-  z: Zone = hostZone(),
-): boolean {
-  if (next === null) return (cardDue ?? '') === ''
-  const a = dueCivilDay(cardDue, z)
-  return a !== undefined && a === dueCivilDay(next, z)
-}
-
 // ── Durations ────────────────────────────────────────────────────────────────
 // Not a civil-day concern — a span has no zone. It lives here because this is
 // the module every time-facing surface already imports, views and the

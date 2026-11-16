@@ -1,3 +1,0 @@
-.kbn-scheduled { position: relative; flex: none; font: 400 var(--type-meta)/var(--leading-tight) var(--font-mono); color: var(--kbn-ink-muted); }
-.kbn-scheduled summary { cursor: pointer; white-space: nowrap; }
-.kbn-scheduled-lines { position: absolute; z-index: 5; right: 0; white-space: pre-wrap; width: 280px; padding: 8px; border: 1px solid var(--kbn-ink-muted); color: var(--kbn-ink); background: var(--kbn-plate); }

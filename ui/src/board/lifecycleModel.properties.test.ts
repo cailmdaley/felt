@@ -41,7 +41,7 @@ import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { MOBILE_MEDIA } from './mobile.js'
 import { modelCard, settle } from './testFixtures.js'
 import { lifecycleVerbsFor, verbSpec } from './workspace/lifecycleVerbs.js'
-import { fiberPageKicker } from './workspace/fiberPageState.js'
+import { attentionOf, quietWord } from './attention.js'
 import { VERB_KEY } from './workspace/lifecycleVerbs.js'
 
 const env = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env ?? {}
@@ -146,10 +146,10 @@ interface BoardInternals {
   dock: { canOpenConversation(card: KanbanCard): boolean }
 }
 
-/** What a human sees of a card: its place, its status line, and the verbs it offers in their words. */
+/** What a human sees of a card: its place, its state and faint word, and the verbs it offers in their words. */
 function drawn(s: LifeState): string {
   const card = modelCard(s)
-  return [served(s, Date.now()).column, fiberPageKicker(card), ...lifecycleVerbsFor(card, true).map(verb => verbSpec(verb, card).label)].join(' | ')
+  return [served(s, Date.now()).column, attentionOf(card, new Map()), quietWord(card), ...lifecycleVerbsFor(card, true).map(verb => verbSpec(verb, card).label)].join(' | ')
 }
 
 function boardCard(data: KanbanResponse | null): KanbanCard | undefined {
@@ -244,14 +244,17 @@ async function send(): Promise<{ receipt: string; left: string; error: string } 
   return said
 }
 
-/** A human performs `verb` on the card from the Desk, by its key, and lets the board finish. */
+/** A human opens the card from the Desk, performs `verb` on it by its key, goes back, and lets the board finish. */
 async function perform(verb: Verb): Promise<boolean> {
   if (!selected()) return false
+  press('o')
+  await settle()
   press(VERB_KEY[verb])
   await settle()
   // The rest popover asks until when: undated.
   const popover = document.querySelector<HTMLElement>('.kbn-rest-popover')
   if (popover) { press('n', popover); await settle() }
+  press('Escape')
   // The verdict waits out its undo window, then commits.
   await finish()
   return true
@@ -291,9 +294,13 @@ describe('the board keeps the lifecycle model across random gesture sequences', 
             }
             if (verb === 'open') {
               selected()
+              press('o')
+              await settle()
               press('c')
+              press('Escape')
               await finish()
-              const attached = owner.sent.slice(sentBefore).filter(s => s.route === 'attach')
+              // Opening the card looks at it, which selects its window and opens nothing; c opens.
+              const attached = owner.sent.slice(sentBefore).filter(s => s.route === 'attach' && s.body.select_only !== true)
               expect(attached, `c reached the owner other than once: ${story()}`).toHaveLength(1)
               // A worker the owner cannot rule out keeps its conversation; the human is told why c opened nothing.
               if (before.worker === 'unseen') {
@@ -308,7 +315,8 @@ describe('the board keeps the lifecycle model across random gesture sequences', 
             // A verdict archives the card off the Desk; its remaining verbs live on other surfaces.
             if (!reached) return
             const after = owner.state
-            const refused = owner.sent.slice(sentBefore).filter(s => s.outcome !== 'ok')
+            // Opening the card to act on it looks at it; a look its owner cannot honour asks nothing of the lifecycle.
+            const refused = owner.sent.slice(sentBefore).filter(s => s.outcome !== 'ok' && !(s.route === 'attach' && s.body.select_only === true))
             expect(refused, `the owner refused a request, or got one the model does not know: ${story()}`).toEqual([])
             expect(VERBS[verb].reached(before, after), `${verb} did not do what it promised: ${story()}`).toBe(true)
             if (!VERBS[verb].mayLookSame?.(before)) {

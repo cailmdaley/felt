@@ -1,0 +1,64 @@
+/* The Desk: three columns of family cards. A card is its top-level's line
+   (state dot, slug, how many members work or a quiet one's faint word),
+   then one line for every member that waits on the human. Set dense in mono
+   like the constitution view's rows; opening a card or a line enters the
+   reader. */
+:root { --kbn-desk-row: 22px; }
+.kbn-desk-head { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-height: 28px; }
+.kbn-desk-head > .kbn-folio { flex: 1 1 auto; min-width: 0; }
+.kbn-col-list { gap: 6px; padding: 6px; }
+.kbn-family {
+  display: flex; flex-direction: column; flex: 0 0 auto;
+  padding: 2px 4px 3px 2px; border-radius: 2px; cursor: pointer;
+  font: var(--type-meta)/var(--leading-tight) var(--font-mono);
+}
+.kbn-family + .kbn-family { padding-top: 5px; border-top: 1px solid var(--kbn-rule); }
+.kbn-family:hover { background: color-mix(in srgb, var(--kbn-paper-bright) 70%, transparent); }
+.kbn-family-head { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; align-items: center; column-gap: 6px; min-height: var(--kbn-desk-row); }
+.kbn-family-head > .constitution-state-dot { width: 14px; height: var(--kbn-desk-row); }
+.kbn-family-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--kbn-ink); }
+.kbn-family[data-attention='quiet'] .kbn-family-name { font-weight: 400; color: var(--kbn-ink-soft); }
+.kbn-family-meta { white-space: nowrap; color: var(--kbn-ink-muted); font-variant-numeric: tabular-nums; }
+.kbn-family[data-attention='quiet'] .kbn-family-meta { font-family: var(--font-serif); font-style: italic; }
+/* Every member that waits, one line each: its slug, then what it wants. */
+.kbn-family-waits { display: flex; flex-direction: column; margin-left: 20px; }
+.kbn-family-wait { display: flex; align-items: baseline; gap: 0; min-height: var(--kbn-desk-row); padding: 0 2px; border-radius: 2px; }
+.kbn-family-wait:hover .kbn-family-wait-slug { color: var(--kbn-ink); }
+.kbn-family-wait-slug { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--kbn-owed-deep, var(--kbn-ink)); }
+.kbn-family-wait-slug::after { content: ' — '; color: var(--kbn-ink-muted); white-space: pre; }
+.kbn-family-want { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink); }
+.kbn-family-want * { display: inline; margin: 0; padding: 0; font-size: inherit; line-height: inherit; }
+.kbn-family-want :is(p, li) + :is(p, li)::before { content: ' '; }
+.kbn-family-wait > .kbn-ch-clear { flex: none; align-self: center; margin-left: 6px; }
+.kbn-family.kbn-key-selected, .kbn-family-wait.kbn-key-selected {
+  background: var(--kbn-paper-bright);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--kbn-ink) 45%, transparent);
+}
+.kbn-family:focus-visible, .kbn-family-wait:focus-visible { outline: 1px solid color-mix(in srgb, var(--kbn-ink) 30%, transparent); outline-offset: -1px; }
+/* The waiting column's initial is gold, the working column's blue, the quiet column's ink. */
+.kbn-col-waiting .kbn-cap { color: var(--kbn-owed-bright); }
+.kbn-col-working .kbn-cap { color: var(--kbn-agent); }
+.kbn-col-waiting { border-color: color-mix(in srgb, var(--kbn-owed-bright) 55%, transparent); }
+.kbn-col-quiet { background: var(--kbn-recess); }
+
+/* The head row's two ways to make something new. */
+.kbn-col-action-draft { background: var(--kbn-owed-bright); border: 1px solid var(--kbn-owed-deep); }
+.kbn-col-action-draft:hover { background: color-mix(in srgb, var(--kbn-owed-bright) 90%, var(--kbn-paper)); }
+.kbn-col-action-draft:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--kbn-owed-bright) 40%, transparent); }
+.kbn-col-action-idea { background: var(--kbn-agent); border: 1px solid var(--kbn-agent-deep); }
+.kbn-col-action-idea:hover { background: color-mix(in srgb, var(--kbn-agent) 93%, var(--kbn-blank)); }
+.kbn-col-action-idea:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--kbn-agent) 40%, transparent); }
+
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  :root { --kbn-desk-row: 32px; }
+  .kbn-desk-head { gap: 6px; }
+  .kbn-folio .kbn-folio-seg { gap: 6px; color: var(--kbn-ink-muted); }
+  .kbn-folio .kbn-folio-tab { gap: 6px; }
+  .kbn-folio .kbn-folio-seg.kbn-folio-seg-active { color: var(--kbn-ink); }
+  .kbn-folio .kbn-folio-name { font-size: var(--type-note); font-variant-caps: normal; font-feature-settings: normal; letter-spacing: 0; overflow: visible; text-overflow: clip; white-space: nowrap; }
+  .kbn-folio .kbn-folio-count { font: var(--type-meta)/var(--leading-tight) var(--font-mono); font-variant-caps: normal; letter-spacing: 0; color: var(--kbn-ink-muted); }
+  .kbn-family-waits { margin-left: 18px; }
+  @media (orientation: portrait) {
+    .kbn-now-board > .kbn-col { height: max(58vh, calc(100dvh - 200px - env(safe-area-inset-bottom, 0px))); }
+  }
+}

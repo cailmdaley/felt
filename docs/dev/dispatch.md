@@ -98,7 +98,7 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   A run started for messages in the inbox (`inbox-<ms>`, ad-hoc mode) starts only while no occurrence is due, and its handoff or concluded exit is not service, so an occurrence that elapsed while it ran still fires ([The inbox](inbox.md#a-fiber-with-no-worker)).
   A run's exit leaves the constitution `active`: a worker that handed off already stamped `handed_off_at`; for one that exited without, the daemon shells `shuttle conclude-run`, which stamps it under the document lock only if the observed run (owner, UID, run id, dispatch timestamp) is current, still armed and unconcluded, so newer runs and human pauses or retirements are preserved.
   The dead-orphan pass concludes a run whose worker exited while the daemon was down at its dispatch instant, so an occurrence missed meanwhile still fires once.
-  An outstanding `ask` does not gate dispatch; the card waits In flight on the human's turn between runs.
+  An outstanding `ask` does not gate dispatch; the constitution waits on the human between runs.
   Arming a standing constitution (`resume`, `reopen`, a forced start) stamps `handed_off_at = now` in the same write, resting it until its next tick.
   `close` refuses a standing constitution except `--tempered=false`, which retires it; `rest` pauses it by writing `status: open`. A stashed horizon alone does not stop a schedule.
 - **A finished run is finished — there is no reopen.** When a oneshot's

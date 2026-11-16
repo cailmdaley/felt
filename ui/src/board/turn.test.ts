@@ -2,8 +2,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
 import { parseCompositeFeed } from './KanbanComposite.js'
-import { buildKanbanResponseFromComposite, inFlightBand, isQuestion } from './KanbanReadModel.js'
-import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
+import { buildKanbanResponseFromComposite } from './KanbanReadModel.js'
+import { KanbanSurfaceRenderer, threadIndexFor } from './KanbanSurfaces.js'
+import { ATTENTION_ORDER, attentionOf } from './attention.js'
+import { deskOrder } from './deskOrdering.js'
 import { hasLiveWorker, type KanbanCard, type KanbanResponse } from './KanbanTypes.js'
 import { card, servedFeed } from './testFixtures.js'
 import { TURN_WORD, turnOf, type Turn } from './turn.js'
@@ -103,44 +105,33 @@ function feed(rows: Row[]): KanbanResponse {
 }
 
 function desk(data: KanbanResponse): HTMLElement {
-  return new KanbanSurfaceRenderer({
-    getDragSourceId: () => null, setDragSourceId: () => {}, waits: () => new Map(), getLastResponse: () => data,
-    stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {},
-    openDetail: vi.fn(),
-  }).renderNowSection(data.now, {}, null)
+  const index = threadIndexFor(data)
+  return new KanbanSurfaceRenderer({ waits: () => new Map(), openDetail: vi.fn(), clear: vi.fn() }).renderDesk(deskOrder(index, new Map()), index)
 }
-
-const YOURS = new Set(['question', 'blocked', 'idle'])
 
 afterEach(() => { vi.unstubAllGlobals(); document.body.replaceChildren() })
 
-describe('band, worker facts and order cannot disagree', () => {
-  it('draws every in-flight card in the band its pill names', () => {
+describe('the column, the dot and the worker facts cannot disagree', () => {
+  it('draws every constitution in the column its state names, its dot saying the same, its turn the same everywhere', () => {
     vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {} })
     vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
     fc.assert(fc.property(fc.array(runtimeArb, { minLength: 1, maxLength: 8 }), (rows) => {
       const data = feed(rows)
       const root = desk(data)
-      const byId = new Map(data.now.inFlight.map(c => [c.id, c]))
-      let seenIdle = false
-      for (const el of root.querySelectorAll<HTMLElement>('[data-flight-band] .kbn-card')) {
+      const byId = new Map(threadIndexFor(data).roots().map(c => [c.id, c]))
+      for (const el of root.querySelectorAll<HTMLElement>('.kbn-family')) {
         const c = byId.get(el.dataset.fiberId!)!
-        const band = el.closest<HTMLElement>('[data-flight-band]')!.dataset.flightBand
-        const turn = turnOf(c)
-        // The card, its band and the read model agree on the turn.
-        expect(el.dataset.turn).toBe(turn.turn)
+        const attention = attentionOf(c, new Map()), turn = turnOf(c)
+        // A lone constitution stands in the column its state names, and its dot says so.
+        expect(el.closest<HTMLElement>('[data-column]')!.dataset.column).toBe(attention)
+        expect(el.querySelector<HTMLElement>('.constitution-state-dot')!.dataset.attention).toBe(attention)
         // A frozen runtime from an unreachable owner never claims a turn; only the synced ask does.
         if (c.originStale) expect(turn.turn).toBe(c.ask ? 'question' : hasLiveWorker(c) ? 'no-signal' : 'none')
-        expect(band).toBe(inFlightBand(c))
-        expect(band === 'yourTurn').toBe(YOURS.has(turn.turn))
+        // An idle worker that asked nothing works.
+        if (turn.turn === 'idle') expect(attention).toBe('working')
         expect(turn.word).toBe(TURN_WORD[turn.turn])
-        // The worker facts every surface reads say the same.
         expect(workerPlateFacts(c, NOW).turn).toBe(turn.turn)
-        // Questions lead Your turn: no question follows an idle turn.
-        if (band === 'yourTurn') {
-          if (isQuestion(c)) expect(seenIdle).toBe(false)
-          else seenIdle = true
-        }
+        expect(ATTENTION_ORDER).toContain(attention)
       }
     }), { numRuns: 150 })
   })

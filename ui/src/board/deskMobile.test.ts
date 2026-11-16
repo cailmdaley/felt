@@ -1,13 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  activeFolioIndex,
-  DEFAULT_BAND_STATE,
-  folioScrollTarget,
-  parseBandState,
-  readBandState,
-  writeBandState,
-  type BandState,
-} from './deskMobile'
+import { activeFolioIndex, folioScrollTarget } from './deskMobile'
 
 describe('activeFolioIndex', () => {
   it('reads the leaf under the viewport', () => {
@@ -42,40 +34,5 @@ describe('folioScrollTarget', () => {
   it('clamps out-of-range requests', () => {
     expect(folioScrollTarget(9, 390, 3)).toBe(780)
     expect(folioScrollTarget(-2, 390, 3)).toBe(0)
-  })
-})
-
-describe('band collapse state', () => {
-  it('defaults to Drafts folded and the other sections open', () => {
-    expect(DEFAULT_BAND_STATE).toEqual({ drafts: false, inFlight: true, awaitingReview: true, roles: true, resting: true })
-    expect(parseBandState(null)).toEqual(DEFAULT_BAND_STATE)
-  })
-
-  it('falls back per key on partial or malformed payloads', () => {
-    expect(parseBandState('{"resting":true}')).toEqual(DEFAULT_BAND_STATE)
-    expect(parseBandState('{"roles":false,"resting":true}')).toEqual({ ...DEFAULT_BAND_STATE, roles: false })
-    expect(parseBandState('{"resting":"yes"}')).toEqual(DEFAULT_BAND_STATE)
-    expect(parseBandState('not json')).toEqual(DEFAULT_BAND_STATE)
-    expect(parseBandState('[]')).toEqual(DEFAULT_BAND_STATE)
-  })
-
-  it('round-trips through a storage stub', () => {
-    const map = new Map<string, string>()
-    const store = {
-      getItem: (k: string) => map.get(k) ?? null,
-      setItem: (k: string, v: string) => void map.set(k, v),
-    }
-    const next: BandState = { ...DEFAULT_BAND_STATE, roles: false }
-    writeBandState(next, store)
-    expect(readBandState(store)).toEqual(next)
-  })
-
-  it('degrades to defaults when storage throws', () => {
-    const store = {
-      getItem: () => { throw new Error('denied') },
-      setItem: () => { throw new Error('denied') },
-    }
-    expect(readBandState(store)).toEqual(DEFAULT_BAND_STATE)
-    expect(() => writeBandState({ ...DEFAULT_BAND_STATE, resting: false }, store)).not.toThrow()
   })
 })

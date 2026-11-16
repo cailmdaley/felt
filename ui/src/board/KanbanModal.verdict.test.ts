@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { KanbanModal } from './KanbanModal.js'
-import type { ColumnKind, KanbanCard, KanbanResponse } from './KanbanTypes.js'
+import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { card, response } from './testFixtures.js'
 import { Verdicts, type Verdict } from './workspace/Verdicts.js'
 
 interface TransitionBoard {
-  transition(card: KanbanCard, target: ColumnKind, opts?: { basis?: KanbanResponse; skipOptimistic?: boolean; verdictCommitted?: boolean }): void
+  transition(card: KanbanCard, target: Verdict, committed?: boolean): void
   lastResponse: KanbanResponse
   workspace: { queueVerdict(card: KanbanCard, verdict: Verdict): void }
   commitTransition: ReturnType<typeof vi.fn>
@@ -24,7 +24,7 @@ function setup(fiber: KanbanCard): TransitionBoard {
   board.announce = vi.fn()
   verdicts = new Verdicts()
   board.workspace = { queueVerdict: vi.fn((queued, target) => verdicts!.queue(queued, target,
-    () => board.transition(queued, target, { verdictCommitted: true, skipOptimistic: true }))) }
+    () => board.transition(queued, target, true))) }
   return board
 }
 afterEach(() => { verdicts?.dispose(); verdicts = undefined; vi.useRealTimers(); vi.restoreAllMocks(); document.body.replaceChildren() })
@@ -42,19 +42,11 @@ describe('verdict transition authorization', () => {
     expect(document.querySelector('.ws-verdict-undo')).toBeNull()
     expect(board.showBanner).toHaveBeenCalledWith(expect.stringContaining('already in'), 'info')
   })
-  it('checks an explicit gesture basis before queuing, not its optimistic destination', () => {
-    const fiber = card({ id: 'work/review', status: 'closed', tempered: true })
-    const board = setup(fiber)
-    board.lastResponse = response()
-    board.transition(fiber, 'tempered', { basis: past(fiber) })
-    expect(board.workspace.queueVerdict).not.toHaveBeenCalled()
-    expect(board.showBanner).toHaveBeenCalledOnce()
-  })
-  it('queues a normal verdict using the explicit pre-paint basis', () => {
+  it('queues a verdict on a card closed for review, and writes nothing yet', () => {
     const fiber = card({ id: 'work/review', status: 'closed', shuttleKind: 'oneshot' })
-    const board = setup({ ...fiber, tempered: true })
-    const basis = response({ now: { drafts: [], inFlight: [], awaitingReview: [fiber] } })
-    board.transition(fiber, 'tempered', { basis })
+    const board = setup(fiber)
+    board.lastResponse = response({ now: { drafts: [], inFlight: [], awaitingReview: [fiber] } })
+    board.transition(fiber, 'tempered')
     expect(board.workspace.queueVerdict).toHaveBeenCalledExactlyOnceWith(fiber, 'tempered')
     expect(board.commitTransition).not.toHaveBeenCalled()
   })
@@ -85,6 +77,6 @@ describe('verdict transition authorization', () => {
     board.transition(fiber, 'tempered')
     vi.advanceTimersByTime(6000)
     expect(board.workspace.queueVerdict).toHaveBeenCalledOnce()
-    expect(board.commitTransition).toHaveBeenCalledExactlyOnceWith(fiber, 'tempered', false)
+    expect(board.commitTransition).toHaveBeenCalledExactlyOnceWith(fiber, 'tempered')
   })
 })

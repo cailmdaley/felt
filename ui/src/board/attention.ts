@@ -10,7 +10,8 @@ import { turnOf } from './turn.js'
  *   waiting — something addressed to the human waits on them: a line the
  *             board says nothing has handled (a post, a question or a close
  *             to them), an open ask, a worker stopped on a harness prompt, a
- *             turn that could not start, or a close for their review.
+ *             turn that could not start, or a close for their review (a
+ *             thread's close whose orchestrator is not on the board included).
  *   working — a live worker, whatever its turn: an idle worker that asked
  *             nothing is still working, not waiting.
  *   quiet   — everything else: drafts, rest, seats, held launches, closes
@@ -27,7 +28,7 @@ export interface Want {
   text: string
   /** When it began waiting, epoch ms; 1 when the time is unknown. */
   at: number
-  /** The board line it waits with, when it waits with one. */
+  /** The board line it waits with, when it waits with one: a post's (`line.kind === 'post'`) the human may clear. */
   line?: Wait
 }
 
@@ -55,10 +56,11 @@ export function wantOf(card: KanbanCard, waits: Waits): Want | null {
   if (turn.turn === 'blocked') {
     return { kind: 'blocked', text: card.launchError ?? (card.runtimePhase === 'identity_failed' ? 'its session could not be identified' : 'could not start its turn'), at: instant(card.lastActivityAt, card.modifiedAt) || 1 }
   }
-  if (line?.kind === 'closed' || (line && !line.kind && threadState(card) === 'to-review')) return review()
+  const forReview = threadState(card) === 'to-review' || (card.column === 'orchestratorReview' && !!card.orphan)
+  if (line?.kind === 'closed' || (line && !line.kind && forReview)) return review()
   if (line) return { kind: line.kind === 'asked' ? 'ask' : 'post', text: line.text?.trim() || (line.kind === 'asked' ? 'asks' : 'posted'), at: line.at, line }
   if (turn.turn === 'question') return { kind: 'ask', text: 'stopped on a prompt', at: turn.since ?? (instant(card.lastActivityAt) || 1) }
-  if (threadState(card) === 'to-review') return review()
+  if (forReview) return review()
   return null
 }
 

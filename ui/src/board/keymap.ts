@@ -24,24 +24,20 @@ export interface KeyBinding {
 const VERDICT_UNDO = `${VERDICT_DELAY_MS / 1000} s`
 const bind = (keys: string[], intent: KeyIntent, label: string, alt = false): KeyBinding => ({ keys, intent, label, alt })
 
-/** Acting on one constitution: the reader's open fiber, the Desk's selected
- * card. Both surfaces bind these same keys and run them through
- * `constitutionAction`, so what a key does to a constitution cannot drift
- * between them. */
-const constitutionBindings = (subject: string): KeyBinding[] => [
-  bind(['c', '.'], 'conversation', `Open ${subject}'s conversation`),
-  bind(['t'], 'temper', `Temper ${subject} (${VERDICT_UNDO} undo)`),
-  bind(['x'], 'discard', `Discard ${subject}, or retire a standing one (${VERDICT_UNDO} undo)`),
-  bind(['a'], 'toReview', `Move ${subject} to Awaiting review (${VERDICT_UNDO} undo)`),
-  bind(['s'], 'rest', `Rest ${subject}, with or without a date; pause or resume a standing one's schedule`),
+/** Acting on the open constitution, from the reader: the same acts its view's head carries, through `constitutionAction`. */
+const constitutionBindings: KeyBinding[] = [
+  bind(['c', '.'], 'conversation', 'Open the open constitution\'s conversation'),
+  bind(['t'], 'temper', `Temper the open constitution (${VERDICT_UNDO} undo)`),
+  bind(['x'], 'discard', `Discard the open constitution, or retire a standing one (${VERDICT_UNDO} undo)`),
+  bind(['a'], 'toReview', `Close the open constitution for review (${VERDICT_UNDO} undo)`),
+  bind(['s'], 'rest', 'Rest the open constitution, with or without a date; pause or resume a standing one\'s schedule'),
   bind(['z'], 'undoVerdict', 'Undo latest pending verdict'),
 ]
 
-/** Desk regions follow reading order: the three Now columns left-to-right,
- * then Resting, then Roles. In flight's Your turn and Working bands form one
- * column. Roles and Resting each form one list in their drawn reading order.
- * Empty regions are skipped; movement stops at the ends, never wraps. */
-export const DESK_REGION_SELECTORS = ['[data-column="drafts"]', '[data-column="inFlight"]', '[data-column="awaitingReview"]', '.kbn-section-stash', '.kbn-section-roles'] as const
+/** Desk regions follow reading order: its three columns left to right, each
+ * its family cards and their lines in drawn order. Empty regions are skipped;
+ * movement stops at the ends, never wraps. */
+export const DESK_REGION_SELECTORS = ['[data-column="waiting"]', '[data-column="working"]', '[data-column="quiet"]'] as const
 
 /** `1`–`4` switch views from every surface. */
 const VIEW_KEYS: KeyBinding[] = [
@@ -55,9 +51,8 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     ...VIEW_KEYS,
     bind(['/'], 'find', 'Find a card or constitution'),
     bind(['h', 'ArrowLeft'], 'back', 'Clear selection'),
-    bind(['j', 'ArrowDown'], 'down', 'Next visible row'), bind(['k', 'ArrowUp'], 'up', 'Previous visible row'),
-    bind(['g'], 'first', 'First card in column'), bind(['G'], 'last', 'Last card in column'),
-    ...constitutionBindings('the selected card'),
+    bind(['j', 'ArrowDown'], 'down', 'Next card or line'), bind(['k', 'ArrowUp'], 'up', 'Previous card or line'),
+    bind(['g'], 'first', 'First in column'), bind(['G'], 'last', 'Last in column'),
     bind(['l', 'ArrowRight', 'Enter', 'o'], 'open', 'Open constitution'), bind(['Escape'], 'back', 'Clear selection'), bind(['?'], 'help', 'Keyboard help'),
   ],
   view: [...VIEW_KEYS, bind(['/'], 'find', 'Find'), bind(['?'], 'help', 'Keyboard help')],
@@ -66,7 +61,7 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['p'], 'audioPlay', 'Audio: play / pause'),
     bind(['['], 'audioBack', 'Audio: back 5 seconds'),
     bind([']'], 'audioForward', 'Audio: forward 5 seconds'),
-    ...constitutionBindings('the open fiber'),
+    ...constitutionBindings,
     bind(['/'], 'find', 'Find a constitution or transcript'),
     bind(['h', 'ArrowLeft', '‹'], 'back', 'Back to the previous page'),
     bind(['ArrowDown'], 'scrollDown', 'Scroll document down (3 lines)'), bind(['ArrowUp'], 'scrollUp', 'Scroll document up (3 lines)'),
@@ -146,19 +141,19 @@ export const helpSections: readonly HelpSection[] = [
     row(['?'], 'This guide', everywhere('help')),
   ] },
   { title: 'Moving', note: 'On the Desk.', rows: [
-    row(['j', 'k', '↓', '↑'], 'Next / previous card', on('desk', 'down', 'up')),
+    row(['j', 'k', '↓', '↑'], 'Next / previous card or waiting line', on('desk', 'down', 'up')),
     row(['h', '←'], 'Clear selection', on('desk', 'back')),
     row(['g', 'G'], 'First / last in the column', on('desk', 'first', 'last')),
     row(['l', '→', 'Enter', 'o'], 'Open the selected constitution', on('desk', 'open')),
     row(['Enter', 'o'], 'On a fiber page, expand it', on('reader', 'open')),
   ] },
-  { title: 'A constitution', note: `The selected card, or the open fiber. Verdicts write after ${VERDICT_UNDO}; z or Undo cancels the latest.`, rows: [
-    row(['c', '.'], 'Open its conversation', [...on('desk', 'conversation'), ...on('reader', 'conversation')]),
-    row(['t'], 'Temper', [...on('desk', 'temper'), ...on('reader', 'temper')]),
-    row(['x'], 'Discard; retire a standing one', [...on('desk', 'discard'), ...on('reader', 'discard')]),
-    row(['a'], 'Move to Awaiting review', [...on('desk', 'toReview'), ...on('reader', 'toReview')]),
-    row(['s'], 'Rest, with or without a date; pause or resume a standing one\'s schedule', [...on('desk', 'rest'), ...on('reader', 'rest')]),
-    row(['z'], 'Undo the latest pending verdict', [...on('desk', 'undoVerdict'), ...on('reader', 'undoVerdict')]),
+  { title: 'A constitution', note: `The open constitution. Verdicts write after ${VERDICT_UNDO}; z or Undo cancels the latest.`, rows: [
+    row(['c', '.'], 'Open its conversation', on('reader', 'conversation')),
+    row(['t'], 'Temper', on('reader', 'temper')),
+    row(['x'], 'Discard; retire a standing one', on('reader', 'discard')),
+    row(['a'], 'Close for review', on('reader', 'toReview')),
+    row(['s'], 'Rest, with or without a date; pause or resume a standing one\'s schedule', on('reader', 'rest')),
+    row(['z'], 'Undo the latest pending verdict', on('reader', 'undoVerdict')),
     row(['b'], 'Go to its orchestrator', on('reader', 'orchestrator')),
   ] },
   { title: 'Fiber page', rows: [

@@ -9,13 +9,12 @@ import {
   formatSpanMinutes,
   instantMs,
   isoDayLocal,
-  sameCivilDue,
   shiftCivilDay,
   wallClock,
   zone,
 } from './civilDay.js';
 import { effectiveHorizon } from './KanbanRules.js';
-import { buildTimelineDays, clusterStashCards, formatDue } from './KanbanSurfaces.js';
+import { buildTimelineDays, formatDue } from './KanbanSurfaces.js';
 import {
   byClosedAtDesc,
   byCreatedAtDesc,
@@ -117,7 +116,6 @@ describe('one value, one day: the chip, the column and the drop guard agree', ()
       '2026-07-30T00:00:00-07:00',
     ]) {
       expect(formatDue(value)).toBe(label);
-      expect(sameCivilDue(value, '2026-07-30', LA)).toBe(true);
     }
   });
 
@@ -125,11 +123,6 @@ describe('one value, one day: the chip, the column and the drop guard agree', ()
     expect(formatDue('not a date')).toBe('not a date');
   });
 
-  it('treats a cleared due as a change unless the card had none', () => {
-    expect(sameCivilDue(undefined, null)).toBe(true);
-    expect(sameCivilDue('2026-07-30T00:00:00Z', null)).toBe(false);
-    expect(sameCivilDue(undefined, '2026-07-30')).toBe(false);
-  });
 });
 
 describe('instants sort by instant, not by wall clock', () => {
@@ -200,15 +193,6 @@ describe('the board comparators, over cards from two continents', () => {
     const d30 = card({ id: 'd30', due: '2026-07-30' });
     const none = card({ id: 'none' });
     expect([none, d30, d29].sort(byDueAtAsc).map((c) => c.id)).toEqual(['d29', 'd30', 'none']);
-  });
-
-  it('clusterStashCards orders each cluster by instant', () => {
-    const clusters = clusterStashCards([
-      card({ id: 'felt/a', createdAt: paris }),
-      card({ id: 'felt/b', createdAt: berkeley }),
-    ]);
-    expect(clusters).toHaveLength(1);
-    expect(clusters[0].cards.map((c) => c.id)).toEqual(['felt/b', 'felt/a']);
   });
 });
 

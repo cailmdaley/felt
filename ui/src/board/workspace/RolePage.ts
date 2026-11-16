@@ -1,5 +1,5 @@
+import { quietWord } from '../attention.js'
 import type { DeskColumn, KanbanCard } from '../KanbanTypes.js'
-import { DESK_COLUMN_TITLE } from '../KanbanSurfaces.js'
 import { renderMarkdown } from '../utils.js'
 import { daemonFetch } from '../daemonApi.js'
 
@@ -95,7 +95,7 @@ function holdRow(card: KanbanCard, onCard: (card: KanbanCard) => void): HTMLElem
   name.textContent = card.name
   const state = document.createElement('span')
   state.className = 'ws-role-hold-column'
-  state.textContent = DESK_COLUMN_TITLE[column]
+  state.textContent = quietWord(card)
   row.append(dot, name, state)
   const outcome = card.outcome ? plainOutcome(card.outcome) : ''
   if (outcome) {

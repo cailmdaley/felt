@@ -122,13 +122,12 @@ describe('shared keyboard table', () => {
       expect(keyIntent(event(key, init), 'reader')).toBeNull()
     }
   })
-  it('c opens the conversation (dot is its alias), s rests the constitution, and no report can ask for the conversation', () => {
-    for (const surface of ['desk', 'reader'] as KeySurface[]) {
-      expect(keyIntent(event('c'), surface)).toBe('conversation')
-      expect(keyIntent(event('.'), surface)).toBe('conversation')
-    }
+  it('c opens the conversation (dot is its alias) and s rests the open constitution, in the reader alone; no report can ask for the conversation', () => {
+    expect(keyIntent(event('c'), 'reader')).toBe('conversation')
+    expect(keyIntent(event('.'), 'reader')).toBe('conversation')
     expect(keyIntent(event('s'), 'reader')).toBe('rest')
-    expect(keyIntent(event('s'), 'desk')).toBe('rest')
+    // The Desk acts on nothing: its keys only move and open.
+    for (const key of ['c', '.', 's', 't', 'x', 'a', 'z']) expect(keyIntent(event(key), 'desk')).toBeNull()
     expect(DOCUMENT_KEY_INTENTS).not.toContain('rest')
     expect(keyIntent(event('[', { metaKey: true }), 'reader')).toBeNull()
     expect(keyIntent(event(']', { metaKey: true }), 'reader')).toBeNull()

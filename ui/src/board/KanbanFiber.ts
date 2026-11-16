@@ -35,8 +35,6 @@ export interface Fiber {
   horizon?: string;   // legacy project-owned planning field. New Kanban writes
                       // only persist `stashed`; `now`/`soon` are read for
                       // compatibility and normalized by KanbanRules.
-  cold?: boolean;     // project-owned frontmatter `cold:` — when true, stash
-                      // cluster renders dimmer and below warm clusters.
   tags?: string[];
   tempered?: boolean;   // human-acceptance signal — agent never sets this itself
   /** True when the fiber has a `shuttle:` frontmatter block. A fiber is
@@ -144,7 +142,6 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
   // `Fiber.start`.
   const start = typeof f.start === 'string' && f.start.trim() ? f.start.trim() : undefined;
   const horizon = typeof f.horizon === 'string' && f.horizon.trim() ? f.horizon.trim() : undefined;
-  const cold = typeof f.cold === 'boolean' ? f.cold : undefined;
 
   const createdAt = pickIsoString(f, 'created_at') ?? '';
   const closedAt = pickIsoString(f, 'closed_at');
@@ -294,7 +291,6 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     due,
     start,
     horizon,
-    cold,
     tags,
     tempered,
     hasShuttleBlock: hasShuttleBlock || undefined,

@@ -127,7 +127,7 @@ human closes it or puts it to rest.
 
 A oneshot need not have a finish line. A hub you come back to — a debug
 intake, a practice — is a oneshot that rests between sessions: `status: open`
-with `horizon: stashed`, drawn in the board's Resting band, and started by hand
+with `horizon: stashed`, quiet on the board's Desk, and started by hand
 when you want it. A worker puts it there with `shuttle rest` when the session
 ends with nothing to review; see [Lifecycle](lifecycle.md).
 
@@ -168,8 +168,7 @@ a verdict. A stashed horizon alone does not stop a schedule.
 
 Oneshots alone make a coherent system. Ignore standing until you want it.
 
-A stored `kind: pinned`, from before Resting held every constitution at rest,
-is still read, as `oneshot`; `shuttle check` warns about it, and
+A stored `kind: pinned` is read as `oneshot`; `shuttle check` warns about it, and
 `scripts/migrate-pinned.py` rewrites it.
 
 ### Channels
@@ -189,9 +188,9 @@ A constitution names its office with its top-level `role: <office>` or
 role. The office's charter is `roles/<office>` in the shared store or in a
 repository linked in at its top level ([where a charter lives](../concepts/roles.md#where-a-charter-lives)).
 A role may have any number of seats, and the charter itself stays
-host-free and is never dispatched. Seat changes only where the board draws it
-at rest (the Roles band rather than Drafts or Resting) and what it means, never
-its lifecycle.
+host-free and is never dispatched. Seat changes only its column at rest (Roles
+rather than Drafts or Resting, where the board's Desk draws it quiet with the
+word *seat*) and what it means, never its lifecycle.
 
 ```bash
 shuttle role <fiber> analyst

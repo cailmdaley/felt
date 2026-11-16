@@ -15,14 +15,13 @@ describe('a thread resolves its root across hosts', () => {
     const index = new ThreadIndex([rootCineca, child])
     expect(index.isOrphan(child)).toBe(false)
     expect(index.parentOf(child)?.id).toBe('01ROOT')
-    expect(index.summary(rootCineca)).toMatchObject({ unfinished: 1, working: 1 })
+    expect(index.rootOf(child).originId).toBe('cineca')
   })
   it('every copy of the root reads the same family', () => {
     const index = new ThreadIndex([rootCineca, rootMac, child])
     expect(index.isOrphan(child)).toBe(false)
     expect(index.children(rootCineca).map(c => c.id)).toEqual(['01CHILD'])
     expect(index.children(rootMac).map(c => c.id)).toEqual(['01CHILD'])
-    expect(index.summary(rootMac)).toMatchObject({ unfinished: 1, working: 1 })
   })
   it('a copy of the thread the index never saw still finds its root', () => {
     const index = new ThreadIndex([rootCineca, child])
@@ -40,6 +39,6 @@ describe('orchestrator resolves against uids when ids are slugs', () => {
     const index = new ThreadIndex([parent, child])
     expect(index.isOrphan(child)).toBe(false)
     expect(index.parentOf(child)?.id).toBe('science/cmbx')
-    expect(index.summary(parent)).toMatchObject({ unfinished: 1, working: 1 })
+    expect(index.rootOf(child).id).toBe('science/cmbx')
   })
 })

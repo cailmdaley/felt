@@ -137,11 +137,11 @@ For daemon Elixir/OTP changes, read the `practices/elixir` felt practice (`felt 
   `close --tempered=false` retires it). The CLI
   (`shuttle.NormalizeKind`), the daemon (`Poller.block_kind`) and the board
   read a `pinned` kind as `oneshot`, and `shuttle check` warns about it. A
-  constitution at rest is `status: open` + `horizon: stashed`, drawn in
+  constitution at rest is `status: open` + `horizon: stashed`, column
   Resting; `shuttle rest` puts it there without review. "Role" names only an
   identity under `roles/`, never a kind of constitution. A constitution with
   `shuttle.role: <role-slug>` and `shuttle.seat: true` is a seat of that office (`shuttle seat`); at rest
-  the board draws it in the Roles band, and its lifecycle is unchanged.
+  its column is Roles, and its lifecycle is unchanged.
 - **`shuttle.project_dir` is required for armed installs.** `shuttle install`
   and `shuttle repeat` require `--project-dir`; workers start there instead of
   falling back to the felt store.

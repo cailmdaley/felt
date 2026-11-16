@@ -15,7 +15,6 @@ interface BoardInternals {
   fetchAndRender(): Promise<void>
   workspace: Workspace
   deskEl: HTMLElement
-  lensCycleId: string | null
   activeViewId: 'desk' | 'chronicle' | 'channels'
   voice: { status: VoiceStatus | null; notify(): void }
   deskKeyboard: { selection: { uid: string; origin: string } | null }
@@ -75,23 +74,15 @@ beforeEach(() => {
 })
 afterEach(() => { board?.unmount(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-// The SDK owns menu activation; jsdom only supplies an unhandled native button click.
-async function activate(button: HTMLButtonElement, key: 'Enter' | ' '): Promise<void> {
-  const down = press(key, {}, button)
-  const up = new KeyboardEvent('keyup', { key, bubbles: true, cancelable: true })
-  button.dispatchEvent(up)
-  if (!down.defaultPrevented && !up.defaultPrevented) button.click()
-  await settle()
-}
-
-it('leaves an idle worker in Your turn when a look moves the voice target onto it', () => {
-  const band = () => document.querySelector<HTMLElement>('[data-card-uid="head-uid"]')!.closest<HTMLElement>('[data-flight-band]')!.dataset.flightBand
-  expect(band()).toBe('yourTurn')
+it('keeps an idle worker that asked nothing in Working, its dot still, when a look moves the voice target onto it', () => {
+  const column = () => document.querySelector<HTMLElement>('[data-card-uid="head-uid"]')!.closest<HTMLElement>('[data-column]')!.dataset.column
+  expect(column()).toBe('working')
   inside.voice.status = voiceStatus({ target: { fiber_id: 'head-uid', origin: head.originId, name: head.name } })
   inside.voice.notify()
   draw(data())
-  expect(band()).toBe('yourTurn')
-  expect(document.querySelector('[data-card-uid="head-uid"] .constitution-state-dot')?.getAttribute('data-attention')).toBe('working')
+  expect(column()).toBe('working')
+  const dot = document.querySelector<HTMLElement>('[data-card-uid="head-uid"] .constitution-state-dot')!
+  expect([dot.dataset.attention, dot.hasAttribute('data-busy')]).toEqual(['working', false])
 })
 
 it('moves through the view tabs by arrows, Home and End, and keeps the numeric hotkeys', async () => {
@@ -124,104 +115,6 @@ it('moves through the view tabs by arrows, Home and End, and keeps the numeric h
     expect(tabs[index].getAttribute('aria-selected')).toBe('true')
     expect(tabs.filter(tab => tab.tabIndex === 0)).toEqual([tabs[index]])
   }
-})
-
-describe('Desk row menu', () => {
-  const row = () => document.querySelector<HTMLElement>('[data-card-uid="review"]')!
-  const menu = () => document.querySelector<HTMLElement>('[role="menu"]')
-  const items = () => [...menu()!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
-  const rightClick = async (el: HTMLElement) => {
-    el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 50 }))
-    await settle()
-  }
-  it('a row carries no menu control; right-click opens the header verbs, drawn as the header draws them', async () => {
-    expect(document.querySelector('.kbn-card-menu')).toBeNull()
-    await rightClick(row())
-    // The header's verbs, then what only the Desk adds: the touch path to a move.
-    expect(items().map(i => i.textContent)).toEqual(['Rest', 'Temper', 'Discard', 'Move…'])
-    expect(items().slice(0, 3).map(i => [...i.classList].filter(c => c.startsWith('kbn-ctl-') || c.startsWith('ws-header')))).toEqual([
-      ['kbn-ctl-rest', 'ws-header-icon', 'ws-header-verb'], ['kbn-ctl-temper', 'ws-header-icon', 'ws-header-verb'], ['kbn-ctl-discard', 'ws-header-icon', 'ws-header-verb']])
-    expect(items().slice(0, 3).every(i => i.querySelector('svg') && i.querySelector('.ws-header-word'))).toBe(true)
-    expect(menu()!.classList.contains('kbn-verb-menu')).toBe(true)
-  })
-  it.each(['Enter', ' '] as const)('Shift+F10 on the selected row opens it; arrows select, Escape restores the row, and %s gives a verdict', async key => {
-    press('j')
-    const selectedRow = document.querySelector<HTMLElement>('.kbn-key-selected')!
-    expect(selectedRow).toBe(row())
-    selectedRow.focus()
-    expect(press('F10', { shiftKey: true }, selectedRow).defaultPrevented).toBe(true)
-    await settle()
-    expect(row().getAttribute('aria-expanded')).toBe('true')
-    expect(document.activeElement).toBe(items()[0])
-    press('ArrowDown', {}, document.activeElement!)
-    expect(document.activeElement).toBe(items()[1])
-    press('End', {}, document.activeElement!)
-    expect(document.activeElement).toBe(items()[3])
-    press('Home', {}, document.activeElement!)
-    expect(document.activeElement).toBe(items()[0])
-    // Desk verb shortcuts do not act through the open menu.
-    press('x', {}, document.activeElement!)
-    expect(document.querySelector('.ws-verdict-undo')).toBeNull()
-    press('Escape', {}, document.activeElement!)
-    await settle()
-    expect(menu()).toBeNull()
-    expect(document.activeElement).toBe(row())
-    expect(selected()).toBe('review')
-    press('ContextMenu', {}, row())
-    await settle()
-    await activate(items()[1], key)
-    expect(menu()).toBeNull()
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('Undo verdict on review')
-    expect(document.querySelector('[data-card-uid="review"] .ws-verdict-undo')?.textContent).toBe('Tempered·undo z')
-    expect(inside.workspace.isActive).toBe(false)
-    press('z')
-  })
-  it('Close for review from the menu enters the same undo window as the header and keys', async () => {
-    const live = card({ id: 'live', uid: 'live', shuttleKind: 'oneshot', status: 'active', workerState: 'running', runtimePhase: 'waiting' })
-    draw(response({ now: { drafts: [], inFlight: [live], awaitingReview: [] } }))
-    vi.stubGlobal('confirm', () => true)
-    await rightClick(document.querySelector<HTMLElement>('[data-card-uid="live"]')!)
-    const review = items().find(i => i.getAttribute('aria-label') === 'Close for review')!
-    review.click()
-    await settle()
-    expect(menu()).toBeNull()
-    expect(document.querySelector('[data-card-uid="live"] .ws-verdict-undo')?.textContent).toMatch(/undo/)
-    press('z')
-  })
-  it('a thread under a row opens neither the row menu nor the browser menu', () => {
-    const waiting = { status: 'active' as const, workerState: 'running' as const, runtimePhase: 'waiting' as const }
-    const root = card({ id: 'family', uid: 'family', shuttleKind: 'oneshot', ...waiting })
-    const kids = ['a', 'b'].map(k => card({ id: `family/${k}`, uid: `family-${k}`, orchestrator: 'family', ...waiting }))
-    draw(response({ now: { drafts: [], inFlight: [root], awaitingReview: [] }, threads: kids }))
-    const line = document.querySelector<HTMLElement>('.kbn-desk-threads .kbn-thread-row')!
-    expect(line).not.toBeNull()
-    const name = line
-    name.focus()
-    expect(press('F10', { shiftKey: true }, name).defaultPrevented).toBe(false)
-    expect(menu()).toBeNull()
-    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 50 })
-    line.dispatchEvent(event)
-    expect(event.defaultPrevented).toBe(true)
-    expect(menu()).toBeNull()
-  })
-  it('never offers family expansion or folding in the row menu', async () => {
-    const root = card({ id: 'family', uid: 'family', shuttleKind: 'oneshot' })
-    const child = card({ id: 'family/child', orchestrator: 'family', status: 'active' })
-    draw(response({ now: { drafts: [root], inFlight: [], awaitingReview: [] }, threads: [child] }))
-    await rightClick(document.querySelector<HTMLElement>('[data-card-uid="family"]')!)
-    expect(menu()?.textContent ?? '').not.toMatch(/Expand family|Fold family/)
-    expect(inside.workspace.isActive).toBe(false)
-  })
-  it('Tab dismisses the menu and a repaint removes its portal', async () => {
-    await rightClick(row())
-    press('Tab', {}, document.activeElement!)
-    await settle()
-    expect(menu()).toBeNull()
-    await rightClick(row())
-    draw(data())
-    await settle()
-    expect(menu()).toBeNull()
-  })
 })
 
 describe('Reader Rest lifecycle', () => {
@@ -273,106 +166,6 @@ describe('Rest controls', () => {
     expect(JSON.parse(String(calls[0][1]?.body))).toEqual({ action: 'rest', fiber: 'finished', origin: 'remote', until: '' })
   })
 
-  it("a Desk card's menu carries a Rest that opens the same popover", async () => {
-    draw(response({ now: { drafts: [], inFlight: [], awaitingReview: [card({ id: 'review', uid: 'review', status: 'closed', shuttleKind: 'oneshot' }), card({ id: 'note', uid: 'note', status: 'closed' })] } }))
-    document.querySelector<HTMLElement>('[data-card-uid="review"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
-    await settle()
-    const rest = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(b => b.textContent === 'Rest')!
-    expect(rest).toBeDefined()
-    await activate(rest, 'Enter')
-    expect(document.querySelector('.kbn-rest-popover')).not.toBeNull()
-  })
-})
-
-describe('a standing constitution on the Desk', () => {
-  const armed = card({ id: 'post', uid: 'post', originId: 'remote', status: 'active', shuttleKind: 'standing', shuttleSchedule: '0 9 * * 1-5', scheduleText: 'weekdays at 09:00' })
-  const paused = card({ id: 'digest', uid: 'digest', status: 'open', effectiveHorizon: 'stashed', storedHorizon: 'stashed', shuttleKind: 'standing', shuttleSchedule: '0 7 * * *', scheduleText: 'daily at 07:00' })
-  const desk = () => response({ stash: [armed, paused] })
-  const lifecycle = () => vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/api/v1/lifecycle')).map(([, init]) => JSON.parse(String(init?.body)))
-  const menu = async (uid: string) => {
-    document.querySelector<HTMLElement>(`[data-card-uid="${uid}"]`)!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
-    await settle()
-    return [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
-  }
-
-  it('reads as scheduled or paused, with its schedule', () => {
-    draw(desk())
-    expect(document.querySelector('[data-card-uid="digest"] .kbn-cluster-item-schedule')?.textContent).toBe('Paused · daily at 07:00')
-    expect(document.querySelector<HTMLElement>('[data-card-uid="digest"]')!.dataset.schedule).toBe('paused')
-    expect(document.querySelector('[data-card-uid="post"] .kbn-cluster-item-schedule')?.textContent).toBe('weekdays at 09:00')
-  })
-
-  it('pauses an armed schedule from its menu at once, posting rest with no wake day', async () => {
-    draw(desk())
-    const entries = await menu('post')
-    expect(entries.map(item => item.textContent)).toEqual(['Pause schedule', 'Retire', 'Move…'])
-    await activate(entries.find(item => item.textContent === 'Pause schedule')!, 'Enter')
-    await settle()
-    expect(document.querySelector('.kbn-rest-popover')).toBeNull()
-    expect(lifecycle()).toEqual([{ action: 'rest', fiber: 'post', origin: 'remote' }])
-  })
-
-  it('resumes a paused schedule from its menu', async () => {
-    draw(desk())
-    const entries = await menu('digest')
-    expect(entries.map(item => item.textContent)).toEqual(['Resume schedule', 'Retire', 'Move…'])
-    await activate(entries.find(item => item.textContent === 'Resume schedule')!, 'Enter')
-    await settle()
-    expect(lifecycle()).toEqual([{ action: 'resume', fiber: 'digest', origin: 'local' }])
-  })
-
-  it('takes s as pause, x as retire, and refuses t', async () => {
-    draw(desk())
-    press('j')
-    const uid = selected()!
-    expect(['post', 'digest']).toContain(uid)
-    expect(press('t').defaultPrevented).toBe(false)
-    expect(document.querySelector(`[data-card-uid="${uid}"] .ws-verdict-undo`)).toBeNull()
-    expect(press('x').defaultPrevented).toBe(true)
-    expect(document.querySelector(`[data-card-uid="${uid}"] .ws-verdict-undo`)?.textContent).toBe('Retired·undo z')
-    press('z')
-    press('s')
-    await settle()
-    expect(document.querySelector('.kbn-rest-popover')).toBeNull()
-    expect(lifecycle()).toEqual([uid === 'post'
-      ? { action: 'rest', fiber: 'post', origin: 'remote' }
-      : { action: 'resume', fiber: 'digest', origin: 'local' }])
-  })
-})
-
-describe('Desk constitution keys', () => {
-  const agentDesk = () => response({ now: {
-    drafts: [card({ id: 'plan', uid: 'plan', shuttleKind: 'oneshot' })],
-    inFlight: [],
-    awaitingReview: [card({ id: 'done', uid: 'done', status: 'closed', shuttleKind: 'oneshot' })],
-  } })
-  const undoLine = (uid: string): string | null | undefined =>
-    document.querySelector(`[data-card-uid="${uid}"] .ws-verdict-undo`)?.textContent
-  it.each([['t', 'Tempered'], ['x', 'Discarded']])('%s gives the selected card its verdict through the reader\'s undo window, and z takes it back', (key, word) => {
-    draw(agentDesk())
-    press('j'); expect(selected()).toBe('done')
-    expect(press(key).defaultPrevented).toBe(true)
-    expect(undoLine('done')).toBe(`${word}·undo z`)
-    expect(inside.workspace.isActive).toBe(false)
-    press('z')
-    expect(undoLine('done')).toBeUndefined()
-  })
-  it('a moves a selected draft to review and is refused where review is not reachable', () => {
-    draw(agentDesk())
-    press('j'); press('k'); expect(selected()).toBe('plan')
-    press('a')
-    expect(undoLine('plan')).toBe('To review·undo z')
-    press('z')
-    press('j'); expect(selected()).toBe('done')
-    expect(press('a').defaultPrevented).toBe(false)
-    expect(undoLine('done')).toBeUndefined()
-  })
-  it('keys do nothing without a selection, and the verdict keys skip a fiber off the lifecycle', () => {
-    expect(press('t').defaultPrevented).toBe(false)
-    press('j'); press('k'); press('k'); press('k'); press('k'); expect(selected()).toBe('draft-uid')
-    expect(press('t').defaultPrevented).toBe(false)
-    expect(undoLine('draft-uid')).toBeUndefined()
-  })
 })
 
 describe('Desk keyboard selection', () => {
@@ -442,29 +235,10 @@ describe('Desk keyboard selection', () => {
     expect(inside.activeViewId).toBe('channels')
   })
 
-  it.each([['n', ''], ['Enter', 'tomorrow']])('s on the focused constitution then %s rests through lifecycle', async (k, which) => {
-    press('j')
-    press('s')
-    await settle()
-    const input = document.querySelector<HTMLElement>('.kbn-rest-popover')!
-    expect(input).not.toBeNull()
-    press(k, {}, input)
-    await settle()
-    const calls = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/api/v1/lifecycle'))
-    expect(calls).toHaveLength(1)
-    const body = JSON.parse(String(calls[0][1]?.body))
-    expect(body).toMatchObject({ action: 'rest', fiber: 'review', origin: 'local' })
-    if (which === '') expect(body.until).toBe('')
-    else expect(body.until).toMatch(/^\d{4}-\d{2}-\d{2}$/)
-    expect(document.querySelector('.kbn-rest-popover')).toBeNull()
-  })
-
-  it('gives Escape in the bar\'s Find to the field before releasing an engaged lens', () => {
-    inside.lensCycleId = 'season'
+  it('puts the bar\'s Find away whole on Escape', () => {
     const find = document.querySelector<HTMLInputElement>('.kbn-viewtabs-find input')!
     find.focus(); find.value = 'mask'
     press('Escape', {}, find)
-    expect(inside.lensCycleId).toBe('season')
     expect(find.value).toBe('')
     expect(document.activeElement).not.toBe(find)
   })
@@ -493,56 +267,34 @@ describe('Desk keyboard selection', () => {
     expect(inside.workspace.isActive).toBe(true)
     expect(window.location.hash).toContain('draft-uid')
   })
-  it('uses a visible existing card filter and leaves slash literal in fields', () => {
-    const input = document.createElement('input'); input.type = 'search'
-    inside.deskEl.append(input)
-    vi.spyOn(input, 'getClientRects').mockReturnValue([{ width: 100 }] as unknown as DOMRectList)
-    press('/')
-    expect(document.activeElement).toBe(input)
-    expect(document.querySelector('.ws-switcher')).toBeNull()
-    expect(press('/', {}, input).defaultPrevented).toBe(false)
-  })
-  it('moves through both flight bands, the three columns and Resting without wrapping', () => {
+  it('moves through the three columns without wrapping, g and G at a column\'s ends', () => {
     press('j'); expect(selected()).toBe('review')
-    press('k'); expect(selected()).toBe('working')
-    press('g'); expect(selected()).toBe('head-uid')
+    // A family that waits itself carries its own line, what it wants.
+    press('j'); expect(selected()).toBe('review')
+    expect(document.querySelector('.kbn-key-selected')!.hasAttribute('data-desk-line')).toBe(true)
+    press('j'); expect(selected()).toBe('head-uid')
     press('G'); expect(selected()).toBe('working')
-    press('j'); expect(selected()).toBe('review')
+    press('g'); expect(selected()).toBe('head-uid')
+    press('j'); press('j'); expect(selected()).toBe('draft-uid')
+    press('G'); expect(selected()).toBe('resting')
     press('j'); expect(selected()).toBe('resting')
-    press('j'); expect(selected()).toBe('resting')
-    press('k'); expect(selected()).toBe('review')
     press('h'); expect(selected()).toBeUndefined()
   })
-  it('walks every visible Desk row across section boundaries in both directions', () => {
-    press('j'); expect(selected()).toBe('review')
-    press('k'); expect(selected()).toBe('working')
-    press('k'); expect(selected()).toBe('head-uid')
-    press('k'); expect(selected()).toBe('d2')
-    press('k'); expect(selected()).toBe('draft-uid')
-    press('k'); expect(selected()).toBe('draft-uid')
-    press('j'); expect(selected()).toBe('d2')
-    press('j'); expect(selected()).toBe('head-uid')
-    press('j'); expect(selected()).toBe('working')
-    press('j'); expect(selected()).toBe('review')
+  it('walks every card across the columns in both directions', () => {
+    const walk = ['review', 'review', 'head-uid', 'working', 'draft-uid', 'd2', 'resting']
+    for (const uid of walk) { press('j'); expect(selected()).toBe(uid) }
     press('j'); expect(selected()).toBe('resting')
-    press('j'); expect(selected()).toBe('resting')
-  })
-  it('skips folded sections while walking across the Desk', () => {
-    document.querySelector<HTMLElement>('[data-column="inFlight"] .kbn-col-head')!.click()
-    press('j'); expect(selected()).toBe('review')
-    press('k'); expect(selected()).toBe('d2')
-    press('j'); expect(selected()).toBe('review')
-    document.querySelector<HTMLElement>('.kbn-section-stash .kbn-bandhead')!.click()
-    press('j'); expect(selected()).toBe('review')
+    for (const uid of [...walk].reverse().slice(1)) { press('k'); expect(selected()).toBe(uid) }
+    press('k'); expect(selected()).toBe('review')
   })
   it('opens the reader stepping the Desk\'s columns', async () => {
-    press('j'); press('k'); press('k'); press('Enter')
-    expect((inside.workspace.reader as unknown as { deskCards(): Array<{ id: string; uid?: string }> }).deskCards().map(row => row.uid ?? row.id)).toEqual(['draft-uid', 'd2', 'head-uid', 'working', 'review', 'resting'])
+    press('j'); press('j'); press('Enter')
+    expect((inside.workspace.reader as unknown as { deskCards(): Array<{ id: string; uid?: string }> }).deskCards().map(row => row.uid ?? row.id)).toEqual(['review', 'head-uid', 'working', 'draft-uid', 'd2', 'resting'])
     await pop(() => document.querySelector<HTMLButtonElement>('.ws-return')!.click())
     expect(inside.workspace.isActive).toBe(false)
   })
   it('survives refresh reorder and a path rename by uid+origin, not list position', () => {
-    press('j'); press('k'); press('k'); press('k'); press('k')
+    for (let n = 0; n < 5; n++) press('j')
     const updated = data()
     updated.now.drafts = [card({ id: 'd2' }), card({ id: 'renamed', uid: 'draft-uid' })]
     draw(updated)
@@ -550,8 +302,8 @@ describe('Desk keyboard selection', () => {
     expect(document.querySelector<HTMLElement>('.kbn-key-selected')?.dataset.fiberId).toBe('renamed')
     press('k'); expect(selected()).toBe('d2')
   })
-  it.each([['j', 'head-uid'], ['J', 'review']])('%s scans two stops and one Escape selects the last viewed Desk card', async (key, expected) => {
-    press('j'); press('k'); press('k'); press('k'); press('k'); press('Enter')
+  it.each([['j', 'working'], ['J', 'draft-uid']])('%s scans two stops and one Escape selects the last viewed Desk card', async (key, expected) => {
+    press('j'); press('Enter')
     await settle()
     for (let step = 0; step < 2; step++) {
       press(key)
@@ -564,7 +316,8 @@ describe('Desk keyboard selection', () => {
     expect(document.activeElement).toBe(document.querySelector('.kbn-key-selected'))
   })
   it('opens with Enter and restores the opened card after reader return and a deferred refresh', async () => {
-    press('j'); press('k'); press('k'); press('k'); press('Enter')
+    for (let n = 0; n < 6; n++) press('j')
+    press('Enter')
     expect(inside.workspace.isActive).toBe(true)
     expect(window.location.hash).toContain('d2')
     const updated = data()
@@ -576,12 +329,13 @@ describe('Desk keyboard selection', () => {
     const restored = document.querySelector<HTMLElement>('.kbn-key-selected')!
     expect(restored.tabIndex).toBe(-1)
     expect(document.activeElement).toBe(restored)
-    press('j'); expect(selected()).toBe('draft-uid')
+    press('j'); expect(selected()).toBe('resting')
   })
   it('selects clicked cards and distinguishes identical uids on different origins', async () => {
-    const updated = response({ now: { drafts: [card({ id: 'a', uid: 'same', originId: 'a' }), card({ id: 'b', uid: 'same', originId: 'b' })], inFlight: [], awaitingReview: [] } })
+    // Without a uid, one path on two hosts is two fibers.
+    const updated = response({ now: { drafts: [card({ id: 'same', originId: 'a' }), card({ id: 'same', originId: 'b' })], inFlight: [], awaitingReview: [] } })
     draw(updated)
-    document.querySelector<HTMLElement>('[data-fiber-id="b"]')!.click()
+    document.querySelector<HTMLElement>('.kbn-family[data-card-origin="b"] .kbn-family-name')!.click()
     expect(document.querySelector<HTMLElement>('.kbn-key-selected')?.dataset.cardOrigin).toBe('b')
     await pop(() => document.querySelector<HTMLButtonElement>('.ws-return')!.click())
     updated.now.drafts.reverse()
@@ -590,7 +344,7 @@ describe('Desk keyboard selection', () => {
   })
   it('keeps focus on its row through a poll, and gives a removed row\'s focus to the row in its place', () => {
     const row = (uid: string) => document.querySelector(`[data-card-uid="${uid}"]`)
-    press('j'); press('k'); press('k')
+    press('j'); press('j'); press('j')
     expect(document.activeElement).toBe(row('head-uid'))
     draw(data())
     expect(document.activeElement).toBe(row('head-uid'))
@@ -599,13 +353,13 @@ describe('Desk keyboard selection', () => {
     draw(without)
     expect(document.activeElement).toBe(row('working'))
     expect(selected()).toBe('working')
-    press('j'); press('j')
+    press('j'); press('j'); press('j')
     expect(document.activeElement).toBe(row('resting'))
     const shorter = data()
     shorter.stash = []
     draw(shorter)
-    expect(document.activeElement).toBe(row('review'))
-    expect(selected()).toBe('review')
+    expect(document.activeElement).toBe(row('d2'))
+    expect(selected()).toBe('d2')
   })
   it('keeps the selection painted through a poll without scrolling the Desk out from under the pointer', () => {
     for (const phone of [false, true]) {
@@ -622,17 +376,17 @@ describe('Desk keyboard selection', () => {
       expect(scroll).not.toHaveBeenCalled()
     }
   })
-  it('pages the phone to the selected column and opens folded lower bands, with reduced motion', () => {
+  it('pages the phone to the selected column, with reduced motion', () => {
     mobile = true; reduced = true
     draw(data())
     const pager = document.querySelector<HTMLElement>('.kbn-now-board')!
     Object.defineProperty(pager, 'clientWidth', { configurable: true, value: 390 })
     press('j')
-    expect(scroll).toHaveBeenCalledWith({ left: 780, behavior: 'instant' })
+    expect(scroll).toHaveBeenLastCalledWith({ left: 0, behavior: 'instant' })
     expect(intoView).toHaveBeenLastCalledWith({ block: 'nearest', inline: 'nearest', behavior: 'instant' })
-    press('j')
-    expect(selected()).toBe('resting')
-    expect(document.querySelector('.kbn-section-stash')?.classList.contains('kbn-band-folded')).toBe(false)
+    press('j'); press('j')
+    expect(selected()).toBe('head-uid')
+    expect(scroll).toHaveBeenLastCalledWith({ left: 390, behavior: 'instant' })
   })
   it('ignores typing, composition and layered dialogs; keeps settings and view keys', () => {
     const input = document.createElement('input'); document.body.append(input); input.focus()
@@ -647,7 +401,7 @@ describe('Desk keyboard selection', () => {
     expect(press('1').defaultPrevented).toBe(true)
   })
 
-  it('chooses the first movement target by review, Needs-you flight, then drafts', () => {
+  it('chooses the first movement target in Waiting on you, then Working, then Quiet', () => {
     press('ArrowDown'); expect(selected()).toBe('review')
     // With focus off the Desk, a selection the poll removes leaves no row to follow.
     press('u'); (document.activeElement as HTMLElement).blur()
@@ -668,14 +422,16 @@ describe('Desk keyboard selection', () => {
 describe('keyboard help', () => {
   it('opens from the table, traps Tab, prevents navigation underneath, and returns focus', async () => {
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => setTimeout(() => callback(performance.now()), 0))
-    const focus = document.querySelector<HTMLElement>('.kbn-col-head')!; focus.focus()
+    press('j')
+    const focus = document.querySelector<HTMLElement>('.kbn-key-selected')!
+    expect(document.activeElement).toBe(focus)
     press('?')
     await settle()
     const dialog = document.querySelector('[role="dialog"][aria-label="Keyboard shortcuts"]')!
     expect(dialog.getAttribute('aria-modal')).toBe('true')
     await vi.waitFor(() => expect(focus.closest('[inert]')).not.toBeNull())
     expect([...dialog.querySelectorAll('h3')].map(el => el.textContent)).toEqual(['Everywhere', 'Moving', 'A constitution', 'Fiber page', "A constitution's view", 'Channels'])
-    press('j'); expect(selected()).toBeUndefined()
+    press('j'); expect(selected()).toBe('review')
     document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
     expect(dialog.contains(document.activeElement)).toBe(true)
     document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))

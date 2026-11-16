@@ -2,10 +2,10 @@ import { DESK_REGION_SELECTORS, type KeyIntent } from './keymap.js'
 import { isMobileViewport } from './mobile.js'
 import { folioScrollTarget } from './deskMobile.js'
 
-/** A Desk row: a card, or the header its family's root stands as in another `section`. */
-export interface DeskAddress { uid: string; origin: string; section?: string }
-const identity = (el: HTMLElement): DeskAddress => ({ uid: el.dataset.cardUid!, origin: el.dataset.cardOrigin!, section: el.dataset.deskSection })
-const matches = (el: HTMLElement, address: DeskAddress): boolean => el.dataset.cardUid === address.uid && el.dataset.cardOrigin === address.origin && el.dataset.deskSection === address.section
+/** A Desk row: a family's card, or one of its lines, each naming a constitution. */
+export interface DeskAddress { uid: string; origin: string; line?: boolean }
+const identity = (el: HTMLElement): DeskAddress => ({ uid: el.dataset.cardUid!, origin: el.dataset.cardOrigin!, ...el.hasAttribute('data-desk-line') ? { line: true } : {} })
+const matches = (el: HTMLElement, address: DeskAddress): boolean => el.dataset.cardUid === address.uid && el.dataset.cardOrigin === address.origin && el.hasAttribute('data-desk-line') === !!address.line
 /** Focus a row without adding every card to the tab sequence. */
 const focusRow = (el: HTMLElement): boolean => {
   if (!el.hasAttribute('tabindex') && el.tabIndex < 0) el.tabIndex = -1
@@ -64,8 +64,13 @@ export class DeskKeyboard {
       .filter(el => !el.closest('[hidden]')))
       .filter(region => region.length > 0)
   }
+  /** The drawn row for the selection: a constitution named without `line` is its card, else, drawn only as a waiting line, that line. */
   private node(): HTMLElement | undefined {
-    return this.selected ? this.regions().flat().find(el => matches(el, this.selected!)) : undefined
+    const selected = this.selected
+    if (!selected) return undefined
+    const rows = this.regions().flat()
+    return rows.find(el => matches(el, selected))
+      ?? (selected.line ? undefined : rows.find(el => el.dataset.cardUid === selected.uid && el.dataset.cardOrigin === selected.origin))
   }
   select(address: DeskAddress, scroll = true): void {
     this.selected = address
@@ -73,17 +78,14 @@ export class DeskKeyboard {
   }
   clear(): void { this.selected = null; this.refresh() }
 
-  /** Repaint after a poll, reopening the selected member's cluster. */
+  /** Repaint after a poll. */
   refresh(scroll = false): void {
     for (const el of this.root.querySelectorAll('.kbn-key-selected')) {
       el.classList.remove('kbn-key-selected')
       el.removeAttribute('aria-current')
     }
-    // A drawn row before a folded one: the selection is shown where the eye is.
-    const candidates = this.selected ? [...this.root.querySelectorAll<HTMLElement>('[data-card-uid]')].filter(node => matches(node, this.selected!)) : []
-    const el = candidates.find(node => !node.closest('[hidden]')) ?? candidates[0]
+    const el = this.node()
     if (!el) return
-    if (el.matches('.kbn-cluster-item[hidden]')) el.parentElement?.querySelector<HTMLButtonElement>('.kbn-cluster-more')?.click()
     el.classList.add('kbn-key-selected')
     el.setAttribute('aria-current', 'true')
     if (scroll) this.reveal(el)
@@ -94,7 +96,7 @@ export class DeskKeyboard {
     const regions = this.regions()
     if (!regions.length) return false
     const current = this.node()
-    const initial = ['awaitingReview', 'inFlight', 'drafts'].map(kind =>
+    const initial = ['waiting', 'working', 'quiet'].map(kind =>
       regions.findIndex(region => region[0].closest(`[data-column="${kind}"]`))).find(index => index >= 0) ?? 0
     const column = current ? regions.findIndex(region => region.includes(current)) : initial
     let row = current ? regions[column].indexOf(current) : 0
@@ -132,7 +134,7 @@ export class DeskKeyboard {
     const address = identity(el)
     this.revealFrame = requestAnimationFrame(() => {
       this.revealFrame = 0
-      if (this.selected?.uid !== address.uid || this.selected.origin !== address.origin || this.selected.section !== address.section) return
+      if (JSON.stringify(this.selected) !== JSON.stringify(address)) return
       const current = this.node()
       if (current) this.revealPlaced(current)
     })
@@ -141,8 +143,6 @@ export class DeskKeyboard {
   private revealPlaced(el: HTMLElement): void {
     const motion = behavior()
     if (isMobileViewport()) {
-      const band = el.closest<HTMLElement>('.kbn-band-folded')
-      band?.querySelector<HTMLElement>('.kbn-bandhead')?.click()
       const column = el.closest<HTMLElement>('[data-column]')
       const board = column?.parentElement
       if (board && column) {

@@ -3,9 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const sheet = (name: string): string => readFileSync(resolve(__dirname, '../src/board', name), 'utf8')
-const deskRows = sheet('deskRows.css')
-const frontier = sheet('deskFrontier.css')
-const threads = sheet('threads.css')
+const desk = sheet('desk.css')
 
 /** The declarations of the first rule whose selector is exactly `selector`. */
 function rule(css: string, selector: string): Record<string, string> {
@@ -23,24 +21,17 @@ const px = (value: string): number => {
 }
 
 describe('the Desk reads at the board label size', () => {
-  it('sets a row as one dense mono line: the slug at the meta size, on a row of 22px, cut by an ellipsis', () => {
-    const name = rule(deskRows, '.kbn-col-list .kbn-card .kbn-card-name')
-    expect(name.font).toMatch(/var\(--type-meta\).*var\(--font-mono\)/)
-    expect(name['white-space']).toBe('nowrap')
-    expect(name['text-overflow']).toBe('ellipsis')
-    expect(rule(deskRows, '.kbn-col-list .kbn-card')['min-height']).toBe('var(--kbn-desk-row)')
-    expect(/--kbn-desk-row:\s*22px/.test(deskRows)).toBe(true)
+  it('sets a family as dense mono lines: the slug at the meta size, on a row of 22px, cut by an ellipsis', () => {
+    expect(rule(desk, '.kbn-family').font).toMatch(/var\(--type-meta\).*var\(--font-mono\)/)
+    const name = rule(desk, '.kbn-family-name')
+    expect([name['white-space'], name['text-overflow']]).toEqual(['nowrap', 'ellipsis'])
+    expect(rule(desk, '.kbn-family-head')['min-height']).toBe('var(--kbn-desk-row)')
+    expect(/--kbn-desk-row:\s*22px/.test(desk)).toBe(true)
   })
 
-  it('steps the column heads down from the full-size 38px', () => {
-    expect(px(rule(deskRows, '.kbn-now-board .kbn-col-title')['font-size'])).toBeLessThan(38)
-  })
-
-  it('names a thread by its slug path on one line, cut short by an ellipsis', () => {
-    const name = rule(frontier, '.kbn-desk-threads .kbn-thread-name')
-    expect(name.color).toBe('var(--kbn-ink-soft)')
-    const row = rule(threads, '.kbn-thread-name')
-    expect([row['white-space'], row['text-overflow']]).toEqual(['nowrap', 'ellipsis'])
+  it('gives what a waiting member wants one line, cut short by an ellipsis', () => {
+    const want = rule(desk, '.kbn-family-want')
+    expect([want['white-space'], want['text-overflow']]).toEqual(['nowrap', 'ellipsis'])
   })
 })
 
@@ -53,12 +44,10 @@ describe('pigment on the Desk is state', () => {
   })
 })
 
-describe('Drafts recede behind the live columns', () => {
-  it('sets a draft title in regular weight and softer ink, with no box of its own', () => {
-    const live = rule(deskRows, '.kbn-col-list .kbn-card .kbn-card-name')
-    const draft = rule(deskRows, '.kbn-col-list .kbn-card.kbn-card-drafts .kbn-card-name')
-    expect(Number(draft['font-weight'])).toBeLessThan(Number(/^(\d+)/.exec(live.font)![1]))
-    expect(draft.color).toBe('var(--kbn-ink-soft)')
-    expect(rule(deskRows, '.kbn-col-list .kbn-card')['border']).toBe('0')
+describe('quiet families recede behind the live ones', () => {
+  it('sets a quiet family\'s name in regular weight and softer ink', () => {
+    const quiet = rule(desk, ".kbn-family[data-attention='quiet'] .kbn-family-name")
+    expect(Number(quiet['font-weight'])).toBeLessThan(Number(rule(desk, '.kbn-family-name')['font-weight']))
+    expect(quiet.color).toBe('var(--kbn-ink-soft)')
   })
 })

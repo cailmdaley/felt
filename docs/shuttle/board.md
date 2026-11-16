@@ -7,7 +7,7 @@ the host-local [ledgers](telemetry.md) — the board stores nothing of its own.
 
 | Key | View | What it answers |
 |---|---|---|
-| `1` | **Desk** | What needs doing, and what is running right now |
+| `1` | **Desk** | What waits on you, what is working, and what is quiet |
 | `2` | **Chronicle** | What a stretch of weeks was about |
 | `3` | **Channels** | Where the work talks to you: a channel per line of work, a thread per worker |
 | `4` | **Globe** | Everything at once, as one place to move through |
@@ -16,156 +16,49 @@ the host-local [ledgers](telemetry.md) — the board stores nothing of its own.
 `#/desk`, `#/chronicle`, `#/channels` and `#/globe` deep-link the views; `#/board` opens Channels.
 A constitution uses `#/board/<uid>@<owner>/<document>`; browser Back returns to the view you opened it from.
 
-## Desk — the kanban
+## Desk — three states
 
-The Desk shows **Drafts**, **In flight**, **Awaiting review**, **Resting** and **Roles**, in that order.
-Resting holds paused and snoozed work, hubs you start by hand, and standing constitutions between runs.
-Roles holds a launcher chip for every seat at rest (a constitution with `shuttle.seat: true` and a role), in name order and never paged.
-Click a section heading to fold or unfold it; Drafts starts folded and the others open, and each fold is remembered in this browser.
+The Desk has three columns: **Waiting on you**, **Working** and **Quiet**.
+Each holds family cards: a top-level constitution with everything under it, its threads at any depth.
+Every family appears once, in the column of its most urgent member, waiting before working before quiet.
+A family whose top-level has a verdict (tempered or discarded) stays off the Desk unless something in it still waits or works.
 
-![The Desk with fictional workshop tasks: lunch options and speaker bios in Drafts, the participant guide and venue access In flight, and the programme and venue decision Awaiting review.](../assets/board-desk.jpg)
+![The Desk with fictional work: families waiting on you, with every waiting member on its own line, beside the working and the quiet.](../assets/board-desk.jpg)
 
-*The cards use fictional workshop data.
-Each card shows its fiber's `outcome`, so the venue decision is readable beside the guide that uses it.*
+*The cards use fictional data.*
 
-Where a card lands is two independent decisions: which column it belongs to,
-and which horizon it sits on.
+### One state
 
-### Column
+One function, `attentionOf` (`ui/src/board/attention.ts`), decides a constitution's state, and every surface draws only that: the Desk's columns, the state dots, the Channels rail and stream, and a constitution's view.
 
-The daemon that owns a constitution decides its column, because only it sees
-the worker: it serves `column` and `turn` on every board row
-(`Shuttle.Lifecycle`), by the rule `shuttle status --json` also reports
-(`internal/shuttle/column.go`). The board files each row by what it is served,
-after setting cycles apart. The rule evaluates in this order:
-
-| Column | Condition |
+| State | When |
 |---|---|
-| Cycles | tagged `cycle` — the board checks this first, unconditionally |
-| Tempered | `closed` + `tempered: true` |
-| Discarded | `closed` + `tempered: false` |
-| With orchestrator | `closed`, `tempered` absent, a thread (`shuttle.thread_parent`) with no `shuttle.review` mark |
-| Awaiting review | `closed`, `tempered` absent: top-level work, or a thread marked for review |
-| In flight | live worker — liveness wins over everything below |
-| Roles | `shuttle.seat: true` with a role, and at rest: not `active`, or `active` + `kind: standing` between runs |
-| Resting | `active` + `kind: standing` between runs — drawn wearing its next launch |
-| In flight | `active` oneshot |
-| Resting | `horizon: stashed`, unless a `due:` day that has come pulls it back |
-| Drafts | anything left, including `open` |
+| **Waiting on you** | The board says a line to you stands unhandled: a post (`shuttle post --to` you), a question or a close addressed to you, until you answer that fiber, it is handled, or you clear the post. Or it has an open `shuttle ask`, its worker is stopped on a harness prompt, its turn could not start (a launch error, a session that could not be identified), or it is closed for your review (a thread its orchestrator marked for you, or whose orchestrator is not on the board, included). |
+| **Working** | It has a live worker, whatever the worker's turn: mid-turn, starting, without a signal, or idle at its prompt with nothing asked. |
+| **Quiet** | Everything else: drafts, rest, seats, launches held at boot, closes its orchestrator reviews, verdicts. |
 
-In flight draws two bands, decided by whose move it is. **Your turn** holds
-live workers whose move is yours: questions first and drawn heavier (an
-outstanding `shuttle ask`, a harness prompt, or a blocked launch), then workers
-idle at their prompt with nothing they started still running. **Working** holds
-the rest, including a worker idle over its own background shells or
-subagents.
-Looking at a worker, or following its conversation in Rex, does not change its band.
-The daemon reads those live children from each harness: Claude
-Code's `background_tasks` on `stop`, Codex's `spawn_agent` calls and
-`subagent_stop` events, and Codex terminal sessions that name
-the worker as `parentThreadId`. A harness that reports none reads as your
-turn when idle. Cards keep creation order within each tier, so a card moves
-only when it crosses the seam or a question is raised or answered.
+A verdict settles everything: a tempered or discarded constitution is quiet.
+The dot says the state: gold while it waits on you, the agent's blue while it works (breathing while its worker is mid-turn, still while idle), hollow when quiet. Its tooltip says what it wants, else its worker's turn.
 
-One reading, the card's *turn*, decides the band, the order, and the
-row's mark on every surface, so a card can never sit in Your turn with a mark
-that says otherwise. The owning daemon serves the turn from its worker's
-runtime; the board lays over it only what it alone knows — the conversation
-you are following, and an owner it cannot reach. The thread roster
-(`shuttle threads`) reads the same turn. The pill's word names why it is (or
-isn't) your move:
+The owning daemon still serves each constitution's lifecycle column (`column`, by the rule `shuttle status --json` reports, `internal/shuttle/column.go`) and its worker's `turn` (`Shuttle.Lifecycle`); the board reads them to decide the state, and draws neither as a word.
 
-| Pill | Band | Meaning | Age counts from |
-|---|---|---|---|
-| **question** | Your turn | The worker needs an answer: an outstanding `shuttle ask` (the worker may still be working, and its dot breathes), or the harness stopped on a prompt. Its dot is red, the Desk's only red. | the ask, or the prompt's event |
-| **idle** | Your turn | The worker ended its turn with nothing running under it. | the last event |
-| **blocked** | Your turn | Rare: the turn could not start (launch error), or the session could not be attributed. Drawn quietly, as a hollow dot. | the last event |
-| **working** | Working | Mid-turn, or idle over background work it started. | the last event, once it has been silent ten minutes |
-| **starting** | Working | Launched in the last five minutes, or its session still being identified; no hook event yet. | the launch |
-| **no signal** | Working | Live past its start, but the daemon holds no hook event for it; or its owning daemon is unreachable, so its last report is frozen and no evidence of a turn (an outstanding ask still reads **question**). | the launch, or the owner's last successful poll |
+### A family card
 
-The dot's breathing says whether the worker is busy, independently of whose
-move it is. The pill is also the control that opens the conversation.
+A card names its top-level by its slug, with its dot. Under it, every member that waits on you has a line, `slug — what it wants`, none capped or folded: the question, the review mark's note or *for review*, the post, or why the turn could not start (the top-level's own want stands without its slug). A waiting post carries a ✓ that clears it, as in Channels.
+A working family with threads says how many of its members work (`3 working`); a quiet card says its faint word: *draft*, *resting*, *resting until* a day, *paused*, `↻` and its next run, *seat* or *held*.
+A line opens that member's view; anywhere else on the card opens the top-level's.
+Waiting on you is ordered newest wait first; Working and Quiet by latest activity.
+On a phone the columns are three leaves of a pager under a folio of three tabs.
 
-The cycle branch comes first on purpose. A [cycle](cycles.md) is an annotation
-on the calendar rather than work, so the board sets it apart before it reads
-any column — otherwise a stray "Autumn 2026" would sit in Drafts forever.
-
-Apart from that one tag, the column reads only `status`, `tempered`, `kind`,
-the seat, the horizon and its `due:`, and worker liveness. Neither the daemon
-nor the board reads tags for anything else.
-
-### A family's threads
-
-A closed thread's review belongs to its orchestrator. Until the orchestrator
-tempers it, discards it or marks it for you (`shuttle close <thread> --review
-"<why>"`), it reads **With orchestrator**: it counts as unfinished in its
-family but asks nothing of you, so it never moves the family into Awaiting
-review. A marked thread awaits your review like top-level work, and its page
-says why it was marked. A thread whose orchestrator is not on the board falls
-to you and is drawn in Awaiting review. Its page still offers Temper and
-Discard, and **Move to review** marks it for you.
-
-A family's root heads its threads in each section of work they stand in (Your turn, Working, Awaiting review), its own mark drawn faintly where its state is another.
-If the root is not in the section and only one thread is, that thread stands alone as its slug path from the root, with its own dot and age.
-Otherwise each thread hangs under its nearest shown ancestor, the threads between left out and named in its slug path from there.
-Drafts, Resting and the Roles list only a family's root, whose own threads in that state fold beneath it; a thread's draft is reached from its family. Every Desk row and thread is named by its fiber slug, as Rex's sidebar shows them, cut short by an ellipsis; the full name is the tooltip and the title of the page it opens. Archived threads are not on the Desk.
-
-The work sections are dense mono lines, a family's root and its threads at the same size, the root in bold, grouped by indentation alone.
-The dot is the row's own state; the count includes the root when it is in the section and all its threads in that state, red when one has a question.
-The count's caret folds the threads; every thread holding threads of its own carries a caret too.
-Family folds in Your turn and Awaiting review start open, and the others start folded; each is remembered in this browser.
-
-A click on a thread opens its page, as a click on a row does, and `j` / `k`
-walk the threads that are showing as well as the rows.
-
-### Horizon
-
-Column says *which lane*; horizon says *desk or Resting*. It is computed by
-`effectiveHorizon` from two frontmatter keys:
-
-- `horizon: stashed` takes a card off the Now board and puts it in Resting.
-  Dragging a card there from In flight or Awaiting review stops its worker and
-  parks it with no verdict — the board's spelling of `shuttle rest`.
-  (The wire format and the API still say `stashed` everywhere; "Resting" is
-  what the human is told, because that is what the surface means — deliberately
-  paused work, not a bin of failures.)
-- A `due:` day that is today or already past **overrides** a stored `stashed`
-  and pulls the card back onto the desk. That override is what makes snooze a
-  return ticket rather than a black hole. A *future* `due:` alone changes
-  nothing: the card keeps its place and simply wears the date.
-
-**Snooze** is the gesture that writes both. Drag a card and a drag horizon
-appears under the tab strip — a slim row of upcoming days, plus a chip per
-upcoming cycle. Drop on a day for `due:` + `horizon: stashed`; drop on a cycle
-chip to land on that cycle's start (clamped to tomorrow if it is already
-running); drop on today to put it back on the desk; drop into Resting to stash
-it dateless.
-
-### Gestures
-
-Two gestures carry different meanings. **Drag-and-drop** advances the card's
-state.
-**The fiber page's controls** give you another worker on the same run.
-
-A standing constitution takes no review: its card offers **Pause schedule**
-(Resume schedule once paused) and **Retire**, and, leading them while a run
-waits on you (its worker live, or its question open), **Temper run**, which ends
-that run and keeps the schedule. A drag to Awaiting review is refused. Its outcome is the last run's digest, the card's
-headline until the next run writes its own.
-
-Opening a Desk card enters its constitution's documents.
-The constitution's console (see [the reader](#the-reader)) carries its worker's line and Listen; its settings hold the next launch's agent, effort, surface and kind, plus the card's due day and parent.
-The Desk also offers Stash and Capture dialogs and Attach.
+The Desk's head row carries `+`, which stashes a new draft, and `✶`, which captures an idea by voice.
+Nothing on the Desk is dragged and it has no context menu: every act on a constitution lives in [its view](#a-constitutions-view).
 
 <a id="attach"></a>
 ### Open a worker
 
-A row's conversation icon (›_) opens the conversation of its fiber, and the console's menu offers **Open conversation** for the constitution it holds or the thread highlighted on its page, on every layout, including phones, whenever a destination is available.
-`c` does the same from any view, and a Desk row's menu offers it too.
-Tap to open; long-press or right-click a row's icon to choose a destination.
+The conversation icon (›_) in a constitution's view head opens the conversation of its fiber, and `c` does the same while the view is open; the console's own icon opens its target's when that is a different constitution.
+Tap to open; long-press or right-click the icon to choose a destination.
 A choice between alternatives is remembered; opening a sole destination leaves the preference unchanged.
-Fiber controls remain inline.
 For terminal workers, the board can open Kitty; `shuttle attach <fiber>` works from other terminals too.
 Claude sessions with Remote Control can open in the browser or Claude app, using your browser's preference in Settings.
 Codex workers open in their terminal session; remote access depends on the host terminal backend.
@@ -174,9 +67,10 @@ See [Opening conversations](conversations.md) for the choices, prerequisites, an
 ### Desk keyboard
 
 Bare keys act on the Desk when focus is outside an editable field.
-`j` / `↓` and `k` / `↑` select the next or previous visible row across sections, skipping folded sections and stopping at the ends.
-`g` and `G` select the first or last row in the current section.
-`l` / `→` or `Enter` / `o` opens the constitution, `h` / `←` or `Esc` clears selection, `/` opens Find, and `?` shows keyboard help.
+`j` / `↓` and `k` / `↑` select the next or previous card or waiting line, across the columns, stopping at the ends.
+`g` and `G` select the first or last in the current column.
+`l` / `→` or `Enter` / `o` opens the selected constitution, `h` / `←` or `Esc` clears selection, `/` opens Find, and `?` shows keyboard help.
+The Desk's keys only move and open; they act on nothing.
 
 ## Chronicle — where the time went
 
@@ -192,8 +86,7 @@ and what is armed.
 ![Chronicle with the same fictional workshop tasks: venue research, programme review, access checks, and guide preparation across September and October, under the Plan a small workshop cycle.](../assets/board-chronicle.jpg)
 
 *No fill, just marks on a line per fiber, so months of fibers stack without
-drowning each other. The era strip is the same [cycle](cycles.md) data that
-fences the Desk's Cycles column.*
+drowning each other. The era strip is the [cycle](cycles.md) data.*
 
 Everything on the page is joined through the ledgers. A minute or a commit
 that does not resolve to a fiber the board carries is not drawn at all, so work
@@ -273,12 +166,12 @@ Reselecting the same page leaves history untouched.
 Stepping between constitutions with j/k or J/K replaces the current visit.
 One Back or root Escape returns from a step to its predecessor; returning to Desk selects the last card viewed.
 
-Bare reader keys work outside editable fields: h/l or left/right step pages, and in a constitution's view, away from the rows, `l` opens its tapestry or report, else its newest sent file; j/k step constitutions in the Desk's order as one flow, across its columns (Drafts, In flight, Awaiting review, Resting and Roles), and J/K jump between those columns, landing on the constitution last open in each; a brief toast names the column and constitution a step lands on, and a constitution outside the Desk stands beside its family's row; down/up scroll about three lines, repeating while held; d/u scroll half a viewport; Space/Shift-Space scroll a full viewport.
+Bare reader keys work outside editable fields: h/l or left/right step pages, and in a constitution's view, away from the rows, `l` opens its tapestry or report, else its newest sent file; j/k step constitutions in the Desk's order as one flow, each family's top-level then its members that wait, across its columns (Waiting on you, Working, Quiet), and J/K jump between those columns, landing on the constitution last open in each; a brief toast names the column and constitution a step lands on, and a constitution outside the Desk stands after its nearest ancestor there; down/up scroll about three lines, repeating while held; d/u scroll half a viewport; Space/Shift-Space scroll a full viewport.
 g/G or Home/End select first/last pages, Enter/o toggle expand, and Escape unwinds popovers, expand, then returns.
-The same constitution keys act on the open fiber in the reader and on the selected card on the Desk: c (or .) opens the worker's conversation exactly as its pill does, and with no worker up reopens its past session in a terminal on its host, in any column: nothing is sent, no turn starts, and the card's lifecycle does not move (a card that never ran is launched from the console); t tempers, x discards and a moves work in progress, or a thread with its orchestrator, to Awaiting review (a thread so moved is marked for your review), each after the same undo window (z takes the latest back).
-s on a focused Desk card or constitution page opens a small date popover: Enter with no date rests undated, and a chosen date rests until that day.
+The constitution keys act on the open fiber in the reader: c (or .) opens the worker's conversation exactly as its pill does, and with no worker up reopens its past session in a terminal on its host, in any column: nothing is sent, no turn starts, and the card's lifecycle does not move (a card that never ran is launched from the console); t tempers, x discards and a moves work in progress, or a thread with its orchestrator, to Awaiting review (a thread so moved is marked for your review), each after the same undo window (z takes the latest back).
+s on a constitution page opens a small date popover: Enter with no date rests undated, and a chosen date rests until that day.
 Rest works in any state and stops a live worker through the owning daemon's lifecycle path.
-In flight shows **Your turn** then **Working**; a question card (an ask or a harness prompt) leads Your turn and opens its report when present.
+A constitution with an open question and no view opens its report when present.
 Alt-left/right step pages and Alt-down/up step constitutions, including while typing.
 A plain fiber reached by wikilink keeps the tab label **Note**.
 The tablist keeps one Tab stop and moves focus with its selected tab.

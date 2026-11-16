@@ -349,6 +349,8 @@ export interface DockOptions {
   phone?: PhoneListening
   /** Opens the Rest popover on the button that asked for it. */
   onRest?: (card: KanbanCard, anchor: HTMLElement) => void
+  /** Releases the boot quarantine on a held constitution's owning host. */
+  onRelease?: (card: KanbanCard) => void
   /** The surface shows the conversation itself: a send keeps the human here rather than opening the worker's terminal. */
   keepPlace?: boolean
 }
@@ -418,6 +420,7 @@ export class Dock {
   private readonly phone: PhoneListening | undefined
   private readonly voice: DockOptions['voice']
   private readonly onRest?: (card: KanbanCard, anchor: HTMLElement) => void
+  private readonly onRelease?: (card: KanbanCard) => void
   private readonly keepPlace: boolean
   private fiberSlug?: FiberSlug
   private channelOf?: (card: KanbanCard) => string | undefined
@@ -436,6 +439,7 @@ export class Dock {
     this.phone = opts.phone
     this.voice = opts.voice
     this.onRest = opts.onRest
+    this.onRelease = opts.onRelease
     this.keepPlace = opts.keepPlace ?? false
   }
 
@@ -677,7 +681,8 @@ export class Dock {
   /**
    * A fiber's lifecycle verbs as one button: its face is the verb that fits
    * the fiber's state ({@link leadVerb}), and a caret on the same pill opens a
-   * menu of the rest, each with its key. The set is the lifecycle model's
+   * menu of the rest, each with its key, and, for a launch the daemon holds
+   * at boot, Release boot quarantine. The set is the lifecycle model's
    * ({@link lifecycleVerbsFor}); Discard and Retire only ever sit in the menu.
    */
   private verbButton(target: () => KanbanCard): { el: HTMLElement; paint(card: KanbanCard, who: string): void } {
@@ -702,21 +707,22 @@ export class Dock {
     face.addEventListener('click', () => { if (lead) act(lead, face) })
     more.addEventListener('click', () => {
       const card = target(), box = el.getBoundingClientRect()
-      openActionMenu(more, offered.filter(verb => verb !== lead).map(verb => ({
+      const release = card.held && this.onRelease ? [{ label: 'Release boot quarantine', run: () => this.onRelease!(card) }] : []
+      openActionMenu(more, [...offered.filter(verb => verb !== lead).map(verb => ({
         label: verbSpec(verb, card).label,
         dress: (item: HTMLButtonElement) => { dressVerb(item, verb, card) },
         run: () => act(verb, el),
-      })), `${slug(card)}'s other verbs`, { x: box.left, y: box.bottom + 4 })
+      })), ...release], `${slug(card)}'s other verbs`, { x: box.left, y: box.bottom + 4 })
     })
     const paint = (card: KanbanCard, who: string): void => {
       offered = lifecycleVerbsFor(card, !!this.onRest)
       lead = leadVerb(card, offered)
-      const rest = offered.filter(verb => verb !== lead)
-      el.hidden = !offered.length
+      const rest = offered.filter(verb => verb !== lead), release = !!card.held && !!this.onRelease
+      el.hidden = !offered.length && !release
       el.setAttribute('aria-label', `${who}'s verbs`)
       face.hidden = !lead
-      more.hidden = !rest.length
-      const words = rest.map(verb => `${verbSpec(verb, card).label} (${VERB_KEY[verb]})`).join(', ')
+      more.hidden = !rest.length && !release
+      const words = [...rest.map(verb => `${verbSpec(verb, card).label} (${VERB_KEY[verb]})`), ...release ? ['Release boot quarantine'] : []].join(', ')
       more.title = `More: ${words}`
       more.setAttribute('aria-label', `More verbs for ${who}: ${words}`)
       if (!lead) return

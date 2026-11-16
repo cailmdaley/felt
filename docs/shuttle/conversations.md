@@ -15,7 +15,7 @@ A live worker's pill names its turn (**question**, **idle**, **blocked**, **work
 ## Choose where conversations open
 
 The console under an open constitution offers **Open conversation** in its menu, and a row its conversation icon (›_), whenever its conversation has somewhere to open on your device, including phones; on a desktop with no worker up, it reopens the last session on its host.
-Tap the console, press `c`, or choose **Open conversation** from a Desk row's menu to open the remembered destination.
+Tap the console or the conversation icon in a constitution's view, or press `c` while its view is open, to open the remembered destination.
 Long-press or right-click the console to pick from all available destinations, even when there is only one.
 The check mark identifies the destination a tap uses.
 

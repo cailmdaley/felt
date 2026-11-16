@@ -237,7 +237,7 @@ Nested charter notes are excluded from the list.
 `role --new` validates the slug before creating anything and leaves existing charters untouched.
 A new charter starts with a short lede naming the constitution it serves and asking its holders to grow the charter.
 Without `--new`, assigning a role still requires an existing charter.
-| `shuttle ask <fiber> "<one-line question>"` | Raise a non-blocking question for the human in `shuttle.ask: {text, at}`; the worker keeps working and its In flight card leads **Your turn**, above idle turns and **Working**. `--clear` removes it. Resume, reopen, and messaging the fiber's worker clear it too. Works offline and accepts `-C <store>`. The same report rule as `close` holds for a question from a worker on its own top-level oneshot |
+| `shuttle ask <fiber> "<one-line question>"` | Raise a non-blocking question for the human in `shuttle.ask: {text, at}`; the worker keeps working, and the board draws the constitution waiting on you with the question as what it wants. `--clear` removes it. Resume, reopen, and messaging the fiber's worker clear it too. Works offline and accepts `-C <store>`. The same report rule as `close` holds for a question from a worker on its own top-level oneshot |
 | `shuttle set-outcome <fiber>` | Set the `outcome:` field (`--outcome`, or stdin for multi-line) |
 | `shuttle handoff <fiber>` | Stamp the clean-exit signal; a worker's final action before its tmux session ends. A block naming an agent the registry does not know is refused before stamping, so the successor never launches on it: fix it with `shuttle set-agent` and hand off again |
 

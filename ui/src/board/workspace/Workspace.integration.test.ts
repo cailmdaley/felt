@@ -7,9 +7,7 @@ import type { ColumnKind, KanbanCard } from '../KanbanTypes.js'
 import type { Turn } from '../turn.js'
 import { Workspace, type WorkspaceOptions } from './Workspace.js'
 import { ThreadIndex } from '../threads.js'
-import { projectDeskFrontier } from '../KanbanReadModel.js'
-import { deskOrder } from '../deskOrdering.js'
-import { response as boardResponse } from '../testFixtures.js'
+import { deskCardKey, deskOrder } from '../deskOrdering.js'
 import type { Reader } from './Reader.js'
 import { Dock } from './Dock.js'
 import { docKey } from './documents.js'
@@ -728,26 +726,27 @@ describe('workspace reader integration', () => {
     expect(workspace.isActive).toBe(false)
     expect(returned).not.toHaveBeenCalled()
   })
-  it('walks In flight\'s bands as one flow with j/k, and stops J/K at each column', async () => {
+  it('walks the Desk\'s columns as one flow with j/k, and stops J/K at each column', async () => {
     workspace.dispose()
     const flight = (uid: string, runtimePhase?: KanbanCard['runtimePhase']): KanbanCard =>
       ({ ...cards[1], id: `work/${uid}`, uid, name: uid, path: `work/${uid}/${uid}.md`, status: 'active', column: 'inFlight', turn: TURN_OF_PHASE[runtimePhase ?? ''] ?? 'no-signal', workerState: 'running', runtimePhase })
     const feed = [{ ...cards[0], status: 'closed', column: 'awaitingReview' as const }, flight('w1', 'working'), flight('n1', 'waiting'), flight('w2', 'working'), flight('n2', 'blocked'), { ...cards[1], uid: 'draft', id: 'work/draft', name: 'draft' }]
-    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, deskRows: () => [feed[5], feed[2], feed[4], feed[1], feed[3], feed[0]], origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
-    workspace.open(feed[0], 'Desk'); await settle()
-    expect(walked()).toEqual(['draft', 'n1', 'n2', 'w1', 'w2', 'alpha'])
-    await step('K'); expect(titled()).toBe('n1')
-    await step('j'); expect(titled()).toBe('n2')
-    // Off the end of one band, j goes on into the next, and on across columns.
-    await step('j'); expect(titled()).toBe('w1')
-    await step('K'); expect(titled()).toBe('draft')
-    await step('j'); expect(titled()).toBe('n1')
-    await step('k'); expect(titled()).toBe('draft')
-    await step('J'); expect(titled()).toBe('n1')
-    await step('J'); expect(titled()).toBe('alpha')
-    await step('K'); expect(titled()).toBe('n1')
+    const order = deskOrder(new ThreadIndex(feed), new Map())
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, deskRows: () => order.rows, deskPlacement: card => order.placements.get(deskCardKey(card)), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    const names = order.rows.map(row => row.name)
+    // The idle n1 works; the blocked n2 waits with the review.
+    expect(order.rows.map(row => order.placements.get(deskCardKey(row))!.group)).toEqual(['Waiting on you', 'Waiting on you', 'Working', 'Working', 'Working', 'Quiet'])
+    expect(names.slice(0, 2).sort()).toEqual(['Alpha', 'n2'])
+    workspace.open(order.rows[0], 'Desk'); await settle()
+    expect(walked()).toEqual(order.rows.map(row => row.uid ?? row.id))
+    await step('j'); expect(titled()).toBe(names[1])
+    // Off the end of one column, j goes on into the next.
+    await step('j'); expect(titled()).toBe(names[2])
+    await step('J'); expect(titled()).toBe('draft')
+    await step('K'); expect(titled()).toBe(names[2])
+    await step('K'); expect(titled()).toBe(names[1])
   })
-  it('keeps an off-Desk thread beside its family\'s Desk row, in that row\'s column', async () => {
+  it('keeps an off-Desk thread beside its nearest ancestor on the Desk, in that family\'s column', async () => {
     workspace.dispose()
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
       card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, ...over })
@@ -759,19 +758,19 @@ describe('workspace reader integration', () => {
       thread({ id: 'settled/ask', orchestrator: 'settled', status: 'active', ask: { text: 'Which cut?', at: '2026-07-02T12:00:00Z' } }),
       thread({ id: 'review', status: 'closed' }),
     ]
-    const index = new ThreadIndex(raw)
-    const feed = raw.map(c => ({ ...c, threadSummary: index.summary(c) }))
-    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, deskRows: () => [feed[0], feed[4], feed[1], feed[5]], threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    const feed = raw, order = deskOrder(new ThreadIndex(feed), new Map())
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, deskRows: () => order.rows, deskPlacement: card => order.placements.get(deskCardKey(card)), threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    // A tempered top-level stands on the Desk while a thread of it waits.
+    expect(order.rows.map(row => row.uid)).toEqual(['settled', 'settled-ask', 'review', 'hub', 'draft'])
     workspace.open(feed[2], 'Desk', 'fiber:host-a:hub-sub'); await settle()
-    expect(walked()).toEqual(['draft', 'settled-ask', 'hub', 'hub-sub', 'review'])
+    expect(walked()).toEqual(['settled', 'settled-ask', 'review', 'hub', 'hub-sub', 'draft'])
     await step('k')
-    expect(landed()).toBe('In flight · hub')
+    expect(landed()).toBe('Working · hub')
     workspace.open(feed[3], 'Desk'); await settle()
-    expect(walked()).toEqual(['draft', 'settled-ask', 'settled', 'hub', 'review'])
     await step('j')
-    expect(landed()).toBe('In flight · hub')
+    expect(landed()).toBe('Waiting on you · settled/ask')
     await step('J')
-    expect(landed()).toBe('Awaiting review · review')
+    expect(landed()).toBe('Working · hub')
   })
   it("leads a thread up its ancestry, by the band's trail and by b", async () => {
     workspace.dispose()
@@ -1164,7 +1163,7 @@ describe('workspace reader integration', () => {
     expect(document.querySelector('.ws-stage-band .ws-band-back, .ws-stage-band .ws-band-leave')).toBeNull()
     expect(document.querySelector('.ws-selected .ws-labelbar .ws-document-back')).not.toBeNull()
   })
-  it('steps the columns of the Desk projection, including scheduled work in Resting', async () => {
+  it('steps the columns of the Desk, scheduled work among the quiet', async () => {
     workspace.dispose()
     const draft = card({ id: 'desk/draft', shuttleKind: 'oneshot' })
     const turn = card({ id: 'desk/turn', status: 'active', shuttleKind: 'oneshot', workerState: 'running', runtimePhase: 'waiting' })
@@ -1173,21 +1172,20 @@ describe('workspace reader integration', () => {
     const seat = card({ id: 'roles/editor', status: 'open', shuttleKind: 'standing', shuttleRole: 'editor', shuttleSeat: true })
     const stashed = card({ id: 'desk/stashed', shuttleKind: 'oneshot', effectiveHorizon: 'stashed' })
     const scheduled = card({ id: 'roles/scheduled', status: 'active', shuttleKind: 'standing', shuttleSchedule: '0 9 * * *', nextLaunchAt: '2026-10-30T09:00:00Z' })
-    const projection = projectDeskFrontier(boardResponse({
-      now: { drafts: [draft], inFlight: [turn, working], awaitingReview: [review] },
-      roles: [seat], stash: [stashed], timeline: { past: [], futureDated: [scheduled] },
-    }))
-    const rows = deskOrder(projection).rows
+    const order = deskOrder(new ThreadIndex([draft, turn, working, review, seat, stashed, scheduled]), new Map())
+    const rows = order.rows
     workspace = makeWorkspace(document.body, {
-      shuttleBase: '', cards: () => [...rows], deskRows: () => rows,
+      shuttleBase: '', cards: () => [...rows], deskRows: () => rows, deskPlacement: card => order.placements.get(deskCardKey(card)),
       threadIndex: () => new ThreadIndex(rows), origin: () => 'Desk',
       onVisibility: visibility, dock: new Dock('', changed),
     })
     workspace.open(rows[0], 'Desk'); await settle()
     expect(walked()).toEqual(rows.map(row => row.uid ?? row.id))
+    expect(rows.map(row => row.id).slice(0, 4)).toEqual(['desk/review', 'desk/turn', 'desk/working', expect.any(String)])
+    expect(rows.map(row => row.id)).toEqual(expect.arrayContaining(['roles/scheduled', 'roles/editor', 'desk/stashed', 'desk/draft']))
     const columns: string[] = []
-    for (let n = 0; n < 4; n++) { await step('J'); columns.push(landed()!.split(' · ')[0]) }
-    expect(columns).toEqual(['In flight', 'Awaiting review', 'Resting', 'Roles'])
+    for (let n = 0; n < 2; n++) { await step('J'); columns.push(landed()!.split(' · ')[0]) }
+    expect(columns).toEqual(['Working', 'Quiet'])
   })
   it('indexes fleet filenames on a cold Desk and refreshes an open picker without entering Reader', async () => {
     workspace.dispose()

@@ -694,17 +694,14 @@ export class Reader {
     if (stop) this.groupMemory.set(stop.key, identity)
   }
   /**
-   * The open constitution joins the list it is missing from: right after its
-   * family's Desk row, which keeps it in that row's group; else after the
-   * nearest ancestor the list holds; anything else at the end.
+   * The open constitution joins the list it is missing from: right after the
+   * nearest ancestor the list holds, its family's card among them, which
+   * keeps it in that card's group; anything else at the end.
    */
   private withCurrent(cards: KanbanCard[]): KanbanCard[] {
     const current = this.currentCard
     if (!current || cards.some(card => deskCardKey(card) === deskCardKey(current))) return cards
     const index = this.opts.threadIndex?.()
-    const lead = index?.family(index.card(current)).lead
-    const row = lead ? cards.findIndex(card => deskCardKey(card) === deskCardKey(lead)) : -1
-    if (row >= 0) return [...cards.slice(0, row + 1), current, ...cards.slice(row + 1)]
     for (let parent = index?.parentOf(current); parent; parent = index!.parentOf(parent)) {
       const at = cards.findIndex(card => deskCardKey(card) === deskCardKey(parent!))
       if (at >= 0) return [...cards.slice(0, at + 1), current, ...cards.slice(at + 1)]

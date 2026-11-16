@@ -174,8 +174,7 @@ type Private = {
   ) => Promise<void>
   showBanner: (message: string, kind: 'error' | 'info') => void
   fetchAndRender: () => Promise<void>
-  transition: (c: KanbanCard, target: 'tempered' | 'composted' | 'inFlight') => void
-  setSurface: (c: KanbanCard, h: 'now' | 'stashed', o?: { due?: string | null }) => void
+  transition: (c: KanbanCard, target: 'tempered' | 'composted' | 'awaitingReview') => void
   livePatch: (
     c: KanbanCard,
     changes: Record<string, unknown>,
@@ -211,234 +210,25 @@ afterEach(() => {
 // Dues relative to the real clock, in the runner's zone — never a literal
 // date, which would name a different civil day either side of the Atlantic.
 const dayFromNow = (n: number): string => isoDayLocal(Date.now() + n * DAY)
-/** How felt serializes a civil day it parsed on a UTC machine. */
-const asStoredUtc = (day: string): string => `${day}T00:00:00Z`
-/** …and on a machine that was in Paris. Same civil day, different encoding. */
-const asStoredParis = (day: string): string => `${day}T00:00:00+02:00`
-
-// ── The Resting drop: one rest, carrying a day or nothing ────────────────────
-
-describe('setSurface → commitSurface — a Resting drop is one rest', () => {
-  const restOf = (fiber: string, extra: Record<string, unknown> = {}) => [{
-    url: `${BASE}/api/v1/lifecycle`, method: 'POST',
-    body: { action: 'rest', fiber, origin: 'local', ...extra },
-  }]
-
-  it('rests a card dated in the future without naming a day — rest keeps it', async () => {
-    const c = card({ due: asStoredUtc(dayFromNow(30)) })
-    asPrivate(makeBoard()).setSurface(c, 'stashed', {})
-    await wire.settled()
-    expect(wire.writes()).toEqual(restOf('fiber-1'))
-  })
-
-  it('preserves a future due stored in a NON-UTC offset too', async () => {
-    // Same civil day, written on a machine at +02:00. Read as an instant this
-    // is a different day, and a west-coast runner could classify it as past.
-    const c = card({ due: asStoredParis(dayFromNow(30)) })
-    const board = asPrivate(makeBoard())
-    const banner = vi.spyOn(board, 'showBanner')
-    board.setSurface(c, 'stashed', {})
-    await wire.settled()
-    expect(wire.writes()).toEqual(restOf('fiber-1'))
-    expect(banner).not.toHaveBeenCalled()
-  })
-
-  it.each([
-    ['already past', -5],
-    ['dated TODAY', 0],
-  ])('reports the cleared due when it is %s — rest clears it', async (_label, offset) => {
-    // Today is the boundary a `new Date(due)` round trip gets wrong in a
-    // negative-offset zone.
-    const c = card({ due: asStoredUtc(dayFromNow(offset)) })
-    const board = asPrivate(makeBoard())
-    const banner = vi.spyOn(board, 'showBanner')
-    board.setSurface(c, 'stashed', {})
-    await wire.settled()
-    expect(wire.writes()).toEqual(restOf('fiber-1'))
-    expect(banner).toHaveBeenCalledWith(expect.stringMatching(/already past.*cleared/), 'info')
-  })
-
-  it('sends an explicit day verbatim as until — the day-cell drop wins over both rules', async () => {
-    const target = dayFromNow(9)
-    const c = card({ due: asStoredUtc(dayFromNow(-5)) }) // a stale due it overrides
-    asPrivate(makeBoard()).setSurface(c, 'stashed', { due: target })
-    await wire.settled()
-    // Bare `YYYY-MM-DD`, byte for byte — not an ISO instant, not re-parsed.
-    expect(wire.writes()).toEqual(restOf('fiber-1', { until: target }))
-  })
-
-  it('writes NOTHING when the drop names the day the card already wears', async () => {
-    // The card carries felt's serialization; the day column supplies the bare
-    // civil day. As strings those differ, so a string compare would run a real
-    // write (and flicker) for a no-op.
-    const day = dayFromNow(4)
-    const c = card({ due: asStoredUtc(day), storedHorizon: 'stashed' })
-    asPrivate(makeBoard()).setSurface(c, 'stashed', { due: day })
-
-    await new Promise((r) => setTimeout(r, 20))
-    expect(wire.calls).toEqual([])
-  })
-
-  it('reopens a closed card as a draft when dropped on a future day', async () => {
-    const due = dayFromNow(7)
-    asPrivate(makeBoard()).setSurface(card({ status: 'closed' }), 'now', { due })
-    await wire.settled()
-    expect(wire.bodiesTo('/api/v1/transition')).toEqual([
-      { fiber_id: 'fiber-1', origin: 'local', target: 'drafts' },
-    ])
-    expect(wire.bodiesTo('/api/v1/felt-edit')[0]).toMatchObject({ due })
-  })
-
-  it('adds a future day to live work without killing or changing its lifecycle', async () => {
-    const due = dayFromNow(7)
-    asPrivate(makeBoard()).setSurface(card({
-      status: 'active', workerState: 'running', tmuxSession: 'live-worker',
-    }), 'now', { due })
-    await wire.settled()
-    expect(wire.writes()).toEqual([{
-      url: `${BASE}/api/v1/felt-edit`, method: 'POST',
-      body: { fiber_id: 'fiber-1', origin: 'local', due },
-    }])
-  })
-
-  it('redates a resting card through rest until', async () => {
-    const due = dayFromNow(7)
-    asPrivate(makeBoard()).setSurface(card({ status: 'open', storedHorizon: 'stashed' }), 'stashed', { due })
-    await wire.settled()
-    expect(wire.writes()).toEqual(restOf('fiber-1', { until: due }))
-  })
-
-  it('redates a resting card that waits on a blocker without replacing it', async () => {
-    const due = dayFromNow(7)
-    const c = card({ status: 'open', storedHorizon: 'stashed', shuttleBlockedOn: 'u-blocker' })
-    asPrivate(makeBoard()).setSurface(c, 'stashed', { due })
-    await wire.settled()
-    expect(wire.writes()).toEqual([{
-      url: `${BASE}/api/v1/felt-edit`, method: 'POST',
-      body: { fiber_id: 'fiber-1', origin: 'local', due },
-    }])
-  })
-
-  it('banners a refused rest', async () => {
-    const board = asPrivate(makeBoard())
-    const banner = vi.spyOn(board, 'showBanner')
-    wire.fail('/api/v1/lifecycle')
-    board.setSurface(card({ status: 'closed' }), 'stashed', { due: dayFromNow(7) })
-    await wire.settled()
-    expect(banner).toHaveBeenCalledWith(expect.stringMatching(/Couldn't move.*Resting/), 'error')
-  })
-
-  it.each([
-    ['an active card', { id: 'active-1', status: 'active' as const, due: asStoredUtc(dayFromNow(30)) }],
-    // Lifecycle placement wins over the planning field: an active oneshot is
-    // In flight even when a previous stash left `horizon: stashed` behind.
-    ['an active card whose stale horizon says stashed', {
-      id: 'active-1', status: 'active' as const, shuttleKind: 'oneshot' as const,
-      workerState: 'running' as const, tmuxSession: 'tmux-active-stashed',
-      storedHorizon: 'stashed' as const, effectiveHorizon: 'stashed' as const,
-    }],
-    // An open card can still have a live worker after a force dispatch while
-    // its old horizon remains stashed; the worker wins the classifier.
-    ['an open stashed card whose worker is live', {
-      id: 'active-1', status: 'open' as const, shuttleKind: 'oneshot' as const,
-      workerState: 'running' as const, tmuxSession: 'tmux-open-stashed-live',
-      storedHorizon: 'stashed' as const, effectiveHorizon: 'stashed' as const,
-    }],
-    // Rest clears a verdict itself.
-    ['a card that carries a verdict', { id: 'active-1', status: 'closed' as const, tempered: true }],
-  ])('rests %s in one write; rest stops its worker in the owning Poller', async (_label, over) => {
-    asPrivate(makeBoard()).setSurface(card(over), 'stashed', {})
-    await wire.settled()
-    expect(wire.writes()).toEqual(restOf('active-1'))
-  })
-
-  it('does not stop a blocked launch that has no live worker', async () => {
-    const c = card({
-      id: 'app-blocked-1',
-      status: 'open',
-      shuttleKind: 'oneshot',
-      runtimePhase: 'blocked',
-      launchError: 'turn/start could not be confirmed',
-      storedHorizon: 'stashed',
-      effectiveHorizon: 'stashed',
-    })
-    asPrivate(makeBoard()).setSurface(c, 'stashed', {})
-    await new Promise((r) => setTimeout(r, 20))
-    expect(wire.writes()).toEqual([])
-  })
-
-  it('unsets horizon and cold on the way back to Now, touching no due', async () => {
-    const c = card({ storedHorizon: 'stashed', due: asStoredUtc(dayFromNow(30)) })
-    asPrivate(makeBoard()).setSurface(c, 'now', {})
-    await wire.settled()
-
-    expect(wire.bodiesTo('/api/v1/felt-edit')[0]).toEqual({
-      fiber_id: 'fiber-1',
-      origin: 'local',
-      unset: ['horizon', 'cold'],
-    })
-  })
-})
 
 describe('optimistic response cache coherence', () => {
-  it('holds polls while a stashed surface gesture is still writing', async () => {
+  it('holds polls while a verdict is still writing, and reads the feed again once it lands', async () => {
     const c = card()
     let finish!: (value: Response) => void
     const reads = vi.fn()
     globalThis.fetch = vi.fn(async input => {
-      if (String(input).includes('/lifecycle')) return new Promise<Response>(resolve => { finish = resolve })
+      if (String(input).includes('/transition')) return new Promise<Response>(resolve => { finish = resolve })
       if (String(input).includes('/fibers/composite')) reads()
       return Response.json({})
     }) as typeof fetch
     const board = asPrivate(makeBoard())
     board.applyResponse(response({ now: { drafts: [c], inFlight: [], awaitingReview: [] } }))
-    board.setSurface(c, 'stashed')
+    board.transition(c, 'awaitingReview')
     await board.fetchAndRender()
     expect(reads).not.toHaveBeenCalled()
-    expect(board.lastResponse?.stash.map(card => card.id)).toContain(c.id)
+    expect(board.lastResponse?.now.awaitingReview.map(card => card.id)).toContain(c.id)
     finish(Response.json({}))
     await vi.waitFor(() => expect(reads).toHaveBeenCalledOnce())
-  })
-
-  it.each([1, 2])('reconciles refused launches unconditionally after all %s gestures settle', async count => {
-    const cards = Array.from({ length: count }, (_, i) => card({ id: `task-${i}`, shuttleProjectDir: '/work' }))
-    const feed = { host: 'local', fibers: cards.map(c => ({
-      origin: 'local', felt_store: '/store', path: c.path,
-      fiber: { id: c.id, name: c.name, status: 'open', shuttle: { kind: 'oneshot', project_dir: '/work' } },
-    })) }
-    const replies: Array<(res: Response) => void> = []
-    const reads: Headers[] = []
-    globalThis.fetch = vi.fn(async (input, init) => {
-      if (String(input).includes('/fibers/composite')) {
-        const headers = new Headers(init?.headers)
-        reads.push(headers)
-        return headers.get('If-None-Match') === '"same"'
-          ? new Response(null, { status: 304 })
-          : Response.json(feed, { headers: { ETag: '"same"' } })
-      }
-      if (String(input).includes('/dispatch')) return new Promise<Response>(resolve => replies.push(resolve))
-      return Response.json({})
-    }) as typeof fetch
-    const board = asPrivate(makeBoard())
-    const failed = new Promise<void>(resolve => {
-      vi.spyOn(board, 'showBanner').mockImplementation(() => resolve())
-    })
-    await board.fetchAndRender()
-    for (const c of cards) board.transition(c, 'inFlight')
-    await vi.waitFor(() => expect(replies).toHaveLength(count))
-    expect(board.lastResponse?.now.inFlight).toHaveLength(count)
-    replies[0](Response.json({ error: 'refused' }, { status: 422 }))
-    if (count === 2) {
-      // A completed gesture must not erase the other one's outstanding paint.
-      await failed
-      expect(reads).toHaveLength(1)
-      expect(board.lastResponse?.now.inFlight).toHaveLength(2)
-      replies[1](Response.json({ error: 'refused' }, { status: 422 }))
-    }
-    await vi.waitFor(() => expect(reads).toHaveLength(2))
-    expect(reads[1].has('If-None-Match')).toBe(false)
-    await vi.waitFor(() => expect(board.lastResponse?.now.drafts).toHaveLength(count))
-    expect(board.lastResponse?.now.inFlight).toHaveLength(0)
   })
 })
 

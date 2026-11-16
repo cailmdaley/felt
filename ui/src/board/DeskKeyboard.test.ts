@@ -11,7 +11,7 @@ it('restores Desk selection without synchronous layout or scrolling a visible ca
   vi.stubGlobal('cancelAnimationFrame', vi.fn())
   vi.stubGlobal('matchMedia', () => ({ matches: false }))
   const root = document.createElement('div')
-  root.innerHTML = '<div data-column="inFlight" style="overflow-y: auto"><div data-card-uid="a" data-card-origin="host"></div></div>'
+  root.innerHTML = '<div data-column="working" style="overflow-y: auto"><div data-card-uid="a" data-card-origin="host"></div></div>'
   document.body.append(root)
   const column = root.firstElementChild as HTMLElement, row = column.firstElementChild as HTMLElement
   const read = vi.spyOn(row, 'getBoundingClientRect').mockReturnValue(new DOMRect(10, 10, 100, 100))

@@ -21,7 +21,6 @@ import {
   railBounds,
   railCivilDay,
   railDayReader,
-  sameCivilDue,
   shiftCivilDay,
   wallClock,
   zone,
@@ -323,14 +322,12 @@ describe('civil days and instants, in every zone', () => {
     }), { seed: 0x0ff5e7, numRuns: RUNS })
   })
 
-  it('calls every serialization of one civil day the same due, both ways round', () => {
+  it('reads every serialization of one civil day as that day, and the next day as another', () => {
     const pairs = civilDays.chain((day) => fc.tuple(spellings(day), spellings(day), spellings(shiftCivilDay(day, 1))))
     fc.assert(fc.property(pairs, zones, ([a, b, nextDay], z) => {
-      expect(sameCivilDue(a, a, z)).toBe(true)
-      expect(sameCivilDue(a, b, z)).toBe(true)
-      expect(sameCivilDue(b, a, z)).toBe(true)
-      expect(sameCivilDue(a, nextDay, z)).toBe(false)
-      expect(sameCivilDue(a, null, z)).toBe(false)
+      expect(dueCivilDay(a, z)).toBeDefined()
+      expect(dueCivilDay(a, z)).toBe(dueCivilDay(b, z))
+      expect(dueCivilDay(a, z)).not.toBe(dueCivilDay(nextDay, z))
     }), { seed: 0x5a3e, numRuns: RUNS })
   })
 })

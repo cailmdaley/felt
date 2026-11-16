@@ -208,7 +208,7 @@ A child's events under a different session id never alter the parent merely beca
 Identified child-count events are deduplicated within the 48-hour replay window.
 A duplicate spawn event is inert for both the child count and the foreground turn.
 The hook stream supplies no individual child identity or live registry; an incomplete stream can therefore leave a stale count until the session is pruned.
-Pi exposes turn activity through the shared event stream but no child registry here; idle Pi workers fall back to Your turn.
+Pi exposes turn activity through the shared event stream but no child registry here; an idle Pi worker reads idle.
 Child activity does not clear a pending human request on a closed parent turn.
 A child completion changes the outstanding count, not whether someone has answered the parent's permission prompt.
 

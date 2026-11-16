@@ -10,27 +10,14 @@
 import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
 import {
-  cycleMembership,
   cycleSpan,
-  dueBouncesFromResting,
   effectiveHorizon,
   isCycleFiber,
-  lensCycles,
-  restingUntil,
 } from './KanbanRules.js'
-import type { CycleDropCandidate } from './KanbanRules.js'
 import type { Fiber } from './KanbanFiber.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
-import { boardFrom, card as baseCard, response, type FeedOf, type FeedRow } from './testFixtures.js'
-import { deriveCycleLens, isSleepingOnSchedule, restingCards } from './KanbanReadModel.js'
-import {
-  clusterStashCards,
-  findCardById,
-  formatLaunchDay,
-  scheduleNote,
-  sortDatedByReturn,
-  splitStashByReturn,
-} from './KanbanSurfaces.js'
+import { boardFrom, type FeedOf, type FeedRow } from './testFixtures.js'
+import { isSleepingOnSchedule, restingCards } from './KanbanReadModel.js'
 import { sessionWindow, stripFacts } from './workspace/Dock.js'
 import { civilDayAt, isoDayLocal, shiftCivilDay } from './civilDay.js'
 
@@ -87,56 +74,6 @@ describe('effectiveHorizon — snooze is due + stashed, composed', () => {
 
   it('leaves a dateless rest resting', () => {
     expect(effectiveHorizon({ horizon: 'stashed' }, NOW).effectiveHorizon).toBe('stashed')
-  })
-})
-
-describe('restingUntil', () => {
-  it('names the wake day for a snoozed card', () => {
-    expect(restingUntil({ horizon: 'stashed', due: dayFromNow(4) }, NOW)).toBe(dayFromNow(4))
-  })
-
-  it('is undefined for a dateless rest and for a card the drift already woke', () => {
-    expect(restingUntil({ horizon: 'stashed' }, NOW)).toBeUndefined()
-    expect(restingUntil({ horizon: 'stashed', due: dayFromNow(-1) }, NOW)).toBeUndefined()
-  })
-
-  it('is undefined for a scheduled card — that one is on the timeline, not resting', () => {
-    expect(restingUntil({ due: dayFromNow(2) }, NOW)).toBeUndefined()
-  })
-})
-
-// What a drag into Resting does with a `due:` it was not handed. The gesture
-// PRESERVES the date — deleting what the human wrote was the bug — except for
-// the one date that cannot survive the trip.
-describe('dueBouncesFromResting', () => {
-  it('STASH PRESERVES A FUTURE DUE — the snooze that comes back on its own', () => {
-    // The Croatia case: a card due in October, dropped into Resting in August.
-    // False here means setSurface leaves the `due:` alone, so the card rests as
-    // `horizon: stashed` + a future date and the drift branch returns it on the
-    // day. This is the whole point of the rule.
-    expect(dueBouncesFromResting(dayFromNow(1), NOW)).toBe(false)
-    expect(dueBouncesFromResting(dayFromNow(49), NOW)).toBe(false)
-  })
-
-  it('STASH DROPS A STALE DUE — it would land the card straight back on the desk', () => {
-    // Today counts as stale: `effectiveHorizon` promotes on `due <= today`, so
-    // keeping either of these would put the card back in Drafts on the next
-    // poll and the drag would read as ignored.
-    expect(dueBouncesFromResting(dayFromNow(0), NOW)).toBe(true)
-    expect(dueBouncesFromResting(dayFromNow(-3), NOW)).toBe(true)
-  })
-
-  it('has nothing to say about a card with no date', () => {
-    expect(dueBouncesFromResting(undefined, NOW)).toBe(false)
-  })
-
-  it('judges the civil day the due NAMES, through felt\'s midnight storage', () => {
-    // The hemisphere trap: tomorrow written at midnight in any offset is still
-    // tomorrow, and must survive the stash in both TZs this file runs under.
-    for (const offset of ['Z', '+02:00', '-07:00']) {
-      expect(dueBouncesFromResting(`${dayFromNow(1)}T00:00:00${offset}`, NOW)).toBe(false)
-      expect(dueBouncesFromResting(`${dayFromNow(-1)}T00:00:00${offset}`, NOW)).toBe(true)
-    }
   })
 })
 
@@ -429,174 +366,6 @@ describe('what the board admits — a shuttle block, or a cycle', () => {
   })
 })
 
-describe('Resting clusters split when they overflow', () => {
-  // Ordering inside a cluster is by createdAt desc, so give each card a
-  // distinct instant to keep assertions stable. The clustering itself is
-  // path-only, so these are TZ-independent.
-  let tick = 0
-  const at = (): string => new Date(NOW - (tick += 60_000)).toISOString()
-  const restingCard = (id: string, cold = false): KanbanCard => ({
-    id,
-    name: id.split('/').pop() ?? id,
-    path: `.felt/${id}.md`,
-    originId: 'local',
-    status: 'open',
-    column: 'resting',
-    turn: 'none',
-    createdAt: at(),
-    effectiveHorizon: 'stashed',
-    drifted: false,
-    isCycle: false,
-    cycleStart: null,
-    ...(cold ? { cold: true } : {}),
-  })
-  const keysOf = (cards: KanbanCard[]): Array<[string, number]> =>
-    clusterStashCards(cards).map((c) => [c.key, c.cards.length])
-
-  it('leaves a cluster of four alone', () => {
-    const cards = ['science/unions/a', 'science/unions/b', 'science/spt3g/c', 'science/spt3g/d']
-      .map((id) => restingCard(id))
-    expect(keysOf(cards)).toEqual([['science', 4]])
-  })
-
-  it('splits six across two subdirectories into two clusters', () => {
-    // The case the operator named: "science 6" → "science/unions 3" + "science/spt3g 3".
-    const cards = [
-      'science/unions/a', 'science/unions/b', 'science/unions/c',
-      'science/spt3g/d', 'science/spt3g/e', 'science/spt3g/f',
-    ].map((id) => restingCard(id))
-    const keys = keysOf(cards)
-    expect(keys).toHaveLength(2)
-    expect(new Map(keys)).toEqual(new Map([['science/unions', 3], ['science/spt3g', 3]]))
-  })
-
-  // Paths over a small vocabulary, two to four segments deep, so groups
-  // collide, overflow, run out of path, and share every next segment.
-  const restingIds = fc.uniqueArray(
-    fc.array(fc.constantFrom('science', 'unions', 'sp', 'shear'), { minLength: 1, maxLength: 3 }),
-    { maxLength: 14, selector: (path) => path.join('/') },
-  ).chain((folders) => fc.array(fc.constantFrom(...(folders.length ? folders : [['science']])), { minLength: 1, maxLength: 14 }))
-    .map((folders) => folders.map((folder, i) => `${folder.join('/')}/c${i}`))
-  const folderOf = (id: string): string[] => id.split('/').slice(0, -1)
-  const prefix = (id: string, depth: number): string => folderOf(id).slice(0, depth).join('/')
-
-  // A cluster splits on its next folder only while it holds more than four
-  // cards and that folder tells its cards apart; a card with no deeper folder
-  // stays at its level. So clusters partition the cards, no two share a key,
-  // each cluster's key is a folder every member sits in, an overfull cluster's
-  // members all share (or all lack) the next folder, and a cluster below the
-  // top level exists only because its parent group overflowed.
-  it('splits overfull groups on the folder that tells them apart, and only those', () => {
-    fc.assert(fc.property(restingIds, (ids) => {
-      const cards = ids.map((id) => restingCard(id))
-      const clusters = clusterStashCards(cards)
-      expect(clusters.flatMap((c) => c.cards.map((card) => card.id)).sort()).toEqual([...ids].sort())
-      expect(new Set(clusters.map((c) => c.key)).size, 'one cluster per key').toBe(clusters.length)
-      for (const { key, cards: members } of clusters) {
-        const depth = key.split('/').length
-        for (const card of members) expect(prefix(card.id, depth), `${card.id} under ${key}`).toBe(key)
-        if (members.length > 4) {
-          expect(new Set(members.map((card) => prefix(card.id, depth + 1))).size, `overfull ${key} could split`).toBe(1)
-        }
-        if (depth > 1) {
-          const parent = key.split('/').slice(0, -1).join('/')
-          expect(ids.filter((id) => prefix(id, depth - 1) === parent).length, `${key} split from a parent of four or fewer`).toBeGreaterThan(4)
-        }
-      }
-    }), { numRuns: 200, seed: 0xc1057e5 })
-  })
-
-  it('DEGENERATE CASE: six leaves in one folder stay one cluster', () => {
-    // Every card's next segment IS its own name, so descending would make six
-    // clusters of one — six headings that say nothing. The group stays whole
-    // and the renderer caps it; this is the case the leaf-slug rule exists for.
-    const cards = ['a/x1', 'a/x2', 'a/x3', 'a/x4', 'a/x5', 'a/x6'].map((id) => restingCard(id))
-    expect(keysOf(cards)).toEqual([['a', 6]])
-  })
-
-  it('never mixes warm and cold in one cluster, and sorts cold last', () => {
-    const cards = [
-      restingCard('science/unions/a'), restingCard('science/unions/b'),
-      restingCard('science/unions/c'), restingCard('science/unions/d'),
-      restingCard('science/unions/e', true), restingCard('science/unions/f', true),
-    ]
-    const clusters = clusterStashCards(cards)
-    for (const c of clusters) {
-      const warmth = new Set(c.cards.map((card) => card.cold === true))
-      expect(warmth.size, `cluster ${c.key} mixes warm and cold`).toBe(1)
-    }
-    expect(clusters.map((c) => c.cold)).toEqual([...clusters.map((c) => c.cold)].sort())
-    // Four warm + two cold: neither side is over the cap, so neither splits —
-    // the split runs per warmth, not over the pooled six.
-    expect(new Map(clusters.map((c) => [`${c.key}:${c.cold}`, c.cards.length])))
-      .toEqual(new Map([['science:false', 4], ['science:true', 2]]))
-  })
-
-  it('keeps top-level cards under their own name', () => {
-    expect(keysOf([restingCard('solo')])).toEqual([['solo', 1]])
-  })
-
-  it('loses nothing, whatever the shape', () => {
-    const ids = [
-      'a/x1', 'a/x2', 'a/x3', 'a/x4', 'a/x5',
-      'b/deep/one', 'b/deep/two', 'b/deep/three', 'b/deep/four', 'b/deep/five',
-      'b/shallow', 'solo',
-    ]
-    const clusters = clusterStashCards(ids.map((id) => restingCard(id)))
-    expect(clusters.flatMap((c) => c.cards.map((card) => card.id)).sort()).toEqual([...ids].sort())
-  })
-
-  describe('splitStashByReturn — the watch list vs. the already-scheduled', () => {
-    it('sorts a bare snooze into dated, a plain rester into undated', () => {
-      const snoozed = { ...restingCard('project/snoozed'), due: dayFromNow(3) }
-      const forgettable = restingCard('project/forgettable')
-      const { undated, dated } = splitStashByReturn([snoozed, forgettable])
-      expect(undated.map((c) => c.id)).toEqual(['project/forgettable'])
-      expect(dated.map((c) => c.id)).toEqual(['project/snoozed'])
-    })
-
-    it('counts a standing constitution asleep on its cron as dated even with no due', () => {
-      const sleeping: KanbanCard = {
-        ...restingCard('roles/sleeper'),
-        shuttleKind: 'standing',
-        status: 'active',
-        tmuxSession: undefined,
-      }
-      const { undated, dated } = splitStashByReturn([sleeping])
-      expect(undated).toEqual([])
-      expect(dated.map((c) => c.id)).toEqual(['roles/sleeper'])
-    })
-
-    it('loses nothing across the split', () => {
-      const cards = [
-        restingCard('a'),
-        { ...restingCard('b'), due: dayFromNow(1) },
-        restingCard('c'),
-      ]
-      const { undated, dated } = splitStashByReturn(cards)
-      expect([...undated, ...dated].map((c) => c.id).sort()).toEqual(['a', 'b', 'c'])
-    })
-  })
-
-  describe('sortDatedByReturn — soonest return first', () => {
-    it('orders clusters and the cards within them by ascending return date', () => {
-      const later = { ...restingCard('proj/later'), due: dayFromNow(10) }
-      const soon = { ...restingCard('other/soon'), due: dayFromNow(1) }
-      const clusters = sortDatedByReturn(clusterStashCards([later, soon]))
-      expect(clusters.flatMap((c) => c.cards.map((card) => card.id))).toEqual(['other/soon', 'proj/later'])
-    })
-
-    it('sorts a sleeping role by its next cron launch, not createdAt', () => {
-      const withinCluster = [
-        { ...restingCard('proj/a'), due: dayFromNow(5) },
-        { ...restingCard('proj/b'), due: dayFromNow(2) },
-      ]
-      const clusters = sortDatedByReturn(clusterStashCards(withinCluster))
-      expect(clusters[0].cards.map((c) => c.id)).toEqual(['proj/b', 'proj/a'])
-    })
-  })
-})
-
 describe('cycles — a named span of time, not work', () => {
   // felt round-trips `start:` exactly as it does `due:`: authored as a bare
   // civil day, re-emitted as midnight-Z. Verified against a real store, and
@@ -705,95 +474,6 @@ describe('cycles — a named span of time, not work', () => {
       // Their typo to see and fix. Swapping would hide it forever.
       expect(cycleSpan({ start: asFeltWrites('2026-09-30'), due: asFeltWrites('2026-09-01') }, NOW))
         .toEqual({ start: '2026-09-30', end: '2026-09-01', openEnded: false })
-    })
-  })
-
-  describe('lensCycles as drop targets — the chapters the drag horizon offers', () => {
-    const cycle = (
-      id: string,
-      cycleStart: string | null,
-      due?: string,
-    ): CycleDropCandidate => ({ id, name: id, cycleStart, due })
-
-    it('offers a future cycle at its own opening day', () => {
-      const targets = lensCycles(
-        [cycle('autumn', dayFromNow(10), dayFromNow(40))],
-        NOW,
-      )
-      expect(targets).toHaveLength(1)
-      expect(targets[0]).toMatchObject({
-        id: 'autumn',
-        start: dayFromNow(10),
-        end: dayFromNow(40),
-        running: false,
-        dropDay: dayFromNow(10),
-      })
-    })
-
-    it('clamps a running cycle to TOMORROW — later this chapter, never a backdate', () => {
-      const targets = lensCycles(
-        [cycle('summer', dayFromNow(-10), dayFromNow(10))],
-        NOW,
-      )
-      expect(targets[0]).toMatchObject({ running: true, dropDay: dayFromNow(1) })
-    })
-
-    it('clamps a cycle opening TODAY too — today means "onto the desk", not a snooze', () => {
-      const targets = lensCycles([cycle('opens-now', dayFromNow(0))], NOW)
-      expect(targets[0]).toMatchObject({ running: true, dropDay: dayFromNow(1) })
-    })
-
-    it('drops a cycle that has already closed', () => {
-      expect(lensCycles(
-        [cycle('spring', dayFromNow(-40), dayFromNow(-1))],
-        NOW,
-      )).toEqual([])
-    })
-
-    it('keeps a cycle closing TODAY — the chapter is still open', () => {
-      const targets = lensCycles(
-        [cycle('closing', dayFromNow(-10), dayFromNow(0))],
-        NOW,
-      )
-      expect(targets.map((t) => t.id)).toEqual(['closing'])
-    })
-
-    it('keeps an open-ended cycle, running, and says so', () => {
-      const targets = lensCycles([cycle('ongoing', dayFromNow(-3))], NOW)
-      expect(targets[0]).toMatchObject({
-        openEnded: true,
-        running: true,
-        end: dayFromNow(0),
-        dropDay: dayFromNow(1),
-      })
-    })
-
-    it('is not a target without a start — a bare due is a deadline, not a chapter', () => {
-      const targets = lensCycles([cycle('deadline', null, dayFromNow(5))], NOW)
-      expect(targets).toHaveLength(1)
-      expect(targets[0].dropDay).toBeUndefined()
-    })
-
-    it('reads felt\'s midnight-Z start the same as a bare civil day', () => {
-      const bare = lensCycles([cycle('c', dayFromNow(4))], NOW)
-      const written = lensCycles(
-        [cycle('c', asFeltWrites(dayFromNow(4)))],
-        NOW,
-      )
-      expect(written).toEqual(bare)
-    })
-
-    it('orders by start, so the strip reads as the calendar does', () => {
-      const targets = lensCycles([
-        cycle('third', dayFromNow(20)),
-        cycle('first', dayFromNow(-2), dayFromNow(3)),
-        cycle('second', dayFromNow(5)),
-      ], NOW)
-      expect(targets.map((t) => t.id)).toEqual(['first', 'second', 'third'])
-    })
-
-    it('offers nothing when there are no cycles at all', () => {
-      expect(lensCycles([], NOW)).toEqual([])
     })
   })
 
@@ -1013,169 +693,6 @@ describe('stripFacts — the drawer strip as a reading of the card', () => {
   })
 })
 
-describe('the cycle lens — membership is derived, never assigned', () => {
-  const asFeltWrites = (day: string): string => `${day}T00:00:00Z`
-
-  // A span we are living in: opened three days ago, closes in ten.
-  const span = cycleSpan(
-    { start: asFeltWrites(dayFromNow(-3)), due: asFeltWrites(dayFromNow(10)) },
-    NOW,
-  )!
-
-  describe('cycleMembership', () => {
-    it('admits a fiber whose due falls inside the span', () => {
-      expect(cycleMembership({ due: asFeltWrites(dayFromNow(4)) }, span, NOW)).toBe('due')
-    })
-
-    it('admits both edges — the span is inclusive', () => {
-      expect(cycleMembership({ due: asFeltWrites(dayFromNow(-3)) }, span, NOW)).toBe('due')
-      expect(cycleMembership({ due: asFeltWrites(dayFromNow(10)) }, span, NOW)).toBe('due')
-    })
-
-    it('refuses a due one day outside either edge', () => {
-      expect(cycleMembership({ due: asFeltWrites(dayFromNow(-4)) }, span, NOW)).toBeNull()
-      expect(cycleMembership({ due: asFeltWrites(dayFromNow(11)) }, span, NOW)).toBeNull()
-    })
-
-    it('admits work in flight now — the chapter we are living in claims it', () => {
-      expect(cycleMembership({ inFlight: true }, span, NOW)).toBe('in-flight')
-    })
-
-    it('does NOT let in-flight work claim a chapter that has not opened', () => {
-      const ahead = cycleSpan(
-        { start: asFeltWrites(dayFromNow(20)), due: asFeltWrites(dayFromNow(30)) },
-        NOW,
-      )!
-      expect(cycleMembership({ inFlight: true }, ahead, NOW)).toBeNull()
-      // …but a due inside it still does. In-flight is about now; a due is not.
-      expect(cycleMembership({ inFlight: true, due: asFeltWrites(dayFromNow(25)) }, ahead, NOW)).toBe('due')
-    })
-
-    it('is null for a dateless fiber sitting at rest — a non-member', () => {
-      expect(cycleMembership({}, span, NOW)).toBeNull()
-      expect(cycleMembership({ inFlight: false, due: undefined }, span, NOW)).toBeNull()
-    })
-  })
-
-  describe('lensCycles — which chapters the Desk offers', () => {
-    const c = (over: Partial<CycleDropCandidate>): CycleDropCandidate =>
-      ({ id: 'cycles/x', name: 'X', cycleStart: null, ...over })
-
-    it('offers the running chapter and the ones ahead, earliest first', () => {
-      const chips = lensCycles([
-        c({ id: 'cycles/next', name: 'Next', cycleStart: dayFromNow(20), due: asFeltWrites(dayFromNow(40)) }),
-        c({ id: 'cycles/now', name: 'Now', cycleStart: dayFromNow(-3), due: asFeltWrites(dayFromNow(10)) }),
-      ], NOW)
-      expect(chips.map((k) => k.id)).toEqual(['cycles/now', 'cycles/next'])
-      expect(chips[0].running).toBe(true)
-      expect(chips[1].running).toBe(false)
-    })
-
-    it('drops a chapter that has already closed', () => {
-      const chips = lensCycles([
-        c({ cycleStart: dayFromNow(-60), due: asFeltWrites(dayFromNow(-30)) }),
-      ], NOW)
-      expect(chips).toEqual([])
-    })
-
-    it('admits a due-only cycle, which the drop-target rule refuses', () => {
-      // A lens needs no opening day to snooze to — a one-day span filters fine.
-      const bare = [c({ id: 'cycles/deadline', name: 'Deadline', due: asFeltWrites(dayFromNow(5)) })]
-      expect(lensCycles(bare, NOW).map((k) => k.id)).toEqual(['cycles/deadline'])
-      expect(lensCycles(bare, NOW)[0].dropDay).toBeUndefined()
-    })
-
-    it('has nothing to say about a cycle with no dates at all', () => {
-      expect(lensCycles([c({})], NOW)).toEqual([])
-    })
-  })
-
-  describe('deriveCycleLens — what the Desk draws differently', () => {
-    const card = (over: Partial<KanbanCard>): KanbanCard =>
-      baseCard({ id: 'work/a', name: 'A', path: 'work/a.md', originId: 'here', status: 'active', createdAt: at0, ...over })
-
-    const board = (over: Partial<KanbanResponse> = {}): KanbanResponse =>
-      response({
-        feltHost: 'here',
-        cycles: [card({
-          id: 'cycles/now', name: 'Now', isCycle: true,
-          cycleStart: dayFromNow(-3), due: asFeltWrites(dayFromNow(10)),
-        })],
-        generatedAt: NOW,
-        ...over,
-      })
-
-    it('claims the due-in-span and the in-flight, and leaves the rest alone', () => {
-      const lens = deriveCycleLens(board({
-        now: {
-          drafts: [
-            card({ id: 'work/due', due: asFeltWrites(dayFromNow(2)) }),
-            card({ id: 'work/later', due: asFeltWrites(dayFromNow(60)) }),
-            card({ id: 'work/undated' }),
-          ],
-          inFlight: [card({ id: 'work/aloft', tmuxSession: 'sess' })],
-          awaitingReview: [],
-        },
-      }), 'cycles/now', NOW)!
-      expect([...lens.memberIds].sort()).toEqual(['work/aloft', 'work/due'])
-      expect(lens.ghosts).toEqual([])
-      expect(lens.count).toBe(2)
-      expect(lens.name).toBe('Now')
-    })
-
-    it('conjures a resting member as a ghost in the column it would sit in', () => {
-      const resting = card({
-        id: 'work/snoozed',
-        status: 'open',
-        due: asFeltWrites(dayFromNow(5)),
-        storedHorizon: 'stashed',
-        effectiveHorizon: 'stashed',
-      })
-      const lens = deriveCycleLens(board({ stash: [resting] }), 'cycles/now', NOW)!
-      expect(lens.ghosts.map((g) => [g.card.id, g.column])).toEqual([['work/snoozed', 'drafts']])
-      expect(lens.memberIds.has('work/snoozed')).toBe(true)
-      expect(lens.count).toBe(1)
-    })
-
-    it('claims due-dated resting seats as ghosts, not seats with only a cadence', () => {
-      const due = card({
-        id: 'seats/due', shuttleSeat: true, shuttleRole: 'vizier', status: 'open',
-        effectiveHorizon: 'stashed', due: asFeltWrites(dayFromNow(5)),
-      })
-      const standing = card({
-        id: 'seats/standing', shuttleSeat: true, shuttleRole: 'vizier', shuttleKind: 'standing',
-        status: 'active', nextLaunchAt: dayFromNow(2),
-      })
-      const far = card({ ...due, id: 'seats/far', due: asFeltWrites(dayFromNow(90)) })
-      const lens = deriveCycleLens(board({ roles: [due, standing, far] }), 'cycles/now', NOW)!
-      expect([...lens.memberIds]).toEqual([due.id])
-      expect(lens.ghosts.map((g) => [g.card.id, g.column])).toEqual([[due.id, 'drafts']])
-      expect(lens.count).toBe(1)
-    })
-
-    it('leaves a resting card that is due outside the span alone', () => {
-      const lens = deriveCycleLens(board({
-        stash: [card({ id: 'work/far', effectiveHorizon: 'stashed', due: asFeltWrites(dayFromNow(90)) })],
-      }), 'cycles/now', NOW)!
-      expect(lens.ghosts).toEqual([])
-      expect(lens.count).toBe(0)
-    })
-
-    it('is null with no lens asked for, and null for a cycle the feed has lost', () => {
-      expect(deriveCycleLens(board(), null, NOW)).toBeNull()
-      expect(deriveCycleLens(board(), 'cycles/vanished', NOW)).toBeNull()
-      expect(deriveCycleLens(null, 'cycles/now', NOW)).toBeNull()
-    })
-
-    it('is null for a cycle with no dates — there is no span to look through', () => {
-      const dateless = board({
-        cycles: [card({ id: 'cycles/vague', name: 'Vague', isCycle: true })],
-      })
-      expect(deriveCycleLens(dateless, 'cycles/vague', NOW)).toBeNull()
-    })
-  })
-})
-
 describe('Resting holds standing constitutions asleep between runs', () => {
   // An armed standing constitution between firings rests, and the read model
   // files it on the timeline surface, which the Desk does not draw; without the
@@ -1208,9 +725,8 @@ describe('Resting holds standing constitutions asleep between runs', () => {
     const resting = restingCards(resp)
     expect(resting.map((c) => c.id)).toEqual(['ops/monthly-report'])
     expect(isSleepingOnSchedule(resting[0])).toBe(true)
-    // The day the chip names comes from the cron, and it is a real instant.
+    // The day it next runs comes from the cron.
     expect(resting[0].nextLaunchAt).toBeDefined()
-    expect(formatLaunchDay(resting[0].nextLaunchAt!)).not.toBe('')
     // And it is nowhere on the desk — Resting is its only home.
     expect(resp.now.drafts).toEqual([])
     expect(resp.now.inFlight).toEqual([])
@@ -1258,14 +774,6 @@ describe('Resting holds standing constitutions asleep between runs', () => {
     const paused = resp.stash[0]
     expect(paused.nextLaunchAt).toBeUndefined()
     expect(isSleepingOnSchedule(paused)).toBe(false)
-    expect(scheduleNote(paused)).toBe('Paused · monthly on the 12th at 09:00')
-    // Nothing brings it back on its own, so it sits with the undated watch list.
-    expect(splitStashByReturn([paused]).undated.map((c) => c.id)).toEqual(['ops/monthly-report'])
-  })
-
-  it('says an armed standing constitution\'s schedule and next firing', () => {
-    const armed = restingCards(boardOf([role({ shuttleScheduleText: 'monthly on the 12th at 09:00' })]))[0]
-    expect(scheduleNote(armed)).toBe(`monthly on the 12th at 09:00 · next ${formatLaunchDay(armed.nextLaunchAt!)}`)
   })
 
   it('serves an armed standing constitution whose run asked something In flight, as a question', () => {
@@ -1292,11 +800,5 @@ describe('Resting holds standing constitutions asleep between runs', () => {
     expect(resp.totals.futureDated).toBe(2)
   })
 
-  it('resolves a far-off role by id, so the drag it accepts is not a no-op', () => {
-    // Anything DRAWN must be FINDABLE — `findCardById` is what every drag
-    // handler resolves through, and the yearly role is exactly the card the old
-    // two-list split rendered in Resting and then failed to resolve.
-    const resp = boardOf([role({ shuttleSchedule: { expr: '0 9 1 1 *', tz: 'UTC' } })])
-    expect(findCardById(resp, 'ops/monthly-report')?.id).toBe('ops/monthly-report')
-  })
+
 })

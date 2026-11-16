@@ -1,40 +1,18 @@
 import '@ui-sdk/web/tabs'
 
 /**
- * KanbanModal — the Desk, plus the chronological views it tabs between.
+ * KanbanModal — the Desk, plus the views it tabs between.
  *
- * The Desk, top to bottom:
- *
- *   Now     — three lifecycle columns (Drafts | In flight | Awaiting review).
- *             The dense workflow board for what is actively being worked.
- *   Resting — deliberately paused work, clustered on the containment path's
- *             first meaningful project token. Held-open clusters (cold:true)
- *             sit below warm ones in a dimmer style. Stored as
- *             `horizon: stashed`; "Resting" is the human name.
- *
- * TIME IS NOT A DESK SURFACE. The chronicle tells the story of past landings
- * and future-dated work, so the Desk's height goes to Now and Resting.
- * What the Desk needs from a day axis is the gesture — "this one on Tuesday"
- * — so it has the drag-reveal horizon: a slim row of future days that appears
- * under the tab strip while a card is in the air and vanishes on drop. See
- * `syncDragHorizon` here and `renderDragHorizon` in KanbanSurfaces.
- *
- * Interaction:
- *   • Drag a card onto a day in the drag horizon → schedule or snooze, decided
- *     by where the card sits (`dayDropHorizon`): a desk or resting card gets
- *     `due` + `horizon: stashed` (snooze); anything else just gets `due`.
- *   • Drag onto today → onto the desk now (due cleared).
- *   • Drag into Resting → `shuttle rest`, keeping any future `due:` (which
- *     makes it a snooze that returns on its own); an already-elapsed `due:` is
- *     cleared, and said out loud, because it would bounce the card back.
- *   • Drag back up to the now-board → clear horizon/cold.
- *   • Drop on a now-board column header routes through the daemon's
- *     /api/v1/transition lifecycle path.
- *   • Click a card body to open its channel in the document workspace.
+ * The Desk is three columns, Waiting on you, Working and Quiet, each a list
+ * of family cards: every top-level constitution with everything under it,
+ * once, in the column of its most urgent member (`deskOrder`). What waits
+ * comes from one function (`attentionOf`), over the cards and the board's
+ * answer of what waits on the human (`BoardFeed.waiting`). A card or a line
+ * opens a constitution's view; acts on a constitution live in that view.
  *
  * Each card's owning daemon serves its column; the read model
- * (`KanbanReadModel.ts`) files the composite feed onto surfaces by it. The drag
- * handler's only knob is which surface and day to send.
+ * (`KanbanReadModel.ts`) builds the cards and their thread graph from the
+ * composite feed.
  */
 
 import { announce, prepareAnnouncements } from '@ui-sdk/core'
@@ -43,39 +21,25 @@ import './palette.css'
 import './darkControls.css'
 import { watchAppearance } from './appearance.js'
 import './KanbanModal.css'
-import './deskRows.css'
 import { Workspace } from './workspace/Workspace.js'
 import { Dock, type ConsoleOptions } from './workspace/Dock.js'
 import { scheduleThumbnails } from './workspace/Thumbnail.js'
 import { confirmWorkerStop } from './workspace/Verdicts.js'
-import { constitutionAction, runAwaitsHuman, schedulePaused, scheduled } from './workspace/fiberPageState.js'
+import { runAwaitsHuman, schedulePaused, scheduled } from './workspace/fiberPageState.js'
 import { DeskKeyboard } from './DeskKeyboard.js'
 import { KeymapHelp } from './KeymapHelp.js'
 import { keyIntent } from './keymap.js'
 import { daemonFetch, isDaemonBooting, postDaemonJson } from './daemonApi.js'
 import { applyTerminalHost, TerminalHostReader } from './hostTerminal.js'
 import { inLane } from './requestLanes.js'
-import type {
-  ColumnKind,
-  HorizonKind,
-  KanbanCard,
-  KanbanResponse,
-} from './KanbanTypes.js'
+import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { hasWorkerToStop } from './KanbanTypes.js'
-import { dispatchFailureMessage, isAgentCard, needsProjectDir, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
-import { PINNED_TAG, THREAD_PIN, type ThreadPinRequest } from './ThreadPeek.js'
-import { COLUMN_TITLES, FALLBACK_DEFAULT_AGENT, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, threadIndexFor, findCardById, findCardColumn, formatDue } from './KanbanSurfaces.js'
+import { COLUMN_TITLES, KanbanSurfaceRenderer, boardCards, threadIndexFor } from './KanbanSurfaces.js'
 import { deskCardKey, deskOrder, type DeskOrder } from './deskOrdering.js'
-import { moveDestinations } from './MoveDestinations.js'
-import type { MoveAction, MoveBroker } from './MoveDestinations.js'
-import { openMoveMenu } from './MoveMenu.js'
 import { parseCompositeFeed, type CompositeFeed } from './KanbanComposite.js'
 import { restPopover } from './RestPopover.js'
-import { rolePopover, type RoleChoice, type RoleProfile } from './RolePopover.js'
-import { buildKanbanResponseFromComposite, deriveCycleLens, surfaceTotals, projectDeskFrontier } from './KanbanReadModel.js'
-import { threadKey } from './threads.js'
-import { dueBouncesFromResting, restingUntil } from './KanbanRules.js'
-import { sameCivilDue } from './civilDay.js'
+import { buildKanbanResponseFromComposite, withPatchedCard } from './KanbanReadModel.js'
+import { type Verdict } from './workspace/Verdicts.js'
 import { coarsePointer, onMobileChange } from './mobile.js'
 import { shouldRunVisiblePoll } from '../runtime/PageAttention'
 import { PhoneListening } from './phoneListening'
@@ -96,23 +60,12 @@ import {
   type ViewContext,
   viewFallbackKind,
 } from './views/index.js'
-import { isTypingTarget } from './views/ViewRegistry.js'
 import { FiberSends } from './fiberSends.js'
 import { viewOfHash } from './workspace/route.js'
 import type { DocKey } from './workspace/documents.js'
 
 /** The message a thrown/rejected value carries, for a banner or an announce. */
 const errText = (err: unknown): string => (err as { message?: string })?.message ?? String(err)
-
-function registryDefaultAgent(raw: unknown): string | null {
-  if (!Array.isArray(raw)) return null
-  for (const value of raw) {
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) continue
-    const record = value as Record<string, unknown>
-    if (record.default === true && typeof record.id === 'string') return record.id
-  }
-  return null
-}
 
 interface KanbanModalOptions {
   /**
@@ -122,13 +75,13 @@ interface KanbanModalOptions {
    */
   onOpenWorker?: WorkerOpener
   /**
-   * Called when the user clicks the Drafts lane's `+` stash button. The host
+   * Called when the user clicks the Desk head's `+` stash button. The host
    * (main.ts) opens the StashForm modal. Omit to hide the button (e.g.
    * read-only contexts).
    */
   onStashClick?: () => void
   /**
-   * Called when the user clicks the In flight lane's `✶` new-idea button. The host
+   * Called when the user clicks the Desk head's `✶` new-idea button. The host
    * opens the CaptureForm modal — a chat-first capture that POSTs the yap to
    * Shuttle's `/api/v1/capture`, which spawns a background session that
    * crystallizes it into a fiber. Omit to hide the button.
@@ -159,15 +112,13 @@ interface KanbanModalOptions {
 
 /** The Desk's own hotkey. The others come from the view registry, so a view
  *  names its own key and nothing here has to agree with it twice. */
-/** A host that refused its agent registry is asked again after this long. */
-const AGENT_RETRY_MS = 60_000
 const DESK_HOTKEY = '1'
 const TABLIST_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'Home', 'End'])
 
 interface KanbanScrollSnapshot {
   bodyLeft: number
   bodyTop: number
-  columns: Partial<Record<ColumnKind, number>>
+  columns: Record<string, number>
 }
 
 export class KanbanModal {
@@ -189,18 +140,10 @@ export class KanbanModal {
 
   /** The view tab strip — persistent chrome, built once in assembleChrome. */
   private tabsEl: HTMLElement | null = null
-  /**
-   * Right-hand end of the tab strip, where the cycle lens chips live. The tabs
-   * never fill their row, so the chips ride in the space already there rather
-   * than spending a band of vertical space on chrome that is usually empty.
-   * Refilled by `render` (the chips carry live member counts); hidden off the
-   * Desk by `syncViewChrome`, since a lens is a Desk posture.
-   */
-  private lensSlotEl: HTMLDivElement | null = null
   /** The bar's Find: one field on every view (constitutions; the channels and their documents on Channels). */
   private findEl: HTMLInputElement | null = null
   /**
-   * Wrapper around the Desk surfaces (Now + Resting).
+   * Wrapper around the Desk.
    * `display: contents` in CSS, so it adds a toggle handle WITHOUT adding a
    * layout box — the sections participate in `.kbn-body`'s flex column as if
    * they were its direct children. Switching to a
@@ -209,55 +152,17 @@ export class KanbanModal {
    * trip through another view.
    */
   private deskEl: HTMLDivElement | null = null
-  /**
-   * Host for the drag-reveal horizon — the slim row of future days a card can
-   * be dropped on. Empty at rest; filled for exactly as
-   * long as a card is in the air. It sits OUTSIDE `deskEl` so a board re-render
-   * (a poll landing mid-drag) can't tear the drop target out from under the
-   * cursor — and it is permanently zero-height, the band inside it hanging
-   * out of flow over the Now board, so raising it never moves the desk under a
-   * cursor that has already aimed (see the CSS block for the full argument).
-   */
-  private dragHorizonEl: HTMLDivElement | null = null
   /** Full-width slot the active temporal view mounts into. Hidden on Desk. */
   private viewHostEl: HTMLDivElement | null = null
   private activeViewId: BoardViewId = 'desk'
   /** The mounted view, or null on Desk / before the first response lands. */
   private activeView: TemporalView | null = null
-  /**
-   * The cycle the Desk is currently seen through, or null for the plain Desk.
-   * VIEW-LOCAL on purpose: never persisted, never sent anywhere, and dropped on
-   * unmount. "Which chapter was I squinting at" is a posture of the moment, not
-   * a fact about the board, and a lens that survived a reload would be a filter
-   * you forgot you set. One at a time — this is a single id, so engaging a
-   * second chip releases the first.
-   */
-  private lensCycleId: string | null = null
   /** True when the most recent composite fetch failed. Drives the view
    *  host's error page — the Desk shows `renderError` for the same state,
    *  but a temporal view has no surfaces of its own to put it in. */
   private lastFetchFailed = false
   private daemonBooting = false
   private inflightFetchToken = 0
-  /**
-   * Backing field for `dragSourceId`. Mutate via the property accessor below
-   * (or via `setDragSource`) so drag state stays in sync everywhere it shows:
-   * the `kbn-dragging` body class, and the drag-reveal horizon.
-   *
-   * This setter is the single choke point for "a drag is in progress" — every
-   * surface starts its drags through `installDraggable` and every drop ends
-   * them through `setDragSourceId(null)` — which is exactly why the horizon
-   * hangs off it rather than off per-surface handlers.
-   */
-  private _dragSourceId: string | null = null
-  private get dragSourceId(): string | null { return this._dragSourceId }
-  private set dragSourceId(value: string | null) {
-    this._dragSourceId = value
-    if (this.body) this.body.classList.toggle('kbn-dragging', value !== null)
-    this.syncDragHorizon(value !== null || (this.surfaces?.isDragging() ?? false))
-  }
-  private dragAutoScrollFrame: number | null = null
-  private dragAutoScrollVelocity = 0
   private bannerTimer: number | null = null
   /** Lightweight auto-poll while mounted. 15s default. */
   private pollTimer: number | null = null
@@ -286,33 +191,6 @@ export class KanbanModal {
   private readonly handleConversationOpening = (): void => {
     if (this.lastResponse) this.render(this.lastResponse)
     this.dock.refreshConversationOpening()
-  }
-
-  private readonly handleThreadPin = (event: Event): void => {
-    const { card, pinned } = (event as CustomEvent<ThreadPinRequest>).detail
-    void this.pinThread(card, pinned)
-  }
-
-  /** Pin or unpin a thread: its `pinned` tag, drawn at once and written through the owner's felt-edit. */
-  private async pinThread(card: KanbanCard, pinned: boolean): Promise<void> {
-    const key = threadKey(card)
-    const mark = (on: boolean): void => {
-      for (const c of boardCards(this.lastResponse)) {
-        if (threadKey(c) !== key) continue
-        const rest = (c.tags ?? []).filter(tag => tag !== PINNED_TAG)
-        c.tags = on ? [...rest, PINNED_TAG] : rest
-      }
-      if (this.lastResponse) this.render(this.lastResponse)
-    }
-    mark(pinned)
-    try {
-      await this.postFeltEdit({ fiber_id: card.id, origin: card.originId, [pinned ? 'add' : 'remove']: [PINNED_TAG] }, pinned ? 'Pin failed' : 'Unpin failed')
-      this.announce(pinned ? `Pinned ${card.name}` : `Unpinned ${card.name}`)
-    } catch (err: unknown) {
-      mark(!pinned)
-      this.showBanner(`Couldn't ${pinned ? 'pin' : 'unpin'} “${card.name}”: ${errText(err)}`, 'error')
-    }
-    await this.fetchAndRender()
   }
 
   constructor(options: KanbanModalOptions) {
@@ -348,21 +226,9 @@ export class KanbanModal {
     this.dock = this.console()
     this.fiberSends = new FiberSends(this.shuttleBase)
     this.surfaces = new KanbanSurfaceRenderer({
-      getDragSourceId: () => this.dragSourceId,
-      setDragSourceId: (id) => { this.dragSourceId = id },
-      getLastResponse: () => this.lastResponse,
       waits: () => this.workspace!.board.waiting,
-      stopDragAutoScroll: () => this.stopDragAutoScroll(),
-      transition: (card, target) => this.transition(card, target),
-      verdict: (card, verdict) => { if (this.workspace) this.workspace.queueVerdict(card, verdict); else this.transition(card, verdict) },
-      setSurface: (card, horizon, opts) => this.setSurface(card, horizon, opts),
-      makeSeat: (card, anchor) => this.makeSeat(card, anchor),
-      openDetail: (card, family) => { if (family) this.openDocumentChannel(card, this.workspace?.familyDocument(card)); else this.openDocumentChannel(card) },
-      onRest: card => this.rest(card),
-      getFleetDefaultAgent: (origin) => this.fleetDefaultAgents.get(origin) ?? FALLBACK_DEFAULT_AGENT,
-      onCardLongPress: (card, anchor) => this.openMoveMenuFor(card, anchor),
-      conversation: { can: card => this.dock.canOpenConversation(card), open: card => { this.dock.openConversation(card) } },
-      releaseQuarantine: (host) => this.releaseQuarantine(host),
+      openDetail: card => this.openDocumentChannel(card),
+      clear: card => { void this.clear(card) },
       onStashClick: this.onStashClick,
       onNewIdeaClick: this.onNewIdeaClick,
     })
@@ -374,9 +240,9 @@ export class KanbanModal {
       this.shuttleBase,
       () => { void this.fetchAndRender() },
       // Expired verdicts enter the optimistic lifecycle path exactly once.
-      (card, target) => this.transition(card, target, { verdictCommitted: true }),
+      (card, target) => this.transition(card, target as Verdict, true),
       this.openWorkerAfterGesture,
-      { voice: { controller: this.voice }, phone: this.phoneAudio, onRest: card => this.rest(card), ...options },
+      { voice: { controller: this.voice }, phone: this.phoneAudio, onRest: card => this.rest(card), onRelease: card => { void this.releaseQuarantine(card.shuttleHost) }, ...options },
     )
   }
 
@@ -435,10 +301,15 @@ export class KanbanModal {
       this.workspace?.follow(id, origin)
     }
     this.voice.onOpen = ({ fiber_id: id, origin, page }) => { void this.workspace?.openFiber(id, origin, page, true) }
+    // What waits on the human moves the Desk as much as the feed does; a line the board names before its record is read is read at once.
+    this.stopBoard = this.workspace.board.subscribe(() => {
+      if (!this.lastResponse) return
+      this.readBoard(this.lastResponse, true)
+      this.render(this.lastResponse)
+    })
     document.addEventListener('keydown', this.handleDocumentKeyDown, true)
     window.addEventListener('resize', this.handleResize)
     window.addEventListener('shuttle-conversation-opening-changed', this.handleConversationOpening)
-    document.addEventListener(THREAD_PIN, this.handleThreadPin)
     this.startPolling()
     this.voice.mount()
     void this.fetchAndRender()
@@ -450,8 +321,9 @@ export class KanbanModal {
    * the kanban's container (already a child of host).
    */
   unmount(): void {
-    this.surfaces.closeMenu()
     if (this.container === null) return
+    this.stopBoard?.()
+    this.stopBoard = null
     this.keymapHelp?.dispose()
     this.keymapHelp = null
     this.deskKeyboard?.dispose()
@@ -466,11 +338,9 @@ export class KanbanModal {
     this.activeView?.unmount()
     this.activeView = null
     this.closeRestPopover?.()
-    this.closeRolePopover?.()
     document.removeEventListener('keydown', this.handleDocumentKeyDown, true)
     window.removeEventListener('resize', this.handleResize)
     window.removeEventListener('shuttle-conversation-opening-changed', this.handleConversationOpening)
-    document.removeEventListener(THREAD_PIN, this.handleThreadPin)
     this.stopMobileWatch?.()
     this.stopMobileWatch = null
     if (this.resizeRaf !== null) {
@@ -484,7 +354,7 @@ export class KanbanModal {
 
   private resizeRaf: number | null = null
   private readonly handleResize = (): void => {
-    // Debounce via RAF — resize fires rapidly during a drag.
+    // Debounce via RAF — resize fires rapidly.
     if (this.resizeRaf !== null) return
     this.resizeRaf = window.requestAnimationFrame(() => {
       this.resizeRaf = null
@@ -495,13 +365,9 @@ export class KanbanModal {
   // ---------------------------------------------------------------------------
 
   /**
-   * Build the kanban DOM into `this.container`: the banner, the body (tab
-   * strip, drag horizon, Desk, view host) and the live region.
-   *
-   * There is no masthead. Two actions — Stash `+` and New idea `✶` — live
-   * in the lane heads (see
-   * KanbanSurfaceRenderer.makeColumnAction). The page begins at the tab
-   * strip; the body's top padding is its only top margin.
+   * Build the kanban DOM into `this.container`: the bar, the banner, the body
+   * (Desk, view host) and the live region. There is no masthead: the page
+   * begins at the bar; the body's top padding is its only top margin.
    */
   private assembleChrome(): void {
     this.container = document.createElement('div')
@@ -514,9 +380,6 @@ export class KanbanModal {
     this.body.className = 'kbn-body'
     this.body.addEventListener('wheel', (e) => this.handleBodyWheel(e), { passive: false })
     this.body.addEventListener('scroll', () => this.updateBodyScrollAffordance(), { passive: true })
-    this.body.addEventListener('dragover', (e) => this.handleBodyDragOver(e), true)
-    this.body.addEventListener('dragleave', (e) => this.handleBodyDragLeave(e))
-    this.body.addEventListener('drop', () => this.stopDragAutoScroll())
 
     // Transition announcements ("Moved 'X' to Tempered.") go to the shared live region.
     prepareAnnouncements(document)
@@ -527,14 +390,9 @@ export class KanbanModal {
     this.bannerEl.setAttribute('role', 'alert')
     this.bannerEl.style.display = 'none'
 
-    // The body's four permanent children: the view tab strip, the drag-reveal
-    // horizon (zero-height and empty until a drag starts), the Desk wrapper
-    // (display: contents — see the field docstring), and the slot a temporal
-    // view mounts into. `render()` only ever rebuilds inside deskEl; the
-    // horizon is filled and emptied by `syncDragHorizon`, never by render.
+    // The body's two permanent children: the Desk wrapper and the slot a
+    // view mounts into. `render()` only ever rebuilds inside deskEl.
     this.tabsEl = this.buildViewTabs()
-    this.dragHorizonEl = document.createElement('div')
-    this.dragHorizonEl.className = 'kbn-draghorizon'
     this.deskEl = document.createElement('div')
     this.deskEl.className = 'kbn-desk'
     this.deskKeyboard = new DeskKeyboard(this.deskEl, address => {
@@ -543,7 +401,7 @@ export class KanbanModal {
     })
     this.viewHostEl = document.createElement('div')
     this.viewHostEl.className = 'kbn-view-host'
-    this.body.append(this.dragHorizonEl, this.deskEl, this.viewHostEl)
+    this.body.append(this.deskEl, this.viewHostEl)
     this.syncViewChrome()
 
     // The bar stands outside the body: the body goes inert under the reader,
@@ -551,10 +409,8 @@ export class KanbanModal {
     this.container.append(this.tabsEl, this.bannerEl, this.body)
 
     // Crossing 700px changes what the Desk IS, not just how it is painted: the
-    // Now triad becomes a pager with a folio strip, and the two bands grow fold
-    // affordances that only exist on a phone. Those are wired at build time, so
-    // the surfaces have to be rebuilt when the threshold is crossed — a resized
-    // window otherwise keeps desktop wiring under a mobile layout.
+    // columns become a pager under a folio strip, wired at build time, so the
+    // Desk is rebuilt when the threshold is crossed.
     this.stopMobileWatch = onMobileChange(() => {
       if (this.activeViewId === 'desk' && this.lastResponse) this.render(this.lastResponse)
     })
@@ -632,10 +488,10 @@ export class KanbanModal {
     return this.deskProjection.rows
   }
 
-  /** Cycle-lens ghosts illustrate another surface; they do not set Desk order. */
+  /** Every constitution the Desk draws, a card or a line. */
   private drawnDeskCardElements(): HTMLElement[] {
     return Array.from(this.deskEl?.querySelectorAll<HTMLElement>(
-      '[data-fiber-id]:not(.kbn-card--lens-ghost)',
+      '[data-fiber-id]',
     ) ?? [])
   }
 
@@ -726,9 +582,6 @@ export class KanbanModal {
     const centre = document.createElement('div')
     centre.className = 'kbn-viewtabs-centre'
     strip.append(centre)
-    this.lensSlotEl = document.createElement('div')
-    this.lensSlotEl.className = 'kbn-viewtabs-lens'
-    strip.append(this.lensSlotEl)
 
     // Settings rides the same row as the pages without being one of them. It
     // is deliberately NOT a tab: the tabs are windows onto the work, and
@@ -788,48 +641,12 @@ export class KanbanModal {
     this.mountOrRefreshActiveView()
   }
 
-  /**
-   * Raise or drop the drag-reveal horizon.
-   *
-   * Built fresh on every drag rather than kept around, so its "today" is always
-   * the real today (a board left open overnight would otherwise offer yesterday
-   * as a drop target) and its width always matches the last response's forward
-   * window. Fourteen day cells is nothing to build.
-   *
-   * Desk only: the temporal views own their own time axis, and a horizon
-   * hovering over them would be a second, contradictory one.
-   */
-  private syncDragHorizon(dragging: boolean): void {
-    const host = this.dragHorizonEl
-    if (!host) return
-    const wanted = dragging && this.activeViewId === 'desk'
-    if (wanted === host.classList.contains('kbn-draghorizon-open')) return
-    if (wanted) {
-      host.innerHTML = ''
-      host.append(this.surfaces.renderDragHorizon())
-      // The band is built at height 0 and grown by the class. A style flush
-      // between the two gives the transition a starting height to animate FROM
-      // — without it the browser sees one computed style and the strip snaps.
-      void host.offsetHeight
-      host.classList.add('kbn-draghorizon-open')
-      return
-    }
-    host.classList.remove('kbn-draghorizon-open')
-    host.innerHTML = ''
-    this.surfaces.stopEdgeScroll()
-  }
-
   /** Paint the selected tab and show exactly one of Desk / view host. */
   private syncViewChrome(): void {
     const onDesk = this.activeViewId === 'desk'
-    // Leaving the Desk mid-drag takes the horizon with it.
-    if (!onDesk) this.syncDragHorizon(false)
     if (this.deskEl) {
       this.deskEl.style.display = onDesk ? '' : 'none'
     }
-    // The chips ride in the tab strip, which every view shares — but the lens
-    // they engage only means anything on the Desk.
-    if (this.lensSlotEl) this.lensSlotEl.style.display = onDesk ? '' : 'none'
     if (this.viewHostEl) this.viewHostEl.style.display = onDesk ? 'none' : ''
     this.tabsEl?.setAttribute('value', this.activeViewId)
     for (const tab of this.tabsEl?.querySelectorAll<HTMLElement>('.kbn-viewtab') ?? []) {
@@ -982,88 +799,43 @@ export class KanbanModal {
     this.body = null
     this.bannerEl = null
     this.tabsEl = null
-    this.lensSlotEl = null
     this.findEl = null
     this.deskEl = null
     this.viewHostEl = null
     this.activeView = null
     this.activeViewId = 'desk'
-    this.lensCycleId = null
     this.viewFallbackSig = null
     this.lastFetchFailed = false
-    this.dragSourceId = null
-    this.stopDragAutoScroll()
     if (this.bannerTimer !== null) {
       window.clearTimeout(this.bannerTimer)
       this.bannerTimer = null
     }
   }
 
-  // ── Transitions ─────────────────────────────────────────────────────────────
+  // ── Verdicts ───────────────────────────────────────────────────────────────
 
   /**
-   * Apply a drag's lifecycle target to a card. Refetches the kanban on
-   * success; shows the banner on failure. Optimism is left to the caller
-   * (the click handler removes the card from the source DOM list before
-   * awaiting).
-   *
-   * Drag-to-inFlight is the launch verb. It routes through the unified
-   * force-dispatch path (the same one the dock's "New session ▸"
-   * uses): a single fresh POST /api/v1/dispatch with `force: true, ad_hoc:
-   * true` and no message — drag carries no directive (resume-previous and
-   * "talk first" intent live on the fiber page). force bypasses status /
-   * enabled / review_state / schedule / validity gates, so closed (tempered or
-   * composted), paused, awaiting-review, and dormant-standing cards all
-   * fire a worker immediately — no waiting on the 15s poller; the dispatch
-   * reopens a closed lifecycle itself, so no separate transition write runs.
-   *
-   * Drag-from-timeline-or-stash composes the park-on-desk write with the
-   * lifecycle verb rather than writing the surface alone and trusting the
-   * served column to redirect: an armed standing constitution always returns
-   * to the timeline (its column is `resting`, horizon-independent), and
-   * tempered/closed past cards never leave timeline.past. Composing both
-   * writes makes the drag take precedence: the gesture lands the card where
-   * the user dropped it AND fires the action that column means.
+   * Give a constitution a verdict: temper, discard, or close it for review.
+   * A temper or a discard given here (not yet through the reader's undo
+   * window) joins that window; one that comes back from it (`committed`) is
+   * written. The card takes its new column at once, and the refetch that
+   * follows the write reconciles it with what its owner serves.
    */
-  private transition(
-    card: KanbanCard,
-    target: ColumnKind,
-    /**
-     * For a gesture that has ALREADY painted its destination and is now
-     * delegating the lifecycle half here (a row dropped on a column). Two things have to be said, and both are about the same trap:
-     *
-     *  • `basis` — the response as it was BEFORE that paint. Every question
-     *    this method asks ("which column is it in now?", "does it need parking
-     *    on the desk?") is a question about where the card came FROM, and
-     *    `this.lastResponse` no longer knows: it already shows the card at its
-     *    destination. Asked against it, `fromKind === target` and the whole
-     *    transition early-returns with "already in In flight" — the write never
-     *    goes out and the optimistic card sits there as a lie.
-     *  • `skipOptimistic` — don't paint it a second time. Not merely redundant:
-     *    a second `applyOptimisticTransition` would lift the card from its NEW
-     *    surface and re-place it, and re-derive nothing useful.
-     */
-    opts: { basis?: KanbanResponse | null; skipOptimistic?: boolean; verdictCommitted?: boolean } = {},
-  ): void {
-    const basis = opts.basis !== undefined ? opts.basis : this.lastResponse
-    // Server placement, or the gesture's pre-paint basis, determines a no-op.
-    // A same-column verdict must not authorize a delayed write after reopening.
-    const fromKind = findCardColumn(basis, card.id)
-    if (fromKind === target) {
+  private transition(card: KanbanCard, target: Verdict, committed = false): void {
+    if (boardCards(this.lastResponse).find(each => each.id === card.id)?.column === target) {
       this.showBanner(`“${card.name}” is already in ${COLUMN_TITLES[target]}.`, 'info')
       this.announce(`${card.name} is already in ${COLUMN_TITLES[target]}.`)
       return
     }
-    // A standing constitution runs now (In flight), has the run waiting on
-    // the human tempered (Tempered, which keeps the schedule), or is retired
-    // (Discarded); its schedule is paused and resumed with Rest, and it is
-    // never closed for review: a run's exit re-arms it.
-    if (card.shuttleKind === 'standing' && target !== 'inFlight' && target !== 'composted' && !(target === 'tempered' && runAwaitsHuman(card))) {
+    // A standing constitution has the run waiting on the human tempered (which
+    // keeps the schedule) or is retired; its schedule is paused and resumed
+    // with Rest, and it is never closed for review: a run's exit re-arms it.
+    if (card.shuttleKind === 'standing' && target !== 'composted' && !(target === 'tempered' && runAwaitsHuman(card))) {
       this.showBanner(`“${card.name}” is a standing constitution — temper a run waiting on you (t), pause its schedule (s) or retire it (x).`, 'info')
       this.announce(`${card.name} runs on its schedule; pause or retire it instead.`)
       return
     }
-    if ((target === 'tempered' || target === 'composted') && this.workspace && !opts.verdictCommitted) {
+    if ((target === 'tempered' || target === 'composted') && this.workspace && !committed) {
       this.workspace.queueVerdict(card, target)
       return
     }
@@ -1071,392 +843,47 @@ export class KanbanModal {
     // In the workspace, Workspace.queueVerdict asks at gesture time and refuses
     // an expired verdict whose card gained an unconfirmed worker, so a committed
     // verdict arrives here already authorized. Without a workspace, ask now.
-    if ((target === 'tempered' || target === 'composted') && !opts.verdictCommitted && !confirmWorkerStop(card, target)) {
+    if ((target === 'tempered' || target === 'composted') && !committed && !confirmWorkerStop(card, target)) {
       this.announce(`Left ${card.name} running.`)
       return
     }
-
-    // Surface-shift case: card lives on a non-Now surface (timeline.futureDated
-    // / stash). For drag onto a Now lifecycle column we first
-    // promote to Now (the "park on desk" half of the gesture), then fall
-    // through to the lifecycle verb (the "act on it" half) — never early-return.
-    const isNowColumn = target === 'drafts' || target === 'inFlight' || target === 'awaitingReview'
-    const onTimelineOrStash = !!basis && [
-      ...basis.timeline.futureDated,
-      ...basis.stash,
-    ].some((c) => c.id === card.id)
-    // Park on the desk whenever leftover planning fields would otherwise
-    // re-route the card after the lifecycle verb lands: a stale `horizon`
-    // re-stashes a reopened draft, a leftover `due:` re-futures it. (The
-    // closed→drafts reopen-as-draft made this reachable: a card stashed
-    // while open, closed, then dragged back to Drafts carries both.)
-    const needSurfaceShift =
-      isNowColumn &&
-      ((fromKind === null && onTimelineOrStash) ||
-        card.storedHorizon !== undefined ||
-        (target === 'drafts' && card.due !== undefined))
-
-    // Optimism: reflect the gesture's named destination *now*, before the
-    // server write returns. This is honoring the drop, not reclassifying —
-    // the user dropped the card on `target`, so it goes there. The served
-    // column stays authoritative: commitTransition refetches and reconciles, so a
-    // surprising server column (or server-enriched card fields like
-    // closedAt) self-corrects within one refetch. The slow part — a daemon
-    // round-trip, a worker spawn for inFlight — no longer blocks the card
-    // from moving.
-    if (!opts.skipOptimistic) {
-      const optimistic = applyOptimisticTransition(basis, card.id, target)
-      if (optimistic) this.applyResponse(optimistic)
-    }
-
-    void this.commitTransition(card, target, needSurfaceShift)
+    const optimistic = this.lastResponse && applyOptimisticTransition(this.lastResponse, card.id, target)
+    if (optimistic) this.applyResponse(optimistic)
+    void this.commitTransition(card, target)
   }
 
   /**
-   * Network half of {@link transition}: settle file state (and launch, for
-   * inFlight) through the daemon, then reconcile against server truth.
-   *
-   * Runs in the background after the optimistic render so its latency is
-   * invisible. On failure it banners and the trailing refetch snaps the
-   * card back to where the server actually has it; on success the refetch
-   * replaces the optimistic placement with the authoritative response
-   * (a no-op re-render when they already agree, via the signature dedup in
-   * fetchAndRender).
+   * Network half of {@link transition}: stop the worker and write the
+   * verdict through the daemon, then reconcile against server truth. On
+   * failure it banners and the trailing refetch puts the card back where its
+   * owner has it.
    */
-  private async commitTransition(
-    card: KanbanCard,
-    target: ColumnKind,
-    needSurfaceShift: boolean,
-  ): Promise<void> {
-    // Held across outstanding writes: a launch can take seconds, during
-    // which a poll would erase its optimistic placement with the old draft.
-    // The last completed gesture releases the poll and reconciles.
+  private async commitTransition(card: KanbanCard, target: Verdict): Promise<void> {
+    // Held across the writes: a poll would otherwise erase the optimistic placement.
     this.gestureDepth += 1
     try {
-      if (needSurfaceShift) {
-        // Same write policy as commitSurface's `now`: clear horizon/cold and
-        // (for a Drafts drop) the `due:` — "park on the desk" means no
-        // planning fields left to re-route the card on the next classify.
-        const surfaceBody: Record<string, unknown> = {
-          fiber_id: card.id, origin: card.originId, unset: ['horizon', 'cold'],
-        }
-        if (target === 'drafts' && card.due !== undefined) surfaceBody.due = null
-        await this.postFeltEdit(surfaceBody, 'Park-on-desk failed')
-      }
-
-      let moved = true
-      if (target === 'inFlight') {
-        moved = await this.launchFromDrag(card)
-      } else {
-        // Dragging a running card off in-flight stops its worker first — the
-        // board's "alive only while in-flight" invariant. inFlight is the one
-        // target that doesn't kill (it's a (re)dispatch).
-        await this.killWorkerIfRunning(card)
-        await this.postTransition(card, target, 'Transition failed')
-      }
-      this.announce(
-        moved && target === 'tempered' && card.shuttleKind === 'standing'
-          ? `Tempered the run of “${card.name}”; it runs again at its next scheduled time.`
-          : moved
-          ? `Moved “${card.name}” to ${COLUMN_TITLES[target]}.`
-          : `“${card.name}” needs a project directory before it can start.`,
-      )
+      await this.killWorkerIfRunning(card)
+      await postDaemonJson(this.shuttleBase, '/api/v1/transition', { fiber_id: card.id, target, origin: card.originId }, 'Transition failed')
+      this.announce(target === 'tempered' && card.shuttleKind === 'standing'
+        ? `Tempered the run of “${card.name}”; it runs again at its next scheduled time.`
+        : `Moved “${card.name}” to ${COLUMN_TITLES[target]}.`)
     } catch (err: unknown) {
       const msg = errText(err)
       this.showBanner(`Couldn't move “${card.name}” to ${COLUMN_TITLES[target]}: ${msg}`, 'error')
       this.announce(`Move failed: ${msg}`)
     }
     this.gestureDepth -= 1
-    // The last outstanding gesture reconciles all optimistic placements.
     await this.fetchAndRender()
   }
 
-  /**
-   * Drag-to-inFlight launch: ONE force dispatch owns the whole launch, with no
-   * transition beside it — the dispatch reopens a closed lifecycle itself, and
-   * a second write would race it into a 409 already_running.
-   *
-   * A drag carries no message and always starts fresh; resuming and saying
-   * something first live on the fiber page, where they are chosen on
-   * purpose. `fresh` is stamped explicitly rather than left to the daemon's
-   * auto-decide, which would resume a transcript that died dirty.
-   *
-   * A start refused for want of a project directory is not a failed move but
-   * a question: the card's panel opens with the directory prompt, and the
-   * answer is `false`. Any other refusal throws the daemon's reason.
-   */
-  private async launchFromDrag(card: KanbanCard): Promise<boolean> {
-    let res: Response
+  /** A waiting post's ✓: the board clears it, and says so if the daemon refuses. */
+  private async clear(card: KanbanCard): Promise<void> {
     try {
-      res = await postForceDispatch(this.shuttleBase, card, { resume_mode: 'fresh' })
+      await this.workspace!.board.clear(card.uid ?? card.id)
+      this.announce(`Cleared ${card.name}'s post.`)
     } catch (err: unknown) {
-      throw new Error(`Couldn't reach the Shuttle daemon: ${errText(err)}`)
+      this.showBanner(`Couldn't clear “${card.name}”'s post: ${errText(err)}`, 'error')
     }
-    if (res.ok) return true
-    const body = (await res.json().catch(() => ({}))) as DispatchFailureBody
-    if (needsProjectDir(body)) {
-      this.workspaceReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
-      this.workspaceReturnCard = { id: card.id, origin: card.originId }
-      this.workspace?.openStartPrompt(card, body)
-      return false
-    }
-    throw new Error(dispatchFailureMessage(body, `reopen ${res.status}`, res.status))
-  }
-
-  /** POST one frontmatter edit, owner-routed by `origin`, throwing the
-   *  daemon's own message on failure. The shared half of every sequence
-   *  write. */
-  private async postFeltEdit(
-    payload: Record<string, unknown>,
-    label = 'Frontmatter edit failed',
-  ): Promise<void> {
-    await postDaemonJson(this.shuttleBase, '/api/v1/felt-edit', payload, label)
-  }
-
-  /**
-   * `horizon` is a planning field, not the card's current board surface.
-   * An active oneshot can retain `horizon: stashed` while its lifecycle puts
-   * it in In flight (the live-worker override, or simply `status:active`).
-   * Compare against the surface the classifier is actually showing, or a
-   * drag returns "already in Resting" before it can stop and park the worker.
-   */
-  private sameSurface(card: KanbanCard, horizon: HorizonKind): boolean {
-    return horizon === 'stashed'
-      ? !hasWorkerToStop(card) && card.status === 'open' && card.effectiveHorizon === 'stashed'
-      : card.effectiveHorizon === 'now'
-  }
-
-  /**
-   * `undefined` means "the date is not being touched", so it can never be the
-   * half of a drop that makes it a real change — a preserved due leaves the
-   * verdict entirely to the surface test. Re-dropping an already-resting dated
-   * card into Resting is therefore a true no-op, reported as such — never a
-   * silent deadline deletion.
-   */
-  private sameDueAs(card: KanbanCard, due: string | null | undefined): boolean {
-    return due === undefined || sameCivilDue(card.due, due)
-  }
-
-  /**
-   * Would `setSurface` find nothing to write for this card?
-   *
-   * Never for a CLOSED card. A tempered/composted past run OR an
-   * awaiting-review one (closed, untempered) classifies by its lifecycle
-   * state, not its stored horizon: it sits in Awaiting review / Past
-   * regardless of a `horizon: stashed` left in its frontmatter. So even when
-   * the stored horizon already equals the target, the drop is a real state
-   * change — commitSurface reopens it as a draft so it actually leaves that
-   * column and lands on the surface.
-   */
-  private alreadyOnSurface(
-    card: KanbanCard,
-    horizon: HorizonKind,
-    due: string | null | undefined,
-  ): boolean {
-    return card.status !== 'closed' && this.sameSurface(card, horizon) && this.sameDueAs(card, due)
-  }
-
-  /**
-   * Apply a planning gesture through the owner-routed write APIs.
-   *
-   *   • Drag a scheduled/in-flight card onto a date column →
-   *     setSurface(card, 'now', { due }); only due changes, preserving its
-   *     lifecycle and worker.
-   *   • SNOOZE — drag a desk card (Drafts / Awaiting review) or a resting card
-   *     onto a date column → setSurface(card, 'stashed', { due }); `shuttle
-   *     rest --until <day>` writes the wake date and resting state in one
-   *     locked write. `dayDropHorizon` chooses between these gestures from the
-   *     card's current column.
-   *   • Drag into Resting                 → setSurface(card, 'stashed').
-   *   • Drag back up to now               → setSurface(card, 'now') clears horizon.
-   *
-   * When `opts.due` is omitted the existing `due:` is PRESERVED, stashing
-   * included. Putting a card down in Resting is one gesture and it does one
-   * thing: it moves the card. The date the human wrote is theirs, and a drag
-   * that quietly deleted it — "I'll look at Croatia in October" becoming a
-   * dateless card nothing will ever surface again — is the second, destructive
-   * act a gesture must never smuggle in. Preserved, `horizon: stashed` + a
-   * future `due:` compose into the snooze that brings the card back by itself.
-   *
-   * The ONE exception: a `due:` that is today or already past would bounce the card straight back onto the
-   * desk, because `effectiveHorizon`'s drift branch outranks its stashed branch
-   * — the drop would read as ignored. Such a due is cleared, and `commitSurface`
-   * says so in a banner. `dueBouncesFromResting` (KanbanRules) is the test.
-   *
-   * Rest itself applies both rules (`shuttle rest` keeps a future due and
-   * clears an arrived one); the board predicts them only to place the card
-   * optimistically and to say which date went. A Resting drop takes a day
-   * (the date-column snooze) or nothing; Now takes a day or `null` to clear.
-   */
-  private setSurface(
-    card: KanbanCard,
-    horizon: HorizonKind,
-    opts: { due?: string | null } = {},
-  ): void {
-
-    // A standing constitution is placed on the timeline by its schedule
-    // (`nextLaunchAt`), not by hand — a horizon/due write here is
-    // silently ignored by the read model and just leaves dead frontmatter.
-    // Reject the planning gesture with an explanation rather than no-op. The
-    // lifecycle gestures still work: drag to In flight runs it now (that's
-    // `transition` → force-dispatch, not this path), Rest pauses its
-    // schedule, and Retire closes it.
-    if (card.shuttleKind === 'standing') {
-      this.showBanner(
-        `“${card.name}” is a standing constitution — it runs on its schedule. Edit the schedule to change when it runs, or drag it to In flight to run it now.`,
-        'info',
-      )
-      this.announce(`${card.name} runs on its schedule; drag it to In flight to run it now.`)
-      return
-    }
-    // A future day preserves open or active work's lifecycle. Closed work
-    // reopens as a draft so the planned date can leave the past column.
-    // An explicit Now placement has no date (or clears it).
-    if (horizon === 'now' && typeof opts.due === 'string' && card.status !== 'closed') {
-      void this.scheduleDue(card, opts.due)
-      return
-    }
-    // A bare stash keeps the card's own `due:`. Only a deadline that would
-    // bounce the card back is dropped, and the drop is reported rather than
-    // done under the gesture's cover.
-    const dropsStaleDue =
-      horizon === 'stashed' && opts.due === undefined && dueBouncesFromResting(card.due)
-    const due = dropsStaleDue ? null : opts.due
-
-    if (this.alreadyOnSurface(card, horizon, due)) {
-      // A genuine no-op: an open/active card already on this surface with these
-      // fields. Tell the user rather than leaving the drag feeling broken.
-      this.showBanner(`“${card.name}” is already in ${SURFACE_TITLE[horizon]}.`, 'info')
-      this.announce(`${card.name} is already in ${SURFACE_TITLE[horizon]}.`)
-      return
-    }
-
-    // Optimism for the one unambiguous destination: `stashed` drops the card
-    // into the stash grid. `now` stays on the refetch path — the Now surface
-    // doesn't name a lifecycle column, so an optimistic placement there would
-    // be a reclassification.
-    if (horizon === 'stashed') {
-      const optimistic = applyOptimisticSurface(this.lastResponse, card.id, due)
-      if (optimistic) this.applyResponse(optimistic)
-    }
-
-    void this.commitSurface(card, horizon, { due, dropsStaleDue })
-  }
-
-  private async scheduleDue(card: KanbanCard, due: string): Promise<void> {
-    try {
-      await this.postFeltEdit({ fiber_id: card.id, origin: card.originId, due }, 'Date edit failed')
-      this.announce(`“${card.name}” is due ${formatDue(due)}.`)
-    } catch (err) {
-      this.showBanner(`Couldn't date “${card.name}”: ${errText(err)}`, 'error')
-    }
-    await this.fetchAndRender()
-  }
-
-  /**
-   * Network half of {@link setSurface}: one owner-routed write, then reconcile.
-   * Runs in the background after the optimistic render (when there was one), so
-   * its latency is invisible; banners + snaps back on failure.
-   *
-   * Into Resting is `shuttle rest`, the worker's own exit said by hand: the
-   * owning daemon writes `status: open` + `horizon: stashed` inside its Poller
-   * in one locked write, clears any verdict, applies the wake day (`until`) or
-   * keeps a future due and clears an arrived one, and stops a live worker
-   * through its backend. On work already at rest, `until` changes only the
-   * wake day, and replaces a blocker, so a resting card that waits on one is
-   * re-dated with a `due` edit instead.
-   *
-   * Back to Now holds DRAFTS. Parking a running card there stops its worker —
-   * alive only while in flight — and a card that isn't a draft yet is parked as
-   * one via `/transition target=drafts` (a closed card reopens as a deferred
-   * draft; an armed card pauses). Now is the absence of a planning field, so
-   * the frontmatter edit clears `horizon` and `cold`.
-   *
-   * `opts.dropsStaleDue` is the one thing this method reports rather than does:
-   * rest clears an already-elapsed deadline, and the human is told which date
-   * went. See `announceSurfaceLanding`.
-   */
-  private async commitSurface(
-    card: KanbanCard,
-    horizon: HorizonKind,
-    opts: { due?: string | null; dropsStaleDue?: boolean },
-  ): Promise<void> {
-    this.gestureDepth += 1
-    try {
-      const restingOnBlocker = !hasWorkerToStop(card) && card.status === 'open'
-        && card.storedHorizon === 'stashed' && card.shuttleBlockedOn !== undefined
-      if (horizon === 'stashed' && restingOnBlocker && typeof opts.due === 'string') {
-        // `rest --until <day>` replaces a blocker; re-dating keeps it.
-        await this.postFeltEdit({ fiber_id: card.id, origin: card.originId, due: opts.due }, 'Rest failed')
-      } else if (horizon === 'stashed') {
-        await postDaemonJson(this.shuttleBase, '/api/v1/lifecycle', {
-          action: 'rest', fiber: card.id, origin: card.originId,
-          ...(typeof opts.due === 'string' ? { until: opts.due } : {}),
-        }, 'Rest failed')
-      } else {
-        await this.killWorkerIfRunning(card)
-        if (card.status !== 'open') {
-          await this.postTransition(card, 'drafts', 'Park-as-draft failed')
-        }
-        const payload: Record<string, unknown> = {
-          fiber_id: card.id, origin: card.originId, unset: ['horizon', 'cold'],
-        }
-        if (opts.due !== undefined) payload.due = opts.due
-        await this.postFeltEdit(payload, 'Surface edit failed')
-      }
-      this.announceSurfaceLanding(card, horizon, opts)
-    } catch (err: unknown) {
-      const message = `Couldn't move “${card.name}” to ${SURFACE_TITLE[horizon]}: ${errText(err)}`
-      this.showBanner(message, 'error')
-      this.announce(message)
-    }
-    this.gestureDepth -= 1
-    await this.fetchAndRender()
-  }
-
-  /**
-   * Say where the card landed, in the register the landing deserves.
-   *
-   * Three cases, and the split is about what the human can already SEE:
-   *
-   *   • A stale deadline was dropped → a visible BANNER naming the date that
-   *     went. This is the only branch that destroys something the human wrote,
-   *     so it is the only one that interrupts; silence here would be a date
-   *     deleted without a word.
-   *   • Resting with a wake day → announce "resting until <day>". No banner:
-   *     the card itself grows a `wakes <day>` chip in the Resting grid
-   *     (KanbanSurfaces' stash card), so the sighted user is already told. The
-   *     announcement carries that same fact to a screen reader, which cannot
-   *     see the chip.
-   *   • Anything else → the plain "Moved to <surface>".
-   *
-   * The wake day comes from `restingUntil`, the same rule the chip and the
-   * timeline ghost use, rather than a date formatted by hand here — one rule,
-   * so the sentence and the chip can never name different days.
-   */
-  private announceSurfaceLanding(
-    card: KanbanCard,
-    horizon: HorizonKind,
-    opts: { due?: string | null; dropsStaleDue?: boolean },
-  ): void {
-    if (opts.dropsStaleDue === true) {
-      const gone = card.due ? formatDue(card.due) : null
-      const msg = gone
-        ? `“${card.name}” is resting, and its ${gone} deadline — already past — was cleared. Give it a new date to have it come back on its own.`
-        : `Moved “${card.name}” to Resting.`
-      this.showBanner(msg, 'info')
-      this.announce(msg)
-      return
-    }
-    // The due the write left on the document: an explicit day (or an explicit
-    // clear) from the caller, otherwise the card's own, preserved.
-    const settledDue = opts.due === undefined ? card.due : (opts.due ?? undefined)
-    const wakes = horizon === 'stashed' ? restingUntil({ horizon: 'stashed', due: settledDue }) : undefined
-    this.announce(
-      wakes
-        ? `“${card.name}” is resting until ${formatDue(wakes)}, when it returns to the desk.`
-        : `Moved “${card.name}” to ${SURFACE_TITLE[horizon]}.`,
-    )
   }
 
   private announce(msg: string): void {
@@ -1480,10 +907,7 @@ export class KanbanModal {
   /** The claude.ai address of the live worker running as `tmux`, if the last
    * feed carried one — the phone's substitute for "open the terminal". */
   private sessionLinkFor(tmux: string): string | undefined {
-    const r = this.lastResponse
-    if (!r) return undefined
-    const cards = [...r.now.drafts, ...r.now.inFlight, ...r.now.awaitingReview]
-    return cards.find((c) => c.tmuxSession === tmux)?.sessionLink
+    return boardCards(this.lastResponse).find((c) => c.tmuxSession === tmux)?.sessionLink
   }
 
   /**
@@ -1558,7 +982,7 @@ export class KanbanModal {
     const sig = this.computeResponseSignature(data)
     const wasFirstRender = this.lastResponse === null
     this.lastResponse = data
-    this.ensureFleetMetadata(data)
+    this.readBoard(data)
     if (!wasFirstRender && sig === this.lastResponseSig) {
       // The Desk skips an identical-payload re-render, but a temporal view
       // still gets its poll: its content moves with the clock (and with
@@ -1570,6 +994,23 @@ export class KanbanModal {
     }
     this.lastResponseSig = sig
     this.render(data)
+  }
+
+  /**
+   * Asks the board what waits on the human, once a poll: the families of
+   * everything that waits, for what each wants, and with nothing waiting one
+   * family, whose answer speaks for the whole board. `unread` asks only the
+   * families of lines whose records are not read yet.
+   */
+  private readBoard(data: KanbanResponse, unread = false): void {
+    const board = this.workspace!.board, index = threadIndexFor(data), families = new Set<string>()
+    for (const [uid, wait] of board.waiting) {
+      const card = index.fiber(uid)
+      if (card && !(unread && wait.kind)) { const root = index.rootOf(card); families.add(root.uid ?? root.id) }
+    }
+    const first = index.roots().find(root => !root.isCycle)
+    if (!unread && !families.size && first) families.add(first.uid ?? first.id)
+    if (families.size) board.read(families)
   }
 
   private computeResponseSignature(data: KanbanResponse): string {
@@ -1657,11 +1098,10 @@ export class KanbanModal {
   }
 
   private render(data: KanbanResponse): void {
-    this.surfaces.closeMenu()
     if (!this.body || !this.deskEl) return
-    const order = deskOrder(data)
+    const index = threadIndexFor(data)
+    const order = deskOrder(index, this.workspace!.board.waiting)
     this.deskProjection = order
-    this.ensureFleetMetadata(data)
     this.syncWorkspaceRuntime()
     if (this.workspace?.isActive) {
       this.lastResponse = data
@@ -1669,15 +1109,10 @@ export class KanbanModal {
       return
     }
 
-    // Never rebuild the Desk while it is hidden behind a temporal view. The
-    // passes at the end of this method MEASURE — `restoreScrollSnapshot`
-    // writes scrollTops — and a `display:none` subtree has no layout box, so
-    // each one silently does nothing.
-    //
-    // Holding the payload instead is also what makes the promise in the
-    // `deskEl` docstring true: the Desk that comes back is the one the user
-    // left, scroll positions intact, repainted from fresh data at the moment
-    // it can see what it is doing.
+    // Never rebuild the Desk while it is hidden behind a temporal view: the
+    // passes at the end of this method MEASURE, and a `display:none` subtree
+    // has no layout box. The payload is held, and the Desk that comes back is
+    // the one the user left, repainted from fresh data.
     if (this.activeViewId !== 'desk') {
       this.lastResponse = data
       this.mountOrRefreshActiveView()
@@ -1688,35 +1123,9 @@ export class KanbanModal {
 
     const scrollSnapshot = this.captureScrollSnapshot()
     const focusedRow = this.deskKeyboard?.focusedRow() ?? null
-    const { staleness } = data
-
     this.deskEl.innerHTML = ''
     this.body.classList.remove('kbn-body-zoomed')
-
-    // Three surfaces, top to bottom: the Now board, Resting, then Roles.
-    // The day axis is only the drag-reveal horizon under
-    // the tab strip (see `syncDragHorizon`).
-    // The cycle lens: a row of chips above the columns, and — when one is
-    // engaged — a lens the Now board is drawn through. Derived fresh from the
-    // response every render, so a poll that changes a `due:` moves a card in or
-    // out of the chapter without anything to invalidate. A lens whose cycle has
-    // vanished from the feed resolves to null and simply releases itself.
-    const lens = deriveCycleLens(data, this.lensCycleId)
-    if (this.lensCycleId !== null && lens === null) this.lensCycleId = null
-    const lensBar = this.surfaces.renderCycleLensBar(
-      this.lensCycleId,
-      (cycleId) => this.setLensCycle(cycleId),
-    )
-    if (this.lensSlotEl) {
-      this.lensSlotEl.innerHTML = ''
-      if (lensBar) this.lensSlotEl.append(lensBar)
-    }
-
-    this.deskEl.append(this.surfaces.renderNowSection(order.now, staleness, lens))
-    // Resting draws snoozed work and standing constitutions between runs or paused.
-    this.deskEl.append(this.surfaces.renderStashSection(order.resting, staleness))
-    const rolesBand = this.surfaces.renderRolesSection(order.roles, staleness)
-    if (rolesBand) this.deskEl.append(rolesBand)
+    this.deskEl.append(this.surfaces.renderDesk(order, index))
 
     this.restoreScrollSnapshot(scrollSnapshot)
     // A redraw repaints the selection in place: the Desk scrolls only when the
@@ -1732,68 +1141,36 @@ export class KanbanModal {
     this.mountOrRefreshActiveView()
   }
 
-  private ensureFleetMetadata(data: KanbanResponse): void {
-    for (const card of boardCards(data)) {
-      if (!isAgentCard(card) || !card.shuttleAgent) continue
-      const origin = card.originId
-      if (this.fleetDefaultAgents.has(origin) || this.fleetDefaultAgentLoads.has(origin)) continue
-      if ((this.fleetDefaultAgentMisses.get(origin) ?? -Infinity) > Date.now() - AGENT_RETRY_MS) continue
-      this.fleetDefaultAgentLoads.add(origin)
-      void inLane('quiet', () => daemonFetch(`${this.shuttleBase}/api/v1/agents?origin=${encodeURIComponent(origin)}`)
-        .then(async response => ({ ok: response.ok, body: response.ok ? await response.json() as unknown : null })))
-        .then(({ ok, body }) => {
-          if (!ok) { this.fleetDefaultAgentMisses.set(origin, Date.now()); return }
-          this.fleetDefaultAgentMisses.delete(origin)
-          const agent = registryDefaultAgent(body)
-          if (!agent) return
-          const fallback = this.fleetDefaultAgents.get(origin) ?? FALLBACK_DEFAULT_AGENT
-          this.fleetDefaultAgents.set(origin, agent)
-          if (agent !== fallback && this.lastResponse && this.container) this.render(this.lastResponse)
-        })
-        .catch(() => { this.fleetDefaultAgentMisses.set(origin, Date.now()) })
-        .finally(() => this.fleetDefaultAgentLoads.delete(origin))
-    }
-  }
-
   private captureScrollSnapshot(): KanbanScrollSnapshot | null {
     if (!this.body) return null
-
-    const columns: Partial<Record<ColumnKind, number>> = {}
+    const columns: Record<string, number> = {}
     for (const col of this.body.querySelectorAll<HTMLElement>('.kbn-col[data-column]')) {
-      const kind = col.dataset.column as ColumnKind | undefined
       const list = col.querySelector<HTMLElement>('.kbn-col-list')
-      if (kind && list) columns[kind] = list.scrollTop
+      if (list) columns[col.dataset.column!] = list.scrollTop
     }
-    // The drag horizon's own scrollLeft is deliberately NOT captured: it only
-    // exists during a drag, and a drag never survives a re-render.
-    return {
-      bodyLeft: this.body.scrollLeft,
-      bodyTop: this.body.scrollTop,
-      columns,
-    }
+    return { bodyLeft: this.body.scrollLeft, bodyTop: this.body.scrollTop, columns }
   }
 
   private restoreScrollSnapshot(snapshot: KanbanScrollSnapshot | null): void {
     if (!this.body || !snapshot) return
-
     const restore = (): void => {
       if (!this.body) return
       this.body.scrollLeft = snapshot.bodyLeft
       this.body.scrollTop = snapshot.bodyTop
-      for (const [kind, scrollTop] of Object.entries(snapshot.columns) as [ColumnKind, number][]) {
-        const list = this.body.querySelector<HTMLElement>(`.kbn-col[data-column="${kind}"] .kbn-col-list`)
+      for (const [column, scrollTop] of Object.entries(snapshot.columns)) {
+        const list = this.body.querySelector<HTMLElement>(`.kbn-col[data-column="${column}"] .kbn-col-list`)
         if (list) list.scrollTop = scrollTop
       }
       this.updateBodyScrollAffordance()
     }
-
     restore()
     window.requestAnimationFrame(restore)
   }
 
-  /** Stash the latest response so drop handlers can resolve cards by id. */
   private lastResponse: KanbanResponse | null = null
-  private deskProjection: DeskOrder = deskOrder(null)
+  private deskProjection: DeskOrder = { columns: { waiting: [], working: [], quiet: [] }, rows: [], placements: new Map() }
+  /** Lets go of the board's what-waits feed on unmount. */
+  private stopBoard: (() => void) | null = null
   /** The last parsed composite feed, redrawn when the hub's terminal is learned. */
   private lastFeed: CompositeFeed | null = null
   /** The hub's terminal backs runtimes that report none; learning it redraws the last feed. */
@@ -1801,10 +1178,6 @@ export class KanbanModal {
     () => inLane('quiet', () => daemonFetch(`${this.shuttleBase}/api/v1/version`)),
     () => { if (this.lastFeed && !this.lastFetchFailed) this.presentFeed(this.lastFeed) },
   )
-  private readonly fleetDefaultAgents = new Map<string, string>()
-  private readonly fleetDefaultAgentLoads = new Set<string>()
-  /** When each unreachable host last refused its registry; renders retry it after AGENT_RETRY_MS. */
-  private readonly fleetDefaultAgentMisses = new Map<string, number>()
   /**
    * A response that arrived while a temporal view was up, waiting for the Desk
    * to be visible again. The Desk is `display:none` behind a view, and every
@@ -1823,13 +1196,6 @@ export class KanbanModal {
   private lastResponseSig: string | null = null
 
   // ── URL + chrome helpers ───────────────────────────────────────────────────
-
-  /** The drag/menu lifecycle write: the daemon maps the column `target` -> a
-   *  lifecycle action. */
-  private async postTransition(card: KanbanCard, target: ColumnKind, label: string): Promise<void> {
-    await postDaemonJson(this.shuttleBase, '/api/v1/transition', { fiber_id: card.id, target, origin: card.originId }, label)
-  }
-
 
   /**
    * Release the boot quarantine on a held card's owning host — the `⏹︎ held` →
@@ -1886,7 +1252,6 @@ export class KanbanModal {
   private startPolling(): void {
     this.stopPolling()
     this.pollTimer = window.setInterval(() => {
-      if (this.surfaces.isDragging()) return
       if (this.gestureDepth > 0) return
       // Hidden tabs stop polling; visible but unfocused tiled windows slow
       // down to the shared page-attention cadence.
@@ -1918,65 +1283,6 @@ export class KanbanModal {
     e.preventDefault()
     this.body.scrollLeft += e.deltaY
     this.updateBodyScrollAffordance()
-  }
-
-  /**
-   * Engage (or release) the cycle lens and repaint the Desk from the response
-   * already in hand. No fetch: membership is derived from data the board has,
-   * so the lens turns on at the speed of a repaint.
-   */
-  private setLensCycle(cycleId: string | null): void {
-    if (this.lensCycleId === cycleId) return
-    this.lensCycleId = cycleId
-    if (this.lastResponse) this.render(this.lastResponse)
-  }
-
-  private closeRolePopover?: () => void
-
-  private makeSeat(card: KanbanCard, anchor: HTMLElement): void {
-    this.closeRolePopover?.()
-    if (card.shuttleRole) {
-      void this.commitSeat(card)
-      return
-    }
-    this.closeRolePopover = rolePopover(card, anchor, async () => {
-      const response = await daemonFetch(`${this.shuttleBase}/api/v1/roles`)
-      if (!response.ok) throw new Error(await response.text())
-      return await response.json() as RoleProfile[]
-    }, choice => this.commitSeat(card, choice))
-  }
-
-  /** Office assignment and seat marking precede the ordinary Resting drop.
-   * Standing seats keep their schedule and their current run untouched. */
-  private async commitSeat(card: KanbanCard, choice?: RoleChoice): Promise<void> {
-    try {
-      if (choice) {
-        await postDaemonJson(this.shuttleBase, '/api/v1/lifecycle', {
-          action: 'role', fiber: card.id, origin: card.originId, ...choice,
-        }, 'Role assignment failed')
-      }
-      await postDaemonJson(this.shuttleBase, '/api/v1/lifecycle', {
-        action: 'seat', fiber: card.id, origin: card.originId,
-      }, 'Seat assignment failed')
-      const seated = { ...card, shuttleRole: choice?.role ?? card.shuttleRole, shuttleSeat: true }
-      const optimistic = applyOptimisticSeat(this.lastResponse, seated)
-      if (optimistic) this.applyResponse(optimistic)
-      if (card.shuttleKind === 'standing') {
-        const message = `“${card.name}” is a seat. It keeps its schedule; its current run is unchanged.`
-        this.showBanner(message, 'info')
-        this.announce(message)
-      } else if (!this.sameSurface(card, 'stashed')) {
-        this.setSurface(seated, 'stashed')
-        return
-      } else {
-        this.announce(`${card.name} is a seat of ${seated.shuttleRole}.`)
-      }
-    } catch (error) {
-      const message = `Couldn't make “${card.name}” a seat: ${errText(error)}`
-      this.showBanner(message, 'error')
-      this.announce(message)
-    }
-    await this.fetchAndRender()
   }
 
   private closeRestPopover?: () => void
@@ -2023,15 +1329,6 @@ export class KanbanModal {
     // The view keys work from the reader too: 1 or 2 parks it, 3 comes back to it.
     if (this.workspace?.isActive) { this.handleViewHotkey(e); return }
     const nativeControl = (e.target as HTMLElement | null)?.closest?.('button, a, [role="button"], [role="tab"]')
-    // Escape releases an engaged lens and goes no further — "back out of what
-    // I'm looking at", and the lens is the nearest thing being looked through.
-    // A field takes its own Escape (the bar's Find puts itself away) before the lens is released.
-    if (e.key === 'Escape' && this.lensCycleId !== null && this.activeViewId === 'desk' && !isTypingTarget(e.target as HTMLElement | null)) {
-      e.preventDefault()
-      e.stopPropagation()
-      this.setLensCycle(null)
-      return
-    }
     if (this.handleSettingsHotkey(e)) return
     if (this.handleViewHotkey(e)) return
     // A tablist's arrows, Home and End are its own (the view strip, the phone folio), not the active view's.
@@ -2044,22 +1341,9 @@ export class KanbanModal {
     }
     if (this.activeViewId === 'desk' && !keystrokeIsSpokenFor()) {
       const intent = keyIntent(e, 'desk')
-      const address = this.deskKeyboard?.selection
-      const selected = address && this.workspaceCards().find(card => (card.uid ?? card.id) === address.uid && card.originId === address.origin)
-      if (intent && constitutionAction(intent, selected, {
-        verdict: (card, verdict) => { this.workspace?.queueVerdict(card, verdict) },
-        conversation: card => this.dock.openConversation(card),
-        rest: card => this.rest(card),
-      })) {
-        e.preventDefault(); e.stopPropagation()
-        return
-      }
       if (intent === 'find') {
-        const filter = [...this.deskEl!.querySelectorAll<HTMLInputElement>('input[type="search"], input[data-card-filter]')]
-          .find(input => !input.closest('[hidden],[inert]') && input.getClientRects().length > 0)
-        if (this.focusFind()) { /* The bar's Find serves every view. */ }
-        else if (filter) filter.focus({ preventScroll: true })
-        else this.workspace?.findConstitution()
+        // The bar's Find serves every view; the phone, which has none in its bar, finds a constitution.
+        if (!this.focusFind()) this.workspace?.findConstitution()
         e.preventDefault(); e.stopPropagation()
         return
       }
@@ -2070,129 +1354,6 @@ export class KanbanModal {
         return
       }
     }
-    // Column Tab-nav is a Desk gesture — a temporal view owns its own focus
-    // order, and the Desk's column heads are display:none behind it anyway.
-    if (e.key !== 'Tab' || this.activeViewId !== 'desk') return
-
-    const active = document.activeElement as HTMLElement | null
-    // A card's explicit controls are reachable before column navigation resumes.
-    const row = active?.closest<HTMLElement>('.kbn-card, .kbn-cluster-item')
-    if (row && active) {
-      const stops = [row, ...row.querySelectorAll<HTMLElement>('button:not(:disabled), a[href]')]
-      const at = stops.indexOf(active)
-      const next = at >= 0 ? stops[at + (e.shiftKey ? -1 : 1)] : undefined
-      if (next) { e.preventDefault(); e.stopPropagation(); next.focus({ preventScroll: true }); return }
-    }
-    const heads = Array.from(this.body.querySelectorAll<HTMLElement>('.kbn-col-head'))
-      .filter(head => head.offsetParent !== null)
-    if (heads.length === 0) return
-
-    const activeHead = active?.closest<HTMLElement>('.kbn-col-head')
-    const activeCol = active?.closest<HTMLElement>('.kbn-col')
-    const activeColHead = activeCol?.querySelector<HTMLElement>('.kbn-col-head') ?? null
-    const currentHead = activeHead ?? activeColHead
-    const fallbackIndex = this.currentColumnIndexFromScroll(heads)
-    const index = currentHead && this.body.contains(currentHead)
-      ? heads.indexOf(currentHead)
-      : fallbackIndex
-
-    if (index === -1) return
-
-    e.preventDefault()
-    e.stopPropagation()
-
-    const nextIndex = (index + (e.shiftKey ? -1 : 1) + heads.length) % heads.length
-    const next = heads[nextIndex]
-    next.focus({ preventScroll: true })
-    this.scrollColumnToStart(next.closest<HTMLElement>('.kbn-col'))
-    this.updateBodyScrollAffordance()
-  }
-
-  private currentColumnIndexFromScroll(heads: HTMLElement[]): number {
-    if (!this.body) return -1
-
-    const bodyLeft = this.body.getBoundingClientRect().left
-    let nearest = -1
-    let nearestDistance = Number.POSITIVE_INFINITY
-    heads.forEach((head, index) => {
-      const col = head.closest<HTMLElement>('.kbn-col')
-      const distance = col ? Math.abs(col.getBoundingClientRect().left - bodyLeft) : Number.POSITIVE_INFINITY
-      if (distance < nearestDistance) {
-        nearestDistance = distance
-        nearest = index
-      }
-    })
-    return nearest
-  }
-
-  private scrollColumnToStart(col: HTMLElement | null): void {
-    if (!this.body || !col) return
-
-    const bodyLeft = this.body.getBoundingClientRect().left
-    const colLeft = col.getBoundingClientRect().left
-    const paddingLeft = Number.parseFloat(window.getComputedStyle(this.body).paddingLeft) || 0
-    this.body.scrollTo({
-      left: this.body.scrollLeft + colLeft - bodyLeft - paddingLeft,
-      behavior: 'smooth',
-    })
-  }
-
-  private handleBodyDragOver(e: DragEvent): void {
-    if (!this.body || !this.surfaces.isDragging() || this.body.classList.contains('kbn-body-zoomed')) return
-    if (this.body.scrollHeight <= this.body.clientHeight) return
-
-    const rect = this.body.getBoundingClientRect()
-    const edge = 96
-    const maxStep = 34
-    const topPressure = Math.max(0, edge - (e.clientY - rect.top))
-    const bottomPressure = Math.max(0, edge - (rect.bottom - e.clientY))
-    const direction = bottomPressure > 0 ? 1 : topPressure > 0 ? -1 : 0
-    const pressure = Math.max(topPressure, bottomPressure) / edge
-
-    this.dragAutoScrollVelocity = direction === 0
-      ? 0
-      : direction * Math.max(10, Math.round(Math.pow(pressure, 1.35) * maxStep))
-
-    if (this.dragAutoScrollVelocity === 0) {
-      this.stopDragAutoScroll()
-      return
-    }
-
-    this.startDragAutoScroll()
-  }
-
-  private handleBodyDragLeave(e: DragEvent): void {
-    if (!this.body) return
-    if (e.relatedTarget && this.body.contains(e.relatedTarget as Node)) return
-    this.stopDragAutoScroll()
-  }
-
-  private startDragAutoScroll(): void {
-    if (this.dragAutoScrollFrame !== null) return
-
-    const tick = (): void => {
-      if (!this.body || !this.surfaces.isDragging() || this.dragAutoScrollVelocity === 0) {
-        this.stopDragAutoScroll()
-        return
-      }
-
-      this.body.scrollTop += this.dragAutoScrollVelocity
-      this.updateBodyScrollAffordance()
-      this.dragAutoScrollFrame = window.requestAnimationFrame(tick)
-    }
-
-    this.dragAutoScrollFrame = window.requestAnimationFrame(tick)
-  }
-
-  private stopDragAutoScroll(): void {
-    // Every dragend / drop path in the modal funnels through here. Also
-    // wind down the horizon's horizontal edge-scroll so its rAF tick
-    // doesn't keep running past the drag's lifetime.
-    this.surfaces.stopEdgeScroll()
-    this.dragAutoScrollVelocity = 0
-    if (this.dragAutoScrollFrame === null) return
-    window.cancelAnimationFrame(this.dragAutoScrollFrame)
-    this.dragAutoScrollFrame = null
   }
 
   private updateBodyScrollAffordance(): void {
@@ -2207,134 +1368,9 @@ export class KanbanModal {
     this.body.classList.toggle('kbn-can-scroll-right', this.body.scrollLeft < maxScrollLeft - 1)
   }
 
-  /**
-   * The Move menu's seam. Why the menu exists is written once, in
-   * `MoveDestinations.ts`; these four calls are the ONLY thing the menu is
-   * given, so it never learns a column or a wire protocol,
-   * and every item it performs lands in the same private gesture method the
-   * equivalent drop lands in. Each call rules on {@link liveCard}.
-   */
-  private readonly moveBroker: MoveBroker = {
-    // Legal destinations, ruled on where the board actually has the card
-    // (`findCardColumn`) rather than a local re-derivation.
-    destinations: (card) => {
-      const live = this.liveCard(card)
-      return moveDestinations(live, findCardColumn(this.lastResponse, live.id))
-    },
-    perform: (card, action) => this.performMove(this.liveCard(card), action),
-  }
-
-  /**
-   * A card held still under the thumb offers what a drag would offer.
-   *
-   * Touch has no drag backend, so this is the ONLY way to move a card on a
-   * phone; on desktop it is a harmless extra beside the drag. Nothing to offer
-   * means nothing appears — a menu with no items is worse than no menu, and the
-   * card is not broken, it is simply somewhere terminal.
-   */
-  private openMoveMenuFor(card: KanbanCard, anchor: HTMLElement): void {
-    if (this.moveBroker.destinations(card).length === 0) return
-    openMoveMenu(card, anchor, this.moveBroker)
-  }
-
-  /**
-   * THE LIVE CARD, not the one the menu is holding.
-   *
-   * The menu stays open for as long as the reader wants while the board polls
-   * underneath it — so the `KanbanCard` captured at the long press goes stale:
-   * the worker finishes, the card closes, someone tempers it from another
-   * host. Every broker call therefore re-resolves the card by id before it
-   * rules or writes, and only falls back to the caller's copy when the board
-   * genuinely has no row for it (a card that has left the feed entirely,
-   * where the stale copy is all anyone has).
-   *
-   * This is the same discipline `transition` already follows for the COLUMN,
-   * for the same reason: a gesture ruled on a stale read is a gesture that
-   * silently no-ops or writes the wrong thing.
-   */
-  private liveCard(card: KanbanCard): KanbanCard {
-    return findCardById(this.lastResponse, card.id) ?? card
-  }
-
-  /** Perform one destination. Each branch is the drop's own entry
-   *  point, so banners, optimism and reconciliation are inherited whole. */
-  private performMove(card: KanbanCard, action: MoveAction): void {
-    switch (action.kind) {
-      case 'transition':
-        this.transition(card, action.target)
-        return
-      case 'surface':
-        this.setSurface(card, action.horizon)
-        return
-    }
-  }
-
 }
 
 // ── Pure helpers ─────────────────────────────────────────────────────────────
-
-/**
- * Lift `cardId` out of whichever single surface of `resp` holds it. Returns
- * the lifted card (null if absent) plus the surface arrays with it removed —
- * `drop` returns the same array reference when the card isn't in a list, so
- * untouched surfaces are shared with the input and only the source surface
- * actually changes. The shared basis both optimistic relocators build on.
- */
-function liftCardFromSurfaces(resp: KanbanResponse, cardId: string): {
-  card: KanbanCard | null
-  now: KanbanResponse['now']
-  timeline: KanbanResponse['timeline']
-  stash: KanbanCard[]
-  roles: KanbanCard[]
-} {
-  let card: KanbanCard | null = null
-  const drop = (list: KanbanCard[]): KanbanCard[] => {
-    // A root's header in another section is a view of it, not the card.
-    const idx = list.findIndex((c) => c.id === cardId && !c.deskSection)
-    if (idx < 0) return list
-    card = list[idx]
-    return [...list.slice(0, idx), ...list.slice(idx + 1)]
-  }
-  return {
-    now: {
-      drafts: drop(resp.now.drafts),
-      inFlight: drop(resp.now.inFlight),
-      awaitingReview: drop(resp.now.awaitingReview),
-    },
-    timeline: {
-      ...resp.timeline,
-      past: drop(resp.timeline.past),
-      futureDated: drop(resp.timeline.futureDated),
-    },
-    stash: drop(resp.stash),
-    roles: drop(resp.roles),
-    card: card ?? resp.threads?.find(c => c.id === cardId) ?? null,
-  }
-}
-
-/**
- * Reassemble a response from mutated surfaces with the length-derived totals
- * recomputed.
- */
-function withSurfaces(
-  resp: KanbanResponse,
-  s: {
-    now: KanbanResponse['now']
-    timeline: KanbanResponse['timeline']
-    stash: KanbanCard[]
-    roles?: KanbanCard[]
-  },
-): KanbanResponse {
-  const roles = s.roles ?? resp.roles
-  return projectDeskFrontier({
-    ...resp,
-    now: s.now,
-    timeline: s.timeline,
-    stash: s.stash,
-    roles,
-    totals: surfaceTotals({ ...s, roles }),
-  })
-}
 
 /**
  * Resolve the card an `openCard(id)` names, across BOTH places a view can get
@@ -2366,160 +1402,23 @@ export function resolveOpenTarget(
 }
 
 /**
- * Optimistic relocation of one card to a lifecycle `target` column, returned
- * as a fresh KanbanResponse (the input is never mutated). Returns null when
- * the card isn't anywhere in `resp` — the caller then skips optimism and
- * leans on the post-commit refetch alone.
- *
- * This honors the gesture's *named* destination: the card takes the column
- * its owner will serve once the write lands, and the minimal fields the
- * destination's own rendering reads — the past lane keys off
- * `status`/`tempered` and a `closedAt` day-column, and closing the fiber drops
- * the running-worker pill.
+ * A verdict painted before its write lands, as a fresh KanbanResponse (the
+ * input is never mutated): the card takes the column its owner will serve,
+ * closed and with its worker stopped. Null when the card is not in `resp`, or
+ * for a standing run tempered, which stays armed on its schedule and is
+ * placed by the refetch.
  */
-export function applyOptimisticTransition(
-  resp: KanbanResponse | null,
-  cardId: string,
-  target: ColumnKind,
-): KanbanResponse | null {
-  if (!resp) return null
-  const nowIso = new Date().toISOString()
-  const { card, now, timeline, stash, roles } = liftCardFromSurfaces(resp, cardId)
-  if (!card) return null
-
-  // A standing run tempered stays armed on its schedule: the refetch places it.
-  if (target === 'tempered' && card.shuttleKind === 'standing') return null
-  const moved: KanbanCard = { ...card }
-  moved.column = target
-  if (target === 'tempered' || target === 'composted') {
-    moved.status = 'closed'
-    moved.tempered = target === 'tempered'
-    moved.workerState = undefined           // closing the fiber stops its worker
-    moved.tmuxSession = undefined
-    moved.turn = 'none'
-    moved.closedAt = card.closedAt ?? nowIso  // past lane skips cards with no closedAt day-column
-    timeline.past = [moved, ...timeline.past]
-  } else {
-    // Patch the fields the destination's own rendering + the next classify
-    // read, mirroring the committed verbs: drafts = reopen-as-draft/pause +
-    // park-on-desk; awaitingReview = close with the verdict cleared (a
-    // thread's close also marks it for the human; the refetch brings the mark); inFlight
-    // = dispatch (the worker pill arrives with the refetch).
-    if (target === 'drafts') {
-      moved.status = 'open'
-      moved.tempered = undefined
-      moved.closedAt = undefined
-      moved.workerState = undefined
-      moved.tmuxSession = undefined
-      moved.runtimePhase = undefined
-      moved.storedHorizon = undefined
-      moved.effectiveHorizon = 'now'
-      moved.drifted = false
-      moved.due = undefined
-      moved.turn = 'none'
-    } else if (target === 'awaitingReview') {
-      moved.status = 'closed'
-      moved.tempered = undefined
-      moved.closedAt = card.closedAt ?? nowIso
-      moved.workerState = undefined
-      moved.tmuxSession = undefined
-      moved.runtimePhase = undefined
-      moved.turn = 'none'
-    } else if (target === 'inFlight') {
-      moved.status = 'active'
-      moved.tempered = undefined
-      moved.closedAt = undefined
-    }
-    // A seat parked as a draft is a seat at rest: it goes back to its role.
-    if (target === 'drafts' && moved.shuttleSeat === true && moved.shuttleRole) {
-      moved.column = 'roles'
-      return withSurfaces(resp, { now, timeline, stash, roles: withSeat(roles, moved) })
-    }
-    now[target] = [...now[target], moved]
-  }
-
-  return withSurfaces(resp, { now, timeline, stash, roles })
-}
-
-/** Optimistically mark the seat without changing a running or closed lifecycle. */
-export function applyOptimisticSeat(resp: KanbanResponse | null, seat: KanbanCard): KanbanResponse | null {
-  if (!resp) return null
-  const patch = (cards: KanbanCard[]): KanbanCard[] => cards.map(card => card.id === seat.id
-    ? { ...card, shuttleRole: seat.shuttleRole, shuttleSeat: true } : card)
-  const updated = withSurfaces(resp, {
-    now: { drafts: patch(resp.now.drafts), inFlight: patch(resp.now.inFlight), awaitingReview: patch(resp.now.awaitingReview) },
-    timeline: { ...resp.timeline, past: patch(resp.timeline.past), futureDated: patch(resp.timeline.futureDated) },
-    stash: patch(resp.stash), roles: patch(resp.roles),
-  })
-  // Whatever was at rest — a draft, a card put down, a standing constitution
-  // between firings — rests among the Roles once it is a seat.
-  return seat.shuttleRole && (seat.column === 'drafts' || seat.column === 'resting' || seat.column === 'roles')
-    ? placeOptimistically(updated, seat.id, () => ({}))
-    : updated
-}
-
-/** `roles` with `seat` placed where the read model's name order puts it. */
-function withSeat(roles: KanbanCard[], seat: KanbanCard): KanbanCard[] {
-  const at = roles.findIndex((c) => c.name.localeCompare(seat.name) > 0)
-  return at < 0 ? [...roles, seat] : [...roles.slice(0, at), seat, ...roles.slice(at)]
-}
-
-/**
- * Optimistic relocation of one card to Resting — the holding grid, dateless or
- * snoozed. The unambiguous-destination twin of {@link applyOptimisticTransition}:
- * `now` is deliberately excluded because the Now surface doesn't name a single
- * lifecycle column, so placing there would mean reclassifying. Returns null
- * when the card is absent.
- */
-export function applyOptimisticSurface(
-  resp: KanbanResponse | null,
-  cardId: string,
-  due?: string | null,
-): KanbanResponse | null {
-  // Rest leaves the card open with the verdict cleared and its worker
-  // stopped — mirrored here so the optimistic card matches the committed
-  // reclassify (the no-snap-back invariant).
-  return placeOptimistically(resp, cardId, (card) => ({
-    status: 'open',
-    tempered: undefined,
-    closedAt: undefined,
+export function applyOptimisticTransition(resp: KanbanResponse, cardId: string, target: Verdict): KanbanResponse | null {
+  const card = boardCards(resp).find(each => each.id === cardId)
+  if (!card || (target === 'tempered' && card.shuttleKind === 'standing')) return null
+  return withPatchedCard(resp, cardId, () => ({
+    column: target,
+    status: 'closed',
+    tempered: target === 'awaitingReview' ? undefined : target === 'tempered',
+    closedAt: card.closedAt ?? new Date().toISOString(),
     workerState: undefined,
     tmuxSession: undefined,
     runtimePhase: undefined,
     turn: 'none',
-    storedHorizon: 'stashed',
-    effectiveHorizon: 'stashed',
-    drifted: false,
-    // The optimistic card must be the card the WRITE produces, or the board
-    // shows one frame of a lie and then snaps. `undefined` is setSurface's
-    // "leave the date alone" (a bare stash preserves a future deadline), so
-    // it keeps the card's own; an explicit day or an explicit `null` — the
-    // date-column snooze, and the stale-due clear — wins over it.
-    due: due === undefined ? card.due : (due ?? undefined),
   }))
-}
-
-/**
- * The skeleton of the stash relocator above: lift the card off whichever
- * surface holds it, patch it, and put it back at the head of Resting (a seat
- * among the Roles).
- * Returns a fresh response (the input is never mutated), or null when there is
- * no response or the card is absent from it.
- */
-function placeOptimistically(
-  resp: KanbanResponse | null,
-  cardId: string,
-  patch: (card: KanbanCard) => Partial<KanbanCard>,
-): KanbanResponse | null {
-  if (!resp) return null
-  const { card, now, timeline, stash, roles } = liftCardFromSurfaces(resp, cardId)
-  if (!card) return null
-  const moved: KanbanCard = { ...card, ...patch(card) }
-  // Resting a seat keeps it a seat: it comes to rest among the Roles.
-  if (moved.shuttleSeat === true && moved.shuttleRole) {
-    moved.column = 'roles'
-    return withSurfaces(resp, { now, timeline, stash, roles: withSeat(roles, moved) })
-  }
-  moved.column = 'resting'
-  return withSurfaces(resp, { now, timeline, stash: [moved, ...stash], roles })
 }

@@ -407,7 +407,7 @@ is not enough.
 
 | Route | Routing | Purpose |
 |---|---|---|
-| `POST /transition` | owner-routed | The unified kanban write: move a fiber to a column, one call per drag |
+| `POST /transition` | owner-routed | The lifecycle write behind a verdict: move a fiber to a column (tempered, composted, awaiting review), one call per verdict |
 | `POST /attach` | **not** owner-routed | Open a worker or past-session viewer on the local display using Kitty or Rex; remote tmux uses SSH; brings the terminal forward. With both `tmux_session` and `session`, a terminal that has gone reopens that past session instead. `{select_only: true}` is a click's: Rex moves to a window the conversation already has, creating none, launching or raising no app and resuming no session, and answers `{moved, session}` |
 | `POST /felt-edit` | owner-routed | Shell `felt edit` on the owning host — felt keeps the validation |
 | `POST /felt-nest` | owner-routed | Shell `felt nest` on the owning host |

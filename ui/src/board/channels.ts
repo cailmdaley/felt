@@ -129,7 +129,7 @@ export function composeChannels(input: {
   const groups = new Map<string, { members: KanbanCard[]; everyone: KanbanCard[] }>()
   for (const card of cards) {
     // A uid names one fiber whichever host serves a copy of it.
-    if (card.deskSection || card.isCycle || seen.has(fiberOf(card))) continue
+    if (card.isCycle || seen.has(fiberOf(card))) continue
     seen.add(fiberOf(card))
     const key = keyOf(card)
     // A channel's own spelling wins over an office's.

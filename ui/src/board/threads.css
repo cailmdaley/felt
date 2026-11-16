@@ -1,4 +1,0 @@
-.kbn-thread-row { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; text-align: left; font: inherit; font-size: var(--type-meta); background: transparent; color: var(--kbn-ink); border: 0; padding: 6px 8px; cursor: pointer; }
-.kbn-thread-row:hover, .kbn-thread-row:focus-visible { background: var(--kbn-plate); }
-.kbn-thread-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Messages waiting for a constitution's next worker outside constitution index rows. */

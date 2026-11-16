@@ -80,10 +80,6 @@ one in the file, and everything below is the board's shorthand for that.
   **era face**: span, intention, derived figures, and *the look back*, a
   memoir composed from the commit trail. **Inscribe this review** writes that
   memoir back into the cycle fiber's body.
-- **Snooze into one**: while dragging a card, the drag horizon offers a chip per
-  upcoming cycle. Dropping on it sets `due:` to that cycle's start day, clamped
-  to tomorrow when the cycle is already running — "rest until tomorrow, later
-  this cycle."
 
 !!! note "The look back reads the commit ledger"
     The era memoir is composed from `~/.shuttle/commits.jsonl`, which the

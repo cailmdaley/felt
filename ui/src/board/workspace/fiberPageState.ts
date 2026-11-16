@@ -1,5 +1,4 @@
 import { hasLiveWorker, type KanbanCard } from '../KanbanTypes.js'
-import { DESK_COLUMN_TITLE } from '../KanbanSurfaces.js'
 import { isAgentCard } from '../KanbanModalShared.js'
 import type { KeyIntent } from '../keymap.js'
 import type { Verdict } from './Verdicts.js'
@@ -66,18 +65,6 @@ export function verdictReachable(card: KanbanCard): boolean {
 export function reviewReachable(card: KanbanCard): boolean {
   return constitution(card) && !standing(card) && (card.column === 'drafts' || card.column === 'inFlight' || card.column === 'orchestratorReview')
 }
-/** The column's name for the page's status line, or a standing constitution's
- *  schedule state at rest; empty for a fiber with no column. A thread marked
- *  for review says why. */
-export function fiberPageKicker(card: KanbanCard): string {
-  if (card.isCycle) return 'Cycle'
-  if (!isAgentCard(card)) return ''
-  if (card.column === 'awaitingReview') return card.reviewMark ? `Marked for your review: ${card.reviewMark.note}` : 'Awaiting your review'
-  if (card.column === 'orchestratorReview') return 'With its orchestrator for review'
-  if (card.column === 'resting' && standing(card)) return schedulePaused(card) ? 'Schedule paused' : 'Scheduled'
-  return DESK_COLUMN_TITLE[card.column]
-}
-
 /** What a surface does once a constitution key has reached a card. */
 export interface ConstitutionActions {
   verdict(card: KanbanCard, verdict: Verdict): void
