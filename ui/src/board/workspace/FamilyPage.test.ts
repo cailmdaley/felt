@@ -87,9 +87,14 @@ describe('a constitution\'s view', () => {
     expect(top.feeds.view).toHaveBeenLastCalledWith(mid)
   })
 
-  it('moves among the rows by j and k, opens one by Enter, and goes up by h, leaving the page from the top', () => {
+  it('lands on its head, moves among the rows by j and k, opens one by Enter, and goes up by h, leaving the page from the top', () => {
     const { page, feeds } = made(mid)
     page.focus()
+    // No row looks chosen, and a stray Enter opens nothing.
+    expect(document.activeElement).toBe(page.el.querySelector('.ov-head'))
+    press(document.activeElement!, 'Enter')
+    expect(feeds.view).not.toHaveBeenCalled()
+    press(document.activeElement!, 'j')
     expect((document.activeElement as HTMLElement).dataset.fiber).toBe('hub/mid/a')
     press(document.activeElement!, 'Enter')
     expect(feeds.view).toHaveBeenLastCalledWith(leaf)
@@ -145,10 +150,29 @@ describe('its frame', () => {
     const { page } = made(root)
     page.focus()
     press(document.activeElement!, 'j')
+    press(document.activeElement!, 'j')
     expect((document.activeElement as HTMLElement).dataset.fiber).toBe('hub/w')
     page.update(root, new ThreadIndex([...cards, card({ id: 'hub/new', name: 'New', orchestrator: 'hub', status: 'active', ask: { text: 'New?', at: when(0) } })]), now + 120_000)
     expect(threads(page).map(([name]) => name)).toContain('new')
     expect((document.activeElement as HTMLElement).dataset.fiber).toBe('hub/w')
+  })
+  it('keeps its head, its acts and its thumbnail across a repaint: what has focus there keeps it, and the thumbnail is never moved', async () => {
+    const dock = new Dock('', vi.fn(), vi.fn(), undefined, { onRest: vi.fn() })
+    const work = { ...mid, shuttleKind: 'oneshot' as const }
+    const page = new FamilyPage(feedsWith(), vi.fn(), target => dock.actsFor(target))
+    document.body.append(page.el)
+    page.update(work, new ThreadIndex([root, work, leaf]), now)
+    await settle()
+    const head = page.el.querySelector('.ov-head'), thumb = page.el.querySelector('.ov-figure > *')
+    const act = page.el.querySelector<HTMLElement>('.ov-tools button:not(.ws-doc-button)')!
+    act.focus()
+    page.update(work, new ThreadIndex([root, work, leaf]), now + 2 * 60_000)
+    await settle()
+    expect([page.el.querySelector('.ov-head') === head, page.el.querySelector('.ov-figure > *') === thumb, document.activeElement === act]).toStrictEqual([true, true, true])
+    page.el.querySelector<HTMLElement>('.ov-head [data-part="constitution"]')!.focus()
+    page.update(work, new ThreadIndex([root, work, leaf]), now + 4 * 60_000)
+    expect((document.activeElement as HTMLElement).dataset.part).toBe('constitution')
+    page.dispose()
   })
   it('tells its owner when its frame is evicted', () => {
     const disposed = vi.fn(), page = new FamilyPage(feedsWith(), disposed)

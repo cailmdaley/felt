@@ -47,6 +47,15 @@ export class FamilyPage {
   private readonly scroller = el('div', 'ws-family-scroll')
   private readonly up = el('nav', 'ov-up')
   private readonly main = el('div', 'ov-main')
+  private readonly head = el('header', 'ov-head')
+  private readonly name = el('h2', 'ov-name')
+  private readonly facts = el('div', 'ov-facts')
+  private readonly tools = el('div', 'ov-tools')
+  private docs = el('span', 'ws-doc-buttons')
+  private readonly strip = el('section', 'ov-strip')
+  private readonly said = el('div', 'ov-said')
+  private readonly figure = el('button', 'ov-figure')
+  private readonly threads = el('ol', 'ov-threads')
   private card: KanbanCard | null = null
   private index: ThreadIndex | null = null
   private signature = ''
@@ -67,6 +76,16 @@ export class FamilyPage {
     this.scroller.setAttribute('role', 'tree')
     this.scroller.setAttribute('aria-label', 'The constitution, its orchestrators and its threads')
     this.scroller.append(this.up, this.main)
+    this.head.tabIndex = -1
+    // An act zone, as the console is: a channel theme's rules stop at its controls.
+    this.tools.dataset.part = 'act'
+    this.tools.append(this.docs)
+    this.head.append(el('span'), this.name, this.facts, this.tools)
+    this.figure.type = 'button'
+    this.figure.hidden = true
+    this.strip.append(this.said, this.figure)
+    this.threads.setAttribute('aria-label', 'Threads')
+    this.main.append(this.head, this.strip, this.threads)
     const grid = el('div', 'ws-family-grid')
     grid.append(this.scroller)
     this.el.append(grid)
@@ -95,8 +114,8 @@ export class FamilyPage {
     this.signature = signature
     this.paint(current, now)
   }
-  /** Takes the keys: the first thread row, else the head. */
-  focus(): void { (this.main.querySelector<HTMLElement>('.ov-thread') ?? this.main.querySelector<HTMLElement>('.ov-head'))?.focus({ preventScroll: true }) }
+  /** Takes the keys on its head: no row looks chosen, and Enter opens nothing until j or k picks one. */
+  focus(): void { this.head.focus({ preventScroll: true }) }
   /** `t`: opens the constitution's tapestry, else its newest sent file. */
   openLead(): void {
     const card = this.card
@@ -117,9 +136,14 @@ export class FamilyPage {
     for (let parent = index.parentOf(index.card(this.card!)); parent; parent = index.parentOf(parent)) above.unshift(parent)
     return above
   }
+  /**
+   * Draws the view in place: the head, the strip and its thumbnail, and the
+   * acts stay the same elements across repaints, so what has focus in them,
+   * an open menu, and a thumbnail's live page all survive; the rows that are
+   * drawn again keep the row the keys were on.
+   */
   private paint(card: KanbanCard, now: number): void {
     const above = this.ancestors()
-    this.up.replaceChildren(...above.map(ancestor => this.compact(ancestor, 'ov-ancestor', now)))
     const model = familyModel(this.index!, card, this.feeds, now)
     const urgency = (thread: MapThread): number => {
       const rank = (ATTENTION as readonly string[]).indexOf(thread.standing)
@@ -127,19 +151,19 @@ export class FamilyPage {
     }
     const threads = model.root.children.map(key => model.threads.get(key)!)
       .sort((a, b) => urgency(a) - urgency(b) || b.lastMove - a.lastMove)
-    const list = el('ol', 'ov-threads')
-    list.setAttribute('aria-label', 'Threads')
-    list.append(...threads.map(thread => {
+    const focused = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.ov-ancestor, .ov-thread')
+    const held = focused && this.el.contains(focused) ? `${focused.className}:${focused.dataset.fiber}` : undefined
+    this.up.replaceChildren(...above.map(ancestor => this.compact(ancestor, 'ov-ancestor', now)))
+    this.paintHead(card, now)
+    this.paintStrip(card, now)
+    this.threads.replaceChildren(...threads.map(thread => {
       const row = this.compact(thread.card, 'ov-thread', now, thread.word)
       row.dataset.standing = thread.tone
       const item = el('li')
       item.append(row)
       return item
     }))
-    // A repaint keeps the row the keys were on.
-    const focused = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.ov-ancestor, .ov-thread')
-    const held = focused && this.el.contains(focused) ? `${focused.className}:${focused.dataset.fiber}` : undefined
-    this.main.replaceChildren(this.head(card, now), this.strip(card, now), ...threads.length ? [list] : [])
+    this.threads.hidden = !threads.length
     if (held) [...this.el.querySelectorAll<HTMLElement>('.ov-ancestor, .ov-thread')].find(row => `${row.className}:${row.dataset.fiber}` === held)?.focus({ preventScroll: true })
   }
   /** A constitution's compact head, as an orchestrator above or a thread below: its dot, its slug, a word, its run. Choosing it opens its view. */
@@ -154,45 +178,41 @@ export class FamilyPage {
     row.addEventListener('click', open)
     return row
   }
-  private head(card: KanbanCard, now: number): HTMLElement {
-    const head = el('header', 'ov-head')
-    head.tabIndex = -1
+  private paintHead(card: KanbanCard, now: number): void {
+    const head = this.head
     head.title = card.name
-    const name = el('h2', 'ov-name', slug(card))
+    this.name.textContent = slug(card)
     const need = needs(card)
-    const facts = el('div', 'ov-facts')
-    facts.append(...need ? [el('span', 'ov-needs', need)] : [], el('span', 'ov-time', runWords(card, now)))
-    const tools = el('div', 'ov-tools')
-    // An act zone, as the console is: a channel theme's rules stop at its controls.
-    tools.dataset.part = 'act'
-    tools.append(docButtons(card, this.feeds))
-    if (this.actsFor) {
-      this.acts ??= this.actsFor(() => this.card!)
-      tools.append(this.acts.el)
-      this.acts.paint()
+    this.facts.replaceChildren(...need ? [el('span', 'ov-needs', need)] : [], el('span', 'ov-time', runWords(card, now)))
+    // Its pages are drawn again; the one in focus keeps it.
+    const part = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.ws-doc-button')
+    const kept = part && this.docs.contains(part) ? part.dataset.part : undefined
+    const docs = docButtons(card, this.feeds)
+    this.docs.replaceWith(docs)
+    this.docs = docs
+    if (kept) docs.querySelector<HTMLElement>(`[data-part="${kept}"]`)?.focus({ preventScroll: true })
+    head.firstElementChild!.replaceWith(stateDot(card, () => {}))
+    if (this.actsFor && !this.acts) {
+      this.acts = this.actsFor(() => this.card!)
+      this.tools.append(this.acts.el)
     }
-    head.append(stateDot(card, () => {}), name, facts, tools)
-    return head
+    this.acts?.paint()
   }
   /** The last thing it posted, left; its tapestry or newest sent file, small, right. */
-  private strip(card: KanbanCard, now: number): HTMLElement {
-    const strip = el('section', 'ov-strip')
+  private paintStrip(card: KanbanCard, now: number): void {
     const said = this.feeds.said(card)
-    const words = el('div', 'ov-said')
     if (said) {
       const text = el('div', 'ov-said-text')
       text.innerHTML = renderMarkdown(said.text)
-      words.append(el('span', 'ov-said-age', ago(said.at, now)), text)
-    }
-    strip.append(words)
-    const figure = el('button', 'ov-figure')
-    figure.type = 'button'
-    figure.hidden = true
-    strip.append(figure)
+      this.said.replaceChildren(el('span', 'ov-said-age', ago(said.at, now)), text)
+    } else this.said.replaceChildren()
+    const strip = this.strip, figure = this.figure
+    strip.hidden = !said && figure.hidden
     void this.feeds.lead(card).then(lead => {
       const doc = lead?.key ?? this.feeds.files(card)[0]?.key
       const file = doc && parseDocKey(doc)
-      if (!doc || !file || this.card?.originId !== card.originId || (this.card.uid ?? this.card.id) !== (card.uid ?? card.id)) return
+      if (this.card?.originId !== card.originId || (this.card.uid ?? this.card.id) !== (card.uid ?? card.id)) return
+      if (!doc || !file) { figure.hidden = true; strip.hidden = !said; return }
       if (this.thumb?.doc !== doc) {
         this.thumb?.thumbnail.dispose()
         const name = file.path.split('/').pop() ?? file.path
@@ -202,15 +222,13 @@ export class FamilyPage {
           priority: () => this.awake && made.el.isConnected ? 2 : 0, distance: () => 0,
         })
         this.thumb = { doc, thumbnail: made }
+        figure.replaceChildren(made.el)
       }
       figure.title = `Open ${lead?.name ?? file.path.split('/').pop()}`
       figure.setAttribute('aria-label', figure.title)
-      figure.replaceChildren(this.thumb.thumbnail.el)
       figure.onclick = () => this.feeds.open(card, doc)
       figure.hidden = strip.hidden = false
     })
-    strip.hidden = !said
-    return strip
   }
   /** Pulled past its top: its orchestrator's view opens. */
   private pulled(by: number): void {
