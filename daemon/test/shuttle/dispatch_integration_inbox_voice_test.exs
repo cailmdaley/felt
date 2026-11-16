@@ -36,11 +36,11 @@ defmodule Shuttle.DispatchIntegrationInboxVoiceTest do
     TransportRunner.gate(:paste)
     lost = batch(id, "voice-lost", "me: then rerun it")
     request = post_api_async("/api/v1/deliver", lost)
-    assert_receive {:transport_held, :paste, ^poller}
-    kill_daemon!(poller, [request])
+    assert_receive {:transport_held, :paste, holder}
+    kill_daemon!(poller, [request], holding: holder)
     refute_received {:answered, ^request, _}
 
-    poller = poller!(host, runner: TransportRunner, boot_quarantine: true)
+    poller = restart!(host, runner: TransportRunner)
     assert %{session_uuid: uuid} = Poller.live_worker(poller, id)
 
     # The relay's recovery repeats the batch: nothing is typed, and the answer

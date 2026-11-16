@@ -663,24 +663,107 @@ defmodule Shuttle.Test.DispatchIntegrationCase do
     poller
   end
 
-  # The daemon dies: `processes` (a request in flight, say) and then the
-  # Poller, its delivery tasks and its worker watchers are killed outright, as
-  # a hard kill would end them, with nothing settled or cleaned up. Terminal
-  # sessions outlive it, as they outlive a real daemon.
-  def kill_daemon!(poller, processes \\ []) do
-    tasks =
-      for pid <- Task.Supervisor.children(Shuttle.TaskSupervisor),
-          {:dictionary, dict} <- [Process.info(pid, :dictionary)],
-          poller in Keyword.get(dict, :"$callers", []),
+  # The daemon dies: `processes` (a request in flight, say), the Poller and
+  # everything that works for the daemon are killed outright, as a hard kill
+  # would end them, with nothing settled or cleaned up. What works for it is
+  # found by ancestry, wherever it runs: any process that reaches the Poller
+  # or a killed request through `$callers` or `$ancestors` (delivery tasks,
+  # worker watchers), and any task under the daemon's task supervisor that
+  # acts for this test (work a request handler started). Terminal sessions
+  # outlive it, as they outlive a real daemon.
+  #
+  # The kill fails rather than kill less: `holding:` names the process a
+  # transport gate reported holding the work, which must be among the killed;
+  # `work: true` says the daemon is mid-work in a process of its own, which
+  # must be found. Afterwards nothing that worked for the daemon is alive.
+  def kill_daemon!(poller, processes \\ [], opts \\ []) do
+    targets = [poller | processes]
+    work = daemon_work(targets, true) -- targets
+    killed = Enum.uniq(targets ++ work)
+
+    if holder = opts[:holding] do
+      assert holder in killed,
+             "the process holding the daemon's work (#{inspect(holder)}) does not work for it"
+    end
+
+    if opts[:work] do
+      assert work -- watchers(poller) != [],
+             "the daemon is mid-work, but no process of its own was found doing it"
+    end
+
+    Enum.each(killed, &kill!/1)
+    finish_off!(killed, 5)
+  end
+
+  # Work started while the kill ran is killed too; a daemon that keeps
+  # starting work after its death fails the test.
+  defp finish_off!(killed, rounds) do
+    case daemon_work(killed, true) -- killed do
+      [] ->
+        :ok
+
+      survivors when rounds > 0 ->
+        Enum.each(survivors, &kill!/1)
+        finish_off!(killed ++ survivors, rounds - 1)
+
+      survivors ->
+        flunk("the daemon's work outlived it: #{inspect(survivors)}")
+    end
+  end
+
+  # Every live process that works for one of `targets`: one that reaches it
+  # through `$callers` or `$ancestors`, directly or through others that do.
+  # With `requests`, also every task under the daemon's task supervisor that
+  # acts for this test, as the work of its request handlers does.
+  defp daemon_work(targets, requests) do
+    links = links()
+    work = acting_for(links, MapSet.new(targets))
+
+    work =
+      if requests do
+        tasks = MapSet.new(Task.Supervisor.children(Shuttle.TaskSupervisor))
+        MapSet.union(work, MapSet.intersection(tasks, acting_for(links, MapSet.new([self()]))))
+      else
+        work
+      end
+
+    work |> MapSet.difference(MapSet.new([self() | targets])) |> MapSet.to_list()
+  end
+
+  # Each live process and the processes it names in `$callers` and
+  # `$ancestors`.
+  defp links do
+    for pid <- Process.list(),
+        {:dictionary, dict} <- [Process.info(pid, :dictionary)],
+        into: %{} do
+      named =
+        (Keyword.get(dict, :"$callers", []) ++ Keyword.get(dict, :"$ancestors", []))
+        |> Enum.map(fn
+          name when is_atom(name) -> Process.whereis(name)
+          link -> link
+        end)
+        |> Enum.filter(&is_pid/1)
+
+      {pid, named}
+    end
+  end
+
+  defp acting_for(links, found) do
+    more =
+      for {pid, named} <- links,
+          not MapSet.member?(found, pid),
+          Enum.any?(named, &MapSet.member?(found, &1)),
+          into: found,
           do: pid
 
-    watchers =
-      for {_, pid, _, _} <- DynamicSupervisor.which_children(Shuttle.WatcherSupervisor),
-          is_pid(pid),
-          match?(%{poller: ^poller}, safe_state(pid)),
-          do: pid
+    if MapSet.size(more) == MapSet.size(found), do: found, else: acting_for(links, more)
+  end
 
-    Enum.each(processes ++ [poller | tasks] ++ watchers, &kill!/1)
+  defp watchers(poller) do
+    for {_, pid, _, _} <- DynamicSupervisor.which_children(Shuttle.WatcherSupervisor),
+        is_pid(pid),
+        match?(%{poller: ^poller}, safe_state(pid)),
+        do: pid
   end
 
   def kill!(pid) do
@@ -695,18 +778,33 @@ defmodule Shuttle.Test.DispatchIntegrationCase do
     :exit, _ -> nil
   end
 
+  # The next daemon over `host`, booted as a restart boots: under the boot
+  # quarantine, which holds fresh launches until `release!/1`.
+  def restart!(host, opts \\ []),
+    do: poller!(host, Keyword.merge([boot_quarantine: true], opts))
+
+  # The operator's release of the boot quarantine, as the board sends it, and
+  # the poll it schedules.
+  def release!(poller) do
+    assert {200, %{"ok" => true, "boot_quarantine" => false}} =
+             post_api("/api/v1/quarantine/release", %{})
+
+    poll!(poller)
+  end
+
   # A poll, then the inbox work it hands to a task.
   def poll!(poller) do
     sync_poll_cycle!(poller)
     drain!(poller)
   end
 
+  # Waits out the work the Poller started, wherever it runs: every process
+  # that works for it, except its worker watchers, which live as long as their
+  # workers.
   def drain!(poller) do
     :sys.get_state(poller, :infinity)
 
-    for pid <- Task.Supervisor.children(Shuttle.TaskSupervisor),
-        {:dictionary, dict} <- [Process.info(pid, :dictionary)],
-        poller in Keyword.get(dict, :"$callers", []) do
+    for pid <- daemon_work([poller], false) -- watchers(poller) do
       ref = Process.monitor(pid)
       assert_receive {:DOWN, ^ref, :process, ^pid, _}, 60_000
     end

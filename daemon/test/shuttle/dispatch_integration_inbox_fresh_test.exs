@@ -47,11 +47,11 @@ defmodule Shuttle.DispatchIntegrationInboxFreshTest do
         "resume_mode" => "fresh"
       })
 
-    assert_receive {:transport_held, :launch, ^poller}
-    kill_daemon!(poller, [request])
+    assert_receive {:transport_held, :launch, holder}
+    kill_daemon!(poller, [request], holding: holder)
     refute_received {:answered, ^request, _}
 
-    poller = poller!(host, runner: TransportRunner)
+    poller = restart!(host, runner: TransportRunner)
 
     # Never launched again: the sender's retry starts nothing and says so.
     assert {out, 0} = fresh(id, "f-lost", "rerun from scratch")
@@ -64,7 +64,7 @@ defmodule Shuttle.DispatchIntegrationInboxFreshTest do
     # operator releases it (docs/dev/dispatch.md, uncertain launch
     # reservations).
     other = armed(host, "tests/fresh-other")
-    poll!(poller)
+    release!(poller)
     assert {out, 0} = fresh(other, "f-next", "begin again")
     assert out =~ "started a fresh session on #{other}"
     assert {_, 0} = fresh(other, "f-next", "begin again")

@@ -42,8 +42,8 @@ defmodule Shuttle.DispatchIntegrationInboxThreadTest do
     # The next daemon's worker on the orchestrator is offered each result by
     # its prompts, one lifecycle signal per offer, and exactly once: later
     # prompts, tool calls and polls offer neither again.
-    poller = poller!(host)
-    poll!(poller)
+    poller = restart!(host)
+    release!(poller)
     assert {200, _} = post_api("/api/v1/dispatch", %{"fiber_id" => hub, "force" => true})
     assert launches(hub) == 1
     %{session_uuid: uuid} = Poller.live_worker(poller, hub)

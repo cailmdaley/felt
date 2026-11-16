@@ -80,11 +80,20 @@ defmodule Shuttle.DispatchIntegrationInboxPulseTest do
     end
   end
 
+  # A daemon over `host`, booted as every daemon boots, under the boot
+  # quarantine, and released: a pulse waits for the release.
   defp daemon!(host) do
     {:ok, poller} =
-      start_poller!(runner: TransportRunner, poll_interval_ms: 600_000, felt_stores: [host])
+      start_poller!(
+        runner: TransportRunner,
+        poll_interval_ms: 600_000,
+        felt_stores: [host],
+        boot_quarantine: true
+      )
 
     await_boot_cycle!(poller)
+
+    assert {200, %{"ok" => true}} = post_api("/api/v1/quarantine/release", %{})
     poller
   end
 
@@ -128,7 +137,7 @@ defmodule Shuttle.DispatchIntegrationInboxPulseTest do
     sync_poll_cycle!(poller)
     assert_receive {:native_frame, receiver, lost}
     assert lost["message"]["content"] =~ "Shuttle pulse."
-    kill_daemon!(poller)
+    kill_daemon!(poller, [], work: true)
     send(receiver, {:fate, :drop})
 
     # The daemon after it never sends that tick again.

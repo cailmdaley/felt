@@ -72,7 +72,7 @@ defmodule Shuttle.DispatchIntegrationInboxSessionTest do
     assert {out, 0} = send.("s-context", "read this next", ["--context-only"])
     assert out =~ "queued #{address} (s-context)"
     kill_daemon!(poller)
-    poller = poller!(host)
+    poller = restart!(host)
 
     # The session's next hook is offered it once, and nothing sends it again:
     # not later hooks, polls, or a retry of its id.

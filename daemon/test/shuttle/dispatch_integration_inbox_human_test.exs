@@ -41,11 +41,11 @@ defmodule Shuttle.DispatchIntegrationInboxHumanTest do
     TransportRunner.gate(:paste)
     lost = line(id, "h-lost", "Then rerun the fit.")
     request = post_api_async("/api/v1/deliver", lost)
-    assert_receive {:transport_held, :paste, ^poller}
-    kill_daemon!(poller, [request])
+    assert_receive {:transport_held, :paste, holder}
+    kill_daemon!(poller, [request], holding: holder)
     refute_received {:answered, ^request, _}
 
-    poller = poller!(host, runner: TransportRunner)
+    poller = restart!(host, runner: TransportRunner)
     assert %{session_uuid: uuid} = Poller.live_worker(poller, id)
 
     # Never typed again: the retry types nothing and says it may not have

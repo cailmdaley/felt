@@ -24,9 +24,12 @@ defmodule Shuttle.DispatchIntegrationInboxMessageTest do
 
     kill_daemon!(poller)
 
-    # The next daemon starts the session the message asks for, and its first
-    # prompt is offered the message.
-    poller = poller!(host)
+    # The next daemon boots under its own quarantine and holds the message
+    # again; once released, it starts the session the message asks for, and
+    # that session's first prompt is offered the message.
+    poller = restart!(host)
+    assert launches(id) == 0
+    release!(poller)
     assert launches(id) == 1
     %{session_uuid: uuid} = Poller.live_worker(poller, id)
     offered = hook!(uuid)

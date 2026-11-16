@@ -96,7 +96,9 @@ defmodule Shuttle.DispatchIntegrationInboxCrossHostTest do
 
     kill_daemon!(poller)
 
-    poller = poller!(host)
+    poller = restart!(host)
+    assert launches(id) == 0
+    release!(poller)
     assert launches(id) == 1
     %{session_uuid: uuid} = Poller.live_worker(poller, id)
     assert hook!(uuid) =~ "check the remote fit"

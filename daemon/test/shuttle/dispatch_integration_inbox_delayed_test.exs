@@ -32,7 +32,8 @@ defmodule Shuttle.DispatchIntegrationInboxDelayedTest do
 
     # The next daemon starts a session for it once it is due, and that
     # session's first prompt is offered it.
-    poller = poller!(host)
+    poller = restart!(host)
+    release!(poller)
 
     assert eventually(fn ->
              poll!(poller)
