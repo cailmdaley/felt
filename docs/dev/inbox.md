@@ -435,6 +435,4 @@ The session-only Claude fallback claims by moving an entry into `fallback/` and 
 `shuttle inbox record-settle <fiber-key> <id> delivered|unknown|undeliverable` records its transport outcome.
 Raw-key verbs act on this host's inbox only; `ls` and `cancel` with a fiber reference route to its owner.
 `context-mailbox put` also accepts thread signals, reply and notification fields, `--turn`, `--derived` and `--attachments-stdin` (a JSON attachment array); its `--wake` means `turn: force`.
-`context-mailbox deliver` is consume without turn facts: only force initiates a wake, ask remains hook context, and a receiver without a hook takes `none` entries as context.
-`context-mailbox pending` shares the inbox counting code.
 `shuttle inbox` with no subcommand is the speaker's held-lines inbox ([CLI reference](../reference/cli.md)).

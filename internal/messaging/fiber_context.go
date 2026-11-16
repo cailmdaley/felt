@@ -296,14 +296,6 @@ func fiberContextHookEligible(root, conversation string, request Request) bool {
 	return err == nil && reservation.holds(request.MessageID, time.Now()) && reservation.Conversation != conversation
 }
 
-// DeliverFiberContext consumes without turn facts. Only force entries initiate
-// a wake; ask remains available to the fiber's hook, and none goes to the hook
-// or, for a receiver without one, as context.
-func DeliverFiberContext(ctx context.Context, env *sysenv.Env, fiber, host, address string, generation uint64) error {
-	_, err := Consume(ctx, env, fiber, host, Worker{Address: address, Epoch: generation})
-	return err
-}
-
 type fiberContextSender func(context.Context, *sysenv.Env, string, Request, string) (Receipt, error)
 
 // freezeLegacyAttempt pins the transport id a pin made before batch payloads

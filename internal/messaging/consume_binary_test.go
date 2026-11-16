@@ -52,9 +52,9 @@ func TestConsumeBinaryCrashBeforeSend(t *testing.T) {
 	}
 	run("inbox", "put", "fiber", "ordinary", "ordinary text", "--turn", "ask")
 	epoch := strings.TrimSpace(run("context-mailbox", "receiver", "fiber", "worker-A", "shuttle://host/pi/A"))
-	run("context-mailbox", "deliver", "fiber", "shuttle://host/pi/A", epoch)
+	run("inbox", "consume", "fiber", "shuttle://host/pi/A", epoch)
 	if injected.Load() != 0 {
-		t.Fatal("compatibility deliver woke for ask")
+		t.Fatal("a consume without turn facts woke for ask")
 	}
 	signal, _ := json.Marshal(ThreadSignal{UID: "child", Verb: "closed", Stamp: time.Now().UTC().Format(time.RFC3339Nano), Owner: "host"})
 	run("context-mailbox", "put", "fiber", "thread-result", "thread child closed: done", "--turn", "ask", "--thread-signal", string(signal))
@@ -117,9 +117,9 @@ func TestConsumeBinaryCrashBeforeSend(t *testing.T) {
 
 	run("inbox", "put", "idle-fiber", "idle-entry", "Wait for idle", "--turn", "idle")
 	idleEpoch := strings.TrimSpace(run("context-mailbox", "receiver", "idle-fiber", "worker-A", "shuttle://host/pi/A"))
-	run("context-mailbox", "deliver", "idle-fiber", "shuttle://host/pi/A", idleEpoch)
+	run("inbox", "consume", "idle-fiber", "shuttle://host/pi/A", idleEpoch)
 	if injected.Load() != 1 {
-		t.Fatal("compatibility deliver woke an idle-only entry")
+		t.Fatal("a consume without turn facts woke an idle-only entry")
 	}
 	if err := OfferMailbox(env, "pi", "A", "host", func(batch []Request) error { t.Fatalf("hook absorbed idle entry: %+v", batch); return nil }); err != nil {
 		t.Fatal(err)

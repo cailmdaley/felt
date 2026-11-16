@@ -56,7 +56,7 @@ func TestClaudeFiberContextFitsReceiverBudgetAndRetainsOversizedBody(t *testing.
 					t.Fatal(err)
 				}
 			}
-			if err := DeliverFiberContext(context.Background(), env, "fiber", "host", address, generation); err != nil {
+			if _, err := Consume(context.Background(), env, "fiber", "host", Worker{Address: address, Epoch: generation}); err != nil {
 				t.Fatal(err)
 			}
 			offered := 0

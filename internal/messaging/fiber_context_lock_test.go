@@ -20,7 +20,7 @@ func TestFiberContextTransitionWaitsForEmission(t *testing.T) {
 	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: Request{MessageID: "first", Text: "first"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := DeliverFiberContext(context.Background(), env, "fiber", "host", "shuttle://host/claude/A", epoch); err != nil {
+	if _, err := Consume(context.Background(), env, "fiber", "host", Worker{Address: "shuttle://host/claude/A", Epoch: epoch}); err != nil {
 		t.Fatal(err)
 	}
 	entered, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)

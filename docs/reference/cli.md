@@ -149,7 +149,7 @@ These event and commit adapters are also installed by the felt plugin, but the
 | `shuttle hook handoff` | Offer the session's one-shot context-budget handoff reminder (see [Agents & Plugin](../agents.md)) |
 | `shuttle hook interrupted` | Record a human interrupt read from a harness transcript on the activity stream (`--session`, `--harness claude\|codex`, `--at` ms, `--id`, `--cwd`); the daemon calls it, no harness hook does |
 
-The hidden `shuttle context-mailbox` subcommands (`put`, `pending`, `get`, `receiver`, `revoke`, `deliver`) are daemon-internal: they manage the owner-local durable context queue that `close --quiet` and `message --context-only` write into, and are not a user surface. Its `put` and `pending` share their code with `shuttle inbox put` and `pending`.
+The hidden `shuttle context-mailbox` subcommands (`put`, `get`, `receiver`, `revoke`) are daemon-internal: they manage the owner-local durable context queue that `close --quiet` and `message --context-only` write into, and are not a user surface. Its `put` shares its code with `shuttle inbox put`.
 
 ## `shuttle` (dispatch layer)
 

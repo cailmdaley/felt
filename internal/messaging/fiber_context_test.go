@@ -53,7 +53,7 @@ func TestFiberContextReachesCodexQuietResumeWithEndedHook(t *testing.T) {
 	if err := Enqueue(env, InboxEntry{Address: "fiber-quiet-resume", Request: request}); err != nil {
 		t.Fatal(err)
 	}
-	if err := DeliverFiberContext(context.Background(), env, "fiber-quiet-resume", "host", address, generation); err != nil {
+	if _, err := Consume(context.Background(), env, "fiber-quiet-resume", "host", Worker{Address: address, Epoch: generation}); err != nil {
 		t.Fatalf("deliver to quiet resumed Codex: %v", err)
 	}
 	if n, err := pendingCount(env, "fiber-quiet-resume"); err != nil || n != 1 {
@@ -71,7 +71,7 @@ func TestFiberContextReachesCodexQuietResumeWithEndedHook(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := DeliverFiberContext(context.Background(), env, "fiber-quiet-resume", "host", nextAddress, next); err != nil {
+	if _, err := Consume(context.Background(), env, "fiber-quiet-resume", "host", Worker{Address: nextAddress, Epoch: next}); err != nil {
 		t.Fatal(err)
 	}
 	var got []Request
@@ -149,7 +149,7 @@ func TestFiberContextWorkerTransitions(t *testing.T) {
 			}
 			a := "shuttle://host/claude/A"
 			first := transition(t, env, "execution-A:A", a)
-			if err := DeliverFiberContext(context.Background(), env, "fiber", "host", a, first); err != nil {
+			if _, err := Consume(context.Background(), env, "fiber", "host", Worker{Address: a, Epoch: first}); err != nil {
 				t.Fatal(err)
 			}
 			if err := Enqueue(env, InboxEntry{Address: "fiber", Request: Request{MessageID: "result", Text: "original"}}); err != nil {
@@ -169,7 +169,7 @@ func TestFiberContextWorkerTransitions(t *testing.T) {
 				t.Fatal("epoch did not advance")
 			}
 			// Delayed delivery selection cannot designate A, and stale hooks cannot emit.
-			if err := DeliverFiberContext(context.Background(), env, "fiber", "host", a, first); err == nil {
+			if _, err := Consume(context.Background(), env, "fiber", "host", Worker{Address: a, Epoch: first}); err == nil {
 				t.Fatal("stale selection succeeded")
 			}
 			if err := OfferMailbox(env, "claude", "A", "host", func(batch []Request) error { t.Errorf("stale A emitted: %+v", batch); return nil }); err != nil {
@@ -180,7 +180,7 @@ func TestFiberContextWorkerTransitions(t *testing.T) {
 				t.Fatal("re-adoption changed epoch")
 			}
 			for i := 0; i < 3; i++ {
-				_ = DeliverFiberContext(context.Background(), env, "fiber", "host", b, second)
+				_, _ = Consume(context.Background(), env, "fiber", "host", Worker{Address: b, Epoch: second})
 			}
 			if n := transition(t, env, identity, b); n != second {
 				t.Fatal("flush changed epoch")
@@ -188,7 +188,7 @@ func TestFiberContextWorkerTransitions(t *testing.T) {
 			if successor == "removed" || successor == "unavailable" {
 				second = transition(t, env, "execution-B:B", "shuttle://host/claude/B")
 			}
-			if err := DeliverFiberContext(context.Background(), env, "fiber", "host", "shuttle://host/claude/B", second); err != nil {
+			if _, err := Consume(context.Background(), env, "fiber", "host", Worker{Address: "shuttle://host/claude/B", Epoch: second}); err != nil {
 				t.Fatal(err)
 			}
 			failed := errors.New("output failed")
@@ -229,7 +229,7 @@ func TestFiberContextAuthorityFailures(t *testing.T) {
 	if _, err := TransitionFiberReceiver(env, "fiber", "host", "B", "-"); err == nil {
 		t.Fatal("corruption reset authority")
 	}
-	if err := DeliverFiberContext(context.Background(), env, "fiber", "host", a, first); err == nil {
+	if _, err := Consume(context.Background(), env, "fiber", "host", Worker{Address: a, Epoch: first}); err == nil {
 		t.Fatal("corrupt authority accepted")
 	}
 }
@@ -245,7 +245,7 @@ func TestFiberContextWakeUsesNativeTurnAndDoesNotReplay(t *testing.T) {
 		if err := Enqueue(env, InboxEntry{Address: "fiber", Request: req}); err != nil {
 			t.Fatal(err)
 		}
-		if err := DeliverFiberContext(context.Background(), env, "fiber", "host", a, epoch); err != nil {
+		if _, err := Consume(context.Background(), env, "fiber", "host", Worker{Address: a, Epoch: epoch}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -273,7 +273,7 @@ func TestPendingCountCountsWhatNoWorkerHasTaken(t *testing.T) {
 	}
 	a := "shuttle://host/claude/A"
 	generation := transition(t, env, "execution-A:A", a)
-	if err := DeliverFiberContext(context.Background(), env, "fiber", "host", a, generation); err != nil {
+	if _, err := Consume(context.Background(), env, "fiber", "host", Worker{Address: a, Epoch: generation}); err != nil {
 		t.Fatal(err)
 	}
 	// A hook-ready receiver takes context on its next hook, not at delivery.

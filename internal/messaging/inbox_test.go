@@ -345,7 +345,7 @@ func TestFiberDeliveryHonoursNotBefore(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := DeliverFiberContext(context.Background(), env, "fiber", "host", a, epoch); err != nil {
+	if _, err := Consume(context.Background(), env, "fiber", "host", Worker{Address: a, Epoch: epoch}); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := PendingEntries(env, "fiber")

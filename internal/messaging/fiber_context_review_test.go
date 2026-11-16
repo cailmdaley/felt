@@ -34,7 +34,7 @@ func TestPinnedQuietCodexContextReturnsToFiberHook(t *testing.T) {
 			if err := writeFiberMailboxAttempt(path, entry, a); err != nil {
 				t.Fatal(err)
 			}
-			_ = DeliverFiberContext(context.Background(), env, "fiber", "host", a, generation)
+			_, _ = Consume(context.Background(), env, "fiber", "host", Worker{Address: a, Epoch: generation})
 			if pendingMailboxText(t, env, "codex", "A", request.Text) {
 				t.Error("quiet pinned context copied into session A queue")
 			}
@@ -50,7 +50,7 @@ func TestPinnedQuietCodexContextReturnsToFiberHook(t *testing.T) {
 			}
 			const b = "shuttle://host/codex/B"
 			generation = transition(t, env, "execution-B", b)
-			_ = DeliverFiberContext(context.Background(), env, "fiber", "host", b, generation)
+			_, _ = Consume(context.Background(), env, "fiber", "host", Worker{Address: b, Epoch: generation})
 			var got []Request
 			if err := OfferMailbox(env, "codex", "B", "host", func(batch []Request) error { got = append(got, batch...); return nil }); err != nil {
 				t.Fatal(err)
@@ -87,7 +87,7 @@ func TestFiberContextWakeWithoutCodexDiscovery(t *testing.T) {
 	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: Request{MessageID: "wake", Text: "wake result", Wake: true}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := DeliverFiberContext(context.Background(), env, "fiber", "host", address, generation); err != nil {
+	if _, err := Consume(context.Background(), env, "fiber", "host", Worker{Address: address, Epoch: generation}); err != nil {
 		t.Fatalf("wake failed: %v", err)
 	}
 	if n, err := pendingCount(env, "fiber"); err != nil || n != 0 || inputs != 1 {

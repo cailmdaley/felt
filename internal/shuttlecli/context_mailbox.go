@@ -1,12 +1,10 @@
 package shuttlecli
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/spf13/cobra"
-	"strconv"
 )
 
 func (a *app) contextMailboxCmd() *cobra.Command {
@@ -59,9 +57,6 @@ func (a *app) contextMailboxCmd() *cobra.Command {
 	put.Flags().StringVar(&threadSignal, "thread-signal", "", "Thread lifecycle signal JSON for delivery-time validation")
 	put.Flags().StringVar(&retainedAt, "retained-at", "", "Origin timestamp used to expire replayed thread context")
 	cmd.AddCommand(put)
-	cmd.AddCommand(&cobra.Command{Use: "pending <fiber-key>...", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		return a.printPendingSummaries(args)
-	}})
 	cmd.AddCommand(&cobra.Command{Use: "get <fiber-key>", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		receiver, err := messaging.ReadFiberReceiver(a.env, args[0])
 		if err != nil {
@@ -107,17 +102,6 @@ func (a *app) contextMailboxCmd() *cobra.Command {
 	}}
 	revoke.Flags().BoolVar(&existing, "existing", false, "Revoke only fibers that already have a mailbox; create nothing")
 	cmd.AddCommand(revoke)
-	cmd.AddCommand(&cobra.Command{Use: "deliver <fiber-key> <address-or-dash> <generation>", Args: cobra.ExactArgs(3), RunE: func(cmd *cobra.Command, args []string) error {
-		host, err := a.resolveOwnHost("")
-		if err != nil {
-			return err
-		}
-		generation, err := strconv.ParseUint(args[2], 10, 64)
-		if err != nil || generation == 0 {
-			return fmt.Errorf("positive receiver generation required")
-		}
-		return messaging.DeliverFiberContext(context.Background(), a.env, args[0], host, args[1], generation)
-	}})
 	return cmd
 }
 

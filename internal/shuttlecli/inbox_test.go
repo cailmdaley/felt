@@ -65,14 +65,12 @@ func TestInboxVerbs(t *testing.T) {
 		t.Fatalf("ls text:\n%s", out)
 	}
 
-	for _, verb := range []string{"inbox", "context-mailbox"} {
-		out, err = run(verb, "pending", "/store:FIBER", "store:EMPTY")
-		if err != nil {
-			t.Fatal(err)
-		}
-		var counts map[string]messaging.PendingSummary
-		if err := json.Unmarshal([]byte(out), &counts); err != nil || counts["/store:FIBER"].Count != 1 || counts["store:EMPTY"].Count != 0 || len(counts["/store:FIBER"].Scheduled) != 1 {
-			t.Fatalf("%s pending = %s (%v)", verb, out, err)
-		}
+	out, err = run("inbox", "pending", "/store:FIBER", "store:EMPTY")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var counts map[string]messaging.PendingSummary
+	if err := json.Unmarshal([]byte(out), &counts); err != nil || counts["/store:FIBER"].Count != 1 || counts["store:EMPTY"].Count != 0 || len(counts["/store:FIBER"].Scheduled) != 1 {
+		t.Fatalf("pending = %s (%v)", out, err)
 	}
 }

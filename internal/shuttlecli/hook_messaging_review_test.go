@@ -24,7 +24,7 @@ func TestHookOutputSurvivesSiblingValidationFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := messaging.DeliverFiberContext(context.Background(), env, "fiber", "host", address, generation); err != nil {
+	if _, err := messaging.Consume(context.Background(), env, "fiber", "host", messaging.Worker{Address: address, Epoch: generation}); err != nil {
 		t.Fatal(err)
 	}
 	for _, request := range []messaging.Request{{MessageID: "plain", Text: "plain peer message"}, {MessageID: "thread-notice", Text: "thread child closed: result"}} {
