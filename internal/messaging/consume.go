@@ -569,9 +569,11 @@ func reconcileConsumedBatch(ctx context.Context, env *sysenv.Env, root string, a
 // advanceBatch advances an open batch for the live worker w, never sending
 // the same payload twice. Its own records settle it first
 // (reconcileConsumedBatch); what remains is a send whose outcome is not
-// confirmed. It rolls forward to w once its conversation has ended, or has
-// been replaced by w for liveAttemptRetryAfter; and to a conversation still w
-// whose outcome stayed unknown that long, it makes one warning-marked retry.
+// confirmed. It rolls forward to w once its conversation has ended, or
+// liveAttemptRetryAfter after its send to a conversation w has replaced; and
+// to a conversation still w, it makes one warning-marked retry once its
+// outcome has stayed unknown for liveAttemptRetryAfter, or queued or
+// submitted for queuedAttemptRetryAfter.
 // A receiver holding it for approval is not retried, and a quiet payload is
 // never sent again: its members return to the fiber's hooks marked
 // possible_repeat. It reports whether the payload may have reached the
@@ -581,8 +583,10 @@ func advanceBatch(ctx context.Context, env *sysenv.Env, root, host string, w Wor
 		return false, err
 	}
 	replaced := a.Conversation != w.Address
-	stale := a.ErrorCode != "wake_held" && time.Since(time.Unix(0, a.OpenedAt)) >= liveAttemptRetryAfter
-	retry := !replaced && stale && a.status() == StatusUnknown && a.Retry == 0
+	age, status := time.Since(time.Unix(0, a.OpenedAt)), a.status()
+	stale := a.ErrorCode != "wake_held" && age >= liveAttemptRetryAfter
+	waited := status == StatusUnknown || ((status == StatusQueued || status == StatusSubmitted) && age >= queuedAttemptRetryAfter)
+	retry := !replaced && stale && waited && a.Retry == 0
 	roll := replaced && (stale || fiberContextSessionEnded(env, host, a.Conversation))
 	if !retry && !roll {
 		return true, a.sendError()

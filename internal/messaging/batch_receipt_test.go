@@ -154,6 +154,46 @@ func TestAnOpenBatchIsNotSentAgain(t *testing.T) {
 	}
 }
 
+// A batch its live receiver queued, whose transcript never shows it taken,
+// makes its one marked retry once it has waited queuedAttemptRetryAfter, and
+// then waits for as long as that receiver lives.
+func TestAQueuedBatchRetriesOnceAfterItsWait(t *testing.T) {
+	env, w := consumeFixture(t)
+	w.Idle = true
+	putWish(t, env, "m", "ask", "hold")
+	root := mailboxDir(env, "fiber", "fiber")
+	var sent []string
+	queued := func(_ context.Context, _ *sysenv.Env, _ string, r Request, _ string) (Receipt, error) {
+		sent = append(sent, r.Text)
+		return Receipt{Status: StatusQueued, Transport: claudeNativeTransport}, nil
+	}
+	pass := func(age time.Duration) {
+		t.Helper()
+		if b := batchOf(t, root, "m"); b != nil {
+			b.OpenedAt = time.Now().Add(-age).UnixNano()
+			if err := writeBatch(root, b); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if result, _ := consumeWith(context.Background(), env, "fiber", "host", w, queued); result.Action != "wake" {
+			t.Fatalf("after %v: %+v", age, result)
+		}
+	}
+	pass(0)
+	pass(queuedAttemptRetryAfter - time.Minute)
+	if len(sent) != 1 {
+		t.Fatalf("sent within the wait: %q", sent)
+	}
+	pass(queuedAttemptRetryAfter)
+	if len(sent) != 2 || !strings.HasPrefix(sent[1], "Possible repeat: an earlier delivery of this message to this session") {
+		t.Fatalf("after the wait: %q", sent)
+	}
+	pass(2 * queuedAttemptRetryAfter)
+	if len(sent) != 2 {
+		t.Fatalf("a second retry: %q", sent)
+	}
+}
+
 // Looking again at an open batch's Claude receipt reads the transcript to its
 // end and stops: a consume over a stuck batch does not wait under the inbox
 // lock.

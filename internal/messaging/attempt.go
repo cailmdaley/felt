@@ -62,6 +62,11 @@ type Attempt struct {
 // still alive, or rolls forward to one that replaced it.
 const liveAttemptRetryAfter = 5 * time.Minute
 
+// queuedAttemptRetryAfter is how long a batch its live receiver queued or
+// submitted waits for its transcript to confirm it before its one
+// warning-marked retry, as an unknown one does after liveAttemptRetryAfter.
+const queuedAttemptRetryAfter = 30 * time.Minute
+
 const (
 	attemptDelivered = "delivered"
 	attemptReleased  = "released"
