@@ -48,8 +48,8 @@ const HTML = /\.html?$/i
 const PAGE_WIDTH = 1440
 /** Narrower than this, the view shows a channel or a thread, not both: a thread opens one level deeper. */
 const SIDE_BY_SIDE_PX = 1100
-/** A message taller than this many lines folds, with Show more to unfold it in place. */
-const FOLD_LINES = 8
+/** A line in the channel taller than this many lines folds, with Show more to unfold it in place; a thread shows its messages whole. */
+const FOLD_LINES = 2
 /** A cleared line offers its Undo in its place this long. */
 const UNDO_MS = 10_000
 type Pane = 'channel' | 'thread'
@@ -813,12 +813,12 @@ export class ChannelsView implements TemporalView {
     }
     this.rebuild(list, rows)
     this.sweepPreviews()
-    this.fold(list)
+    if (pane === 'channel') this.fold(list)
     for (const row of rows) this.sizes?.observe(row)
     if (follow) this.toFoot(list, pane)
     this.landing[pane] = false
   }
-  /** Folds each message taller than {@link FOLD_LINES} lines, unless the reader unfolded it. */
+  /** Folds each line taller than {@link FOLD_LINES} lines, unless the reader unfolded it. */
   private fold(list: HTMLElement): void {
     for (const text of list.querySelectorAll<HTMLElement>('.kbn-ch-msg-text[data-id]')) {
       const id = text.dataset.id!
