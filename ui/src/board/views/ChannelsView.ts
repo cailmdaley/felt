@@ -402,10 +402,10 @@ export class ChannelsView implements TemporalView {
     this.drawRail(); this.drawChannel()
     this.channelEl?.focus({ preventScroll: true })
   }
-  /** With no channel to show, the one this device was last in; else the first listed (on a phone, the rail). */
+  /** With no channel to show, the one this device was last in, else the first listed; a phone shows its rail, with no channel behind it. */
   private resume(): void {
     const channel = this.current === null ? this.channels.find(each => each.key === stored(LAST)) : undefined
-    this.open(channel?.key ?? (isMobileViewport() ? null : this.listed[0]?.key ?? null), false)
+    this.open(isMobileViewport() ? null : channel?.key ?? this.listed[0]?.key ?? null, false)
   }
   private get channel(): Channel | undefined { return this.channels.find(channel => channel.key === this.current) }
 
@@ -692,8 +692,11 @@ export class ChannelsView implements TemporalView {
    * screen before a channel.
    */
   private setRail(hidden: boolean): void {
-    if (isMobileViewport()) this.phoneRail = !hidden
-    else if (this.drawn) this.drawer = !hidden
+    if (isMobileViewport()) {
+      this.phoneRail = !hidden
+      // The rail is the phone's screen: the channel left is read up to now, and none stands behind the rail, unseen.
+      if (!hidden && this.current) { this.open(null, false); this.drawRail(); this.drawChannel() }
+    } else if (this.drawn) this.drawer = !hidden
     else {
       if (hidden === this.railHidden) return
       this.railHidden = hidden

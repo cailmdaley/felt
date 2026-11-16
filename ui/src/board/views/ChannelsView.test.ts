@@ -352,6 +352,21 @@ it('keeps the rail on a phone\'s first screen when swiped leftward with no chann
   expect(layout.hasAttribute('data-rail-hidden')).toBe(false)
 })
 
+it('on a phone, reads a channel only while it is the screen: it resumes on the rail, and going back leaves the channel', async () => {
+  const stored = new Map([['shuttle.channels.last', 'channel:cmbx'], ['shuttle.channels.seen:channel:cmbx', '0']])
+  daemon([], stored)
+  const media = window.matchMedia
+  vi.stubGlobal('matchMedia', (query: string) => ({ ...media(query), matches: query.includes('max-width') }))
+  const { host } = await mount()
+  // The rail is the first screen: nothing behind it is read.
+  expect([host.querySelector('.kbn-ch-layout')!.hasAttribute('data-channel'), stored.get('shuttle.channels.seen:channel:cmbx')]).toStrictEqual([false, '0'])
+  host.querySelector<HTMLButtonElement>('[data-channel="channel:cmbx"]')!.click()
+  const read = Number(stored.get('shuttle.channels.seen:channel:cmbx'))
+  expect(read).toBeGreaterThan(0)
+  host.querySelector<HTMLButtonElement>('.kbn-ch-back')!.click()
+  expect(host.querySelector('.kbn-ch-layout')!.hasAttribute('data-channel')).toBe(false)
+})
+
 it('heads the view with the channel itself, its name written as Slack writes it, the rail\'s toggle at its right', async () => {
   daemon()
   const mill = card({ id: 'mill', uid: 'L', name: 'felt chair', shuttleChannel: 'The Mill', shuttleSeat: true, ...working(2) })
