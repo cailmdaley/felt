@@ -109,6 +109,20 @@ func TestNotifyOnlyFiberRefusalPrintsNoReceipt(t *testing.T) {
 	}
 }
 
+// An owner the local daemon could not reach leaves the outcome unknown, as
+// any session send's does: the unknown receipt is printed with the error.
+func TestNotifyOnlyFiberForwardFailureIsUnknown(t *testing.T) {
+	t.Parallel()
+	stdout, err, _ := runNotifyOnly(t, http.StatusBadGateway,
+		`{"delivered":false,"reason":"forward_failed","origin":"worker-node","error":":econnrefused"}`)
+	if stdout != "unknown work/worker (n-1)\n" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if err == nil || !strings.Contains(err.Error(), "502") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 // The hidden --local sends through this host's native adapter, which has no
 // fiber inbox: a fiber target is refused, naming why, and so is a fiber whose
 // block names no host to hold its inbox. Neither reaches a daemon route that
