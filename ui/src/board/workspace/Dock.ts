@@ -657,7 +657,7 @@ export class Dock {
     const session = document.createElement('span')
     session.className = 'ws-acts-session'
     session.append(conversation.el, settings)
-    el.append(verbs.el, session)
+    el.append(session, verbs.el)
     const paint = (): void => {
       const card = target(), who = slug(card)
       if (host) markVerdictHost(el, card)
@@ -1036,7 +1036,7 @@ export class Dock {
       openActionMenu(menu, this.bandActions(act, menu), `${slug(act)}'s acts`)
     })
     acts.append(menu)
-    // Where the head has room, the menu's acts stand as buttons: the conversation, the constitution, settings and the lead verb.
+    // Where the head has room, the menu's acts stand as buttons: the conversation first, settings, the lead verb, then the constitution.
     const shown = this.actsFor(target, { host: false })
     this.disposers.push(() => shown.dispose())
     const page = document.createElement('button')
@@ -1047,7 +1047,7 @@ export class Dock {
     page.addEventListener('click', () => this.openConstitution?.())
     const buttons = document.createElement('span')
     buttons.className = 'ws-band-buttons'
-    buttons.append(page, shown.el)
+    buttons.append(shown.el, page)
     acts.prepend(buttons)
     if (this.voice && shuttleManaged) {
       this.listen = new ListenControl({

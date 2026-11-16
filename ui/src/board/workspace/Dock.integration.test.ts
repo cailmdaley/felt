@@ -199,6 +199,9 @@ describe('band header', () => {
     // Where the head has room, its acts stand as buttons beside the menu, in the one verdict host.
     expect(band.el.querySelector('.ws-band-acts > .ws-band-buttons .ws-fiber-acts')).not.toBeNull()
     expect(band.el.querySelector('.ws-band-buttons .ws-fiber-acts')!.hasAttribute('data-verdict-key')).toBe(false)
+    // Open conversation stands first among them, the constitution's page last.
+    const order = [...band.el.querySelectorAll<HTMLElement>('.ws-band-buttons :is(.ws-acts-console, .ws-acts-settings, .ws-acts-verbs, .ws-band-page)')].map(button => button.className.split(' ').find(name => /^ws-(acts|band)-/.test(name)))
+    expect(order).toEqual(['ws-acts-console', 'ws-acts-settings', 'ws-acts-verbs', 'ws-band-page'])
     expect(band.el.querySelector('textarea, [contenteditable]:not(.ws-worker-message)')).toBeNull()
     expect(await visibleVerbs(band)).toEqual(['Resume', 'New session', 'Temper', 'Discard'])
     dock.syncRuntime(task({ status: 'active', workerState: 'running', sessionUuid: 'resume-me', tmuxSession: 't' }))

@@ -130,6 +130,8 @@ it('speaks to the channel\'s chair by its slug, and keeps the console\'s draft b
   const dock = host.querySelector<HTMLElement>('.kbn-ch > .ws-dock')!
   const field = () => dock.querySelector<HTMLElement>('.ws-worker-message')!
   expect(field().dataset.placeholder).toBe('Message cmbx')
+  // The chair's pages stand in the channel's head, so the console carries no copy of its constitution.
+  expect(dock.querySelector<HTMLElement>('.ws-band-page')!.hidden).toBe(true)
   field().textContent = 'for the chair'; field().dispatchEvent(new Event('input'))
   // A chair with no worker to run has no console.
   host.querySelector<HTMLButtonElement>('[data-channel="fiber:R"]')!.click()

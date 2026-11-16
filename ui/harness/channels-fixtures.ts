@@ -14,6 +14,8 @@ interface Row {
   outcome?: string
   /** A live worker: mid-turn, or idle at the end of its turn (the Desk's Your turn). */
   state?: 'working' | 'idle'
+  /** Its live worker has a terminal, so its conversation opens. */
+  terminal?: boolean
   closed?: boolean
   minutes: number
   /** Its tapestry page; `figure` names a file in its folder the page shows first. */
@@ -42,7 +44,7 @@ const SLIDE = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 794 1123" wi
  * and old notes idle three weeks, found only by Jump to.
  */
 const ROWS: Row[] = [
-  { id: 'cmbx', name: 'cmbx chair', channel: 'cmbx', seat: true, state: 'idle', minutes: 9,
+  { id: 'cmbx', name: 'cmbx chair', channel: 'cmbx', seat: true, state: 'idle', terminal: true, minutes: 9,
     tapestry: { title: 'CMB lensing × LSS, as it stands', lede: 'κ×tSZ is measured to 9σ on the full footprint; the foreground mask and the covariance are the two calls left before the joint fit.' } },
   { id: 'cmbx/kappa-tsz', name: 'κ × tSZ cross-spectrum', parent: 'cmbx', state: 'working', minutes: 4,
     tapestry: { title: 'κ × tSZ at 9σ', lede: 'The full-footprint cross-spectrum with the new beam window; every null passes at p > 0.1.', figure: 'kappa-tsz-spectrum.svg' } },
@@ -105,7 +107,7 @@ export function addChannelsFixtures(example: WorkspaceExample, now: number): Cha
           ask: row.ask ? { text: row.ask, at: iso(row.minutes) } : undefined,
           review: row.review ? { note: row.review, at: iso(row.minutes) } : undefined,
           thread_parent: row.parent ? { uid: row.parent, host: WORKSPACE_HOST, slug: row.parent, name: ROWS.find(parent => parent.id === row.parent)!.name } : undefined } },
-      runtime: live ? { state: 'running', phase: row.state === 'idle' ? 'waiting' : 'working', session_uuid: `session-${row.id}`, last_activity_at: ms(row.minutes) } : null,
+      runtime: live ? { state: 'running', phase: row.state === 'idle' ? 'waiting' : 'working', session_uuid: `session-${row.id}`, tmux_session: row.terminal ? `${row.id}-shuttle` : undefined, last_activity_at: ms(row.minutes) } : null,
     }
   })
   for (const row of ROWS) {

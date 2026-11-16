@@ -252,7 +252,7 @@ export class ChannelsView implements TemporalView {
     this.channelEl.append(this.head, this.stream, this.dock.el)
     return this.channelEl
   }
-  /** Opens the console on the channel's chair, with the draft kept for that channel; a chair with no worker to run has none. */
+  /** Opens the console on the channel's chair, with the draft kept for that channel; a chair with no worker to run has none. Its pages stand in the channel's head, so the console names none. */
   private seatConsole(channel: Channel | undefined): void {
     const dock = this.dock
     if (!dock) return
@@ -262,7 +262,6 @@ export class ChannelsView implements TemporalView {
     if (was && was !== channel.key) this.drafts.set(was, dock.draft)
     dock.open(channel.seat)
     dock.setActionCard(channel.seat)
-    dock.setNav({ constitution: () => this.openPage('console', channel.seat) })
     if (was !== channel.key) { dock.draft = this.drafts.get(channel.key) ?? ''; this.drafted = channel.key }
   }
   refresh(ctx: ViewContext): void {
