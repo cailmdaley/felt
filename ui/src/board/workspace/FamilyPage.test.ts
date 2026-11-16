@@ -71,15 +71,24 @@ describe('a constitution\'s view', () => {
     expect(page.el.textContent).not.toContain('Leaf')
   })
 
-  it('says what it last posted beside its tapestry, and opens its pages from its head and its thumbnail', async () => {
+  it('says what it last posted, then its tapestry at full width, which unfolds in place and steps on through its sent files; its head opens its pages', async () => {
     const { page, feeds } = made(mid)
     await settle()
     expect(page.el.querySelector('.ov-said-text')!.textContent!.trim()).toBe('Posted the cut.')
     expect(page.el.querySelector('.ov-said-text strong')!.textContent).toBe('cut')
-    const figure = page.el.querySelector<HTMLButtonElement>('.ov-figure')!
-    expect([figure.hidden, figure.title]).toStrictEqual([false, 'Open Tapestry'])
-    figure.click()
-    expect(feeds.open).toHaveBeenLastCalledWith(mid, tapestry.key)
+    // Stacked: head, its words, its threads, then the preview.
+    expect([...page.el.querySelector('.ov-main')!.children].map(part => part.classList[0])).toStrictEqual(['ov-head', 'ov-said', 'ov-threads', 'uf'])
+    const cards = [...page.el.querySelectorAll<HTMLButtonElement>('.ov-unfold .uf-card')]
+    expect(cards.map(card => card.title)).toStrictEqual(['Expand Tapestry'])
+    cards[0].click()
+    const bar = (): string[] => [...page.el.querySelectorAll('.uf-bar .uf-name, .uf-bar .uf-count')].map(part => part.textContent!)
+    expect(bar()).toStrictEqual(['Tapestry', '1 / 3'])
+    press(page.el.querySelector('.uf-page')!, 'ArrowRight')
+    expect(bar()).toStrictEqual(['new.png', '2 / 3'])
+    press(page.el.querySelector('.uf-page')!, 'Escape')
+    expect(page.el.querySelector('.uf[data-unfolded]')).toBeNull()
+    expect(document.activeElement).toBe(cards[0])
+    expect(feeds.open).not.toHaveBeenCalled()
     const parts = [...page.el.querySelectorAll<HTMLElement>('.ov-head .ws-doc-button')].map(button => button.dataset.part)
     expect(parts).toStrictEqual(['constitution', 'tapestry', 'sends', 'edits'])
     page.el.querySelector<HTMLButtonElement>('.ov-head [data-part="sends"]')!.click()
@@ -103,11 +112,14 @@ describe('a constitution\'s view', () => {
     expect(made(idle).page.el.querySelector<HTMLElement>('.ov-said')!.hidden).toBe(true)
   })
 
-  it('draws beneath a thread every thread below it that waits on the human, the post the board names included; its orchestrators read as a path', () => {
+  it('draws beneath a thread every thread below it that waits on the human, the post the board names included; its orchestrators stand above it as strips', () => {
     const { page } = made(root, { waits: () => new Map([['hub/mid/a', { id: 'p', at: now - hour, kind: 'post', text: 'The leaf is cut.' }]]) })
     expect(threads(page)).toStrictEqual([['q', 'Which one?'], ['mid', ''], ['↳ a', 'The leaf is cut.'], ['w', '']])
     expect(page.el.querySelector<HTMLElement>('.ov-thread[data-fiber="hub/mid"] .ov-open')!.textContent).toBe('›')
-    expect([...made(leaf).page.el.querySelectorAll('.ov-up .ov-ancestor')].map(step => [step.textContent, step.getAttribute('title')])).toStrictEqual([['hub', 'hub'], ['mid', 'Mid']])
+    // Its orchestrators, one strip each above it, a rule per level down to its own.
+    const strips = [...made(leaf).page.el.querySelectorAll<HTMLElement>('.ov-up .ov-ancestor')]
+    expect(strips.map(strip => [strip.querySelector('.ov-slug')!.textContent, strip.getAttribute('title'), strip.querySelectorAll('.ov-rule').length, strip.querySelector('.ov-strip-said')!.textContent!.trim()]))
+      .toStrictEqual([['hub', 'hub', 1, ''], ['mid', 'Mid', 2, 'Posted the cut.']])
   })
 
   it('opens a thread\'s view from its row, and its orchestrators\' from the heads above it', () => {
@@ -196,12 +208,12 @@ describe('its frame', () => {
     document.body.append(page.el)
     page.update(work, new ThreadIndex([root, work, leaf]), now)
     await settle()
-    const head = page.el.querySelector('.ov-head'), thumb = page.el.querySelector('.ov-figure > *')
+    const head = page.el.querySelector('.ov-head'), thumb = page.el.querySelector('.uf-card')
     const act = page.el.querySelector<HTMLElement>('.ov-tools button:not(.ws-doc-button)')!
     act.focus()
     page.update(work, new ThreadIndex([root, work, leaf]), now + 2 * 60_000)
     await settle()
-    expect([page.el.querySelector('.ov-head') === head, page.el.querySelector('.ov-figure > *') === thumb, document.activeElement === act]).toStrictEqual([true, true, true])
+    expect([page.el.querySelector('.ov-head') === head, page.el.querySelector('.uf-card') === thumb, document.activeElement === act]).toStrictEqual([true, true, true])
     page.el.querySelector<HTMLElement>('.ov-head [data-part="constitution"]')!.focus()
     page.update(work, new ThreadIndex([root, work, leaf]), now + 4 * 60_000)
     expect((document.activeElement as HTMLElement).dataset.part).toBe('constitution')

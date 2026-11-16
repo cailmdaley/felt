@@ -9,11 +9,10 @@ import { stateDot } from '../stateDot.js'
 import { slug } from '../threadOutline.js'
 import { renderMarkdown } from '../utils.js'
 import type { ThreadIndex } from '../threads.js'
-import { parseDocKey, type DocKey } from './documents.js'
 import type { FiberActs } from './Dock.js'
 import { docButtons, type DocFeeds } from './docButtons.js'
 import { runGlance, runWords } from './runWords.js'
-import { Thumbnail } from './Thumbnail.js'
+import { Unfold } from './Unfold.js'
 import './family-page.css'
 
 /** What the view reads, and where it goes. */
@@ -48,19 +47,22 @@ const time = (card: KanbanCard, now: number): HTMLElement => {
 
 /**
  * One view of a constitution, the same from the Desk, a channel, a role or a
- * thread: its head, opening on one line from the family's top-level down to
- * it, each step its dot and slug (choosing an orchestrator opens its view;
- * pulling the page down past its top opens the nearest one's, moving neither
- * Rex nor voice), then what it wants of the human or its faint word, its run
- * at a glance, its pages and its acts; the last thing it posted; then its
- * sub-threads as a narrow column of rows (dot, slug, its run at a glance, then
- * what it wants when it waits on the human or its faint word when quiet, and a
- * chevron: each opens the same view one level down), what waits first, each
- * followed by every thread below it that waits on the human, and the resting
- * and archived ones behind one quiet control; beside them a large preview of its tapestry or
- * newest sent file, which counts as seen. No outcome is
- * drawn. It reads feeds and repaints only while its frame is selected in an
- * open reader; its frame's eviction ends it.
+ * thread, stacked at every width. Above it, pinned, its orchestrators as one
+ * strip each, the family's top-level first, each indented to its depth with a
+ * rule per level in that level's state colour, its dot, slug, run at a glance
+ * and the last thing it posted (choosing one opens its view; pulling the page
+ * down past its top opens the nearest one's, moving neither Rex nor voice).
+ * Then its head: its dot and slug, what it wants of the human or its faint
+ * word, its run at a glance, its pages and its acts; the last thing it posted;
+ * its sub-threads as a compact block of rows (dot, slug, its run at a glance,
+ * then what it wants when it waits on the human or its faint word when quiet,
+ * and a chevron: each opens the same view one level down), what waits first,
+ * each followed by every thread below it that waits on the human, and the
+ * resting and archived ones behind one quiet control; then its tapestry, or
+ * else its newest sent file, at the view's full width as a preview that
+ * unfolds in place, stepping through its other sent files, and counts as
+ * seen. No outcome is drawn. It reads feeds and repaints only while its frame
+ * is selected in an open reader; its frame's eviction ends it.
  */
 export class FamilyPage {
   readonly el = el('div', 'ws-family-page family-map')
@@ -68,21 +70,21 @@ export class FamilyPage {
   private readonly up = el('nav', 'ov-up')
   private readonly main = el('div', 'ov-main')
   private readonly head = el('header', 'ov-head')
-  private readonly path = el('div', 'ov-path')
+  private readonly title = el('div', 'ov-title')
   private readonly name = el('h2', 'ov-name')
   private readonly facts = el('div', 'ov-facts')
   private readonly tools = el('div', 'ov-tools')
   private docs = el('span', 'ws-doc-buttons')
   private readonly said = el('section', 'ov-said')
-  private readonly body = el('div', 'ov-body')
-  private readonly figure = el('button', 'ov-figure')
   private readonly threads = el('ol', 'ov-threads')
+  private readonly unfold: Unfold
   private card: KanbanCard | null = null
   private index: ThreadIndex | null = null
   private signature = ''
   private awake = true
   private acts: FiberActs | null = null
-  private thumb: { doc: DocKey; thumbnail: Thumbnail } | null = null
+  /** The files the preview shows, by key, and the card they were read for. */
+  private shown: { card: string; files: Map<string, MapFile> } | null = null
   private pull = 0
   /** The resting and archived threads are drawn too. */
   private quietShown = false
@@ -96,21 +98,18 @@ export class FamilyPage {
   constructor(feeds: ViewFeeds, disposed: () => void, actsFor?: (target: () => KanbanCard) => FiberActs) {
     this.feeds = feeds; this.disposed = disposed; this.actsFor = actsFor
     this.up.setAttribute('aria-label', 'Orchestrators')
-    // A tree: its rows own j, k, h and l while they have the keys.
-    this.scroller.setAttribute('role', 'tree')
-    this.scroller.setAttribute('aria-label', 'The constitution, its orchestrators and its threads')
     this.scroller.append(this.main)
     this.head.tabIndex = -1
     // An act zone, as the console is: a channel theme's rules stop at its controls.
     this.tools.dataset.part = 'act'
     this.tools.append(this.docs)
-    // One line from the family's top-level down to this constitution, each step its dot and slug.
-    const line = el('span', 'ov-path-line')
-    line.append(this.up, el('span'), this.name)
-    this.path.append(line)
-    this.head.append(this.path, this.facts, this.tools)
-    this.figure.type = 'button'
-    this.figure.hidden = true
+    this.title.append(el('span'), this.name)
+    this.head.append(this.title, this.facts, this.tools)
+    this.unfold = new Unfold({
+      shuttleBase: feeds.shuttleBase, single: true, awake: () => this.awake,
+      seen: key => { const file = this.shown?.files.get(key); if (file?.unread) feeds.seen(file) },
+    })
+    this.unfold.el.classList.add('ov-unfold')
     this.threads.setAttribute('aria-label', 'Threads')
     this.quiet.type = 'button'
     this.quiet.title = 'Resting and archived threads'
@@ -118,10 +117,12 @@ export class FamilyPage {
       this.quietShown = !this.quietShown
       if (this.card && this.index) this.paint(this.index.card(this.card), Date.now())
     })
-    this.body.append(this.threads, this.figure)
-    this.main.append(this.head, this.said, this.body)
+    this.main.append(this.head, this.said, this.threads, this.unfold.el)
+    // A tree: its strips and rows own j, k, h and l while they have the keys.
     const grid = el('div', 'ws-family-grid')
-    grid.append(this.scroller)
+    grid.setAttribute('role', 'tree')
+    grid.setAttribute('aria-label', 'The constitution, its orchestrators and its threads')
+    grid.append(this.up, this.scroller)
     this.el.append(grid)
     this.el.addEventListener('keydown', event => this.key(event))
     // Only a gesture that begins at the top pulls: a scroll's momentum carried up to the top does not.
@@ -153,7 +154,6 @@ export class FamilyPage {
   /** Takes the keys on its head: no row looks chosen, and Enter opens nothing until j or k picks one. */
   focus(): void {
     this.head.focus({ preventScroll: true })
-    this.path.scrollLeft = 0
   }
   /** `t`: opens the constitution's tapestry, else its newest sent file. */
   openLead(): void {
@@ -191,10 +191,10 @@ export class FamilyPage {
     const quietHeld = document.activeElement === this.quiet
     const focused = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.ov-ancestor, .ov-thread')
     const held = focused && this.el.contains(focused) ? `${focused.className}:${focused.dataset.fiber}` : undefined
-    this.up.replaceChildren(...above.map(ancestor => this.ancestor(ancestor)))
+    this.up.replaceChildren(...above.map((ancestor, depth) => this.ancestor(ancestor, depth, above, now)))
     this.paintHead(card, now)
     this.paintSaid(card, now)
-    this.paintFigure(card)
+    this.paintFiles(card)
     // A resting or archived thread with nothing waiting below it stands behind the quiet control.
     const tucked = threads.filter(({ child, below }) => !below.length && !wantOf(child, waits) && tuckable(child))
     if (!tucked.length) this.quietShown = false
@@ -222,11 +222,25 @@ export class FamilyPage {
     row.addEventListener('click', () => this.feeds.view(card))
     return row
   }
-  /** An orchestrator above, a step of the path back up: its dot and slug. */
-  private ancestor(card: KanbanCard): HTMLElement {
-    const step = this.opener(card, 'ov-ancestor')
-    step.append(stateDot(card, this.feeds.waits(), () => this.feeds.view(card)), el('span', 'ov-slug', slug(card)))
-    return step
+  /**
+   * An orchestrator above, one strip of the pinned stack: a rule for each
+   * level above it and its own, each in that level's state colour, then its
+   * dot, slug, run at a glance and the last thing it posted, on one line.
+   */
+  private ancestor(card: KanbanCard, depth: number, above: readonly KanbanCard[], now: number): HTMLElement {
+    const strip = this.opener(card, 'ov-ancestor'), waits = this.feeds.waits()
+    strip.style.setProperty('--ov-depth', String(depth))
+    const rules = el('span', 'ov-rules')
+    rules.setAttribute('aria-hidden', 'true')
+    rules.append(...above.slice(0, depth + 1).map(level => {
+      const rule = el('span', 'ov-rule')
+      rule.dataset.attention = attentionOf(level, waits)
+      return rule
+    }))
+    const said = this.feeds.said(card), text = el('span', 'ov-strip-said')
+    if (said) { text.innerHTML = renderMarkdown(said.text); text.title = text.textContent?.replace(/\s+/g, ' ').trim() ?? '' }
+    strip.append(rules, stateDot(card, waits, () => this.feeds.view(card)), el('span', 'ov-slug', slug(card)), time(card, now), text)
+    return strip
   }
   /**
    * A thread: its dot, slug and run, then what it wants when it waits on the
@@ -257,9 +271,6 @@ export class FamilyPage {
     this.docs = docs
     if (kept) docs.querySelector<HTMLElement>(`[data-part="${kept}"]`)?.focus({ preventScroll: true })
     this.name.previousElementSibling!.replaceWith(stateDot(card, waits, () => {}))
-    // The path is held at its end, this constitution in sight (0 is the end of a right-to-left box); a clipped start fades.
-    this.path.scrollLeft = 0
-    requestAnimationFrame(() => this.path.toggleAttribute('data-clipped', this.path.scrollWidth > this.path.clientWidth))
     if (this.actsFor && !this.acts) {
       this.acts = this.actsFor(() => this.card!)
       this.tools.append(this.acts.el)
@@ -276,30 +287,20 @@ export class FamilyPage {
     text.title = ago(said.at, now)
     this.said.replaceChildren(text)
   }
-  /** Its tapestry or newest sent file, large, beside its threads. */
-  private paintFigure(card: KanbanCard): void {
-    const figure = this.figure
+  /**
+   * Its tapestry, else its newest sent file, as the preview that unfolds in
+   * place, stepping through every sent file once unfolded. Shown, it is seen.
+   */
+  private paintFiles(card: KanbanCard): void {
+    const uid = card.uid ?? card.id
+    if (this.shown && this.shown.card !== uid) { this.unfold.update([]); this.shown = null }
     void this.feeds.lead(card).then(lead => {
-      const shown = lead ?? this.feeds.files(card)[0], file = shown && parseDocKey(shown.key)
-      figure.hidden = !file
-      if (!shown || !file) return
-      const doc = shown.key
+      if ((this.card?.uid ?? this.card?.id) !== uid) return
+      const files = [...lead ? [lead] : [], ...this.feeds.files(card).filter(file => file.key !== lead?.key)]
+      this.shown = { card: uid, files: new Map(files.map(file => [file.key, file])) }
+      this.unfold.update(files.map(file => ({ key: file.key, name: file.name })))
       // Shown here, it is seen.
-      if (shown.unread) this.feeds.seen(shown)
-      if (this.thumb?.doc !== doc) {
-        this.thumb?.thumbnail.dispose()
-        const name = file.path.split('/').pop() ?? file.path
-        const made: Thumbnail = new Thumbnail({
-          key: `view:${doc}`, shuttleBase: this.feeds.shuttleBase, className: 'ov-thumb', fallback: name,
-          file: { fullPath: file.path, owner: file.owner, basename: name }, pageWidth: 1200,
-          priority: () => this.awake && made.el.isConnected ? 2 : 0, distance: () => 0,
-        })
-        this.thumb = { doc, thumbnail: made }
-        figure.replaceChildren(made.el)
-      }
-      figure.title = `Open ${lead?.name ?? file.path.split('/').pop()}`
-      figure.setAttribute('aria-label', figure.title)
-      figure.onclick = () => this.feeds.open(card, doc)
+      if (files[0]?.unread) this.feeds.seen(files[0])
     })
   }
   /** Pulled past its top: its orchestrator's view opens, quietly, for a scroll is not a click. */
@@ -324,7 +325,6 @@ export class FamilyPage {
     if (step) {
       const next = rows[Math.max(0, Math.min(rows.length - 1, (at < 0 ? rows.findIndex(row => row.matches('.ov-head')) : at) + step))]
       next?.focus({ preventScroll: false })
-      if (next === this.head) this.path.scrollLeft = 0
       if (next) announce(next.title || next.textContent || '')
     } else if ((event.key === 'Enter' || event.key === 'l') && at >= 0 && !rows[at].matches('.ov-head')) rows[at].click()
     else if (event.key === 'h') {
@@ -337,7 +337,7 @@ export class FamilyPage {
   dispose(): void {
     this.awake = false
     this.acts?.dispose()
-    this.thumb?.thumbnail.dispose()
+    this.unfold.dispose()
     this.disposed()
   }
 }

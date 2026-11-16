@@ -236,7 +236,7 @@ try {
     assert.equal(await close.getByText(outcome).count(), 0)
     await close.locator('.kbn-ch-who').click()
     await page.waitForFunction(() => document.querySelector('.ws-selected .ov-name')?.textContent === 'morning-post')
-    await page.locator('.ws-selected .ov-figure .ws-thumbnail').waitFor()
+    await page.locator('.ws-selected .ov-unfold .ws-thumbnail').waitFor()
     assert.equal(await page.locator('.ws-selected .ws-family-page').getByText(outcome).count(), 0)
     assert.deepEqual(errors, [])
     await context.close()

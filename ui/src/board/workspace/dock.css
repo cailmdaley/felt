@@ -383,3 +383,6 @@
 @container dock (min-width: 621px) { .ws-dock .ws-band-acts > .ws-band-menu { display: none; } }
 @container dock (max-width: 620px) { .ws-dock .ws-band-acts > .ws-band-buttons { display: none; } }
 .ws-dock[data-echoed] .ws-band-acts > :is(.ws-band-buttons, .ws-band-menu) { display: none; }
+/* Under a constitution's view, whose strips and head already name it, the console draws no name of its own. */
+.ws-dock[data-echoed] .ws-band-title { display: none; }
+.ws-dock[data-echoed] .ws-band-head { min-height: 0; }

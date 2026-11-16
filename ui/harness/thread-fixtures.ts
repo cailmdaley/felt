@@ -164,7 +164,7 @@ function addLoneFixture(example: WorkspaceExample, now: number): void {
 }
 
 /** The hub threads that carry a tapestry in their fiber directory. */
-const HUB_TAPESTRIES: readonly string[] = ['hub/pipeline-steward', 'hub/cosmology', 'hub/psf-coupling']
+const HUB_TAPESTRIES: readonly string[] = ['hub/pipeline-steward', 'hub/pipeline-steward/rebuild', 'hub/cosmology', 'hub/psf-coupling']
 
 /** The hub family, with its ledgers and sent files; the map's unread marks count from three hours back. */
 function addHubFixture(example: WorkspaceExample, now: number): void {

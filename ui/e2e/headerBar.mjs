@@ -340,7 +340,7 @@ export function registerHeaderBarJourneys(test) {
       for (const name of ['Response analysis', 'Choose the response cut']) {
         await openThread(page, threadRow(page, await familyTree(page), name), name)
         assert.equal(await page.locator('.ws-page.ws-selected .ov-ancestor').first().getAttribute('title'), title)
-        assert.ok(await head().locator('.ov-path-line > .constitution-state-dot').isVisible())
+        assert.ok(await head().locator('.ov-title > .constitution-state-dot').isVisible())
       }
       assert.equal(await head().locator('.ov-name').innerText(), 'question')
       if (process.env.WORKSPACE_SHOTS) {

@@ -94,6 +94,8 @@ export function shouldForwardDocumentKey(event: Pick<KeyboardEvent, 'defaultPrev
   if (!event.altKey && !event.ctrlKey && !event.metaKey) {
     if (['Enter', ' '].includes(event.key ?? '') && el?.closest?.('button,a[href],summary,[role="link"],[role="button"],[role="option"],[role="treeitem"],[role="checkbox"],[role="radio"],[role="switch"],[role="tab"]')) return false
     if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key ?? '') && el?.closest?.('[role="menu"],[role="radiogroup"],[role="tablist"],[role="slider"],[role="listbox"],[role="tree"]')) return false
+    // A file unfolded in place steps to its neighbours and folds with these.
+    if (['ArrowLeft', 'ArrowRight', 'Escape'].includes(event.key ?? '') && el?.closest?.('[data-unfolded]')) return false
     // A constitution's page walks its tree a level at a time with these letters.
     if (['j', 'k', 'h', 'l'].includes(event.key ?? '') && el?.closest?.('[role="tree"]')) return false
   }
