@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { launchBrowser } from './browser.mjs'
@@ -29,7 +30,7 @@ const hold = async (page, from, to) => {
 }
 const shot = async (page, name) => {
   await page.waitForTimeout(400)
-  await page.screenshot({ path: resolve(`../channels-${name}.png`) })
+  await page.screenshot({ path: resolve(process.env.CHANNELS_SHOTS ?? tmpdir(), `channels-${name}.png`) })
 }
 const browser = await launchBrowser()
 try {
@@ -97,8 +98,9 @@ try {
     // Its post carries the deck and the plot it attached, thumbnails side by side; sent before, the deck is not drawn again.
     const kappa = page.locator('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"]')
     assert.equal(await kappa.locator('.kbn-ch-thumb').count(), 2)
-    // The close for review, without a tapestry, says what it came to.
-    assert.equal(await page.locator('.kbn-ch-item[data-kind="close"] .kbn-ch-outcome').count(), 1)
+    // The close for review says its review note, never its outcome.
+    assert.match(await page.locator('.kbn-ch-item[data-kind="close"] .kbn-ch-item-text').textContent(), /agree to 4%/)
+    assert.equal(await page.locator('.kbn-ch-stream').getByText('validated against 2000 simulations').count(), 0)
     // The stream opens on its newest item.
     await page.waitForFunction(() => { const el = document.querySelector('.kbn-ch > .kbn-ch-stream'); return el.scrollHeight - el.scrollTop - el.clientHeight <= 24 }, null, { timeout: 5000 })
     await fits(page)

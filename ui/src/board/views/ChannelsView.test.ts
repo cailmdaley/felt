@@ -96,9 +96,9 @@ it('lists the recent channels, the newest wait first, and reads a channel as wha
   expect(stream(host)).toStrictEqual([['tsz', 'started'], ['mask', 'ask', true], ['tsz', 'file', false], ['beam', 'handed off']])
   expect(item(host, 'mask').querySelector('.kbn-ch-item-text strong')?.textContent).toBe('5σ')
   expect(item(host, 'mask').querySelector('.kbn-ch-kind')?.textContent).toBe('asks')
-  // Files sit side by side: a page and a figure as thumbnails with small captions, any other file a chip.
+  // Files sit side by side: a page and a figure as thumbnails alone, any other file a chip named by its file.
   const files = item(host, 'tsz').querySelectorAll('.kbn-ch-files > .kbn-ch-file')
-  expect([...files].map(file => [file.classList.contains('kbn-ch-thumb'), file.querySelector('.kbn-ch-thumb-name, .kbn-ch-file-name')?.textContent])).toStrictEqual([[true, 'spectrum.svg'], [true, 'deck.html'], [false, 'nulls.md']])
+  expect([...files].map(file => [file.classList.contains('kbn-ch-thumb'), file.querySelector('.kbn-ch-file-name')?.textContent])).toStrictEqual([[true, undefined], [true, undefined], [false, 'nulls.md']])
   expect(item(host, 'tsz').querySelector('.kbn-ch-item-text')?.textContent?.trim()).toBe('The spectrum at 9σ.')
   expect(view.keydown(new KeyboardEvent('keydown', { key: 'j' }))).toBe(true)
   expect(shown(host)).toBe('Moving house')
@@ -370,32 +370,43 @@ it('heads the view with the channel itself, its name written as Slack writes it,
   expect([shown(host), host.querySelector('.kbn-ch-name')!.hasAttribute('data-lone')]).toStrictEqual(['Moving house', true])
 })
 
-it('shows a close awaiting review with its outcome, clamped, when it has no tapestry: the one place an outcome is drawn', async () => {
+it('shows a close awaiting review by its note and its tapestry, never its outcome, and keeps the tapestry across redraws', async () => {
   daemon()
   const cov = card({ id: 'cmbx/cov', uid: 'V', name: 'Covariance', orchestrator: 'C', column: 'awaitingReview', status: 'closed', closedAt: at(40), outcome: 'Validated against **2000** simulations.', reviewMark: { note: 'Agrees to 4%.', at: at(40) } })
-  const { host } = await mount([chair, tsz, mask, beam, cov])
+  const { view, ctx, host } = await mount([chair, tsz, mask, beam, cov])
+  const feeds = (ctx.workspace as unknown as { globeHost: { feeds: { lead: (card: { uid?: string }) => Promise<unknown> } } }).globeHost.feeds
+  feeds.lead = async card => card.uid === 'V' ? { key: 'local:/w/cov/tapestry.html', name: 'Tapestry', at: Date.now(), unread: false } : undefined
+  // Drawn again once the stream changes.
+  ctx.response = board([chair, { ...tsz, name: 'κ × tSZ, final' }, mask, beam, cov])
+  view.refresh(ctx); await settle(); await settle()
   const review = item(host, 'cov')
   expect([review.dataset.kind, review.hasAttribute('data-waiting'), review.querySelector('.kbn-ch-kind')?.textContent]).toStrictEqual(['close', true, 'for review'])
   expect(review.querySelector('.kbn-ch-item-text')?.textContent?.trim()).toBe('Agrees to 4%.')
-  expect(review.querySelector('.kbn-ch-outcome strong')?.textContent).toBe('2000')
-  // Nowhere else: a working thread's outcome is not drawn.
-  expect(host.querySelectorAll('.kbn-ch-outcome')).toHaveLength(1)
+  const lead = review.querySelector<HTMLElement>('[data-item$=":lead"]')!
+  expect(lead.querySelector('.ws-thumbnail')).not.toBeNull()
+  expect(host.textContent).not.toContain('2000')
+  // A redraw of the stream draws the same tapestry at once, not a new one.
+  ctx.response = board([chair, tsz, mask, beam, cov])
+  view.refresh(ctx)
+  expect(item(host, 'cov').querySelector('[data-item$=":lead"]')).toBe(lead)
 })
 
-it('draws a post to the human with what it attached, gold while the daemon says it waits; a closing post is drawn once, as the outcome', async () => {
+it('draws a post to the human with what it attached, never gold, its pages as thumbnails alone', async () => {
+  const human = { label: 'Sam' }
+  daemon([], undefined, {}, { board: { C: [...BOARD.C, record({ id: 'b5', kind: 'post', fiber: 'C', to: human, text: 'Two calls for you today.', files: ['/w/tsz/deck.html'] }, 4)] }, waiting: { C: { id: 'b5', at: Date.now() - 4 * minute } } })
+  const { host } = await mount([chair, tsz, beam])
+  expect(host.querySelector('[data-channel="channel:cmbx"]')!.hasAttribute('data-waiting')).toBe(false)
+  const post = item(host, 'cmbx')
+  expect([post.dataset.kind, post.hasAttribute('data-waiting'), post.querySelector('.kbn-ch-kind')?.textContent, post.querySelector('.kbn-ch-item-text')?.textContent?.trim()]).toStrictEqual(['post', false, 'posted', 'Two calls for you today.'])
+  expect([...post.querySelectorAll('.kbn-ch-file')].map(file => [file.classList.contains('kbn-ch-thumb'), file.querySelector('.ws-thumbnail') !== null, file.childElementCount])).toStrictEqual([[true, true, 1]])
+})
+
+it('says nothing for a closing post, its words being the outcome', async () => {
   const human = { label: 'Sam' }
   const closed = card({ id: 'cmbx/cov', uid: 'V', name: 'Covariance', orchestrator: 'C', column: 'awaitingReview', status: 'closed', closedAt: at(40), outcome: 'Validated against **2000** simulations.' })
-  const board = { C: [
-    ...BOARD.C,
-    record({ id: 'b5', kind: 'post', fiber: 'C', to: human, text: 'Two calls for you today.', files: ['/w/tsz/deck.html'] }, 4),
-    record({ id: 'b6', kind: 'closed', fiber: 'V', to: human, text: 'Validated against **2000** simulations.' }, 40),
-  ] }
-  daemon([], undefined, {}, { board, waiting: { C: { id: 'b5', at: Date.now() - 4 * minute } } })
+  daemon([], undefined, {}, { board: { C: [...BOARD.C, record({ id: 'b6', kind: 'closed', fiber: 'V', to: human, text: 'Validated against **2000** simulations.' }, 40)] }, waiting: { V: { id: 'b6', at: Date.now() - 40 * minute } } })
   const { host } = await mount([chair, tsz, beam, closed])
-  expect(host.querySelector('[data-channel="channel:cmbx"]')!.hasAttribute('data-waiting')).toBe(true)
-  const post = item(host, 'cmbx')
-  expect([post.dataset.kind, post.hasAttribute('data-waiting'), post.querySelector('.kbn-ch-kind')?.textContent, post.querySelector('.kbn-ch-item-text')?.textContent?.trim()]).toStrictEqual(['post', true, 'posted', 'Two calls for you today.'])
-  expect([...post.querySelectorAll('.kbn-ch-thumb-name')].map(name => name.textContent)).toStrictEqual(['deck.html'])
   const close = item(host, 'cov')
-  expect([close.dataset.kind, close.querySelector('.kbn-ch-item-text'), close.querySelector('.kbn-ch-outcome strong')?.textContent]).toStrictEqual(['close', null, '2000'])
+  expect([close.dataset.kind, close.hasAttribute('data-waiting'), close.querySelector('.kbn-ch-item-text')]).toStrictEqual(['close', true, null])
+  expect(host.textContent).not.toContain('2000')
 })

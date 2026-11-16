@@ -1,5 +1,5 @@
 import type { KanbanCard } from './KanbanTypes.js'
-import { arrived, type BoardRecord } from './boardFeed.js'
+import { arrived, type BoardFeed, type BoardRecord } from './boardFeed.js'
 import type { SentFile } from './sentFiles.js'
 import { cardNamed, threadState, type ThreadState } from './threads.js'
 
@@ -86,7 +86,7 @@ export function waitsSince(card: KanbanCard): number {
  * top-level constitution's office names the channel (the named channel that
  * shares the office's charter name, when there is one), else that top-level
  * is a channel of its own. Something in it waits when a card waits
- * (`waitsSince`) or the daemon's `waiting` names a member. A pin counts until
+ * (`waitsSince`) or `waiting` names a member's question or close. A pin counts until
  * a later unpin; a hide counts until a later show or a later wait.
  */
 export function composeChannels(input: {
@@ -96,7 +96,7 @@ export function composeChannels(input: {
   dismissed: readonly string[]
   /** Pinned channel keys, each with its latest pin. */
   pinned: ReadonlyMap<string, number>
-  /** When each fiber's line began waiting on the human, as the daemon says. */
+  /** When each fiber's question or close began waiting on the human ({@link BoardFeed.waiting}). */
   waiting: ReadonlyMap<string, { at: number }>
   now: number
 }): Channel[] {
@@ -232,7 +232,7 @@ export interface Item {
   at: number
   /** When it reached this daemon: what is new to the reader. */
   arrived: number
-  /** The question, the post, a close's review note, or the files' captions (else their names); a closing post is the card's outcome, not this. */
+  /** The question, the post, a close's review note, or the files' captions; empty for a closing post (the card's outcome) and for files sent without one. */
   text: string
   files: SentFile[]
   /** It waits on the human now. */
@@ -249,9 +249,9 @@ const LINES: Readonly<Record<string, Item['kind']>> = { asked: 'ask', post: 'pos
  * A channel's stream, oldest first. Its items are the posts, questions and
  * closes addressed to the human (each carrying the files it attached) and the
  * files sent to the human on their own, each path at its newest send and a
- * worker's sends close together one item. A line waits when the daemon's
- * `waiting` names it; a card that waits with no such line (an open question,
- * a close for the human's review) is its own waiting item. Each worker shows
+ * worker's sends close together one item. A question or close waits when
+ * `waiting` names it, a post never; a card that waits with no such line (an
+ * open question, a close for the human's review) is its own waiting item. Each worker shows
  * once: the item that waits, else its latest. Between the items, a mark for
  * every thread started (`launches`), handed off, or closed to anyone but the
  * human, within the board's reach.
@@ -260,7 +260,7 @@ export function composeStream(input: {
   channel: Channel
   records: readonly BoardRecord[]
   files: readonly SentFile[]
-  /** The line each fiber waits on the human with, as the daemon says. */
+  /** The question or close each fiber waits on the human with ({@link BoardFeed.waiting}). */
   waiting: ReadonlyMap<string, { id: string }>
   launches: (card: KanbanCard) => readonly number[]
   now: number
@@ -317,7 +317,7 @@ export function composeStream(input: {
   }
   const stream: Entry[] = marks
   for (const list of items.values()) {
-    for (const item of list) if (item.kind === 'file') item.text = [...new Set(item.files.flatMap(file => file.caption?.trim() || []))].join(' · ') || item.files.map(file => file.basename).join(', ')
+    for (const item of list) if (item.kind === 'file') item.text = [...new Set(item.files.flatMap(file => file.caption?.trim() || []))].join(' · ')
     const latest = [...list].sort((a, b) => a.at - b.at)
     stream.push(latest.filter(item => item.waiting).at(-1) ?? latest.at(-1)!)
   }

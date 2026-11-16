@@ -174,7 +174,8 @@ describe('composeStream', () => {
 
   it('holds what was addressed to the human, each worker once, with marks of threads starting and stopping between, oldest first', () => {
     expect(said(stream())).toStrictEqual([
-      ['cmbx', 'file', 'plan.md', false],
+      // Sent without a caption, it says nothing: its file names itself.
+      ['cmbx', 'file', '', false],
       ['cmbx/kappa', 'started'],
       // Closed to its chair, a mark; marked for the human's review, an item, with its note.
       ['cmbx/cov', 'closed'],
@@ -203,7 +204,7 @@ describe('composeStream', () => {
     expect(said(stream({ records: [...records, done] })).at(-1)).toStrictEqual(['cmbx/beam', 'closed'])
   })
 
-  it('waits where the daemon says a line waits, else where a card waits; the item that waits shows over a newer one', () => {
+  it('waits where the feed says a question or close waits, else where a card waits; the item that waits shows over a newer one', () => {
     // Without a line the daemon names, the card's close for review is its own item.
     const review = stream({ records: records.filter(each => each.id !== 'r3m'), waiting: new Map() }).find(entry => entry.card === cov && entry.kind !== 'mark')
     expect(review && review.kind !== 'mark' && [review.kind, review.text, review.waiting]).toStrictEqual(['close', 'Validated to 4%.', true])
@@ -211,10 +212,6 @@ describe('composeStream', () => {
     const asked = [...records, record('r9', 'asked', 'M', 21, { to: human, text: 'Which threshold, 5σ or 3σ?' })]
     const ask = stream({ records: asked, waiting: new Map([['M', { id: 'r9' }]]) }).find(entry => entry.card === mask)
     expect(ask && ask.kind !== 'mark' && [ask.id, ask.waiting]).toStrictEqual(['r9', true])
-    // A post the human has not answered waits; the chair's post answered by the human does not.
-    const posted = [...records, record('r10', 'post', 'C', 8, { to: human, text: 'Two calls for you today.' })]
-    const post = stream({ records: posted, waiting: new Map([['C', { id: 'r10' }]]) }).find(entry => entry.card === chair)
-    expect(post && post.kind !== 'mark' && [post.kind, post.waiting]).toStrictEqual(['post', true])
     expect(stream({ files: [...files, send('M', 'mask.svg', 1)] }).find(entry => entry.card === mask)?.kind).toBe('ask')
   })
 

@@ -184,17 +184,6 @@
 .kbn-ch-file:hover { color: var(--kbn-ink); }
 .kbn-ch-thumb { width: 168px; }
 .kbn-ch-thumb-face.ws-thumbnail { width: 168px; height: 105px; border-radius: 4px; box-shadow: 0 0 0 0.5px var(--kbn-rule-strong); }
-.kbn-ch-thumb-name { font: var(--type-label)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-/* What a close awaiting review came to, without a tapestry: its outcome, clamped. */
-.kbn-ch-outcome {
-  max-width: 44rem; padding: 6px 10px; border-left: 2px solid var(--kbn-rule-strong); border-radius: 4px;
-  background: color-mix(in srgb, var(--kbn-ink) 4%, transparent);
-  font: var(--type-meta)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink-soft);
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; overflow-wrap: anywhere;
-}
-.kbn-ch-outcome * { display: inline; margin: 0; padding: 0; }
-.kbn-ch-outcome :is(p, li) + :is(p, li)::before { content: ' '; }
 
 /* The console, docked under the stream. */
 .kbn-ch > .ws-dock { flex: none; }
