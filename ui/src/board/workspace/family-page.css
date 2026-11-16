@@ -26,8 +26,6 @@
 .ov-ancestor .constitution-state-dot { margin-left: calc(var(--ov-step) / -2 - 16px); height: 22px; }
 .ov-ancestor .ov-slug { flex: none; color: var(--ws-ink-soft); }
 .ov-strip-said { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ws-ink-soft); font: var(--type-meta)/var(--leading-ui) var(--font-serif); }
-.ov-strip-said * { display: inline; margin: 0; padding: 0; font-size: inherit; line-height: inherit; }
-.ov-strip-said :is(p, li) + :is(p, li)::before { content: ' '; }
 .ov-title { grid-area: path; display: flex; align-items: center; min-width: 0; font: var(--type-label)/var(--leading-tight) var(--font-mono); }
 .ov-title .constitution-state-dot { flex: none; width: 16px; height: 20px; }
 .ov-main { box-sizing: border-box; padding-bottom: 24px; }

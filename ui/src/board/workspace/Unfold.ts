@@ -1,5 +1,6 @@
 import type { DocumentKey } from './DocumentBridge.js'
-import { buildFileViewer, disposeFileViewer } from '../FileViewerPanel.js'
+import { buildFileViewer, disposeFileViewer, resumeFileViewer, suspendFileViewer } from '../FileViewerPanel.js'
+import { forwardDocumentKey } from './DocumentBridge.js'
 import { documentKind, parseDocKey, type DocKey } from './documents.js'
 import { Thumbnail } from './Thumbnail.js'
 import './unfold.css'
@@ -81,11 +82,12 @@ export class Unfold {
     this.files = [...files]
     const keys = new Set(files.map(file => file.key))
     for (const [key, card] of this.cards) if (!keys.has(key)) { card.thumbnail.dispose(); card.el.remove(); this.cards.delete(key) }
-    const shown = this.opts.single ? this.files.slice(0, 1) : this.files
-    this.row.replaceChildren(...shown.map(file => this.card(file)))
+    const shown = this.opts.single ? this.files.slice(0, 1) : this.files, cards = shown.map(file => this.card(file))
+    // The same cards stay where they stand: moving one reloads its page, drops its focus and resets the row's scroll.
+    if (cards.length !== this.row.children.length || cards.some((card, i) => this.row.children[i] !== card)) this.row.replaceChildren(...cards)
     this.el.hidden = !files.length
     this.el.toggleAttribute('data-several', shown.length > 1)
-    if (this.open && !keys.has(this.open.key)) this.fold()
+    if (this.open && !keys.has(this.open.key)) this.fold(false)
     else if (this.open) this.paintBar()
   }
   /** The file unfolded, if one is. */
@@ -100,7 +102,11 @@ export class Unfold {
     const kind = documentKind(parsed.path)
     const viewer = buildFileViewer(this.opts.shuttleBase, parsed.path, parsed.owner, undefined, undefined, {
       kind: kind === 'fiber' ? undefined : kind, fit: true, active: true,
-      onDocumentKey: (pressed: DocumentKey) => { if (!pressed.altKey && !pressed.ctrlKey && !pressed.metaKey && !pressed.shiftKey) this.key(pressed.key) },
+      // Keys from inside the file: its own steps and fold, else the board's, replayed from its place.
+      onDocumentKey: (pressed: DocumentKey) => {
+        const plain = !pressed.altKey && !pressed.ctrlKey && !pressed.metaKey && !pressed.shiftKey
+        if (!plain || !this.key(pressed.key)) forwardDocumentKey(this.page, pressed, viewer.querySelector('iframe'))
+      },
     })
     this.open = { key, viewer }
     this.page.dataset.kind = kind
@@ -111,29 +117,38 @@ export class Unfold {
     this.page.focus({ preventScroll: true })
     this.opts.seen?.(key)
   }
-  /** Folds the unfolded file back to its preview, and brings the preview into sight. */
-  fold(): void {
+  /**
+   * Folds the unfolded file back to its preview. Folded by the human, the
+   * preview comes into sight with the focus; folded because the file is gone,
+   * the focus moves only if it was in the file, and nothing scrolls.
+   */
+  fold(asked = true): void {
     const key = this.open?.key
     if (!key) return
+    const held = this.el.contains(document.activeElement)
     this.drop()
     this.el.removeAttribute('data-unfolded')
     this.el.replaceChildren(this.row)
     // Folded from a file the row does not draw, it returns to the row's first.
     const card = this.cards.get(key)?.el.isConnected ? this.cards.get(key)!.el : this.row.querySelector<HTMLButtonElement>('.uf-card')
-    card?.focus({ preventScroll: true })
-    ;(card ?? this.el).scrollIntoView({ block: 'nearest' })
+    if (asked || held) card?.focus({ preventScroll: true })
+    if (asked) (card ?? this.el).scrollIntoView({ block: 'nearest' })
   }
+  /** Its host is hidden: an unfolded file stops reading and playing. */
+  suspend(): void { if (this.open) suspendFileViewer(this.open.viewer) }
+  resume(): void { if (this.open) resumeFileViewer(this.open.viewer) }
   dispose(): void {
     this.drop()
     for (const card of this.cards.values()) card.thumbnail.dispose()
     this.cards.clear()
   }
 
-  /** ← and → step, Escape folds, while a file is unfolded; true when the key was used. */
+  /** ← and → step, Escape folds, ↓ and ↑ scroll, while a file is unfolded; true when the key was used. */
   private key(key: string, event?: KeyboardEvent): boolean {
     if (!this.open || event?.altKey || event?.ctrlKey || event?.metaKey || event?.shiftKey) return false
     if (key === 'ArrowLeft' || key === 'ArrowRight') { this.step(key === 'ArrowLeft' ? -1 : 1); return true }
     if (key === 'Escape') { this.fold(); return true }
+    if (key === 'ArrowDown' || key === 'ArrowUp') { scroller(this.el)?.scrollBy({ top: key === 'ArrowDown' ? 60 : -60 }); return true }
     return false
   }
   private step(by: -1 | 1): void {

@@ -85,6 +85,9 @@ describe('a constitution\'s view', () => {
     expect(bar()).toStrictEqual(['Tapestry', '1 / 3'])
     press(page.el.querySelector('.uf-page')!, 'ArrowRight')
     expect(bar()).toStrictEqual(['new.png', '2 / 3'])
+    // Keys in the unfolded file stay there: ↓ does not jump to the rows.
+    press(page.el.querySelector('.uf-page')!, 'ArrowDown')
+    expect(document.activeElement).toBe(page.el.querySelector('.uf-page'))
     press(page.el.querySelector('.uf-page')!, 'Escape')
     expect(page.el.querySelector('.uf[data-unfolded]')).toBeNull()
     expect(document.activeElement).toBe(cards[0])

@@ -713,7 +713,8 @@ function buildHtmlViewer(
         // The board's own scroller carries a fitted page: bring the fragment's
         // offset to its top, as the page would have scrolled itself.
         const mark = document.createElement('div')
-        mark.style.cssText = `position:absolute;left:0;top:${message.payload.top as number}px;width:1px;height:1px;pointer-events:none`
+        // The margin keeps the passage clear of a bar pinned over the top of the scroll.
+        mark.style.cssText = `position:absolute;left:0;top:${message.payload.top as number}px;width:1px;height:1px;pointer-events:none;scroll-margin-top:48px`
         wrap.append(mark)
         mark.scrollIntoView({ block: 'start' })
         mark.remove()

@@ -85,6 +85,8 @@ export class FamilyPage {
   private acts: FiberActs | null = null
   /** The files the preview shows, by key, and the card they were read for. */
   private shown: { card: string; files: Map<string, MapFile> } | null = null
+  /** The latest read of its files: an older read that lands late draws nothing. */
+  private reads = 0
   private pull = 0
   /** The resting and archived threads are drawn too. */
   private quietShown = false
@@ -135,7 +137,7 @@ export class FamilyPage {
     let touch: number | null = null
     this.scroller.addEventListener('touchstart', event => { touch = this.scroller.scrollTop <= 0 ? event.touches[0].clientY : null }, { passive: true })
     this.scroller.addEventListener('touchmove', event => { if (touch !== null && event.touches[0].clientY - touch > PULL_PX) { touch = null; this.pulled(PULL_PX) } }, { passive: true })
-    bindDrawnPage(this.el, { suspend: () => { this.awake = false }, resume: () => { this.awake = true; this.repaint() }, dispose: () => this.dispose() })
+    bindDrawnPage(this.el, { suspend: () => { this.awake = false; this.unfold.suspend() }, resume: () => { this.awake = true; this.unfold.resume(); this.repaint() }, dispose: () => this.dispose() })
   }
 
   update(card: KanbanCard, index: ThreadIndex, now = Date.now()): void {
@@ -146,7 +148,7 @@ export class FamilyPage {
     const current = index.card(card), children = index.children(current), above = this.ancestors()
     const said = this.feeds.said(current), waits = this.feeds.waits()
     const wants = [current, ...above, ...index.subtree(current)].map(card => wantOf(card, waits))
-    const signature = JSON.stringify([Math.floor(now / 60_000), current, above, children, said, wants, this.feeds.files(current).map(file => file.key)])
+    const signature = JSON.stringify([Math.floor(now / 60_000), current, above, children, said, above.map(card => this.feeds.said(card)), wants, this.feeds.files(current).map(file => file.key)])
     if (signature === this.signature) return
     this.signature = signature
     this.paint(current, now)
@@ -237,8 +239,11 @@ export class FamilyPage {
       rule.dataset.attention = attentionOf(level, waits)
       return rule
     }))
-    const said = this.feeds.said(card), text = el('span', 'ov-strip-said')
-    if (said) { text.innerHTML = renderMarkdown(said.text); text.title = text.textContent?.replace(/\s+/g, ' ').trim() ?? '' }
+    // Its words as plain text: a link here would both follow and open the view.
+    const said = this.feeds.said(card), words = el('div')
+    if (said) words.innerHTML = renderMarkdown(said.text)
+    const text = el('span', 'ov-strip-said', words.textContent?.replace(/\s+/g, ' ').trim() ?? '')
+    text.title = text.textContent ?? ''
     strip.append(rules, stateDot(card, waits, () => this.feeds.view(card)), el('span', 'ov-slug', slug(card)), time(card, now), text)
     return strip
   }
@@ -294,8 +299,9 @@ export class FamilyPage {
   private paintFiles(card: KanbanCard): void {
     const uid = card.uid ?? card.id
     if (this.shown && this.shown.card !== uid) { this.unfold.update([]); this.shown = null }
+    const read = ++this.reads
     void this.feeds.lead(card).then(lead => {
-      if ((this.card?.uid ?? this.card?.id) !== uid) return
+      if (read !== this.reads) return
       const files = [...lead ? [lead] : [], ...this.feeds.files(card).filter(file => file.key !== lead?.key)]
       this.shown = { card: uid, files: new Map(files.map(file => [file.key, file])) }
       this.unfold.update(files.map(file => ({ key: file.key, name: file.name })))
@@ -319,6 +325,8 @@ export class FamilyPage {
    */
   private key(event: KeyboardEvent): void {
     if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || (event.target as Element).closest('.ov-tools')) return
+    // An unfolded file keeps its keys.
+    if (this.unfold.unfolded && this.unfold.el.contains(event.target as Node)) return
     const rows = [...this.up.querySelectorAll<HTMLElement>('.ov-ancestor'), this.head, ...this.threads.querySelectorAll<HTMLElement>('.ov-thread')]
     const at = rows.indexOf(event.target as HTMLElement)
     const step = ({ j: 1, ArrowDown: 1, k: -1, ArrowUp: -1 } as Record<string, number>)[event.key]

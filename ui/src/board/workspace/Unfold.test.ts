@@ -43,14 +43,18 @@ describe('files that unfold in place', () => {
     expect(document.activeElement).toBe(unfold.el.querySelector('.uf-card[data-key="host:/w/c.md"]'))
   })
 
-  it('keeps its cards across an update with the same files, and folds when the unfolded file is gone', () => {
+  it('keeps its cards in place across an update with the same files, focus included, and folds when the unfolded file is gone without taking the focus', () => {
     const { unfold } = made()
-    const first = unfold.el.querySelector('.uf-card')
+    const first = unfold.el.querySelector<HTMLElement>('.uf-card')!
+    first.focus()
     unfold.update(files)
-    expect(unfold.el.querySelector('.uf-card')).toBe(first)
+    expect([unfold.el.querySelector('.uf-card'), document.activeElement]).toStrictEqual([first, first])
     unfold.unfold('host:/w/c.md')
+    const elsewhere = document.body.appendChild(document.createElement('input'))
+    elsewhere.focus()
     unfold.update(files.slice(0, 2))
     expect(unfold.unfolded).toBeNull()
     expect(unfold.el.querySelectorAll('.uf-card')).toHaveLength(2)
+    expect(document.activeElement).toBe(elsewhere)
   })
 })
