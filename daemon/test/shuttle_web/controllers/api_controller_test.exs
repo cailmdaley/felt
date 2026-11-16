@@ -637,7 +637,7 @@ defmodule ShuttleWeb.APIControllerTest do
       """,
       "shuttle" => """
       #!/usr/bin/env bash
-      printf '%s\\n' "$@" >> "$SHUTTLE_ARGV_LOG"
+      printf '%s\\n' "$*" >> "$SHUTTLE_ARGV_LOG"
       exit 0
       """
     })
@@ -658,9 +658,15 @@ defmodule ShuttleWeb.APIControllerTest do
     assert body["action"] == "close-tempered"
     assert body["target"] == "tempered"
 
-    captured = argv_log |> File.read!() |> String.split("\n", trim: true)
+    # One line per shuttle call; the daemon's own background calls share the log.
+    captured =
+      argv_log
+      |> File.read!()
+      |> String.split("\n", trim: true)
+      |> Enum.map(&String.split/1)
+      |> Enum.find(&("close" in &1))
+
     assert Enum.take(captured, 2) == ["-C", MockRunner.felt_root()]
-    assert "close" in captured
     assert "--tempered=true" in captured
   end
 
