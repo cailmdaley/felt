@@ -277,6 +277,9 @@ Contract 41 adds `inbox thread-state`, `thread-put`, `routes`, `route` and `sett
 The `/deliver` wire envelope is unchanged, so contract-40 and contract-41 daemons forward results to each other in both directions, and a repeated forward is a no-op on either.
 A daemon rolled back to contract 40 never reads the routing inbox: results bound for another host, unresolved or not yet current, and asker notices, wait there until the host rolls forward.
 What it captures meanwhile goes to its own outbox, which no later daemon reads.
+Rolled forward again, the daemon captures every signal still on an owned thread, stamped after the baseline and under 14 days old, into the routing inbox again, so a result the contract-40 daemon captured but never delivered is not lost.
+One it already delivered is not delivered twice: placing or forwarding it puts the same `thread-<digest>` id into the recipient fiber's inbox, which still holds that id (offered entries outlive the 14-day window), and an asker notice reuses its `<id>-asker` message id, which the sending host's message ledger answers from its stored receipt.
+An unblock note's board line is the exception: its new routing entry owes the line, so the board shows it a second time.
 
 ## Readers
 
