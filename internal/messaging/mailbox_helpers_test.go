@@ -150,14 +150,3 @@ func readConsumedBatch(root string) (Attempt, error) {
 	}
 	return batches[0], nil
 }
-
-// answerThreadSignalsCurrent puts a shuttle on env's PATH that reports every
-// thread signal current.
-func answerThreadSignalsCurrent(t *testing.T, env *sysenv.Env) {
-	t.Helper()
-	scripts := t.TempDir()
-	if err := os.WriteFile(filepath.Join(scripts, "shuttle"), []byte("#!/bin/sh\nprintf '{\"current\":true}\\n'\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	env.Set("PATH", scripts+string(os.PathListSeparator)+env.Getenv("PATH"))
-}

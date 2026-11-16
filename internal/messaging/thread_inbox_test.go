@@ -106,6 +106,45 @@ func TestThreadCaptureKeepsFirstPublicationInsideItsWindow(t *testing.T) {
 	}
 }
 
+// Capture reads stamps in every form the daemon's capture accepts and keeps
+// them as written; an unreadable or expired stamp stores nothing.
+func TestThreadCaptureReadsElixirStampsAsWritten(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	if err := os.MkdirAll(filepath.Dir(threadStatePath(env)), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(threadStatePath(env), []byte(`{"baseline":"2020-01-01T00:00:00Z"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	hourAgo := time.Now().Add(-time.Hour)
+	stamps := map[string]string{
+		"thread-space":   hourAgo.UTC().Format("2006-01-02 15:04:05Z"),
+		"thread-offset":  hourAgo.In(time.FixedZone("", 3600)).Format("2006-01-02T15:04:05.000-0700"),
+		"thread-hours":   hourAgo.In(time.FixedZone("", -7200)).Format("2006-01-02T15:04:05-07"),
+		"thread-comma":   hourAgo.UTC().Format("2006-01-02T15:04:05") + ",25Z",
+		"thread-garbage": "yesterday",
+		"thread-old":     time.Now().Add(-15 * 24 * time.Hour).UTC().Format("2006-01-02 15:04:05Z"),
+	}
+	for id, stamp := range stamps {
+		r := threadRecord()
+		r["retained_at"] = stamp
+		capture(t, env, ThreadPublication{id, r})
+	}
+	got := map[string]string{}
+	for _, p := range routes(t, env) {
+		got[p.ID] = p.Record["retained_at"].(string)
+	}
+	for _, id := range []string{"thread-space", "thread-offset", "thread-hours", "thread-comma"} {
+		if got[id] != stamps[id] {
+			t.Fatalf("%s: %q, want %q as written", id, got[id], stamps[id])
+		}
+	}
+	if len(got) != 4 {
+		t.Fatalf("an unreadable or expired stamp was captured: %v", got)
+	}
+}
+
 func TestRoutingInboxHasNoAdmissionCap(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
