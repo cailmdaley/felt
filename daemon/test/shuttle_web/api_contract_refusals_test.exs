@@ -47,7 +47,7 @@ defmodule ShuttleWeb.ApiContractRefusalsTest do
     end
   end
 
-  test "dispatch and delivery serialize all launch refusal status families", %{poller: poller} do
+  test "dispatch serializes all launch refusal status families", %{poller: poller} do
     for {result, status} <- [
           {{:error, {:fiber_not_found, "fiber missing here"}}, 404},
           {{:error, {:launch_reserved, %{"worker" => "worker-1", "reason" => "unconfirmed"}}},
@@ -57,25 +57,11 @@ defmodule ShuttleWeb.ApiContractRefusalsTest do
           {{:error, :launch_failed}, 500},
           {{:error, {:backend_not_ready, "terminal starting"}}, 503},
           {{:error, :poller_busy}, 202}
-        ],
-        path <- ~w(/dispatch /deliver) do
+        ] do
       :ok = GenServer.call(poller, {:result, result})
-
-      conn =
-        post(
-          api_conn(),
-          "/api/v1" <> path,
-          # Explicit session delivery reaches the scripted launcher without
-          # a human/voice record's document lookup.
-          Jason.encode!(%{
-            fiber_id: "work/item",
-            text: "Continue",
-            message_after_launch: true
-          })
-        )
-
+      conn = post(api_conn(), "/api/v1/dispatch", Jason.encode!(%{fiber_id: "work/item"}))
       assert conn.status == status
-      assert %{"dispatched" => false} = assert_contract(conn, path)
+      assert %{"dispatched" => false} = assert_contract(conn, "/dispatch")
     end
   end
 

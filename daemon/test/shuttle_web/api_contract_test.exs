@@ -35,7 +35,7 @@ defmodule ShuttleWeb.ApiContractTest do
   test "version promises identity and readiness, including during boot, and refuses unknown origins" do
     Env.own_scope!()
 
-    assert %{"api_level" => 1, "host" => _, "ready" => true} =
+    assert %{"api_level" => 2, "host" => _, "ready" => true} =
              get(api_conn(), "/api/v1/version") |> assert_contract("/version")
 
     Shuttle.Readiness.begin_boot()
@@ -314,7 +314,7 @@ defmodule ShuttleWeb.ApiContractWorkerTest do
              request("/dispatch", payload, 200)
   end
 
-  test "delivery launches fresh, messages the live session and can paste terminal input" do
+  test "delivery launches fresh and can paste terminal input" do
     id = "work/deliver"
     constitution(id)
 
@@ -322,18 +322,6 @@ defmodule ShuttleWeb.ApiContractWorkerTest do
              request(
                "/deliver",
                %{fiber_id: id, text: "Start here", from: "human", message_id: "human-start"},
-               200
-             )
-
-    assert %{"delivery" => "message", "delivered" => true, "receipt" => %{"status" => "accepted"}} =
-             request(
-               "/deliver",
-               %{
-                 fiber_id: id,
-                 text: "Then this",
-                 message_id: "live-message",
-                 message_after_launch: true
-               },
                200
              )
 

@@ -79,8 +79,7 @@ defmodule ShuttleWeb.ClaimControllerTest do
           Jason.encode!(%{
             fiber_id: "claimed",
             text: "me: hello",
-            live_input: true,
-            message_after_launch: true
+            live_input: true
           })
         )
 

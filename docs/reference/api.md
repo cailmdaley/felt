@@ -260,10 +260,7 @@ The board supplies ids; a caller without one gets an owner-minted id.
 The prompt hook still records the human row and clears the ask.
 Ambiguous typed input is settled unknown and never re-sent automatically.
 Human launches keep forced-start authority; agent inbox launches, including fresh replacements, obey the armed-document and quarantine gates.
-`live_input: true` keeps voice's typed transport without recording a human entry.
-With `message_after_launch: true`, the owner instead starts the dormant worker without the text in its launch prompt, waits up to 30 s for its native conversation address, then sends the text as a message using `message_id`.
-This keeps transcript-batch deduplication identical for live and dormant workers.
-An address timeout returns **503** rather than claiming delivery.
+`live_input: true` records a spoken line as a human entry with source `voice` and transports it the same way, as typed input or a From User launch prompt.
 
 ### Codex terminal workers
 
@@ -866,7 +863,7 @@ Speaker-labelled paragraphs merge adjacent utterances by the same speaker, witho
 A bare `send` delivers nothing.
 Each delivered batch ends with `— shuttle transcript --since HH:MM:SS`, using its first spoken time on the recorder, followed by ` --recorder HOST` when the target's origin is another host.
 The `/voice/transcript` endpoint reads the corresponding day rows.
-Live workers take terminal input through `/deliver` with `live_input: true`; cold workers receive the same text as their launch directive, with `message_after_launch: false`.
+Live workers take terminal input through `/deliver` with `live_input: true`; cold workers receive the same text as their launch directive.
 Batches stay ordered per destination; different destinations proceed independently.
 The relay checkpoints attempts before delivery and never automatically replays them, including definite failures.
 A 202 with `delivered: null` or an interrupted delivery is unconfirmed; `last` explains that the words remain in the transcript.

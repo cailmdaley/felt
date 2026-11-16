@@ -87,7 +87,7 @@ A plain agent `/deliver` does the same, minting an id when the caller supplies n
 The owner clears the fiber's outstanding ask when a due entry from a sender other than `shuttle` reaches its inbox, including a remote sender.
 A future entry clears nothing.
 Session-addressed messages and idle and mail-failure notices keep their direct transports and `messages/` receipts.
-Voice (`live_input`) uses human records and typed input; explicit `message_after_launch` requests use their session delivery paths.
+Voice (`live_input`) uses human records and typed input.
 
 `/deliver` adds `consumed` for a live worker: the consumer's `action`, `members`, `followup` and `held: cost`, and `message`, this message's state after the pass (`consume --message`): `delivered`, `sent` (its outcome not yet confirmed), `reserved` for a launch, `pending`, or `unknown` when the inbox no longer holds it as delivered (it expired, which consume records on the offered entry as disposition `expired`, or was never stored), which `/deliver` answers as `queued` with `delivered: null`.
 The status describes this message, not whatever else the pass sent: `woken`, `followed_up`, `delivered` (as context, or before a retry), `held`, `starting` or `queued`, which the CLI prints.

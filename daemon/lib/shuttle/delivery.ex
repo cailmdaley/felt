@@ -11,34 +11,16 @@ defmodule Shuttle.Delivery do
   (`Shuttle.InboxRecord`), then transported as typed input or a launch
   prompt. Human launches keep the board's forced-start authority; a fresh
   request passes the agent gate. Voice uses `human/3` with source `voice`.
-  `deliver/3` handles explicit launch-then-message callers through their session transports.
 
   A conversation a human resumed from the card is its worker
   (`Shuttle.SessionResume`), so it is addressed like any other.
   """
 
-  alias Shuttle.{Harnesses, Messaging, Poller, SessionLedger}
+  alias Shuttle.Poller
 
   # How long a delivery's put, consumes and launch may take together; see
   # `context/4`.
   @budget_ms 35_000
-
-  @type result ::
-          {:message, pos_integer(), map()}
-          | {:launch, String.t(), term()}
-          | {:error, pos_integer(), String.t()}
-
-  @spec deliver(String.t(), String.t(), keyword()) :: result()
-  def deliver(fiber_id, text, opts \\ []) do
-    worker = if opts[:resume_mode] != "fresh", do: Poller.live_worker(fiber_id)
-
-    cond do
-      worker && opts[:message_after_launch] -> await_message_address(fiber_id, text, opts)
-      worker -> message(worker, text, opts)
-      opts[:message_after_launch] -> launch_then_message(fiber_id, text, opts)
-      true -> launch(fiber_id, text, opts)
-    end
-  end
 
   def human(fiber_id, text, opts \\ []) do
     dispatch = fn mode ->
@@ -170,114 +152,6 @@ defmodule Shuttle.Delivery do
 
     "no fresh session started: #{why}. Send it again under the same message id once that changes."
   end
-
-  # Explicit launch-then-message callers use native session messaging even
-  # when the worker must start before its conversation can be addressed.
-  defp launch_then_message(fiber_id, text, opts) do
-    result =
-      Poller.dispatch_fiber(fiber_id,
-        force: true,
-        ad_hoc: true,
-        resume_mode: opts[:resume_mode] || "continue"
-      )
-
-    case result do
-      {:ok, _} -> await_message_address(fiber_id, text, opts)
-      {:error, :already_running} -> await_message_address(fiber_id, text, opts)
-      _ -> {:launch, "fresh", result}
-    end
-  end
-
-  defp await_message_address(fiber_id, text, opts) do
-    deadline =
-      System.monotonic_time(:millisecond) + Shuttle.Env.app(:delivery_address_wait_ms, 30_000)
-
-    await_message_address(fiber_id, text, opts, deadline)
-  end
-
-  defp await_message_address(fiber_id, text, opts, deadline) do
-    worker = Poller.live_worker(fiber_id)
-
-    cond do
-      worker && is_binary(worker[:session_uuid]) ->
-        message(worker, text, opts)
-
-      System.monotonic_time(:millisecond) >= deadline ->
-        {:error, 503,
-         "the worker started but has no addressable conversation yet; the transcript retains this batch"}
-
-      true ->
-        Process.sleep(100)
-        await_message_address(fiber_id, text, opts, deadline)
-    end
-  end
-
-  defp launch(fiber_id, text, opts) do
-    since = System.system_time(:millisecond)
-
-    # The dispatcher reads the fiber itself, so it alone decides whether there
-    # is a conversation worth resuming.
-    result =
-      Poller.dispatch_fiber(fiber_id,
-        force: true,
-        ad_hoc: true,
-        user_message: text,
-        resume_mode: opts[:resume_mode] || "continue"
-      )
-
-    # A worker that appeared between the look and the launch takes the message.
-    with {:error, :already_running} <- result,
-         worker when is_map(worker) <- Poller.live_worker(fiber_id) do
-      message(worker, text, opts)
-    else
-      _ -> {:launch, launch_mode(result, fiber_id, since), result}
-    end
-  end
-
-  # Which launch the dispatcher chose, from the session ledger: a resume
-  # records its `resume` row before the dispatch returns.
-  defp launch_mode({:ok, session}, fiber_id, since) do
-    resumed? =
-      SessionLedger.read_since(since)
-      |> Enum.any?(fn row ->
-        row["kind"] == "resume" and (row["tmux"] == session or row["fiber"] == fiber_id)
-      end)
-
-    if resumed?, do: "previous", else: "fresh"
-  end
-
-  defp launch_mode(_result, _fiber_id, _since), do: "fresh"
-
-  defp message(%{session_uuid: native, cli: cli}, text, opts) do
-    case harness(cli) do
-      harness when is_binary(harness) and is_binary(native) ->
-        address = Messaging.address("local", harness, native)
-
-        payload = %{
-          "address" => address,
-          "text" => text,
-          "from" => opts[:from] || "shuttle",
-          "wake" => true,
-          "message_id" => Keyword.get(opts, :message_id) || message_id()
-        }
-
-        case Messaging.send_message(payload) do
-          {:ok, status, receipt} -> {:message, status, receipt}
-          {:error, status, error} -> {:error, status, error}
-        end
-
-      _ ->
-        {:error, 409,
-         "the live worker has no addressable conversation yet; try again once it has started"}
-    end
-  end
-
-  defp harness(cli) do
-    if Harnesses.supported?(cli), do: Harnesses.normalize(cli)
-  end
-
-  defp message_id,
-    do: "deliver-" <> Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false)
 
   @doc """
   Store context and its delivery wishes in the owning fiber's inbox, then

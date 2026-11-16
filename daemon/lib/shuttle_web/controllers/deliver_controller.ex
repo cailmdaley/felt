@@ -12,8 +12,8 @@ defmodule ShuttleWeb.DeliverController do
   202 with `delivered` null when the start is unconfirmed, or 409 with the
   refusal's `reason` and `error`. Human text is recorded there before typed
   input or a From User launch prompt transports it. `live_input` records voice
-  as human input; explicit `message_after_launch` uses the session delivery path. A request carrying
-  `origin` is forwarded to that owner's identical route.
+  as human input. A request carrying `origin` is forwarded to that owner's
+  identical route.
 
   With `context_only` (and a `message_id`), `text` is queued in the fiber's
   inbox (`Shuttle.Delivery.context/4`): 202 `{delivery: "context",
@@ -30,13 +30,11 @@ defmodule ShuttleWeb.DeliverController do
   before a retry), held, starting (a replacement is launching for it) or
   queued (waiting, or sent with its arrival unconfirmed: `delivered` null).
 
-  The session-path answer names what happened in `delivery`: `"message"` with the messaging
-  `receipt`, or `"resume"` / `"dispatch"` with the `/dispatch` envelope.
-  `delivered` is `true` when the worker has the text or its terminal took it
-  as typed input, `false` when it did not
-  get it, and `null` (status 202) when the text was sent but its arrival is
-  unconfirmed: a receipt of status `"unknown"`, or an owner that did not answer
-  in time. `detail` then says what is known.
+  A human line answers `delivery: "input"`. `delivered` is `true` when the
+  worker's terminal took it as typed input or its launch prompt carries it,
+  `false` when it did not get it, and `null` (status 202) when its arrival is
+  unconfirmed: input that may have been submitted, or an owner that did not
+  answer in time. `detail` then says what is known.
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -55,7 +53,6 @@ defmodule ShuttleWeb.DeliverController do
           "attachments",
           "context_only",
           "message_id",
-          "message_after_launch",
           "live_input",
           "voice_record_only",
           "notify_address",
@@ -114,15 +111,12 @@ defmodule ShuttleWeb.DeliverController do
     |> reply(fiber_id)
   end
 
-  defp local(fiber_id, text, from, context), do: local_other(fiber_id, text, from, context)
-
-  defp local_other(fiber_id, text, from, context) do
+  defp local(fiber_id, text, from, context) do
     if from != "human" and context["resume_mode"] == "fresh" do
       Delivery.fresh(fiber_id, text, from: from, message_id: context["message_id"])
       |> reply(fiber_id)
     else
-      agent_inbox =
-        from != "human" and context["message_after_launch"] != true
+      agent_inbox = from != "human"
 
       if context["context_only"] == true or agent_inbox do
         turn =
@@ -160,21 +154,11 @@ defmodule ShuttleWeb.DeliverController do
           notify_wake: context["notify_wake"] == true
         )
       else
-        opts = [
-          from: from,
+        Delivery.human(fiber_id, text,
           message_id: context["message_id"],
-          message_after_launch: context["message_after_launch"] == true,
           resume_mode: resume_mode(context["resume_mode"])
-        ]
-
-        result =
-          if from == "human" do
-            Delivery.human(fiber_id, text, opts)
-          else
-            Delivery.deliver(fiber_id, text, opts)
-          end
-
-        reply(result, fiber_id)
+        )
+        |> reply(fiber_id)
       end
     end
   end
@@ -385,50 +369,8 @@ defmodule ShuttleWeb.DeliverController do
          detail: "Terminal input may have been submitted: #{inspect(result)}"
        }}
 
-  defp reply({:message, status, receipt}, fiber_id) do
-    body = %{delivery: "message", fiber_id: fiber_id, receipt: receipt}
-
-    cond do
-      receipt["status"] == "unknown" ->
-        {202,
-         Map.merge(body, %{
-           delivered: nil,
-           detail: receipt["detail"] || "the message was sent; its arrival is unconfirmed"
-         })}
-
-      status < 300 and receipt["status"] != "rejected" ->
-        {status, Map.put(body, :delivered, true)}
-
-      true ->
-        {if(status < 300, do: 502, else: status),
-         Map.merge(body, %{
-           delivered: false,
-           error: receipt["detail"] || "the worker did not accept the message"
-         })}
-    end
-  end
-
-  defp reply({:launch, mode, result}, fiber_id) do
-    {status, body} = ShuttleWeb.DispatchReply.render(fiber_id, result)
-    delivery = if mode == "previous", do: "resume", else: "dispatch"
-    {status, Map.merge(body, %{delivered: launch_delivered(status, result), delivery: delivery})}
-  end
-
-  defp reply({:error, status, error}, fiber_id),
-    do: {status, %{delivered: false, delivery: "message", fiber_id: fiber_id, error: error}}
-
-  # A launch still queued in the Poller may yet deliver the text: unconfirmed,
-  # not failed.
-  defp launch_delivered(_status, {:error, :poller_busy}), do: nil
-  defp launch_delivered(status, _result), do: status < 300
-
-  # The receipt decides a message delivery's outcome, whichever daemon rendered
-  # the owner's answer.
   defp relay({:forwarded, status, body}) do
     case Jason.decode(body) do
-      {:ok, %{"delivery" => "message", "receipt" => %{"status" => _} = receipt} = payload} ->
-        reply({:message, status, receipt}, payload["fiber_id"])
-
       {:ok, payload} when is_map(payload) ->
         {status, payload}
 

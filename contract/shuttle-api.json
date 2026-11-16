@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Shuttle daemon API, stable tier",
-    "version": "1",
+    "version": "2",
     "description": "The routes a UI other than the board can build on. `info.version` is the API level, the integer `GET /api/v1/version` reports as `api_level`: adding a route or an optional field leaves it alone, removing or renaming anything described here raises it by one. Response objects may carry fields this document does not name; a client ignores them. `x-modules` classes every route the daemon serves under /api/v1: the stable `core` described here, the internal `board` and `fleet` modules, and optional extensions that need software beyond a plain daemon. A client builds on `core` and may ignore the rest."
   },
   "servers": [
@@ -1018,7 +1018,7 @@
     "/deliver": {
       "post": {
         "summary": "Deliver text to a fiber’s worker.",
-        "description": "Agent text enqueues in the owning fiber's inbox before consumption. Human text is recorded and deduplicated there, then transported as typed input or a From User launch prompt. The delivery field names which happened (message, input, resume, dispatch or context). delivered is true when the worker has the text, false when it did not get it, and null (with 202) when it was sent but arrival is unconfirmed; null is not a failure. Launch outcomes reuse the /dispatch envelope, so a launch refusal carries dispatched false and reason. context_only with message_id queues without launching (202). Error bodies vary: a validation refusal carries only error (and delivered false), a launch refusal the /dispatch fields, a forward failure reason and origin.",
+        "description": "Agent text enqueues in the owning fiber's inbox before consumption. Human text is recorded and deduplicated there, then transported as typed input or a From User launch prompt. The delivery field names which happened (context, input or fresh). delivered is true when the worker has the text, false when it did not get it, and null (with 202) when it was sent but arrival is unconfirmed; null is not a failure. A human line's launch outcomes reuse the /dispatch envelope, so a launch refusal carries dispatched false and reason. context_only with message_id queues without launching (202). Error bodies vary: a validation refusal carries only error (and delivered false), a launch refusal the /dispatch fields, a forward failure reason and origin.",
         "tags": [
           "core"
         ],
@@ -1089,15 +1089,11 @@
                       "previous",
                       "fresh"
                     ],
-                    "description": "previous forces resuming the prior conversation (a live worker is still messaged); fresh starts a new conversation, stopping a live worker. From an agent, fresh is recorded under message_id and starts the session with the text in its launch prompt under the inbox launch gate: 200 delivery fresh with delivered true, 202 with delivered null when unconfirmed, 409 with reason and error when refused (the same id may be sent again), and a repeated id answers the stored outcome with duplicate true. Absent lets the owner message a live worker, or else resume or start fresh by its own rule."
-                  },
-                  "message_after_launch": {
-                    "type": "boolean",
-                    "description": "Sends text as a native message once the worker is up rather than in its launch prompt, launching first when none is live; waits up to 30 seconds for the worker's address."
+                    "description": "For a human line, previous forces resuming the prior conversation (a live worker takes the line as typed input) and fresh starts a new conversation, stopping a live worker; absent, a live worker takes the line as typed input, or else the owner resumes or starts fresh by its own rule. From an agent, fresh is recorded under message_id and starts the session with the text in its launch prompt under the inbox launch gate: 200 delivery fresh with delivered true, 202 with delivered null when unconfirmed, 409 with reason and error when refused (the same id may be sent again), and a repeated id answers the stored outcome with duplicate true; previous is ignored."
                   },
                   "live_input": {
                     "type": "boolean",
-                    "description": "Types text into the worker's terminal as the human's next turn instead of messaging it; with no live worker, resumes or starts one with the text."
+                    "description": "Records text as a spoken human line (source voice) and types it into the worker's terminal as the human's next turn; with no live worker, resumes or starts one with the text."
                   },
                   "reply_to": {
                     "type": "string",
@@ -1140,34 +1136,21 @@
         },
         "responses": {
           "200": {
-            "description": "The worker has the text: messaged (delivery message, with the receipt), typed in (input), or launched with it (resume or dispatch).",
+            "description": "The worker has the human's line: typed in, or launched with it (delivery input).",
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/DeliveryMessage"
-                    },
-                    {
-                      "$ref": "#/components/schemas/DeliveryLaunch"
-                    },
-                    {
-                      "$ref": "#/components/schemas/DeliveryInput"
-                    }
-                  ]
+                  "$ref": "#/components/schemas/DeliveryInput"
                 }
               }
             }
           },
           "202": {
-            "description": "Queued in the context mailbox (delivery context), or sent with arrival unconfirmed (delivered null), including an owner that did not answer in time (reason forward_timeout), or a launch queued behind a busy Poller (reason poller_busy).",
+            "description": "Queued in the fiber's inbox (delivery context), or sent with arrival unconfirmed (delivered null), including input or a launch queued behind a busy Poller and an owner that did not answer in time (reason forward_timeout).",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/DeliveryMessage"
-                    },
                     {
                       "$ref": "#/components/schemas/DeliveryInput"
                     },
@@ -1176,9 +1159,6 @@
                     },
                     {
                       "$ref": "#/components/schemas/DeliveryForward"
-                    },
-                    {
-                      "$ref": "#/components/schemas/DeliveryLaunchRefusal"
                     }
                   ]
                 }
@@ -1205,12 +1185,6 @@
                       "$ref": "#/components/schemas/DeliveryError"
                     },
                     {
-                      "$ref": "#/components/schemas/DeliveryLaunchRefusal"
-                    },
-                    {
-                      "$ref": "#/components/schemas/DeliveryMessage"
-                    },
-                    {
                       "$ref": "#/components/schemas/DeliveryInput"
                     }
                   ]
@@ -1219,19 +1193,13 @@
             }
           },
           "409": {
-            "description": "A live worker blocks unless_live (live true), the live worker has no addressable conversation yet or is no longer live, this daemon does not own the fiber, or a launch was refused as on /dispatch (already_running, launch_reserved).",
+            "description": "A live worker blocks unless_live (live true), the live worker is no longer live, this daemon does not own the fiber, a fresh session was refused (reason), or a launch was refused as on /dispatch (already_running, launch_reserved).",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
                       "$ref": "#/components/schemas/DeliveryError"
-                    },
-                    {
-                      "$ref": "#/components/schemas/DeliveryLaunchRefusal"
-                    },
-                    {
-                      "$ref": "#/components/schemas/DeliveryMessage"
                     },
                     {
                       "$ref": "#/components/schemas/DeliveryInput"
@@ -1251,12 +1219,6 @@
                       "$ref": "#/components/schemas/DeliveryError"
                     },
                     {
-                      "$ref": "#/components/schemas/DeliveryLaunchRefusal"
-                    },
-                    {
-                      "$ref": "#/components/schemas/DeliveryMessage"
-                    },
-                    {
                       "$ref": "#/components/schemas/DeliveryInput"
                     }
                   ]
@@ -1274,12 +1236,6 @@
                       "$ref": "#/components/schemas/DeliveryError"
                     },
                     {
-                      "$ref": "#/components/schemas/DeliveryLaunchRefusal"
-                    },
-                    {
-                      "$ref": "#/components/schemas/DeliveryMessage"
-                    },
-                    {
                       "$ref": "#/components/schemas/DeliveryInput"
                     }
                   ]
@@ -1288,7 +1244,7 @@
             }
           },
           "502": {
-            "description": "The worker rejected the message (receipt status rejected), the owner's answer was not JSON, or the request could not be forwarded (reason forward_failed).",
+            "description": "The owner's answer was not JSON, or the request could not be forwarded (reason forward_failed).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1297,12 +1253,6 @@
                       "anyOf": [
                         {
                           "$ref": "#/components/schemas/DeliveryError"
-                        },
-                        {
-                          "$ref": "#/components/schemas/DeliveryLaunchRefusal"
-                        },
-                        {
-                          "$ref": "#/components/schemas/DeliveryMessage"
                         },
                         {
                           "$ref": "#/components/schemas/DeliveryInput"
@@ -1329,12 +1279,6 @@
                           "$ref": "#/components/schemas/DeliveryError"
                         },
                         {
-                          "$ref": "#/components/schemas/DeliveryLaunchRefusal"
-                        },
-                        {
-                          "$ref": "#/components/schemas/DeliveryMessage"
-                        },
-                        {
                           "$ref": "#/components/schemas/DeliveryInput"
                         }
                       ]
@@ -1355,9 +1299,6 @@
                   "anyOf": [
                     {
                       "$ref": "#/components/schemas/DeliveryError"
-                    },
-                    {
-                      "$ref": "#/components/schemas/DeliveryMessage"
                     },
                     {
                       "$ref": "#/components/schemas/DeliveryInput"
@@ -3204,64 +3145,6 @@
           "transport"
         ]
       },
-      "DeliveryMessage": {
-        "type": "object",
-        "properties": {
-          "delivery": {
-            "const": "message"
-          },
-          "delivered": {
-            "type": [
-              "boolean",
-              "null"
-            ]
-          },
-          "fiber_id": {
-            "type": "string"
-          },
-          "receipt": {
-            "$ref": "#/components/schemas/MessageReceipt"
-          },
-          "detail": {
-            "type": "string"
-          },
-          "error": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "delivery",
-          "delivered",
-          "fiber_id",
-          "receipt"
-        ]
-      },
-      "DeliveryLaunch": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/DispatchSuccess"
-          },
-          {
-            "type": "object",
-            "properties": {
-              "delivery": {
-                "type": "string",
-                "enum": [
-                  "resume",
-                  "dispatch"
-                ]
-              },
-              "delivered": {
-                "const": true
-              }
-            },
-            "required": [
-              "delivery",
-              "delivered"
-            ]
-          }
-        ]
-      },
       "DeliveryInput": {
         "type": "object",
         "properties": {
@@ -3341,11 +3224,9 @@
           "delivery": {
             "type": "string",
             "enum": [
-              "message",
               "context",
               "input",
-              "dispatch",
-              "resume"
+              "fresh"
             ]
           },
           "delivered": {
@@ -3368,35 +3249,6 @@
         },
         "required": [
           "error"
-        ]
-      },
-      "DeliveryLaunchRefusal": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/DispatchRefusal"
-          },
-          {
-            "type": "object",
-            "properties": {
-              "delivery": {
-                "type": "string",
-                "enum": [
-                  "resume",
-                  "dispatch"
-                ]
-              },
-              "delivered": {
-                "type": [
-                  "boolean",
-                  "null"
-                ]
-              }
-            },
-            "required": [
-              "delivery",
-              "delivered"
-            ]
-          }
         ]
       },
       "DeliveryForward": {

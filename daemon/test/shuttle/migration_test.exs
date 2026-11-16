@@ -1208,7 +1208,24 @@ defmodule Shuttle.MigrationTest do
   defp assert_native_delivery(fiber, harness) do
     Env.put_app_env(:felt_runner, MessageRunner)
     Env.put_app_env(:migration_message_pid, self())
-    assert {:message, 200, _} = Shuttle.Delivery.deliver(fiber, "hello")
+    worker = Poller.live_worker(fiber)
+
+    address =
+      Shuttle.Messaging.address(
+        "local",
+        Shuttle.Harnesses.normalize(worker.cli),
+        worker.session_uuid
+      )
+
+    assert {:ok, 200, _} =
+             Shuttle.Messaging.send_message(%{
+               "address" => address,
+               "text" => "hello",
+               "from" => "shuttle",
+               "wake" => true,
+               "message_id" => "migration-native"
+             })
+
     assert_receive {:native_message, frame}
     assert frame["address"] =~ "/#{harness}/native-session"
   end

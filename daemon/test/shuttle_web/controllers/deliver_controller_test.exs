@@ -13,9 +13,8 @@ defmodule ShuttleWeb.DeliverControllerTest do
 
   @endpoint ShuttleWeb.Endpoint
 
-  # Answers `shuttle message` with the scripted receipt (accepted unless
-  # `:deliver_test_receipt` names a status, detail and exit code) and records
-  # the frame; every other command is the store mock's.
+  # Answers `shuttle message` with an accepted receipt and records the frame;
+  # records each pasted buffer; every other command is the store mock's.
   defmodule MessageRunner do
     @behaviour Shuttle.Runner
 
@@ -23,16 +22,12 @@ defmodule ShuttleWeb.DeliverControllerTest do
       request = opts[:input] |> String.trim() |> Jason.decode!()
       send(Shuttle.Env.app(:deliver_test_pid), {:message, request})
 
-      {status, detail, exit_code} =
-        Shuttle.Env.app(:deliver_test_receipt, {"accepted", nil, 0})
-
       {Jason.encode!(%{
          message_id: request["message_id"],
          address: request["address"],
-         status: status,
-         transport: "claude-native",
-         detail: detail
-       }), exit_code}
+         status: "accepted",
+         transport: "claude-native"
+       }), 0}
     end
 
     def cmd("tmux", ["load-buffer", "-b", _buffer, path] = args, opts) do
@@ -528,78 +523,41 @@ defmodule ShuttleWeb.DeliverControllerTest do
     assert script =~ "Meeting mode (call)."
   end
 
-  test "a transcript wakes a dormant worker then uses the same deduplicated native message as a live delivery" do
-    fiber = "tests/transcript-first"
+  test "voice records, deduplicates and writes one board row" do
+    fiber = "tests/voice-dormant"
+    events = Path.join(MockRunner.felt_root(), "voice-events.jsonl")
+    Env.put_env("SHUTTLE_EVENTS_FILE", events)
     put_constitution(fiber)
     Env.put_app_env(:felt_runner, MessageRunner)
     Env.put_app_env(:deliver_test_pid, self())
 
     request = %{
       "fiber_id" => fiber,
-      "text" => "spoken words that must arrive once",
-      "message_id" => "transcript-stable-id",
-      "message_after_launch" => true
+      "text" => "me: Claude hello",
+      "message_id" => "voice-first",
+      "live_input" => true
     }
 
-    assert %{"delivered" => true, "delivery" => "message"} =
+    assert %{"delivered" => true, "delivery" => "input"} =
              api_conn() |> post("/api/v1/deliver", Jason.encode!(request)) |> json_response(200)
 
-    refute run_script() =~ request["text"]
-    assert_receive {:message, first}
-    assert first["text"] == request["text"]
-    assert first["message_id"] == "transcript-stable-id"
-
-    assert %{"delivered" => true, "delivery" => "message"} =
+    assert %{"duplicate" => true, "disposition" => "delivered"} =
              api_conn() |> post("/api/v1/deliver", Jason.encode!(request)) |> json_response(200)
 
-    assert_receive {:message, retry}
-    assert retry["message_id"] == first["message_id"]
-    assert retry["address"] == first["address"]
+    assert run_script() =~ "From User:\nme: Claude hello"
+    refute_received {:message, _}
 
-    assert Enum.count(MockRunner.commands(), fn {cmd, args} ->
-             cmd == "tmux" and match?(["new-session" | _], args)
-           end) == 1
-  end
+    records =
+      Path.wildcard(Path.join(Shuttle.data_dir(), "mailboxes/fiber/*/offered/*.json"))
+      |> Enum.map(&(File.read!(&1) |> Jason.decode!()))
 
-  for after_launch <- [false, true] do
-    @after_launch after_launch
-    test "legacy voice records, deduplicates and writes one board row (message_after_launch=#{after_launch})" do
-      fiber = "tests/voice-dormant"
-      events = Path.join(MockRunner.felt_root(), "voice-events.jsonl")
-      Env.put_env("SHUTTLE_EVENTS_FILE", events)
-      put_constitution(fiber)
-      Env.put_app_env(:felt_runner, MessageRunner)
-      Env.put_app_env(:deliver_test_pid, self())
+    assert [%{"disposition" => "delivered", "wishes" => %{"source" => "voice"}}] = records
 
-      request = %{
-        "fiber_id" => fiber,
-        "text" => "me: Claude hello",
-        "message_id" => "voice-first",
-        "message_after_launch" => @after_launch,
-        "live_input" => true
-      }
+    rows =
+      events |> File.read!() |> String.split("\n", trim: true) |> Enum.map(&Jason.decode!/1)
 
-      assert %{"delivered" => true, "delivery" => "input"} =
-               api_conn() |> post("/api/v1/deliver", Jason.encode!(request)) |> json_response(200)
-
-      assert %{"duplicate" => true, "disposition" => "delivered"} =
-               api_conn() |> post("/api/v1/deliver", Jason.encode!(request)) |> json_response(200)
-
-      assert run_script() =~ "From User:\nme: Claude hello"
-      refute_received {:message, _}
-
-      records =
-        Path.wildcard(Path.join(Shuttle.data_dir(), "mailboxes/fiber/*/offered/*.json"))
-        |> Enum.map(&(File.read!(&1) |> Jason.decode!()))
-
-      assert [%{"disposition" => "delivered", "wishes" => %{"source" => "voice"}}] = records
-
-      rows =
-        events |> File.read!() |> String.split("\n", trim: true) |> Enum.map(&Jason.decode!/1)
-
-      assert [%{"id" => "brd-voice-first", "kind" => "human"}] =
-               Enum.filter(rows, &(&1["type"] == "board"))
-    end
+    assert [%{"id" => "brd-voice-first", "kind" => "human"}] =
+             Enum.filter(rows, &(&1["type"] == "board"))
   end
 
   test "voice records bypass quarantine and survive an owner restart without another paste" do
@@ -677,7 +635,6 @@ defmodule ShuttleWeb.DeliverControllerTest do
              "text" => "words",
              "from" => "shuttle",
              "message_id" => "voice-mixed",
-             "message_after_launch" => false,
              "live_input" => true
            }
 
@@ -1028,43 +985,6 @@ defmodule ShuttleWeb.DeliverControllerTest do
     assert Poller.live_worker(fiber_id).session == session
   end
 
-  test "a live worker is messaged at its conversation instead of relaunched" do
-    fiber_id = "tests/deliver-live"
-    session_uuid = message_live_worker(fiber_id)
-
-    launches_before =
-      Enum.count(MockRunner.commands(), fn {cmd, args} ->
-        cmd == "tmux" and hd(args) == "new-session"
-      end)
-
-    body =
-      api_conn()
-      |> post(
-        "/api/v1/deliver",
-        Jason.encode!(%{
-          "fiber_id" => fiber_id,
-          "text" => "Meeting mode (call).",
-          "from" => "shuttle meeting",
-          "message_after_launch" => true
-        })
-      )
-      |> json_response(200)
-
-    assert %{"delivered" => true, "delivery" => "message", "receipt" => receipt} = body
-    assert receipt["status"] == "accepted"
-
-    assert_received {:message, request}
-    assert request["address"] == "shuttle://#{Poller.own_host_id()}/claude/#{session_uuid}"
-    assert request["text"] == "Meeting mode (call)."
-    assert request["from"] == "shuttle meeting"
-    assert request["wake"] == true
-
-    assert launches_before ==
-             Enum.count(MockRunner.commands(), fn {cmd, args} ->
-               cmd == "tmux" and hd(args) == "new-session"
-             end)
-  end
-
   test "resume_mode fresh starts a new session over a live worker" do
     fiber_id = "tests/deliver-fresh-live"
     session_uuid = message_live_worker(fiber_id)
@@ -1089,26 +1009,6 @@ defmodule ShuttleWeb.DeliverControllerTest do
     refute Poller.live_worker(fiber_id).session_uuid == session_uuid
   end
 
-  test "resume_mode previous still messages a live worker" do
-    fiber_id = "tests/deliver-previous-live"
-    message_live_worker(fiber_id)
-
-    assert %{"delivered" => true, "delivery" => "message"} =
-             api_conn()
-             |> post(
-               "/api/v1/deliver",
-               Jason.encode!(%{
-                 "fiber_id" => fiber_id,
-                 "text" => "join the meeting",
-                 "message_after_launch" => true,
-                 "resume_mode" => "previous"
-               })
-             )
-             |> json_response(200)
-
-    assert_received {:message, %{"text" => "join the meeting"}}
-  end
-
   defp message_live_worker(fiber_id) do
     put_constitution(fiber_id)
     assert {:ok, _session} = Poller.dispatch_fiber(fiber_id, [])
@@ -1117,90 +1017,6 @@ defmodule ShuttleWeb.DeliverControllerTest do
     assert %{session_uuid: uuid, cli: "claude"} = Poller.live_worker(fiber_id)
     assert is_binary(uuid)
     uuid
-  end
-
-  test "a sent message whose receipt is unconfirmed is neither delivered nor failed" do
-    message_live_worker("tests/deliver-unconfirmed")
-
-    detail =
-      "native message queued behind the receiver's current turn; no model response to it observed yet"
-
-    Env.put_app_env(:deliver_test_receipt, {"unknown", detail, 1})
-
-    body =
-      api_conn()
-      |> post(
-        "/api/v1/deliver",
-        Jason.encode!(%{
-          "fiber_id" => "tests/deliver-unconfirmed",
-          "text" => "Meeting mode.",
-          "message_after_launch" => true
-        })
-      )
-      |> json_response(202)
-
-    assert %{"delivered" => nil, "delivery" => "message", "detail" => ^detail} = body
-    assert body["receipt"]["status"] == "unknown"
-    refute Map.has_key?(body, "error")
-  end
-
-  test "a refused message is not delivered" do
-    message_live_worker("tests/deliver-refused")
-
-    Env.put_app_env(
-      :deliver_test_receipt,
-      {"rejected", "receiver native inbox denied this message; no turn started", 1}
-    )
-
-    body =
-      api_conn()
-      |> post(
-        "/api/v1/deliver",
-        Jason.encode!(%{
-          "fiber_id" => "tests/deliver-refused",
-          "text" => "Meeting mode.",
-          "message_after_launch" => true
-        })
-      )
-      |> json_response(502)
-
-    assert %{"delivered" => false, "error" => "receiver native inbox denied" <> _} = body
-  end
-
-  test "an owner's unconfirmed receipt is relayed as unconfirmed, whatever status it answered" do
-    receipt = %{
-      "message_id" => "deliver-x",
-      "address" => "shuttle://cineca/claude/abc",
-      "status" => "unknown",
-      "transport" => "claude-native",
-      "detail" => "native message sent; no correlated receiver turn observed"
-    }
-
-    stub_forward(
-      "cineca",
-      "http://localhost:4002",
-      {:ok, 400,
-       Jason.encode!(%{
-         "delivered" => false,
-         "delivery" => "message",
-         "fiber_id" => "tests/remote",
-         "receipt" => receipt,
-         "error" => receipt["detail"]
-       })},
-      StubPostClient
-    )
-
-    body =
-      api_conn()
-      |> post(
-        "/api/v1/deliver",
-        Jason.encode!(%{"fiber_id" => "tests/remote", "text" => "hello", "origin" => "cineca"})
-      )
-      |> json_response(202)
-
-    assert %{"delivered" => nil, "receipt" => ^receipt, "fiber_id" => "tests/remote"} = body
-    assert body["detail"] == receipt["detail"]
-    refute Map.has_key?(body, "error")
   end
 
   test "an owner that does not answer in time leaves the delivery unconfirmed" do

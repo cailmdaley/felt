@@ -1108,7 +1108,7 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
     if record_only and not record_owner?(origin) do
       unconfirmed_import(id, :owner_cannot_import_voice)
     else
-      context = %{"message_id" => id, "message_after_launch" => false, "live_input" => true}
+      context = %{"message_id" => id, "live_input" => true}
       context = if record_only, do: Map.put(context, "voice_record_only", true), else: context
 
       result = ShuttleWeb.DeliverController.route(fiber_id, text, origin, "shuttle", context)
