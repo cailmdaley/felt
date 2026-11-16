@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -118,29 +117,6 @@ func TestMailboxRechecksLegacyThreadNoticeImmediatelyBeforeEmit(t *testing.T) {
 	}
 	if checks != 2 || emitted {
 		t.Fatalf("checks=%d emitted=%v; stale legacy thread notice escaped", checks, emitted)
-	}
-}
-
-func TestMailboxSkewedValidatorDeliversWithCaveat(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	root := mailboxDir(env, "fiber", "fiber")
-	request := Request{MessageID: "thread-result", Text: "closed", ThreadSignal: &ThreadSignal{UID: "child", Verb: "closed", Stamp: time.Now().UTC().Format(time.RFC3339Nano), Owner: "owner"}}
-	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: request}); err != nil {
-		t.Fatal(err)
-	}
-	check := func(context.Context, Request) (bool, error) {
-		return false, threadSignalSkewError{err: errors.New(`daemon at http://127.0.0.1:4000/api/v1/thread-signals/current returned 404: {"errors":{"detail":"Not Found"}}`)}
-	}
-	var delivered []Request
-	if err := offerMailboxValidated(root, func(Request) bool { return true }, check, func(batch []Request) error {
-		delivered = append(delivered, batch...)
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if len(delivered) != 1 || !strings.HasPrefix(delivered[0].Text, staleThreadSignalCaveat) {
-		t.Fatalf("skewed notice = %#v", delivered)
 	}
 }
 

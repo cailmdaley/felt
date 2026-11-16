@@ -518,10 +518,7 @@ func legacyBatch(env *sysenv.Env, root string, it mailboxPendingItem) (Attempt, 
 	if e.Attempt.Payload != nil {
 		return *e.Attempt, nil
 	}
-	e, err := freezeLegacyAttempt(env, e)
-	if err != nil {
-		return Attempt{}, err
-	}
+	e = freezeLegacyAttempt(e)
 	a := *e.Attempt
 	a.OpenedAt = time.Now().UnixNano()
 	switch {
@@ -534,11 +531,7 @@ func legacyBatch(env *sysenv.Env, root string, it mailboxPendingItem) (Attempt, 
 	}
 	// A warning on a successor's send must still fit the transport's limit.
 	if len(a.BaseText) > (64<<10)-512 {
-		text := "Full message JSON (read request.text before acting): " + filepath.Join(root, "offered", filepath.Base(it.path))
-		if strings.Contains(a.Payload.Text, staleThreadSignalCaveat) {
-			text = withStalenessCaveat(text)
-		}
-		a.BaseText = text
+		a.BaseText = "Full message JSON (read request.text before acting): " + filepath.Join(root, "offered", filepath.Base(it.path))
 	}
 	return a, nil
 }
@@ -612,11 +605,10 @@ func reconcileConsumedBatch(ctx context.Context, env *sysenv.Env, root string, a
 		checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		current, err := currentThreadSignalWithBackoff(checkCtx, env, e.Request)
 		cancel()
-		var skew threadSignalSkewError
-		if err != nil && !errors.As(err, &skew) {
+		if err != nil {
 			return false, false, err
 		}
-		if err == nil && !current {
+		if !current {
 			superseded = append(superseded, path)
 		}
 	}

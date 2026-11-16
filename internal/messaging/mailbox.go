@@ -588,11 +588,6 @@ func validateMailboxItem(dir string, it mailboxPendingItem, current func(context
 	isCurrent, err := current(ctx, it.entry.Request)
 	cancel()
 	if err != nil {
-		var skew threadSignalSkewError
-		if errors.As(err, &skew) {
-			it.entry.Request.Text = withStalenessCaveat(it.entry.Request.Text)
-			return it, true, nil
-		}
 		return it, false, err
 	}
 	if !isCurrent {

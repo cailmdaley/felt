@@ -405,7 +405,7 @@ Each selected entry carries the same attempt record:
 
 A wake attempt also stores `payload` (the exact request and transport id), `base_text` and `variant`.
 The transport id is a bounded, domain-separated hash of members, conversation and exact text variant.
-Plain text, a live retry, a possible-repeat warning and a staleness caveat cannot change text under one transport id.
+Plain text, a live retry and a possible-repeat warning cannot change text under one transport id.
 The batch's manifest stores that complete record before any member is pinned or any message is sent.
 Recovery repairs partial member writes and replays that same payload, even when new entries arrive.
 A partial close can replay the same payload against the transport's `messages/` receipt without injecting it again.
@@ -422,7 +422,6 @@ Approval-held messages (`wake_held`) are not retried.
 
 An entry pinned without a manifest is an open batch of one, including one read from `attempt_address` alone; its five-minute wait starts when the consumer first reads it.
 Without a stored payload it keeps the transport id it was sent under.
-Its staleness-caveat variant is reconstructed from the stored transport receipt's content hash.
 Retries and roll-forwards use hashed transport identities.
 Quiet context pinned this way is released to a Codex receiver's fiber hook rather than sent.
 

@@ -298,7 +298,6 @@ Unavailable owners retain their notices for retry, with a shared 30-second
 validation backoff across hook processes.
 Healthy notices can pass deferred notices, so delivery order can differ from
 queue order.
-A recognizable missing validation endpoint allows delivery with a staleness caveat.
 An unresolved legacy notice allows delivery without validation.
 Settled and offered entries expire after 14 days.
 An entry settles after its signal is stamped, so by the time its dedup entry expires the signal is more than 14 days old, and the inbox refuses a stamp that old: an expired notice cannot return.

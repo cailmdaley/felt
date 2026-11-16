@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -307,33 +306,14 @@ func DeliverFiberContext(ctx context.Context, env *sysenv.Env, fiber, host, addr
 
 type fiberContextSender func(context.Context, *sysenv.Env, string, Request, string) (Receipt, error)
 
-// freezeLegacyAttempt pins the old transport id and reconstructs the caveat
-// variant from the receipt's content hash when the payload is absent.
-func freezeLegacyAttempt(env *sysenv.Env, entry mailboxEntry) (mailboxEntry, error) {
+// freezeLegacyAttempt pins the transport id a pin made before batch payloads
+// was sent under.
+func freezeLegacyAttempt(entry mailboxEntry) mailboxEntry {
 	request := entry.Request
 	request.ThreadSignal = nil
 	payload := attemptRequest(request, entry)
-	address := entry.AttemptAddress
-	path := filepath.Join(dataDir(env), "messages", mailboxKey(payload.MessageID+"-"+mailboxKey(address)[:16])+".json")
-	stored, err := readDedupRecord(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return entry, err
-	}
-	if err == nil {
-		for _, text := range []string{strings.TrimPrefix(request.Text, staleThreadSignalCaveat), withStalenessCaveat(request.Text)} {
-			candidate := request
-			candidate.Text = text
-			candidate = attemptRequest(candidate, entry)
-			candidate.Address = address
-			if requestHash(candidate) == stored.Hash {
-				payload = candidate
-				request.Text = text
-				break
-			}
-		}
-	}
 	entry.Attempt.Payload, entry.Attempt.BaseText = &payload, request.Text
-	return entry, nil
+	return entry
 }
 
 // attemptRequest is the request a build before batch payloads sent for a
@@ -399,9 +379,6 @@ func currentThreadSignal(ctx context.Context, env *sysenv.Env, request Request) 
 	cmd := env.CommandContext(ctx, "shuttle", "thread-signal-current", string(bytes))
 	output, err := cmd.Output()
 	if err != nil {
-		if isThreadSignalContractSkew(err) {
-			return false, threadSignalSkewError{err: fmt.Errorf("checking current thread signal %s: %w", request.MessageID, err)}
-		}
 		return false, fmt.Errorf("checking current thread signal %s: %w", request.MessageID, err)
 	}
 	var answer struct {
@@ -416,48 +393,8 @@ func currentThreadSignal(ctx context.Context, env *sysenv.Env, request Request) 
 	return *answer.Current, nil
 }
 
-type threadSignalSkewError struct{ err error }
-
-func (e threadSignalSkewError) Error() string { return e.err.Error() }
-func (e threadSignalSkewError) Unwrap() error { return e.err }
-
-func isThreadSignalContractSkew(err error) bool {
-	message := err.Error()
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
-		message += " " + string(exitErr.Stderr)
-	}
-	lowerMessage := strings.ToLower(message)
-	if strings.Contains(lowerMessage, "unknown command") && strings.Contains(lowerMessage, "thread-signal-current") {
-		return true
-	}
-	if !strings.Contains(lowerMessage, "/api/v1/thread-signals/current") {
-		return false
-	}
-	const status = "returned 404:"
-	index := strings.Index(lowerMessage, status)
-	if index < 0 {
-		return false
-	}
-	var response struct {
-		Errors struct {
-			Detail string `json:"detail"`
-		} `json:"errors"`
-	}
-	return json.Unmarshal([]byte(strings.TrimSpace(message[index+len(status):])), &response) == nil && response.Errors.Detail == "Not Found"
-}
-
 func hasThreadSignalValidation(request Request) bool {
 	return strings.HasPrefix(request.MessageID, "thread-") && !isUnblockedNotice(request.Text)
-}
-
-const staleThreadSignalCaveat = "Staleness caveat: this host's shuttle CLI and daemon do not share the thread-signal validation route, so this lifecycle notice could not be checked for currentness.\n\n"
-
-func withStalenessCaveat(text string) string {
-	if strings.HasPrefix(text, staleThreadSignalCaveat) {
-		return text
-	}
-	return staleThreadSignalCaveat + text
 }
 
 func isUnblockedNotice(text string) bool {

@@ -15,8 +15,8 @@ import (
 type Attempt struct {
 	// Payload pins the exact batch emission and its transport identity.
 	Payload *Request `json:"payload,omitempty"`
-	// BaseText is the captured text, including any labels and staleness caveat,
-	// without a retry warning.
+	// BaseText is the captured text, including any labels, without a retry
+	// warning.
 	BaseText string `json:"base_text,omitempty"`
 	// Variant names the payload's plain, retry-1 or possible-repeat framing.
 	Variant string `json:"variant,omitempty"`

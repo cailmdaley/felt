@@ -66,24 +66,6 @@ func TestLegacyReview7MaxPublicationCanRetry(t *testing.T) {
 	}
 }
 
-func TestLegacyReview5CaveatReceiptVariant(t *testing.T) {
-	env := testEnv(t)
-	answerThreadSignalsCurrent(t, env)
-	address := "shuttle://host/codex/A"
-	transition(t, env, "A", address)
-	r := Request{MessageID: "thread-result", Text: "thread child closed: original", Wake: true}
-	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: r}); err != nil {
-		t.Fatal(err)
-	}
-	caveat := r
-	caveat.Text = withStalenessCaveat(r.Text)
-	sender := legacyReviewSender(t)
-	_ = deliverPinned(t, env, address, caveat, sender)
-	if err := deliverPinned(t, env, address, r, sender); ErrorCode(err) != "ambiguous_delivery" {
-		t.Fatalf("validation recovery changed the in-flight variant: %v", err)
-	}
-}
-
 func TestLegacyReview8PublicationCannotOccupyRetryID(t *testing.T) {
 	env := testEnv(t)
 	address := "shuttle://host/codex/A"

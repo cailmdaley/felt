@@ -424,47 +424,6 @@ func TestCurrentThreadSignalInvokesShuttleFromEnvironmentPath(t *testing.T) {
 	}
 }
 
-func TestThreadSignalContractSkewClassifierIsNarrow(t *testing.T) {
-	for _, test := range []struct {
-		message string
-		want    bool
-	}{
-		{"unknown command \\\"thread-signal-current\\\" for \\\"shuttle\\\"", true},
-		{"daemon at http://127.0.0.1:4000/api/v1/thread-signals/current returned 404: {\"errors\":{\"detail\":\"Not Found\"}}", true},
-		{"daemon at http://127.0.0.1:4000/api/v1/thread-signals/current returned 404: {\"error\":\"fiber_not_found\"}", false},
-		{"daemon at http://127.0.0.1:4000/api/v1/thread-signals/current returned 404: Not Found", false},
-		{"POST /api/v1/thread-signals/current: 404 page not found", false},
-		{"POST /api/v1/thread-signals/current: 404 fiber not found", false},
-		{"POST /api/v1/thread-signals/current: connection refused", false},
-		{"POST /api/v1/fibers/child: 404 page not found", false},
-	} {
-		if got := isThreadSignalContractSkew(errors.New(test.message)); got != test.want {
-			t.Errorf("isThreadSignalContractSkew(%q) = %v, want %v", test.message, got, test.want)
-		}
-	}
-}
-
-func TestCurrentThreadSignalRecognizesMissingRouteFromCLIStderr(t *testing.T) {
-	for _, body := range []string{"daemon at http://127.0.0.1:4000/api/v1/thread-signals/current returned 404: {\"errors\":{\"detail\":\"Not Found\"}}", "unknown command \\\"thread-signal-current\\\" for \\\"shuttle\\\""} {
-		t.Run(body, func(t *testing.T) {
-			env := testEnv(t)
-			bin := t.TempDir()
-			stub := filepath.Join(bin, "shuttle")
-			script := "#!/bin/sh\necho '" + body + "' >&2\nexit 1\n"
-			if err := os.WriteFile(stub, []byte(script), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			env.Set("PATH", bin+string(os.PathListSeparator)+env.Getenv("PATH"))
-			request := Request{MessageID: "thread-id", Text: "closed", ThreadSignal: &ThreadSignal{UID: "child", Verb: "closed", Stamp: time.Now().UTC().Format(time.RFC3339Nano), Owner: "host"}}
-			_, err := currentThreadSignal(context.Background(), env, request)
-			var skew threadSignalSkewError
-			if !errors.As(err, &skew) {
-				t.Fatalf("missing-route error = %v, want a contract-skew error", err)
-			}
-		})
-	}
-}
-
 func TestFiberContextUnknownRolloverRequiresEndedEvidence(t *testing.T) {
 	for _, evidence := range []string{"missing", "ended", "killed", "replaced", "unverified"} {
 		t.Run(evidence, func(t *testing.T) {
