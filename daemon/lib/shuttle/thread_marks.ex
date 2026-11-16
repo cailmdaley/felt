@@ -4,7 +4,11 @@ defmodule Shuttle.ThreadMarks do
 
   A launch is a session-ledger pairing (dispatch, claim, resume, migrate). A
   burst of three or more resumes on one host within one two-minute bucket is that
-  host's daemon coming back and reopening its workers, so it marks nothing.
+  host's daemon coming back and reopening its workers, so it marks nothing. A
+  resume of a session paired with the same thread less than fifteen minutes
+  before is a retry of that launch (a worker that would not stay up, as when a
+  constitution moves host and its new daemon keeps resuming a conversation it
+  cannot open), so it marks nothing either.
 
   A commit joins its thread by one key, `{host, session}`: the host that
   recorded the commit and the harness session that made it, looked up among the
@@ -17,6 +21,7 @@ defmodule Shuttle.ThreadMarks do
 
   @burst_ms 120_000
   @burst_size 3
+  @retry_ms 900_000
 
   @type marks :: %{String.t() => %{launches: [integer()], commits: [integer()]}}
 
@@ -45,10 +50,16 @@ defmodule Shuttle.ThreadMarks do
           else: acc
       end)
 
+    retries = retries(paired)
+
     launched =
       paired
-      |> Enum.reject(&(&1["kind"] == "resume" and Map.get(bursts, bucket(&1), 0) >= @burst_size))
-      |> Enum.group_by(& &1["uid"], & &1["at"])
+      |> Enum.with_index()
+      |> Enum.reject(fn {row, index} ->
+        MapSet.member?(retries, index) or
+          (row["kind"] == "resume" and Map.get(bursts, bucket(row), 0) >= @burst_size)
+      end)
+      |> Enum.group_by(&elem(&1, 0)["uid"], &elem(&1, 0)["at"])
 
     committed =
       commits
@@ -68,6 +79,26 @@ defmodule Shuttle.ThreadMarks do
          commits: Enum.sort(Map.get(committed, uid, []))
        }}
     end)
+  end
+
+  # The ledger places of the resumes within @retry_ms of the same thread and session's previous
+  # pairing, kept or not; an exact duplicate row is a retry of its first copy.
+  defp retries(paired) do
+    paired
+    |> Enum.with_index()
+    |> Enum.sort_by(fn {row, index} -> {row["at"], index} end)
+    |> Enum.reduce({MapSet.new(), %{}}, fn {row, index}, {retries, last} ->
+      key = {row["uid"], row["session"]}
+      before = Map.get(last, key)
+
+      retries =
+        if row["kind"] == "resume" and before != nil and row["at"] - before < @retry_ms,
+          do: MapSet.put(retries, index),
+          else: retries
+
+      {retries, Map.put(last, key, row["at"])}
+    end)
+    |> elem(0)
   end
 
   defp uid(%{"uid" => uid}) when is_binary(uid) and uid != "", do: uid

@@ -499,7 +499,9 @@ fan-in siblings of the fleet's [ledger feeds](#ledger-feeds):
 to `{launches, commits}`, epoch-ms lists oldest first, over the last `reach_ms`
 (the board's 14-day retention). A launch is a session-ledger pairing; a burst
 of three or more resumes on one host within one two-minute bucket is a daemon
-restart and marks nothing. A commit joins its thread by `{host, session}`
+restart and marks nothing, and a resume of a session paired with the same
+thread less than fifteen minutes before is a retry of that launch and marks
+nothing either. A commit joins its thread by `{host, session}`
 against the session ledger, and on the serving host also through that
 session's current successor.
 

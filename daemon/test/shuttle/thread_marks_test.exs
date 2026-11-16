@@ -31,6 +31,27 @@ defmodule Shuttle.ThreadMarksTest do
     refute Map.has_key?(marks, "c")
   end
 
+  test "a resume retrying one session within fifteen minutes is the launch it retries, across hosts" do
+    # The unions hub, re-homed from fir to nibi: nibi resumed fir's conversation every half minute until a fresh dispatch.
+    t = 1_000_000_020_000
+    s = %{"session" => "88f8"}
+
+    marks =
+      ThreadMarks.compose(
+        [
+          session("u", "resume", t, Map.put(s, "host", "fir")),
+          session("u", "resume", t + 31 * 60_000, Map.put(s, "host", "nibi")),
+          session("u", "resume", t + 31 * 60_000 + 34_000, Map.put(s, "host", "nibi")),
+          session("u", "resume", t + 43 * 60_000, Map.put(s, "host", "nibi")),
+          session("u", "dispatch", t + 51 * 60_000, %{"host" => "nibi", "session" => "ae8a"})
+        ],
+        [],
+        "nibi"
+      )
+
+    assert marks["u"].launches == [t, t + 31 * 60_000, t + 51 * 60_000]
+  end
+
   test "resumes on different hosts are not one burst" do
     t = 1_000_000_020_000
 
