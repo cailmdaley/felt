@@ -691,6 +691,7 @@ export class Reader {
     }
     if (intent === 'orchestrator') return this.opts.onOrchestrator?.() ?? false
     if (intent === 'tapestry') return this.opts.onTapestry?.() ?? false
+    if (intent === 'next') return this.stepSent(1)
     const actionCard = this.currentCard && (this.opts.actionCard?.(this.currentCard) ?? this.currentCard)
     // A verdict and Rest are given in a constitution's view alone, where its head carries them.
     if (VIEW_ACTS.includes(intent) && this.document?.kind !== 'family') return false

@@ -6,7 +6,7 @@
    opening its view. This one is set heavier and darker, never larger. Too long for the width, the line scrolls, held at its end. */
 .ov-path { grid-area: path; min-width: 0; overflow-x: auto; scrollbar-width: none; direction: rtl; text-align: left; font: var(--type-label)/var(--leading-tight) var(--font-mono); }
 .ov-path::-webkit-scrollbar { display: none; }
-.ov-path[data-clipped] { mask-image: linear-gradient(to right, transparent, #000 28px); }
+.ov-path[data-clipped] { mask-image: linear-gradient(to right, transparent, currentColor 28px); }
 .ov-path-line { display: inline-flex; align-items: center; direction: ltr; white-space: nowrap; }
 .ov-up { display: flex; align-items: center; color: var(--ws-ink-soft); }
 .ov-up:empty { display: none; }

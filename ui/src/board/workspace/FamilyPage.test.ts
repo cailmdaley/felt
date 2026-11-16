@@ -59,6 +59,12 @@ describe('a constitution\'s view', () => {
     quiet.click()
     expect(threads(page)).toStrictEqual([['q', 'Which one?'], ['w', ''], ['mid', ''], ['d', '']])
     expect(page.el.querySelector('.ov-quiet')!.textContent).toBe('hide quiet')
+    // A resting thread that waits on the human is never tucked away.
+    const rested = card({ id: 'hub/r', name: 'Rested', orchestrator: 'hub', status: 'open', effectiveHorizon: 'stashed', column: 'resting', createdAt: when(30) })
+    expect(rested.column).toBe('resting')
+    const told = made(root, { waits: () => new Map([['hub/r', { id: 'p', at: now - hour, kind: 'post', text: 'Read this.' }]]) }, [...cards, rested]).page
+    expect(threads(told).map(([name]) => name)).toContain('r')
+    expect(threads(made(root, {}, [...cards, rested]).page).map(([name]) => name)).not.toContain('r')
     expect(page.el.textContent).not.toContain('came to this')
     expect(page.el.textContent).not.toContain('Needs a look')
     // Only its own threads: the leaf is mid's.

@@ -6,7 +6,7 @@ export type KeyIntent = 'desk' | 'chronicle' | 'channels' | 'globe' | 'left' | '
 export const DOCUMENT_KEY_INTENTS: readonly KeyIntent[] = [
   'prev', 'next', 'prevChannel', 'nextChannel', 'prevGroup', 'nextGroup', 'first', 'last',
   'scrollDown', 'scrollUp', 'halfDown', 'halfUp', 'pageDown', 'pageUp',
-  'back', 'find', 'help', 'desk', 'chronicle', 'channels', 'globe', 'tapestry',
+  'back', 'find', 'help', 'desk', 'chronicle', 'channels', 'globe', 'tapestry', 'next',
 ]
 /**
  * Intents a document may pass up only while it holds the human's focus, so a
@@ -70,6 +70,7 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['j'], 'nextChannel', 'Next constitution, across columns'), bind(['k'], 'prevChannel', 'Previous constitution, across columns'),
     bind(['J'], 'nextGroup', 'Next Desk column'), bind(['K'], 'prevGroup', 'Previous Desk column'),
     bind(['ArrowLeft'], 'back', 'Back to the previous page', true),
+    bind(['ArrowRight'], 'next', 'On a sent file, the older send'),
     bind(['ArrowDown'], 'nextChannel', 'Next constitution', true), bind(['ArrowUp'], 'prevChannel', 'Previous constitution', true),
     bind(['b'], 'orchestrator', 'Back to the thread’s orchestrator'),
     bind(['l'], 'tapestry', 'From the constitution\'s view, its tapestry'),
@@ -160,7 +161,7 @@ export const helpSections: readonly HelpSection[] = [
     row(['j', 'k', '⌥↓', '⌥↑'], 'Next / previous constitution in Desk order (⌥ only on a constitution\'s page)', on('reader', 'nextChannel', 'prevChannel')),
     row(['⇧J', '⇧K'], 'Next / previous Desk column', on('reader', 'nextGroup', 'prevGroup')),
     row(['h', '←', '‹', '⌥←'], 'Back a page', on('reader', 'back')),
-    row(['←', '→'], 'On a sent file: the newer / older send in its place (← from the newest goes back)', []),
+    row(['←', '→'], 'On a sent file: the newer / older send in its place (← from the newest goes back)', on('reader', 'next')),
     row(['↓', '↑', 'd', 'u', 'Space', '⇧Space'], 'Scroll: line, half page, page', on('reader', 'scrollDown', 'scrollUp', 'halfDown', 'halfUp', 'pageDown', 'pageUp')),
     row(['p', '[', ']'], 'Audio: play or pause, back or forward 5 s', on('reader', 'audioPlay', 'audioBack', 'audioForward')),
   ] },

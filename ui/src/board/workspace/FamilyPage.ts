@@ -36,8 +36,8 @@ const PULL_PX = 120
 /** What a waiting constitution wants, in a word. */
 const WANT_WORD: Readonly<Record<Want['kind'], string>> = { ask: 'asks', review: 'for review', post: 'posted', blocked: 'blocked' }
 
-/** The Desk columns of a thread the rows tuck away behind the quiet control: at rest, or archived. */
-const TUCKED: ReadonlySet<KanbanCard['column']> = new Set(['resting', 'tempered', 'composted'])
+/** A thread the rows tuck away behind the quiet control: put to rest (a standing one between runs and a seat stay drawn), or archived. */
+const tuckable = (card: KanbanCard): boolean => card.column === 'tempered' || card.column === 'composted' || (card.column === 'resting' && card.shuttleKind !== 'standing')
 
 /** Its run at a glance, light; the whole of it on hover. */
 const time = (card: KanbanCard, now: number): HTMLElement => {
@@ -188,6 +188,7 @@ export class FamilyPage {
       const below = index.subtree(child).filter(each => wantOf(each, waits))
       return { child, below, rank: below.length ? 0 : ATTENTION_ORDER.indexOf(attentionOf(child, waits)) }
     }).sort((a, b) => a.rank - b.rank || lastActive(b.child) - lastActive(a.child))
+    const quietHeld = document.activeElement === this.quiet
     const focused = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.ov-ancestor, .ov-thread')
     const held = focused && this.el.contains(focused) ? `${focused.className}:${focused.dataset.fiber}` : undefined
     this.up.replaceChildren(...above.map(ancestor => this.ancestor(ancestor)))
@@ -195,7 +196,8 @@ export class FamilyPage {
     this.paintSaid(card, now)
     this.paintFigure(card)
     // A resting or archived thread with nothing waiting below it stands behind the quiet control.
-    const tucked = threads.filter(({ child, below }) => !below.length && TUCKED.has(child.column))
+    const tucked = threads.filter(({ child, below }) => !below.length && !wantOf(child, waits) && tuckable(child))
+    if (!tucked.length) this.quietShown = false
     const drawn = this.quietShown ? threads : threads.filter(thread => !tucked.includes(thread))
     this.quiet.textContent = this.quietShown ? 'hide quiet' : `${tucked.length} quiet`
     this.quiet.setAttribute('aria-expanded', String(this.quietShown))
@@ -207,6 +209,7 @@ export class FamilyPage {
       return item
     }), ...tucked.length ? [more] : [])
     this.threads.hidden = !threads.length
+    if (quietHeld && this.quiet.isConnected) this.quiet.focus({ preventScroll: true })
     if (held) [...this.el.querySelectorAll<HTMLElement>('.ov-ancestor, .ov-thread')].find(row => `${row.className}:${row.dataset.fiber}` === held)?.focus({ preventScroll: true })
   }
   /** A row that opens a constitution's view, as a click on it does. */
