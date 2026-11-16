@@ -216,6 +216,15 @@ defmodule ShuttleWeb.DeliverController do
             |> Map.merge(consumed(answer, message_id in (answer["members"] || [])))
             |> Map.put(:consumed, answer)
 
+          {:unconsumed, detail} ->
+            Map.merge(body, %{
+              status: "queued",
+              delivered: nil,
+              detail:
+                "#{fiber_id}'s inbox holds it, but could not be consumed for the live worker now " <>
+                  "(#{detail}); the worker's hook or the next poll takes it, unless it was delivered before"
+            })
+
           :queued ->
             Map.put(body, :status, "queued")
         end

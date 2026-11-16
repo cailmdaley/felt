@@ -1177,14 +1177,30 @@ defmodule ShuttleWeb.DeliverControllerTest do
     end
   end
 
-  test "a message to a fiber with a live worker is queued in its inbox" do
+  # The live worker here is a Claude session with no Shuttle hook, so the
+  # inbox cannot be consumed for it: the sender is told the message is held
+  # and why consuming failed, never that it was not delivered, since a repeat
+  # of an id may already have been.
+  test "a message to a fiber with a live worker is queued in its inbox, and a failed consume says so" do
     message_live_worker("tests/deliver-live-queue")
 
-    body =
-      "tests/deliver-live-queue" |> queue_for_fiber("msg-live-1") |> json_response(202)
+    for _attempt <- 1..2 do
+      body =
+        "tests/deliver-live-queue" |> queue_for_fiber("msg-live-1") |> json_response(202)
 
-    assert %{"delivery" => "context", "queued" => true} = body
-    assert [args] = mailbox_puts()
+      assert %{
+               "delivery" => "context",
+               "queued" => true,
+               "status" => "queued",
+               "delivered" => nil,
+               "detail" => detail
+             } = body
+
+      assert detail =~ "could not be consumed for the live worker"
+      assert detail =~ "has not registered a Shuttle message hook"
+    end
+
+    assert [args, _] = mailbox_puts()
     assert "msg-live-1" in args
     refute_received {:message, _}
   end

@@ -92,6 +92,7 @@ Voice (`live_input`) uses human records and typed input.
 `/deliver` adds `consumed` for a live worker: the consumer's `action`, `members`, `followup` and `held: cost`, and `message`, this message's state after the pass (`consume --message`): `delivered`, `sent` (its outcome not yet confirmed), `reserved` for a launch, `pending`, or `unknown` when the inbox no longer holds it as delivered (it expired, which consume records on the offered entry as disposition `expired`, or was never stored), which `/deliver` answers as `queued` with `delivered: null`.
 The status describes this message, not whatever else the pass sent: `woken`, `followed_up`, `delivered` (as context, or before a retry), `held`, `starting` or `queued`, which the CLI prints.
 `delivered` is true once the message is delivered, null when it was sent and its outcome is unconfirmed, and false while it waits or a session starts for it.
+A consume that fails for the live worker, such as a Claude receiver whose hook is not registered yet or whose process is gone, answers `queued` with `delivered: null` and a `detail` naming the failure: the entry is stored, and a repeated id may already have been delivered, which that answer cannot tell.
 An enqueue reply is not a promise that the model read the text.
 The owner's put, consumes and any launch share a 35-second budget, each command limited to 32 seconds, so it answers inside a routing hub's 40-second forward and the CLI's 52-second `/deliver` timeout; clearing the ask runs beside them.
 A timeout leaves the entry durable; retry the same id.

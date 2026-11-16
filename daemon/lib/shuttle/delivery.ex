@@ -179,6 +179,8 @@ defmodule Shuttle.Delivery do
   then asks with `if_costly: fresh`, so a cold cache does not hold it.
 
   Answers `{:ok, {:consumed, answer}}` for a live worker, `{:ok, :queued}`,
+  `{:ok, {:unconsumed, detail}}` when consuming the inbox for the live worker
+  failed (the entry is stored; whether it was delivered before is unknown),
   `{:ok, :starting}` when a session is starting,
   `{:ok, {:waiting, detail}}` saying what a waking entry waits for, or
   `{:ok, {:scheduled, not_before}}` for an entry not yet due, which is stored
@@ -279,13 +281,19 @@ defmodule Shuttle.Delivery do
 
                 {:ok, {:consumed, answer}}
 
-              _ ->
+              waiting when waiting in [:ok, {:error, :no_worker}, {:error, :authority_unknown}] ->
                 {:ok, :queued}
+
+              failure ->
+                {:ok, {:unconsumed, consume_failure(failure)}}
             end
           end
         end
     end
   end
+
+  defp consume_failure({:command_error, _status, output}), do: String.trim(output)
+  defp consume_failure(failure), do: inspect(failure)
 
   defp future?(nil), do: false
 

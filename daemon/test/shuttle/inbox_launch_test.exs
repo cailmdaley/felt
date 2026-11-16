@@ -296,8 +296,12 @@ defmodule Shuttle.InboxLaunchTest do
     refute script =~ "first message"
     refute script =~ "quiet context"
 
-    # The session is live: a second message and later polls start nothing more.
-    assert {:ok, :queued} = Delivery.context(parent, "second message", "m-2", wake: true)
+    # The session is live: a second message and later polls start nothing
+    # more. Its hook is not registered yet, so the message waits for it.
+    assert {:ok, {:unconsumed, unregistered}} =
+             Delivery.context(parent, "second message", "m-2", wake: true)
+
+    assert unregistered =~ "has not registered a Shuttle message hook"
     for _ <- 1..3, do: poll!(poller)
     assert launches(id) == 1
     assert %{"m-1" => %{"turn" => "force"}, "m-2" => %{"turn" => "ask"}} = pending(parent)
@@ -624,7 +628,7 @@ defmodule Shuttle.InboxLaunchTest do
     poller = poller!(host)
     assert launches(id) == 1
 
-    assert {:ok, :queued} =
+    assert {:ok, {:unconsumed, _}} =
              Delivery.context(entry(host, id), "the kernel", "m-answer", wake: true)
 
     poll!(poller)
