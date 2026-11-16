@@ -58,7 +58,7 @@ A lost confirmation repeats the same enqueue, which stores nothing new.
 On the owner, the result stays pending until a worker takes it or currency checking drops it as superseded.
 Settled routing entries keep their ids for 14 days, so a re-capture stores nothing; they settle after their signal is stamped, and the inbox refuses a stamp older than 14 days, so a signal cannot publish again after they expire.
 Boot establishes the capture baseline once; a corrupt capture state holds boot without discarding anything.
-See [The inbox](inbox.md#thread-results-and-routing) for routing, the baseline and rollback.
+See [The inbox](inbox.md#thread-results-and-routing) for routing and the baseline, and [its rollback notes](inbox.md#rollback).
 
 The parent Poller publishes one durable receiver identity and epoch synchronously with worker registration, recovery, removal and conversation rotation.
 A CLI claim binds its supplied conversation UUID in worker metadata before registration publishes authority, never borrowing the predecessor's runtime UUID.

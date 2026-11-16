@@ -466,7 +466,7 @@ processed delivery receipt, including `rejected` and `unknown`. HTTP 400 reports
 `preflight_failed`; preflight refusals may include a rejection receipt. HTTP 409
 reports `message_id_conflict` when a session-message ID is reused for changed content.
 Conflicting fiber-mailbox content is rejected by `/deliver` with HTTP 422.
-Other rejected receipts—including `session_unavailable`, `session_not_found`,
+Other rejected receipts—including `unavailable`, `session_not_found`,
 `wake_required`, and `wake_refused`—return 200. HTTP 5xx means the Shuttle CLI did not
 provide a valid receipt or the owner could not be reached; the daemon may
 include a synthetic `unknown` receipt. `shuttle message` exits 0 for
@@ -484,7 +484,7 @@ the text through its hook. A draft or a constitution at rest keeps the text
 for whoever arms it. The receipt reads `starting a session on <fiber> for it`
 (`status: starting` in `--json`), or `queued for <fiber>: <what it waits for>`
 (`status: queued`, with `detail`).
-A context-only send prints `queued as context for <fiber>` (`status: queued`), whether or not a worker is live: it waits for the worker's next hook, except that a live Pi worker with no hook registered is sent it as context at once (`delivered to <fiber>`).
+A context-only send prints `queued as context for <fiber>` (`status: queued`), whether or not a worker is live: it waits for the worker's next hook.
 Neither starting nor queued is delivered; a worker reads the text through the fiber's inbox.
 A worker that starts meanwhile takes the entry like any other.
 Retrying with the same `--message-id` queues it once. Attachments wait in the inbox as retained owner-local file references,
@@ -496,7 +496,8 @@ retry with `--message-id <printed id>`.
 
 Retry an uncertain delivery with the identical request and the same
 `--message-id`, never a fresh ID. A retry answers the stored receipt unchanged
-and never resends the message; one that finds the first send still running, or
+and never resends the message, unless the first send was refused before
+anything was written; one that finds the first send still running, or
 stopped before it recorded an outcome, answers `unknown` with
 `ambiguous_delivery` at once.
 Changed content, including a changed `reply_to` target, requires a new message ID.

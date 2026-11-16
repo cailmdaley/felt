@@ -19,7 +19,7 @@ A message to a fiber, a thread result and a delayed message are entries, deliver
 The entry, with the manifest of the batch that holds it, is the source of truth across a daemon, CLI or worker death: it stays pending until it is delivered, so a death drops nothing.
 Only a cancel, a superseded thread result or retention (a thread result or notice, 14 days after its stamp) settles an entry undelivered.
 A death, or a receiver that never confirms, can leave a send whose outcome is unknown; the inbox then sends the entry again, once more to the same conversation or on to the one that replaces it, and every such repeat opens with “Possible repeat”.
-Its id makes a second enqueue a no-op while the entry is pending and for 14 days after it settles.
+Its id makes a second enqueue a no-op while the entry is pending and while `offered/` keeps it, which is 14 days from the entry's last write while pending.
 
 Lines the daemon transports itself are at most once: the human's typed and spoken lines, a pulse tick and an agent's `--fresh` request.
 Each is recorded in the fiber's inbox before its one transport, and only the call that created the record transports it; a record left `unknown` is never transported again.
@@ -29,6 +29,7 @@ A pulse tick is also guarded by its clock, which the daemon moves past the tick 
 A message to a session address is not an entry when it asks for a turn: it goes once to the session's own transport (Claude's native socket, Codex's terminal, Pi's native inbox), and its sender's receipt says what that transport answered.
 A repeat of its id answers that receipt without sending again, unless the first send was refused before anything was written.
 Two session messages are entries, in the session's own inbox, which only that session's hook reads: a quiet one (`--context-only`), and an ordinary ask to an idle Claude session that is costly to wake, which the owner holds as context (receipt `queued` on `claude-hook`).
+Nothing wakes the session for either: its hook offers them at its next prompt or tool call, and a session that ends first never sees them.
 
 The fourteen outside-in tests `daemon/test/shuttle/dispatch_integration_inbox_*_test.exs` pin this guarantee with the real CLI and hooks, most of them against a daemon that dies at the worst moment:
 `message` (a fiber message enqueued before its owner dies is delivered once), `cross_host` (the same, forwarded to another owner), `delayed` (a delayed message, once and not before its time), `launch_death` (the message whose launch its owner died starting), `roll_forward` (a batch whose conversation ended unanswered is carried once, marked, to its replacement), `thread` and `thread_waking` (quiet and waking thread results), `notify_idle` (a notify-only subscription is no entry), `human`, `voice`, `fresh` and `pulse` (a line, spoken line, fresh request or tick its owner died transporting is never transported again), and `session` and `session_busy` (a session message is sent once under its receipt, and a busy Claude session's ask goes to its native socket, never its inbox).
@@ -291,7 +292,7 @@ A tracked worker whose conversation is not yet known is consumed as `-` with its
 
 | Entries and worker | Action |
 |---|---|
-| Only `none` | Wait for a hook; a receiver without a hook registration, other than Codex, takes them as context |
+| Only `none` | Wait for a hook |
 | `ask`, busy | Codex terminal follow-up; Pi steering; Claude hook, then native wake after 30 s or once its turn ends |
 | `ask`, not observed idle | Wake without a cost check |
 | `idle`, busy or not observed idle | Wait; hook-offered only to a session launched for it |
@@ -348,8 +349,8 @@ A session started for messages on an armed standing constitution is an ad-hoc ru
 It starts only while no occurrence is due, and its own end, a handoff or a concluded exit, is not service: an occurrence that elapsed while it ran still fires after it ends.
 A temper, rest or re-arm of that run counts as usual.
 
-A receiver without a hook registration takes `none` entries directly, in a batch sent as context without a turn (`action: context`) whenever consume would otherwise wait.
-Codex leaves them to its fiber hook, and Claude without a registration is unavailable.
+For a receiver without a hook registration, consume sends `none` entries directly, in a batch sent as context without a turn (`action: context`), whenever it would otherwise wait.
+Codex is left to its fiber hook, and Claude without a registration is unavailable; Pi, the remaining harness, refuses context without a wake (`wake_required`), which releases the batch, so its `none` entries wait for its hook too.
 
 A wake is one message, oldest first, up to 16 entries and the harness's byte limit, with at most one thread lifecycle signal.
 It includes pending `none` entries and turn-asking entries; busy-worker `idle` entries remain excluded even when force triggers a batch.
@@ -426,7 +427,7 @@ A fiber with no worker settles only the first three rows and hook claims, and le
 
 The current build is CLI contract 48 and HTTP API level 3.
 `bin/shuttle-deploy --ref` rolls a host back to an earlier build, and the deploy keeps the previous live release for it; the notes below cover the recent levels such a rollback reaches, newest first.
-Every level reads the inbox files a newer one wrote, and rolling forward again resumes from the recorded inbox state.
+A rollback leaves inbox entries and records on disk, and rolling forward again resumes from them.
 The daemon and its CLI deploy together: either one rolled back alone is a contract skew that holds fresh dispatch.
 
 **Below contract 48.**

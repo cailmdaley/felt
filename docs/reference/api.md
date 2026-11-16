@@ -321,12 +321,13 @@ A processed delivery returns HTTP 200 for any receipt status, including
 `wrong_host`, `invalid_request`, `unsupported_harness`, and `preflight_failed`
 (which releases the message ID), even when Felt supplies a rejection receipt.
 A `message_id_conflict` returns 409. Other rejected receipts—including
-`session_unavailable`, `session_not_found`, `wake_required`, and `wake_refused`—
+`unavailable`, `session_not_found`, `wake_required`, and `wake_refused`—
 return 200. HTTP 5xx means Felt did not provide a valid receipt or the owner
 could not be reached; the daemon may include a synthetic `unknown` receipt.
 
 Reusing a `message_id` with the same request returns its durable receipt,
-unchanged, and never sends to the receiver again. A request that finds the
+unchanged, and never sends to the receiver again, unless the first send failed
+preflight (`preflight_failed`), which released the ID. A request that finds the
 first send still running, or stopped before it saved a result, answers
 `unknown` (`ambiguous_delivery`) at once without resending. Reusing the ID for
 changed content is rejected by the local felt adapter.
