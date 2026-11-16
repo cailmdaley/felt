@@ -16,6 +16,35 @@ export interface UnfoldOptions {
   awake?(): boolean
   /** A file unfolded, a deliberate look at it. */
   seen?(key: DocKey): void
+  /** Opens the file in the board's full file viewer, whose way back returns here; without it the bar offers no full screen. */
+  full?(key: DocKey): void
+}
+
+/** The bar's two drawn controls, in the stroke the board's icons use. */
+const GLYPH = {
+  full: '<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/>',
+  fold: '<path d="m4 10 4-4 4 4"/>',
+}
+const glyph = (shape: keyof typeof GLYPH): string =>
+  `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${GLYPH[shape]}</svg>`
+
+/**
+ * The ground behind `el` as one opaque background: every translucent tint
+ * between it and the first opaque ground, laid over that ground, so the
+ * pinned bar matches what it covers.
+ */
+function ground(el: HTMLElement): string {
+  const tints: string[] = []
+  for (let at: HTMLElement | null = el; at; at = at.parentElement) {
+    const color = getComputedStyle(at).backgroundColor
+    if (!color || color === 'transparent') continue
+    // rgba(r, g, b, a) or a modern colour's `/ a`; without either it is opaque.
+    const alpha = Number((/^rgba\(.*,\s*([\d.]+)\)$/.exec(color) ?? /\/\s*([\d.]+%?)\s*\)$/.exec(color))?.[1]?.replace(/%$/, 'e-2') ?? 1)
+    if (alpha === 0) continue
+    if (alpha >= 1) return [...tints, color].join(', ')
+    tints.push(`linear-gradient(${color}, ${color})`)
+  }
+  return tints.length ? [...tints, 'var(--ws-paper, var(--kbn-paper))'].join(', ') : ''
 }
 
 /** The nearest box that scrolls this one. */
@@ -29,9 +58,11 @@ function scroller(el: HTMLElement): HTMLElement | null {
  * files inline (a constitution's view, a post in a channel). Folded, each file
  * is a preview capped at about 320px showing the top of its page, at the full
  * width it is given, in one sideways row when there are several. A click
- * unfolds that file at its natural height in the same place, under a slim bar
- * pinned to the top of whatever scrolls it: the file's name, ‹ i / n › when
- * there are several, and the fold control. While one is unfolded, ← and →
+ * unfolds that file at its natural height in the same place, the same card
+ * grown, under a quiet bar pinned to the top of whatever scrolls it: the
+ * file's name, ‹ i / n › when there are several, full screen, and the fold
+ * chevron. The bar has no ground of its own until it pins over the file, when
+ * it takes its page's ground and a hairline. While one is unfolded, ← and →
  * step to its neighbours, from the page or from inside the file, and Escape
  * folds it, returning to the preview.
  */
@@ -60,7 +91,7 @@ export class Unfold {
     this.steps.className = 'uf-steps'
     this.count.className = 'uf-count'
     const control = (button: HTMLButtonElement, text: string, label: string, act: () => void): HTMLButtonElement => {
-      button.type = 'button'; button.className = 'uf-control'; button.textContent = text
+      button.type = 'button'; button.className = 'uf-control'; button.innerHTML = text
       button.title = label; button.setAttribute('aria-label', label)
       button.addEventListener('click', event => { event.stopPropagation(); act() })
       return button
@@ -68,13 +99,20 @@ export class Unfold {
     control(this.prev, '‹', 'Previous file (←)', () => this.step(-1))
     control(this.next, '›', 'Next file (→)', () => this.step(1))
     this.steps.append(this.prev, this.count, this.next)
-    const fold = control(document.createElement('button'), 'collapse ⌃', 'Collapse (Esc)', () => this.fold())
+    const full = opts.full && control(document.createElement('button'), glyph('full'), 'Full screen', () => { if (this.open) opts.full!(this.open.key) })
+    const fold = control(document.createElement('button'), glyph('fold'), 'Collapse (Esc)', () => this.fold())
     fold.classList.add('uf-fold')
-    this.bar.append(this.name, this.steps, fold)
+    full?.classList.add('uf-full')
+    this.bar.append(this.name, this.steps, ...full ? [full] : [], fold)
     this.page.className = 'uf-page'
     this.page.tabIndex = -1
     this.el.append(this.row)
     this.el.addEventListener('keydown', event => { if (this.key(event.key, event)) { event.preventDefault(); event.stopPropagation() } })
+  }
+  /** While a file is unfolded, whether its bar stands pinned over it. */
+  private readonly pin = (): void => {
+    if (!this.open) return
+    this.el.toggleAttribute('data-pinned', this.page.getBoundingClientRect().top < this.bar.getBoundingClientRect().bottom - 1)
   }
 
   /** The files it shows, in order; an unfolded file that is gone folds. */
@@ -113,6 +151,9 @@ export class Unfold {
     this.page.replaceChildren(viewer)
     this.el.setAttribute('data-unfolded', '')
     this.el.replaceChildren(this.bar, this.page)
+    this.el.style.setProperty('--uf-ground', ground(this.el))
+    document.addEventListener('scroll', this.pin, { capture: true, passive: true })
+    this.pin()
     this.paintBar()
     this.page.focus({ preventScroll: true })
     this.opts.seen?.(key)
@@ -161,6 +202,8 @@ export class Unfold {
   }
   private drop(): void {
     if (!this.open) return
+    document.removeEventListener('scroll', this.pin, { capture: true })
+    this.el.removeAttribute('data-pinned')
     disposeFileViewer(this.open.viewer)
     this.open.viewer.remove()
     this.open = null

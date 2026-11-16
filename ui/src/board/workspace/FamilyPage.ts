@@ -110,6 +110,7 @@ export class FamilyPage {
     this.unfold = new Unfold({
       shuttleBase: feeds.shuttleBase, single: true, awake: () => this.awake,
       seen: key => { const file = this.shown?.files.get(key); if (file?.unread) feeds.seen(file) },
+      full: key => { if (this.card) feeds.open(this.card, key) },
     })
     this.unfold.el.classList.add('ov-unfold')
     this.threads.setAttribute('aria-label', 'Threads')

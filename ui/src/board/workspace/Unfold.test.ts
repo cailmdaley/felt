@@ -43,6 +43,17 @@ describe('files that unfold in place', () => {
     expect(document.activeElement).toBe(unfold.el.querySelector('.uf-card[data-key="host:/w/c.md"]'))
   })
 
+  it('offers full screen only when its host can open the file there, and hands it the unfolded file', () => {
+    expect(made().unfold.el.querySelector('.uf-full')).toBeNull()
+    const full = vi.fn(), unfold = new Unfold({ shuttleBase: '', full })
+    document.body.append(unfold.el)
+    unfold.update(files)
+    unfold.el.querySelectorAll<HTMLButtonElement>('.uf-card')[2].click()
+    unfold.el.querySelector<HTMLButtonElement>('.uf-full')!.click()
+    expect(full).toHaveBeenCalledExactlyOnceWith('host:/w/c.md')
+    expect(unfold.unfolded).toBe('host:/w/c.md')
+  })
+
   it('keeps its cards in place across an update with the same files, focus included, and folds when the unfolded file is gone without taking the focus', () => {
     const { unfold } = made()
     const first = unfold.el.querySelector<HTMLElement>('.uf-card')!

@@ -781,10 +781,14 @@ export class ChannelsView implements TemporalView {
    * Escape folds it. A close leads with its tapestry, found as the read says.
    */
   private previews(item: Item, id: string): HTMLElement {
-    const made = this.unfolds.get(id) ?? this.unfolds.set(id, {
-      unfold: new Unfold({ shuttleBase: this.ctx?.shuttleBase ?? '', awake: () => !this.ctx?.workspace?.isActive && !!this.stream?.isConnected }), files: [],
-    }).get(id)!
     const { card } = item
+    const made = this.unfolds.get(id) ?? this.unfolds.set(id, {
+      unfold: new Unfold({
+        shuttleBase: this.ctx?.shuttleBase ?? '', awake: () => !this.ctx?.workspace?.isActive && !!this.stream?.isConnected,
+        // Full screen opens the file in the reader; its way back returns to this item, the file still unfolded.
+        full: key => this.openPage(id, card, key),
+      }), files: [],
+    }).get(id)!
     const files = item.files.map((file): UnfoldFile => ({ key: docKey(file.host ?? card.originId, file.fullPath, card.originId, card.fiberDir), name: declaredTitle(docKey(file.host ?? card.originId, file.fullPath, card.originId, card.fiberDir))?.title ?? file.basename }))
     made.files = files
     this.showPreviews(made)

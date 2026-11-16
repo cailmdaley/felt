@@ -1,6 +1,6 @@
 /* Files that unfold in place. Folded: previews capped near 320px, at the full width given, in one sideways row
-   when there are several, the next peeking at the edge. Unfolded: the file at its natural height under a slim
-   bar pinned to the top of what scrolls it. */
+   when there are several, the next peeking at the edge. Unfolded: the same card grown to the file's natural
+   height, under a quiet bar in the folded row's meta type, pinned to the top of what scrolls it. */
 .uf { --uf-cap: min(320px, 55vh); min-width: 0; }
 .uf[hidden] { display: none; }
 .uf-row { display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: thin; }
@@ -13,26 +13,28 @@
 .uf-thumb.ws-thumbnail { width: 100%; height: 100%; border-radius: 4px; }
 
 .uf-bar {
-  position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px;
-  padding: 4px 6px 4px 10px; border: 1px solid var(--ws-hairline-soft); border-radius: 4px 4px 0 0;
-  background: var(--ws-paper, var(--kbn-paper)); color: var(--ws-ink-soft);
+  position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 4px;
+  padding: 2px 0 6px; color: var(--ws-ink-muted);
   font: var(--type-meta)/var(--leading-ui) var(--font-mono);
 }
-.uf-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ws-ink); }
-.uf-steps { display: inline-flex; align-items: center; gap: 2px; }
+/* Pinned over the file it names, it stands on its page's ground above a hairline. */
+.uf[data-pinned] .uf-bar { background: var(--uf-ground, var(--ws-paper, var(--kbn-paper))); box-shadow: 0 1px 0 var(--ws-hairline-soft); }
+.uf-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ws-ink-soft); }
+.uf-steps { display: inline-flex; align-items: center; gap: 0; }
 .uf-steps[hidden] { display: none; }
 .uf-count { min-width: 5ch; text-align: center; font-variant-numeric: tabular-nums; }
 .uf-control {
-  min-width: 24px; height: 24px; padding: 0 6px; border: 0; border-radius: 3px; background: none; cursor: pointer;
-  color: var(--ws-ink-soft); font: var(--type-meta)/var(--leading-solid) var(--font-serif);
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 22px; height: 22px; padding: 0; border: 0; border-radius: 3px; background: none; cursor: pointer;
+  color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-solid) var(--font-mono);
 }
 .uf-control:disabled { opacity: .35; cursor: default; }
-.uf-control:not(:disabled):is(:hover, :focus-visible) { color: var(--ws-ink); background: var(--ws-hover); outline: none; }
-.uf-fold { border: 1px solid var(--ws-hairline); }
+.uf-control:not(:disabled):is(:hover, :focus-visible) { color: var(--ws-ink); outline: none; }
 @media (pointer: coarse) { .uf-control { min-width: 36px; height: 36px; } }
 
 /* The file at its natural height: a page grows to its content, text and images unclipped; what cannot (a PDF) keeps a tall pane. */
-.uf-page { display: flex; flex-direction: column; border: 1px solid var(--ws-hairline-soft); border-top: 0; border-radius: 0 0 4px 4px; overflow: clip; outline: none; }
+/* The card grown: the folded preview's edge and corners, around the file at its full height. */
+.uf-page { display: flex; flex-direction: column; border-radius: 4px; box-shadow: 0 0 0 1px var(--ws-hairline-soft); overflow: clip; outline: none; }
 .uf-page > * { flex: none; }
 .uf-page[data-kind='html'] .kbn-fileview-frame-wrap { min-height: var(--uf-cap); }
 .uf-page[data-kind='text'] .kbn-fileview-text-wrap { overflow: visible; }
