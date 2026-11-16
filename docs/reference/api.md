@@ -288,13 +288,9 @@ such as `claude-code`, and normalizes the routed address and receipt to the
 canonical harness name. The CLI also resolves unique native session IDs and
 fiber paths, slugs, or UIDs before calling this endpoint. Omitting `wake`
 requests an active task turn; set `wake: false` explicitly for context-only
-delivery. The CLI's default also sends `context_if_busy: true`, which lets a
-busy Claude receiver with a native endpoint and sender return address queue context for `UserPromptSubmit` or `PostToolUse`.
-A full queue, oversized message, or missing return address uses native delivery instead.
+delivery. The CLI's default also sends `context_if_busy: true`, which marks a
+wake the sender did not force: an idle Claude receiver that is costly to wake gets it as context instead.
 `context_if_busy` must be a boolean and requires `wake: true`.
-Unassigned mail falls back after 30 seconds or as soon as the receiver isn't working.
-Queued receipts trigger serialized recovery; pending mail gets one-second checks, with a boot pass and a one-minute safety sweep.
-Queue age and the hook/native claim survive daemon restart.
 A forced wake without that field never silently becomes context-only delivery. The address selects the
 owner strictly; an unknown host is refused rather than attempted locally. Its
 receipt reports the furthest observed submission stage (`accepted`,
@@ -305,13 +301,10 @@ delivery, `queued` means the receiver queues it behind its current turn,
 means a correlated real assistant reply appears. Hook-mailbox `queued` is
 context-only and starts no turn. With `wake: true`, Claude-native
 `queued`/`submitted` receipts are valid; `context_if_busy: true` also permits a
-Claude-hook `queued` receipt, and `context_added` once the main-thread hook writes it as context.
-A retry with the same message ID returns that confirmation or the native fallback receipt.
+Claude-hook `queued` receipt, which is the held-as-context answer.
+A retry with the same message ID returns the stored receipt.
 Native admission alone never means a model reply.
-Fallback waits briefly for admission or refusal rather than observing a model response.
-Preflight failures return mail to the hook queue and retry at most three times.
-A terminal failure, exited receiver or ambiguous interrupted write produces a durable failure notice to the sender's session return address.
-Claude's native approval policy applies to fallback; Shuttle cannot start a turn that Claude holds for approval.
+Claude's native approval policy applies; Shuttle cannot start a turn that Claude holds for approval, and its receipt says so.
 The routing hint isn't part of the message's retry identity, so adding or stripping it across a mixed-version fleet doesn't cause an ID conflict.
 
 `from` names the sender, as given; a request without one reads `[from external]`.

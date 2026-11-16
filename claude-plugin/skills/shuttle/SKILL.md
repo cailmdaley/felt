@@ -114,8 +114,8 @@ Use `shuttle inbox ls <fiber> --scheduled` to see pending and overdue check-ins 
 
 **Work the human asks for now starts now.** When you create a thread, or hand work to a fiber whose worker isn't live, launch it in the same step (`shuttle thread` arms by default; `shuttle dispatch <fiber> --message "…"` starts a worker with your request): a draft or a queued message waits for someone who may not come back. Leave it unlaunched only when the human says later, and then say on the card what it waits for.
 
-Messaging a fiber reaches its current worker, or queues for the next one. A busy Claude worker receives context on main-thread prompt submission or tool completion; unoffered mail falls back to native wake after 30 seconds, or sooner when the worker stops working.
-Fallback failures return a notice to the sender; native delivery still respects Claude's approval policy.
+Messaging a fiber reaches its current worker, or queues for the next one. A busy Claude worker receives it as context on main-thread prompt submission or tool completion; one not offered within 30 seconds, or by the end of the turn, wakes it natively.
+A message to a Claude session address that asks for a turn goes straight to that session's native inbox, which queues it behind a running turn. Native delivery respects Claude's approval policy: a held or refused message answers the sender in its receipt.
 
 **Fiber messages are durable inbox entries, whether the worker is live or dormant.** Their receipt says what became of that message: woken, followed up in a turn, delivered, held as context for cost, starting or queued. Busy Codex and Pi keep terminal follow-up and steering; Claude gets a hook window, then native wake. `--notify-when-idle` subscribes when a hook or wake delivers the entry; with no text it subscribes the fiber's live worker at once. `--fresh` is deduplicated by message id and obeys the armed-document and quarantine gates: it never reopens a closed fiber, and a refusal fails with its reason, after which the same id may be sent again. The new session gets the text in its launch prompt. Session-addressed messages stay with that conversation.
 

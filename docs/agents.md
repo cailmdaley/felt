@@ -172,9 +172,6 @@ Pi's JavaScript handoff implementation is outside its approval boundary.
 Claude offers queued mail only on `PostToolUse` and `UserPromptSubmit`, which stay synchronous.
 `PreToolUse` context can be discarded when a tool is interrupted, so that hook records activity but offers no mail.
 `Stop` and `StopFailure` record a turn end but never drain mail or continue a turn.
-Automatic busy-Claude mail waits up to 30 seconds for a main-thread hook offer, or falls back sooner when the worker isn't working.
-The daemon runs one recovery pass at a time: queued receipts trigger it, pending mail gets one-second follow-ups, and boot plus a one-minute sweep recover missed receipts.
-The durable fallback-directory rename and the hook's output share a short mailbox lock, so only one transport offers a message.
 Claude subagent lifecycle/tool hooks neither touch parent registrations nor write parent activity events; sent-file records and other harnesses' child events retain their own event trails.
 Context-only messages stay queued for a safe prompt or tool hook and never continue a turn.
 `Stop` and `Notification` also stay synchronous: the daemon folds state transitions in file order, so a late stop or notification can close a newer working turn.

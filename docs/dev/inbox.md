@@ -12,6 +12,7 @@ Any other string names an inbox of its own: `shuttle inbox put` accepts it, and 
 
 A message to a fiber, a thread result and a delayed message are inbox entries, and the entry, with the manifest of the batch that holds it, is the source of truth across a daemon, CLI or worker death: it stays pending until a worker's confirmed receipt or its hook's emission delivers it, so a death drops nothing, and only a cancel, a superseded thread result or its retention (a thread result or notice, 14 days after its stamp) settles it undelivered.
 A death, or a receiver that never confirms, can leave a delivery whose outcome is unknown; the inbox then delivers the entry again, by the [batch rules](#batches-and-the-claim), and every such repeat opens with “Possible repeat”.
+A message to a session that asks for a turn is not an entry: it goes once to the session's own transport (Claude's native socket, Codex's terminal, Pi's native inbox), its sender's receipt says what that transport answered, and a repeat of its id answers that receipt without sending again, unless the first send was refused before anything was written; a quiet one (`--context-only`) is an entry in the session's inbox, which only that session's hook reads.
 Lines the daemon transports itself are at most once: the human's typed and spoken lines, a pulse tick and an agent's `--fresh` request are recorded before their one transport, only the call that created the record transports it, and a record left `unknown` is never sent again; one settled `undeliverable` never reached a worker and may be transported again under its id, unless it was spoken.
 
 ## The store
@@ -25,7 +26,6 @@ Each address has one directory under the data directory:
 `offered/` holds entries with a final disposition for 14 days.
 `.lock` serializes writers, hooks and the consumer, including transport emission.
 `batches/` holds one manifest per open batch, the batch's one claim record: `<batch_id>.json` for a consumer's batch, `<batch_id>.hook` for a hook's claim ([below](#batches-and-the-claim)).
-A Claude session also has `fallback/`, where native-wake recovery claims a session entry.
 A fiber has `destination.json`, its worker-owned conversation and receiver epoch.
 
 ## The entry
@@ -40,29 +40,28 @@ A fiber has `destination.json`, its worker-owned conversation and receiver epoch
 
 `request` is the publication as `messaging.Request` defines it: id, text, sender, attachments, reply and idle-notification fields, thread signal and retention stamp.
 `queued_at` is Unix nanoseconds.
-Readers also write `possible_repeat` when an entry settles back to pending after a batch that may have delivered it, and `fallback` on Claude session entries.
-Entries written by earlier builds may also carry `attempt` and `attempt_address`; nothing reads them.
+Readers also write `possible_repeat` when an entry settles back to pending after a batch that may have delivered it.
+Entries written by earlier builds may also carry `attempt`, `attempt_address` and `fallback`; nothing reads them.
 A routing inbox entry also carries `routing`, its publication's routing record, and the `disposition` it settled with, written before it moves to offered.
 
 ### Delivery wishes
 
 | Wish | Values | Meaning |
 |---|---|---|
-| `source` | `message`, `human`, `voice`, `thread`, `pulse`, `notice` | What produced the entry |
+| `source` | `message`, `human`, `voice`, `thread`, `pulse` | What produced the entry |
 | `turn` | `none`, `idle`, `ask`, `force` | Context only; a turn only in a worker observed idle; a turn that cost may hold; or an unconditional wake. Any but `none` starts a session for a fiber with no worker when its gate allows |
 | `if_costly` | `hold`, `fresh` | Hold context or request a fresh session instead of waking a large, cold session |
 | `not_before` | RFC 3339 time, or absent | When readers may first take it |
 
 Fiber readers select from `turn`, not the request's wake fields.
 `Enqueue` also sets `request.wake` for `force`, so a reader that does not understand wishes can still wake for it.
-For a Claude session's `ask`, it sets `context_if_busy`: the hook takes context, with a native wake after 30 seconds without an offer.
-Other session `ask` entries and all session `none` entries are context.
+Session `ask` and `none` entries are context for the session's hook.
 Session inboxes refuse `force` and `idle` with `wake_required`.
 A busy fiber's Claude `ask` remains hook-eligible for 30 seconds, then consume uses its native wake; the daemon schedules a consume at that deadline and also consumes on polls.
 
 An entry without wishes reads as the wishes its request implies.
 `turn` comes from `idle_only`, then `context_if_busy`, then `wake`, else `none`.
-The id prefixes `thread-`, `pulse-`, `voice-` and `claude-mail-failure-` imply sources `thread`, `pulse`, `voice` and `notice`; other ids imply `message`.
+The id prefixes `thread-`, `pulse-` and `voice-` imply sources `thread`, `pulse` and `voice`; other ids imply `message`.
 `if_costly` defaults to `fresh` for thread results and `hold` otherwise.
 
 ## Enqueue
@@ -92,7 +91,8 @@ Attachments are retained under the owner's `message-files/`; the entry contains 
 A plain agent `/deliver` does the same, minting an id when the caller supplies none.
 The owner clears the fiber's outstanding ask when a due entry from a sender other than `shuttle` reaches its inbox, including a remote sender.
 A future entry clears nothing.
-Session-addressed messages and idle and mail-failure notices keep their direct transports and `messages/` receipts.
+Session-addressed messages and idle notices keep their direct transports and `messages/` receipts.
+A session message that asks for a turn goes to the session's native transport whatever its turn state: a busy Claude session's native inbox queues it behind the running turn, which takes it in, and a held, refused or failed send answers its sender in the receipt.
 A receipt is created exclusively before the side effect, as a reservation carrying a random nonce that tells a network filesystem's replayed link from a competing sender, and completed with the transport's answer after it.
 A repeat of the id answers the receipt as recorded; a reservation without an answer, whether its send is still running or stopped mid-delivery, answers `ambiguous_delivery` at once and is never sent again; and different content under the id is `message_id_conflict`.
 A transport that refused before writing anything (`preflight_failed`) releases its reservation, so a retry sends.
@@ -278,7 +278,7 @@ That session's launch prompt names the previous session and its cost, and says t
 Results nobody asked for and unblock notes are quiet context.
 When a different session asked, capture also writes that session an asker notice, id `<id>-asker`, into the routing inbox.
 A waking result keeps its asking fiber and session (`asked_by`); when `inbox route` resolves the recipient past that fiber, as past an archived asking parent, it stores the asker notice and turns the result quiet before it places or forwards it.
-`inbox route` answers `session` for a current notice, and the daemon sends it through the waking session transport, with `wake` and `context_if_busy`, under the notice's own id.
+`inbox route` answers `session` for a current notice, and the daemon sends it through the waking session transport, with `wake` and `context_if_busy` (so a costly idle Claude asker holds it as context), under the notice's own id.
 A refusal settles it `undeliverable`; any other answer the session transport recorded settles it `delivered`, an `unknown` one included, since sending the notice again under its id would only replay that record and the orchestrator's inbox holds the same result.
 Only an unknown answer the daemon made itself (a 502 or 504: the CLI timed out, failed without a receipt, or a remote owner could not be reached) leaves it for the next poll, across restarts.
 
@@ -304,7 +304,6 @@ An unblock note's board line is the exception: its new routing entry owes the li
 
 Every reader skips entries whose `not_before` is in the future.
 `inbox pending` counts only due entries and lists the scheduled ones beside the count; `OverdueFiberContext` measures age from the later of `queued_at` and `not_before`.
-Session native-wake recovery starts its 30-second hook window at that same later time.
 
 ### The live fiber consumer
 
@@ -426,9 +425,8 @@ A manifest without a receipt is a send whose outcome is unknown, whether the con
 A hook claims its emission with a manifest of its own, `<batch_id>.hook`, marked `hook`, with no payload, and removes it when it closes the batch delivered.
 The next reader under the inbox lock, a hook or the consumer, live or dormant, closes a hook manifest it finds, since its hook died between output and close: by the outcome the manifest records, when that hook died mid-close, and otherwise ambiguous.
 A launch reservation is no claim: it lives in `launch.json`, requests no emission and is not evidence of a possible repeat.
-The session-only Claude fallback claims by moving an entry into `fallback/` and writes no manifest.
 A hook claim in a session's mailbox is closed by that session's next hook.
-One left by a session that has ended is inert: nothing that sends reads a session mailbox's claims (Claude recovery walks `pending/` and `fallback/` only, and tells an ended session's senders that delivery is unconfirmed); only `inbox ls` of that session shows it, and `inbox cancel` refuses its members as in flight.
+One left by a session that has ended is inert: nothing that sends reads a session's mailbox; only `inbox ls` of that session shows it, and `inbox cancel` refuses its members as in flight.
 
 Consume sends a new batch once.
 A confirmed receipt (`accepted`, `context_added`, or a Codex terminal `submitted`) closes it delivered; a rejection releases it at once.
@@ -465,6 +463,19 @@ A CLI rolled back to 46 reads a consumer's manifest as its own, but not its rece
 
 Before rolling a host back, let its consumer batches settle, so that no `mailboxes/fiber/*/batches/*.json` remains, or accept those repeats.
 Entries a 47 build settled read the same on 46, and rolling forward again reads a manifest 46 left open, which carries no receipt, as a send of unknown outcome.
+
+### Contract 48 and rollback
+
+Contract 48 removes `claude-mail-recover`: a Claude session message that asks for a turn goes to the native socket, never to the session's hook.
+Entries already in a Claude session's `pending/` stay there as context for that session's hook; nothing wakes the session with them.
+Nothing reads `fallback/`: an entry left there is never sent or offered, and no inspected host had one.
+
+The daemon and its CLI deploy together, and either one rolled back alone is a contract skew that holds fresh dispatch.
+- A 47 daemon with a 48 CLI shells `claude-mail-recover`, which the CLI lacks: every pass fails, and the daemon retries it every second, logging a warning each time, until the CLI is rolled back too. Session messages it sends through the 48 CLI go to the native socket.
+- A 48 daemon with a 47 CLI never shells `claude-mail-recover`: an ask to a busy Claude session, from a sender with a session return address, is queued for that session's hook, and nothing wakes the session with it if no hook offers it.
+
+Across hosts, a sender on 48 that reaches a 47 owner may get that owner's `queued` `claude-hook` receipt for such an ask, and the 47 owner wakes the session natively after 30 seconds as before.
+Rolling a host back one landing leaves nothing to migrate: 48 writes no new state.
 
 ## Verbs
 

@@ -74,8 +74,8 @@ vanishing and the live inventory finding the replacement names.
 It starts real Claude Code with a private home, configuration, mailbox and loopback-only inference stub; it uses no account, operator session, live daemon or public inference endpoint.
 Build the checkout's CLI into a temporary directory and pass its absolute path rather than installing it.
 
-The probe checks mid-tool delivery, a realistic four-second inference gap, interruption of a tool after a queued message, native fallback after the final tool, parent-only mail during a subagent, stopped-worker wake, and API-failure recovery.
-Transport cases explicitly allow native inbound messages and require exactly one main-thread reply to each unique token.
+The probe sends a session message that asks for a turn during a tool, during inference, before an interrupted tool, after the final tool, during a subagent, to a stopped worker and after an API failure, and checks that it goes to the native socket, that no hook offers it, and that the main thread replies to it exactly once.
+Transport cases explicitly allow native inbound messages.
 The subagent case checks that no child inference request contains the parent's mail.
 A separate default-policy case omits `crossSessionInbound` and checks that headless Claude holds a native message for approval and Shuttle reports the hold rather than claiming delivery.
 Daemon tests also run the production recovery CLI against a private mailbox; Go tests exercise bounded retries, crash ownership, sender notices, order and context limits.
