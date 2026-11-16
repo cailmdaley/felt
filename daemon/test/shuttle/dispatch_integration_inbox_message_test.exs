@@ -32,22 +32,30 @@ defmodule Shuttle.DispatchIntegrationInboxMessageTest do
     release!(poller)
     assert launches(id) == 1
     %{session_uuid: uuid} = Poller.live_worker(poller, id)
-    offered = hook!(uuid)
+    session = claude_session!(uuid)
+    offered = harness_hook!(session, uuid, "UserPromptSubmit")
     assert offered =~ "check the fit converged"
     assert offered =~ "life/vizier"
 
-    # Exactly once: no later prompt, poll or retry of the id offers it again.
-    refute hook!(uuid) =~ "check the fit converged"
+    # Exactly once: no later prompt, poll or retry of the id offers it again
+    # or wakes the session with it, and the retry answers that it was
+    # delivered.
+    refute harness_hook!(session, uuid, "UserPromptSubmit") =~ "check the fit converged"
     poll!(poller)
-    assert {_, 0} = send.("m-survives", "check the fit converged")
+    assert {out, 0} = send.("m-survives", "check the fit converged")
+    assert out =~ "delivered to #{id} (m-survives)"
     poll!(poller)
-    refute hook!(uuid) =~ "check the fit converged"
+    refute harness_hook!(session, uuid, "UserPromptSubmit") =~ "check the fit converged"
+    refute_receive {:wake, _}
     assert launches(id) == 1
 
-    # A new message reaches the same worker the same way.
+    # A new message reaches the same worker, which no hook has reported busy,
+    # as a wake, once.
     assert {_, 0} = send.("m-after", "and the residuals")
+    assert_receive {:wake, woken}
+    assert woken =~ "and the residuals"
     poll!(poller)
-    assert hook!(uuid) =~ "and the residuals"
+    refute_receive {:wake, _}
     assert launches(id) == 1
   end
 end

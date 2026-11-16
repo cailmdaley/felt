@@ -53,16 +53,20 @@ defmodule Shuttle.DispatchIntegrationInboxThreadTest do
 
     # The next daemon's worker on the orchestrator is offered each result by
     # its prompts, one lifecycle signal per offer, and exactly once: later
-    # prompts, tool calls and polls offer neither again.
+    # prompts, tool calls and polls offer neither again, and nothing wakes
+    # the worker with them.
     poller = restart!(host)
     release!(poller)
     assert {200, _} = post_api("/api/v1/dispatch", %{"fiber_id" => hub, "force" => true})
     assert launches(hub) == 1
     %{session_uuid: uuid} = Poller.live_worker(poller, hub)
-    offered = for _ <- 1..3, into: "", do: hook!(uuid)
+    session = claude_session!(uuid)
+    prompt = fn -> harness_hook!(session, uuid, "UserPromptSubmit") end
+    offered = for _ <- 1..3, into: "", do: prompt.()
     poll!(poller)
-    offered = offered <> hook!(uuid) <> hook!(uuid, "PostToolUse")
-    assert [_, _] = String.split(offered, "thread #{asker} asked: Which kernel?")
-    assert [_, _] = String.split(offered, "thread #{closer} closed")
+    offered = offered <> prompt.() <> harness_hook!(session, uuid, "PostToolUse")
+    assert [_, _] = String.split(offered, asked)
+    assert [_, _] = String.split(offered, closed)
+    refute_receive {:wake, _}
   end
 end

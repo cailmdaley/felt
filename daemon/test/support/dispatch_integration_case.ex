@@ -876,13 +876,22 @@ defmodule Shuttle.Test.DispatchIntegrationCase do
 
   # A live Claude session `uuid` as its harness presents it: a long-lived
   # harness process whose `SessionStart` hook registered it with the native
-  # messaging socket `native_socket!/3` answers. Answers the harness, for
-  # `harness_hook!/4`.
+  # messaging socket `native_socket!/3` answers. Its hooks, like `hook!/4`'s,
+  # write no board or event rows. Answers the harness, for `harness_hook!/4`.
   def claude_session!(uuid, mode \\ :answer) do
-    transcript = Path.join(System.tmp_dir!(), "native-#{System.unique_integer([:positive])}.jsonl")
+    transcript =
+      Path.join(System.tmp_dir!(), "native-#{System.unique_integer([:positive])}.jsonl")
+
     File.write!(transcript, "")
     socket = native_socket!(uuid, transcript, mode)
-    harness = start_harness!([{"CLAUDE_CODE_MESSAGING_SOCKET", socket}])
+
+    harness =
+      start_harness!([
+        {"CLAUDE_CODE_MESSAGING_SOCKET", socket},
+        {"SHUTTLE_BOARD", "off"},
+        {"SHUTTLE_EVENTS", "off"}
+      ])
+
     harness_hook!(harness, uuid, "SessionStart", %{transcript_path: transcript})
     harness
   end

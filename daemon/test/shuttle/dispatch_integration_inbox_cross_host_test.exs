@@ -96,16 +96,30 @@ defmodule Shuttle.DispatchIntegrationInboxCrossHostTest do
 
     kill_daemon!(poller)
 
+    # The owner's next daemon holds it under its own quarantine, then starts
+    # the session it asks for; that session's first prompt is offered it, and
+    # nothing offers or wakes it with it again, a retry through the sending
+    # daemon included, which answers that it was delivered.
     poller = restart!(host)
     assert launches(id) == 0
     release!(poller)
     assert launches(id) == 1
     %{session_uuid: uuid} = Poller.live_worker(poller, id)
-    assert hook!(uuid) =~ "check the remote fit"
-    refute hook!(uuid) =~ "check the remote fit"
-    assert {_, 0} = send.("m-remote", "check the remote fit")
+    session = claude_session!(uuid)
+    assert harness_hook!(session, uuid, "UserPromptSubmit") =~ "check the remote fit"
+    refute harness_hook!(session, uuid, "UserPromptSubmit") =~ "check the remote fit"
+    assert {out, 0} = send.("m-remote", "check the remote fit")
+    assert out =~ "delivered to #{id} (m-remote)"
     poll!(poller)
-    refute hook!(uuid) =~ "check the remote fit"
+    refute harness_hook!(session, uuid, "UserPromptSubmit") =~ "check the remote fit"
+    refute_receive {:wake, _}
+
+    # A new message through the sending daemon wakes the same worker, once.
+    assert {_, 0} = send.("m-remote-next", "and the remote residuals")
+    assert_receive {:wake, woken}
+    assert woken =~ "and the remote residuals"
+    poll!(poller)
+    refute_receive {:wake, _}
     assert launches(id) == 1
   end
 end

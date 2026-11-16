@@ -24,7 +24,15 @@ defmodule Shuttle.DispatchIntegrationInboxLaunchDeathTest do
     test = self()
 
     send = fn ->
-      shuttle(["message", id, "check the fit", "--message-id", "m-inflight", "--from", "life/vizier"])
+      shuttle([
+        "message",
+        id,
+        "check the fit",
+        "--message-id",
+        "m-inflight",
+        "--from",
+        "life/vizier"
+      ])
     end
 
     # The owner takes the message into the inbox, reserves the launch it asks
@@ -58,18 +66,21 @@ defmodule Shuttle.DispatchIntegrationInboxLaunchDeathTest do
     assert pending(id) == ["m-inflight"]
 
     # The operator accepts the risk; the session that starts is offered the
-    # message by its first prompt, and by nothing after it.
+    # message by its first prompt, and nothing after it offers it or wakes
+    # the session with it.
     assert {_, 0} = shuttle(["dispatch", id, "--release-launch-reservation"])
     drain!(poller)
     assert launches(id) == 1
     %{session_uuid: uuid} = Poller.live_worker(poller, id)
-    offered = hook!(uuid)
+    session = claude_session!(uuid)
+    offered = harness_hook!(session, uuid, "UserPromptSubmit")
     assert offered =~ "check the fit"
     assert offered =~ "life/vizier"
     assert pending(id) == []
-    refute hook!(uuid) =~ "check the fit"
+    refute harness_hook!(session, uuid, "UserPromptSubmit") =~ "check the fit"
     poll!(poller)
-    refute hook!(uuid) =~ "check the fit"
+    refute harness_hook!(session, uuid, "UserPromptSubmit") =~ "check the fit"
+    refute_receive {:wake, _}
     assert launches(id) == 1
   end
 end
