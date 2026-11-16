@@ -111,7 +111,8 @@ func (a *app) queueInFiber(f *felt.Felt, block *shuttle.Block, request messaging
 
 // subscribeFiberIdle asks fiber f's owner to subscribe the request's sender to
 // one idle notice from the fiber's live worker. The answer is the
-// subscription's receipt, addressed to that worker.
+// subscription's receipt, addressed to that worker, or an unknown receipt
+// when the owner did not answer the local daemon in time.
 func (a *app) subscribeFiberIdle(f *felt.Felt, block *shuttle.Block, request messaging.Request) (messaging.Receipt, error) {
 	fiberID := f.UID
 	if fiberID == "" {
@@ -143,6 +144,16 @@ func (a *app) subscribeFiberIdle(f *felt.Felt, block *shuttle.Block, request mes
 	_ = json.Unmarshal(body, &receipt)
 	if resp.StatusCode >= 300 {
 		return receipt, daemonStatusError{url: endpoint, status: resp.StatusCode, body: strings.TrimSpace(string(body))}
+	}
+	if receipt.Status == "" {
+		// The local daemon took the request but the owner did not answer in time.
+		return messaging.Receipt{
+			MessageID: request.MessageID,
+			Address:   request.Address,
+			Status:    messaging.StatusUnknown,
+			Transport: "daemon",
+			Detail:    strings.TrimSuffix(receipt.Detail, ".") + ". Retry this exact request with the same message_id",
+		}, nil
 	}
 	return receipt, nil
 }
