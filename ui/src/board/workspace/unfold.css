@@ -29,7 +29,8 @@
   color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-solid) var(--font-mono);
 }
 .uf-control:disabled { opacity: .35; cursor: default; }
-.uf-control:not(:disabled):is(:hover, :focus-visible) { color: var(--ws-ink); outline: none; }
+.uf-control:not(:disabled):hover { color: var(--ws-ink); }
+.uf-control:focus-visible { color: var(--ws-ink); outline: 1px solid var(--ws-ink-soft); outline-offset: 1px; }
 @media (pointer: coarse) { .uf-control { min-width: 36px; height: 36px; } }
 
 /* The file at its natural height: a page grows to its content, text and images unclipped; what cannot (a PDF) keeps a tall pane. */

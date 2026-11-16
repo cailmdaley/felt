@@ -111,7 +111,8 @@ export class Unfold {
   }
   /** While a file is unfolded, whether its bar stands pinned over it. */
   private readonly pin = (): void => {
-    if (!this.open) return
+    // Out of layout (under the reader), nothing is pinned or unpinned until it shows again.
+    if (!this.open || !this.el.getClientRects().length) return
     this.el.toggleAttribute('data-pinned', this.page.getBoundingClientRect().top < this.bar.getBoundingClientRect().bottom - 1)
   }
 
@@ -177,7 +178,7 @@ export class Unfold {
   }
   /** Its host is hidden: an unfolded file stops reading and playing. */
   suspend(): void { if (this.open) suspendFileViewer(this.open.viewer) }
-  resume(): void { if (this.open) resumeFileViewer(this.open.viewer) }
+  resume(): void { if (this.open) { resumeFileViewer(this.open.viewer); this.pin() } }
   dispose(): void {
     this.drop()
     for (const card of this.cards.values()) card.thumbnail.dispose()
