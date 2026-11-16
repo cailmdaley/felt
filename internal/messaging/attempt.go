@@ -177,13 +177,17 @@ func claimBatch(root string, items []mailboxPendingItem, conversation string) (A
 	return a, writeBatch(root, &a)
 }
 
-// closeBatch records outcome in the batch's manifest, settles its pending
-// members and removes the manifest. A delivered member moves to offered/ with
+// closeBatch records outcome in the batch's manifest, unless it already
+// records one, which stands; then it settles its pending members and removes
+// the manifest. A delivered member moves to offered/ with
 // the modification time it had pending. A released or ambiguous one stays
 // pending, marked possible_repeat when the batch may have reached a
 // conversation: an ambiguous close, or a release after a retry or roll-forward
 // of an unconfirmed send.
 func closeBatch(root string, a *Attempt, outcome string) error {
+	if a.Outcome != "" {
+		outcome = a.Outcome
+	}
 	a.Outcome = outcome
 	if err := writeBatch(root, a); err != nil {
 		return err

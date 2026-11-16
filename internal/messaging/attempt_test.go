@@ -148,6 +148,47 @@ func TestHookThatDiesAfterItsClaimLeavesTheEntryOfferable(t *testing.T) {
 	}
 }
 
+// A hook whose close died after it recorded its outcome leaves a claim the
+// next reader, a hook or a consume, closes by that outcome: a delivered member
+// is not offered again.
+func TestAHookClaimClosesByItsRecordedOutcome(t *testing.T) {
+	for _, reader := range []string{"hook", "consume"} {
+		t.Run(reader, func(t *testing.T) {
+			env := testEnv(t)
+			root := mailboxDir(env, "fiber", "fiber")
+			paths := enqueueFiber(t, env, "only")
+			const a = "shuttle://host/claude/A"
+			claim, err := claimBatch(root, []mailboxPendingItem{{paths[0], readEntry(t, paths[0])}}, a)
+			if err != nil {
+				t.Fatal(err)
+			}
+			claim.Outcome = attemptDelivered
+			if err := writeBatch(root, &claim); err != nil {
+				t.Fatal(err)
+			}
+			var got []Request
+			if reader == "hook" {
+				err = offerMailboxWithAck(root, a, func(Request) bool { return true }, func(batch []Request) error {
+					got = append(got, batch...)
+					return nil
+				}, nil, "claude")
+			} else {
+				_, err = consumeWith(context.Background(), env, "fiber", "host", dormant, neverSend(t))
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != 0 {
+				t.Fatalf("offered again: %+v", got)
+			}
+			offered := readEntry(t, filepath.Join(root, "offered", filepath.Base(paths[0])))
+			if offered.PossibleRepeat || batchOf(t, root, "only") != nil {
+				t.Fatalf("offered entry = %+v", offered)
+			}
+		})
+	}
+}
+
 // TestRacedReadersDeliverAnEntryOnce races the hook offer against the
 // consumer's wake. The inbox lock keeps the loser from reading pending/; the
 // entry reaches offered/ as delivered, with its batch closed, whichever reader

@@ -418,7 +418,7 @@ The send writes no `messages/` receipt.
 A manifest without a receipt is a send whose outcome is unknown, whether the consumer died before the send, during it or before recording it; its payload is never sent again.
 
 A hook claims its emission with a manifest of its own, `<batch_id>.hook`, marked `hook`, with no payload, and removes it when it closes the batch delivered.
-The next reader under the inbox lock, a hook or the consumer, live or dormant, closes a hook manifest it finds ambiguous: its hook died between output and close.
+The next reader under the inbox lock, a hook or the consumer, live or dormant, closes a hook manifest it finds, since its hook died between output and close: by the outcome the manifest records, when that hook died mid-close, and otherwise ambiguous.
 A launch reservation is no claim: it lives in `launch.json`, requests no emission and is not evidence of a possible repeat.
 The session-only Claude fallback claims by moving an entry into `fallback/` and writes no manifest.
 
@@ -437,7 +437,7 @@ Each later pass advances an open batch from its record alone, never sending its 
 | Unconfirmed, sent to a conversation that has ended | Roll forward to W at once, warning-marked |
 | Unconfirmed, sent to a conversation W has replaced for five minutes | Roll forward to W, warning-marked |
 | A quiet payload that would be retried or rolled forward | Close it ambiguous; its members return to the fiber's hooks marked |
-| A hook's claim | Close it ambiguous |
+| A hook's claim | Close it by its recorded outcome, else ambiguous |
 
 “Unconfirmed” is every outcome but a confirmation: `unknown`, a Claude `queued` or `submitted`, a Pi `queued`, and no receipt at all.
 Each pass reads a Claude or Pi conversation's transcript again from `transcript_offset` to its end and stops there, without waiting, whether or not the send's receipt was recorded.
