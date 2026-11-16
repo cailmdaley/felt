@@ -4,10 +4,10 @@ import { turnOf } from '../turn.js'
 
 /** What a thread asks of the human, most urgent first. */
 export const ATTENTION = ['question', 'blocked', 'new', 'turn', 'review', 'working'] as const
-export type Attention = typeof ATTENTION[number]
+export type Urgency = typeof ATTENTION[number]
 /** A thread's place on the map: asking, in flight with no worker running, quiet history on it, or set aside as a count. */
-export type Standing = Attention | 'still' | 'quiet' | 'aside'
-export const ATTENTION_WORD: Readonly<Record<Attention, string>> = {
+export type Standing = Urgency | 'still' | 'quiet' | 'aside'
+export const ATTENTION_WORD: Readonly<Record<Urgency, string>> = {
   question: 'Questions', blocked: 'Blocked', new: 'New', turn: 'Your turn', review: 'To review', working: 'Working',
 }
 
@@ -66,12 +66,11 @@ export interface FamilyModel {
   /** The family seen whole, as one body among others: its summed work, its newest move, its asks by kind. */
   mass: number
   lastMove: number
-  counts: Record<Attention, number>
+  counts: Record<Urgency, number>
 }
 
 /** The card has a conversation to open: a live worker, or a past session. */
 export const conversable = (card: KanbanCard): boolean => hasLiveWorker(card) || !!card.sessionUuid
-export const needsHuman = (thread: MapThread): boolean => (ATTENTION as readonly string[]).includes(thread.standing) && thread.standing !== 'working'
 const isDrawn = (thread: MapThread): boolean => thread.rank >= 0
 /** A thread's mass of work: its launches, commits and files. */
 const mass = (thread: MapThread): number => thread.launches.length + thread.commits.length + thread.files.length
@@ -144,7 +143,7 @@ export function familyModel(index: ThreadIndex, root: KanbanCard, feeds: MapFeed
     const state = index.state(thread.card)
     aside[state === 'drafts' ? 'drafts' : state === 'archived' ? 'archived' : 'resting']++
   }
-  const counts = Object.fromEntries(ATTENTION.map(kind => [kind, attention.filter(thread => thread.standing === kind).length])) as Record<Attention, number>
+  const counts = Object.fromEntries(ATTENTION.map(kind => [kind, attention.filter(thread => thread.standing === kind).length])) as Record<Urgency, number>
   return {
     now, root: top, threads, order, attention, aside, counts,
     mass: all.reduce((sum, thread) => sum + mass(thread), 0), lastMove: Math.max(...all.map(thread => thread.lastMove)),

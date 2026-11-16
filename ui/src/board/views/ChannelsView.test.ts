@@ -51,7 +51,7 @@ function daemon(fail: string[] = [], stored = new Map<string, string>(), pinned:
     if (url.includes('/board/family')) {
       const params = new URL(url, 'http://test').searchParams
       families.push(params.get('fiber')!)
-      return new Response(JSON.stringify({ records: ((kept.board ?? BOARD)[params.get('fiber')!] ?? []).filter(each => each.timestamp >= Number(params.get('since_ms'))), reach_ms: 14 * day, waiting: kept.waiting ?? {} }))
+      return new Response(JSON.stringify({ family: { uid: params.get('fiber') }, records: ((kept.board ?? BOARD)[params.get('fiber')!] ?? []).filter(each => each.timestamp >= Number(params.get('since_ms'))), reach_ms: 14 * day, waiting: kept.waiting ?? {} }))
     }
     return new Response('{}')
   }))

@@ -1,6 +1,7 @@
 import { announce } from '@ui-sdk/core'
 import { marked } from 'marked'
 import createDOMPurify, { type Config } from 'dompurify'
+import type { BoardFeed } from './boardFeed.js'
 import { mathDollars, typesetSanitized } from './mathDollars.js'
 import 'katex/dist/katex.min.css'
 import './math.css'
@@ -457,7 +458,8 @@ export function fileExt(path: string): string {
 /**
  * Show a toast notification
  */
-export function showToast(message: string, type: 'success' | 'warning' | 'error' = 'success', duration = 3000): void {
+/** A toast at the foot of the board; with `undo`, it carries an undo button for as long as it stands. */
+export function showToast(message: string, type: 'success' | 'warning' | 'error' = 'success', duration = 3000, undo?: () => void): void {
   // Remove existing toasts
   const existing = document.querySelector('.shuttle-toast')
   if (existing) existing.remove()
@@ -496,6 +498,10 @@ export function showToast(message: string, type: 'success' | 'warning' | 'error'
       .shuttle-toast.toast-out {
         animation: toast-out 0.3s ease forwards;
       }
+      .shuttle-toast .toast-undo {
+        background: none; border: 0; padding: 0; color: inherit; font: inherit;
+        text-decoration: underline; cursor: pointer;
+      }
       .shuttle-toast .toast-icon {
         font-size: var(--type-row);
         font-weight: bold;
@@ -516,6 +522,14 @@ export function showToast(message: string, type: 'success' | 'warning' | 'error'
   }
 
   toast.classList.add(type)
+  if (undo) {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'toast-undo'
+    button.textContent = 'undo'
+    button.addEventListener('click', () => { toast.remove(); undo() })
+    toast.append(button)
+  }
   document.body.appendChild(toast)
   // The toast is drawn for the eye; screen readers hear it from the shared live region, errors at once.
   announce(message, { priority: type === 'error' ? 'assertive' : 'polite' })
@@ -524,4 +538,20 @@ export function showToast(message: string, type: 'success' | 'warning' | 'error'
     toast.classList.add('toast-out')
     setTimeout(() => toast.remove(), 300)
   }, duration)
+}
+
+/** How long a clear's undo stands. */
+export const CLEAR_UNDO_MS = 6000
+
+/**
+ * A waiting post's ✓, from any surface: the board clears it, then a toast
+ * says so with an undo for a few seconds, which makes it wait again. A refused
+ * clear throws; a refused undo says so.
+ */
+export async function clearPost(board: BoardFeed, uid: string, name: string): Promise<void> {
+  const at = await board.clear(uid)
+  if (at === undefined) return
+  showToast(`Cleared ${name}'s post.`, 'success', CLEAR_UNDO_MS, () => {
+    void board.unclear(uid, at).catch(() => showToast(`${name}'s post could not be brought back; it stays cleared.`, 'error'))
+  })
 }

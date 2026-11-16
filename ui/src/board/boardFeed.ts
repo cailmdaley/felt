@@ -56,6 +56,8 @@ export class BoardFeed {
   private lines = new Map<string, Wait>()
   /** Each fiber's line the human cleared here, by its time: it stays handled whatever a read already under way says. */
   private readonly cleared = new Map<string, number>()
+  /** Each fiber's newest undone clear written here: a clear after it must reach past it, or the undo voids it too. */
+  private readonly undone = new Map<string, number>()
   /** `lines`, less what was cleared here, each with its record once a family holds it. */
   private waits = new Map<string, Wait>()
   private readonly base: string
@@ -102,22 +104,46 @@ export class BoardFeed {
 
   /**
    * The human handles a fiber's line by hand: it stops waiting here at once,
-   * and the daemon is told (a `clear:<uid>:<line's time>` dismissal, which
-   * handles that line and no later one). A refused write waits again, and
-   * throws.
+   * and the daemon is told (a `clear:<uid>:<ms>` dismissal at the line's time,
+   * which handles that line and no later one). Answers the time it cleared to,
+   * which {@link unclear} takes back. A refused write waits again, and throws.
    */
-  async clear(uid: string): Promise<void> {
+  async clear(uid: string): Promise<number | undefined> {
     const line = this.waits.get(uid)
-    if (!line) return
+    if (!line) return undefined
+    const at = Math.max(line.at, (this.undone.get(uid) ?? -1) + 1)
     const before = this.cleared.get(uid)
-    this.cleared.set(uid, line.at)
+    this.cleared.set(uid, at)
     this.settle()
     this.changed()
     try {
-      await postDaemonJson(this.base, '/api/v1/channels/dismiss', { key: `clear:${uid}:${line.at}`, fiber: uid }, 'Clear failed')
+      await postDaemonJson(this.base, '/api/v1/channels/dismiss', { key: `clear:${uid}:${at}`, fiber: uid }, 'Clear failed')
     } catch (error) {
       if (before === undefined) this.cleared.delete(uid)
       else this.cleared.set(uid, before)
+      this.settle()
+      this.changed()
+      throw error
+    }
+    return at
+  }
+
+  /**
+   * Takes back a clear made here (its time, as {@link clear} answered): the
+   * line waits again at once, and the daemon is told (an `unclear:<uid>:<ms>`
+   * dismissal, which voids every clear up to it). A refused write stays
+   * cleared, and throws.
+   */
+  async unclear(uid: string, at: number): Promise<void> {
+    if (this.cleared.get(uid) !== at) return
+    this.cleared.delete(uid)
+    this.settle()
+    this.changed()
+    try {
+      await postDaemonJson(this.base, '/api/v1/channels/dismiss', { key: `unclear:${uid}:${at}`, fiber: uid }, 'Undo failed')
+      this.undone.set(uid, at)
+    } catch (error) {
+      this.cleared.set(uid, at)
       this.settle()
       this.changed()
       throw error
@@ -129,12 +155,12 @@ export class BoardFeed {
       const family = this.families.get(uid) ?? this.families.set(uid, { records: new Map(), cursor: Date.now() - this.reachMs + OVERLAP_MS, pending: false, failed: false }).get(uid)!
       if (family.pending) continue
       family.pending = true
-      void getDaemonJson<{ records?: BoardRecord[]; reach_ms?: number; waiting?: Record<string, Wait> }>(`${this.base}/api/v1/board/family?fiber=${encodeURIComponent(uid)}&since_ms=${family.cursor - OVERLAP_MS}`).then(body => {
+      void getDaemonJson<{ family?: unknown; records?: BoardRecord[]; reach_ms?: number; waiting?: Record<string, Wait> }>(`${this.base}/api/v1/board/family?fiber=${encodeURIComponent(uid)}&since_ms=${family.cursor - OVERLAP_MS}`).then(body => {
         if (typeof body.reach_ms === 'number') this.reachMs = body.reach_ms
         const failed = family.failed, reach = Date.now() - this.reachMs
         let moved = false
-        // Every read answers for the whole board, so the newest answer stands.
-        this.lines = new Map(Object.entries(body.waiting ?? {}))
+        // Every read of a family the daemon resolves answers for the whole board, so the newest such answer stands; one it could not resolve says nothing of the rest.
+        if (body.family != null) this.lines = new Map(Object.entries(body.waiting ?? {}))
         family.failed = false
         for (const record of body.records ?? []) {
           moved ||= !family.records.has(record.id)

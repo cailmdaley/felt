@@ -15,7 +15,7 @@ import type { SentFile } from '../sentFiles.js'
 import { stateDot } from '../stateDot.js'
 import { slug } from '../threadOutline.js'
 import { threadState } from '../threads.js'
-import { renderMarkdown } from '../utils.js'
+import { clearPost, renderMarkdown } from '../utils.js'
 import { attentionOf } from '../attention.js'
 import { turnOf } from '../turn.js'
 import { docKey, parseDocKey } from '../workspace/documents.js'
@@ -566,7 +566,8 @@ export class ChannelsView implements TemporalView {
   private clear(uid: string, card: KanbanCard): HTMLButtonElement {
     const done = button('kbn-ch-clear', '✓', () => {
       done.disabled = true
-      void this.ctx?.workspace?.board.clear(uid).then(() => announce(`Cleared ${card.name}'s post.`), () => {
+      const board = this.ctx?.workspace?.board
+      if (board) void clearPost(board, uid, card.name).catch(() => {
         done.disabled = false
         this.status(`${card.name}'s post could not be cleared; it still waits.`)
       })

@@ -28,9 +28,12 @@ export interface Want {
   text: string
   /** When it began waiting, epoch ms; 1 when the time is unknown. */
   at: number
-  /** The board line it waits with, when it waits with one: a post's (`line.kind === 'post'`) the human may clear. */
+  /** The board line it waits with, when it waits with one: an ask's question, a review's close, a post. */
   line?: Wait
 }
+
+/** Whether the human may clear a want by hand: only a post known to be one is; a question is answered, a close given its verdict. */
+export const clearable = (want: Want | null): boolean => want?.kind === 'post' && want.line?.kind === 'post'
 
 /** The first of `values` that names a real instant, else 0. */
 const instant = (...values: Array<string | number | undefined>): number =>
@@ -47,18 +50,23 @@ const archived = (card: KanbanCard): boolean => card.column === 'tempered' || ca
  */
 export function wantOf(card: KanbanCard, waits: Waits): Want | null {
   if (archived(card)) return null
-  const line = waits.get(fiber(card))
+  // A close waits only while the card stays closed: reopening it writes no record that handles the line.
+  const told = waits.get(fiber(card))
+  const line = told?.kind === 'closed' && card.status !== 'closed' ? undefined : told
   const turn = turnOf(card)
   const review = (): Want => ({ kind: 'review', text: card.reviewMark?.note?.trim() || 'for review', at: line?.at ?? (instant(card.closedAt, card.reviewMark?.at, card.modifiedAt, card.createdAt) || 1), line })
   if (card.status === 'active' && card.ask) {
-    return { kind: 'ask', text: card.ask.text, at: instant(card.ask.at) || line?.at || instant(card.lastActivityAt, card.dispatchedAt, card.modifiedAt) || 1, line }
+    // Its board line, unless that line is known to be something else (a post it made since).
+    const asked = line && (!line.kind || line.kind === 'asked') ? line : undefined
+    return { kind: 'ask', text: card.ask.text, at: instant(card.ask.at) || asked?.at || instant(card.lastActivityAt, card.dispatchedAt, card.modifiedAt) || 1, ...asked ? { line: asked } : {} }
   }
   if (turn.turn === 'blocked') {
     return { kind: 'blocked', text: card.launchError ?? (card.runtimePhase === 'identity_failed' ? 'its session could not be identified' : 'could not start its turn'), at: instant(card.lastActivityAt, card.modifiedAt) || 1 }
   }
   const forReview = threadState(card) === 'to-review' || (card.column === 'orchestratorReview' && !!card.orphan)
   if (line?.kind === 'closed' || (line && !line.kind && forReview)) return review()
-  if (line) return { kind: line.kind === 'asked' ? 'ask' : 'post', text: line.text?.trim() || (line.kind === 'asked' ? 'asks' : 'posted'), at: line.at, line }
+  // A line whose record has not loaded yet says only that it waits.
+  if (line) return { kind: line.kind === 'asked' ? 'ask' : 'post', text: line.text?.trim() || ({ asked: 'asks', post: 'posted' } as Record<string, string>)[line.kind ?? ''] || 'waiting', at: line.at, line }
   if (turn.turn === 'question') return { kind: 'ask', text: 'stopped on a prompt', at: turn.since ?? (instant(card.lastActivityAt) || 1) }
   if (forReview) return review()
   return null

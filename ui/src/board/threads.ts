@@ -1,28 +1,26 @@
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { ascByKey, instantMs } from './civilDay.js'
-import { turnOf } from './turn.js'
 
-export type ThreadState = 'waiting' | 'to-review' | 'with-orchestrator' | 'working' | 'drafts' | 'roles' | 'resting' | 'archived'
+export type ThreadState = 'in-flight' | 'to-review' | 'with-orchestrator' | 'drafts' | 'roles' | 'resting' | 'archived'
 
 export const THREAD_LABEL: Record<ThreadState, string> = {
-  waiting: 'Waiting', 'to-review': 'To review', 'with-orchestrator': 'With orchestrator', working: 'Working', drafts: 'Drafts', roles: 'Roles', resting: 'Resting', archived: 'Archived',
+  'in-flight': 'In flight', 'to-review': 'To review', 'with-orchestrator': 'With orchestrator', drafts: 'Drafts', roles: 'Roles', resting: 'Resting', archived: 'Archived',
 }
 /**
- * A thread's state: its served Desk column, with In flight split by `turnOf`
- * into Waiting (the human's move) and Working (the worker's, including an
- * armed thread whose worker has not started). A closed thread its
- * orchestrator reviews is With orchestrator, which asks nothing of the
- * human; a thread marked for review is To review. A verdict archives; a standing
- * thread asleep on its cron rests; a seat at rest is among the Roles. The
- * family page and mention chips read this; the daemon's roster
- * (`Shuttle.Threads.thread_state/4`) reads the same column and turn.
+ * Where a thread stands in its lifecycle: its served column, with a closed
+ * thread its orchestrator reviews (With orchestrator) told apart from one
+ * awaiting the human's review (To review). A verdict archives; a standing
+ * thread asleep on its cron rests; a seat at rest is among the Roles. It says
+ * nothing of whether the thread waits on the human or works: that is
+ * `attentionOf`'s. The family tree shelves threads by it, and the daemon's
+ * roster (`Shuttle.Threads.thread_state/4`) starts from the same column.
  */
 export function threadState(card: KanbanCard): ThreadState {
   switch (card.column) {
     case 'tempered': case 'composted': return 'archived'
     case 'awaitingReview': return 'to-review'
     case 'orchestratorReview': return 'with-orchestrator'
-    case 'inFlight': return turnOf(card).yours ? 'waiting' : 'working'
+    case 'inFlight': return 'in-flight'
     case 'drafts': return 'drafts'
     case 'roles': return 'roles'
     case 'resting': return 'resting'

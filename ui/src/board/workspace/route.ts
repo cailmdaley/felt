@@ -95,7 +95,8 @@ function withRouteState(value: unknown, routeState: RouteState): StateObject {
 
 /** URL-backed channel navigation and return to the originating view. */
 export class WorkspaceHistory {
-  private readonly onRoute: (route: WorkspaceRoute) => void
+  /** Hears each route to apply; `quiet` when a scan (a replacing step) led to it, which moves neither voice nor Rex. */
+  private readonly onRoute: (route: WorkspaceRoute, quiet: boolean) => void
   private started = false
   private current: WorkspaceRoute | null = null
   private currentHash = ''
@@ -107,8 +108,10 @@ export class WorkspaceHistory {
   private backInFlight = false
   private queuedEnter: (Extract<WorkspaceRoute, { kind: 'channel' }> & { originView?: WorkspaceOriginView; replace: boolean }) | null = null
   private queuedLeave = false
+  /** The step back under way was a scan's, so the route it lands on applies quietly. */
+  private quietPop = false
 
-  constructor(onRoute: (route: WorkspaceRoute) => void) {
+  constructor(onRoute: (route: WorkspaceRoute, quiet: boolean) => void) {
     this.onRoute = onRoute
   }
 
@@ -175,10 +178,10 @@ export class WorkspaceHistory {
     }
     this.current = route
     this.adoptDepth(window.history.state, route, this.currentHash)
-    this.onRoute(route)
+    this.onRoute(route, false)
   }
 
-  /** Constitution steps replace the current visit; other channel and page moves push. */
+  /** Constitution steps (scans) replace the current visit and apply quietly; other channel and page moves push. */
   enter(uid: string, owner: string, doc?: DocKey, originView?: WorkspaceOriginView, replace = false, pageLabel?: string): void {
     this.ensureStarted()
     const route: Extract<WorkspaceRoute, { kind: 'channel' }> = { kind: 'channel', uid, owner, ...(doc === undefined ? {} : { doc }) }
@@ -189,7 +192,12 @@ export class WorkspaceHistory {
     const hash = formatRoute(route)
     if (hash === this.currentHash) return
     const saved = readRouteState(window.history.state)
-    if (replace && hash === saved?.back?.hash) { this.back(); return }
+    if (replace && hash === saved?.back?.hash) {
+      const idle = !this.backInFlight
+      this.back()
+      if (idle && this.backInFlight) this.quietPop = true
+      return
+    }
     if (originView) this.routeOrigin = originView
     // Back adopts the entry's origin along with its address.
     if (saved?.originView !== this.routeOrigin) window.history.replaceState(withRouteState(window.history.state, this.routeState()), '')
@@ -204,7 +212,7 @@ export class WorkspaceHistory {
     this.current = route
     this.currentHash = hash
     this.depth = depth
-    this.onRoute(route)
+    this.onRoute(route, replace)
   }
 
   /** Establish an addressable view as the next channel stack's return point. */
@@ -221,7 +229,7 @@ export class WorkspaceHistory {
     this.currentHash = hash
     this.current = { kind: 'overview', hash }
     window.history.pushState(withRouteState(window.history.state, { ...this.routeState(), label: undefined, pageLabel: undefined, back: undefined }), '', hash)
-    this.onRoute(this.current)
+    this.onRoute(this.current, false)
   }
 
   leave(): void {
@@ -236,7 +244,7 @@ export class WorkspaceHistory {
       this.current = overview
       this.currentHash = destination
       this.depth = 0
-      this.onRoute(overview)
+      this.onRoute(overview, false)
       return
     }
     const hash = `#/${this.routeOrigin}`
@@ -247,7 +255,7 @@ export class WorkspaceHistory {
     this.base = true
     this.baseHash = hash
     window.history.replaceState(withRouteState(window.history.state, { ...this.routeState(), label: undefined, pageLabel: undefined, back: undefined }), '', hash)
-    this.onRoute(overview)
+    this.onRoute(overview, false)
   }
 
   dispose(): void {
@@ -256,6 +264,7 @@ export class WorkspaceHistory {
     window.removeEventListener('hashchange', this.onHashChange)
     this.started = false
     this.backInFlight = false
+    this.quietPop = false
     this.pendingOwnPop = null
     this.queuedEnter = null
   }
@@ -294,6 +303,8 @@ export class WorkspaceHistory {
 
   private handleLocation(state: unknown): void {
     this.backInFlight = false
+    const quiet = this.quietPop
+    this.quietPop = false
     this.redirect()
     const hash = window.location.hash
     const route = parseRoute(hash)
@@ -325,7 +336,7 @@ export class WorkspaceHistory {
       this.base = true
       this.baseHash = hash
     }
-    this.onRoute(next)
+    this.onRoute(next, quiet)
   }
 
   private readonly onPopState = (event: PopStateEvent): void => this.handleLocation(event.state)

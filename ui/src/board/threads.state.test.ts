@@ -10,14 +10,10 @@ import type { KanbanCard } from './KanbanTypes.js'
 const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard => card({ shuttleKind: 'oneshot', ...over })
 
 describe('thread state honours the live worker before the draft rule', () => {
-  it('an open constitution whose live worker is stopped on a prompt is waiting on Cail', () => {
-    expect(threadState(thread({ id: 'a', status: 'open', workerState: 'running', runtimePhase: 'attention' }))).toBe('waiting')
-    expect(threadState(thread({ id: 'b', status: 'open', workerState: 'running', runtimePhase: 'waiting' }))).toBe('waiting')
-    expect(threadState(thread({ id: 'c', status: 'open', workerState: 'blocked' }))).toBe('waiting')
-  })
-  it('an open constitution whose live worker is mid-turn is working, resting horizon or not', () => {
-    expect(threadState(thread({ id: 'a', status: 'open', workerState: 'running', runtimePhase: 'working' }))).toBe('working')
-    expect(threadState(thread({ id: 'b', status: 'open', effectiveHorizon: 'stashed', workerState: 'running', runtimePhase: 'working' }))).toBe('working')
+  it('an open constitution with a live worker is in flight, whatever its turn and however it rests', () => {
+    for (const over of [{ runtimePhase: 'attention' }, { runtimePhase: 'waiting' }, { runtimePhase: 'working' }, { runtimePhase: 'working', effectiveHorizon: 'stashed' }, { workerState: 'blocked' }] as const) {
+      expect(threadState(thread({ id: 'a', status: 'open', workerState: 'running', ...over }))).toBe('in-flight')
+    }
   })
   it('without a live worker an open constitution is a draft or resting, whatever stale runtime it carries', () => {
     expect(threadState(thread({ id: 'a', status: 'open' }))).toBe('drafts')
@@ -40,12 +36,12 @@ describe('every thread surface names a thread the way the Desk files it', () => 
   const asking = thread({ id: 'hub/asking', orchestrator: 'hub', status: 'active', workerState: 'running', runtimePhase: 'waiting' })
   const hub = thread({ id: 'hub', status: 'active', workerState: 'running', runtimePhase: 'working' })
   const expected: Array<[KanbanCard, string, string]> = [
-    [spawned, 'inFlight', 'Quiet'], [standing, 'resting', 'Resting'], [seat, 'roles', 'Roles'], [asking, 'inFlight', 'Working'],
+    [spawned, 'inFlight', 'Quiet'], [standing, 'resting', '↻'], [seat, 'roles', 'seat'], [asking, 'inFlight', 'Working'],
   ]
-  it('an armed thread with no worker yet is quiet, a standing one Resting, a seat Roles, an idle worker that asked nothing Working', () => {
+  it('an armed thread with no worker yet is quiet, a standing one says its next run, a seat seat, an idle worker that asked nothing Working', () => {
     for (const [c, column, label] of expected) {
       expect(c.column).toBe(column)
-      expect(constitutionMentions([c])[0].state).toBe(label)
+      expect(constitutionMentions([c], new Map())[0].state).toBe(label)
     }
   })
   it('the constitution\'s view gives a quiet thread its faint word, and an idle worker that asked nothing none', () => {

@@ -33,6 +33,7 @@ beforeEach(() => {
       return new Response('{"ok":true}')
     }
     if (url.includes('/board/family')) return new Response(JSON.stringify({
+      family: { uid: 'hub-uid' },
       reach_ms: 14 * 86_400_000,
       records: [{ id: 'p1', kind: 'post', fiber: 'deep-uid', to: { label: 'Sam' }, text: 'The cut is in.', timestamp: posted }],
       // The daemon honours the clear: the line stops waiting.
@@ -64,4 +65,21 @@ it('clears a post three levels down from its family card, and does nothing else:
   // The family works again, and the reader opened nothing.
   expect(document.querySelector('[data-column="working"] .kbn-family[data-card-uid="hub-uid"]')).not.toBeNull()
   expect(document.querySelector('.kbn-modal')!.classList.contains('kbn-reader-open')).toBe(false)
+})
+
+it('offers to undo a clear for a few seconds: undo writes the unclear, and the post waits again', async () => {
+  inside.readBoard(inside.lastResponse!)
+  await settle(); await settle(); await settle()
+  document.querySelector<HTMLButtonElement>('.kbn-family-wait[data-card-uid="deep-uid"] .kbn-ch-clear')!.click()
+  await settle(); await settle()
+  const undo = document.querySelector<HTMLButtonElement>('.shuttle-toast .toast-undo')!
+  expect(undo.closest('.shuttle-toast')!.textContent).toContain('Cleared')
+  cleared = false
+  const from = vi.mocked(fetch).mock.calls.length
+  undo.click()
+  await settle(); await settle()
+  const writes = vi.mocked(fetch).mock.calls.slice(from).filter(([, init]) => init?.method === 'POST')
+  expect(writes.map(([url, init]) => [String(url), JSON.parse(String(init!.body))])).toStrictEqual([['/api/v1/channels/dismiss', { key: `unclear:deep-uid:${posted}`, fiber: 'deep-uid' }]])
+  expect(document.querySelector('[data-column="waiting"] .kbn-family-wait[data-card-uid="deep-uid"] .kbn-ch-clear')).not.toBeNull()
+  expect(document.querySelector('.shuttle-toast')).toBeNull()
 })

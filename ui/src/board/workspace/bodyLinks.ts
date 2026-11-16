@@ -1,21 +1,24 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import { APPEARANCE_CHANGED } from '../appearance.js'
-import { attentionOf } from '../attention.js'
-import { threadState, THREAD_LABEL } from '../threads.js'
+import { attentionOf, quietWord, type Waits } from '../attention.js'
 import { turnOf, type Turn } from '../turn.js'
 import { fiberIndex, resolveWikilink, type FiberIndexEntry } from '../wikilinks.js'
 
 export interface ConstitutionMention { id: string; uid?: string; name: string; state: string; turn?: Turn; outcome: string; origin: string }
-/** A mention's state word: the one state every surface draws (here from its card alone), a quiet one by where it rests. */
-const mentionState = (card: KanbanCard): string => {
-  const attention = attentionOf(card, new Map())
+/**
+ * A mention's state word: the one state every surface draws, read against
+ * what the board says waits; a quiet one says the Desk's faint word, and a
+ * verdict says Archived.
+ */
+const mentionState = (card: KanbanCard, waits: Waits): string => {
+  const attention = attentionOf(card, waits)
   if (attention !== 'quiet') return attention === 'waiting' ? 'Waiting' : 'Working'
-  const rest = threadState(card)
-  return rest === 'waiting' || rest === 'working' || rest === 'to-review' ? 'Quiet' : THREAD_LABEL[rest]
+  if (card.column === 'tempered' || card.column === 'composted') return 'Archived'
+  return quietWord(card) || 'Quiet'
 }
-export function constitutionMentions(cards: readonly KanbanCard[]): ConstitutionMention[] {
+export function constitutionMentions(cards: readonly KanbanCard[], waits: Waits): ConstitutionMention[] {
   return cards.filter(card => !!card.shuttleKind && !card.isCycle).map(card => {
-    return { id: card.id, uid: card.uid, name: card.name, origin: card.originId, state: mentionState(card), turn: turnOf(card).turn, outcome: card.outcome ?? '' }
+    return { id: card.id, uid: card.uid, name: card.name, origin: card.originId, state: mentionState(card, waits), turn: turnOf(card).turn, outcome: card.outcome ?? '' }
   })
 }
 
@@ -162,11 +165,13 @@ export interface MentionBindingOptions {
   shuttleBase: string
   /** null refuses unregistered frames; false permits resolution but not navigation. */
   frameActive(frame: HTMLIFrameElement): boolean | null
+  /** What waits on the human, as the board says ({@link BoardFeed.waiting}). */
+  waits(): Waits
 }
 
 /** One workspace lifetime; feed updates repaint the same DOM and only referenced report metadata. */
 export function bindConstitutionMentions(root: HTMLElement, cards: () => readonly KanbanCard[], open: (id: string, origin: string) => void,
-  opts: MentionBindingOptions = { shuttleBase: '', frameActive: () => null }) {
+  opts: MentionBindingOptions = { shuttleBase: '', frameActive: () => null, waits: () => new Map() }) {
   const surfaces = new Map<HTMLElement, { surface: ReturnType<typeof mentionRuntime>; candidates: string[] }>()
   const reports = new Map<HTMLIFrameElement, Set<string>>()
   let sent = new WeakMap<HTMLIFrameElement, string>()
@@ -174,7 +179,7 @@ export function bindConstitutionMentions(root: HTMLElement, cards: () => readonl
   const protocol = 'shuttle-constitution-mentions'
   let disposed = false, scheduled = false, index: FiberIndexEntry[] | undefined
   let indexRequest: Promise<void> | null = null
-  const rows = () => constitutionMentions(cards())
+  const rows = () => constitutionMentions(cards(), opts.waits())
   const ensureIndex = (): void => {
     if (index !== undefined || indexRequest) return
     indexRequest = fiberIndex(opts.shuttleBase).then(value => {

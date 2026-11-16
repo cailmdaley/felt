@@ -33,5 +33,5 @@ it('draws a waiting post three levels down on its family\'s one card, its ✓ wr
 
 it('offers no ✓ on a line whose kind the board has not read yet', () => {
   const { said } = draw(new Map([['hub/a/b/c', { id: 'p', at: Date.parse('2026-11-16T10:00:00Z') }]]))
-  expect(said[0]).toStrictEqual(['c', 'posted', false])
+  expect(said[0]).toStrictEqual(['c', 'waiting', false])
 })

@@ -1,5 +1,5 @@
 import type { KanbanCard } from './KanbanTypes.js'
-import { lastActive, wantOf, type Waits } from './attention.js'
+import { clearable, lastActive, wantOf, type Waits } from './attention.js'
 import { arrived, type BoardRecord } from './boardFeed.js'
 import type { SentFile } from './sentFiles.js'
 import { slug } from './threadOutline.js'
@@ -59,7 +59,6 @@ export const showKey = (key: string, at: number): string => `show:${key}:${at}`
 /** Constitutions a channel speaks for: everything without a verdict. */
 const live = (card: KanbanCard): boolean => card.column !== 'tempered' && card.column !== 'composted'
 export const fiberOf = (card: KanbanCard): string => card.uid ?? card.id
-export const sameFiber = (a: KanbanCard, b: KanbanCard): boolean => fiberOf(a) === fiberOf(b)
 /** The office a role names: its first path segment. */
 export const officeOf = (role: string | undefined): string => role?.split('/')[0] ?? ''
 
@@ -278,8 +277,10 @@ export function composeStream(input: {
     if (record.kind === 'handed_off') mark(card, 'handed off', record.timestamp, record.id)
     else if (kind && toPerson(record.to)) {
       const text = record.text?.trim() ?? ''
-      const waiting = waits.get(fiberOf(card))?.id === record.id && !!wantOf(card, waits)
-      say({ kind, id: record.id, card, at: record.timestamp, arrived: arrived(record), text: kind === 'close' && text === card.outcome?.trim() ? '' : text, files, waiting, ...waiting && kind === 'post' ? { clears: fiberOf(card) } : {} })
+      // A line waits as what its card wants of the human: an open ask stands before a post it made since.
+      const want = wantOf(card, waits)
+      const waiting = want?.line?.id === record.id
+      say({ kind, id: record.id, card, at: record.timestamp, arrived: arrived(record), text: kind === 'close' && text === card.outcome?.trim() ? '' : text, files, waiting, ...waiting && clearable(want) ? { clears: fiberOf(card) } : {} })
     } else if (kind === 'close') mark(card, 'closed', record.timestamp, record.id)
   }
   for (const card of channel.everyone) {
@@ -288,7 +289,7 @@ export function composeStream(input: {
     if (!want || items.get(fiberOf(card))?.some(item => item.waiting)) continue
     const kind = ({ ask: 'ask', review: 'close', post: 'post', blocked: 'blocked' } as const)[want.kind]
     const text = want.kind === 'review' ? card.reviewMark?.note ?? '' : want.text
-    say({ kind, id: `${want.kind}:${fiberOf(card)}:${want.at}`, card, at: want.at, arrived: want.at, text, files: [], waiting: true, ...want.line?.kind === 'post' ? { clears: fiberOf(card) } : {} })
+    say({ kind, id: `${want.kind}:${fiberOf(card)}:${want.at}`, card, at: want.at, arrived: want.at, text, files: [], waiting: true, ...clearable(want) ? { clears: fiberOf(card) } : {} })
   }
   // Each path at its newest send; a worker's sends this close together are one item.
   const sends = new Map<string, SentFile>()

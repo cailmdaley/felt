@@ -1714,7 +1714,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   if (url.includes('/api/v1/board/family')) {
     const params = new URL(url, 'http://harness').searchParams, since = Number(params.get('since_ms') ?? 0)
-    return json({ records: (channelsFixture?.board ?? []).filter(record => record.root === params.get('fiber') && record.timestamp >= since), reach_ms: 14 * 86_400_000, waiting: channelsFixture?.waiting ?? {} })
+    return json({ family: { uid: params.get('fiber') }, records: (channelsFixture?.board ?? []).filter(record => record.root === params.get('fiber') && record.timestamp >= since), reach_ms: 14 * 86_400_000, waiting: channelsFixture?.waiting ?? {} })
   }
 
   if (url.includes('/api/v1/board/marks')) {

@@ -3,7 +3,7 @@ import source from '../../../daemon/test/fixtures/columns/cases.json?raw'
 import { card } from './testFixtures.js'
 import { WIRE_COLUMN } from './KanbanComposite.js'
 import { threadState, type ThreadState } from './threads.js'
-import type { Turn } from './turn.js'
+import { turnOf, type Turn } from './turn.js'
 import { ownerColumn, ownerTurn } from '../../harness/ownerLifecycle.js'
 
 /** The cases the daemon's `Shuttle.Lifecycle` and `shuttle status --json` are held to (daemon/test/fixtures/columns). */
@@ -19,9 +19,13 @@ interface Case {
 }
 const cases: Case[] = JSON.parse(source)
 
-// The rails' state words, from the board's own.
-const STATE: Record<ThreadState, string> = {
-  waiting: 'Waiting', working: 'Working', 'to-review': 'To review', 'with-orchestrator': 'With orchestrator', drafts: 'Draft', archived: 'Archived', resting: 'Resting', roles: 'Resting',
+// The CLI roster's state words, from the board's: an in-flight thread is Waiting on the human's move, else Working.
+const STATE: Record<Exclude<ThreadState, 'in-flight'>, string> = {
+  'to-review': 'To review', 'with-orchestrator': 'With orchestrator', drafts: 'Draft', archived: 'Archived', resting: 'Resting', roles: 'Resting',
+}
+const stateWord = (served: ReturnType<typeof card>): string => {
+  const state = threadState(served)
+  return state === 'in-flight' ? turnOf(served).yours ? 'Waiting' : 'Working' : STATE[state]
 }
 
 describe('the mock owner serves every shared case as the daemon does', () => {
@@ -43,7 +47,7 @@ describe('the board files every served column and turn as the daemon does', () =
         turn: c.turn,
         ...(c.live ? { workerState: 'running' } : {}),
       })
-      expect(STATE[threadState(served)]).toBe(c.state)
+      expect(stateWord(served)).toBe(c.state)
     })
   }
 })

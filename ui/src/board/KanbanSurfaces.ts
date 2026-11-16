@@ -1,24 +1,15 @@
 import '@ui-sdk/web/tabs'
-import { attentionOf, quietWord, type Attention, type Waits } from './attention.js'
+import { attentionOf, clearable, quietWord, type Attention, type Waits } from './attention.js'
 import { civilWeekday, dueCivilDay, formatCivilDay, isoDayLocal, shiftCivilDay } from './civilDay.js'
 import { DESK_COLUMN_TITLE, type DeskFamily, type DeskOrder, type FamilyWait } from './deskOrdering.js'
 import { activeFolioIndex, folioScrollTarget } from './deskMobile.js'
-import type { ColumnKind, KanbanCard, KanbanResponse } from './KanbanTypes.js'
+import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { isMobileViewport } from './mobile.js'
 import { stateDot } from './stateDot.js'
 import { renderMarkdown } from './utils.js'
 import { rowLabel, slug } from './threadOutline.js'
 import { responseThreadIndex, ThreadIndex } from './threads.js'
 import './desk.css'
-
-/** Each lifecycle column's name, as a verdict's announcement says it. */
-export const COLUMN_TITLES: Record<ColumnKind, string> = {
-  drafts: 'Drafts',
-  inFlight: 'In flight',
-  awaitingReview: 'Awaiting review',
-  tempered: 'Tempered',
-  composted: 'Discarded',
-}
 
 /** The Desk's columns, left to right. */
 const COLUMNS: readonly Attention[] = ['waiting', 'working', 'quiet']
@@ -183,8 +174,7 @@ export class KanbanSurfaceRenderer {
     what.innerHTML = renderMarkdown(want.text)
     line.title = `${card.name} — ${what.textContent?.replace(/\s+/g, ' ').trim()}`
     line.append(...own ? [] : [who], what)
-    // Only a line known to be a post is cleared by hand; a question is answered, a close given its verdict.
-    if (want.line?.kind === 'post') {
+    if (clearable(want)) {
       const clear = document.createElement('button')
       clear.type = 'button'
       clear.className = 'kbn-ch-clear'

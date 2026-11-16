@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { RECENT_MS, arranged, composeChannels, composeStream, hideKey, railOrder, reordered, showKey, unpinKey, type Channel, type Entry } from './channels.js'
-import type { BoardRecord } from './boardFeed.js'
+import type { BoardRecord, Wait } from './boardFeed.js'
 import { card } from './testFixtures.js'
 import { ThreadIndex } from './threads.js'
 import type { KanbanCard } from './KanbanTypes.js'
@@ -213,8 +213,8 @@ describe('composeStream', () => {
     const ask = stream({ records: asked, waits: new Map([['M', { id: 'r9', at: now - 21 * minute }]]) }).find(entry => entry.card === mask)
     expect(ask && ask.kind !== 'mark' && [ask.id, ask.waiting]).toStrictEqual(['r9', true])
     expect(stream({ files: [...files, send('M', 'mask.svg', 1)] }).find(entry => entry.card === mask)?.kind).toBe('ask')
-    // A post the daemon names waits, and only a post can be cleared by hand.
-    const posted = stream({ waits: new Map([...waits, ['K', { id: 'r7', at: now - 30 * minute }]]) })
+    // A post the daemon names waits, and only a post can be cleared by hand (the feed knows its kind once it holds the record).
+    const posted = stream({ waits: new Map<string, Wait>([...waits, ['K', { id: 'r7', at: now - 30 * minute, kind: 'post' }]]) })
     expect(posted.flatMap(entry => entry.kind === 'mark' ? [] : [[entry.id, entry.waiting, entry.clears]])).toStrictEqual([
       [expect.any(String), false, undefined], ['r3m', true, undefined], ['r7', true, 'K'], [expect.any(String), true, undefined],
     ])

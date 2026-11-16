@@ -7,7 +7,7 @@ import { constitutionMentions, mentionRuntime, bindConstitutionMentions, resolve
 const work = (extra = {}) => card({ id: 'work/child', uid: 'stable-child', name: 'Child', shuttleKind: 'oneshot', status: 'active', workerState: 'running', ...extra })
 const index = [{ id: 'work/child', name: 'Child' }]
 const update = (runtime: ReturnType<typeof mentionRuntime>, cards = [work()], candidates = ['[[child]]']) => {
-  const rows = constitutionMentions(cards)
+  const rows = constitutionMentions(cards, new Map())
   runtime.update(rows, resolveConstitutionCandidates(candidates, rows, index).targets)
 }
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); document.body.replaceChildren() })
@@ -66,7 +66,7 @@ describe('constitution mentions', () => {
   it('requires full-index wikilink resolution and does not guess ambiguous suffixes', () => {
     const root = document.createElement('div'); root.textContent = '[[child]] notes/plain'
     const runtime = mentionRuntime(root, vi.fn())
-    const rows = constitutionMentions([work(), work({ id: 'other/child', uid: 'other' })])
+    const rows = constitutionMentions([work(), work({ id: 'other/child', uid: 'other' })], new Map())
     const resolved = resolveConstitutionCandidates(['[[child]]'], rows, [...index, { id: 'other/child', name: 'Child' }])
     runtime.update(rows, resolved.targets)
     expect(root.querySelectorAll('a')).toHaveLength(0)
@@ -80,7 +80,7 @@ describe('constitution mentions', () => {
     let installing: Promise<void> | undefined
     const install = () => installWikilinks(root, { shuttleBase: base, onOpen: vi.fn() })
     if (installFirst) installing = install()
-    const binding = bindConstitutionMentions(root, () => [work()], vi.fn(), { shuttleBase: base, frameActive: () => null })
+    const binding = bindConstitutionMentions(root, () => [work()], vi.fn(), { shuttleBase: base, frameActive: () => null, waits: () => new Map() })
     if (!installFirst) installing = install()
     await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
     finish(new Response(JSON.stringify({ fibers: [{ fiber: { id: 'child', name: 'Ordinary' } }, { fiber: { id: 'work/child', name: 'Child' } }] })))
@@ -97,7 +97,7 @@ describe('constitution mentions', () => {
       .mockRejectedValueOnce(new Error('offline'))
       .mockResolvedValueOnce(new Response(JSON.stringify({ fibers: [{ fiber: { id: 'remote/note', name: 'Remote note' } }] })))
     vi.stubGlobal('fetch', fetchMock)
-    const binding = bindConstitutionMentions(root, () => [work()], vi.fn(), { shuttleBase: 'http://mentions-lazy.invalid', frameActive: () => null })
+    const binding = bindConstitutionMentions(root, () => [work()], vi.fn(), { shuttleBase: 'http://mentions-lazy.invalid', frameActive: () => null, waits: () => new Map() })
     expect(fetchMock).not.toHaveBeenCalled()
 
     prose.textContent = '[[remote note]]'
@@ -111,7 +111,7 @@ describe('constitution mentions', () => {
     binding.dispose()
   })
   it('resolves newly spawned read-model constitutions without waiting for a cached full index to include them', () => {
-    const rows = constitutionMentions([work()])
+    const rows = constitutionMentions([work()], new Map())
     expect(resolveConstitutionCandidates(['[[work/child]]'], rows, []).rows).toEqual(rows)
     expect(resolveConstitutionCandidates(['[[child]]'], rows).rows).toStrictEqual([])
   })
@@ -152,7 +152,7 @@ describe('constitution mentions', () => {
     const source = 'debug debug, [[debug]] debug.log debug.example.org https://example.test/?job=debug www.example.test/?job=debug mailto:debug'
     const root = document.createElement('div'); root.textContent = source
     const runtime = mentionRuntime(root, vi.fn())
-    const rows = constitutionMentions([work({ id: 'debug', uid: 'debug-uid' })])
+    const rows = constitutionMentions([work({ id: 'debug', uid: 'debug-uid' })], new Map())
     runtime.update(rows, { '[[debug]]': 'debug-uid' })
     expect([...root.querySelectorAll<HTMLElement>('.ws-constitution-chip')].map(chip => chip.dataset.mentionSource)).toEqual(['[[debug]]'])
     expect(root.textContent).toContain('debug debug, ')
@@ -181,7 +181,12 @@ describe('constitution mentions', () => {
     const states = [work(), work({ status: 'closed', workerState: undefined }),
       work({ status: 'open', effectiveHorizon: 'stashed', workerState: undefined }), work({ status: 'open', workerState: undefined }),
       work({ status: 'closed', tempered: true, workerState: undefined }), work({ ask: { text: 'Which?', at: '2026-01-01T00:00:00Z' } }), work({ workerState: undefined })]
-    expect(constitutionMentions(states).map(row => row.state)).toEqual(['Working', 'Waiting', 'Resting', 'Drafts', 'Archived', 'Waiting', 'Quiet'])
+    expect(constitutionMentions(states, new Map()).map(row => row.state)).toEqual(['Working', 'Waiting', 'resting', 'draft', 'Archived', 'Waiting', 'Quiet'])
+  })
+  it('reads what the board says waits, as every surface does: a post to the human makes its chip Waiting', () => {
+    const quiet = work({ workerState: undefined })
+    expect(constitutionMentions([quiet], new Map())[0].state).toBe('Quiet')
+    expect(constitutionMentions([quiet], new Map([[quiet.uid!, { id: 'p1', at: 1, kind: 'post', text: 'Done.' }]]))[0].state).toBe('Waiting')
   })
   it('sends only requested report metadata, resolves rows beyond 500, and enforces registration and active navigation', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{"fibers":[]}')))
@@ -189,7 +194,7 @@ describe('constitution mentions', () => {
     let registered = false, active = false
     const cards = Array.from({ length: 502 }, (_, i) => work({ id: `work/${i}`, uid: `uid-${i}`, outcome: `Private outcome ${i}` }))
     const open = vi.fn(), post = vi.spyOn(frame.contentWindow!, 'postMessage').mockImplementation(() => {})
-    const binding = bindConstitutionMentions(root, () => cards, open, { shuttleBase: 'http://mentions-reports.invalid', frameActive: () => registered ? active : null })
+    const binding = bindConstitutionMentions(root, () => cards, open, { shuttleBase: 'http://mentions-reports.invalid', frameActive: () => registered ? active : null, waits: () => new Map() })
     const emit = (data: object, source: Window = frame.contentWindow!) => window.dispatchEvent(new MessageEvent('message', { data: { protocol: 'shuttle-constitution-mentions', ...data }, source }))
     const request = (candidates: string[]) => emit({ type: 'candidates', candidates, reset: true, done: true })
     request(['work/501']); expect(post).not.toHaveBeenCalled()

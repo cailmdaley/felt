@@ -27,6 +27,7 @@ import { scheduleThumbnails } from './workspace/Thumbnail.js'
 import { confirmWorkerStop } from './workspace/Verdicts.js'
 import { runAwaitsHuman, schedulePaused, scheduled } from './workspace/fiberPageState.js'
 import { DeskKeyboard } from './DeskKeyboard.js'
+import { clearPost } from './utils.js'
 import { KeymapHelp } from './KeymapHelp.js'
 import { keyIntent } from './keymap.js'
 import { daemonFetch, isDaemonBooting, postDaemonJson } from './daemonApi.js'
@@ -34,7 +35,7 @@ import { applyTerminalHost, TerminalHostReader } from './hostTerminal.js'
 import { inLane } from './requestLanes.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { hasWorkerToStop } from './KanbanTypes.js'
-import { COLUMN_TITLES, KanbanSurfaceRenderer, boardCards, threadIndexFor } from './KanbanSurfaces.js'
+import { KanbanSurfaceRenderer, boardCards, threadIndexFor } from './KanbanSurfaces.js'
 import { deskCardKey, deskOrder, type DeskOrder } from './deskOrdering.js'
 import { parseCompositeFeed, type CompositeFeed } from './KanbanComposite.js'
 import { restPopover } from './RestPopover.js'
@@ -66,6 +67,11 @@ import type { DocKey } from './workspace/documents.js'
 
 /** Who the ledger names for a rest, a pause or a resume given on the board. */
 const BOARD_ACTOR = 'board'
+
+/** How a verdict is said: its past tense, what follows the name, and its verb ("Closed “X” for review", "Couldn't close “X” for review"). */
+const VERDICT_DONE: Record<Verdict, readonly [string, string, string]> = {
+  tempered: ['Tempered', '', 'temper'], composted: ['Discarded', '', 'discard'], awaitingReview: ['Closed', ' for review', 'close'],
+}
 
 /** The message a thrown/rejected value carries, for a banner or an announce. */
 const errText = (err: unknown): string => (err as { message?: string })?.message ?? String(err)
@@ -384,7 +390,7 @@ export class KanbanModal {
     this.body.addEventListener('wheel', (e) => this.handleBodyWheel(e), { passive: false })
     this.body.addEventListener('scroll', () => this.updateBodyScrollAffordance(), { passive: true })
 
-    // Transition announcements ("Moved 'X' to Tempered.") go to the shared live region.
+    // Verdict announcements ("Closed “X” for review.") go to the shared live region.
     prepareAnnouncements(document)
 
     // Transient error/info banner for transitions that fail.
@@ -826,8 +832,8 @@ export class KanbanModal {
    */
   private transition(card: KanbanCard, target: Verdict, committed = false): void {
     if (boardCards(this.lastResponse).find(each => each.id === card.id)?.column === target) {
-      this.showBanner(`“${card.name}” is already in ${COLUMN_TITLES[target]}.`, 'info')
-      this.announce(`${card.name} is already in ${COLUMN_TITLES[target]}.`)
+      this.showBanner(`“${card.name}” is already ${VERDICT_DONE[target][0].toLowerCase()}${VERDICT_DONE[target][1]}.`, 'info')
+      this.announce(`${card.name} is already ${VERDICT_DONE[target][0].toLowerCase()}${VERDICT_DONE[target][1]}.`)
       return
     }
     // A standing constitution has the run waiting on the human tempered (which
@@ -869,21 +875,20 @@ export class KanbanModal {
       await postDaemonJson(this.shuttleBase, '/api/v1/transition', { fiber_id: card.id, target, origin: card.originId }, 'Transition failed')
       this.announce(target === 'tempered' && card.shuttleKind === 'standing'
         ? `Tempered the run of “${card.name}”; it runs again at its next scheduled time.`
-        : `Moved “${card.name}” to ${COLUMN_TITLES[target]}.`)
+        : `${VERDICT_DONE[target][0]} “${card.name}”${VERDICT_DONE[target][1]}.`)
     } catch (err: unknown) {
       const msg = errText(err)
-      this.showBanner(`Couldn't move “${card.name}” to ${COLUMN_TITLES[target]}: ${msg}`, 'error')
-      this.announce(`Move failed: ${msg}`)
+      this.showBanner(`Couldn't ${VERDICT_DONE[target][2]} “${card.name}”${VERDICT_DONE[target][1]}: ${msg}`, 'error')
+      this.announce(`Couldn't ${VERDICT_DONE[target][2]} ${card.name}${VERDICT_DONE[target][1]}: ${msg}`)
     }
     this.gestureDepth -= 1
     await this.fetchAndRender()
   }
 
-  /** A waiting post's ✓: the board clears it, and says so if the daemon refuses. */
+  /** A waiting post's ✓: the board clears it, offering to undo for a few seconds, and says so if the daemon refuses. */
   private async clear(card: KanbanCard): Promise<void> {
     try {
-      await this.workspace!.board.clear(card.uid ?? card.id)
-      this.announce(`Cleared ${card.name}'s post.`)
+      await clearPost(this.workspace!.board, card.uid ?? card.id, card.name)
     } catch (err: unknown) {
       this.showBanner(`Couldn't clear “${card.name}”'s post: ${errText(err)}`, 'error')
     }

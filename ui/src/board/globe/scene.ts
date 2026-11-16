@@ -1,5 +1,5 @@
 /** The placed tiles with what they stand for, in the shape painting, picking and labels read. */
-import type { Attention, MapFile, MapThread, Standing } from '../family/model.js'
+import type { Urgency, MapFile, MapThread, Standing } from '../family/model.js'
 import { ATTENTION } from '../family/model.js'
 import { assign, tilesOf, type Band, type Tile, type TileKind } from './assign.js'
 import { persistentId, type Forest } from './forest.js'
@@ -113,4 +113,4 @@ export function sceneOf(forest: Forest, now: number): Scene {
   return { roots, byKey, threads, deepest, asks: forest.asks.flatMap(ask => { const body = threads.get(persistentId(ask.card)); return body ? [body] : [] }) }
 }
 
-export const askKind = (body: Body): Attention => body.thread!.standing as Attention
+export const askKind = (body: Body): Urgency => body.thread!.standing as Urgency

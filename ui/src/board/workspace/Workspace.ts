@@ -169,7 +169,10 @@ export class Workspace {
       this.globeHost.onFeeds?.()
     })
     this.board = new BoardFeed(opts.shuttleBase)
-    this.board.subscribe(() => { if (this.current && this.isActive) this.current.familyPage?.update(this.current.card, this.graph()) })
+    this.board.subscribe(() => {
+      this.mentions.refresh()
+      if (this.current && this.isActive) this.current.familyPage?.update(this.current.card, this.graph())
+    })
     // Without the catalogue, offices go by their slugs.
     void charters(opts.shuttleBase).then(list => {
       this.charterNames = new Map(list.flatMap(charter => charter.name ? [[charter.slug, charter.name] as [string, string]] : []))
@@ -195,11 +198,11 @@ export class Workspace {
       shuttleBase: opts.shuttleBase,
     }
     this.mentions = bindConstitutionMentions(root, opts.cards, (id, origin) => { void this.openFiber(id, origin) }, {
-      shuttleBase: opts.shuttleBase, frameActive: frame => frameBridge(frame)?.active ?? null,
+      shuttleBase: opts.shuttleBase, frameActive: frame => frameBridge(frame)?.active ?? null, waits: () => this.board.waiting,
     })
     this.depth = new WorkspaceDepth(root)
     this.origin = opts.origin()
-    this.history = new WorkspaceHistory(route => { void this.applyRoute(route) })
+    this.history = new WorkspaceHistory((route, quiet) => { void this.applyRoute(route, quiet) })
     this.dock = this.wire(opts.dock)
     this.themes = new ChannelThemes(opts.shuttleBase)
     this.library = new Library({
@@ -720,7 +723,9 @@ export class Workspace {
     if (card.fiberDir) return `${card.fiberDir}/${card.path.endsWith('.md') ? card.path.split('/').at(-1) : `${card.id.split('/').at(-1)}.md`}`
     return card.path.startsWith('/') ? card.path : `${card.feltStore ?? ''}/${card.path}`
   }
-  private async applyRoute(route: WorkspaceRoute): Promise<void> {
+  /** Applies a route; a `quiet` one, or one applied inside {@link quietly}, moves neither voice nor Rex. */
+  private async applyRoute(route: WorkspaceRoute, quietRoute = false): Promise<void> {
+    const quiet = quietRoute || this.quiet
     const epoch = ++this.routeEpoch
     this.picker.close()
     this.barPicker.close()
@@ -732,7 +737,7 @@ export class Workspace {
       this.opts.onView?.(view)
       this.depth.setActive(false)
       this.opts.onVisibility(false)
-      if (!this.quiet) void this.look(null)
+      if (!quiet) void this.look(null)
       this.stopTimer()
       return
     }
@@ -777,7 +782,7 @@ export class Workspace {
     this.depth.setActive(true)
     this.show(state)
     // Opening a page is a deliberate look at its fiber; nothing that redraws it looks again.
-    if (!this.quiet) void this.look(state.card)
+    if (!quiet) void this.look(state.card)
     await bodyRead
     if (this.disposed || epoch !== this.routeEpoch || this.current !== state || !this.isActive) return
     this.show(state, loadedBefore)

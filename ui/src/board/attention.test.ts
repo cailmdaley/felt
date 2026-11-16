@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { attentionOf, quietWord, wantOf, type Waits } from './attention.js'
+import { attentionOf, clearable, quietWord, wantOf, type Waits } from './attention.js'
 import type { Wait } from './boardFeed.js'
 import type { KanbanCard } from './KanbanTypes.js'
 import { card } from './testFixtures.js'
@@ -15,8 +15,28 @@ describe('a constitution waits on the human when something addressed to them sta
     expect(attentionOf(quiet, post)).toBe('waiting')
     expect(wantOf(quiet, post)).toMatchObject({ kind: 'post', text: 'The new beam is in.', at: 5_000 })
   })
-  it('a line whose record is not read yet still waits', () => {
-    expect(attentionOf(constitution({ id: 'chair', status: 'active' }), waits('chair', { id: 'p1', at: 5_000 }))).toBe('waiting')
+  it('a line whose record is not read yet still waits, saying only that, with nothing to clear', () => {
+    const unread = waits('chair', { id: 'p1', at: 5_000 })
+    expect(attentionOf(constitution({ id: 'chair', status: 'active' }), unread)).toBe('waiting')
+    const want = wantOf(constitution({ id: 'chair', status: 'active' }), unread)
+    expect(want?.text).toBe('waiting')
+    expect(clearable(want)).toBe(false)
+  })
+  it('a post is cleared by hand; an open ask that posted since is answered, its post neither drawn as its want nor cleared by it', () => {
+    const chair = constitution({ id: 'chair', status: 'active' })
+    expect(clearable(wantOf(chair, waits('chair', { id: 'p1', at: 5_000, kind: 'post', text: 'Done.' })))).toBe(true)
+    const asking = constitution({ id: 'chair', status: 'active', ask: { text: 'Which mask?', at: '2026-11-10T09:00:00Z' } })
+    const want = wantOf(asking, waits('chair', { id: 'p2', at: Date.parse('2026-11-10T10:00:00Z'), kind: 'post', text: 'Progress.' }))
+    expect(want).toMatchObject({ kind: 'ask', text: 'Which mask?' })
+    expect(want?.line).toBeUndefined()
+    expect(clearable(want)).toBe(false)
+    const asked = { id: 'a1', at: Date.parse('2026-11-10T09:00:00Z'), kind: 'asked', text: 'Which mask?' }
+    expect(wantOf(asking, waits('chair', asked))?.line).toEqual(asked)
+  })
+  it('a close waits only while its card stays closed: a reopened card is not left waiting for review', () => {
+    const close = waits('cov', { id: 'c1', at: 5_000, kind: 'closed', text: 'Covariance done.' })
+    expect(wantOf(constitution({ id: 'cov', status: 'closed' }), close)).toMatchObject({ kind: 'review' })
+    expect(attentionOf(constitution({ id: 'cov', status: 'active' }), close)).toBe('quiet')
   })
   it('a cleared post does not wait: the board stops naming it', () => {
     expect(attentionOf(constitution({ id: 'chair', status: 'active' }), none)).toBe('quiet')

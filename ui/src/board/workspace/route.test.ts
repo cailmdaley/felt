@@ -11,8 +11,9 @@ afterEach(() => {
 function resetHash(hash: string): void {
   window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${hash}`)
 }
+/** A history whose routes `onRoute` hears as `(route)`, or `(route, 'quiet')` for a scan's. */
 function create(onRoute = vi.fn()): WorkspaceHistory {
-  const history = new WorkspaceHistory(onRoute)
+  const history = new WorkspaceHistory((route, quiet) => quiet ? onRoute(route, 'quiet') : onRoute(route))
   histories.push(history)
   return history
 }
@@ -34,6 +35,21 @@ describe('workspace routes', () => {
     expect(formatRoute(routes[0])).toBe('#/board/project%2Ffiber@host%40a')
     expect(formatRoute({ kind: 'overview' })).toBe('#/channels')
     expect(parseRoute('#/board')).toEqual({ kind: 'overview', hash: '#/channels' })
+  })
+
+  it('a scan onto the visit behind steps back quietly; a click back is not quiet', async () => {
+    resetHash('#/desk')
+    const onRoute = vi.fn()
+    const history = create(onRoute)
+    history.start()
+    history.enter('a', 'host', undefined, 'desk')
+    history.enter('b', 'host')
+    expect(onRoute).toHaveBeenLastCalledWith({ kind: 'channel', uid: 'b', owner: 'host' })
+    await nextPop(() => history.enter('a', 'host', undefined, undefined, true))
+    expect(onRoute).toHaveBeenLastCalledWith({ kind: 'channel', uid: 'a', owner: 'host' }, 'quiet')
+    history.enter('b', 'host')
+    await nextPop(() => history.back())
+    expect(onRoute).toHaveBeenLastCalledWith({ kind: 'channel', uid: 'a', owner: 'host' })
   })
 
   it('rejects malformed, incomplete, and ambiguous hashes', () => {

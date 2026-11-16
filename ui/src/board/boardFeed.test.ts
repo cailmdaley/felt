@@ -9,8 +9,35 @@ const record = (id: string, kind: string, fiber: string, timestamp: number): Boa
 
 /** A daemon that answers each family read with `records` and the board's unhandled lines. */
 function serve(records: () => BoardRecord[], lines: () => Record<string, { id: string; at: number }>): void {
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ records: records(), reach_ms: 86_400_000, waiting: lines() }))))
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ family: { uid: 'root' }, records: records(), reach_ms: 86_400_000, waiting: lines() }))))
 }
+
+it('a read of a family the daemon could not resolve leaves what waits as the last answer said', async () => {
+  const now = Date.now()
+  serve(() => [], () => ({ chair: { id: 'p', at: now } }))
+  const feed = new BoardFeed('')
+  feed.read(['root']); await settle()
+  vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ family: null, viewer: null, records: [], reach_ms: 86_400_000, waiting: {} })))
+  feed.read(['gone']); await settle()
+  expect(feed.waiting.has('chair')).toBe(true)
+})
+
+it('undoes a clear made here: the line waits again at once, the daemon is told, and a clear after it reaches past the undo', async () => {
+  const now = Date.now()
+  serve(() => [record('p', 'post', 'chair', now - 3000)], () => ({ chair: { id: 'p', at: now - 3000 } }))
+  const feed = new BoardFeed('http://daemon')
+  feed.read(['root']); await settle()
+  const at = await feed.clear('chair')
+  expect(at).toBe(now - 3000)
+  const calls = vi.mocked(fetch).mock.calls.length
+  await feed.unclear('chair', at!)
+  expect(feed.waiting.has('chair')).toBe(true)
+  const key = (n: number) => JSON.parse(String(vi.mocked(fetch).mock.calls[n][1]?.body)).key
+  expect(key(calls)).toBe(`unclear:chair:${now - 3000}`)
+  expect(await feed.clear('chair')).toBe(now - 2999)
+  expect(key(calls + 1)).toBe(`clear:chair:${now - 2999}`)
+  expect(feed.waiting.has('chair')).toBe(false)
+})
 
 it('takes every unhandled line as waiting on the human, a post included, with its kind and words once its family is read', async () => {
   const now = Date.now()

@@ -1032,6 +1032,26 @@ describe('workspace reader integration', () => {
     expect(sight).toHaveBeenLastCalledWith(other)
     expect(rex()).toEqual(['worker-hub', 'worker-other'])
   })
+  it('a scan back onto the constitution just clicked away from stays quiet, though it steps back through history', async () => {
+    const hub = card({ id: 'hub', uid: 'hub', originId: 'host-a', shuttleHost: 'host-a', shuttleKind: 'oneshot', status: 'active', path: 'hub.md', tmuxSession: 'worker-hub', workerState: 'running' })
+    const other = card({ id: 'other', uid: 'other', originId: 'host-a', shuttleHost: 'host-a', shuttleKind: 'oneshot', status: 'active', path: 'other.md', tmuxSession: 'worker-other', workerState: 'running' })
+    const feed = [hub, other]
+    bodyCards = feed
+    workspace.dispose()
+    const sight = vi.fn()
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, deskRows: () => feed, origin: () => 'Desk', onVisibility: visibility, onSight: sight, dock: new Dock('', changed) })
+    const rex = (): unknown[] => selections().map(body => body.tmux_session)
+    vi.useFakeTimers()
+    workspace.openFromDesk(hub); await holdOut()
+    workspace.openFromDesk(other); await holdOut()
+    expect(rex()).toEqual(['worker-hub', 'worker-other'])
+    const looks = sight.mock.calls.length
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true, cancelable: true })); await holdOut()
+    await vi.waitFor(() => expect(document.querySelector('.ws-channel-title')?.textContent).toBe('hub'))
+    await holdOut()
+    expect(sight.mock.calls.length).toBe(looks)
+    expect(rex()).toEqual(['worker-hub', 'worker-other'])
+  })
   it('moves voice and Rex together from every page the board shows, to the constitution a page speaks to, once per target', async () => {
     const hub = card({ id: 'hub', uid: 'hub', originId: 'host-a', shuttleHost: 'host-a', shuttleKind: 'oneshot', status: 'active', path: 'hub.md', tmuxSession: 'worker-hub', workerState: 'running' })
     const report = card({ id: 'hub/report', uid: 'hub-report', originId: 'host-a', status: 'open', path: 'hub/report.md' })

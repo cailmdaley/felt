@@ -40,7 +40,7 @@ describe('verdict transition authorization', () => {
     expect(board.commitTransition).not.toHaveBeenCalled()
     expect(board.workspace.queueVerdict).not.toHaveBeenCalled()
     expect(document.querySelector('.ws-verdict-undo')).toBeNull()
-    expect(board.showBanner).toHaveBeenCalledWith(expect.stringContaining('already in'), 'info')
+    expect(board.showBanner).toHaveBeenCalledWith(expect.stringContaining('is already'), 'info')
   })
   it('queues a verdict on a card closed for review, and writes nothing yet', () => {
     const fiber = card({ id: 'work/review', status: 'closed', shuttleKind: 'oneshot' })
