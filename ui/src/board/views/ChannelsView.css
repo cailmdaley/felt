@@ -141,6 +141,10 @@
   display: flex; flex-direction: column;
 }
 .kbn-ch-stream > .kbn-ch-hush { padding: 4px 20px; }
+/* Each speaker's run is ruled off from the one before it by a hairline across the row, with room on both sides; a run continues unruled. */
+.kbn-ch-stream > .kbn-ch-msg:not([data-continued]) { padding-top: 12px; }
+.kbn-ch-stream > .kbn-ch-msg:is(:last-child, :has(+ :not([data-continued]))) { padding-bottom: 12px; }
+.kbn-ch-stream > .kbn-ch-msg + .kbn-ch-msg:not([data-continued]) { background-image: linear-gradient(var(--kbn-rule), var(--kbn-rule)); background-size: calc(100% - 34px) 1px; background-position: 14px 0; background-repeat: no-repeat; }
 /* A message: the worker's dot in the gutter, then who and when, then what, whole. */
 .kbn-ch-msg {
   display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 0 8px;
