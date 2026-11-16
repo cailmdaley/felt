@@ -21,7 +21,6 @@
 .ws-verdict-undo button:hover { color: var(--ws-ink); }
 .ws-verdict-undo kbd { font: inherit; font-variant-caps: normal; letter-spacing: 0; }
 .ws-verdict-undo button:focus-visible { outline: 1px dashed var(--ws-focus); outline-offset: 2px; }
-/* On a Desk card the line takes the card's foot (KanbanModal.css). */
 @keyframes ws-verdict-arrive { from { opacity: 0; } }
 @keyframes ws-verdict-leave { to { opacity: .3; } }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {

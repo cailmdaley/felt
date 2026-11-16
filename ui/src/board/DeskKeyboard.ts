@@ -24,8 +24,9 @@ export class DeskKeyboard {
     this.root = root
     this.open = open
     root.addEventListener('click', this.onClick, true)
+    root.addEventListener('focusin', this.onClick)
   }
-  dispose(): void { cancelAnimationFrame(this.revealFrame); this.root.removeEventListener('click', this.onClick, true) }
+  dispose(): void { cancelAnimationFrame(this.revealFrame); this.root.removeEventListener('click', this.onClick, true); this.root.removeEventListener('focusin', this.onClick) }
   get selection(): DeskAddress | null { return this.selected }
   /** The row drawn for the selection, when one is on the Desk. */
   get selectedRow(): HTMLElement | null { return this.node() ?? null }
@@ -119,7 +120,8 @@ export class DeskKeyboard {
     return true
   }
 
-  private readonly onClick = (event: MouseEvent): void => {
+  /** A click or keyboard focus on a row selects it, so the drawn selection is the row a key acts on. */
+  private readonly onClick = (event: Event): void => {
     const target = event.target as HTMLElement
     const el = target.closest<HTMLElement>('[data-card-uid]')
     if (el && this.root.contains(el)) this.select(identity(el), false)

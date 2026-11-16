@@ -230,7 +230,7 @@
   .kbn-desk { transition: none; }
 }
 
-/* ── The Desk: a head row, its three columns, then its shelf of three ─── */
+/* ── The Desk: its three columns, then its shelf of three ─────────────── */
 .kbn-section {
   position: relative;
   display: flex;

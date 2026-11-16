@@ -62,7 +62,7 @@ Waiting on you and Awaiting review are ordered newest wait first, Roles & standi
 On a phone the three columns are leaves of a pager under a folio of three tabs (Waiting, Working, Review), and the shelf stands below it.
 
 Waiting on you's head carries `+`, which stashes a new draft, and Working's carries `✶`, which captures an idea by voice; on a phone both stand beside the folio's tabs.
-Nothing on the Desk is dragged and it has no context menu: every act on a constitution lives in [its view](#a-constitutions-view).
+Nothing on the Desk is dragged and it has no context menu: a constitution's acts live in [its view](#a-constitutions-view), and its verdicts and rest answer the keys on its selected Desk row too.
 
 <a id="attach"></a>
 ### Open a worker
@@ -81,7 +81,7 @@ Bare keys act on the Desk when focus is outside an editable field.
 `j` / `↓` and `k` / `↑` select the next or previous card or waiting line, across the sections in order, stopping at the ends.
 `g` and `G` select the first or last in the current section.
 `l` / `→` or `Enter` / `o` opens the selected constitution, `h` / `←` or `Esc` clears selection, `/` opens Find, and `?` shows keyboard help.
-The selected row takes the acts its constitution's view head offers, by the same keys: `a` closes for review, `s` rests (or pauses or resumes a schedule), `t` tempers and `x` discards. A family card acts on its top-level, a waiting line on that member. A key acts only on the row drawn as selected, never on the one under the pointer or the voice target. A verdict waits out its undo window on that row (`z` undoes it), a Temper on unfinished work closes and tempers it in one write, and a Rest records the board as its actor.
+The selected row takes the acts its constitution's view head offers, by the same keys: `a` closes for review, `s` rests (or pauses or resumes a schedule), `t` tempers and `x` discards. A family card acts on its top-level, a waiting line on that member. A key acts only on the row drawn as selected, which follows j/k, a click and keyboard focus, never on the one under the pointer or the voice target. A verdict waits out its undo window on that row, or on its family's head for a top-level's own line (`z` undoes it), a Temper on unfinished work closes and tempers it in one write, and a Rest records the board as its actor.
 
 ## Chronicle — where the time went
 
