@@ -46,13 +46,12 @@
 }
 .ov-tools { --ov-control: 24px; grid-area: tools; display: flex; align-items: center; gap: 12px; color: var(--ws-ink-muted); }
 .ov-tools .ws-fiber-acts { --ws-act: var(--ov-control); --ws-act-icon: 15px; gap: 8px; }
-.ov-tools .ws-acts-session { display: grid; grid-template-columns: var(--ov-control) var(--ov-control); gap: 2px; }
-.ws-reader .ov-tools .ws-acts-session .ws-header-icon { grid-row: 1; width: var(--ov-control); height: var(--ov-control); color: var(--ws-ink-soft); }
+.ov-tools .ws-acts-session { gap: 2px; }
+.ws-reader .ov-tools .ws-acts-session .ws-header-icon { width: var(--ov-control); height: var(--ov-control); color: var(--ws-ink-soft); }
 .ws-reader .ov-tools .ws-acts-session .ws-header-icon svg { width: 15px; height: 15px; }
-.ov-tools .ws-acts-settings { grid-column: 1; } .ov-tools .ws-acts-console { grid-column: 2; }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ov-tools .ws-fiber-acts { --ws-act: var(--ws-phone-target); --ws-act-icon: 19px; }
-  .ov-tools .ws-acts-session { grid-template-columns: var(--ws-phone-target) var(--ws-phone-target); gap: 0; }
+  .ov-tools .ws-acts-session { gap: 0; }
   .ws-reader .ov-tools .ws-acts-session .ws-header-icon { width: var(--ws-phone-target); height: var(--ws-phone-target); }
   .ws-reader .ov-tools .ws-acts-session .ws-header-icon svg { width: 20px; height: 20px; }
   .ov-tools .ws-acts-verbs > button { position: relative; }
