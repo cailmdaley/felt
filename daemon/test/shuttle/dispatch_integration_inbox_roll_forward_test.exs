@@ -10,6 +10,19 @@ defmodule Shuttle.DispatchIntegrationInboxRollForwardTest do
   # possible repeat.
   use Shuttle.Test.DispatchIntegrationCase, async: true
 
+  # Kills, as a hard kill of the daemon's process group would, every OS
+  # process whose command line contains `fragment`; answers their pids.
+  defp kill_commands!(fragment) do
+    {ps, 0} = System.cmd("ps", ["-axo", "pid=,command="])
+
+    for line <- String.split(ps, "\n", trim: true),
+        [pid, command] = String.split(String.trim(line), " ", parts: 2),
+        String.contains?(command, fragment) do
+      {_, 0} = System.cmd("kill", ["-9", pid])
+      pid
+    end
+  end
+
   test "a message its owner died waking a worker with is carried to the next conversation once, marked",
        %{host: host} do
     id = armed(host, "tests/roll-forward")
@@ -55,7 +68,7 @@ defmodule Shuttle.DispatchIntegrationInboxRollForwardTest do
     assert_receive {:native_frame, receiver, frame}
     assert frame["message"]["content"] =~ "check the fit"
     kill_daemon!(poller)
-    Shuttle.Env.cmd("pkill", ["-9", "-f", "inbox consume #{host}"])
+    assert [_ | _] = kill_commands!("inbox consume #{host}:")
     send(receiver, {:fate, :drop})
     assert_receive {:sent, {_, status}} when status != 0, 60_000
     assert [%{"id" => "m-pinned", "attempt" => %{"conversation" => conversation}}] = inbox(id)
