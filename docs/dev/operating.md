@@ -42,7 +42,7 @@ The HTTP listener starts before independent Local and Fleet supervision trees.
 Poller initialization acknowledges immediately; its continuation runs observable boot stages inline.
 `/api/v1/version` reports `boot.stage`, `attempt`, `elapsed_ms` and transient retry details while `ready` is false.
 Slow stages are not killed. Transient exceptions retry with 1–30 second backoff; an adoption retry stops only its partial observers, leaving workers alive.
-Only a corrupt thread outbox or capture state (`inbox_import`, `shuttle inbox thread-state` exiting 3) creates `boot_hold`; a timeout or any other import failure retries. Repair the outbox or `mailboxes/threads.json` and restart; `shuttle daemon release` cannot clear it.
+Only a corrupt thread capture state (`thread_baseline`, `shuttle inbox thread-state` exiting 3) creates `boot_hold`; a timeout or any other failure retries. Repair `mailboxes/threads.json` and restart; `shuttle daemon release` cannot clear it.
 State-dependent API routes return 503 until boot completes, while version diagnostics remain available.
 
 ## Native filesystem I/O

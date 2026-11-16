@@ -326,7 +326,7 @@ func TestCollectDaemonReceiptRequiresMatchingContract(t *testing.T) {
 		}, receiptMismatch},
 		{"boot hold", map[string]any{
 			"ready":     false,
-			"boot_hold": map[string]any{"stage": "outbox_baseline", "reason": "corrupt /state/thread-outbox.json"},
+			"boot_hold": map[string]any{"stage": "thread_baseline", "reason": "corrupt /state/mailboxes/threads.json"},
 		}, receiptMismatch},
 		{"mismatch", map[string]any{"contract": map[string]any{"expected": 2, "observed": 1, "ok": false}}, receiptMismatch},
 		{"check could not run after a match", map[string]any{"contract": map[string]any{
@@ -356,7 +356,7 @@ func TestCollectDaemonReceiptRequiresMatchingContract(t *testing.T) {
 				t.Fatalf("migration hold must remain visible with a matching contract: %+v", got)
 			}
 			if tc.name == "boot hold" {
-				if got.BootHold == nil || got.BootHold.Stage != "outbox_baseline" || !strings.Contains(got.Repair, "/state/thread-outbox.json") || !strings.Contains(got.Repair, "daemon release cannot clear") {
+				if got.BootHold == nil || got.BootHold.Stage != "thread_baseline" || !strings.Contains(got.Repair, "/state/mailboxes/threads.json") || !strings.Contains(got.Repair, "daemon release cannot clear") {
 					t.Fatalf("boot hold must name the failure rather than advise waiting: %+v", got)
 				}
 				host := newApp(env).collectHostReceiptWhenReady(got)

@@ -59,16 +59,17 @@ func TestThreadInboxVerbsCaptureForwardSettleAndContract40Enqueue(t *testing.T) 
 	}
 }
 
-func TestThreadStateExitsThreeOnACorruptOutbox(t *testing.T) {
+func TestThreadStateExitsThreeOnACorruptState(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	data := filepath.Join(t.TempDir(), "data")
 	env.Set("SHUTTLE_DATA_DIR", data)
-	if err := os.MkdirAll(data, 0700); err != nil {
+	if err := os.MkdirAll(filepath.Join(data, "mailboxes"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	os.MkdirAll(filepath.Join(data, "thread-outbox"), 0700)
-	os.WriteFile(filepath.Join(data, "thread-outbox", "baseline"), []byte("not a time"), 0600)
+	if err := os.WriteFile(filepath.Join(data, "mailboxes", "threads.json"), []byte(`{"baseline":"not a time"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
 	var out bytes.Buffer
 	env.Stdout, env.Stderr = &out, &out
 	if code := Run(env, []string{"inbox", "thread-state"}); code != exitCorrupt {

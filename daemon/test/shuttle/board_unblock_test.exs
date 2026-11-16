@@ -62,7 +62,7 @@ defmodule Shuttle.BoardUnblockTest do
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf(dir) end)
     Shuttle.Test.Env.put_env("SHUTTLE_DATA_DIR", dir)
-    Shuttle.Inbox.boot_import()
+    Shuttle.Inbox.boot_baseline()
     %{dir: dir}
   end
 

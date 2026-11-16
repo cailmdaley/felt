@@ -948,7 +948,7 @@ defmodule Shuttle.Poller do
   def handle_continue({:boot, opts}, initial) do
     step = &boot_step/2
 
-    with {:ok, _} <- step.("inbox_import", &Shuttle.Inbox.boot_import/0),
+    with {:ok, _} <- step.("thread_baseline", &Shuttle.Inbox.boot_baseline/0),
          {:ok, {stores, auto}} <-
            step.("store_inventory", fn ->
              case Keyword.fetch(opts, :felt_stores) do

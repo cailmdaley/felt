@@ -2,14 +2,11 @@ package messaging
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
@@ -18,7 +15,7 @@ func threadRecord() map[string]any {
 	return map[string]any{"owner": "host", "store": "/store", "parent_uid": "anchor", "parent_host": "host", "parent_unresolved": true, "anchor_uid": "anchor", "text": "thread hub/child closed: done", "retained_at": time.Now().UTC().Format(time.RFC3339Nano), "wake": true}
 }
 
-func bootThread(t *testing.T, env *sysenv.Env) ThreadImport {
+func bootThread(t *testing.T, env *sysenv.Env) ThreadInboxState {
 	t.Helper()
 	s, err := BootThreadInbox(env)
 	if err != nil {
@@ -326,364 +323,20 @@ func TestAskerNoticeRoutesToItsSessionAndSettlesFinal(t *testing.T) {
 	}
 }
 
-func seedOutbox(t *testing.T, env *sysenv.Env, baseline string) string {
-	t.Helper()
-	root := filepath.Join(dataDir(env), "thread-outbox")
-	for _, dir := range []string{"pending", "acked"} {
-		if err := os.MkdirAll(filepath.Join(root, dir), 0700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	os.WriteFile(filepath.Join(root, "baseline"), []byte(baseline), 0600)
-	os.WriteFile(filepath.Join(root, "version"), []byte("4"), 0600)
-	return root
-}
-
-func seedPending(t *testing.T, root, id string, record map[string]any) {
-	t.Helper()
-	b, _ := json.Marshal(map[string]any{"id": id, "record": record})
-	if err := os.WriteFile(filepath.Join(root, "pending", mailboxKey(id)+".json"), b, 0600); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func seedAck(t *testing.T, root, id string) {
-	t.Helper()
-	if err := os.WriteFile(filepath.Join(root, "acked", mailboxKey(id)), []byte(id), 0600); err != nil {
-		t.Fatal(err)
-	}
-}
-
-const oldBaseline = "2020-01-01T00:00:00Z"
-
-func TestThreadImportCrashReplayAckWinsAndBaselineSurvives(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	root := seedOutbox(t, env, oldBaseline)
-	record := threadRecord()
-	seedPending(t, root, "thread-pending", record)
-	seedPending(t, root, "thread-acked", record)
-	seedAck(t, root, "thread-acked")
-	stopped := errors.New("daemon died")
-	if _, err := bootThreadInbox(env, func(string) error { return stopped }); !errors.Is(err, stopped) {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(root); err != nil {
-		t.Fatal("source removed before the import completed", err)
-	}
-	state := bootThread(t, env)
-	if state.Baseline != oldBaseline {
-		t.Fatal(state)
-	}
-	if _, err := os.Stat(root); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("source remains: %v", err)
-	}
-	if got := routes(t, env); len(got) != 1 || got[0].ID != "thread-pending" {
-		t.Fatalf("%+v", got)
-	}
-	if offeredRoute(t, env, "thread-acked").Disposition != "acknowledged" {
-		t.Fatal("acknowledgment not imported")
-	}
-	if got := capture(t, env, ThreadPublication{"thread-acked", record}); len(got) != 0 {
-		t.Fatal("an acknowledged publication was captured again")
-	}
-	if got := bootThread(t, env); got.Baseline != oldBaseline {
-		t.Fatal(got)
-	}
-}
-
-func TestThreadImportAckWinsOverACopyFromAnInterruptedImport(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	root := seedOutbox(t, env, oldBaseline)
-	seedPending(t, root, "thread-late", threadRecord())
-	stopped := errors.New("death after the pending write")
-	if _, err := bootThreadInbox(env, func(string) error { return stopped }); !errors.Is(err, stopped) {
-		t.Fatal(err)
-	}
-	if len(routes(t, env)) != 1 {
-		t.Fatal("pending not durable")
-	}
-	seedAck(t, root, "thread-late")
-	bootThread(t, env)
-	if got := routes(t, env); len(got) != 0 {
-		t.Fatalf("acknowledgment lost: %+v", got)
-	}
-}
-
-func TestThreadImportLeavesRecipientInboxesAlone(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	root := seedOutbox(t, env, oldBaseline)
-	// Contract 40 placed this result and acknowledged it before a worker took it.
-	if err := Enqueue(env, InboxEntry{Address: "/store:parent", Request: Request{MessageID: "thread-done", Text: "already placed"}, Derived: true}); err != nil {
-		t.Fatal(err)
-	}
-	seedPending(t, root, "thread-done", threadRecord())
-	seedAck(t, root, "thread-done")
-	bootThread(t, env)
-	if n, err := pendingCount(env, "/store:parent"); err != nil || n != 1 {
-		t.Fatalf("recipient's result disturbed: %d %v", n, err)
-	}
-}
-
-func TestThreadImportRefusesCorruptSourceAndKeepsIt(t *testing.T) {
-	t.Parallel()
-	for _, corrupt := range []string{"baseline", "pending", "missing baseline"} {
-		t.Run(corrupt, func(t *testing.T) {
-			env := testEnv(t)
-			root := seedOutbox(t, env, oldBaseline)
-			switch corrupt {
-			case "baseline":
-				os.WriteFile(filepath.Join(root, "baseline"), []byte("bad"), 0600)
-			case "pending":
-				os.WriteFile(filepath.Join(root, "pending", "bad.json"), []byte("{"), 0600)
-			case "missing baseline":
-				os.Remove(filepath.Join(root, "baseline"))
-			}
-			if _, err := BootThreadInbox(env); ErrorCode(err) != "corrupt" {
-				t.Fatal("corrupt source accepted:", err)
-			}
-			if _, err := os.Stat(root); err != nil {
-				t.Fatal("corrupt source removed")
-			}
-		})
-	}
-}
-
-// The old daemon wrote acked/<key>.<n>.tmp and renamed it; a hard kill
-// between the two left the tmp file, which was never an acknowledgment.
-func TestThreadImportIgnoresALeftoverAckTmpFile(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	root := seedOutbox(t, env, oldBaseline)
-	seedAck(t, root, "thread-acked")
-	os.WriteFile(filepath.Join(root, "acked", mailboxKey("thread-acked")+".123.tmp"), []byte("thread-acked"), 0600)
-	os.WriteFile(filepath.Join(root, "acked", mailboxKey("thread-torn")+".456.tmp"), []byte("thread-to"), 0600)
-	bootThread(t, env)
-	if offeredRoute(t, env, "thread-acked").Disposition != "acknowledged" {
-		t.Fatal("acknowledgment lost")
-	}
-	if _, err := os.Stat(filepath.Join(routingRoot(env), "offered", mailboxKey("thread-torn")+".json")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("a torn tmp file was imported", err)
-	}
-}
-
-// A pending record the routing inbox can never accept is skipped and
-// reported; the rest import.
-func TestThreadImportSkipsARecordTheInboxCanNeverAccept(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	root := seedOutbox(t, env, oldBaseline)
-	bad := threadRecord()
-	bad["signal"] = map[string]any{"uid": "child"}
-	seedPending(t, root, "thread-bad", bad)
-	seedPending(t, root, "thread-ok", threadRecord())
-	report := bootThread(t, env)
-	if len(report.Skipped) != 1 || report.Skipped[0].ID != "thread-bad" || !strings.Contains(report.Skipped[0].Error, "thread signal") {
-		t.Fatalf("%+v", report)
-	}
-	if got := routes(t, env); len(got) != 1 || got[0].ID != "thread-ok" {
-		t.Fatalf("%+v", got)
-	}
-	if _, err := os.Stat(root); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("source remains", err)
-	}
-}
-
-// An older daemon captured a close whose text is over the inbox's limit. It
-// imports cut short, with its id, stamp, recipient and wishes, so a later
-// capture of an edited outcome under the same id stores nothing.
-func TestThreadImportKeepsAnOversizedPublicationCutShort(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	root := seedOutbox(t, env, oldBaseline)
-	original := threadRecord()
-	original["text"] = "thread hub/child closed: original! " + strings.Repeat("é", 33<<10)
-	seedPending(t, root, "thread-big", original)
-	if report := bootThread(t, env); len(report.Skipped) != 0 {
-		t.Fatalf("%+v", report)
-	}
-	edited := threadRecord()
-	edited["retained_at"] = original["retained_at"]
-	edited["text"] = "thread hub/child closed: edited after first capture"
-	if created := capture(t, env, ThreadPublication{"thread-big", edited}); len(created) != 0 {
-		t.Fatal(created)
-	}
-	got := routes(t, env)
-	if len(got) != 1 {
-		t.Fatalf("%+v", got)
-	}
-	r := got[0].Record
-	text := routeString(r, "text")
-	if !strings.HasPrefix(text, "thread hub/child closed: original! ") || !strings.HasSuffix(text, " … (truncated)") || len(text) > 64<<10 || !utf8.ValidString(text) {
-		t.Fatalf("text %d bytes: %q…", len(text), text[:40])
-	}
-	if r["retained_at"] != original["retained_at"] || r["parent_uid"] != "anchor" || r["wake"] != true {
-		t.Fatalf("%+v", r)
-	}
-	if e := pendingRoute(t, env, "thread-big"); e.Request.Text != text || e.Wishes.Turn != "ask" {
-		t.Fatalf("%+v", e)
-	}
-}
-
-// The import reads stamps the way the old daemon's capture did, keeps them
-// as written, and skips a record with no stamp or one it cannot read.
-func TestThreadImportReadsElixirStampsAndSkipsTheUnreadable(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	root := seedOutbox(t, env, oldBaseline)
-	hourAgo := time.Now().Add(-time.Hour)
-	stamps := map[string]string{
-		"thread-space":   hourAgo.UTC().Format("2006-01-02 15:04:05Z"),
-		"thread-offset":  hourAgo.In(time.FixedZone("", 3600)).Format("2006-01-02T15:04:05.000-0700"),
-		"thread-hours":   hourAgo.In(time.FixedZone("", -7200)).Format("2006-01-02T15:04:05-07"),
-		"thread-comma":   hourAgo.UTC().Format("2006-01-02T15:04:05") + ",25Z",
-		"thread-none":    "",
-		"thread-garbage": "yesterday",
-		"thread-old":     time.Now().Add(-15 * 24 * time.Hour).UTC().Format("2006-01-02 15:04:05Z"),
-	}
-	for id, stamp := range stamps {
-		r := threadRecord()
-		r["retained_at"] = stamp
-		if id == "thread-none" {
-			delete(r, "retained_at")
-		}
-		seedPending(t, root, id, r)
-	}
-	report := bootThread(t, env)
-	skipped := map[string]bool{}
-	for _, s := range report.Skipped {
-		skipped[s.ID] = true
-	}
-	if len(skipped) != 2 || !skipped["thread-none"] || !skipped["thread-garbage"] {
-		t.Fatalf("%+v", report.Skipped)
-	}
-	got := map[string]string{}
-	for _, p := range routes(t, env) {
-		got[p.ID] = p.Record["retained_at"].(string)
-	}
-	for _, id := range []string{"thread-space", "thread-offset", "thread-hours", "thread-comma"} {
-		if got[id] != stamps[id] {
-			t.Fatalf("%s: %q, want %q as written", id, got[id], stamps[id])
-		}
-	}
-	if len(got) != 4 {
-		t.Fatalf("an expired record was imported: %v", got)
-	}
-}
-
-// An acknowledgment is its file name: the old daemon tolerated an ack it
-// could not read (Fir's Lustre client could not stat one), and so does the
-// import. Any other name in acked/ was never an acknowledgment.
-func TestThreadImportTakesAcknowledgmentsByNameAlone(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	root := seedOutbox(t, env, oldBaseline)
-	seedPending(t, root, "thread-acked", threadRecord())
-	seedAck(t, root, "thread-acked")
-	unreadable := filepath.Join(root, "acked", mailboxKey("thread-acked"))
-	if err := os.Chmod(unreadable, 0); err != nil {
-		t.Fatal(err)
-	}
-	seedAck(t, root, "thread-mismatched")
-	os.WriteFile(filepath.Join(root, "acked", mailboxKey("thread-mismatched")), []byte("other content"), 0600)
-	for _, stray := range []string{".nfs000000000123", ".DS_Store", "notes.txt"} {
-		os.WriteFile(filepath.Join(root, "acked", stray), []byte("thread-acked"), 0600)
-	}
-	if report := bootThread(t, env); report.Cleanup != "" {
-		t.Fatal(report)
-	}
-	if got := routes(t, env); len(got) != 0 {
-		t.Fatalf("the acknowledgment did not win: %+v", got)
-	}
-	for _, id := range []string{"thread-acked", "thread-mismatched"} {
-		if offeredRoute(t, env, id).Disposition != "acknowledged" {
-			t.Fatal(id)
-		}
-	}
-	offered, _ := os.ReadDir(filepath.Join(routingRoot(env), "offered"))
-	if len(offered) != 2 {
-		t.Fatalf("stray names were imported: %v", offered)
-	}
-}
-
-// A complete import whose cleanup cannot remove the source reports it and
-// boots; later boots do too, and import nothing again.
-func TestThreadImportCleanupFailureIsReportedNotHeld(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	root := seedOutbox(t, env, oldBaseline)
-	seedAck(t, root, "thread-a")
-	acked := filepath.Join(root, "acked")
-	if err := os.Chmod(acked, 0500); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Chmod(filepath.Join(root+".imported", "acked"), 0700) })
-	for i := 0; i < 3; i++ {
-		report, err := BootThreadInbox(env)
-		if err != nil || report.Baseline != oldBaseline || report.Cleanup == "" {
-			t.Fatalf("boot %d: %+v %v", i, report, err)
-		}
-	}
-	if offeredRoute(t, env, "thread-a").Disposition != "acknowledged" {
-		t.Fatal("ack not imported")
-	}
-	if _, err := os.Stat(root); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("the imported source would import again", err)
-	}
-	os.Chmod(filepath.Join(root+".imported", "acked"), 0700)
-	if report := bootThread(t, env); report.Cleanup != "" {
-		t.Fatal(report)
-	}
-	if _, err := os.Stat(root + ".imported"); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal(err)
-	}
-}
-
-// A daemon rolled back to contract 40 recreates thread-outbox with a later
-// baseline. Rolling forward keeps the inbox's earlier one and imports what the
-// older daemon captured; its acknowledgment settles the inbox's copy.
-func TestThreadImportRollForwardAfterRollbackKeepsTheEarlierBaseline(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	seedOutbox(t, env, oldBaseline)
-	first := bootThread(t, env)
-	capture(t, env, ThreadPublication{"thread-both", threadRecord()}, ThreadPublication{"thread-new", threadRecord()})
-	later := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano)
-	root := seedOutbox(t, env, later)
-	seedAck(t, root, "thread-both")
-	seedPending(t, root, "thread-old", threadRecord())
-	state, err := BootThreadInbox(env)
-	if err != nil || state.Baseline != first.Baseline {
-		t.Fatal(state, err)
-	}
-	ids := map[string]bool{}
-	for _, p := range routes(t, env) {
-		ids[p.ID] = true
-	}
-	if len(ids) != 2 || !ids["thread-new"] || !ids["thread-old"] {
-		t.Fatal(ids)
-	}
-}
-
-// The state holds the baseline alone; a state an earlier build wrote with a
-// retention cutoff reads as its baseline, and the 14-day window on the
-// stamp refuses what has expired.
+// The state holds the baseline alone, which a boot keeps: other fields are
+// ignored, and the 14-day window on the stamp refuses what has expired.
 func TestThreadInboxStateIsTheBaselineAlone(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
-	root := seedOutbox(t, env, oldBaseline)
-	os.WriteFile(filepath.Join(root, "retention_cutoff"), []byte(time.Now().UTC().Format(time.RFC3339Nano)), 0600)
-	bootThread(t, env)
-	if b, _ := os.ReadFile(threadStatePath(env)); string(b) != `{"baseline":"`+oldBaseline+`"}` {
-		t.Fatal(string(b))
-	}
-	earlier := `{"baseline":"` + oldBaseline + `","retention_cutoff":"2999-01-01T00:00:00Z"}`
-	if err := os.WriteFile(threadStatePath(env), []byte(earlier), 0600); err != nil {
+	const baseline = "2020-01-01T00:00:00Z"
+	if err := os.MkdirAll(filepath.Dir(threadStatePath(env)), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if got := bootThread(t, env); got.Baseline != oldBaseline {
+	state := `{"baseline":"` + baseline + `","retention_cutoff":"2999-01-01T00:00:00Z"}`
+	if err := os.WriteFile(threadStatePath(env), []byte(state), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := bootThread(t, env); got.Baseline != baseline {
 		t.Fatal(got)
 	}
 	if got := capture(t, env, ThreadPublication{"thread-recent", threadRecord()}); len(got) != 1 {
@@ -694,29 +347,6 @@ func TestThreadInboxStateIsTheBaselineAlone(t *testing.T) {
 	if got := capture(t, env, ThreadPublication{"thread-expired", expired}); len(got) != 0 {
 		t.Fatal("an expired stamp was captured", got)
 	}
-}
-
-func TestThreadImportBacklogAndInterruptedCleanup(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	root := seedOutbox(t, env, oldBaseline)
-	for i := 0; i < 140; i++ {
-		seedPending(t, root, fmt.Sprintf("thread-%d", i), threadRecord())
-	}
-	state := bootThread(t, env)
-	if got := routes(t, env); len(got) != 140 {
-		t.Fatal(len(got))
-	}
-	// Recursive deletion was interrupted after the completed source was renamed.
-	os.MkdirAll(root+".imported/pending", 0700)
-	os.WriteFile(filepath.Join(root+".imported", "pending", "partial"), []byte("partial"), 0600)
-	if got := bootThread(t, env); got.Baseline != state.Baseline {
-		t.Fatal(got)
-	}
-	if _, err := os.Stat(root + ".imported"); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal(err)
-	}
-
 }
 
 func TestFreshThreadInboxEstablishesItsBaselineOnce(t *testing.T) {
@@ -733,31 +363,26 @@ func TestFreshThreadInboxEstablishesItsBaselineOnce(t *testing.T) {
 	}
 }
 
-// The import touches only the outbox and the routing inbox, so a host's
-// other inboxes cost it nothing. This tree has a busy laptop's shape.
-func TestThreadImportTimeDoesNotGrowWithTheMailboxTree(t *testing.T) {
+// A malformed state is never replaced: boot refuses it as corrupt and leaves
+// it for the operator to restore.
+func TestThreadInboxRefusesACorruptStateAndKeepsIt(t *testing.T) {
 	t.Parallel()
-	env := testEnv(t)
-	for harness, n := range map[string]int{"claude": 931, "pi": 1496, "codex": 95, "fiber": 217} {
-		for i := 0; i < n; i++ {
-			if err := os.MkdirAll(filepath.Join(dataDir(env), "mailboxes", harness, fmt.Sprintf("s%d", i), "pending"), 0700); err != nil {
+	for name, state := range map[string]string{"json": "{", "baseline": `{"baseline":"not a time"}`} {
+		t.Run(name, func(t *testing.T) {
+			env := testEnv(t)
+			if err := os.MkdirAll(filepath.Dir(threadStatePath(env)), 0700); err != nil {
 				t.Fatal(err)
 			}
-		}
-	}
-	root := seedOutbox(t, env, oldBaseline)
-	for i := 0; i < 236; i++ {
-		seedAck(t, root, fmt.Sprintf("thread-ack-%d", i))
-	}
-	for i := 0; i < 9; i++ {
-		seedPending(t, root, fmt.Sprintf("thread-pending-%d", i), threadRecord())
-	}
-	start := time.Now()
-	bootThread(t, env)
-	elapsed := time.Since(start)
-	t.Logf("import of 236 acknowledgments and 9 results: %v", elapsed)
-	if elapsed > 10*time.Second {
-		t.Fatalf("import took %v; the daemon's timeout is 60s", elapsed)
+			if err := os.WriteFile(threadStatePath(env), []byte(state), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := BootThreadInbox(env); ErrorCode(err) != "corrupt" {
+				t.Fatal("corrupt state accepted:", err)
+			}
+			if b, _ := os.ReadFile(threadStatePath(env)); string(b) != state {
+				t.Fatal("corrupt state replaced:", string(b))
+			}
+		})
 	}
 }
 

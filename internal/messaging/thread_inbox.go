@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -20,9 +19,6 @@ import (
 // Placing an entry settles it here; what it became lives in the recipient's
 // inbox, the owner's, or the asking session's transport.
 const ThreadRoutingAddress = "threads"
-
-// outboxKey matches an older daemon's acknowledgment file name.
-var outboxKey = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 func routingRoot(env *sysenv.Env) string { return mailboxDir(env, "fiber", ThreadRoutingAddress) }
 
@@ -410,130 +406,31 @@ func SettleThread(env *sysenv.Env, id, disposition string) error {
 	return finishRouted(root, path, e, disposition)
 }
 
-// ThreadImport is a boot's report: the capture window's baseline, the pending
-// records the routing inbox can never accept, which the import skips, and the
-// cleanup failure, if any, of an imported outbox. A failed cleanup leaves the
-// renamed outbox behind for the next boot to remove; it is never imported
-// again.
-type ThreadImport struct {
-	Baseline string          `json:"baseline"`
-	Skipped  []ThreadRefusal `json:"skipped,omitempty"`
-	Cleanup  string          `json:"cleanup_error,omitempty"`
-}
-
-// BootThreadInbox establishes the capture window and imports a thread outbox
-// left by an older daemon. A malformed baseline or pending payload is a
-// "corrupt" error and is left untouched. No source file is removed until the
-// whole import is durable, and repeating an interrupted import is safe: an
-// acknowledgment wins over a pending copy of its id, and Enqueue keeps the
-// first pending publication.
-func BootThreadInbox(env *sysenv.Env) (ThreadImport, error) {
-	if err := ensureDir(dataDir(env), 0700); err != nil {
-		return ThreadImport{}, err
-	}
-	unlock, err := lockFile(filepath.Join(dataDir(env), "thread-import.lock"))
+// BootThreadInbox establishes the capture window: a host without a baseline
+// records the current time as its baseline, and one with a baseline keeps it.
+// A malformed state is a "corrupt" error and is left untouched.
+func BootThreadInbox(env *sysenv.Env) (ThreadInboxState, error) {
+	unlock, err := lockInbox(routingRoot(env))
 	if err != nil {
-		return ThreadImport{}, err
+		return ThreadInboxState{}, err
 	}
 	defer unlock()
-	return bootThreadInbox(env, nil)
-}
-
-func bootThreadInbox(env *sysenv.Env, imported func(string) error) (ThreadImport, error) {
-	root := filepath.Join(dataDir(env), "thread-outbox")
-	completed := root + ".imported"
-	var report ThreadImport
-	var cleanup []error
-	if err := os.RemoveAll(completed); err != nil {
-		cleanup = append(cleanup, err)
-	}
 	state, err := ReadThreadInboxState(env)
-	established := err == nil
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return report, err
+	if !errors.Is(err, os.ErrNotExist) {
+		return state, err
 	}
-	src, err := readOutbox(root)
-	if err != nil {
-		return report, err
-	}
-	// An established inbox keeps its own baseline, also over an outbox an
-	// older daemon recreated after a rollback: what either daemon published
-	// dedups, and what happened between them is published.
-	if !established {
-		state.Baseline = src.baseline
-		if state.Baseline == "" {
-			state.Baseline = time.Now().UTC().Format(time.RFC3339Nano)
-		}
-	}
-	report.Baseline = state.Baseline
+	state.Baseline = time.Now().UTC().Format(time.RFC3339Nano)
 	b, err := json.Marshal(state)
 	if err != nil {
-		return report, err
+		return state, err
 	}
-	if err = ensureDir(filepath.Dir(threadStatePath(env)), 0700); err != nil {
-		return report, err
-	}
-	if err = mailboxWrite(threadStatePath(env), b, false); err != nil {
-		return report, err
-	}
-	for key := range src.acked {
-		if err = importThreadAck(env, key); err != nil {
-			return report, err
-		}
-		if imported != nil {
-			if err = imported(key); err != nil {
-				return report, err
-			}
-		}
-	}
-	for id, record := range src.pending {
-		if src.acked[mailboxKey(id)] {
-			continue
-		}
-		if text, ok := record["text"].(string); ok {
-			record["text"] = boundedInboxText(text)
-		}
-		entry, err := ThreadEntry(id, record)
-		if _, stampErr := parseStamp(threadStamp(record)); stampErr != nil {
-			err = errCode("invalid_request", "thread publication stamp: %v", stampErr)
-		}
-		if err == nil {
-			err = Enqueue(env, entry)
-		}
-		// Retrying cannot change an invalid record's answer. A record without
-		// a stamp would never expire, so it is refused here too.
-		if ErrorCode(err) == "invalid_request" {
-			report.Skipped = append(report.Skipped, ThreadRefusal{id, err.Error()})
-		} else if err != nil {
-			return report, err
-		}
-		if imported != nil {
-			if err = imported(id); err != nil {
-				return report, err
-			}
-		}
-	}
-	// Everything is imported. Rename the source before recursive deletion, so
-	// a crash during cleanup cannot leave a partial outbox that reads as
-	// corrupt; whatever the cleanup cannot remove is reported, not retried
-	// here, and a source left in place imports again as a no-op.
-	if err = os.Rename(root, completed); err != nil && !errors.Is(err, os.ErrNotExist) {
-		cleanup = append(cleanup, err)
-	} else if err = syncDir(dataDir(env)); err != nil {
-		cleanup = append(cleanup, err)
-	} else if err = os.RemoveAll(completed); err != nil {
-		cleanup = append(cleanup, err)
-	}
-	if err = errors.Join(cleanup...); err != nil {
-		report.Cleanup = err.Error()
-	}
-	return report, nil
+	return state, mailboxWrite(threadStatePath(env), b, false)
 }
 
 // boundedInboxText cuts text over the inbox's 64 KiB limit short: its first
 // 60,000 bytes, ending on a whole character, as the daemon captures a result
-// whose outcome is that long. An older daemon's outbox took any text, and a
-// human line's record holds what the transport carries whole.
+// whose outcome is that long. A record's text is cut the same way, while its
+// transport carries the line whole.
 func boundedInboxText(text string) string {
 	if len(text) <= 64<<10 {
 		return text
@@ -543,95 +440,4 @@ func boundedInboxText(text string) string {
 		cut = cut[:len(cut)-1]
 	}
 	return cut + " … (truncated)"
-}
-
-// outboxImage is an older daemon's thread outbox, thread-outbox/: its
-// baseline, pending/<key>.json payloads and acked/<key> files, held here by
-// key. Its retention_cutoff is not read: Enqueue's 14-day window on the
-// stamp refuses everything it would.
-type outboxImage struct {
-	baseline string
-	acked    map[string]bool
-	pending  map[string]map[string]any
-}
-
-func readOutbox(root string) (outboxImage, error) {
-	img := outboxImage{acked: map[string]bool{}, pending: map[string]map[string]any{}}
-	baseline, err := os.ReadFile(filepath.Join(root, "baseline"))
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return img, err
-	}
-	img.baseline = string(baseline)
-	// An acknowledgment's file name is the hash of the publication's id, the
-	// routing inbox's key for it, so its content is never read. Any other
-	// name (an old daemon's <key>.<n>.tmp, an NFS silly-rename, .DS_Store)
-	// was never an acknowledgment.
-	acks, err := os.ReadDir(filepath.Join(root, "acked"))
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return img, err
-	}
-	for _, ack := range acks {
-		if outboxKey.MatchString(ack.Name()) {
-			img.acked[ack.Name()] = true
-		}
-	}
-	payloads, err := filepath.Glob(filepath.Join(root, "pending", "*.json"))
-	if err != nil {
-		return img, err
-	}
-	for _, path := range payloads {
-		var payload struct {
-			ID     string         `json:"id"`
-			Record map[string]any `json:"record"`
-		}
-		b, err := os.ReadFile(path)
-		if err != nil {
-			return img, err
-		}
-		if json.Unmarshal(b, &payload) != nil || payload.ID == "" || payload.Record == nil {
-			return img, errCode("corrupt", "invalid thread payload: %s", path)
-		}
-		img.pending[payload.ID] = payload.Record
-	}
-	_, versionErr := os.Stat(filepath.Join(root, "version"))
-	if img.baseline == "" && (versionErr == nil || len(img.acked)+len(payloads) > 0) {
-		return img, errCode("corrupt", "missing thread outbox baseline")
-	}
-	if _, err := parseStamp(img.baseline); img.baseline != "" && err != nil {
-		return img, errCode("corrupt", "thread outbox: %v", err)
-	}
-	return img, nil
-}
-
-// importThreadAck records an outbox acknowledgment, which means the old
-// daemon placed the publication, as a payload-free offered entry under its
-// key that dedups a re-capture for the retention window. It settles a pending
-// copy of the same publication: the acknowledgment wins.
-func importThreadAck(env *sysenv.Env, key string) error {
-	root := routingRoot(env)
-	unlock, err := lockInbox(root)
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	pending := filepath.Join(root, "pending", key+".json")
-	e, err := readFiberMailboxEntry(pending)
-	if err == nil {
-		return finishRouted(root, pending, e, "acknowledged")
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	offered := filepath.Join(root, "offered", key+".json")
-	if _, err = os.Stat(offered); !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if err = ensureDir(filepath.Dir(offered), 0700); err != nil {
-		return err
-	}
-	b, err := json.Marshal(mailboxEntry{Wishes: Wishes{Source: "thread"}.withDefaults(Request{}), QueuedAt: time.Now().UnixNano(), Disposition: "acknowledged"})
-	if err != nil {
-		return err
-	}
-	return mailboxWrite(offered, b, false)
 }

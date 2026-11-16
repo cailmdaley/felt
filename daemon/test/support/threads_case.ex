@@ -84,7 +84,7 @@ defmodule Shuttle.Test.ThreadsCase do
     claim_test_daemon_owner!(home)
     Env.put_env("SHUTTLE_HOST", "test-host")
     Env.put_env("SHUTTLE_STORES", dir)
-    unless context[:first_boot], do: Shuttle.Inbox.boot_import()
+    unless context[:first_boot], do: Shuttle.Inbox.boot_baseline()
     Env.put_app_env(:felt_runner, Shuttle.Runner.Default)
     assert {:ok, _} = CLI.run_felt(["-C", dir, "init"])
     assert {:ok, _} = CLI.run_felt(["-C", dir, "add", "hub", "Hub"])

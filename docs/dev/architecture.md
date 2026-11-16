@@ -57,8 +57,8 @@ A result for a fiber this host owns is placed in that fiber's inbox; one for ano
 A lost confirmation repeats the same enqueue, which stores nothing new.
 On the owner, the result stays pending until a worker takes it or currency checking drops it as superseded.
 Settled routing entries keep their ids for 14 days, so a re-capture stores nothing; they settle after their signal is stamped, and the inbox refuses a stamp older than 14 days, so a signal cannot publish again after they expire.
-Boot imports an older daemon's `thread-outbox/` into the routing inbox, keeping its baseline, pending results and acknowledgments; a corrupt baseline or pending payload holds boot without discarding anything.
-See [The inbox](inbox.md#thread-results-and-routing) for routing, the import and rollback.
+Boot establishes the capture baseline once; a corrupt capture state holds boot without discarding anything.
+See [The inbox](inbox.md#thread-results-and-routing) for routing, the baseline and rollback.
 
 The parent Poller publishes one durable receiver identity and epoch synchronously with worker registration, recovery, removal and conversation rotation.
 A CLI claim binds its supplied conversation UUID in worker metadata before registration publishes authority, never borrowing the predecessor's runtime UUID.

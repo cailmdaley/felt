@@ -386,7 +386,7 @@ func (a *app) collectDaemonReceipt() ReceiptDaemon {
 	}
 	if d.BootHold != nil && d.BootHold.Reason != "booting" {
 		d.Status = receiptMismatch
-		d.Repair = fmt.Sprintf("Poller boot holds every launch at %s: %s; repair the outbox data and restart the daemon; daemon release cannot clear this hold", d.BootHold.Stage, d.BootHold.Reason)
+		d.Repair = fmt.Sprintf("Poller boot holds every launch at %s: %s; repair the capture state and restart the daemon; daemon release cannot clear this hold", d.BootHold.Stage, d.BootHold.Reason)
 		return d
 	}
 	if response.Ready != nil && !*response.Ready {

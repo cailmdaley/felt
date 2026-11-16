@@ -187,103 +187,19 @@ defmodule Shuttle.ThreadCaptureTest do
   end
 
   @tag first_boot: true
-  test "a leftover acknowledgment tmp file and a rolled-back outbox both boot", %{data: data} do
-    outbox = Path.join(data, "thread-outbox")
-    File.mkdir_p!(Path.join(outbox, "acked"))
-    File.mkdir_p!(Path.join(outbox, "pending"))
-    File.write!(Path.join(outbox, "baseline"), "2026-10-22T19:33:11.470348Z")
-    File.write!(Path.join(outbox, "version"), "4")
-    key = :crypto.hash(:sha256, "thread-acked") |> Base.encode16(case: :lower)
-    File.write!(Path.join([outbox, "acked", key]), "thread-acked")
-    File.write!(Path.join([outbox, "acked", key <> ".123.tmp"]), "thread-acked")
-    assert :ok = Shuttle.Inbox.boot_import()
-    refute File.exists?(outbox)
-
-    # A daemon rolled back to contract 40 recreated the outbox at its boot.
-    File.mkdir_p!(Path.join(outbox, "acked"))
-    File.write!(Path.join(outbox, "baseline"), DateTime.to_iso8601(DateTime.utc_now()))
-    File.write!(Path.join(outbox, "version"), "4")
-    assert :ok = Shuttle.Inbox.boot_import()
-    assert Shuttle.Test.InboxPublications.baseline() == "2026-10-22T19:33:11.470348Z"
-  end
-
-  @tag first_boot: true
-  test "an outbox the import cannot clean up is logged, and every boot goes on", %{data: data} do
-    outbox = Path.join(data, "thread-outbox")
-    File.mkdir_p!(Path.join(outbox, "acked"))
-    File.write!(Path.join(outbox, "baseline"), "2026-10-22T19:33:11.470348Z")
-    key = :crypto.hash(:sha256, "thread-acked") |> Base.encode16(case: :lower)
-    File.write!(Path.join([outbox, "acked", key]), "thread-acked")
-    File.chmod!(Path.join([outbox, "acked", key]), 0o000)
-    File.write!(Path.join([outbox, "acked", ".nfs000000000123"]), "")
-    File.chmod!(Path.join(outbox, "acked"), 0o500)
-    imported = Path.join(data, "thread-outbox.imported/acked")
-
-    on_exit(fn ->
-      File.chmod(imported, 0o700)
-      File.rm_rf(Path.dirname(imported))
-    end)
-
-    for _ <- 1..2 do
-      log = ExUnit.CaptureLog.capture_log(fn -> assert :ok = Shuttle.Inbox.boot_import() end)
-      assert log =~ "Removing the imported thread outbox failed"
-    end
-
+  test "a baseline that fails without corruption is retried, not held", %{data: data} do
+    state = Path.join(data, "mailboxes/threads.json")
+    File.mkdir_p!(Path.dirname(state))
+    File.write!(state, ~s({"baseline":"2026-10-22T19:33:11.470348Z"}))
+    File.chmod!(state, 0o000)
+    on_exit(fn -> File.chmod(state, 0o600) end)
+    error = assert_raise RuntimeError, fn -> Shuttle.Inbox.boot_baseline() end
+    assert error.message =~ "thread capture baseline failed"
+    File.chmod!(state, 0o600)
+    assert :ok = Shuttle.Inbox.boot_baseline()
     assert Shuttle.Test.InboxPublications.baseline() == "2026-10-22T19:33:11.470348Z"
 
-    assert File.exists?(
-             Path.join(Shuttle.Test.InboxPublications.routing_dir(data), "offered/#{key}.json")
-           )
-  end
-
-  @tag first_boot: true
-  test "an outbox record the inbox can never accept is logged and skipped", %{data: data} do
-    outbox = Path.join(data, "thread-outbox")
-    File.mkdir_p!(Path.join(outbox, "pending"))
-    File.write!(Path.join(outbox, "baseline"), "2026-10-22T19:33:11.470348Z")
-
-    for {id, extra} <- [{"thread-bad", %{"signal" => %{"uid" => "a"}}}, {"thread-ok", %{}}] do
-      key = :crypto.hash(:sha256, id) |> Base.encode16(case: :lower)
-
-      File.write!(
-        Path.join([outbox, "pending", key <> ".json"]),
-        Jason.encode!(%{
-          id: id,
-          record:
-            Map.merge(
-              %{
-                "owner" => "test-host",
-                "parent_uid" => "p",
-                "text" => "done",
-                "retained_at" => DateTime.to_iso8601(DateTime.utc_now())
-              },
-              extra
-            )
-        })
-      )
-    end
-
-    log = ExUnit.CaptureLog.capture_log(fn -> assert :ok = Shuttle.Inbox.boot_import() end)
-    assert log =~ "Thread outbox import skipped thread-bad"
-    assert [{"thread-ok", _}] = Shuttle.Test.InboxPublications.pending()
-    refute File.exists?(outbox)
-  end
-
-  @tag first_boot: true
-  test "an import that fails without corruption is retried, not held", %{data: data} do
-    baseline = Path.join(data, "thread-outbox/baseline")
-    File.mkdir_p!(Path.dirname(baseline))
-    File.write!(baseline, "2026-10-22T19:33:11.470348Z")
-    File.chmod!(baseline, 0o000)
-    on_exit(fn -> File.chmod(baseline, 0o600) end)
-    error = assert_raise RuntimeError, fn -> Shuttle.Inbox.boot_import() end
-    assert error.message =~ "thread inbox import failed"
-    File.chmod!(baseline, 0o600)
-    assert :ok = Shuttle.Inbox.boot_import()
-    assert Shuttle.Test.InboxPublications.baseline() == "2026-10-22T19:33:11.470348Z"
-
-    File.mkdir_p!(Path.join(data, "thread-outbox"))
-    File.write!(Path.join(data, "thread-outbox/baseline"), "not a time")
-    assert_raise Shuttle.Inbox.Corrupt, fn -> Shuttle.Inbox.boot_import() end
+    File.write!(state, ~s({"baseline":"not a time"}))
+    assert_raise Shuttle.Inbox.Corrupt, fn -> Shuttle.Inbox.boot_baseline() end
   end
 end

@@ -69,7 +69,7 @@ defmodule Shuttle.ThreadsTest do
     first = StubPostClient.last().body
 
     Task.async(fn ->
-      Shuttle.Inbox.boot_import()
+      Shuttle.Inbox.boot_baseline()
       Threads.route_results()
     end)
     |> Task.await(30_000)
@@ -695,7 +695,7 @@ defmodule Shuttle.ThreadsTest do
       StubPostClient.set_response({:ok, 202, ~s({"queued":true,"delivery":"context"})})
 
       Task.async(fn ->
-        Shuttle.Inbox.boot_import()
+        Shuttle.Inbox.boot_baseline()
         Threads.route_results()
       end)
       |> Task.await(30_000)

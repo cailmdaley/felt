@@ -191,8 +191,8 @@ defmodule Shuttle.PollerBootTest do
     tmp_dir: root
   } do
     Shuttle.Test.Env.put_env("SHUTTLE_DATA_DIR", root)
-    File.mkdir_p!(Path.join(root, "thread-outbox"))
-    File.write!(Path.join(root, "thread-outbox/baseline"), "not a time")
+    File.mkdir_p!(Path.join(root, "mailboxes"))
+    File.write!(Path.join(root, "mailboxes/threads.json"), ~s({"baseline":"not a time"}))
     session = :trace.session_create(:held_publication, self(), [])
 
     :trace.function(
@@ -207,7 +207,7 @@ defmodule Shuttle.PollerBootTest do
     {:ok, pid} = Poller.start_link(name: nil, own_host_id: "held-publication", felt_stores: [])
 
     try do
-      assert %{boot_hold: %{stage: "inbox_import"}} = :sys.get_state(pid)
+      assert %{boot_hold: %{stage: "thread_baseline"}} = :sys.get_state(pid)
       ref = :trace.delivered(session, :all)
       assert_receive {:trace_delivered, :all, ^ref}
       events = trace_events(pid, [])
@@ -245,17 +245,19 @@ defmodule Shuttle.PollerBootTest do
   end
 
   @tag :tmp_dir
-  test "a corrupt outbox is a named hold and cannot be forced or released", %{tmp_dir: root} do
+  test "a corrupt capture state is a named hold and cannot be forced or released", %{
+    tmp_dir: root
+  } do
     Shuttle.Test.Env.put_env("SHUTTLE_DATA_DIR", root)
-    baseline = Path.join(root, "thread-outbox/baseline")
+    baseline = Path.join(root, "mailboxes/threads.json")
     File.mkdir_p!(Path.dirname(baseline))
-    File.write!(baseline, "not a time")
+    File.write!(baseline, ~s({"baseline":"not a time"}))
     pid = start_supervised!({Poller, name: nil, own_host_id: "held-host", felt_stores: []})
-    assert %{boot_hold: %{stage: "inbox_import"}, boot_quarantine: true} = :sys.get_state(pid)
+    assert %{boot_hold: %{stage: "thread_baseline"}, boot_quarantine: true} = :sys.get_state(pid)
     assert {:error, {:boot_hold, _}} = Poller.dispatch_fiber(pid, "anything", force: true)
     assert {:error, {:boot_hold, _}} = Poller.release_boot_quarantine(pid)
-    assert File.read!(baseline) == "not a time"
+    assert File.read!(baseline) == ~s({"baseline":"not a time"})
     assert Process.alive?(pid)
-    assert %{ready: false, boot_hold: %{stage: "inbox_import"}} = Shuttle.Readiness.status()
+    assert %{ready: false, boot_hold: %{stage: "thread_baseline"}} = Shuttle.Readiness.status()
   end
 end

@@ -23,50 +23,6 @@ defmodule Shuttle.ThreadsInboxTest do
   end
 
   @tag first_boot: true
-  test "boot imports a pending result and acknowledged ids, retaining its baseline", %{
-    store: store,
-    data: data
-  } do
-    assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
-    parent = Enum.find(entries, &(Threads.address(&1.fiber) == "hub"))
-
-    record = %{
-      "owner" => "test-host",
-      "store" => store,
-      "parent_uid" => parent.fiber["uid"],
-      "parent_host" => "test-host",
-      "text" => "original",
-      "retained_at" => DateTime.to_iso8601(DateTime.utc_now()),
-      "wake" => false
-    }
-
-    outbox = Path.join(data, "thread-outbox")
-    File.mkdir_p!(Path.join(outbox, "pending"))
-    File.mkdir_p!(Path.join(outbox, "acked"))
-    File.write!(Path.join(outbox, "baseline"), "2025-01-01T00:00:00Z")
-    key = &(:crypto.hash(:sha256, &1) |> Base.encode16(case: :lower))
-
-    File.write!(
-      Path.join([outbox, "pending", key.("pending") <> ".json"]),
-      Jason.encode!(%{id: "pending", record: record})
-    )
-
-    File.write!(Path.join([outbox, "acked", key.("done")]), "done")
-
-    assert :ok = Shuttle.Inbox.boot_import()
-    refute File.exists?(outbox)
-    assert Shuttle.Test.InboxPublications.baseline() == "2025-01-01T00:00:00Z"
-    assert :ok = Shuttle.Test.InboxPublications.capture([{"done", record}])
-
-    assert [{"pending", %{"text" => "original"}}] =
-             Shuttle.Test.InboxPublications.pending()
-
-    Task.async(fn -> Threads.route_results() end) |> Task.await(30_000)
-    assert Shuttle.Test.InboxPublications.pending() == []
-    assert [%{"request" => %{"text" => "original"}}] = pending(data)
-  end
-
-  @tag first_boot: true
   test "first boot suppresses historical tempered results and restart retains the baseline", %{
     store: store,
     data: data

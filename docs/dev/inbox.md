@@ -265,32 +265,18 @@ An unknown outcome leaves it for the next poll, across restarts; a known one set
 
 `pending_results` counts a fiber's inbox entries no worker has taken plus the routing entries, from the poll's one listing, that routing left waiting with that fiber's `parent_uid`.
 
-### Boot import and compatibility
+### The capture baseline
 
 The Poller's first boot step, `inbox thread-state`, establishes the capture baseline in `mailboxes/threads.json`, which holds the baseline alone and never changes it.
-A host without an outbox establishes its baseline once; signals at or before it never backfill.
+A host without a baseline records the current time once; signals at or before it never backfill.
 An entry settles after its signal is stamped, and its offered entry expires 14 days after it settles; by then `Enqueue`'s 14-day window on the signal's stamp refuses a re-capture, so the signal cannot publish again.
-A `threads.json` an earlier build wrote with a `retention_cutoff` field reads as its baseline; an older daemon's `thread-outbox/retention_cutoff` is not imported.
-
-The same step imports the `thread-outbox/` directory a contract-40 daemon left, under `thread-import.lock` in the data directory.
-Pending records become routing inbox entries with their recipients; acknowledgments become payload-free offered entries (`acknowledged`) that dedup a re-capture.
-An acknowledgment's file name is the hash of its publication's id, which is the routing inbox's key for it, so the import takes acknowledgments from their names and never reads them: an unreadable ack imports, and a name that is not 64 hex characters (an `acked/*.tmp` left by a hard-killed older daemon, an NFS `.nfs*` silly-rename, `.DS_Store`) is ignored.
-An acknowledgment wins over a pending copy of its id, including a copy an interrupted import left, and the import touches no recipient's inbox.
-The importer reads the source without changing it, enqueues idempotently, then renames the directory to `thread-outbox.imported` before deleting it, so a crash at any point repeats safely.
-A pending record whose text is over 64 KiB, which the older daemon's outbox took, imports cut short as capture cuts a long outcome, keeping its id, stamp, recipient and wishes.
-A pending record the routing inbox can never accept (`invalid_request`, such as a malformed signal) is reported as `skipped`, which the daemon logs, and the rest import.
-Stamps are read as the older daemon's capture read them (ISO 8601 with a `T` or space separator and a `Z`, `+01:00`, `+0100` or `+01` offset) and kept as written, since currency compares them verbatim; a record with no stamp, which would never expire, or one that cannot be read is skipped.
-A cleanup failure is reported as `cleanup_error`, which the daemon logs; boot goes on, and the next boot removes what is left.
-A malformed baseline, a pending payload that cannot be parsed, or a malformed state exits 3 (`Shuttle.Inbox.Corrupt`) and holds boot without discarding anything; restore the exact trusted baseline from backup rather than setting it to the current time.
+A malformed state exits 3 (`Shuttle.Inbox.Corrupt`) and holds boot without discarding anything; restore the exact trusted baseline from backup rather than setting it to the current time.
 Any other failure, a timeout included, retries the boot step.
 
 Contract 41 adds `inbox thread-state`, `thread-put`, `routes`, `route` and `settle`.
 The `/deliver` wire envelope is unchanged, so contract-40 and contract-41 daemons forward results to each other in both directions, and a repeated forward is a no-op on either.
-The import is not a reversible migration.
 A daemon rolled back to contract 40 never reads the routing inbox: results bound for another host, unresolved or not yet current, and asker notices, wait there until the host rolls forward.
-Placed entries are ordinary inbox entries, which contract 40 consumes as usual; no routing entry sits in a worker's inbox.
-The rolled-back daemon finds no outbox and starts a new one with its boot time as baseline, so a signal stamped between the contract-41 daemon's last poll and that boot is not published while it runs.
-Rolling forward keeps the inbox's earlier baseline and imports what contract 40 captured: what either daemon published dedups, through the routing inbox's offered entries or the imported acknowledgments, and a still-current signal from that gap is published then.
+What it captures meanwhile goes to its own outbox, which no later daemon reads.
 
 ## Readers
 
@@ -439,7 +425,7 @@ The session-only Claude fallback claims by moving an entry into `fallback/` and 
 | `shuttle inbox pending <address>... [--waking]` | JSON address → pending count, or with `--waking` the count a launch would be for; unreadable addresses are named on stderr and omitted |
 | `shuttle inbox ls <address>` | Pending entries oldest first; `--json` includes wishes, queued time, sender and open attempt |
 | `shuttle inbox consume <fiber-key> <address-or-dash> <epoch> [--idle] [--unknown] [--busy] [--costly] [--message <id>]` | Consume for the current receiver, or with `-` and epoch 0 for a fiber with no worker; one JSON object with `action` (`wait`, `wake`, `context`, `fresh`, `launch`), the `members` sent or reserved, `turn` when an entry asks for a turn the worker's facts would decide, and with `--message` that entry's state after the pass (`message`: `delivered`, `sent`, `reserved`, `pending` or `unknown`). The answer is printed even when an open batch's send fails, which exits nonzero |
-| `shuttle inbox thread-state` | Establish the thread capture window and import an older daemon's thread outbox; print `baseline` and any `skipped` records and `cleanup_error`, or exit 3 on a corrupt outbox or state |
+| `shuttle inbox thread-state` | Establish the thread capture window and print its `baseline`, or exit 3 on a corrupt state |
 | `shuttle inbox thread-put` | Capture a JSON array of `{id, record, board}` publications from stdin into the routing inbox, storing a `board` record in that entry, then append every board line the routing inbox's entries owe, from the stored record; print `{"created": [ids], "refused": [{id, error}], "board_errors": [{id, error}]}`, trying every publication |
 | `shuttle inbox routes` | List the routing inbox's pending publications as `{id, record}` |
 | `shuttle inbox route <id> --current true\|false\|unknown [--record <json> [--key <key>]]` | Advance one routing entry from the daemon's fresh facts: the resolved recipient's `record`, and its inbox `key` when the daemon owns it; print `action`: `wait`, `forward` or `session` with the entry's `record`, or the disposition it recorded (`placed`, `superseded`, `expired`) |

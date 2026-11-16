@@ -8,8 +8,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// exitCorrupt is thread-state's exit status for a corrupt outbox or state,
-// the one import failure the daemon holds boot for.
+// exitCorrupt is thread-state's exit status for a corrupt capture state, the
+// one failure the daemon holds boot for.
 const exitCorrupt = 3
 
 // threadInboxVerbs are the daemon's verbs for the routing inbox
@@ -17,23 +17,20 @@ const exitCorrupt = 3
 func (a *app) threadInboxVerbs() []*cobra.Command {
 	state := &cobra.Command{
 		Use:   "thread-state",
-		Short: "Import an older daemon's thread outbox and print the capture window",
-		Long: `Establish the thread capture baseline and import a thread-outbox left by
-an older daemon into the routing inbox. Prints
-{"baseline", "skipped", "cleanup_error"}: pending records the routing inbox
-can never accept are skipped, and a cleanup failure leaves the imported outbox
-for the next boot to remove. Exits 3 when the outbox's baseline or a pending
-payload, or the state, is corrupt, leaving it untouched.`,
+		Short: "Establish the thread capture window and print its baseline",
+		Long: `Establish the thread capture baseline: a host without one records the
+current time, and one with a baseline keeps it. Prints {"baseline"}. Exits 3
+when the state is corrupt, leaving it untouched.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			report, err := messaging.BootThreadInbox(a.env)
+			window, err := messaging.BootThreadInbox(a.env)
 			if messaging.ErrorCode(err) == "corrupt" {
 				return &cliExitError{code: exitCorrupt, err: err}
 			}
 			if err != nil {
 				return err
 			}
-			return json.NewEncoder(a.env.Stdout).Encode(report)
+			return json.NewEncoder(a.env.Stdout).Encode(window)
 		},
 	}
 	capture := &cobra.Command{
