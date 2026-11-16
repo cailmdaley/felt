@@ -308,17 +308,7 @@ func fiberContextSessionEnded(env *sysenv.Env, host, address string) bool {
 // receipt is written.
 func sendFiberContextAttempt(ctx context.Context, env *sysenv.Env, host string, request Request, address string) (Receipt, error) {
 	request.Address = address
-	receipt, err := SendRecorded(ctx, env, host, request)
-	if err != nil {
-		return receipt, err
-	}
-	if receipt.Status != StatusContextAdded && receipt.Status != StatusAccepted {
-		submittedCodexWake := receipt.Status == StatusSubmitted && receipt.Transport == "codex-terminal" && request.Wake
-		if !submittedCodexWake {
-			return receipt, errCode("unconfirmed", "context delivery: %s", receipt.Status)
-		}
-	}
-	return receipt, nil
+	return SendRecorded(ctx, env, host, request)
 }
 
 func readFiberMailboxEntry(path string) (mailboxEntry, error) {

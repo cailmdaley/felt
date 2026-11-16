@@ -553,16 +553,17 @@ func reconcileConsumedBatch(ctx context.Context, env *sysenv.Env, root string, a
 	if len(superseded) == 0 {
 		return false, nil
 	}
-	a.Outcome = attemptAmbiguous
-	if err := writeBatch(root, a); err != nil {
+	// Closed first: a superseded member left pending by a crash is free, and
+	// the next pass's currency check drops it.
+	if err := closeBatch(root, a, attemptAmbiguous); err != nil {
 		return false, err
 	}
 	for _, path := range superseded {
 		if err := moveToOffered(root, path); err != nil {
-			return false, err
+			return true, err
 		}
 	}
-	return true, closeBatch(root, a, a.Outcome)
+	return true, nil
 }
 
 // advanceBatch advances an open batch for the live worker w, never sending
