@@ -3,12 +3,13 @@ defmodule Shuttle.DispatchIntegrationInboxMessageTest do
   # `shuttle message` sends it to this test's daemon over HTTP, and the real
   # hook of the session that daemon starts is offered it. The inbox promises
   # it is delivered exactly once, even when its owner dies between enqueuing
-  # and delivering it.
+  # and delivering it. The message also answers the fiber's outstanding
+  # question, which its owner clears on enqueue.
   use Shuttle.Test.DispatchIntegrationCase, async: true
 
   test "a message enqueued before its owner dies is delivered exactly once by the next daemon",
        %{host: host} do
-    id = armed(host, "tests/message-survives")
+    id = armed(host, "tests/message-survives", "  ask:\n    text: Did it converge?\n")
     poller = poller!(host, boot_quarantine: true)
     serve_api!(host)
 
@@ -21,6 +22,10 @@ defmodule Shuttle.DispatchIntegrationInboxMessageTest do
     assert out =~ "queued for #{id}"
     assert out =~ "boot quarantine"
     assert launches(id) == 0
+
+    # The owner clears the question the fiber had outstanding: the message
+    # answers it. The sender runs inside no store, so only the owner can.
+    assert eventually(fn -> is_nil(get_in(read_frontmatter(host, id), ["shuttle", "ask"])) end)
 
     kill_daemon!(poller)
 
