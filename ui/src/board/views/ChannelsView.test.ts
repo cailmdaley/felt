@@ -216,6 +216,44 @@ it('draws a worker\'s sent tapestry once, as its card, and keeps the line\'s oth
   } finally { PAGES.clear(); BOARD.C.splice(-1) }
 })
 
+it('draws nothing twice: the card\'s figure is not sent again in its line, and a thread open beside the channel holds its line\'s files and card', async () => {
+  PAGES.set('/notes/tsz/tapestry.html', '<h1>κ × tSZ at 9σ</h1><p>Every null passes.</p><img src="spectrum.png">')
+  try {
+    daemon()
+    const { host } = await mount([chair, { ...tsz, fiberDir: '/notes/tsz' }, mask, beam, van, notes])
+    await settle(); await settle()
+    const spectra = (within: Element) => within.querySelectorAll(`img[src*="${encodeURIComponent('/notes/tsz/spectrum.png')}"]`).length
+    const line = () => message(host, 'κ × tSZ')
+    // The spectrum it sent is its tapestry's figure: drawn once, in the card.
+    expect([spectra(line()), line().querySelectorAll('.kbn-ch-embed').length, line().querySelector('.kbn-ch-image')]).toStrictEqual([1, 1, null])
+    line().querySelector<HTMLElement>('.kbn-ch-msg-name')!.click()
+    // Beside its thread, the line keeps its words; the thread's head holds the card, and its history does not draw the figure again.
+    expect([line().querySelector('.kbn-ch-msg-text')?.textContent?.trim(), line().querySelector('.kbn-ch-attached, .kbn-ch-embed')]).toStrictEqual(['κ×tSZ is measured to 9σ.', null])
+    expect([spectra(host), spectra(host.querySelector('.kbn-ch-thread-head')!)]).toStrictEqual([1, 1])
+    // Closed, the line has them back.
+    host.querySelector<HTMLButtonElement>('.kbn-ch-thread-close')!.click()
+    expect(line().querySelectorAll('.kbn-ch-embed')).toHaveLength(1)
+  } finally { PAGES.clear() }
+})
+
+it('keeps a line\'s files and card in the channel when its thread opens in the channel\'s place', async () => {
+  // Its own folder: the board's resource cache keeps the page an earlier test served.
+  PAGES.set('/notes/tsz-narrow/tapestry.html', '<h1>κ × tSZ at 9σ</h1><p>Every null passes.</p>')
+  const widths: Array<(entries: Array<{ contentRect: { width: number } }>) => void> = []
+  vi.stubGlobal('ResizeObserver', class { constructor(seen: (typeof widths)[number]) { widths.push(seen) } observe() {} unobserve() {} disconnect() {} })
+  try {
+    daemon()
+    const { host } = await mount([chair, { ...tsz, fiberDir: '/notes/tsz-narrow' }, mask, beam, van, notes])
+    await settle(); await settle()
+    widths.forEach(seen => seen([{ contentRect: { width: 750 } }]))
+    message(host, 'κ × tSZ').querySelector<HTMLElement>('.kbn-ch-msg-name')!.click()
+    expect([...message(host, 'κ × tSZ').querySelectorAll('.kbn-ch-embed, .kbn-ch-image')].map(el => el.className)).toStrictEqual(['kbn-ch-image', 'kbn-ch-embed'])
+    // Wide again, the thread stands beside, and the line leaves them to it.
+    widths.forEach(seen => seen([{ contentRect: { width: 1400 } }]))
+    expect(message(host, 'κ × tSZ').querySelector('.kbn-ch-embed, .kbn-ch-image')).toBeNull()
+  } finally { PAGES.clear() }
+})
+
 it('a retried reply keeps its id, so the owner types it at most once; another reply gets its own', async () => {
   const { posts } = daemon(['/api/v1/dispatch'])
   const { host } = await mount()
@@ -587,8 +625,8 @@ it('previews only the newest send of a file sent again and again; the earlier se
     // An earlier send stays openable.
     posts[1].querySelector<HTMLButtonElement>('.kbn-ch-file')!.click()
     expect(openPage).toHaveBeenLastCalledWith(expect.objectContaining({ uid: 'T' }), 'local:/notes/tsz/deck.html')
-    // The channel's line is the thread's latest message, its files drawn whole.
-    expect(drawn(message(host, 'κ × tSZ'))).toStrictEqual(['kbn-ch-embed:deck.html', 'kbn-ch-image:spectrum.png'])
+    // The channel's line is the thread's latest message; beside the open thread, it leaves its files to it.
+    expect(drawn(message(host, 'κ × tSZ'))).toStrictEqual([])
   } finally { BOARD.C.splice(-3) }
 })
 

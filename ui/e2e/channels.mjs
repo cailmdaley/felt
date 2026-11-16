@@ -88,7 +88,8 @@ try {
     // The channel's console speaks to its chair.
     assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-band-title').textContent(), 'cmbx chair')
     const spectrum = page.locator('.kbn-ch-msg[data-fiber="cmbx/kappa-tsz"]')
-    assert.equal(await spectrum.locator('.kbn-ch-image').count(), 1)
+    // The spectrum it sent is its tapestry's figure, so it is drawn once, in the card.
+    assert.equal(await spectrum.locator('.kbn-ch-image').count(), 0)
     // Its deck is a card, its starting page drawn small.
     assert.equal(await spectrum.locator('.kbn-ch-embed .ws-thumbnail').count(), 1)
     // The stream opens on its newest message, and stays there as images arrive.

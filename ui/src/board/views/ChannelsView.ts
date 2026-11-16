@@ -289,7 +289,7 @@ export class ChannelsView implements TemporalView {
       const narrow = entry.contentRect.width < SIDE_BY_SIDE_PX
       if (narrow === this.layout?.hasAttribute('data-narrow')) return
       this.layout?.toggleAttribute('data-narrow', narrow)
-      this.drawThread()
+      this.drawChannel(); this.drawThread()
     })
     this.width.observe(this.layout)
     this.near = new IntersectionObserver(entries => {
@@ -514,8 +514,9 @@ export class ChannelsView implements TemporalView {
         if (generation !== this.generation) return
         const { title, lede, figure } = collapse(body?.text ?? '', card.fiberDir)
         const at = Date.parse(found.modifiedAt ?? '') || Date.parse(card.modifiedAt ?? '') || Date.now()
-        const shown = figure?.startsWith('/') ? fileBytesUrl(ctx.shuttleBase, figure, card.originId) : figure
-        this.tapestries.set(id, { modified: card.modifiedAt, tapestry: { path, at, title: title || card.name, lede, figure: shown } })
+        const local = figure?.startsWith('/') ? figure : undefined
+        const shown = local ? fileBytesUrl(ctx.shuttleBase, local, card.originId) : figure
+        this.tapestries.set(id, { modified: card.modifiedAt, tapestry: { path, at, title: title || card.name, lede, figure: shown, figurePath: local } })
         this.draw()
         return
       }
@@ -744,7 +745,7 @@ export class ChannelsView implements TemporalView {
     // A cleared line is gone, save the one just cleared, which offers its Undo in its place.
     const lines = this.lines = said.filter(line => !line.cleared || fiberOf(line.message.card) === undo?.uid)
     for (const { message } of lines) this.readTapestry(message.card)
-    const sig = JSON.stringify([channel.key, channel.name, failed, this.thread && fiberOf(this.thread), [...this.tempering], [...this.expanded.keys()], [...this.unfolded],
+    const sig = JSON.stringify([channel.key, channel.name, failed, this.thread && fiberOf(this.thread), this.drillsDown(), [...this.tempering], [...this.expanded.keys()], [...this.unfolded],
       lines.map(({ message, replies, last, waiting, act, cleared }) => [message.id, message.kind, message.text, waiting, act, cleared, message.card.name, message.card.turn, message.files.map(file => drawnAs(file, message.card)), replies, last, this.embedded(message.card, 'channel')])])
     if (this.changed('channel', sig)) {
       const back = iconButton('kbn-ch-back', 'back', 'Channels', () => this.setRail(false))
@@ -826,8 +827,12 @@ export class ChannelsView implements TemporalView {
       { ...message, card: who(message.card), from: who(message.from) }, line.replies, line.last, line.waiting, line.act,
       !message.human && message.arrived > before, continues(previous, message), message.files.map(file => whole.has(file) && drawnAs(file, message.card)),
       this.tempering.has(`${fiberOf(message.card)}:${message.at}`), this.expanded.has(message.id), this.unfolded.has(message.id),
-      pane === 'channel' ? this.embedded(message.card, pane) : this.thread && fiberOf(this.thread),
+      pane === 'channel' ? this.embedded(message.card, pane) : this.threadCard && this.embedded(this.threadCard, 'thread'), this.besideIts(line, pane),
     ])
+  }
+  /** A worker's line in the channel while its thread stands open beside it. */
+  private besideIts(line: Line, pane: Pane): boolean {
+    return pane === 'channel' && !!this.thread && !this.drillsDown() && sameFiber(line.message.card, this.thread)
   }
   /**
    * One message: who said it, when, and what, whole, with its files. A message
@@ -885,12 +890,16 @@ export class ChannelsView implements TemporalView {
         body.append(text)
       }
     }
-    // A worker's line in the channel carries its own tapestry; the chair's is a message of its own.
-    // The tapestry's card stands for the page, so the page sent as a file is not drawn again.
-    const tapestry = pane === 'channel' ? this.embedded(card, pane) : null
-    const files = message.files.filter(file => file.fullPath !== tapestry?.path)
-    if (files.length) body.append(this.attachments(message, files, id, whole))
-    if (tapestry) body.append(this.tapestryEmbed(tapestry, card, `embed:${id}`))
+    // A worker's line in the channel carries its own tapestry's card (the chair's is a message of its own),
+    // unless its thread stands open beside the channel, which carries its files and card instead.
+    // The card stands for the page and its figure, so neither sent as a file is drawn again; in a thread, the head's card.
+    if (!this.besideIts(line, pane)) {
+      const tapestry = pane === 'channel' ? this.embedded(card, pane) : null
+      const shown = pane === 'channel' ? tapestry : this.threadCard && this.embedded(this.threadCard, 'thread')
+      const files = message.files.filter(file => file.fullPath !== shown?.path && file.fullPath !== shown?.figurePath)
+      if (files.length) body.append(this.attachments(message, files, id, whole))
+      if (tapestry) body.append(this.tapestryEmbed(tapestry, card, `embed:${id}`))
+    }
     if (replies > 0) {
       const link = button('kbn-ch-replies', `${replies} ${replies === 1 ? 'reply' : 'replies'}`, () => this.openThread(card))
       link.dataset.item = `replies:${fiberOf(card)}`

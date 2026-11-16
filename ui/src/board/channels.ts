@@ -59,8 +59,8 @@ export interface Message {
   title?: string
 }
 
-/** A constitution's tapestry, collapsed to its title, its lede and the address of its first figure. */
-export interface Tapestry { path: string; at: number; title: string; lede: string; figure?: string }
+/** A constitution's tapestry, collapsed to its title, its lede and the address of its first figure, with that figure's file when it is one. */
+export interface Tapestry { path: string; at: number; title: string; lede: string; figure?: string; figurePath?: string }
 
 /**
  * One channel: the constitutions speaking in a named channel (`shuttle.channel`,
