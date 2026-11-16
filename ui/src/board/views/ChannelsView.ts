@@ -878,9 +878,11 @@ export class ChannelsView implements TemporalView {
         body.append(text)
       }
     }
-    if (message.files.length) body.append(this.attachments(message, id, whole))
     // A worker's line in the channel carries its own tapestry; the chair's is a message of its own.
+    // The tapestry's card stands for the page, so the page sent as a file is not drawn again.
     const tapestry = pane === 'channel' ? this.embedded(card, pane) : null
+    const files = message.files.filter(file => file.fullPath !== tapestry?.path)
+    if (files.length) body.append(this.attachments(message, files, id, whole))
     if (tapestry) body.append(this.embed(tapestry, card, `embed:${id}`))
     if (replies > 0) {
       const link = button('kbn-ch-replies', `${replies} ${replies === 1 ? 'reply' : 'replies'}`, () => this.openThread(card))
@@ -930,9 +932,9 @@ export class ChannelsView implements TemporalView {
    * small inline when it is the newest send of its path in the list (`whole`),
    * every other file a chip; each opens in the reader.
    */
-  private attachments(message: Message, id: string, whole: ReadonlySet<SentFile>): HTMLElement {
+  private attachments(message: Message, files: readonly SentFile[], id: string, whole: ReadonlySet<SentFile>): HTMLElement {
     const box = el('div', 'kbn-ch-attached'), base = this.ctx?.shuttleBase ?? ''
-    for (const file of message.files) {
+    for (const file of files) {
       const item = `${id}:${file.fullPath}`
       const open = (): void => { this.returnTo = item; this.openFile(file, message.card) }
       const chip = (gone: boolean): HTMLButtonElement => {

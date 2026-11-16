@@ -202,6 +202,19 @@ it('shows a worker\'s own tapestry under its line and in its thread\'s head, and
   } finally { PAGES.clear() }
 })
 
+it('draws a worker\'s sent tapestry once, as its card, and keeps the line\'s other files', async () => {
+  PAGES.set('/notes/tsz/tapestry.html', '<h1>κ × tSZ at 9σ</h1><p>Every null passes.</p>')
+  BOARD.C.push(record({ id: 't1', kind: 'post', fiber: 'T', text: 'The tapestry, and the deck.', files: ['/notes/tsz/tapestry.html', '/notes/tsz/deck.html'] }, 5))
+  try {
+    daemon()
+    const { host } = await mount([chair, { ...tsz, fiberDir: '/notes/tsz' }, mask, beam, van, notes])
+    await settle(); await settle()
+    const line = message(host, 'κ × tSZ')
+    expect(line.querySelectorAll('.kbn-ch-embed')).toHaveLength(1)
+    expect([...line.querySelectorAll('.kbn-ch-html, .kbn-ch-file')].map(el => el.querySelector('.kbn-ch-image-name')?.textContent ?? el.textContent)).toStrictEqual(['deck.html'])
+  } finally { PAGES.clear(); BOARD.C.splice(-1) }
+})
+
 it('a retried reply keeps its id, so the owner types it at most once; another reply gets its own', async () => {
   const { posts } = daemon(['/api/v1/dispatch'])
   const { host } = await mount()
