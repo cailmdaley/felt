@@ -56,9 +56,12 @@
 .ov-said { min-width: 0; }
 .ov-said-age { display: block; color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-ui) var(--font-serif); }
 .ov-said-text {
-  margin: 2px 0 0; color: var(--ws-ink); font: var(--type-row)/var(--leading-prose) var(--font-serif); overflow-wrap: anywhere; white-space: pre-line;
+  margin: 2px 0 0; color: var(--ws-ink); font: var(--type-row)/var(--leading-prose) var(--font-serif); overflow-wrap: anywhere;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
 }
+/* Its words run on, its paragraphs and items together. */
+.ov-said-text * { display: inline; margin: 0; padding: 0; }
+.ov-said-text :is(p, li) + :is(p, li)::before { content: ' '; }
 .ov-figure { padding: 0; border: 0; background: none; cursor: pointer; }
 .ov-figure:focus-visible { outline: none; }
 .ov-thumb.ws-thumbnail { width: 176px; height: 110px; border-radius: 3px; box-shadow: 0 0 0 1px var(--ws-hairline-soft); }

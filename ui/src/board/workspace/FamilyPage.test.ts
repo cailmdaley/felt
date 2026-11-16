@@ -59,7 +59,8 @@ describe('a constitution\'s view', () => {
   it('says what it last posted beside its tapestry, and opens its pages from its head and its thumbnail', async () => {
     const { page, feeds } = made(mid)
     await settle()
-    expect(page.el.querySelector('.ov-said-text')!.textContent).toBe('Posted the **cut**.')
+    expect(page.el.querySelector('.ov-said-text')!.textContent!.trim()).toBe('Posted the cut.')
+    expect(page.el.querySelector('.ov-said-text strong')!.textContent).toBe('cut')
     const figure = page.el.querySelector<HTMLButtonElement>('.ov-figure')!
     expect([figure.hidden, figure.title]).toStrictEqual([false, 'Open Tapestry'])
     figure.click()

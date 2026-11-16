@@ -6,6 +6,7 @@ import { ago } from '../civilDay.js'
 import { bindDrawnPage } from '../FileViewerPanel.js'
 import { stateDot } from '../stateDot.js'
 import { slug } from '../threadOutline.js'
+import { renderMarkdown } from '../utils.js'
 import { threadState, type ThreadIndex } from '../threads.js'
 import { parseDocKey, type DocKey } from './documents.js'
 import type { FiberActs } from './Dock.js'
@@ -178,7 +179,11 @@ export class FamilyPage {
     const strip = el('section', 'ov-strip')
     const said = this.feeds.said(card)
     const words = el('div', 'ov-said')
-    if (said) words.append(el('span', 'ov-said-age', ago(said.at, now)), el('p', 'ov-said-text', said.text))
+    if (said) {
+      const text = el('div', 'ov-said-text')
+      text.innerHTML = renderMarkdown(said.text)
+      words.append(el('span', 'ov-said-age', ago(said.at, now)), text)
+    }
     strip.append(words)
     const figure = el('button', 'ov-figure')
     figure.type = 'button'
