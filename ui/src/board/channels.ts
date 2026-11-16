@@ -140,7 +140,9 @@ export function composeChannels(input: {
     if (into) into.set(match[2], Math.max(into.get(match[2]) ?? 0, Number(match[3])))
   }
   const since = (kind: string, key: string): number => latest[kind].get(key) ?? -Infinity
-  const recent = (list: KanbanCard[]): KanbanCard | undefined => [...list].sort((a, b) => lastActive(b) - lastActive(a))[0]
+  // The eldest, so a channel keeps its name however its members' activity moves.
+  const eldest = (list: KanbanCard[]): KanbanCard | undefined =>
+    [...list].sort((a, b) => (Date.parse(a.createdAt) || 0) - (Date.parse(b.createdAt) || 0) || a.id.localeCompare(b.id))[0]
   const channels: Channel[] = []
   for (const [key, { members, everyone }] of groups) {
     if (!members.length) continue
@@ -149,10 +151,10 @@ export function composeChannels(input: {
       for (let parent = parentOf(card); parent && keyOf(parent) === key; parent = parentOf(parent)) above.push(parent)
       return above
     }
-    // The chair is the topmost seat, a standing one only when no other is; without a seat, the most recently active top-level.
+    // The chair is the topmost seat, a standing one only when no other is; without a seat, a top-level; the eldest of those it finds.
     const seats = members.filter(card => card.shuttleSeat && !inside(card).some(above => above.shuttleSeat))
     const heads = members.filter(card => !inside(card).length)
-    const seat = recent(seats.filter(card => card.shuttleKind !== 'standing')) ?? recent(seats) ?? recent(heads) ?? recent(members)!
+    const seat = eldest(seats.filter(card => card.shuttleKind !== 'standing')) ?? eldest(seats) ?? eldest(heads) ?? eldest(members)!
     const newest = Math.max(0, ...members.map(card => wantOf(card, input.waits)?.at ?? 0))
     const active = Math.max(0, ...members.map(lastActive))
     const isPinned = (pinned.get(key) ?? -Infinity) > since('pin', key)

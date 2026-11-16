@@ -66,14 +66,18 @@ describe('composeChannels', () => {
     expect(named(channels, 'channel:vizier').members.map(member => member.id)).toContain('life/errand')
   })
 
-  it('chairs a channel with its topmost seat, a non-standing one first, then the most recently active', () => {
+  it('chairs a channel with its topmost seat, a non-standing one first, then the eldest, so its name holds still', () => {
     const channels = compose(all)
     expect(named(channels, 'channel:unions').seat.id).toBe('pando/unions')
     expect(named(channels, 'channel:vizier').seat.id).toBe('life/vizier')
-    // Without a seat, the most recently active top-level.
+    // Without a seat, a top-level, never a thread under it.
     const lone = card({ id: 'lone', uid: 'L', shuttleChannel: 'French', ...working(40) })
     const lesson = card({ id: 'lesson', uid: 'L2', orchestrator: 'L', ...working(1) })
     expect(named(compose([lone, lesson]), 'channel:french').seat.id).toBe('lone')
+    // Two top-levels: the elder chairs, however recently the younger was active.
+    const elder = card({ id: 'spt/edfs', uid: 'E1', shuttleChannel: 'SPT', createdAt: at(600), ...idle(300) })
+    const younger = card({ id: 'spt/pol', uid: 'E2', shuttleChannel: 'SPT', createdAt: at(60), ...working(1) })
+    expect(named(compose([younger, elder]), 'channel:spt').name).toBe('edfs')
   })
 
   it('lists a channel waiting, pinned, or active within a week, the same on every device', () => {
