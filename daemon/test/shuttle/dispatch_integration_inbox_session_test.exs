@@ -4,8 +4,10 @@ defmodule Shuttle.DispatchIntegrationInboxSessionTest do
   # HTTP, and a Claude session registered by its real hooks receives it on its
   # native messaging socket or from its hook. Session messages keep their
   # direct transport and receipts: a repeated message id is never delivered
-  # twice, and context queued for the session before its daemon dies is
-  # offered once by the session's hook.
+  # twice, before or after the daemon dies, and context queued for the session
+  # is offered once by the session's hook. The Poller has no part in either
+  # path, so its death is in the way only of what the receipts and the
+  # session's inbox keep on disk.
   use Shuttle.Test.DispatchIntegrationCase, async: true
 
   alias Shuttle.Test.ThreadsCase
@@ -64,15 +66,21 @@ defmodule Shuttle.DispatchIntegrationInboxSessionTest do
 
     # A repeated id answers its receipt and sends nothing.
     assert {out, 0} = send.("s-direct", "hello there", [])
-    assert out =~ "s-direct"
+    assert out =~ "accepted #{address} (s-direct)"
     refute_receive {:wake, _}
 
-    # Context waits in the session's inbox for its next hook. Its daemon dies
+    # Context waits in the session's inbox for its next hook. The daemon dies
     # before any hook runs.
     assert {out, 0} = send.("s-context", "read this next", ["--context-only"])
     assert out =~ "queued #{address} (s-context)"
     kill_daemon!(poller)
     poller = restart!(host)
+
+    # The direct message's id, repeated after the death, still answers its
+    # receipt and sends nothing.
+    assert {out, 0} = send.("s-direct", "hello there", [])
+    assert out =~ "accepted #{address} (s-direct)"
+    refute_receive {:wake, _}
 
     # The session's next hook is offered it once, and nothing sends it again:
     # not later hooks, polls, or a retry of its id.
