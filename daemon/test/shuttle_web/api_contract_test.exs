@@ -231,7 +231,12 @@ defmodule ShuttleWeb.ApiContractWorkerTest do
       {Jason.encode!(%{
          message_id: request["message_id"],
          address: request["address"],
-         status: if(request["wake"], do: "accepted", else: "context_added"),
+         status:
+           cond do
+             request["notify_when_idle"] and request["text"] in [nil, ""] -> "subscribed"
+             request["wake"] -> "accepted"
+             true -> "context_added"
+           end,
          transport: "claude-native",
          detail: nil
        }), 0}
@@ -407,6 +412,24 @@ defmodule ShuttleWeb.ApiContractWorkerTest do
                "/deliver",
                %{fiber_id: id, text: "Live worker", context_only: true, message_id: "context-3"},
                202
+             )
+
+    # With a live worker, the subscription answers its message receipt,
+    # addressed to that worker.
+    assert %{
+             "message_id" => "notify-2",
+             "status" => "subscribed",
+             "address" => "shuttle://test-host/" <> _
+           } =
+             request(
+               "/deliver",
+               %{
+                 fiber_id: id,
+                 notify_when_idle: true,
+                 from: "shuttle://elsewhere/claude/sender",
+                 message_id: "notify-2"
+               },
+               200
              )
   end
 

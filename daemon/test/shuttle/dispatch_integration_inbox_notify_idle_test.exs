@@ -75,10 +75,14 @@ defmodule Shuttle.DispatchIntegrationInboxNotifyIdleTest do
     assert notice =~ "[subscription n-idle]"
     refute_receive {:wake, _}, 1_000
 
-    # A fiber with no live worker has nobody to watch: the subscription is
-    # refused, and no session starts for it.
-    assert {_, status} = subscribe.(dormant, "n-dormant")
+    # A fiber with no live worker has nobody to watch: its owner refuses the
+    # subscription with 409, the command prints no receipt, and no session
+    # starts for it.
+    assert {out, status} = subscribe.(dormant, "n-dormant")
     assert status != 0
+    assert out =~ "daemon returned 409"
+    assert out =~ "has no live worker to watch"
+    refute out =~ "unknown"
     assert launches(dormant) == 0
     assert inbox(dormant) == []
     assert launches(id) == 1

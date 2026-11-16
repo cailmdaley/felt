@@ -108,3 +108,48 @@ func TestNotifyOnlyFiberRefusalPrintsNoReceipt(t *testing.T) {
 		}
 	}
 }
+
+// The hidden --local sends through this host's native adapter, which has no
+// fiber inbox: a fiber target is refused, naming why, and so is a fiber whose
+// block names no host to hold its inbox. Neither reaches a daemon route that
+// sends.
+func TestLocalMessageToFiberIsRefused(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		block map[string]any
+		want  string
+	}{
+		{"owned", map[string]any{"kind": "oneshot", "host": "worker-node", "agent": "claude-opus", "project_dir": "/tmp"},
+			`fiber "work/worker" takes messages through its owner, not --local`},
+		{"host-less", map[string]any{"kind": "oneshot", "agent": "claude-opus", "project_dir": "/tmp"},
+			`fiber "work/worker" has no shuttle.host, so no owner holds its inbox`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
+			isolateMessageFiberStore(env, writeMessageTargetFiber(t, tc.block))
+			refuse := func(w http.ResponseWriter, r *http.Request) {
+				t.Errorf("sent through %s", r.URL.Path)
+				w.WriteHeader(500)
+			}
+			daemonStub(t, env, map[string]http.HandlerFunc{"/api/v1/deliver": refuse, "/api/v1/messages": refuse})
+			app := newApp(env)
+			var stdout bytes.Buffer
+			app.env.Stdout = &stdout
+			var opts messageOptions
+			cmd := app.messageCmd(&opts)
+			opts.id, opts.from, opts.local = "local-1", "test sender", true
+			cmd.SetIn(strings.NewReader(""))
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			err := cmd.RunE(cmd, []string{"work/worker", "hello"})
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q", stdout.String())
+			}
+		})
+	}
+}
