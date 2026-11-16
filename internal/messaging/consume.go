@@ -154,10 +154,11 @@ func consumePass(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 		return Consumption{}, err
 	}
 	// Each open batch advances on its own, so one awaiting its outcome holds
-	// only its own members. A hook's claim left open is closed ambiguous. A
-	// fiber without a worker has no conversation to advance a batch to: it
-	// settles only what the batch's own records decide (a confirmed receipt, a
-	// superseded member), and the rest wait for the next receiver.
+	// only its own members. A hook's claim left open is closed by its recorded
+	// outcome, else ambiguous. A fiber without a worker has no conversation to
+	// advance a batch to: it settles only what the batch's own records decide
+	// (a confirmed receipt, a superseded member), and the rest wait for the
+	// next receiver.
 	errs := []error{}
 	_, batches, err := openBatches(root)
 	if err != nil {

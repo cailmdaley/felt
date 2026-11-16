@@ -300,7 +300,10 @@ defmodule ShuttleWeb.DeliverController do
     do: %{
       status: "queued",
       delivered: nil,
-      detail: "sent to the worker; its arrival is not yet confirmed, and the inbox resends it"
+      detail:
+        "sent to the worker; its arrival is not yet confirmed. If it stays unconfirmed, " <>
+          "the inbox may send it once more to this worker, or on to the session that replaces it, " <>
+          "marked as a possible repeat"
     }
 
   defp consumed(%{"message" => "unknown"}, _sent?),

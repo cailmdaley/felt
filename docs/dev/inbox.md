@@ -8,6 +8,12 @@ A session's address is `shuttle://<host>/<harness>/<id>`.
 The address `threads` is the host's routing inbox ([below](#thread-results-and-routing)).
 Any other string names an inbox of its own: `shuttle inbox put` accepts it, and nothing reads it.
 
+## The delivery guarantee
+
+A message to a fiber, a thread result and a delayed message are inbox entries, and the entry, with the manifest of the batch that holds it, is the source of truth across a daemon, CLI or worker death: it stays pending until a worker's confirmed receipt or its hook's emission delivers it, so a death drops nothing, and only a cancel, a superseded thread result or its retention (a thread result or notice, 14 days after its stamp) settles it undelivered.
+A death, or a receiver that never confirms, can leave a delivery whose outcome is unknown; the inbox then delivers the entry again, by the [batch rules](#batches-and-the-claim), and every such repeat opens with “Possible repeat”.
+Lines the daemon transports itself are at most once: the human's typed and spoken lines, a pulse tick and an agent's `--fresh` request are recorded before their one transport, only the call that created the record transports it, and a record left `unknown` is never sent again; one settled `undeliverable` never reached a worker and may be transported again under its id, unless it was spoken.
+
 ## The store
 
 Each address has one directory under the data directory:
@@ -421,9 +427,12 @@ A hook claims its emission with a manifest of its own, `<batch_id>.hook`, marked
 The next reader under the inbox lock, a hook or the consumer, live or dormant, closes a hook manifest it finds, since its hook died between output and close: by the outcome the manifest records, when that hook died mid-close, and otherwise ambiguous.
 A launch reservation is no claim: it lives in `launch.json`, requests no emission and is not evidence of a possible repeat.
 The session-only Claude fallback claims by moving an entry into `fallback/` and writes no manifest.
+A hook claim in a session's mailbox is closed by that session's next hook.
+One left by a session that has ended is inert: nothing that sends reads a session mailbox's claims (Claude recovery walks `pending/` and `fallback/` only, and tells an ended session's senders that delivery is unconfirmed); only `inbox ls` of that session shows it, and `inbox cancel` refuses its members as in flight.
 
 Consume sends a new batch once.
 A confirmed receipt (`accepted`, `context_added`, or a Codex terminal `submitted`) closes it delivered; a rejection releases it at once.
+A receiver's refusal (Claude `wake_refused`, Pi `native_rejected`) is a rejection too: its members are free again, the receiver's hook may take those it offers, and the next pass that would wake for them sends them in a new batch, which that receiver may refuse again.
 Any other answer leaves it open.
 Each later pass advances an open batch from its record alone, never sending its payload again:
 
@@ -433,9 +442,10 @@ Each later pass advances an open batch from its record alone, never sending its 
 | Confirmed receipt, or one the conversation's transcript now confirms | Close it delivered, subscribing the idle notices its members asked for |
 | A thread member superseded | Move that member to offered and close the batch ambiguous |
 | Unconfirmed, sent to W | Keep waiting; one retry, warning-marked, under its own transport id, five minutes after the send for an `unknown` outcome or thirty for a `queued` or `submitted` one |
-| Unconfirmed, sent to W but held for approval (`wake_held`) | Wait; no retry |
+| Unconfirmed, sent to W but held for approval (`wake_held`) | Wait for as long as W lives; no retry |
 | Unconfirmed, sent to a conversation that has ended | Roll forward to W at once, warning-marked |
-| Unconfirmed, sent to a conversation W has replaced for five minutes | Roll forward to W, warning-marked |
+| Unconfirmed, sent to a conversation W has replaced | Roll forward to W, warning-marked, once five minutes have passed since the send |
+| Held for approval, sent to a conversation W has replaced | Wait until that conversation ends, then roll forward to W, warning-marked |
 | A quiet payload that would be retried or rolled forward | Close it ambiguous; its members return to the fiber's hooks marked |
 | A hook's claim | Close it by its recorded outcome, else ambiguous |
 
@@ -444,7 +454,6 @@ Each pass reads a Claude or Pi conversation's transcript again from `transcript_
 A Claude pass reads at most 8 MiB past the offset and passes over any row over 1 MiB, such as a screenshot's tool result; Pi's passes over rows over 2 MiB.
 A `queued` or `submitted` send to a conversation that is still the receiver usually holds the message, so it waits thirty minutes for its transcript to confirm it before retrying; the bound covers a receiver that dropped it (a cleared queue, an aborted turn) and a confirmation the transcript read cannot reach.
 After its one retry, a batch whose outcome stays unconfirmed is not sent again to that conversation: it waits for as long as the receiver lives, and rolls forward once the conversation ends or is replaced.
-Exhausting the retry does not prevent a later roll-forward to another receiver.
 A fiber with no worker settles only the first three rows and hook claims, and leaves the rest to the next receiver.
 
 ### Contract 47 and rollback

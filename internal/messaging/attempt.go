@@ -57,9 +57,10 @@ type Attempt struct {
 	TranscriptOffset *int64 `json:"transcript_offset,omitempty"`
 }
 
-// liveAttemptRetryAfter is how long an unconfirmed batch waits for its
-// conversation before it makes one warning-marked retry to a receiver that is
-// still alive, or rolls forward to one that replaced it.
+// liveAttemptRetryAfter is how long after its send a batch whose outcome is
+// unknown waits before it makes one warning-marked retry to a receiver that is
+// still alive, and an unconfirmed batch waits before it rolls forward to one
+// that replaced it.
 const liveAttemptRetryAfter = 5 * time.Minute
 
 // queuedAttemptRetryAfter is how long a batch its live receiver queued or
@@ -167,7 +168,8 @@ func pinnedBy(root string) (map[string]*Attempt, error) {
 
 // claimBatch records a hook's claim of the entries at paths for conversation
 // under the inbox lock. A claim left open belongs to a hook that died between
-// its output and its close; the next reader closes it ambiguous.
+// its output and its close; the next reader closes it by the outcome it
+// records, else ambiguous.
 func claimBatch(root string, items []mailboxPendingItem, conversation string) (Attempt, error) {
 	members := make([]string, len(items))
 	for i, it := range items {
