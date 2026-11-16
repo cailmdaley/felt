@@ -112,7 +112,8 @@ func (a *app) queueInFiber(f *felt.Felt, block *shuttle.Block, request messaging
 // subscribeFiberIdle asks fiber f's owner to subscribe the request's sender to
 // one idle notice from the fiber's live worker. The answer is the
 // subscription's receipt, addressed to that worker, or an unknown receipt
-// when the owner did not answer the local daemon in time.
+// when the owner did not answer the local daemon in time. A refusal with no
+// receipt is an error and no receipt.
 func (a *app) subscribeFiberIdle(f *felt.Felt, block *shuttle.Block, request messaging.Request) (messaging.Receipt, error) {
 	fiberID := f.UID
 	if fiberID == "" {
@@ -142,6 +143,18 @@ func (a *app) subscribeFiberIdle(f *felt.Felt, block *shuttle.Block, request mes
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxMessageReceiptBytes))
 	var receipt messaging.Receipt
 	_ = json.Unmarshal(body, &receipt)
+	if resp.StatusCode >= 300 && receipt.Status == "" {
+		// A definite refusal, such as a fiber with no live worker.
+		var refusal struct {
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(body, &refusal)
+		detail := refusal.Error
+		if detail == "" {
+			detail = strings.TrimSpace(string(body))
+		}
+		return messaging.Receipt{}, fmt.Errorf("subscribing to %s's idleness: daemon returned %d: %s", f.ID, resp.StatusCode, detail)
+	}
 	if resp.StatusCode >= 300 {
 		return receipt, daemonStatusError{url: endpoint, status: resp.StatusCode, body: strings.TrimSpace(string(body))}
 	}

@@ -344,6 +344,9 @@ exit 1 means rejected, unknown, or another command error.`,
 			feltErrorCode := ""
 			if fiber != nil {
 				receipt, err = a.subscribeFiberIdle(fiber, block, request)
+				if err != nil && receipt.Status == "" {
+					return fmt.Errorf("message %s: %w", id, err)
+				}
 			} else if messageOpts.local {
 				host, hostErr := a.resolveOwnHost("")
 				if hostErr != nil {

@@ -2,6 +2,7 @@ package shuttlecli
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -79,5 +80,31 @@ func TestNotifyOnlyFiberSubscriptionForwardTimeout(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "worker-node did not answer in time") ||
 		!strings.Contains(err.Error(), "Retry this exact request with the same message_id") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// A definite refusal prints no receipt: a fiber with no live worker (409) and
+// an owner on a build that takes no notify-only request (400) fail with the
+// owner's reason and nothing on stdout.
+func TestNotifyOnlyFiberRefusalPrintsNoReceipt(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		status int
+		body   string
+	}{
+		{http.StatusConflict, `{"error":"work/worker has no live worker to watch"}`},
+		{http.StatusBadRequest, `{"delivered":false,"error":"text is required"}`},
+	} {
+		stdout, err, _ := runNotifyOnly(t, tc.status, tc.body)
+		if stdout != "" {
+			t.Errorf("%d: stdout = %q, want nothing", tc.status, stdout)
+		}
+		var refusal struct {
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal([]byte(tc.body), &refusal)
+		if err == nil || !strings.Contains(err.Error(), refusal.Error) || !strings.Contains(err.Error(), "message n-1") {
+			t.Errorf("%d: err = %v", tc.status, err)
+		}
 	}
 }
