@@ -393,7 +393,7 @@ it('heads the view with the channel itself, its name written as Slack writes it,
   await settle()
   const head = host.querySelector('.kbn-ch-head')!
   expect(shown(host)).toBe('the-mill')
-  expect([...head.querySelectorAll('.kbn-ch-icon')].map(icon => icon.classList[1])).toStrictEqual(['kbn-ch-back', 'kbn-ch-menu', 'kbn-ch-rail-toggle'])
+  expect([...head.querySelectorAll('.kbn-ch-icon')].map(icon => icon.classList[1])).toStrictEqual(['kbn-ch-rail-toggle', 'kbn-ch-back', 'kbn-ch-menu'])
   // Its chair's pages stand beside its name.
   expect([...head.querySelectorAll<HTMLElement>('.kbn-ch-pages .ws-doc-button')].map(button => button.dataset.part)).toStrictEqual(['constitution'])
   // A lone constitution is named by its slug, its name in the tooltip.

@@ -46,7 +46,7 @@ export function docButtons(card: KanbanCard, feeds: DocFeeds): HTMLElement {
     sent.replaceChildren(...files.length ? [button('sends', 'sends', label, files[0].key, files.length)] : [])
   }
   row.append(button('constitution', 'constitution', 'Constitution', fiberKey(card.originId, uid)), tapestry, sent)
-  if (card.shuttleProjectDir) row.append(button('edits', 'code', 'Edits', changeKey(card.originId, uid)))
+  if (card.shuttleProjectDir) row.append(button('edits', 'edits', 'Edits', changeKey(card.originId, uid)))
   sends()
   void feeds.lead(card).then(lead => {
     if (!lead) return

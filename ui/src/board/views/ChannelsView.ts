@@ -480,7 +480,7 @@ export class ChannelsView implements TemporalView {
     this.layout?.toggleAttribute('data-channel', !!channel)
     if (!channel) {
       this.sigs = { ...this.sigs, head: '', stream: '' }
-      this.head.replaceChildren(el('p', 'kbn-ch-empty', this.channels.length ? 'Choose a channel.' : 'No channels yet.'), this.railToggle!.root)
+      this.head.replaceChildren(this.railToggle!.root, el('p', 'kbn-ch-empty', this.channels.length ? 'Choose a channel.' : 'No channels yet.'))
       this.stream.replaceChildren()
       this.sweepThumbs(new Set())
       return
@@ -501,7 +501,7 @@ export class ChannelsView implements TemporalView {
       pages.classList.add('kbn-ch-pages')
       const menu: IconButton = iconButton('kbn-ch-menu', 'actions', 'Channel menu', () => this.railMenu(channel.key, menu.button))
       menu.button.setAttribute('aria-haspopup', 'menu')
-      this.head.replaceChildren(back.root, name, pages, menu.root, this.railToggle!.root)
+      this.head.replaceChildren(this.railToggle!.root, back.root, name, pages, menu.root)
     }
     const waits = this.ctx!.workspace!.board.waiting
     const stream = JSON.stringify([channel.key, failed, entries.map(entry => [entry.id, entry.kind, entry.at, entry.card.name, attentionOf(entry.card, waits), turnOf(entry.card).turn, entry.kind === 'mark' ? entry.what : [entry.text, entry.waiting, entry.clears, kindWord(entry), entry.files.map(file => file.fullPath)]])])

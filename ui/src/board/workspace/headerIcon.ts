@@ -20,7 +20,7 @@ const shapes = {
   tapestry: '<path d="M5.5 2v12M10.5 2v12M2 5.5h12M2 10.5h12"/>',
   sends: '<rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 5.5v-3h-8v8h3"/>',
   pdf: '<path d="M3.5 1.5h6l3 3v10h-9Z"/><path d="M9.5 1.5v3h3"/>',
-  code: '<path d="m3 4.5 3.5 3.5L3 11.5M8.5 11.5H13"/>',
+  edits: '<path d="M8 2.5v6M5 5.5h6M5 12.5h6"/>',
   file: '<rect x="3.5" y="1.5" width="9" height="13" rx="1"/>',
   download: '<path d="M8 2v8M4.5 6.5 8 10l3.5-3.5M2.5 13.5h11"/>',
   rail: '<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M6 2.5v11"/>',

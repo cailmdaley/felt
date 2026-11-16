@@ -61,7 +61,7 @@
   width: 100%; padding: 5px 10px;
   border: 0.5px solid var(--kbn-rule-strong); border-radius: 6px;
   background: var(--kbn-paper-bright, var(--kbn-paper)); color: var(--kbn-ink);
-  font: italic var(--type-meta)/var(--leading-ui) var(--font-serif);
+  font: var(--type-meta)/var(--leading-ui) var(--font-serif);
 }
 .kbn-ch-jump:focus { outline: 1px solid var(--kbn-you); outline-offset: -1px; }
 .kbn-ch-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }

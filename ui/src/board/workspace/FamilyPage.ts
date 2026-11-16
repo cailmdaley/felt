@@ -57,6 +57,7 @@ export class FamilyPage {
   private readonly up = el('nav', 'ov-up')
   private readonly main = el('div', 'ov-main')
   private readonly head = el('header', 'ov-head')
+  private readonly path = el('div', 'ov-path')
   private readonly name = el('h2', 'ov-name')
   private readonly facts = el('div', 'ov-facts')
   private readonly tools = el('div', 'ov-tools')
@@ -84,12 +85,16 @@ export class FamilyPage {
     // A tree: its rows own j, k, h and l while they have the keys.
     this.scroller.setAttribute('role', 'tree')
     this.scroller.setAttribute('aria-label', 'The constitution, its orchestrators and its threads')
-    this.scroller.append(this.up, this.main)
+    this.scroller.append(this.main)
     this.head.tabIndex = -1
     // An act zone, as the console is: a channel theme's rules stop at its controls.
     this.tools.dataset.part = 'act'
     this.tools.append(this.docs)
-    this.head.append(el('span'), this.name, this.facts, this.tools)
+    // One line from the family's top-level down to this constitution, each step its dot and slug.
+    const line = el('span', 'ov-path-line')
+    line.append(this.up, el('span'), this.name)
+    this.path.append(line)
+    this.head.append(this.path, this.facts, this.tools)
     this.figure.type = 'button'
     this.figure.hidden = true
     this.threads.setAttribute('aria-label', 'Threads')
@@ -217,7 +222,7 @@ export class FamilyPage {
     this.docs.replaceWith(docs)
     this.docs = docs
     if (kept) docs.querySelector<HTMLElement>(`[data-part="${kept}"]`)?.focus({ preventScroll: true })
-    head.firstElementChild!.replaceWith(stateDot(card, waits, () => {}))
+    this.name.previousElementSibling!.replaceWith(stateDot(card, waits, () => {}))
     if (this.actsFor && !this.acts) {
       this.acts = this.actsFor(() => this.card!)
       this.tools.append(this.acts.el)
@@ -275,7 +280,7 @@ export class FamilyPage {
    */
   private key(event: KeyboardEvent): void {
     if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || (event.target as Element).closest('.ov-tools')) return
-    const rows = [...this.el.querySelectorAll<HTMLElement>('.ov-ancestor, .ov-head, .ov-thread')]
+    const rows = [...this.up.querySelectorAll<HTMLElement>('.ov-ancestor'), this.head, ...this.threads.querySelectorAll<HTMLElement>('.ov-thread')]
     const at = rows.indexOf(event.target as HTMLElement)
     const step = ({ j: 1, ArrowDown: 1, k: -1, ArrowUp: -1 } as Record<string, number>)[event.key]
     if (step) {
