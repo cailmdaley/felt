@@ -338,21 +338,8 @@ defmodule ShuttleWeb.DeliverController do
          message_id: id
        }}
 
-  defp reply({:input, {:error, {:inbox_record, error}}}, fiber_id),
-    do: {422, %{delivery: "input", fiber_id: fiber_id, delivered: false, error: inspect(error)}}
-
   defp reply({:input, {:ok, _}}, fiber_id),
     do: {200, %{delivery: "input", fiber_id: fiber_id, delivered: true}}
-
-  defp reply({:input, {:error, :no_live_worker}}, fiber_id),
-    do:
-      {409,
-       %{
-         delivery: "input",
-         fiber_id: fiber_id,
-         delivered: false,
-         error: "the worker is no longer live"
-       }}
 
   defp reply({:input, result}, fiber_id),
     do:
