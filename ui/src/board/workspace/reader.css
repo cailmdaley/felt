@@ -91,6 +91,10 @@
 .ws-provenance { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-icon-button { width: var(--ws-control-height); height: var(--ws-control-height); flex: none; border-radius: var(--ws-control-radius); }
 .ws-icon-button:hover { background: var(--ws-hover); color: var(--ws-ink); }
+.ws-sent-steps { display: inline-flex; flex: none; align-items: center; gap: 2px; color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-solid) var(--font-serif); font-variant-numeric: tabular-nums; }
+.ws-sent-steps[hidden] { display: none; }
+.ws-sent-step { font: var(--type-row)/var(--leading-solid) var(--font-serif); }
+.ws-sent-step:disabled { opacity: .35; cursor: default; }
 .ws-download { display: inline-flex; align-items: center; justify-content: center; }
 .ws-download > svg { width: 15px; height: 15px; }
 .ws-menu[data-slot="popover-content"] { max-height: var(--available-height); }

@@ -160,6 +160,7 @@ export const helpSections: readonly HelpSection[] = [
     row(['j', 'k', '⌥↓', '⌥↑'], 'Next / previous constitution in Desk order (⌥ only on a constitution\'s page)', on('reader', 'nextChannel', 'prevChannel')),
     row(['⇧J', '⇧K'], 'Next / previous Desk column', on('reader', 'nextGroup', 'prevGroup')),
     row(['h', '←', '‹', '⌥←'], 'Back a page', on('reader', 'back')),
+    row(['←', '→'], 'On a sent file: the newer / older send in its place (← from the newest goes back)', []),
     row(['↓', '↑', 'd', 'u', 'Space', '⇧Space'], 'Scroll: line, half page, page', on('reader', 'scrollDown', 'scrollUp', 'halfDown', 'halfUp', 'pageDown', 'pageUp')),
     row(['p', '[', ']'], 'Audio: play or pause, back or forward 5 s', on('reader', 'audioPlay', 'audioBack', 'audioForward')),
   ] },

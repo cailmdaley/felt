@@ -255,6 +255,7 @@ export class Workspace {
       onReturn: () => this.history.back(),
       onOpenDocument: key => this.visit(key),
       onRevisitDocument: key => this.revisit(key),
+      onReplaceDocument: key => this.replaceVisit(key),
       onVerdict: verdict => this.deferVerdict(verdict),
       onConversation: card => { this.dock.openConversation(card) },
       onRest: (card, anchor) => this.opts.onRest?.(card, anchor),
@@ -843,6 +844,10 @@ export class Workspace {
   private visit(key: DocKey): void {
     const doc = this.current?.channel.documents.find(doc => doc.key === key)
     if (doc) this.history.openDocument(key, pageLabel(doc, this.current!.card))
+  }
+  private replaceVisit(key: DocKey): void {
+    const doc = this.current?.channel.documents.find(doc => doc.key === key)
+    if (doc) this.history.replaceDocument(key, pageLabel(doc, this.current!.card))
   }
   private revisit(key: DocKey): void {
     const doc = this.current?.channel.documents.find(doc => doc.key === key)

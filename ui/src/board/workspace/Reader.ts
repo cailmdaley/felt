@@ -47,6 +47,8 @@ export interface ReaderOptions {
   onReturn(): void
   onOpenDocument(key: DocKey): void
   onRevisitDocument(key: DocKey): void
+  /** Another page of the fiber in the current visit's place. */
+  onReplaceDocument(key: DocKey): void
   /** Between the family's map and its tapestry; false outside a family. */
   onTapestry?(): boolean
   actionCard?(card: KanbanCard): KanbanCard
@@ -136,7 +138,7 @@ export class Reader {
   private readonly settingsMenu: SettingsMenu
   private announcement = ''
   private readonly observer: ResizeObserver | null
-  private readonly labels = new WeakMap<DocumentFrame, { glyph: HTMLElement; title: HTMLElement; provenance: HTMLElement }>()
+  private readonly labels = new WeakMap<DocumentFrame, { glyph: HTMLElement; title: HTMLElement; provenance: HTMLElement; steps: HTMLElement }>()
   private channel: Channel | null = null
   private fresh: ReadonlySet<DocKey> = new Set()
   private currentCard: KanbanCard | null = null
@@ -328,6 +330,14 @@ export class Reader {
     if (key === this.selected) return
     this.opts.onOpenDocument(key)
   }
+  /** From a sent file, its fiber's newer (-1) or older (+1) send, in its place; false when there is none to step to. */
+  private stepSent(step: -1 | 1): boolean {
+    const sends = this.channel ? sentDocuments(this.channel) : [], at = sends.findIndex(sent => sent.key === this.selected)
+    const next = at >= 0 ? sends[at + step] : undefined
+    if (!next) return at >= 0 && step === 1
+    this.opts.onReplaceDocument(next.key)
+    return true
+  }
   /** Back, Escape and the phone swipe follow the same visited path. */
   back(): void { this.opts.onReturn() }
   closeSettings(after: () => void): void { this.settingsMenu.close(after) }
@@ -438,7 +448,14 @@ export class Reader {
     const back = button('ws-document-back', '', () => this.back(), `Back to ${this.backDestination}`)
     back.append(element('span', 'ws-back-label', this.backDestination))
     back.title = `Back to ${this.backDestination}`
-    frame.label.append(back, glyph, title, provenance)
+    // A sent file steps to its fiber's newer and older sends, in its place.
+    const steps = element('span', 'ws-sent-steps')
+    steps.hidden = true
+    steps.append(
+      button('ws-icon-button ws-sent-step', '‹', () => this.stepSent(-1), 'Newer sent file (←)'),
+      element('span', 'ws-sent-count'),
+      button('ws-icon-button ws-sent-step', '›', () => this.stepSent(1), 'Older sent file (→)'))
+    frame.label.append(back, glyph, title, steps, provenance)
     // A drawn page is no file: nothing to download, no document menu.
     if (!isDrawn(frame.doc) && !isBaked(frame.doc)) {
       const download = element('a', 'ws-icon-button ws-download')
@@ -447,7 +464,7 @@ export class Reader {
       download.title = `Download ${frame.doc.name}`; download.setAttribute('aria-label', download.title)
       frame.label.append(download, this.menuTrigger('ws-icon-button ws-menu-button', () => frame.doc))
     }
-    this.labels.set(frame, { glyph, title, provenance })
+    this.labels.set(frame, { glyph, title, provenance, steps })
     frame.label.addEventListener('dblclick', e => {
       if (!(e.target as Element).closest('button,a') && frame.doc.key === this.selected) this.toggleExpand()
     })
@@ -464,6 +481,15 @@ export class Reader {
     parts.title.textContent = metadata.title
     parts.title.title = doc.path
     parts.title.classList.toggle('ws-declared-title', !!declaredTitle(doc.key)?.title || doc.provenance.some(p => p.kind === 'embed' && p.title))
+    const sends = this.channel ? sentDocuments(this.channel) : [], at = sends.findIndex(sent => sent.key === doc.key)
+    parts.steps.hidden = at < 0 || sends.length < 2
+    if (!parts.steps.hidden) {
+      const [newer, count, older] = parts.steps.children as unknown as [HTMLButtonElement, HTMLElement, HTMLButtonElement]
+      newer.disabled = at === 0
+      older.disabled = at === sends.length - 1
+      count.textContent = `${at + 1} / ${sends.length}`
+      count.title = `Sent file ${at + 1} of ${sends.length}, newest first`
+    }
     if (parts.provenance.title !== metadata.summary) {
       parts.provenance.textContent = metadata.summary
       parts.provenance.title = metadata.summary
@@ -644,6 +670,10 @@ export class Reader {
     if (e.altKey && !forward) return
     // Native controls own activation and composite navigation.
     if (!forward && !e.metaKey && !e.ctrlKey) return
+    // On a sent file, ← and → step to the newer and older sends; ← from the newest goes back.
+    if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey && this.stepSent(e.key === 'ArrowLeft' ? -1 : 1)) {
+      e.preventDefault(); e.stopImmediatePropagation(); return
+    }
     const intent = keyIntent(e, 'reader')
     if (intent && this.handleIntent(intent, e.repeat, e.key === 'Escape')) {
       e.preventDefault(); e.stopImmediatePropagation()

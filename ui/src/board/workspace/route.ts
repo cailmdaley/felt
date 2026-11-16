@@ -155,6 +155,12 @@ export class WorkspaceHistory {
     this.enter(this.current.uid, this.current.owner, doc, undefined, false, pageLabel)
   }
 
+  /** Another page of the same fiber in the current visit's place: a step among its sent files. */
+  replaceDocument(doc: DocKey, pageLabel?: string): void {
+    if (this.current?.kind !== 'channel' || this.current.doc === doc) return
+    this.enter(this.current.uid, this.current.owner, doc, undefined, true, pageLabel)
+  }
+
   /** Returning to controls reuses their preceding visit; otherwise it adds one. */
   revisitDocument(doc: DocKey, pageLabel?: string): void {
     if (this.current?.kind === 'channel' && formatRoute({ ...this.current, doc }) === readRouteState(window.history.state)?.back?.hash) this.back()

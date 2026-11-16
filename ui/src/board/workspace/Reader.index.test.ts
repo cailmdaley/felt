@@ -12,7 +12,7 @@ function setup(phone = false, sent = [{ path: '/plot.png', time: 1 }]) {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('requestAnimationFrame', () => 1); vi.stubGlobal('cancelAnimationFrame', vi.fn())
   const onReturn = vi.fn(), onOrchestrator = vi.fn(() => false)
-  reader = new Reader({ shuttleBase: '', buildProse: () => document.createElement('div'), onRefreshProse: vi.fn(), onSelect: key => reader.select(key), onOpenDocument: key => reader.select(key), onRevisitDocument: key => reader.select(key), onReturn, onOrchestrator, onChannel: vi.fn(), cards: () => [alpha] })
+  reader = new Reader({ shuttleBase: '', buildProse: () => document.createElement('div'), onRefreshProse: vi.fn(), onSelect: key => reader.select(key), onOpenDocument: key => reader.select(key), onRevisitDocument: key => reader.select(key), onReplaceDocument: key => reader.select(key), onReturn, onOrchestrator, onChannel: vi.fn(), cards: () => [alpha] })
   document.body.append(reader.el)
   const channel = buildChannel({ uid: 'alpha', owner: 'host-a', name: 'Alpha', path: '/alpha.md', fiberDir: '/', body: '', isConstitution: true,
     embeds: [{ path: '/report.html' }, { path: '/detail.html' }], sent })
