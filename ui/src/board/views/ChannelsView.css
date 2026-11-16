@@ -145,6 +145,14 @@
 .kbn-ch-back { display: none; }
 .kbn-ch-name { flex: 1; min-width: 0; margin: 0; font: 600 var(--type-title)/var(--leading-tight) var(--font-serif); color: var(--kbn-ink); overflow-wrap: anywhere; }
 .kbn-ch-name::before { content: '# '; color: var(--kbn-ink-muted); font-weight: 400; }
+/* To you, or All: a small pair of choices beside the channel's name. */
+.kbn-ch-scope { flex: none; display: inline-flex; gap: 2px; padding: 2px; border: 0.5px solid var(--kbn-rule-strong); border-radius: 7px; }
+.kbn-ch-scope-item {
+  padding: 1px 8px; border: 0; border-radius: 5px; background: none; cursor: pointer;
+  font: var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted);
+}
+.kbn-ch-scope-item:hover { color: var(--kbn-ink); }
+.kbn-ch-scope-item[aria-checked='true'] { background: color-mix(in srgb, var(--kbn-ink) 9%, transparent); color: var(--kbn-ink); }
 .kbn-ch-handle { font-family: var(--font-mono); font-size: var(--type-code); font-weight: 500; }
 .kbn-ch-empty { margin: 40px 0; text-align: center; font: italic var(--type-prose)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink-muted); }
 

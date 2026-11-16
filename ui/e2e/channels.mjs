@@ -125,7 +125,12 @@ try {
       // UNIONS, busy and last read 45 minutes ago, rules off what is new.
       await page.locator('.kbn-ch').focus()
       await page.keyboard.press('j')
-      await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'unions' && document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-msg').length === 13)
+      // To you, only what is addressed to the human: the west run's posterior and the n(z) modes' ask.
+      await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'unions')
+      await page.waitForFunction(() => document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-msg').length === 2)
+      // All adds every worker's posts.
+      await page.locator('[data-item="scope:all"]').click()
+      await page.waitForFunction(() => document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-msg').length === 13)
       assert.equal(await page.locator('.kbn-ch-new').count(), 1)
       await shot(page, 'desktop-busy')
       await page.keyboard.press('[')

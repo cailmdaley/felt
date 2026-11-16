@@ -35,8 +35,8 @@ const BOARD: Record<string, BoardRecord[]> = {
 
 /** Tapestry pages the daemon serves, by path. */
 const PAGES = new Map<string, string>()
-/** A daemon that answers the Channels view's reads, records its writes, and fails the ones `fail` names. */
-function daemon(fail: string[] = [], stored = new Map<string, string>(), pinned: Record<string, number> = {}, kept: { dismissed?: string[]; order?: { keys: string[]; at: number } } = {}, answer: Record<string, unknown> = { ok: true, delivered: true }) {
+/** A daemon that answers the Channels view's reads, records its writes, and fails the ones `fail` names; the board shows a channel's everything unless `stored` says otherwise. */
+function daemon(fail: string[] = [], stored = new Map<string, string>([['shuttle.channels.scope', 'all']]), pinned: Record<string, number> = {}, kept: { dismissed?: string[]; order?: { keys: string[]; at: number } } = {}, answer: Record<string, unknown> = { ok: true, delivered: true }) {
   const posts: Array<[string, Record<string, unknown>]> = [], families: string[] = []
   vi.stubGlobal('localStorage', { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value) })
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
@@ -115,6 +115,32 @@ it('lists the recent channels, the newest wait first, and reads a channel as a s
   expect(view.keydown(new KeyboardEvent('keydown', { key: 'j' }))).toBe(true)
   expect(shown(host)).toBe('Moving house')
   expect(stream(host)).toStrictEqual([['Moving house', 'ask', true]])
+})
+
+it('keeps a channel to what is addressed to the human by default, All adding its workers\' posts and stopped turns, remembered; a thread shows everything', async () => {
+  BOARD.C.push(
+    record({ id: 'brd-human-r1', kind: 'human', fiber: 'B', by: { label: 'Sam' }, text: 'Which beam?' }, 8),
+    record({ id: 'r2', kind: 'post', fiber: 'B', text: 'The new one, from the beam thread.' }, 7),
+    record({ id: 'r3', kind: 'post', fiber: 'B', text: 'Rerunning the window function.' }, 6),
+  )
+  try {
+    const stored = new Map<string, string>()
+    daemon([], stored)
+    const { host } = await mount()
+    // A file sent, an ask, and a worker's answer to the human; not the chair's post, nor the beam's post after its answer.
+    expect(stream(host)).toStrictEqual([['κ × tSZ', 'post', false], ['Cluster mask', 'ask', true], ['Beam window', 'post', false]])
+    expect(message(host, 'Beam window').querySelector('.kbn-ch-msg-text')?.textContent?.trim()).toBe('The new one, from the beam thread.')
+    const all = host.querySelector<HTMLButtonElement>('[data-item="scope:all"]')!
+    all.click(); await settle()
+    expect(stream(host).map(([name]) => name)).toStrictEqual(['κ × tSZ', 'Cluster mask', 'cmbx chair', 'Beam window'])
+    expect(message(host, 'Beam window').querySelector('.kbn-ch-msg-text')?.textContent?.trim()).toBe('Rerunning the window function.')
+    expect(stored.get('shuttle.channels.scope')).toBe('all')
+    host.querySelector<HTMLButtonElement>('[data-item="scope:you"]')!.click(); await settle()
+    expect(stream(host).map(([name]) => name)).toStrictEqual(['κ × tSZ', 'Cluster mask', 'Beam window'])
+    // Its thread shows everything it said.
+    message(host, 'Beam window').querySelector<HTMLElement>('.kbn-ch-msg-name')!.click()
+    expect([...host.querySelectorAll('.kbn-ch-thread-list .kbn-ch-msg-text')].map(el => el.textContent?.trim())).toStrictEqual(['Which beam?', 'The new one, from the beam thread.', 'Rerunning the window function.'])
+  } finally { BOARD.C.splice(-3) }
 })
 
 it('opens a worker\'s thread from its message: its name, liveness and ask on top, its history, a reply to it', async () => {
@@ -497,7 +523,7 @@ it('brings a hidden channel back by itself when something in it begins waiting a
 })
 
 it('marks unread channels bold, and rules off what arrived since the last visit', async () => {
-  const stored = new Map([['shuttle.channels.seen:channel:cmbx', String(Date.now() - 19 * minute)], ['shuttle.channels.seen:fiber:R', String(Date.now() - 5 * minute)]])
+  const stored = new Map([['shuttle.channels.scope', 'all'], ['shuttle.channels.seen:channel:cmbx', String(Date.now() - 19 * minute)], ['shuttle.channels.seen:fiber:R', String(Date.now() - 5 * minute)]])
   daemon([], stored)
   const { view, host } = await mount()
   const items = () => [...host.querySelectorAll<HTMLElement>('.kbn-ch-stream > li')].map(el => el.classList.contains('kbn-ch-new') ? 'new' : el.querySelector('.kbn-ch-msg-name')?.textContent)
@@ -511,7 +537,7 @@ it('marks a channel with something unread by a quiet dot, and lights Channels\' 
   const french = card({ id: 'french', uid: 'F', name: 'French lessons', shuttleChannel: 'french', shuttleSeat: true, ...working(3) })
   BOARD.F = [record({ id: 'f1', kind: 'post', fiber: 'F', text: 'La leçon est prête.' }, 10)]
   try {
-    const stored = new Map([['shuttle.channels.seen:channel:cmbx', String(Date.now())], ['shuttle.channels.seen:channel:french', String(Date.now() - 20 * minute)]])
+    const stored = new Map([['shuttle.channels.scope', 'all'], ['shuttle.channels.seen:channel:cmbx', String(Date.now())], ['shuttle.channels.seen:channel:french', String(Date.now() - 20 * minute)]])
     daemon([], stored)
     const { host } = await mount([chair, tsz, french])
     const pick = (key: string) => host.querySelector<HTMLElement>(`[data-channel="${key}"]`)!
@@ -910,7 +936,7 @@ it('clears a worker\'s line by its ✓, offers Undo in its place, and keeps a cl
   expect(posts.at(-1)).toStrictEqual(['/api/v1/channels/dismiss', { key: `clear:T:${posted + 1}`, fiber: 'T' }])
   // Another device holds the clear: the line is gone, with no Undo.
   views.forEach(view => view.unmount()); views.length = 0; document.body.replaceChildren()
-  daemon([], new Map(), {}, { dismissed: [`clear:T:${posted}`] })
+  daemon([], new Map([['shuttle.channels.scope', 'all']]), {}, { dismissed: [`clear:T:${posted}`] })
   const again = await mount()
   expect(stream(again.host).map(([name]) => name)).toStrictEqual(['Cluster mask', 'cmbx chair'])
   expect(again.host.querySelector('.kbn-ch-cleared')).toBeNull()

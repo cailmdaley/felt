@@ -479,6 +479,12 @@ export interface Line {
 
 /** What a worker says to the human, as distinct from lifecycle lines and what others say to it. */
 const SPEAKING: readonly MessageKind[] = ['post', 'ask', 'review', 'turn', 'file', 'tapestry']
+/** What a worker says to the human, not only about its work: an ask, a close for review, a file or tapestry sent. */
+const TO_YOU: readonly MessageKind[] = ['ask', 'review', 'file', 'tapestry']
+/** Whether a worker's message in its thread is addressed to the human: one of {@link TO_YOU}, one carrying files, or one answering the human's line just before it. */
+function toYou(message: Message, thread: readonly Message[]): boolean {
+  return TO_YOU.includes(message.kind) || message.files.length > 0 || !!thread[thread.indexOf(message) - 1]?.human
+}
 
 /**
  * A channel's stream, as Slack keeps a channel short: every worker, its chair
@@ -487,9 +493,11 @@ const SPEAKING: readonly MessageKind[] = ['post', 'ask', 'review', 'turn', 'file
  * on the human, with its thread's size and latest time; and the human's lines
  * to the chair. Oldest first, by each line's time. A worker that has said
  * nothing is not in it. A line its ✓ would clear is marked cleared while its
- * message is no newer than its thread's standing clear.
+ * message is no newer than its thread's standing clear. Kept to what is
+ * addressed to the human (`yours`), a worker's line is the latest it said to
+ * the human, and a worker that said nothing to the human is not in it.
  */
-export function channelLines(messages: readonly Message[], clears: Clears = new Map()): Line[] {
+export function channelLines(messages: readonly Message[], clears: Clears = new Map(), yours = false): Line[] {
   const lines: Line[] = []
   const workers = new Map<string, KanbanCard>()
   for (const message of messages) {
@@ -500,7 +508,7 @@ export function channelLines(messages: readonly Message[], clears: Clears = new 
   }
   for (const card of workers.values()) {
     const thread = threadOf(messages, card)
-    const said = thread.filter(message => message.card === card && !message.human && !message.quiet && SPEAKING.includes(message.kind))
+    const said = thread.filter(message => message.card === card && !message.human && !message.quiet && SPEAKING.includes(message.kind) && (!yours || toYou(message, thread)))
     // A send of the worker's own tapestry page is that tapestry again, not a message of its own.
     const tapestry = said.filter(message => message.kind === 'tapestry').at(-1)
     const latest = said.filter(message => !(tapestry && message.kind === 'file' && message.files.length > 0

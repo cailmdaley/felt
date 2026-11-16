@@ -1,5 +1,6 @@
 import { announce } from '@ui-sdk/core'
 import '@ui-sdk/web/tooltip'
+import '@ui-sdk/web/segmented-control'
 import { ago } from '../civilDay.js'
 import { getDaemonJson, postDaemonJson } from '../daemonApi.js'
 import { head, RESOURCE_PRIORITY, text } from '../documentResources.js'
@@ -30,6 +31,8 @@ import './ChannelsView.css'
 
 const SEEN = 'shuttle.channels.seen:'
 const RAIL = 'shuttle.channels.rail-hidden'
+/** 'all' when a channel shows everything its workers say, not only what is addressed to the human. */
+const SCOPE = 'shuttle.channels.scope'
 /** The channel, and the thread in it, the reader was last in on this device. */
 const LAST = 'shuttle.channels.last'
 /** A pin is renewed by use at most this often; it lapses with the board's reach. */
@@ -212,6 +215,8 @@ export class ChannelsView implements TemporalView {
   /** What was typed in each reply box, by whom it goes to, kept while the reader is elsewhere. */
   private readonly drafts = new Map<string, string>()
   private railHidden = false
+  /** A channel shows everything its workers say, not only what is addressed to the human. */
+  private everything = false
   /** A phone shows the rail until a channel is chosen. */
   private phoneRail = true
   /** Where the view is narrow, the rail is a drawer drawn in over the stream, put away once a channel is chosen. */
@@ -316,6 +321,7 @@ export class ChannelsView implements TemporalView {
       }
     }, { rootMargin: LOAD_POLICY.ring })
     this.railHidden = stored(RAIL) === '1'
+    this.everything = stored(SCOPE) === 'all'
     this.showRail()
     this.unsubscribe = ctx.sends?.subscribe(() => this.draw())
     this.unsubscribeLibrary = ctx.workspace?.library.subscribe(() => { if (this.query) this.drawRail() })
@@ -758,11 +764,12 @@ export class ChannelsView implements TemporalView {
     }
     this.readTapestry(channel.seat)
     const now = Date.now(), failed = this.historyFailed(channel), undo = this.undo
-    const said = channelLines(this.messages(channel), clearsOf([...this.dismissed, ...this.pending]))
+    const messages = this.messages(channel), clears = clearsOf([...this.dismissed, ...this.pending])
+    const said = channelLines(messages, clears, !this.everything)
     // A cleared line is gone, save the one just cleared, which offers its Undo in its place.
     const lines = this.lines = said.filter(line => !line.cleared || fiberOf(line.message.card) === undo?.uid)
     for (const { message } of lines) this.readTapestry(message.card)
-    const sig = JSON.stringify([channel.key, channel.name, failed, this.thread && fiberOf(this.thread), this.drillsDown(), [...this.tempering], [...this.expanded.keys()], [...this.unfolded],
+    const sig = JSON.stringify([channel.key, channel.name, failed, this.thread && fiberOf(this.thread), this.drillsDown(), this.everything, [...this.tempering], [...this.expanded.keys()], [...this.unfolded],
       lines.map(({ message, replies, last, waiting, act, cleared }) => [message.id, message.kind, message.text, waiting, act, cleared, message.card.name, message.card.turn, message.files.map(file => drawnAs(file, message.card)), replies, last, this.embedded(message.card, 'channel')])])
     if (this.changed('channel', sig)) {
       const back = iconButton('kbn-ch-back', 'back', 'Channels', () => this.setRail(false))
@@ -772,11 +779,36 @@ export class ChannelsView implements TemporalView {
       if (channel.title !== channel.name) name.title = channel.title
       const menu: IconButton = iconButton('kbn-ch-menu', 'actions', 'Channel menu', () => this.railMenu(channel.key, menu.button))
       menu.button.setAttribute('aria-haspopup', 'menu')
-      this.head.replaceChildren(back.root, name, menu.root, this.railToggle!.root)
+      this.head.replaceChildren(back.root, name, this.scope(), menu.root, this.railToggle!.root)
       this.fill(this.stream, lines, 'channel', channel, now)
-      if (!lines.length) this.stream.append(el('li', 'kbn-ch-hush', failed ? 'This channel\'s history could not be read; trying again.' : said.length ? 'All clear.' : 'Nothing said here yet.'))
+      const hush = failed ? 'This channel\'s history could not be read; trying again.' : said.length ? 'All clear.'
+        : this.everything || !channelLines(messages, clears).length ? 'Nothing said here yet.' : 'Nothing here is to you yet.'
+      if (!lines.length) this.stream.append(el('li', 'kbn-ch-hush', hush))
     }
     this.tick()
+  }
+  /** The choice between what is addressed to the human and everything the channel's workers say, remembered in this browser. */
+  private scope(): HTMLElement {
+    const control = document.createElement('ui-segmented-control')
+    control.className = 'kbn-ch-scope'
+    control.setAttribute('default-value', this.everything ? 'all' : 'you')
+    control.setAttribute('aria-label', 'Show')
+    for (const [value, label] of [['you', 'To you'], ['all', 'All']]) {
+      const item = document.createElement('ui-segmented-control-item'), choice = el('button', 'kbn-ch-scope-item', label)
+      choice.type = 'button'
+      choice.dataset.item = `scope:${value}`
+      item.setAttribute('value', value)
+      item.setAttribute('as-child', '')
+      item.append(choice)
+      control.append(item)
+    }
+    control.addEventListener('valuechange', event => {
+      this.everything = event.detail.value === 'all'
+      store(SCOPE, this.everything ? 'all' : 'you')
+      this.landing.channel = true
+      this.drawChannel()
+    })
+    return control
   }
   /** Whether a pane's signature changed, keeping the new one. */
   private changed(pane: Pane, sig: string): boolean {
