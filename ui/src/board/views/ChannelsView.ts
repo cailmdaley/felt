@@ -14,6 +14,7 @@ import { openActionMenu } from '../conversationMenu.js'
 import type { SentFile } from '../sentFiles.js'
 import { stateDot } from '../stateDot.js'
 import { slug } from '../threadOutline.js'
+import { threadState } from '../threads.js'
 import { renderMarkdown } from '../utils.js'
 import { docKey, parseDocKey } from '../workspace/documents.js'
 import { headerIcon, type HeaderIcon } from '../workspace/headerIcon.js'
@@ -87,15 +88,16 @@ function lastSeen(key: string): number {
 }
 /** A sent page's title: the one it declares, once read, else its file name. */
 const pageTitle = (file: SentFile, owner: string): string => declaredTitle(docKey(owner, file.fullPath, owner))?.title || file.basename
-/** What each kind of item says before its words. */
-const KIND_WORD: Readonly<Record<Item['kind'], string>> = { ask: 'asks', review: 'for review', file: 'sent' }
+/** What an item says before its words. */
+const kindWord = (item: Item): string =>
+  item.kind === 'close' ? threadState(item.card) === 'to-review' ? 'for review' : 'closed' : { ask: 'asks', post: 'posted', file: 'sent' }[item.kind]
 
 /**
  * Channels: a rail of the channels (what waits on the human floated to the
  * top, the rest in the human's order, each movable and with a menu to hide,
  * pin or move it; Jump to finds the rest and the fleet's documents), and a
  * channel's stream of what its workers addressed to the human — each worker's
- * ask, close for review or sent files as one compact item, with small marks
+ * question, post, close or sent files as one compact item, with small marks
  * between them for every thread started, closed or handed off. Choosing an
  * item opens that constitution's view; its pages open from its thumbnails.
  * The channel's head carries its chair's pages, and its console speaks to its
@@ -299,14 +301,14 @@ export class ChannelsView implements TemporalView {
     const index = threadIndexFor(ctx.response)
     return composeChannels({
       cards: boardCards(ctx.response), parentOf: card => index.parentOf(card), names: ctx.workspace!.charterNames,
-      dismissed: [...this.dismissed, ...this.pending], pinned: this.pinned, now: Date.now(),
+      dismissed: [...this.dismissed, ...this.pending], pinned: this.pinned, waiting: ctx.workspace!.board.waiting, now: Date.now(),
     })
   }
   /** A channel's stream: what its families' records, its sent files and its threads' launches make of it. */
   private entries(channel: Channel, ctx = this.ctx!): Entry[] {
     const workspace = ctx.workspace!
     return composeStream({
-      channel, records: workspace.board.records(channel.families), files: ctx.sends?.files ?? [],
+      channel, records: workspace.board.records(channel.families), files: ctx.sends?.files ?? [], waiting: workspace.board.waiting,
       launches: card => workspace.globeHost.feeds.marks(card)?.launches ?? [], now: Date.now(), reachMs: workspace.board.reachMs,
     })
   }
@@ -484,7 +486,7 @@ export class ChannelsView implements TemporalView {
     const now = Date.now(), entries = this.entries(channel), failed = channel.families.some(uid => this.ctx!.workspace!.board.failed(uid))
     const seat = channel.seat
     const sig = JSON.stringify([channel.key, channel.name, failed, fiberOf(seat), seat.modifiedAt, this.ctx!.workspace!.globeHost.feeds.files(seat).length,
-      entries.map(entry => [entry.id, entry.kind, entry.at, entry.card.name, entry.card.turn, entry.kind === 'mark' ? entry.what : [entry.text, entry.waiting, entry.files.map(file => [file.fullPath, pageTitle(file, file.host ?? entry.card.originId)])]])])
+      entries.map(entry => [entry.id, entry.kind, entry.at, entry.card.name, entry.card.turn, entry.kind === 'mark' ? entry.what : [entry.text, entry.waiting, entry.kind === 'close' && [kindWord(entry), entry.card.outcome], entry.files.map(file => [file.fullPath, pageTitle(file, file.host ?? entry.card.originId)])]])])
     if (sig !== this.sigs.channel) {
       this.sigs.channel = sig
       const back = iconButton('kbn-ch-back', 'back', 'Channels', () => this.setRail(false))
@@ -534,7 +536,7 @@ export class ChannelsView implements TemporalView {
     const age = el('span', 'kbn-ch-age', ago(item.at, now))
     age.dataset.at = String(item.at)
     const head = el('div', 'kbn-ch-item-head')
-    head.append(who, el('span', 'kbn-ch-kind', KIND_WORD[item.kind]), age)
+    head.append(who, el('span', 'kbn-ch-kind', kindWord(item)), age)
     const body = el('div', 'kbn-ch-item-body')
     body.append(head)
     if (item.text) {
@@ -542,9 +544,8 @@ export class ChannelsView implements TemporalView {
       text.innerHTML = renderMarkdown(item.text)
       body.append(text)
     }
-    const files = this.files(item, id)
-    if (files) body.append(files)
-    if (item.kind === 'review' && item.waiting) body.append(this.reviewed(item, id))
+    if (item.kind === 'close') body.append(this.closing(item, id))
+    if (item.files.length) body.append(this.files(item, id))
     row.append(stateDot(card, open), body)
     // The whole item opens the view, save its buttons and a selection.
     row.addEventListener('click', event => {
@@ -554,8 +555,7 @@ export class ChannelsView implements TemporalView {
     return row
   }
   /** An item's files side by side: a page or a figure as its thumbnail with a small caption, any other file as a chip; each opens in the reader. */
-  private files(item: Item, id: string): HTMLElement | undefined {
-    if (item.kind !== 'file') return undefined
+  private files(item: Item, id: string): HTMLElement {
     const box = el('div', 'kbn-ch-files')
     for (const file of item.files) {
       const owner = file.host ?? item.card.originId, key = `${id}:${file.fullPath}`
@@ -571,11 +571,11 @@ export class ChannelsView implements TemporalView {
     return box
   }
   /**
-   * What a close awaiting review came to: its tapestry as its thumbnail, else
-   * its outcome, clamped to a few lines. This is the one place the human reads
-   * an outcome on the board.
+   * What a close came to: its tapestry as its thumbnail, else its closing
+   * post (the outcome), clamped to a few lines. This is the one place the
+   * human reads an outcome on the board.
    */
-  private reviewed(item: Item, id: string): HTMLElement {
+  private closing(item: Item, id: string): HTMLElement {
     const slot = el('div', 'kbn-ch-files')
     const outcome = (): void => {
       if (!item.card.outcome) return

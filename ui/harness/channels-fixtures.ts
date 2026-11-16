@@ -21,20 +21,25 @@ interface Row {
 }
 
 const DAY = 1440
+/** The human, as a board address: a label with no fiber or session. */
+const HUMAN = { label: 'Sam' }
 /** A deck's first slide drawn inline as a portrait page, as a tapestry built from slides shows it. */
 const SLIDE = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 794 1123" width="100%"><rect width="794" height="1123" fill="#fbf6e9"/><text x="60" y="140" font-size="54" fill="#30291f">UNIONS cosmic shear</text><text x="60" y="210" font-size="30" fill="#6b5d45">Paris SWG · Thursday</text><path d="M80 900V400H720" fill="none" stroke="#a39478" stroke-width="3"/><path d="M100 820C260 520 420 760 560 560S680 620 710 480" fill="none" stroke="#3f8278" stroke-width="6"/></svg>'
 
 /**
- * Channels as the board draws them. cmbx: its chair idle with a tapestry, an
- * expert posting a cross-spectrum with its plot attached, one asking, one
- * closed for review with a plot it sent, one at work with nothing to say, and
- * the chair's own posts. UNIONS, busy: a seated chair over two seated hubs, a
- * thread asking and ten more posting, last read 45 minutes ago. Vizier: two seats (the oneshot one chairs), a form asking,
- * the morning post for review. The Mill posts long. An office without a
- * channel (the composer's), hidden from the rail an hour ago; Science and
- * French at work with nothing waiting, in the human's order below what waits;
- * moving house asking for five days, a pinned garden plan, and old notes idle
- * three weeks, found only by Jump to.
+ * Channels as the board draws them. cmbx: its chair idle with a tapestry,
+ * posting to the human and answered; an expert posting its cross-spectrum to
+ * the human with its plots attached; one asking its chair; one closed to its
+ * chair and marked for the human's review; one at work with nothing to say.
+ * UNIONS, busy: a seated chair over two seated hubs, its post to the human
+ * unanswered, a hub posting a figure to the human, a thread asking and ten
+ * more posting to their chair. Vizier: two seats (the oneshot one chairs), a
+ * form asking, the morning post closed with a closing post and its
+ * attachment. The Mill posts long to the human, who answered. An office
+ * without a channel (the composer's), hidden from the rail an hour ago;
+ * Science and French at work with nothing waiting, in the human's order
+ * below what waits; moving house asking for five days, a pinned garden plan,
+ * and old notes idle three weeks, found only by Jump to.
  */
 const ROWS: Row[] = [
   { id: 'cmbx', name: 'cmbx chair', channel: 'cmbx', seat: true, state: 'idle', minutes: 9,
@@ -60,7 +65,7 @@ const ROWS: Row[] = [
   { id: 'pando/unions/paper', name: 'Paper draft', parent: 'pando/unions', state: 'working', minutes: 28,
     tapestry: { title: 'Paris SWG deck', lede: 'Twelve slides for Thursday: the null tests, the blinded S8 and what is left before unblinding.', slide: true } },
   { id: 'life-vizier', name: 'Vizier', channel: 'Vizier', role: 'vizier', seat: true, state: 'idle', minutes: 6 },
-  { id: 'morning-post', name: 'Morning post', channel: 'Vizier', seat: true, standing: true, closed: true, minutes: 140, review: 'Two letters need your reply; drafts are attached.', outcome: 'Eleven letters sorted; two need a reply from you, the rest are filed.',
+  { id: 'morning-post', name: 'Morning post', channel: 'Vizier', seat: true, standing: true, closed: true, minutes: 140, outcome: 'Eleven letters sorted; two need a reply from you, the rest are filed.',
     tapestry: { title: 'The morning post, sorted', lede: 'Eleven letters: two need your reply (the notary and the landlord), four are filed, five were newsletters.' } },
   { id: 'deed-form', name: 'Sign the deed form', parent: 'life-vizier', minutes: 50, ask: 'The notary needs the deed form back by Wednesday. Sign the scan in your Documents folder, or shall I book a slot to sign it in person?' },
   { id: 'mill', name: 'felt chair', channel: 'The Mill', seat: true, state: 'working', minutes: 1 },
@@ -78,6 +83,8 @@ export interface ChannelsFixture {
   pinned: Record<string, number>
   order: { keys: string[]; at: number } | null
   board: Array<BoardRecord & { root: string }>
+  /** What the daemon answers as waiting: each fiber's newest line, when it is addressed to the human and nothing of theirs came after it. */
+  waiting: Record<string, { id: string; at: number }>
 }
 
 export function addChannelsFixtures(example: WorkspaceExample, now: number): ChannelsFixture {
@@ -137,36 +144,40 @@ export function addChannelsFixtures(example: WorkspaceExample, now: number): Cha
   let n = 0
   const said = (fiber: string, kind: string, minutes: number, over: Partial<BoardRecord> = {}): BoardRecord & { root: string } =>
     ({ id: `brd-${String(++n).padStart(3, '0')}`, type: 'board', kind, fiber, by: { fiber }, timestamp: ms(minutes), originName: WORKSPACE_HOST, root: rootOf(fiber), ...over } as BoardRecord & { root: string })
+  /** A line to the human; a thread's line goes up to its chair. */
+  const up = (fiber: string): BoardRecord['to'] => ({ fiber: ROWS.find(row => row.id === fiber)!.parent! })
   const board = [
     said('cmbx', 'post', 300, { text: 'Three experts are on the joint fit this week: κ×tSZ, the cluster mask and the covariance. The plan is attached.', files: ['/fixture-store/workspace/cmbx/weekly-plan.md'] }),
-    said('cmbx/covariance', 'post', 180, { text: 'Started the 2000-simulation run; first comparison in about two hours.' }),
+    said('cmbx/covariance', 'post', 180, { to: up('cmbx/covariance'), text: 'Started the 2000-simulation run; first comparison in about two hours.' }),
     // The deck was sent before, and again with the final numbers: only its newest send is drawn whole.
-    said('cmbx/kappa-tsz', 'post', 120, { text: 'First pass on the full footprint: 7σ, before the new beam.', files: [deck] }),
+    said('cmbx/kappa-tsz', 'post', 120, { to: up('cmbx/kappa-tsz'), text: 'First pass on the full footprint: 7σ, before the new beam.', files: [deck] }),
     said('cmbx/kappa-tsz', 'message', 100, { by: { fiber: 'cmbx' }, to: { fiber: 'cmbx/kappa-tsz' }, text: 'Use the new beam window from the beam thread before the final pass.' }),
-    said('cmbx/kappa-tsz', 'human', 60, { by: { label: 'Sam' }, text: 'Can you also show the null tests next to the spectrum?' }),
-    said('cmbx/covariance', 'closed', 48),
-    said('cmbx/kappa-tsz', 'post', 30, { text: 'κ×tSZ is measured to **9σ** with the new beam. The spectrum and the null tests are attached; every null passes at p > 0.1.', files: [deck, spectrum.fullPath, nulls.fullPath] }),
-    said('cmbx/foregrounds', 'asked', 22, { text: ROWS.find(row => row.id === 'cmbx/foregrounds')!.ask }),
-    said('cmbx', 'post', 12, { text: 'Two calls for you today: the cluster mask threshold and the covariance review. Everything else is moving.' }),
+    said('cmbx/kappa-tsz', 'human', 60, { by: HUMAN, text: 'Can you also show the null tests next to the spectrum?' }),
+    // Closed to its chair with its closing post, then marked by the chair for the human's review.
+    said('cmbx/covariance', 'closed', 48, { to: up('cmbx/covariance'), text: ROWS.find(row => row.id === 'cmbx/covariance')!.outcome }),
+    said('cmbx/covariance', 'closed', 47, { by: { fiber: 'cmbx' }, to: HUMAN, text: ROWS.find(row => row.id === 'cmbx/covariance')!.review }),
+    said('cmbx/kappa-tsz', 'post', 30, { to: HUMAN, text: 'κ×tSZ is measured to **9σ** with the new beam. The spectrum and the null tests are attached; every null passes at p > 0.1.', files: [deck, spectrum.fullPath, nulls.fullPath] }),
+    said('cmbx/foregrounds', 'asked', 22, { to: up('cmbx/foregrounds'), text: ROWS.find(row => row.id === 'cmbx/foregrounds')!.ask }),
+    said('cmbx', 'post', 12, { to: HUMAN, text: 'Two calls for you today: the cluster mask threshold and the covariance review. Everything else is moving.' }),
     // A line the human sent from the board, recorded under the id the board gave it.
-    said('cmbx', 'human', 10, { id: 'brd-human-0001', by: { label: 'Sam' }, text: 'Thanks — I will look after lunch.' }),
-    said('pando/unions/shear-2pt', 'post', 300, { text: 'ξ± measured on all 6 tomographic bins; the covariance from the GLASS mocks is attached next.' }),
-    said('pando/unions/psf', 'post', 260, { text: 'Leakage α = 0.012 ± 0.004 after the new PSF model; the correction is applied.' }),
-    said('pando/unions/rho', 'post', 230, { text: 'ρ₁ through ρ₅ are consistent with zero on every scale.' }),
-    said('pando/unions/bmodes', 'post', 200, { text: 'The B-mode null passes, χ²/dof = 1.04 over 24 bins.' }),
-    said('pando/unions/depth', 'post', 170, { text: 'The depth map is rebuilt with the r-band masks; 3% of the footprint drops below the cut.' }),
-    said('pando/unions/blinding', 'post', 150, { text: 'The blinded data vector is ready for the chains; the key stays with you.' }),
-    said('pando/unions/chains', 'post', 95, { text: 'Chains converged (R−1 < 0.01) on the blinded vector; posteriors match the mock run.' }),
-    said('pando/unions/ia', 'post', 70, { text: 'NLA and TATT give the same S8 within 0.2σ; TATT stays the default.' }),
-    said('pando/unions/photoz', 'post', 40, { text: 'The SOM calibration moves the mean of bin 5 by 0.008; still inside the prior.' }),
-    said('pando/unions/paper', 'post', 28, { text: 'Section 3 is drafted around the null tests; every number comes from the pipeline.' }),
-    said('pando/unions', 'post', 18, { text: 'Morning round: chains converged, photo-z within the prior, the paper draft moving. One ask for you on the n(z) modes.' }),
-    said('pando/unions/west', 'post', 60, { text: 'The west run finished: S8 = 0.781 ± 0.019. The posterior is attached.', files: ['/fixture-store/workspace/pando/unions/west/s8-posterior.svg'] }),
+    said('cmbx', 'human', 10, { id: 'brd-human-0001', by: HUMAN, text: 'Thanks — I will look after lunch.' }),
+    said('pando/unions/shear-2pt', 'post', 300, { to: up('pando/unions/shear-2pt'), text: 'ξ± measured on all 6 tomographic bins; the covariance from the GLASS mocks is attached next.' }),
+    said('pando/unions/psf', 'post', 260, { to: up('pando/unions/psf'), text: 'Leakage α = 0.012 ± 0.004 after the new PSF model; the correction is applied.' }),
+    said('pando/unions/rho', 'post', 230, { to: up('pando/unions/rho'), text: 'ρ₁ through ρ₅ are consistent with zero on every scale.' }),
+    said('pando/unions/bmodes', 'post', 200, { to: up('pando/unions/bmodes'), text: 'The B-mode null passes, χ²/dof = 1.04 over 24 bins.' }),
+    said('pando/unions/depth', 'post', 170, { to: up('pando/unions/depth'), text: 'The depth map is rebuilt with the r-band masks; 3% of the footprint drops below the cut.' }),
+    said('pando/unions/blinding', 'post', 150, { to: up('pando/unions/blinding'), text: 'The blinded data vector is ready for the chains; the key stays with you.' }),
+    said('pando/unions/chains', 'post', 95, { to: up('pando/unions/chains'), text: 'Chains converged (R−1 < 0.01) on the blinded vector; posteriors match the mock run.' }),
+    said('pando/unions/ia', 'post', 70, { to: up('pando/unions/ia'), text: 'NLA and TATT give the same S8 within 0.2σ; TATT stays the default.' }),
+    said('pando/unions/photoz', 'post', 40, { to: up('pando/unions/photoz'), text: 'The SOM calibration moves the mean of bin 5 by 0.008; still inside the prior.' }),
+    said('pando/unions/paper', 'post', 28, { to: up('pando/unions/paper'), text: 'Section 3 is drafted around the null tests; every number comes from the pipeline.' }),
+    said('pando/unions', 'post', 24, { to: HUMAN, text: 'Morning round: chains converged, photo-z within the prior, the paper draft moving. One ask for you on the n(z) modes.' }),
+    said('pando/unions/west', 'post', 60, { to: HUMAN, text: 'The west run finished: S8 = 0.781 ± 0.019. The posterior is attached.', files: ['/fixture-store/workspace/pando/unions/west/s8-posterior.svg'] }),
     said('pando/unions/east', 'handed_off', 45),
-    said('pando/unions/modes', 'asked', 35, { text: ROWS.find(row => row.id === 'pando/unions/modes')!.ask }),
-    said('deed-form', 'asked', 50, { text: ROWS.find(row => row.id === 'deed-form')!.ask }),
-    said('morning-post', 'closed', 140),
-    said('mill', 'post', 25, { text: [
+    said('pando/unions/modes', 'asked', 35, { to: up('pando/unions/modes'), text: ROWS.find(row => row.id === 'pando/unions/modes')!.ask }),
+    said('deed-form', 'asked', 50, { to: up('deed-form'), text: ROWS.find(row => row.id === 'deed-form')!.ask }),
+    said('morning-post', 'closed', 140, { to: HUMAN, text: ROWS.find(row => row.id === 'morning-post')!.outcome, files: [`${dir('morning-post')}/reply-drafts.md`] }),
+    said('mill', 'post', 25, { to: HUMAN, text: [
       'Landed the routing slice on main and deployed it to the Mac; the fleet catch-up waits on you.',
       '',
       '- The unblock board lines now append on every poll from the stored record, so an owed line no longer depends on the thread still waiting on its blocker.',
@@ -177,9 +188,19 @@ export function addChannelsFixtures(example: WorkspaceExample, now: number): Cha
       '',
       'Nothing else is blocked; the lander is idle until the next landing.',
     ].join('\n') }),
-    said('mill/lander', 'post', 15, { text: 'Landed 58bda2a3d on main.' }),
+    said('mill', 'human', 20, { id: 'brd-human-0002', by: HUMAN, text: 'Thanks, I will run the catch-up tonight.' }),
+    said('mill/lander', 'post', 15, { to: up('mill/lander'), text: 'Landed 58bda2a3d on main.' }),
   ]
+  // The daemon's answer: a line waits until the human says something to that fiber after it.
+  const waiting: ChannelsFixture['waiting'] = {}
+  for (const record of [...board].sort((a, b) => a.timestamp - b.timestamp)) {
+    if (['post', 'asked', 'closed'].includes(record.kind)) {
+      if (record.to?.label) waiting[record.fiber!] = { id: record.id, at: record.timestamp }
+      else delete waiting[record.fiber!]
+    } else if (record.kind === 'human') delete waiting[record.fiber!]
+  }
   return {
+    waiting,
     dismissed: [`hide:role:composer:${ms(60)}`],
     pinned: { 'fiber:garden': now - 3 * 86_400_000 },
     // The human put French above Science, and the garden plan last.

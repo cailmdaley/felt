@@ -29,7 +29,7 @@ const all = [unions, east, west, modes, vizier, post, shear, van, old]
 type Input = Parameters<typeof composeChannels>[0]
 function compose(cards: KanbanCard[], over: Partial<Input> = {}): Channel[] {
   const index = new ThreadIndex(cards)
-  return composeChannels({ cards, parentOf: card => index.parentOf(card), names: new Map([['analyst', 'Analyst · the shear desk']]), dismissed: [], pinned: new Map(), now, ...over })
+  return composeChannels({ cards, parentOf: card => index.parentOf(card), names: new Map([['analyst', 'Analyst · the shear desk']]), dismissed: [], pinned: new Map(), waiting: new Map(), now, ...over })
 }
 const named = (channels: Channel[], key: string): Channel => channels.find(channel => channel.key === key)!
 
@@ -111,6 +111,13 @@ describe('composeChannels', () => {
     expect(turns.map(waitsSince)).toStrictEqual([0, 0, 0, now - 4 * minute])
     expect(waitsSince(card({ id: 'review', column: 'awaitingReview', closedAt: at(90) }))).toBe(now - 90 * minute)
   })
+
+  it('waits where the daemon says a member\'s line waits on the human, and brings a hidden channel back for it', () => {
+    const hidden = { dismissed: [hideKey('role:analyst', now - 60 * minute)] }
+    expect(named(compose(all, hidden), 'role:analyst').hidden).toBe(now - 60 * minute)
+    const shearDesk = named(compose(all, { ...hidden, waiting: new Map([['S', { at: now - 5 * minute }]]) }), 'role:analyst')
+    expect([shearDesk.waiting, shearDesk.newest, shearDesk.hidden, shearDesk.listed]).toStrictEqual([true, now - 5 * minute, 0, true])
+  })
 })
 
 describe('the rail\'s order', () => {
@@ -138,63 +145,89 @@ describe('the rail\'s order', () => {
 })
 
 describe('composeStream', () => {
-  // cmbx: a chair, a thread that sent a deck twice and a plot, one asking, one closed for review, one at work saying nothing.
+  // cmbx: a chair, a thread that sent a deck twice and posted a plot to the human, one asking its chair, one closed and marked for review, one at work saying nothing.
   const chair = card({ id: 'cmbx', uid: 'C', name: 'cmbx chair', shuttleChannel: 'cmbx', shuttleSeat: true, ...idle(9) })
   const kappa = card({ id: 'cmbx/kappa', uid: 'K', name: 'κ × tSZ', orchestrator: 'C', ...working(4) })
   const mask = card({ id: 'cmbx/mask', uid: 'M', name: 'Mask', orchestrator: 'C', status: 'active', ask: { text: 'Which threshold?', at: at(22) } })
-  const cov = card({ id: 'cmbx/cov', uid: 'V', name: 'Covariance', orchestrator: 'C', column: 'awaitingReview', status: 'closed', closedAt: at(48), reviewMark: { note: 'Validated to 4%.', at: at(48) } })
+  const cov = card({ id: 'cmbx/cov', uid: 'V', name: 'Covariance', orchestrator: 'C', column: 'awaitingReview', status: 'closed', closedAt: at(48), outcome: 'Validated against 2000 simulations.', reviewMark: { note: 'Validated to 4%.', at: at(47) } })
   const beam = card({ id: 'cmbx/beam', uid: 'B', name: 'Beam', orchestrator: 'C', ...working(2) })
   const channel = named(compose([chair, kappa, mask, cov, beam]), 'channel:cmbx')
+  const human = { label: 'Cail' }, up = { fiber: 'C' }
   const record = (id: string, kind: string, fiber: string, minutes: number, over: Partial<BoardRecord> = {}): BoardRecord => ({ id, kind, fiber, by: { fiber }, timestamp: now - minutes * minute, ...over })
   const send = (uid: string, name: string, minutes: number, caption?: string): SentFile => ({ fullPath: `/w/${uid}/${name}`, basename: name, uid, host: 'h', timestamp: now - minutes * minute, caption })
   const records = [
-    record('r1', 'post', 'K', 120, { text: 'First pass.' }),
-    record('r2', 'asked', 'M', 22, { text: 'Which threshold?' }),
-    record('r3', 'closed', 'V', 48),
+    record('r1', 'post', 'K', 120, { to: up, text: 'First pass.' }),
+    record('r2', 'asked', 'M', 22, { to: up, text: 'Which threshold?' }),
+    record('r3', 'closed', 'V', 48, { to: up, text: 'Validated against 2000 simulations.' }),
+    record('r3m', 'closed', 'V', 47, { to: human, text: 'Validated to 4%.' }),
     record('r4', 'handed_off', 'B', 15),
-    record('r5', 'message', 'K', 100, { by: { fiber: 'C' }, text: 'Use the new beam.' }),
-    record('r6', 'human', 'C', 10, { by: { label: 'human' }, text: 'Thanks.' }),
+    record('r5', 'message', 'K', 100, { by: { fiber: 'C' }, to: { fiber: 'K' }, text: 'Use the new beam.' }),
+    record('r6', 'human', 'C', 10, { by: human, text: 'Thanks.' }),
+    record('r7', 'post', 'K', 30, { to: human, text: 'κ×tSZ at 9σ.', files: ['/w/K/spectrum.svg'] }),
   ]
-  const files = [send('K', 'deck.html', 120, 'First pass.'), send('K', 'deck.html', 31, 'The final deck.'), send('K', 'spectrum.svg', 30, '9σ.'), send('C', 'plan.md', 300)]
+  const files = [send('K', 'deck.html', 120, 'First pass.'), send('K', 'deck.html', 33, 'The final deck.'), send('K', 'spectrum.svg', 30, '9σ.'), send('C', 'plan.md', 300)]
   const launches = new Map([['K', [now - 60 * minute]], ['B', [now - 35 * minute]]])
+  const waiting = new Map([['V', { id: 'r3m' }]])
   const stream = (over: Partial<Parameters<typeof composeStream>[0]> = {}): Entry[] =>
-    composeStream({ channel, records, files, launches: card => launches.get(card.uid!) ?? [], now, reachMs, ...over })
+    composeStream({ channel, records, files, waiting, launches: card => launches.get(card.uid!) ?? [], now, reachMs, ...over })
   const said = (entries: Entry[]) => entries.map(entry => entry.kind === 'mark' ? [entry.card.id, entry.what] : [entry.card.id, entry.kind, entry.text, entry.waiting])
 
   it('holds what was addressed to the human, each worker once, with marks of threads starting and stopping between, oldest first', () => {
     expect(said(stream())).toStrictEqual([
       ['cmbx', 'file', 'plan.md', false],
       ['cmbx/kappa', 'started'],
-      ['cmbx/cov', 'review', 'Validated to 4%.', true],
+      // Closed to its chair, a mark; marked for the human's review, an item, with its note.
+      ['cmbx/cov', 'closed'],
+      ['cmbx/cov', 'close', 'Validated to 4%.', true],
       ['cmbx/beam', 'started'],
-      // A deck sent twice is drawn at its newest send, and files sent together are one item with their captions.
-      ['cmbx/kappa', 'file', 'The final deck. · 9σ.', false],
+      // The post to the human carries the plot it attached, which is not also a send of its own; the deck, sent alone, is not drawn.
+      ['cmbx/kappa', 'post', 'κ×tSZ at 9σ.', false],
+      // Asked of its chair, the open question is the card's.
       ['cmbx/mask', 'ask', 'Which threshold?', true],
       ['cmbx/beam', 'handed off'],
     ])
-    const kappaFiles = stream().find(entry => entry.kind === 'file' && entry.card === kappa)
-    expect(kappaFiles?.kind === 'file' && kappaFiles.files.map(file => file.basename)).toStrictEqual(['deck.html', 'spectrum.svg'])
+    const post = stream().find(entry => entry.kind === 'post')
+    expect(post?.kind === 'post' && post.files.map(file => [file.basename, file.caption])).toStrictEqual([['spectrum.svg', '9σ.']])
   })
 
-  it('keeps posts, the human\'s lines and workers\' messages to each other out; a close for review is its item, not also a mark', () => {
+  it('draws a worker\'s sends together as one item, each path at its newest send', () => {
+    const sent = stream({ records: records.filter(each => each.id !== 'r7') }).find(entry => entry.kind === 'file' && entry.card === kappa)
+    expect(sent?.kind === 'file' && [sent.text, sent.files.map(file => file.basename)]).toStrictEqual(['The final deck. · 9σ.', ['deck.html', 'spectrum.svg']])
+  })
+
+  it('keeps out what was not addressed to the human: posts and closes to others, the human\'s lines, workers\' messages to each other', () => {
     const entries = stream()
-    expect(entries.some(entry => entry.id === 'r1' || entry.id === 'r5' || entry.id === 'r6')).toBe(false)
-    expect(entries.some(entry => entry.kind === 'mark' && entry.card === cov)).toBe(false)
+    expect(entries.some(entry => ['r1', 'r2', 'r3', 'r5', 'r6'].includes(entry.id) && entry.kind !== 'mark')).toBe(false)
     // A tempered close is a mark.
-    const done = record('r7', 'closed', 'B', 5, { verdict: 'tempered' })
+    const done = record('r8', 'closed', 'B', 5, { verdict: 'tempered' })
     expect(said(stream({ records: [...records, done] })).at(-1)).toStrictEqual(['cmbx/beam', 'closed'])
   })
 
-  it('puts the card\'s open ask in when the board holds none, and shows the item that waits over a newer one', () => {
-    const asked = stream({ records: records.filter(each => each.id !== 'r2') }).find(entry => entry.card === mask)
-    expect(asked && asked.kind !== 'mark' && [asked.kind, asked.at, asked.waiting]).toStrictEqual(['ask', now - 22 * minute, true])
-    const later = stream({ files: [...files, send('M', 'mask.svg', 1)] }).find(entry => entry.card === mask)
-    expect(later?.kind).toBe('ask')
+  it('waits where the daemon says a line waits, else where a card waits; the item that waits shows over a newer one', () => {
+    // Without a line the daemon names, the card's close for review is its own item.
+    const review = stream({ records: records.filter(each => each.id !== 'r3m'), waiting: new Map() }).find(entry => entry.card === cov && entry.kind !== 'mark')
+    expect(review && review.kind !== 'mark' && [review.kind, review.text, review.waiting]).toStrictEqual(['close', 'Validated to 4%.', true])
+    // A question to the human that the daemon names is the item, not the card's copy of it.
+    const asked = [...records, record('r9', 'asked', 'M', 21, { to: human, text: 'Which threshold, 5σ or 3σ?' })]
+    const ask = stream({ records: asked, waiting: new Map([['M', { id: 'r9' }]]) }).find(entry => entry.card === mask)
+    expect(ask && ask.kind !== 'mark' && [ask.id, ask.waiting]).toStrictEqual(['r9', true])
+    // A post the human has not answered waits; the chair's post answered by the human does not.
+    const posted = [...records, record('r10', 'post', 'C', 8, { to: human, text: 'Two calls for you today.' })]
+    const post = stream({ records: posted, waiting: new Map([['C', { id: 'r10' }]]) }).find(entry => entry.card === chair)
+    expect(post && post.kind !== 'mark' && [post.kind, post.waiting]).toStrictEqual(['post', true])
+    expect(stream({ files: [...files, send('M', 'mask.svg', 1)] }).find(entry => entry.card === mask)?.kind).toBe('ask')
+  })
+
+  it('leaves a closing post to the card\'s outcome rather than its words', () => {
+    const closed = card({ ...cov, id: 'cmbx/cov', reviewMark: undefined, orchestrator: undefined, shuttleChannel: 'cmbx' })
+    const lone = named(compose([chair, closed]), 'channel:cmbx')
+    const item = stream({ channel: lone, records: [record('c1', 'closed', 'V', 40, { to: human, text: 'Validated against 2000 simulations.' })], waiting: new Map([['V', { id: 'c1' }]]) }).find(entry => entry.card === closed)
+    expect(item && item.kind !== 'mark' && [item.kind, item.text, item.waiting]).toStrictEqual(['close', '', true])
   })
 
   it('judges what is new by when it arrived here, and leaves what fell out of the board\'s reach', () => {
-    const late = record('r8', 'asked', 'M', 30, { text: 'Which threshold?', received_at: now - minute })
-    const item = stream({ records: [late] }).find(entry => entry.card === mask)
+    const late = record('r11', 'asked', 'M', 30, { to: human, text: 'Which threshold?', received_at: now - minute })
+    const item = stream({ records: [late], waiting: new Map([['M', { id: 'r11' }]]) }).find(entry => entry.card === mask)
     expect(item && item.kind !== 'mark' && [item.at, item.arrived]).toStrictEqual([now - 30 * minute, now - minute])
     expect(said(stream({ reachMs: 40 * minute })).map(entry => entry[0])).not.toContain('cmbx')
   })

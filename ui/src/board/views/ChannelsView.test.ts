@@ -27,7 +27,7 @@ const BOARD: Record<string, BoardRecord[]> = {
   C: [
     record({ id: 'b1', kind: 'post', fiber: 'T', text: 'κ×tSZ is measured to 9σ.' }, 30),
     record({ id: 'brd-human-b2', kind: 'human', fiber: 'T', by: { label: 'human' }, text: 'Show the nulls too?' }, 25),
-    record({ id: 'b3', kind: 'asked', fiber: 'M', text: 'Mask at **5σ** or 3σ?' }, 20),
+    record({ id: 'b3', kind: 'asked', fiber: 'M', to: { fiber: 'C' }, text: 'Mask at **5σ** or 3σ?' }, 20),
     record({ id: 'b4', kind: 'handed_off', fiber: 'B' }, 3),
   ],
 }
@@ -38,7 +38,7 @@ const SENT: SentFile[] = [
 ]
 
 /** A daemon that answers the Channels view's reads, records its writes, and fails the ones `fail` names. */
-function daemon(fail: string[] = [], stored = new Map<string, string>(), pinned: Record<string, number> = {}, kept: { dismissed?: string[]; order?: { keys: string[]; at: number } } = {}) {
+function daemon(fail: string[] = [], stored = new Map<string, string>(), pinned: Record<string, number> = {}, kept: { dismissed?: string[]; order?: { keys: string[]; at: number }; board?: Record<string, BoardRecord[]>; waiting?: Record<string, { id: string; at: number }> } = {}) {
   const posts: Array<[string, Record<string, unknown>]> = [], families: string[] = []
   vi.stubGlobal('localStorage', { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value) })
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
@@ -51,7 +51,7 @@ function daemon(fail: string[] = [], stored = new Map<string, string>(), pinned:
     if (url.includes('/board/family')) {
       const params = new URL(url, 'http://test').searchParams
       families.push(params.get('fiber')!)
-      return new Response(JSON.stringify({ records: (BOARD[params.get('fiber')!] ?? []).filter(each => each.timestamp >= Number(params.get('since_ms'))), reach_ms: 14 * day }))
+      return new Response(JSON.stringify({ records: ((kept.board ?? BOARD)[params.get('fiber')!] ?? []).filter(each => each.timestamp >= Number(params.get('since_ms'))), reach_ms: 14 * day, waiting: kept.waiting ?? {} }))
     }
     return new Response('{}')
   }))
@@ -375,9 +375,27 @@ it('shows a close awaiting review with its outcome, clamped, when it has no tape
   const cov = card({ id: 'cmbx/cov', uid: 'V', name: 'Covariance', orchestrator: 'C', column: 'awaitingReview', status: 'closed', closedAt: at(40), outcome: 'Validated against **2000** simulations.', reviewMark: { note: 'Agrees to 4%.', at: at(40) } })
   const { host } = await mount([chair, tsz, mask, beam, cov])
   const review = item(host, 'cov')
-  expect([review.dataset.kind, review.hasAttribute('data-waiting'), review.querySelector('.kbn-ch-kind')?.textContent]).toStrictEqual(['review', true, 'for review'])
+  expect([review.dataset.kind, review.hasAttribute('data-waiting'), review.querySelector('.kbn-ch-kind')?.textContent]).toStrictEqual(['close', true, 'for review'])
   expect(review.querySelector('.kbn-ch-item-text')?.textContent?.trim()).toBe('Agrees to 4%.')
   expect(review.querySelector('.kbn-ch-outcome strong')?.textContent).toBe('2000')
   // Nowhere else: a working thread's outcome is not drawn.
   expect(host.querySelectorAll('.kbn-ch-outcome')).toHaveLength(1)
+})
+
+it('draws a post to the human with what it attached, gold while the daemon says it waits; a closing post is drawn once, as the outcome', async () => {
+  const human = { label: 'Cail' }
+  const closed = card({ id: 'cmbx/cov', uid: 'V', name: 'Covariance', orchestrator: 'C', column: 'awaitingReview', status: 'closed', closedAt: at(40), outcome: 'Validated against **2000** simulations.' })
+  const board = { C: [
+    ...BOARD.C,
+    record({ id: 'b5', kind: 'post', fiber: 'C', to: human, text: 'Two calls for you today.', files: ['/w/tsz/deck.html'] }, 4),
+    record({ id: 'b6', kind: 'closed', fiber: 'V', to: human, text: 'Validated against **2000** simulations.' }, 40),
+  ] }
+  daemon([], undefined, {}, { board, waiting: { C: { id: 'b5', at: Date.now() - 4 * minute } } })
+  const { host } = await mount([chair, tsz, beam, closed])
+  expect(host.querySelector('[data-channel="channel:cmbx"]')!.hasAttribute('data-waiting')).toBe(true)
+  const post = item(host, 'cmbx')
+  expect([post.dataset.kind, post.hasAttribute('data-waiting'), post.querySelector('.kbn-ch-kind')?.textContent, post.querySelector('.kbn-ch-item-text')?.textContent?.trim()]).toStrictEqual(['post', true, 'posted', 'Two calls for you today.'])
+  expect([...post.querySelectorAll('.kbn-ch-thumb-name')].map(name => name.textContent)).toStrictEqual(['deck.html'])
+  const close = item(host, 'cov')
+  expect([close.dataset.kind, close.querySelector('.kbn-ch-item-text'), close.querySelector('.kbn-ch-outcome strong')?.textContent]).toStrictEqual(['close', null, '2000'])
 })

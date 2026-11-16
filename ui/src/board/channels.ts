@@ -85,8 +85,9 @@ export function waitsSince(card: KanbanCard): number {
  * that of the nearest card filed above it; without one anywhere above it, its
  * top-level constitution's office names the channel (the named channel that
  * shares the office's charter name, when there is one), else that top-level
- * is a channel of its own. A pin counts until a later unpin; a hide counts
- * until a later show or a later wait.
+ * is a channel of its own. Something in it waits when a card waits
+ * (`waitsSince`) or the daemon's `waiting` names a member. A pin counts until
+ * a later unpin; a hide counts until a later show or a later wait.
  */
 export function composeChannels(input: {
   cards: readonly KanbanCard[]
@@ -95,6 +96,8 @@ export function composeChannels(input: {
   dismissed: readonly string[]
   /** Pinned channel keys, each with its latest pin. */
   pinned: ReadonlyMap<string, number>
+  /** When each fiber's line began waiting on the human, as the daemon says. */
+  waiting: ReadonlyMap<string, { at: number }>
   now: number
 }): Channel[] {
   const { cards, parentOf, names, dismissed, pinned, now } = input
@@ -174,7 +177,7 @@ export function composeChannels(input: {
     const seats = members.filter(card => card.shuttleSeat && !inside(card).some(above => above.shuttleSeat))
     const heads = members.filter(card => !inside(card).length)
     const seat = recent(seats.filter(card => card.shuttleKind !== 'standing')) ?? recent(seats) ?? recent(heads) ?? recent(members)!
-    const newest = Math.max(0, ...members.map(waitsSince))
+    const newest = Math.max(0, ...members.map(card => Math.max(waitsSince(card), input.waiting.get(fiberOf(card))?.at ?? 0)))
     const active = Math.max(0, ...members.map(lastActive))
     const isPinned = (pinned.get(key) ?? -Infinity) > since('pin', key)
     const waiting = newest > 0
@@ -217,16 +220,19 @@ export function reordered(order: readonly string[], shown: readonly string[]): s
   return order.map(key => moving.has(key) ? shown[next++] : key)
 }
 
-/** Something a worker addressed to the human: an ask, a close for their review, or files sent to them. */
+/** Who a line is for, when it is a person: a label with no fiber or session. */
+export const toPerson = (to: BoardRecord['to']): boolean => !!to?.label && !to.fiber && !to.session
+
+/** Something a worker addressed to the human: a question, a post, a close, or files sent to them. */
 export interface Item {
-  kind: 'ask' | 'review' | 'file'
+  kind: 'ask' | 'post' | 'close' | 'file'
   id: string
   card: KanbanCard
   /** When it was said, by its writer's clock: its place in the stream. */
   at: number
   /** When it reached this daemon: what is new to the reader. */
   arrived: number
-  /** The question, the review note, or the files' captions (else their names). */
+  /** The question, the post, a close's review note, or the files' captions (else their names); a closing post is the card's outcome, not this. */
   text: string
   files: SentFile[]
   /** It waits on the human now. */
@@ -236,22 +242,31 @@ export interface Item {
 export interface Mark { kind: 'mark'; id: string; card: KanbanCard; at: number; what: 'started' | 'closed' | 'handed off' }
 export type Entry = Item | Mark
 
+/** The board records that are a fiber's lines, by the item each makes. */
+const LINES: Readonly<Record<string, Item['kind']>> = { asked: 'ask', post: 'post', closed: 'close' }
+
 /**
- * A channel's stream, oldest first: each worker's one item, the one that
- * waits on the human if any, else its latest (an ask, a close for review, or
- * a burst of files it sent, each path at its newest send), and between them a
- * mark for every thread started (`launches`), closed or handed off within the
- * board's reach. A close for review is its item, not also a mark.
+ * A channel's stream, oldest first. Its items are the posts, questions and
+ * closes addressed to the human (each carrying the files it attached) and the
+ * files sent to the human on their own, each path at its newest send and a
+ * worker's sends close together one item. A line waits when the daemon's
+ * `waiting` names it; a card that waits with no such line (an open question,
+ * a close for the human's review) is its own waiting item. Each worker shows
+ * once: the item that waits, else its latest. Between the items, a mark for
+ * every thread started (`launches`), handed off, or closed to anyone but the
+ * human, within the board's reach.
  */
 export function composeStream(input: {
   channel: Channel
   records: readonly BoardRecord[]
   files: readonly SentFile[]
+  /** The line each fiber waits on the human with, as the daemon says. */
+  waiting: ReadonlyMap<string, { id: string }>
   launches: (card: KanbanCard) => readonly number[]
   now: number
   reachMs: number
 }): Entry[] {
-  const { channel, records, files, launches, now, reachMs } = input
+  const { channel, records, files, waiting, launches, now, reachMs } = input
   const reach = now - reachMs
   const named = new Map<string, KanbanCard>()
   for (const card of channel.everyone) for (const ref of [card.uid, card.id]) if (ref && !named.has(ref)) named.set(ref, card)
@@ -262,30 +277,34 @@ export function composeStream(input: {
     return item
   }
   const mark = (card: KanbanCard, what: Mark['what'], at: number, id: string): void => { marks.push({ kind: 'mark', id, card, at, what }) }
-  const reviewAt = (card: KanbanCard): number => card.reviewMark ? instant(card.reviewMark.at, card.closedAt) || 1 : 0
+  // A file a line attached is that line's, not a send of its own.
+  const claimed = new Set<SentFile>()
+  const attached = (record: BoardRecord): SentFile[] => (record.files ?? []).map(path => {
+    const send = files.find(file => file.fullPath === path && file.uid === record.fiber && Math.abs(file.timestamp - record.timestamp) <= BURST_MS)
+    if (send) claimed.add(send)
+    return send ?? { fullPath: path, basename: path.split('/').pop() ?? path, uid: record.fiber, timestamp: record.timestamp }
+  })
   for (const record of records) {
     const card = record.fiber ? named.get(record.fiber) : undefined
     if (!card || record.timestamp < reach) continue
-    if (record.kind === 'asked') say({ kind: 'ask', id: record.id, card, at: record.timestamp, arrived: arrived(record), text: record.text?.trim() ?? '', files: [], waiting: false })
+    const files = attached(record), kind = LINES[record.kind]
     if (record.kind === 'handed_off') mark(card, 'handed off', record.timestamp, record.id)
-    // The close that put it to the human's review is that review's item.
-    if (record.kind === 'closed' && !(card.reviewMark && !record.verdict && Math.abs(reviewAt(card) - record.timestamp) <= BURST_MS)) mark(card, 'closed', record.timestamp, record.id)
+    else if (kind && toPerson(record.to)) {
+      const text = record.text?.trim() ?? ''
+      say({ kind, id: record.id, card, at: record.timestamp, arrived: arrived(record), text: kind === 'close' && text === card.outcome?.trim() ? '' : text, files, waiting: waiting.get(fiberOf(card))?.id === record.id })
+    } else if (kind === 'close') mark(card, 'closed', record.timestamp, record.id)
   }
   for (const card of channel.everyone) {
     for (const at of launches(card)) if (at >= reach) mark(card, 'started', at, `started:${fiberOf(card)}:${at}`)
-    // The open question is the newest ask the board holds from it, else the card's own.
-    if (card.ask && card.status === 'active') {
-      const asked = items.get(fiberOf(card))?.filter(item => item.kind === 'ask').at(-1)
-      if (asked) asked.waiting = true
-      else { const at = waitsSince(card); say({ kind: 'ask', id: `ask:${fiberOf(card)}`, card, at, arrived: at, text: card.ask.text, files: [], waiting: true }) }
-    }
-    const at = reviewAt(card)
-    if (at >= reach) say({ kind: 'review', id: `review:${fiberOf(card)}:${at}`, card, at, arrived: at, text: card.reviewMark!.note, files: [], waiting: threadState(card) === 'to-review' })
+    const at = waitsSince(card)
+    if (!at || items.get(fiberOf(card))?.some(item => item.waiting)) continue
+    if (card.ask && card.status === 'active') say({ kind: 'ask', id: `ask:${fiberOf(card)}`, card, at, arrived: at, text: card.ask.text, files: [], waiting: true })
+    else say({ kind: 'close', id: `review:${fiberOf(card)}:${at}`, card, at, arrived: at, text: card.reviewMark?.note ?? '', files: [], waiting: true })
   }
   // Each path at its newest send; a worker's sends this close together are one item.
   const sends = new Map<string, SentFile>()
   for (const file of files) {
-    if (file.timestamp < reach || !file.uid) continue
+    if (file.timestamp < reach || !file.uid || claimed.has(file)) continue
     const key = `${file.host ?? ''}:${file.fullPath}`
     if ((sends.get(key)?.timestamp ?? -Infinity) < file.timestamp) sends.set(key, file)
   }
@@ -299,7 +318,8 @@ export function composeStream(input: {
   const stream: Entry[] = marks
   for (const list of items.values()) {
     for (const item of list) if (item.kind === 'file') item.text = [...new Set(item.files.flatMap(file => file.caption?.trim() || []))].join(' · ') || item.files.map(file => file.basename).join(', ')
-    stream.push(list.find(item => item.waiting) ?? [...list].sort((a, b) => a.at - b.at).at(-1)!)
+    const latest = [...list].sort((a, b) => a.at - b.at)
+    stream.push(latest.filter(item => item.waiting).at(-1) ?? latest.at(-1)!)
   }
   return stream.sort((a, b) => a.at - b.at || a.id.localeCompare(b.id))
 }

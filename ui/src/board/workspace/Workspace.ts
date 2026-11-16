@@ -345,12 +345,12 @@ export class Workspace {
     else this.open(card, this.isActive ? this.origin : this.opts.origin(), view)
     void this.look(card)
   }
-  /** What a constitution last posted: its newest post or ask the family board holds, its open question, or its review note. */
+  /** What a constitution last posted: its newest post, question or closing post the family board holds, its open question, or its review note. */
   private said(card: KanbanCard): { text: string; at: number } | undefined {
     const index = this.graph(), root = index.family(index.card(card)).root, uid = card.uid ?? card.id
     this.board.read([root.uid ?? root.id])
     const posts = this.board.records([root.uid ?? root.id])
-      .filter(record => record.fiber === uid && (record.kind === 'post' || record.kind === 'asked') && record.text?.trim())
+      .filter(record => record.fiber === uid && ['post', 'asked', 'closed'].includes(record.kind) && record.text?.trim())
       .map(record => ({ text: record.text!.trim(), at: record.timestamp }))
     if (card.ask && card.status === 'active') posts.push({ text: card.ask.text, at: Date.parse(card.ask.at) || 0 })
     if (index.state(card) === 'to-review' && card.reviewMark?.note) posts.push({ text: card.reviewMark.note, at: Date.parse(card.reviewMark.at) || 0 })
@@ -361,7 +361,7 @@ export class Workspace {
     const cards = this.opts.cards()
     if (this.handles?.cards !== cards || this.handles.names !== this.charterNames) {
       const index = this.graph(), of = new Map<string, string>()
-      for (const channel of composeChannels({ cards, parentOf: each => index.parentOf(each), names: this.charterNames, dismissed: [], pinned: new Map(), now: Date.now() })) {
+      for (const channel of composeChannels({ cards, parentOf: each => index.parentOf(each), names: this.charterNames, dismissed: [], pinned: new Map(), waiting: new Map(), now: Date.now() })) {
         // A lone constitution's channel is that constitution, named by its slug as every console names it.
         for (const member of channel.everyone) of.set(channelFiber(member), channel.chaired ? handle(channel) : slug(channel.seat))
       }

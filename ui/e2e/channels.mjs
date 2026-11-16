@@ -86,17 +86,19 @@ try {
     // What its workers addressed to the human, each worker once, with marks of threads starting and stopping between.
     await page.waitForFunction(() => document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-item').length === 4)
     const said = await page.evaluate(lines)
-    assert.deepEqual(said.filter(([, kind]) => ['ask', 'review', 'file'].includes(kind)), [['cmbx', 'file'], ['covariance', 'review'], ['kappa-tsz', 'file'], ['foregrounds', 'ask']])
+    assert.deepEqual(said.filter(([, kind]) => ['ask', 'post', 'close', 'file'].includes(kind)), [['covariance', 'close'], ['kappa-tsz', 'post'], ['foregrounds', 'ask'], ['cmbx', 'post']])
+    // Closed to its chair, a mark; marked for the human's review, an item.
+    assert.ok(said.some(([who, what]) => who === 'covariance' && what === 'closed'), 'the close to its chair is a mark')
     assert.ok(said.some(([who, what]) => who === 'beam' && what === 'started'), 'the silent beam window shows only as a mark')
     // The channel's head carries its chair's pages; its console speaks to its chair, by slugs.
     assert.ok(await page.locator('.kbn-ch-head .kbn-ch-pages [data-part="constitution"]').isVisible())
     assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-band-title').textContent(), 'cmbx')
     assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-worker-message').getAttribute('data-placeholder'), 'Message cmbx')
-    // The deck it sent twice is drawn once, at its newest send, beside its plot: thumbnails side by side.
+    // Its post carries the deck and the plot it attached, thumbnails side by side; sent before, the deck is not drawn again.
     const kappa = page.locator('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"]')
     assert.equal(await kappa.locator('.kbn-ch-thumb').count(), 2)
     // The close for review, without a tapestry, says what it came to.
-    assert.equal(await page.locator('.kbn-ch-item[data-kind="review"] .kbn-ch-outcome').count(), 1)
+    assert.equal(await page.locator('.kbn-ch-item[data-kind="close"] .kbn-ch-outcome').count(), 1)
     // The stream opens on its newest item.
     await page.waitForFunction(() => { const el = document.querySelector('.kbn-ch > .kbn-ch-stream'); return el.scrollHeight - el.scrollTop - el.clientHeight <= 24 }, null, { timeout: 5000 })
     await fits(page)
@@ -117,7 +119,8 @@ try {
       await page.locator('.kbn-ch').focus()
       await page.keyboard.press('j')
       await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'unions')
-      await page.waitForFunction(() => document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-item').length === 2)
+      // Its chair's post and a hub's figure, both to the human, and a thread's question.
+      await page.waitForFunction(() => document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-item').length === 3)
       await shot(page, 'desktop-busy')
       await page.keyboard.press('[')
       assert.equal(await page.locator('.kbn-ch-layout[data-rail-hidden]').count(), 1)
@@ -177,7 +180,7 @@ try {
     assert.equal(await page.locator('.kbn-ch-pick-unread').count(), 0, 'nothing unread once each channel is read')
     const post = async text => page.evaluate(text => {
       const board = window.__harness.channels.board, like = board.find(record => record.root === 'french') ?? board[0]
-      board.push({ ...like, id: `brd-fresh-${board.length}`, kind: 'asked', fiber: 'french', by: { fiber: 'french' }, root: 'french', timestamp: Date.now() + 1000, received_at: Date.now() + 1000, text, files: [] })
+      board.push({ ...like, id: `brd-fresh-${board.length}`, kind: 'post', fiber: 'french', by: { fiber: 'french' }, to: { label: 'Sam' }, root: 'french', timestamp: Date.now() + 1000, received_at: Date.now() + 1000, text, files: [] })
     }, text)
     // On another channel: the rail's quiet dot.
     await post('Leçon trois est prête.')
