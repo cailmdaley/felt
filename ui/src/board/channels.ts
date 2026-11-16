@@ -87,7 +87,7 @@ export function waitsSince(card: KanbanCard): number {
  * top-level constitution's office names the channel (the named channel that
  * shares the office's charter name, when there is one), else that top-level
  * is a channel of its own. Something in it waits when a card waits
- * (`waitsSince`) or `waiting` names a member's question or close. A pin counts until
+ * (`waitsSince`) or `waiting` names a member's line. A pin counts until
  * a later unpin; a hide counts until a later show or a later wait.
  */
 export function composeChannels(input: {
@@ -97,7 +97,7 @@ export function composeChannels(input: {
   dismissed: readonly string[]
   /** Pinned channel keys, each with its latest pin. */
   pinned: ReadonlyMap<string, number>
-  /** When each fiber's question or close began waiting on the human ({@link BoardFeed.waiting}). */
+  /** When each fiber's line began waiting on the human ({@link BoardFeed.waiting}). */
   waiting: ReadonlyMap<string, { at: number }>
   now: number
 }): Channel[] {
@@ -250,8 +250,8 @@ const LINES: Readonly<Record<string, Item['kind']>> = { asked: 'ask', post: 'pos
  * A channel's stream, oldest first. Its items are the posts, questions and
  * closes addressed to the human (each carrying the files it attached) and the
  * files sent to the human on their own, each path at its newest send and a
- * worker's sends close together one item. A question or close waits when
- * `waiting` names it, a post never; a card that waits with no such line (an
+ * worker's sends close together one item. A post, question or close waits
+ * when `waiting` names it; a card that waits with no such line (an
  * open question, a close for the human's review) is its own waiting item. Each worker shows
  * once: the item that waits, else its latest. Between the items, a mark for
  * every thread started (`launches`), handed off, or closed to anyone but the
@@ -261,7 +261,7 @@ export function composeStream(input: {
   channel: Channel
   records: readonly BoardRecord[]
   files: readonly SentFile[]
-  /** The question or close each fiber waits on the human with ({@link BoardFeed.waiting}). */
+  /** The line each fiber waits on the human with ({@link BoardFeed.waiting}). */
   waiting: ReadonlyMap<string, { id: string }>
   launches: (card: KanbanCard) => readonly number[]
   now: number

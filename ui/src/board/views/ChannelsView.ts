@@ -294,7 +294,7 @@ export class ChannelsView implements TemporalView {
     if (records.ok) this.keep()
     // Every channel in the rail reads its families, for what is new in it, and so does one whose line to the human stands, to learn whether it waits.
     const board = ctx.workspace!.board
-    board.read(this.compose(ctx).filter(channel => channel.listed || channel.key === this.current || channel.members.some(card => board.unhandled.has(fiberOf(card)))).flatMap(channel => channel.families))
+    board.read(this.compose(ctx).filter(channel => channel.listed || channel.key === this.current || channel.members.some(card => board.waiting.has(fiberOf(card)))).flatMap(channel => channel.families))
   }
   /** The channels the board's cards make, with what the daemon keeps of their order, pins and hides. */
   private compose(ctx: ViewContext): Channel[] {

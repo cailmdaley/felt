@@ -423,13 +423,13 @@ it('shows a close awaiting review by its note and its tapestry, never its outcom
   expect(item(host, 'cov').querySelector('[data-item$=":lead"]')).toBe(lead)
 })
 
-it('draws a post to the human with what it attached, never gold, its pages as thumbnails alone', async () => {
+it('draws a post to the human that waits on them gold, with what it attached, its pages as thumbnails alone', async () => {
   const human = { label: 'Sam' }
   daemon([], undefined, {}, { board: { C: [...BOARD.C, record({ id: 'b5', kind: 'post', fiber: 'C', to: human, text: 'Two calls for you today.', files: ['/w/tsz/deck.html'] }, 4)] }, waiting: { C: { id: 'b5', at: Date.now() - 4 * minute } } })
   const { host } = await mount([chair, tsz, beam])
-  expect(host.querySelector('[data-channel="channel:cmbx"]')!.hasAttribute('data-waiting')).toBe(false)
+  expect(host.querySelector('[data-channel="channel:cmbx"]')!.hasAttribute('data-waiting')).toBe(true)
   const post = item(host, 'cmbx')
-  expect([post.dataset.kind, post.hasAttribute('data-waiting'), post.querySelector('.kbn-ch-kind')?.textContent, post.querySelector('.kbn-ch-item-text')?.textContent?.trim()]).toStrictEqual(['post', false, 'posted', 'Two calls for you today.'])
+  expect([post.dataset.kind, post.hasAttribute('data-waiting'), post.querySelector('.kbn-ch-kind')?.textContent, post.querySelector('.kbn-ch-item-text')?.textContent?.trim()]).toStrictEqual(['post', true, 'posted', 'Two calls for you today.'])
   expect([...post.querySelectorAll('.kbn-ch-file')].map(file => [file.classList.contains('kbn-ch-thumb'), file.querySelector('.ws-thumbnail') !== null, file.childElementCount])).toStrictEqual([[true, true, 1]])
 })
 

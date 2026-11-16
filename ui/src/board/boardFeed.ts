@@ -1,4 +1,4 @@
-import { getDaemonJson } from './daemonApi.js'
+import { getDaemonJson, postDaemonJson } from './daemonApi.js'
 
 /**
  * One family-board record as `GET /api/v1/board/family` serves it. `fiber` is
@@ -22,8 +22,12 @@ export interface BoardRecord {
   originName?: string
 }
 
-/** The line a fiber waits on the human with: its record's id and time. */
-export interface Wait { id: string; at: number }
+/**
+ * The line a fiber waits on the human with: its record's id and time, and,
+ * once its family's records hold it, its kind (`post`, `asked` or `closed`),
+ * its words and the files it attached.
+ */
+export interface Wait { id: string; at: number; kind?: string; text?: string; files?: string[] }
 
 /** When a record reached this daemon: its arrival, for a remote one, else its time. */
 export const arrived = (record: BoardRecord): number => record.received_at ?? record.timestamp
@@ -33,15 +37,16 @@ interface Family { records: Map<string, BoardRecord>; cursor: number; pending: b
 
 /** Each read of a family asks again for this much before the newest record it holds, so a record written late is not missed. */
 const OVERLAP_MS = 60_000
-/** The lines that wait on the human: a question, or a close for their review. A post addressed to them is news, never a wait. */
-const WAITS = new Set(['asked', 'closed'])
 
 /**
  * The family board's records, by family (each named by its top-level's uid),
- * over the board's reach: what Channels and a constitution's view read of
- * what a family said. `read` asks each family for what arrived since the
- * newest record it holds; a listener hears a family whose records or whose
- * waits changed.
+ * over the board's reach, and what waits on the human across the whole board:
+ * what the Desk, Channels and a constitution's view read of what a family
+ * said. `read` asks each family for what arrived since the newest record it
+ * holds; every answer also says, for the whole board, each fiber's line to the
+ * human that nothing has handled (a post, a question or a close). `clear`
+ * handles a line by hand. A listener hears a family whose records changed, or
+ * a change in what waits.
  */
 export class BoardFeed {
   /** How far back the board keeps records, as the daemon last said. */
@@ -49,7 +54,9 @@ export class BoardFeed {
   private readonly families = new Map<string, Family>()
   /** The line each fiber addressed to the human and they have not handled, over the board's whole reach, as the newest read said. */
   private lines = new Map<string, Wait>()
-  /** Of those, each fiber's question or close, once its family's records hold it. */
+  /** Each fiber's line the human cleared here, by its time: it stays handled whatever a read already under way says. */
+  private readonly cleared = new Map<string, number>()
+  /** `lines`, less what was cleared here, each with its record once a family holds it. */
   private waits = new Map<string, Wait>()
   private readonly base: string
   private readonly listeners = new Set<() => void>()
@@ -67,20 +74,54 @@ export class BoardFeed {
     for (const uid of uids) for (const record of this.families.get(uid)?.records.values() ?? []) all.set(record.id, record)
     return [...all.values()]
   }
-  /** Each fiber whose question or close waits on the human, by uid. */
+  /** Each fiber whose line to the human waits on them, by uid. */
   get waiting(): ReadonlyMap<string, Wait> { return this.waits }
-  /** Each fiber whose line to the human stands unhandled, a post included, by uid: whose family to read to learn whether it waits. */
-  get unhandled(): ReadonlyMap<string, Wait> { return this.lines }
   /** Whether a family's last read did not answer. */
   failed(uid: string): boolean { return !!this.families.get(uid)?.failed }
 
-  /** The kind of a record some family holds. */
-  private kind(id: string): string | undefined {
+  /** A record some family holds. */
+  private record(id: string): BoardRecord | undefined {
     for (const family of this.families.values()) {
       const record = family.records.get(id)
-      if (record) return record.kind
+      if (record) return record
     }
     return undefined
+  }
+  /** Draws `waits` again from the lines and the records; says whether what waits changed. */
+  private settle(): boolean {
+    const waits = new Map<string, Wait>()
+    for (const [uid, line] of this.lines) {
+      if ((this.cleared.get(uid) ?? -Infinity) >= line.at) continue
+      const record = this.record(line.id)
+      waits.set(uid, record ? { ...line, kind: record.kind, text: record.text, files: record.files } : line)
+    }
+    const changed = waits.size !== this.waits.size || [...waits].some(([uid, wait]) => this.waits.get(uid)?.id !== wait.id || this.waits.get(uid)?.kind !== wait.kind)
+    this.waits = waits
+    return changed
+  }
+
+  /**
+   * The human handles a fiber's line by hand: it stops waiting here at once,
+   * and the daemon is told (a `clear:<uid>:<line's time>` dismissal, which
+   * handles that line and no later one). A refused write waits again, and
+   * throws.
+   */
+  async clear(uid: string): Promise<void> {
+    const line = this.waits.get(uid)
+    if (!line) return
+    const before = this.cleared.get(uid)
+    this.cleared.set(uid, line.at)
+    this.settle()
+    this.changed()
+    try {
+      await postDaemonJson(this.base, '/api/v1/channels/dismiss', { key: `clear:${uid}:${line.at}`, fiber: uid }, 'Clear failed')
+    } catch (error) {
+      if (before === undefined) this.cleared.delete(uid)
+      else this.cleared.set(uid, before)
+      this.settle()
+      this.changed()
+      throw error
+    }
   }
 
   read(uids: Iterable<string>): void {
@@ -102,10 +143,7 @@ export class BoardFeed {
         }
         // What fell out of the board's reach leaves with it.
         for (const [id, record] of family.records) if (arrived(record) < reach) { family.records.delete(id); moved = true }
-        const waits = new Map([...this.lines].filter(([, wait]) => WAITS.has(this.kind(wait.id) ?? '')))
-        const waited = waits.size !== this.waits.size || [...waits].some(([uid, wait]) => this.waits.get(uid)?.id !== wait.id)
-        this.waits = waits
-        if (moved || failed || waited) this.changed()
+        if (this.settle() || moved || failed) this.changed()
       }, () => {
         if (family.failed) return
         family.failed = true
