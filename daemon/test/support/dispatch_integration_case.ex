@@ -663,21 +663,22 @@ defmodule Shuttle.Test.DispatchIntegrationCase do
     poller
   end
 
-  # The daemon dies: `processes` (a request in flight, say), the Poller and
-  # everything that works for the daemon are killed outright, as a hard kill
-  # would end them, with nothing settled or cleaned up. What works for it is
-  # found by ancestry, wherever it runs: any process that reaches the Poller
-  # or a killed request through `$callers` or `$ancestors` (delivery tasks,
-  # worker watchers), and any task under the daemon's task supervisor that
-  # acts for this test (work a request handler started). Terminal sessions
-  # outlive it, as they outlive a real daemon.
+  # The daemon dies: `processes` (a request in flight, say), the Poller, the
+  # requests its served API is handling, and everything that works for the
+  # daemon are killed outright, as a hard kill would end them, with nothing
+  # settled or cleaned up. What works for it is found by ancestry, wherever
+  # it runs: any process that reaches the Poller or a killed request through
+  # `$callers` or `$ancestors` (delivery tasks, worker watchers), and any task
+  # under the daemon's task supervisor that acts for this test (work a
+  # request handler started). Terminal sessions, and the commands the daemon
+  # was running, outlive it, as they outlive a real daemon.
   #
   # The kill fails rather than kill less: `holding:` names the process a
   # transport gate reported holding the work, which must be among the killed;
   # `work: true` says the daemon is mid-work in a process of its own, which
   # must be found. Afterwards nothing that worked for the daemon is alive.
   def kill_daemon!(poller, processes \\ [], opts \\ []) do
-    targets = [poller | processes]
+    targets = [poller | processes] ++ served_requests()
     work = daemon_work(targets, true) -- targets
     killed = Enum.uniq(targets ++ work)
 
@@ -693,6 +694,16 @@ defmodule Shuttle.Test.DispatchIntegrationCase do
 
     Enum.each(killed, &kill!/1)
     finish_off!(killed, 5)
+  end
+
+  # The live processes handling this test's served API's requests.
+  defp served_requests do
+    receive do
+      {:daemon_request, pid} ->
+        if Process.alive?(pid), do: [pid | served_requests()], else: served_requests()
+    after
+      0 -> []
+    end
   end
 
   # Work started while the kill ran is killed too; a daemon that keeps
@@ -985,8 +996,11 @@ defmodule Shuttle.Test.DispatchIntegrationCase do
     @behaviour Plug
     def init(owner), do: owner
 
+    # Each request process tells the owner it serves the daemon, so a
+    # daemon death ends the requests still in flight.
     def call(conn, owner) do
       Shuttle.Env.adopt_callers([owner])
+      send(owner, {:daemon_request, self()})
       ShuttleWeb.Endpoint.call(conn, ShuttleWeb.Endpoint.init([]))
     end
   end
