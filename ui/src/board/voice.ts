@@ -93,8 +93,9 @@ export interface VoiceUpdate {
  * changed, voice on or off, and `onOpen`, a page a session asked for, on any
  * screen. A tab coming back moves nothing.
  * Whichever of Rex and the board moved last holds the target: Rex takes it by coming to the front
- * or changing worker, and the board when the human clicks something it shows, while it has the
- * keyboard. Returning to the board's window takes nothing.
+ * or changing worker, and the board when the human clicks something it shows, or sets voice from
+ * the board, while it has the keyboard. Returning to the board's window takes nothing, and nor
+ * does voice coming on from anywhere else.
  */
 export class Voice {
   status: VoiceStatus | null = null
@@ -105,7 +106,6 @@ export class Voice {
   /** The constitution the board shows, once it speaks to one. */
   private sighted: KanbanCard | null = null
   private sightTimer: number | null = null
-  private couldClaim = false
   private events: EventSource | null = null
   private eventsRecorder: string | undefined
   private recorder: string | undefined
@@ -275,9 +275,6 @@ export class Voice {
         this.status = status
         if (this.expectedEnabled === status.enabled) this.expectedEnabled = null
         this.notify()
-        // Voice coming on (or following again) takes up what the board shows; the board's window coming back does not.
-        if (observing(status) && !this.couldClaim) this.claim()
-        this.couldClaim = observing(status)
       }
       success = true
     } catch {

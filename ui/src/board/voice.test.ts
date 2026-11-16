@@ -379,16 +379,16 @@ describe('live voice', () => {
       await vi.advanceTimersByTimeAsync(2_000); await settle()
       voice.dispose()
     })
-    it.each([
-      ['voice is off', status({ enabled: false, target: held })],
-    ])('changes nothing while %s, and claims the view when following returns', async (_, start) => {
-      const voice = await mounted(start)
+    it('changes nothing while voice is off, nor when it comes on elsewhere; turned on from the board, it takes the view', async () => {
+      const voice = await mounted(status({ enabled: false, target: held }))
       voice.see(worker)
       await vi.advanceTimersByTimeAsync(400); await settle()
       expect(posts).toEqual([])
       current = status({ target: held })
       await vi.advanceTimersByTimeAsync(15_000); await settle()
-      expect(posts).toEqual([{ fiber_id: 'uid-a', origin: 'owner', name: 'A' }])
+      expect([voice.status?.enabled, posts]).toEqual([true, []])
+      await voice.set({ enabled: true }); await settle()
+      expect(posts).toEqual([{ enabled: true }, { fiber_id: 'uid-a', origin: 'owner', name: 'A' }])
       voice.dispose()
     })
     it('leaves the target where it is on a fiber with no constitution, or off any fiber', async () => {
