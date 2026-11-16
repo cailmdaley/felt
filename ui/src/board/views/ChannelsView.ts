@@ -582,6 +582,8 @@ export class ChannelsView implements TemporalView {
     void this.ctx?.workspace?.globeHost.feeds.lead(item.card).then(lead => {
       const file = lead && parseDocKey(lead.key)
       if (!lead || !file || this.leads.get(key)?.doc === lead.key || !slot.isConnected) return
+      // A new tapestry takes the place of the one drawn before.
+      this.drop(key)
       const open = button('kbn-ch-file kbn-ch-thumb', '', () => { this.returnTo = key; this.ctx?.workspace?.openPage(item.card, lead.key) })
       open.dataset.item = key
       open.title = `Open ${lead.name}`
@@ -596,7 +598,7 @@ export class ChannelsView implements TemporalView {
     const kept = this.thumbs.get(key)
     if (kept) return kept
     const thumbnail: Thumbnail = new Thumbnail({
-      key, shuttleBase: this.ctx?.shuttleBase ?? '', file: { fullPath: file.fullPath, owner, basename: file.basename }, fallback: file.basename, captioned: true,
+      key, shuttleBase: this.ctx?.shuttleBase ?? '', file: { fullPath: file.fullPath, owner, basename: file.basename }, fallback: file.basename,
       className: 'kbn-ch-thumb-face', pageWidth: 1200,
       // Under the reader nothing here is seen, so nothing here is worth a live body.
       priority: () => thumbnail.near && !this.ctx?.workspace?.isActive ? 2 : 0,
@@ -608,13 +610,13 @@ export class ChannelsView implements TemporalView {
   }
   /** Lets go of the thumbnails the stream no longer wants. */
   private sweepThumbs(wanted: ReadonlySet<string>): void {
-    for (const [key, thumbnail] of this.thumbs) {
-      if (wanted.has(key)) continue
-      this.near?.unobserve(thumbnail.el)
-      thumbnail.dispose()
-      this.thumbs.delete(key)
-      this.leads.delete(key)
-    }
+    for (const key of this.thumbs.keys()) if (!wanted.has(key)) this.drop(key)
+  }
+  private drop(key: string): void {
+    const thumbnail = this.thumbs.get(key)
+    if (thumbnail) { this.near?.unobserve(thumbnail.el); thumbnail.dispose() }
+    this.thumbs.delete(key)
+    this.leads.delete(key)
   }
 
   /** Writes a channel's unpin, hide or show, counting at once here; a write that fails is taken back and said. */
@@ -721,7 +723,12 @@ export class ChannelsView implements TemporalView {
    */
   private gestures(root: HTMLElement): () => void {
     const onSurface = (target: EventTarget | null): boolean => !this.ctx?.workspace?.isActive && !!(target as Element | null)?.closest?.('.kbn-ch, .kbn-ch-rail')
-    const swipe = (rightward: boolean): void => { if (!rightward) { if (this.channel) this.setRail(true) } else this.setRail(false) }
+    // Leftward over a phone's rail goes back to the channel last read there.
+    const swipe = (rightward: boolean): void => {
+      if (rightward) this.setRail(false)
+      else if (this.channel) this.setRail(true)
+      else if (isMobileViewport() && this.channels.some(channel => channel.key === stored(LAST))) this.open(stored(LAST), true, false)
+    }
     let start: { x: number; y: number } | null = null
     let travel = 0, last = 0
     const down = (event: TouchEvent): void => {

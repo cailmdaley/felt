@@ -218,7 +218,7 @@ A channel's chair is its topmost seat, a non-standing one first, then the most r
 1. A channel shows what its workers addressed to you, one item per worker. Posts to the family and messages between workers stay out.
 2. A dot means one of two things: gold, waiting on you (a question, or work for review); ink, new to you since you last read the channel here.
 3. Choosing an item opens that constitution's [view](#a-constitutions-view). The console says whom you are talking to.
-4. Rex and voice follow your clicks and nothing else: an item, a page, a thread's row. Opening, paging or returning to a channel moves nothing, and nothing moves on a timer, when you come back to the window, when the board loads or reloads, or when a session asks the board to show a page.
+4. Rex and voice follow your clicks and nothing else: an item, a page, a thread's row. Opening, paging or returning to a channel moves nothing, and nothing moves on a timer, when you come back to the window, when voice comes on from anywhere but the board, when the board loads or reloads, or when a session asks the board to show a page.
 5. Each thing shows once on the screen; a page or a figure is a thumbnail that opens it.
 6. The board remembers where you were and nothing else per device: what the rail lists, the pins and the order are the same on every device.
 
@@ -229,7 +229,7 @@ Drag a channel to move it (on a phone, hold it still, then drag), or focus it an
 Right-click a channel, hold it and lift, press the context-menu key or Shift+F10 on it, or use the menu icon in its header for its menu: **Hide** takes it out of the rail until something new waits in it, **Pin** keeps it in the rail and **Unpin** lets it go, and **Move to bottom**.
 The order, pins and hides are kept by the daemon (`shuttle channels order` and `dismiss`), so every screen agrees.
 **Jump to** at its top (`/`, or the bar's Find) finds any channel by its name or its members' names and paths, hidden ones too, marked so, and lists every sent document it matches, from any fiber; opening a channel found brings it back to the rail.
-`[`, the rail icon, or a sideways swipe hides and shows the rail; on a phone the rail is the first screen and a channel fills it, and a swipe or the back arrow returns. Where the view is narrower than about 1100 pixels, a half-screen window for one, the rail is a drawer drawn in over the stream, ending above the console.
+`[`, the rail icon, or a sideways swipe hides and shows the rail; on a phone the rail is the first screen and a channel fills it; a swipe or the back arrow returns to the rail, leaving the channel, and a leftward swipe goes back to it. Where the view is narrower than about 1100 pixels, a half-screen window for one, the rail is a drawer drawn in over the stream, ending above the console.
 The page carries no key hints: `?` lists Channels' keys with the rest.
 Documents of a fiber the board does not hold are read from their owner; a fiber its owner confirms missing files its documents under **Unfiled** on their byte-owning host, and an unreachable owner does not count as a missing fiber.
 

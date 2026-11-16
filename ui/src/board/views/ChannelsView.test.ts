@@ -365,6 +365,11 @@ it('on a phone, reads a channel only while it is the screen: it resumes on the r
   expect(read).toBeGreaterThan(0)
   host.querySelector<HTMLButtonElement>('.kbn-ch-back')!.click()
   expect(host.querySelector('.kbn-ch-layout')!.hasAttribute('data-channel')).toBe(false)
+  // A leftward swipe over the rail goes back to it.
+  const rail = host.querySelector('.kbn-ch-rail')!
+  rail.dispatchEvent(Object.assign(new Event('touchstart', { bubbles: true }), { touches: [{ clientX: 300, clientY: 300 }] }))
+  rail.dispatchEvent(Object.assign(new Event('touchend', { bubbles: true }), { changedTouches: [{ clientX: 150, clientY: 305 }] }))
+  expect([shown(host), host.querySelector('.kbn-ch-layout')!.hasAttribute('data-rail-hidden')]).toStrictEqual(['cmbx', true])
 })
 
 it('leaves the channel\'s head as it stands when only its stream changes, so its focus and menus survive a poll', async () => {
