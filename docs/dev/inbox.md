@@ -441,6 +441,7 @@ Each later pass advances an open batch from its record alone, never sending its 
 
 “Unconfirmed” is every outcome but a confirmation: `unknown`, a Claude `queued` or `submitted`, a Pi `queued`, and no receipt at all.
 Each pass reads a Claude or Pi conversation's transcript again from `transcript_offset` to its end and stops there, without waiting, whether or not the send's receipt was recorded.
+A Claude pass reads at most 8 MiB past the offset and passes over any row over 1 MiB, such as a screenshot's tool result; Pi's passes over rows over 2 MiB.
 A `queued` send to a conversation that is still the receiver waits for its transcript rather than retrying, since the receiver holds it.
 Exhausting the retry does not prevent a later roll-forward to another receiver.
 A fiber with no worker settles only the first three rows and hook claims, and leaves the rest to the next receiver.

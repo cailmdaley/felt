@@ -418,6 +418,9 @@ func observeClaudeTurn(ctx context.Context, f *os.File, path, sessionID, uuid, c
 		reader = bufio.NewReaderSize(f, 64<<10)
 	}
 	var pending []byte
+	// A row over 1 MiB, such as a screenshot's tool result, is discarded and
+	// the rows after it are read.
+	discard := false
 	ancestry := map[string]bool{}
 	total := 0
 	ticker := time.NewTicker(25 * time.Millisecond)
@@ -439,9 +442,15 @@ func observeClaudeTurn(ctx context.Context, f *os.File, path, sessionID, uuid, c
 			fragment, err = reader.ReadSlice('\n')
 		}
 		total += len(fragment)
-		pending = append(pending, fragment...)
-		if len(pending) > 1<<20 || total > 8<<20 {
+		if total > 8<<20 {
 			return stage, fmt.Errorf("receiver evidence exceeds bounded scan")
+		}
+		if !discard {
+			pending = append(pending, fragment...)
+			discard = len(pending) > 1<<20
+		}
+		if discard {
+			pending = nil
 		}
 		if len(fragment) > 0 && fragment[len(fragment)-1] == '\n' {
 			var row struct {
@@ -490,7 +499,7 @@ func observeClaudeTurn(ctx context.Context, f *os.File, path, sessionID, uuid, c
 					ancestry[row.UUID] = true
 				}
 			}
-			pending = nil
+			pending, discard = nil, false
 		}
 		if err == nil || errors.Is(err, bufio.ErrBufferFull) {
 			continue

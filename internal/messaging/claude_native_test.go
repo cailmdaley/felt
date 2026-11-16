@@ -460,6 +460,48 @@ func TestConsumeConfirmsAClaudeBatchWhoseReceiptWasNeverRecorded(t *testing.T) {
 	}
 }
 
+// A transcript row over 1 MiB, such as a screenshot's tool result, is passed
+// over: a queued batch behind one is confirmed by the rows that follow it.
+func TestConsumeConfirmsAClaudeBatchPastATranscriptRowOver1MiB(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	_, sent := nativeClaudeFixture(t, env, func(map[string]any, *os.File) {})
+	const conversation = "shuttle://host/claude/session"
+	w := Worker{Address: conversation, Epoch: transition(t, env, "session", conversation)}
+	putWish(t, env, "m", "ask", "hold")
+	root := mailboxDir(env, "fiber", "fiber")
+	batch := newBatch(t, []string{filepath.Join(root, "pending", mailboxKey("m")+".json")}, conversation)
+	batch.TranscriptOffset = transcriptEnd(env, conversation)
+	batch.Receipt = &Receipt{MessageID: batch.Payload.MessageID, Address: conversation, Status: StatusQueued, Transport: claudeNativeTransport}
+	if err := writeBatch(root, &batch); err != nil {
+		t.Fatal(err)
+	}
+	registration, err := readClaudeNative(env, "session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	transcript, err := os.OpenFile(registration.Transcript, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	large, _ := json.Marshal(map[string]any{"type": "user", "sessionId": "session", "uuid": "screenshot", "message": map[string]any{"content": strings.Repeat("x", 3<<19)}})
+	if _, err := transcript.Write(append(large, '\n')); err != nil {
+		t.Fatal(err)
+	}
+	req := *batch.Payload
+	req.Address = conversation
+	nativeRows(map[string]any{"uuid": claudeNativeUUID(req)}, transcript, false)
+	if err := transcript.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := consumeWith(context.Background(), env, "fiber", "host", w, neverSend(t)); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := pendingCount(env, "fiber"); n != 0 || sent.Load() != 0 || batchOf(t, root, "m") != nil {
+		t.Fatalf("pending = %d, socket writes = %d, batch = %+v", n, sent.Load(), batchOf(t, root, "m"))
+	}
+}
+
 func TestClaudeNativeMidTurnAbsorptionIsAccepted(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
