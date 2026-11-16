@@ -186,7 +186,7 @@
 .kbn-ch-tags-band {
   position: absolute; top: 0; left: 0; right: 0;
   display: flex; flex-direction: column; gap: 2px; padding: 4px 0 5px;
-  background: color-mix(in srgb, var(--kbn-paper) 94%, transparent);
+  background: var(--kbn-paper);
   box-shadow: 0 1px 0 var(--kbn-rule);
 }
 .kbn-ch-tags-band:empty { display: none; }
@@ -238,19 +238,10 @@
 /* Its one line runs on, its paragraphs and items together. */
 .kbn-ch-item-text * { display: inline; margin: 0; padding: 0; }
 .kbn-ch-item-text :is(p, li) + :is(p, li)::before { content: ' '; }
-/* Its files side by side: a page or a figure as its thumbnail alone, its title a small caption beneath; any other file a chip. */
-.kbn-ch-files { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin-top: 6px; }
-.kbn-ch-file {
-  display: inline-flex; flex-direction: column; gap: 3px; max-width: 100%;
-  padding: 0; border: 0; background: none; cursor: pointer; text-align: left; color: var(--kbn-ink-soft);
-}
-.kbn-ch-file:not(.kbn-ch-thumb) {
-  flex-direction: row; padding: 3px 10px; border: 0.5px solid var(--kbn-rule-strong); border-radius: 6px;
-  font: var(--type-meta)/var(--leading-ui) var(--font-mono);
-}
-.kbn-ch-file:hover { color: var(--kbn-ink); }
-.kbn-ch-thumb { width: 168px; }
-.kbn-ch-thumb-face.ws-thumbnail { width: 168px; height: 105px; border-radius: 4px; box-shadow: 0 0 0 0.5px var(--kbn-rule-strong); }
+/* Its files below its words, at the stream's full width: the previews unfold in place (workspace/unfold.css). */
+.kbn-ch-previews { margin-top: 8px; }
+/* An unfolded file's bar pins below the band of pinned line names, the band's own offset taken back. */
+.kbn-ch-previews .uf-bar { top: calc(var(--kbn-ch-tags-h, 0px) - 12px); }
 
 /* The console, docked under the stream. */
 .kbn-ch > .ws-dock { flex: none; }
@@ -266,6 +257,4 @@
   .kbn-ch-back { display: inline-grid; margin-left: -6px; }
   .kbn-ch-head { padding: 6px 10px 6px 16px; }
   .kbn-ch-item { padding-right: 16px; }
-  .kbn-ch-thumb, .kbn-ch-thumb-face.ws-thumbnail { width: 132px; }
-  .kbn-ch-thumb-face.ws-thumbnail { height: 84px; }
 }

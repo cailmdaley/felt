@@ -96,16 +96,16 @@ it('lists the recent channels, the newest wait first, and reads a channel as wha
   expect(stream(host)).toStrictEqual([['tsz', 'start'], ['mask', 'ask', true], ['tsz', 'file', false], ['beam', 'tick']])
   expect(item(host, 'mask').querySelector('.kbn-ch-item-text strong')?.textContent).toBe('5σ')
   expect(item(host, 'mask').querySelector('.kbn-ch-kind')?.textContent).toBe('asks')
-  // Files sit side by side: a page and a figure as thumbnails alone, any other file a chip named by its file.
-  const files = item(host, 'tsz').querySelectorAll('.kbn-ch-files > .kbn-ch-file')
-  expect([...files].map(file => [file.classList.contains('kbn-ch-thumb'), file.querySelector('.kbn-ch-file-name')?.textContent])).toStrictEqual([[true, undefined], [true, undefined], [false, 'nulls.md']])
+  // Its files are previews in one sideways row below its words, every kind of file alike.
+  const files = item(host, 'tsz').querySelectorAll('.kbn-ch-previews .uf-row > .uf-card')
+  expect([[...files].map(file => file.getAttribute('aria-label')), item(host, 'tsz').querySelector('.kbn-ch-previews')!.hasAttribute('data-several')]).toStrictEqual([['Expand spectrum.svg', 'Expand deck.html', 'Expand nulls.md'], true])
   expect(item(host, 'tsz').querySelector('.kbn-ch-item-text')?.textContent?.trim()).toBe('The spectrum at 9σ.')
   expect(view.keydown(new KeyboardEvent('keydown', { key: 'j' }))).toBe(true)
   expect(shown(host)).toBe('van')
   expect(stream(host)).toStrictEqual([['van', 'ask', true]])
 })
 
-it('opening, paging and returning to a channel look at nothing; clicking an item opens its constitution\'s view, a file its page', async () => {
+it('opening, paging and returning to a channel look at nothing; clicking an item opens its constitution\'s view, a file unfolds in place', async () => {
   daemon()
   const { view, ctx, host, see, openFromDesk, openPage } = await mount()
   view.keydown(new KeyboardEvent('keydown', { key: 'j' }))
@@ -117,8 +117,17 @@ it('opening, paging and returning to a channel look at nothing; clicking an item
   expect(see).not.toHaveBeenCalled()
   item(host, 'mask').querySelector<HTMLElement>('.kbn-ch-item-text')!.click()
   expect(openFromDesk).toHaveBeenLastCalledWith(mask)
-  item(host, 'tsz').querySelector<HTMLButtonElement>('.kbn-ch-file')!.click()
-  expect(openPage).toHaveBeenLastCalledWith(tsz, expect.stringContaining('/w/tsz/spectrum.svg'))
+  // A preview unfolds in place: it opens no page and no view, and looks at nothing.
+  const opened = openFromDesk.mock.calls.length, paged = openPage.mock.calls.length
+  item(host, 'tsz').querySelector<HTMLButtonElement>('.uf-card')!.click()
+  expect([item(host, 'tsz').querySelector('.kbn-ch-previews')!.hasAttribute('data-unfolded'), item(host, 'tsz').querySelector('.uf-count')?.textContent]).toStrictEqual([true, '1 / 3'])
+  item(host, 'tsz').querySelector<HTMLElement>('.uf-page')!.click()
+  expect([openFromDesk.mock.calls.length, openPage.mock.calls.length]).toStrictEqual([opened, paged])
+  // Its worker going idle repaints its dot, and the unfolded file stays where it is.
+  const page = item(host, 'tsz').querySelector('.uf-page')
+  ctx.response = board([chair, { ...tsz, runtimePhase: 'waiting' }, mask, beam])
+  view.refresh(ctx); await settle()
+  expect(item(host, 'tsz').querySelector('.uf-page')).toBe(page)
   // The chair's pages in the head open there too.
   host.querySelector<HTMLButtonElement>('.kbn-ch-pages [data-part="constitution"]')!.click()
   expect(openPage).toHaveBeenLastCalledWith(chair, expect.stringContaining('C'))
@@ -425,16 +434,16 @@ it('shows a close awaiting review by its note and its tapestry, never its outcom
   const review = item(host, 'cov')
   expect([review.dataset.kind, review.hasAttribute('data-waiting'), review.querySelector('.kbn-ch-kind')?.textContent]).toStrictEqual(['close', true, 'for review'])
   expect(review.querySelector('.kbn-ch-item-text')?.textContent?.trim()).toBe('Agrees to 4%.')
-  const lead = review.querySelector<HTMLElement>('[data-item$=":lead"]')!
-  expect(lead.querySelector('.ws-thumbnail')).not.toBeNull()
+  const lead = review.querySelector<HTMLElement>('.kbn-ch-previews .uf-card')!
+  expect([lead.dataset.key, lead.querySelector('.ws-thumbnail') !== null]).toStrictEqual(['local:/w/cov/tapestry.html', true])
   expect(host.textContent).not.toContain('2000')
   // A redraw of the stream draws the same tapestry at once, not a new one.
   ctx.response = board([chair, tsz, mask, beam, cov])
   view.refresh(ctx)
-  expect(item(host, 'cov').querySelector('[data-item$=":lead"]')).toBe(lead)
+  expect(item(host, 'cov').querySelector('.kbn-ch-previews .uf-card')).toBe(lead)
 })
 
-it('draws a post to the human that waits on them gold, with what it attached, its pages as thumbnails alone', async () => {
+it('draws a post to the human that waits on them gold, with what it attached as a preview', async () => {
   const human = { label: 'Sam' }
   daemon([], undefined, {}, { board: { C: [...BOARD.C, record({ id: 'b5', kind: 'post', fiber: 'C', to: human, text: 'Two calls for you today.', files: ['/w/tsz/deck.html'] }, 4)] }, waiting: { C: { id: 'b5', at: Date.now() - 4 * minute } } })
   const { host } = await mount([chair, tsz, beam])
@@ -444,7 +453,8 @@ it('draws a post to the human that waits on them gold, with what it attached, it
   // A waiting post carries its clear; nothing else does.
   expect(post.querySelector('.kbn-ch-clear')?.textContent).toBe('✓')
   expect(host.querySelectorAll('.kbn-ch-clear')).toHaveLength(1)
-  expect([...post.querySelectorAll('.kbn-ch-file')].map(file => [file.classList.contains('kbn-ch-thumb'), file.querySelector('.ws-thumbnail') !== null, file.childElementCount])).toStrictEqual([[true, true, 1]])
+  expect([...post.querySelectorAll('.kbn-ch-previews .uf-card')].map(file => [file.getAttribute('aria-label'), file.querySelector('.ws-thumbnail') !== null])).toStrictEqual([['Expand deck.html', true]])
+  expect(post.querySelector('.kbn-ch-previews')!.hasAttribute('data-several')).toBe(false)
 })
 
 it('says nothing for a closing post, its words being the outcome', async () => {

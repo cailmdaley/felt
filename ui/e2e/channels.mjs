@@ -95,9 +95,11 @@ try {
     assert.ok(await page.locator('.kbn-ch-head .kbn-ch-pages [data-part="constitution"]').isVisible())
     assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-band-title').textContent(), 'cmbx')
     assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-worker-message').getAttribute('data-placeholder'), 'Message cmbx')
-    // Its post carries the deck and the plot it attached, thumbnails side by side; sent before, the deck is not drawn again.
+    // Its post carries the deck, the plot and the notes it attached as previews at full width in one sideways row.
     const kappa = page.locator('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"]')
-    assert.equal(await kappa.locator('.kbn-ch-thumb').count(), 2)
+    assert.equal(await kappa.locator('.kbn-ch-previews .uf-card').count(), 3)
+    const [row, card] = await Promise.all([kappa.locator('.uf-row').boundingBox(), kappa.locator('.uf-card').first().boundingBox()])
+    assert.ok(card.height <= 322 && card.width < row.width && card.width > row.width - 80, 'a preview at full width, capped, the next peeking')
     // The close for review says its review note, never its outcome.
     assert.match(await page.locator('.kbn-ch-item[data-kind="close"] .kbn-ch-item-text').textContent(), /agree to 4%/)
     assert.equal(await page.locator('.kbn-ch-stream').getByText('validated against 2000 simulations').count(), 0)
@@ -105,6 +107,15 @@ try {
     await page.waitForFunction(() => { const el = document.querySelector('.kbn-ch > .kbn-ch-stream'); return el.scrollHeight - el.scrollTop - el.clientHeight <= 24 }, null, { timeout: 5000 })
     await fits(page)
     await shot(page, `${name}-channel`)
+    // A click unfolds it in place, opening nothing; → steps to the next file, Escape folds it back.
+    await kappa.locator('.uf-card').first().click()
+    await page.waitForFunction(() => document.querySelector('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"] .kbn-ch-previews[data-unfolded] .uf-count')?.textContent === '1 / 3')
+    assert.equal(await page.locator('.ws-selected').count(), 0, 'unfolding opens no view')
+    await shot(page, `${name}-unfolded`)
+    await page.keyboard.press('ArrowRight')
+    await page.waitForFunction(() => document.querySelector('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"] .uf-count')?.textContent === '2 / 3')
+    await page.keyboard.press('Escape')
+    await page.waitForFunction(() => !document.querySelector('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"] .kbn-ch-previews[data-unfolded]'))
     // An item opens its constitution's view in the reader.
     await page.locator('.kbn-ch-item[data-kind="ask"] .kbn-ch-who').click()
     await page.waitForFunction(() => document.querySelector('.ws-selected .ov-name')?.textContent === 'foregrounds')
@@ -189,7 +200,7 @@ try {
   await shot(page, 'half-rail')
   await pick(page, 'cmbx').click()
   await page.locator('.kbn-ch-rail').waitFor({ state: 'hidden' })
-  await page.locator('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"] .kbn-ch-thumb').first().waitFor()
+  await page.locator('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"] .uf-card').first().waitFor()
   await fits(page)
   await shot(page, 'half-channel')
   assert.deepEqual(errors, [])
@@ -231,7 +242,9 @@ try {
     await page.goto(`${pathToFileURL(resolve('harness-board-dist/index.html'))}?example=channels#/channels`)
     await pick(page, 'vizier').click()
     const close = page.locator('.kbn-ch-item[data-fiber="morning-post"]')
-    await close.locator('[data-item$=":lead"] .ws-thumbnail').waitFor()
+    await close.locator('.kbn-ch-previews .uf-card[data-key$="/tapestry.html"] .ws-thumbnail').waitFor()
+    // The tapestry leads its previews, before the file the close attached.
+    assert.match(await close.locator('.kbn-ch-previews .uf-card').first().getAttribute('data-key'), /tapestry\.html$/)
     const outcome = 'Eleven letters sorted'
     assert.equal(await close.getByText(outcome).count(), 0)
     await close.locator('.kbn-ch-who').click()
