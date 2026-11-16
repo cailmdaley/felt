@@ -148,6 +148,8 @@ export class Workspace {
   /** The last move posted to Rex: when, and to which look. */
   private rexMoved: { at: number; key: string; moved: Promise<boolean> } = { at: -Infinity, key: '', moved: Promise.resolve(false) }
   private routeEpoch = 0
+  /** A route applied now is not a click: the board's load, or a session asking for a page. It moves neither Rex nor voice. */
+  private quiet = false
   private startPrompt: { card: KanbanCard; failure: DispatchFailureBody } | null = null
   /** The complete board-card payload used by the reader's thread and runtime surfaces. */
   private lastUpdateRevision = ''
@@ -272,7 +274,7 @@ export class Workspace {
       },
     })
     root.append(this.reader.el)
-    this.history.start()
+    this.quietly(() => this.history.start())
     this.library.refresh()
     document.addEventListener('visibilitychange', this.visibility)
   }
@@ -781,7 +783,7 @@ export class Workspace {
       this.opts.onView?.(view)
       this.depth.setActive(false)
       this.opts.onVisibility(false)
-      void this.look(null)
+      if (!this.quiet) void this.look(null)
       this.stopTimer()
       return
     }
@@ -826,7 +828,7 @@ export class Workspace {
     this.depth.setActive(true)
     this.show(state)
     // Opening a page is a deliberate look at its fiber; nothing that redraws it looks again.
-    void this.look(state.card)
+    if (!this.quiet) void this.look(state.card)
     const prompt = this.startPrompt
     if (prompt && (prompt.card.uid ?? prompt.card.id) === state.channel.uid && prompt.card.originId === state.channel.owner) {
       this.startPrompt = null
@@ -960,8 +962,16 @@ export class Workspace {
     if (known) this.open(known, this.origin, this.familyDocument(known))
     else void this.openFiber(id, owner)
   }
-  /** Opens a fiber, or one of its pages: its constitution, its tapestry, or its view. */
-  async openFiber(id: string, owner: string, page?: BoardOpen['page']): Promise<void> {
+  /** Runs `act` with its routes applied quietly. */
+  private quietly(act: () => void): void {
+    this.quiet = true
+    try { act() } finally { this.quiet = false }
+  }
+  /**
+   * Opens a fiber, or one of its pages: its constitution, its tapestry, or its
+   * view. A `quiet` open, a session asking for a page, moves neither Rex nor voice.
+   */
+  async openFiber(id: string, owner: string, page?: BoardOpen['page'], quiet = false): Promise<void> {
     const epoch = this.routeEpoch
     let card = cardNamed(this.opts.cards(), id, owner)
     if (!card) {
@@ -974,7 +984,8 @@ export class Workspace {
     const doc = page === 'constitution' ? fiberKey(home, card.uid ?? card.id)
       : page === 'tapestry' ? companion && docKey(home, companion.path, home, dir)
       : this.familyDocument(card)
-    this.open(card, this.origin, doc)
+    if (quiet) this.quietly(() => this.open(card, this.origin, doc))
+    else this.open(card, this.origin, doc)
   }
 
   private readReceipts(state: ChannelState): Promise<void> {

@@ -218,7 +218,7 @@ A channel's chair is its topmost seat, a non-standing one first, then the most r
 1. A channel shows what its workers addressed to you, one item per worker. Posts to the family and messages between workers stay out.
 2. A dot means one of two things: gold, waiting on you (a question, or work for review); ink, new to you since you last read the channel here.
 3. Choosing an item opens that constitution's [view](#a-constitutions-view). The console says whom you are talking to.
-4. Rex and voice follow your clicks and nothing else: an item, a page, a thread's row. Opening, paging or returning to a channel moves nothing, and nothing moves on a timer or when you come back to the window.
+4. Rex and voice follow your clicks and nothing else: an item, a page, a thread's row. Opening, paging or returning to a channel moves nothing, and nothing moves on a timer, when you come back to the window, when the board loads or reloads, or when a session asks the board to show a page.
 5. Each thing shows once on the screen; a page or a figure is a thumbnail that opens it.
 6. The board remembers where you were and nothing else per device: what the rail lists, the pins and the order are the same on every device.
 

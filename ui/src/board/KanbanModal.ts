@@ -433,7 +433,7 @@ export class KanbanModal {
       if (!this.workspace?.isActive && this.activeView?.reveal?.(id, origin)) return
       this.workspace?.follow(id, origin)
     }
-    this.voice.onOpen = ({ fiber_id: id, origin, page }) => { void this.workspace?.openFiber(id, origin, page) }
+    this.voice.onOpen = ({ fiber_id: id, origin, page }) => { void this.workspace?.openFiber(id, origin, page, true) }
     document.addEventListener('keydown', this.handleDocumentKeyDown, true)
     window.addEventListener('resize', this.handleResize)
     window.addEventListener('shuttle-conversation-opening-changed', this.handleConversationOpening)

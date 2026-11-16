@@ -1073,6 +1073,23 @@ describe('workspace reader integration', () => {
     vi.useRealTimers()
     await pop(() => workspace.returnToOrigin())
     expect(sight).toHaveBeenLastCalledWith(null)
+    // A page a session asks for opens without moving either.
+    await workspace.openFiber('other', 'host-a', undefined, true); await settle()
+    expect(workspace.isActive).toBe(true)
+    expect(sight).toHaveBeenLastCalledWith(null)
+    expect(rex()).toHaveLength(5)
+  })
+  it('loads, or reloads, on a constitution\'s page without moving voice or Rex', async () => {
+    const hub = card({ id: 'hub', uid: 'hub', originId: 'host-a', shuttleHost: 'host-a', shuttleKind: 'oneshot', status: 'active', path: 'hub.md', tmuxSession: 'worker-hub', workerState: 'running' })
+    bodyCards = [hub]
+    workspace.dispose()
+    window.history.replaceState(null, '', '#/board/hub@host-a')
+    const sight = vi.fn()
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => [hub], origin: () => 'Desk', onVisibility: visibility, onSight: sight, dock: new Dock('', changed) })
+    await settle()
+    expect(workspace.isActive).toBe(true)
+    expect(sight).not.toHaveBeenCalled()
+    expect(selections()).toEqual([])
   })
   it('moves voice but never Rex on a phone', async () => {
     const worker = card({ id: 'hub', uid: 'hub', originId: 'host-a', shuttleKind: 'oneshot', status: 'active', path: 'hub.md', tmuxSession: 'worker-hub', workerState: 'running' })
