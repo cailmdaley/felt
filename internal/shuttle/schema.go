@@ -72,9 +72,10 @@ type Block struct {
 	// lives in the fiber's top-level `role:`; BlockOf fills it from there (see
 	// BlockOf) and SetConfig writes it back there.
 	Role string `json:"role,omitempty" yaml:"role,omitempty"`
-	// Channel names the board channel this constitution speaks in, such as
-	// "UNIONS" or "cmbx". It is independent of Role and of the fiber's place in
-	// the tree; a thread inherits its parent's.
+	// Channel groups constitutions into one board channel: those sharing a
+	// value speak in one channel, which the board writes as its chair's slug,
+	// never as this value. It is independent of Role and of the fiber's place
+	// in the tree; a thread inherits its parent's.
 	Channel string `json:"channel,omitempty" yaml:"channel,omitempty"`
 	// Seat places a resting constitution in the board's Roles band.
 	// A seat requires a role and does not change the lifecycle.

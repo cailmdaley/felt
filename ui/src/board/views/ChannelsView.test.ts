@@ -382,17 +382,19 @@ it('leaves the channel\'s head as it stands when only its stream changes, so its
   expect(host.querySelector('.kbn-ch-head .kbn-ch-pages')).toBe(pages)
 })
 
-it('heads the view with the channel itself, its name written as Slack writes it, the rail\'s toggle at its right', async () => {
+it('heads the view with the channel itself, written as its chair\'s slug, the rail\'s toggle at its right', async () => {
   daemon()
-  const mill = card({ id: 'mill', uid: 'L', name: 'felt chair', shuttleChannel: 'The Mill', shuttleSeat: true, ...working(2) })
+  // A channel's key is never drawn: the Mill's channel is written as its chair, felt.
+  const mill = card({ id: 'felt', uid: 'L', name: 'The Mill', shuttleChannel: 'The Mill', shuttleSeat: true, ...working(2) })
   const { host } = await mount([chair, tsz, van, mill])
   // The tab bar names the view: no page title of its own.
   expect(host.querySelector('.kbn-view-title')).toBeNull()
-  expect(rail(host)).toStrictEqual(['van', 'cmbx', 'the-mill'])
+  expect(rail(host)).toStrictEqual(['van', 'cmbx', 'felt'])
   host.querySelector<HTMLButtonElement>('[data-channel="channel:the mill"]')!.click()
   await settle()
   const head = host.querySelector('.kbn-ch-head')!
-  expect(shown(host)).toBe('the-mill')
+  expect(shown(host)).toBe('felt')
+  expect(head.querySelector('.kbn-ch-name')!.getAttribute('title')).toBe('The Mill')
   expect([...head.querySelectorAll('.kbn-ch-icon')].map(icon => icon.classList[1])).toStrictEqual(['kbn-ch-rail-toggle', 'kbn-ch-back', 'kbn-ch-menu'])
   // Its chair's pages stand beside its name.
   expect([...head.querySelectorAll<HTMLElement>('.kbn-ch-pages .ws-doc-button')].map(button => button.dataset.part)).toStrictEqual(['constitution'])

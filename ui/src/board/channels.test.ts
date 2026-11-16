@@ -36,15 +36,15 @@ describe('composeChannels', () => {
   it('groups by shuttle.channel, inherited through the orchestrator, else by office, else by top-level; chaired channels first by name', () => {
     const channels = compose(all)
     expect(channels.map(channel => [channel.key, channel.name, channel.chaired, channel.members.map(member => member.id)])).toStrictEqual([
-      ['role:analyst', 'Analyst', true, ['shear']],
-      ['channel:unions', 'UNIONS', true, ['pando/unions', 'east-unions', 'west-unions', 'pando/unions/modes']],
-      ['channel:vizier', 'Vizier', true, ['life/vizier', 'loom/email/morning-post']],
-      // A lone constitution is its own channel, named by its slug.
+      // Every channel is written as its chair's slug; a channel's key or an office's charter name only groups.
+      ['role:analyst', 'shear', true, ['shear']],
+      ['channel:unions', 'unions', true, ['pando/unions', 'east-unions', 'west-unions', 'pando/unions/modes']],
+      ['channel:vizier', 'vizier', true, ['life/vizier', 'loom/email/morning-post']],
       ['fiber:O', 'old', false, ['old']],
       ['fiber:R', 'van', false, ['van']],
     ])
     expect(named(channels, 'fiber:R').title).toBe('Moving house')
-    expect(named(channels, 'role:analyst').title).toBe('Analyst · the shear desk')
+    expect(named(channels, 'role:analyst').title).toBe('Cosmic shear')
     expect(named(channels, 'channel:unions').families).toStrictEqual(['U'])
   })
 
@@ -61,7 +61,7 @@ describe('composeChannels', () => {
     // The vizier's errand carries no channel; its office's charter is named "Vizier", so it speaks in Vizier.
     const errand = card({ id: 'life/errand', uid: 'V', name: 'Errand', shuttleRole: 'vizier', status: 'active' })
     const channels = compose([...all, errand], { names: new Map([['analyst', 'Analyst · the shear desk'], ['vizier', 'Vizier · first point of contact']]) })
-    expect(channels.filter(channel => channel.name === 'Vizier')).toHaveLength(1)
+    expect(channels.filter(channel => channel.name === 'vizier')).toHaveLength(1)
     expect(named(channels, 'channel:vizier').title).toBe('Vizier')
     expect(named(channels, 'channel:vizier').members.map(member => member.id)).toContain('life/errand')
   })
@@ -248,8 +248,8 @@ describe('what waits on the human, as live channels hold it', () => {
 
   it('neither marks nor floats a channel whose workers are only idle, and keeps it hidden when one goes idle after the hide', () => {
     const channels = compose([unions, review, paper, bins])
-    expect(channels.map(channel => [channel.name, channel.waiting])).toStrictEqual([['SPT', false], ['UNIONS', true]])
-    expect(railOrder(channels, ['channel:spt', 'channel:unions']).map(channel => channel.name)).toStrictEqual(['UNIONS', 'SPT'])
+    expect(channels.map(channel => [channel.name, channel.waiting])).toStrictEqual([['paper', false], ['unions', true]])
+    expect(railOrder(channels, ['channel:spt', 'channel:unions']).map(channel => channel.name)).toStrictEqual(['unions', 'paper'])
     const hidden = named(compose([unions, review, paper, bins], { dismissed: [hideKey('channel:spt', now - 60 * minute)] }), 'channel:spt')
     expect([hidden.hidden, hidden.listed]).toStrictEqual([now - 60 * minute, false])
   })
@@ -268,7 +268,8 @@ describe('a channel\'s key', () => {
     const near = card({ id: 'lc/desktop', uid: 'X', name: 'Not under the desk', ...working(3) })
     const channels = compose([lightcone, glass, unit, near])
     expect(named(channels, 'channel:lightcone').members.map(member => member.id)).toStrictEqual(['lc/desk/paper-ii/run/glass-mocks', 'lc/desk/unit-tests'])
-    expect(named(channels, 'channel:lightcone').name).toBe('Lightcone')
+    // Its chair is its live member: the tempered desk speaks for no one.
+    expect(named(channels, 'channel:lightcone').name).toBe('glass-mocks')
     expect(named(channels, 'fiber:X').members.map(member => member.id)).toStrictEqual(['lc/desktop'])
   })
 })

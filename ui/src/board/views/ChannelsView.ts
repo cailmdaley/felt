@@ -6,7 +6,7 @@ import type { KanbanCard } from '../KanbanTypes.js'
 import { boardCards, threadIndexFor } from '../KanbanSurfaces.js'
 import { isMobileViewport } from '../mobile.js'
 import {
-  arranged, composeChannels, composeStream, fiberOf, handle, hideKey, railOrder, reordered, showKey, unpinKey,
+  arranged, composeChannels, composeStream, fiberOf, hideKey, railOrder, reordered, showKey, unpinKey,
   type Channel, type Entry, type Item,
 } from '../channels.js'
 import { createRailReorder, type RailReorder } from '../channelRail.js'
@@ -336,7 +336,8 @@ export class ChannelsView implements TemporalView {
     const rail = railOrder(this.channels, this.order)
     if (!this.query) return rail.filter(channel => channel.listed || (channel.key === this.current && !channel.hidden))
     const query = this.query.toLowerCase()
-    return rail.filter(channel => [channel.title, ...channel.members.flatMap(card => [card.name, card.path])].some(text => text.toLowerCase().includes(query)))
+    // A channel's key (its `shuttle.channel`, or its office) is never drawn, but it is still what the human may remember it by.
+    return rail.filter(channel => [channel.key.slice(channel.key.indexOf(':') + 1), channel.name, channel.title, ...channel.members.flatMap(card => [card.name, card.path])].some(text => text.toLowerCase().includes(query)))
   }
   /** Filters the rail by what Jump to holds, from the rail's field or the bar's Find. */
   find(query: string): void {
@@ -433,7 +434,7 @@ export class ChannelsView implements TemporalView {
       pick.toggleAttribute('data-lone', !channel.chaired)
       pick.toggleAttribute('data-unread', unread.get(channel.key))
       pick.toggleAttribute('data-waiting', channel.waiting)
-      pick.append(el('span', 'kbn-ch-pick-hash', channel.chaired ? '#' : '·'), el('span', 'kbn-ch-pick-name', handle(channel)))
+      pick.append(el('span', 'kbn-ch-pick-hash', channel.chaired ? '#' : '·'), el('span', 'kbn-ch-pick-name', channel.name))
       if (channel.hidden) pick.append(el('span', 'kbn-ch-pick-hidden', 'hidden'))
       // A dot means one of two things: gold, waiting on the human; ink, new since this device last read it.
       if (channel.waiting || unread.get(channel.key)) {
@@ -493,9 +494,9 @@ export class ChannelsView implements TemporalView {
       this.sigs.head = head
       const back = iconButton('kbn-ch-back', 'back', 'Channels', () => this.setRail(false))
       const name = el('h3', 'kbn-ch-name')
-      name.append(channel.chaired ? el('span', 'kbn-ch-handle', handle(channel)) : channel.name)
+      name.append(channel.chaired ? el('span', 'kbn-ch-handle', channel.name) : channel.name)
       name.toggleAttribute('data-lone', !channel.chaired)
-      if (channel.title !== channel.name) name.title = channel.title
+      name.title = channel.title
       // The chair's pages: opening one is a deliberate look at the chair.
       const pages = docButtons(seat, { ...this.ctx!.workspace!.globeHost.feeds, open: (card, doc) => { this.returnTo = null; this.ctx?.workspace?.openPage(card, doc) } })
       pages.classList.add('kbn-ch-pages')

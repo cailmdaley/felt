@@ -27,7 +27,7 @@ import { TranscriptResults } from './TranscriptResults.js'
 import { Library } from './Library.js'
 import { FamilyPage, type ViewFeeds } from './FamilyPage.js'
 import { BoardFeed } from '../boardFeed.js'
-import { composeChannels, fiberOf as channelFiber, handle } from '../channels.js'
+import { composeChannels, fiberOf as channelFiber } from '../channels.js'
 import type { GlobeHost } from '../globe/GlobeStage.js'
 import type { MapFile } from '../family/model.js'
 import { FamilyActivity } from './familyActivity.js'
@@ -345,13 +345,13 @@ export class Workspace {
     if (index.state(card) === 'to-review' && card.reviewMark?.note) posts.push({ text: card.reviewMark.note, at: Date.parse(card.reviewMark.at) || 0 })
     return posts.sort((a, b) => a.at - b.at).at(-1)
   }
-  /** The handle of the channel a constitution speaks in, as the console names it; undefined for a card in none. */
+  /** The slug of the channel a constitution speaks in, as the console names it; undefined for a card in none. */
   channelHandle(card: KanbanCard): string | undefined {
     const cards = this.opts.cards()
     if (this.handles?.cards !== cards || this.handles.names !== this.charterNames) {
       const index = this.graph(), of = new Map<string, string>()
       for (const channel of composeChannels({ cards, parentOf: each => index.parentOf(each), names: this.charterNames, dismissed: [], pinned: new Map(), waits: new Map(), now: Date.now() })) {
-        for (const member of channel.everyone) of.set(channelFiber(member), handle(channel))
+        for (const member of channel.everyone) of.set(channelFiber(member), channel.name)
       }
       this.handles = { cards, names: this.charterNames, of }
     }

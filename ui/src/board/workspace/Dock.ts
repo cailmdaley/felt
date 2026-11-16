@@ -1056,9 +1056,9 @@ export class Dock {
     this.actPaint = () => {
       this.el.dataset.column = card.column
       const act = target()
-      // Slugs throughout: the channel's handle, then whom the box speaks to.
+      // Slugs throughout: the channel's chair, then whom the box speaks to, as one path.
       const channel = this.channelOf?.(act)
-      const root = channel && channel !== slug(act) ? `${channel} / ` : ''
+      const root = channel && channel !== slug(act) ? `${channel}/` : ''
       if (titleRoot.textContent !== root) titleRoot.textContent = root
       if (titleThread.textContent !== slug(act)) titleThread.textContent = slug(act)
       title.title = act.name

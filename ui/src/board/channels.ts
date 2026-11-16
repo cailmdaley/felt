@@ -13,9 +13,9 @@ import { cardNamed } from './threads.js'
 export interface Channel {
   /** `channel:<shuttle.channel, lowercased>`, `role:<office slug>` for an office's top-levels, or `fiber:<uid>` for a lone top-level. */
   key: string
-  /** The channel's name; an office's charter name before any ` · ` gloss; a lone constitution's slug. */
+  /** How the board writes the channel: its chair's slug. */
   name: string
-  /** The name in full: a charter's gloss included, a lone constitution's own name. */
+  /** Its chair's full name, for a tooltip. */
   title: string
   /** Named or an office's: drawn above the lone constitutions. */
   chaired: boolean
@@ -40,10 +40,6 @@ export interface Channel {
   listed: boolean
 }
 
-/** How a channel is written, as Slack writes one: a chaired channel's name lowercased, its spaces hyphens; a lone constitution's slug as it is. */
-export const handle = (channel: Pick<Channel, 'name' | 'chaired'>): string =>
-  channel.chaired ? channel.name.toLowerCase().replace(/\s+/g, '-') : channel.name
-
 /** A channel active within this long stays in the rail. */
 export const RECENT_MS = 7 * 86_400_000
 /** Files a worker sends this close together are one item. */
@@ -64,7 +60,8 @@ export const officeOf = (role: string | undefined): string => role?.split('/')[0
 
 /**
  * Every channel the board holds, the chaired ones first, each shelf by name.
- * A card speaks in its own `shuttle.channel`, else its orchestrator's, else
+ * A channel is written as its chair's slug; `shuttle.channel` and an office's
+ * charter name only group its members and are never drawn. A card speaks in its own `shuttle.channel`, else its orchestrator's, else
  * that of the nearest card filed above it; without one anywhere above it, its
  * top-level constitution's office names the channel (the named channel that
  * shares the office's charter name, when there is one), else that top-level
@@ -123,7 +120,6 @@ export function composeChannels(input: {
     return channelNames.has(merged) ? merged : `role:${office}`
   }
   const channelNames = new Set(cards.flatMap(card => { const name = channelOf(card); return name ? [`channel:${name.toLowerCase()}`] : [] }))
-  const titles = new Map<string, string>()
   const seen = new Set<string>()
   const groups = new Map<string, { members: KanbanCard[]; everyone: KanbanCard[] }>()
   for (const card of cards) {
@@ -131,9 +127,6 @@ export function composeChannels(input: {
     if (card.isCycle || seen.has(fiberOf(card))) continue
     seen.add(fiberOf(card))
     const key = keyOf(card)
-    // A channel's own spelling wins over an office's.
-    const office = officeOf(topOf(card).shuttleRole)
-    if (!titles.has(key) || channelOf(card)) titles.set(key, channelOf(card) ?? (office ? officeName(office) : ''))
     const group = groups.get(key) ?? groups.set(key, { members: [], everyone: [] }).get(key)!
     group.everyone.push(card)
     if (live(card)) group.members.push(card)
@@ -165,9 +158,8 @@ export function composeChannels(input: {
     const isPinned = (pinned.get(key) ?? -Infinity) > since('pin', key)
     const waiting = newest > 0
     const hidden = since('hide', key) > Math.max(since('show', key), newest) ? since('hide', key) : 0
-    const title = titles.get(key) || seat.name
     channels.push({
-      key, name: key.startsWith('fiber:') ? slug(seat) : title.split(' · ')[0], title, chaired: !key.startsWith('fiber:'), seat, members, everyone,
+      key, name: slug(seat), title: seat.name, chaired: !key.startsWith('fiber:'), seat, members, everyone,
       families: [...new Set(members.map(card => fiberOf(topOf(card))))],
       newest, waiting, active, pinned: isPinned, hidden,
       listed: !hidden && (waiting || isPinned || now - active <= RECENT_MS),

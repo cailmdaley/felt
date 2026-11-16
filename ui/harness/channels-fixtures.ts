@@ -72,12 +72,12 @@ const ROWS: Row[] = [
   { id: 'pando/unions/photoz', name: 'Photo-z calibration', parent: 'pando/unions', state: 'working', minutes: 40 },
   { id: 'pando/unions/paper', name: 'Paper draft', parent: 'pando/unions', state: 'working', minutes: 28,
     tapestry: { title: 'Paris SWG deck', lede: 'Twelve slides for Thursday: the null tests, the blinded S8 and what is left before unblinding.', slide: true } },
-  { id: 'life-vizier', name: 'Vizier', channel: 'Vizier', role: 'vizier', seat: true, state: 'idle', minutes: 6 },
+  { id: 'vizier', name: 'Vizier', channel: 'Vizier', role: 'vizier', seat: true, state: 'idle', minutes: 6 },
   { id: 'morning-post', name: 'Morning post', channel: 'Vizier', seat: true, standing: true, closed: true, minutes: 140, outcome: 'Eleven letters sorted; two need a reply from you, the rest are filed.',
     tapestry: { title: 'The morning post, sorted', lede: 'Eleven letters: two need your reply (the notary and the landlord), four are filed, five were newsletters.' } },
-  { id: 'deed-form', name: 'Sign the deed form', parent: 'life-vizier', minutes: 50, ask: 'The notary needs the deed form back by Wednesday. Sign the scan in your Documents folder, or shall I book a slot to sign it in person?' },
-  { id: 'mill', name: 'felt chair', channel: 'The Mill', seat: true, state: 'working', minutes: 1 },
-  { id: 'mill/lander', name: 'Lander', parent: 'mill', state: 'idle', minutes: 15 },
+  { id: 'deed-form', name: 'Sign the deed form', parent: 'vizier', minutes: 50, ask: 'The notary needs the deed form back by Wednesday. Sign the scan in your Documents folder, or shall I book a slot to sign it in person?' },
+  { id: 'felt', name: 'The Mill', channel: 'The Mill', seat: true, state: 'working', minutes: 1 },
+  { id: 'felt/lander', name: 'Lander', parent: 'felt', state: 'idle', minutes: 15 },
   { id: 'score', name: 'Second movement', role: 'composer', state: 'idle', minutes: 200 },
   { id: 'science', name: 'Science desk', channel: 'Science', seat: true, state: 'working', minutes: 12 },
   { id: 'french', name: 'French lessons', channel: 'French', state: 'working', minutes: 90 },
@@ -224,7 +224,7 @@ function addBoardFixtures(example: WorkspaceExample, now: number, ROWS: Row[], m
     said('pando/unions/modes', 'asked', 35, { to: up('pando/unions/modes'), text: ROWS.find(row => row.id === 'pando/unions/modes')!.ask }),
     said('deed-form', 'asked', 50, { to: up('deed-form'), text: ROWS.find(row => row.id === 'deed-form')!.ask }),
     said('morning-post', 'closed', 140, { to: HUMAN, text: ROWS.find(row => row.id === 'morning-post')!.outcome, files: [`${dir('morning-post')}/reply-drafts.md`] }),
-    said('mill', 'post', 25, { to: HUMAN, text: [
+    said('felt', 'post', 25, { to: HUMAN, text: [
       'Landed the routing slice on main and deployed it to the Mac; the fleet catch-up waits on you.',
       '',
       '- The unblock board lines now append on every poll from the stored record, so an owed line no longer depends on the thread still waiting on its blocker.',
@@ -235,8 +235,8 @@ function addBoardFixtures(example: WorkspaceExample, now: number, ROWS: Row[], m
       '',
       'Nothing else is blocked; the lander is idle until the next landing.',
     ].join('\n') }),
-    said('mill', 'human', 20, { id: 'brd-human-0002', by: HUMAN, text: 'Thanks, I will run the catch-up tonight.' }),
-    said('mill/lander', 'post', 15, { to: up('mill/lander'), text: 'Landed 58bda2a3d on main.' }),
+    said('felt', 'human', 20, { id: 'brd-human-0002', by: HUMAN, text: 'Thanks, I will run the catch-up tonight.' }),
+    said('felt/lander', 'post', 15, { to: up('felt/lander'), text: 'Landed 58bda2a3d on main.' }),
     ...more(said, HUMAN),
   ]
   // The daemon's answer: a line waits until the human says something to that fiber after it.

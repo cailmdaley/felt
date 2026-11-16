@@ -763,7 +763,7 @@ describe('workspace reader integration', () => {
     const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
     const press = async (key: string): Promise<void> => { document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); await settle() }
     workspace.open(feed[0], 'Desk'); await settle()
-    // Slugs throughout: the channel's handle, then whom the console speaks to; a lone family's channel is its top-level.
+    // Slugs throughout: the channel's slug, then whom the console speaks to; a lone family's channel is its top-level.
     expect(title()).toBe('hub')
     // The view draws the fiber's acts in its head; the console stands them as buttons where it has room.
     expect(document.querySelector('.ws-selected .ov-head .ov-tools .ws-acts-settings')).not.toBeNull()
@@ -773,7 +773,7 @@ describe('workspace reader integration', () => {
     expect(title()).toBe('hub')
     // A thread opens on its own view.
     workspace.openFromDesk(feed[1]); await settle()
-    expect([selected(), title()]).toStrictEqual(['family:host-a:hub-sub', 'hub / sub'])
+    expect([selected(), title()]).toStrictEqual(['family:host-a:hub-sub', 'hub/sub'])
     // b opens its orchestrator's view.
     await press('b')
     expect([selected(), title()]).toStrictEqual(['family:host-a:hub', 'hub'])
@@ -814,7 +814,7 @@ describe('workspace reader integration', () => {
     // A thread's row opens its own view, whose band speaks to it.
     document.querySelector<HTMLElement>('.ws-selected .ov-thread[data-fiber="leaf"]')!.click(); await settle()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('family:host-a:leaf')
-    expect(document.querySelector('.ws-band-title')?.textContent).toBe('hub / leaf')
+    expect(document.querySelector('.ws-band-title')?.textContent).toBe('hub/leaf')
     const press = (key: string): void => { document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) }
     press('x'); expect(queue).toHaveBeenLastCalledWith(expect.objectContaining({ uid: 'leaf' }), 'composted')
     press('c'); expect(conversation).toHaveBeenLastCalledWith(expect.objectContaining({ uid: 'leaf' }))
@@ -1977,7 +1977,7 @@ describe('a constitution\'s view', () => {
         const card = feed.find(each => each.uid === shown)
         expect(card).toBeDefined()
         expect(document.querySelector('.ws-selected .ov-name')?.textContent).toBe(card!.id.split('/').pop())
-        expect(title()).toBe(card!.uid === 'root' ? 'root' : `root / ${card!.uid}`)
+        expect(title()).toBe(card!.uid === 'root' ? 'root' : `root/${card!.uid}`)
         press('x')
         expect(queue.mock.lastCall?.[0].uid).toBe(card!.uid)
       }
