@@ -114,7 +114,7 @@ func (a *app) recordBoardMessage(target string, request messaging.Request) {
 	if _, err := messaging.ParseAddress(request.Address); err == nil {
 		to.Session = request.Address
 	}
-	if !strings.HasPrefix(target, "shuttle://") && !looksLikeNativeSessionID(target) {
+	if !strings.HasPrefix(target, "shuttle://") && !sessionUUIDPattern.MatchString(target) {
 		if lookup, err := a.lookupShuttleAddressFibers(target); err == nil && !lookup.refused() && len(lookup.Fibers) == 1 {
 			to.Fiber = lookup.Fibers[0].UID
 		}

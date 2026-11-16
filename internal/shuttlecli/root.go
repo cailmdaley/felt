@@ -98,9 +98,6 @@ Common paths:
 // executables and the standard streams through a.env, never through package
 // os; tests replace a probe on their own app.
 type app struct {
-	// messageResolveWait bounds how long fiber-addressed messages wait for a
-	// restarting host's session ledger to become trustworthy again.
-	messageResolveWait time.Duration
 	// eventsLockWait bounds how long an event append waits for the stream's
 	// rotation lock before dropping its line.
 	eventsLockWait time.Duration
@@ -129,7 +126,7 @@ type app struct {
 	execDaemonRelease       func(path string, args ...string) error
 	runDaemonReleaseVersion func(path string) error
 	// daemonSignalPID signals the daemon owner daemon stop targets;
-	// daemonPause is the wait between its checks and message resolution's.
+	// daemonPause is the wait between its checks.
 	daemonSignalPID func(pid int, signal syscall.Signal) error
 	daemonPause     func(time.Duration)
 	// daemonLifecycleTimeout bounds the local lifecycle POST (resume, accept,
@@ -161,7 +158,6 @@ func newApp(env *sysenv.Env) *app {
 		daemonLifecycleOwnerCheck: checkResolvedDaemonPortOwner,
 		daemonSignalPID:           signalDaemonPID,
 		daemonPause:               time.Sleep,
-		messageResolveWait:        90 * time.Second,
 		eventsLockWait:            30 * time.Second,
 		daemonLifecycleTimeout:    daemonPostTimeout,
 		boardEntropy:              rand.Reader,

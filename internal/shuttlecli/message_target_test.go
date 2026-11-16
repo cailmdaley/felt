@@ -9,9 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/messaging"
@@ -422,58 +420,16 @@ func TestResolveMessageTargetAmbiguityCombinesDiscoveryAndLedger(t *testing.T) {
 	}
 }
 
-func TestResolveMessageTargetFiberPathSlugAndUID(t *testing.T) {
+// A Shuttle fiber is a message target by path, slug or UID.
+func TestMessageFiberByPathSlugAndUID(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
-	block := map[string]any{
-		"kind":        "oneshot",
-		"host":        "worker-node",
-		"agent":       "claude-opus",
-		"project_dir": t.TempDir(),
-		"runtime":     map[string]any{"session_uuid": messageTargetSession},
-	}
-	store := writeMessageTargetFiber(t, block)
+	store := writeMessageTargetFiber(t, map[string]any{"kind": "oneshot", "host": "worker-node", "agent": "claude-opus", "project_dir": t.TempDir()})
 	isolateMessageFiberStore(env, store)
-	messageTargetDaemon(t, env, nil, []SessionProvenance{{
-		Session: messageTargetSession,
-		UID:     messageTargetFiberUID,
-		Host:    "worker-node",
-		Harness: "claude-code",
-		Fiber:   "work/worker",
-		Kind:    "dispatch",
-	}})
-
 	for _, target := range []string{"work/worker", "worker", messageTargetFiberUID} {
-		t.Run(target, func(t *testing.T) {
-			t.Parallel()
-			got, err := newApp(env).resolveMessageTarget(target)
-			if err != nil {
-				t.Fatal(err)
-			}
-			want := "shuttle://worker-node/claude/" + messageTargetSession
-			if got != want {
-				t.Fatalf("resolved address = %q, want %q", got, want)
-			}
-		})
-	}
-}
-
-func TestResolveMessageTargetFiberRequiresLedgerEvidence(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	store := writeMessageTargetFiber(t, map[string]any{
-		"kind":        "oneshot",
-		"host":        "worker-node",
-		"agent":       "claude-opus",
-		"project_dir": t.TempDir(),
-		"runtime":     map[string]any{"session_uuid": messageTargetSession},
-	})
-	isolateMessageFiberStore(env, store)
-	messageTargetDaemon(t, env, nil, nil)
-
-	_, err := newApp(env).resolveMessageTarget("work/worker")
-	if err == nil || !strings.Contains(err.Error(), "no session-ledger pairing") {
-		t.Fatalf("expected missing ledger evidence error, got %v", err)
+		if f, block := newApp(env).messageFiber(target); f == nil || f.UID != messageTargetFiberUID || block.Host != "worker-node" {
+			t.Fatalf("%s: %+v", target, f)
+		}
 	}
 }
 
@@ -499,7 +455,7 @@ func TestResolveMessageTargetCodexPeerAddressUsesTranscriptProvenance(t *testing
 		Host: "worker-node", Harness: "codex", At: 2, Kind: "claim",
 	}})
 
-	for _, target := range []string{"work/worker", transcriptID, threadID} {
+	for _, target := range []string{transcriptID, threadID} {
 		got, err := newApp(env).resolveMessageTarget(target)
 		if err != nil {
 			t.Fatalf("resolve %q: %v", target, err)
@@ -515,53 +471,25 @@ func TestResolveMessageTargetCodexLedgerThreadIDUsesNativeAddress(t *testing.T) 
 	env := testEnv(t)
 	const threadID = "11111111-1111-4111-8111-111111111111"
 	const transcriptID = "22222222-2222-4222-8222-222222222222"
-	store := writeMessageTargetFiber(t, map[string]any{
-		"kind":        "oneshot",
-		"host":        "worker-node",
-		"agent":       "codex-luna",
-		"project_dir": t.TempDir(),
-		"runtime":     map[string]any{"session_uuid": threadID},
-	})
-	isolateMessageFiberStore(env, store)
-	messageTargetDaemon(t, env, []messaging.Session{{
-		Address: "shuttle://worker-node/codex/" + threadID,
-		Host:    "worker-node", Harness: "codex", ID: threadID,
-		Fiber: "work/worker", FiberUID: messageTargetFiberUID, TranscriptID: transcriptID,
-	}}, []SessionProvenance{{
+	isolateMessageFiberStore(env, "")
+	messageTargetDaemon(t, env, nil, []SessionProvenance{{
 		Fiber: "work/worker", UID: messageTargetFiberUID, Session: transcriptID,
 		ThreadID: threadID, Host: "worker-node", Harness: "codex", At: 2, Kind: "claim",
 	}})
 
-	got, err := newApp(env).resolveMessageTarget("work/worker")
+	got, err := newApp(env).resolveMessageTarget(transcriptID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := "shuttle://worker-node/codex/" + threadID; got != want {
-		t.Fatalf("resolved address = %q, want peer-view address %q", got, want)
-	}
-}
-
-func TestResolveMessageTargetFiberWithoutRuntimeSessionIsClear(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	store := writeMessageTargetFiber(t, map[string]any{
-		"kind":        "oneshot",
-		"host":        "worker-node",
-		"agent":       "claude-opus",
-		"project_dir": t.TempDir(),
-	})
-	isolateMessageFiberStore(env, store)
-	messageTargetDaemon(t, env, nil, nil)
-
-	_, err := newApp(env).resolveMessageTarget("work/worker")
-	if err == nil || !strings.Contains(err.Error(), "no recorded worker session") || !strings.Contains(err.Error(), "session_uuid") {
-		t.Fatalf("expected missing worker-session error, got %v", err)
+		t.Fatalf("resolved address = %q, want native address %q", got, want)
 	}
 }
 
 // A thread created on its owner reaches this host's stores only through Git;
-// until then the owner feed is what makes it addressable by path or UID.
-func TestResolveMessageTargetFreshRemoteWorkerUsesOwnerPeerBeforeLedgerBinding(t *testing.T) {
+// until then the owner feed is what makes it addressable by path or UID, and
+// its messages go to the owner's inbox.
+func TestMessageToFiberKnownOnlyThroughTheOwnerFeed(t *testing.T) {
 	t.Parallel()
 	for _, localView := range []string{"absent", "own-subtree", "other-subtree", "wrong-leaf"} {
 		t.Run(localView, func(t *testing.T) {
@@ -595,16 +523,8 @@ func TestResolveMessageTargetFreshRemoteWorkerUsesOwnerPeerBeforeLedgerBinding(t
 				}
 				uid = lookup.Fibers[0].UID
 			}
-			peers, _ := json.Marshal(messaging.Directory{Sessions: []messaging.Session{{
-				Address: "shuttle://worker-node/codex/" + messageTargetSession,
-				Host:    "worker-node", Harness: "codex", ID: messageTargetSession,
-				Fiber: id, FiberUID: uid, State: "hook",
-			}}})
-			ledger, _ := json.Marshal(sessionLedgerResponse{Records: []SessionProvenance{},
-				Origins: map[string]any{"worker-node": map[string]any{"stale": false, "last_error": nil}}})
 			feed := `{"fibers":[{"origin":"worker-node","fiber":{"id":"` + uid + `","uid":"` + uid + `","slug":"` + id + `","shuttle":{"kind":"oneshot","host":"worker-node"}}}]}`
 			daemonStub(t, env, map[string]http.HandlerFunc{
-				"/api/v1/peers": jsonBody(string(peers)), sessionsCompositePath: jsonBody(string(ledger)),
 				"/api/v1/fibers/composite": jsonBody(feed),
 				"/api/v1/deliver": func(w http.ResponseWriter, r *http.Request) {
 					var request map[string]any
@@ -617,99 +537,28 @@ func TestResolveMessageTargetFreshRemoteWorkerUsesOwnerPeerBeforeLedgerBinding(t
 				},
 			})
 			for _, target := range []string{id, uid} {
-				got, err := newApp(env).resolveMessageTarget(target)
-				if err != nil {
-					t.Fatalf("fresh remote %s: %v", target, err)
+				if out, _, err := runMessage(t, newApp(env), target, "Read the revised brief"); err != nil || !strings.HasPrefix(out, "woken ") {
+					t.Fatalf("message to %s: %q, %v", target, out, err)
 				}
-				if want := "shuttle://worker-node/codex/" + messageTargetSession; got != want {
-					t.Fatalf("address %q, want %q", got, want)
-				}
-			}
-			if out, _, err := runMessage(t, newApp(env), id, "Read the revised brief"); err != nil || !strings.HasPrefix(out, "woken ") {
-				t.Fatalf("message to fresh remote worker: %q, %v", out, err)
 			}
 		})
 	}
 }
 
-func TestFreshFiberPeerFallbackRefusesUnverifiedBindings(t *testing.T) {
-	t.Parallel()
-	for _, scenario := range []string{"wrong-owner", "wrong-uid", "missing-uid", "multiple-peers", "stale-owner", "different-runtime"} {
-		t.Run(scenario, func(t *testing.T) {
-			t.Parallel()
-			f := &felt.Felt{ID: "hub/worker", UID: messageTargetFiberUID}
-			block := map[string]any{"host": "worker-node", "kind": "oneshot"}
-			peers := []messaging.Session{{Address: "shuttle://worker-node/pi/worker-A", Fiber: f.ID, FiberUID: f.UID}}
-			origins := map[string]any{"worker-node": map[string]any{"stale": false, "last_error": nil}}
-			switch scenario {
-			case "wrong-owner":
-				peers[0].Address = "shuttle://another-node/pi/worker-A"
-			case "wrong-uid":
-				peers[0].FiberUID = "01ARZ3NDEKTSV4RRFFQ69G5FAW"
-			case "missing-uid":
-				peers[0].FiberUID = ""
-			case "multiple-peers":
-				peers = append(peers, messaging.Session{Address: "shuttle://worker-node/pi/worker-B", Fiber: f.ID, FiberUID: f.UID})
-			case "stale-owner":
-				origins["worker-node"] = map[string]any{"stale": true}
-			case "different-runtime":
-				block["runtime"] = map[string]any{"session_uuid": "worker-B"}
-			}
-			if err := f.SetExtraField("shuttle", block); err != nil {
-				t.Fatal(err)
-			}
-			address, err := newApp(testEnv(t)).currentFiberMessageAddress(f, nil, origins, peers)
-			if err == nil {
-				t.Fatalf("%s selected unverified address %q", scenario, address)
-			}
-			if scenario == "multiple-peers" && !strings.Contains(err.Error(), "multiple live peer addresses") {
-				t.Fatalf("ambiguous peers: %v", err)
-			}
-		})
-	}
-}
-
-func TestResolveMessageTargetFiberKnownOnlyToItsOwner(t *testing.T) {
+func TestMessageFiberKnownOnlyToItsOwner(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	isolateMessageFiberStore(env, "")
-	peers, err := json.Marshal(messaging.Directory{Sessions: []messaging.Session{}, Gaps: []messaging.Gap{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ledger, err := json.Marshal(sessionLedgerResponse{
-		Records: []SessionProvenance{{
-			Session: messageTargetSession,
-			UID:     messageTargetFiberUID,
-			Host:    "worker-node",
-			Harness: "claude-code",
-			Fiber:   "hub/remote-thread",
-			Kind:    "dispatch",
-		}},
-		Origins: map[string]any{"worker-node": map[string]any{"stale": false, "last_error": nil}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	feed := `{"fibers":[{"origin":"worker-node","fiber":{"id":"` + messageTargetFiberUID + `","uid":"` + messageTargetFiberUID +
-		`","slug":"hub/remote-thread","name":"remote thread","status":"active","shuttle":{"kind":"oneshot","host":"worker-node","agent":"claude-opus","runtime":{"session_uuid":"` +
-		messageTargetSession + `"}}},"runtime":{"tmux_session":"remote-thread-shuttle"}}],"origins":{"worker-node":{"stale":false}}}`
-	daemonStub(t, env, map[string]http.HandlerFunc{
-		"/api/v1/peers":            jsonBody(string(peers)),
-		sessionsCompositePath:      jsonBody(string(ledger)),
-		"/api/v1/fibers/composite": jsonBody(feed),
-	})
+		`","slug":"hub/remote-thread","name":"remote thread","status":"active","shuttle":{"kind":"oneshot","host":"worker-node","agent":"claude-opus"}},"runtime":{"tmux_session":"remote-thread-shuttle"}}],"origins":{"worker-node":{"stale":false}}}`
+	daemonStub(t, env, map[string]http.HandlerFunc{"/api/v1/fibers/composite": jsonBody(feed)})
 
 	for _, target := range []string{"hub/remote-thread", messageTargetFiberUID} {
-		got, err := newApp(env).resolveMessageTarget(target)
-		if err != nil {
-			t.Fatalf("%s: %v", target, err)
-		}
-		if want := "shuttle://worker-node/claude/" + messageTargetSession; got != want {
-			t.Fatalf("%s resolved to %q, want %q", target, got, want)
+		if f, block := newApp(env).messageFiber(target); f == nil || f.UID != messageTargetFiberUID || block.Host != "worker-node" {
+			t.Fatalf("%s: %+v", target, f)
 		}
 	}
-	if _, err := newApp(env).resolveMessageTarget("remote-thread"); err == nil {
+	if f, _ := newApp(env).messageFiber("remote-thread"); f != nil {
 		t.Fatal("a bare slug must not resolve through the owner feed")
 	}
 }
@@ -791,166 +640,49 @@ func TestResolveMessageTargetRefusesGuessedFiberSlug(t *testing.T) {
 	}
 }
 
-// The owning host's ledger is authoritative over the fiber's git runtime field,
-// which lags until that host pushes: a newer ledger worker wins.
-func TestResolveMessageTargetPrefersNewestLedgerOverStaleRuntime(t *testing.T) {
+// The newest dispatch, resume or claim row names a fiber's worker, whatever
+// its stale runtime field says.
+func TestNewestFiberWorkerPrefersNewestLedgerOverStaleRuntime(t *testing.T) {
 	t.Parallel()
-	env := testEnv(t)
-	store := writeMessageTargetFiber(t, map[string]any{
-		"kind":        "oneshot",
-		"host":        "old-node",
-		"agent":       "claude-opus",
-		"project_dir": t.TempDir(),
-		"runtime":     map[string]any{"session_uuid": "old-session"},
-	})
-	isolateMessageFiberStore(env, store)
-	messageTargetDaemon(t, env, []messaging.Session{
-		{
-			Address: "shuttle://old-node/claude/old-session",
-			Fiber:   "work/worker", FiberUID: messageTargetFiberUID,
-		},
-	}, []SessionProvenance{
-		{
-			Fiber: "work/worker", UID: messageTargetFiberUID, Session: "old-session",
-			Host: "old-node", Harness: "claude-code", At: 1, Kind: "dispatch",
-		},
-		{
-			Fiber: "work/worker", UID: messageTargetFiberUID, Session: "new-session",
-			Host: "new-node", Harness: "claude-code", At: 2, Kind: "dispatch",
-		},
-	})
-
-	address, err := newApp(env).resolveMessageTarget("work/worker")
-	if err != nil || address != "shuttle://new-node/claude/new-session" {
-		t.Fatalf("expected the ledger's newest worker, got %q, %v", address, err)
+	f := &felt.Felt{ID: "work/worker", UID: messageTargetFiberUID}
+	if err := f.SetExtraField("shuttle", map[string]any{"kind": "oneshot", "host": "old-node", "runtime": map[string]any{"session_uuid": "old-session"}}); err != nil {
+		t.Fatal(err)
 	}
-}
-
-// The composite ledger is a polled cache: when the feed from the worker's host
-// or the fiber's owning host is stale or failing, a newer worker there could be
-// missing, so the fiber target is refused rather than sent to an older one.
-func TestResolveMessageTargetRefusesWhenOwningLedgerIsNotFresh(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		name   string
-		origin map[string]any
-		want   string
-	}{
-		{"stale", map[string]any{"stale": true, "last_error": nil}, "is stale"},
-		{"failing", map[string]any{"stale": false, "last_error": "http_status 404"}, "is failing"},
-		{"missing", nil, "not part of the composite"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			env := testEnv(t)
-			store := writeMessageTargetFiber(t, map[string]any{
-				"kind":        "oneshot",
-				"host":        "new-node",
-				"agent":       "claude-opus",
-				"project_dir": t.TempDir(),
-				"runtime":     map[string]any{"session_uuid": "old-session"},
-			})
-			isolateMessageFiberStore(env, store)
-			origins := map[string]any{"old-node": map[string]any{"stale": false, "last_error": nil}}
-			if tc.origin != nil {
-				origins["new-node"] = tc.origin
-			}
-			messageTargetDaemonWithOrigins(t, env, nil, []SessionProvenance{{
-				Fiber: "work/worker", UID: messageTargetFiberUID, Session: "old-session",
-				Host: "old-node", Harness: "claude-code", At: 1, Kind: "dispatch",
-			}}, origins)
-
-			app := newApp(env)
-			app.messageResolveWait = 0
-			_, err := app.resolveMessageTarget("work/worker")
-			if err == nil || !strings.Contains(err.Error(), `host "new-node"`) || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("expected refusal for a %s owning-host ledger, got %v", tc.name, err)
-			}
-		})
+	worker, err := newestFiberWorkerRecord(f, []SessionProvenance{
+		{Fiber: "work/worker", UID: messageTargetFiberUID, Session: "old-session", Host: "old-node", Harness: "claude-code", At: 1, Kind: "dispatch"},
+		{Fiber: "work/worker", UID: messageTargetFiberUID, Session: "new-session", Host: "new-node", Harness: "claude-code", At: 2, Kind: "dispatch"},
+	})
+	if err != nil || worker == nil || worker.Session != "new-session" || worker.Host != "new-node" {
+		t.Fatalf("expected the ledger's newest worker, got %+v, %v", worker, err)
 	}
 }
 
 // A Codex claim row carries a transcript id, not the addressable thread id;
-// without a peer or ledger thread mapping the target is refused, never guessed.
-func TestResolveMessageTargetRefusesCodexTranscriptWithoutThread(t *testing.T) {
+// without a peer or ledger thread mapping its address is refused, never guessed.
+func TestFiberWorkerAddressRefusesCodexTranscriptWithoutThread(t *testing.T) {
 	t.Parallel()
-	env := testEnv(t)
-	store := writeMessageTargetFiber(t, map[string]any{
-		"kind":        "oneshot",
-		"host":        "old-node",
-		"agent":       "claude-opus",
-		"project_dir": t.TempDir(),
-		"runtime":     map[string]any{"session_uuid": "old-session"},
-	})
-	isolateMessageFiberStore(env, store)
-	messageTargetDaemon(t, env, nil, []SessionProvenance{
-		{
-			Fiber: "work/worker", UID: messageTargetFiberUID, Session: "old-session",
-			Host: "old-node", Harness: "claude-code", At: 1, Kind: "dispatch",
-		},
-		{
-			Fiber: "work/worker", UID: messageTargetFiberUID, Session: "new-transcript",
-			Host: "new-node", Harness: "codex", At: 2, Kind: "claim",
-		},
-	})
-
-	_, err := newApp(env).resolveMessageTarget("work/worker")
+	f := &felt.Felt{ID: "work/worker", UID: messageTargetFiberUID}
+	if err := f.SetExtraField("shuttle", map[string]any{"kind": "oneshot", "host": "old-node"}); err != nil {
+		t.Fatal(err)
+	}
+	worker := &SessionProvenance{Fiber: "work/worker", UID: messageTargetFiberUID, Session: "new-transcript", Host: "new-node", Harness: "codex", At: 2, Kind: "claim"}
+	_, err := fiberWorkerAddress(f, worker, "codex", "old-session", nil)
 	if err == nil || !strings.Contains(err.Error(), "thread id is not yet known") ||
 		!strings.Contains(err.Error(), "new-transcript") || !strings.Contains(err.Error(), "explicit shuttle:// address") {
 		t.Fatalf("expected Codex transcript refusal, got %v", err)
 	}
 }
 
-func TestResolveMessageTargetIgnoresEmptyBackfillRow(t *testing.T) {
+func TestNewestFiberWorkerIgnoresEmptyBackfillRow(t *testing.T) {
 	t.Parallel()
-	env := testEnv(t)
 	const runtimeID = "7b57d3d9-92c8-4d22-b0bd-3a2db1c56ea0"
-	store := writeMessageTargetFiber(t, map[string]any{
-		"kind":        "oneshot",
-		"host":        "worker-node",
-		"agent":       "claude-opus",
-		"project_dir": t.TempDir(),
-		"runtime":     map[string]any{"session_uuid": runtimeID},
-	})
-	isolateMessageFiberStore(env, store)
-	messageTargetDaemon(t, env, nil, []SessionProvenance{
+	f := &felt.Felt{ID: "work/worker", UID: messageTargetFiberUID}
+	worker, err := newestFiberWorkerRecord(f, []SessionProvenance{
 		{Fiber: "work/worker", UID: messageTargetFiberUID, Session: runtimeID, Host: "worker-node", Harness: "claude-code", At: 1, Kind: "dispatch"},
 		{Fiber: "work/worker", UID: messageTargetFiberUID, Host: "worker-node", Harness: "codex", At: 2, Kind: "dispatch"},
 	})
-
-	got, err := newApp(env).resolveMessageTarget("work/worker")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := "shuttle://worker-node/claude/" + runtimeID; got != want {
-		t.Fatalf("resolved address = %q, want %q", got, want)
-	}
-}
-
-func TestResolveMessageTargetFiberFailsClosedWhenLedgerUnavailable(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	store := writeMessageTargetFiber(t, map[string]any{
-		"kind":        "oneshot",
-		"host":        "worker-node",
-		"agent":       "claude-opus",
-		"project_dir": t.TempDir(),
-		"runtime":     map[string]any{"session_uuid": messageTargetSession},
-	})
-	isolateMessageFiberStore(env, store)
-	daemonStub(t, env, map[string]http.HandlerFunc{
-		"/api/v1/peers": jsonBody(`{"sessions":[],"gaps":[]}`),
-		sessionsCompositePath: func(w http.ResponseWriter, _ *http.Request) {
-			http.Error(w, "ledger unavailable", http.StatusServiceUnavailable)
-		},
-	})
-
-	app := newApp(env)
-	app.messageResolveWait = 0
-	_, err := app.resolveMessageTarget("work/worker")
-	if err == nil || !strings.Contains(err.Error(), "session ledger is unavailable") ||
-		!strings.Contains(err.Error(), "ledger unavailable") {
-		t.Fatalf("expected ledger-unavailable refusal, got %v", err)
+	if err != nil || worker == nil || worker.Session != runtimeID {
+		t.Fatalf("worker = %+v, %v; want %s", worker, err, runtimeID)
 	}
 }
 
@@ -1006,77 +738,15 @@ func TestResolveMessageTargetAmbiguousSlugListsFullPaths(t *testing.T) {
 	}
 }
 
-// A slug unique in the store resolves like the fiber's full path.
-func TestResolveMessageTargetUniqueNestedSlugResolvesLikeFullPath(t *testing.T) {
+func TestMessageFiberUniqueNestedSlugResolvesLikeFullPath(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
-	block := map[string]any{
-		"kind":        "oneshot",
-		"host":        "worker-node",
-		"agent":       "claude-opus",
-		"project_dir": t.TempDir(),
-	}
-	store := writeMessageTargetFiberWithID(t, "science/cmbx/sims/glass/6x2pt-mocks", messageTargetFiberUID, block)
+	store := writeMessageTargetFiberWithID(t, "science/cmbx/sims/glass/6x2pt-mocks", messageTargetFiberUID, map[string]any{"kind": "oneshot", "host": "worker-node", "agent": "claude-opus", "project_dir": t.TempDir()})
 	isolateMessageFiberStore(env, store)
-	messageTargetDaemon(t, env, nil, []SessionProvenance{{
-		Session: messageTargetSession,
-		UID:     messageTargetFiberUID,
-		Host:    "worker-node",
-		Harness: "claude-code",
-		Fiber:   "science/cmbx/sims/glass/6x2pt-mocks",
-		Kind:    "dispatch",
-	}})
-	want := "shuttle://worker-node/claude/" + messageTargetSession
 	for _, target := range []string{"science/cmbx/sims/glass/6x2pt-mocks", "6x2pt-mocks", "glass/6x2pt-mocks"} {
-		got, err := newApp(env).resolveMessageTarget(target)
-		if err != nil || got != want {
-			t.Fatalf("%s resolved to %q, %v; want %q", target, got, err, want)
+		if f, _ := newApp(env).messageFiber(target); f == nil || f.UID != messageTargetFiberUID {
+			t.Fatalf("%s resolved to %+v", target, f)
 		}
 	}
 }
 
-// A host whose daemon is restarting reads stale until it is back; the sender
-// waits for it rather than being told to hunt for an address.
-func TestResolveMessageTargetWaitsForRestartingHost(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	store := writeMessageTargetFiber(t, map[string]any{
-		"kind":        "oneshot",
-		"host":        "new-node",
-		"agent":       "claude-opus",
-		"project_dir": t.TempDir(),
-		"runtime":     map[string]any{"session_uuid": "old-session"},
-	})
-	isolateMessageFiberStore(env, store)
-	records := []SessionProvenance{{
-		Fiber: "work/worker", UID: messageTargetFiberUID, Session: "old-session",
-		Host: "new-node", Harness: "claude-code", At: 1, Kind: "dispatch",
-	}}
-	peers, _ := json.Marshal(messaging.Directory{Sessions: []messaging.Session{}, Gaps: []messaging.Gap{}})
-	var ledgerCalls atomic.Int32
-	daemonStub(t, env, map[string]http.HandlerFunc{
-		"/api/v1/peers": jsonBody(string(peers)),
-		sessionsCompositePath: func(w http.ResponseWriter, r *http.Request) {
-			stale := ledgerCalls.Add(1) <= 3
-			body, _ := json.Marshal(sessionLedgerResponse{Records: records, Origins: map[string]any{
-				"new-node": map[string]any{"stale": stale, "last_error": nil},
-			}})
-			jsonBody(string(body))(w, r)
-		},
-	})
-
-	now := time.Unix(0, 0)
-	app := newApp(env)
-	app.eventNow = func() time.Time { return now }
-	app.daemonPause = func(d time.Duration) { now = now.Add(d) }
-	got, err := app.resolveMessageTarget("work/worker")
-	if err != nil {
-		t.Fatalf("expected resolution after the host recovered, got %v", err)
-	}
-	if want := "shuttle://new-node/claude/old-session"; got != want {
-		t.Fatalf("resolved %q, want %q", got, want)
-	}
-	if got := ledgerCalls.Load(); got != 4 {
-		t.Fatalf("ledger fetched %d times, want 4", got)
-	}
-}

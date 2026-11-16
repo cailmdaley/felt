@@ -394,19 +394,9 @@ Shuttle fiber path, slug, or UID.
 Fiber targets require one exact match across configured stores; they refuse guesses and duplicate matches, and a slug naming several fibers is refused with their full paths.
 Fiber sends use the owner's durable inbox whether a worker is live or dormant; attachments become retained owner-local file references.
 The receipt says what became of this message: woken, followed up in a turn, delivered (as context, or before a retry), held as context for cost, starting or queued.
-`--notify-when-idle` subscribes when a hook or wake delivers the entry.
-With an owner below contract 42, waking live sends and attachments keep session routing for compatibility.
-A session-routed send resolves to the worker in its newest dispatch, resume, or claim ledger row, which the owning host writes.
-When the fiber's
-`shuttle.runtime.session_uuid` or another live session registered for the
-fiber differs, the command notes it on stderr and still uses the ledger's
-worker.
-Before a fresh worker has its first ledger row, one live peer on the owning host with the fiber's exact UID can supply its native address.
-Multiple matching peers, an unavailable ledger, or a stale or failing ledger feed are refused, since a newer worker could be missing.
+`--notify-when-idle` subscribes when a hook or wake delivers the entry; with no text, the owner subscribes the fiber's live worker at once, and a fiber with no live worker refuses it.
 A fiber absent from local stores can resolve by exact path or UID through the owner's live feed, without waiting for Git sync.
-A managed Codex ledger row on either surface keeps its transcript id in `session` and its address id in `thread_id`.
-A hook-only CLI peer can establish the ledger session's exact address for context delivery even without a separate thread mapping.
-A Codex row whose thread identity cannot otherwise be established is refused.
+A session ID resolves through live discovery and the session ledger; a managed Codex ledger row keeps its transcript id in `session` and its address id in `thread_id`.
 Ambiguous session IDs fail with
 their candidate addresses. Addresses
 use `claude`, `codex`, and `pi`; the ledger spelling `claude-code` normalizes
@@ -452,7 +442,8 @@ Hooks offer queued context when the receiver next prompts or uses a tool; Pi off
 receiver next ends a turn with nothing queued or running, or exits. A receiver
 that is idle already answers at once, giving the time its last turn ended.
 Text is optional: with text, the message is delivered and then the subscription
-is made; without it, the receipt is `subscribed`. The notice arrives as context
+is made; without it, the receipt is `subscribed`, and for a fiber it names the
+live worker the owner subscribed. The notice arrives as context
 from Shuttle and names the receiver in its text; `--notify-wake` has it start a turn instead.
 The callback address comes from the detected harness session.
 `--from` names another sender; callbacks still reach the calling session.

@@ -111,7 +111,7 @@ The mailbox layer reports ended, never registered, or a registered receiver proc
 Directory existence alone is not end evidence: native endpoint registration also creates that directory.
 The owner-local CLI enriches rejected or unknown session receipts from its rotated and live session ledger when another worker holds the fiber.
 Rows are stably ordered by timestamp, with live rows after rotated rows at equal timestamps.
-Successor addresses use the normal fiber resolver's runtime and peer evidence, including Codex CLI workers without `thread_id`.
+Successor addresses come from the fiber worker's ledger row, runtime and peer evidence, including Codex CLI workers without `thread_id`.
 If an exact successor address cannot be established, the receipt still names the recorded successor session and advises the fiber target, without guessing an address.
 This enrichment survives daemon routing and never changes the explicit recipient.
 If a marker or ledger pairing is absent, preserve uncertainty rather than inferring an end or successor.

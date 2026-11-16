@@ -97,6 +97,7 @@ The owner's put, consumes and any launch share a 35-second budget, each command 
 A timeout leaves the entry durable; retry the same id.
 
 `--notify-when-idle` subscribes when a wake or a hook claim delivers the entry, using its publication id, so a repeated claim does not start another watcher.
+With no text it is no entry: `/deliver` subscribes the fiber's live worker (`Poller.context_receiver`) through a session send with no text, and a fiber with no live worker answers 409.
 `--fresh` is not an inbox entry. The sender's `/deliver` (`resume_mode: fresh`, its message id, its text) makes the owner write a record of it straight to the inbox's `offered/`, as a human line is (below), so no worker is ever offered its text, and then ask the Poller for a fresh session with the text in its launch prompt, headed `From <sender>:`. The new session is told where the previous conversation is.
 That launch is an inbox launch, so the agent gate holds it: a closed, resting or unarmed fiber, a due scheduled run, the boot quarantine, a full host, or a launch breaker or cooldown refuses it, and it never reopens or arms a fiber.
 A refusal answers 409 with its `reason` and an `error` that names it, and settles the record undeliverable, so the same id may be sent again once that changes; nothing about it waits in the inbox, and a later message to the fiber never carries its text.

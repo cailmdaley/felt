@@ -23,7 +23,9 @@ func TestQuietLiveFiberIdleSubscriptionGoesToTheInbox(t *testing.T) {
 		w.WriteHeader(http.StatusAccepted)
 		_, _ = w.Write([]byte(`{"queued":true,"status":"delivered"}`))
 	}})
-	receipt, err := newApp(env).queueForFiber(messaging.Request{Address: "work/worker", MessageID: "idle", Text: "quiet context", NotifyWhenIdle: true}, false)
+	app := newApp(env)
+	f, block := app.messageFiber("work/worker")
+	receipt, err := app.queueInFiber(f, block, messaging.Request{Address: "work/worker", MessageID: "idle", Text: "quiet context", NotifyWhenIdle: true}, false, "")
 	if err != nil || receipt == nil || receipt.Status != "delivered" {
 		t.Fatalf("live idle subscription must go to the inbox: %+v, %v", receipt, err)
 	}

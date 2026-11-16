@@ -122,9 +122,7 @@ func TestMessageToOwnerOnlyDormantFiberQueuesBeforeAnyWorkerBinding(t *testing.T
 		"/api/v1/fibers/composite": jsonBody(feed),
 		"/api/v1/deliver":          deliver,
 	})
-	app := newApp(env)
-	app.messageResolveWait = 0
-	stdout, _, err := runMessage(t, app, "science/team/worker", "read this when you start")
+	stdout, _, err := runMessage(t, newApp(env), "science/team/worker", "read this when you start")
 	if err != nil || !strings.Contains(stdout, "queued for science/team/worker") {
 		t.Fatalf("owner-only queue receipt = %q, %v", stdout, err)
 	}
@@ -185,7 +183,8 @@ func TestContextOnlyLiveFiberUsesDurableMailbox(t *testing.T) {
 		},
 	})
 	app := newApp(env)
-	receipt, err := app.queueForFiber(messaging.Request{Address: "work/worker", MessageID: "quiet", Text: "follow the fiber"}, false)
+	f, block := app.messageFiber("work/worker")
+	receipt, err := app.queueInFiber(f, block, messaging.Request{Address: "work/worker", MessageID: "quiet", Text: "follow the fiber"}, false, "")
 	if err != nil || receipt == nil {
 		t.Fatalf("queue = %+v, %v", receipt, err)
 	}

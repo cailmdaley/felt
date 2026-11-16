@@ -15,6 +15,11 @@ defmodule ShuttleWeb.DeliverController do
   as human input. A request carrying `origin` is forwarded to that owner's
   identical route.
 
+  `notify_when_idle` with no `text` subscribes `from` (or `notify_address`)
+  to one idle notice from the fiber's live worker and answers that
+  subscription's message receipt (status `subscribed`); a fiber with no live
+  worker answers 409.
+
   With `context_only` (and a `message_id`), `text` is queued in the fiber's
   inbox (`Shuttle.Delivery.context/4`): 202 `{delivery: "context",
   queued: true, status, detail?}`. `turn` (`"ask"` or `"force"`; `wake` means
@@ -73,12 +78,13 @@ defmodule ShuttleWeb.DeliverController do
   @spec route(term(), term(), String.t() | nil, term()) :: {pos_integer(), map()}
   def route(fiber_id, text, origin, from \\ "shuttle", context \\ %{}) do
     from = if from in [nil, ""], do: "shuttle", else: from
+    text = if is_binary(text) and String.trim(text) != "", do: text
 
     cond do
       not (is_binary(fiber_id) and String.trim(fiber_id) != "") ->
         {400, %{delivered: false, error: "fiber_id is required"}}
 
-      not (is_binary(text) and String.trim(text) != "") ->
+      text == nil and context["notify_when_idle"] != true ->
         {400, %{delivered: false, error: "text is required"}}
 
       true ->
@@ -98,6 +104,8 @@ defmodule ShuttleWeb.DeliverController do
         end
     end
   end
+
+  defp local(fiber_id, nil, from, context), do: subscribe_idle(fiber_id, from, context)
 
   defp local(fiber_id, text, _from, %{"live_input" => true} = context) do
     Delivery.human(fiber_id, text, message_id: context["message_id"], source: "voice")
@@ -152,6 +160,30 @@ defmodule ShuttleWeb.DeliverController do
         )
         |> reply(fiber_id)
       end
+    end
+  end
+
+  # A notify-only request subscribes `from` to one idle notice from the
+  # fiber's live worker, as a session-addressed message with no text would.
+  defp subscribe_idle(fiber_id, from, context) do
+    with {:ok, %{fibers: [entry | _]}} <- Shuttle.FiberDocuments.get_shuttle(fiber_id),
+         {:ok, address, _epoch} <-
+           Shuttle.Poller.context_receiver(Shuttle.Threads.address(entry.fiber)),
+         {:ok, status, receipt} <-
+           context
+           |> Map.take(["message_id", "notify_address", "notify_wake"])
+           |> Map.merge(%{
+             "address" => address,
+             "from" => from,
+             "notify_when_idle" => true,
+             "wake" => false
+           })
+           |> Shuttle.Messaging.send_message() do
+      {status, receipt}
+    else
+      {:ok, %{fibers: []}} -> {404, %{error: "no constitution #{fiber_id} here"}}
+      {:error, status, error} when is_integer(status) -> {status, %{error: error}}
+      _ -> {409, %{error: "#{fiber_id} has no live worker to watch"}}
     end
   end
 

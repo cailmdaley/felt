@@ -29,19 +29,10 @@ type fiberReceipt struct {
 	NotBefore string `json:"not_before,omitempty"`
 }
 
-// queueForFiber routes fiber messages to the fiber's inbox
-// through its owner. Consumption decides context, follow-up, wake or a gated
-// launch. force records --wake. Attachments are retained as owner-local references.
-func (a *app) queueForFiber(request messaging.Request, force bool) (*fiberReceipt, error) {
-	f, block := a.messageFiber(request.Address)
-	if f == nil {
-		return nil, nil
-	}
-	return a.queueInFiber(f, block, request, force, "")
-}
-
-// queueInFiber sends a message to fiber f's inbox through its owner; a
-// notBefore instant (UTC RFC 3339) schedules it.
+// queueInFiber sends a message to fiber f's inbox through its owner, where
+// consumption decides context, follow-up, wake or a gated launch. force
+// records --wake; a notBefore instant (UTC RFC 3339) schedules it.
+// Attachments are retained as owner-local references.
 func (a *app) queueInFiber(f *felt.Felt, block *shuttle.Block, request messaging.Request, force bool, notBefore string) (*fiberReceipt, error) {
 	fiberID := f.UID
 	if fiberID == "" {
@@ -118,6 +109,44 @@ func (a *app) queueInFiber(f *felt.Felt, block *shuttle.Block, request messaging
 	}
 }
 
+// subscribeFiberIdle asks fiber f's owner to subscribe the request's sender to
+// one idle notice from the fiber's live worker. The answer is the
+// subscription's receipt, addressed to that worker.
+func (a *app) subscribeFiberIdle(f *felt.Felt, block *shuttle.Block, request messaging.Request) (messaging.Receipt, error) {
+	fiberID := f.UID
+	if fiberID == "" {
+		fiberID = f.ID
+	}
+	payload, err := json.Marshal(map[string]any{
+		"fiber_id":         fiberID,
+		"origin":           block.Host,
+		"from":             request.From,
+		"message_id":       request.MessageID,
+		"notify_address":   request.NotifyAddress,
+		"notify_when_idle": true,
+		"notify_wake":      request.NotifyWake,
+	})
+	if err != nil {
+		return messaging.Receipt{}, err
+	}
+	endpoint, err := a.daemonEndpoint("/api/v1/deliver")
+	if err != nil {
+		return messaging.Receipt{}, err
+	}
+	resp, err := a.daemonHTTPClient(52*time.Second).Post(endpoint, "application/json", bytes.NewReader(payload))
+	if err != nil {
+		return messaging.Receipt{}, fmt.Errorf("reaching daemon at %s: %w", endpoint, err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxMessageReceiptBytes))
+	var receipt messaging.Receipt
+	_ = json.Unmarshal(body, &receipt)
+	if resp.StatusCode >= 300 {
+		return receipt, daemonStatusError{url: endpoint, status: resp.StatusCode, body: strings.TrimSpace(string(body))}
+	}
+	return receipt, nil
+}
+
 // printFiberReceipt reports a message queued in a fiber's inbox: JSON with
 // --json, else one line naming the fiber, what happens next and the message
 // id a retry reuses.
@@ -148,10 +177,11 @@ func (a *app) printFiberReceipt(receipt *fiberReceipt, wake bool) error {
 	return err
 }
 
-// messageFiber is the one Shuttle-owned fiber a message target names, with its
-// block, or nil when the target is a session or names no such fiber.
+// messageFiber is the one Shuttle-owned fiber a message target names (its
+// path, slug or uid), with its block, or nil when the target is a session
+// address or id, or names no such fiber.
 func (a *app) messageFiber(target string) (*felt.Felt, *shuttle.Block) {
-	if strings.HasPrefix(target, "shuttle://") || looksLikeNativeSessionID(target) {
+	if strings.HasPrefix(target, "shuttle://") || sessionUUIDPattern.MatchString(target) {
 		return nil, nil
 	}
 	return a.lookupFiber(target)

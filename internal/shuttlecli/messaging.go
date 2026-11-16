@@ -17,7 +17,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/messaging"
+	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
@@ -191,7 +193,9 @@ List with inbox ls <fiber> --scheduled; cancel with inbox cancel <fiber> <id>.
 A fiber send always uses its durable inbox; attachments become retained file references. The receipt says
 what became of this message: woken, followed_up in a turn, delivered (as context,
 or before a retry), held as context for cost, starting, queued or scheduled.
---notify-when-idle subscribes when the worker takes the entry, by hook or wake.
+--notify-when-idle subscribes when the worker takes the entry, by hook or wake;
+with no text, the fiber's owner subscribes its live worker at once, and a fiber
+with no live worker refuses it.
 --fresh is deduplicated under the same id and obeys the launch gate; its text
 is the new session's launch prompt. A refusal fails with its reason, and the
 same --message-id may be sent again once that changes.
@@ -303,23 +307,26 @@ exit 1 means rejected, unknown, or another command error.`,
 				return nil
 			}
 			notifyOnly := request.NotifyWhenIdle && request.Text == "" && len(request.Attachments) == 0
-			if !messageOpts.requestJSON && !messageOpts.local && !notifyOnly {
-				queued, err := a.queueForFiber(request, request.Wake && cmd.Flags().Changed("wake"))
+			var fiber *felt.Felt
+			var block *shuttle.Block
+			if !messageOpts.requestJSON && !messageOpts.local {
+				fiber, block = a.messageFiber(request.Address)
+			}
+			if fiber != nil && !notifyOnly {
+				queued, err := a.queueInFiber(fiber, block, request, request.Wake && cmd.Flags().Changed("wake"), "")
 				if err != nil {
 					return err
 				}
-				if queued != nil {
-					if request.NotifyWhenIdle {
-						fmt.Fprintf(a.env.Stderr, "idle subscription: recorded when the worker takes the entry\n")
-					}
-					a.recordBoardMessage(args[0], request)
-					if err := a.clearMessagedFiberAsk(args[0], request.From); err != nil {
-						fmt.Fprintf(a.env.Stderr, "message queued; couldn't clear the fiber's outstanding question: %v\n", err)
-					}
-					return a.printFiberReceipt(queued, request.Wake)
+				if request.NotifyWhenIdle {
+					fmt.Fprintf(a.env.Stderr, "idle subscription: recorded when the worker takes the entry\n")
 				}
+				a.recordBoardMessage(args[0], request)
+				if err := a.clearMessagedFiberAsk(args[0], request.From); err != nil {
+					fmt.Fprintf(a.env.Stderr, "message queued; couldn't clear the fiber's outstanding question: %v\n", err)
+				}
+				return a.printFiberReceipt(queued, request.Wake)
 			}
-			if !messageOpts.requestJSON {
+			if !messageOpts.requestJSON && fiber == nil {
 				request.Address, err = a.resolveMessageTarget(request.Address)
 				if err != nil {
 					return err
@@ -338,7 +345,9 @@ exit 1 means rejected, unknown, or another command error.`,
 			var receipt messaging.Receipt
 			var receiptProduced bool
 			feltErrorCode := ""
-			if messageOpts.local {
+			if fiber != nil {
+				receipt, err = a.subscribeFiberIdle(fiber, block, request)
+			} else if messageOpts.local {
 				host, hostErr := a.resolveOwnHost("")
 				if hostErr != nil {
 					return hostErr
