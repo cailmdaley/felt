@@ -238,10 +238,12 @@
   border-radius: 3px;
   transition: background 140ms ease;
 }
-/* The columns take the Desk's whole height; each scrolls on its own. */
+/* The columns take most of the Desk's height, each scrolling on its own,
+   and the shelf stands under them: 220px holds a few rows of it, so on a
+   normal screen the whole Desk shows without scrolling to the shelf. */
 .kbn-section-now {
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: min(64vh, calc(100% - 220px));
   gap: 6px;
 }
 .kbn-now-board {
@@ -552,6 +554,7 @@
 /* Empty column — a quiet marginal line, set in italic with a small
    fleuron to make absence feel intentional rather than missing. */
 .kbn-empty {
+  line-height: var(--leading-ui);
   text-align: center;
   color: color-mix(in srgb, var(--kbn-ink) 6%, var(--kbn-ink-muted));
   font-family: var(--font-serif);
@@ -867,8 +870,8 @@
   }
 
   /* The head folds into the strip: the folio segment names the leaf and carries its count. */
-  .kbn-col-head { display: none; }
-  .kbn-col-list { padding-top: 8px; }
+  .kbn-now-board .kbn-col-head { display: none; }
+  .kbn-now-board .kbn-col-list { padding-top: 8px; }
 }
 
 @media (max-width: 430px) {

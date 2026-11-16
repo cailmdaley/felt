@@ -96,9 +96,7 @@ export class DeskKeyboard {
     const regions = this.regions()
     if (!regions.length) return false
     const current = this.node()
-    const initial = ['waiting', 'working', 'quiet'].map(kind =>
-      regions.findIndex(region => region[0].closest(`[data-column="${kind}"]`))).find(index => index >= 0) ?? 0
-    const column = current ? regions.findIndex(region => region.includes(current)) : initial
+    const column = current ? regions.findIndex(region => region.includes(current)) : 0
     let row = current ? regions[column].indexOf(current) : 0
     if (intent === 'open') {
       if (!this.selected || !current) return false
@@ -145,9 +143,9 @@ export class DeskKeyboard {
     if (isMobileViewport()) {
       const column = el.closest<HTMLElement>('[data-column]')
       const board = column?.parentElement
-      if (board && column) {
+      if (board?.classList.contains('kbn-now-board') && column) {
         const index = [...board.children].indexOf(column)
-        board.scrollTo?.({ left: folioScrollTarget(index, board.clientWidth, 3), behavior: motion })
+        board.scrollTo?.({ left: folioScrollTarget(index, board.clientWidth, board.children.length), behavior: motion })
       }
       el.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: motion })
       return

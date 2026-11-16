@@ -1,4 +1,5 @@
 import { VERDICT_DELAY_MS } from './workspace/verdictDelay.js'
+import { DESK_SECTIONS } from './deskOrdering.js'
 
 export type KeySurface = 'desk' | 'view' | 'reader'
 export type KeyIntent = 'desk' | 'chronicle' | 'channels' | 'globe' | 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'nextGroup' | 'prevGroup' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward' | 'temper' | 'discard' | 'toReview' | 'undoVerdict' | 'conversation' | 'rest' | 'pin' | 'orchestrator' | 'tapestry'
@@ -37,7 +38,7 @@ const constitutionBindings: KeyBinding[] = [
 /** Desk regions follow reading order: its three columns left to right, each
  * its family cards and their lines in drawn order. Empty regions are skipped;
  * movement stops at the ends, never wraps. */
-export const DESK_REGION_SELECTORS = ['[data-column="waiting"]', '[data-column="working"]', '[data-column="quiet"]'] as const
+export const DESK_REGION_SELECTORS = DESK_SECTIONS.map(section => `[data-column="${section}"]`)
 
 /** `1`–`4` switch views from every surface. */
 const VIEW_KEYS: KeyBinding[] = [

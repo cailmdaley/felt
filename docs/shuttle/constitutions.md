@@ -99,8 +99,8 @@ shuttle install pipeline/covariance-loader \
 This writes the `shuttle:` block, validates the agent against the registry, and
 sets the fiber's `status: active`. The daemon picks it up on the next poll.
 
-Add `--disabled` to stash it as a draft (`status: open`). It sits quiet on the
-board's Desk, drawn as a draft, and waits. `shuttle resume <fiber>` arms it later.
+Add `--disabled` to stash it as a draft (`status: open`). It sits in the board's
+Desk under Drafts, and waits. `shuttle resume <fiber>` arms it later.
 
 `install` is create-only. Run it against a fiber that already has a block and
 it refuses, naming the verb you actually wanted — `shuttle status <fiber>`
@@ -127,7 +127,7 @@ human closes it or puts it to rest.
 
 A oneshot need not have a finish line. A hub you come back to — a debug
 intake, a practice — is a oneshot that rests between sessions: `status: open`
-with `horizon: stashed`, quiet on the board's Desk, and started by hand
+with `horizon: stashed`, under Resting on the board's Desk, and started by hand
 when you want it. A worker puts it there with `shuttle rest` when the session
 ends with nothing to review; see [Lifecycle](lifecycle.md).
 
@@ -189,8 +189,8 @@ role. The office's charter is `roles/<office>` in the shared store or in a
 repository linked in at its top level ([where a charter lives](../concepts/roles.md#where-a-charter-lives)).
 A role may have any number of seats, and the charter itself stays
 host-free and is never dispatched. Seat changes only its column at rest (Roles
-rather than Drafts or Resting, where the board's Desk draws it quiet with the
-word *seat*) and what it means, never its lifecycle.
+rather than Drafts or Resting, the board's Desk drawing it under Roles &
+standing) and what it means, never its lifecycle.
 
 ```bash
 shuttle role <fiber> analyst

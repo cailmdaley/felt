@@ -1,7 +1,7 @@
 import '@ui-sdk/web/tabs'
-import { attentionOf, clearable, quietWord, type Attention, type Waits } from './attention.js'
+import { attentionOf, clearable, quietWord, type Waits } from './attention.js'
 import { civilWeekday, dueCivilDay, formatCivilDay, isoDayLocal, shiftCivilDay } from './civilDay.js'
-import { DESK_COLUMN_TITLE, type DeskFamily, type DeskOrder, type FamilyWait } from './deskOrdering.js'
+import { DESK_COLUMNS, DESK_FOLIO_NAME, DESK_SECTION_TITLE, DESK_SECTIONS, type DeskFamily, type DeskOrder, type DeskSection, type FamilyWait } from './deskOrdering.js'
 import { activeFolioIndex, folioScrollTarget } from './deskMobile.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { isMobileViewport } from './mobile.js'
@@ -11,13 +11,16 @@ import { rowLabel, slug } from './threadOutline.js'
 import { responseThreadIndex, ThreadIndex } from './threads.js'
 import './desk.css'
 
-/** The Desk's columns, left to right. */
-const COLUMNS: readonly Attention[] = ['waiting', 'working', 'quiet']
-const EMPTY: Readonly<Record<Attention, string>> = {
+const EMPTY: Readonly<Record<DeskSection, string>> = {
   waiting: 'Nothing waits on you.',
   working: 'No worker is running.',
-  quiet: 'Nothing is at rest.',
+  review: 'Nothing awaits review.',
+  drafts: 'No drafts.',
+  resting: 'Nothing is resting.',
+  roles: 'No seats or schedules.',
 }
+/** The faint word a shelf's own name already says. */
+const SAID: Partial<Record<DeskSection, string>> = { drafts: 'draft', resting: 'resting', roles: 'seat' }
 
 export interface DeskRendererOptions {
   /** What waits on the human, by fiber. */
@@ -33,12 +36,13 @@ export interface DeskRendererOptions {
 }
 
 /**
- * The Desk: three columns, Waiting on you, Working and Quiet, each a list of
- * family cards, every family once, in the column of its most urgent member
- * (`deskOrder`). Its head row carries the two ways to make something new. On
- * a phone the columns are leaves of a pager under a folio of three tabs.
- * Nothing on it is dragged, and it has no context menu: a card or a line
- * opens a constitution's view, and a waiting post's ✓ clears it.
+ * The Desk: three columns, Waiting on you, Working and Awaiting review, and
+ * under them a shelf of three, Drafts, Resting and Roles & standing; each a
+ * list of family cards, every family once, in its section (`deskOrder`). Its
+ * head row carries the two ways to make something new. On a phone the
+ * columns are leaves of a pager under a folio of three tabs, and the shelf
+ * stands below it. Nothing on it is dragged, and it has no context menu: a
+ * card or a line opens a constitution's view, and a waiting post's ✓ clears it.
  */
 export class KanbanSurfaceRenderer {
   /** Which leaf of the phone's pager is showing, held across redraws. */
@@ -50,20 +54,26 @@ export class KanbanSurfaceRenderer {
   }
 
   renderDesk(order: DeskOrder, index: ThreadIndex): HTMLElement {
+    const desk = document.createElement('div')
+    desk.className = 'kbn-desk-sections'
     const section = document.createElement('section')
     section.className = 'kbn-section kbn-section-now'
     section.setAttribute('role', 'region')
     section.setAttribute('aria-label', 'The desk')
     const board = document.createElement('div')
     board.className = 'kbn-now-board'
-    for (const column of COLUMNS) board.append(this.column(column, order.columns[column], index))
+    for (const column of DESK_COLUMNS) board.append(this.column(column, order.sections[column], index))
     const head = document.createElement('div')
     head.className = 'kbn-desk-head'
-    const folio = this.folio(board, COLUMNS.map(column => order.columns[column].length))
+    const folio = this.folio(board, DESK_COLUMNS.map(column => order.sections[column].length))
     head.append(folio, ...this.actions())
     section.append(head, board)
+    const shelf = document.createElement('div')
+    shelf.className = 'kbn-desk-shelf'
+    for (const each of DESK_SECTIONS) if (!DESK_COLUMNS.includes(each)) shelf.append(this.column(each, order.sections[each], index))
+    desk.append(section, shelf)
     this.pager(board, folio)
-    return section
+    return desk
   }
 
   /** The head row's `+` and `✶`, once each. */
@@ -82,8 +92,8 @@ export class KanbanSurfaceRenderer {
     return [...make('+', 'draft', 'Stash a new draft', this.o.onStashClick), ...make('✶', 'idea', 'New idea — speak it into a card', this.o.onNewIdeaClick)]
   }
 
-  private column(column: Attention, families: DeskFamily[], index: ThreadIndex): HTMLElement {
-    const title = DESK_COLUMN_TITLE[column]
+  private column(column: DeskSection, families: DeskFamily[], index: ThreadIndex): HTMLElement {
+    const title = DESK_SECTION_TITLE[column]
     const col = document.createElement('section')
     col.className = `kbn-col kbn-col-${column}`
     col.dataset.column = column
@@ -128,6 +138,7 @@ export class KanbanSurfaceRenderer {
     const card = document.createElement('div')
     card.className = 'kbn-family'
     card.dataset.attention = family.attention
+    card.dataset.section = family.section
     card.setAttribute('role', 'listitem')
     card.title = root.name
     identify(card, root)
@@ -139,7 +150,8 @@ export class KanbanSurfaceRenderer {
     const meta = document.createElement('span')
     meta.className = 'kbn-family-meta'
     // A family of one says nothing its dot does not; a larger one counts its workers.
-    meta.textContent = family.attention === 'quiet' ? quietWord(root) : family.working && index.children(root).length ? `${family.working} working` : ''
+    const word = family.attention === 'quiet' ? quietWord(root) : ''
+    meta.textContent = family.attention === 'quiet' ? (word === SAID[family.section] ? '' : family.section === 'resting' ? word.replace(/^resting /, '') : word) : family.working && index.children(root).length ? `${family.working} working` : ''
     head.append(stateDot(root, waits, this.o.openDetail), name, meta)
     card.append(head)
     if (family.waits.length) {
@@ -148,7 +160,7 @@ export class KanbanSurfaceRenderer {
       lines.append(...family.waits.map(wait => this.line(wait, wait.card === root)))
       card.append(lines)
     }
-    card.setAttribute('aria-label', `${root.name}, ${attentionOf(root, waits) === 'waiting' ? 'waiting on you' : DESK_COLUMN_TITLE[family.attention].toLowerCase()}`)
+    card.setAttribute('aria-label', `${root.name}, ${attentionOf(root, waits) === 'waiting' ? 'waiting on you' : DESK_SECTION_TITLE[family.section].toLowerCase()}`)
     card.addEventListener('click', event => {
       if ((event.target as Element).closest('button, a')) return
       const line = (event.target as Element).closest<HTMLElement>('.kbn-family-wait')
@@ -196,23 +208,23 @@ export class KanbanSurfaceRenderer {
     strip.className = 'kbn-folio'
     strip.setAttribute('default-value', String(this.folioIndex))
     strip.addEventListener('valuechange', event => {
-      board.scrollTo({ left: folioScrollTarget(Number(event.detail.value), board.clientWidth, COLUMNS.length), behavior: 'smooth' })
+      board.scrollTo({ left: folioScrollTarget(Number(event.detail.value), board.clientWidth, DESK_COLUMNS.length), behavior: 'smooth' })
     })
     const list = document.createElement('ui-tabs-list')
     list.className = 'kbn-folio-tabs'
     list.setAttribute('aria-label', 'Which column is showing')
     strip.append(list)
-    COLUMNS.forEach((column, i) => {
+    DESK_COLUMNS.forEach((column, i) => {
       const seg = document.createElement('div')
       seg.className = `kbn-folio-seg kbn-col-${column}`
       seg.dataset.folio = String(i)
       const tab = document.createElement('button')
       tab.type = 'button'
       tab.className = 'kbn-folio-tab'
-      tab.setAttribute('aria-label', `${DESK_COLUMN_TITLE[column]} (${counts[i]})`)
+      tab.setAttribute('aria-label', `${DESK_SECTION_TITLE[column]} (${counts[i]})`)
       const name = document.createElement('span')
       name.className = 'kbn-folio-name'
-      name.textContent = DESK_COLUMN_TITLE[column]
+      name.textContent = DESK_FOLIO_NAME[column] ?? DESK_SECTION_TITLE[column]
       const count = document.createElement('span')
       count.className = 'kbn-folio-count'
       count.textContent = String(counts[i])

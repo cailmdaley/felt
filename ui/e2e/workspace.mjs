@@ -58,7 +58,7 @@ const deskStops = p => p.locator('.kbn-desk').evaluate(desk => {
   }
   return stops
 })
-const COLUMN_NAME = { waiting: 'Waiting on you', working: 'Working', quiet: 'Quiet' }
+const COLUMN_NAME = { waiting: 'Waiting on you', working: 'Working', review: 'Awaiting review', drafts: 'Drafts', resting: 'Resting', roles: 'Roles & standing' }
 /** Back to the constitution's view, where its verbs live, from any of its pages. */
 async function toView(p) {
   if (await rowActs(p).count() && await rowActs(p).isVisible()) return
@@ -252,11 +252,13 @@ test('Oversized embedded media fit report and constitution text columns', async 
   }), 'Markdown deliverables fit their padded text column')
 })
 
-test('Fresh Desk leaves focus alone; the first j selects awaiting review and Enter opens first', async p => {
+test('Fresh Desk leaves focus alone; the first j selects the first card, j walks on into Awaiting review, and Enter opens', async p => {
   assert.ok(await p.evaluate(() => document.activeElement !== document.querySelector('.kbn-col-head')), 'load must not focus a column head')
   assert.equal(await p.locator('.kbn-key-selected').count(), 0)
   await p.keyboard.press('j')
-  assert.match(await p.locator('.kbn-family.kbn-key-selected').getAttribute('title'), /Calibrate the shear response/)
+  assert.equal(await p.locator('.kbn-key-selected').getAttribute('title'), await p.locator('[data-column] .kbn-family').first().getAttribute('title'))
+  for (let n = 0; n < 30 && !/Calibrate the shear response/.test(await p.locator('.kbn-key-selected').getAttribute('title')); n++) await p.keyboard.press('j')
+  assert.equal(await p.locator('.kbn-family.kbn-key-selected').evaluate(el => el.closest('[data-column]').dataset.column), 'review')
   await p.keyboard.press('Enter')
   await reportReady(p)
   assert.equal(await isSelected(p, 'calibration-report'), true)
@@ -837,7 +839,7 @@ test('Receipt arrivals lead the view\'s sent files and leave the open report be'
   await poll(p, () => document.querySelector('.ws-page.ws-selected')?.getAttribute('data-key')?.endsWith('/brief.md'))
 })
 
-test('j/k step constitutions in Desk order from a Channels-opened reader, J/K step its columns, and each landing is named', async p => {
+test('j/k step constitutions in Desk order from a Channels-opened reader, J/K step its sections, and each landing is named', async p => {
   // Desk order names each constitution once: each family's top-level, then its members that wait.
   const stops = await deskStops(p), names = stops.map(stop => stop.name), at = names.indexOf(name)
   const title = expected => poll(p, name => document.querySelector('.ws-channel-title')?.title === name, expected)
@@ -849,8 +851,9 @@ test('j/k step constitutions in Desk order from a Channels-opened reader, J/K st
   await openFromChannels(p, 'report.html', 'calibration-report')
   await reportReady(p)
   await appFocus(p)
-  // J steps to the next column's first stop, and the toast names the column.
-  const next = stops.find((stop, n) => n > at && stop.column !== stops[at].column)
+  // J steps to the next section, on the constitution last open there (the weekly summary, opened above) or else its first, and the toast names the section.
+  const first = stops.find((stop, n) => n > at && stop.column !== stops[at].column)
+  const next = stops.find(stop => stop.column === first.column && stop.name === 'Weekly shear summary') ?? first
   await p.keyboard.press('Shift+J'); await title(next.name); await landing(`${COLUMN_NAME[next.column]} · ${next.name}`)
   await p.keyboard.press('Shift+K'); await title(name)
   // A constitution's page keeps j and k for its rows while they have the keys; from elsewhere they step constitutions.
@@ -2378,10 +2381,10 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
 for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) test(`Nothing moves when you touch the Desk and Channels (${device})`, async p => {
   const phone = device === 'phone'
   await p.waitForTimeout(phone ? 600 : 0)
-  for (const [index, column] of ['waiting', 'working', 'quiet'].entries()) {
+  for (const [index, column] of ['waiting', 'working', 'review'].entries()) {
     await chooseDeskColumn(p, index)
     const card = p.locator(`[data-column="${column}"] .kbn-family`).first()
-    if (phone) { await p.waitForTimeout(400); continue }
+    if (phone || !await card.count()) { await p.waitForTimeout(400); continue }
     // Under reduced motion a hovered card does not lift.
     await still(p, `hovering a ${column} card`, () => card.hover())
     await p.mouse.move(1, 1)

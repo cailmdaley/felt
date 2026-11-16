@@ -110,7 +110,7 @@ describe('Desk rows in the document workspace', () => {
         board.workspace.open(page, 'Desk')
         await settle()
         const stops = board.workspace as unknown as { deskStop(card: KanbanCard): string }
-        expect(readerRows(board)).toEqual(['review', 'working', 'draft', 'resting/item', 'roles/seat', page.id])
+        expect(readerRows(board)).toEqual(['working', 'review', 'draft', 'resting/item', 'roles/seat', page.id])
         expect(stops.deskStop(page)).toBe('Open')
       }
     } finally {

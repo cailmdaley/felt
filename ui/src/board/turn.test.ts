@@ -112,7 +112,7 @@ function desk(data: KanbanResponse): HTMLElement {
 afterEach(() => { vi.unstubAllGlobals(); document.body.replaceChildren() })
 
 describe('the column, the dot and the worker facts cannot disagree', () => {
-  it('draws every constitution in the column its state names, its dot saying the same, its turn the same everywhere', () => {
+  it('draws every constitution in a section its state names, its dot saying the same, its turn the same everywhere', () => {
     vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {} })
     vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
     fc.assert(fc.property(fc.array(runtimeArb, { minLength: 1, maxLength: 8 }), (rows) => {
@@ -122,8 +122,9 @@ describe('the column, the dot and the worker facts cannot disagree', () => {
       for (const el of root.querySelectorAll<HTMLElement>('.kbn-family')) {
         const c = byId.get(el.dataset.fiberId!)!
         const attention = attentionOf(c, new Map()), turn = turnOf(c)
-        // A lone constitution stands in the column its state names, and its dot says so.
-        expect(el.closest<HTMLElement>('[data-column]')!.dataset.column).toBe(attention)
+        // A lone constitution stands in a section its state names, and its dot says so.
+        const section = el.closest<HTMLElement>('[data-column]')!.dataset.column!
+        expect(attention === 'quiet' ? ['drafts', 'resting', 'roles'] : attention === 'waiting' ? ['waiting', 'review'] : [attention]).toContain(section)
         expect(el.querySelector<HTMLElement>('.constitution-state-dot')!.dataset.attention).toBe(attention)
         // A frozen runtime from an unreachable owner never claims a turn; only the synced ask does.
         if (c.originStale) expect(turn.turn).toBe(c.ask ? 'question' : hasLiveWorker(c) ? 'no-signal' : 'none')

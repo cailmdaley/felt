@@ -1,9 +1,12 @@
-/* The Desk: three columns of family cards. A card is its top-level's line
-   (state dot, slug, how many members work or a quiet one's faint word),
-   then one line for every member that waits on the human. Set dense in mono
-   like the constitution view's rows; opening a card or a line enters the
-   reader. */
+/* The Desk: three columns of family cards over a shelf of three. A card is
+   its top-level's line (state dot, slug, how many members work or a quiet
+   one's faint word), then one line for every member that waits on the
+   human. The columns' slugs are set dense in mono like the constitution
+   view's rows, and what a member wants reads in serif at note size; the
+   shelf's slugs read in serif at note size too. Opening a card or a line
+   enters the reader. */
 :root { --kbn-desk-row: 22px; }
+.kbn-desk-sections { display: contents; }
 .kbn-desk-head { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-height: 28px; }
 .kbn-desk-head > .kbn-folio { flex: 1 1 auto; min-width: 0; }
 .kbn-col-list { gap: 6px; padding: 6px; }
@@ -26,7 +29,7 @@
 .kbn-family-wait:hover .kbn-family-wait-slug { color: var(--kbn-ink); }
 .kbn-family-wait-slug { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--kbn-owed-deep, var(--kbn-ink)); }
 .kbn-family-wait-slug::after { content: ' — '; color: var(--kbn-ink-muted); white-space: pre; }
-.kbn-family-want { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink); }
+.kbn-family-want { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--type-note)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink); }
 .kbn-family-want * { display: inline; margin: 0; padding: 0; font-size: inherit; line-height: inherit; }
 .kbn-family-want :is(p, li) + :is(p, li)::before { content: ' '; }
 .kbn-family-wait > .kbn-ch-clear { flex: none; align-self: center; margin-left: 6px; }
@@ -35,11 +38,17 @@
   box-shadow: inset 2px 0 0 color-mix(in srgb, var(--kbn-ink) 45%, transparent);
 }
 .kbn-family:focus-visible, .kbn-family-wait:focus-visible { outline: 1px solid color-mix(in srgb, var(--kbn-ink) 30%, transparent); outline-offset: -1px; }
-/* The waiting column's initial is gold, the working column's blue, the quiet column's ink. */
-.kbn-col-waiting .kbn-cap { color: var(--kbn-owed-bright); }
+/* The waiting and review columns' initials are gold, the working column's blue, the shelf's ink. */
+.kbn-col-waiting .kbn-cap, .kbn-col-review .kbn-cap { color: var(--kbn-owed-bright); }
 .kbn-col-working .kbn-cap { color: var(--kbn-agent); }
 .kbn-col-waiting { border-color: color-mix(in srgb, var(--kbn-owed-bright) 55%, transparent); }
-.kbn-col-quiet { background: var(--kbn-recess); }
+
+/* The shelf: Drafts, Resting and Roles & standing side by side, in the recess, under smaller heads. */
+.kbn-desk-shelf { flex: 0 0 auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: start; }
+.kbn-desk-shelf > .kbn-col { background: var(--kbn-recess); max-height: 40vh; }
+.kbn-desk-shelf .kbn-col-title { font-size: var(--type-title); }
+.kbn-desk-shelf .kbn-family-name { font: var(--type-note)/var(--leading-ui) var(--font-serif); }
+.kbn-desk-shelf .kbn-empty { padding: 8px; }
 
 /* The head row's two ways to make something new. */
 .kbn-col-action-draft { background: var(--kbn-owed-bright); border: 1px solid var(--kbn-owed-deep); }
@@ -58,6 +67,8 @@
   .kbn-folio .kbn-folio-name { font-size: var(--type-note); font-variant-caps: normal; font-feature-settings: normal; letter-spacing: 0; overflow: visible; text-overflow: clip; white-space: nowrap; }
   .kbn-folio .kbn-folio-count { font: var(--type-meta)/var(--leading-tight) var(--font-mono); font-variant-caps: normal; letter-spacing: 0; color: var(--kbn-ink-muted); }
   .kbn-family-waits { margin-left: 18px; }
+  .kbn-desk-shelf { grid-template-columns: minmax(0, 1fr); }
+  .kbn-desk-shelf > .kbn-col { max-height: none; }
   @media (orientation: portrait) {
     .kbn-now-board > .kbn-col { height: max(58vh, calc(100dvh - 200px - env(safe-area-inset-bottom, 0px))); }
   }

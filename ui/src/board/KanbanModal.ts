@@ -3,9 +3,10 @@ import '@ui-sdk/web/tabs'
 /**
  * KanbanModal — the Desk, plus the views it tabs between.
  *
- * The Desk is three columns, Waiting on you, Working and Quiet, each a list
- * of family cards: every top-level constitution with everything under it,
- * once, in the column of its most urgent member (`deskOrder`). What waits
+ * The Desk is six sections, Waiting on you, Working and Awaiting review as
+ * columns, and Drafts, Resting and Roles & standing on a shelf below them,
+ * each a list of family cards: every top-level constitution with everything
+ * under it, once, in the section its members put it in (`deskOrder`). What waits
  * comes from one function (`attentionOf`), over the cards and the board's
  * answer of what waits on the human (`BoardFeed.waiting`). A card or a line
  * opens a constitution's view; acts on a constitution live in that view.
@@ -37,6 +38,7 @@ import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { hasWorkerToStop } from './KanbanTypes.js'
 import { KanbanSurfaceRenderer, boardCards, threadIndexFor } from './KanbanSurfaces.js'
 import { deskCardKey, deskOrder, type DeskOrder } from './deskOrdering.js'
+import { ThreadIndex } from './threads.js'
 import { parseCompositeFeed, type CompositeFeed } from './KanbanComposite.js'
 import { restPopover } from './RestPopover.js'
 import { buildKanbanResponseFromComposite, withPatchedCard } from './KanbanReadModel.js'
@@ -1176,7 +1178,7 @@ export class KanbanModal {
   }
 
   private lastResponse: KanbanResponse | null = null
-  private deskProjection: DeskOrder = { columns: { waiting: [], working: [], quiet: [] }, rows: [], placements: new Map() }
+  private deskProjection: DeskOrder = deskOrder(new ThreadIndex([]), new Map())
   /** Lets go of the board's what-waits feed on unmount. */
   private stopBoard: (() => void) | null = null
   /** The last parsed composite feed, redrawn when the hub's terminal is learned. */

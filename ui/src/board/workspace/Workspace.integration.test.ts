@@ -702,7 +702,7 @@ describe('workspace reader integration', () => {
     expect(workspace.isActive).toBe(false)
     expect(returned).not.toHaveBeenCalled()
   })
-  it('walks the Desk\'s columns as one flow with j/k, and stops J/K at each column', async () => {
+  it('walks the Desk\'s sections as one flow with j/k, and stops J/K at each section', async () => {
     workspace.dispose()
     const flight = (uid: string, runtimePhase?: KanbanCard['runtimePhase']): KanbanCard =>
       ({ ...cards[1], id: `work/${uid}`, uid, name: uid, path: `work/${uid}/${uid}.md`, status: 'active', column: 'inFlight', turn: TURN_OF_PHASE[runtimePhase ?? ''] ?? 'no-signal', workerState: 'running', runtimePhase })
@@ -710,19 +710,21 @@ describe('workspace reader integration', () => {
     const order = deskOrder(new ThreadIndex(feed), new Map())
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, deskRows: () => order.rows, deskPlacement: card => order.placements.get(deskCardKey(card)), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const names = order.rows.map(row => row.name)
-    // The idle n1 works; the blocked n2 waits with the review.
-    expect(order.rows.map(row => order.placements.get(deskCardKey(row))!.group)).toEqual(['Waiting on you', 'Waiting on you', 'Working', 'Working', 'Working', 'Quiet'])
-    expect(names.slice(0, 2).sort()).toEqual(['Alpha', 'n2'])
+    // The blocked n2 waits on you; the idle n1 works; the close awaits review.
+    expect(order.rows.map(row => order.placements.get(deskCardKey(row))!.group)).toEqual(['Waiting on you', 'Working', 'Working', 'Working', 'Awaiting review', 'Drafts'])
+    expect([names[0], names[4]]).toEqual(['n2', 'Alpha'])
     workspace.open(order.rows[0], 'Desk'); await settle()
     expect(walked()).toEqual(order.rows.map(row => row.uid ?? row.id))
+    // Off the end of one section, j goes on into the next.
     await step('j'); expect(titled()).toBe(names[1])
-    // Off the end of one column, j goes on into the next.
     await step('j'); expect(titled()).toBe(names[2])
+    await step('J'); expect(titled()).toBe('alpha')
     await step('J'); expect(titled()).toBe('draft')
+    await step('K'); expect(titled()).toBe('alpha')
     await step('K'); expect(titled()).toBe(names[2])
-    await step('K'); expect(titled()).toBe(names[1])
+    await step('K'); expect(titled()).toBe('n2')
   })
-  it('keeps an off-Desk thread beside its nearest ancestor on the Desk, in that family\'s column', async () => {
+  it('keeps an off-Desk thread beside its nearest ancestor on the Desk, in that family\'s section', async () => {
     workspace.dispose()
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
       card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, ...over })
@@ -737,9 +739,9 @@ describe('workspace reader integration', () => {
     const feed = raw, order = deskOrder(new ThreadIndex(feed), new Map())
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, deskRows: () => order.rows, deskPlacement: card => order.placements.get(deskCardKey(card)), threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     // A tempered top-level stands on the Desk while a thread of it waits.
-    expect(order.rows.map(row => row.uid)).toEqual(['settled', 'settled-ask', 'review', 'hub', 'draft'])
+    expect(order.rows.map(row => row.uid)).toEqual(['settled', 'settled-ask', 'hub', 'review', 'draft'])
     workspace.open(feed[2], 'Desk', 'fiber:host-a:hub-sub'); await settle()
-    expect(walked()).toEqual(['settled', 'settled-ask', 'review', 'hub', 'hub-sub', 'draft'])
+    expect(walked()).toEqual(['settled', 'settled-ask', 'hub', 'hub-sub', 'review', 'draft'])
     await step('k')
     expect(landed()).toBe('Working · hub')
     workspace.open(feed[3], 'Desk'); await settle()
@@ -1182,7 +1184,7 @@ describe('workspace reader integration', () => {
     expect(document.querySelector('.ws-stage-band .ws-band-back, .ws-stage-band .ws-band-leave')).toBeNull()
     expect(document.querySelector('.ws-selected .ws-labelbar .ws-document-back')).not.toBeNull()
   })
-  it('steps the columns of the Desk, scheduled work among the quiet', async () => {
+  it('steps the sections of the Desk, a seat and a schedule together in Roles & standing', async () => {
     workspace.dispose()
     const draft = card({ id: 'desk/draft', shuttleKind: 'oneshot' })
     const turn = card({ id: 'desk/turn', status: 'active', shuttleKind: 'oneshot', workerState: 'running', runtimePhase: 'waiting' })
@@ -1200,11 +1202,11 @@ describe('workspace reader integration', () => {
     })
     workspace.open(rows[0], 'Desk'); await settle()
     expect(walked()).toEqual(rows.map(row => row.uid ?? row.id))
-    expect(rows.map(row => row.id).slice(0, 4)).toEqual(['desk/review', 'desk/turn', 'desk/working', expect.any(String)])
-    expect(rows.map(row => row.id)).toEqual(expect.arrayContaining(['roles/scheduled', 'roles/editor', 'desk/stashed', 'desk/draft']))
-    const columns: string[] = []
-    for (let n = 0; n < 2; n++) { await step('J'); columns.push(landed()!.split(' · ')[0]) }
-    expect(columns).toEqual(['Working', 'Quiet'])
+    expect(rows.map(row => row.id).slice(0, 2).sort()).toEqual(['desk/turn', 'desk/working'])
+    expect(rows.map(row => row.id).slice(2)).toEqual(['desk/review', 'desk/draft', 'desk/stashed', 'roles/editor', 'roles/scheduled'])
+    const sections: string[] = []
+    for (let n = 0; n < 4; n++) { await step('J'); sections.push(landed()!.split(' · ')[0]) }
+    expect(sections).toEqual(['Awaiting review', 'Drafts', 'Resting', 'Roles & standing'])
   })
   it('indexes fleet filenames on a cold Desk and refreshes an open picker without entering Reader', async () => {
     workspace.dispose()

@@ -469,7 +469,7 @@ export class Workspace {
       cards,
       cards.map(card => {
         const placement = this.opts.deskPlacement?.(card)
-        return placement ? [placement.column, placement.group] : null
+        return placement ? [placement.section, placement.group] : null
       }),
     ])
     const changed = revision !== this.lastUpdateRevision

@@ -35,3 +35,14 @@ it('offers no ✓ on a line whose kind the board has not read yet', () => {
   const { said } = draw(new Map([['hub/a/b/c', { id: 'p', at: Date.parse('2026-11-16T10:00:00Z') }]]))
   expect(said[0]).toStrictEqual(['c', 'waiting', false])
 })
+
+it('draws the three columns, then the shelf of three, each named, a shelf card without the word its section already says', () => {
+  const quiet = [node('plan', { status: 'open' }), node('later', { status: 'open', effectiveHorizon: 'stashed' }), node('referee', { status: 'open', shuttleSeat: true, shuttleRole: 'referee' }), node('watch', { status: 'open', shuttleKind: 'standing', effectiveHorizon: 'stashed' })]
+  const index = new ThreadIndex(quiet)
+  const desk = new KanbanSurfaceRenderer({ waits: () => new Map(), openDetail: vi.fn(), clear: vi.fn() }).renderDesk(deskOrder(index, new Map()), index)
+  const titles = (scope: string) => [...desk.querySelectorAll(`${scope} > .kbn-col`)].map(col => col.querySelector('.kbn-col-title')!.textContent)
+  expect(titles('.kbn-now-board')).toStrictEqual(['Waiting on you', 'Working', 'Awaiting review'])
+  expect(titles('.kbn-desk-shelf')).toStrictEqual(['Drafts', 'Resting', 'Roles & standing'])
+  const meta = (id: string) => desk.querySelector(`.kbn-family[data-card-uid="${id}"] .kbn-family-meta`)!.textContent
+  expect([meta('plan'), meta('later'), meta('referee'), meta('watch')]).toStrictEqual(['', '', '', 'paused'])
+})

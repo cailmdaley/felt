@@ -34,9 +34,10 @@ const data = () => response({
   now: {
     drafts: [card({ id: 'd1', uid: 'draft-uid' }), card({ id: 'd2' })],
     inFlight: [card({ id: 'working', status: 'active', workerState: 'running', runtimePhase: 'working' }), head],
-    awaitingReview: [card({ id: 'review', status: 'closed', shuttleKind: 'oneshot' })],
+    awaitingReview: [],
   },
-  stash: [card({ id: 'resting', effectiveHorizon: 'stashed' })],
+  // It asks, so it waits on you and leads the Desk.
+  stash: [card({ id: 'review', status: 'active', ask: { text: 'Which threshold?', at: '2026-10-05T11:00:00Z' } }), card({ id: 'resting', effectiveHorizon: 'stashed' })],
 })
 function draw(value: KanbanResponse): void { inside.lastResponse = value; inside.render(value) }
 function press(key: string, init: KeyboardEventInit = {}, target: EventTarget = document): KeyboardEvent {
@@ -286,7 +287,7 @@ describe('Desk keyboard selection', () => {
     expect(inside.workspace.isActive).toBe(true)
     expect(window.location.hash).toContain('draft-uid')
   })
-  it('moves through the three columns without wrapping, g and G at a column\'s ends', () => {
+  it('moves through the sections without wrapping, g and G at a section\'s ends', () => {
     press('j'); expect(selected()).toBe('review')
     // A family that waits itself carries its own line, what it wants.
     press('j'); expect(selected()).toBe('review')
@@ -295,6 +296,8 @@ describe('Desk keyboard selection', () => {
     press('G'); expect(selected()).toBe('working')
     press('g'); expect(selected()).toBe('head-uid')
     press('j'); press('j'); expect(selected()).toBe('draft-uid')
+    press('G'); expect(selected()).toBe('d2')
+    press('j'); expect(selected()).toBe('resting')
     press('G'); expect(selected()).toBe('resting')
     press('j'); expect(selected()).toBe('resting')
     press('h'); expect(selected()).toBeUndefined()
@@ -420,13 +423,13 @@ describe('Desk keyboard selection', () => {
     expect(press('1').defaultPrevented).toBe(true)
   })
 
-  it('chooses the first movement target in Waiting on you, then Working, then Quiet', () => {
+  it('chooses the first movement target in Waiting on you, then Working, then the shelf', () => {
     press('ArrowDown'); expect(selected()).toBe('review')
     // With focus off the Desk, a selection the poll removes leaves no row to follow.
     press('u'); (document.activeElement as HTMLElement).blur()
 
     const flight = data()
-    flight.now.awaitingReview = []
+    flight.stash = flight.stash.filter(each => each.id !== 'review')
     flight.now.inFlight = [card({ id: 'needs-you', uid: 'needs-you', status: 'active', workerState: 'running', runtimePhase: 'attention' })]
     draw(flight)
     press('ArrowDown'); expect(selected()).toBe('needs-you')

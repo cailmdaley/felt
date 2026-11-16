@@ -209,7 +209,7 @@ describe('mirrored row survivor determinism', () => {
   })
 })
 
-describe('the Desk: every family once, in the column of its most urgent member', () => {
+describe('the Desk: every family once, in the section its members put it in', () => {
   const at = (minutes: number): string => new Date(NOW - minutes * 60_000).toISOString()
   const node = (id: string, over: Partial<KanbanCard> = {}): KanbanCard =>
     card({ id, uid: id, shuttleKind: 'oneshot', orchestrator: id.includes('/') ? id.slice(0, id.lastIndexOf('/')) : undefined, createdAt: at(600), ...over })
@@ -227,11 +227,12 @@ describe('the Desk: every family once, in the column of its most urgent member',
   ]
   const index = new ThreadIndex(cards)
 
-  it('draws each family once, where its most urgent member puts it, with every waiting member at any depth, the newest first', () => {
+  const sections = (order: ReturnType<typeof deskOrder>) => Object.fromEntries(Object.entries(order.sections).map(([section, families]) => [section, families.map(family => family.root.id)]))
+
+  it('draws each family once, where its members put it, with every waiting member at any depth, the newest first', () => {
     const order = deskOrder(index, new Map())
-    expect(Object.fromEntries(Object.entries(order.columns).map(([column, families]) => [column, families.map(family => family.root.id)])))
-      .toStrictEqual({ waiting: ['cmbx'], working: ['pipe'], quiet: ['notes', 'plan'] })
-    const [cmbx] = order.columns.waiting
+    expect(sections(order)).toStrictEqual({ waiting: ['cmbx'], working: ['pipe'], review: [], drafts: ['plan'], resting: ['notes'], roles: [] })
+    const [cmbx] = order.sections.waiting
     expect(cmbx.waits.map(wait => [wait.card.id, wait.want.kind, wait.want.text])).toStrictEqual([
       ['cmbx/kappa/beam/mask', 'ask', 'Which threshold?'],
       ['cmbx/kappa/beam/cov', 'review', 'for review'],
@@ -240,23 +241,46 @@ describe('the Desk: every family once, in the column of its most urgent member',
     expect(cmbx.working).toBe(3)
   })
 
-  it('moves a family to Waiting on you for a post the board names, and orders that column by its newest wait', () => {
+  it('moves a family to Waiting on you for a post the board names, and orders that section by its newest wait', () => {
     const order = deskOrder(index, new Map([['pipe', { id: 'p', at: NOW - 60_000, kind: 'post', text: 'Read this.' }]]))
-    expect(order.columns.waiting.map(family => family.root.id)).toStrictEqual(['pipe', 'cmbx'])
-    expect(order.columns.working).toStrictEqual([])
+    expect(order.sections.waiting.map(family => family.root.id)).toStrictEqual(['pipe', 'cmbx'])
+    expect(order.sections.working).toStrictEqual([])
+  })
+
+  it('puts a family whose only wants are reviews in Awaiting review, even while it works', () => {
+    const graph = new ThreadIndex([
+      ...cards,
+      node('paper', { status: 'closed', closedAt: at(3) }),
+      node('survey', { status: 'active', workerState: 'running', runtimePhase: 'working' }),
+      node('survey/psf', { status: 'closed', closedAt: at(8), reviewMark: { note: 'Worth your look.', at: at(8) } }),
+    ])
+    const order = deskOrder(graph, new Map())
+    expect(order.sections.review.map(family => family.root.id)).toStrictEqual(['paper', 'survey'])
+    expect(order.sections.review[1].waits.map(wait => [wait.card.id, wait.want.text])).toStrictEqual([['survey/psf', 'Worth your look.']])
+  })
+
+  it('shelves a quiet family by its top-level: drafts and held launches, rests, seats and standing schedules by name', () => {
+    const graph = new ThreadIndex([
+      node('held', { status: 'active', held: true }),
+      node('watch', { status: 'open', shuttleKind: 'standing', effectiveHorizon: 'stashed' }),
+      node('digest', { status: 'active', shuttleKind: 'standing' }),
+      node('referee', { status: 'open', shuttleSeat: true, shuttleRole: 'referee' }),
+      node('later', { status: 'open', effectiveHorizon: 'stashed' }),
+    ])
+    expect(sections(deskOrder(graph, new Map()))).toStrictEqual({ waiting: [], working: [], review: [], drafts: ['held'], resting: ['later'], roles: ['digest', 'referee', 'watch'] })
   })
 
   it('keeps a top-level with a verdict off the Desk unless something in it still waits or works', () => {
     expect(deskOrder(index, new Map()).rows.map(row => row.id)).not.toContain('done')
     const under = new ThreadIndex([...cards, node('done/late', { status: 'active', workerState: 'running', runtimePhase: 'working' })])
-    expect(deskOrder(under, new Map()).columns.working.map(family => family.root.id)).toContain('done')
+    expect(deskOrder(under, new Map()).sections.working.map(family => family.root.id)).toContain('done')
   })
 
-  it('walks the reader through each family\'s top-level, then its waiting members, column by column', () => {
+  it('walks the reader through each family\'s top-level, then its waiting members, section by section', () => {
     const order = deskOrder(index, new Map())
     expect(order.rows.map(row => [row.id, order.placements.get(JSON.stringify([row.originId, row.uid]))?.group])).toStrictEqual([
       ['cmbx', 'Waiting on you'], ['cmbx/kappa/beam/mask', 'Waiting on you'], ['cmbx/kappa/beam/cov', 'Waiting on you'],
-      ['pipe', 'Working'], ['notes', 'Quiet'], ['plan', 'Quiet'],
+      ['pipe', 'Working'], ['plan', 'Drafts'], ['notes', 'Resting'],
     ])
   })
 })

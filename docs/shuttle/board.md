@@ -7,7 +7,7 @@ the host-local [ledgers](telemetry.md) — the board stores nothing of its own.
 
 | Key | View | What it answers |
 |---|---|---|
-| `1` | **Desk** | What waits on you, what is working, and what is quiet |
+| `1` | **Desk** | What waits on you, what is working, what awaits your review, and what rests |
 | `2` | **Chronicle** | What a stretch of weeks was about |
 | `3` | **Channels** | Where the work talks to you: a channel per line of work, a thread per worker |
 | `4` | **Globe** | Everything at once, as one place to move through |
@@ -16,20 +16,31 @@ the host-local [ledgers](telemetry.md) — the board stores nothing of its own.
 `#/desk`, `#/chronicle`, `#/channels` and `#/globe` deep-link the views; `#/board` opens Channels.
 A constitution uses `#/board/<uid>@<owner>/<document>`; browser Back returns to the view you opened it from.
 
-## Desk — three states
+## Desk — six sections
 
-The Desk has three columns: **Waiting on you**, **Working** and **Quiet**.
+The Desk has three columns, **Waiting on you**, **Working** and **Awaiting review**, and under them a shelf of three, **Drafts**, **Resting** and **Roles & standing**.
 Each holds family cards: a top-level constitution with everything under it, its threads at any depth.
-Every family appears once, in the column of its most urgent member, waiting before working before quiet.
+Every family appears once, in the first section that fits it:
+
+| Section | Holds a family when |
+|---|---|
+| **Waiting on you** | a member wants an answer from you: an open ask, a post or question to you, a worker stopped on a prompt, or a turn that could not start |
+| **Awaiting review** | nothing in it wants an answer, and a member is closed for your review: top-level work, a thread its orchestrator marked for you, or one whose orchestrator is not on the board |
+| **Working** | nothing in it waits on you, and a member has a live worker |
+| **Roles & standing** | it is quiet, and its top-level is a seat at rest or a standing constitution, between runs or paused |
+| **Resting** | it is quiet, and its top-level is at rest |
+| **Drafts** | it is quiet otherwise: a draft, or a launch held at boot |
+
+A review is a want too, so a family that both asks and has a close for review stands in Waiting on you with both lines, and a working family with a thread marked for you stands in Awaiting review.
 A family whose top-level has a verdict (tempered or discarded) stays off the Desk unless something in it still waits or works.
 
-![The Desk with fictional work: families waiting on you, with every waiting member on its own line, beside the working and the quiet.](../assets/board-desk.jpg)
+![The Desk with fictional workshop work: the participant guide and venue access working, the programme and venue decision awaiting review, and two drafts on the shelf below.](../assets/board-desk.jpg)
 
 *The cards use fictional data.*
 
 ### One state
 
-One function, `attentionOf` (`ui/src/board/attention.ts`), decides a constitution's state, and every surface draws only that: the Desk's columns, the state dots, the Channels rail and stream, and a constitution's view.
+One function, `attentionOf` (`ui/src/board/attention.ts`), decides a constitution's state, and every surface draws only that: the state dots, the Channels rail and stream, and a constitution's view. The Desk's sections (`deskFamily` in `ui/src/board/deskOrdering.ts`) split it further: a want for review from the other wants, and quiet by what the top-level is.
 
 | State | When |
 |---|---|
@@ -45,10 +56,10 @@ The owning daemon still serves each constitution's lifecycle column (`column`, b
 ### A family card
 
 A card names its top-level by its slug, with its dot. Under it, every member that waits on you has a line, `slug — what it wants`, none capped or folded: the question, the review mark's note or *for review*, the post, or why the turn could not start (the top-level's own want stands without its slug). A waiting post carries a ✓ that clears it, as in Channels.
-A working family with threads says how many of its members work (`3 working`); a quiet card says its faint word: *draft*, *resting*, *resting until* a day, *paused*, `↻` and its next run, *seat* or *held*.
+A working family with threads says how many of its members work (`3 working`); a card on the shelf says its faint word where its section does not already: *until* a day, *paused*, `↻` and its next run, or *held*.
 A line opens that member's view; anywhere else on the card opens the top-level's.
-Waiting on you is ordered newest wait first; Working and Quiet by latest activity.
-On a phone the columns are three leaves of a pager under a folio of three tabs.
+Waiting on you and Awaiting review are ordered newest wait first, Roles & standing by slug, and the rest by latest activity.
+On a phone the three columns are leaves of a pager under a folio of three tabs (Waiting, Working, Review), and the shelf stands below it.
 
 The Desk's head row carries `+`, which stashes a new draft, and `✶`, which captures an idea by voice.
 Nothing on the Desk is dragged and it has no context menu: every act on a constitution lives in [its view](#a-constitutions-view).
@@ -67,8 +78,8 @@ See [Opening conversations](conversations.md) for the choices, prerequisites, an
 ### Desk keyboard
 
 Bare keys act on the Desk when focus is outside an editable field.
-`j` / `↓` and `k` / `↑` select the next or previous card or waiting line, across the columns, stopping at the ends.
-`g` and `G` select the first or last in the current column.
+`j` / `↓` and `k` / `↑` select the next or previous card or waiting line, across the sections in order, stopping at the ends.
+`g` and `G` select the first or last in the current section.
 `l` / `→` or `Enter` / `o` opens the selected constitution, `h` / `←` or `Esc` clears selection, `/` opens Find, and `?` shows keyboard help.
 The Desk's keys only move and open; they act on nothing.
 
@@ -166,7 +177,7 @@ Reselecting the same page leaves history untouched.
 Stepping between constitutions with j/k or J/K replaces the current visit.
 One Back or root Escape returns from a step to its predecessor; returning to Desk selects the last card viewed.
 
-Bare reader keys work outside editable fields: h/l or left/right step pages, and in a constitution's view, away from the rows, `l` opens its tapestry or report, else its newest sent file; j/k step constitutions in the Desk's order as one flow, each family's top-level then its members that wait, across its columns (Waiting on you, Working, Quiet), and J/K jump between those columns, landing on the constitution last open in each; a brief toast names the column and constitution a step lands on, and a constitution outside the Desk stands after its nearest ancestor there; down/up scroll about three lines, repeating while held; d/u scroll half a viewport; Space/Shift-Space scroll a full viewport.
+Bare reader keys work outside editable fields: h/l or left/right step pages, and in a constitution's view, away from the rows, `l` opens its tapestry or report, else its newest sent file; j/k step constitutions in the Desk's order as one flow, each family's top-level then its members that wait, across its sections (Waiting on you, Working, Awaiting review, Drafts, Resting, Roles & standing), and J/K jump between those sections, landing on the constitution last open in each; a brief toast names the section and constitution a step lands on, and a constitution outside the Desk stands after its nearest ancestor there; down/up scroll about three lines, repeating while held; d/u scroll half a viewport; Space/Shift-Space scroll a full viewport.
 g/G or Home/End select first/last pages, Enter/o toggle expand, and Escape unwinds popovers, expand, then returns.
 The constitution keys act on the open fiber in the reader, its lifecycle keys only while its view is the page shown: c (or .) opens the worker's conversation exactly as its pill does, and with no worker up reopens its past session in a terminal on its host, in any column: nothing is sent, no turn starts, and the card's lifecycle does not move (a card that never ran is launched from the console); t tempers, x discards and a closes work in progress, or a thread with its orchestrator, for your review (a thread so closed is marked for you), each after the same undo window (z takes the latest back).
 s in a constitution's view opens a small date popover: Enter with no date rests undated, and a chosen date rests until that day.

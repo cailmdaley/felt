@@ -104,8 +104,9 @@ export function addChannelsFixtures(example: WorkspaceExample, now: number): Cha
  * leaves three levels down wait on the human (one asks, one posted to them
  * with a ✓ to clear it) beside its working threads and an idle worker; a
  * notebook whose live worker is idle, asking nothing, so it works; a launch
- * that could not start; and, quiet, a draft, a rest until a day, and a
- * standing digest asleep until its next run.
+ * that could not start; a paper closed for the human's review; and, quiet,
+ * a draft, a rest until a day, a standing digest asleep until its next run,
+ * a paused arXiv watch and a seat at rest.
  */
 export function addDeskFixtures(example: WorkspaceExample, now: number): ChannelsFixture {
   const rows: Row[] = [
@@ -122,6 +123,9 @@ export function addDeskFixtures(example: WorkspaceExample, now: number): Channel
     { id: 'abstract', name: 'Conference abstract', minutes: 2 * DAY },
     { id: 'reading', name: 'Reading list', minutes: 4 * DAY, rest: '2026-12-01' },
     { id: 'digest', name: 'Weekly digest', standing: true, armed: true, minutes: 3 * DAY },
+    { id: 'arxiv', name: 'arXiv watch', standing: true, rest: true, minutes: 6 * DAY },
+    { id: 'referee', name: 'Referee desk', role: 'referee', seat: true, minutes: 9 * DAY },
+    { id: 'paper', name: 'Lensing paper', closed: true, minutes: 95, review: 'Section 4 is rewritten around the new covariance; read the diff against v2.', outcome: 'The draft is ready for co-authors.' },
   ]
   return addBoardFixtures(example, now, rows, (said, human) => [
     said('survey/catalogue/shapes/selection', 'post', 6, { to: human, text: 'The selection bias is **0.3%** after the new cuts; the plot is in the folder. Nothing to decide.' }),

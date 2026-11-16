@@ -90,7 +90,7 @@ none of them; shuttle validates and resolves its own block.
 | `inputs.from` | felt | A data-flow edge to another fiber |
 | `shuttle:` | shuttle CLI and daemon | Dispatch configuration and lifecycle state; felt preserves the block without validating or resolving it |
 | tag `cycle` + `start:` / `due:` | the shuttle board | A named span of calendar time, drawn as a band. Written by dragging in the Chronicle |
-| `horizon: stashed` | the shuttle board | Puts an open constitution at rest (column Resting, quiet on the Desk). A `due:` day at or past today overrides it |
+| `horizon: stashed` | the shuttle board | Puts an open constitution at rest (column Resting, under Resting on the Desk). A `due:` day at or past today overrides it |
 
 The board writes these itself, through the daemon, which shells the same `felt
 edit --set` you would type. See [Cycles and eras](../shuttle/cycles.md) and
