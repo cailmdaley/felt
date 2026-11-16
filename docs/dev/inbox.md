@@ -443,6 +443,16 @@ A `queued` send to a conversation that is still the receiver waits for its trans
 Exhausting the retry does not prevent a later roll-forward to another receiver.
 A fiber with no worker settles only the first three rows and leaves the rest to the next receiver.
 
+### Contract 47 and rollback
+
+Contract 47 keeps a batch's receipt in its manifest, claims hook emissions with manifests, and never sends an open batch's payload again.
+A CLI rolled back to 46 reads the manifests as its own, but not their receipts:
+- for a consumer's batch it finds no `messages/` receipt under the batch's transport id and sends the payload again, once, to the conversation the manifest names; a batch still unconfirmed at rollback can reach that conversation twice, without a “Possible repeat” line when its variant was plain;
+- a hook's claim, which has no payload, crashes every 46 consume of its fiber, and its members stay held from that fiber's hooks, until the manifest is removed.
+
+Before rolling a host back, let its batches settle, so that no `mailboxes/*/*/batches/*.json` remains, or remove the hook manifests and accept the repeats.
+Entries a 47 build settled read the same on 46, and rolling forward again reads a manifest 46 left open, which carries no receipt, as a send of unknown outcome.
+
 ## Verbs
 
 | Command | Does |
