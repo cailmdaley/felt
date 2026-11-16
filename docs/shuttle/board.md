@@ -59,8 +59,7 @@ outstanding `shuttle ask`, a harness prompt, or a blocked launch), then workers
 idle at their prompt with nothing they started still running. **Working** holds
 the rest, including a worker idle over its own background shells or
 subagents.
-The worker whose conversation you are following also stays in Working, even when it finishes a reply or has a question, and does not count as needing you.
-The board uses the voice target, which also follows Rex, for this distinction.
+Looking at a worker, or following its conversation in Rex, does not change its band.
 The daemon reads those live children from each harness: Claude
 Code's `background_tasks` on `stop`, Codex's `spawn_agent` calls and
 `subagent_stop` events, and Codex terminal sessions that name
