@@ -1,6 +1,7 @@
 package messaging
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,8 +13,8 @@ import (
 
 // The production CLI and its disk claim participate here. A consume killed
 // mid-send leaves its batch's manifest without a receipt: the next consume
-// holds the batch without sending it again, and after the bound its one retry
-// is marked as a possible repeat.
+// checks its thread result's currency and holds the batch without sending it
+// again, and after the bound its one retry is marked as a possible repeat.
 func TestConsumeBinaryCrashMidSend(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "shuttle-real")
 	build := exec.Command("go", "build", "-o", bin, "../../cmd/shuttle")
@@ -23,6 +24,18 @@ func TestConsumeBinaryCrashMidSend(t *testing.T) {
 	env := testEnv(t)
 	env.Set("SHUTTLE_HOST", "host")
 	root := mailboxDir(env, "fiber", "fiber")
+	// The CLI's thread currency check answers current and counts its calls.
+	scripts := t.TempDir()
+	checks := filepath.Join(scripts, "checks")
+	wrapper := "#!/bin/sh\nif [ \"$1\" = thread-signal-current ]; then\n echo >> '" + checks + "'\n printf '{\"current\":true}\\n'\nelse\n exec '" + bin + "' \"$@\"\nfi\n"
+	if err := os.WriteFile(filepath.Join(scripts, "shuttle"), []byte(wrapper), 0700); err != nil {
+		t.Fatal(err)
+	}
+	env.Set("PATH", scripts+string(os.PathListSeparator)+env.Getenv("PATH"))
+	checked := func() int {
+		b, _ := os.ReadFile(checks)
+		return len(b)
+	}
 	var injected atomic.Int32
 	var texts []string
 	held, release := make(chan struct{}), make(chan struct{})
@@ -60,6 +73,8 @@ func TestConsumeBinaryCrashMidSend(t *testing.T) {
 	if injected.Load() != 0 {
 		t.Fatal("a consume without turn facts woke for ask")
 	}
+	signal, _ := json.Marshal(ThreadSignal{UID: "child", Verb: "closed", Stamp: time.Now().UTC().Format(time.RFC3339Nano), Owner: "host"})
+	must("context-mailbox", "put", "fiber", "thread-result", "thread child closed: done", "--turn", "ask", "--thread-signal", string(signal))
 	args := []string{"inbox", "consume", "fiber", "shuttle://host/pi/A", epoch, "--idle"}
 	cmd := exec.Command(bin, args...)
 	cmd.Env = env.Environ()
@@ -78,19 +93,20 @@ func TestConsumeBinaryCrashMidSend(t *testing.T) {
 	_ = cmd.Wait()
 	close(release)
 	batches, err := readBatchManifests(root)
-	if err != nil || len(batches) != 1 || batches[0].Receipt != nil {
+	if err != nil || len(batches) != 1 || batches[0].Receipt != nil || strings.Join(batches[0].Members, ",") != "ordinary,thread-result" {
 		t.Fatalf("manifests=%+v %v", batches, err)
 	}
 
+	before := checked()
 	out, err := run(args...)
-	if err == nil || !strings.Contains(out, `"action":"wake"`) || injected.Load() != 1 {
-		t.Fatalf("within the bound: %v %s, injections=%d", err, out, injected.Load())
+	if err == nil || !strings.Contains(out, `"action":"wake"`) || injected.Load() != 1 || checked() == before {
+		t.Fatalf("within the bound: %v %s, injections=%d, currency checks %d then %d", err, out, injected.Load(), before, checked())
 	}
 	batches[0].OpenedAt = time.Now().Add(-liveAttemptRetryAfter).UnixNano()
 	if err := writeBatch(root, &batches[0]); err != nil {
 		t.Fatal(err)
 	}
-	if out := must(args...); !strings.Contains(out, `"action":"wake"`) || injected.Load() != 2 || !strings.Contains(texts[1], "Possible repeat:") {
+	if out := must(args...); !strings.Contains(out, `"action":"wake"`) || injected.Load() != 2 || !strings.Contains(texts[1], "Possible repeat:") || !strings.Contains(texts[1], "thread child closed: done") {
 		t.Fatalf("retry: %s, injections=%d, texts %q", out, injected.Load(), texts)
 	}
 	if n, _ := pendingCount(env, "fiber"); n != 0 {

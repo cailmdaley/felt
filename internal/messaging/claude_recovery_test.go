@@ -3,6 +3,7 @@ package messaging
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -204,6 +205,44 @@ func TestClaudeExitedReceiverNotifiesImmediately(t *testing.T) {
 		t.Fatal(err)
 	}
 	if notices != 1 || sent.Load() != 0 {
+		t.Fatalf("notices=%d writes=%d", notices, sent.Load())
+	}
+}
+
+// A hook claim a dying hook left in a Claude session's mailbox, once that
+// session has ended, holds nothing back: recovery reads pending/ and tells the
+// sender the entry's delivery is unconfirmed, as for any entry an ended session
+// left, and the claim stays on disk, read by nothing that sends.
+func TestAnEndedSessionsDeadHookClaimHoldsNothingBack(t *testing.T) {
+	env := testEnv(t)
+	req, sent := nativeClaudeFixture(t, env, func(frame map[string]any, f *os.File) { nativeRows(frame, f, false) })
+	req.ContextIfBusy = true
+	_ = SetMailboxState(env, "claude", "session", "host", "working")
+	if _, err := Send(context.Background(), env, "host", req); err != nil {
+		t.Fatal(err)
+	}
+	dir := mailboxDir(env, "claude", "session")
+	lost := errors.New("hook output lost")
+	if err := offerMailboxWithAck(dir, req.Address, func(Request) bool { return true }, func([]Request) error { return lost }, nil, "claude"); !errors.Is(err, lost) {
+		t.Fatalf("offer = %v", err)
+	}
+	if claims, err := readBatchManifests(dir); err != nil || len(claims) != 1 || !claims[0].Hook {
+		t.Fatalf("claims = %+v %v", claims, err)
+	}
+	if err := RegisterMailbox(env, "claude", "session", "host", "", os.Getpid(), false); err != nil {
+		t.Fatal(err)
+	}
+	notices := 0
+	if _, err := RecoverClaudeMail(context.Background(), env, "host", time.Now(), func(_ context.Context, notice Request) error {
+		notices++
+		if !strings.Contains(notice.Text, req.MessageID) || !strings.Contains(notice.Text, "receiver_exited") {
+			t.Fatal(notice.Text)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if notices != 1 || sent.Load() != 0 || pendingMailboxText(t, env, "claude", "session", req.Text) {
 		t.Fatalf("notices=%d writes=%d", notices, sent.Load())
 	}
 }
