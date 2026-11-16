@@ -404,7 +404,7 @@ to `claude`.
 
 For a fiber send, the [inbox consumer](../dev/inbox.md#the-live-fiber-consumer) decides delivery under its lock: a busy Codex worker gets terminal follow-up, Pi gets steering, and Claude gets hook context with native fallback after 30 seconds or when its turn ends.
 The following details describe session-addressed Claude sends.
-A plain session-addressed `shuttle message` to Claude goes to the session's native socket in any turn state; during a turn, Claude's native inbox queues it behind the running turn, which takes it in.
+A plain session-addressed `shuttle message` to Claude goes to the session's native socket in any turn state; during a turn, Claude's native inbox queues it behind the running turn, which takes it in at its next model call or, if none comes, runs it as the next turn.
 The sender's receipt says what the native socket answered: `accepted` once a correlated reply appears, `queued` or `submitted` when none appears within 17 seconds, and `unknown` when it saw neither.
 A refusal, a message Claude's receiver approval policy holds (which starts no turn), or an endpoint that is gone answers the sender in that receipt, and Shuttle sends nothing later.
 Retrying the same message ID returns the original receipt without another write, unless the first send was refused before anything was written.

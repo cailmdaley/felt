@@ -92,7 +92,7 @@ A plain agent `/deliver` does the same, minting an id when the caller supplies n
 The owner clears the fiber's outstanding ask when a due entry from a sender other than `shuttle` reaches its inbox, including a remote sender.
 A future entry clears nothing.
 Session-addressed messages and idle notices keep their direct transports and `messages/` receipts.
-A session message that asks for a turn goes to the session's native transport whatever its turn state: a busy Claude session's native inbox queues it behind the running turn, which takes it in, and a held, refused or failed send answers its sender in the receipt.
+A session message that asks for a turn goes to the session's native transport whatever its turn state: a busy Claude session's native inbox queues it behind the running turn, which takes it in at its next model call or, if none comes, runs it as the next turn, and a held, refused or failed send answers its sender in the receipt.
 A receipt is created exclusively before the side effect, as a reservation carrying a random nonce that tells a network filesystem's replayed link from a competing sender, and completed with the transport's answer after it.
 A repeat of the id answers the receipt as recorded; a reservation without an answer, whether its send is still running or stopped mid-delivery, answers `ambiguous_delivery` at once and is never sent again; and different content under the id is `message_id_conflict`.
 A transport that refused before writing anything (`preflight_failed`) releases its reservation, so a retry sends.

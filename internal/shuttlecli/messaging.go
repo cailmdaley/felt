@@ -167,8 +167,9 @@ The text is the second argument, '-' for stdin, or
 --file; it is capped at 64 KiB. At least one of text, --file, or --attach is required.
 
 By default a session receives the message on its native wake path. A busy Claude
-session's native inbox queues it behind the running turn, which takes it in; Claude's
-approval policy still applies, and a refusal or a held message answers the sender.
+session's native inbox queues it: the running turn takes it in at its next model
+call, or it runs as the next turn. Claude's approval policy still applies, and a
+refusal or a held message answers the sender.
 
 Every turn re-reads the recipient's whole context, and once its prompt cache is
 cold that read is uncached. An ordinary send to a Claude session whose cache is

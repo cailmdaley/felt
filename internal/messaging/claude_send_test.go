@@ -90,6 +90,24 @@ func TestClaudeAskWithoutNativeEndpointIsRefused(t *testing.T) {
 	}
 }
 
+// An ask to a session that has ended, whose native endpoint went with it, is
+// refused before anything is written and leaves nothing for a hook.
+func TestClaudeAskToAnEndedSessionIsRefused(t *testing.T) {
+	env := testEnv(t)
+	req, sent := nativeClaudeFixture(t, env, func(frame map[string]any, f *os.File) { nativeRows(frame, f, false) })
+	req.ContextIfBusy = true
+	if err := RegisterMailbox(env, "claude", "session", "host", "", os.Getpid(), false); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(mailboxDir(env, "claude", "session"), "native.json")); err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := Send(context.Background(), env, "host", req)
+	if err == nil || receipt.Status != StatusRejected || sent.Load() != 0 || pendingMailboxText(t, env, "claude", "session", req.Text) {
+		t.Fatalf("receipt=%+v err=%v writes=%d", receipt, err, sent.Load())
+	}
+}
+
 // A busy session's approval policy answers the sender directly, and a retry
 // of the id writes nothing more.
 func TestClaudeNativeRefusalAnswersTheSender(t *testing.T) {
