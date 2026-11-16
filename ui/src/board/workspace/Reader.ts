@@ -1,3 +1,4 @@
+import { slug } from '../threadOutline.js'
 import { sentDocuments } from './SentFiles.js'
 import type { ThreadIndex } from '../threads.js'
 import './tokens.css'
@@ -250,7 +251,8 @@ export class Reader {
     this.el.inert = false
     this.el.removeAttribute('aria-hidden')
     this.setBackDestination(this.backDestination)
-    this.title.textContent = channel.name
+    // A fiber is named by its slug, its full name in the tooltip.
+    this.title.textContent = this.currentCard ? slug(this.currentCard) : channel.name
     this.title.title = channel.name
     this.host.setChannel(channel.documents, selected)
     this.paint(!switching && !reordered && animate)

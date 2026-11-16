@@ -371,8 +371,7 @@ export class Workspace {
     if (this.handles?.cards !== cards || this.handles.names !== this.charterNames) {
       const index = this.graph(), of = new Map<string, string>()
       for (const channel of composeChannels({ cards, parentOf: each => index.parentOf(each), names: this.charterNames, dismissed: [], pinned: new Map(), waiting: new Map(), now: Date.now() })) {
-        // A lone constitution's channel is that constitution, named by its slug as every console names it.
-        for (const member of channel.everyone) of.set(channelFiber(member), channel.chaired ? handle(channel) : slug(channel.seat))
+        for (const member of channel.everyone) of.set(channelFiber(member), handle(channel))
       }
       this.handles = { cards, names: this.charterNames, of }
     }

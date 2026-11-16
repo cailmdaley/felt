@@ -155,7 +155,7 @@ export class ChannelsView implements TemporalView {
   private railBindings: Array<() => void> = []
   /** A poll arrived while an entry was picked up: the rail is drawn once it lands. */
   private railStale = false
-  private sigs = { rail: '', channel: '' }
+  private sigs = { rail: '', head: '', stream: '' }
   private width: ResizeObserver | null = null
   /** Follows the console's height, which a drawn-in rail ends above. */
   private consoleSize: ResizeObserver | null = null
@@ -465,7 +465,7 @@ export class ChannelsView implements TemporalView {
       const pick = button('kbn-ch-doc', '', () => this.openPage(id, card, receipt.key))
       pick.dataset.item = id
       pick.title = receipt.fullPath
-      pick.append(el('span', 'kbn-ch-doc-name', declaredTitle(receipt.key)?.title ?? receipt.basename), el('span', 'kbn-ch-doc-meta', `${card.name} · ${ago(receipt.timestamp, now)}`))
+      pick.append(el('span', 'kbn-ch-doc-name', declaredTitle(receipt.key)?.title ?? receipt.basename), el('span', 'kbn-ch-doc-meta', `${slug(card)} · ${ago(receipt.timestamp, now)}`))
       item.append(pick)
       return item
     }))
@@ -478,7 +478,7 @@ export class ChannelsView implements TemporalView {
     this.seatConsole(channel)
     this.layout?.toggleAttribute('data-channel', !!channel)
     if (!channel) {
-      this.sigs.channel = ''
+      this.sigs = { ...this.sigs, head: '', stream: '' }
       this.head.replaceChildren(el('p', 'kbn-ch-empty', this.channels.length ? 'Choose a channel.' : 'No channels yet.'), this.railToggle!.root)
       this.stream.replaceChildren()
       this.sweepThumbs(new Set())
@@ -486,10 +486,10 @@ export class ChannelsView implements TemporalView {
     }
     const now = Date.now(), entries = this.entries(channel), failed = channel.families.some(uid => this.ctx!.workspace!.board.failed(uid))
     const seat = channel.seat
-    const sig = JSON.stringify([channel.key, channel.name, failed, fiberOf(seat), seat.modifiedAt, this.ctx!.workspace!.globeHost.feeds.files(seat).length,
-      entries.map(entry => [entry.id, entry.kind, entry.at, entry.card.name, entry.card.turn, entry.kind === 'mark' ? entry.what : [entry.text, entry.waiting, kindWord(entry), entry.files.map(file => file.fullPath)]])])
-    if (sig !== this.sigs.channel) {
-      this.sigs.channel = sig
+    // The head and the stream are drawn apart, so what arrives leaves a focused page or an open menu in the head be.
+    const head = JSON.stringify([channel.key, channel.name, channel.title, fiberOf(seat), seat.modifiedAt, this.ctx!.workspace!.globeHost.feeds.files(seat).length])
+    if (head !== this.sigs.head) {
+      this.sigs.head = head
       const back = iconButton('kbn-ch-back', 'back', 'Channels', () => this.setRail(false))
       const name = el('h3', 'kbn-ch-name')
       name.append(channel.chaired ? el('span', 'kbn-ch-handle', handle(channel)) : channel.name)
@@ -501,6 +501,10 @@ export class ChannelsView implements TemporalView {
       const menu: IconButton = iconButton('kbn-ch-menu', 'actions', 'Channel menu', () => this.railMenu(channel.key, menu.button))
       menu.button.setAttribute('aria-haspopup', 'menu')
       this.head.replaceChildren(back.root, name, pages, menu.root, this.railToggle!.root)
+    }
+    const stream = JSON.stringify([channel.key, failed, entries.map(entry => [entry.id, entry.kind, entry.at, entry.card.name, entry.card.turn, entry.kind === 'mark' ? entry.what : [entry.text, entry.waiting, kindWord(entry), entry.files.map(file => file.fullPath)]])])
+    if (stream !== this.sigs.stream) {
+      this.sigs.stream = stream
       this.rebuild(this.stream, entries.map(entry => entry.kind === 'mark' ? this.markRow(entry, now) : this.itemRow(entry, now)))
       this.sweepThumbs(new Set(entries.flatMap(entry => entry.kind === 'mark' ? [] : [`item:${entry.id}:lead`, ...entry.files.map(file => `item:${entry.id}:${file.fullPath}`)])))
       if (!entries.length) this.stream.append(el('li', 'kbn-ch-hush', failed ? 'This channel\'s history could not be read; trying again.' : 'Nothing addressed to you here yet.'))
@@ -800,6 +804,7 @@ export class ChannelsView implements TemporalView {
     this.near?.disconnect(); this.near = null
     for (const thumbnail of this.thumbs.values()) thumbnail.dispose()
     this.thumbs.clear()
+    this.leads.clear()
     this.generation++
     for (const stop of this.unsubscribe) stop()
     this.unsubscribe = []
@@ -815,7 +820,7 @@ export class ChannelsView implements TemporalView {
     this.list = null; this.found = null; this.jump = null; this.stream = null; this.railToggle = null
     this.dock?.reset(); this.dock = null
     this.drafted = null
-    this.sigs = { rail: '', channel: '' }
+    this.sigs = { rail: '', head: '', stream: '' }
   }
 }
 

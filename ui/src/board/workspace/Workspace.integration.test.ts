@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { slug } from '../threadOutline.js'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { consoleActs, pressConsoleAct } from './testActs.js'
 import { card, servedFeed, settle } from '../testFixtures.js'
@@ -199,7 +200,7 @@ it('does not redraw an unchanged active channel and follows changed cards across
   boardCards = [boardCards[0], { ...boardCards[1], name: 'Beta working', status: 'active', workerState: 'running', runtimePhase: 'working' }]
   workspace.update()
   expect(show).toHaveBeenCalledOnce()
-  expect(document.querySelector('.ws-channel-title')?.textContent).toBe('Beta working')
+  expect(document.querySelector('.ws-channel-title')?.textContent).toBe('beta')
 })
 
 it('discovers a report only after it exists, including creation on a later refresh', async () => {
@@ -274,7 +275,7 @@ it('steps constitutions in one history entry and returns the last viewed card to
   const length = window.history.length
   for (let i = 1; i < bodyCards.length; i++) {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true })); await settle()
-    expect(document.querySelector('.ws-channel-title')?.textContent).toBe(`Scan ${i}`)
+    expect(document.querySelector('.ws-channel-title')?.textContent).toBe(`scan-${i}`)
   }
   expect(window.history.length).toBe(length)
   await pop(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
@@ -722,7 +723,7 @@ describe('workspace reader integration', () => {
     workspace.open(grouped[0], 'Channels'); await settle()
     expect(walked()).toEqual(['beta', 'alpha'])
     await step('k')
-    expect(titled()).toBe('Beta')
+    expect(titled()).toBe('beta')
     await pop(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
     expect(workspace.isActive).toBe(false)
     expect(returned).not.toHaveBeenCalled()
@@ -743,7 +744,7 @@ describe('workspace reader integration', () => {
     await step('j'); expect(titled()).toBe('n1')
     await step('k'); expect(titled()).toBe('draft')
     await step('J'); expect(titled()).toBe('n1')
-    await step('J'); expect(titled()).toBe('Alpha')
+    await step('J'); expect(titled()).toBe('alpha')
     await step('K'); expect(titled()).toBe('n1')
   })
   it('keeps an off-Desk thread beside its family\'s Desk row, in that row\'s column', async () => {
@@ -1210,7 +1211,7 @@ describe('workspace reader integration', () => {
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
     await settle()
     expect(workspace.isActive).toBe(true)
-    expect(workspace.reader.el.querySelector('.ws-channel-title')?.textContent).toBe('Alpha')
+    expect(workspace.reader.el.querySelector('.ws-channel-title')?.textContent).toBe('alpha')
   })
   for (const [routed, landing] of [['the report the Board feed names', 'report.html'], ['a sent file opened by address', 'table.html']] as const) {
     it(`shows only the selected page until the body lands after ${routed}, then the strip in its final order`, async () => {
@@ -1643,10 +1644,10 @@ describe('workspace reader integration', () => {
     await settle()
     // Stepping onto Beta returns to its history entry: the step lands with the traversal.
     await pop(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true })))
-    expect(document.querySelector('.ws-channel-title')?.textContent).toBe(ordered[1].name)
+    expect(document.querySelector('.ws-channel-title')?.textContent).toBe(slug(ordered[1]))
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true, cancelable: true }))
     await settle()
-    expect(document.querySelector('.ws-channel-title')?.textContent).toBe(ordered[0].name)
+    expect(document.querySelector('.ws-channel-title')?.textContent).toBe(slug(ordered[0]))
 
     workspace.reader.openDocument('fiber:host-a:alpha')
     const scroller = document.querySelector<HTMLElement>('.ws-selected .ws-prose-scroll')!
@@ -1819,7 +1820,7 @@ describe('workspace reader integration', () => {
     await settle()
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true }))
     await settle()
-    expect(document.querySelector('.ws-channel-title')?.textContent).toBe(ordered[1].name)
+    expect(document.querySelector('.ws-channel-title')?.textContent).toBe(slug(ordered[1]))
     expect(window.location.hash).toContain(`${ordered[1].uid ?? ordered[1].id}@${ordered[1].originId}`)
     expect(visibility).toHaveBeenCalledWith(true)
   })

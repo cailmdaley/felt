@@ -210,7 +210,7 @@ data while Chronicle is closed.
 
 ## Channels — where the work talks to you
 
-Hotkey `3` opens Channels, which reads like Slack. A constitution speaks in its own `shuttle.channel`, else in its orchestrator's, else in that of the nearest constitution filed above it; without one anywhere above it, the channel is its top-level constitution's office (merged into the named channel that shares its charter's name), or that top-level alone, drawn quieter in the rail.
+Hotkey `3` opens Channels, which reads like Slack. A constitution speaks in its own `shuttle.channel`, else in its orchestrator's, else in that of the nearest constitution filed above it; without one anywhere above it, the channel is its top-level constitution's office (merged into the named channel that shares its charter's name), or that top-level alone, named by its slug and drawn quieter in the rail.
 A channel's chair is its topmost seat, a non-standing one first, then the most recently active; without a seat, its most recently active top-level. The channel's head carries the chair's pages (its constitution, its tapestry, its sent files) beside the channel's name, and the [console](#the-reader) at the foot of the channel speaks to the chair.
 
 **Six rules are the whole contract.**

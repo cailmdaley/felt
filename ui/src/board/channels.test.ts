@@ -40,9 +40,11 @@ describe('composeChannels', () => {
       ['role:analyst', 'Analyst', true, ['shear']],
       ['channel:unions', 'UNIONS', true, ['pando/unions', 'east-unions', 'west-unions', 'pando/unions/modes']],
       ['channel:vizier', 'Vizier', true, ['life/vizier', 'loom/email/morning-post']],
-      ['fiber:R', 'Moving house', false, ['van']],
-      ['fiber:O', 'Old notes', false, ['old']],
+      // A lone constitution is its own channel, named by its slug.
+      ['fiber:O', 'old', false, ['old']],
+      ['fiber:R', 'van', false, ['van']],
     ])
+    expect(named(channels, 'fiber:R').title).toBe('Moving house')
     expect(named(channels, 'role:analyst').title).toBe('Analyst · the shear desk')
     expect(named(channels, 'channel:unions').families).toStrictEqual(['U'])
   })
@@ -126,7 +128,7 @@ describe('the rail\'s order', () => {
   const channels = compose(all)
 
   it('puts the channels an order does not name first, as composed, then the order\'s', () => {
-    expect(keys(arranged(channels, []))).toStrictEqual(['role:analyst', 'channel:unions', 'channel:vizier', 'fiber:R', 'fiber:O'])
+    expect(keys(arranged(channels, []))).toStrictEqual(['role:analyst', 'channel:unions', 'channel:vizier', 'fiber:O', 'fiber:R'])
     expect(keys(arranged(channels, ['fiber:O', 'channel:vizier', 'channel:gone', 'role:analyst']))).toStrictEqual(['channel:unions', 'fiber:R', 'fiber:O', 'channel:vizier', 'role:analyst'])
   })
 

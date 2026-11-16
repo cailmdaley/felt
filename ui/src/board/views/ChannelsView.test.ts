@@ -88,7 +88,7 @@ const item = (host: HTMLElement, who: string) => [...host.querySelectorAll<HTMLE
 it('lists the recent channels, the newest wait first, and reads a channel as what was addressed to the human with marks between', async () => {
   const { families } = daemon()
   const { view, host } = await mount()
-  expect(rail(host)).toStrictEqual(['cmbx', 'Moving house'])
+  expect(rail(host)).toStrictEqual(['cmbx', 'van'])
   expect(host.querySelector('[data-channel="channel:cmbx"]')!.hasAttribute('data-waiting')).toBe(true)
   expect(families).toContain('C')
   expect(shown(host)).toBe('cmbx')
@@ -101,7 +101,7 @@ it('lists the recent channels, the newest wait first, and reads a channel as wha
   expect([...files].map(file => [file.classList.contains('kbn-ch-thumb'), file.querySelector('.kbn-ch-file-name')?.textContent])).toStrictEqual([[true, undefined], [true, undefined], [false, 'nulls.md']])
   expect(item(host, 'tsz').querySelector('.kbn-ch-item-text')?.textContent?.trim()).toBe('The spectrum at 9σ.')
   expect(view.keydown(new KeyboardEvent('keydown', { key: 'j' }))).toBe(true)
-  expect(shown(host)).toBe('Moving house')
+  expect(shown(host)).toBe('van')
   expect(stream(host)).toStrictEqual([['van', 'ask', true]])
 })
 
@@ -159,7 +159,7 @@ it('opens on the channel last open on this device, and on the first channel when
   first.view.keydown(new KeyboardEvent('keydown', { key: 'j' }))
   first.view.unmount(); views.length = 0
   const again = await mount(undefined, new ChannelsView())
-  expect(shown(again.host)).toBe('Moving house')
+  expect(shown(again.host)).toBe('van')
   again.view.unmount(); views.length = 0
   stored.set('shuttle.channels.last', 'channel:gone')
   const third = await mount(undefined, new ChannelsView())
@@ -172,18 +172,18 @@ it('jumps to a channel the rail no longer lists, and to the fleet\'s documents; 
   const jump = host.querySelector<HTMLInputElement>('.kbn-ch-jump')!
   jump.value = 'old'
   jump.dispatchEvent(new Event('input'))
-  expect(rail(host)).toStrictEqual(['Old notes'])
+  expect(rail(host)).toStrictEqual(['notes'])
   expect([...host.querySelectorAll('.kbn-ch-doclist .kbn-ch-doc-name')].map(el => el.textContent)).toStrictEqual(['lensing-notes.md'])
   host.querySelector<HTMLButtonElement>('.kbn-ch-doclist .kbn-ch-doc')!.click()
   expect(openPage).toHaveBeenLastCalledWith(library[0].card, 'host:/notes/old/lensing-notes.md')
   jump.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }))
-  expect(shown(host)).toBe('Old notes')
+  expect(shown(host)).toBe('notes')
   expect(stored.has('shuttle.channels.seen:fiber:N')).toBe(true)
   // Listed while it is the one being read.
-  expect(rail(host)).toStrictEqual(['cmbx', 'Moving house', 'Old notes'])
+  expect(rail(host)).toStrictEqual(['cmbx', 'van', 'notes'])
   host.querySelector<HTMLButtonElement>('[data-channel="channel:cmbx"]')!.click()
   // Having opened it on this device does not keep it listed: what is listed is the same on every device.
-  expect(rail(host)).toStrictEqual(['cmbx', 'Moving house'])
+  expect(rail(host)).toStrictEqual(['cmbx', 'van'])
   view.find('')
 })
 
@@ -244,14 +244,14 @@ it('floats what waits above the human\'s order, and moves a channel by Alt and t
   const { posts } = daemon([], undefined, {}, { order: { keys: ['channel:science', 'channel:french'], at: Date.now() - day } })
   const { view, ctx, host } = await mount([chair, tsz, mask, beam, van, notes, science, french])
   // What waits on the human first, its newest wait first; then the stored order.
-  expect(rail(host)).toStrictEqual(['cmbx', 'Moving house', 'science', 'french'])
+  expect(rail(host)).toStrictEqual(['cmbx', 'van', 'science', 'french'])
   const pick = (name: string) => [...host.querySelectorAll<HTMLButtonElement>('.kbn-ch-pick')].find(el => el.querySelector('.kbn-ch-pick-name')?.textContent === name)!
   const press = (name: string, key: string, over: KeyboardEventInit = {}) => pick(name).dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...over }))
   press('science', 'ArrowDown', { altKey: true })
   await settle()
   // Every channel's place is written, the ones out of the rail and the waiting ones keeping theirs.
-  expect(posts.at(-1)).toStrictEqual(['/api/v1/channels/order', { keys: ['channel:cmbx', 'fiber:R', 'fiber:N', 'channel:french', 'channel:science'] }])
-  expect(rail(host)).toStrictEqual(['cmbx', 'Moving house', 'french', 'science'])
+  expect(posts.at(-1)).toStrictEqual(['/api/v1/channels/order', { keys: ['channel:cmbx', 'fiber:N', 'fiber:R', 'channel:french', 'channel:science'] }])
+  expect(rail(host)).toStrictEqual(['cmbx', 'van', 'french', 'science'])
   // Nothing moves above what waits, and a waiting channel does not move at all.
   press('french', 'ArrowUp', { altKey: true })
   press('cmbx', 'ArrowDown', { altKey: true })
@@ -264,18 +264,18 @@ it('floats what waits above the human\'s order, and moves a channel by Alt and t
   expect(items().map(item => item.textContent)).toStrictEqual(['Hide', 'Pin', 'Move to bottom'])
   items()[2].click()
   await settle()
-  expect(posts.at(-1)).toStrictEqual(['/api/v1/channels/order', { keys: ['channel:cmbx', 'fiber:R', 'fiber:N', 'channel:science', 'channel:french'] }])
-  expect(rail(host)).toStrictEqual(['cmbx', 'Moving house', 'science', 'french'])
+  expect(posts.at(-1)).toStrictEqual(['/api/v1/channels/order', { keys: ['channel:cmbx', 'fiber:N', 'fiber:R', 'channel:science', 'channel:french'] }])
+  expect(rail(host)).toStrictEqual(['cmbx', 'van', 'science', 'french'])
   // A poll keeps the order written here until the feed carries a newer one.
   view.refresh(ctx); await settle()
-  expect(rail(host)).toStrictEqual(['cmbx', 'Moving house', 'science', 'french'])
+  expect(rail(host)).toStrictEqual(['cmbx', 'van', 'science', 'french'])
 })
 
 it('hides a channel by its menu; Jump to finds it, marked, and opening it brings it back', async () => {
   const { posts } = daemon()
   const { view, host } = await mount()
   const pick = (name: string) => [...host.querySelectorAll<HTMLButtonElement>('.kbn-ch-pick')].find(el => el.querySelector('.kbn-ch-pick-name')?.textContent === name)!
-  pick('Moving house').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 30 }))
+  pick('van').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 30 }))
   await settle()
   ;[...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Hide')!.click()
   await settle()
@@ -283,19 +283,19 @@ it('hides a channel by its menu; Jump to finds it, marked, and opening it brings
   expect(posts.at(-1)?.[1]).toMatchObject({ key: expect.stringMatching(/^hide:fiber:R:\d+$/), fiber: 'R' })
   expect(rail(host)).toStrictEqual(['cmbx'])
   view.find('mov')
-  expect(rail(host)).toStrictEqual(['Moving house'])
-  expect(pick('Moving house').querySelector('.kbn-ch-pick-hidden')?.textContent).toBe('hidden')
+  expect(rail(host)).toStrictEqual(['van'])
+  expect(pick('van').querySelector('.kbn-ch-pick-hidden')?.textContent).toBe('hidden')
   // Its menu offers to bring it back.
-  pick('Moving house').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 30 }))
+  pick('van').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 30 }))
   await settle()
   expect([...document.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toStrictEqual(['Unhide', 'Pin', 'Move to bottom'])
   ;(document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
   await settle()
   expect(document.querySelector('[role="menu"]')).toBeNull()
-  pick('Moving house').click()
+  pick('van').click()
   await settle()
   expect(posts.at(-1)?.[1]).toMatchObject({ key: expect.stringMatching(/^show:fiber:R:\d+$/) })
-  expect(rail(host)).toStrictEqual(['cmbx', 'Moving house'])
+  expect(rail(host)).toStrictEqual(['cmbx', 'van'])
 })
 
 it('rebuilds nothing under a held entry: a poll during a hold waits, and the hold lifted opens the menu on it', async () => {
@@ -309,12 +309,12 @@ it('rebuilds nothing under a held entry: a poll during a hold waits, and the hol
   ctx.response = board([chair, tsz, mask, beam, van, notes, card({ id: 'new', uid: 'NEW', name: 'Fresh', ...working(1) })])
   view.refresh(ctx); await settle()
   expect(held.isConnected).toBe(true)
-  expect(rail(host)).toStrictEqual(['cmbx', 'Moving house'])
+  expect(rail(host)).toStrictEqual(['cmbx', 'van'])
   window.dispatchEvent(Object.assign(press('pointerup'), { pointerId: 1, pointerType: 'touch', isPrimary: true }))
   await settle()
   expect([...document.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toStrictEqual(['Hide', 'Pin', 'Move to bottom'])
   // Lifted, the rail takes the poll.
-  expect(rail(host)).toStrictEqual(['cmbx', 'Moving house', 'Fresh'])
+  expect(rail(host)).toStrictEqual(['cmbx', 'van', 'new'])
   ;(document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
   // The window swallows the click a fired hold sends for a moment; let it pass before the next test clicks.
   await new Promise(resolve => setTimeout(resolve, 750))
@@ -324,7 +324,7 @@ it('brings a hidden channel back by itself when something in it begins waiting a
   daemon([], undefined, {}, { dismissed: [`hide:fiber:R:${Date.now() - 35 * minute}`] })
   const { view, ctx, host } = await mount()
   // The van asked half an hour ago, after the hide.
-  expect(rail(host)).toStrictEqual(['cmbx', 'Moving house'])
+  expect(rail(host)).toStrictEqual(['cmbx', 'van'])
   daemon([], undefined, {}, { dismissed: [`hide:fiber:R:${Date.now() - 25 * minute}`] })
   view.refresh(ctx); await settle(); await settle()
   expect(rail(host)).toStrictEqual(['cmbx'])
@@ -367,13 +367,23 @@ it('on a phone, reads a channel only while it is the screen: it resumes on the r
   expect(host.querySelector('.kbn-ch-layout')!.hasAttribute('data-channel')).toBe(false)
 })
 
+it('leaves the channel\'s head as it stands when only its stream changes, so its focus and menus survive a poll', async () => {
+  daemon()
+  const { view, ctx, host } = await mount()
+  const pages = host.querySelector('.kbn-ch-head .kbn-ch-pages')!
+  ctx.response = board([chair, { ...tsz, name: 'κ × tSZ, final' }, mask, beam, van, notes])
+  view.refresh(ctx); await settle()
+  expect(item(host, 'tsz').isConnected).toBe(true)
+  expect(host.querySelector('.kbn-ch-head .kbn-ch-pages')).toBe(pages)
+})
+
 it('heads the view with the channel itself, its name written as Slack writes it, the rail\'s toggle at its right', async () => {
   daemon()
   const mill = card({ id: 'mill', uid: 'L', name: 'felt chair', shuttleChannel: 'The Mill', shuttleSeat: true, ...working(2) })
   const { host } = await mount([chair, tsz, van, mill])
   // The tab bar names the view: no page title of its own.
   expect(host.querySelector('.kbn-view-title')).toBeNull()
-  expect(rail(host)).toStrictEqual(['Moving house', 'cmbx', 'the-mill'])
+  expect(rail(host)).toStrictEqual(['van', 'cmbx', 'the-mill'])
   host.querySelector<HTMLButtonElement>('[data-channel="channel:the mill"]')!.click()
   await settle()
   const head = host.querySelector('.kbn-ch-head')!
@@ -381,10 +391,10 @@ it('heads the view with the channel itself, its name written as Slack writes it,
   expect([...head.querySelectorAll('.kbn-ch-icon')].map(icon => icon.classList[1])).toStrictEqual(['kbn-ch-back', 'kbn-ch-menu', 'kbn-ch-rail-toggle'])
   // Its chair's pages stand beside its name.
   expect([...head.querySelectorAll<HTMLElement>('.kbn-ch-pages .ws-doc-button')].map(button => button.dataset.part)).toStrictEqual(['constitution'])
-  // A lone constitution keeps its own name.
+  // A lone constitution is named by its slug, its name in the tooltip.
   host.querySelector<HTMLButtonElement>('[data-channel="fiber:R"]')!.click()
   await settle()
-  expect([shown(host), host.querySelector('.kbn-ch-name')!.hasAttribute('data-lone')]).toStrictEqual(['Moving house', true])
+  expect([shown(host), host.querySelector('.kbn-ch-name')!.hasAttribute('data-lone'), host.querySelector('.kbn-ch-name')!.getAttribute('title')]).toStrictEqual(['van', true, 'Moving house'])
 })
 
 it('shows a close awaiting review by its note and its tapestry, never its outcome, and keeps the tapestry across redraws', async () => {

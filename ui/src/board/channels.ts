@@ -1,6 +1,7 @@
 import type { KanbanCard } from './KanbanTypes.js'
 import { arrived, type BoardFeed, type BoardRecord } from './boardFeed.js'
 import type { SentFile } from './sentFiles.js'
+import { slug } from './threadOutline.js'
 import { cardNamed, threadState, type ThreadState } from './threads.js'
 
 /**
@@ -11,9 +12,9 @@ import { cardNamed, threadState, type ThreadState } from './threads.js'
 export interface Channel {
   /** `channel:<shuttle.channel, lowercased>`, `role:<office slug>` for an office's top-levels, or `fiber:<uid>` for a lone top-level. */
   key: string
-  /** The channel's name; an office's charter name before any ` · ` gloss; the constitution's name. */
+  /** The channel's name; an office's charter name before any ` · ` gloss; a lone constitution's slug. */
   name: string
-  /** The name in full, a charter's gloss included. */
+  /** The name in full: a charter's gloss included, a lone constitution's own name. */
   title: string
   /** Named or an office's: drawn above the lone constitutions. */
   chaired: boolean
@@ -38,7 +39,7 @@ export interface Channel {
   listed: boolean
 }
 
-/** How a channel is written, as Slack writes one: a chaired channel's name lowercased, its spaces hyphens; a lone constitution's name as it is. */
+/** How a channel is written, as Slack writes one: a chaired channel's name lowercased, its spaces hyphens; a lone constitution's slug as it is. */
 export const handle = (channel: Pick<Channel, 'name' | 'chaired'>): string =>
   channel.chaired ? channel.name.toLowerCase().replace(/\s+/g, '-') : channel.name
 
@@ -184,7 +185,7 @@ export function composeChannels(input: {
     const hidden = since('hide', key) > Math.max(since('show', key), newest) ? since('hide', key) : 0
     const title = titles.get(key) || seat.name
     channels.push({
-      key, name: title.split(' · ')[0], title, chaired: !key.startsWith('fiber:'), seat, members, everyone,
+      key, name: key.startsWith('fiber:') ? slug(seat) : title.split(' · ')[0], title, chaired: !key.startsWith('fiber:'), seat, members, everyone,
       families: [...new Set(members.map(card => fiberOf(topOf(card))))],
       newest, waiting, active, pinned: isPinned, hidden,
       listed: !hidden && (waiting || isPinned || now - active <= RECENT_MS),
