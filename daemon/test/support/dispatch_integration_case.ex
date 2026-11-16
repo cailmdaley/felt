@@ -146,9 +146,10 @@ defmodule Shuttle.Test.DispatchIntegrationCase do
   end
 
   # The integration runner with its terminal's input made visible: every text
-  # pasted into a worker's terminal is kept (`pastes/0`), and a gate armed by
-  # `gate/1` stops the first paste or launch at the terminal, before
-  # it happens, and tells the test which process holds it there.
+  # pasted into a worker's terminal (`pastes/0`) and every session's run
+  # script as it started (`launched/0`) is kept, and a gate armed by `gate/1`
+  # stops the first paste or launch at the terminal, before it happens, and
+  # tells the test which process holds it there.
   defmodule TransportRunner do
     @behaviour Shuttle.Runner
     alias Shuttle.Test.DispatchIntegrationCase.IntegrationRunner
@@ -157,7 +158,8 @@ defmodule Shuttle.Test.DispatchIntegrationCase do
       Shuttle.Test.Env.start_scoped!(
         %{
           id: __MODULE__,
-          start: {Agent, :start_link, [fn -> %{owner: owner, pastes: [], gate: nil} end]}
+          start:
+            {Agent, :start_link, [fn -> %{owner: owner, pastes: [], launched: [], gate: nil} end]}
         },
         __MODULE__
       )
@@ -166,6 +168,7 @@ defmodule Shuttle.Test.DispatchIntegrationCase do
     defp server, do: Shuttle.Test.Env.server!(__MODULE__)
 
     def pastes, do: Agent.get(server(), &Enum.reverse(&1.pastes))
+    def launched, do: Agent.get(server(), &Enum.reverse(&1.launched))
 
     def gate(kind) when kind in [:paste, :launch],
       do: Agent.update(server(), &%{&1 | gate: kind})
@@ -180,7 +183,22 @@ defmodule Shuttle.Test.DispatchIntegrationCase do
 
     def cmd("tmux", ["new-session" | _] = args, opts) do
       hold(:launch)
+      script = File.read!(List.last(args))
+      Agent.update(server(), &%{&1 | launched: [script | &1.launched]})
       IntegrationRunner.cmd("tmux", args, opts)
+    end
+
+    # A session the daemon closes ends.
+    def cmd("tmux", ["kill-session", "-t", target] = args, opts) do
+      IntegrationRunner.cmd("tmux", args, opts)
+
+      IntegrationRunner.remove_tmux_session(
+        target
+        |> String.trim_leading("=")
+        |> String.trim_trailing(":")
+      )
+
+      {"", 0}
     end
 
     # The terminal's sessions outlive a daemon, and the next one lists them.
