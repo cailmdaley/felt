@@ -82,13 +82,13 @@ defmodule ShuttleWeb.DeliverController do
   @spec route(term(), term(), String.t() | nil, term()) :: {pos_integer(), map()}
   def route(fiber_id, text, origin, from \\ "shuttle", context \\ %{}) do
     from = if from in [nil, ""], do: "shuttle", else: from
-    text = if is_binary(text) and String.trim(text) != "", do: text
+    notify_only = text == nil and context["notify_when_idle"] == true
 
     cond do
       not (is_binary(fiber_id) and String.trim(fiber_id) != "") ->
         {400, %{delivered: false, error: "fiber_id is required"}}
 
-      text == nil and context["notify_when_idle"] != true ->
+      not notify_only and not (is_binary(text) and String.trim(text) != "") ->
         {400, %{delivered: false, error: "text is required"}}
 
       true ->

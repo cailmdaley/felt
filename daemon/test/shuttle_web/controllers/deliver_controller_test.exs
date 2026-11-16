@@ -1220,4 +1220,28 @@ defmodule ShuttleWeb.DeliverControllerTest do
              |> post("/api/v1/deliver", Jason.encode!(%{"text" => "x"}))
              |> json_response(400)
   end
+
+  # Only a request with no text is notify-only; whitespace text is refused as
+  # on any other request, and subscribes nobody.
+  test "whitespace text with notify_when_idle is refused, not a subscription" do
+    for extra <- [%{}, %{"context_only" => true, "wake" => true}] do
+      assert %{"error" => "text is required"} =
+               api_conn()
+               |> post(
+                 "/api/v1/deliver",
+                 Jason.encode!(
+                   Map.merge(
+                     %{
+                       "fiber_id" => "tests/x",
+                       "text" => "   ",
+                       "notify_when_idle" => true,
+                       "message_id" => "n-space"
+                     },
+                     extra
+                   )
+                 )
+               )
+               |> json_response(400)
+    end
+  end
 end
