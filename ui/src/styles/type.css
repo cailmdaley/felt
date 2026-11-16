@@ -29,7 +29,7 @@
  * Mono is for what a machine wrote or a person types: code, ids, clock times,
  * counts, keys. A word a person reads as a label is serif, at its row's role.
  * A bare count ("3", "12 steps" as a tally) is mono meta; a number inside a
- * phrase ("2 need you") reads in the phrase's family.
+ * phrase ("2 working") reads in the phrase's family.
  *
  * Times are formatted only by board/civilDay.ts: a clock time is 24h HH:MM, a
  * relative one "4m ago"; both are set as mono meta.
@@ -38,7 +38,7 @@
  * never used. There are two label treatments, both all-small-caps:
  *
  *   kicker   all-small-caps, --track-kicker. Section and group heads,
- *            eyebrows ("Your turn"), rail groups, settings group heads, a
+ *            eyebrows ("Waiting on you"), rail groups, settings group heads, a
  *            pasted block's label, a Chronicle day name. At --type-note in
  *            chrome; the same treatment sets the Desk's column heads and a
  *            view's title at --type-display.

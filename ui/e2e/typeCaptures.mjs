@@ -16,7 +16,7 @@ const settle = page => page.evaluate(() => new Promise(r => requestAnimationFram
 
 async function openRoot(page) {
   // Click the row's own name: its crumb leads to the root.
-  const name = page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${root}"])`).first().locator('.kbn-card-name')
+  const name = page.locator(`.kbn-desk .kbn-family[title*="${root}"] .kbn-family-head`).first().locator('.kbn-family-name')
   const box = await name.boundingBox()
   await name.click({ position: { x: box.width - 6, y: box.height / 2 } })
   await page.locator('.ws-stage-band .ws-dock').waitFor()
@@ -30,7 +30,7 @@ async function openRoot(page) {
 const surfaces = {
   async desk(page) {
     await page.goto(`${base}?example=threads&long-title`)
-    await page.locator('.kbn-desk .kbn-card:visible').first().waitFor()
+    await page.locator('.kbn-desk .kbn-family:visible').first().waitFor()
   },
   async constitution(page) {
     await page.goto(`${base}?example=threads&long-title`)
@@ -46,7 +46,7 @@ const surfaces = {
   },
   async settings(page) {
     await page.goto(`${base}?example=threads`)
-    await page.locator('.kbn-desk .kbn-card:visible').first().waitFor()
+    await page.locator('.kbn-desk .kbn-family:visible').first().waitFor()
     await page.keyboard.press('Meta+Comma')
     await page.locator('[role="dialog"]').last().waitFor({ timeout: 5000 }).catch(() => {})
   },

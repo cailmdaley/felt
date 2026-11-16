@@ -8,7 +8,6 @@ import { launchBrowser } from './browser.mjs'
 import { frames, layoutShift, settleTransitions, unexpected } from './layoutShift.mjs'
 import { registerMapViewJourneys } from './mapViews.mjs'
 import { registerNavigationJourneys } from './navBack.mjs'
-import { registerDeskThreadJourneys } from './deskThreads.mjs'
 import { registerLivingReportJourneys } from './livingReport.mjs'
 import { registerHeaderBarJourneys } from './headerBar.mjs'
 import { familySends, familyTree, pageBack, showFile } from './familyNav.mjs'
@@ -41,22 +40,38 @@ async function openPlainThemeMenu(p) {
 }
 /** A Desk click lands on the constitution's map. */
 async function land(p) {
-  await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${name}"])`).click()
+  await p.locator(`.kbn-desk .kbn-family[title*="${name}"] .kbn-family-head`).click()
   await selected(p).waitFor()
 }
 async function open(p, expected = 'calibration-report') {
   await land(p)
   await choose(p, expected)
 }
+/** The Desk's stops in reading order, as the reader walks them: each family's top-level, then its members that wait, with each one's column. */
+const deskStops = p => p.locator('.kbn-desk').evaluate(desk => {
+  const seen = new Set(), stops = []
+  for (const el of desk.querySelectorAll('[data-column] [data-card-uid]')) {
+    const name = el.classList.contains('kbn-family') ? el.title : el.title.split(' — ')[0]
+    if (seen.has(name)) continue
+    seen.add(name)
+    stops.push({ name, column: el.closest('[data-column]').dataset.column })
+  }
+  return stops
+})
+const COLUMN_NAME = { waiting: 'Waiting on you', working: 'Working', quiet: 'Quiet' }
+/** Back to the constitution's view, where its verbs live, from any of its pages. */
+async function toView(p) {
+  if (await rowActs(p).count() && await rowActs(p).isVisible()) return
+  await leave(p); await land(p)
+}
 /** The strip of acts in a constitution's view's head. */
 const rowActs = p => selected(p).locator('.ov-head .ov-tools > .ws-fiber-acts')
 /** The console's acts: its menu, and where a verdict's undo stands. */
 const consoleActs = p => band(p).locator('.ws-band-head .ws-band-acts')
 /**
- * The fiber's acts where they show: its view's head; on a page with no view
- * (a report, a document, the constitution's own page), the console's.
+ * The fiber's acts: its view's head, the one place its verbs live.
  */
-const acts = p => p.locator('.ws-reader:not(:has(.ws-page.ws-selected .ov-head .ws-fiber-acts)) .ws-stage-band .ws-band-head .ws-band-acts').or(rowActs(p))
+const acts = p => rowActs(p)
 async function headerAction(p, label) {
   const row = await rowActs(p).isVisible()
   if (label === 'Settings') { await (row ? rowActs(p).locator('.ws-acts-settings') : await consoleAct(consoleActs(p), 'Settings')).click(); return }
@@ -154,7 +169,8 @@ async function openFromChannels(p, query, text = query) {
 async function leave(p) {
   const sheet = p.locator('.ws-page-sheet[open], .ws-settings-menu:not([hidden])')
   if (await sheet.count()) { await p.keyboard.press('Escape'); await sheet.waitFor({ state: 'hidden' }) }
-  if (p.viewportSize().width <= 700) {
+  // A phone, upright or on its side, has no Desk tab beside the reader: Escape walks back.
+  if (await p.evaluate(() => matchMedia('(max-width: 700px), (max-height: 500px) and (pointer: coarse)').matches)) {
     for (let step = 0; step < 32 && await p.locator('.kbn-reader-open').count(); step++) {
       await appFocus(p); await p.keyboard.press('Escape'); await p.waitForTimeout(30)
     }
@@ -174,32 +190,6 @@ async function chooseDeskColumn(p, index) {
     return !!leaf && leaf.left >= 0 && leaf.right <= innerWidth
   }, index)
 }
-test('Phone 375 Desk folio keeps its full label and count clear of the active action', async p => {
-  const tab = p.locator('.kbn-folio-seg-active')
-  await tab.waitFor()
-  const layout = await tab.evaluate(segment => {
-    const name = segment.querySelector('.kbn-folio-name')
-    const count = segment.querySelector('.kbn-folio-count')
-    const action = segment.querySelector('.kbn-col-action')
-    const rect = el => { const box = el.getBoundingClientRect(); return { left: box.left, right: box.right, width: box.width, clientWidth: el.clientWidth, scrollWidth: el.scrollWidth } }
-    return {
-      tabName: name?.textContent,
-      tabLabel: segment.querySelector('[role="tab"]')?.getAttribute('aria-label'),
-      count: count?.textContent,
-      actionLabel: action?.getAttribute('aria-label'),
-      actionText: action?.textContent,
-      tab: rect(segment), name: rect(name), countBox: rect(count), action: rect(action),
-    }
-  })
-  assert.equal(layout.tabName, 'In flight')
-  assert.match(layout.tabLabel, /^In flight \(/)
-  assert.equal(layout.actionLabel, 'New idea — speak it into a card')
-  assert.equal(layout.actionText, '✶')
-  assert.ok(layout.name.scrollWidth <= layout.name.clientWidth + 1, 'the full tab name fits')
-  assert.ok(layout.name.right <= layout.countBox.left + 1, 'the count follows the name')
-  assert.ok(layout.countBox.right <= layout.action.left + 1, 'the action follows the count')
-  assert.ok(layout.action.right <= layout.tab.right + 1, 'the action stays inside the tab')
-}, { width: 375, height: 667 })
 const reportPage = p => p.locator('.ws-page[data-key="umber-workstation:/fixture-store/workspace/.felt/research/workspace/calibration-report/report.html"]')
 const report = p => reportPage(p).locator('iframe')
 /** The report one Back away from the constitution, not the page the reader landed on. */
@@ -266,7 +256,7 @@ test('Fresh Desk leaves focus alone; the first j selects awaiting review and Ent
   assert.ok(await p.evaluate(() => document.activeElement !== document.querySelector('.kbn-col-head')), 'load must not focus a column head')
   assert.equal(await p.locator('.kbn-key-selected').count(), 0)
   await p.keyboard.press('j')
-  assert.match(await p.locator('.kbn-card.kbn-key-selected > .kbn-card-name').getAttribute('title'), /Calibrate the shear response/)
+  assert.match(await p.locator('.kbn-family.kbn-key-selected').getAttribute('title'), /Calibrate the shear response/)
   await p.keyboard.press('Enter')
   await reportReady(p)
   assert.equal(await isSelected(p, 'calibration-report'), true)
@@ -293,9 +283,6 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   await choose(p, 'Constitution')
   if (device === 'desktop') await type('.ws-selected .ws-fiber-prose h1', 'display', 'EB Garamond')
   assert.equal(await selected(p).locator('.kbn-detail-lede').count(), 1, 'the constitution leads with its outcome')
-  await openMenu(consoleActs(p))
-  await type('[role="menu"].kbn-verb-menu .ws-header-word', 'label', 'EB Garamond')
-  await closeVerbMenu(p)
   await bandMenu(p, 'Settings')
   await type('.ws-stage-band .kbn-ctl-strip', 'meta', 'IBM Plex Mono')
   await p.keyboard.press('Escape')
@@ -304,113 +291,15 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   await type('.ws-selected .ws-audio-play', 'label', 'EB Garamond')
   await type('.ws-selected .ws-audio-clock', 'meta', 'IBM Plex Mono')
   await type('.ws-selected .ws-audio-compare button > span:first-child', 'label', 'EB Garamond')
+  await toView(p)
+  await openMenu(rowActs(p))
+  await type('[role="menu"].kbn-verb-menu .ws-header-word', 'label', 'EB Garamond')
+  await closeVerbMenu(p)
   await p.keyboard.press('?')
   assert.equal(await p.locator('.kbn-keymap-dialog header button').textContent(), '×')
   await p.keyboard.press('Escape')
   assert.equal(await p.locator('.kbn-keymap-overlay').count(), 0)
 }, viewport)
-
-test('Desk action menus preserve row layout and native keyboard focus through Enter and Space', async p => {
-  const review = p.locator('[data-column="awaitingReview"] .kbn-card').first()
-  await p.mouse.move(0, 0)
-  const before = await review.boundingBox()
-  const words = await review.innerText()
-  await review.hover()
-  assert.deepEqual(await review.boundingBox(), before)
-  assert.equal(await review.innerText(), words)
-  assert.equal(await p.getByRole('menu').count(), 0)
-  await review.click({ button: 'right' })
-  assert.deepEqual(await p.getByRole('menu').getByRole('menuitem').allTextContents(), ['Rest', 'Temper', 'Discard', 'Move…'])
-  await p.keyboard.press('Escape')
-  await p.keyboard.press('Escape'); await p.keyboard.press('j')
-  assert.ok(await review.evaluate(el => el === document.activeElement && el.classList.contains('kbn-key-selected')))
-  for (const key of ['Enter', 'Space']) {
-    await review.press('Shift+F10')
-    const menu = p.getByRole('menu')
-    await menu.waitFor()
-    assert.deepEqual(await menu.getByRole('menuitem').allTextContents(), ['Rest', 'Temper', 'Discard', 'Move…'])
-    assert.equal(await menu.getByRole('menuitem').first().evaluate(el => el === document.activeElement), true)
-    await p.keyboard.press('ArrowDown')
-    assert.equal(await menu.getByRole('menuitem', { name: 'Temper', exact: true }).evaluate(el => el === document.activeElement), true)
-    await p.keyboard.press('End')
-    assert.equal(await menu.getByRole('menuitem', { name: 'Move…', exact: true }).evaluate(el => el === document.activeElement), true)
-    await p.keyboard.press('Escape')
-    assert.equal(await p.getByRole('menu').count(), 0)
-    assert.equal(await review.evaluate(el => el === document.activeElement), true)
-    await review.press('Shift+F10')
-    await p.getByRole('menu').getByRole('menuitem', { name: 'Temper', exact: true }).press(key)
-    await p.getByRole('menu').waitFor({ state: 'detached' })
-    assert.equal(await p.getByRole('button', { name: /Undo verdict on/ }).count(), 1)
-    await p.keyboard.press('z')
-  }
-  await review.press('Shift+F10')
-  await p.getByRole('menu').getByRole('menuitem', { name: 'Rest', exact: true }).press('Space')
-  await p.locator('.kbn-rest-popover').waitFor()
-  await p.keyboard.press('Escape')
-}, undefined, undefined, 'reduce')
-
-test('Desk action menus open on a phone long press without hover', async p => {
-  await chooseDeskColumn(p, 2)
-  const review = p.locator('[data-column="awaitingReview"] .kbn-card').first()
-  const touch = await p.context().newCDPSession(p)
-  const hold = async row => {
-    await row.scrollIntoViewIfNeeded()
-    const box = await row.boundingBox()
-    await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }] })
-    await p.clock.runFor(500)
-    await p.getByRole('menu').waitFor()
-    await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
-  }
-  await hold(review)
-  const menu = p.getByRole('menu')
-  assert.deepEqual(await menu.getByRole('menuitem').allTextContents(), ['Rest', 'Temper', 'Discard', 'Move…'])
-  for (const item of await menu.getByRole('menuitem').all()) {
-    const reach = await item.boundingBox()
-    assert.ok(reach.height >= 44 && reach.width > 0)
-    assert.ok(reach.x >= 0 && reach.x + reach.width <= 390)
-    assert.equal(await item.evaluate(el => { const r = el.getBoundingClientRect(); return el.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)) }), true)
-  }
-  await p.keyboard.press('Escape')
-  await chooseDeskColumn(p, 1)
-  const inFlight = p.locator('[data-column="inFlight"] .kbn-card').first()
-  await hold(inFlight)
-  assert.deepEqual(await p.getByRole('menu').getByRole('menuitem').allTextContents(), ['Close for review', 'Rest', 'Temper', 'Discard', 'Move…'], 'a phone has no conversation to open for a terminal worker without a Claude link')
-}, { width: 390, height: 844 }, undefined, 'reduce', true)
-
-test('Desk family action menus preserve native activation and Resting row stacking', async p => {
-  const fixture = new URL(url); fixture.searchParams.set('example', 'threads'); await p.goto(fixture.href)
-  const family = p.locator('.kbn-desk .kbn-card[data-fiber-id="research/workspace/calibration-report"]:not(.kbn-card-header)')
-  await family.waitFor()
-  await p.keyboard.press('j')
-  for (let row = 0; row < 20; row++) await p.keyboard.press('k')
-  for (let row = 0; row < 20 && !await family.evaluate(el => el.classList.contains('kbn-key-selected')); row++) await p.keyboard.press('j')
-  assert.ok(await family.evaluate(el => el === document.activeElement && el.classList.contains('kbn-key-selected')))
-  for (const key of ['Enter', 'Space']) {
-    await family.focus(); await family.press('Shift+F10'); await p.getByRole('menu').waitFor()
-    assert.deepEqual(await p.getByRole('menu').getByRole('menuitem').allTextContents(), ['Rest', 'Temper', 'Discard', 'Open conversation', 'Move…'])
-    await p.keyboard.press('Escape'); assert.ok(await family.evaluate(el => el === document.activeElement))
-    await family.press('Shift+F10')
-    await p.getByRole('menu').getByRole('menuitem', { name: 'Temper', exact: true }).press(key)
-    await p.getByRole('menu').waitFor({ state: 'detached' })
-    await p.keyboard.press('z')
-  }
-  await p.evaluate(async () => {
-    for (const row of window.__harness.MOCK_FEED.fibers) if (row.fiber.id.startsWith('research/workspace/calibration-report')) {
-      row.fiber.status = 'open'; row.fiber.horizon = 'stashed'; row.runtime = null
-      delete row.fiber.shuttle.ask
-    }
-    await window.__harness.modal.fetchAndRender()
-  })
-  const resting = p.locator(`.kbn-cluster-item:has(.kbn-cluster-item-title[title*="${name}"])`)
-  const geometry = await resting.evaluate(row => {
-    const title = row.querySelector('.kbn-cluster-item-title').getBoundingClientRect()
-    const rect = row.getBoundingClientRect()
-    return { titleInside: title.left >= rect.left && title.right <= rect.right, rowHasMenuTarget: row.getAttribute('aria-haspopup') === 'menu' }
-  })
-  assert.deepEqual(geometry, { titleInside: true, rowHasMenuTarget: true })
-  await resting.click({ button: 'right' })
-  assert.deepEqual(await p.getByRole('menu').getByRole('menuitem').allTextContents(), ['Rest', 'Temper', 'Discard', 'Open conversation', 'Move…'])
-})
 
 test('Pointer, stepping, HTML scrolling, persistent iframe, expansion and resize', async p => {
   await open(p)
@@ -863,13 +752,12 @@ test('The board bar holds its tabs, Find and Settings to the pixel on every view
 // While the reader is open the bar marks the view it came from: that tab (or
 // its key) closes the reader back to it; another tab switches and closes.
 const origins = {
-  desk: { other: 'chronicle', open: async p => { await barTab(p, 'desk').click(); await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${name}"])`).click() } },
+  desk: { other: 'chronicle', open: async p => { await barTab(p, 'desk').click(); await p.locator(`.kbn-desk .kbn-family[title*="${name}"] .kbn-family-head`).click() } },
   channels: { other: 'desk', open: async p => { await openFromChannels(p, 'report.html', 'calibration-report') } },
   chronicle: { other: 'channels', open: async p => { await barTab(p, 'chronicle').click(); await p.locator('.chr-name').filter({ hasText: name }).click() } },
 }
 for (const origin of ['desk', 'chronicle']) test(`Rest popover is above the reader opened from ${origin}`, async p => {
   await origins[origin].open(p)
-  await choose(p, 'Constitution')
   await appFocus(p)
   await p.keyboard.press('s')
   const panel = p.locator('.kbn-rest-popover')
@@ -950,10 +838,8 @@ test('Receipt arrivals lead the view\'s sent files and leave the open report be'
 })
 
 test('j/k step constitutions in Desk order from a Channels-opened reader, J/K step its columns, and each landing is named', async p => {
-  // Desk order names each constitution once, at its own row: a root heading another section is not a stop.
-  const column = id => p.locator(`[data-column="${id}"] .kbn-card:not(.kbn-card-header) > .kbn-card-name`).evaluateAll(names => names.map(name => name.title))
-  const drafts = await column('drafts'), flight = await column('inFlight'), review = await column('awaitingReview')
-  const names = [...drafts, ...flight, ...review], at = names.indexOf(name)
+  // Desk order names each constitution once: each family's top-level, then its members that wait.
+  const stops = await deskStops(p), names = stops.map(stop => stop.name), at = names.indexOf(name)
   const title = expected => poll(p, name => document.querySelector('.ws-channel-title')?.title === name, expected)
   const landing = expected => poll(p, text => document.querySelector('.toast-message')?.textContent === text, expected)
   await openFromChannels(p, 'weekly.txt')
@@ -963,34 +849,24 @@ test('j/k step constitutions in Desk order from a Channels-opened reader, J/K st
   await openFromChannels(p, 'report.html', 'calibration-report')
   await reportReady(p)
   await appFocus(p)
-  await p.keyboard.press('Shift+K'); await title(flight[0]); await landing(`In flight · ${flight[0]}`)
-  // Drafts lands on the card last open there, the one Channels opened first.
-  const read = drafts.indexOf('Weekly shear summary')
-  await p.keyboard.press('Shift+K'); await title(drafts[read]); await landing(`Drafts · ${drafts[read]}`)
+  // J steps to the next column's first stop, and the toast names the column.
+  const next = stops.find((stop, n) => n > at && stop.column !== stops[at].column)
+  await p.keyboard.press('Shift+J'); await title(next.name); await landing(`${COLUMN_NAME[next.column]} · ${next.name}`)
+  await p.keyboard.press('Shift+K'); await title(name)
   // A constitution's page keeps j and k for its rows while they have the keys; from elsewhere they step constitutions.
   const away = () => p.evaluate(() => { document.activeElement?.blur() })
-  await away(); await p.keyboard.press('j'); await title(names[read + 1])
-  await p.keyboard.press('Shift+J'); await title(flight[0])
-  await p.keyboard.press('Shift+K'); await title(names[read + 1])
-  await p.keyboard.press('Shift+J'); await title(flight[0])
-  await p.keyboard.press('Shift+J'); await title(name)
   if (await p.locator('.ws-selected .ws-family-page').count()) {
     await p.locator('.ws-selected .ws-family-page :is(.ov-thread, .ov-ancestor)').first().focus()
     await p.keyboard.press('j'); await p.waitForTimeout(200)
     assert.equal(await p.locator('.ws-channel-title').getAttribute('title'), name, 'j inside the rows stays on the page')
   }
-  await away(); await p.keyboard.press('k'); await title(names[at - 1])
-  await away(); await p.keyboard.press('k'); await title(names[at - 2])
-  await away(); await p.keyboard.press('j'); await title(names[at - 1])
+  await away(); await p.keyboard.press('j'); await title(names[at + 1])
+  await away(); await p.keyboard.press('k'); await title(name)
 })
 
 test('Wide reader scans Desk cards and returns the last viewed card with one Escape or its origin tab', async p => {
-  const cardNames = column => p.locator(`[data-column="${column}"] .kbn-card:not(.kbn-card-header) > .kbn-card-name`).evaluateAll(names => names.map(name => name.title))
-  const deskDrafts = await cardNames('drafts'), review = await cardNames('awaitingReview'), flight = await cardNames('inFlight')
-  const knownDrafts = ['Weekly shear summary', 'Transfer-function check', 'Validate the summary against simulations']
-  assert.deepEqual([...knownDrafts].sort(), [...deskDrafts].sort())
-  const drafts = deskDrafts
-  const names = [...drafts, ...flight, ...review]
+  const names = (await deskStops(p)).map(stop => stop.name)
+  const selectedName = () => p.locator('.kbn-key-selected').evaluate(el => el.classList.contains('kbn-family') ? el.title : el.title.split(' — ')[0])
   await land(p)
   const raised = await p.locator('.kbn-desk').evaluate(e => ({ transform: getComputedStyle(e).transform, filter: getComputedStyle(e).filter }))
   assert.match(raised.transform, /0\.94/)
@@ -1001,42 +877,13 @@ test('Wide reader scans Desk cards and returns the last viewed card with one Esc
   await poll(p, name => document.querySelector('.ws-channel-title')?.title === name, next)
   await p.keyboard.press('Escape')
   await poll(p, () => !document.querySelector('.kbn-reader-open'))
-  assert.equal(await p.locator('.kbn-key-selected .kbn-card-name').getAttribute('title'), next, 'Escape selects the last card viewed')
+  assert.equal(await selectedName(), next, 'Escape selects the last card viewed')
   await land(p)
-  // On a constitution's page j/k walk its own level; Alt+↓/↑ step the Desk's order.
   await p.keyboard.press('Alt+ArrowDown')
   await poll(p, name => document.querySelector('.ws-channel-title')?.title === name, next)
   await barTab(p, 'desk').click()
   await poll(p, () => !document.querySelector('.kbn-reader-open'))
-  assert.equal(await p.locator('.kbn-key-selected .kbn-card-name').getAttribute('title'), next)
-})
-
-test('On a report the console carries the fiber\'s acts, with the undo line in their place; keys reach them', async p => {
-  await open(p)
-  assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper, .kbn-ctl-discard)').count(), 0)
-  const pair = consoleActs(p)
-  // Where the console has room its acts stand as buttons; where it is short, its menu holds them.
-  assert.ok(await verbFace(pair).isVisible() || await pair.getByRole('button', { name: "calibration-report's acts", exact: true }).isVisible())
-  // Work awaiting review leads with Temper; each verb names its key.
-  assert.deepEqual(await offeredVerbs(pair), ['Temper', 'Rest', 'Discard'])
-  // Its key: in the menu's shortcut, or in the face's name.
-  const temper = await consoleAct(pair, 'Temper')
-  assert.ok(await temper.getAttribute('aria-keyshortcuts') === 't' || /\(t\)$/.test(await temper.getAttribute('aria-label') ?? ''), 'Temper names its key')
-  await closeVerbMenu(p)
-  await choose(p, 'calibration-report')
-  await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
-  await appFocus(p); await p.keyboard.press('t')
-  assert.equal(await isSelected(p, 'calibration-report'), true, 'the page stays where it is')
-  await consoleActs(p).locator('.ws-verdict-undo').waitFor()
-  assert.equal(await consoleActs(p).locator('.ws-verdict-undo').count(), 1)
-  assert.equal((await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition')).length, 0)
-  await p.clock.runFor(6000)
-  await poll(p, () => window.__harness.requests.some(r => r.method === 'POST' && r.url.includes('/transition')))
-  await leave(p); await chooseDeskColumn(p, 1)
-  await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
-  assert.equal(await band(p).locator('.ws-band-open').count(), 0)
-  // Its view's head carries its acts, Close for review on the face.
-  assert.deepEqual(await offeredVerbs(acts(p)), ['Close for review', 'Rest', 'Temper', 'Discard'])
+  assert.equal(await selectedName(), next)
 })
 
 async function verdictLook(locator) {
@@ -1072,26 +919,16 @@ for (const theme of [null, 'night-chart']) test(`Verdict verbs wear one pigment 
     await closeVerbMenu(p)
     return [temper, discard]
   }
-  looks.act = await verdicts(consoleActs(p))
   await familyTree(p)
   looks.row = await verdicts(acts(p))
-  await choose(p, 'calibration-report')
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
-  await pressVerb(consoleActs(p), 'Discard')
-  looks.line = [await verdictLook(consoleActs(p).locator('.ws-verdict-undo .ws-verdict-word'))]
+  await pressVerb(acts(p), 'Discard')
+  looks.line = [await verdictLook(acts(p).locator('.ws-verdict-undo .ws-verdict-word'))]
   for (const [surface, [temper, discard]] of Object.entries(looks)) {
     if (temper && discard) { assert.ok(tealish(temper.color), `${surface} Temper ink is verdigris: ${temper.color}`); assert.ok(reddish(discard.color), `${surface} Discard ink is red: ${discard.color}`) }
     for (const look of [temper, discard].filter(Boolean)) assert.ok(look.ratio >= 4.5, `${surface} verdict ink ${look.color} on ${look.fill}: ${look.ratio.toFixed(2)}:1`)
   }
   assert.ok(reddish(looks.line[0].color), 'the undo line names a discard in red')
-  if (!theme) {
-    await p.keyboard.press('z')
-    await p.goto(url)
-    const card = p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${name}"])`)
-    await card.click({ button: 'right' })
-    const desk = [await verdictLook(p.getByRole('menuitem', { name: 'Temper', exact: true })), await verdictLook(p.getByRole('menuitem', { name: 'Discard', exact: true }))]
-    assert.ok(desk.every(look => look.ratio >= 4.5), 'Desk menu verdict labels stay legible')
-  }
 })
 
 async function anchoredInView(p, panel, trigger, label) {
@@ -1158,27 +995,26 @@ test('Landscape phone keeps a one-row top bar while the fiber awaits review', as
   await headerAction(p, 'Settings')
   await p.locator('.ws-settings-menu:not([hidden])').waitFor()
   await p.keyboard.press('Escape')
-  // The console's lead control answers a full-height tap and leads with Temper; Discard is a menu away.
-  const lead = await consoleMenu(consoleActs(p)).isVisible() ? consoleMenu(consoleActs(p)) : verbFace(consoleActs(p))
-  const box = await hitBox(lead)
-  assert.ok(box.height >= 44, `the console's lead control is a full-height target: ${JSON.stringify(box)}`)
-  const verbs = await offeredVerbs(consoleActs(p))
+  // The view's lead verb answers a full-height tap and leads with Temper; Discard is a menu away.
+  await toView(p)
+  const box = await hitBox(verbFace(acts(p)))
+  assert.ok(box.height >= 44, `the view's lead verb is a full-height target: ${JSON.stringify(box)}`)
+  const verbs = await offeredVerbs(acts(p))
   assert.equal(verbs[0], 'Temper')
   assert.ok(verbs.includes('Discard'), 'Discard is a menu away')
 }, { width: 844, height: 390 }, 'reduce', true)
 
 test('A key discard waits on the constitution in place of the pair; undo, then Temper, makes one delayed write', async p => {
-  await open(p); await reportReady(p)
+  await land(p)
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
   await appFocus(p); await p.keyboard.press('x')
-  assert.equal(await isSelected(p, 'calibration-report'), true, 'the key leaves the page in place')
-  const pair = consoleActs(p)
+  const pair = acts(p)
   assert.match(await pair.locator('.ws-verdict-undo').innerText(), /^DISCARDED/i)
-  assert.ok(await consoleMenu(pair).isHidden(), 'the menu gives way to the line')
+  assert.ok(await pair.locator('.ws-acts-verbs').isHidden(), 'the verbs give way to the line')
   await p.clock.runFor(3000)
   await pair.getByRole('button', { name: `Undo verdict on ${name}`, exact: true }).click()
   await pressVerb(pair, 'Temper')
-  assert.equal(await consoleActs(p).locator('.ws-verdict-undo').count(), 1)
+  assert.equal(await acts(p).locator('.ws-verdict-undo').count(), 1)
   assert.match(await pair.locator('.ws-verdict-undo').innerText(), /^TEMPERED/i)
   await p.clock.runFor(3999)
   assert.equal((await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition')).length, 0)
@@ -1189,54 +1025,20 @@ test('A key discard waits on the constitution in place of the pair; undo, then T
   assert.equal(JSON.parse(writes[0].body).target, 'tempered')
 })
 
-test('a moves in-flight work to review through the Desk drag\'s transition, after an undo window z can cancel', async p => {
+test('The view\'s verdict buttons delay and undo through the reader\'s queue', async p => {
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
-  // Another client of the shared browser may dismiss a native dialog first.
-  await p.evaluate(() => { window.confirm = () => true })
-  const posts = async () => (await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition'))
-  await chooseDeskColumn(p, 1)
-  const card = p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`)
-  await card.click()
-  await appFocus(p); await p.keyboard.press('a')
-  const line = acts(p).locator('.ws-verdict-undo')
-  assert.equal(await line.textContent(), 'To review·undo z')
-  // The shared live region takes the announcement a beat after the verdict.
-  await p.clock.runFor(100)
-  assert.equal(await p.locator('[role="status"][aria-live="polite"]').filter({ hasText: 'undo z' }).textContent(), 'To review Remote covariance review · undo z')
-  if (process.env.WORKSPACE_SHOTS) {
-    await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
-    await acts(p).screenshot({ path: `${process.env.WORKSPACE_SHOTS}/to-review-window-reader.png` })
-  }
-  await p.keyboard.press('z')
-  await p.clock.runFor(6000)
-  assert.equal((await posts()).length, 0)
-  await p.keyboard.press('a')
-  await p.clock.runFor(3999)
-  assert.equal((await posts()).length, 0)
-  await p.clock.runFor(1)
-  await poll(p, () => window.__harness.requests.some(r => r.method === 'POST' && r.url.includes('/transition')))
-  assert.equal(JSON.parse((await posts())[0].body).target, 'awaitingReview')
-})
-
-for (const surface of ['Desk', 'fiber']) test(`${surface} verdict buttons delay and undo through the same queue`, async p => {
-  await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
-  if (surface === 'fiber') { await open(p) }
-  const controls = surface === 'Desk'
-    ? p.getByRole('menu')
-    : consoleActs(p)
-  if (surface === 'Desk') await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${name}"])`).click({ button: 'right' })
-  if (surface === 'Desk') await controls.getByRole('menuitem', { name: /Discard/ }).click()
-  else await pressVerb(controls, 'Discard')
-  const host = surface === 'Desk' ? p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${name}"])`).locator('.kbn-card-meta') : controls
-  assert.equal(await host.locator(':scope > .ws-verdict-undo').count(), 1, 'the undo line takes the controls\' place')
+  await land(p)
+  const controls = rowActs(p)
+  await pressVerb(controls, 'Discard')
+  assert.equal(await controls.locator(':scope > .ws-verdict-undo').count(), 1, 'the undo line takes the controls\' place')
   assert.equal((await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition')).length, 0)
-  await p.getByRole('button', { name: `Undo verdict on ${name}`, exact: true }).click()
+  await controls.getByRole('button', { name: `Undo verdict on ${name}`, exact: true }).click()
   await p.clock.runFor(6000)
   assert.equal((await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition')).length, 0)
 })
 
 test('Verdict keys delay writes, guard typing, undo, and commit after leaving the reader', async p => {
-  await open(p)
+  await land(p)
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
   const posts = async () => (await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition'))
   await appFocus(p); await p.keyboard.press('/')
@@ -1249,7 +1051,7 @@ test('Verdict keys delay writes, guard typing, undo, and commit after leaving th
   }
   assert.equal(await p.locator('.ws-verdict-undo').count(), 0)
   await p.keyboard.press('t')
-  assert.equal(await consoleActs(p).locator('.ws-verdict-undo').textContent(), 'Tempered·undo z')
+  assert.equal(await acts(p).locator('.ws-verdict-undo').textContent(), 'Tempered·undo z')
   await p.clock.runFor(100)
   assert.equal(await p.locator('[role="status"][aria-live="polite"]').filter({ hasText: 'undo z' }).textContent(), 'Tempered Calibrate the shear response · undo z')
   assert.equal((await posts()).length, 0)
@@ -1259,7 +1061,7 @@ test('Verdict keys delay writes, guard typing, undo, and commit after leaving th
   await p.clock.runFor(1)
   assert.equal((await posts()).length, 0)
   await p.keyboard.press('x')
-  await p.getByRole('button', { name: `Undo verdict on ${name}`, exact: true }).click()
+  await acts(p).getByRole('button', { name: `Undo verdict on ${name}`, exact: true }).click()
   await p.clock.runFor(6000)
   assert.equal((await posts()).length, 0)
   await p.keyboard.press('x')
@@ -1272,9 +1074,8 @@ test('Verdict keys delay writes, guard typing, undo, and commit after leaving th
 })
 
 test('Temper reaches drafts and work in flight, in their acts and by key, through the undo queue', async p => {
-  await chooseDeskColumn(p, 0)
-  await p.locator('[data-column="drafts"] .kbn-col-head').click()
-  await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Weekly shear summary"])`).click()
+  await chooseDeskColumn(p, 2)
+  await p.locator(`.kbn-desk .kbn-family[title*="Weekly shear summary"] .kbn-family-head`).click()
   const temper = await verbControl(acts(p), 'Temper')
   assert.ok(await temper.isVisible() && await temper.getAttribute('aria-keyshortcuts') === 't', "a draft's acts offer Temper beside its key")
   await closeVerbMenu(p)
@@ -1284,7 +1085,7 @@ test('Temper reaches drafts and work in flight, in their acts and by key, throug
   await poll(p, () => !document.querySelector('.ws-verdict-undo'))
   await leave(p)
   await chooseDeskColumn(p, 1)
-  await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
+  await p.locator(`.kbn-desk .kbn-family[title*="Remote covariance review"] .kbn-family-head`).click()
   // A live worker asks once at the gesture; declining queues nothing.
   const asked = [], dialogErrors = []
   let finishDialog
@@ -1306,7 +1107,7 @@ test('Temper reaches drafts and work in flight, in their acts and by key, throug
 
 test('A standing run waiting on you is tempered with t: no question, an undo window, then the schedule keeps it', async p => {
   await p.goto(`${url}&standing-review`); await chooseDeskColumn(p, 1)
-  await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
+  await p.locator(`.kbn-desk .kbn-family[title*="Remote covariance review"] .kbn-family-head`).click()
   assert.deepEqual(await acts(p).locator('.ws-acts-verbs > button:visible').evaluateAll(buttons => buttons.map(b => b.getAttribute('aria-label'))),
     ['Temper run remote-review (t)', 'More verbs for remote-review: Pause schedule (s), Retire (x)'], 'Temper run leads the acts')
   assert.ok(!(await offeredVerbs(acts(p))).includes('Close for review'))
@@ -1322,11 +1123,11 @@ test('A standing run waiting on you is tempered with t: no question, an undo win
 })
 
 test('Pending verdicts on two fibers commit independently', async p => {
-  await open(p)
+  await land(p)
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
   await p.keyboard.press('t')
   await leave(p)
-  await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Mask validation notes"])`).click()
+  await p.locator(`.kbn-desk .kbn-family[title*="Mask validation notes"] .kbn-family-head`).click()
   await poll(p, () => document.querySelector('.ws-channel-title')?.title === 'Mask validation notes')
   await p.keyboard.press('x')
   assert.equal(await p.evaluate(() => new Set([...document.querySelectorAll('[data-verdict-pending]')].map(el => el.dataset.verdictKey)).size), 2)
@@ -1334,19 +1135,20 @@ test('Pending verdicts on two fibers commit independently', async p => {
   await poll(p, () => window.__harness.requests.filter(r => r.method === 'POST' && r.url.includes('/transition')).length === 2)
 })
 
-test('Conversation c (and its dot alias) uses the pill destination in reader and selected Desk card', async p => {
-  const remote = p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`)
+test('Conversation c (and its dot alias) uses the pill destination in the reader, and the Desk takes neither', async p => {
+  const remote = p.locator(`.kbn-desk .kbn-family[title*="Remote covariance review"] .kbn-family-head`)
   await remote.click()
   const opened = n => poll(p, n => window.__harness.events.filter(e => e.type === 'open-worker').length === n, n)
   await p.keyboard.press('c'); await opened(1)
   await p.keyboard.press('.'); await opened(2)
   await leave(p)
-  await p.keyboard.press('c'); await opened(3)
-  await p.keyboard.press('.'); await opened(4)
+  await p.keyboard.press('j'); await p.keyboard.press('c'); await p.keyboard.press('.')
+  await p.waitForTimeout(150)
+  assert.equal(await p.evaluate(() => window.__harness.events.filter(e => e.type === 'open-worker').length), 2, 'the Desk acts on nothing')
 })
 
 test('A click on a thread only asks Rex to select its window, and opens nothing when it has none; c opens it', async p => {
-  const remote = p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`)
+  const remote = p.locator(`.kbn-desk .kbn-family[title*="Remote covariance review"] .kbn-family-head`)
   const session = 'remote-review-01KVBR3H8DYFXNH96683RX89N0-shuttle'
   await p.evaluate(session => window.__harness.windowless.add(session), session)
   const attaches = () => p.evaluate(() => window.__harness.requests.filter(r => r.method === 'POST' && r.url.endsWith('/api/v1/attach')).map(r => JSON.parse(r.body)))
@@ -2026,14 +1828,14 @@ test('Reader slash hangs the constitution list under the bar Find; Escape puts i
 })
 
 test('Alt-up/down step constitutions from wherever focus rests; browser Back returns to Channels', async p => {
-  // Desk order names each constitution once, at its own row: a root heading another section is not a stop.
-  const column = id => p.locator(`[data-column="${id}"] .kbn-card:not(.kbn-card-header) > .kbn-card-name`).evaluateAll(names => names.map(name => name.title))
-  const names = [...await column('drafts'), ...await column('inFlight'), ...await column('awaitingReview')]
+  const names = (await deskStops(p)).map(stop => stop.name)
   assert.ok(names.length >= 3, 'navigation exercises several constitutions')
   await openFromChannels(p, 'report.html', 'calibration-report')
   await poll(p, first => document.querySelector('.ws-channel-title')?.title === first, name)
   let index = names.indexOf(name)
-  for (const [key, delta] of [['Alt+ArrowUp', -1], ['Alt+ArrowUp', -1], ['Alt+ArrowDown', 1]]) {
+  // Two steps away from the nearer end, then one back.
+  const away = index >= 2 ? [['Alt+ArrowUp', -1], ['Alt+ArrowUp', -1], ['Alt+ArrowDown', 1]] : [['Alt+ArrowDown', 1], ['Alt+ArrowDown', 1], ['Alt+ArrowUp', -1]]
+  for (const [key, delta] of away) {
     await p.keyboard.press(key)
     index += delta
     await poll(p, name => document.querySelector('.ws-channel-title')?.title === name, names[index])
@@ -2083,7 +1885,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
       if (!process.env.WORKSPACE_SHOTS) return
       await mkdir(shots, { recursive: true }); await p.screenshot({ path: resolve(shots, `verdict-${device}-${state}.png`) })
     }
-    await open(p)
+    await land(p)
     assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper, .kbn-ctl-discard)').count(), 0)
     // Temper on the verb button's face, Discard in its caret's menu: each in reach, at touch size on the phone.
     for (const verb of ['Temper', 'Discard']) {
@@ -2101,7 +1903,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     if (device === 'phone') assert.ok((await line.getByRole('button').boundingBox()).height >= 44)
     await shot('undo-line'); await p.keyboard.press('z'); await leave(p)
     await chooseDeskColumn(p, 1)
-    await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
+    await p.locator(`.kbn-desk .kbn-family[title*="Remote covariance review"] .kbn-family-head`).click()
     await poll(p, () => document.querySelector('.ws-stage-band .ws-dock')?.dataset.column === 'inFlight')
     assert.equal(await band(p).locator('[data-part="lifecycle"]').count(), 0, 'colour carries the state; no word says it')
     await shot('working')
@@ -2110,9 +1912,8 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
       row.runtime.phase = 'waiting'; row.runtime.last_activity_at = Date.now() - 120000
       await window.__harness.modal.fetchAndRender()
     })
-    await shot('waiting'); await leave(p); await chooseDeskColumn(p, 0)
-    await p.locator('[data-column="drafts"] .kbn-col-head').click()
-    await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Weekly shear summary"])`).click()
+    await shot('waiting'); await leave(p); await chooseDeskColumn(p, 2)
+    await p.locator(`.kbn-desk .kbn-family[title*="Weekly shear summary"] .kbn-family-head`).click()
     await shot('no-worker')
   }, viewport)
 }
@@ -2174,7 +1975,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     await leave(p)
     // A standing constitution's cadence: the same review, on a schedule.
     await p.goto(`${url}&standing-review`); await chooseDeskColumn(p, 1)
-    await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
+    await p.locator(`.kbn-desk .kbn-family[title*="Remote covariance review"] .kbn-family-head`).click()
     await bandMenu(p, 'Settings')
     const cadence = band(p).locator('.kbn-detail-controls-toggle .kbn-ctl-cadence')
     assert.equal(await cadence.count(), 1); assert.ok((await cadence.innerText()).trim())
@@ -2270,7 +2071,7 @@ test('Escaped theme imports cannot load unscoped CSS or target the act zone', as
 })
 
 test('Custom theme is scoped with private keyframes, hoisted fonts and conditional rules', async p => {
-  const desk = await p.locator('.kbn-card').first().evaluate(el => getComputedStyle(el).opacity)
+  const desk = await p.locator('.kbn-family').first().evaluate(el => getComputedStyle(el).opacity)
   await open(p)
   await choose(p, 'Constitution')
   await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
@@ -2295,7 +2096,7 @@ test('Custom theme is scoped with private keyframes, hoisted fonts and condition
   const allowed = await p.evaluate(css => window.__harness.scopeTheme(`${css} h1 { color: red }`, '[data-ws-theme="font-check"]', 'font-check'), fontImport)
   assert.ok(allowed.startsWith('@import url("https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;600&display=swap");'), 'Google Fonts import survives URL semicolons in canonical form')
   assert.ok(allowed.includes('@scope'), 'rules after an import remain scoped')
-  assert.equal(await p.locator('.kbn-card').first().evaluate(el => getComputedStyle(el).opacity), desk, 'Desk is outside the theme scope')
+  assert.equal(await p.locator('.kbn-family').first().evaluate(el => getComputedStyle(el).opacity), desk, 'Desk is outside the theme scope')
   await leave(p)
   await openFromChannels(p, 'weekly.txt')
   assert.equal(await p.locator('.ws-reader').evaluate(el => getComputedStyle(el).getPropertyValue('--ws-custom-ready').trim()), '', 'another constitution does not inherit the custom theme')
@@ -2323,7 +2124,7 @@ test('Plain removes custom and bundled styling, persists, and can restore custom
 })
 
 test('Broken theme falls back to its bundled base', async p => {
-  await p.locator(`.kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Mask validation notes"])`).click()
+  await p.locator(`.kbn-desk .kbn-family[title*="Mask validation notes"] .kbn-family-head`).click()
   await choose(p, 'Constitution')
   await poll(p, () => document.querySelector('.ws-reader')?.dataset.wsThemeName === 'laboratory-paper')
   const theme = await p.locator('.ws-reader').getAttribute('data-ws-theme')
@@ -2343,7 +2144,8 @@ test('Act zone stops broad button rules and resets theme fonts, sizes and pigmen
     probe.remove()
     return color
   }), 'rgb(255, 0, 0)', 'the broad rule is active in the reading zone')
-  const temper = await verbControl(consoleActs(p), 'Temper')
+  await toView(p)
+  const temper = await verbControl(acts(p), 'Temper')
   const style = await temper.evaluate(el => ({ color: getComputedStyle(el).color, font: getComputedStyle(el).fontFamily, height: getComputedStyle(el).getPropertyValue('--ws-control-height').trim(), agent: getComputedStyle(el).getPropertyValue('--ws-agent').trim(), transform: getComputedStyle(el).textTransform, pigment: getComputedStyle(el).getPropertyValue('--kbn-agent').trim(), mono: getComputedStyle(el).getPropertyValue('--font-mono').trim() }))
   assert.notEqual(style.color, 'rgb(255, 0, 0)', 'button { color: red } cannot reach Temper')
   assert.ok(!style.font.includes('fantasy'))
@@ -2376,7 +2178,7 @@ for (const [label, theme] of [['Night Chart', 'night-chart'], ['Lamplight', 'lam
   // Remote covariance review declares Night Chart: a dark system shows it, and a Lamplight choice leaves a declared dark theme alone.
   await p.emulateMedia({ colorScheme: 'dark' })
   if (theme === 'lamplight') await chooseAppearance(p, 'dark', 'lamplight')
-  await p.locator(`.kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${theme === 'lamplight' ? name : 'Remote covariance review'}"])`).click()
+  await p.locator(`.kbn-desk .kbn-family[title*="${theme === 'lamplight' ? name : 'Remote covariance review'}"] .kbn-family-head`).click()
   await choose(p, 'Constitution')
   await poll(p, theme => document.querySelector('.ws-reader')?.dataset.wsThemeName === theme, theme)
   const contrasts = await p.locator('.ws-stage-column').evaluate(column => {
@@ -2437,11 +2239,11 @@ test('Theme refresh uses ETag on the ordinary cadence, not on selection frames',
 })
 
 test('Protected verdict plate and its undo line hold without author CSS', async p => {
-  await open(p)
+  await land(p)
   await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
-  const plate = consoleActs(p)
-  assert.equal(await plate.evaluate(el => el.closest('[data-part="act"]')?.dataset.act), 'band')
-  assert.notEqual(await consoleControl(plate).evaluate(el => getComputedStyle(el).color), 'rgb(255, 0, 0)')
+  const plate = acts(p)
+  assert.ok(await plate.evaluate(el => !!el.closest('[data-part="act"]')), 'the view\'s acts stand in an act zone')
+  assert.notEqual(await verbFace(plate).evaluate(el => getComputedStyle(el).color), 'rgb(255, 0, 0)')
   await appFocus(p); await p.keyboard.press('t')
   const undo = plate.locator('.ws-verdict-undo button')
   await undo.waitFor()
@@ -2531,7 +2333,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
     await p.keyboard.press('Escape')
   }
   await leave(p); await chooseDeskColumn(p, 1)
-  await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
+  await p.locator(`.kbn-desk .kbn-family[title*="Remote covariance review"] .kbn-family-head`).click()
   await still(p, 'a worker-state change', () => flipWorker(p), { allow: ['.ov-head', '.ov-up'], settle: 100 })
   assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper,.kbn-ctl-discard)').count(), 0)
   // Its view's head carries the verb button: Close for review on its face, the rest behind its caret.
@@ -2576,13 +2378,9 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
 for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) test(`Nothing moves when you touch the Desk and Channels (${device})`, async p => {
   const phone = device === 'phone'
   await p.waitForTimeout(phone ? 600 : 0)
-  for (const [index, column] of ['drafts', 'inFlight', 'awaitingReview'].entries()) {
+  for (const [index, column] of ['waiting', 'working', 'quiet'].entries()) {
     await chooseDeskColumn(p, index)
-    if (column === 'drafts') {
-      await p.locator('[data-column="drafts"] .kbn-col-head').click()
-      await settleTransitions(p, '[data-column="drafts"] .kbn-bandhead-fold')
-    }
-    const card = p.locator(`[data-column="${column}"] .kbn-card`).first()
+    const card = p.locator(`[data-column="${column}"] .kbn-family`).first()
     if (phone) { await p.waitForTimeout(400); continue }
     // Under reduced motion a hovered card does not lift.
     await still(p, `hovering a ${column} card`, () => card.hover())
@@ -2593,7 +2391,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   await still(p, 'a Desk poll repaint', () => repaint(p))
   // The pill's word takes its room from the end of its own row's title; the
   // title's start and every other row stay put.
-  await still(p, 'a Desk worker-state change', () => flipWorker(p), { allow: ['.kbn-card-meta', '.kbn-card-name'], settle: 100 })
+  await still(p, 'a Desk worker-state change', () => flipWorker(p), { allow: ['.kbn-family-meta', '.kbn-family-name'], settle: 100 })
   if (phone) return
   await barTab(p, 'channels').click()
   await p.locator('.kbn-channels .kbn-ch-layout').waitFor()
@@ -2603,7 +2401,6 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
 }, viewport)
 
 registerNavigationJourneys(test)
-registerDeskThreadJourneys(test)
 test('A Globe file thumbnail shows an audio file\'s duration, a video\'s paused first frame and a PDF\'s face', async p => {
   for (const file of ['tone.mp3', 'test.mp4', 'response.pdf']) assert.ok(await p.evaluate(file => !!window.__harness.thumbnail(file), file), `${file} is a fixture send`)
   const thumb = file => p.locator(`[data-harness-thumb="${file}"]`)
@@ -2660,7 +2457,7 @@ async function journey({ name, run, viewport, reducedMotion, touch }) {
   try {
     await page.clock.install({ time: new Date('2026-10-04T14:00:00Z') })
     await page.goto(url)
-    await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Calibrate the shear response"])`).waitFor({ state: 'attached' })
+    await page.locator(`.kbn-desk .kbn-family[title*="Calibrate the shear response"] .kbn-family-head`).waitFor({ state: 'attached' })
     await run(page)
   } catch (error) { failure = error; await mkdir(shots, { recursive: true }); await page.screenshot({ path: resolve(shots, 'failure-' + name.replace(/[^a-z0-9]+/gi, '-').slice(0, 100) + '.png') }).catch(() => {}) }
   finally {

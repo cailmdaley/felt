@@ -43,8 +43,8 @@ The board's read model checks the `cycle` tag first and unconditionally, before
 it reads any column. Its `status`, its `due:`, even a `shuttle:` block someone
 pasted onto it, cannot put it in a Desk column — a cycle routes straight to the
 `cycles` surface. Otherwise an open cycle would read as a draft and a finished
-one as a card that had drifted past its date, and one stray "Autumn 2026" in
-Drafts teaches you to distrust the column.
+one as a card that had drifted past its date, and one stray "Autumn 2026" among
+the drafts teaches you to distrust the Desk.
 
 ## Membership is derived, never assigned
 
@@ -60,10 +60,9 @@ board asks three questions in order, and the first that answers is the reason:
 
 Both edges of the span are inclusive.
 
-The `worked` rung is the real historical rule, and it is the one the Desk cannot
-answer: activity days live in the [temporal feeds](telemetry.md), which the Desk
-does not fetch. On the Desk the rung is simply skipped; the Chronicle, which has
-the activity, uses it.
+The `worked` rung is the real historical rule: it reads activity days from the
+[temporal feeds](telemetry.md), which the Chronicle, where membership is drawn,
+fetches.
 
 ## Working with them
 

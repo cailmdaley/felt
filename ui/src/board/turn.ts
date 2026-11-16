@@ -4,10 +4,10 @@ import { hasLiveWorker, type KanbanCard } from './KanbanTypes.js'
  * Whose move a card is, and why: the one reading every surface draws.
  *
  * The owning daemon decides the turn from its worker's runtime
- * (`Shuttle.Lifecycle.turn/5`) and serves it on the card's row. The In flight
- * band, the order within it, the worker pill's word, pigment and age, the
- * Desk's groups and the dock's control all read it through `turnOf`, so no two
- * of them can tell a different story about one card.
+ * (`Shuttle.Lifecycle.turn/5`) and serves it on the card's row. The worker
+ * pill's word, pigment and age, the dock's control and `attentionOf`'s
+ * waiting-or-working call all read it through `turnOf`, so no two of them can
+ * tell a different story about one card.
  *
  * Two questions are kept apart. The TURN says whose move it is; `busy` says
  * whether the worker is doing something right now. They are independent: a

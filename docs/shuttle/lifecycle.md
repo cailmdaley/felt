@@ -42,7 +42,7 @@ The worker asks four questions, in order. The answer sets `status`, and
 `status` decides what happens next.
 
 **1. Is the desired state realized?** Run `shuttle close <fiber>` and exit.
-Top-level work lands in Awaiting review, where a human accepts it or resumes
+Top-level work waits on the human's review, where a human accepts it or resumes
 it. A thread lands with its orchestrator, which reviews it (see
 [Thread review](#thread-review)).
 A standing run never closes: it has no review, and `close` refuses it (see 4).
@@ -105,7 +105,7 @@ its own constitution.
 
 A closed thread's review belongs to its orchestrator; only top-level work and
 the threads it marks reach the human. A closed thread without a verdict sits in
-the column `orchestrator_review`, drawn **With orchestrator** on the board and
+the column `orchestrator_review`, quiet on the board and
 **To review** in its orchestrator's roster. The orchestrator reads it against
 its Desired State and settles it in one of three ways:
 
@@ -116,10 +116,10 @@ shuttle close <thread> --review "<why>"           # mark it for the human
 ```
 
 The mark (`shuttle.review: {note, at}`) closes the thread if it is open and
-puts it in Awaiting review, where its page shows the note. The note is
+puts it before the human: it waits on them, with the note as what it wants. The note is
 required, `--review` and `--tempered` are mutually exclusive, and a worker
-cannot mark its own constitution. Reopening clears the mark. Moving a thread to
-review on the board marks it too, with the note "Moved to review on the board".
+cannot mark its own constitution. Reopening clears the mark. Closing a thread for
+review from its view on the board marks it too, with the note "Moved to review on the board".
 A thread the human asked for is reviewed the same way: the orchestrator marks
 the ones the human would want to see.
 

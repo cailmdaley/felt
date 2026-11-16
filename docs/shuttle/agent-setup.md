@@ -194,7 +194,7 @@ Choose an installed agent explicitly and Codex runs in the terminal like the oth
 
 Install the test as a draft before activating it.
 Inspect all eligible tasks before running `shuttle daemon release`: release applies to the whole host after a deliberate restart.
-Verify that the task starts in the correct directory, receives a message, and reaches **Awaiting review** with a useful result.
+Verify that the task starts in the correct directory, receives a message, and closes for review with a useful result, waiting on you on the Desk.
 For a terminal worker, test `shuttle attach <fiber>` and detach with `Ctrl-b`, then `d`.
 Test the console separately; a successful worker launch doesn't establish that the preferred opener works.
 If the user only wants the board, don't launch a worker as an unnecessary test.
@@ -204,7 +204,7 @@ If the user only wants the board, don't launch a worker as an unnecessary test.
 Update the setup fiber's outcome and body with what actually passed, the notes location, the board URL, and any remaining login or device checks.
 Keep machine-specific paths in that fiber, not in public documentation.
 Leave rollback instructions for services or app overrides you added.
-When an attached setup worker is finished, close the task through the Shuttle lifecycle so it appears in **Awaiting review**.
+When an attached setup worker is finished, close the task through the Shuttle lifecycle so it waits on the human's review.
 If anything remains unverified, say what and why.
 
 Add [remote machines](remotes.md) only after the first machine works.

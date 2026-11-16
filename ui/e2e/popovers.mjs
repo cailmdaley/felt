@@ -23,7 +23,7 @@ try {
     p.on('pageerror', error => errors.push(error.message))
     const shot = async name => { if (shots) await p.screenshot({ path: resolve(shots, `after-${tag}-${name}.png`) }) }
     await p.goto(url)
-    await p.locator('.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Calibrate the shear response"])').click()
+    await p.locator('.kbn-desk .kbn-family[title*="Calibrate the shear response"] .kbn-family-head').click()
     const { width, height } = p.viewportSize()
     const frame = p.locator('.ws-page.ws-selected iframe').first()
 

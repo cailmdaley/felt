@@ -39,7 +39,7 @@ async function openScenario(name, query, openCard) {
   await page.locator('.kbn-desk').waitFor()
   const harnessReadyMs = await page.evaluate(() => performance.now() - window.__perfNavigationStart)
   if (openCard) {
-    await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Calibrate the shear response"])`).click()
+    await page.locator(`.kbn-desk .kbn-family[title*="Calibrate the shear response"] .kbn-family-head`).click()
     await page.locator('.ws-stage-band .ws-band-head').waitFor()
   }
   await page.screenshot({ path: join(screenshotDir, `${name}.png`) })
@@ -62,7 +62,7 @@ async function openScenario(name, query, openCard) {
         return counts
       }, {}),
       fiberIndexRequests: requests.filter(request => request.url.includes('/api/v1/fibers?fields=index')).length,
-      cards: document.querySelectorAll('.kbn-desk .kbn-card').length,
+      cards: document.querySelectorAll('.kbn-desk .kbn-family').length,
       heapBytes: performance.memory?.usedJSHeapSize ?? null,
     }
   })
@@ -86,7 +86,7 @@ async function openScenario(name, query, openCard) {
   })
   const before = await page.evaluate(() => ({
     cardIdentity: (() => {
-      const card = document.querySelector('.kbn-desk .kbn-card')
+      const card = document.querySelector('.kbn-desk .kbn-family')
       if (card) card.setAttribute('data-perf-identity', 'tracked')
       return card !== null
     })(),
@@ -132,10 +132,10 @@ async function openScenario(name, query, openCard) {
       listenControlMutations,
       revisionChanges,
       mutationTargets: [...mutationTargets.entries()].map(([key, value]) => [key, value]).sort((a, b) => b[1].count - a[1].count).slice(0, 8),
-      cardCount: document.querySelectorAll('.kbn-desk .kbn-card').length,
+      cardCount: document.querySelectorAll('.kbn-desk .kbn-family').length,
       heapBytes: performance.memory?.usedJSHeapSize ?? null,
       requests: window.__harness.requests.length,
-      selectedCardIdentityPreserved: document.querySelector('.kbn-desk .kbn-card[data-perf-identity="tracked"]') !== null,
+      selectedCardIdentityPreserved: document.querySelector('.kbn-desk .kbn-family[data-perf-identity="tracked"]') !== null,
       parseCount: window.__perfParse.count,
       parseElapsedMs: window.__perfParse.elapsedMs,
     }
@@ -243,7 +243,7 @@ async function measureColdApp() {
       assert.equal(initial.some(entry => /mountForms|katex|pdfViewer|pdf\.worker/.test(entry.name)), false,
         'idle first paint does not download forms, KaTeX, or PDF-viewer chunks')
     }
-    await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Math note"])`).click()
+    await page.locator(`.kbn-desk .kbn-family[title*="Math note"] .kbn-family-head`).click()
     await page.waitForFunction(() => performance.getEntriesByType('resource').some(entry => /katex/.test(new URL(entry.name).pathname)))
     const afterMathUse = await page.evaluate(() => performance.getEntriesByType('resource').map(entry => ({
       name: new URL(entry.name).pathname.split('/').at(-1), transferBytes: entry.transferSize, encodedBytes: entry.encodedBodySize,
@@ -253,7 +253,7 @@ async function measureColdApp() {
       'rendering a formula loads KaTeX without loading the forms chunk')
     await page.evaluate(() => document.activeElement?.blur())
     await page.keyboard.press('Escape')
-    const stash = page.getByRole('button', { name: 'Stash a new fiber', exact: true })
+    const stash = page.getByRole('button', { name: 'Stash a new draft', exact: true })
     await stash.click()
     await page.waitForFunction(() => performance.getEntriesByType('resource').some(entry => /mountForms/.test(new URL(entry.name).pathname)))
     const afterFirstUse = await page.evaluate(() => performance.getEntriesByType('resource').map(entry => ({

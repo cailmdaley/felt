@@ -107,7 +107,7 @@ export function addThreadFixtures(example: WorkspaceExample, now: number, many =
 
 /**
  * Roots beside their leading requests: a root
- * in Your turn over ten workers, a working root over four askers and another
+ * idle at its prompt over ten workers, a working root over four askers and another
  * over seven, a resting root whose only life is a thread, and a root awaiting
  * review while its threads work.
  */

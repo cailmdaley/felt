@@ -409,7 +409,7 @@ daemon polls every 30 seconds by default, so the card moves to in-flight on
 its own; `shuttle dispatch pipeline/first-pass` skips the wait. `shuttle ps`
 lists the live worker, and `shuttle attach pipeline/first-pass` opens its terminal.
 
-When the worker closes, the fiber's `outcome` and `## Status` describe the result, and the card lands in Awaiting review.
+When the worker closes, the fiber's `outcome` and `## Status` describe the result, and the card waits on you on the Desk for review.
 A handoff leaves the task active for another worker to continue.
 
 !!! note "First dispatch not starting?"

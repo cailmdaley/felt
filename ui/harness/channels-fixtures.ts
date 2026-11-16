@@ -12,7 +12,7 @@ interface Row {
   ask?: string
   review?: string
   outcome?: string
-  /** A live worker: mid-turn, or idle at the end of its turn (the Desk's Your turn). */
+  /** A live worker: mid-turn, or idle at the end of its turn (Working on the Desk either way). */
   state?: 'working' | 'idle'
   /** Its live worker has a terminal, so its conversation opens. */
   terminal?: boolean
@@ -20,6 +20,12 @@ interface Row {
   minutes: number
   /** Its tapestry page; `figure` names a file in its folder the page shows first. */
   tapestry?: { title: string; lede: string; figure?: string; slide?: boolean }
+  /** Put to rest (`horizon: stashed`), until this civil day when one is named. */
+  rest?: string | true
+  /** Armed with no worker: a standing one asleep until its next run. */
+  armed?: boolean
+  /** Its last launch could not start, and why. */
+  blocked?: string
 }
 
 const DAY = 1440
@@ -90,6 +96,42 @@ export interface ChannelsFixture {
 }
 
 export function addChannelsFixtures(example: WorkspaceExample, now: number): ChannelsFixture {
+  return addBoardFixtures(example, now, ROWS, () => [])
+}
+
+/**
+ * The Desk at work, over the channels' fixture: a survey family whose two
+ * leaves three levels down wait on the human (one asks, one posted to them
+ * with a ✓ to clear it) beside its working threads and an idle worker; a
+ * notebook whose live worker is idle, asking nothing, so it works; a launch
+ * that could not start; and, quiet, a draft, a rest until a day, and a
+ * standing digest asleep until its next run.
+ */
+export function addDeskFixtures(example: WorkspaceExample, now: number): ChannelsFixture {
+  const rows: Row[] = [
+    ...ROWS,
+    { id: 'survey', name: 'Survey pipeline', state: 'working', minutes: 3 },
+    { id: 'survey/catalogue', name: 'Catalogue', parent: 'survey', state: 'working', minutes: 5 },
+    { id: 'survey/catalogue/shapes', name: 'Shape measurement', parent: 'survey/catalogue', state: 'working', minutes: 8 },
+    { id: 'survey/catalogue/shapes/psf', name: 'PSF model', parent: 'survey/catalogue/shapes', minutes: 14, ask: 'The second-moment PSF leaves a 0.4% residual at the chip edges; the pixel model removes it but doubles the run time. Which one?' },
+    { id: 'survey/catalogue/shapes/selection', name: 'Selection bias', parent: 'survey/catalogue/shapes', state: 'idle', minutes: 7 },
+    { id: 'survey/catalogue/photoz', name: 'Photo-z', parent: 'survey/catalogue', state: 'working', minutes: 11 },
+    { id: 'survey/maps', name: 'Mass maps', parent: 'survey', state: 'idle', minutes: 26 },
+    { id: 'notebook', name: 'Lab notebook', state: 'idle', minutes: 18 },
+    { id: 'rerun', name: 'Rerun the mocks', minutes: 33, blocked: 'No project directory on this host: choose one to start.' },
+    { id: 'abstract', name: 'Conference abstract', minutes: 2 * DAY },
+    { id: 'reading', name: 'Reading list', minutes: 4 * DAY, rest: '2026-12-01' },
+    { id: 'digest', name: 'Weekly digest', standing: true, armed: true, minutes: 3 * DAY },
+  ]
+  return addBoardFixtures(example, now, rows, (said, human) => [
+    said('survey/catalogue/shapes/selection', 'post', 6, { to: human, text: 'The selection bias is **0.3%** after the new cuts; the plot is in the folder. Nothing to decide.' }),
+    said('survey/catalogue/shapes/psf', 'asked', 14, { to: { fiber: 'survey/catalogue/shapes' }, text: rows.find(row => row.id === 'survey/catalogue/shapes/psf')!.ask }),
+  ])
+}
+
+type Say = (fiber: string, kind: string, minutes: number, over?: Partial<BoardRecord>) => BoardRecord & { root: string }
+
+function addBoardFixtures(example: WorkspaceExample, now: number, ROWS: Row[], more: (said: Say, human: typeof HUMAN) => Array<BoardRecord & { root: string }>): ChannelsFixture {
   const iso = (minutes: number): string => new Date(now - minutes * 60_000).toISOString()
   const ms = (minutes: number): number => now - minutes * 60_000
   const dir = (id: string): string => `/fixture-store/workspace/${id}`
@@ -98,12 +140,15 @@ export function addChannelsFixtures(example: WorkspaceExample, now: number): Cha
   const launched = (row: Row, n: number): number => row.minutes + 25 + (n * 37) % 140
   example.feed.fibers = ROWS.map((row, n) => {
     const live = row.state === 'working' || row.state === 'idle'
-    const active = !row.closed && (live || !!row.ask)
+    const active = !row.closed && !row.rest && (live || !!row.ask || !!row.armed || !!row.blocked)
     return {
       origin: WORKSPACE_HOST, felt_store: '/fixture-store/workspace', path: `${row.id}/${row.id.split('/').at(-1)}.md`, dir: dir(row.id), orchestrator: row.parent,
+      dispatch_error: row.blocked,
       fiber: { id: row.id, uid: row.id, name: row.name, status: row.closed ? 'closed' : active ? 'active' : 'open', outcome: row.outcome, created_at: iso(row.minutes + DAY), modified_at: iso(row.minutes), closed_at: row.closed ? iso(row.minutes) : undefined,
+        horizon: row.rest ? 'stashed' : undefined, due: typeof row.rest === 'string' ? row.rest : undefined,
         shuttle: { runtime: { dispatched_at: iso(launched(row, n)), handed_off_at: live ? undefined : iso(row.minutes) },
           kind: row.standing ? 'standing' : 'oneshot', host: WORKSPACE_HOST, project_dir: '/fixture-project', agent: 'claude-opus', role: row.role, seat: row.seat, channel: row.channel,
+          schedule: row.armed ? { expr: '0 7 * * 1', tz: 'UTC' } : undefined, resolved: row.armed ? { next_due: new Date(now + 3 * 86_400_000).toISOString() } : undefined,
           ask: row.ask ? { text: row.ask, at: iso(row.minutes) } : undefined,
           review: row.review ? { note: row.review, at: iso(row.minutes) } : undefined,
           thread_parent: row.parent ? { uid: row.parent, host: WORKSPACE_HOST, slug: row.parent, name: ROWS.find(parent => parent.id === row.parent)!.name } : undefined } },
@@ -144,7 +189,7 @@ export function addChannelsFixtures(example: WorkspaceExample, now: number): Cha
   example.sessions = ROWS.map((row, n) => ({ at: ms(launched(row, n)), fiber: row.id, uid: row.id, session: `session-${row.id}`, harness: 'claude-code', agent: 'claude-opus', host: WORKSPACE_HOST, tmux: null, kind: 'dispatch' as const }))
   example.commits = []
   let n = 0
-  const said = (fiber: string, kind: string, minutes: number, over: Partial<BoardRecord> = {}): BoardRecord & { root: string } =>
+  const said: Say = (fiber, kind, minutes, over = {}) =>
     ({ id: `brd-${String(++n).padStart(3, '0')}`, type: 'board', kind, fiber, by: { fiber }, timestamp: ms(minutes), originName: WORKSPACE_HOST, root: rootOf(fiber), ...over } as BoardRecord & { root: string })
   /** A line to the human; a thread's line goes up to its chair. */
   const up = (fiber: string): BoardRecord['to'] => ({ fiber: ROWS.find(row => row.id === fiber)!.parent! })
@@ -192,6 +237,7 @@ export function addChannelsFixtures(example: WorkspaceExample, now: number): Cha
     ].join('\n') }),
     said('mill', 'human', 20, { id: 'brd-human-0002', by: HUMAN, text: 'Thanks, I will run the catch-up tonight.' }),
     said('mill/lander', 'post', 15, { to: up('mill/lander'), text: 'Landed 58bda2a3d on main.' }),
+    ...more(said, HUMAN),
   ]
   // The daemon's answer: a line waits until the human says something to that fiber after it.
   const waiting: ChannelsFixture['waiting'] = {}

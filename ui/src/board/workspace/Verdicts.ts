@@ -5,8 +5,8 @@ import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { VERDICT_DELAY_MS } from './verdictDelay.js'
 import './verdicts.css'
 
-/** The Desk's gestures that wait out an undo window: the two verdicts, and
- * moving work to Awaiting review (closing it with the verdict cleared). */
+/** The acts in a constitution's view that wait out an undo window: the two
+ * verdicts, and closing for review (closing with the verdict cleared). */
 export type Verdict = 'tempered' | 'composted' | 'awaitingReview'
 
 const VERDICT_WORD = { tempered: ['Tempered', 'temper'], composted: ['Discarded', 'discard'], awaitingReview: ['To review', 'move to review'] } as const

@@ -15,13 +15,13 @@ const band = page => page.locator('.ws-stage-band')
 const consoleActs = page => band(page).locator('.ws-band-head .ws-band-acts')
 /**
  * The fiber's acts where they show: its view's head; on a page with no view
- * for the fiber (a draft's own page, a report), the console's menu.
+ * for the fiber, the console's, which carries no verb.
  */
 const acts = page => page.locator('.ws-reader:not(:has(.ws-page.ws-selected .ov-head .ws-fiber-acts)) .ws-stage-band .ws-band-head .ws-band-acts')
   .or(page.locator('.ws-page.ws-selected .ov-head .ov-tools > .ws-fiber-acts'))
 async function openRoot(page) {
   // Click the row's own name: its crumb leads to the root.
-  const name = page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${title}"])`).first().locator('.kbn-card-name')
+  const name = page.locator(`.kbn-desk .kbn-family[title*="${title}"] .kbn-family-head`).first().locator('.kbn-family-name')
   const box = await name.boundingBox()
   await name.click({ position: { x: box.width - 6, y: box.height / 2 } })
   await band(page).locator('.ws-dock').waitFor()
@@ -116,7 +116,7 @@ export function registerHeaderBarJourneys(test) {
       await assertLifecycleInk(page, scheme)
       const visits = [
         ['Response analysis', ['Close for review', 'Rest', 'Temper', 'Discard'], ['Send', 'New session']],
-        // A draft opens on its own page, where no row stands for it: the band carries its acts.
+        // A draft opens on its view too, whose head carries its acts.
         ['Draft the validation plan', ['Close for review', 'Rest', 'Temper', 'Discard'], ['Start']],
         ['Next validation', [], ['Start']],
         ['Accepted pilot', ['Rest'], ['Start']],
@@ -125,7 +125,6 @@ export function registerHeaderBarJourneys(test) {
       for (const [name, verbs, worker] of visits) {
         await visitChannel(page, name)
         assert.deepEqual(await shownVerbs(page), verbs, `${name} draws the verbs its state offers`)
-        if (name === 'Draft the validation plan') assert.equal(await acts(page).evaluate(el => el.classList.contains('ws-band-acts')), true, "the console's menu carries a draft's acts")
         assert.deepEqual(await workerVerbs(page), worker, `${name} offers its worker's verbs`)
         await assertLifecycleInk(page, scheme)
       }
@@ -216,15 +215,8 @@ export function registerHeaderBarJourneys(test) {
       }
     }
     await assertRow(['Temper', 'Rest', 'Discard'])
-    // The phone leaves the reader by its keys and top bar; the band's × stands with the head it hides.
-    for (let step = 0; step < 32 && await page.locator('.kbn-reader-open').count(); step++) {
-      await page.evaluate(() => document.activeElement?.blur()); await page.keyboard.press('Escape'); await page.waitForTimeout(30)
-    }
-    await page.locator('.kbn-folio-seg[data-folio="1"]').click()
-    const family = page.locator('[data-column="inFlight"] .kbn-card[data-fiber-id="research/workspace/calibration-report"]').filter({ has: page.locator('.kbn-thread-count[title*="working"]') })
-    const fold = family.locator('.kbn-thread-count')
-    if (await fold.getAttribute('aria-expanded') === 'false') await fold.click()
-    await family.locator('.kbn-thread-row[title="Response analysis"] .kbn-thread-name').click()
+    // A thread opens from its row in the view, one level down.
+    await page.locator('.ws-page.ws-selected .ov-thread[title="Response analysis"]').click()
     await threadNamed(page, 'Response analysis')
     await assertRow(['Close for review', 'Rest', 'Temper', 'Discard'])
     const reviewInk = await verbFace(acts(page)).evaluate(el => {
@@ -276,7 +268,7 @@ export function registerHeaderBarJourneys(test) {
     assert.ok(await page.getByRole('menuitem', { name: "Today's transcript", exact: true }).isEnabled())
     await page.keyboard.press('Escape')
     await page.locator('.kbn-viewtab[data-view="desk"]').click()
-    await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
+    await page.locator(`.kbn-desk .kbn-family[title*="Remote covariance review"] .kbn-family-head`).click()
     const foreign = page.locator('.ws-stage-band')
     assert.equal(await foreign.locator('.ws-voice-strip').getAttribute('data-mode'), 'pinned')
     for (const width of [1440, 390]) {

@@ -12,7 +12,7 @@ const root = 'Calibrate the shear response'
 /** The family's board, with a terminal behind every worker, so asking Rex leaves an event. */
 async function board(page) {
   await page.goto(url)
-  await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${root}"])`).first().waitFor()
+  await page.locator(`.kbn-desk .kbn-family[title*="${root}"] .kbn-family-head`).first().waitFor()
   await page.evaluate(async () => {
     for (const { runtime } of window.__harness.MOCK_FEED.fibers) if (runtime) runtime.tmux_session = runtime.session_uuid
     await window.__harness.modal.fetchAndRender()
@@ -31,7 +31,7 @@ export function registerMapViewJourneys(test) {
   const head = (page, name) => view(page).locator(`.ov-head[title="${name}"]`)
   const landed = async page => {
     await board(page)
-    await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${root}"])`).last().locator('.kbn-card-name').click()
+    await page.locator(`.kbn-desk .kbn-family[title*="${root}"] .kbn-family-head`).last().locator('.kbn-family-name').click()
     await view(page).locator('.ov-head').waitFor()
     // A Desk row of the family may open a thread's view: its root is its topmost orchestrator.
     const top = view(page).locator('.ov-ancestor').first()
@@ -84,7 +84,7 @@ export function registerMapViewJourneys(test) {
 
   test('A view without threads draws no column for them: its preview takes the width', async page => {
     await page.goto(url.replace('example=threads', 'example=families'))
-    await page.locator('.kbn-desk .kbn-card').first().waitFor()
+    await page.locator('.kbn-desk .kbn-family').first().waitFor()
     await page.evaluate(() => { location.hash = '#/board/hub@umber-workstation/family%3Aumber-workstation%3Ahub' })
     await view(page).locator('.ov-thread[data-fiber="hub/psf-coupling"]').click()
     await view(page).locator('.ov-figure .ws-thumbnail').waitFor()
@@ -95,7 +95,7 @@ export function registerMapViewJourneys(test) {
 
   test('The view\'s strip: what it last posted beside its tapestry, which opens in the reader', async page => {
     await page.goto(url.replace('example=threads', 'example=families'))
-    await page.locator('.kbn-desk .kbn-card').first().waitFor()
+    await page.locator('.kbn-desk .kbn-family').first().waitFor()
     await page.evaluate(() => { location.hash = '#/board/hub@umber-workstation/family%3Aumber-workstation%3Ahub' })
     await view(page).locator('.ov-thread[data-fiber="hub/pipeline-steward"]').click()
     await view(page).locator('.ov-head .ov-needs').getByText('asks', { exact: true }).waitFor()
@@ -108,13 +108,13 @@ export function registerMapViewJourneys(test) {
 
   test('A lone constitution\'s view, and `c` from it opens that worker\'s conversation', async page => {
     await page.goto(url.replace('example=threads', 'example=families'))
-    const card = page.locator('.kbn-desk .kbn-card:has(.kbn-card-name[title="Morning post"])').first()
+    const card = page.locator('.kbn-desk .kbn-family[title="Morning post"] .kbn-family-head').first()
     await card.waitFor({ state: 'attached' })
     await page.evaluate(async () => {
       for (const { runtime } of window.__harness.MOCK_FEED.fibers) if (runtime) runtime.tmux_session = runtime.session_uuid
       await window.__harness.modal.fetchAndRender()
     })
-    await card.locator('.kbn-card-name').click({ force: true })
+    await card.locator('.kbn-family-name').click({ force: true })
     await head(page, 'Morning post').waitFor()
     assert.equal(await view(page).locator('.ov-thread').count(), 0)
     await view(page).locator('.ov-figure .ws-thumbnail').waitFor()
@@ -147,7 +147,7 @@ export function registerMapViewJourneys(test) {
 
   test('The Globe names every live thread of a crowded family, whole and clear of each other, at half a screen, and leaves the archived quiet', async page => {
     await page.goto(url.replace('example=threads', 'example=families'))
-    await page.locator('.kbn-desk .kbn-card').first().waitFor()
+    await page.locator('.kbn-desk .kbn-family').first().waitFor()
     await page.keyboard.press('4')
     await page.locator('.globe canvas').waitFor()
     await page.waitForTimeout(1400)

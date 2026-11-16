@@ -12,6 +12,7 @@
  * `?example=workspace&transcript=search` stages the bar Find's constitutions and grouped transcript hits for "mask".
  * `?identity=all` adds synthetic CLI workers with pending and failed session attribution.
  * `?example=channels&illuminated=1` is a design experiment, not the board: each channel's head set in the illuminated capitals.
+ * `?example=desk` is a busy Desk over the channels' fixture, its `/board/family` answering what waits (a post to the human among it).
  *
  * The SETTINGS sheet is exercised the same way and is the one surface here
  * that is stateful: the stub keeps an in-memory copy of each host's operator
@@ -32,7 +33,7 @@
  * harness-board-dist/index.html via file://. The page ships with the bundle,
  * so the output directory is self-sufficient — nothing to copy in by hand.
  */
-import { addChannelsFixtures } from './channels-fixtures.js'
+import { addChannelsFixtures, addDeskFixtures } from './channels-fixtures.js'
 import { addChangeFixtures, bakeFixtureChange, listFixturePRs } from './change-fixtures.js'
 import { stampLifecycle } from './ownerLifecycle.js'
 import { addNavigationFixtures } from './nav-back-fixtures.js'
@@ -56,11 +57,11 @@ import type {
 
 // ── Mock composite feed ──────────────────────────────────────────────────────
 // Shaped exactly like the daemon's `GET /api/v1/fibers/composite` body, so
-// KanbanModal's own parser + classifier route each fiber to its lane:
-//   • status:open   + shuttle block          → Drafts
-//   • status:active + shuttle block          → In flight (a running worker on
-//                                              one, via `runtime.tmux_session`)
-//   • status:closed + no `tempered`          → Awaiting review
+// KanbanModal's own parser + classifier serve each fiber its lifecycle column:
+//   • status:open   + shuttle block          → drafts (quiet on the Desk)
+//   • status:active + shuttle block          → inFlight (working when a worker
+//                                              runs, via `runtime.tmux_session`)
+//   • status:closed + no `tempered`          → awaitingReview (waiting on you)
 const FOREIGN_HOST = 'basalt-login-02'
 const now = Date.now()
 const search = new URLSearchParams(window.location.search)
@@ -87,7 +88,7 @@ function illuminateChannelNames(): void {
   }).observe(document.body, { childList: true, subtree: true })
 }
 const docsExample = example === 'workshop' ? workshopExample(now) : null
-const workspaceFixture = example === 'change' || example === 'workspace' || example === 'music' || example === 'nav-back' || example === 'threads' || example === 'frontier' || example === 'families' || example === 'thread-review' || example === 'channels' ? workspaceExample(now, { music: example === 'music', transcriptScenario }) : null
+const workspaceFixture = example === 'change' || example === 'workspace' || example === 'music' || example === 'nav-back' || example === 'threads' || example === 'frontier' || example === 'families' || example === 'thread-review' || example === 'channels' || example === 'desk' ? workspaceExample(now, { music: example === 'music', transcriptScenario }) : null
 if (workspaceFixture && search.has('long-title')) {
   const fiber = workspaceFixture.feed.fibers.find(row => (row.fiber as Record<string, unknown>).id === WORKSPACE_ID)!.fiber as Record<string, unknown>
   fiber.name = LONG_WORKSPACE_NAME
@@ -116,7 +117,8 @@ if (workspaceFixture && search.has('manyFiles')) {
     workspaceFixture.receipts.push({ ...first, fullPath, basename: fullPath.split('/').at(-1), timestamp: now - (40 + i * 7) * 60_000, sessionId: `many-files-${i}` })
   }
 }
-const channelsFixture = workspaceFixture && example === 'channels' ? addChannelsFixtures(workspaceFixture, now) : null
+const channelsFixture = workspaceFixture && example === 'channels' ? addChannelsFixtures(workspaceFixture, now)
+  : workspaceFixture && example === 'desk' ? addDeskFixtures(workspaceFixture, now) : null
 const nativeWorkspaceFiles = workspaceFixture ? installWorkspaceNativeURLs(workspaceFixture) : null
 if (docsExample || workspaceFixture) document.querySelectorAll('.sim-corner').forEach(element => element.remove())
 const iso = (offsetMs: number) => new Date(now + offsetMs).toISOString()
@@ -301,8 +303,8 @@ const DRAFTS: MockFiber[] = [
   },
 ]
 
-// In flight: the older, busy run belongs in Working; the newer paused
-// reimbursement belongs in Stalled. Activity age does not rank either band.
+// Active: the older, busy run and the newer paused reimbursement both work;
+// a live worker is Working whatever its turn.
 const IN_FLIGHT: MockFiber[] = [
   {
     id: 'work/spt3g_papers/bmodes-2d/run',
@@ -328,7 +330,7 @@ const IN_FLIGHT: MockFiber[] = [
   },
 ]
 
-// Awaiting review (status:closed, no `tempered`).
+// Closed for the human's review (status:closed, no `tempered`): waiting on you.
 const AWAITING: MockFiber[] = [
   {
     id: 'loom/felt-maintenance/ledger/sweep',
@@ -442,9 +444,9 @@ const STANDING: MockFiber[] = [
 ]
 
 /**
- * ROLE SEATS — constitutions carrying `shuttle.seat`, drawn in the Roles band
- * while they rest. Two share an office (chief of staff on two machines), and
- * one is a standing seat asleep on its cron, so the band shows both hints.
+ * ROLE SEATS — constitutions carrying `shuttle.seat`, quiet on the Desk with the
+ * word *seat* while they rest. Two share an office (chief of staff on two
+ * machines), and one is a standing seat asleep on its cron.
  */
 const ROLE_SEATS: MockFiber[] = [
   { id: 'science/cmbx', name: 'cmbx chair', role: 'cmbx-chair' },
@@ -502,8 +504,7 @@ const SEATS: MockFiber[] = [
 
 /**
  * CYCLES — `cycle`-tagged fibers, each a named span of time. Chronicle draws
- * them as bands above the work, the Desk offers them as lenses, and they
- * appear in NO desk column: the read model files a cycle in `response.cycles`
+ * them as bands above the work, and they appear in NO desk column: the read model files a cycle in `response.cycles`
  * and nowhere else, so the column counts never see one.
  *
  * Without a band on screen there is nothing to click offline, so one live
@@ -665,8 +666,8 @@ const MOCK_FEED = {
         tmux_session: `fixture-identity-${i}-shuttle`, started_at: now - 180_000, last_activity_at: now - 180_000,
       },
     })) : []),
-    // `?turns=all` stages one live worker per turn state, so the In flight
-    // bands and every worker pill can be checked against each other at once.
+    // `?turns=all` stages one live worker per turn state, so every worker pill
+    // and state dot can be checked against each other at once.
     ...(search.get('turns') === 'all' ? TURN_FIXTURES.map(([slug, name, runtime, ask], i) => ({
       ...fiber({
         id: `fixtures/turns/${slug}`, uid: `fixture-turn-${i}`, name, status: 'active',
@@ -752,9 +753,9 @@ const MOCK_FEED = {
       ? { ...fiber(f), pulse: { next_tick: iso(31 * 60_000), last_tick: iso(-28 * 60_000), state: 'scheduled' } }
       : fiber(f)),
     ...SEATS.map(fiber),
-    // An older seat with a live Codex terminal worker that raised its hand. A
-    // question leads Your turn, so it sits ABOVE the newer reimbursement idle
-    // at its prompt.
+    // An older seat with a live Codex terminal worker that raised its hand: a
+    // question waits on you, while the newer reimbursement idle at its prompt
+    // works.
     {
       ...fiber({
         id: 'seats/seat-codex',

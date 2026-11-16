@@ -32,7 +32,7 @@ try {
       if (shots) await p.screenshot({ path: resolve(shots, `after-${name}-${phone ? 'phone' : 'desktop'}-${theme}.png`) })
     }
     await p.goto(`${harness}?example=workspace`)
-    await p.locator('.kbn-desk .kbn-card:not(.kbn-card-header)').first().waitFor({ state: 'attached' })
+    await p.locator('.kbn-desk .kbn-family').first().waitFor({ state: 'attached' })
 
     // Keyboard help: Tab cycles every control in the sheet, not only Close.
     await p.keyboard.press('?')
@@ -50,39 +50,9 @@ try {
     await p.keyboard.press('Shift+Tab'); assert.equal(await focused(helpLink), true, 'help Shift+Tab wraps')
     await p.keyboard.press('Escape'); await help.waitFor({ state: 'detached' })
 
-    // Role picker: its trap includes links and selects; Escape leaves without writing.
-    await p.evaluate(() => {
-      const row = document.querySelector('.kbn-desk .kbn-card:not(.kbn-card-header)')
-      const transfer = new DataTransfer()
-      row.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: transfer }))
-      document.querySelector('.kbn-section-roles').dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer: transfer }))
-      row.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: transfer }))
-    })
-    const role = p.getByRole('dialog', { name: /^Choose a role for/ })
-    await role.getByRole('button', { name: /Analyst/ }).waitFor(); await boardInert(p)
-    const filter = role.getByRole('searchbox', { name: 'Filter roles' })
-    assert.equal(await focused(filter), true, 'role picker opens on its filter')
-    await p.keyboard.press('ArrowDown')
-    assert.equal(await focused(role.getByRole('button', { name: /Analyst/ })), true, 'ArrowDown walks the roles')
-    await shot('role')
-    await role.evaluate(el => {
-      const link = document.createElement('a'); link.href = '#'; link.textContent = 'Role charter'
-      const select = document.createElement('select'); select.setAttribute('aria-label', 'Office scope')
-      select.append(new Option('All hosts', 'all'))
-      el.querySelector('.kbn-role-popover').append(link, select)
-    })
-    await role.getByRole('button', { name: 'Cancel', exact: true }).focus()
-    await p.keyboard.press('Tab'); assert.equal(await focused(role.getByRole('link', { name: 'Role charter' })), true, 'role trap includes links')
-    await p.keyboard.press('Tab'); assert.equal(await focused(role.getByRole('combobox', { name: 'Office scope' })), true, 'role trap includes selects')
-    await p.keyboard.press('Tab'); assert.equal(await focused(filter), true, 'role trap wraps to the filter')
-    if (!phone) {
-      await dragToScrim(p, filter)
-      assert.equal(await role.isVisible(), true, 'a drag from the filter out onto the scrim leaves the role picker open')
-    }
-    await p.keyboard.press('Escape'); await role.waitFor({ state: 'detached' })
-
-    // Rest calendar: the vim keys move its cursor and survive a click on a day.
-    await p.keyboard.press('j')
+    // Rest calendar, from a constitution's view: the vim keys move its cursor and survive a click on a day.
+    await p.locator('.kbn-desk .kbn-family .kbn-family-head').first().click()
+    await p.locator('.ws-page.ws-selected .ov-head').waitFor()
     await p.evaluate(() => document.activeElement.setAttribute('data-rest-opener', ''))
     await p.keyboard.press('s')
     const rest = p.getByRole('dialog', { name: /^Rest / })
@@ -124,7 +94,7 @@ try {
     // Sent files, on the phone's reader: the native modal makes the reader inert, Tab wraps, Back closes it.
     if (phone) {
       await p.goto(`${harness}?example=threads`)
-      await p.locator('.kbn-desk .kbn-card:not(.kbn-card-header) .kbn-card-name[title*="Calibrate the shear response"]').first().click()
+      await p.locator('.kbn-desk .kbn-family[title*="Calibrate the shear response"] .kbn-family-name').first().click()
       const opener = p.locator('.ws-navbar .ws-files-toggle')
       await opener.click()
       const files = p.locator('.ws-page-sheet[open]')

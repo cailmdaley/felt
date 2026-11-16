@@ -19,7 +19,7 @@ try {
     const errors = []
     p.on('pageerror', error => errors.push(error.message))
     await p.goto(url)
-    await p.locator('.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Calibrate the shear response"])').click()
+    await p.locator('.kbn-desk .kbn-family[title*="Calibrate the shear response"] .kbn-family-head').click()
     const opener = p.locator('.ws-page.ws-selected .ov-head .ov-tools .ws-acts-console')
     const menu = p.getByRole('menu', { name: 'Open conversation in' })
     const items = p.getByRole('menuitemradio')

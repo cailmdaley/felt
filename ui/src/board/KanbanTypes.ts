@@ -340,9 +340,8 @@ export interface KanbanResponse {
   /** Stash surface — dateless deferred work; frontend clusters by containment path. */
   stash: KanbanCard[]
   /** Roles surface — seats at rest (`shuttle.seat`, not running, not closed),
-   *  of any kind: drawn as launcher chips in the Roles band after Resting. A
-   *  running seat is in `now.inFlight`; a closed one awaits review like any
-   *  other card. */
+   *  of any kind: quiet on the Desk with the word *seat*. A running seat is
+   *  in `now.inFlight`; a closed one awaits review like any other card. */
   roles: KanbanCard[]
   /**
    * Cycles — `cycle`-tagged fibers, each a named span of time. Read ONLY by the

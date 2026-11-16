@@ -35,10 +35,10 @@ try {
     await p.keyboard.press('Escape')
     await capture.waitFor({ state: 'detached' })
 
-    await p.getByRole('button', { name: 'Stash a new fiber', exact: true }).click()
+    await p.getByRole('button', { name: 'Stash a new draft', exact: true }).click()
     const dialog = p.getByRole('dialog', { name: 'Stash a constitution' })
     await dialog.waitFor()
-    assert.equal(await p.getByRole('button', { name: 'Stash a new fiber', exact: true })
+    assert.equal(await p.getByRole('button', { name: 'Stash a new draft', exact: true })
       .evaluate(el => !!el.closest('[inert]')), true, 'the board is inert under the dialog')
     if (phone) await p.setViewportSize({ width: 390, height: 844 })
     await shot('stash')

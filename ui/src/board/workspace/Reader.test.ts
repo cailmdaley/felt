@@ -273,12 +273,12 @@ describe('Reader', () => {
   })
 
   it('says briefly where a step landed: its Desk column and name', () => {
-    const stops = new Map([[beta, 'Drafts'], [alpha, 'Drafts'], [gamma, 'In flight']])
+    const stops = new Map([[beta, 'Quiet'], [alpha, 'Quiet'], [gamma, 'Working']])
     makeReader(alpha, undefined, { deskStop: row => stops.get(row)! })
     press('j')
-    expect(document.querySelector('.shuttle-toast .toast-message')?.textContent).toBe('In flight · Gamma')
+    expect(document.querySelector('.shuttle-toast .toast-message')?.textContent).toBe('Working · Gamma')
     press('k')
-    expect(document.querySelector('.shuttle-toast .toast-message')?.textContent).toBe('Drafts · Beta')
+    expect(document.querySelector('.shuttle-toast .toast-message')?.textContent).toBe('Quiet · Beta')
     expect(document.querySelectorAll('.shuttle-toast')).toHaveLength(1)
   })
 

@@ -99,8 +99,8 @@ shuttle install pipeline/covariance-loader \
 This writes the `shuttle:` block, validates the agent against the registry, and
 sets the fiber's `status: active`. The daemon picks it up on the next poll.
 
-Add `--disabled` to stash it as a draft (`status: open`). It lands in the
-board's Drafts column and waits. `shuttle resume <fiber>` arms it later.
+Add `--disabled` to stash it as a draft (`status: open`). It sits quiet on the
+board's Desk, drawn as a draft, and waits. `shuttle resume <fiber>` arms it later.
 
 `install` is create-only. Run it against a fiber that already has a block and
 it refuses, naming the verb you actually wanted — `shuttle status <fiber>`
@@ -214,7 +214,7 @@ schedule (`shuttle reshape <fiber> --schedule "0 7 * * *"`). Reshape
 changes only `kind` and the schedule, and leaves the rest of the block —
 including the daemon-owned `runtime:` keys — untouched. It never
 touches felt's lifecycle fields (`status`, `tempered`, `outcome`), so a
-constitution sitting in Awaiting review can be reshaped in place without being re-armed. A
+constitution closed for review can be reshaped in place without being re-armed. A
 `standing` target needs a schedule, from `--schedule` or echoed from the
 existing block; a `oneshot` target drops the schedule, and passing
 `--schedule`/`--tz` against one is an error.
@@ -281,7 +281,7 @@ It stays unarmed until the orchestrator runs `shuttle resume <thread>`.
 Containment relates the work; it does not gate dispatch.
 
 A thread carries its parent's immutable identity and owner hint in `shuttle.thread_parent`, with the session that asked for it in `asked_by`.
-A closed thread is its orchestrator's to review: without a verdict it sits in `orchestrator_review` until the orchestrator tempers it, discards it, or marks it for the human with `shuttle close <thread> --review "<why>"`, which writes `shuttle.review: {note, at}` and puts it in Awaiting review.
+A closed thread is its orchestrator's to review: without a verdict it sits in `orchestrator_review` until the orchestrator tempers it, discards it, or marks it for the human with `shuttle close <thread> --review "<why>"`, which writes `shuttle.review: {note, at}` and puts it before the human, waiting on them.
 The close notice the orchestrator receives says the verdict is its own.
 See [Thread review](lifecycle.md#thread-review).
 Its owner captures results durably even when the parent has no local archive copy.

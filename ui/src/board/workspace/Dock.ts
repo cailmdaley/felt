@@ -2051,7 +2051,7 @@ export class Dock {
           // Changing the SHAPE of an existing block is its own surgical verb.
           // `reshape` rewrites kind + schedule and nothing else — no model, no
           // project_dir, no host, and above all no status: that is what lets a
-          // role sitting in Awaiting review (status: closed) be switched
+          // role closed for review (status: closed) be switched
           // standing → oneshot. The agent is NOT carried here; every axis
           // change commits separately through `commitAxes` → `set-agent`.
           //
