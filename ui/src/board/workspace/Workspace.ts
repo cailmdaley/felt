@@ -349,12 +349,13 @@ export class Workspace {
     else this.open(card, this.isActive ? this.origin : this.opts.origin(), view)
     void this.look(card)
   }
-  /** What a constitution last posted: its newest post, question or closing post the family board holds, its open question, or its review note. */
+  /** What a constitution last posted: its newest post, question or close note the family board holds, its open question, or its review note; never its outcome. */
   private said(card: KanbanCard): { text: string; at: number } | undefined {
-    const index = this.graph(), root = index.family(index.card(card)).root, uid = card.uid ?? card.id
+    const index = this.graph(), root = index.family(index.card(card)).root, uid = card.uid ?? card.id, outcome = card.outcome?.trim()
     this.board.read([root.uid ?? root.id])
+    // A closing post's line carries the outcome as its text.
     const posts = this.board.records([root.uid ?? root.id])
-      .filter(record => record.fiber === uid && ['post', 'asked', 'closed'].includes(record.kind) && record.text?.trim())
+      .filter(record => record.fiber === uid && ['post', 'asked', 'closed'].includes(record.kind) && record.text?.trim() && !(record.kind === 'closed' && record.text.trim() === outcome))
       .map(record => ({ text: record.text!.trim(), at: record.timestamp }))
     if (card.ask && card.status === 'active') posts.push({ text: card.ask.text, at: Date.parse(card.ask.at) || 0 })
     if (index.state(card) === 'to-review' && card.reviewMark?.note) posts.push({ text: card.reviewMark.note, at: Date.parse(card.reviewMark.at) || 0 })
