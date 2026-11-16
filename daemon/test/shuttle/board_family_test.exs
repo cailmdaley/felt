@@ -217,4 +217,106 @@ defmodule Shuttle.BoardFamilyTest do
              true
            ]
   end
+
+  describe "waiting" do
+    defp line(id, ts, kind, fiber, to, extra \\ %{}),
+      do:
+        Map.merge(
+          %{"id" => id, "timestamp" => ts, "kind" => kind, "fiber" => fiber, "to" => to},
+          extra
+        )
+
+    @cail %{"label" => "Cail"}
+    @chair %{"fiber" => "chair"}
+
+    test "a line addressed to the human waits until something handles it" do
+      assert BoardFamily.waiting([line("1", 1, "post", "t", @cail)]) == %{
+               "t" => %{"id" => "1", "at" => 1}
+             }
+
+      assert BoardFamily.waiting([line("1", 1, "asked", "t", @cail)]) == %{
+               "t" => %{"id" => "1", "at" => 1}
+             }
+
+      assert BoardFamily.waiting([line("1", 1, "closed", "t", @cail)]) == %{
+               "t" => %{"id" => "1", "at" => 1}
+             }
+
+      for kind <- ~w(human answered cleared rested) do
+        assert BoardFamily.waiting([
+                 line("1", 1, "post", "t", @cail),
+                 line("2", 2, kind, "t", nil)
+               ]) == %{}
+      end
+
+      # Something handled before the line does not handle it.
+      assert map_size(
+               BoardFamily.waiting([
+                 line("0", 0, "human", "t", nil),
+                 line("1", 1, "post", "t", @cail)
+               ])
+             ) == 1
+    end
+
+    test "a newer line supersedes the last, whoever it is addressed to" do
+      assert BoardFamily.waiting([
+               line("1", 1, "asked", "t", @cail),
+               line("2", 2, "post", "t", @chair)
+             ]) == %{}
+
+      assert BoardFamily.waiting([
+               line("1", 1, "post", "t", @cail),
+               line("2", 2, "post", "t", nil)
+             ]) == %{}
+
+      assert BoardFamily.waiting([
+               line("1", 1, "post", "t", @chair),
+               line("2", 2, "post", "t", @cail)
+             ]) ==
+               %{"t" => %{"id" => "2", "at" => 2}}
+
+      # A verdict closes the line.
+      assert BoardFamily.waiting([
+               line("1", 1, "closed", "t", @cail),
+               line("2", 2, "closed", "t", nil, %{"verdict" => "tempered"})
+             ]) == %{}
+    end
+
+    test "only a person is the human: a fiber, a session or no address waits on no one" do
+      for to <- [
+            @chair,
+            %{"session" => "shuttle://h/claude/s"},
+            %{"label" => "Cail", "fiber" => "x"},
+            nil
+          ] do
+        assert BoardFamily.waiting([line("1", 1, "post", "t", to)]) == %{}
+      end
+    end
+
+    test "the human's clear reaches a line up to its time, unless undone since" do
+      clear = &%{"id" => &1, "timestamp" => 9, "kind" => "dismissed", "text" => &2}
+      post = line("1", 5, "post", "t", @cail)
+      assert BoardFamily.waiting([post, clear.("c", "clear:t:5")]) == %{}
+      assert map_size(BoardFamily.waiting([post, clear.("c", "clear:t:4")])) == 1
+
+      assert map_size(
+               BoardFamily.waiting([post, clear.("c", "clear:t:5"), clear.("u", "unclear:t:6")])
+             ) == 1
+
+      assert BoardFamily.waiting([
+               post,
+               clear.("c", "clear:t:5"),
+               clear.("u", "unclear:t:6"),
+               clear.("d", "clear:t:7")
+             ]) == %{}
+
+      assert map_size(BoardFamily.waiting([post, clear.("c", "clear:other:5")])) == 1
+    end
+
+    test "a legacy line with no address waits on no one" do
+      assert BoardFamily.waiting([
+               %{"id" => "1", "timestamp" => 1, "kind" => "asked", "fiber" => "t"}
+             ]) == %{}
+    end
+  end
 end

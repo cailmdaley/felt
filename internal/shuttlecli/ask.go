@@ -68,7 +68,7 @@ since it was dispatched.`,
 			// Clearing a fiber with no question is a no-op on the board: the daemon
 			// clears after every delivered message and every forced start.
 			if !askClear {
-				a.recordBoard(boardRecord{Kind: "asked", Fiber: f.UID, By: a.boardWorkerParty(), Text: args[1]})
+				a.recordBoard(boardRecord{Kind: "asked", Fiber: f.UID, By: a.boardWorkerParty(), To: a.upOrHuman(st, f), Text: args[1]})
 			} else if oldAsk != nil && !noBoard {
 				kind, by := "cleared", a.boardWorkerParty()
 				if answeredBy != "" {

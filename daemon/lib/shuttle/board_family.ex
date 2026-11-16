@@ -136,6 +136,70 @@ defmodule Shuttle.BoardFamily do
     %{family: family(root), viewer: if(viewer, do: viewer.fiber["uid"]), records: rows}
   end
 
+  # What a fiber says to someone: the newest stands for it and supersedes the rest.
+  @lines ~w(post asked closed)
+  # What handles a line addressed to the human: their reply, an answer, a
+  # cleared question, a rest.
+  @handled ~w(human answered cleared rested)
+
+  @doc """
+  Each fiber whose line waits on the human, as `uid => %{"id", "at"}` of that
+  line. A fiber's line is its newest post, question or close; it waits when it
+  is addressed to a person (a `to` with a label and no fiber or session) and
+  nothing has handled it since: a human line or answer to that fiber, a
+  cleared question, a rest, or the human's clear of its line (a `dismissed`
+  `clear:<uid>:<ms>` reaching the line's time, not voided by a newer
+  `unclear:<uid>:<ms>`). Pass every record in the board's reach.
+  """
+  def waiting(records) do
+    records = Enum.filter(records, &(is_binary(&1["id"]) and is_integer(&1["timestamp"])))
+    order = &{&1["timestamp"], &1["id"]}
+
+    latest =
+      records
+      |> Enum.filter(&(&1["kind"] in @lines and nonempty(&1["fiber"])))
+      |> Enum.group_by(& &1["fiber"])
+      |> Map.new(fn {uid, lines} -> {uid, Enum.max_by(lines, order)} end)
+
+    handled =
+      records
+      |> Enum.filter(&(&1["kind"] in @handled and nonempty(&1["fiber"])))
+      |> Enum.group_by(& &1["fiber"], order)
+      |> Map.new(fn {uid, stamps} -> {uid, Enum.max(stamps)} end)
+
+    cleared = cleared_to(records)
+
+    for {uid, line} <- latest,
+        person?(line["to"]),
+        not (Map.has_key?(handled, uid) and Map.fetch!(handled, uid) > order.(line)),
+        Map.get(cleared, uid, -1) < line["timestamp"],
+        into: %{},
+        do: {uid, %{"id" => line["id"], "at" => line["timestamp"]}}
+  end
+
+  defp person?(%{} = to),
+    do:
+      nonempty(to["label"]) != nil and nonempty(to["fiber"]) == nil and
+        nonempty(to["session"]) == nil
+
+  defp person?(_), do: false
+
+  # Each fiber's line stands cleared up to its newest clear, unless an undo as new voids it.
+  defp cleared_to(records) do
+    marks =
+      for %{"kind" => "dismissed", "text" => text} when is_binary(text) <- records,
+          [_, verb, uid, ms] <- [Regex.run(~r/^(clear|unclear):(.+):(\d+)$/, text)],
+          reduce: %{} do
+        acc ->
+          Map.update(acc, {verb, uid}, String.to_integer(ms), &max(&1, String.to_integer(ms)))
+      end
+
+    for {{"clear", uid}, at} <- marks,
+        at > Map.get(marks, {"unclear", uid}, -1),
+        into: %{},
+        do: {uid, at}
+  end
+
   defp index(entries) do
     Enum.reduce(entries, %{}, fn entry, acc ->
       fiber = entry.fiber

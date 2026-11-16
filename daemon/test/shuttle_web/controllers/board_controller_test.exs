@@ -162,6 +162,68 @@ defmodule ShuttleWeb.BoardControllerTest do
     assert 400 == get(api_conn(), "/api/v1/board/family").status
   end
 
+  defmodule QuietRemoteClient do
+    def get(_url, _headers, _timeout), do: {:ok, 200, [], Jason.encode!(%{records: []})}
+  end
+
+  # A reader catching up from a cursor still learns what waits from before it.
+  test "family endpoint names what waits on the human over the board's whole reach" do
+    path = Path.join(System.tmp_dir!(), "board-waiting-api-#{System.unique_integer([:positive])}")
+    on_exit(fn -> File.rm(path) end)
+    now = System.system_time(:millisecond)
+
+    record = %{
+      "type" => "board",
+      "id" => "to-cail",
+      "timestamp" => now - 60_000,
+      "kind" => "post",
+      "fiber" => "child",
+      "to" => %{"label" => "Cail"},
+      "text" => "the fit converged"
+    }
+
+    File.write!(path, Jason.encode!(record) <> "\n")
+    Shuttle.Test.EventFiles.scope!(path)
+    Shuttle.Test.Env.put_env("SHUTTLE_HOST", "host")
+
+    entries =
+      for {id, uid} <- [{"hub", "root"}, {"hub/child", "child"}],
+          do: %{
+            felt_store: "/store",
+            fiber: %{
+              "id" => id,
+              "slug" => id,
+              "uid" => uid,
+              "name" => uid,
+              "shuttle" => %{"host" => "host"}
+            }
+          }
+
+    poller = start_supervised!({FakePoller, entries})
+    Shuttle.Test.Env.put_server(Shuttle.Poller, poller)
+    dir = Path.join(System.tmp_dir!(), "board-cache-#{System.unique_integer([:positive])}")
+    on_exit(fn -> File.rm_rf(dir) end)
+
+    registry =
+      start_supervised!(
+        {Shuttle.RemoteTemporalRegistry,
+         name: nil,
+         remotes: [%Shuttle.Remote{name: "remote", url: "http://remote"}],
+         client: QuietRemoteClient,
+         store_dir: dir}
+      )
+
+    Shuttle.Test.Env.put_server(Shuttle.RemoteTemporalRegistry, registry)
+
+    result =
+      api_conn()
+      |> get("/api/v1/board/family?fiber=root&since_ms=#{now - 1000}")
+      |> json_response(200)
+
+    assert result["records"] == []
+    assert result["waiting"] == %{"child" => %{"id" => "to-cail", "at" => now - 60_000}}
+  end
+
   test "a late remote record is selected by local receive time" do
     Shuttle.Test.Env.put_env("SHUTTLE_HOST", "host")
 

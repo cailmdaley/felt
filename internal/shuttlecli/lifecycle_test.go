@@ -207,6 +207,35 @@ func TestShuttleClose_UsesLocalDaemon(t *testing.T) {
 	}
 }
 
+// A routed close carries its closing post, and the files the caller sent, to the daemon's writer.
+func TestShuttleClose_RoutesItsPost(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	env.Set("SHUTTLE_EVENTS", "")
+	env.Set("SHUTTLE_EVENTS_FILE", filepath.Join(t.TempDir(), "events.jsonl"))
+	env.Set("CLAUDE_CODE_SESSION_ID", "worker-session")
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), nil)
+	plot := filepath.Join(t.TempDir(), "plot.png")
+	if err := os.WriteFile(plot, []byte("png"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var bodies requestBodies
+	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodies.record(t, r)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"output":"closed"}`)
+	}))
+	if out, err := runIn(t, env, dir, "close", "f", "--tempered=true", "--post", "done", "--file", plot); err != nil {
+		t.Fatalf("close: %v\n%s", err, out)
+	}
+	body := bodies.last()
+	files, _ := body["files"].([]any)
+	if body["post"] != "done" || len(files) != 1 || files[0] != plot {
+		t.Fatalf("lifecycle request = %#v", body)
+	}
+}
+
 func TestShuttleClose_Tempered(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)

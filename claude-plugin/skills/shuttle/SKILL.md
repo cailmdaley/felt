@@ -40,7 +40,7 @@ Diagonal agrees to 3%. `validate/offdiag.py` loads the mocks; plotting is unfini
 
 - **`shuttle:`** — `kind` is `oneshot` (workers keep coming until it is closed or rested) or `standing` (fires on a cron `schedule`). `agent` is a registry id from `shuttle agents`, `host` the daemon that runs it, `project_dir` where the worker starts.
 - **status** — `active` asks for a worker; `open` is a draft (or resting, with `horizon: stashed`); `closed` waits for the human's review.
-- **outcome** — the card's headline: where the work stands and what the reader should do next. Start it with "Blocked: …" when stuck.
+- **outcome** — the card's headline: where the work stands and what the reader should do next. Start it with "Blocked: …" when stuck. Your closing post (`shuttle close --post`) writes the last one: the conclusion, read months later.
 - **`## Desired State`** — the contract: checkable done-conditions and what to leave alone, never steps. Workers choose the path.
 - **`## Status`** — the handoff to the next worker: what landed, what's stuck, what to know. Rewritten, never appended.
 - **`role`** — who answers for the work and in which office (`<office>/<person>`): the felt skill says what a role is. Shuttle reads the office for the charter, the seat and the voice.
@@ -64,7 +64,7 @@ The owner writes its store directly; an unreachable owner fails without a local 
 
 Commit, `felt -C <store> sync --push`, then pick one. `close`, `handoff` and `rest` find your own fiber when you omit the id (after a `migrate`, name it if they can't) and end your session, so make the verb your last command.
 
-- **`shuttle close`** — the Desired State is met. Top-level work goes to the human's Awaiting review; a thread goes to its orchestrator, who reviews it. Have a fresh-context subagent review substantive changes first. An orchestrator settles its closed threads before it closes for review: the close refuses while one has neither a verdict nor a mark.
+- **`shuttle close --post "<conclusion>"`** — the Desired State is met. The closing post becomes your outcome (`--file` attaches its screenshot). Top-level work goes to the human's Awaiting review; a thread goes to its orchestrator, who reviews it. Have a fresh-context subagent review substantive changes first. An orchestrator settles its closed threads before it closes for review: the close refuses while one has neither a verdict nor a mark.
 - **`shuttle -C <store> ask <id> "<question>"`** — a human decision would unlock work. Rewrite `tapestry.html` first, leading with the background the human needs and the options; then keep working on what isn't blocked. `--clear` withdraws it.
 - **`shuttle handoff`** — the next slice needs a fresh worker: context is running low, at a sub-task boundary. `shuttle set-agent <id> <agent>` first to change who comes next. A standing run always hands off, which keeps its schedule; it asks first when its constitution says the run needs review.
 - **`shuttle rest`** — the human drove this session and nothing needs review; the card goes back to Resting. Not for a standing run: rest would pause its schedule, so it refuses one's own worker.
@@ -104,7 +104,7 @@ Does this exist, was it discussed, where did we put it: `shuttle find "<words>"`
 ```bash
 shuttle sessions --json                  # conversations across the fleet
 shuttle message <fiber|session> "…"      # --context-only never wakes; --fresh requests a gated fresh fiber session; --wake forces a turn
-shuttle post "…" [--file f]              # a short line to your channel, files attached; wakes no one
+shuttle post "…" [--to human|<fiber>] [--file f]  # a line up to your orchestrator, or to whom --to names; wakes no one
 shuttle board                            # your family's board
 shuttle send-file <path> --caption "…"   # put a file on the human's board, saying why (or your harness's file tool, with its caption)
 ```
@@ -125,7 +125,7 @@ Fallback failures return a notice to the sender; native delivery still respects 
 
 **The human sees only files you send.** They never open a path from your report. A screenshot, figure or page they should look at goes to them with `shuttle send-file` (or your harness's file tool) or into the tapestry; a file you aren't sending isn't worth naming. Something made for the human to pass on (a letter, a checklist, an explainer) goes to them the same way as soon as it is ready, in a format they can attach (PDF or HTML, not Markdown), and your reply says it is on their board.
 
-**The family board.** Every constitution tree shares a board: its messages, posts, asks, answers, closes and handoffs, and a count of the human's turns per worker, typed or spoken; `shuttle board --turns` reads the lines. Each turn opens with a few lines of what's new there. Post what the family should know instead of relaying it; address someone with `shuttle message` for a direct request. When the human decides something in your session that a sibling or your orchestrator works from, file it in the fiber it decides and `shuttle post` it in the same turn. A post is also what the human reads in your channel on the board, among dozens a day, often on a phone: make each one stand alone — lead with what happened or what you need, name the thing it is about in plain words, one to three sentences, a file attached with `--file` rather than described. A file sent to the human always says why: `shuttle post "…" --file f`, or a caption on `send-file` or your harness's file tool.
+**The family board.** Every constitution tree shares a board: its messages, posts, asks, answers, closes and handoffs, and a count of the human's turns per worker, typed or spoken; `shuttle board --turns` reads the lines. Each turn opens with a few lines of what's new there. Post what the family should know instead of relaying it; address someone with `shuttle message` for a direct request. Post when you finish, are blocked, or need a sign-off. A post goes up to your orchestrator, who triages it; `--to human` is for what the human must see, and waits on them until they reply or clear it. Your newest post supersedes the last, for them and for waiting, so make it the up-to-date thing; an ask and a close are posts too. When the human decides something in your session that a sibling or your orchestrator works from, file it in the fiber it decides and `shuttle post` it in the same turn. A post is also what the human reads in your channel on the board, among dozens a day, often on a phone: make each one stand alone — lead with what happened or what you need, name the thing it is about in plain words, one to three sentences, a file attached with `--file` rather than described. A file sent to the human always says why: `shuttle post "…" --file f`, or a caption on `send-file` or your harness's file tool.
 
 **Human gates.** Ask the human before posting anywhere in their voice or outside their remit: issues or PRs on repos they don't develop, messages in other people's channels.
 

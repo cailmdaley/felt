@@ -216,6 +216,8 @@ defmodule ShuttleWeb.LifecycleController do
      args
      |> add_string_flag("--review", params["review"])
      |> add_bool_flag("--quiet", params["quiet"])
+     |> add_string_flag("--post", params["post"])
+     |> add_list_flag("--attached", params["files"])
      |> add_string_flag("--actor", params["actor"])}
   end
 
@@ -310,6 +312,11 @@ defmodule ShuttleWeb.LifecycleController do
   defp add_string_flag(args, _flag, nil), do: args
   defp add_string_flag(args, _flag, ""), do: args
   defp add_string_flag(args, flag, value), do: args ++ [flag, value]
+
+  defp add_list_flag(args, flag, values) when is_list(values),
+    do: Enum.reduce(values, args, fn value, acc -> add_string_flag(acc, flag, value) end)
+
+  defp add_list_flag(args, _flag, _), do: args
 
   defp add_bool_flag(args, flag, true), do: args ++ [flag]
   defp add_bool_flag(args, _flag, _), do: args

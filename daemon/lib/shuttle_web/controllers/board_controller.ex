@@ -32,27 +32,27 @@ defmodule ShuttleWeb.BoardController do
               json(conn, %{family: nil, viewer: nil, records: [], reach_ms: Board.retention_ms()})
 
             context ->
-              since_ms = max(since_ms, now - Board.retention_ms())
+              reach = now - Board.retention_ms()
+              since_ms = max(since_ms, reach)
 
               remote =
                 RemoteTemporalRegistry.entries_nowait(:board)
                 |> Map.values()
                 |> Enum.flat_map(& &1.items)
-                |> Enum.filter(fn
-                  %{"received_at" => received_at} when is_integer(received_at) ->
-                    received_at >= since_ms
+                |> Enum.filter(&is_integer(&1["received_at"]))
 
-                  _ ->
-                    false
-                end)
+              local = Board.all_since(reach)
 
-              records = Board.all_since(since_ms) ++ remote
+              records =
+                Enum.filter(local, &(&1["timestamp"] >= since_ms)) ++
+                  Enum.filter(remote, &(&1["received_at"] >= since_ms))
 
               json(
                 conn,
                 context
                 |> BoardFamily.compose_prepared(records)
                 |> Map.put(:reach_ms, Board.retention_ms())
+                |> Map.put(:waiting, BoardFamily.waiting(local ++ remote))
               )
           end
         else

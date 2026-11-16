@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/oklog/ulid/v2"
 	"github.com/spf13/cobra"
@@ -351,48 +352,106 @@ func (a *app) boardCmd() *cobra.Command {
 	return cmd
 }
 
+// humanParty is the human as a board address: a label with no fiber or
+// session names a person.
+func (a *app) humanParty() *boardParty {
+	return &boardParty{Label: a.humanLabel()}
+}
+
+// upParty addresses what f says up: to its orchestrator, or nil when nothing
+// stands above it.
+func (a *app) upParty(st *felt.Storage, f *felt.Felt) *boardParty {
+	if parent := orchestratorOf(st, f); parent != nil && parent.UID != "" {
+		return &boardParty{Fiber: parent.UID}
+	}
+	return nil
+}
+
+// upOrHuman addresses a question or a close for review: to f's orchestrator,
+// who reviews it, else to the human.
+func (a *app) upOrHuman(st *felt.Storage, f *felt.Felt) *boardParty {
+	if up := a.upParty(st, f); up != nil {
+		return up
+	}
+	return a.humanParty()
+}
+
+// boardAddress resolves a --to address: "human" or the human's name, else a fiber.
+func (a *app) boardAddress(to string) (*boardParty, error) {
+	to = strings.TrimSpace(to)
+	if strings.EqualFold(to, "human") || strings.EqualFold(to, a.humanLabel()) {
+		return a.humanParty(), nil
+	}
+	f, _, _, err := a.shuttleResolveFiberRef(to, false)
+	if err != nil {
+		return nil, fmt.Errorf("--to %q names neither the human (%s) nor a fiber: %w", to, a.humanLabel(), err)
+	}
+	if f.UID == "" {
+		return nil, fmt.Errorf("--to %q: fiber has no uid", to)
+	}
+	return &boardParty{Fiber: f.UID}, nil
+}
+
 func (a *app) postCmd() *cobra.Command {
-	var fiber string
+	var fiber, to string
 	var attach []string
-	cmd := &cobra.Command{Use: "post <text|->", Short: "Post to a family board without waking a worker", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		var uid string
-		if fiber != "" {
-			f, _, _, err := a.shuttleResolveFiberRef(fiber, false)
-			if err != nil {
-				return err
+	cmd := &cobra.Command{
+		Use:   "post <text|->",
+		Short: "Post to a family board, addressed to someone, without waking anyone",
+		Long: `Records a post on the family board, readable by everyone. Its address says
+whose attention it asks for: --to the human (by name, or "human") or a fiber;
+without --to, the poster's orchestrator (unaddressed at the top level). A
+post addressed to the human waits on them until they reply or clear it, or the
+poster says something newer. A post wakes no one.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var f *felt.Felt
+			var st *felt.Storage
+			if fiber != "" {
+				var err error
+				if f, st, _, err = a.shuttleResolveFiberRef(fiber, false); err != nil {
+					return err
+				}
+			} else {
+				var err error
+				if f, err = a.currentWorkerFiber(); err != nil {
+					return fmt.Errorf("name a fiber with --fiber")
+				}
+				st = felt.NewStorage(workerStoreRoot(f.Path))
 			}
-			uid = f.UID
-		} else {
-			f, err := a.currentWorkerFiber()
-			if err != nil {
-				return fmt.Errorf("name a fiber with --fiber")
+			if f.UID == "" {
+				return fmt.Errorf("fiber has no uid")
 			}
-			uid = f.UID
-		}
-		if uid == "" {
-			return fmt.Errorf("fiber has no uid")
-		}
-		text := args[0]
-		if text == "-" {
-			b, err := io.ReadAll(io.LimitReader(a.env.Stdin, 1<<20))
-			if err != nil {
-				return err
+			address := a.upParty(st, f)
+			if cmd.Flags().Changed("to") {
+				var err error
+				if address, err = a.boardAddress(to); err != nil {
+					return err
+				}
 			}
-			text = string(b)
-		}
-		if strings.TrimSpace(text) == "" {
-			return fmt.Errorf("post text is empty")
-		}
-		var files []string
-		if len(attach) > 0 {
-			var err error
-			if files, err = a.sendFiles(attach, "", ""); err != nil {
-				return err
+			text := args[0]
+			if text == "-" {
+				b, err := io.ReadAll(io.LimitReader(a.env.Stdin, 1<<20))
+				if err != nil {
+					return err
+				}
+				text = string(b)
 			}
-		}
-		return a.appendBoard(boardRecord{Kind: "post", Fiber: uid, By: &boardParty{Fiber: uid}, Text: text, Files: files})
-	}}
+			if strings.TrimSpace(text) == "" {
+				return fmt.Errorf("post text is empty")
+			}
+			var files []string
+			if len(attach) > 0 {
+				var err error
+				if files, err = a.sendFiles(attach, "", ""); err != nil {
+					return err
+				}
+			}
+			return a.appendBoard(boardRecord{Kind: "post", Fiber: f.UID, By: &boardParty{Fiber: f.UID}, To: address, Text: text, Files: files})
+		},
+	}
 	cmd.Flags().StringVar(&fiber, "fiber", "", "Post as the named family member")
+	cmd.Flags().StringVar(&to, "to", "", "Whose attention it asks for: the human (by name, or \"human\") or a fiber (default: the poster's orchestrator)")
 	cmd.Flags().StringArrayVar(&attach, "file", nil, "Attach a file to the post (repeatable); it is also recorded as a sent file")
 	return cmd
 }

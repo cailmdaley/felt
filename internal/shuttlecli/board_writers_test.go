@@ -191,3 +191,128 @@ func TestBoardMessageClearsAsk(t *testing.T) {
 		t.Fatalf("%+v", records)
 	}
 }
+
+// A post's address says whose attention it asks for: up to the poster's
+// orchestrator by default, unaddressed at the top level, or --to the human or
+// a fiber. Questions and closes for review go up, or to the human at the top;
+// a mark goes to the human; a verdict is addressed to no one.
+func TestBoardAddresses(t *testing.T) {
+	type want struct {
+		kind string
+		to   *boardParty
+	}
+	cail := &boardParty{Label: "Cail"}
+	for _, tc := range []struct {
+		name string
+		args []string
+		want func(hub, fit string) want
+	}{
+		{"post goes up", []string{"post", "--fiber", "hub/fit", "fit converged"}, func(hub, _ string) want { return want{"post", &boardParty{Fiber: hub}} }},
+		{"top-level post is unaddressed", []string{"post", "--fiber", "hub", "routine"}, func(string, string) want { return want{"post", nil} }},
+		{"post to the human by name", []string{"post", "--fiber", "hub/fit", "--to", "cail", "look"}, func(string, string) want { return want{"post", cail} }},
+		{"post to the human", []string{"post", "--fiber", "hub", "--to", "human", "look"}, func(string, string) want { return want{"post", cail} }},
+		{"post to a fiber", []string{"post", "--fiber", "hub", "--to", "hub/fit", "go"}, func(_, fit string) want { return want{"post", &boardParty{Fiber: fit}} }},
+		{"thread asks up", []string{"ask", "hub/fit", "which prior?"}, func(hub, _ string) want { return want{"asked", &boardParty{Fiber: hub}} }},
+		{"top-level asks the human", []string{"ask", "hub", "which prior?"}, func(string, string) want { return want{"asked", cail} }},
+		{"thread closes up", []string{"close", "hub/fit", "--local"}, func(hub, _ string) want { return want{"closed", &boardParty{Fiber: hub}} }},
+		{"a mark goes to the human", []string{"close", "hub/fit", "--review", "worth a look", "--local"}, func(string, string) want { return want{"closed", cail} }},
+		{"a verdict is unaddressed", []string{"close", "hub/fit", "--tempered=true", "--local"}, func(string, string) want { return want{"closed", nil} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := testEnv(t)
+			env.Set("SHUTTLE_HOST", "host")
+			env.Set("SHUTTLE_HUMAN", "Cail")
+			env.Set("SHUTTLE_EVENTS", "")
+			path := filepath.Join(t.TempDir(), "events.jsonl")
+			env.Set("SHUTTLE_EVENTS_FILE", path)
+			dir, st := newStore(t)
+			seedShuttleRole(t, st, "hub", felt.StatusActive, map[string]any{"kind": "oneshot", "host": "host", "project_dir": t.TempDir()}, nil)
+			seedShuttleRole(t, st, "hub/fit", felt.StatusActive, map[string]any{"kind": "oneshot", "host": "host", "project_dir": t.TempDir()}, nil)
+			if _, stderr, err := executeIn(t, env, dir, tc.args...); err != nil {
+				t.Fatalf("%v %s", err, stderr)
+			}
+			w := tc.want(mustRead(t, st, "hub").UID, mustRead(t, st, "hub/fit").UID)
+			records := readBoardRecords(t, path)
+			if len(records) != 1 || records[0].Kind != w.kind {
+				t.Fatalf("records %+v", records)
+			}
+			if got := records[0].To; (got == nil) != (w.to == nil) || (got != nil && *got != *w.to) {
+				t.Fatalf("to = %+v, want %+v", got, w.to)
+			}
+		})
+	}
+}
+
+func TestPostToAnUnknownAddressIsRefused(t *testing.T) {
+	env := testEnv(t)
+	env.Set("SHUTTLE_HOST", "host")
+	env.Set("SHUTTLE_HUMAN", "Cail")
+	dir, st := newStore(t)
+	seedShuttleRole(t, st, "hub", felt.StatusActive, map[string]any{"kind": "oneshot", "host": "host", "project_dir": t.TempDir()}, nil)
+	_, stderr, err := executeIn(t, env, dir, "post", "--fiber", "hub", "--to", "nobody", "hello")
+	if err == nil || !strings.Contains(err.Error()+stderr, "names neither the human (Cail) nor a fiber") {
+		t.Fatalf("err %v %s", err, stderr)
+	}
+}
+
+// The closing post is the outcome: --post writes it, with its files, on the
+// fiber and on the board's close line; a close without it leaves the outcome.
+func TestCloseWithPostWritesTheOutcome(t *testing.T) {
+	env := testEnv(t)
+	env.Set("SHUTTLE_HOST", "host")
+	env.Set("SHUTTLE_EVENTS", "")
+	env.Set("CLAUDE_CODE_SESSION_ID", "worker-session")
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	env.Set("SHUTTLE_EVENTS_FILE", path)
+	dir, st := newStore(t)
+	seedShuttleRole(t, st, "hub", felt.StatusActive, map[string]any{"kind": "oneshot", "host": "host", "project_dir": t.TempDir()}, nil)
+	seedShuttleRole(t, st, "hub/fit", felt.StatusActive, map[string]any{"kind": "oneshot", "host": "host", "project_dir": t.TempDir()}, nil)
+	seedShuttleRole(t, st, "hub/plain", felt.StatusActive, map[string]any{"kind": "oneshot", "host": "host", "project_dir": t.TempDir()}, nil)
+	plot := filepath.Join(t.TempDir(), "plot.png")
+	if err := os.WriteFile(plot, []byte("png"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, stderr, err := executeIn(t, env, dir, "close", "hub/fit", "--post", "  Converged at 3%.  ", "--file", plot, "--local"); err != nil {
+		t.Fatalf("%v %s", err, stderr)
+	}
+	if f := mustRead(t, st, "hub/fit"); f.Outcome != "Converged at 3%." || f.Status != felt.StatusClosed {
+		t.Fatalf("outcome %q status %s", f.Outcome, f.Status)
+	}
+	before := mustRead(t, st, "hub/plain").Outcome
+	if _, stderr, err := executeIn(t, env, dir, "close", "hub/plain", "--local"); err != nil {
+		t.Fatalf("%v %s", err, stderr)
+	}
+	if got := mustRead(t, st, "hub/plain").Outcome; got != before {
+		t.Fatalf("plain close changed the outcome %q → %q", before, got)
+	}
+	records := readBoardRecords(t, path)
+	if len(records) != 2 || records[0].Text != "Converged at 3%." || len(records[0].Files) != 1 || records[0].Files[0] != plot || records[1].Text != "" {
+		t.Fatalf("records %+v", records)
+	}
+}
+
+func TestClosePostRefusals(t *testing.T) {
+	for name, c := range map[string]struct {
+		args []string
+		want string
+	}{
+		"empty":       {[]string{"close", "hub/fit", "--post", " "}, "--post is empty"},
+		"with a mark": {[]string{"close", "hub/fit", "--post", "x", "--review", "why"}, "the thread writes its own closing post"},
+		"file alone":  {[]string{"close", "hub/fit", "--file", "x.png"}, "give it with --post"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			env := testEnv(t)
+			env.Set("SHUTTLE_HOST", "host")
+			dir, st := newStore(t)
+			seedShuttleRole(t, st, "hub", felt.StatusActive, map[string]any{"kind": "oneshot", "host": "host", "project_dir": t.TempDir()}, nil)
+			seedShuttleRole(t, st, "hub/fit", felt.StatusActive, map[string]any{"kind": "oneshot", "host": "host", "project_dir": t.TempDir()}, nil)
+			_, stderr, err := executeIn(t, env, dir, append(c.args, "--local")...)
+			if err == nil || !strings.Contains(err.Error()+stderr, c.want) {
+				t.Fatalf("want %q, got %v %s", c.want, err, stderr)
+			}
+			if mustRead(t, st, "hub/fit").Status != felt.StatusActive {
+				t.Fatal("refusal closed it")
+			}
+		})
+	}
+}

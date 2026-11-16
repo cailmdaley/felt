@@ -724,7 +724,8 @@ func setRemoteProjectDirFlag(cmd *cobra.Command, raw string, f *felt.Felt, block
 // ---- close -----------------------------------------------------------------
 
 func (a *app) closeCmd() *cobra.Command {
-	var closeTempered, closeActor, closeReview string
+	var closeTempered, closeActor, closeReview, closePost string
+	var closeFiles, closeAttached []string
 	var closeQuiet bool
 	closeCmd := &cobra.Command{
 		Use:   "close [fiber]",
@@ -738,6 +739,13 @@ thread waits on its orchestrator's review. Use:
   shuttle close <fiber> --tempered=false  # discarded
   shuttle close <thread> --review "<why>" # mark a thread for the human's review
   shuttle close <fiber> --quiet           # context-only result for its orchestrator
+  shuttle close --post "<conclusion>"     # the closing post, written as the outcome
+
+--post is the closing post: its text becomes the fiber's outcome and the
+board's close line, with --file attachments sent beside it. Without it the
+outcome is left as it stands. A close for review is addressed to the
+orchestrator that reviews it, or to the human at the top level; a --review
+mark is addressed to the human.
 
 A closed thread is its orchestrator's to review: the orchestrator reads it
 against its Desired State and tempers it, discards it, or marks it for the
@@ -788,6 +796,18 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 					return fmt.Errorf("--review needs a note saying why the thread is worth the human's look")
 				}
 			}
+			posting := cmd.Flags().Changed("post")
+			if posting {
+				if marking {
+					return fmt.Errorf("--post writes the thread's outcome and --review marks it for the human; the thread writes its own closing post")
+				}
+				if strings.TrimSpace(closePost) == "" {
+					return fmt.Errorf("--post is empty")
+				}
+			}
+			if len(closeFiles) > 0 && !posting {
+				return fmt.Errorf("--file attaches to the closing post: give it with --post")
+			}
 			if f, _, _, lookupErr := a.shuttleResolveFiberRef(args[0], true); lookupErr == nil {
 				if marking && a.isOwnFiber(f) {
 					return fmt.Errorf("%s is your own constitution: whether the human reviews it is its orchestrator's decision; close it with 'shuttle close'", f.ID)
@@ -801,6 +821,14 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 					}
 				}
 			}
+			attached := closeAttached
+			if len(closeFiles) > 0 {
+				sent, err := a.sendFiles(closeFiles, "", "")
+				if err != nil {
+					return err
+				}
+				attached = append(attached, sent...)
+			}
 			if !localOnly(cmd) {
 				candidate, _, _, lookupErr := a.shuttleResolveFiberRef(args[0], true)
 				if lookupErr == nil {
@@ -813,6 +841,12 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 					}
 					if closeQuiet {
 						fields["quiet"] = true
+					}
+					if posting {
+						fields["post"] = closePost
+					}
+					if len(attached) > 0 {
+						fields["files"] = attached
 					}
 					if actor := a.actorSession(closeActor); actor != "" {
 						fields["actor"] = actor
@@ -853,6 +887,12 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 				if closeQuiet {
 					fields["quiet"] = true
 				}
+				if posting {
+					fields["post"] = closePost
+				}
+				if len(attached) > 0 {
+					fields["files"] = attached
+				}
 				if actor := a.actorSession(closeActor); actor != "" {
 					fields["actor"] = actor
 				}
@@ -868,10 +908,16 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 				return standingCloseError(args[0])
 			}
 			if block.Kind == "standing" && *tempered {
+				if posting {
+					return fmt.Errorf("%s is a standing constitution: tempering its run takes no closing post", args[0])
+				}
 				return a.temperStandingRun(st, f, args[0], ref, closeActor)
 			}
 
 			f.Status = felt.StatusClosed
+			if posting {
+				f.Outcome = strings.TrimSpace(closePost)
+			}
 			if err := setTempered(f, tempered); err != nil {
 				return err
 			}
@@ -918,7 +964,18 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 				}
 				by.Session = actor
 			}
-			a.recordBoard(boardRecord{Kind: "closed", Fiber: f.UID, By: by, Verdict: verdict})
+			// The close line carries the closing post, or a mark's note to the human.
+			record := boardRecord{Kind: "closed", Fiber: f.UID, By: by, Verdict: verdict, Files: attached}
+			switch {
+			case marking:
+				record.To, record.Text = a.humanParty(), block.Review.Note
+			case tempered == nil:
+				record.To = a.upOrHuman(st, f)
+			}
+			if posting {
+				record.Text = f.Outcome
+			}
+			a.recordBoard(record)
 			fmt.Fprintf(a.env.Stdout, "closed %s%s\n", args[0], ref.Location())
 			switch {
 			case marking:
@@ -939,6 +996,11 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 	closeCmd.Flags().BoolVar(&closeQuiet, "quiet", false, "Deliver the outcome as context without waking the nearest orchestrator")
 	closeCmd.Flags().StringVar(&closeTempered, "tempered", "", "Set tempered verdict (true/false); omit to close for review")
 	closeCmd.Flags().StringVar(&closeReview, "review", "", "Mark a thread for the human's review, saying why it is worth their look")
+	closeCmd.Flags().StringVar(&closePost, "post", "", "The closing post: the conclusion, written as the fiber's outcome")
+	closeCmd.Flags().StringArrayVar(&closeFiles, "file", nil, "Attach a file to the closing post (repeatable); it is also recorded as a sent file")
+	// The daemon passes the files its caller already sent.
+	closeCmd.Flags().StringArrayVar(&closeAttached, "attached", nil, "Files the closing post attaches, already sent")
+	_ = closeCmd.Flags().MarkHidden("attached")
 	closeCmd.Flags().Bool("local", false, localFlagUsage)
 	closeCmd.Flags().StringVar(&closeActor, "actor", "", actorFlagUsage)
 	_ = closeCmd.Flags().MarkHidden("actor")
