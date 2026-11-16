@@ -140,7 +140,7 @@ const barTab = (p, view) => p.locator(`.kbn-viewtabs .kbn-viewtab[data-view="${v
 const appFocus = p => p.evaluate(() => document.activeElement?.blur())
 const activeBarView = p => p.evaluate(() => document.querySelector('.kbn-viewtabs .kbn-viewtab-active')?.dataset.view ?? null)
 const barFind = p => p.locator('.kbn-viewtabs-find input')
-/** Channels' Find, the bar's or (on a phone) the rail's Jump to, lists the documents it matches; this opens the first whose row holds `text`. */
+/** Channels' Find, the bar's or (on a phone) the rail's Jump to, lists the documents it matches; this opens the first whose row holds `text` (a file name, or its fiber's slug). */
 async function openFromChannels(p, query, text = query) {
   await barTab(p, 'channels').click()
   await p.locator('.kbn-channels .kbn-ch-layout').waitFor()
@@ -822,9 +822,9 @@ test('Desk-opened channel reload and Back restore its Desk origin in the bar', a
   assert.ok(await p.locator('.kbn-modal').count(), 'Desk stays behind the reader')
   await appFocus(p)
   await p.keyboard.press('j')
-  await poll(p, () => document.querySelector('.ws-channel-title')?.textContent !== 'Calibrate the shear response')
+  await poll(p, () => document.querySelector('.ws-channel-title')?.title !== 'Calibrate the shear response')
   await p.goBack()
-  await poll(p, () => document.querySelector('.ws-channel-title')?.textContent === 'Calibrate the shear response')
+  await poll(p, () => document.querySelector('.ws-channel-title')?.title === 'Calibrate the shear response')
   await deskOrigin()
   await leave(p)
   await poll(p, () => document.querySelectorAll('.ws-page.ws-selected').length === 0)
@@ -864,7 +864,7 @@ test('The board bar holds its tabs, Find and Settings to the pixel on every view
 // its key) closes the reader back to it; another tab switches and closes.
 const origins = {
   desk: { other: 'chronicle', open: async p => { await barTab(p, 'desk').click(); await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${name}"])`).click() } },
-  channels: { other: 'desk', open: async p => { await openFromChannels(p, 'report.html', name) } },
+  channels: { other: 'desk', open: async p => { await openFromChannels(p, 'report.html', 'calibration-report') } },
   chronicle: { other: 'channels', open: async p => { await barTab(p, 'chronicle').click(); await p.locator('.chr-name').filter({ hasText: name }).click() } },
 }
 for (const origin of ['desk', 'chronicle']) test(`Rest popover is above the reader opened from ${origin}`, async p => {
@@ -954,13 +954,13 @@ test('j/k step constitutions in Desk order from a Channels-opened reader, J/K st
   const column = id => p.locator(`[data-column="${id}"] .kbn-card:not(.kbn-card-header) > .kbn-card-name`).evaluateAll(names => names.map(name => name.title))
   const drafts = await column('drafts'), flight = await column('inFlight'), review = await column('awaitingReview')
   const names = [...drafts, ...flight, ...review], at = names.indexOf(name)
-  const title = expected => poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, expected)
+  const title = expected => poll(p, name => document.querySelector('.ws-channel-title')?.title === name, expected)
   const landing = expected => poll(p, text => document.querySelector('.toast-message')?.textContent === text, expected)
   await openFromChannels(p, 'weekly.txt')
   assert.equal(await activeBarView(p), 'channels', 'the bar marks Channels as the origin')
   await leave(p)
   assert.equal(await activeBarView(p), 'channels', 'the origin tab closes the reader back to Channels')
-  await openFromChannels(p, 'report.html', name)
+  await openFromChannels(p, 'report.html', 'calibration-report')
   await reportReady(p)
   await appFocus(p)
   await p.keyboard.press('Shift+K'); await title(flight[0]); await landing(`In flight · ${flight[0]}`)
@@ -977,7 +977,7 @@ test('j/k step constitutions in Desk order from a Channels-opened reader, J/K st
   if (await p.locator('.ws-selected .ws-family-page').count()) {
     await p.locator('.ws-selected .ws-family-page :is(.ov-thread, .ov-ancestor)').first().focus()
     await p.keyboard.press('j'); await p.waitForTimeout(200)
-    assert.equal(await p.locator('.ws-channel-title').textContent(), name, 'j inside the rows stays on the page')
+    assert.equal(await p.locator('.ws-channel-title').getAttribute('title'), name, 'j inside the rows stays on the page')
   }
   await away(); await p.keyboard.press('k'); await title(names[at - 1])
   await away(); await p.keyboard.press('k'); await title(names[at - 2])
@@ -998,14 +998,14 @@ test('Wide reader scans Desk cards and returns the last viewed card with one Esc
   const next = names[names.indexOf(name) + 1]
   // On a constitution's page j/k walk its own level; Alt+↓/↑ step the Desk's order.
   await p.keyboard.press('Alt+ArrowDown')
-  await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, next)
+  await poll(p, name => document.querySelector('.ws-channel-title')?.title === name, next)
   await p.keyboard.press('Escape')
   await poll(p, () => !document.querySelector('.kbn-reader-open'))
   assert.equal(await p.locator('.kbn-key-selected .kbn-card-name').getAttribute('title'), next, 'Escape selects the last card viewed')
   await land(p)
   // On a constitution's page j/k walk its own level; Alt+↓/↑ step the Desk's order.
   await p.keyboard.press('Alt+ArrowDown')
-  await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, next)
+  await poll(p, name => document.querySelector('.ws-channel-title')?.title === name, next)
   await barTab(p, 'desk').click()
   await poll(p, () => !document.querySelector('.kbn-reader-open'))
   assert.equal(await p.locator('.kbn-key-selected .kbn-card-name').getAttribute('title'), next)
@@ -1327,7 +1327,7 @@ test('Pending verdicts on two fibers commit independently', async p => {
   await p.keyboard.press('t')
   await leave(p)
   await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Mask validation notes"])`).click()
-  await poll(p, () => document.querySelector('.ws-channel-title')?.textContent === 'Mask validation notes')
+  await poll(p, () => document.querySelector('.ws-channel-title')?.title === 'Mask validation notes')
   await p.keyboard.press('x')
   assert.equal(await p.evaluate(() => new Set([...document.querySelectorAll('[data-verdict-pending]')].map(el => el.dataset.verdictKey)).size), 2)
   await p.clock.runFor(6000)
@@ -1383,7 +1383,7 @@ test('Body file link opens a linked document', async p => {
 test('Body wikilink opens a fiber absent from the card index', async p => {
   await open(p); await choose(p, 'Constitution')
   await selected(p).locator('.kbn-wikilink-live[data-fiber="research/workspace/method-note"]').click()
-  await poll(p, () => document.querySelector('.ws-channel-title')?.textContent === 'Method note')
+  await poll(p, () => document.querySelector('.ws-channel-title')?.title === 'Method note')
   await choose(p, 'Constitution')
   await selected(p).getByText('The response correction uses independent simulations and leaves the measured shear unchanged in the null tests.', { exact: true }).waitFor()
 })
@@ -1750,7 +1750,7 @@ test('Phone Channels finds a report from the rail, reads it and comes Back', asy
     await seasons.evaluate(el => { el.scrollLeft = el.scrollWidth })
     assert.ok(await seasons.evaluate(el => el.scrollLeft > 0))
   }
-  await openFromChannels(p, 'report.html', name)
+  await openFromChannels(p, 'report.html', 'calibration-report')
   await choose(p, 'calibration-report'); await reportReady(p)
   await leave(p)
   assert.equal(await activeBarView(p), 'channels')
@@ -1984,7 +1984,7 @@ test('Reader slash focuses the bar Find, whose list matches by name, path and fi
     assert.ok((await picker.locator('.ws-channel-row:visible .ws-channel-name').allTextContents()).includes(name), `the list includes the constitution matching ${query}`)
   }
   await find.press('Enter')
-  assert.equal(await p.locator('.ws-channel-title').textContent(), name)
+  assert.equal(await p.locator('.ws-channel-title').getAttribute('title'), name)
   await appFocus(p); await p.keyboard.press('/')
   assert.ok(await find.evaluate(e => e === document.activeElement))
   await find.press('Escape')
@@ -2021,7 +2021,7 @@ test('Reader slash hangs the constitution list under the bar Find; Escape puts i
   assert.equal(await picker.locator('.ws-channel-row').count(), 1)
   assert.equal(await picker.locator('.ws-channel-name').innerText(), 'Remote covariance review')
   await find.press('Enter')
-  await poll(p, () => document.querySelector('.ws-channel-title')?.textContent === 'Remote covariance review')
+  await poll(p, () => document.querySelector('.ws-channel-title')?.title === 'Remote covariance review')
   assert.equal(await picker.count(), 0)
 })
 
@@ -2030,13 +2030,13 @@ test('Alt-up/down step constitutions from wherever focus rests; browser Back ret
   const column = id => p.locator(`[data-column="${id}"] .kbn-card:not(.kbn-card-header) > .kbn-card-name`).evaluateAll(names => names.map(name => name.title))
   const names = [...await column('drafts'), ...await column('inFlight'), ...await column('awaitingReview')]
   assert.ok(names.length >= 3, 'navigation exercises several constitutions')
-  await openFromChannels(p, 'report.html', name)
-  await poll(p, first => document.querySelector('.ws-channel-title')?.textContent === first, name)
+  await openFromChannels(p, 'report.html', 'calibration-report')
+  await poll(p, first => document.querySelector('.ws-channel-title')?.title === first, name)
   let index = names.indexOf(name)
   for (const [key, delta] of [['Alt+ArrowUp', -1], ['Alt+ArrowUp', -1], ['Alt+ArrowDown', 1]]) {
     await p.keyboard.press(key)
     index += delta
-    await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, names[index])
+    await poll(p, name => document.querySelector('.ws-channel-title')?.title === name, names[index])
     assert.ok(await selected(p).count(), 'keyboard channel navigation retains a selected page')
   }
   await p.goBack()
@@ -2072,7 +2072,7 @@ for (const view of ['desk', 'chronicle']) test(`${view === 'desk' ? 'Desk' : 'Ch
   await find.fill('tone.mp3')
   await find.press('Enter')
   await reportReady(p)
-  assert.equal(await p.locator('.ws-channel-title').textContent(), name)
+  assert.equal(await p.locator('.ws-channel-title').getAttribute('title'), name)
   assert.equal(await isSelected(p, 'calibration-report'), true)
   assert.equal(await activeBarView(p), view, 'the bar marks the view Find opened the reader from')
 })
