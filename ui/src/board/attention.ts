@@ -87,18 +87,18 @@ export const lastActive = (card: KanbanCard): number =>
 
 /**
  * A quiet constitution's faint word, or '' when it has none: a draft, a held
- * launch, a seat, a standing one's next run or its paused schedule, or a
+ * launch, a standing one's next run or its paused schedule, a seat, or a
  * rest with its return day.
  */
 export function quietWord(card: KanbanCard): string {
   if (card.column === 'drafts') return card.held ? 'held' : 'draft'
   if (card.held) return 'held'
-  if (card.column === 'roles') return 'seat'
-  if (card.shuttleKind === 'standing' && card.column === 'resting') {
+  if (card.shuttleKind === 'standing' && (card.column === 'resting' || card.column === 'roles')) {
     if (card.status === 'open') return 'paused'
     const next = instantMs(card.nextLaunchAt)
     return next === undefined ? '↻' : `↻ ${formatInstant(next, { month: 'short', day: 'numeric' })}`
   }
+  if (card.column === 'roles') return 'seat'
   if (card.column === 'resting') {
     const until = formatCivilDay(dueCivilDay(card.due), { month: 'short', day: 'numeric' })
     return until ? `resting until ${until}` : 'resting'

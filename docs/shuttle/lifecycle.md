@@ -60,7 +60,7 @@ reads as a question.
 **3. A session the human drove, now over, with nothing to review?** Run
 `shuttle rest <fiber>`. It writes `status: open` and `horizon: stashed`, clears
 any verdict, concludes the run and stops the worker: the constitution rests,
-in the Desk's Resting section, its outcome the session's report, and starts again by hand. This is
+in the Desk's Resting section (a seat or a standing one under Roles & standing), its outcome the session's report, and starts again by hand. This is
 how a hub or a seat — a constitution with no finish line — ends a session.
 In a constitution's view, press **s** (or choose Rest) to open a small date popover.
 Enter with an empty date rests undated; choosing a date rests until that day.
@@ -80,7 +80,7 @@ shuttle obeys the vocabulary literally. Know which word does what.
 |---|---|---|
 | "hand off" | Continue with `shuttle handoff <fiber>` | Daemon redispatches when eligible; a standing run fires at its next tick |
 | "close it out" | Run `shuttle close <fiber>`; it sets `status: closed` — never handoff | Card waits for review; a standing constitution has no review, so close refuses it |
-| "put it to rest" | Run `shuttle rest <fiber>`; `status: open`, `horizon: stashed` | Column Resting, in the Desk's Resting section; no new worker |
+| "put it to rest" | Run `shuttle rest <fiber>`; `status: open`, `horizon: stashed` | Column Resting, in the Desk's Resting section (a seat or standing one under Roles & standing); no new worker |
 
 Closing puts the work back on a human's desk. It claims nothing about
 completion. A worker should never upgrade a close-out into a continuation

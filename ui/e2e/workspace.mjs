@@ -2384,6 +2384,8 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   for (const [index, column] of ['waiting', 'working', 'review'].entries()) {
     await chooseDeskColumn(p, index)
     const card = p.locator(`[data-column="${column}"] .kbn-family`).first()
+    // The fixture holds a family in Working and in Awaiting review; nothing in it waits on you.
+    if (column !== 'waiting') assert.ok(await card.count(), `a ${column} card to touch`)
     if (phone || !await card.count()) { await p.waitForTimeout(400); continue }
     // Under reduced motion a hovered card does not lift.
     await still(p, `hovering a ${column} card`, () => card.hover())

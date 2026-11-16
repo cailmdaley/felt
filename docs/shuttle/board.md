@@ -29,7 +29,7 @@ Every family appears once, in the first section that fits it:
 | **Working** | nothing in it waits on you, and a member has a live worker |
 | **Roles & standing** | it is quiet, and its top-level is a seat at rest or a standing constitution, between runs or paused |
 | **Resting** | it is quiet, and its top-level is at rest |
-| **Drafts** | it is quiet otherwise: a draft, or a launch held at boot |
+| **Drafts** | it is quiet otherwise: a draft, a launch held at boot, or an armed launch whose worker has not come up yet |
 
 A review is a want too, so a family that both asks and has a close for review stands in Waiting on you with both lines, and a working family with a thread marked for you stands in Awaiting review.
 A family whose top-level has a verdict (tempered or discarded) stays off the Desk unless something in it still waits or works.

@@ -1,5 +1,5 @@
 import '@ui-sdk/web/tabs'
-import { attentionOf, clearable, quietWord, type Waits } from './attention.js'
+import { clearable, quietWord, type Waits } from './attention.js'
 import { civilWeekday, dueCivilDay, formatCivilDay, isoDayLocal, shiftCivilDay } from './civilDay.js'
 import { DESK_COLUMNS, DESK_FOLIO_NAME, DESK_SECTION_TITLE, DESK_SECTIONS, type DeskFamily, type DeskOrder, type DeskSection, type FamilyWait } from './deskOrdering.js'
 import { activeFolioIndex, folioScrollTarget } from './deskMobile.js'
@@ -160,7 +160,7 @@ export class KanbanSurfaceRenderer {
       lines.append(...family.waits.map(wait => this.line(wait, wait.card === root)))
       card.append(lines)
     }
-    card.setAttribute('aria-label', `${root.name}, ${attentionOf(root, waits) === 'waiting' ? 'waiting on you' : DESK_SECTION_TITLE[family.section].toLowerCase()}`)
+    card.setAttribute('aria-label', `${root.name}, ${DESK_SECTION_TITLE[family.section].toLowerCase()}`)
     card.addEventListener('click', event => {
       if ((event.target as Element).closest('button, a')) return
       const line = (event.target as Element).closest<HTMLElement>('.kbn-family-wait')

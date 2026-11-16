@@ -48,6 +48,7 @@
 .kbn-desk-shelf > .kbn-col { background: var(--kbn-recess); max-height: 40vh; }
 .kbn-desk-shelf .kbn-col-title { font-size: var(--type-title); }
 .kbn-desk-shelf .kbn-family-name { font: var(--type-note)/var(--leading-ui) var(--font-serif); }
+.kbn-desk-shelf .kbn-family-meta { font-size: var(--type-note); }
 .kbn-desk-shelf .kbn-empty { padding: 8px; }
 
 /* The head row's two ways to make something new. */

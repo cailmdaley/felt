@@ -35,8 +35,9 @@ const constitutionBindings: KeyBinding[] = [
   bind(['z'], 'undoVerdict', 'Undo latest pending verdict'),
 ]
 
-/** Desk regions follow reading order: its three columns left to right, each
- * its family cards and their lines in drawn order. Empty regions are skipped;
+/** Desk regions follow reading order: its six sections, the three columns
+ * left to right then the shelf's three, each its family cards and their lines
+ * in drawn order. Empty regions are skipped;
  * movement stops at the ends, never wraps. */
 export const DESK_REGION_SELECTORS = DESK_SECTIONS.map(section => `[data-column="${section}"]`)
 
