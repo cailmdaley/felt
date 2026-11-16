@@ -343,8 +343,8 @@ export class Workspace {
     void this.library.open(card, doc)
   }
   /** A click on a constitution, from any surface: its view opens, and Rex and voice follow it; a `quiet` opening moves neither. */
-  openFromDesk(card: KanbanCard, quiet = false): void {
-    const view = this.familyDocument(card)
+  openFromDesk(clicked: KanbanCard, quiet = false): void {
+    const card = this.live(clicked), view = this.familyDocument(card)
     const open = (): void => {
       if (!view && card.status === 'active' && isQuestion(card)) this.openQuestion(card)
       else this.open(card, this.isActive ? this.origin : this.opts.origin(), view)
@@ -699,7 +699,7 @@ export class Workspace {
    * Resolves true if Rex moved.
    */
   look(card: KanbanCard | null): Promise<boolean> {
-    const target = card && constitutionFor(card, this.opts.cards())
+    const target = card && constitutionFor(this.live(card), this.opts.cards())
     this.opts.onSight?.(target)
     const key = rexKey(target)
     if (key === this.looked.key) return this.looked.moved
@@ -729,6 +729,10 @@ export class Workspace {
     })
     this.looked = { key, moved }
     return moved
+  }
+  /** The board's current copy of a card a surface drew earlier: its worker may have started or stopped since. */
+  private live(card: KanbanCard): KanbanCard {
+    return cardNamed(this.opts.cards(), card.uid ?? card.id, card.originId) ?? card
   }
   /** A later look supersedes a move still waiting out its hold: it never posts, and answers that Rex did not move. */
   private dropRexHold(): void {

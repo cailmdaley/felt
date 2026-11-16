@@ -1024,6 +1024,17 @@ describe('workspace reader integration', () => {
     expect(selections()).toHaveLength(2)
     expect(conversation).not.toHaveBeenCalled()
   })
+  it('reaches the worker a card has now, though the surface clicked drew it before the worker started', async () => {
+    const drawn = card({ id: 'hub', uid: 'hub', originId: 'host-a', shuttleHost: 'host-a', shuttleKind: 'oneshot', status: 'active' })
+    const now = { ...drawn, sessionUuid: 'session-hub', tmuxSession: 'worker-hub', workerState: 'running' as const }
+    workspace.dispose()
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => [now], origin: () => 'Channels', onVisibility: visibility, dock: new Dock('', changed) })
+    vi.useFakeTimers()
+    const original = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (input, init) => String(input).endsWith('/api/v1/attach') ? Response.json({ moved: true, session: 'worker-hub' }) : original(input, init))
+    expect(await workspace.look(drawn)).toBe(true)
+    expect(selections()).toEqual([{ tmux_session: 'worker-hub', shuttle_host: 'host-a', select_only: true }])
+  })
   it('moves voice and Rex together from every page the board shows, to the constitution a page speaks to, once per target', async () => {
     const hub = card({ id: 'hub', uid: 'hub', originId: 'host-a', shuttleHost: 'host-a', shuttleKind: 'oneshot', status: 'active', path: 'hub.md', tmuxSession: 'worker-hub', workerState: 'running' })
     const report = card({ id: 'hub/report', uid: 'hub-report', originId: 'host-a', status: 'open', path: 'hub/report.md' })
