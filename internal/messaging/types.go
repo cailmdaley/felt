@@ -54,7 +54,9 @@ type Request struct {
 	ReplyTo       string `json:"reply_to,omitempty"`
 	NotifyAddress string `json:"notify_address,omitempty"`
 	Wake          bool   `json:"wake"`
-	// ContextIfBusy lets an ordinary CLI message use Claude's hook while working.
+	// ContextIfBusy marks a wake the sender did not force: the daemon holds it
+	// as context when its Claude recipient is idle and costly to wake. In an
+	// entry stored without wishes, it reads as turn ask.
 	ContextIfBusy bool `json:"context_if_busy,omitempty"`
 	// IdleOnly refuses active-turn steering. Claude uses its non-interrupting next-turn queue.
 	IdleOnly     bool          `json:"idle_only,omitempty"`

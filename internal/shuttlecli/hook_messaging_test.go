@@ -40,12 +40,12 @@ func TestEventHookOffersClaudeMailboxWithoutStopWake(t *testing.T) {
 	if state, err := messaging.MailboxState(env, "claude", "s", "host"); err != nil || state != "working" {
 		t.Fatalf("Claude prompt state = %q, %v", state, err)
 	}
-	r := messaging.Request{Address: "shuttle://host/claude/s", Text: "peer message", From: "shuttle://peer/pi/A", ReplyTo: "work/fiber", MessageID: "m", Wake: true, ContextIfBusy: true}
+	r := messaging.Request{Address: "shuttle://host/claude/s", Text: "peer message", From: "shuttle://peer/pi/A", ReplyTo: "work/fiber", MessageID: "m"}
 	if receipt, err := messaging.Send(context.Background(), env, "host", r); err != nil || receipt.Transport != "claude-hook" {
 		t.Fatalf("send: %+v %v", receipt, err)
 	}
 	passive := r
-	passive.MessageID, passive.Text, passive.Wake, passive.ContextIfBusy = "passive", "passive message", false, false
+	passive.MessageID, passive.Text = "passive", "passive message"
 	if _, err := messaging.Send(context.Background(), env, "host", passive); err != nil {
 		t.Fatal(err)
 	}
@@ -102,15 +102,15 @@ func TestClaudeStopDoesNotContinueOrDrainMail(t *testing.T) {
 	hook("SessionStart")
 	hook("UserPromptSubmit")
 	hook("PostToolUse") // the last tool has finished
-	send := func(id string, busy bool) {
+	send := func(id string) {
 		t.Helper()
-		r := messaging.Request{Address: "shuttle://host/claude/s", Text: id, From: "shuttle://peer/pi/sender", MessageID: id, Wake: busy, ContextIfBusy: busy}
+		r := messaging.Request{Address: "shuttle://host/claude/s", Text: id, From: "shuttle://peer/pi/sender", MessageID: id}
 		if receipt, err := messaging.Send(context.Background(), env, "host", r); err != nil || receipt.Status != messaging.StatusQueued {
 			t.Fatalf("send: %+v %v", receipt, err)
 		}
 	}
-	send("context-only", false)
-	send("late-busy", true)
+	send("context-only")
+	send("late-context")
 	if out := hook("StopFailure"); out != "" {
 		t.Fatalf("StopFailure offered context without a continuing turn: %s", out)
 	}
@@ -132,7 +132,7 @@ func TestClaudeStopDoesNotContinueOrDrainMail(t *testing.T) {
 	if bytes.Count(lines, []byte(`"type":"stop"`)) != 2 {
 		t.Fatalf("final Stop not recorded once: %s", lines)
 	}
-	if out := hook("UserPromptSubmit"); !bytes.Contains([]byte(out), []byte("context-only")) || !bytes.Contains([]byte(out), []byte("late-busy")) {
+	if out := hook("UserPromptSubmit"); !bytes.Contains([]byte(out), []byte("context-only")) || !bytes.Contains([]byte(out), []byte("late-context")) {
 		t.Fatalf("queued context lost: %s", out)
 	}
 }

@@ -268,10 +268,8 @@ func claudeNativeAvailable(env *sysenv.Env, id, host string) bool {
 }
 
 // sendClaudeNative writes req to the receiver's native socket and observes its
-// transcript for up to observationWindow: automatic fallback waits briefly for
-// admission or refusal, a direct wake for a model response. beforeWrite, when
-// given, runs immediately before the write; its failure refuses the send.
-func sendClaudeNative(ctx context.Context, env *sysenv.Env, a Address, req Request, observationWindow time.Duration, beforeWrite func() error) (Receipt, error) {
+// transcript for a model response for up to claudeNativeObservationTimeout.
+func sendClaudeNative(ctx context.Context, env *sysenv.Env, a Address, req Request) (Receipt, error) {
 	preflight := func(detail string) (Receipt, error) {
 		return rejected(req, claudeNativeTransport, detail), errCode("preflight_failed", "%s", detail)
 	}
@@ -324,13 +322,8 @@ func sendClaudeNative(ctx context.Context, env *sysenv.Env, a Address, req Reque
 		}
 	}
 	contentHash := nativeContentHash(body.Message.Content)
-	observationCtx, cancelObservation := context.WithTimeout(ctx, observationWindow)
+	observationCtx, cancelObservation := context.WithTimeout(ctx, claudeNativeObservationTimeout)
 	defer cancelObservation()
-	if beforeWrite != nil {
-		if err := beforeWrite(); err != nil {
-			return preflight("cannot record the native write before it starts")
-		}
-	}
 	if deadline, ok := observationCtx.Deadline(); ok {
 		_ = conn.SetWriteDeadline(deadline)
 	}

@@ -22,6 +22,10 @@ import (
 
 const mailboxRetention = 14 * 24 * time.Hour
 
+// claudeHookBatchBytes bounds one Claude hook emission, leaving room for the
+// hook's framing.
+const claudeHookBatchBytes = (8 << 10) - 512
+
 // Supported harness hook interfaces accept additional context without starting
 // a turn. These host-local mailboxes preserve messages until a receiving hook can
 // offer them. An offer is not evidence that the model read or acted on it.
@@ -104,8 +108,6 @@ type mailboxEntry struct {
 	// routing outcome written before the entry moves to offered.
 	Routing     map[string]any `json:"routing,omitempty"`
 	Disposition string         `json:"disposition,omitempty"`
-	// Fallback records native write ownership and bounded preflight retries.
-	Fallback *claudeFallback `json:"fallback,omitempty"`
 	// PossibleRepeat marks an entry an earlier batch may have delivered: its
 	// next emission carries a warning.
 	PossibleRepeat bool `json:"possible_repeat,omitempty"`
@@ -324,11 +326,7 @@ func queueMailbox(env *sysenv.Env, a Address, r Request) (Receipt, error) {
 	if err := Enqueue(env, InboxEntry{Address: r.Address, Request: r}); err != nil {
 		return rejected(r, transport, err.Error()), err
 	}
-	detail := "queued for the session's next prompt or tool hook; no turn started"
-	if a.Harness == "claude" && r.ContextIfBusy {
-		detail = "queued for a main-thread hook; native wake follows if not offered within 30 seconds or when the turn stops"
-	}
-	return Receipt{MessageID: r.MessageID, Address: r.Address, Status: StatusQueued, Transport: transport, Detail: detail}, nil
+	return Receipt{MessageID: r.MessageID, Address: r.Address, Status: StatusQueued, Transport: transport, Detail: "queued for the session's next prompt or tool hook; no turn started"}, nil
 }
 
 func enqueueMailbox(root string, entry mailboxEntry) error {

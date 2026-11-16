@@ -57,7 +57,7 @@ pending, and a turn of force or idle. An unknown wish value is refused.`,
 			})
 		},
 	}
-	put.Flags().StringVar(&wishes.Source, "source", "", "message, human, voice, thread, pulse or notice (default message)")
+	put.Flags().StringVar(&wishes.Source, "source", "", "message, human, voice, thread or pulse (default message)")
 	put.Flags().StringVar(&wishes.Turn, "turn", "", "none, idle, ask or force (default none)")
 	put.Flags().StringVar(&wishes.IfCostly, "if-costly", "", "hold or fresh (default fresh for a thread, else hold)")
 	put.Flags().StringVar(&wishes.NotBefore, "not-before", "", "RFC 3339 time before which the entry stays pending")

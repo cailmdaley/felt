@@ -1376,7 +1376,7 @@
                   },
                   "context_if_busy": {
                     "type": "boolean",
-                    "description": "Requires wake=true. Lets a Claude session that is mid-turn take the text through its hook as context instead of a queued turn, and lets the daemon hold a message for an idle, costly-to-wake Claude session as context (receipt detail says so)."
+                    "description": "Requires wake=true. Marks a wake the sender did not force: the daemon holds the message as context for an idle, costly-to-wake Claude session (receipt detail says so)."
                   },
                   "idle_only": {
                     "type": "boolean",

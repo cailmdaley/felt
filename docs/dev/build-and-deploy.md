@@ -101,7 +101,7 @@ expected level differs holds fresh dispatch with a skew reported on
 `/api/v1/version` and `/api/v1/state` until a periodic recheck matches. `make daemon` therefore builds both Go CLIs first
 (`SKIP_CLI=1` trusts both on `PATH`). The Elixir suite shells both CLIs too, so
 run `make cli-install` before `make mix-test` after changing either boundary.
-Contract level 36 includes the CLI-owned locked writers `conclude-run` and `patch-document`, and `claude-mail-recover` for automatic message delivery.
+Contract level 36 includes the CLI-owned locked writers `conclude-run` and `patch-document`.
 The former checks the current owner, UID, run and lifecycle state under the fiber lock and skips the write when any has moved.
 The latter compares the source document's SHA-256 under that lock and refuses a stale snapshot rather than overwriting a concurrent edit.
 

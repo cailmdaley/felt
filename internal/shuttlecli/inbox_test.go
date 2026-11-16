@@ -22,7 +22,7 @@ func TestInboxVerbs(t *testing.T) {
 		return out.String(), err
 	}
 
-	if _, err := run("inbox", "put", "/store:FIBER", "later", "wait for it", "--source", "notice", "--turn", "ask", "--not-before", "2999-01-01T00:00:00Z", "--from", "bob"); err != nil {
+	if _, err := run("inbox", "put", "/store:FIBER", "later", "wait for it", "--source", "pulse", "--turn", "ask", "--not-before", "2999-01-01T00:00:00Z", "--from", "bob"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := run("inbox", "put", "/store:FIBER", "now", "context"); err != nil {
@@ -49,7 +49,7 @@ func TestInboxVerbs(t *testing.T) {
 	if len(entries) != 2 || entries[0].MessageID != "later" || entries[1].MessageID != "now" {
 		t.Fatalf("entries = %+v", entries)
 	}
-	if e := entries[0]; e.Source != "notice" || e.Turn != "ask" || e.NotBefore != "2999-01-01T00:00:00Z" || e.From != "bob" || e.QueuedAt.IsZero() {
+	if e := entries[0]; e.Source != "pulse" || e.Turn != "ask" || e.NotBefore != "2999-01-01T00:00:00Z" || e.From != "bob" || e.QueuedAt.IsZero() {
 		t.Fatalf("delayed entry = %+v", e)
 	}
 	if e := entries[1]; e.Source != "message" || e.Turn != "none" || e.NotBefore != "" {
@@ -61,7 +61,7 @@ func TestInboxVerbs(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if len(lines) != 2 || strings.Join(strings.Fields(lines[0])[:4], " ") != "later notice ask 2999-01-01T00:00:00Z" || !strings.Contains(lines[0], "bob  wait for it") || strings.Join(strings.Fields(lines[1])[:4], " ") != "now message none -" {
+	if len(lines) != 2 || strings.Join(strings.Fields(lines[0])[:4], " ") != "later pulse ask 2999-01-01T00:00:00Z" || !strings.Contains(lines[0], "bob  wait for it") || strings.Join(strings.Fields(lines[1])[:4], " ") != "now message none -" {
 		t.Fatalf("ls text:\n%s", out)
 	}
 

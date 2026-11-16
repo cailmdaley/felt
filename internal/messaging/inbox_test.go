@@ -22,7 +22,6 @@ func TestEntryWithoutWishesReadsAsItsEquivalentWishes(t *testing.T) {
 		{"wake if idle", `{"request":{"address":"","text":"x","wake":true,"context_if_busy":true,"message_id":"m"},"queued_at":1}`, Wishes{Source: "message", Turn: "ask", IfCostly: "hold"}},
 		{"idle only", `{"request":{"address":"","text":"x","wake":true,"idle_only":true,"message_id":"pulse-k-1"},"queued_at":1}`, Wishes{Source: "pulse", Turn: "idle", IfCostly: "hold"}},
 		{"thread result", `{"request":{"address":"","text":"x","wake":true,"message_id":"thread-closed-abc"},"queued_at":1,"attempt_address":"shuttle://h/codex/s"}`, Wishes{Source: "thread", Turn: "force", IfCostly: "fresh"}},
-		{"mail failure notice", `{"request":{"address":"","text":"x","wake":false,"message_id":"claude-mail-failure-abc"},"queued_at":1}`, Wishes{Source: "notice", Turn: "none", IfCostly: "hold"}},
 	} {
 		path := filepath.Join(dir, tc.name+".json")
 		if err := os.WriteFile(path, []byte(tc.file), 0600); err != nil {
@@ -69,7 +68,7 @@ func TestEnqueuedEntryCarriesTheWakeFieldsAnOlderBuildReads(t *testing.T) {
 		{"fiber", "ask", [3]bool{}},
 		{"fiber", "idle", [3]bool{}},
 		{"shuttle://host/claude/s", "none", [3]bool{}},
-		{"shuttle://host/claude/s", "ask", [3]bool{false, true, false}},
+		{"shuttle://host/claude/s", "ask", [3]bool{}},
 		{"shuttle://host/codex/s", "ask", [3]bool{}},
 	} {
 		name := tc.address + " " + tc.turn
@@ -287,25 +286,6 @@ func TestReadersHonourNotBefore(t *testing.T) {
 		}
 		if n, err := pendingCount(env, address); err != nil || n != 1 {
 			t.Fatalf("delayed entry not left pending: %d %v", n, err)
-		}
-	})
-
-	t.Run("claude fallback", func(t *testing.T) {
-		t.Parallel()
-		env := testEnv(t)
-		address := "shuttle://host/claude/session"
-		if err := RegisterMailbox(env, "claude", "session", "host", "/project", os.Getpid(), true); err != nil {
-			t.Fatal(err)
-		}
-		if err := Enqueue(env, InboxEntry{Address: address, Request: Request{MessageID: "later", Text: "later", From: "shuttle://host/claude/sender"}, Wishes: Wishes{Turn: "ask", NotBefore: later}}); err != nil {
-			t.Fatal(err)
-		}
-		pending, err := RecoverClaudeMail(context.Background(), env, "host", time.Now(), nil)
-		if err != nil || pending {
-			t.Fatalf("recover = %v %v", pending, err)
-		}
-		if _, err := os.Stat(filepath.Join(mailboxDir(env, "claude", "session"), "fallback")); !os.IsNotExist(err) {
-			t.Fatalf("a delayed entry was claimed by the fallback: %v", err)
 		}
 	})
 

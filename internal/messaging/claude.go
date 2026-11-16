@@ -81,24 +81,8 @@ func stringField(m map[string]any, keys ...string) string {
 	return ""
 }
 func (claudeAdapter) send(ctx context.Context, env *sysenv.Env, a Address, r Request) (Receipt, error) {
-	if r.Wake && r.ContextIfBusy && ClaudeFailureTarget(r) != "" && len(Labeled(r))+2 <= claudeHookBatchBytes && claudeNativeAvailable(env, a.ID, a.Host) {
-		if state, err := MailboxState(env, "claude", a.ID, a.Host); err == nil && state == "working" {
-			queued := r
-			queued.Wake = false
-			receipt, err := queueMailbox(env, a, queued)
-			if err == nil {
-				return receipt, nil
-			}
-			// Only known-unsent failures can change transports. An enqueue may
-			// publish its entry before reporting a filesystem durability error.
-			if ErrorCode(err) != "queue_full" && ErrorCode(err) != "unavailable" {
-				receipt.Status = StatusUnknown
-				return receipt, errCode("ambiguous_delivery", "context queue may have accepted the message: %v", err)
-			}
-		}
-	}
 	if r.Wake {
-		return sendClaudeNative(ctx, env, a, r, claudeNativeObservationTimeout, nil)
+		return sendClaudeNative(ctx, env, a, r)
 	}
 	return queueMailbox(env, a, r)
 }

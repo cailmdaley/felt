@@ -166,12 +166,9 @@ then routes text (and --attach files) through the local daemon to the owning hos
 The text is the second argument, '-' for stdin, or
 --file; it is capped at 64 KiB. At least one of text, --file, or --attach is required.
 
-By default a busy Claude session receives context on main-thread prompt submission
-or tool completion. Mail unoffered after 30 seconds, or when the worker stops working,
-falls back to native wake through the owning daemon, even after restart.
-A full mailbox, oversized mail, or no sender return address uses native delivery.
-Fallback failures send a notice to the sender; Claude's approval policy still applies.
-Other sessions use their native wake path.
+By default a session receives the message on its native wake path. A busy Claude
+session's native inbox queues it behind the running turn, which takes it in; Claude's
+approval policy still applies, and a refusal or a held message answers the sender.
 
 Every turn re-reads the recipient's whole context, and once its prompt cache is
 cold that read is uncached. An ordinary send to a Claude session whose cache is

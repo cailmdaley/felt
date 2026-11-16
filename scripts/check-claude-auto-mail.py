@@ -217,65 +217,24 @@ def probe(args, mode):
             print(json.dumps({"mode": mode, "receipt": receipt, "policy": "default requires approval in headless Claude; Shuttle reports it"}), flush=True)
             return
         receipt = send(server.token, "automatic")
-        if mode in ("mid-tool", "subagent", "last-tool", "mid-model", "interrupt"):
-            assert receipt["transport"] == "claude-hook", receipt
+        assert receipt["transport"] == "claude-native", receipt
         if mode == "mid-model":
-            # A realistic inference gap exceeds the rejected three-second
-            # window. Recovery must leave this mail for the safe tool hook.
-            time.sleep(4)
-            run = subprocess.run([str(args.shuttle), "claude-mail-recover"], env=env, capture_output=True, text=True, timeout=120)
-            assert run.returncode == 0, run.stderr
-            assert not list((root / "data" / "mailboxes" / "claude").glob("*/fallback/*.json"))
             (root / "api-go").touch()
         if mode == "interrupt":
             (root / "api-go").touch()
             wait_for(lambda: (root / "in-tool").exists(), "interruptible tool", child)
-            assert not any(server.token in json.dumps(h) for h in json_lines(root / "hook-output.jsonl")), "PreToolUse offered context"
             child.stdin.write(json.dumps({"type": "control_request", "request_id": "interrupt-probe", "request": {"subtype": "interrupt"}}) + "\n")
             child.stdin.flush()
             wait_for(lambda: any(r.get("type") == "result" for r in json_lines(root / "output.jsonl")), "interrupted result", child)
-        if mode in ("mid-tool", "subagent"):
-            (root / "release").touch()
-        if mode in ("mid-tool", "subagent", "mid-model"):
-            wait_for(lambda: any(server.token in json.dumps(h) for h in json_lines(root / "hook-output.jsonl")), "main-thread hook offer", child)
-        if receipt["transport"] == "claude-hook":
-            # The CLI is the same recovery path the daemon ticks. Restarting
-            # this process does not lose the queue time or transport claim.
-            recovery_deadline = time.monotonic() + 90
-            while time.monotonic() < recovery_deadline:
-                run = subprocess.run([str(args.shuttle), "claude-mail-recover"], env=env, capture_output=True, text=True, timeout=120)
-                if run.returncode:
-                    raise AssertionError(run.stderr)
-                hooks = json_lines(root / "hook-output.jsonl")
-                offered = any(server.token in json.dumps(h) for h in hooks)
-                native = list((root / "data" / "mailboxes" / "claude").glob("*/fallback/*.json"))
-                offered_native = [p for p in (root / "data" / "mailboxes" / "claude").glob("*/offered/*.json") if json.loads(p.read_text()).get("fallback")]
-                if offered or native or offered_native:
-                    break
-                time.sleep(0.05)
         (root / "release").touch()
-        wait_for(lambda: any(r.get("type") == "assistant" and server.token in text_of(r.get("message", {}).get("content")) and not r.get("parent_tool_use_id") for r in json_lines(root / "output.jsonl")), "main-thread reply to automatic mail", child)
-        hooks = json_lines(root / "hook-output.jsonl")
-        offers = [h for h in hooks if server.token in json.dumps(h)]
-        if mode in ("mid-tool", "subagent", "mid-model"):
-            assert len(offers) == 1, offers
-            # An async subagent's completion notification starts a main-thread
-            # UserPromptSubmit; synchronous Agent versions return PostToolUse.
-            allowed = ("PostToolUse", "UserPromptSubmit") if mode == "subagent" else ("PostToolUse",)
-            assert offers[0]["hookSpecificOutput"]["hookEventName"] in allowed, offers
-        else:
-            assert not offers, offers
+        wait_for(lambda: any(r.get("type") == "assistant" and server.token in text_of(r.get("message", {}).get("content")) and not r.get("parent_tool_use_id") for r in json_lines(root / "output.jsonl")), "main-thread reply to the message", child)
+        offers = [h for h in json_lines(root / "hook-output.jsonl") if server.token in json.dumps(h)]
+        assert not offers, offers
         if mode == "subagent":
             child_requests = [r for r in json_lines(root / "requests.jsonl") if "CHILD_RUN" in "\n".join(text_of(m["content"]) for m in r["messages"] if m["role"] == "user") and "MODE_SUBAGENT" not in json.dumps(r["messages"])]
             assert child_requests and all(server.token not in json.dumps(r) for r in child_requests), "child received parent mail"
         final = send(server.token, "automatic")
-        if receipt["transport"] == "claude-hook":
-            assert final == receipt, final
-            if not offers:
-                saved = [json.loads(p.read_text())["fallback"]["receipt"] for p in (root / "data" / "mailboxes" / "claude").glob("*/offered/*.json") if json.loads(p.read_text()).get("fallback")]
-                assert len(saved) == 1 and saved[0]["transport"] == "claude-native", saved
-        else:
-            assert final["transport"] == "claude-native", final
+        assert final == receipt, final
         replies = [r for r in json_lines(root / "output.jsonl") if r.get("type") == "assistant" and server.token in text_of(r.get("message", {}).get("content")) and not r.get("parent_tool_use_id")]
         assert len(replies) == 1, replies
         print(json.dumps({"mode": mode, "initial": receipt, "final": final, "hook_offers": len(offers), "main_replies": len(replies), "elapsed_s": round(time.monotonic() - started, 3)}), flush=True)

@@ -7,33 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
-
-func TestClaudeQueuePublicationErrorDoesNotChangeTransports(t *testing.T) {
-	env := testEnv(t)
-	req, sent := nativeClaudeFixture(t, env, func(frame map[string]any, f *os.File) { nativeRows(frame, f, false) })
-	req.ContextIfBusy = true
-	_ = SetMailboxState(env, "claude", "session", "host", "working")
-	queued := req
-	queued.Wake = false
-	// A published entry with no sender receipt models an EEXIST replay or a
-	// post-publication durability failure, without needing an NFS mount.
-	if err := Enqueue(env, InboxEntry{Address: req.Address, Request: queued}); err != nil {
-		t.Fatal(err)
-	}
-	got, err := Send(context.Background(), env, "host", req)
-	if ErrorCode(err) != "ambiguous_delivery" || got.Status != StatusUnknown || sent.Load() != 0 {
-		t.Fatalf("publication error caused a native duplicate: %+v %v writes=%d", got, err, sent.Load())
-	}
-	offered := 0
-	if err := OfferMailbox(env, "claude", "session", "host", func(batch []Request) error { offered += len(batch); return nil }); err != nil {
-		t.Fatal(err)
-	}
-	if offered != 1 || sent.Load() != 0 {
-		t.Fatalf("hook=%d native=%d", offered, sent.Load())
-	}
-}
 
 func TestClaudeFiberContextFitsReceiverBudgetAndRetainsOversizedBody(t *testing.T) {
 	for _, oversized := range []bool{false, true} {
@@ -94,33 +68,4 @@ func TestClaudeFiberContextFitsReceiverBudgetAndRetainsOversizedBody(t *testing.
 			}
 		})
 	}
-}
-
-func TestClaudeRecoveryPassesNeverOverlap(t *testing.T) {
-	env := testEnv(t)
-	received, release := make(chan struct{}), make(chan struct{})
-	req, sent := nativeClaudeFixture(t, env, func(_ map[string]any, _ *os.File) { close(received); <-release })
-	defer close(release)
-	req.ContextIfBusy = true
-	_ = SetMailboxState(env, "claude", "session", "host", "working")
-	if _, err := Send(context.Background(), env, "host", req); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan error, 1)
-	go func() { _, err := RecoverClaudeMail(ctx, env, "host", time.Now().Add(time.Minute), nil); done <- err }()
-	select {
-	case <-received:
-	case <-time.After(5 * time.Second):
-		t.Fatal("native write never started")
-	}
-	if _, err := RecoverClaudeMail(context.Background(), env.Clone(), "host", time.Now().Add(time.Minute), nil); err != nil {
-		t.Fatal(err)
-	}
-	if sent.Load() != 1 {
-		t.Fatalf("overlapping write: %d", sent.Load())
-	}
-	cancel()
-	<-done
 }

@@ -29,7 +29,7 @@ type Wishes struct {
 }
 
 var wishValues = map[string][]string{
-	"source":    {"message", "human", "voice", "thread", "pulse", "notice"},
+	"source":    {"message", "human", "voice", "thread", "pulse"},
 	"turn":      {"none", "idle", "ask", "force"},
 	"if_costly": {"hold", "fresh"},
 }
@@ -69,7 +69,7 @@ func legacyTurn(r Request) string {
 func (w Wishes) withDefaults(r Request) Wishes {
 	if w.Source == "" {
 		w.Source = "message"
-		for prefix, source := range map[string]string{"thread-": "thread", "pulse-": "pulse", "voice-": "voice", "claude-mail-failure-": "notice"} {
+		for prefix, source := range map[string]string{"thread-": "thread", "pulse-": "pulse", "voice-": "voice"} {
 			if strings.HasPrefix(r.MessageID, prefix) {
 				w.Source = source
 			}
@@ -146,9 +146,9 @@ func inboxRoot(env *sysenv.Env, address string) (string, error) {
 // session needs that session's live hook registration on this host; an entry
 // for a fiber is kept whether or not the fiber has a worker.
 //
-// The stored request carries only the wake fields its inbox's readers act on:
-// a fiber's force sets wake, and a Claude session's ask sets context_if_busy.
-// A session inbox cannot start a turn, so it refuses force and idle.
+// The stored request carries only the wake field its inbox's readers act on:
+// a fiber's force sets wake. A session inbox is context for the session's
+// hook and cannot start a turn, so it refuses force and idle.
 //
 // In a fiber inbox, an id already pending, claimed or offered is a successful
 // no-op when the content and wishes match or the entry is Derived; otherwise it
@@ -203,7 +203,6 @@ func Enqueue(env *sysenv.Env, e InboxEntry) error {
 			return errCode("expired", "thread notice is outside the 14-day retention window")
 		}
 		r.Address = e.Address
-		r.ContextIfBusy = w.Turn == "ask" && a.Harness == "claude"
 		return enqueueMailbox(root, mailboxEntry{Request: r, Wishes: w, QueuedAt: time.Now().UnixNano()})
 	}
 	r.Wake = w.Turn == "force"
