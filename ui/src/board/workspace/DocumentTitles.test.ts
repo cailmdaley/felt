@@ -1,14 +1,12 @@
 // @vitest-environment jsdom
 import { expect, it, vi } from 'vitest'
 import { cacheDocumentTitle, extractDocumentTitle, watchDocumentTitles } from './DocumentTitles.js'
-import { changeSendLabel } from './sendLines.js'
 import { buildChannel, documentLabels, documentLabelMetadata } from './documents.js'
 
-it('names a sent PR from a truncated bundle head, not its fiber', () => {
+it('reads a sent PR\'s change from a truncated bundle head', () => {
   const source = '{"version":2,"title":"A \\"quoted\\" change","head_ref":"topic","pr":{"number":42,"head_branch":"feat/stack"},"stats":{"files":2,"additions":12,"deletions":3},"files":[' + 'x'.repeat(100_000)
   const metadata = cacheDocumentTitle('head:/pr.change.json', '/pr.change.json', source)
   expect(metadata.change).toEqual({ number: 42, branch: 'feat/stack', additions: 12, deletions: 3 })
-  expect(changeSendLabel('head:/pr.change.json', 'fallback')).toBe('#42 A "quoted" change · feat/stack · +12 −3')
 })
 
 it('extracts HTML title, H1 fallback and markdown heading without executing markup', () => {

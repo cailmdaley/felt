@@ -349,14 +349,12 @@ export interface DockOptions {
   phone?: PhoneListening
   /** Opens the Rest popover on the button that asked for it. */
   onRest?: (card: KanbanCard, anchor: HTMLElement) => void
-  /** A message the console delivered, with when its send began, for a surface that shows the line until the board records it. */
-  onSent?: (card: KanbanCard, message: string, at: number) => void
   /** The surface shows the conversation itself: a send keeps the human here rather than opening the worker's terminal. */
   keepPlace?: boolean
 }
 
 /** What a surface beside the reader asks of its own console. */
-export type ConsoleOptions = Pick<DockOptions, 'onSent' | 'keepPlace'>
+export type ConsoleOptions = Pick<DockOptions, 'keepPlace'>
 
 /** A warm cache dot drains on this cadence, and the figures follow the session's turns. */
 const USAGE_REFRESH_MS = 15_000
@@ -419,7 +417,6 @@ export class Dock {
   private readonly phone: PhoneListening | undefined
   private readonly voice: DockOptions['voice']
   private readonly onRest?: (card: KanbanCard, anchor: HTMLElement) => void
-  private readonly onSent?: (card: KanbanCard, message: string, at: number) => void
   private readonly keepPlace: boolean
   private fiberSlug?: FiberSlug
   private channelOf?: (card: KanbanCard) => string | undefined
@@ -438,7 +435,6 @@ export class Dock {
     this.phone = opts.phone
     this.voice = opts.voice
     this.onRest = opts.onRest
-    this.onSent = opts.onSent
     this.keepPlace = opts.keepPlace ?? false
   }
 
@@ -1617,7 +1613,7 @@ export class Dock {
    */
   private async startSession(card: KanbanCard, mode: SessionMode, word?: HTMLElement, projectDir?: string, message = '', images: PastedImage[] = []): Promise<boolean> {
     if (this.starting || (mode === 'fresh' && !this.confirmCut(card))) return false
-    const epoch = this.epoch, at = Date.now()
+    const epoch = this.epoch
     const original = word?.textContent ?? ''
     if (word) word.textContent = message || images.length ? 'Sending…' : mode === 'previous' ? 'Resuming…' : 'Starting…'
     this.starting = true
@@ -1651,7 +1647,6 @@ export class Dock {
         this.messageIds.sent()
         const notice = repeatNotice(body)
         if (notice) { showError(notice); return false }
-        if (message) this.onSent?.(card, message, at)
         this.onSaved()
         if (body.tmux_session && !coarsePointer() && !this.keepPlace) this.onOpenWorker?.(body.tmux_session, card.originId)
         return true

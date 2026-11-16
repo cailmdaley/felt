@@ -709,18 +709,14 @@ describe('session verbs', () => {
     expect(saved).toHaveBeenCalledOnce()
   })
 
-  it('tells a surface that keeps its place what it delivered, and opens no terminal there', async () => {
-    const sent = vi.fn()
-    dock.reset(); dock = band = new Dock('', saved, undefined, openWorker, { onSent: sent, keepPlace: true })
+  it('opens no terminal on a send from a surface that keeps its place', async () => {
+    dock.reset(); dock = band = new Dock('', saved, undefined, openWorker, { keepPlace: true })
     dock.open(task({ sessionUuid: 'prior', workerState: 'running', tmuxSession: 'worker' }))
     document.body.append(band.el)
     vi.mocked(fetch).mockResolvedValue(response({ tmux_session: 'worker', terminal: 'rex' }))
-    const before = Date.now()
     type(messageField(), 'one more thing')
     session('Send').click()
     await settle()
-    expect(sent).toHaveBeenCalledWith(expect.objectContaining({ id: 'a/task' }), 'one more thing', expect.any(Number))
-    expect(sent.mock.calls[0][2]).toBeGreaterThanOrEqual(before)
     expect(openWorker).not.toHaveBeenCalled()
     expect(saved).toHaveBeenCalledOnce()
   })

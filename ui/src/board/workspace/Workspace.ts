@@ -423,7 +423,7 @@ export class Workspace {
     this.globeHost.onFeeds?.()
   }
   private graph(): ThreadIndex { return this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards()) }
-  /** A constitution past its draft has its view, and so does any fiber with threads; a draft opens on its own page to be written. */
+  /** A fiber past its draft has a view when it is a constitution or has threads; a draft, threads or not, opens on its own page to be written. */
   private hasMap(card: KanbanCard): boolean {
     const index = this.graph(), current = index.card(card)
     return index.state(current) !== 'drafts' && (index.children(current).length > 0 || current.shuttleKind !== undefined)
