@@ -35,7 +35,7 @@ defmodule ShuttleWeb.ApiContractTest do
   test "version promises identity and readiness, including during boot, and refuses unknown origins" do
     Env.own_scope!()
 
-    assert %{"api_level" => 2, "host" => _, "ready" => true} =
+    assert %{"api_level" => 3, "host" => _, "ready" => true} =
              get(api_conn(), "/api/v1/version") |> assert_contract("/version")
 
     Shuttle.Readiness.begin_boot()
@@ -384,6 +384,21 @@ defmodule ShuttleWeb.ApiContractWorkerTest do
                },
                202
              )
+
+    # A notify-only subscription has no live worker to watch yet.
+    assert %{"error" => error} =
+             request(
+               "/deliver",
+               %{
+                 fiber_id: id,
+                 notify_when_idle: true,
+                 from: "shuttle://elsewhere/claude/sender",
+                 message_id: "notify-1"
+               },
+               409
+             )
+
+    assert error =~ "no live worker"
 
     request("/dispatch", %{fiber_id: id}, 200)
 

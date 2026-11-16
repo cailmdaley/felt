@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Shuttle daemon API, stable tier",
-    "version": "2",
+    "version": "3",
     "description": "The routes a UI other than the board can build on. `info.version` is the API level, the integer `GET /api/v1/version` reports as `api_level`: adding a route or an optional field leaves it alone, removing or renaming anything described here raises it by one. Response objects may carry fields this document does not name; a client ignores them. `x-modules` classes every route the daemon serves under /api/v1: the stable `core` described here, the internal `board` and `fleet` modules, and optional extensions that need software beyond a plain daemon. A client builds on `core` and may ignore the rest."
   },
   "servers": [
@@ -1035,7 +1035,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "The message; must contain non-whitespace text."
+                    "description": "The message; must contain non-whitespace text, except for a notify_when_idle subscription."
                   },
                   "origin": {
                     "type": "string",
@@ -1093,15 +1093,15 @@
                   },
                   "notify_address": {
                     "type": "string",
-                    "description": "With context_only: the session address that receives the idle notice; defaults to from."
+                    "description": "With notify_when_idle: the session address that receives the idle notice; defaults to from."
                   },
                   "notify_when_idle": {
                     "type": "boolean",
-                    "description": "With context_only: subscribes notify_address (or from) to one notice when the receiving worker next goes idle or exits."
+                    "description": "With context_only: subscribes notify_address (or from) to one notice when the receiving worker next goes idle or exits, once the worker takes the entry. With no text: subscribes them at once to the fiber's live worker and answers that subscription's message receipt."
                   },
                   "notify_wake": {
                     "type": "boolean",
-                    "description": "With context_only and notify_when_idle: the idle notice starts a turn for the subscriber."
+                    "description": "With notify_when_idle: the idle notice starts a turn for the subscriber."
                   },
                   "thread_signal": {
                     "type": "object",
@@ -1113,8 +1113,7 @@
                   }
                 },
                 "required": [
-                  "fiber_id",
-                  "text"
+                  "fiber_id"
                 ]
               },
               "example": {
@@ -1128,7 +1127,7 @@
         },
         "responses": {
           "200": {
-            "description": "The worker has the human's line, typed in or launched with it (delivery input), or an agent's fresh session started with the text (delivery fresh, with the worker's terminal fields). A repeated message_id answers duplicate true with the stored outcome: delivered true, or for a human line whose first try may not have arrived, delivered null with disposition unknown.",
+            "description": "A notify-only subscription was made (the MessageReceipt of a session message with no text, status subscribed), or the worker has the human's line, typed in or launched with it (delivery input), or an agent's fresh session started with the text (delivery fresh, with the worker's terminal fields). A repeated message_id answers duplicate true with the stored outcome: delivered true, or for a human line whose first try may not have arrived, delivered null with disposition unknown.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1138,6 +1137,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/DeliveryFresh"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MessageReceipt"
                     }
                   ]
                 }
@@ -1168,7 +1170,7 @@
             }
           },
           "400": {
-            "description": "fiber_id or text is missing or blank, context_only lacks message_id, or origin names no known host.",
+            "description": "fiber_id is missing or blank, text is missing or blank without notify_when_idle, context_only lacks message_id, or origin names no known host.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1195,7 +1197,7 @@
             }
           },
           "409": {
-            "description": "This daemon does not own the fiber, a fresh session was refused (reason), or a launch was refused as on /dispatch (already_running, launch_reserved).",
+            "description": "A notify-only subscription found no live worker to watch, this daemon does not own the fiber, a fresh session was refused (reason), or a launch was refused as on /dispatch (already_running, launch_reserved).",
             "content": {
               "application/json": {
                 "schema": {

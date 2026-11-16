@@ -132,6 +132,21 @@ Rolling a host back to 41 leaves inbox text and attempts on disk, but its consum
 Records already in offered remain, but a 41 daemon does not use them to deduplicate: retrying a board line there can paste twice, and retrying a `--fresh` id starts another session, with forced-start authority.
 Rolling forward resumes the recorded inbox state.
 
+### API level 3 and rollback
+
+API level 3 removes `/deliver`'s `unless_live` and its 409 `live` answer, and lets `/deliver` take `notify_when_idle` with no `text`.
+The CLI contract level does not change: no verb the daemon shells changed its arguments or output.
+During a deploy, peers on the previous build and on this one meet in both directions:
+
+- A previous CLI that fails its `/version` probe still sends `unless_live`; this daemon ignores it and queues the message, answering 202 as for any fiber message.
+- A notify-only `--notify-when-idle` to a fiber, from this CLI to a daemon or owner on the previous build, is refused with 400 `text is required`; nothing is stored, and the same command succeeds once the owner runs this build. A previous CLI resolves the fiber to its worker and posts `/messages`, which this daemon still serves.
+- This daemon answers a failed consume with `delivered: null` and a `detail`; a previous CLI prints the detail after `queued for`.
+- Entries this build writes carry no `session` wish; a previous build reads them as `any`.
+- A previous CLI clears a messaged fiber's question itself as well as its owner; whichever runs second finds none.
+
+Rolling a host back one landing loses nothing on disk: this build writes no new state.
+The rolled-back daemon answers a failed consume as plain `queued` again, and a CLI of this build elsewhere is refused a notify-only fiber subscription to that host until it rolls forward.
+
 ### Voice, pulses and contract 44
 
 A spoken batch is a human line with source `voice` and the relay's stable `voice-…` id.
