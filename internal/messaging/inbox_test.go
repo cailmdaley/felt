@@ -323,7 +323,7 @@ func TestReadersHonourNotBefore(t *testing.T) {
 				t.Fatal(err)
 			}
 			entry.QueuedAt = now.Add(-2 * time.Hour).UnixNano()
-			if err := writeFiberMailboxAttempt(path, entry, ""); err != nil {
+			if err := writeMailboxEntry(path, entry); err != nil {
 				t.Fatal(err)
 			}
 		}

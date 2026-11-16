@@ -245,35 +245,6 @@ func TestConsumeRollForwardABAAndRetry(t *testing.T) {
 	}
 }
 
-func TestConsumeOldPinUsesOldTransportID(t *testing.T) {
-	for _, oldRecord := range []bool{false, true} {
-		t.Run(fmt.Sprint(oldRecord), func(t *testing.T) {
-			env, w := consumeFixture(t)
-			putWish(t, env, "old", "force", "hold")
-			path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey("old")+".json")
-			if oldRecord {
-				err := pinClaim([]string{path}, w.Address)
-				if err != nil {
-					t.Fatal(err)
-				}
-			} else {
-				if err := writeFiberMailboxAttempt(path, readEntry(t, path), w.Address); err != nil {
-					t.Fatal(err)
-				}
-			}
-			_, err := consumeWith(context.Background(), env, "fiber", "host", w, func(_ context.Context, _ *sysenv.Env, _ string, r Request, address string) (Receipt, error) {
-				if r.MessageID != "old" || r.Text != "text of old" || address != w.Address {
-					t.Fatalf("changed old send %+v %s", r, address)
-				}
-				return Receipt{Status: StatusAccepted}, nil
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-		})
-	}
-}
-
 func TestConsumeBatchSizeLimit(t *testing.T) {
 	env, w := consumeFixture(t)
 	w.Idle = true

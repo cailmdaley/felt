@@ -164,18 +164,6 @@ func TestRacedReadersDeliverAnEntryOnceWithADeliveredAttempt(t *testing.T) {
 	}
 }
 
-func TestAttemptAddressAloneReadsAsAnOpenAttempt(t *testing.T) {
-	const raw = `{"request":{"address":"","text":"x","wake":true,"message_id":"thread-closed-abc"},"queued_at":1,"attempt_address":"shuttle://h/codex/s","possible_repeat":true}`
-	var entry mailboxEntry
-	if err := json.Unmarshal([]byte(raw), &entry); err != nil {
-		t.Fatal(err)
-	}
-	want := Attempt{BatchID: batchID([]string{"thread-closed-abc"}), Conversation: "shuttle://h/codex/s", Members: []string{"thread-closed-abc"}}
-	if !entry.Attempt.open() || fmt.Sprint(*entry.Attempt) != fmt.Sprint(want) || !entry.PossibleRepeat {
-		t.Fatalf("entry = %+v, attempt %+v", entry, entry.Attempt)
-	}
-}
-
 // mainEntry is the entry as origin/main (b70f2e61b) decodes it: no attempt
 // record, and no custom decoding.
 type mainEntry struct {
@@ -196,24 +184,18 @@ func TestEntriesThisBuildWritesReadTheSameToAnOlderBuild(t *testing.T) {
 		wantRepeat  bool
 		wantPending bool
 	}{
-		{"direct claim", func(p []string) error { return pinClaim(p, a) }, a, false, true},
+		{"direct claim", func(p []string) error { pinBatch(t, p, a); return nil }, a, false, true},
 		{"hook claim", func(p []string) error { _, err := claimBatch(p, a); return err }, "", false, true},
 		{"released", func(p []string) error {
-			if err := pinClaim(p, a); err != nil {
-				return err
-			}
+			pinBatch(t, p, a)
 			return closeAttempts(p, attemptReleased)
 		}, "", false, true},
 		{"ambiguous", func(p []string) error {
-			if err := pinClaim(p, a); err != nil {
-				return err
-			}
+			pinBatch(t, p, a)
 			return closeAttempts(p, attemptAmbiguous)
 		}, "", true, true},
 		{"delivered", func(p []string) error {
-			if err := pinClaim(p, a); err != nil {
-				return err
-			}
+			pinBatch(t, p, a)
 			return closeAttempts(p, attemptDelivered)
 		}, a, false, false},
 	} {
@@ -239,40 +221,6 @@ func TestEntriesThisBuildWritesReadTheSameToAnOlderBuild(t *testing.T) {
 				t.Fatalf("an older build reads %+v", old)
 			}
 		})
-	}
-}
-
-func TestEntriesAnOlderBuildRewritesReadAsItLeftThem(t *testing.T) {
-	const a, b = "shuttle://host/claude/A", "shuttle://host/claude/B"
-	env := testEnv(t)
-	path := enqueueFiber(t, env, "m")[0]
-	if err := pinClaim([]string{path}, a); err != nil {
-		t.Fatal(err)
-	}
-	for _, pin := range []string{"", b} {
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var old mainEntry
-		if err := json.Unmarshal(raw, &old); err != nil {
-			t.Fatal(err)
-		}
-		old.AttemptAddress = pin
-		raw, err = json.Marshal(old)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := mailboxWrite(path, raw, false); err != nil {
-			t.Fatal(err)
-		}
-		entry := readEntry(t, path)
-		if pin == "" && entry.Attempt != nil {
-			t.Fatalf("unpinned by an older build, entry still holds %+v", entry.Attempt)
-		}
-		if pin != "" && (!entry.Attempt.open() || entry.Attempt.Conversation != pin) {
-			t.Fatalf("pinned to %s by an older build, entry holds %+v", pin, entry.Attempt)
-		}
 	}
 }
 
@@ -303,9 +251,7 @@ func TestUnknownRolloverClosesAndReclaimsInOneEntry(t *testing.T) {
 func TestPendingEntriesShowAnOpenAttempt(t *testing.T) {
 	env := testEnv(t)
 	path := enqueueFiber(t, env, "m")[0]
-	if err := pinClaim([]string{path}, "shuttle://host/claude/A"); err != nil {
-		t.Fatal(err)
-	}
+	pinBatch(t, []string{path}, "shuttle://host/claude/A")
 	entries, err := PendingEntries(env, "fiber")
 	if err != nil || len(entries) != 1 || entries[0].Attempt == nil || entries[0].Attempt.Conversation != "shuttle://host/claude/A" {
 		t.Fatalf("pending = %+v, %v", entries, err)
@@ -335,9 +281,7 @@ func TestDeliveredEntryKeepsTheModificationTimeRetentionRunsFrom(t *testing.T) {
 			}
 		}},
 		{"direct delivery keeps the claim time", func(t *testing.T, env *sysenv.Env, root, path string) {
-			if err := pinClaim([]string{path}, a); err != nil {
-				t.Fatal(err)
-			}
+			pinBatch(t, []string{path}, a)
 			if err := os.Chtimes(path, old, old); err != nil {
 				t.Fatal(err)
 			}
@@ -465,66 +409,6 @@ func TestARejectedRetryIsSentAgainAsAPossibleRepeat(t *testing.T) {
 	}
 }
 
-func TestAnOlderBuildsPossibleRepeatReplaysItsStoredReceipt(t *testing.T) {
-	const b = "shuttle://host/codex/B"
-	env := testEnv(t)
-	request := Request{MessageID: "wake-rolled", Text: "continue", Wake: true}
-	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: request}); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey(request.MessageID)+".json")
-	var sent []Request
-	sender := dedupSender(&sent, func(Request) (string, string) { return StatusUnknown, "ambiguous_delivery" })
-	// The older build's send to successor B, stored unknown under its wording.
-	older := request
-	older.Text = "Possible repeat: delivery to a previous worker had an unknown outcome before its session ended.\n\n" + request.Text
-	if _, err := sender(context.Background(), env, "host", older, b); ErrorCode(err) != "ambiguous_delivery" {
-		t.Fatal(err)
-	}
-	entry := readEntry(t, path)
-	entry.PossibleRepeat = true
-	if err := writeFiberMailboxAttempt(path, entry, b); err != nil {
-		t.Fatal(err)
-	}
-	if err := deliverPinned(t, env, b, request, sender); ErrorCode(err) != "ambiguous_delivery" {
-		t.Fatalf("delivery = %v, want the stored receipt replayed", err)
-	}
-	if len(sent) != 1 {
-		t.Fatalf("transport saw %d sends, want 1", len(sent))
-	}
-}
-
-func TestAnOlderBuildReadsAMidRetryEntryAsPinnedWithoutAWarning(t *testing.T) {
-	const a = "shuttle://host/codex/A"
-	env := testEnv(t)
-	request := Request{MessageID: "wake-rollback", Text: "continue", Wake: true}
-	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: request}); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey(request.MessageID)+".json")
-	var sent []Request
-	sender := dedupSender(&sent, func(Request) (string, string) { return StatusUnknown, "ambiguous_delivery" })
-	for i := 0; i < 2; i++ {
-		if err := deliverPinned(t, env, a, request, sender); ErrorCode(err) != "ambiguous_delivery" {
-			t.Fatal(err)
-		}
-		expireAttempt(t, path)
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var old mainEntry
-	if err := json.Unmarshal(raw, &old); err != nil {
-		t.Fatal(err)
-	}
-	// The older build sends the plain text under the plain id, whose stored
-	// receipt it replays.
-	if len(sent) != 2 || old.AttemptAddress != a || old.PossibleRepeat {
-		t.Fatalf("sends %d, older build reads %+v", len(sent), old)
-	}
-}
-
 func TestAHeldApprovalIsNotRetried(t *testing.T) {
 	const a = "shuttle://host/claude/A"
 	env := testEnv(t)
@@ -571,31 +455,5 @@ func TestALiveConversationGetsOneRetry(t *testing.T) {
 	entry := readEntry(t, path)
 	if len(ids) != 2 || !entry.Attempt.open() || entry.Attempt.Retry != 1 || entry.AttemptAddress != a {
 		t.Fatalf("transport ids %v, entry = %+v attempt %+v", ids, entry, entry.Attempt)
-	}
-}
-
-func TestAttemptAddressAloneStartsItsRetryWaitWhenFirstSeenUnknown(t *testing.T) {
-	const a = "shuttle://host/codex/A"
-	env := testEnv(t)
-	root := mailboxDir(env, "fiber", "fiber")
-	request := Request{MessageID: "wake-old", Text: "continue", Wake: true}
-	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: request}); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(root, "pending", mailboxKey(request.MessageID)+".json")
-	if err := writeFiberMailboxAttempt(path, readEntry(t, path), a); err != nil {
-		t.Fatal(err)
-	}
-	calls := 0
-	sender := func(context.Context, *sysenv.Env, string, Request, string) (Receipt, error) {
-		calls++
-		return Receipt{Status: StatusUnknown}, errCode("ambiguous_delivery", "lost reply")
-	}
-	if err := deliverPinned(t, env, a, request, sender); ErrorCode(err) != "ambiguous_delivery" {
-		t.Fatalf("delivery = %v", err)
-	}
-	entry := readEntry(t, path)
-	if calls != 1 || !entry.Attempt.open() || entry.Attempt.OpenedAt == 0 || entry.Attempt.Retry != 0 || entry.PossibleRepeat {
-		t.Fatalf("calls %d, entry = %+v attempt %+v", calls, entry, entry.Attempt)
 	}
 }

@@ -23,7 +23,7 @@ func TestDelayedEntryWaitsUntilCancelled(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.QueuedAt = time.Now().Add(-30 * 24 * time.Hour).UnixNano()
-	if err := writeFiberMailboxAttempt(path, e, ""); err != nil {
+	if err := writeMailboxEntry(path, e); err != nil {
 		t.Fatal(err)
 	}
 	if summary, err := SummarizePending(env, "fiber"); err != nil || summary.Count != 0 || len(summary.Scheduled) != 1 {

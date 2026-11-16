@@ -27,7 +27,8 @@ func TestOverdueFiberContextReportsOnlyPendingOlderThanThreshold(t *testing.T) {
 	}
 	entry.QueuedAt = now.Add(-11 * time.Minute).UnixNano()
 	entry.PossibleRepeat = true
-	if err := writeFiberMailboxAttempt(path, entry, "shuttle://host/claude/previous"); err != nil {
+	entry.AttemptAddress = "shuttle://host/claude/previous"
+	if err := writeMailboxEntry(path, entry); err != nil {
 		t.Fatal(err)
 	}
 	if err := offerMailbox(root, func(req Request) bool { return req.MessageID == "acknowledged" }, func([]Request) error { return nil }); err != nil {

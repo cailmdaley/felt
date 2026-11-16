@@ -21,48 +21,6 @@ func offerMailboxValidated(dir string, accepts func(Request) bool, current func(
 	return offerMailboxWithAck(dir, "shuttle://host/claude/hook", accepts, emit, current, "")
 }
 
-// writeFiberMailboxAttempt pins an entry to address, or unpins it, the way a
-// build that predates the attempt record does: attempt_address alone.
-func writeFiberMailboxAttempt(path string, entry mailboxEntry, address string) error {
-	entry.AttemptAddress = address
-	entry.Attempt = nil
-	return writeMailboxEntry(path, entry)
-}
-
-// pinClaim claims entries for conversation and pins them there, the way a
-// build before batch payloads claimed a direct delivery.
-func pinClaim(paths []string, conversation string) error {
-	if _, err := claimBatch(paths, conversation); err != nil {
-		return err
-	}
-	for _, path := range paths {
-		entry, err := readFiberMailboxEntry(path)
-		if err != nil {
-			return err
-		}
-		entry.AttemptAddress = conversation
-		if err := writeMailboxEntry(path, entry); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// deliverPinned advances the fiber inbox's open batches for the worker at
-// selected, as consume's first step does, after pinning r to selected the way
-// a build before batch payloads claimed an entry when it is not pinned yet.
-func deliverPinned(t *testing.T, env *sysenv.Env, selected string, r Request, send fiberContextSender) error {
-	t.Helper()
-	root := mailboxDir(env, "fiber", "fiber")
-	path := filepath.Join(root, "pending", mailboxKey(r.MessageID)+".json")
-	if e, err := readFiberMailboxEntry(path); err == nil && e.AttemptAddress == "" {
-		if err := pinClaim([]string{path}, selected); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return advanceBatches(t, env, selected, send)
-}
-
 // pinBatch claims the entries at paths as one open wake batch pinned to
 // conversation, manifest first, as consume claims a batch, and returns it.
 func pinBatch(t *testing.T, paths []string, conversation string) Attempt {
@@ -106,7 +64,7 @@ func deliverBatch(t *testing.T, env *sysenv.Env, selected string, r Request, sen
 func advanceBatches(t *testing.T, env *sysenv.Env, selected string, send fiberContextSender) error {
 	t.Helper()
 	root := mailboxDir(env, "fiber", "fiber")
-	_, batches, err := openBatches(env, root)
+	_, batches, err := openBatches(root)
 	if err != nil {
 		t.Fatal(err)
 	}

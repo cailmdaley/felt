@@ -150,7 +150,7 @@ func consumePass(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	// confirmed receipt, a superseded member), and the rest wait for the next
 	// receiver.
 	errs := []error{}
-	_, batches, err := openBatches(env, root)
+	_, batches, err := openBatches(root)
 	if err != nil {
 		return Consumption{}, err
 	}
@@ -169,14 +169,6 @@ func consumePass(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 		batches = nil
 	}
 	for i := range batches {
-		// Quiet context pinned before batches existed is taken by a Codex
-		// receiver's fiber hook, never sent to its session.
-		if !batches[i].Payload.Wake && a.Harness == "codex" {
-			if hook {
-				errs = append(errs, closeConsumedBatch(root, &batches[i], attemptReleased, nil))
-			}
-			continue
-		}
 		sent, err := deliverConsumedBatch(ctx, env, root, host, w, &batches[i], send)
 		if sent {
 			result.Action, result.Members = "context", append(result.Members, batches[i].Members...)
@@ -186,7 +178,7 @@ func consumePass(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 		}
 		errs = append(errs, err)
 	}
-	items, _, err := openBatches(env, root)
+	items, _, err := openBatches(root)
 	if err != nil {
 		return Consumption{}, err
 	}
@@ -446,10 +438,8 @@ func decideConsumption(due []mailboxPendingItem, w Worker, direct bool, reservat
 }
 
 // openBatches reads the pending entries no open batch holds, and every open
-// batch: one per manifest under batches/, and one for each entry pinned
-// without a manifest. A pin made before batches had manifests is completed
-// here as a batch of one, under the transport id it already used.
-func openBatches(env *sysenv.Env, root string) ([]mailboxPendingItem, []Attempt, error) {
+// batch, one per manifest under batches/.
+func openBatches(root string) ([]mailboxPendingItem, []Attempt, error) {
 	items, err := pendingItems(root)
 	if err != nil {
 		return nil, nil, err
@@ -466,17 +456,8 @@ func openBatches(env *sysenv.Env, root string) ([]mailboxPendingItem, []Attempt,
 	}
 	var free []mailboxPendingItem
 	for _, it := range items {
-		id := it.entry.Request.MessageID
-		switch {
-		case pinned[id]:
-		case it.entry.AttemptAddress == "":
+		if !pinned[it.entry.Request.MessageID] {
 			free = append(free, it)
-		default:
-			a, err := legacyBatch(env, root, it)
-			if err != nil {
-				return nil, nil, err
-			}
-			batches = append(batches, a)
 		}
 	}
 	return free, batches, nil
@@ -507,33 +488,6 @@ func newConsumedAttempt(w Worker, items []mailboxPendingItem, wake bool) Attempt
 	payload := consumedVariant(a)
 	a.Payload = &payload
 	return a
-}
-
-// legacyBatch reads an entry pinned without a manifest as a batch of one. An
-// attempt without a stored payload was pinned before batches: it keeps the
-// transport id it was sent under (see freezeLegacyAttempt), and its wait for
-// an unknown outcome starts now.
-func legacyBatch(env *sysenv.Env, root string, it mailboxPendingItem) (Attempt, error) {
-	e := it.entry
-	if e.Attempt.Payload != nil {
-		return *e.Attempt, nil
-	}
-	e = freezeLegacyAttempt(e)
-	a := *e.Attempt
-	a.OpenedAt = time.Now().UnixNano()
-	switch {
-	case a.Retry > 0:
-		a.Variant = "retry-1"
-	case e.PossibleRepeat:
-		a.Variant = "possible-repeat"
-	default:
-		a.Variant = "plain"
-	}
-	// A warning on a successor's send must still fit the transport's limit.
-	if len(a.BaseText) > (64<<10)-512 {
-		a.BaseText = "Full message JSON (read request.text before acting): " + filepath.Join(root, "offered", filepath.Base(it.path))
-	}
-	return a, nil
 }
 
 // pinConsumedBatch records the batch's manifest, with its complete payload and

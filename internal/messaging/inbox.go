@@ -115,9 +115,7 @@ func (e mailboxEntry) due(now time.Time) bool {
 }
 
 // UnmarshalJSON gives an entry written without wishes the wishes its request
-// fields imply, and reads an attempt_address with no attempt record for that
-// address, as a build that predates the record writes it, as an open attempt
-// of that one entry to that address.
+// fields imply.
 func (e *mailboxEntry) UnmarshalJSON(data []byte) error {
 	type stored mailboxEntry
 	var s stored
@@ -126,10 +124,6 @@ func (e *mailboxEntry) UnmarshalJSON(data []byte) error {
 	}
 	*e = mailboxEntry(s)
 	e.Wishes = e.Wishes.withDefaults(e.Request)
-	if e.AttemptAddress != "" && (e.Attempt == nil || e.Attempt.Conversation != e.AttemptAddress) {
-		members := []string{e.Request.MessageID}
-		e.Attempt = &Attempt{BatchID: batchID(members), Conversation: e.AttemptAddress, Members: members}
-	}
 	return nil
 }
 

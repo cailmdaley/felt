@@ -417,10 +417,7 @@ When it is still the receiver, five minutes of unknown outcome permit one warnin
 Exhausting that retry does not prevent later roll-forward to another receiver.
 Approval-held messages (`wake_held`) are not retried.
 
-An entry pinned without a manifest is an open batch of one, including one read from `attempt_address` alone; its five-minute wait starts when the consumer first reads it.
-Without a stored payload it keeps the transport id it was sent under.
 Retries and roll-forwards use hashed transport identities.
-Quiet context pinned this way is released to a Codex receiver's fiber hook rather than sent.
 
 A hook claim is unpinned.
 If a hook leaves its attempt open, the next reader under the inbox lock, a hook or the consumer, closes it ambiguous, and the entry carries “Possible repeat” wherever it goes next.

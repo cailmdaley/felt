@@ -298,29 +298,6 @@ func fiberContextHookEligible(root, conversation string, request Request) bool {
 
 type fiberContextSender func(context.Context, *sysenv.Env, string, Request, string) (Receipt, error)
 
-// freezeLegacyAttempt pins the transport id a pin made before batch payloads
-// was sent under.
-func freezeLegacyAttempt(entry mailboxEntry) mailboxEntry {
-	request := entry.Request
-	request.ThreadSignal = nil
-	payload := attemptRequest(request, entry)
-	entry.Attempt.Payload, entry.Attempt.BaseText = &payload, request.Text
-	return entry
-}
-
-// attemptRequest is the request a build before batch payloads sent for a
-// pinned entry, under the transport id it used.
-func attemptRequest(request Request, entry mailboxEntry) Request {
-	switch {
-	case entry.Attempt != nil && entry.Attempt.Retry > 0:
-		request.MessageID += fmt.Sprintf("-retry-%d", entry.Attempt.Retry)
-		request.Text = "Possible repeat: an earlier delivery of this message to this session had an unknown outcome.\n\n" + request.Text
-	case entry.PossibleRepeat:
-		request.Text = "Possible repeat: delivery to a previous worker had an unknown outcome before its session ended.\n\n" + request.Text
-	}
-	return request
-}
-
 func fiberContextSessionEnded(env *sysenv.Env, host, address string) bool {
 	a, err := ParseAddress(address)
 	return err == nil && a.Host == host && mailboxReceiverEnded(env, a.Harness, a.ID, host)
