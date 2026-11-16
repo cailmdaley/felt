@@ -1,13 +1,14 @@
 import { announce } from '@ui-sdk/core'
 import type { KanbanCard } from '../KanbanTypes.js'
-import { ATTENTION, familyModel, type MapFeeds, type MapFile, type MapThread } from '../family/model.js'
+import { ATTENTION_ORDER, attentionOf, lastActive, quietWord, wantOf, type Want, type Waits } from '../attention.js'
+import type { MapFeeds, MapFile } from '../family/model.js'
 import { htmlEl as el } from '../family/drawing.js'
 import { ago } from '../civilDay.js'
 import { bindDrawnPage } from '../FileViewerPanel.js'
 import { stateDot } from '../stateDot.js'
 import { slug } from '../threadOutline.js'
 import { renderMarkdown } from '../utils.js'
-import { threadState, type ThreadIndex } from '../threads.js'
+import type { ThreadIndex } from '../threads.js'
 import { parseDocKey, type DocKey } from './documents.js'
 import type { FiberActs } from './Dock.js'
 import { docButtons, type DocFeeds } from './docButtons.js'
@@ -25,24 +26,28 @@ export interface ViewFeeds extends MapFeeds, DocFeeds {
   view(card: KanbanCard, quiet?: boolean): void
   /** The human has seen this file as it stood: it is no longer new. */
   seen(file: MapFile): void
+  /** What waits on the human, by fiber. */
+  waits(): Waits
 }
 
 /** How far the page must be pulled down past its top before its orchestrator's view opens, in px. */
 const PULL_PX = 120
 
-/** Whether a constitution needs the human, in a word. */
-const needs = (card: KanbanCard): string => card.ask && card.status === 'active' ? 'asks' : threadState(card) === 'to-review' ? 'for review' : ''
+/** What a waiting constitution wants, in a word. */
+const WANT_WORD: Readonly<Record<Want['kind'], string>> = { ask: 'asks', review: 'for review', post: 'posted', blocked: 'blocked' }
 
 /**
  * One view of a constitution, the same from the Desk, a channel, a role or a
  * thread: its orchestrators above as a path back up, each step its dot and
  * slug (choosing one opens its view; pulling the page down past its top opens
  * the nearest one's, moving neither Rex nor voice); its head (state dot,
- * slug, whether it needs the human, its run, its pages and its acts); the
- * last thing it posted; then its sub-threads as a narrow column of rows (dot,
- * slug, a word of state, its run, how many threads it has of its own, and a
- * chevron: each opens the same view one level down) beside a large preview
- * of its tapestry or newest sent file, which counts as seen. No outcome is
+ * slug, what it wants of the human or its faint word, its run, its pages
+ * and its acts); the last thing it posted; then its sub-threads as a narrow
+ * column of rows (dot, slug, its run, then what it wants when it waits on the
+ * human or its faint word when quiet, and a chevron: each opens the same view
+ * one level down), what waits first, each followed by every thread below it
+ * that waits on the human; beside them a large preview of its tapestry or
+ * newest sent file, which counts as seen. No outcome is
  * drawn. It reads feeds and repaints only while its frame is selected in an
  * open reader; its frame's eviction ends it.
  */
@@ -112,8 +117,9 @@ export class FamilyPage {
     if (!this.awake) return
     this.feeds.refresh()
     const current = index.card(card), children = index.children(current), above = this.ancestors()
-    const said = this.feeds.said(current)
-    const signature = JSON.stringify([Math.floor(now / 60_000), current, above, children, said, this.feeds.files(current).map(file => file.key)])
+    const said = this.feeds.said(current), waits = this.feeds.waits()
+    const wants = [current, ...above, ...index.subtree(current)].map(card => wantOf(card, waits))
+    const signature = JSON.stringify([Math.floor(now / 60_000), current, above, children, said, wants, this.feeds.files(current).map(file => file.key)])
     if (signature === this.signature) return
     this.signature = signature
     this.paint(current, now)
@@ -147,24 +153,21 @@ export class FamilyPage {
    * drawn again keep the row the keys were on.
    */
   private paint(card: KanbanCard, now: number): void {
-    const above = this.ancestors()
-    const model = familyModel(this.index!, card, this.feeds, now)
-    const urgency = (thread: MapThread): number => {
-      const rank = (ATTENTION as readonly string[]).indexOf(thread.standing)
-      return rank >= 0 ? rank : ATTENTION.length + ['still', 'quiet', 'aside'].indexOf(thread.standing)
-    }
-    const threads = model.root.children.map(key => model.threads.get(key)!)
-      .sort((a, b) => urgency(a) - urgency(b) || b.lastMove - a.lastMove)
+    const above = this.ancestors(), index = this.index!, waits = this.feeds.waits()
+    // A thread with a wait anywhere below it stands with what waits, and every such wait is drawn beneath it.
+    const threads = index.children(card).map(child => {
+      const below = index.subtree(child).filter(each => wantOf(each, waits))
+      return { child, below, rank: below.length ? 0 : ATTENTION_ORDER.indexOf(attentionOf(child, waits)) }
+    }).sort((a, b) => a.rank - b.rank || lastActive(b.child) - lastActive(a.child))
     const focused = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.ov-ancestor, .ov-thread')
     const held = focused && this.el.contains(focused) ? `${focused.className}:${focused.dataset.fiber}` : undefined
     this.up.replaceChildren(...above.map(ancestor => this.ancestor(ancestor)))
     this.paintHead(card, now)
     this.paintSaid(card, now)
     this.paintFigure(card)
-    this.threads.replaceChildren(...threads.map(thread => {
-      const row = this.row(thread, now)
+    this.threads.replaceChildren(...threads.map(({ child, below }) => {
       const item = el('li')
-      item.append(row)
+      item.append(this.row(child, now, waits), ...below.map(deep => this.row(deep, now, waits, true)))
       return item
     }))
     this.threads.hidden = !threads.length
@@ -183,25 +186,30 @@ export class FamilyPage {
   /** An orchestrator above, a step of the path back up: its dot and slug. */
   private ancestor(card: KanbanCard): HTMLElement {
     const step = this.opener(card, 'ov-ancestor')
-    step.append(stateDot(card, () => this.feeds.view(card)), el('span', 'ov-slug', slug(card)))
+    step.append(stateDot(card, this.feeds.waits(), () => this.feeds.view(card)), el('span', 'ov-slug', slug(card)))
     return step
   }
-  /** A thread below: its dot, slug, a word of state, its run, how many threads it has of its own, and the chevron that says it opens. */
-  private row(thread: MapThread, now: number): HTMLElement {
-    const card = thread.card, row = this.opener(card, 'ov-thread'), below = this.index!.children(card).length
-    row.dataset.standing = thread.tone
+  /**
+   * A thread: its dot, slug and run, then what it wants when it waits on the
+   * human, or its faint word when quiet, and the chevron that says it opens.
+   * A thread `deep` below the row it is drawn under waits, and says so.
+   */
+  private row(card: KanbanCard, now: number, waits: Waits, deep = false): HTMLElement {
+    const row = this.opener(card, deep ? 'ov-thread ov-deep' : 'ov-thread'), want = wantOf(card, waits), attention = attentionOf(card, waits)
+    row.dataset.attention = attention
     const open = el('span', 'ov-open', '›')
     open.setAttribute('aria-hidden', 'true')
-    row.append(stateDot(card, () => this.feeds.view(card)), el('span', 'ov-slug', slug(card)), el('span', 'ov-word', thread.word ?? ''), el('span', 'ov-time', runWords(card, now)),
-      el('span', 'ov-count', below ? `${below} ${below === 1 ? 'thread' : 'threads'}` : ''), open)
+    const word = want ? el('span', 'ov-want') : el('span', 'ov-word', attention === 'quiet' ? quietWord(card) : '')
+    if (want) { word.innerHTML = renderMarkdown(want.text); word.title = word.textContent?.replace(/\s+/g, ' ').trim() ?? '' }
+    row.append(stateDot(card, waits, () => this.feeds.view(card)), el('span', 'ov-slug', deep ? `↳ ${slug(card)}` : slug(card)), el('span', 'ov-time', runWords(card, now)), word, open)
     return row
   }
   private paintHead(card: KanbanCard, now: number): void {
     const head = this.head
     head.title = card.name
     this.name.textContent = slug(card)
-    const need = needs(card)
-    this.facts.replaceChildren(...need ? [el('span', 'ov-needs', need)] : [], el('span', 'ov-time', runWords(card, now)))
+    const waits = this.feeds.waits(), want = wantOf(card, waits), faint = attentionOf(card, waits) === 'quiet' ? quietWord(card) : ''
+    this.facts.replaceChildren(...want ? [el('span', 'ov-needs', WANT_WORD[want.kind])] : faint ? [el('span', 'ov-word', faint)] : [], el('span', 'ov-time', runWords(card, now)))
     // Its pages are drawn again; the one in focus keeps it.
     const part = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.ws-doc-button')
     const kept = part && this.docs.contains(part) ? part.dataset.part : undefined
@@ -209,7 +217,7 @@ export class FamilyPage {
     this.docs.replaceWith(docs)
     this.docs = docs
     if (kept) docs.querySelector<HTMLElement>(`[data-part="${kept}"]`)?.focus({ preventScroll: true })
-    head.firstElementChild!.replaceWith(stateDot(card, () => {}))
+    head.firstElementChild!.replaceWith(stateDot(card, waits, () => {}))
     if (this.actsFor && !this.acts) {
       this.acts = this.actsFor(() => this.card!)
       this.tools.append(this.acts.el)
@@ -233,7 +241,7 @@ export class FamilyPage {
       figure.hidden = !file
       if (!shown || !file) return
       const doc = shown.key
-      // Shown here, it is seen: its thread's row stops saying "new file".
+      // Shown here, it is seen.
       if (shown.unread) this.feeds.seen(shown)
       if (this.thumb?.doc !== doc) {
         this.thumb?.thumbnail.dispose()

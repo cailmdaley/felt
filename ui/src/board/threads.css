@@ -2,4 +2,3 @@
 .kbn-thread-row:hover, .kbn-thread-row:focus-visible { background: var(--kbn-plate); }
 .kbn-thread-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Messages waiting for a constitution's next worker outside constitution index rows. */
-.kbn-waiting { flex: none; color: var(--kbn-ink-faint); font-size: var(--type-meta); font-variant-numeric: tabular-nums; white-space: nowrap; }

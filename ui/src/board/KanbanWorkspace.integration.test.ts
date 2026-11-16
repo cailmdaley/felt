@@ -72,7 +72,7 @@ describe('Desk rows in the document workspace', () => {
     const deskRows = (data: KanbanResponse): string[] => {
       const order = deskOrder(data)
       const renderer = new KanbanSurfaceRenderer({
-        getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => data,
+        getDragSourceId: () => null, setDragSourceId: () => {}, waits: () => new Map(), getLastResponse: () => data,
         stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: vi.fn(),
       })
       const root = document.createElement('div')

@@ -39,19 +39,19 @@ describe('every thread surface names a thread the way the Desk files it', () => 
   const asking = thread({ id: 'hub/asking', orchestrator: 'hub', status: 'active', workerState: 'running', runtimePhase: 'waiting' })
   const hub = thread({ id: 'hub', status: 'active', workerState: 'running', runtimePhase: 'working' })
   const expected: Array<[KanbanCard, string, string]> = [
-    [spawned, 'inFlight', 'Working'], [standing, 'resting', 'Resting'], [seat, 'roles', 'Roles'], [asking, 'inFlight', 'Waiting'],
+    [spawned, 'inFlight', 'Quiet'], [standing, 'resting', 'Resting'], [seat, 'roles', 'Roles'], [asking, 'inFlight', 'Working'],
   ]
-  it('an armed thread with no worker yet is Working, a standing one Resting, a seat Roles', () => {
+  it('an armed thread with no worker yet is quiet, a standing one Resting, a seat Roles, an idle worker that asked nothing Working', () => {
     for (const [c, column, label] of expected) {
       expect(c.column).toBe(column)
       expect(constitutionMentions([c])[0].state).toBe(label)
     }
   })
-  it('the constitution\'s view names each thread\'s state in a word', () => {
+  it('the constitution\'s view gives a quiet thread its faint word, and an idle worker that asked nothing none', () => {
     const index = new ThreadIndex([hub, ...expected.map(([c]) => c)])
-    const page = new FamilyPage({ marks: () => undefined, reach: () => 14 * 86_400_000, files: () => [], refresh: () => {}, lead: async () => undefined, said: () => undefined, open: () => {}, view: () => {}, seen: () => {}, shuttleBase: '' }, () => {}); page.update(hub, index)
+    const page = new FamilyPage({ marks: () => undefined, reach: () => 14 * 86_400_000, files: () => [], refresh: () => {}, lead: async () => undefined, said: () => undefined, open: () => {}, view: () => {}, seen: () => {}, waits: () => new Map(), shuttleBase: '' }, () => {}); page.update(hub, index)
     const words = Object.fromEntries([...page.el.querySelectorAll<HTMLElement>('.ov-thread')].map(row => [row.dataset.fiber, row.querySelector('.ov-word')?.textContent]))
-    expect(words).toEqual({ [spawned.id]: 'armed', [standing.id]: 'resting', [seat.id]: 'seat', [asking.id]: 'your turn' })
+    expect(words).toEqual({ [spawned.id]: '', [standing.id]: '↻', [seat.id]: 'seat', [asking.id]: '' })
   })
 })
 

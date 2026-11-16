@@ -45,13 +45,11 @@ describe('the Desk reads at the board label size', () => {
 })
 
 describe('pigment on the Desk is state', () => {
-  it('uses red for a question, gold for the other human turns, blue for work, muted for starting, and paper for quiet dots', () => {
+  it('uses gold for what waits on the human, blue for work, and paper for quiet dots', () => {
     const dots = sheet('stateDot.css')
     expect(rule(dots, '.constitution-state-dot')['--state-dot']).toBe('var(--kbn-paper)')
-    expect(rule(dots, ".constitution-state-dot[data-turn='working']")['--state-dot']).toBe('var(--kbn-agent)')
-    expect(rule(dots, ".constitution-state-dot[data-turn='question']")['--state-dot']).toBe('var(--kbn-you)')
-    expect(rule(dots, ".constitution-state-dot[data-turn='idle']")['--state-dot']).toBe('var(--kbn-owed-bright)')
-    expect(rule(dots, ".constitution-state-dot:is([data-turn='starting'], [data-turn='no-signal'], [data-turn='blocked'])")['--state-dot']).toBe('var(--kbn-ink-muted)')
+    expect(rule(dots, ".constitution-state-dot[data-attention='waiting']")['--state-dot']).toBe('var(--kbn-owed-bright)')
+    expect(rule(dots, ".constitution-state-dot[data-attention='working']")['--state-dot']).toBe('var(--kbn-agent)')
   })
 })
 

@@ -99,9 +99,6 @@ export interface CompositeEntry {
   origin: string;
   /** Nearest ancestor constitution, owner-resolved; null is a root. */
   orchestrator?: string | null;
-  /** Thread results and messages waiting for this constitution's next worker
-   * (the owner's `pending_results`); 0 while a worker is live. */
-  pendingResults?: number;
   scheduledMessages?: ScheduledMessage[];
   /** Owning felt store path on the owning host. */
   feltStore: string;
@@ -190,12 +187,11 @@ export function parseCompositeFeed(body: unknown): CompositeFeed {
     const reportPath = typeof item.report_path === 'string' ? item.report_path : undefined;
 
     const orchestrator = typeof item.orchestrator === 'string' && item.orchestrator ? item.orchestrator : null;
-    const pendingResults = typeof item.pending_results === 'number' && item.pending_results > 0 ? item.pending_results : undefined;
     const dispatchError = typeof item.dispatch_error === 'string' && item.dispatch_error ? item.dispatch_error : undefined;
     const column = WIRE_COLUMN[String(item.column)] ?? 'drafts';
     const turn = TURNS.includes(item.turn as Turn) ? item.turn as Turn : 'none';
     const scheduledMessages = Array.isArray(item.scheduled_messages) ? item.scheduled_messages.filter((e): e is ScheduledMessage => isRecord(e) && typeof e.id === 'string' && typeof e.not_before === 'string' && typeof e.text === 'string') : undefined;
-    entries.push({ origin, orchestrator, pendingResults, scheduledMessages, feltStore, path, fiber, column, turn, runtime, pulse, dispatchError, held, heldSince, dir, reportPath });
+    entries.push({ origin, orchestrator, scheduledMessages, feltStore, path, fiber, column, turn, runtime, pulse, dispatchError, held, heldSince, dir, reportPath });
   }
 
   const origins: Record<string, CompositeOrigin> = {};

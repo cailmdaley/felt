@@ -1,8 +1,9 @@
 import type { KanbanCard } from './KanbanTypes.js'
-import { arrived, type BoardFeed, type BoardRecord } from './boardFeed.js'
+import { lastActive, wantOf, type Waits } from './attention.js'
+import { arrived, type BoardRecord } from './boardFeed.js'
 import type { SentFile } from './sentFiles.js'
 import { slug } from './threadOutline.js'
-import { cardNamed, threadState, type ThreadState } from './threads.js'
+import { cardNamed } from './threads.js'
 
 /**
  * One channel: the constitutions speaking in a named channel (`shuttle.channel`,
@@ -55,30 +56,12 @@ export const hideKey = (key: string, at: number): string => `hide:${key}:${at}`
 /** The dismissal record that brings a hidden channel back: every hide up to `at` stops counting. */
 export const showKey = (key: string, at: number): string => `show:${key}:${at}`
 
-/** Constitutions a channel speaks for: everything not archived. */
-const LIVE: readonly ThreadState[] = ['waiting', 'to-review', 'with-orchestrator', 'working', 'drafts', 'roles', 'resting']
+/** Constitutions a channel speaks for: everything without a verdict. */
+const live = (card: KanbanCard): boolean => card.column !== 'tempered' && card.column !== 'composted'
 export const fiberOf = (card: KanbanCard): string => card.uid ?? card.id
 export const sameFiber = (a: KanbanCard, b: KanbanCard): boolean => fiberOf(a) === fiberOf(b)
-/** The first of `values` that names a real instant, else 0 (no time is known). */
-const instant = (...values: Array<string | number | undefined>): number =>
-  values.map(value => typeof value === 'number' ? value : Date.parse(value ?? '')).find(value => Number.isFinite(value) && value > 0) ?? 0
-/** A card's last update: its worker's latest event or its file's last write, whichever is later. */
-const lastActive = (card: KanbanCard): number =>
-  Math.max(instant(card.lastActivityAt), instant(card.modifiedAt)) || instant(card.closedAt, card.createdAt)
 /** The office a role names: its first path segment. */
 export const officeOf = (role: string | undefined): string => role?.split('/')[0] ?? ''
-
-/**
- * When a card began waiting on the human, or 0 when it does not. Waiting is
- * something addressed to the human that they have not handled: an ask on an
- * active card, or a close awaiting their review. A worker idle at the end of
- * its turn waits on no one. A wait whose time is unknown is 1.
- */
-export function waitsSince(card: KanbanCard): number {
-  if (card.ask && card.status === 'active') return instant(card.ask.at, card.lastActivityAt, card.dispatchedAt, card.modifiedAt, card.createdAt) || 1
-  if (threadState(card) === 'to-review') return instant(card.closedAt, card.reviewMark?.at, card.modifiedAt, card.createdAt) || 1
-  return 0
-}
 
 /**
  * Every channel the board holds, the chaired ones first, each shelf by name.
@@ -86,8 +69,8 @@ export function waitsSince(card: KanbanCard): number {
  * that of the nearest card filed above it; without one anywhere above it, its
  * top-level constitution's office names the channel (the named channel that
  * shares the office's charter name, when there is one), else that top-level
- * is a channel of its own. Something in it waits when a card waits
- * (`waitsSince`) or `waiting` names a member's line. A pin counts until
+ * is a channel of its own. Something in it waits when a member waits on the
+ * human (`wantOf`). A pin counts until
  * a later unpin; a hide counts until a later show or a later wait.
  */
 export function composeChannels(input: {
@@ -97,8 +80,8 @@ export function composeChannels(input: {
   dismissed: readonly string[]
   /** Pinned channel keys, each with its latest pin. */
   pinned: ReadonlyMap<string, number>
-  /** When each fiber's line began waiting on the human ({@link BoardFeed.waiting}). */
-  waiting: ReadonlyMap<string, { at: number }>
+  /** What waits on the human ({@link BoardFeed.waiting}). */
+  waits: Waits
   now: number
 }): Channel[] {
   const { cards, parentOf, names, dismissed, pinned, now } = input
@@ -154,7 +137,7 @@ export function composeChannels(input: {
     if (!titles.has(key) || channelOf(card)) titles.set(key, channelOf(card) ?? (office ? officeName(office) : ''))
     const group = groups.get(key) ?? groups.set(key, { members: [], everyone: [] }).get(key)!
     group.everyone.push(card)
-    if (LIVE.includes(threadState(card))) group.members.push(card)
+    if (live(card)) group.members.push(card)
   }
   // `pin:<key>:<ms>` unpins the pins up to <ms>; `hide:<key>:<ms>` takes it out of the rail until something waits after <ms>;
   // `show:<key>:<ms>` voids the hides up to <ms>.
@@ -178,7 +161,7 @@ export function composeChannels(input: {
     const seats = members.filter(card => card.shuttleSeat && !inside(card).some(above => above.shuttleSeat))
     const heads = members.filter(card => !inside(card).length)
     const seat = recent(seats.filter(card => card.shuttleKind !== 'standing')) ?? recent(seats) ?? recent(heads) ?? recent(members)!
-    const newest = Math.max(0, ...members.map(card => Math.max(waitsSince(card), input.waiting.get(fiberOf(card))?.at ?? 0)))
+    const newest = Math.max(0, ...members.map(card => wantOf(card, input.waits)?.at ?? 0))
     const active = Math.max(0, ...members.map(lastActive))
     const isPinned = (pinned.get(key) ?? -Infinity) > since('pin', key)
     const waiting = newest > 0
@@ -224,9 +207,9 @@ export function reordered(order: readonly string[], shown: readonly string[]): s
 /** Who a line is for, when it is a person: a label with no fiber or session. */
 export const toPerson = (to: BoardRecord['to']): boolean => !!to?.label && !to.fiber && !to.session
 
-/** Something a worker addressed to the human: a question, a post, a close, or files sent to them. */
+/** Something a worker addressed to the human: a question, a post, a close, files sent to them, or a turn that could not start. */
 export interface Item {
-  kind: 'ask' | 'post' | 'close' | 'file'
+  kind: 'ask' | 'post' | 'close' | 'file' | 'blocked'
   id: string
   card: KanbanCard
   /** When it was said, by its writer's clock: its place in the stream. */
@@ -238,6 +221,8 @@ export interface Item {
   files: SentFile[]
   /** It waits on the human now. */
   waiting: boolean
+  /** A waiting post's line, which the human may clear by hand. */
+  clears?: string
 }
 /** A thread started, closed or handed off: a small mark between the items. */
 export interface Mark { kind: 'mark'; id: string; card: KanbanCard; at: number; what: 'started' | 'closed' | 'handed off' }
@@ -251,8 +236,9 @@ const LINES: Readonly<Record<string, Item['kind']>> = { asked: 'ask', post: 'pos
  * closes addressed to the human (each carrying the files it attached) and the
  * files sent to the human on their own, each path at its newest send and a
  * worker's sends close together one item. A post, question or close waits
- * when `waiting` names it; a card that waits with no such line (an
- * open question, a close for the human's review) is its own waiting item. Each worker shows
+ * when the board says it does (`waits`); a member that waits with no such
+ * line drawn (an open question, a harness prompt, a turn that could not
+ * start, a close for the human's review) is its own waiting item. Each worker shows
  * once: the item that waits, else its latest. Between the items, a mark for
  * every thread started (`launches`), handed off, or closed to anyone but the
  * human, within the board's reach.
@@ -261,13 +247,13 @@ export function composeStream(input: {
   channel: Channel
   records: readonly BoardRecord[]
   files: readonly SentFile[]
-  /** The line each fiber waits on the human with ({@link BoardFeed.waiting}). */
-  waiting: ReadonlyMap<string, { id: string }>
+  /** What waits on the human ({@link BoardFeed.waiting}). */
+  waits: Waits
   launches: (card: KanbanCard) => readonly number[]
   now: number
   reachMs: number
 }): Entry[] {
-  const { channel, records, files, waiting, launches, now, reachMs } = input
+  const { channel, records, files, waits, launches, now, reachMs } = input
   const reach = now - reachMs
   const named = new Map<string, KanbanCard>()
   for (const card of channel.everyone) for (const ref of [card.uid, card.id]) if (ref && !named.has(ref)) named.set(ref, card)
@@ -292,15 +278,17 @@ export function composeStream(input: {
     if (record.kind === 'handed_off') mark(card, 'handed off', record.timestamp, record.id)
     else if (kind && toPerson(record.to)) {
       const text = record.text?.trim() ?? ''
-      say({ kind, id: record.id, card, at: record.timestamp, arrived: arrived(record), text: kind === 'close' && text === card.outcome?.trim() ? '' : text, files, waiting: waiting.get(fiberOf(card))?.id === record.id })
+      const waiting = waits.get(fiberOf(card))?.id === record.id && !!wantOf(card, waits)
+      say({ kind, id: record.id, card, at: record.timestamp, arrived: arrived(record), text: kind === 'close' && text === card.outcome?.trim() ? '' : text, files, waiting, ...waiting && kind === 'post' ? { clears: fiberOf(card) } : {} })
     } else if (kind === 'close') mark(card, 'closed', record.timestamp, record.id)
   }
   for (const card of channel.everyone) {
     for (const at of launches(card)) if (at >= reach) mark(card, 'started', at, `started:${fiberOf(card)}:${at}`)
-    const at = waitsSince(card)
-    if (!at || items.get(fiberOf(card))?.some(item => item.waiting)) continue
-    if (card.ask && card.status === 'active') say({ kind: 'ask', id: `ask:${fiberOf(card)}`, card, at, arrived: at, text: card.ask.text, files: [], waiting: true })
-    else say({ kind: 'close', id: `review:${fiberOf(card)}:${at}`, card, at, arrived: at, text: card.reviewMark?.note ?? '', files: [], waiting: true })
+    const want = wantOf(card, waits)
+    if (!want || items.get(fiberOf(card))?.some(item => item.waiting)) continue
+    const kind = ({ ask: 'ask', review: 'close', post: 'post', blocked: 'blocked' } as const)[want.kind]
+    const text = want.kind === 'review' ? card.reviewMark?.note ?? '' : want.text
+    say({ kind, id: `${want.kind}:${fiberOf(card)}:${want.at}`, card, at: want.at, arrived: want.at, text, files: [], waiting: true, ...want.line?.kind === 'post' ? { clears: fiberOf(card) } : {} })
   }
   // Each path at its newest send; a worker's sends this close together are one item.
   const sends = new Map<string, SentFile>()

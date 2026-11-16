@@ -134,7 +134,7 @@ describe('the Roles band', () => {
   const renderer = (data: KanbanResponse, openDetail = vi.fn()) => new KanbanSurfaceRenderer({
     getDragSourceId: () => null,
     setDragSourceId: () => {},
-    getLastResponse: () => data,
+    waits: () => new Map(), getLastResponse: () => data,
     stopDragAutoScroll: () => {},
     transition: () => {},
     setSurface: () => {},

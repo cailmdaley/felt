@@ -7,13 +7,10 @@
   content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor;
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--kbn-ink-muted) 35%, transparent);
 }
-.constitution-state-dot[data-turn='working'] { --state-dot: var(--kbn-agent); }
-.constitution-state-dot[data-turn='working']::before { animation: kbn-worker-breathe 2.4s ease-in-out infinite; }
+.constitution-state-dot[data-attention='waiting'] { --state-dot: var(--kbn-owed-bright); }
+.constitution-state-dot[data-attention='working'] { --state-dot: var(--kbn-agent); }
+.constitution-state-dot[data-busy]::before { animation: kbn-worker-breathe 2.4s ease-in-out infinite; }
 [inert] .constitution-state-dot::before { animation: none; }
 @media (prefers-reduced-motion: reduce) { .constitution-state-dot::before { animation: none !important; } }
-/* A question is red, as on the worker pill; a block is quiet ink. */
-.constitution-state-dot[data-turn='question'] { --state-dot: var(--kbn-you); }
-.constitution-state-dot[data-turn='idle'] { --state-dot: var(--kbn-owed-bright); }
-.constitution-state-dot:is([data-turn='starting'], [data-turn='no-signal'], [data-turn='blocked']) { --state-dot: var(--kbn-ink-muted); }
 .constitution-state-dot:focus-visible { outline: 1px solid var(--kbn-you); outline-offset: -1px; }
 

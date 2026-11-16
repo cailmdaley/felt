@@ -13,7 +13,7 @@ function renderer(data: KanbanResponse, openDetail = vi.fn(), conversation?: Kan
   return new KanbanSurfaceRenderer({
     getDragSourceId: () => null,
     setDragSourceId: () => {},
-    getLastResponse: () => data,
+    waits: () => new Map(), getLastResponse: () => data,
     stopDragAutoScroll: () => {},
     transition: () => {},
     setSurface: () => {},
@@ -113,8 +113,8 @@ describe('In flight bands', () => {
     root.remove()
   })
   it.each([
-    ['identity_pending', 'working', 'Working', 'starting'],
-    ['identity_failed', 'yourTurn', 'Your turn', 'blocked'],
+    ['identity_pending', 'working', 'Working', 'working'],
+    ['identity_failed', 'yourTurn', 'Your turn', 'waiting'],
   ])('marks %s with a dot: a pending identity is the worker\'s move, a failed one needs repair', (phase, band, caption, label) => {
     const data = workerFeed([phase])
     const surfaces = renderer(data)
@@ -122,7 +122,7 @@ describe('In flight bands', () => {
     expect(flightOrder(root)).toEqual([
       { band, caption, label: caption, ids: ['worker-0'] },
     ])
-    expect(root.querySelector('.constitution-state-dot')?.getAttribute('data-turn')).toBe(label)
+    expect(root.querySelector('.constitution-state-dot')?.getAttribute('data-attention')).toBe(label)
     expect(root.querySelector('.kbn-card-phase, .kbn-card-glyph')).toBeNull()
   })
   it('ranks asks and harness prompts first in Your turn, both drawn and named as questions', () => {
@@ -156,7 +156,7 @@ describe('In flight bands', () => {
     expect(flightOrder(renderer(data).renderNowSection(data.now, {}))).toEqual(flightOrder(root))
     question.ask = undefined
     const attention = renderer(data).renderNowSection(data.now, {})
-    expect(attention.querySelector('[data-fiber-id="question"] .constitution-state-dot')?.getAttribute('data-turn')).toBe('question')
+    expect(attention.querySelector('[data-fiber-id="question"] .constitution-state-dot')?.getAttribute('data-attention')).toBe('waiting')
   })
 
   it('draws a launch held in boot quarantine in its own Held band after Working, never as a running worker', () => {

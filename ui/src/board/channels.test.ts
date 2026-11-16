@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { RECENT_MS, arranged, composeChannels, composeStream, hideKey, railOrder, reordered, showKey, unpinKey, waitsSince, type Channel, type Entry } from './channels.js'
+import { RECENT_MS, arranged, composeChannels, composeStream, hideKey, railOrder, reordered, showKey, unpinKey, type Channel, type Entry } from './channels.js'
 import type { BoardRecord } from './boardFeed.js'
-import { inFlightBand } from './KanbanReadModel.js'
 import { card } from './testFixtures.js'
 import { ThreadIndex } from './threads.js'
 import type { KanbanCard } from './KanbanTypes.js'
@@ -29,7 +28,7 @@ const all = [unions, east, west, modes, vizier, post, shear, van, old]
 type Input = Parameters<typeof composeChannels>[0]
 function compose(cards: KanbanCard[], over: Partial<Input> = {}): Channel[] {
   const index = new ThreadIndex(cards)
-  return composeChannels({ cards, parentOf: card => index.parentOf(card), names: new Map([['analyst', 'Analyst · the shear desk']]), dismissed: [], pinned: new Map(), waiting: new Map(), now, ...over })
+  return composeChannels({ cards, parentOf: card => index.parentOf(card), names: new Map([['analyst', 'Analyst · the shear desk']]), dismissed: [], pinned: new Map(), waits: new Map(), now, ...over })
 }
 const named = (channels: Channel[], key: string): Channel => channels.find(channel => channel.key === key)!
 
@@ -101,23 +100,22 @@ describe('composeChannels', () => {
     expect([back.hidden, back.waiting, back.listed]).toStrictEqual([0, true, true])
   })
 
-  it('waits on what is addressed to the human: an open ask or a close for review, never a worker idle at the end of its turn', () => {
+  it('waits on what is addressed to the human: an open ask, a harness prompt, a blocked turn or a close for review, never a worker idle at the end of its turn', () => {
     const turns = [
       card({ id: 'idle', uid: 'I1', ...idle(3) }),
       card({ id: 'blocked', uid: 'I2', status: 'active', workerState: 'blocked', lastActivityAt: now - minute }),
       card({ id: 'prompt', uid: 'I3', status: 'active', workerState: 'running', runtimePhase: 'attention', lastActivityAt: now - minute }),
       card({ id: 'asking', uid: 'I4', ...idle(3), ask: { text: 'Which mask?', at: at(4) } }),
+      card({ id: 'review', uid: 'I5', status: 'closed', column: 'awaitingReview', closedAt: at(90) }),
     ]
-    // The Desk still puts the idle three in Your turn; none of them waits on the human here.
-    expect(turns.filter(card => card.column === 'inFlight' && inFlightBand(card) === 'yourTurn').map(card => card.id)).toEqual(expect.arrayContaining(['idle', 'blocked', 'prompt']))
-    expect(turns.map(waitsSince)).toStrictEqual([0, 0, 0, now - 4 * minute])
-    expect(waitsSince(card({ id: 'review', column: 'awaitingReview', closedAt: at(90) }))).toBe(now - 90 * minute)
+    const waiting = Object.fromEntries(compose(turns).map(channel => [channel.name, channel.waiting && channel.newest]))
+    expect(waiting).toStrictEqual({ idle: false, blocked: now - minute, prompt: now - minute, asking: now - 4 * minute, review: now - 90 * minute })
   })
 
   it('waits where the daemon says a member\'s line waits on the human, and brings a hidden channel back for it', () => {
     const hidden = { dismissed: [hideKey('role:analyst', now - 60 * minute)] }
     expect(named(compose(all, hidden), 'role:analyst').hidden).toBe(now - 60 * minute)
-    const shearDesk = named(compose(all, { ...hidden, waiting: new Map([['S', { at: now - 5 * minute }]]) }), 'role:analyst')
+    const shearDesk = named(compose(all, { ...hidden, waits: new Map([['S', { id: 's1', at: now - 5 * minute }]]) }), 'role:analyst')
     expect([shearDesk.waiting, shearDesk.newest, shearDesk.hidden, shearDesk.listed]).toStrictEqual([true, now - 5 * minute, 0, true])
   })
 })
@@ -169,9 +167,9 @@ describe('composeStream', () => {
   ]
   const files = [send('K', 'deck.html', 120, 'First pass.'), send('K', 'deck.html', 33, 'The final deck.'), send('K', 'spectrum.svg', 30, '9σ.'), send('C', 'plan.md', 300)]
   const launches = new Map([['K', [now - 60 * minute]], ['B', [now - 35 * minute]]])
-  const waiting = new Map([['V', { id: 'r3m' }]])
+  const waits = new Map([['V', { id: 'r3m', at: now - 20 * minute }]])
   const stream = (over: Partial<Parameters<typeof composeStream>[0]> = {}): Entry[] =>
-    composeStream({ channel, records, files, waiting, launches: card => launches.get(card.uid!) ?? [], now, reachMs, ...over })
+    composeStream({ channel, records, files, waits, launches: card => launches.get(card.uid!) ?? [], now, reachMs, ...over })
   const said = (entries: Entry[]) => entries.map(entry => entry.kind === 'mark' ? [entry.card.id, entry.what] : [entry.card.id, entry.kind, entry.text, entry.waiting])
 
   it('holds what was addressed to the human, each worker once, with marks of threads starting and stopping between, oldest first', () => {
@@ -208,25 +206,34 @@ describe('composeStream', () => {
 
   it('waits where the feed says a question or close waits, else where a card waits; the item that waits shows over a newer one', () => {
     // Without a line the daemon names, the card's close for review is its own item.
-    const review = stream({ records: records.filter(each => each.id !== 'r3m'), waiting: new Map() }).find(entry => entry.card === cov && entry.kind !== 'mark')
+    const review = stream({ records: records.filter(each => each.id !== 'r3m'), waits: new Map() }).find(entry => entry.card === cov && entry.kind !== 'mark')
     expect(review && review.kind !== 'mark' && [review.kind, review.text, review.waiting]).toStrictEqual(['close', 'Validated to 4%.', true])
     // A question to the human that the daemon names is the item, not the card's copy of it.
     const asked = [...records, record('r9', 'asked', 'M', 21, { to: human, text: 'Which threshold, 5σ or 3σ?' })]
-    const ask = stream({ records: asked, waiting: new Map([['M', { id: 'r9' }]]) }).find(entry => entry.card === mask)
+    const ask = stream({ records: asked, waits: new Map([['M', { id: 'r9', at: now - 21 * minute }]]) }).find(entry => entry.card === mask)
     expect(ask && ask.kind !== 'mark' && [ask.id, ask.waiting]).toStrictEqual(['r9', true])
     expect(stream({ files: [...files, send('M', 'mask.svg', 1)] }).find(entry => entry.card === mask)?.kind).toBe('ask')
+    // A post the daemon names waits, and only a post can be cleared by hand.
+    const posted = stream({ waits: new Map([...waits, ['K', { id: 'r7', at: now - 30 * minute }]]) })
+    expect(posted.flatMap(entry => entry.kind === 'mark' ? [] : [[entry.id, entry.waiting, entry.clears]])).toStrictEqual([
+      [expect.any(String), false, undefined], ['r3m', true, undefined], ['r7', true, 'K'], [expect.any(String), true, undefined],
+    ])
+    // A line whose record is not read yet waits, and is not offered a clear until it is known to be a post.
+    const unread = stream({ records: records.filter(each => each.id !== 'r7'), waits: new Map([...waits, ['K', { id: 'r7', at: now - 30 * minute }]]) })
+    const kappaItem = unread.find(entry => entry.kind !== 'mark' && entry.card === kappa)
+    expect(kappaItem && kappaItem.kind !== 'mark' && [kappaItem.waiting, kappaItem.clears]).toStrictEqual([true, undefined])
   })
 
   it('leaves a closing post to the card\'s outcome rather than its words', () => {
     const closed = card({ ...cov, id: 'cmbx/cov', reviewMark: undefined, orchestrator: undefined, shuttleChannel: 'cmbx' })
     const lone = named(compose([chair, closed]), 'channel:cmbx')
-    const item = stream({ channel: lone, records: [record('c1', 'closed', 'V', 40, { to: human, text: 'Validated against 2000 simulations.' })], waiting: new Map([['V', { id: 'c1' }]]) }).find(entry => entry.card === closed)
+    const item = stream({ channel: lone, records: [record('c1', 'closed', 'V', 40, { to: human, text: 'Validated against 2000 simulations.' })], waits: new Map([['V', { id: 'c1', at: now - 40 * minute }]]) }).find(entry => entry.card === closed)
     expect(item && item.kind !== 'mark' && [item.kind, item.text, item.waiting]).toStrictEqual(['close', '', true])
   })
 
   it('judges what is new by when it arrived here, and leaves what fell out of the board\'s reach', () => {
     const late = record('r11', 'asked', 'M', 30, { to: human, text: 'Which threshold?', received_at: now - minute })
-    const item = stream({ records: [late], waiting: new Map([['M', { id: 'r11' }]]) }).find(entry => entry.card === mask)
+    const item = stream({ records: [late], waits: new Map([['M', { id: 'r11', at: now - 30 * minute }]]) }).find(entry => entry.card === mask)
     expect(item && item.kind !== 'mark' && [item.at, item.arrived]).toStrictEqual([now - 30 * minute, now - minute])
     expect(said(stream({ reachMs: 40 * minute })).map(entry => entry[0])).not.toContain('cmbx')
   })

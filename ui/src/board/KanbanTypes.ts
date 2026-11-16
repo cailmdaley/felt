@@ -28,8 +28,6 @@ export interface KanbanCard {
   scheduledMessages?: ScheduledMessage[]
   /** Nearest ancestor constitution; absent on older feeds and plain notes. */
   orchestrator?: string | null
-  /** Thread results and messages waiting for its next worker while it has none. */
-  pendingResults?: number
   /** The Desk section this copy of a family's root heads, its own state being another. */
   deskSection?: 'waiting' | 'working' | 'to-review'
   threadSummary?: { unfinished: number; waiting: number; working: number; toReview: number; drafts: number; archived: number }

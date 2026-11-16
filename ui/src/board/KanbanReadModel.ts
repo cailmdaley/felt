@@ -495,7 +495,6 @@ function toCard(
   return {
     id: f.id,
     orchestrator: entry.orchestrator,
-    pendingResults: entry.pendingResults,
     scheduledMessages: entry.scheduledMessages,
     uid: f.uid,
     name: f.name,

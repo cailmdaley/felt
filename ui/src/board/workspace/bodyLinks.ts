@@ -1,13 +1,21 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import { APPEARANCE_CHANGED } from '../appearance.js'
+import { attentionOf } from '../attention.js'
 import { threadState, THREAD_LABEL } from '../threads.js'
 import { turnOf, type Turn } from '../turn.js'
 import { fiberIndex, resolveWikilink, type FiberIndexEntry } from '../wikilinks.js'
 
 export interface ConstitutionMention { id: string; uid?: string; name: string; state: string; turn?: Turn; outcome: string; origin: string }
+/** A mention's state word: the one state every surface draws (here from its card alone), a quiet one by where it rests. */
+const mentionState = (card: KanbanCard): string => {
+  const attention = attentionOf(card, new Map())
+  if (attention !== 'quiet') return attention === 'waiting' ? 'Waiting' : 'Working'
+  const rest = threadState(card)
+  return rest === 'waiting' || rest === 'working' || rest === 'to-review' ? 'Quiet' : THREAD_LABEL[rest]
+}
 export function constitutionMentions(cards: readonly KanbanCard[]): ConstitutionMention[] {
   return cards.filter(card => !!card.shuttleKind && !card.isCycle).map(card => {
-    return { id: card.id, uid: card.uid, name: card.name, origin: card.originId, state: THREAD_LABEL[threadState(card)], turn: turnOf(card).turn, outcome: card.outcome ?? '' }
+    return { id: card.id, uid: card.uid, name: card.name, origin: card.originId, state: mentionState(card), turn: turnOf(card).turn, outcome: card.outcome ?? '' }
   })
 }
 

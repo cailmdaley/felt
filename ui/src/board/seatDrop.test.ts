@@ -23,7 +23,7 @@ function drop(type: string): Event {
 function band(fiber: KanbanCard, makeSeat: (card: KanbanCard, anchor: HTMLElement) => void = vi.fn()): HTMLElement {
   const data = response({ now: { drafts: [fiber], inFlight: [], awaitingReview: [] }, cycles: fiber.isCycle ? [fiber] : [] })
   return new KanbanSurfaceRenderer({
-    getDragSourceId: () => fiber.id, setDragSourceId: vi.fn(), getLastResponse: () => data,
+    getDragSourceId: () => fiber.id, setDragSourceId: vi.fn(), waits: () => new Map(), getLastResponse: () => data,
     stopDragAutoScroll: vi.fn(), transition: vi.fn(), setSurface: vi.fn(), makeSeat, openDetail: vi.fn(),
   }).renderRolesSection([], {})
 }

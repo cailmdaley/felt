@@ -19,7 +19,7 @@ const all = [root, busy, asks, deeper, helper, done]
 function row(of: typeof root, cards = all) {
   const host = document.createElement('div'), name = document.createElement('span'), end = document.createElement('div'), open = vi.fn()
   name.className = 'kbn-card-name'; name.textContent = of.name; host.append(name, end)
-  installFrontierDetails(host, end, of, new ThreadIndex(cards), open)
+  installFrontierDetails(host, end, of, new ThreadIndex(cards), new Map(), open)
   const names = () => [...host.querySelectorAll<HTMLElement>('.kbn-desk-threads .kbn-thread-row')].map(r => `${'  '.repeat(Number(r.dataset.depth))}${r.querySelector('.kbn-thread-name')!.textContent}`)
   const count = host.querySelector<HTMLButtonElement>('.kbn-thread-count')
   return { host, name, end, open, names, count }
@@ -74,12 +74,12 @@ describe('a Desk row and the threads it holds in its section', () => {
     const child = { ...asks, ask: undefined, ...waiting, lastActivityAt: Date.now() - 7 * 60_000 }
     const data = projectDeskFrontier(response({ now: { drafts: [], inFlight: [{ ...root, ...working }, busy], awaitingReview: [] }, threads: [child] }))
     const open = vi.fn()
-    const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => data,
+    const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, waits: () => new Map(), getLastResponse: () => data,
       stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: open })
     const section = renderer.renderNowSection(data.now, {})
     const line = section.querySelector<HTMLElement>(`[data-fiber-id="${child.id}"]`)!
     expect(line.querySelector('.kbn-card-name')?.textContent).toBe('hub/busy/asks')
-    expect(line.querySelector('.constitution-state-dot')?.getAttribute('data-turn')).toBe('idle')
+    expect(line.querySelector('.constitution-state-dot')?.getAttribute('data-attention')).toBe('working')
     expect(line.querySelector('.kbn-row-elapsed')?.textContent).toBe('7m')
     expect(line.querySelector('.kbn-desk-threads')).toBeNull()
     line.click(); expect(open).toHaveBeenCalledWith(child)
@@ -87,7 +87,7 @@ describe('a Desk row and the threads it holds in its section', () => {
   for (const mobile of [false, true]) it(`draws the same row on ${mobile ? 'phone' : 'desktop'}`, () => {
     vi.stubGlobal('matchMedia', () => ({ matches: mobile }))
     const data = projectDeskFrontier(response({ now: { drafts: [], inFlight: [root, busy], awaitingReview: [] }, threads: [asks, deeper, helper] }))
-    const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => data,
+    const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, waits: () => new Map(), getLastResponse: () => data,
       stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: vi.fn() })
     const section = renderer.renderNowSection(data.now, {})
     expect([...section.querySelectorAll('.kbn-card .kbn-card-name')].map(n => n.textContent)).toEqual(['hub', 'hub'])

@@ -8,7 +8,7 @@ function renderer(): KanbanSurfaceRenderer {
   return new KanbanSurfaceRenderer({
     getDragSourceId: () => null,
     setDragSourceId: () => {},
-    getLastResponse: () => null,
+    waits: () => new Map(), getLastResponse: () => null,
     stopDragAutoScroll: () => {},
     transition: vi.fn(),
     setSurface: () => {},

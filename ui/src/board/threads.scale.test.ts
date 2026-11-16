@@ -55,7 +55,7 @@ describe('a family splits across the sections its threads stand in', () => {
     .map(([id, parent, phase]) => ({ origin: 'owner', felt_store: '/store', path: `${id}.md`, orchestrator: parent,
       fiber: { id, name: id, status: 'active', created_at: '2026-10-01T09:00:00Z', shuttle: { kind: 'oneshot' } },
       runtime: { state: 'running', phase, session_uuid: `s-${id}` } })) }))
-  const draw = (board: ReturnType<typeof buildKanbanResponseFromComposite>) => new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => board,
+  const draw = (board: ReturnType<typeof buildKanbanResponseFromComposite>) => new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, waits: () => new Map(), getLastResponse: () => board,
     stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: () => {} }).renderNowSection(board.now, {})
   it('threads in another state group beneath their root heading that section, named by slug', () => {
     const desk = draw(buildKanbanResponseFromComposite(family('waiting', 'working', 10)))
@@ -86,7 +86,7 @@ describe('thread read model at fleet scale', () => {
       const before = threadIndexBuilds()
       board = buildKanbanResponseFromComposite(input)
       expect(threadIndexBuilds()).toBe(before + 1)
-      const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => board,
+      const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, waits: () => new Map(), getLastResponse: () => board,
         stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: () => {} })
       const desk = renderer.renderNowSection(board.now, {})
       // Each family's root, and its header in each other section of work.
@@ -119,7 +119,7 @@ describe('thread read model at fleet scale', () => {
       const reads = (size: number) => {
         const board = buildKanbanResponseFromComposite(feed(chain(size)))
         const deepest = boardCards(board).find(c => c.id.endsWith(`/c${size - 1}`))!
-        const index = threadIndexFor(board), page = new FamilyPage({ marks: () => undefined, reach: () => 14 * 86_400_000, files: () => [], refresh: () => {}, lead: async () => undefined, said: () => undefined, open: () => {}, view: () => {}, seen: () => {}, shuttleBase: '' }, vi.fn())
+        const index = threadIndexFor(board), page = new FamilyPage({ marks: () => undefined, reach: () => 14 * 86_400_000, files: () => [], refresh: () => {}, lead: async () => undefined, said: () => undefined, open: () => {}, view: () => {}, seen: () => {}, waits: () => new Map(), shuttleBase: '' }, vi.fn())
         const before = threadIndexBuilds()
         // Map touches see the walks inside the index's methods, not only the calls.
         const count = counted(Map.prototype, ['get', 'set', 'has', 'delete'], () => page.update(deepest, index))

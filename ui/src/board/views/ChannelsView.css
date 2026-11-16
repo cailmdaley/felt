@@ -164,6 +164,12 @@
 .kbn-ch-who:hover { color: var(--kbn-ink-soft); }
 .kbn-ch-kind { font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
 .kbn-ch-item[data-waiting] .kbn-ch-kind { color: var(--kbn-owed-deep, var(--kbn-ink)); font-weight: 600; }
+/* A waiting post's clear: a small check at the head's end, the post's one act. */
+.kbn-ch-clear {
+  margin-left: auto; padding: 0 6px; border: 1px solid var(--kbn-rule-strong); border-radius: 3px; background: transparent;
+  font: var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-owed-deep, var(--kbn-ink)); cursor: pointer;
+}
+.kbn-ch-clear:hover, .kbn-ch-clear:focus-visible { background: color-mix(in srgb, var(--kbn-owed-bright) 18%, transparent); }
 .kbn-ch-item-text {
   margin: 2px 0 0; font: var(--type-row)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink);
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere;

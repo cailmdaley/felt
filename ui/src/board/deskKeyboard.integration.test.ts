@@ -91,7 +91,7 @@ it('leaves an idle worker in Your turn when a look moves the voice target onto i
   inside.voice.notify()
   draw(data())
   expect(band()).toBe('yourTurn')
-  expect(document.querySelector('[data-card-uid="head-uid"] .constitution-state-dot')?.getAttribute('data-turn')).toBe('idle')
+  expect(document.querySelector('[data-card-uid="head-uid"] .constitution-state-dot')?.getAttribute('data-attention')).toBe('working')
 })
 
 it('moves through the view tabs by arrows, Home and End, and keeps the numeric hotkeys', async () => {

@@ -14,7 +14,7 @@ function surfaces(getFleetDefaultAgent?: (origin: string) => string): KanbanSurf
   return new KanbanSurfaceRenderer({
     getDragSourceId: () => null,
     setDragSourceId: () => {},
-    getLastResponse: () => null,
+    waits: () => new Map(), getLastResponse: () => null,
     stopDragAutoScroll: () => {},
     transition: () => {},
     setSurface: () => {},

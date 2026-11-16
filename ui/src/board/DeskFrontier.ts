@@ -1,4 +1,5 @@
 import type { KanbanCard } from './KanbanTypes.js'
+import type { Waits } from './attention.js'
 import { threadKey, type ThreadIndex, type ThreadState } from './threads.js'
 import { threadRow } from './ThreadPeek.js'
 import { turnOf } from './turn.js'
@@ -35,7 +36,7 @@ const COUNT_WORD: Partial<Record<ThreadState, [string, string]>> = { waiting: ['
  * The count's caret folds them all, and every thread with threads of its own
  * folds on its own caret, each remembered per browser.
  */
-export function installFrontierDetails(host: HTMLElement, end: HTMLElement, card: KanbanCard, index: ThreadIndex, open: (card: KanbanCard) => void, now = Date.now()): void {
+export function installFrontierDetails(host: HTMLElement, end: HTMLElement, card: KanbanCard, index: ThreadIndex, waits: Waits, open: (card: KanbanCard) => void, now = Date.now()): void {
   const self = index.card(card), state = card.deskSection ?? index.state(self)
   // A root heading a section its own state is not in keeps its own mark, faintly.
   host.classList.toggle('kbn-card-header', !!card.deskSection)
@@ -84,7 +85,7 @@ export function installFrontierDetails(host: HTMLElement, end: HTMLElement, card
       if (!visible.has(threadKey(row.parent))) continue
       const fold = parents.has(threadKey(row.card)) ? isOpen(row.card) : null
       if (fold) visible.add(threadKey(row.card))
-      rows.push(threadLine(row, fold, state, index, open, now, draw))
+      rows.push(threadLine(row, fold, state, index, waits, open, now, draw))
     }
     list.replaceChildren(...rows)
     list.hidden = !rows.length
@@ -96,8 +97,8 @@ export function installFrontierDetails(host: HTMLElement, end: HTMLElement, card
 }
 
 /** One thread in a row's outline: its caret when it holds threads, its dot, its slug path and its age. */
-function threadLine({ card, depth, path }: OutlineRow, fold: boolean | null, state: ThreadState, index: ThreadIndex, open: (card: KanbanCard) => void, now: number, redraw: () => void): HTMLElement {
-  const row = threadRow(card, index, open), key = threadKey(card)
+function threadLine({ card, depth, path }: OutlineRow, fold: boolean | null, state: ThreadState, index: ThreadIndex, waits: Waits, open: (card: KanbanCard) => void, now: number, redraw: () => void): HTMLElement {
+  const row = threadRow(card, index, waits, open), key = threadKey(card)
   row.querySelector('.kbn-thread-name')!.textContent = path
   row.dataset.fiberId = card.id
   row.title = card.name

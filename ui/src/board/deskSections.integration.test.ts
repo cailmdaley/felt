@@ -8,7 +8,7 @@ it('folds each Desk section from its heading and remembers it across renders', (
   const stored = new Map<string, string>()
   vi.stubGlobal('localStorage', { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value) })
   const data = response({ now: { drafts: [card({ id: 'draft' })], inFlight: [card({ id: 'work', status: 'active' })], awaitingReview: [card({ id: 'review', status: 'closed' })] } })
-  const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => data,
+  const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, waits: () => new Map(), getLastResponse: () => data,
     stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: vi.fn() })
   const draw = () => {
     const root = document.createElement('div')

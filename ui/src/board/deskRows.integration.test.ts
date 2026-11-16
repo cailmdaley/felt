@@ -6,7 +6,7 @@ import { card, response, settle } from './testFixtures.js'
 
 function options(data: KanbanResponse) {
   return {
-    getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => data,
+    getDragSourceId: () => null, setDragSourceId: () => {}, waits: () => new Map(), getLastResponse: () => data,
     stopDragAutoScroll: () => {}, transition: vi.fn(), setSurface: () => {}, openDetail: vi.fn(),
     onRest: vi.fn(),
   }

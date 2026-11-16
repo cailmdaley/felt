@@ -12,7 +12,7 @@ it.each([
   const child = card({ id: 'hub/work', orchestrator: parent.id, status: 'active', workerState: 'running', runtimePhase: phase === 'waiting' ? 'waiting' : 'working' })
   const host = document.createElement('div'), end = document.createElement('div'), menu = document.createElement('button')
   menu.className = 'kbn-card-menu'; menu.textContent = '•••'; end.append(menu); host.append(end)
-  installFrontierDetails(host, end, parent, new ThreadIndex([parent, child]), vi.fn(), now)
+  installFrontierDetails(host, end, parent, new ThreadIndex([parent, child]), new Map(), vi.fn(), now)
   expect([...end.children].map(el => el.className)).toEqual(['kbn-row-elapsed', 'kbn-thread-count', 'kbn-card-menu'])
   const age = end.querySelector('.kbn-row-elapsed')!
   expect(age.textContent).toBe(elapsed)
@@ -22,11 +22,11 @@ it.each([
 it('draws an age without descendants, and omits it when the pill has no age', () => {
   const host = document.createElement('div'), end = document.createElement('div')
   const parent = card({ id: 'hub', status: 'active', workerState: 'running', runtimePhase: 'waiting', lastActivityAt: now - 7 * 60000 })
-  installFrontierDetails(host, end, parent, new ThreadIndex([parent]), vi.fn(), now)
+  installFrontierDetails(host, end, parent, new ThreadIndex([parent]), new Map(), vi.fn(), now)
   expect(end.textContent).toBe('7m')
   end.replaceChildren()
   const quiet = card({ id: 'quiet' })
-  installFrontierDetails(host, end, quiet, new ThreadIndex([quiet]), vi.fn(), now)
+  installFrontierDetails(host, end, quiet, new ThreadIndex([quiet]), new Map(), vi.fn(), now)
   expect(end.children).toHaveLength(0)
 })
 
@@ -34,13 +34,13 @@ it('uses agreement in the count', () => {
   const parent = card({ id: 'hub', status: 'active', workerState: 'running', runtimePhase: 'waiting' })
   const child = card({ id: 'hub/ask', orchestrator: 'hub', status: 'active', workerState: 'running', runtimePhase: 'waiting' })
   const host = document.createElement('div'), end = document.createElement('div')
-  installFrontierDetails(host, end, parent, new ThreadIndex([parent, child]), vi.fn(), now)
+  installFrontierDetails(host, end, parent, new ThreadIndex([parent, child]), new Map(), vi.fn(), now)
   const count = end.querySelector<HTMLButtonElement>('.kbn-thread-count')!
   expect(count.querySelector('.kbn-count-needs')?.textContent).toBe('2 need you')
   const header = { ...parent, deskSection: 'working' as const }
   const workingChild = { ...child, runtimePhase: 'working', turn: 'working' as const }
   const other = document.createElement('div'), otherEnd = document.createElement('div')
-  installFrontierDetails(other, otherEnd, header, new ThreadIndex([parent, workingChild]), vi.fn(), now)
+  installFrontierDetails(other, otherEnd, header, new ThreadIndex([parent, workingChild]), new Map(), vi.fn(), now)
   expect(other.classList.contains('kbn-card-header')).toBe(true)
   expect(otherEnd.querySelector('.kbn-count-working')?.textContent).toBe('1 working')
 })

@@ -59,7 +59,7 @@ describe('constitution mentions', () => {
     expect(chip.title).toContain('Verified result')
     chip.click(); expect(open).toHaveBeenCalledWith('work/child', work().originId)
     update(runtime, [work({ status: 'closed', workerState: undefined, outcome: 'Ready' })])
-    expect(chip.textContent).toBe('Child · To review')
+    expect(chip.textContent).toBe('Child · Waiting')
     expect(chip.title).toContain('Ready')
     runtime.dispose()
   })
@@ -121,7 +121,7 @@ describe('constitution mentions', () => {
     update(runtime)
     const chip = root.querySelector<HTMLAnchorElement>('a')!
     update(runtime, [work({ id: 'work/renamed', status: 'closed' })])
-    expect(chip.textContent).toBe('Child · To review')
+    expect(chip.textContent).toBe('Child · Waiting')
     chip.click(); expect(open).toHaveBeenLastCalledWith('work/renamed', work().originId)
     update(runtime, [work({ uid: 'replacement', name: 'Different constitution' })])
     expect(chip.dataset.constitution).toBeUndefined()
@@ -177,11 +177,11 @@ describe('constitution mentions', () => {
     expect(root.querySelector('pre')!.textContent).toBe('shuttle thread work/child "ask"\nwork/child')
     runtime.dispose()
   })
-  it('names every lifecycle state from the board rules, including armed workers without runtime', () => {
+  it('names every constitution by the one state, a quiet one by where it rests, an armed one without a worker quiet', () => {
     const states = [work(), work({ status: 'closed', workerState: undefined }),
       work({ status: 'open', effectiveHorizon: 'stashed', workerState: undefined }), work({ status: 'open', workerState: undefined }),
       work({ status: 'closed', tempered: true, workerState: undefined }), work({ ask: { text: 'Which?', at: '2026-01-01T00:00:00Z' } }), work({ workerState: undefined })]
-    expect(constitutionMentions(states).map(row => row.state)).toEqual(['Working', 'To review', 'Resting', 'Drafts', 'Archived', 'Waiting', 'Working'])
+    expect(constitutionMentions(states).map(row => row.state)).toEqual(['Working', 'Waiting', 'Resting', 'Drafts', 'Archived', 'Waiting', 'Quiet'])
   })
   it('sends only requested report metadata, resolves rows beyond 500, and enforces registration and active navigation', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{"fibers":[]}')))

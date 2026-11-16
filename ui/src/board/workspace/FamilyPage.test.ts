@@ -28,7 +28,7 @@ function feedsWith(over: Partial<ViewFeeds> = {}): ViewFeeds {
     marks: () => undefined, reach: () => 14 * 86_400_000, files: c => c.id === 'hub/mid' ? sent : [], refresh: vi.fn(),
     lead: async c => c.id === 'hub/mid' ? { ...tapestry, name: 'Tapestry' } : undefined,
     said: c => c.id === 'hub/mid' ? { text: 'Posted the **cut**.', at: now - hour } : undefined,
-    open: vi.fn(), view: vi.fn(), seen: vi.fn(), shuttleBase: '', ...over,
+    open: vi.fn(), view: vi.fn(), seen: vi.fn(), waits: () => new Map(), shuttleBase: '', ...over,
   }
 }
 function made(at: KanbanCard, over: Partial<ViewFeeds> = {}, known = cards): { page: FamilyPage; feeds: ViewFeeds } {
@@ -38,18 +38,20 @@ function made(at: KanbanCard, over: Partial<ViewFeeds> = {}, known = cards): { p
   page.update(at, new ThreadIndex(known), now)
   return { page, feeds }
 }
-const threads = (page: FamilyPage) => [...page.el.querySelectorAll<HTMLElement>('.ov-thread')].map(row => [row.querySelector('.ov-slug')!.textContent, row.querySelector('.ov-word')?.textContent])
+const threads = (page: FamilyPage) => [...page.el.querySelectorAll<HTMLElement>('.ov-thread')].map(row => [row.querySelector('.ov-slug')!.textContent, row.querySelector('.ov-want, .ov-word')?.textContent?.trim()])
 const press = (el: Element, key: string): KeyboardEvent => { const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }); el.dispatchEvent(event); return event }
 
 afterEach(() => { document.body.replaceChildren(); vi.restoreAllMocks() })
 
 describe('a constitution\'s view', () => {
-  it('heads with its slug, its run and whether it needs the human, then its threads as rows, most urgent first; no outcome anywhere', () => {
+  it('heads with its slug, its run and whether it needs the human, then its threads as rows, what waits first with what it wants; no outcome anywhere', () => {
     const { page } = made(root)
     expect(page.el.querySelector('.ov-name')!.textContent).toBe('hub')
     expect(page.el.querySelector('.ov-head .ov-time')!.textContent).toBe('worked 2h 0m · stopped 1h ago')
     expect(page.el.querySelector('.ov-needs')).toBeNull()
-    expect(threads(page)).toStrictEqual([['q', 'question'], ['w', 'your turn'], ['mid', 'working'], ['d', 'archived']])
+    // The idle worker asked nothing: it works, and says nothing more.
+    expect(threads(page)).toStrictEqual([['q', 'Which one?'], ['w', ''], ['mid', ''], ['d', '']])
+    expect([...page.el.querySelectorAll<HTMLElement>('.ov-thread')].map(row => row.dataset.attention)).toStrictEqual(['waiting', 'working', 'working', 'quiet'])
     expect(page.el.textContent).not.toContain('came to this')
     expect(page.el.textContent).not.toContain('Needs a look')
     // Only its own threads: the leaf is mid's.
@@ -84,14 +86,14 @@ describe('a constitution\'s view', () => {
   it('says a question it waits on, gold, and leaves no band for words a constitution never said', () => {
     const { page } = made(asked)
     expect(page.el.querySelector('.ov-needs')!.textContent).toBe('asks')
+    expect(made(root, { waits: () => new Map([['hub', { id: 'p', at: now, kind: 'post', text: 'Read this.' }]]) }).page.el.querySelector('.ov-needs')!.textContent).toBe('posted')
     expect(made(idle).page.el.querySelector<HTMLElement>('.ov-said')!.hidden).toBe(true)
   })
 
-  it('shows on each thread row that it opens and how many threads it has of its own; its orchestrators read as a path', () => {
-    const { page } = made(root)
-    const row = page.el.querySelector<HTMLElement>('.ov-thread[data-fiber="hub/mid"]')!
-    expect([row.querySelector('.ov-count')!.textContent, row.querySelector('.ov-open')!.textContent]).toStrictEqual(['1 thread', '›'])
-    expect(page.el.querySelector('.ov-thread[data-fiber="hub/q"] .ov-count')!.textContent).toBe('')
+  it('draws beneath a thread every thread below it that waits on the human, the post the board names included; its orchestrators read as a path', () => {
+    const { page } = made(root, { waits: () => new Map([['hub/mid/a', { id: 'p', at: now - hour, kind: 'post', text: 'The leaf is cut.' }]]) })
+    expect(threads(page)).toStrictEqual([['q', 'Which one?'], ['mid', ''], ['↳ a', 'The leaf is cut.'], ['w', ''], ['d', '']])
+    expect(page.el.querySelector<HTMLElement>('.ov-thread[data-fiber="hub/mid"] .ov-open')!.textContent).toBe('›')
     expect([...made(leaf).page.el.querySelectorAll('.ov-up .ov-ancestor')].map(step => [step.textContent, step.getAttribute('title')])).toStrictEqual([['hub', 'hub'], ['mid', 'Mid']])
   })
 

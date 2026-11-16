@@ -16,6 +16,8 @@ import { stateDot } from '../stateDot.js'
 import { slug } from '../threadOutline.js'
 import { threadState } from '../threads.js'
 import { renderMarkdown } from '../utils.js'
+import { attentionOf } from '../attention.js'
+import { turnOf } from '../turn.js'
 import { docKey, parseDocKey } from '../workspace/documents.js'
 import { headerIcon, type HeaderIcon } from '../workspace/headerIcon.js'
 import { declaredTitle, watchDocumentTitles } from '../workspace/DocumentTitles.js'
@@ -89,7 +91,7 @@ function lastSeen(key: string): number {
 }
 /** What an item says before its words. */
 const kindWord = (item: Item): string =>
-  item.kind === 'close' ? threadState(item.card) === 'to-review' ? 'for review' : 'closed' : { ask: 'asks', post: 'posted', file: 'sent' }[item.kind]
+  item.kind === 'close' ? threadState(item.card) === 'to-review' ? 'for review' : 'closed' : { ask: 'asks', post: 'posted', file: 'sent', blocked: 'blocked' }[item.kind]
 
 /**
  * Channels: a rail of the channels (what waits on the human floated to the
@@ -301,14 +303,14 @@ export class ChannelsView implements TemporalView {
     const index = threadIndexFor(ctx.response)
     return composeChannels({
       cards: boardCards(ctx.response), parentOf: card => index.parentOf(card), names: ctx.workspace!.charterNames,
-      dismissed: [...this.dismissed, ...this.pending], pinned: this.pinned, waiting: ctx.workspace!.board.waiting, now: Date.now(),
+      dismissed: [...this.dismissed, ...this.pending], pinned: this.pinned, waits: ctx.workspace!.board.waiting, now: Date.now(),
     })
   }
   /** A channel's stream: what its families' records, its sent files and its threads' launches make of it. */
   private entries(channel: Channel, ctx = this.ctx!): Entry[] {
     const workspace = ctx.workspace!
     return composeStream({
-      channel, records: workspace.board.records(channel.families), files: ctx.sends?.files ?? [], waiting: workspace.board.waiting,
+      channel, records: workspace.board.records(channel.families), files: ctx.sends?.files ?? [], waits: workspace.board.waiting,
       launches: card => workspace.globeHost.feeds.marks(card)?.launches ?? [], now: Date.now(), reachMs: workspace.board.reachMs,
     })
   }
@@ -501,7 +503,8 @@ export class ChannelsView implements TemporalView {
       menu.button.setAttribute('aria-haspopup', 'menu')
       this.head.replaceChildren(back.root, name, pages, menu.root, this.railToggle!.root)
     }
-    const stream = JSON.stringify([channel.key, failed, entries.map(entry => [entry.id, entry.kind, entry.at, entry.card.name, entry.card.turn, entry.kind === 'mark' ? entry.what : [entry.text, entry.waiting, kindWord(entry), entry.files.map(file => file.fullPath)]])])
+    const waits = this.ctx!.workspace!.board.waiting
+    const stream = JSON.stringify([channel.key, failed, entries.map(entry => [entry.id, entry.kind, entry.at, entry.card.name, attentionOf(entry.card, waits), turnOf(entry.card).turn, entry.kind === 'mark' ? entry.what : [entry.text, entry.waiting, entry.clears, kindWord(entry), entry.files.map(file => file.fullPath)]])])
     if (stream !== this.sigs.stream) {
       this.sigs.stream = stream
       this.rebuild(this.stream, entries.map(entry => entry.kind === 'mark' ? this.markRow(entry, now) : this.itemRow(entry, now)))
@@ -541,6 +544,7 @@ export class ChannelsView implements TemporalView {
     age.dataset.at = String(item.at)
     const head = el('div', 'kbn-ch-item-head')
     head.append(who, el('span', 'kbn-ch-kind', kindWord(item)), age)
+    if (item.clears) head.append(this.clear(item.clears, card))
     const body = el('div', 'kbn-ch-item-body')
     body.append(head)
     if (item.text) {
@@ -550,13 +554,26 @@ export class ChannelsView implements TemporalView {
     }
     if (item.kind === 'close') body.append(this.closing(item, id))
     if (item.files.length) body.append(this.files(item, id))
-    row.append(stateDot(card, open), body)
+    row.append(stateDot(card, this.ctx!.workspace!.board.waiting, open), body)
     // The whole item opens the view, save its buttons and a selection.
     row.addEventListener('click', event => {
       if ((event.target as Element).closest('button, a') || getSelection()?.toString()) return
       open()
     })
     return row
+  }
+  /** A waiting post's ✓: the human has read it, and it stops waiting. It writes that alone. */
+  private clear(uid: string, card: KanbanCard): HTMLButtonElement {
+    const done = button('kbn-ch-clear', '✓', () => {
+      done.disabled = true
+      void this.ctx?.workspace?.board.clear(uid).then(() => announce(`Cleared ${card.name}'s post.`), () => {
+        done.disabled = false
+        this.status(`${card.name}'s post could not be cleared; it still waits.`)
+      })
+    })
+    done.title = 'Clear: read, nothing to answer'
+    done.setAttribute('aria-label', `Clear ${card.name}'s post`)
+    return done
   }
   /** An item's files side by side: a page or a figure as its thumbnail alone, any other file as a chip named by its file name; each opens in the reader. */
   private files(item: Item, id: string): HTMLElement {

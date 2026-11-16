@@ -2,6 +2,7 @@ import '@ui-sdk/web/tabs'
 import { installFrontierDetails } from './DeskFrontier.js'
 import { responseThreadIndex, ThreadIndex } from './threads.js'
 import { stateDot } from './stateDot.js'
+import type { Waits } from './attention.js'
 import { markVerdictHost, type Verdict } from './workspace/Verdicts.js'
 import { openActionMenu, type ConversationAction } from './conversationMenu.js'
 import { dressAction, dressVerb, lifecycleVerbsFor, verbSpec } from './workspace/lifecycleVerbs.js'
@@ -129,6 +130,8 @@ export interface KanbanSurfaceRendererOptions {
   getDragSourceId: () => string | null
   setDragSourceId: (id: string | null) => void
   getLastResponse: () => KanbanResponse | null
+  /** What waits on the human, by fiber. */
+  waits: () => Waits
   stopDragAutoScroll: () => void
   transition: (card: KanbanCard, target: ColumnKind) => void | Promise<void>
   setSurface: (
@@ -1052,7 +1055,7 @@ export class KanbanSurfaceRenderer {
 
     if (!isStale) this.installDraggable(el, card, false)
 
-    const glyph = stateDot(card, this.o.openDetail)
+    const glyph = stateDot(card, this.o.waits(), this.o.openDetail)
     const title = document.createElement('span')
     title.className = 'kbn-cluster-item-title'
     title.textContent = card.name
@@ -1072,7 +1075,7 @@ export class KanbanSurfaceRenderer {
     markVerdictHost(end, card)
     el.append(end)
     this.installRowMenu(el, card, isStale)
-    installFrontierDetails(el, end, card, threadIndexFor(this.o.getLastResponse()), this.o.openDetail)
+    installFrontierDetails(el, end, card, threadIndexFor(this.o.getLastResponse()), this.o.waits(), this.o.openDetail)
 
     el.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest('button')) return
@@ -1303,7 +1306,7 @@ export class KanbanSurfaceRenderer {
 
     if (!isStale) this.installDraggable(el, card, true)
 
-    const glyph = stateDot(card, this.o.openDetail)
+    const glyph = stateDot(card, this.o.waits(), this.o.openDetail)
     const name = document.createElement('span')
     name.className = 'kbn-card-name'
     name.textContent = card.name
@@ -1317,7 +1320,7 @@ export class KanbanSurfaceRenderer {
 
 
     el.append(meta)
-    installFrontierDetails(el, meta, card, threadIndexFor(this.o.getLastResponse()), this.o.openDetail)
+    installFrontierDetails(el, meta, card, threadIndexFor(this.o.getLastResponse()), this.o.waits(), this.o.openDetail)
     this.installRowMenu(el, card, isStale)
 
     el.addEventListener('click', (e) => {

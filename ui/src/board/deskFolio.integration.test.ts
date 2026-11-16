@@ -13,7 +13,7 @@ it('a fresh phone Desk opens on In flight and names every tab exactly as its col
   // No layout here: the pager is given a phone's width.
   vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(375)
   const data = response({ now: { drafts: [card({ id: 'd' })], inFlight: [card({ id: 'f', status: 'active' })], awaitingReview: [] } })
-  const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => data,
+  const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, waits: () => new Map(), getLastResponse: () => data,
     stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: vi.fn() })
   document.body.append(renderer.renderNowSection(data.now, {}))
   for (const run of frames.splice(0)) run(0)
@@ -42,7 +42,7 @@ it('turns the pager from the folio tabs by press, arrows, Home and End, and mark
   } })
   onTestFinished(() => { delete (HTMLElement.prototype as Partial<HTMLElement>).scrollTo })
   const data = response({ now: { drafts: [card({ id: 'd' })], inFlight: [card({ id: 'f', status: 'active' })], awaitingReview: [] } })
-  const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => data,
+  const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, waits: () => new Map(), getLastResponse: () => data,
     stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: vi.fn(), onNewIdeaClick: vi.fn() })
   document.body.append(renderer.renderNowSection(data.now, {}))
   for (const run of frames.splice(0)) run(0)
@@ -78,7 +78,7 @@ it('draws the Stash and New idea actions as bare glyphs named for assistive tech
     inFlight: [card({ id: 'flight', status: 'active' })],
     awaitingReview: [card({ id: 'review', status: 'closed' })],
   } })
-  const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => data,
+  const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, waits: () => new Map(), getLastResponse: () => data,
     stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: vi.fn(), onStashClick: stash, onNewIdeaClick: idea })
   const root = renderer.renderNowSection(data.now, {})
   const actions = [...root.querySelectorAll<HTMLButtonElement>('.kbn-col-action')]

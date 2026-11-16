@@ -430,6 +430,9 @@ it('draws a post to the human that waits on them gold, with what it attached, it
   expect(host.querySelector('[data-channel="channel:cmbx"]')!.hasAttribute('data-waiting')).toBe(true)
   const post = item(host, 'cmbx')
   expect([post.dataset.kind, post.hasAttribute('data-waiting'), post.querySelector('.kbn-ch-kind')?.textContent, post.querySelector('.kbn-ch-item-text')?.textContent?.trim()]).toStrictEqual(['post', true, 'posted', 'Two calls for you today.'])
+  // A waiting post carries its clear; nothing else does.
+  expect(post.querySelector('.kbn-ch-clear')?.textContent).toBe('✓')
+  expect(host.querySelectorAll('.kbn-ch-clear')).toHaveLength(1)
   expect([...post.querySelectorAll('.kbn-ch-file')].map(file => [file.classList.contains('kbn-ch-thumb'), file.querySelector('.ws-thumbnail') !== null, file.childElementCount])).toStrictEqual([[true, true, 1]])
 })
 

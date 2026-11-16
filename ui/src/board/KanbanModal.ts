@@ -351,6 +351,7 @@ export class KanbanModal {
       getDragSourceId: () => this.dragSourceId,
       setDragSourceId: (id) => { this.dragSourceId = id },
       getLastResponse: () => this.lastResponse,
+      waits: () => this.workspace!.board.waiting,
       stopDragAutoScroll: () => this.stopDragAutoScroll(),
       transition: (card, target) => this.transition(card, target),
       verdict: (card, verdict) => { if (this.workspace) this.workspace.queueVerdict(card, verdict); else this.transition(card, verdict) },

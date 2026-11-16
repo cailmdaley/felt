@@ -15,7 +15,7 @@
 .ov-ancestor .constitution-state-dot { flex: none; width: 16px; height: 16px; }
 .ov-main { box-sizing: border-box; padding-bottom: 24px; }
 
-/* A thread below, one column of rows sized to what they hold: dot, slug, a word, its run, its own threads, the chevron that opens it. */
+/* A thread below, one column of rows sized to what they hold: dot, slug, its run, what it wants or its faint word, the chevron that opens it. */
 .ov-thread {
   cursor: pointer; outline: none; align-items: baseline; padding: 2px 0;
   font: var(--type-meta)/var(--leading-ui) var(--font-mono); color: var(--ws-ink-soft);
@@ -25,7 +25,11 @@
 .ov-slug { min-width: 0; overflow-wrap: anywhere; color: var(--ws-ink); }
 .ov-ancestor .ov-slug { color: var(--ws-ink-soft); }
 .ov-word { color: var(--fm-text, var(--ws-ink-muted)); font-family: var(--font-serif); font-style: italic; white-space: nowrap; }
-.ov-time, .ov-count { color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-ui) var(--font-serif); white-space: nowrap; }
+.ov-time { color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-ui) var(--font-serif); white-space: nowrap; }
+/* What a waiting thread wants, in its words, one line. */
+.ov-want { max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ws-ink); font: var(--type-meta)/var(--leading-ui) var(--font-serif); }
+.ov-want * { display: inline; margin: 0; padding: 0; font-size: inherit; line-height: inherit; }
+.ov-deep .ov-slug { color: var(--ws-ink-soft); }
 .ov-open { color: var(--ws-ink-muted); font: var(--type-row)/var(--leading-solid) var(--font-serif); opacity: .45; }
 .ov-thread:is(:hover, :focus-visible) .ov-open { opacity: 1; color: var(--ws-ink); }
 
@@ -74,7 +78,7 @@
 .ov-body { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: start; column-gap: 8px; padding-top: 4px; border-top: 1px solid var(--ws-hairline-soft); }
 .ov-threads {
   list-style: none; margin: 0; padding: 4px 0 0;
-  display: grid; grid-template-columns: calc(var(--ov-gutter) - 10px) 20px repeat(4, max-content) 12px; column-gap: 10px; align-content: start;
+  display: grid; grid-template-columns: calc(var(--ov-gutter) - 10px) 20px repeat(3, max-content) 12px; column-gap: 10px; align-content: start;
 }
 .ov-threads > li, .ov-thread { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; }
 /* The gutter is the row's first cell, so its hover reaches the page's edge. */
@@ -100,6 +104,7 @@
   .ov-figure { order: -1; position: static; min-height: 0; height: 200px; margin: 8px var(--ov-gutter) 4px; }
   .ov-threads { display: block; }
   .ov-threads > li { display: block; }
+  .ov-want { max-width: 100%; }
   .ov-thread { position: relative; display: flex; flex-wrap: wrap; column-gap: 10px; padding: 3px var(--ov-gutter) 3px calc(var(--ov-gutter) + 30px); }
   /* The dot stands in the gutter, so a wrapped line starts under the slug. */
   .ov-thread .constitution-state-dot { position: absolute; left: var(--ov-gutter); top: 3px; }
