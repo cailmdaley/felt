@@ -7,29 +7,6 @@ import (
 	"time"
 )
 
-const delayedContract = 45
-
-func (a *app) requireDelayedContract(owner string) error {
-	local, ok := a.daemonContractLevel("")
-	if !ok {
-		return fmt.Errorf("local daemon unreachable; delayed messages require contract %d", delayedContract)
-	}
-	if local.Level < delayedContract {
-		return fmt.Errorf("host %s is at contract %d; delayed messages require %d", local.Host, local.Level, delayedContract)
-	}
-	if local.Host == owner {
-		return nil
-	}
-	remote, ok := a.daemonContractLevel(owner)
-	if !ok {
-		return fmt.Errorf("owner %s unreachable; delayed messages require contract %d", owner, delayedContract)
-	}
-	if remote.Host != owner || remote.Level < delayedContract {
-		return fmt.Errorf("host %s is at contract %d; delayed messages require %d", owner, remote.Level, delayedContract)
-	}
-	return nil
-}
-
 var dayDuration = regexp.MustCompile(`([0-9]+(?:\.[0-9]+)?)d`)
 
 // resolveMessageTime uses the sender's clock and zone, never the owner's.

@@ -185,7 +185,7 @@ Schedule a fiber message with --in 8h (Go durations plus d for days) or --at
 (RFC 3339, sender-local YYYY-MM-DD HH:MM, or next local HH:MM). With only text,
 a delayed send addresses your own fiber. The receipt prints the resolved local
 and UTC time; retry with --message-id <id> --at <printed UTC instant>.
-Both daemons must speak contract 45. Delays refuse session addresses and --fresh.
+Delays refuse session addresses and --fresh.
 List with inbox ls <fiber> --scheduled; cancel with inbox cancel <fiber> <id>.
 
 A fiber send always uses its durable inbox; attachments become retained file references. The receipt says
@@ -282,9 +282,6 @@ exit 1 means rejected, unknown, or another command error.`,
 				}
 				if err != nil {
 					return fmt.Errorf("a delayed message goes to a fiber: %w", err)
-				}
-				if err := a.requireDelayedContract(block.Host); err != nil {
-					return err
 				}
 				resolved, err := resolveMessageTime(delay, at, time.Now(), time.Local)
 				if err != nil {

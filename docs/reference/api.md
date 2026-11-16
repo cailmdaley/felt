@@ -243,7 +243,7 @@ the caller does not send it again.
 
 `POST /deliver` accepts `{fiber_id, text, from?, message_id?, not_before?}` (plus `origin` to forward).
 A future `not_before` (UTC RFC 3339) answers 202 with `status: scheduled`, `queued: true`, `delivered: false` and `not_before`, without clearing an ask or starting consumption or a launch.
-It needs contract 45 on every forwarding and consuming daemon; the CLI checks both its daemon and the owner.
+It needs contract 45 on every forwarding and consuming daemon.
 Agent text goes through the fiber inbox with `turn: ask`.
 An agent's `resume_mode: fresh` is recorded under its id instead and starts a fresh session with the text in its launch prompt, under the inbox launch gate: 200 `{delivery: fresh, fiber_id, delivered: true}` with the worker's `surface`, `terminal` and `tmux_session`, 202 with `delivered: null` and a `detail` when the start is unconfirmed (a busy Poller), or 409 with `reason` and `error` when refused, after which the same id may be sent again; a repeated id starts nothing and answers `duplicate: true` with its `message_id`, as 200 with `delivered: true` once the first started, or 202 with `delivered: null` when whether it started is unknown.
 The owner mints an id for a caller without one.

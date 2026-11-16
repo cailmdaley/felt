@@ -178,7 +178,6 @@ A large, cold idle session therefore gets a gated fresh replacement rather than 
 `--fresh` is refused with a delay because a fresh request records and launches rather than queues.
 Delayed messages accept fiber addresses only: the follow-up-timer proposal's session target is not supported, since a session inbox has no delayed-message consumer and a reminder should follow the work.
 
-The CLI requires both its local daemon and the owner to report contract 45 or higher, naming an older or unreachable host in its refusal.
 The `not_before` wish passes through `/api/v1/deliver` to the owner's `Enqueue`.
 A future entry causes no ask clear, family-board message row, launch reservation, consumption, transport emission or idle subscription at enqueue.
 Every poll consumes live workers and scans dormant fibers with `inbox pending --waking`, whose count excludes future entries.
@@ -213,7 +212,6 @@ The poll's one `inbox pending` call reports each owned fiber's due count and its
 **Rollback below contract 45 is unsafe while delayed entries are pending.**
 An older daemon can ignore the delay and deliver a pending entry immediately.
 List and cancel pending delayed entries on 45 before rolling the owner back, or keep the owner stopped until their times have passed.
-The sender-side version check cannot protect an accepted entry from a later owner rollback.
 
 ## Thread results and routing
 

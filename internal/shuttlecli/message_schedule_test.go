@@ -2,7 +2,6 @@ package shuttlecli
 
 import (
 	"bytes"
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -67,44 +66,24 @@ func TestMessageTimeAcrossClockChangesAndSubsecondDuration(t *testing.T) {
 	}
 }
 
-func TestDelayedMessageContractAndWire(t *testing.T) {
-	for _, levels := range [][2]int{{44, 45}, {45, 40}, {45, 45}} {
-		t.Run(fmt.Sprint(levels), func(t *testing.T) {
-			env := testEnv(t)
-			store := writeMessageTargetFiber(t, map[string]any{"kind": "oneshot", "host": "worker-node", "agent": "claude-opus", "project_dir": t.TempDir()})
-			isolateMessageFiberStore(env, store)
-			deliver, requests := dormantDeliverStub(202, `{"queued":true,"status":"scheduled"}`)
-			daemonStub(t, env, map[string]http.HandlerFunc{
-				"/api/v1/version": func(w http.ResponseWriter, r *http.Request) {
-					host, level := "hub", levels[0]
-					if r.URL.Query().Get("origin") != "" {
-						host, level = "worker-node", levels[1]
-					}
-					fmt.Fprintf(w, `{"host":%q,"contract_level":%d}`, host, level)
-				},
-				"/api/v1/deliver": deliver,
-			})
-			out, _, err := runScheduledMessage(t, newApp(env), "work/worker", "check the fit", "--in", "8h", "--message-id", "later")
-			if levels[0] < 45 || levels[1] < 45 {
-				if err == nil || !strings.Contains(err.Error(), "contract") || len(requests()) != 0 {
-					t.Fatalf("%s %v %+v", out, err, requests())
-				}
-				return
-			}
-			if err != nil || !strings.Contains(out, "scheduled") || !strings.Contains(out, "UTC") {
-				t.Fatalf("%s %v", out, err)
-			}
-			got := requests()
-			if len(got) != 1 || got[0]["not_before"] == "" || got[0]["turn"] != "ask" {
-				t.Fatal(got)
-			}
-		})
+func TestDelayedMessageWire(t *testing.T) {
+	env := testEnv(t)
+	store := writeMessageTargetFiber(t, map[string]any{"kind": "oneshot", "host": "worker-node", "agent": "claude-opus", "project_dir": t.TempDir()})
+	isolateMessageFiberStore(env, store)
+	deliver, requests := dormantDeliverStub(202, `{"queued":true,"status":"scheduled"}`)
+	daemonStub(t, env, map[string]http.HandlerFunc{"/api/v1/deliver": deliver})
+	out, _, err := runScheduledMessage(t, newApp(env), "work/worker", "check the fit", "--in", "8h", "--message-id", "later")
+	if err != nil || !strings.Contains(out, "scheduled") || !strings.Contains(out, "UTC") {
+		t.Fatalf("%s %v", out, err)
+	}
+	got := requests()
+	if len(got) != 1 || got[0]["not_before"] == "" || got[0]["turn"] != "ask" {
+		t.Fatal(got)
 	}
 }
 
 // delayedSendEnv is a host whose store holds work/worker and work/own, both
-// owned by worker-node at contract 45, with a /deliver stub that records what
-// it is sent. own is work/own's file, for a sender that is its worker.
+// owned by worker-node, with a /deliver stub that records what it is sent. own is work/own's file, for a sender that is its worker.
 func delayedSendEnv(t *testing.T) (env *sysenv.Env, own string, requests func() []map[string]any) {
 	t.Helper()
 	env = testEnv(t)
@@ -125,7 +104,6 @@ func delayedSendEnv(t *testing.T) (env *sysenv.Env, own string, requests func() 
 	isolateMessageFiberStore(env, store)
 	deliver, requests := dormantDeliverStub(202, `{"queued":true,"status":"scheduled"}`)
 	daemonStub(t, env, map[string]http.HandlerFunc{
-		"/api/v1/version": jsonBody(`{"host":"worker-node","contract_level":45}`),
 		"/api/v1/deliver": deliver,
 	})
 	return env, matches[0], requests
