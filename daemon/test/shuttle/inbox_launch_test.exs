@@ -182,7 +182,12 @@ defmodule Shuttle.InboxLaunchTest do
 
     _poller = poller!(host)
     parent = entry(host, id)
-    instant = DateTime.add(DateTime.utc_now(), 3600, :second) |> DateTime.to_iso8601()
+
+    instant =
+      DateTime.utc_now()
+      |> DateTime.add(3600, :second)
+      |> DateTime.truncate(:second)
+      |> DateTime.to_iso8601()
 
     assert {:ok, {:scheduled, ^instant}} =
              Delivery.context(parent, "later", "ask-later",
