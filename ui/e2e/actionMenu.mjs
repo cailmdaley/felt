@@ -20,7 +20,7 @@ try {
     p.on('pageerror', error => errors.push(error.message))
     await p.goto(url)
     await p.locator('.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Calibrate the shear response"])').click()
-    const opener = p.locator('.ws-page.ws-selected .fp-row[data-selected] > .fp-line .fp-verbs .ws-acts-console')
+    const opener = p.locator('.ws-page.ws-selected .ov-head .ov-tools .ws-acts-console')
     const menu = p.getByRole('menu', { name: 'Open conversation in' })
     const items = p.getByRole('menuitemradio')
     const shot = async method => {

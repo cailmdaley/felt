@@ -107,7 +107,14 @@ describe('a constitution\'s view', () => {
   it('opens its orchestrator\'s view when pulled down past its top', () => {
     const { page, feeds } = made(mid)
     const scroller = page.el.querySelector('.ws-family-scroll')!
-    for (let n = 0; n < 3; n++) scroller.dispatchEvent(Object.assign(new Event('wheel'), { deltaY: -50 }))
+    const wheel = (at: number) => { const event = new WheelEvent('wheel', { deltaY: -50 }); Object.defineProperty(event, 'timeStamp', { value: at }); scroller.dispatchEvent(event) }
+    // A scroll's momentum carried up to the top does not pull.
+    scroller.scrollTop = 40
+    wheel(1000); scroller.scrollTop = 0
+    for (let n = 1; n < 6; n++) wheel(1000 + n * 50)
+    expect(feeds.view).not.toHaveBeenCalled()
+    // A gesture begun at the top does.
+    for (let n = 0; n < 3; n++) wheel(2000 + n * 50)
     expect(feeds.view).toHaveBeenLastCalledWith(root)
   })
 

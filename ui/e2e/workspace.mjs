@@ -48,23 +48,22 @@ async function open(p, expected = 'calibration-report') {
   await land(p)
   await choose(p, expected)
 }
-/** The highlighted row's strip of acts on its family's page. */
-const rowActs = p => selected(p).locator('.fp-row[data-selected] > .fp-line .fp-verbs > .ws-fiber-acts')
+/** The strip of acts in a constitution's view's head. */
+const rowActs = p => selected(p).locator('.ov-head .ov-tools > .ws-fiber-acts')
 /** The console's acts: its menu, and where a verdict's undo stands. */
 const consoleActs = p => band(p).locator('.ws-band-head .ws-band-acts')
 /**
- * The fiber's acts where they show: the highlighted row's on its family's
- * page; on a page with no row for the fiber (a report, a document, the
- * constitution's own page), the console's menu.
+ * The fiber's acts where they show: its view's head; on a page with no view
+ * (a report, a document, the constitution's own page), the console's.
  */
-const acts = p => p.locator('.ws-reader:not(:has(.ws-page.ws-selected .fp-row[data-selected] .ws-fiber-acts)) .ws-stage-band .ws-band-head .ws-band-acts').or(rowActs(p))
+const acts = p => p.locator('.ws-reader:not(:has(.ws-page.ws-selected .ov-head .ws-fiber-acts)) .ws-stage-band .ws-band-head .ws-band-acts').or(rowActs(p))
 async function headerAction(p, label) {
   const row = await rowActs(p).isVisible()
   if (label === 'Settings') { await (row ? rowActs(p).locator('.ws-acts-settings') : await consoleAct(consoleActs(p), 'Settings')).click(); return }
   if (label === 'Constitution') {
-    // The console's menu opens the constitution's page where no row stands for the fiber; from the family's page, its receded page.
+    // The console opens the constitution's page where no view stands for the fiber; from its view, the head's page button.
     if (!row) await (await consoleAct(consoleActs(p), 'Constitution')).click()
-    else await pageFor(p, 'Constitution').dispatchEvent('click')
+    else await selected(p).locator('.ov-head [data-part="constitution"]').click()
     return
   }
   await acts(p).getByRole('button', { name: label, exact: true }).click()
@@ -927,7 +926,7 @@ for (const width of [701, 1000, 1440, 1920]) test(`The page fills the window bet
   }
 }, { width, height: 900 })
 
-test('Receipt arrivals update the family page\'s sent list and leave the open report be', async p => {
+test('Receipt arrivals lead the view\'s sent files and leave the open report be', async p => {
   await open(p); await reportReady(p)
   await report(p).evaluate(f => { window.__arrivalReport = f.contentWindow })
   await p.evaluate(() => {
@@ -940,14 +939,14 @@ test('Receipt arrivals update the family page\'s sent list and leave the open re
       return new Response(JSON.stringify(payload), { headers: { 'Content-Type': 'application/json' } })
     }
   })
-  // The fleet's receipts are read past their interval: the arrival marks the
-  // family page's list and leads it, and the open report stays as it was.
+  // The fleet's receipts are read past their interval: the arrival leads the
+  // view's sent files, and the open report stays as it was.
   await p.clock.fastForward(60_001)
   await p.evaluate(() => window.__harness.modal.fiberSends.refresh())
   await pageBack(p)
-  await selected(p).locator('.fp-head .fp-sent[data-unread]').waitFor()
-  assert.match(await (await familySends(p)).first().getAttribute('data-held'), /\/brief\.md$/)
   assert.ok(await report(p).evaluate(f => f.contentWindow === window.__arrivalReport))
+  await familySends(p)
+  await poll(p, () => document.querySelector('.ws-page.ws-selected')?.getAttribute('data-key')?.endsWith('/brief.md'))
 })
 
 test('j/k step constitutions in Desk order from a Channels-opened reader, J/K step its columns, and each landing is named', async p => {
@@ -975,8 +974,8 @@ test('j/k step constitutions in Desk order from a Channels-opened reader, J/K st
   await p.keyboard.press('Shift+K'); await title(names[read + 1])
   await p.keyboard.press('Shift+J'); await title(flight[0])
   await p.keyboard.press('Shift+J'); await title(name)
-  if (await p.locator('.ws-selected .fp-tree').count()) {
-    await p.locator('.ws-selected .fp-tree [role="treeitem"]').first().focus()
+  if (await p.locator('.ws-selected .ws-family-page').count()) {
+    await p.locator('.ws-selected .ws-family-page :is(.ov-thread, .ov-ancestor)').first().focus()
     await p.keyboard.press('j'); await p.waitForTimeout(200)
     assert.equal(await p.locator('.ws-channel-title').textContent(), name, 'j inside the rows stays on the page')
   }
@@ -1431,7 +1430,7 @@ test('Text, markdown, code, image, archive and missing-file cause', async p => {
   assert.match(await selected(p).locator('.ws-document-path').innerText(), /\/deliverables\/not-produced.csv$/)
 })
 
-test('A live-arriving image opens at full resolution from its send on the family page', async p => {
+test('A live-arriving image opens at full resolution from the view\'s sent files', async p => {
   await land(p)
   await p.evaluate(() => {
     const original = window.fetch
@@ -1448,15 +1447,15 @@ test('A live-arriving image opens at full resolution from its send on the family
   })
   await p.clock.fastForward(15001)
   await p.evaluate(() => window.__harness.modal.fiberSends.refresh())
-  await selected(p).locator('.fp-head .fp-sent[data-unread]').waitFor()
-  const imageCard = (await familySends(p)).and(p.locator('[data-held$="/live-arrival.png"]'))
-  await imageCard.waitFor()
-  await imageCard.click()
-  const image = selected(p).locator('.fp-head .fp-doc .kbn-fileview-image')
+  await poll(p, () => document.querySelector('.ws-page.ws-selected .ov-head [data-part="sends"]'))
+  await p.waitForTimeout(300)
+  await familySends(p)
+  await poll(p, () => document.querySelector('.ws-page.ws-selected')?.getAttribute('data-key')?.endsWith('/live-arrival.png'))
+  const image = selected(p).locator('.kbn-fileview-image')
   await image.waitFor()
   const geometry = await image.evaluate(async img => {
     await img.decode()
-    const rect = img.getBoundingClientRect(), content = img.closest('.fp-doc').getBoundingClientRect()
+    const rect = img.getBoundingClientRect(), content = img.closest('.ws-page').getBoundingClientRect()
     return { natural: [img.naturalWidth, img.naturalHeight], drawn: [rect.width, rect.height], content: [content.width, content.height] }
   })
   assert.deepEqual(geometry.natural, [3000, 600], 'the reader decodes the source image rather than the strip-sized representation')
@@ -2526,13 +2525,13 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   }
   await leave(p); await chooseDeskColumn(p, 1)
   await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
-  await still(p, 'a worker-state change', () => flipWorker(p), { allow: ['.fp-title'], settle: 100 })
+  await still(p, 'a worker-state change', () => flipWorker(p), { allow: ['.ov-head', '.ov-up'], settle: 100 })
   assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper,.kbn-ctl-discard)').count(), 0)
-  // Its family's page draws its row, so the highlighted row carries the verb button: Close for review on its face, the rest behind its caret.
+  // Its view's head carries the verb button: Close for review on its face, the rest behind its caret.
   assert.equal(await verbFace(acts(p)).getAttribute('data-verb'), 'Close for review')
   for (const control of ['.ws-verb-face', '.ws-verb-more']) {
     assert.ok(await acts(p).locator(control).isVisible())
-    if (!phone) await still(p, `hovering ${control}`, () => acts(p).locator(control).hover(), { allow: [`.fp-row[data-selected] ${control}`] })
+    if (!phone) await still(p, `hovering ${control}`, () => acts(p).locator(control).hover(), { allow: [`.ov-head ${control}`] })
   }
 }, viewport)
 

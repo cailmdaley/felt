@@ -11,8 +11,8 @@ const shots = process.env.CONSOLE_PICKER_SHOTS
 if (shots) await mkdir(shots, { recursive: true })
 const selected = p => p.locator('.ws-page.ws-selected')
 const band = p => p.locator('.ws-stage-band')
-/** The console on the highlighted row: a fiber's acts live on its row of the family page. */
-const lit = p => selected(p).locator('.fp-row[data-selected] > .fp-line .fp-verbs')
+/** The acts in a constitution's view's head. */
+const lit = p => selected(p).locator('.ov-head .ov-tools')
 const opener = p => lit(p).locator('.ws-acts-console')
 const items = p => p.getByRole('menuitemradio')
 async function shot(p, name) {
@@ -33,12 +33,11 @@ async function open(p, backend) {
   await lit(p).locator('.ws-fiber-acts').waitFor({ state: 'visible' })
 }
 async function headerFits(p) {
-  // The band leaves the acts to the rows: none on its first line, one console on the highlighted row.
-  assert.equal(await band(p).locator('.ws-band-head .ws-acts-console:visible').count(), 0, 'the band carries no console while the rows do')
-  assert.equal(await lit(p).locator('.ws-acts-console:visible').count(), 1, 'the highlighted row carries one console opener')
+  // The view's head carries one console opener among its controls, none overlapping.
+  assert.equal(await lit(p).locator('.ws-acts-console:visible').count(), 1, 'the view\'s head carries one console opener')
   const geometry = await lit(p).evaluate(slot => {
-    const row = slot.closest('.fp-title')
-    const controls = [...row.querySelectorAll('.fp-name,.fp-docs,.fp-meta,.ws-fiber-acts > *')]
+    const row = slot.closest('.ov-head')
+    const controls = [...row.querySelectorAll('.ov-name,.ws-doc-buttons,.ov-facts,.ws-fiber-acts > *')]
       .filter(el => el.checkVisibility()).map(el => ({ name: el.className, rect: el.getBoundingClientRect().toJSON() }))
     return { controls }
   })

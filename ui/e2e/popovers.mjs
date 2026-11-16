@@ -27,7 +27,7 @@ try {
     const { width, height } = p.viewportSize()
     const frame = p.locator('.ws-page.ws-selected iframe').first()
 
-    const gear = p.locator('.ws-page.ws-selected .fp-row[data-selected] > .fp-line .fp-verbs .ws-acts-settings')
+    const gear = p.locator('.ws-page.ws-selected .ov-head .ov-tools .ws-acts-settings')
     const settings = p.getByRole('dialog', { name: 'Settings' })
     await gear.click(); await settings.waitFor()
     await shot('settings')

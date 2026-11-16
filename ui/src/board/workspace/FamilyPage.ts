@@ -32,8 +32,8 @@ const needs = (card: KanbanCard): string => card.ask && card.status === 'active'
 
 /**
  * One view of a constitution, the same from the Desk, a channel, a role or a
- * thread: its orchestrators above as compact heads (scrolled out of sight on
- * landing; scrolling up past them, or choosing one, opens its view); its head
+ * thread: its orchestrators above as compact heads (pulling the page down
+ * past its top opens the nearest one's view, as choosing one does); its head
  * (state dot, slug, whether it needs the human, its run, its pages and its
  * acts); a strip of the last thing it posted beside a thumbnail of its
  * tapestry or newest sent file; and its sub-threads as rows (dot, slug, a word
@@ -49,15 +49,10 @@ export class FamilyPage {
   private card: KanbanCard | null = null
   private index: ThreadIndex | null = null
   private signature = ''
-  /** The constitution the page last landed on: a new one scrolls its orchestrators out of sight. */
-  private landed = ''
   private awake = true
   private acts: FiberActs | null = null
   private thumb: { doc: DocKey; thumbnail: Thumbnail } | null = null
   private pull = 0
-  /** A view just landed on: its orchestrators go out of sight once the page has its height. */
-  private landing = false
-  private readonly sized = new ResizeObserver(() => this.fit())
   private readonly feeds: ViewFeeds
   private readonly disposed: () => void
   private readonly actsFor?: (target: () => KanbanCard) => FiberActs
@@ -67,16 +62,24 @@ export class FamilyPage {
   constructor(feeds: ViewFeeds, disposed: () => void, actsFor?: (target: () => KanbanCard) => FiberActs) {
     this.feeds = feeds; this.disposed = disposed; this.actsFor = actsFor
     this.up.setAttribute('aria-label', 'Orchestrators')
+    // A tree: its rows own j, k, h and l while they have the keys.
+    this.scroller.setAttribute('role', 'tree')
+    this.scroller.setAttribute('aria-label', 'The constitution, its orchestrators and its threads')
     this.scroller.append(this.up, this.main)
     const grid = el('div', 'ws-family-grid')
     grid.append(this.scroller)
     this.el.append(grid)
     this.el.addEventListener('keydown', event => this.key(event))
-    this.scroller.addEventListener('wheel', event => this.pulled(-event.deltaY), { passive: true })
+    // Only a gesture that begins at the top pulls: a scroll's momentum carried up to the top does not.
+    let lastWheel = -Infinity, fromTop = false
+    this.scroller.addEventListener('wheel', event => {
+      if (event.timeStamp - lastWheel > 300) fromTop = this.scroller.scrollTop <= 0
+      lastWheel = event.timeStamp
+      if (fromTop) this.pulled(-event.deltaY)
+    }, { passive: true })
     let touch: number | null = null
     this.scroller.addEventListener('touchstart', event => { touch = this.scroller.scrollTop <= 0 ? event.touches[0].clientY : null }, { passive: true })
     this.scroller.addEventListener('touchmove', event => { if (touch !== null && event.touches[0].clientY - touch > PULL_PX) { touch = null; this.pulled(PULL_PX) } }, { passive: true })
-    this.sized.observe(this.scroller)
     bindDrawnPage(this.el, { suspend: () => { this.awake = false }, resume: () => { this.awake = true; this.repaint() }, dispose: () => this.dispose() })
   }
 
@@ -137,29 +140,12 @@ export class FamilyPage {
     const held = focused && this.el.contains(focused) ? `${focused.className}:${focused.dataset.fiber}` : undefined
     this.main.replaceChildren(this.head(card, now), this.strip(card, now), ...threads.length ? [list] : [])
     if (held) [...this.el.querySelectorAll<HTMLElement>('.ov-ancestor, .ov-thread')].find(row => `${row.className}:${row.dataset.fiber}` === held)?.focus({ preventScroll: true })
-    // A view newly landed on shows its own head at the top, its orchestrators just above, out of sight.
-    const key = `${card.originId}:${card.uid ?? card.id}`
-    if (this.landed !== key) {
-      this.landed = key
-      this.pull = 0
-      this.landing = true
-    }
-    this.fit()
-  }
-  /** The view fills the page at least, so its orchestrators can scroll out of sight above it; a view just landed on puts them there. */
-  private fit(): void {
-    const height = this.scroller.clientHeight
-    if (!height) return
-    this.main.style.minHeight = `${height}px`
-    if (!this.landing) return
-    this.landing = false
-    this.scroller.scrollTop = this.up.offsetHeight
   }
   /** A constitution's compact head, as an orchestrator above or a thread below: its dot, its slug, a word, its run. Choosing it opens its view. */
   private compact(card: KanbanCard, className: string, now: number, word?: string): HTMLElement {
     const row = el('div', className)
     row.tabIndex = 0
-    row.setAttribute('role', 'link')
+    row.setAttribute('role', 'treeitem')
     row.dataset.fiber = card.uid ?? card.id
     row.title = card.name
     const open = (): void => this.feeds.view(card)
@@ -176,6 +162,8 @@ export class FamilyPage {
     const facts = el('div', 'ov-facts')
     facts.append(...need ? [el('span', 'ov-needs', need)] : [], el('span', 'ov-time', runWords(card, now)))
     const tools = el('div', 'ov-tools')
+    // An act zone, as the console is: a channel theme's rules stop at its controls.
+    tools.dataset.part = 'act'
     tools.append(docButtons(card, this.feeds))
     if (this.actsFor) {
       this.acts ??= this.actsFor(() => this.card!)
@@ -199,7 +187,7 @@ export class FamilyPage {
     void this.feeds.lead(card).then(lead => {
       const doc = lead?.key ?? this.feeds.files(card)[0]?.key
       const file = doc && parseDocKey(doc)
-      if (!doc || !file || this.card !== card) return
+      if (!doc || !file || this.card?.originId !== card.originId || (this.card.uid ?? this.card.id) !== (card.uid ?? card.id)) return
       if (this.thumb?.doc !== doc) {
         this.thumb?.thumbnail.dispose()
         const name = file.path.split('/').pop() ?? file.path
@@ -252,7 +240,6 @@ export class FamilyPage {
   }
   dispose(): void {
     this.awake = false
-    this.sized.disconnect()
     this.acts?.dispose()
     this.thumb?.thumbnail.dispose()
     this.disposed()

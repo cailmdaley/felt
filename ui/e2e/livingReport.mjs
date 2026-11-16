@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { familySends, familyTree, openThread, pageBack, sentFiles, showFile, threadRow } from './familyNav.mjs'
+import { familyTree, openThread, pageBack, sentFiles, showFile, threadRow } from './familyNav.mjs'
 import { consoleAct, consoleMenu } from './verbs.mjs'
 
 const REPORT = '/calibration-report/report.html'
@@ -58,7 +58,7 @@ async function report(page) {
   await page.waitForTimeout(100)
 }
 export function registerLivingReportJourneys(test) {
-  test('A live rewrite keeps the reader in place, on the report\'s page and unfolded on its family\'s page', async page => {
+  test('A live rewrite keeps the reader in place on the report\'s page', async page => {
     await page.goto(url)
     const original = await page.evaluate(suffix => window.__harness.files.find(file => file.path.endsWith(suffix)).body.text(), REPORT)
     await page.locator('.kbn-desk .kbn-card[data-fiber-id="research/workspace/calibration-report"]:not(.kbn-card-header) .kbn-card-name').click()
@@ -81,27 +81,6 @@ export function registerLivingReportJourneys(test) {
     assert.ok(end > 0 && end < 2500, `the shortened report ends above the old offset (${end})`)
     assert.equal(cut, end, 'the reader lands at the shortened report\'s end, without a pass through its top')
 
-    // Unfolded on the family's page, the report is drawn whole and the page scrolls.
-    await serve(page, original)
-    const head = (await familyTree(page)).locator('.fp-head')
-    await head.locator('.fp-lead').click()
-    await head.locator('.fp-doc').frameLocator(SHOWN).locator('#report-sentinel').waitFor()
-    const scroller = selected(page).locator('.ws-family-scroll')
-    const standing = () => scroller.evaluate(el => [Math.round(el.scrollTop), Math.round(el.querySelector('.fp-head .kbn-fileview-frame-wrap').getBoundingClientRect().height)])
-    await page.waitForFunction(() => document.querySelector('.ws-selected .fp-head .kbn-fileview-frame-wrap')?.getBoundingClientRect().height > 3000, undefined, { polling: 40 })
-    await scroller.evaluate(el => el.scrollTo(0, 2500))
-    await page.waitForTimeout(200)
-    const [at, tall] = await standing()
-    assert.equal(at, 2500)
-    await serve(page, grown(original))
-    await head.locator('.fp-doc').frameLocator(SHOWN).locator('#grown').waitFor({ timeout: 15_000 })
-    await page.waitForFunction(tall => document.querySelector('.ws-selected .fp-head .kbn-fileview-frame-wrap').getBoundingClientRect().height > tall, tall, { polling: 40 })
-    assert.equal((await standing())[0], 2500, 'the family page keeps its offset while the report grows under it')
-    await serve(page, shrunk(original))
-    await head.locator('.fp-doc').frameLocator(SHOWN).locator('#shrunk').waitFor({ timeout: 15_000 })
-    await page.waitForFunction(tall => document.querySelector('.ws-selected .fp-head .kbn-fileview-frame-wrap').getBoundingClientRect().height < tall / 2, tall, { polling: 40 })
-    const [held] = await standing(), max = await scroller.evaluate(el => el.scrollHeight - el.clientHeight)
-    assert.equal(held, Math.min(2500, max), 'a shorter report leaves the page at its offset, or clamped to its end')
   }, { width: 1440, height: 900 }, 'reduce')
   test('A live rewrite that adds and hides passages above the reader leaves them beside the passage they were reading', async page => {
     await page.goto(url)
@@ -123,30 +102,6 @@ export function registerLivingReportJourneys(test) {
     assert.equal(after[0], before[0], 'the same passage stands at the top of the reader')
     assert.ok(Math.abs(after[1] - before[1]) <= 2, `at the same place on screen (${before} → ${after})`)
 
-    // Unfolded on the family's page, the page's own scroller carries the passage.
-    await serve(page, original)
-    const head = (await familyTree(page)).locator('.fp-head')
-    await head.locator('.fp-lead').click()
-    const doc = head.locator('.fp-doc').frameLocator(SHOWN)
-    await doc.locator('#report-sentinel').waitFor()
-    await page.waitForFunction(() => document.querySelector('.ws-selected .fp-head .kbn-fileview-frame-wrap')?.getBoundingClientRect().height > 3000, undefined, { polling: 40 })
-    const scroller = selected(page).locator('.ws-family-scroll')
-    await scroller.evaluate(el => el.scrollTo(0, 2500))
-    await page.waitForTimeout(400)
-    const reading = async () => {
-      const edge = await scroller.evaluate(el => el.getBoundingClientRect().top + 1)
-      const shown = head.locator('.fp-doc ' + SHOWN)
-      const box = await shown.boundingBox()
-      return (await (await shown.elementHandle()).contentFrame()).evaluate(passageAt, edge - box.y)
-    }
-    const held = await reading()
-    assert.match(held[0], /^Report line/, `the family page stands in the report's lines (${held})`)
-    await serve(page, reworked(original))
-    await doc.locator('#added-0').waitFor({ timeout: 15_000 })
-    await page.waitForTimeout(400)
-    const moved = await reading()
-    assert.equal(moved[0], held[0], 'the same passage stands at the top of the family page')
-    assert.ok(Math.abs(moved[1] - held[1]) <= 2, `at the same place on screen (${held} → ${moved})`)
   }, { width: 1440, height: 900 }, 'reduce')
   for (const [device, viewport, phone] of [['desktop', { width: 1440, height: 900 }, false], ['phone', { width: 390, height: 844 }, true]]) {
     test(`Living report (${device}): band, fragments, reload ancestry, nested files, sends and family`, async page => {
@@ -159,16 +114,15 @@ export function registerLivingReportJourneys(test) {
       page.on('pageerror', error => errors.push(String(error)))
       await page.goto(url)
       await page.locator('.kbn-desk .kbn-card[data-fiber-id="research/workspace/calibration-report"]:not(.kbn-card-header) .kbn-card-name').click()
-      // The Desk opens the family's frontier; ancestry reaches the report's owner.
-      if (await band(page).locator('.ws-band-title').textContent() !== 'Calibrate the shear response') {
-        await selected(page).locator('.fp-row[data-selected] .ws-acts-settings').click()
-        await page.locator('.ws-settings-menu:not([hidden]) .ws-ancestry-link').first().click()
+      // The Desk opens the family's frontier; its topmost orchestrator is the report's owner.
+      if (await band(page).locator('.ws-band-title').getAttribute('title') !== 'Calibrate the shear response') {
+        await selected(page).locator('.ov-ancestor').first().click()
       }
       await named(page, 'Calibrate the shear response')
       await band(page).locator('.ws-dock').waitFor()
       assert.equal(await page.locator('.ws-tabs,.ws-head-index,.ws-thumbbar,.ws-page-choice').count(), 0)
       await shot(page, `${device}-landing`)
-      // The family's page draws the root's row; the receded constitution's page is a click away.
+      // Its view's head opens its constitution's page; the receded page is a click away too.
       await page.locator('.ws-page[data-key^="fiber:"]').first().dispatchEvent('click')
       await selected(page).locator('.ws-fiber-prose').waitFor()
       await shot(page, `${device}-top`)
@@ -227,7 +181,8 @@ export function registerLivingReportJourneys(test) {
         await page.keyboard.press('Escape')
         await page.locator('.ws-page-sheet[open]').waitFor({ state: 'hidden' })
       } else {
-        const settings = consoleMenu(band(page))
+        // Settings stands as a button where the console has room, else in its menu, which takes the focus back.
+        const settings = await consoleMenu(band(page)).isVisible() ? consoleMenu(band(page)) : band(page).locator('.ws-band-buttons .ws-acts-settings')
         await (await consoleAct(band(page), 'Settings')).click()
         const menu = page.locator('.ws-settings-menu:not([hidden])')
         await menu.waitFor()
@@ -240,15 +195,13 @@ export function registerLivingReportJourneys(test) {
         await menu.waitFor({ state: 'hidden' })
         assert.equal(await settings.evaluate(el => el === document.activeElement), true)
       }
-      // Entering a thread and unfolding its constitution keep the family's page.
-      const tree = await familyTree(page), route = new URL(page.url()).hash
-      if (!phone) assert.ok(await (await familySends(page)).count() > 0, 'the family page lists the sends')
-      const analysis = threadRow(page, tree, 'Response analysis')
-      await openThread(page, analysis, 'Response analysis')
-      await analysis.locator('.fp-constitution').press('Enter')
-      await analysis.locator('.fp-doc .ws-fiber-prose').waitFor()
-      assert.equal(new URL(page.url()).hash, route)
-      await named(page, 'Calibrate the shear response / Response analysis')
+      // A thread's row opens its own view, whose head opens its constitution.
+      const tree = await familyTree(page)
+      if (!phone) assert.ok(await tree.locator('.ov-head [data-part="sends"]').isVisible(), 'the view holds its sent files among its pages')
+      await openThread(page, threadRow(page, tree, 'Response analysis'), 'Response analysis')
+      await named(page, 'Response analysis')
+      await selected(page).locator('.ov-head [data-part="constitution"]').click()
+      await selected(page).locator('.ws-fiber-prose').waitFor()
       assert.equal(errors.length, 0, errors.join('\n'))
     }, viewport, 'reduce', phone)
   }

@@ -22,7 +22,7 @@ async function openRoot(page) {
   await page.locator('.ws-stage-band .ws-dock').waitFor()
   if (await page.locator('.ws-stage-band .ws-band-title').textContent() !== root) {
     // The highlighted row carries the fiber's acts, its ⚙ among them.
-    await page.locator('.ws-page.ws-selected .fp-row[data-selected] .ws-acts-settings').click()
+    await page.locator('.ws-page.ws-selected .ov-head .ws-acts-settings').click()
     await page.locator('.ws-settings-menu:not([hidden]) .ws-ancestry-link').first().click()
   }
   await page.waitForFunction(name => document.querySelector('.ws-stage-band .ws-band-title')?.textContent === name, root)

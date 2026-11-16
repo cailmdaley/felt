@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { familySends, familyTree, openThread, sentFiles, threadRow } from './familyNav.mjs'
+import { familyTree, openThread, sentFiles, threadRow } from './familyNav.mjs'
 import { closeVerbMenu, consoleAct, consoleMenu, hitBox, offeredVerbs, verbCaret, verbFace, verbMenu } from './verbs.mjs'
 
 const title = 'Calibrate the shear response across independent sky patches and validate each redshift bin'
@@ -14,22 +14,20 @@ const band = page => page.locator('.ws-stage-band')
 /** The console's acts: its menu, and where a verdict's undo stands. */
 const consoleActs = page => band(page).locator('.ws-band-head .ws-band-acts')
 /**
- * The fiber's acts where they show: the highlighted row's on its family's
- * page; on a page with no row for the fiber (a draft's own page, a report),
- * the console's menu.
+ * The fiber's acts where they show: its view's head; on a page with no view
+ * for the fiber (a draft's own page, a report), the console's menu.
  */
-const acts = page => page.locator('.ws-reader:not(:has(.ws-page.ws-selected .fp-row[data-selected] .ws-fiber-acts)) .ws-stage-band .ws-band-head .ws-band-acts')
-  .or(page.locator('.ws-page.ws-selected .fp-row[data-selected] > .fp-line .fp-verbs > .ws-fiber-acts'))
+const acts = page => page.locator('.ws-reader:not(:has(.ws-page.ws-selected .ov-head .ws-fiber-acts)) .ws-stage-band .ws-band-head .ws-band-acts')
+  .or(page.locator('.ws-page.ws-selected .ov-head .ov-tools > .ws-fiber-acts'))
 async function openRoot(page) {
   // Click the row's own name: its crumb leads to the root.
   const name = page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${title}"])`).first().locator('.kbn-card-name')
   const box = await name.boundingBox()
   await name.click({ position: { x: box.width - 6, y: box.height / 2 } })
   await band(page).locator('.ws-dock').waitFor()
-  // A family's Desk row opens its frontier; these journeys exercise the root.
-  if (await band(page).locator('.ws-band-title').textContent() !== title) {
-    await (await consoleAct(consoleActs(page), 'Settings')).click()
-    await page.locator('.ws-settings-menu:not([hidden]) .ws-ancestry-link').first().click()
+  // A family's Desk row opens its frontier's view; these journeys exercise the root, its topmost orchestrator.
+  if (await band(page).locator('.ws-band-title').getAttribute('title') !== title) {
+    await page.locator('.ws-page.ws-selected .ov-ancestor').first().click()
   }
   await named(page, title)
   await acts(page).waitFor()
@@ -137,7 +135,7 @@ export function registerHeaderBarJourneys(test) {
     await page.goto(url)
     await openRoot(page)
     const focused = locator => locator.evaluate(el => el === document.activeElement)
-    for (const [name, control] of [['Settings', acts(page).locator('.ws-acts-settings')], ['Temper', verbFace(acts(page))], ['Constitution', page.locator('.ws-page.ws-selected .fp-row[data-selected] .fp-constitution')]]) {
+    for (const [name, control] of [['Settings', acts(page).locator('.ws-acts-settings')], ['Temper', verbFace(acts(page))], ['Constitution', page.locator('.ws-page.ws-selected .ov-head [data-part="constitution"]')]]) {
       await control.focus()
       for (const width of [850, 390, 1440]) {
         await page.setViewportSize({ width, height: 900 })
@@ -156,26 +154,25 @@ export function registerHeaderBarJourneys(test) {
       assert.deepEqual([geometry.wrap, geometry.overflow], ['nowrap', 'ellipsis'])
       assert.ok(geometry.height <= geometry.line + 1, JSON.stringify(geometry))
       assert.equal(await header.locator('h1').getAttribute('title'), title)
-      assert.equal(await header.locator('.ws-fiber-acts').isVisible(), false, `the family's page carries the acts, not the band, at ${width}`)
-      assert.deepEqual(await shownVerbs(page), ['Temper', 'Rest', 'Discard'], `Awaiting review draws its verbs on its row at ${width}`)
+      assert.deepEqual(await shownVerbs(page), ['Temper', 'Rest', 'Discard'], `Awaiting review draws its verbs in its view's head at ${width}`)
     }
   }, { width: 1440, height: 900 })
-  test('The band keeps its title and controls on one line, and each row its acts, inside open desktop columns', async page => {
+  test('The band keeps its title and controls on one line, and the view\'s head its acts, inside open desktop columns', async page => {
     await page.goto(url)
     await openRoot(page)
     const header = page.locator('.ws-stage-band .ws-band-head')
     let labelSize
     const check = async () => {
-      const sizes = await header.locator('.ws-header-icon').evaluateAll(els => els.filter(el => el.checkVisibility()).map(el => el.getBoundingClientRect().height))
+      const sizes = await header.locator('.ws-header-icon:not(.ws-band-buttons *)').evaluateAll(els => els.filter(el => el.checkVisibility()).map(el => el.getBoundingClientRect().height))
       labelSize ??= sizes[0]
       assert.ok(sizes.length >= 1 && sizes.every(size => size === labelSize), `every band control keeps one height: ${sizes}`)
       const centres = await header.locator('.ws-header-icon, h1').evaluateAll(els => els.filter(el => el.checkVisibility()).map(el => { const r = el.getBoundingClientRect(); return r.top + r.height / 2 }))
       assert.ok(Math.max(...centres) - Math.min(...centres) < 1.5, `the band's head keeps one centre line: ${centres}`)
       assert.ok(await header.locator('h1').evaluate(el => el.clientHeight <= parseFloat(getComputedStyle(el).lineHeight) + 1))
-      // The highlighted row draws every act inside the page, on the row's own line.
+      // The view's head draws every act inside the page, in the head.
       await page.waitForFunction(() => {
-        const strip = document.querySelector('.ws-page.ws-selected .fp-row[data-selected] .ws-fiber-acts')
-        const page = strip?.closest('.ws-page')?.getBoundingClientRect(), row = strip?.closest('.fp-title')?.getBoundingClientRect()
+        const strip = document.querySelector('.ws-page.ws-selected .ov-head .ws-fiber-acts')
+        const page = strip?.closest('.ws-page')?.getBoundingClientRect(), row = strip?.closest('.ov-head')?.getBoundingClientRect()
         return strip && page && row && [...strip.querySelectorAll('button, a')].filter(control => control.checkVisibility()).every(control => {
           const b = control.getBoundingClientRect()
           return b.left >= page.left && b.right <= page.right && b.top >= row.top - 4 && b.bottom <= row.bottom + 4
@@ -189,7 +186,7 @@ export function registerHeaderBarJourneys(test) {
       if (process.env.WORKSPACE_SHOTS && width === 701) await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, 'header-narrow-desktop-light.png') })
     }
   }, { width: 1440, height: 900 })
-  test("The 390px phone band leaves the name to the top bar; the highlighted row's second line carries its views and acts", async page => {
+  test("The 390px phone band leaves the name to the top bar; the view's head carries its pages and acts", async page => {
     await page.addInitScript(() => {
       if (window !== window.top) return
       localStorage.setItem('shuttle.appearance', JSON.stringify({ mode: 'light' }))
@@ -203,20 +200,18 @@ export function registerHeaderBarJourneys(test) {
       assert.ok(row.x >= 0 && row.x + row.width <= width, `the acts fit the phone: ${JSON.stringify(row)}`)
       const centres = await strip.locator('button:visible, a:visible').evaluateAll(els => els.map(el => { const r = el.getBoundingClientRect(); return r.top + r.height / 2 }))
       assert.ok(centres.length >= 2 && Math.max(...centres) - Math.min(...centres) < 2, `the acts share one line: ${centres}`)
-      // Two lines: the name with its age, then the views and the acts side by side.
+      // Under the name: the pages, then the acts.
       const lines = await strip.evaluate(el => {
-        const title = el.closest('.fp-title'), name = title.querySelector('.fp-name').getBoundingClientRect(), docs = title.querySelector('.fp-docs').getBoundingClientRect(), own = el.getBoundingClientRect()
-        return { below: own.top >= name.bottom - 1 && docs.top >= name.bottom - 1, beside: docs.right <= own.left + 1, centres: [docs.top + docs.height / 2, own.top + own.height / 2] }
+        const head = el.closest('.ov-head'), name = head.querySelector('.ov-name').getBoundingClientRect(), docs = head.querySelector('.ws-doc-buttons').getBoundingClientRect(), own = el.getBoundingClientRect()
+        return { below: own.top >= name.bottom - 1 && docs.top >= name.bottom - 1 }
       })
-      assert.ok(lines.below && lines.beside && Math.abs(lines.centres[0] - lines.centres[1]) < 2, `the views and acts share the line under the name: ${JSON.stringify(lines)}`)
+      assert.ok(lines.below, `the pages and acts stand under the name: ${JSON.stringify(lines)}`)
       // Every act is a full touch target in reach: its hit area (the pill's drawing grows to it) is 44px tall.
       for (const [name, control] of [['the verb face', verbFace(strip)], ['the caret', verbCaret(strip)], ['Settings', strip.locator('.ws-acts-settings')]]) {
         if (name === 'the caret' && expected.length < 2) continue
         const reach = await hitBox(control)
         assert.ok(reach.x >= 0 && reach.x + reach.width <= width + 1 && reach.height >= 44, `${name} is a full touch target in reach: ${JSON.stringify(reach)}`)
       }
-      // Only the highlighted row draws its acts on a phone.
-      assert.equal(await page.locator('.ws-page.ws-selected .fp-row:not([data-selected]) > .fp-line .fp-verbs').evaluateAll(slots => slots.filter(slot => slot.checkVisibility()).length), 0)
     }
     await assertRow(['Temper', 'Rest', 'Discard'])
     // The phone leaves the reader by its keys and top bar; the band's × stands with the head it hides.
@@ -307,15 +302,13 @@ export function registerHeaderBarJourneys(test) {
     const posts = await page.evaluate(() => window.__harness.requests.filter(r => r.method === 'POST' && r.url.endsWith('/api/v1/voice')).map(r => JSON.parse(r.body)))
     assert.deepEqual(posts, [{ enabled: true, muted: false, source: 'desktop', recorder: 'local' }, { muted: true, recorder: 'local' }, { enabled: false, recorder: 'local' }])
   }, { width: 1000, height: 900 })
-  test('Thread rows own Enter and Space while body focus keeps expand and paging shortcuts', async page => {
+  test('Thread rows own Enter while body focus keeps expand and paging shortcuts', async page => {
     await page.goto(url)
     await openRoot(page)
-    const row = async name => name === title ? (await familyTree(page)).locator('.fp-head') : threadRow(page, await familyTree(page), name)
-    for (const key of ['Enter', 'Space']) {
-      const press = async target => { await target.focus(); await page.keyboard.press(key) }
-      await openThread(page, await row('Response analysis'), 'Response analysis', press)
-      await openThread(page, await row(title), title, press)
-    }
+    const press = async target => { await target.focus(); await page.keyboard.press('Enter') }
+    await openThread(page, threadRow(page, await familyTree(page), 'Response analysis'), 'Response analysis', press)
+    // Up again, by the orchestrator's head above.
+    await openThread(page, (await familyTree(page)).locator(`.ov-ancestor[title="${title}"]`), title, press)
     await page.evaluate(() => { document.activeElement?.blur(); document.body.focus() })
     // Expand is a key, Enter or o, with no button of its own.
     assert.equal(await page.locator('.ws-expand-button').count(), 0)
@@ -340,31 +333,27 @@ export function registerHeaderBarJourneys(test) {
     await page.waitForFunction(() => document.querySelector('.ws-selected .ws-prose-scroll').scrollTop > 0)
   }, { width: 1440, height: 900 })
   for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
-    for (const scheme of ['light', 'dark']) test(`The constitution's page keeps its root at its head and highlights the entered thread (${device}, ${scheme})`, async page => {
+    for (const scheme of ['light', 'dark']) test(`A thread's view stands under its orchestrators, named by slugs (${device}, ${scheme})`, async page => {
       await page.addInitScript(scheme => {
         if (window !== window.top) return
         localStorage.setItem('shuttle.appearance', JSON.stringify({ mode: scheme, dark: 'night-chart' }))
       }, scheme)
       await page.goto(url)
       await openRoot(page)
-      const head = () => page.locator('.ws-page.ws-selected .fp-head')
+      const head = () => page.locator('.ws-page.ws-selected .ov-head')
+      assert.equal(await head().locator('.ov-name').innerText(), 'calibration-report')
+      // Down two levels, each its own view under its orchestrators, the family's root first.
       for (const name of ['Response analysis', 'Choose the response cut']) {
         await openThread(page, threadRow(page, await familyTree(page), name), name)
-        await familyTree(page)
-        assert.equal(await head().count(), 1)
-        // The band's title names the family; its head row gives the fiber's path.
-        assert.equal(await head().locator('.fp-name').getAttribute('title'), title)
-        assert.equal(await head().locator('.fp-name').innerText(), 'research/workspace/calibration-report')
-        assert.ok(await head().locator('.fp-mark').isVisible())
-        assert.equal(await threadRow(page, page.locator('.ws-page.ws-selected .fp-tree'), name).getAttribute('aria-selected'), 'true')
-        if (process.env.WORKSPACE_SHOTS && name === 'Choose the response cut') {
-          await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
-          await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `family-${device}-${scheme}.png`) })
-        }
-        await openThread(page, head(), title)
-        await familyTree(page)
-        assert.equal(await head().getAttribute('aria-selected'), 'true')
+        assert.equal(await page.locator('.ws-page.ws-selected .ov-ancestor').first().getAttribute('title'), title)
+        assert.ok(await head().locator('.constitution-state-dot').isVisible())
       }
+      assert.equal(await head().locator('.ov-name').innerText(), 'question')
+      if (process.env.WORKSPACE_SHOTS) {
+        await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
+        await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `family-${device}-${scheme}.png`) })
+      }
+      await openThread(page, page.locator(`.ws-page.ws-selected .ov-ancestor[title="${title}"]`), title)
     }, viewport)
     for (const scheme of ['light', 'dark']) test(`One band (${device}, ${scheme}): long name, icons and unified settings`, async page => {
       await page.emulateMedia({ colorScheme: scheme })
@@ -412,10 +401,6 @@ export function registerHeaderBarJourneys(test) {
       }
       const centres = await icons.evaluateAll(els => els.map(el => { const r = el.querySelector('svg').getBoundingClientRect(); return r.top + r.height / 2 }))
       assert.ok(Math.max(...centres) - Math.min(...centres) < 1, `the acts share one vertical centre in ${device}/${scheme}: ${centres}`)
-      if (device === 'desktop') {
-        const name = await strip.evaluate(el => { const r = el.closest('.fp-title').querySelector('.fp-mark').getBoundingClientRect(); return r.top + r.height / 2 })
-        assert.ok(Math.abs(centres[0] - name) < 1.5, `the acts sit on the row's centre line: ${centres[0]} vs ${name}`)
-      }
       if (process.env.WORKSPACE_SHOTS) {
         await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
         await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `header-${device}-${scheme}.png`) })
@@ -430,8 +415,7 @@ export function registerHeaderBarJourneys(test) {
       await sheet.waitFor({ state: 'hidden' })
       assert.equal(await settings.evaluate(el => el === document.activeElement), true)
       if (device === 'desktop') {
-        await familySends(page)
-        assert.ok(await page.locator('.ws-page.ws-selected .fp-head .fp-send-age').count(), 'sends carry their age')
+        assert.ok(await page.locator('.ws-page.ws-selected .ov-head [data-part="sends"]').isVisible(), 'its sent files stand among its pages')
       } else {
         const files = await sentFiles(page)
         assert.ok(await files.locator('time').count(), 'sent files carry timestamps')
@@ -448,34 +432,19 @@ export function registerHeaderBarJourneys(test) {
       assert.equal(await page.evaluate(() => window.__harness.requests.filter(r => r.method === 'POST' && r.url.includes('/transition')).length), 0)
     }, viewport)
   }
-  test("A row's ⚙ opens Settings under it, and another row's ⚙ moves the menu there", async page => {
+  test("The view's ⚙ opens Settings under it, clear of the console", async page => {
     await page.goto(url)
     await openRoot(page)
     const menu = page.locator('.ws-settings-menu:not([hidden])')
-    const under = async (gear, label) => {
-      const [box, anchor] = await Promise.all([menu.boundingBox(), gear.boundingBox()])
-      const below = Math.abs(box.y - (anchor.y + anchor.height)) <= 8, above = Math.abs(box.y + box.height - anchor.y) <= 8
-      assert.ok(below || above, `${label}: the menu opens against its ⚙: ${JSON.stringify({ box, anchor })}`)
-      assert.ok(box.y >= 0 && box.y + box.height <= page.viewportSize().height, `${label}: the menu stays inside the viewport`)
-    }
-    const tree = await familyTree(page)
-    await openThread(page, tree.locator('.fp-head'), title)
     const root = acts(page).locator('.ws-acts-settings')
-    await root.click(); await menu.waitFor(); await under(root, 'root')
+    await root.click(); await menu.waitFor()
+    const [box, anchor] = await Promise.all([menu.boundingBox(), root.boundingBox()])
+    const below = Math.abs(box.y - (anchor.y + anchor.height)) <= 8, above = Math.abs(box.y + box.height - anchor.y) <= 8
+    assert.ok(below || above, `the menu opens against its ⚙: ${JSON.stringify({ box, anchor })}`)
     const console = await band(page).locator('.ws-dock').boundingBox()
-    const opened = await menu.boundingBox()
-    assert.ok(opened.y + opened.height <= console.y + 0.5, 'Settings opened on the title row keeps the console clear')
-    // A row clear of the open menu shows its acts under the pointer.
-    const thread = threadRow(page, tree, 'Discarded pilot')
-    await thread.hover()
-    const gear = thread.locator('> .fp-line .ws-acts-settings')
-    await gear.click()
-    assert.equal(await thread.getAttribute('aria-selected'), 'true', 'a row act highlights its row first')
-    await threadNamed(page, 'Discarded pilot')
-    await menu.waitFor(); await under(gear, 'thread')
-    assert.equal(await menu.locator('.ws-band-sheet-name').innerText(), 'Discarded pilot', 'the sheet names the thread it writes to')
+    assert.ok(box.y + box.height <= console.y + 0.5, 'Settings opened in the head keeps the console clear')
     await page.keyboard.press('Escape')
     await menu.waitFor({ state: 'hidden' })
-    assert.equal(await gear.evaluate(el => el === document.activeElement), true)
+    assert.equal(await root.evaluate(el => el === document.activeElement), true)
   }, { width: 1440, height: 900 })
 }

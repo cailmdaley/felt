@@ -1,7 +1,8 @@
 /**
  * Reading and pressing a fiber's lifecycle verbs as a person does: on a row's
  * strip, the verb button's face, and the rest by opening its caret's menu; on
- * the console (`.ws-band-acts`), every verb from its menu (Escape closes it).
+ * the console (`.ws-band-acts`), the same strip where its head has room, else
+ * every verb from its menu (Escape closes it).
  * The journeys' counterpart of src/board/workspace/testActs.ts.
  */
 
@@ -12,9 +13,11 @@ export const verbFace = acts => acts.locator('.ws-acts-verbs > .ws-verb-face')
 /** The caret on the same pill, which opens the rest. */
 export const verbCaret = acts => acts.locator('.ws-acts-verbs > .ws-verb-more')
 
-/** The console's menu button, where the console holds the acts. */
+/** The console's menu button, where the console is too short to stand its acts as buttons. */
 export const consoleMenu = acts => acts.locator('.ws-band-menu')
-const onConsole = async acts => await consoleMenu(acts).count() > 0
+const onConsole = async acts => await consoleMenu(acts).isVisible()
+/** The console's buttons for its other acts, where its head has room. */
+const CONSOLE_BUTTON = { Constitution: '.ws-band-page', Settings: '.ws-acts-settings', 'Open conversation': '.ws-acts-console' }
 
 async function openMenu(acts) {
   const menu = verbMenu(acts.page())
@@ -25,6 +28,8 @@ async function openMenu(acts) {
 
 /** The console menu's item named `label` (Open conversation, Constitution, Settings, or a verb), which this opens. */
 export async function consoleAct(acts, label) {
+  if (!await onConsole(acts) && CONSOLE_BUTTON[label]) return acts.locator(CONSOLE_BUTTON[label])
+  if (!await onConsole(acts)) return verbControl(acts, label)
   const menu = await openMenu(acts)
   return menu.locator(`[role="menuitem"]:is([data-verb="${label}"], [aria-label="${label}"])`)
 }

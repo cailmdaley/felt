@@ -462,7 +462,7 @@ export class ChannelsView implements TemporalView {
       const pick = button('kbn-ch-doc', '', () => this.openPage(id, card, receipt.key))
       pick.dataset.item = id
       pick.title = receipt.fullPath
-      pick.append(el('span', 'kbn-ch-doc-name', declaredTitle(receipt.key)?.title ?? receipt.basename), el('span', 'kbn-ch-doc-meta', `${slug(card)} · ${ago(receipt.timestamp, now)}`))
+      pick.append(el('span', 'kbn-ch-doc-name', declaredTitle(receipt.key)?.title ?? receipt.basename), el('span', 'kbn-ch-doc-meta', `${card.name} · ${ago(receipt.timestamp, now)}`))
       item.append(pick)
       return item
     }))

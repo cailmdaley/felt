@@ -27,206 +27,68 @@ const clickOn = async (page, locator) => { const { x, y, width, height } = await
 const box = async locator => { const { x, y } = await locator.boundingBox(); return [Math.round(x), Math.round(y)] }
 
 export function registerMapViewJourneys(test) {
-  const tree = page => page.locator('.ws-page.ws-selected .fp-tree')
-  const row = (page, name) => tree(page).locator('.fp-row').filter({ has: page.locator(`.fp-name[title="${name}"]`) })
+  const view = page => page.locator('.ws-page.ws-selected .ws-family-page')
+  const head = (page, name) => view(page).locator(`.ov-head[title="${name}"]`)
   const landed = async page => {
     await board(page)
     await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${root}"])`).last().locator('.kbn-card-name').click()
-    await tree(page).waitFor()
+    await view(page).locator('.ov-head').waitFor()
+    // A Desk row of the family may open a thread's view: its root is its topmost orchestrator.
+    const top = view(page).locator('.ov-ancestor').first()
+    if (await top.count()) await top.click()
+    await until(page, () => document.querySelector('.ws-page.ws-selected .ov-head') && !document.querySelector('.ws-page.ws-selected .ov-ancestor'))
   }
 
-  test('A constitution\'s page: rows enter quietly, documents unfold in place, and Back restores the page', async page => {
+  test('A constitution\'s view: a thread\'s row opens its view one level down and moves Rex; its orchestrators stand above, opened by a click or a pull past the top; keys move nothing', async page => {
     await landed(page)
-    const analysis = row(page, 'Response analysis')
-    if (await analysis.getAttribute('aria-expanded') === 'true') await analysis.click()
-    const quiet = await asked(page), route = new URL(page.url()).hash
-    await analysis.click()
-    assert.equal(await analysis.getAttribute('aria-expanded'), 'true')
+    const rootName = await view(page).locator('.ov-head').getAttribute('title')
+    const quiet = await asked(page)
+    await view(page).locator('.ov-thread[title="Response analysis"]').click()
+    await head(page, 'Response analysis').waitFor()
     await asks(page, quiet.length + 1)
     assert.deepEqual(await asked(page), [...quiet, 'select:session-analysis'])
-    await until(page, () => document.querySelector('.ws-page.ws-selected .fp-row[data-worker] .fp-name')?.title === 'Response analysis')
-    // The band names the highlighted thread after its root, and its figures are the thread's.
-    assert.equal(await page.locator('.ws-stage-band .ws-band-title').textContent(), `${root} / analysis`)
-    await analysis.locator('.fp-constitution').click()
-    await analysis.locator('.fp-doc .ws-fiber-prose').waitFor()
-    assert.equal(new URL(page.url()).hash, route)
-    assert.equal(await analysis.locator('.fp-constitution').getAttribute('aria-pressed'), 'true')
-    await analysis.locator('.fp-constitution').click()
-    assert.equal(await analysis.locator('.fp-doc').isVisible(), false)
-    await analysis.click()
-    assert.equal(await analysis.getAttribute('aria-expanded'), 'false')
-    assert.deepEqual(await asked(page), [...quiet, 'select:session-analysis'])
-
-    const head = tree(page).locator('.fp-head')
-    await head.locator('.fp-lead').waitFor()
-    // One segmented control, in the order every surface keeps: tapestry, constitution, sends with their count, each a stroke mark.
-    const chips = await head.locator('.fp-docs button').evaluateAll(buttons => buttons.map(b => ({ segment: b.classList[1], mark: b.querySelector(':scope > svg')?.getAttribute('viewBox'), text: b.textContent, label: b.getAttribute('aria-label') })))
-    assert.deepEqual(chips.map(chip => [chip.segment, chip.mark]), [['fp-lead', '0 0 16 16'], ['fp-constitution', '0 0 16 16'], ['fp-sent', '0 0 16 16']])
-    assert.deepEqual(chips.slice(0, 2).map(chip => chip.text), ['', ''])
-    assert.match(chips[2].text, /^[1-9]\d*$/)
-    assert.match(chips[2].label, new RegExp(`^${chips[2].text} sent files?$`))
-    await head.locator('.fp-sent').click()
-    assert.equal(await head.locator('.fp-sent').getAttribute('aria-expanded'), 'true')
-    const file = head.locator('.fp-files .fp-file').first(), held = await file.getAttribute('data-held')
-    await file.click()
-    await head.locator('.fp-doc .ws-embedded').waitFor()
-    assert.equal(new URL(page.url()).hash, route)
-    assert.equal(await head.locator('.fp-files .fp-send').count(), 0, 'the open file takes the list\'s place')
-    await head.locator('.fp-back').click()
-    assert.equal(await head.locator('.fp-doc').isVisible(), false)
-    assert.equal(await page.evaluate(() => document.activeElement?.dataset.held), held, 'back lands on the file')
-    // A PDF unfolds whole: its pages and toolbar, not a frame's slice of them.
-    const pdf = head.locator('.fp-files .fp-file[data-held$="response.pdf"]')
-    await pdf.click()
-    await head.locator('.fp-doc .pdfViewer canvas').first().waitFor()
-    const [doc, stage] = await Promise.all(['.fp-doc', '.fp-doc .kbn-fileview-pdf-stage'].map(sel => head.locator(sel).evaluate(el => el.getBoundingClientRect().height)))
-    assert.ok(doc >= stage, `the unfolded PDF shows its whole stage (${doc}px row for a ${stage}px stage)`)
-    await head.locator('.fp-back').click()
-    await head.locator('.fp-lead').click()
-    const link = head.frameLocator('.fp-doc iframe').getByRole('link', { name: 'Read the independent validation →' })
-    await link.waitFor()
-    // Back keeps the open document where it stood in the page's view, read
-    // just into. The page may grow above it meanwhile (the visited file
-    // joins the row's sent files), which the browser's scroll anchoring absorbs,
-    // so scrollTop alone can move.
-    await page.locator('.ws-page.ws-selected .ws-family-scroll').evaluate(el => { el.scrollTop += el.querySelector('.fp-head > .fp-doc').getBoundingClientRect().top - el.getBoundingClientRect().top + 20 })
-    const standing = () => page.locator('.ws-page.ws-selected .ws-family-scroll').evaluate(el => Math.round(el.querySelector('.fp-head > .fp-doc').getBoundingClientRect().top - el.getBoundingClientRect().top))
-    const stood = await standing()
-    await link.click()
-    await page.locator('.ws-page.ws-selected iframe').waitFor()
-    await pageBack(page)
-    await head.frameLocator('.fp-doc iframe').getByRole('link', { name: 'Read the independent validation →' }).waitFor()
-    assert.equal(new URL(page.url()).hash, route)
-    assert.equal(await analysis.getAttribute('aria-expanded'), 'false')
-    await until(page, () => !document.querySelector('.ws-track')?.getAnimations({ subtree: true }).some(a => a.playState === 'running' && a.effect?.getTiming().iterations !== Infinity))
-    assert.equal(await standing(), stood)
-  }, { width: 800, height: 1000 }, 'no-preference')
-
-  test('Opening a sent file and stepping through its send move nothing on the page', async page => {
-    await board(page)
-    // A long page among the sends, to read into before stepping on.
-    await page.evaluate(() => {
-      window.__harness.files.find(file => file.path.endsWith('/paper-review.html')).body = new Blob([
-        `<!doctype html><title>Paper review</title><h1>Paper review</h1>${Array.from({ length: 200 }, (_, n) => `<p>Line ${n + 1} of the review.</p>`).join('')}`,
-      ], { type: 'text/html' })
-    })
-    await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${root}"])`).last().locator('.kbn-card-name').click()
-    const head = tree(page).locator('.fp-head'), scroller = page.locator('.ws-page.ws-selected .ws-family-scroll')
-    const standing = () => scroller.evaluate(el => [Math.round(el.scrollTop), Math.round(el.querySelector('.fp-head .fp-open')?.getBoundingClientRect().top ?? NaN)])
-    const shown = () => head.locator('.fp-open-count').textContent()
-    await head.locator('.fp-sent').click()
-    const review = head.locator('.fp-files .fp-file[data-held$="/paper-review.html"]')
-    if (!await review.count()) await head.locator('.fp-older').click()
-    const [before] = await standing()
-    await review.click()
-    await head.frameLocator('.fp-doc iframe').getByText('Line 200 of the review.').waitFor()
-    await until(page, () => document.querySelector('.ws-selected .fp-head .kbn-fileview-frame-wrap')?.getBoundingClientRect().height > 3000)
-    assert.equal((await standing())[0], before, 'opening a file scrolls nothing')
-    const opened = await shown(), [at, of] = opened.split(' of ').map(Number), newer = `${at - 1} of ${of}`
-    // The bar near the top of the view: a step replaces the file under it and leaves the bar be.
-    await scroller.evaluate(el => { el.scrollTop += el.querySelector('.fp-head .fp-open').getBoundingClientRect().top - el.getBoundingClientRect().top - 40 })
-    await page.waitForTimeout(100)
-    const near = await standing()
-    await head.locator('.fp-step').first().click()
-    assert.equal(await shown(), newer)
-    await page.waitForTimeout(300)
-    assert.deepEqual(await standing(), near, 'a step leaves the page and its bar where they stood')
-    await head.evaluate(el => el.focus({ preventScroll: true }))
-    await page.keyboard.press('ArrowRight')
-    assert.equal(await shown(), opened)
-    await until(page, () => document.querySelector('.ws-selected .fp-head .kbn-fileview-frame-wrap')?.getBoundingClientRect().height > 3000)
-    assert.deepEqual(await standing(), near, 'right steps to the older file in place')
-    // Read deep into the long page, then step to a short file: the page does not pull up.
-    await scroller.evaluate(el => { el.scrollTop += 2000 })
-    await page.waitForTimeout(100)
-    const deep = await standing()
-    await page.keyboard.press('ArrowLeft')
-    assert.equal(await shown(), newer)
-    await page.waitForTimeout(300)
-    assert.deepEqual(await standing(), deep, 'a shorter file keeps the page at its offset')
-  }, { width: 800, height: 1000 })
-
-  test('Row keys skim without moving voice or Rex, then enter and leave the page', async page => {
-    await landed(page)
-    await page.evaluate(() => {
-      const voice = window.__harness.modal.voice, fetch = window.fetch
-      voice.dispose()
-      voice.status = { available: true, enabled: true, muted: false, state: 'listening', target: { fiber_id: 'other', origin: 'other', name: 'Other' }, last: null, error: null }
-      window.__routes = []
-      window.fetch = (url, init) => {
-        if (!String(url).endsWith('/api/v1/voice/target')) return fetch(url, init)
-        const target = JSON.parse(init.body); window.__routes.push(target)
-        return Promise.resolve(new Response(JSON.stringify({ ...voice.status, target })))
-      }
-    })
-    const before = await asked(page), analysis = row(page, 'Response analysis')
-    await tree(page).locator('.fp-head').focus()
-    for (let n = 0; n < 20 && await analysis.getAttribute('aria-selected') !== 'true'; n++) await page.keyboard.press('j')
-    assert.equal(await analysis.getAttribute('aria-selected'), 'true')
-    assert.deepEqual(await asked(page), before)
-    assert.deepEqual(await page.evaluate(() => window.__routes), [])
-    await page.keyboard.press('Enter')
-    await asks(page, before.length + 1)
-    await until(page, () => window.__routes.some(target => target.name === 'Response analysis'))
-    assert.deepEqual(await asked(page), [...before, 'select:session-analysis'])
-    await analysis.focus()
-    await page.keyboard.press('l')
-    assert.ok(await analysis.locator('.fp-docs button').first().evaluate(el => el === document.activeElement))
-    await page.keyboard.press('l')
-    await analysis.locator('.fp-doc .ws-embedded').waitFor()
-    await page.keyboard.press('h')
-    assert.equal(await analysis.locator('.fp-doc').isVisible(), false)
-    assert.ok(await analysis.evaluate(el => el === document.activeElement))
-    await page.keyboard.press('l')
-    await analysis.locator('.fp-doc .ws-embedded').waitFor()
+    assert.match(await page.locator('.ws-stage-band .ws-band-title').textContent(), / \/ analysis$/)
+    // Its orchestrators stand above its head.
+    const scroller = view(page).locator('.ws-family-scroll')
+    assert.deepEqual(await view(page).locator('.ov-ancestor').evaluateAll(rows => rows.map(row => row.title)), [rootName])
+    // No outcome anywhere on the view.
+    assert.equal(await view(page).locator('.fp-note, .kbn-ch-outcome').count(), 0)
+    // Keys move the focus among the rows, and neither they nor scrolling move Rex.
+    await view(page).locator('.ov-head').focus()
     await page.keyboard.press('k')
-    assert.equal(await analysis.getAttribute('aria-selected'), 'false', 'k moves on from a row with a document unfolded')
-    assert.equal(await analysis.locator('.fp-doc').isVisible(), true, 'the document stays under its own row')
-    await page.keyboard.press('h')
-    assert.equal(await analysis.locator('.fp-doc').isVisible(), false, 'h from another row folds it first')
-    assert.ok(await page.locator('.kbn-reader-open').count())
-    await page.keyboard.press('h')
-    await until(page, () => !document.querySelector('.kbn-reader-open'))
+    assert.equal(await page.evaluate(() => document.activeElement?.title), rootName)
+    await scroller.evaluate(el => { el.scrollTop = 0 })
+    assert.deepEqual(await asked(page), [...quiet, 'select:session-analysis'])
+    // Pulled past the top, the orchestrator's view opens.
+    for (let n = 0; n < 4 && !await head(page, rootName).count(); n++) {
+      await scroller.hover()
+      await page.mouse.wheel(0, -100)
+      await page.waitForTimeout(60)
+    }
+    await head(page, rootName).waitFor()
+    // Back returns to the thread's view.
+    await pageBack(page)
+    await head(page, 'Response analysis').waitFor()
+    // A click on an orchestrator's head opens its view too.
+    await scroller.evaluate(el => { el.scrollTop = 0 })
+    await view(page).locator('.ov-ancestor').first().click()
+    await head(page, rootName).waitFor()
   }, { width: 800, height: 1000 })
 
-  test('A constitution\'s page sets archived threads aside behind one fold, and opens it on demand', async page => {
-    await landed(page)
-    const fold = tree(page).locator('.fp-aside').last()
-    await fold.waitFor()
-    assert.equal(await row(page, 'Discarded pilot').count(), 0, 'nothing set aside shows')
-    await fold.click()
-    await row(page, 'Discarded pilot').waitFor()
-  }, { width: 390, height: 844 }, 'reduce', true)
-
-  test('`l` before the tapestry has been read waits for it, rather than opening the newest file', async page => {
-    // The page reads every row's tapestry as it paints, so the reads are held from before it opens.
+  test('The view\'s strip: what it last posted beside its tapestry, which opens in the reader', async page => {
     await page.goto(url.replace('example=threads', 'example=families'))
     await page.locator('.kbn-desk .kbn-card').first().waitFor()
-    await page.evaluate(() => {
-      const fetched = window.fetch, held = []
-      window.__landReads = () => { window.fetch = fetched; held.splice(0).forEach(land => land()) }
-      window.fetch = (input, init) => /tapestry\.html/.test(String(input)) ? new Promise(land => held.push(() => land(fetched(input, init)))) : fetched(input, init)
-      location.hash = '#/board/hub@umber-workstation/family%3Aumber-workstation%3Ahub'
-    })
-    await tree(page).locator('.fp-row').first().waitFor()
-    await row(page, 'Pipeline repository steward').locator('.fp-name').click()
-    // Away from the rows, where `l` steps down a level, it opens the selected thread's tapestry.
-    await page.evaluate(() => { document.activeElement?.blur() })
-    const map = await page.evaluate(() => location.hash)
-    await page.keyboard.press('l')
-    await page.waitForTimeout(200)
-    assert.equal(await page.evaluate(() => location.hash), map, 'nothing opens while the read is out')
-    await page.evaluate(() => window.__landReads())
-    const steward = row(page, 'Pipeline repository steward')
-    await steward.frameLocator('.fp-doc iframe').getByRole('heading', { name: 'Pipeline repository steward' }).waitFor()
-    assert.equal(new URL(page.url()).hash, map, 'the tapestry unfolds on the family page')
-    assert.equal(await steward.locator('.fp-lead').getAttribute('aria-pressed'), 'true')
-    await page.evaluate(() => { document.activeElement?.blur() })
-    await page.keyboard.press('l')
-    assert.equal(await steward.locator('.fp-doc').isVisible(), false, 'a second l folds it')
+    await page.evaluate(() => { location.hash = '#/board/hub@umber-workstation/family%3Aumber-workstation%3Ahub' })
+    await view(page).locator('.ov-thread[data-fiber="hub/pipeline-steward"]').click()
+    await view(page).locator('.ov-head .ov-needs').getByText('asks', { exact: true }).waitFor()
+    assert.equal(await view(page).locator('.ov-said-text').textContent(), 'Should the workflow rewrite land before the cut, or after it?')
+    const figure = view(page).locator('.ov-figure')
+    await figure.locator('.ws-thumbnail').waitFor()
+    await figure.click()
+    await until(page, () => document.querySelector('.ws-page.ws-selected')?.getAttribute('data-key')?.endsWith('/hub/pipeline-steward/tapestry.html'))
   })
 
-  test('A lone constitution opens on its tapestry, and `c` from inside it opens that worker\'s conversation', async page => {
+  test('A lone constitution\'s view, and `c` from it opens that worker\'s conversation', async page => {
     await page.goto(url.replace('example=threads', 'example=families'))
     const card = page.locator('.kbn-desk .kbn-card:has(.kbn-card-name[title="Morning post"])').first()
     await card.waitFor({ state: 'attached' })
@@ -235,51 +97,14 @@ export function registerMapViewJourneys(test) {
       await window.__harness.modal.fetchAndRender()
     })
     await card.locator('.kbn-card-name').click({ force: true })
-    const head = tree(page).locator('.fp-head')
-    const map = head.frameLocator('.fp-doc iframe')
-    await map.getByRole('heading', { name: 'Morning post' }).click()
-    assert.ok(await head.locator('.fp-doc iframe').evaluate(el => el === document.activeElement), 'the tapestry holds the focus')
+    await head(page, 'Morning post').waitFor()
+    assert.equal(await view(page).locator('.ov-thread').count(), 0)
+    await view(page).locator('.ov-figure .ws-thumbnail').waitFor()
+    await page.evaluate(() => { document.activeElement?.blur() })
     const before = await asked(page)
     await page.keyboard.press('c')
     await asks(page, before.length + 1)
     assert.deepEqual(await asked(page), [...before, 'open:session-morning-post'])
-  })
-
-  test('A sent file the board can\'t draw, or that is gone, opens in its slot as a card under its bar, and the page stays live', async page => {
-    await page.goto(url.replace('example=threads', 'example=families'))
-    await page.locator('.kbn-desk .kbn-card').first().waitFor()
-    await page.evaluate(() => { location.hash = '#/board/hub@umber-workstation/family%3Aumber-workstation%3Ahub' })
-    const head = tree(page).locator('.fp-head')
-    await head.locator('.fp-sent').click()
-    await head.locator('.fp-file[data-held$="/Rex.shortcut"]').click()
-    // The bar above names the file; the card says what can be done with it.
-    await head.locator('.fp-open .fp-file-name').getByText('sc/Rex.shortcut', { exact: true }).waitFor()
-    const card = head.locator('.fp-doc .kbn-fileview-unsupported')
-    await card.getByText('Not drawn here · 22,707 bytes').waitFor()
-    assert.equal(await card.getByRole('link', { name: 'Download' }).getAttribute('download'), 'Rex.shortcut')
-    const rect = sel => head.locator(sel).evaluate(el => { const { top, bottom, left, right } = el.getBoundingClientRect(); return { top, bottom, left, right } })
-    const [doc, drawn, bar, note] = await Promise.all(['.fp-doc', '.fp-doc .kbn-fileview-unsupported', '.fp-open', '.fp-note'].map(rect))
-    assert.ok(drawn.top >= doc.top && drawn.bottom <= doc.bottom && drawn.left >= doc.left && drawn.right <= doc.right, `the card sits in its slot: ${JSON.stringify({ doc, drawn })}`)
-    assert.ok(note.bottom <= bar.top && bar.bottom <= doc.top, `outcome, bar and slot stack in flow: ${JSON.stringify({ note, bar, doc })}`)
-    // Every part of the page still answers a click.
-    await tree(page).locator('.fp-row[data-thread$="hub/pipeline-steward"] .fp-name').click()
-    await until(page, () => document.querySelector('.ws-page.ws-selected .fp-row[data-thread$="hub/pipeline-steward"]')?.hasAttribute('data-selected'))
-    await head.locator('.fp-note').click()
-    await until(page, () => document.querySelector('.ws-page.ws-selected .fp-head')?.hasAttribute('data-selected'))
-    // The pointer alone never opens a row's outcome.
-    const steward = tree(page).locator('.fp-row[data-thread$="hub/pipeline-steward"]')
-    await until(page, () => document.querySelector('.ws-page.ws-selected .fp-row[data-thread$="hub/pipeline-steward"] .fp-note')?.getBoundingClientRect().height === 0)
-    await steward.locator('.fp-name').hover()
-    await page.waitForTimeout(700)
-    assert.equal(await steward.locator('.fp-note').evaluate(note => note.getBoundingClientRect().height), 0)
-    await head.locator('.fp-back').click()
-    assert.equal(await head.locator('.fp-doc').isVisible(), false)
-    // A file sent and since deleted says so in the same place.
-    await head.locator('.fp-older').click()
-    await head.locator('.fp-file[data-held$="/agenda.md"]').click()
-    await head.locator('.fp-doc').getByText('Not found on umber-workstation', { exact: true }).waitFor()
-    assert.equal(await head.locator('.fp-doc .kbn-fileview-text-wrap').isVisible(), false, 'the empty viewer gives way to the notice')
-    await head.locator('.fp-back').click()
   })
 
   test('Rex naming a fiber on two hosts reveals that host\'s copy on the Globe', async page => {
