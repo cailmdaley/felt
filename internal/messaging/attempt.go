@@ -11,8 +11,9 @@ import (
 )
 
 // Attempt is a batch's one claim record, its manifest at
-// batches/<batch_id>.json: the members it holds, the conversation it went to
-// and, for a consumer's batch, the payload it sent and the transport's receipt.
+// batches/<batch_id>.json for a consumer's batch and batches/<batch_id>.hook
+// for a hook's claim: the members it holds, the conversation it went to and,
+// for a consumer's batch, the payload it sent and the transport's receipt.
 // An entry is pinned exactly while a manifest names it; member entries are
 // rewritten only when they settle.
 type Attempt struct {
@@ -93,7 +94,12 @@ func (a *Attempt) sendError() error {
 	return errCode("unconfirmed", "batch delivery: %s", a.status())
 }
 
+// batchManifest is where a batch's manifest lives. A hook's claim is named
+// .hook, which a contract-46 CLI does not read.
 func batchManifest(root string, a *Attempt) string {
+	if a.Hook {
+		return filepath.Join(root, "batches", a.BatchID+".hook")
+	}
 	return filepath.Join(root, "batches", a.BatchID+".json")
 }
 
@@ -122,10 +128,11 @@ func readBatchManifests(root string) ([]Attempt, error) {
 	}
 	var batches []Attempt
 	for _, file := range files {
-		if file.IsDir() || strings.HasPrefix(file.Name(), ".") || !strings.HasSuffix(file.Name(), ".json") {
+		name := file.Name()
+		if file.IsDir() || strings.HasPrefix(name, ".") || !(strings.HasSuffix(name, ".json") || strings.HasSuffix(name, ".hook")) {
 			continue
 		}
-		bytes, err := readBounded(filepath.Join(dir, file.Name()), 512<<10)
+		bytes, err := readBounded(filepath.Join(dir, name), 512<<10)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}

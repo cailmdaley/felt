@@ -77,6 +77,48 @@ func TestAHookClaimIsAManifestAndLeavesItsMembersAsTheyWere(t *testing.T) {
 	}
 }
 
+// A consumer's batch and a hook's claim sit side by side in batches/, as
+// <batch_id>.json and <batch_id>.hook: both read as open batches, and the next
+// hook closes only the claim.
+func TestAConsumersBatchAndAHooksClaimReadSideBySide(t *testing.T) {
+	env := testEnv(t)
+	root := mailboxDir(env, "fiber", "fiber")
+	paths := enqueueFiber(t, env, "sent", "claimed")
+	const a = "shuttle://host/claude/A"
+	sent := pinBatch(t, paths[:1], a)
+	claim, err := claimBatch(root, []mailboxPendingItem{{paths[1], readEntry(t, paths[1])}}, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{sent.BatchID + ".json", claim.BatchID + ".hook"} {
+		if _, err := os.Stat(filepath.Join(root, "batches", name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if b := batchOf(t, root, "sent"); b == nil || b.Hook || b.Payload == nil {
+		t.Fatalf("the consumer's batch read as %+v", b)
+	}
+	if b := batchOf(t, root, "claimed"); b == nil || !b.Hook || b.Payload != nil {
+		t.Fatalf("the hook's claim read as %+v", b)
+	}
+	var got []Request
+	if err := offerMailboxWithAck(root, a, func(r Request) bool { return fiberContextHookEligible(root, a, r) }, func(batch []Request) error {
+		got = append(got, batch...)
+		return nil
+	}, nil, "claude"); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].MessageID != "claimed" || !strings.HasPrefix(got[0].Text, hookRepeatWarning) {
+		t.Fatalf("the next hook offered %+v", got)
+	}
+	if b := batchOf(t, root, "sent"); b == nil || b.Hook {
+		t.Fatalf("the consumer's batch after the hook: %+v", b)
+	}
+	if b := batchOf(t, root, "claimed"); b != nil {
+		t.Fatalf("the claim stayed open: %+v", b)
+	}
+}
+
 func TestHookThatDiesAfterItsClaimLeavesTheEntryOfferable(t *testing.T) {
 	env := testEnv(t)
 	paths := enqueueFiber(t, env, "only")

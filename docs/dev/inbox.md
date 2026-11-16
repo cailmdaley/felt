@@ -18,7 +18,7 @@ Each address has one directory under the data directory:
 `pending/<sha256(message id)>.json` holds entries no worker has taken.
 `offered/` holds entries with a final disposition for 14 days.
 `.lock` serializes writers, hooks and the consumer, including transport emission.
-`batches/<batch_id>.json` holds one manifest per open batch, the batch's one claim record ([below](#batches-and-the-claim)).
+`batches/` holds one manifest per open batch, the batch's one claim record: `<batch_id>.json` for a consumer's batch, `<batch_id>.hook` for a hook's claim ([below](#batches-and-the-claim)).
 A Claude session also has `fallback/`, where native-wake recovery claims a session entry.
 A fiber has `destination.json`, its worker-owned conversation and receiver epoch.
 
@@ -393,7 +393,7 @@ A hook takes context from the fiber inbox itself, so replacing the worker does n
 
 ## Batches and the claim
 
-A batch is claimed once, in its manifest, `batches/<batch_id>.json`:
+A batch is claimed once, in its manifest, `batches/<batch_id>.json` (a hook's claim is `batches/<batch_id>.hook`):
 
 ```json
 {"batch_id": "<sha256>", "conversation": "shuttle://host/claude/A", "epoch": 3, "members": ["m-1", "m-2"], "opened_at": 1763190000000000000,
@@ -416,7 +416,7 @@ The consumer writes the manifest before the send, with `transcript_offset`, wher
 The send writes no `messages/` receipt.
 A manifest without a receipt is a send whose outcome is unknown, whether the consumer died before the send, during it or before recording it; its payload is never sent again.
 
-A hook claims its emission with a manifest of its own, marked `hook`, with no payload, and removes it when it closes the batch delivered.
+A hook claims its emission with a manifest of its own, `<batch_id>.hook`, marked `hook`, with no payload, and removes it when it closes the batch delivered.
 The next reader under the inbox lock, a hook or the consumer, live or dormant, closes a hook manifest it finds ambiguous: its hook died between output and close.
 A launch reservation is no claim: it lives in `launch.json`, requests no emission and is not evidence of a possible repeat.
 The session-only Claude fallback claims by moving an entry into `fallback/` and writes no manifest.
@@ -447,11 +447,11 @@ A fiber with no worker settles only the first three rows and hook claims, and le
 ### Contract 47 and rollback
 
 Contract 47 keeps a batch's receipt in its manifest, claims hook emissions with manifests, and never sends an open batch's payload again.
-A CLI rolled back to 46 reads the manifests as its own, but not their receipts:
+A CLI rolled back to 46 reads a consumer's manifest as its own, but not its receipt, and does not read a hook's claim:
 - for a consumer's batch it finds no `messages/` receipt under the batch's transport id and sends the payload again, once, to the conversation the manifest names; a batch still unconfirmed at rollback can reach that conversation twice, without a “Possible repeat” line when its variant was plain;
-- a hook's claim, which has no payload, crashes every 46 consume of its fiber, and its members stay held from that fiber's hooks, until the manifest is removed.
+- a hook's claim (`.hook`) left by a hook that died is invisible to it: its members read as free, the next hook or consume offers them once more without the mark, and the claim stays on disk until a 47 reader closes it.
 
-Before rolling a host back, let its batches settle, so that no `mailboxes/*/*/batches/*.json` remains, or remove the hook manifests and accept the repeats.
+Before rolling a host back, let its consumer batches settle, so that no `mailboxes/fiber/*/batches/*.json` remains, or accept those repeats.
 Entries a 47 build settled read the same on 46, and rolling forward again reads a manifest 46 left open, which carries no receipt, as a send of unknown outcome.
 
 ## Verbs
