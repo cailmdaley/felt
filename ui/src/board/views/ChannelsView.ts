@@ -7,8 +7,9 @@ import { boardCards, threadIndexFor } from '../KanbanSurfaces.js'
 import { isMobileViewport } from '../mobile.js'
 import {
   arranged, composeChannels, composeStream, fiberOf, hideKey, railOrder, reordered, showKey, unpinKey,
-  type Channel, type Entry, type Item,
+  type Channel, type Entry, type Item, type Station,
 } from '../channels.js'
+import { layTube, type Tube, type TubeLine, type TubeRow } from '../tube.js'
 import { createRailReorder, type RailReorder } from '../channelRail.js'
 import { openActionMenu } from '../conversationMenu.js'
 import type { SentFile } from '../sentFiles.js'
@@ -16,7 +17,7 @@ import { stateDot } from '../stateDot.js'
 import { slug } from '../threadOutline.js'
 import { threadState } from '../threads.js'
 import { clearPost, renderMarkdown } from '../utils.js'
-import { attentionOf } from '../attention.js'
+import { attentionOf, type Waits } from '../attention.js'
 import { turnOf } from '../turn.js'
 import { docKey, parseDocKey } from '../workspace/documents.js'
 import { headerIcon, type HeaderIcon } from '../workspace/headerIcon.js'
@@ -50,6 +51,24 @@ const FOUND_DOCUMENTS = 12
 const DRAWN = /\.(html?|png|jpe?g|gif|svg|webp)$/i
 /** Narrower than this, the rail is a drawer drawn in over the stream. */
 const DRAWER_PX = 1100
+/** The tube map's geometry: the outermost lane's centre, the room lanes share at most, the widest step between them, a curve's radius, the dot column. */
+const TUBE = { first: 7, room: 64, pitch: 9, radius: 5, dot: 20 } as const
+/** Where a station sits in its row: an item's dot, a start's ring, an end's terminus, a tick. */
+const STATION_Y = { item: 20, start: 11, end: 7, tick: 5 } as const
+const SVG = 'http://www.w3.org/2000/svg'
+/** A thread's colour on the tube map, one of six, the same wherever its lines are drawn. */
+const hue = (card: KanbanCard): string => {
+  let hash = 0
+  for (const char of fiberOf(card)) hash = (hash * 31 + char.charCodeAt(0)) >>> 0
+  return String(hash % 6)
+}
+/** A pinned tag's height, its gap included. */
+const TAG_PX = 17
+const svg = <K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number>): SVGElementTagNameMap[K] => {
+  const node = document.createElementNS(SVG, tag)
+  for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value))
+  return node
+}
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] => {
   const node = document.createElement(tag)
@@ -98,9 +117,10 @@ const kindWord = (item: Item): string =>
  * top, the rest in the human's order, each movable and with a menu to hide,
  * pin or move it; Jump to finds the rest and the fleet's documents), and a
  * channel's stream of what its workers addressed to the human — each worker's
- * question, post, close or sent files as one compact item, with small marks
- * between them for every thread started, closed or handed off. Choosing an
- * item opens that constitution's view; its pages open from its thumbnails.
+ * question, post, close or sent files as one compact item, beside a tube map
+ * of its threads' lives (`layTube`), each a line from its start to its end
+ * with its items wired to it. Choosing an item or a line opens that
+ * constitution's view; its pages open from its thumbnails.
  * The channel's head carries its chair's pages, and its console speaks to its
  * chair. Opening a channel looks at nothing; only a click on something in it
  * moves Rex and voice. On a phone the rail is the first screen.
@@ -139,6 +159,12 @@ export class ChannelsView implements TemporalView {
   private returnTo: string | null = null
   /** The reader stands over Channels: nothing redraws beneath it. */
   private away = false
+  /** The stream's tube map as last drawn, for the tags pinned at its top. */
+  private tube: Tube | null = null
+  /** A frame asked for to pin the tags after a scroll. */
+  private pinning = 0
+  /** The pinned tags as last drawn: which lines, so a scroll that changes nothing leaves them be. */
+  private tagged = ''
   /** The stream follows what arrives while the reader is at its foot. */
   private following = true
   private railHidden = false
@@ -248,6 +274,7 @@ export class ChannelsView implements TemporalView {
     this.stream.addEventListener('scroll', () => {
       const list = this.stream!
       this.following = list.scrollHeight - list.scrollTop - list.clientHeight <= FOLLOW_PX
+      if (!this.pinning) this.pinning = requestAnimationFrame(() => { this.pinning = 0; this.pinTags() })
     }, { passive: true })
     this.dock = this.ctx!.workspace!.console({ keepPlace: true })
     this.dock.el.hidden = true
@@ -317,7 +344,7 @@ export class ChannelsView implements TemporalView {
   /** Something addressed to the human arrived in the channel since this device last read it. */
   private unread(channel: Channel): boolean {
     const seen = lastSeen(channel.key)
-    return this.entries(channel).some(entry => entry.kind !== 'mark' && entry.arrived > seen)
+    return this.entries(channel).some(entry => entry.kind !== 'station' && entry.arrived > seen)
   }
   private status(text: string): void { if (this.note) this.note.textContent = text }
   /** The order and the hides lapse with the board's reach, so while they stand they are written again. */
@@ -505,23 +532,174 @@ export class ChannelsView implements TemporalView {
       this.head.replaceChildren(this.railToggle!.root, back.root, name, pages, menu.root)
     }
     const waits = this.ctx!.workspace!.board.waiting
-    const stream = JSON.stringify([channel.key, failed, entries.map(entry => [entry.id, entry.kind, entry.at, entry.card.name, attentionOf(entry.card, waits), turnOf(entry.card).turn, entry.kind === 'mark' ? entry.what : [entry.text, entry.waiting, entry.clears, kindWord(entry), entry.files.map(file => file.fullPath)]])])
+    const stream = JSON.stringify([channel.key, failed, entries.map(entry => [entry.id, entry.kind, entry.at, entry.card.name, attentionOf(entry.card, waits), turnOf(entry.card).turn, entry.line, entry.kind === 'station' ? [entry.what, entry.end] : [entry.text, entry.waiting, entry.clears, kindWord(entry), entry.files.map(file => file.fullPath)]])])
     if (stream !== this.sigs.stream) {
       this.sigs.stream = stream
-      this.rebuild(this.stream, entries.map(entry => entry.kind === 'mark' ? this.markRow(entry, now) : this.itemRow(entry, now)))
-      this.sweepThumbs(new Set(entries.flatMap(entry => entry.kind === 'mark' ? [] : [`item:${entry.id}:lead`, ...entry.files.map(file => `item:${entry.id}:${file.fullPath}`)])))
+      const tube = this.tube = layTube(entries)
+      // The lanes share their room, each step no wider than the mock's nine pixels.
+      const pitch = tube.lanes > 1 ? Math.min(TUBE.pitch, TUBE.room / (tube.lanes - 1)) : TUBE.pitch
+      const gutter = tube.lanes ? Math.round(TUBE.first + pitch * (tube.lanes - 1) + TUBE.radius + 12 + TUBE.dot) : TUBE.dot + 4
+      this.stream.style.setProperty('--kbn-ch-tube', `${gutter}px`)
+      const lay = { pitch, gutter, waits, now, last: entries.length - 1 }
+      const tags = el('li', 'kbn-ch-tags')
+      tags.setAttribute('aria-hidden', 'true')
+      tags.append(el('div', 'kbn-ch-tags-band'))
+      this.tagged = ''
+      this.entriesDrawn = entries
+      this.titles.clear()
+      this.named = new Map()
+      tube.rows.forEach((row, index) => { if (row.own && !this.named.has(row.own.line.id)) this.named.set(row.own.line.id, index) })
+      this.rebuild(this.stream, [tags, ...entries.map((entry, row) => {
+        // A line running in from before the stream is named on its first row.
+        const named = !!entry.line && tube.rows[row].own?.line.from === -1 && this.named.get(entry.line) === row
+        const node = entry.kind === 'station' ? this.stationRow(entry, now, named) : this.itemRow(entry, now, named)
+        node.dataset.row = String(row)
+        const own = tube.rows[row].own
+        node.dataset.state = own ? this.lineState(own.line, waits) : ''
+        if (own) node.dataset.hue = hue(own.line.card)
+        node.prepend(this.gutter(tube.rows[row], row, lay))
+        return node
+      })])
+      this.sweepThumbs(new Set(entries.flatMap(entry => entry.kind === 'station' ? [] : [`item:${entry.id}:lead`, ...entry.files.map(file => `item:${entry.id}:${file.fullPath}`)])))
       if (!entries.length) this.stream.append(el('li', 'kbn-ch-hush', failed ? 'This channel\'s history could not be read; trying again.' : 'Nothing addressed to you here yet.'))
       if (this.following) this.stream.scrollTop = this.stream.scrollHeight
+      this.pinTags()
     }
     for (const age of this.layout!.querySelectorAll<HTMLElement>('[data-at]')) age.textContent = ago(Number(age.dataset.at), now)
   }
-  /** A thread started, closed or handed off: who, and what, in one small muted line. */
-  private markRow(mark: Extract<Entry, { kind: 'mark' }>, now: number): HTMLLIElement {
-    const row = el('li', 'kbn-ch-mark')
-    const age = el('span', 'kbn-ch-age', ago(mark.at, now))
-    age.dataset.at = String(mark.at)
-    row.append(el('span', 'kbn-ch-mark-who', slug(mark.card)), el('span', 'kbn-ch-mark-what', mark.what), age)
-    row.title = mark.card.name
+  /** A line's colour: the thread's state now while the line runs, the ink once it has ended. */
+  private lineState(line: TubeLine, waits: Waits): string {
+    return line.to === Infinity ? attentionOf(line.card, waits) : 'ended'
+  }
+  /** What a line says on hover: whose it is, and every station along it; worked out once a draw. */
+  private lineTitle(line: TubeLine, now: number): string {
+    const kept = this.titles.get(line.id)
+    if (kept) return kept
+    const said = this.entriesDrawn.flatMap(entry => {
+      if (entry.line !== line.id) return []
+      const what = entry.kind === 'station' ? { start: 'started', tick: 'handed off', end: entry.end ?? 'closed' }[entry.what] : kindWord(entry)
+      return [`${what} ${ago(entry.at, now)}`]
+    })
+    const title = `${slug(line.card)}: ${[...line.from < 0 ? ['running before this stretch'] : [], ...said].join(', ')}`
+    this.titles.set(line.id, title)
+    return title
+  }
+  /** Where each line's slug is written: its start row, else its first row. */
+  private named = new Map<string, number>()
+  /** The entries the stream last drew, row by row. */
+  private entriesDrawn: Entry[] = []
+  private readonly titles = new Map<string, string>()
+  /**
+   * A row's gutter: every line running past it, and its own part of one —
+   * a start curving out of its ring into the lane, a tick across the lane,
+   * an end curving back in to its terminus, an item's stub out to its dot.
+   * Each line opens its constitution's view.
+   */
+  private gutter(row: TubeRow, index: number, lay: { pitch: number; gutter: number; waits: Waits; now: number; last: number }): SVGSVGElement {
+    const box = svg('svg', { class: 'kbn-ch-gutter', width: lay.gutter })
+    box.setAttribute('aria-hidden', 'true')
+    const x = (line: TubeLine): number => TUBE.first + lay.pitch * line.lane
+    const station = lay.gutter - TUBE.dot / 2, r = TUBE.radius
+    const group = (line: TubeLine): SVGGElement => {
+      const g = svg('g', { class: 'kbn-ch-line', 'data-line': line.id, 'data-state': this.lineState(line, lay.waits), 'data-hue': hue(line.card) })
+      const title = svg('title', {})
+      title.textContent = this.lineTitle(line, lay.now)
+      g.append(title)
+      g.addEventListener('click', event => { event.stopPropagation(); this.openLine(line.card) })
+      return g
+    }
+    for (const line of row.through) {
+      const g = group(line)
+      // A line already running where the stream begins comes in faded from its top.
+      const fades = line.from < 0 && index === 0
+      g.append(svg('rect', { class: `kbn-ch-rail-v${fades ? ' kbn-ch-fade' : ''}`, x: x(line) - 0.75, y: 0, width: 1.5, height: '100%' }), svg('rect', { class: 'kbn-ch-hit', x: x(line) - 5, y: 0, width: 10, height: '100%' }))
+      // A line still running runs on past the last row to the stream's foot.
+      if (line.to === Infinity && index === lay.last) g.append(svg('rect', { class: 'kbn-ch-rail-v', x: x(line) - 0.75, y: '100%', width: 1.5, height: 12 }))
+      box.append(g)
+    }
+    const own = row.own
+    if (!own) return box
+    const g = group(own.line), lx = x(own.line), y = STATION_Y[own.what]
+    const path = (d: string): void => { g.append(svg('path', { class: 'kbn-ch-track', d }), svg('path', { class: 'kbn-ch-hit', d })) }
+    if (own.what === 'start') {
+      path(`M${station - 4} ${y}H${lx + r}A${r} ${r} 0 0 0 ${lx} ${y + r}V${2 * y}`)
+      g.append(svg('circle', { class: 'kbn-ch-ring', cx: station, cy: y, r: 3.5 }))
+    } else if (own.what === 'end') {
+      path(`M${lx} 0V${y - r}A${r} ${r} 0 0 0 ${lx + r} ${y}H${station - 4}`)
+      const shape = own.line.end ?? 'closed'
+      if (shape === 'tempered') g.append(svg('path', { class: 'kbn-ch-term', 'data-end': shape, d: `M${station} ${y - 4.5}L${station + 4.5} ${y}L${station} ${y + 4.5}L${station - 4.5} ${y}Z` }))
+      else if (shape === 'discarded') g.append(svg('path', { class: 'kbn-ch-cross', 'data-end': shape, d: `M${station - 3.5} ${y - 3.5}L${station + 3.5} ${y + 3.5}M${station + 3.5} ${y - 3.5}L${station - 3.5} ${y + 3.5}` }))
+      else g.append(svg('rect', { class: 'kbn-ch-term', 'data-end': shape, x: station - 3, y: y - 3, width: 6, height: 6 }))
+    } else if (own.what === 'tick') {
+      g.append(svg('circle', { class: 'kbn-ch-hand', cx: lx, cy: y, r: 2.75 }))
+    } else {
+      path(`M${lx} ${y}H${station - 6}`)
+      g.append(svg('circle', { class: 'kbn-ch-junction', cx: lx, cy: y, r: 2.5 }))
+    }
+    box.append(g)
+    return box
+  }
+  /** A line, a station or a terminus opens its constitution's view, as an item does, and moves nothing else. */
+  private openLine(card: KanbanCard, from: string | null = null): void {
+    this.returnTo = from
+    this.ctx?.workspace?.openFromDesk(card)
+  }
+  /**
+   * Pins at the stream's top the name of each line running past it whose
+   * start is scrolled out of sight, or never was in the stream: a short stub
+   * from its lane to its slug, in lane order.
+   */
+  private pinTags(): void {
+    const list = this.stream, tube = this.tube, tags = list?.querySelector<HTMLElement>(':scope > .kbn-ch-tags > .kbn-ch-tags-band')
+    if (!list || !tube || !tags) return
+    const rows = [...list.querySelectorAll<HTMLElement>(':scope > [data-row]')]
+    // A start behind the band is out of sight too: the band grows with what it pins, so it is measured until it holds still.
+    // A line is named on its start row, or, running in from before the stream, on its first row: pinned once that row is out of sight.
+    const under = (top: number): TubeLine[] => tube.lines.filter(line => {
+      const named = rows[this.named.get(line.id) ?? -1]
+      return named && named.offsetTop + named.offsetHeight / 2 < top && (line.to === Infinity || (rows[line.to] && rows[line.to].offsetTop > top))
+    })
+    let pinned = under(list.scrollTop)
+    for (let pass = 0, count = -1; pass < 4 && count !== pinned.length; pass++) {
+      count = pinned.length
+      pinned = under(list.scrollTop + (count ? TAG_PX * count + 9 : 0))
+    }
+    const sig = pinned.map(line => line.id).join(' ')
+    if (sig === this.tagged) return
+    this.tagged = sig
+    const waits = this.ctx?.workspace?.board.waiting ?? new Map()
+    const step = tube.lanes > 1 ? Math.min(TUBE.pitch, TUBE.room / (tube.lanes - 1)) : TUBE.pitch
+    tags.replaceChildren(...pinned.map(line => {
+      const tag = el('div', 'kbn-ch-tag')
+      tag.dataset.line = line.id
+      tag.dataset.state = this.lineState(line, waits)
+      tag.dataset.hue = hue(line.card)
+      tag.style.setProperty('--kbn-ch-lane', `${TUBE.first + step * line.lane}px`)
+      tag.append(el('span', 'kbn-ch-tag-name', slug(line.card)))
+      tag.title = line.card.name
+      tag.addEventListener('click', () => this.openLine(line.card))
+      return tag
+    }))
+  }
+  /** A station on a line: a start's ring and slug, a tick, or an end's terminus; the slug is written here, once per line. */
+  private stationRow(station: Station, now: number, named = false): HTMLLIElement {
+    const row = el('li', `kbn-ch-station kbn-ch-st-${station.what}`)
+    row.dataset.line = station.line
+    row.dataset.fiber = fiberOf(station.card)
+    row.dataset.slug = slug(station.card)
+    row.dataset.what = station.what === 'end' ? `end:${station.end ?? 'closed'}` : station.what
+    if (station.what === 'start' || named) {
+      const who = button('kbn-ch-slug', slug(station.card), () => this.openLine(station.card, `station:${station.id}`))
+      who.dataset.item = `station:${station.id}`
+      const what = { start: 'started', tick: 'handed off', end: station.end ?? 'closed' }[station.what]
+      who.title = `${station.card.name} — ${what} ${ago(station.at, now)}`
+      row.toggleAttribute('data-named', named)
+      row.append(who)
+    } else {
+      const what = station.what === 'tick' ? 'handed off' : station.end ?? 'closed'
+      row.setAttribute('aria-label', `${slug(station.card)} ${what} ${ago(station.at, now)}`)
+      row.title = `${slug(station.card)} ${what} ${ago(station.at, now)}`
+    }
     return row
   }
   /**
@@ -530,21 +708,30 @@ export class ChannelsView implements TemporalView {
    * thumbnails side by side, each opening its page. Choosing the item opens the
    * worker's view.
    */
-  private itemRow(item: Item, now: number): HTMLLIElement {
+  private itemRow(item: Item, now: number, named = false): HTMLLIElement {
     const { card } = item
     const row = el('li', 'kbn-ch-item')
     row.dataset.kind = item.kind
+    row.dataset.slug = slug(card)
+    if (item.line) row.dataset.line = item.line
     row.dataset.fiber = fiberOf(card)
     row.toggleAttribute('data-waiting', item.waiting)
     const id = `item:${item.id}`
     const open = (): void => { this.returnTo = id; this.ctx?.workspace?.openFromDesk(card) }
-    const who = button('kbn-ch-who', slug(card), open)
+    // On a line, the line says whose it is: the item names its kind alone, its slug left to its accessible name, unless the line is named here.
+    const lined = !!item.line && !named
+    const who = button('kbn-ch-who', lined ? '' : slug(card), open)
     who.dataset.item = id
     who.title = `Open ${card.name}`
+    who.toggleAttribute('data-lined', lined)
+    if (lined) {
+      who.setAttribute('aria-label', `${slug(card)} ${kindWord(item)}`)
+      who.append(el('span', 'kbn-ch-kind', kindWord(item)))
+    }
     const age = el('span', 'kbn-ch-age', ago(item.at, now))
     age.dataset.at = String(item.at)
     const head = el('div', 'kbn-ch-item-head')
-    head.append(who, el('span', 'kbn-ch-kind', kindWord(item)), age)
+    head.append(who, ...lined ? [] : [el('span', 'kbn-ch-kind', kindWord(item))], age)
     if (item.clears) head.append(this.clear(item.clears, card))
     const body = el('div', 'kbn-ch-item-body')
     body.append(head)

@@ -191,6 +191,10 @@ function addBoardFixtures(example: WorkspaceExample, now: number, ROWS: Row[], m
   example.files.push({ owner: WORKSPACE_HOST, path: deck, mime: 'text/html', body: new Blob(['<!doctype html><html><head><title>κ × tSZ</title><style>body{margin:0;background:#15232e;color:#f3eadc;font:32px Georgia}section{box-sizing:border-box;height:100vh;padding:9vh 8vw;display:flex;flex-direction:column;justify-content:center}h1{font-size:100px;margin:0 0 30px}p{color:#8fcebf}</style></head><body><section><p>CMB LENSING · NOVEMBER</p><h1>κ × tSZ at 9σ</h1><p>A new beam. Every null passes.</p></section></body></html>'], { type: 'text/html' }) })
   // Each row's launch, the started marks between a channel's items.
   example.sessions = ROWS.map((row, n) => ({ at: ms(launched(row, n)), fiber: row.id, uid: row.id, session: `session-${row.id}`, harness: 'claude-code', agent: 'claude-opus', host: WORKSPACE_HOST, tmux: null, kind: 'dispatch' as const }))
+  // UNIONS lives twice in places, as the real channel did: rho closed and was launched again, and the PSF thread was relaunched after its temper.
+  for (const [fiber, minutes] of [['pando/unions/rho', 120], ['pando/unions/psf', 90]] as const) {
+    if (ROWS.some(row => row.id === fiber)) example.sessions.push({ at: ms(minutes), fiber, uid: fiber, session: `session-${fiber}-2`, harness: 'claude-code', agent: 'claude-opus', host: WORKSPACE_HOST, tmux: null, kind: 'dispatch' as const })
+  }
   example.commits = []
   let n = 0
   const said: Say = (fiber, kind, minutes, over = {}) =>
@@ -222,6 +226,16 @@ function addBoardFixtures(example: WorkspaceExample, now: number, ROWS: Row[], m
     said('pando/unions/ia', 'post', 70, { to: up('pando/unions/ia'), text: 'NLA and TATT give the same S8 within 0.2σ; TATT stays the default.' }),
     said('pando/unions/photoz', 'post', 40, { to: up('pando/unions/photoz'), text: 'The SOM calibration moves the mean of bin 5 by 0.008; still inside the prior.' }),
     said('pando/unions/paper', 'post', 28, { to: up('pando/unions/paper'), text: 'Section 3 is drafted around the null tests; every number comes from the pipeline.' }),
+    // UNIONS threads ending through the day: closed to the chair, tempered, discarded.
+    said('pando/unions/shear-2pt', 'closed', 280, { to: up('pando/unions/shear-2pt') }),
+    said('pando/unions/shear-2pt', 'closed', 275, { verdict: 'tempered' }),
+    said('pando/unions/rho', 'closed', 222, { to: up('pando/unions/rho') }),
+    said('pando/unions/bmodes', 'closed', 190, { to: up('pando/unions/bmodes') }),
+    said('pando/unions/bmodes', 'closed', 160, { verdict: 'discarded' }),
+    said('pando/unions/psf', 'closed', 250, { to: up('pando/unions/psf') }),
+    said('pando/unions/psf', 'closed', 248, { verdict: 'tempered' }),
+    said('pando/unions/depth', 'closed', 140, { to: up('pando/unions/depth') }),
+    said('pando/unions/blinding', 'handed_off', 110),
     said('pando/unions', 'post', 24, { to: HUMAN, text: 'Morning round: chains converged, photo-z within the prior, the paper draft moving. One ask for you on the n(z) modes.' }),
     said('pando/unions/west', 'post', 60, { to: HUMAN, text: 'The west run finished: S8 = 0.781 ± 0.019. The posterior is attached.', files: ['/fixture-store/workspace/pando/unions/west/s8-posterior.svg'] }),
     said('pando/unions/east', 'handed_off', 45),

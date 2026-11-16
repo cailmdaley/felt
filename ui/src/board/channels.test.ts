@@ -174,22 +174,26 @@ describe('composeStream', () => {
   const waits = new Map([['V', { id: 'r3m', at: now - 20 * minute }]])
   const stream = (over: Partial<Parameters<typeof composeStream>[0]> = {}): Entry[] =>
     composeStream({ channel, records, files, waits, launches: card => launches.get(card.uid!) ?? [], now, reachMs, ...over })
-  const said = (entries: Entry[]) => entries.map(entry => entry.kind === 'mark' ? [entry.card.id, entry.what] : [entry.card.id, entry.kind, entry.text, entry.waiting])
+  const said = (entries: Entry[]) => entries.map(entry => entry.kind === 'station' ? [entry.card.id, entry.what, ...entry.end ? [entry.end] : []] : [entry.card.id, entry.kind, entry.text, entry.waiting])
 
-  it('holds what was addressed to the human, each worker once, with marks of threads starting and stopping between, oldest first', () => {
+  it('holds what was addressed to the human, each worker once, with its threads\' lives as stations between, oldest first', () => {
     expect(said(stream())).toStrictEqual([
       // Sent without a caption, it says nothing: its file names itself.
       ['cmbx', 'file', '', false],
-      ['cmbx/kappa', 'started'],
-      // Closed to its chair, a mark; marked for the human's review, an item, with its note.
-      ['cmbx/cov', 'closed'],
+      ['cmbx/kappa', 'start'],
+      // Closed to its chair, then marked for the human's review: an item with its note, and one end after it.
       ['cmbx/cov', 'close', 'Validated to 4%.', true],
-      ['cmbx/beam', 'started'],
+      ['cmbx/cov', 'end', 'closed'],
+      ['cmbx/beam', 'start'],
       // The post to the human carries the plot it attached, which is not also a send of its own; the deck, sent alone, is not drawn.
       ['cmbx/kappa', 'post', 'κ×tSZ at 9σ.', false],
       // Asked of its chair, the open question is the card's.
       ['cmbx/mask', 'ask', 'Which threshold?', true],
-      ['cmbx/beam', 'handed off'],
+      ['cmbx/beam', 'tick'],
+    ])
+    // Each item said within a life is on its line; a thread with no station in reach draws none.
+    expect(stream().flatMap(entry => entry.kind === 'station' ? [] : [[entry.card.id, entry.line]])).toStrictEqual([
+      ['cmbx', undefined], ['cmbx/cov', 'V:0'], ['cmbx/kappa', 'K:0'], ['cmbx/mask', undefined],
     ])
     const post = stream().find(entry => entry.kind === 'post')
     expect(post?.kind === 'post' && post.files.map(file => [file.basename, file.caption])).toStrictEqual([['spectrum.svg', '9σ.']])
@@ -202,43 +206,43 @@ describe('composeStream', () => {
 
   it('keeps out what was not addressed to the human: posts and closes to others, the human\'s lines, workers\' messages to each other', () => {
     const entries = stream()
-    expect(entries.some(entry => ['r1', 'r2', 'r3', 'r5', 'r6'].includes(entry.id) && entry.kind !== 'mark')).toBe(false)
-    // A tempered close is a mark.
-    const done = record('r8', 'closed', 'B', 5, { verdict: 'tempered' })
-    expect(said(stream({ records: [...records, done] })).at(-1)).toStrictEqual(['cmbx/beam', 'closed'])
+    expect(entries.some(entry => ['r1', 'r2', 'r3', 'r5', 'r6'].includes(entry.id) && entry.kind !== 'station')).toBe(false)
+    // A close to another ends its line; a temper after it is the same end, shaped as a temper.
+    const done = [record('r8', 'closed', 'B', 5, { to: up }), record('r8t', 'closed', 'B', 4, { verdict: 'tempered' })]
+    expect(said(stream({ records: [...records, ...done] })).slice(-1)).toStrictEqual([['cmbx/beam', 'end', 'tempered']])
   })
 
   it('waits where the feed says a question or close waits, else where a card waits; the item that waits shows over a newer one', () => {
     // Without a line the daemon names, the card's close for review is its own item.
-    const review = stream({ records: records.filter(each => each.id !== 'r3m'), waits: new Map() }).find(entry => entry.card === cov && entry.kind !== 'mark')
-    expect(review && review.kind !== 'mark' && [review.kind, review.text, review.waiting]).toStrictEqual(['close', 'Validated to 4%.', true])
+    const review = stream({ records: records.filter(each => each.id !== 'r3m'), waits: new Map() }).find(entry => entry.card === cov && entry.kind !== 'station')
+    expect(review && review.kind !== 'station' && [review.kind, review.text, review.waiting]).toStrictEqual(['close', 'Validated to 4%.', true])
     // A question to the human that the daemon names is the item, not the card's copy of it.
     const asked = [...records, record('r9', 'asked', 'M', 21, { to: human, text: 'Which threshold, 5σ or 3σ?' })]
     const ask = stream({ records: asked, waits: new Map([['M', { id: 'r9', at: now - 21 * minute }]]) }).find(entry => entry.card === mask)
-    expect(ask && ask.kind !== 'mark' && [ask.id, ask.waiting]).toStrictEqual(['r9', true])
+    expect(ask && ask.kind !== 'station' && [ask.id, ask.waiting]).toStrictEqual(['r9', true])
     expect(stream({ files: [...files, send('M', 'mask.svg', 1)] }).find(entry => entry.card === mask)?.kind).toBe('ask')
     // A post the daemon names waits, and only a post can be cleared by hand (the feed knows its kind once it holds the record).
     const posted = stream({ waits: new Map<string, Wait>([...waits, ['K', { id: 'r7', at: now - 30 * minute, kind: 'post' }]]) })
-    expect(posted.flatMap(entry => entry.kind === 'mark' ? [] : [[entry.id, entry.waiting, entry.clears]])).toStrictEqual([
+    expect(posted.flatMap(entry => entry.kind === 'station' ? [] : [[entry.id, entry.waiting, entry.clears]])).toStrictEqual([
       [expect.any(String), false, undefined], ['r3m', true, undefined], ['r7', true, 'K'], [expect.any(String), true, undefined],
     ])
     // A line whose record is not read yet waits, and is not offered a clear until it is known to be a post.
     const unread = stream({ records: records.filter(each => each.id !== 'r7'), waits: new Map([...waits, ['K', { id: 'r7', at: now - 30 * minute }]]) })
-    const kappaItem = unread.find(entry => entry.kind !== 'mark' && entry.card === kappa)
-    expect(kappaItem && kappaItem.kind !== 'mark' && [kappaItem.waiting, kappaItem.clears]).toStrictEqual([true, undefined])
+    const kappaItem = unread.find(entry => entry.kind !== 'station' && entry.card === kappa)
+    expect(kappaItem && kappaItem.kind !== 'station' && [kappaItem.waiting, kappaItem.clears]).toStrictEqual([true, undefined])
   })
 
   it('leaves a closing post to the card\'s outcome rather than its words', () => {
     const closed = card({ ...cov, id: 'cmbx/cov', reviewMark: undefined, orchestrator: undefined, shuttleChannel: 'cmbx' })
     const lone = named(compose([chair, closed]), 'channel:cmbx')
     const item = stream({ channel: lone, records: [record('c1', 'closed', 'V', 40, { to: human, text: 'Validated against 2000 simulations.' })], waits: new Map([['V', { id: 'c1', at: now - 40 * minute }]]) }).find(entry => entry.card === closed)
-    expect(item && item.kind !== 'mark' && [item.kind, item.text, item.waiting]).toStrictEqual(['close', '', true])
+    expect(item && item.kind !== 'station' && [item.kind, item.text, item.waiting]).toStrictEqual(['close', '', true])
   })
 
   it('judges what is new by when it arrived here, and leaves what fell out of the board\'s reach', () => {
     const late = record('r11', 'asked', 'M', 30, { to: human, text: 'Which threshold?', received_at: now - minute })
     const item = stream({ records: [late], waits: new Map([['M', { id: 'r11', at: now - 30 * minute }]]) }).find(entry => entry.card === mask)
-    expect(item && item.kind !== 'mark' && [item.at, item.arrived]).toStrictEqual([now - 30 * minute, now - minute])
+    expect(item && item.kind !== 'station' && [item.at, item.arrived]).toStrictEqual([now - 30 * minute, now - minute])
     expect(said(stream({ reachMs: 40 * minute })).map(entry => entry[0])).not.toContain('cmbx')
   })
 })
@@ -275,5 +279,34 @@ describe('a channel\'s key', () => {
     // Its chair is its live member: the tempered desk speaks for no one.
     expect(named(channels, 'channel:lightcone').name).toBe('glass-mocks')
     expect(named(channels, 'fiber:X').members.map(member => member.id)).toStrictEqual(['lc/desktop'])
+  })
+})
+
+describe('a thread\'s lives', () => {
+  const hub = card({ id: 'pando/unions', uid: 'U', name: 'UNIONS', shuttleChannel: 'UNIONS', shuttleSeat: true, ...idle(1) })
+  const thread = card({ id: 'pando/unions/bring-425', uid: 'T', name: 'Bring 425', orchestrator: 'U', ...working(1) })
+  const channel = named(compose([hub, thread]), 'channel:unions')
+  const record = (id: string, kind: string, fiber: string, minutes: number, over: Partial<BoardRecord> = {}): BoardRecord => ({ id, kind, fiber, by: { fiber }, timestamp: now - minutes * minute, ...over })
+  const stations = (records: BoardRecord[], launches: Record<string, number[]>) =>
+    composeStream({ channel, records, files: [], waits: new Map(), launches: each => (launches[each.uid!] ?? []).map(minutes => now - minutes * minute), now, reachMs })
+      .flatMap(entry => entry.kind === 'station' ? [[entry.card.uid, entry.what, entry.line, ...entry.end ? [entry.end] : []]] : [])
+
+  it('starts once per run however often its session is resumed, ticks a handoff, and starts again only after it ended', () => {
+    // The hub as the board read it on 16 Nov: launched, resumed and resumed again, handed off, closed, launched again.
+    expect(stations([record('h1', 'handed_off', 'U', 200), record('c1', 'closed', 'U', 100, { to: { label: 'Cail' } })], { U: [300, 260, 259, 240, 199, 30] })).toStrictEqual([
+      ['U', 'start', 'U:0'], ['U', 'tick', 'U:0'], ['U', 'end', 'U:0', 'closed'], ['U', 'start', 'U:1'],
+    ])
+  })
+
+  it('ends a life before a launch at the same instant starts the next', () => {
+    expect(stations([record('c1', 'closed', 'T', 50, { to: { fiber: 'U' } })], { T: [80, 50] })).toStrictEqual([
+      ['T', 'start', 'T:0'], ['T', 'end', 'T:0', 'closed'], ['T', 'start', 'T:1'],
+    ])
+  })
+
+  it('runs in from the stream\'s top when its start is out of reach, and ends where its last verdict came', () => {
+    expect(stations([record('h1', 'handed_off', 'T', 50), record('c1', 'closed', 'T', 40, { to: { fiber: 'U' } }), record('c2', 'closed', 'T', 39, { verdict: 'discarded' })], {})).toStrictEqual([
+      ['T', 'tick', 'T:0'], ['T', 'end', 'T:0', 'discarded'],
+    ])
   })
 })

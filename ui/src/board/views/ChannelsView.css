@@ -131,30 +131,89 @@
 
 .kbn-ch-pages { margin-left: 4px; }
 
-/* The stream: each worker's item, and small marks of threads starting and stopping between them. */
+/* The stream: each worker's item, and at its left a tube map of its threads' lives — a line per life, run down a lane
+   from a start's ring to an end's terminus, its items stations wired to it. */
 .kbn-ch-stream {
+  --kbn-ch-tube: 24px;
+  position: relative;
   flex: 1 1 auto; min-height: 0; overflow-y: auto;
   list-style: none; margin: 0; padding: 12px 0 8px;
   display: flex; flex-direction: column;
 }
 .kbn-ch-stream > .kbn-ch-hush { padding: 4px 20px; }
-/* A mark: who and what, one small muted line. */
-.kbn-ch-mark {
-  display: flex; align-items: baseline; gap: 6px;
-  padding: 1px 20px 1px 42px;
-  font: var(--type-label)/var(--leading-ui) var(--font-mono); color: var(--kbn-ink-muted);
+/* Each row's gutter runs its full height, so the lanes join from row to row. */
+.kbn-ch-gutter { position: absolute; top: 0; left: 0; height: 100%; overflow: visible; pointer-events: none; }
+/* A line's colour is its thread's identity, one of six that are none of the state colours (gold, the agent's blue,
+   verdigris); its state colours its stations and its end. An ended life keeps its colour, quieter. */
+:is(.kbn-ch-stream, .kbn-ch-tags) [data-hue='0'] { --line: var(--kbn-line-0); }
+:is(.kbn-ch-stream, .kbn-ch-tags) [data-hue='1'] { --line: var(--kbn-line-1); }
+:is(.kbn-ch-stream, .kbn-ch-tags) [data-hue='2'] { --line: var(--kbn-line-2); }
+:is(.kbn-ch-stream, .kbn-ch-tags) [data-hue='3'] { --line: var(--kbn-line-3); }
+:is(.kbn-ch-stream, .kbn-ch-tags) [data-hue='4'] { --line: var(--kbn-line-4); }
+:is(.kbn-ch-stream, .kbn-ch-tags) [data-hue='5'] { --line: var(--kbn-line-5); }
+.kbn-ch-line { color: var(--line); pointer-events: auto; cursor: pointer; }
+.kbn-ch-line[data-state='ended'] { opacity: 0.55; }
+.kbn-ch-rail-v { fill: var(--line); }
+.kbn-ch-fade { fill: var(--line); mask: linear-gradient(transparent, var(--kbn-ink) 60%); -webkit-mask: linear-gradient(transparent, var(--kbn-ink) 60%); }
+.kbn-ch-track { fill: none; stroke: var(--line); stroke-width: 1.5; }
+.kbn-ch-hit { fill: transparent; stroke: transparent; stroke-width: 10; }
+/* A start's ring, in the line's colour, filled with the thread's state while it waits on the human or works. */
+.kbn-ch-ring { fill: var(--kbn-paper); stroke: var(--line); stroke-width: 1.5; }
+.kbn-ch-line[data-state='waiting'] .kbn-ch-ring { fill: var(--kbn-owed-bright); }
+.kbn-ch-line[data-state='working'] .kbn-ch-ring { fill: var(--kbn-agent); }
+/* A handoff: an open ring on the line, where one worker passed it to the next. */
+.kbn-ch-hand { fill: var(--kbn-paper); stroke: var(--line); stroke-width: 1.5; }
+.kbn-ch-junction { fill: var(--line); }
+/* An end, by its verdict: closed a square in the ink, tempered a diamond in verdigris, discarded a cross. */
+.kbn-ch-term { fill: var(--kbn-ink-soft); }
+.kbn-ch-term[data-end='tempered'] { fill: var(--kbn-tempered); }
+.kbn-ch-cross { fill: none; stroke: var(--kbn-ink-muted); stroke-width: 1.8; }
+/* Stations of their own: a start's ring and slug, a tick, an end's terminus. Each a short row, written once per line. */
+.kbn-ch-station { position: relative; flex: none; padding-left: calc(var(--kbn-ch-tube) + 2px); }
+.kbn-ch-st-start { display: flex; align-items: center; height: 22px; }
+.kbn-ch-st-tick { height: 10px; }
+.kbn-ch-st-end { height: 14px; }
+/* A line running in from before the stream is named on its first row, a tick or an end too. */
+.kbn-ch-station[data-named] { display: flex; align-items: center; height: 22px; }
+.kbn-ch-slug {
+  padding: 0; border: 0; background: none; cursor: pointer;
+  font: var(--type-label)/var(--leading-ui) var(--font-mono); color: var(--line);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
 }
-.kbn-ch-mark-what { font-family: var(--font-serif); font-style: italic; }
-.kbn-ch-mark .kbn-ch-age { font-family: var(--font-serif); }
-/* An item: the worker's dot in the gutter, then who, what kind and when, its one line and its pages side by side. */
+/* The names of lines whose starts are scrolled away, pinned at the stream's top in lane order. */
+.kbn-ch-tags { position: sticky; top: -12px; z-index: 2; height: 0; flex: none; list-style: none; }
+/* The band floats over the rows beneath it and takes no room of its own, so pinning a tag moves nothing. */
+.kbn-ch-tags-band {
+  position: absolute; top: 0; left: 0; right: 0;
+  display: flex; flex-direction: column; gap: 2px; padding: 4px 0 5px;
+  background: color-mix(in srgb, var(--kbn-paper) 94%, transparent);
+  box-shadow: 0 1px 0 var(--kbn-rule);
+}
+.kbn-ch-tags-band:empty { display: none; }
+.kbn-ch-tag {
+  position: relative; display: flex; align-items: center; height: 15px; padding-left: calc(var(--kbn-ch-tube) + 2px); cursor: pointer;
+}
+.kbn-ch-tag::before { content: ''; position: absolute; left: var(--kbn-ch-lane); width: calc(var(--kbn-ch-tube) - var(--kbn-ch-lane) - 2px); top: 50%; border-top: 1.5px solid var(--line); }
+.kbn-ch-tag::after { content: ''; position: absolute; left: calc(var(--kbn-ch-lane) - 0.75px); top: 50%; bottom: -3px; border-left: 1.5px solid var(--line); }
+.kbn-ch-tag-name {
+  padding: 0 6px; border-radius: 8px; background: color-mix(in srgb, var(--line) 14%, var(--kbn-paper));
+  font: var(--type-label)/var(--leading-tight) var(--font-mono); color: var(--kbn-ink-soft);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* An item: its dot at the gutter's edge, a station on its line; then who (unless its line says), what kind and when, its one line and its pages. */
 .kbn-ch-item {
-  display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 0 8px;
-  margin: 4px 0; padding: 8px 20px 8px 14px;
-  border-left: 2px solid transparent; cursor: pointer;
+  position: relative;
+  display: block;
+  padding: 8px 20px 10px calc(var(--kbn-ch-tube) + 6px);
+  cursor: pointer;
 }
-.kbn-ch-item:hover { background: color-mix(in srgb, var(--kbn-ink) 4%, transparent); }
-.kbn-ch-item[data-waiting] { border-left-color: var(--kbn-owed-bright); background: color-mix(in srgb, var(--kbn-owed-bright) 7%, transparent); }
-.kbn-ch-item .constitution-state-dot { width: 20px; height: 1.5em; }
+.kbn-ch-item:hover { background: linear-gradient(to right, transparent var(--kbn-ch-tube), color-mix(in srgb, var(--kbn-ink) 4%, transparent) 0); }
+.kbn-ch-item[data-waiting] {
+  background: linear-gradient(to right, transparent var(--kbn-ch-tube), var(--kbn-owed-bright) 0, var(--kbn-owed-bright) calc(var(--kbn-ch-tube) + 2px), color-mix(in srgb, var(--kbn-owed-bright) 7%, transparent) 0);
+}
+.kbn-ch-item > .constitution-state-dot { position: absolute; top: 8px; left: calc(var(--kbn-ch-tube) - 20px); width: 20px; height: 24px; }
+/* On a line, the dot, coloured by the thread's state, is ringed in the line's. */
+.kbn-ch-item[data-line] > .constitution-state-dot::before { box-shadow: 0 0 0 1.5px var(--kbn-paper), 0 0 0 3px var(--line); }
 .kbn-ch-item-body { min-width: 0; }
 .kbn-ch-item-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; font: var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); }
 .kbn-ch-who {
@@ -164,6 +223,8 @@
 .kbn-ch-who:hover { color: var(--kbn-ink-soft); }
 .kbn-ch-kind { font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
 .kbn-ch-item[data-waiting] .kbn-ch-kind { color: var(--kbn-owed-deep, var(--kbn-ink)); font-weight: 600; }
+/* An item on a line names its kind alone, as its button. */
+.kbn-ch-who[data-lined] { font: inherit; color: inherit; }
 /* A waiting post's clear: a small check at the head's end, the post's one act. */
 .kbn-ch-clear {
   margin-left: auto; padding: 0 6px; border: 1px solid var(--kbn-rule-strong); border-radius: 3px; background: transparent;
@@ -204,8 +265,7 @@
   .kbn-ch-pick { padding: 9px 10px; font-size: var(--type-prose); }
   .kbn-ch-back { display: inline-grid; margin-left: -6px; }
   .kbn-ch-head { padding: 6px 10px 6px 16px; }
-  .kbn-ch-item { padding: 8px 16px 8px 10px; }
-  .kbn-ch-mark { padding-left: 38px; }
+  .kbn-ch-item { padding-right: 16px; }
   .kbn-ch-thumb, .kbn-ch-thumb-face.ws-thumbnail { width: 132px; }
   .kbn-ch-thumb-face.ws-thumbnail { height: 84px; }
 }

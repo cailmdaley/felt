@@ -216,10 +216,24 @@ export interface Item {
   waiting: boolean
   /** A waiting post's line, which the human may clear by hand. */
   clears?: string
+  /** The life of its thread it was said in, when the stream draws that life as a line. */
+  line?: string
 }
-/** A thread started, closed or handed off: a small mark between the items. */
-export interface Mark { kind: 'mark'; id: string; card: KanbanCard; at: number; what: 'started' | 'closed' | 'handed off' }
-export type Entry = Item | Mark
+/** How a thread's life ended: closed, tempered, or discarded. */
+export type Ending = 'closed' | 'tempered' | 'discarded'
+/**
+ * A station on a thread's line, between the items: where a life of the
+ * thread starts, a handoff along it (a tick), or where it ends. `line` names
+ * the life, `<fiber>:<n>`, which the thread's items on it share.
+ */
+export interface Station { kind: 'station'; id: string; card: KanbanCard; at: number; what: 'start' | 'tick' | 'end'; end?: Ending; line: string }
+export type Entry = Item | Station
+
+/** A close's verdict as the line's terminus. */
+const ending = (verdict: string | undefined): Ending => verdict === 'tempered' || verdict === 'discarded' ? verdict : 'closed'
+/** Where an entry stands among others at the same time: a start before what it says, an end after. */
+const RANK: Readonly<Record<string, number>> = { start: 0, tick: 1, item: 2, end: 3 }
+const rank = (entry: Entry): number => RANK[entry.kind === 'station' ? entry.what : 'item']
 
 /** The board records that are a fiber's lines, by the item each makes. */
 const LINES: Readonly<Record<string, Item['kind']>> = { asked: 'ask', post: 'post', closed: 'close' }
@@ -232,9 +246,16 @@ const LINES: Readonly<Record<string, Item['kind']>> = { asked: 'ask', post: 'pos
  * when the board says it does (`waits`); a member that waits with no such
  * line drawn (an open question, a harness prompt, a turn that could not
  * start, a close for the human's review) is its own waiting item. Each worker shows
- * once: the item that waits, else its latest. Between the items, a mark for
- * every thread started (`launches`), handed off, or closed to anyone but the
- * human, within the board's reach.
+ * once: the item that waits, else its latest.
+ *
+ * Between the items, each thread's lives within the board's reach as
+ * stations: a life starts at a launch (`launches`) while none is running, is
+ * ticked where it was handed off, and ends at its last close before the next
+ * start, its terminus shaped by that close's verdict (a close, a mark for the
+ * human's review, then a temper are one tempered end). A launch inside a running life (a resume, a restart) adds
+ * nothing. A life whose start is out of reach runs in from the stream's top;
+ * one still running runs out at its foot. An item said within a life is on its
+ * line.
  */
 export function composeStream(input: {
   channel: Channel
@@ -250,13 +271,18 @@ export function composeStream(input: {
   const reach = now - reachMs
   const named = new Map<string, KanbanCard>()
   for (const card of channel.everyone) for (const ref of [card.uid, card.id]) if (ref && !named.has(ref)) named.set(ref, card)
-  const items = new Map<string, Item[]>(), marks: Mark[] = []
+  const items = new Map<string, Item[]>()
   const say = (item: Item): Item => {
     const list = items.get(fiberOf(item.card)) ?? items.set(fiberOf(item.card), []).get(fiberOf(item.card))!
     list.push(item)
     return item
   }
-  const mark = (card: KanbanCard, what: Mark['what'], at: number, id: string): void => { marks.push({ kind: 'mark', id, card, at, what }) }
+  // What each thread's line is made of: its launches, handoffs and closes, by fiber.
+  const events = new Map<string, Array<{ at: number; what: 'launch' | 'tick' | 'close'; id: string; verdict?: string }>>()
+  const event = (card: KanbanCard, at: number, what: 'launch' | 'tick' | 'close', id: string, verdict?: string): void => {
+    const list = events.get(fiberOf(card)) ?? events.set(fiberOf(card), []).get(fiberOf(card))!
+    list.push({ at, what, id, verdict })
+  }
   // A file a line attached is that line's, not a send of its own.
   const claimed = new Set<SentFile>()
   const attached = (record: BoardRecord): SentFile[] => (record.files ?? []).map(path => {
@@ -268,17 +294,18 @@ export function composeStream(input: {
     const card = record.fiber ? named.get(record.fiber) : undefined
     if (!card || record.timestamp < reach) continue
     const files = attached(record), kind = LINES[record.kind]
-    if (record.kind === 'handed_off') mark(card, 'handed off', record.timestamp, record.id)
-    else if (kind && toPerson(record.to)) {
+    if (record.kind === 'handed_off') event(card, record.timestamp, 'tick', record.id)
+    if (record.kind === 'closed') event(card, record.timestamp, 'close', record.id, record.verdict)
+    if (kind && toPerson(record.to)) {
       const text = record.text?.trim() ?? ''
       // A line waits as what its card wants of the human: an open ask stands before a post it made since.
       const want = wantOf(card, waits)
       const waiting = want?.line?.id === record.id
       say({ kind, id: record.id, card, at: record.timestamp, arrived: arrived(record), text: kind === 'close' && text === card.outcome?.trim() ? '' : text, files, waiting, ...waiting && clearable(want) ? { clears: fiberOf(card) } : {} })
-    } else if (kind === 'close') mark(card, 'closed', record.timestamp, record.id)
+    }
   }
   for (const card of channel.everyone) {
-    for (const at of launches(card)) if (at >= reach) mark(card, 'started', at, `started:${fiberOf(card)}:${at}`)
+    for (const at of launches(card)) if (at >= reach) event(card, at, 'launch', `started:${fiberOf(card)}:${at}`)
     const want = wantOf(card, waits)
     if (!want || items.get(fiberOf(card))?.some(item => item.waiting)) continue
     const kind = ({ ask: 'ask', review: 'close', post: 'post', blocked: 'blocked' } as const)[want.kind]
@@ -299,11 +326,61 @@ export function composeStream(input: {
     if (burst) { burst.files.push(file); burst.at = burst.arrived = file.timestamp }
     else say({ kind: 'file', id: `file:${file.host ?? ''}:${file.fullPath}:${file.timestamp}`, card, at: file.timestamp, arrived: file.timestamp, text: '', files: [file], waiting: false })
   }
-  const stream: Entry[] = marks
+  const stream: Entry[] = []
   for (const list of items.values()) {
     for (const item of list) if (item.kind === 'file') item.text = [...new Set(item.files.flatMap(file => file.caption?.trim() || []))].join(' · ')
     const latest = [...list].sort((a, b) => a.at - b.at)
     stream.push(latest.filter(item => item.waiting).at(-1) ?? latest.at(-1)!)
   }
-  return stream.sort((a, b) => a.at - b.at || a.id.localeCompare(b.id))
+  for (const card of channel.everyone) {
+    const lives = livesOf(card, events.get(fiberOf(card)) ?? [])
+    stream.push(...lives.flatMap(life => life.stations))
+    for (const item of stream) {
+      if (item.kind === 'station' || item.card !== card) continue
+      const life = lives.find(each => each.from <= item.at && item.at <= each.to)
+      if (life) item.line = life.line
+    }
+  }
+  // At one instant, one thread's earlier life comes before its later one: its end, then the next start.
+  const life = (entry: Entry): number => Number(entry.line?.slice(entry.line.lastIndexOf(':') + 1) ?? 0)
+  return stream.sort((a, b) => a.at - b.at || (a.card === b.card ? life(a) - life(b) : 0) || rank(a) - rank(b) || a.id.localeCompare(b.id))
+}
+
+/** A thread's lives, oldest first: each its stations and the span its items fall in. */
+function livesOf(card: KanbanCard, events: ReadonlyArray<{ at: number; what: 'launch' | 'tick' | 'close'; id: string; verdict?: string }>): Array<{ line: string; from: number; to: number; stations: Station[] }> {
+  const lives: Array<{ line: string; from: number; to: number; stations: Station[] }> = []
+  let open: (typeof lives)[number] | undefined
+  const begin = (from: number, start?: { at: number; id: string }): (typeof lives)[number] => {
+    const line = `${fiberOf(card)}:${lives.length}`
+    const life = { line, from, to: Infinity, stations: start ? [{ kind: 'station' as const, id: start.id, card, at: start.at, what: 'start' as const, line }] : [] }
+    lives.push(life)
+    return life
+  }
+  // A close and a launch at one instant: the close ends the life before the launch starts the next.
+  const order = { close: 0, launch: 1, tick: 2 }
+  for (const event of [...events].sort((a, b) => a.at - b.at || order[a.what] - order[b.what])) {
+    if (event.what === 'launch') { open ??= begin(event.at, event); continue }
+    const last = lives.at(-1)
+    if (event.what === 'tick') {
+      // A handoff with no life running: the life began out of reach.
+      if (!open && !last) open = begin(-Infinity)
+      if (open) open.stations.push({ kind: 'station', id: event.id, card, at: event.at, what: 'tick', line: open.line })
+      continue
+    }
+    if (open) {
+      open.to = event.at
+      open.stations.push({ kind: 'station', id: event.id, card, at: event.at, what: 'end', end: ending(event.verdict), line: open.line })
+      open = undefined
+    } else if (last) {
+      // A close after the close (a mark for review, a verdict): the same end, moved to it and shaped as it says.
+      const end = last.stations.at(-1)!
+      Object.assign(end, { id: event.id, at: event.at, end: ending(event.verdict) })
+      last.to = event.at
+    } else {
+      const life = begin(-Infinity)
+      life.to = event.at
+      life.stations.push({ kind: 'station', id: event.id, card, at: event.at, what: 'end', end: ending(event.verdict), line: life.line })
+    }
+  }
+  return lives
 }

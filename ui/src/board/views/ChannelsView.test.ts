@@ -79,21 +79,21 @@ async function mount(inFlight = [chair, tsz, mask, beam, van, notes], view = new
 }
 const rail = (host: HTMLElement) => [...host.querySelectorAll('.kbn-ch-pick-name')].map(el => el.textContent)
 const shown = (host: HTMLElement) => host.querySelector('.kbn-ch-name')?.textContent
-/** The stream as drawn: each item's who, kind and whether it waits; each mark's who and what. */
-const stream = (host: HTMLElement) => [...host.querySelectorAll<HTMLElement>('.kbn-ch-stream > li')].map(el => el.classList.contains('kbn-ch-mark')
-  ? [el.querySelector('.kbn-ch-mark-who')?.textContent, el.querySelector('.kbn-ch-mark-what')?.textContent]
-  : [el.querySelector('.kbn-ch-who')?.textContent, el.dataset.kind, el.hasAttribute('data-waiting')])
-const item = (host: HTMLElement, who: string) => [...host.querySelectorAll<HTMLElement>('.kbn-ch-item')].find(el => el.querySelector('.kbn-ch-who')?.textContent === who)!
+/** The stream as drawn: each item's slug, kind and whether it waits; each station's slug and what it marks. */
+const stream = (host: HTMLElement) => [...host.querySelectorAll<HTMLElement>('.kbn-ch-stream > li[data-slug]')].map(el => el.dataset.what
+  ? [el.dataset.slug, el.dataset.what]
+  : [el.dataset.slug, el.dataset.kind, el.hasAttribute('data-waiting')])
+const item = (host: HTMLElement, who: string) => [...host.querySelectorAll<HTMLElement>('.kbn-ch-item')].find(el => el.dataset.slug === who)!
 
-it('lists the recent channels, the newest wait first, and reads a channel as what was addressed to the human with marks between', async () => {
+it('lists the recent channels, the newest wait first, and reads a channel as what was addressed to the human with its threads\' lines between', async () => {
   const { families } = daemon()
   const { view, host } = await mount()
   expect(rail(host)).toStrictEqual(['cmbx', 'van'])
   expect(host.querySelector('[data-channel="channel:cmbx"]')!.hasAttribute('data-waiting')).toBe(true)
   expect(families).toContain('C')
   expect(shown(host)).toBe('cmbx')
-  // Posts and the human's lines stay out; the expert's files are one item, the mask's ask waits, the beam's hand-off is a mark.
-  expect(stream(host)).toStrictEqual([['tsz', 'started'], ['mask', 'ask', true], ['tsz', 'file', false], ['beam', 'handed off']])
+  // Posts and the human's lines stay out; the expert's files are one item on its line, the mask's ask waits, the beam's hand-off is a tick.
+  expect(stream(host)).toStrictEqual([['tsz', 'start'], ['mask', 'ask', true], ['tsz', 'file', false], ['beam', 'tick']])
   expect(item(host, 'mask').querySelector('.kbn-ch-item-text strong')?.textContent).toBe('5σ')
   expect(item(host, 'mask').querySelector('.kbn-ch-kind')?.textContent).toBe('asks')
   // Files sit side by side: a page and a figure as thumbnails alone, any other file a chip named by its file.
@@ -122,6 +122,15 @@ it('opening, paging and returning to a channel look at nothing; clicking an item
   // The chair's pages in the head open there too.
   host.querySelector<HTMLButtonElement>('.kbn-ch-pages [data-part="constitution"]')!.click()
   expect(openPage).toHaveBeenLastCalledWith(chair, expect.stringContaining('C'))
+  // A line, its start's slug and its tick open that thread's view, as an item does, and look at nothing.
+  host.querySelector<SVGGElement>('.kbn-ch-stream > [data-what="tick"] .kbn-ch-line')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  expect(openFromDesk).toHaveBeenLastCalledWith(beam)
+  host.querySelector<HTMLButtonElement>('.kbn-ch-stream > [data-what="start"] .kbn-ch-slug')!.click()
+  expect(openFromDesk).toHaveBeenLastCalledWith(tsz)
+  // The item on that line is wired to it and names its kind alone; its slug is its accessible name's.
+  const wired = item(host, 'tsz')
+  expect([wired.querySelector('.kbn-ch-who')?.textContent, wired.querySelector('.kbn-ch-who')?.getAttribute('aria-label'), !!wired.querySelector('.kbn-ch-junction')]).toStrictEqual(['sent', 'tsz sent', true])
+  expect(see).not.toHaveBeenCalled()
 })
 
 it('speaks to the channel\'s chair by its slug, and keeps the console\'s draft by channel', async () => {

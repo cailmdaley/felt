@@ -5,10 +5,8 @@ import { pathToFileURL } from 'node:url'
 import { launchBrowser } from './browser.mjs'
 
 const channels = () => [...document.querySelectorAll('.kbn-ch-pick-name')].map(el => el.textContent)
-/** The stream: each item's who and kind, each mark's who and what. */
-const lines = () => [...document.querySelectorAll('.kbn-ch > .kbn-ch-stream > li')].map(el => el.classList.contains('kbn-ch-mark')
-  ? [el.querySelector('.kbn-ch-mark-who').textContent, el.querySelector('.kbn-ch-mark-what').textContent]
-  : [el.querySelector('.kbn-ch-who').textContent, el.dataset.kind])
+/** The stream: each item's slug and kind, each station's slug and what it marks (start, tick, end:<verdict>). */
+const lines = () => [...document.querySelectorAll('.kbn-ch > .kbn-ch-stream > li[data-slug]')].map(el => [el.dataset.slug, el.dataset.kind ?? el.dataset.what])
 const fits = async page => {
   assert.equal(await page.locator('.kbn-channels').evaluate(el => el.scrollWidth <= el.clientWidth), true)
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
@@ -84,13 +82,15 @@ try {
     await pick(page, 'cmbx').click()
     await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'cmbx' && document.querySelector('.kbn-ch-item'))
     if (phone) assert.equal(await page.locator('.kbn-ch-rail').isVisible(), false)
-    // What its workers addressed to the human, each worker once, with marks of threads starting and stopping between.
+    // What its workers addressed to the human, each worker once, with its threads' lives drawn as lines between.
     await page.waitForFunction(() => document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-item').length === 4)
     const said = await page.evaluate(lines)
     assert.deepEqual(said.filter(([, kind]) => ['ask', 'post', 'close', 'file'].includes(kind)), [['covariance', 'close'], ['kappa-tsz', 'post'], ['foregrounds', 'ask'], ['cmbx', 'post']])
-    // Closed to its chair, a mark; marked for the human's review, an item.
-    assert.ok(said.some(([who, what]) => who === 'covariance' && what === 'closed'), 'the close to its chair is a mark')
-    assert.ok(said.some(([who, what]) => who === 'beam' && what === 'started'), 'the silent beam window shows only as a mark')
+    // Closed to its chair, then marked for the human's review: an item, and its line's end.
+    assert.ok(said.some(([who, what]) => who === 'covariance' && what === 'end:closed'), 'the close ends its line')
+    assert.ok(said.some(([who, what]) => who === 'beam' && what === 'start'), 'the silent beam window shows only as its line')
+    // An item on a line leaves its slug to the line's start: the kappa post names its kind alone.
+    assert.equal(await page.locator('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"] .kbn-ch-who').textContent(), 'posted')
     // The channel's head carries its chair's pages; its console speaks to its chair, by slugs.
     assert.ok(await page.locator('.kbn-ch-head .kbn-ch-pages [data-part="constitution"]').isVisible())
     assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-band-title').textContent(), 'cmbx')
@@ -142,7 +142,7 @@ try {
       assert.ok(await page.locator('.kbn-ch-rail').isVisible())
       await page.locator('.kbn-ch-jump').fill('old')
     } else {
-      // UNIONS, busy: its items and the marks of its many threads.
+      // UNIONS, busy: its items and the lines of its many threads, a dozen running at once.
       await page.locator('.kbn-ch').focus()
       await page.keyboard.press('j')
       await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'unions')
@@ -168,7 +168,7 @@ try {
     await page.waitForFunction(n => document.querySelectorAll('.kbn-ch-pick').length === n, phone ? 7 : 8)
     assert.deepEqual(errors, [])
     await context.close()
-    console.log(`Channels ${name}: the recent channels with what waits floated, a channel dragged into place, its menu, a hidden channel found by Jump to, a stream of what was addressed to the human with marks between, an item opening its constitution's view, ${phone
+    console.log(`Channels ${name}: the recent channels with what waits floated, a channel dragged into place, its menu, a hidden channel found by Jump to, a stream of what was addressed to the human beside its threads' lines, an item opening its constitution's view, ${phone
       ? 'one screen at a time with back to the rail'
       : 'a busy channel, the rail hidden and shown'}, Jump to finding a hidden channel and a document and bringing the channel back, no overflow; screenshots saved`)
   }
