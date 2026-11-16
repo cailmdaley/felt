@@ -1046,8 +1046,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
         "fiber_id" => "tests/remote",
         "text" => "hello",
         "origin" => "cineca",
-        "from" => "unverified",
-        "from_claim" => "shuttle://sender/codex/thread",
+        "from" => "shuttle://sender/codex/thread",
         "sender_proof" => "old"
       })
     )
@@ -1055,7 +1054,6 @@ defmodule ShuttleWeb.DeliverControllerTest do
 
     forwarded = StubPostClient.last().body |> Jason.decode!()
     assert forwarded["from"] == "shuttle://sender/codex/thread"
-    refute Map.has_key?(forwarded, "from_claim")
     refute Map.has_key?(forwarded, "sender_proof")
   end
 

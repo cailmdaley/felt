@@ -39,7 +39,7 @@ defmodule ShuttleWeb.DeliverController do
 
   use Phoenix.Controller, formats: [:json]
 
-  alias Shuttle.{Delivery, Messaging, OriginRouter}
+  alias Shuttle.{Delivery, OriginRouter}
 
   def create(conn, params) do
     {status, body} =
@@ -47,7 +47,7 @@ defmodule ShuttleWeb.DeliverController do
         Map.get(params, "fiber_id"),
         Map.get(params, "text"),
         Map.get(params, "origin"),
-        Messaging.sender(params),
+        Map.get(params, "from"),
         Map.take(params, [
           "address",
           "attachments",

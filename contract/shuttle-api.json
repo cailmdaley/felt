@@ -1045,10 +1045,6 @@
                     "type": "string",
                     "description": "Sender label shown to the worker, typically the sender's shuttle:// session address; blank or absent means \"shuttle\"."
                   },
-                  "from_claim": {
-                    "type": "string",
-                    "description": "Sender label, read only when from is \"unverified\"."
-                  },
                   "attachments": {
                     "type": "array",
                     "items": {"type": "object"},
@@ -1340,10 +1336,6 @@
                   "from": {
                     "type": "string",
                     "description": "Sender label, typically the sender's own shuttle:// address; one line, at most 1024 bytes, without [, ] or ;."
-                  },
-                  "from_claim": {
-                    "type": "string",
-                    "description": "Sender label, read only when from is \"unverified\"."
                   },
                   "reply_to": {
                     "type": "string",

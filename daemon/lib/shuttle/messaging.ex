@@ -101,13 +101,6 @@ defmodule Shuttle.Messaging do
   def send_message_with_files(payload) when is_map(payload),
     do: send_message(payload, :files)
 
-  @doc """
-  The sender a request names. An older peer forwards the sender in `from_claim`
-  under a placeholder `from`.
-  """
-  def sender(%{"from" => "unverified"} = payload), do: Map.get(payload, "from_claim", "")
-  def sender(payload), do: Map.get(payload, "from", "")
-
   defp send_message(payload, mode) do
     with {:ok, request} <- validate_message(payload, mode),
          {:ok, address} <- parse_address(request.address),
@@ -444,7 +437,7 @@ defmodule Shuttle.Messaging do
   defp validate_message(payload, mode) do
     address = Map.get(payload, "address")
     text = Map.get(payload, "text", "")
-    from = sender(payload)
+    from = Map.get(payload, "from", "")
     reply_to = Map.get(payload, "reply_to", "")
     notify_address = Map.get(payload, "notify_address", "")
     # Ordinary messages are task requests. Context-only delivery is explicit

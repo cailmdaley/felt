@@ -637,12 +637,11 @@ defmodule ShuttleWeb.MessagingControllerTest do
     assert_receive {:local_message_frame, %{"wake" => true}}
   end
 
-  test "an older peer's forward reads as its sender, its retired fields ignored", %{host: host} do
+  test "a peer's forward keeps its sender, retired fields ignored", %{host: host} do
     request = %{
       "address" => "shuttle://#{host}/codex/native%2Fid",
       "text" => "approved",
-      "from" => "unverified",
-      "from_claim" => "shuttle://peer/pi/bob",
+      "from" => "shuttle://peer/pi/bob",
       "sender_proof" => "old",
       "attested_sender" => "old",
       "reply_to" => "work/fiber",
@@ -652,11 +651,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
     assert api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(200)
     assert_receive {:local_message_frame, frame}
     assert frame["from"] == "shuttle://peer/pi/bob"
-    refute Enum.any?(~w(from_claim sender_proof attested_sender), &Map.has_key?(frame, &1))
-
-    unnamed = request |> Map.put("from_claim", "") |> Map.put("message_id", "old-peer-unnamed")
-    assert api_conn() |> post("/api/v1/messages", Jason.encode!(unnamed)) |> json_response(200)
-    assert_receive {:local_message_frame, %{"from" => ""}}
+    refute Enum.any?(~w(sender_proof attested_sender), &Map.has_key?(frame, &1))
   end
 
   test "a sender with header delimiters is refused", %{host: host} do
