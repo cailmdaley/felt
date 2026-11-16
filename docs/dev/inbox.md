@@ -474,7 +474,7 @@ The daemon and its CLI deploy together, and either one rolled back alone is a co
 - A 47 daemon with a 48 CLI shells `claude-mail-recover`, which the CLI lacks: every pass fails, and the daemon retries it every second, logging a warning each time, until the CLI is rolled back too. Session messages it sends through the 48 CLI go to the native socket.
 - A 48 daemon with a 47 CLI never shells `claude-mail-recover`: an ask to a busy Claude session, from a sender with a session return address, is queued for that session's hook, and nothing wakes the session with it if no hook offers it.
 
-Across hosts, a sender on 48 that reaches a 47 owner may get that owner's `queued` `claude-hook` receipt for such an ask, and the 47 owner wakes the session natively after 30 seconds as before.
+Across hosts, a sender on 48 that reaches a 47 owner may get that owner's `queued` `claude-hook` receipt for such an ask, and the 47 owner wakes the session natively if its hook has not offered it within 30 seconds.
 Rolling a host back one landing leaves nothing to migrate: 48 writes no new state.
 
 ## Verbs
