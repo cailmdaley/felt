@@ -30,7 +30,7 @@ async function openRoot(page) {
 const surfaces = {
   async desk(page) {
     await page.goto(`${base}?example=threads&long-title`)
-    await page.locator('.kbn-desk .kbn-card').first().waitFor()
+    await page.locator('.kbn-desk .kbn-card:visible').first().waitFor()
   },
   async constitution(page) {
     await page.goto(`${base}?example=threads&long-title`)
@@ -46,7 +46,7 @@ const surfaces = {
   },
   async settings(page) {
     await page.goto(`${base}?example=threads`)
-    await page.locator('.kbn-desk .kbn-card').first().waitFor()
+    await page.locator('.kbn-desk .kbn-card:visible').first().waitFor()
     await page.keyboard.press('Meta+Comma')
     await page.locator('[role="dialog"]').last().waitFor({ timeout: 5000 }).catch(() => {})
   },
