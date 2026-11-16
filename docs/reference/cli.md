@@ -149,7 +149,7 @@ These event and commit adapters are also installed by the felt plugin, but the
 | `shuttle hook handoff` | Offer the session's one-shot context-budget handoff reminder (see [Agents & Plugin](../agents.md)) |
 | `shuttle hook interrupted` | Record a human interrupt read from a harness transcript on the activity stream (`--session`, `--harness claude\|codex`, `--at` ms, `--id`, `--cwd`); the daemon calls it, no harness hook does |
 
-The hidden `shuttle context-mailbox` subcommands (`put`, `get`, `receiver`, `revoke`) are daemon-internal: they manage the owner-local durable context queue that `close --quiet` and `message --context-only` write into, and are not a user surface. Its `put` shares its code with `shuttle inbox put`.
+The hidden `shuttle context-mailbox` subcommands (`put`, `get`, `receiver`, `revoke`) are daemon-internal, not a user surface: `put` is how the owner enqueues every fiber message `/deliver` receives into the fiber's inbox, and shares its code with `shuttle inbox put`; `get`, `receiver` and `revoke` read and change which conversation is the fiber's receiver.
 
 ## `shuttle` (dispatch layer)
 
@@ -276,7 +276,7 @@ is then given back to the human rather than closed.
 | `shuttle voices` | List the voice bank and pocket-tts built-ins on the speaker host, each with the role whose charter claims it |
 | `shuttle say --held` | List spoken lines held because their card is out of view; `shuttle say --play` opens the card waiting longest (routes Listen to it and plays its lines), `--next` moves to the next card, `--stop` leaves the rest held |
 | `shuttle inbox consume <fiber-key> <address-or-dash> <epoch> [--idle] [--unknown] [--busy] [--costly] [--message <id>]` | Consume a fiber's inbox for its live worker, or with `-` and epoch 0 for a fiber with no worker; JSON action is `wait`, `wake`, `context` (quiet entries sent to a receiver without a hook), `fresh` or `launch` (a session to start for the reserved `members`), with `turn` when the worker's idle and cost facts would decide, and `message`, the `--message` entry's state after the pass |
-| `shuttle inbox record-begin [--from <sender>] [--fiber <uid> [--ask <question>]] <fiber-key> <id>` | Record a line the daemon transports itself (typed human input, an agent's fresh request), read from stdin, and with `--fiber` a human line's family-board row; JSON `created` permits only the first caller to transport it, and `disposition` is the record's outcome |
+| `shuttle inbox record-begin [--from <sender>] [--source human\|voice\|pulse\|message] [--fiber <uid> [--ask <question>]] <fiber-key> <id>` | Record a line the daemon transports itself (typed or spoken human input, a pulse tick, an agent's fresh request), read from stdin, and with `--fiber` a human line's family-board row; JSON `created` permits only the first caller to transport it, and `disposition` is the record's outcome |
 | `shuttle inbox record-settle <fiber-key> <id> delivered\|unknown\|undeliverable` | Settle a recorded line without resending it |
 | `shuttle inbox put <address> <message-id> <text>` | Enqueue an entry in this host's inbox for a fiber key or a session's `shuttle://` address, with its delivery wishes (`--source`, `--turn`, `--if-costly`, `--not-before`), `--from` and `--derived`; see [The inbox](../dev/inbox.md) |
 | `shuttle inbox pending <address>... [--waking]` | Print one JSON object of each address's `{count, scheduled}`: the due entries' count and every entry with a delivery time, overdue ones included; `--waking` prints a count per address instead, of only the due entries that ask for a turn, free or held by an open batch, and none while a launch reserved in its lease still owes one |
@@ -381,7 +381,7 @@ listed only while that process runs; a context-only message to a receiver
 whose process has exited is rejected rather than queued. Peer JSON
 rows include the fiber path when the session ledger records its pairing, and
 provenance rows include a canonical `address` when the host and harness are known.
-Messages wake idle receivers; a busy Claude receiver gets context at its next hook by default:
+A message wakes its receiver by default; a busy Claude session's native inbox queues it behind the running turn:
 
 ```bash
 shuttle sessions --json
@@ -402,7 +402,7 @@ their candidate addresses. Addresses
 use `claude`, `codex`, and `pi`; the ledger spelling `claude-code` normalizes
 to `claude`.
 
-For a fiber send, the [inbox consumer](../dev/inbox.md#the-live-fiber-consumer) decides delivery under its lock: a busy Codex worker gets terminal follow-up, Pi gets steering, and Claude gets hook context with native fallback after 30 seconds or when its turn ends.
+For a fiber send, the [inbox consumer](../dev/inbox.md#the-live-fiber-consumer) decides delivery under its lock: a busy Codex worker gets terminal follow-up, Pi gets steering, and Claude gets it from its hook, or a native wake after 30 seconds or once its turn ends.
 The following details describe session-addressed Claude sends.
 A plain session-addressed `shuttle message` to Claude goes to the session's native socket in any turn state; during a turn, Claude's native inbox queues it behind the running turn, which takes it in at its next model call or, if none comes, runs it as the next turn.
 The sender's receipt says what the native socket answered: `accepted` once a correlated reply appears, `queued` or `submitted` when none appears within 17 seconds, and `unknown` when it saw neither.
@@ -415,7 +415,7 @@ Stop never drains or continues a turn.
 Subagent hooks neither receive their parent's mail nor change the parent's turn state.
 Claude hook batches stay below 8 KiB, including message labels.
 A direct context-only message or durable fiber entry larger than this batch budget reaches Claude as a reference to its retained full-message JSON, never a truncated preview or a native wake.
-Hook output and acknowledgment, like native delivery and receipt persistence, aren't atomic across a process crash; transport ownership prevents ordinary duplicate delivery but doesn't establish exactly-once delivery at those boundaries.
+Hook output and acknowledgment, like native delivery and receipt persistence, aren't atomic across a process crash: a hook that dies between writing context and recording it leaves its entries to be offered again, marked “Possible repeat”.
 An interrupt while a sibling PostToolUse hook is still running can also discard Shuttle's already-acknowledged context.
 The stock sibling hook is short, but a slow third-party hook widens this window; acknowledgment isn't transcript confirmation.
 `--wake` forces the native wake path, including during a turn.
@@ -470,7 +470,8 @@ Other rejected receipts—including `session_unavailable`, `session_not_found`,
 `wake_required`, and `wake_refused`—return 200. HTTP 5xx means the Shuttle CLI did not
 provide a valid receipt or the owner could not be reached; the daemon may
 include a synthetic `unknown` receipt. `shuttle message` exits 0 for
-`accepted`, `submitted`, `queued`, `context_added`, and `starting`; it exits 1
+`accepted`, `submitted`, `queued`, `context_added` and `subscribed`, and for a fiber's
+`woken`, `followed_up`, `delivered`, `held`, `starting` and `scheduled`; it exits 1
 for `rejected`, `unknown`, or another command error.
 
 A fiber target with no live worker (a seat at rest, an unarmed thread, a
@@ -483,23 +484,21 @@ the text through its hook. A draft or a constitution at rest keeps the text
 for whoever arms it. The receipt reads `starting a session on <fiber> for it`
 (`status: starting` in `--json`), or `queued for <fiber>: <what it waits for>`
 (`status: queued`, with `detail`).
-A context-only send returns `queued` with a fiber-context receipt, whether or not a worker is live.
+A context-only send prints `queued as context for <fiber>` (`status: queued`), whether or not a worker is live: it waits for the worker's next hook, except that a live Pi worker with no hook registered is sent it as context at once (`delivered to <fiber>`).
 Neither starting nor queued is delivered; a worker reads the text through the fiber's inbox.
-A wake send messages a worker that appeared before the enqueue check.
-Retrying with the same `--message-id` queues it once. Attachments cannot wait in the mailbox, so a message carrying them needs
-a live worker, and a fiber with no `shuttle:` block is still refused. A target that does not
+A worker that starts meanwhile takes the entry like any other.
+Retrying with the same `--message-id` queues it once. Attachments wait in the inbox as retained owner-local file references,
+and a fiber with no `shuttle:` block is refused. A target that does not
 resolve or is ambiguous fails with exit 1 and no receipt.
 Session routing also requires a recorded worker or one exact live peer; a missing session address fails before the session-message request. Once resolved, it prints
 `sending <id> to <resolved address>` to stderr before delivery; if interrupted,
 retry with `--message-id <printed id>`.
 
 Retry an uncertain delivery with the identical request and the same
-`--message-id`, never a fresh ID. A concurrent attempt waits until the owner's
-recorded observation deadline plus 1.5 seconds, capped by its own request
-deadline. A later Claude-native retry of a completed `queued`, `submitted`, or
-`unknown` receipt rechecks the transcript for up to two seconds from its saved
-offset and upgrades the status when it finds later evidence; it never resends
-the message. Records without an offset return their stored receipt unchanged.
+`--message-id`, never a fresh ID. A retry answers the stored receipt unchanged
+and never resends the message; one that finds the first send still running, or
+stopped before it recorded an outcome, answers `unknown` with
+`ambiguous_delivery` at once.
 Changed content, including a changed `reply_to` target, requires a new message ID.
 Requests without `reply_to` retain the same deduplication fingerprint; adding a reply target to an existing request is changed content.
 
@@ -515,9 +514,8 @@ has enabled or trusted them; discovery reflects receiver registration.
 
 Pi wake delivery is `queued` only when Pi's prompt API confirms steer or
 follow-up queue admission. It becomes `accepted` when the session transcript
-records the exact labeled user message. Repeating the same send with the same
-message ID checks for that evidence without resending. Without a session
-transcript, Pi delivery remains `unknown`.
+records the exact labeled user message. Without a session transcript, Pi
+delivery is `unknown`.
 
 | Receipt | Evidence |
 |---|---|
@@ -525,13 +523,13 @@ transcript, Pi delivery remains `unknown`.
 | `submitted` | Claude transcript shows the native user row or `queued_command`; admission only, with no model reply observed yet |
 | `context_added` | A main-thread hook acknowledged adding context; no turn started |
 | `accepted` | Pi has the exact correlated user-message row; Claude has a correlated real assistant reply; other transports report their native runtime acknowledgement |
-| `unknown` | Delivery may have succeeded without enough evidence; retry the same ID to re-check |
+| `unknown` | Delivery may have succeeded without enough evidence; retrying the same ID answers this receipt and sends nothing |
 | `subscribed` | `--notify-when-idle` with no text: the subscription is recorded and watched; nothing was delivered |
 | `rejected` | The request or receiving transport refused delivery |
 
 No receipt proves that a model read, acted on, or integrated the message.
-Hook offers can repeat if the receiver crashes after writing context but before
-recording the offer; message IDs remain stable. Repeating the identical send
+Hook offers can repeat, marked “Possible repeat”, if the receiver crashes after
+writing context but before recording the offer; message IDs are stable. Repeating the identical send
 with the same `--message-id` retrieves its recorded result without redelivery.
 `--from` names the sender. Without it, the sender is the calling session: a live receiver registration in the process ancestry, then the session id the harness exports, then `external`.
 A fiber worker also supplies `reply_to`, a separate fiber target.
@@ -565,8 +563,7 @@ message containing local paths; each harness receives the same file references.
 The JSON receipt's `files` list gives the copied name, path, digest, and size.
 This confirms stored bytes, not that the recipient opened or understood them.
 An identical retry returns the original receipt; changed bytes under the same
-message ID are refused. An older daemon that cannot receive attachments refuses
-the whole file message instead of dropping its files.
+message ID are refused.
 
 `--file` supplies message text. `--attach` transfers file bytes to another
 session. `shuttle send-file` publishes artifacts to the human's IDE using

@@ -243,7 +243,6 @@ the caller does not send it again.
 
 `POST /deliver` accepts `{fiber_id, text, from?, message_id?, not_before?}` (plus `origin` to forward).
 A future `not_before` (UTC RFC 3339) answers 202 with `status: scheduled`, `queued: true`, `delivered: false` and `not_before`, without clearing an ask or starting consumption or a launch.
-It needs contract 45 on every forwarding and consuming daemon.
 Agent text goes through the fiber inbox with `turn: ask`.
 `notify_when_idle: true` with no `text` (absent or null; blank text is refused with 400) subscribes `from` (or `notify_address`) to one idle notice from the fiber's live worker, as a session message with no text does (below), and answers that message receipt: 200 with status `subscribed`, or `rejected` with a `detail` when it cannot be made: 200 when the worker cannot take it (a Claude session with no native inbox), 400 for an invalid request, 409 when its `message_id` already names a different message; or 502 or 504 `unknown` when its outcome is not known, to be retried under the same id. It requires a `message_id` (400 without one). A daemon that does not own the fiber, a fiber with no live worker, and a live worker whose delivery address is not yet confirmed answer 409 with an `error` saying which.
 An agent's `resume_mode: fresh` is recorded under its id instead and starts a fresh session with the text in its launch prompt, under the inbox launch gate: 200 `{delivery: fresh, fiber_id, delivered: true}` with the worker's `surface`, `terminal` and `tmux_session`, 202 with `delivered: null` and a `detail` when the start is unconfirmed (a busy Poller), or 409 with `reason` and `error` when refused, after which the same id may be sent again; a repeated id starts nothing and answers `duplicate: true` with its `message_id`, as 200 with `delivered: true` once the first started, or 202 with `delivered: null` when whether it started is unknown.
@@ -257,7 +256,7 @@ With `from: human`, the owner records and deduplicates the line before typed ter
 A repeated id submits nothing and answers `duplicate: true` with the first submission's `disposition`: `delivered` (and `delivered: true`), or `unknown` when it may not have arrived (`delivered: null`).
 `POST /dispatch` with `user_message` (including attached image references) uses the same human entry, including `existing_only` review requests.
 The board supplies ids; a caller without one gets an owner-minted id.
-The prompt hook still records the human row and clears the ask.
+The record writes the line's family-board row; for typed input, the worker's prompt hook clears the ask and replaces that row under the same identity.
 Ambiguous typed input is settled unknown and never re-sent automatically.
 Human launches keep forced-start authority; agent inbox launches, including fresh replacements, obey the armed-document and quarantine gates.
 `live_input: true` records a spoken line as a human entry with source `voice` and transports it the same way, as typed input or a From User launch prompt.
@@ -305,7 +304,7 @@ Claude-hook `queued` receipt, which is the held-as-context answer.
 A retry with the same message ID returns the stored receipt.
 Native admission alone never means a model reply.
 Claude's native approval policy applies; Shuttle cannot start a turn that Claude holds for approval, and its receipt says so.
-The routing hint isn't part of the message's retry identity, so adding or stripping it across a mixed-version fleet doesn't cause an ID conflict.
+`context_if_busy` isn't part of the message's retry identity: a retry with or without it is the same message.
 
 `from` names the sender, as given; a request without one reads `[from external]`.
 Messages produced inside the daemon are `from: shuttle`.
@@ -326,16 +325,11 @@ A `message_id_conflict` returns 409. Other rejected receipts—including
 return 200. HTTP 5xx means Felt did not provide a valid receipt or the owner
 could not be reached; the daemon may include a synthetic `unknown` receipt.
 
-Reusing a `message_id` with the same request returns its durable receipt. A
-concurrent identical request waits until the owner's recorded observation
-deadline plus 1.5 seconds, capped by the request deadline. If it remains in
-progress or its owner stops before saving a result, felt returns `unknown`
-without resending. A later retry of a completed Claude-native `queued`,
-`submitted`, or `unknown` receipt rechecks the transcript for up to two seconds
-from its saved offset and upgrades the receipt if it finds later evidence; it
-never sends to the receiver again. Receipts without a saved offset remain
-unchanged. Reusing the ID for changed content is rejected by the local felt
-adapter.
+Reusing a `message_id` with the same request returns its durable receipt,
+unchanged, and never sends to the receiver again. A request that finds the
+first send still running, or stopped before it saved a result, answers
+`unknown` (`ambiguous_delivery`) at once without resending. Reusing the ID for
+changed content is rejected by the local felt adapter.
 
 Attachments go through the fleet route [`POST /messages/files`](#fleet).
 
