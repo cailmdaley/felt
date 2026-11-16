@@ -17,7 +17,7 @@ interface BoardInternals {
   deskEl: HTMLElement
   activeViewId: 'desk' | 'chronicle' | 'channels'
   voice: { status: VoiceStatus | null; notify(): void }
-  deskKeyboard: { selection: { uid: string; origin: string } | null }
+  deskKeyboard: { selection: { uid: string; origin: string } | null; select(address: { uid: string; origin: string }): void }
   workspaceColumn(card: typeof head): Array<{ card: typeof head }>
   setView(view: 'desk' | 'chronicle' | 'channels'): void
   openDocumentChannel(card: typeof head): void
@@ -207,6 +207,23 @@ describe('Desk keyboard selection', () => {
     if (to === 'desk') expect(selected()).toBe('review')
     if (from === 'reader') expect(inside.workspace.isActive).toBe(false)
     await Promise.resolve()
+  })
+
+  it('a verdict or Rest key acts on the selected row alone: nothing selected, nothing happens', () => {
+    const drafted = document.querySelector<HTMLElement>('[data-card-uid="draft-uid"]')!
+    drafted.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+    for (const key of ['t', 'x', 'a', 's']) expect(press(key).defaultPrevented).toBe(false)
+    expect(document.querySelector('.ws-verdict-undo, .kbn-rest-popover')).toBeNull()
+  })
+
+  it('t tempers the selected draft through the undo window, and s opens Rest for it', () => {
+    draw(response({ now: { drafts: [card({ id: 'd1', uid: 'draft-uid', shuttleKind: 'oneshot' })], inFlight: [], awaitingReview: [] } }))
+    inside.deskKeyboard.select({ uid: 'draft-uid', origin: 'local' })
+    expect(selected()).toBe('draft-uid')
+    expect(press('t').defaultPrevented).toBe(true)
+    expect(document.querySelector('.ws-verdict-undo')?.textContent).toContain('undo')
+    expect(press('s').defaultPrevented).toBe(true)
+    expect(document.querySelector('.kbn-rest-popover')).not.toBeNull()
   })
 
   it('Escape returns a root Reader to Desk', async () => {

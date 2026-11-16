@@ -122,12 +122,13 @@ describe('shared keyboard table', () => {
       expect(keyIntent(event(key, init), 'reader')).toBeNull()
     }
   })
-  it('c opens the conversation (dot is its alias) and s rests the open constitution, in the reader alone; no report can ask for the conversation', () => {
+  it('c opens the conversation (dot is its alias) in the reader alone, s rests from the reader and the Desk; no report can ask for the conversation', () => {
     expect(keyIntent(event('c'), 'reader')).toBe('conversation')
     expect(keyIntent(event('.'), 'reader')).toBe('conversation')
     expect(keyIntent(event('s'), 'reader')).toBe('rest')
-    // The Desk acts on nothing: its keys only move and open.
-    for (const key of ['c', '.', 's', 't', 'x', 'a', 'z']) expect(keyIntent(event(key), 'desk')).toBeNull()
+    // The Desk's selected row takes the view head's verdicts and Rest; the conversation and undo keys are not the Desk's.
+    expect(['s', 't', 'x', 'a'].map(key => keyIntent(event(key), 'desk'))).toEqual(['rest', 'temper', 'discard', 'toReview'])
+    for (const key of ['c', '.', 'z']) expect(keyIntent(event(key), 'desk')).toBeNull()
     expect(DOCUMENT_KEY_INTENTS).not.toContain('rest')
     expect(keyIntent(event('[', { metaKey: true }), 'reader')).toBeNull()
     expect(keyIntent(event(']', { metaKey: true }), 'reader')).toBeNull()

@@ -26,11 +26,11 @@ import { Workspace } from './workspace/Workspace.js'
 import { Dock, type ConsoleOptions } from './workspace/Dock.js'
 import { scheduleThumbnails } from './workspace/Thumbnail.js'
 import { confirmWorkerStop } from './workspace/Verdicts.js'
-import { runAwaitsHuman, schedulePaused, scheduled } from './workspace/fiberPageState.js'
+import { constitutionAction, runAwaitsHuman, schedulePaused, scheduled } from './workspace/fiberPageState.js'
 import { DeskKeyboard } from './DeskKeyboard.js'
 import { clearPost } from './utils.js'
 import { KeymapHelp } from './KeymapHelp.js'
-import { keyIntent } from './keymap.js'
+import { DESK_ACTS, keyIntent, type KeyIntent } from './keymap.js'
 import { daemonFetch, isDaemonBooting, postDaemonJson } from './daemonApi.js'
 import { applyTerminalHost, TerminalHostReader } from './hostTerminal.js'
 import { inLane } from './requestLanes.js'
@@ -1363,7 +1363,29 @@ export class KanbanModal {
         e.stopPropagation()
         return
       }
+      if (intent && DESK_ACTS.includes(intent) && this.actOnDeskSelection(intent)) {
+        e.preventDefault()
+        e.stopPropagation()
+        return
+      }
     }
+  }
+
+  /**
+   * A verdict or Rest key on the Desk acts on the selected card or line alone,
+   * the row drawn as selected (a family card names its top-level, a line its
+   * member), never on what the pointer is over or the voice target. A verdict
+   * waits out the same undo window as the reader's; Rest opens its popover.
+   */
+  private actOnDeskSelection(intent: KeyIntent): boolean {
+    const address = this.deskKeyboard?.selection
+    if (!address || !this.deskKeyboard?.selectedRow) return false
+    const card = boardCards(this.lastResponse).find(card => (card.uid ?? card.id) === address.uid && card.originId === address.origin)
+    return constitutionAction(intent, card, {
+      verdict: (card, verdict) => { this.workspace?.queueVerdict(card, verdict) },
+      conversation: () => {},
+      rest: card => this.rest(card),
+    })
   }
 
   private updateBodyScrollAffordance(): void {

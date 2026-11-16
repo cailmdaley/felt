@@ -1,4 +1,5 @@
 import '@ui-sdk/web/tabs'
+import { markVerdictHost } from './workspace/Verdicts.js'
 import { clearable, quietWord, type Waits } from './attention.js'
 import { civilWeekday, dueCivilDay, formatCivilDay, isoDayLocal, shiftCivilDay } from './civilDay.js'
 import { DESK_COLUMNS, DESK_FOLIO_NAME, DESK_SECTION_TITLE, DESK_SECTIONS, type DeskFamily, type DeskOrder, type DeskSection, type FamilyWait } from './deskOrdering.js'
@@ -155,6 +156,8 @@ export class KanbanSurfaceRenderer {
     const word = family.attention === 'quiet' ? quietWord(root) : ''
     meta.textContent = family.attention === 'quiet' ? (word === SAID[family.section] ? '' : family.section === 'resting' ? word.replace(/^resting /, '') : word) : family.working && index.children(root).length ? `${family.working} working` : ''
     head.append(stateDot(root, waits, this.o.openDetail), name, meta)
+    // A verdict given from the keys waits out its undo window on the line it names.
+    markVerdictHost(head, root)
     card.append(head)
     if (family.waits.length) {
       const lines = document.createElement('div')
@@ -179,6 +182,8 @@ export class KanbanSurfaceRenderer {
     line.dataset.kind = want.kind
     line.dataset.deskLine = ''
     identify(line, card)
+    // The top-level's own line leaves its undo window to the head above it.
+    if (!own) markVerdictHost(line, card)
     const who = document.createElement('span')
     who.className = 'kbn-family-wait-slug'
     who.textContent = slug(card)
