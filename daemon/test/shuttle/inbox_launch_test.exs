@@ -29,97 +29,9 @@ defmodule Shuttle.InboxLaunchTest do
 
   @note "Shuttle started this session because messages are waiting"
 
-  defp constitution(host, id, frontmatter) do
-    write_fiber(host, id, """
-    ---
-    name: Inbox #{id}
-    #{frontmatter}
-    ---
-    A constitution messages reach.
-    """)
-
-    Shuttle.Test.Env.put_env("SHUTTLE_STORES", host)
-    id
-  end
-
-  defp oneshot(host, id, status, extra \\ "") do
-    constitution(host, id, """
-    status: #{status}
-    #{extra}
-    shuttle:
-      kind: oneshot
-      host: test-host
-      agent: claude-sonnet
-      project_dir: "#{host}"
-    """)
-  end
-
-  # An armed standing constitution between runs: active, its next tick hours
-  # away and its last one served, so only a message starts it.
-  defp armed(host, id) do
-    later = DateTime.add(DateTime.utc_now(), 6 * 3600, :second)
-
-    constitution(host, id, """
-    status: active
-    shuttle:
-      kind: standing
-      host: test-host
-      agent: claude-sonnet
-      project_dir: "#{host}"
-      schedule:
-        expr: "#{later.minute} #{later.hour} * * *"
-        tz: UTC
-    """)
-
-    write_dispatch_marker(host, id, "12345678-1234-4000-8000-000000000042", ago(120))
-    write_handoff_marker(host, id, ago(60))
-    id
-  end
-
   defp entry(host, id) do
     {:ok, %{fibers: [entry]}} = FiberDocuments.get_shuttle(id, felt_stores: [host])
     entry
-  end
-
-  defp launches(id) do
-    session = FiberUid.session(id)
-
-    Enum.count(IntegrationRunner.commands(), fn {cmd, args} ->
-      cmd == "tmux" and "new-session" in args and session in args
-    end)
-  end
-
-  defp poller!(host, opts \\ []) do
-    {:ok, poller} =
-      start_poller!(
-        Keyword.merge(
-          [runner: IntegrationRunner, poll_interval_ms: 600_000, felt_stores: [host]],
-          opts
-        )
-      )
-
-    await_boot_cycle!(poller)
-    drain!(poller)
-    poller
-  end
-
-  # A poll, then the inbox work it hands to a task.
-  defp poll!(poller) do
-    sync_poll_cycle!(poller)
-    drain!(poller)
-  end
-
-  defp drain!(poller) do
-    :sys.get_state(poller, :infinity)
-
-    for pid <- Task.Supervisor.children(Shuttle.TaskSupervisor),
-        {:dictionary, dict} <- [Process.info(pid, :dictionary)],
-        poller in Keyword.get(dict, :"$callers", []) do
-      ref = Process.monitor(pid)
-      assert_receive {:DOWN, ^ref, :process, ^pid, _}, 60_000
-    end
-
-    :sys.get_state(poller, :infinity)
   end
 
   defp pending(entry) do
@@ -147,22 +59,6 @@ defmodule Shuttle.InboxLaunchTest do
       lapsed = System.os_time(:nanosecond) - 3 * 60 * 1_000_000_000
       File.write!(path, Jason.encode!(Map.put(reservation, "opened_at", lapsed)))
     end
-  end
-
-  defp hook!(uuid, event \\ "UserPromptSubmit") do
-    frame =
-      Jason.encode!(%{session_id: uuid, hook_event_name: event, harness: "claude", cwd: "/"})
-
-    cli = Shuttle.Env.find_executable("shuttle")
-
-    {output, 0} =
-      Shuttle.Env.cmd(
-        "bash",
-        ["--noprofile", "--norc", "-c", "printf '%s\\n' '#{frame}' | '#{cli}' hook event"],
-        env: [{"SHUTTLE_BOARD", "off"}, {"SHUTTLE_EVENTS", "off"}]
-      )
-
-    output
   end
 
   test "a delayed entry is inert at enqueue and fires on one poll for a dormant fiber", %{

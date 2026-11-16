@@ -25,6 +25,7 @@ defmodule Shuttle.Test.DispatchIntegrationCase do
       alias Shuttle.Test.DispatchIntegrationCase.IntegrationRunner
       alias Shuttle.Test.DispatchIntegrationCase.RealRexRunner
       alias Shuttle.Test.DispatchIntegrationCase.PausedListingRunner
+      alias Shuttle.Test.DispatchIntegrationCase.ScopedAPI
 
       unless System.find_executable("felt") && System.find_executable("shuttle") do
         @moduletag skip: "felt and shuttle binaries are required for this CLI integration suite"
@@ -504,6 +505,233 @@ defmodule Shuttle.Test.DispatchIntegrationCase do
       })
 
     File.write!(Path.join(session_dir, filename), session_meta <> "\n" <> user_turn <> "\n")
+  end
+
+  # ── Inbox helpers: constitutions, a Poller's polls, the real hook ──────────
+
+  # A constitution in `host` with `frontmatter`; the store is the scope's only
+  # one, so the real CLIs and the daemon both find it.
+  def constitution(host, id, frontmatter) do
+    write_fiber(host, id, """
+    ---
+    name: Inbox #{id}
+    #{frontmatter}
+    ---
+    A constitution messages reach.
+    """)
+
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", host)
+    id
+  end
+
+  def oneshot(host, id, status, extra \\ "") do
+    constitution(host, id, """
+    status: #{status}
+    #{extra}
+    shuttle:
+      kind: oneshot
+      host: test-host
+      agent: claude-sonnet
+      project_dir: "#{host}"
+    """)
+  end
+
+  # An armed standing constitution between runs: active, its next tick hours
+  # away and its last one served, so only a message starts it.
+  def armed(host, id, extra \\ "") do
+    later = DateTime.add(DateTime.utc_now(), 6 * 3600, :second)
+
+    constitution(host, id, """
+    status: active
+    #{extra}
+    shuttle:
+      kind: standing
+      host: test-host
+      agent: claude-sonnet
+      project_dir: "#{host}"
+      schedule:
+        expr: "#{later.minute} #{later.hour} * * *"
+        tz: UTC
+    """)
+
+    write_dispatch_marker(host, id, "12345678-1234-4000-8000-000000000042", ago(120))
+    write_handoff_marker(host, id, ago(60))
+    id
+  end
+
+  # How many sessions the in-memory tmux started for `id`.
+  def launches(id) do
+    session = FiberUid.session(id)
+
+    Enum.count(IntegrationRunner.commands(), fn {cmd, args} ->
+      cmd == "tmux" and "new-session" in args and session in args
+    end)
+  end
+
+  # A Poller over `host` that has run its boot cycle and the work it handed off.
+  def poller!(host, opts \\ []) do
+    {:ok, poller} =
+      start_poller!(
+        Keyword.merge(
+          [runner: IntegrationRunner, poll_interval_ms: 600_000, felt_stores: [host]],
+          opts
+        )
+      )
+
+    await_boot_cycle!(poller)
+    drain!(poller)
+    poller
+  end
+
+  # The daemon dies: `processes` (a request in flight, say) and then the
+  # Poller, its delivery tasks and its worker watchers are killed outright, as
+  # a hard kill would end them, with nothing settled or cleaned up. Terminal
+  # sessions outlive it, as they outlive a real daemon.
+  def kill_daemon!(poller, processes \\ []) do
+    tasks =
+      for pid <- Task.Supervisor.children(Shuttle.TaskSupervisor),
+          {:dictionary, dict} <- [Process.info(pid, :dictionary)],
+          poller in Keyword.get(dict, :"$callers", []),
+          do: pid
+
+    watchers =
+      for {_, pid, _, _} <- DynamicSupervisor.which_children(Shuttle.WatcherSupervisor),
+          is_pid(pid),
+          match?(%{poller: ^poller}, safe_state(pid)),
+          do: pid
+
+    Enum.each(processes ++ [poller | tasks] ++ watchers, &kill!/1)
+  end
+
+  def kill!(pid) do
+    ref = Process.monitor(pid)
+    Process.exit(pid, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^pid, _}
+  end
+
+  defp safe_state(pid) do
+    :sys.get_state(pid, 5_000)
+  catch
+    :exit, _ -> nil
+  end
+
+  # A poll, then the inbox work it hands to a task.
+  def poll!(poller) do
+    sync_poll_cycle!(poller)
+    drain!(poller)
+  end
+
+  def drain!(poller) do
+    :sys.get_state(poller, :infinity)
+
+    for pid <- Task.Supervisor.children(Shuttle.TaskSupervisor),
+        {:dictionary, dict} <- [Process.info(pid, :dictionary)],
+        poller in Keyword.get(dict, :"$callers", []) do
+      ref = Process.monitor(pid)
+      assert_receive {:DOWN, ^ref, :process, ^pid, _}, 60_000
+    end
+
+    :sys.get_state(poller, :infinity)
+  end
+
+  # The real `shuttle hook event` for Claude session `uuid`: what the session
+  # is offered. `frame` adds hook-input fields, such as a prompt's `prompt`;
+  # `hook_env` is the hook's own environment, which by default writes no board
+  # or event rows.
+  def hook!(
+        uuid,
+        event \\ "UserPromptSubmit",
+        frame \\ %{},
+        hook_env \\ [{"SHUTTLE_BOARD", "off"}, {"SHUTTLE_EVENTS", "off"}]
+      ) do
+    frame =
+      Map.merge(
+        %{session_id: uuid, hook_event_name: event, harness: "claude", cwd: "/"},
+        frame
+      )
+
+    input = Path.join(System.tmp_dir!(), "hook-#{System.unique_integer([:positive])}.json")
+    File.write!(input, Jason.encode!(frame) <> "\n")
+
+    # The hook runs under a short-lived stand-in for the harness, a process
+    # that is not a shell, so its registration names no process the test's
+    # later CLI calls descend from: those are not this session speaking.
+    harness =
+      "import subprocess, sys; " <>
+        "sys.exit(subprocess.call(sys.argv[2:], stdin=open(sys.argv[1])))"
+
+    {output, 0} =
+      Shuttle.Env.cmd("python3", ["-I", "-c", harness, input, cli(), "hook", "event"],
+        env: hook_env
+      )
+
+    File.rm(input)
+    output
+  end
+
+  defp cli, do: Shuttle.Env.find_executable("shuttle")
+
+  # ── A test daemon's HTTP API and the real CLI against it ───────────────────
+
+  defmodule ScopedAPI do
+    @moduledoc false
+    @behaviour Plug
+    def init(owner), do: owner
+
+    def call(conn, owner) do
+      Shuttle.Env.adopt_callers([owner])
+      ShuttleWeb.Endpoint.call(conn, ShuttleWeb.Endpoint.init([]))
+    end
+  end
+
+  # Serves this test's daemon (its Poller and scope) on a loopback port and
+  # points the real CLIs at it, with a home and an events file of the test's
+  # own. Answers the events file the CLIs and the daemon write board rows to.
+  def serve_api!(host) do
+    home = Path.join(host, "home")
+    File.mkdir_p!(home)
+    Shuttle.Test.Env.put_env("HOME", home)
+    events = Path.join(host, "events.jsonl")
+    Shuttle.Test.Env.put_env("SHUTTLE_EVENTS_FILE", events)
+    serve_api!()
+    events
+  end
+
+  def serve_api! do
+    api =
+      start_supervised!(
+        {Bandit, plug: {ScopedAPI, self()}, port: 0, ip: {127, 0, 0, 1}, startup_log: false},
+        id: make_ref()
+      )
+
+    {:ok, {_, port}} = ThousandIsland.listener_info(api)
+    url = "http://127.0.0.1:#{port}"
+    Shuttle.Test.Env.put_env("SHUTTLE_DAEMON_URL", url)
+    url
+  end
+
+  # The real `shuttle` CLI as a sender runs it, in this test's scope: answers
+  # its combined output and exit status.
+  def shuttle(args, opts \\ []) do
+    Shuttle.Env.cmd(
+      Shuttle.Env.find_executable("shuttle"),
+      args,
+      Keyword.merge([stderr_to_stdout: true], opts)
+    )
+  end
+
+  # The family-board rows the real CLIs wrote to this test's events file.
+  def board_rows(events) do
+    case File.read(events) do
+      {:ok, text} ->
+        text
+        |> String.split("\n", trim: true)
+        |> Enum.map(&Jason.decode!/1)
+        |> Enum.filter(&(&1["type"] == "board"))
+
+      {:error, :enoent} ->
+        []
+    end
   end
 
   # A ceiling of ~30 s, reached only when the condition never holds: a passing
