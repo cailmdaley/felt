@@ -16,10 +16,13 @@ export const verbCaret = acts => acts.locator('.ws-acts-verbs > .ws-verb-more')
 /** The console's menu button, where the console is too short to stand its acts as buttons. */
 export const consoleMenu = acts => acts.locator('.ws-band-menu')
 const onConsole = async acts => await consoleMenu(acts).isVisible()
+/** One of the console's controls as it stands: its menu where its head is short, else its Settings button. */
+export const consoleControl = acts => acts.locator(':is(.ws-band-menu, .ws-band-buttons .ws-acts-settings):visible').first()
 /** The console's buttons for its other acts, where its head has room. */
 const CONSOLE_BUTTON = { Constitution: '.ws-band-page', Settings: '.ws-acts-settings', 'Open conversation': '.ws-acts-console' }
 
-async function openMenu(acts) {
+/** Opens the acts' verb menu: the console's menu where it stands, else the verb button's caret. */
+export async function openMenu(acts) {
   const menu = verbMenu(acts.page())
   if (!await menu.isVisible()) await (await onConsole(acts) ? consoleMenu(acts) : verbCaret(acts)).click()
   await menu.waitFor()

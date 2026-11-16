@@ -20,12 +20,11 @@ async function openRoot(page) {
   const box = await name.boundingBox()
   await name.click({ position: { x: box.width - 6, y: box.height / 2 } })
   await page.locator('.ws-stage-band .ws-dock').waitFor()
-  if (await page.locator('.ws-stage-band .ws-band-title').textContent() !== root) {
-    // The highlighted row carries the fiber's acts, its ⚙ among them.
-    await page.locator('.ws-page.ws-selected .ov-head .ws-acts-settings').click()
-    await page.locator('.ws-settings-menu:not([hidden]) .ws-ancestry-link').first().click()
+  // A family's Desk row opens its frontier's view; its topmost orchestrator is the root.
+  if (await page.locator('.ws-stage-band .ws-band-title').getAttribute('title') !== root) {
+    await page.locator('.ws-page.ws-selected .ov-ancestor').first().click()
   }
-  await page.waitForFunction(name => document.querySelector('.ws-stage-band .ws-band-title')?.textContent === name, root)
+  await page.waitForFunction(name => document.querySelector('.ws-stage-band .ws-band-title')?.title === name, root)
 }
 
 const surfaces = {
@@ -36,7 +35,7 @@ const surfaces = {
   async constitution(page) {
     await page.goto(`${base}?example=threads&long-title`)
     await openRoot(page)
-    // The family's page carries the acts, so the constitution's own page is reached where it recedes.
+    // The view carries the acts, so the constitution's own page is reached where it recedes.
     await page.locator('.ws-page[data-key^="fiber:"]').first().dispatchEvent('click')
     await page.locator('.ws-selected .ws-fiber-prose').waitFor()
   },

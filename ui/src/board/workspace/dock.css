@@ -380,5 +380,5 @@
 .ws-dock .kbn-ctl-history-toggle { font: var(--type-label)/var(--leading-ui) var(--font-serif) !important; }
 
 /* The console's acts as buttons where its head has room; the menu (⋯) holds them where it is short. */
-@container dock (min-width: 621px) { .ws-band-menu { display: none; } }
-@container dock (max-width: 620px) { .ws-band-buttons { display: none; } }
+@container dock (min-width: 621px) { .ws-dock .ws-band-acts > .ws-band-menu { display: none; } }
+@container dock (max-width: 620px) { .ws-dock .ws-band-acts > .ws-band-buttons { display: none; } }

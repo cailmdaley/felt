@@ -14,7 +14,7 @@ import { registerHeaderBarJourneys } from './headerBar.mjs'
 import { familySends, familyTree, pageBack, showFile } from './familyNav.mjs'
 import { registerCapGeometryJourneys } from './capGeometry.mjs'
 import { registerRenderedTypeJourneys } from './renderedType.mjs'
-import { closeVerbMenu, consoleAct, consoleMenu, hitBox, offeredVerbs, pressVerb, verbCaret, verbControl, verbFace } from './verbs.mjs'
+import { closeVerbMenu, consoleAct, consoleControl, consoleMenu, hitBox, offeredVerbs, openMenu, pressVerb, verbCaret, verbControl, verbFace } from './verbs.mjs'
 
 const browser = await launchBrowser()
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=workspace`
@@ -293,7 +293,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   await choose(p, 'Constitution')
   if (device === 'desktop') await type('.ws-selected .ws-fiber-prose h1', 'display', 'EB Garamond')
   assert.equal(await selected(p).locator('.kbn-detail-lede').count(), 1, 'the constitution leads with its outcome')
-  await consoleMenu(consoleActs(p)).click()
+  await openMenu(consoleActs(p))
   await type('[role="menu"].kbn-verb-menu .ws-header-word', 'label', 'EB Garamond')
   await closeVerbMenu(p)
   await bandMenu(p, 'Settings')
@@ -1011,14 +1011,17 @@ test('Wide reader scans Desk cards and returns the last viewed card with one Esc
   assert.equal(await p.locator('.kbn-key-selected .kbn-card-name').getAttribute('title'), next)
 })
 
-test('On a report the console\'s menu carries the fiber\'s acts, with the undo line in its place; keys reach them', async p => {
+test('On a report the console carries the fiber\'s acts, with the undo line in their place; keys reach them', async p => {
   await open(p)
   assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper, .kbn-ctl-discard)').count(), 0)
   const pair = consoleActs(p)
-  assert.ok(await pair.getByRole('button', { name: "calibration-report's acts", exact: true }).isVisible())
+  // Where the console has room its acts stand as buttons; where it is short, its menu holds them.
+  assert.ok(await verbFace(pair).isVisible() || await pair.getByRole('button', { name: "calibration-report's acts", exact: true }).isVisible())
   // Work awaiting review leads with Temper; each verb names its key.
   assert.deepEqual(await offeredVerbs(pair), ['Temper', 'Rest', 'Discard'])
-  assert.equal(await (await consoleAct(pair, 'Temper')).getAttribute('aria-keyshortcuts'), 't')
+  // Its key: in the menu's shortcut, or in the face's name.
+  const temper = await consoleAct(pair, 'Temper')
+  assert.ok(await temper.getAttribute('aria-keyshortcuts') === 't' || /\(t\)$/.test(await temper.getAttribute('aria-label') ?? ''), 'Temper names its key')
   await closeVerbMenu(p)
   await choose(p, 'calibration-report')
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
@@ -1032,7 +1035,7 @@ test('On a report the console\'s menu carries the fiber\'s acts, with the undo l
   await leave(p); await chooseDeskColumn(p, 1)
   await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
   assert.equal(await band(p).locator('.ws-band-open').count(), 0)
-  // Its family's page draws its row, so the highlighted row carries its acts, Close for review on the face.
+  // Its view's head carries its acts, Close for review on the face.
   assert.deepEqual(await offeredVerbs(acts(p)), ['Close for review', 'Rest', 'Temper', 'Discard'])
 })
 
@@ -1062,7 +1065,10 @@ for (const theme of [null, 'night-chart']) test(`Verdict verbs wear one pigment 
   const verdicts = async strip => {
     const temper = await verdictLook((await verbControl(strip, 'Temper')).and(p.locator('.kbn-ctl-temper')).locator('svg'))
     await closeVerbMenu(p)
-    const discard = await verdictLook(await verbControl(strip, 'Discard'))
+    const control = await verbControl(strip, 'Discard')
+    // A menu opened upward from the console lies under the pointer, which highlights an item: the pointer leaves it.
+    await p.mouse.move(1, 1)
+    const discard = await verdictLook(control)
     await closeVerbMenu(p)
     return [temper, discard]
   }
@@ -1152,9 +1158,10 @@ test('Landscape phone keeps a one-row top bar while the fiber awaits review', as
   await headerAction(p, 'Settings')
   await p.locator('.ws-settings-menu:not([hidden])').waitFor()
   await p.keyboard.press('Escape')
-  // The console's menu answers a full-height tap and leads with Temper; Discard is in it too.
-  const box = await hitBox(consoleMenu(consoleActs(p)))
-  assert.ok(box.height >= 44, `the console's menu is a full-height target: ${JSON.stringify(box)}`)
+  // The console's lead control answers a full-height tap and leads with Temper; Discard is a menu away.
+  const lead = await consoleMenu(consoleActs(p)).isVisible() ? consoleMenu(consoleActs(p)) : verbFace(consoleActs(p))
+  const box = await hitBox(lead)
+  assert.ok(box.height >= 44, `the console's lead control is a full-height target: ${JSON.stringify(box)}`)
   const verbs = await offeredVerbs(consoleActs(p))
   assert.equal(verbs[0], 'Temper')
   assert.ok(verbs.includes('Discard'), 'Discard is a menu away')
@@ -2240,7 +2247,7 @@ test('Theme URLs allow only data, Google Fonts and relative resources inside the
 
 test('Escaped theme imports cannot load unscoped CSS or target the act zone', async p => {
   await open(p); await choose(p, 'Constitution')
-  const control = consoleMenu(consoleActs(p))
+  const control = consoleControl(consoleActs(p))
   await control.waitFor()
   const before = await control.evaluate(element => getComputedStyle(element).color)
   const requests = []
@@ -2347,10 +2354,10 @@ test('Act zone stops broad button rules and resets theme fonts, sizes and pigmen
   assert.ok(!style.mono.includes('fantasy'), 'theme aliases cannot change a control font')
   await closeVerbMenu(p)
   assert.equal(await band(p).locator('.ws-dock').getAttribute('data-part'), 'act')
-  // A row's acts on the family's page are controls too: the theme's broad rules stop short of them.
+  // The acts in a constitution's view are controls too: the theme's broad rules stop short of them.
   await familyTree(p)
   const row = await acts(p).locator('.kbn-ctl-temper').evaluate(el => ({ color: getComputedStyle(el).color, font: getComputedStyle(el).fontFamily, transform: getComputedStyle(el).textTransform }))
-  assert.notEqual(row.color, 'rgb(255, 0, 0)', "button { color: red } cannot reach a row's Temper")
+  assert.notEqual(row.color, 'rgb(255, 0, 0)', "button { color: red } cannot reach the view's Temper")
   assert.ok(!row.font.includes('fantasy'))
   assert.equal(row.transform, 'none')
 }, { width: 1379, height: 900 })
@@ -2434,7 +2441,7 @@ test('Protected verdict plate and its undo line hold without author CSS', async 
   await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
   const plate = consoleActs(p)
   assert.equal(await plate.evaluate(el => el.closest('[data-part="act"]')?.dataset.act), 'band')
-  assert.notEqual(await consoleMenu(plate).evaluate(el => getComputedStyle(el).color), 'rgb(255, 0, 0)')
+  assert.notEqual(await consoleControl(plate).evaluate(el => getComputedStyle(el).color), 'rgb(255, 0, 0)')
   await appFocus(p); await p.keyboard.press('t')
   const undo = plate.locator('.ws-verdict-undo button')
   await undo.waitFor()
@@ -2516,7 +2523,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   await open(p)
   await band(p).locator('.ws-band-head').waitFor()
   if (phone) await settleTransitions(p, '.ws-navbar')
-  if (!phone) for (const control of ['.ws-worker-acts button:not([hidden])', '.ws-band-menu']) await still(p, `hovering ${control}`, () => band(p).locator(control).first().hover(), { allow: [`.ws-stage-band ${control}`] })
+  if (!phone) for (const control of ['.ws-worker-acts button:not([hidden])', '.ws-band-acts :is(.ws-band-menu, .ws-acts-settings):visible']) await still(p, `hovering ${control}`, () => band(p).locator(control).first().hover(), { allow: ['.ws-stage-band .ws-worker-acts', '.ws-stage-band .ws-band-acts'] })
   await still(p, 'a poll repaint under the band', () => repaint(p))
   await bandMenu(p, 'Settings')
   if (!phone) {
@@ -2556,7 +2563,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
     })
     await repaint(p)
   }, settle: 100 }).then(moved => device === 'narrow' ? moved.filter(({ dh, dy }) => !dh && !dy) : moved), [], 'a worker starting leaves the open report still')
-  await still(p, 'hovering the console\'s menu', () => band(p).locator('.ws-band-menu').hover(), { allow: ['.ws-band-menu'] })
+  await still(p, 'hovering the console\'s acts', () => consoleControl(band(p)).hover(), { allow: ['.ws-band-acts'] })
   await still(p, 'a band worker-state change', async () => {
     await p.evaluate(() => {
       const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Calibrate the shear response')

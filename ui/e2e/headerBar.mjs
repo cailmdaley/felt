@@ -57,7 +57,7 @@ const assertLifecycleInk = async (page, scheme) => {
   assert.equal(renderedTheme.appearance, scheme, `the document resolves to ${scheme}: ${JSON.stringify(renderedTheme)}`)
   assert.equal(renderedTheme.pageTheme, scheme === 'dark' ? 'night-chart' : 'portolan', `the selected page uses the ${scheme} bundled theme: ${JSON.stringify(renderedTheme)}`)
   // A row draws its verbs on its strip; the console in its menu.
-  const onConsole = await consoleMenu(strip).count() > 0
+  const onConsole = await consoleMenu(strip).isVisible()
   if (onConsole) { await consoleMenu(strip).click(); await verbMenu(page).waitFor() }
   const verbs = await (onConsole ? verbMenu(page).locator('[role="menuitem"][data-verb]') : strip.locator('.ws-acts-verbs > button')).evaluateAll(buttons => buttons
     .filter(button => button.checkVisibility())
@@ -131,7 +131,7 @@ export function registerHeaderBarJourneys(test) {
       }
     }
   }, { width: 1000, height: 900 })
-  test("Width changes keep visible focus on the highlighted row's acts", async page => {
+  test("Width changes keep visible focus on the view's acts", async page => {
     await page.goto(url)
     await openRoot(page)
     const focused = locator => locator.evaluate(el => el === document.activeElement)
@@ -163,7 +163,7 @@ export function registerHeaderBarJourneys(test) {
     const header = page.locator('.ws-stage-band .ws-band-head')
     let labelSize
     const check = async () => {
-      const sizes = await header.locator('.ws-header-icon:not(.ws-band-buttons *)').evaluateAll(els => els.filter(el => el.checkVisibility()).map(el => el.getBoundingClientRect().height))
+      const sizes = await header.locator('.ws-header-icon').evaluateAll(els => els.filter(el => el.checkVisibility()).map(el => el.getBoundingClientRect().height))
       labelSize ??= sizes[0]
       assert.ok(sizes.length >= 1 && sizes.every(size => size === labelSize), `every band control keeps one height: ${sizes}`)
       const centres = await header.locator('.ws-header-icon, h1').evaluateAll(els => els.filter(el => el.checkVisibility()).map(el => { const r = el.getBoundingClientRect(); return r.top + r.height / 2 }))
