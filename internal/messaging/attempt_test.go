@@ -280,10 +280,7 @@ func TestUnknownRolloverClosesAndReclaimsInOneEntry(t *testing.T) {
 	env := testEnv(t)
 	path := enqueueFiber(t, env, "rolled")[0]
 	const first, next = "shuttle://host/claude/A", "shuttle://host/claude/B"
-	entry := readEntry(t, path)
-	if err := writeFiberMailboxAttempt(path, entry, first); err != nil {
-		t.Fatal(err)
-	}
+	pinBatch(t, []string{path}, first)
 	for _, active := range []bool{true, false} {
 		if err := RegisterMailbox(env, "claude", "A", "host", "/project", os.Getpid(), active); err != nil {
 			t.Fatal(err)
@@ -296,8 +293,8 @@ func TestUnknownRolloverClosesAndReclaimsInOneEntry(t *testing.T) {
 		}
 		return Receipt{Status: StatusUnknown}, errCode("ambiguous_delivery", "lost again")
 	}
-	_ = deliverPinned(t, env, next, Request{MessageID: "rolled", Text: "text of rolled"}, sender)
-	entry = readEntry(t, path)
+	_ = deliverBatch(t, env, next, Request{MessageID: "rolled", Text: "text of rolled"}, sender)
+	entry := readEntry(t, path)
 	if entry.AttemptAddress != next || !entry.PossibleRepeat || !entry.Attempt.open() || entry.Attempt.Conversation != next || entry.Attempt.Epoch != epoch {
 		t.Fatalf("after rolling forward, entry = %+v, attempt %+v", entry, entry.Attempt)
 	}
@@ -388,7 +385,7 @@ func TestAmbiguousWakeToALiveReceiverIsRetriedAfterTheBound(t *testing.T) {
 		})
 	}
 	deliver := func() error {
-		return deliverPinned(t, env, a, request, sender)
+		return deliverBatch(t, env, a, request, sender)
 	}
 	for i := 0; i < 2; i++ {
 		if err := deliver(); ErrorCode(err) != "ambiguous_delivery" {
@@ -449,7 +446,7 @@ func TestARejectedRetryIsSentAgainAsAPossibleRepeat(t *testing.T) {
 		return o.status, o.code
 	})
 	deliver := func() error {
-		return deliverPinned(t, env, a, request, sender)
+		return deliverBatch(t, env, a, request, sender)
 	}
 	if err := deliver(); ErrorCode(err) != "ambiguous_delivery" {
 		t.Fatalf("first = %v", err)
@@ -542,7 +539,7 @@ func TestAHeldApprovalIsNotRetried(t *testing.T) {
 		return Receipt{Status: StatusUnknown}, errCode("wake_held", "receiver approval is required")
 	}
 	for i := 0; i < 2; i++ {
-		if err := deliverPinned(t, env, a, request, sender); ErrorCode(err) != "wake_held" {
+		if err := deliverBatch(t, env, a, request, sender); ErrorCode(err) != "wake_held" {
 			t.Fatal(err)
 		}
 		expireAttempt(t, path)
@@ -566,7 +563,7 @@ func TestALiveConversationGetsOneRetry(t *testing.T) {
 		return Receipt{Status: StatusUnknown}, errCode("ambiguous_delivery", "lost reply")
 	}
 	for i := 0; i < 4; i++ {
-		if err := deliverPinned(t, env, a, request, sender); ErrorCode(err) != "ambiguous_delivery" {
+		if err := deliverBatch(t, env, a, request, sender); ErrorCode(err) != "ambiguous_delivery" {
 			t.Fatalf("delivery %d = %v", i, err)
 		}
 		expireAttempt(t, path)

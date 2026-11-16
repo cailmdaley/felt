@@ -293,13 +293,11 @@ func TestFiberContextRestartRetriesPinnedDestinationAfterAcceptedSend(t *testing
 		t.Fatal(err)
 	}
 	transition(t, env, "execution-first", "shuttle://host/claude/first")
-	// A build before batch payloads pinned the entry, its send was accepted,
-	// and it died before the close.
+	// The consumer claimed a batch for first, its send was accepted, and it
+	// died before the close.
 	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey(request.MessageID)+".json")
-	if err := pinClaim([]string{path}, "shuttle://host/claude/first"); err != nil {
-		t.Fatal(err)
-	}
-	firstID := request.MessageID + "-" + mailboxKey("shuttle://host/claude/first")[:16]
+	batch := pinBatch(t, []string{path}, "shuttle://host/claude/first")
+	firstID := batch.Payload.MessageID + "-" + mailboxKey("shuttle://host/claude/first")[:16]
 	entry, err := readFiberMailboxEntry(path)
 	if err != nil || entry.AttemptAddress != "shuttle://host/claude/first" {
 		t.Fatalf("durable attempt = %+v, %v", entry, err)
@@ -315,7 +313,7 @@ func TestFiberContextRestartRetriesPinnedDestinationAfterAcceptedSend(t *testing
 		successorID = req.MessageID + "-" + mailboxKey(address)[:16]
 		return Receipt{Status: StatusContextAdded}, nil
 	}
-	if err := deliverPinned(t, env, "shuttle://host/claude/successor", request, retry); err != nil {
+	if err := deliverBatch(t, env, "shuttle://host/claude/successor", request, retry); err != nil {
 		t.Fatal(err)
 	}
 	if successorAddress != "shuttle://host/claude/first" || successorID != firstID {
@@ -331,14 +329,8 @@ func TestFiberContextRetargetsAfterPinnedDestinationRejects(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey(request.MessageID)+".json")
-	entry, err := readFiberMailboxEntry(path)
-	if err != nil {
-		t.Fatal(err)
-	}
 	first := "shuttle://host/claude/first"
-	if err := writeFiberMailboxAttempt(path, entry, first); err != nil {
-		t.Fatal(err)
-	}
+	pinBatch(t, []string{path}, first)
 	var addresses []string
 	sender := func(_ context.Context, _ *sysenv.Env, _ string, _ Request, address string) (Receipt, error) {
 		addresses = append(addresses, address)
@@ -348,13 +340,13 @@ func TestFiberContextRetargetsAfterPinnedDestinationRejects(t *testing.T) {
 		return Receipt{Status: StatusContextAdded}, nil
 	}
 	selected := "shuttle://host/claude/successor"
-	if err := deliverPinned(t, env, selected, request, sender); err != nil {
+	if err := deliverBatch(t, env, selected, request, sender); err != nil {
 		t.Fatal(err)
 	}
 	if len(addresses) != 2 || addresses[0] != first || addresses[1] != selected {
 		t.Fatalf("delivery attempts = %v, want rejected first then current successor", addresses)
 	}
-	entry, err = readFiberMailboxEntry(filepath.Join(mailboxDir(env, "fiber", "fiber"), "offered", filepath.Base(path)))
+	entry, err := readFiberMailboxEntry(filepath.Join(mailboxDir(env, "fiber", "fiber"), "offered", filepath.Base(path)))
 	if err != nil || entry.Attempt.Conversation != selected || entry.Attempt.Outcome != attemptDelivered {
 		t.Fatalf("successor attempt = %+v, %v", entry.Attempt, err)
 	}
@@ -498,7 +490,7 @@ func TestFiberContextUnknownRolloverRequiresEndedEvidence(t *testing.T) {
 					return dedupSendResult{Receipt: Receipt{MessageID: req.MessageID, Status: StatusContextAdded}}
 				})
 			}
-			if err := deliverPinned(t, env, first, request, sender); err == nil {
+			if err := deliverBatch(t, env, first, request, sender); err == nil {
 				t.Fatal("unknown outcome acknowledged")
 			}
 			if evidence != "missing" {
@@ -530,7 +522,7 @@ func TestFiberContextUnknownRolloverRequiresEndedEvidence(t *testing.T) {
 				}
 			}
 			for i := 0; i < 2; i++ {
-				err := deliverPinned(t, env, next, request, sender)
+				err := deliverBatch(t, env, next, request, sender)
 				if ended && err != nil {
 					t.Fatal(err)
 				}

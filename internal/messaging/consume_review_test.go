@@ -31,11 +31,11 @@ func TestReview1RejectedRetryPreservesOriginalAmbiguity(t *testing.T) {
 		}
 		return Receipt{Status: StatusUnknown}, errCode("ambiguous_delivery", "unknown")
 	}
-	_ = deliverPinned(t, env, a, r, sender)
+	_ = deliverBatch(t, env, a, r, sender)
 	expireAttempt(t, path)
-	_ = deliverPinned(t, env, a, r, sender)
+	_ = deliverBatch(t, env, a, r, sender)
 	transition(t, env, "B", b)
-	_ = deliverPinned(t, env, b, r, sender)
+	_ = deliverBatch(t, env, b, r, sender)
 	if !strings.HasPrefix(last.Text, "Possible repeat:") {
 		t.Fatalf("lost original ambiguity: %+v", last)
 	}
@@ -55,12 +55,12 @@ func TestReview2ExhaustedRetryStillRollsToLiveSuccessor(t *testing.T) {
 		addresses = append(addresses, address)
 		return Receipt{Status: StatusUnknown}, errCode("ambiguous_delivery", "unknown")
 	}
-	_ = deliverPinned(t, env, a, r, sender)
+	_ = deliverBatch(t, env, a, r, sender)
 	expireAttempt(t, path)
-	_ = deliverPinned(t, env, a, r, sender)
+	_ = deliverBatch(t, env, a, r, sender)
 	expireAttempt(t, path)
 	transition(t, env, "B", b)
-	_ = deliverPinned(t, env, b, r, sender)
+	_ = deliverBatch(t, env, b, r, sender)
 	if addresses[len(addresses)-1] != b {
 		t.Fatalf("stuck at exhausted predecessor: %v", addresses)
 	}

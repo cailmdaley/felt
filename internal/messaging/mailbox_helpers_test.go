@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -59,6 +60,52 @@ func deliverPinned(t *testing.T, env *sysenv.Env, selected string, r Request, se
 			t.Fatal(err)
 		}
 	}
+	return advanceBatches(t, env, selected, send)
+}
+
+// pinBatch claims the entries at paths as one open wake batch pinned to
+// conversation, manifest first, as consume claims a batch, and returns it.
+func pinBatch(t *testing.T, paths []string, conversation string) Attempt {
+	t.Helper()
+	root := filepath.Dir(filepath.Dir(paths[0]))
+	items := make([]mailboxPendingItem, len(paths))
+	wake := false
+	for i, path := range paths {
+		items[i] = mailboxPendingItem{path: path, entry: readEntry(t, path)}
+		wake = wake || items[i].entry.Request.Wake
+	}
+	a := newConsumedAttempt(Worker{Address: conversation, Epoch: receiverEpoch(root, conversation)}, items, wake)
+	if err := pinConsumedBatch(root, &a); err != nil {
+		t.Fatal(err)
+	}
+	return a
+}
+
+// deliverBatch advances the fiber inbox's open batches for the worker at
+// selected, as consume's first step does, after claiming r for selected in a
+// batch of its own when no open batch holds it yet.
+func deliverBatch(t *testing.T, env *sysenv.Env, selected string, r Request, send fiberContextSender) error {
+	t.Helper()
+	root := mailboxDir(env, "fiber", "fiber")
+	path := filepath.Join(root, "pending", mailboxKey(r.MessageID)+".json")
+	batches, err := readBatchManifests(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	held := false
+	for _, b := range batches {
+		held = held || slices.Contains(b.Members, r.MessageID)
+	}
+	if _, err := os.Stat(path); err == nil && !held {
+		pinBatch(t, []string{path}, selected)
+	}
+	return advanceBatches(t, env, selected, send)
+}
+
+// advanceBatches advances every open batch for the worker at selected.
+func advanceBatches(t *testing.T, env *sysenv.Env, selected string, send fiberContextSender) error {
+	t.Helper()
+	root := mailboxDir(env, "fiber", "fiber")
 	_, batches, err := openBatches(env, root)
 	if err != nil {
 		t.Fatal(err)
