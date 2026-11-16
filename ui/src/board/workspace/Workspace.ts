@@ -100,7 +100,8 @@ type WorkspaceView = WorkspaceOriginView
 const VIEW_LABELS: Record<WorkspaceView, string> = { desk: 'Desk', chronicle: 'Chronicle', globe: 'Globe', channels: 'Channels' }
 const viewForOrigin = (origin: string): WorkspaceOriginView => origin === 'Desk' ? 'desk' : origin === 'Chronicle' ? 'chronicle' : origin === 'Globe' ? 'globe' : 'channels'
 const channelId = (uid: string, owner: string): string => JSON.stringify([owner, uid])
-const pageLabel = (doc: WorkspaceDocument): string => doc.kind === 'fiber' ? 'Constitution' : doc.name
+/** How the way back names a page: a constitution's view by its slug, its own page as Constitution, any other by its name. */
+const pageLabel = (doc: WorkspaceDocument, card: KanbanCard): string => doc.kind === 'family' ? slug(card) : doc.kind === 'fiber' ? 'Constitution' : doc.name
 const threadFamilyRevision = (card: KanbanCard, index: ThreadIndex): string => {
   const current = index.card(card)
   const ancestry = index.ancestry(current).flatMap(entry => entry.card ? [index.card(entry.card)] : [])
@@ -889,15 +890,16 @@ export class Workspace {
   }
   private namePage(state: ChannelState, key: DocKey): void {
     const doc = state.channel.documents.find(doc => doc.key === key)!
-    this.history.name(state.channel.name, pageLabel(doc), key)
+    // A fiber is named by its slug, as everywhere on the board.
+    this.history.name(slug(state.card), pageLabel(doc, state.card), key)
   }
   private visit(key: DocKey): void {
     const doc = this.current?.channel.documents.find(doc => doc.key === key)
-    if (doc) this.history.openDocument(key, pageLabel(doc))
+    if (doc) this.history.openDocument(key, pageLabel(doc, this.current!.card))
   }
   private revisit(key: DocKey): void {
     const doc = this.current?.channel.documents.find(doc => doc.key === key)
-    if (doc) this.history.revisitDocument(key, pageLabel(doc))
+    if (doc) this.history.revisitDocument(key, pageLabel(doc, this.current!.card))
   }
   private select(key: DocKey): void {
     const state = this.current

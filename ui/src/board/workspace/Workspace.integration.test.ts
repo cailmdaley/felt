@@ -320,7 +320,7 @@ it('follows visited files after reload and returns a fresh deep link to its orig
   expect(window.location.hash).toBe('#/channels')
 })
 
-it('names the fiber page behind a file, and the constitution behind another channel', async () => {
+it('names the fiber page behind a file, and the constitution behind another channel by its slug', async () => {
   workspace.open(cards[0], 'Desk')
   await settle()
   expect(workspace.reader.document?.kind).toBe('fiber')
@@ -331,7 +331,7 @@ it('names the fiber page behind a file, and the constitution behind another chan
   await settle()
   expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to report.html')
   workspace.open(cards[1]); await settle()
-  expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to Alpha')
+  expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to alpha')
 })
 
 it('visits documents and retraces them without re-reading the channel or its receipt feed', async () => {

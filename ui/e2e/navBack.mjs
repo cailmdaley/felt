@@ -52,13 +52,13 @@ export function registerNavigationJourneys(test) {
         assert.ok(bounds.label.height < 25, `The destination stays on one line: ${JSON.stringify(bounds)}`)
         assert.deepEqual([bounds.stroke.width, bounds.stroke.height, bounds.stroke.content], ['11px', '11px', '""'])
         assert.ok(parseFloat(bounds.stroke.left) >= 1 && bounds.stroke.left === bounds.stroke.bottom, JSON.stringify(bounds.stroke))
-        if (label === 'Choose the response cut') assert.ok(bounds.back.width >= 120, `Long destinations get a third of the bar: ${JSON.stringify(bounds)}`)
       }
       return control
     }
     await page.goto(url + '#/desk')
     // A thread under its family's root opens its own view, whose way back is the Desk.
     const name = page.locator('.kbn-desk .kbn-thread-row[data-fiber-id="research/workspace/calibration-report/analysis/checks/question"]').locator('.kbn-thread-name')
+    const questionSlug = 'question'
     const land = async () => {
       const nameBox = await name.boundingBox()
       await name.click({ position: { x: nameBox.width - 6, y: nameBox.height / 2 } })
@@ -83,12 +83,13 @@ export function registerNavigationJourneys(test) {
     await land()
     // The family's root's view, from its head above; then another of its threads, one level down.
     const parent = selected(page).locator('.ov-ancestor').first()
-    const parentName = await parent.getAttribute('title')
+    const parentName = await parent.getAttribute('title'), parentSlug = await parent.locator('.ov-slug').textContent()
     await parent.click()
     await named(page, parentName)
-    await checkBack('Choose the response cut')
+    // The way back names a fiber by its slug.
+    await checkBack(questionSlug)
     await openThread(page, threadRow(page, await familyTree(page), 'Review the null tests'), 'Review the null tests')
-    await checkBack(parentName)
+    await checkBack(parentSlug)
     await shot('03-sibling')
     // Its constitution, from its head, and a file linked there.
     await selected(page).locator('.ov-head [data-part="constitution"]').click()
