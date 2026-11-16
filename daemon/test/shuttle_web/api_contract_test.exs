@@ -362,7 +362,7 @@ defmodule ShuttleWeb.ApiContractWorkerTest do
              )
   end
 
-  test "delivery context queues for a dormant worker and refuses unless_live after launch" do
+  test "delivery context queues for a dormant worker and for a live one" do
     id = "work/context"
     constitution(id)
 
@@ -380,7 +380,6 @@ defmodule ShuttleWeb.ApiContractWorkerTest do
                  fiber_id: id,
                  text: "Next worker",
                  context_only: true,
-                 unless_live: true,
                  message_id: "context-2"
                },
                202
@@ -388,17 +387,11 @@ defmodule ShuttleWeb.ApiContractWorkerTest do
 
     request("/dispatch", %{fiber_id: id}, 200)
 
-    assert %{"live" => true, "queued" => false} =
+    assert %{"delivery" => "context", "queued" => true} =
              request(
                "/deliver",
-               %{
-                 fiber_id: id,
-                 text: "No queue",
-                 context_only: true,
-                 unless_live: true,
-                 message_id: "context-3"
-               },
-               409
+               %{fiber_id: id, text: "Live worker", context_only: true, message_id: "context-3"},
+               202
              )
   end
 

@@ -3,7 +3,7 @@ defmodule ShuttleWeb.DeliverController do
   Agent-API endpoint: POST /api/v1/deliver
 
   Body `{fiber_id, text, from?, origin?, context_only?, message_id?, wake?,
-  unless_live?, resume_mode?}`. Puts `text`, from `from` or else Shuttle, in front
+  resume_mode?}`. Puts `text`, from `from` or else Shuttle, in front
   of the fiber's worker on its owning host (`Shuttle.Delivery`). Agent text
   goes through its inbox, defaulting to `turn: ask`. An agent's
   `resume_mode: fresh` is recorded there under its `message_id` and starts a
@@ -20,9 +20,8 @@ defmodule ShuttleWeb.DeliverController do
   queued: true, status, detail?}`. `turn` (`"ask"` or `"force"`; `wake` means
   `"ask"`) makes the entry ask for a turn, and a fiber with no live worker is
   then started for it when it may be: `status` is `"starting"`, or `"queued"`
-  with a `detail` saying what the entry waits for. `unless_live` answers 409
-  `{live: true}` and queues nothing while a worker is live, so the sender
-  messages it directly. `shuttle message <fiber>` sends this shape.
+  with a `detail` saying what the entry waits for. `shuttle message <fiber>`
+  sends this shape.
 
   A live inbox answer adds `consumed` (the consumer's action, members,
   followup, held and this message's state). Its status says what became of
@@ -61,7 +60,6 @@ defmodule ShuttleWeb.DeliverController do
           "resume_mode",
           "wake",
           "turn",
-          "unless_live",
           "thread_signal",
           "retained_at",
           "not_before"
@@ -141,7 +139,6 @@ defmodule ShuttleWeb.DeliverController do
           retained_at: context["retained_at"],
           not_before: context["not_before"],
           thread_signal: context["thread_signal"],
-          unless_live: context["unless_live"] == true,
           from: from,
           reply_to: context["reply_to"],
           notify_address: context["notify_address"],
@@ -194,17 +191,6 @@ defmodule ShuttleWeb.DeliverController do
     else
       {:ok, %{fibers: []}} ->
         {404, %{delivered: false, queued: false, error: "no constitution #{fiber_id} here"}}
-
-      {:error, :live_worker} ->
-        {409,
-         %{
-           delivery: "context",
-           delivered: false,
-           queued: false,
-           live: true,
-           fiber_id: fiber_id,
-           error: "the fiber has a live worker; message it directly"
-         }}
 
       {:error, :not_owner} ->
         {409, %{error: "this daemon does not own the fiber"}}

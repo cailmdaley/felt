@@ -47,7 +47,7 @@ The routing column names one of the patterns in [How a route is routed](#how-a-r
 | `POST /fiber/create` | owner-routed | Create a fiber |
 | `POST /dispatch` | owner-routed | Launch a worker for a fiber now, bypassing the poll |
 | `POST /inbox` | owner-routed | List or cancel pending fiber entries: `{fiber_id, origin?, action: "list"\|"cancel", message_id?}`. List answers `{entries: [...]}` with delay times, first lines and overdue wait reasons; cancel moves a pending entry to offered as cancelled, refusing a delivery in flight |
-| `POST /deliver` | owner-routed | Enqueue agent text in a fiber's inbox, then consume it (`consumed` reports the live action); a dormant or fresh launch obeys its gates. Human lines are recorded before typed paste or a From User launch. `message_id` deduplicates; `unless_live` retains its 409 live-worker refusal. See [inbox internals](../dev/inbox.md) |
+| `POST /deliver` | owner-routed | Enqueue agent text in a fiber's inbox, then consume it (`consumed` reports the live action); a dormant or fresh launch obeys its gates. Human lines are recorded before typed paste or a From User launch. `message_id` deduplicates. See [inbox internals](../dev/inbox.md) |
 | `POST /messages` | host-addressed | Deliver a durable, idempotent text message to an exact `shuttle://HOST/HARNESS/NATIVE_ID` address |
 | `POST /lifecycle` | owner-routed | Invoke a named lifecycle action on a fiber — see [below](#lifecycle-actions) |
 | `POST /kill` | owner-routed | Hard-kill a fiber's live worker session; writes no lifecycle verdict |
@@ -250,7 +250,6 @@ The owner mints an id for a caller without one.
 A 202 answer carries `delivery: context`, `queued: true`, a status saying what became of this message (`woken`, `followed_up`, `delivered`, `held`, `starting`, `queued`) and, for a live worker, `consumed` with the consumer's action, evidence and this message's state.
 `delivered` is true once this message is delivered, null when it was sent and its outcome is unconfirmed, and false while it waits or a session starts for it.
 With `context_only: true`, the entry is quiet unless `turn` or `wake` requests a turn; `message_id` is required.
-`unless_live` answers 409 with `live: true` for a live worker and queues nothing.
 `attachments` is an array of `{name, data, sha256}` publications (`data` is base64); the owner retains files and records references in the inbox.
 
 With `from: human`, the owner records and deduplicates the line before typed terminal paste or a From User launch prompt transports it, answering `delivery: input`.

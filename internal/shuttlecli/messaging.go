@@ -203,7 +203,6 @@ what it waits for.
 Neither starting nor queued is delivered.
 Retrying with the same --message-id queues identical content once; conflicting
 fiber-inbox content is rejected through /deliver with HTTP 422.
-An owner below contract 42 keeps attachment sends on the live-session path.
 A fiber with no shuttle: block is refused.
 
 Prints
@@ -313,10 +312,8 @@ exit 1 means rejected, unknown, or another command error.`,
 					return err
 				}
 				if queued != nil {
-					if request.NotifyWhenIdle && queued.subscribesIdle {
+					if request.NotifyWhenIdle {
 						fmt.Fprintf(a.env.Stderr, "idle subscription: recorded when the worker takes the entry\n")
-					} else if request.NotifyWhenIdle {
-						fmt.Fprintf(a.env.Stderr, "idle subscription: unsupported — the owning host's shuttle predates subscribing when its worker takes the entry\n")
 					}
 					a.recordBoardMessage(args[0], request)
 					if err := a.clearMessagedFiberAsk(args[0], request.From); err != nil {
@@ -404,8 +401,6 @@ exit 1 means rejected, unknown, or another command error.`,
 						fmt.Fprintf(a.env.Stderr, " via %s", receipt.Idle.Signal)
 					}
 					fmt.Fprintf(a.env.Stderr, " — %s\n", receipt.Idle.Detail)
-				} else if request.NotifyWhenIdle && receipt.Status != messaging.StatusRejected {
-					fmt.Fprintf(a.env.Stderr, "idle subscription: unsupported — the owning host's shuttle predates --notify-when-idle\n")
 				}
 			}
 			if deliveryErr := messageReceiptError(id, receipt, err); deliveryErr != nil {

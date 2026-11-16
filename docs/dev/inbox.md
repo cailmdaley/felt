@@ -123,10 +123,7 @@ The board reports such a repeat as sent only when it was delivered; for `unknown
 ### Contract 42 and rollback
 
 Contract 42 adds consume's `--busy` and `--message`, followup/held/message answers, `context-mailbox put --attachments-stdin`, and `inbox record-begin/record-settle`.
-The CLI uses these message semantics only when both its own daemon, which forwards only the fields it knows, and the owner answer `/version` at 42, asked live on each send with a 5-second limit; otherwise it uses the older wire, which a 42 owner still accepts.
-An owner below 42 receives the session-routing `unless_live` envelope; attachment sends retain session routing there.
-`--fresh` sends one request to every owner; one below 42 starts the session with forced-start authority and no record.
-An older CLI can still send `unless_live` to a 42 owner: a live worker answers 409 so it follows the session path.
+Every fiber message, attachments and `--notify-when-idle` included, goes to the owner's inbox; the CLI never asks an owner's level.
 Existing inbox entries and open delivery batches remain readable across deployment, and session traffic in flight retains its receipts.
 
 Rolling a host back to 41 leaves inbox text and attempts on disk, but its consumer does not follow up busy Codex or Pi workers.

@@ -61,7 +61,7 @@ func TestMessageToDormantFiberReportsWhatItsOwnerDid(t *testing.T) {
 			"queued for work/worker: work/worker is at rest; the message waits in its inbox for whoever next works on it (msg-next-worker)\n", "ask"},
 		{"held", "", `{"delivery":"context","queued":true,"delivered":false,"status":"queued","detail":"worker-node holds new sessions until its boot quarantine is released; one starts for the message then"}`,
 			"queued for work/worker: worker-node holds new sessions until its boot quarantine is released; one starts for the message then (msg-next-worker)\n", "ask"},
-		{"an older owner", "", `{"delivery":"context","queued":true,"delivered":false,"status":"queued_for_next_worker"}`,
+		{"no detail", "", `{"delivery":"context","queued":true,"delivered":false,"status":"queued"}`,
 			"queued for work/worker: not delivered; queued in work/worker's inbox (msg-next-worker)\n", "ask"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -101,7 +101,7 @@ func TestMessageToDormantFiberReportsWhatItsOwnerDid(t *testing.T) {
 			}
 			want := map[string]any{
 				"fiber_id": messageTargetFiberUID, "origin": "worker-node", "text": "read this when you start",
-				"from": "test sender", "message_id": "msg-next-worker", "context_only": true, "unless_live": true, "wake": true, "turn": tc.turn,
+				"from": "test sender", "message_id": "msg-next-worker", "context_only": true, "wake": true, "turn": tc.turn,
 			}
 			for key, value := range want {
 				if got[0][key] != value {
@@ -129,7 +129,7 @@ func TestMessageToOwnerOnlyDormantFiberQueuesBeforeAnyWorkerBinding(t *testing.T
 		t.Fatalf("owner-only queue receipt = %q, %v", stdout, err)
 	}
 	got := requests()
-	if len(got) != 1 || got[0]["fiber_id"] != messageTargetFiberUID || got[0]["origin"] != "worker-node" || got[0]["unless_live"] != true {
+	if len(got) != 1 || got[0]["fiber_id"] != messageTargetFiberUID || got[0]["origin"] != "worker-node" {
 		t.Fatalf("owner-only queue requests = %#v", got)
 	}
 }
@@ -177,9 +177,6 @@ func TestContextOnlyLiveFiberUsesDurableMailbox(t *testing.T) {
 		"/api/v1/deliver": func(w http.ResponseWriter, r *http.Request) {
 			var payload map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&payload)
-			if payload["unless_live"] != false {
-				t.Error("quiet context bypassed the fiber mailbox for a live worker")
-			}
 			if payload["wake"] != false || payload["turn"] != "" {
 				t.Error("quiet context requested a turn")
 			}
@@ -197,53 +194,7 @@ func TestContextOnlyLiveFiberUsesDurableMailbox(t *testing.T) {
 	}
 }
 
-func TestMessageToLiveFiberSendsToItsWorker(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	store := writeMessageTargetFiber(t, map[string]any{
-		"kind": "oneshot", "host": "worker-node", "agent": "claude-opus", "project_dir": t.TempDir(),
-		"runtime": map[string]any{"session_uuid": messageTargetSession},
-	})
-	isolateMessageFiberStore(env, store)
-	ledger, _ := json.Marshal(sessionLedgerResponse{
-		Records: []SessionProvenance{{Fiber: "work/worker", UID: messageTargetFiberUID, Session: messageTargetSession, Host: "worker-node", Harness: "claude", At: 1, Kind: "dispatch"}},
-		Origins: map[string]any{"worker-node": map[string]any{"stale": false, "last_error": nil}},
-	})
-	peers, _ := json.Marshal(messaging.Directory{Sessions: []messaging.Session{}, Gaps: []messaging.Gap{}})
-	deliver, requests := dormantDeliverStub(http.StatusConflict, `{"delivery":"context","queued":false,"live":true}`)
-	var posted messaging.Request
-	daemonStub(t, env, map[string]http.HandlerFunc{
-		"/api/v1/deliver":     deliver,
-		"/api/v1/peers":       jsonBody(string(peers)),
-		sessionsCompositePath: jsonBody(string(ledger)),
-		"/api/v1/messages": func(w http.ResponseWriter, r *http.Request) {
-			_ = json.NewDecoder(r.Body).Decode(&posted)
-			_ = json.NewEncoder(w).Encode(messaging.Receipt{MessageID: posted.MessageID, Address: posted.Address, Status: messaging.StatusAccepted, Transport: "claude-native"})
-		},
-	})
-
-	app := newApp(env)
-	app.dir = store
-	stdout, _, err := runMessage(t, app, "work/worker", "steer now")
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := requests()
-	if len(got) != 1 || got[0]["fiber_id"] != messageTargetFiberUID || got[0]["unless_live"] != true {
-		t.Fatalf("live-check requests = %v, want one conditional queue request for the private fiber", got)
-	}
-	if posted.Text != "steer now" || posted.MessageID != "msg-next-worker" {
-		t.Fatalf("direct message = %+v", posted)
-	}
-	if want := "shuttle://worker-node/claude/" + messageTargetSession; posted.Address != want {
-		t.Fatalf("posted to %q, want the live worker %q", posted.Address, want)
-	}
-	if !strings.HasPrefix(stdout, "accepted ") {
-		t.Fatalf("receipt = %q", stdout)
-	}
-}
-
-func TestMessageToRemoteLiveFiberSucceedsWhenLocalAskCleanupCannotResolveIt(t *testing.T) {
+func TestMessageToRemoteFiberSucceedsWhenLocalAskCleanupCannotResolveIt(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	ownHost(t, env, "sender-node")
@@ -255,28 +206,8 @@ func TestMessageToRemoteLiveFiberSucceedsWhenLocalAskCleanupCannotResolveIt(t *t
 		"runtime": map[string]any{"session_uuid": messageTargetSession},
 	})
 	isolateMessageFiberStore(env, store)
-	ledger, _ := json.Marshal(sessionLedgerResponse{
-		Records: []SessionProvenance{{Fiber: "work/worker", UID: messageTargetFiberUID, Session: messageTargetSession, Host: "worker-node", Harness: "claude", At: 1, Kind: "dispatch"}},
-		Origins: map[string]any{"worker-node": map[string]any{"stale": false, "last_error": nil}},
-	})
-	peers, _ := json.Marshal(messaging.Directory{Sessions: []messaging.Session{}, Gaps: []messaging.Gap{}})
-	deliver, _ := dormantDeliverStub(http.StatusConflict, `{"delivery":"context","queued":false,"live":true}`)
-	daemonStub(t, env, map[string]http.HandlerFunc{
-		"/api/v1/deliver":     deliver,
-		"/api/v1/peers":       jsonBody(string(peers)),
-		sessionsCompositePath: jsonBody(string(ledger)),
-		"/api/v1/messages": func(w http.ResponseWriter, r *http.Request) {
-			var posted messaging.Request
-			if err := json.NewDecoder(r.Body).Decode(&posted); err != nil {
-				t.Errorf("decode direct message: %v", err)
-				return
-			}
-			_ = json.NewEncoder(w).Encode(messaging.Receipt{
-				MessageID: posted.MessageID, Address: posted.Address,
-				Status: messaging.StatusAccepted, Transport: "claude-native",
-			})
-		},
-	})
+	deliver, _ := dormantDeliverStub(http.StatusAccepted, `{"delivery":"context","queued":true,"status":"woken"}`)
+	daemonStub(t, env, map[string]http.HandlerFunc{"/api/v1/deliver": deliver})
 
 	// The shared store resolves the remote fiber, but this checkout's project
 	// scope cannot load it after delivery.
@@ -288,7 +219,7 @@ func TestMessageToRemoteLiveFiberSucceedsWhenLocalAskCleanupCannotResolveIt(t *t
 	if strings.Contains(stderr, "couldn't clear the fiber's outstanding question") {
 		t.Fatalf("remote fiber received a local cleanup warning: %q", stderr)
 	}
-	if !strings.HasPrefix(stdout, "accepted ") {
+	if !strings.HasPrefix(stdout, "woken ") {
 		t.Fatalf("receipt = %q", stdout)
 	}
 }

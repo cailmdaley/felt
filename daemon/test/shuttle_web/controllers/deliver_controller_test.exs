@@ -128,7 +128,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
 
     # A waking message after the refusal reaches the old worker without the
     # fresh text: the request is a record, never an inbox entry.
-    fiber |> queue_for_fiber("after-refusal", %{"unless_live" => false}) |> json_response(202)
+    fiber |> queue_for_fiber("after-refusal") |> json_response(202)
     refute "fresh-held" in inbox_ids(fiber)
     refute_received {:message, %{"text" => "start over" <> _}}
 
@@ -1057,8 +1057,8 @@ defmodule ShuttleWeb.DeliverControllerTest do
     refute Map.has_key?(forwarded, "sender_proof")
   end
 
-  # `shuttle message <fiber>`'s request: context unless a worker is live. The
-  # context path reads the fiber from the configured stores.
+  # `shuttle message <fiber>`'s request. The context path reads the fiber from
+  # the configured stores.
   defp queue_for_fiber(fiber_id, id, extra \\ %{}) do
     Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
@@ -1072,7 +1072,6 @@ defmodule ShuttleWeb.DeliverControllerTest do
             "text" => "read this when you start",
             "from" => "shuttle://elsewhere/claude/sender",
             "context_only" => true,
-            "unless_live" => true,
             "wake" => true,
             "message_id" => id
           },
@@ -1117,7 +1116,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
     # The same message id queues once.
     assert %{"queued" => true} =
              "tests/deliver-dormant"
-             |> queue_for_fiber("msg-dormant-1", %{"unless_live" => false})
+             |> queue_for_fiber("msg-dormant-1")
              |> json_response(202)
 
     assert launches() == before + 1
@@ -1178,14 +1177,15 @@ defmodule ShuttleWeb.DeliverControllerTest do
     end
   end
 
-  test "a message to a fiber with a live worker is the sender's to deliver, not queued" do
+  test "a message to a fiber with a live worker is queued in its inbox" do
     message_live_worker("tests/deliver-live-queue")
 
     body =
-      "tests/deliver-live-queue" |> queue_for_fiber("msg-live-1") |> json_response(409)
+      "tests/deliver-live-queue" |> queue_for_fiber("msg-live-1") |> json_response(202)
 
-    assert %{"live" => true, "queued" => false} = body
-    assert mailbox_puts() == []
+    assert %{"delivery" => "context", "queued" => true} = body
+    assert [args] = mailbox_puts()
+    assert "msg-live-1" in args
     refute_received {:message, _}
   end
 

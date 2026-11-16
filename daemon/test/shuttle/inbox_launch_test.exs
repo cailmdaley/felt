@@ -328,8 +328,7 @@ defmodule Shuttle.InboxLaunchTest do
             "context_only" => true,
             "message_id" => message_id,
             "wake" => true,
-            "turn" => "ask",
-            "unless_live" => true
+            "turn" => "ask"
           },
           extra
         )
@@ -340,13 +339,14 @@ defmodule Shuttle.InboxLaunchTest do
              send.(dormant, "r-1", %{})
 
     assert launches(dormant) == 1
-    assert {409, %{live: true, queued: false}} = send.(dormant, "r-2", %{})
+    assert {202, %{queued: true}} = send.(dormant, "r-2", %{})
+    assert launches(dormant) == 1
     assert {202, %{status: "queued", detail: detail}} = send.(closed, "r-3", %{})
     assert detail =~ "is closed"
 
     # A quiet send queues and asks nothing of the closed fiber.
     assert {202, %{status: "queued"} = quiet} =
-             send.(closed, "r-4", %{"wake" => false, "turn" => nil, "unless_live" => false})
+             send.(closed, "r-4", %{"wake" => false, "turn" => nil})
 
     refute Map.has_key?(quiet, :detail)
     assert launches(closed) == 0

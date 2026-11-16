@@ -612,16 +612,8 @@ func TestResolveMessageTargetFreshRemoteWorkerUsesOwnerPeerBeforeLedgerBinding(t
 					if request["fiber_id"] != uid || request["origin"] != "worker-node" {
 						t.Errorf("owner delivery = %#v", request)
 					}
-					w.WriteHeader(http.StatusConflict)
-					fmt.Fprint(w, `{"live":true}`)
-				},
-				"/api/v1/messages": func(w http.ResponseWriter, r *http.Request) {
-					var request messaging.Request
-					_ = json.NewDecoder(r.Body).Decode(&request)
-					if request.Address != "shuttle://worker-node/codex/"+messageTargetSession {
-						t.Errorf("recipient = %s", request.Address)
-					}
-					_ = json.NewEncoder(w).Encode(messaging.Receipt{MessageID: request.MessageID, Address: request.Address, Status: messaging.StatusAccepted, Transport: "codex-native"})
+					w.WriteHeader(http.StatusAccepted)
+					fmt.Fprint(w, `{"queued":true,"status":"woken"}`)
 				},
 			})
 			for _, target := range []string{id, uid} {
@@ -633,7 +625,7 @@ func TestResolveMessageTargetFreshRemoteWorkerUsesOwnerPeerBeforeLedgerBinding(t
 					t.Fatalf("address %q, want %q", got, want)
 				}
 			}
-			if out, _, err := runMessage(t, newApp(env), id, "Read the revised brief"); err != nil || !strings.HasPrefix(out, "accepted ") {
+			if out, _, err := runMessage(t, newApp(env), id, "Read the revised brief"); err != nil || !strings.HasPrefix(out, "woken ") {
 				t.Fatalf("message to fresh remote worker: %q, %v", out, err)
 			}
 		})

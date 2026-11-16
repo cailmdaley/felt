@@ -162,9 +162,7 @@ defmodule Shuttle.Delivery do
   it as context, woken or replaced by a fresh session; a fiber with no worker
   is started for it when it may be (`start_for_inbox/1`). Without a turn the
   entry is context for whichever worker comes next. `:from` labels the sender
-  (default `"shuttle"`); `:unless_live` refuses with `{:error, :live_worker}`
-  while a worker is live, queueing nothing, so the sender messages that worker
-  directly. A `thread-` id names the event it reports, so its first capture
+  (default `"shuttle"`). A `thread-` id names the event it reports, so its first capture
   stands whatever a retry states. `:not_before` (UTC RFC 3339) is the
   earliest instant the entry may be delivered; an entry that asks for a turn
   then asks with `if_costly: fresh`, so a cold cache does not hold it.
@@ -182,15 +180,11 @@ defmodule Shuttle.Delivery do
   """
   def context(entry, text, message_id, opts \\ []) do
     deadline = System.monotonic_time(:millisecond) + @budget_ms
-    worker = live_context_worker(entry)
     turn = opts[:turn] || if(opts[:wake], do: "ask")
 
     cond do
       get_in(entry.fiber, ["shuttle", "host"]) != Poller.own_host_id() ->
         {:error, :not_owner}
-
-      Keyword.get(opts, :unless_live, false) and worker != nil ->
-        {:error, :live_worker}
 
       true ->
         from = Keyword.get(opts, :from) || "shuttle"
@@ -625,11 +619,6 @@ defmodule Shuttle.Delivery do
         _ -> nil
       end
     end)
-  end
-
-  defp live_context_worker(entry) do
-    if is_pid(GenServer.whereis(Shuttle.Env.server(Poller))),
-      do: Poller.live_worker(Shuttle.Threads.address(entry.fiber))
   end
 
   @doc "The key of a fiber's context mailbox: its store and durable identity."

@@ -1075,10 +1075,6 @@
                     ],
                     "description": "With context_only: the entry asks for a turn. A live worker is woken (ask may be held as context when waking it is costly, or replaced by a fresh session); a fiber with no worker is started for it when it is armed (status active), not at rest, not a standing schedule whose run is due, and the owner holds no boot quarantine and has a free worker slot. Ignored without context_only."
                   },
-                  "unless_live": {
-                    "type": "boolean",
-                    "description": "With context_only: when the fiber has a live worker, answers 409 with live true and queues nothing."
-                  },
                   "resume_mode": {
                     "type": "string",
                     "enum": [
@@ -1199,7 +1195,7 @@
             }
           },
           "409": {
-            "description": "A live worker blocks unless_live (live true), this daemon does not own the fiber, a fresh session was refused (reason), or a launch was refused as on /dispatch (already_running, launch_reserved).",
+            "description": "This daemon does not own the fiber, a fresh session was refused (reason), or a launch was refused as on /dispatch (already_running, launch_reserved).",
             "content": {
               "application/json": {
                 "schema": {
@@ -3285,10 +3281,6 @@
           "queued": {
             "type": "boolean",
             "description": "Whether the text was queued in the context mailbox; false on every refusal."
-          },
-          "live": {
-            "type": "boolean",
-            "description": "true when the refusal is because the fiber has a live worker (context_only with unless_live)."
           },
           "fiber_id": {
             "type": "string"

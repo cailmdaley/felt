@@ -26,16 +26,12 @@ type fiberReceipt struct {
 	Fiber     string `json:"fiber"`
 	Status    string `json:"status"`
 	Detail    string `json:"detail"`
-	// subscribesIdle reports that the owner records a --notify-when-idle
-	// subscription when the worker takes the entry (contract 42).
-	subscribesIdle bool
-	NotBefore      string `json:"not_before,omitempty"`
+	NotBefore string `json:"not_before,omitempty"`
 }
 
 // queueForFiber routes fiber messages to the fiber's inbox
 // through its owner. Consumption decides context, follow-up, wake or a gated
-// launch. An owner below contract 42 keeps live waking traffic on the session
-// path. force records --wake. Attachments are retained as owner-local references.
+// launch. force records --wake. Attachments are retained as owner-local references.
 func (a *app) queueForFiber(request messaging.Request, force bool) (*fiberReceipt, error) {
 	f, block := a.messageFiber(request.Address)
 	if f == nil {
@@ -58,10 +54,6 @@ func (a *app) queueInFiber(f *felt.Felt, block *shuttle.Block, request messaging
 			turn = "force"
 		}
 	}
-	modern := notBefore != "" || a.inbox42(block.Host)
-	if len(request.Attachments) > 0 && !modern {
-		return nil, nil
-	}
 	if request.Text == "" && len(request.Attachments) > 0 {
 		request.Text = "Attached files."
 	}
@@ -80,7 +72,6 @@ func (a *app) queueInFiber(f *felt.Felt, block *shuttle.Block, request messaging
 		"wake":             request.Wake,
 		"turn":             turn,
 		"context_only":     true,
-		"unless_live":      !modern && (request.Wake || request.NotifyWhenIdle),
 	}
 	if notBefore != "" {
 		fields["not_before"] = notBefore
@@ -101,17 +92,14 @@ func (a *app) queueInFiber(f *felt.Felt, block *shuttle.Block, request messaging
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxMessageReceiptBytes))
 	var answer struct {
 		Queued bool   `json:"queued"`
-		Live   bool   `json:"live"`
 		Status string `json:"status"`
 		Detail string `json:"detail"`
 		Error  string `json:"error"`
 	}
 	_ = json.Unmarshal(body, &answer)
 	switch {
-	case resp.StatusCode == http.StatusConflict && answer.Live && (request.Wake || request.NotifyWhenIdle):
-		return nil, nil
 	case resp.StatusCode < 300 && answer.Queued:
-		receipt := &fiberReceipt{MessageID: request.MessageID, Fiber: f.ID, Status: string(messaging.StatusQueued), Detail: answer.Detail, subscribesIdle: modern}
+		receipt := &fiberReceipt{MessageID: request.MessageID, Fiber: f.ID, Status: string(messaging.StatusQueued), Detail: answer.Detail}
 		switch answer.Status {
 		case statusStarting, "woken", "followed_up", "delivered", "held", "scheduled":
 			receipt.Status = answer.Status
