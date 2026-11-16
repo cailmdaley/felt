@@ -81,10 +81,18 @@ describe('a constitution\'s view', () => {
     expect(quiet.feeds.seen).not.toHaveBeenCalled()
   })
 
-  it('says a question it waits on, gold, and shows no strip for a constitution that said nothing', () => {
+  it('says a question it waits on, gold, and leaves no band for words a constitution never said', () => {
     const { page } = made(asked)
     expect(page.el.querySelector('.ov-needs')!.textContent).toBe('asks')
-    expect(made(idle).page.el.querySelector<HTMLElement>('.ov-strip')!.hidden).toBe(true)
+    expect(made(idle).page.el.querySelector<HTMLElement>('.ov-said')!.hidden).toBe(true)
+  })
+
+  it('shows on each thread row that it opens and how many threads it has of its own; its orchestrators read as a path', () => {
+    const { page } = made(root)
+    const row = page.el.querySelector<HTMLElement>('.ov-thread[data-fiber="hub/mid"]')!
+    expect([row.querySelector('.ov-count')!.textContent, row.querySelector('.ov-open')!.textContent]).toStrictEqual(['1 thread', '›'])
+    expect(page.el.querySelector('.ov-thread[data-fiber="hub/q"] .ov-count')!.textContent).toBe('')
+    expect([...made(leaf).page.el.querySelectorAll('.ov-up .ov-ancestor')].map(step => [step.textContent, step.getAttribute('title')])).toStrictEqual([['hub', 'hub'], ['mid', 'Mid']])
   })
 
   it('opens a thread\'s view from its row, and its orchestrators\' from the heads above it', () => {

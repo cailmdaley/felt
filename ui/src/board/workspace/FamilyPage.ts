@@ -38,10 +38,11 @@ const needs = (card: KanbanCard): string => card.ask && card.status === 'active'
  * thread: its orchestrators above as compact heads (pulling the page down
  * past its top opens the nearest one's view, as choosing one does); its head
  * (state dot, slug, whether it needs the human, its run, its pages and its
- * acts); a strip of the last thing it posted beside a thumbnail of its
- * tapestry or newest sent file, which counts as seen; and its sub-threads as rows (dot, slug, a word
- * of state, its run), each opening the same view one level down. No outcome
- * is drawn. It reads feeds and repaints only while its frame is selected in an
+ * acts); the last thing it posted; then its sub-threads as a narrow column
+ * of rows (dot, slug, a word of state, its run, how many threads it has of
+ * its own, and a chevron: each opens the same view one level down) beside a
+ * large preview of its tapestry or newest sent file, which counts as seen.
+ * Its orchestrators read as a path back up. No outcome is drawn. It reads feeds and repaints only while its frame is selected in an
  * open reader; its frame's eviction ends it.
  */
 export class FamilyPage {
@@ -54,8 +55,8 @@ export class FamilyPage {
   private readonly facts = el('div', 'ov-facts')
   private readonly tools = el('div', 'ov-tools')
   private docs = el('span', 'ws-doc-buttons')
-  private readonly strip = el('section', 'ov-strip')
-  private readonly said = el('div', 'ov-said')
+  private readonly said = el('section', 'ov-said')
+  private readonly body = el('div', 'ov-body')
   private readonly figure = el('button', 'ov-figure')
   private readonly threads = el('ol', 'ov-threads')
   private card: KanbanCard | null = null
@@ -85,9 +86,9 @@ export class FamilyPage {
     this.head.append(el('span'), this.name, this.facts, this.tools)
     this.figure.type = 'button'
     this.figure.hidden = true
-    this.strip.append(this.said, this.figure)
     this.threads.setAttribute('aria-label', 'Threads')
-    this.main.append(this.head, this.strip, this.threads)
+    this.body.append(this.threads, this.figure)
+    this.main.append(this.head, this.said, this.body)
     const grid = el('div', 'ws-family-grid')
     grid.append(this.scroller)
     this.el.append(grid)
@@ -139,7 +140,7 @@ export class FamilyPage {
     return above
   }
   /**
-   * Draws the view in place: the head, the strip and its thumbnail, and the
+   * Draws the view in place: the head, its words, the preview, and the
    * acts stay the same elements across repaints, so what has focus in them,
    * an open menu, and a thumbnail's live page all survive; the rows that are
    * drawn again keep the row the keys were on.
@@ -155,12 +156,12 @@ export class FamilyPage {
       .sort((a, b) => urgency(a) - urgency(b) || b.lastMove - a.lastMove)
     const focused = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.ov-ancestor, .ov-thread')
     const held = focused && this.el.contains(focused) ? `${focused.className}:${focused.dataset.fiber}` : undefined
-    this.up.replaceChildren(...above.map(ancestor => this.compact(ancestor, 'ov-ancestor', now)))
+    this.up.replaceChildren(...above.map(ancestor => this.ancestor(ancestor)))
     this.paintHead(card, now)
-    this.paintStrip(card, now)
+    this.paintSaid(card, now)
+    this.paintFigure(card)
     this.threads.replaceChildren(...threads.map(thread => {
-      const row = this.compact(thread.card, 'ov-thread', now, thread.word)
-      row.dataset.standing = thread.tone
+      const row = this.row(thread, now)
       const item = el('li')
       item.append(row)
       return item
@@ -168,16 +169,30 @@ export class FamilyPage {
     this.threads.hidden = !threads.length
     if (held) [...this.el.querySelectorAll<HTMLElement>('.ov-ancestor, .ov-thread')].find(row => `${row.className}:${row.dataset.fiber}` === held)?.focus({ preventScroll: true })
   }
-  /** A constitution's compact head, as an orchestrator above or a thread below: its dot, its slug, a word, its run. Choosing it opens its view. */
-  private compact(card: KanbanCard, className: string, now: number, word?: string): HTMLElement {
+  /** A row that opens a constitution's view, as a click on it does. */
+  private opener(card: KanbanCard, className: string): HTMLElement {
     const row = el('div', className)
     row.tabIndex = 0
     row.setAttribute('role', 'treeitem')
     row.dataset.fiber = card.uid ?? card.id
     row.title = card.name
-    const open = (): void => this.feeds.view(card)
-    row.append(stateDot(card, open), el('span', 'ov-slug', slug(card)), ...word ? [el('span', 'ov-word', word)] : [], el('span', 'ov-time', runWords(card, now)))
-    row.addEventListener('click', open)
+    row.addEventListener('click', () => this.feeds.view(card))
+    return row
+  }
+  /** An orchestrator above, a step of the path back up: its dot and slug. */
+  private ancestor(card: KanbanCard): HTMLElement {
+    const step = this.opener(card, 'ov-ancestor')
+    step.append(stateDot(card, () => this.feeds.view(card)), el('span', 'ov-slug', slug(card)))
+    return step
+  }
+  /** A thread below: its dot, slug, a word of state, its run, how many threads it has of its own, and the chevron that says it opens. */
+  private row(thread: MapThread, now: number): HTMLElement {
+    const card = thread.card, row = this.opener(card, 'ov-thread'), below = this.index!.children(card).length
+    row.dataset.standing = thread.tone
+    const open = el('span', 'ov-open', '›')
+    open.setAttribute('aria-hidden', 'true')
+    row.append(stateDot(card, () => this.feeds.view(card)), el('span', 'ov-slug', slug(card)), el('span', 'ov-word', thread.word ?? ''), el('span', 'ov-time', runWords(card, now)),
+      el('span', 'ov-count', below ? `${below} ${below === 1 ? 'thread' : 'threads'}` : ''), open)
     return row
   }
   private paintHead(card: KanbanCard, now: number): void {
@@ -200,21 +215,24 @@ export class FamilyPage {
     }
     this.acts?.paint()
   }
-  /** The last thing it posted, left; its tapestry or newest sent file, small, right. */
-  private paintStrip(card: KanbanCard, now: number): void {
+  /** The last thing it posted, under its head. */
+  private paintSaid(card: KanbanCard, now: number): void {
     const said = this.feeds.said(card)
-    if (said) {
-      const text = el('div', 'ov-said-text')
-      text.innerHTML = renderMarkdown(said.text)
-      this.said.replaceChildren(el('span', 'ov-said-age', ago(said.at, now)), text)
-    } else this.said.replaceChildren()
-    const strip = this.strip, figure = this.figure
-    strip.hidden = !said && figure.hidden
+    this.said.hidden = !said
+    if (!said) { this.said.replaceChildren(); return }
+    const text = el('div', 'ov-said-text')
+    text.innerHTML = renderMarkdown(said.text)
+    this.said.replaceChildren(el('span', 'ov-said-age', ago(said.at, now)), text)
+  }
+  /** Its tapestry or newest sent file, large, beside its threads. */
+  private paintFigure(card: KanbanCard): void {
+    const figure = this.figure
     void this.feeds.lead(card).then(lead => {
       const shown = lead ?? this.feeds.files(card)[0], doc = shown?.key
       const file = doc && parseDocKey(doc)
       if (this.card?.originId !== card.originId || (this.card.uid ?? this.card.id) !== (card.uid ?? card.id)) return
-      if (!shown || !doc || !file) { figure.hidden = true; strip.hidden = !said; return }
+      figure.hidden = !shown || !doc || !file
+      if (!shown || !doc || !file) return
       // Shown here, it is seen: its thread's row stops saying "new file".
       if (shown.unread) this.feeds.seen(shown)
       if (this.thumb?.doc !== doc) {
@@ -231,7 +249,6 @@ export class FamilyPage {
       figure.title = `Open ${lead?.name ?? file.path.split('/').pop()}`
       figure.setAttribute('aria-label', figure.title)
       figure.onclick = () => this.feeds.open(card, doc)
-      figure.hidden = strip.hidden = false
     })
   }
   /** Pulled past its top: its orchestrator's view opens. */

@@ -2,29 +2,38 @@
 .ws-family-grid { --ov-gutter: 24px; height: 100%; display: grid; grid-template-rows: minmax(0, 1fr); min-height: 0; color: var(--ws-ink); font: var(--type-label)/var(--leading-tight) var(--font-serif); }
 .ws-family-scroll { min-height: 0; overflow: auto; overscroll-behavior-y: contain; }
 
-/* Its orchestrators, above the head: compact heads, the family's top-level first. */
-.ov-up { display: flex; flex-direction: column; padding: 10px 0 4px; border-bottom: 1px solid var(--ws-hairline-soft); background: color-mix(in srgb, var(--ws-ink) 2.5%, transparent); }
-.ov-up:empty { display: none; }
-.ov-main { box-sizing: border-box; max-width: 1100px; padding-bottom: 32px; }
-
-/* A compact head, for an orchestrator above or a thread below: dot, slug, a word, its run. */
-.ov-ancestor, .ov-thread {
-  display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 10px;
-  padding: 5px var(--ov-gutter); cursor: pointer; outline: none;
+/* Its orchestrators, above the head: a path back up, the family's top-level first, each step opening its view. */
+.ov-up {
+  display: flex; flex-wrap: wrap; align-items: center; row-gap: 2px; padding: 6px calc(var(--ov-gutter) - 6px) 0;
   font: var(--type-meta)/var(--leading-ui) var(--font-mono); color: var(--ws-ink-soft);
 }
-.ov-ancestor:is(:hover, :focus-visible), .ov-thread:is(:hover, :focus-visible) { background: var(--ws-hover); }
-.ov-ancestor .constitution-state-dot, .ov-thread .constitution-state-dot, .ov-head .constitution-state-dot { flex: none; align-self: center; width: 20px; height: 20px; }
+.ov-up:empty { display: none; }
+.ov-ancestor { display: inline-flex; align-items: center; gap: 6px; padding: 1px 6px; border-radius: 4px; cursor: pointer; outline: none; }
+.ov-ancestor::after { content: '/'; margin-left: 6px; color: var(--ws-ink-muted); }
+.ov-ancestor:is(:hover, :focus-visible) { background: var(--ws-hover); }
+.ov-ancestor:is(:hover, :focus-visible) .ov-slug { color: var(--ws-ink); text-decoration: underline; text-underline-offset: 3px; }
+.ov-ancestor .constitution-state-dot { flex: none; width: 16px; height: 16px; }
+.ov-main { box-sizing: border-box; padding-bottom: 24px; }
+
+/* A thread below, one column of rows sized to what they hold: dot, slug, a word, its run, its own threads, the chevron that opens it. */
+.ov-thread {
+  cursor: pointer; outline: none; align-items: baseline; padding: 2px 0;
+  font: var(--type-meta)/var(--leading-ui) var(--font-mono); color: var(--ws-ink-soft);
+}
+.ov-thread:is(:hover, :focus-visible) { background: var(--ws-hover); }
+.ov-thread .constitution-state-dot, .ov-head .constitution-state-dot { flex: none; align-self: center; width: 20px; height: 20px; }
 .ov-slug { min-width: 0; overflow-wrap: anywhere; color: var(--ws-ink); }
 .ov-ancestor .ov-slug { color: var(--ws-ink-soft); }
 .ov-word { color: var(--fm-text, var(--ws-ink-muted)); font-family: var(--font-serif); font-style: italic; white-space: nowrap; }
-.ov-time { color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-ui) var(--font-serif); white-space: nowrap; }
+.ov-time, .ov-count { color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-ui) var(--font-serif); white-space: nowrap; }
+.ov-open { color: var(--ws-ink-muted); font-family: var(--font-serif); font-size: 16px; line-height: 1; opacity: .45; }
+.ov-thread:is(:hover, :focus-visible) .ov-open { opacity: 1; color: var(--ws-ink); }
 
 /* The head: its dot and slug, whether it needs the human and its run, then its pages and its acts. */
 .ov-head {
   display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; grid-template-areas: 'dot name tools' '. facts tools';
   align-items: center; column-gap: 10px; row-gap: 2px;
-  padding: 18px var(--ov-gutter) 12px; outline: none;
+  padding: 10px var(--ov-gutter) 6px; outline: none;
 }
 .ov-head > .constitution-state-dot { grid-area: dot; }
 .ov-name { grid-area: name; min-width: 0; margin: 0; overflow-wrap: anywhere; font: 500 var(--type-title)/var(--leading-tight) var(--font-mono); color: var(--ws-ink); }
@@ -50,31 +59,49 @@
   .ov-tools .ws-acts-verbs > button::before { content: ''; position: absolute; inset: calc((100% - var(--ws-phone-target)) / 2) 0; }
 }
 
-/* The strip: the last thing it posted, then its tapestry or newest sent file, small. */
-.ov-strip { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 16px; margin: 0 var(--ov-gutter) 14px; padding: 12px 0; border-block: 1px solid var(--ws-hairline-soft); }
-.ov-strip[hidden], .ov-figure[hidden] { display: none; }
-.ov-said { min-width: 0; }
+/* The last thing it posted, under the head. */
+.ov-said { margin: 0 var(--ov-gutter) 8px calc(var(--ov-gutter) + 30px); min-width: 0; }
+.ov-said[hidden], .ov-figure[hidden] { display: none; }
 .ov-said-age { display: block; color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-ui) var(--font-serif); }
 .ov-said-text {
-  margin: 2px 0 0; color: var(--ws-ink); font: var(--type-row)/var(--leading-prose) var(--font-serif); overflow-wrap: anywhere;
+  margin: 1px 0 0; color: var(--ws-ink); font: var(--type-row)/var(--leading-prose) var(--font-serif); overflow-wrap: anywhere;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
 }
 /* Its words run on, its paragraphs and items together. */
 .ov-said-text * { display: inline; margin: 0; padding: 0; }
 .ov-said-text :is(p, li) + :is(p, li)::before { content: ' '; }
-.ov-figure { padding: 0; border: 0; background: none; cursor: pointer; }
+
+/* Its threads, a narrow column, and its preview, large, taking the rest of the width. */
+.ov-body { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: start; column-gap: 8px; padding-top: 4px; border-top: 1px solid var(--ws-hairline-soft); }
+.ov-threads {
+  list-style: none; margin: 0; padding: 4px 0 0;
+  display: grid; grid-template-columns: calc(var(--ov-gutter) - 10px) 20px repeat(4, max-content) 12px; column-gap: 10px; align-content: start;
+}
+.ov-threads > li, .ov-thread { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; }
+/* The gutter is the row's first cell, so its hover reaches the page's edge. */
+.ov-thread::before { content: ''; }
+.ov-figure {
+  position: sticky; top: 8px; align-self: stretch; min-height: 340px; max-height: calc(100vh - 220px);
+  margin: 8px var(--ov-gutter) 0 0; padding: 0; border: 0; background: none; cursor: pointer;
+}
 .ov-figure:focus-visible { outline: none; }
-.ov-thumb.ws-thumbnail { width: 176px; height: 110px; border-radius: 3px; box-shadow: 0 0 0 1px var(--ws-hairline-soft); }
+.ov-thumb.ws-thumbnail { width: 100%; height: 100%; border-radius: 4px; box-shadow: 0 0 0 1px var(--ws-hairline-soft); }
 .ov-figure:is(:hover, :focus-visible) .ov-thumb { box-shadow: 0 0 0 1px var(--ws-ink-soft); }
 
-/* Its threads. */
-.ov-threads { list-style: none; margin: 0; padding: 0; }
-
+/* Narrow: the preview stacks above the rows, and a row wraps what it cannot hold. */
 @container (max-width: 560px) {
   .ws-family-grid { --ov-gutter: 16px; }
   .ov-head { grid-template-columns: 20px minmax(0, 1fr); grid-template-areas: 'dot name' '. facts' '. tools'; row-gap: 6px; }
   .ov-tools { flex-wrap: wrap; gap: 6px; }
   .ov-tools .ws-verb-word { display: none; }
-  .ov-strip { grid-template-columns: minmax(0, 1fr) 112px; gap: 10px; }
-  .ov-thumb.ws-thumbnail { width: 112px; height: 72px; }
+  .ov-said { margin-left: var(--ov-gutter); }
+  .ov-body { grid-template-columns: minmax(0, 1fr); }
+  .ov-figure { order: -1; position: static; min-height: 0; height: 200px; margin: 8px var(--ov-gutter) 4px; }
+  .ov-threads { display: block; }
+  .ov-threads > li { display: block; }
+  .ov-thread { position: relative; display: flex; flex-wrap: wrap; column-gap: 10px; padding: 3px var(--ov-gutter) 3px calc(var(--ov-gutter) + 30px); }
+  /* The dot stands in the gutter, so a wrapped line starts under the slug. */
+  .ov-thread .constitution-state-dot { position: absolute; left: var(--ov-gutter); top: 3px; }
+  .ov-thread::before { content: none; }
+  .ov-thread .ov-open { margin-left: auto; }
 }
