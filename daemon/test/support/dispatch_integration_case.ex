@@ -751,6 +751,46 @@ defmodule Shuttle.Test.DispatchIntegrationCase do
 
   defp cli, do: Shuttle.Env.find_executable("shuttle")
 
+  # A stand-in for a harness process that lives as long as its session (until
+  # the test ends): the hooks it runs (`harness_hook!/4`) register it as the
+  # session's receiver, so the session's hook registration stays live. `env`
+  # is the harness's own environment, such as its messaging socket.
+  def start_harness!(env \\ []) do
+    script = """
+    import subprocess, sys
+    for line in sys.stdin:
+        out = subprocess.run([sys.argv[1], "hook", "event"], stdin=open(line.strip()), capture_output=True).stdout
+        sys.stdout.write(out.hex() + "\\n")
+        sys.stdout.flush()
+    """
+
+    port_env =
+      for {name, value} <- Shuttle.Env.child_env() ++ env,
+          do: {String.to_charlist(name), if(value, do: String.to_charlist(value), else: false)}
+
+    Port.open({:spawn_executable, Shuttle.Env.find_executable("python3")}, [
+      :binary,
+      {:line, 16_000_000},
+      args: ["-I", "-c", script, cli()],
+      env: port_env
+    ])
+  end
+
+  def harness_hook!(harness, uuid, event, frame \\ %{}) do
+    frame =
+      Map.merge(
+        %{session_id: uuid, hook_event_name: event, harness: "claude", cwd: "/"},
+        frame
+      )
+
+    input = Path.join(System.tmp_dir!(), "hook-#{System.unique_integer([:positive])}.json")
+    File.write!(input, Jason.encode!(frame) <> "\n")
+    Port.command(harness, input <> "\n")
+    assert_receive {^harness, {:data, {:eol, hex}}}
+    File.rm(input)
+    Base.decode16!(hex, case: :lower)
+  end
+
   # ── A test daemon's HTTP API and the real CLI against it ───────────────────
 
   defmodule ScopedAPI do
