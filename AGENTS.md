@@ -193,6 +193,9 @@ harness:board` builds a self-contained bundle with a mocked daemon that opens
 over `file://`, which is the only way to see the board where `:4000` is
 unreachable — and the only way to stage states a live fleet will not hold
 still for.
+An agent's browser never opens the live board at `:4000`: the board takes the
+human's voice target and Rex focus for whatever a client looks at, a headless
+one included.
 Source builds require Go, Elixir/OTP, Node/npm, and Python 3 on each host.
 Python 3 publishes the release symlink atomically.
 To cycle a supervised daemon directly, use
