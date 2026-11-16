@@ -49,7 +49,7 @@ describe('every thread surface names a thread the way the Desk files it', () => 
   })
   it('the constitution\'s view names each thread\'s state in a word', () => {
     const index = new ThreadIndex([hub, ...expected.map(([c]) => c)])
-    const page = new FamilyPage({ marks: () => undefined, reach: () => 14 * 86_400_000, files: () => [], refresh: () => {}, lead: async () => undefined, said: () => undefined, open: () => {}, view: () => {}, shuttleBase: '' }, () => {}); page.update(hub, index)
+    const page = new FamilyPage({ marks: () => undefined, reach: () => 14 * 86_400_000, files: () => [], refresh: () => {}, lead: async () => undefined, said: () => undefined, open: () => {}, view: () => {}, seen: () => {}, shuttleBase: '' }, () => {}); page.update(hub, index)
     const words = Object.fromEntries([...page.el.querySelectorAll<HTMLElement>('.ov-thread')].map(row => [row.dataset.fiber, row.querySelector('.ov-word')?.textContent]))
     expect(words).toEqual({ [spawned.id]: 'armed', [standing.id]: 'resting', [seat.id]: 'seat', [asking.id]: 'your turn' })
   })

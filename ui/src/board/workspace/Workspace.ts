@@ -33,7 +33,7 @@ import { composeChannels, fiberOf as channelFiber, handle } from '../channels.js
 import type { GlobeHost } from '../globe/GlobeStage.js'
 import type { MapFile } from '../family/model.js'
 import { FamilyActivity } from './familyActivity.js'
-import { unseenSince } from './DocumentSeen.js'
+import { markSeen, unseenSince } from './DocumentSeen.js'
 import { FiberSends } from '../fiberSends.js'
 import { constitutionFor, type BoardOpen } from '../voice.js'
 import { parseRoute, viewOfHash, WorkspaceHistory, type WorkspaceOriginView, type WorkspaceRoute } from './route.js'
@@ -190,6 +190,7 @@ export class Workspace {
       open: (card, doc) => this.openDocument(card, doc),
       said: card => this.said(card),
       view: card => this.openFromDesk(card),
+      seen: file => markSeen([file]),
       shuttleBase: opts.shuttleBase,
     }
     this.globeHost = {

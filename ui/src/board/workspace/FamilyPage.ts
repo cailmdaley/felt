@@ -1,6 +1,6 @@
 import { announce } from '@ui-sdk/core'
 import type { KanbanCard } from '../KanbanTypes.js'
-import { ATTENTION, familyModel, type MapFeeds, type MapThread } from '../family/model.js'
+import { ATTENTION, familyModel, type MapFeeds, type MapFile, type MapThread } from '../family/model.js'
 import { htmlEl as el } from '../family/drawing.js'
 import { ago } from '../civilDay.js'
 import { bindDrawnPage } from '../FileViewerPanel.js'
@@ -23,6 +23,8 @@ export interface ViewFeeds extends MapFeeds, DocFeeds {
   said(card: KanbanCard): { text: string; at: number } | undefined
   /** Opens a constitution's view, as a click on it does: Rex and voice follow. */
   view(card: KanbanCard): void
+  /** The human has seen this file as it stood: it is no longer new. */
+  seen(file: MapFile): void
 }
 
 /** How far the page must be pulled down past its top before its orchestrator's view opens, in px. */
@@ -37,7 +39,7 @@ const needs = (card: KanbanCard): string => card.ask && card.status === 'active'
  * past its top opens the nearest one's view, as choosing one does); its head
  * (state dot, slug, whether it needs the human, its run, its pages and its
  * acts); a strip of the last thing it posted beside a thumbnail of its
- * tapestry or newest sent file; and its sub-threads as rows (dot, slug, a word
+ * tapestry or newest sent file, which counts as seen; and its sub-threads as rows (dot, slug, a word
  * of state, its run), each opening the same view one level down. No outcome
  * is drawn. It reads feeds and repaints only while its frame is selected in an
  * open reader; its frame's eviction ends it.
@@ -209,10 +211,12 @@ export class FamilyPage {
     const strip = this.strip, figure = this.figure
     strip.hidden = !said && figure.hidden
     void this.feeds.lead(card).then(lead => {
-      const doc = lead?.key ?? this.feeds.files(card)[0]?.key
+      const shown = lead ?? this.feeds.files(card)[0], doc = shown?.key
       const file = doc && parseDocKey(doc)
       if (this.card?.originId !== card.originId || (this.card.uid ?? this.card.id) !== (card.uid ?? card.id)) return
-      if (!doc || !file) { figure.hidden = true; strip.hidden = !said; return }
+      if (!shown || !doc || !file) { figure.hidden = true; strip.hidden = !said; return }
+      // Shown here, it is seen: its thread's row stops saying "new file".
+      if (shown.unread) this.feeds.seen(shown)
       if (this.thumb?.doc !== doc) {
         this.thumb?.thumbnail.dispose()
         const name = file.path.split('/').pop() ?? file.path

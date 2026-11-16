@@ -28,7 +28,7 @@ function feedsWith(over: Partial<ViewFeeds> = {}): ViewFeeds {
     marks: () => undefined, reach: () => 14 * 86_400_000, files: c => c.id === 'hub/mid' ? sent : [], refresh: vi.fn(),
     lead: async c => c.id === 'hub/mid' ? { ...tapestry, name: 'Tapestry' } : undefined,
     said: c => c.id === 'hub/mid' ? { text: 'Posted the **cut**.', at: now - hour } : undefined,
-    open: vi.fn(), view: vi.fn(), shuttleBase: '', ...over,
+    open: vi.fn(), view: vi.fn(), seen: vi.fn(), shuttleBase: '', ...over,
   }
 }
 function made(at: KanbanCard, over: Partial<ViewFeeds> = {}, known = cards): { page: FamilyPage; feeds: ViewFeeds } {
@@ -69,6 +69,16 @@ describe('a constitution\'s view', () => {
     expect(parts).toStrictEqual(['constitution', 'tapestry', 'sends', 'edits'])
     page.el.querySelector<HTMLButtonElement>('.ov-head [data-part="sends"]')!.click()
     expect(feeds.open).toHaveBeenLastCalledWith(mid, sent[0].key)
+  })
+
+  it('counts the file its strip shows as seen, and only while it is new', async () => {
+    const fresh = { ...sent[0], unread: true }
+    const { feeds } = made(root, { lead: async () => undefined, files: c => c.id === 'hub' ? [fresh, sent[1]] : [] })
+    await settle()
+    expect(feeds.seen).toHaveBeenCalledExactlyOnceWith(fresh)
+    const quiet = made(mid)
+    await settle()
+    expect(quiet.feeds.seen).not.toHaveBeenCalled()
   })
 
   it('says a question it waits on, gold, and shows no strip for a constitution that said nothing', () => {
