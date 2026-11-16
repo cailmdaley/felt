@@ -865,7 +865,7 @@ Each delivered batch ends with `— shuttle transcript --since HH:MM:SS`, using 
 The `/voice/transcript` endpoint reads the corresponding day rows.
 Live workers take terminal input through `/deliver` with `live_input: true`; cold workers receive the same text as their launch directive.
 Batches stay ordered per destination; different destinations proceed independently.
-The relay checkpoints attempts before delivery and never automatically replays them, including definite failures.
+A batch is sent once: an answer of any status, or a delivery task that crashes, finishes it, and a failure is not retried. A batch a restart interrupted is handed to the owner again under the same id, and the owner's record decides whether it may paste.
 A 202 with `delivered: null` or an interrupted delivery is unconfirmed; `last` explains that the words remain in the transcript.
 
 #### Day transcript

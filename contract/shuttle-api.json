@@ -1199,7 +1199,7 @@
             }
           },
           "409": {
-            "description": "A live worker blocks unless_live (live true), the live worker is no longer live, this daemon does not own the fiber, a fresh session was refused (reason), or a launch was refused as on /dispatch (already_running, launch_reserved).",
+            "description": "A live worker blocks unless_live (live true), this daemon does not own the fiber, a fresh session was refused (reason), or a launch was refused as on /dispatch (already_running, launch_reserved).",
             "content": {
               "application/json": {
                 "schema": {

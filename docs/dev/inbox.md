@@ -141,9 +141,9 @@ The record writes the batch's one `human` or `answered` family-board row; `Human
 A voice record is never re-pasted under its id, even when settled undeliverable.
 The relay keeps ingestion checkpoints, buffers and frozen batches in per-fiber/origin order, but no attempt flags or delivery receipts.
 Recovery repeats the record handoff under the same id; the owner's record, not the relay, decides whether it may paste.
-The relay finishes a batch after one answered attempt, even without a 2xx: it removes the batch and records the outcome as its last, so nothing queues behind it.
+The relay finishes a batch after one attempt, even without a 2xx or when its delivery task crashes: it removes the batch and records the outcome as its last, so nothing queues behind it.
 
-Normal voice forwarding keeps contract 42's `live_input` envelope, so a 44 relay can send to a 42 owner.
+Voice forwarding keeps contract 42's `live_input` envelope, so a 44 relay can send to a 42 owner.
 Only the owner records and deduplicates the batch; the relay writes no forwarding record.
 During a mixed-version deploy, a relay crash mid-forward to a 42 owner can therefore paste twice on recovery.
 The owner's prompt hook supplies the board row on 42; a 44 owner writes it with the fiber's record.
