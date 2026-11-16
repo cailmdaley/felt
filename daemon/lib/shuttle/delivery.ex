@@ -180,7 +180,7 @@ defmodule Shuttle.Delivery do
 
   Answers `{:ok, {:consumed, answer}}` for a live worker, `{:ok, :queued}`,
   `{:ok, {:unconsumed, detail}}` when consuming the inbox for the live worker
-  failed (the entry is stored; whether it was delivered before is unknown),
+  failed (the entry stays pending for that worker's hook or the next worker),
   `{:ok, :starting}` when a session is starting,
   `{:ok, {:waiting, detail}}` saying what a waking entry waits for, or
   `{:ok, {:scheduled, not_before}}` for an entry not yet due, which is stored

@@ -33,6 +33,10 @@ defmodule ShuttleWeb.DeliverController do
   this message: woken, followed_up, delivered (sent as context, or delivered
   before a retry), held, starting (a replacement is launching for it) or
   queued (waiting, or sent with its arrival unconfirmed: `delivered` null).
+  A consume that fails for the live worker, such as a Claude worker whose hook
+  has not registered yet, answers queued with `delivered` null and a `detail`
+  saying the inbox holds the message for its worker and why the live worker
+  could not be handed it now; that worker's hook or the next worker takes it.
 
   A human line answers `delivery: "input"`. `delivered` is `true` when the
   worker's terminal took it as typed input or its launch prompt carries it,
@@ -221,8 +225,8 @@ defmodule ShuttleWeb.DeliverController do
               status: "queued",
               delivered: nil,
               detail:
-                "#{fiber_id}'s inbox holds it, but could not be consumed for the live worker " <>
-                  "(#{detail}); whether it was delivered before is not known"
+                "#{fiber_id}'s inbox holds it, and its worker takes it from there; " <>
+                  "the live worker could not be handed it now (#{detail})"
             })
 
           :queued ->

@@ -1177,10 +1177,11 @@ defmodule ShuttleWeb.DeliverControllerTest do
     end
   end
 
-  # The live worker here is a Claude session with no Shuttle hook, so the
-  # inbox cannot be consumed for it: the sender is told the message is held
-  # and why consuming failed, never that it was not delivered, since a repeat
-  # of an id may already have been.
+  # The live worker here is a Claude session with no Shuttle hook, as every
+  # Claude worker is for a few seconds after launch, so the inbox cannot be
+  # handed to it now. The sender is told the message is queued for the fiber's
+  # worker and why it could not be handed over, with nothing that reads as a
+  # loss to resend under a new id.
   test "a message to a fiber with a live worker is queued in its inbox, and a failed consume says so" do
     message_live_worker("tests/deliver-live-queue")
 
@@ -1196,9 +1197,11 @@ defmodule ShuttleWeb.DeliverControllerTest do
                "detail" => detail
              } = body
 
-      assert detail =~ "could not be consumed for the live worker"
-      assert detail =~ "has not registered a Shuttle message hook"
-      assert detail =~ "whether it was delivered before is not known"
+      assert detail =~
+               ~r/^tests\/deliver-live-queue's inbox holds it, and its worker takes it from there; the live worker could not be handed it now \(.*has not registered a Shuttle message hook.*\)$/s
+
+      refute detail =~ "not known"
+      refute detail =~ "could not be consumed"
     end
 
     assert [args, _] = mailbox_puts()

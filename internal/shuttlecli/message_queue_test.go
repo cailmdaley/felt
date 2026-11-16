@@ -291,3 +291,46 @@ func TestMessageFreshStartsANewSessionOnTheFiber(t *testing.T) {
 		t.Fatal("a session target reached the daemon")
 	}
 }
+
+// A consume that could not hand a message to the live worker answers queued
+// with delivered null: the plain receipt says queued, with the owner's detail
+// for a waking send and as the other context receipts read for --context-only.
+func TestFailedConsumeReceiptSaysQueued(t *testing.T) {
+	t.Parallel()
+	const detail = "work/worker's inbox holds it, and its worker takes it from there; the live worker could not be handed it now (session has not registered a Shuttle message hook on this host)"
+	body := `{"delivery":"context","queued":true,"delivered":null,"status":"queued","detail":"` + detail + `"}`
+	for _, tc := range []struct {
+		name, want  string
+		contextOnly bool
+	}{
+		{"wake", "queued for work/worker: " + detail + " (msg-next-worker)\n", false},
+		{"context only", "queued as context for work/worker (msg-next-worker)\n", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
+			store := writeMessageTargetFiber(t, map[string]any{
+				"kind": "oneshot", "host": "worker-node", "agent": "claude-opus", "project_dir": t.TempDir(),
+			})
+			isolateMessageFiberStore(env, store)
+			deliver, _ := dormantDeliverStub(http.StatusAccepted, body)
+			daemonStub(t, env, map[string]http.HandlerFunc{"/api/v1/deliver": deliver})
+			app := newApp(env)
+			var stdout bytes.Buffer
+			app.env.Stdout = &stdout
+			var opts messageOptions
+			cmd := app.messageCmd(&opts)
+			opts.id, opts.from = "msg-next-worker", "test sender"
+			opts.contextOnly = tc.contextOnly
+			cmd.SetIn(strings.NewReader(""))
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			if err := cmd.RunE(cmd, []string{"work/worker", "read this"}); err != nil {
+				t.Fatal(err)
+			}
+			if stdout.String() != tc.want {
+				t.Fatalf("receipt = %q, want %q", stdout.String(), tc.want)
+			}
+		})
+	}
+}
