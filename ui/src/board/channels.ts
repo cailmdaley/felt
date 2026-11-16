@@ -1,66 +1,7 @@
 import type { KanbanCard } from './KanbanTypes.js'
+import { arrived, type BoardRecord } from './boardFeed.js'
 import type { SentFile } from './sentFiles.js'
 import { cardNamed, threadState, type ThreadState } from './threads.js'
-import { turnOf } from './turn.js'
-
-/**
- * One family-board record as `GET /api/v1/board/family` serves it. `fiber` is
- * the record's subject; `by` and `to` are who spoke and who it was for.
- */
-export interface BoardRecord {
-  id: string
-  kind: string
-  timestamp: number
-  /** A remote record's first arrival at this daemon. */
-  received_at?: number
-  fiber?: string
-  by?: { fiber?: string; session?: string; label?: string }
-  to?: { fiber?: string; session?: string; label?: string }
-  text?: string
-  verdict?: string
-  /** Who the daemon says wrote it: a member's path, a label, or a session. */
-  actor?: string
-  /** The absolute paths a post attaches, each also a sent file. */
-  files?: string[]
-  originName?: string
-}
-
-/**
- * What a message is: a worker's post, ask, review, Your turn or close; a hand-off
- * or another lifecycle line; a file sent on its own; the chair's tapestry; the
- * human's reply; or one worker writing to another.
- */
-export type MessageKind = 'post' | 'ask' | 'review' | 'turn' | 'closed' | 'handed_off' | 'event' | 'file' | 'tapestry' | 'reply' | 'chat'
-
-/** One item of a channel's stream, or of a worker's thread. */
-export interface Message {
-  id: string
-  /** The worker whose thread it belongs to: who said it, or whom the human said it to. */
-  card: KanbanCard
-  /** Another worker that wrote it to `card`. */
-  from?: KanbanCard
-  /** The human said it. */
-  human: boolean
-  kind: MessageKind
-  text: string
-  /** When it was written, by its writer's clock: its place in the stream. */
-  at: number
-  /** When it reached this daemon: what is new to the reader. */
-  arrived: number
-  files: SentFile[]
-  /** It waits on the human now. */
-  waiting: boolean
-  /** It belongs in its worker's thread only, not the channel's stream. */
-  quiet: boolean
-  /** Who wrote it from outside the fleet, when neither a worker nor the human. */
-  label?: string
-  /** A tapestry's page and title. */
-  path?: string
-  title?: string
-}
-
-/** A constitution's tapestry, collapsed to its title, its lede and the address of its first figure, with that figure's file when it is one. */
-export interface Tapestry { path: string; at: number; title: string; lede: string; figure?: string; figurePath?: string }
 
 /**
  * One channel: the constitutions speaking in a named channel (`shuttle.channel`,
@@ -86,14 +27,14 @@ export interface Channel {
   families: string[]
   /** When the newest wait began, or 0 when nothing waits. */
   newest: number
-  /** Something waits on the human and it has not been set aside. */
+  /** Something in it waits on the human. */
   waiting: boolean
   /** Its members' latest activity. */
   active: number
   pinned: boolean
   /** When it was taken out of the rail, nothing having begun waiting in it since; 0 when it is not hidden. */
   hidden: number
-  /** In the rail: not hidden, and waiting, pinned, or opened or active within {@link RECENT_MS}. */
+  /** In the rail: not hidden, and waiting, pinned, or active within {@link RECENT_MS}. */
   listed: boolean
 }
 
@@ -101,42 +42,17 @@ export interface Channel {
 export const handle = (channel: Pick<Channel, 'name' | 'chaired'>): string =>
   channel.chaired ? channel.name.toLowerCase().replace(/\s+/g, '-') : channel.name
 
-/** A channel opened or active within this long stays in the rail. */
+/** A channel active within this long stays in the rail. */
 export const RECENT_MS = 7 * 86_400_000
-/** A file sent this close to a worker's message is attached to it. */
-export const ATTACH_MS = 10 * 60_000
+/** Files a worker sends this close together are one item. */
+export const BURST_MS = 10 * 60_000
 
-/** The dismissal record that clears a channel's waiting mark until something newer waits in it. */
-export const setAsideKey = (channel: Pick<Channel, 'key' | 'newest'>): string => `office:${channel.key}:${channel.newest}`
 /** The dismissal record that unpins a channel: every pin up to `at` stops counting. */
 export const unpinKey = (key: string, at: number): string => `pin:${key}:${at}`
 /** The dismissal record that takes a channel out of the rail at `at`, until something begins waiting in it later. */
 export const hideKey = (key: string, at: number): string => `hide:${key}:${at}`
 /** The dismissal record that brings a hidden channel back: every hide up to `at` stops counting. */
 export const showKey = (key: string, at: number): string => `show:${key}:${at}`
-
-/** The record that clears a worker's line in its channel: the line stays out while its message is no newer than `at`. */
-export const clearKey = (uid: string, at: number): string => `clear:${uid}:${at}`
-/** The record that undoes a clear: every clear of the thread up to `at` stops counting. */
-export const unclearKey = (uid: string, at: number): string => `unclear:${uid}:${at}`
-/** Each thread's newest clear and newest undo, by fiber uid, from the board's dismissal records. */
-export type Clears = ReadonlyMap<string, { clear: number; unclear: number }>
-export function clearsOf(records: readonly string[]): Clears {
-  const clears = new Map<string, { clear: number; unclear: number }>()
-  for (const record of records) {
-    const match = /^(clear|unclear):(.+):(\d+)$/.exec(record)
-    if (!match) continue
-    const entry = clears.get(match[2]) ?? clears.set(match[2], { clear: -Infinity, unclear: -Infinity }).get(match[2])!
-    const kind = match[1] as 'clear' | 'unclear'
-    entry[kind] = Math.max(entry[kind], Number(match[3]))
-  }
-  return clears
-}
-/** The time a thread's line stands cleared to, or -Infinity: its newest clear, unless an undo as new voids it. */
-export const clearedTo = (clears: Clears, uid: string): number => {
-  const entry = clears.get(uid)
-  return entry && entry.clear > entry.unclear ? entry.clear : -Infinity
-}
 
 /** Constitutions a channel speaks for: everything not archived. */
 const LIVE: readonly ThreadState[] = ['waiting', 'to-review', 'with-orchestrator', 'working', 'drafts', 'roles', 'resting']
@@ -169,9 +85,8 @@ export function waitsSince(card: KanbanCard): number {
  * that of the nearest card filed above it; without one anywhere above it, its
  * top-level constitution's office names the channel (the named channel that
  * shares the office's charter name, when there is one), else that top-level
- * is a channel of its own. A pin counts
- * until a later unpin; a set-aside clears the waiting mark until a later wait;
- * a hide counts until a later show or a later wait.
+ * is a channel of its own. A pin counts until a later unpin; a hide counts
+ * until a later show or a later wait.
  */
 export function composeChannels(input: {
   cards: readonly KanbanCard[]
@@ -180,11 +95,9 @@ export function composeChannels(input: {
   dismissed: readonly string[]
   /** Pinned channel keys, each with its latest pin. */
   pinned: ReadonlyMap<string, number>
-  /** When the reader last opened each channel. */
-  opened: (key: string) => number
   now: number
 }): Channel[] {
-  const { cards, parentOf, names, dismissed, pinned, opened, now } = input
+  const { cards, parentOf, names, dismissed, pinned, now } = input
   const tops = new Map<KanbanCard, KanbanCard>(), named = new Map<KanbanCard, string | null>()
   const topOf = (card: KanbanCard): KanbanCard => {
     let top = tops.get(card)
@@ -239,11 +152,11 @@ export function composeChannels(input: {
     group.everyone.push(card)
     if (LIVE.includes(threadState(card))) group.members.push(card)
   }
-  // `office:<key>:<ms>` clears a channel's waiting mark until something waits after <ms>; `pin:<key>:<ms>` unpins the pins up to <ms>;
-  // `hide:<key>:<ms>` takes it out of the rail until something waits after <ms>; `show:<key>:<ms>` voids the hides up to <ms>.
-  const latest: Record<string, Map<string, number>> = { office: new Map(), pin: new Map(), hide: new Map(), show: new Map() }
+  // `pin:<key>:<ms>` unpins the pins up to <ms>; `hide:<key>:<ms>` takes it out of the rail until something waits after <ms>;
+  // `show:<key>:<ms>` voids the hides up to <ms>.
+  const latest: Record<string, Map<string, number>> = { pin: new Map(), hide: new Map(), show: new Map() }
   for (const record of dismissed) {
-    const match = /^(office|pin|hide|show):(.+):(\d+)$/.exec(record)
+    const match = /^(pin|hide|show):(.+):(\d+)$/.exec(record)
     const into = match && latest[match[1]]
     if (into) into.set(match[2], Math.max(into.get(match[2]) ?? 0, Number(match[3])))
   }
@@ -264,14 +177,14 @@ export function composeChannels(input: {
     const newest = Math.max(0, ...members.map(waitsSince))
     const active = Math.max(0, ...members.map(lastActive))
     const isPinned = (pinned.get(key) ?? -Infinity) > since('pin', key)
-    const waiting = newest > 0 && since('office', key) < newest
+    const waiting = newest > 0
     const hidden = since('hide', key) > Math.max(since('show', key), newest) ? since('hide', key) : 0
     const title = titles.get(key) || seat.name
     channels.push({
       key, name: title.split(' · ')[0], title, chaired: !key.startsWith('fiber:'), seat, members, everyone,
       families: [...new Set(members.map(card => fiberOf(topOf(card))))],
       newest, waiting, active, pinned: isPinned, hidden,
-      listed: !hidden && (waiting || isPinned || now - Math.max(active, opened(key)) <= RECENT_MS),
+      listed: !hidden && (waiting || isPinned || now - active <= RECENT_MS),
     })
   }
   return channels.sort((a, b) => Number(b.chaired) - Number(a.chaired) || a.name.localeCompare(b.name))
@@ -304,232 +217,89 @@ export function reordered(order: readonly string[], shown: readonly string[]): s
   return order.map(key => moving.has(key) ? shown[next++] : key)
 }
 
-/** Lifecycle lines a thread keeps, by what they say. */
-const EVENT_WORDS: Readonly<Record<string, string>> = {
-  rested: 'rested', cleared: 'question cleared', run_tempered: 'run tempered', unblocked: 'unblocked',
+/** Something a worker addressed to the human: an ask, a close for their review, or files sent to them. */
+export interface Item {
+  kind: 'ask' | 'review' | 'file'
+  id: string
+  card: KanbanCard
+  /** When it was said, by its writer's clock: its place in the stream. */
+  at: number
+  /** When it reached this daemon: what is new to the reader. */
+  arrived: number
+  /** The question, the review note, or the files' captions (else their names). */
+  text: string
+  files: SentFile[]
+  /** It waits on the human now. */
+  waiting: boolean
 }
-
-/** A line the human sent through the daemon (from the board, the Dock or `shuttle dispatch --message`): its record is keyed by the line's `human-…` id. */
-export const BOARD_LINE = 'brd-human-'
-/** Consecutive messages from one sender this close together are one run, named once. */
-export const RUN_MS = 10 * 60_000
-
-/** Who wrote `ref` (a session URI) when no fiber answers for it: the host it ran on. */
-const sessionHost = (ref: string | undefined): string | undefined => /^shuttle:\/\/([^/]+)\//.exec(ref ?? '')?.[1]
+/** A thread started, closed or handed off: a small mark between the items. */
+export interface Mark { kind: 'mark'; id: string; card: KanbanCard; at: number; what: 'started' | 'closed' | 'handed off' }
+export type Entry = Item | Mark
 
 /**
- * Everything a channel's constitutions said, oldest first: the family board's
- * records about its members, what their cards wait on that the board does not
- * hold, the files they sent (attached to a message close in time, a burst of
- * them one message, else their own; one without words of its own says its
- * files' captions), and the chair's tapestry. A message
- * marked `quiet` belongs in its worker's thread only: the human's lines other
- * than those sent from the board to the chair, workers writing to each other,
- * and every lifecycle line (a close that waits on the human's review is a
- * review, and speaks).
+ * A channel's stream, oldest first: each worker's one item, the one that
+ * waits on the human if any, else its latest (an ask, a close for review, or
+ * a burst of files it sent, each path at its newest send), and between them a
+ * mark for every thread started (`launches`), closed or handed off within the
+ * board's reach. A close for review is its item, not also a mark.
  */
-export function composeMessages(input: {
+export function composeStream(input: {
   channel: Channel
   records: readonly BoardRecord[]
   files: readonly SentFile[]
-  /** Every card on the board, for naming a sender from another channel. */
-  cards?: readonly KanbanCard[]
-  tapestry?: Tapestry | null
+  launches: (card: KanbanCard) => readonly number[]
   now: number
   reachMs: number
-}): Message[] {
-  const { channel, records, files, cards = channel.everyone, tapestry, now, reachMs } = input
-  const lookup = (list: readonly KanbanCard[]): Map<string, KanbanCard> => {
-    const named = new Map<string, KanbanCard>()
-    for (const card of list) for (const ref of [card.uid, card.id]) if (ref && !named.has(ref)) named.set(ref, card)
-    return named
-  }
-  const members = lookup(channel.everyone), everyone = lookup(cards)
-  const cardOf = (ref: string | undefined): KanbanCard | undefined => ref ? members.get(ref) : undefined
-  const messages: Message[] = []
-  const said = (card: KanbanCard, kind: MessageKind, text: string, at: number, over: Partial<Message> = {}): Message => {
-    const message: Message = { id: `${kind}:${fiberOf(card)}:${at}`, card, human: false, kind, text, at, arrived: at, files: [], waiting: false, quiet: false, ...over }
-    messages.push(message)
-    return message
-  }
+}): Entry[] {
+  const { channel, records, files, launches, now, reachMs } = input
   const reach = now - reachMs
-  // Each send is one file, named by its host, path and time; the newest send of a path stands for the others.
+  const named = new Map<string, KanbanCard>()
+  for (const card of channel.everyone) for (const ref of [card.uid, card.id]) if (ref && !named.has(ref)) named.set(ref, card)
+  const items = new Map<string, Item[]>(), marks: Mark[] = []
+  const say = (item: Item): Item => {
+    const list = items.get(fiberOf(item.card)) ?? items.set(fiberOf(item.card), []).get(fiberOf(item.card))!
+    list.push(item)
+    return item
+  }
+  const mark = (card: KanbanCard, what: Mark['what'], at: number, id: string): void => { marks.push({ kind: 'mark', id, card, at, what }) }
+  const reviewAt = (card: KanbanCard): number => card.reviewMark ? instant(card.reviewMark.at, card.closedAt) || 1 : 0
+  for (const record of records) {
+    const card = record.fiber ? named.get(record.fiber) : undefined
+    if (!card || record.timestamp < reach) continue
+    if (record.kind === 'asked') say({ kind: 'ask', id: record.id, card, at: record.timestamp, arrived: arrived(record), text: record.text?.trim() ?? '', files: [], waiting: false })
+    if (record.kind === 'handed_off') mark(card, 'handed off', record.timestamp, record.id)
+    // The close that put it to the human's review is that review's item.
+    if (record.kind === 'closed' && !(card.reviewMark && !record.verdict && Math.abs(reviewAt(card) - record.timestamp) <= BURST_MS)) mark(card, 'closed', record.timestamp, record.id)
+  }
+  for (const card of channel.everyone) {
+    for (const at of launches(card)) if (at >= reach) mark(card, 'started', at, `started:${fiberOf(card)}:${at}`)
+    // The open question is the newest ask the board holds from it, else the card's own.
+    if (card.ask && card.status === 'active') {
+      const asked = items.get(fiberOf(card))?.filter(item => item.kind === 'ask').at(-1)
+      if (asked) asked.waiting = true
+      else { const at = waitsSince(card); say({ kind: 'ask', id: `ask:${fiberOf(card)}`, card, at, arrived: at, text: card.ask.text, files: [], waiting: true }) }
+    }
+    const at = reviewAt(card)
+    if (at >= reach) say({ kind: 'review', id: `review:${fiberOf(card)}:${at}`, card, at, arrived: at, text: card.reviewMark!.note, files: [], waiting: threadState(card) === 'to-review' })
+  }
+  // Each path at its newest send; a worker's sends this close together are one item.
   const sends = new Map<string, SentFile>()
   for (const file of files) {
     if (file.timestamp < reach || !file.uid) continue
     const key = `${file.host ?? ''}:${file.fullPath}`
     if ((sends.get(key)?.timestamp ?? -Infinity) < file.timestamp) sends.set(key, file)
   }
-  for (const record of records) {
-    const card = cardOf(record.fiber)
-    if (!card) continue
-    const by = record.by ?? {}, text = record.text?.trim() ?? ''
-    const base = { id: record.id, arrived: record.received_at ?? record.timestamp }
-    // The human's board line is a channel line when it went to the chair; any other stays in its thread.
-    const yours = { ...base, human: true, quiet: !(record.id.startsWith(BOARD_LINE) && sameFiber(card, channel.seat)) }
-    switch (record.kind) {
-      case 'post': {
-        // A post claims the send of each file it attaches, unless that path was sent again since.
-        const attached = (record.files ?? []).map(path => {
-          const key = `${record.originName ?? ''}:${path}`, send = sends.get(key)
-          if (send && send.timestamp <= record.timestamp + ATTACH_MS) { sends.delete(key); return send }
-          return { fullPath: path, basename: path.split('/').pop() ?? path, timestamp: record.timestamp, uid: fiberOf(card), host: record.originName }
-        })
-        said(card, 'post', text, record.timestamp, { ...base, files: attached })
-        break
-      }
-      case 'asked':
-        said(card, 'ask', text, record.timestamp, base)
-        break
-      case 'closed':
-        said(card, 'closed', record.verdict ?? '', record.timestamp, { ...base, quiet: true })
-        break
-      case 'handed_off':
-        said(card, 'handed_off', '', record.timestamp, { ...base, quiet: true })
-        break
-      case 'message': {
-        const from = by.fiber ? members.get(by.fiber) ?? everyone.get(by.fiber) : undefined
-        const label = from ? undefined : by.label ?? (by.fiber ? record.actor : undefined) ?? (sessionHost(by.session) ? `a session on ${sessionHost(by.session)}` : 'another session')
-        said(card, 'chat', text, record.timestamp, { ...base, quiet: true, from, label })
-        break
-      }
-      case 'human':
-        // Lines typed or spoken in the worker's own terminal belong to that conversation, which Rex shows; the board keeps the ones sent from it.
-        if (record.id.startsWith(BOARD_LINE)) said(card, 'reply', text, record.timestamp, yours)
-        break
-      case 'answered': {
-        // The human's answer is recorded with the question it answers.
-        const answer = !by.fiber && !by.session && by.label ? /\s—\sA:\s([\s\S]*)$/.exec(text)?.[1] : undefined
-        if (answer) said(card, 'reply', answer, record.timestamp, yours)
-        else said(card, 'event', 'answered', record.timestamp, { ...base, quiet: true })
-        break
-      }
-      default:
-        if (EVENT_WORDS[record.kind]) said(card, 'event', EVENT_WORDS[record.kind], record.timestamp, { ...base, quiet: true })
-    }
-  }
-  for (const card of channel.members) {
-    const mine = messages.filter(message => message.card === card && !message.human)
-    // The open question is the newest ask the board holds from it, else the card's own.
-    if (card.ask && card.status === 'active') {
-      const asked = mine.filter(message => message.kind === 'ask').at(-1)
-      if (asked) asked.waiting = true
-      else said(card, 'ask', card.ask.text, waitsSince(card), { waiting: true })
-    }
-    const state = threadState(card)
-    if (state === 'to-review') {
-      const note = card.reviewMark?.note?.trim() ?? ''
-      const close = mine.filter(message => message.kind === 'closed').at(-1)
-      if (close) Object.assign(close, { kind: 'review', text: note, waiting: true, quiet: false })
-      else said(card, 'review', note, waitsSince(card), { waiting: true })
-    }
-    const turn = turnOf(card)
-    // A worker stopped at the end of its turn says why when it said so; that waits on no one.
-    if (state === 'waiting' && turn.turn === 'blocked' && turn.detail) said(card, 'turn', turn.detail, instant(turn.since, card.lastActivityAt, card.modifiedAt, card.createdAt) || 1)
-  }
-  const speaking: readonly MessageKind[] = ['post', 'ask', 'review', 'turn']
-  for (const file of [...sends.values()].sort((a, b) => b.timestamp - a.timestamp)) {
+  for (const file of [...sends.values()].sort((a, b) => a.timestamp - b.timestamp)) {
     const card = cardNamed(channel.everyone, file.uid!, file.host ?? '')
     if (!card) continue
-    const near = messages.filter(message => message.card === card && !message.quiet && speaking.includes(message.kind) && Math.abs(message.at - file.timestamp) <= ATTACH_MS)
-      .sort((a, b) => Math.abs(a.at - file.timestamp) - Math.abs(b.at - file.timestamp))[0]
-    // A burst of files sent together is one message: newest first here, so each joins the burst begun after it.
-    const burst = near ?? messages.find(message => message.card === card && message.kind === 'file' && message.files[0].timestamp - file.timestamp <= ATTACH_MS)
-    if (burst) burst.files.unshift(file)
-    else said(card, 'file', '', file.timestamp, { id: `file:${file.host ?? ''}:${file.fullPath}:${file.timestamp}`, files: [file] })
+    const burst = items.get(fiberOf(card))?.find(item => item.kind === 'file' && file.timestamp - item.files.at(-1)!.timestamp <= BURST_MS)
+    if (burst) { burst.files.push(file); burst.at = burst.arrived = file.timestamp }
+    else say({ kind: 'file', id: `file:${file.host ?? ''}:${file.fullPath}:${file.timestamp}`, card, at: file.timestamp, arrived: file.timestamp, text: '', files: [file], waiting: false })
   }
-  // A file message, or a post, with no words of its own says what its files were sent with.
-  for (const message of messages) {
-    if (message.text || !(message.kind === 'file' || message.kind === 'post')) continue
-    message.text = [...new Set(message.files.flatMap(file => file.caption ?? []))].join('\n\n')
+  const stream: Entry[] = marks
+  for (const list of items.values()) {
+    for (const item of list) if (item.kind === 'file') item.text = [...new Set(item.files.flatMap(file => file.caption?.trim() || []))].join(' · ') || item.files.map(file => file.basename).join(', ')
+    stream.push(list.find(item => item.waiting) ?? [...list].sort((a, b) => a.at - b.at).at(-1)!)
   }
-  if (tapestry) said(channel.seat, 'tapestry', tapestry.lede, tapestry.at, { id: `tapestry:${tapestry.path}`, path: tapestry.path, title: tapestry.title })
-  return messages.sort((a, b) => a.at - b.at || a.id.localeCompare(b.id))
-}
-
-/** A worker's thread: what it said, what was said to it, and what it wrote to others. */
-export const threadOf = (messages: readonly Message[], card: KanbanCard): Message[] =>
-  messages.filter(message => sameFiber(message.card, card) || (!!message.from && sameFiber(message.from, card)))
-
-/** A worker's liveness, as its thread names it. */
-export function liveness(card: KanbanCard): 'working' | 'waiting' | 'resting' | 'closed' {
-  const state = threadState(card)
-  if (waitsSince(card)) return 'waiting'
-  if (state === 'archived' || card.status === 'closed') return 'closed'
-  return state === 'working' || turnOf(card).busy ? 'working' : 'resting'
-}
-
-/**
- * One line of a channel's stream, with its thread's size and latest time when
- * it stands for a worker, and whether anything in that thread waits on the human.
- */
-export interface Line {
-  message: Message
-  replies: number
-  last: number
-  waiting: boolean
-  /**
-   * What its ✓ does: `temper` signs off a close awaiting review, `clear`
-   * acknowledges anything else; none while an ask waits, nor on the human's lines.
-   */
-  act?: 'clear' | 'temper'
-  /** Cleared: its message is no newer than its thread's standing clear. */
-  cleared?: boolean
-}
-
-/** What a worker says to the human, as distinct from lifecycle lines and what others say to it. */
-const SPEAKING: readonly MessageKind[] = ['post', 'ask', 'review', 'turn', 'file', 'tapestry']
-/** What a worker says to the human, not only about its work: an ask, a close for review, a file or tapestry sent. */
-const TO_YOU: readonly MessageKind[] = ['ask', 'review', 'file', 'tapestry']
-/** Whether a worker's message in its thread is addressed to the human: one of {@link TO_YOU}, one carrying files, or one answering the human's line just before it. */
-function toYou(message: Message, thread: readonly Message[]): boolean {
-  return TO_YOU.includes(message.kind) || message.files.length > 0 || !!thread[thread.indexOf(message) - 1]?.human
-}
-
-/**
- * A channel's stream, as Slack keeps a channel short: every worker, its chair
- * included, one line, the latest thing it said (a send of its own tapestry
- * page counting as that tapestry), marked waiting when something of its waits
- * on the human, with its thread's size and latest time; and the human's lines
- * to the chair. Oldest first, by each line's time. A worker that has said
- * nothing is not in it. A line its ✓ would clear is marked cleared while its
- * message is no newer than its thread's standing clear. Kept to what is
- * addressed to the human (`yours`), a worker's line is the latest it said to
- * the human, and a worker that said nothing to the human is not in it.
- */
-export function channelLines(messages: readonly Message[], clears: Clears = new Map(), yours = false): Line[] {
-  const lines: Line[] = []
-  const workers = new Map<string, KanbanCard>()
-  for (const message of messages) {
-    if (message.quiet) continue
-    // The human's own words to the chair stand in the channel; every thread, the chair's included, shows only its latest.
-    if (message.human) lines.push({ message, replies: 0, last: message.at, waiting: message.waiting })
-    else workers.set(fiberOf(message.card), message.card)
-  }
-  for (const card of workers.values()) {
-    const thread = threadOf(messages, card)
-    const said = thread.filter(message => message.card === card && !message.human && !message.quiet && SPEAKING.includes(message.kind) && (!yours || toYou(message, thread)))
-    // A send of the worker's own tapestry page is that tapestry again, not a message of its own.
-    const tapestry = said.filter(message => message.kind === 'tapestry').at(-1)
-    const latest = said.filter(message => !(tapestry && message.kind === 'file' && message.files.length > 0
-      && message.files.every(file => file.fullPath === tapestry.path || file.fullPath.endsWith('/tapestry.html')))).at(-1)
-    if (!latest) continue
-    const open = said.filter(message => message.waiting)
-    const act = open.some(message => message.kind === 'ask') ? undefined : open.some(message => message.kind === 'review') ? 'temper' : 'clear'
-    lines.push({
-      message: latest, replies: thread.length - 1, last: Math.max(...thread.map(message => message.at)), waiting: open.length > 0,
-      act, cleared: act === 'clear' && latest.at <= clearedTo(clears, fiberOf(card)),
-    })
-  }
-  return lines.sort((a, b) => a.message.at - b.message.at || a.message.id.localeCompare(b.message.id))
-}
-
-/**
- * Whether `message` continues the run `previous` began: the same sender, said
- * within {@link RUN_MS}, so its sender is not named again.
- */
-export function continues(previous: Message | undefined, message: Message): boolean {
-  if (!previous || message.at - previous.at > RUN_MS) return false
-  const sender = (each: Message): string => each.human ? 'human' : each.from ? fiberOf(each.from) : each.label ?? fiberOf(each.card)
-  return sender(previous) === sender(message)
+  return stream.sort((a, b) => a.at - b.at || a.id.localeCompare(b.id))
 }

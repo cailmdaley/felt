@@ -6,9 +6,7 @@
 .family-map [data-standing='working'] { --fm-tone: var(--ws-state-working); }
 .family-map [data-standing='new'] { --fm-tone: var(--ws-fresh); }
 .family-map [data-standing] { --fm-text: color-mix(in srgb, var(--fm-tone) 70%, var(--ws-ink)); }
-/* The marks: filled for a move that is the human's, hollow for review, faint for work under way, dashed for no worker. */
-.family-map [data-standing] > svg path, .family-map [data-standing] .fp-mark path { fill: var(--fm-tone); stroke: var(--fm-tone); stroke-width: 1; }
-.family-map [data-standing='review'] > svg path, .family-map [data-standing='review'] .fp-mark path { fill-opacity: .12; stroke-width: 1.5; }
-.family-map [data-standing='working'] > svg path, .family-map [data-standing='working'] .fp-mark path { fill-opacity: .35; }
-.family-map [data-standing='still'] .fp-mark path { fill: none; stroke-dasharray: 2 2; }
-.family-map :is([data-standing='aside'], [data-standing='quiet']) .fp-mark path { fill-opacity: .16; stroke-opacity: .6; }
+/* The marks: filled for a move that is the human's, hollow for review, faint for work under way. */
+.family-map [data-standing] > svg path { fill: var(--fm-tone); stroke: var(--fm-tone); stroke-width: 1; }
+.family-map [data-standing='review'] > svg path { fill-opacity: .12; stroke-width: 1.5; }
+.family-map [data-standing='working'] > svg path { fill-opacity: .35; }

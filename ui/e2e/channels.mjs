@@ -4,7 +4,10 @@ import { pathToFileURL } from 'node:url'
 import { launchBrowser } from './browser.mjs'
 
 const channels = () => [...document.querySelectorAll('.kbn-ch-pick-name')].map(el => el.textContent)
-const lines = () => [...document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-msg')].map(el => [el.querySelector('.kbn-ch-msg-name')?.textContent ?? null, el.dataset.kind])
+/** The stream: each item's who and kind, each mark's who and what. */
+const lines = () => [...document.querySelectorAll('.kbn-ch > .kbn-ch-stream > li')].map(el => el.classList.contains('kbn-ch-mark')
+  ? [el.querySelector('.kbn-ch-mark-who').textContent, el.querySelector('.kbn-ch-mark-what').textContent]
+  : [el.querySelector('.kbn-ch-who').textContent, el.dataset.kind])
 const fits = async page => {
   assert.equal(await page.locator('.kbn-channels').evaluate(el => el.scrollWidth <= el.clientWidth), true)
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
@@ -78,60 +81,43 @@ try {
     await page.locator('.kbn-ch-jump').fill('')
     await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 7)
     await pick(page, 'cmbx').click()
-    await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'cmbx' && document.querySelector('.kbn-ch-tapestry'))
+    await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'cmbx' && document.querySelector('.kbn-ch-item'))
     if (phone) assert.equal(await page.locator('.kbn-ch-rail').isVisible(), false)
-    // Each worker once, its latest, marked while it waits; the chair once too, by its latest line, here its tapestry; the silent beam window absent.
-    await page.waitForFunction(() => document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-msg').length === 5)
-    assert.deepEqual(await page.evaluate(lines), [
-      ['Joint covariance', 'review'], ['κ × tSZ cross-spectrum', 'post'], ['Cluster foreground mask', 'ask'], ['You', 'reply'], ['cmbx chair', 'tapestry'],
-    ])
-    // The channel's console speaks to its chair.
-    assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-band-title').textContent(), 'cmbx chair')
-    const spectrum = page.locator('.kbn-ch-msg[data-fiber="cmbx/kappa-tsz"]')
-    // The spectrum it sent is its tapestry's figure, so it is drawn once, in the card.
-    assert.equal(await spectrum.locator('.kbn-ch-image').count(), 0)
-    // Its deck is a card, its starting page drawn small.
-    assert.equal(await spectrum.locator('.kbn-ch-embed .ws-thumbnail').count(), 1)
-    // The stream opens on its newest message, and stays there as images arrive.
+    // What its workers addressed to the human, each worker once, with marks of threads starting and stopping between.
+    await page.waitForFunction(() => document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-item').length === 4)
+    const said = await page.evaluate(lines)
+    assert.deepEqual(said.filter(([, kind]) => ['ask', 'review', 'file'].includes(kind)), [['cmbx', 'file'], ['covariance', 'review'], ['kappa-tsz', 'file'], ['foregrounds', 'ask']])
+    assert.ok(said.some(([who, what]) => who === 'beam' && what === 'started'), 'the silent beam window shows only as a mark')
+    // The channel's head carries its chair's pages; its console speaks to its chair, by slugs.
+    assert.ok(await page.locator('.kbn-ch-head .kbn-ch-pages [data-part="constitution"]').isVisible())
+    assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-band-title').textContent(), 'cmbx')
+    assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-worker-message').getAttribute('data-placeholder'), 'Message cmbx')
+    // The deck it sent twice is drawn once, at its newest send, beside its plot: thumbnails side by side.
+    const kappa = page.locator('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"]')
+    assert.equal(await kappa.locator('.kbn-ch-thumb').count(), 2)
+    // The close for review, without a tapestry, says what it came to.
+    assert.equal(await page.locator('.kbn-ch-item[data-kind="review"] .kbn-ch-outcome').count(), 1)
+    // The stream opens on its newest item.
     await page.waitForFunction(() => { const el = document.querySelector('.kbn-ch > .kbn-ch-stream'); return el.scrollHeight - el.scrollTop - el.clientHeight <= 24 }, null, { timeout: 5000 })
     await fits(page)
     await shot(page, `${name}-channel`)
-    // A message opens its worker's thread: its history, its liveness, a reply to it.
-    await spectrum.locator('.kbn-ch-replies').click()
-    await page.waitForFunction(() => !document.querySelector('.kbn-ch-thread').hidden)
-    assert.equal(await page.locator('.kbn-ch-liveness').textContent(), 'working')
-    // The thread's own worker speaks unnamed; others are named.
-    assert.deepEqual(await page.locator('.kbn-ch-thread-list .kbn-ch-msg-name').allTextContents(), ['cmbx chair'])
-    // The thread's console speaks to its worker, under the chair's name.
-    assert.equal(await page.locator('.kbn-ch-thread > .ws-dock .ws-band-title').textContent(), 'cmbx chair / kappa-tsz')
-    if (phone) assert.equal(await page.locator('.kbn-ch').isVisible(), false)
-    await fits(page)
-    await shot(page, `${name}-thread`)
+    // An item opens its constitution's view in the reader.
+    await page.locator('.kbn-ch-item[data-kind="ask"] .kbn-ch-who').click()
+    await page.waitForFunction(() => document.querySelector('.ws-selected .ov-name')?.textContent === 'foregrounds')
+    assert.equal(await page.locator('.ws-selected .ov-needs').textContent(), 'asks')
+    await shot(page, `${name}-view`)
+    await page.keyboard.press('Escape')
+    await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'cmbx' && document.querySelector('.kbn-ch').offsetParent)
     if (phone) {
-      await page.locator('.kbn-ch-thread-close').click()
       await page.locator('.kbn-ch-back').click()
       assert.ok(await page.locator('.kbn-ch-rail').isVisible())
       await page.locator('.kbn-ch-jump').fill('old')
     } else {
-      // A closed fiber's thread leads with its conclusion.
-      await page.locator('.kbn-ch-msg', { hasText: 'Joint covariance' }).locator('.kbn-ch-msg-name').click()
-      await page.waitForFunction(() => document.querySelector('.kbn-ch-conclusion'))
-      await page.keyboard.press('Escape')
-      await page.waitForFunction(() => document.querySelector('.kbn-ch-thread').hidden)
-      // The chair's tapestry reads whole in place.
-      await page.locator('.kbn-ch-tapestry .kbn-ch-act', { hasText: 'Read it here' }).click()
-      await page.waitForFunction(() => document.querySelector('.kbn-ch-tapestry-page iframe, .kbn-ch-tapestry-page .kbn-fileview'))
-      await page.locator('.kbn-ch-tapestry .kbn-ch-act', { hasText: 'Fold it' }).click()
-      // UNIONS, busy and last read 45 minutes ago, rules off what is new.
+      // UNIONS, busy: its items and the marks of its many threads.
       await page.locator('.kbn-ch').focus()
       await page.keyboard.press('j')
-      // To you, only what is addressed to the human: the west run's posterior and the n(z) modes' ask.
       await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'unions')
-      await page.waitForFunction(() => document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-msg').length === 2)
-      // All adds every worker's posts.
-      await page.locator('[data-item="scope:all"]').click()
-      await page.waitForFunction(() => document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-msg').length === 13)
-      assert.equal(await page.locator('.kbn-ch-new').count(), 1)
+      await page.waitForFunction(() => document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-item').length === 2)
       await shot(page, 'desktop-busy')
       await page.keyboard.press('[')
       assert.equal(await page.locator('.kbn-ch-layout[data-rail-hidden]').count(), 1)
@@ -151,11 +137,11 @@ try {
     await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 8)
     assert.deepEqual(errors, [])
     await context.close()
-    console.log(`Channels ${name}: the recent channels with what waits floated, a channel dragged into place, its menu, a hidden channel found by Jump to, a short stream with each worker once and the chair's tapestry, a worker's thread, ${phone
+    console.log(`Channels ${name}: the recent channels with what waits floated, a channel dragged into place, its menu, a hidden channel found by Jump to, a stream of what was addressed to the human with marks between, an item opening its constitution's view, ${phone
       ? 'one screen at a time with back to the rail'
-      : 'a closed thread\'s conclusion, the tapestry read in place, a busy channel ruled off since the last visit, the rail hidden and shown'}, Jump to finding a hidden channel and a document and bringing the channel back, no overflow; screenshots saved`)
+      : 'a busy channel, the rail hidden and shown'}, Jump to finding a hidden channel and a document and bringing the channel back, no overflow; screenshots saved`)
   }
-  // Half a screen: a thread opens in the channel's place; a worker's tapestry shows under its line and in its thread.
+  // Half a screen: the rail is a drawer over the stream.
   const context = await browser.newContext({ viewport: { width: 750, height: 900 }, reducedMotion: 'reduce' })
   const page = await context.newPage()
   const errors = []
@@ -163,7 +149,6 @@ try {
   await page.goto(`${pathToFileURL(resolve('harness-board-dist/index.html'))}?example=channels#/channels`)
   await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 8)
   await page.evaluate(() => document.fonts.ready)
-  assert.equal(await page.locator('.kbn-ch-layout[data-narrow]').count(), 1)
   // Half a screen, the rail is a drawer, put away until it is asked for; it ends above the console.
   assert.equal(await page.locator('.kbn-ch-rail').isVisible(), false)
   await page.locator('.kbn-ch-rail-toggle').click()
@@ -173,49 +158,26 @@ try {
   await shot(page, 'half-rail')
   await pick(page, 'cmbx').click()
   await page.locator('.kbn-ch-rail').waitFor({ state: 'hidden' })
-  const spectrum = page.locator('.kbn-ch-msg', { hasText: '9σ' }).locator('.kbn-ch-embed', { hasText: 'Tapestry' })
-  await spectrum.locator('img').waitFor()
-  assert.equal(await spectrum.locator('.kbn-ch-embed-title').textContent(), 'κ × tSZ at 9σ')
-  await spectrum.scrollIntoViewIfNeeded()
+  await page.locator('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"] .kbn-ch-thumb').first().waitFor()
   await fits(page)
   await shot(page, 'half-channel')
-  await page.locator('[data-item="replies:cmbx/kappa-tsz"]').click()
-  await page.waitForFunction(() => !document.querySelector('.kbn-ch-thread').hidden)
-  assert.equal(await page.locator('.kbn-ch').isVisible(), false)
-  assert.equal(await page.locator('.kbn-ch-thread-head .kbn-ch-tip').textContent(), 'Back to # cmbx')
-  assert.equal(await page.locator('.kbn-ch-thread-head .kbn-ch-embed-title').textContent(), 'κ × tSZ at 9σ')
-  await fits(page)
-  await shot(page, 'half-thread')
-  await page.locator('.kbn-ch-thread-close').click()
-  await page.waitForFunction(() => document.querySelector('.kbn-ch-thread').hidden)
-  assert.ok(await page.locator('.kbn-ch').isVisible())
-  // An asking worker's thread says its ask once, in its head.
-  await page.locator('.kbn-ch-msg', { hasText: 'Cluster foreground mask' }).locator('.kbn-ch-msg-name').click()
-  await page.waitForFunction(() => document.querySelector('.kbn-ch-thread-ask'))
-  assert.equal(await page.locator('.kbn-ch-thread-list .kbn-ch-msg[data-kind="ask"]').count(), 0)
-  await shot(page, 'half-ask')
   assert.deepEqual(errors, [])
   await context.close()
-  console.log('Channels at half a screen: a thread in the channel\'s place with a way back, a worker\'s tapestry under its line and in its thread, an ask said once; screenshots saved')
+  console.log('Channels at half a screen: the rail a drawer ending above the console, the stream full width; screenshots saved')
   {
-    // A fresh post in a channel not being read lights its rail dot; reading it clears it.
+    // Something fresh addressed to the human in a channel not being read lights its rail dot; reading it clears it.
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' })
     const page = await context.newPage()
     const errors = []
     page.on('pageerror', error => errors.push(error.message))
     await page.goto(`${pathToFileURL(resolve('harness-board-dist/index.html'))}?example=channels#/channels`)
     await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 8)
-    // Every wait set aside, every channel read, ending in cmbx.
-    while (await page.locator('.kbn-ch-pick[data-waiting]').count()) {
-      await page.locator('.kbn-ch-pick[data-waiting]').first().click({ button: 'right' })
-      await page.locator('[role="menuitem"]', { hasText: 'Not now' }).click()
-      await page.waitForTimeout(100)
-    }
+    // Every channel read, ending in cmbx.
     for (const name of [...await page.evaluate(channels), 'cmbx']) { await pick(page, name).click(); await page.waitForTimeout(150) }
     assert.equal(await page.locator('.kbn-ch-pick-unread').count(), 0, 'nothing unread once each channel is read')
     const post = async text => page.evaluate(text => {
       const board = window.__harness.channels.board, like = board.find(record => record.root === 'french') ?? board[0]
-      board.push({ ...like, id: `brd-fresh-${board.length}`, kind: 'post', fiber: 'french', by: { fiber: 'french' }, root: 'french', timestamp: Date.now() + 1000, received_at: Date.now() + 1000, text, files: [] })
+      board.push({ ...like, id: `brd-fresh-${board.length}`, kind: 'asked', fiber: 'french', by: { fiber: 'french' }, root: 'french', timestamp: Date.now() + 1000, received_at: Date.now() + 1000, text, files: [] })
     }, text)
     // On another channel: the rail's quiet dot.
     await post('Leçon trois est prête.')
@@ -227,6 +189,6 @@ try {
     await pick(page, 'french').locator('.kbn-ch-pick-unread').waitFor({ state: 'detached' })
     assert.deepEqual(errors, [])
     await context.close()
-    console.log('Channels unread: a fresh post in a channel not being read lights its rail dot, and reading it clears the dot')
+    console.log('Channels unread: something fresh addressed to the human in a channel not being read lights its rail dot, and reading it clears the dot')
   }
 } finally { await browser.close() }

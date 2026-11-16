@@ -21,10 +21,3 @@ export function markPath(standing: Standing, r: number): string {
   if (standing === 'blocked') { const d = r * .9; return `M${-d} ${-d}H${d}V${d}H${-d}Z` }
   return `M${-r} 0A${r} ${r} 0 1 0 ${r} 0A${r} ${r} 0 1 0 ${-r} 0Z`
 }
-/** A small svg holding one state mark. */
-export function markSvg(cls: string, standing: Standing, r = 4.5): SVGSVGElement {
-  const mark = svgEl('svg', cls), path = svgEl('path')
-  mark.setAttribute('viewBox', '-7 -7 14 14'); mark.setAttribute('aria-hidden', 'true')
-  path.setAttribute('d', markPath(standing, r)); mark.append(path)
-  return mark
-}

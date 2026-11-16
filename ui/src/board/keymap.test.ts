@@ -35,16 +35,9 @@ describe('shared keyboard table', () => {
     expect(missing).toEqual([])
     expect(phantom).toEqual([])
   })
-  it('describes the constitution page navigation and conversation keys', () => {
-    const page = helpSections.find(section => section.title === "A constitution's page")!
-    expect(page.rows.map(row => [row.keys, row.label])).toEqual([
-      [['j', 'k', '↓', '↑'], "Next / previous thread; on a row's documents, next / previous document"],
-      [['l', '→'], 'In: a row unfolds its first document (tapestry, constitution, sends) under it; again, the next in its place'],
-      [['h', '←'], 'Out: a document to its row, folding it; a row off the page'],
-      [['←', '→'], 'With a sent file open: the newer / older file in its place'],
-      [['Enter'], 'Unfold or fold a row, entering it'],
-      [['c'], 'Open the highlighted thread in Rex'],
-    ])
+  it('describes the constitution view\'s navigation and conversation keys', () => {
+    const page = helpSections.find(section => section.title === "A constitution's view")!
+    expect(page.rows.map(row => row.keys)).toEqual([['j', 'k', '↓', '↑'], ['Enter', 'l'], ['l'], ['h'], ['c']])
   })
   it('routes 1·2·3·4 to the same view intents on every surface, without forwarding them into documents', () => {
     const intents = ['desk', 'chronicle', 'channels', 'globe'] as const

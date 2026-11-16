@@ -28,6 +28,7 @@
  * (./chronicleFeeds.ts) rather than refetching per poll.
  */
 
+import type { BoardFeed } from '../boardFeed.js'
 import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
 import type { DocKey } from '../workspace/documents.js'
 import type { Library } from '../workspace/Library.js'
@@ -85,6 +86,10 @@ export interface ViewContext extends TemporalFetchers {
     /** The constitutions opened in this session, most recent first. */
     readLatelyCards(): KanbanCard[]
     readonly globeHost: GlobeHost
+    /** The family board's records, which Channels reads its streams from. */
+    readonly board: BoardFeed
+    /** Each charter's name, by office slug, once read: an office's channel takes it. */
+    readonly charterNames: ReadonlyMap<string, string>
   }
   /**
    * WORK — every card on the eight lifecycle/planning surfaces, deduped. This

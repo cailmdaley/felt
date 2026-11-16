@@ -92,9 +92,9 @@ export interface VoiceUpdate {
  * target and, on a desktop, `onRex`, the board's one signal that Rex's worker
  * changed, voice on or off, and `onOpen`, a page a session asked for, on any
  * screen. A tab coming back moves nothing.
- * Whichever of Rex and the board had focus last holds the target: Rex takes it by coming to the front
- * or changing worker, and the board by showing something or regaining focus,
- * while it has the keyboard.
+ * Whichever of Rex and the board moved last holds the target: Rex takes it by coming to the front
+ * or changing worker, and the board when the human clicks something it shows, while it has the
+ * keyboard. Returning to the board's window takes nothing.
  */
 export class Voice {
   status: VoiceStatus | null = null
@@ -143,7 +143,6 @@ export class Voice {
     this.mounted = true
     document.addEventListener('visibilitychange', this.visibility)
     window.addEventListener('shuttle-voice-settings-saved', this.settingsSaved)
-    window.addEventListener('focus', this.claim)
     void this.poll()
     this.openEvents()
   }
@@ -177,7 +176,6 @@ export class Voice {
     this.mounted = false
     document.removeEventListener('visibilitychange', this.visibility)
     window.removeEventListener('shuttle-voice-settings-saved', this.settingsSaved)
-    window.removeEventListener('focus', this.claim)
     if (this.sightTimer !== null) window.clearTimeout(this.sightTimer)
     this.sightTimer = null
     this.closeEvents()
@@ -277,10 +275,9 @@ export class Voice {
         this.status = status
         if (this.expectedEnabled === status.enabled) this.expectedEnabled = null
         this.notify()
-        // Following returning, or focus landing in a report's frame, which fires no window focus.
-        const canClaim = observing(status) && document.hasFocus()
-        if (canClaim && !this.couldClaim) this.claim()
-        this.couldClaim = canClaim
+        // Voice coming on (or following again) takes up what the board shows; the board's window coming back does not.
+        if (observing(status) && !this.couldClaim) this.claim()
+        this.couldClaim = observing(status)
       }
       success = true
     } catch {

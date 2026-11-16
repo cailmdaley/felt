@@ -327,56 +327,49 @@ describe('the board keeps the lifecycle model across random gesture sequences', 
 
 const THREADS = [`${ID}/a`, `${ID}/b`]
 
-/** The family page's rows, head first, by the fiber each names. */
-function familyRows(): Array<{ el: HTMLElement; id: string }> {
-  return [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')]
-    .map(el => ({ el, id: el.querySelector<HTMLElement>('.fp-name')?.title ?? '' }))
-    .filter(row => row.id === ID || THREADS.includes(row.id))
+/** The fiber the open constitution view shows, by its path: the owner serves each as `<id>-uid`. */
+const viewed = (): string | undefined => {
+  const key = document.querySelector('.ws-selected')?.getAttribute('data-key') ?? ''
+  return [ID, ...THREADS].find(id => key.endsWith(`:${id}-uid`))
 }
 
-describe('a family page acts on the highlighted thread', () => {
-  it('its row draws the offered verbs, and every request a key or the row sends names that fiber and leaves the others alone', async () => {
+describe('a constitution\'s view acts on the constitution it shows', () => {
+  it('its head draws the offered verbs, and every request a key or the head sends names that fiber and leaves the others alone', async () => {
     await fc.assert(fc.asyncProperty(
       fc.tuple(fc.constantFrom(...STATES), fc.constantFrom(...STATES), fc.constantFrom(...STATES)),
-      fc.nat(),
       fc.array(fc.tuple(fc.nat(), fc.nat()), { minLength: 1, maxLength: 3 }),
-      async ([root, a, b], entry, steps) => {
+      async ([root, a, b], steps) => {
         await mount({ [ID]: root, [THREADS[0]]: a, [THREADS[1]]: b }, Object.fromEntries(THREADS.map(id => [id, ID])))
         try {
-          // The page is entered by any of its fibers the Desk lists.
-          const family = [ID, ...THREADS]
-          if (!selected(family[entry % family.length]) && !selected()) return
-          press('o')
-          await settle()
-          for (const [row, pick] of steps) {
-            const rows = familyRows()
-            if (rows.length === 0) return
-            // The highlight moves from the head by j, as a human walks the page.
-            rows[0].el.focus()
-            for (let i = 0; i < row % rows.length; i++) document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true }))
+          for (const [at, pick] of steps) {
+            // The view is opened from the Desk by any of the family's fibers it lists.
+            const family = [ID, ...THREADS]
+            if (!selected(family[at % family.length])) continue
+            press('o')
             await settle()
-            const lit = familyRows().find(r => r.el.getAttribute('aria-selected') === 'true')
-            expect(lit, 'the page highlights no row').toBeDefined()
-            const target = lit!.id
+            const target = viewed()
+            if (!target) continue
+            const head = document.querySelector<HTMLElement>('.ws-selected .ov-head')!
+            head.focus()
             const state = owner.states.get(target)!
             const card = inside.workspaceCards().find(c => c.id === target)
             const offered: Gesture[] = [
               ...(Object.keys(VERBS) as Verb[]).filter(verb => VERBS[verb].offered(state)),
               ...(card && inside.dock.canOpenConversation(card) ? ['open' as const] : []),
             ]
-            // The highlighted row draws the fiber's acts: the verbs the model offers, in its words.
-            const acts = lit!.el.querySelector<HTMLElement>(':scope > .fp-line .fp-verbs .ws-fiber-acts')
-            expect(acts, `the highlighted row draws no acts (${stateKey(state)})`).not.toBeNull()
+            // The head draws the fiber's acts: the verbs the model offers, in its words.
+            const acts = head.querySelector<HTMLElement>('.ov-tools .ws-fiber-acts')
+            expect(acts, `the view's head draws no acts (${stateKey(state)})`).not.toBeNull()
             // One button wears a verb on its face and holds the rest in its menu; the set is the model's, and Discard never leads.
             const drawn = await rowVerbs(acts!)
-            expect([...drawn].sort(), `the row offers other verbs than the model (${stateKey(state)})`)
+            expect([...drawn].sort(), `the head offers other verbs than the model (${stateKey(state)})`)
               .toEqual(offeredVerbs(state).map(verb => VERBS[verb].label(state)).sort())
-            if (offeredVerbs(state).some(verb => verb !== 'discard')) expect(drawn[0], `Discard leads the row's verbs (${stateKey(state)})`).not.toBe(VERBS.discard.label(state))
+            if (offeredVerbs(state).some(verb => verb !== 'discard')) expect(drawn[0], `Discard leads the head's verbs (${stateKey(state)})`).not.toBe(VERBS.discard.label(state))
             if (offered.length === 0) continue
             const gesture = offered[pick % offered.length]
             const before = new Map(owner.states)
             const sentBefore = owner.sent.length
-            // A human acts by the key, which goes to the focused row and bubbles up, or by the row's own control.
+            // A human acts by the key, which goes to the focused head and bubbles up, or by the head's own control.
             const opener = acts!.querySelector<HTMLElement>('.ws-acts-console')
             const byControl = Math.floor(pick / offered.length) % 2 === 1
             if (byControl && gesture !== 'open') await pressVerb(acts!, VERBS[gesture as Verb].label(state))
@@ -387,11 +380,11 @@ describe('a family page acts on the highlighted thread', () => {
             if (popover) { press('n', popover); await settle() }
             await finish()
             const sent = owner.sent.slice(sentBefore)
-            const story = `${gesture} with ${target} highlighted (${stateKey(state)})\n  sent: ${JSON.stringify(sent)}\n  band: ${document.querySelector('.ws-band-title')?.textContent}; family: ${[...before].map(([id, s]) => `${id}=${stateKey(s)}`).join(' ')}`
+            const story = `${gesture} on ${target}'s view (${stateKey(state)})\n  sent: ${JSON.stringify(sent)}\n  band: ${document.querySelector('.ws-band-title')?.textContent}; family: ${[...before].map(([id, s]) => `${id}=${stateKey(s)}`).join(' ')}`
             expect(sent.length, `the gesture reached no owner: ${story}`).toBeGreaterThan(0)
-            expect(sent.map(s => s.fiber), `the band acted on a fiber that was not highlighted: ${story}`).toEqual(sent.map(() => target))
+            expect(sent.map(s => s.fiber), `the band acted on a fiber the view does not show: ${story}`).toEqual(sent.map(() => target))
             for (const [id, s] of before) {
-              if (id !== target) expect(stateKey(owner.states.get(id)!), `${id} changed though ${target} was highlighted: ${story}`).toBe(stateKey(s))
+              if (id !== target) expect(stateKey(owner.states.get(id)!), `${id} changed though ${target}'s view acted: ${story}`).toBe(stateKey(s))
             }
           }
         } finally {

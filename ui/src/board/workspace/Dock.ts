@@ -422,6 +422,7 @@ export class Dock {
   private readonly onSent?: (card: KanbanCard, message: string, at: number) => void
   private readonly keepPlace: boolean
   private fiberSlug?: FiberSlug
+  private channelOf?: (card: KanbanCard) => string | undefined
 
   constructor(
     shuttleBase: string,
@@ -442,6 +443,8 @@ export class Dock {
   }
 
   setFiberSlug(fiberSlug: FiberSlug): void { this.fiberSlug = fiberSlug }
+  /** Names the channel a fiber speaks in, for the console's head. */
+  setChannelOf(channelOf: (card: KanbanCard) => string | undefined): void { this.channelOf = channelOf }
 
   /** The band's element, built on first use so controls can be exercised without a page. */
   get el(): HTMLElement {
@@ -637,9 +640,10 @@ export class Dock {
    * A fiber's acts, for whatever draws a row for it: its lifecycle verbs as one
    * button ({@link verbButton}), then its session pair, its conversation (as `c`
    * opens it) and its settings sheet. The whole strip is the fiber's verdict
-   * host, so an undo window takes its place.
+   * host, so an undo window takes its place, unless `host` is false: a strip
+   * standing inside a host of its own.
    */
-  actsFor(target: () => KanbanCard): FiberActs {
+  actsFor(target: () => KanbanCard, { host = true } = {}): FiberActs {
     const el = document.createElement('span')
     el.className = 'ws-fiber-acts'
     el.dataset.part = 'acts'
@@ -660,7 +664,7 @@ export class Dock {
     el.append(verbs.el, session)
     const paint = (): void => {
       const card = target(), who = slug(card)
-      markVerdictHost(el, card)
+      if (host) markVerdictHost(el, card)
       el.setAttribute('aria-label', `${who}'s acts`)
       verbs.paint(card, who)
       conversation.paint()
@@ -996,6 +1000,7 @@ export class Dock {
     title.dataset.part = 'fiber-title'
     // A highlighted thread follows the band's name, as a path, under the slug its row draws: the figures beside it are the thread's.
     const titleRoot = document.createElement('span')
+    titleRoot.className = 'ws-band-channel'
     const titleThread = document.createElement('span')
     titleThread.className = 'ws-band-thread'
     title.append(titleRoot, titleThread)
@@ -1032,6 +1037,19 @@ export class Dock {
       openActionMenu(menu, this.bandActions(act, menu), `${slug(act)}'s acts`)
     })
     acts.append(menu)
+    // Where the head has room, the menu's acts stand as buttons: the conversation, the constitution, settings and the lead verb.
+    const shown = this.actsFor(target, { host: false })
+    this.disposers.push(() => shown.dispose())
+    const page = document.createElement('button')
+    page.type = 'button'
+    page.className = 'ws-header-icon ws-band-page'
+    page.dataset.part = 'constitution'
+    page.innerHTML = headerIcon('constitution')
+    page.addEventListener('click', () => this.openConstitution?.())
+    const buttons = document.createElement('span')
+    buttons.className = 'ws-band-buttons'
+    buttons.append(page, shown.el)
+    acts.prepend(buttons)
     if (this.voice && shuttleManaged) {
       this.listen = new ListenControl({
         card: () => this.actionCard ?? card, voice: this.voice.controller, phone: this.phone, shuttleBase: this.shuttleBase,
@@ -1050,11 +1068,12 @@ export class Dock {
     this.actPaint = () => {
       this.el.dataset.column = card.column
       const act = target()
-      const same = (act.uid ?? act.id) === (card.uid ?? card.id) && act.originId === card.originId
-      if (titleRoot.textContent !== card.name) titleRoot.textContent = card.name
-      const thread = same ? '' : ` / ${slug(act)}`
-      if (titleThread.textContent !== thread) titleThread.textContent = thread
-      title.title = same ? card.name : `${card.name} / ${act.name}`
+      // Slugs throughout: the channel's handle, then whom the box speaks to.
+      const channel = this.channelOf?.(act)
+      const root = channel && channel !== slug(act) ? `${channel} / ` : ''
+      if (titleRoot.textContent !== root) titleRoot.textContent = root
+      if (titleThread.textContent !== slug(act)) titleThread.textContent = slug(act)
+      title.title = act.name
       this.paintVoice()
       const usage = this.usage
       paintUsage(contextFact, cacheFact, usage, act.workerAgent ?? act.shuttleAgent)
@@ -1067,6 +1086,9 @@ export class Dock {
       facts.hidden = !facts.textContent
       worker.update(act, warm !== undefined ? `cache warm until ${clockTime(warm)}` : '')
       markVerdictHost(acts, act)
+      page.hidden = !this.openConstitution
+      page.title = `Constitution · ${slug(act)}`
+      page.setAttribute('aria-label', page.title)
       menu.title = `${slug(act)}'s acts`
       menu.setAttribute('aria-label', menu.title)
     }

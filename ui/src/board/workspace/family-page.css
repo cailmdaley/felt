@@ -1,166 +1,65 @@
 .ws-family-page { container-type: inline-size; height: 100%; min-height: 0; }
-/* --fp-text is the row's text column, where its name and all it holds start: the mark's 12px and the title's 8px gap. */
-.ws-family-grid { --fp-gutter: 20px; --fp-text: 20px; --fp-views: 118px; --fp-acts: 244px; --fp-control: 24px; --fp-spring: linear(0, .32 9%, .78 20%, 1.06 32%, 1.12 39%, 1.08 47%, 1 58%, .98 68%, 1); height: 100%; display: grid; grid-template-rows: minmax(0, 1fr); min-height: 0; color: var(--ws-ink); font: var(--type-label)/var(--leading-tight) var(--font-serif); }
-.ws-family-scroll { min-height: 0; overflow: auto; }
+.ws-family-grid { --ov-gutter: 24px; height: 100%; display: grid; grid-template-rows: minmax(0, 1fr); min-height: 0; color: var(--ws-ink); font: var(--type-label)/var(--leading-tight) var(--font-serif); }
+.ws-family-scroll { min-height: 0; overflow: auto; overscroll-behavior-y: contain; }
 
-.fp-tree { max-width: 1200px; padding-bottom: 32px; outline: none; }
-/* Room below an unfolded document, so even the last row's can scroll to the top of the view. */
-.fp-tree:has(.fp-doc:not([hidden])) { padding-bottom: 85vh; }
-.fp-row { --fp-indent: calc(var(--fp-level, 0) * 16px); position: relative; padding: 4px var(--fp-gutter) 4px calc(var(--fp-gutter) + var(--fp-indent)); cursor: pointer; outline: none; }
-.fp-row[data-selected]:not(.fp-head) { background: var(--ws-hover); }
-.fp-row:focus-visible, .fp-aside:focus-visible { outline: 1px solid var(--ws-hairline); outline-offset: -1px; }
-.fp-line { position: relative; }
-.fp-row[data-worker] > .fp-line::before { content: ''; position: absolute; top: 1px; bottom: 1px; left: -8px; width: 2px; border-radius: 1px; background: var(--fm-tone); }
-/* The title line: every mark on it (state, name, word, views, acts, age)
-   centres on the name's first line, a band --fp-line tall. Text cells are
-   padded out to it; the mark and the controls centre inside it. The
-   views and the acts keep columns of their own width, so each lands at the
-   same x on every row. */
-.fp-title { --fp-line: 26px; display: grid; grid-template-columns: 12px minmax(0, 1fr) auto var(--fp-views) var(--fp-acts) 4ch; grid-template-areas: 'mark name word docs verbs meta'; align-items: start; column-gap: 8px; font: var(--type-meta)/var(--leading-tight) var(--font-mono); }
-/* A line of text keeps its role's leading and is padded out to the band, so its first line centres there. */
-.fp-name, .fp-word, .fp-meta { padding-block: calc((var(--fp-line) - var(--leading-tight) * 1em) / 2); }
-.fp-head .fp-title { --fp-line: 28px; }
-.fp-mark { grid-area: mark; width: 10px; height: 10px; margin-top: calc((var(--fp-line) - 10px) / 2); overflow: visible; }
-.fp-name { grid-area: name; min-width: 0; overflow-wrap: anywhere; color: var(--ws-ink-soft); font: 400 var(--type-row)/var(--leading-tight) var(--font-mono); }
-.fp-word { grid-area: word; color: var(--fm-text); white-space: nowrap; }
-.fp-word:empty { display: none; }
-.fp-meta { grid-area: meta; color: var(--ws-ink-muted); white-space: nowrap; text-align: right; }
-.fp-count { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; margin: 3px 0 0 var(--fp-text); color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-tight) var(--font-mono); }
-.fp-tally-mark { display: inline-flex; }
-.fp-tally-svg { width: 11px; height: 11px; overflow: visible; }
-.fp-tally-more { margin-left: 3px; opacity: .7; }
-.fp-count:empty { display: none; }
-.fp-note { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; margin: 1px 0 0 var(--fp-text); overflow: hidden; color: var(--ws-ink-soft); font: var(--type-label)/var(--leading-ui) var(--font-serif); overflow-wrap: anywhere; }
-.fp-note[hidden], .fp-files[hidden] { display: none; }
-/* A thread row's outcome stays folded until the row is highlighted, by keys
-   or a click; the pointer alone never opens it. Its row of the grid opens to
-   the outcome's own height while the words settle in with a little spring;
-   folding is quick and plain. */
-.fp-row:not(.fp-head) > .fp-line { display: grid; grid-template-rows: auto 0fr auto; transition: grid-template-rows .18s cubic-bezier(.4, 0, .2, 1); }
-.fp-line > .fp-title { grid-row: 1; } .fp-line > .fp-note { grid-row: 2; } .fp-line > .fp-count { grid-row: 3; }
-.fp-row:not(.fp-head) > .fp-line > .fp-note { min-height: 0; margin-top: 0; opacity: 0; transform: translateY(-6px); transition: opacity .12s ease-out, transform .18s ease-out; }
-.fp-row:not(.fp-head):is([data-selected], :focus-within) > .fp-line { grid-template-rows: auto 1fr auto; transition: grid-template-rows .36s cubic-bezier(.22, 1, .36, 1); }
-.fp-row:not(.fp-head):is([data-selected], :focus-within) > .fp-line > .fp-note { opacity: 1; transform: none; transition: opacity .24s ease-out .04s, transform .55s var(--fp-spring) .02s; }
+/* Its orchestrators, above the head and out of sight on landing: compact heads, the family's top-level first. */
+.ov-up { display: flex; flex-direction: column; padding: 10px 0 4px; border-bottom: 1px solid var(--ws-hairline-soft); background: color-mix(in srgb, var(--ws-ink) 2.5%, transparent); }
+.ov-up:empty { display: none; }
+.ov-main { box-sizing: border-box; max-width: 1100px; padding-bottom: 32px; }
 
-/* A row's acts (Dock.actsFor): the verb button, then the session pair, in a
-   column of their own, the session pair at its right edge so the caret and
-   the pair land at one x on every row. They show on the highlighted row and
-   under the pointer; elsewhere they keep their place quietly, unless an undo
-   window is drawn there. Settings sits first in the pair, so a row with no
-   conversation to open leaves its gap at the end, beside the age. */
-.fp-verbs { grid-area: verbs; display: flex; justify-content: flex-end; align-items: center; height: var(--fp-line); visibility: hidden; }
-.fp-row:is([data-selected], :focus-within) > .fp-line .fp-verbs, .fp-verbs:has([data-verdict-pending]) { visibility: visible; }
-@media (hover: hover) { .fp-row:hover > .fp-line .fp-verbs { visibility: visible; } }
-.fp-verbs .ws-fiber-acts { --ws-act: var(--fp-control); --ws-act-icon: 15px; flex: 1; justify-content: space-between; gap: 8px; }
-.fp-verbs .ws-acts-session { display: grid; grid-template-columns: var(--fp-control) var(--fp-control); gap: 2px; }
-.ws-reader .fp-verbs .ws-acts-session .ws-header-icon { grid-row: 1; width: var(--fp-control); height: var(--fp-control); color: var(--ws-ink-soft); }
-.ws-reader .fp-verbs .ws-acts-session .ws-header-icon svg { width: 15px; height: 15px; }
-.fp-verbs .ws-acts-settings { grid-column: 1; } .fp-verbs .ws-acts-console { grid-column: 2; }
-/* What a thread holds, as one segmented control: each segment in a place of
-   its own (tapestry, constitution, sends), drawn on the acts' stroke grid; the
-   segments a row has share one outline, and the one open is pressed into it. */
-.fp-docs { --fp-seg: 28px; --fp-sends: 50px; grid-area: docs; justify-self: start; display: grid; grid-template-columns: var(--fp-seg) var(--fp-seg) var(--fp-sends); column-gap: 4px; height: var(--fp-control); margin-top: calc((var(--fp-line) - var(--fp-control)) / 2); white-space: nowrap; }
-.fp-docs:empty { visibility: hidden; }
-.fp-chip { --fp-edge: var(--ws-hairline-soft); position: relative; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: var(--fp-seg); height: 100%; margin: 0; padding: 0 6px; border: 1px solid var(--fp-edge); border-radius: var(--ws-control-radius); background: var(--ws-paper); color: var(--ws-ink-soft); font: var(--type-meta)/var(--leading-solid) var(--font-mono); cursor: pointer; }
-.fp-lead { grid-column: 1; } .fp-constitution { grid-column: 2; } .fp-sent { grid-column: 3; justify-content: flex-start; }
-.fp-chip > svg { flex: none; width: 15px; height: 15px; }
-.fp-row:is([data-selected], :hover) .fp-chip { --fp-edge: var(--ws-hairline); }
-.fp-chip:is(:hover, :focus-visible) { background: var(--ws-hover); color: var(--ws-ink); outline: none; }
-.fp-chip:focus-visible { box-shadow: inset 0 0 0 1px var(--ws-state-working); }
-.fp-chip:is([aria-pressed='true'], [aria-expanded='true']) { background: var(--ws-fill); color: var(--ws-ink); box-shadow: inset 0 1px 2px color-mix(in srgb, var(--ws-ink) 16%, transparent); }
-.fp-chip[data-unread] { padding-right: 9px; color: var(--ws-fresh); }
-.fp-chip[data-unread]::after { content: ''; position: absolute; top: 3px; right: 3px; width: 4px; height: 4px; background: var(--ws-fresh); transform: rotate(45deg); }
-/* A row's sends, one line each, on the row's text column: the age in a fixed column, then what the send carried, every item on one centre line and one gap apart. */
-.fp-files { --fp-age: 4ch; --fp-item-gap: 14px; display: grid; gap: 2px; margin: 4px 0 4px var(--fp-text); cursor: default; }
-/* The age hangs in the line's padding, so a carried item that wraps keeps to the items' column. */
-.fp-send { display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--fp-item-gap); min-width: 0; padding-left: calc(var(--fp-age) + var(--fp-item-gap)); font: var(--type-meta)/var(--leading-ui) var(--font-mono); }
-.fp-send-age { color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-ui) var(--font-mono); white-space: nowrap; }
-.fp-send > .fp-send-age { flex: none; width: var(--fp-age); margin-left: calc(-1 * (var(--fp-age) + var(--fp-item-gap))); }
-/* An item's box is its content; its hover plate and a figure's frame draw just outside it. */
-.fp-file { position: relative; isolation: isolate; display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; padding: 0; border: 0; background: none; color: var(--ws-ink); font: var(--type-label)/var(--leading-ui) var(--font-serif); text-align: left; cursor: pointer; }
-.fp-file::before { content: ''; position: absolute; inset: -1px -6px; z-index: -1; border: 1px solid transparent; border-radius: var(--ws-control-radius); }
-.fp-file:is(:hover, :focus-visible) { outline: none; }
-.fp-file:is(:hover, :focus-visible)::before { background: var(--ws-hover); }
-.fp-file-glyph { flex: none; display: inline-flex; color: var(--ws-ink-muted); }
-.fp-file-glyph > svg { width: 13px; height: 13px; }
-.fp-file-name { min-width: 0; overflow-wrap: anywhere; }
-.fp-file[data-unread] .fp-file-name::before, .fp-file-image[data-unread]::after { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 6px; vertical-align: 1px; background: var(--ws-fresh); transform: rotate(45deg); }
-.fp-file-image::before { inset: -3px; border-color: var(--ws-hairline-soft); }
-.fp-file-image:is(:hover, :focus-visible)::before { border-color: var(--ws-ink-soft); }
-.fp-file-image[data-unread]::after { position: absolute; top: -5px; right: -5px; margin: 0; }
-.fp-thumb { width: 60px; height: 44px; border-radius: 2px; box-shadow: inset 0 0 0 1px var(--ws-hairline-soft); }
-.fp-thumb .ws-thumbnail-face { padding: 4px; }
-.fp-older { justify-self: start; margin: 2px 0 0 -6px; padding: 1px 6px; border: 0; border-radius: var(--ws-control-radius); background: none; color: var(--ws-ink-muted); font: italic var(--type-meta)/var(--leading-ui) var(--font-serif); cursor: pointer; }
-.fp-older:hover, .fp-older:focus-visible { background: var(--ws-hover); color: var(--ws-ink); outline: none; }
-/* An open sent file's bar, in the list's place and on one centre line: the way back, its name and age, and the files either side. */
-.fp-open { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.fp-open .fp-file-name { color: var(--ws-ink); font: var(--type-label)/var(--leading-ui) var(--font-serif); }
-.fp-open-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto; }
-.fp-open-count { color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-ui) var(--font-mono); white-space: nowrap; }
-/* The bar's controls stand as tall as the row's chips. */
-.fp-back, .fp-step { flex: none; display: inline-flex; align-items: center; padding: 2px 6px; border: 1px solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: none; color: var(--ws-ink-soft); font: var(--type-meta)/var(--leading-solid) var(--font-mono); cursor: pointer; }
-.fp-step { border-color: transparent; }
-.fp-open > .fp-send-age { margin-right: auto; }
-.fp-back:hover, .fp-back:focus-visible, .fp-step:not(:disabled):hover, .fp-step:focus-visible { border-color: var(--ws-ink-soft); background: var(--ws-hover); color: var(--ws-ink); outline: none; }
-.fp-step:disabled { opacity: .35; cursor: default; }
-/* A document unfolded under its row, framed on the row's text column, at its own full height, in the page's one scroll. */
-.fp-doc { position: relative; margin: 6px 0 8px var(--fp-text); border: 1px solid var(--ws-hairline-soft); background: var(--ws-paper); cursor: auto; }
-.fp-doc[hidden] { display: none; }
-/* A file's download, quiet in its frame's top corner, as tall as the row's chips. */
-.fp-download { position: absolute; top: 6px; right: 6px; z-index: 2; display: inline-flex; align-items: center; justify-content: center; width: var(--fp-control); height: var(--fp-control); border: 1px solid var(--ws-hairline-soft); border-radius: var(--ws-control-radius); background: var(--ws-paper); color: var(--ws-ink-muted); }
-.fp-download > svg { width: 15px; height: 15px; }
-.fp-download:is(:hover, :focus-visible) { border-color: var(--ws-ink-soft); color: var(--ws-ink); outline: none; }
-.fp-doc .kbn-fileview-frame-wrap { height: 160px; }
-/* A PDF unfolds at its stage's own height, not a frame's. */
-.fp-doc .kbn-fileview-frame-wrap:has(> .kbn-fileview-pdf-stage) { height: auto; }
-.fp-doc .kbn-fileview-text-wrap, .fp-doc .ws-prose-scroll { overflow: visible; }
-.fp-doc .kbn-fileview-image-wrap { padding: 12px; }
-.fp-doc .kbn-fileview-image { max-height: none; }
-.fp-doc .kbn-fileview-pdf-stage { height: 85vh; }
-/* A change reader scrolls inside itself, so it unfolds at the PDF's stage height, never its content's. */
-.fp-doc .kbn-fileview-change { height: 85vh; }
-.fp-head { padding-top: 12px; padding-bottom: 10px; margin-bottom: 6px; border-bottom: 1px solid var(--ws-hairline-soft); }
-
-.fp-head .fp-note { -webkit-line-clamp: 5; color: var(--ws-ink); font-size: var(--type-row); }
-/* An unfolded row, or the head once selected, reads its whole outcome. */
-.fp-row:not(.fp-head)[data-open] > .fp-line > .fp-note, .fp-head[data-selected] > .fp-line > .fp-note { display: block; -webkit-line-clamp: unset; }
-.fp-section { margin-bottom: 2px; padding: 12px var(--fp-gutter) 3px calc(var(--fp-gutter) + var(--fp-level, 0) * 16px); border-bottom: 1px solid var(--ws-hairline-soft); color: var(--fm-text); font: var(--type-note)/var(--leading-solid) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
-.fp-aside { padding: 4px var(--fp-gutter) 4px calc(var(--fp-gutter) + var(--fp-text) + var(--fp-level, 0) * 16px); color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-tight) var(--font-mono); cursor: pointer; outline: none; }
-.fp-aside::before { content: '▸'; display: inline-block; width: 1.2em; margin-left: -1.2em; transition: transform .15s; }
-.fp-aside[aria-expanded='true']::before { transform: rotate(90deg); }
-.fp-aside[data-selected] { background: var(--ws-hover); }
-.fp-aside:hover { color: var(--ws-ink); }
-.fp-row:is([data-standing='aside']) .fp-name { color: var(--ws-ink-muted); }
-@container (max-width: 560px) {
-  .ws-family-grid { --fp-gutter: 16px; }
-  .fp-row { --fp-indent: calc(var(--fp-level, 0) * 12px); }
-  .fp-section { padding-left: calc(var(--fp-gutter) + var(--fp-level, 0) * 12px); }
-  /* Two lines: the name with its age, then what it holds and, on the highlighted row, its acts, at touch size. */
-  .ws-family-grid { --fp-control: 36px; }
-  .fp-title { grid-template-columns: 12px auto minmax(0, 1fr) auto; grid-template-areas: 'mark name name meta' '. docs verbs verbs'; row-gap: 2px; }
-  .fp-word { display: none; }
-  .fp-docs { --fp-seg: 44px; grid-template-columns: none; grid-auto-flow: column; margin-top: 4px; }
-  .fp-docs > .fp-chip { grid-column: auto; }
-  .fp-chip > svg { width: 18px; height: 18px; }
-  .fp-file, .fp-back, .fp-step { min-height: var(--ws-phone-target); }
-  /* A touch target is 44px however tall its drawing. */
-  .fp-chip::before, .ws-acts-verbs > button::before { content: ''; position: absolute; inset: calc((100% - var(--ws-phone-target)) / 2) 0; }
-  .ws-acts-verbs > button { position: relative; }
-  .fp-verbs { height: calc(var(--fp-control) + 8px); display: none; }
-  .fp-row[data-selected] > .fp-line .fp-verbs, .fp-verbs:has([data-verdict-pending]) { display: flex; }
-  .fp-verbs .ws-fiber-acts { --ws-act-icon: 19px; flex: 1; justify-content: space-between; gap: 6px; margin-left: 10px; }
-  .fp-verbs .ws-acts-session { grid-template-columns: var(--ws-phone-target) var(--ws-phone-target); gap: 0; }
-  .ws-reader .fp-verbs .ws-acts-session .ws-header-icon { width: var(--ws-phone-target); height: var(--ws-phone-target); }
-  .ws-reader .fp-verbs .ws-acts-session .ws-header-icon svg { width: 20px; height: 20px; }
-  /* The face keeps its mark and its word in the tooltip; the pill stays narrow enough to share the line. */
-  .fp-verbs .ws-verb-word { display: none; }
-  .fp-verbs .ws-verb-face { padding: 0 10px; }
-  .fp-verbs .ws-verb-more { width: 34px; }
+/* A compact head, for an orchestrator above or a thread below: dot, slug, a word, its run. */
+.ov-ancestor, .ov-thread {
+  display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 10px;
+  padding: 5px var(--ov-gutter); cursor: pointer; outline: none;
+  font: var(--type-meta)/var(--leading-ui) var(--font-mono); color: var(--ws-ink-soft);
 }
-@media (prefers-reduced-motion: reduce) {
-  .fp-row:not(.fp-head) > .fp-line { transition: none; }
-  .fp-row:not(.fp-head) > .fp-line > .fp-note { transition: none; }
-  .fp-row:not(.fp-head):is([data-selected], :focus-within) > .fp-line { transition: none; }
-  .fp-row:not(.fp-head):is([data-selected], :focus-within) > .fp-line > .fp-note { transition: none; }
-  .fp-aside::before { transition: none; }
+.ov-ancestor:is(:hover, :focus-visible), .ov-thread:is(:hover, :focus-visible) { background: var(--ws-hover); }
+.ov-ancestor .constitution-state-dot, .ov-thread .constitution-state-dot, .ov-head .constitution-state-dot { flex: none; align-self: center; width: 20px; height: 20px; }
+.ov-slug { min-width: 0; overflow-wrap: anywhere; color: var(--ws-ink); }
+.ov-ancestor .ov-slug { color: var(--ws-ink-soft); }
+.ov-word { color: var(--fm-text, var(--ws-ink-muted)); font-family: var(--font-serif); font-style: italic; white-space: nowrap; }
+.ov-time { color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-ui) var(--font-serif); white-space: nowrap; }
+
+/* The head: its dot and slug, whether it needs the human and its run, then its pages and its acts. */
+.ov-head {
+  display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; grid-template-areas: 'dot name tools' '. facts tools';
+  align-items: center; column-gap: 10px; row-gap: 2px;
+  padding: 18px var(--ov-gutter) 12px; outline: none;
+}
+.ov-head > .constitution-state-dot { grid-area: dot; }
+.ov-name { grid-area: name; min-width: 0; margin: 0; overflow-wrap: anywhere; font: 500 var(--type-title)/var(--leading-tight) var(--font-mono); color: var(--ws-ink); }
+.ov-facts { grid-area: facts; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; }
+/* Waiting on the human, in the owed gold every surface gives it. */
+.ov-needs {
+  padding: 0 8px; border: 1px solid var(--kbn-owed-bright); border-radius: 999px;
+  color: var(--ws-ink); background: color-mix(in srgb, var(--kbn-owed-bright) 14%, transparent);
+  font: var(--type-meta)/var(--leading-ui) var(--font-serif);
+}
+.ov-tools { grid-area: tools; display: flex; align-items: center; gap: 12px; }
+.ov-tools .ws-fiber-acts { --ws-act: 28px; --ws-act-icon: 15px; }
+
+/* The strip: the last thing it posted, then its tapestry or newest sent file, small. */
+.ov-strip { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 16px; margin: 0 var(--ov-gutter) 14px; padding: 12px 0; border-block: 1px solid var(--ws-hairline-soft); }
+.ov-strip[hidden], .ov-figure[hidden] { display: none; }
+.ov-said { min-width: 0; }
+.ov-said-age { display: block; color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-ui) var(--font-serif); }
+.ov-said-text {
+  margin: 2px 0 0; color: var(--ws-ink); font: var(--type-row)/var(--leading-prose) var(--font-serif); overflow-wrap: anywhere; white-space: pre-line;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
+}
+.ov-figure { padding: 0; border: 0; background: none; cursor: pointer; }
+.ov-figure:focus-visible { outline: none; }
+.ov-thumb.ws-thumbnail { width: 176px; height: 110px; border-radius: 3px; box-shadow: 0 0 0 1px var(--ws-hairline-soft); }
+.ov-figure:is(:hover, :focus-visible) .ov-thumb { box-shadow: 0 0 0 1px var(--ws-ink-soft); }
+
+/* Its threads. */
+.ov-threads { list-style: none; margin: 0; padding: 0; }
+
+@container (max-width: 560px) {
+  .ws-family-grid { --ov-gutter: 16px; }
+  .ov-head { grid-template-columns: 20px minmax(0, 1fr); grid-template-areas: 'dot name' '. facts' '. tools'; row-gap: 6px; }
+  .ov-tools { flex-wrap: wrap; gap: 6px; }
+  .ov-tools .ws-verb-word { display: none; }
+  .ov-strip { grid-template-columns: minmax(0, 1fr) 112px; gap: 10px; }
+  .ov-thumb.ws-thumbnail { width: 112px; height: 72px; }
 }

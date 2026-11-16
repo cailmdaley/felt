@@ -4,8 +4,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { buildKanbanResponseFromComposite } from './KanbanReadModel.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { boardCards, KanbanSurfaceRenderer, threadIndexFor } from './KanbanSurfaces.js'
-import { FamilyPage, placeAt } from './workspace/FamilyPage.js'
-import { conversations, servedFeed } from './testFixtures.js'
+import { FamilyPage } from './workspace/FamilyPage.js'
+import { servedFeed } from './testFixtures.js'
 
 const N = 472
 type Shape = Array<[id: string, parent: string | null]>
@@ -113,19 +113,18 @@ describe('thread read model at fleet scale', () => {
     })
     expect(work(N) / work(N / 4)).toBeLessThan(LINEAR)
   })
-  it('draws the family page for a deep chain in work linear in the subtree, from the response\'s own index', () => {
+  it('draws the view of a deep chain\'s deepest thread, its orchestrators above, in work linear in the chain, from the response\'s own index', () => {
     vi.stubGlobal('matchMedia', () => ({ matches: false }))
     try {
       const reads = (size: number) => {
         const board = buildKanbanResponseFromComposite(feed(chain(size)))
-        const root = board.now.inFlight.find(c => c.id === 'c0')!
         const deepest = boardCards(board).find(c => c.id.endsWith(`/c${size - 1}`))!
-        const index = threadIndexFor(board), page = new FamilyPage(conversations(), { marks: () => undefined, reach: () => 14 * 86_400_000, files: () => [], refresh: () => {}, lead: async () => undefined, embed: () => ({ el: document.createElement('div'), dispose: () => {} }), seen: () => {}, fiberAt: () => undefined, shuttleBase: '' }, placeAt(deepest), vi.fn())
+        const index = threadIndexFor(board), page = new FamilyPage({ marks: () => undefined, reach: () => 14 * 86_400_000, files: () => [], refresh: () => {}, lead: async () => undefined, said: () => undefined, open: () => {}, view: () => {}, shuttleBase: '' }, vi.fn())
         const before = threadIndexBuilds()
         // Map touches see the walks inside the index's methods, not only the calls.
-        const count = counted(Map.prototype, ['get', 'set', 'has', 'delete'], () => page.update(root, index))
+        const count = counted(Map.prototype, ['get', 'set', 'has', 'delete'], () => page.update(deepest, index))
         expect(threadIndexBuilds()).toBe(before)
-        expect(page.el.querySelectorAll('.fp-row')).toHaveLength(size)
+        expect(page.el.querySelectorAll('.ov-ancestor')).toHaveLength(size - 1)
         return count
       }
       expect(reads(N) / reads(N / 4)).toBeLessThan(LINEAR)

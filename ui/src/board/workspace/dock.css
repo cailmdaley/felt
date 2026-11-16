@@ -12,9 +12,14 @@
 .ws-band-identity { flex: 1 1 0; display: flex; align-items: center; gap: 0 12px; min-width: 0; }
 .ws-band-title {
   min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  color: var(--ws-ink); font: 500 var(--type-title)/var(--leading-tight) var(--font-serif);
+  color: var(--ws-ink); font: 500 var(--type-row)/var(--leading-tight) var(--font-mono);
 }
-.ws-band-thread { color: var(--ws-ink-muted); }
+/* Slugs in one weight: the channel's handle muted, then whom the box speaks to. */
+.ws-band-channel { color: var(--ws-ink-muted); }
+/* The console measures its own width, for whether its acts stand as buttons. */
+.ws-dock { container: dock / inline-size; }
+.ws-band-buttons { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+.ws-band-buttons[hidden], .ws-band-page[hidden] { display: none; }
 /* One context figure and the cache's warmth: a verdigris dot draining clockwise
    as the entry ages; cold, an alarm-red ring. Context carries its own tint (paintUsage). */
 .ws-band-meter { flex: none; align-self: center; display: inline-flex; align-items: center; gap: 6px; color: var(--ws-ink-muted); white-space: nowrap; font: var(--type-label)/var(--leading-prose) var(--font-mono); }
@@ -27,7 +32,7 @@
 }
 .ws-band-cache[data-cache='cold'] { border-color: var(--ws-cache-cold); background: transparent; }
 /* The console's menu of the fiber's acts; while a verdict waits out its undo window, its line stands here. */
-.ws-band-acts { flex: none; display: inline-flex; align-items: center; }
+.ws-band-acts { flex: none; display: inline-flex; align-items: center; gap: 6px; }
 .ws-band-acts[data-verdict-pending] { min-width: 10.5rem; justify-content: flex-end; }
 .ws-band-acts > .ws-verdict-undo { justify-content: flex-end; }
 /* A fiber's acts on its row: one verb button, then the session pair (conversation and
@@ -134,7 +139,7 @@
 /* Where the band is narrow the name steps down a size. */
 @media (min-width: 701px) {
   @container band (max-width: 760px) {
-    .ws-band-title { font-size: var(--type-prose); }
+    .ws-band-title { font-size: var(--type-meta); }
   }
 }
 
@@ -147,7 +152,6 @@
   .ws-acts-verbs > button { position: relative; }
   .ws-acts-verbs > button::before { content: ''; position: absolute; inset: calc((100% - var(--ws-phone-target)) / 2) 0; }
   .ws-band-head { gap: 6px; min-height: 0; padding: 2px 4px 0 12px; }
-  .ws-band-title { font-size: var(--type-prose); }
   .ws-dock .ws-worker-acts { --ws-box-line: var(--ws-phone-target); margin: 4px 8px 6px; }
   .ws-dock .ws-worker-tools .listen-dropdown { width: 32px; }
 }
@@ -374,3 +378,7 @@
 /* Data stays mono; verbs are serif plates. */
 .ws-dock .kbn-ctl-btn, .ws-dock .kbn-ctl-foot .kbn-ctl-btn,
 .ws-dock .kbn-ctl-history-toggle { font: var(--type-label)/var(--leading-ui) var(--font-serif) !important; }
+
+/* The console's acts as buttons where its head has room; the menu (⋯) holds them where it is short. */
+@container dock (min-width: 621px) { .ws-band-menu { display: none; } }
+@container dock (max-width: 620px) { .ws-band-buttons { display: none; } }

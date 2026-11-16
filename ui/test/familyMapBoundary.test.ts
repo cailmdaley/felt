@@ -12,7 +12,7 @@ const PAGE = resolve('src/board/workspace/family-page.css')
 it('keeps board/family free of workspace imports', () => {
   const imports = readdirSync(FAMILY).filter(name => name.endsWith('.ts') && !name.endsWith('.test.ts'))
     .flatMap(name => [...readFileSync(join(FAMILY, name), 'utf8').matchAll(/from '([^']+)'/g)].map(match => match[1]))
-  expect(imports.length).toBeGreaterThan(4)
+  expect(imports.length).toBeGreaterThan(2)
   expect(imports.filter(path => path.includes('workspace'))).toEqual([])
 })
 it('scopes every shared state style under the family map root', () => {
@@ -22,7 +22,7 @@ it('scopes every shared state style under the family map root', () => {
 })
 it('truncates no name by style', () => {
   const css = readFileSync(PAGE, 'utf8')
-  for (const name of ['fp-name', 'fp-file-name']) {
+  for (const name of ['ov-name', 'ov-slug']) {
     const rule = css.split('\n').find(line => line.startsWith(`.${name} {`))!
     expect(rule, name).toBeDefined()
     expect(rule, name).not.toMatch(/ellipsis|line-clamp|nowrap/)

@@ -193,7 +193,12 @@ describe('band header', () => {
     expect(band.el.querySelector('.ws-band-head > .ws-band-acts > .ws-band-menu')).not.toBeNull()
     expect(band.el.querySelector<HTMLElement>('.ws-band-acts')!.dataset.verdictKey).toBeTruthy()
     expect(band.el.dataset.column).toBe('awaitingReview')
-    expect(band.el.querySelector('.ws-band-title')?.textContent).toBe('A long and particular name')
+    // Slugs: whom the band speaks to, its name in the title's tooltip.
+    expect(band.el.querySelector('.ws-band-title')?.textContent).toBe('task')
+    expect(band.el.querySelector('.ws-band-title')?.getAttribute('title')).toBe('A long and particular name')
+    // Where the head has room, its acts stand as buttons beside the menu, in the one verdict host.
+    expect(band.el.querySelector('.ws-band-acts > .ws-band-buttons .ws-fiber-acts')).not.toBeNull()
+    expect(band.el.querySelector('.ws-band-buttons .ws-fiber-acts')!.hasAttribute('data-verdict-key')).toBe(false)
     expect(band.el.querySelector('textarea, [contenteditable]:not(.ws-worker-message)')).toBeNull()
     expect(await visibleVerbs(band)).toEqual(['Resume', 'New session', 'Temper', 'Discard'])
     dock.syncRuntime(task({ status: 'active', workerState: 'running', sessionUuid: 'resume-me', tmuxSession: 't' }))
@@ -677,7 +682,7 @@ describe('session verbs', () => {
     vi.mocked(fetch).mockClear()
     vi.mocked(fetch).mockResolvedValue(response({}))
     const field = messageField(actions.el)
-    expect(field.title).toBe('Message Thread')
+    expect(field.title).toBe('Message thread')
     type(field, 'pick up the plots')
     field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     await settle()
@@ -1190,21 +1195,22 @@ describe('session usage', () => {
     expect(usageReads()).toEqual([`/api/v1/transcript/usage?session=${id}&host=candide`])
   })
 
-  it('follows a highlighted thread: its name after the band\'s, its figures and its cache', async () => {
+  it('follows a thread it is aimed at: its channel\'s handle and its slug, its figures and its cache', async () => {
     const thread = '99999999-2222-3333-4444-555555555555'
     answering(url => ({ context: url.includes(thread) ? 40_000 : 182_340 }))
     const root = resting({ name: 'Unions' })
+    dock.setChannelOf(() => 'unions')
     dock.open(root)
     await settle()
     expect(part('context').textContent).toBe('182k')
     dock.setActionCard(task({ id: 'a/task/sub', uid: 'sub', name: 'Sub', status: 'closed', sessionUuid: thread, shuttleHost: 'cineca' }))
     await settle()
-    expect(part('fiber-title').textContent).toBe('Unions / sub')
+    expect(part('fiber-title').textContent).toBe('unions / sub')
     expect(part('context').textContent).toBe('40k')
     expect(usageReads().at(-1)).toBe(`/api/v1/transcript/usage?session=${thread}&host=cineca`)
     dock.setActionCard(root)
     await settle()
-    expect(part('fiber-title').textContent).toBe('Unions')
+    expect(part('fiber-title').textContent).toBe(`unions / ${root.id.split('/').pop()}`)
     expect(part('context').textContent).toBe('182k')
   })
 

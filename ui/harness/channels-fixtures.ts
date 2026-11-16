@@ -1,5 +1,5 @@
 import { WORKSPACE_HOST, type WorkspaceExample } from './workspace-fixtures.js'
-import type { BoardRecord } from '../src/board/channels.js'
+import type { BoardRecord } from '../src/board/boardFeed.js'
 
 interface Row {
   id: string
@@ -85,13 +85,16 @@ export function addChannelsFixtures(example: WorkspaceExample, now: number): Cha
   const ms = (minutes: number): number => now - minutes * 60_000
   const dir = (id: string): string => `/fixture-store/workspace/${id}`
   const rootOf = (id: string): string => { const row = ROWS.find(each => each.id === id)!; return row.parent ? rootOf(row.parent) : id }
-  example.feed.fibers = ROWS.map(row => {
+  // Every row has run: a live one since its launch, a stopped one until it handed off, a while before its last word.
+  const launched = (row: Row, n: number): number => row.minutes + 25 + (n * 37) % 140
+  example.feed.fibers = ROWS.map((row, n) => {
     const live = row.state === 'working' || row.state === 'idle'
     const active = !row.closed && (live || !!row.ask)
     return {
       origin: WORKSPACE_HOST, felt_store: '/fixture-store/workspace', path: `${row.id}/${row.id.split('/').at(-1)}.md`, dir: dir(row.id), orchestrator: row.parent,
       fiber: { id: row.id, uid: row.id, name: row.name, status: row.closed ? 'closed' : active ? 'active' : 'open', outcome: row.outcome, created_at: iso(row.minutes + DAY), modified_at: iso(row.minutes), closed_at: row.closed ? iso(row.minutes) : undefined,
-        shuttle: { kind: row.standing ? 'standing' : 'oneshot', host: WORKSPACE_HOST, project_dir: '/fixture-project', agent: 'claude-opus', role: row.role, seat: row.seat, channel: row.channel,
+        shuttle: { runtime: { dispatched_at: iso(launched(row, n)), handed_off_at: live ? undefined : iso(row.minutes) },
+          kind: row.standing ? 'standing' : 'oneshot', host: WORKSPACE_HOST, project_dir: '/fixture-project', agent: 'claude-opus', role: row.role, seat: row.seat, channel: row.channel,
           ask: row.ask ? { text: row.ask, at: iso(row.minutes) } : undefined,
           review: row.review ? { note: row.review, at: iso(row.minutes) } : undefined,
           thread_parent: row.parent ? { uid: row.parent, host: WORKSPACE_HOST, slug: row.parent, name: ROWS.find(parent => parent.id === row.parent)!.name } : undefined } },
@@ -106,27 +109,31 @@ export function addChannelsFixtures(example: WorkspaceExample, now: number): Cha
     }
   }
   /** A file a worker wrote in its own folder and sent: a plot drawn as SVG, or a short note. */
-  const wrote = (uid: string, name: string, minutes: number, title: string) => {
+  const wrote = (uid: string, name: string, minutes: number, title: string, caption?: string) => {
     const path = `${dir(uid)}/${name}`, svg = name.endsWith('.svg')
     const body = svg
       ? `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400" viewBox="0 0 640 400"><rect width="640" height="400" fill="#fbf6e9"/><text x="40" y="48" font-size="22" fill="#30291f">${title}</text><path d="M60 80V340H600" fill="none" stroke="#a39478"/><path d="M80 300C200 120 320 260 440 160S560 200 590 120" fill="none" stroke="#3f8278" stroke-width="3"/></svg>`
       : `# ${title}\n\nWritten for the channel.\n`
     example.files.push({ owner: WORKSPACE_HOST, path, mime: svg ? 'image/svg+xml' : 'text/markdown', body: new Blob([body], { type: svg ? 'image/svg+xml' : 'text/markdown' }) })
-    return { fullPath: path, basename: name, uid, host: WORKSPACE_HOST, sessionId: `session-${uid}`, timestamp: ms(minutes) }
+    return { fullPath: path, basename: name, uid, host: WORKSPACE_HOST, sessionId: `session-${uid}`, timestamp: ms(minutes), caption }
   }
-  const spectrum = wrote('cmbx/kappa-tsz', 'kappa-tsz-spectrum.svg', 30, 'κ × tSZ cross-spectrum')
+  const spectrum = wrote('cmbx/kappa-tsz', 'kappa-tsz-spectrum.svg', 30, 'κ × tSZ cross-spectrum', 'κ×tSZ at 9σ with the new beam; every null passes at p > 0.1.')
   const nulls = wrote('cmbx/kappa-tsz', 'null-tests.md', 30, 'Null tests')
+  const deck = '/fixture-store/workspace/cmbx/kappa-tsz/deck.html'
+  const deckSend = (minutes: number, caption: string) => ({ fullPath: deck, basename: 'deck.html', uid: 'cmbx/kappa-tsz', host: WORKSPACE_HOST, sessionId: 'session-cmbx/kappa-tsz', timestamp: ms(minutes), caption })
   example.receipts = [
-    spectrum, nulls,
-    wrote('cmbx/covariance', 'covariance-ratio.svg', 49, 'Analytic / simulated covariance'),
-    wrote('cmbx', 'weekly-plan.md', 300, 'The week in cmbx'),
-    wrote('pando/unions/west', 's8-posterior.svg', 60, 'S8 posterior, west run'),
+    // The deck was sent before, and again with the final numbers: only its newest send is drawn.
+    deckSend(120, 'First pass: 7σ before the new beam.'), deckSend(31, 'The deck for Thursday, with the final numbers.'), spectrum, nulls,
+    wrote('cmbx/covariance', 'covariance-ratio.svg', 49, 'Analytic / simulated covariance', 'The analytic and simulated covariances agree to 4% on every block.'),
+    wrote('cmbx', 'weekly-plan.md', 300, 'The week in cmbx', 'The plan for the joint fit this week.'),
+    wrote('pando/unions/west', 's8-posterior.svg', 60, 'S8 posterior, west run', 'The west run: S8 = 0.781 ± 0.019.'),
     wrote('morning-post', 'reply-drafts.md', 140, 'Two replies to send'),
     wrote('old-notes', 'lensing-notes.md', 21 * DAY, 'Lensing notes'),
   ]
-  const deck = '/fixture-store/workspace/cmbx/kappa-tsz/deck.html'
   example.files.push({ owner: WORKSPACE_HOST, path: deck, mime: 'text/html', body: new Blob(['<!doctype html><html><head><title>κ × tSZ</title><style>body{margin:0;background:#15232e;color:#f3eadc;font:32px Georgia}section{box-sizing:border-box;height:100vh;padding:9vh 8vw;display:flex;flex-direction:column;justify-content:center}h1{font-size:100px;margin:0 0 30px}p{color:#8fcebf}</style></head><body><section><p>CMB LENSING · NOVEMBER</p><h1>κ × tSZ at 9σ</h1><p>A new beam. Every null passes.</p></section></body></html>'], { type: 'text/html' }) })
-  example.sessions = []; example.commits = []
+  // Each row's launch, the started marks between a channel's items.
+  example.sessions = ROWS.map((row, n) => ({ at: ms(launched(row, n)), fiber: row.id, uid: row.id, session: `session-${row.id}`, harness: 'claude-code', agent: 'claude-opus', host: WORKSPACE_HOST, tmux: null, kind: 'dispatch' as const }))
+  example.commits = []
   let n = 0
   const said = (fiber: string, kind: string, minutes: number, over: Partial<BoardRecord> = {}): BoardRecord & { root: string } =>
     ({ id: `brd-${String(++n).padStart(3, '0')}`, type: 'board', kind, fiber, by: { fiber }, timestamp: ms(minutes), originName: WORKSPACE_HOST, root: rootOf(fiber), ...over } as BoardRecord & { root: string })
@@ -172,8 +179,6 @@ export function addChannelsFixtures(example: WorkspaceExample, now: number): Cha
     ].join('\n') }),
     said('mill/lander', 'post', 15, { text: 'Landed 58bda2a3d on main.' }),
   ]
-  // UNIONS was last read 45 minutes ago, so what came since sits under a New rule.
-  try { localStorage.setItem('shuttle.channels.seen:channel:unions', String(ms(45))) } catch { /* The rule is a convenience. */ }
   return {
     dismissed: [`hide:role:composer:${ms(60)}`],
     pinned: { 'fiber:garden': now - 3 * 86_400_000 },

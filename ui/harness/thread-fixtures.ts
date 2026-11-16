@@ -181,6 +181,8 @@ function addHubFixture(example: WorkspaceExample, now: number): void {
         outcome: row.note && row.state !== 'ask' ? row.note : undefined,
         created_at: new Date(moved - (row.parent ? row.hours / 2 + 20 + row.launches * 9 : 30 * 24) * hour).toISOString(), closed_at: closed ? new Date(moved).toISOString() : undefined,
         shuttle: { kind: 'oneshot', host: WORKSPACE_HOST, agent: 'codex-sol', project_dir: '/fixture-project',
+          // Its last run: from its last launch, until its last move for one stopped since.
+          runtime: launches.length ? { dispatched_at: new Date(Math.min(launches.at(-1)!, moved - hour / 3)).toISOString(), handed_off_at: phases[row.state] ? undefined : new Date(moved).toISOString() } : undefined,
           ask: row.state === 'ask' ? { text: row.note, at: new Date(moved).toISOString() } : undefined } },
       runtime: phases[row.state] ? { state: 'running', phase: phases[row.state], session_uuid: session, last_activity_at: moved } : null,
     })

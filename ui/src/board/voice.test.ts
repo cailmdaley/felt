@@ -356,7 +356,7 @@ describe('live voice', () => {
       expect(posts).toEqual([{ fiber_id: 'uid-a', origin: 'owner', name: 'A', recorder: 'audio-host' }])
       voice.dispose()
     })
-    it('lets the last focused of Rex and the board decide', async () => {
+    it('takes nothing when the board\'s window comes back: only a look made with the keyboard counts', async () => {
       const voice = await mounted(status({ target: held }))
       focused = false
       voice.see(worker)
@@ -364,11 +364,8 @@ describe('live voice', () => {
       expect(posts).toEqual([])
       focused = true
       window.dispatchEvent(new Event('focus')); await settle()
-      expect(posts).toEqual([{ fiber_id: 'uid-a', origin: 'owner', name: 'A' }])
-      focused = false
-      current = status({ target: held })
       await vi.advanceTimersByTimeAsync(2_000); await settle()
-      expect(posts).toHaveLength(1)
+      expect(posts).toEqual([])
       voice.dispose()
     })
     it('leaves a target that already agrees alone, and survives a refused write', async () => {
@@ -391,17 +388,6 @@ describe('live voice', () => {
       expect(posts).toEqual([])
       current = status({ target: held })
       await vi.advanceTimersByTimeAsync(15_000); await settle()
-      expect(posts).toEqual([{ fiber_id: 'uid-a', origin: 'owner', name: 'A' }])
-      voice.dispose()
-    })
-    it('claims the view when focus lands in a report frame, with no window focus event', async () => {
-      const voice = await mounted(status({ target: held }))
-      focused = false
-      voice.see(worker)
-      await vi.advanceTimersByTimeAsync(2_000); await settle()
-      expect(posts).toEqual([])
-      focused = true
-      await vi.advanceTimersByTimeAsync(2_000); await settle()
       expect(posts).toEqual([{ fiber_id: 'uid-a', origin: 'owner', name: 'A' }])
       voice.dispose()
     })

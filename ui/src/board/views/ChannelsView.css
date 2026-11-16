@@ -1,8 +1,8 @@
-/* Channels: a rail of channels, a channel's stream of short messages, and a
-   worker's thread beside it. Ink on parchment, the serif throughout; red marks
-   what is new, the owed gold what waits on the human. */
+/* Channels: a rail of channels, and a channel's stream of what its workers
+   addressed to the human. Ink on parchment, the serif throughout; the owed
+   gold marks what waits on the human. */
 .kbn-channels { touch-action: pan-y; }
-/* The page holds still: the rail, the stream and the thread each scroll on their own. */
+/* The page holds still: the rail and the stream each scroll on their own. */
 .kbn-channels .kbn-view-body { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 .kbn-channels .kbn-view-titlerow { gap: 16px; }
 .kbn-ch-note {
@@ -25,15 +25,6 @@
   font: var(--type-meta)/var(--leading-ui) var(--font-serif);
   pointer-events: none;
 }
-.kbn-ch-act {
-  padding: 0; border: 0; background: none; cursor: pointer;
-  font: var(--type-meta)/var(--leading-ui) var(--font-serif);
-  color: var(--kbn-ink-muted);
-  text-decoration: underline; text-decoration-thickness: 0.5px; text-underline-offset: 3px;
-  white-space: nowrap;
-}
-.kbn-ch-act:hover { color: var(--kbn-ink); }
-.kbn-ch-act:disabled { cursor: default; text-decoration: none; }
 .kbn-ch-hush { list-style: none; font: italic var(--type-row)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink-muted); }
 .kbn-channels button:focus-visible { outline: 1px solid var(--kbn-you); outline-offset: 1px; }
 
@@ -43,19 +34,11 @@
   display: grid;
   grid-template-columns: minmax(150px, 210px) minmax(0, 1fr);
 }
-.kbn-ch-layout[data-thread] { grid-template-columns: minmax(150px, 210px) minmax(0, 1fr) minmax(0, 0.8fr); }
 .kbn-ch-layout[data-rail-hidden] { grid-template-columns: minmax(0, 1fr); }
-.kbn-ch-layout[data-rail-hidden][data-thread] { grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr); }
 .kbn-ch-layout[data-rail-hidden] .kbn-ch-rail { display: none; }
-/* Too narrow for a channel and a thread side by side: a thread opens in the channel's place, with a way back. */
-.kbn-ch-layout[data-narrow][data-thread] { grid-template-columns: minmax(150px, 210px) minmax(0, 1fr); }
-.kbn-ch-layout[data-narrow][data-rail-hidden][data-thread] { grid-template-columns: minmax(0, 1fr); }
-.kbn-ch-layout[data-narrow][data-thread] > .kbn-ch { display: none; }
-.kbn-ch-layout[data-narrow] .kbn-ch-thread { border-left: 0; }
-.kbn-ch-layout[data-narrow] .kbn-ch-thread-close { align-self: flex-start; margin-left: -6px; }
 /* Narrow, the rail is a drawer drawn in over the stream from the left, ending where the console begins; the stream keeps its width. */
 .kbn-ch-layout[data-drawer] { position: relative; }
-.kbn-ch-layout[data-drawer], .kbn-ch-layout[data-drawer][data-thread] { grid-template-columns: minmax(0, 1fr); }
+.kbn-ch-layout[data-drawer] { grid-template-columns: minmax(0, 1fr); }
 .kbn-ch-layout[data-drawer] .kbn-ch-rail {
   display: flex; position: absolute; z-index: 3; top: 0; left: 0; bottom: var(--kbn-ch-console, 0px);
   width: min(260px, 85%); padding-left: 10px;
@@ -133,10 +116,8 @@
 .kbn-ch-doc-name { font: var(--type-row)/var(--leading-tight) var(--font-serif); overflow-wrap: anywhere; }
 .kbn-ch-doc-meta { font: var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); overflow-wrap: anywhere; }
 
-/* A channel: its name, its stream, the console to its chair. */
-.kbn-ch, .kbn-ch-thread { min-width: 0; min-height: 0; display: flex; flex-direction: column; outline: none; }
-.kbn-ch-thread { border-left: 0.5px solid var(--kbn-rule); }
-.kbn-ch-thread[hidden] { display: none; }
+/* A channel: its name and its chair's pages, its stream, the console to its chair. */
+.kbn-ch { min-width: 0; min-height: 0; display: flex; flex-direction: column; outline: none; }
 .kbn-ch-head {
   display: flex; align-items: center; gap: 2px 8px;
   padding: 8px 14px 8px 20px;
@@ -145,207 +126,91 @@
 .kbn-ch-back { display: none; }
 .kbn-ch-name { flex: 1; min-width: 0; margin: 0; font: 600 var(--type-title)/var(--leading-tight) var(--font-serif); color: var(--kbn-ink); overflow-wrap: anywhere; }
 .kbn-ch-name::before { content: '# '; color: var(--kbn-ink-muted); font-weight: 400; }
-/* To you, or All: a small pair of choices beside the channel's name. */
-.kbn-ch-scope { flex: none; display: inline-flex; gap: 2px; padding: 2px; border: 0.5px solid var(--kbn-rule-strong); border-radius: 7px; }
-.kbn-ch-scope-item {
-  padding: 1px 8px; border: 0; border-radius: 5px; background: none; cursor: pointer;
-  font: var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted);
-}
-.kbn-ch-scope-item:hover { color: var(--kbn-ink); }
-.kbn-ch-scope-item[aria-checked='true'] { background: color-mix(in srgb, var(--kbn-ink) 9%, transparent); color: var(--kbn-ink); }
 .kbn-ch-handle { font-family: var(--font-mono); font-size: var(--type-code); font-weight: 500; }
 .kbn-ch-empty { margin: 40px 0; text-align: center; font: italic var(--type-prose)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink-muted); }
 
+.kbn-ch-pages { margin-left: 4px; }
+
+/* The stream: each worker's item, and small marks of threads starting and stopping between them. */
 .kbn-ch-stream {
   flex: 1 1 auto; min-height: 0; overflow-y: auto;
   list-style: none; margin: 0; padding: 12px 0 8px;
   display: flex; flex-direction: column;
 }
 .kbn-ch-stream > .kbn-ch-hush { padding: 4px 20px; }
-/* Each speaker's run is ruled off from the one before it by a hairline across the row, with room on both sides; a run continues unruled. */
-.kbn-ch-stream > .kbn-ch-msg:not([data-continued]) { padding-top: 12px; }
-.kbn-ch-stream > .kbn-ch-msg:is(:last-child, :has(+ :not([data-continued]))) { padding-bottom: 12px; }
-.kbn-ch-stream > .kbn-ch-msg + .kbn-ch-msg:not([data-continued]) { background-image: linear-gradient(var(--kbn-rule), var(--kbn-rule)); background-size: calc(100% - 34px) 1px; background-position: 14px 0; background-repeat: no-repeat; }
-/* A message: the worker's dot in the gutter, then who and when, then what, whole. */
-.kbn-ch-msg {
+/* A mark: who and what, one small muted line. */
+.kbn-ch-mark {
+  display: flex; align-items: baseline; gap: 6px;
+  padding: 1px 20px 1px 42px;
+  font: var(--type-label)/var(--leading-ui) var(--font-mono); color: var(--kbn-ink-muted);
+}
+.kbn-ch-mark-what { font-family: var(--font-serif); font-style: italic; }
+.kbn-ch-mark .kbn-ch-age { font-family: var(--font-serif); }
+/* An item: the worker's dot in the gutter, then who, what kind and when, its one line and its pages side by side. */
+.kbn-ch-item {
   display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 0 8px;
-  padding: 6px 20px 6px 14px;
-  border-left: 2px solid transparent;
+  margin: 4px 0; padding: 8px 20px 8px 14px;
+  border-left: 2px solid transparent; cursor: pointer;
 }
-.kbn-ch .kbn-ch-msg { cursor: pointer; grid-template-columns: 20px minmax(0, 1fr) 28px; }
-/* A line's ✓, at its right. */
-.kbn-ch-check:disabled { cursor: default; opacity: 0.4; }
-.kbn-ch .kbn-ch-msg.kbn-ch-cleared { cursor: default; padding-block: 2px; }
-.kbn-ch .kbn-ch-msg.kbn-ch-cleared:hover { background: none; }
-.kbn-ch .kbn-ch-msg:hover { background: color-mix(in srgb, var(--kbn-ink) 4%, transparent); }
-.kbn-ch-msg[data-chosen] { background: color-mix(in srgb, var(--kbn-ink) 6%, transparent); }
-.kbn-ch-msg[data-waiting] { border-left-color: var(--kbn-owed-bright); background: color-mix(in srgb, var(--kbn-owed-bright) 7%, transparent); }
-.kbn-ch-msg[data-waiting][data-kind='review'] { border-left-color: var(--kbn-agent); background: color-mix(in srgb, var(--kbn-agent) 4%, transparent); }
-.kbn-ch-msg .constitution-state-dot { width: 20px; height: 1.5em; }
-.kbn-ch-you { display: block; width: 20px; }
-.kbn-ch-msg-body { min-width: 0; }
-.kbn-ch-msg-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; font: var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); }
-.kbn-ch-msg-name {
+.kbn-ch-item:hover { background: color-mix(in srgb, var(--kbn-ink) 4%, transparent); }
+.kbn-ch-item[data-waiting] { border-left-color: var(--kbn-owed-bright); background: color-mix(in srgb, var(--kbn-owed-bright) 7%, transparent); }
+.kbn-ch-item .constitution-state-dot { width: 20px; height: 1.5em; }
+.kbn-ch-item-body { min-width: 0; }
+.kbn-ch-item-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; font: var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); }
+.kbn-ch-who {
   padding: 0; border: 0; background: none; cursor: pointer; text-align: left;
-  font: 700 var(--type-row)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink); overflow-wrap: anywhere;
+  font: 500 var(--type-row)/var(--leading-ui) var(--font-mono); color: var(--kbn-ink); overflow-wrap: anywhere;
 }
-span.kbn-ch-msg-name { cursor: default; }
-button.kbn-ch-msg-name:hover { color: var(--kbn-ink-soft); }
-.kbn-ch-msg[data-human] .kbn-ch-msg-name { color: var(--kbn-ink-soft); }
-/* Where what arrived since the last visit begins. */
-.kbn-ch-new { display: flex; align-items: center; gap: 8px; margin: 4px 20px 2px 14px; color: var(--kbn-you); }
-.kbn-ch-new::before, .kbn-ch-new::after { content: ''; flex: 1; border-top: 0.5px solid currentColor; }
-.kbn-ch-new::before { flex: 0 0 22px; }
-.kbn-ch-new span { font: 600 var(--type-label)/var(--leading-ui) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
-.kbn-ch-msg-text {
-  font: var(--type-row)/var(--leading-prose) var(--font-serif);
-  color: var(--kbn-ink);
-  overflow-wrap: anywhere;
+.kbn-ch-who:hover { color: var(--kbn-ink-soft); }
+.kbn-ch-kind { font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
+.kbn-ch-item[data-waiting] .kbn-ch-kind { color: var(--kbn-owed-deep, var(--kbn-ink)); font-weight: 600; }
+.kbn-ch-item-text {
+  margin: 2px 0 0; font: var(--type-row)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink);
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere;
 }
-.kbn-ch-msg[data-human] .kbn-ch-msg-text { color: var(--kbn-ink-soft); }
-.kbn-ch-msg-text[data-label]::before {
-  content: attr(data-label) ' · ';
-  font: 600 var(--type-label)/var(--leading-ui) var(--font-serif);
-  font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker);
-  color: var(--kbn-owed-deep, var(--kbn-ink-muted));
-}
-.kbn-ch-msg-text > * { margin: 0; }
-.kbn-ch-msg-text > * + * { margin-top: 0.5em; }
-.kbn-ch-msg-text > p:first-child { display: inline; }
-/* A close, a hand-off or another lifecycle line: one quiet line. */
-.kbn-ch-msg.kbn-ch-line { padding-block: 2px; }
-.kbn-ch-line .kbn-ch-msg-name { font-weight: 500; font-size: var(--type-meta); color: var(--kbn-ink-soft); }
-.kbn-ch-line .constitution-state-dot { height: 1.3em; }
-.kbn-ch-line-text { color: var(--kbn-ink-soft); }
-.kbn-ch-acts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin-top: 4px; }
-
-/* Files: images drawn small, every other file a chip. */
-.kbn-ch-attached { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin-top: 6px; }
-.kbn-ch-image {
-  display: flex; flex-direction: column; gap: 2px; max-width: min(320px, 100%);
-  padding: 0; border: 0; background: none; cursor: zoom-in; text-align: left;
-}
-.kbn-ch-image img {
-  display: block; height: 150px; width: auto; max-width: 100%; object-fit: contain;
-  border: 0.5px solid var(--kbn-rule-strong); border-radius: 6px; background: var(--kbn-paper-bright, var(--kbn-paper));
-}
-.kbn-ch-image-name { font: var(--type-meta)/var(--leading-ui) var(--font-mono); color: var(--kbn-ink-muted); overflow-wrap: anywhere; }
+/* Its one line runs on, its paragraphs and items together. */
+.kbn-ch-item-text * { display: inline; margin: 0; padding: 0; }
+.kbn-ch-item-text :is(p, li) + :is(p, li)::before { content: ' '; }
+/* Its files side by side: a page or a figure as its thumbnail alone, its title a small caption beneath; any other file a chip. */
+.kbn-ch-files { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin-top: 6px; }
 .kbn-ch-file {
-  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
-  padding: 3px 10px; border: 0.5px solid var(--kbn-rule-strong); border-radius: 6px;
-  background: color-mix(in srgb, var(--kbn-paper) 60%, transparent);
-  font: var(--type-meta)/var(--leading-ui) var(--font-mono); color: var(--kbn-ink-soft);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
+  display: inline-flex; flex-direction: column; gap: 3px; max-width: 100%;
+  padding: 0; border: 0; background: none; cursor: pointer; text-align: left; color: var(--kbn-ink-soft);
 }
-.kbn-ch-file::before { content: '▤'; color: var(--kbn-ink-muted); }
-.kbn-ch-file:hover { color: var(--kbn-ink); border-color: var(--kbn-ink-muted); }
-/* A file its host no longer holds. */
-.kbn-ch-file[data-gone] { border-style: dashed; color: var(--kbn-ink-muted); }
-/* A run of one sender's messages names it once; the rest sit closer under it. */
-.kbn-ch-msg[data-continued] { padding-top: 0; }
-.kbn-ch-msg[data-continued] .kbn-ch-msg-head:not(:has(.kbn-ch-line-text, .kbn-ch-msg-to)) .kbn-ch-age { display: none; }
-.kbn-ch-reopen { margin: 0; font-size: var(--type-meta); }
+.kbn-ch-file:not(.kbn-ch-thumb) {
+  flex-direction: row; padding: 3px 10px; border: 0.5px solid var(--kbn-rule-strong); border-radius: 6px;
+  font: var(--type-meta)/var(--leading-ui) var(--font-mono);
+}
+.kbn-ch-file:hover { color: var(--kbn-ink); }
+.kbn-ch-thumb { width: 168px; }
+.kbn-ch-thumb-face.ws-thumbnail { width: 168px; height: 105px; border-radius: 4px; box-shadow: 0 0 0 0.5px var(--kbn-rule-strong); }
+.kbn-ch-thumb-name { font: var(--type-label)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* The chair's tapestry, posted: its title and lede, read whole in place. */
-.kbn-ch-tapestry {
-  margin-top: 6px; padding: 10px 14px;
-  max-width: 44rem;
-  border: 0.5px solid var(--kbn-rule-strong); border-left: 3px solid var(--kbn-owed-bright); border-radius: 6px;
-  background: var(--kbn-paper-bright, var(--kbn-paper));
-}
-.kbn-ch-tapestry-kicker {
-  margin: 0; font: 600 var(--type-label)/var(--leading-ui) var(--font-serif);
-  font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); color: var(--kbn-ink-muted);
-}
-.kbn-ch-tapestry-title { margin: 0; font: 600 var(--type-prose)/var(--leading-tight) var(--font-serif); color: var(--kbn-ink); }
-.kbn-ch-tapestry-lede { margin: 4px 0 0; font: var(--type-row)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink-soft); }
-.kbn-ch-tapestry-page { margin-top: 10px; cursor: auto; }
-/* A worker's own tapestry under its line, and in its thread's head: a preview, its first figure in a fixed box beside the title and
-   the lede, one height whatever the figure's shape (a portrait page or a wide plot); it opens the page. */
-.kbn-ch-embed {
-  display: flex; gap: 12px; align-items: flex-start; overflow: hidden;
-  margin-top: 6px; padding: 8px 12px; width: 100%; max-width: 44rem;
-  border: 0.5px solid var(--kbn-rule-strong); border-left: 3px solid var(--kbn-owed-bright); border-radius: 6px;
-  background: var(--kbn-paper-bright, var(--kbn-paper)); color: inherit; text-align: left; font: inherit; cursor: pointer;
-}
-.kbn-ch-attached > .kbn-ch-embed { margin-top: 0; }
-.kbn-ch-embed:hover { border-color: var(--kbn-ink-muted); border-left-color: var(--kbn-owed-bright); }
-.kbn-ch-embed-figure { flex: none; display: block; width: min(40%, 220px); height: 160px; object-fit: contain; border-radius: 3px; background: var(--kbn-paper); }
-/* A sent page's figure is its starting page, drawn small and edged like a page. */
-.kbn-ch-embed-figure.ws-thumbnail { object-fit: initial; height: auto; aspect-ratio: 16 / 10; box-shadow: 0 0 0 0.5px var(--kbn-rule-strong); }
-.kbn-ch-embed-words { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.kbn-ch-embed-title { font: 600 var(--type-row)/var(--leading-tight) var(--font-serif); color: var(--kbn-ink); }
-.kbn-ch-embed-lede {
+/* What a close awaiting review came to, without a tapestry: its outcome, clamped. */
+.kbn-ch-outcome {
+  max-width: 44rem; padding: 6px 10px; border-left: 2px solid var(--kbn-rule-strong); border-radius: 4px;
+  background: color-mix(in srgb, var(--kbn-ink) 4%, transparent);
   font: var(--type-meta)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink-soft);
-  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; overflow-wrap: anywhere;
 }
-.kbn-ch-tapestry-page .kbn-fileview-frame-wrap, .kbn-ch-tapestry-page > .kbn-fileview { height: min(70vh, 760px); }
+.kbn-ch-outcome * { display: inline; margin: 0; padding: 0; }
+.kbn-ch-outcome :is(p, li) + :is(p, li)::before { content: ' '; }
 
-/* A thread: who, how it is, its outcome whole, then its history and the console to its worker. */
-.kbn-ch-thread-head { padding: 10px 20px 12px; border-bottom: 0.5px solid var(--kbn-rule); display: flex; flex-direction: column; gap: 6px; }
-.kbn-ch-thread-close { align-self: flex-end; margin-right: -6px; }
-.kbn-ch-thread-who { display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; }
-.kbn-ch-thread-name {
-  padding: 0; border: 0; background: none; cursor: pointer; text-align: left;
-  font: 600 var(--type-title)/var(--leading-tight) var(--font-serif); color: var(--kbn-ink); overflow-wrap: anywhere;
-}
-.kbn-ch-thread-name:hover { color: var(--kbn-ink-soft); }
-.kbn-ch-liveness {
-  padding: 0 8px; border-radius: 999px;
-  font: var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted);
-  border: 0.5px solid var(--kbn-rule-strong);
-}
-.kbn-ch-liveness[data-state='working'] { color: var(--kbn-agent); border-color: color-mix(in srgb, var(--kbn-agent) 50%, transparent); }
-.kbn-ch-liveness[data-state='waiting'] { color: var(--kbn-owed-deep, var(--kbn-ink)); border-color: var(--kbn-owed-bright); background: color-mix(in srgb, var(--kbn-owed-bright) 12%, transparent); }
-.kbn-ch-status { font: var(--type-row)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink-soft); overflow-wrap: anywhere; }
-.kbn-ch-status > * { margin: 0; }
-.kbn-ch-status > * + * { margin-top: 0.5em; }
+/* The console, docked under the stream. */
+.kbn-ch > .ws-dock { flex: none; }
 
-/* Each pane's console, docked under its list. */
-.kbn-ch > .ws-dock, .kbn-ch-thread > .ws-dock { flex: none; }
-
-/* A phone: one screen at a time — the rail, a channel, or a thread — each full width. */
+/* A phone: one screen at a time — the rail or a channel — each full width. */
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .kbn-channels { padding-inline: 0; }
   .kbn-ch-rail-toggle { display: none; }
-  .kbn-ch-layout, .kbn-ch-layout[data-thread], .kbn-ch-layout[data-rail-hidden], .kbn-ch-layout[data-rail-hidden][data-thread],
-  .kbn-ch-layout[data-narrow][data-thread], .kbn-ch-layout[data-narrow][data-rail-hidden][data-thread] { grid-template-columns: minmax(0, 1fr); }
+  .kbn-ch-layout, .kbn-ch-layout[data-rail-hidden] { grid-template-columns: minmax(0, 1fr); }
   .kbn-ch-layout:not([data-rail-hidden]) > :not(.kbn-ch-rail) { display: none; }
-  .kbn-ch-layout[data-rail-hidden][data-thread] > .kbn-ch { display: none; }
   .kbn-ch-rail { padding: 12px 16px; border-right: 0; }
   .kbn-ch-pick { padding: 9px 10px; font-size: var(--type-prose); }
-  .kbn-ch-thread { border-left: 0; }
   .kbn-ch-back { display: inline-grid; margin-left: -6px; }
   .kbn-ch-head { padding: 6px 10px 6px 16px; }
-  .kbn-ch-msg { padding: 6px 16px 6px 10px; }
-  .kbn-ch-thread-head { padding: 8px 16px 10px; }
-  .kbn-ch-thread-close { align-self: flex-start; }
-  .kbn-ch-tapestry-page .kbn-fileview-frame-wrap, .kbn-ch-tapestry-page > .kbn-fileview { height: 60vh; }
-  .kbn-ch-embed { flex-direction: column; }
-  .kbn-ch-embed-figure { width: 100%; height: 140px; }
+  .kbn-ch-item { padding: 8px 16px 8px 10px; }
+  .kbn-ch-mark { padding-left: 38px; }
+  .kbn-ch-thumb, .kbn-ch-thumb-face.ws-thumbnail { width: 132px; }
+  .kbn-ch-thumb-face.ws-thumbnail { height: 84px; }
 }
-
-/* A long line in the channel folds to two lines of running text, its paragraphs and items run together; Show more unfolds it in place. */
-.kbn-ch-msg-text[data-folded] { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
-.kbn-ch-msg-text[data-folded] * { display: inline; margin: 0; padding: 0; }
-.kbn-ch-msg-text[data-folded] :is(p, li, h1, h2, h3, h4, blockquote, pre) + :is(p, li, h1, h2, h3, h4, blockquote, pre)::before,
-.kbn-ch-msg-text[data-folded] > * + :is(ul, ol)::before { content: ' '; }
-.kbn-ch-more { display: block; margin-top: 2px; }
-/* A worker's thread, from its line in the channel. */
-.kbn-ch-replies {
-  display: inline-block; margin-top: 4px; padding: 0; border: 0; background: none; cursor: pointer; text-align: left;
-  font: 600 var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-agent);
-}
-.kbn-ch-replies .kbn-ch-replies-last, .kbn-ch-replies .kbn-ch-age { font-weight: 400; color: var(--kbn-ink-muted); }
-.kbn-ch-replies:hover { color: var(--kbn-ink); }
-/* What a thread waits on, and a closed fiber's conclusion, each labelled. */
-.kbn-ch-thread-ask, .kbn-ch-conclusion { padding: 6px 10px; border-radius: 6px; }
-.kbn-ch-thread-ask { border-left: 2px solid var(--kbn-owed-bright); background: color-mix(in srgb, var(--kbn-owed-bright) 8%, transparent); color: var(--kbn-ink); }
-.kbn-ch-thread-ask::before, .kbn-ch-conclusion::before {
-  display: block;
-  font: 600 var(--type-label)/var(--leading-ui) var(--font-serif);
-  font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); color: var(--kbn-ink-muted);
-}
-.kbn-ch-thread-ask::before { content: 'Asks'; }
-.kbn-ch-conclusion { border-left: 2px solid var(--kbn-rule-strong); background: color-mix(in srgb, var(--kbn-ink) 4%, transparent); }
-.kbn-ch-conclusion::before { content: 'Conclusion'; }
