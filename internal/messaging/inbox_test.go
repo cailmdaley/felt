@@ -16,12 +16,12 @@ func TestEntryWithoutWishesReadsAsItsEquivalentWishes(t *testing.T) {
 		name, file string
 		want       Wishes
 	}{
-		{"context", `{"request":{"address":"","text":"x","wake":false,"message_id":"m"},"queued_at":1}`, Wishes{Source: "message", Turn: "none", Session: "any", IfCostly: "hold"}},
-		{"wake", `{"request":{"address":"","text":"x","wake":true,"message_id":"m"},"queued_at":1}`, Wishes{Source: "message", Turn: "force", Session: "any", IfCostly: "hold"}},
-		{"context if busy", `{"request":{"address":"shuttle://h/claude/s","text":"x","wake":false,"context_if_busy":true,"message_id":"m"},"queued_at":1}`, Wishes{Source: "message", Turn: "ask", Session: "any", IfCostly: "hold"}},
-		{"wake if idle", `{"request":{"address":"","text":"x","wake":true,"context_if_busy":true,"message_id":"m"},"queued_at":1}`, Wishes{Source: "message", Turn: "ask", Session: "any", IfCostly: "hold"}},
-		{"idle only", `{"request":{"address":"","text":"x","wake":true,"idle_only":true,"message_id":"pulse-k-1"},"queued_at":1}`, Wishes{Source: "pulse", Turn: "idle", Session: "any", IfCostly: "hold"}},
-		{"thread result", `{"request":{"address":"","text":"x","wake":true,"message_id":"thread-closed-abc"},"queued_at":1,"attempt_address":"shuttle://h/codex/s"}`, Wishes{Source: "thread", Turn: "force", Session: "any", IfCostly: "fresh"}},
+		{"context", `{"request":{"address":"","text":"x","wake":false,"message_id":"m"},"queued_at":1}`, Wishes{Source: "message", Turn: "none", IfCostly: "hold"}},
+		{"wake", `{"request":{"address":"","text":"x","wake":true,"message_id":"m"},"queued_at":1}`, Wishes{Source: "message", Turn: "force", IfCostly: "hold"}},
+		{"context if busy", `{"request":{"address":"shuttle://h/claude/s","text":"x","wake":false,"context_if_busy":true,"message_id":"m"},"queued_at":1}`, Wishes{Source: "message", Turn: "ask", IfCostly: "hold"}},
+		{"wake if idle", `{"request":{"address":"","text":"x","wake":true,"context_if_busy":true,"message_id":"m"},"queued_at":1}`, Wishes{Source: "message", Turn: "ask", IfCostly: "hold"}},
+		{"idle only", `{"request":{"address":"","text":"x","wake":true,"idle_only":true,"message_id":"pulse-k-1"},"queued_at":1}`, Wishes{Source: "pulse", Turn: "idle", IfCostly: "hold"}},
+		{"thread result", `{"request":{"address":"","text":"x","wake":true,"message_id":"thread-closed-abc"},"queued_at":1,"attempt_address":"shuttle://h/codex/s"}`, Wishes{Source: "thread", Turn: "force", IfCostly: "fresh"}},
 	} {
 		path := filepath.Join(dir, tc.name+".json")
 		if err := os.WriteFile(path, []byte(tc.file), 0600); err != nil {
@@ -126,7 +126,6 @@ func TestEnqueueRefusesUnknownWishes(t *testing.T) {
 	for name, w := range map[string]Wishes{
 		"source":     {Source: "email"},
 		"turn":       {Turn: "later"},
-		"session":    {Session: "newest"},
 		"if_costly":  {IfCostly: "drop"},
 		"not_before": {NotBefore: "tomorrow"},
 	} {

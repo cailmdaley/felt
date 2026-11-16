@@ -22,8 +22,6 @@ type Wishes struct {
 	// Turn is none (context only), idle (start a turn only when the worker is
 	// idle), ask (start a turn; a costly wake may be held) or force.
 	Turn string `json:"turn"`
-	// Session is any, fresh or previous.
-	Session string `json:"session"`
 	// IfCostly says what to do instead of waking a large, cold session.
 	IfCostly string `json:"if_costly"`
 	// NotBefore is an RFC 3339 time before which readers leave the entry pending.
@@ -33,7 +31,6 @@ type Wishes struct {
 var wishValues = map[string][]string{
 	"source":    {"message", "human", "voice", "thread", "pulse", "notice"},
 	"turn":      {"none", "idle", "ask", "force"},
-	"session":   {"any", "fresh", "previous"},
 	"if_costly": {"hold", "fresh"},
 }
 
@@ -72,7 +69,7 @@ func legacyTurn(r Request) string {
 func (w Wishes) withDefaults(r Request) Wishes {
 	if w.Source == "" {
 		w.Source = "message"
-		for prefix, source := range map[string]string{"thread-": "thread", "pulse-": "pulse", "voice-": "voice", "claude-mail-failure-": "notice"} {
+		for prefix, source := range map[string]string{"thread-": "thread", "pulse-": "pulse", "voice-": "voice"} {
 			if strings.HasPrefix(r.MessageID, prefix) {
 				w.Source = source
 			}
@@ -80,9 +77,6 @@ func (w Wishes) withDefaults(r Request) Wishes {
 	}
 	if w.Turn == "" {
 		w.Turn = legacyTurn(r)
-	}
-	if w.Session == "" {
-		w.Session = "any"
 	}
 	if w.IfCostly == "" {
 		w.IfCostly = "hold"
@@ -94,7 +88,7 @@ func (w Wishes) withDefaults(r Request) Wishes {
 }
 
 func (w Wishes) validate() error {
-	for name, value := range map[string]string{"source": w.Source, "turn": w.Turn, "session": w.Session, "if_costly": w.IfCostly} {
+	for name, value := range map[string]string{"source": w.Source, "turn": w.Turn, "if_costly": w.IfCostly} {
 		if !slices.Contains(wishValues[name], value) {
 			return errCode("invalid_request", "unknown %s %q (want one of %s)", name, value, strings.Join(wishValues[name], ", "))
 		}

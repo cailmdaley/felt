@@ -27,7 +27,7 @@ A manifest lets recovery finish a claim or close interrupted between member-file
 ```json
 {
   "request": {"text": "…", "from": "life/vizier", "message_id": "m-1"},
-  "wishes": {"source": "message", "turn": "ask", "session": "any", "if_costly": "hold", "not_before": "2026-11-15T09:00:00Z"},
+  "wishes": {"source": "message", "turn": "ask", "if_costly": "hold", "not_before": "2026-11-15T09:00:00Z"},
   "queued_at": 1763190000000000000
 }
 ```
@@ -43,7 +43,6 @@ A routing inbox entry also carries `routing`, its publication's routing record, 
 |---|---|---|
 | `source` | `message`, `human`, `voice`, `thread`, `pulse`, `notice` | What produced the entry |
 | `turn` | `none`, `idle`, `ask`, `force` | Context only; a turn only in a worker observed idle; a turn that cost may hold; or an unconditional wake. Any but `none` starts a session for a fiber with no worker when its gate allows |
-| `session` | `any`, `fresh`, `previous` | Recorded session preference; the consumer does not act on it |
 | `if_costly` | `hold`, `fresh` | Hold context or request a fresh session instead of waking a large, cold session |
 | `not_before` | RFC 3339 time, or absent | When readers may first take it |
 
@@ -56,8 +55,8 @@ A busy fiber's Claude `ask` remains hook-eligible for 30 seconds, then consume u
 
 An entry without wishes reads as the wishes its request implies.
 `turn` comes from `idle_only`, then `context_if_busy`, then `wake`, else `none`.
-The id prefixes `thread-`, `pulse-`, `voice-` and `claude-mail-failure-` imply sources `thread`, `pulse`, `voice` and `notice`; other ids imply `message`.
-`session` defaults to `any`, and `if_costly` to `fresh` for thread results and `hold` otherwise.
+The id prefixes `thread-`, `pulse-` and `voice-` imply sources `thread`, `pulse` and `voice`; other ids imply `message`.
+`if_costly` defaults to `fresh` for thread results and `hold` otherwise.
 
 ## Enqueue
 
@@ -418,7 +417,7 @@ The session-only Claude fallback claims by moving an entry into `fallback/` and 
 
 | Command | Does |
 |---|---|
-| `shuttle inbox put <address> <message-id> <text>` | Enqueue, with `--source`, `--turn`, `--session`, `--if-costly`, `--not-before`, `--from` and `--derived`; silent on success |
+| `shuttle inbox put <address> <message-id> <text>` | Enqueue, with `--source`, `--turn`, `--if-costly`, `--not-before`, `--from` and `--derived`; silent on success |
 | `shuttle inbox pending <address>... [--waking]` | JSON address → pending count, or with `--waking` the count a launch would be for; unreadable addresses are named on stderr and omitted |
 | `shuttle inbox ls <address>` | Pending entries oldest first; `--json` includes wishes, queued time, sender and open attempt |
 | `shuttle inbox consume <fiber-key> <address-or-dash> <epoch> [--idle] [--unknown] [--busy] [--costly] [--message <id>]` | Consume for the current receiver, or with `-` and epoch 0 for a fiber with no worker; one JSON object with `action` (`wait`, `wake`, `context`, `fresh`, `launch`), the `members` sent or reserved, `turn` when an entry asks for a turn the worker's facts would decide, and with `--message` that entry's state after the pass (`message`: `delivered`, `sent`, `reserved`, `pending` or `unknown`). The answer is printed even when an open batch's send fails, which exits nonzero |
