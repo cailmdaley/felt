@@ -90,8 +90,9 @@ func TestClaudeAskWithoutNativeEndpointIsRefused(t *testing.T) {
 	}
 }
 
-// An ask to a session that has ended, whose native endpoint went with it, is
-// refused before anything is written and leaves nothing for a hook.
+// An ask to a session that has ended is refused as unavailable before
+// anything is written, though its native endpoint is still registered, and
+// leaves nothing for a hook.
 func TestClaudeAskToAnEndedSessionIsRefused(t *testing.T) {
 	env := testEnv(t)
 	req, sent := nativeClaudeFixture(t, env, func(frame map[string]any, f *os.File) { nativeRows(frame, f, false) })
@@ -99,11 +100,11 @@ func TestClaudeAskToAnEndedSessionIsRefused(t *testing.T) {
 	if err := RegisterMailbox(env, "claude", "session", "host", "", os.Getpid(), false); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(filepath.Join(mailboxDir(env, "claude", "session"), "native.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(mailboxDir(env, "claude", "session"), "native.json")); err != nil {
 		t.Fatal(err)
 	}
 	receipt, err := Send(context.Background(), env, "host", req)
-	if err == nil || receipt.Status != StatusRejected || sent.Load() != 0 || pendingMailboxText(t, env, "claude", "session", req.Text) {
+	if ErrorCode(err) != "unavailable" || receipt.Status != StatusRejected || sent.Load() != 0 || pendingMailboxText(t, env, "claude", "session", req.Text) {
 		t.Fatalf("receipt=%+v err=%v writes=%d", receipt, err, sent.Load())
 	}
 }
@@ -145,10 +146,10 @@ func TestClaudeNativeRefusalAnswersTheSender(t *testing.T) {
 	}
 }
 
-// A hook claim a dying hook left in a Claude session's mailbox, once that
-// session has ended, is inert: nothing sends its member, and the claim stays
-// on disk.
-func TestAnEndedSessionsDeadHookClaimHoldsNothingBack(t *testing.T) {
+// A hook emission that failed leaves its claim and its entry pending in the
+// Claude session's mailbox, and when the session then ends nothing sends the
+// entry.
+func TestAFailedHookClaimStaysAndNothingSendsItsEntryWhenTheSessionEnds(t *testing.T) {
 	env := testEnv(t)
 	req, sent := nativeClaudeFixture(t, env, func(frame map[string]any, f *os.File) { nativeRows(frame, f, false) })
 	req.Wake = false

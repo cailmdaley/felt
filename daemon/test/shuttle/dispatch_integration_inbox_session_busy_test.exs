@@ -36,8 +36,45 @@ defmodule Shuttle.DispatchIntegrationInboxSessionBusyTest do
     poll!(poller)
     assert {out, 0} = send.()
     assert out =~ "accepted #{address} (s-busy)"
-    refute harness_hook!(harness, uuid, "Stop") =~ "check the fit"
+    refute harness_hook!(harness, uuid, "UserPromptSubmit") =~ "check the fit"
     refute_receive {:wake, _}
+  end
+
+  # The receiver's native inbox queues the ask behind the running turn and the
+  # observation window ends before a reply: the sender's receipt says it is
+  # queued, and both the daemon's and the CLI's receipt checks take that
+  # answer for a wake.
+  test "an ask the busy session queues answers queued on claude-native", %{host: host} do
+    serve_api!(host)
+
+    uuid = session_uuid()
+    address = "shuttle://test-host/claude/#{uuid}"
+    sender = "shuttle://test-host/claude/#{session_uuid()}"
+    harness = claude_session!(uuid, :queue)
+    harness_hook!(harness, uuid, "UserPromptSubmit")
+
+    assert {out, 0} =
+             shuttle(
+               [
+                 "message",
+                 address,
+                 "check the fit",
+                 "--message-id",
+                 "s-queued",
+                 "--from",
+                 sender,
+                 "--json"
+               ],
+               stderr_to_stdout: false
+             )
+
+    assert_receive {:queued, queued}
+    assert queued =~ "check the fit"
+    receipt = Jason.decode!(out)
+    assert receipt["status"] == "queued"
+    assert receipt["transport"] == "claude-native"
+    assert receipt["detail"] =~ "next model call"
+    assert inbox(address) == []
   end
 
   defp session_uuid do

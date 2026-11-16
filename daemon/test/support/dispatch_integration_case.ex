@@ -912,6 +912,9 @@ defmodule Shuttle.Test.DispatchIntegrationCase do
   # Claude Code does, into the session's transcript, and sends the test
   # `{:wake, text}`. With `:hold` it sends `{:native_frame, receiver, frame}`
   # and waits for the test's `{:fate, :answer | :drop}`; `:drop` never answers.
+  # With `:queue` it records the message as queued behind a running turn, as
+  # Claude Code's transcript does, sends the test `{:queued, text}`, and never
+  # runs it.
   def native_socket!(uuid, transcript, mode \\ :answer) do
     dir = Path.join(System.tmp_dir!(), "ns-#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)
@@ -950,7 +953,22 @@ defmodule Shuttle.Test.DispatchIntegrationCase do
             :hold ->
               send(test, {:native_frame, self(), frame})
               receive do: ({:fate, fate} -> fate)
+
+            :queue ->
+              :queue
           end
+
+        if fate == :queue do
+          row = %{
+            type: "queue-operation",
+            operation: "enqueue",
+            sessionId: uuid,
+            content: frame["message"]["content"]
+          }
+
+          File.write!(transcript, Jason.encode!(row) <> "\n", [:append])
+          send(test, {:queued, frame["message"]["content"]})
+        end
 
         if fate == :answer do
           rows = [
