@@ -383,7 +383,7 @@ it('shows a close awaiting review with its outcome, clamped, when it has no tape
 })
 
 it('draws a post to the human with what it attached, gold while the daemon says it waits; a closing post is drawn once, as the outcome', async () => {
-  const human = { label: 'Cail' }
+  const human = { label: 'Sam' }
   const closed = card({ id: 'cmbx/cov', uid: 'V', name: 'Covariance', orchestrator: 'C', column: 'awaitingReview', status: 'closed', closedAt: at(40), outcome: 'Validated against **2000** simulations.' })
   const board = { C: [
     ...BOARD.C,

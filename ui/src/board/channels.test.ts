@@ -152,7 +152,7 @@ describe('composeStream', () => {
   const cov = card({ id: 'cmbx/cov', uid: 'V', name: 'Covariance', orchestrator: 'C', column: 'awaitingReview', status: 'closed', closedAt: at(48), outcome: 'Validated against 2000 simulations.', reviewMark: { note: 'Validated to 4%.', at: at(47) } })
   const beam = card({ id: 'cmbx/beam', uid: 'B', name: 'Beam', orchestrator: 'C', ...working(2) })
   const channel = named(compose([chair, kappa, mask, cov, beam]), 'channel:cmbx')
-  const human = { label: 'Cail' }, up = { fiber: 'C' }
+  const human = { label: 'Sam' }, up = { fiber: 'C' }
   const record = (id: string, kind: string, fiber: string, minutes: number, over: Partial<BoardRecord> = {}): BoardRecord => ({ id, kind, fiber, by: { fiber }, timestamp: now - minutes * minute, ...over })
   const send = (uid: string, name: string, minutes: number, caption?: string): SentFile => ({ fullPath: `/w/${uid}/${name}`, basename: name, uid, host: 'h', timestamp: now - minutes * minute, caption })
   const records = [
