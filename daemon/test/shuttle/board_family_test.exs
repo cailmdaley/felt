@@ -242,7 +242,7 @@ defmodule Shuttle.BoardFamilyTest do
                "t" => %{"id" => "1", "at" => 1}
              }
 
-      for kind <- ~w(human answered cleared rested) do
+      for kind <- ~w(human answered cleared rested run_tempered) do
         assert BoardFamily.waiting([
                  line("1", 1, "post", "t", @cail),
                  line("2", 2, kind, "t", nil)

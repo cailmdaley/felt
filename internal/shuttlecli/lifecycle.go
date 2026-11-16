@@ -809,6 +809,9 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 				return fmt.Errorf("--file attaches to the closing post: give it with --post")
 			}
 			if f, _, _, lookupErr := a.shuttleResolveFiberRef(args[0], true); lookupErr == nil {
+				if block, ok, err := shuttle.BlockOf(f); err == nil && ok && posting && block.Kind == "standing" && tempered != nil && *tempered {
+					return fmt.Errorf("%s is a standing constitution: tempering its run takes no closing post", args[0])
+				}
 				if marking && a.isOwnFiber(f) {
 					return fmt.Errorf("%s is your own constitution: whether the human reviews it is its orchestrator's decision; close it with 'shuttle close'", f.ID)
 				}

@@ -139,15 +139,15 @@ defmodule Shuttle.BoardFamily do
   # What a fiber says to someone: the newest stands for it and supersedes the rest.
   @lines ~w(post asked closed)
   # What handles a line addressed to the human: their reply, an answer, a
-  # cleared question, a rest.
-  @handled ~w(human answered cleared rested)
+  # cleared question, a rest, a tempered standing run.
+  @handled ~w(human answered cleared rested run_tempered)
 
   @doc """
   Each fiber whose line waits on the human, as `uid => %{"id", "at"}` of that
   line. A fiber's line is its newest post, question or close; it waits when it
   is addressed to a person (a `to` with a label and no fiber or session) and
   nothing has handled it since: a human line or answer to that fiber, a
-  cleared question, a rest, or the human's clear of its line (a `dismissed`
+  cleared question, a rest, a tempered run, or the human's clear of its line (a `dismissed`
   `clear:<uid>:<ms>` reaching the line's time, not voided by a newer
   `unclear:<uid>:<ms>`). Pass every record in the board's reach.
   """

@@ -29,7 +29,13 @@ defmodule ShuttleWeb.BoardController do
 
           case BoardFamily.prepare(entries, sessions, host, params) do
             nil ->
-              json(conn, %{family: nil, viewer: nil, records: [], reach_ms: Board.retention_ms()})
+              json(conn, %{
+                family: nil,
+                viewer: nil,
+                records: [],
+                reach_ms: Board.retention_ms(),
+                waiting: %{}
+              })
 
             context ->
               reach = now - Board.retention_ms()
@@ -39,7 +45,7 @@ defmodule ShuttleWeb.BoardController do
                 RemoteTemporalRegistry.entries_nowait(:board)
                 |> Map.values()
                 |> Enum.flat_map(& &1.items)
-                |> Enum.filter(&is_integer(&1["received_at"]))
+                |> Enum.filter(&(is_integer(&1["received_at"]) and &1["received_at"] >= reach))
 
               local = Board.all_since(reach)
 

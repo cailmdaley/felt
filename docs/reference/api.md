@@ -691,7 +691,7 @@ It returns `{family, viewer, records, reach_ms, waiting}`, `reach_ms` being the 
 A record is delivered when the viewer is its subject, actor or recipient, or is the orchestrator of a thread's ask, close, handoff, rest or unblock.
 An externally cleared ask about the viewer is not delivered.
 `waiting` maps each fiber uid whose line waits on the human to `{id, at}`, that line's record and time, computed over the board's whole reach whatever `since_ms` is.
-A fiber's line is its newest `post`, `asked` or `closed` record, so a newer one supersedes the last; it waits when its `to` is a person (a `label` with no `fiber` or `session`) and no `human`, `answered`, `cleared` or `rested` record about that fiber has come since, nor a `dismissed` `clear:<uid>:<ms>` reaching the line's time that a newer `unclear:<uid>:<ms>` has not voided.
+A fiber's line is its newest `post`, `asked` or `closed` record, so a newer one supersedes the last; it waits when its `to` is a person (a `label` with no `fiber` or `session`) and no `human`, `answered`, `cleared`, `rested` or `run_tempered` record about that fiber has come since, nor a `dismissed` `clear:<uid>:<ms>` reaching the line's time that a newer `unclear:<uid>:<ms>` has not voided.
 The default window is 24 hours, or six hours for `all=true`, limited to the board's 14-day reach and bounded by the two retained event files.
 Remote records carry `received_at`, the viewer daemon's first receipt time, preserved across refreshes and restarts.
 The family view filters and orders remote records by that time, so a delayed host or a skewed writer clock cannot hide an arrival behind the viewer's cursor.
