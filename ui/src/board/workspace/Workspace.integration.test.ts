@@ -240,16 +240,21 @@ it('gives a constitution a Change page beside its fiber page only when it names 
   expect(pages()[fiber + 1]).toBe(`change:host-b:${bodyCards[1].uid}`)
 })
 
-it('takes a verdict key on a report without moving the page, its undo in the band', async () => {
-  bodyCards = [{ ...cards[0], shuttleKind: 'oneshot', status: 'closed' }]
+it('takes a verdict key only in the constitution\'s view, and never on one of its other pages', async () => {
+  const original = cards[0]
+  cards[0] = { ...original, shuttleKind: 'oneshot', status: 'closed' }
+  onTestFinished(() => { cards[0] = original })
+  bodyCards = [cards[0]]
   workspace.open(bodyCards[0], 'Desk'); await settle()
   const report = docKey('host-a', '/notes/alpha/report.html', 'host-a')
   workspace.reader.openDocument(report); await settle()
-  const press = (key: string): void => { document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) }
-  press('t')
+  const press = (key: string): KeyboardEvent => { const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }); document.dispatchEvent(event); return event }
+  expect(press('t').defaultPrevented).toBe(false)
   expect(workspace.reader.document?.key).toBe(report)
-  expect(document.querySelectorAll('.ws-stage-band .ws-verdict-undo')).toHaveLength(1)
-  expect(document.querySelector('.ws-stage-band .ws-verdict-undo')?.textContent).toMatch(/^Tempered/)
+  expect(document.querySelectorAll('.ws-verdict-undo')).toHaveLength(0)
+  workspace.reader.openDocument(workspace.familyDocument(bodyCards[0])!); await settle()
+  press('t')
+  expect(document.querySelector('.ws-verdict-undo')?.textContent).toMatch(/^Tempered/)
   press('z')
   expect(document.querySelectorAll('.ws-verdict-undo')).toHaveLength(0)
 })
@@ -467,49 +472,18 @@ describe('bar Find transcripts', () => {
 })
 
 describe('workspace reader integration', () => {
-  it('s on the constitution page requests rest', async () => {
+  it('s in the constitution\'s view requests rest', async () => {
     workspace.dispose()
     const onRest = vi.fn()
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed), onRest })
-    const constitution = { ...cards[0], shuttleKind: 'oneshot' as const }
+    const original = cards[0], constitution = { ...original, shuttleKind: 'oneshot' as const }
+    cards[0] = constitution
+    onTestFinished(() => { cards[0] = original })
     bodyCards = [constitution]
-    workspace.open(constitution); await settle(); await settle()
+    workspace.open(constitution, 'Desk', workspace.familyDocument(constitution)); await settle(); await settle()
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 's', bubbles: true, cancelable: true }))
     expect(onRest).toHaveBeenCalledWith(expect.objectContaining({ uid: 'alpha' }), workspace.reader.el)
   })
-  it('a Question leads with its report rather than a remembered file', async () => {
-    const request = vi.mocked(fetch).getMockImplementation()!
-    vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/api/v1/file-info?')
-      ? Response.json({ exists: true }) : request(input, init))
-    const original = cards[0]; cards[0] = { ...original, shuttleKind: 'oneshot' }
-    onTestFinished(() => { cards[0] = original })
-    workspace.open(cards[0]); await settle(); await settle()
-    workspace.reader.openDocument(docKey('host-a', '/notes/alpha/table.html', 'host-a'))
-    workspace.openQuestion(cards[0]); await settle(); await settle()
-    expect(workspace.reader.document?.name).toBe('tapestry.html')
-    expect(document.querySelector('.ws-report-inset')).toBeNull()
-  })
-
-  it('a Question on a constitution with threads never paints its map', async () => {
-    const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
-      card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, ...over })
-    const feed = [thread({ id: 'hub', status: 'active', ask: { text: 'Which?', at: new Date().toISOString() } }), thread({ id: 'hub/a', orchestrator: 'hub', status: 'active' })]
-    bodyCards = feed
-    workspace.dispose()
-    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
-    workspace.openQuestion(feed[0])
-    await Promise.resolve()
-    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).not.toBe('family:host-a:hub')
-    await settle()
-    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).not.toBe('family:host-a:hub')
-  })
-
-  it('a Question without a report opens its constitution', async () => {
-    bodyOverrides.set('host-b:beta', 'A question without a report.')
-    workspace.openQuestion(cards[1]); await settle(); await settle()
-    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('fiber:host-b:beta')
-  })
-
   it('names the office the feed carries and repaints the page when it changes', async () => {
     const original = cards[0]
     const roles = (): string[] => [...document.querySelectorAll('.ws-fiber-role')].map(role => role.textContent ?? '')
@@ -551,6 +525,8 @@ describe('workspace reader integration', () => {
     workspace.update(); await settle()
     document.querySelector<HTMLButtonElement>('.ws-role-hold')!.click()
     await settle(); await settle()
+    expect(document.querySelector('.ws-selected .ov-name')?.textContent).toBe('alpha')
+    workspace.reader.openDocument(`fiber:host-a:alpha`); await settle()
     expect(document.querySelector('.ws-selected [data-part="fiber-title"]')?.textContent).toBe('Alpha')
     // The band stands over a constitution's pages; its fiber page holds no controls.
     expect(document.querySelector('.ws-stage-band .ws-dock')).not.toBeNull()
@@ -872,7 +848,7 @@ describe('workspace reader integration', () => {
     expect(selected()).toBe('family:host-a:lone')
     expect(workspace.familyDocument(card({ id: 'note', originId: 'host-a' }))).toBeUndefined()
   })
-  it('lands a Desk click on a constitution\'s view, even after reading a page of it, and a draft on its own page', async () => {
+  it('lands a Desk click on a constitution\'s view, even after reading a page of it, a draft\'s included', async () => {
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
       card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, ...over })
     const feed = [thread({ id: 'hub', status: 'active' }), thread({ id: 'hub/mid', orchestrator: 'hub', status: 'active' }), thread({ id: 'hub/draft', orchestrator: 'hub', status: 'open' })]
@@ -887,7 +863,7 @@ describe('workspace reader integration', () => {
     workspace.openFromDesk(feed[0]); await settle()
     expect(selected()).toBe('family:host-a:hub')
     workspace.openFromDesk(feed[2]); await settle()
-    expect(selected()).toBe('fiber:host-a:hub-draft')
+    expect(selected()).toBe('family:host-a:hub-draft')
   })
   it('follows Rex to a constitution\'s view, and stands on a page of the same fiber', async () => {
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
@@ -1136,7 +1112,7 @@ describe('workspace reader integration', () => {
     window.dispatchEvent(new Event('focus')); await holdOut()
     expect([sight.mock.calls.length, selections().length]).toStrictEqual([looks, moves])
   })
-  it('draws a lone constitution\'s view as its head with its pages, and a draft on its own page', async () => {
+  it('draws a lone constitution\'s view as its head with its pages, a draft\'s too, where its acts live', async () => {
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
       card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, ...over })
     const feed = [thread({ id: 'lone', status: 'active' }), thread({ id: 'draft', status: 'open' })]
@@ -1148,7 +1124,8 @@ describe('workspace reader integration', () => {
     expect(document.querySelectorAll('.ws-selected .ov-thread')).toHaveLength(0)
     expect(document.querySelector('.ws-selected .ov-head [data-part="constitution"]')).not.toBeNull()
     workspace.openFromDesk(feed[1]); await settle()
-    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('fiber:host-a:draft')
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('family:host-a:draft')
+    expect(document.querySelector('.ws-selected .ov-head .ws-acts-verbs')).not.toBeNull()
   })
   it('draws the map under its label bar, whose back is the way back, with no document menu', async () => {
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
@@ -1416,12 +1393,15 @@ describe('workspace reader integration', () => {
     expect(frame.doc.provenance.filter(p => p.kind === 'sent')).toHaveLength(1)
   })
 
-  it('opens a constitution on its report under the band, and keeps body links and embeds on its fiber page', async () => {
+  it('opens a constitution\'s report under the band, and keeps body links and embeds on its fiber page', async () => {
     const original = cards[0]
     cards[0] = { ...original, shuttleKind: 'oneshot' }
     onTestFinished(() => { cards[0] = original })
     await feedNamesReport()
     workspace.open(cards[0])
+    await settle()
+    expect(workspace.reader.document?.kind).toBe('family')
+    workspace.reader.openDocument(docKey('host-a', '/notes/alpha/report.html', 'host-a'))
     await settle()
     expect(workspace.reader.document?.name).toBe('report.html')
     const band = document.querySelector<HTMLElement>('.ws-stage-band')!
@@ -1553,24 +1533,11 @@ describe('workspace reader integration', () => {
     popover.mockRestore()
   })
 
-  it('a refused Desk start lands on its fiber with the host-specific inline recovery prompt', async () => {
-    const managed: KanbanCard = { ...cards[0], shuttleKind: 'oneshot', shuttleAgent: 'codex-sol' }
-    workspace.openStartPrompt(managed, { reason: 'arm_refused', needs: 'project_dir', host: 'host-a', message: 'Choose a project directory.' })
-    const band = workspace.dock.el
-    expect(document.activeElement).toBe(band.querySelector('.kbn-start-prompt input'))
-    await settle()
-    expect(workspace.isActive).toBe(true)
-    expect(window.location.hash).toContain('alpha@host-a')
-    expect(workspace.reader.document?.kind).toBe('fiber')
-    expect(band.querySelector('.kbn-start-prompt')?.textContent).toContain('Project directory on host-a')
-    expect(document.querySelector('.ws-dock-slot')).toBeNull()
-    expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining('/dispatch'), expect.anything())
-  })
-
   it('phone Back returns from the reader once; the inline controls add no history entry', async () => {
     workspace.dispose()
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('max-width'), addEventListener: vi.fn(), removeEventListener: vi.fn() }))
-    window.history.replaceState(null, '', '/')
+    // A fresh entry, so the session history ends here whatever earlier tests went back over.
+    window.history.pushState(null, '', '/')
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const historyLength = window.history.length
     workspace.open(cards[0])

@@ -48,7 +48,7 @@ Nested roots reset inherited typography and custom properties, so a foreign card
 
 ### Act zone
 
-The band and its verbs, Temper/Discard, verdict plates (and the undo line that takes their place while a verdict waits), and the fiber page's worker control are **act zones**, marked `data-part="act"`.
+The band, a constitution view's verbs (Temper/Discard), verdict plates (and the undo line that takes their place while a verdict waits), and the fiber page's worker control are **act zones**, marked `data-part="act"`.
 The `data-act` attribute identifies `band`, `verdict` or `worker`; it isn't permission for theme rules to enter.
 Each generated CSS scope stops before that zone, so even a broad `button { color: red }` rule can't select Temper or the worker control.
 The zone also resets inherited UI variables and typography to the unthemed defaults, accepting only `--ws-paper` and `--ws-ink` from the channel.

@@ -5,6 +5,9 @@ import './tokens.css'
 import './reader.css'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { constitutionAction } from './fiberPageState.js'
+
+/** The keys that act on a constitution's lifecycle: they act only from its view. */
+const VIEW_ACTS: readonly KeyIntent[] = ['temper', 'discard', 'toReview', 'rest']
 import { keyIntent, shouldForwardDocumentKey, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { MOBILE_MEDIA } from '../mobile.js'
@@ -659,6 +662,8 @@ export class Reader {
     if (intent === 'orchestrator') return this.opts.onOrchestrator?.() ?? false
     if (intent === 'tapestry') return this.opts.onTapestry?.() ?? false
     const actionCard = this.currentCard && (this.opts.actionCard?.(this.currentCard) ?? this.currentCard)
+    // A verdict and Rest are given in a constitution's view alone, where its head carries them.
+    if (VIEW_ACTS.includes(intent) && this.document?.kind !== 'family') return false
     if (constitutionAction(intent, actionCard, {
       verdict: (_, verdict) => this.opts.onVerdict?.(verdict),
       conversation: card => this.opts.onConversation?.(card),

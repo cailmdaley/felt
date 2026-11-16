@@ -33,12 +33,12 @@ const rowActs = (view: Dock, card: KanbanCard): HTMLElement => {
   document.body.append(acts.el)
   return acts.el
 }
-/** What the console's menu holds besides the lifecycle verbs. */
+/** What the console's menu holds: no lifecycle verb. */
 const PLACES = ['Open conversation', 'Constitution', 'Settings']
-/** The message box's verbs, then the lifecycle verbs in the console's menu. */
-const shownVerbs = async (view: Dock): Promise<string[]> => [
+/** The message box's verbs, then the lifecycle verbs the constitution's view draws for the card. */
+const shownVerbs = async (view: Dock, card: KanbanCard): Promise<string[]> => [
   ...(view.el.querySelector<HTMLElement>('.ws-worker-acts')?.hidden ? [] : [...view.el.querySelectorAll<HTMLButtonElement>('.ws-worker-acts button')].filter(button => !button.hidden).map(button => button.dataset.verb!)),
-  ...(await consoleActs(view.el)).filter(act => !PLACES.includes(act)),
+  ...await offeredVerbs(rowActs(view, card)),
 ]
 const menuOf = (view: Dock): HTMLButtonElement => view.el.querySelector<HTMLButtonElement>('.ws-band-head .ws-band-menu')!
 /** The message box's field, and typing into it. */
@@ -110,13 +110,13 @@ describe('change review delivery', () => {
 describe('band header', () => {
   const visibleVerbs = shownVerbs
 
-  it('names its session verbs by their words, and leads its menu with the lifecycle verb that fits', async () => {
+  it('names its session verbs by their words, and offers no lifecycle verb in its menu', async () => {
     dock.reset()
     dock.open(task({ status: 'active', sessionUuid: 'words' }))
     const words = (selector: string) => [...band.el.querySelectorAll<HTMLButtonElement>(selector)].filter(button => !button.hidden).map(button => button.querySelector('.ws-header-word')?.textContent)
     expect(words('.ws-worker-acts button')).toEqual(['Resume', 'New session'])
     expect(band.el.querySelector('.ws-band-head .ws-header-word')).toBeNull()
-    expect((await consoleActs(band.el))[0]).toBe('Close for review')
+    expect((await consoleActs(band.el)).filter(act => !PLACES.includes(act))).toEqual([])
   })
 
   it('draws its first line as identity, with the fiber\'s acts behind one menu', async () => {
@@ -127,7 +127,7 @@ describe('band header', () => {
     expect([...header.children].map(child => child.className)).toEqual(['ws-band-identity', 'ws-band-acts'])
     expect(menuOf(band).getAttribute('aria-label')).toBe("task's acts")
     expect(menuOf(band).getAttribute('aria-haspopup')).toBe('menu')
-    expect(await consoleActs(band.el)).toEqual(['Close for review', 'Rest', 'Temper', 'Discard', 'Open conversation', 'Settings'])
+    expect(await consoleActs(band.el)).toEqual(['Open conversation', 'Settings'])
   })
 
   it('seats its verbs and settings in the acts, and Listen\'s place in the message box', async () => {
@@ -142,7 +142,7 @@ describe('band header', () => {
 
   it('draws the verbs the lifecycle offers for each state', async () => {
     const controls = new Dock('', saved, undefined, undefined, { onRest: vi.fn() })
-    const visible = async (patch: Partial<KanbanCard>): Promise<string[]> => { controls.reset(); controls.open(task(patch)); document.body.append(controls.el); return visibleVerbs(controls) }
+    const visible = async (patch: Partial<KanbanCard>): Promise<string[]> => { controls.reset(); controls.open(task(patch)); document.body.append(controls.el); return visibleVerbs(controls, task(patch)) }
     expect(await visible({ status: 'open' })).toEqual(['Start', 'Close for review', 'Rest', 'Temper', 'Discard'])
     expect(await visible({ status: 'active', workerState: 'running', sessionUuid: 'live', tmuxSession: 'worker' }))
       .toEqual(['Send', 'New session', 'Close for review', 'Rest', 'Temper', 'Discard'])
@@ -195,14 +195,15 @@ describe('band header', () => {
     // Where the head has room, its acts stand as buttons beside the menu, in the one verdict host.
     expect(band.el.querySelector('.ws-band-acts > .ws-band-buttons .ws-fiber-acts')).not.toBeNull()
     expect(band.el.querySelector('.ws-band-buttons .ws-fiber-acts')!.hasAttribute('data-verdict-key')).toBe(false)
-    // Open conversation stands first among them, the constitution's page last.
+    // Open conversation stands first among them, the constitution's page last; its verdicts are its view's.
     const order = [...band.el.querySelectorAll<HTMLElement>('.ws-band-buttons :is(.ws-acts-console, .ws-acts-settings, .ws-acts-verbs, .ws-band-page)')].map(button => button.className.split(' ').find(name => /^ws-(acts|band)-/.test(name)))
-    expect(order).toEqual(['ws-acts-console', 'ws-acts-settings', 'ws-acts-verbs', 'ws-band-page'])
+    expect(order).toEqual(['ws-acts-console', 'ws-acts-settings', 'ws-band-page'])
     expect(band.el.querySelector('textarea, [contenteditable]:not(.ws-worker-message)')).toBeNull()
-    expect(await visibleVerbs(band)).toEqual(['Resume', 'New session', 'Temper', 'Discard'])
-    dock.syncRuntime(task({ status: 'active', workerState: 'running', sessionUuid: 'resume-me', tmuxSession: 't' }))
+    expect(await visibleVerbs(band, task({ status: 'closed', sessionUuid: 'resume-me' }))).toEqual(['Resume', 'New session', 'Temper', 'Discard'])
+    const live = task({ status: 'active', workerState: 'running', sessionUuid: 'resume-me', tmuxSession: 't' })
+    dock.syncRuntime(live)
     expect(band.el.dataset.column).toBe('inFlight')
-    expect(await visibleVerbs(band)).toEqual(['Send', 'New session', 'Close for review', 'Temper', 'Discard'])
+    expect(await visibleVerbs(band, live)).toEqual(['Send', 'New session', 'Close for review', 'Temper', 'Discard'])
   })
 
   it('offers named, keyboard-focusable icons in order without sheets on a row', () => {
@@ -261,12 +262,10 @@ describe('band header', () => {
     const rest = vi.fn(() => confirm.focus())
     dock.reset(); dock = band = new Dock('', saved, undefined, undefined, { onRest: rest })
     dock.open(task({ status: 'active' })); document.body.append(band.el)
-    await pressConsoleAct(band.el, 'Rest')
-    expect(rest).toHaveBeenCalledWith(expect.objectContaining({ id: 'a/task' }), menuOf(band))
-    expect(document.activeElement).toBe(confirm)
     const acts = rowActs(band, task({ status: 'active' }))
     await pressVerb(acts, 'Rest')
     expect(rest).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'a/task' }), acts.querySelector('.ws-acts-verbs'))
+    expect(document.activeElement).toBe(confirm)
   })
 
   it.each([['open', 'open'], ['closed', 'closed']])('offers no verdicts on a %s fiber without a shuttle block', async (_label, status) => {
@@ -367,14 +366,15 @@ describe('band settings', () => {
 })
 
 describe('shared verdict controls', () => {
-  it('uses the same lifecycle callback from both verdict buttons of the band', async () => {
+  it('gives a verdict from the view\'s acts through the band\'s lifecycle callback; the band\'s own menu offers none', async () => {
     const transition = vi.fn()
     const band = new Dock('', saved, transition)
     band.open(task({ status: 'closed' }))
     document.body.append(band.el)
     expect(band.el.dataset.part).toBe('act'); expect(band.el.dataset.act).toBe('band')
     expect(band.el.querySelector<HTMLElement>('.ws-band-acts')!.dataset.verdictKey).toBeTruthy()
-    await pressConsoleAct(band.el, 'Temper')
+    expect(await consoleActs(band.el)).not.toContain('Temper')
+    await pressVerb(rowActs(band, task({ status: 'closed' })), 'Temper')
     await pressVerb(rowActs(band, task({ status: 'closed' })), 'Discard')
     expect(transition.mock.calls.map(([card, target]) => [card.uid, target])).toEqual([
       ['task-uid', 'tempered'], ['task-uid', 'composted'],
@@ -388,7 +388,7 @@ describe('shared verdict controls', () => {
     const band = new Dock('', saved, transition)
     band.open(task({ status: 'active', sessionUuid: 'review' }))
     document.body.append(band.el)
-    await pressConsoleAct(band.el, 'Close for review')
+    await pressVerb(rowActs(band, task({ status: 'active', sessionUuid: 'review' })), 'Close for review')
     expect(transition.mock.calls.map(([card, target]) => [card.uid, target])).toEqual([['task-uid', 'awaitingReview']])
     band.reset()
     await settle()
@@ -837,17 +837,6 @@ describe('session verbs', () => {
     await settle()
     expect(band.el.querySelector('.kbn-start-prompt')).toBeNull()
     expect(band.el.querySelector('.kbn-detail-error')?.textContent).toBe(`On owner-host: ${message}`)
-  })
-
-  it('opens on a refused start with its prompt showing, retrying as a fresh start', async () => {
-    const refused = { reason: 'arm_refused', needs: 'project_dir', host: 'owner', message: 'No directory' } as const
-    dock.openStartPrompt(task({ inheritedProjectDir: { path: '/srv/checkout', from: 'work' } }), refused)
-    expect(band.el.querySelector('.kbn-start-prompt-reason')?.textContent).toBe('On owner: No directory')
-    vi.mocked(fetch).mockClear()
-    vi.mocked(fetch).mockResolvedValue(response({ tmux_session: 'worker' }))
-    band.el.querySelector<HTMLButtonElement>('.kbn-start-prompt .kbn-ctl-send')!.click()
-    await settle()
-    expect(writes()[0]).toMatchObject({ resume_mode: 'fresh', project_dir: '/srv/checkout' })
   })
 
   it('offers the prompt again after a failed retry', async () => {

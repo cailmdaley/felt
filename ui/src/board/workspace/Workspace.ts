@@ -1,4 +1,3 @@
-import { turnOf } from '../turn.js'
 import { slug } from '../threadOutline.js'
 import { ThreadIndex, cardNamed } from '../threads.js'
 import { hasWorkerToStop, type KanbanCard } from '../KanbanTypes.js'
@@ -6,7 +5,7 @@ import type { ConsoleOptions, Dock } from './Dock.js'
 import { Verdicts, confirmWorkerStop, type Verdict } from './Verdicts.js'
 import { onDesk, reviewReachable, verdictReachable } from './fiberPageState.js'
 import { type Charter, charters, holdsRevision, mayBeCharter, roleHolds, roleSlug } from './RolePage.js'
-import type { DispatchFailureBody } from '../KanbanModalShared.js'
+import { isAgentCard } from '../KanbanModalShared.js'
 import { readFiber } from './fiberSource.js'
 import { inLane } from '../requestLanes.js'
 import { cardFromCompositeEntry } from '../KanbanReadModel.js'
@@ -14,7 +13,7 @@ import { normalizeSentFiles, type SentFile } from '../sentFiles.js'
 import { fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
 import type { DeskPlacement } from '../deskOrdering.js'
 import { head, RESOURCE_PRIORITY } from '../documentResources.js'
-import { COMPANION_NAMES, channelLead, documentActivity, familyKey, fiberKey, isBaked, isDrawn, leadReceipt, buildChannel, normalizeAbsolutePath, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
+import { COMPANION_NAMES, documentActivity, familyKey, fiberKey, isBaked, isDrawn, leadReceipt, buildChannel, normalizeAbsolutePath, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { conversationDevice } from '../conversationOpening.js'
 import { selectWorker } from '../sessionHistory.js'
 import { buildFiberProse } from './FiberProse.js'
@@ -85,8 +84,6 @@ interface ChannelState {
   /** The owner file-time reads in flight, at most one per channel. */
   metadataRead?: Promise<boolean>
   selected?: DocKey
-  /** The next arrival lands on the channel's lead page, whatever it last showed. */
-  leadLanding?: boolean
   routedFile?: DocKey
   loaded: boolean
   familyPage?: FamilyPage
@@ -147,7 +144,6 @@ export class Workspace {
   private routeEpoch = 0
   /** A route applied now is not a click: the board's load, or a session asking for a page. It moves neither Rex nor voice. */
   private quiet = false
-  private startPrompt: { card: KanbanCard; failure: DispatchFailureBody } | null = null
   /** The complete board-card payload used by the reader's thread and runtime surfaces. */
   private lastUpdateRevision = ''
   private lastRenderedFamilyRevision = ''
@@ -315,21 +311,6 @@ export class Workspace {
     this.picker.show(this.root)
     this.library.refresh()
   }
-  /** A refused Desk launch enters the document channel and exposes its recovery form. */
-  openStartPrompt(card: KanbanCard, failure: DispatchFailureBody): void {
-    this.startPrompt = { card, failure }
-    this.open(card)
-  }
-
-  /** A Question card leads with its report, even after a previous visit to prose. */
-  openQuestion(card: KanbanCard): void {
-    this.landOnLead(this.ensure(card))
-    this.open(card)
-  }
-  private landOnLead(state: ChannelState): void {
-    state.leadLanding = true
-    state.selected = undefined
-  }
   /** One of a constitution's pages, opened from its view or a channel: a deliberate look at it. */
   private openDocument(card: KanbanCard, doc: DocKey): void {
     if (this.isActive) this.open(card, this.origin, doc, this.library.hasMetadata(card))
@@ -342,10 +323,7 @@ export class Workspace {
   /** A click on a constitution, from any surface: its view opens, and Rex and voice follow it; a `quiet` opening moves neither. */
   openFromDesk(clicked: KanbanCard, quiet = false): void {
     const card = this.live(clicked), view = this.familyDocument(card)
-    const open = (): void => {
-      if (!view && card.status === 'active' && turnOf(card).turn === 'question') this.openQuestion(card)
-      else this.open(card, this.isActive ? this.origin : this.opts.origin(), view)
-    }
+    const open = (): void => { this.open(card, this.isActive ? this.origin : this.opts.origin(), view) }
     if (quiet) { this.quietly(open); return }
     open()
     void this.look(card)
@@ -425,10 +403,10 @@ export class Workspace {
     this.globeHost.onFeeds?.()
   }
   private graph(): ThreadIndex { return this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards()) }
-  /** A fiber past its draft has a view when it is a constitution or has threads; a draft, threads or not, opens on its own page to be written. */
+  /** A fiber has a view when it is on the lifecycle, a draft included (its acts live there), or has threads. */
   private hasMap(card: KanbanCard): boolean {
     const index = this.graph(), current = index.card(card)
-    return index.state(current) !== 'drafts' && (index.children(current).length > 0 || current.shuttleKind !== undefined)
+    return index.children(current).length > 0 || (isAgentCard(current) && !current.isCycle)
   }
 
   /** The open thread's orchestrator; false outside a thread. */
@@ -791,7 +769,7 @@ export class Workspace {
     }
     // Selection resolves before the first paint; data arriving later never moves it.
     // A constitution with threads lands on their view; any other on its report.
-    const wanted = route.doc ?? state.selected ?? (state.leadLanding ? channelLead(state.channel)?.key : this.familyDocument(state.card)) ?? this.knownReport(state)
+    const wanted = route.doc ?? state.selected ?? this.familyDocument(state.card) ?? this.knownReport(state)
     const loadedBefore = state.loaded && state.runFinal
     if (wanted) this.intend(state, wanted)
     this.opts.onVisibility(true)
@@ -799,18 +777,8 @@ export class Workspace {
     this.show(state)
     // Opening a page is a deliberate look at its fiber; nothing that redraws it looks again.
     if (!this.quiet) void this.look(state.card)
-    const prompt = this.startPrompt
-    if (prompt && (prompt.card.uid ?? prompt.card.id) === state.channel.uid && prompt.card.originId === state.channel.owner) {
-      this.startPrompt = null
-      this.dock.openStartPrompt(prompt.card, prompt.failure)
-      if (!window.matchMedia('(max-width: 600px)').matches) this.dock.el.querySelector<HTMLElement>('.kbn-start-prompt input')?.focus({ preventScroll: true })
-    }
     await bodyRead
     if (this.disposed || epoch !== this.routeEpoch || this.current !== state || !this.isActive) return
-    if (state.leadLanding) {
-      state.leadLanding = false
-      state.selected = channelLead(state.channel)?.key
-    }
     this.show(state, loadedBefore)
     this.startTimer()
   }

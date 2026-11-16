@@ -7,7 +7,7 @@ import { attachConversationPicker, openActionMenu, type ConversationAction } fro
 import { canOpenDesktopApp } from '../conversationLinks.js'
 import { confirmWorkerStop, markVerdictHost, type Verdict } from './Verdicts.js'
 import { CONVERSATION_OPENING_CHANGED, conversationDestinations, conversationDevice, conversationOpening, linkDestination, resolveDestination, openDestination, type ConversationDestination, type WorkerOpener } from '../conversationOpening.js'
-import { hasLiveWorker, hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from '../KanbanTypes.js'
+import { hasLiveWorker, hasWorkerToStop, type KanbanCard, type ShuttleKind } from '../KanbanTypes.js'
 import { agentGroups } from '../../forms/agents.js'
 import { dispatchFailureMessage, isAgentCard, needsProjectDir, postForceDispatch, type DispatchFailureBody, type PastedImage } from '../KanbanModalShared.js'
 import { getDaemonJson, postDaemonJson } from '../daemonApi.js'
@@ -414,7 +414,7 @@ export class Dock {
   private readonly timers = new Set<number>()
   private readonly shuttleBase: string
   private readonly onSaved: () => void
-  private readonly onTransition: (card: KanbanCard, target: ColumnKind) => void
+  private readonly onTransition: (card: KanbanCard, target: Verdict) => void
   private queueVerdict?: (card: KanbanCard, target: Verdict) => void
   private readonly onOpenWorker?: WorkerOpener
   private readonly phone: PhoneListening | undefined
@@ -428,7 +428,7 @@ export class Dock {
   constructor(
     shuttleBase: string,
     onChanged: () => void,
-    onTransition?: (card: KanbanCard, target: ColumnKind) => void,
+    onTransition?: (card: KanbanCard, target: Verdict) => void,
     onWorkerOpen?: (tmuxSessionName: string, shuttleHost?: string) => void,
     opts: DockOptions = {},
   ) {
@@ -638,18 +638,19 @@ export class Dock {
   }
 
   /**
-   * A fiber's acts, for whatever draws a row for it: its lifecycle verbs as one
-   * button ({@link verbButton}), then its session pair, its conversation (as `c`
-   * opens it) and its settings sheet. The whole strip is the fiber's verdict
-   * host, so an undo window takes its place, unless `host` is false: a strip
-   * standing inside a host of its own.
+   * A fiber's acts, for whatever draws a head for it: its session pair, its
+   * conversation (as `c` opens it) and its settings sheet, then, where
+   * `verbs` (a constitution's view, the one place a verdict is given), its
+   * lifecycle verbs as one button ({@link verbButton}). The whole strip is
+   * the fiber's verdict host, so an undo window takes its place, unless
+   * `host` is false: a strip standing inside a host of its own.
    */
-  actsFor(target: () => KanbanCard, { host = true } = {}): FiberActs {
+  actsFor(target: () => KanbanCard, { host = true, verbs: lifecycle = true } = {}): FiberActs {
     const el = document.createElement('span')
     el.className = 'ws-fiber-acts'
     el.dataset.part = 'acts'
     el.setAttribute('role', 'group')
-    const verbs = this.verbButton(target)
+    const verbs = lifecycle ? this.verbButton(target) : null
     const conversation = this.buildConsole(target)
     const settings = document.createElement('button')
     settings.type = 'button'
@@ -662,12 +663,12 @@ export class Dock {
     const session = document.createElement('span')
     session.className = 'ws-acts-session'
     session.append(conversation.el, settings)
-    el.append(session, verbs.el)
+    el.append(session, ...verbs ? [verbs.el] : [])
     const paint = (): void => {
       const card = target(), who = slug(card)
       if (host) markVerdictHost(el, card)
       el.setAttribute('aria-label', `${who}'s acts`)
-      verbs.paint(card, who)
+      verbs?.paint(card, who)
       conversation.paint()
       settings.hidden = !this.seated || !this.settingsFor
       settings.title = `Settings for ${who}`
@@ -814,15 +815,9 @@ export class Dock {
     })
   }
 
-  /** The console menu's acts for a fiber: its lifecycle verbs, the one that fits its state first, then its conversation, its page and its settings. */
+  /** The console menu's acts for a fiber: its conversation, its page and its settings. Its verdicts are its view's. */
   private bandActions(card: KanbanCard, anchor: HTMLElement): ConversationAction[] {
-    const offered = lifecycleVerbsFor(card, !!this.onRest), lead = leadVerb(card, offered)
-    const verbs = lead ? [lead, ...offered.filter(verb => verb !== lead)] : offered
-    const actions: ConversationAction[] = verbs.map(verb => ({
-      label: verbSpec(verb, card).label,
-      dress: (item: HTMLButtonElement) => { dressVerb(item, verb, card) },
-      run: () => { if (verb === 'rest') this.onRest?.(card, anchor); else this.verdict(card, VERB_VERDICT[verb]) },
-    }))
+    const actions: ConversationAction[] = []
     const action = (label: string, icon: HeaderIcon, run: () => void): ConversationAction =>
       ({ label, dress: item => { dressAction(item, icon, label) }, run })
     if (this.conversationRoute(card)) actions.push(action('Open conversation', 'console', () => { this.openConversation(card) }))
@@ -1030,8 +1025,8 @@ export class Dock {
       openActionMenu(menu, this.bandActions(act, menu), `${slug(act)}'s acts`)
     })
     acts.append(menu)
-    // Where the head has room, the menu's acts stand as buttons: the conversation first, settings, the lead verb, then the constitution.
-    const shown = this.actsFor(target, { host: false })
+    // Where the head has room, the menu's acts stand as buttons: the conversation first, settings, then the constitution.
+    const shown = this.actsFor(target, { host: false, verbs: false })
     this.disposers.push(() => shown.dispose())
     const page = document.createElement('button')
     page.type = 'button'
@@ -1572,12 +1567,6 @@ export class Dock {
 
     wrap.append(shown, inputPart, content)
     return wrap
-  }
-
-  /** Open on a card whose start was refused for want of a project directory, with its prompt showing. */
-  openStartPrompt(card: KanbanCard, body: DispatchFailureBody): void {
-    this.open(card)
-    if (this.card && this.errorEl) this.showStartPrompt(this.card, body, 'fresh')
   }
 
   /** A review goes to the live worker through the same force dispatch, without start authority. */

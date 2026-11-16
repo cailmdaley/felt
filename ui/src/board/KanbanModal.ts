@@ -240,7 +240,7 @@ export class KanbanModal {
       this.shuttleBase,
       () => { void this.fetchAndRender() },
       // Expired verdicts enter the optimistic lifecycle path exactly once.
-      (card, target) => this.transition(card, target as Verdict, true),
+      (card, target) => this.transition(card, target, true),
       this.openWorkerAfterGesture,
       { voice: { controller: this.voice }, phone: this.phoneAudio, onRest: card => this.rest(card), onRelease: card => { void this.releaseQuarantine(card.shuttleHost) }, ...options },
     )

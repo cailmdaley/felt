@@ -38,7 +38,7 @@ export async function pressVerb(acts: Element, label: string): Promise<void> {
   await settle()
 }
 
-/** The acts a console's menu offers, each as it names itself: its lifecycle verbs, then its conversation, page and settings. */
+/** The acts a console's menu offers, each as it names itself: its conversation, page and settings. */
 export async function consoleActs(console: Element): Promise<string[]> {
   console.querySelector<HTMLButtonElement>('.ws-band-menu')!.click()
   await settle()
