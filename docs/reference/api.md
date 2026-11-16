@@ -258,7 +258,7 @@ A repeated id submits nothing and answers `duplicate: true` with the first submi
 The board supplies ids; a caller without one gets an owner-minted id.
 The record writes the line's family-board row; for typed input, the worker's prompt hook clears the ask and replaces that row under the same identity.
 Ambiguous typed input is settled unknown and never re-sent automatically.
-Human launches keep forced-start authority; agent inbox launches, including fresh replacements, obey the armed-document and quarantine gates.
+Human launches have forced-start authority; agent inbox launches, including fresh replacements, obey the armed-document and quarantine gates.
 `live_input: true` records a spoken line as a human entry with source `voice` and transports it the same way, as typed input or a From User launch prompt.
 
 ### Codex terminal workers

@@ -298,14 +298,12 @@ Unavailable owners retain their notices for retry, with a shared 30-second
 validation backoff across hook processes.
 Healthy notices can pass deferred notices, so delivery order can differ from
 queue order.
-An unresolved legacy notice allows delivery without validation.
+A notice with no structured signal, whose text names no single fiber, is delivered without validation.
 Settled and offered entries expire after 14 days.
 An entry settles after its signal is stamped, so by the time its dedup entry expires the signal is more than 14 days old, and the inbox refuses a stamp that old: an expired notice cannot return.
-An outside asker's waking notice is a separate entry; unknown outcomes are retried, while refusal is final because the orchestrator keeps the same result.
+An outside asker's waking notice is a separate entry, sent once through the asker's session transport: a refusal is final because the orchestrator keeps the same result, any answer the transport recorded settles it, and only an outcome the daemon could not learn (a timeout, an unreachable owner) is tried again.
 
-A delivery with an unknown outcome stays pinned to its original conversation.
-When that conversation explicitly ends, a successor can receive it with a
-possible-repeat warning.
+A delivery with an unknown outcome is sent once more to the same conversation, five minutes later (thirty when the receiver queued it), and is carried to a conversation that replaced the original as soon as the original ends, or five minutes after the send, each time with a possible-repeat warning.
 `shuttle doctor` reports fiber context pending for at least ten minutes.
 
 ## Human in the loop
