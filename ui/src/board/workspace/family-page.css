@@ -6,6 +6,7 @@
    opening its view. This one is set heavier and darker, never larger. Too long for the width, the line scrolls, held at its end. */
 .ov-path { grid-area: path; min-width: 0; overflow-x: auto; scrollbar-width: none; direction: rtl; text-align: left; font: var(--type-label)/var(--leading-tight) var(--font-mono); }
 .ov-path::-webkit-scrollbar { display: none; }
+.ov-path[data-clipped] { mask-image: linear-gradient(to right, transparent, #000 28px); }
 .ov-path-line { display: inline-flex; align-items: center; direction: ltr; white-space: nowrap; }
 .ov-up { display: flex; align-items: center; color: var(--ws-ink-soft); }
 .ov-up:empty { display: none; }
@@ -26,7 +27,7 @@
 .ov-slug { min-width: 0; overflow-wrap: anywhere; color: var(--ws-ink); }
 .ov-ancestor .ov-slug { color: var(--ws-ink-soft); }
 .ov-word { color: var(--fm-text, var(--ws-ink-muted)); font-family: var(--font-serif); white-space: nowrap; }
-.ov-time { color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-ui) var(--font-serif); white-space: nowrap; }
+.ov-time { color: var(--ws-ink-muted); opacity: .8; font: var(--type-meta)/var(--leading-ui) var(--font-serif); white-space: nowrap; }
 /* What a waiting thread wants, in its words, one line. */
 .ov-want { max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ws-ink); font: var(--type-meta)/var(--leading-ui) var(--font-serif); }
 .ov-want * { display: inline; margin: 0; padding: 0; font-size: inherit; line-height: inherit; }
@@ -34,14 +35,14 @@
 .ov-open { color: var(--ws-ink-muted); font: var(--type-row)/var(--leading-solid) var(--font-serif); opacity: .45; }
 .ov-thread:is(:hover, :focus-visible) .ov-open { opacity: 1; color: var(--ws-ink); }
 
-/* The head: its dot and slug, whether it needs the human and its run, then its pages and its acts. */
+/* The head: its path, whether it needs the human and its run at a glance, then its pages and its acts. */
 .ov-head {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'path tools' 'facts tools';
   align-items: center; column-gap: 10px; row-gap: 2px;
   padding: 10px var(--ov-gutter) 6px; outline: none;
 }
 .ov-name { margin: 0 0 0 4px; font: 600 var(--type-label)/var(--leading-tight) var(--font-mono); color: var(--ws-ink); }
-.ov-facts { grid-area: facts; padding-left: 20px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; }
+.ov-facts { grid-area: facts; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; }
 /* Waiting on the human, in the owed gold every surface gives it. */
 .ov-needs {
   padding: 0 8px; border: 1px solid var(--kbn-owed-bright); border-radius: 999px;
@@ -63,9 +64,8 @@
 }
 
 /* The last thing it posted, under the head. */
-.ov-said { margin: 0 var(--ov-gutter) 8px calc(var(--ov-gutter) + 30px); min-width: 0; }
+.ov-said { margin: 0 var(--ov-gutter) 8px; min-width: 0; }
 .ov-said[hidden], .ov-figure[hidden], .ov-threads[hidden] { display: none; }
-.ov-said-age { display: block; color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-ui) var(--font-serif); }
 .ov-said-text {
   margin: 1px 0 0; color: var(--ws-ink); font: var(--type-row)/var(--leading-prose) var(--font-serif); overflow-wrap: anywhere;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
@@ -81,6 +81,12 @@
   display: grid; grid-template-columns: calc(var(--ov-gutter) - 10px) 20px repeat(3, max-content) 12px; column-gap: 10px; align-content: start;
 }
 .ov-threads > li, .ov-thread { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; }
+/* The resting and archived threads' one control, quiet under the rows. */
+.ov-more > .ov-quiet {
+  grid-column: 2 / -1; justify-self: start; margin: 2px 0 0; padding: 1px 4px; border: 0; border-radius: 3px; background: none; cursor: pointer;
+  font: var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--ws-ink-muted);
+}
+.ov-more > .ov-quiet:is(:hover, :focus-visible) { color: var(--ws-ink); background: var(--ws-hover); outline: none; }
 /* The gutter is the row's first cell, so its hover reaches the page's edge. */
 .ov-thread::before { content: ''; }
 .ov-figure {
@@ -99,7 +105,6 @@
   .ov-head { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'path' 'facts' 'tools'; row-gap: 6px; }
   .ov-tools { flex-wrap: wrap; gap: 6px; }
   .ov-tools .ws-verb-word { display: none; }
-  .ov-said { margin-left: var(--ov-gutter); }
   .ov-body { grid-template-columns: minmax(0, 1fr); }
   .ov-figure { order: -1; position: static; min-height: 0; height: 200px; margin: 8px var(--ov-gutter) 4px; }
   .ov-threads { display: block; }

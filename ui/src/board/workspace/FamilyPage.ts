@@ -12,7 +12,7 @@ import type { ThreadIndex } from '../threads.js'
 import { parseDocKey, type DocKey } from './documents.js'
 import type { FiberActs } from './Dock.js'
 import { docButtons, type DocFeeds } from './docButtons.js'
-import { runWords } from './runWords.js'
+import { runGlance, runWords } from './runWords.js'
 import { Thumbnail } from './Thumbnail.js'
 import './family-page.css'
 
@@ -36,17 +36,28 @@ const PULL_PX = 120
 /** What a waiting constitution wants, in a word. */
 const WANT_WORD: Readonly<Record<Want['kind'], string>> = { ask: 'asks', review: 'for review', post: 'posted', blocked: 'blocked' }
 
+/** The Desk columns of a thread the rows tuck away behind the quiet control: at rest, or archived. */
+const TUCKED: ReadonlySet<KanbanCard['column']> = new Set(['resting', 'tempered', 'composted'])
+
+/** Its run at a glance, light; the whole of it on hover. */
+const time = (card: KanbanCard, now: number): HTMLElement => {
+  const glance = el('span', 'ov-time', runGlance(card, now))
+  glance.title = runWords(card, now)
+  return glance
+}
+
 /**
  * One view of a constitution, the same from the Desk, a channel, a role or a
- * thread: its orchestrators above as a path back up, each step its dot and
- * slug (choosing one opens its view; pulling the page down past its top opens
- * the nearest one's, moving neither Rex nor voice); its head (state dot,
- * slug, what it wants of the human or its faint word, its run, its pages
- * and its acts); the last thing it posted; then its sub-threads as a narrow
- * column of rows (dot, slug, its run, then what it wants when it waits on the
- * human or its faint word when quiet, and a chevron: each opens the same view
- * one level down), what waits first, each followed by every thread below it
- * that waits on the human; beside them a large preview of its tapestry or
+ * thread: its head, opening on one line from the family's top-level down to
+ * it, each step its dot and slug (choosing an orchestrator opens its view;
+ * pulling the page down past its top opens the nearest one's, moving neither
+ * Rex nor voice), then what it wants of the human or its faint word, its run
+ * at a glance, its pages and its acts; the last thing it posted; then its
+ * sub-threads as a narrow column of rows (dot, slug, its run at a glance, then
+ * what it wants when it waits on the human or its faint word when quiet, and a
+ * chevron: each opens the same view one level down), what waits first, each
+ * followed by every thread below it that waits on the human, and the resting
+ * and archived ones behind one quiet control; beside them a large preview of its tapestry or
  * newest sent file, which counts as seen. No outcome is
  * drawn. It reads feeds and repaints only while its frame is selected in an
  * open reader; its frame's eviction ends it.
@@ -73,6 +84,9 @@ export class FamilyPage {
   private acts: FiberActs | null = null
   private thumb: { doc: DocKey; thumbnail: Thumbnail } | null = null
   private pull = 0
+  /** The resting and archived threads are drawn too. */
+  private quietShown = false
+  private readonly quiet = el('button', 'ov-quiet')
   private readonly feeds: ViewFeeds
   private readonly disposed: () => void
   private readonly actsFor?: (target: () => KanbanCard) => FiberActs
@@ -98,6 +112,12 @@ export class FamilyPage {
     this.figure.type = 'button'
     this.figure.hidden = true
     this.threads.setAttribute('aria-label', 'Threads')
+    this.quiet.type = 'button'
+    this.quiet.title = 'Resting and archived threads'
+    this.quiet.addEventListener('click', () => {
+      this.quietShown = !this.quietShown
+      if (this.card && this.index) this.paint(this.index.card(this.card), Date.now())
+    })
     this.body.append(this.threads, this.figure)
     this.main.append(this.head, this.said, this.body)
     const grid = el('div', 'ws-family-grid')
@@ -118,6 +138,7 @@ export class FamilyPage {
   }
 
   update(card: KanbanCard, index: ThreadIndex, now = Date.now()): void {
+    if ((this.card?.uid ?? this.card?.id) !== (card.uid ?? card.id)) this.quietShown = false
     this.card = card; this.index = index
     if (!this.awake) return
     this.feeds.refresh()
@@ -130,7 +151,10 @@ export class FamilyPage {
     this.paint(current, now)
   }
   /** Takes the keys on its head: no row looks chosen, and Enter opens nothing until j or k picks one. */
-  focus(): void { this.head.focus({ preventScroll: true }) }
+  focus(): void {
+    this.head.focus({ preventScroll: true })
+    this.path.scrollLeft = 0
+  }
   /** `t`: opens the constitution's tapestry, else its newest sent file. */
   openLead(): void {
     const card = this.card
@@ -170,11 +194,18 @@ export class FamilyPage {
     this.paintHead(card, now)
     this.paintSaid(card, now)
     this.paintFigure(card)
-    this.threads.replaceChildren(...threads.map(({ child, below }) => {
+    // A resting or archived thread with nothing waiting below it stands behind the quiet control.
+    const tucked = threads.filter(({ child, below }) => !below.length && TUCKED.has(child.column))
+    const drawn = this.quietShown ? threads : threads.filter(thread => !tucked.includes(thread))
+    this.quiet.textContent = this.quietShown ? 'hide quiet' : `${tucked.length} quiet`
+    this.quiet.setAttribute('aria-expanded', String(this.quietShown))
+    const more = el('li', 'ov-more')
+    more.append(this.quiet)
+    this.threads.replaceChildren(...drawn.map(({ child, below }) => {
       const item = el('li')
       item.append(this.row(child, now, waits), ...below.map(deep => this.row(deep, now, waits, true)))
       return item
-    }))
+    }), ...tucked.length ? [more] : [])
     this.threads.hidden = !threads.length
     if (held) [...this.el.querySelectorAll<HTMLElement>('.ov-ancestor, .ov-thread')].find(row => `${row.className}:${row.dataset.fiber}` === held)?.focus({ preventScroll: true })
   }
@@ -206,7 +237,7 @@ export class FamilyPage {
     open.setAttribute('aria-hidden', 'true')
     const word = want ? el('span', 'ov-want') : el('span', 'ov-word', attention === 'quiet' ? quietWord(card) : '')
     if (want) { word.innerHTML = renderMarkdown(want.text); word.title = word.textContent?.replace(/\s+/g, ' ').trim() ?? '' }
-    row.append(stateDot(card, waits, () => this.feeds.view(card)), el('span', 'ov-slug', deep ? `↳ ${slug(card)}` : slug(card)), el('span', 'ov-time', runWords(card, now)), word, open)
+    row.append(stateDot(card, waits, () => this.feeds.view(card)), el('span', 'ov-slug', deep ? `↳ ${slug(card)}` : slug(card)), time(card, now), word, open)
     return row
   }
   private paintHead(card: KanbanCard, now: number): void {
@@ -214,7 +245,7 @@ export class FamilyPage {
     head.title = card.name
     this.name.textContent = slug(card)
     const waits = this.feeds.waits(), want = wantOf(card, waits), faint = attentionOf(card, waits) === 'quiet' ? quietWord(card) : ''
-    this.facts.replaceChildren(...want ? [el('span', 'ov-needs', WANT_WORD[want.kind])] : faint ? [el('span', 'ov-word', faint)] : [], el('span', 'ov-time', runWords(card, now)))
+    this.facts.replaceChildren(...want ? [el('span', 'ov-needs', WANT_WORD[want.kind])] : faint ? [el('span', 'ov-word', faint)] : [], time(card, now))
     // Its pages are drawn again; the one in focus keeps it.
     const part = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.ws-doc-button')
     const kept = part && this.docs.contains(part) ? part.dataset.part : undefined
@@ -223,6 +254,9 @@ export class FamilyPage {
     this.docs = docs
     if (kept) docs.querySelector<HTMLElement>(`[data-part="${kept}"]`)?.focus({ preventScroll: true })
     this.name.previousElementSibling!.replaceWith(stateDot(card, waits, () => {}))
+    // The path is held at its end, this constitution in sight (0 is the end of a right-to-left box); a clipped start fades.
+    this.path.scrollLeft = 0
+    requestAnimationFrame(() => this.path.toggleAttribute('data-clipped', this.path.scrollWidth > this.path.clientWidth))
     if (this.actsFor && !this.acts) {
       this.acts = this.actsFor(() => this.card!)
       this.tools.append(this.acts.el)
@@ -236,7 +270,8 @@ export class FamilyPage {
     if (!said) { this.said.replaceChildren(); return }
     const text = el('div', 'ov-said-text')
     text.innerHTML = renderMarkdown(said.text)
-    this.said.replaceChildren(el('span', 'ov-said-age', ago(said.at, now)), text)
+    text.title = ago(said.at, now)
+    this.said.replaceChildren(text)
   }
   /** Its tapestry or newest sent file, large, beside its threads. */
   private paintFigure(card: KanbanCard): void {
@@ -286,6 +321,7 @@ export class FamilyPage {
     if (step) {
       const next = rows[Math.max(0, Math.min(rows.length - 1, (at < 0 ? rows.findIndex(row => row.matches('.ov-head')) : at) + step))]
       next?.focus({ preventScroll: false })
+      if (next === this.head) this.path.scrollLeft = 0
       if (next) announce(next.title || next.textContent || '')
     } else if ((event.key === 'Enter' || event.key === 'l') && at >= 0 && !rows[at].matches('.ov-head')) rows[at].click()
     else if (event.key === 'h') {
