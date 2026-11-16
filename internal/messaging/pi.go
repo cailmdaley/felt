@@ -217,9 +217,6 @@ func (piAdapter) send(ctx context.Context, env *sysenv.Env, a Address, r Request
 	if x, ok := ctx.Deadline(); ok && x.Before(deadline) {
 		deadline = x
 	}
-	if err := publishOwnerDeadline(ctx, deadline); err != nil {
-		return rejected(r, "pi-rpc+unix-socket", "cannot persist delivery deadline"), errCode("preflight_failed", "cannot persist Pi delivery deadline")
-	}
 	c.SetDeadline(deadline)
 	if err = json.NewEncoder(c).Encode(map[string]any{"type": "msg", "message": labeled(r)}); err != nil {
 		return Receipt{}, err
@@ -256,12 +253,4 @@ func (piAdapter) send(ctx context.Context, env *sysenv.Env, a Address, r Request
 		return Receipt{MessageID: r.MessageID, Address: r.Address, Status: StatusUnknown, Transport: "pi-rpc+unix-socket", Detail: detail}, errCode("ambiguous_delivery", "%s", detail)
 	}
 	return Receipt{MessageID: r.MessageID, Address: r.Address, Status: StatusAccepted, Transport: "pi-rpc+unix-socket", Detail: resp.Delivery}, nil
-}
-
-func (piAdapter) sendWithDedupMetadata(ctx context.Context, env *sysenv.Env, a Address, req Request) (Receipt, error, dedupMetadata) {
-	if req.Wake && piNativeAvailable(env, a.ID, a.Host) {
-		return sendPiNativeWithDedupMetadata(ctx, env, a, req, 15*time.Second)
-	}
-	receipt, err := (piAdapter{}).send(ctx, env, a, req)
-	return receipt, err, dedupMetadata{}
 }

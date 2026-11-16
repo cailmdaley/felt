@@ -11,14 +11,6 @@ import (
 	"syscall"
 )
 
-func currentProcessStartTime() string {
-	start, ok := linuxProcessStartTime(os.Getpid())
-	if !ok {
-		return ""
-	}
-	return start
-}
-
 func processAlive(pid int, start string) bool {
 	if pid <= 0 {
 		return false

@@ -18,6 +18,10 @@ const claudeHookOfferWindow = 30 * time.Second
 const claudeHookBatchBytes = (8 << 10) - 512 // Leave room for the hook's framing.
 const claudeFallbackAttempts = 3
 
+// claudeRecoveryBudget bounds one recovery pass inside the daemon's 32-second
+// command limit.
+const claudeRecoveryBudget = 28 * time.Second
+
 // The fallback directory is the transport claim. WriteStarted is persisted
 // immediately before the native write: an interrupted preflight is safe to
 // retry, but a write without a result is ambiguous and must not be repeated.
@@ -63,7 +67,7 @@ func RecoverClaudeMail(ctx context.Context, env *sysenv.Env, host string, now ti
 		return true, err
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-	ctx, cancel := context.WithTimeout(ctx, reservationDeadlineCeiling)
+	ctx, cancel := context.WithTimeout(ctx, claudeRecoveryBudget)
 	defer cancel()
 	var items []mailboxPendingItem
 	var failures []error
@@ -147,7 +151,7 @@ func recoverClaudeMessage(ctx context.Context, env *sysenv.Env, item mailboxPend
 		var failure error
 		switch {
 		case attempt.WriteStarted:
-			receipt, failure = stoppedAttempt(req)
+			receipt, failure = unrecordedDelivery(req)
 		case mailboxReceiverEnded(env, "claude", a.ID, a.Host):
 			receipt, failure = rejected(req, "claude-native", "receiver exited before delivery"), errCode("receiver_exited", "receiver exited before delivery")
 		default:
@@ -155,13 +159,13 @@ func recoverClaudeMessage(ctx context.Context, env *sysenv.Env, item mailboxPend
 			if err := writeMailboxEntry(path, entry); err != nil {
 				return true, err
 			}
-			// This marker is published immediately before conn.Write.
-			sendCtx := context.WithValue(ctx, reservationDeadlinePublisherKey{}, func(time.Time) error {
+			req.Wake, req.ContextIfBusy = true, false
+			// The marker is written immediately before the native write. The
+			// brief observation waits for admission or refusal, not a reply.
+			receipt, failure = sendClaudeNative(ctx, env, a, req, time.Second, func() error {
 				attempt.WriteStarted = true
 				return writeMailboxEntry(path, entry)
 			})
-			req.Wake, req.ContextIfBusy = true, false
-			receipt, failure, _ = sendClaudeNativeBrief(sendCtx, env, a, req)
 			if ErrorCode(failure) == "preflight_failed" && attempt.Attempts < claudeFallbackAttempts {
 				attempt.WriteStarted = false
 				if err := writeMailboxEntry(path, entry); err != nil {

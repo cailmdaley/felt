@@ -87,6 +87,9 @@ A plain agent `/deliver` does the same, minting an id when the caller supplies n
 The owner clears the fiber's outstanding ask when a due entry from a sender other than `shuttle` reaches its inbox, including a remote sender.
 A future entry clears nothing.
 Session-addressed messages and idle and mail-failure notices keep their direct transports and `messages/` receipts.
+A receipt is created exclusively before the side effect, as a reservation carrying a random nonce that tells a network filesystem's replayed link from a competing sender, and completed with the transport's answer after it.
+A repeat of the id answers the receipt as recorded; a reservation without an answer, whether its send is still running or stopped mid-delivery, answers `ambiguous_delivery` at once and is never sent again; and different content under the id is `message_id_conflict`.
+A transport that refused before writing anything (`preflight_failed`) releases its reservation, so a retry sends.
 Voice (`live_input`) uses human records and typed input.
 
 `/deliver` adds `consumed` for a live worker: the consumer's `action`, `members`, `followup` and `held: cost`, and `message`, this message's state after the pass (`consume --message`): `delivered`, `sent` (its outcome not yet confirmed), `reserved` for a launch, `pending`, or `unknown` when the inbox no longer holds it as delivered (it expired, which consume records on the offered entry as disposition `expired`, or was never stored), which `/deliver` answers as `queued` with `delivered: null`.

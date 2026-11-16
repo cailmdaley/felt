@@ -436,19 +436,15 @@ func TestFiberContextUnknownRolloverRequiresEndedEvidence(t *testing.T) {
 			}
 			first, next := "shuttle://host/claude/A", "shuttle://host/claude/B"
 			calls := map[string]int{}
-			sender := func(ctx context.Context, env *sysenv.Env, _ string, req Request, address string) (Receipt, error) {
-				req.Address = address
-				req.MessageID += "-" + mailboxKey(address)[:16]
-				return withDedup(ctx, env, req, func(context.Context) dedupSendResult {
-					calls[address]++
-					if address == first {
-						return dedupSendResult{Receipt: Receipt{Status: StatusUnknown}, Err: errCode("ambiguous_delivery", "lost reply")}
-					}
-					if !strings.Contains(req.Text, "Possible repeat:") {
-						t.Errorf("successor notice lacks repeat warning: %q", req.Text)
-					}
-					return dedupSendResult{Receipt: Receipt{MessageID: req.MessageID, Status: StatusContextAdded}}
-				})
+			sender := func(_ context.Context, _ *sysenv.Env, _ string, req Request, address string) (Receipt, error) {
+				calls[address]++
+				if address == first {
+					return Receipt{Status: StatusUnknown}, errCode("ambiguous_delivery", "lost reply")
+				}
+				if !strings.Contains(req.Text, "Possible repeat:") {
+					t.Errorf("successor notice lacks repeat warning: %q", req.Text)
+				}
+				return Receipt{MessageID: req.MessageID, Status: StatusContextAdded}, nil
 			}
 			if err := deliverBatch(t, env, first, request, sender); err == nil {
 				t.Fatal("unknown outcome acknowledged")

@@ -10,12 +10,8 @@ import (
 	"unsafe"
 )
 
-// Darwin has no lightweight portable process-start token for the current
-// process in the Go standard library, so dedup records use PID-only liveness
-// there. A record that does carry a start token (see processStartToken) is
-// checked against it.
-func currentProcessStartTime() string { return "" }
-
+// A registration that carries a start token (see processStartToken) is
+// checked against it; one without is checked by PID alone.
 func processAlive(pid int, start string) bool {
 	if pid <= 0 {
 		return false

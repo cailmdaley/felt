@@ -102,57 +102,47 @@ func send(ctx context.Context, env *sysenv.Env, host string, req Request, record
 		err := errCode("unsupported_harness", "unsupported harness %q", addr.Harness)
 		return rejected(req, "none", err.Error()), err
 	}
-	deliver := func(sendCtx context.Context) dedupSendResult {
+	deliver := func(sendCtx context.Context) (Receipt, error) {
 		if req.NotifyWhenIdle && req.Text == "" && len(req.Attachments) == 0 {
 			sub := subscribeIdle(env, addr, req)
 			receipt := Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusSubscribed, Transport: "idle-watch", Detail: sub.Detail, Idle: sub}
 			if sub.State != IdleWatching {
 				receipt.Status = StatusRejected
-				return dedupSendResult{Receipt: receipt, Err: errCode("unsupported", "%s", sub.Detail)}
+				return receipt, errCode("unsupported", "%s", sub.Detail)
 			}
-			return dedupSendResult{Receipt: receipt}
+			return receipt, nil
 		}
 		if err := sendCtx.Err(); err != nil {
-			receipt := rejected(req, "validation", err.Error())
-			return dedupSendResult{Receipt: receipt, Err: errCode("preflight_failed", "message deadline expired before delivery: %v", err)}
+			return rejected(req, "validation", err.Error()), errCode("preflight_failed", "message deadline expired before delivery: %v", err)
 		}
 		if addr.Harness != "codex" {
 			if reason := mailboxUnavailable(env, addr.Harness, addr.ID, addr.Host); strings.HasPrefix(reason, "session has ended;") {
-				return dedupSendResult{Receipt: rejected(req, addr.Harness+"-hook", reason), Err: errCode("unavailable", "%s", reason)}
+				return rejected(req, addr.Harness+"-hook", reason), errCode("unavailable", "%s", reason)
 			}
 		}
 		files, err := materializeAttachments(env, req.MessageID, req.Attachments)
 		if err != nil {
-			receipt := rejected(req, "attachments", err.Error())
-			return dedupSendResult{Receipt: receipt, Err: errCode("preflight_failed", "cannot store attachments: %v", err)}
+			return rejected(req, "attachments", err.Error()), errCode("preflight_failed", "cannot store attachments: %v", err)
 		}
 		text, err := renderAttachmentText(req.Text, files)
 		if err != nil {
-			receipt := rejected(req, "attachments", err.Error())
-			return dedupSendResult{Receipt: receipt, Err: errCode("preflight_failed", "%v", err)}
+			return rejected(req, "attachments", err.Error()), errCode("preflight_failed", "%v", err)
 		}
 		if err := sendCtx.Err(); err != nil {
-			receipt := rejected(req, "validation", err.Error())
-			return dedupSendResult{Receipt: receipt, Err: errCode("preflight_failed", "message deadline expired before delivery: %v", err)}
+			return rejected(req, "validation", err.Error()), errCode("preflight_failed", "message deadline expired before delivery: %v", err)
 		}
 		delivery := req
 		delivery.Text = text
 		delivery.Attachments = nil
-		var result dedupSendResult
-		if detailed, ok := a.(dedupMetadataSender); ok {
-			result.Receipt, result.Err, result.Metadata = detailed.sendWithDedupMetadata(sendCtx, env, addr, delivery)
-		} else {
-			result.Receipt, result.Err = a.send(sendCtx, env, addr, delivery)
+		receipt, err := a.send(sendCtx, env, addr, delivery)
+		receipt.Files = files
+		if req.NotifyWhenIdle && receipt.Status != StatusRejected {
+			receipt.Idle = subscribeIdle(env, addr, req)
 		}
-		result.Receipt.Files = files
-		if req.NotifyWhenIdle && result.Receipt.Status != StatusRejected {
-			result.Receipt.Idle = subscribeIdle(env, addr, req)
-		}
-		return result
+		return receipt, err
 	}
 	if recorded {
-		result := deliver(ctx)
-		return result.Receipt, result.Err
+		return deliver(ctx)
 	}
 	return withDedup(ctx, env, req, deliver)
 }

@@ -5,9 +5,8 @@ package messaging
 import "errors"
 
 // No supported process-liveness probe exists outside the shipped Linux and
-// Darwin targets. Fail closed so an unverified reservation is never resent
-// and an unverified mailbox receiver is never advertised.
-func currentProcessStartTime() string { return "" }
+// Darwin targets. Fail closed so an unverified mailbox receiver is never
+// advertised.
 
 func processAlive(int, string) bool { return false }
 

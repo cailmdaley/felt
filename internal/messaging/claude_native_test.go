@@ -3,8 +3,6 @@ package messaging
 import (
 	"bufio"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,7 +10,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"reflect"
 	"regexp"
 	"strings"
 	"sync/atomic"
@@ -264,11 +261,8 @@ func TestClaudeNativeNoWakeAndUnknownRetry(t *testing.T) {
 	if err == nil || r.Status != StatusUnknown {
 		t.Fatalf("%+v %v", r, err)
 	}
-	// The retry rescans the transcript for its bounded window; nothing will
-	// appear, so a short context ends it.
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	r, err = Send(ctx, env, "host", req)
+	// The retry answers the stored receipt and writes nothing.
+	r, err = Send(context.Background(), env, "host", req)
 	if err == nil || r.Status != StatusUnknown || sent.Load() != 1 {
 		t.Fatalf("%+v %v writes %d", r, err, sent.Load())
 	}
@@ -299,12 +293,14 @@ func busyReceiverRows(frame map[string]any, f *os.File, absorb bool) {
 	}
 }
 
-func TestClaudeNativeRetryRefreshesReceiptWithoutResending(t *testing.T) {
+// A wake whose first observation window saw nothing is confirmed by a later
+// consume from the transcript alone, read from where it ended before the send,
+// without writing to the socket again.
+func TestConsumeConfirmsAClaudeBatchFromItsTranscript(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	frameCh := make(chan map[string]any, 1)
-	responded := make(chan struct{}, 1)
-	req, sent := nativeClaudeFixture(t, env, func(frame map[string]any, _ *os.File) { frameCh <- frame; notify(responded) })
+	_, sent := nativeClaudeFixture(t, env, func(frame map[string]any, _ *os.File) { frameCh <- frame })
 	registration, err := readClaudeNative(env, "session")
 	if err != nil {
 		t.Fatal(err)
@@ -313,151 +309,116 @@ func TestClaudeNativeRetryRefreshesReceiptWithoutResending(t *testing.T) {
 	if err := os.WriteFile(registration.Transcript, prefix, 0600); err != nil {
 		t.Fatal(err)
 	}
-	first, firstErr := sendUntilSettled(env, req, responded, 0)
-	if first.Status != StatusUnknown || ErrorCode(firstErr) != "ambiguous_delivery" {
-		t.Fatalf("first receipt: %+v %v", first, firstErr)
-	}
-	frame := <-frameCh
-	transcript, err := os.OpenFile(registration.Transcript, os.O_APPEND|os.O_WRONLY, 0600)
-	if err != nil {
+	w := Worker{Address: "shuttle://host/claude/session", Epoch: transition(t, env, "session", "shuttle://host/claude/session")}
+	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: Request{MessageID: "m", Text: "hello"}, Wishes: Wishes{Turn: "force"}}); err != nil {
 		t.Fatal(err)
 	}
-	busyReceiverRows(frame, transcript, true)
-	if err := transcript.Close(); err != nil {
-		t.Fatal(err)
+	brief := func(ctx context.Context, env *sysenv.Env, host string, r Request, address string) (Receipt, error) {
+		ctx, cancel := context.WithTimeout(ctx, observationSettle)
+		defer cancel()
+		return sendFiberContextAttempt(ctx, env, host, r, address)
 	}
-
-	upgraded, err := Send(context.Background(), env, "host", req)
-	if err != nil || upgraded.Status != StatusAccepted || sent.Load() != 1 {
-		t.Fatalf("retry: %+v %v socket writes=%d", upgraded, err, sent.Load())
+	if _, err := consumeWith(context.Background(), env, "fiber", "host", w, brief); ErrorCode(err) != "ambiguous_delivery" {
+		t.Fatalf("first send: %v", err)
 	}
-	name := sha256.Sum256([]byte(req.MessageID))
-	stored, err := readDedupRecord(filepath.Join(dataDir(env), "messages", hex.EncodeToString(name[:])+".json"))
-	if err != nil || stored.Receipt.Status != StatusAccepted || stored.ErrorCode != "" || stored.TranscriptOffset == nil || *stored.TranscriptOffset != int64(len(prefix)) {
-		t.Fatalf("stored upgrade: %+v err=%v", stored, err)
-	}
-}
-
-func TestClaudeNativeRetryReturnsObservedStageWhenRefreshLockIsBusy(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	req, sent := nativeClaudeFixture(t, env, func(map[string]any, *os.File) {})
-	registration, err := readClaudeNative(env, "session")
-	if err != nil {
-		t.Fatal(err)
+	root := mailboxDir(env, "fiber", "fiber")
+	if batch := batchOf(t, root, "m"); batch == nil || batch.TranscriptOffset == nil || *batch.TranscriptOffset != int64(len(prefix)) || batch.status() != StatusUnknown {
+		t.Fatalf("open batch = %+v", batch)
 	}
 	transcript, err := os.OpenFile(registration.Transcript, os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := json.NewEncoder(transcript).Encode(map[string]any{"type": "user", "sessionId": "session", "uuid": claudeNativeUUID(req)}); err != nil {
-		t.Fatal(err)
-	}
+	busyReceiverRows(<-frameCh, transcript, true)
 	if err := transcript.Close(); err != nil {
 		t.Fatal(err)
 	}
-	offset := int64(0)
-	stored := record{
-		Hash: requestHash(req), State: "complete",
-		Receipt:   Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusUnknown, Transport: claudeNativeTransport, Detail: "stored unknown"},
-		ErrorCode: "ambiguous_delivery", ErrorMessage: "stored unknown",
-		TranscriptOffset: &offset, ClaudeQueueContentHash: nativeContentHash(labeled(req)),
-	}
-	writeDedupRecord(t, dataDir(env), req, stored)
-	lock, err := os.OpenFile(filepath.Join(dataDir(env), "messages", ".refresh.lock"), os.O_CREATE|os.O_RDWR, 0600)
-	if err != nil {
+	if _, err := consumeWith(context.Background(), env, "fiber", "host", w, neverSend(t)); err != nil {
 		t.Fatal(err)
 	}
-	defer lock.Close()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
-		t.Fatal(err)
-	}
-	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-
-	// The submitted row is already on disk, so the rescan reads it at once and
-	// a short context only ends its wait for an assistant row.
-	ctx, cancel := context.WithTimeout(context.Background(), observationSettle)
-	defer cancel()
-	receipt, err := Send(ctx, env, "host", req)
-	if err != nil || receipt.Status != StatusSubmitted || sent.Load() != 0 {
-		t.Fatalf("retry returned stale receipt or resent: %+v %v writes=%d", receipt, err, sent.Load())
+	if n, _ := pendingCount(env, "fiber"); n != 0 || sent.Load() != 1 {
+		t.Fatalf("pending = %d, socket writes = %d", n, sent.Load())
 	}
 }
 
-func TestClaudeNativeRetryKeepsSubmittedReceiptWhenRegistrationIsGone(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	dir := dataDir(env)
-	req := Request{Address: "shuttle://h/claude/0f7c3b1e-1111-2222-3333-444455556666", Text: "hi", MessageID: "m-sub", Wake: true}
-	offset := int64(0)
-	stored := Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusSubmitted, Transport: claudeNativeTransport, Detail: "stored submitted"}
-	writeDedupRecord(t, dir, req, record{Hash: requestHash(req), State: "complete", Receipt: stored, TranscriptOffset: &offset, ClaudeQueueContentHash: "known-content-hash"})
-
-	got, err := Send(context.Background(), env, "h", req)
-	if err != nil || !reflect.DeepEqual(got, stored) || strings.Contains(got.Detail, dir) {
-		t.Fatalf("failed recheck replaced evidence or leaked a path: %+v err=%v", got, err)
-	}
-}
-
-func TestClaudeNativeRetryKeepsReceiptWhenTranscriptCannotBeRescanned(t *testing.T) {
-	t.Parallel()
-	for _, failure := range []string{"open", "scan-bound"} {
-		t.Run(failure, func(t *testing.T) {
+// A consume reads an open batch's Claude transcript again and records what it
+// shows, and keeps the receipt it has when the transcript cannot be read: its
+// registration is gone, the transcript cannot be opened, the scan exceeds its
+// bound, or the batch recorded no offset to read from.
+func TestConsumeReobservesAClaudeBatch(t *testing.T) {
+	for _, tc := range []struct {
+		name, want string
+	}{
+		{"submitted", StatusSubmitted},
+		{"registration gone", StatusUnknown},
+		{"unopenable", StatusUnknown},
+		{"scan bound", StatusUnknown},
+		{"no offset", StatusUnknown},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			env := testEnv(t)
-			req, sent := nativeClaudeFixture(t, env, func(map[string]any, *os.File) {})
+			_, sent := nativeClaudeFixture(t, env, func(map[string]any, *os.File) {})
+			const conversation = "shuttle://host/claude/session"
+			w := Worker{Address: conversation, Epoch: transition(t, env, "session", conversation)}
+			putWish(t, env, "m", "ask", "hold")
+			root := mailboxDir(env, "fiber", "fiber")
+			batch := newBatch(t, []string{filepath.Join(root, "pending", mailboxKey("m")+".json")}, conversation)
+			offset := int64(0)
+			batch.TranscriptOffset = &offset
+			batch.Receipt = &Receipt{MessageID: batch.Payload.MessageID, Address: conversation, Status: StatusUnknown, Transport: claudeNativeTransport, Detail: "stored unknown"}
+			batch.ErrorCode = "ambiguous_delivery"
 			registration, err := readClaudeNative(env, "session")
 			if err != nil {
 				t.Fatal(err)
 			}
-			switch failure {
-			case "open":
+			req := *batch.Payload
+			req.Address = conversation
+			transcript, err := os.OpenFile(registration.Transcript, os.O_APPEND|os.O_WRONLY, 0600)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.name == "no offset" {
+				nativeRows(map[string]any{"uuid": claudeNativeUUID(req)}, transcript, false)
+				batch.TranscriptOffset = nil
+			} else if err := json.NewEncoder(transcript).Encode(map[string]any{"type": "user", "sessionId": "session", "uuid": claudeNativeUUID(req)}); err != nil {
+				t.Fatal(err)
+			}
+			if err := transcript.Close(); err != nil {
+				t.Fatal(err)
+			}
+			switch tc.name {
+			case "registration gone":
+				if err := os.Remove(filepath.Join(mailboxDir(env, "claude", "session"), "native.json")); err != nil {
+					t.Fatal(err)
+				}
+			case "unopenable":
 				if err := os.Remove(registration.Transcript); err != nil {
 					t.Fatal(err)
 				}
 				if err := os.Symlink(filepath.Join(t.TempDir(), "missing"), registration.Transcript); err != nil {
 					t.Fatal(err)
 				}
-			case "scan-bound":
+			case "scan bound":
 				if err := os.WriteFile(registration.Transcript, make([]byte, 9<<20), 0600); err != nil {
 					t.Fatal(err)
 				}
 			}
-			offset := int64(0)
-			stored := Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusSubmitted, Transport: claudeNativeTransport, Detail: "stored submitted"}
-			writeDedupRecord(t, dataDir(env), req, record{Hash: requestHash(req), State: "complete", Receipt: stored, TranscriptOffset: &offset, ClaudeQueueContentHash: nativeContentHash(labeled(req))})
-
-			got, err := Send(context.Background(), env, "host", req)
-			if err != nil || !reflect.DeepEqual(got, stored) || sent.Load() != 0 || strings.Contains(got.Detail, dataDir(env)) {
-				t.Fatalf("failed %s recheck replaced evidence, sent, or leaked a path: %+v err=%v writes=%d", failure, got, err, sent.Load())
+			if err := writeBatch(root, &batch); err != nil {
+				t.Fatal(err)
+			}
+			start := time.Now()
+			if _, err := consumeWith(context.Background(), env, "fiber", "host", w, neverSend(t)); err == nil {
+				t.Fatal("an unconfirmed batch answered no error")
+			}
+			got := batchOf(t, root, "m")
+			if got == nil || got.status() != tc.want || sent.Load() != 0 || time.Since(start) > time.Second {
+				t.Fatalf("batch = %+v, writes = %d, took %v", got, sent.Load(), time.Since(start))
+			}
+			if tc.want == StatusSubmitted && (got.ErrorCode != "" || strings.Contains(got.Receipt.Detail, dataDir(env))) {
+				t.Fatalf("recorded stage = %+v", got)
 			}
 		})
-	}
-}
-
-func TestClaudeNativeRetryWithoutOffsetKeepsStoredReceipt(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	req, sent := nativeClaudeFixture(t, env, func(map[string]any, *os.File) {})
-	frame := map[string]any{"uuid": claudeNativeUUID(req)}
-	registration, err := readClaudeNative(env, "session")
-	if err != nil {
-		t.Fatal(err)
-	}
-	transcript, err := os.OpenFile(registration.Transcript, os.O_APPEND|os.O_WRONLY, 0600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	nativeRows(frame, transcript, false)
-	if err := transcript.Close(); err != nil {
-		t.Fatal(err)
-	}
-	storedReceipt := Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusUnknown, Transport: claudeNativeTransport, Detail: "stored unknown"}
-	writeDedupRecord(t, dataDir(env), req, record{Hash: requestHash(req), State: "complete", Receipt: storedReceipt, ErrorCode: "ambiguous_delivery", ErrorMessage: "stored unknown"})
-
-	receipt, err := Send(context.Background(), env, "host", req)
-	if ErrorCode(err) != "ambiguous_delivery" || !reflect.DeepEqual(receipt, storedReceipt) || sent.Load() != 0 {
-		t.Fatalf("retry changed an offset-less record or wrote to socket: %+v %v writes=%d", receipt, err, sent.Load())
 	}
 }
 

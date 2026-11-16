@@ -241,9 +241,11 @@ func TestPiNativeSendCorrelatesSessionAndRequest(t *testing.T) {
 			}
 			req := Request{Address: "shuttle://host/pi/session", Text: "hello", MessageID: "native", Wake: true}
 			// The reply alone decides the receipt: the transcript that could
-			// confirm an ambiguous reply is never written, so no observation
-			// window is spent waiting for it.
-			receipt, err, _ := sendPiNativeWithDedupMetadata(context.Background(), env, Address{Host: "host", Harness: "pi", ID: "session"}, req, 0)
+			// confirm an ambiguous reply is never written, so a short window
+			// ends the wait for it.
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+			receipt, err := sendPiNative(ctx, env, Address{Host: "host", Harness: "pi", ID: "session"}, req)
 			codeMatches := (tc.code == "" && err == nil) || (tc.code != "" && ErrorCode(err) == tc.code)
 			if receipt.Status != tc.status || !codeMatches {
 				t.Fatalf("receipt=%#v err=%v", receipt, err)
@@ -355,7 +357,9 @@ func TestPiNativeTranscriptReceipts(t *testing.T) {
 	}
 }
 
-func TestPiNativeQueuedRefreshAfterObservationDeadline(t *testing.T) {
+// A Pi steer held past the send's observation is confirmed by a later consume
+// from the transcript alone, without sending it again.
+func TestConsumeConfirmsAQueuedPiBatchFromItsTranscript(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	transcript := filepath.Join(t.TempDir(), "session.jsonl")
@@ -363,38 +367,34 @@ func TestPiNativeQueuedRefreshAfterObservationDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 	var sends atomic.Int32
+	var text string
 	socket, closeFixture := piNativeFixture(t, func(frame map[string]any) any {
 		sends.Add(1)
+		text = frame["message"].(string)
 		return map[string]any{"requestId": frame["requestId"], "sessionId": frame["sessionId"], "delivery": "steer", "ok": true, "queued": true}
 	})
 	defer closeFixture()
 	if err := RegisterPiNative(env, "session", "host", "/project", socket, transcript, os.Getpid(), true); err != nil {
 		t.Fatal(err)
 	}
-	req := Request{Address: "shuttle://host/pi/session", MessageID: "held-steer", Text: "one task", Wake: true}
-	first, err := withDedup(context.Background(), env, req, func(ctx context.Context) dedupSendResult {
-		receipt, err, metadata := sendPiNativeWithDedupMetadata(ctx, env, Address{Host: "host", Harness: "pi", ID: "session"}, req, 50*time.Millisecond)
-		return dedupSendResult{Receipt: receipt, Err: err, Metadata: metadata}
-	})
-	if err != nil || first.Status != StatusQueued {
-		t.Fatalf("queued receipt=%+v err=%v", first, err)
+	if err := RegisterMailbox(env, "pi", "session", "host", "/project", os.Getpid(), true); err != nil {
+		t.Fatal(err)
 	}
-	time.Sleep(50 * time.Millisecond) // The steer remains held past the observation deadline.
-	readCtx, cancelRead := context.WithTimeout(context.Background(), 40*time.Millisecond)
-	defer cancelRead()
-	pending, err := Send(readCtx, env, "host", req)
-	if err != nil || pending.Status != StatusQueued {
-		t.Fatalf("pending receipt=%+v err=%v", pending, err)
+	w := Worker{Address: "shuttle://host/pi/session", Epoch: transition(t, env, "session", "shuttle://host/pi/session"), Busy: true}
+	if err := Enqueue(env, InboxEntry{Address: "fiber", Request: Request{MessageID: "held-steer", Text: "one task"}, Wishes: Wishes{Turn: "force"}}); err != nil {
+		t.Fatal(err)
 	}
-	appendPiUserRow(t, transcript, labeled(req))
 	for i := 0; i < 2; i++ {
-		admitted, err := Send(context.Background(), env, "host", req)
-		if err != nil || admitted.Status != StatusAccepted {
-			t.Fatalf("admitted receipt=%+v err=%v", admitted, err)
+		if _, err := Consume(context.Background(), env, "fiber", "host", w); ErrorCode(err) != "unconfirmed" {
+			t.Fatalf("pass %d: %v", i, err)
 		}
 	}
-	if got := sends.Load(); got != 1 {
-		t.Fatalf("message was sent %d times", got)
+	appendPiUserRow(t, transcript, text)
+	if _, err := Consume(context.Background(), env, "fiber", "host", w); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := pendingCount(env, "fiber"); n != 0 || sends.Load() != 1 {
+		t.Fatalf("pending = %d, sends = %d", n, sends.Load())
 	}
 }
 

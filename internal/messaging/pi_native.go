@@ -169,56 +169,35 @@ func piNativeSessions(env *sysenv.Env, host string) []Session {
 }
 
 func sendPiNative(ctx context.Context, env *sysenv.Env, a Address, req Request) (Receipt, error) {
-	receipt, err, _ := sendPiNativeWithDedupMetadata(ctx, env, a, req, 15*time.Second)
-	return receipt, err
-}
-
-func sendPiNativeWithDedupMetadata(ctx context.Context, env *sysenv.Env, a Address, req Request, observationTimeout time.Duration) (Receipt, error, dedupMetadata) {
-	metadata := dedupMetadata{}
 	r, err := readPiNative(env, a.ID)
 	if err != nil || r.ID != a.ID || r.Host != a.Host || !piNativeAvailable(env, a.ID, a.Host) {
-		return rejected(req, piNativeTransport, "Pi session has not registered a native receiver endpoint"), errCode("preflight_failed", "Pi native receiver endpoint unavailable"), metadata
+		return rejected(req, piNativeTransport, "Pi session has not registered a native receiver endpoint"), errCode("preflight_failed", "Pi native receiver endpoint unavailable")
 	}
 	d := net.Dialer{Timeout: 2 * time.Second}
 	conn, err := d.DialContext(ctx, "unix", r.Socket)
 	if err != nil {
-		return rejected(req, piNativeTransport, "Pi native socket unavailable"), errCode("preflight_failed", "Pi native socket unavailable: %v", err), metadata
+		return rejected(req, piNativeTransport, "Pi native socket unavailable"), errCode("preflight_failed", "Pi native socket unavailable: %v", err)
 	}
 	defer conn.Close()
 	deadline := time.Now().Add(15 * time.Second)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
-	if err := publishOwnerDeadline(ctx, deadline); err != nil {
-		return rejected(req, piNativeTransport, "cannot persist delivery deadline"), errCode("preflight_failed", "cannot persist Pi native delivery deadline"), metadata
-	}
 	_ = conn.SetDeadline(deadline)
 	transcript := openPiReceiptTranscript(r.Transcript, a.ID)
 	if transcript != nil {
 		defer transcript.Close()
 	}
-	if r.Transcript != "" {
-		offset := int64(0)
-		if transcript != nil {
-			offset, _ = transcript.Seek(0, io.SeekCurrent)
-		}
-		metadata.TranscriptOffset = &offset
-		metadata.PiContentHash = nativeContentHash(labeled(req))
-	}
-	observationDeadline := time.Now().Add(observationTimeout)
-	if deadline.Before(observationDeadline) {
-		observationDeadline = deadline
-	}
 	requestID := fmt.Sprintf("shuttle-pi-%d", time.Now().UnixNano())
 	if err := json.NewEncoder(conn).Encode(map[string]any{"type": "msg", "requestId": requestID, "sessionId": a.ID, "message": labeled(req)}); err != nil {
-		return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusUnknown, Transport: piNativeTransport, Detail: "Pi native request write did not complete"}, errCode("ambiguous_delivery", "Pi native request may have reached the receiver: %v", err), metadata
+		return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusUnknown, Transport: piNativeTransport, Detail: "Pi native request write did not complete"}, errCode("ambiguous_delivery", "Pi native request may have reached the receiver: %v", err)
 	}
 	line, err := bufio.NewReaderSize(io.LimitReader(conn, (512<<10)+1), 4096).ReadBytes('\n')
 	if err != nil {
-		if observePiReceipt(ctx, transcript, r.Transcript, a.ID, nativeContentHash(labeled(req)), observationDeadline) {
-			return piTranscriptReceipt(req), nil, metadata
+		if observePiReceipt(ctx, transcript, r.Transcript, a.ID, nativeContentHash(labeled(req)), deadline) {
+			return piTranscriptReceipt(req), nil
 		}
-		return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusUnknown, Transport: piNativeTransport, Detail: "Pi native acknowledgement was not received"}, errCode("ambiguous_delivery", "Pi native acknowledgement was not received: %v", err), metadata
+		return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusUnknown, Transport: piNativeTransport, Detail: "Pi native acknowledgement was not received"}, errCode("ambiguous_delivery", "Pi native acknowledgement was not received: %v", err)
 	}
 	receipt, replyErr := decodePiNativeReply(line, requestID, a.ID, req)
 	if receipt.Status == StatusQueued && r.Transcript == "" {
@@ -226,10 +205,10 @@ func sendPiNativeWithDedupMetadata(ctx context.Context, env *sysenv.Env, a Addre
 		receipt.Detail = "Pi has no session transcript; delivery is unconfirmed"
 		replyErr = errCode("ambiguous_delivery", "%s", receipt.Detail)
 	}
-	if receipt.Status == StatusUnknown && observePiReceipt(ctx, transcript, r.Transcript, a.ID, nativeContentHash(labeled(req)), observationDeadline) {
-		return piTranscriptReceipt(req), nil, metadata
+	if receipt.Status == StatusUnknown && observePiReceipt(ctx, transcript, r.Transcript, a.ID, nativeContentHash(labeled(req)), deadline) {
+		return piTranscriptReceipt(req), nil
 	}
-	return receipt, replyErr, metadata
+	return receipt, replyErr
 }
 
 func decodePiNativeReply(line []byte, requestID, sessionID string, req Request) (Receipt, error) {
@@ -377,35 +356,6 @@ func observePiReceipt(ctx context.Context, f *os.File, path, sessionID, contentH
 		case <-time.After(25 * time.Millisecond):
 		}
 	}
-}
-
-// A repeated read observes admission without writing another socket request.
-func refreshPiNativeReceipt(ctx context.Context, env *sysenv.Env, req Request, stored record) (nativeReceiptRefresh, bool) {
-	address, err := ParseAddress(req.Address)
-	if err != nil || address.Harness != "pi" || stored.PiContentHash == "" {
-		return nativeReceiptRefresh{}, false
-	}
-	registration, err := readPiNative(env, address.ID)
-	if err != nil || registration.ID != address.ID || registration.Host != address.Host {
-		return nativeReceiptRefresh{}, false
-	}
-	f := openPiReceiptTranscript(registration.Transcript, address.ID)
-	if f != nil {
-		defer f.Close()
-		if _, err := f.Seek(*stored.TranscriptOffset, io.SeekStart); err != nil {
-			return nativeReceiptRefresh{}, false
-		}
-	}
-	refreshCtx, cancel := context.WithTimeout(ctx, claudeRetryObservationTimeout)
-	defer cancel()
-	deadline, _ := refreshCtx.Deadline()
-	if !observePiReceipt(refreshCtx, f, registration.Transcript, address.ID, stored.PiContentHash, deadline) {
-		return nativeReceiptRefresh{}, false
-	}
-	upgraded := stored.Receipt
-	upgraded.Status = StatusAccepted
-	upgraded.Detail = "Pi transcript recorded this user message"
-	return nativeReceiptRefresh{Receipt: upgraded}, true
 }
 
 // observePiNative reads a Pi conversation's transcript from offset to its

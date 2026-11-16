@@ -204,7 +204,3 @@ type adapter interface {
 	discover(context.Context, *sysenv.Env, string) ([]Session, error)
 	send(context.Context, *sysenv.Env, Address, Request) (Receipt, error)
 }
-
-type dedupMetadataSender interface {
-	sendWithDedupMetadata(context.Context, *sysenv.Env, Address, Request) (Receipt, error, dedupMetadata)
-}
