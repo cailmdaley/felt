@@ -108,7 +108,7 @@ defmodule ShuttleWeb.DeliverController do
   defp local(fiber_id, nil, from, context), do: subscribe_idle(fiber_id, from, context)
 
   defp local(fiber_id, text, _from, %{"live_input" => true} = context) do
-    Delivery.human(fiber_id, text, message_id: context["message_id"], source: "voice")
+    {:human, Delivery.human(fiber_id, text, message_id: context["message_id"], source: "voice")}
     |> reply(fiber_id)
   end
 
@@ -154,10 +154,11 @@ defmodule ShuttleWeb.DeliverController do
           notify_wake: context["notify_wake"] == true
         )
       else
-        Delivery.human(fiber_id, text,
-          message_id: context["message_id"],
-          resume_mode: resume_mode(context["resume_mode"])
-        )
+        {:human,
+         Delivery.human(fiber_id, text,
+           message_id: context["message_id"],
+           resume_mode: resume_mode(context["resume_mode"])
+         )}
         |> reply(fiber_id)
       end
     end
@@ -188,7 +189,7 @@ defmodule ShuttleWeb.DeliverController do
   end
 
   defp resume_mode(mode) when mode in ["fresh", "previous"], do: mode
-  defp resume_mode(_mode), do: nil
+  defp resume_mode(_mode), do: "continue"
 
   defp context_reply(fiber_id, text, message_id, opts)
        when is_binary(message_id) and message_id != "" do

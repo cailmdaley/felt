@@ -6,11 +6,12 @@ defmodule Shuttle.Delivery do
   context, wakes or follows up with a worker, or reserves a gated fresh or
   dormant launch. A launched worker takes the entries through its fiber hook.
 
-  The human's lines (`human/3`) and an agent's fresh session request
-  (`fresh/3`) are recorded and deduplicated in that inbox
-  (`Shuttle.InboxRecord`), then transported as typed input or a launch
-  prompt. Human launches keep the board's forced-start authority; a fresh
-  request passes the agent gate. Voice uses `human/3` with source `voice`.
+  The human's lines (`human/3`, for `/dispatch` and `/deliver`) and an
+  agent's fresh session request (`fresh/3`) are recorded and deduplicated in
+  that inbox (`Shuttle.InboxRecord`), then transported as typed input or a
+  launch prompt. Human launches keep the board's forced-start authority; a
+  fresh request passes the agent gate. Voice uses `human/3` with source
+  `voice`.
 
   A conversation a human resumed from the card is its worker
   (`Shuttle.SessionResume`), so it is addressed like any other.
@@ -22,43 +23,53 @@ defmodule Shuttle.Delivery do
   # `context/4`.
   @budget_ms 35_000
 
+  @doc """
+  The human's start of `fiber_id`, from `/dispatch` and `/deliver`, with
+  `text`, the human's line, or nil. A line is recorded first under
+  `:message_id` (`Shuttle.InboxRecord`, `:source` voice for a spoken one),
+  so a repeated id transports nothing; then it is typed into the live worker
+  or carried in a From User launch prompt. `:resume_mode` `"continue"` (the
+  default) lets the worker's state choose; any other mode, or nil for the
+  dispatcher's own choice, is used as given. `:force` and `:ad_hoc` default to
+  true; `:existing_only`, `:release_launch_reservation` and `:project_dir`
+  pass to `Poller.dispatch_fiber/2`.
+  """
   def human(fiber_id, text, opts \\ []) do
     dispatch = fn mode ->
       Poller.dispatch_fiber(fiber_id,
-        force: true,
-        ad_hoc: true,
+        force: Keyword.get(opts, :force, true),
+        ad_hoc: Keyword.get(opts, :ad_hoc, true),
+        existing_only: Keyword.get(opts, :existing_only, false),
+        release_launch_reservation: Keyword.get(opts, :release_launch_reservation, false),
+        project_dir: opts[:project_dir],
         resume_mode: mode,
         user_message: text,
-        line_recorded: true
+        line_recorded: text != nil
       )
     end
 
-    result =
-      Shuttle.InboxRecord.submit(
-        fiber_id,
-        text,
-        opts[:message_id],
-        "human",
-        fn _entry ->
-          if opts[:resume_mode],
-            do: dispatch.(opts[:resume_mode]),
-            else: human_launch(fiber_id, dispatch, opts[:source])
-        end,
-        source: opts[:source]
-      )
+    launch = fn _entry ->
+      case Keyword.get(opts, :resume_mode, "continue") do
+        "continue" -> human_launch(fiber_id, dispatch, opts[:source])
+        mode -> dispatch.(mode)
+      end
+    end
 
-    {:human, result}
+    if text,
+      do:
+        Shuttle.InboxRecord.submit(fiber_id, text, opts[:message_id], "human", launch,
+          source: opts[:source]
+        ),
+      else: launch.(nil)
   end
 
-  @doc """
-  Dispatches a human's line in the mode the worker's state chooses, through
-  `dispatch` (a function of the resume mode): typed into a live worker
-  (`previous`), else `continue` (`resume_or_start` for voice), which starts
-  fresh after a clean handoff and otherwise resumes the session or starts
-  cold. A worker that appeared between the look and the launch takes the line
-  as typed input.
-  """
-  def human_launch(fiber_id, dispatch, source \\ nil) do
+  # A human's line in the mode the worker's state chooses, through `dispatch`
+  # (a function of the resume mode): typed into a live worker (`previous`),
+  # else `continue` (`resume_or_start` for voice), which starts fresh after a
+  # clean handoff and otherwise resumes the session or starts cold. A worker
+  # that appeared between the look and the launch takes the line as typed
+  # input.
+  defp human_launch(fiber_id, dispatch, source) do
     mode =
       cond do
         Poller.live_worker(fiber_id) -> "previous"

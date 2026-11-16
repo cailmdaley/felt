@@ -17,10 +17,11 @@ defmodule ShuttleWeb.DispatchController do
 
   The kanban requeue carries the user's directive (`user_message`) and
   continuation mode (`resume_mode ∈ {"previous", "fresh", "continue"}` or
-  absent) inline in the body. `continue` lets the worker's state choose, as a
-  human line delivered through `/deliver` does (`Shuttle.Delivery.human_launch/3`):
-  typed into a live worker, else fresh after a clean handoff, else the session
-  resumed or started cold. It is the board console's plain send. Both ride the dispatch call into the prompt at launch; the remote
+  absent) inline in the body; `Shuttle.Delivery.human/3` records the line and
+  starts the worker with it, as for a human line through `/deliver`.
+  `continue` lets the worker's state choose: typed into a live worker, else
+  fresh after a clean handoff, else the session resumed or started cold. It is
+  the board console's plain send. Both ride the dispatch call into the prompt at launch; the remote
   forward passes `conn.body_params` verbatim, so they survive owner-routing
   intact.
 
@@ -75,34 +76,17 @@ defmodule ShuttleWeb.DispatchController do
     with :ok <- if(is_nil(fiber_id), do: {:error, "fiber_id is required"}, else: :ok),
          {:ok, carried} <- CarriedDocument.adopt(params, fiber_id),
          {:ok, message} <- Shuttle.DispatchImages.attach(message, Map.get(params, "images")) do
-      dispatch = fn mode ->
-        Shuttle.Poller.dispatch_fiber(fiber_id,
+      result =
+        Shuttle.Delivery.human(fiber_id, message,
+          message_id: params["message_id"],
+          resume_mode: normalize_resume_mode(Map.get(params, "resume_mode")),
           force: force or ad_hoc,
-          existing_only: truthy?(Map.get(params, "existing_only", false)),
           ad_hoc: ad_hoc,
+          existing_only: truthy?(Map.get(params, "existing_only", false)),
           release_launch_reservation:
             truthy?(Map.get(params, "release_launch_reservation", false)),
-          user_message: message,
-          line_recorded: not is_nil(message),
-          resume_mode: mode,
           project_dir: normalize_text(Map.get(params, "project_dir"))
         )
-      end
-
-      launch =
-        case normalize_resume_mode(Map.get(params, "resume_mode")) do
-          "continue" -> fn -> Shuttle.Delivery.human_launch(fiber_id, dispatch) end
-          mode -> fn -> dispatch.(mode) end
-        end
-
-      result =
-        if message do
-          Shuttle.InboxRecord.submit(fiber_id, message, params["message_id"], "human", fn _ ->
-            launch.()
-          end)
-        else
-          launch.()
-        end
 
       {status, body} = ShuttleWeb.DispatchReply.render(fiber_id, result)
       conn |> put_status(status) |> json(with_carried(body, carried))

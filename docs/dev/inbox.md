@@ -107,6 +107,7 @@ A contract-41 CLI sends the same request and reads these answers as it always ha
 The human's fresh board action keeps forced-start authority.
 
 Channels replies, the Dock's send and review lines, and `/dispatch user_message` record the line first, as a `source: human` record (`Shuttle.InboxRecord`).
+`/dispatch` with `user_message` and `/deliver` with `from: human` are one implementation, `Shuttle.Delivery.human/3`; `/dispatch` adds its own launch options (`force`, `existing_only`, `project_dir`, images) and, without `resume_mode`, lets the dispatcher choose, where `/deliver` lets the worker's state choose.
 The board keeps one `message_id` per composed message: a retry after a failed send reuses it, and a new message, or the same text after a send went through, gets a new one. The owner mints one for callers without it, such as `shuttle dispatch --message`.
 Images are written to disk and represented as `[Image: path]` lines before recording.
 The owner writes the record straight to the inbox's `offered/`, disposition unknown, under the inbox lock, so no reader ever offers it.
