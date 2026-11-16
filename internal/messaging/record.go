@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
@@ -142,4 +143,19 @@ func HumanRecordFor(env *sysenv.Env, harness, id, host, prompt string, window ti
 		}
 	}
 	return found
+}
+
+// boundedInboxText cuts text over the inbox's 64 KiB limit short: its first
+// 60,000 bytes, ending on a whole character, as the daemon captures a result
+// whose outcome is that long. A record's text is cut the same way, while its
+// transport carries the line whole.
+func boundedInboxText(text string) string {
+	if len(text) <= 64<<10 {
+		return text
+	}
+	cut := text[:60_000]
+	for !utf8.ValidString(cut) {
+		cut = cut[:len(cut)-1]
+	}
+	return cut + " … (truncated)"
 }

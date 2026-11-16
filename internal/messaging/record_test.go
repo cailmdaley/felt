@@ -90,15 +90,21 @@ func TestRecordRetriesOnlyAnUndeliverableLine(t *testing.T) {
 
 // The record holds a line over the inbox limit cut short; the caller
 // transports the whole line.
+// A multi-byte line whose cut falls inside a character ends on the whole
+// character before it.
 func TestRecordRecordsALongLineCutShort(t *testing.T) {
 	env := testEnv(t)
-	text := strings.Repeat("x", 70_000)
-	if created, _, err := BeginRecord(env, "fiber", "human-long", "human", text); err != nil || !created {
-		t.Fatalf("%v %v", created, err)
-	}
-	e, err := readFiberMailboxEntry(filepath.Join(mailboxDir(env, "fiber", "fiber"), "offered", mailboxKey("human-long")+".json"))
-	if err != nil || !strings.HasSuffix(e.Request.Text, "(truncated)") || len(e.Request.Text) > 64<<10 {
-		t.Fatalf("len=%d %v", len(e.Request.Text), err)
+	for id, c := range map[string]struct{ text, want string }{
+		"human-long":       {strings.Repeat("x", 70_000), strings.Repeat("x", 60_000) + " … (truncated)"},
+		"human-multi-byte": {"x" + strings.Repeat("é", 35_000), "x" + strings.Repeat("é", 29_999) + " … (truncated)"},
+	} {
+		if created, _, err := BeginRecord(env, "fiber", id, "human", c.text); err != nil || !created {
+			t.Fatalf("%s: %v %v", id, created, err)
+		}
+		e, err := readFiberMailboxEntry(filepath.Join(mailboxDir(env, "fiber", "fiber"), "offered", mailboxKey(id)+".json"))
+		if err != nil || e.Request.Text != c.want {
+			t.Fatalf("%s: len=%d want %d %v", id, len(e.Request.Text), len(c.want), err)
+		}
 	}
 }
 
