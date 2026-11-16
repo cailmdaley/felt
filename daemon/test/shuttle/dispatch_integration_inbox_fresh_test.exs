@@ -69,5 +69,9 @@ defmodule Shuttle.DispatchIntegrationInboxFreshTest do
     assert out =~ "started a fresh session on #{other}"
     assert {_, 0} = fresh(other, "f-next", "begin again")
     assert carrying("begin again") == 1
+
+    # Released and polled, the daemon still never launches the lost request.
+    poll!(poller)
+    assert carrying("rerun from scratch") == 0
   end
 end
