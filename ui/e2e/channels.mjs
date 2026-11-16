@@ -89,8 +89,13 @@ try {
     // Closed to its chair, then marked for the human's review: an item, and its line's end.
     assert.ok(said.some(([who, what]) => who === 'covariance' && what === 'end:closed'), 'the close ends its line')
     assert.ok(said.some(([who, what]) => who === 'beam' && what === 'start'), 'the silent beam window shows only as its line')
-    // An item on a line leaves its slug to the line's start: the kappa post names its kind alone.
-    assert.equal(await page.locator('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"] .kbn-ch-who').textContent(), 'posted')
+    // An item on a line names its kind; its slug shows only when the line's start is out of sight.
+    assert.equal(await page.locator('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"] .kbn-ch-who .kbn-ch-kind').textContent(), 'posted')
+    const startInSight = await page.evaluate(() => {
+      const list = document.querySelector('.kbn-ch > .kbn-ch-stream'), start = list.querySelector('[data-fiber="cmbx/kappa-tsz"][data-what="start"]')
+      return start.offsetTop + start.offsetHeight > list.scrollTop && start.offsetTop < list.scrollTop + list.clientHeight
+    })
+    assert.equal(await page.locator('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"] .kbn-ch-who-slug').isVisible(), !startInSight)
     // The channel's head carries its chair's pages; its console speaks to its chair, by slugs.
     assert.ok(await page.locator('.kbn-ch-head .kbn-ch-pages [data-part="constitution"]').isVisible())
     assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-band-title').textContent(), 'cmbx')
@@ -159,6 +164,13 @@ try {
       await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'unions')
       // Its chair's post and a hub's figure, both to the human, and a thread's question.
       await page.waitForFunction(() => document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-item').length === 3)
+      // A dozen lines at once keep to a narrow margin: a bundle and at most three lanes, the gutter 34px wide.
+      assert.deepEqual(await page.evaluate(() => [...new Set([...document.querySelectorAll('.kbn-ch-gutter')].map(el => el.getAttribute('width')))]), ['34'])
+      // The bundle opens a list of the threads it carries.
+      await page.locator('.kbn-ch-bundle').last().click({ force: true })
+      await page.waitForFunction(() => document.querySelectorAll('[role="menuitem"]').length > 0)
+      await shot(page, 'desktop-bundle-menu')
+      await page.keyboard.press('Escape')
       await shot(page, 'desktop-busy')
       await page.keyboard.press('[')
       assert.equal(await page.locator('.kbn-ch-layout[data-rail-hidden]').count(), 1)

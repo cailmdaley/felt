@@ -145,18 +145,20 @@
 .kbn-ch-gutter { position: absolute; top: 0; left: 0; height: 100%; overflow: visible; pointer-events: none; }
 /* A line's colour is its thread's identity, one of six that are none of the state colours (gold, the agent's blue,
    verdigris); its state colours its stations and its end. An ended life keeps its colour, quieter. */
-:is(.kbn-ch-stream, .kbn-ch-tags) [data-hue='0'] { --line: var(--kbn-line-0); }
-:is(.kbn-ch-stream, .kbn-ch-tags) [data-hue='1'] { --line: var(--kbn-line-1); }
-:is(.kbn-ch-stream, .kbn-ch-tags) [data-hue='2'] { --line: var(--kbn-line-2); }
-:is(.kbn-ch-stream, .kbn-ch-tags) [data-hue='3'] { --line: var(--kbn-line-3); }
-:is(.kbn-ch-stream, .kbn-ch-tags) [data-hue='4'] { --line: var(--kbn-line-4); }
-:is(.kbn-ch-stream, .kbn-ch-tags) [data-hue='5'] { --line: var(--kbn-line-5); }
+.kbn-ch-stream [data-hue='0'] { --line: var(--kbn-line-0); }
+.kbn-ch-stream [data-hue='1'] { --line: var(--kbn-line-1); }
+.kbn-ch-stream [data-hue='2'] { --line: var(--kbn-line-2); }
+.kbn-ch-stream [data-hue='3'] { --line: var(--kbn-line-3); }
+.kbn-ch-stream [data-hue='4'] { --line: var(--kbn-line-4); }
+.kbn-ch-stream [data-hue='5'] { --line: var(--kbn-line-5); }
 .kbn-ch-line { color: var(--line); pointer-events: auto; cursor: pointer; }
 .kbn-ch-line[data-state='ended'] { opacity: 0.55; }
-.kbn-ch-rail-v { fill: var(--line); }
-.kbn-ch-fade { fill: var(--line); mask: linear-gradient(transparent, var(--kbn-ink) 60%); -webkit-mask: linear-gradient(transparent, var(--kbn-ink) 60%); }
+/* The bundle: every running line out of a lane, one heavier neutral line; it lists the threads it carries. */
+.kbn-ch-bundle { pointer-events: auto; cursor: pointer; }
+.kbn-ch-bundle-v { stroke: var(--kbn-ink-muted); stroke-width: 2.5; }
+.kbn-ch-bundle-foot { fill: var(--kbn-ink-muted); mask: linear-gradient(var(--kbn-ink), transparent); -webkit-mask: linear-gradient(var(--kbn-ink), transparent); }
 .kbn-ch-track { fill: none; stroke: var(--line); stroke-width: 1.5; }
-.kbn-ch-hit { fill: transparent; stroke: transparent; stroke-width: 10; }
+.kbn-ch-hit { fill: transparent; stroke: transparent; stroke-width: 5; }
 /* A start's ring, in the line's colour, filled with the thread's state while it waits on the human or works. */
 .kbn-ch-ring { fill: var(--kbn-paper); stroke: var(--line); stroke-width: 1.5; }
 .kbn-ch-line[data-state='waiting'] .kbn-ch-ring { fill: var(--kbn-owed-bright); }
@@ -171,35 +173,21 @@
 /* Stations of their own: a start's ring and slug, a tick, an end's terminus. Each a short row, written once per line. */
 .kbn-ch-station { position: relative; flex: none; padding-left: calc(var(--kbn-ch-tube) + 2px); }
 .kbn-ch-st-start { display: flex; align-items: center; height: 22px; }
-.kbn-ch-st-tick { height: 10px; }
-.kbn-ch-st-end { height: 14px; }
-/* A line running in from before the stream is named on its first row, a tick or an end too. */
-.kbn-ch-station[data-named] { display: flex; align-items: center; height: 22px; }
+.kbn-ch-st-tick { height: 16px; }
+.kbn-ch-st-end { height: 18px; }
 .kbn-ch-slug {
   padding: 0; border: 0; background: none; cursor: pointer;
   font: var(--type-label)/var(--leading-ui) var(--font-mono); color: var(--line);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
 }
-/* The names of lines whose starts are scrolled away, pinned at the stream's top in lane order. */
-.kbn-ch-tags { position: sticky; top: -12px; z-index: 2; height: 0; flex: none; list-style: none; }
-/* The band floats over the rows beneath it and takes no room of its own, so pinning a tag moves nothing. */
-.kbn-ch-tags-band {
-  position: absolute; top: 0; left: 0; right: 0;
-  display: flex; flex-direction: column; gap: 2px; padding: 4px 0 5px;
-  background: var(--kbn-paper);
-  box-shadow: 0 1px 0 var(--kbn-rule);
+/* The bundle's count: how many running lines it carries at the top of what is in sight, ringed on it. */
+.kbn-ch-count { position: sticky; top: -12px; z-index: 2; height: 0; flex: none; list-style: none; }
+.kbn-ch-count-ring {
+  position: absolute; top: 14px; left: 0; display: grid; place-items: center; width: 17px; height: 17px; padding: 0;
+  border: 1.5px solid var(--kbn-ink-muted); border-radius: 50%; background: var(--kbn-paper); cursor: pointer;
+  font: var(--type-label)/var(--leading-solid) var(--font-serif); color: var(--kbn-ink-soft); font-variant-numeric: tabular-nums;
 }
-.kbn-ch-tags-band:empty { display: none; }
-.kbn-ch-tag {
-  position: relative; display: flex; align-items: center; height: 15px; padding-left: calc(var(--kbn-ch-tube) + 2px); cursor: pointer;
-}
-.kbn-ch-tag::before { content: ''; position: absolute; left: var(--kbn-ch-lane); width: calc(var(--kbn-ch-tube) - var(--kbn-ch-lane) - 2px); top: 50%; border-top: 1.5px solid var(--line); }
-.kbn-ch-tag::after { content: ''; position: absolute; left: calc(var(--kbn-ch-lane) - 0.75px); top: 50%; bottom: -3px; border-left: 1.5px solid var(--line); }
-.kbn-ch-tag-name {
-  padding: 0 6px; border-radius: 8px; background: color-mix(in srgb, var(--line) 14%, var(--kbn-paper));
-  font: var(--type-label)/var(--leading-tight) var(--font-mono); color: var(--kbn-ink-soft);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
+.kbn-ch-count-ring[hidden] { display: none; }
 /* An item: its dot at the gutter's edge, a station on its line; then who (unless its line says), what kind and when, its one line and its pages. */
 .kbn-ch-item {
   position: relative;
@@ -211,7 +199,7 @@
 .kbn-ch-item[data-waiting] {
   background: linear-gradient(to right, transparent var(--kbn-ch-tube), var(--kbn-owed-bright) 0, var(--kbn-owed-bright) calc(var(--kbn-ch-tube) + 2px), color-mix(in srgb, var(--kbn-owed-bright) 7%, transparent) 0);
 }
-.kbn-ch-item > .constitution-state-dot { position: absolute; top: 8px; left: calc(var(--kbn-ch-tube) - 20px); width: 20px; height: 24px; }
+.kbn-ch-item > .constitution-state-dot { position: absolute; top: 8px; left: calc(var(--kbn-ch-tube) - 14px); width: 14px; height: 24px; }
 /* On a line, the dot, coloured by the thread's state, is ringed in the line's. */
 .kbn-ch-item[data-line] > .constitution-state-dot::before { box-shadow: 0 0 0 1.5px var(--kbn-paper), 0 0 0 3px var(--line); }
 .kbn-ch-item-body { min-width: 0; }
@@ -223,8 +211,14 @@
 .kbn-ch-who:hover { color: var(--kbn-ink-soft); }
 .kbn-ch-kind { font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
 .kbn-ch-item[data-waiting] .kbn-ch-kind { color: var(--kbn-owed-deep, var(--kbn-ink)); font-weight: 600; }
-/* An item on a line names its kind alone, as its button. */
-.kbn-ch-who[data-lined] { font: inherit; color: inherit; }
+/* An item on a line names its kind as its button, and its line's slug only where the line is named on it. */
+.kbn-ch-who[data-lined] { display: inline-flex; align-items: baseline; gap: 8px; font: inherit; color: inherit; }
+.kbn-ch-item:not([data-named]) .kbn-ch-who-slug { display: none; }
+.kbn-ch-who-slug { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 var(--type-row)/var(--leading-ui) var(--font-mono); color: var(--line, var(--kbn-ink)); }
+/* Named or not, an item's head keeps one line, so naming it on a scroll moves nothing. */
+.kbn-ch-item[data-line] .kbn-ch-item-head { flex-wrap: nowrap; }
+.kbn-ch-item[data-line] .kbn-ch-who[data-lined] { min-width: 0; }
+.kbn-ch-item[data-line] :is(.kbn-ch-kind, .kbn-ch-age, .kbn-ch-clear) { flex: none; white-space: nowrap; }
 /* A waiting post's clear: a small check at the head's end, the post's one act. */
 .kbn-ch-clear {
   margin-left: auto; padding: 0 6px; border: 1px solid var(--kbn-rule-strong); border-radius: 3px; background: transparent;
@@ -241,7 +235,7 @@
 /* Its files below its words, at the stream's full width: the previews unfold in place (workspace/unfold.css). */
 .kbn-ch-previews { margin-top: 8px; }
 /* An unfolded file's bar pins below the band of pinned line names, the band's own offset taken back. */
-.kbn-ch-previews .uf-bar { top: calc(var(--kbn-ch-tags-h, 0px) - 12px); }
+.kbn-ch-previews .uf-bar { top: -12px; }
 
 /* The console, docked under the stream. */
 .kbn-ch > .ws-dock { flex: none; }

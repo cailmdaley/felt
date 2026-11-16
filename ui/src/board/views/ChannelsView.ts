@@ -9,7 +9,7 @@ import {
   arranged, composeChannels, composeStream, fiberOf, hideKey, railOrder, reordered, showKey, unpinKey,
   type Channel, type Entry, type Item, type Station,
 } from '../channels.js'
-import { layTube, type Tube, type TubeLine, type TubeRow } from '../tube.js'
+import { layTube, type Excursion, type Tube, type TubeLine, type TubeRow } from '../tube.js'
 import { createRailReorder, type RailReorder } from '../channelRail.js'
 import { openActionMenu } from '../conversationMenu.js'
 import { stateDot } from '../stateDot.js'
@@ -47,10 +47,10 @@ const FOLLOW_PX = 24
 const FOUND_DOCUMENTS = 12
 /** Narrower than this, the rail is a drawer drawn in over the stream. */
 const DRAWER_PX = 1100
-/** The tube map's geometry: the outermost lane's centre, the room lanes share at most, the widest step between them, a curve's radius, the dot column. */
-const TUBE = { first: 7, room: 64, pitch: 9, radius: 5, dot: 20 } as const
+/** The tube map's geometry: the bundle's centre, the first lane's, the step between lanes, a curve's radius, the whole margin, the dot column. */
+const TUBE = { bundle: 4, first: 10, pitch: 5, radius: 3, gutter: 34, dot: 14 } as const
 /** Where a station sits in its row: an item's dot, a start's ring, an end's terminus, a tick. */
-const STATION_Y = { item: 20, start: 11, end: 7, tick: 5 } as const
+const STATION_Y = { item: 20, start: 11, end: 9, tick: 8 } as const
 const SVG = 'http://www.w3.org/2000/svg'
 /** A thread's colour on the tube map, one of six, the same wherever its lines are drawn. */
 const hue = (card: KanbanCard): string => {
@@ -58,8 +58,6 @@ const hue = (card: KanbanCard): string => {
   for (const char of fiberOf(card)) hash = (hash * 31 + char.charCodeAt(0)) >>> 0
   return String(hash % 6)
 }
-/** A pinned tag's height, its gap included. */
-const TAG_PX = 17
 const svg = <K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number>): SVGElementTagNameMap[K] => {
   const node = document.createElementNS(SVG, tag)
   for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value))
@@ -153,12 +151,10 @@ export class ChannelsView implements TemporalView {
   private returnTo: string | null = null
   /** The reader stands over Channels: nothing redraws beneath it. */
   private away = false
-  /** The stream's tube map as last drawn, for the tags pinned at its top. */
+  /** The stream's tube map as last drawn, for naming lines on what is in sight. */
   private tube: Tube | null = null
-  /** A frame asked for to pin the tags after a scroll. */
-  private pinning = 0
-  /** The pinned tags as last drawn: which lines, so a scroll that changes nothing leaves them be. */
-  private tagged = ''
+  /** A frame asked for to name the lines in sight after a scroll. */
+  private naming = 0
   /** The stream follows what arrives while the reader is at its foot. */
   private following = true
   private railHidden = false
@@ -262,7 +258,7 @@ export class ChannelsView implements TemporalView {
     this.stream.addEventListener('scroll', () => {
       const list = this.stream!
       this.following = list.scrollHeight - list.scrollTop - list.clientHeight <= FOLLOW_PX
-      if (!this.pinning) this.pinning = requestAnimationFrame(() => { this.pinning = 0; this.pinTags() })
+      if (!this.naming) this.naming = requestAnimationFrame(() => { this.naming = 0; this.nameLines() })
     }, { passive: true })
     this.dock = this.ctx!.workspace!.console({ keepPlace: true })
     this.dock.el.hidden = true
@@ -534,24 +530,17 @@ export class ChannelsView implements TemporalView {
       this.sigs.stream = stream
       const tube = this.tube = layTube(entries)
       // The lanes share their room, each step no wider than the mock's nine pixels.
-      const pitch = tube.lanes > 1 ? Math.min(TUBE.pitch, TUBE.room / (tube.lanes - 1)) : TUBE.pitch
-      const gutter = tube.lanes ? Math.round(TUBE.first + pitch * (tube.lanes - 1) + TUBE.radius + 12 + TUBE.dot) : TUBE.dot + 4
-      this.stream.style.setProperty('--kbn-ch-tube', `${gutter}px`)
-      const lay = { pitch, gutter, waits, now, last: entries.length - 1 }
-      const tags = el('li', 'kbn-ch-tags')
-      tags.setAttribute('aria-hidden', 'true')
-      tags.append(el('div', 'kbn-ch-tags-band'))
-      this.tagged = ''
+      this.stream.style.setProperty('--kbn-ch-tube', `${TUBE.gutter}px`)
+      const lay = { waits, now, last: entries.length - 1 }
+      const count = el('li', 'kbn-ch-count'), ring = button('kbn-ch-count-ring', '', () => this.bundleMenu(this.atTop()))
+      ring.hidden = true
+      count.append(ring)
       this.entriesDrawn = entries
       this.titles.clear()
-      this.named = new Map()
-      tube.rows.forEach((row, index) => { if (row.own && !this.named.has(row.own.line.id)) this.named.set(row.own.line.id, index) })
       const kept = new Set<string>()
-      this.rebuild(this.stream, [tags, ...entries.map((entry, row) => {
-        // A line running in from before the stream is named on its first row.
-        const named = !!entry.line && tube.rows[row].own?.line.from === -1 && this.named.get(entry.line) === row
-        const sig = JSON.stringify([said[row], named]), was = this.rows.get(entry.id)
-        const node = was?.sig === sig ? was.node : entry.kind === 'station' ? this.stationRow(entry, now, named) : this.itemRow(entry, now, named)
+      this.rebuild(this.stream, [count, ...entries.map((entry, row) => {
+        const sig = JSON.stringify(said[row]), was = this.rows.get(entry.id)
+        const node = was?.sig === sig ? was.node : entry.kind === 'station' ? this.stationRow(entry, now) : this.itemRow(entry, now)
         this.rows.set(entry.id, { sig, node })
         kept.add(entry.id)
         if (was?.node === node && entry.kind !== 'station') node.querySelector(':scope > .constitution-state-dot')?.replaceWith(this.dot(entry))
@@ -569,7 +558,7 @@ export class ChannelsView implements TemporalView {
       this.sweep(new Set(entries.flatMap(entry => entry.kind === 'station' ? [] : [`item:${entry.id}`])))
       if (!entries.length) this.stream.append(el('li', 'kbn-ch-hush', failed ? 'This channel\'s history could not be read; trying again.' : 'Nothing addressed to you here yet.'))
       if (this.following) this.stream.scrollTop = this.stream.scrollHeight
-      this.pinTags()
+      this.nameLines()
     }
     for (const age of this.layout!.querySelectorAll<HTMLElement>('[data-at]')) age.textContent = ago(Number(age.dataset.at), now)
   }
@@ -590,22 +579,24 @@ export class ChannelsView implements TemporalView {
     this.titles.set(line.id, title)
     return title
   }
-  /** Where each line's slug is written: its start row, else its first row. */
-  private named = new Map<string, number>()
   /** The entries the stream last drew, row by row. */
   private entriesDrawn: Entry[] = []
   private readonly titles = new Map<string, string>()
   /**
-   * A row's gutter: every line running past it, and its own part of one —
-   * a start curving out of its ring into the lane, a tick across the lane,
-   * an end curving back in to its terminus, an item's stub out to its dot.
-   * Each line opens its constitution's view.
+   * A row's gutter: the bundle every running line rides, a heavier neutral
+   * line; the lanes of the lines out of it beside their events; and the row's
+   * own event — a start's ring curving into its lane or into the bundle, an
+   * item's stub, a handoff's open ring, an end curving to its terminus — a
+   * line leaving the bundle on a curve just above its event and rejoining it
+   * just below. A line, a stub or a station opens its constitution's view;
+   * the bundle lists the threads it carries.
    */
-  private gutter(row: TubeRow, index: number, lay: { pitch: number; gutter: number; waits: Waits; now: number; last: number }): SVGSVGElement {
-    const box = svg('svg', { class: 'kbn-ch-gutter', width: lay.gutter })
+  private gutter(row: TubeRow, index: number, lay: { waits: Waits; now: number; last: number }): SVGSVGElement {
+    const box = svg('svg', { class: 'kbn-ch-gutter', width: TUBE.gutter })
     box.setAttribute('aria-hidden', 'true')
-    const x = (line: TubeLine): number => TUBE.first + lay.pitch * line.lane
-    const station = lay.gutter - TUBE.dot / 2, r = TUBE.radius
+    const lane = (excursion: Excursion): number => TUBE.first + TUBE.pitch * excursion.lane
+    const bx = TUBE.bundle, station = TUBE.gutter - TUBE.dot / 2, r = TUBE.radius
+    const own = row.own, y = own ? STATION_Y[own.what] : 0
     const group = (line: TubeLine): SVGGElement => {
       const g = svg('g', { class: 'kbn-ch-line', 'data-line': line.id, 'data-state': this.lineState(line, lay.waits), 'data-hue': hue(line.card) })
       const title = svg('title', {})
@@ -614,36 +605,76 @@ export class ChannelsView implements TemporalView {
       g.addEventListener('click', event => { event.stopPropagation(); this.openLine(line.card) })
       return g
     }
-    for (const line of row.through) {
-      const g = group(line)
-      // A line already running where the stream begins comes in faded from its top.
-      const fades = line.from < 0 && index === 0
-      g.append(svg('rect', { class: `kbn-ch-rail-v${fades ? ' kbn-ch-fade' : ''}`, x: x(line) - 0.75, y: 0, width: 1.5, height: '100%' }), svg('rect', { class: 'kbn-ch-hit', x: x(line) - 5, y: 0, width: 10, height: '100%' }))
-      // A line still running runs on past the last row to the stream's foot.
-      if (line.to === Infinity && index === lay.last) g.append(svg('rect', { class: 'kbn-ch-rail-v', x: x(line) - 0.75, y: '100%', width: 1.5, height: 12 }))
+    const path = (g: SVGGElement, d: string, className = 'kbn-ch-track'): void => { g.append(svg('path', { class: className, d }), svg('path', { class: 'kbn-ch-hit', d })) }
+    // The bundle: through the row, or from where a line joins it, or down to where one leaves.
+    const { top, bottom } = row.bundle
+    if (top || bottom) {
+      const g = svg('g', { class: 'kbn-ch-bundle' })
+      const carried = [...row.bundled, ...own && !own.excursion ? [own.line] : []]
+      const title = svg('title', {})
+      title.textContent = `${carried.length} running: ${carried.map(line => slug(line.card)).join(', ')}`
+      g.append(title)
+      g.addEventListener('click', event => { event.stopPropagation(); this.bundleMenu(carried, { x: event.clientX, y: event.clientY }) })
+      // Where the bundle meets the row's own line: a curve leaving or rejoining it nine pixels off the event, a wired start's or end's arc its radius off.
+      const meet = own?.leaves || own?.rejoins ? 9 : own && !own.excursion && (own.what === 'start' || own.what === 'end') ? r : 0
+      const span = { x1: bx, x2: bx, y1: top ? 0 : y + meet, y2: bottom ? '100%' : y - meet }
+      g.append(svg('line', { class: 'kbn-ch-bundle-v', ...span }), svg('line', { class: 'kbn-ch-hit', ...span }))
+      // Lines still running run on past the last row to the stream's foot.
+      if (bottom && index === lay.last) g.append(svg('rect', { class: 'kbn-ch-bundle-foot', x: bx - 1.25, y: '100%', width: 2.5, height: 10 }))
       box.append(g)
     }
-    const own = row.own
+    for (const excursion of row.through) {
+      const g = group(excursion.line), x = lane(excursion)
+      const span = { x1: x, x2: x, y1: 0, y2: '100%' }
+      g.append(svg('line', { class: 'kbn-ch-track', ...span }), svg('line', { class: 'kbn-ch-hit', ...span }))
+      box.append(g)
+    }
     if (!own) return box
-    const g = group(own.line), lx = x(own.line), y = STATION_Y[own.what]
-    const path = (d: string): void => { g.append(svg('path', { class: 'kbn-ch-track', d }), svg('path', { class: 'kbn-ch-hit', d })) }
+    const g = group(own.line), ex = own.excursion
+    // Where the row's line runs: its lane, or the bundle it is wired to.
+    const lx = ex ? lane(ex) : bx
+    if (ex) {
+      // Out of the bundle just above the event, back into it just below; a lane through the event's row between.
+      const enter = own.leaves ? `M${bx} ${Math.max(0, y - 9)}C${bx} ${y - 4} ${lx} ${y - 6} ${lx} ${y - 1}` : own.what === 'start' || own.what === 'end' ? '' : `M${lx} 0V${y}`
+      if (enter) path(g, enter)
+      if (own.rejoins) path(g, `M${lx} ${y}C${lx} ${y + 5} ${bx} ${y + 3} ${bx} ${y + 9}`)
+      else if (own.what !== 'end' && own.what !== 'start') g.append(svg('line', { class: 'kbn-ch-track', x1: lx, x2: lx, y1: y, y2: '100%' }))
+    }
     if (own.what === 'start') {
-      path(`M${station - 4} ${y}H${lx + r}A${r} ${r} 0 0 0 ${lx} ${y + r}V${2 * y}`)
+      path(g, `M${station - 4} ${y}H${lx + r}A${r} ${r} 0 0 0 ${lx} ${y + r}`)
+      // Into its lane, on down the row; into the bundle, which carries it on.
+      if (ex && !own.rejoins) g.append(svg('line', { class: 'kbn-ch-track', x1: lx, x2: lx, y1: y + r, y2: '100%' }))
       g.append(svg('circle', { class: 'kbn-ch-ring', cx: station, cy: y, r: 3.5 }))
     } else if (own.what === 'end') {
-      path(`M${lx} 0V${y - r}A${r} ${r} 0 0 0 ${lx + r} ${y}H${station - 4}`)
+      path(g, `M${lx} ${ex ? 0 : y - r}${ex ? `V${y - r}` : ''}A${r} ${r} 0 0 0 ${lx + r} ${y}H${station - 4}`)
       const shape = own.line.end ?? 'closed'
       if (shape === 'tempered') g.append(svg('path', { class: 'kbn-ch-term', 'data-end': shape, d: `M${station} ${y - 4.5}L${station + 4.5} ${y}L${station} ${y + 4.5}L${station - 4.5} ${y}Z` }))
       else if (shape === 'discarded') g.append(svg('path', { class: 'kbn-ch-cross', 'data-end': shape, d: `M${station - 3.5} ${y - 3.5}L${station + 3.5} ${y + 3.5}M${station + 3.5} ${y - 3.5}L${station - 3.5} ${y + 3.5}` }))
       else g.append(svg('rect', { class: 'kbn-ch-term', 'data-end': shape, x: station - 3, y: y - 3, width: 6, height: 6 }))
-    } else if (own.what === 'tick') {
-      g.append(svg('circle', { class: 'kbn-ch-hand', cx: lx, cy: y, r: 2.75 }))
     } else {
-      path(`M${lx} ${y}H${station - 6}`)
-      g.append(svg('circle', { class: 'kbn-ch-junction', cx: lx, cy: y, r: 2.5 }))
+      // An item's stub to its dot; a handoff's stub to an open ring.
+      path(g, `M${lx} ${y}H${station - (own.what === 'tick' ? 3 : 5)}`)
+      g.append(svg('circle', { class: 'kbn-ch-junction', cx: lx, cy: y, r: 2 }))
+      if (own.what === 'tick') g.append(svg('circle', { class: 'kbn-ch-hand', cx: station, cy: y, r: 3 }))
     }
     box.append(g)
     return box
+  }
+  /** The bundle's threads, listed: each opens its constitution's view. */
+  private bundleMenu(lines: readonly TubeLine[], point?: { x: number; y: number }): void {
+    // The count's ring is the list's anchor, wherever on the bundle it was asked for: focus returns to it.
+    const anchor = this.stream?.querySelector<HTMLElement>(':scope > .kbn-ch-count > .kbn-ch-count-ring')
+    if (!lines.length || !anchor) return
+    openActionMenu(anchor, lines.map(line => ({ label: slug(line.card), run: () => this.openLine(line.card) })), `${lines.length} running`, point)
+  }
+  /** The lines the bundle carries at the top of what is in sight. */
+  private atTop(): TubeLine[] {
+    const list = this.stream, tube = this.tube
+    if (!list || !tube) return []
+    const at = [...list.querySelectorAll<HTMLElement>(':scope > [data-row]')].findIndex(node => node.offsetTop + node.offsetHeight > list.scrollTop)
+    // What the bundle carries there, a line wired to it on that row included.
+    const row = at >= 0 ? tube.rows[at] : undefined
+    return row ? [...row.bundled, ...row.own && !row.own.excursion ? [row.own.line] : []] : []
   }
   /** A line, a station or a terminus opens its constitution's view, as an item does, and moves nothing else. */
   private openLine(card: KanbanCard, from: string | null = null): void {
@@ -651,57 +682,44 @@ export class ChannelsView implements TemporalView {
     this.ctx?.workspace?.openFromDesk(card)
   }
   /**
-   * Pins at the stream's top the name of each line running past it whose
-   * start is scrolled out of sight, or never was in the stream: a short stub
-   * from its lane to its slug, in lane order.
+   * Names each line once on what is in sight: on its start row when that is
+   * in sight, else on its first item in sight; otherwise only its tooltip
+   * names it. The bundle's ring counts the lines it carries at the top of
+   * the sight.
    */
-  private pinTags(): void {
-    const list = this.stream, tube = this.tube, tags = list?.querySelector<HTMLElement>(':scope > .kbn-ch-tags > .kbn-ch-tags-band')
-    if (!list || !tube || !tags) return
+  private nameLines(): void {
+    const list = this.stream, tube = this.tube
+    if (!list || !tube) return
+    const top = list.scrollTop, bottom = top + list.clientHeight
     const rows = [...list.querySelectorAll<HTMLElement>(':scope > [data-row]')]
-    // A start behind the band is out of sight too: the band grows with what it pins, so it is measured until it holds still.
-    // A line is named on its start row, or, running in from before the stream, on its first row: pinned once that row is out of sight.
-    const under = (top: number): TubeLine[] => tube.lines.filter(line => {
-      const named = rows[this.named.get(line.id) ?? -1]
-      return named && named.offsetTop + named.offsetHeight / 2 < top && (line.to === Infinity || (rows[line.to] && rows[line.to].offsetTop > top))
-    })
-    let pinned = under(list.scrollTop)
-    for (let pass = 0, count = -1; pass < 4 && count !== pinned.length; pass++) {
-      count = pinned.length
-      pinned = under(list.scrollTop + (count ? TAG_PX * count + 9 : 0))
+    const seen = (node: HTMLElement): boolean => node.offsetTop + node.offsetHeight > top && node.offsetTop < bottom
+    const named = new Set<HTMLElement>()
+    for (const line of tube.lines) {
+      if (line.from >= 0 && rows[line.from] && seen(rows[line.from])) continue
+      const first = rows.find((node, index) => tube.rows[index]?.own?.line === line && node.classList.contains('kbn-ch-item') && seen(node))
+      if (first) named.add(first)
     }
-    const sig = pinned.map(line => line.id).join(' ')
-    if (sig === this.tagged) return
-    this.tagged = sig
-    const waits = this.ctx?.workspace?.board.waiting ?? new Map()
-    const step = tube.lanes > 1 ? Math.min(TUBE.pitch, TUBE.room / (tube.lanes - 1)) : TUBE.pitch
-    // An unfolded file's bar pins below the band.
-    list.style.setProperty('--kbn-ch-tags-h', `${pinned.length ? TAG_PX * pinned.length + 9 : 0}px`)
-    tags.replaceChildren(...pinned.map(line => {
-      const tag = el('div', 'kbn-ch-tag')
-      tag.dataset.line = line.id
-      tag.dataset.state = this.lineState(line, waits)
-      tag.dataset.hue = hue(line.card)
-      tag.style.setProperty('--kbn-ch-lane', `${TUBE.first + step * line.lane}px`)
-      tag.append(el('span', 'kbn-ch-tag-name', slug(line.card)))
-      tag.title = line.card.name
-      tag.addEventListener('click', () => this.openLine(line.card))
-      return tag
-    }))
+    for (const node of rows) node.toggleAttribute('data-named', named.has(node))
+    const carried = this.atTop(), ring = list.querySelector<HTMLButtonElement>(':scope > .kbn-ch-count > .kbn-ch-count-ring')
+    if (ring) {
+      ring.hidden = carried.length < 2
+      ring.textContent = String(carried.length)
+      ring.title = `${carried.length} running: ${carried.map(line => slug(line.card)).join(', ')}`
+      ring.setAttribute('aria-label', ring.title)
+    }
   }
   /** A station on a line: a start's ring and slug, a tick, or an end's terminus; the slug is written here, once per line. */
-  private stationRow(station: Station, now: number, named = false): HTMLLIElement {
+  private stationRow(station: Station, now: number): HTMLLIElement {
     const row = el('li', `kbn-ch-station kbn-ch-st-${station.what}`)
     row.dataset.line = station.line
     row.dataset.fiber = fiberOf(station.card)
     row.dataset.slug = slug(station.card)
     row.dataset.what = station.what === 'end' ? `end:${station.end ?? 'closed'}` : station.what
-    if (station.what === 'start' || named) {
+    if (station.what === 'start') {
       const who = button('kbn-ch-slug', slug(station.card), () => this.openLine(station.card, `station:${station.id}`))
       who.dataset.item = `station:${station.id}`
       const what = { start: 'started', tick: 'handed off', end: station.end ?? 'closed' }[station.what]
       who.title = `${station.card.name} — ${what} ${ago(station.at, now)}`
-      row.toggleAttribute('data-named', named)
       row.append(who)
     } else {
       const what = station.what === 'tick' ? 'handed off' : station.end ?? 'closed'
@@ -715,7 +733,7 @@ export class ChannelsView implements TemporalView {
    * and when, its one line, and the files it carries as previews that unfold
    * in place. Choosing the item, outside its previews, opens the worker's view.
    */
-  private itemRow(item: Item, now: number, named = false): HTMLLIElement {
+  private itemRow(item: Item, now: number): HTMLLIElement {
     const { card } = item
     const row = el('li', 'kbn-ch-item')
     row.dataset.kind = item.kind
@@ -725,15 +743,15 @@ export class ChannelsView implements TemporalView {
     row.toggleAttribute('data-waiting', item.waiting)
     const id = `item:${item.id}`
     const open = (): void => { this.returnTo = id; this.ctx?.workspace?.openFromDesk(card) }
-    // On a line, the line says whose it is: the item names its kind alone, its slug left to its accessible name, unless the line is named here.
-    const lined = !!item.line && !named
+    // On a line, the line says whose it is: the item names its kind, its slug shown only where the line is named on it.
+    const lined = !!item.line
     const who = button('kbn-ch-who', lined ? '' : slug(card), open)
     who.dataset.item = id
     who.title = `Open ${card.name}`
     who.toggleAttribute('data-lined', lined)
     if (lined) {
       who.setAttribute('aria-label', `${slug(card)} ${kindWord(item)}`)
-      who.append(el('span', 'kbn-ch-kind', kindWord(item)))
+      who.append(el('span', 'kbn-ch-who-slug', slug(card)), el('span', 'kbn-ch-kind', kindWord(item)))
     }
     const age = el('span', 'kbn-ch-age', ago(item.at, now))
     age.dataset.at = String(item.at)

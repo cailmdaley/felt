@@ -136,9 +136,9 @@ it('opening, paging and returning to a channel look at nothing; clicking an item
   expect(openFromDesk).toHaveBeenLastCalledWith(beam)
   host.querySelector<HTMLButtonElement>('.kbn-ch-stream > [data-what="start"] .kbn-ch-slug')!.click()
   expect(openFromDesk).toHaveBeenLastCalledWith(tsz)
-  // The item on that line is wired to it and names its kind alone; its slug is its accessible name's.
+  // The item on that line is wired to it and names its kind; its slug shows only where the line is named on it, and is always its accessible name's.
   const wired = item(host, 'tsz')
-  expect([wired.querySelector('.kbn-ch-who')?.textContent, wired.querySelector('.kbn-ch-who')?.getAttribute('aria-label'), !!wired.querySelector('.kbn-ch-junction')]).toStrictEqual(['sent', 'tsz sent', true])
+  expect([wired.querySelector('.kbn-ch-who .kbn-ch-kind')?.textContent, wired.querySelector('.kbn-ch-who')?.getAttribute('aria-label'), !!wired.querySelector('.kbn-ch-junction')]).toStrictEqual(['sent', 'tsz sent', true])
   expect(see).not.toHaveBeenCalled()
 })
 
