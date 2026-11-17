@@ -17,6 +17,8 @@ export interface ThumbnailOptions {
   title?(): string
   /** The width a live page is laid out at before it is drawn to the box; a page drawn wide wants a wider layout to stay small. */
   pageWidth?: number
+  /** Drawn larger than a thumbnail: a page keeps its large embedded images. */
+  keepMedia?: boolean
   /** Visible candidates outrank the loading ring; zero suspends loading. */
   priority(): number
   distance(): number
@@ -218,7 +220,7 @@ export class Thumbnail {
     this.timer = setTimeout(() => finish(false), LOAD_POLICY.softTimeoutMs)
     const kind = documentKind(file.fullPath)
     this.body = buildFileViewer(this.opts.shuttleBase, file.fullPath, file.owner, undefined, undefined, {
-      kind: kind === 'fiber' ? undefined : kind, thumbnail: true, thumbnailLabel: !this.opts.captioned, active: false,
+      kind: kind === 'fiber' ? undefined : kind, thumbnail: true, thumbnailLabel: !this.opts.captioned, keepMedia: this.opts.keepMedia, active: false,
       onState: state => finish(state.status === 'ready'),
       onThumbnailSource: (source, etag) => {
         if (this.documentKey && this.generation === generation) cacheDocumentTitle(this.documentKey, file.fullPath, source, etag)

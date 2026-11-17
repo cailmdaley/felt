@@ -42,19 +42,41 @@ function inlineDataStylesheets(html: string): string {
   })
 }
 
-export function buildThumbnailPreview(source: string): string {
+/** Where a large embedded image stands while the markup is cut: a token the cut cannot split it at. */
+const TOKEN = /\u0000(\d+)\u0000/g
+
+/**
+ * A page's first screen as inert markup: its scripts removed, its head's
+ * styles kept, its body cut to {@link PREVIEW_LIMIT}. For a thumbnail
+ * (`keepMedia` false) every large embedded image, stylesheet link or inline
+ * SVG becomes a grey placeholder, which reads the same at 176 by 116 and
+ * keeps the miniature small; a larger preview keeps them whole, outside the
+ * cut's count, so a figure or a cover draws as it is.
+ */
+export function buildThumbnailPreview(source: string, keepMedia = false): string {
   let html = inlineDataStylesheets(source.replace(/<script\b[^>]*>[\s\S]*?(?:<\/script\s*>|$)/gi, ''))
-  html = html.replace(/\b(src|href)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, (attribute, name: string, value: string) => {
+  const kept: string[] = []
+  const large = (whole: string, placeholder: string): string => {
+    if (whole.length <= MEDIA_LIMIT) return whole
+    if (!keepMedia) return placeholder
+    kept.push(whole)
+    return `\u0000${kept.length - 1}\u0000`
+  }
+  html = html.replace(/\b(src|href)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, (attribute, _name: string, value: string) => {
     const unquoted = value.replace(/^["']|["']$/g, '')
-    return /^data:/i.test(unquoted) && unquoted.length > MEDIA_LIMIT ? `${name}="${mediaPlaceholder}"` : attribute
+    return /^data:/i.test(unquoted) && unquoted.length > MEDIA_LIMIT ? attribute.replace(unquoted, () => large(unquoted, mediaPlaceholder)) : attribute
   })
   html = html.replace(/url\(\s*("[^"]*"|'[^']*'|[^)]*)\s*\)/gi, (url, value: string) => {
     const unquoted = value.trim().replace(/^["']|["']$/g, '')
-    return /^data:/i.test(unquoted) && unquoted.length > MEDIA_LIMIT ? `url('${mediaPlaceholder}')` : url
+    return /^data:/i.test(unquoted) && unquoted.length > MEDIA_LIMIT ? `url('${large(unquoted, mediaPlaceholder)}')` : url
   })
   html = html.replace(/(<svg\b[^>]*>)[\s\S]*?<\/svg\s*>/gi, (svg, opening: string) =>
-    svg.length > MEDIA_LIMIT ? `${opening}<rect width="100%" height="100%" fill="currentColor" opacity=".12"/></svg>` : svg)
-  // Keep the head's styles and the first screen's structure, not the rest of a report.
+    large(svg, `${opening}<rect width="100%" height="100%" fill="currentColor" opacity=".12"/></svg>`))
+  return cut(html).replace(/\u0000\d*$/, '').replace(TOKEN, (_, index: string) => kept[Number(index)])
+}
+
+/** Keep the head's styles and the first screen's structure, not the rest of a report. */
+function cut(html: string): string {
   const body = /<body\b[^>]*>/i.exec(html)
   if (!body) return html.slice(0, PREVIEW_LIMIT)
   const start = body.index + body[0].length
@@ -75,13 +97,15 @@ export class ThumbnailPreviewCache {
   private readonly entries = new Map<string, { etag: string; html: string }>()
   private readonly capacity: number
   constructor(capacity = 128) { this.capacity = capacity }
-  get(src: string, source: string, etag?: string): string {
-    const prior = this.entries.get(src)
+  /** A resource's preview, for a thumbnail or (`keepMedia`) a larger preview: one entry each. */
+  get(src: string, source: string, etag?: string, keepMedia = false): string {
+    const key = keepMedia ? `keep:${src}` : src
+    const prior = this.entries.get(key)
     if (provesContent(etag) && prior?.etag === etag) return prior.html
-    const html = buildThumbnailPreview(source)
+    const html = buildThumbnailPreview(source, keepMedia)
     if (provesContent(etag)) {
-      this.entries.delete(src)
-      this.entries.set(src, { etag, html })
+      this.entries.delete(key)
+      this.entries.set(key, { etag, html })
       if (this.entries.size > this.capacity) this.entries.delete(this.entries.keys().next().value!)
     }
     return html

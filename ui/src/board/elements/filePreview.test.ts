@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { Unfold } from './filePreview.js'
+// @ts-expect-error Node types are excluded from the browser UI's tsconfig.
+import { readFileSync } from 'node:fs'
+import { BOX, densityOf, previewsHeight, Unfold } from './filePreview.js'
 
 const files = [{ key: 'host:/w/a.html', name: 'a.html' }, { key: 'host:/w/b.png', name: 'b.png' }, { key: 'host:/w/c.md', name: 'c.md' }]
 const made = (single = false): { unfold: Unfold; seen: ReturnType<typeof vi.fn> } => {
@@ -67,5 +69,34 @@ describe('files that unfold in place', () => {
     expect(unfold.unfolded).toBeNull()
     expect(unfold.el.querySelectorAll('.uf-card')).toHaveLength(2)
     expect(document.activeElement).toBe(elsewhere)
+  })
+})
+
+describe('a preview\'s box', () => {
+  it('takes its size from its density, by the file\'s kind alone, with no content mounted', () => {
+    const style = document.createElement('style')
+    // The stylesheet as the board ships it: the test reads the sizes CSS sets, not the module's numbers.
+    style.textContent = readFileSync('src/board/elements/filePreview.css', 'utf8')
+    document.head.append(style)
+    const unfold = new Unfold({ shuttleBase: '', awake: () => false })
+    document.body.append(unfold.el)
+    unfold.update([...files, { key: 'host:/w/plot.svg', name: 'plot.svg', at: Date.now() - 60_000 }])
+    const boxes = [...unfold.el.querySelectorAll<HTMLElement>('.uf-card')].map(card => {
+      const { width, height } = getComputedStyle(card)
+      return [card.dataset.density, width, height, !!card.querySelector('.ws-thumbnail-body, iframe, img')]
+    })
+    expect(boxes).toStrictEqual([
+      ['page', `${BOX.page.width}px`, `${BOX.page.height}px`, false],
+      ['figure', `${BOX.figure.width}px`, `${BOX.figure.height}px`, false],
+      ['card', `${BOX.card.width}px`, `${BOX.card.height}px`, false],
+      ['figure', `${BOX.figure.width}px`, `${BOX.figure.height}px`, false],
+    ])
+    // A card has nothing to load: its kind, its name and when it came.
+    expect([...unfold.el.querySelector('[data-density="card"]')!.children].map(part => part.textContent)).toStrictEqual(['≡', 'c.md', ''])
+    style.remove()
+  })
+  it('reckons a row of previews by its tallest box', () => {
+    expect([densityOf('/w/a.svg'), densityOf('/w/deck.html'), densityOf('/w/notes.md'), densityOf('/w/paper.pdf')]).toStrictEqual(['figure', 'page', 'card', 'card'])
+    expect([previewsHeight([]), previewsHeight(['/w/notes.md']), previewsHeight(['/w/notes.md', '/w/deck.html', '/w/a.png'])]).toStrictEqual([0, 56, 360])
   })
 })

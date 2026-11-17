@@ -9,7 +9,7 @@ import {
   arranged, clearLineKey, clearedLines, composeChannels, composeStream, fiberOf, hideKey, railOrder, reordered, showKey, unclearLineKey, unpinKey,
   type Channel, type Entry, type Item, type Station,
 } from '../channels.js'
-import { layTube, type Excursion, type Tube, type TubeLine, type TubeRow } from '../tube.js'
+import { layTube, rowHeight, type Excursion, type Tube, type TubeLine, type TubeRow } from '../tube.js'
 import { createRailReorder, type RailReorder } from '../channelRail.js'
 import { openActionMenu } from '../conversationMenu.js'
 import { stateDot } from '../stateDot.js'
@@ -21,7 +21,7 @@ import { docKey } from '../workspace/documents.js'
 import { headerIcon, type HeaderIcon } from '../workspace/headerIcon.js'
 import { declaredTitle, watchDocumentTitles } from '../workspace/DocumentTitles.js'
 import { docButtons } from '../workspace/docButtons.js'
-import { Unfold, type UnfoldFile } from '../elements/filePreview.js'
+import { BOX, previewsHeight, Unfold, type UnfoldFile } from '../elements/filePreview.js'
 import { groups, kindWord, post } from '../elements/post.js'
 import { doing, threadRow } from '../elements/threadRow.js'
 import { onDesk } from '../workspace/fiberPageState.js'
@@ -42,6 +42,8 @@ const RENEW_MS = 86_400_000
 const KEEP_MS = 7 * 86_400_000
 /** How far a finger or a trackpad must travel sideways to bring the rail in or put it away. */
 const SWIPE_PX = 60
+/** About how tall a post stands without its files: its head and two lines of words. */
+const POST_PX = 64
 /** A stream within this many pixels of its foot follows what arrives. */
 const FOLLOW_PX = 24
 /** Jump to lists at most this many documents beneath the channels it matches. */
@@ -525,7 +527,8 @@ export class ChannelsView implements TemporalView {
     const stream = JSON.stringify([channel.key, failed, said, entries.map(entry => [attentionOf(entry.card, waits), turnOf(entry.card).turn])])
     if (stream !== this.sigs.stream) {
       this.sigs.stream = stream
-      const tube = layTube(entries)
+      // Each row reckoned by its parts' sizes, a post's by its tallest preview, before anything in it loads.
+      const tube = layTube(entries, entries.map(entry => entry.kind === 'station' ? rowHeight(entry) : POST_PX + Math.max(entry.kind === 'close' ? BOX.page.height : 0, previewsHeight(entry.files.map(file => file.fullPath)))))
       // The lanes share their room, each step no wider than the mock's nine pixels.
       this.stream.style.setProperty('--kbn-ch-tube', `${TUBE.gutter}px`)
       const lay = { waits, now, last: entries.length - 1 }
@@ -780,8 +783,8 @@ export class ChannelsView implements TemporalView {
     })
   }
   /**
-   * An item's files at the stream's full width, below its words: one preview,
-   * or several in a sideways row with the next peeking; a click unfolds one
+   * An item's files below its words, each at its density's box in a row that
+   * wraps (elements/filePreview.ts); a click unfolds one
    * in place under a bar pinned as it scrolls, ← and → step through them and
    * Escape folds it. A close leads with its tapestry, found as the read says.
    */
@@ -794,7 +797,10 @@ export class ChannelsView implements TemporalView {
         full: key => this.openPage(id, card, key),
       }), files: [],
     }).get(id)!
-    const files = item.files.map((file): UnfoldFile => ({ key: docKey(file.host ?? card.originId, file.fullPath, card.originId, card.fiberDir), name: declaredTitle(docKey(file.host ?? card.originId, file.fullPath, card.originId, card.fiberDir))?.title ?? file.basename }))
+    const files = item.files.map((file): UnfoldFile => {
+      const key = docKey(file.host ?? card.originId, file.fullPath, card.originId, card.fiberDir)
+      return { key, name: declaredTitle(key)?.title ?? file.basename, at: file.timestamp }
+    })
     made.files = files
     this.showPreviews(made)
     made.unfold.el.classList.add('kbn-ch-previews')

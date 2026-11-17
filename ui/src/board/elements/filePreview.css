@@ -1,6 +1,6 @@
-/* Files that unfold in place. Folded: previews capped near 320px, at the full width given, in one sideways row
-   when there are several, the next peeking at the edge. Unfolded: the same card grown to the file's natural
-   height, under a quiet bar in the folded row's meta type, pinned to the top of what scrolls it. */
+/* Files that unfold in place. Folded: a single lead capped near 320px at the full width given; a post's files each
+   at its density's box (BOX in filePreview.ts), in a row that wraps. Unfolded: the same card grown to the file's
+   natural height, under a quiet bar in the folded row's meta type, pinned to the top of what scrolls it. */
 .uf { --uf-cap: min(320px, 55vh); min-width: 0; }
 .uf[hidden] { display: none; }
 .uf-row { display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: thin; }
@@ -11,6 +11,21 @@
 .uf[data-several] .uf-card { flex-basis: calc(100% - 56px); }
 .uf-card:is(:hover, :focus-visible) { box-shadow: 0 0 0 1px var(--ws-ink-soft); outline: none; }
 .uf-thumb.ws-thumbnail { width: 100%; height: 100%; border-radius: 4px; }
+
+/* A post's files, at Slack's proportions: a figure at most 480 by 360, its picture contained; a page 480 by 270;
+   a card 360 by 56. Each box is set before anything loads, never larger than the row. */
+.uf:not([data-single]) .uf-row { flex-wrap: wrap; gap: 8px; overflow: visible; scroll-snap-type: none; }
+.uf:not([data-single]) .uf-card { flex: none; max-width: 100%; }
+.uf-card[data-density='figure'] { width: 480px; height: 360px; }
+.uf-card[data-density='page'] { width: 480px; height: 270px; }
+.uf-card[data-density='thumbnail'] { width: 176px; height: 116px; }
+.uf-card[data-density='card'] {
+  width: 360px; height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 12px; text-align: left;
+  background: var(--ws-paper, var(--kbn-paper)); color: var(--ws-ink-soft); font: var(--type-meta)/var(--leading-ui) var(--font-serif);
+}
+.uf-card-glyph { flex: none; width: 24px; font: var(--type-title)/var(--leading-solid) var(--font-serif); color: var(--ws-ink-muted); text-align: center; }
+.uf-card-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 var(--type-row)/var(--leading-ui) var(--font-mono); color: var(--ws-ink); }
+.uf-card-age { flex: none; color: var(--ws-ink-muted); white-space: nowrap; }
 
 .uf-bar {
   position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 4px;

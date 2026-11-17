@@ -97,11 +97,13 @@ try {
     assert.ok(await page.locator('.kbn-ch-head .kbn-ch-pages [data-part="constitution"]').isVisible())
     assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-band-title').textContent(), 'cmbx')
     assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-worker-message').getAttribute('data-placeholder'), 'Message cmbx')
-    // Its post carries the deck, the plot and the notes it attached as previews at full width in one sideways row.
+    // Its post carries the deck, the plot and the notes it attached, each at its density's box in a row that wraps:
+    // a page 480 by 270, a figure 480 by 360, a card 360 by 56, never wider than the row.
     const kappa = page.locator('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"]')
     assert.equal(await kappa.locator('.kbn-ch-previews .uf-card').count(), 3)
-    const [row, card] = await Promise.all([kappa.locator('.uf-row').boundingBox(), kappa.locator('.uf-card').first().boundingBox()])
-    assert.ok(card.height <= 322 && card.width < row.width && card.width > row.width - 80, 'a preview at full width, capped, the next peeking')
+    const rowWidth = (await kappa.locator('.uf-row').boundingBox()).width
+    const boxes = await kappa.locator('.uf-card').evaluateAll(cards => cards.map(card => [card.dataset.density, Math.round(card.getBoundingClientRect().width), Math.round(card.getBoundingClientRect().height)]))
+    assert.deepEqual(boxes, [['page', 270], ['figure', 360], ['card', 56]].map(([density, height]) => [density, Math.min({ page: 480, figure: 480, card: 360 }[density], Math.round(rowWidth)), height]))
     // The close for review says its review note, never its outcome.
     assert.match(await page.locator('.kbn-ch-item[data-kind="close"] .kbn-ch-item-text').textContent(), /agree to 4%/)
     assert.equal(await page.locator('.kbn-ch-stream').getByText('validated against 2000 simulations').count(), 0)

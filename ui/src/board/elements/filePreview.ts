@@ -1,12 +1,34 @@
 import type { DocumentKey } from '../workspace/DocumentBridge.js'
 import { buildFileViewer, disposeFileViewer, resumeFileViewer, suspendFileViewer } from '../FileViewerPanel.js'
 import { forwardDocumentKey } from '../workspace/DocumentBridge.js'
-import { documentKind, parseDocKey, type DocKey } from '../workspace/documents.js'
+import { ago } from '../civilDay.js'
+import { documentKind, KIND_GLYPH, parseDocKey, type DocKey } from '../workspace/documents.js'
 import { Thumbnail } from '../workspace/Thumbnail.js'
 import './filePreview.css'
 
-/** A file the previews show: its document key and the name its bar carries. */
-export interface UnfoldFile { key: DocKey; name: string }
+/** A file the previews show: its document key, the name its bar carries, and when it was sent, for a card to say. */
+export interface UnfoldFile { key: DocKey; name: string; at?: number }
+
+/**
+ * How large a file's preview is drawn, by what it is: a figure (an image or
+ * an SVG plot), a page (HTML: a tapestry, a report, a deck), a card for
+ * anything without a picture, and a thumbnail for the globe and the sheets.
+ */
+export type FileDensity = 'figure' | 'page' | 'card' | 'thumbnail'
+
+/** Each density's box in CSS pixels, as filePreview.css draws it, so a stream can reckon a row before anything loads. */
+export const BOX: Readonly<Record<FileDensity, { width: number; height: number }>> = {
+  figure: { width: 480, height: 360 }, page: { width: 480, height: 270 }, card: { width: 360, height: 56 }, thumbnail: { width: 176, height: 116 },
+}
+
+/** A file's density in a row of previews, by its kind alone. */
+export function densityOf(path: string): FileDensity {
+  const kind = documentKind(path)
+  return kind === 'image' ? 'figure' : kind === 'html' ? 'page' : 'card'
+}
+
+/** How tall a row of these files' previews stands before any of them loads: its tallest box. */
+export const previewsHeight = (paths: readonly string[]): number => Math.max(0, ...paths.map(path => BOX[densityOf(path)].height))
 
 export interface UnfoldOptions {
   shuttleBase: string
@@ -55,9 +77,11 @@ function scroller(el: HTMLElement): HTMLElement | null {
 
 /**
  * Files as previews that unfold in place, one component wherever a page shows
- * files inline (a constitution's view, a post in a channel). Folded, each file
- * is a preview capped at about 320px showing the top of its page, at the full
- * width it is given, in one sideways row when there are several. A click
+ * files inline (a constitution's view, a post in a channel). Folded, a single
+ * lead (a constitution's view) is a preview capped at about 320px showing the
+ * top of its page at the full width it is given; a row of a post's files
+ * draws each at its density's box ({@link BOX}), wrapping, a card without a
+ * picture drawn with nothing loaded. A click
  * unfolds that file at its natural height in the same place, the same card
  * grown, under a quiet bar pinned to the top of whatever scrolls it: the
  * file's name, ‹ i / n › when there are several, full screen, and the fold
@@ -77,7 +101,7 @@ export class Unfold {
   private readonly next = document.createElement('button')
   private readonly page = document.createElement('div')
   private files: UnfoldFile[] = []
-  private readonly cards = new Map<DocKey, { el: HTMLButtonElement; thumbnail: Thumbnail }>()
+  private readonly cards = new Map<DocKey, { el: HTMLButtonElement; thumbnail?: Thumbnail }>()
   private open: { key: DocKey; viewer: HTMLElement } | null = null
   private readonly opts: UnfoldOptions
 
@@ -120,7 +144,7 @@ export class Unfold {
   update(files: readonly UnfoldFile[]): void {
     this.files = [...files]
     const keys = new Set(files.map(file => file.key))
-    for (const [key, card] of this.cards) if (!keys.has(key)) { card.thumbnail.dispose(); card.el.remove(); this.cards.delete(key) }
+    for (const [key, card] of this.cards) if (!keys.has(key)) { card.thumbnail?.dispose(); card.el.remove(); this.cards.delete(key) }
     const shown = this.opts.single ? this.files.slice(0, 1) : this.files, cards = shown.map(file => this.card(file))
     // The same cards stay where they stand: moving one reloads its page, drops its focus and resets the row's scroll.
     if (cards.length !== this.row.children.length || cards.some((card, i) => this.row.children[i] !== card)) this.row.replaceChildren(...cards)
@@ -181,7 +205,7 @@ export class Unfold {
   resume(): void { if (this.open) { resumeFileViewer(this.open.viewer); this.pin() } }
   dispose(): void {
     this.drop()
-    for (const card of this.cards.values()) card.thumbnail.dispose()
+    for (const card of this.cards.values()) card.thumbnail?.dispose()
     this.cards.clear()
   }
 
@@ -219,28 +243,40 @@ export class Unfold {
     this.prev.disabled = at === 0
     this.next.disabled = at === this.files.length - 1
   }
-  /** A file's preview, folded: the top of its page, a click to unfold it. */
+  /** A file's preview, folded: the top of its page, or a card naming it, and a click to unfold it. */
   private card(file: UnfoldFile): HTMLButtonElement {
     const made = this.cards.get(file.key)
     if (made) { made.el.title = `Expand ${file.name}`; return made.el }
-    const parsed = parseDocKey(file.key)
+    const parsed = parseDocKey(file.key), path = parsed?.path ?? file.name
     const el = document.createElement('button')
     el.type = 'button'
     el.className = 'uf-card'
     el.dataset.key = file.key
     el.title = `Expand ${file.name}`
     el.setAttribute('aria-label', el.title)
-    const basename = parsed?.path.split('/').pop() ?? file.name
+    el.addEventListener('click', () => this.unfold(file.key))
+    const density = this.opts.single ? undefined : densityOf(path)
+    if (density) el.dataset.density = density
+    if (density === 'card') {
+      // Nothing to see before it opens: its kind, its name and when it came, and nothing loads.
+      const glyph = document.createElement('span'), name = document.createElement('span'), when = document.createElement('span')
+      glyph.className = 'uf-card-glyph'; glyph.textContent = KIND_GLYPH[documentKind(path)]
+      name.className = 'uf-card-name'; name.textContent = file.name
+      when.className = 'uf-card-age'; when.textContent = file.at ? ago(file.at, Date.now()) : ''
+      el.append(glyph, name, when)
+      this.cards.set(file.key, { el })
+      return el
+    }
+    const basename = path.split('/').pop() ?? file.name
     // Laid out at least as wide as a reading column, drawn to the card's width: wide, it is the page itself.
     const thumbnail: Thumbnail = new Thumbnail({
-      key: `unfold:${file.key}`, shuttleBase: this.opts.shuttleBase, className: 'uf-thumb', fallback: file.name,
+      key: `unfold:${file.key}`, shuttleBase: this.opts.shuttleBase, className: 'uf-thumb', fallback: file.name, keepMedia: true,
       file: parsed ? { fullPath: parsed.path, owner: parsed.owner, basename } : undefined,
       get pageWidth() { return Math.max(720, Math.round(el.clientWidth)) },
       priority: () => (this.opts.awake?.() ?? true) && thumbnail.el.isConnected ? 2 : 0,
       distance: () => this.files.findIndex(each => each.key === file.key),
     })
     el.append(thumbnail.el)
-    el.addEventListener('click', () => this.unfold(file.key))
     this.cards.set(file.key, { el, thumbnail })
     return el
   }

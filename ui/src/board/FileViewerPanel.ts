@@ -59,6 +59,8 @@ export interface FileViewerOptions {
   thumbnail?: boolean
   /** Captioned previews keep the filename outside the miniature page. */
   thumbnailLabel?: boolean
+  /** A preview larger than a thumbnail keeps a page's large embedded images rather than placeholders. */
+  keepMedia?: boolean
   /** Inactive viewers read once for a preview, without periodic subscriptions. */
   active?: boolean
   /**
@@ -403,7 +405,7 @@ function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerO
       options.onThumbnailSource?.(body.text, body.etag)
       // An empty frame has already loaded about:blank; only the page's own load counts.
       frame.addEventListener('load', () => finish(true), { once: true })
-      frame.srcdoc = htmlWithBase(thumbnailPreviews.get(src, body.text, body.etag), src)
+      frame.srcdoc = htmlWithBase(thumbnailPreviews.get(src, body.text, body.etag, options.keepMedia), src)
     })
     wrap.append(frame)
   } else if (kind === 'audio') {

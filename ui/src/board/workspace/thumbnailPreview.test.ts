@@ -51,3 +51,19 @@ it('reuses previews by resource and etag, invalidates changed revisions, and bou
   cache.get('weak', 'first', 'W/"stat-123"')
   expect(cache.get('weak', 'changed', 'W/"stat-123"')).toBe('changed')
 })
+
+it('keeps large embedded images whole for a larger preview, past the cut, and swaps them for placeholders in a thumbnail', () => {
+  const cover = `data:image/png;base64,${'A'.repeat(66 * 1024)}`, roundel = `<svg viewBox="0 0 10 10">${'<circle r="1"/>'.repeat(4000)}</svg>`
+  const page = `<head><style>h1{color:red}</style></head><body><h1>Almanac</h1><img src="${cover}"><div style="background:url('${cover}')"></div>${roundel}<p>${'x'.repeat(PREVIEW_LIMIT)}</p>`
+  const kept = buildThumbnailPreview(page, true)
+  expect([kept.includes(`<img src="${cover}">`), kept.includes(`url('${cover}')`), kept.includes(roundel), kept.includes('\u0000')]).toStrictEqual([true, true, true, false])
+  const thumb = buildThumbnailPreview(page)
+  expect([thumb.includes(cover), thumb.includes(roundel), thumb.length < PREVIEW_LIMIT + 1024]).toStrictEqual([false, false, true])
+})
+
+it('caches a thumbnail and a larger preview of one resource apart', () => {
+  const cache = new ThumbnailPreviewCache()
+  const page = `<body><img src="data:image/png;base64,${'A'.repeat(20 * 1024)}">`
+  expect(cache.get('/a', page, '"v1"')).not.toBe(cache.get('/a', page, '"v1"', true))
+  expect(cache.get('/a', page, '"v1"', true)).toContain('AAAA')
+})
