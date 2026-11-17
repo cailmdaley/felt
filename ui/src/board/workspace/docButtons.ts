@@ -21,6 +21,8 @@ export interface DocButtons {
   el: HTMLElement
   /** Reads its sent files again: the count, and a list open from it, follow them in place. */
   refresh(): void
+  /** Closes the list open from its count, if one is. */
+  close(): void
 }
 
 /**
@@ -72,5 +74,5 @@ export function docButtons(card: KanbanCard, feeds: DocFeeds): DocButtons {
     tapestry.replaceChildren(button('tapestry', 'tapestry', found.name, page(found.key)))
     refresh()
   })
-  return { el: row, refresh }
+  return { el: row, refresh, close: () => list?.close() }
 }

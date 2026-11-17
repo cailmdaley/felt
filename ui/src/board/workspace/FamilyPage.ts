@@ -75,7 +75,7 @@ export class FamilyPage {
   private readonly name = el('h2', 'ov-name')
   private readonly facts = el('div', 'ov-facts')
   private readonly tools = el('div', 'ov-tools')
-  private docs: DocButtons = { el: el('span', 'ws-doc-buttons'), refresh: () => {} }
+  private docs: DocButtons = { el: el('span', 'ws-doc-buttons'), refresh: () => {}, close: () => {} }
   private readonly said = el('section', 'ov-said')
   private readonly threads = el('ol', 'ov-threads')
   /** The fine ink of its lines: one drawing over the pinned stack, one over the view below it. */

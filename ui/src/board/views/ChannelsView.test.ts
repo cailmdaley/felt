@@ -605,6 +605,19 @@ it('keeps the head\'s list of the chair\'s files current while it is open, whate
   expect([rows(), count.isConnected, count.getAttribute('aria-expanded')]).toStrictEqual([['local:/w/plan-v2.md'], true, 'true'])
 })
 
+it('closes the chair\'s files list and draws the new head when Rex brings another channel', async () => {
+  daemon()
+  const { view, ctx, host } = await mount()
+  const feeds = (ctx.workspace as unknown as { globeHost: { feeds: { files: () => unknown[] } } }).globeHost.feeds
+  feeds.files = () => [{ key: 'local:/w/plan.md', name: 'plan.md', at: Date.now() - minute, unread: false }]
+  ctx.response = board([{ ...chair, modifiedAt: new Date().toISOString() }, tsz, mask, beam, van, notes])
+  view.refresh(ctx); await settle()
+  host.querySelector<HTMLButtonElement>('.kbn-ch-pages [data-part="sends"]')!.click(); await settle()
+  expect(document.querySelectorAll('.kbn-conversation-menu .uf-file-row')).toHaveLength(1)
+  expect(view.followRex('R', 'local')).toBe(true); await settle(); await settle()
+  expect([host.querySelector('.kbn-ch-name')!.textContent, document.querySelectorAll('.kbn-conversation-menu .uf-file-row').length]).toStrictEqual(['van', 0])
+})
+
 it('lists the running threads as they stand when the list opens, not as the stream last drew them', async () => {
   daemon()
   const { view, ctx, host } = await mount()

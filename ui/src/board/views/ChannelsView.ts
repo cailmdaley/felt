@@ -133,6 +133,8 @@ export class ChannelsView implements TemporalView {
   private head: HTMLElement | null = null
   /** The chair's pages in the head. */
   private pages?: DocButtons
+  /** The channel the head was last drawn for. */
+  private headKey?: string
   private stream: HTMLOListElement | null = null
   private note: HTMLElement | null = null
   /** The console, to the channel's chair. */
@@ -572,10 +574,13 @@ export class ChannelsView implements TemporalView {
     const now = Date.now(), entries = this.streamOf(channel), failed = channel.families.some(uid => this.ctx!.workspace!.board.failed(uid))
     const seat = channel.seat
     // The head and the stream are drawn apart, so what arrives leaves a focused page or an open menu in the head be;
-    // the head waits while a list hangs from its pages, whose count follows the chair's files in place.
+    // the head waits while a list hangs from its pages, whose count follows the chair's files in place, unless the channel changed: then the list closes.
     const head = JSON.stringify([channel.key, channel.name, channel.title, fiberOf(seat), seat.modifiedAt])
-    if (head !== this.sigs.head && !this.pages?.el.querySelector('[aria-expanded="true"]')) {
+    const listing = this.headKey === channel.key && !!this.pages?.el.querySelector('[aria-expanded="true"]')
+    if (head !== this.sigs.head && !listing) {
+      this.pages?.close()
       this.sigs.head = head
+      this.headKey = channel.key
       const back = iconButton('kbn-ch-back', 'back', 'Channels', () => this.setRail(false))
       const name = el('h3', 'kbn-ch-name')
       name.append(channel.chaired ? el('span', 'kbn-ch-handle', channel.name) : channel.name)
