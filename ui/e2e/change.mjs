@@ -8,6 +8,8 @@ export function registerChangeJourneys(test) {
   const open = async page => {
     page.setDefaultTimeout(30_000)
     await page.goto(page.url().replace('example=workspace', 'example=change'))
+    const route = () => new URL(page.url()).hash
+    const desk = route()
     await page.locator(`.kbn-desk .kbn-family[title*="Calibrate the shear response"] .kbn-family-head`).click()
     await page.locator('.ws-stage-band .ws-dock').waitFor()
     await showFile(page, '/family.change.json')
@@ -130,6 +132,8 @@ export function registerChangeJourneys(test) {
   for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) test(`A sent change opens in the reader at a reading height (${viewport.width}px)`, async page => {
     page.setDefaultTimeout(30_000)
     await page.goto(page.url().replace('example=workspace', 'example=change'))
+    const route = () => new URL(page.url()).hash
+    const desk = route()
     await page.locator(`.kbn-desk .kbn-family[title*="Calibrate the shear response"] .kbn-family-head`).click()
     await page.locator('.ws-selected .ov-head').waitFor()
     await showFile(page, '/family.change.json')
@@ -140,7 +144,7 @@ export function registerChangeJourneys(test) {
     await overview.locator('.change-mermaid svg').waitFor()
     await overview.locator('img[alt="The response figure"]').evaluate(img => img.complete && img.naturalWidth > 0 || new Promise((done, fail) => { img.onload = done; img.onerror = fail }))
   }, viewport)
-  test('A tapestry relative link opens by keyboard and Back returns to the tapestry', async page => {
+  test('A tapestry relative link opens by keyboard in the reader, and Back returns to the Desk', async page => {
     page.setDefaultTimeout(30_000)
     await page.addInitScript(() => {
       window.addEventListener('message', event => {
@@ -148,12 +152,12 @@ export function registerChangeJourneys(test) {
       })
     })
     await page.goto(page.url().replace('example=workspace', 'example=change'))
+    const route = () => new URL(page.url()).hash
+    const desk = route()
     await page.locator(`.kbn-desk .kbn-family[title*="Calibrate the shear response"] .kbn-family-head`).click()
     // The view's head opens its tapestry in the reader.
     await page.locator('.ws-selected .ov-head [data-part="tapestry"]').click()
-    const route = () => new URL(page.url()).hash
     await page.locator('.ws-selected iframe').waitFor()
-    const tapestry = route()
     const link = page.frameLocator('.ws-selected iframe').getByRole('link', { name: 'Read the change →' })
     await link.waitFor()
     await page.locator('.ws-selected .kbn-fileview-loading').waitFor({ state: 'detached' })
@@ -163,8 +167,9 @@ export function registerChangeJourneys(test) {
     await link.press('Enter')
     await page.locator('.ws-selected .change-reader').waitFor()
     assert.equal(popups.length, 0, 'relative change links stay in the workspace after the report bridge is ready')
+    // The change took the tapestry's place in the reader's one entry: Back is the Desk.
     await pageBack(page)
-    await page.frameLocator('.ws-selected iframe').getByRole('link', { name: 'Read the change →' }).waitFor()
-    assert.equal(route(), tapestry)
+    await page.locator('.ws-reader.ws-dormant').waitFor()
+    assert.equal(route(), desk)
   })
 }
