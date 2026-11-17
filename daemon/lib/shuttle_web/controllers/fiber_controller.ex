@@ -66,7 +66,7 @@ defmodule ShuttleWeb.FiberController do
          :ok <- unused_uid(uid),
          {:ok, root, local_id} <- create_target(fiber_id, frontmatter),
          {:ok, _} <- polled_destination(root, local_id),
-         {:ok, path, generated_uid} <- felt_add(root, local_id, name, body, frontmatter),
+         {:ok, path, generated_uid} <- felt_add(root, local_id, name, body, frontmatter, uid),
          {:ok, store} <- polled_store(path),
          :ok <- inject_create_frontmatter(path, frontmatter, uid),
          uid = if(uid == "", do: generated_uid, else: uid),
@@ -194,12 +194,15 @@ defmodule ShuttleWeb.FiberController do
 
   defp validate_shuttle(_, _), do: {:error, "shuttle must be an object"}
 
-  # felt owns placement, identity and duplicate rejection. `--namespace`
-  # addresses the enclosing store rather than a project-rooted subtree, without
-  # name inference. The returned path is felt's carried physical path.
-  defp felt_add(root, fiber_id, name, body, frontmatter) do
+  # felt owns placement, identity, the slug convention and duplicate rejection.
+  # `--namespace` addresses the enclosing store rather than a project-rooted
+  # subtree, without name inference. A request carrying a uid is a fiber that
+  # already exists elsewhere: `--uid` keeps its identity and its slug as
+  # spelled. The returned path is felt's carried physical path.
+  defp felt_add(root, fiber_id, name, body, frontmatter, uid) do
     args =
       ["-C", root, "add", fiber_id, name, "--namespace", "-s", status_of(frontmatter)] ++
+        uid_args(uid) ++
         body_args(body) ++ tag_args(frontmatter) ++ native_field_args(frontmatter)
 
     with {:ok, _output} <- Shuttle.Felt.run(args) do
@@ -212,6 +215,9 @@ defmodule ShuttleWeb.FiberController do
       {:command_error, _status, output} -> {:error, "felt add failed: #{String.trim(output)}"}
     end
   end
+
+  defp uid_args(""), do: []
+  defp uid_args(uid), do: ["--uid", uid]
 
   defp felt_metadata(root, fiber_id) do
     case Shuttle.Felt.run(["-C", root, "show", fiber_id, "-j", "--exact"]) do

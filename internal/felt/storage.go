@@ -609,6 +609,27 @@ func (s *Storage) CheckAvailableID(id string) error {
 	return nil
 }
 
+// CheckNewSlugs refuses id when a segment it would create breaks the slug
+// convention. A segment whose directory already exists is not new: a fiber
+// may be added below an existing path whatever that path's spelling.
+func (s *Storage) CheckNewSlugs(id string) error {
+	parts := strings.Split(id, "/")
+	for i, part := range parts {
+		err := CheckSlug(part)
+		if err == nil {
+			continue
+		}
+		if i < len(parts)-1 && part != "." && part != ".." {
+			dir := filepath.Join(s.root, filepath.FromSlash(strings.Join(parts[:i+1], "/")))
+			if info, statErr := os.Stat(dir); statErr == nil && info.IsDir() {
+				continue
+			}
+		}
+		return err
+	}
+	return nil
+}
+
 // Create publishes a new fiber without replacing an existing document,
 // stamping an open fiber's role (see StampRole).
 // The availability check shares Update's advisory lock, and publication itself

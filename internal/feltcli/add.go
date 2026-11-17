@@ -15,6 +15,7 @@ func (a *app) addCmd() *cobra.Command {
 	var addTags []string
 	var addOutcome string
 	var addRole string
+	var addUID string
 	var addTopLevel, addNamespace bool
 	command := &cobra.Command{
 		Use:   "add <slug> <name>",
@@ -31,7 +32,13 @@ resolution and uses <slug> as spelled.
 
 If the new name changes existing link resolution, a warning on stderr names
 the affected references and their original targets. Resolve it on the spot:
-write those links with full paths, or rename the new fiber.`,
+write those links with full paths, or rename the new fiber.
+
+Each path segment <slug> creates must follow the slug convention: lowercase
+letters and digits joined by single hyphens. A non-conforming segment is
+refused with its conforming form; segments that already exist are kept as they
+are spelled. --uid carries a fiber from another store under its existing
+intrinsic id and slug, which are not held to the convention.`,
 		Example: `  felt add analysis/covariance "Covariance method" -s open
   felt add analysis/jackknife-bias "Jackknife bias" -o "negligible below 200 patches"`,
 		Args: cobra.ExactArgs(2),
@@ -54,6 +61,12 @@ write those links with full paths, or rename the new fiber.`,
 			if err != nil {
 				return err
 			}
+			if addUID != "" {
+				if !felt.LooksLikeUID(addUID) {
+					return fmt.Errorf("--uid must be a ULID, got %q", addUID)
+				}
+				f.UID = addUID
+			}
 			if addNamespace && f.ID != args[0] {
 				return fmt.Errorf("--namespace requires a canonical path (got %q, canonical %q)", args[0], f.ID)
 			}
@@ -73,6 +86,12 @@ write those links with full paths, or rename the new fiber.`,
 				if rewritten {
 					fmt.Fprintf(a.env.Stderr, "Resolved %s under %s\n", f.ID, resolved)
 					f.ID = resolved
+				}
+			}
+			// A carried fiber keeps the slug it already has.
+			if addUID == "" {
+				if err := storage.CheckNewSlugs(f.ID); err != nil {
+					return err
 				}
 			}
 			if err := storage.CheckAvailableID(f.ID); err != nil {
@@ -132,6 +151,7 @@ write those links with full paths, or rename the new fiber.`,
 	command.Flags().StringVarP(&addOutcome, "outcome", "o", "", "Outcome: what was decided or learned")
 	command.Flags().StringVarP(&addRole, "role", "R", "", "Who is responsible: <person>, or <office>/<person> (open work defaults to git config felt.person)")
 	command.Flags().BoolVar(&addNamespace, "namespace", false, "Use the exact path relative to the enclosing store, independent of this project view")
+	command.Flags().StringVar(&addUID, "uid", "", "Carry an existing fiber: give it this intrinsic id and keep its slug as spelled")
 	command.Flags().BoolVar(&addTopLevel, "top-level", false, "Use <slug> as spelled; don't resolve it against existing fibers")
 	return command
 }

@@ -25,7 +25,9 @@ func (a *app) checkCmd() *cobra.Command {
   - stray fiber files: a bare <dir>/<slug>.md with fiber frontmatter below the
     root, which belongs at <dir>/<slug>/<slug>.md (felt migrate folds it)
   - two entries in one directory whose names differ only by case, on disk or
-    in the git index (a case-insensitive filesystem can check out only one)`,
+    in the git index (a case-insensitive filesystem can check out only one)
+  - a fiber whose slug is outside the slug convention, lowercase letters and
+    digits joined by single hyphens (a warning, naming the conforming form)`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			storage, _, err := felt.RequireStore(a.env, a.dir)
@@ -71,6 +73,7 @@ func (a *app) checkCmd() *cobra.Command {
 				return err
 			}
 			issues = append(issues, caseIssues...)
+			issues = append(issues, felt.CheckSlugConvention(felts)...)
 			legacyIssues, err := felt.CheckLegacyFormat(storage)
 			if err != nil {
 				return err

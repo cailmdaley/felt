@@ -43,15 +43,14 @@ func TestNewRequiresName(t *testing.T) {
 	}
 }
 
-func TestNewSlugifiesInput(t *testing.T) {
+func TestNewTakesIDAsSpelled(t *testing.T) {
 	t.Parallel()
-	f, err := New("Mocks Unbiased", "Mocks unbiased")
+	f, err := New("unions/shear_2d/new-thing", "Mocks unbiased")
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}
-
-	if f.ID != "mocks-unbiased" {
-		t.Errorf("ID = %q, want %q", f.ID, "mocks-unbiased")
+	if f.ID != "unions/shear_2d/new-thing" {
+		t.Errorf("ID = %q", f.ID)
 	}
 	if f.Name != "Mocks unbiased" {
 		t.Errorf("Name = %q, want %q", f.Name, "Mocks unbiased")
@@ -60,14 +59,57 @@ func TestNewSlugifiesInput(t *testing.T) {
 
 func TestNewEmptySlug(t *testing.T) {
 	t.Parallel()
-	_, err := New("", "Some title")
-	if err == nil {
+	if _, err := New("", "Some title"); err == nil {
 		t.Error("New(\"\", ...) should return an error")
 	}
+}
 
-	_, err = New("   ", "Some title")
-	if err == nil {
-		t.Error("New(\"   \", ...) should return an error")
+func TestSlugConvention(t *testing.T) {
+	t.Parallel()
+	for _, slug := range []string{"a", "0", "foo-bar", "v1-2", "a1-b2-c3"} {
+		if err := CheckSlug(slug); err != nil {
+			t.Errorf("CheckSlug(%q) = %v", slug, err)
+		}
+	}
+	for slug, want := range map[string]string{
+		"Foo Bar":   `slug "Foo Bar" is not lowercase letters, digits and hyphens; use "foo-bar"`,
+		"shear_2d":  `slug "shear_2d" is not lowercase letters, digits and hyphens; use "shear-2d"`,
+		"v1.2":      `slug "v1.2" is not lowercase letters, digits and hyphens; use "v1-2"`,
+		".hidden":   `slug ".hidden" is not lowercase letters, digits and hyphens; use "hidden"`,
+		"a--b":      `slug "a--b" is not lowercase letters, digits and hyphens; use "a-b"`,
+		"-a":        `slug "-a" is not lowercase letters, digits and hyphens; use "a"`,
+		"a-":        `slug "a-" is not lowercase letters, digits and hyphens; use "a"`,
+		"éclair":    `slug "éclair" is not lowercase letters, digits and hyphens; use "eclair"`,
+		"c-ℓ-space": `slug "c-ℓ-space" is not lowercase letters, digits and hyphens; use "c-space"`,
+		"a/b":       `slug "a/b" is not lowercase letters, digits and hyphens; use "a-b"`,
+		"..":        `slug ".." is not lowercase letters, digits and hyphens`,
+		"":          `slug "" is not lowercase letters, digits and hyphens`,
+	} {
+		if err := CheckSlug(slug); err == nil || err.Error() != want {
+			t.Errorf("CheckSlug(%q) = %v, want %s", slug, err, want)
+		}
+	}
+}
+
+// The convention is exactly what Slugify emits: every non-empty output
+// conforms, and a conforming slug is its own Slugify.
+func TestSlugifyEmitsTheConvention(t *testing.T) {
+	t.Parallel()
+	inputs := []string{"Foo Bar", "shear_2d", "[tag] Title", "--a__b--", "ℓ-max", "Straße", "v1.2", "x", "Σ only", "Hello, World! 2026"}
+	for r := range latinFold {
+		inputs = append(inputs, string(r), "a"+string(r)+"b")
+	}
+	for _, in := range inputs {
+		out := Slugify(in)
+		if out != "" && !ValidSlug(out) {
+			t.Errorf("Slugify(%q) = %q, outside the convention", in, out)
+		}
+		if out != "" && Slugify(out) != out {
+			t.Errorf("Slugify(%q) = %q is not a fixed point", in, out)
+		}
+		if id, err := GenerateID(in + " " + in + " " + in + " " + in); err == nil && !ValidSlug(id) {
+			t.Errorf("GenerateID derived %q, outside the convention", id)
+		}
 	}
 }
 

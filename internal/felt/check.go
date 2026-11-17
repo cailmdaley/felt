@@ -422,3 +422,17 @@ func sortIssues(issues []CheckIssue) {
 		return issues[i].Message < issues[j].Message
 	})
 }
+
+// CheckSlugConvention warns about each fiber whose own slug, its last path
+// segment, is outside the slug convention. Such a fiber works with every verb;
+// the warning names the conforming form felt rename can give it.
+func CheckSlugConvention(felts []*Felt) []CheckIssue {
+	var issues []CheckIssue
+	for _, f := range felts {
+		if err := CheckSlug(path.Base(f.ID)); err != nil {
+			issues = append(issues, CheckIssue{Level: CheckLevelWarning, FiberID: f.ID, Message: err.Error()})
+		}
+	}
+	sortIssues(issues)
+	return issues
+}

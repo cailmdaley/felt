@@ -14,8 +14,7 @@ import (
 // for. Open fibers created in that checkout are stamped `role: <person>`.
 const PersonConfigKey = "felt.person"
 
-var roleSegment = `[a-z0-9]+(?:-[a-z0-9]+)*`
-var rolePattern = regexp.MustCompile(`^` + roleSegment + `(?:/` + roleSegment + `)?$`)
+var rolePattern = regexp.MustCompile(`^` + slugSegment + `(?:/` + slugSegment + `)?$`)
 
 // ValidRole reports whether role is `<office>` or `<office>/<person>`, each
 // segment a slug. The office is never `roles`, so a charter path such as

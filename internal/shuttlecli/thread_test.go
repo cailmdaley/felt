@@ -101,7 +101,7 @@ func TestThreadDoesNotInheritLegacySurface(t *testing.T) {
 
 func TestThreadRefusesBeforeWriting(t *testing.T) {
 	t.Parallel()
-	for _, flags := range [][]string{{"--host", "other"}, {"--agent", "not-an-agent"}, {"--slug", "../escape"}, {"--project-dir", "/does-not-exist"}} {
+	for _, flags := range [][]string{{"--host", "other"}, {"--agent", "not-an-agent"}, {"--slug", "../escape"}, {"--slug", "Bad_Slug"}, {"--project-dir", "/does-not-exist"}} {
 		t.Run(strings.Join(flags, " "), func(t *testing.T) {
 			env := testEnv(t)
 			ownHost(t, env, "testhost")

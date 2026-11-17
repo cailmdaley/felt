@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"reflect"
@@ -215,18 +216,13 @@ func (f *Felt) RecencyAnchor() time.Time {
 	return anchor
 }
 
-// New creates a new Felt from a slug and name.
-// The slug is slugified silently if it contains spaces or uppercase.
+// New creates a new Felt at id with a fresh intrinsic id. It takes id as
+// spelled: the verb creating it checks the slugs it introduces against the
+// slug convention (CheckSlug, Storage.CheckNewSlugs).
 // Fibers have no status by default — status is opt-in for tracked work.
-func New(slug string, name string) (*Felt, error) {
-	slug = strings.TrimSpace(slug)
-	if slug == "" {
-		return nil, fmt.Errorf("slug cannot be empty")
-	}
-
-	id := SlugifyPath(slug)
+func New(id string, name string) (*Felt, error) {
 	if id == "" {
-		return nil, fmt.Errorf("slug must contain at least one alphanumeric character")
+		return nil, fmt.Errorf("slug cannot be empty")
 	}
 
 	name = strings.TrimSpace(name)
@@ -262,20 +258,27 @@ func GenerateID(title string) (string, error) {
 	return slug, nil
 }
 
-// SlugifyPath handles slash-separated paths: prefix segments are directory names
-// kept as-is (must match existing directories), only the final segment is slugified.
-// This lets "felt add pure_eb/my-fiber" work without mangling "pure_eb".
-func SlugifyPath(s string) string {
-	idx := strings.LastIndex(s, "/")
-	if idx < 0 {
-		return Slugify(s)
+// slugSegment is the slug convention: lowercase ASCII letters and digits in
+// runs joined by single hyphens. It is exactly the set of non-empty strings
+// Slugify returns unchanged, so a derived slug always conforms.
+const slugSegment = `[a-z0-9]+(?:-[a-z0-9]+)*`
+
+var slugPattern = regexp.MustCompile(`^` + slugSegment + `$`)
+
+// ValidSlug reports whether one path segment follows the slug convention.
+func ValidSlug(slug string) bool { return slugPattern.MatchString(slug) }
+
+// CheckSlug refuses a path segment outside the slug convention, naming the
+// conforming form Slugify gives it when there is one.
+func CheckSlug(slug string) error {
+	if ValidSlug(slug) {
+		return nil
 	}
-	prefix := s[:idx]
-	slug := Slugify(s[idx+1:])
-	if slug == "" {
-		return ""
+	err := fmt.Sprintf("slug %q is not lowercase letters, digits and hyphens", slug)
+	if conforming := Slugify(slug); conforming != "" {
+		err += fmt.Sprintf("; use %q", conforming)
 	}
-	return prefix + "/" + slug
+	return errors.New(err)
 }
 
 // Slugify converts a string to a URL-safe ASCII slug. Latin letters with

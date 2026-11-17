@@ -60,6 +60,24 @@ felt show bao-analysis/damping-prior
 A bare slug resolves as long as it is unique across the store. Ambiguity raises
 an error rather than a guess.
 
+### The slug convention
+
+A slug is one path segment of lowercase ASCII letters and digits, in runs
+joined by single hyphens: `damping-prior`, `v1-2`, `run-2026-03`. It is what
+felt derives from a title, so a derived slug always conforms. Every verb that
+creates or changes a slug holds it to the convention and refuses any other,
+naming the conforming form: `felt add`, `felt rename`, `shuttle thread --slug`,
+and `shuttle role --new`. A slug with a dot, a space, an underscore, a capital
+or an accented letter is refused rather than normalized, because it is the
+spelling links and `inputs.from` have to carry.
+
+Only the segment being created or changed is checked. A store may hold fibers
+from before the convention, such as `shear_2d` or a slug with `ℓ` in it; they
+stay addressable by every verb, links to them resolve and move with them, and
+`felt add` places new fibers below them. `felt check` names each one as a
+warning with its conforming form, which `felt rename` can give it. A fiber
+carried to another host keeps its slug as spelled.
+
 ### Commands that delete or move never act on a guess
 
 An address resolves in one of these ways:

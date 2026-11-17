@@ -119,6 +119,9 @@ func TestShuttleRoleNewValidatesBeforeCreation(t *testing.T) {
 			t.Fatalf("accepted %v", args)
 		}
 	}
+	if _, err := runIn(t, env, dir, "role", "hub", "Bad_Office", "--new", "Bad"); err == nil || !strings.Contains(err.Error(), `slug "Bad_Office" is not lowercase letters, digits and hyphens; use "bad-office"`) {
+		t.Fatalf("role --new refusal does not name the conforming slug: %v", err)
+	}
 	after, _ := os.ReadFile(st.Path("hub"))
 	if string(before) != string(after) {
 		t.Fatal("changed constitution")

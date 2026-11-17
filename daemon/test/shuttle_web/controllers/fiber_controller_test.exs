@@ -287,7 +287,7 @@ defmodule ShuttleWeb.FiberControllerTest do
       |> post(
         "/api/v1/fiber/create",
         Jason.encode!(%{
-          id: "tests/transferred",
+          id: "tests/transferred_v1",
           uid: uid,
           name: "Transferred fiber",
           body: "the source body",
@@ -303,7 +303,7 @@ defmodule ShuttleWeb.FiberControllerTest do
 
     assert conn.status == 200
 
-    assert %{"id" => "tests/transferred", "uid" => ^uid, "path" => path} =
+    assert %{"id" => "tests/transferred_v1", "uid" => ^uid, "path" => path} =
              Jason.decode!(conn.resp_body)
 
     assert {:ok, parsed} = path |> File.read!() |> frontmatter() |> YamlElixir.read_from_string()
@@ -328,7 +328,23 @@ defmodule ShuttleWeb.FiberControllerTest do
       end)
 
     assert keys == Enum.uniq(keys), "duplicate frontmatter keys: #{inspect(keys)}"
-    assert {_json, 0} = System.cmd("felt", ["-C", tmp, "show", "tests/transferred", "-j"])
+    assert {_json, 0} = System.cmd("felt", ["-C", tmp, "show", "tests/transferred_v1", "-j"])
+  end
+
+  test "POST /api/v1/fiber/create refuses a new slug outside the slug convention", %{tmp: tmp} do
+    conn =
+      api_conn()
+      |> post(
+        "/api/v1/fiber/create",
+        Jason.encode!(%{
+          id: "tests/new_v1",
+          name: "New fiber",
+          frontmatter: %{status: "open", shuttle: %{kind: "oneshot", project_dir: tmp}}
+        })
+      )
+
+    assert conn.status == 400
+    assert Jason.decode!(conn.resp_body)["error"] =~ ~s(use "new-v1")
   end
 
   test "POST /api/v1/fiber/create keeps an unregistered worker cwd out of store selection",

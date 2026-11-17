@@ -174,3 +174,56 @@ func TestAddValidatesStatusLikeEdit(t *testing.T) {
 		t.Fatalf("add -s closed: status=%q closed-at=%v, want closed with a stamp", done.Status, done.ClosedAt)
 	}
 }
+
+// felt add holds every segment it creates to the slug convention and names
+// the conforming form; segments that already exist keep their spelling.
+func TestAddRefusesNonConformingNewSlugs(t *testing.T) {
+	t.Parallel()
+	dir, s := newStore(t)
+	writeFixtureFelt(t, s, "unions/shear_2d", "Shear")
+	writeFixtureFelt(t, s, "c-ℓ-space", "Ell")
+	for _, tc := range []struct{ slug, want string }{
+		{"Foo Bar", `slug "Foo Bar" is not lowercase letters, digits and hyphens; use "foo-bar"`},
+		{"v1.2", `use "v1-2"`},
+		{".hidden", `use "hidden"`},
+		{"new_dir/thing", `slug "new_dir" is not lowercase letters, digits and hyphens; use "new-dir"`},
+		{"unions/shear_2d/Bad", `use "bad"`},
+		{"unions/../x", `slug ".."`},
+	} {
+		before := storeBytes(t, s.Root())
+		if out, err := runCommand(t, dir, "add", tc.slug, "Name"); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("add %q: %v\n%s, want %s", tc.slug, err, out, tc.want)
+		}
+		if len(storeBytes(t, s.Root())) != len(before) {
+			t.Fatalf("refused add %q wrote a file", tc.slug)
+		}
+	}
+	for _, slug := range []string{"unions/shear_2d/new-thing", "c-ℓ-space/child", "shear_2d/placed"} {
+		if out, err := runCommand(t, dir, "add", slug, "Name"); err != nil {
+			t.Fatalf("add %q: %v\n%s", slug, err, out)
+		}
+	}
+	mustRead(t, s, "unions/shear_2d/new-thing")
+	mustRead(t, s, "unions/shear_2d/placed")
+	mustRead(t, s, "c-ℓ-space/child")
+}
+
+// --uid carries an existing fiber, as the daemon does for a cross-host
+// create: its identity and its slug arrive as spelled.
+func TestAddUIDCarriesExistingSlug(t *testing.T) {
+	t.Parallel()
+	dir, s := newStore(t)
+	uid := felt.NewULID()
+	if out, err := runCommand(t, dir, "add", "work/spt3g_papers", "Papers", "--namespace", "--uid", uid); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if got := mustRead(t, s, "work/spt3g_papers"); got.UID != uid {
+		t.Fatalf("uid = %q, want %q", got.UID, uid)
+	}
+	if _, err := runCommand(t, dir, "add", "other_one", "X", "--namespace"); err == nil || !strings.Contains(err.Error(), `use "other-one"`) {
+		t.Fatalf("namespace create without --uid: %v", err)
+	}
+	if _, err := runCommand(t, dir, "add", "x", "X", "--uid", "not-a-ulid"); err == nil || !strings.Contains(err.Error(), "--uid must be a ULID") {
+		t.Fatalf("bad uid: %v", err)
+	}
+}

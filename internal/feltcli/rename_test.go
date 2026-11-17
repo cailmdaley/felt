@@ -114,10 +114,15 @@ func TestRenameRefusalsChangeNothing(t *testing.T) {
 		{"ambiguous", "x", "new", "ambiguous"},
 		{"guessed", "wrong/unique", "new", "a/unique"},
 		{"prefix", "a/uni", "new", "a/unique"},
-		{"slash", "a/x", "other/new", "single"},
-		{"empty", "a/x", "", "single"},
-		{"dot", "a/x", "..", "single"},
+		{"slash", "a/x", "other/new", `slug "other/new" is not lowercase letters, digits and hyphens`},
+		{"empty", "a/x", "", `slug "" is not`},
+		{"dot", "a/x", "..", `slug ".." is not`},
 		{"companion", "a/x", "companion", "companion"},
+		{"space", "a/x", "Foo Bar", `slug "Foo Bar" is not lowercase letters, digits and hyphens; use "foo-bar"`},
+		{"version", "a/x", "v1.2", `use "v1-2"`},
+		{"hidden", "a/x", ".hidden", `use "hidden"`},
+		{"underscore", "a/x", "new_x", `use "new-x"`},
+		{"trailing-space", "a/x", "new ", `use "new"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

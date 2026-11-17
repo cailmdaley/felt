@@ -18,21 +18,23 @@ func (a *app) renameCmd() *cobra.Command {
 		Short: "Change a fiber's basename, carrying descendants and links",
 		Long: `Renames the directory and its fiber document, preserving the intrinsic id.
 References are rewritten as with nest, including across the enclosing store.
-The new slug must be a single path segment. Guessed ids and existing destinations
-are refused. Project-specific frontmatter is preserved without interpretation.
+The new slug is one path segment following the slug convention: lowercase
+letters and digits joined by single hyphens; any other is refused with its
+conforming form. The fiber being renamed may have any slug. Guessed ids and
+existing destinations are refused. Project-specific frontmatter is preserved without interpretation.
 
 Remaining occurrences of the old path are listed for manual review, not changed.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			slug := args[1]
-			if slug == "" || slug == "." || slug == ".." || strings.Contains(slug, "/") || strings.TrimSpace(slug) != slug {
-				return fmt.Errorf("new-slug must be a single non-empty path segment")
-			}
 			storage, root, err := felt.RequireStore(a.env, a.dir)
 			if err != nil {
 				return err
 			}
 			if handled, err := a.retryMove(storage, args, true); handled {
+				return err
+			}
+			if err := felt.CheckSlug(slug); err != nil {
 				return err
 			}
 			ref, err := felt.ResolveExactRef(storage, felt.CommandScope(a.env, root, a.dir), args[0])

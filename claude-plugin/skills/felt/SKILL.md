@@ -68,7 +68,7 @@ felt roles                                  # the offices and their charters
 felt sync / felt sync --push                # merge the store's upstream / publish
 ```
 
-`felt <verb> --help` has the rest. Edit bodies and long outcomes in the file itself (`.felt/<path>/<slug>.md`); put a multi-sentence outcome in a `|-` block scalar.
+A new slug is lowercase letters and digits joined by single hyphens; `add` and `rename` refuse any other and name the conforming form ([the slug convention](https://cailmdaley.github.io/felt/concepts/fibers/#the-slug-convention)). `felt <verb> --help` has the rest. Edit bodies and long outcomes in the file itself (`.felt/<path>/<slug>.md`); put a multi-sentence outcome in a `|-` block scalar.
 
 Plain queries search bodies by default, placing name/slug hits before metadata hits and marking body-dependent hits; `--no-body` restores the metadata-only scope.
 

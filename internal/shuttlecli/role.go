@@ -33,6 +33,11 @@ roles/ before assigning the role; existing charters are preserved.`,
 				return fmt.Errorf("--new requires a role slug and a non-empty office name")
 			}
 			if !clear && !shuttle.ValidRole(args[1]) {
+				for _, segment := range strings.Split(args[1], "/") {
+					if err := felt.CheckSlug(segment); err != nil {
+						return fmt.Errorf("role must be <office> or <office>/<person>, each a slug: %w", err)
+					}
+				}
 				return fmt.Errorf("role must be <office> or <office>/<person>, each a slug, got %q", args[1])
 			}
 			f, st, block, ref, unlock, err := a.resolveOwnedShuttleFiber(args[0], "use 'shuttle install' first")

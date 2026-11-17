@@ -149,8 +149,8 @@ remote draft made with --disabled stays in this store while you write it;
 			if err != nil {
 				return err
 			}
-			if slug == "" || strings.ContainsAny(slug, `/\\`) || slug == "." || slug == ".." {
-				return fmt.Errorf("--slug must name one child, not a path")
+			if err := felt.CheckSlug(slug); err != nil {
+				return fmt.Errorf("--slug: %w", err)
 			}
 			child, err := felt.New(parent.ID+"/"+slug, ask)
 			if err != nil {
