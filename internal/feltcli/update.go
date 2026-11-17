@@ -72,7 +72,7 @@ PATH, and the Codex and pi integrations where felt is already installed.`,
 			}
 
 			// Build asset name matching goreleaser template
-			assetName := fmt.Sprintf("felt_%s_%s.tar.gz", archiveOS(), archiveArch())
+			assetName := fmt.Sprintf("felt_%s_%s.tar.gz", ArchiveOS(), ArchiveArch())
 			url := fmt.Sprintf("https://github.com/cailmdaley/felt/releases/download/%s/%s", latest, assetName)
 
 			// Download
@@ -228,8 +228,8 @@ func latestVersion() (string, error) {
 	return rel.TagName, nil
 }
 
-// archiveOS returns the OS name as goreleaser formats it (title case).
-func archiveOS() string {
+// ArchiveOS is the OS name as release archives spell it (title case).
+func ArchiveOS() string {
 	switch runtime.GOOS {
 	case "darwin":
 		return "Darwin"
@@ -240,8 +240,8 @@ func archiveOS() string {
 	}
 }
 
-// archiveArch returns the arch as goreleaser formats it.
-func archiveArch() string {
+// ArchiveArch is the CPU architecture as release archives spell it.
+func ArchiveArch() string {
 	switch runtime.GOARCH {
 	case "amd64":
 		return "x86_64"

@@ -318,22 +318,25 @@ func TestCollectDaemonReceiptRequiresMatchingContract(t *testing.T) {
 				"name": "hub-a", "host": "hub-a.example.ts.net", "port": 443,
 				"socket": "/run/shuttle/sock/dial-name-hub-a.sock", "status": "ready",
 			}}},
-			"contract": map[string]any{"expected": 2, "observed": 2, "ok": true},
+			"contract": map[string]any{"expected": ShuttleContractLevel, "observed": ShuttleContractLevel, "ok": true},
 		}, receiptHealthy},
 		{"migration hold", map[string]any{
-			"ready": true, "contract": map[string]any{"expected": 2, "observed": 2, "ok": true},
+			"ready": true, "contract": map[string]any{"expected": ShuttleContractLevel, "observed": ShuttleContractLevel, "ok": true},
 			"reconciliation_hold": "journal_unreadable /state/migrations/broken.json: invalid schema",
 		}, receiptMismatch},
 		{"boot hold", map[string]any{
 			"ready":     false,
 			"boot_hold": map[string]any{"stage": "thread_baseline", "reason": "corrupt /state/mailboxes/threads.json"},
 		}, receiptMismatch},
-		{"mismatch", map[string]any{"contract": map[string]any{"expected": 2, "observed": 1, "ok": false}}, receiptMismatch},
+		{"mismatch", map[string]any{"contract": map[string]any{"expected": ShuttleContractLevel, "observed": 1, "ok": false}}, receiptMismatch},
 		{"check could not run after a match", map[string]any{"contract": map[string]any{
-			"expected": 2, "observed": 2, "ok": true, "error": "shuttle contract could not run: eagain",
+			"expected": ShuttleContractLevel, "observed": ShuttleContractLevel, "ok": true, "error": "shuttle contract could not run: eagain",
 		}}, receiptHealthy},
 		{"check never ran", map[string]any{"contract": map[string]any{
-			"expected": 2, "observed": nil, "ok": true, "error": "shuttle contract could not run: eagain",
+			"expected": ShuttleContractLevel, "observed": nil, "ok": true, "error": "shuttle contract could not run: eagain",
+		}}, receiptMismatch},
+		{"daemon built for another CLI", map[string]any{"ready": true, "contract": map[string]any{
+			"expected": ShuttleContractLevel - 11, "observed": ShuttleContractLevel - 11, "ok": true,
 		}}, receiptMismatch},
 		{"booting ignores incomplete contract and listener evidence", map[string]any{
 			"ready": false, "listen": "tcp://127.0.0.1:4000", "host_class": "shared-multi-user",
@@ -364,6 +367,9 @@ func TestCollectDaemonReceiptRequiresMatchingContract(t *testing.T) {
 				if status != receiptMismatch || repair == "" {
 					t.Fatalf("held daemon must not be downgraded to transient booting: %s %s", status, repair)
 				}
+			}
+			if tc.name == "daemon built for another CLI" && !strings.Contains(got.Repair, "shuttle daemon upgrade") {
+				t.Fatalf("a daemon built for another CLI must name what brings it level: %+v", got)
 			}
 			if strings.HasPrefix(tc.name, "check") && got.ContractError != "shuttle contract could not run: eagain" {
 				t.Fatalf("a check that could not run must say why: %+v", got)

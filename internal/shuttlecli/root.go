@@ -31,6 +31,10 @@ var (
 	versionLine string
 )
 
+// releaseDownloadBase is where release archives are published, one directory
+// per tag.
+var releaseDownloadBase = "https://github.com/cailmdaley/felt/releases/download"
+
 func SetVersionInfo(v, commit, date string) {
 	Version = v
 	if commit == "none" {
@@ -148,6 +152,10 @@ type app struct {
 	// versionProbeTimeout bounds each `shuttle --version` the binary receipt
 	// runs against a candidate executable.
 	versionProbeTimeout time.Duration
+	// version is this CLI's release version (Version); releaseDownloadBase
+	// is where `shuttle daemon upgrade` fetches the matching daemon archive.
+	version             string
+	releaseDownloadBase string
 }
 
 func newApp(env *sysenv.Env) *app {
@@ -167,6 +175,8 @@ func newApp(env *sysenv.Env) *app {
 		eventRand:                 func() int { return mathrand.Intn(32768) },
 		httpProxy:                 http.ProxyFromEnvironment,
 		versionProbeTimeout:       3 * time.Second,
+		version:                   Version,
+		releaseDownloadBase:       releaseDownloadBase,
 	}
 	a.programStatusTTY = func(pid int) string { return messaging.ProcessTTY(pid, a.env.EUID()) }
 	a.programStatusWrite = func(path string, b []byte) error {

@@ -34,6 +34,9 @@ type fiberReceipt struct {
 // records --wake; a notBefore instant (UTC RFC 3339) schedules it.
 // Attachments are retained as owner-local references.
 func (a *app) queueInFiber(f *felt.Felt, block *shuttle.Block, request messaging.Request, force bool, notBefore string) (*fiberReceipt, error) {
+	if err := a.requireDeliveringDaemon(block.Host); err != nil {
+		return nil, fmt.Errorf("message %s: %w", request.MessageID, err)
+	}
 	fiberID := f.UID
 	if fiberID == "" {
 		fiberID = f.ID

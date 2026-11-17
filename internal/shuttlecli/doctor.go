@@ -410,6 +410,12 @@ func (a *app) collectDaemonReceipt() ReceiptDaemon {
 	} else {
 		d.Status, d.Repair = receiptMismatch, "restart or upgrade the daemon and shuttle together so their contract levels match"
 	}
+	// A daemon checks the CLI on its PATH when it starts; one left running
+	// across a CLI upgrade passed that check against the CLI it replaced.
+	if fmt.Sprint(d.Expected) != fmt.Sprint(ShuttleContractLevel) {
+		d.Status = receiptMismatch
+		d.Repair = fmt.Sprintf("the daemon was built for CLI contract %v and this shuttle is contract %d, so it cannot deliver messages to live workers; bring it level with `%s`", d.Expected, ShuttleContractLevel, a.levelCommand())
+	}
 	if d.ReconciliationHold != "" {
 		d.Status = receiptMismatch
 		d.Repair = "migration recovery holds every launch: " + d.ReconciliationHold + "; inspect the named journal and follow docs/reference/api.md worker migration recovery; daemon release cannot clear this hold"

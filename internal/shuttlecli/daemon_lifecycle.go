@@ -25,6 +25,8 @@ func (a *app) shuttleDaemonCmd() *cobra.Command {
 		a.shuttleDaemonStartCmd(),
 		a.newShuttleDaemonStopCommand(),
 		a.shuttleDaemonStatusCmd(),
+		a.daemonCheckCmd(),
+		a.daemonUpgradeCmd(),
 		a.shuttleDaemonReleaseCmd(),
 		a.shuttleDaemonResetCmd(),
 		a.newShuttleDaemonInstallCommand(),
