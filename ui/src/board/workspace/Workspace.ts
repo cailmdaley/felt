@@ -97,7 +97,6 @@ const VIEW_LABELS: Record<WorkspaceView, string> = { desk: 'Desk', chronicle: 'C
 const viewForOrigin = (origin: string): WorkspaceOriginView => origin === 'Desk' ? 'desk' : origin === 'Chronicle' ? 'chronicle' : origin === 'Globe' ? 'globe' : 'channels'
 const channelId = (uid: string, owner: string): string => JSON.stringify([owner, uid])
 /** How the way back names a page: a constitution's view by its slug, its own page as Constitution, any other by its name. */
-const pageLabel = (doc: WorkspaceDocument, card: KanbanCard): string => doc.kind === 'family' ? slug(card) : doc.kind === 'fiber' ? 'Constitution' : doc.name
 const threadFamilyRevision = (card: KanbanCard, index: ThreadIndex): string => {
   const current = index.card(card)
   const ancestry = index.ancestry(current).flatMap(entry => entry.card ? [index.card(entry.card)] : [])
@@ -252,10 +251,7 @@ export class Workspace {
         await this.dock.sendReview(target.card, message)
       },
       onCrossing: travel => this.depth.cross(travel),
-      onReturn: () => this.history.back(),
-      onOpenDocument: key => this.visit(key),
-      onRevisitDocument: key => this.revisit(key),
-      onReplaceDocument: key => this.replaceVisit(key),
+      onReturn: () => this.history.leave(),
       onVerdict: verdict => this.deferVerdict(verdict),
       onConversation: card => { this.dock.openConversation(card) },
       onRest: (card, anchor) => this.opts.onRest?.(card, anchor),
@@ -569,7 +565,7 @@ export class Workspace {
     this.dock.open(state.card)
     return this.dock
   }
-  /** The reader's way back names where the visited path leads. */
+  /** The reader's way back names the view it returns to. */
   private nameBack(): void {
     this.reader.setBackDestination(this.history.backLabel)
   }
@@ -820,7 +816,7 @@ export class Workspace {
     const ch = state.channel
     const selected = this.shown(state)
     this.refreshProse(state)
-    this.namePage(state, selected)
+    this.history.name(selected)
     this.reader.show(ch, selected, state.card, animate, state.loaded && state.runFinal, state.runFinal)
     this.nameBack()
     if (selected === this.familyDocument(state.card)) this.focusMap(state)
@@ -836,22 +832,8 @@ export class Workspace {
     const active = document.activeElement
     if (!active || active === document.body || active.matches('.ws-return, .ws-document-back') || active.closest('[inert]')) state.familyPage?.focus()
   }
-  private namePage(state: ChannelState, key: DocKey): void {
-    const doc = state.channel.documents.find(doc => doc.key === key)!
-    // A fiber is named by its slug, as everywhere on the board.
-    this.history.name(slug(state.card), pageLabel(doc, state.card), key)
-  }
   private visit(key: DocKey): void {
-    const doc = this.current?.channel.documents.find(doc => doc.key === key)
-    if (doc) this.history.openDocument(key, pageLabel(doc, this.current!.card))
-  }
-  private replaceVisit(key: DocKey): void {
-    const doc = this.current?.channel.documents.find(doc => doc.key === key)
-    if (doc) this.history.replaceDocument(key, pageLabel(doc, this.current!.card))
-  }
-  private revisit(key: DocKey): void {
-    const doc = this.current?.channel.documents.find(doc => doc.key === key)
-    if (doc) this.history.revisitDocument(key, pageLabel(doc, this.current!.card))
+    if (this.current?.channel.documents.some(doc => doc.key === key)) this.history.show(key)
   }
   private select(key: DocKey): void {
     const state = this.current
@@ -861,7 +843,7 @@ export class Workspace {
     this.reader.select(key)
     this.echo(state, key)
     if (key === this.familyDocument(state.card)) this.focusMap(state)
-    this.namePage(state, key)
+    this.history.name(key)
   }
   private isBodyFile(state: ChannelState, key: DocKey): boolean {
     const template = document.createElement('template')

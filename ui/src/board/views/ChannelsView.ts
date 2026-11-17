@@ -363,12 +363,7 @@ export class ChannelsView implements TemporalView {
     const ctx = this.ctx
     if (!ctx || !this.list || !this.loaded) return
     // Nothing redraws under the reader; coming back draws once and returns focus where the reader was opened from.
-    if (ctx.workspace?.isActive) {
-      // An unfolded file under the reader stops reading and playing.
-      if (!this.away) for (const { unfold } of this.unfolds.values()) unfold.suspend()
-      this.away = true
-      return
-    }
+    if (ctx.workspace?.isActive) { this.depart(); return }
     const returning = this.away
     if (returning) for (const { unfold } of this.unfolds.values()) unfold.resume()
     this.away = false
@@ -378,10 +373,23 @@ export class ChannelsView implements TemporalView {
     this.drawChannel()
     if (returning) this.returnFocus()
   }
-  /** The item the reader was opened from, else the console. */
+  /** Opens the reader from the item named `from`, which takes the focus back when the reader closes. */
+  private leaveFor(from: string | null, open: () => void): void {
+    this.returnTo = from
+    this.depart()
+    open()
+  }
+  /** The reader covers the channel: an unfolded file under it stops reading and playing, and the return is awaited. */
+  private depart(): void {
+    if (!this.away) for (const { unfold } of this.unfolds.values()) unfold.suspend()
+    this.away = true
+  }
+  /** The item the reader was opened from (its unfolded file, when it has one, so ← → and Escape work at once), else the console. */
   private returnFocus(): void {
-    const item = this.returnTo && this.layout?.querySelector<HTMLElement>(`[data-item="${CSS.escape(this.returnTo)}"]`)
+    const from = this.returnTo
     this.returnTo = null
+    if (from && this.unfolds.get(from)?.unfold.focus()) return
+    const item = from && this.layout?.querySelector<HTMLElement>(`[data-item="${CSS.escape(from)}"]`)
     if (item) item.focus({ preventScroll: true })
     else this.dock?.focus()
   }
@@ -513,7 +521,7 @@ export class ChannelsView implements TemporalView {
       name.toggleAttribute('data-lone', !channel.chaired)
       name.title = channel.title
       // The chair's pages: opening one is a deliberate look at the chair.
-      const pages = docButtons(seat, { ...this.ctx!.workspace!.globeHost.feeds, open: (card, doc) => { this.returnTo = null; this.ctx?.workspace?.openPage(card, doc) } })
+      const pages = docButtons(seat, { ...this.ctx!.workspace!.globeHost.feeds, open: (card, doc) => this.leaveFor(null, () => this.ctx?.workspace?.openPage(card, doc)) })
       pages.classList.add('kbn-ch-pages')
       const menu: IconButton = iconButton('kbn-ch-menu', 'actions', 'Channel menu', () => this.railMenu(channel.key, menu.button))
       menu.button.setAttribute('aria-haspopup', 'menu')
@@ -693,8 +701,7 @@ export class ChannelsView implements TemporalView {
   }
   /** A line, a station or a terminus opens its constitution's view, as an item does, and moves nothing else. */
   private openLine(card: KanbanCard, from: string | null = null): void {
-    this.returnTo = from
-    this.ctx?.workspace?.openFromDesk(card)
+    this.leaveFor(from, () => this.ctx?.workspace?.openFromDesk(card))
   }
   /** A station on a line: a start's ring and slug, a tick, or an end's terminus; the slug is written here, once per line. */
   private stationRow(station: Station, now: number): HTMLLIElement {
@@ -721,7 +728,7 @@ export class ChannelsView implements TemporalView {
   /** One thing a worker addressed to the human, as a post (elements/post.ts). */
   private itemRow(item: Item, now: number, grouped: boolean): HTMLLIElement {
     const id = `item:${item.id}`
-    const open = (): void => { this.returnTo = id; this.ctx?.workspace?.openFromDesk(item.card) }
+    const open = (): void => this.leaveFor(id, () => this.ctx?.workspace?.openFromDesk(item.card))
     return post(item, {
       now, dot: this.dot(item), open, grouped, clear: this.check(item),
       previews: item.kind === 'close' || item.files.length ? this.previews(item, id) : undefined,
@@ -729,7 +736,7 @@ export class ChannelsView implements TemporalView {
   }
   /** An item's state dot, which opens its worker's view. */
   private dot(item: Item): HTMLButtonElement {
-    return stateDot(item.card, this.ctx!.workspace!.board.waiting, () => { this.returnTo = `item:${item.id}`; this.ctx?.workspace?.openFromDesk(item.card) })
+    return stateDot(item.card, this.ctx!.workspace!.board.waiting, () => this.leaveFor(`item:${item.id}`, () => this.ctx?.workspace?.openFromDesk(item.card)))
   }
   /**
    * A line's ✓, on every post and file line: the line leaves the stream, and
@@ -977,8 +984,7 @@ export class ChannelsView implements TemporalView {
 
   /** Opens a fiber's page, or one of its documents, from the item named `from`. */
   private openPage(from: string, card: KanbanCard, key?: string): void {
-    this.returnTo = from
-    this.ctx?.workspace?.openPage(card, key)
+    this.leaveFor(from, () => this.ctx?.workspace?.openPage(card, key))
   }
   /** j / k page through the rail's channels, looking at nothing. */
   private step(by: number): void {

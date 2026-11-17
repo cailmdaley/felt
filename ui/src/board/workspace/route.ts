@@ -9,16 +9,9 @@ export type WorkspaceRoute =
 const BOARD_HASH = '#/board'
 const STATE_KEY = 'shuttleWorkspace'
 export type WorkspaceOriginView = 'desk' | 'chronicle' | 'globe' | 'channels'
-interface HistoryPage { hash: string; label?: string; pageLabel?: string }
-interface RouteState {
-  depth: number
-  base: boolean
-  baseHash: string
-  originView?: WorkspaceOriginView
-  label?: string
-  pageLabel?: string
-  back?: HistoryPage
-}
+const VIEW_NAMES: Record<WorkspaceOriginView, string> = { desk: 'Desk', chronicle: 'Chronicle', globe: 'Globe', channels: 'Channels' }
+/** What a reader entry says about itself: whether the view it was opened from is the entry below it, and which view that is. */
+interface RouteState { layer: boolean; originView: WorkspaceOriginView }
 type StateObject = Record<string, unknown>
 
 function encode(value: string): string {
@@ -77,95 +70,54 @@ function stateObject(value: unknown): StateObject {
 }
 
 function readRouteState(value: unknown): RouteState | null {
-  const entry = stateObject(value)[STATE_KEY]
-  if (!entry || typeof entry !== 'object') return null
-  const { depth, base, baseHash, originView, label, pageLabel, back } = entry as Partial<RouteState>
-  return Number.isInteger(depth) && depth! >= 0 && typeof base === 'boolean' && typeof baseHash === 'string'
-    ? {
-      depth: depth!, base, baseHash, ...(isOriginView(originView) ? { originView } : {}),
-      label: typeof label === 'string' ? label : undefined,
-      pageLabel: typeof pageLabel === 'string' ? pageLabel : undefined,
-      back: back && typeof back.hash === 'string' ? back : undefined,
-    } : null
+  const entry = stateObject(value)[STATE_KEY] as Partial<RouteState> | undefined
+  return entry && typeof entry.layer === 'boolean' && isOriginView(entry.originView) ? { layer: entry.layer, originView: entry.originView } : null
 }
 
-function withRouteState(value: unknown, routeState: RouteState): StateObject {
-  return { ...stateObject(value), [STATE_KEY]: routeState }
+function withRouteState(value: unknown, routeState: RouteState | null): StateObject {
+  const state = stateObject(value)
+  if (routeState) state[STATE_KEY] = routeState
+  else delete state[STATE_KEY]
+  return state
 }
 
-/** URL-backed channel navigation and return to the originating view. */
+/**
+ * Where back goes. The reader is one layer over the view it was opened
+ * from, and back's destination depends only on where you are, never on how
+ * you got there: back from any page the reader shows returns to that view.
+ *
+ * The layer holds at most one history entry, pushed directly above its
+ * view's when the reader opens. Every move inside the reader (another
+ * constitution, another page, a link, a scan) replaces that entry, so the
+ * address always names what is shown while the history never grows. The
+ * reader's back, Escape, the phone's swipe, the origin view's tab and the
+ * browser's own back are therefore the same single step. A reader address
+ * opened directly (a deep link, a typed URL with nothing of ours below it)
+ * has no view entry below: leaving it replaces it with its view.
+ *
+ * Another view chosen from the reader replaces the reader's entry, so the
+ * browser's back from there returns to the view the reader covered.
+ */
 export class WorkspaceHistory {
-  /** Hears each route to apply; `quiet` when a scan (a replacing step) led to it, which moves neither voice nor Rex. */
+  /** Hears each route to apply; `quiet` when a scan led to it, which moves neither voice nor Rex. */
   private readonly onRoute: (route: WorkspaceRoute, quiet: boolean) => void
   private started = false
   private current: WorkspaceRoute | null = null
   private currentHash = ''
-  private depth = 0
-  private base = false
-  private baseHash = ''
-  private routeOrigin: WorkspaceOriginView = 'channels'
-  private pendingOwnPop: string | null = null
-  private backInFlight = false
-  private queuedEnter: (Extract<WorkspaceRoute, { kind: 'channel' }> & { originView?: WorkspaceOriginView; replace: boolean }) | null = null
-  private queuedLeave = false
-  /** The step back under way was a scan's, so the route it lands on applies quietly. */
-  private quietPop = false
+  private origin: WorkspaceOriginView = 'channels'
+  /** The reader's entry sits directly above its view's. */
+  private layered = false
+  /** A back this history asked for has not landed: anything asked meanwhile waits for it. */
+  private leaving = false
+  private queued: (() => void) | null = null
 
   constructor(onRoute: (route: WorkspaceRoute, quiet: boolean) => void) {
     this.onRoute = onRoute
   }
 
-  get originView(): WorkspaceOriginView { return this.routeOrigin }
-  get backLabel(): string {
-    const back = readRouteState(window.history.state)?.back
-    const route = back && parseRoute(back.hash)
-    if (route?.kind !== 'channel') return this.originLabel
-    const sameChannel = this.current?.kind === 'channel' && route.uid === this.current.uid && route.owner === this.current.owner
-    return (sameChannel ? back?.pageLabel : back?.label) ?? route.uid
-  }
-  private get originLabel(): string { return { desk: 'Desk', chronicle: 'Chronicle', globe: 'Globe', channels: 'Channels' }[this.routeOrigin] }
-
-  /** Resolve this entry's page address and names without adding a visit. */
-  name(label: string, pageLabel = label, doc = this.current?.kind === 'channel' ? this.current.doc : undefined): void {
-    if (this.current?.kind !== 'channel') return
-    const saved = readRouteState(window.history.state)
-    const route: WorkspaceRoute = { ...this.current, doc }
-    const hash = formatRoute(route)
-    if (hash === saved?.back?.hash) { this.back(); return }
-    if (hash === this.currentHash && saved?.label === label && saved?.pageLabel === pageLabel) return
-    window.history.replaceState(withRouteState(window.history.state, { ...this.routeState(), label, pageLabel }), '', hash)
-    this.current = route
-    this.currentHash = hash
-  }
-
-  /** Follow the visited path, or return a direct address to its origin view. */
-  back(): void {
-    if (this.current?.kind !== 'channel' || this.pendingOwnPop !== null || this.backInFlight) return
-    if (this.depth > 0) { this.backInFlight = true; window.history.back() }
-    else this.leave()
-  }
-
-  /** Explicit page opens add a visit, including links to a page just visited. */
-  openDocument(doc: DocKey, pageLabel?: string): void {
-    if (this.pendingOwnPop !== null) {
-      if (this.queuedEnter) this.queuedEnter.doc = doc
-      return
-    }
-    if (this.current?.kind !== 'channel' || this.current.doc === doc) return
-    this.enter(this.current.uid, this.current.owner, doc, undefined, false, pageLabel)
-  }
-
-  /** Another page of the same fiber in the current visit's place: a step among its sent files. */
-  replaceDocument(doc: DocKey, pageLabel?: string): void {
-    if (this.current?.kind !== 'channel' || this.current.doc === doc) return
-    this.enter(this.current.uid, this.current.owner, doc, undefined, true, pageLabel)
-  }
-
-  /** Returning to controls reuses their preceding visit; otherwise it adds one. */
-  revisitDocument(doc: DocKey, pageLabel?: string): void {
-    if (this.current?.kind === 'channel' && formatRoute({ ...this.current, doc }) === readRouteState(window.history.state)?.back?.hash) this.back()
-    else this.openDocument(doc, pageLabel)
-  }
+  get originView(): WorkspaceOriginView { return this.origin }
+  /** The name of the one place back goes. */
+  get backLabel(): string { return VIEW_NAMES[this.origin] }
 
   start(): void {
     if (this.started) return
@@ -175,93 +127,82 @@ export class WorkspaceHistory {
     window.addEventListener('popstate', this.onPopState)
     window.addEventListener('hashchange', this.onHashChange)
     const route = parseRoute(this.currentHash)
-    if (!route) {
-      this.depth = 0
-      this.base = true
-      this.baseHash = this.currentHash
-      this.routeOrigin = readRouteState(window.history.state)?.originView ?? viewOfHash(this.currentHash) ?? this.routeOrigin
-      return
-    }
+    const saved = readRouteState(window.history.state)
+    if (route?.kind !== 'channel') { this.origin = viewOfHash(this.currentHash) ?? this.origin; return }
     this.current = route
-    this.adoptDepth(window.history.state, route, this.currentHash)
+    this.layered = saved?.layer ?? false
+    this.origin = saved?.originView ?? 'channels'
     this.onRoute(route, false)
   }
 
-  /** Constitution steps (scans) replace the current visit and apply quietly; other channel and page moves push. */
-  enter(uid: string, owner: string, doc?: DocKey, originView?: WorkspaceOriginView, replace = false, pageLabel?: string): void {
+  /**
+   * Show a constitution, at one of its pages. From a view this opens the
+   * reader's layer above it; inside the reader it takes the layer's place.
+   */
+  enter(uid: string, owner: string, doc?: DocKey, originView?: WorkspaceOriginView, quiet = false): void {
     this.ensureStarted()
+    if (this.leaving) { this.queued = () => this.enter(uid, owner, doc, originView, quiet); return }
     const route: Extract<WorkspaceRoute, { kind: 'channel' }> = { kind: 'channel', uid, owner, ...(doc === undefined ? {} : { doc }) }
-    if (this.pendingOwnPop !== null) {
-      this.queuedEnter = { ...route, originView: originView ?? this.routeOrigin, replace }
-      return
-    }
     const hash = formatRoute(route)
     if (hash === this.currentHash) return
-    const saved = readRouteState(window.history.state)
-    if (replace && hash === saved?.back?.hash) {
-      const idle = !this.backInFlight
-      this.back()
-      if (idle && this.backInFlight) this.quietPop = true
-      return
+    if (this.current?.kind === 'channel') {
+      window.history.replaceState(withRouteState(window.history.state, this.routeState()), '', hash)
+    } else {
+      this.origin = viewOfHash(this.currentHash) ?? originView ?? this.origin
+      this.layered = true
+      window.history.pushState(withRouteState(null, this.routeState()), '', hash)
     }
-    if (originView) this.routeOrigin = originView
-    // Back adopts the entry's origin along with its address.
-    if (saved?.originView !== this.routeOrigin) window.history.replaceState(withRouteState(window.history.state, this.routeState()), '')
-    const sameChannel = this.current?.kind === 'channel' && this.current.uid === uid && this.current.owner === owner
-    const back = replace ? saved?.back : { hash: this.currentHash, label: saved?.label, pageLabel: saved?.pageLabel }
-    const depth = this.depth + (replace ? 0 : 1)
-    const state = withRouteState(window.history.state, {
-      ...this.routeState(depth), label: sameChannel ? saved?.label : undefined, pageLabel, back,
-    })
-    if (replace) window.history.replaceState(state, '', hash)
-    else window.history.pushState(state, '', hash)
     this.current = route
     this.currentHash = hash
-    this.depth = depth
-    this.onRoute(route, replace)
+    this.onRoute(route, quiet)
   }
 
-  /** Establish an addressable view as the next channel stack's return point. */
+  /** Another page of the constitution shown, in the layer's place. */
+  show(doc: DocKey): void {
+    if (this.current?.kind !== 'channel' || this.current.doc === doc) return
+    this.enter(this.current.uid, this.current.owner, doc)
+  }
+
+  /** The address follows a page the reader settled on by itself, applying nothing. */
+  name(doc: DocKey | undefined): void {
+    if (this.current?.kind !== 'channel' || this.leaving || this.current.doc === doc) return
+    const { uid, owner } = this.current
+    const route: WorkspaceRoute = { kind: 'channel', uid, owner, ...(doc === undefined ? {} : { doc }) }
+    const hash = formatRoute(route)
+    window.history.replaceState(withRouteState(window.history.state, this.routeState()), '', hash)
+    this.current = route
+    this.currentHash = hash
+  }
+
+  /** Show a view. From the reader it takes the reader's entry; otherwise it is a new entry. */
   view(address: string): void {
     this.ensureStarted()
+    if (this.leaving) { this.queued = () => this.view(address); return }
     const hash = canonical(address)
     if (hash === this.currentHash) return
-    this.pendingOwnPop = null
-    this.queuedEnter = null
-    this.depth = 0
-    this.base = true
-    this.baseHash = hash
-    this.routeOrigin = viewOfHash(hash) ?? 'channels'
-    this.currentHash = hash
+    if (this.current?.kind === 'channel') window.history.replaceState(withRouteState(window.history.state, null), '', hash)
+    else window.history.pushState(null, '', hash)
+    this.origin = viewOfHash(hash) ?? 'channels'
+    this.layered = false
     this.current = { kind: 'overview', hash }
-    window.history.pushState(withRouteState(window.history.state, { ...this.routeState(), label: undefined, pageLabel: undefined, back: undefined }), '', hash)
+    this.currentHash = hash
     this.onRoute(this.current, false)
   }
 
+  /** Back, from anywhere in the reader: its view, in one step. */
   leave(): void {
-    if (this.current?.kind !== 'channel') return
-    if (this.pendingOwnPop !== null) { this.queuedLeave = true; return }
-    if (this.base && this.depth > 0) {
-      const depth = this.depth
-      const destination = this.baseHash
-      const overview: WorkspaceRoute = { kind: 'overview', hash: destination }
-      this.pendingOwnPop = destination
-      window.history.go(-depth)
-      this.current = overview
-      this.currentHash = destination
-      this.depth = 0
-      this.onRoute(overview, false)
-      return
+    if (this.current?.kind !== 'channel' || this.leaving) return
+    const hash = `#/${this.origin}`
+    if (this.layered) {
+      this.leaving = true
+      window.history.back()
+    } else {
+      window.history.replaceState(withRouteState(window.history.state, null), '', hash)
     }
-    const hash = `#/${this.routeOrigin}`
-    const overview: WorkspaceRoute = { kind: 'overview', hash }
-    this.current = overview
+    this.layered = false
+    this.current = { kind: 'overview', hash }
     this.currentHash = hash
-    this.depth = 0
-    this.base = true
-    this.baseHash = hash
-    window.history.replaceState(withRouteState(window.history.state, { ...this.routeState(), label: undefined, pageLabel: undefined, back: undefined }), '', hash)
-    this.onRoute(overview, false)
+    this.onRoute(this.current, false)
   }
 
   dispose(): void {
@@ -269,36 +210,16 @@ export class WorkspaceHistory {
     window.removeEventListener('popstate', this.onPopState)
     window.removeEventListener('hashchange', this.onHashChange)
     this.started = false
-    this.backInFlight = false
-    this.quietPop = false
-    this.pendingOwnPop = null
-    this.queuedEnter = null
+    this.leaving = false
+    this.queued = null
   }
 
   private ensureStarted(): void {
     if (!this.started) this.start()
   }
 
-  private routeState(depth = this.depth): RouteState {
-    const saved = readRouteState(window.history.state)
-    return { depth, base: this.base, baseHash: this.baseHash, originView: this.routeOrigin, label: saved?.label, pageLabel: saved?.pageLabel, back: saved?.back }
-  }
-
-  private adoptDepth(state: unknown, route: WorkspaceRoute, hash: string): void {
-    const saved = readRouteState(state)
-    if (saved) {
-      this.depth = saved.depth
-      this.base = saved.base
-      this.baseHash = saved.baseHash
-    } else {
-      this.depth = 0
-      this.base = route.kind === 'overview'
-      this.baseHash = route.kind === 'overview' ? hash : ''
-    }
-    this.routeOrigin = saved?.originView
-      ?? viewOfHash(saved?.baseHash ?? '')
-      ?? viewOfHash(hash)
-      ?? (route.kind === 'channel' ? 'channels' : this.routeOrigin)
+  private routeState(): RouteState {
+    return { layer: this.layered, originView: this.origin }
   }
 
   /** An old `#/board` address is replaced by `#/channels` where it stands. */
@@ -307,42 +228,40 @@ export class WorkspaceHistory {
     if (hash !== window.location.hash) window.history.replaceState(window.history.state, '', hash)
   }
 
+  /** The browser moved: through its own back or forward, a typed address, or a back this history asked for. */
   private handleLocation(state: unknown): void {
-    this.backInFlight = false
-    const quiet = this.quietPop
-    this.quietPop = false
     this.redirect()
     const hash = window.location.hash
+    const queued = this.leaving ? this.queued : null
+    this.leaving = false
+    this.queued = null
+    if (hash !== this.currentHash) this.land(hash, state)
+    queued?.()
+  }
+
+  private land(hash: string, state: unknown): void {
     const route = parseRoute(hash)
-    if (this.pendingOwnPop === hash) {
-      this.pendingOwnPop = null
-      this.currentHash = hash
-      this.current = route ?? { kind: 'overview' }
-      this.adoptDepth(state, this.current, hash)
-      if (this.queuedLeave) {
-        this.queuedLeave = false
-        this.queuedEnter = null
-        this.leave()
-        return
+    const saved = readRouteState(state)
+    if (route?.kind === 'channel') {
+      if (!saved) {
+        // An address typed or followed outside the board, above whatever was shown.
+        this.layered = this.current?.kind !== 'channel' && this.current !== null
+        if (this.current?.kind === 'overview') this.origin = viewOfHash(this.currentHash) ?? this.origin
+        window.history.replaceState(withRouteState(state, this.routeState()), '')
+      } else {
+        this.layered = saved.layer
+        this.origin = saved.originView
       }
-      const queued = this.queuedEnter
-      this.queuedEnter = null
-      if (queued) this.enter(queued.uid, queued.owner, queued.doc, queued.originView, queued.replace)
-      return
+      this.current = route
+    } else {
+      this.currentHash = hash
+      if (!this.current && !viewOfHash(hash)) return
+      this.layered = false
+      this.origin = viewOfHash(hash) ?? this.origin
+      this.current = { kind: 'overview', hash }
     }
-
-    if (hash === this.currentHash) return
-
     this.currentHash = hash
-    const next: WorkspaceRoute | null = route ? (route.kind === 'overview' ? { ...route, hash } : route) : (this.current ? { kind: 'overview', hash } : null)
-    if (!next) { this.current = null; this.depth = 0; this.base = true; this.baseHash = hash; return }
-    this.current = next
-    this.adoptDepth(state, next, hash)
-    if (!route && next.kind === 'overview' && !readRouteState(state)) {
-      this.base = true
-      this.baseHash = hash
-    }
-    this.onRoute(next, quiet)
+    this.onRoute(this.current, false)
   }
 
   private readonly onPopState = (event: PopStateEvent): void => this.handleLocation(event.state)

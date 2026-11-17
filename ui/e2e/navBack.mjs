@@ -13,7 +13,7 @@ export function registerNavigationJourneys(test) {
   for (const [device, viewport, phone] of [
     ['phone', { width: 390, height: 844 }, true],
     ['desktop', { width: 1440, height: 900 }, false],
-  ]) test(`Visited-path navigation (${device}): nested Desk landing, sibling, file, reload, Back and deep link`, async page => {
+  ]) test(`Back from the Desk (${device}): nested landing, orchestrator, sibling, file, reload and deep link each go back in one step`, async page => {
     const shot = async name => {
       if (!process.env.NAV_BACK_SHOTS) return
       await mkdir(process.env.NAV_BACK_SHOTS, { recursive: true })
@@ -84,29 +84,35 @@ export function registerNavigationJourneys(test) {
     await land()
     // The family's root's view, from its head above; then another of its threads, one level down.
     const parent = selected(page).locator('.ov-ancestor').first()
-    const parentName = await parent.getAttribute('title'), parentSlug = await parent.locator('.thread-row-slug').textContent()
+    const parentName = await parent.getAttribute('title')
     await parent.click()
     await named(page, parentName)
-    // The way back names a fiber by its slug.
-    await checkBack(questionSlug)
+    // However deep the reader goes, its way back names the view it was opened from.
+    await checkBack('Desk')
     await openThread(page, threadRow(page, await familyTree(page), 'Review the null tests'), 'Review the null tests')
-    await checkBack(parentSlug)
+    await checkBack('Desk')
     await shot('03-sibling')
     // Its constitution, from its head, and a file linked there.
     await selected(page).locator('.ov-head [data-part="constitution"]').click()
     await selected(page).getByRole('link', { name: 'Open validation', exact: true }).click()
     await selected(page).frameLocator('iframe').getByRole('heading', { name: 'Independent patches agree' }).waitFor()
-    await checkBack('Constitution')
+    await checkBack('Desk')
     await shot('04-linked-file')
     const fileHash = new URL(page.url()).hash
+    // One press, from four pages deep.
     await pageBack(page)
-    await selected(page).getByRole('link', { name: 'Open validation', exact: true }).click()
+    await page.locator('.ws-reader.ws-dormant').waitFor()
+    assert.equal(new URL(page.url()).hash, '#/desk')
+    // Forward reopens the file, and a reload keeps the Desk below it.
+    await page.goForward()
+    await selected(page).frameLocator('iframe').getByRole('heading', { name: 'Independent patches agree' }).waitFor()
     await page.reload()
     await selected(page).frameLocator('iframe').getByRole('heading', { name: 'Independent patches agree' }).waitFor()
-    await checkBack('Constitution')
+    await checkBack('Desk')
     await shot('05-file-reloaded')
     await page.goBack()
-    await selected(page).getByRole('link', { name: 'Open validation', exact: true }).waitFor()
+    await page.locator('.ws-reader.ws-dormant').waitFor()
+    assert.equal(new URL(page.url()).hash, '#/desk')
 
     // Strip entry metadata to exercise a genuinely unvisited address.
     await page.goto(url + fileHash)
@@ -119,5 +125,81 @@ export function registerNavigationJourneys(test) {
     await page.locator('.ws-reader.ws-dormant').waitFor()
     assert.equal(new URL(page.url()).hash, '#/channels')
     await shot('07-deep-link-to-channels')
+  }, viewport, 'reduce', phone)
+}
+
+const channelsUrl = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=channels#/channels`
+const streamScroll = page => page.locator('.kbn-ch .kbn-ch-stream').evaluate(el => {
+  for (let node = el; node; node = node.parentElement) if (node.scrollHeight > node.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(node).overflowY)) return Math.round(node.scrollTop)
+  return Math.round(document.scrollingElement.scrollTop)
+})
+
+/**
+ * Channels: a post opens its thread, then the orchestrator and the thread
+ * again, back and forth, then a file; each way back (the reader's ‹,
+ * Escape, the browser's Back, the Channels tab, the phone's swipe) lands
+ * on the channel in one press, scrolled where it was, the post in focus.
+ * An unfolded file sent to full screen comes back unfolded with the keys.
+ */
+export function registerChannelsBackJourneys(test) {
+  for (const [device, viewport, phone] of [
+    ['phone', { width: 390, height: 844 }, true],
+    ['desktop', { width: 1440, height: 900 }, false],
+  ]) test(`Back from Channels (${device}): every way back is one press to the channel, where it was`, async page => {
+    const ways = phone ? ['reader', 'browser', 'swipe'] : ['reader', 'escape', 'browser', 'tab']
+    for (const way of ways) {
+      await page.goto(channelsUrl)
+      await page.locator('.kbn-ch-pick', { hasText: 'unions' }).first().click()
+      const posts = page.locator('.kbn-ch .kbn-ch-item .kbn-ch-who')
+      await posts.first().waitFor()
+      const post = posts.nth(3)
+      await post.scrollIntoViewIfNeeded()
+      const item = await post.getAttribute('data-item')
+      const scrolled = await streamScroll(page)
+      await post.click()
+      await page.locator('.ws-reader:not(.ws-dormant)').waitFor()
+      for (let i = 0; i < 2; i++) {
+        await page.keyboard.press('b')
+        await page.waitForFunction(() => /unions@/.test(decodeURIComponent(location.hash)) && !/\/unions\/[^@]+@/.test(decodeURIComponent(location.hash)))
+        await selected(page).locator('.thread-row').nth(2).click()
+        await page.waitForFunction(() => !/unions@/.test(decodeURIComponent(location.hash)) || /\/unions\/[^@]+@/.test(decodeURIComponent(location.hash)))
+      }
+      await selected(page).locator('.ws-doc-button').nth(1).click()
+      const length = await page.evaluate(() => navigation.entries().length)
+      assert.equal(length, 2, `${way}: the reader holds one entry above Channels, however far it went`)
+      if (way === 'reader') await (phone ? page.locator('.ws-return') : selected(page).locator('.ws-document-back')).click()
+      else if (way === 'escape') { await page.locator('.ws-reader').click({ position: { x: 4, y: 200 } }).catch(() => {}); await page.keyboard.press('Escape') }
+      else if (way === 'browser') await page.goBack()
+      else if (way === 'tab') await page.locator('button[data-view="channels"]').first().click()
+      else if (way === 'swipe') {
+        const cdp = await page.context().newCDPSession(page)
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 60, y: 300 }] })
+        for (const x of [90, 140, 210, 280]) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: 300 }] })
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+        await cdp.detach()
+      }
+      await page.locator('.ws-reader.ws-dormant').waitFor()
+      assert.equal(new URL(page.url()).hash, '#/channels', `${way}: one press reaches the channel`)
+      assert.equal(await page.locator('.kbn-ch-pick[aria-current="true"], .kbn-ch-pick.kbn-ch-pick-on').first().textContent().catch(() => 'unions').then(t => t.includes('unions')), true)
+      assert.equal(await page.evaluate(() => document.activeElement?.dataset.item), item, `${way}: the post opened from has the focus`)
+      assert.equal(await streamScroll(page), scrolled, `${way}: the stream is where it was left`)
+    }
+
+    // An unfolded file sent to full screen returns unfolded, with the keys.
+    await page.goto(channelsUrl)
+    await page.locator('.kbn-ch-pick', { hasText: 'unions' }).first().click()
+    const several = page.locator('.kbn-ch .kbn-ch-previews[data-several]').first()
+    await several.locator('.uf-card').first().click()
+    const name = () => several.locator('.uf-name').textContent()
+    const first = await name()
+    await several.locator('.uf-full').click()
+    await page.locator('.ws-reader:not(.ws-dormant)').waitFor()
+    await (phone ? page.locator('.ws-return') : selected(page).locator('.ws-document-back')).click()
+    await page.locator('.ws-reader.ws-dormant').waitFor()
+    assert.equal(await page.evaluate(() => document.activeElement?.classList.contains('uf-page')), true, 'the unfolded file has the keys')
+    await page.keyboard.press('ArrowRight')
+    assert.notEqual(await name(), first, '→ steps to the next file')
+    await page.keyboard.press('Escape')
+    assert.equal(await several.getAttribute('data-unfolded'), null, 'Escape folds it')
   }, viewport, 'reduce', phone)
 }

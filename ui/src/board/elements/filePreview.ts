@@ -171,6 +171,12 @@ export class Unfold {
     if (this.open && !keys.has(this.open.key)) this.fold(false)
     else if (this.open) this.paintBar()
   }
+  /** Gives the keys to the unfolded file, if one is; false when none is. */
+  focus(): boolean {
+    if (!this.open) return false
+    this.page.focus({ preventScroll: true })
+    return true
+  }
   /** The file unfolded, if one is. */
   get unfolded(): DocKey | null { return this.open?.key ?? null }
 

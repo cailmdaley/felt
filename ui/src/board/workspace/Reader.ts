@@ -45,10 +45,6 @@ export interface ReaderOptions {
   reviewTarget?(source: WorkspaceDocument): string
   onCrossing?(travel: number): void
   onReturn(): void
-  onOpenDocument(key: DocKey): void
-  onRevisitDocument(key: DocKey): void
-  /** Another page of the fiber in the current visit's place. */
-  onReplaceDocument(key: DocKey): void
   /** Between the family's map and its tapestry; false outside a family. */
   onTapestry?(): boolean
   actionCard?(card: KanbanCard): KanbanCard
@@ -328,17 +324,17 @@ export class Reader {
   /** Open a file over the current page, preserving its exact return point. */
   openDocument(key: DocKey): void {
     if (key === this.selected) return
-    this.opts.onOpenDocument(key)
+    this.opts.onSelect(key)
   }
   /** From a sent file, its fiber's newer (-1) or older (+1) send, in its place; false when there is none to step to. */
   private stepSent(step: -1 | 1): boolean {
     const sends = this.channel ? sentDocuments(this.channel) : [], at = sends.findIndex(sent => sent.key === this.selected)
     const next = at >= 0 ? sends[at + step] : undefined
     if (!next) return at >= 0 && step === 1
-    this.opts.onReplaceDocument(next.key)
+    this.opts.onSelect(next.key)
     return true
   }
-  /** Back, Escape and the phone swipe follow the same visited path. */
+  /** Back, Escape and the phone swipe: the view the reader was opened from. */
   back(): void { this.opts.onReturn() }
   closeSettings(after: () => void): void { this.settingsMenu.close(after) }
   /** Seat the console under the stage, or clear it where the page has none. */

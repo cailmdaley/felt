@@ -225,16 +225,16 @@ it('discovers a report only after it exists, including creation on a later refre
   expect(workspace.reader.host.get(key)).toBeDefined()
 })
 
-it('brings the constitution forward from the band and retraces to the page it left', async () => {
+it('brings the constitution forward from the band, and back from it returns to the view', async () => {
   bodyCards = cards.map(card => ({ ...card, shuttleKind: 'oneshot' }))
   workspace.open(bodyCards[0], 'Desk'); await settle()
   workspace.open(bodyCards[1], 'Desk'); await settle()
   workspace.reader.openDocument(docKey('host-b', '/notes/beta/report.html', 'host-b')); await settle()
   await pressConsoleAct(document.querySelector('.ws-stage-band')!, 'Constitution')
   expect(workspace.reader.document?.kind).toBe('fiber')
-  expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to report.html')
+  expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to Desk')
   await pop(() => workspace.reader.back())
-  expect(workspace.reader.document?.name).toBe('report.html')
+  expect(workspace.isActive).toBe(false)
 })
 
 it('gives a constitution a Change page beside its fiber page only when it names a project', async () => {
@@ -294,7 +294,7 @@ it('steps constitutions in one history entry and returns the last viewed card to
   expect(returned).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ uid: bodyCards[3].uid }))
 })
 
-it('does not rewrite unchanged names on show and writes a page selection once', async () => {
+it('does not rewrite the address on show, and a page selection takes the reader\'s entry once', async () => {
   bodyCards = [{ ...cards[0], shuttleKind: 'oneshot' }]
   workspace.open(bodyCards[0], 'Desk'); await settle()
   const replace = vi.spyOn(window.history, 'replaceState')
@@ -305,11 +305,11 @@ it('does not rewrite unchanged names on show and writes a page selection once', 
   }
   expect(replace).not.toHaveBeenCalled()
   workspace.reader.openDocument(docKey('host-a', '/notes/alpha/report.html', 'host-a')); await settle()
-  expect(push).toHaveBeenCalledOnce()
-  expect(replace).not.toHaveBeenCalled()
+  expect(push).not.toHaveBeenCalled()
+  expect(replace).toHaveBeenCalledOnce()
 })
 
-it('follows visited files after reload and returns a fresh deep link to its origin', async () => {
+it('reopens a file after reload with its view still below, and returns a fresh deep link to its origin', async () => {
   workspace.open(cards[0], 'Desk'); await settle()
   const report = docKey('host-a', '/notes/alpha/report.html', 'host-a')
   const table = docKey('host-a', '/notes/alpha/table.html', 'host-a')
@@ -319,10 +319,9 @@ it('follows visited files after reload and returns a fresh deep link to its orig
   workspace.dispose()
   workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
   await settle()
+  expect(workspace.reader.document?.key).toBe(table)
   await pop(() => workspace.reader.back())
-  expect(workspace.reader.document?.key).toBe(report)
-  await pop(() => workspace.reader.back())
-  expect(workspace.reader.document?.kind).toBe('fiber')
+  expect(workspace.isActive).toBe(false)
   workspace.dispose()
   window.history.replaceState(null, '', hash)
   workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
@@ -332,21 +331,21 @@ it('follows visited files after reload and returns a fresh deep link to its orig
   expect(window.location.hash).toBe('#/channels')
 })
 
-it('names the fiber page behind a file, and the constitution behind another channel by its slug', async () => {
+it('names the view it was opened from as its way back, from a file or another constitution', async () => {
   workspace.open(cards[0], 'Desk')
   await settle()
   expect(workspace.reader.document?.kind).toBe('fiber')
   workspace.reader.openDocument(docKey('host-a', '/notes/alpha/report.html', 'host-a'))
   await settle()
-  expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to Constitution')
+  expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to Desk')
   workspace.reader.openDocument(docKey('host-a', '/notes/alpha/table.html', 'host-a'))
   await settle()
-  expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to report.html')
+  expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to Desk')
   workspace.open(cards[1]); await settle()
-  expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to alpha')
+  expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to Desk')
 })
 
-it('visits documents and retraces them without re-reading the channel or its receipt feed', async () => {
+it('moves between documents and back to one without re-reading the channel or its receipt feed', async () => {
   workspace.open(cards[0], 'Desk'); await settle()
   const reads = () => vi.mocked(fetch).mock.calls.filter(([url]) => /\/api\/v1\/(fibers\/|sent-files\?)/.test(String(url))).length
   const before = reads()
@@ -354,7 +353,8 @@ it('visits documents and retraces them without re-reading the channel or its rec
   await settle()
   workspace.reader.openDocument(docKey('host-a', '/notes/alpha/table.html', 'host-a'))
   await settle()
-  await pop(() => workspace.reader.back())
+  workspace.reader.openDocument(docKey('host-a', '/notes/alpha/report.html', 'host-a'))
+  await settle()
   expect(workspace.reader.document?.name).toBe('report.html')
   expect(reads()).toBe(before)
 })
@@ -1432,7 +1432,7 @@ describe('workspace reader integration', () => {
     expect(window.location.hash).toContain(encodeURIComponent(reportKey))
     workspace.reader.openDocument('fiber:host-a:alpha')
     expect(frame.el.classList.contains('ws-receded')).toBe(true)
-    await pop(() => workspace.reader.back())
+    workspace.reader.openDocument(reportKey)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'o', bubbles: true, cancelable: true }))
     expect(frame.el.classList.contains('ws-expanded')).toBe(true)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
@@ -1654,14 +1654,13 @@ describe('workspace reader integration', () => {
     expect(document.querySelector('.ws-tab')).toBeNull()
   })
 
-  it('uses the Reader back key to pop an opened file to its parent', async () => {
+  it('leaves the reader for its view by Escape from an opened file', async () => {
     workspace.open(cards[0]); await settle()
     const key = docKey('host-a', '/notes/alpha/table.html', 'host-a')
     workspace.reader.openDocument(key)
     expect(workspace.reader.document?.key).toBe(key)
     await pop(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
-    expect(workspace.reader.document?.kind).toBe('fiber')
-    expect(workspace.isActive).toBe(true)
+    expect(workspace.isActive).toBe(false)
   })
 
   it('uses j/k for constitution order and held arrows for document scrolling', async () => {
@@ -1670,8 +1669,8 @@ describe('workspace reader integration', () => {
     const ordered = [cards[0], cards[1]]
     workspace.open(ordered[0])
     await settle()
-    // Stepping onto Beta returns to its history entry: the step lands with the traversal.
-    await pop(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true })))
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true }))
+    await settle()
     expect(document.querySelector('.ws-channel-title')?.textContent).toBe(slug(ordered[1]))
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true, cancelable: true }))
     await settle()
@@ -1880,7 +1879,7 @@ describe('workspace reader integration', () => {
     workspace.open(cards[0], 'Channels', reportKey)
     await settle()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
-    expect(window.history.state).toMatchObject({ shuttleWorkspace: { originView: 'channels', base: true } })
+    expect(window.history.state).toMatchObject({ shuttleWorkspace: { originView: 'channels', layer: true } })
 
     workspace.dispose()
     document.body.replaceChildren()
@@ -1901,7 +1900,7 @@ describe('workspace reader integration', () => {
     expect(workspace.reader.isActive).toBe(false)
   })
 
-  it('restores the Channels return after reloading a nested file route', async () => {
+  it('returns to Channels in one step after reloading on a second file', async () => {
     workspace.suspend('channels')
     await settle()
     await feedNamesReport()
@@ -1913,7 +1912,7 @@ describe('workspace reader integration', () => {
     workspace.reader.openDocument(tableKey)
     await settle()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(tableKey)
-    expect(window.history.state).toMatchObject({ shuttleWorkspace: { back: { pageLabel: 'report.html' }, depth: 2 } })
+    expect(window.history.state).toMatchObject({ shuttleWorkspace: { originView: 'channels', layer: true } })
 
     workspace.dispose()
     document.body.replaceChildren()
@@ -1924,8 +1923,6 @@ describe('workspace reader integration', () => {
     await settle()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(tableKey)
 
-    await pop(() => workspace.reader.back())
-    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
     const returned = new Promise<void>(resolve => window.addEventListener('popstate', () => resolve(), { once: true }))
     workspace.reader.back()
     await returned

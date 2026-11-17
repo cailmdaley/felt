@@ -50,6 +50,7 @@ lives in the docs site (`docs/`, published to
 | Plugin integration, `scripts/release.sh`, release candidates | [`docs/dev/releasing.md`](docs/dev/releasing.md) |
 | Codebase layout, test suites | [`docs/dev/layout.md`](docs/dev/layout.md) |
 | The board's elements (thread row, post, file preview), their proportions and design thinking | [`docs/dev/elements.md`](docs/dev/elements.md) |
+| Where back goes: the reader as one layer over a view, `WorkspaceHistory` | [`docs/dev/navigation.md`](docs/dev/navigation.md) |
 | UI SDK elements, imperative menus, styling and testing | [`docs/dev/ui-sdk.md`](docs/dev/ui-sdk.md) |
 | Writing a test: where it goes, tiers, fixtures, properties | [`docs/dev/testing.md`](docs/dev/testing.md) |
 | Installing a daemon, keep-alive, Rex, Remote Control | [`docs/shuttle/installation.md`](docs/shuttle/installation.md) |
