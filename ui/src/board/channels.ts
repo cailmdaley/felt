@@ -272,8 +272,10 @@ const LINES: Readonly<Record<string, Item['kind']>> = { asked: 'ask', post: 'pos
  * start, its terminus shaped by that close's verdict (a close, a mark for the
  * human's review, then a temper are one tempered end), or at a rest while it
  * runs (a seat or a standing run between runs, a stashed constitution). A launch inside a running life (a resume, a restart) adds
- * nothing. A life whose start is out of reach runs in from the stream's top;
- * one still running runs out at its foot. An item said within a life is on its
+ * nothing. A life whose start is out of reach runs in from the stream's top,
+ * as does the life of a thread that said something in reach with none of
+ * those there, unless it is closed or at rest; one still running runs out at
+ * its foot. An item said within a life is on its
  * line.
  */
 export function composeStream(input: {
@@ -353,6 +355,10 @@ export function composeStream(input: {
   }
   for (const card of channel.everyone) {
     const lives = livesOf(card, events.get(fiberOf(card)) ?? [])
+    // Something said in reach and no launch, handoff, rest or close there: a life begun before the reach, running unless it has stopped since.
+    if (!lives.length && card.status !== 'closed' && card.column !== 'resting' && card.column !== 'roles' && stream.some(item => item.card === card)) {
+      lives.push({ line: `${fiberOf(card)}:0`, from: -Infinity, to: Infinity, stations: [] })
+    }
     stream.push(...lives.flatMap(life => life.stations))
     for (const item of stream) {
       if (item.kind === 'station' || item.card !== card) continue

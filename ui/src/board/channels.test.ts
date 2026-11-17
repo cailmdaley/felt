@@ -204,10 +204,14 @@ describe('composeStream', () => {
       ['cmbx/mask', 'ask', 'Which threshold?', true],
       ['cmbx/beam', 'tick'],
     ])
-    // Each item said within a life is on its line; a thread with no station in reach draws none.
+    // Each item said within a life is on its line. A thread that said something in reach with no station there runs in from before it,
+    // as the chair and the asking mask do; the deck's first pass came before the expert's launch and is on no line.
     expect(stream().flatMap(entry => entry.kind === 'station' ? [] : [[entry.card.id, entry.line]])).toStrictEqual([
-      ['cmbx', undefined], ['cmbx/kappa', undefined], ['cmbx/cov', 'V:0'], ['cmbx/kappa', 'K:0'], ['cmbx/kappa', 'K:0'], ['cmbx/mask', undefined],
+      ['cmbx', 'C:0'], ['cmbx/kappa', undefined], ['cmbx/cov', 'V:0'], ['cmbx/kappa', 'K:0'], ['cmbx/kappa', 'K:0'], ['cmbx/mask', 'M:0'],
     ])
+    // Closed or at rest, such a thread has stopped: it draws no line.
+    const stopped = stream({ channel: { ...channel, everyone: channel.everyone.map(each => each === mask ? { ...mask, column: 'resting' as const } : each) } })
+    expect(stopped.find(entry => entry.kind !== 'station' && entry.card.id === 'cmbx/mask')?.line).toBeUndefined()
     const post = stream().find(entry => entry.kind === 'post')
     expect(post?.kind === 'post' && post.files.map(file => [file.basename, file.caption])).toStrictEqual([['spectrum.svg', '9σ.']])
   })

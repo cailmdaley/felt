@@ -543,12 +543,12 @@ it('rings the threads running now and lists them as thread rows, from the ring o
   daemon()
   const { host, openFromDesk } = await mount()
   const ring = host.querySelector<HTMLButtonElement>('.kbn-ch-count-ring')!
-  // The beam's life runs in from before the stream; the expert's started 40 minutes ago; neither has ended.
-  expect([ring.hidden, ring.textContent, ring.title]).toStrictEqual([false, '2', '2 running: beam, tsz'])
+  // The beam's life runs in from before the stream; the expert's started 40 minutes ago; the mask, launched before the reach, asks in it with nothing else there; none has ended.
+  expect([ring.hidden, ring.textContent, ring.title]).toStrictEqual([false, '3', '3 running: mask, beam, tsz'])
   expect([...host.querySelectorAll('.kbn-ch-bundle > title')].every(title => title.textContent === ring.title)).toBe(true)
   ring.click(); await settle()
   const rows = [...document.querySelectorAll<HTMLElement>('[role="menuitem"] .thread-row')]
-  expect(rows.map(row => [row.querySelector('.thread-row-slug')!.textContent, row.querySelector('.thread-row-doing')!.textContent])).toStrictEqual([['beam', 'working'], ['tsz', 'working']])
-  rows[1].click(); await settle(); await settle()
+  expect(rows.map(row => [row.querySelector('.thread-row-slug')!.textContent, row.querySelector('.thread-row-doing')!.textContent])).toStrictEqual([['mask', 'Mask at 5σ or 3σ?'], ['beam', 'working'], ['tsz', 'working']])
+  rows[2].click(); await settle(); await settle()
   expect(openFromDesk).toHaveBeenLastCalledWith(tsz)
 })
