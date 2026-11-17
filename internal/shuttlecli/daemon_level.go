@@ -93,7 +93,11 @@ func (a *app) requireDeliveringDaemon(owner string) error {
 		return nil
 	}
 	if !local.matches() {
-		return fmt.Errorf("the Shuttle daemon on this host runs %s and this shuttle is %s: it would queue this message without delivering it. Bring the daemon level with `%s`, then send again", local.describe(), a.cliDescription(), a.levelCommand())
+		fix := "Bring the daemon level with `" + a.levelCommand() + "`, then send again"
+		if release, err := a.findDaemonRelease(); err == nil && !fetchedRelease(release.Dir) {
+			fix = "A deploy in progress brings it level when it finishes, so send again then; with none running, deploy it: " + a.levelCommand()
+		}
+		return fmt.Errorf("the Shuttle daemon on this host runs %s and this shuttle is %s: it would queue this message without delivering it. %s", local.describe(), a.cliDescription(), fix)
 	}
 	if owner == "" || owner == local.Host {
 		return nil

@@ -150,7 +150,8 @@ Bring it level: shuttle daemon upgrade
 
 `shuttle daemon upgrade` downloads the daemon release matching the installed
 `shuttle`, checks that its runtime starts on the host, puts it in place of the
-selected release, and stops the running daemon so that its keep-alive
+selected release, copies its `shuttle-launch` to `~/.local/bin` as the
+installer does, and stops the running daemon so that its keep-alive
 supervisor or respawn loop starts the new one. A daemon nothing supervises is
 left stopped, and the command says to run `shuttle daemon start`. Like every
 restart, it arms the boot quarantine: review the board, then run

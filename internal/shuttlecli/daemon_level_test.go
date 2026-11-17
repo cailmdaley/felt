@@ -94,6 +94,30 @@ func TestFiberMessageRefusesADaemonWithoutAContractLevel(t *testing.T) {
 	}
 }
 
+// On a host whose daemon a checkout builds, a level bump installs the CLIs
+// before the deploy activates the daemon, so the refusal says the deploy in
+// progress brings it level.
+func TestFiberMessageOnACheckoutBuiltHostWaitsForTheDeploy(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	store := writeMessageTargetFiber(t, map[string]any{
+		"kind": "oneshot", "host": "hub", "agent": "claude-opus", "project_dir": t.TempDir(),
+	})
+	isolateMessageFiberStore(env, store)
+	release := filepath.Join(t.TempDir(), "repo", "bin", "rel")
+	fakeRelease(t, release, "3.0.0")
+	env.Set("SHUTTLE_RELEASE", release)
+	deliver, requests := dormantDeliverStub(http.StatusAccepted, `{"queued":true}`)
+	daemonStub(t, env, map[string]http.HandlerFunc{
+		"/api/v1/version": versionBody("hub", "3.0.0", ShuttleContractLevel-1),
+		"/api/v1/deliver": deliver,
+	})
+	_, _, err := runMessage(t, newApp(env), "work/worker", "hello")
+	if err == nil || !strings.Contains(err.Error(), "A deploy in progress brings it level when it finishes") || !strings.Contains(err.Error(), "bin/shuttle-deploy --hosts local") || len(requests()) != 0 {
+		t.Fatalf("message error = %v, requests = %v", err, requests())
+	}
+}
+
 // fakeRelease writes a daemon release whose launcher reports version.
 func fakeRelease(t *testing.T, dir, version string) {
 	t.Helper()
@@ -109,9 +133,7 @@ func fakeRelease(t *testing.T, dir, version string) {
 // unreachableDaemon points env at a daemon address nothing answers.
 func unreachableDaemon(t *testing.T, env interface{ Set(string, string) }) {
 	t.Helper()
-	server := httptest.NewServer(http.NotFoundHandler())
-	server.Close()
-	env.Set("SHUTTLE_DAEMON_URL", server.URL)
+	env.Set("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1")
 }
 
 func TestDaemonCheckSaysHowTheDaemonDiffersFromTheseCLIs(t *testing.T) {
@@ -174,7 +196,7 @@ func releaseArchive(t *testing.T, version string) []byte {
 		name string
 		mode int64
 		body string
-	}{{"shuttled/", 0o755, ""}, {"shuttled/bin/", 0o755, ""}, {"shuttled/bin/shuttled", 0o755, script}} {
+	}{{"shuttled/", 0o755, ""}, {"shuttled/bin/", 0o755, ""}, {"shuttled/bin/shuttled", 0o755, script}, {"shuttled/bin/shuttle-launch", 0o755, "#!/bin/sh\n# launch " + version + "\n"}} {
 		hdr := &tar.Header{Name: entry.name, Mode: entry.mode, Size: int64(len(entry.body)), Typeflag: tar.TypeReg}
 		if strings.HasSuffix(entry.name, "/") {
 			hdr.Typeflag = tar.TypeDir
@@ -236,6 +258,10 @@ func TestDaemonUpgradeReplacesTheFetchedReleaseWithThisVersion(t *testing.T) {
 				wantVersion = "3.0.0"
 				if !strings.Contains(stdout, "no daemon is running; `shuttle daemon start` starts this release") {
 					t.Fatalf("upgrade with no daemon running must say how to start it: %q", stdout)
+				}
+				home, _ := env.UserHomeDir()
+				if launch, err := os.ReadFile(filepath.Join(home, ".local", "bin", "shuttle-launch")); err != nil || !strings.Contains(string(launch), "launch 3.0.0") {
+					t.Fatalf("upgrade must install the release's shuttle-launch as the installer does: %q %v", launch, err)
 				}
 			}
 			if got := app.releaseVersion(daemonRelease{Dir: release, Launcher: filepath.Join(release, "bin", "shuttled")}); got != wantVersion {

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/atomicfile"
 	"github.com/cailmdaley/felt/internal/feltcli"
 	"github.com/spf13/cobra"
 )
@@ -55,6 +56,9 @@ with bin/shuttle-deploy.`,
 					return err
 				}
 				fmt.Fprintf(a.env.Stdout, "installed daemon %s at %s (was %s)\n", a.version, release.Dir, installed)
+				if err := a.installLaunchHelper(release.Dir); err != nil {
+					return err
+				}
 			}
 			if err := a.restartOnRelease(); err != nil {
 				return err
@@ -65,6 +69,27 @@ with bin/shuttle-deploy.`,
 			return nil
 		},
 	}
+}
+
+// installLaunchHelper copies the release's shuttle-launch to ~/.local/bin, as
+// the installer does: a hub revives this host over SSH by running that path.
+func (a *app) installLaunchHelper(dir string) error {
+	launch, err := os.ReadFile(filepath.Join(dir, "bin", "shuttle-launch"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	home, err := a.env.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	target := filepath.Join(home, ".local", "bin", "shuttle-launch")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	return atomicfile.Write(target, launch, 0o755)
 }
 
 // restartOnRelease stops a running daemon that is not at this version and
