@@ -127,6 +127,30 @@ describe('workspace routes', () => {
     expect(onRoute).toHaveBeenLastCalledWith({ kind: 'overview', hash: '#/channels' })
   })
 
+  it('the view under the reader, chosen from it, is back: one step, leaving no second copy of the view', async () => {
+    resetHash('#/desk')
+    const history = create()
+    history.start()
+    history.enter('a', 'host', undefined, 'desk')
+    history.show('host:/f.html')
+    await nextPop(() => history.view('#/desk'))
+    expect(window.location.hash).toBe('#/desk')
+    window.history.pushState({ floor: 1 }, '', '#/desk')
+    window.history.back()
+    await settle()
+    expect(window.location.hash).toBe('#/desk')
+  })
+
+  it('an address typed over a freshly loaded view opens a layer above it', async () => {
+    resetHash('#/globe')
+    const history = create()
+    history.start()
+    await new Promise<void>(resolve => { window.addEventListener('hashchange', () => resolve(), { once: true }); window.location.hash = '#/board/typed@host' })
+    await settle()
+    await nextPop(() => history.leave())
+    expect(window.location.hash).toBe('#/globe')
+  })
+
   it('a reload inside the reader keeps the view below it', async () => {
     resetHash('#/globe')
     let history = create()
@@ -176,7 +200,7 @@ describe('workspace routes', () => {
     expect(window.location.hash).toBe('#/channels')
     expect(history.originView).toBe('channels')
     expect(onRoute).not.toHaveBeenCalled()
-    history.enter('one', 'host')
+    history.view('#/desk')
     history.view('#/board')
     expect(window.location.hash).toBe('#/channels')
     expect(onRoute).toHaveBeenLastCalledWith({ kind: 'overview', hash: '#/channels' })

@@ -2,19 +2,15 @@ import type { Channel, DocKey } from './documents.js'
 import { sentFiles } from './SentFiles.js'
 import './page-sheet.css'
 
-const HISTORY_KEY = 'shuttlePageSheet'
-
-/** The sheet of sent files, with modal focus containment and a browser-Back entry. */
+/** The sheet of sent files, a dialog over the reader with modal focus containment; it keeps no history entry, so Back leaves the reader and closes it with it. */
 export class PageSheet {
   readonly el = document.createElement('dialog')
   private readonly body = document.createElement('div')
   private readonly list = document.createElement('div')
   private readonly heading = document.createElement('h2')
-  private readonly token = `files:${Math.random().toString(36).slice(2)}`
   private model: { channel: Channel; selected: DocKey; fresh: ReadonlySet<DocKey> } | null = null
   private opener: HTMLElement | null = null
   private afterClose: (() => void) | null = null
-  private pendingBack = false
   private expanded = false
 
   private readonly onChoose: (key: DocKey) => void
@@ -39,7 +35,6 @@ export class PageSheet {
     close.addEventListener('pointerup', event => { if (start !== null && event.clientY - start > 44) this.close(); start = null })
     close.addEventListener('pointercancel', () => { start = null })
     window.addEventListener('resize', this.position)
-    window.addEventListener('popstate', this.pop)
     this.el.addEventListener('keydown', this.keydown)
   }
   get isOpen(): boolean { return this.el.open }
@@ -49,9 +44,8 @@ export class PageSheet {
     if (this.isOpen) this.render()
   }
   show(opener: HTMLElement): void {
-    if (this.isOpen || this.pendingBack || !this.model) return
+    if (this.isOpen || !this.model) return
     this.opener = opener
-    window.history.pushState({ ...window.history.state, [HISTORY_KEY]: this.token }, '')
     this.open()
   }
   private render(): void {
@@ -76,14 +70,12 @@ export class PageSheet {
     this.el.style.setProperty('--ws-files-height', `${Math.max(120, card.height - 72)}px`)
   }
   close(after?: () => void): void {
-    if (!this.isOpen || this.pendingBack) return
+    if (!this.isOpen) return
     this.afterClose = after ?? null
-    if (window.history.state?.[HISTORY_KEY] === this.token) { this.pendingBack = true; window.history.back() }
-    else this.dismiss()
+    this.dismiss()
   }
   private dismiss(): void {
     if (this.el.open) this.el.close()
-    this.pendingBack = false
     this.onVisibility()
     this.opener?.setAttribute('aria-expanded', 'false')
     if (this.opener?.isConnected && !this.opener.closest('[inert]')) this.opener.focus({ preventScroll: true })
@@ -91,14 +83,7 @@ export class PageSheet {
   }
   hide(): void {
     this.model = null; this.afterClose = null
-    if (window.history.state?.[HISTORY_KEY] === this.token) {
-      const state = { ...window.history.state }; delete state[HISTORY_KEY]; window.history.replaceState(state, '')
-    }
     this.dismiss()
-  }
-  private readonly pop = (): void => {
-    if (window.history.state?.[HISTORY_KEY] === this.token && this.model) { if (!this.isOpen) this.open() }
-    else if (this.isOpen || this.pendingBack) this.dismiss()
   }
   private readonly keydown = (event: KeyboardEvent): void => {
     if (!this.isOpen) return
@@ -112,6 +97,6 @@ export class PageSheet {
     }
   }
   dispose(): void {
-    this.hide(); window.removeEventListener('resize', this.position); window.removeEventListener('popstate', this.pop); this.el.removeEventListener('keydown', this.keydown); this.el.remove()
+    this.hide(); window.removeEventListener('resize', this.position); this.el.removeEventListener('keydown', this.keydown); this.el.remove()
   }
 }

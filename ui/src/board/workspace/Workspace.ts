@@ -96,7 +96,6 @@ type WorkspaceView = WorkspaceOriginView
 const VIEW_LABELS: Record<WorkspaceView, string> = { desk: 'Desk', chronicle: 'Chronicle', globe: 'Globe', channels: 'Channels' }
 const viewForOrigin = (origin: string): WorkspaceOriginView => origin === 'Desk' ? 'desk' : origin === 'Chronicle' ? 'chronicle' : origin === 'Globe' ? 'globe' : 'channels'
 const channelId = (uid: string, owner: string): string => JSON.stringify([owner, uid])
-/** How the way back names a page: a constitution's view by its slug, its own page as Constitution, any other by its name. */
 const threadFamilyRevision = (card: KanbanCard, index: ThreadIndex): string => {
   const current = index.card(card)
   const ancestry = index.ancestry(current).flatMap(entry => entry.card ? [index.card(entry.card)] : [])

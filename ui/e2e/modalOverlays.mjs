@@ -109,12 +109,14 @@ try {
       await p.keyboard.press('Shift+Tab')
       assert.equal(await focused(controls.last()), true, 'Shift+Tab wraps inside the sheet')
       await shot('files')
-      await p.goBack(); await files.waitFor({ state: 'detached' })
-      assert.equal(await focused(opener), true, 'Back returns focus to the opener')
-      await opener.click(); await files.waitFor()
+      const entries = await p.evaluate(() => navigation.entries().length)
       await p.keyboard.press('Escape'); await files.waitFor({ state: 'detached' })
       assert.equal(await focused(opener), true, 'Escape returns focus to the opener')
-      assert.equal(await p.evaluate(() => window.history.state?.shuttlePageSheet), undefined, 'Escape spends the sheet history entry')
+      await opener.click(); await files.waitFor()
+      assert.equal(await p.evaluate(() => navigation.entries().length), entries, 'the sheet keeps no history entry')
+      // Back leaves the reader, and the sheet with it.
+      await p.goBack(); await files.waitFor({ state: 'detached' })
+      await p.locator('.ws-reader.ws-dormant').waitFor()
     }
     await context.close()
     console.log(`PASS modal overlays (${phone ? 'phone' : 'desktop'}, ${theme})`)

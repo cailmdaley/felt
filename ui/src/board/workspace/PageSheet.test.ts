@@ -43,15 +43,17 @@ it('stays closed with nothing to show, and says so when opened on no files', () 
     expect(sheet.el.querySelector('.ws-sent-files p')?.textContent).toBe('No files sent yet.')
   } finally { sheet.dispose() }
 })
-it('yields board shortcuts to the native modal and closes through browser Back', async () => {
+it('yields board shortcuts to the native modal, keeps no history entry, and closes by Escape', async () => {
   const sheet = new PageSheet('', vi.fn()), opener = document.createElement('button')
   document.body.append(sheet.el, opener)
   try {
     sheet.update(channel([]), '', new Set())
+    const length = window.history.length
     sheet.show(opener)
     expect(blockingDialogOpen()).toBe(true)
-    window.history.back()
-    await vi.waitFor(() => expect(sheet.isOpen).toBe(false))
+    expect(window.history.length).toBe(length)
+    sheet.el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(sheet.isOpen).toBe(false)
     expect(blockingDialogOpen()).toBe(false)
     expect(document.activeElement).toBe(opener)
   } finally { sheet.dispose() }

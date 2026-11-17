@@ -96,7 +96,9 @@ function withRouteState(value: unknown, routeState: RouteState | null): StateObj
  * has no view entry below: leaving it replaces it with its view.
  *
  * Another view chosen from the reader replaces the reader's entry, so the
- * browser's back from there returns to the view the reader covered.
+ * browser's back from there returns to the view the reader covered; the
+ * view under the reader, chosen from it, is back. Dialogs over the reader
+ * (the sent files sheet) keep no entry of their own.
  */
 export class WorkspaceHistory {
   /** Hears each route to apply; `quiet` when a scan led to it, which moves neither voice nor Rex. */
@@ -128,7 +130,11 @@ export class WorkspaceHistory {
     window.addEventListener('hashchange', this.onHashChange)
     const route = parseRoute(this.currentHash)
     const saved = readRouteState(window.history.state)
-    if (route?.kind !== 'channel') { this.origin = viewOfHash(this.currentHash) ?? this.origin; return }
+    if (route?.kind !== 'channel') {
+      const view = viewOfHash(this.currentHash)
+      if (view) { this.origin = view; this.current = { kind: 'overview', hash: this.currentHash } }
+      return
+    }
     this.current = route
     this.layered = saved?.layer ?? false
     this.origin = saved?.originView ?? 'channels'
@@ -180,6 +186,8 @@ export class WorkspaceHistory {
     if (this.leaving) { this.queued = () => this.view(address); return }
     const hash = canonical(address)
     if (hash === this.currentHash) return
+    // The view under the reader, chosen from it, is back.
+    if (this.current?.kind === 'channel' && viewOfHash(hash) === this.origin) { this.leave(); return }
     if (this.current?.kind === 'channel') window.history.replaceState(withRouteState(window.history.state, null), '', hash)
     else window.history.pushState(null, '', hash)
     this.origin = viewOfHash(hash) ?? 'channels'
@@ -245,7 +253,7 @@ export class WorkspaceHistory {
     if (route?.kind === 'channel') {
       if (!saved) {
         // An address typed or followed outside the board, above whatever was shown.
-        this.layered = this.current?.kind !== 'channel' && this.current !== null
+        this.layered = this.current?.kind === 'overview'
         if (this.current?.kind === 'overview') this.origin = viewOfHash(this.currentHash) ?? this.origin
         window.history.replaceState(withRouteState(state, this.routeState()), '')
       } else {

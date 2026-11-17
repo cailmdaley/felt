@@ -321,7 +321,7 @@ export class Reader {
     this.runSettled = settled
     if (!settled) this.pageSheet.hide()
   }
-  /** Open a file over the current page, preserving its exact return point. */
+  /** Show another of the channel's pages in the reader's place. */
   openDocument(key: DocKey): void {
     if (key === this.selected) return
     this.opts.onSelect(key)

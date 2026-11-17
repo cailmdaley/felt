@@ -1612,7 +1612,7 @@ test('Phone HTML reader retains its opaque frame and reading position', async p 
 }, { width: 390, height: 844 })
 
 for (const viewport of [{ width: 375, height: 667 }, { width: 390, height: 844 }, { width: 430, height: 932 }]) {
-  test(`Phone ${viewport.width}: edge-to-edge page, modal sheet choice, focus and browser Back`, async p => {
+  test(`Phone ${viewport.width}: edge-to-edge page, modal sheet choice, focus, and browser Back leaving the reader with the sheet`, async p => {
     await open(p); await reportReady(p)
     const geometry = await selected(p).evaluate(el => {
       const rect = el.getBoundingClientRect(), sheet = getComputedStyle(el.querySelector('.ws-sheet'))
@@ -1626,7 +1626,7 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 390, height: 844 }
     await opener.click()
     const sheet = p.getByRole('dialog', { name: 'Sent files', exact: true })
     await sheet.waitFor()
-    assert.equal(p.url(), url, 'sheet is a same-address history layer')
+    assert.equal(p.url(), url, 'the sheet keeps the address')
     await sheet.locator('[data-part="sent-files-more"]').click()
     assert.ok(await sheet.locator('.ws-sent-file').count() >= 12)
     assert.ok(await sheet.locator('.ws-sent-file time').first().getAttribute('datetime'))
@@ -1636,7 +1636,7 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 390, height: 844 }
     }
     await p.keyboard.press('l')
     assert.equal(await selected(p).getAttribute('data-key'), key, 'sheet keys cannot step reader')
-    await p.goBack()
+    await p.keyboard.press('Escape')
     await poll(p, () => !document.querySelector('.ws-page-sheet').open)
     assert.equal(p.url(), url); assert.ok(await opener.evaluate(el => el === document.activeElement))
     await opener.click()
@@ -1649,8 +1649,10 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 390, height: 844 }
     const grabber = await sheet.getByRole('button', { name: 'Close sent files' }).boundingBox()
     await swipe(p, grabber.x + grabber.width / 2, grabber.y + 20, grabber.x + grabber.width / 2, grabber.y + 90)
     await poll(p, () => !document.querySelector('.ws-page-sheet').open)
-    await leave(p)
-    await poll(p, () => document.querySelector('.ws-reader')?.inert)
+    // The sheet keeps no history entry: the browser's Back leaves the reader, and the sheet with it.
+    await opener.click(); await sheet.waitFor()
+    await p.goBack()
+    await poll(p, () => document.querySelector('.ws-reader')?.inert && !document.querySelector('.ws-page-sheet').open)
   }, viewport)
 }
 
