@@ -198,7 +198,7 @@ Every constitution, reached from a Desk row, a channel, a role or a thread, open
 
 The console at its foot speaks to the constitution the view shows; so do the lifecycle keys and `c`. Over the view, the console draws neither its name nor the pages and acts the head already carries. The way back names a fiber by its slug. With the keys on its rows, `j` and `k` (or down and up) move among the orchestrators and the threads, Enter or `l` opens the one in focus, and `h` opens the orchestrator's view, or from the top of the family goes back where the view was opened from; moving the focus moves nothing else.
 
-When Rex's worker changes, from its sidebar or otherwise, the board goes to that fiber's view, with voice on or off, without speaking back to Rex; a page of the same fiber stands, so opening a file does not bounce back. Rex merely coming to the front moves nothing on the board. The Globe shows such a fiber in place.
+When Rex's worker changes, from its sidebar or otherwise, the board goes to that fiber's view, with voice on or off, without speaking back to Rex; a page of the same fiber stands, so opening a file does not bounce back. Rex merely coming to the front moves nothing on the board. The Globe shows such a fiber in place, and Channels, with no reader open over it, opens that worker's channel scrolled to its latest post (else the latest station on its line), tinted until you choose a channel or Rex moves on.
 
 The view reads its feeds and repaints only while it is the selected page of an open reader, and runs nothing in between.
 

@@ -162,6 +162,8 @@ export class ChannelsView implements TemporalView {
   private running: KanbanCard[] = []
   /** The stream follows what arrives while the reader is at its foot. */
   private following = true
+  /** The worker Rex last brought this channel to, whose latest line is marked. */
+  private marked: string | null = null
   private railHidden = false
   /** A phone shows the rail until a channel is chosen. */
   private phoneRail = true
@@ -421,6 +423,7 @@ export class ChannelsView implements TemporalView {
       this.current = key
       if (key) { store(SEEN + key, String(Date.now())); store(LAST, key) }
       this.following = true
+      this.marked = null
       const channel = this.channel
       if (channel) this.ctx?.workspace?.board.read(channel.families)
     }
@@ -433,6 +436,34 @@ export class ChannelsView implements TemporalView {
     if (isMobileViewport() || this.drawn) this.setRail(true)
     this.drawRail(); this.drawChannel()
     this.channelEl?.focus({ preventScroll: true })
+  }
+  /**
+   * The board follows Rex to a worker: its channel opens, scrolled to that
+   * worker's latest post (else the latest station on its line), which is
+   * marked; false when no channel holds it.
+   * Following looks at nothing and renews no pin.
+   */
+  reveal(id: string, origin: string): boolean {
+    if (!this.loaded) return false
+    let card: KanbanCard | undefined
+    const channel = this.channels.find(each => (card = each.everyone.find(one => one.originId === origin && (one.uid === id || one.id === id))))
+    if (!channel || !card) return false
+    this.open(channel.key, true, false)
+    this.marked = fiberOf(card)
+    this.mark(true)
+    return true
+  }
+  /** Marks the latest line of the worker Rex followed to, if the channel shows one; `bring` scrolls it into sight with the keys. */
+  private mark(bring = false): void {
+    for (const row of this.stream?.querySelectorAll('[data-marked]') ?? []) row.removeAttribute('data-marked')
+    // Its latest post, else the latest station on its line.
+    const own = this.marked ? [...this.stream?.querySelectorAll<HTMLElement>(`:scope > [data-fiber="${CSS.escape(this.marked)}"]`) ?? []] : []
+    const row = own.filter(each => each.matches('.kbn-ch-item')).at(-1) ?? own.at(-1)
+    if (!row) return
+    row.setAttribute('data-marked', '')
+    if (!bring) return
+    row.scrollIntoView({ block: 'center' })
+    row.querySelector<HTMLElement>('[data-item]')?.focus({ preventScroll: true })
   }
   /** With no channel to show, the one this device was last in, else the first listed; a phone shows its rail, with no channel behind it. */
   private resume(): void {
@@ -586,6 +617,7 @@ export class ChannelsView implements TemporalView {
         return node
       })])
       for (const id of this.rows.keys()) if (!kept.has(id)) this.rows.delete(id)
+      this.mark()
       for (const close of leading) this.lead(close)
       this.sweep(new Set(entries.flatMap(entry => entry.kind === 'station' ? [] : [`item:${entry.id}`])))
       if (!entries.length) this.stream.append(el('li', 'kbn-ch-hush', failed ? 'This channel\'s history could not be read; trying again.' : 'Nothing addressed to you here yet.'))

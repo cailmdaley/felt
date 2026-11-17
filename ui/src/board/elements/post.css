@@ -8,6 +8,8 @@
 }
 .kbn-ch-item[data-grouped] { padding-top: 2px; }
 .kbn-ch-item[data-grouped] > .constitution-state-dot { visibility: hidden; }
+/* The worker Rex brought the channel to: its latest line, tinted until the channel is left or Rex moves on. */
+:is(.kbn-ch-item, .kbn-ch-station)[data-marked] { background: linear-gradient(to right, transparent var(--kbn-ch-tube), color-mix(in srgb, var(--kbn-you) 9%, transparent) 0); }
 .kbn-ch-item:hover { background: linear-gradient(to right, transparent var(--kbn-ch-tube), color-mix(in srgb, var(--kbn-ink) 4%, transparent) 0); }
 .kbn-ch-item[data-waiting] {
   background: linear-gradient(to right, transparent var(--kbn-ch-tube), var(--kbn-owed-bright) 0, var(--kbn-owed-bright) calc(var(--kbn-ch-tube) + 2px), color-mix(in srgb, var(--kbn-owed-bright) 7%, transparent) 0);
