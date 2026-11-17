@@ -1,11 +1,17 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest'
+import { layTube } from '../tube.js'
 import { ChannelsView } from './ChannelsView.js'
 import type { ViewContext } from './ViewRegistry.js'
 import { BoardFeed, type BoardRecord } from '../boardFeed.js'
 import type { SentFile } from '../sentFiles.js'
 import { card, response, settle } from '../testFixtures.js'
 import { Dock, type ConsoleOptions } from '../workspace/Dock.js'
+
+vi.mock('../tube.js', async original => {
+  const tube = await original<typeof import('../tube.js')>()
+  return { ...tube, layTube: vi.fn(tube.layTube) }
+})
 
 const views: ChannelsView[] = []
 afterEach(() => { views.forEach(view => view.unmount()); views.length = 0; document.body.replaceChildren(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
@@ -512,15 +518,16 @@ it('clears a line that waits on no one from the stream, with e as with its ✓, 
   const { posts } = daemon()
   const { view, host } = await mount()
   expect(item(host, 'mask').querySelector('.kbn-ch-clear')).toBeNull()
-  const files = item(host, 'tsz'), id = files.querySelector<HTMLElement>('[data-item]')!.dataset.item!.slice('item:'.length)
+  const files = item(host, 'tsz')
   files.querySelector<HTMLElement>('.kbn-ch-who')!.focus()
   expect(view.keydown(new KeyboardEvent('keydown', { key: 'e' }))).toBe(true)
   await settle(); await settle()
-  expect(posts.at(-1)?.[1]).toStrictEqual({ key: expect.stringMatching(new RegExp(`^line:\\d+:${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)), fiber: 'T' })
+  // The clear names each send the item showed, one record each.
+  expect(posts.slice(-3).map(([, body]) => [body.fiber, String(body.key).replace(/^line:\d+:/, '')])).toStrictEqual(SENT.map(file => ['T', `file:local:${file.fullPath}:${file.timestamp}`]))
   expect(item(host, 'tsz')).toBeUndefined()
   document.querySelector<HTMLButtonElement>('.shuttle-toast .toast-undo')!.click()
   await settle(); await settle()
-  expect(posts.at(-1)?.[1]).toStrictEqual({ key: expect.stringMatching(/^unline:\d+:file:/), fiber: 'T' })
+  expect(posts.slice(-3).map(([, body]) => String(body.key).replace(/^unline:\d+:/, ''))).toStrictEqual(SENT.map(file => `file:local:${file.fullPath}:${file.timestamp}`))
   expect(item(host, 'tsz')).toBeDefined()
 })
 
@@ -566,4 +573,79 @@ it('rings the threads running now and lists them as thread rows, from the ring o
   expect(rows.map(row => [row.querySelector('.thread-row-slug')!.textContent, row.querySelector('.thread-row-doing')!.textContent])).toStrictEqual([['mask', 'Mask at 5σ or 3σ?'], ['beam', 'working'], ['tsz', 'working']])
   rows[2].click(); await settle(); await settle()
   expect(openFromDesk).toHaveBeenLastCalledWith(tsz)
+})
+
+it('lists the running threads as they stand when the list opens, not as the stream last drew them', async () => {
+  daemon()
+  const { view, ctx, host } = await mount()
+  ctx.response = board([chair, tsz, mask, { ...beam, outcome: 'Beam is fitted.', modifiedAt: new Date().toISOString() }, van, notes])
+  view.refresh(ctx); await settle()
+  host.querySelector<HTMLButtonElement>('.kbn-ch-count-ring')!.click(); await settle()
+  const row = [...document.querySelectorAll<HTMLElement>('[role="menuitem"] .thread-row')].find(each => each.querySelector('.thread-row-slug')!.textContent === 'beam')!
+  expect(row.querySelector('.thread-row-doing')!.textContent).toBe('Beam is fitted.')
+})
+
+it('redraws a file sent again: its card says when it last came', async () => {
+  daemon()
+  const { view, ctx, host } = await mount()
+  const age = () => [...item(host, 'tsz').querySelectorAll<HTMLElement>('.uf-card')].find(card => card.dataset.key?.endsWith('nulls.md'))!.querySelector('.uf-card-age')!.textContent
+  expect(age()).toBe('14m ago')
+  ;(ctx.sends as unknown as { files: SentFile[] }).files = [...SENT.slice(0, 2), { ...SENT[2], timestamp: Date.now() - 10 * minute }]
+  view.refresh(ctx); await settle()
+  expect(age()).toBe('10m ago')
+})
+
+it('keeps the undo of a waiting post\'s clear when the line could not be taken from the stream', async () => {
+  const human = { label: 'Sam' }, posted = Date.now() - 4 * minute
+  const { posts } = daemon([], undefined, {}, { board: { C: [...BOARD.C, { ...record({ id: 'b5', kind: 'post', fiber: 'C', to: human, text: 'Two calls for you today.' }, 4), timestamp: posted }] }, waiting: { C: { id: 'b5', at: posted } } })
+  const answer = vi.mocked(fetch).getMockImplementation()!
+  vi.mocked(fetch).mockImplementation(async (url, init) =>
+    init?.method === 'POST' && String(JSON.parse(String(init.body)).key).startsWith('line:') ? new Response('{"error":"disk full"}', { status: 422 }) : answer(url, init))
+  const { host } = await mount([chair, tsz, beam])
+  item(host, 'cmbx').querySelector<HTMLButtonElement>('.kbn-ch-clear')!.click()
+  await settle(); await settle()
+  expect([item(host, 'cmbx').hasAttribute('data-waiting'), host.querySelector('.kbn-ch-note')!.textContent]).toStrictEqual([false, "cmbx chair's line could not be taken from the stream; it no longer waits."])
+  document.querySelector<HTMLButtonElement>('.shuttle-toast .toast-undo')!.click()
+  await settle(); await settle()
+  // The undo takes back what was written: the clear, and no line.
+  expect(posts.at(-1)?.[1]).toStrictEqual({ key: `unclear:C:${posted}`, fiber: 'C' })
+  expect(posts.some(([, body]) => String(body.key).startsWith('unline:'))).toBe(false)
+  expect(item(host, 'cmbx').hasAttribute('data-waiting')).toBe(true)
+})
+
+it('reads the tapestry of each fiber\'s newest close only, and reckons a close\'s row with a tapestry only when it shows one', async () => {
+  const human = { label: 'Sam' }
+  const cov = card({ id: 'cmbx/cov', uid: 'V', name: 'Covariance', orchestrator: 'C', column: 'tempered', status: 'closed', closedAt: at(20), outcome: 'Validated.' })
+  daemon([], undefined, {}, { board: { C: [...BOARD.C, record({ id: 'v1', kind: 'closed', fiber: 'V', to: human, text: 'First pass.' }, 60), record({ id: 'v2', kind: 'closed', fiber: 'V', to: human, text: 'Second pass.' }, 20)] } })
+  const lead = vi.fn(async (_card: { uid?: string }) => ({ key: 'local:/w/cov/tapestry.html', name: 'Tapestry', at: Date.now(), unread: false }))
+  const view = new ChannelsView()
+  const { ctx, host } = await mount([chair, tsz, mask, beam, cov], view)
+  ;(ctx.workspace as unknown as { globeHost: { feeds: { lead: typeof lead } } }).globeHost.feeds.lead = lead
+  ctx.response = board([chair, { ...tsz, name: 'κ × tSZ, final' }, mask, beam, cov])
+  view.refresh(ctx); await settle(); await settle()
+  const closes = () => [...host.querySelectorAll<HTMLElement>('.kbn-ch-item[data-kind="close"]')]
+  expect(closes().map(close => [...close.querySelectorAll<HTMLElement>('.kbn-ch-previews .uf-card')].map(card => card.dataset.key))).toStrictEqual([[], ['local:/w/cov/tapestry.html']])
+  expect(lead.mock.calls.every(([each]) => each.uid === 'V')).toBe(true)
+  const calls = lead.mock.calls.length
+  ctx.response = board([chair, tsz, mask, beam, cov])
+  view.refresh(ctx); await settle()
+  expect(lead.mock.calls.length - calls).toBe(1)
+  // The stream was laid out again with the tapestry the newest close shows, and none for the older one.
+  const [entries, heights] = vi.mocked(layTube).mock.lastCall!
+  expect(entries.flatMap((entry, row) => entry.kind === 'close' ? [[entry.id, heights![row]]] : [])).toStrictEqual([['v1', 64], ['v2', 64 + 270]])
+})
+
+it('takes from the stream the sends whose clear was written, and its undo brings back only those', async () => {
+  const { posts } = daemon()
+  const answer = vi.mocked(fetch).getMockImplementation()!
+  vi.mocked(fetch).mockImplementation(async (url, init) =>
+    init?.method === 'POST' && String(JSON.parse(String(init.body)).key).endsWith('nulls.md:' + SENT[2].timestamp) ? new Response('{"error":"disk full"}', { status: 422 }) : answer(url, init))
+  const { host } = await mount()
+  item(host, 'tsz').querySelector<HTMLButtonElement>('.kbn-ch-clear')!.click()
+  await settle(); await settle()
+  expect([...item(host, 'tsz').querySelectorAll<HTMLElement>('.uf-card')].map(card => card.getAttribute('aria-label'))).toStrictEqual(['Expand nulls.md'])
+  document.querySelector<HTMLButtonElement>('.shuttle-toast .toast-undo')!.click()
+  await settle(); await settle()
+  expect(posts.filter(([, body]) => String(body.key).startsWith('unline:')).map(([, body]) => String(body.key).replace(/^unline:\d+:/, ''))).toStrictEqual(SENT.slice(0, 2).map(file => `file:local:${file.fullPath}:${file.timestamp}`))
+  expect(item(host, 'tsz').querySelectorAll('.uf-card')).toHaveLength(3)
 })

@@ -51,12 +51,17 @@ export const unpinKey = (key: string, at: number): string => `pin:${key}:${at}`
 export const hideKey = (key: string, at: number): string => `hide:${key}:${at}`
 /** The dismissal record that brings a hidden channel back: every hide up to `at` stops counting. */
 export const showKey = (key: string, at: number): string => `show:${key}:${at}`
-/** The dismissal record that clears one line of a stream (an item, by its id) at `at`, until a later {@link unclearLineKey}. */
+/** The dismissal record that clears one line of a stream ({@link lineIds}) at `at`, until a later {@link unclearLineKey}. */
 export const clearLineKey = (id: string, at: number): string => `line:${at}:${id}`
 /** The dismissal record that brings a cleared line back: every clear of it up to `at` stops counting. */
 export const unclearLineKey = (id: string, at: number): string => `unline:${at}:${id}`
 
-/** The lines cleared by hand, by item id, with when: each whose newest clear is newer than its newest undo. */
+/** A send's id: the line it is in the stream, whichever item it is drawn in. */
+export const sendId = (file: SentFile): string => `file:${file.host ?? ''}:${file.fullPath}:${file.timestamp}`
+/** The lines a clear of an item takes, one record each: every send of a file item, else the item itself. */
+export const lineIds = (item: Item): string[] => item.kind === 'file' ? item.files.map(sendId) : [item.id]
+
+/** The lines cleared by hand, by id, with when: each whose newest clear is newer than its newest undo. */
 export function clearedLines(dismissed: readonly string[]): Map<string, number> {
   const latest = { line: new Map<string, number>(), unline: new Map<string, number>() }
   for (const record of dismissed) {
@@ -245,6 +250,8 @@ export type Ending = 'closed' | 'tempered' | 'discarded' | 'rested'
  */
 export interface Station { kind: 'station'; id: string; card: KanbanCard; at: number; what: 'start' | 'tick' | 'end'; end?: Ending; line: string }
 export type Entry = Item | Station
+/** A channel's stream: its entries, oldest first, and the threads running in it now, whether or not anything of theirs is drawn. */
+export interface Stream { entries: Entry[]; running: KanbanCard[] }
 
 /** A close's verdict as the line's terminus. */
 const ending = (verdict: string | undefined): Ending => verdict === 'tempered' || verdict === 'discarded' ? verdict : 'closed'
@@ -276,7 +283,8 @@ const LINES: Readonly<Record<string, Item['kind']>> = { asked: 'ask', post: 'pos
  * as does the life of a thread that said something in reach with none of
  * those there, unless it is closed or at rest; one still running runs out at
  * its foot. An item said within a life is on its
- * line.
+ * line. A thread whose life runs now is running, though the human cleared
+ * all it said; one that said nothing in reach and launched before it is not.
  */
 export function composeStream(input: {
   channel: Channel
@@ -285,11 +293,11 @@ export function composeStream(input: {
   /** What waits on the human ({@link BoardFeed.waiting}). */
   waits: Waits
   launches: (card: KanbanCard) => readonly number[]
-  /** The items the human cleared by hand ({@link clearedLines}), by id, with when: none is drawn. */
+  /** The lines the human cleared by hand ({@link clearedLines}), by id: none is drawn, and a file item shows only the sends not among them. */
   cleared: ReadonlyMap<string, number>
   now: number
   reachMs: number
-}): Entry[] {
+}): Stream {
   const { channel, records, files, waits, launches, cleared, now, reachMs } = input
   const reach = now - reachMs
   const named = new Map<string, KanbanCard>()
@@ -306,10 +314,12 @@ export function composeStream(input: {
     const list = events.get(fiberOf(card)) ?? events.set(fiberOf(card), []).get(fiberOf(card))!
     list.push({ at, what, id, verdict })
   }
-  // A file a line attached is that line's, not a send of its own.
+  // A file a line attached is that line's, not a send of its own: the send of it nearest the line in time.
   const claimed = new Set<SentFile>()
   const attached = (record: BoardRecord): SentFile[] => (record.files ?? []).map(path => {
-    const send = files.find(file => file.fullPath === path && file.uid === record.fiber && Math.abs(file.timestamp - record.timestamp) <= BURST_MS)
+    const distance = (file: SentFile): number => Math.abs(file.timestamp - record.timestamp)
+    const send = files.filter(file => file.fullPath === path && file.uid === record.fiber && distance(file) <= BURST_MS)
+      .reduce<SentFile | undefined>((near, file) => near && distance(near) <= distance(file) ? near : file, undefined)
     if (send) claimed.add(send)
     return send ?? { fullPath: path, basename: path.split('/').pop() ?? path, uid: record.fiber, timestamp: record.timestamp }
   })
@@ -337,29 +347,35 @@ export function composeStream(input: {
     say({ kind, id: `${want.kind}:${fiberOf(card)}:${want.at}`, card, at: want.at, arrived: want.at, text, files: [], waiting: true, ...clearable(want) ? { clears: fiberOf(card) } : {} })
   }
   // Every send is a line; a worker's sends this close together are one item, a path sent twice in it at its newest.
-  // A burst the human cleared holds what it showed: a send after the clear starts its own item.
   const sends = files.filter(file => file.timestamp >= reach && file.uid && !claimed.has(file)).sort((a, b) => a.timestamp - b.timestamp)
   for (const file of sends) {
     const card = cardNamed(channel.everyone, file.uid!, file.host ?? '')
     if (!card) continue
-    const burst = items.get(fiberOf(card))?.filter(item => item.kind === 'file' && file.timestamp - item.files.at(-1)!.timestamp <= BURST_MS && !(file.timestamp > (cleared.get(item.id) ?? Infinity))).at(-1)
-    if (burst) {
-      burst.files = [...burst.files.filter(each => each.fullPath !== file.fullPath || each.host !== file.host), file]
-      burst.at = burst.arrived = file.timestamp
-    } else say({ kind: 'file', id: `file:${file.host ?? ''}:${file.fullPath}:${file.timestamp}`, card, at: file.timestamp, arrived: file.timestamp, text: '', files: [file], waiting: false })
+    const burst = items.get(fiberOf(card))?.filter(item => item.kind === 'file' && file.timestamp - item.files.at(-1)!.timestamp <= BURST_MS).at(-1)
+    if (burst) burst.files = [...burst.files.filter(each => each.fullPath !== file.fullPath || each.host !== file.host), file]
+    else say({ kind: 'file', id: '', card, at: file.timestamp, arrived: file.timestamp, text: '', files: [file], waiting: false })
   }
+  // A clear names each line it took: a file item shows the sends not cleared, named by its first, and goes when none is left.
   const stream: Entry[] = []
-  for (const list of items.values()) {
-    for (const item of list) if (item.kind === 'file') item.text = [...new Set(item.files.flatMap(file => file.caption?.trim() || []))].join(' · ')
-    stream.push(...list.filter(item => !cleared.has(item.id)))
+  for (const list of items.values()) for (const item of list) {
+    if (item.kind === 'file') {
+      item.files = item.files.filter(file => !cleared.has(sendId(file)))
+      if (!item.files.length) continue
+      item.id = sendId(item.files[0])
+      item.at = item.arrived = item.files.at(-1)!.timestamp
+      item.text = [...new Set(item.files.flatMap(file => file.caption?.trim() || []))].join(' · ')
+    } else if (cleared.has(item.id)) continue
+    stream.push(item)
   }
+  const running: KanbanCard[] = []
   for (const card of channel.everyone) {
     const lives = livesOf(card, events.get(fiberOf(card)) ?? [])
-    // Something said in reach and no launch, handoff, rest or close there: a life begun before the reach, running unless it has stopped since.
-    if (!lives.length && card.status !== 'closed' && card.column !== 'resting' && card.column !== 'roles' && stream.some(item => item.card === card)) {
+    // Something said in reach, cleared or not, and no launch, handoff, rest or close there: a life begun before the reach, running unless it has stopped since.
+    if (!lives.length && card.status !== 'closed' && card.column !== 'resting' && card.column !== 'roles' && items.has(fiberOf(card))) {
       lives.push({ line: `${fiberOf(card)}:0`, from: -Infinity, to: Infinity, stations: [] })
     }
     stream.push(...lives.flatMap(life => life.stations))
+    if (lives.at(-1)?.to === Infinity) running.push(card)
     for (const item of stream) {
       if (item.kind === 'station' || item.card !== card) continue
       const life = lives.find(each => each.from <= item.at && item.at <= each.to)
@@ -368,7 +384,7 @@ export function composeStream(input: {
   }
   // At one instant, one thread's earlier life comes before its later one: its end, then the next start.
   const life = (entry: Entry): number => Number(entry.line?.slice(entry.line.lastIndexOf(':') + 1) ?? 0)
-  return stream.sort((a, b) => a.at - b.at || (a.card === b.card ? life(a) - life(b) : 0) || rank(a) - rank(b) || a.id.localeCompare(b.id))
+  return { entries: stream.sort((a, b) => a.at - b.at || (a.card === b.card ? life(a) - life(b) : 0) || rank(a) - rank(b) || a.id.localeCompare(b.id)), running }
 }
 
 /** What a thread's line is made of: a launch, a handoff, a close (with its verdict), or a rest. */

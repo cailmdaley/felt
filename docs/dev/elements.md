@@ -33,7 +33,7 @@ The rest are the board's own choices, made to sit with those numbers:
 | Thumbnail (globe tiles, sheets) | 176 by 116 |
 
 A box never grows wider than the row it sits in: narrower, a figure or a page keeps its proportions and a card its height.
-`BOX` and `PREVIEW_GAP` in `filePreview.ts` state the same numbers for code that reckons a row's height (the stream's margin), and a test reads the stylesheet to keep them equal; `previewsHeight` wraps a post's boxes in the stream's width as the row does.
+`BOX` and `PREVIEW_GAP` in `filePreview.ts` state the same numbers for code that reckons a row's height (the stream's margin), and a test reads the stylesheet to keep them equal; `previewsHeight` wraps a post's boxes in the stream's width as the row does, and stands them in one line while that width is not known; a close's row counts a tapestry only when it shows one.
 
 ## Elements
 
@@ -53,7 +53,7 @@ Densities: **line** (all parts, one line; the ringed count's list, the Desk's me
 
 **Which threads a list shows.** A list of a family's threads shows only what moves: the threads that wait on the human or are working (`attentionOf` in `attention.ts`: `waiting` or `working`), what waits first, each followed by every thread below it that waits on the human (so a quiet thread with a wait below it stands too). Everything else is quiet (seats, drafts, rest, standing threads between runs, held launches, closes its orchestrator reviews) and sits behind one "N quiet" fold that opens to the same rows. The constitution view's thread list follows this rule; the Desk's family card lists only the members that wait, and the ringed count's list names the threads running now.
 
-The ringed count beside a channel's stream counts the threads running there now (each line not yet ended, a rest ending one as a close does), and its tooltip and its list, from the ring or anywhere on the bundle, name exactly that set as thread rows, what waits first.
+The ringed count beside a channel's stream counts the threads running there now (each life not yet ended, a rest ending one as a close does), though the human has cleared everything one said; and its tooltip and its list, from the ring or anywhere on the bundle, name exactly that set as thread rows, what waits first, the list drawn from the threads as they stand when it opens. A worker the stream does not hold (launched before the board's reach and with nothing in it since) is not counted.
 
 ### Post — `post.ts`
 
@@ -63,8 +63,8 @@ One line a thread addressed to the human.
 |---|---|
 | Head | the thread's slug in its line's colour, its role, the age; the kind word only for an ask, a close (for review, closed) or a block |
 | Text | Markdown, at prose size |
-| Files | a row of file previews below the text |
-| Clear | ✓ at the head's right, on every post and file line, and `e` on the line in focus; one press takes the line from the stream (`line:<ms>:<item id>`) and, for a waiting post, stops it waiting too (`clear:<uid>:<ms>`), with one undo that restores both; a waiting ask or close is answered, not cleared |
+| Files | a row of file previews below the text; a fiber's newest close in the stream leads them with its tapestry |
+| Clear | ✓ at the head's right, on every post and file line, and `e` on the line in focus; one press takes the line from the stream (`line:<ms>:<id>`, one record for each line it takes: a post by its id, a file item by each of its sends, so a send it did not name still shows and the item goes once none is left) and, for a waiting post, stops it waiting too (`clear:<uid>:<ms>`), with one undo that restores both; a waiting ask or close is answered, not cleared |
 
 A line that follows one from the same thread less than five minutes before it, and asks nothing, drops its head: its slug and role stay for assistive technology, its age shows at the right on hover, and its ✓ stays.
 

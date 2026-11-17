@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { RECENT_MS, arranged, clearLineKey, clearedLines, composeChannels, composeStream, hideKey, railOrder, reordered, showKey, unclearLineKey, unpinKey, type Channel, type Entry } from './channels.js'
+import { RECENT_MS, arranged, clearLineKey, clearedLines, composeChannels, composeStream, hideKey, lineIds, railOrder, reordered, sendId, showKey, unclearLineKey, unpinKey, type Channel, type Entry, type Item } from './channels.js'
 import type { BoardRecord, Wait } from './boardFeed.js'
 import { card } from './testFixtures.js'
 import { ThreadIndex } from './threads.js'
@@ -182,8 +182,9 @@ describe('composeStream', () => {
   const files = [send('K', 'deck.html', 120, 'First pass.'), send('K', 'deck.html', 33, 'The final deck.'), send('K', 'spectrum.svg', 30, '9σ.'), send('C', 'plan.md', 300)]
   const launches = new Map([['K', [now - 60 * minute]], ['B', [now - 35 * minute]]])
   const waits = new Map([['V', { id: 'r3m', at: now - 20 * minute }]])
-  const stream = (over: Partial<Parameters<typeof composeStream>[0]> = {}): Entry[] =>
+  const streamOf = (over: Partial<Parameters<typeof composeStream>[0]> = {}) =>
     composeStream({ channel, records, files, waits, launches: card => launches.get(card.uid!) ?? [], cleared: new Map(), now, reachMs, ...over })
+  const stream = (over: Partial<Parameters<typeof composeStream>[0]> = {}): Entry[] => streamOf(over).entries
   const said = (entries: Entry[]) => entries.map(entry => entry.kind === 'station' ? [entry.card.id, entry.what, ...entry.end ? [entry.end] : []] : [entry.card.id, entry.kind, entry.text, entry.waiting])
 
   it('holds everything addressed to the human, with its threads\' lives as stations between, oldest first', () => {
@@ -222,15 +223,37 @@ describe('composeStream', () => {
     expect(sends({ files: [...files, send('K', 'deck.html', 31, 'The final deck, fixed.')] })).toStrictEqual([['First pass.', ['deck.html']], ['The final deck, fixed. · 9σ.', ['deck.html', 'spectrum.svg']]])
   })
 
-  it('hides only what a cleared burst showed: a send after the clear starts its own item', () => {
-    const later = [...files, send('K', 'nulls.md', 28, 'The nulls.')]
-    const burst = stream({ records: records.filter(each => each.id !== 'r7') }).find(entry => entry.kind === 'file' && entry.card === kappa && entry.files.length > 1)!
-    const kept = (clearedAt: number) => stream({ records: records.filter(each => each.id !== 'r7'), files: later, cleared: clearedLines([clearLineKey(burst.id, clearedAt)]) })
-      .flatMap(entry => entry.kind === 'file' && entry.card === kappa ? [entry.files.map(file => file.basename)] : [])
-    // Cleared before the nulls were sent, the burst keeps hidden what it held, and the nulls stand alone.
-    expect(kept(now - 29 * minute)).toStrictEqual([['deck.html'], ['nulls.md']])
-    // Cleared after, they were in what it showed.
-    expect(kept(now - 27 * minute)).toStrictEqual([['deck.html']])
+  it('clears a file item by naming each send it showed: a send it did not name shows, and the item goes when none is left', () => {
+    const quiet = records.filter(each => each.id !== 'r7'), nulls = send('K', 'nulls.md', 28, 'The nulls.')
+    const burst = stream({ records: quiet }).find((entry): entry is Item => entry.kind === 'file' && entry.card === kappa && entry.files.length > 1)!
+    const shown = (over: Partial<Parameters<typeof composeStream>[0]>) => stream({ records: quiet, files: [...files, nulls], ...over })
+      .flatMap(entry => entry.kind === 'file' && entry.card === kappa ? [[entry.id, entry.files.map(file => file.basename)]] : [])
+    const cleared = (...dismissed: string[][]) => ({ cleared: clearedLines(dismissed.flat()) })
+    const first = lineIds(burst).map(id => clearLineKey(id, now - 27 * minute))
+    // Sent before the clear but read after it, the nulls were never seen: they show, in the burst they joined, which takes their name.
+    expect(shown(cleared(first))).toStrictEqual([[expect.any(String), ['deck.html']], [sendId(nulls), ['nulls.md']]])
+    // One device clears the burst, another the nulls; the first undoes its clear, and the nulls stay cleared.
+    const second = [clearLineKey(sendId(nulls), now - 26 * minute)], undo = lineIds(burst).map(id => unclearLineKey(id, now - 25 * minute))
+    expect(shown(cleared(first, second, undo)).at(-1)).toStrictEqual([burst.id, ['deck.html', 'spectrum.svg']])
+    expect(shown(cleared(first, second))).toHaveLength(1)
+    // The burst's first send leaving the board's reach leaves the rest cleared.
+    expect(shown({ ...cleared(first, second), reachMs: 32 * minute })).toStrictEqual([])
+  })
+
+  it('gives an attached file the send of it nearest its line in time, leaving an earlier send of it its own line', () => {
+    const early = send('K', 'spectrum.svg', 38, 'An early cut.')
+    const entries = stream({ files: [early, ...files] })
+    const post = entries.find((entry): entry is Item => entry.kind === 'post')!
+    expect(post.files.map(file => file.timestamp)).toStrictEqual([now - 30 * minute])
+    expect(entries.some(entry => entry.kind === 'file' && entry.files.includes(early))).toBe(true)
+  })
+
+  it('counts a thread running though the human cleared all it said, and not one that said nothing in reach', () => {
+    const plan = stream().find((entry): entry is Item => entry.kind === 'file' && entry.card === chair)!
+    expect(streamOf().running).toContain(chair)
+    const cleared = streamOf({ cleared: clearedLines(lineIds(plan).map(id => clearLineKey(id, now))) })
+    expect([cleared.entries.some(entry => entry.card === chair), cleared.running.includes(chair)]).toStrictEqual([false, true])
+    expect(streamOf({ files: files.filter(file => file.uid !== 'C') }).running).not.toContain(chair)
   })
 
   it('keeps out what was not addressed to the human: posts and closes to others, the human\'s lines, workers\' messages to each other', () => {
@@ -325,7 +348,7 @@ describe('a thread\'s lives', () => {
   const channel = named(compose([hub, thread]), 'channel:unions')
   const record = (id: string, kind: string, fiber: string, minutes: number, over: Partial<BoardRecord> = {}): BoardRecord => ({ id, kind, fiber, by: { fiber }, timestamp: now - minutes * minute, ...over })
   const stations = (records: BoardRecord[], launches: Record<string, number[]>) =>
-    composeStream({ channel, records, files: [], waits: new Map(), launches: each => (launches[each.uid!] ?? []).map(minutes => now - minutes * minute), cleared: new Map(), now, reachMs })
+    composeStream({ channel, records, files: [], waits: new Map(), launches: each => (launches[each.uid!] ?? []).map(minutes => now - minutes * minute), cleared: new Map(), now, reachMs }).entries
       .flatMap(entry => entry.kind === 'station' ? [[entry.card.uid, entry.what, entry.line, ...entry.end ? [entry.end] : []]] : [])
 
   it('starts once per run however often its session is resumed, ticks a handoff, and starts again only after it ended', () => {

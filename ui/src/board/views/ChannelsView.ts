@@ -6,10 +6,10 @@ import type { KanbanCard } from '../KanbanTypes.js'
 import { boardCards, threadIndexFor } from '../KanbanSurfaces.js'
 import { isMobileViewport } from '../mobile.js'
 import {
-  arranged, clearLineKey, clearedLines, composeChannels, composeStream, fiberOf, hideKey, railOrder, reordered, showKey, unclearLineKey, unpinKey,
-  type Channel, type Entry, type Item, type Station,
+  arranged, clearLineKey, clearedLines, lineIds, composeChannels, composeStream, fiberOf, hideKey, railOrder, reordered, showKey, unclearLineKey, unpinKey,
+  type Channel, type Entry, type Item, type Station, type Stream,
 } from '../channels.js'
-import { layTube, rowHeight, type Excursion, type Tube, type TubeLine, type TubeRow } from '../tube.js'
+import { layTube, rowHeight, type Excursion, type TubeLine, type TubeRow } from '../tube.js'
 import { createRailReorder, type RailReorder } from '../channelRail.js'
 import { openActionMenu } from '../conversationMenu.js'
 import { stateDot } from '../stateDot.js'
@@ -91,6 +91,9 @@ function iconButton(className: string, icon: HeaderIcon, label: string, onClick:
   root.append(trigger, tip)
   return { root, button: node, name: text => { tip.textContent = text } }
 }
+/** Threads in the order a list of them reads: what waits on the human first, then what works, each by its latest activity. */
+const ranked = (cards: KanbanCard[], waits: Waits): KanbanCard[] =>
+  cards.sort((a, b) => ATTENTION_ORDER.indexOf(attentionOf(a, waits)) - ATTENTION_ORDER.indexOf(attentionOf(b, waits)) || lastActive(b) - lastActive(a))
 const stored = (key: string): string | null => { try { return localStorage.getItem(key) } catch { return null } }
 const store = (key: string, value: string): void => { try { localStorage.setItem(key, value) } catch { /* A convenience only. */ } }
 /** Whether anything from `node` up to `stop` can still scroll sideways by `toward` (positive: rightward). */
@@ -150,7 +153,12 @@ export class ChannelsView implements TemporalView {
   private returnTo: string | null = null
   /** The reader stands over Channels: nothing redraws beneath it. */
   private away = false
-  /** The threads running now, as the stream was last drawn ({@link runningNow}). */
+  /**
+   * The threads running now in this channel, as the stream was last drawn:
+   * each with a life not yet ended, what waits on the human first, then what
+   * works, each by its latest activity. The ring counts them, and it and the
+   * bundle list them.
+   */
   private running: KanbanCard[] = []
   /** The stream follows what arrives while the reader is at its foot. */
   private following = true
@@ -314,7 +322,7 @@ export class ChannelsView implements TemporalView {
     })
   }
   /** A channel's stream: what its families' records, its sent files and its threads' launches make of it. */
-  private entries(channel: Channel, ctx = this.ctx!): Entry[] {
+  private streamOf(channel: Channel, ctx = this.ctx!): Stream {
     const workspace = ctx.workspace!
     return composeStream({
       channel, records: workspace.board.records(channel.families), files: ctx.sends?.files ?? [], waits: workspace.board.waiting,
@@ -325,7 +333,7 @@ export class ChannelsView implements TemporalView {
   /** Something addressed to the human arrived in the channel since this device last read it. */
   private unread(channel: Channel): boolean {
     const seen = lastSeen(channel.key)
-    return this.entries(channel).some(entry => entry.kind !== 'station' && entry.arrived > seen)
+    return this.streamOf(channel).entries.some(entry => entry.kind !== 'station' && entry.arrived > seen)
   }
   private status(text: string): void { if (this.note) this.note.textContent = text }
   /** The order and the hides lapse with the board's reach, so while they stand they are written again. */
@@ -509,7 +517,7 @@ export class ChannelsView implements TemporalView {
       this.rows.clear()
       return
     }
-    const now = Date.now(), entries = this.entries(channel), failed = channel.families.some(uid => this.ctx!.workspace!.board.failed(uid))
+    const now = Date.now(), { entries, running } = this.streamOf(channel), failed = channel.families.some(uid => this.ctx!.workspace!.board.failed(uid))
     const seat = channel.seat
     // The head and the stream are drawn apart, so what arrives leaves a focused page or an open menu in the head be.
     const head = JSON.stringify([channel.key, channel.name, channel.title, fiberOf(seat), seat.modifiedAt, this.ctx!.workspace!.globeHost.feeds.files(seat).length])
@@ -532,18 +540,27 @@ export class ChannelsView implements TemporalView {
     // A line follows the one before it in its group: the row above, of the same thread, moments before.
     const grouped = entries.map((entry, row) => { const before = entries[row - 1]; return entry.kind !== 'station' && before?.kind !== 'station' && groups(before, entry) })
     // What the elements draw of its card: its name, slug and office.
-    const said = entries.map((entry, row) => [entry.id, entry.kind, entry.at, entry.card.name, slug(entry.card), entry.card.shuttleRole, entry.line, entry.kind === 'station' ? [entry.what, entry.end] : [entry.text, entry.waiting, entry.clears, kindWord(entry), grouped[row], entry.files.map(file => file.fullPath)]])
+    const said = entries.map((entry, row) => [entry.id, entry.kind, entry.at, entry.card.name, slug(entry.card), entry.card.shuttleRole, entry.line, entry.kind === 'station' ? [entry.what, entry.end] : [entry.text, entry.waiting, entry.clears, kindWord(entry), grouped[row], entry.files.map(file => [file.host, file.fullPath, file.timestamp])]])
+    // Each fiber's newest close leads its previews with its tapestry; an older close lets its go.
+    const newest = new Map<string, Item>()
+    for (const entry of entries) if (entry.kind === 'close') newest.set(fiberOf(entry.card), entry)
+    const leading = new Set(newest.values())
+    for (const entry of entries) {
+      const made = entry.kind === 'close' && !leading.has(entry) ? this.unfolds.get(`item:${entry.id}`) : undefined
+      if (made?.lead) { made.lead = undefined; this.showPreviews(made) }
+    }
+    const leads = entries.map(entry => this.unfolds.get(`item:${entry.id}`)?.lead?.key)
     // The width a post's previews wrap in: the stream's, less the gutter and the post's padding.
     const wide = this.stream.clientWidth ? this.stream.clientWidth - TUBE.gutter - 26 : Infinity
-    const stream = JSON.stringify([channel.key, failed, said, entries.map(entry => [attentionOf(entry.card, waits), turnOf(entry.card).turn]), wide])
+    const stream = JSON.stringify([channel.key, failed, said, entries.map(entry => [attentionOf(entry.card, waits), turnOf(entry.card).turn]), leads, wide])
     if (stream !== this.sigs.stream) {
       this.sigs.stream = stream
-      // Each row reckoned by its parts' sizes, a post's by its previews as they wrap (a close's tapestry leading them), before anything in it loads.
-      const tube = layTube(entries, entries.map(entry => entry.kind === 'station' ? rowHeight(entry) : POST_PX + previewsHeight([...entry.kind === 'close' ? ['tapestry.html'] : [], ...entry.files.map(file => file.fullPath)], wide)))
+      // Each row reckoned by its parts' sizes, a post's by its previews as they wrap (a tapestry it shows leading them), before anything in it loads.
+      const tube = layTube(entries, entries.map((entry, row) => entry.kind === 'station' ? rowHeight(entry) : POST_PX + previewsHeight([...leads[row] ? ['tapestry.html'] : [], ...entry.files.map(file => file.fullPath)], wide)))
       // The lanes share their room, each step no wider than the mock's nine pixels.
       this.stream.style.setProperty('--kbn-ch-tube', `${TUBE.gutter}px`)
       const lay = { waits, now, last: entries.length - 1 }
-      this.running = this.runningNow(tube, waits)
+      this.running = ranked(running, waits)
       const count = el('li', 'kbn-ch-count'), ring = button('kbn-ch-count-ring', String(this.running.length), () => this.bundleMenu())
       ring.hidden = !this.running.length
       ring.title = this.runningTitle()
@@ -569,7 +586,7 @@ export class ChannelsView implements TemporalView {
         return node
       })])
       for (const id of this.rows.keys()) if (!kept.has(id)) this.rows.delete(id)
-      for (const entry of entries) if (entry.kind === 'close') this.lead(entry)
+      for (const close of leading) this.lead(close)
       this.sweep(new Set(entries.flatMap(entry => entry.kind === 'station' ? [] : [`item:${entry.id}`])))
       if (!entries.length) this.stream.append(el('li', 'kbn-ch-hush', failed ? 'This channel\'s history could not be read; trying again.' : 'Nothing addressed to you here yet.'))
       if (this.following) this.stream.scrollTop = this.stream.scrollHeight
@@ -673,16 +690,6 @@ export class ChannelsView implements TemporalView {
     box.append(g)
     return box
   }
-  /**
-   * The threads running now in this channel: each line not yet ended, one
-   * row per thread, what waits on the human first, then what works, each
-   * by its latest activity. The ring counts them, and it and the bundle list them.
-   */
-  private runningNow(tube: Tube, waits: Waits): KanbanCard[] {
-    const cards = new Map<string, KanbanCard>()
-    for (const line of tube.lines) if (line.to === Infinity) cards.set(fiberOf(line.card), line.card)
-    return [...cards.values()].sort((a, b) => ATTENTION_ORDER.indexOf(attentionOf(a, waits)) - ATTENTION_ORDER.indexOf(attentionOf(b, waits)) || lastActive(b) - lastActive(a))
-  }
   private runningTitle(): string {
     return `${this.running.length} running: ${this.running.map(card => slug(card)).join(', ')}`
   }
@@ -692,8 +699,9 @@ export class ChannelsView implements TemporalView {
     const anchor = this.stream?.querySelector<HTMLElement>(':scope > .kbn-ch-count > .kbn-ch-count-ring')
     const workspace = this.ctx?.workspace
     if (!this.running.length || !anchor || !workspace) return
-    const now = Date.now(), waits = workspace.board.waiting
-    openActionMenu(anchor, this.running.map(card => ({
+    // The threads as they stand now, not as the stream last drew them.
+    const now = Date.now(), waits = workspace.board.waiting, current = new Map(this.channel?.everyone.map(card => [fiberOf(card), card]))
+    openActionMenu(anchor, ranked(this.running.map(card => current.get(fiberOf(card)) ?? card), waits).map(card => ({
       label: `${slug(card)}: ${doing(card, waits, workspace.said(card)).text}`,
       content: threadRow(card, { waits, now, said: workspace.said(card), hue: hue(card) }),
       run: () => this.openLine(card),
@@ -765,32 +773,47 @@ export class ChannelsView implements TemporalView {
     const row = done.closest('.kbn-ch-item'), held = row?.contains(document.activeElement)
     const next = [...this.stream?.querySelectorAll<HTMLElement>(':scope > .kbn-ch-item') ?? []]
     const after = (next[next.indexOf(row as HTMLElement) + 1] ?? next[next.indexOf(row as HTMLElement) - 1])?.querySelector<HTMLElement>('[data-item]')?.dataset.item
-    const key = clearLineKey(item.id, Date.now()), fiber = fiberOf(item.card), waits = item.clears
-    this.pending.push(key)
+    const at = Date.now(), fiber = fiberOf(item.card), waits = item.clears
+    const lines = lineIds(item).map(id => ({ id, key: clearLineKey(id, at) }))
+    this.pending.push(...lines.map(line => line.key))
     this.draw()
     // The line after it may be drawn anew (ungrouped, it takes a head): it is found again by its id.
     if (held && after) this.stream?.querySelector<HTMLElement>(`[data-item="${CSS.escape(after)}"]`)?.focus({ preventScroll: true })
+    const write = (key: string, failure: string): Promise<boolean> =>
+      postDaemonJson(ctx.shuttleBase, '/api/v1/channels/dismiss', { key, fiber }, failure).then(() => true, () => {
+        this.pending = this.pending.filter(each => each !== key)
+        return false
+      })
     // The clear first: a line write refused after it leaves a post that no longer waits, still in the stream with its ✓.
     let cleared: number | undefined
     try {
       if (waits && board) cleared = await board.clear(waits)
-      await postDaemonJson(ctx.shuttleBase, '/api/v1/channels/dismiss', { key, fiber }, 'Clear failed')
     } catch {
-      this.pending = this.pending.filter(each => each !== key)
+      this.pending = this.pending.filter(each => !lines.some(line => line.key === each))
       this.draw()
-      this.status(cleared === undefined ? `${item.card.name}'s line could not be cleared; it is as it was.` : `${item.card.name}'s line could not be taken from the stream; it no longer waits.`)
+      this.status(`${item.card.name}'s line could not be cleared; it is as it was.`)
       return
     }
-    clearToast(`Cleared ${slug(item.card)}'s line.`, () => {
-      const back = unclearLineKey(item.id, Date.now())
-      this.pending.push(back)
+    // Each line its own record: a clear names every line it took.
+    const written = await Promise.all(lines.map(line => write(line.key, 'Clear failed'))), taken = lines.filter((_, index) => written[index])
+    if (taken.length < lines.length) {
       this.draw()
-      void postDaemonJson(ctx.shuttleBase, '/api/v1/channels/dismiss', { key: back, fiber }, 'Undo failed').catch(() => {
-        this.pending = this.pending.filter(each => each !== back)
+      this.status(cleared !== undefined ? `${item.card.name}'s line could not be taken from the stream; it no longer waits.`
+        : taken.length ? `Some of ${item.card.name}'s files could not be taken from the stream.` : `${item.card.name}'s line could not be cleared; it is as it was.`)
+    }
+    if (!taken.length && cleared === undefined) return
+    // The undo takes back what was written.
+    clearToast(`Cleared ${slug(item.card)}'s ${taken.length ? 'line' : 'post'}.`, () => {
+      if (waits && board && cleared !== undefined) void board.unclear(waits, cleared).catch(() => this.status(`${item.card.name}'s post could not be brought back; it stays cleared.`))
+      if (!taken.length) return
+      const backAt = Date.now(), backs = taken.map(line => unclearLineKey(line.id, backAt))
+      this.pending.push(...backs)
+      this.draw()
+      void Promise.all(backs.map(back => write(back, 'Undo failed'))).then(done => {
+        if (done.every(Boolean)) return
         this.draw()
         this.status(`${item.card.name}'s line could not be brought back; it stays cleared.`)
       })
-      if (waits && board && cleared !== undefined) void board.unclear(waits, cleared).catch(() => this.status(`${item.card.name}'s post could not be brought back; it stays cleared.`))
     })
   }
   /**
@@ -820,14 +843,19 @@ export class ChannelsView implements TemporalView {
   private showPreviews(made: { unfold: Unfold; lead?: UnfoldFile; files: UnfoldFile[] }): void {
     made.unfold.update([...made.lead ? [made.lead] : [], ...made.files.filter(file => file.key !== made.lead?.key)])
   }
-  /** A close's tapestry, read again on every draw of its row, kept or new: a tapestry written since takes its place at the head of its previews. */
+  /**
+   * A fiber's newest close's tapestry, read again on every draw of the stream:
+   * a tapestry written since takes its place at the head of its previews, and
+   * the stream is laid out again with it.
+   */
   private lead(item: Item): void {
     const id = `item:${item.id}`, made = this.unfolds.get(id)
-    if (!made || item.kind !== 'close') return
+    if (!made) return
     void this.ctx?.workspace?.globeHost.feeds.lead(item.card).then(lead => {
       if (!lead || made.lead?.key === lead.key || this.unfolds.get(id) !== made) return
       made.lead = { key: lead.key, name: lead.name }
       this.showPreviews(made)
+      this.draw()
     })
   }
   /** Lets go of the previews the stream no longer draws. */

@@ -34,15 +34,16 @@ export const PREVIEW_GAP = 8
  * How tall a row of these files' previews stands in `width` pixels before any
  * of them loads: the boxes wrapped as the row wraps them, each line as tall as
  * its tallest box, a box narrower than its density's scaled to fit (a figure
- * or a page keeping its proportions, a card its height).
+ * or a page keeping its proportions, a card its height). In a width not
+ * known yet (Infinity), the boxes stand in one line.
  */
 export function previewsHeight(paths: readonly string[], width: number): number {
   const lines: number[] = []
-  let used = Infinity
+  let used = 0
   for (const path of paths) {
     const density = densityOf(path), box = BOX[density], w = Math.min(box.width, width)
     const h = density === 'card' ? box.height : box.height * w / box.width
-    if (used + PREVIEW_GAP + w > width) { lines.push(h); used = w }
+    if (!lines.length || used + PREVIEW_GAP + w > width) { lines.push(h); used = w }
     else { lines[lines.length - 1] = Math.max(lines.at(-1)!, h); used += PREVIEW_GAP + w }
   }
   return lines.reduce((sum, h) => sum + h, 0) + PREVIEW_GAP * Math.max(0, lines.length - 1)
@@ -270,7 +271,12 @@ export class Unfold {
   /** A file's preview, folded: the top of its page, or a card naming it, and a click to unfold it. */
   private card(file: UnfoldFile): HTMLButtonElement {
     const made = this.cards.get(file.key)
-    if (made) { made.el.title = `Expand ${file.name}`; return made.el }
+    if (made) {
+      made.el.title = `Expand ${file.name}`
+      // A card sent again says when it last came.
+      made.el.querySelector('.uf-card-age')?.replaceWith(timeEl(file.at ?? 0, Date.now(), 'uf-card-age'))
+      return made.el
+    }
     const parsed = parseDocKey(file.key), path = parsed?.path ?? file.name
     const el = document.createElement('button')
     el.type = 'button'
