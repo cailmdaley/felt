@@ -57,7 +57,6 @@ const FOUND_DOCUMENTS = 12
 const DRAWER_PX = 1100
 /** The margin's width: wide on a desktop, where the fibres can wander; narrower where the stream's width is scarce. */
 const MARGIN = { wide: 56, narrow: 40, below: 560 } as const
-/** How freely the fibres wander and how heavy their ink is, at each width. */
 /** The strand's count: how far below the top of what is in sight its swelling's middle stands, how far down it looks for the strand, and where it stands with none. */
 const COUNT = { at: 24, reach: 160, alone: 9 } as const
 /** The count's swelling: a short spindle of the strand's ink, a little off true, as a varicosity on a fibre. */
@@ -73,6 +72,7 @@ function swelling(): SVGSVGElement {
   box.append(path)
   return box
 }
+/** How freely the fibres wander and how heavy their ink is, at each width. */
 const INK = { wide: { chaos: 1.6, weight: 1.15 }, narrow: { chaos: 1, weight: 1.05 } } as const
 /** What stops a worker's run, among a thread's records. */
 const STOPS = new Set(['handed_off', 'closed', 'rested', 'asked'])
@@ -287,7 +287,7 @@ export class ChannelsView implements TemporalView {
     this.stream = el('ol', 'kbn-ch-stream')
     this.stream.addEventListener('scroll', () => {
       // Only the reader's own scroll leaves the foot: rows that grow before a scroll's event arrives leave the stream following.
-      const moved = this.stream!.scrollTop !== this.lastTop
+      const moved = Math.abs(this.stream!.scrollTop - this.lastTop) > 1
       this.lastTop = this.stream!.scrollTop
       if (this.atFoot()) this.following = true
       else if (moved) this.following = false
@@ -504,9 +504,9 @@ export class ChannelsView implements TemporalView {
     this.bring = false
     if (isTypingTarget(document.activeElement as HTMLElement | null)) return
     row.scrollIntoView({ block: 'center' })
-    // Its line may be the stream's newest: brought to it there, the stream still follows.
+    // Brought to the stream's newest line, the stream still follows; brought to any other, it stays on that line.
     this.lastTop = this.stream!.scrollTop
-    this.following = this.atFoot()
+    this.following = row === this.stream!.lastElementChild && this.atFoot()
     row.querySelector<HTMLElement>('[data-item]')?.focus({ preventScroll: true })
   }
   /** With no channel to show, the one this device was last in, else the first listed; a phone shows its rail, with no channel behind it. */
@@ -1005,7 +1005,8 @@ export class ChannelsView implements TemporalView {
         shuttleBase: this.ctx?.shuttleBase ?? '', awake: () => !this.ctx?.workspace?.isActive && !!this.stream?.isConnected,
         // Full screen opens the file in the reader; its way back returns to this item, the file still unfolded.
         full: key => this.openPage(id, card, key),
-        link: (key, href) => this.leaveFor(id, () => this.ctx?.workspace?.openLink(card, key, href)),
+        // A link that goes somewhere leaves as full screen does; one that goes nowhere leaves the page as it is.
+        link: (key, href) => { if (this.ctx?.workspace?.openLink(card, key, href)) { this.returnTo = id; this.depart() } },
         opening: () => this.foldOthers(id),
       }), files: [],
     }).get(id)!

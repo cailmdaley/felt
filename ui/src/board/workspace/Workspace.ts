@@ -864,19 +864,24 @@ export class Workspace {
   /**
    * A link followed in a page a view unfolded in place, routed as the reader
    * routes its own: a board route moves the board, and a file beside the page
-   * opens in the reader as one of `card`'s pages.
+   * opens in the reader as one of `card`'s pages. False when the link goes
+   * nowhere the board is not already.
    */
-  openLink(card: KanbanCard, source: DocKey, href: string): void {
-    const from = parseDocKey(source)
-    if (from) this.openRelative(from, href, card)
+  openLink(card: KanbanCard, source: DocKey, href: string): boolean {
+    const from = parseDocKey(source), before = window.location.hash
+    if (!from) return false
+    return this.openRelative(from, href, card) || window.location.hash !== before
   }
-  /** Follows a link from a document: `holder` is the constitution whose page a file opens as, the one on show when absent. */
-  private openRelative(source: Pick<WorkspaceDocument, 'owner' | 'path'>, href: string, holder?: KanbanCard): void {
-    if (!href) return
+  /**
+   * Follows a link from a document: `holder` is the constitution whose page a
+   * file opens as, the one on show when absent. True when it opened a file.
+   */
+  private openRelative(source: Pick<WorkspaceDocument, 'owner' | 'path'>, href: string, holder?: KanbanCard): boolean {
+    if (!href) return false
     const route = parseRoute(href)
-    if (route?.kind === 'channel') { this.history.enter(route.uid, route.owner, route.doc); return }
-    if (route?.kind === 'overview' || (viewOfHash(href) && !route)) { this.history.view(href); return }
-    if (href.startsWith('#')) return
+    if (route?.kind === 'channel') { this.history.enter(route.uid, route.owner, route.doc); return false }
+    if (route?.kind === 'overview' || (viewOfHash(href) && !route)) { this.history.view(href); return false }
+    if (href.startsWith('#')) return false
     let path: string, hash: string, owner = source.owner
     try {
       const url = new URL(href, window.location.href)
@@ -885,15 +890,19 @@ export class Workspace {
         path = url.searchParams.get('path')!
         owner = url.searchParams.get('origin') || owner
       } else {
-        if (/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(href)) return
+        if (/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(href)) return false
         path = decodeURIComponent(href.split(/[?#]/)[0])
       }
       hash = url.hash
-    } catch { return }
-    if (!path || path.includes('\0') || path.includes('\\')) return
+    } catch { return false }
+    if (!path || path.includes('\0') || path.includes('\\')) return false
     const file = normalizeAbsolutePath(path, source.path.slice(0, source.path.lastIndexOf('/')))
-    if (holder) this.openDocument(holder, docKey(owner, file, holder.originId, holder.fiberDir))
-    else this.openFile(file, undefined, owner, hash)
+    if (holder) {
+      const key = docKey(owner, file, holder.originId, holder.fiberDir)
+      this.openDocument(holder, key)
+      if (hash) this.reader.host.navigateFragment(key, hash)
+    } else this.openFile(file, undefined, owner, hash)
+    return true
   }
 
   private openFile(path: string, title?: string, owner = this.current?.card.originId, hash = ''): void {

@@ -86,7 +86,7 @@ export interface ViewContext extends TemporalFetchers {
     /** A fiber's page, or one of its documents; a fiber the board does not hold is read from its owner first. */
     openPage(card: KanbanCard, doc?: DocKey): void
     /** A link followed in a file unfolded in the view, routed as the reader routes its own (`Workspace.openLink`). */
-    openLink(card: KanbanCard, source: DocKey, href: string): void
+    openLink(card: KanbanCard, source: DocKey, href: string): boolean
     readonly globeHost: GlobeHost
     /** The family board's records, which Channels reads its streams from. */
     readonly board: BoardFeed
