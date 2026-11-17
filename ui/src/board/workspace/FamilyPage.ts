@@ -52,7 +52,7 @@ const WANT_WORD: Readonly<Record<Want['kind'], string>> = { ask: 'asks', review:
  * behind one quiet control that opens to them; then its tapestry, or
  * else its newest sent file, at the view's full width as a preview that
  * unfolds in place, stepping through its other sent files, and counts as
- * seen. No outcome is drawn. It reads feeds and repaints only while its frame
+ * seen. Its head draws no outcome; a thread row says one when it is newer than its last post. It reads feeds and repaints only while its frame
  * is selected in an open reader; its frame's eviction ends it.
  */
 export class FamilyPage {

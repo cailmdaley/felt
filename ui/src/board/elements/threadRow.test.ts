@@ -8,7 +8,7 @@ const when = (back: number): string => new Date(now - back * hour).toISOString()
 
 describe('threadRow', () => {
   const parts = (row: HTMLElement) => [...row.children].map(part => [part.className.replace('el-time ', ''), part.textContent])
-  it('says what a thread is doing: what it wants, else what it last said, else its faint word or its turn, and when it last spoke', () => {
+  it('says what a thread is doing: what it wants, else the newer of what it last said and its outcome, else its faint word or its turn, and when that was said', () => {
     const asked = card({ id: 'felt/ui-pass', name: 'UI pass', shuttleRole: 'felt-ui', status: 'active', ask: { text: 'Which **one**?', at: when(1) } })
     expect(parts(threadRow(asked, { waits: new Map(), now }))).toStrictEqual([
       ['constitution-state-dot', ''], ['thread-row-slug', 'ui-pass'], ['thread-row-role', 'felt-ui'], ['thread-row-doing', 'Which one?'], ['thread-row-age', '1h ago'],
@@ -17,6 +17,10 @@ describe('threadRow', () => {
     expect(parts(threadRow(busy, { waits: new Map(), now, said: { text: 'Landed *it*.', at: now - 5 * 60_000 } }))).toStrictEqual([
       ['constitution-state-dot', ''], ['thread-row-slug', 'felt'], ['thread-row-doing', 'Landed it.'], ['thread-row-age', '5m ago'],
     ])
+    // The newer of what it said and its outcome, timed by its file's last write.
+    const done = { ...busy, outcome: 'Shipped **v2**.', modifiedAt: when(2) }
+    const newer = (said: number) => [...threadRow(done, { waits: new Map(), now, said: { text: 'Landed it.', at: now - said * hour } }).querySelectorAll('.thread-row-doing, .thread-row-age')].map(part => part.textContent)
+    expect([newer(1), newer(3)]).toStrictEqual([['Landed it.', '1h ago'], ['Shipped v2.', '2h ago']])
     // Working with nothing said: its turn's word, timed from its launch.
     const launched = threadRow({ ...busy, dispatchedAt: when(23) }, { waits: new Map(), now })
     expect([launched.querySelector('.thread-row-doing')!.textContent, launched.querySelector('.thread-row-age')!.textContent]).toStrictEqual(['working', '23h ago'])

@@ -39,15 +39,18 @@ const plain = (markdown: string): string => {
 }
 
 /**
- * What a thread is doing, in a line, and since when: what it wants of the
- * human, else what it last said, else its faint word or its turn's word
- * since it was last active.
+ * What a thread is doing, in a line, and when that was said: what it wants
+ * of the human; else the newer of the last thing it said and its outcome
+ * (timed by its file's last write); else its faint word when quiet, or its
+ * turn's word, timed from its launch while it works and from when it last
+ * moved otherwise.
  */
 export function doing(card: KanbanCard, waits: Waits, said?: { text: string; at: number }): { text: string; at: number } {
   const want = wantOf(card, waits)
   if (want) return { text: plain(want.text), at: want.at > 1 ? want.at : lastActive(card) }
-  if (said?.text.trim()) return { text: plain(said.text), at: said.at }
-  // Nothing said: a working thread is timed from its launch, any other from when it last moved.
+  const outcome = card.outcome?.trim() ? { text: card.outcome, at: instantMs(card.modifiedAt) ?? lastActive(card) } : undefined
+  const latest = [said?.text.trim() ? said : undefined, outcome].filter(each => each !== undefined).sort((a, b) => b.at - a.at)[0]
+  if (latest) return { text: plain(latest.text), at: latest.at }
   const since = hasLiveWorker(card) ? instantMs(card.dispatchedAt) : undefined
   return { text: (attentionOf(card, waits) === 'quiet' && quietWord(card)) || TURN_WORD[turnOf(card).turn], at: since ?? lastActive(card) }
 }
@@ -55,7 +58,8 @@ export function doing(card: KanbanCard, waits: Waits, said?: { text: string; at:
 /**
  * A constitution or thread as one row, the same wherever the board lists
  * one: its state dot, its slug (in its line's colour where it has one), its
- * office when that is not its slug, what it is doing and when it last spoke.
+ * office when that is not its slug, what it is doing and when that was said;
+ * the doing's whole text is its tooltip.
  * The chip density keeps the dot, slug and office.
  */
 export function threadRow(card: KanbanCard, { waits, now, density = 'line', said, open, hue }: ThreadRowOptions): HTMLElement {
@@ -70,9 +74,8 @@ export function threadRow(card: KanbanCard, { waits, now, density = 'line', said
   if (office && office !== name) row.append(el('span', 'thread-row-role', office))
   if (density === 'line') {
     const { text, at } = doing(card, waits, said)
-    const what = el('span', 'thread-row-doing', text)
-    what.title = text
-    row.append(what, timeEl(at, now, 'thread-row-age'))
+    row.title = `${card.name} — ${text}`
+    row.append(el('span', 'thread-row-doing', text), timeEl(at, now, 'thread-row-age'))
   }
   if (open) row.addEventListener('click', () => open(card))
   return row

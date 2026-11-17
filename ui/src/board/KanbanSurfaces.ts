@@ -184,7 +184,6 @@ export class KanbanSurfaceRenderer {
     identify(line, card)
     // The top-level's own line leaves its undo window to the head above it.
     if (!own) markVerdictHost(line, card)
-    line.title = `${card.name} — ${line.querySelector('.thread-row-doing')?.textContent ?? ''}`
     if (clearable(want)) {
       const clear = document.createElement('button')
       clear.type = 'button'

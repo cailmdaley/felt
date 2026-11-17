@@ -48,23 +48,23 @@ const press = (el: Element, key: string): KeyboardEvent => { const event = new K
 afterEach(() => { document.body.replaceChildren(); vi.restoreAllMocks() })
 
 describe('a constitution\'s view', () => {
-  it('heads with its slug, its run and whether it needs the human, then its threads as rows, what waits first with what it wants; no outcome anywhere', () => {
+  it('heads with its slug, its time and whether it needs the human, then its threads as rows, what waits first with what it wants, else the newer of what it said and its outcome', () => {
     const { page } = made(root)
     expect(page.el.querySelector('.ov-name')!.textContent).toBe('hub')
     // Quiet, its head is timed from when it last moved, in the elements' one grammar, the instant in full on hover.
     const time = page.el.querySelector<HTMLElement>('.ov-head .ov-time')!
     expect([time.classList.contains('el-time'), time.textContent, time.title]).toStrictEqual([true, relative(lastActive(root), now), instantStamp(lastActive(root))])
     // Working with nothing said, it is timed from its launch.
-    const launched = made(card({ ...mid, id: 'solo', orchestrator: undefined, dispatchedAt: when(5) }), { said: () => undefined }).page
+    const launched = made(card({ ...mid, id: 'solo', orchestrator: undefined, outcome: undefined, dispatchedAt: when(5) }), { said: () => undefined }).page
     expect(launched.el.querySelector('.ov-head .ov-time')!.textContent).toBe('5h ago')
     expect(page.el.querySelector('.ov-needs')).toBeNull()
-    // Each says what it is doing: what it asks, else what it last said, else its turn. The tempered thread stands behind the quiet control.
-    expect(threads(page)).toStrictEqual([['q', 'Which one?'], ['w', 'idle'], ['mid', 'Posted the cut.']])
+    // Each says what it is doing: what it asks, else the newer of what it last said and its outcome, else its turn. The tempered thread stands behind the quiet control.
+    expect(threads(page)).toStrictEqual([['q', 'Which one?'], ['w', 'Needs a look'], ['mid', 'Posted the cut.']])
     expect([...page.el.querySelectorAll<HTMLElement>('.ov-thread')].map(row => row.dataset.attention)).toStrictEqual(['waiting', 'working', 'working'])
     const quiet = page.el.querySelector<HTMLButtonElement>('.ov-quiet')!
     expect(quiet.textContent).toBe('1 quiet')
     quiet.click()
-    expect(threads(page).slice(0, 3)).toStrictEqual([['q', 'Which one?'], ['w', 'idle'], ['mid', 'Posted the cut.']])
+    expect(threads(page).slice(0, 3)).toStrictEqual([['q', 'Which one?'], ['w', 'Needs a look'], ['mid', 'Posted the cut.']])
     expect(threads(page).map(([slug]) => slug)).toStrictEqual(['q', 'w', 'mid', 'd'])
     expect(page.el.querySelector('.ov-quiet')!.textContent).toBe('hide quiet')
     // A resting thread that waits on the human is never tucked away.
@@ -73,8 +73,10 @@ describe('a constitution\'s view', () => {
     const told = made(root, { waits: () => new Map([['hub/r', { id: 'p', at: now - hour, kind: 'post', text: 'Read this.' }]]) }, [...cards, rested]).page
     expect(threads(told).map(([name]) => name)).toContain('r')
     expect(threads(made(root, {}, [...cards, rested]).page).map(([name]) => name)).not.toContain('r')
-    expect(page.el.textContent).not.toContain('came to this')
-    expect(page.el.textContent).not.toContain('Needs a look')
+    // An outcome written after its last post is what it says.
+    const rewrote = made(root, {}, cards.map(each => each === mid ? { ...mid, modifiedAt: new Date(now - 60_000).toISOString() } : each)).page
+    const row = rewrote.el.querySelector<HTMLElement>('.ov-thread[data-fiber="hub/mid"]')!
+    expect([row.querySelector('.thread-row-doing')!.textContent, row.querySelector('.thread-row-age')!.textContent, row.title]).toStrictEqual(['Mid came to this.', '1m ago', 'Mid — Mid came to this.'])
     // Only its own threads: the leaf is mid's.
     expect(page.el.textContent).not.toContain('Leaf')
   })
@@ -142,11 +144,11 @@ describe('a constitution\'s view', () => {
 
   it('draws beneath a thread every thread below it that waits on the human, the post the board names included; its orchestrators stand above it as strips', () => {
     const { page } = made(root, { waits: () => new Map([['hub/mid/a', { id: 'p', at: now - hour, kind: 'post', text: 'The leaf is cut.' }]]) })
-    expect(threads(page)).toStrictEqual([['q', 'Which one?'], ['mid', 'Posted the cut.'], ['↳ a', 'The leaf is cut.'], ['w', 'idle']])
+    expect(threads(page)).toStrictEqual([['q', 'Which one?'], ['mid', 'Posted the cut.'], ['↳ a', 'The leaf is cut.'], ['w', 'Needs a look']])
     // Its orchestrators, one strip each above it, each with its own rule.
     const strips = [...made(leaf).page.el.querySelectorAll<HTMLElement>('.ov-up .ov-ancestor')]
     expect(strips.map(strip => [strip.querySelector('.thread-row-slug')!.textContent, strip.getAttribute('title'), strip.querySelectorAll('.ov-rule').length, strip.querySelector('.thread-row-doing')!.textContent]))
-      .toStrictEqual([['hub', 'hub', 1, 'no worker'], ['mid', 'Mid', 1, 'Posted the cut.']])
+      .toStrictEqual([['hub', 'hub — The hub came to this.', 1, 'The hub came to this.'], ['mid', 'Mid — Posted the cut.', 1, 'Posted the cut.']])
   })
 
   it('opens a thread\'s view from its row, and its orchestrators\' from the heads above it', () => {

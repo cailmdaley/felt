@@ -44,7 +44,7 @@ A constitution or thread as one line.
 | State dot | `stateDot`: waiting (owed), working, quiet; busy while mid-turn |
 | Slug | the last segment of its id, mono, in its line's colour where it has one |
 | Role | its office, small caps, muted; left out when it equals the slug |
-| Doing | what it wants of the human, else what it last said (`Workspace.said`), else its faint word (seat, resting, ↻) or its turn's word; one line, cut with an ellipsis |
+| Doing | what it wants of the human; else the newer of what it last said (`Workspace.said`) and its outcome (timed by its file's last write); else its faint word (seat, resting, ↻) when quiet, or its turn's word; one line, cut with an ellipsis, the whole of it in the row's tooltip |
 | Age | when what the doing says was said; with nothing said, when a working thread launched, else when it last moved; in the elements' time (below) |
 
 Densities: **line** (all parts, one line; the ringed count's list, the Desk's member lines, the constitution view's threads and ancestors) and **chip** (dot, slug and role; a thread's start station in Channels, where the margin's ring stands for the dot). Given an opener, clicking the row or its dot opens the thread's view; without one the row is drawn still, its dot no button, for a control that holds it (a menu item) to own the press. A view adds its own keys and roles to the row (the constitution view's tree).
