@@ -190,7 +190,7 @@ func TestAddRefusesNonConformingNewSlugs(t *testing.T) {
 		{".hidden", `use "hidden"`},
 		{"new_dir/thing", `slug "new_dir" is not lowercase letters, digits and hyphens; use "new-dir"`},
 		{"unions/shear_2d/Bad", `use "bad"`},
-		{"unions/../x", `slug ".."`},
+		{"unions/../x", `must be a path inside the store`},
 	} {
 		before := storeBytes(t, s.Root())
 		if out, err := runCommand(t, dir, "add", tc.slug, "Name"); err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -227,6 +227,45 @@ func TestAddUIDCarriesExistingSlug(t *testing.T) {
 	}
 	if _, err := runCommand(t, dir, "add", "x", "X", "--uid", "not-a-ulid"); err == nil || !strings.Contains(err.Error(), "--uid must be a ULID") {
 		t.Fatalf("bad uid: %v", err)
+	}
+}
+
+// --uid carries a slug as spelled but only inside the store, under a UID no
+// fiber already holds, written upper-case; plain add refuses the same escapes.
+func TestAddUIDStaysInsideStoreUnderAFreshUID(t *testing.T) {
+	t.Parallel()
+	dir, s := newStore(t)
+	held := felt.NewULID()
+	if out, err := runCommand(t, dir, "add", "held", "Held", "--uid", held); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for _, tc := range []struct{ args []string }{
+		{[]string{"../../escape", "X", "--uid", felt.NewULID()}},
+		{[]string{"a/./b", "X", "--uid", felt.NewULID()}},
+		{[]string{"/abs", "X", "--uid", felt.NewULID()}},
+		{[]string{"a//b", "X", "--uid", felt.NewULID()}},
+		{[]string{"again", "X", "--uid", held}},
+		{[]string{"lower", "X", "--uid", strings.ToLower(held)}},
+		{[]string{"../../escape", "X"}},
+		{[]string{"/abs", "X"}},
+	} {
+		before := storeBytes(t, s.Root())
+		if out, err := runCommand(t, dir, append([]string{"add"}, tc.args...)...); err == nil {
+			t.Fatalf("add %v succeeded:\n%s", tc.args, out)
+		}
+		if len(storeBytes(t, s.Root())) != len(before) {
+			t.Fatalf("refused add %v wrote a file", tc.args)
+		}
+		if _, err := os.Stat(filepath.Join(s.Root(), "../../escape")); !os.IsNotExist(err) {
+			t.Fatalf("add %v escaped the store: %v", tc.args, err)
+		}
+	}
+	lower := strings.ToLower(felt.NewULID())
+	if out, err := runCommand(t, dir, "add", "carried", "C", "--uid", lower); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if got := mustRead(t, s, "carried"); got.UID != strings.ToUpper(lower) {
+		t.Fatalf("uid = %q, want upper-case %q", got.UID, strings.ToUpper(lower))
 	}
 }
 

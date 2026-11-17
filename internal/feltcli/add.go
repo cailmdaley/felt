@@ -2,6 +2,7 @@ package feltcli
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
@@ -61,11 +62,23 @@ intrinsic id and slug, which are not held to the convention.`,
 			if err != nil {
 				return err
 			}
+			for _, segment := range strings.Split(f.ID, "/") {
+				if segment == "" || segment == "." || segment == ".." {
+					return fmt.Errorf("slug %q must be a path inside the store", f.ID)
+				}
+			}
 			if addUID != "" {
 				if !felt.LooksLikeUID(addUID) {
 					return fmt.Errorf("--uid must be a ULID, got %q", addUID)
 				}
-				f.UID = addUID
+				f.UID = strings.ToUpper(addUID)
+				existing, err := storage.ListMetadataByUID(f.UID)
+				if err != nil {
+					return err
+				}
+				if len(existing) > 0 {
+					return fmt.Errorf("uid %s already belongs to %s", f.UID, existing[0].ID)
+				}
 			}
 			if addNamespace && f.ID != args[0] {
 				return fmt.Errorf("--namespace requires a canonical path (got %q, canonical %q)", args[0], f.ID)
