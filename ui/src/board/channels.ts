@@ -13,9 +13,9 @@ import { cardNamed } from './threads.js'
 export interface Channel {
   /** `channel:<shuttle.channel, lowercased>`, `role:<office slug>` for an office's top-levels, or `fiber:<uid>` for a lone top-level. */
   key: string
-  /** How the board writes the channel: its chair's slug. */
+  /** The office slug for a seatless office, otherwise the chair's slug. */
   name: string
-  /** Its chair's full name, for a tooltip. */
+  /** The office's charter name for a seatless office, otherwise the chair's full name. */
   title: string
   /** Named or an office's: drawn above the lone constitutions. */
   chaired: boolean
@@ -76,8 +76,8 @@ export const officeOf = (role: string | undefined): string => role?.split('/')[0
 
 /**
  * Every channel the board holds, the chaired ones first, each shelf by name.
- * A channel is written as its chair's slug; `shuttle.channel` and an office's
- * charter name only group its members and are never drawn. A card speaks in its own `shuttle.channel`, else its orchestrator's, else
+ * A seatless office's channel is written as its office; every other channel
+ * uses its chair's slug. A card speaks in its own `shuttle.channel`, else its orchestrator's, else
  * that of the nearest card filed above it; without one anywhere above it, its
  * top-level constitution's office names the channel (the named channel that
  * shares the office's charter name, when there is one), else that top-level
@@ -176,8 +176,9 @@ export function composeChannels(input: {
     const isPinned = (pinned.get(key) ?? -Infinity) > since('pin', key)
     const waiting = newest > 0
     const hidden = since('hide', key) > Math.max(since('show', key), newest) ? since('hide', key) : 0
+    const office = key.startsWith('role:') && !seats.length ? key.slice(5) : ''
     channels.push({
-      key, name: slug(seat), title: seat.name, chaired: !key.startsWith('fiber:'), seat, members, everyone,
+      key, name: office || slug(seat), title: office ? officeName(office) : seat.name, chaired: !key.startsWith('fiber:'), seat, members, everyone,
       families: [...new Set(members.map(card => fiberOf(topOf(card))))],
       newest, waiting, active, pinned: isPinned, hidden,
       listed: !hidden && (waiting || isPinned || now - active <= RECENT_MS),

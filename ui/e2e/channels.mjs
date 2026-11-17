@@ -32,6 +32,18 @@ const shot = async (page, name) => {
 }
 const browser = await launchBrowser()
 try {
+  {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' })
+    const page = await context.newPage()
+    await page.goto(`${pathToFileURL(resolve('harness-board-dist/index.html'))}?example=channels#/channels`)
+    await page.locator('.kbn-ch-jump').fill('compo')
+    await pick(page, 'composer').click()
+    await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'composer')
+    assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-band-title').textContent(), 'score')
+    assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-worker-message').getAttribute('data-placeholder'), 'Message score')
+    await shot(page, 'seatless-office')
+    await context.close()
+  }
   for (const [name, width, height] of [['desktop', 1440, 900], ['phone', 390, 844]]) {
     const phone = name === 'phone'
     const context = await browser.newContext({ viewport: { width, height }, reducedMotion: 'reduce', isMobile: phone, hasTouch: phone })
@@ -74,7 +86,7 @@ try {
     // Jump to finds a hidden channel, marked as such.
     await page.locator('.kbn-ch-jump').fill('compo')
     await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 1)
-    assert.deepEqual(await page.evaluate(channels), ['score'])
+    assert.deepEqual(await page.evaluate(channels), ['composer'])
     assert.equal(await page.locator('.kbn-ch-pick-hidden').textContent(), 'hidden')
     await shot(page, `${name}-jump-hidden`)
     await page.locator('.kbn-ch-jump').fill('')

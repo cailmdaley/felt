@@ -345,13 +345,13 @@ export class Workspace {
     if (index.state(card) === 'to-review' && card.reviewMark?.note) posts.push({ text: card.reviewMark.note, at: Date.parse(card.reviewMark.at) || 0 })
     return posts.sort((a, b) => a.at - b.at).at(-1)
   }
-  /** The slug of the channel a constitution speaks in, as the console names it; undefined for a card in none. */
+  /** The channel chair's slug, as the console names it; undefined for a card in no channel. */
   channelHandle(card: KanbanCard): string | undefined {
     const cards = this.opts.cards()
     if (this.handles?.cards !== cards || this.handles.names !== this.charterNames) {
       const index = this.graph(), of = new Map<string, string>()
       for (const channel of composeChannels({ cards, parentOf: each => index.parentOf(each), names: this.charterNames, dismissed: [], pinned: new Map(), waits: new Map(), now: Date.now() })) {
-        for (const member of channel.everyone) of.set(channelFiber(member), channel.name)
+        for (const member of channel.everyone) of.set(channelFiber(member), slug(channel.seat))
       }
       this.handles = { cards, names: this.charterNames, of }
     }

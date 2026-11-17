@@ -344,7 +344,7 @@ export class ChannelsView implements TemporalView {
     const rail = railOrder(this.channels, this.order)
     if (!this.query) return rail.filter(channel => channel.listed || (channel.key === this.current && !channel.hidden))
     const query = this.query.toLowerCase()
-    // A channel's key (its `shuttle.channel`, or its office) is never drawn, but it is still what the human may remember it by.
+    // A channel's key, its name, its title and its members are all searchable.
     return rail.filter(channel => [channel.key.slice(channel.key.indexOf(':') + 1), channel.name, channel.title, ...channel.members.flatMap(card => [card.name, card.path])].some(text => text.toLowerCase().includes(query)))
   }
   /** Filters the rail by what Jump to holds, from the rail's field or the bar's Find. */

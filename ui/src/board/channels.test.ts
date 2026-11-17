@@ -36,16 +36,26 @@ describe('composeChannels', () => {
   it('groups by shuttle.channel, inherited through the orchestrator, else by office, else by top-level; chaired channels first by name', () => {
     const channels = compose(all)
     expect(channels.map(channel => [channel.key, channel.name, channel.chaired, channel.members.map(member => member.id)])).toStrictEqual([
-      // Every channel is written as its chair's slug; a channel's key or an office's charter name only groups.
-      ['role:analyst', 'shear', true, ['shear']],
+      ['role:analyst', 'analyst', true, ['shear']],
       ['channel:unions', 'unions', true, ['pando/unions', 'east-unions', 'west-unions', 'pando/unions/modes']],
       ['channel:vizier', 'vizier', true, ['life/vizier', 'loom/email/morning-post']],
       ['fiber:O', 'old', false, ['old']],
       ['fiber:R', 'van', false, ['van']],
     ])
     expect(named(channels, 'fiber:R').title).toBe('Moving house')
-    expect(named(channels, 'role:analyst').title).toBe('Cosmic shear')
+    expect(named(channels, 'role:analyst').title).toBe('Analyst · the shear desk')
     expect(named(channels, 'channel:unions').families).toStrictEqual(['U'])
+  })
+
+  it('names a seatless office for its office, retaining the eldest top-level as chair', () => {
+    const elder = card({ id: 'life/fee', uid: 'I1', name: 'Fee and mission', shuttleRole: 'intendant', createdAt: at(600) })
+    const younger = card({ id: 'life/travel', uid: 'I2', shuttleRole: 'intendant', createdAt: at(60) })
+    const office = named(compose([younger, elder], { names: new Map([['intendant', 'Intendant · missions']]) }), 'role:intendant')
+    expect([office.name, office.title, office.seat]).toStrictEqual(['intendant', 'Intendant · missions', elder])
+    expect(named(compose([elder], { names: new Map() }), 'role:intendant').title).toBe('intendant')
+    const seat = card({ id: 'life/office-chair', uid: 'I3', name: 'Office chair', shuttleRole: 'intendant', shuttleSeat: true })
+    const seated = named(compose([elder, seat]), 'role:intendant')
+    expect([seated.name, seated.title, seated.seat]).toStrictEqual(['office-chair', 'Office chair', seat])
   })
 
   it('follows the orchestrator link, not where a fiber is filed, and a thread\'s own channel wins', () => {
