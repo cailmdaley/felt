@@ -214,11 +214,11 @@ export class FamilyPage {
   private paint(card: KanbanCard, now: number): void {
     const above = this.ancestors(), index = this.index!, waits = this.feeds.waits()
     // A thread with a wait anywhere below it stands with what waits, and every such wait is drawn beneath it.
-    // A thread with a worker anywhere below it ranks and stands with what works.
+    // A thread with a worker anywhere below it ranks and stands with what works; a quiet one kept so has those workers drawn beneath it too.
     const threads = index.children(card).map(child => {
-      const subtree = index.subtree(child), below = subtree.filter(each => wantOf(each, waits))
-      const own = attentionOf(child, waits)
-      const moving = below.length || own === 'waiting' ? 'waiting' : own === 'working' || subtree.some(each => attentionOf(each, waits) === 'working') ? 'working' : 'quiet'
+      const subtree = index.subtree(child), own = attentionOf(child, waits)
+      const below = subtree.filter(each => wantOf(each, waits) || own === 'quiet' && attentionOf(each, waits) === 'working')
+      const moving = own === 'waiting' || below.some(each => wantOf(each, waits)) ? 'waiting' : own === 'working' || subtree.some(each => attentionOf(each, waits) === 'working') ? 'working' : 'quiet'
       return { child, below, moving, rank: ATTENTION_ORDER.indexOf(moving) }
     }).sort((a, b) => a.rank - b.rank || lastActive(b.child) - lastActive(a.child))
     const quietHeld = document.activeElement === this.quiet

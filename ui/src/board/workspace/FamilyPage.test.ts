@@ -97,12 +97,16 @@ describe('a constitution\'s view', () => {
     expect([...page.el.querySelectorAll<HTMLElement>('.ov-thread')].slice(5).every(row => row.classList.contains('thread-row') && row.dataset.attention === 'quiet')).toBe(true)
   })
 
-  it('keeps a quiet thread in the list while a worker below it is working, so a working grandchild is never folded out of sight', () => {
+  it('keeps a quiet thread in the list while a worker below it is working, and draws that worker beneath it to say why; a working thread does not list its workers', () => {
     const quietParent = card({ id: 'hub/qp', name: 'Quiet parent', orchestrator: 'hub', status: 'open', column: 'drafts', createdAt: when(30) })
     const working = card({ id: 'hub/qp/run', name: 'Running', orchestrator: 'hub/qp', status: 'active', createdAt: when(10), workerState: 'running', runtimePhase: 'working', sessionUuid: 'session-run' })
-    const { page } = made(root, {}, [...cards, quietParent, working])
-    expect(threads(page).map(([name]) => name)).toContain('qp')
+    const busy = card({ id: 'hub/qp/run/fit', name: 'Fit', orchestrator: 'hub/qp/run', status: 'active', createdAt: when(5), workerState: 'running', runtimePhase: 'working', sessionUuid: 'session-fit' })
+    const { page } = made(root, {}, [...cards, quietParent, working, busy])
+    const names = threads(page).map(([name]) => name)
+    expect(names.slice(names.indexOf('qp'), names.indexOf('qp') + 3)).toStrictEqual(['qp', '↳ run', '↳ fit'])
     expect(page.el.querySelector('.ov-quiet')!.textContent).toBe('1 quiet')
+    page.update(root, new ThreadIndex([...cards, { ...quietParent, status: 'active', workerState: 'running', runtimePhase: 'working', sessionUuid: 'session-qp' }, working, busy]), now)
+    expect(threads(page).map(([name]) => name).filter(name => name.startsWith('↳ ') && /run|fit/.test(name))).toStrictEqual([])
   })
 
   it('unfolds a quiet thread at the next update once a worker below it starts working', () => {
