@@ -543,6 +543,26 @@ export function showToast(message: string, type: 'success' | 'warning' | 'error'
 /** How long a clear's undo stands. */
 export const CLEAR_UNDO_MS = 6000
 
+/** The clears whose undo still stands, which one toast takes back together. */
+let clears: { undos: Array<() => void>; until: number } | null = null
+
+/**
+ * Says a clear was made, with an undo for {@link CLEAR_UNDO_MS}. A clear made
+ * while an earlier one's undo stands joins it: the toast counts them, and its
+ * undo takes back every one.
+ */
+export function clearToast(message: string, undo: () => void): void {
+  const now = Date.now()
+  if (!clears || now > clears.until || !document.querySelector('.shuttle-toast .toast-undo')) clears = { undos: [], until: 0 }
+  const batch = clears
+  batch.undos.push(undo)
+  batch.until = now + CLEAR_UNDO_MS
+  showToast(batch.undos.length > 1 ? `Cleared ${batch.undos.length} lines.` : message, 'success', CLEAR_UNDO_MS, () => {
+    if (clears === batch) clears = null
+    for (const each of batch.undos) each()
+  })
+}
+
 /**
  * A waiting post's ✓, from any surface: the board clears it, then a toast
  * says so with an undo for a few seconds, which makes it wait again. A refused
@@ -551,7 +571,7 @@ export const CLEAR_UNDO_MS = 6000
 export async function clearPost(board: BoardFeed, uid: string, name: string): Promise<void> {
   const at = await board.clear(uid)
   if (at === undefined) return
-  showToast(`Cleared ${name}'s post.`, 'success', CLEAR_UNDO_MS, () => {
+  clearToast(`Cleared ${name}'s post.`, () => {
     void board.unclear(uid, at).catch(() => showToast(`${name}'s post could not be brought back; it stays cleared.`, 'error'))
   })
 }

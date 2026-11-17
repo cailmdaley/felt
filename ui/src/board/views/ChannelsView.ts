@@ -14,7 +14,7 @@ import { createRailReorder, type RailReorder } from '../channelRail.js'
 import { openActionMenu } from '../conversationMenu.js'
 import { stateDot } from '../stateDot.js'
 import { slug } from '../threadOutline.js'
-import { CLEAR_UNDO_MS, showToast } from '../utils.js'
+import { clearToast } from '../utils.js'
 import { ATTENTION_ORDER, attentionOf, lastActive, type Waits } from '../attention.js'
 import { turnOf } from '../turn.js'
 import { docKey } from '../workspace/documents.js'
@@ -771,7 +771,7 @@ export class ChannelsView implements TemporalView {
       this.status(`${item.card.name}'s line could not be cleared; it is as it was.`)
       return
     }
-    showToast(`Cleared ${slug(item.card)}'s line.`, 'success', CLEAR_UNDO_MS, () => {
+    clearToast(`Cleared ${slug(item.card)}'s line.`, () => {
       const back = unclearLineKey(item.id, Date.now())
       this.pending.push(back)
       this.draw()
