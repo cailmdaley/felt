@@ -24,6 +24,10 @@ import (
 // a restart, and the release then boots.
 const daemonRespawnWait = 60 * time.Second
 
+// releaseDownloadTimeout bounds the whole download of a release archive, so a
+// stalled connection fails the upgrade instead of hanging it.
+var releaseDownloadTimeout = 10 * time.Minute
+
 func (a *app) daemonUpgradeCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "upgrade",
@@ -32,9 +36,10 @@ func (a *app) daemonUpgradeCmd() *cobra.Command {
 $SHUTTLE_RELEASE names, which the installer writes) with this CLI's version of
 the release archive, verified before anything is replaced. A running daemon is
 then stopped, and its keep-alive supervisor or respawn loop starts the new
-release; a daemon that nothing restarts is left stopped, with the command that
-starts it. The restart arms the boot quarantine, released with
-'shuttle daemon release'.
+release. A daemon that nothing restarts is left stopped and the command fails,
+naming the command that starts it; the replaced release is then kept beside
+the new one, at <release>.previous, until a later upgrade. The restart arms
+the boot quarantine, released with 'shuttle daemon release'.
 
 A release built from a checkout is not replaced: deploy it from that checkout
 with bin/shuttle-deploy.`,
@@ -60,7 +65,7 @@ with bin/shuttle-deploy.`,
 					return err
 				}
 			}
-			if err := a.restartOnRelease(); err != nil {
+			if err := a.restartOnRelease(previous); err != nil {
 				return err
 			}
 			if previous != "" {
@@ -93,8 +98,10 @@ func (a *app) installLaunchHelper(dir string) error {
 }
 
 // restartOnRelease stops a running daemon that is not at this version and
-// waits for its supervisor to start the selected release.
-func (a *app) restartOnRelease() error {
+// waits for its supervisor to start the selected release. A daemon that does
+// not come back is an error naming previous, the release it was replaced from,
+// when there is one.
+func (a *app) restartOnRelease(previous string) error {
 	running, err := a.daemonBuildAt("")
 	if err != nil {
 		fmt.Fprintln(a.env.Stdout, "no daemon is running; `shuttle daemon start` starts this release")
@@ -118,8 +125,11 @@ func (a *app) restartOnRelease() error {
 			return nil
 		}
 	}
-	fmt.Fprintf(a.env.Stdout, "the daemon stopped and nothing restarted it within %s; start it with `shuttle daemon start`\n", daemonRespawnWait)
-	return nil
+	err = fmt.Errorf("the daemon stopped and nothing restarted it within %s; start it with `shuttle daemon start`", daemonRespawnWait)
+	if previous != "" {
+		err = fmt.Errorf("%w; the release it ran is kept at %s", err, previous)
+	}
+	return err
 }
 
 // replaceRelease puts this version's release archive at dir and returns where
@@ -133,7 +143,7 @@ func (a *app) replaceRelease(dir string) (string, error) {
 	asset := fmt.Sprintf("shuttled_%s_%s.tar.gz", feltcli.ArchiveOS(), feltcli.ArchiveArch())
 	url := fmt.Sprintf("%s/v%s/%s", strings.TrimRight(a.releaseDownloadBase, "/"), a.version, asset)
 	fmt.Fprintf(a.env.Stdout, "downloading %s\n", url)
-	resp, err := http.Get(url)
+	resp, err := (&http.Client{Timeout: releaseDownloadTimeout}).Get(url)
 	if err != nil {
 		return "", fmt.Errorf("downloading the daemon release: %w", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -89,9 +90,11 @@ func (a *app) levelCommand() string {
 
 // fetchedRelease reports whether dir is a release the installer or
 // `shuttle daemon upgrade` unpacked, rather than one a checkout built: a
-// checkout builds its releases inside its own bin/ directory.
+// checkout builds its releases in <checkout>/bin/, beside the daemon's
+// daemon/mix.exs.
 func fetchedRelease(dir string) bool {
-	return filepath.Base(filepath.Dir(dir)) != "bin"
+	_, err := os.Stat(filepath.Join(filepath.Dir(filepath.Dir(dir)), "daemon", "mix.exs"))
+	return err != nil
 }
 
 // requireDeliveringDaemon refuses a fiber message the daemons on its path

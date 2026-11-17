@@ -11,7 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/feltcli"
 )
@@ -121,7 +123,7 @@ func TestFiberMessageOnACheckoutBuiltHostWaitsForTheDeploy(t *testing.T) {
 		"kind": "oneshot", "host": "hub", "agent": "claude-opus", "project_dir": t.TempDir(),
 	})
 	isolateMessageFiberStore(env, store)
-	release := filepath.Join(t.TempDir(), "repo", "bin", "rel")
+	release := checkoutRelease(t)
 	fakeRelease(t, release, "3.0.0")
 	env.Set("SHUTTLE_RELEASE", release)
 	deliver, requests := dormantDeliverStub(http.StatusAccepted, `{"queued":true}`)
@@ -133,6 +135,20 @@ func TestFiberMessageOnACheckoutBuiltHostWaitsForTheDeploy(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "A deploy in progress brings it level when it finishes") || !strings.Contains(err.Error(), "bin/shuttle-deploy --hosts local") || len(requests()) != 0 {
 		t.Fatalf("message error = %v, requests = %v", err, requests())
 	}
+}
+
+// checkoutRelease is the path of a release built inside a fresh checkout,
+// one that holds the daemon's daemon/mix.exs.
+func checkoutRelease(t *testing.T) string {
+	t.Helper()
+	checkout := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(filepath.Join(checkout, "daemon"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, "daemon", "mix.exs"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(checkout, "bin", "rel")
 }
 
 // fakeRelease writes a daemon release whose launcher reports version.
@@ -237,17 +253,18 @@ func releaseArchive(t *testing.T, version string) []byte {
 func TestDaemonUpgradeReplacesTheFetchedReleaseWithThisVersion(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		name, archived, want string
-		replaced             bool
+		name, archived, want, home string
+		replaced                   bool
 	}{
-		{name: "verified", archived: "3.0.0", want: "installed daemon 3.0.0", replaced: true},
-		{name: "mismatched archive", archived: "2.9.9", want: `reports version "2.9.9", expected 3.0.0`},
+		{name: "verified", archived: "3.0.0", want: "installed daemon 3.0.0", home: "share/shuttle", replaced: true},
+		{name: "installed under a bin directory", archived: "3.0.0", want: "installed daemon 3.0.0", home: "bin/shuttled", replaced: true},
+		{name: "mismatched archive", archived: "2.9.9", want: `reports version "2.9.9", expected 3.0.0`, home: "share/shuttle"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			env := testEnv(t)
 			unreachableDaemon(t, env)
-			release := filepath.Join(t.TempDir(), "share", "shuttle")
+			release := filepath.Join(t.TempDir(), filepath.FromSlash(tc.home))
 			fakeRelease(t, release, "2.0.0")
 			env.Set("SHUTTLE_RELEASE", release)
 			archive := releaseArchive(t, tc.archived)
@@ -298,7 +315,7 @@ func TestDaemonUpgradeLeavesACheckoutBuiltRelease(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	unreachableDaemon(t, env)
-	release := filepath.Join(t.TempDir(), "repo", "bin", "rel")
+	release := checkoutRelease(t)
 	fakeRelease(t, release, "2.0.0")
 	env.Set("SHUTTLE_RELEASE", release)
 	var fetched atomic.Bool
@@ -309,5 +326,68 @@ func TestDaemonUpgradeLeavesACheckoutBuiltRelease(t *testing.T) {
 	_, _, err := executeApp(t, app, "", "daemon", "upgrade")
 	if err == nil || !strings.Contains(err.Error(), "bin/shuttle-deploy --hosts local") || fetched.Load() {
 		t.Fatalf("upgrade of a checkout-built release = %v (fetched %v)", err, fetched.Load())
+	}
+}
+
+// A daemon that nothing restarts after the upgrade stopped it fails the
+// upgrade, naming the command that starts it and the replaced release, which
+// is kept.
+func TestDaemonUpgradeFailsWhenNothingRestartsTheDaemon(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	daemon := daemonStub(t, env, map[string]http.HandlerFunc{"/api/v1/version": versionBody("hub", "2.0.0", ShuttleContractLevel-1)})
+	// The listener the upgrade stops is the stub's, owned by this test, and
+	// the stop's signal goes nowhere.
+	env.Set("SHUTTLE_PORT", daemon.URL[strings.LastIndex(daemon.URL, ":")+1:])
+	release := filepath.Join(t.TempDir(), "share", "shuttle")
+	fakeRelease(t, release, "2.0.0")
+	env.Set("SHUTTLE_RELEASE", release)
+	archive := releaseArchive(t, "3.0.0")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(archive) }))
+	t.Cleanup(server.Close)
+	app := newApp(env)
+	app.version, app.releaseDownloadBase = "3.0.0", server.URL
+	app.daemonPause = func(time.Duration) {}
+	app.daemonSignalPID = func(int, syscall.Signal) error { return nil }
+	_, _, err := executeApp(t, app, "", "daemon", "upgrade")
+	if err == nil || !strings.Contains(err.Error(), "`shuttle daemon start`") || !strings.Contains(err.Error(), release+".previous") {
+		t.Fatalf("upgrade with nothing to restart the daemon = %v, want a failure naming the start command and the kept release", err)
+	}
+	if got := app.releaseVersion(daemonRelease{Launcher: filepath.Join(release+".previous", "bin", "shuttled")}); got != "2.0.0" {
+		t.Fatalf("the replaced release must be kept, reports %q", got)
+	}
+}
+
+// A download that stalls fails the upgrade once its time is up.
+func TestDaemonUpgradeDownloadTimesOut(t *testing.T) {
+	saved := releaseDownloadTimeout
+	releaseDownloadTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { releaseDownloadTimeout = saved })
+	env := testEnv(t)
+	unreachableDaemon(t, env)
+	release := filepath.Join(t.TempDir(), "share", "shuttle")
+	fakeRelease(t, release, "2.0.0")
+	env.Set("SHUTTLE_RELEASE", release)
+	stall := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		<-stall
+	}))
+	t.Cleanup(func() { close(stall); server.Close() })
+	app := newApp(env)
+	app.version, app.releaseDownloadBase = "3.0.0", server.URL
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := executeApp(t, app, "", "daemon", "upgrade")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("a stalled download must fail the upgrade")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("a stalled download hung the upgrade")
 	}
 }
