@@ -216,7 +216,7 @@ Fiber ids, slugs and uids resolve through the owner to its host-local `<store>:<
 `shuttle inbox cancel <fiber> <message-id>` marks a pending entry `cancelled` and moves it to `offered/`, under the inbox lock.
 An entry an open batch holds is refused as `in_flight`: cancellation cannot retract text already emitted.
 Both fiber-reference commands use the owner-routed `/api/v1/inbox` endpoint (`action: list|cancel`); an unreachable owner is an error, never an archive fallback.
-The poll's one `inbox pending` call reports each owned fiber's due count and its scheduled entries; the owner feed carries the entries to the Desk's expandable scheduled chip, and a future entry does not count as waiting for a worker.
+The poll's one `inbox pending` call reports each owned fiber's due count and its scheduled entries; the owner feed carries the entries as `scheduled_messages`, and a future entry does not count as waiting for a worker.
 
 ## Thread results and routing
 
@@ -472,4 +472,4 @@ Further back, deduplication thins out: below 44 a voice batch in flight can past
 `shuttle inbox record-settle <fiber-key> <id> delivered|unknown|undeliverable` records its transport outcome.
 Raw-key verbs act on this host's inbox only; `ls` and `cancel` with a fiber reference route to its owner.
 `context-mailbox put` also accepts thread signals, reply and notification fields, `--turn`, `--derived` and `--attachments-stdin` (a JSON attachment array); its `--wake` means `turn: force`.
-`shuttle inbox` with no subcommand is the speaker's held-lines inbox ([CLI reference](../reference/cli.md)).
+The speaker's held lines are `shuttle say --held` ([CLI reference](../reference/cli.md)).

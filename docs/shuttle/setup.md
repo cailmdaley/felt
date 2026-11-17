@@ -1,7 +1,5 @@
 # Set up Shuttle
 
-This guide targets **2.0.0-rc.4**, a release candidate for testing before the stable 2.0 release.
-The agent setup guide pins that version explicitly; ordinary stable updates do not select it.
 
 **We recommend setting up Shuttle with the agent you already use.**
 Give it the prompt below, let it check your machine and explain the choices, then open the board link it gives you.

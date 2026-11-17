@@ -43,7 +43,7 @@ running daemon's version when reachable, otherwise the local Mix release version
 | Command | Purpose |
 |---|---|
 | `felt nest <child> <parent>` | Move a fiber subtree under a parent, keeping its basename and rewriting every reference the move would break (wikilinks, markdown links, `inputs.from`), across the enclosing store too from a view; refuses a guessed id. Use `rename` to change the basename |
-| `felt rename <id> <new-slug>` | Change the directory and document basename, preserving the intrinsic id and carrying descendants and references, including across linked repositories. Refuses guessed ids, existing destinations, and companion-file collisions. Lists remaining old paths for manual review; does not rewrite prose or opaque project fields |
+| `felt rename <id> <new-slug>` | Change the directory and document basename, preserving the intrinsic id and carrying descendants and references, including across linked repositories. Refuses an id it would have to guess at (a prefix or a stale path), existing destinations, and companion-file collisions. Lists remaining old paths for manual review; does not rewrite prose, opaque project fields, or a markdown link to a file inside the renamed directory |
 | `felt unnest <child>` | Move a nested fiber subtree to the top level, rewriting and refusing as `nest` does |
 | `felt recover-move [--abandon]` | Finish an interrupted subtree move's reference repairs; `--abandon` drops the journal without undoing the move or repairing remaining references |
 

@@ -489,7 +489,7 @@ human is only one of them:
   One reset buys one attempt, and it 409s when no recovery action is waiting.
 
 **The daemon serves its own web UI at `http://127.0.0.1:4000/`** — the Desk
-kanban with Stash/Capture, Chronicle, Channels and Globe on hotkeys 1–4. Any
+with Stash/Capture, Chronicle, Channels and Globe on hotkeys 1–4. Any
 document opens in the reader; a constitution's controls sit in the console
 docked under its page, which also opens its conversation. The UI is served as the static `ui/dist`
 bundle by the same process as the `:4000` API (`Plug.Static` + `SpaController`).

@@ -98,7 +98,7 @@ newer run, a handoff, or a human pause or retirement is left as it stands.
 | Trigger | Behavior |
 |---|---|
 | Scheduled cron dispatch | **Always fresh** — standing constitutions never auto-resume |
-| Ad-hoc dispatch (kanban drag, `--ad-hoc`) | **Always fresh** |
+| Ad-hoc dispatch (`--ad-hoc`) | **Always fresh** |
 | Board **Resume** on the last run's session | Resume — the button carries `resume_mode: previous`; session id from `shuttle.runtime.session_uuid` |
 | Daemon recovery / orphan adoption | Fresh |
 

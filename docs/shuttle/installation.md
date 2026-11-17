@@ -82,14 +82,11 @@ needs:
 
 ## Fetch the release
 
-These commands select **2.0.0-rc.4** for prerelease testing.
-Stable updates and Homebrew do not select release candidates automatically.
-
 The install script always installs both Go CLIs. Set `SHUTTLE_DAEMON=1` to
 also unpack the daemon release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | FELT_VERSION=2.0.0-rc.4 SHUTTLE_DAEMON=1 sh
+curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | SHUTTLE_DAEMON=1 sh
 ```
 
 !!! warning "Environment variables go after the pipe"
@@ -165,7 +162,7 @@ login and restarts itself when it dies. No checkout, no toolchain. Run the steps
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh \
-  | FELT_VERSION=2.0.0-rc.4 SHUTTLE_DAEMON=1 sh
+  | SHUTTLE_DAEMON=1 sh
 ```
 
 `SHUTTLE_DAEMON=1` goes *after* the pipe, for the reason in the warning above: in front
@@ -288,10 +285,10 @@ and the daemon release when requested:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh \
-  | FELT_VERSION=2.0.0-rc.4 SHUTTLE_DAEMON=1 sh
+  | FELT_VERSION=3.0.0 SHUTTLE_DAEMON=1 sh
 ```
 
-Replace `2.0.0-rc.4` with the tag you want. Both variables sit after the pipe, for
+Replace `3.0.0` with the tag you want. Both variables sit after the pipe, for
 the reason above: an install that silently drops `FELT_VERSION` fetches the
 latest stable instead. The tag is accepted with or without its leading `v`. If
 it has no `shuttled_<os>_<arch>.tar.gz` asset for your platform, the install
@@ -310,9 +307,8 @@ are actually running:
 curl -s http://127.0.0.1:4000/api/v1/version    # mix_vsn is the release tag
 ```
 
-Keep the version pin while testing this candidate.
-The stable channel is still 1.x and uses different commands, configuration paths, and packaging.
-Returning to it requires that tag's installer and service configuration; an unpinned update is not a rollback procedure for 2.0.
+The 1.x releases use different commands, configuration paths, and packaging.
+Returning to one requires that tag's installer and service configuration.
 
 ## Build from a checkout
 

@@ -6,14 +6,65 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## [3.0.0] — 2026-11-17
+
+A major version because `shuttle inbox --play|--next|--stop` moved to `shuttle say`, the `/api/v1/deliver` request and its status words changed, and the board's Board view and Desk drag are gone. The `felt` CLI has no incompatible change: stores, frontmatter and every 2.0.0 verb read as before.
+
+### Upgrading from 2.0.0
+
+- Stores used with `felt` alone need nothing: `felt update`, or the installer, and you are done.
+- On a host that runs the Shuttle daemon, upgrade the CLIs and the daemon together and restart the daemon at once: run the installer with `SHUTTLE_DAEMON=1`, then restart the daemon. `felt update` replaces only the CLIs. A running 2.0.0 daemon checks the CLI's contract level only when it starts, so until it is restarted on 3.0.0 it keeps calling verbs the 3.0.0 CLI no longer has, and messages to live workers are not delivered. A 3.0.0 daemon with an older CLI holds fresh dispatch and checks again every 30 seconds. The CLI contract is at level 48 (37 in 2.0.0). The HTTP API level (3; 1 in 2.0.0) is reported by `/api/v1/version` and not enforced.
+- Upgrade every host of a fleet in one pass.
+- A 2.0.0 daemon that owns a fiber does not understand what a 3.0.0 sender asks of it: it drops a message's attachments, queues a `--in`/`--at` check-in at once instead of at its time, and does not start a session for a dormant fiber.
+- Thread results a 2.0.0 daemon had not yet placed (those still in `~/.shuttle/thread-outbox/pending/`, for an unresolved recipient or an unreachable owner) are not carried over, and a thread that closes or asks while the daemon is down for the upgrade is not reported to its orchestrator. Upgrade when that directory is empty and the host's threads are quiet.
+- A message a 2.0.0 daemon was in the middle of delivering may arrive a second time after the upgrade, without the "Possible repeat" mark.
+- Going back to 2.0.0 is unsafe while inbox entries are pending: an older owner delivers delayed entries at once and can repeat others. [The inbox](docs/dev/inbox.md) lists the hazards under Rollback.
+
 ### Added
 
-- `shuttle inbox put|pending|ls`: every inbox entry, for a fiber or a session, is created by one writer that records its delivery wishes (`source`, `turn`, `session`, `if_costly`, `not_before`) and refuses an unknown value. An entry waits until its `not_before` has passed. Contract level 38.
-- Inbox entries carry an attempt record (`batch_id`, `conversation`, `epoch`, `members`, `opened_at`, `outcome`), written by one claim that the hook offer and direct fiber delivery both take entries through, and shown by `shuttle inbox ls --json` while it is open. `attempt_address` and `possible_repeat` are still written beside it, so delivery is unchanged on every host.
+- `felt rename <id> <new-slug>` changes a fiber's last path segment. The directory and its document are renamed together, descendants come along, and the fiber's intrinsic id is unchanged. Wikilinks, directory links and `inputs[].from` references to the fiber and its descendants are rewritten as `felt nest` rewrites them, across the enclosing store and repositories linked into it, and each fiber whose text still holds the old id is listed for review. Run it from the store when the fiber lives in a repository the store links in: run in that repository's own checkout, it rewrites and reviews only that repository. Prose and other project fields are never rewritten, and neither is a markdown link to a file inside the renamed directory (`../old/old.md`), which the review list does not name either. It refuses a slug that is not one path segment, an existing destination, a companion file that already has the new document's name, a bare-form fiber (`.felt/<slug>.md`), and an id felt would have to guess at (a prefix or a stale path). The new slug is taken as given, not normalized as `felt add` normalizes one: keep to lowercase letters, digits and hyphens, since a slug with a dot or a space leaves links felt does not read as references. An interrupted rename finishes when the command is repeated, or with `felt recover-move`, which does not print the review list. A fiber with a live Shuttle worker is renamed without stopping it: the daemon, `shuttle status`, `shuttle attach` and the fiber's inbox find it by its intrinsic id.
+- `shuttle message <fiber> <text> --in 8h` or `--at <time>` schedules a check-in on the fiber's owning host, so it outlives the sending session; with no fiber it goes to the sender's own. `shuttle inbox ls <fiber> [--scheduled]` lists the entries waiting in a fiber's inbox on its owner and `shuttle inbox cancel <fiber> <id>` cancels one.
+- `shuttle inbox put|pending|ls`: every inbox entry, for a fiber or a session, is created by one writer that records its delivery wishes (`--source`, `--turn`, `--if-costly`, `--not-before`) and refuses an unknown value. An entry waits until its `not_before` has passed. `shuttle inbox ls --json` shows the delivery attempt an entry is part of while it is open.
+- Channels, the board's third view (hotkey `3`), takes the place of the Board view. Each line of work is a channel whose stream holds what its workers addressed to you: posts, questions, closes for your review and the files they sent, which unfold in place, HTML pages included. The rail lists channels that wait on you, are pinned, or were active in the last week, with unread counts. A ✓ (or `e`) clears a line, with an undo. Channel order, pins and hides are kept by the daemon, so every device agrees; `shuttle channels order|pin|dismiss` writes them.
+- `shuttle.channel: <name>` in a constitution's `shuttle:` block chooses the channel it speaks in, and `shuttle thread` copies it to the thread it creates. Without it a constitution speaks in its orchestrator's channel, else its office's, else its own.
+- `shuttle post --to human|<fiber>` addresses a post; one to the human waits on them until they reply or clear it. `--file` attaches files.
+- `shuttle close --post "<conclusion>"` writes the closing post: its text becomes the fiber's `outcome` and the board's close line, and `--file` attaches files to it.
+- `shuttle send-file --caption "<why>"` records why files were sent, and the board shows the caption with them.
+- The board shows a Change page beside the fiber page of every constitution with a `project_dir`: the checked-out branch against the remote's default branch, uncommitted work included, or the GitHub PRs it follows, baked by the owning host each time the page opens. An optional `shuttle.change: {repo, base, prs}` names the change.
+- `shuttle change --pr N` bakes a GitHub PR (for a merged one, the range it merged), `--list` lists the PRs a fiber follows, and `--cache` writes the bundle to `$XDG_CACHE_HOME/felt/changes/` instead of beside the fiber. `--base` is optional.
+- `shuttle sessions --since <time>` lists every Claude, Codex and Pi session on a host with a transcript message since then, live or ended, with the fibers each worked on; `--host` reads another host through its daemon.
+- `shuttle resume --carry` and `shuttle dispatch --carry`. A remote resume or dispatch sends this host's copy of the constitution to its owner; an owner that already holds the constitution keeps its own and prints how the two differ, unless `--carry` is given.
+
+### Changed
+
+- The held voice-line controls moved from `shuttle inbox` to `shuttle say`: `shuttle say --held` lists the held lines, and `--play`, `--next` and `--stop` play them. `shuttle inbox` manages message inboxes.
+- Messages to a fiber wait in a durable inbox on the owning host, whether or not a worker is live. A message that asks for a turn starts a session for an armed fiber with no worker; it does not when the fiber is resting, a draft or closed, when the host's boot quarantine is held, or when its worker slots are full. The receipt says what happened: `woken`, `followed_up`, `delivered`, `held`, `starting`, `queued` or `scheduled`. `shuttle message --json` no longer prints `queued_for_next_worker`.
+- `shuttle message --fresh` is deduplicated by `--message-id` and obeys the owner's launch gates: it starts a session only on an armed constitution and never reopens a closed fiber. A refusal gives its reason, and the same id can be sent again.
+- `shuttle message` to a Claude session address goes to that session's native inbox, which queues it behind a running turn.
+- `/api/v1/deliver` answers `delivery` as `context`, `input` or `fresh` (it was `message|input|resume|dispatch|context`), and its 409 `live` answer is gone. `/api/v1/dispatch` answers 202 with `queued: true` and reason `poller_busy` where it answered 504 for a slow poller: do not resend.
+- The Desk has three columns, **Waiting on you**, **Working** and **Awaiting review**, over a shelf of **Drafts**, **Resting** and **Roles & standing**. Each family appears once, with a line for every member that waits on you. The selected card takes `a` (close for review), `s` (rest), `t` (temper) and `x` (discard); a verdict waits out an undo window.
+- Every constitution opens on one view, the same from the Desk, a channel or a thread: its orchestrators, its head, its last words, the threads that wait or work, and a preview of its tapestry. A console docked at the bottom of the reader and of each channel is the board's one place to type to a worker.
+- Back in the board's reader returns in one step to the view it was opened from, however far you went inside it. Escape, the ‹ button, the view's tab and the browser's Back do the same.
+- Voice and Rex follow the board only on a click, never on a poll, a page load or the window coming forward.
+- Resuming a constitution's past session from the board runs it as that constitution's worker without changing the card's lifecycle.
+- When `shuttle claim` runs inside a harness, the worker ends when that harness process exits, and its terminal is given back to the human rather than closed.
+- `shuttle find --since` and `shuttle transcript search --since` also accept hours (`12h`) and RFC 3339 times.
+- `pi-fable` runs Claude Fable 5.2.
+
+### Removed
+
+- The board's Board view; `#/board` opens Channels.
+- Dragging Desk cards, their context menu and Move…. Verdicts and rest are in a constitution's view and on the selected Desk row's keys.
+- The board no longer draws `cold: true`; the key stays in the fiber and is ignored.
+- `/api/v1/deliver` no longer takes `unless_live`, `message_after_launch` or `from_claim`; an owner ignores them if sent.
 
 ### Fixed
 
-- A Codex wake whose terminal paste failed after text may have reached the composer is `unknown` (`ambiguous_delivery`) and is not pasted again at once. A direct fiber delivery whose outcome stays unknown for five minutes while its conversation is alive is sent once more, under a new transport id and marked "Possible repeat"; a send held for approval is not. The daemon's `/sessions/input` answers 502 `terminal_input_ambiguous` for it and 503 `terminal_input_failed` when nothing was typed.
+- A Codex wake whose terminal paste failed after text may have reached the composer is `unknown` (`ambiguous_delivery`) and is not pasted again at once. A delivery whose outcome stays unknown while its conversation is alive is sent once more, marked "Possible repeat"; a send held for approval is not. The daemon's `/sessions/input` answers 502 `terminal_input_ambiguous` for it and 503 `terminal_input_failed` when nothing was typed (in 2.0.0 a failed input was 502).
+- The owning daemon no longer refuses a fiber message or a human line whose text begins with `-`, such as a Markdown list. From the CLI, pass such text after `--`, on stdin or with `--file`.
+- A daemon that cannot run its CLI contract check, for example on a host out of processes, no longer treats that as a skew and holds dispatch; the check repeats every 30 seconds, and a skew clears once the levels match.
+- A Claude transcript row over 1 MiB, such as a screenshot's tool result, no longer stops the daemon reading the transcript.
+- `felt nest` and `felt unnest` refuse a bare-form fiber (`.felt/<slug>.md`) before writing anything; they used to report success and leave the document where it was, and for a bare-form fiber at the top of a linked repository (`<mount>/<slug>.md`) they also deleted the store's link to that repository. If you ran one there under 2.0.0, check that the repository is still linked.
 
 ## [2.0.0] — 2026-11-13
 
@@ -487,3 +538,5 @@ the source of truth — `.felt/index.db` is a rebuildable cache.
 [1.1.0]: https://github.com/cailmdaley/felt/releases/tag/v1.1.0
 [2.0.0-rc.1]: https://github.com/cailmdaley/felt/releases/tag/v2.0.0-rc.1
 [2.0.0-rc.2]: https://github.com/cailmdaley/felt/releases/tag/v2.0.0-rc.2
+[2.0.0]: https://github.com/cailmdaley/felt/releases/tag/v2.0.0
+[3.0.0]: https://github.com/cailmdaley/felt/releases/tag/v3.0.0

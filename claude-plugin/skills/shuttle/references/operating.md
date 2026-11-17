@@ -31,7 +31,7 @@ On Rex, `shuttle attach` opens the local app and a claim carries native session 
 The Desk derives each card's column from `status`, `tempered`, `shuttle.kind` and whether a worker owns it:
 
 - **Drafts** — `status: open`, on the desk.
-- **Resting** — `status: open` with `horizon: stashed`: put down, with no verdict owed. Hubs and seats a human starts by hand rest here between sessions; `shuttle rest` and a drag into Resting put a card here.
+- **Resting** — `status: open` with `horizon: stashed`: put down, with no verdict owed. Hubs and seats a human starts by hand rest here between sessions; `shuttle rest` puts a card here.
 - **Scheduled** — an armed standing constitution between runs, drawn in Resting with its next launch. A paused one (`status: open`) rests there too, drawn as paused with its schedule. One whose last run asked a question waits In flight, on your turn, until the ask is answered.
 - **Pulsed** — a oneshot constitution can wake its own conversation on an interval, without a review run per tick.
 - **In flight** — a live worker, or an armed oneshot.
