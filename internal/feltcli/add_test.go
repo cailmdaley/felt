@@ -230,8 +230,9 @@ func TestAddUIDCarriesExistingSlug(t *testing.T) {
 	}
 }
 
-// --uid carries a slug as spelled but only inside the store, under a UID no
-// fiber already holds, written upper-case; plain add refuses the same escapes.
+// --uid carries a slug as spelled but only inside the store, with no segment
+// starting with a dot, under a UID no fiber already holds, written upper-case;
+// plain add refuses the same escapes.
 func TestAddUIDStaysInsideStoreUnderAFreshUID(t *testing.T) {
 	t.Parallel()
 	dir, s := newStore(t)
@@ -248,6 +249,9 @@ func TestAddUIDStaysInsideStoreUnderAFreshUID(t *testing.T) {
 		{[]string{"lower", "X", "--uid", strings.ToLower(held)}},
 		{[]string{"../../escape", "X"}},
 		{[]string{"/abs", "X"}},
+		{[]string{"sub/.git", "X", "--uid", felt.NewULID()}},
+		{[]string{".hidden", "X", "--uid", felt.NewULID()}},
+		{[]string{"sub/.git", "X"}},
 	} {
 		before := storeBytes(t, s.Root())
 		if out, err := runCommand(t, dir, append([]string{"add"}, tc.args...)...); err == nil {

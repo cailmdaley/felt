@@ -39,7 +39,8 @@ Each path segment <slug> creates must follow the slug convention: lowercase
 letters and digits joined by single hyphens. A non-conforming segment is
 refused with its conforming form; segments that already exist are kept as they
 are spelled. --uid carries a fiber from another store under its existing
-intrinsic id and slug, which are not held to the convention.`,
+intrinsic id and slug, which are not held to the convention. No segment may
+start with a dot, with or without --uid.`,
 		Example: `  felt add analysis/covariance "Covariance method" -s open
   felt add analysis/jackknife-bias "Jackknife bias" -o "negligible below 200 patches"`,
 		Args: cobra.ExactArgs(2),
@@ -65,6 +66,9 @@ intrinsic id and slug, which are not held to the convention.`,
 			for _, segment := range strings.Split(f.ID, "/") {
 				if segment == "" || segment == "." || segment == ".." {
 					return fmt.Errorf("slug %q must be a path inside the store", f.ID)
+				}
+				if strings.HasPrefix(segment, ".") {
+					return fmt.Errorf("slug %q starts with \".\", which no segment may; use %q", segment, felt.Slugify(segment))
 				}
 			}
 			if addUID != "" {
