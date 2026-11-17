@@ -186,6 +186,7 @@ export const helpSections: readonly HelpSection[] = [
     row(['['], 'Hide or show the channels', []),
     row(['/'], 'Jump to a channel or a file', []),
     row(['Enter'], 'Write to the channel\'s chair', []),
+    row(['e'], 'Clear the post or files in focus; a question or a close is answered, not cleared', []),
     row(['⌥↑', '⌥↓'], 'Move the channel in the rail', []),
     row(['Menu', '⇧F10'], 'The channel\'s menu: hide, pin, move to the bottom; a long press on a phone', []),
   ] },

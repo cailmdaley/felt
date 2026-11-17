@@ -450,9 +450,9 @@ it('draws a post to the human that waits on them gold, with what it attached as 
   expect(host.querySelector('[data-channel="channel:cmbx"]')!.hasAttribute('data-waiting')).toBe(true)
   const post = item(host, 'cmbx')
   expect([post.dataset.kind, post.hasAttribute('data-waiting'), post.querySelector('.kbn-ch-kind'), post.querySelector('.kbn-ch-item-text')?.textContent?.trim()]).toStrictEqual(['post', true, null, 'Two calls for you today.'])
-  // A waiting post carries its clear; nothing else does.
+  // Every post and file line carries a clear: the waiting post's, and the expert's files'.
   expect(post.querySelector('.kbn-ch-clear')?.textContent).toBe('✓')
-  expect(host.querySelectorAll('.kbn-ch-clear')).toHaveLength(1)
+  expect([...host.querySelectorAll('.kbn-ch-clear')].map(check => check.getAttribute('aria-label'))).toStrictEqual(["Clear κ × tSZ's files", "Clear cmbx chair's post"])
   expect([...post.querySelectorAll('.kbn-ch-previews .uf-card')].map(file => [file.getAttribute('aria-label'), file.querySelector('.ws-thumbnail') !== null])).toStrictEqual([['Expand deck.html', true]])
   expect(post.querySelector('.kbn-ch-previews')!.hasAttribute('data-several')).toBe(false)
 })
@@ -486,6 +486,22 @@ it('clears a waiting post with its ✓ and does nothing else: one write, the dis
   expect(posts.at(-1)?.[1]).toStrictEqual({ key: `clear:C:${posted}`, fiber: 'C' })
   expect(item(host, 'cmbx').hasAttribute('data-waiting')).toBe(false)
   expect(host.querySelector('[data-channel="channel:cmbx"]')!.hasAttribute('data-waiting')).toBe(false)
+})
+
+it('clears a line that waits on no one from the stream, with e as with its ✓, and an undo brings it back; a question has no ✓', async () => {
+  const { posts } = daemon()
+  const { view, host } = await mount()
+  expect(item(host, 'mask').querySelector('.kbn-ch-clear')).toBeNull()
+  const files = item(host, 'tsz'), id = files.querySelector<HTMLElement>('[data-item]')!.dataset.item!.slice('item:'.length)
+  files.querySelector<HTMLElement>('.kbn-ch-who')!.focus()
+  expect(view.keydown(new KeyboardEvent('keydown', { key: 'e' }))).toBe(true)
+  await settle(); await settle()
+  expect(posts.at(-1)?.[1]).toStrictEqual({ key: expect.stringMatching(new RegExp(`^line:\\d+:${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)), fiber: 'T' })
+  expect(item(host, 'tsz')).toBeUndefined()
+  document.querySelector<HTMLButtonElement>('.shuttle-toast .toast-undo')!.click()
+  await settle(); await settle()
+  expect(posts.at(-1)?.[1]).toStrictEqual({ key: expect.stringMatching(/^unline:\d+:file:/), fiber: 'T' })
+  expect(item(host, 'tsz')).toBeDefined()
 })
 
 it('hides a channel and does nothing else: one write, the dismissal, and no lifecycle request', async () => {

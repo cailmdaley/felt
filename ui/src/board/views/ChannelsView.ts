@@ -6,7 +6,7 @@ import type { KanbanCard } from '../KanbanTypes.js'
 import { boardCards, threadIndexFor } from '../KanbanSurfaces.js'
 import { isMobileViewport } from '../mobile.js'
 import {
-  arranged, composeChannels, composeStream, fiberOf, hideKey, railOrder, reordered, showKey, unpinKey,
+  arranged, clearLineKey, clearedLines, composeChannels, composeStream, fiberOf, hideKey, railOrder, reordered, showKey, unclearLineKey, unpinKey,
   type Channel, type Entry, type Item, type Station,
 } from '../channels.js'
 import { layTube, type Excursion, type Tube, type TubeLine, type TubeRow } from '../tube.js'
@@ -14,7 +14,7 @@ import { createRailReorder, type RailReorder } from '../channelRail.js'
 import { openActionMenu } from '../conversationMenu.js'
 import { stateDot } from '../stateDot.js'
 import { slug } from '../threadOutline.js'
-import { clearPost } from '../utils.js'
+import { CLEAR_UNDO_MS, clearPost, showToast } from '../utils.js'
 import { ATTENTION_ORDER, attentionOf, lastActive, type Waits } from '../attention.js'
 import { turnOf } from '../turn.js'
 import { docKey } from '../workspace/documents.js'
@@ -316,7 +316,8 @@ export class ChannelsView implements TemporalView {
     const workspace = ctx.workspace!
     return composeStream({
       channel, records: workspace.board.records(channel.families), files: ctx.sends?.files ?? [], waits: workspace.board.waiting,
-      launches: card => workspace.globeHost.feeds.marks(card)?.launches ?? [], now: Date.now(), reachMs: workspace.board.reachMs,
+      launches: card => workspace.globeHost.feeds.marks(card)?.launches ?? [], cleared: clearedLines([...this.dismissed, ...this.pending]),
+      now: Date.now(), reachMs: workspace.board.reachMs,
     })
   }
   /** Something addressed to the human arrived in the channel since this device last read it. */
@@ -714,7 +715,7 @@ export class ChannelsView implements TemporalView {
     const id = `item:${item.id}`
     const open = (): void => { this.returnTo = id; this.ctx?.workspace?.openFromDesk(item.card) }
     return post(item, {
-      now, dot: this.dot(item), open, grouped, clear: item.clears ? this.clear(item.clears, item.card) : undefined,
+      now, dot: this.dot(item), open, grouped, clear: this.check(item),
       previews: item.kind === 'close' || item.files.length ? this.previews(item, id) : undefined,
     })
   }
@@ -722,19 +723,61 @@ export class ChannelsView implements TemporalView {
   private dot(item: Item): HTMLButtonElement {
     return stateDot(item.card, this.ctx!.workspace!.board.waiting, () => { this.returnTo = `item:${item.id}`; this.ctx?.workspace?.openFromDesk(item.card) })
   }
-  /** A waiting post's ✓: the human has read it, and it stops waiting. It writes that alone. */
-  private clear(uid: string, card: KanbanCard): HTMLButtonElement {
+  /**
+   * A line's ✓, on every post and file line: a waiting post stops waiting (it
+   * writes that alone); any other leaves the stream. A question or a close
+   * that waits is answered, not cleared, and has none.
+   */
+  private check(item: Item): HTMLButtonElement | undefined {
+    if (item.waiting ? !item.clears : item.kind !== 'post' && item.kind !== 'file') return undefined
+    const { card } = item
     const done = button('kbn-ch-clear', '✓', () => {
       done.disabled = true
-      const board = this.ctx?.workspace?.board
-      if (board) void clearPost(board, uid, card.name).catch(() => {
-        done.disabled = false
-        this.status(`${card.name}'s post could not be cleared; it still waits.`)
+      if (item.clears) {
+        const board = this.ctx?.workspace?.board
+        if (board) void clearPost(board, item.clears, card.name).catch(() => {
+          done.disabled = false
+          this.status(`${card.name}'s post could not be cleared; it still waits.`)
+        })
+      } else void this.clearLine(item, done)
+    })
+    done.title = item.clears ? 'Clear: read, nothing to answer' : 'Clear: read, take it from the stream'
+    done.setAttribute('aria-label', `Clear ${card.name}'s ${item.kind === 'file' ? 'files' : 'post'}`)
+    return done
+  }
+  /**
+   * Takes a line that waits on no one out of the stream, across the fleet,
+   * with an undo for a few seconds; the line after it takes the focus. A
+   * refused write brings it back and says so.
+   */
+  private async clearLine(item: Item, done: HTMLButtonElement): Promise<void> {
+    const ctx = this.ctx
+    if (!ctx) return
+    const row = done.closest('.kbn-ch-item'), held = row?.contains(document.activeElement)
+    const next = [...this.stream?.querySelectorAll<HTMLElement>(':scope > .kbn-ch-item') ?? []]
+    const after = next[next.indexOf(row as HTMLElement) + 1] ?? next[next.indexOf(row as HTMLElement) - 1]
+    const key = clearLineKey(item.id, Date.now()), fiber = fiberOf(item.card)
+    this.pending.push(key)
+    this.draw()
+    if (held) after?.querySelector<HTMLElement>('[data-item]')?.focus({ preventScroll: true })
+    try {
+      await postDaemonJson(ctx.shuttleBase, '/api/v1/channels/dismiss', { key, fiber }, 'Clear failed')
+    } catch {
+      this.pending = this.pending.filter(each => each !== key)
+      this.draw()
+      this.status(`${item.card.name}'s line could not be cleared; it is as it was.`)
+      return
+    }
+    showToast(`Cleared ${slug(item.card)}'s line.`, 'success', CLEAR_UNDO_MS, () => {
+      const back = unclearLineKey(item.id, Date.now())
+      this.pending.push(back)
+      this.draw()
+      void postDaemonJson(ctx.shuttleBase, '/api/v1/channels/dismiss', { key: back, fiber }, 'Undo failed').catch(() => {
+        this.pending = this.pending.filter(each => each !== back)
+        this.draw()
+        this.status(`${item.card.name}'s line could not be brought back; it stays cleared.`)
       })
     })
-    done.title = 'Clear: read, nothing to answer'
-    done.setAttribute('aria-label', `Clear ${card.name}'s post`)
-    return done
   }
   /**
    * An item's files at the stream's full width, below its words: one preview,
@@ -953,6 +996,9 @@ export class ChannelsView implements TemporalView {
     if (event.key === 'k') { this.step(-1); return true }
     if (event.key === '[') { this.setRail(this.railShown()); return true }
     if (event.key === 'Enter' && !active?.closest('button, a, input') && this.channel) { this.dock?.focus(); return true }
+    // e clears the line in focus, as its ✓ does.
+    const check = event.key === 'e' ? active?.closest('.kbn-ch-item')?.querySelector<HTMLButtonElement>('.kbn-ch-clear:not(:disabled)') : null
+    if (check) { check.click(); return true }
     return false
   }
   unmount(): void {

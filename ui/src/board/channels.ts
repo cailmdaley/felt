@@ -51,6 +51,22 @@ export const unpinKey = (key: string, at: number): string => `pin:${key}:${at}`
 export const hideKey = (key: string, at: number): string => `hide:${key}:${at}`
 /** The dismissal record that brings a hidden channel back: every hide up to `at` stops counting. */
 export const showKey = (key: string, at: number): string => `show:${key}:${at}`
+/** The dismissal record that clears one line of a stream (an item, by its id) at `at`, until a later {@link unclearLineKey}. */
+export const clearLineKey = (id: string, at: number): string => `line:${at}:${id}`
+/** The dismissal record that brings a cleared line back: every clear of it up to `at` stops counting. */
+export const unclearLineKey = (id: string, at: number): string => `unline:${at}:${id}`
+
+/** The lines cleared by hand, by item id: each whose newest clear is newer than its newest undo. */
+export function clearedLines(dismissed: readonly string[]): Set<string> {
+  const latest = { line: new Map<string, number>(), unline: new Map<string, number>() }
+  for (const record of dismissed) {
+    const match = /^(line|unline):(\d+):(.+)$/.exec(record)
+    if (!match) continue
+    const into = latest[match[1] as 'line' | 'unline']
+    into.set(match[3], Math.max(into.get(match[3]) ?? 0, Number(match[2])))
+  }
+  return new Set([...latest.line].filter(([id, at]) => at > (latest.unline.get(id) ?? -Infinity)).map(([id]) => id))
+}
 
 /** Constitutions a channel speaks for: everything without a verdict. */
 const live = (card: KanbanCard): boolean => card.column !== 'tempered' && card.column !== 'composted'
@@ -246,7 +262,8 @@ const LINES: Readonly<Record<string, Item['kind']>> = { asked: 'ask', post: 'pos
  * when the board says it does (`waits`); a member that waits with no such
  * line drawn (an open question, a harness prompt, a turn that could not
  * start, a close for the human's review) is its own waiting item. Every item
- * in the board's reach is drawn, as a channel in Slack holds every message.
+ * in the board's reach is drawn, as a channel in Slack holds every message,
+ * save those the human cleared by hand.
  *
  * Between the items, each thread's lives within the board's reach as
  * stations: a life starts at a launch (`launches`) while none is running, is
@@ -265,10 +282,12 @@ export function composeStream(input: {
   /** What waits on the human ({@link BoardFeed.waiting}). */
   waits: Waits
   launches: (card: KanbanCard) => readonly number[]
+  /** The items the human cleared by hand ({@link clearedLines}), by id: none is drawn. */
+  cleared: ReadonlySet<string>
   now: number
   reachMs: number
 }): Entry[] {
-  const { channel, records, files, waits, launches, now, reachMs } = input
+  const { channel, records, files, waits, launches, cleared, now, reachMs } = input
   const reach = now - reachMs
   const named = new Map<string, KanbanCard>()
   for (const card of channel.everyone) for (const ref of [card.uid, card.id]) if (ref && !named.has(ref)) named.set(ref, card)
@@ -331,7 +350,7 @@ export function composeStream(input: {
   const stream: Entry[] = []
   for (const list of items.values()) {
     for (const item of list) if (item.kind === 'file') item.text = [...new Set(item.files.flatMap(file => file.caption?.trim() || []))].join(' · ')
-    stream.push(...list)
+    stream.push(...list.filter(item => !cleared.has(item.id)))
   }
   for (const card of channel.everyone) {
     const lives = livesOf(card, events.get(fiberOf(card)) ?? [])

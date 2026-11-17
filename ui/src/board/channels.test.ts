@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { RECENT_MS, arranged, composeChannels, composeStream, hideKey, railOrder, reordered, showKey, unpinKey, type Channel, type Entry } from './channels.js'
+import { RECENT_MS, arranged, clearLineKey, clearedLines, composeChannels, composeStream, hideKey, railOrder, reordered, showKey, unclearLineKey, unpinKey, type Channel, type Entry } from './channels.js'
 import type { BoardRecord, Wait } from './boardFeed.js'
 import { card } from './testFixtures.js'
 import { ThreadIndex } from './threads.js'
@@ -173,7 +173,7 @@ describe('composeStream', () => {
   const launches = new Map([['K', [now - 60 * minute]], ['B', [now - 35 * minute]]])
   const waits = new Map([['V', { id: 'r3m', at: now - 20 * minute }]])
   const stream = (over: Partial<Parameters<typeof composeStream>[0]> = {}): Entry[] =>
-    composeStream({ channel, records, files, waits, launches: card => launches.get(card.uid!) ?? [], now, reachMs, ...over })
+    composeStream({ channel, records, files, waits, launches: card => launches.get(card.uid!) ?? [], cleared: new Set(), now, reachMs, ...over })
   const said = (entries: Entry[]) => entries.map(entry => entry.kind === 'station' ? [entry.card.id, entry.what, ...entry.end ? [entry.end] : []] : [entry.card.id, entry.kind, entry.text, entry.waiting])
 
   it('holds everything addressed to the human, with its threads\' lives as stations between, oldest first', () => {
@@ -233,6 +233,14 @@ describe('composeStream', () => {
     expect(kappaItem && kappaItem.kind !== 'station' && [kappaItem.waiting, kappaItem.clears]).toStrictEqual([true, undefined])
   })
 
+  it('leaves out a line the human cleared, until a later undo brings it back', () => {
+    const ids = (dismissed: string[]) => stream({ cleared: clearedLines(dismissed) }).flatMap(entry => entry.kind === 'station' ? [] : [entry.id])
+    const all = ids([]), file = all.find(id => id.startsWith('file:'))!
+    expect(ids([clearLineKey('r7', 5), clearLineKey(file, 5)])).toStrictEqual(all.filter(id => id !== 'r7' && id !== file))
+    expect(ids([clearLineKey('r7', 5), unclearLineKey('r7', 6)])).toStrictEqual(all)
+    expect(ids([clearLineKey('r7', 5), unclearLineKey('r7', 6), clearLineKey('r7', 7)])).toStrictEqual(all.filter(id => id !== 'r7'))
+  })
+
   it('leaves a closing post to the card\'s outcome rather than its words', () => {
     const closed = card({ ...cov, id: 'cmbx/cov', reviewMark: undefined, orchestrator: undefined, shuttleChannel: 'cmbx' })
     const lone = named(compose([chair, closed]), 'channel:cmbx')
@@ -289,7 +297,7 @@ describe('a thread\'s lives', () => {
   const channel = named(compose([hub, thread]), 'channel:unions')
   const record = (id: string, kind: string, fiber: string, minutes: number, over: Partial<BoardRecord> = {}): BoardRecord => ({ id, kind, fiber, by: { fiber }, timestamp: now - minutes * minute, ...over })
   const stations = (records: BoardRecord[], launches: Record<string, number[]>) =>
-    composeStream({ channel, records, files: [], waits: new Map(), launches: each => (launches[each.uid!] ?? []).map(minutes => now - minutes * minute), now, reachMs })
+    composeStream({ channel, records, files: [], waits: new Map(), launches: each => (launches[each.uid!] ?? []).map(minutes => now - minutes * minute), cleared: new Set(), now, reachMs })
       .flatMap(entry => entry.kind === 'station' ? [[entry.card.uid, entry.what, entry.line, ...entry.end ? [entry.end] : []]] : [])
 
   it('starts once per run however often its session is resumed, ticks a handoff, and starts again only after it ended', () => {

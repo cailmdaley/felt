@@ -623,6 +623,11 @@ or `fiber:<top-level uid>`. The board writes:
   cleared at the close.
 - `unclear:<fiber uid>:<ms>` to undo a clear: it voids every clear of that
   thread up to `<ms>`.
+- `line:<ms>:<item id>` to take one line that waits on no one (a post or a
+  send, by the stream's item id) out of its channel at `<ms>`; it touches no
+  other line and nothing that waits.
+- `unline:<ms>:<item id>` to bring a cleared line back: it voids every clear
+  of that line up to `<ms>`.
 
 Dismissals reach every hub through the remote board feeds and are omitted from
 family-board reading.
