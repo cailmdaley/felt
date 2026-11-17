@@ -87,7 +87,13 @@ describe('composeChannels', () => {
     // Two top-levels: the elder chairs, however recently the younger was active.
     const elder = card({ id: 'spt/edfs', uid: 'E1', shuttleChannel: 'SPT', createdAt: at(600), ...idle(300) })
     const younger = card({ id: 'spt/pol', uid: 'E2', shuttleChannel: 'SPT', createdAt: at(60), ...working(1) })
-    expect(named(compose([younger, elder]), 'channel:spt').name).toBe('edfs')
+    expect(named(compose([younger, elder]), 'channel:spt').seat.id).toBe('spt/edfs')
+  })
+
+  it('writes a named channel as its name, lowercased with hyphens for spaces, whoever chairs it', () => {
+    const mill = card({ id: 'felt', uid: 'M1', name: 'Felt', shuttleChannel: 'The Mill', shuttleSeat: true, ...working(2) })
+    const channel = named(compose([mill]), 'channel:the mill')
+    expect([channel.name, channel.title, channel.seat]).toStrictEqual(['the-mill', 'Felt', mill])
   })
 
   it('lists a channel waiting, pinned, or active within a week, the same on every device', () => {
@@ -330,8 +336,8 @@ describe('what waits on the human, as live channels hold it', () => {
 
   it('neither marks nor floats a channel whose workers are only idle, and keeps it hidden when one goes idle after the hide', () => {
     const channels = compose([unions, review, paper, bins])
-    expect(channels.map(channel => [channel.name, channel.waiting])).toStrictEqual([['paper', false], ['unions', true]])
-    expect(railOrder(channels, ['channel:spt', 'channel:unions']).map(channel => channel.name)).toStrictEqual(['unions', 'paper'])
+    expect(channels.map(channel => [channel.name, channel.waiting])).toStrictEqual([['spt', false], ['unions', true]])
+    expect(railOrder(channels, ['channel:spt', 'channel:unions']).map(channel => channel.name)).toStrictEqual(['unions', 'spt'])
     const hidden = named(compose([unions, review, paper, bins], { dismissed: [hideKey('channel:spt', now - 60 * minute)] }), 'channel:spt')
     expect([hidden.hidden, hidden.listed]).toStrictEqual([now - 60 * minute, false])
   })
@@ -351,7 +357,8 @@ describe('a channel\'s key', () => {
     const channels = compose([lightcone, glass, unit, near])
     expect(named(channels, 'channel:lightcone').members.map(member => member.id)).toStrictEqual(['lc/desk/paper-ii/run/glass-mocks', 'lc/desk/unit-tests'])
     // Its chair is its live member: the tempered desk speaks for no one.
-    expect(named(channels, 'channel:lightcone').name).toBe('glass-mocks')
+    expect(named(channels, 'channel:lightcone').seat.id).toBe('lc/desk/paper-ii/run/glass-mocks')
+    expect(named(channels, 'channel:lightcone').name).toBe('lightcone')
     expect(named(channels, 'fiber:X').members.map(member => member.id)).toStrictEqual(['lc/desktop'])
   })
 })

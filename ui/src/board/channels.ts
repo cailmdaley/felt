@@ -13,7 +13,7 @@ import { cardNamed } from './threads.js'
 export interface Channel {
   /** `channel:<shuttle.channel, lowercased>`, `role:<office slug>` for an office's top-levels, or `fiber:<uid>` for a lone top-level. */
   key: string
-  /** The office slug for a seatless office, otherwise the chair's slug. */
+  /** A named channel's name, lowercased with hyphens for spaces; a seatless office's slug; otherwise its chair's slug. */
   name: string
   /** The office's charter name for a seatless office, otherwise the chair's full name. */
   title: string
@@ -81,9 +81,11 @@ export const officeOf = (role: string | undefined): string => role?.split('/')[0
 
 /**
  * Every channel the board holds, the chaired ones first, each shelf by name.
- * A seatless office's channel is written as its office; every other channel
- * uses its chair's slug. A card speaks in its own `shuttle.channel`, else its orchestrator's, else
- * that of the nearest card filed above it; without one anywhere above it, its
+ * A named channel is written as its name, lowercased with hyphens for spaces
+ * (`The Mill` is `the-mill`), an office merged into it included; a seatless
+ * office's channel as its office; any other as its chair's slug. A card
+ * speaks in its own `shuttle.channel`, else its orchestrator's, else that of
+ * the nearest card filed above it; without one anywhere above it, its
  * top-level constitution's office names the channel (the named channel that
  * shares the office's charter name, when there is one), else that top-level
  * is a channel of its own. Something in it waits when a member waits on the
@@ -182,8 +184,9 @@ export function composeChannels(input: {
     const waiting = newest > 0
     const hidden = since('hide', key) > Math.max(since('show', key), newest) ? since('hide', key) : 0
     const office = key.startsWith('role:') && !seats.length ? key.slice(5) : ''
+    const name = key.startsWith('channel:') ? key.slice(8).replace(/ /g, '-') : office || slug(seat)
     channels.push({
-      key, name: office || slug(seat), title: office ? officeName(office) : seat.name, chaired: !key.startsWith('fiber:'), seat, members, everyone,
+      key, name, title: office ? officeName(office) : seat.name, chaired: !key.startsWith('fiber:'), seat, members, everyone,
       families: [...new Set(members.map(card => fiberOf(topOf(card))))],
       newest, waiting, active, pinned: isPinned, hidden,
       listed: !hidden && (waiting || isPinned || now - active <= RECENT_MS),

@@ -42,6 +42,11 @@ try {
     assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-band-title').textContent(), 'score')
     assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-worker-message').getAttribute('data-placeholder'), 'Message score')
     await shot(page, 'seatless-office')
+    // A named channel is written as its name; its console names its chair by slug.
+    await page.locator('.kbn-ch-jump').fill('')
+    await pick(page, 'the-mill').click()
+    await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'the-mill')
+    assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-band-title').textContent(), 'felt')
     await context.close()
   }
   for (const [name, width, height] of [['desktop', 1440, 900], ['phone', 390, 844]]) {
@@ -55,7 +60,7 @@ try {
     await page.evaluate(() => document.fonts.ready)
     // What waits on the human, the newest wait first, then the human's order; the hidden composer and old notes, idle three weeks, only by Jump to.
     // The Mill's workers are idle at the end of their turns: that waits on no one, so it keeps its place in the order.
-    assert.deepEqual(await page.evaluate(channels), ['cmbx', 'unions', 'vizier', 'move', 'felt', 'french', 'science', 'garden'])
+    assert.deepEqual(await page.evaluate(channels), ['cmbx', 'unions', 'vizier', 'move', 'the-mill', 'french', 'science', 'garden'])
     if (phone) {
       // The rail is the first screen; choosing a channel fills it.
       assert.equal(await page.locator('.kbn-ch').isVisible(), false)
@@ -71,7 +76,7 @@ try {
       await page.mouse.up()
     }
     await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick-name')[5]?.textContent === 'garden')
-    assert.deepEqual(await page.evaluate(channels), ['cmbx', 'unions', 'vizier', 'move', 'felt', 'garden', 'french', 'science'])
+    assert.deepEqual(await page.evaluate(channels), ['cmbx', 'unions', 'vizier', 'move', 'the-mill', 'garden', 'french', 'science'])
     // The drag opened nothing and asked for no menu.
     assert.equal(await page.locator('[role="menu"]').count(), 0)
     if (phone) assert.equal(await page.locator('.kbn-ch').isVisible(), false)
