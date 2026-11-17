@@ -38,10 +38,9 @@ try {
     await p.getByRole('button', { name: 'Stash a new draft', exact: true }).click()
     const dialog = p.getByRole('dialog', { name: 'Stash a constitution' })
     await dialog.waitFor()
-    // The dialog marks the board inert in an effect after it mounts.
+    // The dialog makes the board inert after its first paint.
     await p.waitForFunction(el => !!el.closest('[inert]'),
       await p.getByRole('button', { name: 'Stash a new draft', exact: true }).elementHandle())
-      .catch(() => assert.fail('the board is inert under the dialog'))
     if (phone) await p.setViewportSize({ width: 390, height: 844 })
     await shot('stash')
 
