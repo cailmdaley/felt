@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/feltcli"
+	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
 // versionBody is a daemon's /api/v1/version answer.
@@ -343,6 +344,7 @@ func TestDaemonUpgradeFailsWhenNothingRestartsTheDaemon(t *testing.T) {
 	// The listener the upgrade stops is the stub's, owned by this test, and
 	// the stop's signal goes nowhere.
 	env.Set("SHUTTLE_PORT", daemon.URL[strings.LastIndex(daemon.URL, ":")+1:])
+	sysenvtest.FakeCommand(t, env, "lsof", fmt.Sprintf("#!/bin/sh\necho %d\n", os.Getpid()))
 	release := filepath.Join(t.TempDir(), "share", "shuttle")
 	fakeRelease(t, release, "2.0.0")
 	env.Set("SHUTTLE_RELEASE", release)
