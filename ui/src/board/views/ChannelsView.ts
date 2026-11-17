@@ -440,13 +440,14 @@ export class ChannelsView implements TemporalView {
   /**
    * The board follows Rex to a worker: its channel opens, scrolled to that
    * worker's latest post (else the latest station on its line), which is
-   * marked; false when no channel holds it.
+   * marked; false when no channel holds it. A uid names one fiber on every
+   * host, and a channel keeps one copy of each, so a uid matches any host's.
    * Following looks at nothing and renews no pin.
    */
   reveal(id: string, origin: string): boolean {
     if (!this.loaded) return false
     let card: KanbanCard | undefined
-    const channel = this.channels.find(each => (card = each.everyone.find(one => one.originId === origin && (one.uid === id || one.id === id))))
+    const channel = this.channels.find(each => (card = each.everyone.find(one => one.uid === id || (one.id === id && one.originId === origin))))
     if (!channel || !card) return false
     this.open(channel.key, true, false)
     this.marked = fiberOf(card)
