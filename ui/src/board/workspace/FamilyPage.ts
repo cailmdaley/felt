@@ -32,8 +32,8 @@ export interface ViewFeeds extends MapFeeds, DocFeeds {
 /** How far the page must be pulled down past its top before its orchestrator's view opens, in px. */
 const PULL_PX = 120
 
-/** What a waiting constitution wants, in a word. */
-const WANT_WORD: Readonly<Record<Want['kind'], string>> = { ask: 'asks', review: 'for review', post: 'posted', blocked: 'blocked' }
+/** What a waiting constitution asks of the human, in a word; a post it waits with says nothing its words below do not. */
+const WANT_WORD: Readonly<Record<Want['kind'], string>> = { ask: 'asks', review: 'for review', post: '', blocked: 'blocked' }
 
 /** A thread the rows tuck away behind the quiet control: put to rest (a standing one between runs and a seat stay drawn), or archived. */
 const tuckable = (card: KanbanCard): boolean => card.column === 'tempered' || card.column === 'composted' || (card.column === 'resting' && card.shuttleKind !== 'standing')
@@ -245,7 +245,7 @@ export class FamilyPage {
     head.title = card.name
     this.name.textContent = slug(card)
     const waits = this.feeds.waits(), want = wantOf(card, waits), faint = attentionOf(card, waits) === 'quiet' ? quietWord(card) : ''
-    this.facts.replaceChildren(...want ? [el('span', 'ov-needs', WANT_WORD[want.kind])] : faint ? [el('span', 'ov-word', faint)] : [], time(card, now))
+    this.facts.replaceChildren(...want && WANT_WORD[want.kind] ? [el('span', 'ov-needs', WANT_WORD[want.kind])] : faint ? [el('span', 'ov-word', faint)] : [], time(card, now))
     // Its pages are drawn again; the one in focus keeps it.
     const part = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.ws-doc-button')
     const kept = part && this.docs.contains(part) ? part.dataset.part : undefined

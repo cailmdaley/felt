@@ -136,9 +136,9 @@ it('opening, paging and returning to a channel look at nothing; clicking an item
   expect(openFromDesk).toHaveBeenLastCalledWith(beam)
   host.querySelector<HTMLButtonElement>('.kbn-ch-stream > [data-what="start"] .kbn-ch-slug')!.click()
   expect(openFromDesk).toHaveBeenLastCalledWith(tsz)
-  // The item on that line is wired to it and names its kind; its slug shows only where the line is named on it, and is always its accessible name's.
+  // The item on that line is wired to it and names its thread; a send says no word the stream does not.
   const wired = item(host, 'tsz')
-  expect([wired.querySelector('.kbn-ch-who .kbn-ch-kind')?.textContent, wired.querySelector('.kbn-ch-who')?.getAttribute('aria-label'), !!wired.querySelector('.kbn-ch-junction')]).toStrictEqual(['sent', 'tsz sent', true])
+  expect([wired.querySelector('.kbn-ch-who')?.textContent, wired.querySelector('.kbn-ch-kind'), !!wired.querySelector('.kbn-ch-junction')]).toStrictEqual(['tsz', null, true])
   expect(see).not.toHaveBeenCalled()
 })
 
@@ -449,7 +449,7 @@ it('draws a post to the human that waits on them gold, with what it attached as 
   const { host } = await mount([chair, tsz, beam])
   expect(host.querySelector('[data-channel="channel:cmbx"]')!.hasAttribute('data-waiting')).toBe(true)
   const post = item(host, 'cmbx')
-  expect([post.dataset.kind, post.hasAttribute('data-waiting'), post.querySelector('.kbn-ch-kind')?.textContent, post.querySelector('.kbn-ch-item-text')?.textContent?.trim()]).toStrictEqual(['post', true, 'posted', 'Two calls for you today.'])
+  expect([post.dataset.kind, post.hasAttribute('data-waiting'), post.querySelector('.kbn-ch-kind'), post.querySelector('.kbn-ch-item-text')?.textContent?.trim()]).toStrictEqual(['post', true, null, 'Two calls for you today.'])
   // A waiting post carries its clear; nothing else does.
   expect(post.querySelector('.kbn-ch-clear')?.textContent).toBe('✓')
   expect(host.querySelectorAll('.kbn-ch-clear')).toHaveLength(1)

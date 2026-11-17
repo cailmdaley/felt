@@ -111,7 +111,8 @@ describe('a constitution\'s view', () => {
   it('says a question it waits on, gold, and leaves no band for words a constitution never said', () => {
     const { page } = made(asked)
     expect(page.el.querySelector('.ov-needs')!.textContent).toBe('asks')
-    expect(made(root, { waits: () => new Map([['hub', { id: 'p', at: now, kind: 'post', text: 'Read this.' }]]) }).page.el.querySelector('.ov-needs')!.textContent).toBe('posted')
+    // A post it waits with needs no word: its words stand below the head.
+    expect(made(root, { waits: () => new Map([['hub', { id: 'p', at: now, kind: 'post', text: 'Read this.' }]]) }).page.el.querySelector('.ov-needs')).toBeNull()
     expect(made(idle).page.el.querySelector<HTMLElement>('.ov-said')!.hidden).toBe(true)
   })
 

@@ -89,13 +89,10 @@ try {
     // Closed to its chair, then marked for the human's review: an item, and its line's end.
     assert.ok(said.some(([who, what]) => who === 'covariance' && what === 'end:closed'), 'the close ends its line')
     assert.ok(said.some(([who, what]) => who === 'beam' && what === 'start'), 'the silent beam window shows only as its line')
-    // An item on a line names its kind; its slug shows only when the line's start is out of sight.
-    assert.equal(await page.locator('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"] .kbn-ch-who .kbn-ch-kind').textContent(), 'posted')
-    const startInSight = await page.evaluate(() => {
-      const list = document.querySelector('.kbn-ch > .kbn-ch-stream'), start = list.querySelector('[data-fiber="cmbx/kappa-tsz"][data-what="start"]')
-      return start.offsetTop + start.offsetHeight > list.scrollTop && start.offsetTop < list.scrollTop + list.clientHeight
-    })
-    assert.equal(await page.locator('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"] .kbn-ch-who-slug').isVisible(), !startInSight)
+    // A post's head names its thread and says no word the stream already implies; a question says it asks.
+    assert.equal(await page.locator('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"] .kbn-ch-who').textContent(), 'kappa-tsz')
+    assert.equal(await page.locator('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"] .kbn-ch-kind').count(), 0)
+    assert.equal(await page.locator('.kbn-ch-item[data-kind="ask"] .kbn-ch-kind').textContent(), 'asks')
     // The channel's head carries its chair's pages; its console speaks to its chair, by slugs.
     assert.ok(await page.locator('.kbn-ch-head .kbn-ch-pages [data-part="constitution"]').isVisible())
     assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-band-title').textContent(), 'cmbx')
@@ -164,6 +161,8 @@ try {
       await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'unions')
       // A dozen threads' posts to the human through the day, a hub's figure, its chair's round, and a thread's question.
       await page.waitForFunction(() => document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-item').length === 14)
+      // The chains thread's second post, three minutes after its first, groups under its head.
+      assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('.kbn-ch-item[data-grouped]')].map(el => el.dataset.slug)), ['chains'])
       // A dozen lines at once keep to a narrow margin: a bundle and at most three lanes, the gutter 34px wide.
       assert.deepEqual(await page.evaluate(() => [...new Set([...document.querySelectorAll('.kbn-ch-gutter')].map(el => el.getAttribute('width')))]), ['34'])
       // The ring counts the threads running now; the bundle lists that same set, one thread row each, none twice.

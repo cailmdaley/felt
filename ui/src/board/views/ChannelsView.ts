@@ -22,7 +22,7 @@ import { headerIcon, type HeaderIcon } from '../workspace/headerIcon.js'
 import { declaredTitle, watchDocumentTitles } from '../workspace/DocumentTitles.js'
 import { docButtons } from '../workspace/docButtons.js'
 import { Unfold, type UnfoldFile } from '../elements/filePreview.js'
-import { kindWord, post } from '../elements/post.js'
+import { groups, kindWord, post } from '../elements/post.js'
 import { doing, threadRow } from '../elements/threadRow.js'
 import { onDesk } from '../workspace/fiberPageState.js'
 import type { Dock } from '../workspace/Dock.js'
@@ -148,12 +148,8 @@ export class ChannelsView implements TemporalView {
   private returnTo: string | null = null
   /** The reader stands over Channels: nothing redraws beneath it. */
   private away = false
-  /** The stream's tube map as last drawn, for naming lines on what is in sight. */
-  private tube: Tube | null = null
   /** The threads running now, as the stream was last drawn ({@link runningNow}). */
   private running: KanbanCard[] = []
-  /** A frame asked for to name the lines in sight after a scroll. */
-  private naming = 0
   /** The stream follows what arrives while the reader is at its foot. */
   private following = true
   private railHidden = false
@@ -257,7 +253,6 @@ export class ChannelsView implements TemporalView {
     this.stream.addEventListener('scroll', () => {
       const list = this.stream!
       this.following = list.scrollHeight - list.scrollTop - list.clientHeight <= FOLLOW_PX
-      if (!this.naming) this.naming = requestAnimationFrame(() => { this.naming = 0; this.nameLines() })
     }, { passive: true })
     this.dock = this.ctx!.workspace!.console({ keepPlace: true })
     this.dock.el.hidden = true
@@ -523,11 +518,13 @@ export class ChannelsView implements TemporalView {
     }
     const waits = this.ctx!.workspace!.board.waiting
     // A row draws an entry; the thread's state, which moves while its worker runs, is painted on it in place.
-    const said = entries.map(entry => [entry.id, entry.kind, entry.at, entry.card.name, entry.line, entry.kind === 'station' ? [entry.what, entry.end] : [entry.text, entry.waiting, entry.clears, kindWord(entry), entry.files.map(file => file.fullPath)]])
+    // A line follows the one before it in its group: the row above, of the same thread, moments before.
+    const grouped = entries.map((entry, row) => { const before = entries[row - 1]; return entry.kind !== 'station' && before?.kind !== 'station' && groups(before, entry) })
+    const said = entries.map((entry, row) => [entry.id, entry.kind, entry.at, entry.card.name, entry.line, entry.kind === 'station' ? [entry.what, entry.end] : [entry.text, entry.waiting, entry.clears, kindWord(entry), grouped[row], entry.files.map(file => file.fullPath)]])
     const stream = JSON.stringify([channel.key, failed, said, entries.map(entry => [attentionOf(entry.card, waits), turnOf(entry.card).turn])])
     if (stream !== this.sigs.stream) {
       this.sigs.stream = stream
-      const tube = this.tube = layTube(entries)
+      const tube = layTube(entries)
       // The lanes share their room, each step no wider than the mock's nine pixels.
       this.stream.style.setProperty('--kbn-ch-tube', `${TUBE.gutter}px`)
       const lay = { waits, now, last: entries.length - 1 }
@@ -543,7 +540,7 @@ export class ChannelsView implements TemporalView {
       const kept = new Set<string>()
       this.rebuild(this.stream, [count, ...entries.map((entry, row) => {
         const sig = JSON.stringify(said[row]), was = this.rows.get(entry.id)
-        const node = was?.sig === sig ? was.node : entry.kind === 'station' ? this.stationRow(entry, now) : this.itemRow(entry, now)
+        const node = was?.sig === sig ? was.node : entry.kind === 'station' ? this.stationRow(entry, now) : this.itemRow(entry, now, grouped[row])
         this.rows.set(entry.id, { sig, node })
         kept.add(entry.id)
         if (was?.node === node && entry.kind !== 'station') node.querySelector(':scope > .constitution-state-dot')?.replaceWith(this.dot(entry))
@@ -561,7 +558,6 @@ export class ChannelsView implements TemporalView {
       this.sweep(new Set(entries.flatMap(entry => entry.kind === 'station' ? [] : [`item:${entry.id}`])))
       if (!entries.length) this.stream.append(el('li', 'kbn-ch-hush', failed ? 'This channel\'s history could not be read; trying again.' : 'Nothing addressed to you here yet.'))
       if (this.following) this.stream.scrollTop = this.stream.scrollHeight
-      this.nameLines()
     }
     for (const age of this.layout!.querySelectorAll<HTMLElement>('[data-at]')) age.textContent = ago(Number(age.dataset.at), now)
   }
@@ -576,7 +572,7 @@ export class ChannelsView implements TemporalView {
     const said = this.entriesDrawn.flatMap(entry => {
       if (entry.line !== line.id) return []
       const what = entry.kind === 'station' ? { start: 'started', tick: 'handed off', end: entry.end ?? 'closed' }[entry.what] : kindWord(entry)
-      return [`${what} ${ago(entry.at, now)}`]
+      return [[what, ago(entry.at, now)].filter(Boolean).join(' ')]
     })
     const title = `${slug(line.card)}: ${[...line.from < 0 ? ['running before this stretch'] : [], ...said].join(', ')}`
     this.titles.set(line.id, title)
@@ -693,25 +689,6 @@ export class ChannelsView implements TemporalView {
     this.returnTo = from
     this.ctx?.workspace?.openFromDesk(card)
   }
-  /**
-   * Names each line once on what is in sight: on its start row when that is
-   * in sight, else on its first item in sight; otherwise only its tooltip
-   * names it.
-   */
-  private nameLines(): void {
-    const list = this.stream, tube = this.tube
-    if (!list || !tube) return
-    const top = list.scrollTop, bottom = top + list.clientHeight
-    const rows = [...list.querySelectorAll<HTMLElement>(':scope > [data-row]')]
-    const seen = (node: HTMLElement): boolean => node.offsetTop + node.offsetHeight > top && node.offsetTop < bottom
-    const named = new Set<HTMLElement>()
-    for (const line of tube.lines) {
-      if (line.from >= 0 && rows[line.from] && seen(rows[line.from])) continue
-      const first = rows.find((node, index) => tube.rows[index]?.own?.line === line && node.classList.contains('kbn-ch-item') && seen(node))
-      if (first) named.add(first)
-    }
-    for (const node of rows) node.toggleAttribute('data-named', named.has(node))
-  }
   /** A station on a line: a start's ring and slug, a tick, or an end's terminus; the slug is written here, once per line. */
   private stationRow(station: Station, now: number): HTMLLIElement {
     const row = el('li', `kbn-ch-station kbn-ch-st-${station.what}`)
@@ -733,11 +710,11 @@ export class ChannelsView implements TemporalView {
     return row
   }
   /** One thing a worker addressed to the human, as a post (elements/post.ts). */
-  private itemRow(item: Item, now: number): HTMLLIElement {
+  private itemRow(item: Item, now: number, grouped: boolean): HTMLLIElement {
     const id = `item:${item.id}`
     const open = (): void => { this.returnTo = id; this.ctx?.workspace?.openFromDesk(item.card) }
     return post(item, {
-      now, dot: this.dot(item), open, clear: item.clears ? this.clear(item.clears, item.card) : undefined,
+      now, dot: this.dot(item), open, grouped, clear: item.clears ? this.clear(item.clears, item.card) : undefined,
       previews: item.kind === 'close' || item.files.length ? this.previews(item, id) : undefined,
     })
   }

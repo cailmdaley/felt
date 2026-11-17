@@ -1,10 +1,13 @@
-/* An item: its dot at the gutter's edge, a station on its line; then who (unless its line says), what kind and when, its one line and its pages. */
+/* A post: its dot at the gutter's edge, a station on its line; then its head (who, its office, what it asks, when), its words and its files.
+   Posts from different threads stand 8px apart; a line grouped under the one before it, 2px. */
 .kbn-ch-item {
   position: relative;
   display: block;
-  padding: 8px 20px 10px calc(var(--kbn-ch-tube) + 6px);
+  padding: 8px 20px 0 calc(var(--kbn-ch-tube) + 6px);
   cursor: pointer;
 }
+.kbn-ch-item[data-grouped] { padding-top: 2px; }
+.kbn-ch-item[data-grouped] > .constitution-state-dot { visibility: hidden; }
 .kbn-ch-item:hover { background: linear-gradient(to right, transparent var(--kbn-ch-tube), color-mix(in srgb, var(--kbn-ink) 4%, transparent) 0); }
 .kbn-ch-item[data-waiting] {
   background: linear-gradient(to right, transparent var(--kbn-ch-tube), var(--kbn-owed-bright) 0, var(--kbn-owed-bright) calc(var(--kbn-ch-tube) + 2px), color-mix(in srgb, var(--kbn-owed-bright) 7%, transparent) 0);
@@ -21,27 +24,28 @@
 .kbn-ch-who:hover { color: var(--kbn-ink-soft); }
 .kbn-ch-kind { font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
 .kbn-ch-item[data-waiting] .kbn-ch-kind { color: var(--kbn-owed-deep, var(--kbn-ink)); font-weight: 600; }
-/* An item on a line names its kind as its button, and its line's slug only where the line is named on it. */
-.kbn-ch-who[data-lined] { display: inline-flex; align-items: baseline; gap: 8px; font: inherit; color: inherit; }
-.kbn-ch-item:not([data-named]) .kbn-ch-who-slug { display: none; }
-.kbn-ch-who-slug { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 var(--type-row)/var(--leading-ui) var(--font-mono); color: var(--line, var(--kbn-ink)); }
-/* Named or not, an item's head keeps one line, so naming it on a scroll moves nothing. */
-.kbn-ch-item[data-line] .kbn-ch-item-head { flex-wrap: nowrap; }
-.kbn-ch-item[data-line] .kbn-ch-who[data-lined] { min-width: 0; }
-.kbn-ch-item[data-line] :is(.kbn-ch-kind, .kbn-ch-age, .kbn-ch-clear) { flex: none; white-space: nowrap; }
+/* Its head keeps one line: the slug in its line's colour, its office in small caps. */
+.kbn-ch-item-head { flex-wrap: nowrap; }
+.kbn-ch-who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--line, var(--kbn-ink)); }
+.kbn-ch-role { flex: none; font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); white-space: nowrap; }
+.kbn-ch-item-head :is(.kbn-ch-kind, .kbn-ch-age, .kbn-ch-clear) { flex: none; white-space: nowrap; }
+/* Grouped, the head steps aside: who and what stay for assistive technology, the age shows on hover, the clear stays. */
+.kbn-ch-item[data-grouped] .kbn-ch-item-head { position: absolute; top: 2px; right: 20px; z-index: 1; }
+.kbn-ch-item[data-grouped] :is(.kbn-ch-who, .kbn-ch-role) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.kbn-ch-item[data-grouped]:not(:hover, :focus-within) .kbn-ch-age { visibility: hidden; }
 /* A waiting post's clear: a small check at the head's end, the post's one act. */
 .kbn-ch-clear {
   margin-left: auto; padding: 0 6px; border: 1px solid var(--kbn-rule-strong); border-radius: 3px; background: transparent;
   font: var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-owed-deep, var(--kbn-ink)); cursor: pointer;
 }
 .kbn-ch-clear:hover, .kbn-ch-clear:focus-visible { background: color-mix(in srgb, var(--kbn-owed-bright) 18%, transparent); }
-.kbn-ch-item-text {
-  margin: 2px 0 0; font: var(--type-row)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink);
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere;
-}
-/* Its one line runs on, its paragraphs and items together. */
-.kbn-ch-item-text * { display: inline; margin: 0; padding: 0; }
-.kbn-ch-item-text :is(p, li) + :is(p, li)::before { content: ' '; }
+.kbn-ch-item-text { margin: 2px 0 0; font: var(--type-prose)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink); overflow-wrap: anywhere; }
+.kbn-ch-item[data-grouped] .kbn-ch-item-text { margin-top: 0; padding-right: 64px; }
+/* Its words as written, set close: paragraphs and lists a few pixels apart. */
+.kbn-ch-item-text > :first-child { margin-top: 0; }
+.kbn-ch-item-text > :last-child { margin-bottom: 0; }
+.kbn-ch-item-text :is(p, ul, ol, pre, blockquote) { margin: 4px 0; }
+.kbn-ch-item-text :is(ul, ol) { padding-left: 1.3em; }
 /* Its files below its words, at the stream's full width: the previews unfold in place (workspace/unfold.css). */
 .kbn-ch-previews { margin-top: 8px; }
 /* An unfolded file's bar pins below the band of pinned line names, the band's own offset taken back. */

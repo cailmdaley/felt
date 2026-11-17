@@ -66,7 +66,7 @@ export function wantOf(card: KanbanCard, waits: Waits): Want | null {
   const forReview = threadState(card) === 'to-review' || (card.column === 'orchestratorReview' && !!card.orphan)
   if (line?.kind === 'closed' || (line && !line.kind && forReview)) return review()
   // A line whose record has not loaded yet says only that it waits.
-  if (line) return { kind: line.kind === 'asked' ? 'ask' : 'post', text: line.text?.trim() || ({ asked: 'asks', post: 'posted' } as Record<string, string>)[line.kind ?? ''] || 'waiting', at: line.at, line }
+  if (line) return { kind: line.kind === 'asked' ? 'ask' : 'post', text: line.text?.trim() || (line.kind === 'asked' ? 'asks' : 'waiting'), at: line.at, line }
   if (turn.turn === 'question') return { kind: 'ask', text: 'stopped on a prompt', at: turn.since ?? (instant(card.lastActivityAt) || 1) }
   if (forReview) return review()
   return null
