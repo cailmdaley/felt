@@ -141,7 +141,7 @@ export class FamilyPage {
     const current = index.card(card), children = index.children(current), above = this.ancestors()
     const said = this.feeds.said(current), waits = this.feeds.waits()
     const wants = [current, ...above, ...index.subtree(current)].map(card => wantOf(card, waits))
-    const signature = JSON.stringify([Math.floor(now / 60_000), current, above, children, said, above.map(card => this.feeds.said(card)), wants, this.feeds.files(current).map(file => file.key)])
+    const signature = JSON.stringify([Math.floor(now / 60_000), current, above, children, said, [...above, ...index.subtree(current)].map(card => this.feeds.said(card)), wants, this.feeds.files(current).map(file => file.key)])
     if (signature === this.signature) return
     this.signature = signature
     this.paint(current, now)
