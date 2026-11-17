@@ -118,8 +118,8 @@ export function mountPdfViewer(
       }
       linkService.setDocument(document)
       pageCount = document.numPages
-      viewer.setDocument(document)
       firstPage = document.getPage(1).then(() => {}, () => {})
+      viewer.setDocument(document)
       updatePageLabel()
     } catch (error) {
       dispose()
