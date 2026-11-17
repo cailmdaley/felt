@@ -238,7 +238,7 @@ and `ui/test/zoneReads.test.ts` fails on a local-zone `Date` read anywhere
 else.
 CI runs `npm test`, then type-checks and builds the bundle with
 `npm run build`. Its Journeys job runs the board's browser journeys
-(`npm run e2e`) on every push to `main`, about nine minutes and waited on by
+(`npm run e2e`) on every push to `main`, six to nine minutes and waited on by
 no other job.
 
 ### Deploying
