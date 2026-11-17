@@ -188,54 +188,6 @@
   font: var(--type-label)/var(--leading-solid) var(--font-serif); color: var(--kbn-ink-soft); font-variant-numeric: tabular-nums;
 }
 .kbn-ch-count-ring[hidden] { display: none; }
-/* An item: its dot at the gutter's edge, a station on its line; then who (unless its line says), what kind and when, its one line and its pages. */
-.kbn-ch-item {
-  position: relative;
-  display: block;
-  padding: 8px 20px 10px calc(var(--kbn-ch-tube) + 6px);
-  cursor: pointer;
-}
-.kbn-ch-item:hover { background: linear-gradient(to right, transparent var(--kbn-ch-tube), color-mix(in srgb, var(--kbn-ink) 4%, transparent) 0); }
-.kbn-ch-item[data-waiting] {
-  background: linear-gradient(to right, transparent var(--kbn-ch-tube), var(--kbn-owed-bright) 0, var(--kbn-owed-bright) calc(var(--kbn-ch-tube) + 2px), color-mix(in srgb, var(--kbn-owed-bright) 7%, transparent) 0);
-}
-.kbn-ch-item > .constitution-state-dot { position: absolute; top: 8px; left: calc(var(--kbn-ch-tube) - 14px); width: 14px; height: 24px; }
-/* On a line, the dot, coloured by the thread's state, is ringed in the line's. */
-.kbn-ch-item[data-line] > .constitution-state-dot::before { box-shadow: 0 0 0 1.5px var(--kbn-paper), 0 0 0 3px var(--line); }
-.kbn-ch-item-body { min-width: 0; }
-.kbn-ch-item-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; font: var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); }
-.kbn-ch-who {
-  padding: 0; border: 0; background: none; cursor: pointer; text-align: left;
-  font: 500 var(--type-row)/var(--leading-ui) var(--font-mono); color: var(--kbn-ink); overflow-wrap: anywhere;
-}
-.kbn-ch-who:hover { color: var(--kbn-ink-soft); }
-.kbn-ch-kind { font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
-.kbn-ch-item[data-waiting] .kbn-ch-kind { color: var(--kbn-owed-deep, var(--kbn-ink)); font-weight: 600; }
-/* An item on a line names its kind as its button, and its line's slug only where the line is named on it. */
-.kbn-ch-who[data-lined] { display: inline-flex; align-items: baseline; gap: 8px; font: inherit; color: inherit; }
-.kbn-ch-item:not([data-named]) .kbn-ch-who-slug { display: none; }
-.kbn-ch-who-slug { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 var(--type-row)/var(--leading-ui) var(--font-mono); color: var(--line, var(--kbn-ink)); }
-/* Named or not, an item's head keeps one line, so naming it on a scroll moves nothing. */
-.kbn-ch-item[data-line] .kbn-ch-item-head { flex-wrap: nowrap; }
-.kbn-ch-item[data-line] .kbn-ch-who[data-lined] { min-width: 0; }
-.kbn-ch-item[data-line] :is(.kbn-ch-kind, .kbn-ch-age, .kbn-ch-clear) { flex: none; white-space: nowrap; }
-/* A waiting post's clear: a small check at the head's end, the post's one act. */
-.kbn-ch-clear {
-  margin-left: auto; padding: 0 6px; border: 1px solid var(--kbn-rule-strong); border-radius: 3px; background: transparent;
-  font: var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-owed-deep, var(--kbn-ink)); cursor: pointer;
-}
-.kbn-ch-clear:hover, .kbn-ch-clear:focus-visible { background: color-mix(in srgb, var(--kbn-owed-bright) 18%, transparent); }
-.kbn-ch-item-text {
-  margin: 2px 0 0; font: var(--type-row)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink);
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere;
-}
-/* Its one line runs on, its paragraphs and items together. */
-.kbn-ch-item-text * { display: inline; margin: 0; padding: 0; }
-.kbn-ch-item-text :is(p, li) + :is(p, li)::before { content: ' '; }
-/* Its files below its words, at the stream's full width: the previews unfold in place (workspace/unfold.css). */
-.kbn-ch-previews { margin-top: 8px; }
-/* An unfolded file's bar pins below the band of pinned line names, the band's own offset taken back. */
-.kbn-ch-previews .uf-bar { top: -12px; }
 
 /* The console, docked under the stream. */
 .kbn-ch > .ws-dock { flex: none; }
@@ -250,5 +202,4 @@
   .kbn-ch-pick { padding: 9px 10px; font-size: var(--type-prose); }
   .kbn-ch-back { display: inline-grid; margin-left: -6px; }
   .kbn-ch-head { padding: 6px 10px 6px 16px; }
-  .kbn-ch-item { padding-right: 16px; }
 }

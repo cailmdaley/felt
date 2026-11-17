@@ -1,9 +1,9 @@
-import type { DocumentKey } from './DocumentBridge.js'
+import type { DocumentKey } from '../workspace/DocumentBridge.js'
 import { buildFileViewer, disposeFileViewer, resumeFileViewer, suspendFileViewer } from '../FileViewerPanel.js'
-import { forwardDocumentKey } from './DocumentBridge.js'
-import { documentKind, parseDocKey, type DocKey } from './documents.js'
-import { Thumbnail } from './Thumbnail.js'
-import './unfold.css'
+import { forwardDocumentKey } from '../workspace/DocumentBridge.js'
+import { documentKind, parseDocKey, type DocKey } from '../workspace/documents.js'
+import { Thumbnail } from '../workspace/Thumbnail.js'
+import './filePreview.css'
 
 /** A file the previews show: its document key and the name its bar carries. */
 export interface UnfoldFile { key: DocKey; name: string }

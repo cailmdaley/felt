@@ -30,24 +30,6 @@
 .ov-title .constitution-state-dot { flex: none; width: 16px; height: 20px; }
 .ov-main { box-sizing: border-box; padding-bottom: 24px; }
 
-/* A thread below, one column of rows sized to what they hold: dot, slug, its run, what it wants or its faint word, the chevron that opens it. */
-.ov-thread {
-  cursor: pointer; outline: none; align-items: baseline; padding: 2px 0;
-  font: var(--type-meta)/var(--leading-ui) var(--font-mono); color: var(--ws-ink-soft);
-}
-.ov-thread:is(:hover, :focus-visible) { background: var(--ws-hover); }
-.ov-thread .constitution-state-dot { flex: none; align-self: center; width: 20px; height: 20px; }
-.ov-slug { min-width: 0; overflow-wrap: anywhere; color: var(--ws-ink); }
-.ov-ancestor .ov-slug { color: var(--ws-ink-soft); }
-.ov-word { color: var(--fm-text, var(--ws-ink-muted)); font-family: var(--font-serif); white-space: nowrap; }
-.ov-time { color: var(--ws-ink-muted); opacity: .8; font: var(--type-meta)/var(--leading-ui) var(--font-serif); white-space: nowrap; }
-/* What a waiting thread wants, in its words, one line. */
-.ov-want { max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ws-ink); font: var(--type-meta)/var(--leading-ui) var(--font-serif); }
-.ov-want * { display: inline; margin: 0; padding: 0; font-size: inherit; line-height: inherit; }
-.ov-deep .ov-slug { color: var(--ws-ink-soft); }
-.ov-open { color: var(--ws-ink-muted); font: var(--type-row)/var(--leading-solid) var(--font-serif); opacity: .45; }
-.ov-thread:is(:hover, :focus-visible) .ov-open { opacity: 1; color: var(--ws-ink); }
-
 /* The head: its path, whether it needs the human and its run at a glance, then its pages and its acts. */
 .ov-head {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'path tools' 'facts tools';

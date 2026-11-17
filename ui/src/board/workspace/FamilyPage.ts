@@ -11,8 +11,8 @@ import { renderMarkdown } from '../utils.js'
 import type { ThreadIndex } from '../threads.js'
 import type { FiberActs } from './Dock.js'
 import { docButtons, type DocFeeds } from './docButtons.js'
-import { runGlance, runWords } from './runWords.js'
-import { Unfold } from './Unfold.js'
+import { Unfold } from '../elements/filePreview.js'
+import { runTime as time, threadRow } from '../elements/threadRow.js'
 import './family-page.css'
 
 /** What the view reads, and where it goes. */
@@ -37,13 +37,6 @@ const WANT_WORD: Readonly<Record<Want['kind'], string>> = { ask: 'asks', review:
 
 /** A thread the rows tuck away behind the quiet control: put to rest (a standing one between runs and a seat stay drawn), or archived. */
 const tuckable = (card: KanbanCard): boolean => card.column === 'tempered' || card.column === 'composted' || (card.column === 'resting' && card.shuttleKind !== 'standing')
-
-/** Its run at a glance, light; the whole of it on hover. */
-const time = (card: KanbanCard, now: number): HTMLElement => {
-  const glance = el('span', 'ov-time', runGlance(card, now))
-  glance.title = runWords(card, now)
-  return glance
-}
 
 /**
  * One view of a constitution, the same from the Desk, a channel, a role or a
@@ -208,7 +201,8 @@ export class FamilyPage {
     more.append(this.quiet)
     this.threads.replaceChildren(...drawn.map(({ child, below }) => {
       const item = el('li')
-      item.append(this.row(child, now, waits), ...below.map(deep => this.row(deep, now, waits, true)))
+      const open = (card: KanbanCard): void => this.feeds.view(card)
+      item.append(threadRow(child, { waits, now, open }), ...below.map(deep => threadRow(deep, { waits, now, open, deep: true })))
       return item
     }), ...tucked.length ? [more] : [])
     this.threads.hidden = !threads.length
@@ -245,21 +239,6 @@ export class FamilyPage {
     text.title = text.textContent ?? ''
     strip.append(rule, stateDot(card, waits, () => this.feeds.view(card)), el('span', 'ov-slug', slug(card)), time(card, now), text)
     return strip
-  }
-  /**
-   * A thread: its dot, slug and run, then what it wants when it waits on the
-   * human, or its faint word when quiet, and the chevron that says it opens.
-   * A thread `deep` below the row it is drawn under waits, and says so.
-   */
-  private row(card: KanbanCard, now: number, waits: Waits, deep = false): HTMLElement {
-    const row = this.opener(card, deep ? 'ov-thread ov-deep' : 'ov-thread'), want = wantOf(card, waits), attention = attentionOf(card, waits)
-    row.dataset.attention = attention
-    const open = el('span', 'ov-open', '›')
-    open.setAttribute('aria-hidden', 'true')
-    const word = want ? el('span', 'ov-want') : el('span', 'ov-word', attention === 'quiet' ? quietWord(card) : '')
-    if (want) { word.innerHTML = renderMarkdown(want.text); word.title = word.textContent?.replace(/\s+/g, ' ').trim() ?? '' }
-    row.append(stateDot(card, waits, () => this.feeds.view(card)), el('span', 'ov-slug', deep ? `↳ ${slug(card)}` : slug(card)), time(card, now), word, open)
-    return row
   }
   private paintHead(card: KanbanCard, now: number): void {
     const head = this.head

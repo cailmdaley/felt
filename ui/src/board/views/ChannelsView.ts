@@ -14,15 +14,15 @@ import { createRailReorder, type RailReorder } from '../channelRail.js'
 import { openActionMenu } from '../conversationMenu.js'
 import { stateDot } from '../stateDot.js'
 import { slug } from '../threadOutline.js'
-import { threadState } from '../threads.js'
-import { clearPost, renderMarkdown } from '../utils.js'
+import { clearPost } from '../utils.js'
 import { attentionOf, type Waits } from '../attention.js'
 import { turnOf } from '../turn.js'
 import { docKey } from '../workspace/documents.js'
 import { headerIcon, type HeaderIcon } from '../workspace/headerIcon.js'
 import { declaredTitle, watchDocumentTitles } from '../workspace/DocumentTitles.js'
 import { docButtons } from '../workspace/docButtons.js'
-import { Unfold, type UnfoldFile } from '../workspace/Unfold.js'
+import { Unfold, type UnfoldFile } from '../elements/filePreview.js'
+import { kindWord, post } from '../elements/post.js'
 import { onDesk } from '../workspace/fiberPageState.js'
 import type { Dock } from '../workspace/Dock.js'
 import { createViewPage } from './ViewPage.js'
@@ -102,10 +102,6 @@ function lastSeen(key: string): number {
   const value = Number(stored(SEEN + key) ?? NaN)
   return Number.isFinite(value) ? value : -Infinity
 }
-/** What an item says before its words. */
-const kindWord = (item: Item): string =>
-  item.kind === 'close' ? threadState(item.card) === 'to-review' ? 'for review' : 'closed' : { ask: 'asks', post: 'posted', file: 'sent', blocked: 'blocked' }[item.kind]
-
 /**
  * Channels: a rail of the channels (what waits on the human floated to the
  * top, the rest in the human's order, each movable and with a menu to hide,
@@ -728,51 +724,14 @@ export class ChannelsView implements TemporalView {
     }
     return row
   }
-  /**
-   * One thing a worker addressed to the human: its state dot, who, what kind
-   * and when, its one line, and the files it carries as previews that unfold
-   * in place. Choosing the item, outside its previews, opens the worker's view.
-   */
+  /** One thing a worker addressed to the human, as a post (elements/post.ts). */
   private itemRow(item: Item, now: number): HTMLLIElement {
-    const { card } = item
-    const row = el('li', 'kbn-ch-item')
-    row.dataset.kind = item.kind
-    row.dataset.slug = slug(card)
-    if (item.line) row.dataset.line = item.line
-    row.dataset.fiber = fiberOf(card)
-    row.toggleAttribute('data-waiting', item.waiting)
     const id = `item:${item.id}`
-    const open = (): void => { this.returnTo = id; this.ctx?.workspace?.openFromDesk(card) }
-    // On a line, the line says whose it is: the item names its kind, its slug shown only where the line is named on it.
-    const lined = !!item.line
-    const who = button('kbn-ch-who', lined ? '' : slug(card), open)
-    who.dataset.item = id
-    who.title = `Open ${card.name}`
-    who.toggleAttribute('data-lined', lined)
-    if (lined) {
-      who.setAttribute('aria-label', `${slug(card)} ${kindWord(item)}`)
-      who.append(el('span', 'kbn-ch-who-slug', slug(card)), el('span', 'kbn-ch-kind', kindWord(item)))
-    }
-    const age = el('span', 'kbn-ch-age', ago(item.at, now))
-    age.dataset.at = String(item.at)
-    const head = el('div', 'kbn-ch-item-head')
-    head.append(who, ...lined ? [] : [el('span', 'kbn-ch-kind', kindWord(item))], age)
-    if (item.clears) head.append(this.clear(item.clears, card))
-    const body = el('div', 'kbn-ch-item-body')
-    body.append(head)
-    if (item.text) {
-      const text = el('div', 'kbn-ch-item-text')
-      text.innerHTML = renderMarkdown(item.text)
-      body.append(text)
-    }
-    if (item.kind === 'close' || item.files.length) body.append(this.previews(item, id))
-    row.append(this.dot(item), body)
-    // The whole item opens the view, save its buttons, its previews and a selection.
-    row.addEventListener('click', event => {
-      if ((event.target as Element).closest('button, a, .uf') || getSelection()?.toString()) return
-      open()
+    const open = (): void => { this.returnTo = id; this.ctx?.workspace?.openFromDesk(item.card) }
+    return post(item, {
+      now, dot: this.dot(item), open, clear: item.clears ? this.clear(item.clears, item.card) : undefined,
+      previews: item.kind === 'close' || item.files.length ? this.previews(item, id) : undefined,
     })
-    return row
   }
   /** An item's state dot, which opens its worker's view. */
   private dot(item: Item): HTMLButtonElement {
