@@ -241,6 +241,40 @@ defmodule Shuttle.SessionBindingTest do
     assert EventStream.session_activity(name)["sid"].phase == "working"
   end
 
+  test "a successor session's runtime carries none of its predecessor's activity" do
+    now = DateTime.from_unix!(@now, :millisecond)
+
+    meta = %{
+      session: "pane",
+      agent_id: "test",
+      started_at: now,
+      last_activity_at: now,
+      session_uuid: "old"
+    }
+
+    quiet_at = System.system_time(:millisecond) - 30 * 60_000
+
+    activity = %{
+      "old" => %{last_event_at: quiet_at, phase: "working", since: quiet_at - 1},
+      "new" => %{
+        last_event_at: System.system_time(:millisecond),
+        phase: "working",
+        since: @now + 5
+      }
+    }
+
+    binding = fold([event("old", "session_start", @now), event("new", "session_start", @now + 1)])
+    index = Snapshot.runtime_index(%{"fiber" => meta}, activity)
+    assert index["fiber"].quiet_since == quiet_at
+
+    entry = %{fiber: %{"id" => "fiber", "shuttle" => %{"runtime" => %{"session_uuid" => "old"}}}}
+    runtime = Snapshot.put_runtime(entry, index, activity, binding).runtime
+
+    assert %{session_uuid: "new", phase: "working", phase_since: since} = runtime
+    assert since == @now + 5
+    refute Map.has_key?(runtime, :quiet_since)
+  end
+
   test "snapshot joins cache UUID, not tmux or missing worker metadata UUID" do
     now = DateTime.from_unix!(@now, :millisecond)
 

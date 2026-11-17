@@ -250,7 +250,9 @@ defmodule Shuttle.Poller.Snapshot do
                 )
 
               Map.has_key?(activity, uuid) ->
-                Map.merge(payload, activity_fields(Map.fetch!(activity, uuid)))
+                payload
+                |> Map.drop([:phase, :phase_since, :quiet_since])
+                |> Map.merge(activity_fields(Map.fetch!(activity, uuid)))
 
               true ->
                 Map.drop(payload, [:phase, :phase_since, :quiet_since])

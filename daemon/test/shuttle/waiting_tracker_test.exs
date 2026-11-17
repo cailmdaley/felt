@@ -148,11 +148,12 @@ defmodule Shuttle.WaitingTrackerTest do
 
     assert since.(sessions) == %{phase: "waiting", last_event_at: @now + 7, since: @now + 6}
 
-    all = events ++ [at.("notification", 4), at.("pre_tool_use", 5), at.("stop", 6)]
-    known = fold(Enum.take(all, 3))
-
-    assert Tracker.replay_events(known, all, @now)["session-a"].since ==
-             fold(all)["session-a"].since
+    # A replayed suffix inside the prefix's phase keeps the prefix's since.
+    tools = [at.("pre_tool_use", 8), at.("post_tool_use", 9)]
+    known = fold(events)
+    replayed = Tracker.replay_events(known, events ++ tools, @now)
+    assert replayed["session-a"].since == @now + 1
+    assert replayed["session-a"] == fold(events ++ tools)["session-a"]
   end
 
   test "turn transitions derive working, waiting, attention, and terminal states" do

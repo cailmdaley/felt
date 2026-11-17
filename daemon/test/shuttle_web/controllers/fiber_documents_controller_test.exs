@@ -402,6 +402,62 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     assert entry["runtime"]["agent"] == "codex"
   end
 
+  test "both feeds keep their ETags while a working worker's events move, and change on its phase",
+       %{store: store} do
+    uid = "01KVRTNM000000000000000002"
+
+    write_fiber!(store, "tests/busy", """
+    ---
+    id: #{uid}
+    name: Busy worker
+    status: active
+    shuttle:
+      kind: oneshot
+      host: test-host
+    ---
+
+    Body.
+    """)
+
+    poller = warm_poller!(store)
+    now = DateTime.utc_now()
+
+    replace_and_publish!(poller, fn state ->
+      %{
+        state
+        | running:
+            Map.put(state.running, uid, %{
+              fiber_id: "tests/busy",
+              pid: self(),
+              uid: uid,
+              session: "busy-#{uid}-shuttle",
+              session_uuid: "busy-session",
+              agent_id: "claude",
+              started_at: now,
+              last_activity_at: now
+            })
+      }
+    end)
+
+    began = System.system_time(:millisecond) - 60_000
+
+    etags = fn last_event_at, phase ->
+      Shuttle.Test.Env.put_app_env(:waiting_phases_source, fn ->
+        %{"busy-session" => %{last_event_at: last_event_at, phase: phase, since: began}}
+      end)
+
+      for path <- ["/api/v1/fibers?shuttle=true", "/api/v1/fibers/composite"] do
+        conn = get(api_conn(), path)
+        assert conn.status == 200
+        get_resp_header(conn, "etag")
+      end
+    end
+
+    working = etags.(began + 1_000, "working")
+    assert etags.(began + 30_000, "working") == working
+    refute etags.(began + 30_000, "waiting") == working
+  end
+
   test "GET /api/v1/fibers?shuttle=true serves the warm poller cache with runtime AND held overlays",
        %{store: store} do
     # This fiber is NEVER written to disk: only the poller's in-memory document
