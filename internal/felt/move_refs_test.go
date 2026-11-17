@@ -488,6 +488,40 @@ func TestMoveSubtreeCarriesFileLinks(t *testing.T) {
 	}
 }
 
+// A move leaves every fiber it does not concern byte for byte, however its
+// file links are spelled, in the store and in a symlink-mounted repository.
+func TestMoveSubtreeLeavesUnrelatedFileLinks(t *testing.T) {
+	t.Parallel()
+	for _, move := range [][2]string{{"a/x", "b/x"}, {"a", "anew"}, {"a/x", "a/x2"}} {
+		t.Run(move[1], func(t *testing.T) {
+			t.Parallel()
+			s := newMoveFixture(t)
+			mount := t.TempDir()
+			if err := os.Symlink(mount, filepath.Join(s.Root(), "proj")); err != nil {
+				t.Fatal(err)
+			}
+			unrelated := map[string]string{
+				"unrelated":  fiber("U", "[u](../unrelated/u.png) [v](./v.png) [w](../b/../unrelated/w.png)"),
+				"ba":         fiber("BA", "[ba](../ba/ba.md) [ax](../a/../ba/f.png)"),
+				"proj/notes": fiber("N", "[fig](../../proj/fig.png) [sib](../notes/x.png) [deep](./sub/../y.png)"),
+				"proj/fig":   fiber("F", "[own](../fig/fig.md)"),
+				"b/keep":     fiber("K", "[k](../../b/keep/k.png)"),
+			}
+			for id, content := range unrelated {
+				writeFiberFile(t, s, id, content)
+			}
+			if _, err := s.MoveSubtree(move[0], move[1]); err != nil {
+				t.Fatalf("MoveSubtree: %v", err)
+			}
+			for id, want := range unrelated {
+				if got := readFiberFile(t, s, id); got != want {
+					t.Errorf("%s changed:\n%s\nwant:\n%s", id, got, want)
+				}
+			}
+		})
+	}
+}
+
 // Fibers outside the slug convention stay addressable: links to them in every
 // form felt reads are carried when an ancestor moves.
 func TestMoveSubtreeCarriesLinksToNonConformingSlugs(t *testing.T) {

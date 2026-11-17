@@ -1242,29 +1242,28 @@ func DocumentDir(f *Felt) string {
 // move of oldID to newID. The link resolves against sourceDir, the directory
 // of the source's document before the move; the file it names moves with the
 // subtree when it lies inside it, and the moved fiber's own document takes
-// its new basename. The link is respelled from the source's directory after
-// the move, so a link out of a subtree whose depth changed still arrives.
-// An unknown sourceDir leaves the link alone.
+// its new basename. A link is respelled, from the source's directory after
+// the move, only when the file or the source moves and the spelling as
+// written would no longer reach the file; every other link stays byte for
+// byte. An unknown sourceDir leaves the link alone.
 func rewriteMovedFileLink(sourceDir, target, oldID, newID string) (string, bool) {
 	if sourceDir == "" {
 		return "", false
 	}
-	file := path.Join(sourceDir, target)
-	if file == path.Join(oldID, path.Base(oldID)+FileExt) {
+	oldFile := path.Join(sourceDir, target)
+	file, fileMoves := remapIDPrefix(oldFile, oldID, newID)
+	if oldFile == path.Join(oldID, path.Base(oldID)+FileExt) {
 		file = path.Join(newID, path.Base(newID)+FileExt)
-	} else {
-		file, _ = remapIDPrefix(file, oldID, newID)
 	}
-	newDir, _ := remapIDPrefix(sourceDir, oldID, newID)
+	newDir, sourceMoves := remapIDPrefix(sourceDir, oldID, newID)
+	if !fileMoves && !sourceMoves || path.Join(newDir, target) == file {
+		return "", false
+	}
 	rel, err := filepath.Rel(filepath.FromSlash(newDir), filepath.FromSlash(file))
 	if err != nil {
 		return "", false
 	}
-	rel = filepath.ToSlash(rel)
-	if rel == path.Clean(target) {
-		return "", false
-	}
-	return rel, true
+	return filepath.ToSlash(rel), true
 }
 
 // rewriteMovedRef decides one reference's fate when oldID moves to newID. The
