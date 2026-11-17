@@ -278,3 +278,26 @@ export function registerRexFollowJourneys(test) {
     await page.locator('.ws-page.ws-selected[data-key^="family:"] .ov-head').waitFor()
   }, { width: 1440, height: 900 }, 'reduce', false)
 }
+
+/** `t` on a post in Channels unfolds its worker's tapestry in the post's previews, in sight; again, it folds; a worker with none moves nothing. */
+export function registerPostTapestryJourneys(test) {
+  test('t on a post in Channels unfolds its tapestry in place, and folds it again', async page => {
+    await page.goto(channelsUrl)
+    await page.locator('.kbn-ch-pick', { hasText: 'cmbx' }).first().click()
+    const post = fiber => page.locator(`.kbn-ch-item[data-fiber="${fiber}"]`).last()
+    await post('cmbx/foregrounds').locator('.kbn-ch-who').focus()
+    await page.keyboard.press('t')
+    await page.waitForTimeout(200)
+    assert.equal(await post('cmbx/foregrounds').locator('.uf').count(), 0, 'no tapestry, nothing unfolds')
+    await post('cmbx/kappa-tsz').locator('.kbn-ch-who').focus()
+    await page.keyboard.press('t')
+    const unfold = post('cmbx/kappa-tsz').locator('.uf[data-unfolded]')
+    await unfold.waitFor()
+    assert.equal(await unfold.locator('.uf-name').textContent(), 'Tapestry')
+    assert.ok(await unfold.locator('.uf-bar').isVisible(), 'its bar in sight')
+    assert.equal(await page.locator('.ws-reader:not(.ws-dormant)').count(), 0, 'no reader opens')
+    await post('cmbx/kappa-tsz').locator('.kbn-ch-who').focus()
+    await page.keyboard.press('t')
+    await post('cmbx/kappa-tsz').locator('.uf:not([data-unfolded])').waitFor()
+  }, { width: 1280, height: 860 }, 'reduce', false)
+}

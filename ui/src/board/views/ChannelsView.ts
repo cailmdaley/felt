@@ -617,7 +617,7 @@ export class ChannelsView implements TemporalView {
       this.titles.clear()
       const kept = new Set<string>()
       this.rebuild(this.stream, [count, ...entries.map((entry, row) => {
-        const sig = JSON.stringify(said[row]), was = this.rows.get(entry.id)
+        const sig = JSON.stringify([said[row], leads[row]]), was = this.rows.get(entry.id)
         const node = was?.sig === sig ? was.node : entry.kind === 'station' ? this.stationRow(entry, now) : this.itemRow(entry, now, grouped[row])
         this.rows.set(entry.id, { sig, node })
         kept.add(entry.id)
@@ -786,7 +786,7 @@ export class ChannelsView implements TemporalView {
     const open = (): void => this.leaveFor(id, () => this.ctx?.workspace?.openFromDesk(item.card))
     return post(item, {
       now, dot: this.dot(item), open, grouped, clear: this.check(item),
-      previews: item.kind === 'close' || item.files.length ? this.previews(item, id) : undefined,
+      previews: item.kind === 'close' || item.files.length || this.unfolds.get(id)?.lead ? this.previews(item, id) : undefined,
     })
   }
   /** An item's state dot, which opens its worker's view. */
@@ -904,6 +904,29 @@ export class ChannelsView implements TemporalView {
       this.showPreviews(made)
       this.draw()
     })
+  }
+  /**
+   * `t` on a post: its worker's tapestry unfolds in the post's previews, at
+   * their head as a close's leads them, or folds if it is the one unfolded;
+   * a worker with no tapestry says so.
+   */
+  private async unfoldTapestry(id: string): Promise<void> {
+    const item = this.entriesDrawn.find((entry): entry is Item => entry.kind !== 'station' && `item:${entry.id}` === id)
+    const lead = item && await this.ctx?.workspace?.globeHost.feeds.lead(item.card)
+    if (!item || !this.entriesDrawn.includes(item)) return
+    if (!lead) { announce(`${slug(item.card)} has no tapestry`); return }
+    const held = this.unfolds.get(id)
+    if (held?.unfold.unfolded === lead.key) { held.unfold.fold(); return }
+    if (held?.lead?.key !== lead.key) {
+      const made = held ?? (this.previews(item, id), this.unfolds.get(id)!)
+      made.lead = { key: lead.key, name: lead.name, at: lead.at }
+      this.showPreviews(made)
+      this.sigs.stream = ''
+      this.drawChannel()
+    }
+    const made = this.unfolds.get(id)
+    made?.unfold.unfold(lead.key)
+    made?.unfold.el.scrollIntoView({ block: 'start' })
   }
   /** Lets go of the previews the stream no longer draws. */
   private sweep(wanted: ReadonlySet<string>): void {
@@ -1087,6 +1110,9 @@ export class ChannelsView implements TemporalView {
     if (event.key === 'k') { this.step(-1); return true }
     if (event.key === '[') { this.setRail(this.railShown()); return true }
     if (event.key === 'Enter' && !active?.closest('button, a, input') && this.channel) { this.dock?.focus(); return true }
+    // t unfolds the tapestry of the post in focus beneath it.
+    const post = event.key === 't' ? active?.closest<HTMLElement>('.kbn-ch-item')?.querySelector<HTMLElement>('[data-item]')?.dataset.item : undefined
+    if (post) { void this.unfoldTapestry(post); return true }
     // e clears the line in focus, as its ✓ does.
     const check = event.key === 'e' ? active?.closest('.kbn-ch-item')?.querySelector<HTMLButtonElement>('.kbn-ch-clear:not(:disabled)') : null
     if (check) { check.click(); return true }
