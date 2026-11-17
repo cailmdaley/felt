@@ -228,6 +228,8 @@ export function registerMapViewJourneys(test) {
     const name = label => page.locator('.globe-names .globe-name').filter({ hasText: label })
     const peek = page.locator('.globe-peek-name')
     const before = await asked(page)
+    // The Globe draws its threads once the fleet's feeds answer; until then there is nothing to walk to.
+    await page.locator('.globe-names .globe-name').first().waitFor()
     await page.keyboard.press('ArrowRight')
     await peek.filter({ hasText: 'Choose the response cut' }).waitFor()
     const report = name('Report')
