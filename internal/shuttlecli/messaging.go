@@ -291,7 +291,6 @@ exit 1 means rejected, unknown, or another command error.`,
 					return err
 				}
 				instant := resolved.Format(time.RFC3339Nano)
-				fmt.Fprintf(cmd.ErrOrStderr(), "scheduling %s for %s; to retry, send it again with --message-id %s --at %s\n", request.MessageID, instant, request.MessageID, instant)
 				receipt, err := a.queueInFiber(f, block, request, request.Wake && cmd.Flags().Changed("wake"), instant)
 				if err != nil {
 					return err

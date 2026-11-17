@@ -180,3 +180,33 @@ func TestDelayedRetryWithPrintedInstant(t *testing.T) {
 		t.Fatalf("sent %v, want the retry to carry %s to %s", got, instant, messageTargetFiberUID)
 	}
 }
+
+// A scheduled message a stale daemon would not deliver prints only the
+// refusal; one that is sent first prints the command that retries it.
+func TestScheduledMessageRefusalIsAllItPrints(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		level int
+	}{{"stale", ShuttleContractLevel - 1}, {"level", ShuttleContractLevel}} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := testEnv(t)
+			store := writeMessageTargetFiber(t, map[string]any{"kind": "oneshot", "host": "hub", "agent": "claude-opus", "project_dir": t.TempDir()})
+			isolateMessageFiberStore(env, store)
+			deliver, _ := dormantDeliverStub(202, `{"queued":true,"status":"scheduled"}`)
+			daemonStub(t, env, map[string]http.HandlerFunc{
+				"/api/v1/version": versionBody("hub", "2.1.0", tc.level),
+				"/api/v1/deliver": deliver,
+			})
+			_, stderr, err := runScheduledMessage(t, newApp(env), "work/worker", "later", "--in", "8h", "--message-id", "later")
+			if tc.level != ShuttleContractLevel {
+				if err == nil || !strings.Contains(err.Error(), "without delivering") || strings.Contains(stderr, "scheduling") {
+					t.Fatalf("err=%v stderr=%q, want the refusal alone", err, stderr)
+				}
+				return
+			}
+			if err != nil || !strings.Contains(stderr, "to retry, send it again with --message-id later") {
+				t.Fatalf("err=%v stderr=%q", err, stderr)
+			}
+		})
+	}
+}

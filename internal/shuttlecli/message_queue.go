@@ -31,11 +31,15 @@ type fiberReceipt struct {
 
 // queueInFiber sends a message to fiber f's inbox through its owner, where
 // consumption decides context, follow-up, wake or a gated launch. force
-// records --wake; a notBefore instant (UTC RFC 3339) schedules it.
+// records --wake; a notBefore instant (UTC RFC 3339) schedules it, and the
+// command that retries it is printed before it is sent.
 // Attachments are retained as owner-local references.
 func (a *app) queueInFiber(f *felt.Felt, block *shuttle.Block, request messaging.Request, force bool, notBefore string) (*fiberReceipt, error) {
 	if err := a.requireDeliveringDaemon(block.Host); err != nil {
 		return nil, fmt.Errorf("message %s: %w", request.MessageID, err)
+	}
+	if notBefore != "" {
+		fmt.Fprintf(a.env.Stderr, "scheduling %s for %s; to retry, send it again with --message-id %s --at %s\n", request.MessageID, notBefore, request.MessageID, notBefore)
 	}
 	fiberID := f.UID
 	if fiberID == "" {
