@@ -141,6 +141,7 @@ export function registerMapViewJourneys(test) {
     assert.ok(box.y >= shown.y - 1 && box.y < shown.y + shown.height, 'the folded preview is in view')
     await view(page).locator('.ov-head [data-part="sends"]').click()
     await page.locator('.kbn-conversation-menu .uf-file-row').first().click()
+    await view(page).locator('.uf[data-unfolded] .uf-full').click()
     await until(page, () => document.querySelector('.ws-page.ws-selected')?.getAttribute('data-key')?.includes('/fixture-project/'))
   }, viewport)
 

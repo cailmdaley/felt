@@ -51,5 +51,7 @@ export async function pageBack(page) {
 /** The open constitution's sent files, from its view's head: its count lists them, and the newest opens in the reader. */
 export async function familySends(page) {
   await page.locator('.ws-page.ws-selected .ov-head [data-part="sends"]').click()
+  // A row unfolds its file in the view; full screen from there opens it in the reader.
   await fileList(page).locator('.uf-file-row').first().click()
+  await page.locator('.ws-page.ws-selected .uf[data-unfolded] .uf-full').click()
 }
