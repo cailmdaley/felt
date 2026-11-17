@@ -3,13 +3,14 @@
 import assert from 'node:assert/strict'
 import { mkdir, readFile, readdir, stat } from 'node:fs/promises'
 import { createServer } from 'node:http'
+import { tmpdir } from 'node:os'
 import { resolve, join, extname, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { launchBrowser } from './browser.mjs'
 
 const browser = await launchBrowser()
 const base = pathToFileURL(resolve('harness-board-dist/index.html')).href
-const screenshotDir = '/private/tmp/felt-board-perf-screenshots'
+const screenshotDir = join(tmpdir(), 'felt-board-perf-screenshots')
 await mkdir(screenshotDir, { recursive: true })
 const result = { environment: 'Chrome, file:// harness, 1440x900, mocked daemon', scenarios: {} }
 async function inventory(directory) {
