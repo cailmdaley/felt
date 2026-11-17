@@ -575,6 +575,17 @@ it('rings the threads running now and lists them as thread rows, from the ring o
   expect(openFromDesk).toHaveBeenLastCalledWith(tsz)
 })
 
+it('redraws the ring when the threads running change and nothing drawn does', async () => {
+  const human = { label: 'Sam' }
+  // The chair said one line, cleared: it runs with nothing of it drawn.
+  daemon([], undefined, {}, { board: { C: [...BOARD.C, record({ id: 'p1', kind: 'post', fiber: 'C', to: human, text: 'Done for today.' }, 10)] }, dismissed: [`line:${Date.now()}:p1`] })
+  const { view, ctx, host } = await mount([chair, tsz, beam])
+  expect(host.querySelector('.kbn-ch-count-ring')!.textContent).toBe('3')
+  ctx.response = board([{ ...chair, status: 'open', column: 'resting' }, tsz, beam])
+  view.refresh(ctx); await settle()
+  expect(host.querySelector('.kbn-ch-count-ring')!.textContent).toBe('2')
+})
+
 it('lists the running threads as they stand when the list opens, not as the stream last drew them', async () => {
   daemon()
   const { view, ctx, host } = await mount()

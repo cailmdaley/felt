@@ -598,7 +598,8 @@ export class ChannelsView implements TemporalView {
     const leads = entries.map(entry => this.unfolds.get(`item:${entry.id}`)?.lead?.key)
     // The width a post's previews wrap in: the stream's, less the gutter and the post's padding.
     const wide = this.stream.clientWidth ? this.stream.clientWidth - TUBE.gutter - 26 : Infinity
-    const stream = JSON.stringify([channel.key, failed, said, entries.map(entry => [attentionOf(entry.card, waits), turnOf(entry.card).turn]), leads, wide])
+    // The ring and its title name the threads running, what waits first, which can change with no entry changing.
+    const stream = JSON.stringify([channel.key, failed, said, entries.map(entry => [attentionOf(entry.card, waits), turnOf(entry.card).turn]), leads, wide, running.map(card => [fiberOf(card), attentionOf(card, waits)])])
     if (stream !== this.sigs.stream) {
       this.sigs.stream = stream
       // Each row reckoned by its parts' sizes, a post's by its previews as they wrap (a tapestry it shows leading them), before anything in it loads.

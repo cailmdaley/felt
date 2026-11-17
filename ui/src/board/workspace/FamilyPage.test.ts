@@ -104,6 +104,15 @@ describe('a constitution\'s view', () => {
     expect(threads(page).map(([name]) => name)).toContain('qp')
     expect(page.el.querySelector('.ov-quiet')!.textContent).toBe('1 quiet')
   })
+
+  it('unfolds a quiet thread at the next update once a worker below it starts working', () => {
+    const quietParent = card({ id: 'hub/qp', name: 'Quiet parent', orchestrator: 'hub', status: 'open', column: 'drafts', createdAt: when(30) })
+    const run = card({ id: 'hub/qp/run', name: 'Running', orchestrator: 'hub/qp', status: 'active', createdAt: when(10) })
+    const { page } = made(root, {}, [...cards, quietParent, run])
+    expect(threads(page).map(([name]) => name)).not.toContain('qp')
+    page.update(root, new ThreadIndex([...cards, quietParent, { ...run, workerState: 'running', runtimePhase: 'working', sessionUuid: 'session-run' }]), now)
+    expect(threads(page).map(([name]) => name)).toContain('qp')
+  })
   it('says what it last posted, then its tapestry at full width, which unfolds in place and steps on through its sent files; its head unfolds its files there and opens its other pages', async () => {
     const { page, feeds } = made(mid)
     await settle()

@@ -140,7 +140,8 @@ export class FamilyPage {
     this.feeds.refresh()
     const current = index.card(card), children = index.children(current), above = this.ancestors()
     const said = this.feeds.said(current), waits = this.feeds.waits()
-    const wants = [current, ...above, ...index.subtree(current)].map(card => wantOf(card, waits))
+    // What each of them wants and whether it works: a grandchild's worker starting unfolds the thread above it.
+    const wants = [current, ...above, ...index.subtree(current)].map(card => [wantOf(card, waits), attentionOf(card, waits)])
     const signature = JSON.stringify([Math.floor(now / 60_000), current, above, children, said, [...above, ...index.subtree(current)].map(card => this.feeds.said(card)), wants, this.feeds.files(current).map(file => file.key)])
     if (signature === this.signature) return
     this.signature = signature
