@@ -3,7 +3,7 @@
  * the sent-files composite. The Desk's report marks, the document library
  * and the family map all draw from this one store; none reads the feed itself.
  */
-import { normalizeSentFiles, type SentFile } from './sentFiles.js'
+import { latestSends, normalizeSentFiles, type SentFile } from './sentFiles.js'
 import { DAY_MS } from './civilDay.js'
 import { docKey, parseDocKey, type DocKey } from './workspace/documents.js'
 import { readComposite, windowStart } from './daemonApi.js'
@@ -26,17 +26,10 @@ export const SEND_WINDOW_MS = 30 * DAY_MS
 /** The least time between two fleet reads. */
 export const SEND_REFRESH_MS = 60_000
 
-/** Each fiber's files, newest first, a re-send at its latest time. */
+/** Each fiber's files, newest first, a re-send at its latest time with the latest caption it was given. */
 export function sendsByFiber(files: readonly SentFile[]): Map<string, SentFile[]> {
-  const latest = new Map<string, SentFile>()
-  for (const file of files) {
-    if (!file.uid || file.uid === file.sessionId) continue
-    const identity = `${file.uid}\u0000${file.host ?? ''}\u0000${file.fullPath}`
-    const prior = latest.get(identity)
-    if (!prior || file.timestamp > prior.timestamp) latest.set(identity, file)
-  }
   const out = new Map<string, SentFile[]>()
-  for (const file of latest.values()) {
+  for (const file of latestSends(files.filter(file => file.uid && file.uid !== file.sessionId), file => `${file.uid}\u0000${file.host ?? ''}\u0000${file.fullPath}`)) {
     const list = out.get(file.uid!)
     if (list) list.push(file)
     else out.set(file.uid!, [file])

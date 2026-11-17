@@ -88,14 +88,14 @@ export function fileRow(file: UnfoldFile, now = Date.now()): HTMLElement {
   return row
 }
 
-/** Files as a list under `anchor`, in the order given, each row opening its file; `current` marks the one being read. Returns its close. */
+/** Files as a list under `anchor`, newest first, each row opening its file; `current` marks the one being read. Returns its close. */
 export function openFileList(anchor: HTMLElement, files: readonly UnfoldFile[], open: (key: DocKey) => void, current?: DocKey): () => void {
-  const now = Date.now()
-  return openActionMenu(anchor, files.map(file => {
+  const now = Date.now(), newest = [...files].sort((a, b) => (b.at ?? -Infinity) - (a.at ?? -Infinity))
+  return openActionMenu(anchor, newest.map(file => {
     const content = fileRow(file, now)
     content.toggleAttribute('data-current', file.key === current)
     return { label: file.caption ? `${file.name}: ${file.caption}` : file.name, content, run: () => open(file.key) }
-  }), `${files.length} ${files.length === 1 ? 'file' : 'files'}`, undefined, true)
+  }), `${newest.length} ${newest.length === 1 ? 'file' : 'files'}`, undefined, true)
 }
 
 /** The bar's two drawn controls, in the stroke the board's icons use. */

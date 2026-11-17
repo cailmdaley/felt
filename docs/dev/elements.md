@@ -65,7 +65,7 @@ One line a thread addressed to the human.
 | Head | the thread's slug in its line's colour, its role, the age; the kind word only for an ask, a close (for review, closed) or a block |
 | Text | Markdown, at prose size |
 | Files | a row of file previews below the text; a fiber's newest close in the stream leads them with its tapestry |
-| Clear | ✓ at the head's right, on every post and file line, and `e` on the line in focus; one press takes the line from the stream (`line:<ms>:<id>`, one record for each line it takes: a post by its id, a file item by each of its sends, so a send it did not name still shows and the item goes once none is left) and, for a waiting post, stops it waiting too (`clear:<uid>:<ms>`), with one undo that restores both; a waiting ask or close is answered, not cleared |
+| Clear | ✓ at the head's right, on every post and file line, and `e` on the line in focus; one press takes the line from the stream (`line:<ms>:<id>`, one record for each line it takes: a post by its id, a file item by each of its sends, a path it draws once at its newest named for every time it was sent, so a send it did not name still shows and the item goes once none is left) and, for a waiting post, stops it waiting too (`clear:<uid>:<ms>`), with one undo that restores both; a waiting ask or close is answered, not cleared |
 
 A line that follows one from the same thread less than five minutes before it, and asks nothing, drops its head: its slug and role stay for assistive technology, its age shows at the right on hover, and its ✓ stays.
 
@@ -79,7 +79,7 @@ The grammar's arithmetic (`relativeAge`) lives in `civilDay.ts` with every other
 
 A file as a card that unfolds in place to the whole file, with ‹ i / n › between a post's files, Esc to fold and full screen.
 Its density sets its box: **figure** (images, SVG plots), **page** (HTML, tapestries, decks), **card** (everything else, drawn from its name alone with nothing loaded) at the sizes above, and **thumbnail** for the globe and sheets.
-A fifth density, **row** (`fileRow`), lists a file rather than previewing it: the card's kind glyph, name and age in one line, and its caption (why it was sent, when its send said) under them; unread, its glyph takes the fresh ink, and the file being read is underlined.
+A fifth density, **row** (`fileRow`), lists a file rather than previewing it: the card's kind glyph, name and age in one line, and its caption under them (why it was sent: its newest send's caption, else the latest an earlier send of it gave, the same in every list and in the reader); unread, its glyph takes the fresh ink, and the file being read is underlined.
 
 **A count opens its list.** Several files can be stepped through or read as a list (`openFileList`): a modal menu of file rows, newest first, each opening its file; a press outside only closes it. The list opens from every count of files: a constitution's sent-files count among its pages (the list is the files that count counts, and a row opens the file in the reader), the `i / n` in an unfolded file's bar (a row unfolds that file in place), the `i / n` on a sent file's page in the reader, and the phone's top-bar files button (a row opens the file in the reader).
 A post's files sit in a row that wraps. The constitution view's one lead (its tapestry, else its newest file) is the exception: it stands at the view's full width, capped near 320px.

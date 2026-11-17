@@ -17,6 +17,13 @@ describe('sendsByFiber', () => {
     expect([...map.keys()].sort()).toEqual(['A', 'B'])
     expect(map.get('A')!.map(f => [f.fullPath, f.timestamp])).toEqual([['/a/chains.tar.gz', 9], ['/a/old.html', 4], ['/a/new.png', 3]])
   })
+  it('captions a file sent again without one by the latest caption it was given, as the reader does', () => {
+    const captioned = [file('/a/plot.png', 'A', 1, { caption: 'First cut.' }), file('/a/plot.png', 'A', 3), file('/a/plot.png', 'A', 2, { caption: 'Second cut.' })]
+    expect(sendsByFiber(captioned).get('A')!.map(f => [f.timestamp, f.caption])).toEqual([[3, 'Second cut.']])
+    // The feed's own records stay as they came.
+    expect(captioned[1].caption).toBeUndefined()
+    expect(sendsByFiber([...captioned, file('/a/plot.png', 'A', 4, { caption: 'Final.' })]).get('A')!.map(f => f.caption)).toEqual(['Final.'])
+  })
 })
 
 describe('FiberSends', () => {

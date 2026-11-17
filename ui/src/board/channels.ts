@@ -1,7 +1,7 @@
 import type { KanbanCard } from './KanbanTypes.js'
 import { clearable, lastActive, wantOf, type Waits } from './attention.js'
 import { arrived, type BoardRecord } from './boardFeed.js'
-import type { SentFile } from './sentFiles.js'
+import { latestSends, type SentFile } from './sentFiles.js'
 import { slug } from './threadOutline.js'
 import { cardNamed } from './threads.js'
 
@@ -59,7 +59,7 @@ export const unclearLineKey = (id: string, at: number): string => `unline:${at}:
 /** A send's id: the line it is in the stream, whichever item it is drawn in. */
 export const sendId = (file: SentFile): string => `file:${file.host ?? ''}:${file.fullPath}:${file.timestamp}`
 /** The lines a clear of an item takes, one record each: every send of a file item, else the item itself. */
-export const lineIds = (item: Item): string[] => item.kind === 'file' ? item.files.map(sendId) : [item.id]
+export const lineIds = (item: Item): string[] => item.sends?.map(sendId) ?? [item.id]
 
 /** The lines cleared by hand, by id, with when: each whose newest clear is newer than its newest undo. */
 export function clearedLines(dismissed: readonly string[]): Map<string, number> {
@@ -233,7 +233,10 @@ export interface Item {
   arrived: number
   /** The question, the post, a close's review note, or the files' captions; empty for a closing post (the card's outcome) and for files sent without one. */
   text: string
+  /** Its files, a path sent more than once at its newest send. */
   files: SentFile[]
+  /** A file item's sends not cleared, oldest first, a path sent twice in it each time: what its clear names. */
+  sends?: SentFile[]
   /** It waits on the human now. */
   waiting: boolean
   /** A waiting post's line, which the human may clear by hand. */
@@ -346,22 +349,23 @@ export function composeStream(input: {
     const text = want.kind === 'review' ? card.reviewMark?.note ?? '' : want.text
     say({ kind, id: `${want.kind}:${fiberOf(card)}:${want.at}`, card, at: want.at, arrived: want.at, text, files: [], waiting: true, ...clearable(want) ? { clears: fiberOf(card) } : {} })
   }
-  // Every send is a line; a worker's sends this close together are one item, a path sent twice in it at its newest.
+  // Every send is a line; a worker's sends this close together are one item.
   const sends = files.filter(file => file.timestamp >= reach && file.uid && !claimed.has(file)).sort((a, b) => a.timestamp - b.timestamp)
   for (const file of sends) {
     const card = cardNamed(channel.everyone, file.uid!, file.host ?? '')
     if (!card) continue
     const burst = items.get(fiberOf(card))?.filter(item => item.kind === 'file' && file.timestamp - item.files.at(-1)!.timestamp <= BURST_MS).at(-1)
-    if (burst) burst.files = [...burst.files.filter(each => each.fullPath !== file.fullPath || each.host !== file.host), file]
+    if (burst) burst.files.push(file)
     else say({ kind: 'file', id: '', card, at: file.timestamp, arrived: file.timestamp, text: '', files: [file], waiting: false })
   }
-  // A clear names each line it took: a file item shows the sends not cleared, named by its first, and goes when none is left.
+  // A clear names each line it took: a file item holds the sends not cleared, named by its first, shows a path sent twice among them at its newest, and goes when none is left.
   const stream: Entry[] = []
   for (const list of items.values()) for (const item of list) {
     if (item.kind === 'file') {
-      item.files = item.files.filter(file => !cleared.has(sendId(file)))
-      if (!item.files.length) continue
-      item.id = sendId(item.files[0])
+      item.sends = item.files.filter(file => !cleared.has(sendId(file)))
+      if (!item.sends.length) continue
+      item.files = latestSends(item.sends, file => `${file.host ?? ''}\u0000${file.fullPath}`)
+      item.id = sendId(item.sends[0])
       item.at = item.arrived = item.files.at(-1)!.timestamp
       item.text = [...new Set(item.files.flatMap(file => file.caption?.trim() || []))].join(' · ')
     } else if (cleared.has(item.id)) continue

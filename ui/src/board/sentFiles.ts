@@ -63,3 +63,19 @@ export function normalizeSentFiles(body: unknown): SentFile[] {
   }
   return out
 }
+
+/**
+ * Each identity's newest send, oldest first. Its caption is the newest send's,
+ * else the latest caption an earlier send of it gave: a file sent again
+ * without a caption keeps the last it was given.
+ */
+export function latestSends(files: readonly SentFile[], identity: (file: SentFile) => string): SentFile[] {
+  const latest = new Map<string, SentFile>(), said = new Map<string, SentFile>()
+  for (const file of files) {
+    const id = identity(file), prior = latest.get(id), told = said.get(id)
+    if (!prior || file.timestamp > prior.timestamp) latest.set(id, file)
+    if (file.caption && (!told || file.timestamp > told.timestamp)) said.set(id, file)
+  }
+  return [...latest].map(([id, file]) => file.caption || !said.has(id) ? file : { ...file, caption: said.get(id)!.caption })
+    .sort((a, b) => a.timestamp - b.timestamp)
+}

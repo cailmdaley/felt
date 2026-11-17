@@ -240,6 +240,19 @@ describe('composeStream', () => {
     expect(shown({ ...cleared(first, second), reachMs: 32 * minute })).toStrictEqual([])
   })
 
+  it('applies clears before it draws a path sent twice at its newest: the older send shows once the newer is cleared, and a ✓ names both', () => {
+    const quiet = records.filter(each => each.id !== 'r7'), fixed = send('K', 'deck.html', 31)
+    const kappas = (over: Partial<Parameters<typeof composeStream>[0]> = {}) => stream({ records: quiet, files: [...files, fixed], ...over })
+      .filter((entry): entry is Item => entry.kind === 'file' && entry.card === kappa)
+    const burst = kappas().at(-1)!
+    // Sent again without a caption, the deck keeps the one it was given.
+    expect([burst.text, burst.files.map(file => file.timestamp)]).toStrictEqual(['The final deck. · 9σ.', [fixed.timestamp, files[2].timestamp]])
+    expect(lineIds(burst)).toStrictEqual([files[1], fixed, files[2]].map(sendId))
+    const newer = kappas({ cleared: clearedLines([clearLineKey(sendId(fixed), now)]) }).at(-1)!
+    expect(newer.files.map(file => file.timestamp)).toStrictEqual([files[1].timestamp, files[2].timestamp])
+    expect(kappas({ cleared: clearedLines(lineIds(burst).map(id => clearLineKey(id, now))) }).map(item => item.text)).toStrictEqual(['First pass.'])
+  })
+
   it('gives an attached file the send of it nearest its line in time, leaving an earlier send of it its own line', () => {
     const early = send('K', 'spectrum.svg', 38, 'An early cut.')
     const entries = stream({ files: [early, ...files] })

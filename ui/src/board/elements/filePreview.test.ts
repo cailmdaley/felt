@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 // @ts-expect-error Node types are excluded from the browser UI's tsconfig.
 import { readFileSync } from 'node:fs'
 import { settle } from '../testFixtures.js'
-import { BOX, densityOf, fileRow, PREVIEW_GAP, previewsHeight, Unfold } from './filePreview.js'
+import { BOX, densityOf, fileRow, openFileList, PREVIEW_GAP, previewsHeight, Unfold } from './filePreview.js'
 
 const files = [{ key: 'host:/w/a.html', name: 'a.html' }, { key: 'host:/w/b.png', name: 'b.png' }, { key: 'host:/w/c.md', name: 'c.md' }]
 const made = (single = false): { unfold: Unfold; seen: ReturnType<typeof vi.fn> } => {
@@ -131,5 +131,14 @@ describe('a preview\'s box', () => {
     // Before the stream is laid out its width is unknown: the boxes stand in one line.
     expect(previewsHeight(three, Infinity)).toBe(360)
     expect(readFileSync('src/board/elements/filePreview.css', 'utf8')).toContain(`flex-wrap: wrap; align-items: flex-start; gap: ${PREVIEW_GAP}px;`)
+  })
+})
+
+describe('a list of files', () => {
+  it('lists them newest first, whatever order it is given', async () => {
+    const anchor = document.body.appendChild(document.createElement('button'))
+    openFileList(anchor, [{ key: 'host:/w/a.md', name: 'a.md', at: 1 }, { key: 'host:/w/c.md', name: 'c.md', at: 3 }, { key: 'host:/w/b.md', name: 'b.md', at: 2 }], () => {})
+    await settle()
+    expect([...document.querySelectorAll<HTMLElement>('.uf-file-row')].map(row => row.dataset.key)).toStrictEqual(['host:/w/c.md', 'host:/w/b.md', 'host:/w/a.md'])
   })
 })
