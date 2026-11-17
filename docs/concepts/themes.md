@@ -2,7 +2,7 @@
 
 A constitution can give its Shuttle channel a visual identity without changing its documents or the Desk.
 Its theme reaches the reader's veil, thumbnail paper, page frames, label bars, fiber header and prose, Markdown or text pages, and audio waveform ink.
-Phone top and bottom bars and the page sheet use the channel's materials without adding a card frame around the edge-to-edge page.
+Phone top and bottom bars use the channel's materials without adding a card frame around the edge-to-edge page.
 HTML reports, PDFs, images and other documents keep their own styling.
 The board's bar, with the reader's map of pages, stays the Desk's on every view.
 

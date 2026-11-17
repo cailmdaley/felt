@@ -12,7 +12,7 @@ export const ATTENTION_WORD: Readonly<Record<Urgency, string>> = {
 }
 
 export interface ThreadMarks { launches: number[]; commits: number[] }
-export interface MapFile { key: string; name: string; at: number; unread: boolean }
+export interface MapFile { key: string; name: string; at: number; unread: boolean; caption?: string }
 /** The facts about a thread that do not live on its card. */
 export interface MapFeeds {
   marks(card: KanbanCard): ThreadMarks | undefined

@@ -109,12 +109,14 @@ if (workspaceFixture && example === 'threads') addThreadFixtures(workspaceFixtur
 if (workspaceFixture && example === 'frontier') addFrontierFixtures(workspaceFixture, now)
 if (workspaceFixture && example === 'families') addFamilyFixtures(workspaceFixture, now)
 if (workspaceFixture && example === 'thread-review') addThreadReviewFixtures(workspaceFixture, now)
-// `manyFiles` lengthens the open constitution's sent-files trail so the sheet's list has to fold and scroll.
+// `manyFiles` lengthens the open constitution's sent-files trail so its list has to scroll; every third send says why, one at length.
 if (workspaceFixture && search.has('manyFiles')) {
   const first = workspaceFixture.receipts[0], dir = String(first.fullPath).slice(0, String(first.fullPath).lastIndexOf('/'))
   for (let i = 1; i <= 28; i++) {
     const fullPath = `${dir}/sweep/scan-${String(i).padStart(2, '0')}.png`
-    workspaceFixture.receipts.push({ ...first, fullPath, basename: fullPath.split('/').at(-1), timestamp: now - (40 + i * 7) * 60_000, sessionId: `many-files-${i}` })
+    const caption = i === 1 ? 'The shear response across all five patches after the PSF leakage fix; patch 3 still sits a little high in the outermost bin, which the next scan isolates'
+      : i % 3 === 1 ? `Scan ${i}: response by redshift bin` : undefined
+    workspaceFixture.receipts.push({ ...first, fullPath, basename: fullPath.split('/').at(-1), timestamp: now - (40 + i * 7) * 60_000, sessionId: `many-files-${i}`, ...caption ? { caption } : {} })
   }
 }
 const channelsFixture = workspaceFixture && example === 'channels' ? addChannelsFixtures(workspaceFixture, now)

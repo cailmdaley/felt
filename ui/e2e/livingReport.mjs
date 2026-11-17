@@ -181,7 +181,7 @@ export function registerLivingReportJourneys(test) {
         assert.ok(await (await sentFiles(page)).count() > 0)
         await shot(page, `${device}-sheet`)
         await page.keyboard.press('Escape')
-        await page.locator('.ws-page-sheet[open]').waitFor({ state: 'hidden' })
+        await page.locator('.kbn-conversation-menu:has(.uf-file-row)').waitFor({ state: 'detached' })
       } else {
         // Settings stands as a button where the console has room, else in its menu, which takes the focus back.
         const settings = await consoleMenu(band(page)).isVisible() ? consoleMenu(band(page)) : band(page).locator('.ws-band-buttons .ws-acts-settings')
@@ -189,7 +189,7 @@ export function registerLivingReportJourneys(test) {
         const menu = page.locator('.ws-settings-menu:not([hidden])')
         await menu.waitFor()
         assert.ok(await menu.locator('.kbn-ctl-history').count() > 0, 'sessions live in settings')
-        assert.equal(await menu.locator('.ws-sent-file, .ws-family').count(), 0, 'settings hold no threads or sent files')
+        assert.equal(await menu.locator('.uf-file-row, .ws-family').count(), 0, 'settings hold no threads or sent files')
         const box = await menu.boundingBox(), header = await band(page).locator('.ws-band-head').boundingBox()
         assert.ok(Math.abs(box.y + box.height - header.y) < 16, 'the dropdown opens above the console, clear of it')
         await shot(page, 'desktop-settings')

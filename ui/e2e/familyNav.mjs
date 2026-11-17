@@ -32,21 +32,24 @@ export async function showFile(page, suffix) {
   await file.dispatchEvent('click')
   await file.and(page.locator('.ws-selected')).waitFor()
 }
-/** The sent files, in the sheet the phone's top bar opens. */
+/** The open list of files: a count's, a bar's or the phone's top bar's. */
+export const fileList = page => page.locator('.kbn-conversation-menu:has(.uf-file-row)')
+/** The sent files, in the list the phone's top bar opens. */
 export async function sentFiles(page) {
-  const sheet = page.locator('.ws-page-sheet[open]')
-  if (!await sheet.count()) {
+  const rows = fileList(page).locator('.uf-file-row')
+  if (!await rows.count()) {
     await page.locator('.ws-navbar .ws-files-toggle').click()
-    await sheet.waitFor()
+    await rows.first().waitFor()
   }
-  return sheet.locator('.ws-sent-file')
+  return rows
 }
 /** The reader's back, one step to the view it was opened from: the phone's top bar holds it, the selected page's label bar elsewhere. */
 export async function pageBack(page) {
   const phone = page.viewportSize().width <= 700
   await page.locator(phone ? '.ws-navbar .ws-return' : '.ws-page.ws-selected .ws-document-back').click()
 }
-/** The open constitution's sent files, from its view's head: the newest opens in the reader. */
+/** The open constitution's sent files, from its view's head: its count lists them, and the newest opens in the reader. */
 export async function familySends(page) {
   await page.locator('.ws-page.ws-selected .ov-head [data-part="sends"]').click()
+  await fileList(page).locator('.uf-file-row').first().click()
 }

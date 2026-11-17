@@ -2,7 +2,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 // @ts-expect-error Node types are excluded from the browser UI's tsconfig.
 import { readFileSync } from 'node:fs'
-import { BOX, densityOf, PREVIEW_GAP, previewsHeight, Unfold } from './filePreview.js'
+import { settle } from '../testFixtures.js'
+import { BOX, densityOf, fileRow, PREVIEW_GAP, previewsHeight, Unfold } from './filePreview.js'
 
 const files = [{ key: 'host:/w/a.html', name: 'a.html' }, { key: 'host:/w/b.png', name: 'b.png' }, { key: 'host:/w/c.md', name: 'c.md' }]
 const made = (single = false): { unfold: Unfold; seen: ReturnType<typeof vi.fn> } => {
@@ -69,6 +70,30 @@ describe('files that unfold in place', () => {
     expect(unfold.unfolded).toBeNull()
     expect(unfold.el.querySelectorAll('.uf-card')).toHaveLength(2)
     expect(document.activeElement).toBe(elsewhere)
+  })
+})
+
+describe('a file as a row of a list', () => {
+  it('draws the card\'s face in a line, kind glyph, name and age, with its caption under it when it has one', () => {
+    const now = Date.UTC(2026, 10, 17, 12)
+    const row = fileRow({ key: 'host:/w/sweep.png', name: 'sweep.png', at: now - 5 * 60_000, caption: 'The shear sweep, bin 3', unread: true }, now)
+    expect([...row.children].map(part => [part.className, part.textContent])).toStrictEqual([
+      ['uf-glyph', '▨'], ['uf-file-name', 'sweep.png'], ['el-time uf-age', '5m ago'], ['uf-caption', 'The shear sweep, bin 3'],
+    ])
+    expect([row.dataset.key, row.hasAttribute('data-unread')]).toStrictEqual(['host:/w/sweep.png', true])
+    expect(fileRow({ key: 'host:/w/c.md', name: 'c.md', at: now }, now).querySelector('.uf-caption')).toBeNull()
+  })
+
+  it('lists a bar\'s files from its count, the one unfolded marked, and a row unfolds its file in place', async () => {
+    const { unfold } = made()
+    unfold.el.querySelectorAll<HTMLButtonElement>('.uf-card')[0].click()
+    unfold.el.querySelector<HTMLButtonElement>('.uf-count')!.click()
+    await settle()
+    const rows = [...document.querySelectorAll<HTMLElement>('.kbn-conversation-menu .uf-file-row')]
+    expect(rows.map(row => [row.dataset.key, row.hasAttribute('data-current')])).toStrictEqual(files.map((file, i) => [file.key, i === 0]))
+    rows[2].closest('button')!.click()
+    await settle(); await settle()
+    expect([unfold.unfolded, bar(unfold)]).toStrictEqual(['host:/w/c.md', ['c.md', '3 / 3']])
   })
 })
 

@@ -6,6 +6,7 @@ The board owns actions, presentation, the gestures that ask for a popup, and its
 | Widget | Where | SDK entry |
 |---|---|---|
 | Action, row and conversation menus, the Channels rail's entry and channel menu | `board/conversationMenu.ts`, `views/ChannelsView.ts` | `@ui-sdk/web/menu` |
+| A list of files (a count's, an unfolded file's bar, the phone's top bar) | `board/elements/filePreview.ts` (`openFileList`, through `openActionMenu`) | `@ui-sdk/web/menu` |
 | Channels' icon controls (rail, channel menu, back, close), each named by its tooltip | `views/ChannelsView.ts` | `@ui-sdk/web/tooltip` |
 | Channels rail reordering (mouse drag, touch hold-then-drag, Alt+↑/↓) | `board/channelRail.ts` | core `createReorder` on a `definePrimitive` instance |
 | Move menu | `board/MoveMenu.ts` | `@ui-sdk/web/menu` |
@@ -21,7 +22,6 @@ The board owns actions, presentation, the gestures that ask for a popup, and its
 These stay the board's own, each for a reason that still holds:
 
 - The Listen options menu holds a number field; an SDK menu closes on Tab and takes digits for typeahead.
-- The sent-files sheet is a native `<dialog>` with its own Tab cycle and history entry; native `showModal()` makes the page inert but lets Tab leave for the browser's toolbar.
 - The constitution picker filters from the bar's Find field, which every view shares; SDK autocomplete and command own their input.
 - `selectPicker.ts` dresses a native `<select>` whose API the Dock uses throughout; the SDK select replaces the element.
 - The banner is one inline `role=alert` line with two timings.

@@ -8,7 +8,7 @@ type Provenance =
   | { kind: 'fiber' }
   | { kind: 'family' }
   | { kind: 'embed'; title?: string }
-  | { kind: 'sent'; session?: string; time: number; worker?: string }
+  | { kind: 'sent'; session?: string; time: number; worker?: string; caption?: string }
   | { kind: 'link'; title?: string }
   /** A page opened by its address before the channel's own reads list it. */
   | { kind: 'routed' }
@@ -57,7 +57,7 @@ export interface ChannelInput {
   /** The fiber's genuine owner-daemon modification time, never its creation time. */
   modifiedAt?: string
   embeds?: { path: string; title?: string }[]
-  sent?: { path: string; owner?: string; session?: string; time: number; worker?: string }[]
+  sent?: { path: string; owner?: string; session?: string; time: number; worker?: string; caption?: string }[]
   links?: { path: string; owner?: string; title?: string }[]
   /** Pages opened by address that no read has listed yet. */
   routed?: { path: string; owner?: string }[]
@@ -185,6 +185,18 @@ export function lastSent(document: WorkspaceDocument): number | undefined {
   return times.length ? Math.max(...times) : undefined
 }
 
+/** Receipt-backed files, newest first. */
+export function sentDocuments(channel: Channel): WorkspaceDocument[] {
+  return channel.documents.filter(doc => doc.provenance.some(p => p.kind === 'sent'))
+    .sort((a, b) => (lastSent(b) ?? 0) - (lastSent(a) ?? 0) || a.key.localeCompare(b.key))
+}
+
+/** Why it was last sent, from its latest receipt that said. */
+export function sentCaption(document: WorkspaceDocument): string | undefined {
+  for (const p of [...document.provenance].reverse()) if (p.kind === 'sent' && p.caption) return p.caption
+  return undefined
+}
+
 /** True when the body declares the document, as an embed or a link. */
 function isDeclared(document: WorkspaceDocument): boolean {
   return document.provenance.some(p => p.kind === 'embed' || p.kind === 'link')
@@ -299,6 +311,7 @@ export function buildChannel(input: ChannelInput): Channel {
       kind: 'sent', time: receipt.time,
       ...(receipt.session ? { session: receipt.session } : {}),
       ...(receipt.worker ? { worker: receipt.worker } : {}),
+      ...(receipt.caption ? { caption: receipt.caption } : {}),
     })
   }
   for (const link of input.links ?? []) {

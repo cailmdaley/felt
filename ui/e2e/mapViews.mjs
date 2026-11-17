@@ -133,13 +133,14 @@ export function registerMapViewJourneys(test) {
     await until(page, () => document.querySelector('.ws-page.ws-selected .uf-bar .uf-count')?.textContent === '1 / 6')
     await page.keyboard.press('ArrowLeft')
     assert.equal(page.url(), at, 'an arrow at the first file goes nowhere')
-    // Folded, the preview stands back in sight, and the files button still opens the reader on the newest send.
+    // Folded, the preview stands back in sight, and the files button lists the sends, the newest opening the reader.
     await bar.locator('.uf-fold').click()
     assert.equal(await view(page).locator('.uf[data-unfolded]').count(), 0)
     assert.ok(await card.isVisible())
     const box = await card.boundingBox(), shown = await scroller.boundingBox()
     assert.ok(box.y >= shown.y - 1 && box.y < shown.y + shown.height, 'the folded preview is in view')
     await view(page).locator('.ov-head [data-part="sends"]').click()
+    await page.locator('.kbn-conversation-menu .uf-file-row').first().click()
     await until(page, () => document.querySelector('.ws-page.ws-selected')?.getAttribute('data-key')?.includes('/fixture-project/'))
   }, viewport)
 

@@ -865,7 +865,7 @@ export class ChannelsView implements TemporalView {
     }).get(id)!
     const files = item.files.map((file): UnfoldFile => {
       const key = docKey(file.host ?? card.originId, file.fullPath, card.originId, card.fiberDir)
-      return { key, name: declaredTitle(key)?.title ?? file.basename, at: file.timestamp }
+      return { key, name: declaredTitle(key)?.title ?? file.basename, at: file.timestamp, caption: file.caption }
     })
     made.files = files
     this.showPreviews(made)

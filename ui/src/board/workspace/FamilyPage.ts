@@ -279,7 +279,7 @@ export class FamilyPage {
       if (read !== this.reads) return
       const files = [...lead ? [lead] : [], ...this.feeds.files(card).filter(file => file.key !== lead?.key)]
       this.shown = { card: uid, files: new Map(files.map(file => [file.key, file])) }
-      this.unfold.update(files.map(file => ({ key: file.key, name: file.name })))
+      this.unfold.update(files)
       // Shown here, it is seen.
       if (files[0]?.unread) this.feeds.seen(files[0])
     })

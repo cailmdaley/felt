@@ -30,6 +30,7 @@ The rest are the board's own choices, made to sit with those numbers:
 | Image or figure preview | a box 480 by 360, the picture contained in it with its aspect kept |
 | Page preview (HTML, tapestry, deck) | 480 by 270 |
 | File card (Markdown, PDF, code, audio, anything without a picture) | 360 by 56: kind glyph, name, age |
+| File row (a list of files) | the card's face in one line, as wide as its list up to 420; its caption a second line, cut at two |
 | Thumbnail (globe tiles, sheets) | 176 by 116 |
 
 A box never grows wider than the row it sits in: narrower, a figure or a page keeps its proportions and a card its height.
@@ -76,8 +77,11 @@ The grammar's arithmetic (`relativeAge`) lives in `civilDay.ts` with every other
 
 ### File preview — `filePreview.ts`
 
-A file as a card that unfolds in place to the whole file, with ‹ › between a post's files, Esc to fold and full screen.
+A file as a card that unfolds in place to the whole file, with ‹ i / n › between a post's files, Esc to fold and full screen.
 Its density sets its box: **figure** (images, SVG plots), **page** (HTML, tapestries, decks), **card** (everything else, drawn from its name alone with nothing loaded) at the sizes above, and **thumbnail** for the globe and sheets.
+A fifth density, **row** (`fileRow`), lists a file rather than previewing it: the card's kind glyph, name and age in one line, and its caption (why it was sent, when its send said) under them; unread, its glyph takes the fresh ink, and the file being read is underlined.
+
+**A count opens its list.** Several files can be stepped through or read as a list (`openFileList`): a menu of file rows, newest first, each opening its file. The list opens from every count of files: a constitution's sent-files count among its pages (the list is the files that count counts, and a row opens the file in the reader), the `i / n` in an unfolded file's bar (a row unfolds that file in place), the `i / n` on a sent file's page in the reader, and the phone's top-bar files button (a row opens the file in the reader).
 A post's files sit in a row that wraps. The constitution view's one lead (its tapestry, else its newest file) is the exception: it stands at the view's full width, capped near 320px.
 Only thumbnails swap a page's large embedded images for placeholders; a figure or page preview keeps them whole, which costs memory per mounted preview (when previews mount is the performance work's to decide).
 

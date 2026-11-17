@@ -414,7 +414,7 @@ export function registerHeaderBarJourneys(test) {
         const files = await sentFiles(page)
         assert.ok(await files.locator('time').count(), 'sent files carry timestamps')
         await page.keyboard.press('Escape')
-        await page.locator('.ws-page-sheet[open]').waitFor({ state: 'hidden' })
+        await page.locator('.kbn-conversation-menu:has(.uf-file-row)').waitFor({ state: 'detached' })
       }
       // A verdict leaves settings before opening its undo window.
       await settings.click()

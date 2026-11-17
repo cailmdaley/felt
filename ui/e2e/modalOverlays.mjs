@@ -91,30 +91,22 @@ try {
       await p.keyboard.press('Escape'); await era.waitFor({ state: 'detached' })
     }
 
-    // Sent files, on the phone's reader: the native modal makes the reader inert, Tab wraps, Back closes it.
+    // Sent files, on the phone's reader: the top bar's list takes the focus, and Escape returns it to the opener.
     if (phone) {
       await p.goto(`${harness}?example=threads`)
       await p.locator('.kbn-desk .kbn-family[title*="Calibrate the shear response"] .kbn-family-name').first().click()
       const opener = p.locator('.ws-navbar .ws-files-toggle')
       await opener.click()
-      const files = p.locator('.ws-page-sheet[open]')
+      const files = p.locator('.kbn-conversation-menu:has(.uf-file-row)')
       await files.waitFor()
-      assert.equal(await p.evaluate(() => {
-        const outside = document.querySelector('.ws-navbar button:not(.ws-files-toggle)')
-        outside.focus(); return document.activeElement === outside
-      }), false, 'the reader behind the sheet takes no focus')
-      const controls = files.locator('button:visible')
-      await controls.last().focus(); await p.keyboard.press('Tab')
-      assert.equal(await focused(controls.first()), true, 'Tab wraps inside the sheet')
-      await p.keyboard.press('Shift+Tab')
-      assert.equal(await focused(controls.last()), true, 'Shift+Tab wraps inside the sheet')
+      assert.equal(await files.evaluate(el => el.contains(document.activeElement)), true, 'the list takes the focus')
       await shot('files')
       const entries = await p.evaluate(() => navigation.entries().length)
       await p.keyboard.press('Escape'); await files.waitFor({ state: 'detached' })
       assert.equal(await focused(opener), true, 'Escape returns focus to the opener')
       await opener.click(); await files.waitFor()
-      assert.equal(await p.evaluate(() => navigation.entries().length), entries, 'the sheet keeps no history entry')
-      // Back leaves the reader, and the sheet with it.
+      assert.equal(await p.evaluate(() => navigation.entries().length), entries, 'the list keeps no history entry')
+      // Back leaves the reader, and the list with it.
       await p.goBack(); await files.waitFor({ state: 'detached' })
       await p.locator('.ws-reader.ws-dormant').waitFor()
     }

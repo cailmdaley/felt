@@ -25,7 +25,7 @@ export function openActionMenu(anchor: HTMLElement, actions: readonly Conversati
   menu.setAttribute('collision-padding', '8')
   root.append(menu)
   const anchorBounds = anchor.getBoundingClientRect()
-  const close = (): void => { root.api.close() }
+  const close = (): void => { root.api?.close() }
   const scrolled = (): void => {
     // Queued scroll events need not mean the anchor moved.
     const next = anchor.getBoundingClientRect()

@@ -84,7 +84,7 @@ async function headerAction(p, label) {
   await acts(p).getByRole('button', { name: label, exact: true }).click()
 }
 async function bandMenu(p, label) {
-  const sheet = p.locator('.ws-page-sheet[open], .ws-settings-menu:not([hidden])')
+  const sheet = p.locator('.kbn-conversation-menu:has(.uf-file-row), .ws-settings-menu:not([hidden])')
   if (['Settings', 'Sessions'].includes(label) && await sheet.count()) {
     await p.keyboard.press('Escape'); await sheet.waitFor({ state: 'hidden' }); return
   }
@@ -138,7 +138,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
 }
 
 async function choose(p, label) {
-  const sheet = p.locator('.ws-page-sheet[open], .ws-settings-menu:not([hidden])')
+  const sheet = p.locator('.kbn-conversation-menu:has(.uf-file-row), .ws-settings-menu:not([hidden])')
   if (await sheet.count() && ['Constitution', 'calibration-report'].includes(label)) {
     await p.keyboard.press('Escape'); await sheet.waitFor({ state: 'hidden' })
   }
@@ -167,7 +167,7 @@ async function openFromChannels(p, query, text = query) {
 // Leave the reader: the phone's back chevron, or on the desktop the bar's
 // origin tab (the view the reader was opened from), which closes it back there.
 async function leave(p) {
-  const sheet = p.locator('.ws-page-sheet[open], .ws-settings-menu:not([hidden])')
+  const sheet = p.locator('.kbn-conversation-menu:has(.uf-file-row), .ws-settings-menu:not([hidden])')
   if (await sheet.count()) { await p.keyboard.press('Escape'); await sheet.waitFor({ state: 'hidden' }) }
   // A phone, upright or on its side, has no Desk tab beside the reader: Escape walks back.
   if (await p.evaluate(() => matchMedia('(max-width: 700px), (max-height: 500px) and (pointer: coarse)').matches)) {
@@ -1612,7 +1612,7 @@ test('Phone HTML reader retains its opaque frame and reading position', async p 
 }, { width: 390, height: 844 })
 
 for (const viewport of [{ width: 375, height: 667 }, { width: 390, height: 844 }, { width: 430, height: 932 }]) {
-  test(`Phone ${viewport.width}: edge-to-edge page, modal sheet choice, focus, and browser Back leaving the reader with the sheet`, async p => {
+  test(`Phone ${viewport.width}: edge-to-edge page, the files list, its choice and focus, and browser Back leaving the reader with the list`, async p => {
     await open(p); await reportReady(p)
     const geometry = await selected(p).evaluate(el => {
       const rect = el.getBoundingClientRect(), sheet = getComputedStyle(el.querySelector('.ws-sheet'))
@@ -1623,36 +1623,31 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 390, height: 844 }
     assert.equal(await selected(p).locator('.ws-labelbar').isVisible(), false)
     const url = p.url(), key = await selected(p).getAttribute('data-key')
     const opener = p.locator('.ws-navbar .ws-files-toggle')
+    const list = p.locator('.kbn-conversation-menu:has(.uf-file-row)'), rows = list.locator('.uf-file-row')
     await opener.click()
-    const sheet = p.getByRole('dialog', { name: 'Sent files', exact: true })
-    await sheet.waitFor()
-    assert.equal(p.url(), url, 'the sheet keeps the address')
-    await sheet.locator('[data-part="sent-files-more"]').click()
-    assert.ok(await sheet.locator('.ws-sent-file').count() >= 12)
-    assert.ok(await sheet.locator('.ws-sent-file time').first().getAttribute('datetime'))
-    for (let i = 0; i < 22; i++) {
-      await p.keyboard.press('Tab')
-      assert.ok(await sheet.evaluate(el => el.contains(document.activeElement)), 'native modal keeps focus inside the sheet')
-    }
+    await list.waitFor()
+    assert.equal(p.url(), url, 'the list opens in place')
+    assert.ok(await rows.count() >= 12)
+    assert.ok(await rows.locator('time').first().getAttribute('datetime'))
+    const fits = await list.boundingBox()
+    assert.ok(fits.x >= 0 && fits.x + fits.width <= viewport.width, 'the list fits the phone')
     await p.keyboard.press('l')
-    assert.equal(await selected(p).getAttribute('data-key'), key, 'sheet keys cannot step reader')
+    assert.equal(await selected(p).getAttribute('data-key'), key, 'the list\'s keys cannot step the reader')
     await p.keyboard.press('Escape')
-    await poll(p, () => !document.querySelector('.ws-page-sheet').open)
-    assert.equal(p.url(), url); assert.ok(await opener.evaluate(el => el === document.activeElement))
+    await list.waitFor({ state: 'detached' })
+    assert.ok(await opener.evaluate(el => el === document.activeElement))
     await opener.click()
-    await sheet.locator('.ws-sent-file[data-key$="/brief.md"]').click()
-    await poll(p, () => !document.querySelector('.ws-page-sheet').open)
+    await list.locator('.uf-file-row[data-key$="/brief.md"]').click()
+    await list.waitFor({ state: 'detached' })
     assert.equal(await isSelected(p, 'brief.md'), true)
-    await opener.click(); await p.mouse.click(10, 10)
-    await poll(p, () => !document.querySelector('.ws-page-sheet').open)
-    await opener.click()
-    const grabber = await sheet.getByRole('button', { name: 'Close sent files' }).boundingBox()
-    await swipe(p, grabber.x + grabber.width / 2, grabber.y + 20, grabber.x + grabber.width / 2, grabber.y + 90)
-    await poll(p, () => !document.querySelector('.ws-page-sheet').open)
-    // The sheet keeps no history entry: the browser's Back leaves the reader, and the sheet with it.
-    await opener.click(); await sheet.waitFor()
+    // A press outside closes it, and reaches what it lands on: here the console, which goes nowhere.
+    await opener.click(); await p.mouse.click(viewport.width / 2, viewport.height - 20)
+    await list.waitFor({ state: 'detached' })
+    // The list keeps no history entry: the browser's Back leaves the reader, and the list with it.
+    await opener.click(); await list.waitFor()
     await p.goBack()
-    await poll(p, () => document.querySelector('.ws-reader')?.inert && !document.querySelector('.ws-page-sheet').open)
+    await list.waitFor({ state: 'detached' })
+    await poll(p, () => document.querySelector('.ws-reader')?.inert)
   }, viewport)
 }
 
@@ -2295,7 +2290,7 @@ test('Theme changes repaint paused audio without replacing the player or fetchin
 })
 
 for (const theme of ['portolan', 'blueprint', 'laboratory-paper', 'night-chart']) {
-  test(`Theme phone paper stays edge to edge with styled bars and page sheet: ${theme}`, async p => {
+  test(`Theme phone paper stays edge to edge with styled bars and its files list: ${theme}`, async p => {
     const themed = new URL(url); themed.searchParams.set('theme-preview', `01KVBR1F9BWBVKF97473PV67K8:${theme}`)
     await p.goto(themed.href); await open(p); await choose(p, 'Constitution')
     const frame = selected(p).locator('[data-part="page-frame"]')
@@ -2304,9 +2299,7 @@ for (const theme of ['portolan', 'blueprint', 'laboratory-paper', 'night-chart']
     assert.deepEqual(await frame.evaluate(el => { const s = getComputedStyle(el); return [s.borderRadius, s.clipPath, s.boxShadow, s.borderTopWidth] }), ['0px', 'none', 'none', '0px'])
     assert.ok(await p.locator('[data-part="phone-topbar"]').isVisible())
     await p.locator('.ws-navbar .ws-files-toggle').click()
-    assert.ok(await p.locator('[data-part="page-sheet-panel"]').isVisible())
-    assert.ok(await p.locator('[data-part="page-sheet-row"]').count() > 1)
-    assert.equal(await p.locator('[data-part="page-sheet-panel"]').evaluate(el => getComputedStyle(el).getPropertyValue('--ws-paper').trim()), await p.locator('.ws-reader').evaluate(el => getComputedStyle(el).getPropertyValue('--ws-paper').trim()))
+    assert.ok(await p.locator('.kbn-conversation-menu .uf-file-row').count() > 1)
   }, { width: 390, height: 844 })
 }
 

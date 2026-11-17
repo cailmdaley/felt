@@ -242,10 +242,10 @@ describe('blockingDialogOpen beside keystrokeIsSpokenFor', () => {
   })
 
   it('both yield to an open native modal dialog but not a closed one', () => {
-    stubDOM([boardRoot, el({ tag: 'DIALOG', classes: ['ws-page-sheet'], attrs: { open: '' } })])
+    stubDOM([boardRoot, el({ tag: 'DIALOG', attrs: { open: '' } })])
     expect(blockingDialogOpen()).toBe(true)
     expect(keystrokeIsSpokenFor()).toBe(true)
-    stubDOM([boardRoot, el({ tag: 'DIALOG', classes: ['ws-page-sheet'] }), el({ attrs: { open: '' } })])
+    stubDOM([boardRoot, el({ tag: 'DIALOG' }), el({ attrs: { open: '' } })])
     expect(blockingDialogOpen()).toBe(false)
   })
 

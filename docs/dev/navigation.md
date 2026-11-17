@@ -21,7 +21,7 @@ Every surface that moves the reader asks it; none touches `window.history` for t
 - **A back in flight** (the pop has not landed yet) holds whatever is asked meanwhile and applies it once the pop lands; an open queued this way pushes a fresh layer.
 
 - **The view under the reader, chosen from it** (its tab, its key, the header's close on a reader opened from the Desk) is back, not a new entry.
-- **Dialogs over the reader keep no entry.** The sent files sheet (`PageSheet`) closes by Escape or a click outside; Back leaves the reader and the sheet with it.
+- **Popups over the reader keep no entry.** The list of sent files (`openFileList`) closes by Escape or a click outside; Back leaves the reader and the list with it.
 
 So from any reachable state, one back reaches a view.
 

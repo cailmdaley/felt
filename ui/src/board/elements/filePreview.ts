@@ -1,4 +1,5 @@
 import type { DocumentKey } from '../workspace/DocumentBridge.js'
+import { openActionMenu } from '../conversationMenu.js'
 import { buildFileViewer, disposeFileViewer, resumeFileViewer, suspendFileViewer } from '../FileViewerPanel.js'
 import { forwardDocumentKey } from '../workspace/DocumentBridge.js'
 import { documentKind, KIND_GLYPH, parseDocKey, type DocKey } from '../workspace/documents.js'
@@ -6,8 +7,12 @@ import { Thumbnail } from '../workspace/Thumbnail.js'
 import { timeEl } from './time.js'
 import './filePreview.css'
 
-/** A file the previews show: its document key, the name its bar carries, and when it was sent, for a card to say. */
-export interface UnfoldFile { key: DocKey; name: string; at?: number }
+/**
+ * A file the previews show: its document key, the name its bar carries, when
+ * it was sent, for a card or a row to say, why it was sent when its send said,
+ * and whether it is unread.
+ */
+export interface UnfoldFile { key: DocKey; name: string; at?: number; caption?: string; unread?: boolean }
 
 /**
  * How large a file's preview is drawn, by what it is: a figure (an image or
@@ -61,6 +66,38 @@ export interface UnfoldOptions {
   full?(key: DocKey): void
 }
 
+/** A file's face, drawn alike in a card and a row: its kind's glyph, its name, and when it came. */
+function face(file: UnfoldFile, now: number): HTMLElement[] {
+  const glyph = document.createElement('span'), name = document.createElement('span')
+  glyph.className = 'uf-glyph'; glyph.textContent = KIND_GLYPH[documentKind(parseDocKey(file.key)?.path ?? file.name)]
+  name.className = 'uf-file-name'; name.textContent = file.name
+  return [glyph, name, timeEl(file.at ?? 0, now, 'uf-age')]
+}
+
+/**
+ * A file as one row of a list, the card's face in a line with its caption
+ * under it when its send gave one. Drawn still: the list's item owns the press.
+ */
+export function fileRow(file: UnfoldFile, now = Date.now()): HTMLElement {
+  const row = document.createElement('span')
+  row.className = 'uf-file-row'
+  row.dataset.key = file.key
+  row.toggleAttribute('data-unread', !!file.unread)
+  row.append(...face(file, now))
+  if (file.caption) row.append(Object.assign(document.createElement('span'), { className: 'uf-caption', textContent: file.caption }))
+  return row
+}
+
+/** Files as a list under `anchor`, in the order given, each row opening its file; `current` marks the one being read. Returns its close. */
+export function openFileList(anchor: HTMLElement, files: readonly UnfoldFile[], open: (key: DocKey) => void, current?: DocKey): () => void {
+  const now = Date.now()
+  return openActionMenu(anchor, files.map(file => {
+    const content = fileRow(file, now)
+    content.toggleAttribute('data-current', file.key === current)
+    return { label: file.caption ? `${file.name}: ${file.caption}` : file.name, content, run: () => open(file.key) }
+  }), `${files.length} ${files.length === 1 ? 'file' : 'files'}`)
+}
+
 /** The bar's two drawn controls, in the stroke the board's icons use. */
 const GLYPH = {
   full: '<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/>',
@@ -103,8 +140,8 @@ function scroller(el: HTMLElement): HTMLElement | null {
  * picture drawn with nothing loaded. A click
  * unfolds that file at its natural height in the same place, the same card
  * grown, under a quiet bar pinned to the top of whatever scrolls it: the
- * file's name, ‹ i / n › when there are several, full screen, and the fold
- * chevron. The bar has no ground of its own until it pins over the file, when
+ * file's name, ‹ i / n › when there are several (the count opening the list
+ * of them, {@link openFileList}), full screen, and the fold chevron. The bar has no ground of its own until it pins over the file, when
  * it takes its page's ground and a hairline. While one is unfolded, ← and →
  * step to its neighbours, from the page or from inside the file, and Escape
  * folds it, returning to the preview.
@@ -115,7 +152,7 @@ export class Unfold {
   private readonly bar = document.createElement('div')
   private readonly name = document.createElement('span')
   private readonly steps = document.createElement('span')
-  private readonly count = document.createElement('span')
+  private readonly count = document.createElement('button')
   private readonly prev = document.createElement('button')
   private readonly next = document.createElement('button')
   private readonly page = document.createElement('div')
@@ -132,7 +169,6 @@ export class Unfold {
     this.bar.className = 'uf-bar'
     this.name.className = 'uf-name'
     this.steps.className = 'uf-steps'
-    this.count.className = 'uf-count'
     const control = (button: HTMLButtonElement, text: string, label: string, act: () => void): HTMLButtonElement => {
       button.type = 'button'; button.className = 'uf-control'; button.innerHTML = text
       button.title = label; button.setAttribute('aria-label', label)
@@ -141,6 +177,8 @@ export class Unfold {
     }
     control(this.prev, '‹', 'Previous file (←)', () => this.step(-1))
     control(this.next, '›', 'Next file (→)', () => this.step(1))
+    control(this.count, '', 'List the files', () => { openFileList(this.count, this.files, key => this.unfold(key), this.open?.key) })
+    this.count.classList.add('uf-count')
     this.steps.append(this.prev, this.count, this.next)
     const full = opts.full && control(document.createElement('button'), glyph('full'), 'Full screen', () => { if (this.open) opts.full!(this.open.key) })
     const fold = control(document.createElement('button'), glyph('fold'), 'Collapse (Esc)', () => this.fold())
@@ -265,6 +303,8 @@ export class Unfold {
     this.name.title = parseDocKey(file.key)?.path ?? file.name
     this.steps.hidden = this.files.length < 2
     this.count.textContent = `${at + 1} / ${this.files.length}`
+    this.count.title = `File ${at + 1} of ${this.files.length}: list them`
+    this.count.setAttribute('aria-label', this.count.title)
     this.prev.disabled = at === 0
     this.next.disabled = at === this.files.length - 1
   }
@@ -289,10 +329,7 @@ export class Unfold {
     if (density) el.dataset.density = density
     if (density === 'card') {
       // Nothing to see before it opens: its kind, its name and when it came, and nothing loads.
-      const glyph = document.createElement('span'), name = document.createElement('span'), when = timeEl(file.at ?? 0, Date.now(), 'uf-card-age')
-      glyph.className = 'uf-card-glyph'; glyph.textContent = KIND_GLYPH[documentKind(path)]
-      name.className = 'uf-card-name'; name.textContent = file.name
-      el.append(glyph, name, when)
+      el.append(...face(file, Date.now()))
       this.cards.set(file.key, { el })
       return el
     }

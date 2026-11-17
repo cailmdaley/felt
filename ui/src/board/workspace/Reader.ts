@@ -1,5 +1,5 @@
 import { slug } from '../threadOutline.js'
-import { sentDocuments } from './SentFiles.js'
+import { openFileList } from '../elements/filePreview.js'
 import type { ThreadIndex } from '../threads.js'
 import './tokens.css'
 import './reader.css'
@@ -16,7 +16,7 @@ import { fileBytesUrl, showToast } from '../utils.js'
 import { instantStamp } from '../civilDay.js'
 import { DocumentHost, type DocumentFrame } from './DocumentHost.js'
 import { scrollHtmlViewer } from './DocumentBridge.js'
-import { documentLabels, documentLabelMetadata, isBaked, isDrawn, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
+import { documentLabels, documentLabelMetadata, isBaked, isDrawn, lastSent, sentCaption, sentDocuments, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { DocumentSeen } from './DocumentSeen.js'
 import { declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
 import { probeDocumentTitles } from './titleProbe.js'
@@ -27,7 +27,6 @@ import { groupJump, groupStops } from './groupJump.js'
 import { invalidateWorkspaceMeasures, workspaceMeasure } from './measures.js'
 import { type Verdict } from './Verdicts.js'
 import { installPageSwipe, PhoneTopbar, SWIPE, swipeFollow, swipeOutcome, swipeSettleTime, type SwipeSignal } from './PhoneGestures.js'
-import { PageSheet } from './PageSheet.js'
 import { SettingsMenu } from './SettingsMenu.js'
 import '@ui-sdk/web/popover'
 import type { UiPopoverElement } from '@ui-sdk/web'
@@ -112,7 +111,7 @@ export class Reader {
   private readonly stopTitles: () => void
   private readonly seen = new DocumentSeen()
   private channelReady = false
-  /** The body and receipts have settled; the files sheet can open. */
+  /** The body and receipts have settled; the files list can open. */
   private runSettled = true
   private readonly navbar: HTMLElement
   private readonly lead: HTMLElement
@@ -130,13 +129,14 @@ export class Reader {
   private swipeSettle: ReturnType<typeof setTimeout> | null = null
   private swiping = false
   private swipeWatchdog: ReturnType<typeof setTimeout> | null = null
-  private readonly pageSheet: PageSheet
   private readonly settingsMenu: SettingsMenu
   private announcement = ''
   private readonly observer: ResizeObserver | null
   private readonly labels = new WeakMap<DocumentFrame, { glyph: HTMLElement; title: HTMLElement; provenance: HTMLElement; steps: HTMLElement }>()
   private channel: Channel | null = null
   private fresh: ReadonlySet<DocKey> = new Set()
+  /** Closes the list of sent files while it is open. */
+  private closeFiles = (): void => {}
   private currentCard: KanbanCard | null = null
   /** The constitution last open in each Desk column, for this session. */
   private readonly groupMemory = new Map<string, string>()
@@ -147,7 +147,7 @@ export class Reader {
   private readonly menu = document.createElement('ui-popover') as UiPopoverElement<DocumentOf>
   private readonly menuContent = document.createElement('ui-popover-content')
   private readonly picker: ConstitutionPicker
-  /** The way to the sheet of sent files, marked while one is unread. */
+  /** The way to the list of sent files, marked while one is unread. */
   private readonly filesToggle: HTMLButtonElement
   private instantRaf = 0
   private readonly motion = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -166,7 +166,7 @@ export class Reader {
     this.el.dataset.wsThemeBoundary = ''
     this.veil.dataset.part = 'veil'
     this.el.inert = true
-    this.filesToggle = button('ws-files-toggle', '', () => this.openFilesSheet(), 'Sent files')
+    this.filesToggle = button('ws-files-toggle', '', () => this.openSentFiles(this.filesToggle), 'Sent files')
     this.filesToggle.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path class="ws-toggle-line" d="M6.5 3.5h7M6.5 8h7M6.5 12.5h7"/><circle class="ws-toggle-flag" cx="3" cy="3.5" r="1"/><circle class="ws-toggle-bullet" cx="3" cy="8" r="1"/><circle class="ws-toggle-bullet" cx="3" cy="12.5" r="1"/></svg>'
     this.returnButton = button('ws-return', '', () => this.back(), 'Back to Desk')
     this.title = button('ws-channel-title', '', () => this.openSwitcher())
@@ -179,7 +179,6 @@ export class Reader {
     this.navbar.dataset.part = 'phone-topbar'
     this.navbar.append(this.lead, this.trail)
     this.settingsMenu = new SettingsMenu()
-    this.pageSheet = new PageSheet(opts.shuttleBase, key => this.openDocument(key), () => this.paintFilesToggle())
     prepareAnnouncements(document)
     this.parallax.append(this.track)
     this.stage.append(this.parallax)
@@ -192,7 +191,7 @@ export class Reader {
     const column = element('div', 'ws-stage-column')
     this.band.hidden = true
     column.append(this.stage, this.band)
-    this.el.append(this.veil, this.navbar, column, this.pageSheet.el, this.menu)
+    this.el.append(this.veil, this.navbar, column, this.menu)
     this.host = new DocumentHost(this.track, {
       shuttleBase: opts.shuttleBase,
       buildProse: opts.buildProse,
@@ -233,11 +232,11 @@ export class Reader {
     }
   }
 
-  /** Show the selected page; settled body and receipt reads enable the files sheet. */
+  /** Show the selected page; settled body and receipt reads enable the files list. */
   show(channel: Channel, selected: DocKey, card?: KanbanCard, animate = true, ready = true, settled = ready): void {
     const switching = channel.uid !== this.channel?.uid || channel.owner !== this.channel?.owner || !this.active
     this.cancelSwipe()
-    if (switching) { if (this.expanded) this.setExpanded(false); this.closeMenu(); this.pageSheet.hide(); this.settingsMenu.close() }
+    if (switching) { if (this.expanded) this.setExpanded(false); this.closeMenu(); this.closeFiles(); this.settingsMenu.close() }
     const reordered = this.selected === selected && this.channel?.documents.map(d => d.key).join('\0') !== channel.documents.map(d => d.key).join('\0')
     this.channelReady = ready
     this.settleRun(settled)
@@ -280,8 +279,8 @@ export class Reader {
     if (this.expanded) this.setExpanded(false)
     this.active = false
     this.opts.themes?.unbind(this.el)
-    this.pageSheet.hide()
     this.closeMenu()
+    this.closeFiles()
     this.el.inert = true
     this.el.setAttribute('aria-hidden', 'true')
     cancelAnimationFrame(this.arrival)
@@ -319,7 +318,6 @@ export class Reader {
   /** Hide the run's surfaces while it is provisional; they fade in once, when it lands. */
   private settleRun(settled: boolean): void {
     this.runSettled = settled
-    if (!settled) this.pageSheet.hide()
   }
   /** Show another of the channel's pages in the reader's place. */
   openDocument(key: DocKey): void {
@@ -349,13 +347,16 @@ export class Reader {
     this.closeMenu()
     this.settingsMenu.show(content, opener, host)
   }
-  private openFilesSheet(opener: HTMLElement = this.filesToggle): void {
-    if (!this.runSettled) return
-    this.el.append(this.pageSheet.el)
-    this.pageSheet.show(opener)
+  /** The constitution's sent files as a list under `opener`, newest first, the page being read marked; a row opens its file. */
+  private openSentFiles(opener: HTMLElement): void {
+    const ch = this.channel
+    if (!this.runSettled || !ch) return
+    this.closeFiles = openFileList(opener, sentDocuments(ch).map(doc => ({
+      key: doc.key, name: documentLabelMetadata(doc, doc.name, ch.owner).title, at: lastSent(doc), caption: sentCaption(doc), unread: this.fresh.has(doc.key),
+    })), key => this.openDocument(key), this.selected ?? undefined)
   }
   private get swipeable(): boolean {
-    return this.active && this.phone.matches && !this.expanded && !this.pageSheet.isOpen && !this.menu.open
+    return this.active && this.phone.matches && !this.expanded && !this.menu.open && !blockingDialogOpen()
       && this.runSettled && (window.visualViewport?.scale ?? 1) <= 1.01
   }
   /**
@@ -417,7 +418,6 @@ export class Reader {
       this.fillLabel(frame, ch.labels[i])
     })
     const fresh = this.seen.observe(ch, this.selected ?? '', this.channelReady)
-    this.pageSheet.update(ch, this.selected ?? '', fresh)
     this.fresh = fresh
     this.paintFilesToggle()
     const doc = ch.documents[index]
@@ -449,7 +449,7 @@ export class Reader {
     steps.hidden = true
     steps.append(
       button('ws-icon-button ws-sent-step', '‹', () => this.stepSent(-1), 'Newer sent file (←)'),
-      element('span', 'ws-sent-count'),
+      button('ws-sent-count', '', () => this.openSentFiles(steps.querySelector('.ws-sent-count')!)),
       button('ws-icon-button ws-sent-step', '›', () => this.stepSent(1), 'Older sent file (→)'))
     frame.label.append(back, glyph, title, steps, provenance)
     // A drawn page is no file: nothing to download, no document menu.
@@ -484,7 +484,8 @@ export class Reader {
       newer.disabled = at === 0
       older.disabled = at === sends.length - 1
       count.textContent = `${at + 1} / ${sends.length}`
-      count.title = `Sent file ${at + 1} of ${sends.length}, newest first`
+      count.title = `Sent file ${at + 1} of ${sends.length}, newest first: list them`
+      count.setAttribute('aria-label', count.title)
     }
     if (parts.provenance.title !== metadata.summary) {
       parts.provenance.textContent = metadata.summary
@@ -650,12 +651,11 @@ export class Reader {
   private paintFilesToggle(): void {
     const documents = this.channel ? sentDocuments(this.channel) : []
     this.filesToggle.hidden = !documents.length
-    this.filesToggle.setAttribute('aria-expanded', String(this.pageSheet.isOpen))
     this.filesToggle.toggleAttribute('data-attention', this.fresh.size > 0)
   }
   private readonly keydown = (e: KeyboardEvent): void => {
     // Open popups own their keys, Escape included.
-    if (this.pageSheet.isOpen || this.settingsMenu.isOpen || this.menu.open) return
+    if (this.settingsMenu.isOpen || this.menu.open) return
     this.keyboardModality()
     if (!this.active || e.isComposing || e.defaultPrevented || blockingDialogOpen()) return
     if ((e.key === 'Enter' || e.key === 'Escape') && this.picker.el.contains(e.target as Node)) return
@@ -772,7 +772,6 @@ export class Reader {
     this.closeMenu()
     this.stopSwipe()
     this.clearSwipeWatchdog()
-    this.pageSheet.dispose()
     this.settingsMenu.dispose()
     this.observer?.disconnect()
     window.removeEventListener('resize', this.relayout)

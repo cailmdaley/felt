@@ -17,6 +17,8 @@ export interface FiberSend {
   basename: string
   timestamp: number
   owner: string
+  /** Why it was sent, when its send said. */
+  caption?: string
 }
 
 /** How far back a sent file still counts. */
@@ -111,14 +113,14 @@ function resolve(card: KanbanCard, file: SentFile): FiberSend | undefined {
   const key = docKey(file.host ?? '', file.fullPath, card.originId, card.fiberDir)
   const parsed = parseDocKey(key)
   if (!parsed) return undefined
-  return { key, fullPath: file.fullPath, basename: file.basename, timestamp: file.timestamp, owner: parsed.owner }
+  return { key, fullPath: file.fullPath, basename: file.basename, timestamp: file.timestamp, owner: parsed.owner, ...file.caption ? { caption: file.caption } : {} }
 }
 
 function sameFiles(a: readonly SentFile[], b: readonly SentFile[]): boolean {
   if (a.length !== b.length) return false
   for (let i = 0; i < a.length; i++) {
     const x = a[i], y = b[i]
-    if (x.fullPath !== y.fullPath || x.timestamp !== y.timestamp || x.host !== y.host || x.uid !== y.uid || x.sessionId !== y.sessionId) return false
+    if (x.fullPath !== y.fullPath || x.timestamp !== y.timestamp || x.host !== y.host || x.uid !== y.uid || x.sessionId !== y.sessionId || x.caption !== y.caption) return false
   }
   return true
 }

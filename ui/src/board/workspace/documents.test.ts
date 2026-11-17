@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   leadReceipt, channelLead, buildChannel, defaultSelection, docKey, documentKind, documentLabels, documentLabelMetadata, fallbackSelection,
-  bakeOf, changeKey, fiberKey, isBaked, normalizeAbsolutePath, parseDocKey, proseDocument, type ChannelInput, type WorkspaceDocument,
+  bakeOf, changeKey, fiberKey, isBaked, normalizeAbsolutePath, parseDocKey, proseDocument, sentCaption, sentDocuments, type ChannelInput, type WorkspaceDocument,
 } from './documents.js'
 
 const base: ChannelInput = {
@@ -43,6 +43,13 @@ describe('document identity and kinds', () => {
     expect(documentKind('/x/review.CHANGE.JSON')).toBe('change')
     expect(documentKind('/x/ordinary.json')).toBe('text')
   })
+})
+
+it('lists sent files newest first, each with the caption of its latest send that gave one', () => {
+  const channel = buildChannel({ ...base, body: '', sent: [
+    { path: '/a/plot.png', time: 1, caption: 'First cut' }, { path: '/a/plot.png', time: 3 }, { path: '/a/table.csv', time: 2, caption: 'The table' },
+  ] })
+  expect(sentDocuments(channel).map(doc => [doc.name, sentCaption(doc)])).toStrictEqual([['plot.png', 'First cut'], ['table.csv', 'The table']])
 })
 
 it('opens a change declared by embed and deduplicates its sent receipt', () => {

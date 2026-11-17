@@ -127,7 +127,13 @@ describe('a constitution\'s view', () => {
     expect(feeds.open).not.toHaveBeenCalled()
     const parts = [...page.el.querySelectorAll<HTMLElement>('.ov-head .ws-doc-button')].map(button => button.dataset.part)
     expect(parts).toStrictEqual(['constitution', 'tapestry', 'sends', 'edits'])
+    // The count lists its files, newest first; a row opens its file.
     page.el.querySelector<HTMLButtonElement>('.ov-head [data-part="sends"]')!.click()
+    await settle()
+    const rows = [...document.querySelectorAll<HTMLElement>('.kbn-conversation-menu .uf-file-row')]
+    expect(rows.map(row => row.dataset.key)).toStrictEqual(sent.map(file => file.key))
+    rows[0].closest('button')!.click()
+    await settle(); await settle()
     expect(feeds.open).toHaveBeenLastCalledWith(mid, sent[0].key)
   })
 

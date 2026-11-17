@@ -356,7 +356,7 @@ export class Workspace {
   }
   /** A card's sent files, and the open channel's other documents, newest first. */
   private mapFiles(card: KanbanCard): MapFile[] {
-    const files = new Map(this.sends.sends(card).map(send => [send.key, { key: send.key, name: send.basename, at: send.timestamp, unread: unseenSince(send.key, send.timestamp) }]))
+    const files = new Map(this.sends.sends(card).map((send): [string, MapFile] => [send.key, { key: send.key, name: send.basename, at: send.timestamp, unread: unseenSince(send.key, send.timestamp), caption: send.caption }]))
     const documents = this.channels.get(channelId(card.uid ?? card.id, card.originId))?.channel.documents ?? []
     for (const doc of documents) {
       const at = documentActivity(doc)
@@ -1077,7 +1077,7 @@ export class Workspace {
     const provisional = state.routedFile ? parseDocKey(state.routedFile) : null
     const receipts = state.channel.uid.startsWith('other:') ? this.library.receipts(state.channel.uid)
       : this.receipts.get(channelId(state.channel.uid, state.channel.owner))?.files ?? []
-    const sent = receipts.map(f => ({ path: f.fullPath, owner: f.host ?? card.originId, session: f.sessionId, time: f.timestamp }))
+    const sent = receipts.map(f => ({ path: f.fullPath, owner: f.host ?? card.originId, session: f.sessionId, time: f.timestamp, caption: f.caption }))
     state.channel = buildChannel({
       uid: before.uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: before.body, outcome: before.outcome, isConstitution: card.shuttleKind !== undefined, family: this.hasMap(card), change: !!card.shuttleProjectDir, changePRs: card.shuttleChangePRs,
       sent, links: state.links, routed: provisional ? [provisional] : undefined, previous: before, modifiedAt: card.modifiedAt, fileModifiedAt: state.fileModifiedAt,

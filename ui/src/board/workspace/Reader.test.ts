@@ -120,7 +120,6 @@ describe('Reader', () => {
     expect(reader.el.hasAttribute('data-ws-theme-boundary')).toBe(true)
     expect([...bound.keys()]).toEqual([reader.el])
     expect(reader.el.querySelectorAll('[data-part="chrome-plate"]')).toHaveLength(0)
-    expect(reader.el.querySelector('[data-part="page-sheet"]')).not.toBeNull()
     expect(reader.el.querySelector('.ws-navbar')?.getAttribute('data-part')).toBe('phone-topbar')
     expect(reader.el.querySelector('.ws-thumbbar')).toBeNull()
     expect(reader.el.querySelector('.ws-navbar .kbn-ctl-temper, .ws-navbar .kbn-ctl-discard')).toBeNull()
@@ -346,19 +345,12 @@ describe('Reader', () => {
 
   describe('sent files', () => {
     const sent = buildChannel({ uid: 'alpha', owner: 'host-a', name: 'Alpha', path: '/notes/alpha.md', fiberDir: '/notes', body: '', sent: [{ path: '/notes/plot.png', time: 1 }] })
-    const openSheet = (reader: Reader, open: () => void): void => {
-      const showModal = vi.fn(function (this: HTMLDialogElement) { this.setAttribute('open', '') })
-      Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { value: showModal, configurable: true })
-      Object.defineProperty(HTMLDialogElement.prototype, 'close', { value(this: HTMLDialogElement) { this.removeAttribute('open') }, configurable: true })
-      try {
-        open()
-        expect(showModal).toHaveBeenCalledOnce()
-        expect(reader.el.querySelector('.ws-page-sheet [data-part="page-sheet-row"]')?.getAttribute('data-key')).toBe('host-a:/notes/plot.png')
-        disposeReader(reader)
-      } finally { Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal'); Reflect.deleteProperty(HTMLDialogElement.prototype, 'close') }
+    const listed = async (): Promise<string[]> => {
+      await settle()
+      return [...document.querySelectorAll<HTMLElement>('.kbn-conversation-menu .uf-file-row')].map(row => row.dataset.key!)
     }
 
-    it('gives the phone a top bar toggle only while there are files, and opens the sheet from it', () => {
+    it('gives the phone a top bar toggle only while there are files, and lists them from it', async () => {
       viewport.phone = true
       const reader = makeReader()
       const toggle = reader.el.querySelector<HTMLButtonElement>('.ws-navbar .ws-files-toggle')!
@@ -366,7 +358,10 @@ describe('Reader', () => {
       reader.show(sent, sent.documents[0].key, alpha)
       expect(toggle.hidden).toBe(false)
       expect(toggle.closest('.ws-nav-trail')).not.toBeNull()
-      openSheet(reader, () => { toggle.click(); expect(toggle.getAttribute('aria-expanded')).toBe('true') })
+      toggle.click()
+      expect(toggle.getAttribute('aria-expanded')).toBe('true')
+      expect(await listed()).toEqual(['host-a:/notes/plot.png'])
+      disposeReader(reader)
     })
 
     it('marks unread files on the toggle at every width', () => {

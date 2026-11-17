@@ -145,15 +145,18 @@ try {
     await page.locator('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"] .kbn-ch-who').click()
     await page.waitForFunction(() => document.querySelector('.ws-selected .ov-name')?.textContent === 'kappa-tsz')
     await page.locator('.ws-selected .ov-head [data-part="sends"]').click()
+    await page.waitForFunction(() => document.querySelectorAll('.kbn-conversation-menu .uf-file-row').length === 3)
+    await shot(page, `${name}-sends-list`)
+    await page.locator('.kbn-conversation-menu .uf-file-row').first().click()
     const count = () => page.locator('.ws-page.ws-selected .ws-sent-count').textContent()
     await page.waitForFunction(() => document.querySelector('.ws-page.ws-selected .ws-sent-count')?.textContent === '1 / 3')
     await page.keyboard.press('ArrowRight')
     await page.waitForFunction(() => document.querySelector('.ws-page.ws-selected .ws-sent-count')?.textContent === '2 / 3')
     if (phone) {
       await shot(page, `${name}-sends`)
-      // A phone has no page bar: its top bar's files sheet lists every file sent.
+      // A phone has no page bar: its top bar's files list names every file sent.
       await page.locator('.ws-files-toggle').click()
-      await page.waitForFunction(() => document.querySelectorAll('.ws-sent-file').length === 3)
+      await page.waitForFunction(() => document.querySelectorAll('.kbn-conversation-menu .uf-file-row').length === 3)
       await shot(page, `${name}-sends-sheet`)
       await page.keyboard.press('Escape')
     } else {

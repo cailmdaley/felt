@@ -793,18 +793,13 @@ describe('workspace reader integration', () => {
     links()[0].click(); await settle()
     expect(title()).toBe('hub')
   })
-  it('opens the sheet of sent files from the toggle, newest first', async () => {
+  it('lists the sent files from the toggle, newest first', async () => {
     workspace.open(cards[0], 'Desk'); await settle()
     const toggle = document.querySelector<HTMLButtonElement>('.ws-files-toggle')!
     expect(toggle.hidden).toBe(false)
-    const showModal = vi.fn()
-    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { value: showModal, configurable: true })
-    try {
-      toggle.click()
-      expect(showModal).toHaveBeenCalledOnce()
-      const rows = [...document.querySelectorAll<HTMLButtonElement>('.ws-page-sheet [data-part="page-sheet-row"]')]
-      expect(rows.map(row => row.dataset.key)).toEqual(['host-a:/notes/alpha/table.html', 'host-a:/notes/alpha/report.html'])
-    } finally { Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal') }
+    toggle.click(); await settle()
+    const rows = [...document.querySelectorAll<HTMLElement>('.kbn-conversation-menu .uf-file-row')]
+    expect(rows.map(row => row.dataset.key)).toEqual(['host-a:/notes/alpha/table.html', 'host-a:/notes/alpha/report.html'])
   })
   it('hides the toggle for a constitution with no sent files', async () => {
     workspace.open(cards[1], 'Desk'); await settle()
