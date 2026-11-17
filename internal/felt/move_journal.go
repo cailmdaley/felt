@@ -29,6 +29,7 @@ type moveRewrite struct {
 	ID           string
 	Path         string
 	SourceOld    string
+	SourceDir    string
 	BeforeSHA256 string
 	AfterSHA256  string
 	Done         bool
@@ -45,7 +46,7 @@ func (s *Storage) saveMove(oldID, newID string, inside, outside []pendingWrite) 
 		result := moveRewriteGroup{}
 		for _, w := range writes {
 			result.Context = w.context
-			result.Writes = append(result.Writes, moveRewrite{ID: w.id, Path: w.path, SourceOld: w.sourceOld})
+			result.Writes = append(result.Writes, moveRewrite{ID: w.id, Path: w.path, SourceOld: w.sourceOld, SourceDir: w.sourceDir})
 		}
 		return result
 	}
@@ -137,7 +138,7 @@ func (s *Storage) recoverMove(oldID, newID string) (*MoveResult, bool, error) {
 		for i := range group.rewrites.Writes {
 			w := &group.rewrites.Writes[i]
 			if !w.Done {
-				if err := (pendingWrite{w.ID, w.Path, w.SourceOld, group.rewrites.Context}).writeJournaled(s, w, &journal); err != nil {
+				if err := (pendingWrite{w.ID, w.Path, w.SourceOld, w.SourceDir, group.rewrites.Context}).writeJournaled(s, w, &journal); err != nil {
 					return result, true, fmt.Errorf("unfinished move; repeat %s -> %s: %w", oldID, newID, err)
 				}
 				w.Done = true

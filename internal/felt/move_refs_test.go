@@ -442,3 +442,106 @@ func TestMoveSubtreeLeavesLinkTheMoveDoesNotCapture(t *testing.T) {
 		t.Fatalf("rewritten %v; sib.md = %q", result.Rewritten, readFiberFile(t, s, "a/sib"))
 	}
 }
+
+// A markdown link to a file resolves against the directory of the document
+// that holds it. A move carries the links into the moved subtree, the moved
+// fiber's own document under its new basename, and the links out of it whose
+// depth changed; links inside the subtree, code, URLs and fragments stay.
+func TestMoveSubtreeCarriesFileLinks(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		newID              string
+		c, xy, x, y, other string
+	}{
+		{
+			newID: "a/z",
+			c:     "[d](../a/z/z.md#s) [p](../a/z/plot.png) ![q](../a/z/y/y.md) [u](../b/b.md) [w](https://h/a/x/p.png) `[k](../a/x/x.md)`",
+			xy:    "[p](../z/plot.png?raw=1) [o](../xy-other.png)",
+			x:     "[up](../../c/c.md) [own](plot.png) [kid](y/y.md)",
+			y:     "[parent](../z.md) [plot](../plot.png)",
+		},
+		{
+			newID: "b/q/x",
+			c:     "[d](../b/q/x/x.md#s) [p](../b/q/x/plot.png) ![q](../b/q/x/y/y.md) [u](../b/b.md) [w](https://h/a/x/p.png) `[k](../a/x/x.md)`",
+			xy:    "[p](../../b/q/x/plot.png?raw=1) [o](../xy-other.png)",
+			x:     "[up](../../../c/c.md) [own](plot.png) [kid](y/y.md)",
+			y:     "[parent](../x.md) [plot](../plot.png)",
+		},
+	} {
+		t.Run(tc.newID, func(t *testing.T) {
+			t.Parallel()
+			s := newMoveFixture(t)
+			writeFiberFile(t, s, "c", fiber("C", "[d](../a/x/x.md#s) [p](../a/x/plot.png) ![q](../a/x/y/y.md) [u](../b/b.md) [w](https://h/a/x/p.png) `[k](../a/x/x.md)`"))
+			writeFiberFile(t, s, "a/xy", fiber("XY", "[p](../x/plot.png?raw=1) [o](../xy-other.png)"))
+			writeFiberFile(t, s, "a/x", fiber("X", "[up](../../c/c.md) [own](plot.png) [kid](y/y.md)"))
+			writeFiberFile(t, s, "a/x/y", fiber("Y", "[parent](../x.md) [plot](../plot.png)"))
+
+			if _, err := s.MoveSubtree("a/x", tc.newID); err != nil {
+				t.Fatalf("MoveSubtree: %v", err)
+			}
+			for id, want := range map[string]string{"c": fiber("C", tc.c), "a/xy": fiber("XY", tc.xy), tc.newID: fiber("X", tc.x), tc.newID + "/y": fiber("Y", tc.y)} {
+				if got := readFiberFile(t, s, id); got != want {
+					t.Errorf("%s after move:\n%s\nwant:\n%s", id, got, want)
+				}
+			}
+		})
+	}
+}
+
+// Fibers outside the slug convention stay addressable: links to them in every
+// form felt reads are carried when an ancestor moves.
+func TestMoveSubtreeCarriesLinksToNonConformingSlugs(t *testing.T) {
+	t.Parallel()
+	_, s := newStore(t)
+	for _, id := range []string{"u", "u/shear_2d", "u/c-ℓ-space", "u/Caps"} {
+		writeFiberFile(t, s, id, fiber("F", ""))
+	}
+	writeFiberFile(t, s, "c", "---\nid: fixture-C\nname: C\ninputs:\n  - from: u/shear_2d\n  - {from: u/c-ℓ-space}\n---\n\n"+
+		"[[u/shear_2d]] [s](u/shear_2d) [[u/c-ℓ-space|l]] [e](../u/c-ℓ-space) [[u/Caps]] [f](../u/shear_2d/plot.png)\n")
+
+	if _, err := s.MoveSubtree("u", "v"); err != nil {
+		t.Fatalf("MoveSubtree: %v", err)
+	}
+	want := "---\nid: fixture-C\nname: C\ninputs:\n  - from: v/shear_2d\n  - {from: v/c-ℓ-space}\n---\n\n" +
+		"[[v/shear_2d]] [s](v/shear_2d) [[v/c-ℓ-space|l]] [e](../v/c-ℓ-space) [[v/Caps]] [f](../v/shear_2d/plot.png)\n"
+	if got := readFiberFile(t, s, "c"); got != want {
+		t.Fatalf("c after move:\n%s\nwant:\n%s", got, want)
+	}
+	felts, err := s.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issues, err := s.Check(felts); err != nil || len(issues) != 0 {
+		t.Fatalf("check after move: %v %v", issues, err)
+	}
+}
+
+// inputs.from is rewritten in every YAML spelling of an inputs sequence.
+func TestMoveSubtreeRewritesEveryInputsForm(t *testing.T) {
+	t.Parallel()
+	s := newMoveFixture(t)
+	writeFiberFile(t, s, "a/x", "---\nid: fixture-X\nname: X\noutputs:\n  - id: out\n---\n\n")
+	frontmatter := func(id string) string {
+		return "inputs:\n" +
+			"  - from: " + id + "\n" +
+			"  - {from: " + id + "}\n" +
+			"  - id: q\n    from: \"" + id + "\"\n" +
+			"  - id: f\n    from: " + id + ".out\n" +
+			"  - from: " + id + " # comment\n" +
+			"  - from: '" + id + "'\n" +
+			"  - from: >-\n      " + id + "\n" +
+			"flow: 1\n"
+	}
+	writeFiberFile(t, s, "c", "---\nid: fixture-C\nname: C\n"+frontmatter("a/x")+"---\n\n")
+	writeFiberFile(t, s, "d", "---\nid: fixture-D\nname: D\ninputs: [{from: a/x/y}, {id: o, from: a/x.out}]\n---\n\n")
+
+	if _, err := s.MoveSubtree("a/x", "b/x"); err != nil {
+		t.Fatalf("MoveSubtree: %v", err)
+	}
+	if got, want := readFiberFile(t, s, "c"), "---\nid: fixture-C\nname: C\n"+frontmatter("b/x")+"---\n\n"; got != want {
+		t.Errorf("c after move:\n%s\nwant:\n%s", got, want)
+	}
+	if got, want := readFiberFile(t, s, "d"), "---\nid: fixture-D\nname: D\ninputs: [{from: b/x/y}, {id: o, from: b/x.out}]\n---\n\n"; got != want {
+		t.Errorf("d after move:\n%s\nwant:\n%s", got, want)
+	}
+}

@@ -87,9 +87,12 @@ func (a *app) printRemainingPaths(storage *felt.Storage, oldID string) error {
 			spellings = append(spellings, strings.Join(parts[i:], "/"))
 		}
 	}
+	// A spelling counts where it stands as a whole path: not inside a longer
+	// name, nor after another path's segment, though a relative ./ or ../
+	// before it, as in a markdown link, still counts.
 	patterns := make([]*regexp.Regexp, 0, len(spellings))
 	for _, spelling := range spellings {
-		patterns = append(patterns, regexp.MustCompile(`(^|[^a-zA-Z0-9_/-])`+regexp.QuoteMeta(spelling)+`($|[^a-zA-Z0-9_-])`))
+		patterns = append(patterns, regexp.MustCompile(`(?:^|[^\p{L}\p{N}_/-])(?:\.\.?/)*`+regexp.QuoteMeta(spelling)+`(?:$|[^\p{L}\p{N}_-])`))
 	}
 	fibers, err := storage.List()
 	if err != nil {

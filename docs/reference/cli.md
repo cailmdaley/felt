@@ -22,7 +22,7 @@ running daemon's version when reachable, otherwise the local Mix release version
 | Command | Purpose |
 |---|---|
 | `felt init` | Create or repair the local `.felt/` directory and support files |
-| `felt add <slug> <name>` | Create a fiber (`-b` body, `-o` outcome, `-s` status, `-t` tag, `-D` due, `-R` role, defaulting for open work to `git config felt.person`, `--top-level` to skip placing `<slug>` under an existing fiber of the same leading name; `--namespace` to create an exact path in the enclosing store, independent of the project view) |
+| `felt add <slug> <name>` | Create a fiber (`-b` body, `-o` outcome, `-s` status, `-t` tag, `-D` due, `-R` role, defaulting for open work to `git config felt.person`, `--top-level` to skip placing `<slug>` under an existing fiber of the same leading name; `--namespace` to create an exact path in the enclosing store, independent of the project view; `--uid` to carry an existing fiber under its intrinsic id and slug). Refuses a segment it creates outside [the slug convention](../concepts/fibers.md#the-slug-convention), naming the conforming form |
 | `felt edit <id>` | Modify a fiber's native metadata (`--name`, `-o`, `-s`, `-t`/`--untag`, `-b` body, `-D`, `-R` role, `--set`/`--unset` for opaque scalars) |
 | `felt show <id>` | Show a fiber at a given detail level (`-d name\|compact\|summary\|full`; compact and summary report the body's line count; `--body`, `--citations`, `--consumers`, `--field <name>`; `--citations` and `--consumers` search the whole store; `--exact` accepts only a ULID or an exact enclosing-store path; `--path-hint <path>` verifies a UID at that exact path before walking for it) |
 | `felt rm <id>` | Delete a fiber's file; nested fibers stay where they are. Refuses a guessed id (one resolving only by its last segment or as a prefix completion) and names the fiber it would have reached |
@@ -42,8 +42,8 @@ running daemon's version when reachable, otherwise the local Mix release version
 
 | Command | Purpose |
 |---|---|
-| `felt nest <child> <parent>` | Move a fiber subtree under a parent, keeping its basename and rewriting every reference the move would break (wikilinks, markdown links, `inputs.from`), across the enclosing store too from a view; refuses a guessed id. Use `rename` to change the basename |
-| `felt rename <id> <new-slug>` | Change the directory and document basename, preserving the intrinsic id and carrying descendants and references, including across linked repositories. Refuses an id it would have to guess at (a prefix or a stale path), existing destinations, and companion-file collisions. Lists remaining old paths for manual review; does not rewrite prose, opaque project fields, or a markdown link to a file inside the renamed directory |
+| `felt nest <child> <parent>` | Move a fiber subtree under a parent, keeping its basename and rewriting every reference the move would break (wikilinks, markdown links to fibers and to files, `inputs.from`), across the enclosing store too from a view; refuses a guessed id. Use `rename` to change the basename |
+| `felt rename <id> <new-slug>` | Change the directory and document basename, preserving the intrinsic id and carrying descendants and references (wikilinks, markdown links to fibers and to files, `inputs.from`), including across linked repositories. Refuses a new slug outside [the slug convention](../concepts/fibers.md#the-slug-convention), naming the conforming form; the fiber renamed may have any slug. Refuses an id it would have to guess at (a prefix or a stale path), existing destinations, and companion-file collisions. Lists the fibers whose text still holds the old path for manual review; does not rewrite prose or opaque project fields |
 | `felt unnest <child>` | Move a nested fiber subtree to the top level, rewriting and refusing as `nest` does |
 | `felt recover-move [--abandon]` | Finish an interrupted subtree move's reference repairs; `--abandon` drops the journal without undoing the move or repairing remaining references |
 
@@ -58,7 +58,7 @@ Store support files `*.md.lock`, `.*.tmp` and `.move-pending.json*` belong in `.
 
 | Command | Purpose |
 |---|---|
-| `felt check` | Report unparseable fibers, empty names, broken wikilinks, `inputs.from` refs, stale link paths, legacy forms, slug collisions, stray fiber files; exits non-zero on errors |
+| `felt check` | Report unparseable fibers, empty names, broken wikilinks, `inputs.from` refs, stale link paths, legacy forms, slug collisions, stray fiber files; exits non-zero on errors. Warns about each fiber outside [the slug convention](../concepts/fibers.md#the-slug-convention) |
 | `felt migrate` | Normalize legacy storage into the current model, folding stray fiber files into their directories; exits non-zero when a stray cannot fold safely (`--dir`, `--dry-run`) |
 | `felt backfill-ids` | Assign ULID ids to fibers missing one (`--dir`, `--dry-run`) |
 

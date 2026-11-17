@@ -77,17 +77,24 @@ func TestBareFormMovesRefuseBeforeJournaling(t *testing.T) {
 func TestRenameRemainingPathsRespectBothBoundaries(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ id, unrelated string }{
-		{"x", "box. prefix/x. xylophone. /x. my_x."},
-		{"a/x", "alpha/x. aa/x. prefix/a/x. a/xy."},
+		{"x", "box. prefix/x. xylophone. /x. my_x. ℓx. xé. café/x. x-ray."},
+		{"a/x", "alpha/x. aa/x. prefix/a/x. a/xy. ℓa/x. a/xσ. ../prefix/a/x."},
 	} {
 		t.Run(tc.id, func(t *testing.T) {
 			t.Parallel()
 			dir, s := newStore(t)
-			for _, f := range []*felt.Felt{
-				{ID: tc.id, Name: "Target"},
-				{ID: "positive", Name: "Review", Body: tc.id + ". Code `" + tc.id + "` and quoted \"" + tc.id + "/child\"."},
-				{ID: "negative", Name: "Unrelated", Body: tc.unrelated},
-			} {
+			positives := []string{
+				tc.id + ".",
+				"Code `" + tc.id + "`.",
+				"Quoted \"" + tc.id + "/child\".",
+				"[make](../" + tc.id + "/Makefile)",
+				"Relative ./" + tc.id + "/notes and ℓ " + tc.id + " σ.",
+			}
+			fibers := []*felt.Felt{{ID: tc.id, Name: "Target"}, {ID: "negative", Name: "Unrelated", Body: tc.unrelated}}
+			for i, body := range positives {
+				fibers = append(fibers, &felt.Felt{ID: fmt.Sprintf("positive-%d", i), Name: "Review", Body: body})
+			}
+			for _, f := range fibers {
 				if err := s.Write(f); err != nil {
 					t.Fatal(err)
 				}
@@ -96,7 +103,12 @@ func TestRenameRemainingPathsRespectBothBoundaries(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%v\n%s", err, out)
 			}
-			if !strings.Contains(out, "Old path remains in positive") || strings.Contains(out, "Old path remains in negative") {
+			for i := range positives {
+				if !strings.Contains(out, fmt.Sprintf("Old path remains in positive-%d (manual review)", i)) {
+					t.Errorf("review misses %q: %s", positives[i], out)
+				}
+			}
+			if strings.Contains(out, "Old path remains in negative") {
 				t.Fatalf("remaining-path boundaries: %s", out)
 			}
 			if got := mustRead(t, s, "negative").Body; got != tc.unrelated {
@@ -286,5 +298,45 @@ func TestRenameInsideLinkedRepositoryAndView(t *testing.T) {
 				t.Fatalf("check: %v\n%s", err, out)
 			}
 		})
+	}
+}
+
+// A fiber outside the slug convention can be renamed into it and nested
+// under its own spelling; the links to it come along, check stops naming it,
+// and a markdown link to a file in it is carried too.
+func TestRenameAndNestNonConformingFibers(t *testing.T) {
+	t.Parallel()
+	dir, s := newStore(t)
+	for _, id := range []string{"unions", "unions/shear_2d", "unions/c-ℓ-space", "dest", "citer"} {
+		writeFixtureFelt(t, s, id, id)
+	}
+	f := mustRead(t, s, "citer")
+	f.Body = "[[unions/shear_2d]] [s](unions/shear_2d) [[unions/c-ℓ-space]] [p](../unions/shear_2d/plot.png)"
+	if err := s.Write(f); err != nil {
+		t.Fatal(err)
+	}
+	writeConsumer(t, s, "consumer", "unions/c-ℓ-space")
+
+	out, err := runCommand(t, dir, "check")
+	if err != nil || !strings.Contains(out, `WARNING: unions/shear_2d: slug "shear_2d" is not lowercase letters, digits and hyphens; use "shear-2d"`) ||
+		!strings.Contains(out, `WARNING: unions/c-ℓ-space: slug "c-ℓ-space"`) || strings.Contains(out, "WARNING: citer") {
+		t.Fatalf("check before: %v\n%s", err, out)
+	}
+
+	if out, err := runCommand(t, dir, "rename", "unions/shear_2d", "shear-2d"); err != nil {
+		t.Fatalf("rename: %v\n%s", err, out)
+	}
+	if out, err := runCommand(t, dir, "nest", "unions/c-ℓ-space", "dest"); err != nil {
+		t.Fatalf("nest: %v\n%s", err, out)
+	}
+	if got := mustRead(t, s, "citer").Body; got != "[[unions/shear-2d]] [s](unions/shear-2d) [[dest/c-ℓ-space]] [p](../unions/shear-2d/plot.png)" {
+		t.Fatal(got)
+	}
+	if got := inputFroms(t, s, "consumer"); !reflect.DeepEqual(got, []string{"dest/c-ℓ-space", "dest/c-ℓ-space"}) {
+		t.Fatal(got)
+	}
+	out, err = runCommand(t, dir, "check")
+	if err != nil || strings.Contains(out, "shear") || !strings.Contains(out, "WARNING: dest/c-ℓ-space: slug") {
+		t.Fatalf("check after: %v\n%s", err, out)
 	}
 }

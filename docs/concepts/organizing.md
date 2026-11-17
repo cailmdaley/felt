@@ -57,7 +57,10 @@ felt unnest bao-analysis/damping-prior   # → damping-prior
 ```
 
 A move rewrites every reference, body link or `inputs.from`, whose path
-reached the moved fiber before and would not reach it after. The `unnest` above
+reached the moved fiber before and would not reach it after. A markdown link to
+a file, such as `../damping-prior/contour.png` or the fiber's own `.md`,
+resolves against the directory of the document holding it and is respelled so
+it reaches the same file after the move. The `unnest` above
 turns `[[bao-analysis/damping-prior/contour-plot#fit|the fit]]` into
 `[[damping-prior/contour-plot#fit|the fit]]`, keeping fragment and label.
 Spellings the move leaves working are not touched: a bare slug or a suffix

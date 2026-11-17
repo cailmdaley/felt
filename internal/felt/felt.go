@@ -1078,6 +1078,54 @@ func RewriteBodyRefs(body string, rewrite func(target string) (string, bool)) (s
 	return b.String(), true
 }
 
+// urlSchemeRe matches a link target that starts with a URL scheme (https:,
+// mailto:), which no relative file path does.
+var urlSchemeRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*:`)
+
+// RewriteFileLinks replaces the path of every markdown link to a file — a
+// relative target that is not a fiber reference, such as ../x/plot.png or
+// ../x/x.md — for which rewrite returns a new spelling. A #fragment or ?query,
+// the link text, and code stay as written. It reports whether anything changed.
+func RewriteFileLinks(body string, rewrite func(target string) (string, bool)) (string, bool) {
+	if !strings.Contains(body, "](") {
+		return body, false
+	}
+	masked := maskCode(body)
+	var b strings.Builder
+	pos := 0
+	changed := false
+	for _, m := range bodyLinkRe.FindAllStringSubmatchIndex(masked, -1) {
+		raw := masked[m[2]:m[3]]
+		if strings.IndexByte(raw, codeMask) >= 0 {
+			continue
+		}
+		if _, ok := parseBodyRefTarget(raw, ""); ok {
+			continue
+		}
+		target := strings.TrimSpace(raw)
+		if i := strings.IndexAny(target, "#?"); i >= 0 {
+			target = target[:i]
+		}
+		if target == "" || strings.HasPrefix(target, "/") || urlSchemeRe.MatchString(target) {
+			continue
+		}
+		next, ok := rewrite(target)
+		if !ok || next == target {
+			continue
+		}
+		start := m[2] + strings.Index(raw, target)
+		b.WriteString(body[pos:start])
+		b.WriteString(next)
+		pos = start + len(target)
+		changed = true
+	}
+	if !changed {
+		return body, false
+	}
+	b.WriteString(body[pos:])
+	return b.String(), true
+}
+
 func (r BodyRef) String() string {
 	if r.Fragment == "" {
 		return r.Target

@@ -1063,10 +1063,13 @@ type moveRewriteContext struct {
 
 // pendingWrite applies the move's reference semantics to the current document.
 // An empty path names a moved fiber, found by its destination id after rename.
+// sourceDir is the directory holding the source's document before the move, in
+// id coordinates, against which its markdown file links resolve.
 type pendingWrite struct {
 	id        string
 	path      string
 	sourceOld string
+	sourceDir string
 	context   *moveRewriteContext
 }
 
@@ -1097,20 +1100,7 @@ func (w pendingWrite) writeJournaled(s *Storage, task *moveRewrite, journal *mov
 				return fmt.Errorf("move rewrite conflict in %s: document changed after the recorded write intent", path)
 			}
 		}
-		rewrite := func(ref string) (string, bool) {
-			return rewriteMovedRef(before, after, w.sourceOld, w.id, ref, context.OldID, context.NewID)
-		}
-		f.RewriteDataFlowRefs(func(ref string) (string, bool) {
-			target, fragment := splitDataFlowRef(ref)
-			if replaced, ok := rewrite(target); ok {
-				if fragment != "" {
-					replaced += "." + fragment
-				}
-				return replaced, true
-			}
-			return "", false
-		})
-		f.Body, _ = RewriteBodyRefs(f.Body, rewrite)
+		rewriteMovedFiber(f, before, after, w.sourceOld, w.id, w.sourceDir, context.OldID, context.NewID)
 		return nil
 	}, func(path string, original, updated []byte) error {
 		if task != nil {
@@ -1177,34 +1167,90 @@ func planMoveRewrites(all, sources []*Felt, external *ExternalRefs, oldID, newID
 	var writes []pendingWrite
 	for _, f := range sources {
 		sourceNew, moved := remapIDPrefix(f.ID, oldID, newID)
-		rewrite := func(target string) (string, bool) {
-			return rewriteMovedRef(before, after, f.ID, sourceNew, target, oldID, newID)
-		}
+		sourceDir := documentDir(f)
 		clone := *f
 		clone.ID = sourceNew
-		flowChanged := clone.RewriteDataFlowRefs(func(ref string) (string, bool) {
-			target, fragment := splitDataFlowRef(ref)
-			next, ok := rewrite(target)
-			if !ok {
-				return ref, false
-			}
-			if fragment != "" {
-				next += "." + fragment
-			}
-			return next, true
-		})
-		_, bodyChanged := RewriteBodyRefs(f.Body, rewrite)
-		if !flowChanged && !bodyChanged {
+		if !rewriteMovedFiber(&clone, before, after, f.ID, sourceNew, sourceDir, oldID, newID) {
 			continue
 		}
 
-		w := pendingWrite{id: sourceNew, path: f.Path, sourceOld: f.ID, context: context}
+		w := pendingWrite{id: sourceNew, path: f.Path, sourceOld: f.ID, sourceDir: sourceDir, context: context}
 		if moved {
 			w.path = ""
 		}
 		writes = append(writes, w)
 	}
 	return writes, nil
+}
+
+// rewriteMovedFiber rewrites, in f, every reference whose meaning the move of
+// oldID to newID would change: inputs.from, body links to fibers, and markdown
+// links to files. The source sits at sourceOld before the move and sourceNew
+// after it, its document in sourceDir before the move. Planning and the
+// journaled write both call it, so a replay rewrites what the plan saw.
+func rewriteMovedFiber(f *Felt, before, after *scopedIDResolver, sourceOld, sourceNew, sourceDir, oldID, newID string) bool {
+	rewrite := func(target string) (string, bool) {
+		return rewriteMovedRef(before, after, sourceOld, sourceNew, target, oldID, newID)
+	}
+	flowChanged := f.RewriteDataFlowRefs(func(ref string) (string, bool) {
+		target, fragment := splitDataFlowRef(ref)
+		next, ok := rewrite(target)
+		if !ok {
+			return ref, false
+		}
+		if fragment != "" {
+			next += "." + fragment
+		}
+		return next, true
+	})
+	body, bodyChanged := RewriteBodyRefs(f.Body, rewrite)
+	body, filesChanged := RewriteFileLinks(body, func(target string) (string, bool) {
+		return rewriteMovedFileLink(sourceDir, target, oldID, newID)
+	})
+	f.Body = body
+	return flowChanged || bodyChanged || filesChanged
+}
+
+// documentDir is the directory holding f's document, in id coordinates: the
+// fiber's own directory in directory form, its parent's in bare form.
+func documentDir(f *Felt) string {
+	base := path.Base(f.ID)
+	if filepath.Base(f.Path) == base+FileExt && filepath.Base(filepath.Dir(f.Path)) == base {
+		return f.ID
+	}
+	if parent := ParentPath(f.ID); parent != "" {
+		return parent
+	}
+	return "."
+}
+
+// rewriteMovedFileLink carries a relative markdown link to a file across the
+// move of oldID to newID. The link resolves against sourceDir, the directory
+// of the source's document before the move; the file it names moves with the
+// subtree when it lies inside it, and the moved fiber's own document takes
+// its new basename. The link is respelled from the source's directory after
+// the move, so a link out of a subtree whose depth changed still arrives.
+// An unknown sourceDir leaves the link alone.
+func rewriteMovedFileLink(sourceDir, target, oldID, newID string) (string, bool) {
+	if sourceDir == "" {
+		return "", false
+	}
+	file := path.Join(sourceDir, target)
+	if file == path.Join(oldID, path.Base(oldID)+FileExt) {
+		file = path.Join(newID, path.Base(newID)+FileExt)
+	} else {
+		file, _ = remapIDPrefix(file, oldID, newID)
+	}
+	newDir, _ := remapIDPrefix(sourceDir, oldID, newID)
+	rel, err := filepath.Rel(filepath.FromSlash(newDir), filepath.FromSlash(file))
+	if err != nil {
+		return "", false
+	}
+	rel = filepath.ToSlash(rel)
+	if rel == path.Clean(target) {
+		return "", false
+	}
+	return rel, true
 }
 
 // rewriteMovedRef decides one reference's fate when oldID moves to newID. The
