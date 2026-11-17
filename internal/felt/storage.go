@@ -610,8 +610,8 @@ func (s *Storage) CheckAvailableID(id string) error {
 }
 
 // CheckNewSlugs refuses id when a segment it would create breaks the slug
-// convention. A segment whose directory already exists is not new: a fiber
-// may be added below an existing path whatever that path's spelling.
+// convention. A segment whose directory or fiber already exists is not new: a
+// fiber may be added below an existing path whatever that path's spelling.
 func (s *Storage) CheckNewSlugs(id string) error {
 	parts := strings.Split(id, "/")
 	for i, part := range parts {
@@ -622,6 +622,9 @@ func (s *Storage) CheckNewSlugs(id string) error {
 		if i < len(parts)-1 && part != "." && part != ".." {
 			dir := filepath.Join(s.root, filepath.FromSlash(strings.Join(parts[:i+1], "/")))
 			if info, statErr := os.Stat(dir); statErr == nil && info.IsDir() {
+				continue
+			}
+			if _, statErr := os.Stat(s.Path(strings.Join(parts[:i+1], "/"))); statErr == nil {
 				continue
 			}
 		}

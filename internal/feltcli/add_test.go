@@ -2,6 +2,8 @@ package feltcli
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -226,4 +228,17 @@ func TestAddUIDCarriesExistingSlug(t *testing.T) {
 	if _, err := runCommand(t, dir, "add", "x", "X", "--uid", "not-a-ulid"); err == nil || !strings.Contains(err.Error(), "--uid must be a ULID") {
 		t.Fatalf("bad uid: %v", err)
 	}
+}
+
+// A bare-form fiber outside the slug convention can still gain a child.
+func TestAddUnderBareFormNonConformingFiber(t *testing.T) {
+	t.Parallel()
+	dir, s := newStore(t)
+	if err := os.WriteFile(filepath.Join(s.Root(), "bare_one.md"), []byte("---\nname: Bare\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runCommand(t, dir, "add", "bare_one/kid", "Kid"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	mustRead(t, s, "bare_one/kid")
 }
