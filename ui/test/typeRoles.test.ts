@@ -17,7 +17,7 @@ const OWNER = 'styles/type.css'
 
 const SIZE = /^var\(--type-[a-z-]+\)$/
 const GLYPH = /^var\(--glyph-[a-z-]+\)$/
-const FAMILY = /^var\(--font-(serif|mono|initials|initials-frill)\)$/
+const FAMILY = /^var\(--font-(serif|mono|sign|initials|initials-frill)\)$/
 const LEADING = /^var\(--leading-[a-z]+\)$/
 const TRACK = /^var\(--track-[a-z]+\)$/
 /** A line box set by geometry rather than leading: a length, or a box token. */

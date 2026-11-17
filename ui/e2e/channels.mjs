@@ -180,10 +180,13 @@ try {
       await page.waitForFunction(() => document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-item').length === 14)
       // The chains thread's second post, three minutes after its first, groups under its head.
       assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('.kbn-ch-item[data-grouped]')].map(el => el.dataset.slug)), ['chains'])
-      // A dozen lines at once keep to a narrow margin: a bundle and at most three lanes, the gutter 34px wide.
-      assert.deepEqual(await page.evaluate(() => [...new Set([...document.querySelectorAll('.kbn-ch-gutter')].map(el => el.getAttribute('width')))]), ['34'])
-      // The ring counts the threads running now; the bundle lists that same set, one thread row each, none twice.
-      await page.locator('.kbn-ch-bundle').last().click({ force: true })
+      // A dozen lines at once in one margin of fine ink, 56px wide, a few fibres at any height and the rest on the strand.
+      assert.equal(await page.locator('.kbn-ch-margin > .kbn-ch-ink').getAttribute('width'), '56')
+      // Its ink costs a few milliseconds a painting (about 3 on a laptop); the bound leaves room for a slow runner.
+      const inked = await page.evaluate(() => performance.getEntriesByName('kbn-ch-ink').map(each => each.duration))
+      assert.ok(inked.length && Math.max(...inked.slice(1)) < 30, `margin paintings took ${inked.map(ms => ms.toFixed(1)).join(', ')}ms`)
+      // The ring counts the threads running now; the strand lists that same set, one thread row each, none twice.
+      await page.locator('.kbn-ch-count-ring').click()
       await page.waitForFunction(() => document.querySelectorAll('[role="menuitem"]').length > 0)
       const listed = await page.evaluate(() => [...document.querySelectorAll('[role="menuitem"] .thread-row-slug')].map(el => el.textContent))
       assert.equal(listed.length, Number(await page.locator('.kbn-ch-count-ring').textContent()))

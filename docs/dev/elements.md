@@ -23,7 +23,7 @@ The rest are the board's own choices, made to sit with those numbers:
 
 | Measure | Value |
 |---|---|
-| Stream gutter (the line's margin, in Slack's avatar column) | as drawn by `tube.ts` |
+| Stream margin (the fine ink, in Slack's avatar column) | 56px on a desktop, 40px below a 560px stream; laid by `tube.ts`, drawn by `margin.ts` |
 | Post text | `--type-prose` serif, `--leading-prose` |
 | Gap between posts from different threads | 8px; within a group, 2px |
 | A group | consecutive lines from one thread less than 5 minutes apart |
@@ -50,7 +50,7 @@ A constitution or thread as one line.
 | Doing | what it wants of the human; else the newer of what it last said (`Workspace.said`) and its outcome (timed by its file's last write); else its faint word (seat, resting, ↻) when quiet, or its turn's word; one line, cut with an ellipsis, the whole of it in the row's tooltip |
 | Age | when what the doing says was said; with nothing said, when a working thread launched, else when it last moved; in the elements' time (below) |
 
-Densities: **line** (all parts, one line; the ringed count's list, the Desk's member lines, the constitution view's threads and ancestors) and **chip** (dot, slug and role; a thread's start station in Channels, where the margin's ring stands for the dot). Given an opener, clicking the row or its dot opens the thread's view; without one the row is drawn still, its dot no button, for a control that holds it (a menu item) to own the press. A view adds its own keys and roles to the row (the constitution view's tree).
+Densities: **line** (all parts, one line; the ringed count's list, the Desk's member lines, the constitution view's threads and ancestors) and **chip** (dot, slug and role; a thread's start station in Channels, where the margin's cell body stands for the dot). Given an opener, clicking the row or its dot opens the thread's view; without one the row is drawn still, its dot no button, for a control that holds it (a menu item) to own the press. A view adds its own keys and roles to the row (the constitution view's tree).
 
 **Which threads a list shows.** A list of a family's threads shows only what moves: the threads that wait on the human or are working (`attentionOf` in `attention.ts`: `waiting` or `working`), what waits first, each followed by every thread below it that waits on the human (so a quiet thread with a wait below it stands too); a thread with a worker anywhere below it ranks and stands with what works, from the moment that worker starts. Everything else is quiet (seats, drafts, rest, standing threads between runs, held launches, closes its orchestrator reviews) and sits behind one "N quiet" fold that opens to the same rows. The constitution view's thread list follows this rule; the Desk's family card lists only the members that wait, and the ringed count's list names the threads running now.
 
@@ -87,4 +87,4 @@ Only thumbnails swap a page's large embedded images for placeholders; a figure o
 
 ## What stays the board's own
 
-The margin's line (`tube.ts`) and its drawing, the Desk's layout, the Chronicle's lifelines and the globe's tiles are the board's own surfaces; they use these elements where they list a thread or show a file, and draw everything else themselves.
+The margin's fine ink (`tube.ts` lays it, `ink.ts` holds its noise, ribbon and non-crossing field, `margin.ts` draws it; the constitution view's lines are `workspace/familyInk.ts`), the Desk's layout, the Chronicle's lifelines and the globe's tiles are the board's own surfaces; they use these elements where they list a thread or show a file, and draw everything else themselves.

@@ -57,6 +57,8 @@
   /* A thread's own colour on Channels' tube map: six that are none of the state colours (gold, the agent's blue, verdigris). */
   --kbn-line-0: #8E2F4F; --kbn-line-1: #6B4C93; --kbn-line-2: #5E7A2C;
   --kbn-line-3: #A0562A; --kbn-line-4: #A23B9A; --kbn-line-5: #5F6670;
+  /* How heavy Channels' fine ink is drawn: on paper a fibre needs more weight than on the dark stock to read as well. */
+  --kbn-ink-weight: 1.3;
   --kbn-tempered-ink: #2E6862;
   /* The verdict's other pole: a fiber discarded to compost, in the deletion
      red. It marks the Discard verb and the discarded state, never an actor. */
@@ -160,6 +162,7 @@
   color-scheme: dark;
   --kbn-line-0: #D9799A; --kbn-line-1: #B39BD9; --kbn-line-2: #A8C26A;
   --kbn-line-3: #D99A66; --kbn-line-4: #D88AD2; --kbn-line-5: #A9B0B8;
+  --kbn-ink-weight: 1;
   --kbn-rag: color-mix(in srgb, var(--kbn-paper) 50%, var(--kbn-paper-bright));
   --kbn-form-paper: var(--kbn-paper);
   --kbn-form-well: var(--kbn-sheet);
@@ -262,5 +265,13 @@
   --kbn-slate: #ACBCC6;
   --kbn-held: #B4BDE0;
 }
+
+/* A thread's identity colour (lineHue.ts), wherever it is drawn: an element with data-hue takes it as --line. */
+[data-hue='0'] { --line: var(--kbn-line-0); }
+[data-hue='1'] { --line: var(--kbn-line-1); }
+[data-hue='2'] { --line: var(--kbn-line-2); }
+[data-hue='3'] { --line: var(--kbn-line-3); }
+[data-hue='4'] { --line: var(--kbn-line-4); }
+[data-hue='5'] { --line: var(--kbn-line-5); }
 
 html[data-ws-appearance='dark'], html[data-ws-appearance='dark'] body { background-color: var(--kbn-parchment); }

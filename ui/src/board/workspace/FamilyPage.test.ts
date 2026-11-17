@@ -119,7 +119,7 @@ describe('a constitution\'s view', () => {
     expect(page.el.querySelector('.ov-said-text')!.textContent!.trim()).toBe('Posted the cut.')
     expect(page.el.querySelector('.ov-said-text strong')!.textContent).toBe('cut')
     // Stacked: head, its words, its threads, then the preview.
-    expect([...page.el.querySelector('.ov-main')!.children].map(part => part.classList[0])).toStrictEqual(['ov-head', 'ov-said', 'ov-threads', 'uf'])
+    expect([...page.el.querySelector('.ov-main')!.children].map(part => part.classList[0])).toStrictEqual(['ov-ink', 'ov-head', 'ov-said', 'ov-threads', 'uf'])
     const cards = [...page.el.querySelectorAll<HTMLButtonElement>('.ov-unfold .uf-card')]
     expect(cards.map(card => card.title)).toStrictEqual(['Expand Tapestry'])
     cards[0].click()
@@ -179,10 +179,10 @@ describe('a constitution\'s view', () => {
   it('draws beneath a thread every thread below it that waits on the human, the post the board names included; its orchestrators stand above it as strips', () => {
     const { page } = made(root, { waits: () => new Map([['hub/mid/a', { id: 'p', at: now - hour, kind: 'post', text: 'The leaf is cut.' }]]) })
     expect(threads(page)).toStrictEqual([['q', 'Which one?'], ['mid', 'Posted the cut.'], ['↳ a', 'The leaf is cut.'], ['w', 'Needs a look']])
-    // Its orchestrators, one strip each above it, each with its own rule.
+    // Its orchestrators, one strip each above it, each in its own identity colour.
     const strips = [...made(leaf).page.el.querySelectorAll<HTMLElement>('.ov-up .ov-ancestor')]
-    expect(strips.map(strip => [strip.querySelector('.thread-row-slug')!.textContent, strip.getAttribute('title'), strip.querySelectorAll('.ov-rule').length, strip.querySelector('.thread-row-doing')!.textContent]))
-      .toStrictEqual([['hub', 'hub — The hub came to this.', 1, 'The hub came to this.'], ['mid', 'Mid — Posted the cut.', 1, 'Posted the cut.']])
+    expect(strips.map(strip => [strip.querySelector('.thread-row-slug')!.textContent, strip.getAttribute('title'), !!strip.dataset.hue, strip.querySelector('.thread-row-doing')!.textContent]))
+      .toStrictEqual([['hub', 'hub — The hub came to this.', true, 'The hub came to this.'], ['mid', 'Mid — Posted the cut.', true, 'Posted the cut.']])
   })
 
   it('opens a thread\'s view from its row, and its orchestrators\' from the heads above it', () => {

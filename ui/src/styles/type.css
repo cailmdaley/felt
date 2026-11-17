@@ -55,12 +55,20 @@
  * Glyph tokens size marks drawn from a font (a cross, a dropcap, a chevron),
  * never text.
  *
- * Faces. EB Garamond and IBM Plex Mono load from Google Fonts in index.html.
+ * Faces. EB Garamond and IBM Plex Mono load from Google Fonts in index.html;
+ * Metropolitan Line ships beside this file and is declared here.
  * The illuminated initials ship with the board (ui/public/fonts/, served at
  * /fonts/) and are declared here: EB Garamond Initials F2 is the letter's
  * body and F1 the flourish laid over it. A face's family is a literal name,
  * because an @font-face descriptor cannot read a custom property.
  */
+/* Metropolitan Line (SIL OFL 1.1, fonts/MetropolitanLine-OFL.txt), an open revival of Johnston's 1916 Underground
+   lettering, bundled with the board: Channels sets its slugs, its headers and its counts in it. */
+@font-face {
+  font-family: 'Metropolitan Line';
+  src: url('./fonts/MetropolitanLine-Regular.woff2') format('woff2');
+  font-display: swap;
+}
 @font-face {
   font-family: 'EBGI F1';
   src: url('/fonts/EBGaramond-InitialsF1.otf') format('opentype');
@@ -75,6 +83,7 @@
 :root {
   --font-serif: 'EB Garamond', Garamond, Georgia, serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-sign: 'Metropolitan Line', 'Gill Sans', 'Gill Sans MT', Seravek, 'Trebuchet MS', sans-serif;
   --font-initials: 'EBGI F2', var(--font-serif);
   --font-initials-frill: 'EBGI F1', var(--font-serif);
 

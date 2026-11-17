@@ -9,7 +9,10 @@ import {
   arranged, clearLineKey, clearedLines, lineIds, composeChannels, composeStream, fiberOf, hideKey, railOrder, reordered, showKey, unclearLineKey, unpinKey,
   type Channel, type Entry, type Item, type Station, type Stream,
 } from '../channels.js'
-import { layTube, rowHeight, type Excursion, type TubeLine, type TubeRow } from '../tube.js'
+import { layTube, rowHeight, runsOf, tautness, type Tube, type TubeLine } from '../tube.js'
+import { drawMargin, tautAlong, type MarginRow } from '../margin.js'
+import { random } from '../ink.js'
+import { lineHue } from '../lineHue.js'
 import { createRailReorder, type RailReorder } from '../channelRail.js'
 import { openActionMenu } from '../conversationMenu.js'
 import { stateDot } from '../stateDot.js'
@@ -50,22 +53,15 @@ const FOLLOW_PX = 24
 const FOUND_DOCUMENTS = 12
 /** Narrower than this, the rail is a drawer drawn in over the stream. */
 const DRAWER_PX = 1100
-/** The tube map's geometry: the bundle's centre, the first lane's, the step between lanes, a curve's radius, the whole margin, the dot column. */
-const TUBE = { bundle: 4, first: 10, pitch: 5, radius: 3, gutter: 34, dot: 14 } as const
-/** Where a station sits in its row: an item's dot, a start's ring, an end's terminus, a tick. */
-const STATION_Y = { item: 20, start: 11, end: 9, tick: 8 } as const
-const SVG = 'http://www.w3.org/2000/svg'
-/** A thread's colour on the tube map, one of six, the same wherever its lines are drawn. */
-const hue = (card: KanbanCard): string => {
-  let hash = 0
-  for (const char of fiberOf(card)) hash = (hash * 31 + char.charCodeAt(0)) >>> 0
-  return String(hash % 6)
-}
-const svg = <K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number>): SVGElementTagNameMap[K] => {
-  const node = document.createElementNS(SVG, tag)
-  for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value))
-  return node
-}
+/** The margin's width: wide on a desktop, where the fibres can wander; narrower where the stream's width is scarce. */
+const MARGIN = { wide: 56, narrow: 40, below: 560 } as const
+/** How freely the fibres wander and how heavy their ink is, at each width. */
+const INK = { wide: { chaos: 1.6, weight: 1.15 }, narrow: { chaos: 1, weight: 1.05 } } as const
+/** What stops a worker's run, among a thread's records. */
+const STOPS = new Set(['handed_off', 'closed', 'rested', 'asked'])
+const hue = lineHue
+/** The threads a stretch of the strand gathers, one per thread. */
+const gatheredCards = (lines: readonly TubeLine[]): KanbanCard[] => [...new Map(lines.map(line => [fiberOf(line.card), line.card])).values()]
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] => {
   const node = document.createElement(tag)
@@ -113,10 +109,10 @@ function lastSeen(key: string): number {
  * top, the rest in the human's order, each movable and with a menu to hide,
  * pin or move it; Jump to finds the rest and the fleet's documents), and a
  * channel's stream of what its workers addressed to the human — each worker's
- * question, post, close or sent files as one compact item, beside a tube map
- * of its threads' lives (`layTube`), each a line from its start to its end
- * with its items wired to it. Choosing an item or a line opens that
- * constitution's view; its files unfold in place.
+ * question, post, close or sent files as one compact item, beside a margin
+ * of its threads' lives drawn in fine ink (`layTube`, `drawMargin`), each a
+ * fibre where it speaks, its posts hanging from it on drops. Choosing an item
+ * or a fibre opens that constitution's view; its files unfold in place.
  * The channel's head carries its chair's pages, and its console speaks to its
  * chair. Opening a channel looks at nothing; only a click on something in it
  * moves Rex and voice. On a phone the rail is the first screen.
@@ -267,6 +263,8 @@ export class ChannelsView implements TemporalView {
     this.stream.addEventListener('scroll', () => {
       const list = this.stream!
       this.following = list.scrollHeight - list.scrollTop - list.clientHeight <= FOLLOW_PX
+      this.placeRing()
+      if (!this.painting && this.leavingBand()) this.painting = requestAnimationFrame(() => { this.painting = 0; this.paint() })
     }, { passive: true })
     this.dock = this.ctx!.workspace!.console({ keepPlace: true })
     this.dock.el.hidden = true
@@ -334,10 +332,10 @@ export class ChannelsView implements TemporalView {
       now: Date.now(), reachMs: workspace.board.reachMs,
     })
   }
-  /** Something addressed to the human arrived in the channel since this device last read it. */
-  private unread(channel: Channel): boolean {
+  /** How many things addressed to the human arrived in the channel since this device last read it. */
+  private unread(channel: Channel): number {
     const seen = lastSeen(channel.key)
-    return this.streamOf(channel).entries.some(entry => entry.kind !== 'station' && entry.arrived > seen)
+    return this.streamOf(channel).entries.filter(entry => entry.kind !== 'station' && entry.arrived > seen).length
   }
   private status(text: string): void { if (this.note) this.note.textContent = text }
   /** The order and the hides lapse with the board's reach, so while they stand they are written again. */
@@ -494,9 +492,11 @@ export class ChannelsView implements TemporalView {
     // Nothing is rebuilt under an entry pressed or picked up; it is drawn once it lands.
     this.railStale = rail.moving
     if (rail.moving) return
-    const unread = new Map(listed.map(channel => [channel.key, channel.key !== this.current && !channel.waiting && this.unread(channel)]))
+    const unread = new Map(listed.map(channel => [channel.key, channel.key !== this.current && !channel.waiting ? this.unread(channel) : 0]))
+    const waits = this.ctx!.workspace!.board.waiting
+    const owed = new Map(listed.map(channel => [channel.key, channel.members.filter(card => attentionOf(card, waits) === 'waiting').length]))
     // A poll that changed nothing in the rail leaves it be.
-    const sig = JSON.stringify([this.query, this.current, listed.map(channel => [channel.key, channel.name, channel.title, channel.chaired, channel.waiting, !!channel.hidden, unread.get(channel.key)])])
+    const sig = JSON.stringify([this.query, this.current, listed.map(channel => [channel.key, channel.name, channel.title, channel.chaired, channel.waiting, !!channel.hidden, unread.get(channel.key), owed.get(channel.key)])])
     if (sig === this.sigs.rail) { this.drawFound(); return }
     this.sigs.rail = sig
     for (const unbind of this.railBindings) unbind()
@@ -509,14 +509,15 @@ export class ChannelsView implements TemporalView {
       pick.dataset.channel = channel.key
       pick.dataset.item = `channel:${channel.key}`
       pick.toggleAttribute('data-lone', !channel.chaired)
-      pick.toggleAttribute('data-unread', unread.get(channel.key))
+      pick.toggleAttribute('data-unread', !!unread.get(channel.key))
       pick.toggleAttribute('data-waiting', channel.waiting)
       pick.append(el('span', 'kbn-ch-pick-hash', channel.chaired ? '#' : '·'), el('span', 'kbn-ch-pick-name', channel.name))
       if (channel.hidden) pick.append(el('span', 'kbn-ch-pick-hidden', 'hidden'))
-      // A dot means one of two things: gold, waiting on the human; ink, new since this device last read it.
+      // A ringed count means one of two things: in gold, how many wait on the human; in the ink, how many are new since this device last read it.
       if (channel.waiting || unread.get(channel.key)) {
-        const mark = el('span', channel.waiting ? 'kbn-ch-pick-mark' : 'kbn-ch-pick-unread')
-        mark.title = channel.waiting ? 'Waiting on you' : 'New since you read it'
+        const count = channel.waiting ? Math.max(1, owed.get(channel.key)!) : unread.get(channel.key)!
+        const mark = el('span', channel.waiting ? 'kbn-ch-pick-mark' : 'kbn-ch-pick-unread', String(count))
+        mark.title = channel.waiting ? `${count} waiting on you` : `${count} new since you read it`
         pick.append(mark)
       }
       pick.title = channel.waiting ? `${channel.title} — waiting on you` : channel.title
@@ -597,17 +598,24 @@ export class ChannelsView implements TemporalView {
       if (made?.lead && !made.asked) { made.lead = undefined; this.showPreviews(made) }
     }
     const leads = entries.map(entry => this.unfolds.get(`item:${entry.id}`)?.lead?.key)
-    // The width a post's previews wrap in: the stream's, less the gutter and the post's padding.
-    const wide = this.stream.clientWidth ? this.stream.clientWidth - TUBE.gutter - 26 : Infinity
+    // The margin's width, and the width a post's previews wrap in: the stream's, less the margin and the post's padding.
+    const margin = this.stream.clientWidth && this.stream.clientWidth < MARGIN.below ? MARGIN.narrow : MARGIN.wide
+    const wide = this.stream.clientWidth ? this.stream.clientWidth - margin - 26 : Infinity
+    // A fibre's tension follows its runs, which can move with no row moving (a relaunch inside a life).
+    const runs = this.runs(channel, now, waits)
+    const ran = [...new Set(entries.map(entry => entry.card))].map(card => runs(card).map(([from, to]) => [from, to === now ? 'now' : to]))
     // The ring and its title name the threads running, what waits first, which can change with no entry changing.
-    const stream = JSON.stringify([channel.key, failed, said, entries.map(entry => [attentionOf(entry.card, waits), turnOf(entry.card).turn]), leads, wide, running.map(card => [fiberOf(card), attentionOf(card, waits)])])
+    const stream = JSON.stringify([channel.key, failed, said, entries.map(entry => [attentionOf(entry.card, waits), turnOf(entry.card).turn]), leads, wide, margin, ran, running.map(card => [fiberOf(card), attentionOf(card, waits)])])
     if (stream !== this.sigs.stream) {
       this.sigs.stream = stream
       // Each row reckoned by its parts' sizes, a post's by its previews as they wrap (a tapestry it shows leading them), before anything in it loads.
-      const tube = layTube(entries, entries.map((entry, row) => entry.kind === 'station' ? rowHeight(entry) : POST_PX + previewsHeight([...leads[row] ? ['tapestry.html'] : [], ...entry.files.map(file => file.fullPath)], wide)))
-      // The lanes share their room, each step no wider than the mock's nine pixels.
-      this.stream.style.setProperty('--kbn-ch-tube', `${TUBE.gutter}px`)
-      const lay = { waits, now, last: entries.length - 1 }
+      const heights = entries.map((entry, row) => entry.kind === 'station' ? rowHeight(entry) : POST_PX + previewsHeight([...leads[row] ? ['tapestry.html'] : [], ...entry.files.map(file => file.fullPath)], wide))
+      const index = threadIndexFor(this.ctx!.response)
+      // Every thread in a channel is its chair's: a parent reaches to a sub-thread only below the chair.
+      const parentOf = (card: KanbanCard): KanbanCard | undefined => { const parent = index.parentOf(card); return parent && fiberOf(parent) !== fiberOf(seat) ? parent : undefined }
+      const tube = layTube(entries, heights, { parentOf, grouped, active: line => attentionOf(line.card, waits) === 'working' })
+      this.tube = { tube, grouped, margin, taut: tautAlong(tube, entries.map(entry => entry.at), line => runs(line.card), tautness) }
+      this.stream.style.setProperty('--kbn-ch-tube', `${margin}px`)
       this.running = ranked(running, waits)
       const count = el('li', 'kbn-ch-count'), ring = button('kbn-ch-count-ring', String(this.running.length), () => this.bundleMenu())
       ring.hidden = !this.running.length
@@ -615,10 +623,14 @@ export class ChannelsView implements TemporalView {
       ring.setAttribute('aria-label', ring.title)
       ring.setAttribute('aria-haspopup', 'menu')
       count.append(ring)
+      // The margin's ink, one drawing over the whole stream, laid over the rows once they stand.
+      const ink = el('li', 'kbn-ch-margin')
+      ink.setAttribute('aria-hidden', 'true')
+      ink.addEventListener('click', event => this.marginClick(event))
       this.entriesDrawn = entries
       this.titles.clear()
       const kept = new Set<string>()
-      this.rebuild(this.stream, [count, ...entries.map((entry, row) => {
+      this.rebuild(this.stream, [count, ink, ...entries.map((entry, row) => {
         // A lead asked onto a post with no previews gives it a row of them; elsewhere the previews take it in place.
         const grows = entry.kind !== 'station' && entry.kind !== 'close' && !entry.files.length && !!leads[row]
         const sig = JSON.stringify([said[row], grows]), was = this.rows.get(entry.id)
@@ -627,12 +639,9 @@ export class ChannelsView implements TemporalView {
         kept.add(entry.id)
         if (was?.node === node && entry.kind !== 'station') node.querySelector(':scope > .constitution-state-dot')?.replaceWith(this.dot(entry))
         node.dataset.row = String(row)
-        const own = tube.rows[row].own
-        node.dataset.state = own ? this.lineState(own.line, waits) : ''
-        if (own) node.dataset.hue = hue(own.line.card)
-        const gutter = this.gutter(tube.rows[row], row, lay)
-        if (node.firstChild instanceof SVGSVGElement) node.firstChild.replaceWith(gutter)
-        else node.prepend(gutter)
+        const line = entry.line ? tube.lines.find(each => each.id === entry.line) : undefined
+        node.dataset.state = line ? this.lineState(line, waits) : ''
+        if (line) node.dataset.hue = hue(line.card)
         return node
       })])
       for (const id of this.rows.keys()) if (!kept.has(id)) this.rows.delete(id)
@@ -641,6 +650,8 @@ export class ChannelsView implements TemporalView {
       if (!entries.length) this.stream.append(el('li', 'kbn-ch-hush', failed ? 'This channel\'s history could not be read; trying again.' : 'Nothing addressed to you here yet.'))
       if (this.following) this.stream.scrollTop = this.stream.scrollHeight
       this.mark()
+      this.watchRows()
+      this.paint()
     }
     retime(this.layout!, now)
   }
@@ -657,106 +668,133 @@ export class ChannelsView implements TemporalView {
       const what = entry.kind === 'station' ? { start: 'started', tick: 'handed off', end: entry.end ?? 'closed' }[entry.what] : kindWord(entry)
       return [[what, relative(entry.at, now)].filter(Boolean).join(' ')]
     })
-    const title = `${slug(line.card)}: ${[...line.from < 0 ? ['running before this stretch'] : [], ...said].join(', ')}`
+    const title = `${line.card.name} — ${[...line.from < 0 ? ['running before this stretch'] : [], ...said].join(', ')}`
     this.titles.set(line.id, title)
     return title
   }
   /** The entries the stream last drew, row by row. */
   private entriesDrawn: Entry[] = []
   private readonly titles = new Map<string, string>()
+  /** The stream's layout as last drawn, which the margin is painted from whenever a row's height moves. */
+  private tube: { tube: Tube; grouped: boolean[]; margin: number; taut: (line: TubeLine, s: number) => number; painted?: string } | null = null
+  /** Watches the stream's rows, so a preview that loads or a window that narrows repaints the margin. */
+  private rowSizes: ResizeObserver | null = null
+  private painting = 0
+  /** Where the strand runs at each height of the last painting, so the ringed count can sit on it. */
+  private strandAt: (y: number) => number | undefined = () => undefined
+  private watchRows(): void {
+    this.rowSizes ??= new ResizeObserver(() => {
+      if (this.painting) return
+      this.painting = requestAnimationFrame(() => { this.painting = 0; this.paint() })
+    })
+    this.rowSizes.disconnect()
+    for (const row of this.stream?.children ?? []) this.rowSizes.observe(row)
+  }
   /**
-   * A row's gutter: the bundle every running line rides, a heavier neutral
-   * line; the lanes of the lines out of it beside their events; and the row's
-   * own event — a start's ring curving into its lane or into the bundle, an
-   * item's stub, a handoff's open ring, an end curving to its terminus — a
-   * line leaving the bundle on a curve just above its event and rejoining it
-   * just below. A line, a stub or a station opens its constitution's view;
-   * the bundle lists the threads it carries.
+   * Paints the margin over the rows as they stand: one SVG of fine ink
+   * (`margin.ts`), its lengths mapped from the layout's reckoning onto the
+   * rows' measured tops, so nothing is re-phased when a row grows.
    */
-  private gutter(row: TubeRow, index: number, lay: { waits: Waits; now: number; last: number }): SVGSVGElement {
-    const box = svg('svg', { class: 'kbn-ch-gutter', width: TUBE.gutter })
-    box.setAttribute('aria-hidden', 'true')
-    const lane = (excursion: Excursion): number => TUBE.first + TUBE.pitch * excursion.lane
-    const bx = TUBE.bundle, station = TUBE.gutter - TUBE.dot / 2, r = TUBE.radius
-    const own = row.own, y = own ? STATION_Y[own.what] : 0
-    const group = (line: TubeLine): SVGGElement => {
-      const g = svg('g', { class: 'kbn-ch-line', 'data-line': line.id, 'data-state': this.lineState(line, lay.waits), 'data-hue': hue(line.card) })
-      const title = svg('title', {})
-      title.textContent = this.lineTitle(line, lay.now)
-      g.append(title)
-      g.addEventListener('click', event => { event.stopPropagation(); this.openLine(line.card) })
-      return g
+  private paint(): void {
+    const stream = this.stream, laid = this.tube, holder = stream?.querySelector(':scope > .kbn-ch-margin')
+    if (!stream || !laid || !holder) return
+    const began = performance.now()
+    const nodes = this.entriesDrawn.map(entry => this.rows.get(entry.id)?.node)
+    if (nodes.some(node => !node)) return
+    const rows: MarginRow[] = this.entriesDrawn.map((entry, row) => ({ entry, grouped: laid.grouped[row], top: nodes[row]!.offsetTop, height: nodes[row]!.offsetHeight }))
+    const heavier = Number(getComputedStyle(stream).getPropertyValue('--kbn-ink-weight')) || 1
+    // A band of three screens about what is in sight is drawn; rows standing where they stood, in the same ink and band, are already painted.
+    const top = stream.scrollTop, screen = stream.clientHeight || 900, band = [top - screen, top + 2 * screen] as const
+    const sig = `${heavier}:${rows.map(row => `${row.top},${row.height}`).join(';')}`
+    if (laid.painted === sig && holder.firstChild && !this.leavingBand(top)) return
+    laid.painted = sig
+    const inked = performance.now(), now = Date.now(), ink = INK[laid.margin === MARGIN.wide ? 'wide' : 'narrow'], last = rows.at(-1)
+    const drawn = drawMargin(laid.tube, rows, last ? last.top + last.height : 0, {
+      width: laid.margin, chaos: ink.chaos, weight: ink.weight * heavier, hue: line => hue(line.card), taut: laid.taut,
+      title: line => this.lineTitle(line, now), band,
+      gatheredTitle: lines => { const cards = gatheredCards(lines); return `${cards.length} gathered here: ${cards.map(card => slug(card)).join(', ')}` },
+      markTitle: entry => entry.kind === 'station' ? `${entry.card.name} — ${{ start: 'started', tick: 'handed off', end: entry.end ?? 'closed' }[entry.what]} ${relative(entry.at, now)}` : entry.card.name,
+    })
+    performance.measure('kbn-ch-ink', { start: inked })
+    holder.replaceChildren(drawn.svg)
+    this.strandAt = drawn.strandAt
+    this.band = drawn.band
+    this.placeRing(top)
+    // What a painting costs, whole and in its ink alone, for the performance probes to read.
+    performance.measure('kbn-ch-margin', { start: began })
+  }
+  /** The measured band the margin was last drawn over. */
+  private band: readonly [number, number] = [0, 0]
+  /** What is in sight has come within half a screen of an edge of the drawn band that is not the stream's own. */
+  private leavingBand(top = this.stream?.scrollTop ?? 0): boolean {
+    const stream = this.stream
+    if (!stream) return false
+    const screen = stream.clientHeight, [from, to] = this.band
+    return (from > 0 && top < from + screen / 2) || (to < stream.scrollHeight - 8 && top + screen > to - screen / 2)
+  }
+  /** The ringed count sits on the strand it counts, at the top of what is in sight. */
+  private placeRing(top = this.stream?.scrollTop ?? 0): void {
+    const ring = this.stream?.querySelector<HTMLElement>(':scope > .kbn-ch-count > .kbn-ch-count-ring')
+    if (!ring) return
+    const x = this.strandAt(top + 22)
+    ring.style.left = `${Math.max(0, (x ?? 8.5) - 8.5)}px`
+  }
+  /** A fibre or a mark opens its line's constitution; the strand lists the threads it gathers. */
+  private marginClick(event: MouseEvent): void {
+    const target = event.target as Element
+    // A finger cannot hover: the first tap on a mark, a fibre or the strand names it, a second on the same thing opens it.
+    if ((event as Partial<PointerEvent>).pointerType === 'touch') {
+      const named = target.closest('.kbn-ch-mark, .kbn-ch-fibre, .kbn-ch-gathered'), title = named?.querySelector(':scope > title')?.textContent
+      if (named && title && this.named?.of !== named) { event.stopPropagation(); this.name(named, title, event); return }
     }
-    const path = (g: SVGGElement, d: string, className = 'kbn-ch-track'): void => { g.append(svg('path', { class: className, d }), svg('path', { class: 'kbn-ch-hit', d })) }
-    // The bundle: through the row, or from where a line joins it, or down to where one leaves.
-    const { top, bottom } = row.bundle
-    if (top || bottom) {
-      const g = svg('g', { class: 'kbn-ch-bundle' })
-      const title = svg('title', {})
-      title.textContent = this.runningTitle()
-      g.append(title)
-      g.addEventListener('click', event => { event.stopPropagation(); this.bundleMenu({ x: event.clientX, y: event.clientY }) })
-      // Where the bundle meets the row's own line: a curve leaving or rejoining it nine pixels off the event, a wired start's or end's arc its radius off.
-      const meet = own?.leaves || own?.rejoins ? 9 : own && !own.excursion && (own.what === 'start' || own.what === 'end') ? r : 0
-      const span = { x1: bx, x2: bx, y1: top ? 0 : y + meet, y2: bottom ? '100%' : y - meet }
-      g.append(svg('line', { class: 'kbn-ch-bundle-v', ...span }), svg('line', { class: 'kbn-ch-hit', ...span }))
-      // Lines still running run on past the last row to the stream's foot.
-      if (bottom && index === lay.last) g.append(svg('rect', { class: 'kbn-ch-bundle-foot', x: bx - 1.25, y: '100%', width: 2.5, height: 10 }))
-      box.append(g)
+    this.named?.label.remove(); this.named = null
+    const gathered = target.closest<SVGGElement>('.kbn-ch-gathered')?.dataset.gathered
+    if (gathered !== undefined) {
+      event.stopPropagation()
+      this.bundleMenu({ x: event.clientX, y: event.clientY }, gatheredCards(this.tube?.tube.gathered[Number(gathered)]?.lines ?? []))
+      return
     }
-    for (const excursion of row.through) {
-      const g = group(excursion.line), x = lane(excursion)
-      const span = { x1: x, x2: x, y1: 0, y2: '100%' }
-      g.append(svg('line', { class: 'kbn-ch-track', ...span }), svg('line', { class: 'kbn-ch-hit', ...span }))
-      box.append(g)
-    }
-    if (!own) return box
-    const g = group(own.line), ex = own.excursion
-    // Where the row's line runs: its lane, or the bundle it is wired to.
-    const lx = ex ? lane(ex) : bx
-    if (ex) {
-      // Out of the bundle just above the event, back into it just below; a lane through the event's row between.
-      const enter = own.leaves ? `M${bx} ${Math.max(0, y - 9)}C${bx} ${y - 4} ${lx} ${y - 6} ${lx} ${y - 1}` : own.what === 'start' || own.what === 'end' ? '' : `M${lx} 0V${y}`
-      if (enter) path(g, enter)
-      if (own.rejoins) path(g, `M${lx} ${y}C${lx} ${y + 5} ${bx} ${y + 3} ${bx} ${y + 9}`)
-      else if (own.what !== 'end' && own.what !== 'start') g.append(svg('line', { class: 'kbn-ch-track', x1: lx, x2: lx, y1: y, y2: '100%' }))
-    }
-    if (own.what === 'start') {
-      path(g, `M${station - 4} ${y}H${lx + r}A${r} ${r} 0 0 0 ${lx} ${y + r}`)
-      // Into its lane, on down the row; into the bundle, which carries it on.
-      if (ex && !own.rejoins) g.append(svg('line', { class: 'kbn-ch-track', x1: lx, x2: lx, y1: y + r, y2: '100%' }))
-      g.append(svg('circle', { class: 'kbn-ch-ring', cx: station, cy: y, r: 3.5 }))
-    } else if (own.what === 'end') {
-      path(g, `M${lx} ${ex ? 0 : y - r}${ex ? `V${y - r}` : ''}A${r} ${r} 0 0 0 ${lx + r} ${y}H${station - 4}`)
-      const shape = own.line.end ?? 'closed'
-      if (shape === 'tempered') g.append(svg('path', { class: 'kbn-ch-term', 'data-end': shape, d: `M${station} ${y - 4.5}L${station + 4.5} ${y}L${station} ${y + 4.5}L${station - 4.5} ${y}Z` }))
-      else if (shape === 'discarded') g.append(svg('path', { class: 'kbn-ch-cross', 'data-end': shape, d: `M${station - 3.5} ${y - 3.5}L${station + 3.5} ${y + 3.5}M${station + 3.5} ${y - 3.5}L${station - 3.5} ${y + 3.5}` }))
-      else g.append(svg('rect', { class: 'kbn-ch-term', 'data-end': shape, x: station - 3, y: y - 3, width: 6, height: 6 }))
-    } else {
-      // An item's stub to its dot; a handoff's stub to an open ring.
-      path(g, `M${lx} ${y}H${station - (own.what === 'tick' ? 3 : 5)}`)
-      g.append(svg('circle', { class: 'kbn-ch-junction', cx: lx, cy: y, r: 2 }))
-      if (own.what === 'tick') g.append(svg('circle', { class: 'kbn-ch-hand', cx: station, cy: y, r: 3 }))
-    }
-    box.append(g)
-    return box
+    const id = target.closest<SVGGElement>('.kbn-ch-fibre')?.dataset.line
+    const line = id ? this.tube?.tube.lines.find(each => each.id === id) : undefined
+    if (line) { event.stopPropagation(); this.openLine(line.card) }
+  }
+  /** What a first tap on the margin named, and the label that names it. */
+  private named: { of: Element; label: HTMLElement } | null = null
+  private name(of: Element, title: string, event: MouseEvent): void {
+    const stream = this.stream
+    if (!stream) return
+    this.named?.label.remove()
+    const label = el('span', 'kbn-ch-named', title), box = stream.getBoundingClientRect()
+    label.style.left = `${event.clientX - box.left + 10}px`
+    label.style.top = `${event.clientY - box.top + stream.scrollTop - 26}px`
+    stream.querySelector(':scope > .kbn-ch-margin')?.append(label)
+    this.named = { of, label }
+  }
+  /** Each thread's runs ({@link runsOf}): its launches, stopped by its handoffs, closes, rests and questions. */
+  private runs(channel: Channel, now: number, waits: Waits): (card: KanbanCard) => Array<[number, number]> {
+    const workspace = this.ctx!.workspace!, records = workspace.board.records(channel.families), memo = new Map<KanbanCard, Array<[number, number]>>()
+    return card => memo.get(card) ?? memo.set(card, runsOf(
+      workspace.globeHost.feeds.marks(card)?.launches ?? [],
+      records.filter(record => STOPS.has(record.kind) && (record.fiber === card.uid || record.fiber === card.id)).map(record => record.timestamp),
+      { now, working: attentionOf(card, waits) === 'working', last: lastActive(card) },
+    )).get(card)!
   }
   private runningTitle(): string {
     return `${this.running.length} running: ${this.running.map(card => slug(card)).join(', ')}`
   }
   /** The threads running now, listed as thread rows: each opens its constitution's view. */
-  private bundleMenu(point?: { x: number; y: number }): void {
-    // The count's ring is the list's anchor, wherever on the bundle it was asked for: focus returns to it.
+  private bundleMenu(point?: { x: number; y: number }, gathered?: KanbanCard[]): void {
+    // The count's ring is the list's anchor, wherever on the strand it was asked for: focus returns to it.
     const anchor = this.stream?.querySelector<HTMLElement>(':scope > .kbn-ch-count > .kbn-ch-count-ring')
-    const workspace = this.ctx?.workspace
-    if (!this.running.length || !anchor || !workspace) return
+    const workspace = this.ctx?.workspace, cards = gathered ?? this.running
+    if (!cards.length || !anchor || !workspace) return
     // The threads as they stand now, not as the stream last drew them.
     const now = Date.now(), waits = workspace.board.waiting, current = new Map(this.channel?.everyone.map(card => [fiberOf(card), card]))
-    openActionMenu(anchor, ranked(this.running.map(card => current.get(fiberOf(card)) ?? card), waits).map(card => ({
+    openActionMenu(anchor, ranked(cards.map(card => current.get(fiberOf(card)) ?? card), waits).map(card => ({
       label: `${slug(card)}: ${doing(card, waits, workspace.said(card)).text}`,
       content: threadRow(card, { waits, now, said: workspace.said(card), hue: hue(card) }),
       run: () => this.openLine(card),
-    })), `${this.running.length} running`, point)
+    })), gathered ? `${cards.length} gathered here` : `${cards.length} running`, point)
   }
   /** A line, a station or a terminus opens its constitution's view, as an item does, and moves nothing else. */
   private openLine(card: KanbanCard, from: string | null = null): void {
@@ -795,7 +833,14 @@ export class ChannelsView implements TemporalView {
   }
   /** An item's state dot, which opens its worker's view. */
   private dot(item: Item): HTMLButtonElement {
-    return stateDot(item.card, this.ctx!.workspace!.board.waiting, () => this.leaveFor(`item:${item.id}`, () => this.ctx?.workspace?.openFromDesk(item.card)))
+    const dot = stateDot(item.card, this.ctx!.workspace!.board.waiting, () => this.leaveFor(`item:${item.id}`, () => this.ctx?.workspace?.openFromDesk(item.card)))
+    // Each drop a little different, and the same each time it is drawn.
+    const shape = random(`drop:${item.id}`)
+    dot.style.setProperty('--drop-w', `${(6.6 + shape() * 1.4).toFixed(2)}px`)
+    dot.style.setProperty('--drop-h', `${(5.4 + shape() * 1.2).toFixed(2)}px`)
+    dot.style.setProperty('--drop-turn', `${Math.round((shape() - 0.5) * 50)}deg`)
+    dot.title = `${item.card.name} — ${dot.title}`
+    return dot
   }
   /**
    * A line's ✓, on every post and file line: the line leaves the stream, and
@@ -1137,6 +1182,9 @@ export class ChannelsView implements TemporalView {
     this.stopGestures?.(); this.stopGestures = undefined
     this.width?.disconnect(); this.width = null
     this.consoleSize?.disconnect(); this.consoleSize = null
+    this.rowSizes?.disconnect(); this.rowSizes = null
+    cancelAnimationFrame(this.painting); this.painting = 0
+    this.tube = null
     for (const unbind of this.railBindings) unbind()
     this.railBindings = []
     this.rail?.destroy(); this.rail = null

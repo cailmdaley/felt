@@ -83,14 +83,18 @@
 .kbn-ch-pick-hash { flex: none; width: 0.7em; color: var(--kbn-ink-muted); }
 .kbn-ch-pick-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 /* A chaired channel's name is written as Slack writes it: lowercase, in the monospace. */
-.kbn-ch-pick:not([data-lone]) .kbn-ch-pick-name { font-family: var(--font-mono); font-size: var(--type-code); }
-.kbn-ch-pick[data-unread] .kbn-ch-pick-name { font-weight: 700; color: var(--kbn-ink); }
+.kbn-ch-pick:not([data-lone]) .kbn-ch-pick-name { font-family: var(--font-sign); font-size: var(--type-row); }
+.kbn-ch-pick[data-unread] .kbn-ch-pick-name { color: var(--kbn-ink); }
 .kbn-ch-pick[data-lone] { font-size: var(--type-meta); color: var(--kbn-ink-muted); }
 .kbn-ch-pick[data-lone] .kbn-ch-pick-hash { opacity: 0.6; }
-/* Waiting on the human: a dot. */
-.kbn-ch-pick-mark { flex: none; align-self: center; width: 7px; height: 7px; border-radius: 50%; background: var(--kbn-owed-bright); box-shadow: 0 0 0 2px color-mix(in srgb, var(--kbn-owed-bright) 25%, transparent); }
-/* Something said since the human last read it: a quieter dot, in the ink. */
-.kbn-ch-pick-unread { flex: none; align-self: center; width: 6px; height: 6px; border-radius: 50%; background: var(--kbn-ink-soft); }
+/* A ringed numeral, as the board counts everywhere in Channels: how many wait on the human, in gold; how many are new
+   since the human last read the channel, in the ink. */
+.kbn-ch-pick-mark, .kbn-ch-pick-unread, .kbn-ch-count-ring {
+  display: grid; place-items: center; flex: none; align-self: center; box-sizing: border-box; min-width: 17px; height: 17px; padding: 0 3px;
+  border: 1px solid var(--kbn-ink-muted); border-radius: 9px; background: var(--kbn-paper);
+  font: var(--type-meta)/var(--leading-solid) var(--font-sign); color: var(--kbn-ink-soft);
+}
+.kbn-ch-pick-mark { border-color: var(--kbn-owed-bright); color: var(--kbn-owed-deep, var(--kbn-owed-bright)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--kbn-owed-bright) 22%, transparent); }
 /* What waits on the human floats above the human's order, a little apart from it. */
 .kbn-ch-rail-item[data-waiting]:has(+ .kbn-ch-rail-item:not([data-waiting])) { margin-bottom: 8px; }
 .kbn-ch-pick-hidden { flex: none; font: var(--type-label)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); }
@@ -126,50 +130,41 @@
 .kbn-ch-back { display: none; }
 .kbn-ch-name { flex: 1; min-width: 0; margin: 0; font: 600 var(--type-title)/var(--leading-tight) var(--font-serif); color: var(--kbn-ink); overflow-wrap: anywhere; }
 .kbn-ch-name::before { content: '# '; color: var(--kbn-ink-muted); font-weight: 400; }
-.kbn-ch-handle { font-family: var(--font-mono); font-size: var(--type-code); font-weight: 500; }
+.kbn-ch-handle { font-family: var(--font-sign); font-weight: 400; }
 .kbn-ch-empty { margin: 40px 0; text-align: center; font: italic var(--type-prose)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink-muted); }
 
 .kbn-ch-pages { margin-left: 4px; }
 
-/* The stream: each worker's item, and at its left a tube map of its threads' lives — a line per life, run down a lane
-   from a start's ring to an end's terminus, its items stations wired to it. */
+/* The stream: each worker's item, and at its left the margin, drawn in fine ink over the rows (margin.ts). */
 .kbn-ch-stream {
-  --kbn-ch-tube: 24px;
+  --kbn-ch-tube: 56px;
   position: relative;
   flex: 1 1 auto; min-height: 0; overflow-y: auto;
   list-style: none; margin: 0; padding: 12px 0 8px;
   display: flex; flex-direction: column;
 }
 .kbn-ch-stream > .kbn-ch-hush { padding: 4px 20px; }
-/* Each row's gutter runs its full height, so the lanes join from row to row. */
-.kbn-ch-gutter { position: absolute; top: 0; left: 0; height: 100%; overflow: visible; pointer-events: none; }
+.kbn-ch-margin { height: 0; flex: none; list-style: none; }
+.kbn-ch-ink { position: absolute; top: 0; left: 0; z-index: 1; overflow: visible; pointer-events: none; }
+/* A post's drop stands above the ink, which stands above the rows. */
+.kbn-ch-item > .constitution-state-dot { z-index: 2; }
 /* A line's colour is its thread's identity, one of six that are none of the state colours (gold, the agent's blue,
-   verdigris); its state colours its stations and its end. An ended life keeps its colour, quieter. */
-.kbn-ch-stream [data-hue='0'] { --line: var(--kbn-line-0); }
-.kbn-ch-stream [data-hue='1'] { --line: var(--kbn-line-1); }
-.kbn-ch-stream [data-hue='2'] { --line: var(--kbn-line-2); }
-.kbn-ch-stream [data-hue='3'] { --line: var(--kbn-line-3); }
-.kbn-ch-stream [data-hue='4'] { --line: var(--kbn-line-4); }
-.kbn-ch-stream [data-hue='5'] { --line: var(--kbn-line-5); }
-.kbn-ch-line { color: var(--line); pointer-events: auto; cursor: pointer; }
-.kbn-ch-line[data-state='ended'] { opacity: 0.55; }
-/* The bundle: every running line out of a lane, one heavier neutral line; it lists the threads it carries. */
-.kbn-ch-bundle { pointer-events: auto; cursor: pointer; }
-.kbn-ch-bundle-v { stroke: var(--kbn-ink-muted); stroke-width: 2.5; }
-.kbn-ch-bundle-foot { fill: var(--kbn-ink-muted); mask: linear-gradient(var(--kbn-ink), transparent); -webkit-mask: linear-gradient(var(--kbn-ink), transparent); }
-.kbn-ch-track { fill: none; stroke: var(--line); stroke-width: 1.5; }
-.kbn-ch-hit { fill: transparent; stroke: transparent; stroke-width: 5; }
-/* A start's ring, in the line's colour, filled with the thread's state while it waits on the human or works. */
-.kbn-ch-ring { fill: var(--kbn-paper); stroke: var(--line); stroke-width: 1.5; }
-.kbn-ch-line[data-state='waiting'] .kbn-ch-ring { fill: var(--kbn-owed-bright); }
-.kbn-ch-line[data-state='working'] .kbn-ch-ring { fill: var(--kbn-agent); }
-/* A handoff: an open ring on the line, where one worker passed it to the next. */
-.kbn-ch-hand { fill: var(--kbn-paper); stroke: var(--line); stroke-width: 1.5; }
-.kbn-ch-junction { fill: var(--line); }
-/* An end, by its verdict: closed a square in the ink, tempered a diamond in verdigris, discarded a cross. */
-.kbn-ch-term { fill: var(--kbn-ink-soft); }
-.kbn-ch-term[data-end='tempered'] { fill: var(--kbn-tempered); }
-.kbn-ch-cross { fill: none; stroke: var(--kbn-ink-muted); stroke-width: 1.8; }
+   verdigris); state is on its drops. A line that has ended keeps its colour, drawn toward the paper. */
+.kbn-ch-fibre { --ink: var(--line); fill: var(--ink); color: var(--ink); }
+.kbn-ch-fibre[data-ended] { --ink: color-mix(in srgb, var(--line) 62%, var(--kbn-paper)); }
+.kbn-ch-fibre stop { stop-color: var(--ink); }
+.kbn-ch-fibre .kbn-ch-fray { opacity: 0.7; }
+.kbn-ch-fibre .kbn-ch-gather { opacity: 0.55; }
+.kbn-ch-knot { fill: var(--kbn-paper); stroke: var(--ink); stroke-width: 0.9; }
+/* The strand: what runs with no fibre of its own here, a few faint fibres under the ringed count. */
+.kbn-ch-strand-ink { fill: color-mix(in srgb, var(--kbn-ink-muted) 55%, transparent); }
+.kbn-ch-hit { fill: none; stroke: transparent; stroke-width: 7; pointer-events: stroke; cursor: pointer; }
+.kbn-ch-hit-mark { fill: transparent; pointer-events: all; cursor: pointer; }
+/* On a phone, a first tap on the margin names what it touched; a second opens it. */
+.kbn-ch-named {
+  position: absolute; z-index: 3; max-width: 70vw; padding: 2px 6px; border-radius: 3px; pointer-events: none;
+  background: var(--kbn-ink); color: var(--kbn-paper); font: var(--type-meta)/var(--leading-ui) var(--font-serif);
+}
 /* Stations of their own: a start's ring and slug, a tick, an end's terminus. Each a short row, written once per line. */
 .kbn-ch-station { position: relative; flex: none; padding-left: calc(var(--kbn-ch-tube) + 2px); }
 .kbn-ch-st-start { display: flex; align-items: center; height: 22px; }
@@ -177,14 +172,11 @@
 .kbn-ch-st-end { height: 18px; }
 .kbn-ch-slug { padding: 0; border: 0; background: none; cursor: pointer; text-align: left; max-width: 100%; min-width: 0; }
 .kbn-ch-slug > .thread-row > .constitution-state-dot { display: none; }
-.kbn-ch-slug .thread-row-slug { font-size: var(--type-label); }
+.kbn-ch-slug .thread-row-slug { font: var(--type-label)/var(--leading-ui) var(--font-sign); }
 /* The bundle's count: how many running lines it carries at the top of what is in sight, ringed on it. */
 .kbn-ch-count { position: sticky; top: -12px; z-index: 2; height: 0; flex: none; list-style: none; }
-.kbn-ch-count-ring {
-  position: absolute; top: 14px; left: 0; display: grid; place-items: center; width: 17px; height: 17px; padding: 0;
-  border: 1.5px solid var(--kbn-ink-muted); border-radius: 50%; background: var(--kbn-paper); cursor: pointer;
-  font: var(--type-label)/var(--leading-solid) var(--font-serif); color: var(--kbn-ink-soft); font-variant-numeric: tabular-nums;
-}
+/* The strand's count rides on the strand, its ring on the strand's line. */
+.kbn-ch-count-ring { position: absolute; top: 14px; left: 0; cursor: pointer; }
 .kbn-ch-count-ring[hidden] { display: none; }
 
 /* The console, docked under the stream. */

@@ -15,8 +15,12 @@
   background: linear-gradient(to right, transparent var(--kbn-ch-tube), var(--kbn-owed-bright) 0, var(--kbn-owed-bright) calc(var(--kbn-ch-tube) + 2px), color-mix(in srgb, var(--kbn-owed-bright) 7%, transparent) 0);
 }
 .kbn-ch-item > .constitution-state-dot { position: absolute; top: 8px; left: calc(var(--kbn-ch-tube) - 14px); width: 14px; height: 24px; }
-/* On a line, the dot, coloured by the thread's state, is ringed in the line's. */
-.kbn-ch-item[data-line] > .constitution-state-dot::before { box-shadow: 0 0 0 1.5px var(--kbn-paper), 0 0 0 3px var(--line); }
+/* On a line, the dot is the drop its fibre's collateral ends in: a small ellipse, each a little different, gold when it
+   waits on the human, blue while it works, and hollow in the line's colour when quiet. */
+.kbn-ch-item[data-line] > .constitution-state-dot::before {
+  width: var(--drop-w, 7px); height: var(--drop-h, 6px); transform: rotate(var(--drop-turn, 0deg)); box-shadow: none;
+}
+.kbn-ch-item[data-line] > .constitution-state-dot[data-attention='quiet']::before { background: var(--kbn-paper); box-shadow: inset 0 0 0 1px var(--line); }
 .kbn-ch-item-body { min-width: 0; }
 .kbn-ch-item-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; font: var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); }
 .kbn-ch-who {
@@ -28,7 +32,7 @@
 .kbn-ch-item[data-waiting] .kbn-ch-kind { color: var(--kbn-owed-deep, var(--kbn-ink)); font-weight: 600; }
 /* Its head keeps one line: the slug in its line's colour, its office in small caps. */
 .kbn-ch-item-head { flex-wrap: nowrap; }
-.kbn-ch-who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--line, var(--kbn-ink)); }
+.kbn-ch-who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--line, var(--kbn-ink)); font-family: var(--font-sign); font-weight: 400; }
 .kbn-ch-role { flex: none; font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); white-space: nowrap; }
 .kbn-ch-item-head :is(.kbn-ch-kind, .kbn-ch-age, .kbn-ch-clear) { flex: none; white-space: nowrap; }
 /* Grouped, the head steps aside: who and what stay for assistive technology, the age shows on hover, the clear stays. */

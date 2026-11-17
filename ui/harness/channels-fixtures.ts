@@ -242,6 +242,8 @@ function addBoardFixtures(example: WorkspaceExample, now: number, ROWS: Row[], m
   for (const [fiber, minutes] of [['pando/unions/rho', 120], ['pando/unions/psf', 90]] as const) {
     if (ROWS.some(row => row.id === fiber)) example.sessions.push({ at: ms(minutes), fiber, uid: fiber, session: `session-${fiber}-2`, harness: 'claude-code', agent: 'claude-opus', host: WORKSPACE_HOST, tmux: null, kind: 'dispatch' as const })
   }
+  // The west hub rested between its runs: it handed off two hours ago and was launched again an hour and a quarter ago.
+  if (ROWS.some(row => row.id === 'pando/unions/west')) example.sessions.push({ at: ms(75), fiber: 'pando/unions/west', uid: 'pando/unions/west', session: 'session-pando/unions/west-2', harness: 'claude-code', agent: 'claude-opus', host: WORKSPACE_HOST, tmux: null, kind: 'dispatch' as const })
   example.commits = []
   let n = 0
   const said: Say = (fiber, kind, minutes, over = {}) =>
@@ -286,6 +288,7 @@ function addBoardFixtures(example: WorkspaceExample, now: number, ROWS: Row[], m
     said('pando/unions', 'post', 24, { to: HUMAN, text: 'Morning round: chains converged, photo-z within the prior, the paper draft moving. One ask for you on the n(z) modes.' }),
     said('pando/unions/west', 'post', 60, { to: HUMAN, text: 'The west run finished: S8 = 0.781 ± 0.019. The posterior is attached.', files: ['/fixture-store/workspace/pando/unions/west/s8-posterior.svg'] }),
     said('pando/unions/east', 'handed_off', 45),
+    said('pando/unions/west', 'handed_off', 120),
     said('pando/unions/modes', 'asked', 35, { to: up('pando/unions/modes'), text: ROWS.find(row => row.id === 'pando/unions/modes')!.ask }),
     said('deed-form', 'asked', 50, { to: up('deed-form'), text: ROWS.find(row => row.id === 'deed-form')!.ask }),
     said('morning-post', 'closed', 140, { to: HUMAN, text: ROWS.find(row => row.id === 'morning-post')!.outcome, files: [`${dir('morning-post')}/reply-drafts.md`] }),

@@ -14,6 +14,8 @@ import { parseDocKey, type DocKey } from './documents.js'
 import { Unfold } from '../elements/filePreview.js'
 import { doing, threadRow } from '../elements/threadRow.js'
 import { relative, timeEl } from '../elements/time.js'
+import { lineHue } from '../lineHue.js'
+import { drawFibres, type Knot } from './familyInk.js'
 import './family-page.css'
 
 /** What the view reads, and where it goes. */
@@ -40,8 +42,8 @@ const WANT_WORD: Readonly<Record<Want['kind'], string>> = { ask: 'asks', review:
 /**
  * One view of a constitution, the same from the Desk, a channel, a role or a
  * thread, stacked at every width. Above it, pinned, its orchestrators as one
- * strip each, the family's top-level first, each indented to its depth with a
- * rule per level in that level's state colour, and its thread row (choosing
+ * strip each, the family's top-level first, each indented to its depth, its
+ * fibre in its identity colour curving into the next level, and its thread row (choosing
  * one opens its view; pulling the page
  * down past its top opens the nearest one's, moving neither Rex nor voice).
  * Then its head: its dot and slug, what it wants of the human or its faint
@@ -56,6 +58,13 @@ const WANT_WORD: Readonly<Record<Want['kind'], string>> = { ask: 'asks', review:
  * seen. Its head draws no outcome; a thread row says one when it is newer than its last post. It reads feeds and repaints only while its frame
  * is selected in an open reader; its frame's eviction ends it.
  */
+const svgBox = (): SVGSVGElement => {
+  const box = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  box.classList.add('ov-ink')
+  box.setAttribute('aria-hidden', 'true')
+  return box
+}
+
 export class FamilyPage {
   readonly el = el('div', 'ws-family-page family-map')
   private readonly scroller = el('div', 'ws-family-scroll')
@@ -69,6 +78,11 @@ export class FamilyPage {
   private docs = el('span', 'ws-doc-buttons')
   private readonly said = el('section', 'ov-said')
   private readonly threads = el('ol', 'ov-threads')
+  /** The fine ink of its lines: one drawing over the pinned stack, one over the view below it. */
+  private readonly upInk = svgBox()
+  private readonly mainInk = svgBox()
+  private inking = 0
+  private readonly resized = new ResizeObserver(() => this.inkLater())
   private readonly unfold: Unfold
   private card: KanbanCard | null = null
   private index: ThreadIndex | null = null
@@ -114,7 +128,8 @@ export class FamilyPage {
       this.quietShown = !this.quietShown
       if (this.card && this.index) this.paint(this.index.card(this.card), Date.now())
     })
-    this.main.append(this.head, this.said, this.threads, this.unfold.el)
+    this.main.append(this.mainInk, this.head, this.said, this.threads, this.unfold.el)
+    this.resized.observe(this.main)
     // A tree: its strips and rows own j, k, h and l while they have the keys.
     const grid = el('div', 'ws-family-grid')
     grid.setAttribute('role', 'tree')
@@ -209,7 +224,7 @@ export class FamilyPage {
     const quietHeld = document.activeElement === this.quiet
     const focused = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.ov-ancestor, .ov-thread')
     const held = focused && this.el.contains(focused) ? `${focused.className}:${focused.dataset.fiber}` : undefined
-    this.up.replaceChildren(...above.map((ancestor, depth) => this.ancestor(ancestor, depth, above, now)))
+    this.up.replaceChildren(...above.map((ancestor, depth) => this.ancestor(ancestor, depth, above, now)), this.upInk)
     this.paintHead(card, now)
     this.paintSaid(card, now)
     this.paintFiles(card)
@@ -229,10 +244,45 @@ export class FamilyPage {
     this.threads.hidden = !threads.length
     if (quietHeld && this.quiet.isConnected) this.quiet.focus({ preventScroll: true })
     if (held) [...this.el.querySelectorAll<HTMLElement>('.ov-ancestor, .ov-thread')].find(row => `${row.className}:${row.dataset.fiber}` === held)?.focus({ preventScroll: true })
+    this.inkLater()
+  }
+  private inkLater(): void {
+    if (this.inking) return
+    this.inking = requestAnimationFrame(() => { this.inking = 0; this.ink() })
+  }
+  /**
+   * Draws its lines in fine ink once the rows stand: each orchestrator's
+   * fibre into the next level's dot (the last down into the view, where it
+   * meets the constitution's dot), and the constitution's own fibre into
+   * each of its threads.
+   */
+  private ink(): void {
+    const card = this.card && this.index?.card(this.card)
+    if (!card || !this.awake) return
+    const above = this.ancestors(), dotOf = (row: Element | null | undefined) => row?.querySelector(':scope > .constitution-state-dot') ?? undefined
+    const centre = (dot: Element | undefined, frame: DOMRect): [number, number] | undefined => {
+      const box = dot?.getBoundingClientRect()
+      return box && box.width ? [box.left + box.width / 2 - frame.left, box.top + box.height / 2 - frame.top] : undefined
+    }
+    const upFrame = this.up.getBoundingClientRect(), mainFrame = this.main.getBoundingClientRect()
+    const headDot = centre(this.title.querySelector('.constitution-state-dot') ?? undefined, mainFrame)
+    const strips = [...this.up.querySelectorAll(':scope > .ov-ancestor')]
+    const chain: Knot[] = above.flatMap((each, k) => { const at = centre(dotOf(strips[k]), upFrame); return at ? [{ at, hue: lineHue(each), seed: each.uid ?? each.id }] : [] })
+    for (const [box, frame] of [[this.upInk, upFrame], [this.mainInk, mainFrame]] as const) { box.setAttribute('width', String(frame.width)); box.setAttribute('height', String(frame.height)) }
+    this.upInk.replaceChildren()
+    drawFibres(this.upInk, { chain, foot: headDot && chain.length ? [headDot[0], upFrame.height] : undefined })
+    if (!headDot) { this.mainInk.replaceChildren(); return }
+    const self: Knot = { at: headDot, hue: lineHue(card), seed: card.uid ?? card.id }
+    const branches = [...this.threads.querySelectorAll(':scope > li > .ov-thread:not(.ov-deep)')].map(row => centre(dotOf(row), mainFrame)).filter(at => at !== undefined)
+    this.mainInk.replaceChildren()
+    // The last orchestrator's fibre comes on into the view from its top and down into the constitution's dot.
+    const parent = above.at(-1)
+    if (parent) drawFibres(this.mainInk, { chain: [{ at: [headDot[0], -4], hue: lineHue(parent), seed: `${parent.uid ?? parent.id}:in` }], foot: [headDot[0], headDot[1] - 5] })
+    drawFibres(this.mainInk, { chain: [self], branches, trunk: Math.max(6, (branches[0]?.[0] ?? headDot[0]) - 16) })
   }
   /** A thread row (elements/threadRow.ts) the view's keys move among, which opens that constitution's view. */
   private opener(card: KanbanCard, className: string, now: number, waits: Waits): HTMLElement {
-    const row = threadRow(card, { waits, now, said: this.feeds.said(card), open: each => this.feeds.view(each) })
+    const row = threadRow(card, { waits, now, said: this.feeds.said(card), open: each => this.feeds.view(each), hue: lineHue(card) })
     row.classList.add(...className.split(' '))
     row.tabIndex = 0
     row.setAttribute('role', 'treeitem')
@@ -240,22 +290,19 @@ export class FamilyPage {
   }
   /**
    * An orchestrator above, one strip of the pinned stack, indented to its
-   * depth: its thread row, and its rule in its state colour from its dot down
-   * through the strips below it, so each level's rule passes every deeper strip.
+   * depth: its thread row, its fibre drawn from its dot into the next level's
+   * ({@link ink}).
    */
   private ancestor(card: KanbanCard, depth: number, above: readonly KanbanCard[], now: number): HTMLElement {
     const waits = this.feeds.waits(), strip = this.opener(card, 'ov-ancestor', now, waits)
     strip.style.setProperty('--ov-depth', String(depth))
     strip.style.setProperty('--ov-below', String(above.length - 1 - depth))
-    const rule = el('span', 'ov-rule')
-    rule.setAttribute('aria-hidden', 'true')
-    rule.dataset.attention = attentionOf(card, waits)
-    strip.prepend(rule)
     return strip
   }
   private paintHead(card: KanbanCard, now: number): void {
     const head = this.head
     head.title = card.name
+    head.dataset.hue = lineHue(card)
     this.name.textContent = slug(card)
     const waits = this.feeds.waits(), want = wantOf(card, waits), faint = attentionOf(card, waits) === 'quiet' ? quietWord(card) : ''
     this.facts.replaceChildren(...want && WANT_WORD[want.kind] ? [el('span', 'ov-needs', WANT_WORD[want.kind])] : faint ? [el('span', 'ov-word', faint)] : [], timeEl(doing(card, waits, this.feeds.said(card)).at, now, 'ov-time'))
@@ -340,6 +387,8 @@ export class FamilyPage {
   }
   dispose(): void {
     this.awake = false
+    this.resized.disconnect()
+    cancelAnimationFrame(this.inking)
     this.acts?.dispose()
     this.unfold.dispose()
     this.disposed()

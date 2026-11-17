@@ -4,12 +4,6 @@
   font: var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--ws-ink-soft);
 }
 .thread-row > .constitution-state-dot { align-self: center; width: 14px; height: 20px; }
-.thread-row[data-hue='0'] { --line: var(--kbn-line-0); }
-.thread-row[data-hue='1'] { --line: var(--kbn-line-1); }
-.thread-row[data-hue='2'] { --line: var(--kbn-line-2); }
-.thread-row[data-hue='3'] { --line: var(--kbn-line-3); }
-.thread-row[data-hue='4'] { --line: var(--kbn-line-4); }
-.thread-row[data-hue='5'] { --line: var(--kbn-line-5); }
 /* A name is never cut: the doing gives way. */
 .thread-row-slug { flex: none; overflow-wrap: anywhere; font: 500 var(--type-meta)/var(--leading-ui) var(--font-mono); color: var(--line, var(--ws-ink)); }
 .thread-row-role { flex: none; font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); color: var(--ws-ink-muted); white-space: nowrap; }

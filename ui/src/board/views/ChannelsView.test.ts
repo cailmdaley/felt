@@ -138,13 +138,14 @@ it('opening, paging and returning to a channel look at nothing; clicking an item
   host.querySelector<HTMLButtonElement>('.kbn-ch-pages [data-part="constitution"]')!.click()
   expect(openPage).toHaveBeenLastCalledWith(chair, expect.stringContaining('C'))
   // A line, its start's slug and its tick open that thread's view, as an item does, and look at nothing.
-  host.querySelector<SVGGElement>('.kbn-ch-stream > [data-what="tick"] .kbn-ch-line')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  const ticked = host.querySelector<HTMLElement>('.kbn-ch-stream > [data-what="tick"]')!.dataset.line!
+  host.querySelector<SVGGElement>(`.kbn-ch-margin .kbn-ch-fibre[data-line="${ticked}"]`)!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
   expect(openFromDesk).toHaveBeenLastCalledWith(beam)
   host.querySelector<HTMLButtonElement>('.kbn-ch-stream > [data-what="start"] .kbn-ch-slug')!.click()
   expect(openFromDesk).toHaveBeenLastCalledWith(tsz)
-  // The item on that line is wired to it and names its thread; a send says no word the stream does not.
+  // The item on that line hangs from its fibre and names its thread; a send says no word the stream does not.
   const wired = item(host, 'tsz')
-  expect([wired.querySelector('.kbn-ch-who')?.textContent, wired.querySelector('.kbn-ch-kind'), !!wired.querySelector('.kbn-ch-junction')]).toStrictEqual(['tsz', null, true])
+  expect([wired.querySelector('.kbn-ch-who')?.textContent, wired.querySelector('.kbn-ch-kind'), !!host.querySelector(`.kbn-ch-margin .kbn-ch-fibre[data-line="${wired.dataset.line}"]`)]).toStrictEqual(['tsz', null, true])
   expect(see).not.toHaveBeenCalled()
 })
 
@@ -561,13 +562,13 @@ it('hides a channel and does nothing else: one write, the dismissal, and no life
   expect(asked.filter(([url]) => LIFECYCLE.test(url))).toStrictEqual([])
 })
 
-it('rings the threads running now and lists them as thread rows, from the ring or anywhere on the bundle', async () => {
+it('rings the threads running now and lists them as thread rows from the ring; the strand names what it gathers where it is', async () => {
   daemon()
   const { host, openFromDesk } = await mount()
   const ring = host.querySelector<HTMLButtonElement>('.kbn-ch-count-ring')!
   // The beam's life runs in from before the stream; the expert's started 40 minutes ago; the mask, launched before the reach, asks in it with nothing else there; none has ended.
   expect([ring.hidden, ring.textContent, ring.title]).toStrictEqual([false, '3', '3 running: mask, beam, tsz'])
-  expect([...host.querySelectorAll('.kbn-ch-bundle > title')].every(title => title.textContent === ring.title)).toBe(true)
+  expect([...host.querySelectorAll('.kbn-ch-gathered > title')].every(title => / gathered here: /.test(title.textContent!))).toBe(true)
   ring.click(); await settle()
   const rows = [...document.querySelectorAll<HTMLElement>('[role="menuitem"] .thread-row')]
   expect(rows.map(row => [row.querySelector('.thread-row-slug')!.textContent, row.querySelector('.thread-row-doing')!.textContent])).toStrictEqual([['mask', 'Mask at 5σ or 3σ?'], ['beam', 'working'], ['tsz', 'working']])

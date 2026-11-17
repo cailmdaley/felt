@@ -3,8 +3,7 @@
 .ws-family-scroll { min-height: 0; overflow: auto; overscroll-behavior-y: contain; }
 
 /* Its orchestrators, pinned above the view: one strip each, the family's top-level first, each indented to its
-   depth by a rule per level in that level's state colour (gold waiting on the human, the agent's blue working,
-   hairline quiet). Each opens its view. */
+   depth, its fibre curving into the next level. Each opens its view. */
 .ov-up { display: flex; flex-direction: column; padding: 4px 0 0; border-bottom: 1px solid var(--ws-hairline-soft); background: color-mix(in srgb, var(--ws-ink) 3%, var(--ws-paper, var(--kbn-paper))); }
 .ov-up:empty { display: none; }
 .ov-ancestor {
@@ -13,15 +12,13 @@
 }
 .ov-ancestor:is(:hover, :focus-visible) { background: var(--ws-hover); }
 .ov-ancestor:is(:hover, :focus-visible) .thread-row-slug { text-decoration: underline; text-underline-offset: 3px; }
-/* Its rule: from its dot's centre down to the foot of the stack, under the dot; the deepest strip draws none. */
-.ov-rule {
-  --ov-rule: var(--ws-hairline); position: absolute; z-index: 0; top: 50%; width: 2px; pointer-events: none;
-  left: calc(var(--ov-gutter) - 6px + var(--ov-depth) * var(--ov-step) + 9px); height: calc(50% + var(--ov-below) * 100%);
-  background: var(--ov-rule);
-}
-.ov-rule[data-attention='waiting'] { --ov-rule: var(--kbn-owed-bright); }
-.ov-rule[data-attention='working'] { --ov-rule: var(--kbn-agent); }
-.ov-ancestor:last-child .ov-rule { display: none; }
+/* Its lines, in fine ink over the stack and over the view (familyInk.ts): each fibre in its thread's identity colour,
+   under the dots, which keep the state. */
+.ov-up, .ov-main { position: relative; }
+.ov-ink { position: absolute; top: 0; left: 0; z-index: 0; overflow: visible; pointer-events: none; }
+.ov-fibre { fill: var(--line, var(--ws-hairline)); }
+.ov-up { overflow: hidden; }
+.ov-head, .ov-said, .ov-threads, .ov-unfold { position: relative; z-index: 1; }
 .ov-ancestor .constitution-state-dot { position: relative; z-index: 1; width: 20px; height: 22px; }
 .ov-title { grid-area: path; display: flex; align-items: center; min-width: 0; font: var(--type-label)/var(--leading-tight) var(--font-mono); }
 .ov-title .constitution-state-dot { flex: none; width: 16px; height: 20px; }
@@ -33,7 +30,7 @@
   align-items: center; column-gap: 10px; row-gap: 2px;
   padding: 10px var(--ov-gutter) 6px; outline: none;
 }
-.ov-name { margin: 0 0 0 4px; overflow-wrap: anywhere; font: 600 var(--type-label)/var(--leading-tight) var(--font-mono); color: var(--ws-ink); }
+.ov-name { margin: 0 0 0 4px; overflow-wrap: anywhere; font: 600 var(--type-label)/var(--leading-tight) var(--font-mono); color: var(--line, var(--ws-ink)); }
 .ov-facts { grid-area: facts; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; }
 /* Waiting on the human, in the owed gold every surface gives it. */
 .ov-needs {
