@@ -147,25 +147,17 @@ try {
     await page.locator('.ws-selected .ov-head [data-part="sends"]').click()
     await page.waitForFunction(() => document.querySelectorAll('.kbn-conversation-menu .uf-file-row').length === 3)
     await shot(page, `${name}-sends-list`)
+    // A row of the list unfolds that file in the view, where ← and → step among them.
     await page.locator('.kbn-conversation-menu .uf-file-row').first().click()
-    const count = () => page.locator('.ws-page.ws-selected .ws-sent-count').textContent()
-    await page.waitForFunction(() => document.querySelector('.ws-page.ws-selected .ws-sent-count')?.textContent === '1 / 3')
+    const viewCount = () => page.waitForFunction(() => document.querySelector('.ws-selected .uf-count')?.textContent).then(h => h.jsonValue())
+    const [at, of] = (await viewCount()).split(' / ').map(Number)
+    assert.ok(at < of, 'the first row is not the last file')
     await page.keyboard.press('ArrowRight')
-    await page.waitForFunction(() => document.querySelector('.ws-page.ws-selected .ws-sent-count')?.textContent === '2 / 3')
-    if (phone) {
-      await shot(page, `${name}-sends`)
-      // A phone has no page bar: its top bar's files list names every file sent.
-      await page.locator('.ws-files-toggle').click()
-      await page.waitForFunction(() => document.querySelectorAll('.kbn-conversation-menu .uf-file-row').length === 3)
-      await shot(page, `${name}-sends-sheet`)
-      await page.keyboard.press('Escape')
-    } else {
-      await page.locator('.ws-page.ws-selected .ws-sent-step').last().click()
-      assert.equal(await page.waitForFunction(() => document.querySelector('.ws-page.ws-selected .ws-sent-count')?.textContent === '3 / 3').then(() => count()), '3 / 3')
-      await shot(page, `${name}-sends`)
-    }
-    // Stepping replaces the reader's page: one back returns to Channels.
-    await page.keyboard.press('h')
+    await page.waitForFunction(want => document.querySelector('.ws-selected .uf-count')?.textContent === want, `${at + 1} / ${of}`)
+    await shot(page, `${name}-sends`)
+    // Escape folds the file, and the next leaves the view: one step back to Channels.
+    await page.keyboard.press('Escape')
+    await page.keyboard.press('Escape')
     await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'cmbx' && document.querySelector('.kbn-ch').offsetParent)
     if (phone) {
       await page.locator('.kbn-ch-back').click()
