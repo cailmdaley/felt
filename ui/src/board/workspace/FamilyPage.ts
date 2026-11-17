@@ -9,7 +9,7 @@ import { slug } from '../threadOutline.js'
 import { renderMarkdown } from '../utils.js'
 import type { ThreadIndex } from '../threads.js'
 import type { FiberActs } from './Dock.js'
-import { docButtons, type DocFeeds } from './docButtons.js'
+import { docButtons, type DocButtons, type DocFeeds } from './docButtons.js'
 import { parseDocKey, type DocKey } from './documents.js'
 import { Unfold } from '../elements/filePreview.js'
 import { doing, threadRow } from '../elements/threadRow.js'
@@ -75,7 +75,7 @@ export class FamilyPage {
   private readonly name = el('h2', 'ov-name')
   private readonly facts = el('div', 'ov-facts')
   private readonly tools = el('div', 'ov-tools')
-  private docs = el('span', 'ws-doc-buttons')
+  private docs: DocButtons = { el: el('span', 'ws-doc-buttons'), refresh: () => {} }
   private readonly said = el('section', 'ov-said')
   private readonly threads = el('ol', 'ov-threads')
   /** The fine ink of its lines: one drawing over the pinned stack, one over the view below it. */
@@ -112,7 +112,7 @@ export class FamilyPage {
     this.head.tabIndex = -1
     // An act zone, as the console is: a channel theme's rules stop at its controls.
     this.tools.dataset.part = 'act'
-    this.tools.append(this.docs)
+    this.tools.append(this.docs.el)
     this.title.append(el('span'), this.name)
     this.head.append(this.title, this.facts, this.tools)
     this.unfold = new Unfold({
@@ -306,15 +306,15 @@ export class FamilyPage {
     this.name.textContent = slug(card)
     const waits = this.feeds.waits(), want = wantOf(card, waits), faint = attentionOf(card, waits) === 'quiet' ? quietWord(card) : ''
     this.facts.replaceChildren(...want && WANT_WORD[want.kind] ? [el('span', 'ov-needs', WANT_WORD[want.kind])] : faint ? [el('span', 'ov-word', faint)] : [], timeEl(doing(card, waits, this.feeds.said(card)).at, now, 'ov-time'))
-    // Its pages are drawn again, the one in focus keeping it; not while a list hangs from one, whose focus returns there.
-    if (!this.docs.querySelector('[aria-expanded="true"]')) {
+    // Its pages are drawn again, the one in focus keeping it; while a list hangs from one, whose focus returns there, they only read their files again.
+    if (!this.docs.el.querySelector('[aria-expanded="true"]')) {
       const part = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.ws-doc-button')
-      const kept = part && this.docs.contains(part) ? part.dataset.part : undefined
-      const docs = docButtons(card, { ...this.feeds, open: (each, doc) => this.show(each, doc) }).el
-      this.docs.replaceWith(docs)
+      const kept = part && this.docs.el.contains(part) ? part.dataset.part : undefined
+      const docs = docButtons(card, { ...this.feeds, open: (each, doc) => this.show(each, doc) })
+      this.docs.el.replaceWith(docs.el)
       this.docs = docs
-      if (kept) docs.querySelector<HTMLElement>(`[data-part="${kept}"]`)?.focus({ preventScroll: true })
-    }
+      if (kept) docs.el.querySelector<HTMLElement>(`[data-part="${kept}"]`)?.focus({ preventScroll: true })
+    } else this.docs.refresh()
     this.name.previousElementSibling!.replaceWith(stateDot(card, waits, () => {}))
     if (this.actsFor && !this.acts) {
       this.acts = this.actsFor(() => this.card!)

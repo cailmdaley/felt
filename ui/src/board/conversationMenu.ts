@@ -131,10 +131,12 @@ export function openActionMenu(anchor: HTMLElement, actions: readonly Conversati
   const update = (actions: readonly ConversationAction[]): void => {
     if (closed) return
     const held = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('[data-action-index]')
-    const was = held && menu.contains(held) ? current[Number(held.dataset.actionIndex)]?.label : undefined
+    const index = held && menu.contains(held) ? Number(held.dataset.actionIndex) : -1, was = current[index]?.label
     fill(actions)
-    const at = was === undefined ? -1 : actions.findIndex(action => action.label === was)
-    if (at >= 0) menu.querySelector<HTMLElement>(`[data-action-index="${at}"]`)?.focus({ preventScroll: true })
+    if (index < 0) return
+    // The focused item keeps the focus; gone, its place does.
+    const at = actions.findIndex(action => action.label === was)
+    menu.querySelector<HTMLElement>(`[data-action-index="${at >= 0 ? at : Math.max(0, Math.min(index, actions.length - 1))}"]`)?.focus({ preventScroll: true })
   }
   return { close, update }
 }

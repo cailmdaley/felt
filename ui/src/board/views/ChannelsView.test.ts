@@ -713,3 +713,15 @@ it('writes a clear\'s records a few at a time, offers its undo at once, and an u
   expect(named('unline:')).toStrictEqual(named('line:'))
   expect(item(host, 'tsz').querySelectorAll('.uf-card')).toHaveLength(7)
 })
+
+it('names in its ✓ a send brought back on another device, though the item draws the same', async () => {
+  const older = { ...SENT[1], timestamp: Date.now() - 14.5 * minute }, id = `file:local:${older.fullPath}:${older.timestamp}`
+  const kept = { dismissed: [`line:${Date.now() - 5 * minute}:${id}`] }
+  const { posts } = daemon([], undefined, {}, kept)
+  const { view, ctx } = await mount(undefined, undefined, [older, ...SENT])
+  kept.dismissed.push(`unline:${Date.now() - minute}:${id}`)
+  view.refresh(ctx); await settle(); await settle()
+  item(document.body, 'tsz').querySelector<HTMLButtonElement>('.kbn-ch-clear')!.click()
+  await settle(); await settle()
+  expect(posts.map(([, body]) => String(body.key).replace(/^line:\d+:/, ''))).toContain(id)
+})

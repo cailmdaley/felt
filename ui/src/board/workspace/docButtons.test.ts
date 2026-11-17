@@ -18,7 +18,12 @@ it('keeps its count\'s button when the tapestry lands while the list hangs from 
   expect(count.textContent).toBe('2')
   count.click(); await settle()
   expect(count.getAttribute('aria-expanded')).toBe('true')
+  // The keys rest on the tapestry's row, which leaves the list when the tapestry lands.
+  document.querySelectorAll<HTMLElement>('.kbn-conversation-menu [data-action-index]')[1].focus()
+  const focused = (): string | null | undefined => document.activeElement?.querySelector('.uf-file-row')?.getAttribute('data-key')
+  expect(focused()).toBe('host:/w/tapestry.html')
   land(file('tapestry.html', 1)); await settle()
+  expect(focused()).toBe('host:/w/plot.png')
   // The tapestry stands on its own; the count is the same button, counting what is left.
   expect([pages.el.querySelector('[data-part="sends"]'), count.isConnected, count.textContent, rows()]).toStrictEqual([count, true, '1', ['host:/w/plot.png']])
   sent = [file('fit.png', 3), ...sent]

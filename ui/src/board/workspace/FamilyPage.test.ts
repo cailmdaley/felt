@@ -158,6 +158,19 @@ describe('a constitution\'s view', () => {
     expect(feeds.open).toHaveBeenCalledExactlyOnceWith(mid, 'fiber:local:hub/mid')
   })
 
+  it('keeps its sent-files list current while it is open: a send that arrives takes its row', async () => {
+    let files = sent
+    const { page } = made(mid, { files: c => c.id === 'hub/mid' ? files : [] })
+    await settle()
+    page.el.querySelector<HTMLButtonElement>('.ov-head [data-part="sends"]')!.click()
+    await settle()
+    const rows = (): string[] => [...document.querySelectorAll<HTMLElement>('.kbn-conversation-menu .uf-file-row')].map(row => row.dataset.key!)
+    expect(rows()).toStrictEqual(sent.map(each => each.key))
+    files = [file('fit.png', 0.5), ...sent]
+    page.update(mid, new ThreadIndex(cards), now)
+    expect(rows()).toStrictEqual(files.map(each => each.key))
+  })
+
   it('counts the file its strip shows as seen, and only while it is new', async () => {
     const fresh = { ...sent[0], unread: true }
     const { feeds } = made(root, { lead: async () => undefined, files: c => c.id === 'hub' ? [fresh, sent[1]] : [] })
