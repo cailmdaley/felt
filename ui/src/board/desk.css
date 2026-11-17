@@ -25,13 +25,8 @@
 .kbn-family[data-attention='quiet'] .kbn-family-meta { font-family: var(--font-serif); font-style: italic; }
 /* Every member that waits, one line each: its slug, then what it wants. */
 .kbn-family-waits { display: flex; flex-direction: column; margin-left: 20px; }
-.kbn-family-wait { display: flex; align-items: baseline; gap: 0; min-height: var(--kbn-desk-row); padding: 0 2px; border-radius: 2px; }
-.kbn-family-wait:hover .kbn-family-wait-slug { color: var(--kbn-ink); }
-.kbn-family-wait-slug { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--kbn-owed-deep, var(--kbn-ink)); }
-.kbn-family-wait-slug::after { content: ' — '; color: var(--kbn-ink-muted); white-space: pre; }
-.kbn-family-want { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--type-note)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink); }
-.kbn-family-want * { display: inline; margin: 0; padding: 0; font-size: inherit; line-height: inherit; }
-.kbn-family-want :is(p, li) + :is(p, li)::before { content: ' '; }
+.kbn-family-wait { min-height: var(--kbn-desk-row); padding: 0 2px; border-radius: 2px; cursor: pointer; }
+.kbn-family-wait:hover { background: color-mix(in srgb, var(--kbn-ink) 5%, transparent); }
 .kbn-family-wait > .kbn-ch-clear { flex: none; align-self: center; margin-left: 6px; }
 .kbn-family.kbn-key-selected, .kbn-family-wait.kbn-key-selected {
   background: var(--kbn-paper-bright);

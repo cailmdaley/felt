@@ -103,7 +103,7 @@ export function registerMapViewJourneys(test) {
     // Stacked: the head, the threads, then the preview, at every width.
     const [head, threads, preview] = await Promise.all(['.ov-head', '.ov-threads', '.ov-unfold'].map(part => view(page).locator(part).boundingBox()))
     assert.ok(head.y < threads.y && threads.y + threads.height <= preview.y, 'head, then threads, then the preview')
-    assert.equal(await view(page).locator('.ov-up .ov-ancestor .ov-slug').allTextContents().then(names => names.join(' ')), 'hub')
+    assert.equal(await view(page).locator('.ov-up .ov-ancestor .thread-row-slug').allTextContents().then(names => names.join(' ')), 'hub')
     const card = view(page).locator('.uf-card')
     await card.locator('.ws-thumbnail').waitFor()
     assert.equal(await card.count(), 1, 'the other sent files wait behind the files button')

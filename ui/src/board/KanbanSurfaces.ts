@@ -7,8 +7,8 @@ import { activeFolioIndex, folioScrollTarget } from './deskMobile.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { isMobileViewport } from './mobile.js'
 import { stateDot } from './stateDot.js'
-import { renderMarkdown } from './utils.js'
-import { rowLabel, slug } from './threadOutline.js'
+import { threadRow } from './elements/threadRow.js'
+import { rowLabel } from './threadOutline.js'
 import { responseThreadIndex, ThreadIndex } from './threads.js'
 import './desk.css'
 
@@ -132,7 +132,7 @@ export class KanbanSurfaceRenderer {
   /**
    * One family: its top-level's dot and slug, with how many of its members
    * work, or a quiet one's faint word; then every member that waits on the
-   * human, one line each (`slug — what it wants`), a post's ✓ beside it.
+   * human as a thread row, a post's ✓ beside it.
    * A line opens that member's view; anywhere else on the card opens the
    * top-level's.
    */
@@ -175,24 +175,16 @@ export class KanbanSurfaceRenderer {
     return card
   }
 
-  /** A member that waits: `slug — what it wants` (the top-level's own want, without its slug), and a post's ✓. */
+  /** A member that waits, as a thread row (elements/threadRow.ts: dot, slug, office, what it wants, since when), and a post's ✓. */
   private line({ card, want }: FamilyWait, own: boolean): HTMLElement {
-    const line = document.createElement('div')
-    line.className = 'kbn-family-wait'
+    const line = threadRow(card, { waits: this.o.waits(), now: Date.now() })
+    line.classList.add('kbn-family-wait')
     line.dataset.kind = want.kind
     line.dataset.deskLine = ''
     identify(line, card)
     // The top-level's own line leaves its undo window to the head above it.
     if (!own) markVerdictHost(line, card)
-    const who = document.createElement('span')
-    who.className = 'kbn-family-wait-slug'
-    who.textContent = slug(card)
-    // Its words as written, on one line.
-    const what = document.createElement('span')
-    what.className = 'kbn-family-want'
-    what.innerHTML = renderMarkdown(want.text)
-    line.title = `${card.name} — ${what.textContent?.replace(/\s+/g, ' ').trim()}`
-    line.append(...own ? [] : [who], what)
+    line.title = `${card.name} — ${line.querySelector('.thread-row-doing')?.textContent ?? ''}`
     if (clearable(want)) {
       const clear = document.createElement('button')
       clear.type = 'button'

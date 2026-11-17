@@ -30,7 +30,7 @@ describe('the Desk reads at the board label size', () => {
   })
 
   it('gives what a waiting member wants one line, cut short by an ellipsis', () => {
-    const want = rule(desk, '.kbn-family-want')
+    const want = rule(sheet('elements/threadRow.css'), '.thread-row-doing')
     expect([want['white-space'], want['text-overflow']]).toEqual(['nowrap', 'ellipsis'])
   })
 })

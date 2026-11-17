@@ -701,7 +701,9 @@ export class ChannelsView implements TemporalView {
     row.dataset.slug = slug(station.card)
     row.dataset.what = station.what === 'end' ? `end:${station.end ?? 'closed'}` : station.what
     if (station.what === 'start') {
-      const who = button('kbn-ch-slug', slug(station.card), () => this.openLine(station.card, `station:${station.id}`))
+      // The thread as a chip (its slug and office); the ring in the margin is its dot.
+      const who = button('kbn-ch-slug', '', () => this.openLine(station.card, `station:${station.id}`))
+      who.append(threadRow(station.card, { waits: this.ctx!.workspace!.board.waiting, now, density: 'chip', hue: hue(station.card) }))
       who.dataset.item = `station:${station.id}`
       const what = { start: 'started', tick: 'handed off', end: station.end ?? 'closed' }[station.what]
       who.title = `${station.card.name} — ${what} ${ago(station.at, now)}`

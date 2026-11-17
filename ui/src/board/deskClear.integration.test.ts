@@ -54,7 +54,7 @@ it('clears a post three levels down from its family card, and does nothing else:
   inside.readBoard(inside.lastResponse!)
   await settle(); await settle(); await settle()
   const line = document.querySelector<HTMLElement>('[data-column="waiting"] .kbn-family-wait[data-card-uid="deep-uid"]')!
-  expect(line.querySelector('.kbn-family-want')!.textContent!.trim()).toBe('The cut is in.')
+  expect(line.querySelector('.thread-row-doing')!.textContent!.trim()).toBe('The cut is in.')
   const from = vi.mocked(fetch).mock.calls.length
   line.querySelector<HTMLButtonElement>('.kbn-ch-clear')!.click()
   await settle(); await settle()

@@ -53,6 +53,7 @@ const styleExceptions = [
   { path: 'views/ChronicleView.css', reason: 'Chronicle is a separate temporal view, outside the Desk design.' },
   { path: 'FileViewerPanel.css', reason: 'Document and media viewers belong to the reader, not Desk cards.' },
   { path: 'prose.css', reason: 'Rendered document prose and wikilinks belong to the reader, not Desk cards.' },
+  { path: 'elements/filePreview.css', reason: 'A file preview is the reader\'s file, folded; its ring on hover is the reader\'s, not a Desk card\'s.' },
 ] as const
 const tintProperties = new Set(['color', 'background', 'background-color', 'border-color', 'border-top-color', 'border-bottom-color', 'border-left-color', 'border-right-color', 'outline-color', 'text-decoration-color', 'fill', 'stroke', '--kbn-row-ground'])
 

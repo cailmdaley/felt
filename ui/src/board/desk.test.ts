@@ -17,17 +17,17 @@ function draw(waits: Map<string, Wait>, clear = vi.fn(), openDetail = vi.fn()) {
   const desk = new KanbanSurfaceRenderer({ waits: () => waits, openDetail, clear }).renderDesk(deskOrder(index, waits), index)
   document.body.append(desk)
   const lines = [...desk.querySelectorAll<HTMLElement>('.kbn-family-wait')]
-  return { desk, lines, clear, openDetail, said: lines.map(line => [line.querySelector('.kbn-family-wait-slug')?.textContent ?? null, line.querySelector('.kbn-family-want')!.textContent!.trim(), !!line.querySelector('.kbn-ch-clear')]) }
+  return { desk, lines, clear, openDetail, said: lines.map(line => [line.querySelector('.thread-row-slug')?.textContent ?? null, line.querySelector('.thread-row-doing')!.textContent!.trim(), !!line.querySelector('.kbn-ch-clear')]) }
 }
 
 it('draws a waiting post three levels down on its family\'s one card, its ✓ writing the clear and opening nothing', () => {
   const { lines, said, clear, openDetail } = draw(new Map([['hub/a/b/c', { id: 'p', at: Date.parse('2026-11-16T10:00:00Z'), kind: 'post', text: 'The cut is in.' }]]))
-  // The newest wait first; the top-level's own want stands without its slug.
-  expect(said).toStrictEqual([['c', 'The cut is in.', true], [null, 'Ship it?', false]])
+  // The newest wait first, each a thread row naming its thread.
+  expect(said).toStrictEqual([['c', 'The cut is in.', true], ['hub', 'Ship it?', false]])
   lines[0].querySelector<HTMLButtonElement>('.kbn-ch-clear')!.click()
   expect(clear).toHaveBeenCalledExactlyOnceWith(cards[3])
   expect(openDetail).not.toHaveBeenCalled()
-  lines[0].querySelector<HTMLElement>('.kbn-family-want')!.click()
+  lines[0].querySelector<HTMLElement>('.thread-row-doing')!.click()
   expect(openDetail).toHaveBeenLastCalledWith(cards[3])
 })
 

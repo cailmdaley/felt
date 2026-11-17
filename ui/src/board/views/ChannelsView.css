@@ -175,11 +175,9 @@
 .kbn-ch-st-start { display: flex; align-items: center; height: 22px; }
 .kbn-ch-st-tick { height: 16px; }
 .kbn-ch-st-end { height: 18px; }
-.kbn-ch-slug {
-  padding: 0; border: 0; background: none; cursor: pointer;
-  font: var(--type-label)/var(--leading-ui) var(--font-mono); color: var(--line);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
-}
+.kbn-ch-slug { padding: 0; border: 0; background: none; cursor: pointer; text-align: left; max-width: 100%; min-width: 0; }
+.kbn-ch-slug > .thread-row > .constitution-state-dot { display: none; }
+.kbn-ch-slug .thread-row-slug { font-size: var(--type-label); }
 /* The bundle's count: how many running lines it carries at the top of what is in sight, ringed on it. */
 .kbn-ch-count { position: sticky; top: -12px; z-index: 2; height: 0; flex: none; list-style: none; }
 .kbn-ch-count-ring {

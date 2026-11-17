@@ -845,7 +845,7 @@ describe('workspace reader integration', () => {
     workspace.open(feed[1], 'Desk'); await settle()
     expect(selected()).toBe('family:host-a:hub-leaf')
     expect(document.querySelector('.ws-selected .ov-name')?.textContent).toBe('leaf')
-    expect([...document.querySelectorAll('.ws-selected .ov-up .ov-slug')].map(el => el.textContent)).toStrictEqual(['hub'])
+    expect([...document.querySelectorAll('.ws-selected .ov-up .thread-row-slug')].map(el => el.textContent)).toStrictEqual(['hub'])
     workspace.open(feed[2], 'Desk'); await settle()
     expect(selected()).toBe('family:host-a:lone')
     expect(workspace.familyDocument(card({ id: 'note', originId: 'host-a' }))).toBeUndefined()

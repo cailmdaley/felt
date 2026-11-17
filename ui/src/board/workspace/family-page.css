@@ -10,10 +10,9 @@
 .ov-ancestor {
   --ov-step: 14px; position: relative; display: flex; align-items: center; gap: 6px; min-width: 0; cursor: pointer; outline: none;
   padding: 0 var(--ov-gutter) 0 calc(var(--ov-gutter) - 6px + var(--ov-depth) * var(--ov-step));
-  font: var(--type-meta)/var(--leading-ui) var(--font-mono); color: var(--ws-ink-soft); white-space: nowrap;
 }
 .ov-ancestor:is(:hover, :focus-visible) { background: var(--ws-hover); }
-.ov-ancestor:is(:hover, :focus-visible) .ov-slug { color: var(--ws-ink); text-decoration: underline; text-underline-offset: 3px; }
+.ov-ancestor:is(:hover, :focus-visible) .thread-row-slug { text-decoration: underline; text-underline-offset: 3px; }
 /* Its rule: from its dot's centre down to the foot of the stack, under the dot; the deepest strip draws none. */
 .ov-rule {
   --ov-rule: var(--ws-hairline); position: absolute; z-index: 0; top: 50%; width: 2px; pointer-events: none;
@@ -23,9 +22,7 @@
 .ov-rule[data-attention='waiting'] { --ov-rule: var(--kbn-owed-bright); }
 .ov-rule[data-attention='working'] { --ov-rule: var(--kbn-agent); }
 .ov-ancestor:last-child .ov-rule { display: none; }
-.ov-ancestor .constitution-state-dot { position: relative; z-index: 1; height: 22px; }
-.ov-ancestor .ov-slug { flex: none; color: var(--ws-ink-soft); }
-.ov-strip-said { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ws-ink-soft); font: var(--type-meta)/var(--leading-ui) var(--font-serif); }
+.ov-ancestor .constitution-state-dot { position: relative; z-index: 1; width: 20px; height: 22px; }
 .ov-title { grid-area: path; display: flex; align-items: center; min-width: 0; font: var(--type-label)/var(--leading-tight) var(--font-mono); }
 .ov-title .constitution-state-dot { flex: none; width: 16px; height: 20px; }
 .ov-main { box-sizing: border-box; padding-bottom: 24px; }
@@ -69,20 +66,18 @@
 .ov-said-text * { display: inline; margin: 0; padding: 0; }
 .ov-said-text :is(p, li) + :is(p, li)::before { content: ' '; }
 
-/* Its threads, a compact block of rows sized to what they hold. */
-.ov-threads {
-  list-style: none; margin: 0; padding: 4px 0; border-top: 1px solid var(--ws-hairline-soft);
-  display: grid; grid-template-columns: calc(var(--ov-gutter) - 10px) 20px repeat(3, max-content) 12px; column-gap: 10px; align-content: start;
-}
-.ov-threads > li, .ov-thread { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; }
+/* Its threads, one thread row each, a thread waiting deep below indented under it; the hover reaches the page's edges. */
+.ov-threads { list-style: none; margin: 0; padding: 4px 0; border-top: 1px solid var(--ws-hairline-soft); }
+.ov-thread { padding: 2px var(--ov-gutter) 2px calc(var(--ov-gutter) - 6px); cursor: pointer; outline: none; }
+.ov-thread:is(:hover, :focus-visible) { background: var(--ws-hover); }
+.ov-thread > .constitution-state-dot { width: 20px; }
+.ov-deep { padding-left: calc(var(--ov-gutter) + 18px); }
 /* The resting and archived threads' one control, quiet under the rows. */
 .ov-more > .ov-quiet {
-  grid-column: 2 / -1; justify-self: start; margin: 2px 0 0; padding: 1px 4px; border: 0; border-radius: 3px; background: none; cursor: pointer;
+  margin: 2px 0 0 calc(var(--ov-gutter) - 6px); padding: 1px 4px; border: 0; border-radius: 3px; background: none; cursor: pointer;
   font: var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--ws-ink-muted);
 }
 .ov-more > .ov-quiet:is(:hover, :focus-visible) { color: var(--ws-ink); background: var(--ws-hover); outline: none; }
-/* The gutter is the row's first cell, so its hover reaches the page's edge. */
-.ov-thread::before { content: ''; }
 /* Then its tapestry at the view's full width, unfolding in place. */
 .ov-unfold { margin: 8px var(--ov-gutter) 0; }
 
@@ -93,12 +88,6 @@
   .ov-tools { flex-wrap: wrap; gap: 6px; }
   .ov-tools .ws-verb-word { display: none; }
   .ov-ancestor { --ov-step: 10px; }
-  .ov-threads { display: block; }
-  .ov-threads > li { display: block; }
-  .ov-want { max-width: 100%; }
-  .ov-thread { position: relative; display: flex; flex-wrap: wrap; column-gap: 10px; padding: 3px var(--ov-gutter) 3px calc(var(--ov-gutter) + 30px); }
-  /* The dot stands in the gutter, so a wrapped line starts under the slug. */
-  .ov-thread .constitution-state-dot { position: absolute; left: var(--ov-gutter); top: 3px; }
-  .ov-thread::before { content: none; }
-  .ov-thread .ov-open { margin-left: auto; }
 }
+/* The head's faint word, when the constitution is quiet. */
+.ov-word { color: var(--fm-text, var(--ws-ink-muted)); font-family: var(--font-serif); white-space: nowrap; }

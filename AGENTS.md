@@ -49,6 +49,7 @@ lives in the docs site (`docs/`, published to
 | Inbox entries, delivery wishes, `Enqueue` and its dedup, `shuttle inbox put\|pending\|ls` | [`docs/dev/inbox.md`](docs/dev/inbox.md) |
 | Plugin integration, `scripts/release.sh`, release candidates | [`docs/dev/releasing.md`](docs/dev/releasing.md) |
 | Codebase layout, test suites | [`docs/dev/layout.md`](docs/dev/layout.md) |
+| The board's elements (thread row, post, file preview), their proportions and design thinking | [`docs/dev/elements.md`](docs/dev/elements.md) |
 | UI SDK elements, imperative menus, styling and testing | [`docs/dev/ui-sdk.md`](docs/dev/ui-sdk.md) |
 | Writing a test: where it goes, tiers, fixtures, properties | [`docs/dev/testing.md`](docs/dev/testing.md) |
 | Installing a daemon, keep-alive, Rex, Remote Control | [`docs/shuttle/installation.md`](docs/shuttle/installation.md) |

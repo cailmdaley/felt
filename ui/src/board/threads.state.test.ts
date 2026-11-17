@@ -44,11 +44,11 @@ describe('every thread surface names a thread the way the Desk files it', () => 
       expect(constitutionMentions([c], new Map())[0].state).toBe(label)
     }
   })
-  it('the constitution\'s view gives a quiet thread its faint word, and an idle worker that asked nothing none', () => {
+  it('the constitution\'s view gives a quiet thread its faint word, else its turn\'s word, as every thread row does', () => {
     const index = new ThreadIndex([hub, ...expected.map(([c]) => c)])
     const page = new FamilyPage({ marks: () => undefined, reach: () => 14 * 86_400_000, files: () => [], refresh: () => {}, lead: async () => undefined, said: () => undefined, open: () => {}, view: () => {}, seen: () => {}, waits: () => new Map(), shuttleBase: '' }, () => {}); page.update(hub, index)
-    const words = Object.fromEntries([...page.el.querySelectorAll<HTMLElement>('.ov-thread')].map(row => [row.dataset.fiber, row.querySelector('.ov-word')?.textContent]))
-    expect(words).toEqual({ [spawned.id]: '', [standing.id]: '↻', [seat.id]: 'seat', [asking.id]: '' })
+    const words = Object.fromEntries([...page.el.querySelectorAll<HTMLElement>('.ov-thread')].map(row => [row.dataset.fiber, row.querySelector('.thread-row-doing')?.textContent]))
+    expect(words).toEqual({ [spawned.id]: 'no worker', [standing.id]: '↻', [seat.id]: 'seat', [asking.id]: 'idle' })
   })
 })
 

@@ -58,7 +58,7 @@ export function registerNavigationJourneys(test) {
     await page.goto(url + '#/desk')
     // A thread under its family's root opens its own view, whose way back is the Desk.
     // The thread asks, so its family's Desk card carries it as a waiting line.
-    const name = page.locator('.kbn-desk .kbn-family-wait[data-fiber-id="research/workspace/calibration-report/analysis/checks/question"]').locator('.kbn-family-want')
+    const name = page.locator('.kbn-desk .kbn-family-wait[data-fiber-id="research/workspace/calibration-report/analysis/checks/question"]').locator('.thread-row-doing')
     const questionSlug = 'question'
     const land = async () => {
       const nameBox = await name.boundingBox()
@@ -84,7 +84,7 @@ export function registerNavigationJourneys(test) {
     await land()
     // The family's root's view, from its head above; then another of its threads, one level down.
     const parent = selected(page).locator('.ov-ancestor').first()
-    const parentName = await parent.getAttribute('title'), parentSlug = await parent.locator('.ov-slug').textContent()
+    const parentName = await parent.getAttribute('title'), parentSlug = await parent.locator('.thread-row-slug').textContent()
     await parent.click()
     await named(page, parentName)
     // The way back names a fiber by its slug.

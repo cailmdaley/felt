@@ -64,7 +64,7 @@ it.each([false, true])('the state dot opens the top-level once on phone=%s, and 
   const open = vi.spyOn(inside, 'openDocumentChannel').mockImplementation(() => {})
   family().querySelector<HTMLButtonElement>('.kbn-family-head .constitution-state-dot')!.click()
   expect(open).toHaveBeenCalledExactlyOnceWith(head)
-  family().querySelector<HTMLElement>('.kbn-family-want')!.click()
+  family().querySelector<HTMLElement>('.thread-row-doing')!.click()
   expect(open).toHaveBeenLastCalledWith(ask)
   family().querySelector<HTMLElement>('.kbn-family-name')!.click()
   expect(open).toHaveBeenLastCalledWith(head)

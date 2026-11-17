@@ -32,7 +32,8 @@
 /* Grouped, the head steps aside: who and what stay for assistive technology, the age shows on hover, the clear stays. */
 .kbn-ch-item[data-grouped] .kbn-ch-item-head { position: absolute; top: 2px; right: 20px; z-index: 1; }
 .kbn-ch-item[data-grouped] :is(.kbn-ch-who, .kbn-ch-role) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-.kbn-ch-item[data-grouped]:not(:hover, :focus-within) .kbn-ch-age { visibility: hidden; }
+.kbn-ch-item[data-grouped] .kbn-ch-age { color: transparent; }
+.kbn-ch-item[data-grouped]:is(:hover, :focus-within) .kbn-ch-age { color: var(--kbn-ink-muted); }
 /* A waiting post's clear: a small check at the head's end, the post's one act. */
 .kbn-ch-clear {
   margin-left: auto; padding: 0 6px; border: 1px solid var(--kbn-rule-strong); border-radius: 3px; background: transparent;

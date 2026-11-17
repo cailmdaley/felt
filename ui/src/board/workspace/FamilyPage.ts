@@ -12,7 +12,7 @@ import type { ThreadIndex } from '../threads.js'
 import type { FiberActs } from './Dock.js'
 import { docButtons, type DocFeeds } from './docButtons.js'
 import { Unfold } from '../elements/filePreview.js'
-import { ovThreadRow as threadRow, runTime as time } from '../elements/threadRow.js'
+import { runTime as time, threadRow } from '../elements/threadRow.js'
 import './family-page.css'
 
 /** What the view reads, and where it goes. */
@@ -42,14 +42,13 @@ const tuckable = (card: KanbanCard): boolean => card.column === 'tempered' || ca
  * One view of a constitution, the same from the Desk, a channel, a role or a
  * thread, stacked at every width. Above it, pinned, its orchestrators as one
  * strip each, the family's top-level first, each indented to its depth with a
- * rule per level in that level's state colour, its dot, slug, run at a glance
- * and the last thing it posted (choosing one opens its view; pulling the page
+ * rule per level in that level's state colour, and its thread row (choosing
+ * one opens its view; pulling the page
  * down past its top opens the nearest one's, moving neither Rex nor voice).
  * Then its head: its dot and slug, what it wants of the human or its faint
  * word, its run at a glance, its pages and its acts; the last thing it posted;
- * its sub-threads as a compact block of rows (dot, slug, its run at a glance,
- * then what it wants when it waits on the human or its faint word when quiet,
- * and a chevron: each opens the same view one level down), what waits first,
+ * its sub-threads as thread rows (each opens the same view one level down),
+ * what waits first,
  * each followed by every thread below it that waits on the human, and the
  * resting and archived ones behind one quiet control; then its tapestry, or
  * else its newest sent file, at the view's full width as a preview that
@@ -201,43 +200,34 @@ export class FamilyPage {
     more.append(this.quiet)
     this.threads.replaceChildren(...drawn.map(({ child, below }) => {
       const item = el('li')
-      const open = (card: KanbanCard): void => this.feeds.view(card)
-      item.append(threadRow(child, { waits, now, open }), ...below.map(deep => threadRow(deep, { waits, now, open, deep: true })))
+      item.append(this.opener(child, 'ov-thread', now, waits), ...below.map(deep => this.opener(deep, 'ov-thread ov-deep', now, waits)))
       return item
     }), ...tucked.length ? [more] : [])
     this.threads.hidden = !threads.length
     if (quietHeld && this.quiet.isConnected) this.quiet.focus({ preventScroll: true })
     if (held) [...this.el.querySelectorAll<HTMLElement>('.ov-ancestor, .ov-thread')].find(row => `${row.className}:${row.dataset.fiber}` === held)?.focus({ preventScroll: true })
   }
-  /** A row that opens a constitution's view, as a click on it does. */
-  private opener(card: KanbanCard, className: string): HTMLElement {
-    const row = el('div', className)
+  /** A thread row (elements/threadRow.ts) the view's keys move among, which opens that constitution's view. */
+  private opener(card: KanbanCard, className: string, now: number, waits: Waits): HTMLElement {
+    const row = threadRow(card, { waits, now, said: this.feeds.said(card), open: each => this.feeds.view(each) })
+    row.classList.add(...className.split(' '))
     row.tabIndex = 0
     row.setAttribute('role', 'treeitem')
-    row.dataset.fiber = card.uid ?? card.id
-    row.title = card.name
-    row.addEventListener('click', () => this.feeds.view(card))
     return row
   }
   /**
    * An orchestrator above, one strip of the pinned stack, indented to its
-   * depth: its dot, slug, run at a glance and the last thing it posted, on one
-   * line, and its rule in its state colour from its dot down through the
-   * strips below it, so each level's rule passes every deeper strip.
+   * depth: its thread row, and its rule in its state colour from its dot down
+   * through the strips below it, so each level's rule passes every deeper strip.
    */
   private ancestor(card: KanbanCard, depth: number, above: readonly KanbanCard[], now: number): HTMLElement {
-    const strip = this.opener(card, 'ov-ancestor'), waits = this.feeds.waits()
+    const waits = this.feeds.waits(), strip = this.opener(card, 'ov-ancestor', now, waits)
     strip.style.setProperty('--ov-depth', String(depth))
     strip.style.setProperty('--ov-below', String(above.length - 1 - depth))
     const rule = el('span', 'ov-rule')
     rule.setAttribute('aria-hidden', 'true')
     rule.dataset.attention = attentionOf(card, waits)
-    // Its words as plain text: a link here would both follow and open the view.
-    const said = this.feeds.said(card), words = el('div')
-    if (said) words.innerHTML = renderMarkdown(said.text)
-    const text = el('span', 'ov-strip-said', words.textContent?.replace(/\s+/g, ' ').trim() ?? '')
-    text.title = text.textContent ?? ''
-    strip.append(rule, stateDot(card, waits, () => this.feeds.view(card)), el('span', 'ov-slug', slug(card)), time(card, now), text)
+    strip.prepend(rule)
     return strip
   }
   private paintHead(card: KanbanCard, now: number): void {

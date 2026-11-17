@@ -21,8 +21,8 @@ it('scopes every shared state style under the family map root', () => {
   expect(rules.filter(rule => !/^\.family-map/.test(rule))).toEqual([])
 })
 it('truncates no name by style', () => {
-  const css = readFileSync(PAGE, 'utf8')
-  for (const name of ['ov-name', 'ov-slug']) {
+  const css = readFileSync(PAGE, 'utf8') + readFileSync(resolve('src/board/elements/threadRow.css'), 'utf8')
+  for (const name of ['ov-name', 'thread-row-slug']) {
     const rule = css.split('\n').find(line => line.startsWith(`.${name} {`))!
     expect(rule, name).toBeDefined()
     expect(rule, name).not.toMatch(/ellipsis|line-clamp|nowrap/)
