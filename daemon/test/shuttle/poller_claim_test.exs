@@ -98,7 +98,7 @@ defmodule Shuttle.PollerClaimTest do
     assert {:error, {:launch_reserved, _}} = Poller.dispatch_fiber(poller, id, [])
     assert_receive :held_launch_probe
     assert [%{attempts: 2, reason: message}] = Poller.snapshot(poller).blocked
-    assert message =~ ~r/\(\d+s old\)/
+    assert message =~ ~r/\(since \S+\)/
     assert message =~ "duplicate"
     state = :sys.get_state(poller, @state_timeout)
     assert state.dispatch_failures[key].first_attempted_at == first.first_attempted_at

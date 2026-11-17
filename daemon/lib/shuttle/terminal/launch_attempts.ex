@@ -218,11 +218,13 @@ defmodule Shuttle.Terminal.LaunchAttempts do
   # An operator accepts possible duplication. The original script must survive.
   def release(name), do: locked(name, fn -> remove(path(name)) end)
 
+  # The message names when the reservation was recorded, never its age, so the
+  # feeds that serve it keep their validators while the reservation stands.
   def message(info) do
-    age =
-      case age(info) do
-        nil -> "age unknown"
-        seconds -> "#{seconds}s old"
+    since =
+      case info do
+        %{"recorded_at" => stamp} when is_binary(stamp) -> "since #{stamp}"
+        _ -> "since an unknown time"
       end
 
     id = Shuttle.ULID.from_tmux(info["worker"]) || info["worker"]
@@ -233,7 +235,7 @@ defmodule Shuttle.Terminal.LaunchAttempts do
           "The attempt's dispatch record is unresolved; the work may already have run and exited.",
         else: info["reason"]
 
-    "Launch reserved for #{info["worker"]} (#{age}): #{reason} " <>
+    "Launch reserved for #{info["worker"]} (#{since}): #{reason} " <>
       "No running worker is confirmed. Releasing may repeat work or create a duplicate worker. " <>
       "To accept that risk, run shuttle dispatch '#{id}' --release-launch-reservation on the owning host."
   end
