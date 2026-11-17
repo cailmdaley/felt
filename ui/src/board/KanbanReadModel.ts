@@ -357,7 +357,7 @@ function toCard(
   const tmuxSession = runtime?.tmuxSession;
   // A blocked worker's phase is its block; otherwise the activity category.
   const runtimePhase = runtime?.state === 'blocked' ? 'blocked' : runtime?.phase;
-  const lastActivityAt = entry.runtime?.phaseSince;
+  const lastActivityAt = runtime?.phaseSince ?? runtime?.startedAt;
   const held = entry.held === true;
   const heldSince = entry.heldSince;
   // Resting belongs to open fibers: an active or closed one is never stashed,

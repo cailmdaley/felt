@@ -81,7 +81,7 @@ export function attentionOf(card: KanbanCard, waits: Waits): Attention {
 /** Waiting, then working, then quiet. */
 export const ATTENTION_ORDER: readonly Attention[] = ['waiting', 'working', 'quiet']
 
-/** When a card last moved: its worker's latest event or its file's last write. */
+/** When a card last moved: its worker's last turn change or its file's last write. */
 export const lastActive = (card: KanbanCard): number =>
   Math.max(instant(card.lastActivityAt), instant(card.modifiedAt)) || instant(card.closedAt, card.createdAt)
 

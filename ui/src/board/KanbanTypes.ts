@@ -108,9 +108,9 @@ export interface KanbanCard {
   launchError?: string
   /**
    * The instant, epoch ms, the live worker's turn last changed: it began its
-   * turn, ended it, or stopped on a prompt (the feed's `phase_since`). The
-   * turn's age and a working family's place on the Desk read from it. Absent
-   * for worker-less cards and before the worker's first hook event.
+   * turn, ended it, or stopped on a prompt (the feed's `phase_since`), or its
+   * launch before its first hook event. The turn's age and a working family's
+   * place on the Desk read from it. Absent for worker-less cards.
    */
   lastActivityAt?: number
   /** A working worker silent past the owner's floor: the instant of its last

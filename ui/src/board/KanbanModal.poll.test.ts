@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { KanbanModal } from './KanbanModal.js'
+import { civilDayAt, isoDayLocal } from './civilDay.js'
 import { parseCompositeFeed, type CompositeFeed } from './KanbanComposite.js'
 import { buildKanbanResponseFromComposite } from './KanbanReadModel.js'
 import type { KanbanResponse } from './KanbanTypes.js'
@@ -70,15 +71,18 @@ describe('a poll the daemon answers 304', () => {
     expect(board.render).toHaveBeenCalled()
   })
 
-  it('reclassifies once the local civil day has turned, for due-day promotion', async () => {
-    vi.useFakeTimers({ now: NOW, toFake: ['Date'] })
-    const board = polled(NOW - 36 * 3_600_000), before = board.lastResponse
+  it.each([
+    ['an hour either side of local midnight', -3_600_000, 3_600_000, true],
+    ['the same local day, across a UTC midnight in a zone behind it', 15 * 3_600_000, 17 * 3_600_000, false],
+  ])('reclassifies only when the local civil day has turned: %s', async (_case, built, polledAt, turned) => {
+    const midnight = civilDayAt(isoDayLocal(NOW), 0)!
+    vi.useFakeTimers({ now: midnight + polledAt, toFake: ['Date'] })
+    const board = polled(midnight + built), before = board.lastResponse
     const present = vi.spyOn(board, 'presentFeed')
 
     await board.fetchAndRender()
 
-    expect(present).toHaveBeenCalledWith(feed)
-    expect(board.lastResponse).not.toBe(before)
-    expect(board.lastResponse?.generatedAt).toBe(NOW)
+    expect(present).toHaveBeenCalledTimes(turned ? 1 : 0)
+    expect(board.lastResponse === before).toBe(!turned)
   })
 })
