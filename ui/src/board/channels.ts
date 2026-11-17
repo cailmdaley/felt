@@ -56,8 +56,8 @@ export const clearLineKey = (id: string, at: number): string => `line:${at}:${id
 /** The dismissal record that brings a cleared line back: every clear of it up to `at` stops counting. */
 export const unclearLineKey = (id: string, at: number): string => `unline:${at}:${id}`
 
-/** The lines cleared by hand, by item id: each whose newest clear is newer than its newest undo. */
-export function clearedLines(dismissed: readonly string[]): Set<string> {
+/** The lines cleared by hand, by item id, with when: each whose newest clear is newer than its newest undo. */
+export function clearedLines(dismissed: readonly string[]): Map<string, number> {
   const latest = { line: new Map<string, number>(), unline: new Map<string, number>() }
   for (const record of dismissed) {
     const match = /^(line|unline):(\d+):(.+)$/.exec(record)
@@ -65,7 +65,7 @@ export function clearedLines(dismissed: readonly string[]): Set<string> {
     const into = latest[match[1] as 'line' | 'unline']
     into.set(match[3], Math.max(into.get(match[3]) ?? 0, Number(match[2])))
   }
-  return new Set([...latest.line].filter(([id, at]) => at > (latest.unline.get(id) ?? -Infinity)).map(([id]) => id))
+  return new Map([...latest.line].filter(([id, at]) => at > (latest.unline.get(id) ?? -Infinity)))
 }
 
 /** Constitutions a channel speaks for: everything without a verdict. */
@@ -258,8 +258,8 @@ const LINES: Readonly<Record<string, Item['kind']>> = { asked: 'ask', post: 'pos
 /**
  * A channel's stream, oldest first. Its items are the posts, questions and
  * closes addressed to the human (each carrying the files it attached) and the
- * files sent to the human on their own, each path at its newest send and a
- * worker's sends close together one item. A post, question or close waits
+ * files sent to the human on their own, every send a line and a worker's
+ * sends close together one item. A post, question or close waits
  * when the board says it does (`waits`); a member that waits with no such
  * line drawn (an open question, a harness prompt, a turn that could not
  * start, a close for the human's review) is its own waiting item. Every item
@@ -283,8 +283,8 @@ export function composeStream(input: {
   /** What waits on the human ({@link BoardFeed.waiting}). */
   waits: Waits
   launches: (card: KanbanCard) => readonly number[]
-  /** The items the human cleared by hand ({@link clearedLines}), by id: none is drawn. */
-  cleared: ReadonlySet<string>
+  /** The items the human cleared by hand ({@link clearedLines}), by id, with when: none is drawn. */
+  cleared: ReadonlyMap<string, number>
   now: number
   reachMs: number
 }): Entry[] {
@@ -334,19 +334,17 @@ export function composeStream(input: {
     const text = want.kind === 'review' ? card.reviewMark?.note ?? '' : want.text
     say({ kind, id: `${want.kind}:${fiberOf(card)}:${want.at}`, card, at: want.at, arrived: want.at, text, files: [], waiting: true, ...clearable(want) ? { clears: fiberOf(card) } : {} })
   }
-  // Each path at its newest send; a worker's sends this close together are one item.
-  const sends = new Map<string, SentFile>()
-  for (const file of files) {
-    if (file.timestamp < reach || !file.uid || claimed.has(file)) continue
-    const key = `${file.host ?? ''}:${file.fullPath}`
-    if ((sends.get(key)?.timestamp ?? -Infinity) < file.timestamp) sends.set(key, file)
-  }
-  for (const file of [...sends.values()].sort((a, b) => a.timestamp - b.timestamp)) {
+  // Every send is a line; a worker's sends this close together are one item, a path sent twice in it at its newest.
+  // A burst the human cleared holds what it showed: a send after the clear starts its own item.
+  const sends = files.filter(file => file.timestamp >= reach && file.uid && !claimed.has(file)).sort((a, b) => a.timestamp - b.timestamp)
+  for (const file of sends) {
     const card = cardNamed(channel.everyone, file.uid!, file.host ?? '')
     if (!card) continue
-    const burst = items.get(fiberOf(card))?.find(item => item.kind === 'file' && file.timestamp - item.files.at(-1)!.timestamp <= BURST_MS)
-    if (burst) { burst.files.push(file); burst.at = burst.arrived = file.timestamp }
-    else say({ kind: 'file', id: `file:${file.host ?? ''}:${file.fullPath}:${file.timestamp}`, card, at: file.timestamp, arrived: file.timestamp, text: '', files: [file], waiting: false })
+    const burst = items.get(fiberOf(card))?.filter(item => item.kind === 'file' && file.timestamp - item.files.at(-1)!.timestamp <= BURST_MS && !(file.timestamp > (cleared.get(item.id) ?? Infinity))).at(-1)
+    if (burst) {
+      burst.files = [...burst.files.filter(each => each.fullPath !== file.fullPath || each.host !== file.host), file]
+      burst.at = burst.arrived = file.timestamp
+    } else say({ kind: 'file', id: `file:${file.host ?? ''}:${file.fullPath}:${file.timestamp}`, card, at: file.timestamp, arrived: file.timestamp, text: '', files: [file], waiting: false })
   }
   const stream: Entry[] = []
   for (const list of items.values()) {

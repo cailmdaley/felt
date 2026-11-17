@@ -183,13 +183,15 @@ describe('composeStream', () => {
   const launches = new Map([['K', [now - 60 * minute]], ['B', [now - 35 * minute]]])
   const waits = new Map([['V', { id: 'r3m', at: now - 20 * minute }]])
   const stream = (over: Partial<Parameters<typeof composeStream>[0]> = {}): Entry[] =>
-    composeStream({ channel, records, files, waits, launches: card => launches.get(card.uid!) ?? [], cleared: new Set(), now, reachMs, ...over })
+    composeStream({ channel, records, files, waits, launches: card => launches.get(card.uid!) ?? [], cleared: new Map(), now, reachMs, ...over })
   const said = (entries: Entry[]) => entries.map(entry => entry.kind === 'station' ? [entry.card.id, entry.what, ...entry.end ? [entry.end] : []] : [entry.card.id, entry.kind, entry.text, entry.waiting])
 
   it('holds everything addressed to the human, with its threads\' lives as stations between, oldest first', () => {
     expect(said(stream())).toStrictEqual([
       // Sent without a caption, it says nothing: its file names itself.
       ['cmbx', 'file', '', false],
+      // Every send is a line: the deck's first pass, hours before its final one.
+      ['cmbx/kappa', 'file', 'First pass.', false],
       ['cmbx/kappa', 'start'],
       // Closed to its chair, then marked for the human's review: an item with its note, and one end after it.
       ['cmbx/cov', 'close', 'Validated to 4%.', true],
@@ -204,15 +206,27 @@ describe('composeStream', () => {
     ])
     // Each item said within a life is on its line; a thread with no station in reach draws none.
     expect(stream().flatMap(entry => entry.kind === 'station' ? [] : [[entry.card.id, entry.line]])).toStrictEqual([
-      ['cmbx', undefined], ['cmbx/cov', 'V:0'], ['cmbx/kappa', 'K:0'], ['cmbx/kappa', 'K:0'], ['cmbx/mask', undefined],
+      ['cmbx', undefined], ['cmbx/kappa', undefined], ['cmbx/cov', 'V:0'], ['cmbx/kappa', 'K:0'], ['cmbx/kappa', 'K:0'], ['cmbx/mask', undefined],
     ])
     const post = stream().find(entry => entry.kind === 'post')
     expect(post?.kind === 'post' && post.files.map(file => [file.basename, file.caption])).toStrictEqual([['spectrum.svg', '9σ.']])
   })
 
-  it('draws a worker\'s sends together as one item, each path at its newest send', () => {
-    const sent = stream({ records: records.filter(each => each.id !== 'r7') }).find(entry => entry.kind === 'file' && entry.card === kappa)
-    expect(sent?.kind === 'file' && [sent.text, sent.files.map(file => file.basename)]).toStrictEqual(['The final deck. · 9σ.', ['deck.html', 'spectrum.svg']])
+  it('draws every send as a line, a worker\'s sends close together as one item with a path sent twice in it at its newest', () => {
+    const sends = (over: Partial<Parameters<typeof composeStream>[0]> = {}) => stream({ records: records.filter(each => each.id !== 'r7'), ...over }).flatMap(entry => entry.kind === 'file' && entry.card === kappa ? [[entry.text, entry.files.map(file => file.basename)]] : [])
+    expect(sends()).toStrictEqual([['First pass.', ['deck.html']], ['The final deck. · 9σ.', ['deck.html', 'spectrum.svg']]])
+    expect(sends({ files: [...files, send('K', 'deck.html', 31, 'The final deck, fixed.')] })).toStrictEqual([['First pass.', ['deck.html']], ['The final deck, fixed. · 9σ.', ['deck.html', 'spectrum.svg']]])
+  })
+
+  it('hides only what a cleared burst showed: a send after the clear starts its own item', () => {
+    const later = [...files, send('K', 'nulls.md', 28, 'The nulls.')]
+    const burst = stream({ records: records.filter(each => each.id !== 'r7') }).find(entry => entry.kind === 'file' && entry.card === kappa && entry.files.length > 1)!
+    const kept = (clearedAt: number) => stream({ records: records.filter(each => each.id !== 'r7'), files: later, cleared: clearedLines([clearLineKey(burst.id, clearedAt)]) })
+      .flatMap(entry => entry.kind === 'file' && entry.card === kappa ? [entry.files.map(file => file.basename)] : [])
+    // Cleared before the nulls were sent, the burst keeps hidden what it held, and the nulls stand alone.
+    expect(kept(now - 29 * minute)).toStrictEqual([['deck.html'], ['nulls.md']])
+    // Cleared after, they were in what it showed.
+    expect(kept(now - 27 * minute)).toStrictEqual([['deck.html']])
   })
 
   it('keeps out what was not addressed to the human: posts and closes to others, the human\'s lines, workers\' messages to each other', () => {
@@ -235,7 +249,7 @@ describe('composeStream', () => {
     // A post the daemon names waits, and only a post can be cleared by hand (the feed knows its kind once it holds the record).
     const posted = stream({ waits: new Map<string, Wait>([...waits, ['K', { id: 'r7', at: now - 30 * minute, kind: 'post' }]]) })
     expect(posted.flatMap(entry => entry.kind === 'station' ? [] : [[entry.id, entry.waiting, entry.clears]])).toStrictEqual([
-      [expect.any(String), false, undefined], ['r3m', true, undefined], [expect.any(String), false, undefined], ['r7', true, 'K'], [expect.any(String), true, undefined],
+      [expect.any(String), false, undefined], [expect.any(String), false, undefined], ['r3m', true, undefined], [expect.any(String), false, undefined], ['r7', true, 'K'], [expect.any(String), true, undefined],
     ])
     // A line whose record is not read yet waits, and is not offered a clear until it is known to be a post.
     const unread = stream({ records: records.filter(each => each.id !== 'r7'), waits: new Map([...waits, ['K', { id: 'r7', at: now - 30 * minute }]]) })
@@ -307,7 +321,7 @@ describe('a thread\'s lives', () => {
   const channel = named(compose([hub, thread]), 'channel:unions')
   const record = (id: string, kind: string, fiber: string, minutes: number, over: Partial<BoardRecord> = {}): BoardRecord => ({ id, kind, fiber, by: { fiber }, timestamp: now - minutes * minute, ...over })
   const stations = (records: BoardRecord[], launches: Record<string, number[]>) =>
-    composeStream({ channel, records, files: [], waits: new Map(), launches: each => (launches[each.uid!] ?? []).map(minutes => now - minutes * minute), cleared: new Set(), now, reachMs })
+    composeStream({ channel, records, files: [], waits: new Map(), launches: each => (launches[each.uid!] ?? []).map(minutes => now - minutes * minute), cleared: new Map(), now, reachMs })
       .flatMap(entry => entry.kind === 'station' ? [[entry.card.uid, entry.what, entry.line, ...entry.end ? [entry.end] : []]] : [])
 
   it('starts once per run however often its session is resumed, ticks a handoff, and starts again only after it ended', () => {
