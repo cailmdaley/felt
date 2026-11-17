@@ -72,14 +72,18 @@ export function registerMapViewJourneys(test) {
     await head(page, rootName).waitFor()
     await page.waitForTimeout(500)
     assert.deepEqual(await asked(page), pulled)
-    // Back returns to the thread's view.
-    await pageBack(page)
+    // The thread's row again; Rex already stands at its worker.
+    await view(page).locator('.ov-thread[title="Response analysis"]').click()
     await head(page, 'Response analysis').waitFor()
     // A click on an orchestrator's step opens its view too, and moves Rex to its worker.
     await scroller.evaluate(el => { el.scrollTop = 0 })
     await view(page).locator('.ov-ancestor').first().click()
     await head(page, rootName).waitFor()
     await asks(page, pulled.length + 1)
+    // However many views down the reader went, Back is one step to the Desk.
+    await pageBack(page)
+    await page.locator('.ws-reader.ws-dormant').waitFor()
+    assert.equal(await page.locator('.kbn-viewtabs .kbn-viewtab-active').getAttribute('data-view'), 'desk')
   }, { width: 800, height: 1000 })
 
   test('A view without threads: its preview takes the view\'s width', async page => {
