@@ -10,6 +10,7 @@ import { renderMarkdown } from '../utils.js'
 import type { ThreadIndex } from '../threads.js'
 import type { FiberActs } from './Dock.js'
 import { docButtons, type DocFeeds } from './docButtons.js'
+import type { DocKey } from './documents.js'
 import { Unfold } from '../elements/filePreview.js'
 import { doing, threadRow } from '../elements/threadRow.js'
 import { relative, timeEl } from '../elements/time.js'
@@ -145,9 +146,13 @@ export class FamilyPage {
     this.signature = signature
     this.paint(current, now)
   }
-  /** Takes the keys on its head: no row looks chosen, and Enter opens nothing until j or k picks one. */
+  /** Gives the keys to its unfolded file, else to its head: no row looks chosen, and Enter opens nothing until j or k picks one. */
   focus(): void {
-    this.head.focus({ preventScroll: true })
+    if (!this.unfold.focus()) this.head.focus({ preventScroll: true })
+  }
+  /** The reader showed `key` full screen: an unfolded file here steps to it, when it is one of this view's files. */
+  follow(key: DocKey): void {
+    if (this.unfold.unfolded) this.unfold.unfold(key)
   }
   /** `t`: opens the constitution's tapestry, else its newest sent file. */
   openLead(): void {

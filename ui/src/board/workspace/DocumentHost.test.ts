@@ -202,6 +202,19 @@ describe('stable document frames', () => {
     expect(buildProse).toHaveBeenCalledTimes(2)
   })
 
+  it('keeps the open channel\'s view through a long walk of its files, and lets it go with the channel', () => {
+    const map = { ...docs[0], key: 'family:host-a:hub', kind: 'family' as const }, files = docs.slice(1)
+    host.setChannel([map, ...files], map.key)
+    const view = host.get(map.key)!.viewer
+    for (const file of files) host.select(file.key)
+    expect(host.get(map.key)!.viewer).toBe(view)
+    host.select(map.key)
+    expect(host.get(map.key)!.viewer).toBe(view)
+    // Another channel's walk may take it.
+    for (let n = 0; n < 11; n++) host.setChannel([doc(n, 'host-b')], doc(n, 'host-b').key)
+    expect(host.get(map.key)).toBeUndefined()
+  })
+
   it('does not reselect a page that recedes in its own document-link handler', () => {
     const fiber = { ...docs[0], kind: 'fiber' as const }
     host.setChannel([fiber, docs[1]], fiber.key)

@@ -87,6 +87,8 @@ interface ChannelState {
   routedFile?: DocKey
   loaded: boolean
   familyPage?: FamilyPage
+  /** The page the reader showed last in this channel. */
+  shown?: DocKey
   /** The run is final: body and receipts are both in, or the body read failed. The strip waits for it. */
   runFinal: boolean
   metadataKnown: boolean
@@ -814,6 +816,7 @@ export class Workspace {
     state.familyPage?.update(state.card, this.graph())
     const ch = state.channel
     const selected = this.shown(state)
+    this.arrive(state, selected)
     this.refreshProse(state)
     this.history.name(selected)
     this.reader.show(ch, selected, state.card, animate, state.loaded && state.runFinal, state.runFinal)
@@ -831,6 +834,11 @@ export class Workspace {
     const active = document.activeElement
     if (!active || active === document.body || active.matches('.ws-return, .ws-document-back') || active.closest('[inert]')) state.familyPage?.focus()
   }
+  /** The reader shows `key`. Back on the view from a file it opened full screen, the view's unfolded file is the one last read there. */
+  private arrive(state: ChannelState, key: DocKey): void {
+    if (key === this.familyDocument(state.card) && state.shown && state.shown !== key) state.familyPage?.follow(state.shown)
+    state.shown = key
+  }
   private visit(key: DocKey): void {
     if (this.current?.channel.documents.some(doc => doc.key === key)) this.history.show(key)
   }
@@ -839,6 +847,7 @@ export class Workspace {
     if (!state || !state.channel.documents.some(d => d.key === key)) return
     state.selected = key
     state.routedFile = undefined
+    this.arrive(state, key)
     this.reader.select(key)
     this.echo(state, key)
     if (key === this.familyDocument(state.card)) this.focusMap(state)

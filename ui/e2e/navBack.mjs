@@ -210,3 +210,30 @@ export function registerChannelsBackJourneys(test) {
     assert.equal(await several.getAttribute('data-unfolded'), null, 'Escape folds it')
   }, viewport, 'reduce', phone)
 }
+
+/**
+ * A constitution's view: a sent file unfolded there and sent full screen,
+ * stepped through further than the reader keeps pages for, comes back to the
+ * view still unfolded, on the file last read, with its bar and its keys.
+ */
+export function registerViewFullScreenJourneys(test) {
+  test('Full screen from a constitution\'s view: back on the view, the file last read is the one unfolded', async page => {
+    await page.goto(`${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=workspace&manyFiles#/board/01KVBR1F9BWBVKF97473PV67K8@umber-workstation`)
+    const view = await familyTree(page)
+    const unfold = view.locator('.ov-unfold')
+    await unfold.locator('.uf-card').click()
+    await page.keyboard.press('ArrowRight')
+    await unfold.locator('.uf-count', { hasText: '2 / ' }).waitFor()
+    await unfold.locator('.uf-full').click()
+    await page.locator('.ws-page.ws-selected:not([data-key^="family:"])').waitFor()
+    for (let n = 0; n < 12; n++) await page.keyboard.press('ArrowRight')
+    await page.evaluate(() => { document.activeElement?.blur() })
+    await page.keyboard.press('l')
+    await view.locator('.ov-head').waitFor()
+    assert.equal(await unfold.getAttribute('data-unfolded'), '', 'still unfolded')
+    assert.ok(await unfold.locator('.uf-bar').isVisible(), 'its bar stands above it')
+    assert.match(await unfold.locator('.uf-count').textContent(), /^14 \/ /, 'on the file last read full screen')
+    await page.keyboard.press('ArrowRight')
+    await unfold.locator('.uf-count', { hasText: '15 / ' }).waitFor()
+  }, { width: 1440, height: 900 }, 'reduce', false)
+}

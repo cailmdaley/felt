@@ -174,9 +174,15 @@ export class DocumentHost {
     this.enforceBudget(visible)
   }
 
+  /**
+   * Evicts the least recently shown pages until the live ones fit the budget.
+   * The open channel's drawn pages (its prose, its view) are never the victim:
+   * they cost a little DOM, and the view holds what the human left unfolded there.
+   */
   private enforceBudget(visible = this.visibleKeys()): void {
+    const kept = new Set([...visible, ...this.documents.filter(isDrawn).map(doc => doc.key)])
     while ([...this.live.values()].reduce((sum, state) => sum + state.weight, 0) > RETAIN) {
-      const victim = [...this.live.keys()].find(id => !visible.includes(id))
+      const victim = [...this.live.keys()].find(id => !kept.has(id))
       if (victim === undefined) break
       this.evict(this.live.get(victim)!)
       this.live.delete(victim)
