@@ -20,11 +20,22 @@ import (
 // compare the daemon's build level (contract_level in /api/v1/version, the
 // level its Contract module expects) with ShuttleContractLevel.
 
-// daemonBuild is what a daemon's /api/v1/version says it was built as.
+// daemonBuild is what a daemon's /api/v1/version says it was built as, and
+// its receipt of the CLIs it shells.
 type daemonBuild struct {
-	Host    string `json:"host"`
-	Version string `json:"mix_vsn"`
-	Level   int    `json:"contract_level"`
+	Host     string `json:"host"`
+	Version  string `json:"mix_vsn"`
+	Level    int    `json:"contract_level"`
+	Contract *struct {
+		OK     *bool  `json:"ok"`
+		Reason string `json:"reason"`
+	} `json:"contract"`
+}
+
+// skewed reports whether the daemon's own receipt says the CLIs beside it are
+// at another contract level than it was built for.
+func (b daemonBuild) skewed() bool {
+	return b.Contract != nil && b.Contract.OK != nil && !*b.Contract.OK
 }
 
 // matches reports whether the daemon shells this CLI's contract.
@@ -84,9 +95,11 @@ func fetchedRelease(dir string) bool {
 }
 
 // requireDeliveringDaemon refuses a fiber message the daemons on its path
-// would queue and not deliver: the local daemon, which takes the request, and
-// the owner it routes to, which delivers it. A daemon that cannot be
-// reached is left for the request itself to report.
+// would queue and not deliver: the local daemon, which takes the request and
+// must be built for this CLI's contract, and the owner it routes to, which
+// delivers through its own CLIs and is refused only when its receipt says
+// they are skewed. A daemon that cannot be reached, or an owner whose answer
+// carries no receipt, is left for the request itself to report.
 func (a *app) requireDeliveringDaemon(owner string) error {
 	local, err := a.daemonBuildAt("")
 	if err != nil {
@@ -103,10 +116,10 @@ func (a *app) requireDeliveringDaemon(owner string) error {
 		return nil
 	}
 	remote, err := a.daemonBuildAt(owner)
-	if err != nil || remote.matches() {
+	if err != nil || !remote.skewed() {
 		return nil
 	}
-	return fmt.Errorf("%s's Shuttle daemon runs %s and this shuttle is %s: it would queue this message without delivering it. Bring %s's daemon level with its CLIs, then send again", owner, remote.describe(), a.cliDescription(), owner)
+	return fmt.Errorf("%s's Shuttle daemon runs %s and reports its CLIs skewed (%s): it would queue this message without delivering it. Bring %s's daemon level with its CLIs, then send again", owner, remote.describe(), remote.Contract.Reason, owner)
 }
 
 // daemonLevelNotice says how this host's daemon differs from these CLIs, or

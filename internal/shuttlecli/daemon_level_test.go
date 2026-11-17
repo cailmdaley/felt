@@ -21,22 +21,39 @@ func versionBody(host, version string, level int) http.HandlerFunc {
 	return jsonBody(fmt.Sprintf(`{"host":%q,"mix_vsn":%q,"contract_level":%d}`, host, version, level))
 }
 
-// A fiber message goes through the local daemon to the fiber's owner. Either
-// one built for another CLI contract would queue it without delivering it, so
-// the CLI refuses before sending, names the daemon, and sends nothing.
+// receiptBody is a daemon's /api/v1/version answer carrying its receipt of
+// the CLIs beside it: skewed when they report cliLevel instead of level.
+func receiptBody(host, version string, level, cliLevel int) http.HandlerFunc {
+	ok, reason := "true", "null"
+	if cliLevel != level {
+		ok, reason = "false", fmt.Sprintf(`"expected contract level %d, CLI reports %d"`, level, cliLevel)
+	}
+	return jsonBody(fmt.Sprintf(`{"host":%q,"mix_vsn":%q,"contract_level":%d,"contract":{"expected":%d,"observed":%d,"ok":%s,"reason":%s}}`,
+		host, version, level, level, cliLevel, ok, reason))
+}
+
+// A fiber message goes through the local daemon to the fiber's owner. A
+// local daemon built for another contract than this CLI, or an owner whose
+// receipt says its own CLIs are skewed, would queue it without delivering it,
+// so the CLI refuses before sending, names the daemon, and sends nothing. An
+// owner at another level than this CLI but level with its own CLIs delivers,
+// as does one whose answer carries no receipt.
 func TestFiberMessageRefusesADaemonBuiltForAnotherContract(t *testing.T) {
 	t.Parallel()
+	older := ShuttleContractLevel - 1
 	for _, tc := range []struct {
-		name               string
-		local, owner, want string
-		localLevel         int
-		ownerLevel         int
+		name       string
+		want       string
+		localLevel int
+		owner      http.HandlerFunc
 	}{
-		{name: "stale local daemon", localLevel: ShuttleContractLevel - 11, ownerLevel: ShuttleContractLevel,
-			want: fmt.Sprintf("the Shuttle daemon on this host runs 2.0.0 (CLI contract %d) and this shuttle is 3.0.0 (CLI contract %d)", ShuttleContractLevel-11, ShuttleContractLevel)},
-		{name: "stale owner", localLevel: ShuttleContractLevel, ownerLevel: ShuttleContractLevel - 11,
-			want: fmt.Sprintf("worker-node's Shuttle daemon runs 2.0.0 (CLI contract %d)", ShuttleContractLevel-11)},
-		{name: "both level", localLevel: ShuttleContractLevel, ownerLevel: ShuttleContractLevel},
+		{name: "stale local daemon", localLevel: ShuttleContractLevel - 11, owner: receiptBody("worker-node", "2.0.0", ShuttleContractLevel, ShuttleContractLevel),
+			want: fmt.Sprintf("the Shuttle daemon on this host runs 2.0.0 (CLI contract %d) and this shuttle is 2.1.0 (CLI contract %d)", ShuttleContractLevel-11, ShuttleContractLevel)},
+		{name: "skewed owner", localLevel: ShuttleContractLevel, owner: receiptBody("worker-node", "2.0.0", older, ShuttleContractLevel),
+			want: fmt.Sprintf("worker-node's Shuttle daemon runs 2.0.0 (CLI contract %d) and reports its CLIs skewed (expected contract level %d, CLI reports %d)", older, older, ShuttleContractLevel)},
+		{name: "owner level with its own older CLIs", localLevel: ShuttleContractLevel, owner: receiptBody("worker-node", "2.0.0", older, older)},
+		{name: "owner without a receipt", localLevel: ShuttleContractLevel, owner: versionBody("worker-node", "1.4.0", 0)},
+		{name: "both level", localLevel: ShuttleContractLevel, owner: receiptBody("worker-node", "2.1.0", ShuttleContractLevel, ShuttleContractLevel)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -49,7 +66,7 @@ func TestFiberMessageRefusesADaemonBuiltForAnotherContract(t *testing.T) {
 			daemonStub(t, env, map[string]http.HandlerFunc{
 				"/api/v1/version": func(w http.ResponseWriter, r *http.Request) {
 					if r.URL.Query().Get("origin") == "worker-node" {
-						versionBody("worker-node", "2.0.0", tc.ownerLevel)(w, r)
+						tc.owner(w, r)
 						return
 					}
 					versionBody("hub", "2.0.0", tc.localLevel)(w, r)
@@ -57,7 +74,7 @@ func TestFiberMessageRefusesADaemonBuiltForAnotherContract(t *testing.T) {
 				"/api/v1/deliver": deliver,
 			})
 			app := newApp(env)
-			app.version = "3.0.0"
+			app.version = "2.1.0"
 			stdout, _, err := runMessage(t, app, "work/worker", "hello")
 			if tc.want == "" {
 				if err != nil || len(requests()) != 1 || !strings.Contains(stdout, "woken") {
