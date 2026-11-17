@@ -400,6 +400,20 @@ it('leaves the channel\'s head as it stands when only its stream changes, so its
   expect(host.querySelector('.kbn-ch-head .kbn-ch-pages')).toBe(pages)
 })
 
+it('draws a post and the running list again when its thread\'s office or slug changes', async () => {
+  const human = { label: 'Sam' }
+  daemon([], undefined, {}, { board: { C: [...BOARD.C, record({ id: 'b9', kind: 'post', fiber: 'B', to: human, text: 'Beam done.' }, 2)] } })
+  const { view, ctx, host } = await mount([chair, tsz, beam])
+  expect(item(host, 'beam').querySelector('.kbn-ch-role')).toBeNull()
+  const moved = { ...beam, shuttleRole: 'optics' }
+  ctx.response = board([chair, tsz, moved])
+  view.refresh(ctx); await settle()
+  expect(item(host, 'beam').querySelector('.kbn-ch-role')?.textContent).toBe('optics')
+  host.querySelector<HTMLButtonElement>('.kbn-ch-count-ring')!.click(); await settle()
+  const row = [...document.querySelectorAll<HTMLElement>('[role="menuitem"] .thread-row')].find(each => each.querySelector('.thread-row-slug')!.textContent === 'beam')!
+  expect(row.querySelector('.thread-row-role')?.textContent).toBe('optics')
+})
+
 it('heads the view with the channel itself, written as its chair\'s slug, the rail\'s toggle at its right', async () => {
   daemon()
   // A channel's key is never drawn: the Mill's channel is written as its chair, felt.

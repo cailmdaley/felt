@@ -523,7 +523,8 @@ export class ChannelsView implements TemporalView {
     // A row draws an entry; the thread's state, which moves while its worker runs, is painted on it in place.
     // A line follows the one before it in its group: the row above, of the same thread, moments before.
     const grouped = entries.map((entry, row) => { const before = entries[row - 1]; return entry.kind !== 'station' && before?.kind !== 'station' && groups(before, entry) })
-    const said = entries.map((entry, row) => [entry.id, entry.kind, entry.at, entry.card.name, entry.line, entry.kind === 'station' ? [entry.what, entry.end] : [entry.text, entry.waiting, entry.clears, kindWord(entry), grouped[row], entry.files.map(file => file.fullPath)]])
+    // What the elements draw of its card: its name, slug and office.
+    const said = entries.map((entry, row) => [entry.id, entry.kind, entry.at, entry.card.name, slug(entry.card), entry.card.shuttleRole, entry.line, entry.kind === 'station' ? [entry.what, entry.end] : [entry.text, entry.waiting, entry.clears, kindWord(entry), grouped[row], entry.files.map(file => file.fullPath)]])
     const stream = JSON.stringify([channel.key, failed, said, entries.map(entry => [attentionOf(entry.card, waits), turnOf(entry.card).turn])])
     if (stream !== this.sigs.stream) {
       this.sigs.stream = stream
