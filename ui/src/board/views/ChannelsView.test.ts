@@ -497,7 +497,8 @@ it('clears a waiting post with one press of its ✓: it leaves the stream and st
   const asked = requestsSince(from)
   expect(asked.filter(([, method]) => method === 'POST')).toStrictEqual([['/api/v1/channels/dismiss', 'POST'], ['/api/v1/channels/dismiss', 'POST']])
   expect(asked.filter(([url]) => LIFECYCLE.test(url))).toStrictEqual([])
-  expect(posts.slice(-2).map(([, body]) => body).sort((a, b) => String(a.key).localeCompare(String(b.key)))).toStrictEqual([{ key: `clear:C:${posted}`, fiber: 'C' }, { key: expect.stringMatching(/^line:\d+:b5$/), fiber: 'C' }])
+  // The clear first, then the line: a refused line write leaves only a post that no longer waits.
+  expect(posts.slice(-2).map(([, body]) => body)).toStrictEqual([{ key: `clear:C:${posted}`, fiber: 'C' }, { key: expect.stringMatching(/^line:\d+:b5$/), fiber: 'C' }])
   expect(item(host, 'cmbx')).toBeUndefined()
   expect(host.querySelector('[data-channel="channel:cmbx"]')!.hasAttribute('data-waiting')).toBe(false)
   document.querySelector<HTMLButtonElement>('.shuttle-toast .toast-undo')!.click()

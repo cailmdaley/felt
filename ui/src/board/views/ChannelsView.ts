@@ -526,7 +526,7 @@ export class ChannelsView implements TemporalView {
     // What the elements draw of its card: its name, slug and office.
     const said = entries.map((entry, row) => [entry.id, entry.kind, entry.at, entry.card.name, slug(entry.card), entry.card.shuttleRole, entry.line, entry.kind === 'station' ? [entry.what, entry.end] : [entry.text, entry.waiting, entry.clears, kindWord(entry), grouped[row], entry.files.map(file => file.fullPath)]])
     // The width a post's previews wrap in: the stream's, less the gutter and the post's padding.
-    const wide = Math.max(1, this.stream.clientWidth - TUBE.gutter - 26)
+    const wide = this.stream.clientWidth ? this.stream.clientWidth - TUBE.gutter - 26 : Infinity
     const stream = JSON.stringify([channel.key, failed, said, entries.map(entry => [attentionOf(entry.card, waits), turnOf(entry.card).turn]), wide])
     if (stream !== this.sigs.stream) {
       this.sigs.stream = stream
@@ -763,16 +763,15 @@ export class ChannelsView implements TemporalView {
     this.draw()
     // The line after it may be drawn anew (ungrouped, it takes a head): it is found again by its id.
     if (held && after) this.stream?.querySelector<HTMLElement>(`[data-item="${CSS.escape(after)}"]`)?.focus({ preventScroll: true })
+    // The clear first: a line write refused after it leaves a post that no longer waits, still in the stream with its ✓.
     let cleared: number | undefined
     try {
-      ;[, cleared] = await Promise.all([
-        postDaemonJson(ctx.shuttleBase, '/api/v1/channels/dismiss', { key, fiber }, 'Clear failed'),
-        waits && board ? board.clear(waits) : undefined,
-      ])
+      if (waits && board) cleared = await board.clear(waits)
+      await postDaemonJson(ctx.shuttleBase, '/api/v1/channels/dismiss', { key, fiber }, 'Clear failed')
     } catch {
       this.pending = this.pending.filter(each => each !== key)
       this.draw()
-      this.status(`${item.card.name}'s line could not be cleared; it is as it was.`)
+      this.status(cleared === undefined ? `${item.card.name}'s line could not be cleared; it is as it was.` : `${item.card.name}'s line could not be taken from the stream; it no longer waits.`)
       return
     }
     clearToast(`Cleared ${slug(item.card)}'s line.`, () => {
