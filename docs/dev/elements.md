@@ -33,7 +33,7 @@ The rest are the board's own choices, made to sit with those numbers:
 | Thumbnail (globe tiles, sheets) | 176 by 116 |
 
 A box never grows wider than the row it sits in: narrower, a figure or a page keeps its proportions and a card its height.
-`BOX` in `filePreview.ts` states the same numbers for code that reckons a row's height (the stream's margin), and a test reads the stylesheet to keep them equal.
+`BOX` and `PREVIEW_GAP` in `filePreview.ts` state the same numbers for code that reckons a row's height (the stream's margin), and a test reads the stylesheet to keep them equal; `previewsHeight` wraps a post's boxes in the stream's width as the row does.
 
 ## Elements
 

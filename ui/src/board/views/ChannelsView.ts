@@ -21,7 +21,7 @@ import { docKey } from '../workspace/documents.js'
 import { headerIcon, type HeaderIcon } from '../workspace/headerIcon.js'
 import { declaredTitle, watchDocumentTitles } from '../workspace/DocumentTitles.js'
 import { docButtons } from '../workspace/docButtons.js'
-import { BOX, previewsHeight, Unfold, type UnfoldFile } from '../elements/filePreview.js'
+import { previewsHeight, Unfold, type UnfoldFile } from '../elements/filePreview.js'
 import { groups, kindWord, post } from '../elements/post.js'
 import { doing, threadRow } from '../elements/threadRow.js'
 import { onDesk } from '../workspace/fiberPageState.js'
@@ -525,11 +525,13 @@ export class ChannelsView implements TemporalView {
     const grouped = entries.map((entry, row) => { const before = entries[row - 1]; return entry.kind !== 'station' && before?.kind !== 'station' && groups(before, entry) })
     // What the elements draw of its card: its name, slug and office.
     const said = entries.map((entry, row) => [entry.id, entry.kind, entry.at, entry.card.name, slug(entry.card), entry.card.shuttleRole, entry.line, entry.kind === 'station' ? [entry.what, entry.end] : [entry.text, entry.waiting, entry.clears, kindWord(entry), grouped[row], entry.files.map(file => file.fullPath)]])
-    const stream = JSON.stringify([channel.key, failed, said, entries.map(entry => [attentionOf(entry.card, waits), turnOf(entry.card).turn])])
+    // The width a post's previews wrap in: the stream's, less the gutter and the post's padding.
+    const wide = Math.max(1, this.stream.clientWidth - TUBE.gutter - 26)
+    const stream = JSON.stringify([channel.key, failed, said, entries.map(entry => [attentionOf(entry.card, waits), turnOf(entry.card).turn]), wide])
     if (stream !== this.sigs.stream) {
       this.sigs.stream = stream
-      // Each row reckoned by its parts' sizes, a post's by its tallest preview, before anything in it loads.
-      const tube = layTube(entries, entries.map(entry => entry.kind === 'station' ? rowHeight(entry) : POST_PX + Math.max(entry.kind === 'close' ? BOX.page.height : 0, previewsHeight(entry.files.map(file => file.fullPath)))))
+      // Each row reckoned by its parts' sizes, a post's by its previews as they wrap (a close's tapestry leading them), before anything in it loads.
+      const tube = layTube(entries, entries.map(entry => entry.kind === 'station' ? rowHeight(entry) : POST_PX + previewsHeight([...entry.kind === 'close' ? ['tapestry.html'] : [], ...entry.files.map(file => file.fullPath)], wide)))
       // The lanes share their room, each step no wider than the mock's nine pixels.
       this.stream.style.setProperty('--kbn-ch-tube', `${TUBE.gutter}px`)
       const lay = { waits, now, last: entries.length - 1 }

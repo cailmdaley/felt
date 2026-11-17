@@ -27,8 +27,26 @@ export function densityOf(path: string): FileDensity {
   return kind === 'image' ? 'figure' : kind === 'html' ? 'page' : 'card'
 }
 
-/** How tall a row of these files' previews stands before any of them loads: its tallest box. */
-export const previewsHeight = (paths: readonly string[]): number => Math.max(0, ...paths.map(path => BOX[densityOf(path)].height))
+/** The gap between previews in a row that wraps, as filePreview.css sets it. */
+export const PREVIEW_GAP = 8
+
+/**
+ * How tall a row of these files' previews stands in `width` pixels before any
+ * of them loads: the boxes wrapped as the row wraps them, each line as tall as
+ * its tallest box, a box narrower than its density's scaled to fit (a figure
+ * or a page keeping its proportions, a card its height).
+ */
+export function previewsHeight(paths: readonly string[], width: number): number {
+  const lines: number[] = []
+  let used = Infinity
+  for (const path of paths) {
+    const density = densityOf(path), box = BOX[density], w = Math.min(box.width, width)
+    const h = density === 'card' ? box.height : box.height * w / box.width
+    if (used + PREVIEW_GAP + w > width) { lines.push(h); used = w }
+    else { lines[lines.length - 1] = Math.max(lines.at(-1)!, h); used += PREVIEW_GAP + w }
+  }
+  return lines.reduce((sum, h) => sum + h, 0) + PREVIEW_GAP * Math.max(0, lines.length - 1)
+}
 
 export interface UnfoldOptions {
   shuttleBase: string

@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 // @ts-expect-error Node types are excluded from the browser UI's tsconfig.
 import { readFileSync } from 'node:fs'
-import { BOX, densityOf, previewsHeight, Unfold } from './filePreview.js'
+import { BOX, densityOf, PREVIEW_GAP, previewsHeight, Unfold } from './filePreview.js'
 
 const files = [{ key: 'host:/w/a.html', name: 'a.html' }, { key: 'host:/w/b.png', name: 'b.png' }, { key: 'host:/w/c.md', name: 'c.md' }]
 const made = (single = false): { unfold: Unfold; seen: ReturnType<typeof vi.fn> } => {
@@ -97,8 +97,12 @@ describe('a preview\'s box', () => {
     expect([...unfold.el.querySelector('[data-density="card"]')!.children].map(part => part.textContent)).toStrictEqual(['≡', 'c.md', ''])
     style.remove()
   })
-  it('reckons a row of previews by its tallest box', () => {
+  it('reckons a row of previews as it wraps in its width, each line its tallest box, a narrow figure or page scaled', () => {
     expect([densityOf('/w/a.svg'), densityOf('/w/deck.html'), densityOf('/w/notes.md'), densityOf('/w/paper.pdf')]).toStrictEqual(['figure', 'page', 'card', 'card'])
-    expect([previewsHeight([]), previewsHeight(['/w/notes.md']), previewsHeight(['/w/notes.md', '/w/deck.html', '/w/a.png'])]).toStrictEqual([0, 56, 360])
+    const three = ['/w/notes.md', '/w/deck.html', '/w/a.png']
+    // Wide enough for all three on one line; then the plot wraps; then each stands alone; then a phone, each box narrowed.
+    expect([previewsHeight([], 1400), previewsHeight(['/w/notes.md'], 1400), previewsHeight(three, 1400), previewsHeight(three, 900), previewsHeight(three, 480), previewsHeight(three, 300)])
+      .toStrictEqual([0, 56, 360, 270 + PREVIEW_GAP + 360, 56 + 270 + 360 + 2 * PREVIEW_GAP, 56 + 270 * 300 / 480 + 360 * 300 / 480 + 2 * PREVIEW_GAP])
+    expect(readFileSync('src/board/elements/filePreview.css', 'utf8')).toContain(`flex-wrap: wrap; align-items: flex-start; gap: ${PREVIEW_GAP}px;`)
   })
 })
