@@ -309,7 +309,7 @@ export class KanbanModal {
     })
     this.voice.onRex = ({ fiber_id: id, origin }) => {
       this.workspace?.rexAt(id, origin)
-      if (!this.workspace?.isActive && this.activeView?.reveal?.(id, origin)) return
+      if (!this.workspace?.isActive && (this.activeView?.followRex?.(id, origin) || this.activeView?.reveal?.(id, origin))) return
       this.workspace?.follow(id, origin)
     }
     this.voice.onOpen = ({ fiber_id: id, origin, page }) => { void this.workspace?.openFiber(id, origin, page, true) }

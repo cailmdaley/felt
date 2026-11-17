@@ -48,6 +48,8 @@ export interface TemporalView {
   keydown?(event: KeyboardEvent): boolean
   /** Rex moved to this fiber: show it here, leaving Rex be; false to leave it to the reader. */
   reveal?(id: string, origin: string): boolean
+  /** Rex moved to this fiber's worker, and only then: show where it speaks here; false to leave it to the reader. */
+  followRex?(id: string, origin: string): boolean
   /** The board bar's Find, when the view filters itself by it; '' lifts the filter. */
   find?(query: string): void
 }

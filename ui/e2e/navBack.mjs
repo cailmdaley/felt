@@ -261,6 +261,13 @@ export function registerRexFollowJourneys(test) {
     await rex('cmbx/kappa-tsz')
     await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'cmbx')
     assert.deepEqual(await marked(), { fibers: ['cmbx/kappa-tsz'], latest: true, inSight: true })
+    // Typing to the chair, nothing moves: the channel stays and the console keeps the keys.
+    await page.getByLabel('Message to cmbx').click()
+    await rex('pando/unions/psf')
+    await page.waitForTimeout(200)
+    assert.equal(await page.locator('.kbn-ch-name').textContent(), 'cmbx')
+    assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), 'Message to cmbx', 'the console keeps the keys')
+    assert.equal(await page.locator('.ws-reader:not(.ws-dormant)').count(), 0)
     // Choosing a channel leaves the mark behind.
     await page.locator('.kbn-ch-pick', { hasText: 'unions' }).first().click()
     assert.deepEqual((await marked()).fibers, [])

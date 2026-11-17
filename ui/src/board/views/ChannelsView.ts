@@ -164,6 +164,8 @@ export class ChannelsView implements TemporalView {
   private following = true
   /** The worker Rex last brought this channel to, whose latest line is marked. */
   private marked: string | null = null
+  /** The marked line is still to be brought into sight, its records not yet drawn. */
+  private bring = false
   private railHidden = false
   /** A phone shows the rail until a channel is chosen. */
   private phoneRail = true
@@ -429,12 +431,13 @@ export class ChannelsView implements TemporalView {
     }
     if (!focus) return
     if (key && deliberate) {
+      this.marked = null
       this.renew(key)
       const channel = this.channels.find(each => each.key === key)
       if (channel?.hidden) void this.dismiss(channel, showKey(key, Date.now()))
     }
     if (isMobileViewport() || this.drawn) this.setRail(true)
-    this.drawRail(); this.drawChannel()
+    this.drawRail(); this.drawChannel(); this.mark()
     this.channelEl?.focus({ preventScroll: true })
   }
   /**
@@ -442,27 +445,38 @@ export class ChannelsView implements TemporalView {
    * worker's latest post (else the latest station on its line), which is
    * marked; false when no channel holds it. A uid names one fiber on every
    * host, and a channel keeps one copy of each, so a uid matches any host's.
-   * Following looks at nothing and renews no pin.
+   * Following looks at nothing and renews no pin; while the human types it
+   * moves nothing.
    */
-  reveal(id: string, origin: string): boolean {
-    if (!this.loaded) return false
+  followRex(id: string, origin: string): boolean {
+    this.marked = null
+    if (!this.loaded) { this.mark(); return false }
     let card: KanbanCard | undefined
     const channel = this.channels.find(each => (card = each.everyone.find(one => one.uid === id || (one.id === id && one.originId === origin))))
-    if (!channel || !card) return false
+    if (!channel || !card) { this.mark(); return false }
+    // While the human types, in the console or a field, Channels stays where it is.
+    if (isTypingTarget(document.activeElement as HTMLElement | null)) { this.mark(); return true }
     this.open(channel.key, true, false)
     this.marked = fiberOf(card)
-    this.mark(true)
+    this.bring = true
+    this.mark()
     return true
   }
-  /** Marks the latest line of the worker Rex followed to, if the channel shows one; `bring` scrolls it into sight with the keys. */
-  private mark(bring = false): void {
+  /**
+   * Marks the latest line of the worker Rex followed to, if the channel shows
+   * one. Brought to it, the first draw that holds the line scrolls it into
+   * sight and gives it the keys, even when its records arrive after.
+   */
+  private mark(): void {
     for (const row of this.stream?.querySelectorAll('[data-marked]') ?? []) row.removeAttribute('data-marked')
     // Its latest post, else the latest station on its line.
     const own = this.marked ? [...this.stream?.querySelectorAll<HTMLElement>(`:scope > [data-fiber="${CSS.escape(this.marked)}"]`) ?? []] : []
     const row = own.filter(each => each.matches('.kbn-ch-item')).at(-1) ?? own.at(-1)
     if (!row) return
     row.setAttribute('data-marked', '')
-    if (!bring) return
+    if (!this.bring) return
+    this.bring = false
+    this.following = false
     row.scrollIntoView({ block: 'center' })
     row.querySelector<HTMLElement>('[data-item]')?.focus({ preventScroll: true })
   }
@@ -618,11 +632,11 @@ export class ChannelsView implements TemporalView {
         return node
       })])
       for (const id of this.rows.keys()) if (!kept.has(id)) this.rows.delete(id)
-      this.mark()
       for (const close of leading) this.lead(close)
       this.sweep(new Set(entries.flatMap(entry => entry.kind === 'station' ? [] : [`item:${entry.id}`])))
       if (!entries.length) this.stream.append(el('li', 'kbn-ch-hush', failed ? 'This channel\'s history could not be read; trying again.' : 'Nothing addressed to you here yet.'))
       if (this.following) this.stream.scrollTop = this.stream.scrollHeight
+      this.mark()
     }
     retime(this.layout!, now)
   }
