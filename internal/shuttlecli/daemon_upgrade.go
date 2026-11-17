@@ -37,8 +37,8 @@ $SHUTTLE_RELEASE names, which the installer writes) with this CLI's version of
 the release archive, verified before anything is replaced. A running daemon is
 then stopped, and its keep-alive supervisor or respawn loop starts the new
 release. A daemon that nothing restarts is left stopped and the command fails,
-naming the command that starts it; the replaced release is then kept beside
-the new one, at <release>.previous, until a later upgrade. The restart arms
+naming the command that starts it. Until a daemon runs the new release, the
+replaced one is kept beside it, at <release>.previous, until a later upgrade. The restart arms
 the boot quarantine, released with 'shuttle daemon release'.
 
 A release built from a checkout is not replaced: deploy it from that checkout
@@ -65,13 +65,11 @@ with bin/shuttle-deploy.`,
 					return err
 				}
 			}
-			if err := a.restartOnRelease(previous); err != nil {
+			running, err := a.restartOnRelease(previous)
+			if err != nil || !running || previous == "" {
 				return err
 			}
-			if previous != "" {
-				return os.RemoveAll(previous)
-			}
-			return nil
+			return os.RemoveAll(previous)
 		},
 	}
 }
@@ -98,38 +96,39 @@ func (a *app) installLaunchHelper(dir string) error {
 }
 
 // restartOnRelease stops a running daemon that is not at this version and
-// waits for its supervisor to start the selected release. A daemon that does
-// not come back is an error naming previous, the release it was replaced from,
-// when there is one.
-func (a *app) restartOnRelease(previous string) error {
+// waits for its supervisor to start the selected release. It reports whether a
+// daemon now runs this version. A daemon that does not come back is an error
+// naming previous, the release it was replaced from, when there is one; with
+// no daemon running, previous is named as kept.
+func (a *app) restartOnRelease(previous string) (bool, error) {
+	kept := ""
+	if previous != "" {
+		kept = "; the release it replaced is kept at " + previous
+	}
 	running, err := a.daemonBuildAt("")
 	if err != nil {
-		fmt.Fprintln(a.env.Stdout, "no daemon is running; `shuttle daemon start` starts this release")
-		return nil
+		fmt.Fprintf(a.env.Stdout, "no daemon is running; `shuttle daemon start` starts this release%s\n", kept)
+		return false, nil
 	}
 	if running.Version == a.version && running.matches() {
 		fmt.Fprintf(a.env.Stdout, "the daemon is running %s\n", a.version)
-		return nil
+		return true, nil
 	}
 	settings, err := a.resolveHostSettings()
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := a.stopDaemonEndpoint(settings, ""); err != nil {
-		return err
+		return false, err
 	}
 	for waited := time.Duration(0); waited < daemonRespawnWait; waited += time.Second {
 		a.daemonPause(time.Second)
 		if build, err := a.daemonBuildAt(""); err == nil && build.Version == a.version {
 			fmt.Fprintf(a.env.Stdout, "the daemon restarted on %s; its boot quarantine holds new launches until `shuttle daemon release`\n", a.version)
-			return nil
+			return true, nil
 		}
 	}
-	err = fmt.Errorf("the daemon stopped and nothing restarted it within %s; start it with `shuttle daemon start`", daemonRespawnWait)
-	if previous != "" {
-		err = fmt.Errorf("%w; the release it ran is kept at %s", err, previous)
-	}
-	return err
+	return false, fmt.Errorf("the daemon stopped and nothing restarted it within %s; start it with `shuttle daemon start`%s", daemonRespawnWait, kept)
 }
 
 // replaceRelease puts this version's release archive at dir and returns where

@@ -290,8 +290,8 @@ func TestDaemonUpgradeReplacesTheFetchedReleaseWithThisVersion(t *testing.T) {
 			wantVersion := "2.0.0"
 			if tc.replaced {
 				wantVersion = "2.1.0"
-				if !strings.Contains(stdout, "no daemon is running; `shuttle daemon start` starts this release") {
-					t.Fatalf("upgrade with no daemon running must say how to start it: %q", stdout)
+				if !strings.Contains(stdout, "no daemon is running; `shuttle daemon start` starts this release; the release it replaced is kept at ") || !strings.Contains(stdout, filepath.FromSlash(tc.home)+".previous\n") {
+					t.Fatalf("upgrade with no daemon running must say how to start it and where the replaced release is: %q", stdout)
 				}
 				home, _ := env.UserHomeDir()
 				if launch, err := os.ReadFile(filepath.Join(home, ".local", "bin", "shuttle-launch")); err != nil || !strings.Contains(string(launch), "launch 2.1.0") {
@@ -301,9 +301,13 @@ func TestDaemonUpgradeReplacesTheFetchedReleaseWithThisVersion(t *testing.T) {
 			if got := app.releaseVersion(daemonRelease{Dir: release, Launcher: filepath.Join(release, "bin", "shuttled")}); got != wantVersion {
 				t.Fatalf("release reports %q after upgrade, want %q", got, wantVersion)
 			}
-			leftovers, _ := filepath.Glob(filepath.Join(filepath.Dir(release), ".shuttled-upgrade-*"))
-			if previous, _ := filepath.Glob(release + ".previous"); len(leftovers)+len(previous) != 0 {
-				t.Fatalf("upgrade left %v %v behind", leftovers, previous)
+			if leftovers, _ := filepath.Glob(filepath.Join(filepath.Dir(release), ".shuttled-upgrade-*")); len(leftovers) != 0 {
+				t.Fatalf("upgrade left %v behind", leftovers)
+			}
+			// No daemon has run the new release yet, so the replaced one stays.
+			previous, _ := filepath.Glob(release + ".previous")
+			if len(previous) != 0 != tc.replaced {
+				t.Fatalf("replaced release kept = %v, want %v", previous, tc.replaced)
 			}
 		})
 	}

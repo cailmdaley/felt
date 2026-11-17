@@ -153,8 +153,9 @@ Bring it level: shuttle daemon upgrade
 selected release, copies its `shuttle-launch` to `~/.local/bin` as the
 installer does, and stops the running daemon so that its keep-alive
 supervisor or respawn loop starts the new one. A daemon nothing supervises is
-left stopped, and the command fails saying to run `shuttle daemon start`; the
-release it replaced stays beside the new one, at `<release>.previous`. Like every
+left stopped, and the command fails saying to run `shuttle daemon start`. Until
+a daemon runs the new release, the one it replaced stays beside it, at
+`<release>.previous`. Like every
 restart, it arms the boot quarantine: review the board, then run
 `shuttle daemon release`. `shuttle daemon check` prints the same comparison on
 its own. Until the daemon is level, `shuttle message <fiber>` refuses to send:

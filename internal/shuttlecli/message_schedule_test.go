@@ -199,7 +199,7 @@ func TestScheduledMessageRefusalIsAllItPrints(t *testing.T) {
 			})
 			_, stderr, err := runScheduledMessage(t, newApp(env), "work/worker", "later", "--in", "8h", "--message-id", "later")
 			if tc.level != ShuttleContractLevel {
-				if err == nil || !strings.Contains(err.Error(), "without delivering") || strings.Contains(stderr, "scheduling") {
+				if err == nil || !strings.Contains(err.Error(), "without delivering") || stderr != "Error: "+err.Error()+"\n" {
 					t.Fatalf("err=%v stderr=%q, want the refusal alone", err, stderr)
 				}
 				return
