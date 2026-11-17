@@ -553,7 +553,11 @@ export class KanbanModal {
       hotkeyEl.textContent = spec.hotkey
       hotkeyEl.setAttribute('aria-hidden', 'true')
       tab.append(hotkeyEl, labelEl)
-      tab.addEventListener('click', () => this.setView(spec.id))
+      tab.addEventListener('click', event => {
+        // The tab of the view under the reader closes it, and that view puts the focus back where the reader was opened from; the tablist's own press would take it.
+        if (this.workspace?.isActive && spec.id === this.activeViewId) event.stopImmediatePropagation()
+        this.setView(spec.id)
+      })
       const part = document.createElement('ui-tabs-tab')
       part.setAttribute('value', spec.id)
       part.append(tab)
