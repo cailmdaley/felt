@@ -142,6 +142,10 @@ brews:
       if pi_installed && which("pi")
         system "#{bin}/felt", "setup", "pi"
       end
+      # Say when this host's Shuttle daemon differs from the new CLIs, as
+      # felt update does. Like every call above, `system` returns false on a
+      # failure instead of raising, so it cannot fail the install.
+      system "#{bin}/shuttle", "daemon", "check"
     # Snapshot first, deliberately: Go's `or` short-circuits, so a local
     # `goreleaser --snapshot` never reaches .Env.GITHUB_REPOSITORY (an unset
     # key there is a hard template error). .Prerelease is the tag's suffix —
