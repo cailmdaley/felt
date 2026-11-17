@@ -350,3 +350,30 @@ func TestUpdateRefreshRealExecutableSealsItsOwnBuild(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// After an update the new felt asks the shuttle beside it about the host's
+// daemon and prints its answer, which is empty when the daemon matches.
+func TestUpdateRefreshReportsWhatShuttleSaysOfTheDaemon(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, answer, want string }{
+		{"stale daemon", "The Shuttle daemon running on this host is 2.0.0; these CLIs are 3.0.0.\nBring it level: shuttle daemon upgrade\n",
+			"\nThe Shuttle daemon running on this host is 2.0.0; these CLIs are 3.0.0.\nBring it level: shuttle daemon upgrade\n"},
+		{"matching or absent daemon", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			env, streams := testEnv(t)
+			dir := t.TempDir()
+			feltPath := filepath.Join(dir, "felt")
+			if err := os.WriteFile(feltPath, []byte("felt"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			env.Set("FELT_BIN", feltPath)
+			linkScript(t, filepath.Join(dir, "shuttle"), "#!/bin/sh\n[ \"$*\" = \"daemon check\" ] || exit 2\nprintf '%s' '"+tc.answer+"'\n")
+			testApp(t, env).reportDaemonLevel()
+			if got := streams.Stdout.String(); got != tc.want {
+				t.Fatalf("daemon report = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

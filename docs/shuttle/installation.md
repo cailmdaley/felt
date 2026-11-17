@@ -139,6 +139,26 @@ Upgrade by running the same command again. It deletes `$SHUTTLE_HOME` and
 unpacks the new tarball in its place, so keep nothing of your own in there. The
 daemon's state lives in `~/.shuttle` and survives.
 
+`felt update` replaces only the two CLIs. When a daemon on the host runs, or
+would start, a different version, it ends by saying so, with both versions and
+the command that brings the daemon level:
+
+```text
+The Shuttle daemon running on this host is 2.0.0 (CLI contract 37); these CLIs are 3.0.0 (CLI contract 48). Until they match, messages to live workers are queued and not delivered.
+Bring it level: shuttle daemon upgrade
+```
+
+`shuttle daemon upgrade` downloads the daemon release matching the installed
+`shuttle`, checks that its runtime starts on the host, puts it in place of the
+selected release, and stops the running daemon so that its keep-alive
+supervisor or respawn loop starts the new one. A daemon nothing supervises is
+left stopped, and the command says to run `shuttle daemon start`. Like every
+restart, it arms the boot quarantine: review the board, then run
+`shuttle daemon release`. `shuttle daemon check` prints the same comparison on
+its own. Until the daemon is level, `shuttle message <fiber>` refuses to send:
+an older daemon queues a fiber message and does not deliver it, and the
+messages it queued are delivered once the upgraded daemon is released.
+
 The daemon tarball carries what the release needs to run *and* to keep
 running. Under its root sit `bin/`, `erts-*/`, `lib/`, `releases/` and
 `share/`. `bin/` contains `shuttled`, the BEAM launcher; `share/` holds the

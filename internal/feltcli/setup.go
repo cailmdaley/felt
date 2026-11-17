@@ -60,8 +60,10 @@ func (a *app) setupCmd() *cobra.Command {
 	var source string
 	refresh := &cobra.Command{
 		Use: "refresh", Hidden: true,
+		Short: "Finish an update from the new binary: refresh integrations, then report the Shuttle daemon",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a.refreshPluginAfterUpdate(source)
+			a.reportDaemonLevel()
 			return nil
 		},
 	}

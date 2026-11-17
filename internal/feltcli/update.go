@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/atomicfile"
 	"github.com/spf13/cobra"
@@ -30,7 +31,10 @@ func (a *app) updateCmd() *cobra.Command {
 		Long: `Replaces both CLI binaries from the latest GitHub release (a dev build asks first),
 then moves the agent integrations to the matching tag so hooks and skills stay
 in step with the binary: the Claude Code plugin whenever the claude CLI is on
-PATH, and the Codex and pi integrations where felt is already installed.`,
+PATH, and the Codex and pi integrations where felt is already installed.
+When a Shuttle daemon is installed or running at another version than the new
+CLIs, it says so, with both versions and the command that brings the daemon
+level; the daemon itself is left as it is.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// update replaces the binary this process is running.
 			feltPath, err := os.Executable()
@@ -131,6 +135,25 @@ func (a *app) refreshPluginAfterUpdate(marketplaceRef string) {
 	}
 	a.refreshCodexSetupIfInstalled(marketplaceRef)
 	a.refreshPiSetupIfInstalled(marketplaceRef)
+}
+
+// reportDaemonLevel prints what the shuttle installed beside this felt says
+// about the host's Shuttle daemon: when it differs from these CLIs, both
+// versions and the command that brings it level; nothing when it matches or
+// no daemon is installed. felt knows nothing of the daemon; shuttle decides.
+func (a *app) reportDaemonLevel() {
+	feltPath, err := a.currentFeltExecutable()
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	notice, err := a.env.CommandContext(ctx, filepath.Join(filepath.Dir(feltPath), "shuttle"), "daemon", "check").Output()
+	if err != nil || len(notice) == 0 {
+		return
+	}
+	fmt.Fprintln(a.env.Stdout)
+	a.env.Stdout.Write(notice)
 }
 
 func (a *app) updatePairIsCurrent(feltPath, currentVersion, latestVersion, build string) bool {

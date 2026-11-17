@@ -73,7 +73,7 @@ Store support files `*.md.lock`, `.*.tmp` and `.move-pending.json*` belong in `.
 | `felt setup skills` | Link felt skills into a target directory (`--source`, `--target`, default `~/.claude/skills`) |
 | `felt setup validate --source <checkout>` | Non-mutating validation of a complete local plugin candidate, including both skills and registered hook files |
 | `felt uninstall` | Remove the felt plugin from Claude Code and Codex and the felt package from pi (inverse of `setup claude`/`codex`/`pi`) |
-| `felt update` | Update the `felt` and `shuttle` Go binaries together, then refresh the Claude Code plugin and any installed Codex or pi integration to the matching tag |
+| `felt update` | Update the `felt` and `shuttle` Go binaries together, then refresh the Claude Code plugin and any installed Codex or pi integration to the matching tag. When a Shuttle daemon on the host is running or installed at another version than the new CLIs, it prints both versions and the command that brings the daemon level (`shuttle daemon check`); it does not change the daemon |
 
 ## `felt hook` (agent-harness adapters)
 
