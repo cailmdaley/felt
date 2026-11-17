@@ -503,7 +503,8 @@ export class ChannelsView implements TemporalView {
     if (!this.bring) return
     this.bring = false
     if (isTypingTarget(document.activeElement as HTMLElement | null)) return
-    row.scrollIntoView({ block: 'center' })
+    // A line taller than the stream shows from its first words.
+    row.scrollIntoView({ block: row.offsetHeight > this.stream!.clientHeight ? 'start' : 'center' })
     // Brought to the stream's newest line, the stream still follows; brought to any other, it stays on that line.
     this.lastTop = this.stream!.scrollTop
     this.following = row === this.stream!.lastElementChild && this.atFoot()

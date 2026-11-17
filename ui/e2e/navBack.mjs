@@ -250,7 +250,7 @@ export function registerRexFollowJourneys(test) {
     const marked = () => page.evaluate(() => {
       const stream = document.querySelector('.kbn-ch-stream'), rows = [...stream.querySelectorAll(':scope > [data-marked]')]
       const view = stream.getBoundingClientRect(), box = rows[0]?.getBoundingClientRect()
-      return { fibers: rows.map(row => row.dataset.fiber), latest: rows[0] === [...stream.querySelectorAll(`:scope > .kbn-ch-item[data-fiber="${CSS.escape(rows[0]?.dataset.fiber ?? '')}"]`)].at(-1), inSight: !!box && box.top >= view.top - 1 && box.bottom <= view.bottom + 1 }
+      return { fibers: rows.map(row => row.dataset.fiber), latest: rows[0] === [...stream.querySelectorAll(`:scope > .kbn-ch-item[data-fiber="${CSS.escape(rows[0]?.dataset.fiber ?? '')}"]`)].at(-1), inSight: !!box && box.top >= view.top - 1 && (box.bottom <= view.bottom + 1 || box.height > view.height) }
     })
     await page.locator('.kbn-ch-pick', { hasText: 'cmbx' }).first().click()
     await rex('pando/unions/shear-2pt')
