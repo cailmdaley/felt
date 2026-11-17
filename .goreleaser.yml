@@ -143,9 +143,11 @@ brews:
         system "#{bin}/felt", "setup", "pi"
       end
       # Say when this host's Shuttle daemon differs from the new CLIs, as
-      # felt update does. Like every call above, `system` returns false on a
-      # failure instead of raising, so it cannot fail the install.
-      system "#{bin}/shuttle", "daemon", "check"
+      # felt update does. Formula#system would log the notice out of sight
+      # and raise on a failure; Utils.popen_read returns the output whatever
+      # the exit, and opoo shows it.
+      daemon_notice = Utils.popen_read("#{bin}/shuttle", "daemon", "check").strip
+      opoo daemon_notice unless daemon_notice.empty?
     # Snapshot first, deliberately: Go's `or` short-circuits, so a local
     # `goreleaser --snapshot` never reaches .Env.GITHUB_REPOSITORY (an unset
     # key there is a hard template error). .Prerelease is the tag's suffix —
