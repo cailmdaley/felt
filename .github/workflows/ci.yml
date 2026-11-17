@@ -171,6 +171,37 @@ jobs:
       - name: Conserve real Git rows in the browser DOM
         run: npm run e2e:change
 
+  # Every browser journey of the board, against the mocked-daemon harness. A job
+  # of its own: it is CI's longest, and nothing else waits on it.
+  journeys:
+    name: Journeys (board in a headless browser)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The harness fixture is baked by a shuttle built from this checkout.
+      - name: Set up Go for the harness fixture
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install headless Chromium
+        run: npx playwright-core install --with-deps chromium
+
+      - name: Run the browser journeys
+        run: npm run e2e
+
   # Warm the EL8 OTP cache that release.yml's daemon legs restore from.
   #
   # This job exists purely because of how actions/cache is scoped. A cache entry
