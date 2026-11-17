@@ -44,18 +44,21 @@ async function shot(page, name) {
   await mkdir(shots, { recursive: true })
   await page.screenshot({ path: resolve(shots, `${name}.png`) })
 }
-async function back(page, phone) {
-  if (phone) await frame(page).locator('body').evaluate(() => window.scrollBy(0, -100)).catch(() => {})
-  if (phone) await page.locator('.ws-navbar .ws-return').focus()
-  await pageBack(page)
-  // Let go of the top bar, so a reading scrolled past its fold collapses it now rather than under the next tap.
-  if (phone) await page.evaluate(() => { if (document.activeElement?.closest('.ws-navbar')) document.activeElement.blur() })
-  await page.waitForTimeout(100)
-}
 async function report(page) {
-  if (!await page.locator('.ws-selected[data-key$="/report.html"]').count()) await showFile(page, '/report.html')
+  if (!await page.locator(`.ws-selected[data-key$="${REPORT}"]`).count()) await showFile(page, REPORT)
   await frame(page).getByRole('heading', { name: 'Calibration report', exact: true }).waitFor()
   await page.waitForTimeout(100)
+}
+/** The constitution's own page, a click on its receded page away. */
+async function constitution(page) {
+  await page.locator('.ws-page[data-key^="fiber:"]').first().dispatchEvent('click')
+  await selected(page).locator('.ws-fiber-prose').waitFor()
+}
+/** The reader's back from any of its pages is one step to the Desk it was opened from. */
+async function leftForDesk(page) {
+  await pageBack(page)
+  await page.locator('.ws-reader.ws-dormant').waitFor()
+  assert.equal(await page.locator('.kbn-viewtabs .kbn-viewtab-active').getAttribute('data-view'), 'desk')
 }
 export function registerLivingReportJourneys(test) {
   test('A live rewrite keeps the reader in place on the report\'s page', async page => {
@@ -123,8 +126,7 @@ export function registerLivingReportJourneys(test) {
       assert.equal(await page.locator('.ws-tabs,.ws-head-index,.ws-thumbbar,.ws-page-choice').count(), 0)
       await shot(page, `${device}-landing`)
       // Its view's head opens its constitution's page; the receded page is a click away too.
-      await page.locator('.ws-page[data-key^="fiber:"]').first().dispatchEvent('click')
-      await selected(page).locator('.ws-fiber-prose').waitFor()
+      await constitution(page)
       await shot(page, `${device}-top`)
 
       // The report opens in the existing nested reader.
@@ -137,13 +139,15 @@ export function registerLivingReportJourneys(test) {
       assert.equal(await selected(page).locator('iframe').evaluate(el => el.contentWindow === null), false)
       assert.equal(await frame(page).locator('body').evaluate(() => location.href), 'about:srcdoc')
       assert.ok(await frame(page).locator('#conclusions').evaluate(el => Math.abs(el.getBoundingClientRect().top) < 10))
+      // Escape from inside the report reaches the reader, which closes to the Desk; Forward reopens the report.
       await page.keyboard.press('Escape')
-      await selected(page).locator('.ws-fiber-prose').waitFor()
+      await page.locator('.ws-reader.ws-dormant').waitFor()
+      await page.goForward()
       await report(page)
       await link(page, 'Validation conclusions')
       await frame(page).locator('#validation-conclusions').waitFor()
       assert.ok(await frame(page).locator('#validation-conclusions').evaluate(el => Math.abs(el.getBoundingClientRect().top) < 10))
-      await back(page, phone)
+      await report(page)
       // A relative page not declared in the body or sent-file ledger opens in the same stage.
       const tabsBefore = context.pages().length
       await link(page, 'Read the independent validation →')
@@ -156,24 +160,22 @@ export function registerLivingReportJourneys(test) {
       await link(page, 'Open the response plot →')
       await selected(page).locator('img').waitFor()
       await shot(page, `${device}-plot`)
+      // A reload keeps the plot over the Desk: Back is the Desk, and Forward the plot.
       await page.reload()
       await selected(page).locator('img').waitFor()
-      await back(page, phone)
-      await frame(page).getByRole('heading', { name: 'Independent patches agree', exact: true }).waitFor()
-      await back(page, phone)
-      await frame(page).getByRole('heading', { name: 'Calibration report', exact: true }).waitFor()
+      await leftForDesk(page)
+      await page.goForward()
+      await selected(page).locator('img').waitFor()
+      await report(page)
       await link(page, 'Cross-host report →')
       await frame(page).getByRole('heading', { name: 'Remote section', exact: true }).waitFor()
       assert.match(await selected(page).getAttribute('data-key'), /^basalt-login-02:\/remote\/report.html$/)
       assert.ok(await frame(page).locator('#remote-section').evaluate(el => Math.abs(el.getBoundingClientRect().top) < 10))
-      await back(page, phone)
+      await report(page)
       // Paths into a thread's folder retain the owning host and nest like any other page.
       await link(page, 'Read the analysis thread →')
       await frame(page).getByRole('heading', { name: 'Response analysis', exact: true }).waitFor()
-      await back(page, phone)
-      await frame(page).getByRole('heading', { name: 'Calibration report', exact: true }).waitFor()
-      await back(page, phone)
-      await selected(page).locator('.ws-fiber-prose').waitFor()
+      await constitution(page)
 
       if (phone) {
         assert.ok(await (await sentFiles(page)).count() > 0)
