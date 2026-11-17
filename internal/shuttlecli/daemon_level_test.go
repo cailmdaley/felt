@@ -255,16 +255,22 @@ func TestDaemonUpgradeReplacesTheFetchedReleaseWithThisVersion(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name, archived, want, home string
-		replaced                   bool
+		replaced, socket           bool
 	}{
 		{name: "verified", archived: "2.1.0", want: "installed daemon 2.1.0", home: "share/shuttle", replaced: true},
+		{name: "no daemon socket", archived: "2.1.0", want: "installed daemon 2.1.0", home: "share/shuttle", replaced: true, socket: true},
 		{name: "installed under a bin directory", archived: "2.1.0", want: "installed daemon 2.1.0", home: "bin/shuttled", replaced: true},
 		{name: "mismatched archive", archived: "2.9.9", want: `reports version "2.9.9", expected 2.1.0`, home: "share/shuttle"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			env := testEnv(t)
-			unreachableDaemon(t, env)
+			if tc.socket {
+				env.Unset("SHUTTLE_DAEMON_URL")
+				env.Set("SHUTTLE_LISTEN", "unix://"+filepath.Join(shortPrivateTempDir(t), "absent.sock"))
+			} else {
+				unreachableDaemon(t, env)
+			}
 			release := filepath.Join(t.TempDir(), filepath.FromSlash(tc.home))
 			fakeRelease(t, release, "2.0.0")
 			env.Set("SHUTTLE_RELEASE", release)
@@ -361,6 +367,35 @@ func TestDaemonUpgradeFailsWhenNothingRestartsTheDaemon(t *testing.T) {
 	}
 	if got := app.releaseVersion(daemonRelease{Launcher: filepath.Join(release+".previous", "bin", "shuttled")}); got != "2.0.0" {
 		t.Fatalf("the replaced release must be kept, reports %q", got)
+	}
+}
+
+// A daemon that is listening but does not answer fails the upgrade before
+// anything is downloaded or replaced; only a refused connection means no
+// daemon runs.
+func TestDaemonUpgradeFailsBeforeTheSwapWhenTheDaemonDoesNotAnswer(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	daemonStub(t, env, map[string]http.HandlerFunc{"/api/v1/version": func(w http.ResponseWriter, r *http.Request) {
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err == nil {
+			conn.Close()
+		}
+	}})
+	release := filepath.Join(t.TempDir(), "share", "shuttle")
+	fakeRelease(t, release, "2.0.0")
+	env.Set("SHUTTLE_RELEASE", release)
+	var fetched atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fetched.Store(true) }))
+	t.Cleanup(server.Close)
+	app := newApp(env)
+	app.version, app.releaseDownloadBase = "2.1.0", server.URL
+	_, _, err := executeApp(t, app, "", "daemon", "upgrade")
+	if err == nil || !strings.Contains(err.Error(), "the daemon did not answer") || fetched.Load() {
+		t.Fatalf("upgrade with a daemon that does not answer = %v (fetched %v), want a failure before the swap", err, fetched.Load())
+	}
+	if got := app.releaseVersion(daemonRelease{Launcher: filepath.Join(release, "bin", "shuttled")}); got != "2.0.0" {
+		t.Fatalf("the release must stay in place, reports %q", got)
 	}
 }
 

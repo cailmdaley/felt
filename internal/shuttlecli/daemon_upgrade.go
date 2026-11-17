@@ -12,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/cailmdaley/felt/internal/atomicfile"
@@ -34,7 +35,8 @@ func (a *app) daemonUpgradeCmd() *cobra.Command {
 		Short: "Install the daemon release matching these CLIs and restart the daemon on it",
 		Long: `Replaces the selected daemon release (the one ~/.shuttle/repo or
 $SHUTTLE_RELEASE names, which the installer writes) with this CLI's version of
-the release archive, verified before anything is replaced. A running daemon is
+the release archive, verified before anything is replaced. A daemon that is
+listening but does not answer fails the upgrade before then. A running daemon is
 then stopped, and its keep-alive supervisor or respawn loop starts the new
 release. A daemon that nothing restarts is left stopped and the command fails,
 naming the command that starts it. The replaced release is kept at
@@ -55,6 +57,15 @@ with bin/shuttle-deploy.`,
 			if !fetchedRelease(release.Dir) {
 				return fmt.Errorf("the daemon release at %s was built from a checkout; deploy it from that checkout with bin/shuttle-deploy --hosts local", release.Dir)
 			}
+			// Only nothing listening — a refused connection, or no unix
+			// socket — means no daemon runs; one that does not answer fails
+			// the upgrade before anything is replaced.
+			var daemon *daemonBuild
+			if build, err := a.daemonBuildAt(""); err == nil {
+				daemon = &build
+			} else if !errors.Is(err, syscall.ECONNREFUSED) && !errors.Is(err, syscall.ENOENT) {
+				return fmt.Errorf("the daemon did not answer, so nothing was replaced: %w", err)
+			}
 			previous := ""
 			if installed := a.releaseVersion(release); installed != a.version {
 				if previous, err = a.replaceRelease(release.Dir); err != nil {
@@ -65,7 +76,7 @@ with bin/shuttle-deploy.`,
 					return err
 				}
 			}
-			running, err := a.restartOnRelease(previous)
+			running, err := a.restartOnRelease(daemon, previous)
 			if err != nil || !running || previous == "" {
 				return err
 			}
@@ -95,18 +106,17 @@ func (a *app) installLaunchHelper(dir string) error {
 	return atomicfile.Write(target, launch, 0o755)
 }
 
-// restartOnRelease stops a running daemon that is not at this version and
-// waits for its supervisor to start the selected release. It reports whether a
-// daemon now runs this version. A daemon that does not come back is an error
-// naming previous, the release it was replaced from, when there is one; with
-// no daemon running, previous is named as kept.
-func (a *app) restartOnRelease(previous string) (bool, error) {
+// restartOnRelease stops running, the daemon the upgrade found, when it is not
+// at this version and waits for its supervisor to start the selected release.
+// It reports whether a daemon now runs this version. A daemon that does not
+// come back is an error naming previous, the release it was replaced from,
+// when there is one; with no daemon running, previous is named as kept.
+func (a *app) restartOnRelease(running *daemonBuild, previous string) (bool, error) {
 	kept := ""
 	if previous != "" {
 		kept = "; the release it replaced is kept at " + previous
 	}
-	running, err := a.daemonBuildAt("")
-	if err != nil {
+	if running == nil {
 		fmt.Fprintf(a.env.Stdout, "no daemon is running; `shuttle daemon start` starts this release%s\n", kept)
 		return false, nil
 	}
