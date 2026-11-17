@@ -680,3 +680,36 @@ it('takes from the stream the sends whose clear was written, and its undo brings
   expect(posts.filter(([, body]) => String(body.key).startsWith('unline:')).map(([, body]) => String(body.key).replace(/^unline:\d+:/, ''))).toStrictEqual(SENT.slice(0, 2).map(file => `file:local:${file.fullPath}:${file.timestamp}`))
   expect(item(host, 'tsz').querySelectorAll('.uf-card')).toHaveLength(3)
 })
+
+it('writes a clear\'s records a few at a time, offers its undo at once, and an undo mid-way writes back what was written and never writes the rest', async () => {
+  const many: SentFile[] = Array.from({ length: 7 }, (_, i) => ({ fullPath: `/w/tsz/plot-${i}.png`, basename: `plot-${i}.png`, uid: 'T', host: 'local', timestamp: Date.now() - (20 - i) * minute }))
+  const { posts } = daemon()
+  const answer = vi.mocked(fetch).getMockImplementation()!
+  // In flight and at most in flight, the clear's records and the undo's apart.
+  const flying = { line: 0, unline: 0 }, peak = { line: 0, unline: 0 }
+  const held: Array<() => void> = []
+  vi.mocked(fetch).mockImplementation(async (url, init) => {
+    if (init?.method !== 'POST') return answer(url, init)
+    const kind = String(JSON.parse(String(init.body)).key).split(':')[0] as keyof typeof flying
+    flying[kind]++; peak[kind] = Math.max(peak[kind], flying[kind])
+    await new Promise<void>(resolve => held.push(resolve))
+    flying[kind]--
+    return answer(url, init)
+  })
+  const { host } = await mount(undefined, undefined, many)
+  item(host, 'tsz').querySelector<HTMLButtonElement>('.kbn-ch-clear')!.click()
+  await settle()
+  expect([item(host, 'tsz'), flying.line, document.querySelector('.shuttle-toast .toast-undo') !== null]).toStrictEqual([undefined, 4, true])
+  // Two land; the undo comes while the next two are on their way.
+  held.splice(0, 2).forEach(release => release())
+  await settle(); await settle()
+  document.querySelector<HTMLButtonElement>('.shuttle-toast .toast-undo')!.click()
+  expect(item(host, 'tsz')).toBeDefined()
+  while (held.length) { held.splice(0).forEach(release => release()); await settle(); await settle() }
+  expect(peak).toStrictEqual({ line: 4, unline: 4 })
+  const keys = posts.map(([, body]) => String(body.key)), named = (prefix: string) => keys.filter(key => key.startsWith(prefix)).map(key => key.replace(/^\w+:\d+:/, '')).sort()
+  // The two that landed made way for two more: six were sent before the undo, each is written back, and the last was never written.
+  expect(named('line:')).toStrictEqual(many.slice(0, 6).map(file => `file:local:${file.fullPath}:${file.timestamp}`).sort())
+  expect(named('unline:')).toStrictEqual(named('line:'))
+  expect(item(host, 'tsz').querySelectorAll('.uf-card')).toHaveLength(7)
+})

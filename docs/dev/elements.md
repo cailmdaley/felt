@@ -65,7 +65,7 @@ One line a thread addressed to the human.
 | Head | the thread's slug in its line's colour, its role, the age; the kind word only for an ask, a close (for review, closed) or a block |
 | Text | Markdown, at prose size |
 | Files | a row of file previews below the text; a fiber's newest close in the stream leads them with its tapestry |
-| Clear | ✓ at the head's right, on every post and file line, and `e` on the line in focus; one press takes the line from the stream (`line:<ms>:<id>`, one record for each line it takes: a post by its id, a file item by each of its sends, a path it draws once at its newest named for every time it was sent, so a send it did not name still shows and the item goes once none is left) and, for a waiting post, stops it waiting too (`clear:<uid>:<ms>`), with one undo that restores both; a waiting ask or close is answered, not cleared |
+| Clear | ✓ at the head's right, on every post and file line, and `e` on the line in focus; one press takes the line from the stream (`line:<ms>:<id>`, one record for each line it takes: a post by its id, a file item by each of its sends, a path it draws once at its newest named for every time it was sent, so a send it did not name still shows and the item goes once none is left) and, for a waiting post, stops it waiting too (`clear:<uid>:<ms>`), with one undo that restores both, offered as soon as the line leaves; its records are written four at a time, and an undo writes back those written and never writes the rest; a waiting ask or close is answered, not cleared |
 
 A line that follows one from the same thread less than five minutes before it, and asks nothing, drops its head: its slug and role stay for assistive technology, its age shows at the right on hover, and its ✓ stays.
 

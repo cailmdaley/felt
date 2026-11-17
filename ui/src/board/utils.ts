@@ -563,6 +563,20 @@ export function clearToast(message: string, undo: () => void): void {
   })
 }
 
+/** Runs `task` on each of `items`, at most `limit` at once, taking them in order; resolves with each result in its item's place. */
+export async function fewAtATime<T, R>(items: readonly T[], limit: number, task: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length)
+  let next = 0
+  const lane = async (): Promise<void> => {
+    while (next < items.length) {
+      const at = next++
+      results[at] = await task(items[at])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, lane))
+  return results
+}
+
 /**
  * A waiting post's ✓, from any surface: the board clears it, then a toast
  * says so with an undo for a few seconds, which makes it wait again. A refused

@@ -17,7 +17,7 @@ import { createRailReorder, type RailReorder } from '../channelRail.js'
 import { openActionMenu } from '../conversationMenu.js'
 import { stateDot } from '../stateDot.js'
 import { slug } from '../threadOutline.js'
-import { clearToast } from '../utils.js'
+import { clearToast, fewAtATime } from '../utils.js'
 import { ATTENTION_ORDER, attentionOf, lastActive, type Waits } from '../attention.js'
 import { turnOf } from '../turn.js'
 import { docKey } from '../workspace/documents.js'
@@ -47,6 +47,8 @@ const KEEP_MS = 7 * 86_400_000
 const SWIPE_PX = 60
 /** About how tall a post stands without its files: its head and two lines of words. */
 const POST_PX = 64
+/** How many of a clear's records are written at once: each write is a process in the daemon. */
+const CLEAR_WRITES = 4
 /** A stream within this many pixels of its foot follows what arrives. */
 const FOLLOW_PX = 24
 /** Jump to lists at most this many documents beneath the channels it matches. */
@@ -863,8 +865,11 @@ export class ChannelsView implements TemporalView {
   }
   /**
    * Takes a line out of the stream, across the fleet, and a post that waits
-   * stops waiting, with one undo for a few seconds that restores both; the
-   * line after it takes the focus. A refused write brings it back and says so.
+   * stops waiting; the line after it takes the focus. One undo is offered as
+   * soon as the line leaves, for a few seconds, and restores both: what was
+   * written is written back, and what was not yet written never is. The
+   * line's records are written a few at a time ({@link CLEAR_WRITES}). A
+   * refused write brings back what it would have taken and says so.
    */
   private async clearLine(item: Item, done: HTMLButtonElement): Promise<void> {
     const ctx = this.ctx, board = ctx?.workspace?.board
@@ -878,42 +883,51 @@ export class ChannelsView implements TemporalView {
     this.draw()
     // The line after it may be drawn anew (ungrouped, it takes a head): it is found again by its id.
     if (held && after) this.stream?.querySelector<HTMLElement>(`[data-item="${CSS.escape(after)}"]`)?.focus({ preventScroll: true })
+    const drop = (keys: readonly string[]): void => { this.pending = this.pending.filter(each => !keys.includes(each)) }
     const write = (key: string, failure: string): Promise<boolean> =>
-      postDaemonJson(ctx.shuttleBase, '/api/v1/channels/dismiss', { key, fiber }, failure).then(() => true, () => {
-        this.pending = this.pending.filter(each => each !== key)
-        return false
-      })
+      postDaemonJson(ctx.shuttleBase, '/api/v1/channels/dismiss', { key, fiber }, failure).then(() => true, () => { drop([key]); return false })
     // The clear first: a line write refused after it leaves a post that no longer waits, still in the stream with its ✓.
-    let cleared: number | undefined
-    try {
-      if (waits && board) cleared = await board.clear(waits)
-    } catch {
-      this.pending = this.pending.filter(each => !lines.some(line => line.key === each))
+    const clearing = waits && board ? board.clear(waits) : Promise.resolve(undefined)
+    // Each line's write once it starts, true when it was written.
+    const sent = new Map<(typeof lines)[number], Promise<boolean>>()
+    let undone = false
+    clearToast(`Cleared ${slug(item.card)}'s line.`, () => {
+      undone = true
+      // A line not yet written is never written; one written, or on its way, is brought back once it lands.
+      drop(lines.filter(line => !sent.has(line)).map(line => line.key))
+      const backAt = Date.now(), backs = [...sent.keys()].map(line => ({ line, key: unclearLineKey(line.id, backAt) }))
+      this.pending.push(...backs.map(back => back.key))
       this.draw()
-      this.status(`${item.card.name}'s line could not be cleared; it is as it was.`)
-      return
-    }
-    // Each line its own record: a clear names every line it took.
-    const written = await Promise.all(lines.map(line => write(line.key, 'Clear failed'))), taken = lines.filter((_, index) => written[index])
-    if (taken.length < lines.length) {
-      this.draw()
-      this.status(cleared !== undefined ? `${item.card.name}'s line could not be taken from the stream; it no longer waits.`
-        : taken.length ? `Some of ${item.card.name}'s files could not be taken from the stream.` : `${item.card.name}'s line could not be cleared; it is as it was.`)
-    }
-    if (!taken.length && cleared === undefined) return
-    // The undo takes back what was written.
-    clearToast(`Cleared ${slug(item.card)}'s ${taken.length ? 'line' : 'post'}.`, () => {
-      if (waits && board && cleared !== undefined) void board.unclear(waits, cleared).catch(() => this.status(`${item.card.name}'s post could not be brought back; it stays cleared.`))
-      if (!taken.length) return
-      const backAt = Date.now(), backs = taken.map(line => unclearLineKey(line.id, backAt))
-      this.pending.push(...backs)
-      this.draw()
-      void Promise.all(backs.map(back => write(back, 'Undo failed'))).then(done => {
+      void clearing.then(cleared => {
+        if (waits && board && cleared !== undefined) return board.unclear(waits, cleared).catch(() => this.status(`${item.card.name}'s post could not be brought back; it stays cleared.`))
+      }, () => {})
+      void fewAtATime(backs, CLEAR_WRITES, async back => await sent.get(back.line) ? write(back.key, 'Undo failed') : (drop([back.key]), true)).then(done => {
         if (done.every(Boolean)) return
         this.draw()
         this.status(`${item.card.name}'s line could not be brought back; it stays cleared.`)
       })
     })
+    let cleared: number | undefined
+    try {
+      cleared = await clearing
+    } catch {
+      drop(lines.map(line => line.key))
+      this.draw()
+      this.status(`${item.card.name}'s line could not be cleared; it is as it was.`)
+      return
+    }
+    // Each line its own record: a clear names every line it took.
+    const written = await fewAtATime(lines, CLEAR_WRITES, line => {
+      if (undone) return Promise.resolve(undefined)
+      const sending = write(line.key, 'Clear failed')
+      sent.set(line, sending)
+      return sending
+    })
+    const refused = written.filter(each => each === false).length
+    if (!refused) return
+    this.draw()
+    this.status(cleared !== undefined ? `${item.card.name}'s line could not be taken from the stream; it no longer waits.`
+      : refused < lines.length ? `Some of ${item.card.name}'s files could not be taken from the stream.` : `${item.card.name}'s line could not be cleared; it is as it was.`)
   }
   /**
    * An item's files below its words, each at its density's box in a row that
