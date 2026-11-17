@@ -1,8 +1,8 @@
-import { ago } from '../civilDay.js'
 import { fiberOf, officeOf, type Item } from '../channels.js'
 import { slug } from '../threadOutline.js'
 import { threadState } from '../threads.js'
 import { renderMarkdown } from '../utils.js'
+import { timeEl } from './time.js'
 import './post.css'
 
 export interface PostParts {
@@ -60,8 +60,7 @@ export function post(item: Item, { now, dot, open, grouped = false, clear, previ
   who.addEventListener('click', open)
   who.dataset.item = `item:${item.id}`
   who.title = `Open ${card.name}`
-  const age = el('span', 'kbn-ch-age', ago(item.at, now))
-  age.dataset.at = String(item.at)
+  const age = timeEl(item.at, now, 'kbn-ch-age')
   const head = el('div', 'kbn-ch-item-head')
   who.setAttribute('aria-label', [name, kind].filter(Boolean).join(' '))
   head.append(who, ...office && office !== name ? [el('span', 'kbn-ch-role', office)] : [], ...kind ? [el('span', 'kbn-ch-kind', kind)] : [], age)

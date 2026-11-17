@@ -1,5 +1,3 @@
-.ov-time { color: var(--ws-ink-muted); opacity: .8; font: var(--type-meta)/var(--leading-ui) var(--font-serif); white-space: nowrap; }
-
 /* A thread row: dot, slug, office, what it is doing, when it last spoke; one line, the doing cut with an ellipsis. */
 .thread-row {
   display: flex; align-items: baseline; gap: 8px; min-width: 0;
@@ -17,4 +15,4 @@
 .thread-row-role { flex: none; font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); color: var(--ws-ink-muted); white-space: nowrap; }
 .thread-row-doing { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ws-ink); }
 .thread-row[data-attention='quiet'] .thread-row-doing { color: var(--ws-ink-muted); }
-.thread-row-age { flex: none; margin-left: auto; white-space: nowrap; color: var(--ws-ink-muted); font-variant-numeric: tabular-nums; }
+.thread-row-age { flex: none; margin-left: auto; }

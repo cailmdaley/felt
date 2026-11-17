@@ -6,6 +6,9 @@ import type { KanbanCard } from '../KanbanTypes.js'
 import type { MapFile } from '../family/model.js'
 import { disposeFileViewer, resumeFileViewer, suspendFileViewer } from '../FileViewerPanel.js'
 import { FamilyPage, type ViewFeeds } from './FamilyPage.js'
+import { lastActive } from '../attention.js'
+import { instantStamp } from '../civilDay.js'
+import { relative } from '../elements/time.js'
 import { Dock } from './Dock.js'
 import { leadVerb, lifecycleVerbsFor, verbSpec } from './lifecycleVerbs.js'
 import { offeredVerbs } from './testActs.js'
@@ -48,9 +51,12 @@ describe('a constitution\'s view', () => {
   it('heads with its slug, its run and whether it needs the human, then its threads as rows, what waits first with what it wants; no outcome anywhere', () => {
     const { page } = made(root)
     expect(page.el.querySelector('.ov-name')!.textContent).toBe('hub')
-    // Its run at a glance, the whole of it on hover.
+    // Quiet, its head is timed from when it last moved, in the elements' one grammar, the instant in full on hover.
     const time = page.el.querySelector<HTMLElement>('.ov-head .ov-time')!
-    expect([time.textContent, time.title]).toStrictEqual(['1h ago', 'worked 2h 0m · stopped 1h ago'])
+    expect([time.classList.contains('el-time'), time.textContent, time.title]).toStrictEqual([true, relative(lastActive(root), now), instantStamp(lastActive(root))])
+    // Working with nothing said, it is timed from its launch.
+    const launched = made(card({ ...mid, id: 'solo', orchestrator: undefined, dispatchedAt: when(5) }), { said: () => undefined }).page
+    expect(launched.el.querySelector('.ov-head .ov-time')!.textContent).toBe('5h ago')
     expect(page.el.querySelector('.ov-needs')).toBeNull()
     // Each says what it is doing: what it asks, else what it last said, else its turn. The tempered thread stands behind the quiet control.
     expect(threads(page)).toStrictEqual([['q', 'Which one?'], ['w', 'idle'], ['mid', 'Posted the cut.']])

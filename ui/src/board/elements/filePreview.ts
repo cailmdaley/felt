@@ -1,9 +1,9 @@
 import type { DocumentKey } from '../workspace/DocumentBridge.js'
 import { buildFileViewer, disposeFileViewer, resumeFileViewer, suspendFileViewer } from '../FileViewerPanel.js'
 import { forwardDocumentKey } from '../workspace/DocumentBridge.js'
-import { ago } from '../civilDay.js'
 import { documentKind, KIND_GLYPH, parseDocKey, type DocKey } from '../workspace/documents.js'
 import { Thumbnail } from '../workspace/Thumbnail.js'
+import { timeEl } from './time.js'
 import './filePreview.css'
 
 /** A file the previews show: its document key, the name its bar carries, and when it was sent, for a card to say. */
@@ -259,10 +259,9 @@ export class Unfold {
     if (density) el.dataset.density = density
     if (density === 'card') {
       // Nothing to see before it opens: its kind, its name and when it came, and nothing loads.
-      const glyph = document.createElement('span'), name = document.createElement('span'), when = document.createElement('span')
+      const glyph = document.createElement('span'), name = document.createElement('span'), when = timeEl(file.at ?? 0, Date.now(), 'uf-card-age')
       glyph.className = 'uf-card-glyph'; glyph.textContent = KIND_GLYPH[documentKind(path)]
       name.className = 'uf-card-name'; name.textContent = file.name
-      when.className = 'uf-card-age'; when.textContent = file.at ? ago(file.at, Date.now()) : ''
       el.append(glyph, name, when)
       this.cards.set(file.key, { el })
       return el

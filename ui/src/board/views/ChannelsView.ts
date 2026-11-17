@@ -1,6 +1,6 @@
 import { announce } from '@ui-sdk/core'
 import '@ui-sdk/web/tooltip'
-import { ago } from '../civilDay.js'
+import { relative, retime } from '../elements/time.js'
 import { getDaemonJson, postDaemonJson } from '../daemonApi.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { boardCards, threadIndexFor } from '../KanbanSurfaces.js'
@@ -481,7 +481,7 @@ export class ChannelsView implements TemporalView {
       const pick = button('kbn-ch-doc', '', () => this.openPage(id, card, receipt.key))
       pick.dataset.item = id
       pick.title = receipt.fullPath
-      pick.append(el('span', 'kbn-ch-doc-name', declaredTitle(receipt.key)?.title ?? receipt.basename), el('span', 'kbn-ch-doc-meta', `${slug(card)} · ${ago(receipt.timestamp, now)}`))
+      pick.append(el('span', 'kbn-ch-doc-name', declaredTitle(receipt.key)?.title ?? receipt.basename), el('span', 'kbn-ch-doc-meta', `${slug(card)} · ${relative(receipt.timestamp, now)}`))
       item.append(pick)
       return item
     }))
@@ -563,7 +563,7 @@ export class ChannelsView implements TemporalView {
       if (!entries.length) this.stream.append(el('li', 'kbn-ch-hush', failed ? 'This channel\'s history could not be read; trying again.' : 'Nothing addressed to you here yet.'))
       if (this.following) this.stream.scrollTop = this.stream.scrollHeight
     }
-    for (const age of this.layout!.querySelectorAll<HTMLElement>('[data-at]')) age.textContent = ago(Number(age.dataset.at), now)
+    retime(this.layout!, now)
   }
   /** A line's colour: the thread's state now while the line runs, the ink once it has ended. */
   private lineState(line: TubeLine, waits: Waits): string {
@@ -576,7 +576,7 @@ export class ChannelsView implements TemporalView {
     const said = this.entriesDrawn.flatMap(entry => {
       if (entry.line !== line.id) return []
       const what = entry.kind === 'station' ? { start: 'started', tick: 'handed off', end: entry.end ?? 'closed' }[entry.what] : kindWord(entry)
-      return [[what, ago(entry.at, now)].filter(Boolean).join(' ')]
+      return [[what, relative(entry.at, now)].filter(Boolean).join(' ')]
     })
     const title = `${slug(line.card)}: ${[...line.from < 0 ? ['running before this stretch'] : [], ...said].join(', ')}`
     this.titles.set(line.id, title)
@@ -706,12 +706,12 @@ export class ChannelsView implements TemporalView {
       who.append(threadRow(station.card, { waits: this.ctx!.workspace!.board.waiting, now, density: 'chip', hue: hue(station.card) }))
       who.dataset.item = `station:${station.id}`
       const what = { start: 'started', tick: 'handed off', end: station.end ?? 'closed' }[station.what]
-      who.title = `${station.card.name} — ${what} ${ago(station.at, now)}`
+      who.title = `${station.card.name} — ${what} ${relative(station.at, now)}`
       row.append(who)
     } else {
       const what = station.what === 'tick' ? 'handed off' : station.end ?? 'closed'
-      row.setAttribute('aria-label', `${slug(station.card)} ${what} ${ago(station.at, now)}`)
-      row.title = `${slug(station.card)} ${what} ${ago(station.at, now)}`
+      row.setAttribute('aria-label', `${slug(station.card)} ${what} ${relative(station.at, now)}`)
+      row.title = `${slug(station.card)} ${what} ${relative(station.at, now)}`
     }
     return row
   }

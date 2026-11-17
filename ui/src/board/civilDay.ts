@@ -193,6 +193,20 @@ export function ago(ms: number, now = Date.now(), options: { seconds?: boolean }
   return span === 'now' ? 'just now' : `${span} ago`
 }
 
+/**
+ * How long ago an instant was, in the elements' one grammar
+ * (elements/time.ts): `now` under a minute, then `12m ago`, `5h ago` under a
+ * day, then `3d ago`. A future instant reads `now`; an unknown one, nothing.
+ */
+export function relativeAge(ms: number, now: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return ''
+  const span = Math.max(0, now - ms)
+  if (span < 60_000) return 'now'
+  if (span < HOUR_MS) return `${Math.floor(span / 60_000)}m ago`
+  if (span < DAY_MS) return `${Math.floor(span / HOUR_MS)}h ago`
+  return `${Math.floor(span / DAY_MS)}d ago`
+}
+
 /** An instant's wall clock in a zone, as a Date read with its UTC getters. */
 function wall(ms: number, z: Zone): Date {
   return new Date(ms + z.offsetMs(ms))

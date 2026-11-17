@@ -1,0 +1,2 @@
+/* A time, the same wherever an element draws one: mono at meta size, muted, tabular numerals. */
+.el-time { font: var(--type-meta)/var(--leading-ui) var(--font-mono); font-variant-numeric: tabular-nums; color: var(--ws-ink-muted); white-space: nowrap; }

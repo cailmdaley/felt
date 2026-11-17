@@ -26,7 +26,7 @@
 }
 .uf-card-glyph { flex: none; width: 24px; font: var(--type-title)/var(--leading-solid) var(--font-serif); color: var(--ws-ink-muted); text-align: center; }
 .uf-card-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 var(--type-row)/var(--leading-ui) var(--font-mono); color: var(--ws-ink); }
-.uf-card-age { flex: none; color: var(--ws-ink-muted); white-space: nowrap; }
+.uf-card-age { flex: none; }
 
 .uf-bar {
   position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 4px;

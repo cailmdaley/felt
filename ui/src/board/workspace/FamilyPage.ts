@@ -3,7 +3,6 @@ import type { KanbanCard } from '../KanbanTypes.js'
 import { ATTENTION_ORDER, attentionOf, lastActive, quietWord, wantOf, type Want, type Waits } from '../attention.js'
 import type { MapFeeds, MapFile } from '../family/model.js'
 import { htmlEl as el } from '../family/drawing.js'
-import { ago } from '../civilDay.js'
 import { bindDrawnPage } from '../FileViewerPanel.js'
 import { stateDot } from '../stateDot.js'
 import { slug } from '../threadOutline.js'
@@ -12,7 +11,8 @@ import type { ThreadIndex } from '../threads.js'
 import type { FiberActs } from './Dock.js'
 import { docButtons, type DocFeeds } from './docButtons.js'
 import { Unfold } from '../elements/filePreview.js'
-import { runTime as time, threadRow } from '../elements/threadRow.js'
+import { doing, threadRow } from '../elements/threadRow.js'
+import { relative, timeEl } from '../elements/time.js'
 import './family-page.css'
 
 /** What the view reads, and where it goes. */
@@ -44,7 +44,7 @@ const WANT_WORD: Readonly<Record<Want['kind'], string>> = { ask: 'asks', review:
  * one opens its view; pulling the page
  * down past its top opens the nearest one's, moving neither Rex nor voice).
  * Then its head: its dot and slug, what it wants of the human or its faint
- * word, its run at a glance, its pages and its acts; the last thing it posted;
+ * word, the age of what it last said or wants (or how long it has worked), its pages and its acts; the last thing it posted;
  * its sub-threads as thread rows (each opens the same view one level down),
  * only those that wait on the human or are working, what waits first,
  * each followed by every thread below it that waits on the human, and the
@@ -234,7 +234,7 @@ export class FamilyPage {
     head.title = card.name
     this.name.textContent = slug(card)
     const waits = this.feeds.waits(), want = wantOf(card, waits), faint = attentionOf(card, waits) === 'quiet' ? quietWord(card) : ''
-    this.facts.replaceChildren(...want && WANT_WORD[want.kind] ? [el('span', 'ov-needs', WANT_WORD[want.kind])] : faint ? [el('span', 'ov-word', faint)] : [], time(card, now))
+    this.facts.replaceChildren(...want && WANT_WORD[want.kind] ? [el('span', 'ov-needs', WANT_WORD[want.kind])] : faint ? [el('span', 'ov-word', faint)] : [], timeEl(doing(card, waits, this.feeds.said(card)).at, now, 'ov-time'))
     // Its pages are drawn again; the one in focus keeps it.
     const part = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.ws-doc-button')
     const kept = part && this.docs.contains(part) ? part.dataset.part : undefined
@@ -256,7 +256,7 @@ export class FamilyPage {
     if (!said) { this.said.replaceChildren(); return }
     const text = el('div', 'ov-said-text')
     text.innerHTML = renderMarkdown(said.text)
-    text.title = ago(said.at, now)
+    text.title = relative(said.at, now)
     this.said.replaceChildren(text)
   }
   /**
