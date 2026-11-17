@@ -9,7 +9,8 @@ Run `cd ui && npm test` for the board's unit and integration tests.
 Run `cd ui && npm run e2e` for every headless harness browser journey: workspace (including header, living-report, constitution page and Globe journeys), document request budgets, and performance budgets.
 The command builds both bundles, runs every suite even when one fails, and exits nonzero on any failure.
 Each suite launches its own headless Chrome, and the board's Google Fonts are served from a cache under `ui/node_modules/.cache/e2e-fonts` after their first fetch.
-The workspace suite runs its journeys four at a time, each in its own context (`E2E_JOBS` changes the count), prints each journey's time, and takes `E2E_ONLY=<regex>` to run the journeys it names; the whole command takes about two minutes on a busy laptop.
+The workspace suite runs its journeys four at a time, each in its own context (`E2E_JOBS` changes the count), prints each journey's time, and takes `E2E_ONLY=<regex>` to run the journeys it names; the whole command takes about three and a half minutes on a laptop.
+CI runs it on every push to `main` as the Journeys job, beside the UI job and waited on by none; the job takes six to nine minutes on a GitHub runner, Chromium install included.
 The `*-live.mjs` probes require a live daemon and are opt-in, separate from this harness gate.
 
 `cd ui && npm run e2e:change` builds the change-reader ES-module harness and checks every virtual diff window, including open shadow DOM, against an independent parse of real `git diff` output.
@@ -232,7 +233,7 @@ and add your test to its file.
 |---|---|---|
 | the suites | `make go-test`, `make mix-test`, `make js-test` — each concurrent within itself and aiming to finish in under a minute on a laptop, a target rather than a guarantee; each holds the machine's one suite slot (`scripts/suite-slot.sh`), so workers sharing a host run them in turn, and one that finds the slot held waits or pushes and reads CI's result | every change, every lane |
 | full | `make test` plus `make test-linux` (CI's Ubuntu: dash as `/bin/sh`, `/proc`, systemd) | before pushing; CI |
-| browser | `npm run e2e`, on a headless Chrome of its own | changes to anything the board draws |
+| browser | `npm run e2e`, on a headless Chrome of its own | changes to anything the board draws; CI, as the Journeys job |
 | opt-in | real harness smoke, the stranger-bootstrap container, `integration`-tagged tests | when touching what they cover |
 
 A test belongs in a browser only if a browser is the only place it can be

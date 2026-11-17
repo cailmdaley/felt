@@ -62,7 +62,7 @@ run in four tiers:
 |---|---|---|
 | the suites | `go test ./...`, `make mix-test`, `(cd ui && npm test)` | every change |
 | full | `make test`, then `make test-linux` (CI's Ubuntu) | before pushing; CI |
-| browser | `(cd ui && npm run e2e)` | changes to anything the board draws |
+| browser | `(cd ui && npm run e2e)` | changes to anything the board draws; CI, as the Journeys job |
 | opt-in | real harness smoke, `scripts/test-bootstrap.sh`, `integration`-tagged tests | when touching what they cover |
 
 ```bash
@@ -73,7 +73,7 @@ make mix-test              # full Elixir suite; shells both CLIs on PATH, so `ma
 (cd daemon && mix test --only focus)  # tagged subset
 (cd ui && npm test)        # the board suite; vitest, once, under
                            # TZ=America/Los_Angeles
-(cd ui && npm run e2e)     # builds the file:// harness and tests the workspace in system Chrome
+(cd ui && npm run e2e)     # builds the file:// harness and runs every browser journey on a headless Chrome
 make plugin-hooks-test     # shell shims, Pi adapter, handoff policy and transcript pipe tests
 bash scripts/test-plugin-hooks.sh  # the shell hook shims, HOME and PATH sandboxed
 node extensions/pi/real-handoff.mjs  # opt-in real Pi engine; isolated synthetic provider, no credentials
