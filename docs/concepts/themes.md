@@ -112,9 +112,6 @@ These hooks are stable; renaming or removing one is a theme-breaking change.
 | `[data-part='thumbnail']` | Shared preview's UI paper |
 | `[data-part='thumbnail-face']` | Designed text face beneath a loaded preview |
 | `[data-part='phone-topbar']` | Reader navbar; top bar on phone |
-| `[data-part='page-sheet']` | Modal sent-files list and phone thread sheet |
-| `[data-part='page-sheet-panel']` | Files-and-threads sheet's paper panel |
-| `[data-part='page-sheet-row']` | One dated sent-file choice |
 | `[data-part='audio-page']` | Listening page and comparison list |
 | `[data-part='audio-waveform']` | Canvas; its CSS `color` sets the played waveform ink |
 

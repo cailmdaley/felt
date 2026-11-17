@@ -243,13 +243,15 @@ export class FamilyPage {
     this.name.textContent = slug(card)
     const waits = this.feeds.waits(), want = wantOf(card, waits), faint = attentionOf(card, waits) === 'quiet' ? quietWord(card) : ''
     this.facts.replaceChildren(...want && WANT_WORD[want.kind] ? [el('span', 'ov-needs', WANT_WORD[want.kind])] : faint ? [el('span', 'ov-word', faint)] : [], timeEl(doing(card, waits, this.feeds.said(card)).at, now, 'ov-time'))
-    // Its pages are drawn again; the one in focus keeps it.
-    const part = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.ws-doc-button')
-    const kept = part && this.docs.contains(part) ? part.dataset.part : undefined
-    const docs = docButtons(card, this.feeds)
-    this.docs.replaceWith(docs)
-    this.docs = docs
-    if (kept) docs.querySelector<HTMLElement>(`[data-part="${kept}"]`)?.focus({ preventScroll: true })
+    // Its pages are drawn again, the one in focus keeping it; not while a list hangs from one, whose focus returns there.
+    if (!this.docs.querySelector('[aria-expanded="true"]')) {
+      const part = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.ws-doc-button')
+      const kept = part && this.docs.contains(part) ? part.dataset.part : undefined
+      const docs = docButtons(card, this.feeds)
+      this.docs.replaceWith(docs)
+      this.docs = docs
+      if (kept) docs.querySelector<HTMLElement>(`[data-part="${kept}"]`)?.focus({ preventScroll: true })
+    }
     this.name.previousElementSibling!.replaceWith(stateDot(card, waits, () => {}))
     if (this.actsFor && !this.acts) {
       this.acts = this.actsFor(() => this.card!)

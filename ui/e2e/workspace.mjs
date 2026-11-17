@@ -1640,8 +1640,8 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 390, height: 844 }
     await list.locator('.uf-file-row[data-key$="/brief.md"]').click()
     await list.waitFor({ state: 'detached' })
     assert.equal(await isSelected(p, 'brief.md'), true)
-    // A press outside closes it, and reaches what it lands on: here the console, which goes nowhere.
-    await opener.click(); await p.mouse.click(viewport.width / 2, viewport.height - 20)
+    // A press outside only closes it: the top bar's back under it stays put.
+    await opener.click(); await p.mouse.click(10, 10)
     await list.waitFor({ state: 'detached' })
     // The list keeps no history entry: the browser's Back leaves the reader, and the list with it.
     await opener.click(); await list.waitFor()

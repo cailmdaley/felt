@@ -13,11 +13,15 @@ export interface ConversationAction {
 
 let dismissOpenMenu: (() => void) | undefined
 
-/** Mount a temporary SDK menu outside the board's clickable rows. */
-export function openActionMenu(anchor: HTMLElement, actions: readonly ConversationAction[], label: string, point?: { x: number; y: number }): () => void {
+/**
+ * Mount a temporary SDK menu outside the board's clickable rows. An outside
+ * press closes it and reaches what it lands on, unless it is `modal`, when the
+ * press only closes it.
+ */
+export function openActionMenu(anchor: HTMLElement, actions: readonly ConversationAction[], label: string, point?: { x: number; y: number }, modal = false): () => void {
   dismissOpenMenu?.()
   const root = document.createElement('ui-menu')
-  root.setAttribute('modal', 'false')
+  root.setAttribute('modal', String(modal))
   const menu = document.createElement('ui-menu-content')
   menu.className = 'kbn-conversation-menu'
   menu.setAttribute('aria-label', label)

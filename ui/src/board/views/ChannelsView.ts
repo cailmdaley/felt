@@ -885,7 +885,7 @@ export class ChannelsView implements TemporalView {
     if (!made) return
     void this.ctx?.workspace?.globeHost.feeds.lead(item.card).then(lead => {
       if (!lead || made.lead?.key === lead.key || this.unfolds.get(id) !== made) return
-      made.lead = { key: lead.key, name: lead.name }
+      made.lead = { key: lead.key, name: lead.name, at: lead.at }
       this.showPreviews(made)
       this.draw()
     })

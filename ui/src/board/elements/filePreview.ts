@@ -95,7 +95,7 @@ export function openFileList(anchor: HTMLElement, files: readonly UnfoldFile[], 
     const content = fileRow(file, now)
     content.toggleAttribute('data-current', file.key === current)
     return { label: file.caption ? `${file.name}: ${file.caption}` : file.name, content, run: () => open(file.key) }
-  }), `${files.length} ${files.length === 1 ? 'file' : 'files'}`)
+  }), `${files.length} ${files.length === 1 ? 'file' : 'files'}`, undefined, true)
 }
 
 /** The bar's two drawn controls, in the stroke the board's icons use. */
