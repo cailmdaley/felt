@@ -562,27 +562,26 @@ it('hides a channel and does nothing else: one write, the dismissal, and no life
   expect(asked.filter(([url]) => LIFECYCLE.test(url))).toStrictEqual([])
 })
 
-it('rings the threads running now and lists them as thread rows from the ring; the strand names what it gathers where it is', async () => {
+it('rings the threads with a live worker, what waits first, and lists them as thread rows from the ring; the strand names what it gathers where it is', async () => {
   daemon()
-  const { host, openFromDesk } = await mount()
+  // The mask asks from a live worker and the chair is idle at the end of its turn: both run. The van asks with no worker, and the notes are a draft: neither runs.
+  const { host, openFromDesk } = await mount([chair, tsz, { ...mask, ...idle(20) }, beam, van, notes])
   const ring = host.querySelector<HTMLButtonElement>('.kbn-ch-count-ring')!
-  // The beam's life runs in from before the stream; the expert's started 40 minutes ago; the mask, launched before the reach, asks in it with nothing else there; none has ended.
-  expect([ring.hidden, ring.textContent, ring.title]).toStrictEqual([false, '3', '3 running: mask, beam, tsz'])
+  expect([ring.hidden, ring.textContent, ring.title]).toStrictEqual([false, '4', '4 running: mask, beam, tsz, cmbx'])
   expect([...host.querySelectorAll('.kbn-ch-gathered > title')].every(title => / gathered here: /.test(title.textContent!))).toBe(true)
   ring.click(); await settle()
   const rows = [...document.querySelectorAll<HTMLElement>('[role="menuitem"] .thread-row')]
-  expect(rows.map(row => [row.querySelector('.thread-row-slug')!.textContent, row.querySelector('.thread-row-doing')!.textContent])).toStrictEqual([['mask', 'Mask at 5σ or 3σ?'], ['beam', 'working'], ['tsz', 'working']])
+  expect(rows.map(row => [row.querySelector('.thread-row-slug')!.textContent, row.querySelector('.thread-row-doing')!.textContent])).toStrictEqual([['mask', 'Mask at 5σ or 3σ?'], ['beam', 'working'], ['tsz', 'working'], ['cmbx', 'idle']])
   rows[2].click(); await settle(); await settle()
   expect(openFromDesk).toHaveBeenLastCalledWith(tsz)
 })
 
 it('redraws the ring when the threads running change and nothing drawn does', async () => {
-  const human = { label: 'Sam' }
-  // The chair said one line, cleared: it runs with nothing of it drawn.
-  daemon([], undefined, {}, { board: { C: [...BOARD.C, record({ id: 'p1', kind: 'post', fiber: 'C', to: human, text: 'Done for today.' }, 10)] }, dismissed: [`line:${Date.now()}:p1`] })
+  daemon()
   const { view, ctx, host } = await mount([chair, tsz, beam])
   expect(host.querySelector('.kbn-ch-count-ring')!.textContent).toBe('3')
-  ctx.response = board([{ ...chair, status: 'open', column: 'resting' }, tsz, beam])
+  // The chair's worker stops, its line in the stream unchanged.
+  ctx.response = board([{ ...chair, workerState: undefined, runtimePhase: undefined }, tsz, beam])
   view.refresh(ctx); await settle()
   expect(host.querySelector('.kbn-ch-count-ring')!.textContent).toBe('2')
 })

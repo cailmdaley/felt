@@ -6,8 +6,8 @@ import type { KanbanCard } from '../KanbanTypes.js'
 import { boardCards, threadIndexFor } from '../KanbanSurfaces.js'
 import { isMobileViewport } from '../mobile.js'
 import {
-  arranged, clearLineKey, clearedLines, lineIds, composeChannels, composeStream, fiberOf, hideKey, railOrder, reordered, showKey, unclearLineKey, unpinKey,
-  type Channel, type Entry, type Item, type Station, type Stream,
+  arranged, clearLineKey, clearedLines, lineIds, composeChannels, composeStream, fiberOf, runningIn, hideKey, railOrder, reordered, showKey, unclearLineKey, unpinKey,
+  type Channel, type Entry, type Item, type Station,
 } from '../channels.js'
 import { layTube, rowHeight, runsOf, tautness, type Tube, type TubeLine } from '../tube.js'
 import { drawMargin, tautAlong, type MarginRow } from '../margin.js'
@@ -155,7 +155,7 @@ export class ChannelsView implements TemporalView {
   private away = false
   /**
    * The threads running now in this channel, as the stream was last drawn:
-   * each with a life not yet ended, what waits on the human first, then what
+   * each with a live worker ({@link runningIn}), what waits on the human first, then what
    * works, each by its latest activity. The ring counts them, and it and the
    * bundle list them.
    */
@@ -328,7 +328,7 @@ export class ChannelsView implements TemporalView {
     })
   }
   /** A channel's stream: what its families' records, its sent files and its threads' launches make of it. */
-  private streamOf(channel: Channel, ctx = this.ctx!): Stream {
+  private streamOf(channel: Channel, ctx = this.ctx!): Entry[] {
     const workspace = ctx.workspace!
     return composeStream({
       channel, records: workspace.board.records(channel.families), files: ctx.sends?.files ?? [], waits: workspace.board.waiting,
@@ -339,7 +339,7 @@ export class ChannelsView implements TemporalView {
   /** How many things addressed to the human arrived in the channel since this device last read it. */
   private unread(channel: Channel): number {
     const seen = lastSeen(channel.key)
-    return this.streamOf(channel).entries.filter(entry => entry.kind !== 'station' && entry.arrived > seen).length
+    return this.streamOf(channel).filter(entry => entry.kind !== 'station' && entry.arrived > seen).length
   }
   private status(text: string): void { if (this.note) this.note.textContent = text }
   /** The order and the hides lapse with the board's reach, so while they stand they are written again. */
@@ -569,7 +569,7 @@ export class ChannelsView implements TemporalView {
       this.rows.clear()
       return
     }
-    const now = Date.now(), { entries, running } = this.streamOf(channel), failed = channel.families.some(uid => this.ctx!.workspace!.board.failed(uid))
+    const now = Date.now(), entries = this.streamOf(channel), failed = channel.families.some(uid => this.ctx!.workspace!.board.failed(uid))
     const seat = channel.seat
     // The head and the stream are drawn apart, so what arrives leaves a focused page or an open menu in the head be;
     // the head waits while a list hangs from its pages, whose count follows the chair's files in place.
@@ -588,7 +588,7 @@ export class ChannelsView implements TemporalView {
       menu.button.setAttribute('aria-haspopup', 'menu')
       this.head.replaceChildren(this.railToggle!.root, back.root, name, this.pages.el, menu.root)
     } else this.pages?.refresh()
-    const waits = this.ctx!.workspace!.board.waiting
+    const waits = this.ctx!.workspace!.board.waiting, running = ranked(runningIn(channel), waits)
     // A row draws an entry; the thread's state, which moves while its worker runs, is painted on it in place.
     // A line follows the one before it in its group: the row above, of the same thread, moments before.
     const grouped = entries.map((entry, row) => { const before = entries[row - 1]; return entry.kind !== 'station' && before?.kind !== 'station' && groups(before, entry) })
@@ -621,7 +621,7 @@ export class ChannelsView implements TemporalView {
       const tube = layTube(entries, heights, { parentOf, grouped, active: line => attentionOf(line.card, waits) === 'working' })
       this.tube = { tube, grouped, margin, taut: tautAlong(tube, entries.map(entry => entry.at), line => runs(line.card), tautness) }
       this.stream.style.setProperty('--kbn-ch-tube', `${margin}px`)
-      this.running = ranked(running, waits)
+      this.running = running
       const count = el('li', 'kbn-ch-count'), ring = button('kbn-ch-count-ring', String(this.running.length), () => this.bundleMenu())
       ring.hidden = !this.running.length
       ring.title = this.runningTitle()

@@ -177,12 +177,15 @@ try {
       // Its ink costs a few milliseconds a painting (about 3 on a laptop); the bound leaves room for a slow runner.
       const inked = await page.evaluate(() => performance.getEntriesByName('kbn-ch-ink').map(each => each.duration))
       assert.ok(inked.length && Math.max(...inked.slice(1)) < 30, `margin paintings took ${inked.map(ms => ms.toFixed(1)).join(', ')}ms`)
-      // The ring counts the threads running now; the strand lists that same set, one thread row each, none twice.
+      // The ring counts the threads with a live worker, and its list names exactly them, one thread row each, what waits first:
+      // not the seats at rest, the standing digest between runs, the draft or the thread put to rest.
       await page.locator('.kbn-ch-count-ring').click()
       await page.waitForFunction(() => document.querySelectorAll('[role="menuitem"]').length > 0)
       const listed = await page.evaluate(() => [...document.querySelectorAll('[role="menuitem"] .thread-row-slug')].map(el => el.textContent))
       assert.equal(listed.length, Number(await page.locator('.kbn-ch-count-ring').textContent()))
-      assert.equal(new Set(listed).size, listed.length)
+      assert.deepEqual([...listed].sort(), ['blinding', 'bmodes', 'chains', 'depth', 'east', 'ia', 'paper', 'photoz', 'psf', 'rho', 'shear-2pt', 'unions', 'west'])
+      const attention = await page.evaluate(() => [...document.querySelectorAll('[role="menuitem"] .thread-row')].map(row => row.dataset.attention))
+      assert.deepEqual(attention, [...attention].sort((a, b) => Number(a !== 'waiting') - Number(b !== 'waiting')))
       await shot(page, 'desktop-bundle-menu')
       await page.keyboard.press('Escape')
       await shot(page, 'desktop-busy')

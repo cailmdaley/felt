@@ -1,4 +1,4 @@
-import type { KanbanCard } from './KanbanTypes.js'
+import { hasLiveWorker, type KanbanCard } from './KanbanTypes.js'
 import { clearable, lastActive, wantOf, type Waits } from './attention.js'
 import { arrived, type BoardRecord } from './boardFeed.js'
 import { latestSends, type SentFile } from './sentFiles.js'
@@ -253,8 +253,6 @@ export type Ending = 'closed' | 'tempered' | 'discarded' | 'rested'
  */
 export interface Station { kind: 'station'; id: string; card: KanbanCard; at: number; what: 'start' | 'tick' | 'end'; end?: Ending; line: string }
 export type Entry = Item | Station
-/** A channel's stream: its entries, oldest first, and the threads running in it now, whether or not anything of theirs is drawn. */
-export interface Stream { entries: Entry[]; running: KanbanCard[] }
 
 /** A close's verdict as the line's terminus. */
 const ending = (verdict: string | undefined): Ending => verdict === 'tempered' || verdict === 'discarded' ? verdict : 'closed'
@@ -286,8 +284,7 @@ const LINES: Readonly<Record<string, Item['kind']>> = { asked: 'ask', post: 'pos
  * as does the life of a thread that said something in reach with none of
  * those there, unless it is closed or at rest; one still running runs out at
  * its foot. An item said within a life is on its
- * line. A thread whose life runs now is running, though the human cleared
- * all it said; one that said nothing in reach and launched before it is not.
+ * line.
  */
 export function composeStream(input: {
   channel: Channel
@@ -300,7 +297,7 @@ export function composeStream(input: {
   cleared: ReadonlyMap<string, number>
   now: number
   reachMs: number
-}): Stream {
+}): Entry[] {
   const { channel, records, files, waits, launches, cleared, now, reachMs } = input
   const reach = now - reachMs
   const named = new Map<string, KanbanCard>()
@@ -371,7 +368,6 @@ export function composeStream(input: {
     } else if (cleared.has(item.id)) continue
     stream.push(item)
   }
-  const running: KanbanCard[] = []
   for (const card of channel.everyone) {
     const lives = livesOf(card, events.get(fiberOf(card)) ?? [])
     // Something said in reach, cleared or not, and no launch, handoff, rest or close there: a life begun before the reach, running unless it has stopped since.
@@ -379,7 +375,6 @@ export function composeStream(input: {
       lives.push({ line: `${fiberOf(card)}:0`, from: -Infinity, to: Infinity, stations: [] })
     }
     stream.push(...lives.flatMap(life => life.stations))
-    if (lives.at(-1)?.to === Infinity) running.push(card)
     for (const item of stream) {
       if (item.kind === 'station' || item.card !== card) continue
       const life = lives.find(each => each.from <= item.at && item.at <= each.to)
@@ -388,7 +383,12 @@ export function composeStream(input: {
   }
   // At one instant, one thread's earlier life comes before its later one: its end, then the next start.
   const life = (entry: Entry): number => Number(entry.line?.slice(entry.line.lastIndexOf(':') + 1) ?? 0)
-  return { entries: stream.sort((a, b) => a.at - b.at || (a.card === b.card ? life(a) - life(b) : 0) || rank(a) - rank(b) || a.id.localeCompare(b.id)), running }
+  return stream.sort((a, b) => a.at - b.at || (a.card === b.card ? life(a) - life(b) : 0) || rank(a) - rank(b) || a.id.localeCompare(b.id))
+}
+
+/** The threads running in a channel now: each with a live worker, once per fiber. */
+export function runningIn(channel: Channel): KanbanCard[] {
+  return [...new Map(channel.everyone.filter(hasLiveWorker).map(card => [fiberOf(card), card])).values()]
 }
 
 /** What a thread's line is made of: a launch, a handoff, a close (with its verdict), or a rest. */

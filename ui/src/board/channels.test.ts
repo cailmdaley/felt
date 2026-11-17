@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { RECENT_MS, arranged, clearLineKey, clearedLines, composeChannels, composeStream, hideKey, lineIds, railOrder, reordered, sendId, showKey, unclearLineKey, unpinKey, type Channel, type Entry, type Item } from './channels.js'
+import { RECENT_MS, arranged, clearLineKey, clearedLines, composeChannels, composeStream, hideKey, lineIds, railOrder, reordered, runningIn, sendId, showKey, unclearLineKey, unpinKey, type Channel, type Entry, type Item } from './channels.js'
 import type { BoardRecord, Wait } from './boardFeed.js'
 import { card } from './testFixtures.js'
 import { ThreadIndex } from './threads.js'
@@ -182,9 +182,8 @@ describe('composeStream', () => {
   const files = [send('K', 'deck.html', 120, 'First pass.'), send('K', 'deck.html', 33, 'The final deck.'), send('K', 'spectrum.svg', 30, '9σ.'), send('C', 'plan.md', 300)]
   const launches = new Map([['K', [now - 60 * minute]], ['B', [now - 35 * minute]]])
   const waits = new Map([['V', { id: 'r3m', at: now - 20 * minute }]])
-  const streamOf = (over: Partial<Parameters<typeof composeStream>[0]> = {}) =>
+  const stream = (over: Partial<Parameters<typeof composeStream>[0]> = {}): Entry[] =>
     composeStream({ channel, records, files, waits, launches: card => launches.get(card.uid!) ?? [], cleared: new Map(), now, reachMs, ...over })
-  const stream = (over: Partial<Parameters<typeof composeStream>[0]> = {}): Entry[] => streamOf(over).entries
   const said = (entries: Entry[]) => entries.map(entry => entry.kind === 'station' ? [entry.card.id, entry.what, ...entry.end ? [entry.end] : []] : [entry.card.id, entry.kind, entry.text, entry.waiting])
 
   it('holds everything addressed to the human, with its threads\' lives as stations between, oldest first', () => {
@@ -261,12 +260,14 @@ describe('composeStream', () => {
     expect(entries.some(entry => entry.kind === 'file' && entry.files.includes(early))).toBe(true)
   })
 
-  it('counts a thread running though the human cleared all it said, and not one that said nothing in reach', () => {
-    const plan = stream().find((entry): entry is Item => entry.kind === 'file' && entry.card === chair)!
-    expect(streamOf().running).toContain(chair)
-    const cleared = streamOf({ cleared: clearedLines(lineIds(plan).map(id => clearLineKey(id, now))) })
-    expect([cleared.entries.some(entry => entry.card === chair), cleared.running.includes(chair)]).toStrictEqual([false, true])
-    expect(streamOf({ files: files.filter(file => file.uid !== 'C') }).running).not.toContain(chair)
+  it('counts as running the threads with a live worker, once each, whatever the stream holds of their lives', () => {
+    // A standing thread between runs, whose last run re-armed it with no rest or close, and a draft: no worker, not running.
+    const weekly = card({ id: 'cmbx/weekly', uid: 'W', orchestrator: 'C', status: 'active', shuttleKind: 'standing' })
+    const draft = card({ id: 'cmbx/draft', uid: 'D', orchestrator: 'C', status: 'open' })
+    // A worker whose life ended at a close it made, still live: running.
+    const closer = card({ id: 'cmbx/closer', uid: 'L', orchestrator: 'C', ...working(1), status: 'closed' })
+    const all = { ...channel, everyone: [...channel.everyone, weekly, draft, closer, { ...kappa }] }
+    expect(runningIn(all).map(each => each.id).sort()).toStrictEqual(['cmbx', 'cmbx/beam', 'cmbx/closer', 'cmbx/kappa'])
   })
 
   it('keeps out what was not addressed to the human: posts and closes to others, the human\'s lines, workers\' messages to each other', () => {
@@ -361,7 +362,7 @@ describe('a thread\'s lives', () => {
   const channel = named(compose([hub, thread]), 'channel:unions')
   const record = (id: string, kind: string, fiber: string, minutes: number, over: Partial<BoardRecord> = {}): BoardRecord => ({ id, kind, fiber, by: { fiber }, timestamp: now - minutes * minute, ...over })
   const stations = (records: BoardRecord[], launches: Record<string, number[]>) =>
-    composeStream({ channel, records, files: [], waits: new Map(), launches: each => (launches[each.uid!] ?? []).map(minutes => now - minutes * minute), cleared: new Map(), now, reachMs }).entries
+    composeStream({ channel, records, files: [], waits: new Map(), launches: each => (launches[each.uid!] ?? []).map(minutes => now - minutes * minute), cleared: new Map(), now, reachMs })
       .flatMap(entry => entry.kind === 'station' ? [[entry.card.uid, entry.what, entry.line, ...entry.end ? [entry.end] : []]] : [])
 
   it('starts once per run however often its session is resumed, ticks a handoff, and starts again only after it ended', () => {
