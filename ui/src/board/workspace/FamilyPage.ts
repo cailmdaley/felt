@@ -154,14 +154,25 @@ export class FamilyPage {
   follow(key: DocKey): void {
     if (this.unfold.unfolded) this.unfold.unfold(key)
   }
-  /** `t`: opens the constitution's tapestry, else its newest sent file. */
+  /** `l` away from the rows: unfolds the constitution's tapestry (else its newest sent file) here, or folds it if it is the one unfolded. */
   openLead(): void {
     const card = this.card
     if (!card) return
     void this.feeds.lead(card).then(lead => {
       const doc = lead?.key ?? this.feeds.files(card)[0]?.key
-      if (doc) this.feeds.open(card, doc)
+      if (doc) this.show(card, doc)
     })
+  }
+  /**
+   * One of its pages, asked for from its head: a file the view holds (its
+   * tapestry, a sent file) unfolds below, in sight, or folds if it is the one
+   * unfolded; any other page (its constitution, its edits) opens in the reader.
+   */
+  private show(card: KanbanCard, doc: DocKey): void {
+    if (!this.shown?.files.has(doc)) { this.feeds.open(card, doc); return }
+    if (this.unfold.unfolded === doc) { this.unfold.fold(); return }
+    this.unfold.unfold(doc)
+    this.unfold.el.scrollIntoView({ block: 'start' })
   }
 
   private repaint(): void {
@@ -247,7 +258,7 @@ export class FamilyPage {
     if (!this.docs.querySelector('[aria-expanded="true"]')) {
       const part = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.ws-doc-button')
       const kept = part && this.docs.contains(part) ? part.dataset.part : undefined
-      const docs = docButtons(card, this.feeds)
+      const docs = docButtons(card, { ...this.feeds, open: (each, doc) => this.show(each, doc) })
       this.docs.replaceWith(docs)
       this.docs = docs
       if (kept) docs.querySelector<HTMLElement>(`[data-part="${kept}"]`)?.focus({ preventScroll: true })

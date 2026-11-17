@@ -104,7 +104,7 @@ describe('a constitution\'s view', () => {
     expect(threads(page).map(([name]) => name)).toContain('qp')
     expect(page.el.querySelector('.ov-quiet')!.textContent).toBe('1 quiet')
   })
-  it('says what it last posted, then its tapestry at full width, which unfolds in place and steps on through its sent files; its head opens its pages', async () => {
+  it('says what it last posted, then its tapestry at full width, which unfolds in place and steps on through its sent files; its head unfolds its files there and opens its other pages', async () => {
     const { page, feeds } = made(mid)
     await settle()
     expect(page.el.querySelector('.ov-said-text')!.textContent!.trim()).toBe('Posted the cut.')
@@ -127,14 +127,26 @@ describe('a constitution\'s view', () => {
     expect(feeds.open).not.toHaveBeenCalled()
     const parts = [...page.el.querySelectorAll<HTMLElement>('.ov-head .ws-doc-button')].map(button => button.dataset.part)
     expect(parts).toStrictEqual(['constitution', 'tapestry', 'sends', 'edits'])
-    // The count lists its files, newest first; a row opens its file.
+    // The count lists its files, newest first; a row unfolds its file here.
     page.el.querySelector<HTMLButtonElement>('.ov-head [data-part="sends"]')!.click()
     await settle()
     const rows = [...document.querySelectorAll<HTMLElement>('.kbn-conversation-menu .uf-file-row')]
     expect(rows.map(row => row.dataset.key)).toStrictEqual(sent.map(file => file.key))
     rows[0].closest('button')!.click()
     await settle(); await settle()
-    expect(feeds.open).toHaveBeenLastCalledWith(mid, sent[0].key)
+    expect(bar()).toStrictEqual(['new.png', '2 / 3'])
+    // The tapestry's button unfolds it in the same place, in place of the file; pressed again, it folds.
+    const tapestryButton = (): HTMLButtonElement => page.el.querySelector<HTMLButtonElement>('.ov-head [data-part="tapestry"]')!
+    tapestryButton().click()
+    expect(bar()).toStrictEqual(['Tapestry', '1 / 3'])
+    tapestryButton().click()
+    expect(page.el.querySelector('.uf[data-unfolded]')).toBeNull()
+    // l does the same; the constitution's page still opens in the reader.
+    page.openLead(); await settle()
+    expect(bar()).toStrictEqual(['Tapestry', '1 / 3'])
+    expect(feeds.open).not.toHaveBeenCalled()
+    page.el.querySelector<HTMLButtonElement>('.ov-head [data-part="constitution"]')!.click()
+    expect(feeds.open).toHaveBeenCalledExactlyOnceWith(mid, 'fiber:local:hub/mid')
   })
 
   it('counts the file its strip shows as seen, and only while it is new', async () => {

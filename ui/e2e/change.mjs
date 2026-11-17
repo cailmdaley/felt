@@ -155,9 +155,10 @@ export function registerChangeJourneys(test) {
     const route = () => new URL(page.url()).hash
     const desk = route()
     await page.locator(`.kbn-desk .kbn-family[title*="Calibrate the shear response"] .kbn-family-head`).click()
-    // The view's head opens its tapestry in the reader.
+    // The view's head unfolds its tapestry in the view; full screen opens it in the reader.
     await page.locator('.ws-selected .ov-head [data-part="tapestry"]').click()
-    await page.locator('.ws-selected iframe').waitFor()
+    await page.locator('.ws-selected .ov-unfold[data-unfolded] .uf-full').click()
+    await page.locator('.ws-selected:not([data-key^="family:"]) iframe').waitFor()
     const link = page.frameLocator('.ws-selected iframe').getByRole('link', { name: 'Read the change →' })
     await link.waitFor()
     await page.locator('.ws-selected .kbn-fileview-loading').waitFor({ state: 'detached' })

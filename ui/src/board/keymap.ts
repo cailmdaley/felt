@@ -177,7 +177,7 @@ export const helpSections: readonly HelpSection[] = [
   { title: 'A constitution\'s view', note: 'Its orchestrators above, its threads below; choosing one opens its view, and that moves voice and Rex. Scrolling up past the top opens the orchestrator\'s.', rows: [
     row(['j', 'k', '↓', '↑'], 'Next / previous orchestrator or thread', []),
     row(['Enter', 'l'], 'Open the one in focus', []),
-    row(['l'], 'Away from the rows: open its tapestry, else its newest sent file', on('reader', 'tapestry')),
+    row(['l'], 'Away from the rows: unfold its tapestry here, else its newest sent file', on('reader', 'tapestry')),
     row(['h'], 'Open its orchestrator\'s view; from the top of the family, back', []),
     row(['c'], 'Open its conversation in Rex', []),
   ] },
