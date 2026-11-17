@@ -175,7 +175,7 @@ export class ChannelsView implements TemporalView {
   private drawer = false
   private dismissed: string[] = []
   private pending: string[] = []
-  /** Each line's latest clear, by the line's id: the wait it cleared, and its writes (the clear's, and its undo's once asked) settling. */
+  /** Each line's clear still being written, by the line's id: the wait it cleared, and its writes (the clear's, and its undo's once asked) settling. */
   private readonly lineClears = new Map<string, { clears?: string; settled: Promise<unknown> }>()
   private pinned = new Map<string, number>()
   /** The human's order of the channels, and when it was written. */
@@ -905,7 +905,13 @@ export class ChannelsView implements TemporalView {
       if (before) await before.settled
       return waits && board ? board.clear(waits) : undefined
     })()
-    this.lineClears.set(item.id, { settled: clearing.catch(() => {}), clears: waits })
+    // Held while its writes are in flight, and let go once they land, so a later clear goes by what waits then.
+    const hold = (settled: Promise<unknown>): void => {
+      const entry = { clears: waits, settled }
+      this.lineClears.set(item.id, entry)
+      void settled.then(() => { if (this.lineClears.get(item.id) === entry) this.lineClears.delete(item.id) })
+    }
+    hold(clearing.catch(() => {}))
     // Each line's write once it starts, true when it was written.
     const sent = new Map<(typeof lines)[number], Promise<boolean>>()
     let undone = false
@@ -916,9 +922,9 @@ export class ChannelsView implements TemporalView {
       const backAt = Date.now(), backs = [...sent.keys()].map(line => ({ line, key: unclearLineKey(line.id, backAt) }))
       this.pending.push(...backs.map(back => back.key))
       this.draw()
-      this.lineClears.set(item.id, { clears: waits, settled: clearing.then(cleared => {
+      hold(clearing.then(cleared => {
         if (waits && board && cleared !== undefined) return board.unclear(waits, cleared).catch(() => this.status(`${item.card.name}'s post could not be brought back; it stays cleared.`))
-      }, () => {}) })
+      }, () => {}))
       void fewAtATime(backs, CLEAR_WRITES, async back => await sent.get(back.line) ? write(back.key, 'Undo failed') : (drop([back.key]), true)).then(done => {
         if (done.every(Boolean)) return
         this.draw()

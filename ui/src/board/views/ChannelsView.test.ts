@@ -682,6 +682,25 @@ it('clears a waiting post again after an undo while its first clear is still bei
   expect([item(host, 'cmbx'), ctx.workspace!.board.waiting.has('C')]).toStrictEqual([undefined, false])
 })
 
+it('clears an old post by what waits now once its earlier clear and undo have landed, leaving a newer wait be', async () => {
+  const human = { label: 'Sam' }, posted = Date.now() - 4 * minute
+  const { posts } = daemon([], undefined, {}, { board: { C: [...BOARD.C, { ...record({ id: 'b5', kind: 'post', fiber: 'C', to: human, text: 'Two calls for you today.' }, 4), timestamp: posted }] }, waiting: { C: { id: 'b5', at: posted } } })
+  const { ctx, host } = await mount([chair, tsz, beam])
+  item(host, 'cmbx').querySelector<HTMLButtonElement>('.kbn-ch-clear')!.click()
+  await settle(); await settle()
+  document.querySelector<HTMLButtonElement>('.shuttle-toast .toast-undo')!.click()
+  for (let n = 0; n < 4; n++) await settle()
+  // The chair asks since: what waits is its question, not the post.
+  const board = ctx.workspace!.board as unknown as { lines: Map<string, { id: string; at: number }>; settle(): boolean; changed(): void }
+  board.lines.set('C', { id: 'q1', at: Date.now() })
+  board.settle(); board.changed(); await settle()
+  const from = posts.length
+  ;[...host.querySelectorAll<HTMLElement>('.kbn-ch-item')].find(each => each.querySelector('[data-item="item:b5"]'))!.querySelector<HTMLButtonElement>('.kbn-ch-clear')!.click()
+  for (let n = 0; n < 4; n++) await settle()
+  expect(posts.slice(from).map(([, body]) => String(body.key)).filter(key => key.startsWith('clear:'))).toStrictEqual([])
+  expect(ctx.workspace!.board.waiting.get('C')?.id).toBe('q1')
+})
+
 it('reads the tapestry of each fiber\'s newest close only, and reckons a close\'s row with a tapestry only when it shows one', async () => {
   const human = { label: 'Sam' }
   const cov = card({ id: 'cmbx/cov', uid: 'V', name: 'Covariance', orchestrator: 'C', column: 'tempered', status: 'closed', closedAt: at(20), outcome: 'Validated.' })
