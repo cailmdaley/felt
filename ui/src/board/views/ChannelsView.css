@@ -82,9 +82,8 @@
 .kbn-ch-pick[aria-current] { color: var(--kbn-ink); background: color-mix(in srgb, var(--kbn-owed-bright) 16%, transparent); }
 .kbn-ch-pick-hash { flex: none; width: 0.7em; color: var(--kbn-ink-muted); }
 .kbn-ch-pick-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-/* A channel's name is set in the serif's small caps, as the board sets its labels; a lone constitution's a size down and muted. */
-.kbn-ch-pick-name { font-size: var(--type-prose); font-weight: 500; font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
-.kbn-ch-pick[data-lone] .kbn-ch-pick-name { font-size: var(--type-row); font-weight: 400; }
+/* A chaired channel's name is written as Slack writes it: lowercase, in the monospace. */
+.kbn-ch-pick:not([data-lone]) .kbn-ch-pick-name { font-family: var(--font-sign); font-size: var(--type-row); }
 .kbn-ch-pick[data-unread] .kbn-ch-pick-name { color: var(--kbn-ink); }
 .kbn-ch-pick[data-lone] { font-size: var(--type-meta); color: var(--kbn-ink-muted); }
 .kbn-ch-pick[data-lone] .kbn-ch-pick-hash { opacity: 0.6; }
