@@ -144,7 +144,7 @@ would start, a different version, it ends by saying so, with both versions and
 the command that brings the daemon level:
 
 ```text
-The Shuttle daemon running on this host is 2.0.0 (CLI contract 37); these CLIs are 3.0.0 (CLI contract 48). Until they match, messages to live workers are queued and not delivered.
+The Shuttle daemon running on this host is 2.0.0 (CLI contract 37); these CLIs are 2.1.0 (CLI contract 49). Until they match, messages to live workers are queued and not delivered.
 Bring it level: shuttle daemon upgrade
 ```
 

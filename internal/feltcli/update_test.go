@@ -356,8 +356,8 @@ func TestUpdateRefreshRealExecutableSealsItsOwnBuild(t *testing.T) {
 func TestUpdateRefreshReportsWhatShuttleSaysOfTheDaemon(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ name, answer, want string }{
-		{"stale daemon", "The Shuttle daemon running on this host is 2.0.0; these CLIs are 3.0.0.\nBring it level: shuttle daemon upgrade\n",
-			"\nThe Shuttle daemon running on this host is 2.0.0; these CLIs are 3.0.0.\nBring it level: shuttle daemon upgrade\n"},
+		{"stale daemon", "The Shuttle daemon running on this host is 2.0.0; these CLIs are 2.1.0.\nBring it level: shuttle daemon upgrade\n",
+			"\nThe Shuttle daemon running on this host is 2.0.0; these CLIs are 2.1.0.\nBring it level: shuttle daemon upgrade\n"},
 		{"matching or absent daemon", "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

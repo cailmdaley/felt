@@ -124,11 +124,11 @@ func TestFiberMessageOnACheckoutBuiltHostWaitsForTheDeploy(t *testing.T) {
 	})
 	isolateMessageFiberStore(env, store)
 	release := checkoutRelease(t)
-	fakeRelease(t, release, "3.0.0")
+	fakeRelease(t, release, "2.1.0")
 	env.Set("SHUTTLE_RELEASE", release)
 	deliver, requests := dormantDeliverStub(http.StatusAccepted, `{"queued":true}`)
 	daemonStub(t, env, map[string]http.HandlerFunc{
-		"/api/v1/version": versionBody("hub", "3.0.0", ShuttleContractLevel-1),
+		"/api/v1/version": versionBody("hub", "2.1.0", ShuttleContractLevel-1),
 		"/api/v1/deliver": deliver,
 	})
 	_, _, err := runMessage(t, newApp(env), "work/worker", "hello")
@@ -178,13 +178,13 @@ func TestDaemonCheckSaysHowTheDaemonDiffersFromTheseCLIs(t *testing.T) {
 		want      []string
 	}{
 		{name: "running stale daemon", running: versionBody("hub", "2.0.0", ShuttleContractLevel-11),
-			want: []string{fmt.Sprintf("The Shuttle daemon running on this host is 2.0.0 (CLI contract %d); these CLIs are 3.0.0 (CLI contract %d).", ShuttleContractLevel-11, ShuttleContractLevel), "messages to live workers are queued and not delivered", "Bring it level: shuttle daemon upgrade\n"}},
-		{name: "running daemon at another version of this contract", running: versionBody("hub", "3.0.1", ShuttleContractLevel),
-			want: []string{fmt.Sprintf("is 3.0.1 (CLI contract %d); these CLIs are 3.0.0", ShuttleContractLevel), "Bring it level: shuttle daemon upgrade\n"}},
-		{name: "running level daemon", running: versionBody("hub", "3.0.0", ShuttleContractLevel)},
+			want: []string{fmt.Sprintf("The Shuttle daemon running on this host is 2.0.0 (CLI contract %d); these CLIs are 2.1.0 (CLI contract %d).", ShuttleContractLevel-11, ShuttleContractLevel), "messages to live workers are queued and not delivered", "Bring it level: shuttle daemon upgrade\n"}},
+		{name: "running daemon at another version of this contract", running: versionBody("hub", "2.1.1", ShuttleContractLevel),
+			want: []string{fmt.Sprintf("is 2.1.1 (CLI contract %d); these CLIs are 2.1.0", ShuttleContractLevel), "Bring it level: shuttle daemon upgrade\n"}},
+		{name: "running level daemon", running: versionBody("hub", "2.1.0", ShuttleContractLevel)},
 		{name: "stopped stale release", installed: "2.0.0",
-			want: []string{"is 2.0.0; these CLIs are 3.0.0.\nBring it level before starting it: shuttle daemon upgrade\n"}},
-		{name: "stopped level release", installed: "3.0.0"},
+			want: []string{"is 2.0.0; these CLIs are 2.1.0.\nBring it level before starting it: shuttle daemon upgrade\n"}},
+		{name: "stopped level release", installed: "2.1.0"},
 		{name: "no daemon"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -201,7 +201,7 @@ func TestDaemonCheckSaysHowTheDaemonDiffersFromTheseCLIs(t *testing.T) {
 				env.Set("SHUTTLE_RELEASE", release)
 			}
 			app := newApp(env)
-			app.version = "3.0.0"
+			app.version = "2.1.0"
 			stdout, _, err := executeApp(t, app, "", "daemon", "check")
 			if err != nil {
 				t.Fatal(err)
@@ -256,9 +256,9 @@ func TestDaemonUpgradeReplacesTheFetchedReleaseWithThisVersion(t *testing.T) {
 		name, archived, want, home string
 		replaced                   bool
 	}{
-		{name: "verified", archived: "3.0.0", want: "installed daemon 3.0.0", home: "share/shuttle", replaced: true},
-		{name: "installed under a bin directory", archived: "3.0.0", want: "installed daemon 3.0.0", home: "bin/shuttled", replaced: true},
-		{name: "mismatched archive", archived: "2.9.9", want: `reports version "2.9.9", expected 3.0.0`, home: "share/shuttle"},
+		{name: "verified", archived: "2.1.0", want: "installed daemon 2.1.0", home: "share/shuttle", replaced: true},
+		{name: "installed under a bin directory", archived: "2.1.0", want: "installed daemon 2.1.0", home: "bin/shuttled", replaced: true},
+		{name: "mismatched archive", archived: "2.9.9", want: `reports version "2.9.9", expected 2.1.0`, home: "share/shuttle"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -268,7 +268,7 @@ func TestDaemonUpgradeReplacesTheFetchedReleaseWithThisVersion(t *testing.T) {
 			fakeRelease(t, release, "2.0.0")
 			env.Set("SHUTTLE_RELEASE", release)
 			archive := releaseArchive(t, tc.archived)
-			asset := fmt.Sprintf("/v3.0.0/shuttled_%s_%s.tar.gz", feltcli.ArchiveOS(), feltcli.ArchiveArch())
+			asset := fmt.Sprintf("/v2.1.0/shuttled_%s_%s.tar.gz", feltcli.ArchiveOS(), feltcli.ArchiveArch())
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path != asset {
 					http.NotFound(w, r)
@@ -278,7 +278,7 @@ func TestDaemonUpgradeReplacesTheFetchedReleaseWithThisVersion(t *testing.T) {
 			}))
 			t.Cleanup(server.Close)
 			app := newApp(env)
-			app.version, app.releaseDownloadBase = "3.0.0", server.URL
+			app.version, app.releaseDownloadBase = "2.1.0", server.URL
 			stdout, _, err := executeApp(t, app, "", "daemon", "upgrade")
 			got := stdout
 			if err != nil {
@@ -289,12 +289,12 @@ func TestDaemonUpgradeReplacesTheFetchedReleaseWithThisVersion(t *testing.T) {
 			}
 			wantVersion := "2.0.0"
 			if tc.replaced {
-				wantVersion = "3.0.0"
+				wantVersion = "2.1.0"
 				if !strings.Contains(stdout, "no daemon is running; `shuttle daemon start` starts this release") {
 					t.Fatalf("upgrade with no daemon running must say how to start it: %q", stdout)
 				}
 				home, _ := env.UserHomeDir()
-				if launch, err := os.ReadFile(filepath.Join(home, ".local", "bin", "shuttle-launch")); err != nil || !strings.Contains(string(launch), "launch 3.0.0") {
+				if launch, err := os.ReadFile(filepath.Join(home, ".local", "bin", "shuttle-launch")); err != nil || !strings.Contains(string(launch), "launch 2.1.0") {
 					t.Fatalf("upgrade must install the release's shuttle-launch as the installer does: %q %v", launch, err)
 				}
 			}
@@ -322,7 +322,7 @@ func TestDaemonUpgradeLeavesACheckoutBuiltRelease(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fetched.Store(true) }))
 	t.Cleanup(server.Close)
 	app := newApp(env)
-	app.version, app.releaseDownloadBase = "3.0.0", server.URL
+	app.version, app.releaseDownloadBase = "2.1.0", server.URL
 	_, _, err := executeApp(t, app, "", "daemon", "upgrade")
 	if err == nil || !strings.Contains(err.Error(), "bin/shuttle-deploy --hosts local") || fetched.Load() {
 		t.Fatalf("upgrade of a checkout-built release = %v (fetched %v)", err, fetched.Load())
@@ -342,11 +342,11 @@ func TestDaemonUpgradeFailsWhenNothingRestartsTheDaemon(t *testing.T) {
 	release := filepath.Join(t.TempDir(), "share", "shuttle")
 	fakeRelease(t, release, "2.0.0")
 	env.Set("SHUTTLE_RELEASE", release)
-	archive := releaseArchive(t, "3.0.0")
+	archive := releaseArchive(t, "2.1.0")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(archive) }))
 	t.Cleanup(server.Close)
 	app := newApp(env)
-	app.version, app.releaseDownloadBase = "3.0.0", server.URL
+	app.version, app.releaseDownloadBase = "2.1.0", server.URL
 	app.daemonPause = func(time.Duration) {}
 	app.daemonSignalPID = func(int, syscall.Signal) error { return nil }
 	_, _, err := executeApp(t, app, "", "daemon", "upgrade")
@@ -376,7 +376,7 @@ func TestDaemonUpgradeDownloadTimesOut(t *testing.T) {
 	}))
 	t.Cleanup(func() { close(stall); server.Close() })
 	app := newApp(env)
-	app.version, app.releaseDownloadBase = "3.0.0", server.URL
+	app.version, app.releaseDownloadBase = "2.1.0", server.URL
 	done := make(chan error, 1)
 	go func() {
 		_, _, err := executeApp(t, app, "", "daemon", "upgrade")
