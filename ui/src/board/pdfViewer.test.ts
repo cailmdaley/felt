@@ -42,7 +42,7 @@ import { mountPdfViewer } from './pdfViewer.js'
 afterEach(() => { pdfMocks.getDocument.mockReset(); pdfMocks.viewer = null; pdfMocks.readyScale = ''; pdfMocks.resizeObserver = null; vi.unstubAllGlobals() })
 
 describe('PDF.js viewer integration', () => {
-  it('fits page one to the pane width before readiness, keeps the chosen fit across resizes and the current page across refits, and tears down its worker signals', async () => {
+  it('fits page one to the pane width before readiness, keeps the chosen fit across resizes and the current page across refits, tears down its worker signals, and destroys the document once page one has settled', async () => {
     vi.stubGlobal('ResizeObserver', class {
       disconnected = false
       callback: () => void
@@ -57,7 +57,9 @@ describe('PDF.js viewer integration', () => {
       }
     })
     const destroy = vi.fn(async () => {})
-    pdfMocks.getDocument.mockReturnValue({ promise: Promise.resolve({ numPages: 3 }), destroy })
+    let pageOne = (): void => {}
+    const firstPage = new Promise<void>(resolve => { pageOne = resolve })
+    pdfMocks.getDocument.mockReturnValue({ promise: Promise.resolve({ numPages: 3, getPage: () => firstPage }), destroy })
     const host = document.createElement('div')
     const onReady = vi.fn()
     const mounted = mountPdfViewer(host, new ArrayBuffer(8), onReady, vi.fn())
@@ -89,7 +91,11 @@ describe('PDF.js viewer integration', () => {
     mounted.dispose()
     expect(signal.aborted).toBe(true)
     expect(pdfMocks.resizeObserver?.disconnected).toBe(true)
-    expect(destroy).toHaveBeenCalledOnce()
     expect(host.childElementCount).toBe(0)
+    // The document outlives the viewer's request for page one.
+    await Promise.resolve()
+    expect(destroy).not.toHaveBeenCalled()
+    pageOne()
+    await vi.waitFor(() => expect(destroy).toHaveBeenCalledOnce())
   })
 })

@@ -56,6 +56,7 @@ export function mountPdfViewer(
   let disposed = false
   let loadingTask: PDFDocumentLoadingTask | null = null
   let firstPageReady = false
+  let firstPage: Promise<void> | null = null
   let pageCount = 0
   const updatePageLabel = (): void => {
     if (!disposed && pageCount) pageLabel.textContent = `${viewer.currentPageNumber} / ${pageCount}`
@@ -99,7 +100,10 @@ export function mountPdfViewer(
     viewer.setDocument(null)
     linkService.setDocument(null)
     viewer.cleanup()
-    void loadingTask?.destroy()
+    // The viewer's request for page 1 settles before its document goes:
+    // destroyed under that request, pdf.js rejects a promise nothing handles.
+    const task = loadingTask
+    void (firstPage ?? Promise.resolve()).then(() => task?.destroy())
     loadingTask = null
     host.replaceChildren()
   }
@@ -115,6 +119,7 @@ export function mountPdfViewer(
       linkService.setDocument(document)
       pageCount = document.numPages
       viewer.setDocument(document)
+      firstPage = document.getPage(1).then(() => {}, () => {})
       updatePageLabel()
     } catch (error) {
       dispose()
