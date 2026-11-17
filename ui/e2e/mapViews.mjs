@@ -207,7 +207,7 @@ export function registerMapViewJourneys(test) {
     await board(page)
     await page.keyboard.press('4')
     await page.locator('.globe-canvas').waitFor()
-    await page.waitForTimeout(1300)
+    await page.locator('.globe-names .globe-name').first().waitFor()
     const before = await asked(page)
     await page.keyboard.press('/')
     await page.keyboard.type('Deep follow-up')
