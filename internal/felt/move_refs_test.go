@@ -522,6 +522,24 @@ func TestMoveSubtreeLeavesUnrelatedFileLinks(t *testing.T) {
 	}
 }
 
+// A link's target ends before its title, or at the closing > of a <...>
+// target, so titled and bracketed links are carried like bare ones.
+func TestMoveSubtreeCarriesTitledAndBracketedFileLinks(t *testing.T) {
+	t.Parallel()
+	_, s := newStore(t)
+	for _, id := range []string{"top", "top/deep"} {
+		writeFiberFile(t, s, id, fiber("T", ""))
+	}
+	writeFiberFile(t, s, "top/m", fiber("M", `[a](../x.png) [b](../x.png "t ../q/r") [c](<../x y.png>) [d](<../x.png> "t") [e](../x.png#f 'g')`))
+	if _, err := s.MoveSubtree("top/m", "top/deep/m"); err != nil {
+		t.Fatalf("MoveSubtree: %v", err)
+	}
+	want := fiber("M", `[a](../../x.png) [b](../../x.png "t ../q/r") [c](<../../x y.png>) [d](<../../x.png> "t") [e](../../x.png#f 'g')`)
+	if got := readFiberFile(t, s, "top/deep/m"); got != want {
+		t.Fatalf("m after move:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // Fibers outside the slug convention stay addressable: links to them in every
 // form felt reads are carried when an ancestor moves.
 func TestMoveSubtreeCarriesLinksToNonConformingSlugs(t *testing.T) {

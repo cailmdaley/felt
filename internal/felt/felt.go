@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/oklog/ulid/v2"
 	"gopkg.in/yaml.v3"
@@ -1085,9 +1086,10 @@ var urlSchemeRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*:`)
 // RewriteMarkdownPaths replaces the path of every relative markdown link —
 // ../x/plot.png, ../x/x.md, ../x/Makefile, ../x — for which rewrite returns a
 // new spelling. rewrite also receives the fiber reference the target spells,
-// when it has that shape, so a caller can leave those to RewriteBodyRefs. A
-// #fragment or ?query, the link text, and code stay as written. It reports
-// whether anything changed.
+// when it has that shape, so a caller can leave those to RewriteBodyRefs. The
+// target ends at the first whitespace, before any "title", unless it is
+// wrapped in <...>. A #fragment or ?query, a title, the link text, and code
+// stay as written. It reports whether anything changed.
 func RewriteMarkdownPaths(body string, rewrite func(target string, ref *BodyRef) (string, bool)) (string, bool) {
 	if !strings.Contains(body, "](") {
 		return body, false
@@ -1101,7 +1103,13 @@ func RewriteMarkdownPaths(body string, rewrite func(target string, ref *BodyRef)
 		if strings.IndexByte(raw, codeMask) >= 0 {
 			continue
 		}
-		target := strings.TrimSpace(raw)
+		destination := strings.TrimSpace(raw)
+		if inner, ok := strings.CutPrefix(destination, "<"); ok {
+			destination, _, _ = strings.Cut(inner, ">")
+		} else if i := strings.IndexFunc(destination, unicode.IsSpace); i >= 0 {
+			destination = destination[:i]
+		}
+		target := destination
 		if i := strings.IndexAny(target, "#?"); i >= 0 {
 			target = target[:i]
 		}
@@ -1109,7 +1117,7 @@ func RewriteMarkdownPaths(body string, rewrite func(target string, ref *BodyRef)
 			continue
 		}
 		var ref *BodyRef
-		if parsed, ok := parseBodyRefTarget(raw, ""); ok {
+		if parsed, ok := parseBodyRefTarget(destination, ""); ok {
 			ref = &parsed
 		}
 		next, ok := rewrite(target, ref)
