@@ -37,9 +37,9 @@ $SHUTTLE_RELEASE names, which the installer writes) with this CLI's version of
 the release archive, verified before anything is replaced. A running daemon is
 then stopped, and its keep-alive supervisor or respawn loop starts the new
 release. A daemon that nothing restarts is left stopped and the command fails,
-naming the command that starts it. Until a daemon runs the new release, the
-replaced one is kept beside it, at <release>.previous, until a later upgrade. The restart arms
-the boot quarantine, released with 'shuttle daemon release'.
+naming the command that starts it. The replaced release is kept at
+<release>.previous unless the upgrade sees a daemon running the new one. The
+restart arms the boot quarantine, released with 'shuttle daemon release'.
 
 A release built from a checkout is not replaced: deploy it from that checkout
 with bin/shuttle-deploy.`,
@@ -128,7 +128,7 @@ func (a *app) restartOnRelease(previous string) (bool, error) {
 			return true, nil
 		}
 	}
-	return false, fmt.Errorf("the daemon stopped and nothing restarted it within %s; start it with `shuttle daemon start`%s", daemonRespawnWait, kept)
+	return false, fmt.Errorf("the daemon stopped and nothing restarted it within %s; start it with `shuttle daemon start`, which runs in the foreground, then `shuttle daemon release`%s", daemonRespawnWait, kept)
 }
 
 // replaceRelease puts this version's release archive at dir and returns where

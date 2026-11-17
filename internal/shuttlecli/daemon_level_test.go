@@ -179,7 +179,7 @@ func TestDaemonCheckSaysHowTheDaemonDiffersFromTheseCLIs(t *testing.T) {
 		want      []string
 	}{
 		{name: "running stale daemon", running: versionBody("hub", "2.0.0", ShuttleContractLevel-11),
-			want: []string{fmt.Sprintf("The Shuttle daemon running on this host is 2.0.0 (CLI contract %d); these CLIs are 2.1.0 (CLI contract %d).", ShuttleContractLevel-11, ShuttleContractLevel), "messages to live workers are queued and not delivered", "Bring it level: shuttle daemon upgrade\n"}},
+			want: []string{fmt.Sprintf("The Shuttle daemon running on this host is 2.0.0 (CLI contract %d); these CLIs are 2.1.0 (CLI contract %d).", ShuttleContractLevel-11, ShuttleContractLevel), "Until they match, `shuttle message <fiber>` refuses and messages already waiting in a fiber's inbox are not delivered.", "Bring it level: shuttle daemon upgrade\n"}},
 		{name: "running daemon at another version of this contract", running: versionBody("hub", "2.1.1", ShuttleContractLevel),
 			want: []string{fmt.Sprintf("is 2.1.1 (CLI contract %d); these CLIs are 2.1.0", ShuttleContractLevel), "Bring it level: shuttle daemon upgrade\n"}},
 		{name: "running level daemon", running: versionBody("hub", "2.1.0", ShuttleContractLevel)},
@@ -356,11 +356,20 @@ func TestDaemonUpgradeFailsWhenNothingRestartsTheDaemon(t *testing.T) {
 	app.daemonPause = func(time.Duration) {}
 	app.daemonSignalPID = func(int, syscall.Signal) error { return nil }
 	_, _, err := executeApp(t, app, "", "daemon", "upgrade")
-	if err == nil || !strings.Contains(err.Error(), "`shuttle daemon start`") || !strings.Contains(err.Error(), release+".previous") {
-		t.Fatalf("upgrade with nothing to restart the daemon = %v, want a failure naming the start command and the kept release", err)
+	if err == nil || !strings.Contains(err.Error(), "`shuttle daemon start`, which runs in the foreground, then `shuttle daemon release`") || !strings.Contains(err.Error(), release+".previous") {
+		t.Fatalf("upgrade with nothing to restart the daemon = %v, want a failure naming the start command, that it runs in the foreground, the release that follows, and the kept release", err)
 	}
 	if got := app.releaseVersion(daemonRelease{Launcher: filepath.Join(release+".previous", "bin", "shuttled")}); got != "2.0.0" {
 		t.Fatalf("the replaced release must be kept, reports %q", got)
+	}
+}
+
+// The upgrade's help says plainly when the replaced release is kept.
+func TestDaemonUpgradeHelpSaysWhenTheReplacedReleaseIsKept(t *testing.T) {
+	t.Parallel()
+	long := strings.Join(strings.Fields(newApp(testEnv(t)).daemonUpgradeCmd().Long), " ")
+	if want := "The replaced release is kept at <release>.previous unless the upgrade sees a daemon running the new one."; !strings.Contains(long, want) {
+		t.Fatalf("upgrade help = %q, want it to contain %q", long, want)
 	}
 }
 

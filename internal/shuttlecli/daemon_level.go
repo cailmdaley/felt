@@ -125,6 +125,10 @@ func (a *app) requireDeliveringDaemon(owner string) error {
 	return fmt.Errorf("%s's Shuttle daemon runs %s and reports its CLIs skewed (%s): it would queue this message without delivering it. Bring %s's daemon level with its CLIs, then send again", owner, remote.describe(), remote.Contract.Reason, owner)
 }
 
+// contractSkewEffect is what a daemon at another contract than these CLIs
+// means for messages, until the two match.
+const contractSkewEffect = "`shuttle message <fiber>` refuses and messages already waiting in a fiber's inbox are not delivered"
+
 // daemonLevelNotice says how this host's daemon differs from these CLIs, or
 // returns "" when it matches or none is installed. A running daemon is
 // judged by what it reports; a stopped one by the release it would start.
@@ -136,7 +140,7 @@ func (a *app) daemonLevelNotice() string {
 		}
 		notice := fmt.Sprintf("The Shuttle daemon running on this host is %s; these CLIs are %s.", running.describe(), a.cliDescription())
 		if !running.matches() {
-			notice += " Until they match, messages to live workers are queued and not delivered."
+			notice += " Until they match, " + contractSkewEffect + "."
 		}
 		return notice + "\nBring it level: " + a.levelCommand() + "\n"
 	}

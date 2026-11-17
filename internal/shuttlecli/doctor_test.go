@@ -368,7 +368,7 @@ func TestCollectDaemonReceiptRequiresMatchingContract(t *testing.T) {
 					t.Fatalf("held daemon must not be downgraded to transient booting: %s %s", status, repair)
 				}
 			}
-			if tc.name == "daemon built for another CLI" && !strings.Contains(got.Repair, "shuttle daemon upgrade") {
+			if tc.name == "daemon built for another CLI" && (!strings.Contains(got.Repair, "shuttle daemon upgrade") || !strings.Contains(got.Repair, "until they match, `shuttle message <fiber>` refuses and messages already waiting in a fiber's inbox are not delivered")) {
 				t.Fatalf("a daemon built for another CLI must name what brings it level: %+v", got)
 			}
 			if strings.HasPrefix(tc.name, "check") && got.ContractError != "shuttle contract could not run: eagain" {

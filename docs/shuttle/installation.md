@@ -144,7 +144,7 @@ would start, a different version, it ends by saying so, with both versions and
 the command that brings the daemon level:
 
 ```text
-The Shuttle daemon running on this host is 2.0.0 (CLI contract 37); these CLIs are 2.1.0 (CLI contract 49). Until they match, messages to live workers are queued and not delivered.
+The Shuttle daemon running on this host is 2.0.0 (CLI contract 37); these CLIs are 2.1.0 (CLI contract 49). Until they match, `shuttle message <fiber>` refuses and messages already waiting in a fiber's inbox are not delivered.
 Bring it level: shuttle daemon upgrade
 ```
 
@@ -153,10 +153,10 @@ Bring it level: shuttle daemon upgrade
 selected release, copies its `shuttle-launch` to `~/.local/bin` as the
 installer does, and stops the running daemon so that its keep-alive
 supervisor or respawn loop starts the new one. A daemon nothing supervises is
-left stopped, and the command fails saying to run `shuttle daemon start`. Until
-a daemon runs the new release, the one it replaced stays beside it, at
-`<release>.previous`. Like every
-restart, it arms the boot quarantine: review the board, then run
+left stopped, and the command fails saying to run `shuttle daemon start`,
+which runs in the foreground, then `shuttle daemon release`. The replaced
+release is kept at `<release>.previous` unless the upgrade sees a daemon
+running the new one. Like every restart, it arms the boot quarantine: review the board, then run
 `shuttle daemon release`. `shuttle daemon check` prints the same comparison on
 its own. Until the daemon is level, `shuttle message <fiber>` refuses to send:
 an older daemon queues a fiber message and does not deliver it, and the
