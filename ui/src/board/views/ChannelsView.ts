@@ -175,6 +175,8 @@ export class ChannelsView implements TemporalView {
   private drawer = false
   private dismissed: string[] = []
   private pending: string[] = []
+  /** Each line's latest clear, by the line's id: the wait it cleared, and its writes (the clear's, and its undo's once asked) settling. */
+  private readonly lineClears = new Map<string, { clears?: string; settled: Promise<unknown> }>()
   private pinned = new Map<string, number>()
   /** The human's order of the channels, and when it was written. */
   private order: string[] = []
@@ -874,7 +876,9 @@ export class ChannelsView implements TemporalView {
    * soon as the line leaves, for a few seconds, and restores both: what was
    * written is written back, and what was not yet written never is. The
    * line's records are written a few at a time ({@link CLEAR_WRITES}). A
-   * refused write brings back what it would have taken and says so.
+   * refused write brings back what it would have taken and says so. A line
+   * cleared again before its last clear's writes (and their undo's) land
+   * waits for them, so it clears what waits then.
    */
   private async clearLine(item: Item, done: HTMLButtonElement): Promise<void> {
     const ctx = this.ctx, board = ctx?.workspace?.board
@@ -882,7 +886,7 @@ export class ChannelsView implements TemporalView {
     const row = done.closest('.kbn-ch-item'), held = row?.contains(document.activeElement)
     const next = [...this.stream?.querySelectorAll<HTMLElement>(':scope > .kbn-ch-item') ?? []]
     const after = (next[next.indexOf(row as HTMLElement) + 1] ?? next[next.indexOf(row as HTMLElement) - 1])?.querySelector<HTMLElement>('[data-item]')?.dataset.item
-    const at = Date.now(), fiber = fiberOf(item.card), waits = item.clears
+    const at = Date.now(), fiber = fiberOf(item.card)
     const lines = lineIds(item).map(id => ({ id, key: clearLineKey(id, at) }))
     this.pending.push(...lines.map(line => line.key))
     this.draw()
@@ -892,7 +896,13 @@ export class ChannelsView implements TemporalView {
     const write = (key: string, failure: string): Promise<boolean> =>
       postDaemonJson(ctx.shuttleBase, '/api/v1/channels/dismiss', { key, fiber }, failure).then(() => true, () => { drop([key]); return false })
     // The clear first: a line write refused after it leaves a post that no longer waits, still in the stream with its ✓.
-    const clearing = waits && board ? board.clear(waits) : Promise.resolve(undefined)
+    // A line cleared again while its earlier clear, or that clear's undo, is still being written waits for it, so it sees whether the post waits.
+    const before = this.lineClears.get(item.id), waits = item.clears ?? before?.clears
+    const clearing = (async () => {
+      if (before) await before.settled
+      return waits && board ? board.clear(waits) : undefined
+    })()
+    this.lineClears.set(item.id, { settled: clearing.catch(() => {}), clears: waits })
     // Each line's write once it starts, true when it was written.
     const sent = new Map<(typeof lines)[number], Promise<boolean>>()
     let undone = false
@@ -903,9 +913,9 @@ export class ChannelsView implements TemporalView {
       const backAt = Date.now(), backs = [...sent.keys()].map(line => ({ line, key: unclearLineKey(line.id, backAt) }))
       this.pending.push(...backs.map(back => back.key))
       this.draw()
-      void clearing.then(cleared => {
+      this.lineClears.set(item.id, { clears: waits, settled: clearing.then(cleared => {
         if (waits && board && cleared !== undefined) return board.unclear(waits, cleared).catch(() => this.status(`${item.card.name}'s post could not be brought back; it stays cleared.`))
-      }, () => {})
+      }, () => {}) })
       void fewAtATime(backs, CLEAR_WRITES, async back => await sent.get(back.line) ? write(back.key, 'Undo failed') : (drop([back.key]), true)).then(done => {
         if (done.every(Boolean)) return
         this.draw()

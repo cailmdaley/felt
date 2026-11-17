@@ -69,7 +69,7 @@ One line a thread addressed to the human.
 | Files | a row of file previews below the text; a fiber's newest close in the stream leads them with its tapestry |
 | Clear | ✓ at the head's right, on every post and file line, and `e` on the line in focus: one press takes the line from the stream and, for a waiting post, stops it waiting too, with one undo for both; a waiting ask or close is answered, not cleared |
 
-A clear is remembered as one `line:<ms>:<id>` record per line it took (a post by its id, a file item by each send it showed, so a send it did not show still appears) and, for a waiting post, `clear:<uid>:<ms>`; records are written four at a time, and the undo writes back only what was written.
+A clear is remembered as one `line:<ms>:<id>` record per line it took (a post by its id, a file item by each send it showed, so a send it did not show still appears) and, for a waiting post, `clear:<uid>:<ms>`; records are written four at a time, and the undo writes back only what was written. A line cleared again while its last clear, or that clear's undo, is still being written waits for those writes, so it sees whether its post waits.
 
 A line that follows one from the same thread less than five minutes before it, and asks nothing, drops its head: its slug and role stay for assistive technology, its age shows at the right on hover, and its ✓ stays.
 

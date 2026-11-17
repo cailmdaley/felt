@@ -656,6 +656,32 @@ it('keeps the undo of a waiting post\'s clear when the line could not be taken f
   expect(item(host, 'cmbx').hasAttribute('data-waiting')).toBe(true)
 })
 
+it('clears a waiting post again after an undo while its first clear is still being written: the second clear waits for it, and the post stops waiting', async () => {
+  const human = { label: 'Sam' }, posted = Date.now() - 4 * minute
+  const { posts } = daemon([], undefined, {}, { board: { C: [...BOARD.C, { ...record({ id: 'b5', kind: 'post', fiber: 'C', to: human, text: 'Two calls for you today.' }, 4), timestamp: posted }] }, waiting: { C: { id: 'b5', at: posted } } })
+  // The first clear's write hangs until it is let go.
+  const answer = vi.mocked(fetch).getMockImplementation()!
+  let land = (): void => {}
+  const held = new Promise<void>(resolve => { land = resolve })
+  vi.mocked(fetch).mockImplementation(async (url, init) => {
+    const response = answer(url, init)
+    return init?.method === 'POST' && String(JSON.parse(String(init.body)).key) === `clear:C:${posted}` ? held.then(() => response) : response
+  })
+  const { ctx, host } = await mount([chair, tsz, beam])
+  item(host, 'cmbx').querySelector<HTMLButtonElement>('.kbn-ch-clear')!.click()
+  await settle()
+  document.querySelector<HTMLButtonElement>('.shuttle-toast .toast-undo')!.click()
+  await settle()
+  item(host, 'cmbx').querySelector<HTMLButtonElement>('.kbn-ch-clear')!.click()
+  await settle()
+  land()
+  for (let n = 0; n < 6; n++) await settle()
+  const keys = posts.map(([, body]) => String(body.key)).filter(key => /^(un)?clear:C:/.test(key))
+  expect(keys.slice(0, 2)).toStrictEqual([`clear:C:${posted}`, `unclear:C:${posted}`])
+  expect(keys.length === 3 && Number(keys[2].split(':')[2]) > posted).toBe(true)
+  expect([item(host, 'cmbx'), ctx.workspace!.board.waiting.has('C')]).toStrictEqual([undefined, false])
+})
+
 it('reads the tapestry of each fiber\'s newest close only, and reckons a close\'s row with a tapestry only when it shows one', async () => {
   const human = { label: 'Sam' }
   const cov = card({ id: 'cmbx/cov', uid: 'V', name: 'Covariance', orchestrator: 'C', column: 'tempered', status: 'closed', closedAt: at(20), outcome: 'Validated.' })
