@@ -13,12 +13,13 @@
 .uf-thumb.ws-thumbnail { width: 100%; height: 100%; border-radius: 4px; }
 
 /* A post's files, at Slack's proportions: a figure at most 480 by 360, its picture contained; a page 480 by 270;
-   a card 360 by 56. Each box is set before anything loads, never larger than the row. */
-.uf:not([data-single]) .uf-row { flex-wrap: wrap; gap: 8px; overflow: visible; scroll-snap-type: none; }
+   a card 360 by 56. Each box is set before anything loads; narrower than the row it never grows past, a figure or a
+   page keeps its proportions and a card its height. */
+.uf:not([data-single]) .uf-row { flex-wrap: wrap; align-items: flex-start; gap: 8px; overflow: visible; scroll-snap-type: none; }
 .uf:not([data-single]) .uf-card { flex: none; max-width: 100%; }
-.uf-card[data-density='figure'] { width: 480px; height: 360px; }
-.uf-card[data-density='page'] { width: 480px; height: 270px; }
-.uf-card[data-density='thumbnail'] { width: 176px; height: 116px; }
+.uf-card[data-density='figure'] { width: 480px; height: auto; aspect-ratio: 480 / 360; }
+.uf-card[data-density='page'] { width: 480px; height: auto; aspect-ratio: 480 / 270; }
+.uf-card[data-density='thumbnail'] { width: 176px; height: auto; aspect-ratio: 176 / 116; }
 .uf-card[data-density='card'] {
   width: 360px; height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 12px; text-align: left;
   background: var(--ws-paper, var(--kbn-paper)); color: var(--ws-ink-soft); font: var(--type-meta)/var(--leading-ui) var(--font-serif);

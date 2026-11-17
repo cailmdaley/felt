@@ -103,7 +103,9 @@ try {
     assert.equal(await kappa.locator('.kbn-ch-previews .uf-card').count(), 3)
     const rowWidth = (await kappa.locator('.uf-row').boundingBox()).width
     const boxes = await kappa.locator('.uf-card').evaluateAll(cards => cards.map(card => [card.dataset.density, Math.round(card.getBoundingClientRect().width), Math.round(card.getBoundingClientRect().height)]))
-    assert.deepEqual(boxes, [['page', 270], ['figure', 360], ['card', 56]].map(([density, height]) => [density, Math.min({ page: 480, figure: 480, card: 360 }[density], Math.round(rowWidth)), height]))
+    // Narrower than its box, a figure or a page keeps its proportions, a card its height.
+    const box = (density, width, height) => { const drawn = Math.min(width, Math.round(rowWidth)); return [density, drawn, density === 'card' ? height : Math.round(drawn * height / width)] }
+    assert.deepEqual(boxes.map(([density, width, height]) => [density, width, height]), [box('page', 480, 270), box('figure', 480, 360), box('card', 360, 56)])
     // The close for review says its review note, never its outcome.
     assert.match(await page.locator('.kbn-ch-item[data-kind="close"] .kbn-ch-item-text').textContent(), /agree to 4%/)
     assert.equal(await page.locator('.kbn-ch-stream').getByText('validated against 2000 simulations').count(), 0)

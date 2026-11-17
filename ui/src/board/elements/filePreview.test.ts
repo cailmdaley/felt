@@ -81,15 +81,17 @@ describe('a preview\'s box', () => {
     const unfold = new Unfold({ shuttleBase: '', awake: () => false })
     document.body.append(unfold.el)
     unfold.update([...files, { key: 'host:/w/plot.svg', name: 'plot.svg', at: Date.now() - 60_000 }])
+    // jsdom lays nothing out: the box is its width and its height, or its width and its proportions (e2e/channels.mjs measures it drawn).
     const boxes = [...unfold.el.querySelectorAll<HTMLElement>('.uf-card')].map(card => {
-      const { width, height } = getComputedStyle(card)
-      return [card.dataset.density, width, height, !!card.querySelector('.ws-thumbnail-body, iframe, img')]
+      const style = getComputedStyle(card), ratio = style.getPropertyValue('aspect-ratio').split('/').map(Number)
+      const height = style.height === 'auto' ? Math.round(parseFloat(style.width) * ratio[1] / ratio[0]) : parseFloat(style.height)
+      return [card.dataset.density, parseFloat(style.width), height, !!card.querySelector('.ws-thumbnail-body, iframe, img')]
     })
     expect(boxes).toStrictEqual([
-      ['page', `${BOX.page.width}px`, `${BOX.page.height}px`, false],
-      ['figure', `${BOX.figure.width}px`, `${BOX.figure.height}px`, false],
-      ['card', `${BOX.card.width}px`, `${BOX.card.height}px`, false],
-      ['figure', `${BOX.figure.width}px`, `${BOX.figure.height}px`, false],
+      ['page', BOX.page.width, BOX.page.height, false],
+      ['figure', BOX.figure.width, BOX.figure.height, false],
+      ['card', BOX.card.width, BOX.card.height, false],
+      ['figure', BOX.figure.width, BOX.figure.height, false],
     ])
     // A card has nothing to load: its kind, its name and when it came.
     expect([...unfold.el.querySelector('[data-density="card"]')!.children].map(part => part.textContent)).toStrictEqual(['≡', 'c.md', ''])

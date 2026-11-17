@@ -30,7 +30,7 @@ The rest are the board's own choices, made to sit with those numbers:
 | File card (Markdown, PDF, code, audio, anything without a picture) | 360 by 56: kind glyph, name, age |
 | Thumbnail (globe tiles, sheets) | 176 by 116 |
 
-A box never grows wider than the row it sits in; its height holds.
+A box never grows wider than the row it sits in: narrower, a figure or a page keeps its proportions and a card its height.
 `BOX` in `filePreview.ts` states the same numbers for code that reckons a row's height (the stream's margin), and a test reads the stylesheet to keep them equal.
 
 ## Elements
