@@ -929,10 +929,18 @@ func (s *Storage) Delete(id string) error {
 
 // pruneEmptyDirs removes now-empty ancestor directories, walking from startDir
 // up toward (but never including) the store root. It stops at the first
-// non-empty directory; any other removal error is reported.
+// non-empty directory and at a symlink, which mounts another store; any other
+// error is reported.
 func (s *Storage) pruneEmptyDirs(startDir string) error {
 	for dir := startDir; dir != s.root; dir = filepath.Dir(dir) {
-		err := os.Remove(dir)
+		info, err := os.Lstat(dir)
+		if err != nil {
+			return fmt.Errorf("cleaning directory %s: %w", dir, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			break
+		}
+		err = os.Remove(dir)
 		if err == nil {
 			continue
 		}

@@ -3156,3 +3156,55 @@ func TestAmbiguousSlugNamesItsCandidates(t *testing.T) {
 		t.Errorf("Find(likelihood) = %v, %v; want science/cmbx/likelihood", f, err)
 	}
 }
+
+// Removing or moving a fiber out of a symlink-mounted store keeps the mount:
+// pruning empty parents stops at the symlink, whether the store behind it
+// still holds another fiber or is now empty. A bare-form document sits
+// directly behind the symlink.
+func TestDeleteAndMoveKeepSymlinkedMount(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name        string
+		other, bare bool
+		op          func(*Storage) error
+	}{
+		{"rm keeps other", true, false, func(s *Storage) error { return s.Delete("m/doc") }},
+		{"rename keeps other", true, false, func(s *Storage) error { _, err := s.MoveSubtree("m/doc", "doc2"); return err }},
+		{"rm empties", false, false, func(s *Storage) error { return s.Delete("m/doc") }},
+		{"rm bare empties", false, true, func(s *Storage) error { return s.Delete("m/doc") }},
+		{"rename empties", false, false, func(s *Storage) error { _, err := s.MoveSubtree("m/doc", "doc2"); return err }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, outer := newStore(t)
+			mounted := t.TempDir()
+			inner := &Storage{root: mounted}
+			if tc.bare {
+				if err := os.WriteFile(filepath.Join(mounted, "doc"+FileExt), []byte(fiber("D", "")), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				writeFiberFile(t, inner, "doc", fiber("D", ""))
+			}
+			if tc.other {
+				writeFiberFile(t, inner, "other", fiber("O", ""))
+			}
+			mount := filepath.Join(outer.root, "m")
+			if err := os.Symlink(mounted, mount); err != nil {
+				t.Fatal(err)
+			}
+			if err := tc.op(outer); err != nil {
+				t.Fatal(err)
+			}
+			info, err := os.Lstat(mount)
+			if err != nil || info.Mode()&os.ModeSymlink == 0 {
+				t.Fatalf("mount after %s: %v, %v; want the symlink kept", tc.name, info, err)
+			}
+			if tc.other {
+				if _, err := os.Stat(filepath.Join(mount, "other", "other"+FileExt)); err != nil {
+					t.Fatalf("other after %s: %v", tc.name, err)
+				}
+			}
+		})
+	}
+}
