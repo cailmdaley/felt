@@ -110,7 +110,7 @@ defmodule Shuttle.InterruptWatcherTest do
           ev("interrupted", @t0 + 2)
         ])
 
-      assert %{"s" => %{phase: "waiting", last_event_at: at}} =
+      assert %{"s" => %{phase: "waiting", last_event_at: at, since: at}} =
                WaitingTracker.phases(sessions, @t0)
 
       assert at == @t0 + 2

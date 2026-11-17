@@ -3297,9 +3297,10 @@ defmodule Shuttle.Poller do
   defp stamp_runtime(entries, running) when map_size(running) == 0, do: entries
 
   defp stamp_runtime(entries, running) do
-    # `activity` is the `session => %{last_event_at, phase}` map derived from
-    # this host's events.jsonl — the real last-activity timestamp and phase
-    # category ("attention" / "waiting" / "working") of each tracked session.
+    # `activity` is the `session => %{last_event_at, phase, since}` map derived
+    # from this host's events.jsonl: each tracked session's phase category
+    # ("attention" / "waiting" / "working"), when it entered it, and its latest
+    # event.
     # Only running workers get stamped, so a session that signals and then dies
     # never leaves a stale runtime — it's already gone from `running`.
     activity = session_activity()
@@ -3310,7 +3311,7 @@ defmodule Shuttle.Poller do
 
   # The activity source. Defaults to the host-local event stream; overridable
   # via app env so tests inject a deterministic `session => %{last_event_at,
-  # phase}` map without writing to the real events.jsonl.
+  # phase, since}` map without writing to the real events.jsonl.
   @doc false
   def session_activity do
     case Shuttle.Env.app(:waiting_phases_source) do

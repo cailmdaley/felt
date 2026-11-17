@@ -101,7 +101,7 @@ defmodule Shuttle.EventStreamTest do
     {:reductions, before} = Process.info(self(), :reductions)
 
     assert EventStream.session_activity(name) == %{
-             "s1" => %{last_event_at: @t0, phase: "working"}
+             "s1" => %{last_event_at: @t0, phase: "working", since: @t0}
            }
 
     assert EventStream.open_turns(name) == %{"s1" => %{at: @t0, harness: nil}}

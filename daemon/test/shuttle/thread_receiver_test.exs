@@ -742,7 +742,13 @@ defmodule Shuttle.ThreadReceiverTest do
     )
 
     Env.put_app_env(:waiting_phases_source, fn ->
-      %{native => %{phase: "waiting", last_event_at: System.system_time(:millisecond)}}
+      %{
+        native => %{
+          phase: "waiting",
+          last_event_at: System.system_time(:millisecond),
+          since: System.system_time(:millisecond)
+        }
+      }
     end)
 
     assert Poller.worker_turn(poller, "hub") == :idle

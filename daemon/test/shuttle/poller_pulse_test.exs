@@ -44,7 +44,7 @@ defmodule Shuttle.PollerPulseTest do
 
     [worker] = Map.values(:sys.get_state(poller).running)
     uuid = worker.session_uuid
-    Agent.update(phase, fn _ -> %{uuid => %{last_event_at: 0, phase: "waiting"}} end)
+    Agent.update(phase, fn _ -> %{uuid => %{last_event_at: 0, phase: "waiting", since: 0}} end)
     %{poller: poller, phase: phase, uuid: uuid}
   end
 
@@ -124,7 +124,13 @@ defmodule Shuttle.PollerPulseTest do
     refute_receive {:pulse_sent, _, _}
 
     Agent.update(phase, fn _ ->
-      %{uuid => %{phase: "waiting", last_event_at: System.system_time(:millisecond) + 1}}
+      %{
+        uuid => %{
+          phase: "waiting",
+          last_event_at: System.system_time(:millisecond) + 1,
+          since: System.system_time(:millisecond) + 1
+        }
+      }
     end)
 
     cycle(poller)
@@ -143,14 +149,14 @@ defmodule Shuttle.PollerPulseTest do
     phase: phase,
     uuid: uuid
   } do
-    Agent.update(phase, fn _ -> %{uuid => %{phase: "working", last_event_at: 0}} end)
+    Agent.update(phase, fn _ -> %{uuid => %{phase: "working", last_event_at: 0, since: 0}} end)
     due(poller)
     cycle(poller)
     refute_receive {:pulse_sent, _, _}
     assert [row] = Map.values(:sys.get_state(poller).pulses)
     refute Pulse.due?(row, DateTime.utc_now())
     assert row["last_tick"] == nil
-    Agent.update(phase, fn _ -> %{uuid => %{phase: "waiting", last_event_at: 0}} end)
+    Agent.update(phase, fn _ -> %{uuid => %{phase: "waiting", last_event_at: 0, since: 0}} end)
     :sys.replace_state(poller, &%{&1 | boot_quarantine: true})
     due(poller)
     cycle(poller)
@@ -192,7 +198,7 @@ defmodule Shuttle.PollerPulseTest do
        } do
     windowed(uuid)
 
-    Agent.update(phase, fn _ -> %{uuid => %{phase: "working", last_event_at: 0}} end)
+    Agent.update(phase, fn _ -> %{uuid => %{phase: "working", last_event_at: 0, since: 0}} end)
     cycle(poller)
     due(poller)
     cycle(poller)
@@ -201,7 +207,7 @@ defmodule Shuttle.PollerPulseTest do
     assert Pulse.due?(row, DateTime.utc_now())
     refute_receive {:pulse_sent, _, _}
 
-    Agent.update(phase, fn _ -> %{uuid => %{phase: "waiting", last_event_at: 0}} end)
+    Agent.update(phase, fn _ -> %{uuid => %{phase: "waiting", last_event_at: 0, since: 0}} end)
     cycle(poller)
     assert [worker] = Map.values(:sys.get_state(poller).running)
     refute worker.session_uuid == uuid

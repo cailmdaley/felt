@@ -250,11 +250,10 @@ defmodule Shuttle.Poller.Snapshot do
                 )
 
               Map.has_key?(activity, uuid) ->
-                %{last_event_at: at, phase: phase} = Map.fetch!(activity, uuid)
-                payload |> Map.put(:last_activity_at, at) |> Map.put(:phase, phase)
+                Map.merge(payload, activity_fields(Map.fetch!(activity, uuid)))
 
               true ->
-                Map.delete(payload, :phase)
+                Map.drop(payload, [:phase, :phase_since, :quiet_since])
             end
           else
             payload
@@ -364,30 +363,33 @@ defmodule Shuttle.Poller.Snapshot do
 
   # The feed's `runtime` payload: the shared worker fields plus activity.
   #
-  # `last_activity_at` + `phase` come from the activity tracker keyed by this
-  # worker's harness UUID: the timestamp of its most recent hook event and
-  # the event's phase category ("attention" / "waiting" / "working"). This is
-  # what lets the in-flight column rank by idle duration; `meta.last_activity_at`
-  # equals `started_at` (only the tmux liveness heartbeat ever bumps it), which
-  # is useless for ranking.
-  #
-  # Fallback: a just-dispatched worker with no hook event yet has no tracker
-  # record, so we fall back to `meta.last_activity_at` (≈ `started_at`) and omit
-  # `phase` — correct, since a brand-new worker shouldn't outrank an idle review.
+  # Activity comes from the tracker keyed by this worker's harness UUID. A
+  # worker with no tracker record yet (just dispatched, no hook event) carries
+  # none, and the board reads its age from `started_at`.
   defp runtime_payload(meta, activity) do
     base = worker_fields(meta)
-    activity_key = Map.get(meta, :session_uuid)
 
-    payload =
-      case is_binary(activity_key) and Map.get(activity, activity_key) do
-        %{last_event_at: at, phase: phase} ->
-          base |> Map.put(:last_activity_at, at) |> Map.put(:phase, phase)
+    case Map.get(activity, Map.get(meta, :session_uuid)) do
+      %{phase: _} = record -> Map.merge(base, activity_fields(record))
+      _ -> base
+    end
+  end
 
-        _ ->
-          Map.put(base, :last_activity_at, DateTime.to_unix(meta.last_activity_at, :millisecond))
-      end
+  # A working worker silent this long is quiet: the board says so.
+  @quiet_after_ms 10 * 60_000
 
-    payload
+  # What the feed says of a session's activity: its phase category
+  # ("attention" / "waiting" / "working"), `phase_since`, the instant it entered
+  # that phase, and, for a working session with no hook event for
+  # `@quiet_after_ms`, `quiet_since`, the instant of its last event. Every
+  # field moves on a transition, never with each tool call, so the feeds that
+  # carry them keep their validators while a worker works.
+  defp activity_fields(%{phase: phase, since: since, last_event_at: at}) do
+    fields = %{phase: phase, phase_since: since}
+
+    if phase == "working" and System.system_time(:millisecond) - at >= @quiet_after_ms,
+      do: Map.put(fields, :quiet_since, at),
+      else: fields
   end
 
   defp stringify_keys(value) when is_map(value) do

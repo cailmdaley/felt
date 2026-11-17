@@ -132,7 +132,11 @@ defmodule Shuttle.PulseTest do
     refute Pulse.due?(pulses["watch-uid"], later)
 
     stale = %{
-      "conversation" => %{phase: "waiting", last_event_at: DateTime.to_unix(@now, :millisecond)}
+      "conversation" => %{
+        phase: "waiting",
+        last_event_at: DateTime.to_unix(@now, :millisecond),
+        since: DateTime.to_unix(@now, :millisecond)
+      }
     }
 
     assert Pulse.observe(pulses, [fiber()], stale, [], later) == pulses
@@ -178,7 +182,11 @@ defmodule Shuttle.PulseTest do
     restored = Pulse.load() |> Pulse.reconcile([f], "test-host", @now)
 
     activity = %{
-      "conversation" => %{phase: "waiting", last_event_at: DateTime.to_unix(@now, :millisecond)}
+      "conversation" => %{
+        phase: "waiting",
+        last_event_at: DateTime.to_unix(@now, :millisecond),
+        since: DateTime.to_unix(@now, :millisecond)
+      }
     }
 
     observed = Pulse.observe(restored, [f], activity, [], @now)

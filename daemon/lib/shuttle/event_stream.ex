@@ -9,7 +9,7 @@ defmodule Shuttle.EventStream do
       `GET /api/v1/activity`;
     * `Shuttle.SentFiles` — the sent-file events behind `/api/v1/sent-files`;
     * `Shuttle.WaitingTracker` — explicit turn state per harness session UUID,
-      stamped onto running cards as `last_event_at` and `phase`;
+      stamped onto running cards as their `phase` and when it began;
     * `Shuttle.SessionBinding` — receiver-process succession joining the
       worker's persisted UUID to its current harness session;
     * `Shuttle.Board` — retained board records keyed by id.
@@ -155,12 +155,18 @@ defmodule Shuttle.EventStream do
     do: call(server, :board_records)
 
   @doc """
-  The published phase map: `session => %{last_event_at: ms, phase: phase}` over every
+  The published phase map: `session => %{last_event_at: ms, phase: phase, since: ms}` over every
   tracked harness session UUID. An ETS read, never a call, so it answers at once
   even while the stream is mid-reseed. A stream that is not running is `%{}`.
   """
   @spec session_activity(atom()) ::
-          %{optional(String.t()) => %{last_event_at: integer(), phase: String.t()}}
+          %{
+            optional(String.t()) => %{
+              last_event_at: integer(),
+              phase: String.t(),
+              since: integer()
+            }
+          }
   def session_activity(server \\ __MODULE__) when is_atom(server) do
     case :ets.lookup(server, :activity) do
       [{:activity, phases}] -> phases

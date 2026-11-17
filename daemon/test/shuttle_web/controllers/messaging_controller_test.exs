@@ -610,7 +610,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
     assert_receive {:local_message_frame, %{"context_if_busy" => true, "wake" => true}}
 
     Shuttle.Test.Env.put_app_env(:waiting_phases_source, fn ->
-      %{session => %{phase: "waiting", last_event_at: 0}}
+      %{session => %{phase: "waiting", last_event_at: 0, since: 0}}
     end)
 
     receipt = api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(200)

@@ -359,7 +359,13 @@ defmodule Shuttle.ThreadsInboxTest do
     assert File.read!(authority_path) == authority
     # A running turn takes the asked result through its hook, not a wake.
     Env.put_app_env(:waiting_phases_source, fn ->
-      %{native => %{phase: "working", last_event_at: System.system_time(:millisecond)}}
+      %{
+        native => %{
+          phase: "working",
+          last_event_at: System.system_time(:millisecond),
+          since: System.system_time(:millisecond)
+        }
+      }
     end)
 
     assert {:ok, _} = CLI.run_in_store(store, ["reopen", "hub/child", "--local"])
@@ -398,7 +404,13 @@ defmodule Shuttle.ThreadsInboxTest do
     refute_receive {:wake, _}
 
     Env.put_app_env(:waiting_phases_source, fn ->
-      %{native => %{phase: "waiting", last_event_at: System.system_time(:millisecond)}}
+      %{
+        native => %{
+          phase: "waiting",
+          last_event_at: System.system_time(:millisecond),
+          since: System.system_time(:millisecond)
+        }
+      }
     end)
 
     assert {:ok, _} = CLI.run_in_store(store, ["reopen", "hub/child", "--local"])
@@ -441,7 +453,13 @@ defmodule Shuttle.ThreadsInboxTest do
     )
 
     Env.put_app_env(:waiting_phases_source, fn ->
-      %{native => %{phase: "waiting", last_event_at: System.system_time(:millisecond)}}
+      %{
+        native => %{
+          phase: "waiting",
+          last_event_at: System.system_time(:millisecond),
+          since: System.system_time(:millisecond)
+        }
+      }
     end)
 
     assert Poller.worker_turn(poller, "hub") == :idle

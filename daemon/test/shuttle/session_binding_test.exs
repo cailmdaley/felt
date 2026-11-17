@@ -252,19 +252,19 @@ defmodule Shuttle.SessionBindingTest do
     }
 
     activity = %{
-      "old" => %{last_event_at: @now, phase: "working"},
-      "new" => %{last_event_at: @now + 3, phase: "waiting"},
-      "same-pane-shuttle" => %{last_event_at: @now + 9, phase: "attention"}
+      "old" => %{last_event_at: @now, phase: "working", since: @now},
+      "new" => %{last_event_at: @now + 3, phase: "waiting", since: @now + 2},
+      "same-pane-shuttle" => %{last_event_at: @now + 9, phase: "attention", since: @now + 9}
     }
 
     binding = fold([event("old", "session_start", @now), event("new", "session_start", @now + 1)])
     index = Snapshot.runtime_index(%{"fiber" => meta}, activity)
     entry = %{fiber: %{"id" => "fiber", "shuttle" => %{"runtime" => %{"session_uuid" => "old"}}}}
 
-    assert %{runtime: %{phase: "waiting", session_uuid: "new", last_activity_at: at}} =
+    assert %{runtime: %{phase: "waiting", session_uuid: "new", phase_since: at}} =
              Snapshot.put_runtime(entry, index, activity, binding)
 
-    assert at == @now + 3
+    assert at == @now + 2
     unknown = %{fiber: %{"id" => "fiber"}}
     refute Map.has_key?(Snapshot.put_runtime(unknown, index, activity, binding).runtime, :phase)
   end

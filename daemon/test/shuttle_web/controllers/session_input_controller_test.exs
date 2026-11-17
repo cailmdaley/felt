@@ -21,9 +21,14 @@ defmodule ShuttleWeb.SessionInputControllerTest do
       send(Shuttle.Env.app(:session_input_test), {:tmux, args})
 
       case Process.get({:session_input_tmux, hd(args)}) do
-        [reply | later] -> tap(reply, fn _ -> Process.put({:session_input_tmux, hd(args)}, later) end)
-        nil -> Process.get(:session_input_tmux, {"", 0})
-        reply -> reply
+        [reply | later] ->
+          tap(reply, fn _ -> Process.put({:session_input_tmux, hd(args)}, later) end)
+
+        nil ->
+          Process.get(:session_input_tmux, {"", 0})
+
+        reply ->
+          reply
       end
     end
   end

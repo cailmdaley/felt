@@ -35,7 +35,7 @@ defmodule Shuttle.PollerIdentityTest do
     Env.put_app_env(:session_bindings_source, fn -> binding end)
 
     Env.put_app_env(:waiting_phases_source, fn ->
-      %{"cleared" => %{phase: "waiting", last_event_at: now}}
+      %{"cleared" => %{phase: "waiting", last_event_at: now, since: now}}
     end)
 
     MockRunner.set_fiber(id, make_fiber(id))
@@ -111,7 +111,7 @@ defmodule Shuttle.PollerIdentityTest do
       MockRunner.add_tmux_session(FiberUid.session(id))
 
       Env.put_app_env(:waiting_phases_source, fn ->
-        %{FiberUid.session(id) => %{phase: "working", last_event_at: 1}}
+        %{FiberUid.session(id) => %{phase: "working", last_event_at: 1, since: 1}}
       end)
 
       opts = [
@@ -294,8 +294,8 @@ defmodule Shuttle.PollerIdentityTest do
 
     Env.put_app_env(:waiting_phases_source, fn ->
       %{
-        "A" => %{phase: "working", last_event_at: 1},
-        "B" => %{phase: "waiting", last_event_at: 2}
+        "A" => %{phase: "working", last_event_at: 1, since: 1},
+        "B" => %{phase: "waiting", last_event_at: 2, since: 2}
       }
     end)
 
@@ -372,7 +372,7 @@ defmodule Shuttle.PollerIdentityTest do
     Env.put_app_env(:session_bindings_source, fn -> Shuttle.SessionBinding.new() end)
 
     Env.put_app_env(:waiting_phases_source, fn ->
-      %{"B" => %{phase: "waiting", last_event_at: 2}}
+      %{"B" => %{phase: "waiting", last_event_at: 2, since: 2}}
     end)
 
     {:ok, restarted} = start_poller!(opts)
@@ -498,8 +498,8 @@ defmodule Shuttle.PollerIdentityTest do
 
     Env.put_app_env(:waiting_phases_source, fn ->
       %{
-        stale_uuid => %{phase: "waiting", last_event_at: now},
-        "stale-successor" => %{phase: "waiting", last_event_at: now + 1}
+        stale_uuid => %{phase: "waiting", last_event_at: now, since: now},
+        "stale-successor" => %{phase: "waiting", last_event_at: now + 1, since: now + 1}
       }
     end)
 

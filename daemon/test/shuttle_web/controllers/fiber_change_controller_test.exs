@@ -166,8 +166,10 @@ defmodule ShuttleWeb.FiberChangeControllerTest do
       conn = get(api_conn(), "/api/v1/fibers/tests/review/change")
 
       assert conn.status == 200
+
       assert [%{"fiber" => %{"name" => "A note named change"}}] =
                Jason.decode!(conn.resp_body)["fibers"]
+
       refute File.exists?(args)
     end
 

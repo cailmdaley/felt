@@ -5,7 +5,9 @@ defmodule Shuttle.WaitingTracker do
   Sessions are keyed by nonempty `sessionId`, independently of tmux naming.
   Each record tracks turn state, outstanding Claude background work, Codex
   children, a pending human request, its last activity time, and its harness.
-  `phases/2` derives attention, working, or waiting. An `interrupted` line,
+  `phases/2` derives attention, working, or waiting, with the instant the
+  session entered that phase: the time of the event that changed it, which
+  events inside the phase leave alone. An `interrupted` line,
   which the daemon writes from a transcript, closes the turn. Outstanding background
   work or children keep a session working for as long as the tracker holds it,
   since each harness reports their completion with a new event.
@@ -27,6 +29,7 @@ defmodule Shuttle.WaitingTracker do
               kids: 0,
               pending: false,
               at: 0,
+              since: nil,
               harness: nil,
               child_events: %{},
               events: %{},
@@ -36,23 +39,34 @@ defmodule Shuttle.WaitingTracker do
 
   @type sessions :: %{optional(String.t()) => %Session{}}
 
-  @doc "Derives each session's timestamp and phase at `now`."
+  @doc """
+  Derives each session's last event time, phase, and the instant it entered
+  that phase, at `now`.
+  """
   @spec phases(sessions(), integer()) ::
-          %{optional(String.t()) => %{last_event_at: integer(), phase: String.t()}}
+          %{
+            optional(String.t()) => %{
+              last_event_at: integer(),
+              phase: String.t(),
+              since: integer()
+            }
+          }
   def phases(sessions, _now) do
-    Map.new(sessions, fn {id, session} ->
-      phase =
-        cond do
-          session.pending -> "attention"
-          session.turn == :open -> "working"
-          session.turn != :ended and session.bg + session.kids > 0 -> "working"
-          session.turn == :unstarted -> nil
-          true -> "waiting"
-        end
-
-      {id, %{last_event_at: session.at, phase: phase}}
+    sessions
+    |> Map.new(fn {id, session} ->
+      {id, %{last_event_at: session.at, phase: phase(session), since: session.since}}
     end)
     |> Map.reject(fn {_id, activity} -> is_nil(activity.phase) end)
+  end
+
+  defp phase(session) do
+    cond do
+      session.pending -> "attention"
+      session.turn == :open -> "working"
+      session.turn != :ended and session.bg + session.kids > 0 -> "working"
+      session.turn == :unstarted -> nil
+      true -> "waiting"
+    end
   end
 
   @doc """
@@ -72,8 +86,14 @@ defmodule Shuttle.WaitingTracker do
     session = Map.get(sessions, id, %Session{harness: event["harness"]})
 
     case transition(session, type, event, now) do
-      :ignore -> sessions
-      updated -> Map.put(sessions, id, remember_event(updated, event, now))
+      :ignore ->
+        sessions
+
+      updated ->
+        updated =
+          if phase(updated) == phase(session), do: updated, else: %{updated | since: updated.at}
+
+        Map.put(sessions, id, remember_event(updated, event, now))
     end
   end
 

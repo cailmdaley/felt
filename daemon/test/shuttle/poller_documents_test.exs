@@ -1048,13 +1048,14 @@ defmodule Shuttle.PollerDocumentsTest do
     assert %{tmux_session: session, state: _state, started_at: started} = runtime
     assert is_binary(session)
     assert is_integer(started)
-    # No activity source by default → no phase, but last_activity_at still
-    # present (falls back to meta/started_at) so the field is never missing.
+    # No activity source by default → no activity fields; the board reads the
+    # worker's age from started_at.
     refute Map.has_key?(runtime, :phase)
-    assert is_integer(runtime.last_activity_at)
+    refute Map.has_key?(runtime, :phase_since)
+    refute Map.has_key?(runtime, :quiet_since)
   end
 
-  test "owner feed stamps the REAL last_activity_at, distinct from started_at" do
+  test "owner feed stamps when the phase began, and quiet_since only past the floor" do
     uid = "01JZ00000000000000000000RA"
 
     fiber =
@@ -1082,26 +1083,40 @@ defmodule Shuttle.PollerDocumentsTest do
              length(snap.eligible) == 1 and get_in(snap, [:document_cache, "entries"]) >= 1
            end)
 
-    # Discover the running worker's session and its started_at, then inject an
-    # activity record whose last_event_at is deliberately 90s BEFORE started_at.
-    assert {:ok, %{fibers: [%{runtime: %{started_at: started}}]}} =
-             Poller.cached_fiber_documents(poller)
-
     assert {:ok, %{fibers: [%{runtime: %{session_uuid: session}}]}} =
              Poller.cached_fiber_documents(poller)
 
     assert is_binary(session)
-    last_event_at = started - 90_000
+    now = System.system_time(:millisecond)
+    began = now - 30 * 60_000
 
+    # Working, last event a minute ago: the turn's start, no quiet.
     Env.put_app_env(:waiting_phases_source, fn ->
-      %{session => %{last_event_at: last_event_at, phase: "waiting"}}
+      %{session => %{last_event_at: now - 60_000, phase: "working", since: began}}
     end)
 
     assert {:ok, %{fibers: [%{runtime: runtime}]}} = Poller.cached_fiber_documents(poller)
-    # The served last_activity_at is the tracker's real timestamp — NOT started_at.
-    assert runtime.last_activity_at == last_event_at
-    assert runtime.last_activity_at != runtime.started_at
-    assert runtime.phase == "waiting"
+    assert %{phase: "working", phase_since: ^began} = runtime
+    refute Map.has_key?(runtime, :quiet_since)
+    refute Map.has_key?(runtime, :last_activity_at)
+
+    # Working, silent for 11 minutes: quiet since its last event.
+    Env.put_app_env(:waiting_phases_source, fn ->
+      %{session => %{last_event_at: now - 11 * 60_000, phase: "working", since: began}}
+    end)
+
+    assert {:ok, %{fibers: [%{runtime: quiet}]}} = Poller.cached_fiber_documents(poller)
+    assert quiet.quiet_since == now - 11 * 60_000
+    assert quiet.phase_since == began
+
+    # Waiting is never quiet, however long ago its last event.
+    Env.put_app_env(:waiting_phases_source, fn ->
+      %{session => %{last_event_at: began, phase: "waiting", since: began}}
+    end)
+
+    assert {:ok, %{fibers: [%{runtime: waiting}]}} = Poller.cached_fiber_documents(poller)
+    assert %{phase: "waiting", phase_since: ^began} = waiting
+    refute Map.has_key?(waiting, :quiet_since)
   end
 
   test "owner feed stamps phase: waiting when the live worker's session is waiting for input" do
@@ -1140,26 +1155,33 @@ defmodule Shuttle.PollerDocumentsTest do
              Poller.cached_fiber_documents(poller)
 
     Env.put_app_env(:waiting_phases_source, fn ->
-      %{session => %{last_event_at: 1_700_000_000_000, phase: "waiting"}}
+      %{
+        session => %{last_event_at: 1_700_000_000_000, phase: "waiting", since: 1_700_000_000_000}
+      }
     end)
 
     assert {:ok, %{fibers: [%{runtime: runtime}]}} = Poller.cached_fiber_documents(poller)
     assert runtime.phase == "waiting"
-    assert runtime.last_activity_at == 1_700_000_000_000
+    assert runtime.phase_since == 1_700_000_000_000
 
     # The escalation phase stamps straight through the same path.
     Env.put_app_env(:waiting_phases_source, fn ->
-      %{session => %{last_event_at: 1_700_000_000_000, phase: "attention"}}
+      %{
+        session => %{
+          last_event_at: 1_700_000_000_000,
+          phase: "attention",
+          since: 1_700_000_000_000
+        }
+      }
     end)
 
     assert {:ok, %{fibers: [%{runtime: escalated}]}} = Poller.cached_fiber_documents(poller)
     assert escalated.phase == "attention"
 
-    # Clearing the activity map drops the phase but keeps last_activity_at (the
-    # meta/started_at fallback) — self-healing on the serve path.
+    # Clearing the activity map drops the activity fields on the serve path.
     Env.put_app_env(:waiting_phases_source, fn -> %{} end)
     assert {:ok, %{fibers: [%{runtime: cleared}]}} = Poller.cached_fiber_documents(poller)
     refute Map.has_key?(cleared, :phase)
-    assert is_integer(cleared.last_activity_at)
+    refute Map.has_key?(cleared, :phase_since)
   end
 end

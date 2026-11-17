@@ -114,8 +114,45 @@ defmodule Shuttle.WaitingTrackerTest do
       assert result["worker"] == initial["worker"]
 
       assert Tracker.phases(result, @now)["worker"] ==
-               %{phase: "waiting", last_event_at: @now - 1}
+               %{phase: "waiting", last_event_at: @now - 1, since: @now - 1}
     end
+  end
+
+  test "a phase's since is the event that entered it; events inside the phase leave it" do
+    at = fn type, t -> event(type, "session-a", %{"timestamp" => @now + t}) end
+    since = fn sessions -> Tracker.phases(sessions, @now + 100)["session-a"] end
+
+    events = [
+      at.("session_start", 0),
+      at.("user_prompt_submit", 1),
+      at.("pre_tool_use", 2),
+      at.("post_tool_use", 3)
+    ]
+
+    sessions = fold(events)
+    assert since.(sessions) == %{phase: "working", last_event_at: @now + 3, since: @now + 1}
+
+    sessions = Tracker.apply_event(sessions, at.("notification", 4), @now)
+    assert since.(sessions) == %{phase: "attention", last_event_at: @now + 4, since: @now + 4}
+
+    sessions = Tracker.apply_event(sessions, at.("pre_tool_use", 5), @now)
+    sessions = Tracker.apply_event(sessions, at.("stop", 6), @now)
+    assert since.(sessions) == %{phase: "waiting", last_event_at: @now + 6, since: @now + 6}
+
+    sessions =
+      Tracker.apply_event(
+        sessions,
+        at.("notification", 7) |> Map.put("notificationKind", "idle_prompt"),
+        @now
+      )
+
+    assert since.(sessions) == %{phase: "waiting", last_event_at: @now + 7, since: @now + 6}
+
+    all = events ++ [at.("notification", 4), at.("pre_tool_use", 5), at.("stop", 6)]
+    known = fold(Enum.take(all, 3))
+
+    assert Tracker.replay_events(known, all, @now)["session-a"].since ==
+             fold(all)["session-a"].since
   end
 
   test "turn transitions derive working, waiting, attention, and terminal states" do

@@ -230,7 +230,7 @@ defmodule Shuttle.PulseRecordFailureRegressionTest do
     await_boot_cycle!(poller)
     [worker] = Map.values(:sys.get_state(poller).running)
     uuid = worker.session_uuid
-    Agent.update(phase, fn _ -> %{uuid => %{last_event_at: 0, phase: "waiting"}} end)
+    Agent.update(phase, fn _ -> %{uuid => %{last_event_at: 0, phase: "waiting", since: 0}} end)
     %{poller: poller, uuid: uuid}
   end
 

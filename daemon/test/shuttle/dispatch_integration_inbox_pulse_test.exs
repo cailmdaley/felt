@@ -35,7 +35,7 @@ defmodule Shuttle.DispatchIntegrationInboxPulseTest do
     at = System.system_time(:millisecond)
 
     Shuttle.Test.Env.put_app_env(:waiting_phases_source, fn ->
-      %{uuid => %{phase: "waiting", last_event_at: at}}
+      %{uuid => %{phase: "waiting", last_event_at: at, since: at}}
     end)
   end
 

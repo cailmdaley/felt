@@ -209,7 +209,7 @@ defmodule Shuttle.VoiceTest do
     # A live worker waiting at its prompt for hours is warm.
     idle = %{
       fiber: %{"id" => "idle", "shuttle" => %{"host" => "owner"}},
-      runtime: %{phase: "waiting", last_activity_at: 0}
+      runtime: %{phase: "waiting", phase_since: 0}
     }
 
     Env.put_app_env(:voice_target_entries, fn -> [idle] end)
