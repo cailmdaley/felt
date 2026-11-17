@@ -164,6 +164,8 @@ export class ChannelsView implements TemporalView {
   private running: KanbanCard[] = []
   /** The stream follows what arrives while the reader is at its foot. */
   private following = true
+  /** Where the stream stood at its last scroll or when it was last put at its foot: a scroll event that finds it there was not the reader moving. */
+  private lastTop = 0
   /** The worker Rex last brought this channel to, whose latest line is marked. */
   private marked: string | null = null
   /** The marked line is still to be brought into sight, its records not yet drawn. */
@@ -269,8 +271,11 @@ export class ChannelsView implements TemporalView {
     this.head = el('header', 'kbn-ch-head')
     this.stream = el('ol', 'kbn-ch-stream')
     this.stream.addEventListener('scroll', () => {
-      const list = this.stream!
-      this.following = list.scrollHeight - list.scrollTop - list.clientHeight <= FOLLOW_PX
+      // Only the reader's own scroll leaves the foot: rows that grow before a scroll's event arrives leave the stream following.
+      const moved = this.stream!.scrollTop !== this.lastTop
+      this.lastTop = this.stream!.scrollTop
+      if (this.atFoot()) this.following = true
+      else if (moved) this.following = false
       this.placeRing()
       if (!this.painting && this.leavingBand()) this.painting = requestAnimationFrame(() => { this.painting = 0; this.paint() })
     }, { passive: true })
@@ -483,8 +488,10 @@ export class ChannelsView implements TemporalView {
     if (!this.bring) return
     this.bring = false
     if (isTypingTarget(document.activeElement as HTMLElement | null)) return
-    this.following = false
     row.scrollIntoView({ block: 'center' })
+    // Its line may be the stream's newest: brought to it there, the stream still follows.
+    this.lastTop = this.stream!.scrollTop
+    this.following = this.atFoot()
     row.querySelector<HTMLElement>('[data-item]')?.focus({ preventScroll: true })
   }
   /** With no channel to show, the one this device was last in, else the first listed; a phone shows its rail, with no channel behind it. */
@@ -660,7 +667,7 @@ export class ChannelsView implements TemporalView {
       for (const close of leading) this.lead(close)
       this.sweep(new Set(entries.flatMap(entry => entry.kind === 'station' ? [] : [`item:${entry.id}`])))
       if (!entries.length) this.stream.append(el('li', 'kbn-ch-hush', failed ? 'This channel\'s history could not be read; trying again.' : 'Nothing addressed to you here yet.'))
-      if (this.following) this.stream.scrollTop = this.stream.scrollHeight
+      if (this.following) this.toFoot()
       this.mark()
       this.watchRows()
       this.paint()
@@ -696,14 +703,24 @@ export class ChannelsView implements TemporalView {
   private strandAt: (y: number) => number | undefined = () => undefined
   private watchRows(): void {
     this.rowSizes ??= new ResizeObserver(() => {
-      // A row that grows late (a tapestry found, a figure's proportions read) keeps a stream that follows at its foot, unless a file unfolded there is being read.
-      const stream = this.stream
-      if (stream && this.following && !stream.querySelector('[data-unfolded]')) stream.scrollTop = stream.scrollHeight
+      // A row that grows late (a tapestry found, a figure's proportions read) or a stream that shortens (the console growing, the window) keeps a stream that follows at its foot, unless a file unfolded there is being read.
+      if (this.following && !this.stream?.querySelector('[data-unfolded]')) this.toFoot()
       if (this.painting) return
       this.painting = requestAnimationFrame(() => { this.painting = 0; this.paint() })
     })
     this.rowSizes.disconnect()
+    if (this.stream) this.rowSizes.observe(this.stream)
     for (const row of this.stream?.children ?? []) this.rowSizes.observe(row)
+  }
+  private atFoot(): boolean {
+    const list = this.stream
+    return !!list && list.scrollHeight - list.scrollTop - list.clientHeight <= FOLLOW_PX
+  }
+  private toFoot(): void {
+    const list = this.stream
+    if (!list) return
+    list.scrollTop = list.scrollHeight
+    this.lastTop = list.scrollTop
   }
   /**
    * Paints the margin over the rows as they stand: one SVG of fine ink

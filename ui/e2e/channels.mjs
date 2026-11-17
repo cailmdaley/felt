@@ -314,4 +314,48 @@ try {
     await context.close()
     console.log('Channels close: its tapestry drawn, its outcome nowhere, in the stream or its view')
   }
+  {
+    // A stream that follows keeps its foot through what moves it without the reader: rows growing late one after
+    // another, the console growing under it, Rex bringing the board to its newest line; a reader who scrolled up stays.
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' })
+    const page = await context.newPage()
+    await page.goto(`${pathToFileURL(resolve('harness-board-dist/index.html'))}?example=channels#/channels`)
+    await pick(page, 'cmbx').click()
+    const fromFoot = () => page.evaluate(() => { const el = document.querySelector('.kbn-ch > .kbn-ch-stream'); return el.scrollHeight - el.scrollTop - el.clientHeight })
+    const atFoot = () => page.waitForFunction(() => { const el = document.querySelector('.kbn-ch > .kbn-ch-stream'); return el.scrollHeight > el.clientHeight && el.scrollHeight - el.scrollTop - el.clientHeight <= 24 }, null, { timeout: 5000 })
+    const post = text => page.evaluate(text => {
+      const board = window.__harness.channels.board, like = board.findLast(record => record.fiber === 'cmbx' && record.kind === 'post')
+      board.push({ ...like, id: `brd-foot-${board.length}`, timestamp: Date.now() + board.length, received_at: Date.now(), text, files: [] })
+      return window.__harness.modal.fetchAndRender()
+    }, text)
+    await atFoot()
+    // Two rows grow, the second between the first's return to the foot and that scroll's event.
+    await page.evaluate(() => new Promise(done => {
+      const [second, first] = [...document.querySelectorAll('.kbn-ch-stream > .kbn-ch-item')].slice(-2)
+      requestAnimationFrame(() => {
+        first.style.minHeight = `${first.offsetHeight + 120}px`
+        setTimeout(() => { second.style.minHeight = `${second.offsetHeight + 120}px`; setTimeout(done, 300) }, 0)
+      })
+    }))
+    await atFoot()
+    // Rex comes to the chair, whose newest line is the stream's: the board marks it, and what the chair says next is in sight.
+    await page.evaluate(() => window.__harness.modal.voice.onRex({ fiber_id: 'cmbx', origin: window.__harness.MOCK_FEED.fibers[0].origin }))
+    await page.locator('.kbn-ch-item[data-marked][data-fiber="cmbx"]').waitFor()
+    await post('The covariance review is in: nothing to change before the joint fit.')
+    await page.locator('.kbn-ch-stream').getByText('The covariance review is in').waitFor()
+    await atFoot()
+    // The console grows with a draft of several lines.
+    await page.locator('.kbn-ch > .ws-dock .ws-worker-message').click()
+    for (let line = 0; line < 6; line++) { await page.keyboard.type('more'); await page.keyboard.press('Shift+Enter') }
+    await atFoot()
+    // The reader scrolls up: the next line arrives below, and the stream stays where they read.
+    await page.locator('.kbn-ch-stream').evaluate(el => { el.scrollTop -= 300 })
+    await page.waitForTimeout(200)
+    await post('The joint fit has started.')
+    await page.locator('.kbn-ch-stream').getByText('The joint fit has started.').waitFor()
+    await page.waitForTimeout(300)
+    assert.ok(await fromFoot() > 250, 'a reader who scrolled up is not brought back to the foot')
+    await context.close()
+    console.log('Channels foot: a stream that follows keeps its foot through late rows, a growing console and Rex; a reader who scrolled up stays')
+  }
 } finally { await browser.close() }
