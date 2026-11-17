@@ -10,7 +10,7 @@ import { renderMarkdown } from '../utils.js'
 import type { ThreadIndex } from '../threads.js'
 import type { FiberActs } from './Dock.js'
 import { docButtons, type DocFeeds } from './docButtons.js'
-import type { DocKey } from './documents.js'
+import { parseDocKey, type DocKey } from './documents.js'
 import { Unfold } from '../elements/filePreview.js'
 import { doing, threadRow } from '../elements/threadRow.js'
 import { relative, timeEl } from '../elements/time.js'
@@ -79,6 +79,8 @@ export class FamilyPage {
   private shown: { card: string; files: Map<string, MapFile> } | null = null
   /** The latest read of its files: an older read that lands late draws nothing. */
   private reads = 0
+  /** A file asked for before its files were read, unfolded once they are. */
+  private wanted: DocKey | null = null
   private pull = 0
   /** The quiet threads are drawn too. */
   private quietShown = false
@@ -170,6 +172,8 @@ export class FamilyPage {
    * unfolded; any other page (its constitution, its edits) opens in the reader.
    */
   private show(card: KanbanCard, doc: DocKey): void {
+    // Its files not yet read, a file waits for them.
+    if (this.shown?.card !== (card.uid ?? card.id) && parseDocKey(doc)) { this.wanted = doc; return }
     if (!this.shown?.files.has(doc)) { this.feeds.open(card, doc); return }
     if (this.unfold.unfolded === doc) { this.unfold.fold(); return }
     this.unfold.unfold(doc)
@@ -296,6 +300,9 @@ export class FamilyPage {
       this.unfold.update(files)
       // Shown here, it is seen.
       if (files[0]?.unread) this.feeds.seen(files[0])
+      const wanted = this.wanted
+      this.wanted = null
+      if (wanted) this.show(card, wanted)
     })
   }
   /** Pulled past its top: its orchestrator's view opens, quietly, for a scroll is not a click. */

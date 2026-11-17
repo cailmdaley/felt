@@ -142,7 +142,7 @@ export class ChannelsView implements TemporalView {
   /** What was typed to each channel's chair, by channel, kept while the reader is elsewhere. */
   private readonly drafts = new Map<string, string>()
   /** Each item's files as previews that unfold in place, by item, kept across redraws with the close's tapestry it found. */
-  private readonly unfolds = new Map<string, { unfold: Unfold; lead?: UnfoldFile; files: UnfoldFile[] }>()
+  private readonly unfolds = new Map<string, { unfold: Unfold; lead?: UnfoldFile; files: UnfoldFile[]; asked?: boolean }>()
   /** The stream's rows as last drawn, by entry, each with what it drew: a row that would draw the same is kept, an unfolded file in it with it. */
   private readonly rows = new Map<string, { sig: string; node: HTMLLIElement }>()
   private channels: Channel[] = []
@@ -476,6 +476,7 @@ export class ChannelsView implements TemporalView {
     row.setAttribute('data-marked', '')
     if (!this.bring) return
     this.bring = false
+    if (isTypingTarget(document.activeElement as HTMLElement | null)) return
     this.following = false
     row.scrollIntoView({ block: 'center' })
     row.querySelector<HTMLElement>('[data-item]')?.focus({ preventScroll: true })
@@ -593,7 +594,7 @@ export class ChannelsView implements TemporalView {
     const leading = new Set(newest.values())
     for (const entry of entries) {
       const made = entry.kind === 'close' && !leading.has(entry) ? this.unfolds.get(`item:${entry.id}`) : undefined
-      if (made?.lead) { made.lead = undefined; this.showPreviews(made) }
+      if (made?.lead && !made.asked) { made.lead = undefined; this.showPreviews(made) }
     }
     const leads = entries.map(entry => this.unfolds.get(`item:${entry.id}`)?.lead?.key)
     // The width a post's previews wrap in: the stream's, less the gutter and the post's padding.
@@ -618,7 +619,9 @@ export class ChannelsView implements TemporalView {
       this.titles.clear()
       const kept = new Set<string>()
       this.rebuild(this.stream, [count, ...entries.map((entry, row) => {
-        const sig = JSON.stringify([said[row], leads[row]]), was = this.rows.get(entry.id)
+        // A lead asked onto a post with no previews gives it a row of them; elsewhere the previews take it in place.
+        const grows = entry.kind !== 'station' && entry.kind !== 'close' && !entry.files.length && !!leads[row]
+        const sig = JSON.stringify([said[row], grows]), was = this.rows.get(entry.id)
         const node = was?.sig === sig ? was.node : entry.kind === 'station' ? this.stationRow(entry, now) : this.itemRow(entry, now, grouped[row])
         this.rows.set(entry.id, { sig, node })
         kept.add(entry.id)
@@ -921,6 +924,7 @@ export class ChannelsView implements TemporalView {
     if (held?.lead?.key !== lead.key) {
       const made = held ?? (this.previews(item, id), this.unfolds.get(id)!)
       made.lead = { key: lead.key, name: lead.name, at: lead.at }
+      made.asked = true
       this.showPreviews(made)
       this.sigs.stream = ''
       this.drawChannel()
@@ -1103,6 +1107,9 @@ export class ChannelsView implements TemporalView {
     // Enter in the bar's Find opens what it found first.
     if (event.key === 'Enter' && this.query && isTypingTarget(active) && !replying && active !== this.jump) { this.openFirst(); return true }
     if (keystrokeIsSpokenFor()) return false
+    // t unfolds the tapestry of the post in focus beneath it, and from inside it folds it.
+    const post = event.key === 't' ? active?.closest<HTMLElement>('.kbn-ch-item')?.querySelector<HTMLElement>('[data-item]')?.dataset.item : undefined
+    if (post) { void this.unfoldTapestry(post); return true }
     // An unfolded file keeps the keys typed in it; its own are ←, →, ↑, ↓ and Escape.
     if (active?.closest('.uf[data-unfolded]')) return false
     if (event.key === 'Escape' && this.overDrawer()) { this.setRail(true); return true }
@@ -1111,9 +1118,6 @@ export class ChannelsView implements TemporalView {
     if (event.key === 'k') { this.step(-1); return true }
     if (event.key === '[') { this.setRail(this.railShown()); return true }
     if (event.key === 'Enter' && !active?.closest('button, a, input') && this.channel) { this.dock?.focus(); return true }
-    // t unfolds the tapestry of the post in focus beneath it.
-    const post = event.key === 't' ? active?.closest<HTMLElement>('.kbn-ch-item')?.querySelector<HTMLElement>('[data-item]')?.dataset.item : undefined
-    if (post) { void this.unfoldTapestry(post); return true }
     // e clears the line in focus, as its ✓ does.
     const check = event.key === 'e' ? active?.closest('.kbn-ch-item')?.querySelector<HTMLButtonElement>('.kbn-ch-clear:not(:disabled)') : null
     if (check) { check.click(); return true }

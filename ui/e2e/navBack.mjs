@@ -296,7 +296,8 @@ export function registerPostTapestryJourneys(test) {
     assert.equal(await unfold.locator('.uf-name').textContent(), 'Tapestry')
     assert.ok(await unfold.locator('.uf-bar').isVisible(), 'its bar in sight')
     assert.equal(await page.locator('.ws-reader:not(.ws-dormant)').count(), 0, 'no reader opens')
-    await post('cmbx/kappa-tsz').locator('.kbn-ch-who').focus()
+    // From inside the unfolded tapestry, t folds it.
+    assert.equal(await page.evaluate(() => document.activeElement?.classList.contains('uf-page')), true)
     await page.keyboard.press('t')
     await post('cmbx/kappa-tsz').locator('.uf:not([data-unfolded])').waitFor()
   }, { width: 1280, height: 860 }, 'reduce', false)
