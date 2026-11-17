@@ -15,43 +15,31 @@ import './filePreview.css'
 export interface UnfoldFile { key: DocKey; name: string; at?: number; caption?: string; unread?: boolean }
 
 /**
- * How large a file's preview is drawn, by what it is: a figure (an image or
- * an SVG plot), a page (HTML: a tapestry, a report, a deck), a card for
- * anything without a picture, and a thumbnail for the globe and the sheets.
+ * How a file's preview is drawn, by what it is: a figure (an image or an SVG
+ * plot), a page (HTML: a tapestry, a report, a deck), a card for anything
+ * without a picture, and a thumbnail for the globe and the sheets.
  */
 export type FileDensity = 'figure' | 'page' | 'card' | 'thumbnail'
 
-/** Each density's box in CSS pixels, as filePreview.css draws it, so a stream can reckon a row before anything loads. */
-export const BOX: Readonly<Record<FileDensity, { width: number; height: number }>> = {
-  figure: { width: 480, height: 360 }, page: { width: 480, height: 270 }, card: { width: 360, height: 56 }, thumbnail: { width: 176, height: 116 },
-}
-
-/** A file's density in a row of previews, by its kind alone. */
+/** A file's density in a post's previews, by its kind alone. */
 export function densityOf(path: string): FileDensity {
   const kind = documentKind(path)
   return kind === 'image' ? 'figure' : kind === 'html' ? 'page' : 'card'
 }
 
-/** The gap between previews in a row that wraps, as filePreview.css sets it. */
+/** The gap between a post's previews and a card's height in CSS pixels, as filePreview.css sets them. */
 export const PREVIEW_GAP = 8
+export const CARD_PX = 56
+/** A folded figure's or page's height, as filePreview.css caps it: about a third of the screen, 300px at most. */
+export const foldPx = (): number => Math.min(300, 0.33 * window.innerHeight)
 
 /**
- * How tall a row of these files' previews stands in `width` pixels before any
- * of them loads: the boxes wrapped as the row wraps them, each line as tall as
- * its tallest box, a box narrower than its density's scaled to fit (a figure
- * or a page keeping its proportions, a card its height). In a width not
- * known yet (Infinity), the boxes stand in one line.
+ * How tall these files' folded previews stand before any of them loads: each
+ * on a line of its own, a figure or a page at the fold's height and a card
+ * at its own.
  */
-export function previewsHeight(paths: readonly string[], width: number): number {
-  const lines: number[] = []
-  let used = 0
-  for (const path of paths) {
-    const density = densityOf(path), box = BOX[density], w = Math.min(box.width, width)
-    const h = density === 'card' ? box.height : box.height * w / box.width
-    if (!lines.length || used + PREVIEW_GAP + w > width) { lines.push(h); used = w }
-    else { lines[lines.length - 1] = Math.max(lines.at(-1)!, h); used += PREVIEW_GAP + w }
-  }
-  return lines.reduce((sum, h) => sum + h, 0) + PREVIEW_GAP * Math.max(0, lines.length - 1)
+export function previewsHeight(paths: readonly string[], fold = foldPx()): number {
+  return paths.reduce((sum, path) => sum + (densityOf(path) === 'card' ? CARD_PX : fold), 0) + PREVIEW_GAP * Math.max(0, paths.length - 1)
 }
 
 export interface UnfoldOptions {
@@ -359,11 +347,11 @@ export class Unfold {
       return el
     }
     const basename = path.split('/').pop() ?? file.name
-    // Laid out at least as wide as a reading column, drawn to the card's width: wide, it is the page itself.
+    // A post's page is laid out at its card's width, so it is drawn at its real size; a view's lead, at least as wide as a reading column.
     const thumbnail: Thumbnail = new Thumbnail({
       key: `unfold:${file.key}`, shuttleBase: this.opts.shuttleBase, className: 'uf-thumb', fallback: file.name, keepMedia: true,
       file: parsed ? { fullPath: parsed.path, owner: parsed.owner, basename } : undefined,
-      get pageWidth() { return Math.max(720, Math.round(el.clientWidth)) },
+      get pageWidth() { return density ? Math.round(el.clientWidth) || 720 : Math.max(720, Math.round(el.clientWidth)) },
       // Alive only near the screen: loaded as it nears, released once well away.
       priority: () => (this.opts.awake?.() ?? true) ? thumbnail.screenPriority() : 0,
       distance: () => thumbnail.gap(),

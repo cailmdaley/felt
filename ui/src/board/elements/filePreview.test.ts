@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 // @ts-expect-error Node types are excluded from the browser UI's tsconfig.
 import { readFileSync } from 'node:fs'
 import { settle } from '../testFixtures.js'
-import { BOX, densityOf, fileRow, openFileList, PREVIEW_GAP, previewsHeight, Unfold } from './filePreview.js'
+import { CARD_PX, densityOf, fileRow, foldPx, openFileList, PREVIEW_GAP, previewsHeight, Unfold } from './filePreview.js'
 
 const files = [{ key: 'host:/w/a.html', name: 'a.html' }, { key: 'host:/w/b.png', name: 'b.png' }, { key: 'host:/w/c.md', name: 'c.md' }]
 const made = (single = false): { unfold: Unfold; seen: ReturnType<typeof vi.fn> } => {
@@ -106,31 +106,35 @@ describe('a preview\'s box', () => {
     const unfold = new Unfold({ shuttleBase: '', awake: () => false })
     document.body.append(unfold.el)
     unfold.update([...files, { key: 'host:/w/plot.svg', name: 'plot.svg', at: Date.now() - 60_000 }])
-    // jsdom lays nothing out: the box is its width and its height, or its width and its proportions (e2e/channels.mjs measures it drawn).
+    // jsdom lays nothing out: the box is the width and the height its rules give it (e2e/channels.mjs measures it drawn).
     const boxes = [...unfold.el.querySelectorAll<HTMLElement>('.uf-card')].map(card => {
-      const style = getComputedStyle(card), ratio = style.getPropertyValue('aspect-ratio').split('/').map(Number)
-      const height = style.height === 'auto' ? Math.round(parseFloat(style.width) * ratio[1] / ratio[0]) : parseFloat(style.height)
-      return [card.dataset.density, parseFloat(style.width), height, !!card.querySelector('.ws-thumbnail-body, iframe, img')]
+      const style = getComputedStyle(card)
+      return [card.dataset.density, style.width, style.height, !!card.querySelector('.ws-thumbnail-body, iframe, img')]
     })
     expect(boxes).toStrictEqual([
-      ['page', BOX.page.width, BOX.page.height, false],
-      ['figure', BOX.figure.width, BOX.figure.height, false],
-      ['card', BOX.card.width, BOX.card.height, false],
-      ['figure', BOX.figure.width, BOX.figure.height, false],
+      ['page', '100%', 'var(--uf-fold)', false],
+      ['figure', '100%', 'var(--uf-fold)', false],
+      ['card', '100%', `${CARD_PX}px`, false],
+      ['figure', '100%', 'var(--uf-fold)', false],
     ])
     // A card has nothing to load: its kind, its name and when it came.
     expect([...unfold.el.querySelector('[data-density="card"]')!.children].map(part => part.textContent)).toStrictEqual(['≡', 'c.md', ''])
     style.remove()
   })
-  it('reckons a row of previews as it wraps in its width, each line its tallest box, a narrow figure or page scaled', () => {
+  it('reckons a post\'s previews each on a line of its own, a figure or a page at the fold\'s height and a card at its own', () => {
     expect([densityOf('/w/a.svg'), densityOf('/w/deck.html'), densityOf('/w/notes.md'), densityOf('/w/paper.pdf')]).toStrictEqual(['figure', 'page', 'card', 'card'])
     const three = ['/w/notes.md', '/w/deck.html', '/w/a.png']
-    // Wide enough for all three on one line; then the plot wraps; then each stands alone; then a phone, each box narrowed.
-    expect([previewsHeight([], 1400), previewsHeight(['/w/notes.md'], 1400), previewsHeight(three, 1400), previewsHeight(three, 900), previewsHeight(three, 480), previewsHeight(three, 300)])
-      .toStrictEqual([0, 56, 360, 270 + PREVIEW_GAP + 360, 56 + 270 + 360 + 2 * PREVIEW_GAP, 56 + 270 * 300 / 480 + 360 * 300 / 480 + 2 * PREVIEW_GAP])
-    // Before the stream is laid out its width is unknown: the boxes stand in one line.
-    expect(previewsHeight(three, Infinity)).toBe(360)
-    expect(readFileSync('src/board/elements/filePreview.css', 'utf8')).toContain(`flex-wrap: wrap; align-items: flex-start; gap: ${PREVIEW_GAP}px;`)
+    expect([previewsHeight([], 300), previewsHeight(['/w/notes.md'], 300), previewsHeight(three, 300), previewsHeight(three, 200)])
+      .toStrictEqual([0, CARD_PX, CARD_PX + 300 + 300 + 2 * PREVIEW_GAP, CARD_PX + 200 + 200 + 2 * PREVIEW_GAP])
+    // The fold is a third of the screen, 300px at most, as the stylesheet caps it.
+    vi.stubGlobal('innerHeight', 600)
+    expect(foldPx()).toBe(198)
+    vi.stubGlobal('innerHeight', 1200)
+    expect(foldPx()).toBe(300)
+    vi.unstubAllGlobals()
+    const css = readFileSync('src/board/elements/filePreview.css', 'utf8')
+    expect(css).toContain('--uf-fold: min(300px, 33vh);')
+    expect(css).toContain(`flex-direction: column; gap: ${PREVIEW_GAP}px;`)
   })
 })
 

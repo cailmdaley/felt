@@ -2,6 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { layTube } from '../tube.js'
 import { ChannelsView } from './ChannelsView.js'
+import { foldPx } from '../elements/filePreview.js'
 import type { ViewContext } from './ViewRegistry.js'
 import { BoardFeed, type BoardRecord } from '../boardFeed.js'
 import type { SentFile } from '../sentFiles.js'
@@ -720,7 +721,7 @@ it('reads the tapestry of each fiber\'s newest close only, and reckons a close\'
   expect(lead.mock.calls.length - calls).toBe(1)
   // The stream was laid out again with the tapestry the newest close shows, and none for the older one.
   const [entries, heights] = vi.mocked(layTube).mock.lastCall!
-  expect(entries.flatMap((entry, row) => entry.kind === 'close' ? [[entry.id, heights![row]]] : [])).toStrictEqual([['v1', 64], ['v2', 64 + 270]])
+  expect(entries.flatMap((entry, row) => entry.kind === 'close' ? [[entry.id, heights![row]]] : [])).toStrictEqual([['v1', 64], ['v2', 64 + foldPx()]])
 })
 
 it('takes from the stream the sends whose clear was written, and its undo brings back only those', async () => {

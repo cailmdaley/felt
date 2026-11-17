@@ -24,7 +24,7 @@ import { docKey } from '../workspace/documents.js'
 import { headerIcon, type HeaderIcon } from '../workspace/headerIcon.js'
 import { declaredTitle, watchDocumentTitles } from '../workspace/DocumentTitles.js'
 import { docButtons, type DocButtons } from '../workspace/docButtons.js'
-import { previewsHeight, Unfold, type UnfoldFile } from '../elements/filePreview.js'
+import { foldPx, previewsHeight, Unfold, type UnfoldFile } from '../elements/filePreview.js'
 import { groups, kindWord, post } from '../elements/post.js'
 import { doing, threadRow } from '../elements/threadRow.js'
 import { onDesk } from '../workspace/fiberPageState.js'
@@ -632,18 +632,18 @@ export class ChannelsView implements TemporalView {
       if (made?.lead && !made.asked) { made.lead = undefined; this.showPreviews(made) }
     }
     const leads = entries.map(entry => this.unfolds.get(`item:${entry.id}`)?.lead?.key)
-    // The margin's width, and the width a post's previews wrap in: the stream's, less the margin and the post's padding.
+    // The margin's width, and how tall a folded preview stands.
     const margin = this.stream.clientWidth && this.stream.clientWidth < MARGIN.below ? MARGIN.narrow : MARGIN.wide
-    const wide = this.stream.clientWidth ? this.stream.clientWidth - margin - 26 : Infinity
+    const fold = foldPx()
     // A fibre's tension follows its runs, which can move with no row moving (a relaunch inside a life).
     const runs = this.runs(channel, now, waits)
     const ran = [...new Set(entries.map(entry => entry.card))].map(card => runs(card).map(([from, to]) => [from, to === now ? 'now' : to]))
     // The count and its title name the threads running, what waits first, which can change with no entry changing.
-    const stream = JSON.stringify([channel.key, failed, said, entries.map(entry => [attentionOf(entry.card, waits), turnOf(entry.card).turn]), leads, wide, margin, ran, running.map(card => [fiberOf(card), attentionOf(card, waits)])])
+    const stream = JSON.stringify([channel.key, failed, said, entries.map(entry => [attentionOf(entry.card, waits), turnOf(entry.card).turn]), leads, fold, margin, ran, running.map(card => [fiberOf(card), attentionOf(card, waits)])])
     if (stream !== this.sigs.stream) {
       this.sigs.stream = stream
-      // Each row reckoned by its parts' sizes, a post's by its previews as they wrap (a tapestry it shows leading them), before anything in it loads.
-      const heights = entries.map((entry, row) => entry.kind === 'station' ? rowHeight(entry) : POST_PX + previewsHeight([...leads[row] ? ['tapestry.html'] : [], ...entry.files.map(file => file.fullPath)], wide))
+      // Each row reckoned by its parts' sizes, a post's by its previews (a tapestry it shows leading them), before anything in it loads.
+      const heights = entries.map((entry, row) => entry.kind === 'station' ? rowHeight(entry) : POST_PX + previewsHeight([...leads[row] ? ['tapestry.html'] : [], ...entry.files.map(file => file.fullPath)], fold))
       const index = threadIndexFor(this.ctx!.response)
       // Every thread in a channel is its chair's: a parent reaches to a sub-thread only below the chair.
       const parentOf = (card: KanbanCard): KanbanCard | undefined => { const parent = index.parentOf(card); return parent && fiberOf(parent) !== fiberOf(seat) ? parent : undefined }

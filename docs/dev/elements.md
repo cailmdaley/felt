@@ -27,17 +27,17 @@ The rest are the board's own choices, made to sit with those numbers:
 | Post text | `--type-prose` serif, `--leading-prose` |
 | Gap between posts from different threads | 8px; within a group, 2px |
 | A group | consecutive lines from one thread less than 5 minutes apart |
-| Image or figure preview | a box 480 by 360, the picture contained in it with its aspect kept |
-| Page preview (HTML, tapestry, deck) | 480 by 270 |
-| File card (Markdown, PDF, code, audio, anything without a picture) | 360 by 56: kind glyph, name, age |
+| Image or figure preview | the post's width, a third of the screen high and 300px at most, the picture whole in it with its aspect kept |
+| Page preview (HTML, tapestry, deck) | the same box, showing the top of the page at its real size |
+| File card (Markdown, PDF, code, audio, anything without a picture) | the post's width by 56: kind glyph, name, age |
 | File row (a list of files) | the card's face in one line, as wide as its list up to 420; its caption a second line, cut at two |
 | Constitution view's thread list | at most 760 wide, the reading measure, so a row's age stands near its words |
 | A thread row's age | at least 16px from its doing |
 | A menu (a list of files, of threads) | 16px clear of the window's edge, so it stays on the board's sheet |
 | Thumbnail (globe tiles, sheets) | 176 by 116 |
 
-A box never grows wider than the row it sits in: narrower, a figure or a page keeps its proportions and a card its height.
-`BOX` and `PREVIEW_GAP` in `filePreview.ts` state the same numbers for code that reckons a row's height (the stream's margin), and a test reads the stylesheet to keep them equal; `previewsHeight` wraps a post's boxes in the stream's width as the row does, and stands them in one line while that width is not known; a close's row counts a tapestry only when it shows one.
+A post's previews stand each on a line of its own, as wide as the post, so unfolding one changes its height alone and never its width.
+`foldPx`, `CARD_PX` and `PREVIEW_GAP` in `filePreview.ts` state the same numbers for code that reckons a row's height (the stream's margin), and a test reads the stylesheet to keep them equal; `previewsHeight` sums a post's boxes; a close's row counts a tapestry only when it shows one.
 
 ## Elements
 

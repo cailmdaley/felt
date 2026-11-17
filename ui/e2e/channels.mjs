@@ -115,15 +115,14 @@ try {
     await page.keyboard.press('Escape')
     assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-band-title').textContent(), 'cmbx')
     assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-worker-message').getAttribute('data-placeholder'), 'Message cmbx')
-    // Its post carries the deck, the plot and the notes it attached, each at its density's box in a row that wraps:
-    // a page 480 by 270, a figure 480 by 360, a card 360 by 56, never wider than the row.
+    // Its post carries the deck, the plot and the notes it attached, each on a line of its own as wide as the post:
+    // a page and a figure a third of the screen high, 300px at most, a card 56.
     const kappa = page.locator('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"]')
     assert.equal(await kappa.locator('.kbn-ch-previews .uf-card').count(), 3)
     const rowWidth = (await kappa.locator('.uf-row').boundingBox()).width
     const boxes = await kappa.locator('.uf-card').evaluateAll(cards => cards.map(card => [card.dataset.density, Math.round(card.getBoundingClientRect().width), Math.round(card.getBoundingClientRect().height)]))
-    // Narrower than its box, a figure or a page keeps its proportions, a card its height.
-    const box = (density, width, height) => { const drawn = Math.min(width, Math.round(rowWidth)); return [density, drawn, density === 'card' ? height : Math.round(drawn * height / width)] }
-    assert.deepEqual(boxes.map(([density, width, height]) => [density, width, height]), [box('page', 480, 270), box('figure', 480, 360), box('card', 360, 56)])
+    const fold = Math.round(Math.min(300, 0.33 * height))
+    assert.deepEqual(boxes, [['page', Math.round(rowWidth), fold], ['figure', Math.round(rowWidth), fold], ['card', Math.round(rowWidth), 56]])
     // The close for review says its review note, never its outcome.
     assert.match(await page.locator('.kbn-ch-item[data-kind="close"] .kbn-ch-item-text').textContent(), /agree to 4%/)
     assert.equal(await page.locator('.kbn-ch-stream').getByText('validated against 2000 simulations').count(), 0)
@@ -134,6 +133,8 @@ try {
     // A click unfolds it in place, opening nothing; → steps to the next file, Escape folds it back.
     await kappa.locator('.uf-card').first().click()
     await page.waitForFunction(() => document.querySelector('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"] .kbn-ch-previews[data-unfolded] .uf-count')?.textContent === '1 / 3')
+    // Unfolded, the file is as wide as it was folded: it only grew downward.
+    assert.equal(Math.round((await kappa.locator('.uf-page').boundingBox()).width), Math.round(rowWidth))
     assert.equal(await page.locator('.ws-selected').count(), 0, 'unfolding opens no view')
     await shot(page, `${name}-unfolded`)
     await page.keyboard.press('ArrowRight')

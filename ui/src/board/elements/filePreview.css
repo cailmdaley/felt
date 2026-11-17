@@ -1,7 +1,7 @@
 /* Files that unfold in place. Folded: a single lead capped near 320px at the full width given; a post's files each
-   at its density's box (BOX in filePreview.ts), in a row that wraps. Unfolded: the same card grown to the file's
-   natural height, under a quiet bar in the folded row's meta type, pinned to the top of what scrolls it. */
-.uf { --uf-cap: min(320px, 55vh); min-width: 0; }
+   on a line of its own at the full width given. Unfolded: the same card grown downward to the file's natural
+   height, under a quiet bar in the folded row's meta type, pinned to the top of what scrolls it. */
+.uf { --uf-cap: min(320px, 55vh); --uf-fold: min(300px, 33vh); min-width: 0; }
 .uf[hidden] { display: none; }
 .uf-row { display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: thin; }
 .uf-card {
@@ -12,16 +12,13 @@
 .uf-card:is(:hover, :focus-visible) { box-shadow: 0 0 0 1px var(--ws-ink-soft); outline: none; }
 .uf-thumb.ws-thumbnail { width: 100%; height: 100%; border-radius: 4px; }
 
-/* A post's files, at Slack's proportions: a figure at most 480 by 360, its picture contained; a page 480 by 270;
-   a card 360 by 56. Each box is set before anything loads; narrower than the row it never grows past, a figure or a
-   page keeps its proportions and a card its height. */
-.uf:not([data-single]) .uf-row { flex-wrap: wrap; align-items: flex-start; gap: 8px; overflow: visible; scroll-snap-type: none; }
-.uf:not([data-single]) .uf-card { flex: none; max-width: 100%; }
-.uf-card[data-density='figure'] { width: 480px; height: auto; aspect-ratio: 480 / 360; }
-.uf-card[data-density='page'] { width: 480px; height: auto; aspect-ratio: 480 / 270; }
-.uf-card[data-density='thumbnail'] { width: 176px; height: auto; aspect-ratio: 176 / 116; }
-.uf-card[data-density='card'] {
-  width: 360px; height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 12px; text-align: left;
+/* A post's files, each as wide as the post and short: a page shows its top at its real size, a figure stands whole
+   in the same box with its aspect kept, both a third of the screen high at most (foldPx in filePreview.ts); a card
+   is one line, 56px. Each box is set before anything loads, and unfolding one changes its height alone. */
+.uf:not([data-single]) .uf-row { flex-direction: column; gap: 8px; overflow: visible; scroll-snap-type: none; }
+.uf:not([data-single]) .uf-card { flex: none; width: 100%; height: var(--uf-fold); }
+.uf:not([data-single]) .uf-card[data-density='card'] {
+  height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 12px; text-align: left;
   background: var(--ws-paper, var(--kbn-paper)); color: var(--ws-ink-soft); font: var(--type-meta)/var(--leading-ui) var(--font-serif);
 }
 .uf-glyph { flex: none; width: 24px; font: var(--type-title)/var(--leading-solid) var(--font-serif); color: var(--ws-ink-muted); text-align: center; }
