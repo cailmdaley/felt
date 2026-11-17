@@ -39,9 +39,11 @@ const SLIDE = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 794 1123" wi
  * posting to the human and answered; an expert posting its cross-spectrum to
  * the human with its plots attached; one asking its chair; one closed to its
  * chair and marked for the human's review; one at work with nothing to say.
- * UNIONS, busy: a seated chair over two seated hubs, its post to the human
- * unanswered, a hub posting a figure to the human, a thread asking and ten
- * more posting to their chair. Vizier: two seats (the oneshot one chairs), a
+ * UNIONS, busy: a seated chair over two seated hubs at work and two at
+ * rest, its post to the human unanswered, a hub posting a figure to the
+ * human, a thread asking and ten more posting to their chair; a weekly
+ * standing thread between runs, a draft and a thread put to rest sit quiet.
+ * Vizier: two seats (the oneshot one chairs), a
  * form asking, the morning post closed with a closing post and its
  * attachment. The Mill posts long to the human, who answered. An office
  * without a channel (the composer's), hidden from the rail an hour ago;
@@ -72,6 +74,11 @@ const ROWS: Row[] = [
   { id: 'pando/unions/photoz', name: 'Photo-z calibration', parent: 'pando/unions', state: 'working', minutes: 40 },
   { id: 'pando/unions/paper', name: 'Paper draft', parent: 'pando/unions', state: 'working', minutes: 28,
     tapestry: { title: 'Paris SWG deck', lede: 'Twelve slides for Thursday: the null tests, the blinded S8 and what is left before unblinding.', slide: true } },
+  { id: 'pando/unions/north', name: 'north hub', parent: 'pando/unions', seat: true, rest: true, minutes: 2 * DAY },
+  { id: 'pando/unions/south', name: 'south hub', parent: 'pando/unions', seat: true, rest: true, minutes: 3 * DAY },
+  { id: 'pando/unions/weekly', name: 'Weekly shear digest', parent: 'pando/unions', standing: true, armed: true, minutes: 2 * DAY },
+  { id: 'pando/unions/glass', name: 'GLASS mock refresh', parent: 'pando/unions', minutes: DAY },
+  { id: 'pando/unions/star-gal', name: 'Star-galaxy separation', parent: 'pando/unions', rest: true, minutes: 6 * DAY },
   { id: 'vizier', name: 'Vizier', channel: 'Vizier', role: 'vizier', seat: true, state: 'idle', minutes: 6 },
   { id: 'morning-post', name: 'Morning post', channel: 'Vizier', seat: true, standing: true, closed: true, minutes: 140, outcome: 'Eleven letters sorted; two need a reply from you, the rest are filed.',
     tapestry: { title: 'The morning post, sorted', lede: 'Eleven letters: two need your reply (the notary and the landlord), four are filed, five were newsletters.' } },

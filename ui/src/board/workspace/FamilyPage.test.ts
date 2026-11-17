@@ -73,6 +73,22 @@ describe('a constitution\'s view', () => {
     expect(page.el.textContent).not.toContain('Leaf')
   })
 
+  it('lists only the threads that wait on the human or are working; a seat, a standing thread between runs, a draft and a rest join the quiet fold, which opens to them as the same rows', () => {
+    const seat = card({ id: 'hub/seat', name: 'Seat', orchestrator: 'hub', status: 'open', column: 'roles', shuttleSeat: true, createdAt: when(30) })
+    const weekly = card({ id: 'hub/weekly', name: 'Weekly', orchestrator: 'hub', status: 'active', column: 'resting', shuttleKind: 'standing', createdAt: when(30) })
+    const draft = card({ id: 'hub/draft', name: 'Draft', orchestrator: 'hub', status: 'open', column: 'drafts', createdAt: when(30) })
+    // A quiet thread with a wait below it stands with what waits.
+    const quietParent = card({ id: 'hub/qp', name: 'Quiet parent', orchestrator: 'hub', status: 'open', column: 'drafts', createdAt: when(30) })
+    const below = card({ id: 'hub/qp/ask', name: 'Below', orchestrator: 'hub/qp', status: 'active', createdAt: when(10), ask: { text: 'Go?', at: when(1) } })
+    const { page } = made(root, {}, [...cards, seat, weekly, draft, quietParent, below])
+    expect(threads(page).map(([name]) => name)).toStrictEqual(['q', 'qp', '↳ ask', 'w', 'mid'])
+    const quiet = page.el.querySelector<HTMLButtonElement>('.ov-quiet')!
+    expect(quiet.textContent).toBe('4 quiet')
+    quiet.click()
+    expect(threads(page).map(([name]) => name).slice(5).sort()).toStrictEqual(['d', 'draft', 'seat', 'weekly'])
+    expect([...page.el.querySelectorAll<HTMLElement>('.ov-thread')].slice(5).every(row => row.classList.contains('thread-row') && row.dataset.attention === 'quiet')).toBe(true)
+  })
+
   it('says what it last posted, then its tapestry at full width, which unfolds in place and steps on through its sent files; its head opens its pages', async () => {
     const { page, feeds } = made(mid)
     await settle()

@@ -35,8 +35,6 @@ const PULL_PX = 120
 /** What a waiting constitution asks of the human, in a word; a post it waits with says nothing its words below do not. */
 const WANT_WORD: Readonly<Record<Want['kind'], string>> = { ask: 'asks', review: 'for review', post: '', blocked: 'blocked' }
 
-/** A thread the rows tuck away behind the quiet control: put to rest (a standing one between runs and a seat stay drawn), or archived. */
-const tuckable = (card: KanbanCard): boolean => card.column === 'tempered' || card.column === 'composted' || (card.column === 'resting' && card.shuttleKind !== 'standing')
 
 /**
  * One view of a constitution, the same from the Desk, a channel, a role or a
@@ -48,9 +46,10 @@ const tuckable = (card: KanbanCard): boolean => card.column === 'tempered' || ca
  * Then its head: its dot and slug, what it wants of the human or its faint
  * word, its run at a glance, its pages and its acts; the last thing it posted;
  * its sub-threads as thread rows (each opens the same view one level down),
- * what waits first,
+ * only those that wait on the human or are working, what waits first,
  * each followed by every thread below it that waits on the human, and the
- * resting and archived ones behind one quiet control; then its tapestry, or
+ * quiet ones (seats, drafts, rest, standing threads between runs, closes)
+ * behind one quiet control that opens to them; then its tapestry, or
  * else its newest sent file, at the view's full width as a preview that
  * unfolds in place, stepping through its other sent files, and counts as
  * seen. No outcome is drawn. It reads feeds and repaints only while its frame
@@ -80,7 +79,7 @@ export class FamilyPage {
   /** The latest read of its files: an older read that lands late draws nothing. */
   private reads = 0
   private pull = 0
-  /** The resting and archived threads are drawn too. */
+  /** The quiet threads are drawn too. */
   private quietShown = false
   private readonly quiet = el('button', 'ov-quiet')
   private readonly feeds: ViewFeeds
@@ -107,7 +106,7 @@ export class FamilyPage {
     this.unfold.el.classList.add('ov-unfold')
     this.threads.setAttribute('aria-label', 'Threads')
     this.quiet.type = 'button'
-    this.quiet.title = 'Resting and archived threads'
+    this.quiet.title = 'Quiet threads: seats, drafts, rest, standing threads between runs, closes'
     this.quiet.addEventListener('click', () => {
       this.quietShown = !this.quietShown
       if (this.card && this.index) this.paint(this.index.card(this.card), Date.now())
@@ -190,8 +189,8 @@ export class FamilyPage {
     this.paintHead(card, now)
     this.paintSaid(card, now)
     this.paintFiles(card)
-    // A resting or archived thread with nothing waiting below it stands behind the quiet control.
-    const tucked = threads.filter(({ child, below }) => !below.length && !wantOf(child, waits) && tuckable(child))
+    // A quiet thread with nothing waiting below it stands behind the quiet control.
+    const tucked = threads.filter(({ child, below }) => !below.length && attentionOf(child, waits) === 'quiet')
     if (!tucked.length) this.quietShown = false
     const drawn = this.quietShown ? threads : threads.filter(thread => !tucked.includes(thread))
     this.quiet.textContent = this.quietShown ? 'hide quiet' : `${tucked.length} quiet`
