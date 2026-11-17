@@ -23,7 +23,7 @@ import { turnOf } from '../turn.js'
 import { docKey } from '../workspace/documents.js'
 import { headerIcon, type HeaderIcon } from '../workspace/headerIcon.js'
 import { declaredTitle, watchDocumentTitles } from '../workspace/DocumentTitles.js'
-import { docButtons } from '../workspace/docButtons.js'
+import { docButtons, type DocButtons } from '../workspace/docButtons.js'
 import { previewsHeight, Unfold, type UnfoldFile } from '../elements/filePreview.js'
 import { groups, kindWord, post } from '../elements/post.js'
 import { doing, threadRow } from '../elements/threadRow.js'
@@ -129,6 +129,8 @@ export class ChannelsView implements TemporalView {
   private railToggle: IconButton | null = null
   private channelEl: HTMLElement | null = null
   private head: HTMLElement | null = null
+  /** The chair's pages in the head. */
+  private pages?: DocButtons
   private stream: HTMLOListElement | null = null
   private note: HTMLElement | null = null
   /** The console, to the channel's chair. */
@@ -567,9 +569,10 @@ export class ChannelsView implements TemporalView {
     }
     const now = Date.now(), { entries, running } = this.streamOf(channel), failed = channel.families.some(uid => this.ctx!.workspace!.board.failed(uid))
     const seat = channel.seat
-    // The head and the stream are drawn apart, so what arrives leaves a focused page or an open menu in the head be.
-    const head = JSON.stringify([channel.key, channel.name, channel.title, fiberOf(seat), seat.modifiedAt, this.ctx!.workspace!.globeHost.feeds.files(seat).length])
-    if (head !== this.sigs.head) {
+    // The head and the stream are drawn apart, so what arrives leaves a focused page or an open menu in the head be;
+    // the head waits while a list hangs from its pages, whose count follows the chair's files in place.
+    const head = JSON.stringify([channel.key, channel.name, channel.title, fiberOf(seat), seat.modifiedAt])
+    if (head !== this.sigs.head && !this.pages?.el.querySelector('[aria-expanded="true"]')) {
       this.sigs.head = head
       const back = iconButton('kbn-ch-back', 'back', 'Channels', () => this.setRail(false))
       const name = el('h3', 'kbn-ch-name')
@@ -577,12 +580,12 @@ export class ChannelsView implements TemporalView {
       name.toggleAttribute('data-lone', !channel.chaired)
       name.title = channel.title
       // The chair's pages: opening one is a deliberate look at the chair.
-      const pages = docButtons(seat, { ...this.ctx!.workspace!.globeHost.feeds, open: (card, doc) => this.leaveFor(null, () => this.ctx?.workspace?.openPage(card, doc)) })
-      pages.classList.add('kbn-ch-pages')
+      this.pages = docButtons(seat, { ...this.ctx!.workspace!.globeHost.feeds, open: (card, doc) => this.leaveFor(null, () => this.ctx?.workspace?.openPage(card, doc)) })
+      this.pages.el.classList.add('kbn-ch-pages')
       const menu: IconButton = iconButton('kbn-ch-menu', 'actions', 'Channel menu', () => this.railMenu(channel.key, menu.button))
       menu.button.setAttribute('aria-haspopup', 'menu')
-      this.head.replaceChildren(this.railToggle!.root, back.root, name, pages, menu.root)
-    }
+      this.head.replaceChildren(this.railToggle!.root, back.root, name, this.pages.el, menu.root)
+    } else this.pages?.refresh()
     const waits = this.ctx!.workspace!.board.waiting
     // A row draws an entry; the thread's state, which moves while its worker runs, is painted on it in place.
     // A line follows the one before it in its group: the row above, of the same thread, moments before.

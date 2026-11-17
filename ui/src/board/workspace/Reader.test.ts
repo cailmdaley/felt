@@ -364,6 +364,17 @@ describe('Reader', () => {
       disposeReader(reader)
     })
 
+    it('follows the files while its list is open: a send that arrives takes its row', async () => {
+      viewport.phone = true
+      const reader = makeReader()
+      reader.show(sent, sent.documents[0].key, alpha)
+      reader.el.querySelector<HTMLButtonElement>('.ws-navbar .ws-files-toggle')!.click()
+      expect(await listed()).toEqual(['host-a:/notes/plot.png'])
+      reader.show(buildChannel({ uid: 'alpha', owner: 'host-a', name: 'Alpha', path: '/notes/alpha.md', fiberDir: '/notes', body: '', previous: sent, sent: [{ path: '/notes/plot.png', time: 1 }, { path: '/notes/fit.png', time: 2 }] }), sent.documents[0].key, alpha)
+      expect(await listed()).toEqual(['host-a:/notes/fit.png', 'host-a:/notes/plot.png'])
+      disposeReader(reader)
+    })
+
     it('marks unread files on the toggle at every width', () => {
       for (const phone of [false, true]) {
         viewport.phone = phone

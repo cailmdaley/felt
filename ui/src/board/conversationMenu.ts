@@ -13,12 +13,15 @@ export interface ConversationAction {
 
 let dismissOpenMenu: (() => void) | undefined
 
+/** An open menu: its close, and its items drawn anew while it stays open, the focused one keeping the focus; once closed, an update does nothing. */
+export interface ActionMenu { close(): void; update(actions: readonly ConversationAction[]): void }
+
 /**
  * Mount a temporary SDK menu outside the board's clickable rows. An outside
  * press closes it and reaches what it lands on, unless it is `modal`, when the
  * press only closes it.
  */
-export function openActionMenu(anchor: HTMLElement, actions: readonly ConversationAction[], label: string, point?: { x: number; y: number }, modal = false): () => void {
+export function openActionMenu(anchor: HTMLElement, actions: readonly ConversationAction[], label: string, point?: { x: number; y: number }, modal = false): ActionMenu {
   dismissOpenMenu?.()
   const root = document.createElement('ui-menu')
   root.setAttribute('modal', String(modal))
@@ -35,12 +38,12 @@ export function openActionMenu(anchor: HTMLElement, actions: readonly Conversati
     const next = anchor.getBoundingClientRect()
     if (next.left !== anchorBounds.left || next.top !== anchorBounds.top) close()
   }
-  let selectedAction: ConversationAction | undefined
+  let selectedAction: ConversationAction | undefined, closed = false
   root.addEventListener('openchange', event => {
     if (!event.detail.value && event.detail.reason === 'item-press') {
       const target = event.detail.event?.target as HTMLElement | undefined
       const index = target?.closest<HTMLElement>('[data-action-index]')?.dataset.actionIndex
-      if (index !== undefined) selectedAction = actions[Number(index)]
+      if (index !== undefined) selectedAction = current[Number(index)]
     }
   })
   // A destination picker starts at the remembered choice once the SDK moves focus in.
@@ -49,6 +52,7 @@ export function openActionMenu(anchor: HTMLElement, actions: readonly Conversati
   }, { once: true })
   root.addEventListener('openchangecomplete', event => {
     if (event.detail.value) return
+    closed = true
     anchor.setAttribute('aria-expanded', 'false')
     window.removeEventListener('resize', close)
     window.removeEventListener('scroll', scrolled, true)
@@ -62,54 +66,60 @@ export function openActionMenu(anchor: HTMLElement, actions: readonly Conversati
   // Menu keys and pointer presses belong to the popup, not the board below it.
   menu.addEventListener('keydown', event => event.stopPropagation())
   menu.addEventListener('pointerdown', event => event.stopPropagation())
-  let group: HTMLElement | undefined
-  if (actions.some(action => action.checked !== undefined)) {
-    const radio = document.createElement('ui-menu-radio-group')
-    const selected = actions.findIndex(action => action.checked)
-    if (selected >= 0) radio.setAttribute('default-value', String(selected))
-    group = radio
-    menu.append(group)
-  }
-  let verbs = false
-  for (const [index, action] of (actions.length ? actions : [{ label: 'No actions available', disabled: true }]).entries()) {
-    const part = document.createElement(action.checked === undefined ? 'ui-menu-item' : 'ui-menu-radio-item')
-    part.setAttribute('as-child', '')
-    part.setAttribute('value', String(index))
-    part.setAttribute('label', action.label)
-    if (action.disabled) part.setAttribute('disabled', '')
-    if (action.checked !== undefined) part.setAttribute('close-on-select', '')
-    const item = document.createElement(action.href ? 'a' : 'button')
-    item.dataset.actionIndex = String(index)
-    if (item instanceof HTMLAnchorElement) linkDestination(item, action.href!)
-    else (item as HTMLButtonElement).type = 'button'
-    if (action.content) { item.append(action.content); item.setAttribute('aria-label', action.label) }
-    else if (action.checked === undefined) item.textContent = action.label
-    else {
-      const mark = document.createElement('ui-menu-item-indicator')
-      mark.setAttribute('keep-mounted', '')
-      mark.setAttribute('aria-hidden', 'true')
-      mark.textContent = '✓'
-      const text = document.createElement('span')
-      text.className = 'kbn-conversation-label'
-      text.textContent = action.label
-      item.append(mark, text)
+  let current = actions
+  const fill = (actions: readonly ConversationAction[]): void => {
+    current = actions
+    menu.replaceChildren()
+    let group: HTMLElement | undefined
+    if (actions.some(action => action.checked !== undefined)) {
+      const radio = document.createElement('ui-menu-radio-group')
+      const selected = actions.findIndex(action => action.checked)
+      if (selected >= 0) radio.setAttribute('default-value', String(selected))
+      group = radio
+      menu.append(group)
     }
-    if (action.dress && item instanceof HTMLButtonElement) {
-      action.dress(item)
-      verbs = true
-      menu.classList.add('kbn-verb-menu')
-    } else if (verbs) {
-      if (!menu.querySelector('ui-menu-separator')) {
-        const rule = document.createElement('ui-menu-separator')
-        rule.className = 'kbn-verb-menu-rule'
-        menu.append(rule)
+    let verbs = false
+    for (const [index, action] of (actions.length ? actions : [{ label: 'No actions available', disabled: true }]).entries()) {
+      const part = document.createElement(action.checked === undefined ? 'ui-menu-item' : 'ui-menu-radio-item')
+      part.setAttribute('as-child', '')
+      part.setAttribute('value', String(index))
+      part.setAttribute('label', action.label)
+      if (action.disabled) part.setAttribute('disabled', '')
+      if (action.checked !== undefined) part.setAttribute('close-on-select', '')
+      const item = document.createElement(action.href ? 'a' : 'button')
+      item.dataset.actionIndex = String(index)
+      if (item instanceof HTMLAnchorElement) linkDestination(item, action.href!)
+      else (item as HTMLButtonElement).type = 'button'
+      if (action.content) { item.append(action.content); item.setAttribute('aria-label', action.label) }
+      else if (action.checked === undefined) item.textContent = action.label
+      else {
+        const mark = document.createElement('ui-menu-item-indicator')
+        mark.setAttribute('keep-mounted', '')
+        mark.setAttribute('aria-hidden', 'true')
+        mark.textContent = '✓'
+        const text = document.createElement('span')
+        text.className = 'kbn-conversation-label'
+        text.textContent = action.label
+        item.append(mark, text)
       }
-      item.classList.add('kbn-verb-menu-plain')
+      if (action.dress && item instanceof HTMLButtonElement) {
+        action.dress(item)
+        verbs = true
+        menu.classList.add('kbn-verb-menu')
+      } else if (verbs) {
+        if (!menu.querySelector('ui-menu-separator')) {
+          const rule = document.createElement('ui-menu-separator')
+          rule.className = 'kbn-verb-menu-rule'
+          menu.append(rule)
+        }
+        item.classList.add('kbn-verb-menu-plain')
+      }
+      part.append(item)
+      ;(action.checked === undefined ? menu : group!).append(part)
+      item.addEventListener('click', event => event.stopPropagation())
     }
-    part.append(item)
-    ;(action.checked === undefined ? menu : group!).append(part)
-    item.addEventListener('click', event => event.stopPropagation())
   }
+  fill(actions)
   document.body.append(root)
   anchor.setAttribute('aria-expanded', 'true')
   dismissOpenMenu = close
@@ -118,7 +128,15 @@ export function openActionMenu(anchor: HTMLElement, actions: readonly Conversati
   // Controller-opened popups return to the element focused when they open.
   anchor.focus({ preventScroll: true })
   void root.api.open({ anchor: point ?? anchor, focus: 'first' })
-  return close
+  const update = (actions: readonly ConversationAction[]): void => {
+    if (closed) return
+    const held = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('[data-action-index]')
+    const was = held && menu.contains(held) ? current[Number(held.dataset.actionIndex)]?.label : undefined
+    fill(actions)
+    const at = was === undefined ? -1 : actions.findIndex(action => action.label === was)
+    if (at >= 0) menu.querySelector<HTMLElement>(`[data-action-index="${at}"]`)?.focus({ preventScroll: true })
+  }
+  return { close, update }
 }
 
 /** Touch and mouse share the same picker. Activating the anchor opens its destination. */

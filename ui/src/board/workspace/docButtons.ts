@@ -1,4 +1,4 @@
-import { openFileList } from '../elements/filePreview.js'
+import { openFileList, type OpenFileList } from '../elements/filePreview.js'
 import type { MapFile } from '../family/model.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { slug } from '../threadOutline.js'
@@ -16,44 +16,61 @@ export interface DocFeeds {
   open(card: KanbanCard, doc: DocKey): void
 }
 
+/** A constitution's page buttons, and a way to read its files again. */
+export interface DocButtons {
+  el: HTMLElement
+  /** Reads its sent files again: the count, and a list open from it, follow them in place. */
+  refresh(): void
+}
+
 /**
  * A constitution's pages as one row of icons, the same wherever it stands (a
  * constitution's view, a channel's head): its constitution, its tapestry once
  * found, its sent files (a count that opens their list, newest first, each
  * row opening its file in the reader) and, for a fiber with a project, its edits.
+ * The count is one button for the row's life, so a list open from it keeps its
+ * opener whatever arrives.
  */
-export function docButtons(card: KanbanCard, feeds: DocFeeds): HTMLElement {
+export function docButtons(card: KanbanCard, feeds: DocFeeds): DocButtons {
   const row = document.createElement('span')
   row.className = 'ws-doc-buttons'
   const who = slug(card), uid = card.uid ?? card.id
-  const button = (part: string, icon: HeaderIcon, label: string, open: (node: HTMLButtonElement) => void, count?: number): HTMLButtonElement => {
+  const button = (part: string, icon: HeaderIcon, label: string, open: (node: HTMLButtonElement) => void): HTMLButtonElement => {
     const node = document.createElement('button')
     node.type = 'button'
     node.className = 'ws-doc-button'
     node.dataset.part = part
     node.innerHTML = headerIcon(icon)
-    if (count !== undefined) node.append(Object.assign(document.createElement('span'), { className: 'ws-doc-count', textContent: String(count) }))
     node.title = `${label} · ${who}`
     node.setAttribute('aria-label', node.title)
     node.addEventListener('click', event => { event.stopPropagation(); open(node) })
     return node
   }
-  // The tapestry and the sends each keep a slot, filled once the tapestry's read lands.
+  // The tapestry keeps a slot, filled once its read lands; the sends' count stands while there are any.
   const tapestry = document.createElement('span'), sent = document.createElement('span')
   tapestry.className = sent.className = 'ws-doc-slot'
-  const sends = (lead?: MapFile): void => {
-    const files = feeds.files(card).filter(file => file.key !== lead?.key)
-    const label = `${files.length} sent ${files.length === 1 ? 'file' : 'files'}`
-    sent.replaceChildren(...files.length ? [button('sends', 'sends', label, node => { openFileList(node, files, key => feeds.open(card, key)) }, files.length)] : [])
+  let lead: MapFile | undefined, list: OpenFileList | undefined
+  const files = (): MapFile[] => feeds.files(card).filter(file => file.key !== lead?.key)
+  const count = button('sends', 'sends', '', node => { list = openFileList(node, files(), key => feeds.open(card, key)) })
+  const number = Object.assign(document.createElement('span'), { className: 'ws-doc-count' })
+  count.append(number)
+  const refresh = (): void => {
+    const now = files(), label = `${now.length} sent ${now.length === 1 ? 'file' : 'files'}`
+    number.textContent = String(now.length)
+    count.title = `${label} · ${who}`
+    count.setAttribute('aria-label', count.title)
+    if (!!now.length !== sent.contains(count)) sent.replaceChildren(...now.length ? [count] : [])
+    list?.update(now)
   }
   const page = (doc: DocKey) => (): void => feeds.open(card, doc)
   row.append(button('constitution', 'constitution', 'Constitution', page(fiberKey(card.originId, uid))), tapestry, sent)
   if (card.shuttleProjectDir) row.append(button('edits', 'edits', 'Edits', page(changeKey(card.originId, uid))))
-  sends()
-  void feeds.lead(card).then(lead => {
-    if (!lead) return
-    tapestry.replaceChildren(button('tapestry', 'tapestry', lead.name, page(lead.key)))
-    sends(lead)
+  refresh()
+  void feeds.lead(card).then(found => {
+    if (!found) return
+    lead = found
+    tapestry.replaceChildren(button('tapestry', 'tapestry', found.name, page(found.key)))
+    refresh()
   })
-  return row
+  return { el: row, refresh }
 }

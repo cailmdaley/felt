@@ -142,3 +142,16 @@ describe('a list of files', () => {
     expect([...document.querySelectorAll<HTMLElement>('.uf-file-row')].map(row => row.dataset.key)).toStrictEqual(['host:/w/c.md', 'host:/w/b.md', 'host:/w/a.md'])
   })
 })
+
+describe('the list an unfolded file\'s count opens', () => {
+  it('follows the files while it is open', async () => {
+    const { unfold } = made()
+    unfold.unfold(files[0].key)
+    unfold.el.querySelector<HTMLButtonElement>('.uf-count')!.click()
+    await settle()
+    const rows = (): string[] => [...document.querySelectorAll<HTMLElement>('.kbn-conversation-menu .uf-file-row')].map(row => row.dataset.key!)
+    expect(rows()).toHaveLength(3)
+    unfold.update([...files, { key: 'host:/w/d.md', name: 'd.md', at: 9 }])
+    expect(rows()).toStrictEqual(['host:/w/d.md', ...files.map(file => file.key)])
+  })
+})

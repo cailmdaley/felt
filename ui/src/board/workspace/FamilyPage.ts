@@ -310,7 +310,7 @@ export class FamilyPage {
     if (!this.docs.querySelector('[aria-expanded="true"]')) {
       const part = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.ws-doc-button')
       const kept = part && this.docs.contains(part) ? part.dataset.part : undefined
-      const docs = docButtons(card, { ...this.feeds, open: (each, doc) => this.show(each, doc) })
+      const docs = docButtons(card, { ...this.feeds, open: (each, doc) => this.show(each, doc) }).el
       this.docs.replaceWith(docs)
       this.docs = docs
       if (kept) docs.querySelector<HTMLElement>(`[data-part="${kept}"]`)?.focus({ preventScroll: true })

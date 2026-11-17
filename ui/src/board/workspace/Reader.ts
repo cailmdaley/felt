@@ -1,5 +1,5 @@
 import { slug } from '../threadOutline.js'
-import { openFileList } from '../elements/filePreview.js'
+import { openFileList, type OpenFileList, type UnfoldFile } from '../elements/filePreview.js'
 import type { ThreadIndex } from '../threads.js'
 import './tokens.css'
 import './reader.css'
@@ -136,7 +136,8 @@ export class Reader {
   private channel: Channel | null = null
   private fresh: ReadonlySet<DocKey> = new Set()
   /** Closes the list of sent files while it is open. */
-  private closeFiles = (): void => {}
+  private filesList?: OpenFileList
+  private closeFiles(): void { this.filesList?.close() }
   private currentCard: KanbanCard | null = null
   /** The constitution last open in each Desk column, for this session. */
   private readonly groupMemory = new Map<string, string>()
@@ -349,11 +350,15 @@ export class Reader {
   }
   /** The constitution's sent files as a list under `opener`, newest first, the page being read marked; a row opens its file. */
   private openSentFiles(opener: HTMLElement): void {
+    if (!this.runSettled || !this.channel) return
+    this.filesList = openFileList(opener, this.sentFiles(), key => this.openDocument(key), this.selected ?? undefined)
+  }
+  /** Its sent files as the list's rows, each new until read. */
+  private sentFiles(): UnfoldFile[] {
     const ch = this.channel
-    if (!this.runSettled || !ch) return
-    this.closeFiles = openFileList(opener, sentDocuments(ch).map(doc => ({
+    return ch ? sentDocuments(ch).map(doc => ({
       key: doc.key, name: documentLabelMetadata(doc, doc.name, ch.owner).title, at: lastSent(doc), caption: sentCaption(doc), unread: this.fresh.has(doc.key),
-    })), key => this.openDocument(key), this.selected ?? undefined)
+    })) : []
   }
   private get swipeable(): boolean {
     return this.active && this.phone.matches && !this.expanded && !this.menu.open && !blockingDialogOpen()
@@ -419,6 +424,8 @@ export class Reader {
     })
     const fresh = this.seen.observe(ch, this.selected ?? '', this.channelReady)
     this.fresh = fresh
+    // An open list follows the files: a send that arrives while it hangs takes its row.
+    this.filesList?.update(this.sentFiles(), this.selected ?? undefined)
     this.paintFilesToggle()
     const doc = ch.documents[index]
     if (doc) this.el.dataset.page = doc.kind

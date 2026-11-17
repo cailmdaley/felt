@@ -1,5 +1,5 @@
 import type { DocumentKey } from '../workspace/DocumentBridge.js'
-import { openActionMenu } from '../conversationMenu.js'
+import { openActionMenu, type ConversationAction } from '../conversationMenu.js'
 import { buildFileViewer, disposeFileViewer, resumeFileViewer, suspendFileViewer } from '../FileViewerPanel.js'
 import { forwardDocumentKey } from '../workspace/DocumentBridge.js'
 import { documentKind, KIND_GLYPH, parseDocKey, type DocKey } from '../workspace/documents.js'
@@ -88,14 +88,29 @@ export function fileRow(file: UnfoldFile, now = Date.now()): HTMLElement {
   return row
 }
 
-/** Files as a list under `anchor`, newest first, each row opening its file; `current` marks the one being read. Returns its close. */
-export function openFileList(anchor: HTMLElement, files: readonly UnfoldFile[], open: (key: DocKey) => void, current?: DocKey): () => void {
-  const now = Date.now(), newest = [...files].sort((a, b) => (b.at ?? -Infinity) - (a.at ?? -Infinity))
-  return openActionMenu(anchor, newest.map(file => {
-    const content = fileRow(file, now)
-    content.toggleAttribute('data-current', file.key === current)
-    return { label: file.caption ? `${file.name}: ${file.caption}` : file.name, content, run: () => open(file.key) }
-  }), `${newest.length} ${newest.length === 1 ? 'file' : 'files'}`, undefined, true)
+/** An open list of files: its close, and its rows drawn anew from the files as they stand now. */
+export interface OpenFileList { close(): void; update(files: readonly UnfoldFile[], current?: DocKey): void }
+
+/** Files as a list under `anchor`, newest first, each row opening its file; `current` marks the one being read. */
+export function openFileList(anchor: HTMLElement, files: readonly UnfoldFile[], open: (key: DocKey) => void, current?: DocKey): OpenFileList {
+  const rows = (files: readonly UnfoldFile[], current?: DocKey): ConversationAction[] => {
+    const now = Date.now()
+    return [...files].sort((a, b) => (b.at ?? -Infinity) - (a.at ?? -Infinity)).map(file => {
+      const content = fileRow(file, now)
+      content.toggleAttribute('data-current', file.key === current)
+      return { label: file.caption ? `${file.name}: ${file.caption}` : file.name, content, run: () => open(file.key) }
+    })
+  }
+  const menu = openActionMenu(anchor, rows(files, current), `${files.length} ${files.length === 1 ? 'file' : 'files'}`, undefined, true)
+  // Drawn anew only when what it lists has changed, so a row under the pointer or the keys stays put.
+  let drawn = JSON.stringify([files, current])
+  return {
+    close: menu.close,
+    update: (files, current) => {
+      const now = JSON.stringify([files, current])
+      if (now !== drawn) { drawn = now; menu.update(rows(files, current)) }
+    },
+  }
 }
 
 /** The bar's two drawn controls, in the stroke the board's icons use. */
@@ -159,6 +174,8 @@ export class Unfold {
   private files: UnfoldFile[] = []
   private readonly cards = new Map<DocKey, { el: HTMLButtonElement; thumbnail?: Thumbnail }>()
   private open: { key: DocKey; viewer: HTMLElement } | null = null
+  /** The list its count last opened, which follows its files while it is open. */
+  private list?: OpenFileList
   private readonly opts: UnfoldOptions
 
   constructor(opts: UnfoldOptions) {
@@ -177,7 +194,7 @@ export class Unfold {
     }
     control(this.prev, '‹', 'Previous file (←)', () => this.step(-1))
     control(this.next, '›', 'Next file (→)', () => this.step(1))
-    control(this.count, '', 'List the files', () => { openFileList(this.count, this.files, key => this.unfold(key), this.open?.key) })
+    control(this.count, '', 'List the files', () => { this.list = openFileList(this.count, this.files, key => this.unfold(key), this.open?.key) })
     this.count.classList.add('uf-count')
     this.steps.append(this.prev, this.count, this.next)
     const full = opts.full && control(document.createElement('button'), glyph('full'), 'Full screen', () => { if (this.open) opts.full!(this.open.key) })
@@ -209,6 +226,7 @@ export class Unfold {
     this.el.toggleAttribute('data-several', shown.length > 1)
     if (this.open && !keys.has(this.open.key)) this.fold(false)
     else if (this.open) this.paintBar()
+    this.list?.update(this.files, this.open?.key)
   }
   /** Gives the keys to the unfolded file, if one is; false when none is. */
   focus(): boolean {

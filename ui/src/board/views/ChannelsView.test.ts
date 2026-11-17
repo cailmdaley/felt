@@ -587,6 +587,25 @@ it('redraws the ring when the threads running change and nothing drawn does', as
   expect(host.querySelector('.kbn-ch-count-ring')!.textContent).toBe('2')
 })
 
+it('keeps the head\'s list of the chair\'s files current while it is open, whatever else the head shows', async () => {
+  daemon()
+  const { view, ctx, host } = await mount()
+  const feeds = (ctx.workspace as unknown as { globeHost: { feeds: { files: () => unknown[] } } }).globeHost.feeds
+  let files = [{ key: 'local:/w/plan.md', name: 'plan.md', at: Date.now() - minute, unread: false }]
+  feeds.files = () => files
+  ctx.response = board([{ ...chair, modifiedAt: new Date().toISOString() }, tsz, mask, beam, van, notes])
+  view.refresh(ctx); await settle()
+  const count = host.querySelector<HTMLButtonElement>('.kbn-ch-pages [data-part="sends"]')!
+  count.click(); await settle()
+  const rows = (): string[] => [...document.querySelectorAll<HTMLElement>('.kbn-conversation-menu .uf-file-row')].map(row => row.dataset.key!)
+  expect(rows()).toStrictEqual(['local:/w/plan.md'])
+  // The same count, another file; and the chair's file written, which would draw the head anew.
+  files = [{ key: 'local:/w/plan-v2.md', name: 'plan-v2.md', at: Date.now(), unread: false }]
+  ctx.response = board([{ ...chair, modifiedAt: new Date(Date.now() + minute).toISOString() }, tsz, mask, beam, van, notes])
+  view.refresh(ctx); await settle()
+  expect([rows(), count.isConnected, count.getAttribute('aria-expanded')]).toStrictEqual([['local:/w/plan-v2.md'], true, 'true'])
+})
+
 it('lists the running threads as they stand when the list opens, not as the stream last drew them', async () => {
   daemon()
   const { view, ctx, host } = await mount()
