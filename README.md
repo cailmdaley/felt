@@ -69,7 +69,7 @@ Install the latest release:
 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | sh
 ```
 
-Homebrew installs the latest stable 1.x release, which does not include the 2.0 setup flow:
+Homebrew installs the same release:
 
 ```sh
 brew install cailmdaley/tap/felt
