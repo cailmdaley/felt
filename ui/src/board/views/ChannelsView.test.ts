@@ -419,7 +419,7 @@ it('draws a post and the running list again when its thread\'s office or slug ch
   expect(item(host, 'beam').querySelector('.kbn-ch-role')?.textContent).toBe('optics')
   host.querySelector<HTMLButtonElement>('.kbn-ch-count-label')!.click(); await settle()
   const row = [...document.querySelectorAll<HTMLElement>('[role="menuitem"] .thread-row')].find(each => each.querySelector('.thread-row-slug')!.textContent === 'beam')!
-  expect([row.querySelector('.thread-row-role'), row.title]).toStrictEqual([null, expect.stringContaining('(optics)')])
+  expect([row.querySelector('.thread-row-role'), row.title]).toStrictEqual([null, expect.stringContaining(' — optics · ')])
 })
 
 it('heads the view with the channel itself, written as its chair\'s slug, the rail\'s toggle at its right', async () => {

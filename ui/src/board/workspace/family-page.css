@@ -70,7 +70,7 @@
 .ov-thread:is(:hover, :focus-visible) { background: var(--ws-hover); }
 .ov-thread { --thread-dot: 20px; }
 .ov-thread > .constitution-state-dot { width: 20px; }
-.ov-deep { --thread-indent: 18px; }
+.ov-deep { --thread-indent: 24px; }
 /* The resting and archived threads' one control, quiet under the rows. */
 .ov-more > .ov-quiet {
   margin: 2px 0 0 calc(var(--ov-gutter) - 6px); padding: 1px 4px; border: 0; border-radius: 3px; background: none; cursor: pointer;

@@ -57,8 +57,8 @@ const FOUND_DOCUMENTS = 12
 const DRAWER_PX = 1100
 /** The margin's width: wide on a desktop, where the fibres can wander; narrower where the stream's width is scarce. */
 const MARGIN = { wide: 56, narrow: 40, below: 560 } as const
-/** The strand's count: how far below the top of what is in sight its swelling's middle stands, how far down it looks for the strand, and where it stands with none. */
-const COUNT = { at: 24, reach: 160, alone: 9 } as const
+/** The strand's count: how far below the top of what is in sight its swelling's middle stands, how far down it looks for the strand, where it stands with none, and the stream's padding above it, which it stands under until the stream scrolls past. */
+const COUNT = { at: 24, reach: 160, alone: 9, pad: 12 } as const
 /** The count's swelling: a short spindle of the strand's ink, a little off true, as a varicosity on a fibre. */
 const SWELLING = { width: 8, height: 18 } as const
 function swelling(): SVGSVGElement {
@@ -179,7 +179,7 @@ export class ChannelsView implements TemporalView {
   private running: KanbanCard[] = []
   /** The stream follows what arrives while the reader is at its foot. */
   private following = true
-  /** Where the stream stood at its last scroll or when it was last put at its foot: a scroll event that finds it there was not the reader moving. */
+  /** Where the stream stood when the reader last moved it or the board last put it somewhere: a scroll event that finds it there was not the reader moving. */
   private lastTop = 0
   /** The worker Rex last brought this channel to, whose latest line is marked. */
   private marked: string | null = null
@@ -286,11 +286,12 @@ export class ChannelsView implements TemporalView {
     this.head = el('header', 'kbn-ch-head')
     this.stream = el('ol', 'kbn-ch-stream')
     this.stream.addEventListener('scroll', () => {
-      // Only the reader's own scroll leaves the foot: rows that grow before a scroll's event arrives leave the stream following.
-      const moved = Math.abs(this.stream!.scrollTop - this.lastTop) > 1
-      this.lastTop = this.stream!.scrollTop
-      if (this.atFoot()) this.following = true
-      else if (moved) this.following = false
+      // Only the reader's own scroll says whether the stream follows: one that finds it where it was last put changes nothing,
+      // so rows that grow before a scroll's event arrives leave it following, and a line Rex brought stays in sight.
+      if (Math.abs(this.stream!.scrollTop - this.lastTop) > 1) {
+        this.lastTop = this.stream!.scrollTop
+        this.following = this.atFoot()
+      }
       this.placeCount()
       if (!this.painting && this.leavingBand()) this.painting = requestAnimationFrame(() => { this.painting = 0; this.paint() })
     }, { passive: true })
@@ -789,10 +790,11 @@ export class ChannelsView implements TemporalView {
   private placeCount(top = this.stream?.scrollTop ?? 0): void {
     const label = this.stream?.querySelector<HTMLElement>(':scope > .kbn-ch-count > .kbn-ch-count-label')
     if (!label) return
-    let x: number | undefined, y = top + COUNT.at
-    for (; y <= top + COUNT.at + COUNT.reach; y += 4) if ((x = this.strandAt(y)) !== undefined) break
+    const from = top + COUNT.at + Math.max(0, COUNT.pad - top)
+    let x: number | undefined, y = from
+    for (; y <= from + COUNT.reach; y += 4) if ((x = this.strandAt(y)) !== undefined) break
     label.style.left = `${(x ?? COUNT.alone) - SWELLING.width / 2}px`
-    label.style.top = `${(x === undefined ? 0 : y - top - COUNT.at)}px`
+    label.style.top = `${(x === undefined ? 0 : y - from)}px`
   }
   /** A fibre or a mark opens its line's constitution; the strand lists the threads it gathers. */
   private marginClick(event: MouseEvent): void {
@@ -994,8 +996,8 @@ export class ChannelsView implements TemporalView {
       : refused < lines.length ? `Some of ${item.card.name}'s files could not be taken from the stream.` : `${item.card.name}'s line could not be cleared; it is as it was.`)
   }
   /**
-   * An item's files below its words, each at its density's box in a row that
-   * wraps (elements/filePreview.ts); a click unfolds one
+   * An item's files below its words, each on a line of its own as wide as the
+   * item (elements/filePreview.ts); a click unfolds one
    * in place under a bar pinned as it scrolls, ← and → step through them and
    * Escape folds it. A close leads with its tapestry, found as the read says.
    */

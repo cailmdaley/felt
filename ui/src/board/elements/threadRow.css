@@ -17,7 +17,9 @@
    never more than 45% of the list, past which a slug wraps. */
 .thread-rows { display: grid; grid-template-columns: fit-content(45%) minmax(0, 1fr) auto; column-gap: 8px; }
 .thread-rows > li { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; }
+/* An item that holds no row (a list's own control) takes no part in the columns. */
+.thread-rows > li:not(:has(> .thread-row)) { display: block; }
 .thread-rows .thread-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; }
-.thread-rows .thread-row > .constitution-state-dot { grid-area: 1 / 1; margin-left: var(--thread-indent, 0px); }
+.thread-rows .thread-row > .constitution-state-dot { grid-area: 1 / 1; z-index: 1; margin-left: var(--thread-indent, 0px); }
 .thread-rows .thread-row-slug { grid-area: 1 / 1; padding-left: calc(var(--thread-dot, 14px) + 8px + var(--thread-indent, 0px)); }
 .thread-rows .thread-row-age { margin-left: 0; justify-self: end; }

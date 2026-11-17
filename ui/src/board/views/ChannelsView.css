@@ -175,7 +175,7 @@
 .kbn-ch-slug .thread-row-slug { font: var(--type-label)/var(--leading-ui) var(--font-sign); }
 /* The strand's count: how many threads run in the channel, written as a label on a plate: a swelling on the strand
    at the top of what is in sight, and a small numeral in the margin's ink beside it. */
-.kbn-ch-count { position: sticky; top: 0; z-index: 2; height: 0; margin-top: -12px; flex: none; list-style: none; }
+.kbn-ch-count { position: sticky; top: 0; z-index: 2; height: 0; flex: none; list-style: none; }
 .kbn-ch-count-label {
   position: absolute; top: 0; left: 0; display: flex; align-items: flex-start; gap: 1px; height: 30px; margin-top: 15px; padding: 0 3px 0 0;
   border: 0; border-radius: 3px; background: none; cursor: pointer; color: var(--kbn-ink-soft);

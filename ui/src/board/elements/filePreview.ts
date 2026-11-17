@@ -16,10 +16,10 @@ export interface UnfoldFile { key: DocKey; name: string; at?: number; caption?: 
 
 /**
  * How a file's preview is drawn, by what it is: a figure (an image or an SVG
- * plot), a page (HTML: a tapestry, a report, a deck), a card for anything
- * without a picture, and a thumbnail for the globe and the sheets.
+ * plot), a page (HTML: a tapestry, a report, a deck), and a card for anything
+ * without a picture.
  */
-export type FileDensity = 'figure' | 'page' | 'card' | 'thumbnail'
+export type FileDensity = 'figure' | 'page' | 'card'
 
 /** A file's density in a post's previews, by its kind alone. */
 export function densityOf(path: string): FileDensity {
@@ -142,9 +142,10 @@ function scroller(el: HTMLElement): HTMLElement | null {
  * Files as previews that unfold in place, one component wherever a page shows
  * files inline (a constitution's view, a post in a channel). Folded, a single
  * lead (a constitution's view) is a preview capped at about 320px showing the
- * top of its page at the full width it is given; a row of a post's files
- * draws each at its density's box ({@link BOX}), wrapping, a card without a
- * picture drawn with nothing loaded. A click
+ * top of its page at the full width it is given; a post's files stand each
+ * on a line of its own at the full width given, a page or a figure at the
+ * fold's height ({@link foldPx}) and a card without a picture one line,
+ * drawn with nothing loaded. A click
  * unfolds that file at its natural height in the same place, the same card
  * grown, under a quiet bar pinned to the top of whatever scrolls it: the
  * file's name, ‹ i / n › when there are several (the count opening the list

@@ -175,7 +175,7 @@ export class KanbanSurfaceRenderer {
     return card
   }
 
-  /** A member that waits, as a thread row (elements/threadRow.ts: dot, slug, office, what it wants, since when), and a post's ✓. */
+  /** A member that waits, as a thread row (elements/threadRow.ts: dot, slug, what it wants, how long ago), and a post's ✓. */
   private line({ card, want }: FamilyWait, own: boolean): HTMLElement {
     const line = threadRow(card, { waits: this.o.waits(), now: Date.now() })
     line.classList.add('kbn-family-wait')
