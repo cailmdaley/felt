@@ -269,6 +269,32 @@ func TestAddUIDStaysInsideStoreUnderAFreshUID(t *testing.T) {
 	}
 }
 
+// --uid refuses a UID any fiber of the enclosing store holds, outside the
+// view it runs in too.
+func TestAddUIDRefusesAUIDHeldInTheEnclosingStore(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	store := felt.NewStorage(filepath.Join(tmp, "store"))
+	if err := store.Init(); err != nil {
+		t.Fatal(err)
+	}
+	held := felt.NewULID()
+	writeFixtureFelt(t, store, "proj", "Proj")
+	if err := store.Write(&felt.Felt{ID: "other", Name: "Other", UID: held, CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(tmp, "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(store.Root(), "proj"), filepath.Join(project, ".felt")); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runCommand(t, project, "add", "x", "X", "--uid", held); err == nil || !strings.Contains(err.Error(), "already belongs to other") {
+		t.Fatalf("add --uid held elsewhere in the store: %v\n%s", err, out)
+	}
+}
+
 // A bare-form fiber outside the slug convention can still gain a child.
 func TestAddUnderBareFormNonConformingFiber(t *testing.T) {
 	t.Parallel()

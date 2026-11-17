@@ -72,7 +72,12 @@ intrinsic id and slug, which are not held to the convention.`,
 					return fmt.Errorf("--uid must be a ULID, got %q", addUID)
 				}
 				f.UID = strings.ToUpper(addUID)
-				existing, err := storage.ListMetadataByUID(f.UID)
+				// A UID is unique across the enclosing store, the scope felt find searches.
+				scope := storage
+				if external := storage.ExternalRefs(); external != nil {
+					scope = felt.NewStorage(external.ProjectDir())
+				}
+				existing, err := scope.ListMetadataByUID(f.UID)
 				if err != nil {
 					return err
 				}
