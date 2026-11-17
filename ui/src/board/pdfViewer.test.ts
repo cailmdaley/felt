@@ -98,4 +98,17 @@ describe('PDF.js viewer integration', () => {
     pageOne()
     await vi.waitFor(() => expect(destroy).toHaveBeenCalledOnce())
   })
+
+  it('destroys the document when page one fails after the viewer is closed', async () => {
+    vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+    const destroy = vi.fn(async () => {})
+    let failPageOne = (_: Error): void => {}
+    const firstPage = new Promise<void>((_, reject) => { failPageOne = reject })
+    pdfMocks.getDocument.mockReturnValue({ promise: Promise.resolve({ numPages: 1, getPage: () => firstPage }), destroy })
+    const mounted = mountPdfViewer(document.createElement('div'), new ArrayBuffer(8), vi.fn(), vi.fn())
+    await mounted.ready
+    mounted.dispose()
+    failPageOne(new Error('Transport destroyed'))
+    await vi.waitFor(() => expect(destroy).toHaveBeenCalledOnce())
+  })
 })
