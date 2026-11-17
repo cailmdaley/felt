@@ -114,7 +114,7 @@ describe('thread read model at fleet scale', () => {
       const reads = (size: number) => {
         const board = buildKanbanResponseFromComposite(feed(chain(size)))
         const deepest = boardCards(board).find(c => c.id.endsWith(`/c${size - 1}`))!
-        const index = threadIndexFor(board), page = new FamilyPage({ marks: () => undefined, reach: () => 14 * 86_400_000, files: () => [], refresh: () => {}, lead: async () => undefined, said: () => undefined, open: () => {}, view: () => {}, seen: () => {}, waits: () => new Map(), shuttleBase: '' }, vi.fn())
+        const index = threadIndexFor(board), page = new FamilyPage({ marks: () => undefined, reach: () => 14 * 86_400_000, files: () => [], refresh: () => {}, lead: async () => undefined, said: () => undefined, open: () => {}, link: () => {}, view: () => {}, seen: () => {}, waits: () => new Map(), shuttleBase: '' }, vi.fn())
         const before = threadIndexBuilds()
         // Map touches see the walks inside the index's methods, not only the calls.
         const count = counted(Map.prototype, ['get', 'set', 'has', 'delete'], () => page.update(deepest, index))

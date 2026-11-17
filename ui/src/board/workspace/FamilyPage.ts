@@ -28,6 +28,8 @@ export interface ViewFeeds extends MapFeeds, DocFeeds {
   view(card: KanbanCard, quiet?: boolean): void
   /** The human has seen this file as it stood: it is no longer new. */
   seen(file: MapFile): void
+  /** A link followed in one of a constitution's files, unfolded in its view (`Workspace.openLink`). */
+  link(card: KanbanCard, source: DocKey, href: string): void
   /** What waits on the human, by fiber. */
   waits(): Waits
 }
@@ -119,6 +121,7 @@ export class FamilyPage {
       shuttleBase: feeds.shuttleBase, single: true, awake: () => this.awake,
       seen: key => { const file = this.shown?.files.get(key); if (file?.unread) feeds.seen(file) },
       full: key => { if (this.card) feeds.open(this.card, key) },
+      link: (key, href) => { if (this.card) feeds.link(this.card, key, href) },
     })
     this.unfold.el.classList.add('ov-unfold')
     this.threads.setAttribute('aria-label', 'Threads')

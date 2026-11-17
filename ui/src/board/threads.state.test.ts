@@ -46,7 +46,7 @@ describe('every thread surface names a thread the way the Desk files it', () => 
   })
   it('the constitution\'s view gives a quiet thread its faint word in its quiet fold, else its turn\'s word, as every thread row does', () => {
     const index = new ThreadIndex([hub, ...expected.map(([c]) => c)])
-    const page = new FamilyPage({ marks: () => undefined, reach: () => 14 * 86_400_000, files: () => [], refresh: () => {}, lead: async () => undefined, said: () => undefined, open: () => {}, view: () => {}, seen: () => {}, waits: () => new Map(), shuttleBase: '' }, () => {}); page.update(hub, index)
+    const page = new FamilyPage({ marks: () => undefined, reach: () => 14 * 86_400_000, files: () => [], refresh: () => {}, lead: async () => undefined, said: () => undefined, open: () => {}, link: () => {}, view: () => {}, seen: () => {}, waits: () => new Map(), shuttleBase: '' }, () => {}); page.update(hub, index)
     page.el.querySelector<HTMLButtonElement>('.ov-quiet')!.click()
     const words = Object.fromEntries([...page.el.querySelectorAll<HTMLElement>('.ov-thread')].map(row => [row.dataset.fiber, row.querySelector('.thread-row-doing')?.textContent]))
     expect(words).toEqual({ [spawned.id]: 'no worker', [standing.id]: '↻', [seat.id]: 'seat', [asking.id]: 'idle' })

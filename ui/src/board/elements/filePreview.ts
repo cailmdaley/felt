@@ -66,6 +66,8 @@ export interface UnfoldOptions {
   opening?(): void
   /** Opens the file in the board's full file viewer, whose way back returns here; without it the bar offers no full screen. */
   full?(key: DocKey): void
+  /** A link followed in the unfolded file `key`: a board route, or a file beside it. */
+  link?(key: DocKey, href: string): void
 }
 
 /** A file's face, drawn alike in a card and a row: its kind's glyph, its name, and when it came. */
@@ -248,6 +250,7 @@ export class Unfold {
     const kind = documentKind(parsed.path)
     const viewer = buildFileViewer(this.opts.shuttleBase, parsed.path, parsed.owner, undefined, undefined, {
       kind: kind === 'fiber' ? undefined : kind, fit: true, active: true,
+      onNavigate: href => this.opts.link?.(key, href),
       // Keys from inside the file: its own steps and fold, else the board's, replayed from its place.
       onDocumentKey: (pressed: DocumentKey) => {
         const plain = !pressed.altKey && !pressed.ctrlKey && !pressed.metaKey && !pressed.shiftKey

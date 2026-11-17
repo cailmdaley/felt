@@ -968,6 +968,7 @@ export class ChannelsView implements TemporalView {
         shuttleBase: this.ctx?.shuttleBase ?? '', awake: () => !this.ctx?.workspace?.isActive && !!this.stream?.isConnected,
         // Full screen opens the file in the reader; its way back returns to this item, the file still unfolded.
         full: key => this.openPage(id, card, key),
+        link: (key, href) => this.leaveFor(id, () => this.ctx?.workspace?.openLink(card, key, href)),
         opening: () => this.foldOthers(id),
       }), files: [],
     }).get(id)!

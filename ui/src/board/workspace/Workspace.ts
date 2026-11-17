@@ -184,6 +184,7 @@ export class Workspace {
       refresh: () => this.refreshFamilyFeeds(),
       lead: card => this.mapLead(card),
       open: (card, doc) => this.openDocument(card, doc),
+      link: (card, source, href) => this.openLink(card, source, href),
       said: card => this.said(card),
       view: (card, quiet) => this.openFromDesk(card, quiet),
       seen: file => markSeen([file]),
@@ -860,7 +861,17 @@ export class Workspace {
       [link.dataset.filePath, link.dataset.filePathAlt].some(path => path && docKey(state.card.originId, path, state.card.originId, state.card.fiberDir) === key))
   }
 
-  private openRelative(source: Pick<WorkspaceDocument, 'owner' | 'path'>, href: string): void {
+  /**
+   * A link followed in a page a view unfolded in place, routed as the reader
+   * routes its own: a board route moves the board, and a file beside the page
+   * opens in the reader as one of `card`'s pages.
+   */
+  openLink(card: KanbanCard, source: DocKey, href: string): void {
+    const from = parseDocKey(source)
+    if (from) this.openRelative(from, href, card)
+  }
+  /** Follows a link from a document: `holder` is the constitution whose page a file opens as, the one on show when absent. */
+  private openRelative(source: Pick<WorkspaceDocument, 'owner' | 'path'>, href: string, holder?: KanbanCard): void {
     if (!href) return
     const route = parseRoute(href)
     if (route?.kind === 'channel') { this.history.enter(route.uid, route.owner, route.doc); return }
@@ -880,7 +891,9 @@ export class Workspace {
       hash = url.hash
     } catch { return }
     if (!path || path.includes('\0') || path.includes('\\')) return
-    this.openFile(normalizeAbsolutePath(path, source.path.slice(0, source.path.lastIndexOf('/'))), undefined, owner, hash)
+    const file = normalizeAbsolutePath(path, source.path.slice(0, source.path.lastIndexOf('/')))
+    if (holder) this.openDocument(holder, docKey(owner, file, holder.originId, holder.fiberDir))
+    else this.openFile(file, undefined, owner, hash)
   }
 
   private openFile(path: string, title?: string, owner = this.current?.card.originId, hash = ''): void {

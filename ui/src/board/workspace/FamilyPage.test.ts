@@ -31,7 +31,7 @@ function feedsWith(over: Partial<ViewFeeds> = {}): ViewFeeds {
     marks: () => undefined, reach: () => 14 * 86_400_000, files: c => c.id === 'hub/mid' ? sent : [], refresh: vi.fn(),
     lead: async c => c.id === 'hub/mid' ? { ...tapestry, name: 'Tapestry' } : undefined,
     said: c => c.id === 'hub/mid' ? { text: 'Posted the **cut**.', at: now - hour } : undefined,
-    open: vi.fn(), view: vi.fn(), seen: vi.fn(), waits: () => new Map(), shuttleBase: '', ...over,
+    open: vi.fn(), link: vi.fn(), view: vi.fn(), seen: vi.fn(), waits: () => new Map(), shuttleBase: '', ...over,
   }
 }
 function made(at: KanbanCard, over: Partial<ViewFeeds> = {}, known = cards): { page: FamilyPage; feeds: ViewFeeds } {
