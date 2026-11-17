@@ -18,7 +18,7 @@ Read this page before changing what the board draws.
 ## Proportions
 
 Channels follows Slack's proportions, which are tuned for a dense stream read all day.
-Sourced from Slack: a file's inline image is drawn from a 360-pixel thumbnail, from a ladder of 64, 80, 360, 480, 720, 960 and 1024 (the `thumb_*` fields of Slack's file object); an attachment image is capped at 360 wide by 500 tall, and an attachment thumbnail is 75 by 75 (Slack's `MessageAttachment` reference).
+Sourced from Slack: a file's inline image is its `thumb_360`, whose longest side is at most 360 pixels, from a ladder of 64, 80, 360, 480, 720, 960 and 1024 (Slack's file object reference); a legacy attachment's image is resized to at most 360 wide or 500 tall, and its thumbnail's longest side to 75 (Slack's legacy secondary attachments reference).
 The rest are the board's own choices, made to sit with those numbers:
 
 | Measure | Value |
@@ -65,7 +65,9 @@ One line a thread addressed to the human.
 | Head | the thread's slug in its line's colour, its role, the age; the kind word only for an ask, a close (for review, closed) or a block |
 | Text | Markdown, at prose size |
 | Files | a row of file previews below the text; a fiber's newest close in the stream leads them with its tapestry |
-| Clear | ✓ at the head's right, on every post and file line, and `e` on the line in focus; one press takes the line from the stream (`line:<ms>:<id>`, one record for each line it takes: a post by its id, a file item by each of its sends, a path it draws once at its newest named for every time it was sent, so a send it did not name still shows and the item goes once none is left) and, for a waiting post, stops it waiting too (`clear:<uid>:<ms>`), with one undo that restores both, offered as soon as the line leaves; its records are written four at a time, and an undo writes back those written and never writes the rest; a waiting ask or close is answered, not cleared |
+| Clear | ✓ at the head's right, on every post and file line, and `e` on the line in focus: one press takes the line from the stream and, for a waiting post, stops it waiting too, with one undo for both; a waiting ask or close is answered, not cleared |
+
+A clear is remembered as one `line:<ms>:<id>` record per line it took (a post by its id, a file item by each send it showed, so a send it did not show still appears) and, for a waiting post, `clear:<uid>:<ms>`; records are written four at a time, and the undo writes back only what was written.
 
 A line that follows one from the same thread less than five minutes before it, and asks nothing, drops its head: its slug and role stay for assistive technology, its age shows at the right on hover, and its ✓ stays.
 
