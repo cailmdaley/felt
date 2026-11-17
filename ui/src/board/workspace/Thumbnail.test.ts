@@ -116,3 +116,33 @@ it('tries a failed thumbnail again once the miss it saw has expired, so a report
   renderer.finishes.at(-1)!()
   expect(thumb.state).toBe('live')
 })
+
+it('loads what is on screen first, keeps a live one through a short scroll away, and releases it once well away', () => {
+  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1)); vi.stubGlobal('cancelAnimationFrame', vi.fn())
+  vi.stubGlobal('innerHeight', 800); vi.stubGlobal('innerWidth', 1200)
+  // A stream that scrolls, 600px tall at the top of the window, holding previews 300px apart.
+  const stream = document.createElement('div'); stream.style.overflowY = 'auto'; document.body.append(stream)
+  vi.spyOn(stream, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 1200, 600))
+  let scrolled = 0
+  const at = (i: number): DOMRect => new DOMRect(0, i * 300 - scrolled, 480, 270)
+  for (let i = 0; i < 12; i++) {
+    const thumb: Thumbnail = new Thumbnail({ key: `s${i}`, shuttleBase: '', file: { fullPath: `/s${i}.html`, owner: 'host', basename: `s${i}.html` }, fallback: '',
+      priority: () => thumb.screenPriority(), distance: () => thumb.gap() })
+    vi.spyOn(thumb.el, 'getClientRects').mockReturnValue([at(i)] as unknown as DOMRectList)
+    vi.spyOn(thumb.el, 'getBoundingClientRect').mockImplementation(() => at(i))
+    thumbs.push(thumb); stream.append(thumb.el)
+  }
+  const states = (): string => thumbs.map(t => t.state[0]).join('')
+  pumpThumbnails()
+  // On screen (0, 1) and within the ring (2, whose top is 0px below; 3 at 300px) load; the rest wait.
+  expect(states()).toBe('lllliiiiiiii')
+  renderer.finishes.splice(0).forEach(f => f()); pumpThumbnails()
+  expect(states()).toBe('lllliiiiiiii')
+  // A short scroll down: 0 and 1 are within the keep ring and stay live; 4 and 5 come near and load.
+  scrolled = 900; pumpThumbnails()
+  expect(states().slice(0, 6)).toBe('llllll')
+  // Well away: the first previews are released and their bodies gone.
+  scrolled = 3000; pumpThumbnails()
+  expect(thumbs.slice(0, 4).map(t => [t.state, !!t.body])).toEqual(Array(4).fill(['idle', false]))
+  stream.remove()
+})

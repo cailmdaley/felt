@@ -28,27 +28,68 @@ export interface ThumbnailOptions {
 /**
  * How many document bodies may be alive at once. A thumbnail's face is
  * metadata and costs nothing; its body is a live document, so bodies are
- * finite: nearest the reader's eye loads first, and past the cap the least
- * recently seen lower-priority body makes room.
+ * finite: nearest the reader's eye loads first, and past the cap the
+ * farthest lower-priority body makes room.
  */
 export const LOAD_POLICY = {
   /** Live or loading bodies allowed at once. */
   maxLive: 16,
   /** Bodies loading at once; four keeps the connection pool and main thread usable. */
   maxConcurrent: 4,
-  /** The ring around the viewport inside which a thumbnail is worth loading. */
-  ring: '300px',
+  /** How far beyond what is on screen, in pixels, a thumbnail starts loading. */
+  ring: 300,
+  /** How far beyond what is on screen a live thumbnail stays live: far enough that a scroll back does not reload it. */
+  keep: 1500,
   /** How long before a load is called stalled, generous for a remote origin. */
   softTimeoutMs: 20_000,
 } as const
+
+/**
+ * How far `el` stands from what is on screen, in pixels: 0 when any of it
+ * shows, else its distance along the farther axis from the area its
+ * clipping ancestors and the viewport leave visible; Infinity when it is
+ * out of layout. `clips` memoizes each ancestor's clip for one pass.
+ */
+function screenGap(el: Element, clips: Map<Element, DOMRect | null>): number {
+  if (!el.isConnected || !el.getClientRects().length) return Infinity
+  let top = 0, left = 0, bottom = innerHeight, right = innerWidth
+  for (let at = el.parentElement; at && at !== document.documentElement; at = at.parentElement) {
+    let clip = clips.get(at)
+    if (clip === undefined) {
+      const style = getComputedStyle(at)
+      clip = /hidden|auto|scroll|clip/.test(style.overflowX + style.overflowY) ? at.getBoundingClientRect() : null
+      clips.set(at, clip)
+    }
+    if (!clip) continue
+    top = Math.max(top, clip.top); left = Math.max(left, clip.left)
+    bottom = Math.min(bottom, clip.bottom); right = Math.min(right, clip.right)
+  }
+  const box = el.getBoundingClientRect()
+  const dy = Math.max(0, top - box.bottom, box.top - bottom), dx = Math.max(0, left - box.right, box.left - right)
+  return Math.max(dx, dy)
+}
 
 /** One shared budget for the overview and every strip, with stable nearest-first loading. */
 class ThumbnailBudget {
   readonly thumbnails = new Set<Thumbnail>()
   private raf?: number
+  /** Each thumbnail's distance from the screen, read once per pass. */
+  private gaps = new Map<Thumbnail, number>()
+  private clips = new Map<Element, DOMRect | null>()
+  private readonly moved = (): void => this.schedule()
+  gap(thumb: Thumbnail): number {
+    let gap = this.gaps.get(thumb)
+    if (gap === undefined) { gap = screenGap(thumb.el, this.clips); this.gaps.set(thumb, gap) }
+    return gap
+  }
   private readonly byElement = new Map<Element, Thumbnail>()
   private observer?: ResizeObserver
   add(thumb: Thumbnail): void {
+    // A scroll anywhere, or the window resized, moves thumbnails toward or away from the screen.
+    if (!this.thumbnails.size) {
+      document.addEventListener('scroll', this.moved, { capture: true, passive: true })
+      addEventListener('resize', this.moved)
+    }
     this.thumbnails.add(thumb)
     this.byElement.set(thumb.el, thumb)
     if (!this.observer && typeof ResizeObserver !== 'undefined') {
@@ -75,9 +116,12 @@ class ThumbnailBudget {
     if (!this.thumbnails.size) {
       if (this.raf !== undefined) cancelAnimationFrame(this.raf)
       this.raf = undefined
+      document.removeEventListener('scroll', this.moved, { capture: true })
+      removeEventListener('resize', this.moved)
     } else this.schedule()
   }
   private pump(): void {
+    this.gaps.clear(); this.clips.clear()
     const all = [...this.thumbnails]
     // Collect geometry-dependent ranks before mounting or scaling writes any styles.
     const ranks = new Map(all.map(t => [t, { priority: t.priority(), distance: t.distance() }]))
@@ -93,13 +137,14 @@ class ThumbnailBudget {
       if (population.filter(t => t.state === 'loading').length >= LOAD_POLICY.maxConcurrent) break
       if (population.length >= LOAD_POLICY.maxLive) {
         const victim = population.filter(t => t.state === 'live' && priority(t) < priority(candidate))
-          .sort((a, b) => priority(a) - priority(b) || a.lastVisible - b.lastVisible || distance(b) - distance(a))[0]
+          .sort((a, b) => priority(a) - priority(b) || distance(b) - distance(a))[0]
         if (!victim) break
         victim.unmount()
       }
       candidate.mount()
     }
     for (const thumb of all) thumb.scale()
+    this.gaps.clear(); this.clips.clear()
   }
 }
 const budget = new ThumbnailBudget()
@@ -119,8 +164,6 @@ export class Thumbnail {
   readonly el: HTMLElement
   file?: ThumbnailFile
   state: 'idle' | 'loading' | 'live' | 'failed' = 'idle'
-  near = false
-  lastVisible = 0
   body?: HTMLElement
   private timer?: ReturnType<typeof setTimeout>
   private retryTimer?: ReturnType<typeof setTimeout>
@@ -174,6 +217,19 @@ export class Thumbnail {
     }
   }
   priority(): number { return this.opts.priority() }
+  /** How far it stands from what is on screen, in pixels (see {@link screenGap}). */
+  gap(): number { return budget.gap(this) }
+  /**
+   * A priority by where it stands: 2 on screen, 1 within the loading ring,
+   * and a live or loading one ½ out to the keep ring, so it stays until
+   * something nearer needs its place; past that, 0 releases it.
+   */
+  screenPriority(): number {
+    const gap = this.gap()
+    if (gap === 0) return 2
+    if (gap <= LOAD_POLICY.ring) return 1
+    return this.state !== 'idle' && this.state !== 'failed' && gap <= LOAD_POLICY.keep ? 0.5 : 0
+  }
   distance(): number { return this.opts.distance() }
   schedule(): void { budget.schedule() }
   dispose(): void { clearTimeout(this.retryTimer); this.stopTitles(); budget.remove(this); this.unmount(); this.el.remove() }

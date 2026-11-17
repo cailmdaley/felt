@@ -357,8 +357,9 @@ export class Unfold {
       key: `unfold:${file.key}`, shuttleBase: this.opts.shuttleBase, className: 'uf-thumb', fallback: file.name, keepMedia: true,
       file: parsed ? { fullPath: parsed.path, owner: parsed.owner, basename } : undefined,
       get pageWidth() { return Math.max(720, Math.round(el.clientWidth)) },
-      priority: () => (this.opts.awake?.() ?? true) && thumbnail.el.isConnected ? 2 : 0,
-      distance: () => this.files.findIndex(each => each.key === file.key),
+      // Alive only near the screen: loaded as it nears, released once well away.
+      priority: () => (this.opts.awake?.() ?? true) ? thumbnail.screenPriority() : 0,
+      distance: () => thumbnail.gap(),
     })
     el.append(thumbnail.el)
     this.cards.set(file.key, { el, thumbnail })
