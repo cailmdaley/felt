@@ -7,6 +7,8 @@ export interface ConversationAction {
   label: string; href?: string; run?: () => void; disabled?: boolean; checked?: boolean
   /** Draws the item as a control drawn elsewhere (a header verb). */
   dress?: (item: HTMLButtonElement) => void
+  /** What the item shows in place of its label, which still names it to the keys and to assistive technology. */
+  content?: HTMLElement
 }
 
 let dismissOpenMenu: (() => void) | undefined
@@ -76,7 +78,8 @@ export function openActionMenu(anchor: HTMLElement, actions: readonly Conversati
     item.dataset.actionIndex = String(index)
     if (item instanceof HTMLAnchorElement) linkDestination(item, action.href!)
     else (item as HTMLButtonElement).type = 'button'
-    if (action.checked === undefined) item.textContent = action.label
+    if (action.content) { item.append(action.content); item.setAttribute('aria-label', action.label) }
+    else if (action.checked === undefined) item.textContent = action.label
     else {
       const mark = document.createElement('ui-menu-item-indicator')
       mark.setAttribute('keep-mounted', '')

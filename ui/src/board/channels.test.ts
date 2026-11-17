@@ -309,4 +309,14 @@ describe('a thread\'s lives', () => {
       ['T', 'tick', 'T:0'], ['T', 'end', 'T:0', 'discarded'],
     ])
   })
+
+  it('ends a life at a rest, which a later launch follows with a new one; a rest after an end moves nothing', () => {
+    // A seat between runs: launched, rested, launched again and still running.
+    expect(stations([record('r1', 'rested', 'U', 100)], { U: [200, 30] })).toStrictEqual([
+      ['U', 'start', 'U:0'], ['U', 'end', 'U:0', 'rested'], ['U', 'start', 'U:1'],
+    ])
+    expect(stations([record('c1', 'closed', 'T', 60, { to: { fiber: 'U' } }), record('r1', 'rested', 'T', 50)], { T: [80] })).toStrictEqual([
+      ['T', 'start', 'T:0'], ['T', 'end', 'T:0', 'closed'],
+    ])
+  })
 })

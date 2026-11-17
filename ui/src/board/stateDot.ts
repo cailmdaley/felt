@@ -26,3 +26,14 @@ export function stateDot(card: KanbanCard, waits: Waits, open: (card: KanbanCard
   dot.addEventListener('click', event => { event.stopPropagation(); open(card) })
   return dot
 }
+
+/** The same dot, drawn still: for a row a control holds, which owns the press. */
+export function stateMark(card: KanbanCard, waits: Waits): HTMLElement {
+  const attention = attentionOf(card, waits), turn = turnOf(card)
+  const mark = document.createElement('span')
+  mark.className = 'constitution-state-dot'
+  mark.dataset.attention = attention
+  mark.toggleAttribute('data-busy', attention === 'working' && turn.turn === 'working')
+  mark.setAttribute('aria-hidden', 'true')
+  return mark
+}

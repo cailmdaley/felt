@@ -12,7 +12,7 @@ import type { ThreadIndex } from '../threads.js'
 import type { FiberActs } from './Dock.js'
 import { docButtons, type DocFeeds } from './docButtons.js'
 import { Unfold } from '../elements/filePreview.js'
-import { runTime as time, threadRow } from '../elements/threadRow.js'
+import { ovThreadRow as threadRow, runTime as time } from '../elements/threadRow.js'
 import './family-page.css'
 
 /** What the view reads, and where it goes. */

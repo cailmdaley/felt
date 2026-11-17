@@ -334,7 +334,7 @@ export class Workspace {
     void this.look(card)
   }
   /** What a constitution last posted: its newest post, question or close note the family board holds, its open question, or its review note; never its outcome. */
-  private said(card: KanbanCard): { text: string; at: number } | undefined {
+  said(card: KanbanCard): { text: string; at: number } | undefined {
     const index = this.graph(), root = index.rootOf(card), uid = card.uid ?? card.id, outcome = card.outcome?.trim()
     this.board.read([root.uid ?? root.id])
     // A closing post's line carries the outcome as its text.

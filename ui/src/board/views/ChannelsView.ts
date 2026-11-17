@@ -15,7 +15,7 @@ import { openActionMenu } from '../conversationMenu.js'
 import { stateDot } from '../stateDot.js'
 import { slug } from '../threadOutline.js'
 import { clearPost } from '../utils.js'
-import { attentionOf, type Waits } from '../attention.js'
+import { ATTENTION_ORDER, attentionOf, lastActive, type Waits } from '../attention.js'
 import { turnOf } from '../turn.js'
 import { docKey } from '../workspace/documents.js'
 import { headerIcon, type HeaderIcon } from '../workspace/headerIcon.js'
@@ -23,6 +23,7 @@ import { declaredTitle, watchDocumentTitles } from '../workspace/DocumentTitles.
 import { docButtons } from '../workspace/docButtons.js'
 import { Unfold, type UnfoldFile } from '../elements/filePreview.js'
 import { kindWord, post } from '../elements/post.js'
+import { doing, threadRow } from '../elements/threadRow.js'
 import { onDesk } from '../workspace/fiberPageState.js'
 import type { Dock } from '../workspace/Dock.js'
 import { createViewPage } from './ViewPage.js'
@@ -149,6 +150,8 @@ export class ChannelsView implements TemporalView {
   private away = false
   /** The stream's tube map as last drawn, for naming lines on what is in sight. */
   private tube: Tube | null = null
+  /** The threads running now, as the stream was last drawn ({@link runningNow}). */
+  private running: KanbanCard[] = []
   /** A frame asked for to name the lines in sight after a scroll. */
   private naming = 0
   /** The stream follows what arrives while the reader is at its foot. */
@@ -528,8 +531,12 @@ export class ChannelsView implements TemporalView {
       // The lanes share their room, each step no wider than the mock's nine pixels.
       this.stream.style.setProperty('--kbn-ch-tube', `${TUBE.gutter}px`)
       const lay = { waits, now, last: entries.length - 1 }
-      const count = el('li', 'kbn-ch-count'), ring = button('kbn-ch-count-ring', '', () => this.bundleMenu(this.atTop()))
-      ring.hidden = true
+      this.running = this.runningNow(tube, waits)
+      const count = el('li', 'kbn-ch-count'), ring = button('kbn-ch-count-ring', String(this.running.length), () => this.bundleMenu())
+      ring.hidden = !this.running.length
+      ring.title = this.runningTitle()
+      ring.setAttribute('aria-label', ring.title)
+      ring.setAttribute('aria-haspopup', 'menu')
       count.append(ring)
       this.entriesDrawn = entries
       this.titles.clear()
@@ -606,11 +613,10 @@ export class ChannelsView implements TemporalView {
     const { top, bottom } = row.bundle
     if (top || bottom) {
       const g = svg('g', { class: 'kbn-ch-bundle' })
-      const carried = [...row.bundled, ...own && !own.excursion ? [own.line] : []]
       const title = svg('title', {})
-      title.textContent = `${carried.length} running: ${carried.map(line => slug(line.card)).join(', ')}`
+      title.textContent = this.runningTitle()
       g.append(title)
-      g.addEventListener('click', event => { event.stopPropagation(); this.bundleMenu(carried, { x: event.clientX, y: event.clientY }) })
+      g.addEventListener('click', event => { event.stopPropagation(); this.bundleMenu({ x: event.clientX, y: event.clientY }) })
       // Where the bundle meets the row's own line: a curve leaving or rejoining it nine pixels off the event, a wired start's or end's arc its radius off.
       const meet = own?.leaves || own?.rejoins ? 9 : own && !own.excursion && (own.what === 'start' || own.what === 'end') ? r : 0
       const span = { x1: bx, x2: bx, y1: top ? 0 : y + meet, y2: bottom ? '100%' : y - meet }
@@ -656,21 +662,31 @@ export class ChannelsView implements TemporalView {
     box.append(g)
     return box
   }
-  /** The bundle's threads, listed: each opens its constitution's view. */
-  private bundleMenu(lines: readonly TubeLine[], point?: { x: number; y: number }): void {
+  /**
+   * The threads running now in this channel: each line not yet ended, one
+   * row per thread, what waits on the human first, then what works, each
+   * by its latest activity. The ring counts them, and it and the bundle list them.
+   */
+  private runningNow(tube: Tube, waits: Waits): KanbanCard[] {
+    const cards = new Map<string, KanbanCard>()
+    for (const line of tube.lines) if (line.to === Infinity) cards.set(fiberOf(line.card), line.card)
+    return [...cards.values()].sort((a, b) => ATTENTION_ORDER.indexOf(attentionOf(a, waits)) - ATTENTION_ORDER.indexOf(attentionOf(b, waits)) || lastActive(b) - lastActive(a))
+  }
+  private runningTitle(): string {
+    return `${this.running.length} running: ${this.running.map(card => slug(card)).join(', ')}`
+  }
+  /** The threads running now, listed as thread rows: each opens its constitution's view. */
+  private bundleMenu(point?: { x: number; y: number }): void {
     // The count's ring is the list's anchor, wherever on the bundle it was asked for: focus returns to it.
     const anchor = this.stream?.querySelector<HTMLElement>(':scope > .kbn-ch-count > .kbn-ch-count-ring')
-    if (!lines.length || !anchor) return
-    openActionMenu(anchor, lines.map(line => ({ label: slug(line.card), run: () => this.openLine(line.card) })), `${lines.length} running`, point)
-  }
-  /** The lines the bundle carries at the top of what is in sight. */
-  private atTop(): TubeLine[] {
-    const list = this.stream, tube = this.tube
-    if (!list || !tube) return []
-    const at = [...list.querySelectorAll<HTMLElement>(':scope > [data-row]')].findIndex(node => node.offsetTop + node.offsetHeight > list.scrollTop)
-    // What the bundle carries there, a line wired to it on that row included.
-    const row = at >= 0 ? tube.rows[at] : undefined
-    return row ? [...row.bundled, ...row.own && !row.own.excursion ? [row.own.line] : []] : []
+    const workspace = this.ctx?.workspace
+    if (!this.running.length || !anchor || !workspace) return
+    const now = Date.now(), waits = workspace.board.waiting
+    openActionMenu(anchor, this.running.map(card => ({
+      label: `${slug(card)}: ${doing(card, waits, workspace.said(card)).text}`,
+      content: threadRow(card, { waits, now, said: workspace.said(card), hue: hue(card) }),
+      run: () => this.openLine(card),
+    })), `${this.running.length} running`, point)
   }
   /** A line, a station or a terminus opens its constitution's view, as an item does, and moves nothing else. */
   private openLine(card: KanbanCard, from: string | null = null): void {
@@ -680,8 +696,7 @@ export class ChannelsView implements TemporalView {
   /**
    * Names each line once on what is in sight: on its start row when that is
    * in sight, else on its first item in sight; otherwise only its tooltip
-   * names it. The bundle's ring counts the lines it carries at the top of
-   * the sight.
+   * names it.
    */
   private nameLines(): void {
     const list = this.stream, tube = this.tube
@@ -696,13 +711,6 @@ export class ChannelsView implements TemporalView {
       if (first) named.add(first)
     }
     for (const node of rows) node.toggleAttribute('data-named', named.has(node))
-    const carried = this.atTop(), ring = list.querySelector<HTMLButtonElement>(':scope > .kbn-ch-count > .kbn-ch-count-ring')
-    if (ring) {
-      ring.hidden = carried.length < 2
-      ring.textContent = String(carried.length)
-      ring.title = `${carried.length} running: ${carried.map(line => slug(line.card)).join(', ')}`
-      ring.setAttribute('aria-label', ring.title)
-    }
   }
   /** A station on a line: a start's ring and slug, a tick, or an end's terminus; the slug is written here, once per line. */
   private stationRow(station: Station, now: number): HTMLLIElement {

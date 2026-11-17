@@ -166,9 +166,12 @@ try {
       await page.waitForFunction(() => document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-item').length === 3)
       // A dozen lines at once keep to a narrow margin: a bundle and at most three lanes, the gutter 34px wide.
       assert.deepEqual(await page.evaluate(() => [...new Set([...document.querySelectorAll('.kbn-ch-gutter')].map(el => el.getAttribute('width')))]), ['34'])
-      // The bundle opens a list of the threads it carries.
+      // The ring counts the threads running now; the bundle lists that same set, one thread row each, none twice.
       await page.locator('.kbn-ch-bundle').last().click({ force: true })
       await page.waitForFunction(() => document.querySelectorAll('[role="menuitem"]').length > 0)
+      const listed = await page.evaluate(() => [...document.querySelectorAll('[role="menuitem"] .thread-row-slug')].map(el => el.textContent))
+      assert.equal(listed.length, Number(await page.locator('.kbn-ch-count-ring').textContent()))
+      assert.equal(new Set(listed).size, listed.length)
       await shot(page, 'desktop-bundle-menu')
       await page.keyboard.press('Escape')
       await shot(page, 'desktop-busy')

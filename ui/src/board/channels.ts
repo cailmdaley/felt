@@ -219,8 +219,8 @@ export interface Item {
   /** The life of its thread it was said in, when the stream draws that life as a line. */
   line?: string
 }
-/** How a thread's life ended: closed, tempered, or discarded. */
-export type Ending = 'closed' | 'tempered' | 'discarded'
+/** How a thread's life ended: closed, tempered, discarded, or put to rest. */
+export type Ending = 'closed' | 'tempered' | 'discarded' | 'rested'
 /**
  * A station on a thread's line, between the items: where a life of the
  * thread starts, a handoff along it (a tick), or where it ends. `line` names
@@ -252,7 +252,8 @@ const LINES: Readonly<Record<string, Item['kind']>> = { asked: 'ask', post: 'pos
  * stations: a life starts at a launch (`launches`) while none is running, is
  * ticked where it was handed off, and ends at its last close before the next
  * start, its terminus shaped by that close's verdict (a close, a mark for the
- * human's review, then a temper are one tempered end). A launch inside a running life (a resume, a restart) adds
+ * human's review, then a temper are one tempered end), or at a rest while it
+ * runs (a seat or a standing run between runs, a stashed constitution). A launch inside a running life (a resume, a restart) adds
  * nothing. A life whose start is out of reach runs in from the stream's top;
  * one still running runs out at its foot. An item said within a life is on its
  * line.
@@ -278,8 +279,8 @@ export function composeStream(input: {
     return item
   }
   // What each thread's line is made of: its launches, handoffs and closes, by fiber.
-  const events = new Map<string, Array<{ at: number; what: 'launch' | 'tick' | 'close'; id: string; verdict?: string }>>()
-  const event = (card: KanbanCard, at: number, what: 'launch' | 'tick' | 'close', id: string, verdict?: string): void => {
+  const events = new Map<string, LifeEvent[]>()
+  const event = (card: KanbanCard, at: number, what: LifeEvent['what'], id: string, verdict?: string): void => {
     const list = events.get(fiberOf(card)) ?? events.set(fiberOf(card), []).get(fiberOf(card))!
     list.push({ at, what, id, verdict })
   }
@@ -296,6 +297,7 @@ export function composeStream(input: {
     const files = attached(record), kind = LINES[record.kind]
     if (record.kind === 'handed_off') event(card, record.timestamp, 'tick', record.id)
     if (record.kind === 'closed') event(card, record.timestamp, 'close', record.id, record.verdict)
+    if (record.kind === 'rested') event(card, record.timestamp, 'rest', record.id)
     if (kind && toPerson(record.to)) {
       const text = record.text?.trim() ?? ''
       // A line waits as what its card wants of the human: an open ask stands before a post it made since.
@@ -346,8 +348,11 @@ export function composeStream(input: {
   return stream.sort((a, b) => a.at - b.at || (a.card === b.card ? life(a) - life(b) : 0) || rank(a) - rank(b) || a.id.localeCompare(b.id))
 }
 
+/** What a thread's line is made of: a launch, a handoff, a close (with its verdict), or a rest. */
+interface LifeEvent { at: number; what: 'launch' | 'tick' | 'close' | 'rest'; id: string; verdict?: string }
+
 /** A thread's lives, oldest first: each its stations and the span its items fall in. */
-function livesOf(card: KanbanCard, events: ReadonlyArray<{ at: number; what: 'launch' | 'tick' | 'close'; id: string; verdict?: string }>): Array<{ line: string; from: number; to: number; stations: Station[] }> {
+function livesOf(card: KanbanCard, events: readonly LifeEvent[]): Array<{ line: string; from: number; to: number; stations: Station[] }> {
   const lives: Array<{ line: string; from: number; to: number; stations: Station[] }> = []
   let open: (typeof lives)[number] | undefined
   const begin = (from: number, start?: { at: number; id: string }): (typeof lives)[number] => {
@@ -356,8 +361,8 @@ function livesOf(card: KanbanCard, events: ReadonlyArray<{ at: number; what: 'la
     lives.push(life)
     return life
   }
-  // A close and a launch at one instant: the close ends the life before the launch starts the next.
-  const order = { close: 0, launch: 1, tick: 2 }
+  // A close or a rest and a launch at one instant: the end comes before the launch starts the next.
+  const order = { close: 0, rest: 0, launch: 1, tick: 2 }
   for (const event of [...events].sort((a, b) => a.at - b.at || order[a.what] - order[b.what])) {
     if (event.what === 'launch') { open ??= begin(event.at, event); continue }
     const last = lives.at(-1)
@@ -367,19 +372,21 @@ function livesOf(card: KanbanCard, events: ReadonlyArray<{ at: number; what: 'la
       if (open) open.stations.push({ kind: 'station', id: event.id, card, at: event.at, what: 'tick', line: open.line })
       continue
     }
+    const end = event.what === 'rest' ? 'rested' : ending(event.verdict)
     if (open) {
       open.to = event.at
-      open.stations.push({ kind: 'station', id: event.id, card, at: event.at, what: 'end', end: ending(event.verdict), line: open.line })
+      open.stations.push({ kind: 'station', id: event.id, card, at: event.at, what: 'end', end, line: open.line })
       open = undefined
     } else if (last) {
+      // A rest with no life running ends nothing: the life ended already keeps its end.
+      if (event.what === 'rest') continue
       // A close after the close (a mark for review, a verdict): the same end, moved to it and shaped as it says.
-      const end = last.stations.at(-1)!
-      Object.assign(end, { id: event.id, at: event.at, end: ending(event.verdict) })
+      Object.assign(last.stations.at(-1)!, { id: event.id, at: event.at, end })
       last.to = event.at
     } else {
       const life = begin(-Infinity)
       life.to = event.at
-      life.stations.push({ kind: 'station', id: event.id, card, at: event.at, what: 'end', end: ending(event.verdict), line: life.line })
+      life.stations.push({ kind: 'station', id: event.id, card, at: event.at, what: 'end', end, line: life.line })
     }
   }
   return lives

@@ -14,3 +14,21 @@
 .ov-deep .ov-slug { color: var(--ws-ink-soft); }
 .ov-open { color: var(--ws-ink-muted); font: var(--type-row)/var(--leading-solid) var(--font-serif); opacity: .45; }
 .ov-thread:is(:hover, :focus-visible) .ov-open { opacity: 1; color: var(--ws-ink); }
+
+/* A thread row: dot, slug, office, what it is doing, when it last spoke; one line, the doing cut with an ellipsis. */
+.thread-row {
+  display: flex; align-items: baseline; gap: 8px; min-width: 0;
+  font: var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--ws-ink-soft);
+}
+.thread-row > .constitution-state-dot { align-self: center; width: 14px; height: 20px; }
+.thread-row[data-hue='0'] { --line: var(--kbn-line-0); }
+.thread-row[data-hue='1'] { --line: var(--kbn-line-1); }
+.thread-row[data-hue='2'] { --line: var(--kbn-line-2); }
+.thread-row[data-hue='3'] { --line: var(--kbn-line-3); }
+.thread-row[data-hue='4'] { --line: var(--kbn-line-4); }
+.thread-row[data-hue='5'] { --line: var(--kbn-line-5); }
+.thread-row-slug { flex: none; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 var(--type-meta)/var(--leading-ui) var(--font-mono); color: var(--line, var(--ws-ink)); }
+.thread-row-role { flex: none; font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); color: var(--ws-ink-muted); white-space: nowrap; }
+.thread-row-doing { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ws-ink); }
+.thread-row[data-attention='quiet'] .thread-row-doing { color: var(--ws-ink-muted); }
+.thread-row-age { flex: none; margin-left: auto; white-space: nowrap; color: var(--ws-ink-muted); font-variant-numeric: tabular-nums; }

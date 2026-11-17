@@ -67,7 +67,7 @@ async function mount(inFlight = [chair, tsz, mask, beam, van, notes], view = new
     openFromDesk, openPage, look: see, isActive: false,
     console: (options: ConsoleOptions) => new Dock('', requestRefresh, undefined, undefined, options),
     library: { subscribe: () => () => {}, cancelOpen: vi.fn(), documents: () => library },
-    board: new BoardFeed(''), charterNames: new Map(),
+    board: new BoardFeed(''), charterNames: new Map(), said: () => undefined,
     globeHost: { feeds: { marks: (each: { uid?: string }) => ({ launches: launches[each.uid!] ?? [], commits: [] }), reach: () => 14 * day, files: () => [], lead: async () => undefined, refresh: () => {} } },
   }
   const sends = { files: sent, subscribe: () => () => {}, refresh: async () => {} }
@@ -500,4 +500,18 @@ it('hides a channel and does nothing else: one write, the dismissal, and no life
   const asked = requestsSince(from)
   expect(asked.filter(([, method]) => method === 'POST')).toStrictEqual([['/api/v1/channels/dismiss', 'POST']])
   expect(asked.filter(([url]) => LIFECYCLE.test(url))).toStrictEqual([])
+})
+
+it('rings the threads running now and lists them as thread rows, from the ring or anywhere on the bundle', async () => {
+  daemon()
+  const { host, openFromDesk } = await mount()
+  const ring = host.querySelector<HTMLButtonElement>('.kbn-ch-count-ring')!
+  // The beam's life runs in from before the stream; the expert's started 40 minutes ago; neither has ended.
+  expect([ring.hidden, ring.textContent, ring.title]).toStrictEqual([false, '2', '2 running: beam, tsz'])
+  expect([...host.querySelectorAll('.kbn-ch-bundle > title')].every(title => title.textContent === ring.title)).toBe(true)
+  ring.click(); await settle()
+  const rows = [...document.querySelectorAll<HTMLElement>('[role="menuitem"] .thread-row')]
+  expect(rows.map(row => [row.querySelector('.thread-row-slug')!.textContent, row.querySelector('.thread-row-doing')!.textContent])).toStrictEqual([['beam', 'working'], ['tsz', 'working']])
+  rows[1].click(); await settle(); await settle()
+  expect(openFromDesk).toHaveBeenLastCalledWith(tsz)
 })
