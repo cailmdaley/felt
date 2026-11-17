@@ -314,7 +314,7 @@ export class Unfold {
     if (made) {
       made.el.title = `Expand ${file.name}`
       // A card sent again says when it last came.
-      made.el.querySelector('.uf-card-age')?.replaceWith(timeEl(file.at ?? 0, Date.now(), 'uf-card-age'))
+      made.el.querySelector('.uf-age')?.replaceWith(timeEl(file.at ?? 0, Date.now(), 'uf-age'))
       return made.el
     }
     const parsed = parseDocKey(file.key), path = parsed?.path ?? file.name

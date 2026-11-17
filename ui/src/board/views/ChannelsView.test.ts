@@ -588,7 +588,7 @@ it('lists the running threads as they stand when the list opens, not as the stre
 it('redraws a file sent again: its card says when it last came', async () => {
   daemon()
   const { view, ctx, host } = await mount()
-  const age = () => [...item(host, 'tsz').querySelectorAll<HTMLElement>('.uf-card')].find(card => card.dataset.key?.endsWith('nulls.md'))!.querySelector('.uf-card-age')!.textContent
+  const age = () => [...item(host, 'tsz').querySelectorAll<HTMLElement>('.uf-card')].find(card => card.dataset.key?.endsWith('nulls.md'))!.querySelector('.uf-age')!.textContent
   expect(age()).toBe('14m ago')
   ;(ctx.sends as unknown as { files: SentFile[] }).files = [...SENT.slice(0, 2), { ...SENT[2], timestamp: Date.now() - 10 * minute }]
   view.refresh(ctx); await settle()
