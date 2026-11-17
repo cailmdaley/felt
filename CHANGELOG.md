@@ -1,28 +1,34 @@
 # Changelog
 
 All notable changes to felt are recorded here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
-adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/). A release's number
+rises by a minor for new work, incompatible changes included, and its entry
+leads with what breaks and how to upgrade; a major version marks an era the
+maintainer declares ([Versioning](docs/dev/releasing.md#versioning)).
 
 ## Unreleased
 
-## [3.0.0] — 2026-11-17
+## [2.1.0] — 2026-11-17
 
-A major version because `shuttle inbox --play|--next|--stop` moved to `shuttle say`, the `/api/v1/deliver` request and its status words changed, and the board's Board view and Desk drag are gone. The `felt` CLI has no incompatible change: stores, frontmatter and every 2.0.0 verb read as before.
+What you get: `felt rename`, one slug convention that every verb holds a new slug to, a board with Channels, check-ins a session schedules for itself, and a `felt update` that says when it has left a Shuttle daemon behind. What breaks is Shuttle's: `shuttle inbox --play|--next|--stop` moved to `shuttle say`, the `/api/v1/deliver` request and its status words changed, and the board's Board view and Desk drag are gone. Stores, frontmatter and every 2.0.0 `felt` verb read as before; `felt add` refuses a slug outside the convention where it used to rewrite it.
 
 ### Upgrading from 2.0.0
 
 - Stores used with `felt` alone need nothing: `felt update`, or the installer, and you are done.
-- On a host that runs the Shuttle daemon, upgrade the CLIs and the daemon together and restart the daemon at once: run the installer with `SHUTTLE_DAEMON=1`, then restart the daemon. `felt update` replaces only the CLIs. A running 2.0.0 daemon checks the CLI's contract level only when it starts, so until it is restarted on 3.0.0 it keeps calling verbs the 3.0.0 CLI no longer has, and messages to live workers are not delivered. A 3.0.0 daemon with an older CLI holds fresh dispatch and checks again every 30 seconds. The CLI contract is at level 48 (37 in 2.0.0). The HTTP API level (3; 1 in 2.0.0) is reported by `/api/v1/version` and not enforced.
+- On a host that runs the Shuttle daemon, run `felt update`, then the command it names, `shuttle daemon upgrade`, which fetches the daemon release matching the CLIs, swaps it in and restarts the daemon. `felt update` replaces only the CLIs and ends by saying so when the daemon on the host is at another version. A 2.0.0 daemon left running beside 2.1.0 CLIs does not deliver messages to live workers: they wait in the fiber's inbox and arrive once the daemon is level. Until then `shuttle message <fiber>` refuses and names the command. A 2.1.0 daemon with an older CLI holds fresh dispatch and checks again every 30 seconds. The CLI contract is at level 49 (37 in 2.0.0). The HTTP API level (3; 1 in 2.0.0) is reported by `/api/v1/version` and not enforced.
 - Upgrade every host of a fleet in one pass.
-- A 2.0.0 daemon that owns a fiber does not understand what a 3.0.0 sender asks of it: it drops a message's attachments, queues a `--in`/`--at` check-in at once instead of at its time, and does not start a session for a dormant fiber.
+- A 2.0.0 daemon that owns a fiber does not understand what a 2.1.0 sender asks of it: it drops a message's attachments, queues a `--in`/`--at` check-in at once instead of at its time, and does not start a session for a dormant fiber.
 - Thread results a 2.0.0 daemon had not yet placed (those still in `~/.shuttle/thread-outbox/pending/`, for an unresolved recipient or an unreachable owner) are not carried over, and a thread that closes or asks while the daemon is down for the upgrade is not reported to its orchestrator. Upgrade when that directory is empty and the host's threads are quiet.
 - A message a 2.0.0 daemon was in the middle of delivering may arrive a second time after the upgrade, without the "Possible repeat" mark.
 - Going back to 2.0.0 is unsafe while inbox entries are pending: an older owner delivers delayed entries at once and can repeat others. [The inbox](docs/dev/inbox.md) lists the hazards under Rollback.
 
 ### Added
 
-- `felt rename <id> <new-slug>` changes a fiber's last path segment. The directory and its document are renamed together, descendants come along, and the fiber's intrinsic id is unchanged. Wikilinks, directory links and `inputs[].from` references to the fiber and its descendants are rewritten as `felt nest` rewrites them, across the enclosing store and repositories linked into it, and each fiber whose text still holds the old id is listed for review. Run it from the store when the fiber lives in a repository the store links in: run in that repository's own checkout, it rewrites and reviews only that repository. Prose and other project fields are never rewritten, and neither is a markdown link to a file inside the renamed directory (`../old/old.md`), which the review list does not name either. It refuses a slug that is not one path segment, an existing destination, a companion file that already has the new document's name, a bare-form fiber (`.felt/<slug>.md`), and an id felt would have to guess at (a prefix or a stale path). The new slug is taken as given, not normalized as `felt add` normalizes one: keep to lowercase letters, digits and hyphens, since a slug with a dot or a space leaves links felt does not read as references. An interrupted rename finishes when the command is repeated, or with `felt recover-move`, which does not print the review list. A fiber with a live Shuttle worker is renamed without stopping it: the daemon, `shuttle status`, `shuttle attach` and the fiber's inbox find it by its intrinsic id.
+- `felt rename <id> <new-slug>` changes a fiber's last path segment. The directory and its document are renamed together, descendants come along, and the fiber's intrinsic id is unchanged. Wikilinks, markdown links to the fiber's directory and to files inside it, and `inputs[].from` references to the fiber and its descendants are rewritten, across the enclosing store and repositories linked into it; `felt nest` rewrites the same links. Each fiber whose text still holds the old path is listed for review: prose, other project fields and reference-style links (`[x]: path`) are never rewritten. Run it from the store when the fiber lives in a repository the store links in: run in that repository's own checkout, it rewrites and reviews only that repository. It refuses a slug outside the convention, an existing destination, a companion file that already has the new document's name, a bare-form fiber (`.felt/<slug>.md`), and an id felt would have to guess at (a prefix or a stale path). An interrupted rename finishes when the command is repeated, or with `felt recover-move`, which does not print the review list. A fiber with a live Shuttle worker is renamed without stopping it: the daemon, `shuttle status`, `shuttle attach` and the fiber's inbox find it by its intrinsic id.
+- One slug convention: a slug is lowercase letters and digits joined by single hyphens ([Fibers](docs/concepts/fibers.md#the-slug-convention)). `felt add`, `felt rename`, `shuttle thread --slug` and `shuttle role --new` refuse a new slug outside it and name the conforming form. Fibers that already have another slug (an underscore, a capital, a non-ASCII letter) keep it, stay addressable and linkable, can be moved and given children, and are listed as warnings by `felt check`.
+- `felt update` ends by saying when the host's Shuttle daemon, running or installed, is at another version than the CLIs it installed, and names the command that brings it level. `shuttle daemon check` prints the same notice.
+- `shuttle daemon upgrade` fetches the daemon release matching the installed CLIs, verifies it starts, swaps it in and restarts the daemon. It is for fetched releases; a daemon built from a checkout is deployed from that checkout.
+- `felt add --uid <ULID>` creates a fiber under an existing identity, keeping its slug as spelled; the daemon uses it to carry a fiber to its owning host.
 - `shuttle message <fiber> <text> --in 8h` or `--at <time>` schedules a check-in on the fiber's owning host, so it outlives the sending session; with no fiber it goes to the sender's own. `shuttle inbox ls <fiber> [--scheduled]` lists the entries waiting in a fiber's inbox on its owner and `shuttle inbox cancel <fiber> <id>` cancels one.
 - `shuttle inbox put|pending|ls`: every inbox entry, for a fiber or a session, is created by one writer that records its delivery wishes (`--source`, `--turn`, `--if-costly`, `--not-before`) and refuses an unknown value. An entry waits until its `not_before` has passed. `shuttle inbox ls --json` shows the delivery attempt an entry is part of while it is open.
 - Channels, the board's third view (hotkey `3`), takes the place of the Board view. Each line of work is a channel whose stream holds what its workers addressed to you: posts, questions, closes for your review and the files they sent, which unfold in place, HTML pages included. The rail lists channels that wait on you, are pinned, or were active in the last week, with unread counts. A ✓ (or `e`) clears a line, with an undo. Channel order, pins and hides are kept by the daemon, so every device agrees; `shuttle channels order|pin|dismiss` writes them.
@@ -37,6 +43,8 @@ A major version because `shuttle inbox --play|--next|--stop` moved to `shuttle s
 
 ### Changed
 
+- `felt add` refuses a slug outside the convention and names the conforming form; it used to rewrite `Foo Bar` to `foo-bar` silently.
+- `shuttle message <fiber>` exits 1 without sending when the fiber's owning daemon is built for another CLI contract than this `shuttle`, and names the command that brings the daemon level. `shuttle doctor` reports the same difference as a mismatch.
 - The held voice-line controls moved from `shuttle inbox` to `shuttle say`: `shuttle say --held` lists the held lines, and `--play`, `--next` and `--stop` play them. `shuttle inbox` manages message inboxes.
 - Messages to a fiber wait in a durable inbox on the owning host, whether or not a worker is live. A message that asks for a turn starts a session for an armed fiber with no worker; it does not when the fiber is resting, a draft or closed, when the host's boot quarantine is held, or when its worker slots are full. The receipt says what happened: `woken`, `followed_up`, `delivered`, `held`, `starting`, `queued` or `scheduled`. `shuttle message --json` no longer prints `queued_for_next_worker`.
 - `shuttle message --fresh` is deduplicated by `--message-id` and obeys the owner's launch gates: it starts a session only on an armed constitution and never reopens a closed fiber. A refusal gives its reason, and the same id can be sent again.
@@ -539,4 +547,4 @@ the source of truth — `.felt/index.db` is a rebuildable cache.
 [2.0.0-rc.1]: https://github.com/cailmdaley/felt/releases/tag/v2.0.0-rc.1
 [2.0.0-rc.2]: https://github.com/cailmdaley/felt/releases/tag/v2.0.0-rc.2
 [2.0.0]: https://github.com/cailmdaley/felt/releases/tag/v2.0.0
-[3.0.0]: https://github.com/cailmdaley/felt/releases/tag/v3.0.0
+[2.1.0]: https://github.com/cailmdaley/felt/releases/tag/v2.1.0

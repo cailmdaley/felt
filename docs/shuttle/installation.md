@@ -306,10 +306,10 @@ and the daemon release when requested:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh \
-  | FELT_VERSION=3.0.0 SHUTTLE_DAEMON=1 sh
+  | FELT_VERSION=2.1.0 SHUTTLE_DAEMON=1 sh
 ```
 
-Replace `3.0.0` with the tag you want. Both variables sit after the pipe, for
+Replace `2.1.0` with the tag you want. Both variables sit after the pipe, for
 the reason above: an install that silently drops `FELT_VERSION` fetches the
 latest stable instead. The tag is accepted with or without its leading `v`. If
 it has no `shuttled_<os>_<arch>.tar.gz` asset for your platform, the install

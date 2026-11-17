@@ -166,6 +166,16 @@ The `toolchain` directive in `go.mod` pins the compiler used by source builds,
 CI, and release packaging; the `go` directive remains the language minimum.
 Keep the toolchain on a supported security patch release.
 
+## Versioning
+
+A release's number rises by a minor for new work, incompatible changes
+included: 2.0.0 is followed by 2.1.0 whatever 2.1.0 breaks. Its changelog entry
+and release notes lead with what a user gets, then with what breaks and how to
+upgrade. A patch carries fixes alone. A major version marks an era the
+maintainer declares; no change earns one by being incompatible.
+
+## Cutting a release
+
 Release: `scripts/release.sh <version>` first requires the main checkout to be
 cleanly aligned with `origin/main` and checks that the new tag is absent both
 locally and remotely. It then bumps
@@ -227,7 +237,7 @@ daemon:
 PROBE_ROOT="$(mktemp -d)"
 HOME="$PROBE_ROOT/felt-home" PATH=/usr/bin:/bin \
   FELT_INSTALL_DIR="$PROBE_ROOT/cli" \
-  FELT_VERSION=3.0.0 SHUTTLE_DAEMON=1 \
+  FELT_VERSION=2.1.0 SHUTTLE_DAEMON=1 \
   SHUTTLE_HOME="$PROBE_ROOT/shuttle" sh ./install.sh
 "$PROBE_ROOT/cli/felt" --version
 SHUTTLE_RELEASE="$PROBE_ROOT/shuttle" "$PROBE_ROOT/cli/shuttle" version
