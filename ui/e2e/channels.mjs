@@ -107,6 +107,12 @@ try {
     assert.equal(await page.locator('.kbn-ch-item[data-kind="ask"] .kbn-ch-kind').textContent(), 'asks')
     // The channel's head carries its chair's pages; its console speaks to its chair, by slugs.
     assert.ok(await page.locator('.kbn-ch-head .kbn-ch-pages [data-part="constitution"]').isVisible())
+    // The chair's files list hangs inside the channel's sheet.
+    await page.locator('.kbn-ch-head .kbn-ch-pages [data-part="sends"]').click()
+    await page.locator('.kbn-conversation-menu .uf-file-row').first().waitFor()
+    const [list, sheet] = await Promise.all(['.kbn-conversation-menu', '.kbn-channels'].map(part => page.locator(part).boundingBox()))
+    assert.ok(list.x >= sheet.x && list.x + list.width <= sheet.x + sheet.width, `the files list (${list.x}–${list.x + list.width}) stands inside the sheet (${sheet.x}–${sheet.x + sheet.width})`)
+    await page.keyboard.press('Escape')
     assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-band-title').textContent(), 'cmbx')
     assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-worker-message').getAttribute('data-placeholder'), 'Message cmbx')
     // Its post carries the deck, the plot and the notes it attached, each at its density's box in a row that wraps:
@@ -184,6 +190,13 @@ try {
       const listed = await page.evaluate(() => [...document.querySelectorAll('[role="menuitem"] .thread-row-slug')].map(el => el.textContent))
       assert.equal(listed.length, Number(await page.locator('.kbn-ch-count-ring').textContent()))
       assert.deepEqual([...listed].sort(), ['blinding', 'bmodes', 'chains', 'depth', 'east', 'ia', 'paper', 'photoz', 'psf', 'rho', 'shear-2pt', 'unions', 'west'])
+      // Each row's age stands apart from its doing, however long the doing runs.
+      const gaps = await page.evaluate(() => [...document.querySelectorAll('[role="menuitem"] .thread-row')].map(row => {
+        const text = node => { const range = document.createRange(); range.selectNodeContents(node); return range.getBoundingClientRect() }
+        const doing = row.querySelector('.thread-row-doing')
+        return text(row.querySelector('.thread-row-age')).left - Math.min(text(doing).right, doing.getBoundingClientRect().right)
+      }))
+      assert.ok(gaps.every(gap => gap >= 14), `the ages stand apart from their doing (${gaps.map(Math.round).join(', ')}px)`)
       const attention = await page.evaluate(() => [...document.querySelectorAll('[role="menuitem"] .thread-row')].map(row => row.dataset.attention))
       assert.deepEqual(attention, [...attention].sort((a, b) => Number(a !== 'waiting') - Number(b !== 'waiting')))
       await shot(page, 'desktop-bundle-menu')

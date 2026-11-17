@@ -64,7 +64,8 @@
 .ov-said-text :is(p, li) + :is(p, li)::before { content: ' '; }
 
 /* Its threads, one thread row each, a thread waiting deep below indented under it; the hover reaches the page's edges. */
-.ov-threads { list-style: none; margin: 0; padding: 4px 0; border-top: 1px solid var(--ws-hairline-soft); }
+/* The reading measure: a row's age stands near its words. */
+.ov-threads { list-style: none; margin: 0; padding: 4px 0; max-width: 760px; border-top: 1px solid var(--ws-hairline-soft); }
 .ov-thread { padding: 2px var(--ov-gutter) 2px calc(var(--ov-gutter) - 6px); cursor: pointer; outline: none; }
 .ov-thread:is(:hover, :focus-visible) { background: var(--ws-hover); }
 .ov-thread > .constitution-state-dot { width: 20px; }

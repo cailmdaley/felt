@@ -29,7 +29,8 @@ export function openActionMenu(anchor: HTMLElement, actions: readonly Conversati
   menu.className = 'kbn-conversation-menu'
   menu.setAttribute('aria-label', label)
   menu.setAttribute('align', 'start')
-  menu.setAttribute('collision-padding', '8')
+  // Clear of the window's edge by more than the board's sheet stands in from it (12px), so a menu stays on the sheet.
+  menu.setAttribute('collision-padding', '16')
   root.append(menu)
   const anchorBounds = anchor.getBoundingClientRect()
   const close = (): void => { root.api?.close() }

@@ -31,6 +31,9 @@ The rest are the board's own choices, made to sit with those numbers:
 | Page preview (HTML, tapestry, deck) | 480 by 270 |
 | File card (Markdown, PDF, code, audio, anything without a picture) | 360 by 56: kind glyph, name, age |
 | File row (a list of files) | the card's face in one line, as wide as its list up to 420; its caption a second line, cut at two |
+| Constitution view's thread list | at most 760 wide, the reading measure, so a row's age stands near its words |
+| A thread row's age | at least 16px from its doing |
+| A menu (a list of files, of threads) | 16px clear of the window's edge, so it stays on the board's sheet |
 | Thumbnail (globe tiles, sheets) | 176 by 116 |
 
 A box never grows wider than the row it sits in: narrower, a figure or a page keeps its proportions and a card its height.
@@ -86,7 +89,7 @@ A file as a card that unfolds in place to the whole file, with ‹ i / n › bet
 Its density sets its box: **figure** (images, SVG plots), **page** (HTML, tapestries, decks), **card** (everything else, drawn from its name alone with nothing loaded) at the sizes above, and **thumbnail** for the globe and sheets.
 A fifth density, **row** (`fileRow`), lists a file rather than previewing it: the card's kind glyph, name and age in one line, and its caption under them (why it was sent: its newest send's caption, else the latest an earlier send of it gave, the same in every list and in the reader); unread, its glyph takes the fresh ink, and the file being read is underlined.
 
-**A count opens its list.** Several files can be stepped through or read as a list (`openFileList`): a modal menu of file rows, newest first whatever order it is given, each opening its file; a press outside only closes it. An open list follows its files: a send that arrives while it hangs takes its row, and the count it hangs from stays the same button, its number updated in place; a channel's head keeps it open until the board moves to another channel, which closes it. The list opens from every count of files: a constitution's sent-files count among its pages (the list is the files that count counts, and a row opens the file in the reader), the `i / n` in an unfolded file's bar (a row unfolds that file in place), the `i / n` on a sent file's page in the reader, and the phone's top-bar files button (a row opens the file in the reader).
+**A count opens its list.** Several files can be stepped through or read as a list (`openFileList`): a modal menu of file rows, newest first whatever order it is given, each opening its file; a press outside only closes it. An open list follows its files: a send that arrives while it hangs takes its row, and the count it hangs from stays the same button, its number updated in place; a channel's head keeps it open until the board moves to another channel, which closes it. The list opens from every count of files: a constitution's sent-files count among its pages (the list is the files that count counts, and a row opens the file in the reader, or in the constitution view unfolds it there), the `i / n` in an unfolded file's bar (a row unfolds that file in place), the `i / n` on a sent file's page in the reader, and the phone's top-bar files button (a row opens the file in the reader).
 A post's files sit in a row that wraps. The constitution view's one lead (its tapestry, else its newest file) is the exception: it stands at the view's full width, capped near 320px.
 Only thumbnails swap a page's large embedded images for placeholders; a figure or page preview keeps them whole, which costs memory per mounted preview (when previews mount is the performance work's to decide).
 

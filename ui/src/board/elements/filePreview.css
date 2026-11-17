@@ -32,7 +32,7 @@
    under the name, cut at two. Unread, its glyph takes the fresh ink; the one being read is underlined. */
 .uf-file-row {
   display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: baseline; column-gap: 10px;
-  width: min(420px, calc(100vw - 44px)); text-align: left;
+  width: min(420px, calc(100vw - 68px)); text-align: left;
 }
 .uf-file-row > .uf-glyph { font-size: var(--type-row); }
 .uf-caption {

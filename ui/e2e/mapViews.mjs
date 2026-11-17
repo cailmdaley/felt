@@ -108,6 +108,8 @@ export function registerMapViewJourneys(test) {
     const [head, threads, preview] = await Promise.all(['.ov-head', '.ov-threads', '.ov-unfold'].map(part => view(page).locator(part).boundingBox()))
     assert.ok(head.y < threads.y && threads.y + threads.height <= preview.y, 'head, then threads, then the preview')
     assert.equal(await view(page).locator('.ov-up .ov-ancestor .thread-row-slug').allTextContents().then(names => names.join(' ')), 'hub')
+    // The threads keep to a reading measure, so each row's age stands near its words.
+    assert.ok(threads.width <= 760, `the thread list is ${threads.width}px wide`)
     const card = view(page).locator('.uf-card')
     await card.locator('.ws-thumbnail').waitFor()
     assert.equal(await card.count(), 1, 'the other sent files wait behind the files button')

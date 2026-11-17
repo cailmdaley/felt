@@ -10,7 +10,7 @@
   padding: 5px;
   box-shadow: 0 6px 20px color-mix(in srgb, var(--kbn-shade) 13.33%, transparent);
   min-width: 220px;
-  max-width: calc(100vw - 16px);
+  max-width: calc(100vw - 32px);
   max-height: var(--available-height);
   overflow-y: auto;
   font-family: var(--font-serif);

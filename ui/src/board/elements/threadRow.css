@@ -9,4 +9,5 @@
 .thread-row-role { flex: none; font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); color: var(--ws-ink-muted); white-space: nowrap; }
 .thread-row-doing { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ws-ink); }
 .thread-row[data-attention='quiet'] .thread-row-doing { color: var(--ws-ink-muted); }
-.thread-row-age { flex: none; margin-left: auto; }
+/* The age stands apart from the doing, however far the doing runs. */
+.thread-row-age { flex: none; margin-left: auto; padding-left: 8px; }
