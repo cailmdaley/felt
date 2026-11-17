@@ -68,11 +68,11 @@ felt derives from a title, so a derived slug always conforms. Every verb that
 creates or changes a slug holds it to the convention and refuses any other,
 naming the conforming form: `felt add`, `felt rename`, `shuttle thread --slug`,
 and `shuttle role --new`. A slug with a dot, a space, an underscore, a capital
-or an accented letter is refused rather than normalized, because it is the
-spelling links and `inputs.from` have to carry.
+or an accented letter is refused rather than normalized: links and
+`inputs.from` carry a slug exactly as it is spelled.
 
 Only the segment being created or changed is checked. A store may hold fibers
-from before the convention, such as `shear_2d` or a slug with `ℓ` in it; they
+outside the convention, such as `shear_2d` or a slug with `ℓ` in it; they
 stay addressable by every verb, links to them resolve and move with them, and
 `felt add` places new fibers below them. `felt check` names each one as a
 warning with its conforming form, which `felt rename` can give it. A fiber

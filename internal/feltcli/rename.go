@@ -6,6 +6,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
@@ -75,8 +76,10 @@ func (a *app) finishRename(storage *felt.Storage, oldID, newID string) error {
 
 func (a *app) printRemainingPaths(storage *felt.Storage, oldID string) error {
 	// Search the same enclosing namespace that participated in link rewriting.
+	fullOld := oldID
 	if ext := storage.ExternalRefs(); ext != nil {
 		storage = felt.NewStorage(filepath.Dir(ext.Root()))
+		fullOld = path.Join(ext.Prefix(), oldID)
 	}
 	spellings := []string{oldID}
 	// A repository linked into this store also writes ids in its own namespace.
@@ -87,12 +90,9 @@ func (a *app) printRemainingPaths(storage *felt.Storage, oldID string) error {
 			spellings = append(spellings, strings.Join(parts[i:], "/"))
 		}
 	}
-	// A spelling counts where it stands as a whole path: not inside a longer
-	// name, nor after another path's segment, though a relative ./ or ../
-	// before it, as in a markdown link, still counts.
 	patterns := make([]*regexp.Regexp, 0, len(spellings))
 	for _, spelling := range spellings {
-		patterns = append(patterns, regexp.MustCompile(`(?:^|[^\p{L}\p{N}_/-])(?:\.\.?/)*`+regexp.QuoteMeta(spelling)+`(?:$|[^\p{L}\p{N}_-])`))
+		patterns = append(patterns, remainingPathPattern(spelling))
 	}
 	fibers, err := storage.List()
 	if err != nil {
@@ -103,12 +103,22 @@ func (a *app) printRemainingPaths(storage *felt.Storage, oldID string) error {
 		if err != nil {
 			return err
 		}
-		for _, pattern := range patterns {
-			if pattern.Match(data) {
-				fmt.Fprintf(a.env.Stdout, "Old path remains in %s (manual review)\n", f.ID)
-				break
-			}
+		matches := slices.ContainsFunc(patterns, func(p *regexp.Regexp) bool { return p.Match(data) })
+		// A path relative to the fiber's own document, ../x from a sibling,
+		// names the old directory too.
+		if rel, err := filepath.Rel(felt.DocumentDir(f), fullOld); !matches && err == nil && strings.HasPrefix(filepath.ToSlash(rel), "../") {
+			matches = remainingPathPattern(filepath.ToSlash(rel)).Match(data)
+		}
+		if matches {
+			fmt.Fprintf(a.env.Stdout, "Old path remains in %s (manual review)\n", f.ID)
 		}
 	}
 	return nil
+}
+
+// remainingPathPattern matches spelling where it stands as a whole path: not
+// inside a longer name, nor after another path's segment, though a relative
+// ./ or ../ before it, as in a markdown link, still counts.
+func remainingPathPattern(spelling string) *regexp.Regexp {
+	return regexp.MustCompile(`(?:^|[^\p{L}\p{N}_/-])(?:\.\.?/)*` + regexp.QuoteMeta(spelling) + `(?:$|[^\p{L}\p{N}_-])`)
 }

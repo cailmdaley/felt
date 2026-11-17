@@ -1082,11 +1082,13 @@ func RewriteBodyRefs(body string, rewrite func(target string) (string, bool)) (s
 // mailto:), which no relative file path does.
 var urlSchemeRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*:`)
 
-// RewriteFileLinks replaces the path of every markdown link to a file — a
-// relative target that is not a fiber reference, such as ../x/plot.png or
-// ../x/x.md — for which rewrite returns a new spelling. A #fragment or ?query,
-// the link text, and code stay as written. It reports whether anything changed.
-func RewriteFileLinks(body string, rewrite func(target string) (string, bool)) (string, bool) {
+// RewriteMarkdownPaths replaces the path of every relative markdown link —
+// ../x/plot.png, ../x/x.md, ../x/Makefile, ../x — for which rewrite returns a
+// new spelling. rewrite also receives the fiber reference the target spells,
+// when it has that shape, so a caller can leave those to RewriteBodyRefs. A
+// #fragment or ?query, the link text, and code stay as written. It reports
+// whether anything changed.
+func RewriteMarkdownPaths(body string, rewrite func(target string, ref *BodyRef) (string, bool)) (string, bool) {
 	if !strings.Contains(body, "](") {
 		return body, false
 	}
@@ -1099,9 +1101,6 @@ func RewriteFileLinks(body string, rewrite func(target string) (string, bool)) (
 		if strings.IndexByte(raw, codeMask) >= 0 {
 			continue
 		}
-		if _, ok := parseBodyRefTarget(raw, ""); ok {
-			continue
-		}
 		target := strings.TrimSpace(raw)
 		if i := strings.IndexAny(target, "#?"); i >= 0 {
 			target = target[:i]
@@ -1109,7 +1108,11 @@ func RewriteFileLinks(body string, rewrite func(target string) (string, bool)) (
 		if target == "" || strings.HasPrefix(target, "/") || urlSchemeRe.MatchString(target) {
 			continue
 		}
-		next, ok := rewrite(target)
+		var ref *BodyRef
+		if parsed, ok := parseBodyRefTarget(raw, ""); ok {
+			ref = &parsed
+		}
+		next, ok := rewrite(target, ref)
 		if !ok || next == target {
 			continue
 		}

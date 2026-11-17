@@ -87,7 +87,7 @@ func TestRenameRemainingPathsRespectBothBoundaries(t *testing.T) {
 				tc.id + ".",
 				"Code `" + tc.id + "`.",
 				"Quoted \"" + tc.id + "/child\".",
-				"[make](../" + tc.id + "/Makefile)",
+				"[make]: ../" + tc.id + "/plot.png",
 				"Relative ./" + tc.id + "/notes and ℓ " + tc.id + " σ.",
 			}
 			fibers := []*felt.Felt{{ID: tc.id, Name: "Target"}, {ID: "negative", Name: "Unrelated", Body: tc.unrelated}}
@@ -338,5 +338,58 @@ func TestRenameAndNestNonConformingFibers(t *testing.T) {
 	out, err = runCommand(t, dir, "check")
 	if err != nil || strings.Contains(out, "shear") || !strings.Contains(out, "WARNING: dest/c-ℓ-space: slug") {
 		t.Fatalf("check after: %v\n%s", err, out)
+	}
+}
+
+// A sibling's links into the moved directory are carried when they are inline
+// markdown links, a dot-less file included, and named for review when felt
+// cannot read them, as a reference-style link written relative to the sibling.
+func TestMoveCarriesSiblingFileLinksAndReviewsTheRest(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ verb, arg, newID, carried string }{
+		{"rename", "renamed", "a/renamed", "[m](../renamed/Makefile) [p](../renamed/plot.png)"},
+		{"nest", "b", "b/x", "[m](../../b/x/Makefile) [p](../../b/x/plot.png)"},
+	} {
+		t.Run(tc.verb, func(t *testing.T) {
+			t.Parallel()
+			dir, s := newStore(t)
+			for _, id := range []string{"a", "a/x", "b"} {
+				writeFixtureFelt(t, s, id, id)
+			}
+			for _, name := range []string{"Makefile", "plot.png"} {
+				if err := os.WriteFile(filepath.Join(s.Root(), "a/x", name), []byte(name), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for id, body := range map[string]string{
+				"a/inline":    "[m](../x/Makefile) [p](../x/plot.png)",
+				"a/reference": "See [plot].\n\n[plot]: ../x/plot.png",
+			} {
+				if err := s.Write(&felt.Felt{ID: id, Name: id, Body: body}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if out, err := runCommand(t, dir, "check"); err != nil || strings.Contains(out, "WARNING") || strings.Contains(out, "ERROR") {
+				t.Fatalf("check before: %v\n%s", err, out)
+			}
+			out, err := runCommand(t, dir, tc.verb, "a/x", tc.arg)
+			if err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			if got := mustRead(t, s, "a/inline").Body; got != tc.carried {
+				t.Fatalf("inline links: %s", got)
+			}
+			for _, name := range []string{"Makefile", "plot.png"} {
+				if _, err := os.Stat(filepath.Join(s.Root(), tc.newID, name)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.verb == "rename" && (!strings.Contains(out, "Old path remains in a/reference") || strings.Contains(out, "Old path remains in a/inline")) {
+				t.Fatalf("review: %s", out)
+			}
+			if out, err := runCommand(t, dir, "check"); err != nil || strings.Contains(out, "ERROR") {
+				t.Fatalf("check after: %v\n%s", err, out)
+			}
+		})
 	}
 }

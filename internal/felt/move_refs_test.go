@@ -545,3 +545,35 @@ func TestMoveSubtreeRewritesEveryInputsForm(t *testing.T) {
 		t.Errorf("d after move:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+// Conforming slugs that look like something else, a number or a ULID, are
+// links like any other.
+func TestMoveSubtreeCarriesNumericAndULIDShapedSlugs(t *testing.T) {
+	t.Parallel()
+	_, s := newStore(t)
+	ulidish := "01h0000000000000000000000a"
+	if !ValidSlug(ulidish) || !LooksLikeUID(ulidish) {
+		t.Fatal("fixture slug must conform and look like a ULID")
+	}
+	for _, id := range []string{"p", "p/0", "p/2026", "p/" + ulidish} {
+		writeFiberFile(t, s, id, fiber("F", ""))
+	}
+	doc := func(p string) string {
+		return "---\nid: fixture-C\nname: C\ninputs:\n  - from: " + p + "/0\n  - from: " + p + "/2026\n  - from: " + p + "/" + ulidish + "\n---\n\n" +
+			"[[" + p + "/0]] [z](../" + p + "/0) [[" + p + "/2026]] [y](" + p + "/2026) [[" + p + "/" + ulidish + "]] [u](../" + p + "/" + ulidish + ")\n"
+	}
+	writeFiberFile(t, s, "c", doc("p"))
+	felts, err := s.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issues, err := s.Check(felts); err != nil || len(issues) != 0 {
+		t.Fatalf("check before move: %v %v", issues, err)
+	}
+	if _, err := s.MoveSubtree("p", "q"); err != nil {
+		t.Fatalf("MoveSubtree: %v", err)
+	}
+	if got := readFiberFile(t, s, "c"); got != doc("q") {
+		t.Fatalf("c after move:\n%s\nwant:\n%s", got, doc("q"))
+	}
+}

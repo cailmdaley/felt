@@ -1167,7 +1167,7 @@ func planMoveRewrites(all, sources []*Felt, external *ExternalRefs, oldID, newID
 	var writes []pendingWrite
 	for _, f := range sources {
 		sourceNew, moved := remapIDPrefix(f.ID, oldID, newID)
-		sourceDir := documentDir(f)
+		sourceDir := DocumentDir(f)
 		clone := *f
 		clone.ID = sourceNew
 		if !rewriteMovedFiber(&clone, before, after, f.ID, sourceNew, sourceDir, oldID, newID) {
@@ -1188,6 +1188,12 @@ func planMoveRewrites(all, sources []*Felt, external *ExternalRefs, oldID, newID
 // links to files. The source sits at sourceOld before the move and sourceNew
 // after it, its document in sourceDir before the move. Planning and the
 // journaled write both call it, so a replay rewrites what the plan saw.
+//
+// A markdown link is a link to a file unless it spells a fiber reference that
+// resolved before the move. A file link shaped like a fiber reference
+// (../x/Makefile) is carried only when it lands inside the moved subtree, so a
+// broken fiber link elsewhere is not respelled as a path. File links are
+// carried first, against the body as written.
 func rewriteMovedFiber(f *Felt, before, after *scopedIDResolver, sourceOld, sourceNew, sourceDir, oldID, newID string) bool {
 	rewrite := func(target string) (string, bool) {
 		return rewriteMovedRef(before, after, sourceOld, sourceNew, target, oldID, newID)
@@ -1203,17 +1209,25 @@ func rewriteMovedFiber(f *Felt, before, after *scopedIDResolver, sourceOld, sour
 		}
 		return next, true
 	})
-	body, bodyChanged := RewriteBodyRefs(f.Body, rewrite)
-	body, filesChanged := RewriteFileLinks(body, func(target string) (string, bool) {
+	body, filesChanged := RewriteMarkdownPaths(f.Body, func(target string, ref *BodyRef) (string, bool) {
+		if ref != nil {
+			if _, ok := before.ResolvePath(sourceOld, ref.Target); ok {
+				return "", false
+			}
+			if _, inside := remapIDPrefix(path.Join(sourceDir, target), oldID, newID); !inside {
+				return "", false
+			}
+		}
 		return rewriteMovedFileLink(sourceDir, target, oldID, newID)
 	})
+	body, bodyChanged := RewriteBodyRefs(body, rewrite)
 	f.Body = body
 	return flowChanged || bodyChanged || filesChanged
 }
 
-// documentDir is the directory holding f's document, in id coordinates: the
+// DocumentDir is the directory holding f's document, in id coordinates: the
 // fiber's own directory in directory form, its parent's in bare form.
-func documentDir(f *Felt) string {
+func DocumentDir(f *Felt) string {
 	base := path.Base(f.ID)
 	if filepath.Base(f.Path) == base+FileExt && filepath.Base(filepath.Dir(f.Path)) == base {
 		return f.ID
