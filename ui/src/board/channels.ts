@@ -245,8 +245,8 @@ const LINES: Readonly<Record<string, Item['kind']>> = { asked: 'ask', post: 'pos
  * worker's sends close together one item. A post, question or close waits
  * when the board says it does (`waits`); a member that waits with no such
  * line drawn (an open question, a harness prompt, a turn that could not
- * start, a close for the human's review) is its own waiting item. Each worker shows
- * once: the item that waits, else its latest.
+ * start, a close for the human's review) is its own waiting item. Every item
+ * in the board's reach is drawn, as a channel in Slack holds every message.
  *
  * Between the items, each thread's lives within the board's reach as
  * stations: a life starts at a launch (`launches`) while none is running, is
@@ -331,8 +331,7 @@ export function composeStream(input: {
   const stream: Entry[] = []
   for (const list of items.values()) {
     for (const item of list) if (item.kind === 'file') item.text = [...new Set(item.files.flatMap(file => file.caption?.trim() || []))].join(' · ')
-    const latest = [...list].sort((a, b) => a.at - b.at)
-    stream.push(latest.filter(item => item.waiting).at(-1) ?? latest.at(-1)!)
+    stream.push(...list)
   }
   for (const card of channel.everyone) {
     const lives = livesOf(card, events.get(fiberOf(card)) ?? [])

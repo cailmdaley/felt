@@ -95,8 +95,45 @@ export interface ChannelsFixture {
   waiting: Record<string, { id: string; at: number }>
 }
 
+/** A figure as a worker draws one: a plot `width` by `height`, titled. */
+const plot = (title: string, width = 640, height = 400): string =>
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="${width}" height="${height}" fill="#fbf6e9"/><text x="32" y="44" font-size="22" fill="#30291f">${title}</text><path d="M56 70V${height - 50}H${width - 30}" fill="none" stroke="#a39478"/><path d="M70 ${height - 90}C${width * .3} ${height * .3} ${width * .5} ${height * .7} ${width * .7} ${height * .4}S${width * .85} ${height * .5} ${width - 40} ${height * .3}" fill="none" stroke="#3f8278" stroke-width="3"/></svg>`
+
+/**
+ * The channels, and UNIONS as a busy stream: a dozen of its threads post to
+ * the human through the day, several with files (figures, a tall one among
+ * them, an HTML page, Markdown notes), the chains thread twice within a few
+ * minutes; the human answered about half of them, and the n(z) modes thread
+ * still asks.
+ */
 export function addChannelsFixtures(example: WorkspaceExample, now: number): ChannelsFixture {
-  return addBoardFixtures(example, now, ROWS, () => [])
+  return addBoardFixtures(example, now, ROWS, (said, human, send) => {
+    const dir = (id: string): string => `/fixture-store/workspace/pando/unions/${id}`
+    const xi = send(`${dir('shear-2pt')}/xi-pm.svg`, plot('ξ± on six tomographic bins'), 292)
+    const leak = send(`${dir('psf')}/leakage.svg`, plot('PSF leakage α by bin'), 256)
+    const nulls = send(`${dir('bmodes')}/bmode-nulls.md`, '# B-mode nulls\n\nχ²/dof = 1.04 over 24 bins; every bin passes.\n', 196)
+    const depth = send(`${dir('depth')}/depth-map.html`, '<!doctype html><html><head><title>Depth map, r band</title><style>body{margin:0;font:16px/1.5 Georgia,serif;background:#fbf6e9;color:#30291f}main{padding:28px 36px}h1{margin:0 0 8px}.map{height:300px;margin-top:16px;border-radius:6px;background:radial-gradient(circle at 30% 40%,#3f8278,#a39478 55%,#e4dcc8)}</style></head><body><main><h1>Depth map, r band</h1><p>Rebuilt with the r-band masks; 3% of the footprint falls below the cut.</p><div class="map"></div></main></body></html>', 166)
+    const posterior = send(`${dir('chains')}/s8-omegam.svg`, plot('S8 × Ωm, blinded'), 100)
+    const chainNotes = send(`${dir('chains')}/convergence.md`, '# Convergence\n\nR−1 < 0.01 on every parameter after 40k steps.\n', 100)
+    const ia = send(`${dir('ia')}/nla-tatt.svg`, plot('NLA vs TATT', 360, 520), 69)
+    const tally: Array<[string, number, string, string[]?, boolean?]> = [
+      ['shear-2pt', 292, 'ξ± is measured on all six bins; the plot is attached.', [xi]],
+      ['psf', 256, 'Leakage is down to **α = 0.012 ± 0.004** after the new PSF model.', [leak], true],
+      ['rho', 226, 'ρ₁ through ρ₅ are consistent with zero on every scale. Nothing for you to decide.'],
+      ['bmodes', 196, 'The B-mode null passes; the per-bin table is in the notes.', [nulls], true],
+      ['depth', 166, 'The depth map is rebuilt; 3% of the footprint falls below the cut. The page shows where.', [depth]],
+      ['blinding', 146, 'The blinded data vector is ready; the key stays with you.', undefined, true],
+      ['chains', 100, 'Chains converged on the blinded vector. Posterior and convergence notes attached.', [posterior, chainNotes]],
+      ['chains', 97, 'One more: the run used the GLASS covariance, not the analytic one, as we agreed.'],
+      ['ia', 69, 'NLA and TATT agree on S8 within 0.2σ; TATT stays the default.', [ia], true],
+      ['photoz', 41, 'The SOM calibration moves bin 5 by 0.008, inside the prior.'],
+      ['paper', 29, 'Section 3 is drafted around the null tests.'],
+    ]
+    return tally.flatMap(([id, minutes, text, files, answered]) => [
+      said(`pando/unions/${id}`, 'post', minutes, { to: human, text, ...files ? { files } : {} }),
+      ...answered ? [said(`pando/unions/${id}`, 'human', minutes - 2, { by: human, text: 'Thanks.' })] : [],
+    ])
+  })
 }
 
 /**
@@ -135,7 +172,10 @@ export function addDeskFixtures(example: WorkspaceExample, now: number): Channel
 
 type Say = (fiber: string, kind: string, minutes: number, over?: Partial<BoardRecord>) => BoardRecord & { root: string }
 
-function addBoardFixtures(example: WorkspaceExample, now: number, ROWS: Row[], more: (said: Say, human: typeof HUMAN) => Array<BoardRecord & { root: string }>): ChannelsFixture {
+/** A file a worker wrote and sent the human `minutes` ago: its path, which a line may attach. */
+type Send = (path: string, body: string, minutes: number) => string
+
+function addBoardFixtures(example: WorkspaceExample, now: number, ROWS: Row[], more: (said: Say, human: typeof HUMAN, send: Send) => Array<BoardRecord & { root: string }>): ChannelsFixture {
   const iso = (minutes: number): string => new Date(now - minutes * 60_000).toISOString()
   const ms = (minutes: number): number => now - minutes * 60_000
   const dir = (id: string): string => `/fixture-store/workspace/${id}`
@@ -255,7 +295,13 @@ function addBoardFixtures(example: WorkspaceExample, now: number, ROWS: Row[], m
     ].join('\n') }),
     said('felt', 'human', 20, { id: 'brd-human-0002', by: HUMAN, text: 'Thanks, I will run the catch-up tonight.' }),
     said('felt/lander', 'post', 15, { to: up('felt/lander'), text: 'Landed 58bda2a3d on main.' }),
-    ...more(said, HUMAN),
+    ...more(said, HUMAN, (path, body, minutes) => {
+      const uid = path.split('/').slice(3, -1).join('/'), name = path.split('/').at(-1)!
+      const mime = name.endsWith('.svg') ? 'image/svg+xml' : name.endsWith('.html') ? 'text/html' : 'text/markdown'
+      example.files.push({ owner: WORKSPACE_HOST, path, mime, body: new Blob([body], { type: mime }) })
+      example.receipts.push({ fullPath: path, basename: name, uid, host: WORKSPACE_HOST, sessionId: `session-${uid}`, timestamp: ms(minutes) })
+      return path
+    }),
   ]
   // The daemon's answer: a line waits until the human says something to that fiber after it.
   const waiting: ChannelsFixture['waiting'] = {}

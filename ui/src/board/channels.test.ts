@@ -176,7 +176,7 @@ describe('composeStream', () => {
     composeStream({ channel, records, files, waits, launches: card => launches.get(card.uid!) ?? [], now, reachMs, ...over })
   const said = (entries: Entry[]) => entries.map(entry => entry.kind === 'station' ? [entry.card.id, entry.what, ...entry.end ? [entry.end] : []] : [entry.card.id, entry.kind, entry.text, entry.waiting])
 
-  it('holds what was addressed to the human, each worker once, with its threads\' lives as stations between, oldest first', () => {
+  it('holds everything addressed to the human, with its threads\' lives as stations between, oldest first', () => {
     expect(said(stream())).toStrictEqual([
       // Sent without a caption, it says nothing: its file names itself.
       ['cmbx', 'file', '', false],
@@ -185,7 +185,8 @@ describe('composeStream', () => {
       ['cmbx/cov', 'close', 'Validated to 4%.', true],
       ['cmbx/cov', 'end', 'closed'],
       ['cmbx/beam', 'start'],
-      // The post to the human carries the plot it attached, which is not also a send of its own; the deck, sent alone, is not drawn.
+      // The deck, sent alone, at its newest send; then the post to the human, carrying the plot it attached, which is not also a send of its own.
+      ['cmbx/kappa', 'file', 'The final deck.', false],
       ['cmbx/kappa', 'post', 'κ×tSZ at 9σ.', false],
       // Asked of its chair, the open question is the card's.
       ['cmbx/mask', 'ask', 'Which threshold?', true],
@@ -193,7 +194,7 @@ describe('composeStream', () => {
     ])
     // Each item said within a life is on its line; a thread with no station in reach draws none.
     expect(stream().flatMap(entry => entry.kind === 'station' ? [] : [[entry.card.id, entry.line]])).toStrictEqual([
-      ['cmbx', undefined], ['cmbx/cov', 'V:0'], ['cmbx/kappa', 'K:0'], ['cmbx/mask', undefined],
+      ['cmbx', undefined], ['cmbx/cov', 'V:0'], ['cmbx/kappa', 'K:0'], ['cmbx/kappa', 'K:0'], ['cmbx/mask', undefined],
     ])
     const post = stream().find(entry => entry.kind === 'post')
     expect(post?.kind === 'post' && post.files.map(file => [file.basename, file.caption])).toStrictEqual([['spectrum.svg', '9σ.']])
@@ -212,7 +213,7 @@ describe('composeStream', () => {
     expect(said(stream({ records: [...records, ...done] })).slice(-1)).toStrictEqual([['cmbx/beam', 'end', 'tempered']])
   })
 
-  it('waits where the feed says a question or close waits, else where a card waits; the item that waits shows over a newer one', () => {
+  it('waits where the feed says a question or close waits, else where a card waits', () => {
     // Without a line the daemon names, the card's close for review is its own item.
     const review = stream({ records: records.filter(each => each.id !== 'r3m'), waits: new Map() }).find(entry => entry.card === cov && entry.kind !== 'station')
     expect(review && review.kind !== 'station' && [review.kind, review.text, review.waiting]).toStrictEqual(['close', 'Validated to 4%.', true])
@@ -224,11 +225,11 @@ describe('composeStream', () => {
     // A post the daemon names waits, and only a post can be cleared by hand (the feed knows its kind once it holds the record).
     const posted = stream({ waits: new Map<string, Wait>([...waits, ['K', { id: 'r7', at: now - 30 * minute, kind: 'post' }]]) })
     expect(posted.flatMap(entry => entry.kind === 'station' ? [] : [[entry.id, entry.waiting, entry.clears]])).toStrictEqual([
-      [expect.any(String), false, undefined], ['r3m', true, undefined], ['r7', true, 'K'], [expect.any(String), true, undefined],
+      [expect.any(String), false, undefined], ['r3m', true, undefined], [expect.any(String), false, undefined], ['r7', true, 'K'], [expect.any(String), true, undefined],
     ])
     // A line whose record is not read yet waits, and is not offered a clear until it is known to be a post.
     const unread = stream({ records: records.filter(each => each.id !== 'r7'), waits: new Map([...waits, ['K', { id: 'r7', at: now - 30 * minute }]]) })
-    const kappaItem = unread.find(entry => entry.kind !== 'station' && entry.card === kappa)
+    const kappaItem = unread.find(entry => entry.kind === 'post' && entry.card === kappa)
     expect(kappaItem && kappaItem.kind !== 'station' && [kappaItem.waiting, kappaItem.clears]).toStrictEqual([true, undefined])
   })
 

@@ -82,10 +82,10 @@ try {
     await pick(page, 'cmbx').click()
     await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'cmbx' && document.querySelector('.kbn-ch-item'))
     if (phone) assert.equal(await page.locator('.kbn-ch-rail').isVisible(), false)
-    // What its workers addressed to the human, each worker once, with its threads' lives drawn as lines between.
-    await page.waitForFunction(() => document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-item').length === 4)
+    // Everything its workers addressed to the human, with its threads' lives drawn as lines between.
+    await page.waitForFunction(() => document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-item').length === 5)
     const said = await page.evaluate(lines)
-    assert.deepEqual(said.filter(([, kind]) => ['ask', 'post', 'close', 'file'].includes(kind)), [['covariance', 'close'], ['kappa-tsz', 'post'], ['foregrounds', 'ask'], ['cmbx', 'post']])
+    assert.deepEqual(said.filter(([, kind]) => ['ask', 'post', 'close', 'file'].includes(kind)), [['covariance', 'file'], ['covariance', 'close'], ['kappa-tsz', 'post'], ['foregrounds', 'ask'], ['cmbx', 'post']])
     // Closed to its chair, then marked for the human's review: an item, and its line's end.
     assert.ok(said.some(([who, what]) => who === 'covariance' && what === 'end:closed'), 'the close ends its line')
     assert.ok(said.some(([who, what]) => who === 'beam' && what === 'start'), 'the silent beam window shows only as its line')
@@ -162,8 +162,8 @@ try {
       await page.locator('.kbn-ch').focus()
       await page.keyboard.press('j')
       await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'unions')
-      // Its chair's post and a hub's figure, both to the human, and a thread's question.
-      await page.waitForFunction(() => document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-item').length === 3)
+      // A dozen threads' posts to the human through the day, a hub's figure, its chair's round, and a thread's question.
+      await page.waitForFunction(() => document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-item').length === 14)
       // A dozen lines at once keep to a narrow margin: a bundle and at most three lanes, the gutter 34px wide.
       assert.deepEqual(await page.evaluate(() => [...new Set([...document.querySelectorAll('.kbn-ch-gutter')].map(el => el.getAttribute('width')))]), ['34'])
       // The ring counts the threads running now; the bundle lists that same set, one thread row each, none twice.
