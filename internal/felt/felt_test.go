@@ -1491,3 +1491,40 @@ func TestParseRejectsDuplicateKeyInsideExtraField(t *testing.T) {
 		t.Fatalf("want a parse error naming the shuttle field, got %v", err)
 	}
 }
+
+// A markdown link's destination ends at whitespace only before a quoted
+// title; a file name with spaces is the whole destination.
+func TestMarkdownDestinationKeepsSpacesBeforeNoTitle(t *testing.T) {
+	t.Parallel()
+	for raw, want := range map[string]string{
+		"../meeting notes.pdf":               "../meeting notes.pdf",
+		"Screenshot 2026-11-17 at 10.02.png": "Screenshot 2026-11-17 at 10.02.png",
+		" plot v2.png ":                      "plot v2.png",
+		`../target "Title"`:                  "../target",
+		`../target 'Title'`:                  "../target",
+		`<a b.png> "t"`:                      "a b.png",
+		`my plot.png "T"`:                    "my plot.png",
+		`../x.png "t ../q/r"`:                "../x.png",
+	} {
+		if got := markdownDestination(raw); got != want {
+			t.Errorf("markdownDestination(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}
+
+// A link to a file whose name has spaces is no fiber reference: felt check
+// passes on it and it cites nothing.
+func TestFileLinkWithSpacesIsNoFiberReference(t *testing.T) {
+	t.Parallel()
+	body := "![shot](Screenshot 2026-11-17 at 10.02.png) ![m](../meeting notes.pdf) [s](plot v2.png)"
+	if refs := ExtractBodyRefs(body); len(refs) != 0 {
+		t.Fatalf("ExtractBodyRefs = %#v, want none", refs)
+	}
+	if issues := Check([]*Felt{{ID: "src", Name: "Src", Body: body}}, nil); len(issues) != 0 {
+		t.Fatalf("Check = %#v, want none", issues)
+	}
+	refs := ExtractBodyRefs(`[a](../target "Title") [b](other 'T')`)
+	if len(refs) != 2 || refs[0].Target != "target" || refs[1].Target != "other" {
+		t.Fatalf("titled refs = %#v, want target and other", refs)
+	}
+}

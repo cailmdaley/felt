@@ -530,13 +530,13 @@ func TestMoveSubtreeCarriesTitledAndBracketedFileLinks(t *testing.T) {
 	for _, id := range []string{"top", "top/deep"} {
 		writeFiberFile(t, s, id, fiber("T", ""))
 	}
-	writeFiberFile(t, s, "top/m", fiber("M", `[a](../x.png) [b](../x.png "t ../q/r") [c](<../x y.png>) [d](<../x.png> "t") [e](../x.png#f 'g')`))
+	writeFiberFile(t, s, "top/m", fiber("M", `[a](../x.png) [b](../x.png "t ../q/r") [c](<../x y.png>) [d](<../x.png> "t") [e](../x.png#f 'g') [h](../my plot.png "T")`))
 	writeFiberFile(t, s, "c", fiber("C", `[f](../top/m "t") [g](<../top/m/m.md> "t")`))
 	if _, err := s.MoveSubtree("top/m", "top/deep/m"); err != nil {
 		t.Fatalf("MoveSubtree: %v", err)
 	}
 	for id, want := range map[string]string{
-		"top/deep/m": fiber("M", `[a](../../x.png) [b](../../x.png "t ../q/r") [c](<../../x y.png>) [d](<../../x.png> "t") [e](../../x.png#f 'g')`),
+		"top/deep/m": fiber("M", `[a](../../x.png) [b](../../x.png "t ../q/r") [c](<../../x y.png>) [d](<../../x.png> "t") [e](../../x.png#f 'g') [h](../../my plot.png "T")`),
 		"c":          fiber("C", `[f](../top/deep/m "t") [g](<../top/deep/m/m.md> "t")`),
 	} {
 		if got := readFiberFile(t, s, id); got != want {
@@ -632,5 +632,25 @@ func TestMoveSubtreeCarriesNumericAndULIDShapedSlugs(t *testing.T) {
 	}
 	if got := readFiberFile(t, s, "c"); got != doc("q") {
 		t.Fatalf("c after move:\n%s\nwant:\n%s", got, doc("q"))
+	}
+}
+
+// A link to a file whose name has spaces is not read as a link to the fiber
+// its first word names, so renaming that fiber leaves it byte for byte.
+func TestMoveSubtreeLeavesFileLinksWithSpaces(t *testing.T) {
+	t.Parallel()
+	_, s := newStore(t)
+	for _, id := range []string{"meeting", "src/plot"} {
+		writeFiberFile(t, s, id, fiber("F", ""))
+	}
+	src := fiber("S", "![m](../meeting notes.pdf) [s](plot v2.png)")
+	writeFiberFile(t, s, "src", src)
+	for _, move := range [][2]string{{"meeting", "mtg"}, {"src/plot", "src/chart"}} {
+		if _, err := s.MoveSubtree(move[0], move[1]); err != nil {
+			t.Fatalf("MoveSubtree %v: %v", move, err)
+		}
+	}
+	if got := readFiberFile(t, s, "src"); got != src {
+		t.Fatalf("src after renames:\n%s\nwant:\n%s", got, src)
 	}
 }

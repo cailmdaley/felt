@@ -13,7 +13,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/oklog/ulid/v2"
 	"gopkg.in/yaml.v3"
@@ -1088,15 +1087,20 @@ func RewriteBodyRefs(body string, rewrite func(target string) (string, bool)) (s
 // mailto:), which no relative file path does.
 var urlSchemeRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*:`)
 
+// titleRe matches a markdown link's quoted title and the whitespace before it.
+var titleRe = regexp.MustCompile(`\s+("[^"]*"|'[^']*')\s*$`)
+
 // markdownDestination is a markdown link's destination as written inside its
-// parentheses: up to the first whitespace, before any "title", or the text
-// inside <...>.
+// parentheses: the text inside <...>, or else the trimmed text before any
+// quoted title, spaces included.
 func markdownDestination(raw string) string {
 	destination := strings.TrimSpace(raw)
 	if inner, ok := strings.CutPrefix(destination, "<"); ok {
 		destination, _, _ = strings.Cut(inner, ">")
-	} else if i := strings.IndexFunc(destination, unicode.IsSpace); i >= 0 {
-		destination = destination[:i]
+		return destination
+	}
+	if loc := titleRe.FindStringIndex(destination); loc != nil {
+		return destination[:loc[0]]
 	}
 	return destination
 }
@@ -1105,8 +1109,8 @@ func markdownDestination(raw string) string {
 // ../x/plot.png, ../x/x.md, ../x/Makefile, ../x — for which rewrite returns a
 // new spelling. rewrite also receives the fiber reference the target spells,
 // when it has that shape, so a caller can leave those to RewriteBodyRefs. The
-// target ends at the first whitespace, before any "title", unless it is
-// wrapped in <...>. A #fragment or ?query, a title, the link text, and code
+// target is the text inside <...>, or else everything before a quoted title,
+// spaces included. A #fragment or ?query, a title, the link text, and code
 // stay as written. It reports whether anything changed.
 func RewriteMarkdownPaths(body string, rewrite func(target string, ref *BodyRef) (string, bool)) (string, bool) {
 	if !strings.Contains(body, "](") {
