@@ -751,7 +751,9 @@ export class ChannelsView implements TemporalView {
   private placeRing(top = this.stream?.scrollTop ?? 0): void {
     const ring = this.stream?.querySelector<HTMLElement>(':scope > .kbn-ch-count > .kbn-ch-count-ring')
     if (!ring) return
-    const x = this.strandAt(top + 22)
+    // Above where the strand begins, the ring stands over its first inked point.
+    let x: number | undefined
+    for (let y = top + 22; x === undefined && y <= top + 182; y += 8) x = this.strandAt(y)
     ring.style.left = `${Math.max(0, (x ?? 8.5) - 8.5)}px`
   }
   /** A fibre or a mark opens its line's constitution; the strand lists the threads it gathers. */

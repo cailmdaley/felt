@@ -70,7 +70,7 @@ export function measure(tube: Tube, rows: readonly MarginRow[]): { y: (s: number
   return { y: along(S, Y), s: along(Y, S) }
 }
 
-/** The margin drawn, the band it covers, and where its strand runs at a measured height in that band. */
+/** The margin drawn, the band it covers, and where its strand is inked at a measured height in that band. */
 export interface Margin { svg: SVGSVGElement; band: readonly [number, number]; strandAt: (y: number) => number | undefined }
 
 export function drawMargin(tube: Tube, rows: readonly MarginRow[], height: number, options: MarginOptions): Margin {
@@ -240,7 +240,7 @@ export function drawMargin(tube: Tube, rows: readonly MarginRow[], height: numbe
   function gather(g: SVGGElement, mark: Point, ys: number, way: 1 | -1): void {
     const xs = at(ys).strand?.x
     if (xs === undefined) return
-    const far: Point = [xs, ys], points = bezier(mark, [mark[0] - 8, mark[1] + way * 14], [xs + 6, ys - way * 12], far, 20)
+    const far: Point = [xs, ys], points = bezier(mark, [mark[0] - 8, mark[1] + way * 14], [xs, ys - way * 20], far, 20)
     wisp(g, points, u => weight * (0.85 - 0.75 * u) + 0.05, 'kbn-ch-gather')
   }
   function synapse(parent: TubeLine, sx: number, y: number, R: () => number): void {
@@ -251,7 +251,7 @@ export function drawMargin(tube: Tube, rows: readonly MarginRow[], height: numbe
     g.append(svg('circle', { class: 'kbn-ch-bouton', cx: to[0].toFixed(2), cy: to[1].toFixed(2), r: 1.1 }))
   }
   for (const g of groups.values()) box.append(g)
-  return { svg: box, band, strandAt: y => at(y).strand?.x }
+  return { svg: box, band, strandAt: y => { const strand = at(y).strand; return strand && strand.p > 0.3 ? strand.x : undefined } }
 }
 
 /** A start: a small body of ink, a short apical wisp above it and two basal ones. */
