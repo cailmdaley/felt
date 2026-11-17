@@ -161,10 +161,8 @@ try {
       assert.equal(await page.waitForFunction(() => document.querySelector('.ws-page.ws-selected .ws-sent-count')?.textContent === '3 / 3').then(() => count()), '3 / 3')
       await shot(page, `${name}-sends`)
     }
-    // Stepping took the file's place: one back returns to the view.
+    // Stepping replaces the reader's page: one back returns to Channels.
     await page.keyboard.press('h')
-    await page.waitForFunction(() => document.querySelector('.ws-selected .ov-name')?.textContent === 'kappa-tsz')
-    await page.keyboard.press('Escape')
     await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'cmbx' && document.querySelector('.kbn-ch').offsetParent)
     if (phone) {
       await page.locator('.kbn-ch-back').click()

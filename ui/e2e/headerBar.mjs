@@ -216,7 +216,7 @@ export function registerHeaderBarJourneys(test) {
     }
     await assertRow(['Temper', 'Rest', 'Discard'])
     // A thread opens from its row in the view, one level down.
-    await page.locator('.ws-page.ws-selected .ov-thread[title="Response analysis"]').click()
+    await threadRow(page, await familyTree(page), 'analysis').click()
     await threadNamed(page, 'Response analysis')
     await assertRow(['Close for review', 'Rest', 'Temper', 'Discard'])
     const reviewInk = await verbFace(acts(page)).evaluate(el => {
@@ -300,9 +300,9 @@ export function registerHeaderBarJourneys(test) {
     await page.goto(url)
     await openRoot(page)
     const press = async target => { await target.focus(); await page.keyboard.press('Enter') }
-    await openThread(page, threadRow(page, await familyTree(page), 'Response analysis'), 'Response analysis', press)
+    await openThread(page, threadRow(page, await familyTree(page), 'analysis'), 'Response analysis', press)
     // Up again, by the orchestrator's head above.
-    await openThread(page, (await familyTree(page)).locator(`.ov-ancestor[title="${title}"]`), title, press)
+    await openThread(page, (await familyTree(page)).locator('.ov-ancestor').filter({ has: page.locator('.thread-row-slug', { hasText: /^calibration-report$/ }) }), title, press)
     await page.evaluate(() => { document.activeElement?.blur(); document.body.focus() })
     // Expand is a key, Enter or o, with no button of its own.
     assert.equal(await page.locator('.ws-expand-button').count(), 0)
@@ -337,9 +337,9 @@ export function registerHeaderBarJourneys(test) {
       const head = () => page.locator('.ws-page.ws-selected .ov-head')
       assert.equal(await head().locator('.ov-name').innerText(), 'calibration-report')
       // Down two levels, each its own view under its orchestrators, the family's root first.
-      for (const name of ['Response analysis', 'Choose the response cut']) {
-        await openThread(page, threadRow(page, await familyTree(page), name), name)
-        assert.equal(await page.locator('.ws-page.ws-selected .ov-ancestor').first().getAttribute('title'), title)
+      for (const [slug, name] of [['analysis', 'Response analysis'], ['question', 'Choose the response cut']]) {
+        await openThread(page, threadRow(page, await familyTree(page), slug), name)
+        assert.equal(await page.locator('.ws-page.ws-selected .ov-ancestor .thread-row-slug').first().textContent(), 'calibration-report')
         assert.ok(await head().locator('.ov-title > .constitution-state-dot').isVisible())
       }
       assert.equal(await head().locator('.ov-name').innerText(), 'question')
@@ -347,7 +347,7 @@ export function registerHeaderBarJourneys(test) {
         await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
         await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `family-${device}-${scheme}.png`) })
       }
-      await openThread(page, page.locator(`.ws-page.ws-selected .ov-ancestor[title="${title}"]`), title)
+      await openThread(page, page.locator('.ws-page.ws-selected .ov-ancestor').filter({ has: page.locator('.thread-row-slug', { hasText: /^calibration-report$/ }) }), title)
     }, viewport)
     for (const scheme of ['light', 'dark']) test(`One band (${device}, ${scheme}): long name, icons and unified settings`, async page => {
       await page.emulateMedia({ colorScheme: scheme })

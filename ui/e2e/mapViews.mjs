@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { pageBack } from './familyNav.mjs'
+import { pageBack, threadRow } from './familyNav.mjs'
 
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads`
 const root = 'Calibrate the shear response'
@@ -48,18 +48,18 @@ export function registerMapViewJourneys(test) {
       await window.__harness.modal.fetchAndRender()
     }, rootName)
     const quiet = await asked(page)
-    await view(page).locator('.ov-thread[title="Response analysis"]').click()
+    await threadRow(page, view(page), 'analysis').click()
     await head(page, 'Response analysis').waitFor()
     await asks(page, quiet.length + 1)
     assert.deepEqual(await asked(page), [...quiet, 'select:session-analysis'])
     assert.match(await page.locator('.ws-stage-band .ws-band-title').textContent(), /\/analysis$/)
     // Its orchestrators stand above its head.
     const scroller = view(page).locator('.ws-family-scroll')
-    assert.deepEqual(await view(page).locator('.ov-ancestor').evaluateAll(rows => rows.map(row => row.title)), [rootName])
+    assert.deepEqual(await view(page).locator('.ov-ancestor .thread-row-slug').allTextContents(), ['calibration-report'])
     // Keys move the focus among the rows, and neither they nor scrolling move Rex.
     await view(page).locator('.ov-head').focus()
     await page.keyboard.press('k')
-    assert.equal(await page.evaluate(() => document.activeElement?.title), rootName)
+    assert.equal(await page.evaluate(() => document.activeElement?.querySelector('.thread-row-slug')?.textContent), 'calibration-report')
     await scroller.evaluate(el => { el.scrollTop = 0 })
     assert.deepEqual(await asked(page), [...quiet, 'select:session-analysis'])
     // Pulled past the top, the orchestrator's view opens; a pull is no click, so Rex stays.
@@ -73,7 +73,7 @@ export function registerMapViewJourneys(test) {
     await page.waitForTimeout(500)
     assert.deepEqual(await asked(page), pulled)
     // The thread's row again; Rex already stands at its worker.
-    await view(page).locator('.ov-thread[title="Response analysis"]').click()
+    await threadRow(page, view(page), 'analysis').click()
     await head(page, 'Response analysis').waitFor()
     // A click on an orchestrator's step opens its view too, and moves Rex to its worker.
     await scroller.evaluate(el => { el.scrollTop = 0 })

@@ -15,8 +15,8 @@ export async function familyTree(page) {
   await view.locator('.ov-head').waitFor()
   return view
 }
-/** A thread's row in a constitution's view, by its exact name, which the row carries as its tooltip. */
-export const threadRow = (page, view, name) => view.locator(`.ov-thread[title="${name}"]`)
+/** A thread's row in a constitution's view, by its slug. */
+export const threadRow = (page, view, slug) => view.locator('.ov-thread').filter({ has: page.locator('.thread-row-slug').getByText(slug, { exact: true }) })
 /** Opens a thread's own view from its row. */
 export async function openThread(page, row, name, activate = target => target.click()) {
   await activate(row)

@@ -1,4 +1,4 @@
-import { familyTree, openThread, pageBack, threadRow } from './familyNav.mjs'
+import { familyTree, openThread, pageBack } from './familyNav.mjs'
 import assert from 'node:assert/strict'
 import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -84,12 +84,12 @@ export function registerNavigationJourneys(test) {
     await land()
     // The family's root's view, from its head above; then another of its threads, one level down.
     const parent = selected(page).locator('.ov-ancestor').first()
-    const parentName = await parent.getAttribute('title')
     await parent.click()
-    await named(page, parentName)
+    await named(page, 'Calibrate the shear response')
     // However deep the reader goes, its way back names the view it was opened from.
     await checkBack('Desk')
-    await openThread(page, threadRow(page, await familyTree(page), 'Review the null tests'), 'Review the null tests')
+    const tree = await familyTree(page)
+    await openThread(page, tree.locator('.ov-thread[data-fiber="thread-review"]'), 'Review the null tests')
     await checkBack('Desk')
     await shot('03-sibling')
     // Its constitution, from its head, and a file linked there.

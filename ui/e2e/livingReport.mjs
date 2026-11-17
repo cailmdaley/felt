@@ -200,7 +200,7 @@ export function registerLivingReportJourneys(test) {
       // A thread's row opens its own view, whose head opens its constitution.
       const tree = await familyTree(page)
       if (!phone) assert.ok(await tree.locator('.ov-head [data-part="sends"]').isVisible(), 'the view holds its sent files among its pages')
-      await openThread(page, threadRow(page, tree, 'Response analysis'), 'Response analysis')
+      await openThread(page, threadRow(page, tree, 'analysis'), 'Response analysis')
       await named(page, 'Response analysis')
       await selected(page).locator('.ov-head [data-part="constitution"]').click()
       await selected(page).locator('.ws-fiber-prose').waitFor()
