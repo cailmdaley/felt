@@ -10,7 +10,7 @@ Run `cd ui && npm run e2e` for every headless harness browser journey: workspace
 The command builds both bundles, runs every suite even when one fails, and exits nonzero on any failure.
 Each suite launches its own headless Chrome, and the board's Google Fonts are served from a cache under `ui/node_modules/.cache/e2e-fonts` after their first fetch.
 The workspace suite runs its journeys four at a time, each in its own context (`E2E_JOBS` changes the count), prints each journey's time, and takes `E2E_ONLY=<regex>` to run the journeys it names; the whole command takes about three and a half minutes on a laptop.
-CI runs it on every push to `main` as the Journeys job, beside the UI job and waited on by none; the job takes six to nine minutes on a GitHub runner, Chromium install included.
+CI runs it on every push to `main` as the Journeys job, beside the UI job and waited on by none; the job takes about nine minutes on a GitHub runner, Chromium install included.
 The `*-live.mjs` probes require a live daemon and are opt-in, separate from this harness gate.
 
 `cd ui && npm run e2e:change` builds the change-reader ES-module harness and checks every virtual diff window, including open shadow DOM, against an independent parse of real `git diff` output.
