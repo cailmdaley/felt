@@ -129,6 +129,12 @@ export function registerNavigationJourneys(test) {
 }
 
 const channelsUrl = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=channels#/channels`
+/** The unions channel: chosen from the rail, or already shown where a phone reopens the channel it last showed. */
+async function toUnions(page) {
+  const pick = page.locator('.kbn-ch-pick', { hasText: 'unions' }).first()
+  await pick.waitFor({ state: 'attached' })
+  if (await pick.isVisible()) await pick.click()
+}
 const streamScroll = page => page.locator('.kbn-ch .kbn-ch-stream').evaluate(el => {
   for (let node = el; node; node = node.parentElement) if (node.scrollHeight > node.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(node).overflowY)) return Math.round(node.scrollTop)
   return Math.round(document.scrollingElement.scrollTop)
@@ -149,13 +155,14 @@ export function registerChannelsBackJourneys(test) {
     const ways = phone ? ['reader', 'browser', 'swipe'] : ['reader', 'escape', 'browser', 'tab']
     for (const way of ways) {
       await page.goto(channelsUrl)
-      await page.locator('.kbn-ch-pick', { hasText: 'unions' }).first().click()
+      await toUnions(page)
       const posts = page.locator('.kbn-ch .kbn-ch-item .kbn-ch-who')
       await posts.first().waitFor()
       const post = posts.nth(3)
       await post.scrollIntoViewIfNeeded()
       const item = await post.getAttribute('data-item')
       const scrolled = await streamScroll(page)
+      const below = await page.evaluate(() => navigation.currentEntry.index)
       await post.click()
       await page.locator('.ws-reader:not(.ws-dormant)').waitFor()
       for (let i = 0; i < 2; i++) {
@@ -165,8 +172,8 @@ export function registerChannelsBackJourneys(test) {
         await page.waitForFunction(() => !/unions@/.test(decodeURIComponent(location.hash)) || /\/unions\/[^@]+@/.test(decodeURIComponent(location.hash)))
       }
       await selected(page).locator('.ws-doc-button').nth(1).click()
-      const length = await page.evaluate(() => navigation.entries().length)
-      assert.equal(length, 2, `${way}: the reader holds one entry above Channels, however far it went`)
+      const history = await page.evaluate(() => ({ index: navigation.currentEntry.index, length: navigation.entries().length }))
+      assert.deepEqual(history, { index: below + 1, length: below + 2 }, `${way}: the reader holds one entry above Channels, however far it went`)
       if (way === 'reader') await (phone ? page.locator('.ws-return') : selected(page).locator('.ws-document-back')).click()
       else if (way === 'escape') { await page.locator('.ws-reader').click({ position: { x: 4, y: 200 } }).catch(() => {}); await page.keyboard.press('Escape') }
       else if (way === 'browser') await page.goBack()
@@ -187,7 +194,7 @@ export function registerChannelsBackJourneys(test) {
 
     // An unfolded file sent to full screen returns unfolded, with the keys.
     await page.goto(channelsUrl)
-    await page.locator('.kbn-ch-pick', { hasText: 'unions' }).first().click()
+    await toUnions(page)
     const several = page.locator('.kbn-ch .kbn-ch-previews[data-several]').first()
     await several.locator('.uf-card').first().click()
     const name = () => several.locator('.uf-name').textContent()
