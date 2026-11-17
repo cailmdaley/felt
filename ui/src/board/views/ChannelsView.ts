@@ -10,8 +10,8 @@ import {
   type Channel, type Entry, type Item, type Station,
 } from '../channels.js'
 import { layTube, rowHeight, runsOf, tautness, type Tube, type TubeLine } from '../tube.js'
-import { drawMargin, tautAlong, type MarginRow } from '../margin.js'
-import { random, ribbon } from '../ink.js'
+import { GUTTER, drawMargin, tautAlong, type MarginRow } from '../margin.js'
+import { random } from '../ink.js'
 import { lineHue } from '../lineHue.js'
 import { createRailReorder, type RailReorder } from '../channelRail.js'
 import { openActionMenu } from '../conversationMenu.js'
@@ -56,22 +56,7 @@ const FOUND_DOCUMENTS = 12
 /** Narrower than this, the rail is a drawer drawn in over the stream. */
 const DRAWER_PX = 1100
 /** The margin's width: wide on a desktop, where the fibres can wander; narrower where the stream's width is scarce. */
-const MARGIN = { wide: 56, narrow: 40, below: 560 } as const
-/** The strand's count: how far below the top of what is in sight its swelling's middle stands, how far down it looks for the strand, where it stands with none, and the stream's padding above it, which it stands under until the stream scrolls past. */
-const COUNT = { at: 24, reach: 160, alone: 9, pad: 12 } as const
-/** The count's swelling: a short spindle of the strand's ink, a little off true, as a varicosity on a fibre. */
-const SWELLING = { width: 8, height: 18 } as const
-function swelling(): SVGSVGElement {
-  const { width, height } = SWELLING, box = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-  box.setAttribute('class', 'kbn-ch-count-swelling')
-  box.setAttribute('width', String(width)); box.setAttribute('height', String(height))
-  box.setAttribute('aria-hidden', 'true')
-  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-  const spine = Array.from({ length: 13 }, (_, i): [number, number] => [width / 2 + 0.35 * Math.sin(i / 2.2), (i / 12) * height])
-  path.setAttribute('d', ribbon(spine, u => 0.9 + 3.3 * Math.sin(Math.PI * Math.min(1, u * 1.08)) ** 2.2))
-  box.append(path)
-  return box
-}
+const MARGIN = { wide: 56, narrow: 50, below: 560 } as const
 /** How freely the fibres wander and how heavy their ink is, at each width. */
 const INK = { wide: { chaos: 1.6, weight: 1.15 }, narrow: { chaos: 1, weight: 1.05 } } as const
 /** What stops a worker's run, among a thread's records. */
@@ -292,7 +277,6 @@ export class ChannelsView implements TemporalView {
         this.lastTop = this.stream!.scrollTop
         this.following = this.atFoot()
       }
-      this.placeCount()
       if (!this.painting && this.leavingBand()) this.painting = requestAnimationFrame(() => { this.painting = 0; this.paint() })
     }, { passive: true })
     // What the human sends from here is answered at the stream's foot: a send returns the stream there, wherever it was being read.
@@ -653,13 +637,14 @@ export class ChannelsView implements TemporalView {
       const tube = layTube(entries, heights, { parentOf, grouped, active: line => attentionOf(line.card, waits) === 'working' })
       this.tube = { tube, grouped, margin, taut: tautAlong(tube, entries.map(entry => entry.at), line => runs(line.card), tautness) }
       this.stream.style.setProperty('--kbn-ch-tube', `${margin}px`)
+      this.stream.style.setProperty('--kbn-ch-gutter', `${GUTTER}px`)
       this.running = running
       const count = el('li', 'kbn-ch-count'), label = button('kbn-ch-count-label', '', () => this.bundleMenu())
       label.hidden = !this.running.length
       label.title = this.runningTitle()
       label.setAttribute('aria-label', label.title)
       label.setAttribute('aria-haspopup', 'menu')
-      label.append(swelling(), el('span', 'kbn-ch-count-n', String(this.running.length)))
+      label.append(el('span', 'kbn-ch-count-n', String(this.running.length)))
       count.append(label)
       // The margin's ink, one drawing over the whole stream, laid over the rows once they stand.
       const ink = el('li', 'kbn-ch-margin')
@@ -718,8 +703,6 @@ export class ChannelsView implements TemporalView {
   /** Watches the stream's rows, so a preview that loads or a window that narrows repaints the margin. */
   private rowSizes: ResizeObserver | null = null
   private painting = 0
-  /** Where the strand runs at each height of the last painting, so its count can sit on it. */
-  private strandAt: (y: number) => number | undefined = () => undefined
   private watchRows(): void {
     this.rowSizes ??= new ResizeObserver(() => {
       // A row that grows late (a tapestry found, a figure's proportions read) or a stream that shortens (the console growing, the window) keeps a stream that follows at its foot, unless a file unfolded there is being read.
@@ -768,9 +751,7 @@ export class ChannelsView implements TemporalView {
     })
     performance.measure('kbn-ch-ink', { start: inked })
     holder.replaceChildren(drawn.svg)
-    this.strandAt = drawn.strandAt
     this.band = drawn.band
-    this.placeCount(top)
     // What a painting costs, whole and in its ink alone, for the performance probes to read.
     performance.measure('kbn-ch-margin', { start: began })
   }
@@ -782,20 +763,6 @@ export class ChannelsView implements TemporalView {
     if (!stream) return false
     const screen = stream.clientHeight, [from, to] = this.band
     return (from > 0 && top < from + screen / 2) || (to < stream.scrollHeight - 8 && top + screen > to - screen / 2)
-  }
-  /**
-   * The count's swelling sits on the strand, at the top of what is in sight;
-   * where the strand begins lower, at its first inked point; with no strand
-   * near, at the margin's edge.
-   */
-  private placeCount(top = this.stream?.scrollTop ?? 0): void {
-    const label = this.stream?.querySelector<HTMLElement>(':scope > .kbn-ch-count > .kbn-ch-count-label')
-    if (!label) return
-    const from = top + COUNT.at + Math.max(0, COUNT.pad - top)
-    let x: number | undefined, y = from
-    for (; y <= from + COUNT.reach; y += 4) if ((x = this.strandAt(y)) !== undefined) break
-    label.style.left = `${(x ?? COUNT.alone) - SWELLING.width / 2}px`
-    label.style.top = `${(x === undefined ? 0 : y - from)}px`
   }
   /** A fibre or a mark opens its line's constitution; the strand lists the threads it gathers. */
   private marginClick(event: MouseEvent): void {

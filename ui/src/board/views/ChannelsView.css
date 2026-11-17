@@ -156,7 +156,7 @@
 .kbn-ch-fibre .kbn-ch-fray { opacity: 0.7; }
 .kbn-ch-fibre .kbn-ch-gather { opacity: 0.55; }
 .kbn-ch-knot { fill: var(--kbn-paper); stroke: var(--ink); stroke-width: 0.9; }
-/* The strand: what runs with no fibre of its own here, a few faint fibres under its count. */
+/* The strand: what runs with no fibre of its own here, a few faint fibres. */
 .kbn-ch-strand-ink { fill: color-mix(in srgb, var(--kbn-ink-muted) 55%, transparent); }
 .kbn-ch-hit { fill: none; stroke: transparent; stroke-width: 7; pointer-events: stroke; cursor: pointer; }
 .kbn-ch-hit-mark { fill: transparent; pointer-events: all; cursor: pointer; }
@@ -173,22 +173,16 @@
 .kbn-ch-slug { padding: 0; border: 0; background: none; cursor: pointer; text-align: left; max-width: 100%; min-width: 0; }
 .kbn-ch-slug > .thread-row > .constitution-state-dot { display: none; }
 .kbn-ch-slug .thread-row-slug { font: var(--type-label)/var(--leading-ui) var(--font-sign); }
-/* The strand's count: how many threads run in the channel, written as a label on a plate: a swelling on the strand
-   at the top of what is in sight, and a small numeral in the margin's ink beside it. */
+/* The strand's count: how many threads run in the channel, a small numeral in the margin's ink at the top of what is
+   in sight, standing still in the gutter at the margin's left edge that no ink enters (margin.ts). */
 .kbn-ch-count { position: sticky; top: 0; z-index: 2; height: 0; flex: none; list-style: none; }
 .kbn-ch-count-label {
-  position: absolute; top: 0; left: 0; display: flex; align-items: flex-start; gap: 1px; height: 30px; margin-top: 15px; padding: 0 3px 0 0;
-  border: 0; border-radius: 3px; background: none; cursor: pointer; color: var(--kbn-ink-soft);
+  position: absolute; top: 0; left: 0; width: var(--kbn-ch-gutter); margin-top: 14px; padding: 0;
+  border: 0; border-radius: 3px; background: none; cursor: pointer; color: var(--kbn-ink-soft); text-align: center;
 }
 .kbn-ch-count-label[hidden] { display: none; }
-.kbn-ch-count-swelling { flex: none; fill: var(--kbn-ink-muted); }
-/* The numeral stands clear of the fibres that pass under it, on a breath of the paper. */
-.kbn-ch-count-n {
-  font: italic var(--type-label)/var(--leading-solid) var(--font-serif); font-variant-numeric: oldstyle-nums;
-  text-shadow: 0 0 2px var(--kbn-parchment), 0 0 2px var(--kbn-parchment), 0 0 3px var(--kbn-parchment), 0 0 3px var(--kbn-parchment);
-}
+.kbn-ch-count-n { font: italic var(--type-label)/var(--leading-solid) var(--font-serif); font-variant-numeric: oldstyle-nums; }
 .kbn-ch-count-label:hover, .kbn-ch-count-label:focus-visible { color: var(--kbn-ink); }
-.kbn-ch-count-label:hover > .kbn-ch-count-swelling, .kbn-ch-count-label:focus-visible > .kbn-ch-count-swelling { fill: var(--kbn-ink-soft); }
 
 /* The console, docked under the stream. */
 .kbn-ch > .ws-dock { flex: none; }

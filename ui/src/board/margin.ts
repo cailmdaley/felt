@@ -8,7 +8,8 @@ import { ANCHOR, type Span, type Tube, type TubeLine } from './tube.js'
  * collateral from a fibre down to each post's drop, a cell body at a start
  * (touched by its parent's fibre when it is a sub-thread), a small loop at a
  * handoff, and an arbor, a fray or a taper at an end. Plain SVG paths, drawn
- * once per layout; the drops themselves are the posts' state dots.
+ * once per layout; the drops themselves are the posts' state dots. A gutter
+ * at the margin's left edge holds the strand's count, and no ink enters it.
  */
 
 /** A row as laid out: its entry, whether it groups under the one above, and where it stands. */
@@ -42,6 +43,10 @@ const svg = <K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string,
 }
 /** Sampling step down the stream, in measured pixels. */
 const STEP = 3
+/** The gutter at the margin's left edge that holds the strand's count, a two-digit numeral at label size; no ink enters it. */
+export const GUTTER = 16
+/** Where the fibres and the strand may run across a margin this wide: right of the gutter, left of the posts' drops. */
+export const fibreRoom = (width: number): { left: number; right: number } => ({ left: GUTTER + 2, right: width - 16 })
 
 /**
  * Maps reckoned heights onto measured ones, row by row: each row's top and
@@ -70,17 +75,17 @@ export function measure(tube: Tube, rows: readonly MarginRow[]): { y: (s: number
   return { y: along(S, Y), s: along(Y, S) }
 }
 
-/** The margin drawn, the band it covers, and where its strand is inked at a measured height in that band. */
-export interface Margin { svg: SVGSVGElement; band: readonly [number, number]; strandAt: (y: number) => number | undefined }
+/** The margin drawn and the band it covers. */
+export interface Margin { svg: SVGSVGElement; band: readonly [number, number] }
 
 export function drawMargin(tube: Tube, rows: readonly MarginRow[], height: number, options: MarginOptions): Margin {
   const { width, chaos, weight } = options
   const box = svg('svg', { class: 'kbn-ch-ink', width, height, 'aria-hidden': 'true' })
   const band = [Math.max(0, Math.floor((options.band?.[0] ?? 0) / STEP) * STEP), Math.min(height, options.band?.[1] ?? height)] as const
-  if (!rows.length) return { svg: box, band, strandAt: () => undefined }
+  if (!rows.length) return { svg: box, band }
   const map = measure(tube, rows), drop = width - 7
   const k0 = band[0] / STEP, slices: Slice[] = [], at = (y: number): Slice => slices[Math.max(0, Math.min(slices.length - 1, Math.round(y / STEP) - k0))]
-  const place = field(tube, { left: 5, right: drop - 9, chaos, taut: options.taut })
+  const place = field(tube, { ...fibreRoom(width), chaos, taut: options.taut })
   for (let y = band[0]; y <= band[1] + STEP; y += STEP) slices.push(place(map.s(y)))
   const inBand = (y: number, pad = 0): boolean => y >= band[0] - pad && y <= band[1] + pad
   const xOf = (line: TubeLine, y: number): number | undefined => at(y).lines.get(line)?.x
@@ -107,7 +112,7 @@ export function drawMargin(tube: Tube, rows: readonly MarginRow[], height: numbe
   }
   const rowY = (row: number): number => rows[row].top + Math.min(tube.anchors[row] - tube.tops[row], rows[row].height)
 
-  // The strand: a few faint fibres under its count, breathing around one another, wherever lines are gathered.
+  // The strand: a few faint fibres breathing around one another, wherever lines are gathered.
   {
     const g = svg('g', { class: 'kbn-ch-strand' })
     const breath = Array.from({ length: STRAND_FIBRES }, (_, k) => noise(`strand:${k}`, 40 + k * 17))
@@ -251,7 +256,7 @@ export function drawMargin(tube: Tube, rows: readonly MarginRow[], height: numbe
     g.append(svg('circle', { class: 'kbn-ch-bouton', cx: to[0].toFixed(2), cy: to[1].toFixed(2), r: 1.1 }))
   }
   for (const g of groups.values()) box.append(g)
-  return { svg: box, band, strandAt: y => { const strand = at(y).strand; return strand && strand.p > 0.3 ? strand.x : undefined } }
+  return { svg: box, band }
 }
 
 /** A start: a small body of ink, a short apical wisp above it and two basal ones. */

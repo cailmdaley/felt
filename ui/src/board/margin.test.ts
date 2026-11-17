@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import type { Entry } from './channels.js'
-import { drawMargin, measure, type MarginRow } from './margin.js'
+import { GUTTER, drawMargin, measure, type MarginRow } from './margin.js'
 import { card } from './testFixtures.js'
 import { layTube, rowHeight } from './tube.js'
 
@@ -44,5 +44,31 @@ describe('the margin', () => {
     // Its cell's three wisps, its arbor's three twigs, and the one curve between its start and its end.
     expect(fibre.querySelectorAll('.kbn-ch-twig').length).toBe(7)
     expect(svg.innerHTML).not.toMatch(/NaN|Infinity/)
+  })
+
+  it('leaves the count its gutter: at both margins, however the rows stand and the fibres wander, no ink is drawn at its left edge', () => {
+    const faults: string[] = []
+    for (const width of [56, 50]) {
+      for (let seed = 1; seed <= 12; seed++) {
+        const tube = layTube(entries, heights, { active: line => (line.rank + seed) % 3 === 0 })
+        const rows = laid(heights.map((height, n) => height + ((n * seed * 37) % 5) * 40))
+        const last = rows.at(-1)!
+        const { svg } = drawMargin(tube, rows, last.top + last.height, {
+          width, chaos: 1.6, weight: 1.15, hue: () => '0', taut: (line, s) => (Math.sin(s / (30 + seed) + line.rank) + 1) / 2,
+          title: () => '', gatheredTitle: () => '', markTitle: () => '',
+        })
+        // Every ink path's points (its hover targets are not ink), and every circle's left edge.
+        for (const path of svg.querySelectorAll('path:not(.kbn-ch-hit)')) {
+          const xs = (path.getAttribute('d')!.match(/-?\d+(\.\d+)?/g) ?? []).map(Number).filter((_, k) => k % 2 === 0)
+          const x = Math.min(...xs)
+          if (x < GUTTER) faults.push(`${width}px, seed ${seed}: ${path.getAttribute('class')} at ${x}`)
+        }
+        for (const circle of svg.querySelectorAll('circle:not(.kbn-ch-hit-mark)')) {
+          const x = Number(circle.getAttribute('cx')) - Number(circle.getAttribute('r'))
+          if (x < GUTTER) faults.push(`${width}px, seed ${seed}: ${circle.getAttribute('class')} at ${x}`)
+        }
+      }
+    }
+    expect(faults).toStrictEqual([])
   })
 })

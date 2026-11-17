@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Entry } from './channels.js'
 import { field } from './ink.js'
+import { GUTTER, fibreRoom } from './margin.js'
 import { card } from './testFixtures.js'
 import { FADE_PX, MAX_FIBRES, REACH_PX, WORKING_FIBRES, layTube, runsOf, tautness } from './tube.js'
 
@@ -73,17 +74,33 @@ describe('the fibres', () => {
   }
 
   it('never cross and are never more than a few: across random scenes, at every height, each drawn line lies right of the strand and of every line ranked before it, inside the margin', () => {
-    const faults: string[] = []
+    const faults: string[] = [], { left, right } = fibreRoom(56)
     for (let seed = 1; seed <= 60; seed++) {
       const { entries, heights } = scene(seed)
       const tube = layTube(entries, heights, { active: line => line.rank % 2 === 0 })
-      const place = field(tube, { left: 5, right: 40, chaos: 1.6, taut: (line, s) => (Math.sin(s / 40 + line.rank) + 1) / 2 })
+      const place = field(tube, { left, right, chaos: 1.6, taut: (line, s) => (Math.sin(s / 40 + line.rank) + 1) / 2 })
       for (let s = 0; s <= tube.height; s += 3) {
         const slice = place(s)
         const xs = [...slice.lines].sort(([a], [b]) => a.rank - b.rank || a.id.localeCompare(b.id)).map(([, here]) => here.x)
         const across = slice.strand ? [slice.strand.x, ...xs] : xs
-        if (across.some((x, k) => x < 5 || x > 40 || (k > 0 && x <= across[k - 1]))) faults.push(`seed ${seed} at ${s}: ${across.map(x => x.toFixed(2))}`)
+        if (across.some((x, k) => x < left || x > right || (k > 0 && x <= across[k - 1]))) faults.push(`seed ${seed} at ${s}: ${across.map(x => x.toFixed(2))}`)
         if (tube.spans.filter(span => span.from < s && s < span.to).length > MAX_FIBRES) faults.push(`seed ${seed} at ${s}: more than ${MAX_FIBRES} fibres`)
+      }
+    }
+    expect(faults).toStrictEqual([])
+  })
+
+  it('leave the count its gutter: across random scenes, at both margins, every height, wherever they wander, the strand and each line lie right of it', () => {
+    const faults: string[] = []
+    for (const width of [56, 50]) {
+      for (let seed = 1; seed <= 60; seed++) {
+        const { entries, heights } = scene(seed)
+        const tube = layTube(entries, heights, { active: line => line.rank % 3 === 0 })
+        const place = field(tube, { ...fibreRoom(width), chaos: 1.6, taut: (line, s) => (Math.cos(s / 55 + line.rank) + 1) / 2 })
+        for (let s = 0; s <= tube.height; s += 3) {
+          const slice = place(s), xs = [...slice.strand ? [slice.strand.x] : [], ...[...slice.lines.values()].map(here => here.x)]
+          if (xs.some(x => x < GUTTER)) faults.push(`${width}px, seed ${seed} at ${s}: ${xs.map(x => x.toFixed(2))}`)
+        }
       }
     }
     expect(faults).toStrictEqual([])
@@ -94,7 +111,7 @@ describe('the fibres', () => {
       const { entries, heights } = scene(seed)
       const arriving: Entry = { kind: 'post', id: 'late', card: entries[0].card, at: now, arrived: now, text: '', files: [], waiting: false, line: entries[0].line }
       const before = layTube(entries, heights), after = layTube([...entries, arriving], [...heights, 64])
-      const was = field(before, { left: 5, right: 40, chaos: 1.6 }), is = field(after, { left: 5, right: 40, chaos: 1.6 })
+      const was = field(before, { ...fibreRoom(56), chaos: 1.6 }), is = field(after, { ...fibreRoom(56), chaos: 1.6 })
       for (let s = 0; s < before.height - REACH_PX - 2 * FADE_PX; s += 7) {
         expect([...is(s).lines.values()].map(here => here.x), `seed ${seed} at ${s}`).toStrictEqual([...was(s).lines.values()].map(here => here.x))
       }

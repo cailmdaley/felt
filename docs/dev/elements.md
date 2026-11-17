@@ -23,7 +23,7 @@ The rest are the board's own choices, made to sit with those numbers:
 
 | Measure | Value |
 |---|---|
-| Stream margin (the fine ink, in Slack's avatar column) | 56px on a desktop, 40px below a 560px stream; laid by `tube.ts`, drawn by `margin.ts` |
+| Stream margin (the fine ink, in Slack's avatar column) | 56px on a desktop, 50px below a 560px stream, its left 16px a gutter for the strand's count that no ink enters; laid by `tube.ts`, drawn by `margin.ts` |
 | Post text | `--type-prose` serif, `--leading-prose` |
 | Gap between posts from different threads | 8px; within a group, 2px |
 | A group | consecutive lines from one thread less than 5 minutes apart |
@@ -59,7 +59,7 @@ Densities: **line** (dot, slug, doing and age on one line; the strand's count's 
 
 **Which threads a list shows.** A list of a family's threads shows only what moves: the threads that wait on the human or are working (`attentionOf` in `attention.ts`: `waiting` or `working`), what waits first, each followed by every thread below it that waits on the human (so a quiet thread with a wait below it stands too); a thread with a worker anywhere below it ranks and stands with what works, from the moment that worker starts, and when it is itself quiet the working threads below it are drawn beneath it too, to say why it stands. Everything else is quiet (seats, drafts, rest, standing threads between runs, held launches, closes its orchestrator reviews) and sits behind one "N quiet" fold that opens to the same rows. The constitution view's thread list follows this rule; the Desk's family card lists only the members that wait, and the list from the strand's count names the threads running now.
 
-The count on the strand beside a channel's stream (a swelling on the strand and a small numeral in the margin's ink, as a label on a plate) numbers the threads running there now: those with a live worker (`hasLiveWorker`), each once, whatever the stream holds of their lives, so a standing thread between runs or a draft is not counted and a worker still live after its close is. Its tooltip and its list, from the count or anywhere on the strand, name exactly that set as thread rows, what waits first, the list drawn from the threads as they stand when it opens.
+The strand's count beside a channel's stream (a small numeral in the margin's ink, standing still at the top of what is in sight in the gutter at the margin's left edge) numbers the threads running there now: those with a live worker (`hasLiveWorker`), each once, whatever the stream holds of their lives, so a standing thread between runs or a draft is not counted and a worker still live after its close is. Its tooltip and its list, from the count or anywhere on the strand, name exactly that set as thread rows, what waits first, the list drawn from the threads as they stand when it opens.
 
 ### Post — `post.ts`
 
