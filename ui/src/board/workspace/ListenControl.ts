@@ -229,6 +229,8 @@ export class ListenControl {
         items[(at + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus()
       }
     })
+    // A press on an item leaves the focus where it is: Safari moves it to the nearest focusable ancestor, outside the menu, whose focusout closes the menu before the click lands.
+    menu.addEventListener('mousedown', event => { if ((event.target as Element).closest('button')) event.preventDefault() })
     menu.addEventListener('focusout', event => { if (event.relatedTarget && !this.el.contains(event.relatedTarget as Node)) this.closeMenu() })
     this.el.append(menu)
     this.release = anchorPopover(menu, this.el, { placement: 'below-start' })

@@ -75,3 +75,21 @@ it('holds the board\'s bare keys while open, so a digit cannot switch views bene
   key('Escape')
   expect(keystrokeIsSpokenFor()).toBe(false)
 })
+
+it('a pressed item acts where a press moves focus to the nearest focusable ancestor, as Safari does', () => {
+  // The Channels console: the control sits inside a focusable box, outside any surface that holds focus on a press.
+  const box = document.createElement('div'); box.tabIndex = -1
+  document.body.append(box); box.append(control.el)
+  const press = (target: HTMLElement) => {
+    const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true })
+    if (target.dispatchEvent(down)) (target.closest<HTMLElement>('input, [tabindex]') ?? document.body).focus()
+    if (target.isConnected) target.click()
+  }
+  opener.click()
+  press(items().find(item => item.textContent === 'Stop listening')!)
+  expect(voice.set).toHaveBeenCalledWith({ enabled: false })
+  // The cadence field still takes the focus a press gives it.
+  opener.click()
+  const quiet = menu()!.querySelector<HTMLInputElement>('input[type="number"]')!
+  expect(quiet.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))).toBe(true)
+})
