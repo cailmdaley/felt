@@ -107,7 +107,7 @@ export function drawMargin(tube: Tube, rows: readonly MarginRow[], height: numbe
   }
   const rowY = (row: number): number => rows[row].top + Math.min(tube.anchors[row] - tube.tops[row], rows[row].height)
 
-  // The strand: a few faint fibres under the ringed count, breathing around one another, wherever lines are gathered.
+  // The strand: a few faint fibres under its count, breathing around one another, wherever lines are gathered.
   {
     const g = svg('g', { class: 'kbn-ch-strand' })
     const breath = Array.from({ length: STRAND_FIBRES }, (_, k) => noise(`strand:${k}`, 40 + k * 17))

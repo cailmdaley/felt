@@ -416,7 +416,7 @@ it('draws a post and the running list again when its thread\'s office or slug ch
   ctx.response = board([chair, tsz, moved])
   view.refresh(ctx); await settle()
   expect(item(host, 'beam').querySelector('.kbn-ch-role')?.textContent).toBe('optics')
-  host.querySelector<HTMLButtonElement>('.kbn-ch-count-ring')!.click(); await settle()
+  host.querySelector<HTMLButtonElement>('.kbn-ch-count-label')!.click(); await settle()
   const row = [...document.querySelectorAll<HTMLElement>('[role="menuitem"] .thread-row')].find(each => each.querySelector('.thread-row-slug')!.textContent === 'beam')!
   expect(row.querySelector('.thread-row-role')?.textContent).toBe('optics')
 })
@@ -562,28 +562,28 @@ it('hides a channel and does nothing else: one write, the dismissal, and no life
   expect(asked.filter(([url]) => LIFECYCLE.test(url))).toStrictEqual([])
 })
 
-it('rings the threads with a live worker, what waits first, and lists them as thread rows from the ring; the strand names what it gathers where it is', async () => {
+it('counts the threads with a live worker, what waits first, and lists them as thread rows from the count; the strand names what it gathers where it is', async () => {
   daemon()
   // The mask asks from a live worker and the chair is idle at the end of its turn: both run. The van asks with no worker, and the notes are a draft: neither runs.
   const { host, openFromDesk } = await mount([chair, tsz, { ...mask, ...idle(20) }, beam, van, notes])
-  const ring = host.querySelector<HTMLButtonElement>('.kbn-ch-count-ring')!
-  expect([ring.hidden, ring.textContent, ring.title]).toStrictEqual([false, '4', '4 running: mask, beam, tsz, cmbx'])
+  const count = host.querySelector<HTMLButtonElement>('.kbn-ch-count-label')!
+  expect([count.hidden, count.textContent, count.title]).toStrictEqual([false, '4', '4 running: mask, beam, tsz, cmbx'])
   expect([...host.querySelectorAll('.kbn-ch-gathered > title')].every(title => / gathered here: /.test(title.textContent!))).toBe(true)
-  ring.click(); await settle()
+  count.click(); await settle()
   const rows = [...document.querySelectorAll<HTMLElement>('[role="menuitem"] .thread-row')]
   expect(rows.map(row => [row.querySelector('.thread-row-slug')!.textContent, row.querySelector('.thread-row-doing')!.textContent])).toStrictEqual([['mask', 'Mask at 5σ or 3σ?'], ['beam', 'working'], ['tsz', 'working'], ['cmbx', 'idle']])
   rows[2].click(); await settle(); await settle()
   expect(openFromDesk).toHaveBeenLastCalledWith(tsz)
 })
 
-it('redraws the ring when the threads running change and nothing drawn does', async () => {
+it('redraws the count when the threads running change and nothing drawn does', async () => {
   daemon()
   const { view, ctx, host } = await mount([chair, tsz, beam])
-  expect(host.querySelector('.kbn-ch-count-ring')!.textContent).toBe('3')
+  expect(host.querySelector('.kbn-ch-count-label')!.textContent).toBe('3')
   // The chair's worker stops, its line in the stream unchanged.
   ctx.response = board([{ ...chair, workerState: undefined, runtimePhase: undefined }, tsz, beam])
   view.refresh(ctx); await settle()
-  expect(host.querySelector('.kbn-ch-count-ring')!.textContent).toBe('2')
+  expect(host.querySelector('.kbn-ch-count-label')!.textContent).toBe('2')
 })
 
 it('keeps the head\'s list of the chair\'s files current while it is open, whatever else the head shows', async () => {
@@ -623,7 +623,7 @@ it('lists the running threads as they stand when the list opens, not as the stre
   const { view, ctx, host } = await mount()
   ctx.response = board([chair, tsz, mask, { ...beam, outcome: 'Beam is fitted.', modifiedAt: new Date().toISOString() }, van, notes])
   view.refresh(ctx); await settle()
-  host.querySelector<HTMLButtonElement>('.kbn-ch-count-ring')!.click(); await settle()
+  host.querySelector<HTMLButtonElement>('.kbn-ch-count-label')!.click(); await settle()
   const row = [...document.querySelectorAll<HTMLElement>('[role="menuitem"] .thread-row')].find(each => each.querySelector('.thread-row-slug')!.textContent === 'beam')!
   expect(row.querySelector('.thread-row-doing')!.textContent).toBe('Beam is fitted.')
 })

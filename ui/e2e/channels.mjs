@@ -200,12 +200,12 @@ try {
       // Its ink costs a few milliseconds a painting (about 3 on a laptop); the bound leaves room for a slow runner.
       const inked = await page.evaluate(() => performance.getEntriesByName('kbn-ch-ink').map(each => each.duration))
       assert.ok(inked.length && Math.max(...inked.slice(1)) < 30, `margin paintings took ${inked.map(ms => ms.toFixed(1)).join(', ')}ms`)
-      // The ring counts the threads with a live worker, and its list names exactly them, one thread row each, what waits first:
+      // The count numbers the threads with a live worker, and its list names exactly them, one thread row each, what waits first:
       // not the seats at rest, the standing digest between runs, the draft or the thread put to rest.
-      await page.locator('.kbn-ch-count-ring').click()
+      await page.locator('.kbn-ch-count-label').click()
       await page.waitForFunction(() => document.querySelectorAll('[role="menuitem"]').length > 0)
       const listed = await page.evaluate(() => [...document.querySelectorAll('[role="menuitem"] .thread-row-slug')].map(el => el.textContent))
-      assert.equal(listed.length, Number(await page.locator('.kbn-ch-count-ring').textContent()))
+      assert.equal(listed.length, Number(await page.locator('.kbn-ch-count-label').textContent()))
       assert.deepEqual([...listed].sort(), ['blinding', 'bmodes', 'chains', 'depth', 'east', 'ia', 'paper', 'photoz', 'psf', 'rho', 'shear-2pt', 'unions', 'west'])
       // Each row's age stands apart from its doing, however long the doing runs.
       const gaps = await page.evaluate(() => [...document.querySelectorAll('[role="menuitem"] .thread-row')].map(row => {

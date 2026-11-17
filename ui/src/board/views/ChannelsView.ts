@@ -11,7 +11,7 @@ import {
 } from '../channels.js'
 import { layTube, rowHeight, runsOf, tautness, type Tube, type TubeLine } from '../tube.js'
 import { drawMargin, tautAlong, type MarginRow } from '../margin.js'
-import { random } from '../ink.js'
+import { random, ribbon } from '../ink.js'
 import { lineHue } from '../lineHue.js'
 import { createRailReorder, type RailReorder } from '../channelRail.js'
 import { openActionMenu } from '../conversationMenu.js'
@@ -58,6 +58,21 @@ const DRAWER_PX = 1100
 /** The margin's width: wide on a desktop, where the fibres can wander; narrower where the stream's width is scarce. */
 const MARGIN = { wide: 56, narrow: 40, below: 560 } as const
 /** How freely the fibres wander and how heavy their ink is, at each width. */
+/** The strand's count: how far below the top of what is in sight its swelling's middle stands, how far down it looks for the strand, and where it stands with none. */
+const COUNT = { at: 24, reach: 160, alone: 9 } as const
+/** The count's swelling: a short spindle of the strand's ink, a little off true, as a varicosity on a fibre. */
+const SWELLING = { width: 8, height: 18 } as const
+function swelling(): SVGSVGElement {
+  const { width, height } = SWELLING, box = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  box.setAttribute('class', 'kbn-ch-count-swelling')
+  box.setAttribute('width', String(width)); box.setAttribute('height', String(height))
+  box.setAttribute('aria-hidden', 'true')
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+  const spine = Array.from({ length: 13 }, (_, i): [number, number] => [width / 2 + 0.35 * Math.sin(i / 2.2), (i / 12) * height])
+  path.setAttribute('d', ribbon(spine, u => 0.9 + 3.3 * Math.sin(Math.PI * Math.min(1, u * 1.08)) ** 2.2))
+  box.append(path)
+  return box
+}
 const INK = { wide: { chaos: 1.6, weight: 1.15 }, narrow: { chaos: 1, weight: 1.05 } } as const
 /** What stops a worker's run, among a thread's records. */
 const STOPS = new Set(['handed_off', 'closed', 'rested', 'asked'])
@@ -158,8 +173,8 @@ export class ChannelsView implements TemporalView {
   /**
    * The threads running now in this channel, as the stream was last drawn:
    * each with a live worker ({@link runningIn}), what waits on the human first, then what
-   * works, each by its latest activity. The ring counts them, and it and the
-   * bundle list them.
+   * works, each by its latest activity. The strand's count numbers them, and it and
+   * the strand list them.
    */
   private running: KanbanCard[] = []
   /** The stream follows what arrives while the reader is at its foot. */
@@ -276,7 +291,7 @@ export class ChannelsView implements TemporalView {
       this.lastTop = this.stream!.scrollTop
       if (this.atFoot()) this.following = true
       else if (moved) this.following = false
-      this.placeRing()
+      this.placeCount()
       if (!this.painting && this.leavingBand()) this.painting = requestAnimationFrame(() => { this.painting = 0; this.paint() })
     }, { passive: true })
     this.dock = this.ctx!.workspace!.console({ keepPlace: true })
@@ -623,7 +638,7 @@ export class ChannelsView implements TemporalView {
     // A fibre's tension follows its runs, which can move with no row moving (a relaunch inside a life).
     const runs = this.runs(channel, now, waits)
     const ran = [...new Set(entries.map(entry => entry.card))].map(card => runs(card).map(([from, to]) => [from, to === now ? 'now' : to]))
-    // The ring and its title name the threads running, what waits first, which can change with no entry changing.
+    // The count and its title name the threads running, what waits first, which can change with no entry changing.
     const stream = JSON.stringify([channel.key, failed, said, entries.map(entry => [attentionOf(entry.card, waits), turnOf(entry.card).turn]), leads, wide, margin, ran, running.map(card => [fiberOf(card), attentionOf(card, waits)])])
     if (stream !== this.sigs.stream) {
       this.sigs.stream = stream
@@ -636,12 +651,13 @@ export class ChannelsView implements TemporalView {
       this.tube = { tube, grouped, margin, taut: tautAlong(tube, entries.map(entry => entry.at), line => runs(line.card), tautness) }
       this.stream.style.setProperty('--kbn-ch-tube', `${margin}px`)
       this.running = running
-      const count = el('li', 'kbn-ch-count'), ring = button('kbn-ch-count-ring', String(this.running.length), () => this.bundleMenu())
-      ring.hidden = !this.running.length
-      ring.title = this.runningTitle()
-      ring.setAttribute('aria-label', ring.title)
-      ring.setAttribute('aria-haspopup', 'menu')
-      count.append(ring)
+      const count = el('li', 'kbn-ch-count'), label = button('kbn-ch-count-label', '', () => this.bundleMenu())
+      label.hidden = !this.running.length
+      label.title = this.runningTitle()
+      label.setAttribute('aria-label', label.title)
+      label.setAttribute('aria-haspopup', 'menu')
+      label.append(swelling(), el('span', 'kbn-ch-count-n', String(this.running.length)))
+      count.append(label)
       // The margin's ink, one drawing over the whole stream, laid over the rows once they stand.
       const ink = el('li', 'kbn-ch-margin')
       ink.setAttribute('aria-hidden', 'true')
@@ -699,7 +715,7 @@ export class ChannelsView implements TemporalView {
   /** Watches the stream's rows, so a preview that loads or a window that narrows repaints the margin. */
   private rowSizes: ResizeObserver | null = null
   private painting = 0
-  /** Where the strand runs at each height of the last painting, so the ringed count can sit on it. */
+  /** Where the strand runs at each height of the last painting, so its count can sit on it. */
   private strandAt: (y: number) => number | undefined = () => undefined
   private watchRows(): void {
     this.rowSizes ??= new ResizeObserver(() => {
@@ -751,7 +767,7 @@ export class ChannelsView implements TemporalView {
     holder.replaceChildren(drawn.svg)
     this.strandAt = drawn.strandAt
     this.band = drawn.band
-    this.placeRing(top)
+    this.placeCount(top)
     // What a painting costs, whole and in its ink alone, for the performance probes to read.
     performance.measure('kbn-ch-margin', { start: began })
   }
@@ -764,14 +780,18 @@ export class ChannelsView implements TemporalView {
     const screen = stream.clientHeight, [from, to] = this.band
     return (from > 0 && top < from + screen / 2) || (to < stream.scrollHeight - 8 && top + screen > to - screen / 2)
   }
-  /** The ringed count sits on the strand it counts, at the top of what is in sight. */
-  private placeRing(top = this.stream?.scrollTop ?? 0): void {
-    const ring = this.stream?.querySelector<HTMLElement>(':scope > .kbn-ch-count > .kbn-ch-count-ring')
-    if (!ring) return
-    // Above where the strand begins, the ring stands over its first inked point.
-    let x: number | undefined
-    for (let y = top + 22; x === undefined && y <= top + 182; y += 8) x = this.strandAt(y)
-    ring.style.left = `${Math.max(0, (x ?? 8.5) - 8.5)}px`
+  /**
+   * The count's swelling sits on the strand, at the top of what is in sight;
+   * where the strand begins lower, at its first inked point; with no strand
+   * near, at the margin's edge.
+   */
+  private placeCount(top = this.stream?.scrollTop ?? 0): void {
+    const label = this.stream?.querySelector<HTMLElement>(':scope > .kbn-ch-count > .kbn-ch-count-label')
+    if (!label) return
+    let x: number | undefined, y = top + COUNT.at
+    for (; y <= top + COUNT.at + COUNT.reach; y += 4) if ((x = this.strandAt(y)) !== undefined) break
+    label.style.left = `${(x ?? COUNT.alone) - SWELLING.width / 2}px`
+    label.style.top = `${(x === undefined ? 0 : y - top - COUNT.at)}px`
   }
   /** A fibre or a mark opens its line's constitution; the strand lists the threads it gathers. */
   private marginClick(event: MouseEvent): void {
@@ -818,8 +838,8 @@ export class ChannelsView implements TemporalView {
   }
   /** The threads running now, listed as thread rows: each opens its constitution's view. */
   private bundleMenu(point?: { x: number; y: number }, gathered?: KanbanCard[]): void {
-    // The count's ring is the list's anchor, wherever on the strand it was asked for: focus returns to it.
-    const anchor = this.stream?.querySelector<HTMLElement>(':scope > .kbn-ch-count > .kbn-ch-count-ring')
+    // The count is the list's anchor, wherever on the strand it was asked for: focus returns to it.
+    const anchor = this.stream?.querySelector<HTMLElement>(':scope > .kbn-ch-count > .kbn-ch-count-label')
     const workspace = this.ctx?.workspace, cards = gathered ?? this.running
     if (!cards.length || !anchor || !workspace) return
     // The threads as they stand now, not as the stream last drew them.
