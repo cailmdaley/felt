@@ -41,7 +41,7 @@ export async function sentFiles(page) {
   }
   return sheet.locator('.ws-sent-file')
 }
-/** Back a page: the phone's top bar holds the way back, the selected page's label bar elsewhere. */
+/** The reader's back, one step to the view it was opened from: the phone's top bar holds it, the selected page's label bar elsewhere. */
 export async function pageBack(page) {
   const phone = page.viewportSize().width <= 700
   await page.locator(phone ? '.ws-navbar .ws-return' : '.ws-page.ws-selected .ws-document-back').click()

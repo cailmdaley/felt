@@ -10,7 +10,7 @@ import { registerMapViewJourneys } from './mapViews.mjs'
 import { registerChannelsBackJourneys, registerNavigationJourneys } from './navBack.mjs'
 import { registerLivingReportJourneys } from './livingReport.mjs'
 import { registerHeaderBarJourneys } from './headerBar.mjs'
-import { familySends, familyTree, pageBack, showFile } from './familyNav.mjs'
+import { familySends, familyTree, showFile } from './familyNav.mjs'
 import { registerCapGeometryJourneys } from './capGeometry.mjs'
 import { registerRenderedTypeJourneys } from './renderedType.mjs'
 import { closeVerbMenu, consoleAct, consoleControl, consoleMenu, hitBox, offeredVerbs, openMenu, pressVerb, verbCaret, verbControl, verbFace } from './verbs.mjs'
@@ -192,7 +192,7 @@ async function chooseDeskColumn(p, index) {
 }
 const reportPage = p => p.locator('.ws-page[data-key="umber-workstation:/fixture-store/workspace/.felt/research/workspace/calibration-report/report.html"]')
 const report = p => reportPage(p).locator('iframe')
-/** The report one Back away from the constitution, not the page the reader landed on. */
+/** The report, reached by way of the constitution's page. */
 async function revisitReport(p) {
   await choose(p, 'Constitution'); await choose(p, 'calibration-report')
 }
@@ -312,8 +312,12 @@ test('Pointer, stepping, HTML scrolling, persistent iframe, expansion and resize
   const inner = await reportDocument(p)
   const identity = await inner.evaluate(() => { window.__sentinel = 'kept'; return document.querySelector('#report-identity').textContent })
   await choose(p, 'brief.md')
+  // Escape from any page of the reader is one step to the view it was opened from.
   await appFocus(p); await p.keyboard.press('Escape')
-  assert.equal(await isSelected(p, 'calibration-report'), true)
+  await poll(p, () => !document.querySelector('.kbn-reader-open'))
+  assert.equal(await activeBarView(p), 'desk')
+  await open(p)
+  assert.ok(await iframe.evaluate(f => f === window.__reportFrame && f.contentWindow === window.__reportWindow), 'leaving the reader retains the iframe')
   await choose(p, 'brief.md')
   await choose(p, 'calibration-report')
   await inner.evaluate(() => {
@@ -364,7 +368,7 @@ test('Pointer, stepping, HTML scrolling, persistent iframe, expansion and resize
 })
 
 test('Hostile report keys cannot queue verdicts or open controls; trusted and posted navigation still work', async p => {
-  await open(p); await revisitReport(p); await reportReady(p)
+  await open(p); await reportReady(p)
   const inner = await reportDocument(p)
   const key = await selected(p).getAttribute('data-key')
   const before = (await records(p)).filter(r => r.method === 'POST').length
@@ -387,12 +391,13 @@ test('Hostile report keys cannot queue verdicts or open controls; trusted and po
   assert.equal(await selected(p).getAttribute('data-key'), key, 'untrusted report key events are ignored')
   await p.keyboard.press('ArrowDown')
   await pollReport(p, () => document.scrollingElement.scrollTop > 0)
+  // A trusted Escape, and an Escape the report posts, each close the reader to its view.
   await p.keyboard.press('Escape')
-  await poll(p, key => document.querySelector('.ws-selected')?.dataset.key !== key, key)
-  assert.notEqual(await selected(p).getAttribute('data-key'), key)
-  await choose(p, 'calibration-report')
+  await poll(p, () => !document.querySelector('.kbn-reader-open'))
+  await open(p); await reportReady(p)
+  assert.equal(await selected(p).getAttribute('data-key'), key)
   await inner.evaluate(() => parent.postMessage({ protocol: 'shuttle-document', version: 1, type: 'key', payload: { key: 'Escape' } }, '*'))
-  await poll(p, key => document.querySelector('.ws-selected')?.dataset.key !== key, key)
+  await poll(p, () => !document.querySelector('.kbn-reader-open'))
 })
 
 test('Report reference batches are size-capped and limited to four responses a second', async p => {
@@ -419,7 +424,7 @@ test('Report reference batches are size-capped and limited to four responses a s
   assert.equal(await inner.evaluate(() => window.__referenceResponses), 0)
 })
 
-test('Channel references select from HTML, markdown, plain text and the fiber with coherent history', async p => {
+test('Channel references select from HTML, markdown, plain text and the fiber, and Back leaves the reader in one step', async p => {
   await open(p); await reportReady(p)
   const key = await selected(p).getAttribute('data-key')
   const inner = await reportDocument(p)
@@ -436,9 +441,10 @@ test('Channel references select from HTML, markdown, plain text and the fiber wi
   await selected(p).getByRole('link', { name: 'the report', exact: true }).click()
   await reportReady(p)
   assert.equal(await selected(p).getAttribute('data-key'), key)
+  // Links move inside the reader's one entry: the browser's Back from the second leaves it for the Desk.
   await p.goBack()
-  await poll(p, () => document.querySelector('.ws-selected .ws-label-title')?.textContent === 'Field note')
-  await leave(p)
+  await poll(p, () => !document.querySelector('.kbn-reader-open'))
+  assert.equal(await activeBarView(p), 'desk')
   await open(p)
   await choose(p, 'readme.txt')
   await selected(p).getByRole('link', { name: 'tone.mp3', exact: true }).click()
@@ -714,8 +720,14 @@ test('Desk-opened channel reload and Back restore its Desk origin in the bar', a
   await appFocus(p)
   await p.keyboard.press('j')
   await poll(p, () => document.querySelector('.ws-channel-title')?.title !== 'Calibrate the shear response')
+  const scanned = await p.locator('.ws-channel-title').getAttribute('title')
+  await deskOrigin()
+  // The scan took the reader's one entry: Back is the Desk, and Forward the constitution scanned to.
   await p.goBack()
-  await poll(p, () => document.querySelector('.ws-channel-title')?.title === 'Calibrate the shear response')
+  await poll(p, () => !document.querySelector('.kbn-reader-open'))
+  assert.equal(await activeBarView(p), 'desk')
+  await p.goForward()
+  await poll(p, title => document.querySelector('.ws-channel-title')?.title === title, scanned)
   await deskOrigin()
   await leave(p)
   await poll(p, () => document.querySelectorAll('.ws-page.ws-selected').length === 0)
@@ -833,7 +845,7 @@ test('Receipt arrivals lead the view\'s sent files and leave the open report be'
   // view's sent files, and the open report stays as it was.
   await p.clock.fastForward(60_001)
   await p.evaluate(() => window.__harness.modal.fiberSends.refresh())
-  await pageBack(p)
+  await familyTree(p)
   assert.ok(await report(p).evaluate(f => f.contentWindow === window.__arrivalReport))
   await familySends(p)
   await poll(p, () => document.querySelector('.ws-page.ws-selected')?.getAttribute('data-key')?.endsWith('/brief.md'))
@@ -1642,15 +1654,20 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 390, height: 844 }
   }, viewport)
 }
 
-test('Phone back swipe nests; edges, vertical pans and sideways content keep their touches', async p => {
+test('Phone back swipe from a file returns to the view; edges, vertical pans and sideways content keep their touches', async p => {
+  const left = async () => {
+    await poll(p, () => document.querySelector('.ws-reader')?.classList.contains('ws-dormant'))
+    assert.equal(await activeBarView(p), 'desk')
+  }
   await open(p); await reportReady(p)
   const key = () => selected(p).getAttribute('data-key')
   const original = await key()
   await choose(p, 'brief.md')
-  const nested = await key()
   await swipe(p, 100, 700, 300, 696)
-  await poll(p, original => document.querySelector('.ws-selected')?.dataset.key === original, original)
-  assert.equal(await key(), original, 'a back swipe inside a document returns to its parent report')
+  // From a file opened over the report, as from any page, the back swipe is one step to the view.
+  await left()
+  await open(p); await reportReady(p)
+  assert.equal(await key(), original)
   await poll(p, () => !document.querySelector('.ws-stage').classList.contains('ws-swiping'))
   await swipe(p, 5, 420, 200, 420)
   assert.equal(await key(), original, 'Safari edge-back starts are not claimed')
@@ -1689,11 +1706,11 @@ test('Phone back swipe nests; edges, vertical pans and sideways content keep the
   await swipe(p, 300, box.y + box.height / 2, 100, box.y + box.height / 2)
   assert.equal(await key(), brief, 'a sideways-scrolling markdown table keeps its swipe')
   await swipe(p, 100, box.y + box.height + 60, 300, box.y + box.height + 64)
-  assert.notEqual(await key(), brief, 'board-rendered prose below the table still goes back')
+  await left() // board-rendered prose below the table still goes back
 }, { width: 390, height: 844 })
 
-test('Phone page swipe follows the finger, snaps back short of the threshold and commits past it', async p => {
-  await open(p); await revisitReport(p); await reportReady(p)
+test('Phone page swipe follows the finger, snaps back short of the threshold and past it returns to the view', async p => {
+  await open(p); await reportReady(p)
   await exerciseTrackSettlementWait(p)
   await waitForTrackSettlement(p)
   const original = await selected(p).getAttribute('data-key')
@@ -1716,8 +1733,10 @@ test('Phone page swipe follows the finger, snaps back short of the threshold and
   await touch('touchStart', 80, y)
   for (const x of [90, 140, 200, 260, 310]) { await touch('touchMove', x, y); await p.waitForTimeout(16) }
   await touch('touchEnd')
-  await poll(p, original => document.querySelector('.ws-selected')?.dataset.key !== original, original)
   assert.ok(await p.locator('.ws-stage').evaluate(el => el.classList.contains('ws-swipe-release')), 'the commit settles on the release curve')
+  // Past the threshold the swipe is the reader's back: one step to the view it was opened from.
+  await poll(p, () => document.querySelector('.ws-reader')?.classList.contains('ws-dormant'))
+  assert.equal(await activeBarView(p), 'desk')
   await cdp.detach()
 }, { width: 390, height: 844 }, 'no-preference')
 
