@@ -1,6 +1,5 @@
 # Set up Shuttle
 
-
 **We recommend setting up Shuttle with the agent you already use.**
 Give it the prompt below, let it check your machine and explain the choices, then open the board link it gives you.
 You can use Claude Code, Codex, or pi on macOS or Linux.

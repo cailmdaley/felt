@@ -23,15 +23,14 @@ There is no Windows build.
 
 It also installs felt's integration for supported agent CLIs it finds, including Claude Code and Codex.
 That writes to those agents' configuration folders; `felt uninstall` reverses the integration.
-Homebrew supplies the stable 1.x release rather than this candidate:
+Homebrew installs the same release:
 
 ```sh
 brew install cailmdaley/tap/felt
 ```
 
 For source builds and other installation choices, see the [installation reference](shuttle/installation.md).
-Check your installation with `felt --version`; rerun the pinned installer to reinstall the candidate.
-`felt update` selects the stable channel, so do not use it to update an RC installation.
+Check your installation with `felt --version`, and move to a newer release with `felt update`.
 
 ## Create a store
 
