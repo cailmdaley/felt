@@ -34,6 +34,7 @@ import { DESK_ACTS, keyIntent, type KeyIntent } from './keymap.js'
 import { daemonFetch, isDaemonBooting, postDaemonJson } from './daemonApi.js'
 import { applyTerminalHost, TerminalHostReader } from './hostTerminal.js'
 import { inLane } from './requestLanes.js'
+import { isoDayLocal } from './civilDay.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { hasWorkerToStop } from './KanbanTypes.js'
 import { KanbanSurfaceRenderer, boardCards, threadIndexFor } from './KanbanSurfaces.js'
@@ -951,11 +952,8 @@ export class KanbanModal {
       if (this.compositeEtag) headers.set('If-None-Match', this.compositeEtag)
       const res = await daemonFetch(`${this.shuttleBase}/api/v1/fibers/composite`, { headers })
       if (token !== this.inflightFetchToken) return
-      // An unchanged feed skips the transfer and the parse, not the
-      // classification: cards still move with the clock, and a page that
-      // showed a failure redraws from the feed it already holds.
       if (res.status === 304) {
-        if (this.lastFeed) this.presentFeed(this.lastFeed)
+        if (this.lastFeed) this.presentUnchanged(this.lastFeed)
         return
       }
       if (!res.ok) {
@@ -996,18 +994,42 @@ export class KanbanModal {
     const sig = this.computeResponseSignature(data)
     const wasFirstRender = this.lastResponse === null
     this.lastResponse = data
-    this.readBoard(data)
     if (!wasFirstRender && sig === this.lastResponseSig) {
-      // The Desk skips an identical-payload re-render, but a temporal view
-      // still gets its poll: its content moves with the clock (and with
-      // activity and the ledgers), not only with the fiber feed. The open
-      // card's worker pill crosses its idle threshold on the clock too.
-      this.syncWorkspaceRuntime()
-      this.mountOrRefreshActiveView()
+      this.refreshUnchanged(data)
       return
     }
+    this.readBoard(data)
     this.lastResponseSig = sig
     this.render(data)
+  }
+
+  /**
+   * A 304: the feed is the one already classified, so the poll neither
+   * classifies nor fingerprints it again. Classification reads the clock only
+   * for due-day promotion, so a new local civil day reclassifies, as does a
+   * page showing a failure, whose redraw needs the signature back.
+   */
+  private presentUnchanged(feed: CompositeFeed): void {
+    const data = this.lastResponse
+    if (!data || this.lastResponseSig === null || isoDayLocal(Date.now()) !== isoDayLocal(data.generatedAt)) {
+      this.presentFeed(feed)
+      return
+    }
+    this.lastFetchFailed = false
+    this.daemonBooting = false
+    this.refreshUnchanged(data)
+  }
+
+  /**
+   * A poll whose board is the one drawn: the Desk stays, but what waits on the
+   * human is read again, and the workspace and a temporal view still get the
+   * poll, since their content moves with the clock and the ledgers, not only
+   * with the fiber feed.
+   */
+  private refreshUnchanged(data: KanbanResponse): void {
+    this.readBoard(data)
+    this.syncWorkspaceRuntime()
+    this.mountOrRefreshActiveView()
   }
 
   /**
