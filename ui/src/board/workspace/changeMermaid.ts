@@ -22,24 +22,23 @@ export function drawMermaid(root: HTMLElement): void {
     loading = import('mermaid').then(module => module.default)
     window.addEventListener(APPEARANCE_CHANGED, () => {
       for (const figure of figures.keys()) if (!figure.isConnected) figures.delete(figure)
-      void draw([...figures.keys()])
+      void draw([...figures])
     })
   }
   void draw(fences.map(fence => {
-    const figure = document.createElement('figure')
+    const figure = document.createElement('figure'), source = fence.textContent ?? ''
     figure.className = 'change-mermaid'
-    figures.set(figure, fence.textContent ?? '')
+    figures.set(figure, source)
     fence.replaceWith(figure)
-    return figure
+    return [figure, source]
   }))
 }
 
-async function draw(targets: HTMLElement[]): Promise<void> {
+async function draw(targets: Array<[HTMLElement, string]>): Promise<void> {
   if (!targets.length) return
   const mermaid = await loading!
-  mermaid.initialize(config(targets[0].isConnected ? targets[0] : document.documentElement))
-  for (const figure of targets) {
-    const source = figures.get(figure) ?? ''
+  mermaid.initialize(config(targets[0][0].isConnected ? targets[0][0] : document.documentElement))
+  for (const [figure, source] of targets) {
     try {
       figure.innerHTML = (await mermaid.render(`change-mermaid-${++drawn}`, source)).svg
     } catch {

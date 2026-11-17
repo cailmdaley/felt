@@ -136,6 +136,10 @@ it('loads what is on screen first, keeps a live one through a short scroll away,
   pumpThumbnails()
   // On screen (0, 1) and within the ring (2, whose top is 0px below; 3 at 300px) load; the rest wait.
   expect(states()).toBe('lllliiiiiiii')
+  // Still loading and scrolled out of the ring, a load gives its slot to what is near.
+  scrolled = 1500; pumpThumbnails()
+  expect(thumbs.slice(0, 3).map(t => t.state)).toStrictEqual(['idle', 'idle', 'idle'])
+  scrolled = 0; pumpThumbnails()
   renderer.finishes.splice(0).forEach(f => f()); pumpThumbnails()
   expect(states()).toBe('lllliiiiiiii')
   // A short scroll down: 0 and 1 are within the keep ring and stay live; 4 and 5 come near and load.
