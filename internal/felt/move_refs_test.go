@@ -686,3 +686,21 @@ func TestMoveSubtreeCarriesRefShapedFileLinksOfAMovedFiber(t *testing.T) {
 		}
 	}
 }
+
+// A moved fiber's link to a fiber whose path also exists on disk stays a fiber
+// reference, and an unresolved one that reaches nothing stays as written.
+func TestMoveSubtreeLeavesFiberAndMissingRefShapedLinksOfAMovedFiber(t *testing.T) {
+	t.Parallel()
+	_, s := newStore(t)
+	for _, id := range []string{"a", "a/sib", "a/deep"} {
+		writeFiberFile(t, s, id, fiber("F", ""))
+	}
+	b := fiber("B", "[t](../sib) [n](../../../nope)")
+	writeFiberFile(t, s, "a/b", b)
+	if _, err := s.MoveSubtree("a/b", "a/deep/b"); err != nil {
+		t.Fatalf("MoveSubtree: %v", err)
+	}
+	if got := readFiberFile(t, s, "a/deep/b"); got != b {
+		t.Fatalf("b after move:\n%s\nwant:\n%s", got, b)
+	}
+}
