@@ -1,4 +1,4 @@
-/* A thread row: dot, slug, office, what it is doing, when it last spoke; one line, the doing cut with an ellipsis. */
+/* A thread row: dot, slug, what it is doing, how long ago it said so; one line, the doing cut with an ellipsis. A chip is dot, slug and office. */
 .thread-row {
   display: flex; align-items: baseline; gap: 8px; min-width: 0;
   font: var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--ws-ink-soft);
@@ -11,3 +11,13 @@
 .thread-row[data-attention='quiet'] .thread-row-doing { color: var(--ws-ink-muted); }
 /* The age stands apart from the doing, however far the doing runs. */
 .thread-row-age { flex: none; margin-left: auto; padding-left: 8px; }
+
+/* A list of thread rows begins every doing on one column and ends every age on another: the dot and the slug share
+   the first column, as wide as the longest slug with its indent (--thread-indent, a thread listed under another) and
+   never more than 45% of the list, past which a slug wraps. */
+.thread-rows { display: grid; grid-template-columns: fit-content(45%) minmax(0, 1fr) auto; column-gap: 8px; }
+.thread-rows > li { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; }
+.thread-rows .thread-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; }
+.thread-rows .thread-row > .constitution-state-dot { grid-area: 1 / 1; margin-left: var(--thread-indent, 0px); }
+.thread-rows .thread-row-slug { grid-area: 1 / 1; padding-left: calc(var(--thread-dot, 14px) + 8px + var(--thread-indent, 0px)); }
+.thread-rows .thread-row-age { margin-left: 0; justify-self: end; }

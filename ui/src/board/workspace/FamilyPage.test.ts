@@ -8,7 +8,7 @@ import { disposeFileViewer, resumeFileViewer, suspendFileViewer } from '../FileV
 import { FamilyPage, type ViewFeeds } from './FamilyPage.js'
 import { lastActive } from '../attention.js'
 import { instantStamp } from '../civilDay.js'
-import { relative } from '../elements/time.js'
+import { brief } from '../elements/time.js'
 import { Dock } from './Dock.js'
 import { leadVerb, lifecycleVerbsFor, verbSpec } from './lifecycleVerbs.js'
 import { offeredVerbs } from './testActs.js'
@@ -53,10 +53,10 @@ describe('a constitution\'s view', () => {
     expect(page.el.querySelector('.ov-name')!.textContent).toBe('hub')
     // Quiet, its head is timed from when it last moved, in the elements' one grammar, the instant in full on hover.
     const time = page.el.querySelector<HTMLElement>('.ov-head .ov-time')!
-    expect([time.classList.contains('el-time'), time.textContent, time.title]).toStrictEqual([true, relative(lastActive(root), now), instantStamp(lastActive(root))])
+    expect([time.classList.contains('el-time'), time.textContent, time.title]).toStrictEqual([true, brief(lastActive(root), now), instantStamp(lastActive(root))])
     // Working with nothing said, it is timed from its launch.
     const launched = made(card({ ...mid, id: 'solo', orchestrator: undefined, outcome: undefined, dispatchedAt: when(5) }), { said: () => undefined }).page
-    expect(launched.el.querySelector('.ov-head .ov-time')!.textContent).toBe('5h ago')
+    expect(launched.el.querySelector('.ov-head .ov-time')!.textContent).toBe('5h')
     expect(page.el.querySelector('.ov-needs')).toBeNull()
     // Each says what it is doing: what it asks, else the newer of what it last said and its outcome, else its turn. The tempered thread stands behind the quiet control.
     expect(threads(page)).toStrictEqual([['q', 'Which one?'], ['w', 'Needs a look'], ['mid', 'Posted the cut.']])
@@ -76,7 +76,7 @@ describe('a constitution\'s view', () => {
     // An outcome written after its last post is what it says.
     const rewrote = made(root, {}, cards.map(each => each === mid ? { ...mid, modifiedAt: new Date(now - 60_000).toISOString() } : each)).page
     const row = rewrote.el.querySelector<HTMLElement>('.ov-thread[data-fiber="hub/mid"]')!
-    expect([row.querySelector('.thread-row-doing')!.textContent, row.querySelector('.thread-row-age')!.textContent, row.title]).toStrictEqual(['Mid came to this.', '1m ago', 'Mid — Mid came to this.'])
+    expect([row.querySelector('.thread-row-doing')!.textContent, row.querySelector('.thread-row-age')!.textContent, row.title]).toStrictEqual(['Mid came to this.', '1m', 'Mid — Mid came to this.'])
     // Only its own threads: the leaf is mid's.
     expect(page.el.textContent).not.toContain('Leaf')
   })

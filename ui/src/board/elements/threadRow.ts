@@ -16,7 +16,7 @@ const el = (tag: string, className: string, text?: string): HTMLElement => {
   return node
 }
 
-/** How much of a thread row shows: all of it on one line, or its dot, slug and role where its doing is shown beside it. */
+/** How much of a thread row shows: its dot, slug, doing and age on one line, or its dot, slug and office where its doing is shown beside it. */
 export type ThreadDensity = 'line' | 'chip'
 
 export interface ThreadRowOptions {
@@ -60,10 +60,11 @@ export function doing(card: KanbanCard, waits: Waits, said?: { text: string; at:
 
 /**
  * A constitution or thread as one row, the same wherever the board lists
- * one: its state dot, its slug (in its line's colour where it has one), its
- * office when that is not its slug, what it is doing and when that was said;
- * the doing's whole text is its tooltip.
- * The chip density keeps the dot, slug and office.
+ * one: its state dot, its slug (in its line's colour where it has one), what
+ * it is doing and how long ago that was said; its tooltip names it, its
+ * office when that is not its slug, and the doing's whole text. The chip
+ * density draws the dot, the slug and the office. Rows in a `.thread-rows`
+ * list begin their doings on one column (threadRow.css).
  */
 export function threadRow(card: KanbanCard, { waits, now, density = 'line', said, open, hue }: ThreadRowOptions): HTMLElement {
   const row = el('div', 'thread-row')
@@ -74,12 +75,12 @@ export function threadRow(card: KanbanCard, { waits, now, density = 'line', said
   row.title = card.name
   const name = slug(card), office = officeOf(card.shuttleRole)
   row.append(open ? stateDot(card, waits, open) : stateMark(card, waits), el('span', 'thread-row-slug', name))
-  if (office && office !== name) row.append(el('span', 'thread-row-role', office))
+  const role = office && office !== name ? office : ''
   if (density === 'line') {
     const { text, at } = doing(card, waits, said)
-    row.title = `${card.name} — ${text}`
-    row.append(el('span', 'thread-row-doing', text), timeEl(at, now, 'thread-row-age'))
-  }
+    row.title = `${card.name}${role ? ` (${role})` : ''} — ${text}`
+    row.append(el('span', 'thread-row-doing', text), timeEl(at, now, 'thread-row-age', true))
+  } else if (role) row.append(el('span', 'thread-row-role', role))
   if (open) row.addEventListener('click', () => open(card))
   return row
 }

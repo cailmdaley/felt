@@ -356,7 +356,23 @@ try {
     await page.locator('.kbn-ch-stream').getByText('The joint fit has started.').waitFor()
     await page.waitForTimeout(300)
     assert.ok(await fromFoot() > 250, 'a reader who scrolled up is not brought back to the foot')
+    // The chair's view lists its threads as rows of slug, doing and age: every doing begins on one column, a thread
+    // listed under another indented before it, and an age is said without "ago", the head's too.
+    await pick(page, 'unions').click()
+    await page.locator('.kbn-ch-item[data-fiber="pando/unions"] .kbn-ch-who').last().click()
+    await page.locator('.ws-selected .ov-threads .thread-row').first().waitFor()
+    const rows = await page.locator('.ws-selected .ov-threads .thread-row').evaluateAll(rows => rows.map(row => ({
+      deep: row.classList.contains('ov-deep'), parts: [...row.children].map(part => part.className.split(' ')[0]),
+      dot: row.querySelector('.constitution-state-dot').getBoundingClientRect().left, slug: row.querySelector('.thread-row-slug').getBoundingClientRect(),
+      doing: row.querySelector('.thread-row-doing').getBoundingClientRect().left, age: row.querySelector('.thread-row-age').textContent,
+    })))
+    assert.ok(rows.length > 3 && rows.some(row => row.deep))
+    assert.deepEqual([...new Set(rows.map(row => Math.round(row.doing)))].length, 1, 'every doing begins on one column')
+    assert.ok(rows.every(row => row.doing >= row.slug.right), 'no slug runs into its doing')
+    assert.ok(rows.every(row => row.deep === (row.dot > rows[0].dot)), 'a thread under another is indented')
+    assert.deepEqual(rows[0].parts, ['constitution-state-dot', 'thread-row-slug', 'thread-row-doing', 'el-time'])
+    assert.ok([...rows.map(row => row.age), await page.locator('.ws-selected .ov-head .ov-time').textContent()].every(age => /^(now|\d+[mhd])$/.test(age)))
     await context.close()
-    console.log('Channels foot: a stream that follows keeps its foot through late rows, a growing console and Rex; a reader who scrolled up stays')
+    console.log('Channels foot: a stream that follows keeps its foot through late rows, a growing console and Rex; a reader who scrolled up stays; a view\'s thread rows on one column')
   }
 } finally { await browser.close() }

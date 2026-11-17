@@ -125,6 +125,7 @@ export class FamilyPage {
     })
     this.unfold.el.classList.add('ov-unfold')
     this.threads.setAttribute('aria-label', 'Threads')
+    this.threads.classList.add('thread-rows')
     this.quiet.type = 'button'
     this.quiet.title = 'Quiet threads: seats, drafts, rest, standing threads between runs, closes'
     this.quiet.addEventListener('click', () => {
@@ -308,7 +309,7 @@ export class FamilyPage {
     head.dataset.hue = lineHue(card)
     this.name.textContent = slug(card)
     const waits = this.feeds.waits(), want = wantOf(card, waits), faint = attentionOf(card, waits) === 'quiet' ? quietWord(card) : ''
-    this.facts.replaceChildren(...want && WANT_WORD[want.kind] ? [el('span', 'ov-needs', WANT_WORD[want.kind])] : faint ? [el('span', 'ov-word', faint)] : [], timeEl(doing(card, waits, this.feeds.said(card)).at, now, 'ov-time'))
+    this.facts.replaceChildren(...want && WANT_WORD[want.kind] ? [el('span', 'ov-needs', WANT_WORD[want.kind])] : faint ? [el('span', 'ov-word', faint)] : [], timeEl(doing(card, waits, this.feeds.said(card)).at, now, 'ov-time', true))
     // Its pages are drawn again, the one in focus keeping it; while a list hangs from one, whose focus returns there, they only read their files again.
     if (!this.docs.el.querySelector('[aria-expanded="true"]')) {
       const part = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.ws-doc-button')
