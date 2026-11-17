@@ -754,11 +754,12 @@ export class ChannelsView implements TemporalView {
     if (!ctx) return
     const row = done.closest('.kbn-ch-item'), held = row?.contains(document.activeElement)
     const next = [...this.stream?.querySelectorAll<HTMLElement>(':scope > .kbn-ch-item') ?? []]
-    const after = next[next.indexOf(row as HTMLElement) + 1] ?? next[next.indexOf(row as HTMLElement) - 1]
+    const after = (next[next.indexOf(row as HTMLElement) + 1] ?? next[next.indexOf(row as HTMLElement) - 1])?.querySelector<HTMLElement>('[data-item]')?.dataset.item
     const key = clearLineKey(item.id, Date.now()), fiber = fiberOf(item.card), waits = item.clears
     this.pending.push(key)
     this.draw()
-    if (held) after?.querySelector<HTMLElement>('[data-item]')?.focus({ preventScroll: true })
+    // The line after it may be drawn anew (ungrouped, it takes a head): it is found again by its id.
+    if (held && after) this.stream?.querySelector<HTMLElement>(`[data-item="${CSS.escape(after)}"]`)?.focus({ preventScroll: true })
     let cleared: number | undefined
     try {
       ;[, cleared] = await Promise.all([

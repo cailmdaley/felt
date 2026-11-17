@@ -509,6 +509,22 @@ it('clears a line that waits on no one from the stream, with e as with its ✓, 
   expect(item(host, 'tsz')).toBeDefined()
 })
 
+it('keeps the keys going after a clear: the line after it takes the focus, found again when it is drawn anew', async () => {
+  const human = { label: 'Sam' }
+  // Two posts of the chair's a minute apart: the second is grouped under the first, and takes a head once the first leaves.
+  daemon([], undefined, {}, { board: { C: [...BOARD.C, record({ id: 'g1', kind: 'post', fiber: 'C', to: human, text: 'First.' }, 8), record({ id: 'g2', kind: 'post', fiber: 'C', to: human, text: 'Second.' }, 7)] } })
+  const { view, host } = await mount([chair, tsz, beam])
+  const second = host.querySelector<HTMLElement>('[data-item="item:g2"]')!.closest<HTMLElement>('.kbn-ch-item')!
+  expect(second.hasAttribute('data-grouped')).toBe(true)
+  host.querySelector<HTMLElement>('[data-item="item:g1"]')!.focus()
+  expect(view.keydown(new KeyboardEvent('keydown', { key: 'e' }))).toBe(true)
+  await settle(); await settle()
+  const now = host.querySelector<HTMLElement>('[data-item="item:g2"]')!
+  expect(now.closest('.kbn-ch-item')!.hasAttribute('data-grouped')).toBe(false)
+  expect(document.activeElement).toBe(now)
+  expect(now.isConnected).toBe(true)
+})
+
 it('hides a channel and does nothing else: one write, the dismissal, and no lifecycle request', async () => {
   daemon()
   const { host } = await mount()
