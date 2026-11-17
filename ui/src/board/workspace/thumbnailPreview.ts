@@ -72,7 +72,10 @@ export function buildThumbnailPreview(source: string, keepMedia = false): string
   })
   html = html.replace(/(<svg\b[^>]*>)[\s\S]*?<\/svg\s*>/gi, (svg, opening: string) =>
     large(svg, `${opening}<rect width="100%" height="100%" fill="currentColor" opacity=".12"/></svg>`))
-  return cut(html).replace(/\u0000\d*$/, '').replace(TOKEN, (_, index: string) => kept[Number(index)])
+  // A token the cut split is dropped, a whole one at the end kept; a kept image inside a kept SVG holds its own token: restore until none is left.
+  let preview = cut(html).replace(/(?<!\u0000\d+)\u0000\d*$/, ''), before = ''
+  while (preview !== before) { before = preview; preview = preview.replace(TOKEN, (_, index: string) => kept[Number(index)]) }
+  return preview
 }
 
 /** Keep the head's styles and the first screen's structure, not the rest of a report. */
@@ -92,21 +95,32 @@ function cut(html: string): string {
   return head + body[0] + html.slice(start, start + PREVIEW_LIMIT)
 }
 
-/** Cache only previews, one revision per owner-routed resource, with bounded retention. */
+/** Cache only previews, one revision per owner-routed resource, within a byte budget, the least recently used leaving first. */
 export class ThumbnailPreviewCache {
   private readonly entries = new Map<string, { etag: string; html: string }>()
-  private readonly capacity: number
-  constructor(capacity = 128) { this.capacity = capacity }
+  private readonly budget: number
+  private bytes = 0
+  /** `budget` in bytes, a string's UTF-16 code units at two each: a larger preview keeps its media whole, so its count alone bounds nothing. */
+  constructor(budget = 4 * 1024 * 1024) { this.budget = budget }
   /** A resource's preview, for a thumbnail or (`keepMedia`) a larger preview: one entry each. */
   get(src: string, source: string, etag?: string, keepMedia = false): string {
     const key = keepMedia ? `keep:${src}` : src
     const prior = this.entries.get(key)
-    if (provesContent(etag) && prior?.etag === etag) return prior.html
+    if (provesContent(etag) && prior?.etag === etag) {
+      this.entries.delete(key)
+      this.entries.set(key, prior)
+      return prior.html
+    }
     const html = buildThumbnailPreview(source, keepMedia)
     if (provesContent(etag)) {
-      this.entries.delete(key)
+      if (prior) { this.entries.delete(key); this.bytes -= prior.html.length * 2 }
       this.entries.set(key, { etag, html })
-      if (this.entries.size > this.capacity) this.entries.delete(this.entries.keys().next().value!)
+      this.bytes += html.length * 2
+      for (const [oldest, entry] of this.entries) {
+        if (this.bytes <= this.budget) break
+        this.entries.delete(oldest)
+        this.bytes -= entry.html.length * 2
+      }
     }
     return html
   }

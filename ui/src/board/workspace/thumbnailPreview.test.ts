@@ -40,8 +40,9 @@ it('caps the body while keeping the head and bounded output for fragments', () =
   expect(preview).toContain('<style>h1{color:red}</style>')
   expect(preview.length).toBeLessThan(PREVIEW_LIMIT * 2)
 })
-it('reuses previews by resource and etag, invalidates changed revisions, and bounds retention', () => {
-  const cache = new ThumbnailPreviewCache(2)
+it('reuses previews by resource and etag, invalidates changed revisions, and bounds retention by bytes', () => {
+  // Room for 11 characters: '<h1>B</h1>' and one of 'b' or 'c'.
+  const cache = new ThumbnailPreviewCache(22)
   expect(cache.get('a', '<h1>A</h1>', '1')).toBe('<h1>A</h1>')
   expect(cache.get('a', 'not processed', '1')).toBe('<h1>A</h1>')
   expect(cache.get('a', '<h1>B</h1>', '2')).toBe('<h1>B</h1>')
@@ -66,4 +67,26 @@ it('caches a thumbnail and a larger preview of one resource apart', () => {
   const page = `<body><img src="data:image/png;base64,${'A'.repeat(20 * 1024)}">`
   expect(cache.get('/a', page, '"v1"')).not.toBe(cache.get('/a', page, '"v1"', true))
   expect(cache.get('/a', page, '"v1"', true)).toContain('AAAA')
+})
+
+it('evicts by size, the least recently used first, and keeps nothing larger than its budget', () => {
+  const cache = new ThumbnailPreviewCache(2 * 30)
+  cache.get('a', 'a'.repeat(10), '1'); cache.get('b', 'b'.repeat(10), '1'); cache.get('c', 'c'.repeat(10), '1')
+  // Read again, a is the most recently used; a larger d pushes out b, then c.
+  expect(cache.get('a', 'stale', '1')).toBe('a'.repeat(10))
+  cache.get('d', 'd'.repeat(20), '1')
+  expect([cache.get('d', 'x', '1'), cache.get('a', 'x', '1'), cache.get('b', 'x', '1')]).toStrictEqual(['d'.repeat(20), 'a'.repeat(10), 'x'])
+  expect(cache.get('huge', 'h'.repeat(40), '1')).toBe('h'.repeat(40))
+  expect(cache.get('huge', 'again', '1')).toBe('again')
+})
+
+it('restores a large image kept inside a large SVG, leaving no token behind', () => {
+  const image = `data:image/png;base64,${'A'.repeat(20 * 1024)}`
+  const svg = `<svg viewBox="0 0 10 10"><image href="${image}"/>${'<circle r="1"/>'.repeat(1200)}</svg>`
+  // Last in the page, its token ends the cut markup and is kept whole.
+  const kept = buildThumbnailPreview(`<body><h1>Plot</h1>${svg}`, true)
+  expect([kept.includes(svg), kept.includes('\u0000')]).toStrictEqual([true, false])
+  // Cut through the middle of a token, the half token is dropped.
+  const cutThrough = buildThumbnailPreview(`<body>${'x'.repeat(PREVIEW_LIMIT - 2)}${svg}`, true)
+  expect([cutThrough.includes('\u0000'), cutThrough.includes('<svg')]).toStrictEqual([false, false])
 })
