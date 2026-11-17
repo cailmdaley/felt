@@ -172,7 +172,8 @@ async function openScenario(name, query, openCard) {
       await window.__harness.modal.fetchAndRender()
       return {
         revisionChanged: window.__harness.modal.workspace.lastUpdateRevision !== previousRevision,
-        titleUpdated: document.querySelector('.ws-stage-band .ws-band-title')?.textContent?.includes('live update') ?? false,
+        // The band writes the fiber as its slug and carries its name as the tooltip.
+        titleUpdated: document.querySelector('.ws-stage-band .ws-band-title')?.getAttribute('title')?.includes('live update') ?? false,
       }
     }, before.revision)
   }
@@ -287,7 +288,7 @@ for (const [name, scenario] of Object.entries(result.scenarios)) {
   assert.equal(tick.cards, scenario.initial.cards, `${name}: card count stays constant`)
   if (scenario.changedCardRefresh) {
     assert.equal(scenario.changedCardRefresh.revisionChanged, true, `${name}: changed card payload reaches the workspace`)
-    assert.equal(scenario.changedCardRefresh.titleUpdated, true, `${name}: changed title appears in the band`)
+    assert.equal(scenario.changedCardRefresh.titleUpdated, true, `${name}: changed name reaches the band's tooltip`)
   }
   assert.ok(tick.retainedHeapGrowthBytes < 12 * 1024 * 1024, `${name}: one simulated hour retains less than 12 MiB after GC`)
   assert.equal(tick.jsonParseCount, 0, `${name}: unchanged board snapshots parse no JSON`)
