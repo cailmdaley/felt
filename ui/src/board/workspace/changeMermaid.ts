@@ -16,6 +16,8 @@ const figures = new Map<HTMLElement, string>()
 export function drawMermaid(root: HTMLElement): void {
   const fences = [...root.querySelectorAll<HTMLElement>('pre.language-mermaid')]
   if (!fences.length) return
+  // Only figures still on a page are kept for redrawing, so a page left lets go of its own.
+  for (const figure of figures.keys()) if (!figure.isConnected) figures.delete(figure)
   if (!loading) {
     loading = import('mermaid').then(module => module.default)
     window.addEventListener(APPEARANCE_CHANGED, () => {

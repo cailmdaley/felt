@@ -763,3 +763,14 @@ it('names in its ✓ a send brought back on another device, though the item draw
   await settle(); await settle()
   expect(posts.map(([, body]) => String(body.key).replace(/^line:\d+:/, ''))).toContain(id)
 })
+
+it('keeps one file unfolded in the stream: unfolding another folds the first', async () => {
+  const human = { label: 'Sam' }
+  daemon([], undefined, {}, { board: { C: [...BOARD.C, record({ id: 'b5', kind: 'post', fiber: 'C', to: human, text: 'Two calls for you today.', files: ['/w/tsz/deck.html'] }, 4)] }, waiting: { C: { id: 'b5', at: Date.now() - 4 * minute } } })
+  const { host } = await mount([chair, tsz, beam])
+  const unfolded = () => [...host.querySelectorAll<HTMLElement>('.kbn-ch-previews[data-unfolded]')].map(previews => previews.closest<HTMLElement>('[data-slug]')!.dataset.slug)
+  item(host, 'tsz').querySelector<HTMLButtonElement>('.uf-card')!.click()
+  expect(unfolded()).toStrictEqual(['tsz'])
+  item(host, 'cmbx').querySelector<HTMLButtonElement>('.uf-card')!.click()
+  expect(unfolded()).toStrictEqual(['cmbx'])
+})

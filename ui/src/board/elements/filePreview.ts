@@ -62,6 +62,8 @@ export interface UnfoldOptions {
   awake?(): boolean
   /** A file unfolded, a deliberate look at it. */
   seen?(key: DocKey): void
+  /** Called as a file unfolds, before it takes the keys: a page that keeps one file unfolded at a time folds the others here. */
+  opening?(): void
   /** Opens the file in the board's full file viewer, whose way back returns here; without it the bar offers no full screen. */
   full?(key: DocKey): void
 }
@@ -242,6 +244,7 @@ export class Unfold {
     const file = this.files.find(each => each.key === key), parsed = parseDocKey(key)
     if (!file || !parsed) return
     if (this.open?.key === key) return
+    this.opts.opening?.()
     this.drop()
     const kind = documentKind(parsed.path)
     const viewer = buildFileViewer(this.opts.shuttleBase, parsed.path, parsed.owner, undefined, undefined, {

@@ -696,6 +696,9 @@ export class ChannelsView implements TemporalView {
   private strandAt: (y: number) => number | undefined = () => undefined
   private watchRows(): void {
     this.rowSizes ??= new ResizeObserver(() => {
+      // A row that grows late (a tapestry found, a figure's proportions read) keeps a stream that follows at its foot, unless a file unfolded there is being read.
+      const stream = this.stream
+      if (stream && this.following && !stream.querySelector('[data-unfolded]')) stream.scrollTop = stream.scrollHeight
       if (this.painting) return
       this.painting = requestAnimationFrame(() => { this.painting = 0; this.paint() })
     })
@@ -957,6 +960,7 @@ export class ChannelsView implements TemporalView {
         shuttleBase: this.ctx?.shuttleBase ?? '', awake: () => !this.ctx?.workspace?.isActive && !!this.stream?.isConnected,
         // Full screen opens the file in the reader; its way back returns to this item, the file still unfolded.
         full: key => this.openPage(id, card, key),
+        opening: () => this.foldOthers(id),
       }), files: [],
     }).get(id)!
     const files = item.files.map((file): UnfoldFile => {
@@ -1009,6 +1013,18 @@ export class ChannelsView implements TemporalView {
     const made = this.unfolds.get(id)
     made?.unfold.unfold(lead.key)
     made?.unfold.el.scrollIntoView({ block: 'start' })
+  }
+  /**
+   * One file unfolded in the stream at a time: an unfolded file is a live
+   * page, polled while it shows. The others fold without moving what the
+   * human is looking at, whatever a fold above it takes out of the stream.
+   */
+  private foldOthers(id: string): void {
+    const others = [...this.unfolds].filter(([other, { unfold }]) => other !== id && unfold.unfolded)
+    if (!others.length) return
+    const here = this.unfolds.get(id)?.unfold.el, top = here?.getBoundingClientRect().top
+    for (const [, { unfold }] of others) unfold.fold(false)
+    if (here && top !== undefined && this.stream) this.stream.scrollTop += here.getBoundingClientRect().top - top
   }
   /** Lets go of the previews the stream no longer draws. */
   private sweep(wanted: ReadonlySet<string>): void {
