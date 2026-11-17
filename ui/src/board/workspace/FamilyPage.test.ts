@@ -97,6 +97,13 @@ describe('a constitution\'s view', () => {
     expect([...page.el.querySelectorAll<HTMLElement>('.ov-thread')].slice(5).every(row => row.classList.contains('thread-row') && row.dataset.attention === 'quiet')).toBe(true)
   })
 
+  it('keeps a quiet thread in the list while a worker below it is working, so a working grandchild is never folded out of sight', () => {
+    const quietParent = card({ id: 'hub/qp', name: 'Quiet parent', orchestrator: 'hub', status: 'open', column: 'drafts', createdAt: when(30) })
+    const working = card({ id: 'hub/qp/run', name: 'Running', orchestrator: 'hub/qp', status: 'active', createdAt: when(10), workerState: 'running', runtimePhase: 'working', sessionUuid: 'session-run' })
+    const { page } = made(root, {}, [...cards, quietParent, working])
+    expect(threads(page).map(([name]) => name)).toContain('qp')
+    expect(page.el.querySelector('.ov-quiet')!.textContent).toBe('1 quiet')
+  })
   it('says what it last posted, then its tapestry at full width, which unfolds in place and steps on through its sent files; its head opens its pages', async () => {
     const { page, feeds } = made(mid)
     await settle()

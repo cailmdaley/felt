@@ -178,9 +178,12 @@ export class FamilyPage {
   private paint(card: KanbanCard, now: number): void {
     const above = this.ancestors(), index = this.index!, waits = this.feeds.waits()
     // A thread with a wait anywhere below it stands with what waits, and every such wait is drawn beneath it.
+    // A thread with a worker anywhere below it ranks and stands with what works.
     const threads = index.children(card).map(child => {
-      const below = index.subtree(child).filter(each => wantOf(each, waits))
-      return { child, below, rank: below.length ? 0 : ATTENTION_ORDER.indexOf(attentionOf(child, waits)) }
+      const subtree = index.subtree(child), below = subtree.filter(each => wantOf(each, waits))
+      const own = attentionOf(child, waits)
+      const moving = below.length || own === 'waiting' ? 'waiting' : own === 'working' || subtree.some(each => attentionOf(each, waits) === 'working') ? 'working' : 'quiet'
+      return { child, below, moving, rank: ATTENTION_ORDER.indexOf(moving) }
     }).sort((a, b) => a.rank - b.rank || lastActive(b.child) - lastActive(a.child))
     const quietHeld = document.activeElement === this.quiet
     const focused = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.ov-ancestor, .ov-thread')
@@ -189,8 +192,8 @@ export class FamilyPage {
     this.paintHead(card, now)
     this.paintSaid(card, now)
     this.paintFiles(card)
-    // A quiet thread with nothing waiting below it stands behind the quiet control.
-    const tucked = threads.filter(({ child, below }) => !below.length && attentionOf(child, waits) === 'quiet')
+    // A quiet thread with nothing waiting or working below it stands behind the quiet control.
+    const tucked = threads.filter(({ moving }) => moving === 'quiet')
     if (!tucked.length) this.quietShown = false
     const drawn = this.quietShown ? threads : threads.filter(thread => !tucked.includes(thread))
     this.quiet.textContent = this.quietShown ? 'hide quiet' : `${tucked.length} quiet`
