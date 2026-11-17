@@ -44,7 +44,7 @@ What you get: `felt rename`, one slug convention that every verb holds a new slu
 ### Changed
 
 - `felt add` refuses a slug outside the convention and names the conforming form; it used to rewrite `Foo Bar` to `foo-bar` silently.
-- `shuttle message <fiber>` exits 1 without sending when the fiber's owning daemon is built for another CLI contract than this `shuttle`, and names the command that brings the daemon level. `shuttle doctor` reports the same difference as a mismatch.
+- `shuttle message <fiber>` exits 1 without sending when this host's daemon is built for another CLI contract than this `shuttle`, or when the fiber's owning host reports that its own daemon and CLIs differ, and names the command that brings the daemon level. `shuttle doctor` reports the same difference as a mismatch.
 - The held voice-line controls moved from `shuttle inbox` to `shuttle say`: `shuttle say --held` lists the held lines, and `--play`, `--next` and `--stop` play them. `shuttle inbox` manages message inboxes.
 - Messages to a fiber wait in a durable inbox on the owning host, whether or not a worker is live. A message that asks for a turn starts a session for an armed fiber with no worker; it does not when the fiber is resting, a draft or closed, when the host's boot quarantine is held, or when its worker slots are full. The receipt says what happened: `woken`, `followed_up`, `delivered`, `held`, `starting`, `queued` or `scheduled`. `shuttle message --json` no longer prints `queued_for_next_worker`.
 - `shuttle message --fresh` is deduplicated by `--message-id` and obeys the owner's launch gates: it starts a session only on an armed constitution and never reopens a closed fiber. A refusal gives its reason, and the same id can be sent again.
