@@ -356,6 +356,10 @@ try {
     await page.locator('.kbn-ch-stream').getByText('The joint fit has started.').waitFor()
     await page.waitForTimeout(300)
     assert.ok(await fromFoot() > 250, 'a reader who scrolled up is not brought back to the foot')
+    // What the human sends from the channel's console returns the stream to its foot, where the answer will come.
+    await page.locator('.kbn-ch > .ws-dock .ws-worker-message').click()
+    await page.keyboard.press('Enter')
+    await atFoot()
     // The chair's view lists its threads as rows of slug, doing and age: every doing begins on one column, a thread
     // listed under another indented before it, and an age is said without "ago", the head's too.
     await pick(page, 'unions').click()

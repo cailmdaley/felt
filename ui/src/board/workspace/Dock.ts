@@ -359,10 +359,12 @@ export interface DockOptions {
   onRelease?: (card: KanbanCard) => void
   /** The surface shows the conversation itself: a send keeps the human here rather than opening the worker's terminal. */
   keepPlace?: boolean
+  /** The human sent a message or started a worker from this console, and the daemon took it. */
+  onSent?: () => void
 }
 
 /** What a surface beside the reader asks of its own console. */
-export type ConsoleOptions = Pick<DockOptions, 'keepPlace'>
+export type ConsoleOptions = Pick<DockOptions, 'keepPlace' | 'onSent'>
 
 /** A warm cache dot drains on this cadence, and the figures follow the session's turns. */
 const USAGE_REFRESH_MS = 15_000
@@ -428,6 +430,7 @@ export class Dock {
   private readonly onRest?: (card: KanbanCard, anchor: HTMLElement) => void
   private readonly onRelease?: (card: KanbanCard) => void
   private readonly keepPlace: boolean
+  private readonly onSent?: () => void
   private fiberSlug?: FiberSlug
   private channelOf?: (card: KanbanCard) => string | undefined
 
@@ -447,6 +450,7 @@ export class Dock {
     this.onRest = opts.onRest
     this.onRelease = opts.onRelease
     this.keepPlace = opts.keepPlace ?? false
+    this.onSent = opts.onSent
   }
 
   setFiberSlug(fiberSlug: FiberSlug): void { this.fiberSlug = fiberSlug }
@@ -1640,6 +1644,7 @@ export class Dock {
         const notice = repeatNotice(body)
         if (notice) { showError(notice); return false }
         this.onSaved()
+        this.onSent?.()
         if (body.tmux_session && !coarsePointer() && !this.keepPlace) this.onOpenWorker?.(body.tmux_session, card.originId)
         return true
       }

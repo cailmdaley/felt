@@ -295,7 +295,8 @@ export class ChannelsView implements TemporalView {
       this.placeCount()
       if (!this.painting && this.leavingBand()) this.painting = requestAnimationFrame(() => { this.painting = 0; this.paint() })
     }, { passive: true })
-    this.dock = this.ctx!.workspace!.console({ keepPlace: true })
+    // What the human sends from here is answered at the stream's foot: a send returns the stream there, wherever it was being read.
+    this.dock = this.ctx!.workspace!.console({ keepPlace: true, onSent: () => { this.following = true; this.toFoot() } })
     this.dock.el.hidden = true
     this.channelEl.append(this.head, this.stream, this.dock.el)
     return this.channelEl
