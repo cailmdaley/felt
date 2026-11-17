@@ -74,7 +74,7 @@ func TestMoveRewritePreservesEditAfterPlanning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writes, err := planMoveRewrites(all, all, nil, "a/x", "b/x")
+	writes, err := planMoveRewrites(s.root, all, all, nil, "a/x", "b/x")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -652,5 +652,37 @@ func TestMoveSubtreeLeavesFileLinksWithSpaces(t *testing.T) {
 	}
 	if got := readFiberFile(t, s, "src"); got != src {
 		t.Fatalf("src after renames:\n%s\nwant:\n%s", got, src)
+	}
+}
+
+// A moved fiber carries its links to files and directories outside the store
+// that are shaped like fiber references (Makefile, LICENSE, a directory), so
+// each still reaches its path; links to fibers stay fiber references.
+func TestMoveSubtreeCarriesRefShapedFileLinksOfAMovedFiber(t *testing.T) {
+	t.Parallel()
+	dir, s := newStore(t)
+	for _, name := range []string{"Makefile", "LICENSE"} {
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Mkdir(filepath.Join(dir, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"a", "a/sib", "c"} {
+		writeFiberFile(t, s, id, fiber("F", ""))
+	}
+	writeFiberFile(t, s, "a/b", fiber("B", "[m](../../../Makefile) [l](../../../LICENSE) [d](../../../docs) [c](../c) [s](../a/sib)"))
+	if _, err := s.MoveSubtree("a/b", "out"); err != nil {
+		t.Fatalf("MoveSubtree: %v", err)
+	}
+	want := fiber("B", "[m](../../Makefile) [l](../../LICENSE) [d](../../docs) [c](../c) [s](../a/sib)")
+	if got := readFiberFile(t, s, "out"); got != want {
+		t.Fatalf("out after move:\n%s\nwant:\n%s", got, want)
+	}
+	for _, target := range []string{"../../Makefile", "../../LICENSE", "../../docs"} {
+		if _, err := os.Stat(filepath.Join(s.root, "out", filepath.FromSlash(target))); err != nil {
+			t.Errorf("%s from out: %v", target, err)
+		}
 	}
 }
