@@ -996,7 +996,12 @@ func bodyRefSites(body string) []bodyRefSite {
 	masked := maskCode(body)
 	for _, re := range []*regexp.Regexp{bodyLinkRe, wikiLinkRe} {
 		for _, m := range re.FindAllStringSubmatchIndex(masked, -1) {
-			raw := masked[m[2]:m[3]]
+			raw, base := masked[m[2]:m[3]], m[2]
+			if re == bodyLinkRe {
+				destination := markdownDestination(raw)
+				base += strings.Index(raw, destination)
+				raw = destination
+			}
 			fragment := ""
 			if len(m) > 5 && m[4] >= 0 {
 				fragment = masked[m[4]:m[5]]
@@ -1016,7 +1021,7 @@ func bodyRefSites(body string) []bodyRefSite {
 			if at < 0 {
 				continue
 			}
-			start := m[2] + at
+			start := base + at
 			site := bodyRefSite{ref: ref, start: start, end: start + len(ref.Target), label: body[m[0]:m[1]]}
 			if re == bodyLinkRe {
 				site.markdownTarget = strings.SplitN(strings.TrimSpace(raw), "#", 2)[0]
@@ -1083,6 +1088,19 @@ func RewriteBodyRefs(body string, rewrite func(target string) (string, bool)) (s
 // mailto:), which no relative file path does.
 var urlSchemeRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*:`)
 
+// markdownDestination is a markdown link's destination as written inside its
+// parentheses: up to the first whitespace, before any "title", or the text
+// inside <...>.
+func markdownDestination(raw string) string {
+	destination := strings.TrimSpace(raw)
+	if inner, ok := strings.CutPrefix(destination, "<"); ok {
+		destination, _, _ = strings.Cut(inner, ">")
+	} else if i := strings.IndexFunc(destination, unicode.IsSpace); i >= 0 {
+		destination = destination[:i]
+	}
+	return destination
+}
+
 // RewriteMarkdownPaths replaces the path of every relative markdown link —
 // ../x/plot.png, ../x/x.md, ../x/Makefile, ../x — for which rewrite returns a
 // new spelling. rewrite also receives the fiber reference the target spells,
@@ -1103,12 +1121,7 @@ func RewriteMarkdownPaths(body string, rewrite func(target string, ref *BodyRef)
 		if strings.IndexByte(raw, codeMask) >= 0 {
 			continue
 		}
-		destination := strings.TrimSpace(raw)
-		if inner, ok := strings.CutPrefix(destination, "<"); ok {
-			destination, _, _ = strings.Cut(inner, ">")
-		} else if i := strings.IndexFunc(destination, unicode.IsSpace); i >= 0 {
-			destination = destination[:i]
-		}
+		destination := markdownDestination(raw)
 		target := destination
 		if i := strings.IndexAny(target, "#?"); i >= 0 {
 			target = target[:i]

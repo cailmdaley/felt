@@ -531,12 +531,17 @@ func TestMoveSubtreeCarriesTitledAndBracketedFileLinks(t *testing.T) {
 		writeFiberFile(t, s, id, fiber("T", ""))
 	}
 	writeFiberFile(t, s, "top/m", fiber("M", `[a](../x.png) [b](../x.png "t ../q/r") [c](<../x y.png>) [d](<../x.png> "t") [e](../x.png#f 'g')`))
+	writeFiberFile(t, s, "c", fiber("C", `[f](../top/m "t") [g](<../top/m/m.md> "t")`))
 	if _, err := s.MoveSubtree("top/m", "top/deep/m"); err != nil {
 		t.Fatalf("MoveSubtree: %v", err)
 	}
-	want := fiber("M", `[a](../../x.png) [b](../../x.png "t ../q/r") [c](<../../x y.png>) [d](<../../x.png> "t") [e](../../x.png#f 'g')`)
-	if got := readFiberFile(t, s, "top/deep/m"); got != want {
-		t.Fatalf("m after move:\n%s\nwant:\n%s", got, want)
+	for id, want := range map[string]string{
+		"top/deep/m": fiber("M", `[a](../../x.png) [b](../../x.png "t ../q/r") [c](<../../x y.png>) [d](<../../x.png> "t") [e](../../x.png#f 'g')`),
+		"c":          fiber("C", `[f](../top/deep/m "t") [g](<../top/deep/m/m.md> "t")`),
+	} {
+		if got := readFiberFile(t, s, id); got != want {
+			t.Errorf("%s after move:\n%s\nwant:\n%s", id, got, want)
+		}
 	}
 }
 
