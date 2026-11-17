@@ -14,4 +14,16 @@ describe('slugStem', () => {
   it('is empty for a title with no letters or digits', () => {
     expect(slugStem('— !')).toBe('')
   })
+
+  it('folds Latin letters to ASCII as the CLI does', () => {
+    expect(slugStem('Café résumé')).toBe('cafe-resume')
+    expect(slugStem('Straße')).toBe('strasse')
+    expect(slugStem('Æsir Œuvre Øre Đak Łódź Þing Ðe Iı')).toBe('aesir-oeuvre-ore-dak-lodz-thing-de-ii')
+  })
+
+  it('always matches the slug convention or is empty', () => {
+    for (const title of ['Café résumé', 'Straße', 'ℓ-max', 'ﬁle ² ș ệ', 'Σ only', '[tag] Title', '--a__b--', '日本']) {
+      expect(slugStem(title)).toMatch(/^([a-z0-9]+(-[a-z0-9]+)*)?$/)
+    }
+  })
 })
