@@ -65,16 +65,13 @@ export interface TurnState {
   since?: number
 }
 
-/** A worker that has been working this long without a hook event says so. */
-export const SILENCE_FLOOR_MS = 10 * 60_000
-
 function instant(value: string | undefined): number | undefined {
   const ms = value ? Date.parse(value) : NaN
   return Number.isFinite(ms) ? ms : undefined
 }
 
 /** What a card must carry for its turn to be read. */
-export type TurnInput = Pick<KanbanCard, 'turn' | 'status' | 'ask' | 'workerState' | 'runtimePhase' | 'launchError' | 'lastActivityAt' | 'workerStartedAt' | 'dispatchedAt' | 'originStale'>
+export type TurnInput = Pick<KanbanCard, 'turn' | 'status' | 'ask' | 'workerState' | 'runtimePhase' | 'launchError' | 'lastActivityAt' | 'quietSince' | 'workerStartedAt' | 'dispatchedAt' | 'originStale'>
 
 /**
  * The card's turn: the owner-served `turn`, with what only this board knows
@@ -82,10 +79,7 @@ export type TurnInput = Pick<KanbanCard, 'turn' | 'status' | 'ask' | 'workerStat
  * owner's runtime is frozen at its last poll, so a live worker's turn is unknown and only the synced ask
  * is still owed. An `ask` counts only on an active card.
  */
-export function turnOf(
-  card: TurnInput,
-  nowMs: number = Date.now(),
-): TurnState {
+export function turnOf(card: TurnInput): TurnState {
   const phase = card.runtimePhase
   const live = hasLiveWorker(card)
   const busy = !card.originStale && card.workerState === 'running' && phase === 'working'
@@ -116,10 +110,9 @@ export function turnOf(
     case 'idle':
       return state('idle', 'The worker ended its turn with nothing running under it.', card.lastActivityAt)
     case 'working': {
-      const silent = card.lastActivityAt !== undefined && nowMs - card.lastActivityAt >= SILENCE_FLOOR_MS
-      return state('working', silent
+      return state('working', card.quietSince !== undefined
         ? 'The worker is mid-turn or over background work, with no hook event since.'
-        : 'The worker is mid-turn or over background work it started.', silent ? card.lastActivityAt : undefined)
+        : 'The worker is mid-turn or over background work it started.', card.quietSince)
     }
     case 'starting':
       return phase === 'identity_pending'

@@ -250,7 +250,7 @@ describe('a mirrored fiber renders as ONE card', () => {
       const feed = feedWith(
         [
           owned('kelvin', {
-            runtime: { state: 'running', tmuxSession: 'final-push-01K-shuttle', phase: 'attention', lastActivityAt: NOW },
+            runtime: { state: 'running', tmuxSession: 'final-push-01K-shuttle', phase: 'attention', phaseSince: NOW },
           }),
           owned('laptop'),
         ],

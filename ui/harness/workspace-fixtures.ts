@@ -294,7 +294,7 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
         session_link: console && !console.startsWith('rex-') && console !== 'unlinked' ? 'https://claude.ai/code/session_fixture' : undefined,
         session_uuid: WORKSPACE_LATEST_SESSION,
         agent: console === 'rex-pi' ? 'pi-sol' : console === 'rex-codex' ? 'codex-sol' : 'claude-opus',
-        last_activity_at: now - 5_000,
+        phase_since: now - 5_000,
         started_at: now - 3 * minute,
       }
     }
@@ -303,7 +303,7 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
         state: 'running',
         phase: 'working',
         tmux_session: `remote-review-${fiber.uid}-shuttle`,
-        last_activity_at: now - 5_000,
+        phase_since: now - 5_000,
         started_at: now - 12 * minute,
       }
     }

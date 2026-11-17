@@ -107,11 +107,15 @@ export interface KanbanCard {
   /** Durable explanation for a blocked app launch. */
   launchError?: string
   /**
-   * Real ms timestamp of the live worker's most-recent hook event (any type).
-   * Present only for a live worker (paired with `workerState`);
-   * drives the turn's age on the worker pill, never card ordering. Absent for worker-less cards.
+   * The instant, epoch ms, the live worker's turn last changed: it began its
+   * turn, ended it, or stopped on a prompt (the feed's `phase_since`). The
+   * turn's age and a working family's place on the Desk read from it. Absent
+   * for worker-less cards and before the worker's first hook event.
    */
   lastActivityAt?: number
+  /** A working worker silent past the owner's floor: the instant of its last
+   * hook event (the feed's `quiet_since`). */
+  quietSince?: number
   /** Owner-observed launch instant of the current worker, epoch milliseconds. */
   workerStartedAt?: number
   /**

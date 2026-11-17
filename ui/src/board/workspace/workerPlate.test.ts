@@ -8,7 +8,7 @@ describe('owner-observed worker facts', () => {
   it('ages a working worker only once it has gone quiet', () => {
     const busy = card({ id: 'task', workerState: 'running', runtimePhase: 'working', lastActivityAt: now - 30_000, workerStartedAt: now - 12 * 60000 })
     expect(workerPlateFacts(busy, now)).toEqual({ turn: 'working', word: 'working', elapsed: undefined, busy: true })
-    const quiet = card({ id: 'task', workerState: 'running', runtimePhase: 'working', lastActivityAt: now - 18 * 3_600_000 })
+    const quiet = card({ id: 'task', workerState: 'running', runtimePhase: 'working', lastActivityAt: now - 19 * 3_600_000, quietSince: now - 18 * 3_600_000 })
     expect(workerPlateFacts(quiet, now).elapsed).toBe('18h')
   })
   it('ages a worker with no signal from its live launch, never stale dispatch metadata', () => {

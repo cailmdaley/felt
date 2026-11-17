@@ -582,14 +582,14 @@ const BARE_FOLLOW_UP = 'work/spt3g_papers/bmodes-2d/run/new-mask'
 
 /** One live worker per turn state: slug, name, runtime overrides, outstanding ask. */
 const TURN_FIXTURES: ReadonlyArray<readonly [string, string, Record<string, unknown>, string?]> = [
-  ['asked-while-working', 'Asked a question, still working', { phase: 'working', last_activity_at: now - 30_000 }, 'OK to adopt the SPICE estimator as default?'],
-  ['asked-then-idle', 'Asked a question, then went idle', { phase: 'waiting', last_activity_at: now - 40 * 60_000 }, 'Two OKs: install the rebuilt maps; clear scratch?'],
-  ['at-a-prompt', 'Stopped at a permission prompt', { phase: 'attention', last_activity_at: now - 5 * 60_000 }],
-  ['idle', 'Ended its turn', { phase: 'waiting', last_activity_at: now - 90 * 60_000 }],
-  ['working', 'Working right now', { phase: 'working', last_activity_at: now - 4_000 }],
-  ['silent-working', 'Working, no sign of life for 18h', { phase: 'working', last_activity_at: now - 18 * 3_600_000 }],
-  ['no-signal', 'Live, no hook event yet', { last_activity_at: now - 20 * 3_600_000 }],
-  ['blocked', 'Terminal worker could not start', { state: 'blocked', last_activity_at: now - 12 * 60_000 }],
+  ['asked-while-working', 'Asked a question, still working', { phase: 'working', phase_since: now - 30_000 }, 'OK to adopt the SPICE estimator as default?'],
+  ['asked-then-idle', 'Asked a question, then went idle', { phase: 'waiting', phase_since: now - 40 * 60_000 }, 'Two OKs: install the rebuilt maps; clear scratch?'],
+  ['at-a-prompt', 'Stopped at a permission prompt', { phase: 'attention', phase_since: now - 5 * 60_000 }],
+  ['idle', 'Ended its turn', { phase: 'waiting', phase_since: now - 90 * 60_000 }],
+  ['working', 'Working right now', { phase: 'working', phase_since: now - 4_000 }],
+  ['silent-working', 'Working, no sign of life for 18h', { phase: 'working', phase_since: now - 19 * 3_600_000, quiet_since: now - 18 * 3_600_000 }],
+  ['no-signal', 'Live, no hook event yet', { phase_since: now - 20 * 3_600_000 }],
+  ['blocked', 'Terminal worker could not start', { state: 'blocked', phase_since: now - 12 * 60_000 }],
 ]
 
 /**
@@ -636,7 +636,7 @@ const denseRows = search.get('desk') === 'dense'
         state: 'running',
         tmux_session: sessionFor(id, `dense-${i}`),
         phase: i % 3 === 0 ? 'waiting' : 'working',
-        last_activity_at: now - (i % 3 === 0 ? (i + 1) * 3_600_000 : 20_000),
+        phase_since: now - (i % 3 === 0 ? (i + 1) * 3_600_000 : 20_000),
       },
     }
   }))
@@ -663,7 +663,7 @@ const MOCK_FEED = {
       runtime: {
         state: 'running', surface: 'cli', session_uuid: null, identity_pending: true, phase,
         identity_error: i ? 'Timed out waiting for session file; retrying acquisition.' : undefined,
-        tmux_session: `fixture-identity-${i}-shuttle`, started_at: now - 180_000, last_activity_at: now - 180_000,
+        tmux_session: `fixture-identity-${i}-shuttle`, started_at: now - 180_000, phase_since: now - 180_000,
       },
     })) : []),
     // `?turns=all` stages one live worker per turn state, so every worker pill
@@ -696,7 +696,7 @@ const MOCK_FEED = {
         tmux_session: 'legacy-surface-codex-shuttle',
         session_uuid: LEGACY_SURFACE_THREAD,
         agent: 'codex-luna',
-        last_activity_at: now,
+        phase_since: now,
       },
     },
     ...IN_FLIGHT.map((f, i) => {
@@ -711,7 +711,7 @@ const MOCK_FEED = {
             state: 'running',
             tmux_session: sessionFor(f.id, f.uid ?? ''),
             phase: 'working',
-            last_activity_at: now - 4_000,
+            phase_since: now - 4_000,
           },
         }
       }
@@ -726,7 +726,7 @@ const MOCK_FEED = {
           tmux_session: sessionFor(f.id, f.uid ?? ''),
           session_link: 'https://claude.ai/code/session_harness-waiting',
           phase: 'waiting',
-          last_activity_at: now - (3 * 3_600_000 + 12 * 60_000),
+          phase_since: now - (3 * 3_600_000 + 12 * 60_000),
         },
       }
     }),
@@ -772,7 +772,7 @@ const MOCK_FEED = {
         tmux_session: 'codex-seat-shuttle',
         session_uuid: '01a0be38-6c36-7cd1-aec9-53a680d1f693',
         agent: 'codex-sol',
-        last_activity_at: now - 25 * 60_000,
+        phase_since: now - 25 * 60_000,
       },
     },
     ...CYCLES.map(fiber),

@@ -203,7 +203,7 @@ function addBoardFixtures(example: WorkspaceExample, now: number, ROWS: Row[], m
           ask: row.ask ? { text: row.ask, at: iso(row.minutes) } : undefined,
           review: row.review ? { note: row.review, at: iso(row.minutes) } : undefined,
           thread_parent: row.parent ? { uid: row.parent, host: WORKSPACE_HOST, slug: row.parent, name: ROWS.find(parent => parent.id === row.parent)!.name } : undefined } },
-      runtime: live ? { state: 'running', phase: row.state === 'idle' ? 'waiting' : 'working', session_uuid: `session-${row.id}`, tmux_session: row.terminal ? `${row.id}-shuttle` : undefined, last_activity_at: ms(row.minutes) } : null,
+      runtime: live ? { state: 'running', phase: row.state === 'idle' ? 'waiting' : 'working', session_uuid: `session-${row.id}`, tmux_session: row.terminal ? `${row.id}-shuttle` : undefined, phase_since: ms(row.minutes) } : null,
     }
   })
   for (const row of ROWS) {

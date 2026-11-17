@@ -76,7 +76,7 @@ const isDrawn = (thread: MapThread): boolean => thread.rank >= 0
 const mass = (thread: MapThread): number => thread.launches.length + thread.commits.length + thread.files.length
 
 function standingOf(card: KanbanCard, index: ThreadIndex, fresh: boolean, lastMove: number, now: number, reach: number): Standing {
-  const state = index.state(card), { turn, yours } = turnOf(card, now)
+  const state = index.state(card), { turn, yours } = turnOf(card)
   if (state === 'archived') return now - lastMove < reach ? 'quiet' : 'aside'
   if (turn === 'question') return turn
   if (state === 'drafts' || state === 'roles' || state === 'resting') return 'aside'
@@ -100,13 +100,13 @@ export function familyModel(index: ThreadIndex, root: KanbanCard, feeds: MapFeed
     const marks = feeds.marks(card), files = feeds.files(card)
     const launches = marks?.launches ?? [], commits = marks?.commits ?? []
     const ended = Date.parse(card.closedAt ?? '') || null, born = Date.parse(card.createdAt) || ended || now
-    const ask = turnOf(card, now).turn === 'question' ? card.ask : undefined
+    const ask = turnOf(card).turn === 'question' ? card.ask : undefined
     const lastMove = Math.min(now, Math.max(card.lastActivityAt ?? 0, ...launches, ...commits, ...files.map(file => file.at), ended ?? 0, born, Date.parse(ask?.at ?? '') || 0))
     const fresh = files.some(file => file.unread)
     const standing = standingOf(card, index, fresh, lastMove, now, reach), tone = standingOf(card, index, false, lastMove, now, reach) as MapThread['tone']
     const thread: MapThread = {
       key: threadKey(card), card, name: card.name, depth, parent, children: [], standing, tone,
-      word: WORD[standing] ?? (standing === 'working' ? turnOf(card, now).word : standing === 'still' ? stillWord(card) : index.state(card) === 'roles' ? 'seat' : THREAD_LABEL[index.state(card)].toLowerCase()),
+      word: WORD[standing] ?? (standing === 'working' ? turnOf(card).word : standing === 'still' ? stillWord(card) : index.state(card) === 'roles' ? 'seat' : THREAD_LABEL[index.state(card)].toLowerCase()),
       note: ask?.text ?? (card.column === 'awaitingReview' && card.reviewMark ? `Marked for your review: ${card.reviewMark.note}` : card.outcome ?? ''), rank: -1, lastMove, born, ended, launches, commits, files, fresh,
       merged: index.state(card) === 'archived', weight: launches.length + commits.length + files.length,
     }

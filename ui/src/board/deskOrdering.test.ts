@@ -141,7 +141,7 @@ describe('the composite Desk is independent of entry and origin order', () => {
         shuttleKind: 'oneshot',
         horizon: lane === 'rest' ? 'stashed' : undefined,
       }, origin)
-      if (lane === 'flight') e.runtime = { state: 'running', phase: i % 2 ? 'working' : 'waiting', lastActivityAt: NOW - i * 1000 }
+      if (lane === 'flight') e.runtime = { state: 'running', phase: i % 2 ? 'working' : 'waiting', phaseSince: NOW - i * 1000 }
       return e
     }),
   )

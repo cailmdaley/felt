@@ -29,37 +29,38 @@ describe('turnOf', () => {
     ['a fresh launch with no hook yet', { turn: 'starting', workerStartedAt: NOW - 60_000 }, 'starting', 'starting', false, /no hook event yet/],
     ['an old launch with no hook', { turn: 'no-signal', workerStartedAt: NOW - 20 * 3_600_000 }, 'no-signal', 'no signal', false, /holds no hook event/],
   ])('says %s', (_, over, turn, word, yours, detail) => {
-    const state = turnOf(live(over), NOW)
+    const state = turnOf(live(over))
     expect(state).toMatchObject({ turn, word, yours })
     expect(state.detail).toMatch(detail)
   })
 
   it('keeps whose move apart from whether the worker is busy', () => {
-    expect(turnOf(live({ turn: 'question', runtimePhase: 'working', ask: ASK }), NOW)).toMatchObject({ turn: 'question', yours: true, busy: true })
-    expect(turnOf(live({ turn: 'idle', runtimePhase: 'waiting' }), NOW)).toMatchObject({ yours: true, busy: false })
+    expect(turnOf(live({ turn: 'question', runtimePhase: 'working', ask: ASK }))).toMatchObject({ turn: 'question', yours: true, busy: true })
+    expect(turnOf(live({ turn: 'idle', runtimePhase: 'waiting' }))).toMatchObject({ yours: true, busy: false })
   })
 
   it('ages a question from when it was asked, and an idle turn from the last event', () => {
-    expect(turnOf(live({ turn: 'question', runtimePhase: 'working', ask: ASK, lastActivityAt: NOW - 1000 }), NOW).since).toBe(Date.parse(ASK.at))
-    expect(turnOf(live({ turn: 'idle', runtimePhase: 'waiting', lastActivityAt: NOW - 5000 }), NOW).since).toBe(NOW - 5000)
+    expect(turnOf(live({ turn: 'question', runtimePhase: 'working', ask: ASK, lastActivityAt: NOW - 1000 })).since).toBe(Date.parse(ASK.at))
+    expect(turnOf(live({ turn: 'idle', runtimePhase: 'waiting', lastActivityAt: NOW - 5000 })).since).toBe(NOW - 5000)
   })
 
-  it('names a working worker\'s silence only past ten minutes', () => {
-    expect(turnOf(live({ turn: 'working', runtimePhase: 'working', lastActivityAt: NOW - 60_000 }), NOW).since).toBeUndefined()
-    expect(turnOf(live({ turn: 'working', runtimePhase: 'working', lastActivityAt: NOW - 18 * 3_600_000 }), NOW).since).toBe(NOW - 18 * 3_600_000)
+  it('names a working worker\'s silence when its owner says it is quiet', () => {
+    expect(turnOf(live({ turn: 'working', runtimePhase: 'working', lastActivityAt: NOW - 3_600_000 })).since).toBeUndefined()
+    const quiet = turnOf(live({ turn: 'working', runtimePhase: 'working', lastActivityAt: NOW - 20 * 3_600_000, quietSince: NOW - 18 * 3_600_000 }))
+    expect(quiet).toMatchObject({ since: NOW - 18 * 3_600_000, detail: expect.stringMatching(/no hook event since/) })
   })
 
   it('reads an unreachable owner\'s frozen runtime as no turn at all, keeping only the synced ask', () => {
     const since = '2026-10-16T14:17:00Z'
     const frozen = live({ turn: 'working', runtimePhase: 'working', lastActivityAt: NOW - 98 * 3_600_000, originStale: { since } })
-    expect(turnOf(frozen, NOW)).toMatchObject({ turn: 'no-signal', word: 'no signal', yours: false, busy: false, since: Date.parse(since) })
-    expect(turnOf({ ...frozen, turn: 'question', runtimePhase: 'attention' }, NOW).turn).toBe('no-signal')
-    expect(turnOf({ ...frozen, ask: ASK }, NOW)).toMatchObject({ turn: 'question', yours: true, busy: false })
+    expect(turnOf(frozen)).toMatchObject({ turn: 'no-signal', word: 'no signal', yours: false, busy: false, since: Date.parse(since) })
+    expect(turnOf({ ...frozen, turn: 'question', runtimePhase: 'attention' }).turn).toBe('no-signal')
+    expect(turnOf({ ...frozen, ask: ASK })).toMatchObject({ turn: 'question', yours: true, busy: false })
   })
 
   it('counts an ask only on an active card', () => {
-    expect(turnOf(card({ id: 'x', status: 'closed', ask: ASK }), NOW).turn).toBe('none')
-    expect(turnOf(card({ id: 'x', status: 'active', ask: ASK }), NOW)).toMatchObject({ turn: 'question', yours: true })
+    expect(turnOf(card({ id: 'x', status: 'closed', ask: ASK })).turn).toBe('none')
+    expect(turnOf(card({ id: 'x', status: 'active', ask: ASK }))).toMatchObject({ turn: 'question', yours: true })
   })
 })
 

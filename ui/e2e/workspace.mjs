@@ -1933,7 +1933,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     await shot('working')
     await p.evaluate(async () => {
       const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Remote covariance review')
-      row.runtime.phase = 'waiting'; row.runtime.last_activity_at = Date.now() - 120000
+      row.runtime.phase = 'waiting'; row.runtime.phase_since = Date.now() - 120000
       await window.__harness.modal.fetchAndRender()
     })
     await shot('waiting'); await leave(p); await chooseDeskColumn(p, 2)
@@ -2339,7 +2339,7 @@ async function flipWorker(p) {
   await p.evaluate(() => {
     const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Remote covariance review')
     row.runtime.phase = row.runtime.phase === 'waiting' ? 'working' : 'waiting'
-    row.runtime.last_activity_at = Date.now() - 120000
+    row.runtime.phase_since = Date.now() - 120000
   })
   await repaint(p)
 }
@@ -2385,7 +2385,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   assert.deepEqual(await layoutShift(p, { regions: ['.kbn-viewtabs', '.ws-selected'], act: async () => {
     await p.evaluate(() => {
       const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Calibrate the shear response')
-      row.runtime = { state: 'running', phase: 'working', tmux_session: 'calibration-shuttle', last_activity_at: Date.now(), started_at: Date.now() - 60000 }
+      row.runtime = { state: 'running', phase: 'working', tmux_session: 'calibration-shuttle', phase_since: Date.now(), started_at: Date.now() - 60000 }
     })
     await repaint(p)
   }, settle: 100 }).then(moved => device === 'narrow' ? moved.filter(({ dh, dy }) => !dh && !dy) : moved), [], 'a worker starting leaves the open report still')
@@ -2393,7 +2393,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   await still(p, 'a band worker-state change', async () => {
     await p.evaluate(() => {
       const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Calibrate the shear response')
-      row.runtime.phase = 'waiting'; row.runtime.last_activity_at = Date.now() - 120000
+      row.runtime.phase = 'waiting'; row.runtime.phase_since = Date.now() - 120000
     })
     await repaint(p)
   }, { settle: 100 })

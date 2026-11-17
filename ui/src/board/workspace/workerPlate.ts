@@ -10,7 +10,7 @@ import { turnOf, type Turn } from '../turn.js'
  * minutes. `busy` breathes the dot whatever the turn.
  */
 export function workerPlateFacts(card: KanbanCard, now = Date.now()): { turn: Turn; word: string; elapsed?: string; busy: boolean } {
-  const { turn, word, since, busy } = turnOf(card, now)
+  const { turn, word, since, busy } = turnOf(card)
   const elapsed = since !== undefined && Number.isFinite(since) ? age(now - since) : undefined
   return { turn, word, elapsed, busy }
 }

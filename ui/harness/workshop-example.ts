@@ -41,7 +41,7 @@ export function workshopExample(now: number) {
         shuttle: settings,
       },
       ...(task.status === 'active' ? { runtime: {
-        state: 'running', phase: 'working', tmux_session: tmux, last_activity_at: now - 4_000,
+        state: 'running', phase: 'working', tmux_session: tmux, phase_since: now - 4_000,
       } } : {}),
     }
   })

@@ -140,7 +140,7 @@ export function addFamilyFixtures(example: WorkspaceExample, now: number): void 
         closed_at: row.status === 'closed' ? new Date(now - 60000).toISOString() : undefined,
         shuttle: { kind: 'oneshot', host: WORKSPACE_HOST, agent: 'codex-sol', project_dir: '/fixture-project',
           ask: row.ask ? { text: 'Which leakage model?', at: at.toISOString() } : undefined } },
-      runtime: row.phase ? { state: 'running', phase: row.phase, session_uuid: `session-${row.id}`, last_activity_at: at.getTime() } : null,
+      runtime: row.phase ? { state: 'running', phase: row.phase, session_uuid: `session-${row.id}`, phase_since: at.getTime() } : null,
     })
     example.bodies[row.id] = `## Desired State\n\n${row.name}.\n\n## Status\n\nFamily fixture.`
   }
@@ -156,7 +156,7 @@ function addLoneFixture(example: WorkspaceExample, now: number): void {
     origin: WORKSPACE_HOST, felt_store: '/fixture-store/workspace', path: `${id}/${id}.md`, dir,
     fiber: { id, uid: id, name: 'Morning post', status: 'active', outcome: 'Three letters need you today; the rest is filed.', created_at: new Date(now - 3600000).toISOString(),
       shuttle: { kind: 'standing', host: WORKSPACE_HOST, agent: 'claude-opus', project_dir: '/fixture-project' } },
-    runtime: { state: 'running', phase: 'waiting', session_uuid: `session-${id}`, last_activity_at: at },
+    runtime: { state: 'running', phase: 'waiting', session_uuid: `session-${id}`, phase_since: at },
   })
   example.bodies[id] = '## Desired State\n\nThe morning read.\n\n## Status\n\nLone fixture.'
   const page = '<!doctype html><html><head><meta charset="utf-8"><title>Morning post</title><style>body{font:16px Georgia;margin:24px}.map{height:60vh;display:grid;place-items:center;background:#e4dcc8}</style></head><body><div class="map">today</div><h1>Morning post</h1><p>Three letters need you today.</p></body></html>'
@@ -185,7 +185,7 @@ function addHubFixture(example: WorkspaceExample, now: number): void {
           runtime: launches.length ? { dispatched_at: new Date(Math.min(launches.at(-1)!, moved - hour / 3)).toISOString(), handed_off_at: phases[row.state] ? undefined : new Date(moved).toISOString() } : undefined,
           ask: row.state === 'ask' ? { text: row.note, at: new Date(moved).toISOString() } : undefined } },
       // The hub's worker has a terminal, so its conversation opens.
-      runtime: phases[row.state] ? { state: 'running', phase: phases[row.state], session_uuid: session, tmux_session: row.id === 'hub' ? 'hub-shuttle' : undefined, last_activity_at: moved } : null,
+      runtime: phases[row.state] ? { state: 'running', phase: phases[row.state], session_uuid: session, tmux_session: row.id === 'hub' ? 'hub-shuttle' : undefined, phase_since: moved } : null,
     })
     example.bodies[row.id] = `## Desired State\n\n${row.name}.\n\n## Status\n\n${row.note}`
     if (HUB_TAPESTRIES.includes(row.id)) {

@@ -22,7 +22,7 @@
 //         fiber: {...felt JSON...}, // → mapFeltJsonToFiber
 //         column: string,           // owner-served Desk column (drafts, in_flight, …)
 //         turn: string,             // owner-served turn (question, idle, working, …)
-//         runtime?: { state, tmux_session?, session_uuid?, phase?, ... } | null,  // owner-served liveness
+//         runtime?: { state, tmux_session?, session_uuid?, phase?, phase_since?, quiet_since?, ... } | null,  // owner-served liveness
 //         dir?: string,             // fiber's own dir (embed/image base), owner-resolved
 //         report_path?: string,     // companion page, owner-resolved
 //         origin: string,           // owning host/remote name
@@ -73,10 +73,15 @@ interface CompositeRuntime {
    * phases. The board reads it through `turnOf`. Absent until the worker's
    * first hook event. */
   phase?: string;
-  /** Real ms timestamp of this live session's most-recent hook event of ANY
-   * type. Present only for a tracked running worker; drives the turn's age on
-   * the worker pill, never card ordering. */
-  lastActivityAt?: number;
+  /** Owner-served instant, epoch ms, at which the worker entered its current
+   * `phase`: began its turn, ended it, or stopped on a prompt. Tool calls
+   * inside a phase leave it, so the feed holds still while a worker works.
+   * Absent until the worker's first hook event. */
+  phaseSince?: number;
+  /** Owner-served: a working worker with no hook event for the owner's silence
+   * floor (ten minutes) is quiet, and this is the instant of its last event.
+   * Absent otherwise. */
+  quietSince?: number;
   /** Owner-observed launch instant of the current worker, epoch milliseconds. */
   startedAt?: number;
   /** Owner-served: where a phone opens this worker — the claude.ai bridge URL
@@ -233,7 +238,8 @@ function parseRuntime(value: unknown): CompositeRuntime | undefined {
   if (!tmuxSession && !sessionUuid && typeof value.state !== 'string') return undefined;
   const state = value.state === 'blocked' ? 'blocked' : 'running';
   const phase = typeof value.phase === 'string' && value.phase.length > 0 ? value.phase : undefined;
-  const lastActivityAt = typeof value.last_activity_at === 'number' ? value.last_activity_at : undefined;
+  const phaseSince = typeof value.phase_since === 'number' ? value.phase_since : undefined;
+  const quietSince = typeof value.quiet_since === 'number' ? value.quiet_since : undefined;
   const launchError = typeof value.launch_error === 'string' && value.launch_error ? value.launch_error : undefined;
   const sessionLink =
     typeof value.session_link === 'string' && value.session_link.startsWith('https://')
@@ -243,7 +249,7 @@ function parseRuntime(value: unknown): CompositeRuntime | undefined {
   const startedAt = typeof value.started_at === 'number' && Number.isFinite(value.started_at) ? value.started_at : undefined;
   const terminalBackend = value.terminal === 'rex' || value.terminal === 'tmux' ? value.terminal : undefined;
   const rexSession = typeof value.rex_session === 'string' && value.rex_session ? value.rex_session : undefined;
-  return { state: launchError ? 'blocked' : state, tmuxSession, terminalBackend, rexSession, agent, sessionUuid, phase, lastActivityAt, startedAt, sessionLink, launchError };
+  return { state: launchError ? 'blocked' : state, tmuxSession, terminalBackend, rexSession, agent, sessionUuid, phase, phaseSince, quietSince, startedAt, sessionLink, launchError };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
