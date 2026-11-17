@@ -104,6 +104,7 @@ import {
   spellHeight,
 } from './chronicleModel.js'
 import { getDaemonJson, postDaemonJson } from '../daemonApi.js'
+import { slugStem } from '../slug.js'
 import './ChronicleView.css'
 
 // ── Window ───────────────────────────────────────────────────────────────────
@@ -2235,12 +2236,7 @@ class ChronicleView implements TemporalView {
     // No card exists yet, so this is the board's own scope rather than a
     // fiber's — the same resolution the capture forms use.
     const origin = BOARD_ORIGIN
-    const slug =
-      name
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '')
-        .slice(0, 60) || `cycle-${Date.now()}`
+    const slug = slugStem(name) || `cycle-${Date.now()}`
     const id = `cycles/${slug}`
 
     try {

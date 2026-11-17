@@ -50,6 +50,7 @@ import {
 import { filterParentCandidates } from '../board/fiberSearch'
 import { fiberIndex, type FiberIndexEntry } from '../board/wikilinks'
 import { daemonErrorMessage, postDaemonJson } from '../board/daemonApi'
+import { slugStem } from '../board/slug'
 import type { Host, Project } from './projectModel'
 
 // ---------------------------------------------------------------------------
@@ -80,21 +81,6 @@ export interface StashFormProps {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/**
- * The slug rule — mirrors Shuttle/felt's (kebab-case, lowercased, non-alphanum
- * collapsed, leading/trailing hyphens stripped, capped at 60). The single
- * source for both the live preview and the submitted id, so preview == reality
- * by construction. Empty stem means the title had no alphanumerics; each caller
- * labels that case for itself.
- */
-function slugStem(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 60)
-}
 
 /** The shuttle block, assembled client-side (lean: only true/non-empty
  *  fields ride). */
