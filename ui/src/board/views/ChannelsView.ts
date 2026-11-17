@@ -14,7 +14,7 @@ import { createRailReorder, type RailReorder } from '../channelRail.js'
 import { openActionMenu } from '../conversationMenu.js'
 import { stateDot } from '../stateDot.js'
 import { slug } from '../threadOutline.js'
-import { CLEAR_UNDO_MS, clearPost, showToast } from '../utils.js'
+import { CLEAR_UNDO_MS, showToast } from '../utils.js'
 import { ATTENTION_ORDER, attentionOf, lastActive, type Waits } from '../attention.js'
 import { turnOf } from '../turn.js'
 import { docKey } from '../workspace/documents.js'
@@ -729,44 +729,42 @@ export class ChannelsView implements TemporalView {
     return stateDot(item.card, this.ctx!.workspace!.board.waiting, () => { this.returnTo = `item:${item.id}`; this.ctx?.workspace?.openFromDesk(item.card) })
   }
   /**
-   * A line's ✓, on every post and file line: a waiting post stops waiting (it
-   * writes that alone); any other leaves the stream. A question or a close
-   * that waits is answered, not cleared, and has none.
+   * A line's ✓, on every post and file line: the line leaves the stream, and
+   * a waiting post stops waiting too. A question or a close that waits is
+   * answered, not cleared, and has none.
    */
   private check(item: Item): HTMLButtonElement | undefined {
     if (item.waiting ? !item.clears : item.kind !== 'post' && item.kind !== 'file') return undefined
     const { card } = item
     const done = button('kbn-ch-clear', '✓', () => {
       done.disabled = true
-      if (item.clears) {
-        const board = this.ctx?.workspace?.board
-        if (board) void clearPost(board, item.clears, card.name).catch(() => {
-          done.disabled = false
-          this.status(`${card.name}'s post could not be cleared; it still waits.`)
-        })
-      } else void this.clearLine(item, done)
+      void this.clearLine(item, done)
     })
-    done.title = item.clears ? 'Clear: read, nothing to answer' : 'Clear: read, take it from the stream'
+    done.title = item.clears ? 'Clear: read, nothing to answer; take it from the stream' : 'Clear: read, take it from the stream'
     done.setAttribute('aria-label', `Clear ${card.name}'s ${item.kind === 'file' ? 'files' : 'post'}`)
     return done
   }
   /**
-   * Takes a line that waits on no one out of the stream, across the fleet,
-   * with an undo for a few seconds; the line after it takes the focus. A
-   * refused write brings it back and says so.
+   * Takes a line out of the stream, across the fleet, and a post that waits
+   * stops waiting, with one undo for a few seconds that restores both; the
+   * line after it takes the focus. A refused write brings it back and says so.
    */
   private async clearLine(item: Item, done: HTMLButtonElement): Promise<void> {
-    const ctx = this.ctx
+    const ctx = this.ctx, board = ctx?.workspace?.board
     if (!ctx) return
     const row = done.closest('.kbn-ch-item'), held = row?.contains(document.activeElement)
     const next = [...this.stream?.querySelectorAll<HTMLElement>(':scope > .kbn-ch-item') ?? []]
     const after = next[next.indexOf(row as HTMLElement) + 1] ?? next[next.indexOf(row as HTMLElement) - 1]
-    const key = clearLineKey(item.id, Date.now()), fiber = fiberOf(item.card)
+    const key = clearLineKey(item.id, Date.now()), fiber = fiberOf(item.card), waits = item.clears
     this.pending.push(key)
     this.draw()
     if (held) after?.querySelector<HTMLElement>('[data-item]')?.focus({ preventScroll: true })
+    let cleared: number | undefined
     try {
-      await postDaemonJson(ctx.shuttleBase, '/api/v1/channels/dismiss', { key, fiber }, 'Clear failed')
+      ;[, cleared] = await Promise.all([
+        postDaemonJson(ctx.shuttleBase, '/api/v1/channels/dismiss', { key, fiber }, 'Clear failed'),
+        waits && board ? board.clear(waits) : undefined,
+      ])
     } catch {
       this.pending = this.pending.filter(each => each !== key)
       this.draw()
@@ -782,6 +780,7 @@ export class ChannelsView implements TemporalView {
         this.draw()
         this.status(`${item.card.name}'s line could not be brought back; it stays cleared.`)
       })
+      if (waits && board && cleared !== undefined) void board.unclear(waits, cleared).catch(() => this.status(`${item.card.name}'s post could not be brought back; it stays cleared.`))
     })
   }
   /**

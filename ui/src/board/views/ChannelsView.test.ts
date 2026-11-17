@@ -471,7 +471,7 @@ it('says nothing for a closing post, its words being the outcome', async () => {
 const requestsSince = (from: number): Array<[string, string]> => vi.mocked(fetch).mock.calls.slice(from).map(([url, init]) => [String(url), init?.method ?? 'GET'])
 const LIFECYCLE = /\/api\/v1\/(transition|lifecycle|kill|dispatch)\b/
 
-it('clears a waiting post with its ✓ and does nothing else: one write, the dismissal, and no lifecycle request', async () => {
+it('clears a waiting post with one press of its ✓: it leaves the stream and stops waiting, two dismissals and no lifecycle request, and one undo restores both', async () => {
   const human = { label: 'Sam' }, posted = Date.now() - 4 * minute
   const { posts } = daemon([], undefined, {}, { board: { C: [...BOARD.C, { ...record({ id: 'b5', kind: 'post', fiber: 'C', to: human, text: 'Two calls for you today.' }, 4), timestamp: posted }] }, waiting: { C: { id: 'b5', at: posted } } })
   // The chair is active and was never closed.
@@ -481,11 +481,16 @@ it('clears a waiting post with its ✓ and does nothing else: one write, the dis
   item(host, 'cmbx').querySelector<HTMLButtonElement>('.kbn-ch-clear')!.click()
   await settle(); await settle()
   const asked = requestsSince(from)
-  expect(asked.filter(([, method]) => method === 'POST')).toStrictEqual([['/api/v1/channels/dismiss', 'POST']])
+  expect(asked.filter(([, method]) => method === 'POST')).toStrictEqual([['/api/v1/channels/dismiss', 'POST'], ['/api/v1/channels/dismiss', 'POST']])
   expect(asked.filter(([url]) => LIFECYCLE.test(url))).toStrictEqual([])
-  expect(posts.at(-1)?.[1]).toStrictEqual({ key: `clear:C:${posted}`, fiber: 'C' })
-  expect(item(host, 'cmbx').hasAttribute('data-waiting')).toBe(false)
+  expect(posts.slice(-2).map(([, body]) => body).sort((a, b) => String(a.key).localeCompare(String(b.key)))).toStrictEqual([{ key: `clear:C:${posted}`, fiber: 'C' }, { key: expect.stringMatching(/^line:\d+:b5$/), fiber: 'C' }])
+  expect(item(host, 'cmbx')).toBeUndefined()
   expect(host.querySelector('[data-channel="channel:cmbx"]')!.hasAttribute('data-waiting')).toBe(false)
+  document.querySelector<HTMLButtonElement>('.shuttle-toast .toast-undo')!.click()
+  await settle(); await settle()
+  expect(posts.slice(-2).map(([, body]) => String(body.key)).sort()).toStrictEqual([`unclear:C:${posted}`, expect.stringMatching(/^unline:\d+:b5$/)])
+  expect(item(host, 'cmbx').hasAttribute('data-waiting')).toBe(true)
+  expect(host.querySelector('[data-channel="channel:cmbx"]')!.hasAttribute('data-waiting')).toBe(true)
 })
 
 it('clears a line that waits on no one from the stream, with e as with its ✓, and an undo brings it back; a question has no ✓', async () => {
