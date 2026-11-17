@@ -1065,6 +1065,14 @@ describe('Dock session history', () => {
 })
 
 describe('Dock poll reconciliation', () => {
+  it('draws a live worker\'s launch as the elements\' time, and a finished run\'s clocks in its face', () => {
+    const launched = Date.now() - 12 * 60_000
+    dock.syncRuntime(task({ workerState: 'running', dispatchedAt: new Date(launched).toISOString() }))
+    const live = band.el.querySelector<HTMLElement>('.kbn-ctl-run')!
+    expect([live.textContent, live.querySelector<HTMLElement>('time.el-time')?.dataset.at]).toStrictEqual(['launched 12m ago', String(launched)])
+    dock.syncRuntime(task({ workerState: undefined, dispatchedAt: new Date(launched).toISOString(), handedOffAt: new Date(launched + 5 * 60_000).toISOString() }))
+    expect(band.el.querySelector('.kbn-ctl-run')!.classList.contains('el-time')).toBe(true)
+  })
   it('re-seeds settings from polls and writes only the edited agent axis', async () => {
     dock.syncRuntime(task({ id: 'b/task', shuttleAgent: 'codex-luna', shuttleEffort: 'low',
       shuttleKind: 'standing', shuttleSchedule: '0 9 * * *', shuttleTz: 'UTC', due: '2026-10-12' }))

@@ -24,6 +24,7 @@ import { SettingsMenu } from './SettingsMenu.js'
 import { VoiceStrip, voiceLine, type FiberSlug } from './voiceStrip.js'
 import { fetchTranscriptUsage, paintUsage, warmUntil, type TranscriptUsage } from './transcriptUsage.js'
 import { slug } from '../threadOutline.js'
+import { timeEl } from '../elements/time.js'
 import '@ui-sdk/web/autocomplete'
 import { anchorSelect, dismissSelectPicker } from './selectPicker.js'
 import { ListenControl } from './ListenControl.js'
@@ -35,6 +36,8 @@ interface AgentAxes { agent: string; effort: string; chrome: boolean }
 
 export interface SessionWindow {
   text: string
+  /** A live worker's launch, drawn after the text as the elements' time. */
+  at?: number
   /** `clean`: the run ended on the worker's own handoff stamp (the verdigris
    *  ✓). `unclean`: it stopped without one. `running`: a worker is still up. */
   state: 'running' | 'clean' | 'unclean'
@@ -48,7 +51,7 @@ export interface SessionWindow {
  *
  *   14:02 → 17:38 · 3h 36m            — a clean, concluded run (✓ beside it)
  *   Aug 4 14:02 → 17:38 · 3h 36m      — the same run, days ago
- *   since 14:02                       — a worker still running
+ *   launched 12m ago                  — a worker still running, its clock time on hover
  *   14:02 · no handoff                — it stopped without stamping one
  *
  * A DAY appears in front of a time exactly when the bare time would mislead:
@@ -85,7 +88,8 @@ export function sessionWindow(
 
   if (hasLiveWorker(card)) {
     return {
-      text: `since ${start}`,
+      text: 'launched ',
+      at: dispatched,
       state: 'running',
       title: `Worker launched ${instantStamp(dispatched)} and is still running.`,
     }
@@ -234,7 +238,9 @@ function buildStrip(card: KanbanCard): HTMLElement {
   if (facts.place) put('kbn-ctl-place', facts.place.text, facts.place.title)
   if (facts.due) put('kbn-ctl-due', `due ${facts.due}`)
   if (facts.run) {
-    const run = put('kbn-ctl-run', facts.run.text, facts.run.title, strip)
+    // A live worker's age is the elements' time; a finished run's clocks and span are set in its face.
+    const run = put(facts.run.at === undefined ? 'kbn-ctl-run el-time' : 'kbn-ctl-run', facts.run.text, facts.run.title, strip)
+    if (facts.run.at !== undefined) run.append(timeEl(facts.run.at, Date.now()))
     if (facts.run.state === 'clean') {
       const mark = document.createElement('span')
       mark.className = 'kbn-ctl-run-clean'

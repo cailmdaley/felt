@@ -403,6 +403,7 @@ describe('bar Find transcripts', () => {
     expect(result.title).toBe('/transcripts/alpha.jsonl:2')
     expect(result.querySelector('.ws-search-meta')?.textContent).toContain('claude · b4edf873 · alpha')
     expect(result.querySelector('.ws-search-meta')?.textContent).toContain('13 matches')
+    expect(result.querySelector('.ws-search-meta > time.el-time')?.getAttribute('datetime')).toBe(new Date(hit.timestamp).toISOString())
     expect(document.querySelector('.ws-search-transcripts .kbn-flight-caption')?.textContent).toBe('Transcripts')
     press(find, 'ArrowDown'); expect(document.activeElement).toBe(rows[0])
     press(rows[0], 'ArrowDown'); expect(document.activeElement).toBe(rows[1])

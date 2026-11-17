@@ -1,5 +1,6 @@
 import { slug } from '../threadOutline.js'
 import { openFileList, type OpenFileList, type UnfoldFile } from '../elements/filePreview.js'
+import { retime, timeEl } from '../elements/time.js'
 import type { ThreadIndex } from '../threads.js'
 import './tokens.css'
 import './reader.css'
@@ -494,10 +495,11 @@ export class Reader {
       count.title = `Sent file ${at + 1} of ${sends.length}, newest first: list them`
       count.setAttribute('aria-label', count.title)
     }
-    if (parts.provenance.title !== metadata.summary) {
-      parts.provenance.textContent = metadata.summary
-      parts.provenance.title = metadata.summary
-    }
+    const summary = JSON.stringify(metadata.summary)
+    if (parts.provenance.dataset.summary !== summary) {
+      parts.provenance.dataset.summary = summary
+      parts.provenance.replaceChildren(...metadata.summary.map(part => typeof part === 'string' ? part : timeEl(part.at, Date.now())))
+    } else retime(parts.provenance, Date.now())
   }
 
   private measure(name: string, fallback: number): number {

@@ -65,11 +65,11 @@ describe('frame metadata', () => {
   it('carries genuine modification time and never substitutes creation or previous metadata', () => {
     const first = buildChannel({ ...base, modifiedAt: '2026-10-05T11:00:00Z' })
     expect(proseDocument(first)?.modifiedAt).toBe('2026-10-05T11:00:00Z')
-    expect(documentLabelMetadata(proseDocument(first)!, 'Constitution', base.owner, now)).toEqual({ title: '', summary: 'Last changed 1h ago' })
+    expect(documentLabelMetadata(proseDocument(first)!, 'Constitution', base.owner)).toEqual({ title: '', summary: ['Last changed ', { at: now - 3600000 }] })
     const unknown = proseDocument(buildChannel({ ...base, previous: first }))!
     expect(unknown.modifiedAt).toBeUndefined()
-    expect(documentLabelMetadata(unknown, 'Note', base.owner, now)).toEqual({ title: '', summary: 'Last changed unknown' })
-    expect(documentLabelMetadata({ ...unknown, modifiedAt: 'invalid' }, 'Note', base.owner, now).summary).toBe('Last changed unknown')
+    expect(documentLabelMetadata(unknown, 'Note', base.owner)).toEqual({ title: '', summary: ['Last changed unknown'] })
+    expect(documentLabelMetadata({ ...unknown, modifiedAt: 'invalid' }, 'Note', base.owner).summary).toStrictEqual(['Last changed unknown'])
   })
 
   it('shows arrival and receipts without agent or same-owner host, and names foreign owners', () => {
@@ -78,9 +78,9 @@ describe('frame metadata', () => {
       { kind: 'sent' as const, time: now - 7200000, worker: 'sol' },
       { kind: 'sent' as const, time: now - 3600000, worker: 'sol' },
     ] }
-    expect(documentLabelMetadata(report, 'report', base.owner, now)).toEqual({ title: 'Results', summary: 'sent 1h ago · 2 receipts' })
-    expect(documentLabelMetadata({ ...report, owner: 'host-b' }, 'report', base.owner, now).summary).toBe('sent 1h ago · 2 receipts · host-b')
-    expect(documentLabelMetadata({ ...report, provenance: report.provenance.slice(0, 1) }, 'report', base.owner, now)).toEqual({ title: 'Results', summary: 'embedded' })
+    expect(documentLabelMetadata(report, 'report', base.owner)).toEqual({ title: 'Results', summary: ['sent ', { at: now - 3600000 }, ' · 2 receipts'] })
+    expect(documentLabelMetadata({ ...report, owner: 'host-b' }, 'report', base.owner).summary).toStrictEqual(['sent ', { at: now - 3600000 }, ' · 2 receipts', ' · host-b'])
+    expect(documentLabelMetadata({ ...report, provenance: report.provenance.slice(0, 1) }, 'report', base.owner)).toEqual({ title: 'Results', summary: ['embedded'] })
   })
 })
 
@@ -112,7 +112,7 @@ describe('buildChannel', () => {
     expect(isBaked(change)).toBe(true)
     expect(bakeOf(buildChannel({ ...base, isConstitution: true, change: true, changePRs: [12, 5] }).documents.find(isBaked)!)).toEqual({ uid: 'fiber-1', prs: [12, 5] })
     expect(channel.labels).toEqual(['Results', 'Constitution', 'Change', 'notes.html'])
-    expect(documentLabelMetadata(change, 'Change', 'host-a')).toEqual({ title: 'Change', summary: 'baked on open' })
+    expect(documentLabelMetadata(change, 'Change', 'host-a')).toEqual({ title: 'Change', summary: ['baked on open'] })
     expect(defaultSelection(buildChannel({ ...base, body: 'plain', isConstitution: true, change: true }))).toBe('fiber:host-a:fiber-1')
   })
 

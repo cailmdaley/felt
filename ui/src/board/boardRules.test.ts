@@ -620,12 +620,13 @@ describe('sessionWindow', () => {
     expect(w?.text).toMatch(/→ [A-Za-z]{3}\.? ?\d{1,2} \d{2}:\d{2} · 4h 0m$/)
   })
 
-  it('says since when for a live worker, and claims no clean exit', () => {
+  it('says when a live worker launched, as an age with its clock time on hover, and claims no clean exit', () => {
     const w = sessionWindow(
       { dispatchedAt: at(-20 * 60_000), workerState: 'running' },
       NOW,
     )
-    expect(w?.text).toMatch(/^since \d{2}:\d{2}$/)
+    expect([w?.text, w?.at]).toStrictEqual(['launched ', NOW - 20 * 60_000])
+    expect(w?.title).toMatch(/\d{2}:\d{2}/)
     expect(w?.state).toBe('running')
   })
 

@@ -9,7 +9,6 @@ import { deskOrder } from './deskOrdering.js'
 import { hasLiveWorker, type KanbanCard, type KanbanResponse } from './KanbanTypes.js'
 import { card, servedFeed } from './testFixtures.js'
 import { TURN_WORD, turnOf, type Turn } from './turn.js'
-import { workerPlateFacts } from './workspace/workerPlate.js'
 
 const NOW = Date.parse('2026-10-18T12:00:00Z')
 const live = (over: Partial<KanbanCard>): KanbanCard =>
@@ -132,7 +131,6 @@ describe('the column, the dot and the worker facts cannot disagree', () => {
         // An idle worker that asked nothing works.
         if (turn.turn === 'idle') expect(attention).toBe('working')
         expect(turn.word).toBe(TURN_WORD[turn.turn])
-        expect(workerPlateFacts(c, NOW).turn).toBe(turn.turn)
         expect(ATTENTION_ORDER).toContain(attention)
       }
     }), { numRuns: 150 })

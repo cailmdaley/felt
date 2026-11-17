@@ -125,6 +125,9 @@ describe('say it once label bars', () => {
       expect(fiber.label.querySelector('.ws-label-title')?.textContent).toBe('')
       expect(fiber.label.querySelector('.ws-kind-glyph')?.textContent).toBe('')
       expect(fiber.label.textContent).toContain('Last changed 1h ago')
+      // The age is the elements' time: its face, and the instant in full on hover.
+      const changed = fiber.label.querySelector<HTMLElement>('.ws-provenance > time.el-time')!
+      expect([changed.textContent, changed.dataset.at]).toStrictEqual(['1h ago', String(now - 3600000)])
       expect(fiber.label.textContent).not.toMatch(/Constitution|fiber page|Task name|host-a/)
       expect(report.label.querySelector('.ws-provenance')?.textContent).toBe('sent 1h ago')
       expect(reader.host.get(first.documents.find(d => d.name === 'foreign.pdf')!.key)!.label.querySelector('.ws-provenance')?.textContent).toBe('sent 1h ago · host-b')

@@ -1,4 +1,4 @@
-import { ago } from '../civilDay.js'
+import { timeEl } from '../elements/time.js'
 import { hitLocation, projectName, searchTranscripts, snippetPieces, type TranscriptHit } from './transcriptSearch.js'
 import './transcriptResults.css'
 
@@ -72,7 +72,8 @@ export class TranscriptResults {
     const meta = document.createElement('small')
     meta.className = 'ws-search-meta'
     const when = Date.parse(hit.timestamp)
-    meta.textContent = [hit.harness || 'session', hit.session.slice(0, 8), projectName(hit.project), Number.isFinite(when) ? ago(when) : '', `${hit.matches} ${hit.matches === 1 ? 'match' : 'matches'}`, ...hit.fibers.map(fiber => fiber.name || fiber.id)].filter(Boolean).join(' · ')
+    const parts: Array<string | HTMLElement> = [hit.harness || 'session', hit.session.slice(0, 8), projectName(hit.project), ...Number.isFinite(when) ? [timeEl(when, Date.now())] : [], `${hit.matches} ${hit.matches === 1 ? 'match' : 'matches'}`, ...hit.fibers.map(fiber => fiber.name || fiber.id)].filter(Boolean)
+    meta.append(...parts.flatMap((part, n) => n ? [' · ', part] : [part]))
     const copy = document.createElement('button')
     copy.type = 'button'
     copy.textContent = 'copy path'

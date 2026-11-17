@@ -1,7 +1,7 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import { ATTENTION, ATTENTION_WORD, conversable, type MapFeeds, type MapFile } from '../family/model.js'
 import { htmlEl as el, markPath, svgEl } from '../family/drawing.js'
-import { age } from '../civilDay.js'
+import { timeEl } from '../elements/time.js'
 import { PERIOD, PROJECTIONS, UPRIGHT, bounded, carried, planeOutline, facing, flight, frameOf, grip, invert, keeping, northUp, project, wholeRadius, type Camera, type Flight, type Frame, type Grip, type Projection, type Viewport } from './camera.js'
 import { forestOf, persistentId } from './forest.js'
 import { NORTH, cellSpan, centre, child, facePoint, inCell, ipixOf, type FacePoint, type Vec } from './healpix.js'
@@ -628,12 +628,13 @@ export class GlobeStage {
     const title = el('div', 'globe-peek-title')
     title.dataset.standing = body.tone
     title.append(el('span', 'globe-peek-name', body.name))
-    if (thread) title.append(el('span', 'globe-peek-meta', [thread.word, age(now - thread.lastMove)].join(' · ')))
+    const meta = (...parts: Array<string | HTMLElement>): HTMLElement => { const span = el('span', 'globe-peek-meta'); span.append(...parts); return span }
+    if (thread) title.append(meta(`${thread.word} · `, timeEl(thread.lastMove, now)))
     else if (body.kind === 'province' || body.kind === 'area') {
       const families = this.familyCount(body)
       title.append(el('span', 'globe-peek-meta', `${families} ${families === 1 ? 'family' : 'families'}`))
     }
-    else if (body.file?.at) title.append(el('span', 'globe-peek-meta', age(now - body.file.at)))
+    else if (body.file?.at) title.append(meta(timeEl(body.file.at, now)))
     title.append(el('span', 'globe-peek-cell', `order ${body.cell.order} · nest ${ipixOf(body.cell)}`))
     this.peek.append(title)
     if (thread?.note) this.peek.append(el('p', 'globe-peek-note', firstSentence(thread.note)))

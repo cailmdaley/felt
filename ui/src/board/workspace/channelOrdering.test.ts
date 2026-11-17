@@ -32,7 +32,7 @@ describe('channel order properties', () => {
     const sent = [{ path: 'out/report.html', time: 30 }, { path: 'plot.png', time: 20 }, { path: 'log.txt', time: 10 }]
     const early = buildChannel({ ...input, sent, routed: [{ path: 'opened.csv' }] })
     expect(early.documents.map(d => d.name)).toEqual(['Note', 'report.html', 'plot.png', 'log.txt', 'opened.csv'])
-    expect(documentLabelMetadata(early.documents[4], 'opened.csv', 'host').summary).toBe('opened by address')
+    expect(documentLabelMetadata(early.documents[4], 'opened.csv', 'host').summary).toStrictEqual(['opened by address'])
     const loaded = buildChannel({ ...input, sent, previous: early, embeds: [{ path: 'out/report.html' }, { path: 'notes.md' }] })
     expect(loaded.documents.map(d => d.name)).toEqual(['notes.md', 'report.html', 'Note', 'plot.png', 'log.txt'])
   })

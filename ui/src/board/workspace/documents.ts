@@ -1,4 +1,3 @@
-import { ago } from '../civilDay.js'
 import { extractEmbeds, fileKind } from '../attachments.js'
 import { declaredTitle } from './DocumentTitles.js'
 
@@ -348,23 +347,25 @@ export function buildChannel(input: ChannelInput): Channel {
   return channel
 }
 
+/** A label's summary: its words, and the instants among them, which the label draws as the elements' time. */
+export type Summary = Array<string | { at: number }>
+
 /** The frame owns document naming and arrival metadata; renderers own content only. */
-export function documentLabelMetadata(doc: WorkspaceDocument, label: string, channelOwner: string, now = Date.now()): { title: string; summary: string } {
-  const age = (time: number): string => ago(time, now)
-  if (doc.kind === 'family') return { title: '', summary: '' }
-  if (isBaked(doc)) return { title: label, summary: 'baked on open' }
+export function documentLabelMetadata(doc: WorkspaceDocument, label: string, channelOwner: string): { title: string; summary: Summary } {
+  if (doc.kind === 'family') return { title: '', summary: [] }
+  if (isBaked(doc)) return { title: label, summary: ['baked on open'] }
   if (doc.kind === 'fiber') {
     const time = doc.modifiedAt ? Date.parse(doc.modifiedAt) : NaN
-    return { title: '', summary: Number.isFinite(time) ? `Last changed ${age(time)}` : 'Last changed unknown' }
+    return { title: '', summary: Number.isFinite(time) ? ['Last changed ', { at: time }] : ['Last changed unknown'] }
   }
   const sent = doc.provenance.filter(p => p.kind === 'sent')
   const latest = sent.filter(p => Number.isFinite(p.time)).sort((a, b) => b.time - a.time)[0]
   const embed = doc.provenance.find(p => p.kind === 'embed')
   const linked = doc.provenance.some(p => p.kind === 'link')
-  const segments = [sent.length ? latest ? `sent ${age(latest.time)}` : 'sent · time unknown' : embed ? 'embedded' : linked ? 'linked from body' : 'opened by address']
-  if (sent.length > 1) segments.push(`${sent.length} receipts`)
-  if (doc.owner !== channelOwner) segments.push(doc.owner)
-  return { title: declaredTitle(doc.key)?.title ?? (embed?.kind === 'embed' && embed.title ? embed.title : label), summary: segments.join(' · ') }
+  const summary: Summary = sent.length ? latest ? ['sent ', { at: latest.time }] : ['sent · time unknown'] : [embed ? 'embedded' : linked ? 'linked from body' : 'opened by address']
+  if (sent.length > 1) summary.push(` · ${sent.length} receipts`)
+  if (doc.owner !== channelOwner) summary.push(` · ${doc.owner}`)
+  return { title: declaredTitle(doc.key)?.title ?? (embed?.kind === 'embed' && embed.title ? embed.title : label), summary }
 }
 
 export function defaultSelection(channel: Channel): DocKey {

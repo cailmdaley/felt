@@ -80,6 +80,8 @@ describe('moving on the globe', () => {
     clickAt(400, 500)
     expect(crumbs().at(-1)).toBe('science/hub')
     expect(board.conversed).toEqual(['science/hub'])
+    // Its peek says when it last moved in the elements' time.
+    expect(stage.el.querySelector('.globe-peek-meta > time.el-time')?.textContent).toMatch(/ago$|^now$/)
     stage.keydown(new KeyboardEvent('keydown', { key: 'h' }))
     settle()
     expect(crumbs()).toEqual(['Everything', 'science'])
