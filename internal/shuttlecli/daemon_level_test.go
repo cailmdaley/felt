@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -370,6 +371,48 @@ func TestDaemonUpgradeFailsWhenNothingRestartsTheDaemon(t *testing.T) {
 	}
 }
 
+// A daemon that a supervisor starts while the archive downloads is found
+// after the swap and restarted; the upgrade never reports that no daemon runs
+// while the old one does.
+func TestDaemonUpgradeFindsADaemonThatStartsDuringTheDownload(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	reserved, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := reserved.Addr().String()
+	reserved.Close()
+	env.Set("SHUTTLE_DAEMON_URL", "http://"+addr)
+	env.Set("SHUTTLE_PORT", addr[strings.LastIndex(addr, ":")+1:])
+	sysenvtest.FakeCommand(t, env, "lsof", fmt.Sprintf("#!/bin/sh\necho %d\n", os.Getpid()))
+	release := filepath.Join(t.TempDir(), "share", "shuttle")
+	fakeRelease(t, release, "2.0.0")
+	env.Set("SHUTTLE_RELEASE", release)
+	archive := releaseArchive(t, "2.1.0")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		respawned, err := net.Listen("tcp", addr)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		old := &http.Server{Handler: versionBody("hub", "2.0.0", ShuttleContractLevel-1)}
+		go func() { _ = old.Serve(respawned) }()
+		t.Cleanup(func() { _ = old.Close() })
+		_, _ = w.Write(archive)
+	}))
+	t.Cleanup(server.Close)
+	app := newApp(env)
+	app.version, app.releaseDownloadBase = "2.1.0", server.URL
+	app.daemonPause = func(time.Duration) {}
+	var stopped atomic.Bool
+	app.daemonSignalPID = func(int, syscall.Signal) error { stopped.Store(true); return nil }
+	stdout, _, err := executeApp(t, app, "", "daemon", "upgrade")
+	if strings.Contains(stdout, "no daemon is running") || !stopped.Load() || err == nil || !strings.Contains(err.Error(), "nothing restarted it") {
+		t.Fatalf("upgrade with a daemon started during the download = %q, err %v, stopped %v; want the old daemon stopped and, with nothing restarting it, a failure", stdout, err, stopped.Load())
+	}
+}
+
 // A daemon that is listening but does not answer fails the upgrade before
 // anything is downloaded or replaced; only a refused connection means no
 // daemon runs.
@@ -391,7 +434,7 @@ func TestDaemonUpgradeFailsBeforeTheSwapWhenTheDaemonDoesNotAnswer(t *testing.T)
 	app := newApp(env)
 	app.version, app.releaseDownloadBase = "2.1.0", server.URL
 	_, _, err := executeApp(t, app, "", "daemon", "upgrade")
-	if err == nil || !strings.Contains(err.Error(), "the daemon did not answer") || fetched.Load() {
+	if err == nil || !strings.Contains(err.Error(), "the daemon's version could not be read") || fetched.Load() {
 		t.Fatalf("upgrade with a daemon that does not answer = %v (fetched %v), want a failure before the swap", err, fetched.Load())
 	}
 	if got := app.releaseVersion(daemonRelease{Launcher: filepath.Join(release, "bin", "shuttled")}); got != "2.0.0" {
