@@ -17,12 +17,15 @@ const latinFold: Record<string, string> = {
 /**
  * The slug a title gives a new fiber, by felt's convention: lowercase letters
  * and digits joined by single hyphens, at most 60 characters, with no hyphen
- * at either end. Latin letters fold to ASCII as the CLI folds them (é to e,
- * ß to ss). Empty when the title has no letters or digits; each caller names
- * that case for itself.
+ * at either end. It derives as the CLI's Slugify does: [bracketed] tags are
+ * dropped, İ lowercases to i, and Latin letters fold to ASCII (é to e, ß to
+ * ss). Empty when the title has no letters or digits; each caller names that
+ * case for itself.
  */
 export function slugStem(title: string): string {
   return title
+    .replace(/\[[^\]]*\]/g, '')
+    .replace(/İ/g, 'i')
     .toLowerCase()
     .replace(/[^\x00-\x7f]/g, (c) => latinFold[c] ?? c)
     .replace(/[^a-z0-9]+/g, '-')

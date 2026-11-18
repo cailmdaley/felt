@@ -200,6 +200,12 @@ func TestAddRefusesNonConformingNewSlugs(t *testing.T) {
 			t.Fatalf("refused add %q wrote a file", tc.slug)
 		}
 	}
+	// A segment with no letters or digits has no conforming form to name.
+	for _, slug := range []string{"...", ".-"} {
+		if _, err := runCommand(t, dir, "add", slug, "Name"); err == nil || strings.Contains(err.Error(), "use") {
+			t.Fatalf("add %q = %v, want a refusal naming no conforming form", slug, err)
+		}
+	}
 	for _, slug := range []string{"unions/shear_2d/new-thing", "c-ℓ-space/child", "shear_2d/placed"} {
 		if out, err := runCommand(t, dir, "add", slug, "Name"); err != nil {
 			t.Fatalf("add %q: %v\n%s", slug, err, out)

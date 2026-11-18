@@ -1,6 +1,7 @@
 package feltcli
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -68,7 +69,11 @@ start with a dot, with or without --uid.`,
 					return fmt.Errorf("slug %q must be a path inside the store", f.ID)
 				}
 				if strings.HasPrefix(segment, ".") {
-					return fmt.Errorf("slug %q starts with \".\", which no segment may; use %q", segment, felt.Slugify(segment))
+					err := fmt.Sprintf("slug %q starts with \".\", which no segment may", segment)
+					if conforming := felt.Slugify(segment); conforming != "" {
+						err += fmt.Sprintf("; use %q", conforming)
+					}
+					return errors.New(err)
 				}
 			}
 			if addUID != "" {

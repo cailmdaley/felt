@@ -1,5 +1,11 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { slugStem } from './slug'
+
+/** Titles and the slugs the CLI's Slugify derives from them. */
+const cliSlugs: Record<string, string> = JSON.parse(
+  readFileSync(new URL('../../../internal/felt/testdata/slugify.json', import.meta.url), 'utf8'),
+)
 
 describe('slugStem', () => {
   it('joins lowercase words with single hyphens', () => {
@@ -15,10 +21,10 @@ describe('slugStem', () => {
     expect(slugStem('— !')).toBe('')
   })
 
-  it('folds Latin letters to ASCII as the CLI does', () => {
-    expect(slugStem('Café résumé')).toBe('cafe-resume')
-    expect(slugStem('Straße')).toBe('strasse')
-    expect(slugStem('Æsir Œuvre Øre Đak Łódź Þing Ðe Iı')).toBe('aesir-oeuvre-ore-dak-lodz-thing-de-ii')
+  it('derives the slug the CLI derives', () => {
+    for (const [title, slug] of Object.entries(cliSlugs)) {
+      expect(slugStem(title), title).toBe(slug)
+    }
   })
 
   it('always matches the slug convention or is empty', () => {

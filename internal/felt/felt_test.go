@@ -3,6 +3,7 @@ package felt
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -219,6 +220,25 @@ func TestGenerateIDRejectsEmptySlug(t *testing.T) {
 	_, err := GenerateID("!!!")
 	if err == nil {
 		t.Fatal("GenerateID should reject titles with no alphanumeric characters")
+	}
+}
+
+// The board derives a slug as Slugify does; both read this table
+// (ui/src/board/slug.test.ts).
+func TestSlugifySharedFixture(t *testing.T) {
+	t.Parallel()
+	data, err := os.ReadFile("testdata/slugify.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases map[string]string
+	if err := json.Unmarshal(data, &cases); err != nil {
+		t.Fatal(err)
+	}
+	for title, want := range cases {
+		if got := Slugify(title); got != want {
+			t.Errorf("Slugify(%q) = %q, want %q", title, got, want)
+		}
 	}
 }
 
