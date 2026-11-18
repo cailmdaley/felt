@@ -34,12 +34,16 @@ describe('holdings', () => {
     ufPage.dataset.key = 'local:/a/plot.html'
     ufPage.append(frame('x'.repeat(40)))
     unfolded.append(ufPage)
+    const pdf = document.createElement('div')
+    pdf.dataset.pdfBytes = '2500000'
+    pdf.append(Object.assign(document.createElement('canvas'), { width: 1000, height: 1500 }), Object.assign(document.createElement('canvas'), { width: 1000, height: 1500 }))
     const folded = document.createElement('div')
     folded.className = 'uf'
     document.body.append(
       thumb, unfolded, folded, frame('stray'),
       readerPage('local:/a/tapestry.html', 'ws-parked', [frame('y'.repeat(1000))]),
       readerPage('local:/a/notes.html', 'ws-selected', [frame('z'.repeat(10))]),
+      readerPage('local:/a/deck.pdf', 'ws-parked', [pdf]),
       readerPage('local:/a/evicted.html', 'ws-receded', [Object.assign(document.createElement('div'), { className: 'ws-placeholder' })]),
     )
     history.replaceState(null, '', '#/channels')
@@ -52,6 +56,7 @@ describe('holdings', () => {
       reader: [
         { key: 'local:/a/tapestry.html', state: 'parked', frames: 1, chars: 1000 },
         { key: 'local:/a/notes.html', state: 'selected', frames: 1, chars: 10 },
+        { key: 'local:/a/deck.pdf', state: 'parked', frames: 0, chars: 0, pdfBytes: 2_500_000, canvases: 2, megapixels: 3 },
       ],
       unfolded: [{ key: 'local:/a/plot.html', frames: 1, chars: 40 }],
       images: { count: 1 },

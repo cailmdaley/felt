@@ -14,6 +14,8 @@ export function mountPdfViewer(
   onReady: () => void,
   onError: (message: string) => void,
 ): MountedPdfViewer {
+  // The board's holdings report reads what each document keeps from here.
+  host.dataset.pdfBytes = String(bytes.byteLength)
   const toolbar = document.createElement('div')
   toolbar.className = 'kbn-pdf-toolbar'
   toolbar.setAttribute('aria-label', 'PDF controls')

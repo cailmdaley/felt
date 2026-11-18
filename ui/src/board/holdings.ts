@@ -3,8 +3,12 @@ import { heldText } from './documentResources.js'
 import { thumbnailCount } from './workspace/Thumbnail.js'
 import { viewOfHash } from './workspace/route.js'
 
-/** A document the page keeps: its key, its DOM elements, its frames and their `srcdoc` characters. */
-export interface HeldDocument { key: string; state?: string; nodes: number; frames: number; chars: number }
+/**
+ * A document the page keeps: its key, its DOM elements, its frames and their
+ * `srcdoc` characters, the PDFs drawn in it (their bytes), and the pixels of
+ * its canvases and images, in megapixels.
+ */
+export interface HeldDocument { key: string; state?: string; nodes: number; frames: number; chars: number; pdfBytes: number; canvases: number; megapixels: number }
 
 /** What the board holds at one moment, read from the page as it stands. */
 export interface Holdings {
@@ -23,13 +27,23 @@ export interface Holdings {
   cache: { chars: number; entries: number }
 }
 
-function held(el: Element, key: string, state?: string): HeldDocument {
+const megapixels = (images: Iterable<HTMLImageElement | HTMLCanvasElement>): number => {
+  let pixels = 0
+  for (const image of images) pixels += image instanceof HTMLImageElement ? image.naturalWidth * image.naturalHeight : image.width * image.height
+  return Math.round(pixels / 1e4) / 100
+}
+
+function held(el: HTMLElement, key: string, state?: string): HeldDocument {
   const frames = [...el.getElementsByTagName('iframe')]
+  const canvases = el.getElementsByTagName('canvas')
   return {
     key, ...state ? { state } : {},
     nodes: el.getElementsByTagName('*').length,
     frames: frames.length,
     chars: frames.reduce((sum, frame) => sum + (frame.getAttribute('srcdoc')?.length ?? 0), 0),
+    pdfBytes: [...el.querySelectorAll<HTMLElement>('[data-pdf-bytes]')].reduce((sum, pdf) => sum + Number(pdf.dataset.pdfBytes), 0),
+    canvases: canvases.length,
+    megapixels: megapixels([...canvases, ...el.getElementsByTagName('img')]),
   }
 }
 
@@ -58,10 +72,7 @@ export function holdings(): Holdings {
       .map(page => held(page, page.dataset.key ?? '', readerState(page))),
     unfolded: [...document.querySelectorAll<HTMLElement>('.uf[data-unfolded] .uf-page')]
       .map(page => held(page, page.dataset.key ?? '')),
-    images: {
-      count: images.length,
-      megapixels: Math.round(images.reduce((sum, image) => sum + image.naturalWidth * image.naturalHeight, 0) / 1e4) / 100,
-    },
+    images: { count: images.length, megapixels: megapixels(images) },
     cache: heldText(),
   }
 }
