@@ -953,7 +953,8 @@ var linkOpenRe = regexp.MustCompile(`\[[^\]]*\]\(`)
 // only when whitespace leads to a "quoted", 'quoted' or (parenthesised) text
 // whose closing delimiter, escapes honoured, is followed by nothing but
 // whitespace and the link's ")": the title in ../meeting (title) is one, and
-// "(1)" in ../report (1).pdf is part of the file name.
+// "(1)" in ../report (1).pdf is part of the file name. A link ends within its
+// paragraph: a blank line before its ")" means it is none.
 func markdownLinks(text string) [][]int {
 	var links [][]int
 	from := 0
@@ -994,7 +995,7 @@ func scanLinkTail(text string, i int) (d0, d1, end int, ok bool) {
 		return 0, 0, 0, false
 	}
 	depth := 0
-	for ; i < len(text); i++ {
+	for ; i < len(text) && !blankLineAt(text, i); i++ {
 		c := text[i]
 		switch {
 		case isLinkSpace(c) && depth == 0:
@@ -1030,6 +1031,9 @@ func scanTitleAndClose(text string, i int) (int, bool) {
 		}
 		i++
 		for ; i < len(text) && text[i] != closer; i++ {
+			if blankLineAt(text, i) {
+				return 0, false
+			}
 			if text[i] == '\\' {
 				i++
 			}
@@ -1047,6 +1051,17 @@ func scanTitleAndClose(text string, i int) (int, bool) {
 }
 
 func isLinkSpace(c byte) bool { return c == ' ' || c == '\t' || c == '\n' }
+
+// blankLineAt reports whether a blank line, which ends a paragraph, starts
+// at the newline at i.
+func blankLineAt(text string, i int) bool {
+	if text[i] != '\n' {
+		return false
+	}
+	for i++; i < len(text) && (text[i] == ' ' || text[i] == '\t'); i++ {
+	}
+	return i < len(text) && text[i] == '\n'
+}
 
 // wikiLinkRe matches [[slug]], [[slug#fragment]], and [[slug#fragment|label]] wikilinks.
 var wikiLinkRe = regexp.MustCompile(`\[\[([^\]|#]+)(?:#([^\]|]+))?(?:\|[^\]]+)?\]\]`)
@@ -1101,8 +1116,10 @@ func bodyRefSites(body string) []bodyRefSite {
 	var sites []bodyRefSite
 	masked := maskCode(body)
 	for _, markdown := range []bool{true, false} {
-		matches := markdownLinks(masked)
-		if !markdown {
+		var matches [][]int
+		if markdown {
+			matches = markdownLinks(masked)
+		} else {
 			matches = wikiLinkRe.FindAllStringSubmatchIndex(masked, -1)
 		}
 		for _, m := range matches {

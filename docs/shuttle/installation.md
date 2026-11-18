@@ -159,8 +159,8 @@ left stopped, and the command fails saying to run `shuttle daemon start`,
 which runs in the foreground, then `shuttle daemon release`. With no daemon
 running, it holds the daemon's ownership claim until the new release is in
 place, so a supervisor's start in the meantime fails and its retry starts the
-new release; a daemon that is starting fails the upgrade before anything is
-replaced. The replaced
+new release; a daemon that is starting, or a `~/.shuttle/owner-node` that
+names another login node, fails the upgrade before anything is replaced. The replaced
 release is kept at `<release>.previous` unless the upgrade sees a daemon
 running the new one. Like every restart, it arms the boot quarantine: review the board, then run
 `shuttle daemon release`. `shuttle daemon check` prints the same comparison on

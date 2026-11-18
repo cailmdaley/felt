@@ -95,7 +95,7 @@ func (a *app) claimDaemonOwner(settings hostSettings, replacePID int, installing
 				// installer's claim. This works before the child has bound its listener.
 				handoff := installing == nil && owner.Supervisor != "" && a.supervisorMainPID(supervisorOptions{OS: owner.OS, Label: owner.Supervisor}) == os.Getpid()
 				if !handoff {
-					return nil, fmt.Errorf("daemon endpoint already claimed by live process %d (start or install in progress)", owner.PID)
+					return nil, fmt.Errorf("daemon endpoint already claimed by live process %d (start, install or upgrade in progress)", owner.PID)
 				}
 			}
 		}

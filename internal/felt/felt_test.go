@@ -1551,6 +1551,19 @@ func TestMarkdownLinksReadTheDestination(t *testing.T) {
 	}
 }
 
+// A link ends within its paragraph: an opening that never closes does not
+// swallow the links of the paragraphs after it.
+func TestMarkdownLinksEndAtABlankLine(t *testing.T) {
+	t.Parallel()
+	body := "See [plan](../plan draft\n\nLater (aside) see [design](../design).)"
+	if refs := ExtractBodyRefs(body); len(refs) != 1 || refs[0].Target != "design" {
+		t.Errorf("refs = %v, want design alone", refs)
+	}
+	if links := markdownLinks("[t](a\n\"title\")"); len(links) != 1 {
+		t.Errorf("a title on the next line = %v, want one link", links)
+	}
+}
+
 // A file name that starts like a fiber's slug and goes on with a quote or a
 // parenthesis is no reference to that fiber, and no rewrite of it touches it.
 func TestBodyRefsLeaveFileNamesHoldingQuotesAndParentheses(t *testing.T) {
