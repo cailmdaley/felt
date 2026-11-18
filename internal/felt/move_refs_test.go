@@ -704,3 +704,25 @@ func TestMoveSubtreeLeavesFiberAndMissingRefShapedLinksOfAMovedFiber(t *testing.
 		t.Fatalf("b after move:\n%s\nwant:\n%s", got, b)
 	}
 }
+
+// Whether a moved fiber's ref-shaped link reaches a path is decided before the
+// move: a link that reached nothing stays as written even when the move puts
+// the fiber itself at that path.
+func TestMoveSubtreeDecidesFileLinksBeforeTheMove(t *testing.T) {
+	t.Parallel()
+	dir, s := newStore(t)
+	if err := os.WriteFile(filepath.Join(dir, "Makefile"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"a", "c", "c/d"} {
+		writeFiberFile(t, s, id, fiber("F", ""))
+	}
+	writeFiberFile(t, s, "a/b", fiber("B", "[mk](../../../Makefile) [x](../../c/d/b) [x2](../../c/d/b/img)"))
+	if _, err := s.MoveSubtree("a/b", "c/d/b"); err != nil {
+		t.Fatalf("MoveSubtree: %v", err)
+	}
+	want := fiber("B", "[mk](../../../../Makefile) [x](../../c/d/b) [x2](../../c/d/b/img)")
+	if got := readFiberFile(t, s, "c/d/b"); got != want {
+		t.Fatalf("b after move:\n%s\nwant:\n%s", got, want)
+	}
+}

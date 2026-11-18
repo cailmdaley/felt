@@ -1505,10 +1505,31 @@ func TestMarkdownDestinationKeepsSpacesBeforeNoTitle(t *testing.T) {
 		`<a b.png> "t"`:                      "a b.png",
 		`my plot.png "T"`:                    "my plot.png",
 		`../x.png "t ../q/r"`:                "../x.png",
+		"../meeting (paren title":            "../meeting",
+		`meeting "a (b`:                      "meeting",
+		`../meeting "say \"hi\""`:            "../meeting",
 	} {
 		if got := markdownDestination(raw); got != want {
 			t.Errorf("markdownDestination(%q) = %q, want %q", raw, got, want)
 		}
+	}
+}
+
+// A title in parentheses, a quoted title holding ")", and a quoted title
+// holding an escaped quote are titles: the link is a reference to meeting, and
+// a rewrite changes only the target.
+func TestBodyRefsReadEveryTitleFormAsATitle(t *testing.T) {
+	t.Parallel()
+	body := `[5](../meeting (paren title)) [11](../meeting "say \"hi\"") [13](meeting "a (b)") [q](meeting 'it\'s')`
+	if refs := ExtractBodyRefs(body); len(refs) != 1 || refs[0].Target != "meeting" {
+		t.Errorf("refs = %v, want meeting alone", refs)
+	}
+	got, _ := RewriteBodyRefs(body, func(target string) (string, bool) {
+		return "mtg", target == "meeting"
+	})
+	want := `[5](../mtg (paren title)) [11](../mtg "say \"hi\"") [13](mtg "a (b)") [q](mtg 'it\'s')`
+	if got != want {
+		t.Errorf("rewrite:\n got %s\nwant %s", got, want)
 	}
 }
 

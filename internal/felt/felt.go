@@ -1087,12 +1087,15 @@ func RewriteBodyRefs(body string, rewrite func(target string) (string, bool)) (s
 // mailto:), which no relative file path does.
 var urlSchemeRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*:`)
 
-// titleRe matches a markdown link's quoted title and the whitespace before it.
-var titleRe = regexp.MustCompile(`\s+("[^"]*"|'[^']*')\s*$`)
+// titleRe matches a markdown link's title and the whitespace before it: a
+// "quoted" or 'quoted' title, which may hold escaped quotes, or a (parenthesised)
+// one. bodyLinkRe stops at the first ")", so a title holding ")" or in
+// parentheses arrives cut short, and its closing delimiter is optional here.
+var titleRe = regexp.MustCompile(`\s+("(?:[^"\\]|\\.)*"?|'(?:[^'\\]|\\.)*'?|\([^)]*)\s*$`)
 
 // markdownDestination is a markdown link's destination as written inside its
 // parentheses: the text inside <...>, or else the trimmed text before any
-// quoted title, spaces included.
+// title, spaces included.
 func markdownDestination(raw string) string {
 	destination := strings.TrimSpace(raw)
 	if inner, ok := strings.CutPrefix(destination, "<"); ok {

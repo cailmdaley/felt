@@ -1062,10 +1062,8 @@ func (s *Storage) MoveSubtree(oldID, newID string) (*MoveResult, error) {
 	return result, err
 }
 
-// moveRewriteContext is what a journaled rewrite needs to replay the plan. Root
-// is the store directory its ids are relative to.
+// moveRewriteContext is what a journaled rewrite needs to replay the plan.
 type moveRewriteContext struct {
-	Root            string
 	OldIDs          []string
 	NewIDs          []string
 	OldID           string
@@ -1073,6 +1071,10 @@ type moveRewriteContext struct {
 	ExternalRoot    string
 	ExternalPrefix  string
 	AbsentNeighbors map[string]int
+	// Existing holds the file links, in id coordinates, that reached a file or
+	// directory when the move was planned. A link's fate is decided then, once:
+	// after the move a path may exist that did not before.
+	Existing map[string]bool
 }
 
 // pendingWrite applies the move's reference semantics to the current document.
@@ -1114,7 +1116,8 @@ func (w pendingWrite) writeJournaled(s *Storage, task *moveRewrite, journal *mov
 				return fmt.Errorf("move rewrite conflict in %s: document changed after the recorded write intent", path)
 			}
 		}
-		rewriteMovedFiber(f, before, after, context.Root, w.sourceOld, w.id, w.sourceDir, context.OldID, context.NewID)
+		exists := func(linked string) bool { return context.Existing[linked] }
+		rewriteMovedFiber(f, before, after, exists, w.sourceOld, w.id, w.sourceDir, context.OldID, context.NewID)
 		return nil
 	}, func(path string, original, updated []byte) error {
 		if task != nil {
@@ -1175,8 +1178,16 @@ func planMoveRewrites(root string, all, sources []*Felt, external *ExternalRefs,
 	sort.Strings(newIDs)
 	before := newScopedIDResolverIn(oldIDs, external, absent...)
 	after := newScopedIDResolverIn(newIDs, external, absent...)
-	context := &moveRewriteContext{Root: root, OldIDs: oldIDs, NewIDs: newIDs,
-		OldID: oldID, NewID: newID, ExternalRoot: external.Root(), ExternalPrefix: external.Prefix(), AbsentNeighbors: before.absent}
+	context := &moveRewriteContext{OldIDs: oldIDs, NewIDs: newIDs,
+		OldID: oldID, NewID: newID, ExternalRoot: external.Root(), ExternalPrefix: external.Prefix(), AbsentNeighbors: before.absent,
+		Existing: map[string]bool{}}
+	exists := func(linked string) bool {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(linked))); err != nil {
+			return false
+		}
+		context.Existing[linked] = true
+		return true
+	}
 
 	var writes []pendingWrite
 	for _, f := range sources {
@@ -1184,7 +1195,7 @@ func planMoveRewrites(root string, all, sources []*Felt, external *ExternalRefs,
 		sourceDir := DocumentDir(f)
 		clone := *f
 		clone.ID = sourceNew
-		if !rewriteMovedFiber(&clone, before, after, root, f.ID, sourceNew, sourceDir, oldID, newID) {
+		if !rewriteMovedFiber(&clone, before, after, exists, f.ID, sourceNew, sourceDir, oldID, newID) {
 			continue
 		}
 
@@ -1200,7 +1211,8 @@ func planMoveRewrites(root string, all, sources []*Felt, external *ExternalRefs,
 // rewriteMovedFiber rewrites, in f, every reference whose meaning the move of
 // oldID to newID would change: inputs.from, body links to fibers, and markdown
 // links to files. The source sits at sourceOld before the move and sourceNew
-// after it, its document in sourceDir before the move, in the store at root.
+// after it, its document in sourceDir before the move. exists says whether a
+// file link, in id coordinates, reached a file or directory before the move.
 // Planning and the journaled write both call it, so a replay rewrites what the
 // plan saw.
 //
@@ -1210,7 +1222,7 @@ func planMoveRewrites(root string, all, sources []*Felt, external *ExternalRefs,
 // the source moves and the link reaches an existing file or directory, so a
 // broken fiber link is not respelled as a path. File links are carried first,
 // against the body as written.
-func rewriteMovedFiber(f *Felt, before, after *scopedIDResolver, root, sourceOld, sourceNew, sourceDir, oldID, newID string) bool {
+func rewriteMovedFiber(f *Felt, before, after *scopedIDResolver, exists func(linked string) bool, sourceOld, sourceNew, sourceDir, oldID, newID string) bool {
 	rewrite := func(target string) (string, bool) {
 		return rewriteMovedRef(before, after, sourceOld, sourceNew, target, oldID, newID)
 	}
@@ -1235,7 +1247,7 @@ func rewriteMovedFiber(f *Felt, before, after *scopedIDResolver, root, sourceOld
 				if sourceOld == sourceNew {
 					return "", false
 				}
-				if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(linked))); err != nil {
+				if !exists(linked) {
 					return "", false
 				}
 			}
