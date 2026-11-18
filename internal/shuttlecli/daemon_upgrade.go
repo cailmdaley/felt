@@ -36,11 +36,12 @@ func (a *app) daemonUpgradeCmd() *cobra.Command {
 		Long: `Replaces the selected daemon release (the one ~/.shuttle/repo or
 $SHUTTLE_RELEASE names, which the installer writes) with this CLI's version of
 the release archive, verified before anything is replaced. A daemon that is
-listening but does not report its version, or one that is starting, fails the
-upgrade before then, as does a ~/.shuttle/owner-node that pins the daemon to
-another login node. With no daemon running, the upgrade holds the daemon's
-ownership claim until the new release is in place, so a 'shuttle daemon start'
-in the meantime fails and its retry starts the new release. A running daemon is
+listening but does not report its version fails the upgrade before then, as
+does a ~/.shuttle/owner-node that pins the daemon to another login node. With
+no daemon running, the upgrade holds the daemon's ownership claim while it
+replaces the release, failing first when a daemon is starting, so a 'shuttle
+daemon start' in the meantime fails and its retry starts the new release. A
+running daemon is
 then stopped, and its keep-alive supervisor or respawn loop starts the new
 release. A daemon that nothing restarts is left stopped and the command fails,
 naming the command that starts it. The replaced release is kept at
@@ -65,11 +66,11 @@ with bin/shuttle-deploy.`,
 			if err != nil {
 				return fmt.Errorf("the daemon's version could not be read, so nothing was replaced: %w", err)
 			}
+			if owner, pin := a.otherOwnerNode(); owner != "" {
+				return fmt.Errorf("this host's daemon belongs to login node %q (%s); run the upgrade there", owner, pin)
+			}
 			previous := ""
 			if installed := a.releaseVersion(release); installed != a.version {
-				if owner := a.otherOwnerNode(); owner != "" {
-					return fmt.Errorf("this host's daemon belongs to login node %q (~/.shuttle/owner-node), which may be running it from this release; run the upgrade there", owner)
-				}
 				// With no daemon running, the upgrade holds the endpoint's
 				// ownership claim through the swap, so a supervisor's
 				// `shuttle daemon start` meanwhile fails and its retry starts
@@ -102,30 +103,31 @@ with bin/shuttle-deploy.`,
 	}
 }
 
-// otherOwnerNode is the login node ~/.shuttle/owner-node pins this host's
-// daemon to, when that is another node than this one: on a cluster sharing
-// HOME, that node's daemon runs from the release an upgrade here would replace.
-// shuttle-launch honours the same pin.
-func (a *app) otherOwnerNode() string {
+// otherOwnerNode is the login node the pin file (~/.shuttle/owner-node, or
+// $SHUTTLE_OWNER_NODE_FILE) assigns this host's daemon to, when that is another
+// node than this one, and the pin's path: on a cluster sharing HOME, that
+// node's daemon runs from the release an upgrade here would replace. It reads
+// the pin as shuttle-launch does: the first line, against the short hostname.
+func (a *app) otherOwnerNode() (string, string) {
 	path := a.env.Getenv("SHUTTLE_OWNER_NODE_FILE")
 	if path == "" {
 		home, err := a.env.UserHomeDir()
 		if err != nil {
-			return ""
+			return "", ""
 		}
 		path = filepath.Join(home, ".shuttle", "owner-node")
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return ""
+		return "", ""
 	}
-	owner, _, _ := strings.Cut(strings.TrimSpace(string(data)), "\n")
+	owner, _, _ := strings.Cut(string(data), "\n")
 	node, _ := a.env.Hostname()
 	node, _, _ = strings.Cut(node, ".")
 	if owner == "" || owner == node {
-		return ""
+		return "", ""
 	}
-	return owner
+	return owner, path
 }
 
 // runningDaemon is the daemon answering on this host, or nil when nothing

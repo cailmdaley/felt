@@ -1555,12 +1555,23 @@ func TestMarkdownLinksReadTheDestination(t *testing.T) {
 // swallow the links of the paragraphs after it.
 func TestMarkdownLinksEndAtABlankLine(t *testing.T) {
 	t.Parallel()
-	body := "See [plan](../plan draft\n\nLater (aside) see [design](../design).)"
-	if refs := ExtractBodyRefs(body); len(refs) != 1 || refs[0].Target != "design" {
-		t.Errorf("refs = %v, want design alone", refs)
+	for _, body := range []string{
+		"See [plan](../plan draft\n\nLater (aside) see [design](../design).)",
+		"See [plan](../plan draft\r\n\r\nLater (aside) see [design](../design).)",
+		"See [plan](../plan draft\n \t\nLater (aside) see [design](../design).)",
+		"[p](../p \"title\n\nlater\") [d](../design)",
+		"[p](\n\n../p) [d](../design)",
+		"[p](../p \n\n) [d](../design)",
+		"[p](<../p\n\nq>) [d](../design)",
+	} {
+		if refs := ExtractBodyRefs(body); len(refs) != 1 || refs[0].Target != "design" {
+			t.Errorf("refs of %q = %v, want design alone", body, refs)
+		}
 	}
-	if links := markdownLinks("[t](a\n\"title\")"); len(links) != 1 {
-		t.Errorf("a title on the next line = %v, want one link", links)
+	for _, text := range []string{"[t](a\n\"title\")", "[t](a\r\n\"title\")", "[t](\na)", "[t](a\n)"} {
+		if links := markdownLinks(text); len(links) != 1 || text[links[0][2]:links[0][3]] != "a" {
+			t.Errorf("markdownLinks(%q) = %v, want one link to a", text, links)
+		}
 	}
 }
 

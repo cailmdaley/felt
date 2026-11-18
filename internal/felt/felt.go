@@ -953,8 +953,9 @@ var linkOpenRe = regexp.MustCompile(`\[[^\]]*\]\(`)
 // only when whitespace leads to a "quoted", 'quoted' or (parenthesised) text
 // whose closing delimiter, escapes honoured, is followed by nothing but
 // whitespace and the link's ")": the title in ../meeting (title) is one, and
-// "(1)" in ../report (1).pdf is part of the file name. A link ends within its
-// paragraph: a blank line before its ")" means it is none.
+// "(1)" in ../report (1).pdf is part of the file name. The destination and
+// the title each lie on one line; one line ending may come before the
+// destination, between it and the title, and before the ")".
 func markdownLinks(text string) [][]int {
 	var links [][]int
 	from := 0
@@ -979,13 +980,11 @@ func markdownLinks(text string) [][]int {
 // i, just past its "(", and returns the destination's range and the index
 // past the link's ")".
 func scanLinkTail(text string, i int) (d0, d1, end int, ok bool) {
-	for i < len(text) && isLinkSpace(text[i]) {
-		i++
-	}
+	i = skipLinkSpace(text, i)
 	d0 = i
 	if i < len(text) && text[i] == '<' {
-		close := strings.IndexByte(text[i:], '>')
-		if close < 0 {
+		close := strings.IndexAny(text[i:], ">\r\n")
+		if close < 0 || text[i+close] != '>' {
 			return 0, 0, 0, false
 		}
 		d0, d1 = i+1, i+close
@@ -995,13 +994,18 @@ func scanLinkTail(text string, i int) (d0, d1, end int, ok bool) {
 		return 0, 0, 0, false
 	}
 	depth := 0
-	for ; i < len(text) && !blankLineAt(text, i); i++ {
+	for ; i < len(text); i++ {
 		c := text[i]
 		switch {
-		case isLinkSpace(c) && depth == 0:
+		case (isLinkSpace(c) || isLineEnd(c)) && depth == 0:
 			if end, ok := scanTitleAndClose(text, i); ok {
 				return d0, i, end, d0 < i
 			}
+			if isLineEnd(c) {
+				return 0, 0, 0, false
+			}
+		case isLineEnd(c):
+			return 0, 0, 0, false
 		case c == '(':
 			depth++
 		case c == ')':
@@ -1014,35 +1018,28 @@ func scanLinkTail(text string, i int) (d0, d1, end int, ok bool) {
 	return 0, 0, 0, false
 }
 
-// scanTitleAndClose reads optional whitespace, an optional title and
-// optional whitespace from i, and returns the index past the link's ")" that
-// must follow them.
+// scanTitleAndClose reads whitespace, an optional title on one line and
+// whitespace from i, and returns the index past the link's ")" that must
+// follow them.
 func scanTitleAndClose(text string, i int) (int, bool) {
-	skip := func() {
-		for i < len(text) && isLinkSpace(text[i]) {
-			i++
-		}
-	}
-	skip()
+	i = skipLinkSpace(text, i)
 	if i < len(text) && strings.IndexByte(`"'(`, text[i]) >= 0 {
 		closer := text[i]
 		if closer == '(' {
 			closer = ')'
 		}
-		i++
-		for ; i < len(text) && text[i] != closer; i++ {
-			if blankLineAt(text, i) {
+		for i++; i < len(text) && text[i] != closer; i++ {
+			if isLineEnd(text[i]) {
 				return 0, false
 			}
-			if text[i] == '\\' {
+			if text[i] == '\\' && i+1 < len(text) && !isLineEnd(text[i+1]) {
 				i++
 			}
 		}
 		if i >= len(text) {
 			return 0, false
 		}
-		i++
-		skip()
+		i = skipLinkSpace(text, i+1)
 	}
 	if i < len(text) && text[i] == ')' {
 		return i + 1, true
@@ -1050,18 +1047,30 @@ func scanTitleAndClose(text string, i int) (int, bool) {
 	return 0, false
 }
 
-func isLinkSpace(c byte) bool { return c == ' ' || c == '\t' || c == '\n' }
-
-// blankLineAt reports whether a blank line, which ends a paragraph, starts
-// at the newline at i.
-func blankLineAt(text string, i int) bool {
-	if text[i] != '\n' {
-		return false
+// skipLinkSpace skips spaces and tabs from i, crossing at most one line
+// ending, so a link never reaches past a blank line.
+func skipLinkSpace(text string, i int) int {
+	crossed := false
+	for i < len(text) {
+		switch c := text[i]; {
+		case isLinkSpace(c):
+			i++
+		case isLineEnd(c) && !crossed:
+			crossed = true
+			if c == '\r' && i+1 < len(text) && text[i+1] == '\n' {
+				i++
+			}
+			i++
+		default:
+			return i
+		}
 	}
-	for i++; i < len(text) && (text[i] == ' ' || text[i] == '\t'); i++ {
-	}
-	return i < len(text) && text[i] == '\n'
+	return i
 }
+
+func isLinkSpace(c byte) bool { return c == ' ' || c == '\t' }
+
+func isLineEnd(c byte) bool { return c == '\n' || c == '\r' }
 
 // wikiLinkRe matches [[slug]], [[slug#fragment]], and [[slug#fragment|label]] wikilinks.
 var wikiLinkRe = regexp.MustCompile(`\[\[([^\]|#]+)(?:#([^\]|]+))?(?:\|[^\]]+)?\]\]`)

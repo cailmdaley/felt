@@ -489,28 +489,58 @@ func TestDaemonUpgradeFailsWhileADaemonStarts(t *testing.T) {
 	}
 }
 
-// On a cluster sharing HOME, the release belongs to the login node that
-// ~/.shuttle/owner-node names: an upgrade from another node replaces nothing.
-func TestDaemonUpgradeRefusesAnotherOwnerNodesRelease(t *testing.T) {
+// An upgrade that replaces nothing needs no claim, so a daemon starting on
+// the release already in place does not fail it.
+func TestDaemonUpgradeAtThisVersionIgnoresAStartingDaemon(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	unreachableDaemon(t, env)
 	release := filepath.Join(t.TempDir(), "share", "shuttle")
-	fakeRelease(t, release, "2.0.0")
+	fakeRelease(t, release, "2.1.0")
 	env.Set("SHUTTLE_RELEASE", release)
-	ownerFile := filepath.Join(t.TempDir(), "owner-node")
-	if err := os.WriteFile(ownerFile, []byte("login-elsewhere\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	env.Set("SHUTTLE_OWNER_NODE_FILE", ownerFile)
 	var fetched atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fetched.Store(true) }))
 	t.Cleanup(server.Close)
 	app := newApp(env)
 	app.version, app.releaseDownloadBase = "2.1.0", server.URL
-	_, _, err := executeApp(t, app, "", "daemon", "upgrade")
-	if err == nil || !strings.Contains(err.Error(), `login node "login-elsewhere"`) || fetched.Load() {
-		t.Fatalf("upgrade from another node = %v (fetched %v), want a refusal before the download", err, fetched.Load())
+	settings, err := app.resolveHostSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseClaim, err := app.claimDaemonOwner(settings, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseClaim()
+	if _, _, err := executeApp(t, app, "", "daemon", "upgrade"); err != nil || fetched.Load() {
+		t.Fatalf("upgrade at this version while a daemon starts = %v (fetched %v), want success with nothing fetched", err, fetched.Load())
+	}
+}
+
+// On a cluster sharing HOME, the release belongs to the login node that
+// ~/.shuttle/owner-node names: an upgrade from another node replaces nothing.
+func TestDaemonUpgradeRefusesAnotherOwnerNodesRelease(t *testing.T) {
+	t.Parallel()
+	for _, installed := range []string{"2.0.0", "2.1.0"} {
+		env := testEnv(t)
+		unreachableDaemon(t, env)
+		release := filepath.Join(t.TempDir(), "share", "shuttle")
+		fakeRelease(t, release, installed)
+		env.Set("SHUTTLE_RELEASE", release)
+		ownerFile := filepath.Join(t.TempDir(), "owner-node")
+		if err := os.WriteFile(ownerFile, []byte("login-elsewhere\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		env.Set("SHUTTLE_OWNER_NODE_FILE", ownerFile)
+		var fetched atomic.Bool
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fetched.Store(true) }))
+		t.Cleanup(server.Close)
+		app := newApp(env)
+		app.version, app.releaseDownloadBase = "2.1.0", server.URL
+		_, _, err := executeApp(t, app, "", "daemon", "upgrade")
+		if err == nil || !strings.Contains(err.Error(), `login node "login-elsewhere" (`+ownerFile+`)`) || fetched.Load() {
+			t.Fatalf("upgrade from another node with %s installed = %v (fetched %v), want a refusal before the download", installed, err, fetched.Load())
+		}
 	}
 }
 
