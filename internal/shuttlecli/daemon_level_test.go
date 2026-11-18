@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"fmt"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -254,6 +253,21 @@ func TestDaemonCheckJudgesACheckoutBuiltDaemonByItsContract(t *testing.T) {
 	}
 }
 
+// shuttle doctor names the command daemon check names for a checkout-built
+// daemon at another contract: a deploy from the checkout that built it.
+func TestDoctorNamesTheDeployForACheckoutBuiltDaemon(t *testing.T) {
+	t.Parallel()
+	release := checkoutRelease(t)
+	env := testEnv(t)
+	daemonStub(t, env, map[string]http.HandlerFunc{"/api/v1/version": jsonBody(fmt.Sprintf(
+		`{"ready":true,"release_path":%q,"contract":{"expected":%d,"observed":%d,"ok":true}}`, release, ShuttleContractLevel-1, ShuttleContractLevel-1))})
+	env.Set("SHUTTLE_RELEASE", filepath.Join(t.TempDir(), "absent"))
+	got := newApp(env).collectDaemonReceipt()
+	if want := "bin/shuttle-deploy --hosts local, from the checkout that built " + release; !strings.Contains(got.Repair, want) {
+		t.Fatalf("doctor repair = %q, want it to contain %q", got.Repair, want)
+	}
+}
+
 // releaseArchive is a daemon release archive whose launcher reports version.
 func releaseArchive(t *testing.T, version string) []byte {
 	t.Helper()
@@ -405,45 +419,73 @@ func TestDaemonUpgradeFailsWhenNothingRestartsTheDaemon(t *testing.T) {
 	}
 }
 
-// A daemon that a supervisor starts while the archive downloads is found
-// after the swap and restarted; the upgrade never reports that no daemon runs
-// while the old one does.
-func TestDaemonUpgradeFindsADaemonThatStartsDuringTheDownload(t *testing.T) {
+// With no daemon running, a daemon start during the download is refused, so
+// a supervisor's retry starts the new release; the upgrade never swaps a
+// release under a daemon it did not see.
+func TestDaemonUpgradeHoldsTheOwnerClaimThroughTheSwap(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
-	reserved, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	addr := reserved.Addr().String()
-	reserved.Close()
-	env.Set("SHUTTLE_DAEMON_URL", "http://"+addr)
-	env.Set("SHUTTLE_PORT", addr[strings.LastIndex(addr, ":")+1:])
-	sysenvtest.FakeCommand(t, env, "lsof", fmt.Sprintf("#!/bin/sh\necho %d\n", os.Getpid()))
+	unreachableDaemon(t, env)
 	release := filepath.Join(t.TempDir(), "share", "shuttle")
 	fakeRelease(t, release, "2.0.0")
 	env.Set("SHUTTLE_RELEASE", release)
 	archive := releaseArchive(t, "2.1.0")
+	app := newApp(env)
+	var startErr error
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		respawned, err := net.Listen("tcp", addr)
+		settings, err := app.resolveHostSettings()
 		if err != nil {
 			t.Error(err)
 			return
 		}
-		old := &http.Server{Handler: versionBody("hub", "2.0.0", ShuttleContractLevel-1)}
-		go func() { _ = old.Serve(respawned) }()
-		t.Cleanup(func() { _ = old.Close() })
+		var releaseClaim func()
+		if releaseClaim, startErr = app.claimDaemonOwner(settings, 0, nil); startErr == nil {
+			releaseClaim()
+		}
 		_, _ = w.Write(archive)
 	}))
 	t.Cleanup(server.Close)
+	app.version, app.releaseDownloadBase = "2.1.0", server.URL
+	if _, _, err := executeApp(t, app, "", "daemon", "upgrade"); err != nil {
+		t.Fatal(err)
+	}
+	if startErr == nil || !strings.Contains(startErr.Error(), "already claimed") {
+		t.Fatalf("a daemon start during the download = %v, want it refused", startErr)
+	}
+	settings, _ := app.resolveHostSettings()
+	releaseClaim, err := app.claimDaemonOwner(settings, 0, nil)
+	if err != nil {
+		t.Fatalf("a daemon start after the upgrade = %v, want the claim free", err)
+	}
+	releaseClaim()
+}
+
+// A daemon that holds the ownership claim but is not yet listening is
+// starting: the upgrade fails before replacing anything.
+func TestDaemonUpgradeFailsWhileADaemonStarts(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	unreachableDaemon(t, env)
+	release := filepath.Join(t.TempDir(), "share", "shuttle")
+	fakeRelease(t, release, "2.0.0")
+	env.Set("SHUTTLE_RELEASE", release)
+	var fetched atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fetched.Store(true) }))
+	t.Cleanup(server.Close)
 	app := newApp(env)
 	app.version, app.releaseDownloadBase = "2.1.0", server.URL
-	app.daemonPause = func(time.Duration) {}
-	var stopped atomic.Bool
-	app.daemonSignalPID = func(int, syscall.Signal) error { stopped.Store(true); return nil }
-	stdout, _, err := executeApp(t, app, "", "daemon", "upgrade")
-	if strings.Contains(stdout, "no daemon is running") || !stopped.Load() || err == nil || !strings.Contains(err.Error(), "nothing restarted it") {
-		t.Fatalf("upgrade with a daemon started during the download = %q, err %v, stopped %v; want the old daemon stopped and, with nothing restarting it, a failure", stdout, err, stopped.Load())
+	settings, err := app.resolveHostSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseClaim, err := app.claimDaemonOwner(settings, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseClaim()
+	_, _, err = executeApp(t, app, "", "daemon", "upgrade")
+	if err == nil || !strings.Contains(err.Error(), "a daemon is starting") || fetched.Load() {
+		t.Fatalf("upgrade while a daemon starts = %v (fetched %v), want a failure before the download", err, fetched.Load())
 	}
 }
 

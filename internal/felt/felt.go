@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"path"
 	"reflect"
@@ -274,11 +273,16 @@ func CheckSlug(slug string) error {
 	if ValidSlug(slug) {
 		return nil
 	}
-	err := fmt.Sprintf("slug %q is not lowercase letters, digits and hyphens", slug)
+	return fmt.Errorf("slug %q is not lowercase letters, digits and hyphens%s", slug, ConformingHint(slug))
+}
+
+// ConformingHint names the conforming form Slugify gives slug, as `; use
+// "form"`, or is empty when slug has no letters or digits.
+func ConformingHint(slug string) string {
 	if conforming := Slugify(slug); conforming != "" {
-		err += fmt.Sprintf("; use %q", conforming)
+		return fmt.Sprintf("; use %q", conforming)
 	}
-	return errors.New(err)
+	return ""
 }
 
 // Slugify converts a string to a URL-safe ASCII slug. Latin letters with
@@ -938,8 +942,111 @@ func (f *Felt) IsClosed() bool {
 	return f.Status == StatusClosed
 }
 
-// bodyLinkRe matches markdown links: [text](target)
-var bodyLinkRe = regexp.MustCompile(`\[[^\]]*\]\(([^)]+)\)`)
+// linkOpenRe matches the opening of a markdown link, [text](, which
+// markdownLinks scans on from.
+var linkOpenRe = regexp.MustCompile(`\[[^\]]*\]\(`)
+
+// markdownLinks finds every markdown link [text](destination "title") in
+// text. Each match is the link's byte range and its destination's, in the
+// shape of a regexp submatch index. The destination is the text inside <...>,
+// or else a run with balanced parentheses, spaces included. A title is one
+// only when whitespace leads to a "quoted", 'quoted' or (parenthesised) text
+// whose closing delimiter, escapes honoured, is followed by nothing but
+// whitespace and the link's ")": the title in ../meeting (title) is one, and
+// "(1)" in ../report (1).pdf is part of the file name.
+func markdownLinks(text string) [][]int {
+	var links [][]int
+	from := 0
+	for from < len(text) {
+		loc := linkOpenRe.FindStringIndex(text[from:])
+		if loc == nil {
+			break
+		}
+		start, open := from+loc[0], from+loc[1]
+		d0, d1, end, ok := scanLinkTail(text, open)
+		if !ok {
+			from = open
+			continue
+		}
+		links = append(links, []int{start, end, d0, d1})
+		from = end
+	}
+	return links
+}
+
+// scanLinkTail reads a markdown link's destination and optional title from
+// i, just past its "(", and returns the destination's range and the index
+// past the link's ")".
+func scanLinkTail(text string, i int) (d0, d1, end int, ok bool) {
+	for i < len(text) && isLinkSpace(text[i]) {
+		i++
+	}
+	d0 = i
+	if i < len(text) && text[i] == '<' {
+		close := strings.IndexByte(text[i:], '>')
+		if close < 0 {
+			return 0, 0, 0, false
+		}
+		d0, d1 = i+1, i+close
+		if end, ok := scanTitleAndClose(text, d1+1); ok {
+			return d0, d1, end, true
+		}
+		return 0, 0, 0, false
+	}
+	depth := 0
+	for ; i < len(text); i++ {
+		c := text[i]
+		switch {
+		case isLinkSpace(c) && depth == 0:
+			if end, ok := scanTitleAndClose(text, i); ok {
+				return d0, i, end, d0 < i
+			}
+		case c == '(':
+			depth++
+		case c == ')':
+			if depth == 0 {
+				return d0, i, i + 1, d0 < i
+			}
+			depth--
+		}
+	}
+	return 0, 0, 0, false
+}
+
+// scanTitleAndClose reads optional whitespace, an optional title and
+// optional whitespace from i, and returns the index past the link's ")" that
+// must follow them.
+func scanTitleAndClose(text string, i int) (int, bool) {
+	skip := func() {
+		for i < len(text) && isLinkSpace(text[i]) {
+			i++
+		}
+	}
+	skip()
+	if i < len(text) && strings.IndexByte(`"'(`, text[i]) >= 0 {
+		closer := text[i]
+		if closer == '(' {
+			closer = ')'
+		}
+		i++
+		for ; i < len(text) && text[i] != closer; i++ {
+			if text[i] == '\\' {
+				i++
+			}
+		}
+		if i >= len(text) {
+			return 0, false
+		}
+		i++
+		skip()
+	}
+	if i < len(text) && text[i] == ')' {
+		return i + 1, true
+	}
+	return 0, false
+}
+
+func isLinkSpace(c byte) bool { return c == ' ' || c == '\t' || c == '\n' }
 
 // wikiLinkRe matches [[slug]], [[slug#fragment]], and [[slug#fragment|label]] wikilinks.
 var wikiLinkRe = regexp.MustCompile(`\[\[([^\]|#]+)(?:#([^\]|]+))?(?:\|[^\]]+)?\]\]`)
@@ -993,14 +1100,13 @@ func bodyRefSites(body string) []bodyRefSite {
 	}
 	var sites []bodyRefSite
 	masked := maskCode(body)
-	for _, re := range []*regexp.Regexp{bodyLinkRe, wikiLinkRe} {
-		for _, m := range re.FindAllStringSubmatchIndex(masked, -1) {
+	for _, markdown := range []bool{true, false} {
+		matches := markdownLinks(masked)
+		if !markdown {
+			matches = wikiLinkRe.FindAllStringSubmatchIndex(masked, -1)
+		}
+		for _, m := range matches {
 			raw, base := masked[m[2]:m[3]], m[2]
-			if re == bodyLinkRe {
-				destination := markdownDestination(raw)
-				base += strings.Index(raw, destination)
-				raw = destination
-			}
 			fragment := ""
 			if len(m) > 5 && m[4] >= 0 {
 				fragment = masked[m[4]:m[5]]
@@ -1022,7 +1128,7 @@ func bodyRefSites(body string) []bodyRefSite {
 			}
 			start := base + at
 			site := bodyRefSite{ref: ref, start: start, end: start + len(ref.Target), label: body[m[0]:m[1]]}
-			if re == bodyLinkRe {
+			if markdown {
 				site.markdownTarget = strings.SplitN(strings.TrimSpace(raw), "#", 2)[0]
 			}
 			sites = append(sites, site)
@@ -1087,33 +1193,12 @@ func RewriteBodyRefs(body string, rewrite func(target string) (string, bool)) (s
 // mailto:), which no relative file path does.
 var urlSchemeRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*:`)
 
-// titleRe matches a markdown link's title and the whitespace before it: a
-// "quoted" or 'quoted' title, which may hold escaped quotes, or a (parenthesised)
-// one. bodyLinkRe stops at the first ")", so a title holding ")" or in
-// parentheses arrives cut short, and its closing delimiter is optional here.
-var titleRe = regexp.MustCompile(`\s+("(?:[^"\\]|\\.)*"?|'(?:[^'\\]|\\.)*'?|\([^)]*)\s*$`)
-
-// markdownDestination is a markdown link's destination as written inside its
-// parentheses: the text inside <...>, or else the trimmed text before any
-// title, spaces included.
-func markdownDestination(raw string) string {
-	destination := strings.TrimSpace(raw)
-	if inner, ok := strings.CutPrefix(destination, "<"); ok {
-		destination, _, _ = strings.Cut(inner, ">")
-		return destination
-	}
-	if loc := titleRe.FindStringIndex(destination); loc != nil {
-		return destination[:loc[0]]
-	}
-	return destination
-}
-
 // RewriteMarkdownPaths replaces the path of every relative markdown link —
 // ../x/plot.png, ../x/x.md, ../x/Makefile, ../x — for which rewrite returns a
 // new spelling. rewrite also receives the fiber reference the target spells,
 // when it has that shape, so a caller can leave those to RewriteBodyRefs. The
-// target is the text inside <...>, or else everything before a quoted title,
-// spaces included. A #fragment or ?query, a title, the link text, and code
+// target is the link's destination as markdownLinks reads it, spaces
+// included. A #fragment or ?query, a title, the link text, and code
 // stay as written. It reports whether anything changed.
 func RewriteMarkdownPaths(body string, rewrite func(target string, ref *BodyRef) (string, bool)) (string, bool) {
 	if !strings.Contains(body, "](") {
@@ -1123,12 +1208,11 @@ func RewriteMarkdownPaths(body string, rewrite func(target string, ref *BodyRef)
 	var b strings.Builder
 	pos := 0
 	changed := false
-	for _, m := range bodyLinkRe.FindAllStringSubmatchIndex(masked, -1) {
-		raw := masked[m[2]:m[3]]
-		if strings.IndexByte(raw, codeMask) >= 0 {
+	for _, m := range markdownLinks(masked) {
+		destination := masked[m[2]:m[3]]
+		if strings.IndexByte(destination, codeMask) >= 0 {
 			continue
 		}
-		destination := markdownDestination(raw)
 		target := destination
 		if i := strings.IndexAny(target, "#?"); i >= 0 {
 			target = target[:i]
@@ -1144,7 +1228,7 @@ func RewriteMarkdownPaths(body string, rewrite func(target string, ref *BodyRef)
 		if !ok || next == target {
 			continue
 		}
-		start := m[2] + strings.Index(raw, target)
+		start := m[2]
 		b.WriteString(body[pos:start])
 		b.WriteString(next)
 		pos = start + len(target)

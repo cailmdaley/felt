@@ -141,7 +141,9 @@ daemon's state lives in `~/.shuttle` and survives.
 
 `felt update` replaces only the two CLIs. When a daemon on the host runs, or
 would start, a different version, it ends by saying so, with both versions and
-the command that brings the daemon level:
+the command that brings the daemon level. A daemon a checkout built carries no
+release version, so a running one is compared by its contract level alone and
+a stopped one not at all:
 
 ```text
 The Shuttle daemon running on this host is 2.0.0 (CLI contract 37); these CLIs are 2.1.0 (CLI contract 49). Until they match, `shuttle message <fiber>` refuses and messages already waiting in a fiber's inbox are not delivered.
@@ -154,7 +156,11 @@ selected release, copies its `shuttle-launch` to `~/.local/bin` as the
 installer does, and stops the running daemon so that its keep-alive
 supervisor or respawn loop starts the new one. A daemon nothing supervises is
 left stopped, and the command fails saying to run `shuttle daemon start`,
-which runs in the foreground, then `shuttle daemon release`. The replaced
+which runs in the foreground, then `shuttle daemon release`. With no daemon
+running, it holds the daemon's ownership claim until the new release is in
+place, so a supervisor's start in the meantime fails and its retry starts the
+new release; a daemon that is starting fails the upgrade before anything is
+replaced. The replaced
 release is kept at `<release>.previous` unless the upgrade sees a daemon
 running the new one. Like every restart, it arms the boot quarantine: review the board, then run
 `shuttle daemon release`. `shuttle daemon check` prints the same comparison on

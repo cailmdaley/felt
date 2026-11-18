@@ -366,6 +366,7 @@ func (a *app) collectDaemonReceipt() ReceiptDaemon {
 		Ready              *bool               `json:"ready"`
 		ReconciliationHold string              `json:"reconciliation_hold"`
 		BootHold           *ReceiptBootHold    `json:"boot_hold"`
+		ReleasePath        string              `json:"release_path"`
 		Contract           struct {
 			Expected json.RawMessage `json:"expected"`
 			Observed json.RawMessage `json:"observed"`
@@ -414,7 +415,7 @@ func (a *app) collectDaemonReceipt() ReceiptDaemon {
 	// across a CLI upgrade passed that check against the CLI it replaced.
 	if fmt.Sprint(d.Expected) != fmt.Sprint(ShuttleContractLevel) {
 		d.Status = receiptMismatch
-		d.Repair = fmt.Sprintf("the daemon was built for CLI contract %v and this shuttle is contract %d: until they match, %s; bring it level with `%s`", d.Expected, ShuttleContractLevel, contractSkewEffect, levelCommand(a.releaseDir("")))
+		d.Repair = fmt.Sprintf("the daemon was built for CLI contract %v and this shuttle is contract %d: until they match, %s; bring it level with `%s`", d.Expected, ShuttleContractLevel, contractSkewEffect, levelCommand(a.releaseDir(response.ReleasePath)))
 	}
 	if d.ReconciliationHold != "" {
 		d.Status = receiptMismatch

@@ -204,10 +204,10 @@ func (a *app) daemonCheckCmd() *cobra.Command {
 		Long: `Compares the daemon on this host with these CLIs. A running daemon is
 judged by its /api/v1/version: the CLI contract level it was built to shell and
 its release version, or the contract level alone for a daemon a checkout built,
-which carries no release version. A stopped one is judged by the version of the release it
-would start. When they differ, prints both and the command that brings the
-daemon level; prints nothing when they match or no daemon is installed. Always
-exits 0. felt update runs it after replacing the CLIs.`,
+which carries no release version. A stopped one is judged by the version of
+the release it would start, and not at all when a checkout built it. When they
+differ, prints both and the command that brings the daemon level; prints
+nothing when they match or no daemon is installed. Always exits 0. felt update runs it after replacing the CLIs.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, err := fmt.Fprint(a.env.Stdout, a.daemonLevelNotice())

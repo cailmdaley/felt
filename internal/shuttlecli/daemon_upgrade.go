@@ -36,7 +36,10 @@ func (a *app) daemonUpgradeCmd() *cobra.Command {
 		Long: `Replaces the selected daemon release (the one ~/.shuttle/repo or
 $SHUTTLE_RELEASE names, which the installer writes) with this CLI's version of
 the release archive, verified before anything is replaced. A daemon that is
-listening but does not report its version fails the upgrade before then. A running daemon is
+listening but does not report its version, or one that is starting, fails the
+upgrade before then. With no daemon running, the upgrade holds the daemon's
+ownership claim until the new release is in place, so a 'shuttle daemon start'
+in the meantime fails and its retry starts the new release. A running daemon is
 then stopped, and its keep-alive supervisor or respawn loop starts the new
 release. A daemon that nothing restarts is left stopped and the command fails,
 naming the command that starts it. The replaced release is kept at
@@ -61,6 +64,20 @@ with bin/shuttle-deploy.`,
 			if err != nil {
 				return fmt.Errorf("the daemon's version could not be read, so nothing was replaced: %w", err)
 			}
+			// With no daemon running, the upgrade holds the endpoint's
+			// ownership claim through the swap, so a supervisor's
+			// `shuttle daemon start` waits for the new release.
+			if daemon == nil {
+				settings, err := a.resolveHostSettings()
+				if err != nil {
+					return err
+				}
+				releaseClaim, err := a.claimDaemonOwner(settings, 0, nil)
+				if err != nil {
+					return fmt.Errorf("a daemon is starting, so nothing was replaced; run the upgrade again once it answers: %w", err)
+				}
+				defer releaseClaim()
+			}
 			previous := ""
 			if installed := a.releaseVersion(release); installed != a.version {
 				if previous, err = a.replaceRelease(release.Dir); err != nil {
@@ -69,13 +86,6 @@ with bin/shuttle-deploy.`,
 				fmt.Fprintf(a.env.Stdout, "installed daemon %s at %s (was %s)\n", a.version, release.Dir, installed)
 				if err := a.installLaunchHelper(release.Dir); err != nil {
 					return err
-				}
-			}
-			// A supervisor may have started the old release while the
-			// archive downloaded.
-			if daemon == nil {
-				if daemon, err = a.runningDaemon(); err != nil {
-					return fmt.Errorf("the daemon's version could not be read after the release was replaced: %w", err)
 				}
 			}
 			running, err := a.restartOnRelease(daemon, previous)

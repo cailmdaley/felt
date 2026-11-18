@@ -1512,9 +1512,10 @@ func TestParseRejectsDuplicateKeyInsideExtraField(t *testing.T) {
 	}
 }
 
-// A markdown link's destination ends at whitespace only before a quoted
-// title; a file name with spaces is the whole destination.
-func TestMarkdownDestinationKeepsSpacesBeforeNoTitle(t *testing.T) {
+// A markdown link's destination ends at whitespace only before a title that
+// closes the link; a file name with spaces, quotes or parentheses is the
+// whole destination.
+func TestMarkdownLinksReadTheDestination(t *testing.T) {
 	t.Parallel()
 	for raw, want := range map[string]string{
 		"../meeting notes.pdf":               "../meeting notes.pdf",
@@ -1525,13 +1526,41 @@ func TestMarkdownDestinationKeepsSpacesBeforeNoTitle(t *testing.T) {
 		`<a b.png> "t"`:                      "a b.png",
 		`my plot.png "T"`:                    "my plot.png",
 		`../x.png "t ../q/r"`:                "../x.png",
-		"../meeting (paren title":            "../meeting",
-		`meeting "a (b`:                      "meeting",
+		"../meeting (paren title)":           "../meeting",
+		`meeting "a (b)"`:                    "meeting",
+		`meeting "a) b"`:                     "meeting",
 		`../meeting "say \"hi\""`:            "../meeting",
+		"../meeting 'til dawn.pdf":           "../meeting 'til dawn.pdf",
+		`../meeting "draft.pdf`:              `../meeting "draft.pdf`,
+		"../meeting (2026)/plot.png":         "../meeting (2026)/plot.png",
+		"../report (1).pdf":                  "../report (1).pdf",
 	} {
-		if got := markdownDestination(raw); got != want {
-			t.Errorf("markdownDestination(%q) = %q, want %q", raw, got, want)
+		text := "see [x](" + raw + ") here"
+		links := markdownLinks(text)
+		if len(links) != 1 {
+			t.Errorf("markdownLinks(%q) = %v, want one link", text, links)
+			continue
 		}
+		m := links[0]
+		if got := text[m[2]:m[3]]; got != want {
+			t.Errorf("destination of %q = %q, want %q", raw, got, want)
+		}
+		if got := text[m[0]:m[1]]; got != "[x]("+raw+")" {
+			t.Errorf("link of %q = %q", raw, got)
+		}
+	}
+}
+
+// A file name that starts like a fiber's slug and goes on with a quote or a
+// parenthesis is no reference to that fiber, and no rewrite of it touches it.
+func TestBodyRefsLeaveFileNamesHoldingQuotesAndParentheses(t *testing.T) {
+	t.Parallel()
+	body := `[B](../meeting 'til dawn.pdf) [C](../meeting "draft.pdf) [D](../meeting (2026)/plot.png) [r](../report (1).pdf)`
+	if refs := ExtractBodyRefs(body); len(refs) != 0 {
+		t.Errorf("refs = %v, want none", refs)
+	}
+	if got, changed := RewriteBodyRefs(body, func(string) (string, bool) { return "mtg", true }); changed {
+		t.Errorf("rewrite changed the body to %s", got)
 	}
 }
 
@@ -1540,14 +1569,14 @@ func TestMarkdownDestinationKeepsSpacesBeforeNoTitle(t *testing.T) {
 // a rewrite changes only the target.
 func TestBodyRefsReadEveryTitleFormAsATitle(t *testing.T) {
 	t.Parallel()
-	body := `[5](../meeting (paren title)) [11](../meeting "say \"hi\"") [13](meeting "a (b)") [q](meeting 'it\'s')`
+	body := `[5](../meeting (paren title)) [11](../meeting "say \"hi\"") [13](meeting "a (b)") [q](meeting 'it\'s') [r](meeting "a) b")`
 	if refs := ExtractBodyRefs(body); len(refs) != 1 || refs[0].Target != "meeting" {
 		t.Errorf("refs = %v, want meeting alone", refs)
 	}
 	got, _ := RewriteBodyRefs(body, func(target string) (string, bool) {
 		return "mtg", target == "meeting"
 	})
-	want := `[5](../mtg (paren title)) [11](../mtg "say \"hi\"") [13](mtg "a (b)") [q](mtg 'it\'s')`
+	want := `[5](../mtg (paren title)) [11](../mtg "say \"hi\"") [13](mtg "a (b)") [q](mtg 'it\'s') [r](mtg "a) b")`
 	if got != want {
 		t.Errorf("rewrite:\n got %s\nwant %s", got, want)
 	}
