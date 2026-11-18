@@ -1,3 +1,4 @@
+// @ts-expect-error Node types are excluded from the browser UI's tsconfig.
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { slugStem } from './slug'
