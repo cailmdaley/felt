@@ -24,10 +24,11 @@ import (
 // daemonBuild is what a daemon's /api/v1/version says it was built as, and
 // its receipt of the CLIs it shells.
 type daemonBuild struct {
-	Host     string `json:"host"`
-	Version  string `json:"mix_vsn"`
-	Level    int    `json:"contract_level"`
-	Contract *struct {
+	Host        string `json:"host"`
+	Version     string `json:"mix_vsn"`
+	Level       int    `json:"contract_level"`
+	ReleasePath string `json:"release_path"`
+	Contract    *struct {
 		OK     *bool  `json:"ok"`
 		Reason string `json:"reason"`
 	} `json:"contract"`
@@ -81,12 +82,30 @@ func (a *app) cliDescription() string {
 
 // levelCommand is what brings this host's daemon level with these CLIs: the
 // upgrade verb for a fetched release, a deploy for one built from a checkout.
-func (a *app) levelCommand() string {
-	if release, err := a.findDaemonRelease(); err == nil && !fetchedRelease(release.Dir) {
-		return "bin/shuttle-deploy --hosts local, from the checkout that built " + release.Dir
+// dir is the release in question.
+func levelCommand(dir string) string {
+	if checkoutBuilt(dir) {
+		return "bin/shuttle-deploy --hosts local, from the checkout that built " + dir
 	}
 	return "shuttle daemon upgrade"
 }
+
+// releaseDir is the release a daemon reports it runs from, or the selected
+// release when it reports none (a daemon run under Mix reports "unknown");
+// "" when there is neither.
+func (a *app) releaseDir(reported string) string {
+	if reported != "" && reported != "unknown" {
+		return reported
+	}
+	if release, err := a.findDaemonRelease(); err == nil {
+		return release.Dir
+	}
+	return ""
+}
+
+// checkoutBuilt reports whether dir is a release a checkout built, which
+// carries the daemon's source version rather than a release version.
+func checkoutBuilt(dir string) bool { return dir != "" && !fetchedRelease(dir) }
 
 // fetchedRelease reports whether dir is a release the installer or
 // `shuttle daemon upgrade` unpacked, rather than one a checkout built: a
@@ -109,9 +128,10 @@ func (a *app) requireDeliveringDaemon(owner string) error {
 		return nil
 	}
 	if !local.matches() {
-		fix := "Bring the daemon level with `" + a.levelCommand() + "`, then send again"
-		if release, err := a.findDaemonRelease(); err == nil && !fetchedRelease(release.Dir) {
-			fix = "A deploy in progress brings it level when it finishes, so send again then; with none running, deploy it: " + a.levelCommand()
+		dir := a.releaseDir(local.ReleasePath)
+		fix := "Bring the daemon level with `" + levelCommand(dir) + "`, then send again"
+		if checkoutBuilt(dir) {
+			fix = "A deploy in progress brings it level when it finishes, so send again then; with none running, deploy it: " + levelCommand(dir)
 		}
 		return fmt.Errorf("the Shuttle daemon on this host runs %s and this shuttle is %s: it would queue this message without delivering it. %s", local.describe(), a.cliDescription(), fix)
 	}
@@ -131,10 +151,13 @@ const contractSkewEffect = "`shuttle message <fiber>` refuses and messages alrea
 
 // daemonLevelNotice says how this host's daemon differs from these CLIs, or
 // returns "" when it matches or none is installed. A running daemon is
-// judged by what it reports; a stopped one by the release it would start.
+// judged by what it reports; a stopped one by the release it would start. A
+// daemon built from a checkout carries no release version, so only its
+// contract level is compared.
 func (a *app) daemonLevelNotice() string {
 	if running, err := a.daemonBuildAt(""); err == nil {
-		versionDiffers := a.version != "dev" && running.Version != a.version
+		dir := a.releaseDir(running.ReleasePath)
+		versionDiffers := a.version != "dev" && !checkoutBuilt(dir) && running.Version != a.version
 		if running.matches() && !versionDiffers {
 			return ""
 		}
@@ -142,10 +165,10 @@ func (a *app) daemonLevelNotice() string {
 		if !running.matches() {
 			notice += " Until they match, " + contractSkewEffect + "."
 		}
-		return notice + "\nBring it level: " + a.levelCommand() + "\n"
+		return notice + "\nBring it level: " + levelCommand(dir) + "\n"
 	}
 	release, err := a.findDaemonRelease()
-	if err != nil || a.version == "dev" {
+	if err != nil || a.version == "dev" || checkoutBuilt(release.Dir) {
 		return ""
 	}
 	installed := a.releaseVersion(release)
@@ -155,7 +178,7 @@ func (a *app) daemonLevelNotice() string {
 	if installed == "" {
 		installed = "an unknown version"
 	}
-	return fmt.Sprintf("The Shuttle daemon release installed at %s is %s; these CLIs are %s.\nBring it level before starting it: %s\n", release.Dir, installed, a.version, a.levelCommand())
+	return fmt.Sprintf("The Shuttle daemon release installed at %s is %s; these CLIs are %s.\nBring it level before starting it: %s\n", release.Dir, installed, a.version, levelCommand(release.Dir))
 }
 
 // releaseVersion is the version a release's launcher reports, "" when it
@@ -180,7 +203,8 @@ func (a *app) daemonCheckCmd() *cobra.Command {
 		Short: "Say whether this host's daemon matches these CLIs, and what brings it level",
 		Long: `Compares the daemon on this host with these CLIs. A running daemon is
 judged by its /api/v1/version: the CLI contract level it was built to shell and
-its release version. A stopped one is judged by the version of the release it
+its release version, or the contract level alone for a daemon a checkout built,
+which carries no release version. A stopped one is judged by the version of the release it
 would start. When they differ, prints both and the command that brings the
 daemon level; prints nothing when they match or no daemon is installed. Always
 exits 0. felt update runs it after replacing the CLIs.`,

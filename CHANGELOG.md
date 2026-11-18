@@ -8,6 +8,14 @@ maintainer declares ([Versioning](docs/dev/releasing.md#versioning)).
 
 ## Unreleased
 
+### Fixed
+
+- `felt check`, `felt show --citations`, `felt rename` and `felt nest` in 2.1.1 read a link title in parentheses (`[t](../meeting (title))`), a quoted title holding `)`, or a quoted title holding an escaped quote as part of the target, so such a link was reported broken and left pointing at the old path by a rename. They are titles again, as in 2.1.0.
+- `shuttle daemon upgrade` in 2.1.1 could replace the release under a daemon that a supervisor started during the download, say that no daemon was running, and exit 0, leaving the old daemon running. It looks again after the swap and restarts what it finds. A daemon that answers with something other than its version is reported as such.
+- `felt nest` and `felt rename` decide before the move whether a moved fiber's link reaches a file, so a link that reached nothing stays as written even when the move puts something at that path.
+- The board derives the same slug as the CLI from a title with a leading `[tag]` or a dotted capital `İ`. `felt add` no longer suggests an empty slug.
+- `felt update` and `shuttle daemon check` no longer ask to upgrade a daemon a checkout built whose contract level matches the CLIs; a source build carries no release version to compare.
+
 ## [2.1.1] — 2026-11-18
 
 Fixes alone. Upgrade from 2.1.0 with `felt update`; a host that runs the Shuttle daemon follows it with `shuttle daemon upgrade`.

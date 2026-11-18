@@ -220,6 +220,40 @@ func TestDaemonCheckSaysHowTheDaemonDiffersFromTheseCLIs(t *testing.T) {
 	}
 }
 
+// A daemon a checkout built reports its source version, which says nothing
+// about these CLIs: daemon check compares only its contract level, and a
+// skewed one is brought level by a deploy from that checkout. The selected
+// release the CLI would find elsewhere does not decide it.
+func TestDaemonCheckJudgesACheckoutBuiltDaemonByItsContract(t *testing.T) {
+	t.Parallel()
+	release := checkoutRelease(t)
+	for _, tc := range []struct {
+		name  string
+		level int
+		want  string
+	}{
+		{name: "level contract", level: ShuttleContractLevel},
+		{name: "skewed contract", level: ShuttleContractLevel - 1, want: "Bring it level: bin/shuttle-deploy --hosts local, from the checkout that built " + release + "\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
+			daemonStub(t, env, map[string]http.HandlerFunc{"/api/v1/version": jsonBody(fmt.Sprintf(
+				`{"host":"hub","mix_vsn":"0.1.0","contract_level":%d,"release_path":%q}`, tc.level, release))})
+			env.Set("SHUTTLE_RELEASE", filepath.Join(t.TempDir(), "absent"))
+			app := newApp(env)
+			app.version = "2.1.1"
+			stdout, _, err := executeApp(t, app, "", "daemon", "check")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.want == "" && stdout != "" || !strings.Contains(stdout, tc.want) {
+				t.Fatalf("daemon check = %q, want %q", stdout, tc.want)
+			}
+		})
+	}
+}
+
 // releaseArchive is a daemon release archive whose launcher reports version.
 func releaseArchive(t *testing.T, version string) []byte {
 	t.Helper()

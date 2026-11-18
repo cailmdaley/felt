@@ -414,7 +414,7 @@ func (a *app) collectDaemonReceipt() ReceiptDaemon {
 	// across a CLI upgrade passed that check against the CLI it replaced.
 	if fmt.Sprint(d.Expected) != fmt.Sprint(ShuttleContractLevel) {
 		d.Status = receiptMismatch
-		d.Repair = fmt.Sprintf("the daemon was built for CLI contract %v and this shuttle is contract %d: until they match, %s; bring it level with `%s`", d.Expected, ShuttleContractLevel, contractSkewEffect, a.levelCommand())
+		d.Repair = fmt.Sprintf("the daemon was built for CLI contract %v and this shuttle is contract %d: until they match, %s; bring it level with `%s`", d.Expected, ShuttleContractLevel, contractSkewEffect, levelCommand(a.releaseDir("")))
 	}
 	if d.ReconciliationHold != "" {
 		d.Status = receiptMismatch
