@@ -8,6 +8,10 @@ maintainer declares ([Versioning](docs/dev/releasing.md#versioning)).
 
 ## Unreleased
 
+## [2.1.2] — 2026-11-18
+
+Fixes alone. Upgrade from 2.1.1 with `felt update`; a host that runs a fetched Shuttle daemon follows it with `shuttle daemon upgrade`.
+
 ### Fixed
 
 - `felt check`, `felt show --citations`, `felt rename` and `felt nest` in 2.1.1 read a link title in parentheses (`[t](../meeting (title))`), a quoted title holding `)`, or a quoted title holding an escaped quote as part of the target, so such a link was reported broken and left pointing at the old path by a rename. They are titles again, as in 2.1.0. A link's destination and title each lie on one line, so a link left unclosed no longer swallows the links of the paragraphs after it. A title counts only when it closes the link, so a file name that holds quotes or parentheses (`../report (1).pdf`, `../meeting 'til dawn.pdf`) stays the whole target.
