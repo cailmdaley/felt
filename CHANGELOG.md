@@ -8,6 +8,20 @@ maintainer declares ([Versioning](docs/dev/releasing.md#versioning)).
 
 ## Unreleased
 
+## [2.1.1] — 2026-11-18
+
+Fixes alone. Upgrade from 2.1.0 with `felt update`; a host that runs the Shuttle daemon follows it with `shuttle daemon upgrade`.
+
+### Fixed
+
+- `felt rename` and `felt nest` in 2.1.0 rewrote a link to a file whose name holds a space (`![m](../meeting notes.pdf)`, a macOS screenshot) when a fiber named like the text before the space moved, leaving a link to a file that does not exist; `felt check` reported such links as broken references and `felt show --citations` listed fibers that do not cite. A link's target keeps its spaces and ends only before a quoted title. If you renamed or nested a fiber with 2.1.0, look at `git diff` in the store for links to files with spaces in their names.
+- `felt rm`, `felt rename` and `felt nest` no longer delete the symlink that mounts another repository into a store when they empty the directory behind it. Present since 2.0.0.
+- A moved fiber carries its links to existing files and directories that are spelled like fiber references, such as `../Makefile`.
+- `felt add --uid` refuses a UID held by any fiber of the enclosing store, and `felt add` refuses a path segment that starts with a dot.
+- The board derives the same slug from an accented title as the CLI: `Café résumé` gives `cafe-resume`.
+- The stale-daemon notice from `felt update`, `shuttle daemon check` and `shuttle doctor` says what happens with these CLIs: `shuttle message <fiber>` refuses, and messages already in a fiber's inbox wait.
+- `shuttle daemon upgrade` fails before replacing anything when a daemon holds the port and does not answer; only nothing listening counts as no daemon. Where nothing restarts the daemon, its message says that `shuttle daemon start` runs in the foreground and that `shuttle daemon release` follows.
+
 ## [2.1.0] — 2026-11-17
 
 What you get: `felt rename`, one slug convention that every verb holds a new slug to, a board with Channels, check-ins a session schedules for itself, and a `felt update` that says when it has left a Shuttle daemon behind. What breaks is Shuttle's: `shuttle inbox --play|--next|--stop` moved to `shuttle say`, the `/api/v1/deliver` request and its status words changed, and the board's Board view and Desk drag are gone. Stores, frontmatter and every 2.0.0 `felt` verb read as before; `felt add` refuses a slug outside the convention where it used to rewrite it.
@@ -547,4 +561,5 @@ the source of truth — `.felt/index.db` is a rebuildable cache.
 [2.0.0-rc.1]: https://github.com/cailmdaley/felt/releases/tag/v2.0.0-rc.1
 [2.0.0-rc.2]: https://github.com/cailmdaley/felt/releases/tag/v2.0.0-rc.2
 [2.0.0]: https://github.com/cailmdaley/felt/releases/tag/v2.0.0
+[2.1.1]: https://github.com/cailmdaley/felt/releases/tag/v2.1.1
 [2.1.0]: https://github.com/cailmdaley/felt/releases/tag/v2.1.0
