@@ -517,6 +517,46 @@ func TestDaemonUpgradeAtThisVersionIgnoresAStartingDaemon(t *testing.T) {
 	}
 }
 
+// The owner pin is read as shuttle-launch reads it: its first line, as
+// written, against the short hostname.
+func TestOtherOwnerNodeReadsThePinAsShuttleLaunchDoes(t *testing.T) {
+	t.Parallel()
+	host, err := os.Hostname()
+	if err != nil {
+		t.Fatal(err)
+	}
+	short, _, _ := strings.Cut(host, ".")
+	for pin, other := range map[string]bool{
+		short + "\n":          false,
+		short:                 false,
+		"\n" + short + "\n":   false,
+		short + "\r\n":        true,
+		" " + short + "\n":    true,
+		"elsewhere\n" + short: true,
+	} {
+		env := testEnv(t)
+		file := filepath.Join(t.TempDir(), "owner-node")
+		if err := os.WriteFile(file, []byte(pin), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		env.Set("SHUTTLE_OWNER_NODE_FILE", file)
+		if owner, _ := newApp(env).otherOwnerNode(); (owner != "") != other {
+			t.Errorf("pin %q: other owner %q, want other %v", pin, owner, other)
+		}
+	}
+	if host != short {
+		env := testEnv(t)
+		file := filepath.Join(t.TempDir(), "owner-node")
+		if err := os.WriteFile(file, []byte(host+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		env.Set("SHUTTLE_OWNER_NODE_FILE", file)
+		if owner, _ := newApp(env).otherOwnerNode(); owner == "" {
+			t.Errorf("pin %q, the full hostname, reads as this node", host)
+		}
+	}
+}
+
 // On a cluster sharing HOME, the release belongs to the login node that
 // ~/.shuttle/owner-node names: an upgrade from another node replaces nothing.
 func TestDaemonUpgradeRefusesAnotherOwnerNodesRelease(t *testing.T) {

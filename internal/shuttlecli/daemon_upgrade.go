@@ -41,10 +41,9 @@ does a ~/.shuttle/owner-node that pins the daemon to another login node. With
 no daemon running, the upgrade holds the daemon's ownership claim while it
 replaces the release, failing first when a daemon is starting, so a 'shuttle
 daemon start' in the meantime fails and its retry starts the new release. A
-running daemon is
-then stopped, and its keep-alive supervisor or respawn loop starts the new
-release. A daemon that nothing restarts is left stopped and the command fails,
-naming the command that starts it. The replaced release is kept at
+running daemon is then stopped, and its keep-alive supervisor or respawn loop
+starts the new release. A daemon that nothing restarts is left stopped and the
+command fails, naming the command that starts it. The replaced release is kept at
 <release>.previous unless the upgrade sees a daemon running the new one. The
 restart arms the boot quarantine, released with 'shuttle daemon release'.
 

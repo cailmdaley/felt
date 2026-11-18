@@ -1563,6 +1563,8 @@ func TestMarkdownLinksEndAtABlankLine(t *testing.T) {
 		"[p](\n\n../p) [d](../design)",
 		"[p](../p \n\n) [d](../design)",
 		"[p](<../p\n\nq>) [d](../design)",
+		"[p](../p \"t\\\nmore\") [d](../design)",
+		"[p](../p(x\n\nlater) see [d](../design))",
 	} {
 		if refs := ExtractBodyRefs(body); len(refs) != 1 || refs[0].Target != "design" {
 			t.Errorf("refs of %q = %v, want design alone", body, refs)

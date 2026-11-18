@@ -1048,7 +1048,7 @@ func scanTitleAndClose(text string, i int) (int, bool) {
 }
 
 // skipLinkSpace skips spaces and tabs from i, crossing at most one line
-// ending, so a link never reaches past a blank line.
+// ending, so a link's destination and title never reach past a blank line.
 func skipLinkSpace(text string, i int) int {
 	crossed := false
 	for i < len(text) {
