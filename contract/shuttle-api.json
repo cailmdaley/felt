@@ -46,6 +46,7 @@
         "POST /channels/pin",
         "POST /channels/order",
         "GET /board/marks",
+        "POST /board/holdings",
         "POST /board/open",
         "GET /sent-files/all/composite",
         "GET /activity/composite",

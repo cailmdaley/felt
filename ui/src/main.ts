@@ -2,6 +2,7 @@ import './app.css'
 import { KanbanModal } from './board/KanbanModal.js'
 import { showToast } from './board/utils.js'
 import { workerOpener } from './board/sessionHistory.js'
+import { reportHoldings } from './board/holdings.js'
 
 /**
  * Entry point — mounts the kanban board against the Shuttle daemon.
@@ -66,3 +67,4 @@ const board = new KanbanModal({
 })
 
 board.mount(host)
+reportHoldings(shuttleBase)

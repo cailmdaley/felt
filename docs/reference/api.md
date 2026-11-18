@@ -493,6 +493,7 @@ fan-in siblings of the fleet's [ledger feeds](#ledger-feeds):
 | `POST /channels/pin` | local CLI write | `{key, fiber?}` appends a `pinned` board record, which keeps a channel listed until it leaves the reach; same replies as dismiss |
 | `POST /channels/order` | local CLI write | `{keys: [key…]}` appends an `ordered` board record, the human's order of the rail; same replies as dismiss |
 | `GET /board/marks` | session and commit composites | Each thread's launches and commits over the board's reach |
+| `POST /board/holdings` | local file write | A JSON object, what the board says it holds, appended with the host's local `time` as one line of `<data dir>/tmp/board-holdings.jsonl`; returns `{ok: true}`. The board sends one a minute only when it runs as the installed web app from this host's own address |
 | `POST /board/open` | every board in the fleet | `{fiber_id, origin?, page}` asks every board on a `/voice/events` stream to show that fiber's `constitution`, `tapestry` or `files` page; `origin` defaults to this host. The daemon tells its own boards and passes the request, marked `forwarded: true`, to every other daemon in the fleet, which tells only its own |
 
 `/board/marks` answers `{reach_ms, marks, origins}`: `marks` maps a fiber uid

@@ -484,6 +484,9 @@ export function knownFact<T>(src: string, name: string, validator: string): Prom
   return held?.validator === validator ? held.value as Promise<T | null> : undefined
 }
 
+/** The whole bodies held, in characters, and the documents known. */
+export function heldText(): { chars: number; entries: number } { return { chars: textHeld, entries: entries.size } }
+
 /** Test support. */
 export function resetDocumentResources(): void {
   entries.clear(); inFlight.clear(); textHeld = 0

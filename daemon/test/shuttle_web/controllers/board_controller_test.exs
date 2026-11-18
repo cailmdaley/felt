@@ -97,6 +97,35 @@ defmodule ShuttleWeb.BoardControllerTest do
     assert Map.has_key?(body["origins"], host)
   end
 
+  test "holdings appends each report as one line stamped with the host's local time" do
+    dir = Path.join(System.tmp_dir!(), "board-holdings-#{System.unique_integer([:positive])}")
+    on_exit(fn -> File.rm_rf(dir) end)
+    Shuttle.Test.Env.put_env("SHUTTLE_DATA_DIR", dir)
+
+    report = %{
+      "page" => 1,
+      "frames" => 3,
+      "reader" => [%{"key" => "local:/a.html", "chars" => 9}]
+    }
+
+    for _ <- 1..2 do
+      assert %{"ok" => true} =
+               api_conn()
+               |> post("/api/v1/board/holdings", Jason.encode!(report))
+               |> json_response(200)
+    end
+
+    lines =
+      dir
+      |> Path.join("tmp/board-holdings.jsonl")
+      |> File.read!()
+      |> String.split("\n", trim: true)
+
+    assert [first, _] = Enum.map(lines, &Jason.decode!/1)
+    assert Map.delete(first, "time") == report
+    assert first["time"] =~ ~r/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d$/
+  end
+
   test "family endpoint composes and deduplicates a remote feed" do
     path = Path.join(System.tmp_dir!(), "board-family-api-#{System.unique_integer([:positive])}")
     on_exit(fn -> File.rm(path) end)

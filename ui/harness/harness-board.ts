@@ -41,6 +41,7 @@ import { addFamilyFixtures, addFrontierFixtures, addThreadFixtures, addThreadRev
 import { KanbanModal } from '../src/board/KanbanModal.js'
 import { scopeTheme } from '../src/board/workspace/themeScope.js'
 import { Thumbnail } from '../src/board/workspace/Thumbnail.js'
+import { holdings } from '../src/board/holdings.js'
 import { workshopExample } from './workshop-example.js'
 import { installWorkspaceNativeURLs, NOTE_FIBERS, WORKSPACE_HOST, WORKSPACE_ID, WORKSPACE_UID, LONG_WORKSPACE_NAME, workspaceExample } from './workspace-fixtures.js'
 import { WORKSPACE_LATEST_SESSION, transcriptSearchHits } from './transcript-fixtures.js'
@@ -1815,6 +1816,8 @@ try {
   ;(window as unknown as { __harness: unknown }).__harness = {
     modal,
     scopeTheme,
+    /** What the board holds, as the installed web app reports it each minute. */
+    holdings,
     /** Lays a sent file's thumbnail on the page as the Globe lays one on a file tile, to read what it draws. */
     thumbnail(basename: string): HTMLElement | null {
       const sent = workspaceFixture?.receipts.find(file => String(file.basename) === basename)

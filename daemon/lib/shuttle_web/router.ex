@@ -144,6 +144,8 @@ defmodule ShuttleWeb.Router do
     get("/board/family", BoardController, :family)
     # Each thread's launches and commits over the board's reach, fleet-wide.
     get("/board/marks", BoardController, :marks)
+    # The installed board's minute-by-minute account of what it holds.
+    post("/board/holdings", BoardController, :holdings)
     get("/board", BoardController, :show)
     post("/board/open", VoiceController, :open)
     get("/sent-files", SentFilesController, :show)

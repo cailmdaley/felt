@@ -167,6 +167,8 @@ class ThumbnailBudget {
 }
 const budget = new ThumbnailBudget()
 export function pumpThumbnails(): void { budget.flush() }
+/** How many thumbnails exist, drawn or not. */
+export function thumbnailCount(): number { return budget.thumbnails.size }
 /** Ranks every thumbnail again on the next frame, after something their priorities read has changed. */
 export function scheduleThumbnails(): void { budget.schedule() }
 

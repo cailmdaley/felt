@@ -248,6 +248,7 @@ export class Unfold {
     })
     this.open = { key, viewer }
     this.page.dataset.kind = kind
+    this.page.dataset.key = key
     this.page.replaceChildren(viewer)
     this.el.setAttribute('data-unfolded', '')
     this.el.replaceChildren(this.bar, this.page)

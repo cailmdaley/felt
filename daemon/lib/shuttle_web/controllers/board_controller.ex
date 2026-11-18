@@ -113,6 +113,25 @@ defmodule ShuttleWeb.BoardController do
     end)
   end
 
+  @doc """
+  `POST /api/v1/board/holdings` — appends what the installed board reports it
+  holds, a JSON object, as one line of `<data dir>/tmp/board-holdings.jsonl`.
+  The line's `time` is this host's local time to the second, as the sampled
+  footprint of the board's page is stamped, so the two join on it.
+  """
+  def holdings(conn, _params) do
+    path = Path.join([Shuttle.data_dir(), "tmp", "board-holdings.jsonl"])
+    time = NaiveDateTime.to_iso8601(NaiveDateTime.local_now())
+    line = Jason.encode!(Map.put(conn.body_params, "time", time)) <> "\n"
+
+    with :ok <- Shuttle.FS.mkdir_p(Path.dirname(path)),
+         :ok <- Shuttle.FS.write(path, line, [:append]) do
+      json(conn, %{ok: true})
+    else
+      {:error, reason} -> conn |> put_status(500) |> json(%{error: inspect(reason)})
+    end
+  end
+
   defp thread_inputs do
     Poller.thread_inputs()
   catch
