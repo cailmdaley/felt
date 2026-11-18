@@ -64,7 +64,9 @@ an error rather than a guess.
 
 A slug is one path segment of lowercase ASCII letters and digits, in runs
 joined by single hyphens: `damping-prior`, `v1-2`, `run-2026-03`. It is what
-felt derives from a title, so a derived slug always conforms. Every verb that
+felt derives from a title, so a derived slug always conforms; deriving folds
+accented Latin letters to ASCII (`Café résumé` gives `cafe-resume`), in the
+CLI and on the board alike. Every verb that
 creates or changes a slug holds it to the convention and refuses any other,
 naming the conforming form: `felt add`, `felt rename`, `shuttle thread --slug`,
 and `shuttle role --new`. A slug with a dot, a space, an underscore, a capital
