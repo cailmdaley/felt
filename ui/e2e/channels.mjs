@@ -238,13 +238,12 @@ try {
       await page.keyboard.press('[')
       assert.equal(await page.locator('.kbn-ch-layout[data-rail-hidden]').count(), 1)
       await page.keyboard.press('[')
-      await page.keyboard.press('/')
-      await page.keyboard.type('old')
+      await page.locator('.kbn-ch-jump').fill('old')
     }
-    // Jump to finds a channel the rail no longer lists, and the fleet's documents.
+    // Jump to finds a channel the rail no longer lists, and nothing else: documents are the board's Find's.
     await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 1)
     assert.deepEqual(await page.evaluate(channels), ['old-notes'])
-    assert.deepEqual(await page.locator('.kbn-ch-doclist .kbn-ch-doc-name').allTextContents(), ['lensing-notes.md'])
+    assert.equal(await page.locator('.kbn-ch-rail').getByText('lensing-notes.md').count(), 0)
     await shot(page, `${name}-jump`)
     await page.locator('.kbn-ch-pick').click()
     await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'old-notes')
@@ -256,7 +255,7 @@ try {
     await context.close()
     console.log(`Channels ${name}: the recent channels with what waits floated, a channel dragged into place, its menu, a hidden channel found by Jump to, a stream of what was addressed to the human beside its threads' lines, an item opening its constitution's view, ${phone
       ? 'one screen at a time with back to the rail'
-      : 'a busy channel, the rail hidden and shown'}, Jump to finding a hidden channel and a document and bringing the channel back, no overflow; screenshots saved`)
+      : 'a busy channel, the rail hidden and shown'}, Jump to finding a hidden channel and bringing it back, no overflow; screenshots saved`)
   }
   // Half a screen: the rail is a drawer over the stream.
   const context = await browser.newContext({ viewport: { width: 750, height: 900 }, reducedMotion: 'reduce' })

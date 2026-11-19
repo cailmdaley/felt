@@ -37,6 +37,8 @@ async function visitChannel(page, name) {
   await page.evaluate(() => document.activeElement?.blur())
   await page.keyboard.press('/')
   const find = page.locator('.kbn-viewtabs-find input')
+  // In the reader Find searches the constitution shown; Backspace widens it to the board.
+  await find.press('Backspace')
   await find.fill(name)
   await page.locator('.ws-switcher .ws-channel-row').filter({ has: page.getByText(name, { exact: true }) }).click()
   await threadNamed(page, name)

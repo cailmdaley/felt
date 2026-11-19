@@ -1817,7 +1817,11 @@ try {
       const desk = host.querySelector<HTMLButtonElement>('[data-view="desk"]')
       desk?.click()
       const find = host.querySelector<HTMLInputElement>('.kbn-viewtabs-find input[type="search"]')
-      if (find) { find.value = 'mask'; find.focus(); find.dispatchEvent(new Event('input', { bubbles: true })) }
+      if (find) {
+        find.value = 'mask'; find.focus(); find.dispatchEvent(new Event('input', { bubbles: true }))
+        // Transcripts at the board's scope are read when asked.
+        find.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true }))
+      }
     }, 500)
   }
   if (search.has('capture')) void openCapture({ shuttleBase: '', onResult: (message, ok) => showToast(message, ok ? 'success' : 'error') })

@@ -155,13 +155,20 @@ const barTab = (p, view) => p.locator(`.kbn-viewtabs .kbn-viewtab[data-view="${v
 const appFocus = p => p.evaluate(() => document.activeElement?.blur())
 const activeBarView = p => p.evaluate(() => document.querySelector('.kbn-viewtabs .kbn-viewtab-active')?.dataset.view ?? null)
 const barFind = p => p.locator('.kbn-viewtabs-find input')
-/** Channels' Find, the bar's or (on a phone) the rail's Jump to, lists the documents it matches; this opens the first whose row holds `text` (a file name, or its fiber's slug). */
+/** From Channels, Find widened to the whole board (the bar's, or on a phone its sheet) lists the documents it matches; this opens the first whose row holds `text` (a file name, or its fiber's slug). */
 async function openFromChannels(p, query, text = query) {
   await barTab(p, 'channels').click()
   await p.locator('.kbn-channels .kbn-ch-layout').waitFor()
-  const find = await barFind(p).isVisible() ? barFind(p) : p.locator('.kbn-ch-jump')
-  await find.fill(query)
-  await p.locator('.kbn-ch-doclist .kbn-ch-doc').filter({ hasText: text }).first().click()
+  if (await barFind(p).isVisible()) {
+    await barFind(p).click()
+    // An open channel scopes Find to itself; Backspace in the empty field widens it.
+    if (await p.locator('.kbn-viewtabs-find .ws-find-chip:visible').count()) await p.keyboard.press('Backspace')
+    await barFind(p).fill(query)
+  } else {
+    await p.locator('.kbn-viewtabs-phone-find').click()
+    await p.locator('.ws-find-sheet input').fill(query)
+  }
+  await p.locator('.ws-find [data-section="files"] .ws-find-pick').filter({ hasText: text }).first().click()
   await selected(p).waitFor()
 }
 // Leave the reader: the phone's back chevron, or on the desktop the bar's
@@ -1209,24 +1216,34 @@ test('Body wikilink opens a fiber absent from the card index', async p => {
   await selected(p).getByText('The response correction uses independent simulations and leaves the measured shear unchanged in the null tests.', { exact: true }).waitFor()
 })
 
-test('Channels Find reaches every document, and the field empties across views and the reader', async p => {
+test('Find on Channels folds the open channel; Backspace widens it to every document; the field empties across views and the reader', async p => {
   await barTab(p, 'channels').click()
-  const find = barFind(p), found = p.locator('.kbn-ch-doclist .kbn-ch-doc')
-  // The bar's Find serves Channels as the rail's Jump to does.
+  await p.locator('.kbn-ch-name').waitFor()
+  const find = barFind(p), chip = p.locator('.kbn-viewtabs-find .ws-find-chip'), files = p.locator('.ws-find [data-section="files"] .ws-find-pick')
+  const channel = await p.locator('.kbn-ch-name').innerText()
+  await find.click()
+  assert.equal(await chip.innerText(), `in #${channel}`, 'the chip names the open channel')
+  // A word nothing in the channel says folds it to nothing, and lists nothing beneath the field.
+  await find.fill('zzzz-no-match')
+  await p.locator('.kbn-ch-stream > .kbn-ch-hush').filter({ hasText: 'zzzz-no-match' }).waitFor()
+  assert.equal(await p.locator('.ws-find').count(), 0, 'a channel answers in place')
+  await find.fill('')
+  await find.press('Backspace')
+  assert.equal(await chip.isVisible(), false, 'Backspace in the empty field drops the chip')
+  assert.equal(await p.locator('.kbn-ch-stream > .kbn-ch-hush').count(), 0, 'and draws the stream whole')
   await find.fill('mask-validation')
-  await found.first().waitFor()
-  assert.deepEqual(await found.locator('.kbn-ch-doc-name').allTextContents(), ['mask-validation.md'])
-  // Switching views empties Find and lifts its filter.
+  await files.first().waitFor()
+  assert.deepEqual(await files.locator('.uf-file-name').allTextContents(), ['mask-validation.md'])
+  // Switching views empties Find and puts its list away.
   await barTab(p, 'desk').click(); await barTab(p, 'channels').click()
   assert.equal(await find.inputValue(), '', 'switching views empties Find')
-  assert.equal(await found.count(), 0, 'and lifts the filter')
+  assert.equal(await files.count(), 0, 'and puts its list away')
   // So does opening a document Find listed and coming back.
-  await find.fill('brief.md')
-  await found.first().click()
+  await openFromChannels(p, 'brief.md')
   assert.equal(await isSelected(p, 'brief.md'), true)
   await leave(p)
   assert.equal(await find.inputValue(), '', 'the reader empties Find')
-  assert.equal(await found.count(), 0, 'and Channels is unfiltered on return')
+  assert.equal(await files.count(), 0, 'and Channels is unfiltered on return')
 })
 
 test('Resent report is one document with four receipts', async p => {
@@ -1795,20 +1812,27 @@ async function exerciseTrackSettlementWait(p) {
   }, saved)
 }
 
-test('Reader slash focuses the bar Find, whose list matches by name, path and file, and Enter selects', async p => {
+test('In the reader Find searches its constitution under a chip; Backspace widens to the board, and Enter selects', async p => {
   await open(p)
-  const find = barFind(p), picker = p.locator('.ws-menu.ws-switcher')
+  const find = barFind(p), list = p.locator('.ws-find'), chip = p.locator('.kbn-viewtabs-find .ws-find-chip')
   assert.equal(await p.locator('.ws-page.ws-receded:visible').count(), 0, 'no neighbouring page shows')
   await appFocus(p)
   await p.keyboard.press('Meta+[')
-  assert.equal(await picker.count(), 0, 'Cmd-[ is free')
+  assert.equal(await list.count(), 0, 'Cmd-[ is free')
   await p.keyboard.press('/')
   assert.ok(await find.evaluate(e => e === document.activeElement), '/ focuses the bar Find')
-  for (const query of ['Calibrate the shear response', 'research/workspace/calibration-report', 'TONE.MP3']) {
+  assert.equal(await chip.innerText(), `in ${name}`, 'the chip names the constitution being read')
+  await find.fill('tone.mp3')
+  await list.locator('[data-section="files"] .ws-find-pick').filter({ hasText: 'tone.mp3' }).waitFor()
+  assert.equal(await list.locator('[data-section="constitutions"]').count(), 0, 'its scope lists no constitutions')
+  await find.fill('')
+  await find.press('Backspace')
+  assert.equal(await chip.isVisible(), false, 'Backspace in the empty field widens to the board')
+  for (const query of ['Calibrate the shear response', 'research/workspace/calibration-report']) {
     await find.fill(query)
-    await picker.waitFor()
-    if (!query.includes('/')) assert.equal(await picker.locator('.ws-channel-row:visible').count(), 1, `the list matches ${query}`)
-    assert.ok((await picker.locator('.ws-channel-row:visible .ws-channel-name').allTextContents()).includes(name), `the list includes the constitution matching ${query}`)
+    await list.locator('.ws-channel-row').first().waitFor()
+    if (!query.includes('/')) assert.equal(await list.locator('.ws-channel-row').count(), 1, `the list matches ${query}`)
+    assert.ok((await list.locator('.ws-channel-row .ws-channel-name').allTextContents()).includes(name), `the list includes the constitution matching ${query}`)
   }
   await find.press('Enter')
   assert.equal(await p.locator('.ws-channel-title').getAttribute('title'), name)
@@ -1819,37 +1843,37 @@ test('Reader slash focuses the bar Find, whose list matches by name, path and fi
   assert.deepEqual(await find.evaluate(e => [e === document.activeElement, e.value]), [false, ''], 'one Escape clears and blurs Find')
 })
 
-test('Reader slash hangs the constitution list under the bar Find; Escape puts it away and Enter chooses a file match', async p => {
+test('Reader Find hangs its list under the bar Find; Escape puts it away and Enter chooses a file the board found', async p => {
   await open(p); await revisitReport(p)
-  const find = barFind(p)
+  const find = barFind(p), list = p.locator('.ws-find')
   await appFocus(p); await p.keyboard.press('/')
-  const picker = p.locator('.ws-menu.ws-switcher')
   assert.ok(await find.evaluate(e => e === document.activeElement))
+  await find.press('Backspace')
   await find.fill('remote-summary.pdf')
-  await picker.waitFor()
-  assert.equal(await picker.locator('input').count(), 0, 'the list holds rows only; the field is the bar\'s')
-  const [list, field] = await Promise.all([picker.boundingBox(), find.boundingBox()])
-  assert.ok(list.y >= field.y + field.height - 1 && Math.abs(list.y - (field.y + field.height)) <= 12, `the list hangs under the field: ${JSON.stringify({ list, field })}`)
-  assert.equal(await picker.locator('.ws-channel-row').count(), 1)
-  assert.equal(await picker.locator('.ws-channel-name').innerText(), name)
+  await list.waitFor()
+  assert.equal(await list.locator('input').count(), 0, 'the list holds rows only; the field is the bar\'s')
+  const [box, field] = await Promise.all([list.boundingBox(), find.boundingBox()])
+  assert.ok(box.y >= field.y + field.height - 1 && Math.abs(box.y - (field.y + field.height)) <= 12, `the list hangs under the field: ${JSON.stringify({ box, field })}`)
+  assert.equal(await list.locator('[data-section="files"] .ws-find-pick').count(), 1)
   await find.press('Escape')
-  assert.equal(await picker.count(), 0)
+  assert.equal(await list.count(), 0)
   assert.deepEqual(await find.evaluate(e => [e === document.activeElement, e.value]), [false, ''], 'one Escape closes the list, clears and blurs Find')
   // Escape on a focused row does what Escape in the field does, and the reader stays.
   await appFocus(p); await p.keyboard.press('/')
+  await find.press('Backspace')
   await find.fill('remote-summary.pdf')
-  await picker.locator('.ws-channel-row').first().focus()
+  await list.locator('.ws-find-pick').first().focus()
   await p.keyboard.press('Escape')
-  assert.equal(await picker.count(), 0, 'Escape on a row closes the list')
+  assert.equal(await list.count(), 0, 'Escape on a row closes the list')
   assert.equal(await find.inputValue(), '', 'and empties Find')
   assert.ok(await p.locator('.kbn-reader-open').count(), 'and leaves the reader open')
   await p.keyboard.press('/')
+  await find.press('Backspace')
   await find.fill('transfer.txt')
-  assert.equal(await picker.locator('.ws-channel-row').count(), 1)
-  assert.equal(await picker.locator('.ws-channel-name').innerText(), 'Remote covariance review')
+  await list.locator('[data-section="files"] .ws-find-pick').filter({ hasText: 'transfer.txt' }).waitFor()
   await find.press('Enter')
   await poll(p, () => document.querySelector('.ws-channel-title')?.title === 'Remote covariance review')
-  assert.equal(await picker.count(), 0)
+  assert.equal(await list.count(), 0)
 })
 
 test('Alt-up/down step constitutions from wherever focus rests; browser Back returns to Channels', async p => {
@@ -1871,18 +1895,20 @@ test('Alt-up/down step constitutions from wherever focus rests; browser Back ret
   assert.equal(new URL(p.url()).hash, '#/channels')
 }, { width: 1440, height: 460 })
 
-for (const view of ['desk', 'chronicle']) test(`${view === 'desk' ? 'Desk' : 'Chronicle'} slash hangs the constitution list under the bar Find without opening the reader; Escape and Enter work`, async p => {
+for (const view of ['desk', 'chronicle']) test(`${view === 'desk' ? 'Desk' : 'Chronicle'} slash hangs its list under the bar Find without opening the reader; Escape and Enter work`, async p => {
   if (view !== 'desk') { await barTab(p, view).click(); await poll(p, view => document.querySelector('.kbn-viewtab-active')?.dataset.view === view, view) }
   const find = barFind(p)
   await appFocus(p); await p.keyboard.press('/')
   assert.equal(await p.locator('.ws-page.ws-selected:visible').count(), 0, 'Find does not enter the reader')
   assert.ok(await find.evaluate(e => e === document.activeElement))
-  const picker = p.locator('.ws-menu.ws-switcher')
-  for (const query of ['Calibrate the shear response', 'research/workspace/calibration-report', 'tone.mp3']) {
+  const picker = p.locator('.ws-find')
+  // The Chronicle's Find searches its constitutions under a chip; the Desk's, the whole board.
+  assert.equal(await p.locator('.kbn-viewtabs-find .ws-find-chip').isVisible(), view === 'chronicle')
+  for (const query of ['Calibrate the shear response', 'research/workspace/calibration-report']) {
     await find.fill(query)
-    await picker.waitFor()
+    await picker.locator('.ws-channel-row').first().waitFor()
     if (!query.includes('/')) assert.equal(await picker.locator('.ws-channel-row').count(), 1, `the list matches ${query}`)
-    assert.ok((await picker.locator('.ws-channel-name').allTextContents()).includes(name), `the list includes the constitution matching ${query}`)
+    assert.ok((await picker.locator('.ws-channel-row .ws-channel-name').allTextContents()).includes(name), `the list includes the constitution matching ${query}`)
   }
   assert.equal(await picker.locator('input').count(), 0, 'the bar holds the field')
   await find.press('Escape')
@@ -1896,7 +1922,15 @@ for (const view of ['desk', 'chronicle']) test(`${view === 'desk' ? 'Desk' : 'Ch
   await find.press('Escape')
   assert.deepEqual(await find.evaluate(e => [e === document.activeElement, e.value]), [false, ''], 'Escape on a field with no list clears and blurs')
   await p.keyboard.press('/')
-  await find.fill('tone.mp3')
+  if (view === 'chronicle') {
+    // A pick on the Chronicle finds the lifeline and opens nothing.
+    await find.fill('Calibrate the shear response')
+    await find.press('Enter')
+    await p.locator('.chr-found').first().waitFor()
+    assert.equal(await p.locator('.kbn-reader-open').count(), 0, 'the Chronicle shows the lifeline, not the reader')
+    return
+  }
+  await find.fill('Calibrate the shear response')
   await find.press('Enter')
   await reportReady(p)
   assert.equal(await p.locator('.ws-channel-title').getAttribute('title'), name)
@@ -2422,7 +2456,8 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   await p.locator('.kbn-channels .kbn-ch-layout').waitFor()
   await p.waitForTimeout(400)
   await still(p, 'a Channels poll repaint', () => repaint(p))
-  await still(p, 'summoning Find', () => p.keyboard.press('/'))
+  // The field names the open channel it searches with a chip inside its own box, which stands still.
+  await still(p, 'summoning Find', () => p.keyboard.press('/'), { allow: ['.kbn-viewtabs-find'] })
 }, viewport)
 
 registerNavigationJourneys(test)
