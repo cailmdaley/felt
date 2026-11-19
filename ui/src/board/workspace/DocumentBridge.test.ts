@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { carryReading, connectDocumentFrame, documentMessage, envelope, forwardDocumentKey, type ReadingAnchor } from './DocumentBridge.js'
+import { carryReading, connectDocumentFrame, documentMessage, envelope, forwardDocumentKey, withWorkspaceKeyBridge, type ReadingAnchor } from './DocumentBridge.js'
 
 afterEach(() => { document.body.replaceChildren(); vi.restoreAllMocks() })
 
@@ -149,5 +149,20 @@ describe('carryReading', () => {
     expect(documentMessage(envelope('anchors', { items: Array(3001).fill(['#c', 0]) }))).toBe(false)
     expect(documentMessage(envelope('anchors', { items: [['#c1']] }))).toBe(false)
     expect(documentMessage(envelope('anchors', { items: [['#c1', 'top']] }))).toBe(false)
+  })
+})
+
+describe('a framed document', () => {
+  it('has its queries kept out of the browser\'s result cache before any of its own scripts run', () => {
+    const page = withWorkspaceKeyBridge('<!doctype html><script>first()</script><p>page</p>')
+    expect(page.indexOf('data-shuttle-workspace-bridge')).toBeLessThan(page.indexOf('first()'))
+    const script = /<script data-shuttle-workspace-bridge>([\s\S]*?)<\/script>/.exec(page)![1]
+    const view = document.body.appendChild(document.createElement('iframe')).contentWindow as Window & typeof globalThis
+    const asked: string[] = []
+    view.Document.prototype.querySelectorAll = function (selectors: string) { asked.push(selectors); return [] as unknown as NodeListOf<Element> }
+    try { new view.Function(script)() } catch { /* the rest of the runtime needs a real browser */ }
+    asked.length = 0
+    view.document.querySelectorAll('p')
+    expect(asked).toEqual(['p,p'])
   })
 })

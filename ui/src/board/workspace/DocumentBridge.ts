@@ -1,3 +1,4 @@
+import { keepQueriesUncached } from '../../runtime/uncachedQueries.js'
 import { DOCUMENT_KEY_INTENTS, FOCUSED_DOCUMENT_KEY_INTENTS, keyIntent, shouldForwardDocumentKey, surfaceBindings, type KeyIntent } from '../keymap.js'
 import { referenceRuntime, type ReferenceTarget, type ReferencePlayback } from './ChannelReferences.js'
 import referenceStyles from './references.css?inline'
@@ -206,7 +207,8 @@ function installEmbeddedPdfEmbeds(send: (type: string, payload?: Record<string, 
   }, { once: true })
 }
 
-function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForwardDocumentKey, bindings: typeof surfaceBindings, allowed: readonly KeyIntent[], limits: { count: number; length: number; interval: number }, references: typeof referenceRuntime, css: string, protocol: string, version: number, swipe: typeof installPageSwipe, swipeLimits: typeof SWIPE, mentions: typeof mentionRuntime, mentionCss: string, reportMentions: typeof reportMentionRuntime, embeddedPdfs: typeof installEmbeddedPdfEmbeds, boardOrigin: string, parseBoardRoute: typeof parseRoute, anchors: typeof readingAnchors, anchorLimit: number): void {
+function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForwardDocumentKey, bindings: typeof surfaceBindings, allowed: readonly KeyIntent[], limits: { count: number; length: number; interval: number }, references: typeof referenceRuntime, css: string, protocol: string, version: number, swipe: typeof installPageSwipe, swipeLimits: typeof SWIPE, mentions: typeof mentionRuntime, mentionCss: string, reportMentions: typeof reportMentionRuntime, embeddedPdfs: typeof installEmbeddedPdfEmbeds, boardOrigin: string, parseBoardRoute: typeof parseRoute, anchors: typeof readingAnchors, anchorLimit: number, uncached: typeof keepQueriesUncached): void {
+  uncached()
   // Storage belongs to this document's lifetime, never the board's origin.
   // Decks and plotting libraries can keep preferences without escaping isolation.
   for (const name of ['localStorage', 'sessionStorage'] as const) {
@@ -473,7 +475,7 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
 
 /** Inject after the doctype/base so standalone fragments keep standards mode. */
 export function withWorkspaceKeyBridge(html: string): string {
-  const bridge = `<script data-shuttle-workspace-bridge>(${documentRuntime.toString()})(${keyIntent.toString()},${shouldForwardDocumentKey.toString()},${JSON.stringify(surfaceBindings)},${JSON.stringify([...DOCUMENT_KEY_INTENTS, ...FOCUSED_DOCUMENT_KEY_INTENTS])},${JSON.stringify({ count: REFERENCE_LIMIT, length: REFERENCE_LENGTH, interval: Math.ceil(1000 / REFERENCE_RATE) + 10 })},${referenceRuntime.toString()},${JSON.stringify(referenceStyles)},${JSON.stringify(PROTOCOL)},${VERSION},${installPageSwipe.toString()},${JSON.stringify(SWIPE)},${mentionRuntime.toString()},${JSON.stringify(mentionStyles)},${reportMentionRuntime.toString()},${installEmbeddedPdfEmbeds.toString()},${JSON.stringify(window.location.origin)},${parseRoute.toString()},${readingAnchors.toString()},${ANCHOR_LIMIT});</script>`
+  const bridge = `<script data-shuttle-workspace-bridge>(${documentRuntime.toString()})(${keyIntent.toString()},${shouldForwardDocumentKey.toString()},${JSON.stringify(surfaceBindings)},${JSON.stringify([...DOCUMENT_KEY_INTENTS, ...FOCUSED_DOCUMENT_KEY_INTENTS])},${JSON.stringify({ count: REFERENCE_LIMIT, length: REFERENCE_LENGTH, interval: Math.ceil(1000 / REFERENCE_RATE) + 10 })},${referenceRuntime.toString()},${JSON.stringify(referenceStyles)},${JSON.stringify(PROTOCOL)},${VERSION},${installPageSwipe.toString()},${JSON.stringify(SWIPE)},${mentionRuntime.toString()},${JSON.stringify(mentionStyles)},${reportMentionRuntime.toString()},${installEmbeddedPdfEmbeds.toString()},${JSON.stringify(window.location.origin)},${parseRoute.toString()},${readingAnchors.toString()},${ANCHOR_LIMIT},${keepQueriesUncached.toString()});</script>`
   let insertion = 0
   const doctype = /<!doctype\b[^>]*>/i.exec(html)
   if (doctype) insertion = doctype.index + doctype[0].length

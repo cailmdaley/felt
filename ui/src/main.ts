@@ -1,3 +1,5 @@
+// First, so that no module's queries run before it.
+import './runtime/installUncachedQueries.js'
 import './app.css'
 import { KanbanModal } from './board/KanbanModal.js'
 import { showToast } from './board/utils.js'
