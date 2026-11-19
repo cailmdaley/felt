@@ -60,9 +60,12 @@ export function constitutionsSection(src: ConstitutionSources): FindSection {
   const rowOf = (hit: SearchHit<KanbanCard>, needle: string): FindRow => {
     const card = hit.card
     const state = card ? CLOSED_STATE[card.column] : hit.status ?? undefined
-    const content = face(marked('ws-channel-name', hit.name, needle), [card ? card.originId : 'in the record', ...state ? [state] : []], hit.excerpt ? marked('ws-find-quote', hit.excerpt, needle) : undefined)
-    if (state || !hit.onBoard) content.dataset.state = state ?? 'record'
-    if (card && src.current?.(card)) content.dataset.current = ''
+    const content = (): HTMLElement => {
+      const drawn = face(marked('ws-channel-name', hit.name, needle), [card ? card.originId : 'in the record', ...state ? [state] : []], hit.excerpt ? marked('ws-find-quote', hit.excerpt, needle) : undefined)
+      if (state || !hit.onBoard) drawn.dataset.state = state ?? 'record'
+      if (card && src.current?.(card)) drawn.dataset.current = ''
+      return drawn
+    }
     return {
       key: card ? `${card.originId}:${card.uid ?? card.id}` : hit.id,
       label: state ? `${hit.name}, ${state}` : hit.name,
@@ -100,7 +103,7 @@ export function channelsSection(src: { channels(): Channel[]; open(channel: Chan
       return channelHits(src.channels(), query).map(channel => ({
         key: channel.key,
         label: `#${channel.name}`,
-        content: face(marked('ws-channel-name', `#${channel.name}`, needle), [channel.misc ? 'everything without a channel' : channel.title]),
+        content: () => face(marked('ws-channel-name', `#${channel.name}`, needle), [channel.misc ? 'everything without a channel' : channel.title]),
         pick: () => src.open(channel),
       }))
     },
@@ -124,14 +127,17 @@ export function saidSection(src: SaidSources): FindSection {
     rows: query => {
       const needle = needleOf(query), now = Date.now()
       return saidHits(src.records(), src.cardOf, query).map(({ record, card, excerpt }) => {
-        const channel = src.channelOf?.(card)
-        const name = el('span', 'ws-channel-name'), word = SAID_WORD[record.kind]
-        name.append(slug(card))
-        if (word) name.append(' ', Object.assign(el('span', 'ws-find-kind'), { textContent: word }))
+        const content = (): HTMLElement => {
+          const channel = src.channelOf?.(card)
+          const name = el('span', 'ws-channel-name'), word = SAID_WORD[record.kind]
+          name.append(slug(card))
+          if (word) name.append(' ', Object.assign(el('span', 'ws-find-kind'), { textContent: word }))
+          return face(name, [...channel ? [`#${channel.name}`] : [], timeEl(record.timestamp, now)], marked('ws-find-quote', excerpt, needle))
+        }
         return {
           key: record.id,
           label: `${slug(card)}: ${excerpt}`,
-          content: face(name, [...channel ? [`#${channel.name}`] : [], timeEl(record.timestamp, now)], marked('ws-find-quote', excerpt, needle)),
+          content,
           pick: () => src.open(card, record),
         }
       })
@@ -148,8 +154,11 @@ export function filesSection(src: { documents(): Array<{ card: KanbanCard; recei
       const now = Date.now()
       return documentHits(src.documents(), key => declaredTitle(key)?.title, query).map(({ card, receipt }) => {
         const name = declaredTitle(receipt.key)?.title ?? receipt.basename
-        const content = el('span', 'ws-find-face ws-find-file')
-        content.append(fileRow({ key: receipt.key, name, at: receipt.timestamp, caption: receipt.caption }, now), Object.assign(document.createElement('small'), { textContent: slug(card) }))
+        const content = (): HTMLElement => {
+          const drawn = el('span', 'ws-find-face ws-find-file')
+          drawn.append(fileRow({ key: receipt.key, name, at: receipt.timestamp, caption: receipt.caption }, now), Object.assign(document.createElement('small'), { textContent: slug(card) }))
+          return drawn
+        }
         return { key: receipt.key, label: `${name}, from ${slug(card)}`, content, pick: () => src.open(card, receipt.key) }
       })
     },
@@ -193,7 +202,7 @@ export function transcriptsSection(src: TranscriptSources): FindSection {
       void navigator.clipboard?.writeText(hitLocation(hit)).then(() => { copy.textContent = 'copied' }, () => { copy.textContent = 'not copied' })
     })
     const card = hit.fibers.map(fiber => src.cardOf(fiber.id)).find(Boolean)
-    return { key: `${hit.session}:${hit.line}`, label: hit.snippet.replace(/[«»]/g, ''), content, extra: copy, ...card ? { pick: () => src.open(card) } : {} }
+    return { key: `${hit.session}:${hit.line}`, label: hit.snippet.replace(/[«»]/g, ''), content: () => content, extra: copy, ...card ? { pick: () => src.open(card) } : {} }
   }
   return {
     id: 'transcripts',

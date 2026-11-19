@@ -72,10 +72,11 @@ export class SearchPanel {
       bar.className = 'ws-find-field'
       bar.append(this.chip, this.field)
       this.el.append(bar)
+      // A field of its own is served here; a shared one is served by its owner (`show`).
       this.field.addEventListener('focus', this.serve)
+      this.field.addEventListener('input', this.serve)
     }
     this.el.append(this.list)
-    this.field.addEventListener('input', this.serve)
     document.addEventListener('keydown', this.keydown, true)
     document.addEventListener('pointerdown', this.outside)
   }
@@ -238,7 +239,7 @@ export class SearchPanel {
     pick.className = ['ws-find-pick', row.className].filter(Boolean).join(' ')
     pick.dataset.findKey = `${section.id}:${row.key}`
     pick.setAttribute('aria-label', row.label)
-    pick.append(row.content)
+    pick.append(row.content())
     if (row.pick) pick.addEventListener('click', () => { const chosen = row.pick!; this.done(); chosen() })
     else pick.setAttribute('aria-disabled', 'true')
     item.append(pick)

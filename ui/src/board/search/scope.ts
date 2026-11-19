@@ -14,8 +14,8 @@ export interface FindRow {
   key: string
   /** Its accessible name. */
   label: string
-  /** What the row shows. */
-  content: HTMLElement
+  /** What the row shows, built only for a row that is drawn. */
+  content(): HTMLElement
   /** Picking it; absent for a row that can be named but not reached. */
   pick?(): void
   /** A second control beside the row (a transcript hit's "copy path"). */
