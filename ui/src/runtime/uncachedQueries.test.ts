@@ -40,5 +40,6 @@ it('asks the browser for a list of the selector twice exactly where WebKit would
   asked.length = 0
   nodes[0].querySelectorAll(new String('p') as unknown as string)
   expect(asked).toEqual(['p,p'])
-  expect(view.Element.prototype.querySelectorAll.name).toBe('record')
+  const installed = view.Element.prototype.querySelectorAll
+  expect([installed.name, installed.length, String(installed)]).toEqual(['querySelectorAll', 1, String(record)])
 })

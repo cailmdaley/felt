@@ -22,8 +22,10 @@ export function keepQueriesUncached(): void {
   }
   for (const proto of [Document.prototype, DocumentFragment.prototype, Element.prototype]) {
     for (const name of ['querySelector', 'querySelectorAll'] as const) {
-      // A proxy keeps the native name and length, and passes a page's check for native code.
-      const asked = new Proxy(proto[name], { apply: (native, node, args: unknown[]) => Reflect.apply(native, node, list(args)) })
+      const native = proto[name] as (this: unknown, ...args: unknown[]) => unknown
+      const asked = function (this: unknown, ...args: unknown[]): unknown { return native.apply(this, list(args)) }
+      // A page that checks for the browser's own method reads its name, length and source.
+      Object.defineProperties(asked, { name: { value: name }, length: { value: native.length }, toString: { value: () => Function.prototype.toString.call(native) } })
       Object.defineProperty(proto, name, { ...Object.getOwnPropertyDescriptor(proto, name), value: asked })
     }
   }
