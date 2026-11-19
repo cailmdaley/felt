@@ -727,6 +727,7 @@ func TestLsJSONUnreadableRows(t *testing.T) {
 		{"ls", "-j", "-s", "all", "--unreadable"},
 		{"ls", "-j", "-s", "all", "--unreadable", "--any", "field:shuttle", "--json-field", "id,name"},
 		{"ls", "-j", "--unreadable", "--ids-from", ids},
+		{"ls", "-j", "-s", "all", "--unreadable", "--has-field", "shuttle"},
 	} {
 		out, err := runCommand(t, dir, args...)
 		if err != nil {

@@ -3101,6 +3101,10 @@ func fileFrontmatterHasTopLevelFields(path string, fields []string) (bool, error
 	if err != nil {
 		return false, err
 	}
+	// Frontmatter that does not parse is the walk's to report, not a miss.
+	if _, err := frontmatterMappingNode(frontmatter); err != nil {
+		return false, fmt.Errorf("parsing YAML frontmatter: %w", err)
+	}
 	return frontmatterHasTopLevelFields(frontmatter, fields), nil
 }
 

@@ -472,10 +472,10 @@ var postToolEditTools = map[string]struct{}{
 const postToolTouchInterval = time.Hour
 
 // runPostToolHook stamps the durable recency anchor (updated-at) on the fiber
-// whose file an agent just edited directly. Every path is a silent pass: a
-// PostToolUse hook must never fail the tool call, and losing one stamp is
-// cheaper than blocking. The frontmatter stamp is the recency mechanism —
-// a missed stamp just means one edit reads slightly stale.
+// whose file an agent just edited directly, or, when the edit left the fiber's
+// markdown unreadable, answers with a block that names the parse error. Every
+// other path is a silent pass: losing one stamp is cheaper than failing the
+// tool call.
 func runPostToolHook(stdin io.Reader, stdout io.Writer) error {
 	var input postToolInput
 	if err := json.NewDecoder(stdin).Decode(&input); err != nil {

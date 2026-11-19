@@ -47,7 +47,7 @@ func TestSyncFetchTimeoutLeavesHeadUntouched(t *testing.T) {
 	f := newSyncFixture(t)
 	before := syncTestGit(t, f.clone, "rev-parse", "HEAD")
 	env, _ := testEnv(t)
-	_, err := testApp(t, env).syncStore(context.Background(), f.clone, false, time.Nanosecond, env.Stdout)
+	err := testApp(t, env).syncStore(context.Background(), f.clone, false, time.Nanosecond, env.Stdout)
 	if err == nil || !strings.Contains(err.Error(), "fetching felt store upstream failed") || !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("sync error: %v", err)
 	}

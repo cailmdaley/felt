@@ -3,6 +3,7 @@ package feltcli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -13,6 +14,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/felt"
 )
 
 type syncFixture struct {
@@ -161,7 +164,7 @@ func runFixtureSync(t *testing.T, f syncFixture, push bool) (string, error) {
 	t.Helper()
 	env, _ := testEnv(t)
 	var out bytes.Buffer
-	err := testApp(t, env).syncStoreAndMounts(context.Background(), f.clone, push, syncGitTimeout, &out)
+	err := testApp(t, env).syncStore(context.Background(), f.clone, push, syncGitTimeout, &out)
 	return out.String(), err
 }
 
@@ -533,7 +536,7 @@ func TestSyncAlsoSyncsMountedRepositories(t *testing.T) {
 		}
 		peerCommit(t, store, "store-upstream.md")
 		peerCommit(t, science, "science-upstream.md")
-		writeSyncFile(t, science.clone, ".felt/draft.md", "uncommitted\n")
+		writeSyncFile(t, science.clone, ".felt/draft.md", "---\nname: Draft\n---\n")
 
 		out, err := runCommand(t, store.clone, "sync")
 		if err != nil {
@@ -692,6 +695,16 @@ func FuzzSyncStateSequencePreservesLocalFiles(fz *testing.F) {
 // the hand edit that makes YAML stop reading the whole file.
 const brokenFiber = "---\nname: Hub\noutcome: 'the chair's notes'\n---\n"
 
+// syncWithReport runs a sync as the command does: the merge and push, then
+// the store's unreadable fibers as its last word.
+func syncWithReport(t *testing.T, f syncFixture, push bool) (string, error) {
+	t.Helper()
+	out, err := runFixtureSync(t, f, push)
+	var report bytes.Buffer
+	err = errors.Join(err, reportUnreadable(felt.NewStorage(f.clone), &report))
+	return out + report.String(), err
+}
+
 func TestSyncNamesAnUnreadableFiberItPulls(t *testing.T) {
 	t.Parallel()
 	f := newSyncFixture(t)
@@ -700,8 +713,10 @@ func TestSyncNamesAnUnreadableFiberItPulls(t *testing.T) {
 	syncTestGit(t, f.peer, "add", ".felt")
 	syncTestGit(t, f.peer, "commit", "-m", "break the hub")
 	syncTestGit(t, f.peer, "push")
+	// A fetch before the sync must not hide what the merge brings in.
+	syncTestGit(t, f.clone, "fetch")
 
-	out, err := runFixtureSync(t, f, false)
+	out, err := syncWithReport(t, f, false)
 	if err == nil || !strings.Contains(err.Error(), "sync completed, but 1 fiber(s)") {
 		t.Fatalf("sync error = %v\n%s", err, out)
 	}
@@ -713,20 +728,19 @@ func TestSyncNamesAnUnreadableFiberItPulls(t *testing.T) {
 	if head := syncTestGit(t, f.clone, "rev-parse", "HEAD"); head != syncTestGit(t, f.peer, "rev-parse", "HEAD") {
 		t.Fatal("the merge did not complete")
 	}
+	// The next sync, with nothing left to carry, still names it.
+	if _, err := syncWithReport(t, f, true); err == nil {
+		t.Fatal("a second sync forgot the unreadable fiber")
+	}
 }
 
-func TestSyncNamesAnUnreadableFiberItPushes(t *testing.T) {
+func TestSyncWithReadableFibersExitsZero(t *testing.T) {
 	t.Parallel()
 	f := newSyncFixture(t)
-	writeSyncFile(t, f.clone, ".felt/hub.md", brokenFiber)
+	writeSyncFile(t, f.clone, ".felt/hub.md", "---\nname: Hub\noutcome: 'the chair''s notes'\n---\n")
 	syncTestGit(t, f.clone, "add", ".felt")
-	syncTestGit(t, f.clone, "commit", "-m", "break the hub")
-
-	out, err := runFixtureSync(t, f, true)
-	if err == nil || !strings.Contains(out, "hub.md") {
+	syncTestGit(t, f.clone, "commit", "-m", "hub")
+	if out, err := syncWithReport(t, f, true); err != nil || strings.Contains(out, "✗") {
 		t.Fatalf("sync error = %v\n%s", err, out)
-	}
-	if syncTestGit(t, f.remote, "rev-parse", "HEAD") != syncTestGit(t, f.clone, "rev-parse", "HEAD") {
-		t.Fatal("the push did not complete")
 	}
 }
