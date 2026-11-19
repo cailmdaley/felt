@@ -29,8 +29,8 @@ it('asks the browser for a list of the selector twice exactly where WebKit would
   for (const proto of [view.Document.prototype, view.DocumentFragment.prototype, view.Element.prototype]) { proto.querySelector = record; proto.querySelectorAll = record }
   new view.Function(`(${keepQueriesUncached.toString()})()`)()
   const twice = (selector: string): string => `${selector},${selector}`
-  const kept = ['p', ' p\n', 'P', '*', '.c', 'p.c', '.md\\:flex', '.\\31 0', '.\\32 xl\\:flex', '.a\\ b', '.c\\,x', '/*a,b*/p', 'p/* */', 'p\\', '\u00a0p', 'p\u000b']
-  const left = ['p,p', 'body p', 'a>b', 'a+b', 'a~b', '#b', '[data-x]', 'p:not(q)', 'p:not(\\.c', '[a="\\62 ', '']
+  const kept = ['p', ' p\n', 'P', '*', '.c', 'p.c', '.md\\:flex', '.\\31 0', '.\\32 xl\\:flex', '.a\\ b', '.c\\,x', '/*a,b*/p', 'p/* */', '\u00a0p', 'p\u000b']
+  const left = ['p,p', 'body p', 'a>b', 'a+b', 'a~b', '#b', '[data-x]', 'p:not(q)', 'p:not(\\.c', '[a="\\62 ', 'p\\', 'p/*', 'p/*/', '']
   const nodes = [view.document, view.document.createDocumentFragment(), view.document.createElement('div')]
   for (const node of nodes) for (const method of ['querySelector', 'querySelectorAll'] as const) {
     asked.length = 0
