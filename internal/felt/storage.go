@@ -93,6 +93,62 @@ type Storage struct {
 
 	enclosingOnce sync.Once
 	external      *ExternalRefs
+
+	// skipped is what the most recent listing found on disk and could not
+	// read (see Unreadable).
+	skippedMu sync.Mutex
+	skipped   []Unreadable
+}
+
+// Unreadable is a fiber file a listing found and could not read — almost
+// always frontmatter that no longer parses as YAML. Its JSON form is the row
+// `ls --json --unreadable` emits in the fiber's place.
+type Unreadable struct {
+	ID   string `json:"id"`
+	Path string `json:"path"` // absolute and symlink-resolved, as a fiber's path is
+	// Error is the parse failure without the path, e.g. `parsing YAML
+	// frontmatter: yaml: line 12: did not find expected key`.
+	Error string `json:"unreadable"`
+}
+
+// Unreadable reports the fiber files the most recent listing through this
+// Storage skipped because they could not be read, in walk order. iCloud
+// files that are not yet downloaded are not among them: their bytes are
+// absent, not broken.
+func (s *Storage) Unreadable() []Unreadable {
+	s.skippedMu.Lock()
+	defer s.skippedMu.Unlock()
+	return append([]Unreadable(nil), s.skipped...)
+}
+
+// CheckFiberFile reads the fiber file at path as a listing does and returns
+// why it cannot, or nil when it can.
+func CheckFiberFile(path string) error {
+	_, err := readMetadataFile(path, "")
+	return err
+}
+
+// IsFiberFile reports whether path names a fiber's markdown: `<slug>.md` in a
+// directory named `<slug>`, or a bare `.md` at the top of a `.felt`.
+func IsFiberFile(path string) bool {
+	base := filepath.Base(path)
+	if !strings.HasSuffix(base, ".md") {
+		return false
+	}
+	dir := filepath.Base(filepath.Dir(path))
+	return dir == DirName || dir == strings.TrimSuffix(base, ".md")
+}
+
+// FindUnreadable walks the whole store and reports every fiber file that
+// cannot be read.
+func (s *Storage) FindUnreadable() ([]Unreadable, error) {
+	quiet := s.quietWalk
+	s.quietWalk = true
+	defer func() { s.quietWalk = quiet }()
+	if _, err := s.ListMetadata(); err != nil {
+		return nil, err
+	}
+	return s.Unreadable(), nil
 }
 
 // ErrExternalReference reports a query that names a real fiber in the
@@ -882,6 +938,17 @@ func (s *Storage) readPathWithMode(path, id string, mode ParseMode) (*Felt, erro
 		carriedPath = resolved
 	}
 	return readFiberAt(path, carriedPath, id, mode)
+}
+
+// canonicalPath is the absolute, symlink-resolved location of a file the
+// walk found, the form a fiber's Path takes.
+func canonicalPath(file fiberFile) string {
+	if !file.canonical {
+		if resolved, err := filepath.EvalSymlinks(file.path); err == nil {
+			return resolved
+		}
+	}
+	return file.path
 }
 
 // readFile reads a fiber the walk found. The walk descends only real
@@ -1938,19 +2005,27 @@ func (s *Storage) listFilesWithMode(mode ParseMode, includeModTime bool, fields 
 	parallelFileWork(len(files), process)
 
 	var felts []*Felt
+	var skipped []Unreadable
 	evicted := 0 // iCloud-dataless files that couldn't be materialized during the walk
 	for i, file := range files {
 		if issues[i] != nil {
 			if isEvictedFileError(issues[i]) {
 				evicted++
-			} else if !s.quietWalk {
-				fmt.Fprintf(os.Stderr, "warning: failed to parse %s: %v\n", file.path, issues[i])
+			} else {
+				skipped = append(skipped, Unreadable{ID: file.id, Path: canonicalPath(file), Error: parseFailureDetail(file.path, issues[i])})
+				if !s.quietWalk {
+					fmt.Fprintf(os.Stderr, "warning: failed to parse %s: %v\n", file.path, issues[i])
+				}
 			}
 		}
 		if results[i] != nil {
 			felts = append(felts, results[i])
 		}
 	}
+
+	s.skippedMu.Lock()
+	s.skipped = skipped
+	s.skippedMu.Unlock()
 
 	if evicted > 0 && !s.quietWalk {
 		fmt.Fprintf(os.Stderr, "warning: %d file(s) not materialized (iCloud) under %s; run `brctl download` or open them in Files to hydrate\n", evicted, s.root)

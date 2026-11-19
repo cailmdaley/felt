@@ -161,7 +161,7 @@ func runFixtureSync(t *testing.T, f syncFixture, push bool) (string, error) {
 	t.Helper()
 	env, _ := testEnv(t)
 	var out bytes.Buffer
-	err := testApp(t, env).syncStore(context.Background(), f.clone, push, syncGitTimeout, &out)
+	err := testApp(t, env).syncStoreAndMounts(context.Background(), f.clone, push, syncGitTimeout, &out)
 	return out.String(), err
 }
 
@@ -686,4 +686,47 @@ func FuzzSyncStateSequencePreservesLocalFiles(fz *testing.F) {
 			}
 		}
 	})
+}
+
+// brokenFiber is a fiber whose single-quoted outcome holds a bare apostrophe,
+// the hand edit that makes YAML stop reading the whole file.
+const brokenFiber = "---\nname: Hub\noutcome: 'the chair's notes'\n---\n"
+
+func TestSyncNamesAnUnreadableFiberItPulls(t *testing.T) {
+	t.Parallel()
+	f := newSyncFixture(t)
+	writeSyncFile(t, f.peer, ".felt/hub/hub.md", brokenFiber)
+	writeSyncFile(t, f.peer, ".felt/hub/notes.md", "not a fiber: no frontmatter\n")
+	syncTestGit(t, f.peer, "add", ".felt")
+	syncTestGit(t, f.peer, "commit", "-m", "break the hub")
+	syncTestGit(t, f.peer, "push")
+
+	out, err := runFixtureSync(t, f, false)
+	if err == nil || !strings.Contains(err.Error(), "sync completed, but 1 fiber(s)") {
+		t.Fatalf("sync error = %v\n%s", err, out)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	tail := strings.Join(lines[len(lines)-3:], "\n")
+	if !strings.Contains(tail, filepath.Join(".felt", "hub", "hub.md")) || !strings.Contains(tail, "yaml") || strings.Contains(tail, "notes.md") {
+		t.Fatalf("the report is not the sync's last word:\n%s", out)
+	}
+	if head := syncTestGit(t, f.clone, "rev-parse", "HEAD"); head != syncTestGit(t, f.peer, "rev-parse", "HEAD") {
+		t.Fatal("the merge did not complete")
+	}
+}
+
+func TestSyncNamesAnUnreadableFiberItPushes(t *testing.T) {
+	t.Parallel()
+	f := newSyncFixture(t)
+	writeSyncFile(t, f.clone, ".felt/hub.md", brokenFiber)
+	syncTestGit(t, f.clone, "add", ".felt")
+	syncTestGit(t, f.clone, "commit", "-m", "break the hub")
+
+	out, err := runFixtureSync(t, f, true)
+	if err == nil || !strings.Contains(out, "hub.md") {
+		t.Fatalf("sync error = %v\n%s", err, out)
+	}
+	if syncTestGit(t, f.remote, "rev-parse", "HEAD") != syncTestGit(t, f.clone, "rev-parse", "HEAD") {
+		t.Fatal("the push did not complete")
+	}
 }

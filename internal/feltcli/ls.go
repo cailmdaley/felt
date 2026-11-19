@@ -64,6 +64,7 @@ func NewLsCmd(env *sysenv.Env, view ViewOptions) *cobra.Command {
 	var lsJSONFields []string
 	var lsVerbose bool
 	var lsPerson string
+	var lsUnreadable bool
 	command := &cobra.Command{
 		Use:   "ls [query]",
 		Short: "List and search fibers in this view",
@@ -108,6 +109,9 @@ felt find searches the rest of it.`,
 			jsonFields := splitListFlag(lsJSONFields)
 			if len(jsonFields) > 0 && !view.jsonOutput() {
 				return fmt.Errorf("--json-field requires --json")
+			}
+			if lsUnreadable && !view.jsonOutput() {
+				return fmt.Errorf("--unreadable requires --json")
 			}
 
 			// If any filter is active (tags, query, recent) and -s wasn't explicitly set,
@@ -159,6 +163,7 @@ felt find searches the rest of it.`,
 			if err != nil {
 				return err
 			}
+			unreadable := storage.Unreadable()
 			exactMatches, rest, bodyOnly, err := search.match(storage, felts, bodiesLoaded)
 			if err != nil {
 				return err
@@ -216,14 +221,28 @@ felt find searches the rest of it.`,
 						f.Body = ""
 					}
 				}
+				rows := make([]interface{}, 0, len(filtered))
 				if len(jsonFields) > 0 {
 					projected, err := projectFeltsJSON(filtered, jsonFields)
 					if err != nil {
 						return err
 					}
-					return writeJSON(out, projected)
+					for _, row := range projected {
+						rows = append(rows, row)
+					}
+				} else {
+					for _, f := range filtered {
+						rows = append(rows, f)
+					}
 				}
-				return writeJSON(out, filtered)
+				// A file the walk could not read matches no filter and fails
+				// none: it is listed whole, in place of the fiber it holds.
+				if lsUnreadable {
+					for _, u := range unreadable {
+						rows = append(rows, u)
+					}
+				}
+				return writeJSON(out, rows)
 			}
 
 			// Closed suppression is a human-output concern only: --json is the wire
@@ -288,6 +307,7 @@ felt find searches the rest of it.`,
 	command.Flags().StringArrayVar(&lsAny, "any", nil, "Match any field:<name> or tag:<tag> filter (repeatable)")
 	command.Flags().StringVar(&lsIDsFrom, "ids-from", "", "Read fiber ids from a file (one id per line) without walking the store")
 	command.Flags().StringArrayVar(&lsJSONFields, "json-field", nil, "With --json, emit only these top-level fields (repeatable or comma-separated)")
+	command.Flags().BoolVar(&lsUnreadable, "unreadable", false, "With --json, also emit {id, path, unreadable} for each fiber file the walk could not read")
 	command.Flags().StringVar(&lsPerson, "person", "", "Only fibers whose role names this person")
 	command.Flags().BoolVarP(&lsVerbose, "verbose", "v", false, "List every match flat, without collapsing matches under a matching ancestor")
 	if view.Binary != "" && view.Binary != "felt" {

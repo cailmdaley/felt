@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/spf13/cobra"
 )
@@ -34,6 +35,9 @@ type DoctorReceipt struct {
 	PendingContext      []messaging.PendingContext `json:"pending_context,omitempty"`
 	PendingContextError string                     `json:"pending_context_error,omitempty"`
 	Rex                 *ReceiptRex                `json:"rex,omitempty"`
+	// Unreadable is every fiber file in this host's stores that no listing can
+	// read, so the board and dispatch skip it.
+	Unreadable []felt.Unreadable `json:"unreadable,omitempty"`
 }
 
 type ReceiptDaemon struct {
@@ -125,6 +129,9 @@ func (a *app) doctorCmd() *cobra.Command {
 				a.printTmuxServerReceipt(receipt.TmuxServer)
 				a.printRexReceipt(receipt.Rex)
 				a.printPendingContextReceipt(receipt)
+				for _, u := range receipt.Unreadable {
+					fmt.Fprintf(a.env.Stdout, "warning: fiber %s cannot be read, so listings, the board and dispatch skip it: %s\n  %s\n", u.ID, u.Error, u.Path)
+				}
 				if receipt.Repair != "" {
 					fmt.Fprintf(a.env.Stdout, "repair: %s\n", receipt.Repair)
 				}
@@ -170,6 +177,7 @@ func (a *app) collectDoctorReceipt() DoctorReceipt {
 	if err != nil {
 		receipt.PendingContextError = err.Error()
 	}
+	receipt.Unreadable = a.collectUnreadable()
 	statuses := []receiptStatus{receipt.Daemon.Status, receipt.Host.Status}
 	if receipt.TmuxServer != nil {
 		statuses = append(statuses, receipt.TmuxServer.Status)
@@ -189,6 +197,30 @@ func (a *app) collectDoctorReceipt() DoctorReceipt {
 		foldDoctorRepair(&receipt, receipt.Rex.Status, receipt.Rex.Repair)
 	}
 	return receipt
+}
+
+// collectUnreadable walks each store this host serves, once per physical
+// file however many stores reach it.
+func (a *app) collectUnreadable() []felt.Unreadable {
+	stores, err := a.shuttleStores()
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var all []felt.Unreadable
+	for _, store := range stores {
+		found, err := felt.NewStorage(store).FindUnreadable()
+		if err != nil {
+			continue
+		}
+		for _, u := range found {
+			if !seen[u.Path] {
+				seen[u.Path] = true
+				all = append(all, u)
+			}
+		}
+	}
+	return all
 }
 
 func (a *app) printPendingContextReceipt(receipt DoctorReceipt) {

@@ -769,7 +769,7 @@ func runPreToolWithInput(t *testing.T, a *app, input preToolInput) string {
 func runPostToolWithInput(t *testing.T, input postToolInput) {
 	t.Helper()
 	stdinR := stdinPipe(t, input)
-	if err := runPostToolHook(stdinR); err != nil {
+	if err := runPostToolHook(stdinR, io.Discard); err != nil {
 		t.Fatalf("runPostToolHook: %v", err)
 	}
 }
@@ -793,7 +793,7 @@ func TestPostToolHookWaitsForLifecycleLock(t *testing.T) {
 	defer unlock()
 	data, _ := json.Marshal(postEditInput("Edit", storage.Path("alpha")))
 	done := make(chan error, 1)
-	go func() { done <- runPostToolHook(strings.NewReader(string(data))) }()
+	go func() { done <- runPostToolHook(strings.NewReader(string(data)), io.Discard) }()
 	select {
 	case err := <-done:
 		t.Fatalf("hook bypassed lifecycle lock: %v", err)
@@ -1003,5 +1003,37 @@ func TestPostToolHookSkipsDuringGitOperation(t *testing.T) {
 	}
 	if after.UpdatedAt == nil {
 		t.Fatal("not stamped after the merge concluded")
+	}
+}
+
+// A hand edit that breaks the frontmatter is answered with a block naming the
+// file and the parse error, which the harness shows the agent at once; a
+// companion file in the same directory is never mistaken for the fiber.
+func TestPostToolHookBlocksAnEditThatLeavesTheFiberUnreadable(t *testing.T) {
+	t.Parallel()
+	_, storage := newStore(t)
+	if err := storage.Write(&felt.Felt{ID: "hub", Name: "Hub", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	path := storage.Path("hub")
+	if err := os.WriteFile(path, []byte("---\nname: Hub\noutcome: 'the chair's notes'\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := func(file string) string {
+		var out bytes.Buffer
+		if err := runPostToolHook(stdinPipe(t, postEditInput("Edit", file)), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.String()
+	}
+	var reply struct{ Decision, Reason string }
+	if err := json.Unmarshal([]byte(run(path)), &reply); err != nil {
+		t.Fatal(err)
+	}
+	if reply.Decision != "block" || !strings.Contains(reply.Reason, path) || !strings.Contains(reply.Reason, "yaml") {
+		t.Fatalf("reply = %+v", reply)
+	}
+	if out := run(filepath.Join(filepath.Dir(path), "notes.md")); out != "" {
+		t.Fatalf("a companion edit answered %q", out)
 	}
 }

@@ -3,8 +3,10 @@ package feltcli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -117,10 +119,12 @@ func (a *app) hookPostToolCmd() *cobra.Command {
 		Long: `Reads the PostToolUse payload from stdin. When the tool was Edit, Write, or
 MultiEdit on a markdown file inside a felt store, stamps the owning fiber's
 updated-at, so a direct edit counts toward recency as felt add and felt edit
-do. Silent for any other tool, file, or error.`,
+do. When the edit leaves the fiber's own markdown unreadable, it answers with
+a block naming the parse error instead, so the editing agent repairs it at
+once. Silent for any other tool, file, or error.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runPostToolHook(a.env.Stdin)
+			return runPostToolHook(a.env.Stdin, a.env.Stdout)
 		},
 	}
 	return command
@@ -472,7 +476,7 @@ const postToolTouchInterval = time.Hour
 // PostToolUse hook must never fail the tool call, and losing one stamp is
 // cheaper than blocking. The frontmatter stamp is the recency mechanism —
 // a missed stamp just means one edit reads slightly stale.
-func runPostToolHook(stdin io.Reader) error {
+func runPostToolHook(stdin io.Reader, stdout io.Writer) error {
 	var input postToolInput
 	if err := json.NewDecoder(stdin).Decode(&input); err != nil {
 		return nil
@@ -490,6 +494,19 @@ func runPostToolHook(stdin io.Reader) error {
 	root, id, ok := fiberFromEditedPath(fp)
 	if !ok {
 		return nil
+	}
+	// A hand edit is the one write felt does not validate, and a fiber that no
+	// longer parses drops out of every listing, board and dispatch without a
+	// sound. Say so to the agent that just made it, mid-merge included.
+	if felt.IsFiberFile(fp) {
+		if err := felt.CheckFiberFile(fp); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return encodeHookJSON(stdout, map[string]string{
+				"decision": "block",
+				"reason": fmt.Sprintf("This edit left %s unreadable: %v. Every felt and shuttle listing, the board and the daemon now skip this fiber "+
+					"(a constitution stops dispatching and its threads lose their channel). Fix the frontmatter now; "+
+					"a single-quoted value doubles each apostrophe (''), or write a long outcome as a |- block.", fp, err),
+			})
+		}
 	}
 	// Mid-merge, an edit to a fiber file is conflict resolution, not work on
 	// the fiber: the agent is reconciling two machines' versions, and the

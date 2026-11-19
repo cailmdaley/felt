@@ -78,14 +78,19 @@ killed merge holding the Git index lock.`,
 // mount is attempted before any failure is returned.
 func (a *app) syncStoreAndMounts(parent context.Context, storeRoot string, push bool, fetchTimeout time.Duration, output io.Writer) error {
 	var failures []error
-	if err := a.syncStore(parent, storeRoot, push, fetchTimeout, output); err != nil {
+	var touched []string
+	collect := func(files []string) { touched = append(touched, files...) }
+	if files, err := a.syncStore(parent, storeRoot, push, fetchTimeout, output); err != nil {
 		failures = append(failures, err)
+	} else {
+		collect(files)
 	}
 	for _, mount := range a.mountedRepositories(parent, storeRoot) {
 		if _, err := fmt.Fprintf(output, "Syncing %s, mounted at %s…\n", mount.repo, mount.at); err != nil {
 			return err
 		}
-		err := a.syncStore(parent, mount.repo, push, fetchTimeout, output)
+		files, err := a.syncStore(parent, mount.repo, push, fetchTimeout, output)
+		collect(files)
 		var noUpstream *noUpstreamError
 		switch {
 		case errors.As(err, &noUpstream):
@@ -104,7 +109,33 @@ func (a *app) syncStoreAndMounts(parent context.Context, storeRoot string, push 
 			}
 		}
 	}
+	if err := reportUnreadable(touched, output); err != nil {
+		failures = append(failures, err)
+	}
 	return errors.Join(failures...)
+}
+
+// reportUnreadable ends a sync by naming each fiber it carried, in either
+// direction, that no listing can read. Such a fiber vanishes from every view
+// and from dispatch on every host that pulls it, so this is the sync's last
+// word and its exit status, though the merge and push themselves completed.
+func reportUnreadable(files []string, output io.Writer) error {
+	var broken []string
+	for _, file := range files {
+		if !felt.IsFiberFile(file) {
+			continue
+		}
+		if err := felt.CheckFiberFile(file); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			broken = append(broken, fmt.Sprintf("  %s\n    %v", file, err))
+		}
+	}
+	if len(broken) == 0 {
+		return nil
+	}
+	if _, err := fmt.Fprintf(output, "\n✗ This sync carried %d fiber(s) no felt or shuttle command can read: every listing, board and daemon skips them until their frontmatter parses.\n%s\n", len(broken), strings.Join(broken, "\n")); err != nil {
+		return err
+	}
+	return fmt.Errorf("sync completed, but %d fiber(s) it carried cannot be read; fix the frontmatter above, commit, and sync again", len(broken))
 }
 
 // syncMount is a Git repository other than the store's own whose files a
@@ -184,7 +215,10 @@ type noUpstreamError struct{ reason string }
 
 func (e *noUpstreamError) Error() string { return e.reason }
 
-func (a *app) syncStore(parent context.Context, storeRoot string, push bool, fetchTimeout time.Duration, output io.Writer) error {
+// syncStore syncs the repository holding storeRoot and returns the absolute
+// paths of the store files that differ between the upstream it started from
+// and the HEAD it leaves: what it pulled and what it published.
+func (a *app) syncStore(parent context.Context, storeRoot string, push bool, fetchTimeout time.Duration, output io.Writer) ([]string, error) {
 	if parent == nil {
 		parent = context.Background()
 	}
@@ -200,11 +234,11 @@ func (a *app) syncStore(parent context.Context, storeRoot string, push bool, fet
 	}
 
 	if _, err := git("rev-parse", "--show-toplevel"); err != nil {
-		return fmt.Errorf("finding the felt store's Git root: %w", err)
+		return nil, fmt.Errorf("finding the felt store's Git root: %w", err)
 	}
 	commonDir, err := git("rev-parse", "--git-common-dir")
 	if err != nil {
-		return fmt.Errorf("finding the Git metadata directory: %w", err)
+		return nil, fmt.Errorf("finding the Git metadata directory: %w", err)
 	}
 	commonDir = strings.TrimSpace(commonDir)
 	if !filepath.IsAbs(commonDir) {
@@ -212,7 +246,7 @@ func (a *app) syncStore(parent context.Context, storeRoot string, push bool, fet
 	}
 	gitDir, err := git("rev-parse", "--git-dir")
 	if err != nil {
-		return fmt.Errorf("finding the Git worktree metadata directory: %w", err)
+		return nil, fmt.Errorf("finding the Git worktree metadata directory: %w", err)
 	}
 	gitDir = strings.TrimSpace(gitDir)
 	if !filepath.IsAbs(gitDir) {
@@ -220,67 +254,96 @@ func (a *app) syncStore(parent context.Context, storeRoot string, push bool, fet
 	}
 	unlock, err := lockSyncRepository(commonDir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer unlock()
 
 	branch, err := git("symbolic-ref", "--quiet", "--short", "HEAD")
 	if err != nil {
-		return fmt.Errorf("felt sync requires a checked-out branch: %w", err)
+		return nil, fmt.Errorf("felt sync requires a checked-out branch: %w", err)
 	}
 	branch = strings.TrimSpace(branch)
 	tracking, err := git("for-each-ref", "--format=%(upstream:remotename)\n%(upstream:remoteref)", "refs/heads/"+branch)
 	if err != nil {
-		return fmt.Errorf("reading branch %q tracking configuration: %w", branch, err)
+		return nil, fmt.Errorf("reading branch %q tracking configuration: %w", branch, err)
 	}
 	trackingParts := strings.Split(strings.TrimSpace(tracking), "\n")
 	if len(trackingParts) != 2 {
-		return &noUpstreamError{fmt.Sprintf("branch %q has no usable upstream; set one with `git branch --set-upstream-to` and retry", branch)}
+		return nil, &noUpstreamError{fmt.Sprintf("branch %q has no usable upstream; set one with `git branch --set-upstream-to` and retry", branch)}
 	}
 	remote := strings.TrimSpace(trackingParts[0])
 	mergeRef := strings.TrimSpace(trackingParts[1])
 	if remote == "" || !strings.HasPrefix(mergeRef, "refs/heads/") {
-		return &noUpstreamError{fmt.Sprintf("branch %q must track a remote branch to sync", branch)}
+		return nil, &noUpstreamError{fmt.Sprintf("branch %q must track a remote branch to sync", branch)}
 	}
 	if err := rejectGitOperationInProgress(git, gitDir); err != nil {
-		return err
+		return nil, err
 	}
 	_, err = git("diff", "--cached", "--quiet", "--")
 	if err != nil {
-		return fmt.Errorf("felt store has staged changes; commit or unstage them before `felt sync`: %w", err)
+		return nil, fmt.Errorf("felt store has staged changes; commit or unstage them before `felt sync`: %w", err)
 	}
 
+	// Where upstream stood before this sync: its diff with the final HEAD is
+	// everything the sync pulls and publishes.
+	before, err := git("rev-parse", "--verify", "--quiet", "refs/remotes/"+remote+"/"+strings.TrimPrefix(mergeRef, "refs/heads/"))
+	if err != nil {
+		before, _ = git("rev-parse", "HEAD")
+	}
 	if _, err := fmt.Fprintf(output, "Fetching %s for %s…\n", remote, branch); err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := git("fetch", "--no-tags", remote, mergeRef); err != nil {
-		return fmt.Errorf("fetching felt store upstream failed; sync did not complete: %w", err)
+		return nil, fmt.Errorf("fetching felt store upstream failed; sync did not complete: %w", err)
 	}
 	mergeOutput, mergeErr := git("merge", "--ff", "--no-autostash", "--no-overwrite-ignore", "--no-edit", "FETCH_HEAD")
 	if mergeErr != nil {
 		if hasUnmergedIndex(git) {
-			return fmt.Errorf("upstream merge has conflicts; resolve and commit them, then retry `felt sync`: %s", strings.TrimSpace(mergeOutput))
+			return nil, fmt.Errorf("upstream merge has conflicts; resolve and commit them, then retry `felt sync`: %s", strings.TrimSpace(mergeOutput))
 		}
-		return fmt.Errorf("merging felt store upstream failed: %w: %s", mergeErr, strings.TrimSpace(mergeOutput))
+		return nil, fmt.Errorf("merging felt store upstream failed: %w: %s", mergeErr, strings.TrimSpace(mergeOutput))
 	}
 	if strings.TrimSpace(mergeOutput) != "" {
 		if _, err := fmt.Fprintln(output, strings.TrimSpace(mergeOutput)); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if push {
 		if _, err := fmt.Fprintf(output, "Pushing %s to %s:%s…\n", branch, remote, strings.TrimPrefix(mergeRef, "refs/heads/")); err != nil {
-			return err
+			return nil, err
 		}
 		if pushOutput, err := git("push", remote, "HEAD:"+mergeRef); err != nil {
-			return fmt.Errorf("push failed after local sync; upstream merge remains applied: %w: %s", err, strings.TrimSpace(pushOutput))
+			return nil, fmt.Errorf("push failed after local sync; upstream merge remains applied: %w: %s", err, strings.TrimSpace(pushOutput))
 		} else if strings.TrimSpace(pushOutput) != "" {
 			if _, err := fmt.Fprintln(output, strings.TrimSpace(pushOutput)); err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
-	return nil
+	return syncedFiles(git, storeRoot, strings.TrimSpace(before)), nil
+}
+
+// syncedFiles lists the absolute paths of the files under a `.felt` that are
+// present at HEAD and differ from before.
+func syncedFiles(git func(...string) (string, error), repo, before string) []string {
+	if before == "" {
+		return nil
+	}
+	top, err := git("rev-parse", "--show-toplevel")
+	if err != nil {
+		return nil
+	}
+	out, err := git("diff", "--name-only", "-z", "--diff-filter=d", before, "HEAD")
+	if err != nil {
+		return nil
+	}
+	var files []string
+	for _, name := range strings.Split(out, "\x00") {
+		if slices.Contains(strings.Split(name, "/"), felt.DirName) {
+			files = append(files, filepath.Join(strings.TrimSpace(top), filepath.FromSlash(name)))
+		}
+	}
+	return files
 }
 
 func rejectGitOperationInProgress(git func(...string) (string, error), gitDir string) error {

@@ -698,3 +698,59 @@ func TestTreeDepthLimit(t *testing.T) {
 		t.Fatalf("unflagged tree showed elision indicator:\n%s", full)
 	}
 }
+
+// --unreadable lists a file the walk cannot read in place of its fiber, by
+// id, canonical path and parse error, through filters, projections and
+// --ids-from alike; without the flag the JSON holds fibers only.
+func TestLsJSONUnreadableRows(t *testing.T) {
+	t.Parallel()
+	dir, storage := newStore(t)
+	if err := storage.Write(&felt.Felt{ID: "fine", Name: "Fine"}); err != nil {
+		t.Fatal(err)
+	}
+	broken := filepath.Join(dir, ".felt", "hub", "hub.md")
+	if err := os.MkdirAll(filepath.Dir(broken), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(broken, []byte("---\nname: Hub\nshuttle:\n  kind: oneshot\noutcome: 'the chair's notes'\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := filepath.EvalSymlinks(broken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := filepath.Join(t.TempDir(), "ids")
+	if err := os.WriteFile(ids, []byte("hub\nfine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"ls", "-j", "-s", "all", "--unreadable"},
+		{"ls", "-j", "-s", "all", "--unreadable", "--any", "field:shuttle", "--json-field", "id,name"},
+		{"ls", "-j", "--unreadable", "--ids-from", ids},
+	} {
+		out, err := runCommand(t, dir, args...)
+		if err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+		var rows []map[string]any
+		if err := json.Unmarshal([]byte(out), &rows); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+		var found map[string]any
+		for _, row := range rows {
+			if row["unreadable"] != nil {
+				found = row
+			}
+		}
+		if found == nil || found["id"] != "hub" || found["path"] != canonical || !strings.Contains(found["unreadable"].(string), "yaml") || strings.Contains(found["unreadable"].(string), "reading file") {
+			t.Fatalf("%v: unreadable row = %v\n%s", args, found, out)
+		}
+	}
+	out, err := runCommand(t, dir, "ls", "-j", "-s", "all")
+	if err != nil || strings.Contains(out, "unreadable") {
+		t.Fatalf("plain listing: %v\n%s", err, out)
+	}
+	if _, err := runCommand(t, dir, "ls", "--unreadable"); err == nil {
+		t.Fatal("--unreadable without --json was accepted")
+	}
+}
