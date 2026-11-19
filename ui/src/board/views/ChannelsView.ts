@@ -15,6 +15,7 @@ import { random } from '../ink.js'
 import { lineHue } from '../lineHue.js'
 import { createRailReorder, type RailReorder } from '../channelRail.js'
 import { RailMotion, SLOP_PX, WHEEL_IDLE_MS, WheelAxis } from './railMotion.js'
+import type { SwipeSignal } from '../workspace/PhoneGestures.js'
 import { openActionMenu } from '../conversationMenu.js'
 import { stateDot } from '../stateDot.js'
 import { slug } from '../threadOutline.js'
@@ -1336,13 +1337,19 @@ export class ChannelsView implements TemporalView {
     layout.style.setProperty('--kbn-ch-stream-x', `${over ? 0 : (p - (this.railShown() ? 1 : 0)) * width}px`)
   }
   /**
-   * Sideways gestures while Channels is the surface shown: the rail follows a
-   * finger or a two-finger trackpad swipe, rightward in, leftward away, and
-   * settles by where it stands and how fast it went when let go. Content that
-   * scrolls sideways keeps its gesture; travel along the stream is the stream's.
+   * Sideways gestures anywhere in Channels, the reader over it included: the
+   * rail follows a finger or a two-finger trackpad swipe, rightward in,
+   * leftward away, and settles by where it stands and how fast it went when
+   * let go. Over the reader, a rightward swipe leaves it and draws the rail in
+   * the same way ({@link readerSwipe}), so the swipe always means the rail and
+   * never back. Content that scrolls sideways keeps its gesture; travel along
+   * the stream is the stream's.
    */
   private gestures(root: HTMLElement): () => void {
-    const onSurface = (target: EventTarget | null): boolean => !this.ctx?.workspace?.isActive && !!(target as Element | null)?.closest?.('.kbn-ch, .kbn-ch-rail')
+    const reading = (): boolean => !!this.ctx?.workspace?.isActive
+    const onSurface = (target: EventTarget | null): boolean => !reading() && !!(target as Element | null)?.closest?.('.kbn-ch, .kbn-ch-rail')
+    // The reader recognises touches itself, in its frames too, and offers them here; a trackpad's are read here.
+    const onReader = (target: EventTarget | null): boolean => reading() && !!(target as Element | null)?.closest?.('.ws-reader')
     const motion = this.motion, axis = new WheelAxis()
     // A gesture is taken only toward somewhere the rail can go, unless it is already moving.
     const toward = (px: number): boolean => !this.rail?.moving && (motion.active || (px > 0 ? !this.railShown() : this.railShown() && this.canLeaveRail()))
@@ -1369,27 +1376,52 @@ export class ChannelsView implements TemporalView {
       if (touch?.taken) motion.release()
       touch = null
     }
-    let idle = 0
+    let idle = 0, leaving = false
     const wheel = (event: WheelEvent): void => {
-      if (!onSurface(event.target)) return
+      const over = onReader(event.target)
+      if (!over && !onSurface(event.target)) return
       const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? root.clientWidth : 1
       const dx = event.deltaX * unit, dy = event.deltaY * unit, sideways = Math.abs(dx) > Math.abs(dy)
-      if (sideways && !axis.holding && scrollsSideways(event.target as Element, root, dx)) return
+      if (sideways && !axis.holding && scrollsSideways(event.target as Element, document.body, dx)) return
       const px = axis.feed(dx, dy, event.timeStamp)
       // Taking the gesture keeps the browser from going back a page.
       if (sideways || px !== null) event.preventDefault()
-      if (px === null || !toward(-px)) return
+      if (px === null) return
+      // Rightward over the reader leaves it, once, and goes on to draw the rail in.
+      if (over && px >= 0 && !motion.active) return
+      if (over && !leaving) { leaving = true; this.ctx?.workspace?.returnToOrigin() }
+      if (!over) leaving = false
+      if (!toward(-px)) return
       motion.drag(-px, event.timeStamp)
       clearTimeout(idle)
       // A trackpad says nothing when the fingers lift; the rail lets go once its events pause.
       idle = window.setTimeout(() => motion.release(), WHEEL_IDLE_MS)
     }
+    // A touch the reader recognised: rightward, it leaves the reader and the rail follows on from there.
+    let fromReader: number | null = null
+    const readerSwipe = (signal: SwipeSignal): boolean => {
+      if (signal.phase !== 'move') {
+        if (fromReader === null) return false
+        fromReader = null
+        motion.release()
+        return true
+      }
+      if (fromReader === null) {
+        if (signal.dx <= 0 || this.rail?.moving) return false
+        fromReader = 0
+        this.ctx?.workspace?.returnToOrigin()
+      }
+      if (toward(signal.dx - fromReader)) motion.drag(signal.dx - fromReader, performance.now())
+      fromReader = signal.dx
+      return true
+    }
+    if (this.ctx?.workspace) this.ctx.workspace.swipeBeneath = readerSwipe
     // Touch events, not pointer events: the browser cancels a pointer it starts panning, but a touch still ends.
     root.addEventListener('touchstart', down, { passive: true })
     root.addEventListener('touchmove', move, { passive: true })
     root.addEventListener('touchend', up, { passive: true })
     root.addEventListener('touchcancel', up, { passive: true })
-    root.addEventListener('wheel', wheel, { passive: false })
+    document.addEventListener('wheel', wheel, { passive: false })
     return () => {
       clearTimeout(idle)
       motion.rest(this.railShown())
@@ -1397,7 +1429,8 @@ export class ChannelsView implements TemporalView {
       root.removeEventListener('touchmove', move)
       root.removeEventListener('touchend', up)
       root.removeEventListener('touchcancel', up)
-      root.removeEventListener('wheel', wheel)
+      document.removeEventListener('wheel', wheel)
+      if (this.ctx?.workspace?.swipeBeneath === readerSwipe) this.ctx.workspace.swipeBeneath = null
     }
   }
 

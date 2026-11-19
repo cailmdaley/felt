@@ -143,8 +143,9 @@ const streamScroll = page => page.locator('.kbn-ch .kbn-ch-stream').evaluate(el 
 /**
  * Channels: a post opens its thread, then the orchestrator and the thread
  * again, back and forth, then a file; each way back (the reader's ‹,
- * Escape, the browser's Back, the Channels tab, the phone's swipe) lands
- * on the channel in one press, scrolled where it was, the post in focus.
+ * Escape, the browser's Back, the Channels tab) lands on the channel in one
+ * press, scrolled where it was, the post in focus. The swipe is not a way
+ * back here: it brings the rail (`channels.mjs`, `railGesture.mjs`).
  * An unfolded file sent to full screen comes back unfolded with the keys.
  */
 export function registerChannelsBackJourneys(test) {
@@ -152,7 +153,7 @@ export function registerChannelsBackJourneys(test) {
     ['phone', { width: 390, height: 844 }, true],
     ['desktop', { width: 1440, height: 900 }, false],
   ]) test(`Back from Channels (${device}): every way back is one press to the channel, where it was`, async page => {
-    const ways = phone ? ['reader', 'browser', 'swipe'] : ['reader', 'escape', 'browser', 'tab']
+    const ways = phone ? ['reader', 'browser'] : ['reader', 'escape', 'browser', 'tab']
     for (const way of ways) {
       await page.goto(channelsUrl)
       await toUnions(page)
@@ -178,13 +179,6 @@ export function registerChannelsBackJourneys(test) {
       else if (way === 'escape') { await page.locator('.ws-reader').click({ position: { x: 4, y: 200 } }).catch(() => {}); await page.keyboard.press('Escape') }
       else if (way === 'browser') await page.goBack()
       else if (way === 'tab') await page.locator('button[data-view="channels"]').first().click()
-      else if (way === 'swipe') {
-        const cdp = await page.context().newCDPSession(page)
-        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 60, y: 300 }] })
-        for (const x of [90, 140, 210, 280]) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: 300 }] })
-        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
-        await cdp.detach()
-      }
       await page.locator('.ws-reader.ws-dormant').waitFor()
       assert.equal(new URL(page.url()).hash, '#/channels', `${way}: one press reaches the channel`)
       assert.equal(await page.locator('.kbn-ch-pick[aria-current="true"], .kbn-ch-pick.kbn-ch-pick-on').first().textContent().catch(() => 'unions').then(t => t.includes('unions')), true)

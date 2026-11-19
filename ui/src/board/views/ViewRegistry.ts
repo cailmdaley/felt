@@ -36,6 +36,7 @@ import type { ConsoleOptions, Dock } from '../workspace/Dock.js'
 import type { TemporalFetchers } from './TemporalData.js'
 import type { FiberSends } from '../fiberSends.js'
 import type { GlobeHost } from '../globe/GlobeStage.js'
+import type { SwipeSignal } from '../workspace/PhoneGestures.js'
 
 export interface TemporalView {
   id: 'chronicle' | 'globe' | 'channels'
@@ -76,6 +77,10 @@ export interface ViewContext extends TemporalFetchers {
   /** The board's document reader and the fleet's documents. */
   workspace?: {
     readonly isActive: boolean
+    /** Leaves the reader for the view beneath it, as its back does (`Workspace.returnToOrigin`). */
+    returnToOrigin(): void
+    /** The view beneath the reader that owns its page swipe: true when it took the swipe. */
+    swipeBeneath: ((signal: SwipeSignal) => boolean) | null
     readonly dock: { openConversation(card: KanbanCard): boolean }
     /** A console of the view's own, built and wired as the reader's (`Workspace.console`). */
     console(options: ConsoleOptions): Dock

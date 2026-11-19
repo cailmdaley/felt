@@ -88,6 +88,15 @@ try {
     for (let frame = 0; frame < 12; frame++) { await page.mouse.wheel(frame % 3 ? 2 : -2, -40); await page.waitForTimeout(16) }
     assert.equal(await showing(page), 1)
     assert.notEqual(await page.locator('.kbn-ch-stream').evaluate(el => el.scrollTop), before, 'the stream scrolled')
+
+    // Over the reader opened from the channel, the same swipe leaves it and brings the rail: never only back.
+    await swipe(page, at, 240)
+    await settled(page, false)
+    await page.locator('.kbn-ch-item[data-kind="ask"] .kbn-ch-who').click()
+    await page.waitForFunction(() => document.querySelector('.ws-selected .ov-name')?.textContent === 'foregrounds')
+    await swipe(page, at, -240)
+    await page.waitForFunction(() => location.hash === '#/channels')
+    await settled(page, true)
     assert.deepEqual(errors, [])
   }
   {
@@ -143,7 +152,7 @@ try {
     assert.equal(await hidden(page), true)
     assert.deepEqual(errors, [])
   }
-  console.log('Rail gesture in WebKit: a trackpad swipe and a finger both carry the rail, a second swipe in the first one\'s inertia takes effect, a half swipe settles back, a vertical scroll leaves it be')
+  console.log('Rail gesture in WebKit: a trackpad swipe and a finger both carry the rail, a second swipe in the first one\'s inertia takes effect, a half swipe settles back, a vertical scroll leaves it be, and over the reader the swipe brings the rail')
 } finally {
   await browser.close()
 }

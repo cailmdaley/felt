@@ -45,6 +45,8 @@ export interface ReaderOptions {
   reviewTarget?(source: WorkspaceDocument): string
   onCrossing?(travel: number): void
   onReturn(): void
+  /** A page swipe offered first to the view beneath the reader; true when that view took it. */
+  onSwipe?(signal: SwipeSignal): boolean
   /** Between the family's map and its tapestry; false outside a family. */
   onTapestry?(): boolean
   actionCard?(card: KanbanCard): KanbanCard
@@ -371,6 +373,7 @@ export class Reader {
    * quiet for half a second, is cancelled so layout owns the track again.
    */
   private swipe(signal: SwipeSignal): void {
+    if (!this.swiping && this.opts.onSwipe?.(signal)) return
     const ch = this.channel
     const index = ch?.documents.findIndex(d => d.key === this.selected) ?? -1
     const width = this.stage.clientWidth

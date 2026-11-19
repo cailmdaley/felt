@@ -38,6 +38,7 @@ import { parseRoute, viewOfHash, WorkspaceHistory, type WorkspaceOriginView, typ
 import { ChannelThemes } from './ChannelThemes.js'
 import { changeReviewTarget } from './changeReviewTarget.js'
 import { daemonFetch } from '../daemonApi.js'
+import type { SwipeSignal } from './PhoneGestures.js'
 
 export interface WorkspaceOptions {
   /** The current response's thread graph, built once per response. */
@@ -248,6 +249,7 @@ export class Workspace {
       },
       onCrossing: travel => this.depth.cross(travel),
       onReturn: () => this.history.leave(),
+      onSwipe: signal => this.swipeBeneath?.(signal) ?? false,
       onVerdict: verdict => this.deferVerdict(verdict),
       onConversation: card => { this.dock.openConversation(card) },
       onRest: (card, anchor) => this.opts.onRest?.(card, anchor),
@@ -272,6 +274,8 @@ export class Workspace {
   }
 
   get isActive(): boolean { return this.reader.isActive }
+  /** The view beneath the reader, when it owns the page swipe (Channels: the swipe brings its rail); true when it took the swipe. */
+  swipeBeneath: ((signal: SwipeSignal) => boolean) | null = null
   /**
    * The board bar's Find, routed by what it serves now: the filter of a view
    * that filters itself by it (Channels), and otherwise a list of

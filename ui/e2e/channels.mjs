@@ -26,6 +26,15 @@ const hold = async (page, from, to) => {
   await touch('touchEnd', [])
   await cdp.detach()
 }
+/** A finger drawn rightward across the screen from `from`, as trusted touches. */
+const swipeRight = async (page, from) => {
+  const cdp = await page.context().newCDPSession(page)
+  const touch = (type, points) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points })
+  await touch('touchStart', [from])
+  for (let step = 1; step <= 10; step++) { await touch('touchMove', [{ x: from.x + 22 * step, y: from.y }]); await page.waitForTimeout(16) }
+  await touch('touchEnd', [])
+  await cdp.detach()
+}
 const shot = async (page, name) => {
   await page.waitForTimeout(400)
   await page.screenshot({ path: resolve(process.env.CHANNELS_SHOTS ?? tmpdir(), `channels-${name}.png`) })
@@ -189,7 +198,11 @@ try {
     await page.keyboard.press('Escape')
     await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'cmbx' && document.querySelector('.kbn-ch').offsetParent)
     if (phone) {
-      await page.locator('.kbn-ch-back').click()
+      // From the reader over a channel, the swipe that brings the rail on a channel brings it here too: never back to the channel.
+      await page.locator('.kbn-ch-item[data-kind="ask"] .kbn-ch-who').click()
+      await page.waitForFunction(() => document.querySelector('.ws-selected .ov-name')?.textContent === 'foregrounds')
+      await swipeRight(page, { x: 120, y: 420 })
+      await page.waitForFunction(() => location.hash === '#/channels' && !document.querySelector('.kbn-ch-layout').hasAttribute('data-rail-hidden'))
       assert.ok(await page.locator('.kbn-ch-rail').isVisible())
       await page.locator('.kbn-ch-jump').fill('old')
     } else {
