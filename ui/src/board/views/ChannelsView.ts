@@ -528,15 +528,17 @@ export class ChannelsView implements TemporalView {
     const needle = needleOf(this.folding)
     for (const id of this.foundRows) for (const part of this.rows.get(id)?.node.querySelectorAll('.kbn-ch-item-text, .uf-file-name, .uf-caption, .kbn-ch-slug') ?? []) highlight(part, needle)
     const at = this.foundAt && this.foundRows.includes(this.foundAt) ? this.foundAt : this.foundRows.at(-1)
-    if (at) this.showFound(at)
+    // A redraw that keeps the match in hand leaves the stream where the reader has it.
+    if (at) this.showFound(at, at !== this.foundAt)
   }
-  /** Marks the match in hand and brings it into sight. */
-  private showFound(id: string): void {
+  /** Marks the match in hand and, when it is a new one, brings it into sight. */
+  private showFound(id: string, bring = true): void {
     this.foundAt = id
     for (const row of this.stream?.querySelectorAll('[data-found]') ?? []) row.removeAttribute('data-found')
     const row = this.rows.get(id)?.node
     if (!row || !this.stream) return
     row.setAttribute('data-found', '')
+    if (!bring) return
     row.scrollIntoView({ block: row.offsetHeight > this.stream.clientHeight ? 'start' : 'center' })
     this.lastTop = this.stream.scrollTop
   }
@@ -596,8 +598,8 @@ export class ChannelsView implements TemporalView {
       this.following = true
       this.marked = null
       this.markedItem = null
-      this.folding = ''
-      this.foundAt = null
+      // Find searched the channel left: it is put away, its fold and its chip with it.
+      if (this.folding) { this.folding = ''; this.foundAt = null; this.ctx?.workspace?.clearFind() }
       const channel = this.channel
       if (channel) this.ctx?.workspace?.board.read(channel.families)
     }

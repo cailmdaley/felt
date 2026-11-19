@@ -976,3 +976,26 @@ it('opens where Find picked: a hidden channel brought back, the picked line mark
   expect(posts.at(-1)?.[1]).toMatchObject({ key: expect.stringMatching(/^show:channel:van:\d+$/) })
   expect(host.querySelector<HTMLElement>('.kbn-ch-stream > [data-marked]')?.dataset.slug).toBe('van')
 })
+
+it('keeps the reader\'s place while folded: a redraw scrolls only to a new match, and leaving the channel puts Find away', async () => {
+  daemon()
+  const { view, ctx, host } = await mount()
+  const clearFind = vi.fn()
+  Object.assign(ctx.workspace!, { clearFind })
+  const scope = view.findScope()!
+  const find = 'inPlace' in scope ? scope.inPlace : undefined
+  const scrolled = vi.spyOn(HTMLElement.prototype, 'scrollIntoView')
+  find!.input('σ')
+  expect(scrolled).toHaveBeenCalledTimes(1)
+  // A poll that redraws the folded stream, a thread renamed, leaves the stream where the reader has it.
+  const sig = (view as unknown as { sigs: { stream: string } }).sigs.stream
+  view.refresh({ ...ctx, response: board([chair, { ...tsz, name: 'κ × tSZ, renamed' }, mask, beam, van, notes]) }); await settle()
+  expect((view as unknown as { sigs: { stream: string } }).sigs.stream, 'the stream was drawn again').not.toBe(sig)
+  expect(host.querySelector<HTMLElement>('.kbn-ch-stream > [data-found]')?.dataset.slug).toBe('tsz')
+  expect(scrolled).toHaveBeenCalledTimes(1)
+  find!.step(-1)
+  expect(scrolled).toHaveBeenCalledTimes(2)
+  view.keydown(new KeyboardEvent('keydown', { key: 'j' }))
+  expect(shown(host)).toBe('van')
+  expect(clearFind).toHaveBeenCalledOnce()
+})
