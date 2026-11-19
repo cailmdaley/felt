@@ -14,7 +14,7 @@ The board owns actions, presentation, the gestures that ask for a popup, and its
 | Settings dropdown, Reader document menu | `board/workspace/SettingsMenu.ts`, `Reader.ts` | `@ui-sdk/web/popover` |
 | View tabs, phone folio strip | `board/KanbanModal.ts`, `KanbanSurfaces.ts` | `@ui-sdk/web/tabs` |
 | Dock Kind | `board/workspace/Dock.ts` | `@ui-sdk/web/segmented-control` |
-| Parent-fiber picker, Chronicle search | `board/workspace/Dock.ts`, `board/views/ChronicleView.ts` | `@ui-sdk/web/autocomplete` |
+| Parent-fiber picker | `board/workspace/Dock.ts` | `@ui-sdk/web/autocomplete` |
 | Screen-reader announcements | `announce` callers across the board | core `announce` |
 | The console above a phone's on-screen keyboard | `board/workspace/Dock.ts` | core `bindAvoidKeyboard` |
 | Form dialog, parent picker, tag chips | `forms/AppDialog.tsx`, `forms/StashForm.tsx` | `@ui-sdk/react` dialog, autocomplete, combobox |
@@ -22,7 +22,7 @@ The board owns actions, presentation, the gestures that ask for a popup, and its
 These stay the board's own, each for a reason that still holds:
 
 - The Listen options menu holds a number field; an SDK menu closes on Tab and takes digits for typeahead.
-- The constitution picker filters from the bar's Find field, which every view shares; SDK autocomplete and command own their input.
+- The board's Find (`board/search/SearchPanel.ts`) lists beneath the bar's field, which every view shares, or answers in place (a channel folds its stream); SDK autocomplete and command own their input. Its phone sheet is a native modal `<dialog>`, which `blockingDialogOpen()` matches.
 - `selectPicker.ts` dresses a native `<select>` whose API the Dock uses throughout; the SDK select replaces the element.
 - The banner is one inline `role=alert` line with two timings.
 - Regions that are visible text as well as live regions (Dock save status, receipts, the aim readout) stay in place.

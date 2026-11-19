@@ -54,7 +54,7 @@ const VIEW_KEYS: KeyBinding[] = [
 export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
   desk: [
     ...VIEW_KEYS,
-    bind(['/'], 'find', 'Find a card or constitution'),
+    bind(['/'], 'find', 'Find across the board'),
     bind(['h', 'ArrowLeft'], 'back', 'Clear selection'),
     bind(['j', 'ArrowDown'], 'down', 'Next card or line'), bind(['k', 'ArrowUp'], 'up', 'Previous card or line'),
     bind(['g'], 'first', 'First in column'), bind(['G'], 'last', 'Last in column'),
@@ -69,7 +69,7 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['['], 'audioBack', 'Audio: back 5 seconds'),
     bind([']'], 'audioForward', 'Audio: forward 5 seconds'),
     ...constitutionBindings,
-    bind(['/'], 'find', 'Find a constitution or transcript'),
+    bind(['/'], 'find', 'Find in this constitution; Backspace in the empty field widens to the board'),
     bind(['h', 'ArrowLeft', '‹'], 'back', 'Back to the view the reader was opened from'),
     bind(['ArrowDown'], 'scrollDown', 'Scroll document down (3 lines)'), bind(['ArrowUp'], 'scrollUp', 'Scroll document up (3 lines)'),
     bind(['d'], 'halfDown', 'Scroll half a viewport down'), bind(['u'], 'halfUp', 'Scroll half a viewport up'),
@@ -184,7 +184,7 @@ export const helpSections: readonly HelpSection[] = [
   { title: 'Channels', note: 'A channel holds what its workers addressed to you, with marks of threads starting and stopping; an item opens its constitution\'s view. On a phone, swipe sideways between the rail and a channel.', rows: [
     row(['j', 'k'], 'Next / previous channel', []),
     row(['['], 'Hide or show the channels', []),
-    row(['/'], 'Jump to a channel or a file', []),
+    row(['/'], 'Find in the open channel: its stream folds to what matches, ↑ ↓ step, Esc unfolds', []),
     row(['Enter'], 'Write to the channel\'s chair', []),
     row(['e'], 'Clear the post or files in focus; a question or a close is answered, not cleared', []),
     row(['t'], 'Unfold the tapestry of the post in focus beneath it; again, fold it', []),

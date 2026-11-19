@@ -11,8 +11,12 @@
  *
  * Chronicle holds the record in time. Channels has one channel per office,
  * listed while something in it waits on the human or he keeps it pinned,
- * each with its files; every channel and document is found from there. The
- * Globe is all the work on a sphere.
+ * each with its files. The Globe is all the work on a sphere.
+ *
+ * The bar's Find searches where the board stands: a view says where with
+ * `findScope` (a list of what it searches and what a pick does, or a handler
+ * that answers the field in place), and none searches the whole board; a pick
+ * that lands in a view goes through its `show`.
  *
  * A view is a plain object with a three-call lifecycle. KanbanModal owns the
  * host element and the data; the view owns everything inside the host.
