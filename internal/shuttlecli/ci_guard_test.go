@@ -87,15 +87,24 @@ func (h *ciStatusHarness) write(path, body string) {
 	}
 }
 
+// ciHelperDeadline bounds each wait on the helper. It is a hang guard, not a
+// speed bound: a blocked fake gh never returns until released, so a hook that
+// waited on it would never finish. The first node start on a fresh CI runner
+// alone has taken up to 3.75 s, and it is paid by whichever tests start first.
+const ciHelperDeadline = 30 * time.Second
+
 func (h *ciStatusHarness) run(args ...string) (string, time.Duration) {
 	h.t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), ciHelperDeadline)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "node", append([]string{h.module}, args...)...)
 	cmd.Env = append(os.Environ(), "PATH="+h.bin+":"+os.Getenv("PATH"), "CI_COMMON_DIR="+filepath.Dir(h.cache), "CI_ARGS="+h.args, "CI_RESPONSE="+h.response, "CI_FAIL="+h.fail, "CI_BLOCK="+h.block, "CI_RELEASE="+h.release)
 	started := time.Now()
 	out, err := cmd.CombinedOutput()
 	elapsed := time.Since(started)
+	if ctx.Err() != nil {
+		h.t.Fatalf("CI helper did not exit within %v: %s", ciHelperDeadline, out)
+	}
 	if err != nil {
 		h.t.Fatalf("CI helper: %v: %s", err, out)
 	}
@@ -104,7 +113,7 @@ func (h *ciStatusHarness) run(args ...string) (string, time.Duration) {
 
 func (h *ciStatusHarness) awaitFreshCache() {
 	h.t.Helper()
-	deadline := time.Now().Add(4 * time.Second)
+	deadline := time.Now().Add(ciHelperDeadline)
 	for time.Now().Before(deadline) {
 		data, _ := os.ReadFile(h.cache)
 		if strings.Contains(string(data), "eeeeeeee12345678") {
