@@ -630,7 +630,11 @@ test('Opaque report denies parent DOM and same-origin API reads; links open outs
     const rawFilePopup = await checkPopup(() => rawFile.click(), await rawFile.evaluate(link => link.href))
     await mkdir(shots, { recursive: true })
     await writeFile(resolve(shots, 'security-probes.json'), JSON.stringify({ iframe: access, relativeAssets: assets, siblingPopup, rawFilePopup, requests }, null, 2))
-  } finally { await new Promise(resolve => server.close(resolve)) }
+  } finally {
+    // The page's keep-alive sockets close only with its context, after this journey returns; close drops them rather than waiting.
+    server.closeAllConnections()
+    await new Promise(resolve => server.close(resolve))
+  }
 })
 
 test('Embedded HTML media pauses on recede and park without reloading or auto-resuming', async p => {
@@ -2467,6 +2471,9 @@ const runnable = tests.filter(test => !process.env.E2E_ONLY || new RegExp(proces
 const started = performance.now()
 let passed = 0
 
+// The slowest journey takes about 20 s on CI; one still running at two minutes is hung, and fails by name.
+const JOURNEY_LIMIT_MS = 120_000
+
 async function journey({ name, run, viewport, reducedMotion, touch }) {
   const phone = !!viewport && viewport.width <= 700
   const context = await browser.newContext({ viewport: viewport ?? { width: 1440, height: 900 },
@@ -2475,15 +2482,16 @@ async function journey({ name, run, viewport, reducedMotion, touch }) {
   page.setDefaultTimeout(10000)
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
-  let failure
+  let failure, limit
   const begun = performance.now()
   try {
     await page.clock.install({ time: new Date('2026-10-04T14:00:00Z') })
     await page.goto(url)
     await page.locator(`.kbn-desk .kbn-family[title*="Calibrate the shear response"] > :first-child`).waitFor({ state: 'attached' })
-    await run(page)
+    await Promise.race([run(page), new Promise((_, reject) => { limit = setTimeout(() => reject(new Error(`journey still running after ${JOURNEY_LIMIT_MS / 1000}s`)), JOURNEY_LIMIT_MS) })])
   } catch (error) { failure = error; await mkdir(shots, { recursive: true }); await page.screenshot({ path: resolve(shots, 'failure-' + name.replace(/[^a-z0-9]+/gi, '-').slice(0, 100) + '.png') }).catch(() => {}) }
   finally {
+    clearTimeout(limit)
     try { assert.deepEqual(errors, [], 'pageerror events') } catch (error) { failure = failure ? new AggregateError([failure, error]) : error }
     await context.close()
   }

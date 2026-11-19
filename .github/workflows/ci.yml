@@ -176,6 +176,8 @@ jobs:
   journeys:
     name: Journeys (board in a headless browser)
     runs-on: ubuntu-latest
+    # A complete run takes 6 to 16 minutes; one still going at 30 is hung.
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: ui

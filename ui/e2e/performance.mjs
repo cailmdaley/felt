@@ -268,6 +268,7 @@ async function measureColdApp() {
       delayedChunks: { formula: 'katex', stash: 'mountForms' } }
     await page.close()
   } finally {
+    server.closeAllConnections()
     await new Promise(resolve => server.close(resolve))
   }
 }
