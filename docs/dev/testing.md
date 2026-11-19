@@ -253,6 +253,7 @@ and add your test to its file.
 - **Desk input:** `keymap.test.ts`, `deskKeyboard.integration.test.ts`, `longPress`, `dismissGesture`, `mobile`.
 - **Dispatch actions:** `boardWire.test.ts`, `daemonApi`, `startPrompt`, `KanbanModal.verdict`.
 - **Chronicle:** `src/board/views/chronicle*.test.ts`, `temporalData.test.ts`, `vocabulary.test.ts`.
+- **Find:** `src/board/search/` (the matchers, the stream fold and the highlighter); the bar's scopes through `workspace/Workspace.integration.test.ts`, a channel's fold through `views/ChannelsView.test.ts`.
 - **Listen and the phone:** workspace Listen tests and `src/phone/*.test.ts`.
 - **Settings:** `src/forms/settings/`.
 - **Styles and accessibility:** `ui/test/*.test.ts`.
