@@ -269,8 +269,9 @@ in `NOTICE` and `LICENSE-APACHE`.
 
 ## Landing changes
 
-Run the change itself before landing it, then the targeted local tests; use the full suite for broad changes.
-A new test is a browser journey, a property, a differential or a regression named for a real bug, and a flaky test is fixed or deleted, never retried ([`docs/dev/testing.md`](docs/dev/testing.md#what-a-test-is-for)).
+Run the targeted local tests before pushing; use the full suite for broad changes.
+Run the change itself as well: the board in the harness, a CLI verb from the built binary, a daemon change in its deploy.
+A new behavioural test goes through a product entry point, or is a property, a differential or a regression named for a real bug; a flaky test is fixed or deleted, never retried ([`docs/dev/testing.md`](docs/dev/testing.md#what-a-test-is-for)).
 A full suite goes through its make target, which queues on the machine's suite slot; when the slot is held, pushing and reading CI's result is as good.
 CI is feedback, not a landing or deployment gate: do not wait for CI after pushing.
 The repo's SessionStart hook prints the cached latest completed main CI result when red and refreshes it in the background for the next session.

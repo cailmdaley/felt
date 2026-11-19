@@ -108,19 +108,27 @@ names: flip the condition, drop the header, delete the binding. Watch the
 test go red for that reason, then restore the code. A test nobody has seen
 fail cannot be told apart from one that cannot fail.
 
-**Run the change before you test it.** A passing suite says the checks
+**Run the change as well as its tests.** A passing suite says the checks
 still hold; only the running thing says the change does what was meant. Open
-the board change in the harness (`cd ui && npm run harness:board`) and read a
-headless screenshot, run the CLI verb from the built binary against a
-temporary store, and read the fresh daemon's answer after a deploy.
+a board change in the harness (`cd ui && npm run harness:board`) and read a
+headless screenshot. Run a CLI verb from the built binary against a
+temporary store. A daemon change runs for the first time in its deploy, so
+read the fresh daemon's answer there before reporting it landed.
 
-**A new test is a journey, a property, a differential or a named
-regression.** These take their answer from somewhere other than the code's
-author: a real flow through the product, a rule held over generated inputs,
-a second implementation or an independent parse, or a bug that happened.
-An example test that pins how two pieces are wired (this callback was called
-with that argument) shares the author's understanding of the task and is
-left out. Section 2 says which tier a test runs in.
+**A new behavioural test takes its answer from outside the code.** It is one
+of four kinds:
+
+- a test through a product entry point (a CLI verb, an HTTP route, a daemon
+  process, a board view), at the cheapest tier that decides it (section 2);
+- a property, a rule held over generated inputs (section 4);
+- a differential, checked against a second implementation or an independent
+  parse, as the parity tables and the change reader are;
+- a regression named for a bug that happened.
+
+A few distinct stories told as examples through an entry point are the first
+kind. What is left out is the test of an internal seam that only restates
+it: a mock receiving what the test just handed it. Source guards (hygiene,
+the env and zone guards) are not behavioural tests and stay.
 
 **A flaky test is fixed or deleted, never retried.** A test that fails on a
 commit that doesn't touch its subject gets its cause found. Don't rerun it
