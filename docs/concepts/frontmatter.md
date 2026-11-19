@@ -27,6 +27,22 @@ owns it natively, but only a file edit sets it. `role` names who is responsible 
 open work; its first segment is the office and its last the person, and a
 person's own desk is the office named for them ([roles](roles.md)).
 
+When felt writes an `outcome` or `description`, a single line of at most 80
+characters that needs no quoting stays a plain scalar. Anything else — longer
+text, several lines, or text YAML would otherwise quote, such as one with
+`: ` or ` #` — is written as a `|-` literal block, which takes
+apostrophes, quotes, colons, and `#` as they are:
+
+```yaml
+outcome: |-
+    Fixed Σ_nl at 5.5 Mpc/h — freeing it widens the α error ~30%. Raphael's branch lacks it.
+```
+
+The few values a literal block cannot carry exactly (trailing spaces, a
+leading tab or newline, control characters) are double-quoted with escapes.
+felt restyles a value only when it writes that value; a hand-written quoted
+outcome stays as it is until the outcome changes.
+
 ## Project-owned fields
 
 felt treats every other top-level YAML key as **opaque**. It preserves the key

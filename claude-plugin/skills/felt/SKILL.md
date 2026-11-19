@@ -28,7 +28,8 @@ That fiber's id is its path, `bao-analysis/damping-prior`, or its slug `damping-
 name: BAO damping scale in the fiducial fit
 status: closed
 tags: [decision]
-outcome: Fixed Σ_nl at the simulation-calibrated 5.5 Mpc/h — freeing it widens the α error ~30% with no shift in the mean.
+outcome: |-
+    Fixed Σ_nl at the simulation-calibrated 5.5 Mpc/h — freeing it widens the α error ~30% with no shift in the mean.
 ---
 
 The fiducial fit in [[bao-analysis]] needs a value for the damping scale Σ_nl, degenerate with the peak amplitude at our signal-to-noise.

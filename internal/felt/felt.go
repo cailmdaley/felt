@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/oklog/ulid/v2"
 	"gopkg.in/yaml.v3"
@@ -749,7 +750,20 @@ func (f *Felt) Marshal() ([]byte, error) {
 		Role:        f.Role,
 	}
 
-	yamlBytes, err := yaml.Marshal(fm)
+	var native yaml.Node
+	if err := native.Encode(fm); err != nil {
+		return nil, fmt.Errorf("marshaling YAML: %w", err)
+	}
+	// Encode passes values through the emitter and back, which can alter some
+	// strings (a leading newline); the prose fields take their text from fm.
+	// Text that is not valid UTF-8 is encoded as !!binary and left so.
+	prose := map[string]string{"outcome": fm.Outcome, "description": fm.Description}
+	for i := 0; i+1 < len(native.Content); i += 2 {
+		if text, ok := prose[native.Content[i].Value]; ok && native.Content[i+1].Tag == "!!str" {
+			styleProse(native.Content[i+1], text)
+		}
+	}
+	yamlBytes, err := yaml.Marshal(&native)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling YAML: %w", err)
 	}
@@ -787,6 +801,45 @@ func (f *Felt) Marshal() ([]byte, error) {
 	}
 
 	return buf.Bytes(), nil
+}
+
+// proseMaxPlain is the longest single-line outcome or description felt
+// writes as a plain scalar.
+const proseMaxPlain = 80
+
+// styleProse puts an outcome's or description's text in value and chooses
+// its style. A short
+// single-line value the encoder writes plain stays plain. Anything else is a
+// `|-` literal block, which takes apostrophes, quotes, colons and `#` as
+// they are, so a hand edit cannot break the frontmatter. A value a literal
+// block cannot carry exactly (trailing spaces, a tab or newline at the start,
+// control characters) is double-quoted, which escapes everything.
+func styleProse(value *yaml.Node, text string) {
+	value.Value = text
+	if !strings.Contains(text, "\n") && utf8.RuneCountInString(text) <= proseMaxPlain {
+		if out, err := renderScalar(text, 0); err == nil && !strings.HasPrefix(out, "'") && !strings.HasPrefix(out, `"`) {
+			return
+		}
+	}
+	value.Style = yaml.DoubleQuotedStyle
+	if out, err := renderScalar(text, yaml.LiteralStyle); err == nil && strings.HasPrefix(out, "|") && decodesTo(out, text) {
+		value.Style = yaml.LiteralStyle
+	}
+}
+
+// renderScalar returns how the encoder writes text in style as a mapping
+// value, starting after the key's `: `.
+func renderScalar(text string, style yaml.Style) (string, error) {
+	out, err := yaml.Marshal(&yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{
+		{Kind: yaml.ScalarNode, Tag: "!!str", Value: "v"},
+		{Kind: yaml.ScalarNode, Tag: "!!str", Value: text, Style: style},
+	}})
+	return strings.TrimPrefix(string(out), "v: "), err
+}
+
+func decodesTo(rendered, text string) bool {
+	var back struct{ V string }
+	return yaml.Unmarshal([]byte("v: "+rendered), &back) == nil && back.V == text
 }
 
 // orderedExtraKeys returns ExtraFields keys in a stable, document-preserving

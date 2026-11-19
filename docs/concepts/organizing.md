@@ -152,4 +152,7 @@ outcome: |-
 
 `felt edit -o "…"` goes through the shell, which mangles multiline content and
 quotes. The block scalar takes the content literally, so paragraphs, lists, and
-embeds round-trip cleanly.
+embeds round-trip cleanly, and an apostrophe or colon added later needs no
+escaping. felt itself writes any outcome longer than a short plain line as a
+`|-` block ([frontmatter](frontmatter.md#native-fields)), so a file edit
+usually starts from one.
