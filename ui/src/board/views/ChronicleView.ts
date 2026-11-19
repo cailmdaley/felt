@@ -77,7 +77,7 @@ import {
   localHits,
   mergeHits,
   type SearchHit,
-} from './chronicleSearch.js'
+} from '../search/match.js'
 import { fiberDocUrl } from '../utils.js'
 import {
   attributeActivity,
@@ -551,7 +551,7 @@ class ChronicleView implements TemporalView {
     box.hits.clear()
     if (!this.searchQuery) { box.root.open = false; return }
 
-    const boardIds = new Set(ctx.cards.map((c) => c.id))
+    const boardIds = new Map(ctx.cards.map((c) => [c.id, c]))
     const record = this.recordHitsFor === this.searchQuery ? this.recordHits : []
     const hits = mergeHits(localHits(ctx.cards, this.searchQuery), record, boardIds)
 
