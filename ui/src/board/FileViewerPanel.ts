@@ -784,7 +784,7 @@ function buildHtmlViewer(
       veil.classList.remove('kbn-fileview-loading-error')
       const withBase = htmlWithBase(html, src)
       const srcdoc = options.transformHtml?.(withBase) ?? withWorkspaceKeyBridge(options.fit ? pinViewportUnits(withBase, window.innerHeight) : withBase)
-      const weight = new Blob([html]).size > 2 * 1024 * 1024 || /<(?:audio|video)\b/i.test(html) ? 2 : 1
+      const weight = pageWeight(html)
       if (!hasContent) {
         hasContent = true
         byteWeights.set(iframe, weight)
@@ -1064,4 +1064,17 @@ export function pinViewportUnits(html: string, height: number): string {
   return html
     .replace(/(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi, (_, open: string, css: string, close: string) => open + pin(css) + close)
     .replace(/(\sstyle\s*=\s*)(["'])([\s\S]*?)\2/gi, (_, attr: string, quote: string, css: string) => attr + quote + pin(css) + quote)
+}
+
+/**
+ * How many of the reader's live-document slots a page costs. A slot is about
+ * one ordinary page; every ten images or embedded documents cost another,
+ * since WebKit keeps each decoded (an SVG figure is a document of its own),
+ * so a report with a hundred figures fills the budget by itself. A page past
+ * 2 MB or one with audio or video costs at least two.
+ */
+export function pageWeight(html: string): number {
+  const media = html.match(/<(?:img|iframe|object|embed)\b/gi)?.length ?? 0
+  const heavy = new Blob([html]).size > 2 * 1024 * 1024 || /<(?:audio|video)\b/i.test(html) ? 1 : 0
+  return Math.min(10, 1 + heavy + Math.floor(media / 10))
 }

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildFileViewer, disposeFileViewer, htmlWithBase, htmlAssetUrl, pinViewportUnits } from './FileViewerPanel.js'
+import { buildFileViewer, disposeFileViewer, htmlWithBase, htmlAssetUrl, pinViewportUnits, pageWeight } from './FileViewerPanel.js'
 import { envelope } from './workspace/DocumentBridge.js'
 import { resetDocumentResources } from './documentResources.js'
 const ready = (frame: HTMLIFrameElement) => window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, data: envelope('ready') }))
@@ -577,4 +577,14 @@ describe('workspace file viewer hooks', () => {
     expect(htmlViewer.querySelector('.pdfViewer')).toBeNull()
     expect(pdfRenderer.mount).not.toHaveBeenCalled()
   })
+})
+
+it('weighs a page by its figures: a report with a hundred fills the reader\'s budget alone', () => {
+  const figures = (n: number): string => '<img src="f.svg">'.repeat(n)
+  expect(pageWeight('<p>prose</p>')).toBe(1)
+  expect(pageWeight(figures(9))).toBe(1)
+  expect(pageWeight(figures(10) + '<iframe src="deck.html"></iframe>')).toBe(2)
+  expect(pageWeight('<video src="v.mp4"></video>')).toBe(2)
+  expect(pageWeight(figures(94))).toBe(10)
+  expect(pageWeight(figures(400))).toBe(10)
 })
