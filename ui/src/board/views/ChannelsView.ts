@@ -282,7 +282,10 @@ export class ChannelsView implements TemporalView {
     this.list = el('ol', 'kbn-ch-list')
     this.found = el('section', 'kbn-ch-found')
     this.found.setAttribute('aria-label', 'Files found')
-    rail.append(this.jump, this.list, this.found)
+    // Jump to stands in a band as tall as the channel's head, its rule running on from the head's.
+    const head = el('div', 'kbn-ch-rail-head')
+    head.append(this.jump)
+    rail.append(head, this.list, this.found)
     return rail
   }
   private channelPane(): HTMLElement {
