@@ -73,7 +73,12 @@ func TestTmuxPassthrough(t *testing.T) {
 				}
 			})
 
-			run("new-session", "-d", "-s", "status", "-x", "160", "-y", "48", "printf TMUX-STATUS-READY; exec sleep 600")
+			run("new-session", "-d", "-s", "status", "-x", "160", "-y", "48", "exec sleep 600")
+			// An attaching client answers the server's MSG_READY with MSG_RESIZE,
+			// and the server answers that with a full redraw. Passthrough with
+			// value "on" is discarded while a full redraw is pending, so the test
+			// waits for this hook, which runs once that redraw is queued.
+			run("set-hook", "-g", "client-resized", "wait-for -S client-resized")
 			pane := "status:0.0"
 			run("set-option", "-p", "-t", pane, "allow-passthrough", passthrough)
 			paneTTY := run("display-message", "-p", "-t", pane, "#{pane_tty}")
@@ -113,11 +118,10 @@ func TestTmuxPassthrough(t *testing.T) {
 				}
 				t.Error("tmux client did not exit after SIGKILL")
 			})
-			// A rendered greeting proves both the pane program and the visible
-			// client are ready; the client-attached hook alone can fire too early.
-			readTmuxUntil(t, master, []byte("TMUX-STATUS-READY"))
-			// Round-trip fresh pane output after the initial screen. Passthrough
-			// with value "on" is discarded while tmux has a full redraw pending.
+			run("wait-for", "client-resized")
+			// Pane output written after the resize redraw was queued reaches the
+			// client no earlier than that redraw, so seeing it proves no full
+			// redraw is pending.
 			if err := Write(paneTTY, []byte("CLIENT-READY")); err != nil {
 				t.Fatal(err)
 			}
