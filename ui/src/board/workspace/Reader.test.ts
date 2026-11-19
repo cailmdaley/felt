@@ -42,7 +42,6 @@ function makeReader(current: KanbanCard = alpha, themes?: ChannelThemes, extra: 
     onChannel,
     cards: () => channels,
     deskCards: () => listedCards,
-    files: card => card === beta ? ['unique-result.pdf'] : [],
     ...extra,
   })
   document.body.append(reader.el)
@@ -56,9 +55,6 @@ function disposeReader(reader: Reader): void {
   readers = readers.filter((candidate) => candidate !== reader)
 }
 
-function rowNames(reader: Reader): string[] {
-  return [...reader.el.querySelectorAll<HTMLElement>('.ws-switcher .ws-channel-name')].map(row => row.textContent ?? '')
-}
 function press(key: string, init: KeyboardEventInit = {}): void {
   document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init }))
 }
@@ -203,54 +199,18 @@ describe('Reader', () => {
     expect(toggle.hidden).toBe(true)
   })
 
-  it('opens the switcher from the title where no board bar Find answers', () => {
-    const reader = makeReader()
-    reader.el.querySelector<HTMLButtonElement>('.ws-channel-title')!.click()
-    const switcher = reader.el.querySelector<HTMLElement>('.ws-switcher')!
-    expect(switcher.querySelector('.ws-channel-find')).not.toBeNull()
-    expect(switcher.querySelectorAll('.ws-channel-row')).toHaveLength(3)
-  })
-
-  it('sends the title and / to the board bar Find on the desktop, and to the switcher on the phone', () => {
-    const onFind = vi.fn(() => true)
+  it('sends the title and / to the board\'s Find, on the desktop and the phone alike', () => {
+    const onFind = vi.fn()
     const desk = makeReader(alpha, undefined, { onFind })
     desk.el.querySelector<HTMLButtonElement>('.ws-channel-title')!.click()
     press('/')
     expect(onFind).toHaveBeenCalledTimes(2)
-    expect(desk.el.querySelector('.ws-switcher')).toBeNull()
     disposeReader(desk)
     viewport.phone = true
     const phone = makeReader(alpha, undefined, { onFind })
     phone.el.querySelector<HTMLButtonElement>('.ws-channel-title')!.click()
-    expect(onFind).toHaveBeenCalledTimes(2)
-    expect(phone.el.querySelector('.ws-switcher')).not.toBeNull()
-  })
-
-  it('lists channels in Desk order, marks the current channel, filters, and opens the chosen card', () => {
-    const reader = makeReader(beta, undefined, { pickerCards: () => listedCards })
-    reader.el.querySelector<HTMLButtonElement>('.ws-channel-title')!.click()
-    const rows = [...reader.el.querySelectorAll<HTMLButtonElement>('.ws-channel-row')]
-    expect(rowNames(reader)).toEqual(['Beta', 'Alpha', 'Gamma'])
-    expect(rows.map(row => row.getAttribute('aria-current'))).toEqual(['true', 'false', 'false'])
-
-    const find = reader.el.querySelector<HTMLInputElement>('.ws-switcher .ws-channel-find')!
-    find.value = 'alpha'
-    find.dispatchEvent(new Event('input'))
-    expect(rowNames(reader)).toEqual(['Alpha'])
-    reader.el.querySelector<HTMLButtonElement>('.ws-channel-row')!.click()
-    expect(onChannel).toHaveBeenCalledOnce()
-    expect(onChannel).toHaveBeenCalledWith(alpha)
-  })
-
-  it('marks owner identity even for equal UIDs and a channel absent from the list', () => {
-    const other = { ...alpha, originId: 'host-other', name: 'Other Alpha' }
-    const reader = makeReader(alpha, undefined, { pickerCards: () => [alpha, alpha] })
-    reader.show(channel(other), fiberKey(other), other)
-    reader.el.querySelector<HTMLButtonElement>('.ws-channel-title')!.click()
-    const selected = [...reader.el.querySelectorAll<HTMLElement>('.ws-switcher [aria-current="true"]')]
-    expect(selected).toHaveLength(1)
-    expect(selected[0].dataset.channelOwner).toBe('host-other')
-    expect(reader.el.querySelectorAll('.ws-switcher .ws-channel-row')).toHaveLength(2)
+    press('/')
+    expect(onFind).toHaveBeenCalledTimes(4)
   })
 
   it('steps constitutions in Desk order with j/k, even when the card feed differs', () => {

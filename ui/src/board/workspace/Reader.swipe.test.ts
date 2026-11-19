@@ -28,7 +28,7 @@ beforeEach(() => {
   onReturn.mockReset()
   reader = new Reader({
     shuttleBase: '', buildProse: () => document.createElement('div'), onRefreshProse: vi.fn(),
-    onSelect, onReturn, onChannel: vi.fn(), cards: () => [alpha], deskCards: () => [alpha], files: () => [],
+    onSelect, onReturn, onChannel: vi.fn(), cards: () => [alpha], deskCards: () => [alpha],
   })
   Object.defineProperty(reader.stage, 'clientWidth', { configurable: true, value: 390 })
   Object.defineProperty(reader.stage, 'clientHeight', { configurable: true, value: 700 })

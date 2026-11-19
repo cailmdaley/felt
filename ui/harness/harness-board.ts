@@ -1674,6 +1674,18 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (!workspaceFixture || !(url.includes(WORKSPACE_LATEST_SESSION) || channelsFixture)) return json({ availability: 'transcript_missing' }, 404)
     return json({ context: 182_340, cached: 179_216, cache_warm_until: Date.now() + 47 * 60_000, cache_ttl: 3_600_000, hit_share: 0.94, at: Date.now() - 13 * 60_000 })
   }
+  // The record search: outcomes from the feed's own fibers, and one closed fiber the board no longer holds, so both halves of the list show.
+  if (url.includes('/api/v1/search?')) {
+    const query = (new URL(url, 'http://harness').searchParams.get('q') ?? '').trim(), needle = query.toLowerCase()
+    if (!needle) return json({ query, results: [], errors: [] })
+    const feed = (workspaceFixture?.feed ?? docsExample?.feed ?? MOCK_FEED) as { fibers: Array<{ fiber: { id: string; name?: string; status?: string; outcome?: string } }> }
+    const outcomes = feed.fibers.map(row => row.fiber).filter(fiber => fiber.outcome?.toLowerCase().includes(needle)).map(fiber => {
+      const at = fiber.outcome!.toLowerCase().indexOf(needle)
+      return { id: fiber.id, name: fiber.name ?? fiber.id, status: fiber.status ?? 'open', where: ['outcome'], excerpt: `…${fiber.outcome!.slice(Math.max(0, at - 40), at + needle.length + 60)}…`, rank: 4 }
+    })
+    const record = { id: `archive/${needle.replace(/[^a-z0-9]+/g, '-')}-first-pass`, name: `The first ${query} pass`, status: 'closed', where: ['body'], excerpt: `…an earlier attempt at the ${query}, closed before this board's reach…`, rank: 5 }
+    return json({ query, results: [...outcomes, record], errors: [] })
+  }
   if (url.includes('/api/v1/transcripts/search')) {
     const query = new URL(url, 'http://harness').searchParams.get('q') ?? ''
     if (query.trim().toLowerCase() === 'nothing') return json({ query, index: MOCK_TRANSCRIPT_INDEX, hits: [], errors: [] })

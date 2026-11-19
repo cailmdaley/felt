@@ -273,6 +273,8 @@
 .kbn-viewtabs-find input::placeholder { color: var(--kbn-ink-faint); }
 .kbn-viewtabs-find input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
 .kbn-viewtabs-find-key { margin-right: 5px; font-family: var(--font-mono); font-size: var(--type-meta); }
+/* The phone's Find is a button in its bottom bar; a desktop has the field. */
+.kbn-viewtabs-phone-find { display: none; }
 .kbn-viewtabs-find:focus-within .kbn-viewtabs-find-key { visibility: hidden; }
 /* Narrower than half a screen the tabs give up their keycaps. */
 @media (max-width: 780px) {
@@ -727,6 +729,12 @@
   .kbn-viewtabs-views { gap: 4px; flex: 0 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
   /* The phone's bar is its bottom nav; the reader covers it and keeps its own bars. */
   .kbn-viewtabs-find { display: none !important; }
+  .kbn-viewtabs-phone-find {
+    display: inline-flex; align-items: center; justify-content: center; flex: none; box-sizing: border-box;
+    width: var(--ws-phone-target, 44px); height: var(--ws-phone-target, 44px); padding: 0; border: 1px solid color-mix(in srgb, var(--kbn-ink-muted) 34%, transparent);
+    border-radius: 4px; background: none; color: var(--kbn-ink);
+  }
+  .kbn-viewtabs-phone-find > svg { width: 18px; height: 18px; }
   .kbn-reader-open .kbn-viewtabs { z-index: 20; }
   .kbn-viewtabs { flex-wrap: nowrap; }
   .kbn-viewtabs-settings {

@@ -21,7 +21,6 @@ import { documentLabels, documentLabelMetadata, isBaked, isDrawn, lastSent, sent
 import { DocumentSeen } from './DocumentSeen.js'
 import { declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
 import { probeDocumentTitles } from './titleProbe.js'
-import { ConstitutionPicker } from './ConstitutionPicker.js'
 import type { ChannelThemes } from './ChannelThemes.js'
 import { deskCardKey } from '../deskOrdering.js'
 import { groupJump, groupStops } from './groupJump.js'
@@ -64,12 +63,10 @@ export interface ReaderOptions {
   threadIndex?(): ThreadIndex
   /** The Desk's reading order, which every constitution-stepping binding walks. */
   deskCards?(): KanbanCard[]
-  pickerCards?(): KanbanCard[]
   /** The Desk column a card stands in: the J/K stops. */
   deskStop?(card: KanbanCard): string
-  files?(card: KanbanCard): string[]
-  /** Summon the board bar's Find (desktop), in place of the phone's switcher. */
-  onFind?(): boolean
+  /** Summon the board's Find: the bar's on a desktop, a sheet of its own on the phone. */
+  onFind?(): void
   /** Expand has taken, or given back, the whole window. */
   onExpand?(expanded: boolean): void
 }
@@ -150,7 +147,6 @@ export class Reader {
   /** The document menu: one non-modal SDK popover that every ⋯ opens for its own document. */
   private readonly menu = document.createElement('ui-popover') as UiPopoverElement<DocumentOf>
   private readonly menuContent = document.createElement('ui-popover-content')
-  private readonly picker: ConstitutionPicker
   /** The way to the list of sent files, marked while one is unread. */
   private readonly filesToggle: HTMLButtonElement
   private instantRaf = 0
@@ -173,7 +169,7 @@ export class Reader {
     this.filesToggle = button('ws-files-toggle', '', () => this.openSentFiles(this.filesToggle), 'Sent files')
     this.filesToggle.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path class="ws-toggle-line" d="M6.5 3.5h7M6.5 8h7M6.5 12.5h7"/><circle class="ws-toggle-flag" cx="3" cy="3.5" r="1"/><circle class="ws-toggle-bullet" cx="3" cy="8" r="1"/><circle class="ws-toggle-bullet" cx="3" cy="12.5" r="1"/></svg>'
     this.returnButton = button('ws-return', '', () => this.back(), 'Back to Desk')
-    this.title = button('ws-channel-title', '', () => this.openSwitcher())
+    this.title = button('ws-channel-title', '', () => this.opts.onFind?.())
     this.lead = element('div', 'ws-nav-lead')
     this.lead.append(this.returnButton, this.title)
     this.trail.append(this.filesToggle, this.menuTrigger('ws-icon-button ws-phone-document-menu', () => this.document))
@@ -186,12 +182,6 @@ export class Reader {
     prepareAnnouncements(document)
     this.parallax.append(this.track)
     this.stage.append(this.parallax)
-    this.picker = new ConstitutionPicker({
-      cards: () => this.withCurrent(this.opts.pickerCards?.() ?? this.opts.cards()),
-      files: opts.files,
-      current: card => (card.uid ?? card.id) === this.channel?.uid && card.originId === this.channel?.owner,
-      onOpen: card => { this.closeMenu(); this.opts.onChannel(card) },
-    })
     const column = element('div', 'ws-stage-column')
     this.band.hidden = true
     column.append(this.stage, this.band)
@@ -644,21 +634,10 @@ export class Reader {
     toggle.setAttribute('aria-pressed', String(!!card && themes.isPlain(card)))
   }
   private closeMenu(): boolean {
-    if (this.picker.isOpen) { this.picker.close(); return true }
     return this.menu.open && this.menu.api.close()
   }
   private readonly pointerInput = (): void => { this.keyboardInput = false; this.el.classList.remove('ws-keyboard') }
   private readonly keyboardModality = (): void => { this.keyboardInput = true; this.el.classList.add('ws-keyboard') }
-  private openSwitcher(): void {
-    if (!this.phone.matches && this.opts.onFind?.()) return
-    if (this.picker.isOpen) { this.picker.close(); return }
-    this.closeMenu()
-    this.picker.show(this.el, this.title)
-  }
-  /** Re-list the channel rows after the overview's order changes. */
-  refreshChannels(): void {
-    if (this.active && this.picker.isOpen) this.picker.refresh()
-  }
   /** The phone's top bar holds the toggle, marked while a sent file is unread. */
   private paintFilesToggle(): void {
     const documents = this.channel ? sentDocuments(this.channel) : []
@@ -670,7 +649,6 @@ export class Reader {
     if (this.settingsMenu.isOpen || this.menu.open) return
     this.keyboardModality()
     if (!this.active || e.isComposing || e.defaultPrevented || blockingDialogOpen()) return
-    if ((e.key === 'Enter' || e.key === 'Escape') && this.picker.el.contains(e.target as Node)) return
     // Activation belongs to the focused control, including command-modified keys.
     if (['Enter', ' '].includes(e.key) && !shouldForwardDocumentKey({ target: e.target, defaultPrevented: false, key: e.key })) return
     // Alt chords never bypass editable/native control guards; command shortcuts may.
@@ -691,8 +669,7 @@ export class Reader {
     if (intent === 'help') return false
     if (intent === 'back') {
       if (repeat) return true
-      if (this.picker.isOpen) this.picker.close(true)
-      else if (this.opts.onEscapeLayer?.()) { /* An inline control popover consumed Escape. */ }
+      if (this.opts.onEscapeLayer?.()) { /* An inline control popover consumed Escape. */ }
       else if (escape && this.expanded) this.toggleExpand()
       else this.back()
       return true
@@ -709,9 +686,7 @@ export class Reader {
       rest: card => this.opts.onRest?.(card, this.el),
     })) return true
     if (intent === 'find') {
-      if (!this.phone.matches && this.opts.onFind?.()) { /* The board bar's Find serves the reader too. */ }
-      else if (this.picker.isOpen) this.picker.focus()
-      else this.openSwitcher()
+      this.opts.onFind?.()
     }
     else if (intent === 'open') this.toggleExpand()
     else if (intent === 'prevChannel' || intent === 'nextChannel') {
@@ -791,7 +766,6 @@ export class Reader {
     cancelAnimationFrame(this.arrival)
     if (this.departure !== null) clearTimeout(this.departure)
     this.stopTitles()
-    this.picker.dispose()
     this.host.dispose()
     document.removeEventListener('keydown', this.keydown, true)
     document.removeEventListener('pointerdown', this.pointerInput, true)

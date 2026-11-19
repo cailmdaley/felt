@@ -293,12 +293,12 @@ describe('Desk keyboard selection', () => {
     expect(press('/').defaultPrevented).toBe(true)
     expect(inside.workspace.isActive).toBe(false)
     expect(window.location.hash).toBe(route)
-    const find = document.querySelector<HTMLInputElement>('.ws-switcher input')!
+    const find = document.querySelector<HTMLInputElement>('.ws-find-sheet input')!
     expect(document.activeElement).toBe(find)
     press('Escape', {}, find)
     expect(document.activeElement).toBe(previous)
     press('/')
-    const input = document.querySelector<HTMLInputElement>('.ws-switcher input')!
+    const input = document.querySelector<HTMLInputElement>('.ws-find-sheet input')!
     input.value = 'd1'; input.dispatchEvent(new Event('input'))
     press('Enter', {}, input)
     expect(inside.workspace.isActive).toBe(true)

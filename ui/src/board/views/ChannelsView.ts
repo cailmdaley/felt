@@ -25,7 +25,7 @@ import { ATTENTION_ORDER, attentionOf, lastActive, type Waits } from '../attenti
 import { turnOf } from '../turn.js'
 import { docKey } from '../workspace/documents.js'
 import { headerIcon, type HeaderIcon } from '../workspace/headerIcon.js'
-import { declaredTitle, watchDocumentTitles } from '../workspace/DocumentTitles.js'
+import { declaredTitle } from '../workspace/DocumentTitles.js'
 import { docButtons, type DocButtons } from '../workspace/docButtons.js'
 import { foldPx, previewsHeight, Unfold, type UnfoldFile } from '../elements/filePreview.js'
 import { groups, kindWord, post } from '../elements/post.js'
@@ -34,6 +34,9 @@ import { onDesk } from '../workspace/fiberPageState.js'
 import type { Dock } from '../workspace/Dock.js'
 import { createViewPage } from './ViewPage.js'
 import { isTypingTarget, keystrokeIsSpokenFor, registerView, type TemporalView, type ViewContext } from './ViewRegistry.js'
+import { channelMatches, foldStream, matchedRows, needleOf } from '../search/match.js'
+import { highlight, unhighlight } from '../search/highlight.js'
+import type { FindScope } from '../search/scope.js'
 import './ChannelsView.css'
 
 /** When this device last read each channel: its ink dot. */
@@ -59,7 +62,6 @@ const OPENS_ON = 8
 /** A stream within this many pixels of its foot follows what arrives. */
 const FOLLOW_PX = 24
 /** Jump to lists at most this many documents beneath the channels it matches. */
-const FOUND_DOCUMENTS = 12
 /** Narrower than this, the rail is a drawer drawn in over the stream. */
 const DRAWER_PX = 1100
 /** The margin's width: wide on a desktop, where the fibres can wander; narrower where the stream's width is scarce. */
@@ -144,7 +146,6 @@ export class ChannelsView implements TemporalView {
   private layout: HTMLElement | null = null
   private list: HTMLOListElement | null = null
   private jump: HTMLInputElement | null = null
-  private found: HTMLElement | null = null
   private railToggle: IconButton | null = null
   private channelEl: HTMLElement | null = null
   private head: HTMLElement | null = null
@@ -172,6 +173,15 @@ export class ChannelsView implements TemporalView {
   private from = Infinity
   /** What Jump to is looking for; '' lists the rail. */
   private query = ''
+  /** What the bar's Find folds the open channel's stream to; '' draws it whole. */
+  private folding = ''
+  /** The match in hand while the stream is folded, by entry, and every match in stream order. */
+  private foundAt: string | null = null
+  private foundRows: string[] = []
+  /** Where Find asked Channels to go, kept until the channels are read. */
+  private wanted: { channel: string; item?: string } | null = null
+  /** The line Find brought the channel to, marked, by entry. */
+  private markedItem: string | null = null
   /** The item a document or view was opened from, which takes focus again when the reader closes. */
   private returnTo: string | null = null
   /** The reader stands over Channels: nothing redraws beneath it. */
@@ -292,9 +302,6 @@ export class ChannelsView implements TemporalView {
     this.unsubscribe = [
       ctx.sends?.subscribe(() => this.draw()) ?? (() => {}),
       workspace.board.subscribe(() => this.draw()),
-      workspace.library.subscribe(() => { if (this.query) this.drawRail() }),
-      // A found page is named by its declared title once the page is read.
-      watchDocumentTitles(() => { if (this.query) this.drawFound() }),
     ]
     this.refresh(ctx)
   }
@@ -306,19 +313,17 @@ export class ChannelsView implements TemporalView {
     this.jump = el('input', 'kbn-ch-jump')
     this.jump.type = 'search'
     this.jump.placeholder = 'Jump to…'
-    this.jump.setAttribute('aria-label', 'Jump to a channel or file')
-    this.jump.addEventListener('input', () => this.find(this.jump!.value))
+    this.jump.setAttribute('aria-label', 'Jump to a channel')
+    this.jump.addEventListener('input', () => this.filter(this.jump!.value))
     this.jump.addEventListener('keydown', event => {
       if (event.key === 'Enter') { event.preventDefault(); this.openFirst() }
-      if (event.key === 'Escape' && this.jump!.value) { event.stopPropagation(); this.find('') }
+      if (event.key === 'Escape' && this.jump!.value) { event.stopPropagation(); this.filter('') }
     })
     this.list = el('ol', 'kbn-ch-list')
-    this.found = el('section', 'kbn-ch-found')
-    this.found.setAttribute('aria-label', 'Files found')
     // Jump to stands in a band as tall as the channel's head, its rule running on from the head's.
     const head = el('div', 'kbn-ch-rail-head')
     head.append(this.jump)
-    rail.append(head, this.list, this.found)
+    rail.append(head, this.list)
     return rail
   }
   private channelPane(): HTMLElement {
@@ -434,21 +439,106 @@ export class ChannelsView implements TemporalView {
   private get listed(): Channel[] {
     const rail = railOrder(this.channels, this.order)
     if (!this.query) return rail.filter(channel => channel.listed || (channel.key === this.current && !channel.hidden))
-    const query = this.query.toLowerCase()
     // A channel's key, its name, its title and its members are all searchable.
-    return rail.filter(channel => [channel.key.slice(channel.key.indexOf(':') + 1), channel.name, channel.title, ...channel.members.flatMap(card => [card.name, card.path])].some(text => text.toLowerCase().includes(query)))
+    const needle = needleOf(this.query)
+    return rail.filter(channel => channelMatches(channel, needle))
   }
-  /** Filters the rail by what Jump to holds, from the rail's field or the bar's Find. */
-  find(query: string): void {
+  /** Filters the rail by what Jump to holds. */
+  private filter(query: string): void {
     this.query = query.trim()
     if (this.jump && this.jump.value !== query) this.jump.value = query
     this.drawRail()
   }
-  /** Enter in Jump to opens the first channel it found, else the first document. */
+  /** Enter in Jump to opens the first channel it found. */
   private openFirst(): void {
     const channel = this.listed[0]
-    if (channel) { this.find(''); this.open(channel.key, true); return }
-    this.found?.querySelector<HTMLButtonElement>('button')?.click()
+    if (channel) { this.filter(''); this.open(channel.key, true) }
+  }
+
+  /** With a channel open, the bar's Find searches it in place, folding its stream to what matches; else it searches the whole board. */
+  findScope(): FindScope | undefined {
+    const channel = this.channel
+    if (!channel || !this.layout?.isConnected) return undefined
+    return {
+      chip: `in #${channel.name}`,
+      inPlace: { input: query => this.fold(query), step: by => this.stepFound(by), keep: () => this.keepFound(), clear: () => this.unfold() },
+    }
+  }
+  /** Find picked a channel, or a line in one: it opens there once the channels are read, a hidden one brought back, the line marked. */
+  show(target: { channel: string; item?: string }): void {
+    this.wanted = target
+    if (this.loaded && this.layout?.isConnected) this.draw()
+  }
+  private applyWanted(): void {
+    const wanted = this.wanted
+    if (!wanted || !this.channels.some(channel => channel.key === wanted.channel)) return
+    this.wanted = null
+    this.filter('')
+    this.open(wanted.channel, true)
+    if (!wanted.item) return
+    this.markedItem = wanted.item
+    this.bring = true
+    this.mark()
+  }
+  /** Folds the open channel's stream to what `query` finds; '' draws it whole. */
+  private fold(query: string): void {
+    const folding = query.trim()
+    if (folding === this.folding) return
+    if (!folding) { this.unfold(); return }
+    if (!this.folding) this.following = false
+    this.folding = folding
+    this.foundAt = null
+    this.drawChannel()
+  }
+  /** Draws the stream whole again, the match in hand kept in sight. */
+  private unfold(): void {
+    if (!this.folding) return
+    const at = this.foundAt
+    this.folding = ''
+    this.foundAt = null
+    this.foundRows = []
+    this.drawChannel()
+    const row = at ? this.rows.get(at)?.node : undefined
+    if (row && this.stream) {
+      row.scrollIntoView({ block: row.offsetHeight > this.stream.clientHeight ? 'start' : 'center' })
+      this.lastTop = this.stream.scrollTop
+      this.following = this.atFoot()
+    } else this.following = true
+    if (this.following) this.toFoot()
+  }
+  /** ↑ / ↓ in Find: the previous or next match comes into sight. */
+  private stepFound(by: 1 | -1): void {
+    const at = this.foundRows.indexOf(this.foundAt ?? '')
+    const next = this.foundRows[Math.max(0, Math.min(this.foundRows.length - 1, at < 0 ? this.foundRows.length - 1 : at + by))]
+    if (next) this.showFound(next)
+  }
+  /** Enter in Find: the match in hand takes the keys, the stream still folded. */
+  private keepFound(): void {
+    const row = this.foundAt ? this.rows.get(this.foundAt)?.node : undefined
+    const target = row?.querySelector<HTMLElement>('[data-item]') ?? this.channelEl
+    target?.focus({ preventScroll: true })
+  }
+  /** Marks each match's words, and the match in hand: the one it was, else the newest. */
+  private markFound(folded: ReturnType<typeof foldStream> | null): void {
+    if (!this.stream) return
+    unhighlight(this.stream)
+    for (const row of this.stream.querySelectorAll('[data-found]')) row.removeAttribute('data-found')
+    this.foundRows = folded ? matchedRows(folded).map(entry => entry.id) : []
+    if (!folded) return
+    const needle = needleOf(this.folding)
+    for (const id of this.foundRows) for (const part of this.rows.get(id)?.node.querySelectorAll('.kbn-ch-item-text, .uf-file-name, .uf-caption, .kbn-ch-slug') ?? []) highlight(part, needle)
+    const at = this.foundAt && this.foundRows.includes(this.foundAt) ? this.foundAt : this.foundRows.at(-1)
+    if (at) this.showFound(at)
+  }
+  /** Marks the match in hand and brings it into sight. */
+  private showFound(id: string): void {
+    this.foundAt = id
+    for (const row of this.stream?.querySelectorAll('[data-found]') ?? []) row.removeAttribute('data-found')
+    const row = this.rows.get(id)?.node
+    if (!row || !this.stream) return
+    row.setAttribute('data-found', '')
+    row.scrollIntoView({ block: row.offsetHeight > this.stream.clientHeight ? 'start' : 'center' })
+    this.lastTop = this.stream.scrollTop
   }
   private draw(): void {
     const ctx = this.ctx
@@ -458,6 +548,7 @@ export class ChannelsView implements TemporalView {
     const returning = this.away
     this.away = false
     this.channels = this.compose(ctx)
+    this.applyWanted()
     if (!this.channels.some(channel => channel.key === this.current)) this.resume()
     this.drawRail()
     this.drawChannel()
@@ -504,12 +595,16 @@ export class ChannelsView implements TemporalView {
       if (key) { store(SEEN + key, String(Date.now())); store(LAST, key) }
       this.following = true
       this.marked = null
+      this.markedItem = null
+      this.folding = ''
+      this.foundAt = null
       const channel = this.channel
       if (channel) this.ctx?.workspace?.board.read(channel.families)
     }
     if (!focus) return
     if (key && deliberate) {
       this.marked = null
+      this.markedItem = null
       this.renew(key)
       const channel = this.channels.find(each => each.key === key)
       if (channel?.hidden) void this.dismiss(channel, showKey(key, Date.now()))
@@ -528,6 +623,7 @@ export class ChannelsView implements TemporalView {
    */
   followRex(id: string, origin: string): boolean {
     this.marked = null
+    this.markedItem = null
     if (!this.loaded) { this.mark(); return false }
     let card: KanbanCard | undefined
     const channel = this.channels.find(each => (card = each.everyone.find(one => one.uid === id || (one.id === id && one.originId === origin))))
@@ -549,9 +645,10 @@ export class ChannelsView implements TemporalView {
    */
   private mark(): void {
     for (const row of this.stream?.querySelectorAll('[data-marked]') ?? []) row.removeAttribute('data-marked')
-    // Its latest post, else the latest station on its line.
+    // The line Find picked; else the worker's latest post, else the latest station on its line.
     const own = this.marked ? [...this.stream?.querySelectorAll<HTMLElement>(`:scope > [data-fiber="${CSS.escape(this.marked)}"]`) ?? []] : []
-    const row = own.filter(each => each.matches('.kbn-ch-item')).at(-1) ?? own.at(-1)
+    const picked = this.markedItem ? this.rows.get(this.markedItem)?.node : undefined
+    const row = picked?.isConnected ? picked : own.filter(each => each.matches('.kbn-ch-item')).at(-1) ?? own.at(-1)
     if (!row) return
     row.setAttribute('data-marked', '')
     if (!this.bring) return
@@ -584,7 +681,7 @@ export class ChannelsView implements TemporalView {
     const owed = new Map(listed.map(channel => [channel.key, channel.members.filter(card => attentionOf(card, waits) === 'waiting').length]))
     // A poll that changed nothing in the rail leaves it be.
     const sig = JSON.stringify([this.query, this.current, listed.map(channel => [channel.key, channel.name, channel.title, channel.misc, channel.waiting, !!channel.hidden, unread.get(channel.key), owed.get(channel.key)])])
-    if (sig === this.sigs.rail) { this.drawFound(); return }
+    if (sig === this.sigs.rail) return
     this.sigs.rail = sig
     for (const unbind of this.railBindings) unbind()
     this.railBindings = []
@@ -592,7 +689,7 @@ export class ChannelsView implements TemporalView {
     for (const channel of listed) {
       const item = el('li', 'kbn-ch-rail-item')
       item.toggleAttribute('data-waiting', channel.waiting)
-      const pick = button('kbn-ch-pick', '', () => { this.find(''); this.open(channel.key, true) })
+      const pick = button('kbn-ch-pick', '', () => { this.filter(''); this.open(channel.key, true) })
       pick.dataset.channel = channel.key
       pick.dataset.item = `channel:${channel.key}`
       pick.toggleAttribute('data-misc', channel.misc)
@@ -617,28 +714,7 @@ export class ChannelsView implements TemporalView {
     }
     if (this.query && !items.length) items.push(el('li', 'kbn-ch-hush kbn-ch-none', 'No channel matches.'))
     this.rebuild(list, items)
-    this.drawFound()
   }
-  /** The documents Jump to matches, across every channel and every fiber the fleet sent from. */
-  private drawFound(): void {
-    const found = this.found!, query = this.query.toLowerCase(), library = this.ctx?.workspace?.library
-    const matches = !query || !library ? [] : library.documents().filter(({ card, receipt }) =>
-      [receipt.basename, receipt.fullPath, declaredTitle(receipt.key)?.title ?? '', card.name].some(text => text.toLowerCase().includes(query)))
-      .slice(0, FOUND_DOCUMENTS)
-    found.hidden = !matches.length
-    const now = Date.now(), list = el('ol', 'kbn-ch-doclist')
-    list.append(...matches.map(({ card, receipt }) => {
-      const item = el('li', ''), id = `found:${receipt.key}`
-      const pick = button('kbn-ch-doc', '', () => this.openPage(id, card, receipt.key))
-      pick.dataset.item = id
-      pick.title = receipt.fullPath
-      pick.append(el('span', 'kbn-ch-doc-name', declaredTitle(receipt.key)?.title ?? receipt.basename), el('span', 'kbn-ch-doc-meta', `${slug(card)} · ${relative(receipt.timestamp, now)}`))
-      item.append(pick)
-      return item
-    }))
-    this.rebuild(found, [el('h4', 'kbn-ch-shelf', 'Files'), list])
-  }
-
   private drawChannel(): void {
     if (!this.head || !this.stream) return
     const channel = this.channel
@@ -652,7 +728,10 @@ export class ChannelsView implements TemporalView {
       this.rows.clear()
       return
     }
-    const now = Date.now(), { entries, hidden } = this.window(this.streamOf(channel)), failed = channel.families.some(uid => this.ctx!.workspace!.board.failed(uid))
+    const now = Date.now(), whole = this.streamOf(channel), failed = channel.families.some(uid => this.ctx!.workspace!.board.failed(uid))
+    // Folded by Find, the stream draws what matches across the whole channel, each life a match is on from its start to its end, and marks where the rest folded away; else it draws its window.
+    const folded = this.folding ? foldStream(whole, this.folding) : null
+    const { entries, hidden } = folded ? { entries: folded.entries, hidden: 0 } : this.window(whole)
     const seat = channel.seat
     // The head and the stream are drawn apart, so what arrives leaves a focused page or an open menu in the head be;
     // the head waits while a list hangs from its pages, whose count follows the chair's files in place, unless the channel changed: then the list closes.
@@ -682,9 +761,9 @@ export class ChannelsView implements TemporalView {
     const said = entries.map((entry, row) => [entry.id, entry.kind, entry.at, entry.card.name, slug(entry.card), entry.card.shuttleRole, entry.line, entry.kind === 'station' ? [entry.what, entry.end] : [entry.text, entry.waiting, entry.clears, kindWord(entry), grouped[row], entry.files.map(file => [file.host, file.fullPath, file.timestamp]), lineIds(entry)]])
     // Each fiber's newest close leads its previews with its tapestry; an older close lets its go.
     const newest = new Map<string, Item>()
-    for (const entry of entries) if (entry.kind === 'close') newest.set(fiberOf(entry.card), entry)
+    for (const entry of whole) if (entry.kind === 'close') newest.set(fiberOf(entry.card), entry)
     const leading = new Set(newest.values())
-    for (const entry of entries) {
+    for (const entry of whole) {
       const made = entry.kind === 'close' && !leading.has(entry) ? this.unfolds.get(`item:${entry.id}`) : undefined
       if (made?.lead) { made.lead = undefined; this.showPreviews(made) }
     }
@@ -696,7 +775,7 @@ export class ChannelsView implements TemporalView {
     const runs = this.runs(channel, now, waits)
     const ran = [...new Set(entries.map(entry => entry.card))].map(card => runs(card).map(([from, to]) => [from, to === now ? 'now' : to]))
     // The count and its title name the threads running, what waits first, which can change with no entry changing.
-    const stream = JSON.stringify([channel.key, failed, hidden, said, entries.map(entry => [attentionOf(entry.card, waits), turnOf(entry.card).turn]), leads, fold, margin, ran, running.map(card => [fiberOf(card), attentionOf(card, waits)])])
+    const stream = JSON.stringify([channel.key, this.folding, failed, hidden, said, entries.map(entry => [attentionOf(entry.card, waits), turnOf(entry.card).turn]), leads, fold, margin, ran, running.map(card => [fiberOf(card), attentionOf(card, waits)])])
     if (stream !== this.sigs.stream) {
       this.sigs.stream = stream
       // Each row reckoned by its parts' sizes, a post's by its previews (a tapestry it shows leading them), before anything in it loads.
@@ -723,7 +802,7 @@ export class ChannelsView implements TemporalView {
       this.entriesDrawn = entries
       this.titles.clear()
       const kept = new Set<string>()
-      this.rebuild(this.stream, [count, ink, ...hidden ? [this.earlierRow(hidden)] : [], ...entries.map((entry, row) => {
+      const drawn = entries.map((entry, row) => {
         const sig = JSON.stringify(said[row]), was = this.rows.get(entry.id)
         const node = was?.sig === sig ? was.node : entry.kind === 'station' ? this.stationRow(entry, now) : this.itemRow(entry, now, grouped[row])
         this.rows.set(entry.id, { sig, node })
@@ -734,13 +813,17 @@ export class ChannelsView implements TemporalView {
         node.dataset.state = line ? this.lineState(line, waits) : ''
         if (line) node.dataset.hue = hue(line.card)
         return node
-      })])
+      })
+      const gap = (rows: number): HTMLLIElement[] => rows ? [el('li', 'kbn-ch-folded', `· · · ${rows} ${rows === 1 ? 'row' : 'rows'} folded · · ·`)] : []
+      this.rebuild(this.stream, [count, ink, ...hidden ? [this.earlierRow(hidden)] : [], ...folded ? [...drawn.flatMap((node, row) => [...gap(folded.gaps[row]), node]), ...gap(folded.gaps.at(-1)!)] : drawn])
       for (const id of this.rows.keys()) if (!kept.has(id)) this.rows.delete(id)
       for (const close of leading) this.lead(close)
-      this.sweep(new Set(entries.flatMap(entry => entry.kind === 'station' ? [] : [`item:${entry.id}`])))
-      if (!entries.length) this.stream.append(el('li', 'kbn-ch-hush', failed ? 'This channel\'s history could not be read; trying again.' : 'Nothing addressed to you here yet.'))
-      if (this.following) this.toFoot()
+      // What a fold hides keeps its previews, so they stand as they were when it unfolds.
+      this.sweep(new Set(whole.flatMap(entry => entry.kind === 'station' ? [] : [`item:${entry.id}`])))
+      if (!entries.length) this.stream.append(el('li', 'kbn-ch-hush', folded ? `Nothing in #${channel.name} says “${this.folding}”.` : failed ? 'This channel\'s history could not be read; trying again.' : 'Nothing addressed to you here yet.'))
+      if (this.following && !folded) this.toFoot()
       this.mark()
+      this.markFound(folded)
       this.watchRows()
       this.paint()
     }
@@ -1464,14 +1547,13 @@ export class ChannelsView implements TemporalView {
     const active = document.activeElement as HTMLElement | null
     const replying = !!active?.closest('.ws-dock')
     if (event.key === 'Escape' && (replying || active === this.jump)) { this.channelEl?.focus({ preventScroll: true }); return true }
-    // Enter in the bar's Find opens what it found first.
-    if (event.key === 'Enter' && this.query && isTypingTarget(active) && !replying && active !== this.jump) { this.openFirst(); return true }
     if (keystrokeIsSpokenFor()) return false
+    // Escape in a folded stream puts Find away, which draws the stream whole about the match in hand.
+    if (event.key === 'Escape' && this.folding) { this.ctx?.workspace?.clearFind(); return true }
     // t opens the tapestry of the post in focus in the reader.
     const post = event.key === 't' ? active?.closest<HTMLElement>('.kbn-ch-item')?.querySelector<HTMLElement>('[data-item]')?.dataset.item : undefined
     if (post) { void this.openTapestry(post); return true }
     if (event.key === 'Escape' && this.overDrawer()) { this.moveRail(true); return true }
-    if (event.key === '/' && this.jump) { this.moveRail(false); this.jump.focus({ preventScroll: true }); return true }
     if (event.key === 'j') { this.step(1); return true }
     if (event.key === 'k') { this.step(-1); return true }
     if (event.key === '[') { this.moveRail(this.railShown()); return true }
@@ -1487,6 +1569,9 @@ export class ChannelsView implements TemporalView {
     if (this.dock && this.drafted) this.drafts.set(this.drafted, this.dock.draft)
     if (this.current) store(SEEN + this.current, String(Date.now()))
     this.query = ''
+    this.folding = ''
+    this.foundAt = null
+    this.foundRows = []
     this.sweep(new Set())
     this.rows.clear()
     this.generation++
@@ -1504,7 +1589,7 @@ export class ChannelsView implements TemporalView {
     this.reading = false
     this.ctx = null
     this.layout = this.channelEl = this.head = this.note = null
-    this.list = null; this.found = null; this.jump = null; this.stream = null; this.railToggle = null
+    this.list = null; this.jump = null; this.stream = null; this.railToggle = null
     this.dock?.reset(); this.dock = null
     this.drafted = null
     this.sigs = { rail: '', head: '', stream: '' }

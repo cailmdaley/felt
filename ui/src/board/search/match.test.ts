@@ -300,6 +300,12 @@ describe('foldStream', () => {
     expect(matchedRows(folded).map(e => e.id)).toEqual(['a2', 'b2'])
   })
 
+  it('finds a close that says nothing of its own by its constitution\'s outcome', () => {
+    const closed: Item = { kind: 'close', id: 'c1', card: card({ id: 'w/gamma', name: 'Gamma', outcome: 'The foreground mask is the open call.' }), at: 0, arrived: 0, text: '', files: [], waiting: false }
+    expect(matchedRows(foldStream([closed], 'mask')).map(e => e.id)).toEqual(['c1'])
+    expect(matchedRows(foldStream([{ ...closed, text: 'A note of its own' }], 'mask'))).toEqual([])
+  })
+
   it('finds a thread by its name at its start', () => {
     expect(matchedRows(foldStream(stream, 'beta')).map(e => e.id)).toEqual(['b-start'])
   })

@@ -32,6 +32,7 @@ import { clearPost } from './utils.js'
 import { KeymapHelp } from './KeymapHelp.js'
 import { DESK_ACTS, keyIntent, type KeyIntent } from './keymap.js'
 import { daemonFetch, isDaemonBooting, postDaemonJson } from './daemonApi.js'
+import { headerIcon } from './workspace/headerIcon.js'
 import { applyTerminalHost, TerminalHostReader } from './hostTerminal.js'
 import { inLane } from './requestLanes.js'
 import { isoDayLocal } from './civilDay.js'
@@ -152,8 +153,10 @@ export class KanbanModal {
 
   /** The view tab strip — persistent chrome, built once in assembleChrome. */
   private tabsEl: HTMLElement | null = null
-  /** The bar's Find: one field on every view (constitutions; the channels and their documents on Channels). */
+  /** The bar's Find: one field on every view, searching where the board stands. */
   private findEl: HTMLInputElement | null = null
+  /** The chip in Find naming where it searches. */
+  private findChip: HTMLButtonElement | null = null
   /**
    * Wrapper around the Desk.
    * `display: contents` in CSS, so it adds a toggle handle WITHOUT adding a
@@ -302,6 +305,9 @@ export class KanbanModal {
       dock: this.dock,
       console: options => this.console(options),
       find: this.findEl ?? undefined,
+      findChip: this.findChip ?? undefined,
+      findScope: () => this.activeView?.findScope?.(),
+      openChannel: target => this.showChannel(target),
       focusFind: () => this.focusFind(),
       reveal: card => !!this.activeView?.reveal?.(card.uid ?? card.id, card.originId),
       onRest: card => this.rest(card),
@@ -439,6 +445,13 @@ export class KanbanModal {
     else this.workspace?.openFromDesk(card)
   }
 
+  /** Find picked a channel, or a line in one: Channels comes up on it, from the reader too. */
+  private showChannel(target: { channel: string; item?: string }): void {
+    getView('channels')?.show?.(target)
+    if (this.activeViewId === 'channels' && this.workspace?.isActive) this.workspace.returnToOrigin()
+    else this.setView('channels')
+  }
+
   /** Focus the bar's Find, where the bar carries one (the phone's bottom bar does not). */
   private focusFind(): boolean {
     const find = this.findEl
@@ -565,39 +578,37 @@ export class KanbanModal {
       views.append(part)
     }
 
-    // Find follows the tabs: one field every view shares.
+    // Find follows the tabs: one field every view shares, searching where the board stands, the chip in it saying where.
     const find = document.createElement('label')
     find.className = 'kbn-viewtabs-find'
+    this.findChip = document.createElement('button')
     this.findEl = document.createElement('input')
     this.findEl.type = 'search'
     this.findEl.placeholder = 'Find'
-    this.findEl.setAttribute('aria-label', 'Find a constitution or transcript')
-    // A view that filters itself by Find (Channels) takes it; elsewhere it lists constitutions.
-    const serve = (): void => {
-      const view = this.activeView
-      this.workspace?.find(view?.find ? query => view.find?.(query) : undefined)
-    }
+    this.findEl.setAttribute('aria-label', 'Find')
+    const serve = (): void => this.workspace?.find()
     this.findEl.addEventListener('focus', serve)
     this.findEl.addEventListener('input', serve)
-    // Escape puts Find away whole: its list, its filter and the focus.
-    this.findEl.addEventListener('keydown', (e) => {
-      if (e.key !== 'Escape' || e.isComposing) return
-      e.preventDefault(); e.stopPropagation()
-      this.workspace?.clearFind()
-      this.findEl?.blur()
-    })
     const findKey = document.createElement('span')
     findKey.className = 'kbn-viewtab-hotkey kbn-viewtabs-find-key'
     findKey.textContent = '/'
     findKey.setAttribute('aria-hidden', 'true')
-    find.append(this.findEl, findKey)
+    find.append(this.findChip, this.findEl, findKey)
     strip.append(find)
+    // The phone's bar has no room for a field: a button opens Find as a sheet.
+    const phoneFind = document.createElement('button')
+    phoneFind.type = 'button'
+    phoneFind.className = 'kbn-viewtabs-phone-find'
+    phoneFind.innerHTML = headerIcon('find')
+    phoneFind.title = 'Find'
+    phoneFind.setAttribute('aria-label', 'Find')
+    phoneFind.addEventListener('click', () => this.workspace?.findConstitution())
 
     // The centre always takes the room between Find and Settings, so Settings
     // never moves between views.
     const centre = document.createElement('div')
     centre.className = 'kbn-viewtabs-centre'
-    strip.append(centre)
+    strip.append(centre, phoneFind)
 
     // Settings rides the same row as the pages without being one of them. It
     // is deliberately NOT a tab: the tabs are windows onto the work, and
@@ -816,6 +827,7 @@ export class KanbanModal {
     this.bannerEl = null
     this.tabsEl = null
     this.findEl = null
+    this.findChip = null
     this.deskEl = null
     this.viewHostEl = null
     this.activeView = null

@@ -19,6 +19,13 @@ if (typeof HTMLElement !== 'undefined') {
     finished: Promise.resolve(), currentTime: 0, pause() {}, cancel() {}, commitStyles() {},
   }) as unknown as Animation
   HTMLElement.prototype.scrollIntoView ??= function () {}
+  // A modal dialog opens and closes, firing `close`; its top layer and inert background are a browser's.
+  HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { this.open = true }
+  HTMLDialogElement.prototype.close ??= function (this: HTMLDialogElement) {
+    if (!this.open) return
+    this.open = false
+    this.dispatchEvent(new Event('close'))
+  }
   window.matchMedia ??= (media: string): MediaQueryList => ({
     matches: false, media, onchange: null,
     addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent: () => false,

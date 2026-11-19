@@ -22,12 +22,14 @@ import { frameBridge } from './DocumentBridge.js'
 import './mentions.css'
 import { Reader } from './Reader.js'
 import { WorkspaceDepth } from './Depth.js'
-import { ConstitutionPicker } from './ConstitutionPicker.js'
-import { TranscriptResults } from './TranscriptResults.js'
+import { SearchPanel } from '../search/SearchPanel.js'
+import type { FindScope, ListScope } from '../search/scope.js'
+import { channelsSection, constitutionsSection, filesSection, saidSection, transcriptsSection } from '../search/sections.js'
 import { Library } from './Library.js'
 import { FamilyPage, type ViewFeeds } from './FamilyPage.js'
-import { BoardFeed } from '../boardFeed.js'
-import { composeChannels, fiberOf as channelFiber } from '../channels.js'
+import { BoardFeed, type BoardRecord } from '../boardFeed.js'
+import { wantOf } from '../attention.js'
+import { composeChannels, fiberOf as channelFiber, type Channel as BoardChannel } from '../channels.js'
 import type { GlobeHost } from '../globe/GlobeStage.js'
 import type { MapFile } from '../family/model.js'
 import { FamilyActivity } from './familyActivity.js'
@@ -62,6 +64,12 @@ export interface WorkspaceOptions {
   console(options: ConsoleOptions): Dock
   /** The board bar's Find field, shared by every view on the desktop. */
   find?: HTMLInputElement
+  /** The chip in the bar's Find that names where it searches. */
+  findChip?: HTMLButtonElement
+  /** Where the view on show has the bar's Find search; none searches the whole board. */
+  findScope?(): FindScope | undefined
+  /** Brings Channels up on a channel, a hidden one back to the rail, and the line `item` marked in its stream. */
+  openChannel?(target: { channel: string; item?: string }): void
   /** Focus the board bar's Find; false where the bar has none (the phone). */
   focusFind?(): boolean
   /** Brings the view standing behind the stage to a fiber Find picked; false when it holds no place for it, and the fiber's page opens. */
@@ -114,9 +122,13 @@ export class Workspace {
   private readonly activity: FamilyActivity
   private readonly sends: FiberSends
   private readonly stopSends: () => void
-  private readonly picker: ConstitutionPicker
-  /** The list the board bar's Find hangs beneath itself; the phone, without that field, uses `picker`. */
-  private readonly barPicker: ConstitutionPicker
+  /** The board bar's Find: the list it hangs beneath itself, or the view it answers in place. */
+  private readonly barFind: SearchPanel
+  /** The phone's Find, with a field of its own, in a sheet. */
+  private readonly sheet = document.createElement('dialog')
+  private readonly sheetFind: SearchPanel
+  /** What had the focus when the sheet opened, which takes it back when the sheet closes. */
+  private sheetReturn: HTMLElement | null = null
   private readonly themes: ChannelThemes
   private readonly root: HTMLElement
   private readonly depth: WorkspaceDepth
@@ -128,8 +140,6 @@ export class Workspace {
   private current: ChannelState | null = null
   /** Constitutions opened in this session, most recent first. */
   private origin = 'Channels'
-  /** The filter of the view the bar's Find serves, while it serves one. */
-  private filter?: (query: string) => void
   private readonly receipts = new Map<string, { files: SentFile[]; etag?: string }>()
   private readonly receiptsRead = new Map<string, Promise<void>>()
   private readonly loads = new Map<string, Promise<void>>()
@@ -151,8 +161,8 @@ export class Workspace {
   private readonly mapFeeds: ViewFeeds
   /** The family board's records, which a constitution's view and Channels read. */
   readonly board: BoardFeed
-  /** Each constitution's channel handle, for the board's cards as last composed. */
-  private handles: { cards: KanbanCard[]; of: Map<string, string> } | null = null
+  /** The channels the board's cards make, as last composed, and each constitution's channel by fiber. */
+  private composed: { cards: KanbanCard[]; channels: BoardChannel[]; of: Map<string, BoardChannel> } | null = null
   /** Each constitution's tapestry read, by fiber and its last write. */
   private readonly leadReads = new Map<string, { modified?: string; read: Promise<MapFile | undefined> }>()
   /** What a surface over the whole fleet reaches through the board: the map's feeds, and its pages and conversations. */
@@ -170,6 +180,7 @@ export class Workspace {
     this.board = new BoardFeed(opts.shuttleBase)
     this.board.subscribe(() => {
       this.mentions.refresh()
+      this.refreshFind()
       if (this.current && this.isActive) this.current.familyPage?.update(this.current.card, this.graph())
     })
     this.mapFeeds = {
@@ -207,25 +218,29 @@ export class Workspace {
       cards: opts.cards,
       onOpen: (card, doc) => this.open(card, this.opts.origin(), doc, this.library.hasMetadata(card)),
     })
-    this.library.subscribe(() => { this.reader?.refreshChannels(); this.picker?.refresh(); if (this.barPicker?.isOpen) this.barPicker.refresh() })
-    const pickerOptions = {
-      cards: () => {
-        const ordered = this.library.orderedCards()
-        return [...ordered, ...opts.cards().filter(card => !ordered.some(row => (row.uid ?? row.id) === (card.uid ?? card.id) && row.originId === card.originId))]
-      },
-      files: (card: KanbanCard) => this.library.fileNames(card),
-      onOpen: (card: KanbanCard) => {
-        this.clearFind()
-        if (!this.isActive && opts.reveal?.(card)) { opts.find?.blur(); return }
-        this.open(card, this.isActive ? this.origin : opts.origin(), undefined, this.library.hasMetadata(card))
-      },
-    }
-    this.picker = new ConstitutionPicker(pickerOptions)
-    this.barPicker = new ConstitutionPicker({
-      ...pickerOptions, find: opts.find, active: () => this.barPicker.isOpen,
-      supplement: opts.find ? new TranscriptResults(opts.shuttleBase) : undefined,
-      onEscape: () => { this.clearFind(); opts.find?.blur(); (document.activeElement as HTMLElement | null)?.blur?.() },
+    this.library.subscribe(() => this.refreshFind())
+    this.barFind = new SearchPanel({
+      field: opts.find, chip: opts.findChip,
+      scope: () => this.findScope(),
+      board: () => this.boardScope(),
+      onDone: () => opts.find?.blur(),
     })
+    this.sheetFind = new SearchPanel({
+      // The sheet covers the view, so a view that answers in place is searched as the whole board.
+      scope: () => { const scope = this.findScope(); return 'inPlace' in scope ? this.boardScope() : scope },
+      board: () => this.boardScope(),
+      onDone: () => this.sheet.close(),
+    })
+    this.sheet.className = 'ws-find-sheet'
+    this.sheet.setAttribute('aria-label', 'Find')
+    this.sheet.append(this.sheetFind.el)
+    this.sheet.addEventListener('close', () => {
+      this.sheetFind.clear()
+      this.sheet.remove()
+      if (this.sheetReturn?.isConnected && !this.isActive) this.sheetReturn.focus({ preventScroll: true })
+      this.sheetReturn = null
+    })
+    this.sheet.addEventListener('click', event => { if (event.target === this.sheet) this.sheet.close() })
     const reviewTarget = (source: WorkspaceDocument) => changeReviewTarget(source, opts.cards())
     this.reader = new Reader({
       shuttleBase: opts.shuttleBase,
@@ -233,10 +248,8 @@ export class Workspace {
       cards: opts.cards,
       threadIndex: () => opts.threadIndex?.() ?? new ThreadIndex(opts.cards()),
       deskCards: () => this.opts.deskRows(),
-      pickerCards: () => this.library.orderedCards(),
       deskStop: card => this.deskStop(card),
-      files: card => this.library.fileNames(card),
-      onFind: () => opts.focusFind?.() ?? false,
+      onFind: () => { if (!opts.focusFind?.()) this.findConstitution() },
       onExpand: expanded => opts.onExpand?.(expanded),
       onSelect: key => this.visit(key),
       onNavigate: (source, href) => this.openRelative(source, href),
@@ -276,29 +289,89 @@ export class Workspace {
   get isActive(): boolean { return this.reader.isActive }
   /** The view beneath the reader, when it owns the page swipe (Channels: the swipe brings its rail); true when it took the swipe. */
   swipeBeneath: ((signal: SwipeSignal) => boolean) | null = null
-  /**
-   * The board bar's Find, routed by what it serves now: the filter of a view
-   * that filters itself by it (Channels), and otherwise a list of
-   * constitutions hung beneath the field.
-   */
-  find(filter?: (query: string) => void): void {
+  /** The board bar's Find, answering where the board stands (the reader's constitution, the view's scope, else the whole board). */
+  find(): void {
     const input = this.opts.find
     if (!input) return
-    this.filter = this.isActive ? undefined : filter
-    if (this.filter) { this.barPicker.close(); this.filter(input.value); return }
-    if (!this.barPicker.isOpen) this.barPicker.show(this.root, input)
-    else this.barPicker.refresh()
+    this.barFind.show(this.root, input.closest('label') ?? input)
     this.library.refresh()
   }
-  /** Close the Find's list, if it hangs open. */
-  closeFind(): void { this.barPicker.close() }
-  /** Empty the bar's Find and lift whatever it filtered. */
-  clearFind(): void {
-    const input = this.opts.find
-    this.barPicker.close()
-    if (!input?.value) return
-    input.value = ''
-    this.filter?.('')
+  /** Empty the bar's Find and put away whatever it did. */
+  clearFind(): void { this.barFind.clear() }
+  /** Where Find stands: in the reader, its constitution; else where the view on show says; else the whole board. */
+  private findScope(): FindScope {
+    if (this.isActive && this.current) return this.threadScope(this.current.card)
+    return this.opts.findScope?.() ?? this.boardScope()
+  }
+  private refreshFind(): void {
+    this.barFind?.refresh()
+    this.sheetFind?.refresh()
+  }
+  /** A constitution Find picked: the view behind the stage shows it where it can, else its page opens. */
+  private pickCard(card: KanbanCard): void {
+    if (!this.isActive && this.opts.reveal?.(card)) return
+    this.open(card, this.isActive ? this.origin : this.opts.origin(), undefined, this.library.hasMetadata(card))
+  }
+  /** The board's cards by uid and by id. */
+  private cardOf(ref: string): KanbanCard | undefined {
+    return this.opts.cards().find(card => card.uid === ref || card.id === ref)
+  }
+  /** Every family top-level the board's cards belong to. */
+  private families(): string[] {
+    const index = this.graph()
+    return [...new Set(this.opts.cards().map(card => { const root = index.rootOf(card); return root.uid ?? root.id }))]
+  }
+  /**
+   * What was said to the human, for Find: the family board's records over
+   * `families`, and each open question a worker asked with no record of it,
+   * under the id the stream draws it by.
+   */
+  private saidRecords(families: string[], cards = this.opts.cards()): BoardRecord[] {
+    const asks = cards.flatMap((card): BoardRecord[] => {
+      const want = card.status === 'active' && card.ask ? wantOf(card, this.board.waiting) : undefined
+      const uid = card.uid ?? card.id
+      return want?.kind === 'ask' && !want.line ? [{ id: `ask:${uid}:${want.at}`, kind: 'asked', timestamp: want.at, fiber: uid, to: { label: 'you' }, text: want.text }] : []
+    })
+    return [...this.board.records(families), ...asks]
+  }
+  /** A line Find picked: Channels opens at it, marked; a fiber in no channel opens its page. */
+  private openSaid(card: KanbanCard, item: string): void {
+    const channel = this.channelOf(card)
+    if (channel && this.opts.openChannel) this.opts.openChannel({ channel: channel.key, item })
+    else this.pickCard(card)
+  }
+  /** The whole board: constitutions, channels, what was said, files, and transcripts when asked. */
+  boardScope(): ListScope {
+    const recent = (): KanbanCard[] => {
+      const ordered = this.library.orderedCards()
+      return [...ordered, ...this.opts.cards().filter(card => !ordered.some(row => (row.uid ?? row.id) === (card.uid ?? card.id) && row.originId === card.originId))]
+    }
+    return {
+      sections: [
+        constitutionsSection({
+          shuttleBase: this.opts.shuttleBase, cards: this.opts.cards, recent, pick: hit => hit.card && this.pickCard(hit.card),
+          current: card => this.isActive && (card.uid ?? card.id) === this.current?.channel.uid && card.originId === this.current.channel.owner,
+        }),
+        ...this.opts.openChannel ? [channelsSection({ channels: () => this.boardChannels(), open: channel => this.opts.openChannel!({ channel: channel.key }) })] : [],
+        saidSection({ records: () => this.saidRecords(this.families()), cardOf: uid => this.cardOf(uid), channelOf: card => this.channelOf(card), open: (card, record) => this.openSaid(card, record.id) }),
+        filesSection({ documents: () => this.library.documents(), open: (card, key) => this.openDocument(card, key) }),
+        transcriptsSection({ shuttleBase: this.opts.shuttleBase, cardOf: id => this.cardOf(id), open: card => this.pickCard(card), ask: true }),
+      ],
+      open: () => this.board.read(this.families()),
+    }
+  }
+  /** One constitution: what it said, its files, and its own transcripts. */
+  private threadScope(card: KanbanCard): ListScope {
+    const uid = card.uid ?? card.id, root = this.graph().rootOf(card), family = root.uid ?? root.id
+    return {
+      chip: `in ${card.name}`,
+      sections: [
+        saidSection({ records: () => this.saidRecords([family], [card]).filter(record => record.fiber === uid || record.fiber === card.id), cardOf: () => card, open: (_, record) => this.openSaid(card, record.id) }),
+        filesSection({ documents: () => this.library.documents().filter(doc => (doc.card.uid ?? doc.card.id) === uid && doc.card.originId === card.originId), open: (each, key) => this.openDocument(each, key) }),
+        transcriptsSection({ shuttleBase: this.opts.shuttleBase, fiber: card.id, cardOf: id => this.cardOf(id), open: each => this.pickCard(each), title: 'Its transcripts' }),
+      ],
+      open: () => this.board.read([family]),
+    }
   }
   /** Return from the reader to the view it was opened from, as Escape does. */
   returnToOrigin(): void {
@@ -307,9 +380,14 @@ export class Workspace {
   }
   /** The header's close control returns to Desk, regardless of its origin view. */
   escapeHome(): void { this.history.view('#/desk') }
-  /** Opens over the Desk without navigating or waking the reader. */
+  /** The phone's Find: a sheet with a field of its own, over the board or the reader. */
   findConstitution(): void {
-    this.picker.show(this.root)
+    if (this.sheet.open) { this.sheetFind.field.focus(); return }
+    this.sheetReturn = document.activeElement as HTMLElement | null
+    this.root.append(this.sheet)
+    this.sheet.showModal()
+    this.sheetFind.serve()
+    this.sheetFind.field.focus({ preventScroll: true })
     this.library.refresh()
   }
   /** One of a constitution's pages, opened from its view or a channel: a deliberate look at it. */
@@ -343,17 +421,24 @@ export class Workspace {
   }
   /** The channel chair's slug, as the console names it, or in the catch-all its family's top-level's; undefined for a card in no channel. */
   channelHandle(card: KanbanCard): string | undefined {
+    const channel = this.channelOf(card)
+    if (!channel) return undefined
+    // In the catch-all, which has no chair, a constitution goes by its family's top-level.
+    return slug(channel.seat ?? this.graph().rootOf(card))
+  }
+  /** The channel a constitution speaks in, as the board's cards make them. */
+  private channelOf(card: KanbanCard): BoardChannel | undefined { return this.channelsComposed().of.get(channelFiber(card)) }
+  /** Every channel the board's cards make, hidden ones too. */
+  private boardChannels(): BoardChannel[] { return this.channelsComposed().channels }
+  private channelsComposed(): { channels: BoardChannel[]; of: Map<string, BoardChannel> } {
     const cards = this.opts.cards()
-    if (this.handles?.cards !== cards) {
-      const index = this.graph(), of = new Map<string, string>()
-      for (const channel of composeChannels({ cards, parentOf: each => index.parentOf(each), dismissed: [], pinned: new Map(), waits: new Map(), now: Date.now() })) {
-        // In the catch-all, which has no chair, a constitution goes by its family's top-level.
-        const top = (card: KanbanCard): KanbanCard => { let at = card; for (let up = index.parentOf(at); up; up = index.parentOf(at)) at = up; return at }
-        for (const member of channel.everyone) of.set(channelFiber(member), slug(channel.seat ?? top(member)))
-      }
-      this.handles = { cards, of }
+    if (this.composed?.cards !== cards) {
+      const index = this.graph(), of = new Map<string, BoardChannel>()
+      const channels = composeChannels({ cards, parentOf: each => index.parentOf(each), dismissed: [], pinned: new Map(), waits: new Map(), now: Date.now() })
+      for (const channel of channels) for (const member of channel.everyone) of.set(channelFiber(member), channel)
+      this.composed = { cards, channels, of }
     }
-    return this.handles.of.get(channelFiber(card))
+    return this.composed
   }
   /** A card's sent files, and the open channel's other documents, newest first. */
   private mapFiles(card: KanbanCard): MapFile[] {
@@ -477,7 +562,7 @@ export class Workspace {
     if (!card) {
       this.mentions.refresh()
       this.library.cardsChanged()
-      if (changed) this.reader.refreshChannels()
+      if (changed) this.refreshFind()
       this.refreshProse(this.current)
       return
     }
@@ -485,7 +570,7 @@ export class Workspace {
     this.mentions.refresh()
     this.library.cardsChanged()
     if (threadFamilyRevision(card, this.opts.threadIndex?.() ?? new ThreadIndex(cards)) === this.lastRenderedFamilyRevision) {
-      this.reader.refreshChannels()
+      this.refreshFind()
       return
     }
     this.current.card = card
@@ -726,8 +811,8 @@ export class Workspace {
   private async applyRoute(route: WorkspaceRoute, quietRoute = false): Promise<void> {
     const quiet = quietRoute || this.quiet
     const epoch = ++this.routeEpoch
-    this.picker.close()
-    this.barPicker.close()
+    this.barFind.close()
+    if (this.sheet.open) this.sheet.close()
     if (route.kind === 'overview') {
       const view = viewOfHash(route.hash ?? window.location.hash) ?? this.history.originView
       if (view === 'desk' && this.origin === 'Desk' && this.current && this.isActive) this.opts.onReturnCard?.(this.current.card)
@@ -1136,8 +1221,9 @@ export class Workspace {
     this.verdicts.dispose()
     this.dock.setVerdictQueue(undefined)
     this.dock.reset()
-    this.picker.dispose()
-    this.barPicker.dispose()
+    this.barFind.dispose()
+    this.sheetFind.dispose()
+    this.sheet.remove()
     this.reader.dispose()
     this.library.dispose()
     this.stopSends()

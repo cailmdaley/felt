@@ -1,0 +1,83 @@
+/* The board's Find: the list hung under the field, section by section. */
+.ws-find { display: flex; flex-direction: column; gap: 0; }
+.ws-find[hidden] { display: none; }
+.ws-find-list { display: flex; flex-direction: column; overflow: auto; min-height: 0; }
+.ws-find-section { padding: 6px 0 4px; }
+.ws-find-section + .ws-find-section { border-top: var(--ws-line-width) solid var(--ws-hairline-soft); }
+.ws-find-section > .kbn-flight-caption { margin: 0 0 2px; padding: 0 var(--ws-inset); }
+.ws-find-item { position: relative; display: flex; align-items: flex-start; }
+.ws-find-pick {
+  flex: 1; min-width: 0; display: block; text-align: left; padding: var(--ws-small-gap) var(--ws-inset);
+  border: var(--ws-line-width) solid transparent; border-radius: var(--ws-control-radius); background: none; cursor: pointer;
+  font: 400 var(--type-row)/var(--leading-tight) var(--font-serif); color: var(--ws-ink-soft);
+}
+.ws-find-pick:hover, .ws-find-pick:focus-visible { background: var(--ws-hover); color: var(--ws-ink); }
+.ws-find-pick:focus-visible { outline: none; border-color: var(--ws-ink-faint); }
+.ws-find-pick[aria-disabled] { cursor: default; }
+.ws-find-pick[aria-disabled]:hover { background: none; }
+.ws-find-face { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ws-find-face > small { font: var(--type-meta)/var(--leading-prose) var(--font-mono); color: var(--ws-ink-faint); overflow-wrap: anywhere; }
+.ws-find-face[data-state] > .ws-channel-name { opacity: 0.55; }
+.ws-find-face[data-current] > .ws-channel-name { text-decoration: underline 1px; text-underline-offset: 3px; }
+.ws-find-kind { font: var(--type-meta)/var(--leading-solid) var(--font-mono); color: var(--ws-ink-muted); }
+.ws-find-quote {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere;
+  font: var(--type-label)/var(--leading-ui) var(--font-serif); color: var(--ws-ink-soft);
+}
+.ws-find-file .uf-file-row { width: 100%; }
+.ws-find mark, .kbn-ch-stream mark.kbn-ch-found-text { background: color-mix(in srgb, var(--ws-fresh) 26%, transparent); color: inherit; border-radius: 2px; }
+.ws-find-more {
+  display: block; margin: 0 var(--ws-inset) 2px; padding: 2px 0; border: 0; background: none; cursor: pointer;
+  font: var(--type-meta)/var(--leading-prose) var(--font-mono); color: var(--ws-ink-muted); text-align: left;
+}
+.ws-find-more:hover, .ws-find-more:focus-visible { color: var(--ws-ink); }
+.ws-find-more:focus-visible { outline: none; text-decoration: underline; }
+.ws-find-ask {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px; width: 100%; text-align: left;
+  padding: var(--ws-small-gap) var(--ws-inset); border: var(--ws-line-width) solid transparent; border-radius: var(--ws-control-radius);
+  background: none; cursor: pointer; font: var(--type-label)/var(--leading-ui) var(--font-serif); color: var(--ws-ink-soft);
+}
+.ws-find-ask:hover, .ws-find-ask:focus-visible { background: var(--ws-hover); color: var(--ws-ink); }
+.ws-find-ask:focus-visible { outline: none; }
+.ws-find-ask > kbd { font: var(--type-meta)/var(--leading-solid) var(--font-mono); color: var(--ws-ink-muted); }
+@media (pointer: coarse) { .ws-find-ask > kbd { display: none; } }
+/* A second control rides the end of its row's last line, so the row keeps its whole width. */
+.ws-find-extra {
+  position: absolute; right: var(--ws-inset); bottom: var(--ws-small-gap); padding: 0; border: 0; background: none; cursor: pointer;
+  font: var(--type-meta)/var(--leading-prose) var(--font-mono); color: var(--ws-ink-muted); text-decoration: underline;
+}
+.ws-find-extra:hover, .ws-find-extra:focus-visible { color: var(--ws-ink); }
+.ws-find-extra:focus-visible { outline: none; }
+.ws-find .ws-search-result { display: flex; flex-direction: column; gap: 2px; padding: 0; }
+.ws-search-snippet { font: var(--type-label)/var(--leading-ui) var(--font-serif); overflow-wrap: anywhere; color: var(--ws-ink); }
+.ws-search-meta { font: var(--type-meta)/var(--leading-prose) var(--font-mono); color: var(--ws-ink-muted); }
+.ws-search-note { margin: 0; padding: 8px 12px; font: var(--type-label)/var(--leading-prose) var(--font-serif); color: var(--ws-ink-muted); }
+.ws-find-item:has(> .ws-find-extra) .ws-search-meta { padding-right: 80px; }
+
+/* The chip naming where Find searches: a stamp inside the field, its words cut before it grows the field. */
+.ws-find-chip {
+  flex: 0 1 auto; min-width: 0; max-width: 55%; margin-left: 3px; padding: 1px 6px; border: 0; border-radius: 3px; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: var(--type-meta)/var(--leading-ui) var(--font-mono); color: var(--kbn-paper); background: var(--kbn-ink-soft);
+}
+.ws-find-chip:hover { background: var(--kbn-ink); }
+.ws-find-chip[hidden] { display: none; }
+
+/* A field of its own, at the top of the phone's sheet. */
+.ws-find-field {
+  display: flex; align-items: center; gap: 4px; padding: 0 0 0 2px; margin-bottom: 4px;
+  border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: var(--ws-paper);
+}
+.ws-find-field:focus-within { border-color: var(--ws-ink-faint); }
+.ws-find-field .ws-channel-find { flex: 1; min-width: 0; border: 0; outline: none; }
+
+/* The phone's Find: a sheet from the top of the screen, so the on-screen keyboard covers the list's foot and never the field. */
+.ws-find-sheet {
+  position: fixed; inset: env(safe-area-inset-top, 0px) 0 auto; box-sizing: border-box; width: 100%; max-width: none; max-height: 86dvh;
+  margin: 0; padding: 10px 12px 12px; border: 0; border-bottom: var(--ws-line-width) solid var(--ws-hairline);
+  border-radius: 0 0 12px 12px; background: var(--ws-paper); color: var(--ws-ink); box-shadow: var(--ws-float);
+}
+.ws-find-sheet::backdrop { background: color-mix(in srgb, var(--kbn-ink) 28%, transparent); }
+.ws-find-sheet .ws-find { position: static; width: 100%; max-width: none; max-height: calc(86dvh - 22px); padding: 0; border: 0; box-shadow: none; background: none; }
+.ws-find-sheet .ws-channel-find { font-size: var(--type-row); min-height: var(--ws-phone-target, 44px); }
+.ws-find-sheet .ws-find-pick, .ws-find-sheet .ws-find-ask { min-height: var(--ws-phone-target, 44px); }

@@ -1080,119 +1080,13 @@ button.chr-name:hover {
   to { transform: rotate(360deg); }
 }
 
-/* ── Searching the record ───────────────────────────────────────────────── */
-
-/* A rule under a line of text rather than a boxed field: the page is a
-   chronicle, and its search should read as a margin note you can type in, not
-   as a form. */
-.chr-search {
-  flex: 0 0 auto;
-}
-
-.chr-search-input {
-  width: 190px;
-  padding: 2px 4px;
-  border: 0;
-  border-bottom: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 42%, transparent);
-  background: transparent;
-  font-family: var(--font-serif);
-  font-style: italic;
-  font-size: var(--type-label);
-  color: var(--kbn-ink);
-  outline: none;
-  /* Wider once you are in it — the query gets room without the head ever
-     changing height. */
-  transition: width 160ms ease-out, border-color 160ms ease-out;
-}
-.chr-search-input:focus {
-  width: 260px;
-  border-bottom-color: var(--kbn-owed);
-}
-.chr-search-input::placeholder { color: var(--kbn-ink-faint); }
-/* WebKit's own clear affordance is a grey circle in a parchment margin. */
-.chr-search-input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
-
-/* The SDK places search hits in the top layer without reflowing the grid. */
-.chr-search-hits {
-  width: min(380px, calc(100vw - 24px));
-  max-height: min(46vh, var(--available-height));
-  margin: 0;
-  padding: 0;
-  overflow-y: auto;
-  color: var(--kbn-ink);
-  background: color-mix(in srgb, var(--kbn-paper-bright) 99%, transparent);
-  border: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 34%, transparent);
-  border-radius: 3px;
-  box-shadow: 0 3px 10px color-mix(in srgb, var(--kbn-shade) 14%, transparent);
-}
-
-.chr-search-none {
-  display: block;
-  padding: 8px 10px;
-  font-family: var(--font-serif);
-  font-style: italic;
-  font-size: var(--type-note);
-  color: var(--kbn-ink-faint);
-}
-
-/* One hit is three lines at most: the name, its address, and — when the words
-   were found in the body or the outcome — the passage they were found in. */
-.chr-hit {
-  display: block;
-  padding: 6px 10px;
-  border: 0;
-  border-bottom: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 16%, transparent);
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-.chr-hit:last-child { border-bottom: 0; }
-.chr-hit:is(:hover, [data-highlighted]) { background: color-mix(in srgb, var(--kbn-owed-bright) 12%, transparent); }
-
-.chr-hit-name {
-  display: block;
-  font-family: var(--font-serif);
-  font-size: var(--type-label);
-  color: var(--kbn-ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.chr-hit-id {
-  display: block;
-  font-family: var(--font-mono);
-  font-size: var(--type-meta);
-  color: var(--kbn-ink-faint);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-/* The passage. Two lines, clamped — an excerpt that grows into a paragraph
-   turns the list into a document. */
-.chr-hit-why {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  margin-top: 2px;
-  font-family: var(--font-serif);
-  font-style: italic;
-  font-size: var(--type-note);
-  line-height: var(--leading-ui);
-  color: var(--kbn-ink-muted);
-}
-
-/* IN THE RECORD, NOT ON THIS BOARD. Still listed — it is an honest answer to
-   the question asked — but quieter, because the click cannot take you to a
-   lifeline that is not drawn. */
-.chr-hit-off .chr-hit-name { color: var(--kbn-ink-muted); }
-.chr-hit-off { cursor: default; }
+/* ── Found from the bar's Find ─────────────────────────────────────────── */
 
 /* THE JUMP LANDS HERE. Gold, the page's own "this is the one" pigment (it is
    what `due` and the cycle bands are inked in), and it STAYS: the record is
    long, and a highlight that faded after a beat would leave the reader exactly
    where they were before they searched. Cleared by the next jump, or by
-   clearing the search. */
+   leaving the view. */
 .chr-found.chr-label {
   background: color-mix(in srgb, var(--kbn-owed-bright) 20%, transparent);
   box-shadow: inset 2px 0 0 var(--kbn-owed-bright);
@@ -1224,9 +1118,6 @@ button.chr-name:hover {
   .chr-note,
   .chr-diff { display: none; }
 
-  .chr-tools { flex: 1 1 100%; }
   /* A finger's target, not a glyph's: the board's 44px floor. */
   .chr-refresh { min-width: 44px; min-height: 44px; }
-  .chr-search { flex: 1 1 auto; }
-  .chr-search-input { width: 100%; }
 }

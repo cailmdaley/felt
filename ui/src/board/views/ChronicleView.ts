@@ -72,12 +72,9 @@ import {
   windowOf,
   type DayRange,
 } from './chronicleWindow.js'
-import {
-  fetchRecordHits,
-  localHits,
-  mergeHits,
-  type SearchHit,
-} from '../search/match.js'
+import type { SearchHit } from '../search/match.js'
+import type { FindScope } from '../search/scope.js'
+import { constitutionsSection } from '../search/sections.js'
 import { fiberDocUrl } from '../utils.js'
 import {
   attributeActivity,
@@ -123,16 +120,6 @@ const FUTURE_DAYS = 14
 const VISIBLE_PAST_DAYS = 14
 const VISIBLE_FUTURE_DAYS = 7
 const VISIBLE_DAYS = VISIBLE_PAST_DAYS + VISIBLE_FUTURE_DAYS + 1
-
-/**
- * How long the hand must rest before the record is searched.
- *
- * The local half (names, ids) never waits — it is a filter over memory. This
- * governs only the daemon's body search, which is a `felt ls --body` per store:
- * ~0.6s on the live loom, cheap enough to run per pause and far too expensive
- * to run per keystroke.
- */
-const SEARCH_DEBOUNCE_MS = 250
 
 /** Bounds on the fitted day width, so a very narrow or very wide board still
  *  gets columns a day numeral fits in and marks read at. */
@@ -316,20 +303,8 @@ class ChronicleView implements TemporalView {
   private origins: TemporalOrigins = {}
 
   // ── Search ────────────────────────────────────────────────────────────────
-  /** The head's search box, while mounted. */
-  private searchBox: { root: HTMLElementTagNameMap['ui-autocomplete']; list: HTMLElement; empty: HTMLElement; hits: Map<string, SearchHit> } | null = null
-  /** What is typed, trimmed. The local half re-filters on it every keystroke. */
-  private searchQuery = ''
-  /** The daemon's body-search answer, and the query it answers — held together
-   *  so a reply that lands after the hand moved on is never shown for the
-   *  wrong words. */
-  private recordHits: readonly SearchHit[] = []
-  private recordHitsFor = ''
-  private searchTimer: number | null = null
-  /** Bumps per record search, so only the newest reply may paint. */
-  private searchSeq = 0
   /** The fiber the reader jumped to. Its lifeline stays lit until another jump
-   *  or a cleared search — the record is long, and a highlight that faded
+   *  or the view is left — the record is long, and a highlight that faded
    *  would leave you back where you started. */
   private foundId: string | null = null
 
@@ -343,7 +318,7 @@ class ChronicleView implements TemporalView {
     // three moving the others.
     const tools = document.createElement('div')
     tools.className = 'chr-tools'
-    tools.append(this.buildRefresh(), this.buildSearch(ctx))
+    tools.append(this.buildRefresh())
     page.titleRow.append(tools)
     host.append(page.root)
 
@@ -399,11 +374,6 @@ class ChronicleView implements TemporalView {
     this.monthEl = null
     this.resizeObserver?.disconnect()
     this.resizeObserver = null
-    // A search is a question about one visit, like the era scope above it: the
-    // box goes with the head that held it, and a pending debounce must not fire
-    // into a torn-down view.
-    this.resetSearch()
-    this.searchBox = null
     this.foundId = null
     this.root?.remove()
     this.root = null
@@ -417,183 +387,14 @@ class ChronicleView implements TemporalView {
 
   // ── Search ────────────────────────────────────────────────────────────────
 
-  /**
-   * The head's search box: one input, and a list of hits under it.
-   *
-   * TWO CLOCKS, ONE LIST — see ./chronicleSearch.ts for the whole of that
-   * argument. Names and ids come from the cards this page is already holding
-   * and re-filter on the keystroke; bodies come from the daemon, debounced,
-   * and are merged into the same list when they land. Nothing about the list
-   * jumps as the second half arrives: the merge sorts on one rank scale, so
-   * the instant answers keep their places and the body hits fall in around
-   * them.
-   */
-  private buildSearch(mountCtx: ViewContext): HTMLElement {
-    // Every handler below reads `this.ctx`, never the context this box was
-    // built with: the view is mounted once and refreshed on every poll, so a
-    // closure over the mount-time context would search yesterday's cards.
-    const current = (): ViewContext => this.ctx ?? mountCtx
-
-    const box = document.createElement('ui-autocomplete')
-    box.className = 'chr-search'
-    box.setAttribute('filter', 'false')
-    box.setAttribute('modal', 'false')
-    box.setAttribute('open-on-focus', '')
-
-    const input = document.createElement('input')
-    input.type = 'search'
-    input.className = 'chr-search-input'
-    input.placeholder = 'search the record'
-    input.setAttribute('aria-label', 'Search every constitution, body text included')
-
-    const inputPart = document.createElement('ui-autocomplete-input')
-    inputPart.append(input)
-    const content = document.createElement('ui-autocomplete-content')
-    content.className = 'chr-search-hits'
-    content.setAttribute('align', 'end')
-    content.setAttribute('side-offset', '4')
-    // The SDK stashes the empty part's children while there are hits, so the
-    // message and its look live in one child that survives the stash.
-    const empty = document.createElement('ui-autocomplete-empty')
-    const emptyText = document.createElement('span')
-    emptyText.className = 'chr-search-none'
-    empty.append(emptyText)
-    const list = document.createElement('ui-autocomplete-list')
-    content.append(empty, list)
-    box.append(inputPart, content)
-    const hits = new Map<string, SearchHit>()
-    this.searchBox = { root: box, list, empty: emptyText, hits }
-    box.addEventListener('valuechange', event => {
-      if (event.detail.reason === 'item-press') {
-        // Choosing a record navigates without replacing the search text.
-        event.preventDefault()
-        const hit = hits.get(event.detail.value)
-        if (hit) this.jumpTo(hit, current())
-        return
-      }
-      this.searchQuery = event.detail.value.trim()
-      // The local half is free, so it repaints on the keystroke; the record
-      // half is a shell-out, so it waits for the hand to stop.
-      this.paintHits(current())
-      this.scheduleRecordSearch(current())
-    })
-    // Hits show while there is a query and the field has focus; choosing one
-    // leaves them up for the next.
-    box.addEventListener('openchange', event => {
-      const { value, reason } = event.detail
-      if (value ? !this.searchQuery : reason === 'item-press') event.preventDefault()
-    })
-    input.addEventListener('keydown', (e) => {
-      if (e.key !== 'Escape') return
-      // The board closes itself on Escape and the era scope leaves on it;
-      // abandoning a search comes before both.
-      e.stopPropagation()
-      this.clearSearch(current())
-      input.blur()
-    })
-
-    return box
-  }
-
-  /** Debounced record (body) search. One in flight at a time; only the newest
-   *  reply may paint, so a slow store cannot overwrite a later answer. */
-  private scheduleRecordSearch(ctx: ViewContext): void {
-    if (this.searchTimer !== null) window.clearTimeout(this.searchTimer)
-    const query = this.searchQuery
-    if (query.length < 2) {
-      // One letter matches most of the record and costs a full walk to say so.
-      this.recordHits = []
-      this.recordHitsFor = ''
-      return
+  /** The bar's Find on the Chronicle searches its constitutions; a pick finds the lifeline. */
+  findScope(): FindScope | undefined {
+    const ctx = this.ctx
+    if (!ctx) return undefined
+    return {
+      chip: 'in Chronicle',
+      sections: [constitutionsSection({ shuttleBase: ctx.shuttleBase, cards: () => this.ctx?.cards ?? [], pick: hit => { if (this.ctx) this.jumpTo(hit, this.ctx) } })],
     }
-    const seq = (this.searchSeq += 1)
-    this.searchTimer = window.setTimeout(() => {
-      this.searchTimer = null
-      void fetchRecordHits(ctx.shuttleBase, query)
-        .then((hits) => {
-          if (seq !== this.searchSeq || this.searchQuery !== query) return
-          this.recordHits = hits
-          this.recordHitsFor = query
-          this.paintHits(ctx)
-        })
-        .catch(() => {
-          // The daemon could not answer. The local half already has, and a
-          // list that silently keeps working on names beats an error where
-          // the answers were.
-        })
-    }, SEARCH_DEBOUNCE_MS)
-  }
-
-  /** Forget the query and everything derived from it, and make sure a pending
-   *  debounce cannot fire into the state that follows. */
-  private resetSearch(): void {
-    if (this.searchTimer !== null) window.clearTimeout(this.searchTimer)
-    this.searchTimer = null
-    this.searchSeq += 1
-    this.searchQuery = ''
-    this.recordHits = []
-    this.recordHitsFor = ''
-  }
-
-  private clearSearch(ctx: ViewContext): void {
-    this.resetSearch()
-    if (this.searchBox) this.searchBox.root.value = ''
-    this.setFound(null)
-    this.paintHits(ctx)
-  }
-
-  /** Draw the merged list. Pure logic lives in ./chronicleSearch.ts; this is
-   *  the DOM around it. */
-  private paintHits(ctx: ViewContext): void {
-    const box = this.searchBox
-    if (!box) return
-    box.list.replaceChildren()
-    box.hits.clear()
-    if (!this.searchQuery) { box.root.open = false; return }
-
-    const boardIds = new Map(ctx.cards.map((c) => [c.id, c]))
-    const record = this.recordHitsFor === this.searchQuery ? this.recordHits : []
-    const hits = mergeHits(localHits(ctx.cards, this.searchQuery), record, boardIds)
-
-    box.empty.textContent =
-      this.recordHitsFor === this.searchQuery ? 'nothing in the record' : 'searching the record…'
-    for (const hit of hits) {
-      box.hits.set(hit.id, hit)
-      box.list.append(this.buildHit(hit))
-    }
-  }
-
-  private buildHit(hit: SearchHit): HTMLElement {
-    const el = document.createElement('ui-autocomplete-item')
-    // A choice reports its label, so the label is the id a pick jumps to.
-    el.setAttribute('value', hit.id)
-    el.setAttribute('label', hit.id)
-    el.className = `chr-hit${hit.onBoard ? '' : ' chr-hit-off'}`
-
-    const name = document.createElement('span')
-    name.className = 'chr-hit-name'
-    name.textContent = hit.name
-
-    const id = document.createElement('span')
-    id.className = 'chr-hit-id'
-    id.textContent = hit.id
-
-    el.append(name, id)
-
-    // WHY this row is in the list. An excerpt when the words were in the body
-    // or the outcome — that is the whole point of asking the daemon — and
-    // otherwise nothing, because "matched on its name" is visible above.
-    if (hit.excerpt) {
-      const why = document.createElement('span')
-      why.className = 'chr-hit-why'
-      why.textContent = hit.excerpt
-      el.append(why)
-    }
-
-    el.title = hit.onBoard
-      ? `${hit.id} — jump to its lifeline`
-      : `${hit.id} — in the record, not on this board`
-    return el
   }
 
   /**

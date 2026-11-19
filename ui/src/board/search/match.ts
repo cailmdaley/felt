@@ -260,11 +260,13 @@ export function pieces(text: string, needle: string): Array<{ text: string; hit:
   return out
 }
 
-/** Whether a stream row answers to the needle: a line by its words and its files' names and captions; a thread's start by the thread's name or slug. */
+/** Whether a stream row answers to the needle: a line by its words (a bare close by its outcome) and its files' names and captions; a thread's start by the thread's name or slug. */
 export function entryMatches(entry: Entry, needle: string): boolean {
   if (!needle) return false
   if (entry.kind === 'station') return entry.what === 'start' && [entry.card.name, entry.card.id.split('/').pop()].some(text => holds(text, needle))
-  return holds(entry.text, needle) || entry.files.some(file => holds(file.basename, needle) || holds(file.caption, needle))
+  // A close that says nothing of its own stands for its constitution's outcome.
+  const words = entry.kind === 'close' && !entry.text ? entry.card.outcome : entry.text
+  return holds(words, needle) || entry.files.some(file => holds(file.basename, needle) || holds(file.caption, needle))
 }
 
 /** A stream folded to what a query finds. */

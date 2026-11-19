@@ -196,16 +196,15 @@ it('opens on the channel last open on this device, and on the first channel when
   expect(shown(third.host)).toBe('cmbx')
 })
 
-it('jumps to a channel the rail no longer lists, and to the fleet\'s documents; the rail lists the same on every device', async () => {
+it('jumps to a channel the rail no longer lists, finding channels and nothing else; the rail lists the same on every device', async () => {
   const { stored } = daemon()
-  const { view, host, openPage } = await mount()
+  const { host } = await mount()
   const jump = host.querySelector<HTMLInputElement>('.kbn-ch-jump')!
   jump.value = 'old'
   jump.dispatchEvent(new Event('input'))
   expect(rail(host)).toStrictEqual(['notes'])
-  expect([...host.querySelectorAll('.kbn-ch-doclist .kbn-ch-doc-name')].map(el => el.textContent)).toStrictEqual(['lensing-notes.md'])
-  host.querySelector<HTMLButtonElement>('.kbn-ch-doclist .kbn-ch-doc')!.click()
-  expect(openPage).toHaveBeenLastCalledWith(library[0].card, 'host:/notes/old/lensing-notes.md')
+  // A sent document named like it is the board's Find's to find, not the rail's.
+  expect(host.querySelector('.kbn-ch-rail')!.textContent).not.toContain('lensing-notes.md')
   jump.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }))
   expect(shown(host)).toBe('notes')
   expect(stored.has('shuttle.channels.seen:channel:notes')).toBe(true)
@@ -214,7 +213,6 @@ it('jumps to a channel the rail no longer lists, and to the fleet\'s documents; 
   host.querySelector<HTMLButtonElement>('[data-channel="channel:cmbx"]')!.click()
   // Having opened it on this device does not keep it listed: what is listed is the same on every device.
   expect(rail(host)).toStrictEqual(['cmbx', 'van'])
-  view.find('')
 })
 
 it('hides and shows the rail by its button, by [ and by sideways swipes, and remembers the rail', async () => {
@@ -300,7 +298,7 @@ it('floats what waits above the human\'s order, and moves a channel by Alt and t
 
 it('hides a channel by its menu; Jump to finds it, marked, and opening it brings it back', async () => {
   const { posts } = daemon()
-  const { view, host } = await mount()
+  const { host } = await mount()
   const pick = (name: string) => [...host.querySelectorAll<HTMLButtonElement>('.kbn-ch-pick')].find(el => el.querySelector('.kbn-ch-pick-name')?.textContent === name)!
   pick('van').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 30 }))
   await settle()
@@ -309,7 +307,9 @@ it('hides a channel by its menu; Jump to finds it, marked, and opening it brings
   expect(posts.at(-1)?.[0]).toBe('/api/v1/channels/dismiss')
   expect(posts.at(-1)?.[1]).toMatchObject({ key: expect.stringMatching(/^hide:channel:van:\d+$/), fiber: 'R' })
   expect(rail(host)).toStrictEqual(['cmbx'])
-  view.find('mov')
+  const jump = host.querySelector<HTMLInputElement>('.kbn-ch-jump')!
+  jump.value = 'mov'
+  jump.dispatchEvent(new Event('input'))
   expect(rail(host)).toStrictEqual(['van'])
   expect(pick('van').querySelector('.kbn-ch-pick-hidden')?.textContent).toBe('hidden')
   // Its menu offers to bring it back.
@@ -935,4 +935,44 @@ it('opens a channel on its newest lines, back to the oldest it holds unread, and
   expect(followed.host.querySelector('.kbn-ch-stream > [data-what="tick"]')).toBeNull()
   expect(followed.view.followRex('B', 'local')).toBe(true)
   expect(followed.host.querySelector('.kbn-ch-stream > [data-what="tick"]')?.hasAttribute('data-marked')).toBe(true)
+})
+
+it('folds the open channel to what Find holds, each match marked, steps between them, and draws it whole again', async () => {
+  daemon()
+  const { view, host } = await mount()
+  const scope = view.findScope()!
+  expect(scope.chip).toBe('in #cmbx')
+  const find = 'inPlace' in scope ? scope.inPlace : undefined
+  const folds = () => [...host.querySelectorAll('.kbn-ch-stream > .kbn-ch-folded')].map(el => el.textContent)
+  const marks = () => [...host.querySelectorAll('.kbn-ch-stream mark')].map(el => el.textContent)
+  const found = () => host.querySelector<HTMLElement>('.kbn-ch-stream > [data-found]')?.dataset.slug
+  // The expert's files are captioned at 9σ: its line stays from its start, the rest folds away about it.
+  find!.input('9σ')
+  expect(stream(host)).toStrictEqual([['tsz', 'start'], ['tsz', 'file', false]])
+  expect(folds()).toStrictEqual(['· · · 1 row folded · · ·', '· · · 1 row folded · · ·'])
+  expect(marks()).toStrictEqual(['9σ'])
+  expect(found()).toBe('tsz')
+  // Two matches: the newest is in hand, and ↑ goes to the older.
+  find!.input('σ')
+  expect(stream(host).filter(row => row.length === 3).map(row => row[0])).toStrictEqual(['mask', 'tsz'])
+  expect(found()).toBe('tsz')
+  find!.step(-1)
+  expect(found()).toBe('mask')
+  find!.input('nowhere at all')
+  expect(host.querySelector('.kbn-ch-stream > .kbn-ch-hush')?.textContent).toBe('Nothing in #cmbx says “nowhere at all”.')
+  find!.clear()
+  expect(stream(host)).toStrictEqual([['tsz', 'start'], ['mask', 'ask', true], ['tsz', 'file', false], ['beam', 'tick']])
+  expect([folds(), marks(), found()]).toStrictEqual([[], [], undefined])
+})
+
+it('opens where Find picked: a hidden channel brought back, the picked line marked', async () => {
+  const { posts } = daemon([], new Map(), {}, { dismissed: [`hide:channel:van:${Date.now()}`] })
+  const { view, host } = await mount()
+  expect(rail(host)).toStrictEqual(['cmbx'])
+  const line = `ask:R:${Date.parse(van.ask!.at)}`
+  view.show({ channel: 'channel:van', item: line })
+  await settle()
+  expect(shown(host)).toBe('van')
+  expect(posts.at(-1)?.[1]).toMatchObject({ key: expect.stringMatching(/^show:channel:van:\d+$/) })
+  expect(host.querySelector<HTMLElement>('.kbn-ch-stream > [data-marked]')?.dataset.slug).toBe('van')
 })

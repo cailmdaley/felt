@@ -29,6 +29,7 @@
  */
 
 import type { BoardFeed } from '../boardFeed.js'
+import type { FindScope } from '../search/scope.js'
 import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
 import type { DocKey } from '../workspace/documents.js'
 import type { Library } from '../workspace/Library.js'
@@ -51,8 +52,10 @@ export interface TemporalView {
   reveal?(id: string, origin: string): boolean
   /** Rex moved to this fiber's worker, and only then: show where it speaks here; false to leave it to the reader. */
   followRex?(id: string, origin: string): boolean
-  /** The board bar's Find, when the view filters itself by it; '' lifts the filter. */
-  find?(query: string): void
+  /** Where the bar's Find searches on this view, now; none searches the whole board. */
+  findScope?(): FindScope | undefined
+  /** Find picked a place in this view (a channel, a line in it): show it, whether or not the view is mounted yet. */
+  show?(target: { channel: string; item?: string }): void
 }
 
 /**
@@ -97,6 +100,8 @@ export interface ViewContext extends TemporalFetchers {
     readonly board: BoardFeed
     /** The last thing a constitution said to anyone, with when; undefined when it said nothing. */
     said(card: KanbanCard): { text: string; at: number } | undefined
+    /** Empty the bar's Find and put away whatever it did. */
+    clearFind(): void
   }
   /**
    * WORK — every card on the eight lifecycle/planning surfaces, deduped. This

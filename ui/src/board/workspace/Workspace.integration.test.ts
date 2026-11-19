@@ -381,68 +381,71 @@ describe('bar Find transcripts', () => {
   }
   const press = (el: HTMLElement, key: string): void => { el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) }
 
-  it('debounces, keeps constitutions first, and steps across into each excerpt\'s copy path', async () => {
-    vi.useFakeTimers()
-    const find = setup()
+  const transcriptReads = (): string[] => vi.mocked(fetch).mock.calls.map(([url]) => String(url)).filter(url => url.includes('/transcripts/search'))
+  const answer = (hits: unknown[]): void => {
     const original = vi.mocked(fetch).getMockImplementation()!
     vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/transcripts/search')
-      ? new Response(JSON.stringify({ hits: [hit], errors: [] }))
+      ? new Response(JSON.stringify({ hits, errors: [] }))
       : original(input, init))
-    type(find, 'Al')
-    await vi.advanceTimersByTimeAsync(400)
-    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/transcripts/search'))).toBe(false)
+  }
+  const ask = async (find: HTMLInputElement): Promise<void> => {
+    find.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true }))
+    await vi.advanceTimersByTimeAsync(250); await settle()
+  }
+
+  it('reads transcripts at the board\'s scope only when asked, and steps from the field through every row and its copy path', async () => {
+    vi.useFakeTimers()
+    const find = setup()
+    answer([hit])
     type(find, 'Alpha')
-    await vi.advanceTimersByTimeAsync(299)
-    expect(document.querySelector('.ws-search-result')).toBeNull()
-    await vi.advanceTimersByTimeAsync(1); await settle()
-    const rows = [...document.querySelectorAll<HTMLElement>('.ws-switcher .ws-channel-row, .ws-switcher .ws-search-result button')]
-    expect(rows).toHaveLength(2)
-    expect(rows[0].classList.contains('ws-channel-row')).toBe(true)
-    expect(rows[1].textContent).toBe('copy path')
-    const result = document.querySelector<HTMLElement>('.ws-search-result')!
+    await vi.advanceTimersByTimeAsync(1000); await settle()
+    expect(transcriptReads()).toEqual([])
+    expect(document.querySelector('.ws-find-ask')?.textContent).toContain('Search transcripts for “Alpha”')
+    await ask(find)
+    expect(transcriptReads()).toHaveLength(1)
+    expect(transcriptReads()[0]).not.toContain('fiber=')
+    const result = document.querySelector<HTMLElement>('[data-section="transcripts"] .ws-search-result')!
     expect(result.querySelector('mark')?.textContent).toBe('Alpha')
     expect(result.title).toBe('/transcripts/alpha.jsonl:2')
     expect(result.querySelector('.ws-search-meta')?.textContent).toContain('claude · b4edf873 · alpha')
     expect(result.querySelector('.ws-search-meta')?.textContent).toContain('13 matches')
     expect(result.querySelector('.ws-search-meta > time.el-time')?.getAttribute('datetime')).toBe(new Date(hit.timestamp).toISOString())
-    expect(document.querySelector('.ws-search-transcripts .kbn-flight-caption')?.textContent).toBe('Transcripts')
-    press(find, 'ArrowDown'); expect(document.activeElement).toBe(rows[0])
-    press(rows[0], 'ArrowDown'); expect(document.activeElement).toBe(rows[1])
-    press(rows[1], 'ArrowUp'); expect(document.activeElement).toBe(rows[0])
+    expect(document.querySelector('[data-section="transcripts"] .kbn-flight-caption')?.textContent).toBe('Transcripts')
+    const stops = [...document.querySelectorAll<HTMLElement>('.ws-find-list button')]
+    expect(stops[0].classList.contains('ws-channel-row')).toBe(true)
+    expect(stops.at(-1)!.textContent).toBe('copy path')
+    press(find, 'ArrowDown'); expect(document.activeElement).toBe(stops[0])
+    for (const stop of stops.slice(1)) { press(document.activeElement as HTMLElement, 'ArrowDown'); expect(document.activeElement).toBe(stop) }
+    press(stops[1], 'ArrowUp'); expect(document.activeElement).toBe(stops[0])
+    press(stops[0], 'ArrowUp'); expect(document.activeElement).toBe(find)
   })
 
-  it('opens nothing from an excerpt, and copies its location', async () => {
+  it('opens the constitution a transcript\'s session worked on, and copies its location', async () => {
     vi.useFakeTimers()
     const find = setup()
     const copied = vi.fn(async () => {})
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText: copied } })
-    const original = vi.mocked(fetch).getMockImplementation()!
-    vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/transcripts/search')
-      ? new Response(JSON.stringify({ hits: [{ ...hit, matches: 1 }], errors: [] }))
-      : original(input, init))
-    type(find, 'Alpha'); await vi.advanceTimersByTimeAsync(300); await settle()
+    answer([{ ...hit, matches: 1 }])
+    type(find, 'Alpha'); await ask(find)
     expect(document.querySelector('.ws-search-meta')?.textContent).toContain('1 match ·')
-    document.querySelector<HTMLElement>('.ws-search-result')!.click(); await settle()
-    expect(workspace.isActive).toBe(false)
-    const copy = document.querySelector<HTMLButtonElement>('.ws-search-result button')!
+    const copy = document.querySelector<HTMLButtonElement>('.ws-find-extra')!
     copy.click(); await settle()
     expect(copied).toHaveBeenCalledWith('/transcripts/alpha.jsonl:2')
     expect(copy.textContent).toBe('copied')
     expect(workspace.isActive).toBe(false)
+    document.querySelector<HTMLElement>('[data-section="transcripts"] .ws-find-pick')!.click(); await settle()
+    expect(workspace.isActive).toBe(true)
+    expect(workspace.reader.el.querySelector('.ws-channel-title')?.textContent).toBe('alpha')
   })
 
-  it('never activates an excerpt from Enter in the field', async () => {
+  it('never asks for transcripts from a plain Enter in the field', async () => {
     vi.useFakeTimers()
     const find = setup()
     bodyCards = []
-    const original = vi.mocked(fetch).getMockImplementation()!
-    vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/transcripts/search')
-      ? new Response(JSON.stringify({ hits: [hit], errors: [] }))
-      : original(input, init))
+    answer([hit])
     type(find, 'Alpha'); await vi.advanceTimersByTimeAsync(300); await settle()
-    const copy = document.querySelector<HTMLButtonElement>('.ws-search-result button')!
-    press(find, 'Enter'); await settle()
-    expect(copy.textContent).toBe('copy path')
+    press(find, 'Enter'); await vi.advanceTimersByTimeAsync(300); await settle()
+    expect(transcriptReads()).toEqual([])
     expect(workspace.isActive).toBe(false)
   })
 
@@ -454,17 +457,17 @@ describe('bar Find transcripts', () => {
     vi.mocked(fetch).mockImplementation((input, init) => String(input).includes('/transcripts/search')
       ? new Promise(resolve => requests.push({ signal: init!.signal as AbortSignal, resolve }))
       : original(input, init))
-    type(find, 'Alpha'); await vi.advanceTimersByTimeAsync(300)
+    type(find, 'Alpha'); await ask(find)
     type(find, 'Beta'); expect(requests[0].signal.aborted).toBe(true)
-    await vi.advanceTimersByTimeAsync(300)
     requests[0].resolve(new Response(JSON.stringify({ hits: [hit], errors: [] }))); await settle()
     expect(document.querySelector('.ws-search-result')).toBeNull()
-    workspace.closeFind(); expect(requests[1].signal.aborted).toBe(true)
+    await ask(find)
+    workspace.clearFind(); expect(requests[1].signal.aborted).toBe(true)
     requests[1].resolve(new Response(JSON.stringify({ hits: [hit], errors: [] }))); await settle()
-    expect(document.querySelector('.ws-switcher')).toBeNull()
+    expect(document.querySelector('.ws-find')).toBeNull()
   })
 
-  it('shows one quiet failure and offers copy path for sessions with no board card', async () => {
+  it('shows one quiet failure, and a hit with no board card can only be copied', async () => {
     vi.useFakeTimers()
     const find = setup()
     const original = vi.mocked(fetch).getMockImplementation()!
@@ -472,12 +475,37 @@ describe('bar Find transcripts', () => {
     vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/transcripts/search')
       ? new Response(JSON.stringify(fail ? { error: 'offline' } : { hits: [{ ...hit, fibers: [] }], errors: [] }), { status: fail ? 502 : 200 })
       : original(input, init))
-    type(find, 'Alpha'); await vi.advanceTimersByTimeAsync(300); await settle()
-    expect(document.querySelector('.ws-search-note')?.textContent).toBe('Transcript search unavailable.')
+    type(find, 'Alpha'); await ask(find)
+    expect(document.querySelectorAll('.ws-search-note')).toHaveLength(1)
+    expect(document.querySelector('[data-section="transcripts"] .ws-search-note')?.textContent).toBe('Transcript search unavailable.')
     fail = false
-    type(find, 'Alph'); await vi.advanceTimersByTimeAsync(300); await settle()
-    expect(document.querySelector('.ws-search-note')).toBeNull()
-    expect(document.querySelector('.ws-search-result button')?.textContent).toBe('copy path')
+    type(find, 'Alph'); await ask(find)
+    expect(document.querySelector('[data-section="transcripts"] .ws-search-note')).toBeNull()
+    expect(document.querySelector('[data-section="transcripts"] .ws-find-pick')?.getAttribute('aria-disabled')).toBe('true')
+    expect(document.querySelector('.ws-find-extra')?.textContent).toBe('copy path')
+  })
+
+  it('in the reader, searches its constitution: a chip names it, its own transcripts read unasked, and Backspace widens to the board', async () => {
+    vi.useFakeTimers()
+    const find = setup()
+    const chip = document.createElement('button')
+    workspace.dispose()
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => bodyCards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed), find, findChip: chip })
+    answer([hit])
+    workspace.openFromDesk(bodyCards[0]); await settle()
+    expect(workspace.isActive).toBe(true)
+    type(find, 'Alpha')
+    expect(chip.hidden).toBe(false)
+    expect(chip.textContent).toBe('in Alpha')
+    await vi.advanceTimersByTimeAsync(250); await settle()
+    expect(transcriptReads()).toHaveLength(1)
+    expect(new URL(transcriptReads()[0], 'http://board').searchParams.get('fiber')).toBe('work/alpha')
+    expect(document.querySelector('[data-section="transcripts"] .kbn-flight-caption')?.textContent).toBe('Its transcripts')
+    expect(document.querySelector('[data-section="constitutions"]')).toBeNull()
+    type(find, '')
+    press(find, 'Backspace')
+    expect(chip.hidden).toBe(true)
+    expect(document.querySelector('[data-section="constitutions"]')).not.toBeNull()
   })
 })
 
@@ -1213,7 +1241,7 @@ describe('workspace reader integration', () => {
     for (let n = 0; n < 4; n++) { await step('J'); sections.push(landed()!.split(' · ')[0]) }
     expect(sections).toEqual(['Awaiting review', 'Drafts', 'Resting', 'Roles & standing'])
   })
-  it('indexes fleet filenames on a cold Desk and refreshes an open picker without entering Reader', async () => {
+  it('finds sent files from the phone\'s sheet on a cold Desk, without entering Reader until one is picked', async () => {
     workspace.dispose()
     document.body.replaceChildren()
     vi.spyOn(Date, 'now').mockReturnValue(1000)
@@ -1225,29 +1253,31 @@ describe('workspace reader integration', () => {
     workspace.findConstitution()
     expect(workspace.isActive).toBe(false)
     expect(window.location.hash).toBe(route)
-    const find = document.querySelector<HTMLInputElement>('.ws-switcher input')!
+    const find = document.querySelector<HTMLInputElement>('.ws-find-sheet input')!
     expect(document.activeElement).toBe(find)
+    const files = (): number => document.querySelectorAll('.ws-find-sheet [data-section="files"] .ws-find-pick').length
     find.value = 'table.html'; find.dispatchEvent(new Event('input'))
-    expect(document.querySelectorAll('.ws-switcher .ws-channel-row')).toHaveLength(0)
+    expect(files()).toBe(0)
     await settle()
-    expect(document.querySelectorAll('.ws-switcher .ws-channel-row')).toHaveLength(1)
+    expect(files()).toBe(1)
     expect(document.activeElement).toBe(find)
     expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/sent-files/all/'))).toHaveLength(1)
     expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/api/v1/fibers/'))).toBe(false)
     find.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
     expect(document.activeElement).toBe(previous)
-    expect(document.querySelector('.ws-switcher')).toBeNull()
+    expect(document.querySelector('.ws-find-sheet')).toBeNull()
     workspace.findConstitution()
-    const input = document.querySelector<HTMLInputElement>('.ws-switcher input')!
+    const input = document.querySelector<HTMLInputElement>('.ws-find-sheet input')!
     const reads = vi.mocked(fetch).mock.calls.length
     input.value = 'table.html'; input.dispatchEvent(new Event('input'))
     expect(vi.mocked(fetch).mock.calls.length).toBe(reads)
-    expect(document.querySelectorAll('.ws-switcher .ws-channel-row')).toHaveLength(1)
+    expect(files()).toBe(1)
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
     await settle()
     expect(workspace.isActive).toBe(true)
     expect(workspace.reader.el.querySelector('.ws-channel-title')?.textContent).toBe('alpha')
   })
+
   for (const [routed, landing] of [['the report the Board feed names', 'report.html'], ['a sent file opened by address', 'table.html']] as const) {
     it(`shows only the selected page until the body lands after ${routed}, then the strip in its final order`, async () => {
       if (landing === 'report.html') await feedNamesReport()

@@ -119,22 +119,6 @@
 /* The SDK writes the copy's computed colours inline; an entry's own background is clear, so the copy takes the paper's. */
 .kbn-ch-pick[data-drag-preview] { background-color: var(--kbn-paper) !important; box-shadow: 0 6px 18px color-mix(in srgb, var(--kbn-ink) 22%, transparent); }
 .kbn-ch-none { padding: 4px 10px; }
-.kbn-ch-shelf {
-  margin: 4px 0 2px 10px;
-  font: 500 var(--type-label)/var(--leading-ui) var(--font-serif);
-  font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker);
-  color: var(--kbn-ink-muted);
-}
-.kbn-ch-found[hidden] { display: none; }
-.kbn-ch-doclist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
-.kbn-ch-doc {
-  display: flex; flex-direction: column;
-  width: 100%; padding: 4px 10px; border: 0; border-radius: 4px; background: none; text-align: left; cursor: pointer;
-  color: var(--kbn-ink-soft);
-}
-.kbn-ch-doc:hover { color: var(--kbn-ink); background: color-mix(in srgb, var(--kbn-ink) 5%, transparent); }
-.kbn-ch-doc-name { font: var(--type-row)/var(--leading-tight) var(--font-serif); overflow-wrap: anywhere; }
-.kbn-ch-doc-meta { font: var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); overflow-wrap: anywhere; }
 
 /* A channel: its name and its chair's pages, its stream, the console to its chair. */
 .kbn-ch { min-width: 0; min-height: 0; display: flex; flex-direction: column; outline: none; }
@@ -164,6 +148,14 @@
 .kbn-ch-earlier { list-style: none; flex: none; padding: 2px 20px 10px calc(var(--kbn-ch-tube) + var(--kbn-ch-gutter, 0px)); }
 .kbn-ch-earlier-more { border: 0; background: none; padding: 2px 0; cursor: pointer; font: italic var(--type-row)/var(--leading-solid) var(--font-serif); color: var(--kbn-ink-muted); }
 .kbn-ch-earlier-more:hover, .kbn-ch-earlier-more:focus-visible { color: var(--kbn-ink); }
+/* Folded by Find: a quiet line where rows folded away; the line's ink runs on through it. */
+.kbn-ch-stream > .kbn-ch-folded {
+  flex: none; list-style: none; padding: 6px 0 6px calc(var(--kbn-ch-tube) + 4px);
+  font: italic var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-faint);
+}
+/* The match in hand. */
+:is(.kbn-ch-item, .kbn-ch-station)[data-found] { background: linear-gradient(to right, transparent var(--kbn-ch-tube), color-mix(in srgb, var(--kbn-owed-bright) 12%, transparent) 0); }
+:is(.kbn-ch-item, .kbn-ch-station)[data-found] mark.kbn-ch-found-text { background: color-mix(in srgb, var(--kbn-owed-bright) 62%, transparent); }
 .kbn-ch-margin { height: 0; flex: none; list-style: none; }
 .kbn-ch-ink { position: absolute; top: 0; left: 0; z-index: 1; overflow: visible; pointer-events: none; }
 /* A post's drop stands above the ink, which stands above the rows. */
