@@ -7,7 +7,6 @@ import type { ViewContext } from './ViewRegistry.js'
 import { BoardFeed, type BoardRecord } from '../boardFeed.js'
 import type { SentFile } from '../sentFiles.js'
 import { card, response, settle } from '../testFixtures.js'
-import { CLEAR_UNDO_MS } from '../utils.js'
 import { Dock, type ConsoleOptions } from '../workspace/Dock.js'
 
 vi.mock('../tube.js', async original => {
