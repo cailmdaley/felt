@@ -287,19 +287,30 @@ func extractRelease(r io.Reader, dir string) error {
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return err
 			}
-			file, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, os.FileMode(hdr.Mode).Perm())
+			data, err := io.ReadAll(tr)
 			if err != nil {
 				return err
 			}
-			_, err = io.Copy(file, tr)
-			if closeErr := file.Close(); err == nil {
-				err = closeErr
-			}
-			if err != nil {
+			if err := writeUnforked(target, data, os.FileMode(hdr.Mode).Perm()); err != nil {
 				return err
 			}
 		default:
 			return fmt.Errorf("archive entry %q is neither a file nor a directory", hdr.Name)
 		}
 	}
+}
+
+// writeUnforked creates path holding data while no fork can inherit its
+// writer. On Linux a process forked while the writer is open keeps it until
+// its child execs, and executing the file meanwhile fails with ETXTBSY;
+// verifyRelease executes what extractRelease writes at once.
+func writeUnforked(path string, data []byte, perm os.FileMode) error {
+	syscall.ForkLock.RLock()
+	defer syscall.ForkLock.RUnlock()
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)
+	if err != nil {
+		return err
+	}
+	_, err = file.Write(data)
+	return errors.Join(err, file.Close())
 }

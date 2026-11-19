@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
 func TestDaemonOwnerPathSurvivesHostnameDomainChanges(t *testing.T) {
@@ -79,9 +81,7 @@ func TestDaemonHandoffTimeoutStopsPendingService(t *testing.T) {
 	bin := t.TempDir()
 	calls := filepath.Join(bin, "calls")
 	source := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + calls + "'\ncase \"$*\" in *MainPID*) echo 0;; esac\n"
-	if err := os.WriteFile(filepath.Join(bin, "systemctl"), []byte(source), 0755); err != nil {
-		t.Fatal(err)
-	}
+	sysenvtest.WriteFile(t, filepath.Join(bin, "systemctl"), []byte(source), 0755)
 	env.Set("PATH", bin+":"+env.Getenv("PATH"))
 	a := newApp(env)
 	settings, err := a.resolveHostSettings()
@@ -134,9 +134,7 @@ func TestSupervisorEndpointUsesManagerAndRenderedPort(t *testing.T) {
 			}
 			tc.dropins = strings.ReplaceAll(tc.dropins, "DIR", unitDir)
 			source := "#!/bin/sh\ncase \"$*\" in *DropInPaths*) echo '" + tc.dropins + "';; *show-environment*) echo '" + tc.managerEnv + "';; esac\n"
-			if err := os.WriteFile(filepath.Join(bin, "systemctl"), []byte(source), 0755); err != nil {
-				t.Fatal(err)
-			}
+			sysenvtest.WriteFile(t, filepath.Join(bin, "systemctl"), []byte(source), 0755)
 			env.Set("PATH", bin+":"+env.Getenv("PATH"))
 			env.Set("SHUTTLE_LISTEN", "tcp://127.0.0.1:1")
 			env.Set("SHUTTLE_PORT", "2")

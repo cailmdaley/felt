@@ -100,8 +100,16 @@ func LinkScript(t testing.TB, path, script string) {
 	if source, err := cachedScript(script); err == nil && os.Link(source, path) == nil {
 		return
 	}
+	WriteFile(t, path, []byte(script), 0o555)
+}
+
+// WriteFile is os.WriteFile written while no fork can inherit the writer, so
+// an executable it writes can be run at once even while parallel tests start
+// processes; see lockScriptWrite.
+func WriteFile(t testing.TB, path string, data []byte, perm os.FileMode) {
+	t.Helper()
 	unlock := lockScriptWrite()
-	err := os.WriteFile(path, []byte(script), 0o555)
+	err := os.WriteFile(path, data, perm)
 	unlock()
 	if err != nil {
 		t.Fatalf("writing %s: %v", path, err)

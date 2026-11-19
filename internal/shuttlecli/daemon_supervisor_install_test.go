@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
 func TestSupervisorReinstallVerifiesTargetListener(t *testing.T) {
@@ -37,9 +39,7 @@ func TestSupervisorReinstallVerifiesTargetListener(t *testing.T) {
 			bin := t.TempDir()
 			write := func(path, source string) {
 				t.Helper()
-				if err := os.WriteFile(path, []byte(source), 0755); err != nil {
-					t.Fatal(err)
-				}
+				sysenvtest.WriteFile(t, path, []byte(source), 0755)
 			}
 			write(filepath.Join(bin, "tmux"), "#!/bin/sh\nexit 1\n")
 			serviceData := filepath.Join(home, "service-data")
