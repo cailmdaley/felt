@@ -92,6 +92,17 @@ const stream = (host: HTMLElement) => [...host.querySelectorAll<HTMLElement>('.k
   : [el.dataset.slug, el.dataset.kind, el.hasAttribute('data-waiting')])
 const item = (host: HTMLElement, who: string) => [...host.querySelectorAll<HTMLElement>('.kbn-ch-item')].find(el => el.dataset.slug === who)!
 
+/** The rail settles: a trackpad's pause, then its motion's frames. */
+const settled = () => new Promise(resolve => setTimeout(resolve, 600))
+/** A finger drawn sideways across `on` from x `from` to `to`, let go, and the rail settled. */
+async function swipe(on: Element, from: number, to: number): Promise<void> {
+  const at = (x: number, y: number) => [{ clientX: x, clientY: y }]
+  on.dispatchEvent(Object.assign(new Event('touchstart', { bubbles: true }), { touches: at(from, 300) }))
+  for (let step = 1; step <= 4; step++) on.dispatchEvent(Object.assign(new Event('touchmove', { bubbles: true }), { touches: at(from + (to - from) * step / 4, 300 + step) }))
+  on.dispatchEvent(Object.assign(new Event('touchend', { bubbles: true }), { changedTouches: at(to, 304) }))
+  await settled()
+}
+
 it('lists the recent channels, the newest wait first, and reads a channel as what was addressed to the human with its threads\' lines between', async () => {
   const { families } = daemon()
   const { view, host } = await mount()
@@ -224,17 +235,14 @@ it('hides and shows the rail by its button, by [ and by sideways swipes, and rem
   expect(stored.get('shuttle.channels.rail-hidden')).toBe('1')
   expect(view.keydown(new KeyboardEvent('keydown', { key: '[' }))).toBe(true)
   expect(layout.hasAttribute('data-rail-hidden')).toBe(false)
-  const swipe = (on: Element, from: number, to: number) => {
-    on.dispatchEvent(Object.assign(new Event('touchstart', { bubbles: true }), { touches: [{ clientX: from, clientY: 300 }] }))
-    on.dispatchEvent(Object.assign(new Event('touchend', { bubbles: true }), { changedTouches: [{ clientX: to, clientY: 310 }] }))
-  }
   const streamEl = host.querySelector('.kbn-ch .kbn-ch-stream')!
-  swipe(streamEl, 300, 180)
+  await swipe(streamEl, 300, 180)
   expect(layout.hasAttribute('data-rail-hidden')).toBe(true)
-  swipe(streamEl, 200, 320)
+  await swipe(streamEl, 200, 320)
   expect(layout.hasAttribute('data-rail-hidden')).toBe(false)
   const wheel = (on: Element, deltaX: number) => { const event = Object.assign(new Event('wheel', { bubbles: true, cancelable: true }), { deltaX, deltaY: 2 }); on.dispatchEvent(event); return event.defaultPrevented }
   expect(wheel(streamEl, 80)).toBe(true)
+  await settled()
   expect(layout.hasAttribute('data-rail-hidden')).toBe(true)
   view.unmount(); views.length = 0
   const again = await mount(undefined, new ChannelsView())
@@ -372,9 +380,7 @@ it('keeps the rail on a phone\'s first screen when swiped leftward with no chann
   const { host } = await mount()
   const layout = host.querySelector('.kbn-ch-layout')!
   expect(layout.hasAttribute('data-channel')).toBe(false)
-  const rail = host.querySelector('.kbn-ch-rail')!
-  rail.dispatchEvent(Object.assign(new Event('touchstart', { bubbles: true }), { touches: [{ clientX: 300, clientY: 300 }] }))
-  rail.dispatchEvent(Object.assign(new Event('touchend', { bubbles: true }), { changedTouches: [{ clientX: 150, clientY: 305 }] }))
+  await swipe(host.querySelector('.kbn-ch-rail')!, 300, 150)
   expect(layout.hasAttribute('data-rail-hidden')).toBe(false)
 })
 
@@ -392,9 +398,7 @@ it('on a phone, reads a channel only while it is the screen: it resumes on the r
   host.querySelector<HTMLButtonElement>('.kbn-ch-back')!.click()
   expect(host.querySelector('.kbn-ch-layout')!.hasAttribute('data-channel')).toBe(false)
   // A leftward swipe over the rail goes back to it.
-  const rail = host.querySelector('.kbn-ch-rail')!
-  rail.dispatchEvent(Object.assign(new Event('touchstart', { bubbles: true }), { touches: [{ clientX: 300, clientY: 300 }] }))
-  rail.dispatchEvent(Object.assign(new Event('touchend', { bubbles: true }), { changedTouches: [{ clientX: 150, clientY: 305 }] }))
+  await swipe(host.querySelector('.kbn-ch-rail')!, 300, 150)
   expect([shown(host), host.querySelector('.kbn-ch-layout')!.hasAttribute('data-rail-hidden')]).toStrictEqual(['cmbx', true])
 })
 

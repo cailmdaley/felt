@@ -14,6 +14,7 @@ import { GUTTER, drawMargin, tautAlong, type MarginRow } from '../margin.js'
 import { random } from '../ink.js'
 import { lineHue } from '../lineHue.js'
 import { createRailReorder, type RailReorder } from '../channelRail.js'
+import { RailMotion, SLOP_PX, WHEEL_IDLE_MS, WheelAxis } from './railMotion.js'
 import { openActionMenu } from '../conversationMenu.js'
 import { stateDot } from '../stateDot.js'
 import { slug } from '../threadOutline.js'
@@ -43,8 +44,8 @@ const LAST = 'shuttle.channels.last'
 const RENEW_MS = 86_400_000
 /** The rail's order and its hides are written again once this old, well inside the board's reach. */
 const KEEP_MS = 7 * 86_400_000
-/** How far a finger or a trackpad must travel sideways to bring the rail in or put it away. */
-const SWIPE_PX = 60
+/** How far an overlaid rail's shadow reaches past its edge: put away, it stands this much further out. */
+const SHADOW_PX = 24
 /** About how tall a post stands without its files: its head and two lines of words. */
 const POST_PX = 64
 /** How many of a clear's records are written at once: each write is a process in the daemon. */
@@ -197,6 +198,24 @@ export class ChannelsView implements TemporalView {
   private generation = 0
   private unsubscribe: Array<() => void> = []
   private stopGestures?: () => void
+  /** The rail's place as it moves: following a gesture, or settling. */
+  private readonly motion = new RailMotion({
+    begin: () => this.beginMotion(),
+    render: p => this.renderMotion(p),
+    commit: shown => {
+      this.setRail(!shown)
+      // A phone that has come to its channel reads it.
+      if (!shown && isMobileViewport()) { this.drawRail(); this.channelEl?.focus({ preventScroll: true }) }
+      this.renderMotion(this.motion.p)
+    },
+    end: () => {
+      this.layout?.removeAttribute('data-rail-moving')
+      for (const name of ['--kbn-ch-rail-x', '--kbn-ch-stream-x']) this.layout?.style.removeProperty(name)
+    },
+    still: () => !this.layout?.isConnected || matchMedia('(prefers-reduced-motion: reduce)').matches,
+  }, true)
+  /** The rail's width as it moves. */
+  private motionWidth = 0
 
   mount(host: HTMLElement, ctx: ViewContext): void {
     this.ctx = ctx
@@ -206,7 +225,7 @@ export class ChannelsView implements TemporalView {
     page.root.classList.add('kbn-channels')
     // The board's tab bar names the view: the channel's own head is the view's top row, the rail's toggle at its right.
     page.titleRow.remove()
-    this.railToggle = iconButton('kbn-ch-rail-toggle', 'rail', '', () => this.setRail(this.railShown()))
+    this.railToggle = iconButton('kbn-ch-rail-toggle', 'rail', '', () => this.moveRail(this.railShown()))
     this.layout = el('div', 'kbn-ch-layout')
     this.layout.append(this.railEl(), this.channelPane())
     this.note = el('p', 'kbn-ch-note', 'Reading the channels…')
@@ -223,6 +242,7 @@ export class ChannelsView implements TemporalView {
       const layout = this.layout!, drawer = entry.contentRect.width < DRAWER_PX && !isMobileViewport()
       if (drawer === layout.hasAttribute('data-drawer')) return
       layout.toggleAttribute('data-drawer', drawer)
+      this.motion.rest(this.railShown())
       this.showRail()
     })
     this.width.observe(this.layout)
@@ -231,7 +251,7 @@ export class ChannelsView implements TemporalView {
     if (this.dock) this.consoleSize.observe(this.dock.el)
     // A press outside the drawn-in rail puts it away.
     this.layout.addEventListener('pointerdown', event => {
-      if (this.overDrawer() && !(event.target as Element).closest('.kbn-ch-rail, .kbn-ch-rail-toggle')) this.setRail(true)
+      if (this.overDrawer() && !(event.target as Element).closest('.kbn-ch-rail, .kbn-ch-rail-toggle')) this.moveRail(true)
     })
     this.railHidden = stored(RAIL) === '1'
     this.showRail()
@@ -448,7 +468,7 @@ export class ChannelsView implements TemporalView {
       const channel = this.channels.find(each => each.key === key)
       if (channel?.hidden) void this.dismiss(channel, showKey(key, Date.now()))
     }
-    if (isMobileViewport() || this.drawn) this.setRail(true)
+    if (isMobileViewport() || this.drawn) this.moveRail(true)
     this.drawRail(); this.drawChannel(); this.mark()
     this.channelEl?.focus({ preventScroll: true })
   }
@@ -592,7 +612,7 @@ export class ChannelsView implements TemporalView {
       this.pages?.close()
       this.sigs.head = head
       this.headKey = channel.key
-      const back = iconButton('kbn-ch-back', 'back', 'Channels', () => this.setRail(false))
+      const back = iconButton('kbn-ch-back', 'back', 'Channels', () => this.moveRail(false))
       const name = el('h3', 'kbn-ch-name')
       name.append(channel.chaired ? el('span', 'kbn-ch-handle', channel.name) : channel.name)
       name.toggleAttribute('data-lone', !channel.chaired)
@@ -1141,57 +1161,99 @@ export class ChannelsView implements TemporalView {
   }
   private showRail(): void {
     const shown = this.railShown()
+    if (!this.motion.active) this.motion.p = shown ? 1 : 0
     this.layout?.toggleAttribute('data-rail-hidden', !shown)
     if (!this.railToggle) return
     this.railToggle.name(shown ? 'Hide channels' : 'Show channels')
     this.railToggle.button.setAttribute('aria-expanded', String(shown))
   }
+  /** Carries the rail in or away, from wherever it stands. */
+  private moveRail(hidden: boolean): void {
+    if (!this.motion.active && this.railShown() === !hidden) return
+    this.motion.go(!hidden)
+  }
+  /** Whether the rail could be put away: a channel stands behind it, or on a phone, the one last read. */
+  private canLeaveRail(): boolean {
+    return !!this.channel || (isMobileViewport() && this.channels.some(channel => channel.key === stored(LAST)))
+  }
+  /** The rail is laid out to move over the stream, or with it; a phone's rail leaving bares the channel last read. */
+  private beginMotion(): number {
+    const layout = this.layout!
+    layout.setAttribute('data-rail-moving', '')
+    if (isMobileViewport() && this.phoneRail && !this.current) {
+      const last = stored(LAST)
+      if (last && this.channels.some(channel => channel.key === last)) { this.open(last, false); this.drawChannel() }
+    }
+    this.motionWidth = layout.querySelector('.kbn-ch-rail')?.getBoundingClientRect().width ?? 0
+    return this.motionWidth
+  }
+  /** Draws the rail `p` of the way in: over the stream where it is a drawer or a phone's screen, else pushing the stream aside. */
+  private renderMotion(p: number): void {
+    const layout = this.layout, width = this.motionWidth
+    if (!layout) return
+    const over = isMobileViewport() || this.drawn
+    layout.style.setProperty('--kbn-ch-rail-x', `${(p - 1) * (width + (over ? SHADOW_PX : 0))}px`)
+    layout.style.setProperty('--kbn-ch-stream-x', `${over ? 0 : (p - (this.railShown() ? 1 : 0)) * width}px`)
+  }
   /**
-   * Sideways gestures while Channels is the surface shown: drawn rightward
-   * across a channel they bring the rail, leftward they put it away. A
-   * two-finger trackpad swipe does the same. Content that scrolls sideways keeps it.
+   * Sideways gestures while Channels is the surface shown: the rail follows a
+   * finger or a two-finger trackpad swipe, rightward in, leftward away, and
+   * settles by where it stands and how fast it went when let go. Content that
+   * scrolls sideways keeps its gesture; travel along the stream is the stream's.
    */
   private gestures(root: HTMLElement): () => void {
     const onSurface = (target: EventTarget | null): boolean => !this.ctx?.workspace?.isActive && !!(target as Element | null)?.closest?.('.kbn-ch, .kbn-ch-rail')
-    // Leftward over a phone's rail goes back to the channel last read there.
-    const swipe = (rightward: boolean): void => {
-      if (rightward) this.setRail(false)
-      else if (this.channel) this.setRail(true)
-      else if (isMobileViewport() && this.channels.some(channel => channel.key === stored(LAST))) this.open(stored(LAST), true, false)
-    }
-    let start: { x: number; y: number } | null = null
-    let travel = 0, last = 0
+    const motion = this.motion, axis = new WheelAxis()
+    const free = (): boolean => !this.rail?.moving && (motion.active || !this.railShown() || this.canLeaveRail())
+    let touch: { x: number; y: number; taken: boolean | null } | null = null
     const down = (event: TouchEvent): void => {
-      start = event.touches.length === 1 && onSurface(event.target) ? { x: event.touches[0].clientX, y: event.touches[0].clientY } : null
+      const point = event.touches[0]
+      touch = event.touches.length === 1 && point && onSurface(event.target) ? { x: point.clientX, y: point.clientY, taken: null } : null
     }
-    const up = (event: TouchEvent): void => {
-      const end = event.changedTouches[0], from = start
-      start = null
-      if (!from || !end) return
-      const dx = end.clientX - from.x, dy = end.clientY - from.y
-      if (Math.abs(dx) < SWIPE_PX || Math.abs(dy) > Math.abs(dx) || scrollsSideways(event.target as Element, root, -dx)) return
-      swipe(dx > 0)
+    const move = (event: TouchEvent): void => {
+      const point = event.touches[0]
+      if (!touch || !point || touch.taken === false) return
+      const dx = point.clientX - touch.x, dy = point.clientY - touch.y
+      if (touch.taken === null) {
+        if (Math.hypot(dx, dy) < 1.5 * SLOP_PX) return
+        touch.taken = Math.abs(dx) > Math.abs(dy) && !scrollsSideways(event.target as Element, root, -dx) && free()
+        if (!touch.taken) return
+      }
+      touch.x = point.clientX; touch.y = point.clientY
+      motion.drag(dx, event.timeStamp)
     }
+    const up = (): void => {
+      if (touch?.taken) motion.release()
+      touch = null
+    }
+    let idle = 0
     const wheel = (event: WheelEvent): void => {
-      if (Math.abs(event.deltaX) <= Math.abs(event.deltaY) || !onSurface(event.target) || scrollsSideways(event.target as Element, root, event.deltaX)) return
+      if (!onSurface(event.target)) return
+      const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? root.clientWidth : 1
+      const dx = event.deltaX * unit, dy = event.deltaY * unit, sideways = Math.abs(dx) > Math.abs(dy)
+      if (sideways && !axis.holding && scrollsSideways(event.target as Element, root, dx)) return
+      const px = axis.feed(dx, dy, event.timeStamp)
       // Taking the gesture keeps the browser from going back a page.
-      event.preventDefault()
-      // One swipe is a burst of wheel events: it acts once, and a pause starts the next.
-      if (event.timeStamp - last > 300) travel = 0
-      last = event.timeStamp
-      if (Number.isNaN(travel)) return
-      travel += event.deltaX
-      if (Math.abs(travel) < SWIPE_PX) return
-      swipe(travel < 0)
-      travel = NaN
+      if (sideways || px !== null) event.preventDefault()
+      if (px === null || !free()) return
+      motion.drag(-px, event.timeStamp)
+      clearTimeout(idle)
+      // A trackpad says nothing when the fingers lift; the rail lets go once its events pause.
+      idle = window.setTimeout(() => motion.release(), WHEEL_IDLE_MS)
     }
     // Touch events, not pointer events: the browser cancels a pointer it starts panning, but a touch still ends.
     root.addEventListener('touchstart', down, { passive: true })
+    root.addEventListener('touchmove', move, { passive: true })
     root.addEventListener('touchend', up, { passive: true })
+    root.addEventListener('touchcancel', up, { passive: true })
     root.addEventListener('wheel', wheel, { passive: false })
     return () => {
+      clearTimeout(idle)
+      motion.rest(this.railShown())
       root.removeEventListener('touchstart', down)
+      root.removeEventListener('touchmove', move)
       root.removeEventListener('touchend', up)
+      root.removeEventListener('touchcancel', up)
       root.removeEventListener('wheel', wheel)
     }
   }
@@ -1223,11 +1285,11 @@ export class ChannelsView implements TemporalView {
     if (post) { void this.unfoldTapestry(post); return true }
     // An unfolded file keeps the keys typed in it; its own are ←, →, ↑, ↓ and Escape.
     if (active?.closest('.uf[data-unfolded]')) return false
-    if (event.key === 'Escape' && this.overDrawer()) { this.setRail(true); return true }
-    if (event.key === '/' && this.jump) { this.setRail(false); this.jump.focus({ preventScroll: true }); return true }
+    if (event.key === 'Escape' && this.overDrawer()) { this.moveRail(true); return true }
+    if (event.key === '/' && this.jump) { this.moveRail(false); this.jump.focus({ preventScroll: true }); return true }
     if (event.key === 'j') { this.step(1); return true }
     if (event.key === 'k') { this.step(-1); return true }
-    if (event.key === '[') { this.setRail(this.railShown()); return true }
+    if (event.key === '[') { this.moveRail(this.railShown()); return true }
     if (event.key === 'Enter' && !active?.closest('button, a, input') && this.channel) { this.dock?.focus(); return true }
     // e clears the line in focus, as its ✓ does.
     const check = event.key === 'e' ? active?.closest('.kbn-ch-item')?.querySelector<HTMLButtonElement>('.kbn-ch-clear:not(:disabled)') : null

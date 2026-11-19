@@ -196,8 +196,9 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install headless Chromium
-        run: npx playwright-core install --with-deps chromium
+      # WebKit for the journeys that must hold in Safari's engine.
+      - name: Install headless Chromium and WebKit
+        run: npx playwright-core install --with-deps chromium webkit
 
       - name: Run the browser journeys
         run: npm run e2e

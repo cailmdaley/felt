@@ -29,26 +29,28 @@
 .kbn-channels button:focus-visible { outline: 1px solid var(--kbn-you); outline-offset: 1px; }
 
 .kbn-ch-layout {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(150px, 210px) minmax(0, 1fr);
+  grid-template-columns: 210px minmax(0, 1fr);
 }
-.kbn-ch-layout[data-rail-hidden] { grid-template-columns: minmax(0, 1fr); }
-.kbn-ch-layout[data-rail-hidden] .kbn-ch-rail { display: none; }
-/* Narrow, the rail is a drawer drawn in over the stream from the left, ending where the console begins; the stream keeps its width. */
-.kbn-ch-layout[data-drawer] { position: relative; }
-.kbn-ch-layout[data-drawer] { grid-template-columns: minmax(0, 1fr); }
-.kbn-ch-layout[data-drawer] .kbn-ch-rail {
-  display: flex; position: absolute; z-index: 3; top: 0; left: 0; bottom: var(--kbn-ch-console, 0px);
-  width: min(260px, 85%); padding-left: 10px;
+.kbn-ch-layout:is([data-rail-hidden], [data-drawer]) { grid-template-columns: minmax(0, 1fr); }
+.kbn-ch-layout[data-rail-hidden]:not([data-rail-moving]) .kbn-ch-rail { display: none; }
+/* The rail drawn over the stream: narrow, a drawer from the left ending where the console begins, the stream keeping
+   its width; a put-away column on its way back, pushing the stream as it comes. */
+.kbn-ch-layout[data-rail-moving][data-rail-hidden]:not([data-drawer]) .kbn-ch-rail {
+  position: absolute; z-index: 3; top: 0; left: 0; bottom: 0; width: 210px; box-sizing: border-box;
   background: var(--kbn-paper);
-  box-shadow: 6px 0 18px color-mix(in srgb, var(--kbn-ink) 14%, transparent);
-  transform: translateX(-105%); visibility: hidden;
-  transition: transform 180ms ease, visibility 0s linear 180ms;
 }
-.kbn-ch-layout[data-drawer]:not([data-rail-hidden]) .kbn-ch-rail { transform: none; visibility: visible; transition: transform 180ms ease; }
-@media (prefers-reduced-motion: reduce) { .kbn-ch-layout[data-drawer] .kbn-ch-rail, .kbn-ch-layout[data-drawer]:not([data-rail-hidden]) .kbn-ch-rail { transition: none; } }
+.kbn-ch-layout[data-drawer] .kbn-ch-rail {
+  position: absolute; z-index: 3; top: 0; left: 0; bottom: var(--kbn-ch-console, 0px); width: min(260px, 85%); padding-left: 10px;
+  background: var(--kbn-paper); box-shadow: 6px 0 18px color-mix(in srgb, var(--kbn-ink) 14%, transparent);
+}
+/* Moving, the rail follows the finger and the stream moves with it (railMotion.ts); what leaves the layout is clipped. */
+.kbn-ch-layout[data-rail-moving] { overflow: clip; }
+.kbn-ch-layout[data-rail-moving] .kbn-ch-rail { transform: translateX(var(--kbn-ch-rail-x, 0px)); will-change: transform; }
+.kbn-ch-layout[data-rail-moving] > .kbn-ch { transform: translateX(var(--kbn-ch-stream-x, 0px)); will-change: transform; }
 
 /* The rail: Jump to, then the channels, the chaired ones above the lone constitutions. */
 .kbn-ch-rail {
@@ -192,8 +194,13 @@
   .kbn-channels { padding-inline: 0; }
   .kbn-ch-rail-toggle { display: none; }
   .kbn-ch-layout, .kbn-ch-layout[data-rail-hidden] { grid-template-columns: minmax(0, 1fr); }
-  .kbn-ch-layout:not([data-rail-hidden]) > :not(.kbn-ch-rail) { display: none; }
+  .kbn-ch-layout:not([data-rail-hidden], [data-rail-moving]) > :not(.kbn-ch-rail) { display: none; }
   .kbn-ch-rail { padding: 12px 16px; border-right: 0; }
+  /* Moving, the rail is a sheet over the channel it leaves or comes from. */
+  .kbn-ch-layout[data-rail-moving] .kbn-ch-rail {
+    position: absolute; z-index: 3; inset: 0; width: auto; background: var(--kbn-paper);
+    box-shadow: 6px 0 18px color-mix(in srgb, var(--kbn-ink) 14%, transparent);
+  }
   .kbn-ch-pick { padding: 9px 10px; font-size: var(--type-prose); }
   .kbn-ch-back { display: inline-grid; margin-left: -6px; }
   .kbn-ch-head { padding: 6px 10px 6px 16px; }
