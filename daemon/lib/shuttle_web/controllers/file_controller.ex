@@ -132,7 +132,8 @@ defmodule ShuttleWeb.FileController do
   end
 
   defp serve_framed(conn, path, origin) do
-    with {:ok, runtime} <- File.read(Path.join(ShuttleWeb.Assets.dist(), "framed-runtime.js")),
+    with {:ok, runtime} <-
+           Shuttle.FS.read(Path.join(ShuttleWeb.Assets.dist(), "framed-runtime.js")),
          {:ok, body} <- framed_body(path, origin) do
       page = with_framed_runtime(body, runtime)
       etag = weak_etag(page)
