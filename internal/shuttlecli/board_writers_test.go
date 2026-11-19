@@ -190,6 +190,26 @@ func TestBoardMessageClearsAsk(t *testing.T) {
 	}
 }
 
+// The board's own clear answers as "human", which names the human as the
+// human's other lines do.
+func TestBoardAskClearAnsweredByHumanNamesTheHuman(t *testing.T) {
+	env := testEnv(t)
+	env.Set("SHUTTLE_HOST", "host")
+	env.Set("SHUTTLE_HUMAN", "Cail")
+	env.Set("SHUTTLE_EVENTS", "")
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	env.Set("SHUTTLE_EVENTS_FILE", path)
+	dir, st := newStore(t)
+	seedShuttleRole(t, st, "f", felt.StatusActive, map[string]any{"kind": "oneshot", "host": "host", "project_dir": t.TempDir(), "ask": map[string]any{"text": "why?", "at": "2026-10-28T10:00:00Z"}}, nil)
+	if _, stderr, err := executeIn(t, env, dir, "ask", "f", "--clear", "--answered-by", "human"); err != nil {
+		t.Fatalf("ask --clear: %v %s", err, stderr)
+	}
+	records := readBoardRecords(t, path)
+	if len(records) != 1 || records[0].Kind != "answered" || records[0].By == nil || *records[0].By != (boardParty{Label: "Cail"}) {
+		t.Fatalf("%+v", records)
+	}
+}
+
 // A post's address says whose attention it asks for: up to the poster's
 // orchestrator by default, unaddressed at the top level, or --to the human or
 // a fiber. Questions and closes for review go up, or to the human at the top;

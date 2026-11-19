@@ -596,7 +596,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     @behaviour Shuttle.Runner
 
     def cmd("shuttle", ["-C", _store, verb | _] = args, opts)
-        when verb in ["role", "seat", "close"] do
+        when verb in ["role", "seat", "channel", "ask", "close"] do
       send(Shuttle.Env.app(:seat_writer_observer), {:seat_writer, self(), args})
       Shuttle.Runner.Default.cmd("shuttle", args, opts)
     end
@@ -631,7 +631,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     refute_receive {:seat_writer, _, ["-C", _, "close" | _]}, 100
   end
 
-  test "role and seat edits execute in the Poller, serialized with lifecycle writes" do
+  test "role, seat and channel edits and the board's ask-clear execute in the Poller" do
     store = fixture_store!("shuttle-seat-serialized", "tests/hub", "Hub")
     install_fake_cli!()
     Shuttle.Test.Env.put_app_env(:seat_writer_observer, self())
@@ -650,7 +650,10 @@ defmodule ShuttleWeb.LifecycleControllerTest do
            ["editor", "--new", "Office editor"]},
           {"role", %{"clear" => true}, ["--clear"]},
           {"seat", %{}, []},
-          {"seat", %{"clear" => true}, ["--clear"]}
+          {"seat", %{"clear" => true}, ["--clear"]},
+          {"channel", %{"channel" => "Cosmic shear"}, ["Cosmic shear"]},
+          {"channel", %{"channel" => nil}, ["--clear"]},
+          {"channel", %{}, ["--clear"]}
         ] do
       conn =
         post(
@@ -667,6 +670,102 @@ defmodule ShuttleWeb.LifecycleControllerTest do
                ["-C", store, action, "tests/hub"] ++
                  office_args ++ ["--fiber-path", "tests/hub", "--local"]
     end
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/lifecycle",
+        Jason.encode!(%{"action" => "ask-clear", "fiber" => "tests/hub"})
+      )
+
+    assert conn.status == 200
+    assert_receive {:seat_writer, ^poller, args}
+
+    assert args ==
+             ["-C", store, "ask", "tests/hub", "--clear", "--answered-by", "human"] ++
+               ["--fiber-path", "tests/hub"]
+  end
+
+  test "a channel that is neither a string nor null is refused before shelling" do
+    fixture_store!("shuttle-lifecycle-channel-bad", "tests/hub", "Hub")
+    args_file = install_fake_cli!()
+
+    for channel <- [42, true, %{"name" => "x"}] do
+      conn =
+        post(
+          api_conn(),
+          "/api/v1/lifecycle",
+          Jason.encode!(%{"action" => "channel", "fiber" => "tests/hub", "channel" => channel})
+        )
+
+      assert conn.status in 400..499
+      assert conn.resp_body =~ "channel must be a string, or null to clear"
+    end
+
+    refute File.exists?(args_file)
+  end
+
+  # The real CLI writes the channel on a closed constitution and removes it,
+  # leaving the rest of the document as it was; ask-clear removes a question.
+  @tag :tmp_dir
+  test "channel and ask-clear write a closed constitution through the real CLI", %{
+    tmp_dir: tmp
+  } do
+    store = Path.join(tmp, "loom")
+    path = Path.join([store, ".felt", "tests", "hub", "hub.md"])
+    File.mkdir_p!(Path.dirname(path))
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", store)
+    Shuttle.Test.Env.put_env("SHUTTLE_HOST", "test-host")
+    Shuttle.Test.Env.put_env("SHUTTLE_EVENTS", "")
+
+    content =
+      "---\nid: 01ARZ3NDEKTSV4RRFFQ69G5FAX\nname: Hub\nstatus: closed\noutcome: Done.\n" <>
+        "closed_at: 2026-11-01T10:00:00Z\nshuttle:\n  kind: oneshot\n  host: test-host\n" <>
+        "  project_dir: #{tmp}\n  ask:\n    text: which prior?\n    at: 2026-11-01T09:00:00Z\n---\nBody\n"
+
+    File.write!(path, content)
+
+    lifecycle = fn body ->
+      post(api_conn(), "/api/v1/lifecycle", Jason.encode!(Map.put(body, "fiber", "tests/hub")))
+    end
+
+    frontmatter = fn ->
+      {:ok, parsed} =
+        path
+        |> File.read!()
+        |> String.split("---\n", parts: 3)
+        |> Enum.at(1)
+        |> YamlElixir.read_from_string()
+
+      parsed
+    end
+
+    original = frontmatter.()
+
+    conn = lifecycle.(%{"action" => "channel", "channel" => "  Cosmic shear  "})
+    assert conn.status == 200, conn.resp_body
+    assert conn.resp_body =~ ~s(speaks in channel "Cosmic shear")
+
+    assert %{
+             "status" => "closed",
+             "outcome" => "Done.",
+             "shuttle" => %{"channel" => "Cosmic shear"}
+           } =
+             frontmatter.()
+
+    conn = lifecycle.(%{"action" => "channel", "channel" => "two\nlines"})
+    assert conn.status == 422
+    assert conn.resp_body =~ "channel name must be one line"
+
+    conn = lifecycle.(%{"action" => "channel", "channel" => nil})
+    assert conn.status == 200, conn.resp_body
+    assert frontmatter.() == original
+
+    conn = lifecycle.(%{"action" => "ask-clear"})
+    assert conn.status == 200, conn.resp_body
+    assert conn.resp_body == "updated question for 01ARZ3NDEKTSV4RRFFQ69G5FAX\n"
+    refute Map.has_key?(frontmatter.()["shuttle"], "ask")
+    assert %{"status" => "closed", "outcome" => "Done."} = frontmatter.()
   end
 
   test "role without a slug or --clear is refused before shelling" do

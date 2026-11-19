@@ -228,6 +228,7 @@ untouched by any of this.
 | `shuttle roles [--json]` | `felt roles` under Shuttle: list role charters ([where a charter lives](../concepts/roles.md#where-a-charter-lives)), with `slug`, `id` (the charter's fiber id in the shared store), `name`, and `outcome`; JSON is an array (empty as `[]`) |
 | `shuttle role <fiber> <office>[/<person>] [--new "Office name"]` | Set the fiber's top-level `role` and remove any `shuttle.role` from its block; a bare office is stored as `<office>/<person>` when the repository's `git config felt.person` names one. The office needs a charter; `--new` creates a missing one, and `--clear` clears both role and seat. Preserves lifecycle and execution settings |
 | `shuttle seat <fiber>` | Set `shuttle.seat: true`; requires a role. `--clear` removes the seat field. Preserves lifecycle and execution settings |
+| `shuttle channel <fiber> <name>` | Set `shuttle.channel` to `<name>`, trimmed and otherwise as given (one line, not empty): constitutions declaring one name speak in one board channel, and a thread inherits its ancestor's. `--clear` removes the key. Works on a constitution of any status, closed included, and preserves lifecycle, outcome, execution settings and runtime. A remote-owned constitution is changed through its owner daemon |
 
 Older CLIs can duplicate UID-less documents and delete the sender's copy when resuming across store views; cross-host documents need an intrinsic `id:` UID.
 

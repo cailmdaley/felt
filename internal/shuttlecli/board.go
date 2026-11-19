@@ -92,6 +92,9 @@ func (a *app) boardWorkerParty() *boardParty {
 }
 
 func (a *app) boardMessageActor(from string) *boardParty {
+	if strings.EqualFold(strings.TrimSpace(from), "human") {
+		return a.humanParty()
+	}
 	by := &boardParty{}
 	if _, err := messaging.ParseAddress(from); err != nil {
 		by.Label = from

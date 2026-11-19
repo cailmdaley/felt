@@ -8,7 +8,9 @@ defmodule ShuttleWeb.LifecycleController do
   identical `/lifecycle` (origin stripped) and relayed verbatim. The local
   branch delegates to Shuttle CLI verbs, so the validated offline frontmatter
   writer remains the single implementation of
-  install/pause/rest/resume/repeat/close/reopen/set-model/set-agent/role/seat/set-outcome/uninstall.
+  install/pause/rest/resume/repeat/close/reopen/set-model/set-agent/role/seat/channel/set-outcome/uninstall.
+  `ask-clear` withdraws a worker's question as the human's, through
+  `shuttle ask --clear --answered-by human`.
 
   `install`/`repeat` are CREATE verbs — they refuse a fiber that already
   carries a shuttle block. Changing the SHAPE of an existing block (its kind,
@@ -32,7 +34,7 @@ defmodule ShuttleWeb.LifecycleController do
 
   alias Shuttle.{CarriedDocument, FeltStores, LifecycleService, OriginRouter, RemoteFiberRegistry}
 
-  @allowed ~w(install pause rest resume repeat reshape close reopen set-model set-agent role seat set-outcome uninstall)
+  @allowed ~w(install pause rest resume repeat reshape close reopen set-model set-agent role seat channel ask-clear set-outcome uninstall)
 
   @kinds ~w(oneshot standing)
 
@@ -147,9 +149,16 @@ defmodule ShuttleWeb.LifecycleController do
     |> clean_result()
   end
 
-  defp execute(action, %{"fiber" => fiber} = params) when action in ["role", "seat", "pause"] do
+  defp execute("ask-clear", %{"fiber" => fiber} = params) do
+    :clear_ask
+    |> LifecycleService.transition(fiber, ["--answered-by", "human"], params["fiber_path"])
+    |> clean_result()
+  end
+
+  defp execute(action, %{"fiber" => fiber} = params)
+       when action in ["role", "seat", "channel", "pause"] do
     with {:ok, [^action, ^fiber | args]} <- args_for(action, params) do
-      verb = %{"role" => :role, "seat" => :seat, "pause" => :pause}[action]
+      verb = %{"role" => :role, "seat" => :seat, "channel" => :channel, "pause" => :pause}[action]
       verb |> LifecycleService.transition(fiber, args, params["fiber_path"]) |> clean_result()
     end
   end
@@ -293,6 +302,19 @@ defmodule ShuttleWeb.LifecycleController do
     do: {:ok, ["seat", fiber, "--clear"]}
 
   defp args_for("seat", %{"fiber" => fiber}), do: {:ok, ["seat", fiber]}
+
+  # A string names the channel, which the CLI trims and validates; null or an
+  # absent key clears it.
+  defp args_for("channel", %{"fiber" => fiber, "channel" => channel}) when is_binary(channel),
+    do: {:ok, ["channel", fiber, channel]}
+
+  defp args_for("channel", %{"fiber" => fiber, "channel" => nil}),
+    do: {:ok, ["channel", fiber, "--clear"]}
+
+  defp args_for("channel", %{"channel" => _}),
+    do: {:error, "channel must be a string, or null to clear"}
+
+  defp args_for("channel", %{"fiber" => fiber}), do: {:ok, ["channel", fiber, "--clear"]}
 
   # The outcome string round-trips as a single argv element, so multi-line
   # values (block scalars) survive without stdin piping. set-outcome refuses a

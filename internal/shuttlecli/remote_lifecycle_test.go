@@ -456,6 +456,16 @@ func TestRemoteLifecycleVerbsUseBoardOwnerRoute(t *testing.T) {
 				t.Fatalf("seat --clear payload = %#v", body)
 			}
 		}},
+		{"channel", felt.StatusClosed, remoteShuttleBlock(project), []string{"channel", "channel", "Cosmic shear"}, "channel", func(t *testing.T, body map[string]any) {
+			if body["channel"] != "Cosmic shear" {
+				t.Fatalf("channel payload = %#v", body)
+			}
+		}},
+		{"unchannel", felt.StatusClosed, remoteShuttleBlock(project), []string{"channel", "unchannel", "--clear"}, "channel", func(t *testing.T, body map[string]any) {
+			if _, ok := body["channel"]; ok {
+				t.Fatalf("channel --clear payload = %#v", body)
+			}
+		}},
 		{"uninstall", felt.StatusActive, remoteShuttleBlock(project), []string{"uninstall", "uninstall"}, "uninstall", nil},
 	} {
 		t.Run(tc.id, func(t *testing.T) {
@@ -618,7 +628,7 @@ func TestShuttleRemoteLifecycleLocalRefusesWithoutRouting(t *testing.T) {
 
 	for _, verb := range [][]string{
 		{"pause"}, {"rest"}, {"resume"}, {"close"}, {"reopen"}, {"set-outcome", "--outcome", "x"},
-		{"set-model", "claude-opus"}, {"set-agent", "claude-opus"}, {"role", "--clear"}, {"seat", "--clear"}, {"reshape", "oneshot"}, {"uninstall"},
+		{"set-model", "claude-opus"}, {"set-agent", "claude-opus"}, {"role", "--clear"}, {"seat", "--clear"}, {"channel", "--clear"}, {"reshape", "oneshot"}, {"uninstall"},
 	} {
 		argv := append([]string{verb[0], "work/task"}, verb[1:]...)
 		argv = append(argv, "--local")

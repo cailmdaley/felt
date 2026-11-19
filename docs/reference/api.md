@@ -166,8 +166,8 @@ An unavailable owner fails the request, and a duplicate document is refused rath
 `POST /lifecycle` takes `{fiber, action, origin?}` plus the action's own
 fields, and runs the matching `shuttle <action>` on the owning host:
 `install`, `repeat`, `reshape`, `pause`, `rest`, `resume`, `close`, `reopen`,
-`set-model`, `set-agent`, `role`, `seat`, `set-outcome` or
-`uninstall`.
+`set-model`, `set-agent`, `role`, `seat`, `channel`, `set-outcome` or
+`uninstall`; `ask-clear` runs `shuttle ask <fiber> --clear`.
 Lifecycle requests can carry `fiber_path`, an exact namespace path verified against the requested UID before a full UID search.
 A stale or mismatched hint falls back to UID resolution; it never changes the requested identity. Hint read errors and timeouts are resolution failures, not stale hints.
 The writer reads the resolved address directly, without convenient lookup or remote fallback. UID-less documents retain exact path addressing even if the file disappears between resolution and the write.
@@ -177,7 +177,9 @@ The `role` action takes `role: <role-slug>`, or `clear: true` to remove both rol
 An optional `new_name: "Office name"` passes `--new "Office name"` to the CLI to create a missing charter in the shared namespace.
 Existing charters are preserved, and without `new_name` the charter must already exist.
 The `seat` action sets `shuttle.seat: true` and requires an assigned role; `clear: true` removes the seat field.
-`resume`, `role`, `seat` and `rest` run the Shuttle CLI's write verb (`shuttle <verb> <fiber> --local`) inside the
+The `channel` action takes `channel: "<name>"` to set `shuttle.channel` (trimmed; an empty or multi-line name is a 422 refusal), or `channel: null` or no `channel` key to remove it; any other value is 400. It accepts a constitution of any status, closed included, and changes nothing else in the document.
+The `ask-clear` action withdraws the worker's outstanding question (`shuttle.ask`) as the human's: it runs `shuttle ask <fiber> --clear --answered-by human`, whose family-board row names the human. A fiber with no question succeeds and records no row.
+`resume`, `role`, `seat`, `channel`, `ask-clear` and `rest` run the Shuttle CLI's write verb (`shuttle <verb> <fiber> --local`; `ask` without `--local`) inside the
 owning daemon's Poller, serialized with its state changes — a rest then stops
 any live worker through its backend — which then refreshes
 that fiber's document cache; a poll read in flight sees the old document or

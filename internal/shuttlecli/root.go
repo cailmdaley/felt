@@ -230,6 +230,7 @@ func (a *app) rootCmd() *cobra.Command {
 	for _, command := range []*cobra.Command{
 		a.shuttleAgentsCmd(),
 		a.roleCmd(),
+		a.channelCmd(),
 		feltcli.NewRolesCmd(a.env, a.shuttleViewOptions()),
 		a.askCmd(),
 		a.boardCmd(),

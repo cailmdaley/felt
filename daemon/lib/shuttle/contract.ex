@@ -22,7 +22,7 @@ defmodule Shuttle.Contract do
   require Logger
 
   # Matches internal/shuttlecli/contract.go's ShuttleContractLevel.
-  @expected_level 49
+  @expected_level 50
 
   # The daemon-shelled surface each recent level introduced. A skew reason
   # names every surface above the CLI's level, so an operator sees which verb
@@ -76,7 +76,8 @@ defmodule Shuttle.Contract do
     48 =>
       "message --local sending a Claude session's ask straight to its native socket " <>
         "(this daemon shells no claude-mail-recover)",
-    49 => "felt add --uid (a fiber carried to its owner keeps its identity and slug)"
+    49 => "felt add --uid (a fiber carried to its owner keeps its identity and slug)",
+    50 => "channel (a constitution's board channel, set or cleared)"
   }
 
   @doc "The daemon's expected `shuttle contract` level."
