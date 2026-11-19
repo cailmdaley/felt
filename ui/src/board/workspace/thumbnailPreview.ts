@@ -8,6 +8,13 @@ const PLACEHOLDER = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg
 const mediaPlaceholder = PLACEHOLDER.replaceAll('"', '%22')
 
 const STYLE_LIMIT = PREVIEW_LIMIT - 32
+/**
+ * How many images and embedded pages a preview loads. A preview is drawn
+ * without scripts, where the browser loads every image at once whatever its
+ * `loading`, and shows only its first screen: a report's forty figures would
+ * all be fetched and decoded for the two that show.
+ */
+export const PREVIEW_MEDIA = 4
 
 function attribute(tag: string, name: string): string | undefined {
   const match = new RegExp(`\\s${name}\\s*=\\s*("[^"]*"|'[^']*'|[^\\s>]+)`, 'i').exec(tag)
@@ -75,7 +82,20 @@ export function buildThumbnailPreview(source: string, keepMedia = false): string
   // A token the cut split is dropped, a whole one at the end kept; a kept image inside a kept SVG holds its own token: restore until none is left.
   let preview = cut(html).replace(/(?<!\u0000\d+)\u0000\d*$/, ''), before = ''
   while (preview !== before) { before = preview; preview = preview.replace(TOKEN, (_, index: string) => kept[Number(index)]) }
-  return preview
+  return loadFirstMedia(preview)
+}
+
+/** Past the first {@link PREVIEW_MEDIA}, an image draws the placeholder and an embedded page, video or source loads nothing. */
+function loadFirstMedia(html: string): string {
+  let seen = 0
+  return html.replace(/<(img|source|video|audio|iframe|frame|object|embed|input)\b[^>]*>/gi, (tag, name: string) => {
+    if (name.toLowerCase() === 'input' && attribute(tag, 'type')?.toLowerCase() !== 'image') return tag
+    if (seen++ < PREVIEW_MEDIA) return tag
+    const blank = /^(img|input)$/i.test(name) ? mediaPlaceholder : 'about:blank'
+    return tag
+      .replace(/\s(srcset|imagesrcset)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+      .replace(/\s(src|data|poster)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, (_, attr: string) => ` ${attr}="${attr.toLowerCase() === 'poster' ? mediaPlaceholder : blank}"`)
+  })
 }
 
 /** Keep the head's styles and the first screen's structure, not the rest of a report. */

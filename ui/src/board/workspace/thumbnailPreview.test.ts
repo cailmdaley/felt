@@ -90,3 +90,13 @@ it('restores a large image kept inside a large SVG, leaving no token behind', ()
   const cutThrough = buildThumbnailPreview(`<body>${'x'.repeat(PREVIEW_LIMIT - 2)}${svg}`, true)
   expect([cutThrough.includes('\u0000'), cutThrough.includes('<svg')]).toStrictEqual([false, false])
 })
+
+it('loads only the first few images and embedded pages, past which an image draws the placeholder', () => {
+  const figures = Array.from({ length: 6 }, (_, i) => `<figure><img src="f${i}.svg" srcset="f${i}@2x.svg 2x" loading="lazy"></figure>`).join('')
+  const preview = buildThumbnailPreview(`<body>${figures}<iframe src="deck.html"></iframe><video src="v.mp4" poster="p.png"></video><input type="text" src="x"></body>`)
+  expect(preview.match(/src="f\d\.svg"/g)).toEqual(['src="f0.svg"', 'src="f1.svg"', 'src="f2.svg"', 'src="f3.svg"'])
+  expect(preview).not.toMatch(/f[45]|deck\.html|v\.mp4|p\.png/)
+  expect(preview).toContain('<iframe src="about:blank">')
+  expect(preview).toContain('<input type="text" src="x">')
+  expect(preview.match(/<img\b/g)).toHaveLength(6)
+})
