@@ -148,7 +148,7 @@ class ThumbnailBudget {
     for (const thumb of all) {
       if (priority(thumb) === 0 && (thumb.state === 'live' || thumb.state === 'loading')) thumb.unmount()
     }
-    const candidates = all.filter(t => t.state === 'idle' && t.file && priority(t) > 0)
+    const candidates = all.filter(t => t.state === 'idle' && t.file && t.measured && priority(t) > 0)
       .sort((a, b) => priority(b) - priority(a) || distance(a) - distance(b) || a.key.localeCompare(b.key))
     for (const candidate of candidates) {
       const population = all.filter(t => t.state === 'live' || t.state === 'loading')
@@ -190,6 +190,8 @@ export class Thumbnail {
   private generation = 0
   private boxWidth = 176
   private boxHeight = 116
+  /** Whether the box's size is known: a body mounts only once it can be drawn at its final scale. */
+  measured = typeof ResizeObserver === 'undefined'
   private scaled?: { content: HTMLElement; width: number; height: number }
   private readonly opts: ThumbnailOptions
   private readonly face: HTMLElement
@@ -262,6 +264,7 @@ export class Thumbnail {
     this.el.classList.remove('ws-thumbnail-ready')
   }
   resize(width: number, height: number): void {
+    this.measured = true
     this.boxWidth = width || 176
     this.boxHeight = height || 116
   }
@@ -285,6 +288,8 @@ export class Thumbnail {
       if (this.generation !== generation || this.state !== 'loading') return
       clearTimeout(this.timer); this.timer = undefined
       this.state = ok ? 'live' : 'failed'
+      // A text body's pre arrives with its ready signal; it is drawn scaled from its first frame.
+      if (ok) this.scale()
       this.el.classList.toggle('ws-thumbnail-ready', ok)
       if (!ok) {
         disposeFileViewer(this.body ?? null); this.body?.remove(); this.body = undefined

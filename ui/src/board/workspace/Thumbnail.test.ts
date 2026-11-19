@@ -3,9 +3,11 @@ import { afterEach, expect, it, vi } from 'vitest'
 const renderer = vi.hoisted(() => ({ finishes: [] as Array<() => void>, fails: [] as Array<() => void> }))
 vi.mock('../FileViewerPanel.js', () => ({
   readThumbnailMetadata: vi.fn(async () => {}),
-  buildFileViewer: vi.fn((_base, _path, _owner, _frame, _scroll, options) => {
-    const body = document.createElement('div'); body.append(document.createElement('iframe'))
-    renderer.finishes.push(() => options.onState({ status: 'ready' }))
+  buildFileViewer: vi.fn((_base, path: string, _owner, _frame, _scroll, options) => {
+    // A text body's pre arrives with its ready signal, as FileViewerPanel appends it.
+    const text = path.endsWith('.txt')
+    const body = document.createElement('div'); if (!text) body.append(document.createElement('iframe'))
+    renderer.finishes.push(() => { if (text) body.append(document.createElement('pre')); options.onState({ status: 'ready' }) })
     renderer.fails.push(() => options.onState({ status: 'error', error: new Error('Thumbnail unavailable'), hasContent: false }))
     return body
   }),
@@ -16,6 +18,8 @@ import { docKey } from './documents.js'
 import { Thumbnail, pumpThumbnails } from './Thumbnail.js'
 import { RESOURCE_FRESH_MS } from '../documentResources.js'
 let thumbs: Thumbnail[] = []
+/** A thumbnail whose box the budget's ResizeObserver has measured, as it is by the first frame it is laid out. */
+const measured = (opts: ConstructorParameters<typeof Thumbnail>[0]): Thumbnail => { const thumb = new Thumbnail(opts); thumb.resize(176, 116); return thumb }
 afterEach(() => { for (const thumb of thumbs) thumb.dispose(); thumbs = []; renderer.finishes = []; renderer.fails = []; vi.unstubAllGlobals(); vi.useRealTimers() })
 it.each(['report.html', 'index.html'])('omits the generic %s fallback title from its face', basename => {
   const path = `/reports/${basename}`
@@ -43,7 +47,7 @@ it('shares four loading and sixteen live slots across overview and tab previews,
   let overviewVisible = true
   for (let i = 0; i < 32; i++) {
     const tab = i >= 20
-    const thumb = new Thumbnail({ key: String(i), shuttleBase: '', file: { fullPath: `/${i}.html`, owner: 'host', basename: `${i}.html` }, fallback: '',
+    const thumb = measured({ key: String(i), shuttleBase: '', file: { fullPath: `/${i}.html`, owner: 'host', basename: `${i}.html` }, fallback: '',
       priority: () => tab ? 0 : overviewVisible ? 2 : 0, distance: () => i,
     })
     thumbs.push(thumb); document.body.append(thumb.el)
@@ -58,7 +62,7 @@ it('shares four loading and sixteen live slots across overview and tab previews,
   const alive = thumbs.filter(t => t.body)
   pumpThumbnails(); expect(thumbs.filter(t => t.body)).toEqual(alive)
   overviewVisible = false
-  const tab = new Thumbnail({ key: 'selected-tab', shuttleBase: '', file: { fullPath: '/selected.html', owner: 'host', basename: 'selected.html' }, fallback: '', priority: () => 3, distance: () => 0 })
+  const tab = measured({ key: 'selected-tab', shuttleBase: '', file: { fullPath: '/selected.html', owner: 'host', basename: 'selected.html' }, fallback: '', priority: () => 3, distance: () => 0 })
   thumbs.push(tab); document.body.append(tab.el)
   pumpThumbnails()
   expect(tab.state).toBe('loading')
@@ -69,7 +73,7 @@ it('unmounts live and loading thumbnails outside the loading ring, including hid
   vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1)); vi.stubGlobal('cancelAnimationFrame', vi.fn())
   let priority = 2
   for (let i = 0; i < 2; i++) {
-    const thumb = new Thumbnail({ key: `offscreen-${i}`, shuttleBase: '', file: { fullPath: `/${i}.html`, owner: 'host', basename: `${i}.html` }, fallback: '', priority: () => priority, distance: () => 0 })
+    const thumb = measured({ key: `offscreen-${i}`, shuttleBase: '', file: { fullPath: `/${i}.html`, owner: 'host', basename: `${i}.html` }, fallback: '', priority: () => priority, distance: () => 0 })
     thumbs.push(thumb)
   }
   pumpThumbnails(); renderer.finishes[0]()
@@ -83,7 +87,7 @@ it('unmounts live and loading thumbnails outside the loading ring, including hid
 
 it('scales from observed sizes without layout reads or unchanged style writes', () => {
   vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1)); vi.stubGlobal('cancelAnimationFrame', vi.fn())
-  const thumb = new Thumbnail({ key: 'scale', shuttleBase: '', file: { fullPath: '/scale.html', owner: 'host', basename: 'scale.html' }, fallback: '', priority: () => 2, distance: () => 0 })
+  const thumb = measured({ key: 'scale', shuttleBase: '', file: { fullPath: '/scale.html', owner: 'host', basename: 'scale.html' }, fallback: '', priority: () => 2, distance: () => 0 })
   thumbs.push(thumb)
   const width = vi.spyOn(thumb.el, 'clientWidth', 'get'), height = vi.spyOn(thumb.el, 'clientHeight', 'get')
   pumpThumbnails()
@@ -99,10 +103,31 @@ it('scales from observed sizes without layout reads or unchanged style writes', 
   expect(width).not.toHaveBeenCalled(); expect(height).not.toHaveBeenCalled()
 })
 
+// Regression: the band's layout-shift journey failed on CI when it measured a text pre in the frame between its arrival and the next pump.
+it('loads no body until its box has been measured, so it is never drawn at a guessed scale', () => {
+  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1)); vi.stubGlobal('cancelAnimationFrame', vi.fn())
+  const thumb = new Thumbnail({ key: 'unmeasured', shuttleBase: '', file: { fullPath: '/u.html', owner: 'host', basename: 'u.html' }, fallback: '', priority: () => 2, distance: () => 0 })
+  thumbs.push(thumb)
+  pumpThumbnails()
+  expect(thumb.state).toBe('idle')
+  thumb.resize(380, 240); pumpThumbnails()
+  expect(thumb.state).toBe('loading')
+})
+
+it('draws a text body scaled from the moment it is ready, before any later pump', () => {
+  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1)); vi.stubGlobal('cancelAnimationFrame', vi.fn())
+  const thumb = measured({ key: 'notes', shuttleBase: '', file: { fullPath: '/notes.txt', owner: 'host', basename: 'notes.txt' }, fallback: '', priority: () => 2, distance: () => 0 })
+  thumbs.push(thumb); thumb.resize(190, 120)
+  pumpThumbnails()
+  renderer.finishes.splice(0).forEach(f => f())
+  const pre = thumb.body!.querySelector('pre')!
+  expect([thumb.state, pre.style.width, pre.style.transform]).toEqual(['live', '760px', 'scale(0.25)'])
+})
+
 it('tries a failed thumbnail again once the miss it saw has expired, so a report written later appears', () => {
   vi.useFakeTimers()
   vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1)); vi.stubGlobal('cancelAnimationFrame', vi.fn())
-  const thumb = new Thumbnail({ key: 'late', shuttleBase: '', file: { fullPath: '/late/report.html', owner: 'host', basename: 'report.html' }, fallback: '', priority: () => 2, distance: () => 0 })
+  const thumb = measured({ key: 'late', shuttleBase: '', file: { fullPath: '/late/report.html', owner: 'host', basename: 'report.html' }, fallback: '', priority: () => 2, distance: () => 0 })
   thumbs.push(thumb); document.body.append(thumb.el)
   pumpThumbnails()
   renderer.fails.splice(0).forEach(fail => fail())
@@ -126,7 +151,7 @@ it('loads what is on screen first, keeps a live one through a short scroll away,
   let scrolled = 0
   const at = (i: number): DOMRect => new DOMRect(0, i * 300 - scrolled, 480, 270)
   for (let i = 0; i < 12; i++) {
-    const thumb: Thumbnail = new Thumbnail({ key: `s${i}`, shuttleBase: '', file: { fullPath: `/s${i}.html`, owner: 'host', basename: `s${i}.html` }, fallback: '',
+    const thumb: Thumbnail = measured({ key: `s${i}`, shuttleBase: '', file: { fullPath: `/s${i}.html`, owner: 'host', basename: `s${i}.html` }, fallback: '',
       priority: () => thumb.screenPriority(), distance: () => thumb.gap() })
     vi.spyOn(thumb.el, 'getClientRects').mockReturnValue([at(i)] as unknown as DOMRectList)
     vi.spyOn(thumb.el, 'getBoundingClientRect').mockImplementation(() => at(i))

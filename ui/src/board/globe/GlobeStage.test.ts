@@ -48,7 +48,13 @@ describe('moving on the globe', () => {
     frames = []
     vi.stubGlobal('requestAnimationFrame', (frame: FrameRequestCallback) => frames.push(frame))
     vi.stubGlobal('cancelAnimationFrame', noop)
-    vi.stubGlobal('ResizeObserver', class { observe = noop; unobserve = noop; disconnect = noop })
+    // Like a browser's, it reports each box once after it is observed.
+    vi.stubGlobal('ResizeObserver', class {
+      private readonly report: ResizeObserverCallback
+      constructor(report: ResizeObserverCallback) { this.report = report }
+      observe(target: Element): void { queueMicrotask(() => this.report([{ target, contentRect: target.getBoundingClientRect() } as ResizeObserverEntry], this as unknown as ResizeObserver)) }
+      unobserve = noop; disconnect = noop
+    })
     vi.stubGlobal('Path2D', class {})
     vi.stubGlobal('PointerEvent', class extends MouseEvent {
       pointerId: number; pointerType: string
@@ -143,7 +149,7 @@ describe('moving on the globe', () => {
     settle()
     expect(named()).toContain('science/hub/old')
   })
-  it('shows a sent plot on its tile once the tile is wide enough to read it, and names it beneath', () => {
+  it('shows a sent plot on its tile once the tile is wide enough to read it, and names it beneath', async () => {
     const shown = (): HTMLElement[] => [...stage.el.querySelectorAll<HTMLElement>('.globe-preview:not([hidden])')]
     expect(shown()).toHaveLength(0)
     stage.follow('life/errand', ORIGIN)
@@ -151,6 +157,7 @@ describe('moving on the globe', () => {
     const name = stage.el.querySelector<HTMLElement>('.globe-name[data-kind="file"]')!
     const [, x, y] = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(name.style.transform)!.map(Number)
     for (let n = 0; n < 12 && !shown().length; n++) stage.el.dispatchEvent(new WheelEvent('wheel', { deltaY: -60, clientX: x, clientY: y, bubbles: true, cancelable: true }))
+    await Promise.resolve()
     settle()
     expect(shown()).toHaveLength(1)
     expect(shown()[0].querySelector('img')?.getAttribute('src')).toContain('plot.png')
