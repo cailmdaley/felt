@@ -213,10 +213,15 @@ export function saidHits<C>(records: readonly BoardRecord[], cardOf: (uid: strin
     const card = record.fiber ? cardOf(record.fiber) : undefined
     if (card === undefined) continue
     seen.add(record.id)
-    hits.push({ record, card, excerpt: excerpt(record.text!, needle) })
+    hits.push({ record, card, excerpt: excerpt(plain(record.text!), needle, SAID_ROOM) })
   }
   return hits.sort((a, b) => b.record.timestamp - a.record.timestamp || a.record.id.localeCompare(b.record.id))
 }
+
+/** About two lines of a list row: a said line's excerpt is cut to this, so its match stays in sight. */
+const SAID_ROOM = 90
+/** Markdown's emphasis and code marks taken out, for a line read as plain words. */
+export const plain = (text: string): string => text.replace(/\*\*|__|`/g, '')
 
 /** A sent document as the matchers read it. */
 interface Document { card: { name: string }; receipt: { key: string; basename: string; fullPath: string } }

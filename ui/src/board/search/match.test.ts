@@ -225,6 +225,14 @@ describe('saidHits', () => {
     expect(saidHits(records, uid => cards.get(uid), 'mask').map(hit => [hit.record.id, hit.card])).toEqual([['b', 'second'], ['c', 'first'], ['a', 'first']])
   })
 
+  it('excerpts a long line as plain words about its match', () => {
+    const text = `${'Masking clusters at **5σ** keeps 94% of the area and leaves a 0.3σ residual in the 1-halo term; '.repeat(2)}which threshold?`
+    const [hit] = saidHits([record('long', { text })], uid => cards.get(uid), 'threshold')
+    expect(hit.excerpt).toContain('threshold')
+    expect(hit.excerpt).not.toContain('**')
+    expect(hit.excerpt.length).toBeLessThanOrEqual(92)
+  })
+
   it('leaves out what a channel does not draw: a line to another thread, a handoff, and a fiber the board does not hold', () => {
     const records = [
       record('to-thread', { text: 'mask', to: { fiber: 'f2' } }),
