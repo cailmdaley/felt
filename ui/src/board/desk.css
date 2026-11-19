@@ -26,11 +26,12 @@
 /* Every member that waits, one line each: its slug, then what it wants. */
 .kbn-family-waits { display: flex; flex-direction: column; margin-left: 20px; }
 .kbn-family-wait { min-height: var(--kbn-desk-row); padding: 0 2px; border-radius: 2px; cursor: pointer; }
-/* A family drawn as its top-level's line alone: the row stands where a head would. */
-.kbn-family > .thread-row { min-height: var(--kbn-desk-row); align-items: center; gap: 6px; }
-.kbn-family > .thread-row > .thread-row-slug { font-weight: 600; color: var(--kbn-ink); }
+/* A waiting top-level's own line is its family's head: the row stands where a head would, its working count after its age. */
+.kbn-family-top { min-height: var(--kbn-desk-row); align-items: center; gap: 6px; }
+.kbn-family-top > .thread-row-slug { font-weight: 600; color: var(--kbn-ink); }
+.kbn-family-top > .kbn-family-meta { flex: none; margin-left: 4px; font-family: var(--font-mono); }
 .kbn-family-wait:hover { background: color-mix(in srgb, var(--kbn-ink) 5%, transparent); }
-:is(.kbn-family-wait, .kbn-family > .thread-row) > .kbn-ch-clear { flex: none; align-self: center; margin-left: 6px; }
+:is(.kbn-family-wait, .kbn-family-top) > .kbn-ch-clear { flex: none; align-self: center; margin-left: 6px; }
 .kbn-family.kbn-key-selected, .kbn-family-wait.kbn-key-selected {
   background: var(--kbn-paper-bright);
   box-shadow: inset 2px 0 0 color-mix(in srgb, var(--kbn-ink) 45%, transparent);

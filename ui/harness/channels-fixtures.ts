@@ -155,7 +155,7 @@ export function addChannelsFixtures(example: WorkspaceExample, now: number): Cha
 export function addDeskFixtures(example: WorkspaceExample, now: number): ChannelsFixture {
   const rows: Row[] = [
     ...ROWS,
-    { id: 'survey', name: 'Survey pipeline', state: 'working', minutes: 3 },
+    { id: 'survey', name: 'Survey pipeline', state: 'idle', minutes: 3, ask: 'The shapes and photo-z branches both touch the catalogue schema; merge shapes first, or hold both until the run ends?' },
     { id: 'survey/catalogue', name: 'Catalogue', parent: 'survey', state: 'working', minutes: 5 },
     { id: 'survey/catalogue/shapes', name: 'Shape measurement', parent: 'survey/catalogue', state: 'working', minutes: 8 },
     { id: 'survey/catalogue/shapes/psf', name: 'PSF model', parent: 'survey/catalogue/shapes', minutes: 14, ask: 'The second-moment PSF leaves a 0.4% residual at the chip edges; the pixel model removes it but doubles the run time. Which one?' },

@@ -130,12 +130,12 @@ export class KanbanSurfaceRenderer {
   }
 
   /**
-   * One family: its top-level's dot and slug, with how many of its members
-   * work, or a quiet one's faint word; then every member that waits on the
-   * human as a thread row, a post's ✓ beside it. A family whose only line
-   * would be its top-level's own, with nothing working, is that line alone.
-   * A line opens that member's view; anywhere else on the card opens the
-   * top-level's.
+   * One family, headed by its top-level: while the top-level waits, its own
+   * thread row (what it wants, how long ago, a post's ✓, its undo window);
+   * otherwise its dot and slug, or a quiet one's faint word. Beside either,
+   * how many of its members work. Under the head, every other member that
+   * waits on the human, one line each. A line opens that member's view;
+   * anywhere else on the card opens the top-level's.
    */
   private family(family: DeskFamily, index: ThreadIndex): HTMLElement {
     const { root } = family, waits = this.o.waits()
@@ -153,36 +153,41 @@ export class KanbanSurfaceRenderer {
       const wait = line && family.waits.find(each => fiber(each.card) === line.dataset.cardUid)
       this.o.openDetail(wait ? wait.card : root)
     })
-    if (!family.working && family.waits.length === 1 && family.waits[0].card === root) {
-      card.append(this.row(family.waits[0]))
-      return card
-    }
-    const head = document.createElement('div')
-    head.className = 'kbn-family-head'
-    const name = document.createElement('span')
-    name.className = 'kbn-family-name'
-    name.textContent = rowLabel(index, root)
     const meta = document.createElement('span')
     meta.className = 'kbn-family-meta'
     // A family of one says nothing its dot does not; a larger one counts its workers.
     const word = family.attention === 'quiet' ? quietWord(root) : ''
     meta.textContent = family.attention === 'quiet' ? (word === SAID[family.section] ? '' : family.section === 'resting' ? word.replace(/^resting /, '') : word) : family.working && index.children(root).length ? `${family.working} working` : ''
-    head.append(stateDot(root, waits, this.o.openDetail), name, meta)
-    // A verdict given from the keys waits out its undo window on the line it names.
-    markVerdictHost(head, root)
-    card.append(head)
-    if (family.waits.length) {
+    const own = family.waits.find(wait => wait.card === root)
+    if (own) {
+      const head = this.row(own)
+      head.classList.add('kbn-family-top')
+      if (meta.textContent) head.querySelector('.thread-row-age')!.after(meta)
+      card.append(head)
+    } else {
+      const head = document.createElement('div')
+      head.className = 'kbn-family-head'
+      const name = document.createElement('span')
+      name.className = 'kbn-family-name'
+      name.textContent = rowLabel(index, root)
+      head.append(stateDot(root, waits, this.o.openDetail), name, meta)
+      // A verdict given from the keys waits out its undo window on the line it names.
+      markVerdictHost(head, root)
+      card.append(head)
+    }
+    const members = family.waits.filter(wait => wait !== own)
+    if (members.length) {
       const lines = document.createElement('div')
       lines.className = 'kbn-family-waits'
-      lines.append(...family.waits.map(wait => this.line(wait, wait.card === root)))
+      lines.append(...members.map(wait => this.line(wait)))
       card.append(lines)
     }
     return card
   }
 
   /** A member that waits, as a line of its family's card that opens it. */
-  private line(wait: FamilyWait, own: boolean): HTMLElement {
-    const line = this.row(wait, !own)
+  private line(wait: FamilyWait): HTMLElement {
+    const line = this.row(wait)
     line.classList.add('kbn-family-wait')
     line.dataset.deskLine = ''
     identify(line, wait.card)
@@ -191,13 +196,12 @@ export class KanbanSurfaceRenderer {
 
   /**
    * A member that waits, as a thread row (elements/threadRow.ts: dot, slug,
-   * what it wants, how long ago), and a post's ✓; it draws the member's undo
-   * window unless a head above it names the same constitution (`verdicts`).
+   * what it wants, how long ago), a post's ✓, and the member's undo window.
    */
-  private row({ card, want }: FamilyWait, verdicts = true): HTMLElement {
+  private row({ card, want }: FamilyWait): HTMLElement {
     const line = threadRow(card, { waits: this.o.waits(), now: Date.now() })
     line.dataset.kind = want.kind
-    if (verdicts) markVerdictHost(line, card)
+    markVerdictHost(line, card)
     if (clearable(want)) {
       const clear = document.createElement('button')
       clear.type = 'button'
