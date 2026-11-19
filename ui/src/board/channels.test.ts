@@ -105,6 +105,16 @@ describe('composeChannels', () => {
     expect([moving.waiting, moving.newest, moving.listed]).toStrictEqual([true, now - 10 * minute, true])
   })
 
+  it('leaves out a channel of drafts however recently they were touched, unless it is pinned or something in it waits', () => {
+    const draft = card({ id: 'trip', uid: 'D', name: 'Check in', column: 'drafts', modifiedAt: at(60) })
+    const isListed = (cards: KanbanCard[], over: Partial<Input> = {}) => named(compose(cards, over), 'fiber:D').listed
+    expect(isListed([draft])).toBe(false)
+    expect(isListed([draft], { pinned: new Map([['fiber:D', now - day]]) })).toBe(true)
+    expect(isListed([draft], { waits: new Map([['D', { id: 'd1', at: now - minute }]]) })).toBe(true)
+    // A thread under it past its draft lists the channel.
+    expect(isListed([draft, card({ id: 'trip/bags', uid: 'D2', orchestrator: 'D', ...working(5) })])).toBe(true)
+  })
+
   it('hides a channel until a later show or something waiting after the hide', () => {
     const hide = (dismissed: string[], cards = all) => named(compose(cards, { dismissed }), 'role:analyst')
     expect([hide([]).hidden, hide([]).listed]).toStrictEqual([0, true])

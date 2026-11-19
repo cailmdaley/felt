@@ -36,7 +36,7 @@ export interface Channel {
   pinned: boolean
   /** When it was taken out of the rail, nothing having begun waiting in it since; 0 when it is not hidden. */
   hidden: number
-  /** In the rail: not hidden, and waiting, pinned, or active within {@link RECENT_MS}. */
+  /** In the rail: not hidden, and waiting, pinned, or active within {@link RECENT_MS} with a member past its draft. */
   listed: boolean
 }
 
@@ -89,8 +89,10 @@ export const officeOf = (role: string | undefined): string => role?.split('/')[0
  * top-level constitution's office names the channel (the named channel that
  * shares the office's charter name, when there is one), else that top-level
  * is a channel of its own. Something in it waits when a member waits on the
- * human (`wantOf`). A pin counts until
- * a later unpin; a hide counts until a later show or a later wait.
+ * human (`wantOf`). It is in the rail while something in it waits or it is
+ * pinned, or while it was active within {@link RECENT_MS} and not every live
+ * member is a draft. A pin counts until a later unpin; a hide counts until a
+ * later show or a later wait.
  */
 export function composeChannels(input: {
   cards: readonly KanbanCard[]
@@ -182,6 +184,7 @@ export function composeChannels(input: {
     const active = Math.max(0, ...members.map(lastActive))
     const isPinned = (pinned.get(key) ?? -Infinity) > since('pin', key)
     const waiting = newest > 0
+    const drafted = members.every(card => card.column === 'drafts')
     const hidden = since('hide', key) > Math.max(since('show', key), newest) ? since('hide', key) : 0
     const office = key.startsWith('role:') && !seats.length ? key.slice(5) : ''
     const name = key.startsWith('channel:') ? key.slice(8).replace(/ /g, '-') : office || slug(seat)
@@ -189,7 +192,7 @@ export function composeChannels(input: {
       key, name, title: office ? officeName(office) : seat.name, chaired: !key.startsWith('fiber:'), seat, members, everyone,
       families: [...new Set(members.map(card => fiberOf(topOf(card))))],
       newest, waiting, active, pinned: isPinned, hidden,
-      listed: !hidden && (waiting || isPinned || now - active <= RECENT_MS),
+      listed: !hidden && (waiting || isPinned || (!drafted && now - active <= RECENT_MS)),
     })
   }
   return channels.sort((a, b) => Number(b.chaired) - Number(a.chaired) || a.name.localeCompare(b.name))
