@@ -51,7 +51,7 @@ try {
     await p.keyboard.press('Escape'); await help.waitFor({ state: 'detached' })
 
     // Rest calendar, from a constitution's view: the vim keys move its cursor and survive a click on a day.
-    await p.locator('.kbn-desk .kbn-family .kbn-family-head').first().click()
+    await p.locator('.kbn-desk .kbn-family > :first-child').first().click()
     await p.locator('.ws-page.ws-selected .ov-head').waitFor()
     await p.evaluate(() => document.activeElement.setAttribute('data-rest-opener', ''))
     await p.keyboard.press('s')
@@ -94,7 +94,7 @@ try {
     // Sent files, on the phone's reader: the top bar's list takes the focus, and Escape returns it to the opener.
     if (phone) {
       await p.goto(`${harness}?example=threads`)
-      await p.locator('.kbn-desk .kbn-family[title*="Calibrate the shear response"] .kbn-family-name').first().click()
+      await p.locator('.kbn-desk .kbn-family[title*="Calibrate the shear response"] > :first-child').first().click()
       const opener = p.locator('.ws-navbar .ws-files-toggle')
       await opener.click()
       const files = p.locator('.kbn-conversation-menu:has(.uf-file-row)')

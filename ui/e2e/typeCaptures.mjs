@@ -16,7 +16,7 @@ const settle = page => page.evaluate(() => new Promise(r => requestAnimationFram
 
 async function openRoot(page) {
   // Click the row's own name: its crumb leads to the root.
-  const name = page.locator(`.kbn-desk .kbn-family[title*="${root}"] .kbn-family-head`).first().locator('.kbn-family-name')
+  const name = page.locator(`.kbn-desk .kbn-family[title*="${root}"] > :first-child`).first().locator(':is(.kbn-family-name, .thread-row-slug)')
   const box = await name.boundingBox()
   await name.click({ position: { x: box.width - 6, y: box.height / 2 } })
   await page.locator('.ws-stage-band .ws-dock').waitFor()

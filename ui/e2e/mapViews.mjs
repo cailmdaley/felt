@@ -12,7 +12,7 @@ const root = 'Calibrate the shear response'
 /** The family's board, with a terminal behind every worker, so asking Rex leaves an event. */
 async function board(page) {
   await page.goto(url)
-  await page.locator(`.kbn-desk .kbn-family[title*="${root}"] .kbn-family-head`).first().waitFor()
+  await page.locator(`.kbn-desk .kbn-family[title*="${root}"] > :first-child`).first().waitFor()
   await page.evaluate(async () => {
     for (const { runtime } of window.__harness.MOCK_FEED.fibers) if (runtime) runtime.tmux_session = runtime.session_uuid
     await window.__harness.modal.fetchAndRender()
@@ -31,7 +31,7 @@ export function registerMapViewJourneys(test) {
   const head = (page, name) => view(page).locator(`.ov-head[title="${name}"]`)
   const landed = async page => {
     await board(page)
-    await page.locator(`.kbn-desk .kbn-family[title*="${root}"] .kbn-family-head`).last().locator('.kbn-family-name').click()
+    await page.locator(`.kbn-desk .kbn-family[title*="${root}"] > :first-child`).last().locator(':is(.kbn-family-name, .thread-row-slug)').click()
     await view(page).locator('.ov-head').waitFor()
     // A Desk row of the family may open a thread's view: its root is its topmost orchestrator.
     const top = view(page).locator('.ov-ancestor').first()
@@ -149,13 +149,13 @@ export function registerMapViewJourneys(test) {
 
   test('A lone constitution\'s view, and `c` from it opens that worker\'s conversation', async page => {
     await page.goto(url.replace('example=threads', 'example=families'))
-    const card = page.locator('.kbn-desk .kbn-family[title="Morning post"] .kbn-family-head').first()
+    const card = page.locator('.kbn-desk .kbn-family[title="Morning post"] > :first-child').first()
     await card.waitFor({ state: 'attached' })
     await page.evaluate(async () => {
       for (const { runtime } of window.__harness.MOCK_FEED.fibers) if (runtime) runtime.tmux_session = runtime.session_uuid
       await window.__harness.modal.fetchAndRender()
     })
-    await card.locator('.kbn-family-name').click({ force: true })
+    await card.locator(':is(.kbn-family-name, .thread-row-slug)').click({ force: true })
     await head(page, 'Morning post').waitFor()
     assert.equal(await view(page).locator('.ov-thread').count(), 0)
     await view(page).locator('.ov-unfold .ws-thumbnail').waitFor()

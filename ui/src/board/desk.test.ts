@@ -47,3 +47,28 @@ it('draws the three columns, then the shelf of three, each named, a shelf card w
   // A standing seat at rest says its schedule is paused.
   expect([meta('plan'), meta('later'), meta('referee'), meta('watch'), meta('chair')]).toStrictEqual(['', '', '', 'paused', 'paused'])
 })
+
+it('draws a family whose only line is its top-level\'s own, nothing working, as that line alone: one row, one stop', () => {
+  const lone = [node('move', { ask: { text: 'Which van?', at: '2026-11-15T10:00:00Z' } }), node('trip', { ask: { text: 'Which train?', at: '2026-11-15T09:00:00Z' } }), node('trip/bags', { workerState: 'running', runtimePhase: 'working' })]
+  const index = new ThreadIndex(lone)
+  const desk = new KanbanSurfaceRenderer({ waits: () => new Map(), openDetail: vi.fn(), clear: vi.fn() }).renderDesk(deskOrder(index, new Map()), index)
+  const move = desk.querySelector<HTMLElement>('.kbn-family[data-card-uid="move"]')!
+  expect([move.querySelector('.kbn-family-head'), move.querySelectorAll('[data-card-uid]').length]).toStrictEqual([null, 0])
+  expect([...move.querySelectorAll('.thread-row')].map(row => [row.querySelector('.thread-row-slug')!.textContent, row.querySelector('.thread-row-doing')!.textContent])).toStrictEqual([['move', 'Which van?']])
+  // With a thread working under it, the head counts it and the top-level's own line stands below.
+  const trip = desk.querySelector<HTMLElement>('.kbn-family[data-card-uid="trip"]')!
+  expect([trip.querySelector('.kbn-family-meta')!.textContent, trip.querySelectorAll('.kbn-family-wait').length]).toStrictEqual(['1 working', 1])
+})
+
+it('keeps a lone waiting post\'s ✓ on its one row: the ✓ clears and opens nothing, the row opens the constitution', () => {
+  const memo = node('memo')
+  const index = new ThreadIndex([memo])
+  const waits = new Map([['memo', { id: 'm', at: Date.parse('2026-11-16T10:00:00Z'), kind: 'post' as const, text: 'The memo is sent.' }]])
+  const clear = vi.fn(), openDetail = vi.fn()
+  const desk = new KanbanSurfaceRenderer({ waits: () => waits, openDetail, clear }).renderDesk(deskOrder(index, waits), index)
+  const row = desk.querySelector<HTMLElement>('.kbn-family[data-card-uid="memo"] > .thread-row')!
+  row.querySelector<HTMLButtonElement>('.kbn-ch-clear')!.click()
+  expect([clear.mock.calls, openDetail.mock.calls.length]).toStrictEqual([[[memo]], 0])
+  row.querySelector<HTMLElement>('.thread-row-doing')!.click()
+  expect(openDetail).toHaveBeenCalledExactlyOnceWith(memo)
+})

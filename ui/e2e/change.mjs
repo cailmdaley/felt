@@ -10,7 +10,7 @@ export function registerChangeJourneys(test) {
     await page.goto(page.url().replace('example=workspace', 'example=change'))
     const route = () => new URL(page.url()).hash
     const desk = route()
-    await page.locator(`.kbn-desk .kbn-family[title*="Calibrate the shear response"] .kbn-family-head`).click()
+    await page.locator(`.kbn-desk .kbn-family[title*="Calibrate the shear response"] > :first-child`).click()
     await page.locator('.ws-stage-band .ws-dock').waitFor()
     await showFile(page, '/family.change.json')
     await page.locator('.ws-selected .change-reader').waitFor()
@@ -134,7 +134,7 @@ export function registerChangeJourneys(test) {
     await page.goto(page.url().replace('example=workspace', 'example=change'))
     const route = () => new URL(page.url()).hash
     const desk = route()
-    await page.locator(`.kbn-desk .kbn-family[title*="Calibrate the shear response"] .kbn-family-head`).click()
+    await page.locator(`.kbn-desk .kbn-family[title*="Calibrate the shear response"] > :first-child`).click()
     await page.locator('.ws-selected .ov-head').waitFor()
     await showFile(page, '/family.change.json')
     await page.locator('.ws-selected .change-map').waitFor()
@@ -154,7 +154,7 @@ export function registerChangeJourneys(test) {
     await page.goto(page.url().replace('example=workspace', 'example=change'))
     const route = () => new URL(page.url()).hash
     const desk = route()
-    await page.locator(`.kbn-desk .kbn-family[title*="Calibrate the shear response"] .kbn-family-head`).click()
+    await page.locator(`.kbn-desk .kbn-family[title*="Calibrate the shear response"] > :first-child`).click()
     // The view's head unfolds its tapestry in the view; full screen opens it in the reader.
     await page.locator('.ws-selected .ov-head [data-part="tapestry"]').click()
     await page.locator('.ws-selected .ov-unfold[data-unfolded] .uf-full').click()

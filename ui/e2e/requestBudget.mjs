@@ -50,7 +50,7 @@ p.on('pageerror', error => errors.push(error.message))
 try {
   await p.clock.install()
   await p.goto(url)
-  await p.locator(`.kbn-desk .kbn-family[title*="Music"] .kbn-family-head`).first().click()
+  await p.locator(`.kbn-desk .kbn-family[title*="Music"] > :first-child`).first().click()
   const selected = () => p.locator('.ws-page.ws-selected')
   // A Desk click lands on the constitution's page, its report already unfolded under its lone row.
   await selected().frameLocator('iframe').getByRole('heading', { name: 'Listening notes', exact: true }).waitFor()

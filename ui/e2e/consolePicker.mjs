@@ -29,7 +29,7 @@ async function pickerReadable(p, requireFocus = true) {
 }
 async function open(p, backend) {
   await p.goto(`${base}&console=${backend}`)
-  await p.locator(`.kbn-desk .kbn-family[title*="Calibrate the shear response"] .kbn-family-head`).click()
+  await p.locator(`.kbn-desk .kbn-family[title*="Calibrate the shear response"] > :first-child`).click()
   await lit(p).locator('.ws-fiber-acts').waitFor({ state: 'visible' })
 }
 async function headerFits(p) {

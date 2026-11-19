@@ -21,7 +21,7 @@ const acts = page => page.locator('.ws-reader:not(:has(.ws-page.ws-selected .ov-
   .or(page.locator('.ws-page.ws-selected .ov-head .ov-tools > .ws-fiber-acts'))
 async function openRoot(page) {
   // Click the row's own name: its crumb leads to the root.
-  const name = page.locator(`.kbn-desk .kbn-family[title*="${title}"] .kbn-family-head`).first().locator('.kbn-family-name')
+  const name = page.locator(`.kbn-desk .kbn-family[title*="${title}"] > :first-child`).first().locator(':is(.kbn-family-name, .thread-row-slug)')
   const box = await name.boundingBox()
   await name.click({ position: { x: box.width - 6, y: box.height / 2 } })
   await band(page).locator('.ws-dock').waitFor()
@@ -268,7 +268,7 @@ export function registerHeaderBarJourneys(test) {
     assert.ok(await page.getByRole('menuitem', { name: "Today's transcript", exact: true }).isEnabled())
     await page.keyboard.press('Escape')
     await page.locator('.kbn-viewtab[data-view="desk"]').click()
-    await page.locator(`.kbn-desk .kbn-family[title*="Remote covariance review"] .kbn-family-head`).click()
+    await page.locator(`.kbn-desk .kbn-family[title*="Remote covariance review"] > :first-child`).click()
     const foreign = page.locator('.ws-stage-band')
     assert.equal(await foreign.locator('.ws-voice-strip').getAttribute('data-mode'), 'pinned')
     for (const width of [1440, 390]) {

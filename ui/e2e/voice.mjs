@@ -14,7 +14,7 @@ const browser = await launchBrowser({
 })
 async function open(page, state) {
   await page.goto(`${url}&voice=${state}`)
-  await page.locator('.kbn-desk .kbn-family[data-fiber-id="research/workspace/calibration-report"] .kbn-family-name').click()
+  await page.locator('.kbn-desk .kbn-family[data-fiber-id="research/workspace/calibration-report"] > :first-child').click()
   await page.locator('.ws-stage-band .listen-mic').waitFor()
 }
 const band = page => page.locator('.ws-stage-band')

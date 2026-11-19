@@ -40,7 +40,7 @@ async function openPlainThemeMenu(p) {
 }
 /** A Desk click lands on the constitution's map. */
 async function land(p) {
-  await p.locator(`.kbn-desk .kbn-family[title*="${name}"] .kbn-family-head`).click()
+  await p.locator(`.kbn-desk .kbn-family[title*="${name}"] > :first-child`).click()
   await selected(p).waitFor()
 }
 async function open(p, expected = 'calibration-report') {
@@ -766,7 +766,7 @@ test('The board bar holds its tabs, Find and Settings to the pixel on every view
 // While the reader is open the bar marks the view it came from: that tab (or
 // its key) closes the reader back to it; another tab switches and closes.
 const origins = {
-  desk: { other: 'chronicle', open: async p => { await barTab(p, 'desk').click(); await p.locator(`.kbn-desk .kbn-family[title*="${name}"] .kbn-family-head`).click() } },
+  desk: { other: 'chronicle', open: async p => { await barTab(p, 'desk').click(); await p.locator(`.kbn-desk .kbn-family[title*="${name}"] > :first-child`).click() } },
   channels: { other: 'desk', open: async p => { await openFromChannels(p, 'report.html', 'calibration-report') } },
   chronicle: { other: 'channels', open: async p => { await barTab(p, 'chronicle').click(); await p.locator('.chr-name').filter({ hasText: name }).click() } },
 }
@@ -1090,7 +1090,7 @@ test('Verdict keys delay writes, guard typing, undo, and commit after leaving th
 
 test('Temper reaches drafts and work in flight, in their acts and by key, through the undo queue', async p => {
   await chooseDeskColumn(p, 2)
-  await p.locator(`.kbn-desk .kbn-family[title*="Weekly shear summary"] .kbn-family-head`).click()
+  await p.locator(`.kbn-desk .kbn-family[title*="Weekly shear summary"] > :first-child`).click()
   const temper = await verbControl(acts(p), 'Temper')
   assert.ok(await temper.isVisible() && await temper.getAttribute('aria-keyshortcuts') === 't', "a draft's acts offer Temper beside its key")
   await closeVerbMenu(p)
@@ -1100,7 +1100,7 @@ test('Temper reaches drafts and work in flight, in their acts and by key, throug
   await poll(p, () => !document.querySelector('.ws-verdict-undo'))
   await leave(p)
   await chooseDeskColumn(p, 1)
-  await p.locator(`.kbn-desk .kbn-family[title*="Remote covariance review"] .kbn-family-head`).click()
+  await p.locator(`.kbn-desk .kbn-family[title*="Remote covariance review"] > :first-child`).click()
   // A live worker asks once at the gesture; declining queues nothing.
   const asked = [], dialogErrors = []
   let finishDialog
@@ -1122,7 +1122,7 @@ test('Temper reaches drafts and work in flight, in their acts and by key, throug
 
 test('A standing run waiting on you is tempered with t: no question, an undo window, then the schedule keeps it', async p => {
   await p.goto(`${url}&standing-review`); await chooseDeskColumn(p, 1)
-  await p.locator(`.kbn-desk .kbn-family[title*="Remote covariance review"] .kbn-family-head`).click()
+  await p.locator(`.kbn-desk .kbn-family[title*="Remote covariance review"] > :first-child`).click()
   assert.deepEqual(await acts(p).locator('.ws-acts-verbs > button:visible').evaluateAll(buttons => buttons.map(b => b.getAttribute('aria-label'))),
     ['Temper run remote-review (t)', 'More verbs for remote-review: Pause schedule (s), Retire (x)'], 'Temper run leads the acts')
   assert.ok(!(await offeredVerbs(acts(p))).includes('Close for review'))
@@ -1142,7 +1142,7 @@ test('Pending verdicts on two fibers commit independently', async p => {
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
   await p.keyboard.press('t')
   await leave(p)
-  await p.locator(`.kbn-desk .kbn-family[title*="Mask validation notes"] .kbn-family-head`).click()
+  await p.locator(`.kbn-desk .kbn-family[title*="Mask validation notes"] > :first-child`).click()
   await poll(p, () => document.querySelector('.ws-channel-title')?.title === 'Mask validation notes')
   await p.keyboard.press('x')
   assert.equal(await p.evaluate(() => new Set([...document.querySelectorAll('[data-verdict-pending]')].map(el => el.dataset.verdictKey)).size), 2)
@@ -1151,7 +1151,7 @@ test('Pending verdicts on two fibers commit independently', async p => {
 })
 
 test('Conversation c (and its dot alias) uses the pill destination in the reader, and the Desk takes neither', async p => {
-  const remote = p.locator(`.kbn-desk .kbn-family[title*="Remote covariance review"] .kbn-family-head`)
+  const remote = p.locator(`.kbn-desk .kbn-family[title*="Remote covariance review"] > :first-child`)
   await remote.click()
   const opened = n => poll(p, n => window.__harness.events.filter(e => e.type === 'open-worker').length === n, n)
   await p.keyboard.press('c'); await opened(1)
@@ -1163,7 +1163,7 @@ test('Conversation c (and its dot alias) uses the pill destination in the reader
 })
 
 test('A click on a thread only asks Rex to select its window, and opens nothing when it has none; c opens it', async p => {
-  const remote = p.locator(`.kbn-desk .kbn-family[title*="Remote covariance review"] .kbn-family-head`)
+  const remote = p.locator(`.kbn-desk .kbn-family[title*="Remote covariance review"] > :first-child`)
   const session = 'remote-review-01KVBR3H8DYFXNH96683RX89N0-shuttle'
   await p.evaluate(session => window.__harness.windowless.add(session), session)
   const attaches = () => p.evaluate(() => window.__harness.requests.filter(r => r.method === 'POST' && r.url.endsWith('/api/v1/attach')).map(r => JSON.parse(r.body)))
@@ -1922,7 +1922,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     if (device === 'phone') assert.ok((await line.getByRole('button').boundingBox()).height >= 44)
     await shot('undo-line'); await p.keyboard.press('z'); await leave(p)
     await chooseDeskColumn(p, 1)
-    await p.locator(`.kbn-desk .kbn-family[title*="Remote covariance review"] .kbn-family-head`).click()
+    await p.locator(`.kbn-desk .kbn-family[title*="Remote covariance review"] > :first-child`).click()
     await poll(p, () => document.querySelector('.ws-stage-band .ws-dock')?.dataset.column === 'inFlight')
     assert.equal(await band(p).locator('[data-part="lifecycle"]').count(), 0, 'colour carries the state; no word says it')
     await shot('working')
@@ -1932,7 +1932,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
       await window.__harness.modal.fetchAndRender()
     })
     await shot('waiting'); await leave(p); await chooseDeskColumn(p, 2)
-    await p.locator(`.kbn-desk .kbn-family[title*="Weekly shear summary"] .kbn-family-head`).click()
+    await p.locator(`.kbn-desk .kbn-family[title*="Weekly shear summary"] > :first-child`).click()
     await shot('no-worker')
   }, viewport)
 }
@@ -1994,7 +1994,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     await leave(p)
     // A standing constitution's cadence: the same review, on a schedule.
     await p.goto(`${url}&standing-review`); await chooseDeskColumn(p, 1)
-    await p.locator(`.kbn-desk .kbn-family[title*="Remote covariance review"] .kbn-family-head`).click()
+    await p.locator(`.kbn-desk .kbn-family[title*="Remote covariance review"] > :first-child`).click()
     await bandMenu(p, 'Settings')
     const cadence = band(p).locator('.kbn-detail-controls-toggle .kbn-ctl-cadence')
     assert.equal(await cadence.count(), 1); assert.ok((await cadence.innerText()).trim())
@@ -2143,7 +2143,7 @@ test('Plain removes custom and bundled styling, persists, and can restore custom
 })
 
 test('Broken theme falls back to its bundled base', async p => {
-  await p.locator(`.kbn-desk .kbn-family[title*="Mask validation notes"] .kbn-family-head`).click()
+  await p.locator(`.kbn-desk .kbn-family[title*="Mask validation notes"] > :first-child`).click()
   await choose(p, 'Constitution')
   await poll(p, () => document.querySelector('.ws-reader')?.dataset.wsThemeName === 'laboratory-paper')
   const theme = await p.locator('.ws-reader').getAttribute('data-ws-theme')
@@ -2197,7 +2197,7 @@ for (const [label, theme] of [['Night Chart', 'night-chart'], ['Lamplight', 'lam
   // Remote covariance review declares Night Chart: a dark system shows it, and a Lamplight choice leaves a declared dark theme alone.
   await p.emulateMedia({ colorScheme: 'dark' })
   if (theme === 'lamplight') await chooseAppearance(p, 'dark', 'lamplight')
-  await p.locator(`.kbn-desk .kbn-family[title*="${theme === 'lamplight' ? name : 'Remote covariance review'}"] .kbn-family-head`).click()
+  await p.locator(`.kbn-desk .kbn-family[title*="${theme === 'lamplight' ? name : 'Remote covariance review'}"] > :first-child`).click()
   await choose(p, 'Constitution')
   await poll(p, theme => document.querySelector('.ws-reader')?.dataset.wsThemeName === theme, theme)
   const contrasts = await p.locator('.ws-stage-column').evaluate(column => {
@@ -2350,7 +2350,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
     await p.keyboard.press('Escape')
   }
   await leave(p); await chooseDeskColumn(p, 1)
-  await p.locator(`.kbn-desk .kbn-family[title*="Remote covariance review"] .kbn-family-head`).click()
+  await p.locator(`.kbn-desk .kbn-family[title*="Remote covariance review"] > :first-child`).click()
   await still(p, 'a worker-state change', () => flipWorker(p), { allow: ['.ov-head', '.ov-up'], settle: 100 })
   assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper,.kbn-ctl-discard)').count(), 0)
   // Its view's head carries the verb button: Close for review on its face, the rest behind its caret.
@@ -2480,7 +2480,7 @@ async function journey({ name, run, viewport, reducedMotion, touch }) {
   try {
     await page.clock.install({ time: new Date('2026-10-04T14:00:00Z') })
     await page.goto(url)
-    await page.locator(`.kbn-desk .kbn-family[title*="Calibrate the shear response"] .kbn-family-head`).waitFor({ state: 'attached' })
+    await page.locator(`.kbn-desk .kbn-family[title*="Calibrate the shear response"] > :first-child`).waitFor({ state: 'attached' })
     await run(page)
   } catch (error) { failure = error; await mkdir(shots, { recursive: true }); await page.screenshot({ path: resolve(shots, 'failure-' + name.replace(/[^a-z0-9]+/gi, '-').slice(0, 100) + '.png') }).catch(() => {}) }
   finally {

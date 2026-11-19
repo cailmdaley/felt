@@ -132,7 +132,8 @@ export class KanbanSurfaceRenderer {
   /**
    * One family: its top-level's dot and slug, with how many of its members
    * work, or a quiet one's faint word; then every member that waits on the
-   * human as a thread row, a post's ✓ beside it.
+   * human as a thread row, a post's ✓ beside it. A family whose only line
+   * would be its top-level's own, with nothing working, is that line alone.
    * A line opens that member's view; anywhere else on the card opens the
    * top-level's.
    */
@@ -145,6 +146,17 @@ export class KanbanSurfaceRenderer {
     card.setAttribute('role', 'listitem')
     card.title = root.name
     identify(card, root)
+    card.setAttribute('aria-label', `${root.name}, ${DESK_SECTION_TITLE[family.section].toLowerCase()}`)
+    card.addEventListener('click', event => {
+      if ((event.target as Element).closest('button, a')) return
+      const line = (event.target as Element).closest<HTMLElement>('.kbn-family-wait')
+      const wait = line && family.waits.find(each => fiber(each.card) === line.dataset.cardUid)
+      this.o.openDetail(wait ? wait.card : root)
+    })
+    if (!family.working && family.waits.length === 1 && family.waits[0].card === root) {
+      card.append(this.row(family.waits[0]))
+      return card
+    }
     const head = document.createElement('div')
     head.className = 'kbn-family-head'
     const name = document.createElement('span')
@@ -165,25 +177,27 @@ export class KanbanSurfaceRenderer {
       lines.append(...family.waits.map(wait => this.line(wait, wait.card === root)))
       card.append(lines)
     }
-    card.setAttribute('aria-label', `${root.name}, ${DESK_SECTION_TITLE[family.section].toLowerCase()}`)
-    card.addEventListener('click', event => {
-      if ((event.target as Element).closest('button, a')) return
-      const line = (event.target as Element).closest<HTMLElement>('.kbn-family-wait')
-      const wait = line && family.waits.find(each => fiber(each.card) === line.dataset.cardUid)
-      this.o.openDetail(wait ? wait.card : root)
-    })
     return card
   }
 
-  /** A member that waits, as a thread row (elements/threadRow.ts: dot, slug, what it wants, how long ago), and a post's ✓. */
-  private line({ card, want }: FamilyWait, own: boolean): HTMLElement {
-    const line = threadRow(card, { waits: this.o.waits(), now: Date.now() })
+  /** A member that waits, as a line of its family's card that opens it. */
+  private line(wait: FamilyWait, own: boolean): HTMLElement {
+    const line = this.row(wait, !own)
     line.classList.add('kbn-family-wait')
-    line.dataset.kind = want.kind
     line.dataset.deskLine = ''
-    identify(line, card)
-    // The top-level's own line leaves its undo window to the head above it.
-    if (!own) markVerdictHost(line, card)
+    identify(line, wait.card)
+    return line
+  }
+
+  /**
+   * A member that waits, as a thread row (elements/threadRow.ts: dot, slug,
+   * what it wants, how long ago), and a post's ✓; it draws the member's undo
+   * window unless a head above it names the same constitution (`verdicts`).
+   */
+  private row({ card, want }: FamilyWait, verdicts = true): HTMLElement {
+    const line = threadRow(card, { waits: this.o.waits(), now: Date.now() })
+    line.dataset.kind = want.kind
+    if (verdicts) markVerdictHost(line, card)
     if (clearable(want)) {
       const clear = document.createElement('button')
       clear.type = 'button'

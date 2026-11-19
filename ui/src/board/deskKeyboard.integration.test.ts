@@ -306,9 +306,8 @@ describe('Desk keyboard selection', () => {
   })
   it('moves through the sections without wrapping, g and G at a section\'s ends', () => {
     press('j'); expect(selected()).toBe('review')
-    // A family that waits itself carries its own line, what it wants.
-    press('j'); expect(selected()).toBe('review')
-    expect(document.querySelector('.kbn-key-selected')!.hasAttribute('data-desk-line')).toBe(true)
+    // A family of one that waits is its own line alone: one stop.
+    expect(document.querySelector('.kbn-key-selected')!.hasAttribute('data-desk-line')).toBe(false)
     press('j'); expect(selected()).toBe('head-uid')
     press('G'); expect(selected()).toBe('working')
     press('g'); expect(selected()).toBe('head-uid')
@@ -320,7 +319,7 @@ describe('Desk keyboard selection', () => {
     press('h'); expect(selected()).toBeUndefined()
   })
   it('walks every card across the columns in both directions', () => {
-    const walk = ['review', 'review', 'head-uid', 'working', 'draft-uid', 'd2', 'resting']
+    const walk = ['review', 'head-uid', 'working', 'draft-uid', 'd2', 'resting']
     for (const uid of walk) { press('j'); expect(selected()).toBe(uid) }
     press('j'); expect(selected()).toBe('resting')
     for (const uid of [...walk].reverse().slice(1)) { press('k'); expect(selected()).toBe(uid) }
@@ -333,7 +332,7 @@ describe('Desk keyboard selection', () => {
     expect(inside.workspace.isActive).toBe(false)
   })
   it('survives refresh reorder and a path rename by uid+origin, not list position', () => {
-    for (let n = 0; n < 5; n++) press('j')
+    for (let n = 0; n < 4; n++) press('j')
     const updated = data()
     updated.now.drafts = [card({ id: 'd2' }), card({ id: 'renamed', uid: 'draft-uid' })]
     draw(updated)
@@ -355,7 +354,7 @@ describe('Desk keyboard selection', () => {
     expect(document.activeElement).toBe(document.querySelector('.kbn-key-selected'))
   })
   it('opens with Enter and restores the opened card after reader return and a deferred refresh', async () => {
-    for (let n = 0; n < 6; n++) press('j')
+    for (let n = 0; n < 5; n++) press('j')
     press('Enter')
     expect(inside.workspace.isActive).toBe(true)
     expect(window.location.hash).toContain('d2')
@@ -383,7 +382,7 @@ describe('Desk keyboard selection', () => {
   })
   it('keeps focus on its row through a poll, and gives a removed row\'s focus to the row in its place', () => {
     const row = (uid: string) => document.querySelector(`[data-card-uid="${uid}"]`)
-    press('j'); press('j'); press('j')
+    press('j'); press('j')
     expect(document.activeElement).toBe(row('head-uid'))
     draw(data())
     expect(document.activeElement).toBe(row('head-uid'))
@@ -423,7 +422,7 @@ describe('Desk keyboard selection', () => {
     press('j')
     expect(scroll).toHaveBeenLastCalledWith({ left: 0, behavior: 'instant' })
     expect(intoView).toHaveBeenLastCalledWith({ block: 'nearest', inline: 'nearest', behavior: 'instant' })
-    press('j'); press('j')
+    press('j')
     expect(selected()).toBe('head-uid')
     expect(scroll).toHaveBeenLastCalledWith({ left: 390, behavior: 'instant' })
   })

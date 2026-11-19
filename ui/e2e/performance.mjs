@@ -40,7 +40,7 @@ async function openScenario(name, query, openCard) {
   await page.locator('.kbn-desk').waitFor()
   const harnessReadyMs = await page.evaluate(() => performance.now() - window.__perfNavigationStart)
   if (openCard) {
-    await page.locator(`.kbn-desk .kbn-family[title*="Calibrate the shear response"] .kbn-family-head`).click()
+    await page.locator(`.kbn-desk .kbn-family[title*="Calibrate the shear response"] > :first-child`).click()
     await page.locator('.ws-stage-band .ws-band-head').waitFor()
   }
   await page.screenshot({ path: join(screenshotDir, `${name}.png`) })
@@ -245,7 +245,7 @@ async function measureColdApp() {
       assert.equal(initial.some(entry => /mountForms|katex|pdfViewer|pdf\.worker/.test(entry.name)), false,
         'idle first paint does not download forms, KaTeX, or PDF-viewer chunks')
     }
-    await page.locator(`.kbn-desk .kbn-family[title*="Math note"] .kbn-family-head`).click()
+    await page.locator(`.kbn-desk .kbn-family[title*="Math note"] > :first-child`).click()
     await page.waitForFunction(() => performance.getEntriesByType('resource').some(entry => /katex/.test(new URL(entry.name).pathname)))
     const afterMathUse = await page.evaluate(() => performance.getEntriesByType('resource').map(entry => ({
       name: new URL(entry.name).pathname.split('/').at(-1), transferBytes: entry.transferSize, encodedBytes: entry.encodedBodySize,

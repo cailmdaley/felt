@@ -64,7 +64,7 @@ export function registerLivingReportJourneys(test) {
   test('A live rewrite keeps the reader in place on the report\'s page', async page => {
     await page.goto(url)
     const original = await page.evaluate(suffix => window.__harness.files.find(file => file.path.endsWith(suffix)).body.text(), REPORT)
-    await page.locator('.kbn-desk .kbn-family[data-fiber-id="research/workspace/calibration-report"] .kbn-family-name').click()
+    await page.locator('.kbn-desk .kbn-family[data-fiber-id="research/workspace/calibration-report"] > :first-child').click()
     await selected(page).waitFor()
     await showFile(page, REPORT)
     await frame(page).locator('#report-sentinel').waitFor()
@@ -88,7 +88,7 @@ export function registerLivingReportJourneys(test) {
   test('A live rewrite that adds and hides passages above the reader leaves them beside the passage they were reading', async page => {
     await page.goto(url)
     const original = await page.evaluate(suffix => window.__harness.files.find(file => file.path.endsWith(suffix)).body.text(), REPORT)
-    await page.locator('.kbn-desk .kbn-family[data-fiber-id="research/workspace/calibration-report"] .kbn-family-name').click()
+    await page.locator('.kbn-desk .kbn-family[data-fiber-id="research/workspace/calibration-report"] > :first-child').click()
     await selected(page).waitFor()
     await showFile(page, REPORT)
     await frame(page).locator('#report-sentinel').waitFor()
@@ -116,7 +116,7 @@ export function registerLivingReportJourneys(test) {
       const errors = []
       page.on('pageerror', error => errors.push(String(error)))
       await page.goto(url)
-      await page.locator('.kbn-desk .kbn-family[data-fiber-id="research/workspace/calibration-report"] .kbn-family-name').click()
+      await page.locator('.kbn-desk .kbn-family[data-fiber-id="research/workspace/calibration-report"] > :first-child').click()
       // The Desk opens the family's frontier; its topmost orchestrator is the report's owner.
       if (await band(page).locator('.ws-band-title').getAttribute('title') !== 'Calibrate the shear response') {
         await selected(page).locator('.ov-ancestor').first().click()
