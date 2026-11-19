@@ -3,11 +3,14 @@
 #
 #   make daemon && scripts/scratch-daemon.sh [port]     # port defaults to 4190
 #
-# Boots bin/rel-built on 127.0.0.1:<port> with its own HOME, host id
+# Boots a copy of bin/rel-built on 127.0.0.1:<port> with its own HOME, host id
 # (verify-scratch), operator files, ledgers and one-fiber felt store, with the
-# checkout's ./felt and ./shuttle first on PATH. tmux, rex, codex, tailscale,
-# hark and ps are stubs, so it can neither see nor launch a real worker, and
-# the host's own daemon, stores and operator files are never read or written.
+# checkout's ./felt and ./shuttle first on PATH. It starts from an empty
+# environment, and tmux, rex, codex, tailscale, hark, ps, open, osascript,
+# afplay, kitty and kitten are stubs, so it can neither see nor launch a real
+# worker, and the host's own daemon, stores and operator files are never read
+# or written. The copy lives outside bin/, where make start would mistake it
+# for the host's daemon.
 # It prints the URL, the root, a file to source so the CLIs address the same
 # world, and how to stop it; the daemon keeps running after the script exits.
 set -eu
@@ -27,13 +30,16 @@ tmp=${TMPDIR:-/tmp}
 root=$(mktemp -d "${tmp%/}/scratch-daemon.XXXXXX")
 mkdir -p "$root/bin" "$root/store"
 cp "$repo/felt" "$repo/shuttle" "$root/bin/"
-for stub in tmux rex codex tailscale hark; do
+cp -RL "$repo/bin/rel-built" "$root/release"
+for stub in tmux rex codex tailscale hark open osascript afplay kitty kitten; do
   printf '#!/bin/sh\nexit 1\n' >"$root/bin/$stub"
 done
 printf '#!/bin/sh\nexit 0\n' >"$root/bin/ps"
 chmod +x "$root"/bin/*
 
 cat >"$root/env" <<EOF
+for v in \$(env | grep -Eo '^(SHUTTLE|REX|FELT|KITTY)_[A-Za-z0-9_]*'); do unset "\$v"; done
+unset XDG_CACHE_HOME XDG_CONFIG_HOME XDG_STATE_HOME XDG_DATA_HOME HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
 export HOME='$root' PATH='$root/bin':"\$PATH" SHUTTLE_HOST=verify-scratch SHUTTLE_PORT=$port
 export SHUTTLE_DATA_DIR='$root/data' SHUTTLE_HOST_CONFIG_FILE='$root/host.json' SHUTTLE_VOICE_FILE='$root/voice.json' HARK_DIR='$root/hark'
 export SHUTTLE_STORES_FILE='$root/stores.json' SHUTTLE_PROJECTS_FILE='$root/projects.json' SHUTTLE_REMOTES_FILE='$root/remotes.json' SHUTTLE_AGENTS_FILE='$root/agents.json'
@@ -50,7 +56,8 @@ printf '{"felt_stores":["%s"]}\n' "$root/store" >"$root/stores.json"
   felt add demo "Scratch constitution" >/dev/null &&
   shuttle install demo --disabled >/dev/null)
 
-nohup "$release" start >"$root/daemon.log" 2>&1 &
+nohup env -i HOME="$root" PATH="$PATH" TMPDIR="$tmp" LANG="${LANG:-C.UTF-8}" \
+  sh -c '. "$1/env" && exec "$1/release/bin/shuttled" start' sh "$root" >"$root/daemon.log" 2>&1 &
 pid=$!
 tries=0
 until curl -sf "http://127.0.0.1:$port/api/v1/version" >/dev/null 2>&1; do

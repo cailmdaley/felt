@@ -14,24 +14,24 @@ a laptop; a fresh worktree first pays `npm ci` (~15 s) and a cold Mix compile.
 ## The board
 
 ```bash
-cd ui && npm run harness:board          # ~18 s; the mocked-daemon bundle in harness-board-dist/
-export AGENT_BROWSER_SESSION=verify-$$  # your own headless Chrome, launched on first use
-agent-browser open "file://$PWD/harness-board-dist/index.html?example=channels"
-agent-browser press 3                   # 1 Desk, 2 Chronicle, 3 Channels, 4 Globe
-agent-browser snapshot -i               # refs for what you can click
-agent-browser click @e57 && agent-browser screenshot /path/in/scratchpad/after.png   # a ref from the snapshot
-agent-browser eval 'JSON.stringify(window.__harness.requests.filter(r => r.method !== "GET").slice(-3))'  # what it wrote to the mocked daemon
-agent-browser --json errors             # uncaught page errors (plain `errors` prints them blank)
-agent-browser set viewport 390 844      # phone width, then screenshot again
-agent-browser close
+cd ui && npm run harness:board  # ~18 s; the mocked-daemon bundle in harness-board-dist/
+agent-browser --session verify-<fiber> open "file://$PWD/harness-board-dist/index.html?example=channels"
+agent-browser --session verify-<fiber> press 3                   # 1 Desk, 2 Chronicle, 3 Channels, 4 Globe
+agent-browser --session verify-<fiber> snapshot -i               # refs for what you can click
+agent-browser --session verify-<fiber> click @e57 && agent-browser --session verify-<fiber> screenshot /path/in/scratchpad/after.png   # a ref from the snapshot
+agent-browser --session verify-<fiber> eval 'JSON.stringify(window.__harness.requests.filter(r => r.method !== "GET").slice(-3))'  # what it wrote to the mocked daemon
+agent-browser --session verify-<fiber> --json errors             # uncaught page errors (plain `errors` prints them blank)
+agent-browser --session verify-<fiber> set viewport 390 844      # phone width, then screenshot again
+agent-browser --session verify-<fiber> close
 ```
 
-Then read the screenshot. The query strings that stage a state (`?example=`,
+A session name of your own gets a headless Chrome of its own, launched on
+first use; repeat it on every call, since shell state does not survive between
+tool calls. Then read the screenshot. The query strings that stage a state (`?example=`,
 `?transcript=`, `?voice=`, …) are listed at the top of
 `ui/harness/harness-board.ts`; add a fixture there when the state you need is
 missing. Never open the live board at `:4000`: it takes the human's voice
-target and Rex focus. A session of your own launches its own headless Chrome
-in about a second; a lane on `bin/shared-browser`
+target and Rex focus. A lane on `bin/shared-browser`
 ([layout.md](../../../docs/dev/layout.md#browser-checks)) saves memory when
 that browser answers.
 
@@ -55,16 +55,18 @@ pass `--local` where a verb has it. Verbs that ask a daemon (`snapshot`,
 
 ```bash
 make daemon                       # ~9 s warm, ~32 s in a fresh worktree; builds bin/rel-built and ./felt ./shuttle
-scripts/scratch-daemon.sh         # ~5 s; prints url (127.0.0.1:4190), root, env file and stop command
+scripts/scratch-daemon.sh         # 5-20 s (it copies the release); prints url (127.0.0.1:4190), root, env file and stop command
+root=<the printed root>
 curl -s -X POST -H 'content-type: application/json' \
   -d '{"action":"channel","fiber":"demo","channel":"-bad"}' 127.0.0.1:4190/api/v1/lifecycle
 . "$root/env" && cd "$root/store" && shuttle snapshot   # the CLIs, pointed at the scratch daemon
 kill <pid> && rm -rf "$root"      # as printed
 ```
 
-The scratch daemon has its own home, host id (`verify-scratch`), stores,
-ledgers and operator files, and stub `tmux`, `rex`, `codex`, `tailscale` and
-`ps`, so it cannot see or launch a real worker. It boots under the boot
+The scratch daemon starts from an empty environment with its own home, host
+id (`verify-scratch`), stores, ledgers and operator files, and stub `tmux`,
+`rex`, `codex`, `tailscale`, `hark`, `ps`, `open`, `osascript`, `afplay` and
+`kitty`, so it cannot see or launch a real worker. It boots under the boot
 quarantine like any daemon. It does not replace the deploy: a daemon change
 still runs for the first time on the host in `bin/shuttle-deploy`
 ([build-and-deploy.md](../../../docs/dev/build-and-deploy.md)), and you read the
