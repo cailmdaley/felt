@@ -985,12 +985,12 @@ defmodule Shuttle.Threads do
 
     publish(
       for(
-        {id, record} <- result_publications(entries, own_host, now),
-        do: %{id: id, record: record}
+        {{id, alias}, record} <- result_publications(entries, own_host, now),
+        do: %{id: id, aliases: [alias], record: record}
       ) ++
         for(
-          {id, record, board} <- unblock_publications(entries, own_host, now),
-          do: %{id: id, record: record, board: board}
+          {{id, alias}, record, board} <- unblock_publications(entries, own_host, now),
+          do: %{id: id, aliases: [alias], record: record, board: board}
         )
     )
   end
@@ -1009,9 +1009,7 @@ defmodule Shuttle.Threads do
   end
 
   defp result_publication(entry, parent, own_host, verb, stamp, text, wake) do
-    id =
-      "thread-" <>
-        digest({entry.felt_store, entry.fiber["uid"] || entry.fiber["id"], verb, stamp})
+    {id, legacy} = ids = publication_ids(entry, {verb, stamp})
 
     text = bounded("thread #{address(entry.fiber)} #{verb}: #{text}")
     parent_uid = Map.fetch!(parent.fiber, "uid")
@@ -1046,9 +1044,9 @@ defmodule Shuttle.Threads do
         |> Map.take(["owner", "store", "retained_at", "text", "signal"])
         |> Map.put("session", asker["session"])
 
-      [{id, record}, {id <> "-asker", told}]
+      [{ids, record}, {{id <> "-asker", legacy <> "-asker"}, told}]
     else
-      [{id, record}]
+      [{ids, record}]
     end
   end
 
@@ -1079,7 +1077,7 @@ defmodule Shuttle.Threads do
       blocker_id = blocker["uid"] || address(blocker)
       text = "#{blocker["name"] || address(blocker)} closed"
 
-      {"thread-" <> digest({entry.felt_store, thread, "unblocked", blocker_id, stamp}),
+      {publication_ids(entry, {"unblocked", blocker_id, stamp}),
        parent
        |> routing_record(own_host, stamp)
        |> Map.merge(%{
@@ -1469,9 +1467,7 @@ defmodule Shuttle.Threads do
           uid == (fiber["uid"] || fiber["id"])
 
         nil ->
-          params["message_id"] ==
-            "thread-" <>
-              digest({entry.felt_store, fiber["uid"] || fiber["id"], verb, stamp})
+          params["message_id"] in Tuple.to_list(publication_ids(entry, {verb, stamp}))
 
         _ ->
           false
@@ -1559,6 +1555,16 @@ defmodule Shuttle.Threads do
     Enum.reject(ask ++ exit, fn {_verb, stamp, _text, _wake} ->
       stamp == runtime["orchestrator_acted_at"]
     end)
+  end
+
+  # A publication's id and its alias. The id names the signal by its fiber's
+  # uid, which survives a move between stores. The alias also names the store
+  # holding the thread; a routing inbox may hold the signal under it, and
+  # capture treats it as the same publication.
+  defp publication_ids(entry, signal) do
+    fiber = Tuple.insert_at(signal, 0, entry.fiber["uid"] || entry.fiber["id"])
+
+    {"thread-" <> digest(fiber), "thread-" <> digest(Tuple.insert_at(fiber, 0, entry.felt_store))}
   end
 
   defp digest(term),

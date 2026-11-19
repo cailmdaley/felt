@@ -94,9 +94,12 @@ func threadStamp(r map[string]any) string {
 // producer's id and the routing record. A record with a session is the asker
 // notice for that session; any other names its recipient fiber by
 // parent_uid, marked parent_unresolved until the daemon resolves it.
+// Aliases are other ids of the same publication: a routing inbox entry under
+// any of them, pending or offered, is this publication captured before.
 type ThreadPublication struct {
-	ID     string         `json:"id"`
-	Record map[string]any `json:"record"`
+	ID      string         `json:"id"`
+	Aliases []string       `json:"aliases,omitempty"`
+	Record  map[string]any `json:"record"`
 }
 
 // ThreadEntry is a publication's routing inbox entry. The text and wishes it
@@ -135,14 +138,18 @@ type ThreadCapture struct {
 }
 
 // CaptureThreads enqueues each publication into the routing inbox; one
-// refusal does not stop the others. A publication captured before (pending or
-// offered in the routing inbox) or outside the capture window stores nothing,
+// refusal does not stop the others. A publication captured before under its id
+// or an alias (pending or offered in the routing inbox) or outside the capture
+// window stores nothing,
 // so the first capture fixes the publication whatever a later poll renders.
 // A record with a board line stores it in its entry, which owes the line
 // until BoardLineAppended records it (OwedBoardLines).
 func CaptureThreads(env *sysenv.Env, publications []ThreadPublication) ThreadCapture {
 	c := ThreadCapture{Created: []string{}, Refused: []ThreadRefusal{}}
 	for _, p := range publications {
+		if capturedAs(routingRoot(env), p.Aliases) {
+			continue
+		}
 		entry, err := ThreadEntry(p.ID, p.Record)
 		made := false
 		entry.Created = &made
@@ -156,6 +163,15 @@ func CaptureThreads(env *sysenv.Env, publications []ThreadPublication) ThreadCap
 		}
 	}
 	return c
+}
+
+func capturedAs(root string, ids []string) bool {
+	for _, id := range ids {
+		if _, _, err := routedEntry(root, id); !errors.Is(err, os.ErrNotExist) {
+			return true
+		}
+	}
+	return false
 }
 
 // routedEntry finds a routing inbox entry, pending or offered, by id.
@@ -236,7 +252,7 @@ func ThreadRoutes(env *sysenv.Env) ([]ThreadPublication, error) {
 	}
 	out := []ThreadPublication{}
 	for _, it := range items {
-		out = append(out, ThreadPublication{it.entry.Request.MessageID, it.entry.Routing})
+		out = append(out, ThreadPublication{ID: it.entry.Request.MessageID, Record: it.entry.Routing})
 	}
 	return out, nil
 }

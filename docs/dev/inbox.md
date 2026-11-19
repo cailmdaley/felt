@@ -224,8 +224,9 @@ A thread's owner captures its close, ask, handoff, rest and verdict publications
 There is no thread publication queue outside the inbox.
 Each poll's delivery task captures in one `shuttle inbox thread-put` call, made even when it has nothing to capture, after skipping signals older than the 14-day retention window; the Poller itself shells nothing for threads, and a failed capture is logged and repeated by the next poll.
 `thread-put` tries every publication and reports the ones the inbox refused, such as a close whose text is over 64 KiB; the daemon logs each refusal, and one refused publication never stops the rest.
-The producer keeps its exact lifecycle-derived ids.
-A re-capture finds the id pending or offered in the routing inbox and stores nothing, so the first capture fixes the publication and its wishes even when a later poll renders an edited outcome.
+A publication's id is derived from its signal: the thread's uid, the verb and the stamp (an unblock note adds its blocker), never the store, so a thread whose tree moves to another store keeps its ids.
+The daemon passes each publication's `aliases` too: the id that also names the store holding the thread, under which a routing inbox may hold the signal.
+A re-capture finds the id or an alias pending or offered in the routing inbox and stores nothing, so the first capture fixes the publication and its wishes even when a later poll renders an edited outcome.
 `Enqueue` stores a routing entry only when its stamp is after the capture baseline (`mailboxes/threads.json`, below) and, like every inbox entry, at most 14 days old.
 An unblock note carries its board line, which its entry stores and owes until the line is appended: every `thread-put` call, after capturing, appends each line the routing inbox's entries owe, pending or offered, then records it in the entry.
 The line appended is the board record the first capture stored, never a later poll's rendering, and its board id is `brd-<publication id>`, so a repeat after an append whose record was lost replaces the line rather than adding one.

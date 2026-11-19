@@ -83,17 +83,17 @@ func TestThreadCaptureKeepsFirstPublicationInsideItsWindow(t *testing.T) {
 	env := testEnv(t)
 	state := bootThread(t, env)
 	record := threadRecord()
-	if got := capture(t, env, ThreadPublication{"thread-a", record}); len(got) != 1 {
+	if got := capture(t, env, ThreadPublication{ID: "thread-a", Record: record}); len(got) != 1 {
 		t.Fatal(got)
 	}
 	edited := threadRecord()
 	edited["text"] = "edited outcome"
-	if got := capture(t, env, ThreadPublication{"thread-a", edited}); len(got) != 0 {
+	if got := capture(t, env, ThreadPublication{ID: "thread-a", Record: edited}); len(got) != 0 {
 		t.Fatal("recapture created", got)
 	}
 	old := threadRecord()
 	old["retained_at"] = state.Baseline
-	if got := capture(t, env, ThreadPublication{"thread-history", old}); len(got) != 0 {
+	if got := capture(t, env, ThreadPublication{ID: "thread-history", Record: old}); len(got) != 0 {
 		t.Fatal("a stamp at the baseline was captured", got)
 	}
 	got := routes(t, env)
@@ -129,7 +129,7 @@ func TestThreadCaptureReadsElixirStampsAsWritten(t *testing.T) {
 	for id, stamp := range stamps {
 		r := threadRecord()
 		r["retained_at"] = stamp
-		capture(t, env, ThreadPublication{id, r})
+		capture(t, env, ThreadPublication{ID: id, Record: r})
 	}
 	got := map[string]string{}
 	for _, p := range routes(t, env) {
@@ -151,7 +151,7 @@ func TestRoutingInboxHasNoAdmissionCap(t *testing.T) {
 	bootThread(t, env)
 	var publications []ThreadPublication
 	for i := 0; i < 200; i++ {
-		publications = append(publications, ThreadPublication{fmt.Sprintf("thread-%d", i), threadRecord()})
+		publications = append(publications, ThreadPublication{ID: fmt.Sprintf("thread-%d", i), Record: threadRecord()})
 	}
 	if got := capture(t, env, publications...); len(got) != 200 {
 		t.Fatal(len(got))
@@ -162,7 +162,7 @@ func TestRouteForwardsAResolvedRemoteResultUntilSettled(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	bootThread(t, env)
-	capture(t, env, ThreadPublication{"thread-f", threadRecord()})
+	capture(t, env, ThreadPublication{ID: "thread-f", Record: threadRecord()})
 	for _, f := range []RouteFacts{{ID: "thread-f", Current: "unknown"}, {ID: "thread-f", Current: "true"}} {
 		if got := route(t, env, f); got.Action != "wait" {
 			t.Fatal("unresolved", got)
@@ -194,7 +194,7 @@ func TestRouteForwardsAResolvedRemoteResultUntilSettled(t *testing.T) {
 	if offeredRoute(t, env, "thread-f").Disposition != "forwarded" || len(routes(t, env)) != 0 {
 		t.Fatal("not settled")
 	}
-	if got := capture(t, env, ThreadPublication{"thread-f", threadRecord()}); len(got) != 0 {
+	if got := capture(t, env, ThreadPublication{ID: "thread-f", Record: threadRecord()}); len(got) != 0 {
 		t.Fatal("a settled publication was captured again")
 	}
 }
@@ -203,7 +203,7 @@ func TestRoutePlacesALocalResultAsAnOrdinaryEntry(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	bootThread(t, env)
-	capture(t, env, ThreadPublication{"thread-l", threadRecord()})
+	capture(t, env, ThreadPublication{ID: "thread-l", Record: threadRecord()})
 	f := resolved("host")
 	f.ID = "thread-l"
 	if got := route(t, env, f); got.Action != "placed" {
@@ -239,7 +239,7 @@ func TestRouteResolvedPastTheAskingFiberWakesTheAskingSession(t *testing.T) {
 		r := threadRecord()
 		r["asked_by"] = map[string]any{"session": "shuttle://host/claude/asker", "fiber": "anchor"}
 		r["signal"] = map[string]any{"uid": "child", "verb": "closed", "stamp": r["retained_at"], "owner": "host"}
-		capture(t, env, ThreadPublication{"thread-a", r})
+		capture(t, env, ThreadPublication{ID: "thread-a", Record: r})
 		f := resolved(owner)
 		f.ID = "thread-a"
 		// A forward repeats until settled, and the repeat carries the stored
@@ -268,7 +268,7 @@ func TestRouteResolvedPastTheAskingFiberWakesTheAskingSession(t *testing.T) {
 	bootThread(t, env)
 	r := threadRecord()
 	r["asked_by"] = map[string]any{"session": "shuttle://host/claude/asker", "fiber": "parent"}
-	capture(t, env, ThreadPublication{"thread-b", r})
+	capture(t, env, ThreadPublication{ID: "thread-b", Record: r})
 	f := resolved("host")
 	f.ID = "thread-b"
 	if got := route(t, env, f); got.Action != "placed" {
@@ -288,7 +288,7 @@ func TestRouteIntoAFullRecipientWaitsWithoutLosingTheResult(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	capture(t, env, ThreadPublication{"thread-full", threadRecord()})
+	capture(t, env, ThreadPublication{ID: "thread-full", Record: threadRecord()})
 	f := resolved("host")
 	f.ID = "thread-full"
 	if _, err := RouteThread(env, f); ErrorCode(err) != "queue_full" {
@@ -303,12 +303,12 @@ func TestRouteSettlesSupersededAndExpiredWithoutHandoff(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	bootThread(t, env)
-	capture(t, env, ThreadPublication{"thread-s", threadRecord()})
+	capture(t, env, ThreadPublication{ID: "thread-s", Record: threadRecord()})
 	if got := route(t, env, RouteFacts{ID: "thread-s", Current: "false"}); got.Action != "superseded" {
 		t.Fatal(got)
 	}
 	// An entry stored inside the window expires while it waits.
-	capture(t, env, ThreadPublication{"thread-e", threadRecord()})
+	capture(t, env, ThreadPublication{ID: "thread-e", Record: threadRecord()})
 	path := filepath.Join(routingRoot(env), "pending", mailboxKey("thread-e")+".json")
 	e, _ := readFiberMailboxEntry(path)
 	e.Request.RetainedAt = time.Now().Add(-15 * 24 * time.Hour).UTC().Format(time.RFC3339Nano)
@@ -323,7 +323,7 @@ func TestWaitingRouteDoesNotRewriteItsEntry(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	bootThread(t, env)
-	capture(t, env, ThreadPublication{"thread-w", threadRecord()})
+	capture(t, env, ThreadPublication{ID: "thread-w", Record: threadRecord()})
 	f := resolved("remote")
 	f.ID, f.Current = "thread-w", "unknown"
 	route(t, env, f)
@@ -342,7 +342,7 @@ func TestAskerNoticeRoutesToItsSessionAndSettlesFinal(t *testing.T) {
 	env := testEnv(t)
 	bootThread(t, env)
 	record := map[string]any{"owner": "host", "store": "/store", "session": "shuttle://remote/claude/asker", "text": "thread hub/child asked: which?", "retained_at": time.Now().UTC().Format(time.RFC3339Nano)}
-	capture(t, env, ThreadPublication{"thread-x-asker", record})
+	capture(t, env, ThreadPublication{ID: "thread-x-asker", Record: record})
 	if got := route(t, env, RouteFacts{ID: "thread-x-asker", Current: "unknown"}); got.Action != "wait" {
 		t.Fatal(got)
 	}
@@ -378,12 +378,12 @@ func TestThreadInboxStateIsTheBaselineAlone(t *testing.T) {
 	if got := bootThread(t, env); got.Baseline != baseline {
 		t.Fatal(got)
 	}
-	if got := capture(t, env, ThreadPublication{"thread-recent", threadRecord()}); len(got) != 1 {
+	if got := capture(t, env, ThreadPublication{ID: "thread-recent", Record: threadRecord()}); len(got) != 1 {
 		t.Fatal("a recent stamp was refused", got)
 	}
 	expired := threadRecord()
 	expired["retained_at"] = time.Now().Add(-15 * 24 * time.Hour).UTC().Format(time.RFC3339Nano)
-	if got := capture(t, env, ThreadPublication{"thread-expired", expired}); len(got) != 0 {
+	if got := capture(t, env, ThreadPublication{ID: "thread-expired", Record: expired}); len(got) != 0 {
 		t.Fatal("an expired stamp was captured", got)
 	}
 }
@@ -435,7 +435,7 @@ func TestOwedBoardLineExpiresWithItsOfferedEntry(t *testing.T) {
 	for _, id := range []string{"thread-owed", "thread-appended"} {
 		record := threadRecord()
 		record["board"] = map[string]any{"kind": "unblocked", "fiber": "a", "text": id}
-		capture(t, env, ThreadPublication{id, record})
+		capture(t, env, ThreadPublication{ID: id, Record: record})
 		f := resolved("host")
 		f.ID = id
 		route(t, env, f)
