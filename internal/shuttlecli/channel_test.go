@@ -56,7 +56,7 @@ func TestShuttleChannelRefusesInvalidArgumentsWithoutWriting(t *testing.T) {
 	for _, args := range [][]string{
 		{"channel", "hub"}, {"channel", "hub", ""}, {"channel", "hub", "   "},
 		{"channel", "hub", "two\nlines"}, {"channel", "hub", "name", "--clear"},
-		{"channel", "note", "name"},
+		{"channel", "note", "name"}, {"channel", "hub", "--", "-x"}, {"channel", "hub", "--", "--help"}, {"channel", "hub", "#alpha"},
 	} {
 		if _, err := runIn(t, env, dir, args...); err == nil {
 			t.Fatalf("%q: accepted", args)

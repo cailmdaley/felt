@@ -51,6 +51,8 @@ const SHADOW_PX = 24
 const POST_PX = 64
 /** How many of a clear's records are written at once: each write is a process in the daemon. */
 const CLEAR_WRITES = 4
+/** A channel written here is shown so this long at most before the feed's word stands, whatever it says. */
+const MOVED_MS = 60_000
 /** A stream within this many pixels of its foot follows what arrives. */
 const FOLLOW_PX = 24
 /** Jump to lists at most this many documents beneath the channels it matches. */
@@ -189,8 +191,8 @@ export class ChannelsView implements TemporalView {
   private drawer = false
   private dismissed: string[] = []
   private pending: string[] = []
-  /** Channels written here, by fiber, until the feed carries them: a spelling, or null for none. */
-  private moved = new Map<string, string | null>()
+  /** Channels written here, by fiber, until the feed carries them or {@link MOVED_MS} passes: a spelling, or null for none. */
+  private moved = new Map<string, { to: string | null; at: number }>()
   /** Each line's clear still being written, by the line's id: the wait it cleared, and its writes (the clear's, and its undo's once asked) settling. */
   private readonly lineClears = new Map<string, { clears?: string; settled: Promise<unknown> }>()
   private pinned = new Map<string, number>()
@@ -380,9 +382,10 @@ export class ChannelsView implements TemporalView {
     const patched = new Map<string, KanbanCard>()
     const patch = (card: KanbanCard): KanbanCard => {
       const uid = fiberOf(card)
-      if (!this.moved.has(uid)) return card
-      const want = this.moved.get(uid) ?? undefined
-      if ((card.shuttleChannel?.trim() || undefined) === want) { this.moved.delete(uid); return card }
+      const move = this.moved.get(uid)
+      if (!move) return card
+      const want = move.to ?? undefined
+      if ((card.shuttleChannel?.trim() || undefined) === want || Date.now() - move.at > MOVED_MS) { this.moved.delete(uid); return card }
       return patched.get(uid) ?? patched.set(uid, { ...card, shuttleChannel: want }).get(uid)!
     }
     return composeChannels({
@@ -585,7 +588,7 @@ export class ChannelsView implements TemporalView {
       pick.toggleAttribute('data-waiting', channel.waiting)
       pick.append(el('span', 'kbn-ch-pick-hash', '#'), el('span', 'kbn-ch-pick-name', channel.name))
       if (channel.hidden) pick.append(el('span', 'kbn-ch-pick-hidden', 'hidden'))
-      // A ringed count means one of two things: in gold, how many wait on the human; in the ink, how many are new since this device last read it.
+      // One count of two kinds, drawn apart: a gold disc, how many wait on the human; an ink ring, how many lines are new since this device last read it.
       if (channel.waiting || unread.get(channel.key)) {
         const count = channel.waiting ? Math.max(1, owed.get(channel.key)!) : unread.get(channel.key)!
         const mark = el('span', channel.waiting ? 'kbn-ch-pick-mark' : 'kbn-ch-pick-unread', String(count))
@@ -925,7 +928,7 @@ export class ChannelsView implements TemporalView {
   /**
    * A line's ✓, on every post, question and file line: the line leaves the
    * stream; a waiting post stops waiting, and a worker's waiting question is
-   * withdrawn, read with nothing to answer. A close that waits is given its
+   * withdrawn, read with nothing to answer ({@link withdraw}). A close that waits is given its
    * verdict, and a blocked turn its fix, not a ✓.
    */
   private check(item: Item): HTMLButtonElement | undefined {
@@ -945,14 +948,15 @@ export class ChannelsView implements TemporalView {
    * soon as the line leaves, for a few seconds, and restores both: what was
    * written is written back, and what was not yet written never is. The
    * line's records are written a few at a time ({@link CLEAR_WRITES}). A
-   * worker's waiting question is withdrawn on its owner once the undo has
-   * lapsed. A refused write brings back what it would have taken and says so. A line
+   * worker's waiting question is withdrawn instead ({@link withdraw}). A
+   * refused write brings back what it would have taken and says so. A line
    * cleared again before its last clear's writes (and their undo's) land
    * waits for them, so it clears what waits then.
    */
   private async clearLine(item: Item, done: HTMLButtonElement): Promise<void> {
     const ctx = this.ctx, board = ctx?.workspace?.board
     if (!ctx) return
+    if (withdraws(item)) return this.withdraw(item, ctx)
     const row = done.closest('.kbn-ch-item'), held = row?.contains(document.activeElement)
     const next = [...this.stream?.querySelectorAll<HTMLElement>(':scope > .kbn-ch-item') ?? []]
     const after = (next[next.indexOf(row as HTMLElement) + 1] ?? next[next.indexOf(row as HTMLElement) - 1])?.querySelector<HTMLElement>('[data-item]')?.dataset.item
@@ -982,14 +986,8 @@ export class ChannelsView implements TemporalView {
     // Each line's write once it starts, true when it was written.
     const sent = new Map<(typeof lines)[number], Promise<boolean>>()
     let undone = false
-    // A question is withdrawn only once its undo lapses, since nothing writes it back; refused, its line comes back with it.
-    const withdrawal = withdraws(item) ? window.setTimeout(() => {
-      postDaemonJson(ctx.shuttleBase, '/api/v1/lifecycle', { action: 'ask-clear', fiber: item.card.id, origin: item.card.originId }, 'Clear failed')
-        .then(() => ctx.requestRefresh(), () => { undo(); this.status(`${item.card.name}'s question could not be withdrawn; it still waits.`) })
-    }, CLEAR_UNDO_MS) : 0
     const undo = (): void => {
       undone = true
-      window.clearTimeout(withdrawal)
       // A line not yet written is never written; one written, or on its way, is brought back once it lands.
       drop(lines.filter(line => !sent.has(line)).map(line => line.key))
       const backAt = Date.now(), backs = [...sent.keys()].map(line => ({ line, key: unclearLineKey(line.id, backAt) }))
@@ -1026,6 +1024,33 @@ export class ChannelsView implements TemporalView {
     this.draw()
     this.status(cleared !== undefined ? `${item.card.name}'s line could not be taken from the stream; it no longer waits.`
       : refused < lines.length ? `Some of ${item.card.name}'s files could not be taken from the stream.` : `${item.card.name}'s line could not be cleared; it is as it was.`)
+  }
+  /**
+   * A worker's waiting question, read with nothing to answer: it is withdrawn
+   * on its owner (`/lifecycle` ask-clear), and once that lands its line leaves
+   * the stream. It has no undo, since nothing writes a question back; while
+   * the withdrawal is in flight its line is out of sight here, and a refused
+   * one brings it back and says so.
+   */
+  private async withdraw(item: Item, ctx: ViewContext): Promise<void> {
+    const at = Date.now(), fiber = fiberOf(item.card), keys = lineIds(item).map(id => clearLineKey(id, at))
+    this.pending.push(...keys)
+    this.draw()
+    try {
+      await postDaemonJson(ctx.shuttleBase, '/api/v1/lifecycle', { action: 'ask-clear', fiber: item.card.id, origin: item.card.originId }, 'Clear failed')
+    } catch {
+      this.pending = this.pending.filter(key => !keys.includes(key))
+      this.draw()
+      this.status(`${item.card.name}'s question could not be withdrawn; it still waits.`)
+      return
+    }
+    showToast(`Withdrew ${slug(item.card)}'s question.`)
+    ctx.requestRefresh()
+    const written = await fewAtATime(keys, CLEAR_WRITES, key => postDaemonJson(ctx.shuttleBase, '/api/v1/channels/dismiss', { key, fiber }, 'Clear failed').then(() => true, () => false))
+    if (written.every(Boolean)) return
+    this.pending = this.pending.filter(key => !keys.includes(key))
+    this.draw()
+    this.status(`${item.card.name}'s question no longer waits, but its line could not be taken from the stream.`)
   }
   /**
    * An item's files below its words, each on a line of its own as wide as the
@@ -1148,70 +1173,75 @@ export class ChannelsView implements TemporalView {
       ...channel.misc ? [] : [{ label: `Archive #${channel.name}: its threads go to #misc`, run: () => { void this.archive(channel) } }],
     ], channel.name, point)
   }
-  /** The families a channel holds, each as its top-level's row, to choose one to move. */
+  /** The heads a channel holds (each member whose orchestrator speaks elsewhere), each as its row, to choose one to move. */
   private familyMenu(channel: Channel, anchor: HTMLElement, point?: { x: number; y: number }): void {
-    const waits = this.ctx!.workspace!.board.waiting, now = Date.now(), cards = boardCards(this.ctx!.response)
-    const tops = channel.families.flatMap(uid => cards.find(card => fiberOf(card) === uid) ?? [])
-    openActionMenu(anchor, ranked(tops, waits).map(card => ({
-      label: card.name, content: threadRow(card, { waits, now }), run: () => { this.moveFamily(card) },
+    const waits = this.ctx!.workspace!.board.waiting, now = Date.now()
+    openActionMenu(anchor, ranked([...channel.heads], waits).map(card => ({
+      label: card.name, content: threadRow(card, { waits, now }), run: () => { this.moveFamily(card, channel) },
     })), `Move a thread from #${channel.name}`, point)
   }
-  /** The top-level of a constitution's family, whose channel its threads speak in. */
-  private topOf(card: KanbanCard): KanbanCard {
-    const index = threadIndexFor(this.ctx!.response)
-    let top = card
-    for (let up = index.parentOf(top); up; up = index.parentOf(top)) top = up
-    return top
-  }
-  /** Asks where a family goes, and writes its top-level's channel there. */
-  private moveFamily(card: KanbanCard): void {
-    const top = this.topOf(card), here = this.channels.find(channel => channel.everyone.some(each => fiberOf(each) === fiberOf(top)))
-    const choices = this.channels.filter(channel => !channel.misc).map(channel => ({ name: channel.name, spelling: channel.spelling }))
-    channelPicker(`${slug(top)} and its threads`, here?.name ?? MISC, choices, spelling => {
-      const was = top.shuttleChannel?.trim() || null
-      void this.writeChannels([{ card: top, to: spelling, was }], `${slug(top)} moved to #${spelling === null ? MISC : spelling.trim().toLowerCase().replace(/ /g, '-')}.`)
-    })
-  }
-  /** Archives a channel: every constitution that names it, closed ones too, names none, so its live members speak in misc; nothing is tempered. */
-  private async archive(channel: Channel): Promise<void> {
-    const live = channel.members.length
-    await this.writeChannels(channel.declarers.map(card => ({ card, to: null, was: card.shuttleChannel!.trim() })),
-      `#${channel.name} archived: its ${live === 1 ? 'thread speaks' : `${live} threads speak`} in #misc.`)
+  /** A card's channel as this view shows it: what it declares, with what was written here and not yet carried by the feed. */
+  private declared(card: KanbanCard): string | null {
+    const move = this.moved.get(fiberOf(card))
+    return move ? move.to : card.shuttleChannel?.trim() || null
   }
   /**
-   * Writes each card's channel through its owner (`/lifecycle` channel), shown
-   * here at once, with an undo for a few seconds that writes back what each
-   * had. A refused write takes back what it would have changed and says so.
+   * Asks where a head and the threads under it go, and writes its channel
+   * there. To #misc it clears its own channel, or writes `misc` when the
+   * constitution above it (its orchestrator, else what it is filed under)
+   * would still give it one.
+   */
+  private moveFamily(head: KanbanCard, here: Channel): void {
+    const choices = this.channels.filter(channel => !channel.misc).map(channel => ({ name: channel.name, spelling: channel.spelling }))
+    const cards = boardCards(this.ctx!.response), index = threadIndexFor(this.ctx!.response)
+    const filed = (id: string): KanbanCard | undefined => id.includes('/') ? cards.find(card => card.id === id.slice(0, id.lastIndexOf('/'))) ?? filed(id.slice(0, id.lastIndexOf('/'))) : undefined
+    const above = index.parentOf(head) ?? filed(head.id)
+    const inherits = !!above && !this.channels.find(channel => channel.everyone.some(each => fiberOf(each) === fiberOf(above)))?.misc
+    channelPicker(`${slug(head)} and its threads`, here.name, choices, spelling => {
+      const to = spelling ?? (inherits ? MISC : null)
+      void this.writeChannels([{ card: head, to, was: this.declared(head) }], `${slug(head)} moved to #${spelling === null ? MISC : spelling.trim().toLowerCase().replace(/ /g, '-')}.`)
+    })
+  }
+  /** Archives a channel: every constitution that names it, closed ones too, names none; nothing is tempered. */
+  private async archive(channel: Channel): Promise<void> {
+    await this.writeChannels(channel.declarers.map(card => ({ card, to: null, was: this.declared(card) })),
+      `#${channel.name} archived: its threads speak in #misc, or in a channel above them.`)
+  }
+  /**
+   * Writes each card's channel through its owner (`/lifecycle` channel), all
+   * shown here at once, with an undo for a few seconds that writes back what
+   * each had. A refused write takes back what it would have changed and says so.
    */
   private async writeChannels(moves: ReadonlyArray<{ card: KanbanCard; to: string | null; was: string | null }>, said: string): Promise<void> {
     const ctx = this.ctx
     if (!ctx || !moves.length) return
-    const write = async (each: { card: KanbanCard }, to: string | null): Promise<boolean> => {
-      this.moved.set(fiberOf(each.card), to)
-      try {
-        await postDaemonJson(ctx.shuttleBase, '/api/v1/lifecycle', { action: 'channel', fiber: each.card.id, origin: each.card.originId, channel: to }, 'Move failed')
-        return true
-      } catch {
-        this.moved.delete(fiberOf(each.card))
-        return false
-      }
-    }
     const run = async (to: (each: (typeof moves)[number]) => string | null, failed: string): Promise<void> => {
-      const done = await fewAtATime(moves, CLEAR_WRITES, each => write(each, to(each)))
+      const entries = moves.map(each => { const entry = { to: to(each), at: Date.now() }; this.moved.set(fiberOf(each.card), entry); return entry })
+      this.draw()
+      const done = await fewAtATime(moves, CLEAR_WRITES, async each => {
+        const entry = entries[moves.indexOf(each)]
+        try {
+          await postDaemonJson(ctx.shuttleBase, '/api/v1/lifecycle', { action: 'channel', fiber: each.card.id, origin: each.card.originId, channel: entry.to }, 'Move failed')
+          return true
+        } catch {
+          // A later write of the same card stands.
+          if (this.moved.get(fiberOf(each.card)) === entry) this.moved.delete(fiberOf(each.card))
+          return false
+        }
+      })
       this.draw()
       ctx.requestRefresh()
       if (!done.every(Boolean)) this.status(failed)
     }
     const doing = run(each => each.to, `Some channels could not be written; those stay as they were.`)
-    this.draw()
     showToast(said, 'success', CLEAR_UNDO_MS, () => { void doing.then(() => run(each => each.was, `Some channels could not be written back.`)) })
     await doing
   }
   /** Every channel's key in the human's order. */
-  private arrangement(): string[] { return arranged(this.channels, this.order).map(channel => channel.key) }
+  private arrangement(): string[] { return arranged(this.channels.filter(channel => !channel.misc), this.order).map(channel => channel.key) }
   /** A move landed in the rail: the channels it shows that do not wait take the order they were dropped in. */
   private reorder(keys: string[]): void {
-    const waiting = new Set(this.channels.filter(channel => channel.waiting).map(channel => channel.key))
+    const waiting = new Set(this.channels.filter(channel => channel.waiting || channel.misc).map(channel => channel.key))
     void this.writeOrder(reordered(this.arrangement(), keys.filter(key => !waiting.has(key))))
   }
   /** Keeps the human's order here at once and across the fleet once the daemon has it. */

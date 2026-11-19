@@ -72,7 +72,7 @@ One line a thread addressed to the human.
 | Head | the thread's slug in its line's colour, its role, the age; the kind word only for an ask, a close (for review, closed) or a block |
 | Text | Markdown, at prose size |
 | Files | a row of file previews below the text; a fiber's newest close in the stream leads them with its tapestry |
-| Clear | ✓ at the head's right, on every post, question and file line, and `e` on the line in focus: one press takes the line from the stream and, for a waiting post, stops it waiting too, with one undo for both; a worker's waiting question (`shuttle.ask`) is withdrawn on its owner once that undo lapses (`/lifecycle` `ask-clear`), since nothing writes it back; a close that waits is given its verdict and a blocked turn its fix, not a ✓ |
+| Clear | ✓ at the head's right, on every post, question and file line, and `e` on the line in focus: one press takes the line from the stream and, for a waiting post, stops it waiting too, with one undo for both; a worker's waiting question (`shuttle.ask`) is instead withdrawn on its owner (`/lifecycle` `ask-clear`) and its line taken once that lands, with no undo, since nothing writes a question back; a close that waits is given its verdict and a blocked turn its fix, not a ✓ |
 
 A clear is remembered as one `line:<ms>:<id>` record per line it took (a post by its id, a file item by each send it showed, so a send it did not show still appears) and, for a waiting post, `clear:<uid>:<ms>`; records are written four at a time, and the undo writes back only what was written. A line cleared again while its last clear, or that clear's undo, is still being written waits for those writes, so it sees whether its post waits.
 

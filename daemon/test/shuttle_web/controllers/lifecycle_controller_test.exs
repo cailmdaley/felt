@@ -705,6 +705,25 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     refute File.exists?(args_file)
   end
 
+  test "a channel name that starts with a dash is refused before shelling, so it is never read as a flag" do
+    fixture_store!("shuttle-lifecycle-channel-dash", "tests/hub", "Hub")
+    args_file = install_fake_cli!()
+
+    for channel <- ["--help", "--clear", "-x"] do
+      conn =
+        post(
+          api_conn(),
+          "/api/v1/lifecycle",
+          Jason.encode!(%{"action" => "channel", "fiber" => "tests/hub", "channel" => channel})
+        )
+
+      assert conn.status in 400..499
+      assert conn.resp_body =~ "must not start with"
+    end
+
+    refute File.exists?(args_file)
+  end
+
   # The real CLI writes the channel on a closed constitution and removes it,
   # leaving the rest of the document as it was; ask-clear removes a question.
   @tag :tmp_dir

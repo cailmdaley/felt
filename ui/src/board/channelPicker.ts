@@ -30,7 +30,9 @@ export function channelPicker(subject: string, current: string, choices: readonl
   dialog.append(scrim)
   document.body.append(dialog)
 
-  const key = (name: string): string => name.trim().toLowerCase().replace(/ /g, '-')
+  // The rail writes every channel with a `#`, so a typed one means the same name.
+  const bare = (name: string): string => name.trim().replace(/^#+\s*/, '')
+  const key = (name: string): string => bare(name).toLowerCase().replace(/ /g, '-')
   const finish = (spelling: string | null): void => { close(); submit(spelling) }
   const option = (label: string, hint: string, pick: () => void, here = false): HTMLLIElement => {
     const item = el('li', '')
@@ -44,7 +46,7 @@ export function channelPicker(subject: string, current: string, choices: readonl
     return item
   }
   const paint = (): void => {
-    const typed = field.value.trim(), wanted = key(typed)
+    const typed = bare(field.value), wanted = key(typed)
     const shown = choices.filter(choice => !wanted || choice.name.includes(wanted))
     const items = shown.map(choice => option(`#${choice.name}`, '', () => finish(choice.spelling), choice.name === current))
     if (typed && wanted !== 'misc' && !choices.some(choice => choice.name === wanted)) items.unshift(option(`#${wanted}`, 'new channel', () => finish(typed)))

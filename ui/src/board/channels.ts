@@ -25,6 +25,8 @@ export interface Channel {
   declarers: KanbanCard[]
   /** Every live constitution in it. */
   members: KanbanCard[]
+  /** Its live members whose orchestrator speaks elsewhere: what a move takes, each with the threads under it. */
+  heads: KanbanCard[]
   /** Every constitution in it, archived ones too, for resolving what they said. */
   everyone: KanbanCard[]
   /** The uids of the families its live members belong to, each family's top-level; the catch-all's are those of its listed members. */
@@ -188,7 +190,7 @@ export function composeChannels(input: {
     const spelling = misc ? '' : eldest(declarers.filter(card => keyOf(card) === key))?.shuttleChannel?.trim() ?? key.slice(8)
     channels.push({
       key, name: misc ? MISC : key.slice(8).replace(/ /g, '-'), title: seat?.name ?? 'Every constitution without a channel', misc, seat, spelling,
-      declarers, members, everyone,
+      declarers, members, heads, everyone,
       families: [...new Set(speaking.map(card => fiberOf(topOf(card))))],
       newest, waiting, active, pinned: isPinned, hidden,
       listed: !hidden && (waiting || isPinned || now - active <= RECENT_MS),

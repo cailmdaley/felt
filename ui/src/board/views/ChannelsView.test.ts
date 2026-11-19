@@ -541,31 +541,27 @@ it('clears a waiting post with one press of its ✓: it leaves the stream and st
   expect(host.querySelector('[data-channel="channel:cmbx"]')!.hasAttribute('data-waiting')).toBe(true)
 })
 
-it('withdraws a worker\'s waiting question with its ✓ once the undo lapses, the line leaving at once; an undo writes nothing to the worker', async () => {
+it('withdraws a worker\'s waiting question with its ✓, then takes its line from the stream; a refused withdrawal leaves both', async () => {
   const { posts } = daemon()
   const { host } = await mount()
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-  try {
-    const lifecycle = () => posts.filter(([url]) => url.endsWith('/lifecycle'))
-    const check = () => item(host, 'mask').querySelector<HTMLButtonElement>('.kbn-ch-clear')!
-    expect(check().getAttribute('aria-label')).toBe('Clear Cluster mask\'s question')
-    // Undone inside the window, the question stands: its line comes back and nothing reaches the worker.
-    check().click()
-    await settle(); await settle()
-    expect(item(host, 'mask')).toBeUndefined()
-    document.querySelector<HTMLButtonElement>('.shuttle-toast .toast-undo')!.click()
-    await settle(); await settle()
-    vi.advanceTimersByTime(CLEAR_UNDO_MS)
-    await settle()
-    expect([item(host, 'mask') !== undefined, lifecycle()]).toStrictEqual([true, []])
-    // Left to lapse, it is withdrawn on its owner.
-    check().click()
-    await settle(); await settle()
-    expect(posts.at(-1)?.[1]).toMatchObject({ key: expect.stringMatching(/^line:\d+:ask:M:\d+$/) })
-    vi.advanceTimersByTime(CLEAR_UNDO_MS)
-    await settle()
-    expect(lifecycle()).toStrictEqual([['/api/v1/lifecycle', { action: 'ask-clear', fiber: 'cmbx/mask', origin: mask.originId }]])
-  } finally { vi.runOnlyPendingTimers(); vi.useRealTimers() }
+  const check = () => item(host, 'mask').querySelector<HTMLButtonElement>('.kbn-ch-clear')!
+  expect(check().getAttribute('aria-label')).toBe('Clear Cluster mask\'s question')
+  check().click()
+  await settle(); await settle(); await settle()
+  // The question first, on its owner; its line once that has landed.
+  expect(posts.slice(-2)).toStrictEqual([
+    ['/api/v1/lifecycle', { action: 'ask-clear', fiber: 'cmbx/mask', origin: mask.originId }],
+    ['/api/v1/channels/dismiss', { key: expect.stringMatching(/^line:\d+:ask:M:\d+$/), fiber: 'M' }],
+  ])
+  expect(item(host, 'mask')).toBeUndefined()
+})
+
+it('keeps a question and its line when its owner refuses the withdrawal', async () => {
+  const { posts } = daemon(['/api/v1/lifecycle'])
+  const { host } = await mount()
+  item(host, 'mask').querySelector<HTMLButtonElement>('.kbn-ch-clear')!.click()
+  await settle(); await settle(); await settle()
+  expect([posts.filter(([url]) => url.endsWith('/dismiss')), item(host, 'mask') !== undefined]).toStrictEqual([[], true])
 })
 
 it('clears a line that waits on no one from the stream, with e as with its ✓, and an undo brings it back', async () => {
@@ -890,7 +886,7 @@ it('archives a channel: every constitution that names it, closed ones too, names
     { action: 'channel', fiber: 'cmbx-old', origin: earlier.originId, channel: null },
   ])
   expect(rail(host)).toStrictEqual(['van', 'misc'])
-  expect(document.querySelector('.shuttle-toast')!.textContent).toContain('#cmbx archived: its 4 threads speak in #misc.')
+  expect(document.querySelector('.shuttle-toast')!.textContent).toContain('#cmbx archived: its threads speak in #misc, or in a channel above them.')
   document.querySelector<HTMLButtonElement>('.shuttle-toast .toast-undo')!.click()
   await settle(); await settle()
   expect(lifecycles(posts).slice(-2).map(body => [body.fiber, body.channel])).toStrictEqual([['cmbx', 'cmbx'], ['cmbx-old', 'cmbx']])
@@ -904,4 +900,28 @@ it('takes a move back and says so when the owner refuses it', async () => {
   await menuItem('Archive #van')
   expect(lifecycles(posts)).toHaveLength(1)
   expect([rail(host), host.querySelector('.kbn-ch-note, [role="status"]')?.textContent ?? '']).toStrictEqual([['van', 'cmbx'], expect.stringContaining('could not be written')])
+})
+
+it('moves to misc a family whose channel comes from a closed constitution it is filed under by writing misc, and leaves misc out of the order', async () => {
+  const { posts } = daemon()
+  const alpha = card({ id: 'alpha', uid: 'A0', name: 'Alpha', shuttleChannel: 'Alpha', status: 'closed', column: 'tempered' })
+  const kid = card({ id: 'alpha/kid', uid: 'AK', name: 'Kid', ...working(2) })
+  const stray = card({ id: 'stray', uid: 'ST', name: 'Stray', ...working(3) })
+  const { host } = await mount([chair, tsz, alpha, kid, stray])
+  host.querySelector('[data-channel="channel:alpha"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 30 }))
+  await menuItem('Move a thread')
+  await menuItem('kid')
+  const field = document.querySelector<HTMLInputElement>('.kbn-move-field')!
+  // A typed # names the same channel.
+  field.value = '#misc'
+  field.dispatchEvent(new Event('input'))
+  expect([...document.querySelectorAll('.kbn-move-option .kbn-move-name')].map(each => each.textContent)).toStrictEqual(['#misc'])
+  field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+  await settle(); await settle()
+  expect(lifecycles(posts)).toStrictEqual([{ action: 'channel', fiber: 'alpha/kid', origin: kid.originId, channel: 'misc' }])
+  expect(rail(host)).toStrictEqual(['cmbx', 'misc'])
+  // Moving a channel to the bottom writes the named channels alone.
+  host.querySelector('[data-channel="channel:cmbx"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 30 }))
+  await menuItem('Move to bottom')
+  expect(posts.filter(([url]) => url.endsWith('/channels/order')).at(-1)?.[1]).toStrictEqual({ keys: ['channel:cmbx'] })
 })

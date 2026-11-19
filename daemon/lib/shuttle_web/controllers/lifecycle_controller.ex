@@ -305,6 +305,10 @@ defmodule ShuttleWeb.LifecycleController do
 
   # A string names the channel, which the CLI trims and validates; null or an
   # absent key clears it.
+  # A name that starts with a dash would be read as a flag, so it is refused here, as the verb refuses it.
+  defp args_for("channel", %{"channel" => "-" <> _}),
+    do: {:error, "channel name must not start with \"-\""}
+
   defp args_for("channel", %{"fiber" => fiber, "channel" => channel}) when is_binary(channel),
     do: {:ok, ["channel", fiber, channel]}
 

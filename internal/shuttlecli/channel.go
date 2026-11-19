@@ -31,6 +31,9 @@ closed included; status, outcome, configuration and runtime are untouched.`,
 				if strings.ContainsAny(name, "\r\n") {
 					return fmt.Errorf("channel name must be one line")
 				}
+				if strings.HasPrefix(name, "-") || strings.HasPrefix(name, "#") {
+					return fmt.Errorf("channel name must not start with %q", name[:1])
+				}
 			}
 			f, st, block, ref, unlock, err := a.resolveOwnedShuttleFiber(args[0], "use 'shuttle install' first")
 			if err != nil {
