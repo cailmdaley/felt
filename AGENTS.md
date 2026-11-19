@@ -53,6 +53,7 @@ lives in the docs site (`docs/`, published to
 | Where back goes: the reader as one layer over a view, `WorkspaceHistory` | [`docs/dev/navigation.md`](docs/dev/navigation.md) |
 | UI SDK elements, imperative menus, styling and testing | [`docs/dev/ui-sdk.md`](docs/dev/ui-sdk.md) |
 | Writing a test: where it goes, tiers, fixtures, properties | [`docs/dev/testing.md`](docs/dev/testing.md) |
+| Running a change to look at it: the board harness, a scratch daemon, the built CLIs | [`.agents/skills/verify/SKILL.md`](.agents/skills/verify/SKILL.md) |
 | Installing a daemon, keep-alive, Rex, Remote Control | [`docs/shuttle/installation.md`](docs/shuttle/installation.md) |
 | Stores, agents, host classes, remotes, Tailscale | [`docs/shuttle/configuration.md`](docs/shuttle/configuration.md) |
 | macOS TCC and other sharp edges | [`docs/shuttle/troubleshooting.md`](docs/shuttle/troubleshooting.md) |

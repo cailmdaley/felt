@@ -112,8 +112,11 @@ fail cannot be told apart from one that cannot fail.
 still hold; only the running thing says the change does what was meant. Open
 a board change in the harness (`cd ui && npm run harness:board`) and read a
 headless screenshot. Run a CLI verb from the built binary against a
-temporary store. A daemon change runs for the first time in its deploy, so
-read the fresh daemon's answer there before reporting it landed.
+temporary store. Boot a daemon change as a private scratch daemon
+(`scripts/scratch-daemon.sh`) before it lands, then read the fresh daemon's
+answer in its deploy before reporting it landed. The recipes, timed, are the
+repo's `verify` skill ([`.agents/skills/verify/SKILL.md`](../../.agents/skills/verify/SKILL.md)),
+which Claude Code, Codex and Pi workers all load.
 
 **A new behavioural test takes its answer from outside the code.** It is one
 of four kinds:

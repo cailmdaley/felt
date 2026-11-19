@@ -121,7 +121,7 @@ Give every browser lane a unique `LANE` name so it gets a pinned tab in the shar
 LANE=tests-browser-1
 agent-browser --session "$LANE" connect "$(bin/shared-browser endpoint)"
 agent-browser --session "$LANE" --pin-tab tab new
-agent-browser --session "$LANE" open http://127.0.0.1:4000/
+agent-browser --session "$LANE" open "file://$PWD/ui/harness-board-dist/index.html"
 agent-browser --session "$LANE" tab close
 agent-browser --session "$LANE" close
 ```
