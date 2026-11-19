@@ -547,6 +547,32 @@ defmodule ShuttleWeb.FileControllerTest do
     end
 
     @tag :tmp_dir
+    test "a remote owner's page gets it from the hub, and an owner's refusal is relayed as it is" do
+      stub_forward("file-owner", "http://localhost:4001", {:error, :unset})
+      StubGetFileClient.set_response({:ok, 200, [], "text/html", "<head></head>"})
+
+      conn = framed_owner("/project/deck.html")
+
+      assert conn.resp_body ==
+               "<head><script data-shuttle-framed-runtime>uncached()</script></head>"
+
+      assert StubGetFileClient.last().url ==
+               "http://localhost:4001/api/v1/file?path=#{URI.encode_www_form("/project/deck.html")}"
+
+      StubGetFileClient.set_response(
+        {:ok, 404, [], "application/json", ~s({"error":"file not found"})}
+      )
+
+      assert framed_owner("/project/deck.html").status == 404
+    end
+
+    defp framed_owner(path) do
+      api_conn()
+      |> put_req_header("sec-fetch-dest", "iframe")
+      |> get("/api/v1/file?path=#{URI.encode_www_form(path)}&origin=file-owner")
+    end
+
+    @tag :tmp_dir
     test "is served as it is when the bundle has no framed runtime", %{tmp_dir: dir} do
       File.rm!(Path.join([dir, "dist", "framed-runtime.js"]))
       path = Path.join(dir, "deck.html")
