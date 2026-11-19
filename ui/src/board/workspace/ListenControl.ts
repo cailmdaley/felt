@@ -131,9 +131,10 @@ export class ListenControl {
     void this.opts.voice.set({ enabled: false }).then(() => this.opts.phone?.cancel()).catch(error => this.fail(error))
   }
 
+  /** What the open menu shows; it closes only when this changes. A route pushed with its `cold`, which the read omits, is the same route. */
   private signature(): string {
-    const state = this.opts.voice.status
-    return JSON.stringify([state?.enabled, state?.muted, state?.follow, state?.system_audio, state?.target, state?.recorder, state?.source, this.failure()])
+    const state = this.opts.voice.status, target = state?.target
+    return JSON.stringify([state?.enabled, state?.muted, state?.follow, state?.system_audio, target?.origin, target?.fiber_id, this.route(), state?.recorder, state?.source, this.failure()])
   }
   private paint(): void {
     const state = this.opts.voice.status

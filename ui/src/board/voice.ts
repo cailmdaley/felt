@@ -5,6 +5,8 @@ import { getDaemonJson, postDaemonJson } from './daemonApi.js'
 
 /** How long a view must hold before voice follows it, so a pan does not flap. */
 const SIGHT_MS = 350
+/** A voice write unanswered this long fails, so the writes queued behind it still go. */
+const WRITE_MS = 15_000
 
 export interface VoiceStatus {
   /** The audio recorder, not the target card's origin. */
@@ -206,7 +208,7 @@ export class Voice {
     const target = { fiber_id: card.uid ?? card.id, origin: card.originId, name: card.name, ...(status?.recorder ? { recorder: status.recorder } : {}) }
     this.revision++
     const task = this.writes.then(async () => {
-      const status = await postDaemonJson<VoiceStatus>(this.base, '/api/v1/voice/target', target, 'Voice request failed')
+      const status = await this.post('/api/v1/voice/target', target)
       this.revision++
       this.observedView = viewKey
       this.status = status
@@ -251,7 +253,7 @@ export class Voice {
     const task = this.writes.then(async () => {
       // Let a phone start select its recorder; every later control stays there.
       const recorder = values.source === 'phone' && values.enabled ? undefined : this.status?.recorder ?? this.recorder
-      const status = await postDaemonJson<VoiceStatus>(this.base, '/api/v1/voice', { ...values, ...(recorder ? { recorder } : {}) }, 'Voice request failed')
+      const status = await this.post('/api/v1/voice', { ...values, ...(recorder ? { recorder } : {}) })
       this.revision++
       this.status = status
       this.notify()
@@ -259,6 +261,16 @@ export class Voice {
     })
     this.writes = task.catch(() => {})
     return task
+  }
+  /** One write, abandoned after WRITE_MS whether or not the fetch honours its abort. */
+  private post(path: string, body: unknown): Promise<VoiceStatus> {
+    const controller = new AbortController()
+    let timer = 0
+    const deadline = new Promise<never>((_, reject) => {
+      timer = window.setTimeout(() => { controller.abort(); reject(new Error('Voice request timed out')) }, WRITE_MS)
+    })
+    const request = postDaemonJson<VoiceStatus>(this.base, path, body, 'Voice request failed', { signal: controller.signal })
+    return Promise.race([request, deadline]).finally(() => window.clearTimeout(timer))
   }
   private async poll(): Promise<void> {
     if (!this.mounted || document.hidden || this.read) return

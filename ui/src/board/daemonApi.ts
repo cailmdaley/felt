@@ -94,8 +94,10 @@ export async function postDaemonJson<T = unknown>(
   path: string,
   body: unknown,
   label = 'Request failed',
+  init?: Pick<RequestInit, 'signal'>,
 ): Promise<T> {
   const res = await daemonFetch(`${shuttleBase}${path}`, {
+    ...init,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
