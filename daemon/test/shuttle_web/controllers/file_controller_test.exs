@@ -83,6 +83,7 @@ defmodule ShuttleWeb.FileControllerTest do
         local_conn()
         |> put_req_header("origin", "null")
         |> put_req_header("accept", "text/html")
+        |> put_req_header("sec-fetch-dest", "document")
         |> get(sibling_url)
 
       assert conn.status == 200
@@ -528,6 +529,24 @@ defmodule ShuttleWeb.FileControllerTest do
     end
 
     @tag :tmp_dir
+    test "counts a report-relative page as framed when the browser sends no fetch metadata", %{
+      tmp_dir: dir
+    } do
+      path = Path.join(dir, "deck.html")
+      File.write!(path, "<head></head>")
+
+      assert get(api_conn(), file_asset_url("local", path)).resp_body ==
+               "<head><script data-shuttle-framed-runtime>uncached()</script></head>"
+
+      assert api_conn()
+             |> put_req_header("sec-fetch-dest", "document")
+             |> get(file_asset_url("local", path))
+             |> Map.fetch!(:resp_body) == "<head></head>"
+
+      assert get_resp_header(framed(path, []), "vary") == ["sec-fetch-dest"]
+    end
+
+    @tag :tmp_dir
     test "is served as it is when the bundle has no framed runtime", %{tmp_dir: dir} do
       File.rm!(Path.join([dir, "dist", "framed-runtime.js"]))
       path = Path.join(dir, "deck.html")
@@ -571,7 +590,10 @@ defmodule ShuttleWeb.FileControllerTest do
         url = file_url(route, "local", path)
 
         browser =
-          local_conn() |> put_req_header("origin", "null") |> put_req_header("accept", accept)
+          local_conn()
+          |> put_req_header("origin", "null")
+          |> put_req_header("accept", accept)
+          |> put_req_header("sec-fetch-dest", "document")
 
         whole = get(browser, url)
         assert whole.status == 200, row
@@ -610,7 +632,10 @@ defmodule ShuttleWeb.FileControllerTest do
         url = file_url(route, "file-owner", path)
 
         browser =
-          local_conn() |> put_req_header("origin", "null") |> put_req_header("accept", accept)
+          local_conn()
+          |> put_req_header("origin", "null")
+          |> put_req_header("accept", accept)
+          |> put_req_header("sec-fetch-dest", "document")
 
         for {label, owner_response, status, relayed_body} <- [
               {"unsafe owner headers", {:ok, 200, unsafe_headers, content_type, body}, 200, body},

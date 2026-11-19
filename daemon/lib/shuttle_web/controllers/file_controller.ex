@@ -116,11 +116,19 @@ defmodule ShuttleWeb.FileController do
   # but not into the frames those documents hold. WebKit never frees a
   # document whose script asked a lone tag or class query, so the page gets
   # the bundle's `framed-runtime.js` at its head, which asks such queries as
-  # lists. A page that cannot be read whole is served as it is.
+  # lists. A page that cannot be read whole is served as it is. Browsers send
+  # `Sec-Fetch-Dest` only to trustworthy origins, so over plain http to a
+  # tailnet host a report-relative asset with no header counts as framed.
   defp framed_page?(conn, path) do
-    conn.method == "GET" and not head_request?(conn) and get_req_header(conn, "range") == [] and
-      get_req_header(conn, "sec-fetch-dest") in [["iframe"], ["frame"]] and
-      MIME.from_path(path) == "text/html"
+    framed? =
+      case get_req_header(conn, "sec-fetch-dest") do
+        [dest] -> dest in ["iframe", "frame"]
+        [] -> conn.assigns[:report_asset] == true
+        _ -> false
+      end
+
+    framed? and conn.method == "GET" and not head_request?(conn) and
+      get_req_header(conn, "range") == [] and MIME.from_path(path) == "text/html"
   end
 
   defp serve_framed(conn, path, origin) do
@@ -128,12 +136,18 @@ defmodule ShuttleWeb.FileController do
          {:ok, body} <- framed_body(path, origin) do
       page = with_framed_runtime(body, runtime)
       etag = weak_etag(page)
-      conn = conn |> put_resp_header("cache-control", "no-cache") |> put_resp_header("etag", etag)
+
+      conn =
+        conn
+        |> put_resp_header("cache-control", "no-cache")
+        |> put_resp_header("vary", "sec-fetch-dest")
+        |> put_resp_header("etag", etag)
 
       if not_modified?(conn, etag, nil),
         do: send_resp(conn, 304, ""),
         else: conn |> put_resp_content_type(MIME.from_path(path)) |> send_resp(200, page)
     else
+      {:relay, forwarded} -> relay_file_bytes(conn, forwarded)
       _ -> serve(conn, path, origin)
     end
   end
@@ -142,8 +156,15 @@ defmodule ShuttleWeb.FileController do
     case OriginRouter.route(origin) do
       {:remote, remote} ->
         case OriginRouter.forward_file_get(remote, "/api/v1/file", %{"path" => path}, []) do
-          {:forwarded, 200, _headers, _content_type, body} when is_binary(body) -> {:ok, body}
-          _ -> :error
+          {:forwarded, 200, _headers, _content_type, body}
+          when is_binary(body) and byte_size(body) <= @hash_limit ->
+            {:ok, body}
+
+          {:forwarded, 200, _headers, _content_type, _body} ->
+            :error
+
+          forwarded ->
+            {:relay, forwarded}
         end
 
       :local ->
@@ -165,7 +186,9 @@ defmodule ShuttleWeb.FileController do
   # After the head's opening tag, else the html element's, else the doctype, so
   # the page keeps its rendering mode and the script runs before its own.
   def with_framed_runtime(page, runtime) do
-    script = "<script data-shuttle-framed-runtime>" <> runtime <> "</script>"
+    script =
+      "<script data-shuttle-framed-runtime>" <>
+        String.replace(runtime, "</", "<\\/") <> "</script>"
 
     at =
       Enum.find_value(
@@ -191,7 +214,9 @@ defmodule ShuttleWeb.FileController do
   """
   def asset(conn, %{"origin" => origin, "path" => segments})
       when is_binary(origin) and is_list(segments) and segments != [] do
-    show(conn, %{"origin" => origin, "path" => Path.join(["/" | segments])})
+    conn
+    |> assign(:report_asset, true)
+    |> show(%{"origin" => origin, "path" => Path.join(["/" | segments])})
   end
 
   def asset(conn, _params), do: show(conn, %{})
@@ -380,6 +405,12 @@ defmodule ShuttleWeb.FileController do
         {:ok, content_type} -> put_resp_content_type(conn, content_type, nil)
         :error -> put_resp_content_type(conn, MIME.from_path(path))
       end
+
+    # A page loaded into a frame is served with the framed runtime at its head.
+    conn =
+      if MIME.from_path(path) == "text/html",
+        do: put_resp_header(conn, "vary", "sec-fetch-dest"),
+        else: conn
 
     put_resp_header(conn, "accept-ranges", "bytes")
   end
