@@ -211,7 +211,7 @@
   .kbn-ch-rail-head { height: 34px; margin: 0 -16px; padding: 6px 16px; }
   .kbn-ch-jump { height: 34px; font-size: var(--type-row); }
   /* Moving, the rail is a sheet over the channel it leaves or comes from. */
-  .kbn-ch-layout[data-rail-moving] .kbn-ch-rail {
+  .kbn-ch-layout[data-rail-moving] .kbn-ch-rail, .kbn-ch-layout[data-rail-moving][data-rail-hidden]:not([data-drawer]) .kbn-ch-rail {
     position: absolute; z-index: 3; inset: 0; width: auto; background: var(--kbn-paper);
     box-shadow: 6px 0 18px color-mix(in srgb, var(--kbn-ink) 14%, transparent);
   }

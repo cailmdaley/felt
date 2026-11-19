@@ -95,6 +95,7 @@ const ranked = (cards: KanbanCard[], waits: Waits): KanbanCard[] =>
   cards.sort((a, b) => ATTENTION_ORDER.indexOf(attentionOf(a, waits)) - ATTENTION_ORDER.indexOf(attentionOf(b, waits)) || lastActive(b) - lastActive(a))
 const stored = (key: string): string | null => { try { return localStorage.getItem(key) } catch { return null } }
 const store = (key: string, value: string): void => { try { localStorage.setItem(key, value) } catch { /* A convenience only. */ } }
+const forget = (key: string): void => { try { localStorage.removeItem(key) } catch { /* A convenience only. */ } }
 /** Whether anything from `node` up to `stop` can still scroll sideways by `toward` (positive: rightward). */
 function scrollsSideways(node: Element | null, stop: Element, toward: number): boolean {
   for (; node && node !== stop; node = node.parentElement) {
@@ -204,11 +205,15 @@ export class ChannelsView implements TemporalView {
     render: p => this.renderMotion(p),
     commit: shown => {
       this.setRail(!shown)
+      // A phone's channel bared by a rail that came back was glimpsed, not read: its seen mark stands as it was.
+      if (shown && this.peeked) { if (this.peeked.seen === null) forget(SEEN + this.peeked.key); else store(SEEN + this.peeked.key, this.peeked.seen) }
+      this.peeked = null
       // A phone that has come to its channel reads it.
       if (!shown && isMobileViewport()) { this.drawRail(); this.channelEl?.focus({ preventScroll: true }) }
       this.renderMotion(this.motion.p)
     },
     end: () => {
+      this.peeked = null
       this.layout?.removeAttribute('data-rail-moving')
       for (const name of ['--kbn-ch-rail-x', '--kbn-ch-stream-x']) this.layout?.style.removeProperty(name)
     },
@@ -216,6 +221,8 @@ export class ChannelsView implements TemporalView {
   }, true)
   /** The rail's width as it moves. */
   private motionWidth = 0
+  /** On a phone, the channel a leaving rail bares, and its seen mark before it was bared. */
+  private peeked: { key: string; seen: string | null } | null = null
 
   mount(host: HTMLElement, ctx: ViewContext): void {
     this.ctx = ctx
@@ -1142,7 +1149,7 @@ export class ChannelsView implements TemporalView {
   /** Whether the rail is a drawer: the view is narrow, not a phone's. */
   private get drawn(): boolean { return !!this.layout?.hasAttribute('data-drawer') }
   /** The rail is drawn in over the stream. */
-  private overDrawer(): boolean { return this.drawn && this.drawer }
+  private overDrawer(): boolean { return this.drawn && (this.drawer || this.motion.active) }
   private railShown(): boolean { return isMobileViewport() ? this.phoneRail : this.drawn ? this.drawer : !this.railHidden }
   /**
    * Hides or shows the rail: remembered on this device where it is a column;
@@ -1185,7 +1192,10 @@ export class ChannelsView implements TemporalView {
     layout.setAttribute('data-rail-moving', '')
     if (isMobileViewport() && this.phoneRail && !this.current) {
       const last = stored(LAST)
-      if (last && this.channels.some(channel => channel.key === last)) { this.open(last, false); this.drawChannel() }
+      if (last && this.channels.some(channel => channel.key === last)) {
+        this.peeked = { key: last, seen: stored(SEEN + last) }
+        this.open(last, false); this.drawChannel()
+      }
     }
     this.motionWidth = layout.querySelector('.kbn-ch-rail')?.getBoundingClientRect().width ?? 0
     return this.motionWidth
@@ -1207,9 +1217,12 @@ export class ChannelsView implements TemporalView {
   private gestures(root: HTMLElement): () => void {
     const onSurface = (target: EventTarget | null): boolean => !this.ctx?.workspace?.isActive && !!(target as Element | null)?.closest?.('.kbn-ch, .kbn-ch-rail')
     const motion = this.motion, axis = new WheelAxis()
-    const free = (): boolean => !this.rail?.moving && (motion.active || !this.railShown() || this.canLeaveRail())
+    // A gesture is taken only toward somewhere the rail can go, unless it is already moving.
+    const toward = (px: number): boolean => !this.rail?.moving && (motion.active || (px > 0 ? !this.railShown() : this.railShown() && this.canLeaveRail()))
     let touch: { x: number; y: number; taken: boolean | null } | null = null
     const down = (event: TouchEvent): void => {
+      // A second finger ends the drag where it stands.
+      if (touch?.taken) motion.release()
       const point = event.touches[0]
       touch = event.touches.length === 1 && point && onSurface(event.target) ? { x: point.clientX, y: point.clientY, taken: null } : null
     }
@@ -1219,7 +1232,7 @@ export class ChannelsView implements TemporalView {
       const dx = point.clientX - touch.x, dy = point.clientY - touch.y
       if (touch.taken === null) {
         if (Math.hypot(dx, dy) < 1.5 * SLOP_PX) return
-        touch.taken = Math.abs(dx) > Math.abs(dy) && !scrollsSideways(event.target as Element, root, -dx) && free()
+        touch.taken = Math.abs(dx) > Math.abs(dy) && !scrollsSideways(event.target as Element, root, -dx) && toward(dx)
         if (!touch.taken) return
       }
       touch.x = point.clientX; touch.y = point.clientY
@@ -1238,7 +1251,7 @@ export class ChannelsView implements TemporalView {
       const px = axis.feed(dx, dy, event.timeStamp)
       // Taking the gesture keeps the browser from going back a page.
       if (sideways || px !== null) event.preventDefault()
-      if (px === null || !free()) return
+      if (px === null || !toward(-px)) return
       motion.drag(-px, event.timeStamp)
       clearTimeout(idle)
       // A trackpad says nothing when the fingers lift; the rail lets go once its events pause.

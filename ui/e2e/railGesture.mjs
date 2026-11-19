@@ -36,7 +36,7 @@ async function swipe(page, at, deltaX, { frames = 8, tail = 40 } = {}) {
 }
 
 /** A finger drawn sideways from `from` by `dx`, in `moves` steps a frame apart; touch events built in the page, as WebKit's desktop build has no Touch constructor. */
-async function drag(page, from, dx, { moves = 10, frame = 16, dy = 0 } = {}) {
+async function drag(page, from, dx, { moves = 10, frame = 16, dy = 0, lift = true, during } = {}) {
   const send = (type, x, y) => page.evaluate(({ type, x, y }) => {
     const target = window.__touchTarget ??= document.elementFromPoint(x, y)
     const point = { identifier: 1, target, clientX: x, clientY: y }
@@ -48,7 +48,8 @@ async function drag(page, from, dx, { moves = 10, frame = 16, dy = 0 } = {}) {
   }, { type, x, y })
   await send('touchstart', from.x, from.y)
   for (let step = 1; step <= moves; step++) { await page.waitForTimeout(frame); await send('touchmove', from.x + dx * step / moves, from.y + dy * step / moves) }
-  await send('touchend', from.x + dx, from.y + dy)
+  await during?.()
+  if (lift) await send('touchend', from.x + dx, from.y + dy)
 }
 
 const browser = await webkit.launch({ headless: true })
@@ -97,12 +98,41 @@ try {
     page.on('pageerror', error => { if (!/access control checks/.test(error.message)) errors.push(error.message) })
     await page.goto(url)
     await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 8)
+    const railWidth = () => page.evaluate(() => document.querySelector('.kbn-ch-rail').getBoundingClientRect().width)
+    const full = await railWidth()
     await page.locator('.kbn-ch-pick').first().click()
+    // Leaving for the channel chosen, the rail keeps the screen's width.
+    assert.equal(await railWidth(), full)
     await page.waitForFunction(() => document.querySelector('.kbn-ch-name') && !document.querySelector('.kbn-ch-layout[data-rail-moving]'))
     const middle = { x: 195, y: 420 }
     // In, away and in again, each drag begun while the last still settles.
     await drag(page, middle, 220)
     await drag(page, middle, -220)
+    await drag(page, middle, 220)
+    await settled(page, true)
+    await drag(page, middle, -220)
+    await settled(page, false)
+    // Back on the rail, a leftward peek at the channel last read, let go early, leaves it unread; mid-way the rail keeps its width.
+    await drag(page, middle, 220)
+    await settled(page, true)
+    const seen = () => page.evaluate(() => Object.entries(localStorage).filter(([key]) => key.startsWith('shuttle.channels.seen:')).sort().join())
+    const before = await seen()
+    const rest = await page.evaluate(() => document.querySelector('.kbn-ch-rail').getBoundingClientRect().width)
+    let width = 0
+    await drag(page, middle, -60, { moves: 6, frame: 40, during: async () => { width = await page.evaluate(() => document.querySelector('.kbn-ch-rail').getBoundingClientRect().width) } })
+    assert.equal(width, rest, 'the rail keeps the screen\'s width as it moves')
+    await page.waitForTimeout(150)
+    await settled(page, true)
+    assert.equal(await seen(), before, 'a glimpse is not a read')
+    // A second finger landing mid-drag lets the rail settle; it is never left half drawn.
+    await drag(page, middle, -120, { lift: false })
+    await page.evaluate(() => {
+      const target = window.__touchTarget, point = { identifier: 2, target, clientX: 300, clientY: 500 }
+      const event = new Event('touchstart', { bubbles: true }); Object.defineProperty(event, 'touches', { value: [point, point] }); target.dispatchEvent(event)
+      for (const type of ['touchend', 'touchend']) { const end = new Event(type, { bubbles: true }); Object.defineProperty(end, 'touches', { value: [] }); Object.defineProperty(end, 'changedTouches', { value: [point] }); target.dispatchEvent(end) }
+      delete window.__touchTarget
+    })
+    await page.waitForFunction(() => !document.querySelector('.kbn-ch-layout[data-rail-moving]'), null, { timeout: 2000 })
     await drag(page, middle, 220)
     await settled(page, true)
     await drag(page, middle, -220)
