@@ -85,13 +85,21 @@ export function buildThumbnailPreview(source: string, keepMedia = false): string
   return loadFirstMedia(preview)
 }
 
-/** Past the first {@link PREVIEW_MEDIA}, an image draws the placeholder and an embedded page, video or source loads nothing. */
+/**
+ * Past the first {@link PREVIEW_MEDIA} that would be fetched, an image draws the
+ * placeholder and an embedded page or video loads nothing. An embedded `data:`
+ * image costs no fetch and is not counted; a `<source>` follows the element it
+ * belongs to; comments are dropped so a commented-out figure takes no place.
+ */
 function loadFirstMedia(html: string): string {
   let seen = 0
-  return html.replace(/<(img|source|video|audio|iframe|frame|object|embed|input)\b[^>]*>/gi, (tag, name: string) => {
-    if (name.toLowerCase() === 'input' && attribute(tag, 'type')?.toLowerCase() !== 'image') return tag
-    if (seen++ < PREVIEW_MEDIA) return tag
-    const blank = /^(img|input)$/i.test(name) ? mediaPlaceholder : 'about:blank'
+  const fetched = (tag: string): boolean => ['src', 'data', 'poster', 'srcset'].some(name => { const value = attribute(tag, name); return value !== undefined && !/^data:/i.test(value) })
+  return html.replace(/<!--[\s\S]*?(?:-->|$)/g, '').replace(/<(img|source|video|audio|iframe|frame|object|embed|input)(?=[\s/>])[^>]*>/gi, (tag, name: string) => {
+    const kind = name.toLowerCase()
+    if (kind === 'input' && attribute(tag, 'type')?.toLowerCase() !== 'image') return tag
+    if (kind !== 'source' && fetched(tag) && seen++ < PREVIEW_MEDIA) return tag
+    if (seen < PREVIEW_MEDIA || !fetched(tag)) return tag
+    const blank = /^(img|input)$/.test(kind) ? mediaPlaceholder : 'about:blank'
     return tag
       .replace(/\s(srcset|imagesrcset)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
       .replace(/\s(src|data|poster)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, (_, attr: string) => ` ${attr}="${attr.toLowerCase() === 'poster' ? mediaPlaceholder : blank}"`)

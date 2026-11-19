@@ -100,3 +100,13 @@ it('loads only the first few images and embedded pages, past which an image draw
   expect(preview).toContain('<input type="text" src="x">')
   expect(preview.match(/<img\b/g)).toHaveLength(6)
 })
+
+it('counts what would be fetched: a picture as its image, an embedded image or a commented-out figure not at all', () => {
+  const picture = (i: number): string => `<picture><source media="(min-width: 1px)" srcset="s${i}.avif"><source srcset="s${i}.webp"><img src="p${i}.png"></picture>`
+  const embedded = '<img src="data:image/png;base64,AAAA">'
+  const preview = buildThumbnailPreview(`<body><!-- <img src="c1.png"><img src="c2.png"><img src="c3.png"><img src="c4.png"> -->${picture(0)}${embedded}${picture(1)}${picture(2)}${picture(3)}${picture(4)}</body>`)
+  for (const i of [0, 1, 2, 3]) expect(preview).toContain(`src="p${i}.png"`)
+  expect(preview).toContain('srcset="s3.webp"')
+  expect(preview).not.toMatch(/c\d\.png|p4\.png|s4\./)
+  expect(preview).toContain(embedded)
+})
