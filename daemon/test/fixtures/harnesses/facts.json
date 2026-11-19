@@ -1,0 +1,60 @@
+[
+  {
+    "name": "claude",
+    "ledger": "claude-code",
+    "binary": "claude",
+    "identity": "assigned",
+    "delivery": "native",
+    "idle_signal": true,
+    "interrupts": true,
+    "transcripts": {
+      "env": "SHUTTLE_CLAUDE_PROJECTS_DIR",
+      "home_env": "CLAUDE_CONFIG_DIR",
+      "home": ".claude",
+      "leaf": "projects"
+    }
+  },
+  {
+    "name": "codex",
+    "ledger": "codex",
+    "binary": "codex",
+    "identity": "reported",
+    "delivery": "paste",
+    "idle_signal": true,
+    "interrupts": true,
+    "transcripts": {
+      "env": "SHUTTLE_CODEX_SESSIONS_DIR",
+      "home_env": "CODEX_HOME",
+      "home": ".codex",
+      "leaf": "sessions"
+    }
+  },
+  {
+    "name": "pi",
+    "ledger": "pi",
+    "binary": "pi",
+    "identity": "reported",
+    "delivery": "extension",
+    "idle_signal": false,
+    "interrupts": false,
+    "transcripts": {
+      "env": "SHUTTLE_PI_SESSIONS_DIR",
+      "home": ".pi/agent",
+      "leaf": "sessions"
+    }
+  },
+  {
+    "name": "antigravity",
+    "ledger": "antigravity",
+    "binary": "agy",
+    "identity": "reported",
+    "delivery": "inject",
+    "idle_signal": true,
+    "interrupts": false,
+    "transcripts": {
+      "env": "SHUTTLE_ANTIGRAVITY_BRAIN_DIR",
+      "home": ".gemini/antigravity-cli",
+      "leaf": "brain"
+    }
+  }
+]

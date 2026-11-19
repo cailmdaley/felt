@@ -2,6 +2,7 @@ package shuttlecli
 
 import (
 	"fmt"
+	"github.com/cailmdaley/felt/internal/harness"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,7 +55,7 @@ func currentSessionBinding(address messaging.Address, records []SessionProvenanc
 	var found *SessionProvenance
 	conflict := false
 	for _, row := range records {
-		if row.Host != address.Host || messaging.NormalizeHarness(row.Harness) != address.Harness || row.nativeSessionID() != address.ID || row.fiber() == "" || !workerBindingKind(row.Kind) {
+		if row.Host != address.Host || harness.Normalize(row.Harness) != address.Harness || row.nativeSessionID() != address.ID || row.fiber() == "" || !workerBindingKind(row.Kind) {
 			continue
 		}
 		if found != nil && row.At < found.At {

@@ -3,6 +3,7 @@ package shuttlecli
 import (
 	"context"
 	"fmt"
+	"github.com/cailmdaley/felt/internal/harness"
 	"io"
 	"os"
 	"path/filepath"
@@ -38,12 +39,12 @@ type transcriptFiber struct {
 
 func (a *app) transcriptIndexCmd() *cobra.Command {
 	var rebuild bool
-	var file, harness string
+	var file, kind string
 	cmd := &cobra.Command{Use: "index", Short: "Build or update the local transcript search index", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		if cmd.Flags().Changed("file") && file == "" {
 			return fmt.Errorf("--file must name a transcript")
 		}
-		if file == "" && harness != "" {
+		if file == "" && kind != "" {
 			return fmt.Errorf("--harness is only valid with --file")
 		}
 		path, err := transcriptindex.DefaultPath(a.env)
@@ -57,13 +58,13 @@ func (a *app) transcriptIndexCmd() *cobra.Command {
 		defer idx.Close()
 		ctx := cmd.Context()
 		if file != "" {
-			if harness != "claude" && harness != "codex" && harness != "pi" {
-				return fmt.Errorf("--file requires --harness claude, codex, or pi")
+			if !harness.Known(kind) {
+				return fmt.Errorf("--file requires --harness, one of %s", harness.Names())
 			}
 			var cancel context.CancelFunc
 			ctx, cancel = context.WithTimeout(ctx, 2*time.Minute)
 			defer cancel()
-			if err := idx.IndexFile(ctx, file, harness); err != nil {
+			if err := idx.IndexFile(ctx, file, kind); err != nil {
 				return err
 			}
 		} else {
@@ -107,7 +108,7 @@ func (a *app) transcriptIndexCmd() *cobra.Command {
 	}}
 	cmd.Flags().BoolVar(&rebuild, "rebuild", false, "discard and rebuild the index")
 	cmd.Flags().StringVar(&file, "file", "", "index one transcript file")
-	cmd.Flags().StringVar(&harness, "harness", "", "transcript harness")
+	cmd.Flags().StringVar(&kind, "harness", "", "transcript harness")
 	_ = cmd.Flags().MarkHidden("file")
 	_ = cmd.Flags().MarkHidden("harness")
 	return cmd
@@ -154,7 +155,7 @@ func (a *app) transcriptSearchCmd() *cobra.Command {
 	cmd.Flags().StringVar(&q.Fiber, "fiber", "", "restrict to sessions linked to this fiber")
 	cmd.Flags().StringVar(&q.Since, "since", "", "restrict by age (30d, 12h, YYYY-MM-DD or RFC3339)")
 	cmd.Flags().StringVar(&q.Project, "project", "", "project path prefix")
-	cmd.Flags().StringVar(&q.Harness, "harness", "", "harness (claude, codex, pi)")
+	cmd.Flags().StringVar(&q.Harness, "harness", "", "harness ("+harness.Names()+")")
 	cmd.Flags().IntVarP(&q.Limit, "limit", "n", 20, "maximum sessions (messages with --per-message)")
 	cmd.Flags().BoolVar(&q.PerMessage, "per-message", false, "return individual messages instead of grouping by session")
 	cmd.Flags().BoolVar(&q.NoIndex, "no-index", false, "search without checking for new transcript content")
@@ -169,8 +170,8 @@ func (a *app) searchTranscripts(ctx context.Context, q transcriptQuery) (transcr
 	if q.Limit < 1 {
 		return none, fmt.Errorf("--limit must be positive")
 	}
-	if q.Harness != "" && q.Harness != "claude" && q.Harness != "codex" && q.Harness != "pi" {
-		return none, fmt.Errorf("--harness must be claude, codex, or pi")
+	if q.Harness != "" && !harness.Known(q.Harness) {
+		return none, fmt.Errorf("--harness must be one of %s", harness.Names())
 	}
 	sinceValue, err := parseTranscriptSince(q.Since, a.eventNow())
 	if err != nil {

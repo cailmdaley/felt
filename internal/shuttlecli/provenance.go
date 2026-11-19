@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/cailmdaley/felt/internal/harness"
 	"io"
 	"net/url"
 	"os"
@@ -239,7 +240,7 @@ func provenanceSessionKey(row SessionProvenance) string {
 	if native == "" {
 		native = row.Session
 	}
-	return row.Host + "\x00" + messaging.NormalizeHarness(row.Harness) + "\x00" + native
+	return row.Host + "\x00" + harness.Normalize(row.Harness) + "\x00" + native
 }
 
 func provenanceAddress(row SessionProvenance) string {
@@ -710,7 +711,7 @@ and availability.`,
 				if row.Stale {
 					fiberName += " [stale]"
 				}
-				harness := messaging.NormalizeHarness(row.Harness)
+				harness := harness.Normalize(row.Harness)
 				fmt.Fprintf(a.env.Stdout, "%-38s %-16s %-16s %-64s %-14s %-18s %s\n", row.Session, row.Host, harness, row.Address, row.Kind, row.Transcript.Availability, fiberName)
 			}
 			return nil

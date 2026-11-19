@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cailmdaley/felt/internal/harnesspaths"
+	"github.com/cailmdaley/felt/internal/harness"
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
@@ -153,7 +153,7 @@ func TestClaudeSessionsAreNeverNudged(t *testing.T) {
 	env.Set("SHUTTLE_HANDOFF_STATE_DIR", t.TempDir())
 	env.Set("SHUTTLE_HANDOFF_TOKENS", "1000")
 	row, _ := json.Marshal(map[string]any{"type": "assistant", "message": map[string]any{"role": "assistant", "usage": map[string]any{"input_tokens": 2_000_000}}})
-	root, err := harnesspaths.ClaudeProjects(env)
+	root, err := harness.TranscriptRoot(env, "claude")
 	if err != nil {
 		t.Fatal(err)
 	}

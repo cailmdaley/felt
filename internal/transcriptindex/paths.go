@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cailmdaley/felt/internal/harnesspaths"
+	"github.com/cailmdaley/felt/internal/harness"
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
@@ -15,15 +15,12 @@ type Root struct{ Harness, Path string }
 // Roots are the harness transcript trees the index covers.
 func Roots(env *sysenv.Env) ([]Root, error) {
 	var roots []Root
-	for _, r := range []struct {
-		harness string
-		path    func(*sysenv.Env) (string, error)
-	}{{"claude", harnesspaths.ClaudeProjects}, {"codex", harnesspaths.CodexSessions}, {"pi", harnesspaths.PiSessions}} {
-		path, err := r.path(env)
+	for _, f := range harness.All() {
+		path, err := harness.TranscriptRoot(env, f.Name)
 		if err != nil {
 			return nil, err
 		}
-		roots = append(roots, Root{r.harness, path})
+		roots = append(roots, Root{f.Name, path})
 	}
 	return roots, nil
 }

@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/cailmdaley/felt/internal/harnesspaths"
+	"github.com/cailmdaley/felt/internal/harness"
 	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
@@ -19,7 +19,7 @@ func TestEventHookOffersClaudeMailboxWithoutStopWake(t *testing.T) {
 	t.Parallel()
 	env := messageHookEnv(t, "host")
 	provideClaudeNative(t, env, "s")
-	claudeProjects, _ := harnesspaths.ClaudeProjects(env)
+	claudeProjects, _ := harness.TranscriptRoot(env, "claude")
 	transcript := filepath.Join(claudeProjects, "p", "s.jsonl")
 	hook := func(name string) string {
 		t.Helper()

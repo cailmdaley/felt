@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
-	"github.com/cailmdaley/felt/internal/harnesspaths"
+	"github.com/cailmdaley/felt/internal/harness"
 	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
@@ -440,9 +440,9 @@ func TestEventHarnessDetection(t *testing.T) {
 	env, _ := isolateEvents(t)
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	env.Set("SHUTTLE_EVENTS_FILE", path)
-	claude, _ := harnesspaths.ClaudeProjects(env)
-	codex, _ := harnesspaths.CodexSessions(env)
-	pi, _ := harnesspaths.PiSessions(env)
+	claude, _ := harness.TranscriptRoot(env, "claude")
+	codex, _ := harness.TranscriptRoot(env, "codex")
+	pi, _ := harness.TranscriptRoot(env, "pi")
 
 	for _, tc := range []struct {
 		transcript string
@@ -889,7 +889,7 @@ func TestEventGoldenParity(t *testing.T) {
 
 	receivers := map[string]int{"sess-a": 4242, "sess-b": 4243, "sess-d": 4244, "sess-c": 4245}
 	var got bytes.Buffer
-	claudeProjects, err := harnesspaths.ClaudeProjects(env)
+	claudeProjects, err := harness.TranscriptRoot(env, "claude")
 	if err != nil {
 		t.Fatal(err)
 	}

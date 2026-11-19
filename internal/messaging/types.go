@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/cailmdaley/felt/internal/harness"
 	"net/url"
 	"strings"
 
@@ -143,8 +144,8 @@ func ErrorCode(err error) string {
 	return "internal"
 }
 
-func FormatAddress(host, harness, id string) (string, error) {
-	return formatAddress(host, NormalizeHarness(harness), id)
+func FormatAddress(host, name, id string) (string, error) {
+	return formatAddress(host, harness.Normalize(name), id)
 }
 
 func formatAddress(host, harness, id string) (string, error) {
@@ -187,7 +188,7 @@ func ParseAddress(raw string) (Address, error) {
 	if err != nil || canonical != raw {
 		return Address{}, errCode("invalid_address", "address is not canonical")
 	}
-	return Address{Host: u.Host, Harness: NormalizeHarness(h), ID: id}, nil
+	return Address{Host: u.Host, Harness: harness.Normalize(h), ID: id}, nil
 }
 
 func validatePart(name, s string) error {

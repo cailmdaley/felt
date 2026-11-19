@@ -7,6 +7,7 @@ defmodule Shuttle.HarnessPathsTest do
     SHUTTLE_CLAUDE_PROJECTS_DIR
     SHUTTLE_PI_SESSIONS_DIR
     SHUTTLE_CODEX_SESSIONS_DIR
+    SHUTTLE_ANTIGRAVITY_BRAIN_DIR
     CLAUDE_CONFIG_DIR
     CODEX_HOME
   )
@@ -26,7 +27,8 @@ defmodule Shuttle.HarnessPathsTest do
     roots = %{
       "claude" => :claude_projects_root,
       "codex" => :codex_sessions_root,
-      "pi" => :pi_sessions_root
+      "pi" => :pi_sessions_root,
+      "antigravity" => :antigravity_brain_root
     }
 
     for %{"name" => name, "env" => env, "expect" => expect} <-

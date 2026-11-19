@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/cailmdaley/felt/internal/harness"
 	"os"
 	"path/filepath"
 	"slices"
@@ -248,6 +249,9 @@ func normalizeAgentRecords(agents []AgentRecord) {
 		agents[i].DefaultEffortSource = ""
 		if agents[i].Wrapper == "" {
 			agents[i].Wrapper = agents[i].CLI
+			if f, ok := harness.Lookup(agents[i].CLI); ok {
+				agents[i].Wrapper = f.Binary
+			}
 		}
 	}
 }

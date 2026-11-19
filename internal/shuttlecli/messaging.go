@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/cailmdaley/felt/internal/harness"
 	"io"
 	"net/http"
 	"net/url"
@@ -84,7 +85,7 @@ func (a *app) runShuttleSessionDiscovery(ctx context.Context, o *sessionsDiscove
 
 // fetchPeerDirectory reads the daemon's fleet-wide peer directory, narrowed
 // to one host or harness when either is given.
-func (a *app) fetchPeerDirectory(host, harness string) (messaging.Directory, error) {
+func (a *app) fetchPeerDirectory(host, kind string) (messaging.Directory, error) {
 	endpoint, err := a.daemonEndpoint("/api/v1/peers")
 	if err != nil {
 		return messaging.Directory{}, err
@@ -97,34 +98,34 @@ func (a *app) fetchPeerDirectory(host, harness string) (messaging.Directory, err
 	if host != "" {
 		q.Set("host", host)
 	}
-	if harness != "" {
-		q.Set("harness", messaging.NormalizeHarness(strings.TrimSpace(harness)))
+	if kind != "" {
+		q.Set("harness", harness.Normalize(strings.TrimSpace(kind)))
 	}
 	u.RawQuery = q.Encode()
 	return getDaemonJSON[messaging.Directory](a, u.String(), "parsing peer directory")
 }
 
-func filterPeerDirectory(directory messaging.Directory, host, harness string) messaging.Directory {
+func filterPeerDirectory(directory messaging.Directory, host, kind string) messaging.Directory {
 	host = strings.TrimSpace(host)
-	harness = messaging.NormalizeHarness(strings.TrimSpace(harness))
+	kind = harness.Normalize(strings.TrimSpace(kind))
 	filtered := directory.Sessions[:0]
 	for _, session := range directory.Sessions {
 		if host != "" && session.Host != host {
 			continue
 		}
-		if harness != "" && messaging.NormalizeHarness(session.Harness) != harness {
+		if kind != "" && harness.Normalize(session.Harness) != kind {
 			continue
 		}
 		filtered = append(filtered, session)
 	}
 	directory.Sessions = filtered
-	if host != "" || harness != "" {
+	if host != "" || kind != "" {
 		gaps := directory.Gaps[:0]
 		for _, gap := range directory.Gaps {
 			if host != "" && gap.Host != host {
 				continue
 			}
-			if harness != "" && gap.Harness != "" && gap.Harness != "*" && messaging.NormalizeHarness(gap.Harness) != harness {
+			if kind != "" && gap.Harness != "" && gap.Harness != "*" && harness.Normalize(gap.Harness) != kind {
 				continue
 			}
 			gaps = append(gaps, gap)

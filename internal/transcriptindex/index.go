@@ -159,7 +159,7 @@ func (i *Index) CatchUp(ctx context.Context, roots []Root, rebuild bool) ([]stri
 			if !d.Type().IsRegular() || !strings.HasSuffix(path, ".jsonl") {
 				return nil
 			}
-			if root.Harness == "codex" && !strings.HasPrefix(d.Name(), "rollout-") {
+			if !formats[root.Harness].indexes(path) {
 				return nil
 			}
 			seen[path] = true
@@ -242,7 +242,8 @@ func tailHash(f *os.File, offset int64) (string, error) {
 // A writer acquires SQLite's lock before reading the checkpoint, so concurrent
 // hook/manual catch-ups cannot insert the same appended messages twice.
 func (i *Index) IndexFile(ctx context.Context, path, harness string) error {
-	if harness != "claude" && harness != "codex" && harness != "pi" {
+	form, ok := formats[harness]
+	if !ok {
 		return fmt.Errorf("unknown harness %q", harness)
 	}
 	info, err := os.Stat(path)
@@ -310,7 +311,7 @@ func (i *Index) IndexFile(ctx context.Context, path, harness string) error {
 		}
 	}
 	if old.meta.Session == "" {
-		old.meta.Session = sessionFromPath(path)
+		old.meta.Session = form.session(path)
 	}
 	if _, err = f.Seek(old.offset, io.SeekStart); err != nil {
 		return err
@@ -337,7 +338,7 @@ func (i *Index) IndexFile(ctx context.Context, path, harness string) error {
 		}
 		old.offset += int64(len(line))
 		old.line++
-		msgs, e := parseLine(harness, line, &old.meta)
+		msgs, e := form.line(line, &old.meta)
 		if e != nil {
 			malformed++
 			continue
@@ -368,12 +369,4 @@ func (i *Index) IndexFile(ctx context.Context, path, harness string) error {
 		return fmt.Errorf("skipped %d malformed complete JSONL lines", malformed)
 	}
 	return nil
-}
-func sessionFromPath(path string) string {
-	name := strings.TrimSuffix(filepath.Base(path), ".jsonl")
-	// Both rollout and Pi names end in a native UUID; Claude filenames are UUIDs.
-	if len(name) >= 36 {
-		return name[len(name)-36:]
-	}
-	return name
 }

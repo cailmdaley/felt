@@ -3,6 +3,7 @@ package shuttlecli
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/cailmdaley/felt/internal/harness"
 	"strconv"
 	"strings"
 
@@ -270,8 +271,8 @@ func (a *app) renderEvent(input eventHookInput) (string, bool) {
 		Harness:     a.harnessFor(input.TranscriptPath),
 		OriginName:  origin,
 	}
-	if input.Harness == "claude" || input.Harness == "codex" || input.Harness == "pi" {
-		line.Harness = messaging.LedgerHarnessName(input.Harness)
+	if harness.Known(input.Harness) {
+		line.Harness = harness.LedgerName(input.Harness)
 	}
 	pid := input.NativePID
 	if line.Harness != "pi" {

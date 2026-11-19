@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"github.com/cailmdaley/felt/internal/harness"
 	"os"
 	"sort"
 	"strings"
@@ -118,7 +119,7 @@ func (a *app) enrichUnavailableSession(req messaging.Request, receipt messaging.
 	if err != nil || worker == nil {
 		return receipt
 	}
-	harness := messaging.NormalizeHarness(worker.Harness)
+	harness := harness.Normalize(worker.Harness)
 	if worker.Host == address.Host && harness == address.Harness && worker.nativeSessionID() == address.ID {
 		return receipt
 	}

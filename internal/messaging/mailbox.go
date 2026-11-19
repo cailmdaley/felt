@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/cailmdaley/felt/internal/harness"
 	"io"
 	"os"
 	"path/filepath"
@@ -136,8 +137,8 @@ func RegisterMailbox(env *sysenv.Env, harness, id, host, cwd string, pid int, ac
 
 // Each transition checks ownership and publishes under one stable per-session
 // lock. The atomic rename keeps readers from observing a partial registration.
-func registerMailboxWith(env *sysenv.Env, harness, id, host, cwd string, pid int, active bool, publish func(string, []byte, bool) error) error {
-	if harness != "claude" && harness != "codex" && harness != "pi" {
+func registerMailboxWith(env *sysenv.Env, name, id, host, cwd string, pid int, active bool, publish func(string, []byte, bool) error) error {
+	if !harness.Known(name) {
 		return errCode("invalid_request", "unsupported mailbox harness")
 	}
 	if id == "" || len(id) > 4096 || strings.ContainsAny(id, "\x00\r\n") {
@@ -146,7 +147,7 @@ func registerMailboxWith(env *sysenv.Env, harness, id, host, cwd string, pid int
 	if _, err := os.Stat(dataDir(env)); err != nil {
 		return err
 	}
-	dir := mailboxDir(env, harness, id)
+	dir := mailboxDir(env, name, id)
 	reg := mailboxRegistration{ID: id, Host: host, Ended: !active}
 	path := filepath.Join(dir, "receiver.json")
 	if active {
@@ -165,7 +166,7 @@ func registerMailboxWith(env *sysenv.Env, harness, id, host, cwd string, pid int
 		return err
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-	if current, err := mailboxRegistrationFor(env, harness, id); err == nil && current.live() {
+	if current, err := mailboxRegistrationFor(env, name, id); err == nil && current.live() {
 		candidateStart := processStartToken(pid)
 		if current.PID != pid || current.Start != candidateStart {
 			return errCode("unavailable", "mailbox session is already registered to a live receiver process")

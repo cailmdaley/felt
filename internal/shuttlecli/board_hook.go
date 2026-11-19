@@ -3,6 +3,7 @@ package shuttlecli
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/cailmdaley/felt/internal/harness"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -61,7 +62,7 @@ func currentPromptSession(address messaging.Address, f *felt.Felt, records []Ses
 	}
 	newest, err := newestFiberWorkerRecord(f, records)
 	return err == nil && newest != nil && newest.Host == address.Host &&
-		messaging.NormalizeHarness(newest.Harness) == address.Harness && newest.nativeSessionID() == address.ID
+		harness.Normalize(newest.Harness) == address.Harness && newest.nativeSessionID() == address.ID
 }
 
 // recordHumanPrompt serializes prompt attribution with fiber lifecycle writes.
@@ -76,7 +77,7 @@ func (a *app) recordHumanPrompt(input eventHookInput) {
 	if err != nil {
 		return
 	}
-	address := messaging.Address{Host: host, Harness: messaging.NormalizeHarness(input.Harness), ID: input.SessionID}
+	address := messaging.Address{Host: host, Harness: harness.Normalize(input.Harness), ID: input.SessionID}
 	records := a.localMessageLedger()
 	row, err := currentSessionBinding(address, records)
 	if err != nil || row == nil {

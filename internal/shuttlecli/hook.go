@@ -1,8 +1,7 @@
 package shuttlecli
 
 import (
-	"github.com/cailmdaley/felt/internal/harnesspaths"
-	"github.com/cailmdaley/felt/internal/messaging"
+	"github.com/cailmdaley/felt/internal/harness"
 	"github.com/spf13/cobra"
 )
 
@@ -29,9 +28,8 @@ func (a *app) hookCmd() *cobra.Command {
 // harnessFor names the harness by the tree its transcript lives in; an empty
 // or unrelated path identifies the Codex hook format.
 func (a *app) harnessFor(transcriptPath string) string {
-	switch harness := harnesspaths.Harness(a.env, transcriptPath); harness {
-	case "claude", "pi":
-		return messaging.LedgerHarnessName(harness)
+	if name := harness.ForTranscript(a.env, transcriptPath); name != "" {
+		return harness.LedgerName(name)
 	}
-	return messaging.LedgerHarnessName("codex")
+	return harness.LedgerName("codex")
 }

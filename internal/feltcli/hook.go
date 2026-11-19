@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
-	"github.com/cailmdaley/felt/internal/harnesspaths"
+	"github.com/cailmdaley/felt/internal/harness"
 	"github.com/spf13/cobra"
 )
 
@@ -137,7 +137,7 @@ once. Silent for any other tool, file, or error.`,
 // isClaudeTranscriptPath recognizes the only harness-specific distinction the
 // Felt PreToolUse gate needs: whether Claude Code's tree holds the transcript.
 func (a *app) isClaudeTranscriptPath(transcriptPath string) bool {
-	return harnesspaths.Harness(a.env, transcriptPath) == "claude"
+	return harness.ForTranscript(a.env, transcriptPath) == "claude"
 }
 
 // ----------------------------------------------------------------------------

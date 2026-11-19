@@ -1,6 +1,7 @@
 package shuttle
 
 import (
+	"github.com/cailmdaley/felt/internal/harness"
 	"time"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
@@ -26,6 +27,10 @@ type ResolvedAgent struct {
 	Effort   string `json:"effort,omitempty"`
 	Chrome   bool   `json:"chrome,omitempty"`
 	Headless bool   `json:"headless,omitempty"`
+	// Harness is the facts of the harness CLI names, absent when CLI names
+	// none Shuttle knows. The daemon reads them here rather than holding a
+	// table of its own.
+	Harness *harness.Facts `json:"harness,omitempty"`
 }
 
 // Resolved is the resolved view of a shuttle: block — what felt emits additively
@@ -78,7 +83,15 @@ func (r *AgentRegistry) NewResolvedAgent(rec AgentRecord, axes Axes) *ResolvedAg
 		Effort:                axes.Effort,
 		Chrome:                axes.Chrome,
 		Headless:              axes.Headless,
+		Harness:               harnessFacts(rec.CLI),
 	}
+}
+
+func harnessFacts(cli string) *harness.Facts {
+	if f, ok := harness.Lookup(cli); ok {
+		return &f
+	}
+	return nil
 }
 
 // ResolveBlock computes the resolved view of a block: the agent name (or the
@@ -128,7 +141,7 @@ func ResolveBlock(b *Block, reg *AgentRegistry, now time.Time) (*Resolved, error
 		}
 		res.ScheduleText = ScheduleText(b.Schedule.Expr)
 	}
-	pulseAgentAllowed := res.Agent == nil || res.Agent.CLI == "claude" || res.Agent.CLI == "codex"
+	pulseAgentAllowed := res.Agent == nil || res.Agent.Harness != nil && res.Agent.Harness.IdleSignal
 	if b.Pulse != nil && len(validatePulse(b.Pulse)) == 0 && b.Kind == "oneshot" && pulseAgentAllowed {
 		if interval, err := b.Pulse.Interval(); err == nil {
 			res.PulseIntervalMS = interval.Milliseconds()

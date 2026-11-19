@@ -1,11 +1,11 @@
 package shuttlecli
 
 import (
+	"github.com/cailmdaley/felt/internal/harness"
 	"path/filepath"
 	"strconv"
 	"strings"
 
-	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/cailmdaley/felt/internal/progstatus"
 )
 
@@ -74,16 +74,16 @@ func (a *app) reportProgramStatus(input eventHookInput) {
 	if a.env.Getenv("TMUX") == "" || a.env.Getenv("TMUX_PANE") == "" {
 		return
 	}
-	harness := input.Harness
-	if harness != "claude" && harness != "pi" && harness != "codex" {
-		harness = messaging.NormalizeHarness(a.harnessFor(input.TranscriptPath))
+	name := input.Harness
+	if !harness.Known(name) {
+		name = harness.Normalize(a.harnessFor(input.TranscriptPath))
 	}
-	report, ok := programStatusFor(input, harness, a.env.Getenv("SHUTTLE_FIBER_PATH"))
+	report, ok := programStatusFor(input, name, a.env.Getenv("SHUTTLE_FIBER_PATH"))
 	if !ok {
 		return
 	}
 	receiver := input.NativePID
-	if harness != "pi" {
+	if name != "pi" {
 		receiver = a.eventReceiverPID()
 	}
 	path := a.programStatusTTY(receiver)

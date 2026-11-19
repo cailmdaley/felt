@@ -1,15 +1,28 @@
 {
-  "_comment": "Harness transcript roots, asserted by BOTH the Go suite (internal/harnesspaths/harnesspaths_test.go) and the Elixir daemon suite (test/shuttle/harness_paths_test.exs). Every variable not named in `env` is unset. In `expect`, a leading `~/` stands for the home directory the test runs under.",
+  "_comment": "Harness transcript roots, asserted by BOTH the Go suite (internal/harness/paths_test.go) and the Elixir daemon suite (test/shuttle/harness_paths_test.exs). Every variable not named in `env` is unset. In `expect`, a leading `~/` stands for the home directory the test runs under.",
   "cases": [
     {
       "name": "defaults",
       "env": {},
-      "expect": {"claude": "~/.claude/projects", "codex": "~/.codex/sessions", "pi": "~/.pi/agent/sessions"}
+      "expect": {
+        "claude": "~/.claude/projects",
+        "codex": "~/.codex/sessions",
+        "pi": "~/.pi/agent/sessions",
+        "antigravity": "~/.gemini/antigravity-cli/brain"
+      }
     },
     {
       "name": "harness homes",
-      "env": {"CLAUDE_CONFIG_DIR": "/cfg/claude", "CODEX_HOME": "/cfg/codex"},
-      "expect": {"claude": "/cfg/claude/projects", "codex": "/cfg/codex/sessions", "pi": "~/.pi/agent/sessions"}
+      "env": {
+        "CLAUDE_CONFIG_DIR": "/cfg/claude",
+        "CODEX_HOME": "/cfg/codex"
+      },
+      "expect": {
+        "claude": "/cfg/claude/projects",
+        "codex": "/cfg/codex/sessions",
+        "pi": "~/.pi/agent/sessions",
+        "antigravity": "~/.gemini/antigravity-cli/brain"
+      }
     },
     {
       "name": "Shuttle overrides beat harness homes",
@@ -18,9 +31,15 @@
         "CODEX_HOME": "/cfg/codex",
         "SHUTTLE_CLAUDE_PROJECTS_DIR": "/srv/claude",
         "SHUTTLE_CODEX_SESSIONS_DIR": "/srv/codex",
-        "SHUTTLE_PI_SESSIONS_DIR": "/srv/pi"
+        "SHUTTLE_PI_SESSIONS_DIR": "/srv/pi",
+        "SHUTTLE_ANTIGRAVITY_BRAIN_DIR": "/srv/agy"
       },
-      "expect": {"claude": "/srv/claude", "codex": "/srv/codex", "pi": "/srv/pi"}
+      "expect": {
+        "claude": "/srv/claude",
+        "codex": "/srv/codex",
+        "pi": "/srv/pi",
+        "antigravity": "/srv/agy"
+      }
     },
     {
       "name": "blank values count as unset",
@@ -29,9 +48,15 @@
         "CODEX_HOME": "  ",
         "SHUTTLE_CLAUDE_PROJECTS_DIR": " ",
         "SHUTTLE_CODEX_SESSIONS_DIR": "",
-        "SHUTTLE_PI_SESSIONS_DIR": ""
+        "SHUTTLE_PI_SESSIONS_DIR": "",
+        "SHUTTLE_ANTIGRAVITY_BRAIN_DIR": " "
       },
-      "expect": {"claude": "~/.claude/projects", "codex": "~/.codex/sessions", "pi": "~/.pi/agent/sessions"}
+      "expect": {
+        "claude": "~/.claude/projects",
+        "codex": "~/.codex/sessions",
+        "pi": "~/.pi/agent/sessions",
+        "antigravity": "~/.gemini/antigravity-cli/brain"
+      }
     }
   ]
 }

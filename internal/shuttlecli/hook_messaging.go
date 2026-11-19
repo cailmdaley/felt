@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/cailmdaley/felt/internal/harness"
 	"io"
 	"path/filepath"
 	"strings"
@@ -150,13 +151,13 @@ func turnMailboxState(input eventHookInput) string {
 }
 
 func (a *app) messageHookHarness(input eventHookInput) string {
-	if input.Harness == "claude" || input.Harness == "codex" || input.Harness == "pi" {
+	if harness.Known(input.Harness) {
 		return input.Harness
 	}
-	if messaging.NormalizeHarness(a.harnessFor(input.TranscriptPath)) == "claude" {
+	if harness.Normalize(a.harnessFor(input.TranscriptPath)) == "claude" {
 		return "claude"
 	}
-	if messaging.NormalizeHarness(a.harnessFor(input.TranscriptPath)) != "codex" {
+	if harness.Normalize(a.harnessFor(input.TranscriptPath)) != "codex" {
 		return ""
 	}
 	if input.Model != "" || strings.TrimSpace(a.env.Getenv("CODEX_THREAD_ID")) == input.SessionID || strings.Contains(filepath.ToSlash(input.TranscriptPath), "/.codex/") {

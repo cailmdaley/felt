@@ -10,7 +10,7 @@ defmodule Shuttle.HarnessPaths do
   Each root takes an option, then Shuttle's explicit override, then the
   harness's own home variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`), then the
   harness default under the home directory; a blank value counts as unset.
-  `internal/harnesspaths` is the Go copy, and
+  `internal/harness` is the Go copy, and
   `test/fixtures/harness_paths/cases.json` holds both to the same roots.
   """
 
@@ -45,6 +45,14 @@ defmodule Shuttle.HarnessPaths do
         non_empty(Shuttle.Env.get("CODEX_HOME")) || Path.join(Shuttle.Env.home(), ".codex"),
         "sessions"
       )
+    end)
+  end
+
+  @doc "The Antigravity CLI's conversation root, one `<id>/` directory per conversation."
+  @spec antigravity_brain_root(keyword()) :: String.t()
+  def antigravity_brain_root(opts \\ []) do
+    configured_path(opts, [:antigravity_root], "SHUTTLE_ANTIGRAVITY_BRAIN_DIR", fn ->
+      Path.join([Shuttle.Env.home(), ".gemini", "antigravity-cli", "brain"])
     end)
   end
 

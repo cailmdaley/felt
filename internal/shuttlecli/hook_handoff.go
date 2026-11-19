@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cailmdaley/felt/internal/harnesspaths"
+	"github.com/cailmdaley/felt/internal/harness"
 	"github.com/spf13/cobra"
 )
 
@@ -50,7 +50,7 @@ func (a *app) runHandoffHook(in io.Reader, out io.Writer) error {
 	if (input.Event != "PostToolUse" && input.Event != "UserPromptSubmit") || input.Session == "" || input.Transcript == "" {
 		return nil
 	}
-	if harnesspaths.Harness(a.env, input.Transcript) == "claude" {
+	if harness.ForTranscript(a.env, input.Transcript) == "claude" {
 		return nil
 	}
 	usage, err := readCodexUsage(input.Transcript)

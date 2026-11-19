@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/cailmdaley/felt/internal/harness"
 	"net"
 	"os"
 	"path/filepath"
@@ -58,12 +59,16 @@ func TestHarnessAliasesNormalizeAndMatchSharedFixture(t *testing.T) {
 	if err := json.Unmarshal(data, &fixture); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(addressHarnessNames, fixture.Names) {
-		t.Fatalf("Go address harness names = %#v, shared fixture = %#v", addressHarnessNames, fixture.Names)
+	names := map[string]string{}
+	for _, f := range harness.All() {
+		names[f.Name], names[f.Ledger] = f.Name, f.Name
+	}
+	if !reflect.DeepEqual(names, fixture.Names) {
+		t.Fatalf("Go harness names = %#v, shared fixture = %#v", names, fixture.Names)
 	}
 	for spelling, canonical := range fixture.Names {
-		if got := NormalizeHarness(spelling); got != canonical {
-			t.Errorf("NormalizeHarness(%q) = %q, want %q", spelling, got, canonical)
+		if got := harness.Normalize(spelling); got != canonical {
+			t.Errorf("harness.Normalize(%q) = %q, want %q", spelling, got, canonical)
 		}
 		address, err := FormatAddress("host", spelling, "session/id")
 		if err != nil {
@@ -81,9 +86,9 @@ func TestHarnessAliasesNormalizeAndMatchSharedFixture(t *testing.T) {
 			t.Errorf("ParseAddress(%q) = %#v", spelling, parsed)
 		}
 	}
-	for canonical, want := range map[string]string{"claude": "claude-code", "codex": "codex", "pi": "pi"} {
-		if got := LedgerHarnessName(canonical); got != want {
-			t.Errorf("LedgerHarnessName(%q) = %q, want %q", canonical, got, want)
+	for canonical, want := range map[string]string{"claude": "claude-code", "codex": "codex", "pi": "pi", "antigravity": "antigravity"} {
+		if got := harness.LedgerName(canonical); got != want {
+			t.Errorf("harness.LedgerName(%q) = %q, want %q", canonical, got, want)
 		}
 	}
 }

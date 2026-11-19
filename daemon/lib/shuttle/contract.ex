@@ -22,7 +22,7 @@ defmodule Shuttle.Contract do
   require Logger
 
   # Matches internal/shuttlecli/contract.go's ShuttleContractLevel.
-  @expected_level 52
+  @expected_level 53
 
   # The daemon-shelled surface each recent level introduced. A skew reason
   # names every surface above the CLI's level, so an operator sees which verb
@@ -80,7 +80,9 @@ defmodule Shuttle.Contract do
     50 => "channel (a constitution's board channel, set or cleared)",
     51 =>
       "inbox thread-put aliases (a thread result captured under another id is not captured again)",
-    52 => "inbox rekey and fiber:<uid> inbox keys (a fiber's inbox names no store)"
+    52 => "inbox rekey and fiber:<uid> inbox keys (a fiber's inbox names no store)",
+    53 =>
+      "resolved agent records carry their harness's facts (ls/show resolved.agent.harness, agents resolve)"
   }
 
   @doc "The daemon's expected `shuttle contract` level."

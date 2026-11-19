@@ -1,4 +1,4 @@
-package harnesspaths
+package harness
 
 import (
 	"encoding/json"
@@ -32,7 +32,6 @@ func TestRootsFixtureParity(t *testing.T) {
 	if len(fixture.Cases) == 0 {
 		t.Fatal("fixture has no cases")
 	}
-	roots := map[string]func(*sysenv.Env) (string, error){"claude": ClaudeProjects, "codex": CodexSessions, "pi": PiSessions}
 	for _, c := range fixture.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			t.Parallel()
@@ -47,11 +46,11 @@ func TestRootsFixtureParity(t *testing.T) {
 				if strings.HasPrefix(want, "~/") {
 					want = home + want[1:]
 				}
-				got, err := roots[harness](env)
+				got, err := TranscriptRoot(env, harness)
 				if err != nil || got != want {
 					t.Fatalf("%s: got %q err %v, want %q", harness, got, err, want)
 				}
-				if name := Harness(env, filepath.Join(got, "x", "session.jsonl")); name != harness {
+				if name := ForTranscript(env, filepath.Join(got, "x", "session.jsonl")); name != harness {
 					t.Fatalf("a transcript under %s reads as %q, want %q", got, name, harness)
 				}
 			}
@@ -64,7 +63,7 @@ func TestHarnessOfAPathUnderNoRoot(t *testing.T) {
 	dir := t.TempDir()
 	env := sysenv.New(dir, []string{"HOME=" + filepath.Join(dir, "home")})
 	for _, path := range []string{"", "/elsewhere/session.jsonl", filepath.Join(dir, "home", ".claude", "projects")} {
-		if name := Harness(env, path); name != "" {
+		if name := ForTranscript(env, path); name != "" {
 			t.Fatalf("%q reads as %q", path, name)
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/cailmdaley/felt/internal/harness"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -41,9 +42,9 @@ func (a *app) runRecentSessions(ctx context.Context, o *sessionsDiscoveryOptions
 	if err != nil {
 		return err
 	}
-	harness := messaging.NormalizeHarness(strings.TrimSpace(o.harness))
-	if harness != "" && harness != "claude" && harness != "codex" && harness != "pi" {
-		return fmt.Errorf("--harness must be claude, codex, or pi")
+	kind := harness.Normalize(strings.TrimSpace(o.harness))
+	if kind != "" && !harness.Known(kind) {
+		return fmt.Errorf("--harness must be one of %s", harness.Names())
 	}
 	own, err := a.resolveOwnHost("")
 	if err != nil {
@@ -54,9 +55,9 @@ func (a *app) runRecentSessions(ctx context.Context, o *sessionsDiscoveryOptions
 	}
 	var result recentSessions
 	if o.local || o.host == "" || o.host == own {
-		result, err = a.localRecentSessions(ctx, own, since, harness)
+		result, err = a.localRecentSessions(ctx, own, since, kind)
 	} else {
-		result, err = a.remoteRecentSessions(o.host, since, harness)
+		result, err = a.remoteRecentSessions(o.host, since, kind)
 	}
 	if err != nil {
 		return err

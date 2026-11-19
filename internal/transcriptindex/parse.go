@@ -39,10 +39,11 @@ type block struct {
 	Content   json.RawMessage `json:"content"`
 }
 
-// parseLine accepts only canonical conversation records. API request copies,
+// nativeLine reads Claude Code, Codex and Pi lines, which share a message
+// shape. It accepts only canonical conversation records. API request copies,
 // reasoning, images, signatures, usage, compaction and event mirrors aren't
 // conversation messages and never enter the index.
-func parseLine(harness string, line []byte, meta *metadata) ([]message, error) {
+func nativeLine(harness string, line []byte, meta *metadata) ([]message, error) {
 	var e envelope
 	if err := json.Unmarshal(line, &e); err != nil {
 		return nil, err

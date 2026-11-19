@@ -2,8 +2,8 @@ package shuttlecli
 
 import (
 	"fmt"
+	"github.com/cailmdaley/felt/internal/harness"
 
-	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/spf13/cobra"
 )
 
@@ -23,7 +23,7 @@ import (
 // line without them directly by its session UUID.
 
 func (a *app) hookInterruptedCmd() *cobra.Command {
-	var session, harness, cwd, id string
+	var session, name, cwd, id string
 	var at int64
 	cmd := &cobra.Command{
 		Use:   "interrupted",
@@ -40,8 +40,8 @@ the stream is disabled.`,
 			if session == "" || id == "" || at <= 0 {
 				return fmt.Errorf("--session, --id and --at are required")
 			}
-			if harness != "claude" && harness != "codex" {
-				return fmt.Errorf("--harness must be claude or codex")
+			if f, ok := harness.Lookup(name); !ok || !f.Interrupts {
+				return fmt.Errorf("--harness must name a harness whose interrupts Shuttle reads")
 			}
 			origin, err := a.resolveOwnHost("")
 			if err != nil {
@@ -53,7 +53,7 @@ the stream is disabled.`,
 				Type:       "interrupted",
 				SessionID:  session,
 				CWD:        cwd,
-				Harness:    messaging.LedgerHarnessName(harness),
+				Harness:    harness.LedgerName(name),
 				OriginName: origin,
 			})
 			if err != nil {
@@ -67,7 +67,7 @@ the stream is disabled.`,
 		},
 	}
 	cmd.Flags().StringVar(&session, "session", "", "harness session UUID")
-	cmd.Flags().StringVar(&harness, "harness", "", "claude or codex")
+	cmd.Flags().StringVar(&name, "harness", "", "the harness, one whose transcript records interrupts")
 	cmd.Flags().StringVar(&cwd, "cwd", "", "the session's working directory")
 	cmd.Flags().StringVar(&id, "id", "", "the transcript record id of the interrupt")
 	cmd.Flags().Int64Var(&at, "at", 0, "the interrupt's time, Unix milliseconds")

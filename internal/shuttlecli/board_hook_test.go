@@ -208,7 +208,7 @@ func TestHumanPromptAnswersOwnedAsk(t *testing.T) {
 
 			input.SessionID = "unbound"
 			input.Prompt = "not bound"
-			if row, err := currentSessionBinding(messaging.Address{Host: "host", Harness: messaging.NormalizeHarness(harness), ID: input.SessionID}, a.localMessageLedger()); err != nil || row != nil {
+			if row, err := currentSessionBinding(messaging.Address{Host: "host", Harness: harness, ID: input.SessionID}, a.localMessageLedger()); err != nil || row != nil {
 				t.Fatalf("unexpected binding for other session: %+v, %v", row, err)
 			}
 			runPrompt()

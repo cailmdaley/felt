@@ -2,6 +2,7 @@ package shuttlecli
 
 import (
 	"fmt"
+	"github.com/cailmdaley/felt/internal/harness"
 	"maps"
 	"slices"
 	"sort"
@@ -130,7 +131,7 @@ func ledgerMessageCandidates(sessionID string, records []SessionProvenance, sess
 		if record.Session == "" || record.Session != sessionID && record.ThreadID != sessionID {
 			continue
 		}
-		if record.ThreadID == "" && record.Session == sessionID && messaging.NormalizeHarness(record.Harness) == "codex" {
+		if record.ThreadID == "" && record.Session == sessionID && harness.Normalize(record.Harness) == "codex" {
 			mapped := peerAddressesForTranscript(record, sessions)
 			if len(mapped) > 0 {
 				candidates = append(candidates, mapped...)
@@ -159,7 +160,7 @@ func peerHasNativeCodexAddress(record SessionProvenance, sessionID string, sessi
 	for _, session := range sessions {
 		address, err := messaging.ParseAddress(session.Address)
 		if err == nil && address.Host == record.Host && address.ID == sessionID &&
-			messaging.NormalizeHarness(address.Harness) == "codex" &&
+			harness.Normalize(address.Harness) == "codex" &&
 			peerSessionMatchesFiber(session, record.fiber(), record.UID) {
 			return true
 		}
@@ -261,14 +262,14 @@ func newestFiberWorkerRecord(f *felt.Felt, records []SessionProvenance) (*Sessio
 			!workerBindingKind(row.Kind) {
 			continue
 		}
-		binding, err := currentSessionBinding(messaging.Address{Host: row.Host, Harness: messaging.NormalizeHarness(row.Harness), ID: row.nativeSessionID()}, records)
+		binding, err := currentSessionBinding(messaging.Address{Host: row.Host, Harness: harness.Normalize(row.Harness), ID: row.nativeSessionID()}, records)
 		if err != nil {
 			return nil, err
 		}
 		if binding != nil && !sessionRecordBelongsToFiber(*binding, f) {
 			continue
 		}
-		key := row.Session + "\x00" + row.ThreadID + "\x00" + row.Host + "\x00" + messaging.NormalizeHarness(row.Harness)
+		key := row.Session + "\x00" + row.ThreadID + "\x00" + row.Host + "\x00" + harness.Normalize(row.Harness)
 		if row.At > latestAt {
 			latestAt = row.At
 			latest = map[string]SessionProvenance{key: row}
@@ -282,7 +283,7 @@ func newestFiberWorkerRecord(f *felt.Felt, records []SessionProvenance) (*Sessio
 	if len(latest) > 1 {
 		candidates := make([]string, 0, len(latest))
 		for _, row := range latest {
-			candidates = append(candidates, fmt.Sprintf("%s on %s/%s", row.Session, row.Host, messaging.NormalizeHarness(row.Harness)))
+			candidates = append(candidates, fmt.Sprintf("%s on %s/%s", row.Session, row.Host, harness.Normalize(row.Harness)))
 		}
 		sort.Strings(candidates)
 		return nil, fmt.Errorf("fiber %q has conflicting newest session-ledger records: %s", f.ID, strings.Join(candidates, ", "))

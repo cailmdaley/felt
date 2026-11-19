@@ -15,7 +15,22 @@
           "wrapper": "claude",
           "model": "opus",
           "extra_flags": "--permission-mode auto --allow-dangerously-skip-permissions",
-          "effort": "high"
+          "effort": "high",
+          "harness": {
+            "name": "claude",
+            "ledger": "claude-code",
+            "binary": "claude",
+            "identity": "assigned",
+            "delivery": "native",
+            "idle_signal": true,
+            "interrupts": true,
+            "transcripts": {
+              "env": "SHUTTLE_CLAUDE_PROJECTS_DIR",
+              "home_env": "CLAUDE_CONFIG_DIR",
+              "home": ".claude",
+              "leaf": "projects"
+            }
+          }
         }
       },
       "role": "vizier",

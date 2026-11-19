@@ -3,6 +3,7 @@ package messaging
 import (
 	"encoding/json"
 	"errors"
+	"github.com/cailmdaley/felt/internal/harness"
 	"os"
 	"path/filepath"
 	"slices"
@@ -190,7 +191,7 @@ func Enqueue(env *sysenv.Env, e InboxEntry) error {
 	r.Wake, r.ContextIfBusy, r.IdleOnly = false, false, false
 	if session {
 		a, _ := ParseAddress(e.Address)
-		if a.Harness != "claude" && a.Harness != "codex" && a.Harness != "pi" {
+		if !harness.Known(a.Harness) {
 			return errCode("unavailable", "harness has no Shuttle message hook")
 		}
 		if reason := mailboxUnavailable(env, a.Harness, a.ID, a.Host); reason != "" {

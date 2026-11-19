@@ -5,6 +5,7 @@ package shuttle
 
 import (
 	"fmt"
+	"github.com/cailmdaley/felt/internal/harness"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -299,8 +300,8 @@ func Validate(b *Block, agents *AgentRegistry) ValidationErrors {
 			}
 			if name != "" {
 				rec, _, err := agents.Resolve(name, b.Effort, b.Chrome)
-				if err == nil && rec.CLI == "pi" {
-					add("pulse", "requires a Claude or Codex agent with idle-only wake support")
+				if f, known := harness.Lookup(rec.CLI); err == nil && known && !f.IdleSignal {
+					add("pulse", "requires an agent whose harness reports idle (idle-only wake support)")
 				}
 			}
 		}

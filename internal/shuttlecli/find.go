@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/cailmdaley/felt/internal/harness"
 	"strings"
 	"time"
 
@@ -25,7 +26,7 @@ type findResult struct {
 
 func (a *app) findCmd() *cobra.Command {
 	var fq feltcli.FindQuery
-	var since, harness string
+	var since, kind string
 	cmd := &cobra.Command{
 		Use:   "find <query...>",
 		Short: "Search fibers and session transcripts together",
@@ -53,12 +54,12 @@ alone, with more filters.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fq.Query = strings.Join(args, " ")
 			fq.Changed(cmd)
-			tq := transcriptQuery{Query: fq.Query, Since: since, Harness: harness, Limit: fq.Limit}
+			tq := transcriptQuery{Query: fq.Query, Since: since, Harness: kind, Limit: fq.Limit}
 			if tq.Limit <= 0 {
 				tq.Limit = 100
 			}
-			if harness != "" && harness != "claude" && harness != "codex" && harness != "pi" {
-				return fmt.Errorf("--harness must be claude, codex, or pi")
+			if kind != "" && !harness.Known(kind) {
+				return fmt.Errorf("--harness must be one of %s", harness.Names())
 			}
 			if _, err := parseTranscriptSince(since, a.eventNow()); err != nil {
 				return err
@@ -136,6 +137,6 @@ alone, with more filters.`,
 	feltcli.AddFindFlags(cmd, &fq)
 	cmd.Flags().Lookup("limit").Usage = "Cap on fibers printed from the enclosing store and on sessions (0 = fibers uncapped, 100 sessions)"
 	cmd.Flags().StringVar(&since, "since", "", "sessions: restrict by age (30d, 12h, YYYY-MM-DD or RFC3339)")
-	cmd.Flags().StringVar(&harness, "harness", "", "sessions: harness (claude, codex, pi)")
+	cmd.Flags().StringVar(&kind, "harness", "", "sessions: harness ("+harness.Names()+")")
 	return cmd
 }
