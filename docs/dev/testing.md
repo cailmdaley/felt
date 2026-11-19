@@ -108,6 +108,27 @@ names: flip the condition, drop the header, delete the binding. Watch the
 test go red for that reason, then restore the code. A test nobody has seen
 fail cannot be told apart from one that cannot fail.
 
+**Run the change before you test it.** A passing suite says the checks
+still hold; only the running thing says the change does what was meant. Open
+the board change in the harness (`cd ui && npm run harness:board`) and read a
+headless screenshot, run the CLI verb from the built binary against a
+temporary store, and read the fresh daemon's answer after a deploy.
+
+**A new test is a journey, a property, a differential or a named
+regression.** These take their answer from somewhere other than the code's
+author: a real flow through the product, a rule held over generated inputs,
+a second implementation or an independent parse, or a bug that happened.
+An example test that pins how two pieces are wired (this callback was called
+with that argument) shares the author's understanding of the task and is
+left out. Section 2 says which tier a test runs in.
+
+**A flaky test is fixed or deleted, never retried.** A test that fails on a
+commit that doesn't touch its subject gets its cause found. Don't rerun it
+until it passes, add a sleep, or skip it. If the cause can't be found,
+delete the test and file why in a fiber. When a check still fails after
+three attempts at a fix, stop and bring the human the failure and what you
+tried.
+
 **Pass state in; don't change the world.** When the code under test depends
 on ambient state (the time zone, environment variables, `PATH`, `HOME`, the
 clock, a registered process), make that state a parameter and set it per
