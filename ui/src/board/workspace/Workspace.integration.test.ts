@@ -149,12 +149,13 @@ const selections = (): Record<string, unknown>[] => vi.mocked(fetch).mock.calls
   .map(([, init]) => JSON.parse(String(init!.body)) as Record<string, unknown>)
 afterEach(() => { resetLanes(); workspace?.dispose(); vi.useRealTimers(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-it('uses the chair fiber as the console prefix for a seatless office', () => {
+it('prefixes the console with a named channel\'s chair, and in the catch-all with the family\'s top-level', () => {
   const chair = card({ id: 'life/fee-and-mission', uid: 'fee', shuttleRole: 'intendant', createdAt: '2026-01-01' })
   const thread = card({ id: 'life/fee-and-mission/travel', uid: 'travel', orchestrator: 'fee' })
-  boardCards = [chair, thread]
-  expect(workspace.channelHandle(chair)).toBe('fee-and-mission')
-  expect(workspace.channelHandle(thread)).toBe('fee-and-mission')
+  const seat = card({ id: 'life/intendant', uid: 'int', shuttleChannel: 'Intendant', shuttleSeat: true, createdAt: '2025-01-01' })
+  const errand = card({ id: 'life/errand', uid: 'errand', orchestrator: 'int' })
+  boardCards = [chair, thread, seat, errand]
+  expect([chair, thread, seat, errand].map(each => workspace.channelHandle(each))).toStrictEqual(['fee-and-mission', 'fee-and-mission', 'intendant', 'intendant'])
 })
 
 it('routes a linked change to the fiber holding its file on its own host, not the report channel', async () => {

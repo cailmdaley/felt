@@ -96,19 +96,21 @@
 .kbn-ch-pick[aria-current] { color: var(--kbn-ink); background: color-mix(in srgb, var(--kbn-owed-bright) 16%, transparent); }
 .kbn-ch-pick-hash { flex: none; width: 0.7em; color: var(--kbn-ink-muted); }
 .kbn-ch-pick-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-/* A chaired channel's name is written as Slack writes it: lowercase, in the monospace. */
-.kbn-ch-pick:not([data-lone]) .kbn-ch-pick-name { font-family: var(--font-sign); font-size: var(--type-row); }
+/* A channel's name is written as Slack writes it: lowercase, in the monospace. */
+.kbn-ch-pick .kbn-ch-pick-name { font-family: var(--font-sign); font-size: var(--type-row); }
 .kbn-ch-pick[data-unread] .kbn-ch-pick-name { color: var(--kbn-ink); }
-.kbn-ch-pick[data-lone] { font-size: var(--type-meta); color: var(--kbn-ink-muted); }
-.kbn-ch-pick[data-lone] .kbn-ch-pick-hash { opacity: 0.6; }
-/* A ringed numeral, as the rail counts: how many wait on the human, in gold; how many are new
-   since the human last read the channel, in the ink. */
+/* The catch-all stands apart at the rail's foot, its name quieter than a declared channel's. */
+.kbn-ch-rail-item:has(> .kbn-ch-pick[data-misc]) { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--kbn-rule); }
+.kbn-ch-pick[data-misc] .kbn-ch-pick-name { font-style: italic; }
+/* The rail's two counts read apart: how many lines wait on the human is a solid gold disc, the
+   Desk's owed colour; how many lines are new since this device last read the channel is a bare
+   ink numeral in a ring. */
 .kbn-ch-pick-mark, .kbn-ch-pick-unread {
   display: grid; place-items: center; flex: none; align-self: center; box-sizing: border-box; min-width: 17px; height: 17px; padding: 0 3px;
   border: 1px solid var(--kbn-ink-muted); border-radius: 9px; background: var(--kbn-paper);
   font: var(--type-meta)/var(--leading-solid) var(--font-sign); color: var(--kbn-ink-soft);
 }
-.kbn-ch-pick-mark { border-color: var(--kbn-owed-bright); color: var(--kbn-owed-deep, var(--kbn-owed-bright)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--kbn-owed-bright) 22%, transparent); }
+.kbn-ch-pick-mark { border-color: var(--kbn-owed-deep, var(--kbn-owed-bright)); background: var(--kbn-owed-bright); color: var(--kbn-paper); font-weight: 600; }
 /* What waits on the human floats above the human's order, a little apart from it. */
 .kbn-ch-rail-item[data-waiting]:has(+ .kbn-ch-rail-item:not([data-waiting])) { margin-bottom: 8px; }
 .kbn-ch-pick-hidden { flex: none; font: var(--type-label)/var(--leading-ui) var(--font-serif); color: var(--kbn-ink-muted); }

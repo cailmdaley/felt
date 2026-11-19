@@ -45,11 +45,13 @@ const SLIDE = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 794 1123" wi
  * standing thread between runs, a draft and a thread put to rest sit quiet.
  * Vizier: two seats (the oneshot one chairs), a
  * form asking, the morning post closed with a closing post and its
- * attachment. The Mill posts long to the human, who answered. An office
- * without a channel (the composer's), hidden from the rail an hour ago;
+ * attachment. The Mill posts long to the human, who answered. The
+ * composer's channel, hidden from the rail an hour ago;
  * Science and French at work with nothing waiting, in the human's order
  * below what waits; moving house asking for five days, a pinned garden plan,
- * and old notes idle three weeks, found only by Jump to.
+ * and old notes idle three weeks, found only by Jump to. Three name no
+ * channel and speak in misc: a journal club at work, a working group and a
+ * flight check-in quiet.
  */
 const ROWS: Row[] = [
   { id: 'cmbx', name: 'cmbx chair', channel: 'cmbx', seat: true, state: 'idle', terminal: true, minutes: 9,
@@ -85,12 +87,15 @@ const ROWS: Row[] = [
   { id: 'deed-form', name: 'Sign the deed form', parent: 'vizier', minutes: 50, ask: 'The notary needs the deed form back by Wednesday. Sign the scan in your Documents folder, or shall I book a slot to sign it in person?' },
   { id: 'felt', name: 'The Mill', channel: 'The Mill', seat: true, state: 'working', minutes: 1 },
   { id: 'felt/lander', name: 'Lander', parent: 'felt', state: 'idle', minutes: 15 },
-  { id: 'score', name: 'Second movement', role: 'composer', state: 'idle', minutes: 200 },
+  { id: 'score', name: 'Second movement', channel: 'Composer', role: 'composer', state: 'idle', minutes: 200 },
   { id: 'science', name: 'Science desk', channel: 'Science', seat: true, state: 'working', minutes: 12 },
   { id: 'french', name: 'French lessons', channel: 'French', state: 'working', minutes: 90 },
-  { id: 'move', name: 'Moving house', minutes: 5 * DAY, ask: 'The 12 m³ van is free on Saturday; the 20 m³ only on Sunday. Which one?' },
-  { id: 'garden', name: 'Garden plan', minutes: 12 * DAY, outcome: 'Tomatoes go in after the last frost; the seed order is drafted.' },
-  { id: 'old-notes', name: 'Old lensing notes', minutes: 21 * DAY },
+  { id: 'move', name: 'Moving house', channel: 'Move', minutes: 5 * DAY, ask: 'The 12 m³ van is free on Saturday; the 20 m³ only on Sunday. Which one?' },
+  { id: 'garden', name: 'Garden plan', channel: 'Garden', minutes: 12 * DAY, outcome: 'Tomatoes go in after the last frost; the seed order is drafted.' },
+  { id: 'old-notes', name: 'Old lensing notes', channel: 'Old-notes', minutes: 21 * DAY },
+  { id: 'journal-club', name: 'CosmoStat journal club', state: 'working', minutes: 25 },
+  { id: 'tools-wg', name: 'IAP tools working group', minutes: 3 * 60 },
+  { id: 'check-in', name: 'Flight check-in', minutes: 2 * DAY },
 ]
 
 export interface ChannelsFixture {
@@ -323,10 +328,10 @@ function addBoardFixtures(example: WorkspaceExample, now: number, ROWS: Row[], m
   }
   return {
     waiting,
-    dismissed: [`hide:role:composer:${ms(60)}`],
-    pinned: { 'fiber:garden': now - 3 * 86_400_000 },
+    dismissed: [`hide:channel:composer:${ms(60)}`],
+    pinned: { 'channel:garden': now - 3 * 86_400_000 },
     // The human put French above Science, and the garden plan last.
-    order: { keys: ['channel:french', 'channel:science', 'fiber:garden'], at: ms(DAY) },
+    order: { keys: ['channel:french', 'channel:science', 'channel:garden'], at: ms(DAY) },
     board,
   }
 }

@@ -7,6 +7,7 @@ import type { ViewContext } from './ViewRegistry.js'
 import { BoardFeed, type BoardRecord } from '../boardFeed.js'
 import type { SentFile } from '../sentFiles.js'
 import { card, response, settle } from '../testFixtures.js'
+import { CLEAR_UNDO_MS } from '../utils.js'
 import { Dock, type ConsoleOptions } from '../workspace/Dock.js'
 
 vi.mock('../tube.js', async original => {
@@ -26,9 +27,9 @@ const chair = card({ id: 'cmbx', uid: 'C', name: 'cmbx chair', shuttleChannel: '
 const tsz = card({ id: 'cmbx/tsz', uid: 'T', name: 'κ × tSZ', orchestrator: 'C', ...working(2) })
 const mask = card({ id: 'cmbx/mask', uid: 'M', name: 'Cluster mask', orchestrator: 'C', shuttleKind: 'oneshot', status: 'active', ask: { text: 'Mask at **5σ** or 3σ?', at: at(20) } })
 const beam = card({ id: 'cmbx/beam', uid: 'B', name: 'Beam window', orchestrator: 'C', ...working(1) })
-// A lone constitution asking; a quiet one idle for weeks.
-const van = card({ id: 'van', uid: 'R', name: 'Moving house', status: 'active', ask: { text: 'Which van?', at: at(30) } })
-const notes = card({ id: 'notes', uid: 'N', name: 'Old notes', status: 'open', modifiedAt: new Date(Date.now() - 20 * day).toISOString() })
+// A constitution asking in a channel of its own; a quiet one idle for weeks.
+const van = card({ id: 'van', uid: 'R', name: 'Moving house', shuttleChannel: 'van', status: 'active', ask: { text: 'Which van?', at: at(30) } })
+const notes = card({ id: 'notes', uid: 'N', name: 'Old notes', shuttleChannel: 'notes', status: 'open', modifiedAt: new Date(Date.now() - 20 * day).toISOString() })
 const record = (over: Partial<BoardRecord> & Pick<BoardRecord, 'id' | 'kind' | 'fiber'>, minutes: number): BoardRecord => ({ by: { fiber: over.fiber }, timestamp: Date.now() - minutes * minute, originName: 'local', ...over })
 const BOARD: Record<string, BoardRecord[]> = {
   C: [
@@ -74,7 +75,7 @@ async function mount(inFlight = [chair, tsz, mask, beam, van, notes], view = new
     openFromDesk, openPage, look: see, isActive: false,
     console: (options: ConsoleOptions) => new Dock('', requestRefresh, undefined, undefined, options),
     library: { subscribe: () => () => {}, cancelOpen: vi.fn(), documents: () => library },
-    board: new BoardFeed(''), charterNames: new Map(), said: () => undefined,
+    board: new BoardFeed(''), said: () => undefined,
     globeHost: { feeds: { marks: (each: { uid?: string }) => ({ launches: launches[each.uid!] ?? [], commits: [] }), reach: () => 14 * day, files: () => [], lead: async () => undefined, refresh: () => {} } },
   }
   const sends = { files: sent, subscribe: () => () => {}, refresh: async () => {} }
@@ -128,7 +129,7 @@ it('opening, paging and returning to a channel look at nothing; clicking an item
   const { view, ctx, host, see, openFromDesk, openPage } = await mount()
   view.keydown(new KeyboardEvent('keydown', { key: 'j' }))
   view.keydown(new KeyboardEvent('keydown', { key: 'k' }))
-  host.querySelector<HTMLButtonElement>('[data-channel="fiber:R"]')!.click()
+  host.querySelector<HTMLButtonElement>('[data-channel="channel:van"]')!.click()
   host.querySelector<HTMLButtonElement>('[data-channel="channel:cmbx"]')!.click()
   view.refresh(ctx); await settle()
   window.dispatchEvent(new Event('focus'))
@@ -171,20 +172,20 @@ it('speaks to the channel\'s chair by its slug, and keeps the console\'s draft b
   expect(dock.querySelector<HTMLElement>('.ws-band-page')!.hidden).toBe(true)
   field().textContent = 'for the chair'; field().dispatchEvent(new Event('input'))
   // A chair with no worker to run has no console.
-  host.querySelector<HTMLButtonElement>('[data-channel="fiber:R"]')!.click()
+  host.querySelector<HTMLButtonElement>('[data-channel="channel:van"]')!.click()
   expect(dock.hidden).toBe(true)
   host.querySelector<HTMLButtonElement>('[data-channel="channel:cmbx"]')!.click()
   expect(field().textContent).toBe('for the chair')
 })
 
-it('marks a channel with something new to the human by an ink dot, counting what a channel never opened has said, and never counting marks', async () => {
-  const stored = new Map([['shuttle.channels.seen:fiber:R', String(Date.now() - 5 * minute)]])
+it('marks a channel with something new to the human by an ink dot, counting from when this device first saw it, and never counting marks', async () => {
+  const stored = new Map([['shuttle.channels.seen:channel:van', String(Date.now() - 5 * minute)]])
   daemon([], stored)
   const science = card({ id: 'science', uid: 'S', name: 'Science desk', shuttleChannel: 'Science', ...working(3) })
   const { host } = await mount([chair, tsz, mask, beam, van, notes, science], undefined, SENT, { S: [Date.now() - minute] })
   const dot = (key: string) => host.querySelector(`[data-channel="${key}"]`)!
   // Moving house was read after its ask; science's only news is a thread starting.
-  expect(dot('fiber:R').hasAttribute('data-unread')).toBe(false)
+  expect(dot('channel:van').hasAttribute('data-unread')).toBe(false)
   expect(dot('channel:science').hasAttribute('data-unread')).toBe(false)
   // cmbx waits: gold, not ink.
   expect([dot('channel:cmbx').querySelector('.kbn-ch-pick-mark') !== null, dot('channel:cmbx').querySelector('.kbn-ch-pick-unread')]).toStrictEqual([true, null])
@@ -215,7 +216,7 @@ it('jumps to a channel the rail no longer lists, and to the fleet\'s documents; 
   expect(openPage).toHaveBeenLastCalledWith(library[0].card, 'host:/notes/old/lensing-notes.md')
   jump.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }))
   expect(shown(host)).toBe('notes')
-  expect(stored.has('shuttle.channels.seen:fiber:N')).toBe(true)
+  expect(stored.has('shuttle.channels.seen:channel:notes')).toBe(true)
   // Listed while it is the one being read.
   expect(rail(host)).toStrictEqual(['cmbx', 'van', 'notes'])
   host.querySelector<HTMLButtonElement>('[data-channel="channel:cmbx"]')!.click()
@@ -263,7 +264,7 @@ it('pins and unpins from its menu, and restores a write that fails', async () =>
   expect(host.querySelector('.kbn-ch-menu')!.closest('ui-tooltip')!.querySelector('.kbn-ch-tip')?.textContent).toBe('Channel menu')
   host.querySelector<HTMLButtonElement>('.kbn-ch-menu')!.click()
   await settle()
-  expect(items().map(item => item.textContent)).toStrictEqual(['Hide', 'Pin', 'Move to bottom'])
+  expect(items().map(item => item.textContent).slice(0, 4)).toStrictEqual(['Hide', 'Pin', 'Move to bottom', 'Move a thread to another channel…'])
   items()[1].click()
   await settle()
   expect(posts.at(-1)).toStrictEqual(['/api/v1/channels/pin', { key: 'channel:cmbx', fiber: 'C' }])
@@ -284,7 +285,7 @@ it('floats what waits above the human\'s order, and moves a channel by Alt and t
   press('science', 'ArrowDown', { altKey: true })
   await settle()
   // Every channel's place is written, the ones out of the rail and the waiting ones keeping theirs.
-  expect(posts.at(-1)).toStrictEqual(['/api/v1/channels/order', { keys: ['channel:cmbx', 'fiber:N', 'fiber:R', 'channel:french', 'channel:science'] }])
+  expect(posts.at(-1)).toStrictEqual(['/api/v1/channels/order', { keys: ['channel:cmbx', 'channel:notes', 'channel:van', 'channel:french', 'channel:science'] }])
   expect(rail(host)).toStrictEqual(['cmbx', 'van', 'french', 'science'])
   // Nothing moves above what waits, and a waiting channel does not move at all.
   press('french', 'ArrowUp', { altKey: true })
@@ -295,10 +296,10 @@ it('floats what waits above the human\'s order, and moves a channel by Alt and t
   press('french', 'ContextMenu')
   await settle()
   const items = () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
-  expect(items().map(item => item.textContent)).toStrictEqual(['Hide', 'Pin', 'Move to bottom'])
+  expect(items().map(item => item.textContent).slice(0, 4)).toStrictEqual(['Hide', 'Pin', 'Move to bottom', 'Move a thread to another channel…'])
   items()[2].click()
   await settle()
-  expect(posts.at(-1)).toStrictEqual(['/api/v1/channels/order', { keys: ['channel:cmbx', 'fiber:N', 'fiber:R', 'channel:science', 'channel:french'] }])
+  expect(posts.at(-1)).toStrictEqual(['/api/v1/channels/order', { keys: ['channel:cmbx', 'channel:notes', 'channel:van', 'channel:science', 'channel:french'] }])
   expect(rail(host)).toStrictEqual(['cmbx', 'van', 'science', 'french'])
   // A poll keeps the order written here until the feed carries a newer one.
   view.refresh(ctx); await settle()
@@ -314,7 +315,7 @@ it('hides a channel by its menu; Jump to finds it, marked, and opening it brings
   ;[...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Hide')!.click()
   await settle()
   expect(posts.at(-1)?.[0]).toBe('/api/v1/channels/dismiss')
-  expect(posts.at(-1)?.[1]).toMatchObject({ key: expect.stringMatching(/^hide:fiber:R:\d+$/), fiber: 'R' })
+  expect(posts.at(-1)?.[1]).toMatchObject({ key: expect.stringMatching(/^hide:channel:van:\d+$/), fiber: 'R' })
   expect(rail(host)).toStrictEqual(['cmbx'])
   view.find('mov')
   expect(rail(host)).toStrictEqual(['van'])
@@ -322,20 +323,20 @@ it('hides a channel by its menu; Jump to finds it, marked, and opening it brings
   // Its menu offers to bring it back.
   pick('van').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 30 }))
   await settle()
-  expect([...document.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toStrictEqual(['Unhide', 'Pin', 'Move to bottom'])
+  expect([...document.querySelectorAll('[role="menuitem"]')].map(item => item.textContent).slice(0, 4)).toStrictEqual(['Unhide', 'Pin', 'Move to bottom', 'Move a thread to another channel…'])
   ;(document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
   await settle()
   expect(document.querySelector('[role="menu"]')).toBeNull()
   pick('van').click()
   await settle()
-  expect(posts.at(-1)?.[1]).toMatchObject({ key: expect.stringMatching(/^show:fiber:R:\d+$/) })
+  expect(posts.at(-1)?.[1]).toMatchObject({ key: expect.stringMatching(/^show:channel:van:\d+$/) })
   expect(rail(host)).toStrictEqual(['cmbx', 'van'])
 })
 
 it('rebuilds nothing under a held entry: a poll during a hold waits, and the hold lifted opens the menu on it', async () => {
   daemon()
   const { view, ctx, host } = await mount()
-  const held = host.querySelector<HTMLButtonElement>('[data-channel="fiber:R"]')!
+  const held = host.querySelector<HTMLButtonElement>('[data-channel="channel:van"]')!
   const press = (type: string) => new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: 10, clientY: 10 })
   held.dispatchEvent(Object.assign(press('pointerdown'), { pointerId: 1, pointerType: 'touch', isPrimary: true }))
   await new Promise(resolve => setTimeout(resolve, 500))
@@ -346,20 +347,20 @@ it('rebuilds nothing under a held entry: a poll during a hold waits, and the hol
   expect(rail(host)).toStrictEqual(['cmbx', 'van'])
   window.dispatchEvent(Object.assign(press('pointerup'), { pointerId: 1, pointerType: 'touch', isPrimary: true }))
   await settle()
-  expect([...document.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toStrictEqual(['Hide', 'Pin', 'Move to bottom'])
-  // Lifted, the rail takes the poll.
-  expect(rail(host)).toStrictEqual(['cmbx', 'van', 'new'])
+  expect([...document.querySelectorAll('[role="menuitem"]')].map(item => item.textContent).slice(0, 4)).toStrictEqual(['Hide', 'Pin', 'Move to bottom', 'Move a thread to another channel…'])
+  // Lifted, the rail takes the poll: the new constitution names no channel, so it speaks in misc.
+  expect(rail(host)).toStrictEqual(['cmbx', 'van', 'misc'])
   ;(document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
   // The window swallows the click a fired hold sends for a moment; let it pass before the next test clicks.
   await new Promise(resolve => setTimeout(resolve, 750))
 })
 
 it('brings a hidden channel back by itself when something in it begins waiting after the hide', async () => {
-  daemon([], undefined, {}, { dismissed: [`hide:fiber:R:${Date.now() - 35 * minute}`] })
+  daemon([], undefined, {}, { dismissed: [`hide:channel:van:${Date.now() - 35 * minute}`] })
   const { view, ctx, host } = await mount()
   // The van asked half an hour ago, after the hide.
   expect(rail(host)).toStrictEqual(['cmbx', 'van'])
-  daemon([], undefined, {}, { dismissed: [`hide:fiber:R:${Date.now() - 25 * minute}`] })
+  daemon([], undefined, {}, { dismissed: [`hide:channel:van:${Date.now() - 25 * minute}`] })
   view.refresh(ctx); await settle(); await settle()
   expect(rail(host)).toStrictEqual(['cmbx'])
 })
@@ -442,10 +443,30 @@ it('heads the view with the channel itself, written as its name, the rail\'s tog
   expect([...head.querySelectorAll('.kbn-ch-icon')].map(icon => icon.classList[1])).toStrictEqual(['kbn-ch-rail-toggle', 'kbn-ch-back', 'kbn-ch-menu'])
   // Its chair's pages stand beside its name.
   expect([...head.querySelectorAll<HTMLElement>('.kbn-ch-pages .ws-doc-button')].map(button => button.dataset.part)).toStrictEqual(['constitution'])
-  // A lone constitution is named by its slug, its name in the tooltip.
-  host.querySelector<HTMLButtonElement>('[data-channel="fiber:R"]')!.click()
+  // A channel of one constitution is written as its channel too, its chair's name in the tooltip.
+  host.querySelector<HTMLButtonElement>('[data-channel="channel:van"]')!.click()
   await settle()
-  expect([shown(host), host.querySelector('.kbn-ch-name')!.hasAttribute('data-lone'), host.querySelector('.kbn-ch-name')!.getAttribute('title')]).toStrictEqual(['van', true, 'Moving house'])
+  expect([shown(host), host.querySelector('.kbn-ch-name')!.hasAttribute('data-misc'), host.querySelector('.kbn-ch-name')!.getAttribute('title')]).toStrictEqual(['van', false, 'Moving house'])
+})
+
+it('speaks for every constitution without a channel in misc, at the rail\'s foot, with no chair to address and nothing to pin', async () => {
+  const { stored } = daemon()
+  // Two strays: one asks (the newest wait on the board), one works; a third, quiet for weeks, is in misc but reads nothing.
+  const stray = card({ id: 'errand', uid: 'E', name: 'Errand', status: 'active', ask: { text: 'Which form?', at: at(1) } })
+  const busy = card({ id: 'busy', uid: 'U', name: 'Busy', ...working(2) })
+  const quiet = card({ id: 'quiet', uid: 'Q', name: 'Quiet', status: 'open', modifiedAt: new Date(Date.now() - 20 * day).toISOString() })
+  const { host } = await mount([chair, tsz, mask, beam, van, stray, busy, quiet])
+  expect(rail(host)).toStrictEqual(['cmbx', 'van', 'misc'])
+  const pick = host.querySelector<HTMLButtonElement>('[data-channel="misc"]')!
+  expect([pick.hasAttribute('data-misc'), pick.hasAttribute('data-waiting'), pick.querySelector('.kbn-ch-pick-mark')?.textContent]).toStrictEqual([true, true, '1'])
+  // First seen on this device: what it said before counts as read.
+  expect(Number(stored.get('shuttle.channels.seen:misc'))).toBeGreaterThan(Date.now() - minute)
+  pick.click(); await settle()
+  expect([shown(host), host.querySelector('.kbn-ch-pages'), stream(host)]).toStrictEqual(['misc', null, [['errand', 'ask', true]]])
+  expect(host.querySelector<HTMLElement>('.ws-dock')?.hidden ?? true).toBe(true)
+  pick.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 30 }))
+  await settle()
+  expect([...document.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).not.toContain('Pin')
 })
 
 it('shows a close awaiting review by its note and its tapestry, never its outcome, and keeps the tapestry across redraws', async () => {
@@ -520,10 +541,36 @@ it('clears a waiting post with one press of its ✓: it leaves the stream and st
   expect(host.querySelector('[data-channel="channel:cmbx"]')!.hasAttribute('data-waiting')).toBe(true)
 })
 
-it('clears a line that waits on no one from the stream, with e as with its ✓, and an undo brings it back; a question has no ✓', async () => {
+it('withdraws a worker\'s waiting question with its ✓ once the undo lapses, the line leaving at once; an undo writes nothing to the worker', async () => {
+  const { posts } = daemon()
+  const { host } = await mount()
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  try {
+    const lifecycle = () => posts.filter(([url]) => url.endsWith('/lifecycle'))
+    const check = () => item(host, 'mask').querySelector<HTMLButtonElement>('.kbn-ch-clear')!
+    expect(check().getAttribute('aria-label')).toBe('Clear Cluster mask\'s question')
+    // Undone inside the window, the question stands: its line comes back and nothing reaches the worker.
+    check().click()
+    await settle(); await settle()
+    expect(item(host, 'mask')).toBeUndefined()
+    document.querySelector<HTMLButtonElement>('.shuttle-toast .toast-undo')!.click()
+    await settle(); await settle()
+    vi.advanceTimersByTime(CLEAR_UNDO_MS)
+    await settle()
+    expect([item(host, 'mask') !== undefined, lifecycle()]).toStrictEqual([true, []])
+    // Left to lapse, it is withdrawn on its owner.
+    check().click()
+    await settle(); await settle()
+    expect(posts.at(-1)?.[1]).toMatchObject({ key: expect.stringMatching(/^line:\d+:ask:M:\d+$/) })
+    vi.advanceTimersByTime(CLEAR_UNDO_MS)
+    await settle()
+    expect(lifecycle()).toStrictEqual([['/api/v1/lifecycle', { action: 'ask-clear', fiber: 'cmbx/mask', origin: mask.originId }]])
+  } finally { vi.runOnlyPendingTimers(); vi.useRealTimers() }
+})
+
+it('clears a line that waits on no one from the stream, with e as with its ✓, and an undo brings it back', async () => {
   const { posts } = daemon()
   const { view, host } = await mount()
-  expect(item(host, 'mask').querySelector('.kbn-ch-clear')).toBeNull()
   const files = item(host, 'tsz')
   files.querySelector<HTMLElement>('.kbn-ch-who')!.focus()
   expect(view.keydown(new KeyboardEvent('keydown', { key: 'e' }))).toBe(true)
@@ -797,4 +844,64 @@ it('keeps one file unfolded in the stream: unfolding another folds the first', a
   expect(unfolded()).toStrictEqual(['tsz'])
   item(host, 'cmbx').querySelector<HTMLButtonElement>('.uf-card')!.click()
   expect(unfolded()).toStrictEqual(['cmbx'])
+})
+
+const menuItem = async (label: string) => {
+  await settle()
+  ;[...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(each => each.textContent?.startsWith(label))!.click()
+  await settle(); await settle()
+}
+const lifecycles = (posts: Array<[string, Record<string, unknown>]>) => posts.filter(([url]) => url.endsWith('/lifecycle')).map(([, body]) => body)
+
+it('moves a family out of misc into a new channel by its top-level\'s channel, at once, and an undo writes back what it had', async () => {
+  const { posts } = daemon()
+  const errand = card({ id: 'errand', uid: 'E', name: 'Errand', status: 'active', ask: { text: 'Which form?', at: at(1) } })
+  const leg = card({ id: 'errand/leg', uid: 'EL', name: 'Leg', orchestrator: 'E', ...working(2) })
+  const { host } = await mount([chair, tsz, van, errand, leg])
+  // Van waits, so it floats; misc, though its errand waits too, stays at the foot.
+  expect(rail(host)).toStrictEqual(['van', 'cmbx', 'misc'])
+  host.querySelector('[data-channel="misc"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 30 }))
+  await menuItem('Move a thread')
+  await menuItem('errand')
+  // The picker offers the named channels and a new one as typed; misc, where it is now, is not a move.
+  const field = document.querySelector<HTMLInputElement>('.kbn-move-field')!
+  expect([...document.querySelectorAll('.kbn-move-option:not(:disabled) .kbn-move-name')].map(each => each.textContent)).toStrictEqual(['#cmbx', '#van'])
+  field.value = 'Paper work'
+  field.dispatchEvent(new Event('input'))
+  field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+  await settle(); await settle()
+  expect(lifecycles(posts)).toStrictEqual([{ action: 'channel', fiber: 'errand', origin: errand.originId, channel: 'Paper work' }])
+  // The thread under it moves with it.
+  expect(rail(host)).toStrictEqual(['paper-work', 'van', 'cmbx'])
+  document.querySelector<HTMLButtonElement>('.shuttle-toast .toast-undo')!.click()
+  await settle(); await settle()
+  expect(lifecycles(posts).at(-1)).toStrictEqual({ action: 'channel', fiber: 'errand', origin: errand.originId, channel: null })
+  expect(rail(host)).toStrictEqual(['van', 'cmbx', 'misc'])
+})
+
+it('archives a channel: every constitution that names it, closed ones too, names none, nothing is tempered, and its live threads speak in misc', async () => {
+  const { posts } = daemon()
+  const earlier = card({ id: 'cmbx-old', uid: 'C0', name: 'Old cmbx', shuttleChannel: 'cmbx', status: 'closed', column: 'tempered' })
+  const { host } = await mount([chair, tsz, mask, beam, van, earlier])
+  host.querySelector('[data-channel="channel:cmbx"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 30 }))
+  await menuItem('Archive #cmbx')
+  expect(lifecycles(posts)).toStrictEqual([
+    { action: 'channel', fiber: 'cmbx', origin: chair.originId, channel: null },
+    { action: 'channel', fiber: 'cmbx-old', origin: earlier.originId, channel: null },
+  ])
+  expect(rail(host)).toStrictEqual(['van', 'misc'])
+  expect(document.querySelector('.shuttle-toast')!.textContent).toContain('#cmbx archived: its 4 threads speak in #misc.')
+  document.querySelector<HTMLButtonElement>('.shuttle-toast .toast-undo')!.click()
+  await settle(); await settle()
+  expect(lifecycles(posts).slice(-2).map(body => [body.fiber, body.channel])).toStrictEqual([['cmbx', 'cmbx'], ['cmbx-old', 'cmbx']])
+  expect(rail(host)).toStrictEqual(['cmbx', 'van'])
+})
+
+it('takes a move back and says so when the owner refuses it', async () => {
+  const { posts } = daemon(['/api/v1/lifecycle'])
+  const { host } = await mount([chair, tsz, van])
+  host.querySelector('[data-channel="channel:van"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 30 }))
+  await menuItem('Archive #van')
+  expect(lifecycles(posts)).toHaveLength(1)
+  expect([rail(host), host.querySelector('.kbn-ch-note, [role="status"]')?.textContent ?? '']).toStrictEqual([['van', 'cmbx'], expect.stringContaining('could not be written')])
 })

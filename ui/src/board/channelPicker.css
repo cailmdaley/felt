@@ -1,0 +1,31 @@
+/* Move to channel: the rest dialog's sheet, a field, and the channels as a list the field narrows. */
+.kbn-move {
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(520px, calc(100dvh - 64px));
+  padding: 22px 24px 18px;
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 12px;
+  background: var(--kbn-parchment);
+  color: var(--kbn-ink);
+  border: 1px solid color-mix(in srgb, var(--kbn-ink) 28%, transparent);
+  border-radius: 12px;
+  box-shadow: 0 18px 60px color-mix(in srgb, var(--kbn-shade) 45%, transparent);
+}
+.kbn-move-title { margin: 0; font-size: var(--type-title); font-weight: 400; }
+.kbn-move-subject { margin: -8px 0 0; font-size: var(--type-note); color: var(--kbn-ink-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kbn-move-field {
+  font: var(--type-row) var(--font-sign); color: var(--kbn-ink);
+  padding: 6px 8px; background: var(--kbn-paper-bright, transparent);
+  border: 1px solid color-mix(in srgb, var(--kbn-ink) 28%, transparent); border-radius: 6px;
+}
+.kbn-move-list { margin: 0; padding: 0; list-style: none; overflow-y: auto; }
+.kbn-move-option {
+  width: 100%; display: flex; align-items: baseline; gap: 8px; padding: 5px 8px;
+  font: inherit; color: inherit; text-align: left; background: none; border: 0; border-radius: 4px; cursor: pointer;
+}
+.kbn-move-option:hover:not(:disabled) { background: color-mix(in srgb, var(--kbn-owed-bright) 16%, transparent); }
+.kbn-move-option:focus-visible { background: color-mix(in srgb, var(--kbn-owed-bright) 16%, transparent); outline: none; }
+.kbn-move-option:disabled { cursor: default; color: var(--kbn-ink-muted); }
+.kbn-move-name { flex: 1; min-width: 0; overflow-wrap: anywhere; font: var(--type-row) var(--font-sign); }
+.kbn-move-hint { flex: none; font-size: var(--type-meta); color: var(--kbn-ink-muted); font-style: italic; }

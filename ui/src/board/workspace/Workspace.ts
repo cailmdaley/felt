@@ -150,10 +150,8 @@ export class Workspace {
   private readonly mapFeeds: ViewFeeds
   /** The family board's records, which a constitution's view and Channels read. */
   readonly board: BoardFeed
-  /** Each charter's name, by office slug, once read. */
-  charterNames = new Map<string, string>()
   /** Each constitution's channel handle, for the board's cards as last composed. */
-  private handles: { cards: KanbanCard[]; names: Map<string, string>; of: Map<string, string> } | null = null
+  private handles: { cards: KanbanCard[]; of: Map<string, string> } | null = null
   /** Each constitution's tapestry read, by fiber and its last write. */
   private readonly leadReads = new Map<string, { modified?: string; read: Promise<MapFile | undefined> }>()
   /** What a surface over the whole fleet reaches through the board: the map's feeds, and its pages and conversations. */
@@ -173,10 +171,6 @@ export class Workspace {
       this.mentions.refresh()
       if (this.current && this.isActive) this.current.familyPage?.update(this.current.card, this.graph())
     })
-    // Without the catalogue, offices go by their slugs.
-    void charters(opts.shuttleBase).then(list => {
-      this.charterNames = new Map(list.flatMap(charter => charter.name ? [[charter.slug, charter.name] as [string, string]] : []))
-    }).catch(() => {})
     this.mapFeeds = {
       marks: card => this.activity.of(card.uid ?? card.id),
       reach: () => this.activity.reach(),
@@ -343,15 +337,17 @@ export class Workspace {
     if (index.state(card) === 'to-review' && card.reviewMark?.note) posts.push({ text: card.reviewMark.note, at: Date.parse(card.reviewMark.at) || 0 })
     return posts.sort((a, b) => a.at - b.at).at(-1)
   }
-  /** The channel chair's slug, as the console names it; undefined for a card in no channel. */
+  /** The channel chair's slug, as the console names it, or in the catch-all its family's top-level's; undefined for a card in no channel. */
   channelHandle(card: KanbanCard): string | undefined {
     const cards = this.opts.cards()
-    if (this.handles?.cards !== cards || this.handles.names !== this.charterNames) {
+    if (this.handles?.cards !== cards) {
       const index = this.graph(), of = new Map<string, string>()
-      for (const channel of composeChannels({ cards, parentOf: each => index.parentOf(each), names: this.charterNames, dismissed: [], pinned: new Map(), waits: new Map(), now: Date.now() })) {
-        for (const member of channel.everyone) of.set(channelFiber(member), slug(channel.seat))
+      for (const channel of composeChannels({ cards, parentOf: each => index.parentOf(each), dismissed: [], pinned: new Map(), waits: new Map(), now: Date.now() })) {
+        // In the catch-all, which has no chair, a constitution goes by its family's top-level.
+        const top = (card: KanbanCard): KanbanCard => { let at = card; for (let up = index.parentOf(at); up; up = index.parentOf(at)) at = up; return at }
+        for (const member of channel.everyone) of.set(channelFiber(member), slug(channel.seat ?? top(member)))
       }
-      this.handles = { cards, names: this.charterNames, of }
+      this.handles = { cards, of }
     }
     return this.handles.of.get(channelFiber(card))
   }

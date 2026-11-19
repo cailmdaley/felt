@@ -90,8 +90,6 @@ export interface ViewContext extends TemporalFetchers {
     readonly globeHost: GlobeHost
     /** The family board's records, which Channels reads its streams from. */
     readonly board: BoardFeed
-    /** Each charter's name, by office slug, once read: an office's channel takes it. */
-    readonly charterNames: ReadonlyMap<string, string>
     /** The last thing a constitution said to anyone, with when; undefined when it said nothing. */
     said(card: KanbanCard): { text: string; at: number } | undefined
   }

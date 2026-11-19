@@ -2,43 +2,48 @@ import { hasLiveWorker, type KanbanCard } from './KanbanTypes.js'
 import { clearable, lastActive, wantOf, type Waits } from './attention.js'
 import { arrived, type BoardRecord } from './boardFeed.js'
 import { latestSends, type SentFile } from './sentFiles.js'
-import { slug } from './threadOutline.js'
 import { cardNamed } from './threads.js'
 
 /**
- * One channel: the constitutions speaking in a named channel (`shuttle.channel`,
- * a thread inheriting its nearest ancestor's), else an office's top-levels and
- * their threads, else one top-level constitution with its threads.
+ * One channel: the constitutions a `shuttle.channel` names (a constitution's
+ * own, else the nearest one above it), or {@link MISC}, everyone else.
  */
 export interface Channel {
-  /** `channel:<shuttle.channel, lowercased>`, `role:<office slug>` for an office's top-levels, or `fiber:<uid>` for a lone top-level. */
+  /** `channel:<shuttle.channel, lowercased>`, or {@link MISC}. */
   key: string
-  /** A named channel's name, lowercased with hyphens for spaces; a seatless office's slug; otherwise its chair's slug. */
+  /** A named channel's name, lowercased with hyphens for spaces; `misc` for the catch-all. */
   name: string
-  /** The office's charter name for a seatless office, otherwise the chair's full name. */
+  /** Its chair's full name; for the catch-all, what it holds. */
   title: string
-  /** Named or an office's: drawn above the lone constitutions. */
-  chaired: boolean
-  /** Its chair: whose tapestry it carries and who a reply in it goes to. */
-  seat: KanbanCard
+  /** The catch-all: drawn at the rail's foot, with no chair to address. */
+  misc: boolean
+  /** Its chair: whose tapestry it carries and who a reply in it goes to; none for the catch-all. */
+  seat?: KanbanCard
+  /** The name as its constitutions write it (`The Mill`), which a move to it writes; '' for the catch-all. */
+  spelling: string
+  /** The constitutions that name it themselves, archived ones too: what archiving it unsets. */
+  declarers: KanbanCard[]
   /** Every live constitution in it. */
   members: KanbanCard[]
   /** Every constitution in it, archived ones too, for resolving what they said. */
   everyone: KanbanCard[]
-  /** The uids of the families its live members belong to, each family's top-level. */
+  /** The uids of the families its live members belong to, each family's top-level; the catch-all's are those of its listed members. */
   families: string[]
   /** When the newest wait began, or 0 when nothing waits. */
   newest: number
   /** Something in it waits on the human. */
   waiting: boolean
-  /** Its members' latest activity. */
+  /** Its members' latest activity, drafts aside. */
   active: number
   pinned: boolean
   /** When it was taken out of the rail, nothing having begun waiting in it since; 0 when it is not hidden. */
   hidden: number
-  /** In the rail: not hidden, and waiting, pinned, or active within {@link RECENT_MS} with a member past its draft. */
+  /** In the rail: not hidden, and waiting, pinned (never the catch-all), or active within {@link RECENT_MS}. */
   listed: boolean
 }
+
+/** The catch-all channel's key, which no `channel:` key can be; a constitution that names `misc` speaks in it. */
+export const MISC = 'misc'
 
 /** A channel active within this long stays in the rail. */
 export const RECENT_MS = 7 * 86_400_000
@@ -80,24 +85,20 @@ export const fiberOf = (card: KanbanCard): string => card.uid ?? card.id
 export const officeOf = (role: string | undefined): string => role?.split('/')[0] ?? ''
 
 /**
- * Every channel the board holds, the chaired ones first, each shelf by name.
- * A named channel is written as its name, lowercased with hyphens for spaces
- * (`The Mill` is `the-mill`), an office merged into it included; a seatless
- * office's channel as its office; any other as its chair's slug. A card
- * speaks in its own `shuttle.channel`, else its orchestrator's, else that of
- * the nearest card filed above it; without one anywhere above it, its
- * top-level constitution's office names the channel (the named channel that
- * shares the office's charter name, when there is one), else that top-level
- * is a channel of its own. Something in it waits when a member waits on the
- * human (`wantOf`). It is in the rail while something in it waits or it is
- * pinned, or while it was active within {@link RECENT_MS} and not every live
- * member is a draft. A pin counts until a later unpin; a hide counts until a
- * later show or a later wait.
+ * Every channel the board holds: the named ones by name, then {@link MISC}.
+ * A card speaks in its own `shuttle.channel`, else its orchestrator's, else
+ * that of the nearest card filed above it; a card with none anywhere above
+ * it, or whose name is `misc`, speaks in the catch-all. A named channel is
+ * written as its name, lowercased with hyphens for spaces (`The Mill` is
+ * `the-mill`). Something in it waits when a member waits on the human
+ * (`wantOf`). It is in the rail while something in it waits or it is pinned,
+ * or while a member past its draft was active within {@link RECENT_MS}; the
+ * catch-all is never pinned. A pin counts until a later unpin; a hide counts
+ * until a later show or a later wait.
  */
 export function composeChannels(input: {
   cards: readonly KanbanCard[]
   parentOf: (card: KanbanCard) => KanbanCard | undefined
-  names: ReadonlyMap<string, string>
   dismissed: readonly string[]
   /** Pinned channel keys, each with its latest pin. */
   pinned: ReadonlyMap<string, number>
@@ -105,7 +106,7 @@ export function composeChannels(input: {
   waits: Waits
   now: number
 }): Channel[] {
-  const { cards, parentOf, names, dismissed, pinned, now } = input
+  const { cards, parentOf, dismissed, pinned, now } = input
   const tops = new Map<KanbanCard, KanbanCard>(), named = new Map<KanbanCard, string | null>()
   const topOf = (card: KanbanCard): KanbanCard => {
     let top = tops.get(card)
@@ -130,31 +131,25 @@ export function composeChannels(input: {
     if (named.has(card)) return named.get(card)!
     named.set(card, null)
     const above = parentOf(card) ?? filedUnder(card)
-    const name = card.shuttleChannel ?? (above ? channelOf(above) : null)
+    const name = card.shuttleChannel?.trim() || (above ? channelOf(above) : null)
     named.set(card, name)
     return name
   }
-  const officeName = (office: string): string => names.get(office) ?? office
-  // An office's channel merges into the named channel that shares its charter's name.
   const keyOf = (card: KanbanCard): string => {
-    const name = channelOf(card)
-    if (name) return `channel:${name.toLowerCase()}`
-    const office = officeOf(topOf(card).shuttleRole)
-    if (!office) return `fiber:${fiberOf(topOf(card))}`
-    const merged = `channel:${officeName(office).split(' · ')[0].toLowerCase()}`
-    return channelNames.has(merged) ? merged : `role:${office}`
+    const name = channelOf(card)?.toLowerCase()
+    return name && name !== MISC ? `channel:${name}` : MISC
   }
-  const channelNames = new Set(cards.flatMap(card => { const name = channelOf(card); return name ? [`channel:${name.toLowerCase()}`] : [] }))
   const seen = new Set<string>()
-  const groups = new Map<string, { members: KanbanCard[]; everyone: KanbanCard[] }>()
+  const groups = new Map<string, { members: KanbanCard[]; everyone: KanbanCard[]; declarers: KanbanCard[] }>()
   for (const card of cards) {
     // A uid names one fiber whichever host serves a copy of it.
     if (card.isCycle || seen.has(fiberOf(card))) continue
     seen.add(fiberOf(card))
     const key = keyOf(card)
-    const group = groups.get(key) ?? groups.set(key, { members: [], everyone: [] }).get(key)!
+    const group = groups.get(key) ?? groups.set(key, { members: [], everyone: [], declarers: [] }).get(key)!
     group.everyone.push(card)
     if (live(card)) group.members.push(card)
+    if (card.shuttleChannel?.trim()) group.declarers.push(card)
   }
   // `pin:<key>:<ms>` unpins the pins up to <ms>; `hide:<key>:<ms>` takes it out of the rail until something waits after <ms>;
   // `show:<key>:<ms>` voids the hides up to <ms>.
@@ -165,12 +160,13 @@ export function composeChannels(input: {
     if (into) into.set(match[2], Math.max(into.get(match[2]) ?? 0, Number(match[3])))
   }
   const since = (kind: string, key: string): number => latest[kind].get(key) ?? -Infinity
-  // The eldest, so a channel keeps its name however its members' activity moves.
+  // The eldest, so a channel keeps its chair however its members' activity moves.
   const eldest = (list: KanbanCard[]): KanbanCard | undefined =>
     [...list].sort((a, b) => (Date.parse(a.createdAt) || 0) - (Date.parse(b.createdAt) || 0) || a.id.localeCompare(b.id))[0]
   const channels: Channel[] = []
-  for (const [key, { members, everyone }] of groups) {
+  for (const [key, { members, everyone, declarers }] of groups) {
     if (!members.length) continue
+    const misc = key === MISC
     const inside = (card: KanbanCard): KanbanCard[] => {
       const above: KanbanCard[] = []
       for (let parent = parentOf(card); parent && keyOf(parent) === key; parent = parentOf(parent)) above.push(parent)
@@ -179,24 +175,30 @@ export function composeChannels(input: {
     // The chair is the topmost seat, a standing one only when no other is; without a seat, a top-level; the eldest of those it finds.
     const seats = members.filter(card => card.shuttleSeat && !inside(card).some(above => above.shuttleSeat))
     const heads = members.filter(card => !inside(card).length)
-    const seat = eldest(seats.filter(card => card.shuttleKind !== 'standing')) ?? eldest(seats) ?? eldest(heads) ?? eldest(members)!
-    const newest = Math.max(0, ...members.map(card => wantOf(card, input.waits)?.at ?? 0))
-    const active = Math.max(0, ...members.map(lastActive))
-    const isPinned = (pinned.get(key) ?? -Infinity) > since('pin', key)
+    const seat = misc ? undefined : eldest(seats.filter(card => card.shuttleKind !== 'standing')) ?? eldest(seats) ?? eldest(heads) ?? eldest(members)!
+    const wantAt = (card: KanbanCard): number => wantOf(card, input.waits)?.at ?? 0
+    const newest = Math.max(0, ...members.map(wantAt))
+    const past = members.filter(card => card.column !== 'drafts')
+    const active = Math.max(0, ...past.map(lastActive))
+    const isPinned = !misc && (pinned.get(key) ?? -Infinity) > since('pin', key)
     const waiting = newest > 0
-    const drafted = members.every(card => card.column === 'drafts')
     const hidden = since('hide', key) > Math.max(since('show', key), newest) ? since('hide', key) : 0
-    const office = key.startsWith('role:') && !seats.length ? key.slice(5) : ''
-    const name = key.startsWith('channel:') ? key.slice(8).replace(/ /g, '-') : office || slug(seat)
+    // The catch-all reads only the families of what in it waits or was recently active: it holds every stray constitution.
+    const speaking = misc ? members.filter(card => wantAt(card) > 0 || (card.column !== 'drafts' && now - lastActive(card) <= RECENT_MS)) : members
+    const spelling = misc ? '' : eldest(declarers.filter(card => keyOf(card) === key))?.shuttleChannel?.trim() ?? key.slice(8)
     channels.push({
-      key, name, title: office ? officeName(office) : seat.name, chaired: !key.startsWith('fiber:'), seat, members, everyone,
-      families: [...new Set(members.map(card => fiberOf(topOf(card))))],
+      key, name: misc ? MISC : key.slice(8).replace(/ /g, '-'), title: seat?.name ?? 'Every constitution without a channel', misc, seat, spelling,
+      declarers, members, everyone,
+      families: [...new Set(speaking.map(card => fiberOf(topOf(card))))],
       newest, waiting, active, pinned: isPinned, hidden,
-      listed: !hidden && (waiting || isPinned || (!drafted && now - active <= RECENT_MS)),
+      listed: !hidden && (waiting || isPinned || now - active <= RECENT_MS),
     })
   }
-  return channels.sort((a, b) => Number(b.chaired) - Number(a.chaired) || a.name.localeCompare(b.name))
+  return channels.sort((a, b) => Number(a.misc) - Number(b.misc) || a.name.localeCompare(b.name))
 }
+
+/** A stored key of a kind no channel has (`role:<office>`, `fiber:<uid>`): an order, seen mark or last channel keeps none. */
+export const bygone = (key: string): boolean => key.startsWith('role:') || key.startsWith('fiber:')
 
 /**
  * Every channel in the human's order: those the order does not name first, as
@@ -208,10 +210,10 @@ export function arranged(channels: readonly Channel[], order: readonly string[])
   return [...channels].sort((a, b) => rank(a) - rank(b))
 }
 
-/** The rail's order: what waits on the human first, the newest wait first, then everything else in the human's order. */
+/** The rail's order: what waits on the human first, the newest wait first, then everything else in the human's order, and the catch-all at the foot. */
 export function railOrder(channels: readonly Channel[], order: readonly string[]): Channel[] {
-  const all = arranged(channels, order)
-  return [...all.filter(channel => channel.waiting).sort((a, b) => b.newest - a.newest), ...all.filter(channel => !channel.waiting)]
+  const all = arranged(channels.filter(channel => !channel.misc), order)
+  return [...all.filter(channel => channel.waiting).sort((a, b) => b.newest - a.newest), ...all.filter(channel => !channel.waiting), ...channels.filter(channel => channel.misc)]
 }
 
 /**

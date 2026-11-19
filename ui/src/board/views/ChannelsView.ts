@@ -6,7 +6,7 @@ import type { KanbanCard } from '../KanbanTypes.js'
 import { boardCards, threadIndexFor } from '../KanbanSurfaces.js'
 import { isMobileViewport } from '../mobile.js'
 import {
-  arranged, clearLineKey, clearedLines, lineIds, composeChannels, composeStream, fiberOf, runningIn, hideKey, railOrder, reordered, showKey, unclearLineKey, unpinKey,
+  MISC, arranged, bygone, clearLineKey, clearedLines, lineIds, composeChannels, composeStream, fiberOf, runningIn, hideKey, railOrder, reordered, showKey, unclearLineKey, unpinKey,
   type Channel, type Entry, type Item, type Station,
 } from '../channels.js'
 import { layTube, rowHeight, runsOf, tautness, type Tube, type TubeLine } from '../tube.js'
@@ -18,7 +18,8 @@ import { RailMotion, SLOP_PX, WHEEL_IDLE_MS, WheelAxis } from './railMotion.js'
 import { openActionMenu } from '../conversationMenu.js'
 import { stateDot } from '../stateDot.js'
 import { slug } from '../threadOutline.js'
-import { clearToast, fewAtATime } from '../utils.js'
+import { CLEAR_UNDO_MS, clearToast, fewAtATime, showToast } from '../utils.js'
+import { channelPicker } from '../channelPicker.js'
 import { ATTENTION_ORDER, attentionOf, lastActive, type Waits } from '../attention.js'
 import { turnOf } from '../turn.js'
 import { docKey } from '../workspace/documents.js'
@@ -96,6 +97,15 @@ const ranked = (cards: KanbanCard[], waits: Waits): KanbanCard[] =>
 const stored = (key: string): string | null => { try { return localStorage.getItem(key) } catch { return null } }
 const store = (key: string, value: string): void => { try { localStorage.setItem(key, value) } catch { /* A convenience only. */ } }
 const forget = (key: string): void => { try { localStorage.removeItem(key) } catch { /* A convenience only. */ } }
+/** This device's seen marks and last channel for keys no channel has ({@link bygone}) go. */
+function forgetBygone(): void {
+  try {
+    const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i) ?? '')
+    for (const key of keys) if ((key.startsWith(SEEN) && bygone(key.slice(SEEN.length))) || (key === LAST && bygone(stored(LAST) ?? ''))) forget(key)
+  } catch { /* A convenience only. */ }
+}
+/** A waiting line that is a worker's own open question (`shuttle.ask`), which its ✓ withdraws. */
+const withdraws = (item: Item): boolean => item.waiting && item.kind === 'ask' && item.card.status === 'active' && !!item.card.ask
 /** Whether anything from `node` up to `stop` can still scroll sideways by `toward` (positive: rightward). */
 function scrollsSideways(node: Element | null, stop: Element, toward: number): boolean {
   for (; node && node !== stop; node = node.parentElement) {
@@ -179,6 +189,8 @@ export class ChannelsView implements TemporalView {
   private drawer = false
   private dismissed: string[] = []
   private pending: string[] = []
+  /** Channels written here, by fiber, until the feed carries them: a spelling, or null for none. */
+  private moved = new Map<string, string | null>()
   /** Each line's clear still being written, by the line's id: the wait it cleared, and its writes (the clear's, and its undo's once asked) settling. */
   private readonly lineClears = new Map<string, { clears?: string; settled: Promise<unknown> }>()
   private pinned = new Map<string, number>()
@@ -261,6 +273,7 @@ export class ChannelsView implements TemporalView {
       if (this.overDrawer() && !(event.target as Element).closest('.kbn-ch-rail, .kbn-ch-rail-toggle')) this.moveRail(true)
     })
     this.railHidden = stored(RAIL) === '1'
+    forgetBygone()
     this.showRail()
     const workspace = ctx.workspace!
     this.unsubscribe = [
@@ -319,8 +332,8 @@ export class ChannelsView implements TemporalView {
   private seatConsole(channel: Channel | undefined): void {
     const dock = this.dock
     if (!dock) return
-    dock.el.hidden = !channel || !onDesk(channel.seat)
-    if (!channel || dock.el.hidden) return
+    dock.el.hidden = !channel?.seat || !onDesk(channel.seat)
+    if (!channel?.seat || dock.el.hidden) return
     const was = this.drafted
     if (was && was !== channel.key) this.drafts.set(was, dock.draft)
     dock.open(channel.seat)
@@ -350,7 +363,8 @@ export class ChannelsView implements TemporalView {
       for (const [key, at] of this.pinned) if (Date.now() - at > records.value.reach_ms) this.pinned.delete(key)
       // An order written here stands until the feed carries one as new.
       const order = records.value.order
-      if (order && order.at >= this.orderAt) { this.order = order.keys; this.orderAt = order.at }
+      // A key no channel can have now is dropped, so the next write of the order leaves it out.
+      if (order && order.at >= this.orderAt) { this.order = order.keys.filter(key => !bygone(key)); this.orderAt = order.at }
     }
     this.status(records.ok ? '' : 'Some channel sources are unavailable — showing the last read.')
     this.draw()
@@ -362,8 +376,17 @@ export class ChannelsView implements TemporalView {
   /** The channels the board's cards make, with what the daemon keeps of their order, pins and hides. */
   private compose(ctx: ViewContext): Channel[] {
     const index = threadIndexFor(ctx.response)
+    // A channel written here stands until the feed carries it.
+    const patched = new Map<string, KanbanCard>()
+    const patch = (card: KanbanCard): KanbanCard => {
+      const uid = fiberOf(card)
+      if (!this.moved.has(uid)) return card
+      const want = this.moved.get(uid) ?? undefined
+      if ((card.shuttleChannel?.trim() || undefined) === want) { this.moved.delete(uid); return card }
+      return patched.get(uid) ?? patched.set(uid, { ...card, shuttleChannel: want }).get(uid)!
+    }
     return composeChannels({
-      cards: boardCards(ctx.response), parentOf: card => index.parentOf(card), names: ctx.workspace!.charterNames,
+      cards: boardCards(ctx.response).map(patch), parentOf: card => { const parent = index.parentOf(card); return parent && patch(parent) },
       dismissed: [...this.dismissed, ...this.pending], pinned: this.pinned, waits: ctx.workspace!.board.waiting, now: Date.now(),
     })
   }
@@ -539,11 +562,13 @@ export class ChannelsView implements TemporalView {
     // Nothing is rebuilt under an entry pressed or picked up; it is drawn once it lands.
     this.railStale = rail.moving
     if (rail.moving) return
+    // A channel this device has never read counts what arrives from when it first sees it, not everything in the board's reach.
+    for (const channel of listed) if (stored(SEEN + channel.key) === null) store(SEEN + channel.key, String(Date.now()))
     const unread = new Map(listed.map(channel => [channel.key, channel.key !== this.current && !channel.waiting ? this.unread(channel) : 0]))
     const waits = this.ctx!.workspace!.board.waiting
     const owed = new Map(listed.map(channel => [channel.key, channel.members.filter(card => attentionOf(card, waits) === 'waiting').length]))
     // A poll that changed nothing in the rail leaves it be.
-    const sig = JSON.stringify([this.query, this.current, listed.map(channel => [channel.key, channel.name, channel.title, channel.chaired, channel.waiting, !!channel.hidden, unread.get(channel.key), owed.get(channel.key)])])
+    const sig = JSON.stringify([this.query, this.current, listed.map(channel => [channel.key, channel.name, channel.title, channel.misc, channel.waiting, !!channel.hidden, unread.get(channel.key), owed.get(channel.key)])])
     if (sig === this.sigs.rail) { this.drawFound(); return }
     this.sigs.rail = sig
     for (const unbind of this.railBindings) unbind()
@@ -555,10 +580,10 @@ export class ChannelsView implements TemporalView {
       const pick = button('kbn-ch-pick', '', () => { this.find(''); this.open(channel.key, true) })
       pick.dataset.channel = channel.key
       pick.dataset.item = `channel:${channel.key}`
-      pick.toggleAttribute('data-lone', !channel.chaired)
+      pick.toggleAttribute('data-misc', channel.misc)
       pick.toggleAttribute('data-unread', !!unread.get(channel.key))
       pick.toggleAttribute('data-waiting', channel.waiting)
-      pick.append(el('span', 'kbn-ch-pick-hash', channel.chaired ? '#' : '·'), el('span', 'kbn-ch-pick-name', channel.name))
+      pick.append(el('span', 'kbn-ch-pick-hash', '#'), el('span', 'kbn-ch-pick-name', channel.name))
       if (channel.hidden) pick.append(el('span', 'kbn-ch-pick-hidden', 'hidden'))
       // A ringed count means one of two things: in gold, how many wait on the human; in the ink, how many are new since this device last read it.
       if (channel.waiting || unread.get(channel.key)) {
@@ -573,7 +598,7 @@ export class ChannelsView implements TemporalView {
       item.append(pick)
       items.push(item)
       // What waits on the human stays on top, and Jump to's matches are not the rail's order.
-      this.railBindings.push(rail.attach(pick, channel.key, channel.waiting || !!this.query))
+      this.railBindings.push(rail.attach(pick, channel.key, channel.waiting || channel.misc || !!this.query))
     }
     if (this.query && !items.length) items.push(el('li', 'kbn-ch-hush kbn-ch-none', 'No channel matches.'))
     this.rebuild(list, items)
@@ -616,7 +641,7 @@ export class ChannelsView implements TemporalView {
     const seat = channel.seat
     // The head and the stream are drawn apart, so what arrives leaves a focused page or an open menu in the head be;
     // the head waits while a list hangs from its pages, whose count follows the chair's files in place, unless the channel changed: then the list closes.
-    const head = JSON.stringify([channel.key, channel.name, channel.title, fiberOf(seat), seat.modifiedAt])
+    const head = JSON.stringify([channel.key, channel.name, channel.title, seat && fiberOf(seat), seat?.modifiedAt])
     const listing = this.headKey === channel.key && !!this.pages?.el.querySelector('[aria-expanded="true"]')
     if (head !== this.sigs.head && !listing) {
       this.pages?.close()
@@ -624,15 +649,15 @@ export class ChannelsView implements TemporalView {
       this.headKey = channel.key
       const back = iconButton('kbn-ch-back', 'back', 'Channels', () => this.moveRail(false))
       const name = el('h3', 'kbn-ch-name')
-      name.append(channel.chaired ? el('span', 'kbn-ch-handle', channel.name) : channel.name)
-      name.toggleAttribute('data-lone', !channel.chaired)
+      name.append(el('span', 'kbn-ch-handle', channel.name))
+      name.toggleAttribute('data-misc', channel.misc)
       name.title = channel.title
       // The chair's pages: opening one is a deliberate look at the chair.
-      this.pages = docButtons(seat, { ...this.ctx!.workspace!.globeHost.feeds, open: (card, doc) => this.leaveFor(null, () => this.ctx?.workspace?.openPage(card, doc)) })
-      this.pages.el.classList.add('kbn-ch-pages')
+      this.pages = seat && docButtons(seat, { ...this.ctx!.workspace!.globeHost.feeds, open: (card, doc) => this.leaveFor(null, () => this.ctx?.workspace?.openPage(card, doc)) })
+      this.pages?.el.classList.add('kbn-ch-pages')
       const menu: IconButton = iconButton('kbn-ch-menu', 'actions', 'Channel menu', () => this.railMenu(channel.key, menu.button))
       menu.button.setAttribute('aria-haspopup', 'menu')
-      this.head.replaceChildren(this.railToggle!.root, back.root, name, this.pages.el, menu.root)
+      this.head.replaceChildren(this.railToggle!.root, back.root, name, ...this.pages ? [this.pages.el] : [], menu.root)
     } else this.pages?.refresh()
     const waits = this.ctx!.workspace!.board.waiting, running = ranked(runningIn(channel), waits)
     // A row draws an entry; the thread's state, which moves while its worker runs, is painted on it in place.
@@ -663,7 +688,7 @@ export class ChannelsView implements TemporalView {
       const heights = entries.map((entry, row) => entry.kind === 'station' ? rowHeight(entry) : POST_PX + previewsHeight([...leads[row] ? ['tapestry.html'] : [], ...entry.files.map(file => file.fullPath)], fold))
       const index = threadIndexFor(this.ctx!.response)
       // Every thread in a channel is its chair's: a parent reaches to a sub-thread only below the chair.
-      const parentOf = (card: KanbanCard): KanbanCard | undefined => { const parent = index.parentOf(card); return parent && fiberOf(parent) !== fiberOf(seat) ? parent : undefined }
+      const parentOf = (card: KanbanCard): KanbanCard | undefined => { const parent = index.parentOf(card); return parent && (!seat || fiberOf(parent) !== fiberOf(seat)) ? parent : undefined }
       const tube = layTube(entries, heights, { parentOf, grouped, active: line => attentionOf(line.card, waits) === 'working' })
       this.tube = { tube, grouped, margin, taut: tautAlong(tube, entries.map(entry => entry.at), line => runs(line.card), tautness) }
       this.stream.style.setProperty('--kbn-ch-tube', `${margin}px`)
@@ -898,19 +923,20 @@ export class ChannelsView implements TemporalView {
     return dot
   }
   /**
-   * A line's ✓, on every post and file line: the line leaves the stream, and
-   * a waiting post stops waiting too. A question or a close that waits is
-   * answered, not cleared, and has none.
+   * A line's ✓, on every post, question and file line: the line leaves the
+   * stream; a waiting post stops waiting, and a worker's waiting question is
+   * withdrawn, read with nothing to answer. A close that waits is given its
+   * verdict, and a blocked turn its fix, not a ✓.
    */
   private check(item: Item): HTMLButtonElement | undefined {
-    if (item.waiting ? !item.clears : item.kind !== 'post' && item.kind !== 'file') return undefined
+    if (item.waiting ? !item.clears && !withdraws(item) : item.kind !== 'post' && item.kind !== 'file' && item.kind !== 'ask') return undefined
     const { card } = item
     const done = button('kbn-ch-clear', '✓', () => {
       done.disabled = true
       void this.clearLine(item, done)
     })
-    done.title = item.clears ? 'Clear: read, nothing to answer; take it from the stream' : 'Clear: read, take it from the stream'
-    done.setAttribute('aria-label', `Clear ${card.name}'s ${item.kind === 'file' ? 'files' : 'post'}`)
+    done.title = item.clears || withdraws(item) ? 'Clear: read, nothing to answer; take it from the stream' : 'Clear: read, take it from the stream'
+    done.setAttribute('aria-label', `Clear ${card.name}'s ${item.kind === 'file' ? 'files' : item.kind === 'ask' ? 'question' : 'post'}`)
     return done
   }
   /**
@@ -919,7 +945,8 @@ export class ChannelsView implements TemporalView {
    * soon as the line leaves, for a few seconds, and restores both: what was
    * written is written back, and what was not yet written never is. The
    * line's records are written a few at a time ({@link CLEAR_WRITES}). A
-   * refused write brings back what it would have taken and says so. A line
+   * worker's waiting question is withdrawn on its owner once the undo has
+   * lapsed. A refused write brings back what it would have taken and says so. A line
    * cleared again before its last clear's writes (and their undo's) land
    * waits for them, so it clears what waits then.
    */
@@ -955,8 +982,14 @@ export class ChannelsView implements TemporalView {
     // Each line's write once it starts, true when it was written.
     const sent = new Map<(typeof lines)[number], Promise<boolean>>()
     let undone = false
-    clearToast(`Cleared ${slug(item.card)}'s line.`, () => {
+    // A question is withdrawn only once its undo lapses, since nothing writes it back; refused, its line comes back with it.
+    const withdrawal = withdraws(item) ? window.setTimeout(() => {
+      postDaemonJson(ctx.shuttleBase, '/api/v1/lifecycle', { action: 'ask-clear', fiber: item.card.id, origin: item.card.originId }, 'Clear failed')
+        .then(() => ctx.requestRefresh(), () => { undo(); this.status(`${item.card.name}'s question could not be withdrawn; it still waits.`) })
+    }, CLEAR_UNDO_MS) : 0
+    const undo = (): void => {
       undone = true
+      window.clearTimeout(withdrawal)
       // A line not yet written is never written; one written, or on its way, is brought back once it lands.
       drop(lines.filter(line => !sent.has(line)).map(line => line.key))
       const backAt = Date.now(), backs = [...sent.keys()].map(line => ({ line, key: unclearLineKey(line.id, backAt) }))
@@ -970,7 +1003,8 @@ export class ChannelsView implements TemporalView {
         this.draw()
         this.status(`${item.card.name}'s line could not be brought back; it stays cleared.`)
       })
-    })
+    }
+    clearToast(`Cleared ${slug(item.card)}'s line.`, undo)
     let cleared: number | undefined
     try {
       cleared = await clearing
@@ -1087,7 +1121,7 @@ export class ChannelsView implements TemporalView {
     this.pending.push(key)
     this.draw()
     try {
-      await postDaemonJson(ctx.shuttleBase, '/api/v1/channels/dismiss', { key, fiber: fiberOf(channel.seat) })
+      await postDaemonJson(ctx.shuttleBase, '/api/v1/channels/dismiss', { key, ...channel.seat ? { fiber: fiberOf(channel.seat) } : {} })
     } catch {
       this.pending = this.pending.filter(item => item !== key)
       this.draw()
@@ -1104,11 +1138,74 @@ export class ChannelsView implements TemporalView {
       channel.hidden
         ? { label: 'Unhide', run: () => { void this.dismiss(channel, showKey(key, now)) } }
         : { label: 'Hide', run: () => { void this.dismiss(channel, hideKey(key, now)); announce(`${channel.name} hidden; Jump to finds it.`) } },
-      channel.pinned
-        ? { label: 'Unpin', run: () => { void this.dismiss(channel, unpinKey(key, now)) } }
-        : { label: 'Pin', run: () => { void this.pin(channel); this.draw() } },
-      { label: 'Move to bottom', run: () => { void this.writeOrder([...this.arrangement().filter(each => each !== key), key]) } },
+      ...channel.misc ? [] : [
+        channel.pinned
+          ? { label: 'Unpin', run: () => { void this.dismiss(channel, unpinKey(key, now)) } }
+          : { label: 'Pin', run: () => { void this.pin(channel); this.draw() } },
+        { label: 'Move to bottom', run: () => { void this.writeOrder([...this.arrangement().filter(each => each !== key), key]) } },
+      ],
+      ...channel.families.length ? [{ label: 'Move a thread to another channel…', run: () => { this.familyMenu(channel, pick, point) } }] : [],
+      ...channel.misc ? [] : [{ label: `Archive #${channel.name}: its threads go to #misc`, run: () => { void this.archive(channel) } }],
     ], channel.name, point)
+  }
+  /** The families a channel holds, each as its top-level's row, to choose one to move. */
+  private familyMenu(channel: Channel, anchor: HTMLElement, point?: { x: number; y: number }): void {
+    const waits = this.ctx!.workspace!.board.waiting, now = Date.now(), cards = boardCards(this.ctx!.response)
+    const tops = channel.families.flatMap(uid => cards.find(card => fiberOf(card) === uid) ?? [])
+    openActionMenu(anchor, ranked(tops, waits).map(card => ({
+      label: card.name, content: threadRow(card, { waits, now }), run: () => { this.moveFamily(card) },
+    })), `Move a thread from #${channel.name}`, point)
+  }
+  /** The top-level of a constitution's family, whose channel its threads speak in. */
+  private topOf(card: KanbanCard): KanbanCard {
+    const index = threadIndexFor(this.ctx!.response)
+    let top = card
+    for (let up = index.parentOf(top); up; up = index.parentOf(top)) top = up
+    return top
+  }
+  /** Asks where a family goes, and writes its top-level's channel there. */
+  private moveFamily(card: KanbanCard): void {
+    const top = this.topOf(card), here = this.channels.find(channel => channel.everyone.some(each => fiberOf(each) === fiberOf(top)))
+    const choices = this.channels.filter(channel => !channel.misc).map(channel => ({ name: channel.name, spelling: channel.spelling }))
+    channelPicker(`${slug(top)} and its threads`, here?.name ?? MISC, choices, spelling => {
+      const was = top.shuttleChannel?.trim() || null
+      void this.writeChannels([{ card: top, to: spelling, was }], `${slug(top)} moved to #${spelling === null ? MISC : spelling.trim().toLowerCase().replace(/ /g, '-')}.`)
+    })
+  }
+  /** Archives a channel: every constitution that names it, closed ones too, names none, so its live members speak in misc; nothing is tempered. */
+  private async archive(channel: Channel): Promise<void> {
+    const live = channel.members.length
+    await this.writeChannels(channel.declarers.map(card => ({ card, to: null, was: card.shuttleChannel!.trim() })),
+      `#${channel.name} archived: its ${live === 1 ? 'thread speaks' : `${live} threads speak`} in #misc.`)
+  }
+  /**
+   * Writes each card's channel through its owner (`/lifecycle` channel), shown
+   * here at once, with an undo for a few seconds that writes back what each
+   * had. A refused write takes back what it would have changed and says so.
+   */
+  private async writeChannels(moves: ReadonlyArray<{ card: KanbanCard; to: string | null; was: string | null }>, said: string): Promise<void> {
+    const ctx = this.ctx
+    if (!ctx || !moves.length) return
+    const write = async (each: { card: KanbanCard }, to: string | null): Promise<boolean> => {
+      this.moved.set(fiberOf(each.card), to)
+      try {
+        await postDaemonJson(ctx.shuttleBase, '/api/v1/lifecycle', { action: 'channel', fiber: each.card.id, origin: each.card.originId, channel: to }, 'Move failed')
+        return true
+      } catch {
+        this.moved.delete(fiberOf(each.card))
+        return false
+      }
+    }
+    const run = async (to: (each: (typeof moves)[number]) => string | null, failed: string): Promise<void> => {
+      const done = await fewAtATime(moves, CLEAR_WRITES, each => write(each, to(each)))
+      this.draw()
+      ctx.requestRefresh()
+      if (!done.every(Boolean)) this.status(failed)
+    }
+    const doing = run(each => each.to, `Some channels could not be written; those stay as they were.`)
+    this.draw()
+    showToast(said, 'success', CLEAR_UNDO_MS, () => { void doing.then(() => run(each => each.was, `Some channels could not be written back.`)) })
+    await doing
   }
   /** Every channel's key in the human's order. */
   private arrangement(): string[] { return arranged(this.channels, this.order).map(channel => channel.key) }
@@ -1136,7 +1233,7 @@ export class ChannelsView implements TemporalView {
     if (!ctx) return
     this.pinned.set(channel.key, Date.now())
     try {
-      await postDaemonJson(ctx.shuttleBase, '/api/v1/channels/pin', { key: channel.key, fiber: fiberOf(channel.seat) }, 'Pin failed')
+      await postDaemonJson(ctx.shuttleBase, '/api/v1/channels/pin', { key: channel.key, ...channel.seat ? { fiber: fiberOf(channel.seat) } : {} }, 'Pin failed')
     } catch (error) {
       this.status(`${channel.name} is pinned here only: ${error instanceof Error ? error.message : String(error)}`)
     }

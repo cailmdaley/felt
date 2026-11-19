@@ -61,7 +61,7 @@ try {
     // WebKit refuses the harness's daemon requests over file://; those are not the rail's.
     page.on('pageerror', error => { if (!/access control checks/.test(error.message)) errors.push(error.message) })
     await page.goto(url)
-    await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 8 && document.querySelector('.kbn-ch-name'))
+    await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 9 && document.querySelector('.kbn-ch-name'))
     const stream = await page.locator('.kbn-ch-stream').boundingBox()
     const at = { x: stream.x + stream.width / 2, y: stream.y + stream.height / 2 }
     await settled(page, true)
@@ -97,7 +97,7 @@ try {
     // WebKit refuses the harness's daemon requests over file://; those are not the rail's.
     page.on('pageerror', error => { if (!/access control checks/.test(error.message)) errors.push(error.message) })
     await page.goto(url)
-    await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 8)
+    await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 9)
     const railWidth = () => page.evaluate(() => document.querySelector('.kbn-ch-rail').getBoundingClientRect().width)
     const full = await railWidth()
     await page.locator('.kbn-ch-pick').first().click()

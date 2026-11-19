@@ -175,10 +175,13 @@ A stored `kind: pinned` is read as `oneshot`; `shuttle check` warns about it, an
 
 `shuttle.channel: <name>` names the board channel a constitution speaks in,
 such as `UNIONS` or `cmbx`. A channel is where the human reads and answers a
-body of work; it is independent of the constitution's role and of where the
-fiber is filed, so a paper filed under one project can speak in another's
-channel. `shuttle thread` copies the parent's channel to the thread. Set it by
-editing the `shuttle:` block.
+body of work; it exists only where a constitution declares it, and it is
+independent of the constitution's role and of where the fiber is filed, so a
+paper filed under one project can speak in another's channel. A thread speaks
+in its orchestrator's channel unless it declares its own; a constitution with
+none above it speaks in the board's catch-all, `#misc`. `shuttle thread` copies
+the parent's channel to the thread. Set it with `shuttle channel <fiber> <name>`
+(`--clear` removes it), or from the board's channel menu.
 
 ### Seats
 

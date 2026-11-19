@@ -41,7 +41,7 @@ try {
     await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'composer')
     assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-band-title').textContent(), 'score')
     assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-worker-message').getAttribute('data-placeholder'), 'Message score')
-    await shot(page, 'seatless-office')
+    await shot(page, 'hidden-channel')
     // A named channel is written as its name; its console names its chair by slug.
     await page.locator('.kbn-ch-jump').fill('')
     await pick(page, 'the-mill').click()
@@ -56,11 +56,11 @@ try {
     const errors = []
     page.on('pageerror', error => errors.push(error.message))
     await page.goto(`${pathToFileURL(resolve('harness-board-dist/index.html'))}?example=channels#/channels`)
-    await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 8)
+    await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 9)
     await page.evaluate(() => document.fonts.ready)
     // What waits on the human, the newest wait first, then the human's order; the hidden composer and old notes, idle three weeks, only by Jump to.
     // The Mill's workers are idle at the end of their turns: that waits on no one, so it keeps its place in the order.
-    assert.deepEqual(await page.evaluate(channels), ['cmbx', 'unions', 'vizier', 'move', 'the-mill', 'french', 'science', 'garden'])
+    assert.deepEqual(await page.evaluate(channels), ['cmbx', 'unions', 'vizier', 'move', 'the-mill', 'french', 'science', 'garden', 'misc'])
     if (phone) {
       // The rail is the first screen; choosing a channel fills it.
       assert.equal(await page.locator('.kbn-ch').isVisible(), false)
@@ -76,18 +76,18 @@ try {
       await page.mouse.up()
     }
     await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick-name')[5]?.textContent === 'garden')
-    assert.deepEqual(await page.evaluate(channels), ['cmbx', 'unions', 'vizier', 'move', 'the-mill', 'garden', 'french', 'science'])
+    assert.deepEqual(await page.evaluate(channels), ['cmbx', 'unions', 'vizier', 'move', 'the-mill', 'garden', 'french', 'science', 'misc'])
     // The drag opened nothing and asked for no menu.
     assert.equal(await page.locator('[role="menu"]').count(), 0)
     if (phone) assert.equal(await page.locator('.kbn-ch').isVisible(), false)
     // A right-click, or a finger held and lifted, opens an entry's menu; Hide takes it out of the rail.
     if (phone) await hold(page, await middle(pick(page, 'science')))
     else await pick(page, 'science').click({ button: 'right' })
-    await page.waitForFunction(() => document.querySelectorAll('[role="menuitem"]').length === 3)
-    assert.deepEqual(await page.locator('[role="menuitem"]').allTextContents(), ['Hide', 'Pin', 'Move to bottom'])
+    await page.waitForFunction(() => document.querySelectorAll('[role="menuitem"]').length === 5)
+    assert.deepEqual(await page.locator('[role="menuitem"]').allTextContents(), ['Hide', 'Pin', 'Move to bottom', 'Move a thread to another channel…', 'Archive #science: its threads go to #misc'])
     await shot(page, `${name}-rail-menu`)
     await page.locator('[role="menuitem"]', { hasText: 'Hide' }).click()
-    await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 7)
+    await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 8)
     // Jump to finds a hidden channel, marked as such.
     await page.locator('.kbn-ch-jump').fill('compo')
     await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 1)
@@ -95,7 +95,7 @@ try {
     assert.equal(await page.locator('.kbn-ch-pick-hidden').textContent(), 'hidden')
     await shot(page, `${name}-jump-hidden`)
     await page.locator('.kbn-ch-jump').fill('')
-    await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 7)
+    await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 8)
     await pick(page, 'cmbx').click()
     await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'cmbx' && document.querySelector('.kbn-ch-item'))
     if (phone) assert.equal(await page.locator('.kbn-ch-rail').isVisible(), false)
@@ -241,7 +241,7 @@ try {
     if (phone) await page.locator('.kbn-ch-back').click()
     await page.locator('.kbn-ch-jump').fill('')
     // The rail lists the channel being read; on a phone, back on the rail, none is.
-    await page.waitForFunction(n => document.querySelectorAll('.kbn-ch-pick').length === n, phone ? 7 : 8)
+    await page.waitForFunction(n => document.querySelectorAll('.kbn-ch-pick').length === n, phone ? 8 : 9)
     assert.deepEqual(errors, [])
     await context.close()
     console.log(`Channels ${name}: the recent channels with what waits floated, a channel dragged into place, its menu, a hidden channel found by Jump to, a stream of what was addressed to the human beside its threads' lines, an item opening its constitution's view, ${phone
@@ -254,7 +254,7 @@ try {
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
   await page.goto(`${pathToFileURL(resolve('harness-board-dist/index.html'))}?example=channels#/channels`)
-  await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 8)
+  await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 9)
   await page.evaluate(() => document.fonts.ready)
   // Half a screen, the rail is a drawer, put away until it is asked for; it ends above the console.
   assert.equal(await page.locator('.kbn-ch-rail').isVisible(), false)
@@ -278,7 +278,7 @@ try {
     const errors = []
     page.on('pageerror', error => errors.push(error.message))
     await page.goto(`${pathToFileURL(resolve('harness-board-dist/index.html'))}?example=channels#/channels`)
-    await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 8)
+    await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 9)
     // Every channel read, ending in cmbx.
     for (const name of [...await page.evaluate(channels), 'cmbx']) { await pick(page, name).click(); await page.waitForTimeout(150) }
     assert.equal(await page.locator('.kbn-ch-pick-unread').count(), 0, 'nothing unread once each channel is read')

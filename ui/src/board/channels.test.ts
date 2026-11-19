@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { RECENT_MS, arranged, clearLineKey, clearedLines, composeChannels, composeStream, hideKey, lineIds, railOrder, reordered, runningIn, sendId, showKey, unclearLineKey, unpinKey, type Channel, type Entry, type Item } from './channels.js'
+import { MISC, RECENT_MS, arranged, bygone, clearLineKey, clearedLines, composeChannels, composeStream, hideKey, lineIds, railOrder, reordered, runningIn, sendId, showKey, unclearLineKey, unpinKey, type Channel, type Entry, type Item } from './channels.js'
 import type { BoardRecord, Wait } from './boardFeed.js'
 import { card } from './testFixtures.js'
 import { ThreadIndex } from './threads.js'
@@ -19,7 +19,7 @@ const modes = card({ id: 'pando/unions/modes', uid: 'W', name: 'n(z) modes', orc
 // Vizier: two seats, one standing and fresher; the oneshot one chairs.
 const vizier = card({ id: 'life/vizier', uid: 'Z', name: 'Vizier', shuttleChannel: 'Vizier', shuttleSeat: true, shuttleRole: 'vizier', ...idle(50) })
 const post = card({ id: 'loom/email/morning-post', uid: 'P', name: 'Morning post', shuttleChannel: 'Vizier', shuttleSeat: true, shuttleKind: 'standing', ...working(1) })
-// An office without a channel; a lone top-level; one idle for more than a week.
+// Three that name no channel: one in an office, one that waits, one idle for more than a week.
 const shear = card({ id: 'shear', uid: 'S', name: 'Cosmic shear', shuttleRole: 'analyst', ...working(5) })
 const van = card({ id: 'van', uid: 'R', name: 'Moving house', status: 'active', ask: { text: 'Which van?', at: at(10) } })
 const old = card({ id: 'old', uid: 'O', name: 'Old notes', status: 'open', modifiedAt: new Date(now - RECENT_MS - day).toISOString() })
@@ -28,34 +28,45 @@ const all = [unions, east, west, modes, vizier, post, shear, van, old]
 type Input = Parameters<typeof composeChannels>[0]
 function compose(cards: KanbanCard[], over: Partial<Input> = {}): Channel[] {
   const index = new ThreadIndex(cards)
-  return composeChannels({ cards, parentOf: card => index.parentOf(card), names: new Map([['analyst', 'Analyst · the shear desk']]), dismissed: [], pinned: new Map(), waits: new Map(), now, ...over })
+  return composeChannels({ cards, parentOf: card => index.parentOf(card), dismissed: [], pinned: new Map(), waits: new Map(), now, ...over })
 }
 const named = (channels: Channel[], key: string): Channel => channels.find(channel => channel.key === key)!
 
 describe('composeChannels', () => {
-  it('groups by shuttle.channel, inherited through the orchestrator, else by office, else by top-level; chaired channels first by name', () => {
+  it('groups by shuttle.channel, inherited through the orchestrator; everything else speaks in misc, at the foot', () => {
     const channels = compose(all)
-    expect(channels.map(channel => [channel.key, channel.name, channel.chaired, channel.members.map(member => member.id)])).toStrictEqual([
-      ['role:analyst', 'analyst', true, ['shear']],
-      ['channel:unions', 'unions', true, ['pando/unions', 'east-unions', 'west-unions', 'pando/unions/modes']],
-      ['channel:vizier', 'vizier', true, ['life/vizier', 'loom/email/morning-post']],
-      ['fiber:O', 'old', false, ['old']],
-      ['fiber:R', 'van', false, ['van']],
+    expect(channels.map(channel => [channel.key, channel.name, channel.misc, channel.members.map(member => member.id)])).toStrictEqual([
+      ['channel:unions', 'unions', false, ['pando/unions', 'east-unions', 'west-unions', 'pando/unions/modes']],
+      ['channel:vizier', 'vizier', false, ['life/vizier', 'loom/email/morning-post']],
+      [MISC, 'misc', true, ['shear', 'van', 'old']],
     ])
-    expect(named(channels, 'fiber:R').title).toBe('Moving house')
-    expect(named(channels, 'role:analyst').title).toBe('Analyst · the shear desk')
     expect(named(channels, 'channel:unions').families).toStrictEqual(['U'])
+    // The catch-all has no chair; it reads the families of what in it waits or was recently active, not the week-old notes.
+    const misc = named(channels, MISC)
+    expect([misc.seat, misc.spelling, misc.families]).toStrictEqual([undefined, '', ['S', 'R']])
   })
 
-  it('names a seatless office for its office, retaining the eldest top-level as chair', () => {
-    const elder = card({ id: 'life/fee', uid: 'I1', name: 'Fee and mission', shuttleRole: 'intendant', createdAt: at(600) })
-    const younger = card({ id: 'life/travel', uid: 'I2', shuttleRole: 'intendant', createdAt: at(60) })
-    const office = named(compose([younger, elder], { names: new Map([['intendant', 'Intendant · missions']]) }), 'role:intendant')
-    expect([office.name, office.title, office.seat]).toStrictEqual(['intendant', 'Intendant · missions', elder])
-    expect(named(compose([elder], { names: new Map() }), 'role:intendant').title).toBe('intendant')
-    const seat = card({ id: 'life/office-chair', uid: 'I3', name: 'Office chair', shuttleRole: 'intendant', shuttleSeat: true })
-    const seated = named(compose([elder, seat]), 'role:intendant')
-    expect([seated.name, seated.title, seated.seat]).toStrictEqual(['office-chair', 'Office chair', seat])
+  it('takes a constitution that names misc into the catch-all, however it spells it', () => {
+    const odd = card({ id: 'odd', uid: 'M', shuttleChannel: 'Misc', ...working(3) })
+    const channels = compose([...all, odd])
+    expect(channels.filter(channel => channel.name === 'misc').map(channel => channel.key)).toStrictEqual([MISC])
+    expect(named(channels, MISC).members.map(member => member.id)).toContain('odd')
+  })
+
+  it('keeps each channel\'s spelling and the constitutions that declare it, closed ones too, for a move to it and its archiving', () => {
+    const closed = card({ id: 'life/vizier-old', uid: 'Z0', shuttleChannel: 'Vizier', status: 'closed', column: 'tempered' })
+    const vizierChannel = named(compose([...all, closed]), 'channel:vizier')
+    expect([vizierChannel.spelling, vizierChannel.declarers.map(each => each.id)]).toStrictEqual(['Vizier', ['life/vizier', 'loom/email/morning-post', 'life/vizier-old']])
+    // A thread that inherits it is a member, not a declarer.
+    expect(named(compose(all), 'channel:unions').declarers.map(each => each.id)).toStrictEqual(['pando/unions'])
+  })
+
+  it('never makes a channel of an office or a lone top-level', () => {
+    const errand = card({ id: 'life/errand', uid: 'V', name: 'Errand', shuttleRole: 'vizier', status: 'active', ask: { text: 'Book it?', at: at(3) } })
+    const channels = compose([...all, errand])
+    expect(channels.map(channel => channel.key)).toStrictEqual(['channel:unions', 'channel:vizier', MISC])
+    expect(named(channels, MISC).members.map(member => member.id)).toContain('life/errand')
+    expect([bygone('role:analyst'), bygone('fiber:R'), bygone('channel:vizier'), bygone(MISC)]).toStrictEqual([true, true, false, false])
   })
 
   it('follows the orchestrator link, not where a fiber is filed, and a thread\'s own channel wins', () => {
@@ -67,27 +78,18 @@ describe('composeChannels', () => {
     expect(named(channels, 'channel:spt').members.map(member => member.id)).toStrictEqual(['pando/unions/paper'])
   })
 
-  it('merges an office into the channel that shares its charter name', () => {
-    // The vizier's errand carries no channel; its office's charter is named "Vizier", so it speaks in Vizier.
-    const errand = card({ id: 'life/errand', uid: 'V', name: 'Errand', shuttleRole: 'vizier', status: 'active' })
-    const channels = compose([...all, errand], { names: new Map([['analyst', 'Analyst · the shear desk'], ['vizier', 'Vizier · first point of contact']]) })
-    expect(channels.filter(channel => channel.name === 'vizier')).toHaveLength(1)
-    expect(named(channels, 'channel:vizier').title).toBe('Vizier')
-    expect(named(channels, 'channel:vizier').members.map(member => member.id)).toContain('life/errand')
-  })
-
   it('chairs a channel with its topmost seat, a non-standing one first, then the eldest, so its name holds still', () => {
     const channels = compose(all)
-    expect(named(channels, 'channel:unions').seat.id).toBe('pando/unions')
-    expect(named(channels, 'channel:vizier').seat.id).toBe('life/vizier')
+    expect(named(channels, 'channel:unions').seat!.id).toBe('pando/unions')
+    expect(named(channels, 'channel:vizier').seat!.id).toBe('life/vizier')
     // Without a seat, a top-level, never a thread under it.
     const lone = card({ id: 'lone', uid: 'L', shuttleChannel: 'French', ...working(40) })
     const lesson = card({ id: 'lesson', uid: 'L2', orchestrator: 'L', ...working(1) })
-    expect(named(compose([lone, lesson]), 'channel:french').seat.id).toBe('lone')
+    expect(named(compose([lone, lesson]), 'channel:french').seat!.id).toBe('lone')
     // Two top-levels: the elder chairs, however recently the younger was active.
     const elder = card({ id: 'spt/edfs', uid: 'E1', shuttleChannel: 'SPT', createdAt: at(600), ...idle(300) })
     const younger = card({ id: 'spt/pol', uid: 'E2', shuttleChannel: 'SPT', createdAt: at(60), ...working(1) })
-    expect(named(compose([younger, elder]), 'channel:spt').seat.id).toBe('spt/edfs')
+    expect(named(compose([younger, elder]), 'channel:spt').seat!.id).toBe('spt/edfs')
   })
 
   it('writes a named channel as its name, lowercased with hyphens for spaces, whoever chairs it', () => {
@@ -97,79 +99,90 @@ describe('composeChannels', () => {
   })
 
   it('lists a channel waiting, pinned, or active within a week, the same on every device', () => {
-    const listed = (over: Partial<Input> = {}) => compose(all, over).filter(channel => channel.listed).map(channel => channel.key)
-    expect(listed()).not.toContain('fiber:O')
-    expect(listed({ pinned: new Map([['fiber:O', now - 2 * day]]) })).toContain('fiber:O')
-    expect(listed({ pinned: new Map([['fiber:O', now - 2 * day]]), dismissed: [unpinKey('fiber:O', now - day)] })).not.toContain('fiber:O')
-    const moving = named(compose(all), 'fiber:R')
+    const quiet = card({ id: 'notes', uid: 'Q1', shuttleChannel: 'Notes', status: 'open', modifiedAt: new Date(now - RECENT_MS - day).toISOString() })
+    const listed = (over: Partial<Input> = {}) => compose([...all, quiet], over).filter(channel => channel.listed).map(channel => channel.key)
+    expect(listed()).not.toContain('channel:notes')
+    expect(listed({ pinned: new Map([['channel:notes', now - 2 * day]]) })).toContain('channel:notes')
+    expect(listed({ pinned: new Map([['channel:notes', now - 2 * day]]), dismissed: [unpinKey('channel:notes', now - day)] })).not.toContain('channel:notes')
+  })
+
+  it('lists the catch-all only while something in it waits or was recently active, never for a pin or a draft', () => {
+    const draft = card({ id: 'trip', uid: 'D', name: 'Check in', column: 'drafts', modifiedAt: at(60) })
+    const isListed = (cards: KanbanCard[], over: Partial<Input> = {}) => named(compose(cards, over), MISC).listed
+    expect(isListed([old])).toBe(false)
+    expect(isListed([old, draft])).toBe(false)
+    expect(isListed([old], { pinned: new Map([[MISC, now - day]]) })).toBe(false)
+    expect(isListed([old, draft], { waits: new Map([['D', { id: 'd1', at: now - minute }]]) })).toBe(true)
+    expect(isListed([old, card({ id: 'bags', uid: 'D2', ...working(5) })])).toBe(true)
+    const moving = named(compose(all), MISC)
     expect([moving.waiting, moving.newest, moving.listed]).toStrictEqual([true, now - 10 * minute, true])
   })
 
   it('leaves out a channel of drafts however recently they were touched, unless it is pinned or something in it waits', () => {
-    const draft = card({ id: 'trip', uid: 'D', name: 'Check in', column: 'drafts', modifiedAt: at(60) })
-    const isListed = (cards: KanbanCard[], over: Partial<Input> = {}) => named(compose(cards, over), 'fiber:D').listed
+    const draft = card({ id: 'trip', uid: 'D', name: 'Check in', shuttleChannel: 'Travel', column: 'drafts', modifiedAt: at(60) })
+    const isListed = (cards: KanbanCard[], over: Partial<Input> = {}) => named(compose(cards, over), 'channel:travel').listed
     expect(isListed([draft])).toBe(false)
-    expect(isListed([draft], { pinned: new Map([['fiber:D', now - day]]) })).toBe(true)
+    expect(isListed([draft], { pinned: new Map([['channel:travel', now - day]]) })).toBe(true)
     expect(isListed([draft], { waits: new Map([['D', { id: 'd1', at: now - minute }]]) })).toBe(true)
     // A thread under it past its draft lists the channel.
     expect(isListed([draft, card({ id: 'trip/bags', uid: 'D2', orchestrator: 'D', ...working(5) })])).toBe(true)
   })
 
   it('hides a channel until a later show or something waiting after the hide', () => {
-    const hide = (dismissed: string[], cards = all) => named(compose(cards, { dismissed }), 'role:analyst')
+    const hide = (dismissed: string[], cards = all) => named(compose(cards, { dismissed }), MISC)
     expect([hide([]).hidden, hide([]).listed]).toStrictEqual([0, true])
-    expect([hide([hideKey('role:analyst', now - minute)]).hidden, hide([hideKey('role:analyst', now - minute)]).listed]).toStrictEqual([now - minute, false])
+    expect([hide([hideKey(MISC, now - minute)]).hidden, hide([hideKey(MISC, now - minute)]).listed]).toStrictEqual([now - minute, false])
     // Pinned, it is still out of the rail.
-    expect(named(compose(all, { dismissed: [hideKey('role:analyst', now - minute)], pinned: new Map([['role:analyst', now]]) }), 'role:analyst').listed).toBe(false)
-    expect(hide([hideKey('role:analyst', now - 2 * minute), showKey('role:analyst', now - minute)]).hidden).toBe(0)
-    expect(hide([showKey('role:analyst', now - 2 * minute), hideKey('role:analyst', now - minute)]).hidden).toBe(now - minute)
+    expect(named(compose(all, { dismissed: [hideKey(MISC, now - minute)], pinned: new Map([[MISC, now]]) }), MISC).listed).toBe(false)
+    expect(hide([hideKey(MISC, now - 2 * minute), showKey(MISC, now - minute)]).hidden).toBe(0)
+    expect(hide([showKey(MISC, now - 2 * minute), hideKey(MISC, now - minute)]).hidden).toBe(now - minute)
     // A wait older than the hide keeps it hidden; one that began after brings it back.
     const asking = (minutes: number) => [...all.filter(each => each !== shear), { ...shear, status: 'active' as const, ask: { text: 'Which mask?', at: at(minutes) } }]
-    expect(hide([hideKey('role:analyst', now - 5 * minute)], asking(10)).hidden).toBe(now - 5 * minute)
-    const back = hide([hideKey('role:analyst', now - 5 * minute)], asking(1))
+    expect(hide([hideKey(MISC, now - 5 * minute)], asking(10)).hidden).toBe(now - 5 * minute)
+    const back = hide([hideKey(MISC, now - 5 * minute)], asking(1))
     expect([back.hidden, back.waiting, back.listed]).toStrictEqual([0, true, true])
   })
 
   it('waits on what is addressed to the human: an open ask, a harness prompt, a blocked turn or a close for review, never a worker idle at the end of its turn', () => {
     const turns = [
-      card({ id: 'idle', uid: 'I1', ...idle(3) }),
-      card({ id: 'blocked', uid: 'I2', status: 'active', workerState: 'blocked', lastActivityAt: now - minute }),
-      card({ id: 'prompt', uid: 'I3', status: 'active', workerState: 'running', runtimePhase: 'attention', lastActivityAt: now - minute }),
-      card({ id: 'asking', uid: 'I4', ...idle(3), ask: { text: 'Which mask?', at: at(4) } }),
-      card({ id: 'review', uid: 'I5', status: 'closed', column: 'awaitingReview', closedAt: at(90) }),
+      card({ id: 'idle', uid: 'I1', shuttleChannel: 'idle', ...idle(3) }),
+      card({ id: 'blocked', uid: 'I2', shuttleChannel: 'blocked', status: 'active', workerState: 'blocked', lastActivityAt: now - minute }),
+      card({ id: 'prompt', uid: 'I3', shuttleChannel: 'prompt', status: 'active', workerState: 'running', runtimePhase: 'attention', lastActivityAt: now - minute }),
+      card({ id: 'asking', uid: 'I4', shuttleChannel: 'asking', ...idle(3), ask: { text: 'Which mask?', at: at(4) } }),
+      card({ id: 'review', uid: 'I5', shuttleChannel: 'review', status: 'closed', column: 'awaitingReview', closedAt: at(90) }),
     ]
     const waiting = Object.fromEntries(compose(turns).map(channel => [channel.name, channel.waiting && channel.newest]))
     expect(waiting).toStrictEqual({ idle: false, blocked: now - minute, prompt: now - minute, asking: now - 4 * minute, review: now - 90 * minute })
   })
 
   it('waits where the daemon says a member\'s line waits on the human, and brings a hidden channel back for it', () => {
-    const hidden = { dismissed: [hideKey('role:analyst', now - 60 * minute)] }
-    expect(named(compose(all, hidden), 'role:analyst').hidden).toBe(now - 60 * minute)
-    const shearDesk = named(compose(all, { ...hidden, waits: new Map([['S', { id: 's1', at: now - 5 * minute }]]) }), 'role:analyst')
+    const hidden = { dismissed: [hideKey(MISC, now - 60 * minute)] }
+    expect(named(compose(all.filter(each => each !== van), hidden), MISC).hidden).toBe(now - 60 * minute)
+    const shearDesk = named(compose(all.filter(each => each !== van), { ...hidden, waits: new Map([['S', { id: 's1', at: now - 5 * minute }]]) }), MISC)
     expect([shearDesk.waiting, shearDesk.newest, shearDesk.hidden, shearDesk.listed]).toStrictEqual([true, now - 5 * minute, 0, true])
   })
 })
 
 describe('the rail\'s order', () => {
   const keys = (channels: Channel[]) => channels.map(channel => channel.key)
-  // Moving house, UNIONS (its thread asks) and Vizier (its chair is idle) wait on the human; the van's ask is the newest.
-  const channels = compose(all)
+  const spt = card({ id: 'spt', uid: 'T', shuttleChannel: 'SPT', ...working(3) })
+  // UNIONS (its thread asks) and misc (the van asks, the newer wait) wait on the human; SPT and Vizier do not.
+  const channels = compose([...all, spt])
 
-  it('puts the channels an order does not name first, as composed, then the order\'s', () => {
-    expect(keys(arranged(channels, []))).toStrictEqual(['role:analyst', 'channel:unions', 'channel:vizier', 'fiber:O', 'fiber:R'])
-    expect(keys(arranged(channels, ['fiber:O', 'channel:vizier', 'channel:gone', 'role:analyst']))).toStrictEqual(['channel:unions', 'fiber:R', 'fiber:O', 'channel:vizier', 'role:analyst'])
+  it('puts the named channels an order does not name first, as composed, then the order\'s, and leaves the catch-all out of it', () => {
+    expect(keys(arranged(channels, []))).toStrictEqual(['channel:spt', 'channel:unions', 'channel:vizier', MISC])
+    expect(keys(arranged(channels, ['channel:vizier', 'channel:gone', 'channel:spt']))).toStrictEqual(['channel:unions', MISC, 'channel:vizier', 'channel:spt'])
   })
 
-  it('floats what waits on the human, the newest wait first, above the human\'s order', () => {
-    // The vizier's chair, idle at the end of its turn, waits on no one.
-    expect(channels.filter(channel => channel.waiting).map(channel => [channel.key, channel.newest])).toStrictEqual([['channel:unions', now - 20 * minute], ['fiber:R', now - 10 * minute]])
-    expect(keys(railOrder(channels, ['fiber:O', 'channel:vizier', 'role:analyst', 'fiber:R', 'channel:unions']))).toStrictEqual(['fiber:R', 'channel:unions', 'fiber:O', 'channel:vizier', 'role:analyst'])
+  it('floats what waits on the human, the newest wait first, above the human\'s order, and keeps the catch-all at the foot', () => {
+    expect(channels.filter(channel => channel.waiting).map(channel => [channel.key, channel.newest])).toStrictEqual([['channel:unions', now - 20 * minute], [MISC, now - 10 * minute]])
+    expect(keys(railOrder(channels, ['channel:vizier', MISC, 'channel:spt', 'channel:unions']))).toStrictEqual(['channel:unions', 'channel:vizier', 'channel:spt', MISC])
   })
 
   it('rearranges only the channels shown, every other keeping its place', () => {
-    const order = ['role:analyst', 'fiber:R', 'channel:unions', 'fiber:O', 'channel:vizier']
+    const order = ['channel:unions', 'fiber:R', 'channel:unions', 'fiber:O', 'channel:vizier']
     // Shown: analyst, unions, vizier (fiber:R waits, fiber:O is out of the rail); vizier is dragged to the top.
-    expect(reordered(order, ['channel:vizier', 'role:analyst', 'channel:unions'])).toStrictEqual(['channel:vizier', 'fiber:R', 'role:analyst', 'fiber:O', 'channel:unions'])
+    expect(reordered(order, ['channel:vizier', 'channel:unions', 'channel:unions'])).toStrictEqual(['channel:vizier', 'fiber:R', 'channel:unions', 'fiber:O', 'channel:unions'])
     expect(reordered(order, [])).toStrictEqual(order)
   })
 })
@@ -354,11 +367,7 @@ describe('what waits on the human, as live channels hold it', () => {
 })
 
 describe('a channel\'s key', () => {
-  it('stays the office\'s until a charter name joins it to a channel, and a thread with closed ancestors takes the channel filed above it', () => {
-    const errand = card({ id: 'life/errand', uid: 'V', name: 'Errand', shuttleRole: 'first-contact', status: 'active' })
-    const keys = (names: Map<string, string>) => compose([...all, errand], { names }).map(channel => channel.key)
-    expect(keys(new Map())).toContain('role:first-contact')
-    expect(keys(new Map([['first-contact', 'Vizier · first point of contact']]))).not.toContain('role:first-contact')
+  it('takes the channel filed above a thread whose ancestors are closed or absent', () => {
     // The Lightcone desk is tempered; its live thread, under ancestors closed or absent, has no orchestrator.
     const lightcone = card({ id: 'lc/desk', uid: 'LD', name: 'Lightcone desk', shuttleChannel: 'Lightcone', shuttleRole: 'lightcone-desk', column: 'tempered', status: 'closed' })
     const glass = card({ id: 'lc/desk/paper-ii/run/glass-mocks', uid: 'G', name: 'Glass mocks', ...working(3) })
@@ -367,9 +376,9 @@ describe('a channel\'s key', () => {
     const channels = compose([lightcone, glass, unit, near])
     expect(named(channels, 'channel:lightcone').members.map(member => member.id)).toStrictEqual(['lc/desk/paper-ii/run/glass-mocks', 'lc/desk/unit-tests'])
     // Its chair is its live member: the tempered desk speaks for no one.
-    expect(named(channels, 'channel:lightcone').seat.id).toBe('lc/desk/paper-ii/run/glass-mocks')
+    expect(named(channels, 'channel:lightcone').seat!.id).toBe('lc/desk/paper-ii/run/glass-mocks')
     expect(named(channels, 'channel:lightcone').name).toBe('lightcone')
-    expect(named(channels, 'fiber:X').members.map(member => member.id)).toStrictEqual(['lc/desktop'])
+    expect(named(channels, MISC).members.map(member => member.id)).toStrictEqual(['lc/desktop'])
   })
 })
 
