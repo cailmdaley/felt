@@ -42,9 +42,7 @@ func TestShuttleLaunchUsesGoDaemonLifecycleCommands(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(releaseLauncher), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(releaseLauncher, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	sysenvtest.WriteFile(t, releaseLauncher, []byte("#!/bin/sh\nexit 0\n"), 0o755)
 	env := testEnv(t)
 	dead := filepath.Join(root, "listener-dead")
 	calls := filepath.Join(root, "calls")
@@ -114,9 +112,7 @@ func TestShuttleLaunchRecoveryDoesNotStopOrMarkAnExistingOwner(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(releaseLauncher), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(releaseLauncher, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	sysenvtest.WriteFile(t, releaseLauncher, []byte("#!/bin/sh\nexit 0\n"), 0o755)
 	env := testEnv(t)
 	home := filepath.Join(root, "home")
 	if err := os.MkdirAll(home, 0o755); err != nil {

@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
 // Activation, from pointer selection through readiness, quarantine release and
@@ -119,9 +121,7 @@ case "$*" in *'/quarantine/release'*)
 esac
 exec "$FAKE_BIN/curl-ungated" "$@"
 `
-			if err := os.WriteFile(curl, []byte(gate), 0755); err != nil {
-				t.Fatal(err)
-			}
+			sysenvtest.WriteFile(t, curl, []byte(gate), 0755)
 			if err := os.WriteFile(f.events, nil, 0600); err != nil {
 				t.Fatal(err)
 			}
