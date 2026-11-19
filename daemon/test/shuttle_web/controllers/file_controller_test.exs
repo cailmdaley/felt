@@ -466,6 +466,76 @@ defmodule ShuttleWeb.FileControllerTest do
     end
   end
 
+  describe "a page loaded into a frame" do
+    setup %{tmp_dir: dir} do
+      dist = Path.join(dir, "dist")
+      File.mkdir_p!(dist)
+      File.write!(Path.join(dist, "framed-runtime.js"), "uncached()")
+      Shuttle.Test.Env.put_env("SHUTTLE_UI_DIST", dist)
+      :ok
+    end
+
+    defp framed(path, headers \\ [{"sec-fetch-dest", "iframe"}]) do
+      Enum.reduce(headers, api_conn(), fn {name, value}, conn ->
+        put_req_header(conn, name, value)
+      end)
+      |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
+    end
+
+    @tag :tmp_dir
+    test "gets the framed runtime at its head, before its own scripts", %{tmp_dir: dir} do
+      path = Path.join(dir, "deck.html")
+
+      File.write!(
+        path,
+        "<!doctype html><html><head><script>q()</script></head><body>s</body></html>"
+      )
+
+      conn = framed(path)
+
+      assert conn.status == 200
+
+      assert conn.resp_body ==
+               "<!doctype html><html><head><script data-shuttle-framed-runtime>uncached()</script><script>q()</script></head><body>s</body></html>"
+
+      assert get_resp_header(conn, "content-type") |> List.first() =~ "text/html"
+      assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy]
+      [etag] = get_resp_header(conn, "etag")
+      assert framed(path, [{"sec-fetch-dest", "iframe"}, {"if-none-match", etag}]).status == 304
+    end
+
+    @tag :tmp_dir
+    test "goes after the doctype when the page has no head or html tag", %{tmp_dir: dir} do
+      path = Path.join(dir, "bare.html")
+      File.write!(path, "<!DOCTYPE html><p>x")
+
+      assert framed(path).resp_body ==
+               "<!DOCTYPE html><script data-shuttle-framed-runtime>uncached()</script><p>x"
+    end
+
+    @tag :tmp_dir
+    test "is served as it is when it is fetched rather than framed, or is not HTML", %{
+      tmp_dir: dir
+    } do
+      page = Path.join(dir, "deck.html")
+      File.write!(page, "<head></head>")
+      text = Path.join(dir, "notes.txt")
+      File.write!(text, "<head></head>")
+
+      assert framed(page, []).resp_body == "<head></head>"
+      assert framed(page, [{"sec-fetch-dest", "empty"}]).resp_body == "<head></head>"
+      assert framed(text).resp_body == "<head></head>"
+    end
+
+    @tag :tmp_dir
+    test "is served as it is when the bundle has no framed runtime", %{tmp_dir: dir} do
+      File.rm!(Path.join([dir, "dist", "framed-runtime.js"]))
+      path = Path.join(dir, "deck.html")
+      File.write!(path, "<head></head>")
+      assert framed(path).resp_body == "<head></head>"
+    end
+  end
+
   describe "file security boundary" do
     # Scriptable documents (every HTML spelling, XML feeds, SVG), an extension
     # no table knows, and native media. The sandbox is independent of type, so

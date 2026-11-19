@@ -41,6 +41,11 @@ defmodule ShuttleWeb.FileController do
   owner-routed leg forwards these request headers and relays the owner's
   validators and range metadata. `/file-info` remains available for
   metadata-only probes used by other artifact types.
+
+  **A page loaded into a frame** (`Sec-Fetch-Dest: iframe`, an HTML path) is
+  read whole from its owner and served with the UI bundle's
+  `framed-runtime.js` at its head, so WebKit can free it (see
+  `with_framed_runtime/2`).
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -75,7 +80,17 @@ defmodule ShuttleWeb.FileController do
   @gregorian_epoch_offset :calendar.datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}})
 
   def show(conn, %{"path" => path} = params) when is_binary(path) and path != "" do
-    case OriginRouter.route(Map.get(params, "origin")) do
+    if framed_page?(conn, path),
+      do: serve_framed(conn, path, Map.get(params, "origin")),
+      else: serve(conn, path, Map.get(params, "origin"))
+  end
+
+  def show(conn, _params) do
+    conn |> put_status(400) |> json(%{error: "path is required"})
+  end
+
+  defp serve(conn, path, origin) do
+    case OriginRouter.route(origin) do
       {:error, {:unknown_origin, origin}} ->
         ShuttleWeb.RelayHelpers.unknown_origin(conn, origin)
 
@@ -96,8 +111,75 @@ defmodule ShuttleWeb.FileController do
     end
   end
 
-  def show(conn, _params) do
-    conn |> put_status(400) |> json(%{error: "path is required"})
+  # An HTML page the browser loads into a frame, such as a deck framed inside a
+  # report. The board injects its runtime into the documents it frames itself,
+  # but not into the frames those documents hold. WebKit never frees a
+  # document whose script asked a lone tag or class query, so the page gets
+  # the bundle's `framed-runtime.js` at its head, which asks such queries as
+  # lists. A page that cannot be read whole is served as it is.
+  defp framed_page?(conn, path) do
+    conn.method == "GET" and not head_request?(conn) and get_req_header(conn, "range") == [] and
+      get_req_header(conn, "sec-fetch-dest") in [["iframe"], ["frame"]] and
+      MIME.from_path(path) == "text/html"
+  end
+
+  defp serve_framed(conn, path, origin) do
+    with {:ok, runtime} <- File.read(Path.join(ShuttleWeb.Assets.dist(), "framed-runtime.js")),
+         {:ok, body} <- framed_body(path, origin) do
+      page = with_framed_runtime(body, runtime)
+      etag = weak_etag(page)
+      conn = conn |> put_resp_header("cache-control", "no-cache") |> put_resp_header("etag", etag)
+
+      if not_modified?(conn, etag, nil),
+        do: send_resp(conn, 304, ""),
+        else: conn |> put_resp_content_type(MIME.from_path(path)) |> send_resp(200, page)
+    else
+      _ -> serve(conn, path, origin)
+    end
+  end
+
+  defp framed_body(path, origin) do
+    case OriginRouter.route(origin) do
+      {:remote, remote} ->
+        case OriginRouter.forward_file_get(remote, "/api/v1/file", %{"path" => path}, []) do
+          {:forwarded, 200, _headers, _content_type, body} when is_binary(body) -> {:ok, body}
+          _ -> :error
+        end
+
+      :local ->
+        with :absolute <- Path.type(path),
+             {:ok, %File.Stat{type: :regular, size: size}} when size <= @hash_limit <-
+               Shuttle.FS.stat(path, time: :posix),
+             {:ok, body} <- Shuttle.FS.read(path) do
+          {:ok, body}
+        else
+          _ -> :error
+        end
+
+      _ ->
+        :error
+    end
+  end
+
+  @doc false
+  # After the head's opening tag, else the html element's, else the doctype, so
+  # the page keeps its rendering mode and the script runs before its own.
+  def with_framed_runtime(page, runtime) do
+    script = "<script data-shuttle-framed-runtime>" <> runtime <> "</script>"
+
+    at =
+      Enum.find_value(
+        [~r/<head\b[^>]*>/i, ~r/<html\b[^>]*>/i, ~r/<!doctype\b[^>]*>/i],
+        0,
+        fn tag ->
+          case Regex.run(tag, page, return: :index) do
+            [{start, length}] -> start + length
+            nil -> nil
+          end
+        end
+      )
+
+    binary_part(page, 0, at) <> script <> binary_part(page, at, byte_size(page) - at)
   end
 
   @doc """

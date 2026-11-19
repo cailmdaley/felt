@@ -5,6 +5,7 @@ import { changeAliases } from './change-build.js'
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib'
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { keepQueriesUncached } from './src/runtime/uncachedQueries.js'
 
 /**
  * The Shuttle UI build.
@@ -53,11 +54,27 @@ function precompress(): Plugin {
   }
 }
 
+/**
+ * `framed-runtime.js`: the script the daemon puts at the head of an HTML page
+ * it serves into a frame, which the board cannot reach to inject its own
+ * runtime (a deck framed inside a report). It asks lone tag and class queries
+ * as lists, so WebKit can free the page (`src/runtime/uncachedQueries.ts`).
+ */
+function framedRuntime(): Plugin {
+  return {
+    name: 'framed-runtime',
+    apply: 'build',
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'framed-runtime.js', source: `(${keepQueriesUncached.toString()})();\n` })
+    },
+  }
+}
+
 export default defineConfig({
   base: '',
   test: { setupFiles: ['./test/setup.ts'] },
   resolve: { alias: changeAliases },
-  plugins: [react(), precompress()],
+  plugins: [react(), framedRuntime(), precompress()],
   server: {
     port: 5174,
     proxy: {
