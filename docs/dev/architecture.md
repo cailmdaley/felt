@@ -100,7 +100,8 @@ current content, artifacts, and execution controls.
 A **store** is a `.felt/` directory and everything under it — one namespace,
 one git repo. A **view** (or substore) is a project whose `.felt` is a *symlink*
 into a subdirectory of a larger store: this repo's `.felt` points into
-`~/loom/.felt/ai-futures/felt`. The loom is the store; the project is a lens on
+`~/loom/.felt/pando/felt`, where `pando` is itself a link to a shared
+repository mounted in the loom. The loom is the store; the project is a lens on
 it. A lens narrows what is *listed*, never what can be *found* or *reached*.
 
 An **id** is resolved against the local store first, then — on a miss — against
