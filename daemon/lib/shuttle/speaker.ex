@@ -557,6 +557,10 @@ defmodule Shuttle.Speaker do
       {:ok, path} ->
         if current.segment, do: Shuttle.FS.rm(current.segment)
         state = played_start(state, Map.get(current.item, :said, current.item.text))
+        # Read before the player starts: a reading taken after it can fall
+        # after time already spent speaking, and a hold would then resume the
+        # line earlier than where it stopped.
+        started = state.clock.()
 
         %{
           state
@@ -565,7 +569,7 @@ defmodule Shuttle.Speaker do
               | handle: state.play.(path),
                 segment: if(path != current.wav, do: path),
                 offset: from,
-                started: state.clock.()
+                started: started
             }
         }
 
