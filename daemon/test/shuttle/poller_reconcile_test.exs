@@ -129,6 +129,9 @@ defmodule Shuttle.PollerReconcileTest do
           felt_stores: [MockRunner.felt_root()]
         )
 
+      # The boot cycle lands first: run between the closure and the failing
+      # scan, it would see both a closed fiber and a complete inventory.
+      settle_poller!(poller)
       assert {:ok, session} = Poller.dispatch_fiber(poller, id, force: true, ad_hoc: true)
       %{pid: watcher} = Poller.worker_status(poller, id)
       MockRunner.set_fiber(id, Map.put(MockRunner.fiber(id), "status", "closed"))
@@ -174,6 +177,9 @@ defmodule Shuttle.PollerReconcileTest do
           felt_stores: [MockRunner.felt_root()]
         )
 
+      # The boot cycle lands first, so it cannot stop the closed worker before
+      # its teardown is made to fail.
+      settle_poller!(poller)
       assert {:ok, session} = Poller.dispatch_fiber(poller, id, force: true, ad_hoc: true)
       MockRunner.set_fiber(id, Map.put(MockRunner.fiber(id), "status", "closed"))
 
