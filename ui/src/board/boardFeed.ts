@@ -35,6 +35,9 @@ export const arrived = (record: BoardRecord): number => record.received_at ?? re
 /** One family's records, read a window at a time; `failed` while its last read did not answer. */
 interface Family { records: Map<string, BoardRecord>; cursor: number; pending: boolean; failed: boolean }
 
+/** A family's slot, empty, reaching back over the board's reach. */
+const fresh = (reachMs: number): Family => ({ records: new Map(), cursor: Date.now() - reachMs + OVERLAP_MS, pending: false, failed: false })
+
 /** Each read of a family asks again for this much before the newest record it holds, so a record written late is not missed. */
 const OVERLAP_MS = 60_000
 
@@ -43,7 +46,8 @@ const OVERLAP_MS = 60_000
  * over the board's reach, and what waits on the human across the whole board:
  * what the Desk, Channels and a constitution's view read of what a family
  * said. `read` asks each family for what arrived since the newest record it
- * holds; every answer also says, for the whole board, each fiber's line to the
+ * holds; `readBoard` asks once for every family's at once (what Find searches
+ * across the board). Every answer also says, for the whole board, each fiber's line to the
  * human that nothing has handled (a post, a question or a close). `clear`
  * handles a line by hand. A listener hears a family whose records changed, or
  * a change in what waits.
@@ -52,6 +56,8 @@ export class BoardFeed {
   /** How far back the board keeps records, as the daemon last said. */
   reachMs = 14 * 86_400_000
   private readonly families = new Map<string, Family>()
+  /** Every family's records together, as `readBoard` reads them. */
+  private board: Family | null = null
   /** The line each fiber addressed to the human and they have not handled, over the board's whole reach, as the newest read said. */
   private lines = new Map<string, Wait>()
   /** Each fiber's line the human cleared here, by its time: it stays handled whatever a read already under way says. */
@@ -76,6 +82,8 @@ export class BoardFeed {
     for (const uid of uids) for (const record of this.families.get(uid)?.records.values() ?? []) all.set(record.id, record)
     return [...all.values()]
   }
+  /** Every family's records, as the last `readBoard` left them. */
+  boardRecords(): BoardRecord[] { return [...this.board?.records.values() ?? []] }
   /** Each fiber whose line to the human waits on them, by uid. */
   get waiting(): ReadonlyMap<string, Wait> { return this.waits }
   /** Whether a family's last read did not answer. */
@@ -83,7 +91,7 @@ export class BoardFeed {
 
   /** A record some family holds. */
   private record(id: string): BoardRecord | undefined {
-    for (const family of this.families.values()) {
+    for (const family of [...this.families.values(), ...this.board ? [this.board] : []]) {
       const record = family.records.get(id)
       if (record) return record
     }
@@ -152,29 +160,39 @@ export class BoardFeed {
 
   read(uids: Iterable<string>): void {
     for (const uid of new Set(uids)) {
-      const family = this.families.get(uid) ?? this.families.set(uid, { records: new Map(), cursor: Date.now() - this.reachMs + OVERLAP_MS, pending: false, failed: false }).get(uid)!
-      if (family.pending) continue
-      family.pending = true
-      void getDaemonJson<{ family?: unknown; records?: BoardRecord[]; reach_ms?: number; waiting?: Record<string, Wait> }>(`${this.base}/api/v1/board/family?fiber=${encodeURIComponent(uid)}&since_ms=${family.cursor - OVERLAP_MS}`).then(body => {
-        if (typeof body.reach_ms === 'number') this.reachMs = body.reach_ms
-        const failed = family.failed, reach = Date.now() - this.reachMs
-        let moved = false
-        // Every read of a family the daemon resolves answers for the whole board, so the newest such answer stands; one it could not resolve says nothing of the rest.
-        if (body.family != null) this.lines = new Map(Object.entries(body.waiting ?? {}))
-        family.failed = false
-        for (const record of body.records ?? []) {
-          moved ||= !family.records.has(record.id)
-          family.records.set(record.id, record)
-          family.cursor = Math.max(family.cursor, arrived(record))
-        }
-        // What fell out of the board's reach leaves with it.
-        for (const [id, record] of family.records) if (arrived(record) < reach) { family.records.delete(id); moved = true }
-        if (this.settle() || moved || failed) this.changed()
-      }, () => {
-        if (family.failed) return
-        family.failed = true
-        this.changed()
-      }).finally(() => { family.pending = false })
+      const family = this.families.get(uid) ?? this.families.set(uid, fresh(this.reachMs)).get(uid)!
+      this.pull(family, `fiber=${encodeURIComponent(uid)}`)
     }
+  }
+
+  /** Every family's records in one read (`all=true`), from the newest the board slot holds. */
+  readBoard(): void {
+    this.pull(this.board ??= fresh(this.reachMs), 'all=true')
+  }
+
+  /** Reads what arrived for `family` since the newest record it holds, `which` naming it to the daemon. */
+  private pull(family: Family, which: string): void {
+    if (family.pending) return
+    family.pending = true
+    void getDaemonJson<{ family?: unknown; records?: BoardRecord[]; reach_ms?: number; waiting?: Record<string, Wait> }>(`${this.base}/api/v1/board/family?${which}&since_ms=${family.cursor - OVERLAP_MS}`).then(body => {
+      if (typeof body.reach_ms === 'number') this.reachMs = body.reach_ms
+      const failed = family.failed, reach = Date.now() - this.reachMs
+      let moved = false
+      // Every read the daemon resolves answers for the whole board, so the newest such answer stands; a family it could not resolve says nothing of the rest. The whole board's read always resolves.
+      if (body.family != null || family === this.board) this.lines = new Map(Object.entries(body.waiting ?? {}))
+      family.failed = false
+      for (const record of body.records ?? []) {
+        moved ||= !family.records.has(record.id)
+        family.records.set(record.id, record)
+        family.cursor = Math.max(family.cursor, arrived(record))
+      }
+      // What fell out of the board's reach leaves with it.
+      for (const [id, record] of family.records) if (arrived(record) < reach) { family.records.delete(id); moved = true }
+      if (this.settle() || moved || failed) this.changed()
+    }, () => {
+      if (family.failed) return
+      family.failed = true
+      this.changed()
+    }).finally(() => { family.pending = false })
   }
 }

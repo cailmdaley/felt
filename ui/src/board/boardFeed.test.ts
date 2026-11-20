@@ -22,6 +22,20 @@ it('a read of a family the daemon could not resolve leaves what waits as the las
   expect(feed.waiting.has('chair')).toBe(true)
 })
 
+it('reads every family at once into the board slot, whose answer says what waits though it names no family', async () => {
+  const now = Date.now()
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ family: null, viewer: null, records: [record('p', 'post', 'chair', now - 3000)], reach_ms: 86_400_000, waiting: { chair: { id: 'p', at: now - 3000 } } }))))
+  const feed = new BoardFeed('')
+  feed.readBoard(); await settle()
+  expect(String(vi.mocked(fetch).mock.calls[0][0])).toMatch(/\/api\/v1\/board\/family\?all=true&since_ms=\d+$/)
+  expect(feed.boardRecords().map(each => each.id)).toEqual(['p'])
+  expect(feed.records(['chair'])).toEqual([])
+  expect(feed.waiting.get('chair')).toMatchObject({ id: 'p', kind: 'post' })
+  feed.readBoard(); await settle()
+  const since = Number(new URL(String(vi.mocked(fetch).mock.calls[1][0]), 'http://board').searchParams.get('since_ms'))
+  expect(since, 'the next read asks from the newest record held').toBe(now - 3000 - 60_000)
+})
+
 it('undoes a clear made here: the line waits again at once, the daemon is told, and a clear after it reaches past the undo', async () => {
   const now = Date.now()
   serve(() => [record('p', 'post', 'chair', now - 3000)], () => ({ chair: { id: 'p', at: now - 3000 } }))

@@ -1728,8 +1728,8 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     return json({ ok: true })
   }
   if (url.includes('/api/v1/board/family')) {
-    const params = new URL(url, 'http://harness').searchParams, since = Number(params.get('since_ms') ?? 0)
-    return json({ family: { uid: params.get('fiber') }, records: (channelsFixture?.board ?? []).filter(record => record.root === params.get('fiber') && record.timestamp >= since), reach_ms: 14 * 86_400_000, waiting: channelsFixture?.waiting ?? {} })
+    const params = new URL(url, 'http://harness').searchParams, since = Number(params.get('since_ms') ?? 0), all = params.get('all') === 'true'
+    return json({ family: all ? null : { uid: params.get('fiber') }, records: (channelsFixture?.board ?? []).filter(record => (all || record.root === params.get('fiber')) && record.timestamp >= since), reach_ms: 14 * 86_400_000, waiting: channelsFixture?.waiting ?? {} })
   }
 
   if (url.includes('/api/v1/board/marks')) {
