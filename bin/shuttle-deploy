@@ -1227,7 +1227,7 @@ stage_remote() {
     run_value "$host" 'mktemp -d' > "$RUN_DIR/$host.stage" || { bad 'stage: failed'; return 1; }
   else
     url="$(fleet_url "$host")"
-    say "$host ($url:$dir, over the tailnet)"
+    say "$host ($dir, over the tailnet at $url)"
     run="$("$LOCAL_TOOL/relay" create "$url")" || {
       bad "tailnet: no deploy run on $url; a daemon that is down or predates tailnet deploys needs one deploy with --ssh=$host"
       return 1
