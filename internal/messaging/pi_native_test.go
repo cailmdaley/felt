@@ -303,12 +303,18 @@ func TestPiNativeTranscriptReceipts(t *testing.T) {
 			if scenario == "historical" {
 				appendMessage(labeled(req), "user")
 			}
+			persisted := make(chan struct{})
 			socket, closeFixture := piNativeFixture(t, func(frame map[string]any) any {
 				text := frame["message"].(string)
 				switch scenario {
 				case "mid-turn":
-					time.Sleep(75 * time.Millisecond)
-					appendMessage(text, "user")
+					// A busy Pi acknowledges the steer and persists it later,
+					// so the sender has to keep reading the transcript.
+					go func() {
+						defer close(persisted)
+						time.Sleep(75 * time.Millisecond)
+						appendMessage(text, "user")
+					}()
 				case "idle", "wrong-session":
 					appendMessage(text, "user")
 				case "concurrent":
@@ -327,8 +333,16 @@ func TestPiNativeTranscriptReceipts(t *testing.T) {
 			if err := RegisterPiNative(env, "session", "host", "/project", socket, transcript, os.Getpid(), true); err != nil {
 				t.Fatal(err)
 			}
-			send := func(r Request) Receipt {
-				ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+			// A send expected to be accepted returns as soon as its transcript
+			// row appears, so its deadline is a hang guard, not a speed bound.
+			// A send expected to stay unknown waits out the whole deadline,
+			// so its window is short; no delay can turn it into an acceptance.
+			send := func(r Request, want string) Receipt {
+				deadline := 300 * time.Millisecond
+				if want == StatusAccepted {
+					deadline = 10 * time.Second
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), deadline)
 				defer cancel()
 				receipt, _ := sendPiNative(ctx, env, Address{Host: "host", Harness: "pi", ID: "session"}, r)
 				return receipt
@@ -338,8 +352,8 @@ func TestPiNativeTranscriptReceipts(t *testing.T) {
 				other.MessageID = "second"
 				other.Text = "other body"
 				done := make(chan Receipt, 1)
-				go func() { done <- send(other) }()
-				first := send(req)
+				go func() { done <- send(other, StatusUnknown) }()
+				first := send(req, StatusAccepted)
 				second := <-done
 				if first.Status != StatusAccepted || second.Status != StatusUnknown {
 					t.Fatalf("first=%+v second=%+v", first, second)
@@ -350,8 +364,11 @@ func TestPiNativeTranscriptReceipts(t *testing.T) {
 			if scenario == "idle" || scenario == "mid-turn" {
 				want = StatusAccepted
 			}
-			if got := send(req); got.Status != want {
+			if got := send(req, want); got.Status != want {
 				t.Fatalf("receipt=%+v want=%s", got, want)
+			}
+			if scenario == "mid-turn" {
+				<-persisted
 			}
 		})
 	}
