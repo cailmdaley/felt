@@ -937,6 +937,30 @@ it('opens a channel on its newest lines, back to the oldest it holds unread, and
   expect(followed.host.querySelector('.kbn-ch-stream > [data-what="tick"]')?.hasAttribute('data-marked')).toBe(true)
 })
 
+it('draws a line Find reaches beyond the window: a picked line marked, and a fold\'s match in hand as the fold lifts', async () => {
+  const human = { label: 'Sam' }
+  const posts = Array.from({ length: 12 }, (_, n) => record({ id: `p${n}`, kind: 'post', fiber: 'C', to: human, text: `Round ${n}.` }, 120 - n * 10))
+  const said = (host: HTMLElement) => [...host.querySelectorAll('.kbn-ch-item .kbn-ch-item-text')].map(el => el.textContent?.trim())
+  daemon([], new Map([['shuttle.channels.seen:channel:cmbx', String(Date.now() - minute)]]), {}, { board: { C: posts } })
+  const { host, view } = await mount([chair])
+  expect(said(host)).not.toContain('Round 1.')
+  // A Said pick older than the window: drawn, and marked.
+  view.show({ channel: 'channel:cmbx', item: 'p1' })
+  await settle()
+  expect(host.querySelector<HTMLElement>('.kbn-ch-stream > [data-marked] .kbn-ch-item-text')?.textContent?.trim()).toBe('Round 1.')
+  view.unmount(); document.body.replaceChildren()
+  // A fold searches the whole channel, and lifting it keeps the match in hand drawn.
+  daemon([], new Map([['shuttle.channels.seen:channel:cmbx', String(Date.now() - minute)]]), {}, { board: { C: posts } })
+  const again = await mount([chair])
+  expect(said(again.host)).not.toContain('Round 0.')
+  const scope = again.view.findScope()!
+  const find = 'inPlace' in scope ? scope.inPlace : undefined
+  find!.input('Round 0.')
+  expect(said(again.host)).toStrictEqual(['Round 0.'])
+  find!.clear()
+  expect(said(again.host)).toContain('Round 0.')
+})
+
 it('folds the open channel to what Find holds, each match marked, steps between them, and draws it whole again', async () => {
   daemon()
   const { view, host } = await mount()

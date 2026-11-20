@@ -498,9 +498,10 @@ export class ChannelsView implements TemporalView {
     if (!this.folding) return
     const at = this.foundAt
     this.folding = ''
-    this.foundAt = null
     this.foundRows = []
+    // The match in hand is drawn, its window widened to it, and then let go.
     this.drawChannel()
+    this.foundAt = null
     const row = at ? this.rows.get(at)?.node : undefined
     if (row && this.stream) {
       row.scrollIntoView({ block: row.offsetHeight > this.stream.clientHeight ? 'start' : 'center' })
@@ -847,7 +848,8 @@ export class ChannelsView implements TemporalView {
    * The part of a channel's stream it shows: from its {@link OPENS_ON}th
    * newest line to the human as of when it was come to, or from its oldest
    * line unread then or waiting, or the worker Rex came to (its latest post,
-   * else its latest station), whichever is older; with how many lines to the
+   * else its latest station), or the line Find picked or held as a fold
+   * lifts, whichever is older; with how many lines to the
    * human stand before it. The start only moves back while the channel stays
    * open (Earlier, a line that stops waiting leaves it where it was), and what
    * arrives after is always shown.
@@ -859,7 +861,9 @@ export class ChannelsView implements TemporalView {
     const held = items.find(item => item.waiting || item.arrived > this.opened.seen)
     const own = this.marked ? all.filter(entry => fiberOf(entry.card) === this.marked) : []
     const marked = own.filter(entry => entry.kind !== 'station').at(-1) ?? own.at(-1)
-    for (const entry of [held, marked]) if (entry) start = Math.min(start, entry.at)
+    // The line Find picked, and the match in hand as a fold lifts, are drawn wherever they stand.
+    const found = all.filter(entry => entry.id === this.markedItem || entry.id === this.foundAt)
+    for (const entry of [held, marked, ...found]) if (entry) start = Math.min(start, entry.at)
     // A start reckoned before the channel's lines have all been read is not kept: it would show the whole channel for good.
     const from = Math.min(this.from, start)
     if (Number.isFinite(start)) this.from = from
