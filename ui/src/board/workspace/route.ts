@@ -197,6 +197,11 @@ export class WorkspaceHistory {
     this.onRoute(this.current, false)
   }
 
+  /** A back that landed in a framed page's own history (a deck's slides): the back this history asked for goes on to the view. */
+  framePopped(): void {
+    if (this.leaving) window.history.back()
+  }
+
   /** Back, from anywhere in the reader: its view, in one step. */
   leave(): void {
     if (this.current?.kind !== 'channel' || this.leaving) return

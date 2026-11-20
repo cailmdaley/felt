@@ -185,11 +185,14 @@ try {
     await page.keyboard.press('Escape')
     await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'cmbx' && document.querySelector('.kbn-ch').offsetParent)
     if (phone) {
-      // From the reader over a channel, the swipe that brings the rail on a channel brings it here too: never back to the channel.
+      // From the reader over a channel, a finger's swipe returns to the channel's stream and nothing more; the next brings the rail.
       await page.locator('.kbn-ch-item[data-kind="ask"] .kbn-ch-who').click()
       await page.waitForFunction(() => document.querySelector('.ws-selected .ov-name')?.textContent === 'foregrounds')
       await swipeRight(page, { x: 120, y: 420 })
-      await page.waitForFunction(() => location.hash === '#/channels' && !document.querySelector('.kbn-ch-layout').hasAttribute('data-rail-hidden'))
+      await page.waitForFunction(() => location.hash === '#/channels' && document.querySelector('.kbn-ch-name')?.textContent === 'cmbx' && !document.querySelector('.kbn-ch-layout[data-rail-moving]'))
+      assert.equal(await page.locator('.kbn-ch-rail').isVisible(), false)
+      await swipeRight(page, { x: 120, y: 420 })
+      await page.waitForFunction(() => !document.querySelector('.kbn-ch-layout').hasAttribute('data-rail-hidden'))
       assert.ok(await page.locator('.kbn-ch-rail').isVisible())
       await page.locator('.kbn-ch-jump').fill('old')
     } else {

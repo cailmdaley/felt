@@ -18,7 +18,7 @@ import { conversationDevice } from '../conversationOpening.js'
 import { selectWorker } from '../sessionHistory.js'
 import { buildFiberProse } from './FiberProse.js'
 import { bindConstitutionMentions } from './bodyLinks.js'
-import { frameBridge } from './DocumentBridge.js'
+import { frameBridge, onFramePopped } from './DocumentBridge.js'
 import './mentions.css'
 import { Reader } from './Reader.js'
 import { WorkspaceDepth } from './Depth.js'
@@ -212,6 +212,7 @@ export class Workspace {
     this.depth = new WorkspaceDepth(root)
     this.origin = opts.origin()
     this.history = new WorkspaceHistory((route, quiet) => { void this.applyRoute(route, quiet) })
+    onFramePopped(() => this.history.framePopped())
     this.dock = this.wire(opts.dock)
     this.themes = new ChannelThemes(opts.shuttleBase)
     this.library = new Library({
@@ -1228,6 +1229,7 @@ export class Workspace {
     this.stopTimer()
     document.removeEventListener('visibilitychange', this.visibility)
     this.history.dispose()
+    onFramePopped(null)
     this.verdicts.dispose()
     this.dock.setVerdictQueue(undefined)
     this.dock.reset()

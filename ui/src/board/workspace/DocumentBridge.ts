@@ -55,7 +55,7 @@ export function documentMessage(data: unknown): data is DocumentMessage {
   const p = data.payload
   switch (data.type) {
     case 'ready': return fields(p, ['media']) && (p.media === undefined || typeof p.media === 'boolean')
-    case 'media': case 'references:scan': case 'pdf:scan': return fields(p, [])
+    case 'media': case 'references:scan': case 'pdf:scan': case 'popped': return fields(p, [])
     case 'pause': return fields(p, []) || fields(p, ['candidate']) && shortString(p.candidate)
     case 'active': return fields(p, ['active']) && typeof p.active === 'boolean'
     case 'sideways': return fields(p, ['take']) && typeof p.take === 'boolean'
@@ -263,6 +263,9 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
     parent.postMessage({ protocol, version, type, payload }, '*')
   }
   embeddedPdfs(send)
+  // A page that keeps its own history (a deck's slides, a report's tabs) adds to the board's: a step back through it is reported,
+  // so a back the board asked for goes on to the view beneath.
+  window.addEventListener('popstate', () => send('popped'))
   const style = document.createElement('style'); style.textContent = css
   ;(document.head ?? document.documentElement).append(style)
   const disposeMentions = reportMentions(mentions, mentionCss, limits, () => active)
@@ -519,6 +522,9 @@ export function frameBridge(frame: HTMLIFrameElement): FrameBridge | undefined {
 /** The connected frames, and whether the view beneath the reader takes their sideways wheel ({@link takeSidewaysWheel}). */
 const connected = new Set<FrameBridge>()
 let sidewaysTaken = false
+let popped: (() => void) | null = null
+/** Hears each step back that lands in a framed page's own history rather than the board's. */
+export function onFramePopped(listen: (() => void) | null): void { popped = listen }
 /**
  * While `take` holds, every document frame passes its sideways wheel up,
  * replayed on the frame element as the board's own, and keeps it from the
@@ -588,6 +594,7 @@ export function connectDocumentFrame(frame: HTMLIFrameElement, receive: (message
       for (const listener of listeners) listener(bridge.position)
     }
     if (message.type === 'anchors') bridge.anchors = message.payload.items as ReadingAnchor[]
+    if (message.type === 'popped') { popped?.(); return }
     if (message.type === 'ready' && sidewaysTaken) bridge.command('sideways', { take: true })
     if (message.type === 'wheel') {
       if (active) frame.dispatchEvent(new WheelEvent('wheel', { deltaX: message.payload.dx as number, deltaY: message.payload.dy as number, bubbles: true, cancelable: true }))

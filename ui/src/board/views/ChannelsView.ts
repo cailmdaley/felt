@@ -1437,13 +1437,13 @@ export class ChannelsView implements TemporalView {
     layout.style.setProperty('--kbn-ch-stream-x', `${over ? 0 : (p - (this.railShown() ? 1 : 0)) * width}px`)
   }
   /**
-   * Sideways gestures anywhere in Channels, the reader over it included: the
-   * rail follows a finger or a two-finger trackpad swipe, rightward in,
-   * leftward away, and settles by where it stands and how fast it went when
-   * let go. Over the reader, a rightward swipe leaves it and brings the rail in,
-   * so the swipe always means the rail and
-   * never back. Content that scrolls sideways keeps its gesture; travel along
-   * the stream is the stream's.
+   * Sideways gestures anywhere in Channels, the reader over it included: on
+   * the stream the rail follows a finger or a two-finger trackpad swipe,
+   * rightward in, leftward away, and settles by where it stands and how fast
+   * it went when let go. Over the reader a rightward swipe leaves it, however
+   * deep, for the channel's stream, and that is all it does: the next swipe
+   * brings the rail. Content that scrolls sideways keeps its gesture; travel
+   * along the stream is the stream's.
    */
   private gestures(root: HTMLElement): () => void {
     const reading = (): boolean => !!this.ctx?.workspace?.isActive
@@ -1487,7 +1487,9 @@ export class ChannelsView implements TemporalView {
       if (touch) follow(touch.on, false)
       touch = null
     }
-    let idle = 0, leaving = false
+    // A trackpad swipe that left the reader is spent: the rest of it, its inertia dying away, moves nothing; its events pausing, or
+    // rising again as fingers start the next swipe, end it.
+    let idle = 0, spent: { peak: number; last: number } | null = null
     const wheel = (event: WheelEvent): void => {
       const over = onReader(event.target)
       if (!over && !onSurface(event.target)) return
@@ -1498,31 +1500,25 @@ export class ChannelsView implements TemporalView {
       // Taking the gesture keeps the browser from going back a page.
       if (sideways || px !== null) event.preventDefault()
       if (px === null) return
-      // Rightward over the reader leaves it, once, and goes on to draw the rail in.
-      if (over && px >= 0 && !motion.active) return
-      if (over && !leaving) {
-        leaving = true
-        this.ctx?.workspace?.returnToOrigin()
-        // A framed page's wheel stops coming once the reader that showed it is put away: the rail is committed, as for a touch.
-        if (event.target instanceof HTMLIFrameElement) {
-          if (!this.railShown()) motion.go(true)
-          clearTimeout(idle)
-          idle = window.setTimeout(() => { leaving = false }, WHEEL_IDLE_MS)
-          return
-        }
+      const travel = Math.abs(px)
+      if (spent && spent.last < spent.peak / 2 && travel > 1.5 * spent.last + 2) spent = null
+      if (over && px < 0 && !spent) this.ctx?.workspace?.returnToOrigin()
+      if (over || spent) {
+        spent = { peak: Math.max(spent?.peak ?? 0, travel), last: travel }
+        clearTimeout(idle)
+        idle = window.setTimeout(() => { spent = null }, WHEEL_IDLE_MS)
+        return
       }
-      if (!over) leaving = false
       if (!toward(-px)) return
       motion.drag(-px, event.timeStamp)
       clearTimeout(idle)
       // A trackpad says nothing when the fingers lift; the rail lets go once its events pause.
-      idle = window.setTimeout(() => { leaving = false; motion.release() }, WHEEL_IDLE_MS)
+      idle = window.setTimeout(() => motion.release(), WHEEL_IDLE_MS)
     }
-    // A touch the reader recognised, moving rightward: it leaves the reader and the rail comes in. The rail does not follow the
-    // rest of that finger, since a frame stops reporting a touch once the reader that showed it is put away.
+    // A touch the reader recognised, moving rightward, leaves it for the channel's stream; the rest of that finger moves nothing.
     const readerSwipe = (signal: SwipeSignal): boolean => {
       if (signal.phase !== 'move' || signal.dx <= 0 || this.rail?.moving) return false
-      if (reading()) { this.ctx?.workspace?.returnToOrigin(); if (!this.railShown()) motion.go(true) }
+      this.ctx?.workspace?.returnToOrigin()
       return true
     }
     if (this.ctx?.workspace) this.ctx.workspace.swipeBeneath = readerSwipe

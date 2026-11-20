@@ -99,6 +99,20 @@ describe('workspace routes', () => {
     }
   })
 
+  it('a back that lands in a framed page\'s own history goes on back to the view; a frame stepping back by itself is left be', () => {
+    resetHash('#/channels')
+    const history = create()
+    history.start()
+    history.enter('a', 'host', 'host:/files/deck.html', 'channels')
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => {})
+    history.framePopped()
+    expect(back).not.toHaveBeenCalled()
+    history.leave()
+    history.framePopped()
+    history.framePopped()
+    expect(back).toHaveBeenCalledTimes(3)
+  })
+
   it('a scan is quiet; the browser\'s forward reopens the reader where it was left', async () => {
     resetHash('#/channels')
     const onRoute = vi.fn()

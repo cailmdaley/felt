@@ -89,22 +89,33 @@ try {
     assert.equal(await showing(page), 1)
     assert.notEqual(await page.locator('.kbn-ch-stream').evaluate(el => el.scrollTop), before, 'the stream scrolled')
 
-    // Over the reader opened from the channel, the same swipe leaves it and brings the rail: never only back.
+    // Over anything opened from the channel, however deep, one swipe returns to the channel's stream and nothing more; the next
+    // brings the rail. Deep: a deck from a post, stepped two slides on (each a history entry of the deck's own), then a link in it
+    // to another constitution's view.
     await swipe(page, at, 240)
     await settled(page, false)
-    await page.locator('.kbn-ch-item[data-kind="ask"] .kbn-ch-who').click()
+    await page.locator('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"] .uf-card[data-density="page"]').last().click()
+    await page.waitForFunction(() => /deck\.html/.test(decodeURIComponent(location.hash)) && document.querySelector('.ws-selected iframe'))
+    const deck = page.frameLocator('.ws-selected iframe')
+    await deck.locator('h1').click()
+    await deck.locator('h1').click()
+    assert.equal(await (await page.locator('.ws-selected iframe').elementHandle()).contentFrame().then(frame => frame.evaluate(() => location.hash)), '#/2', 'the deck stepped two slides on')
+    await deck.locator('a[href^="#/board/"]').click()
     await page.waitForFunction(() => document.querySelector('.ws-selected .ov-name')?.textContent === 'foregrounds')
+    // The second swipe begins while the first's inertia still dies away: the inertia moves nothing, the new swipe brings the rail.
+    await swipe(page, at, -240, { tail: 12 })
+    assert.equal(await page.evaluate(() => location.hash), '#/channels', 'one swipe returns to the channel')
+    assert.equal(await showing(page), 0, 'and does not bring the rail')
     await swipe(page, at, -240)
-    await page.waitForFunction(() => location.hash === '#/channels')
     await settled(page, true)
 
     // Over a framed page, the tapestry a close's card opens, the frame keeps the wheel from the board and from Safari's back:
-    // it passes the swipe up, so it brings the rail too. Dispatched in the frame, where a real trackpad's events land.
+    // it passes the swipe up, which returns to the channel. Dispatched in the frame, where a real trackpad's events land.
     await swipe(page, at, 240)
     await settled(page, false)
     await page.locator('.kbn-ch-item[data-fiber="cmbx/covariance"][data-kind="close"] .uf-card[data-page]').click()
     await page.waitForFunction(() => location.hash.includes('tapestry.html') && document.querySelector('.ws-selected iframe'))
-    const framed = page.frames().find(frame => frame !== page.mainFrame())
+    const framed = await (await page.locator('.ws-selected iframe').elementHandle()).contentFrame()
     await framed.waitForFunction(() => document.readyState === 'complete')
     const kept = await framed.evaluate(async () => {
       let kept = 0
@@ -116,8 +127,11 @@ try {
       return kept
     }).catch(() => -1)
     await page.waitForFunction(() => location.hash === '#/channels')
-    await settled(page, true)
     assert.ok(kept !== 0, 'the frame kept the sideways wheel from the browser')
+    await page.waitForTimeout(300)
+    await settled(page, false)
+    await swipe(page, at, -240)
+    await settled(page, true)
     assert.deepEqual(errors, [])
   }
   {
@@ -173,7 +187,7 @@ try {
     assert.equal(await hidden(page), true)
     assert.deepEqual(errors, [])
   }
-  console.log('Rail gesture in WebKit: a trackpad swipe and a finger both carry the rail, a second swipe in the first one\'s inertia takes effect, a half swipe settles back, a vertical scroll leaves it be, and over the reader, a framed page included, the swipe brings the rail')
+  console.log('Rail gesture in WebKit: a trackpad swipe and a finger both carry the rail, a second swipe in the first one\'s inertia takes effect, a half swipe settles back, a vertical scroll leaves it be, and over the reader, however deep and a framed page included, one swipe returns to the channel and the next brings the rail')
 } finally {
   await browser.close()
 }
