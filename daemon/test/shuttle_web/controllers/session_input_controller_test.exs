@@ -85,6 +85,39 @@ defmodule ShuttleWeb.SessionInputControllerTest do
              |> json_response(200)
   end
 
+  test "pastes to a harness that takes typed input, and to no other", %{path: path} do
+    for {harness, session, status} <- [
+          {"antigravity", "22222222-2222-4222-8222-222222222222", 200},
+          {"claude-code", "33333333-3333-4333-8333-333333333333", 404}
+        ] do
+      uid = "01ARZ3NDEKTSV4RRFFQ69G5F" <> String.slice(session, 0, 2)
+
+      assert :ok =
+               Shuttle.SessionLedger.record_checked(
+                 session: session,
+                 fiber: "work/#{harness}",
+                 uid: uid,
+                 harness: harness,
+                 host: "test-host",
+                 tmux: "#{harness}-shuttle",
+                 kind: "dispatch",
+                 path: path
+               )
+
+      conn =
+        post(
+          api_conn(),
+          "/api/v1/sessions/input",
+          Jason.encode!(%{session_uuid: session, text: "please continue"})
+        )
+
+      assert conn.status == status, "#{harness}: #{conn.resp_body}"
+    end
+
+    assert_received {:tmux, ["send-keys", "-t", "=antigravity-shuttle:", "Enter"]}
+    refute_received {:tmux, ["send-keys", "-t", "=claude-code-shuttle:", "Enter"]}
+  end
+
   for {step, status, code} <- [
         {"load-buffer", 503, "terminal_input_failed"},
         {"paste-buffer", 502, "terminal_input_ambiguous"},

@@ -91,6 +91,50 @@ defmodule Shuttle.HarnessConformanceTest do
     end
   end
 
+  @tag :tmp_dir
+  test "an Antigravity worker's conversation is the session start its hooks reported", %{
+    tmp_dir: tmp
+  } do
+    id = "e63c2d73-3d33-457e-9457-0ab8670fac39"
+    work = Path.join(tmp, "work")
+    File.mkdir_p!(work)
+    brain = Path.join(tmp, "brain")
+    logs = Path.join([brain, id, ".system_generated", "logs"])
+    File.mkdir_p!(logs)
+    File.cp!(fixture("antigravity", "transcript.jsonl"), Path.join(logs, "transcript_full.jsonl"))
+    events = Path.join(tmp, "events.jsonl")
+    Shuttle.Test.Env.put_env("SHUTTLE_ANTIGRAVITY_BRAIN_DIR", brain)
+    Shuttle.Test.Env.put_env("SHUTTLE_EVENTS_FILE", events)
+    dispatched = ~U[2026-11-20 00:02:49Z]
+    at = DateTime.to_unix(dispatched, :millisecond)
+
+    start = fn id, cwd, at ->
+      Jason.encode!(%{
+        "type" => "session_start",
+        "harness" => "antigravity",
+        "sessionId" => id,
+        "cwd" => cwd,
+        "timestamp" => at
+      }) <> "\n"
+    end
+
+    # Another conversation in the same checkout, and one from before the dispatch.
+    File.write!(
+      events,
+      start.(id, work, at - 60_000) <>
+        start.(id, work, at + 1_000) <>
+        start.("ffffffff-0000-4000-8000-000000000000", work, at + 2_000)
+    )
+
+    agy = Shuttle.Harness.Antigravity
+    assert {:ok, ^id} = agy.find_session(work, dispatched, fiber_id: "demo/fixture")
+    assert :error = agy.find_session(work, dispatched, fiber_id: "demo/other")
+    assert :error = agy.find_session(tmp, dispatched, fiber_id: "demo/fixture")
+    assert :error = agy.find_session(work, DateTime.add(dispatched, 60), fiber_id: "demo/fixture")
+    assert agy.transcript_cwd(Path.join(logs, "transcript_full.jsonl")) == work
+    assert Shuttle.Transcript.path(id) == Path.join(logs, "transcript_full.jsonl")
+  end
+
   test "an Antigravity transcript's tail gives its latest turn's context and cache reads" do
     usage = TranscriptUsage.read(fixture("antigravity", "transcript.jsonl"), "antigravity")
 

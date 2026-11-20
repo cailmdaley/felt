@@ -26,14 +26,14 @@ defmodule ShuttleWeb.SessionInputController do
             end
 
           :gone ->
-            error(conn, 404, "session_not_running", "Codex session is not running")
+            error(conn, 404, "session_not_running", "The session is not running")
 
           :unknown ->
             error(conn, 503, "terminal_unavailable", "Terminal state is unknown")
         end
 
       :error ->
-        error(conn, 404, "session_not_found", "No current terminal owns this Codex session")
+        error(conn, 404, "session_not_found", "No current terminal that takes typed input owns this session")
     end
   end
 
@@ -47,12 +47,12 @@ defmodule ShuttleWeb.SessionInputController do
 
         case terminal_state(runner, terminal) do
           :alive -> receiver_process(conn, session, terminal, runner)
-          :gone -> error(conn, 404, "session_not_running", "Codex session is not running")
+          :gone -> error(conn, 404, "session_not_running", "The session is not running")
           :unknown -> error(conn, 503, "terminal_unavailable", "Terminal state is unknown")
         end
 
       :error ->
-        error(conn, 404, "session_not_found", "No current terminal owns this Codex session")
+        error(conn, 404, "session_not_found", "No current terminal that takes typed input owns this session")
     end
   end
 
