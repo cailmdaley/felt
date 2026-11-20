@@ -853,8 +853,10 @@ defmodule Shuttle.RemoteRegistryTest do
       MockClient.set("http://localhost:4001/api/v1/state", {:error, {:http_status, 503}})
       MockRunner.set("ssh", responses)
 
+      # A 1 ms cadence lets every poll_now probe; a minute's staleness keeps a
+      # poll's answer fresh however long a loaded host takes to read it back.
       remote = %Remote{
-        candide_remote(poll_interval_ms: 1)
+        candide_remote(poll_interval_ms: 1, stale_multiplier: 60_000)
         | tunnel: %{manager: :none, multiplex: false, label: nil}
       }
 
@@ -1244,7 +1246,8 @@ defmodule Shuttle.RemoteRegistryTest do
       {:ok, _pid} =
         RemoteRegistry.start_link(
           name: name,
-          remotes: [candide_remote(poll_interval_ms: 1)],
+          # Every poll_now probes; a poll's answer stays fresh for a minute.
+          remotes: [candide_remote(poll_interval_ms: 1, stale_multiplier: 60_000)],
           client: MockClient,
           runner: MockRunner,
           auto_poll: false,
@@ -1885,7 +1888,10 @@ defmodule Shuttle.RemoteRegistryTest do
       :ok = RemoteRegistry.poll_now(:reg_fleet_rm)
       assert map_size(RemoteRegistry.snapshots(:reg_fleet_rm)) == 2
 
-      write_fleet(path, [%{"name" => "candide", "port" => 4001, "poll_interval_ms" => 1}])
+      write_fleet(path, [
+        %{"name" => "candide", "port" => 4001, "poll_interval_ms" => 1, "stale_multiplier" => 60_000}
+      ])
+
       :ok = RemoteRegistry.poll_now(:reg_fleet_rm)
 
       snapshots = RemoteRegistry.snapshots(:reg_fleet_rm)
