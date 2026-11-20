@@ -1,11 +1,11 @@
 package shuttlecli
 
 import (
-	"github.com/cailmdaley/felt/internal/harness"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/cailmdaley/felt/internal/harness"
 	"github.com/cailmdaley/felt/internal/progstatus"
 )
 

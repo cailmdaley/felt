@@ -2,12 +2,12 @@ package messaging
 
 import (
 	"context"
-	"github.com/cailmdaley/felt/internal/harness"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/harness"
 	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/cailmdaley/felt/internal/sysenv"
 )

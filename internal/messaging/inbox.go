@@ -3,7 +3,6 @@ package messaging
 import (
 	"encoding/json"
 	"errors"
-	"github.com/cailmdaley/felt/internal/harness"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/harness"
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
 

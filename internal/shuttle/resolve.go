@@ -1,9 +1,9 @@
 package shuttle
 
 import (
-	"github.com/cailmdaley/felt/internal/harness"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/harness"
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
 

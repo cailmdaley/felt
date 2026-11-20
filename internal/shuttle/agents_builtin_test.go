@@ -20,6 +20,7 @@ func TestBuiltinRegistry_IsComplete(t *testing.T) {
 		"pi-luna", "pi-openai-luna", "pi-openai-terra", "pi-openai-sol", "pi-haiku", "pi-sonnet", "pi-opus", "pi-fable",
 		"pi-grok", "pi-gemini-flash",
 		"pi-kimi", "pi-deepseek-flash", "pi-glm-flash", "pi-union-alpha",
+		"agy-neon", "agy-argon", "agy-flash",
 	}
 	if got := reg.IDs(); !slices.Equal(got, want) {
 		t.Fatalf("built-in ids = %v, want %v", got, want)
@@ -102,8 +103,9 @@ func TestBuiltinRegistry_ChromeAxisIsReachable(t *testing.T) {
 }
 
 // TestBuiltinRegistry_WrapperDefaultsToCLI: the record format lets `wrapper` be
-// omitted, and the loader fills it from `cli`. The daemon reads wrapper to build
-// the launch command, so an empty one would dispatch nothing.
+// omitted, and the loader fills it with the harness's binary (internal/harness),
+// which is `cli` itself except for Antigravity's `agy`. The daemon reads wrapper
+// to build the launch command, so an empty one would dispatch nothing.
 func TestBuiltinRegistry_WrapperDefaultsToCLI(t *testing.T) {
 	t.Parallel()
 	reg, err := LoadBuiltinAgentRegistry()
@@ -114,8 +116,9 @@ func TestBuiltinRegistry_WrapperDefaultsToCLI(t *testing.T) {
 		if a.IsAlias() {
 			continue
 		}
-		if a.Wrapper != a.CLI {
-			t.Fatalf("%s: wrapper = %q, want the cli %q", a.ID, a.Wrapper, a.CLI)
+		want := map[string]string{"claude": "claude", "codex": "codex", "pi": "pi", "antigravity": "agy"}[a.CLI]
+		if a.Wrapper != want {
+			t.Fatalf("%s: wrapper = %q, want %q", a.ID, a.Wrapper, want)
 		}
 	}
 }

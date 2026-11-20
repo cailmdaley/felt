@@ -69,6 +69,7 @@ Store support files `*.md.lock`, `.*.tmp` and `.move-pending.json*` belong in `.
 | `felt setup claude` | Install the felt plugin for Claude Code (`--source`, `--uninstall`) |
 | `felt setup codex` | Install the felt plugin for Codex (`--source`, `--uninstall`) |
 | `felt setup pi` | Install the felt package for pi (`--uninstall`) |
+| `felt setup antigravity` | Install the felt plugin for the Antigravity CLI at `~/.gemini/config/plugins/felt/` (`--source`, `--uninstall`) |
 | `felt setup receipt` | Report the Felt executable and promoted/loaded harness generations, hooks, and pending plugin-promotion state (`--json` for the machine-readable receipt, where each bundle's `inspection` is `confirmed` by the harness's plugin list, `configured` from its config and cache alone, or `unknown`) |
 | `felt setup skills` | Link felt skills into a target directory (`--source`, `--target`, default `~/.claude/skills`) |
 | `felt setup validate --source <checkout>` | Non-mutating validation of a complete local plugin candidate, including both skills and registered hook files |

@@ -3,10 +3,10 @@ package shuttlecli
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/cailmdaley/felt/internal/harness"
 	"strconv"
 	"strings"
 
+	"github.com/cailmdaley/felt/internal/harness"
 	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/spf13/cobra"
 )

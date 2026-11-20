@@ -2,13 +2,13 @@ package shuttlecli
 
 import (
 	"fmt"
-	"github.com/cailmdaley/felt/internal/harness"
 	"maps"
 	"slices"
 	"sort"
 	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/harness"
 	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/cailmdaley/felt/internal/shuttle"
 )

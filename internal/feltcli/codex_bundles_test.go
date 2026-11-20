@@ -19,6 +19,8 @@ func codexPluginFileClass(path string) string {
 		return "hook-bundle"
 	case "claude-plugin/hooks/lib/handoff.mjs":
 		return "pi-only"
+	case "claude-plugin/hooks/agy.sh":
+		return "antigravity-only"
 	}
 	if strings.HasPrefix(path, "claude-plugin/skills/") {
 		return "skills-bundle"

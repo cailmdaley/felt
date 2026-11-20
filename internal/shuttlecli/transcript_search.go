@@ -3,7 +3,6 @@ package shuttlecli
 import (
 	"context"
 	"fmt"
-	"github.com/cailmdaley/felt/internal/harness"
 	"io"
 	"os"
 	"path/filepath"
@@ -11,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/harness"
 	"github.com/cailmdaley/felt/internal/transcriptindex"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"

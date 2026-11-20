@@ -3,13 +3,13 @@ package transcriptindex
 import (
 	"context"
 	"encoding/json"
-	"github.com/cailmdaley/felt/internal/harness"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/harness"
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
 

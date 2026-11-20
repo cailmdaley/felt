@@ -2,8 +2,8 @@ package shuttlecli
 
 import (
 	"fmt"
-	"github.com/cailmdaley/felt/internal/harness"
 
+	"github.com/cailmdaley/felt/internal/harness"
 	"github.com/spf13/cobra"
 )
 

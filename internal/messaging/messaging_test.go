@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/cailmdaley/felt/internal/harness"
 	"net"
 	"os"
 	"path/filepath"
@@ -18,6 +17,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/harness"
 )
 
 func TestReplyTargetValidation(t *testing.T) {
