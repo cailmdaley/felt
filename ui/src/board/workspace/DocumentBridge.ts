@@ -362,18 +362,17 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
   })
   document.addEventListener('scroll', position, { capture: true, passive: true })
   // A trackpad's wheel inside an opaque frame never reaches the board either: while the view beneath takes the sideways
-  // swipe, the frame passes its wheel up, and keeps a sideways one from the browser, save where the page scrolls that way.
+  // swipe, the frame passes a sideways wheel up, and keeps a sideways one from the browser, save where the page scrolls that way.
   document.addEventListener('wheel', event => {
     if (!active || !sideways) return
     const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerWidth : 1
     const dx = Math.max(-8192, Math.min(8192, event.deltaX * unit)), dy = Math.max(-8192, Math.min(8192, event.deltaY * unit))
-    if (Math.abs(dx) > Math.abs(dy)) {
-      for (let el = event.target instanceof Element ? event.target : null; el; el = el.parentElement) {
-        const scrolls = el.scrollWidth > el.clientWidth + 1 && (el === document.scrollingElement || /auto|scroll/.test(getComputedStyle(el).overflowX))
-        if (scrolls && (dx < 0 ? el.scrollLeft > 0 : el.scrollLeft + el.clientWidth < el.scrollWidth - 1)) return
-      }
-      event.preventDefault()
+    if (Math.abs(dx) <= Math.abs(dy)) return
+    for (let el = event.target instanceof Element ? event.target : null; el; el = el.parentElement) {
+      const scrolls = el.scrollWidth > el.clientWidth + 1 && (el === document.scrollingElement || /auto|scroll/.test(getComputedStyle(el).overflowX))
+      if (scrolls && (dx < 0 ? el.scrollLeft > 0 : el.scrollLeft + el.clientWidth < el.scrollWidth - 1)) return
     }
+    event.preventDefault()
     send('wheel', { dx, dy })
   }, { passive: false })
   // Touches inside an opaque frame never reach the board, so the frame
@@ -521,8 +520,8 @@ export function frameBridge(frame: HTMLIFrameElement): FrameBridge | undefined {
 const connected = new Set<FrameBridge>()
 let sidewaysTaken = false
 /**
- * While `take` holds, every document frame passes its wheel up, replayed on
- * the frame element as the board's own, and keeps a sideways one from the
+ * While `take` holds, every document frame passes its sideways wheel up,
+ * replayed on the frame element as the board's own, and keeps it from the
  * browser's back: a view beneath the reader that answers the sideways swipe
  * (Channels' rail) is the only one that takes it.
  */

@@ -189,7 +189,7 @@ export function registerChannelsBackJourneys(test) {
     // A post's file opens in the reader; one back returns to the post, in focus.
     await page.goto(channelsUrl)
     await toUnions(page)
-    const several = page.locator('.kbn-ch .kbn-ch-item:has(.kbn-ch-previews[data-several])').first()
+    const several = page.locator('.kbn-ch .kbn-ch-item:has(.kbn-ch-previews .uf[data-several])').first()
     const from = await several.locator('[data-item]').first().getAttribute('data-item')
     await several.locator('.uf-card').first().click()
     await page.locator('.ws-reader:not(.ws-dormant)').waitFor()

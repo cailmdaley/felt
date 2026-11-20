@@ -316,9 +316,10 @@ try {
     await page.goto(`${pathToFileURL(resolve('harness-board-dist/index.html'))}?example=channels#/channels`)
     await pick(page, 'vizier').click()
     const close = page.locator('.kbn-ch-item[data-fiber="morning-post"]')
-    await close.locator('.kbn-ch-previews .uf-card[data-key$="/tapestry.html"] .ws-thumbnail').waitFor()
-    // The tapestry leads its previews, before the file the close attached.
-    assert.match(await close.locator('.kbn-ch-previews .uf-card').first().getAttribute('data-key'), /tapestry\.html$/)
+    // The tapestry is a one-line card leading its previews, before the file the close attached, and loads nothing.
+    await close.locator('.kbn-ch-previews .uf-card[data-page]:not(:disabled)').waitFor()
+    assert.equal(await close.locator('.kbn-ch-previews .uf-card').first().getAttribute('data-page'), '')
+    assert.equal(await close.locator('.kbn-ch-previews .uf-card[data-page] .ws-thumbnail').count(), 0)
     const outcome = 'Eleven letters sorted'
     assert.equal(await close.getByText(outcome).count(), 0)
     await close.locator('.kbn-ch-who').click()

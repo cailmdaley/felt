@@ -138,7 +138,7 @@ it('opening, paging and returning to a channel look at nothing; clicking an item
   // A preview opens its file in the reader, and looks at nothing.
   item(host, 'tsz').querySelector<HTMLButtonElement>('.uf-card')!.click()
   expect(openPage).toHaveBeenLastCalledWith(tsz, 'local:/w/tsz/spectrum.svg')
-  expect(host.querySelector('.kbn-ch-previews[data-unfolded]')).toBeNull()
+  expect(host.querySelector('.kbn-ch-previews .uf[data-unfolded]')).toBeNull()
   // The chair's pages in the head open there too.
   host.querySelector<HTMLButtonElement>('.kbn-ch-pages [data-part="constitution"]')!.click()
   expect(openPage).toHaveBeenLastCalledWith(chair, expect.stringContaining('C'))
@@ -499,7 +499,7 @@ it('draws a post to the human that waits on them gold, with what it attached as 
   expect(post.querySelector('.kbn-ch-clear')?.textContent).toBe('✓')
   expect([...host.querySelectorAll('.kbn-ch-clear')].map(check => check.getAttribute('aria-label'))).toStrictEqual(["Clear κ × tSZ's files", "Clear cmbx chair's post"])
   expect([...post.querySelectorAll('.kbn-ch-previews .uf-card')].map(file => [file.getAttribute('aria-label'), file.querySelector('.ws-thumbnail') !== null])).toStrictEqual([['Open deck.html', true]])
-  expect(post.querySelector('.kbn-ch-previews')!.hasAttribute('data-several')).toBe(false)
+  expect(post.querySelector('.kbn-ch-previews .uf')!.hasAttribute('data-several')).toBe(false)
 })
 
 it('says nothing for a closing post, its words being the outcome', async () => {
