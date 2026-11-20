@@ -2,7 +2,9 @@
 
 An inbox holds text waiting for a worker on the host that owns its address.
 An address is a fiber or a session.
-A fiber's host-local key is its felt store path and uid (id when it has no uid), joined by a colon, as in `/home/me/loom:01ARZ3NDEKTSV4RRFFQ69G5FAV`.
+A fiber's host-local key is `fiber:` and its uid, as in `fiber:01ARZ3NDEKTSV4RRFFQ69G5FAV`; it names no store, so a fiber's inbox, scheduled check-ins included, stays where it is when its tree moves to another store.
+A fiber without a uid is keyed by its felt store path and id, joined by a colon.
+At boot, before it recovers any worker, the daemon runs `shuttle inbox rekey` over its stores: an inbox still keyed `<store>:<uid>` under any of them moves to `fiber:<uid>`, with the session links that name it; when several exist for one fiber, the one whose receiver was written last becomes the inbox and the others add the entries it lacks.
 `Shuttle.Delivery.context_key/1` builds it.
 A session's address is `shuttle://<host>/<harness>/<id>`.
 The address `threads` is the host's routing inbox ([below](#thread-results-and-routing)).
@@ -212,7 +214,7 @@ A `force` reminder skips cost and hook windows; a `none` reminder waits as conte
 
 `shuttle inbox ls <fiber> --scheduled` shows all pending entries with a `not_before`, including overdue ones, with time, sender, first text line and an overdue wait reason.
 The reason is the one a `/deliver` receipt would give: the agent gate or launch admission refusal the next poll would meet, or the worker that has yet to take the entry.
-Fiber ids, slugs and uids resolve through the owner to its host-local `<store>:<uid>` key, and a reference that names no fiber is an error; a raw key (a store path and uid, a `shuttle://` address or `threads`) reads this host.
+Fiber ids, slugs and uids resolve through the owner to its host-local `fiber:<uid>` key, and a reference that names no fiber is an error; a raw key (`fiber:<uid>`, a store path and id, a `shuttle://` address or `threads`) reads this host.
 `shuttle inbox cancel <fiber> <message-id>` marks a pending entry `cancelled` and moves it to `offered/`, under the inbox lock.
 An entry an open batch holds is refused as `in_flight`: cancellation cannot retract text already emitted.
 Both fiber-reference commands use the owner-routed `/api/v1/inbox` endpoint (`action: list|cancel`); an unreachable owner is an error, never an archive fallback.

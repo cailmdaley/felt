@@ -963,6 +963,7 @@ defmodule Shuttle.Poller do
              Shuttle.Contract.refresh(Shuttle.Contract.unchecked(), state.runner)
            end),
          state = %{state | contract_check: contract},
+         {:ok, _} <- step.("inbox_rekey", fn -> Shuttle.Inbox.rekey(stores) end),
          {:ok, previous} <-
            step.("heartbeat", fn -> DaemonHeartbeat.read(state.daemon_heartbeat_file) end),
          {:ok, state} <- step.("migration_recovery", fn -> recover_migrations(state) end),
@@ -5943,8 +5944,8 @@ defmodule Shuttle.Poller do
   defp context_receiver_key(state, meta, fiber) do
     fiber_id = fiber_address(meta)
     store = Map.get(meta, :felt_store) || owning_store(fiber_id, state)
-    uid = metadata_uid(meta) || (fiber && (fiber["uid"] || fiber["id"])) || fiber_id
-    store <> ":" <> uid
+    uid = metadata_uid(meta) || (fiber && fiber["uid"])
+    Shuttle.Delivery.fiber_key(store, uid, (fiber && fiber["id"]) || fiber_id)
   end
 
   defp persist_context_receiver(state, meta, worker) do

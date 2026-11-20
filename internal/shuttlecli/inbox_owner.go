@@ -13,11 +13,11 @@ import (
 	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
-// rawInboxKey reports whether ref is a host-local inbox key (a felt store
-// path and uid, a session address, or the routing inbox) rather than a fiber
-// reference.
+// rawInboxKey reports whether ref is a host-local inbox key (a fiber's
+// fiber:<uid> key or, for a fiber without a uid, its store path and id, a
+// session address, or the routing inbox) rather than a fiber reference.
 func rawInboxKey(ref string) bool {
-	return strings.HasPrefix(ref, "/") || strings.HasPrefix(ref, "shuttle://") || ref == "threads"
+	return strings.HasPrefix(ref, messaging.FiberKeyPrefix) || strings.HasPrefix(ref, "/") || strings.HasPrefix(ref, "shuttle://") || ref == "threads"
 }
 
 // inboxFiber resolves the reference an inbox verb or a delayed send names:

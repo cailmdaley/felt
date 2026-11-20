@@ -68,7 +68,7 @@ defmodule Shuttle.DispatchIntegrationInboxRollForwardTest do
     assert_receive {:native_frame, receiver, frame}
     assert frame["message"]["content"] =~ "check the fit"
     kill_daemon!(poller)
-    assert [_ | _] = kill_commands!("inbox consume #{host}:")
+    assert [_ | _] = kill_commands!("inbox consume fiber:")
     send(receiver, {:fate, :drop})
     assert_receive {:sent, {_, status}} when status != 0, 60_000
     assert [%{"id" => "m-pinned", "attempt" => %{"conversation" => conversation}}] = inbox(id)

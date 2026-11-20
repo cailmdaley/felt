@@ -110,7 +110,7 @@ defmodule Shuttle.ThreadReceiverTest do
     {:ok,
      store: dir,
      data: data,
-     key: dir <> ":" <> uid,
+     key: "fiber:" <> uid,
      canonical: Dispatcher.session_name("hub", uid)}
   end
 
@@ -560,7 +560,7 @@ defmodule Shuttle.ThreadReceiverTest do
           do: assert({:ok, _} = CLI.run_felt(["-C", store, "edit", slug, "-s", "closed"]))
 
         assert {:ok, json} = CLI.run_in_store(store, ["show", slug, "--json"])
-        {slug, store <> ":" <> Jason.decode!(json)["uid"]}
+        {slug, "fiber:" <> Jason.decode!(json)["uid"]}
       end
 
     seed_receiver!(store, keys["gone"], "old-worker:G", "G")

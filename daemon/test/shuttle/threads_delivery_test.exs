@@ -669,9 +669,8 @@ defmodule Shuttle.ThreadsDeliveryTest do
     assert parent.felt_store == store
     Threads.deliver_results(entries, "test-host")
     canonical = Shuttle.Delivery.context_key(parent)
-    view = other <> ":" <> parent.fiber["uid"]
-    assert {:ok, out} = CLI.run(["inbox", "pending", "--waking", canonical, view])
-    assert Jason.decode!(out) == %{canonical => 1, view => 0}
+    assert {:ok, out} = CLI.run(["inbox", "pending", "--waking", canonical])
+    assert Jason.decode!(out) == %{canonical => 1}
     assert Shuttle.Test.InboxPublications.pending() == []
     hub_uid = parent.fiber["uid"]
     assert Threads.pending_results(entries, "test-host", []) == {%{hub_uid => 1}, %{}}

@@ -646,7 +646,15 @@ defmodule Shuttle.Delivery do
     end)
   end
 
-  @doc "The key of a fiber's context mailbox: its store and durable identity."
+  @doc "The key of a fiber's context mailbox (see `fiber_key/3`)."
   def context_key(entry),
-    do: entry.felt_store <> ":" <> (entry.fiber["uid"] || entry.fiber["id"])
+    do: fiber_key(entry.felt_store, entry.fiber["uid"], entry.fiber["id"])
+
+  @doc """
+  A fiber's inbox key: `fiber:<uid>`, naming no store, so the inbox stays put
+  when the fiber's tree moves to another store. A fiber without a uid is keyed
+  by its store and id.
+  """
+  def fiber_key(_store, uid, _id) when is_binary(uid) and uid != "", do: "fiber:" <> uid
+  def fiber_key(store, _uid, id), do: store <> ":" <> id
 end

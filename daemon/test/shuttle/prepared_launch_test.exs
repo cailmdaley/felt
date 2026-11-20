@@ -429,7 +429,7 @@ defmodule Shuttle.PreparedLaunchTest do
     )
 
     session = Shuttle.Test.FiberUid.session(id)
-    key = root <> ":" <> Shuttle.Test.FiberUid.for(id)
+    key = "fiber:" <> Shuttle.Test.FiberUid.for(id)
     address = Shuttle.Messaging.address("test-host", "claude", "old-uuid")
 
     assert {:ok, _} =
@@ -461,7 +461,7 @@ defmodule Shuttle.PreparedLaunchTest do
     )
 
     session = Shuttle.Test.FiberUid.session(id)
-    key = root <> ":" <> Shuttle.Test.FiberUid.for(id)
+    key = "fiber:" <> Shuttle.Test.FiberUid.for(id)
     address = Shuttle.Messaging.address("test-host", "claude", "old-uuid")
 
     assert {:ok, _} =

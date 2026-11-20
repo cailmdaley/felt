@@ -8,13 +8,14 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
 
-// inboxVerbs are the inbox verbs: put, pending, ls, cancel and consume. An
-// address is a fiber key (<felt store path>:<uid>) or a session's shuttle://
+// inboxVerbs are the inbox verbs: put, pending, ls, cancel, consume and
+// rekey. An address is a fiber key (fiber:<uid>) or a session's shuttle://
 // address on this host; ls and cancel also take a fiber reference, answered
 // by the fiber's owner.
 func (a *app) shuttleInboxCmd() *cobra.Command {
@@ -38,8 +39,10 @@ func (a *app) inboxVerbs() []*cobra.Command {
 		Use:   "put <address> <message-id> <text>",
 		Short: "Enqueue an entry in an address's inbox on this host",
 		Long: `Enqueue an entry in the inbox of a fiber key or a session's shuttle:// address
-on this host. A fiber's key is the path of its felt store and its uid, joined by
-a colon (/home/me/loom:01M7...); the daemon reads no other key for that fiber.
+on this host. A fiber's key is fiber: and its uid (fiber:01M7...), naming no
+store, so the inbox stays put when the fiber's tree moves to another store; a
+fiber without a uid is keyed by its store's path and its id, joined by a colon.
+The daemon reads no other key for that fiber.
 In a fiber's inbox, an id already there is a successful no-op
 when its content and wishes match, or whatever they are with --derived;
 otherwise it is a message_id_conflict. A session's inbox refuses an id already
@@ -160,7 +163,36 @@ to consume again with the worker's --idle, --unknown and --costly facts.`,
 	consume.Flags().BoolVar(&idle, "idle", false, "The live worker was observed idle")
 	consume.Flags().BoolVar(&unknown, "unknown", false, "The live worker's turn state is unknown: woken for ask, never for idle")
 	consume.Flags().BoolVar(&costly, "costly", false, "Waking the live worker is costly")
-	return append(append([]*cobra.Command{put, pending, ls, consume, cancel}, a.recordInboxVerbs()...), a.threadInboxVerbs()...)
+	rekey := &cobra.Command{
+		Use:   "rekey <store>...",
+		Short: "Move inboxes keyed by a store's path to their fiber's uid key",
+		Long: `Move the inbox of every Shuttle-managed fiber in these felt stores that is
+still keyed <store>:<uid>, for any of the stores, to fiber:<uid>, and point
+session links at it. Every store is tried for every fiber's uid, so an inbox
+left under the store a tree moved out of is found too. When several such
+inboxes exist for one fiber, the one whose receiver was written last becomes
+the inbox and the others add the entries it lacks. Idempotent; the daemon runs
+it at boot. A store that cannot be listed is named on stderr and skipped.
+Prints the number of inboxes moved.`,
+		Args: cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var uids []string
+			for _, store := range args {
+				fibers, err := felt.NewStorage(store).ListMetadataHavingFrontmatterFields([]string{"shuttle"})
+				if err != nil {
+					fmt.Fprintf(a.env.Stderr, "%s: %v\n", store, err)
+					continue
+				}
+				for _, f := range fibers {
+					uids = append(uids, f.UID)
+				}
+			}
+			n, err := messaging.RekeyFiberInboxes(a.env, args, uids)
+			fmt.Fprintln(a.env.Stdout, n)
+			return err
+		},
+	}
+	return append(append([]*cobra.Command{put, pending, ls, consume, cancel, rekey}, a.recordInboxVerbs()...), a.threadInboxVerbs()...)
 }
 
 // printPendingSummaries prints one JSON object, key => its PendingSummary. A key

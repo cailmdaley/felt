@@ -100,7 +100,7 @@ defmodule Shuttle.PollerPublicationTest do
 
       assert_received {:context_delivery, ["inbox", "consume", key, ^address, generation]}
 
-      assert key == root <> ":" <> uid
+      assert key == "fiber:" <> uid
       assert generation == Integer.to_string(epoch)
     end)
   end
