@@ -59,7 +59,7 @@ Some behaviour belongs to one harness and stays outside the adapters, as that ha
 Every harness's hooks reach Shuttle in one shape, Claude Code's hook payload (`hook_event_name`, `session_id`, `cwd`, `transcript_path`, `prompt`, `tool_name`, `tool_input`, `background_tasks`).
 `shuttle hook event` records it on the host's event stream, registers the session's mailbox, records the turn state and offers queued messages; the daemon's `Shuttle.WaitingTracker` folds the stream into working, waiting and attention.
 Claude Code and Codex run the plugin's shims, which pass their payloads through.
-Pi's extension sends the same shape with an explicit `harness`.
+Pi's extension sends the same shape with an explicit `harness`; its `Stop` is Pi's `agent_settled`, after any retry, compaction retry or queued follow-up, since `agent_end` can be followed by more of the same run.
 Antigravity's shim runs `shuttle hook antigravity`, which translates agy's camelCase payload into this shape with `harness: "antigravity"` and answers in agy's shape.
 
 The events Shuttle relies on:
@@ -118,8 +118,9 @@ A new harness's live behaviour is checked once by hand, and what it cannot do is
 - **Launch**: `pi <flags> '<prompt>'`, never on stdin, which switches Pi to print mode; effort is a `:level` suffix on the model.
 - **Identity**: reported, by the session file in the working directory's folder under the sessions root.
 - **Resume**: `--session <uuid>`; a failed resume starts fresh and the identity is captured again.
-- **Delivery**: extension. Shuttle's Pi extension opens a socket that steers a busy turn and follows up an idle one.
-- **Transcript**: `~/.pi/agent/sessions/--<cwd>--/…<uuid>.jsonl`.
+- **Delivery**: extension. Shuttle's Pi extension opens a socket that steers a busy turn and follows up an idle one. An idle-only wake (a pulse) carries `idleOnly`, and the extension refuses it as busy unless Pi has settled (`ctx.isIdle()`); a Confer job, which has no such check, refuses every idle-only wake.
+- **Turns**: the extension reports `SessionStart`, `UserPromptSubmit` (before each run starts), the tool events, `Stop` on `agent_settled`, and `SessionEnd`. Pi has no background-task registry, so its `Stop` carries no `background_tasks`.
+- **Transcript**: `$PI_CODING_AGENT_DIR/sessions/--<cwd>--/…<uuid>.jsonl`, with `PI_CODING_AGENT_DIR` defaulting to `~/.pi/agent`.
 - **Instructions**: the launch prompt, the package's skills.
 - **Installed by**: `felt setup pi`, through `pi install`.
 
@@ -143,10 +144,10 @@ What each harness cannot do, as Shuttle runs it today:
 
 - **Claude Code**: its harness name is spelled two ways, `claude` and `claude-code` in ledgers and on the event stream.
 - **Codex**: no fresh fallback on a failed resume; no Remote Control; its hooks name no harness, so the hook handler infers Codex from the payload.
-- **Pi**: reports no idle turn, so it has no pulse and takes no idle-only wake; no interrupt reading; no task list; its transcript root does not honour `PI_CODING_AGENT_DIR`; outside `felt setup`'s plugin promotion and the setup receipt.
+- **Pi**: no interrupt reading, though `agent_settled` carries `aborted` when the human cancels with Escape; no task list; its transcript root does not follow `PI_CODING_AGENT_SESSION_DIR` or the `sessionDir` setting, which move Pi's sessions out of its agent directory; outside `felt setup`'s plugin promotion and the setup receipt.
 - **Antigravity**:
   - Its conversation id cannot be assigned at launch, and SessionStart does not fire on resume.
-  - No interrupt detection: its transcript records no interrupt Shuttle reads (a `Stop` carries `terminationReason: "USER_CANCELED"`, which nothing reads yet).
+  - No interrupt detection. On agy 1.5.13, Escape fires no hook at all (no `Stop`, no `PostInvocation`), whether it cancels the model mid-stream or a running tool, so the cancelled turn stays working on the event stream until the next prompt. `USER_CANCELED`, which agy documents as a `Stop` `terminationReason`, was not observed. The only traces are agy's own: the transcript records an `ERROR_MESSAGE` "The stream was interrupted" for a cancel mid-stream and nothing for one during a tool, and agy's debug log (`~/.gemini/antigravity-cli/log/cli-<start>.log`) writes `Cancel requested for cascade <conversation id>` for every cancel. Neither is read: the first misses half the cancels, the second is an unversioned debug log.
   - No Remote Control, no task list, no context-budget handoff nudge, and no skill-activation gate.
   - Its transcript records no working directory, so `shuttle find` hits carry no project, and a History resume needs the session start still on the event stream.
   - Not in `felt setup`'s plugin promotion or the setup receipt.

@@ -2,8 +2,8 @@ defmodule Shuttle.Harness.Pi do
   @moduledoc """
   Pi. Its conversation id is reported after launch, by the session file it
   writes in the working directory's folder under the sessions root; the
-  prompt is an argument and effort a `:level` suffix on the model. Pi's hooks
-  name no idle turn and its transcript no interrupt.
+  prompt is an argument and effort a `:level` suffix on the model. Its
+  extension reports Stop when Pi settles; its transcript records no interrupt.
   """
 
   @behaviour Shuttle.Harness
@@ -17,7 +17,7 @@ defmodule Shuttle.Harness.Pi do
   @impl true
   def binary, do: "pi"
   @impl true
-  def idle_signal?, do: false
+  def idle_signal?, do: true
   @impl true
   def interrupts?, do: false
   @impl true

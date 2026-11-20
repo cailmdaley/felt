@@ -173,6 +173,9 @@ export default function feltExtension(pi: ExtensionAPI) {
 	let nativeSessionId: string | null = null;
 	let nativeCwd: string | null = null;
 	let nativeTranscript: string | null = null;
+	// The context of the session the native endpoint serves; its isIdle() says
+	// whether Pi has settled, which an idle-only message requires.
+	let nativeCtx: any = null;
 	let streaming = false;
 	const nativeFrameLimit = 512 << 10;
 
@@ -223,6 +226,7 @@ export default function feltExtension(pi: ExtensionAPI) {
 		nativeSessionId = sid;
 		nativeCwd = ctx.cwd;
 		nativeTranscript = safeSessionFile(ctx);
+		nativeCtx = ctx;
 		try {
 			const parent = path.dirname(nativeSocket);
 			fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
@@ -269,6 +273,10 @@ export default function feltExtension(pi: ExtensionAPI) {
 				}
 				if (request?.type !== "msg" || request.sessionId !== sid || !requestId || typeof request.message !== "string" || !request.message.trim() || request.message.includes("\0") || Buffer.byteLength(request.message) > (128 << 10)) {
 					writeNativeReply(socket, { ...replyBase, ok: false, error: "invalid Pi message request" });
+					return;
+				}
+				if (request.idleOnly === true && !nativeCtx?.isIdle()) {
+					writeNativeReply(socket, { ...replyBase, ok: false, busy: true, error: "Pi turn is not idle" });
 					return;
 				}
 				const delivery = streaming ? "steer" : "follow_up";
@@ -426,13 +434,16 @@ export default function feltExtension(pi: ExtensionAPI) {
 		streaming = true;
 	});
 
-	pi.on("agent_end", async (_event, ctx) => {
+	pi.on("agent_end", async () => {
 		streaming = false;
-		emit("Stop", {}, ctx);
 	});
 
-	pi.on("agent_settled", async () => {
+	// agent_end can be followed by a retry, a compaction retry or queued
+	// follow-ups; agent_settled ends everything Pi will run on its own, so it
+	// is the turn's Stop.
+	pi.on("agent_settled", async (_event, ctx) => {
 		streaming = false;
+		emit("Stop", {}, ctx);
 	});
 
 	pi.on("tool_call", async (event, ctx) => {

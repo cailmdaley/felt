@@ -9,12 +9,13 @@
       "binary": "pi",
       "delivery": "extension",
       "identity": "reported",
-      "idle_signal": false,
+      "idle_signal": true,
       "interrupts": false,
       "ledger": "pi",
       "name": "pi",
       "transcripts": {
         "env": "SHUTTLE_PI_SESSIONS_DIR",
+        "home_env": "PI_CODING_AGENT_DIR",
         "home": ".pi/agent",
         "leaf": "sessions"
       }

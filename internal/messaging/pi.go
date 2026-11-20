@@ -203,6 +203,9 @@ func (piAdapter) send(ctx context.Context, env *sysenv.Env, a Address, r Request
 	if piNativeAvailable(env, a.ID, a.Host) {
 		return sendPiNative(ctx, env, a, r)
 	}
+	if r.IdleOnly {
+		return rejected(r, "pi-rpc+unix-socket", "a Confer job cannot hold a message until it is idle"), errCode("busy", "Pi turn is not known to be idle")
+	}
 	j, err := findPi(ctx, env, a.ID)
 	if err != nil {
 		return rejected(r, "pi-rpc+unix-socket", err.Error()), errCode("session_not_found", "%v", err)

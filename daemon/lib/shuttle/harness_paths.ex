@@ -8,7 +8,8 @@ defmodule Shuttle.HarnessPaths do
   drift.
 
   Each root takes an option, then Shuttle's explicit override, then the
-  harness's own home variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`), then the
+  harness's own home variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
+  `PI_CODING_AGENT_DIR`), then the
   harness default under the home directory; a blank value counts as unset.
   `internal/harness` is the Go copy, and
   `test/fixtures/harness_paths/cases.json` holds both to the same roots.
@@ -33,7 +34,11 @@ defmodule Shuttle.HarnessPaths do
   @spec pi_sessions_root(keyword()) :: String.t()
   def pi_sessions_root(opts \\ []) do
     configured_path(opts, [:pi_root], "SHUTTLE_PI_SESSIONS_DIR", fn ->
-      Path.join([Shuttle.Env.home(), ".pi", "agent", "sessions"])
+      Path.join(
+        non_empty(Shuttle.Env.get("PI_CODING_AGENT_DIR")) ||
+          Path.join([Shuttle.Env.home(), ".pi", "agent"]),
+        "sessions"
+      )
     end)
   end
 

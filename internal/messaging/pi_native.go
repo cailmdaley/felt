@@ -189,7 +189,11 @@ func sendPiNative(ctx context.Context, env *sysenv.Env, a Address, req Request) 
 		defer transcript.Close()
 	}
 	requestID := fmt.Sprintf("shuttle-pi-%d", time.Now().UnixNano())
-	if err := json.NewEncoder(conn).Encode(map[string]any{"type": "msg", "requestId": requestID, "sessionId": a.ID, "message": labeled(req)}); err != nil {
+	msg := map[string]any{"type": "msg", "requestId": requestID, "sessionId": a.ID, "message": labeled(req)}
+	if req.IdleOnly {
+		msg["idleOnly"] = true
+	}
+	if err := json.NewEncoder(conn).Encode(msg); err != nil {
 		return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusUnknown, Transport: piNativeTransport, Detail: "Pi native request write did not complete"}, errCode("ambiguous_delivery", "Pi native request may have reached the receiver: %v", err)
 	}
 	line, err := bufio.NewReaderSize(io.LimitReader(conn, (512<<10)+1), 4096).ReadBytes('\n')
@@ -223,6 +227,9 @@ func decodePiNativeReply(line []byte, requestID, sessionID string, req Request) 
 		return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusUnknown, Transport: piNativeTransport, Detail: "Pi native acknowledgement lacked correlated evidence"}, errCode("ambiguous_delivery", "Pi native acknowledgement lacked correlated evidence")
 	}
 	if !*resp.OK {
+		if resp.Busy {
+			return rejected(req, piNativeTransport, resp.Error+"; message was not delivered"), errCode("busy", "%s", resp.Error)
+		}
 		return rejected(req, piNativeTransport, resp.Error), errCode("native_rejected", "Pi rejected prompt: %s", resp.Error)
 	}
 	if resp.Delivery != "steer" && resp.Delivery != "follow_up" {
@@ -236,7 +243,9 @@ func decodePiNativeReply(line []byte, requestID, sessionID string, req Request) 
 }
 
 type piNativeReply struct {
-	Queued    bool   `json:"queued"`
+	Queued bool `json:"queued"`
+	// Busy marks a refused idle-only message: Pi had not settled.
+	Busy      bool   `json:"busy"`
 	OK        *bool  `json:"ok"`
 	Delivery  string `json:"delivery"`
 	Error     string `json:"error"`

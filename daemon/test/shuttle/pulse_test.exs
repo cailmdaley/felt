@@ -135,7 +135,9 @@ defmodule Shuttle.PulseTest do
 
     assert Pulse.config(bare.("claude"))
     assert Pulse.config(bare.("codex"))
-    refute Pulse.config(bare.("pi"))
+    assert Pulse.config(bare.("pi"))
+    assert Pulse.config(bare.("antigravity"))
+    refute Pulse.config(bare.("unknown-harness"))
   end
 
   test "one pending tick survives reconciliation until a fresh idle event, and handoff clears it" do

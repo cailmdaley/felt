@@ -40,14 +40,12 @@ func TestPulseRejectsInvalidDurationsAndWindows(t *testing.T) {
 	}
 }
 
-func TestPulseRequiresAgentWithSafeWake(t *testing.T) {
+func TestPulseAcceptsEveryHarnessThatReportsIdle(t *testing.T) {
 	reg := builtinReg(t)
-	errs := Validate(&Block{Kind: "oneshot", Agent: "pi-openai-terra", Pulse: &Pulse{Every: "59m"}}, reg)
-	if !strings.Contains(errs.Error(), "idle-only wake") {
-		t.Fatalf("Pi pulse error = %v", errs)
-	}
-	if errs := Validate(&Block{Kind: "oneshot", Agent: "claude-opus", Pulse: &Pulse{Every: "59m"}}, reg); len(errs) != 0 {
-		t.Fatalf("Claude pulse rejected: %v", errs)
+	for _, agent := range []string{"claude-opus", "codex-sol", "pi-openai-terra", "agy-flash"} {
+		if errs := Validate(&Block{Kind: "oneshot", Agent: agent, Pulse: &Pulse{Every: "59m"}}, reg); len(errs) != 0 {
+			t.Fatalf("%s pulse rejected: %v", agent, errs)
+		}
 	}
 }
 
@@ -75,12 +73,5 @@ func TestResolveBlockOmitsInvalidPulse(t *testing.T) {
 		if resolved.PulseIntervalMS != 0 {
 			t.Fatalf("invalid pulse resolved: %+v", resolved)
 		}
-	}
-	resolved, err := ResolveBlock(&Block{Kind: "oneshot", Agent: "pi-openai-terra", Pulse: &Pulse{Every: "59m"}}, reg, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resolved.PulseIntervalMS != 0 {
-		t.Fatalf("Pi pulse resolved: %+v", resolved)
 	}
 }

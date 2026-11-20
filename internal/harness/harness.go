@@ -67,8 +67,8 @@ var all = []Facts{
 	},
 	{
 		Name: "pi", Ledger: "pi", Binary: "pi",
-		Identity: "reported", Delivery: "extension",
-		Transcripts: Transcripts{Env: "SHUTTLE_PI_SESSIONS_DIR", Home: ".pi/agent", Leaf: "sessions"},
+		Identity: "reported", Delivery: "extension", IdleSignal: true,
+		Transcripts: Transcripts{Env: "SHUTTLE_PI_SESSIONS_DIR", HomeEnv: "PI_CODING_AGENT_DIR", Home: ".pi/agent", Leaf: "sessions"},
 	},
 	{
 		Name: "antigravity", Ledger: "antigravity", Binary: "agy",

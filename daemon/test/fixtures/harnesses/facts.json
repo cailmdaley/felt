@@ -35,10 +35,11 @@
     "binary": "pi",
     "identity": "reported",
     "delivery": "extension",
-    "idle_signal": false,
+    "idle_signal": true,
     "interrupts": false,
     "transcripts": {
       "env": "SHUTTLE_PI_SESSIONS_DIR",
+      "home_env": "PI_CODING_AGENT_DIR",
       "home": ".pi/agent",
       "leaf": "sessions"
     }

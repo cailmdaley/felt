@@ -199,7 +199,7 @@ A busy session skips the tick and tries at the next interval, without interrupti
 Pause, rest and close stop pulses.
 Pulse timing persists in daemon operational state across restarts, outside the fiber lifecycle.
 Ticks do not create board events or review cards unless the worker chooses to write or post.
-Claude and Codex support pulse; Pi has no idle-safe wake path.
+Every harness Shuttle runs supports pulse.
 
 **The circuit breaker** (7) exists because a worker that dies on startup would
 otherwise be relaunched forever. Five consecutive worker deaths, each under 90

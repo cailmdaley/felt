@@ -99,6 +99,7 @@ let sessionId = "pi-extension-test-session-a";
 const ctx = {
 	cwd: root,
 	hasUI: false,
+	isIdle: () => !busy,
 	ui: { notify() {} },
 	sessionManager: {
 		getSessionId: () => sessionId,
@@ -144,6 +145,10 @@ reply = await request({ type: "msg", requestId: "active", sessionId, message: "a
 assert.deepEqual(reply, { ok: true, queued: true, delivery: "steer", requestId: "active", sessionId });
 assert.deepEqual(sent.at(-1), { message: "active message", options: { deliverAs: "steer" } });
 assert.equal(AgentSession.prototype.prompt, originalPrompt, "the admission callback does not leave the shared method replaced");
+const beforeIdleOnly = sent.length;
+reply = await request({ type: "msg", requestId: "idle-only-busy", sessionId, message: "pulse", idleOnly: true });
+assert.deepEqual(reply, { ok: false, busy: true, error: "Pi turn is not idle", requestId: "idle-only-busy", sessionId });
+assert.equal(sent.length, beforeIdleOnly, "an idle-only message never steers a running turn");
 reply = await request({ type: "msg", requestId: "refused-async", sessionId, message: "async refusal" });
 assert.equal(reply.ok, undefined, "an asynchronous rejection is not queue admission");
 reply = await request({ type: "msg", requestId: "handled-busy", sessionId, message: "Pi may have refused this" });
@@ -216,7 +221,13 @@ assert.equal(reply.delivery, "follow_up", "new idle session must not inherit the
 
 await handlers.get("agent_start")({}, ctx);
 await handlers.get("agent_end")({}, ctx);
-await waitFor(() => hasHook(shuttleCalls, "event", "Stop"), "Stop should reach shuttle");
+await new Promise((resolve) => setTimeout(resolve, 200));
+assert.equal(hasHook(shuttleCalls, "event", "Stop"), false, "agent_end may be followed by a retry or a queued follow-up, so it is not the turn's end");
+busy = false;
+await handlers.get("agent_settled")({ aborted: false }, ctx);
+await waitFor(() => hasHook(shuttleCalls, "event", "Stop"), "Stop should reach shuttle once Pi settles");
+reply = await request({ type: "msg", requestId: "idle-only-settled", sessionId, message: "pulse", idleOnly: true });
+assert.equal(reply.delivery, "follow_up", "an idle-only message reaches a settled session");
 reply = await request({ type: "msg", requestId: "after-end", sessionId, message: "another turn" });
 assert.equal(reply.delivery, "follow_up");
 await handlers.get("session_shutdown")({}, ctx);

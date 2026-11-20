@@ -254,6 +254,28 @@ func TestPiNativeSendCorrelatesSessionAndRequest(t *testing.T) {
 	}
 }
 
+// An idle-only wake asks the extension to hold it unless Pi has settled; the
+// extension's refusal is a busy turn, as for every harness that reports idle.
+func TestPiNativeIdleOnlyWakeRefusedByABusySession(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	socket, closeFixture := piNativeFixture(t, func(request map[string]any) any {
+		if request["idleOnly"] != true {
+			return map[string]any{"ok": true, "delivery": "steer", "requestId": request["requestId"], "sessionId": request["sessionId"]}
+		}
+		return map[string]any{"ok": false, "busy": true, "error": "Pi turn is not idle", "requestId": request["requestId"], "sessionId": request["sessionId"]}
+	})
+	defer closeFixture()
+	if err := RegisterPiNative(env, "session", "host", "/project", socket, filepath.Join(t.TempDir(), "session.jsonl"), os.Getpid(), true); err != nil {
+		t.Fatal(err)
+	}
+	req := Request{Address: "shuttle://host/pi/session", Text: "pulse", MessageID: "pulse", Wake: true, IdleOnly: true}
+	receipt, err := Send(context.Background(), env, "host", req)
+	if receipt.Status != StatusRejected || ErrorCode(err) != "busy" {
+		t.Fatalf("receipt=%#v err=%v", receipt, err)
+	}
+}
+
 func TestPiMailboxSupportsPassiveContext(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)

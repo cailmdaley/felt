@@ -15,12 +15,13 @@
       "name": "harness homes",
       "env": {
         "CLAUDE_CONFIG_DIR": "/cfg/claude",
-        "CODEX_HOME": "/cfg/codex"
+        "CODEX_HOME": "/cfg/codex",
+        "PI_CODING_AGENT_DIR": "/cfg/pi"
       },
       "expect": {
         "claude": "/cfg/claude/projects",
         "codex": "/cfg/codex/sessions",
-        "pi": "~/.pi/agent/sessions",
+        "pi": "/cfg/pi/sessions",
         "antigravity": "~/.gemini/antigravity-cli/brain"
       }
     },
@@ -29,6 +30,7 @@
       "env": {
         "CLAUDE_CONFIG_DIR": "/cfg/claude",
         "CODEX_HOME": "/cfg/codex",
+        "PI_CODING_AGENT_DIR": "/cfg/pi",
         "SHUTTLE_CLAUDE_PROJECTS_DIR": "/srv/claude",
         "SHUTTLE_CODEX_SESSIONS_DIR": "/srv/codex",
         "SHUTTLE_PI_SESSIONS_DIR": "/srv/pi",
@@ -46,6 +48,7 @@
       "env": {
         "CLAUDE_CONFIG_DIR": "",
         "CODEX_HOME": "  ",
+        "PI_CODING_AGENT_DIR": " ",
         "SHUTTLE_CLAUDE_PROJECTS_DIR": " ",
         "SHUTTLE_CODEX_SESSIONS_DIR": "",
         "SHUTTLE_PI_SESSIONS_DIR": "",
