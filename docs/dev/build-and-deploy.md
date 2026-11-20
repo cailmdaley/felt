@@ -218,11 +218,16 @@ deploy routes reuse the daemon every host already runs and the access it
 already grants.
 
 **Bringing a host onto tailnet deploys** takes one ssh deploy of a revision
-that has the routes, after which no deploy needs ssh:
+that has the routes, after which no deploy needs ssh. For a host whose login
+wants MFA, log in once so the ssh config's `ControlMaster` holds the
+connection, then deploy over it:
 
 ```sh
-bin/shuttle-deploy --hosts <host> --ssh=<host> --handshake
+ssh <host> true && bin/shuttle-deploy --hosts <host> --ssh=<host>
 ```
+
+(`--handshake` answers the prompt itself for an entry marked
+`"auth": "interactive"`.)
 
 The helper prints one warning if the target commit's latest completed main CI run failed.
 Its advisory GitHub query has a ten-second process timeout and never updates the latest-main cache.
