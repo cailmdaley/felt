@@ -1812,7 +1812,7 @@ async function exerciseTrackSettlementWait(p) {
   }, saved)
 }
 
-test('In the reader Find searches its constitution under a chip; Backspace widens to the board, and Enter selects', async p => {
+test('In the reader Find lists the constitutions, then searches its constitution under a chip; Backspace widens to the board, and Enter selects', async p => {
   await open(p)
   const find = barFind(p), list = p.locator('.ws-find'), chip = p.locator('.kbn-viewtabs-find .ws-find-chip')
   assert.equal(await p.locator('.ws-page.ws-receded:visible').count(), 0, 'no neighbouring page shows')
@@ -1822,6 +1822,11 @@ test('In the reader Find searches its constitution under a chip; Backspace widen
   await p.keyboard.press('/')
   assert.ok(await find.evaluate(e => e === document.activeElement), '/ focuses the bar Find')
   assert.equal(await chip.innerText(), `in ${name}`, 'the chip names the constitution being read')
+  // Before anything is typed it lists the board's constitutions, the one being read first and current.
+  const current = list.locator('[data-section="constitutions"] .ws-find-pick').first()
+  await current.waitFor()
+  assert.equal(await current.getAttribute('aria-current'), 'true', 'the constitution being read is marked current')
+  assert.equal(await current.locator('.ws-channel-name').innerText(), name, 'and leads the list')
   await find.fill('tone.mp3')
   await list.locator('[data-section="files"] .ws-find-pick').filter({ hasText: 'tone.mp3' }).waitFor()
   assert.equal(await list.locator('[data-section="constitutions"]').count(), 0, 'its scope lists no constitutions')
