@@ -11,7 +11,7 @@ Everything else Shuttle does (dispatch, lifecycle, the inbox, the board) stays h
 
 ### Facts
 
-`internal/harness` holds one record per harness, the only table of harness facts in the repo.
+`internal/harness` holds one record per harness, the source of every harness fact.
 Every resolved agent record carries its harness's record under `harness` (`shuttle ls --json`, `shuttle show -j`, `shuttle agents resolve --json`), and the daemon reads `identity` and `idle_signal` from the record it already has.
 Where the daemon holds only a harness's name, or a record from a CLI that carries no `harness`, each Elixir module answers the facts the daemon needs by name (`identity/0`, `idle_signal?/0` and the rest under Verbs); the conformance test holds those answers in parity with `facts.json`. `Shuttle.HarnessPaths` holds the daemon's transcript roots, resolved from the same variables as `transcripts`.
 

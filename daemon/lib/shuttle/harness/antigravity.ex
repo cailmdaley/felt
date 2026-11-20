@@ -93,19 +93,19 @@ defmodule Shuttle.Harness.Antigravity do
   end
 
   # This harness's session starts on the event stream, newest first: the live
-  # file's tail, then the rotated file's. Only lines naming a session start
-  # are decoded.
+  # file's tail, then (read only when the caller gets that far) the rotated
+  # file's. Only lines naming a session start are decoded.
   defp session_starts do
     live = EventStream.default_events_file()
 
     [live, EventStream.rotated(live)]
-    |> Enum.flat_map(fn path ->
+    |> Stream.flat_map(fn path ->
       {lines, _whole?} = FileTail.last_lines(path, @events_tail_bytes)
       Enum.reverse(lines)
     end)
-    |> Enum.filter(&String.contains?(&1, "session_start"))
-    |> Enum.map(&EventStream.decode/1)
-    |> Enum.filter(&match?(%{"type" => "session_start", "harness" => "antigravity"}, &1))
+    |> Stream.filter(&String.contains?(&1, "session_start"))
+    |> Stream.map(&EventStream.decode/1)
+    |> Stream.filter(&match?(%{"type" => "session_start", "harness" => "antigravity"}, &1))
   end
 
   defp mentions?(id, fiber_id) do

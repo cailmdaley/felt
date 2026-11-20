@@ -5,10 +5,12 @@ defmodule Shuttle.Harness do
   What a harness *is* — how its identity is learned, how messages reach it,
   whether it reports idle — is the Go registry's table of facts
   (`internal/harness`), carried on every resolved agent record under
-  `"harness"`; the daemon reads it there and keeps no table of its own. What a
-  harness *does* lives here: the command lines that launch and resume it, and
-  the readers of its transcript. A site that holds only a harness's name (a
-  session-ledger row, an event-stream line) asks the harness's module.
+  `"harness"`. Each module also answers the facts the daemon needs by name
+  (`identity/0`, `idle_signal?/0`, ...), for a site that holds only a
+  harness's name (a session-ledger row, an event-stream line) or a record
+  without facts; the conformance test holds those answers to the Go table.
+  What a harness *does* lives here too: the command lines that launch and
+  resume it, and the readers of its transcript.
 
   `daemon/test/fixtures/harnesses/` is the conformance fixture set: the Go
   table and, per harness, a fixed agent record with its expected command lines

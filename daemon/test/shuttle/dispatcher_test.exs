@@ -318,6 +318,10 @@ defmodule Shuttle.DispatcherTest do
         name == "no-wrapper" ->
           {Jason.encode!(%{"id" => "no-wrapper", "model" => "sonnet"}), 0}
 
+        # A record from a CLI that carries no harness facts.
+        name == "claude-bare" ->
+          {Jason.encode!(%{"id" => name, "cli" => "claude", "wrapper" => "claude"}), 0}
+
         name == "codex" and chrome ->
           {"chrome not supported by agent codex (claude harness only)", 1}
 
@@ -2024,6 +2028,25 @@ defmodule Shuttle.DispatcherTest do
     claim = Jason.decode!(claim_json)
     for key <- ["host", "chrome", "effort"], do: refute(Map.has_key?(install, key))
     refute Map.has_key?(claim, "session_uuid")
+  end
+
+  test "a resolved record without harness facts still hands Claude its session id" do
+    {:ok, %{session_uuid: uuid}} =
+      Dispatcher.capture("an idea",
+        runner: MockRunner,
+        work_dir: "/tmp",
+        felt_store: "/tmp",
+        agent: "claude-bare"
+      )
+
+    assert is_binary(uuid)
+
+    {_, args} =
+      Enum.find(MockRunner.commands(), fn {cmd, args} ->
+        cmd == "tmux" and hd(args) == "new-session"
+      end)
+
+    assert File.read!(List.last(args)) =~ "--session-id '#{uuid}'"
   end
 
   test "capture spawns a non-shuttle-suffixed session with the prompt in the run script" do

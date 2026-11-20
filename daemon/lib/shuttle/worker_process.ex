@@ -259,13 +259,15 @@ defmodule Shuttle.WorkerProcess do
     |> Enum.max_by(& &1["at"], fn -> nil end)
   end
 
-  # The live receiver a reported-identity harness's hooks registered for
-  # `uuid`, in any of those harnesses' mailboxes.
+  # The live receiver hooks registered for `uuid`, for a harness whose
+  # receiver carries one conversation for its life (Codex, Antigravity). A
+  # receiver that succeeds to another conversation (Claude, Pi) leaves the
+  # first one's registration standing, so it names no holder.
   defp hook_holder(procs, uuid, runner) do
     key = :crypto.hash(:sha256, uuid) |> Base.encode16(case: :lower)
 
     Shuttle.Harness.modules()
-    |> Enum.filter(&(&1.identity() == "reported"))
+    |> Enum.reject(& &1.receiver_succession?())
     |> Enum.find_value(&mailbox_holder(procs, uuid, &1.name(), key, runner))
   end
 
