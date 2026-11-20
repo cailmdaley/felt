@@ -259,9 +259,18 @@ defmodule Shuttle.WorkerProcess do
     |> Enum.max_by(& &1["at"], fn -> nil end)
   end
 
+  # The live receiver a reported-identity harness's hooks registered for
+  # `uuid`, in any of those harnesses' mailboxes.
   defp hook_holder(procs, uuid, runner) do
     key = :crypto.hash(:sha256, uuid) |> Base.encode16(case: :lower)
-    path = Path.join([Shuttle.data_dir(), "mailboxes", "codex", key, "receiver.json"])
+
+    Shuttle.Harness.modules()
+    |> Enum.filter(&(&1.identity() == "reported"))
+    |> Enum.find_value(&mailbox_holder(procs, uuid, &1.name(), key, runner))
+  end
+
+  defp mailbox_holder(procs, uuid, harness, key, runner) do
+    path = Path.join([Shuttle.data_dir(), "mailboxes", harness, key, "receiver.json"])
 
     with {:ok, bytes} <- Shuttle.FS.read(path),
          {:ok, %{"id" => ^uuid, "host" => host, "pid" => pid} = reg} <- Jason.decode(bytes),

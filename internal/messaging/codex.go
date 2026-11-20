@@ -64,10 +64,13 @@ func sendTerminalWithDiscovery(ctx context.Context, env *sysenv.Env, address Add
 
 // terminalTitle names a terminal harness in messages a person reads.
 func terminalTitle(name string) string {
-	if name == "antigravity" {
+	switch name {
+	case "codex":
+		return "Codex"
+	case "antigravity":
 		return "Antigravity"
 	}
-	return "Codex"
+	return name
 }
 
 // UnnamedSender heads a message whose caller gave no sender.

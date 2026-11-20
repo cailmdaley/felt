@@ -3082,9 +3082,11 @@ defmodule Shuttle.Poller do
       open_task? ->
         :unknown
 
+      # A turn no hook has reported counts as idle where a message is typed
+      # into the terminal, since typed input queues behind a running turn.
       Shuttle.Harness.idle_signal?(cli) and
           (phase == "waiting" or
-             (Shuttle.Harness.normalize(cli || "") == "codex" and is_nil(phase))) ->
+             (is_nil(phase) and Shuttle.Harness.call(cli, :takes_paste?, [], false))) ->
         :idle
 
       true ->

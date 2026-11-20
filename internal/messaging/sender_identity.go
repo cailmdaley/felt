@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/cailmdaley/felt/internal/harness"
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
@@ -43,8 +44,9 @@ func detectProcessSenderForThread(env *sysenv.Env, host string, ancestors map[in
 	nearest := len(ancestors) + 64
 	sender := ""
 	ambiguous := false
-	for _, harness := range []string{"claude", "codex", "pi"} {
-		root := filepath.Join(dataDir(env), "mailboxes", harness)
+	for _, facts := range harness.All() {
+		name := facts.Name
+		root := filepath.Join(dataDir(env), "mailboxes", name)
 		entries, err := os.ReadDir(root)
 		if err != nil {
 			continue
@@ -62,10 +64,10 @@ func detectProcessSenderForThread(env *sysenv.Env, host string, ancestors map[in
 			if !ancestor || distance > nearest || !registration.live() {
 				continue
 			}
-			if distance >= codexDistance && harness != "codex" {
+			if distance >= codexDistance && name != "codex" {
 				continue
 			}
-			address, err := FormatAddress(host, harness, registration.ID)
+			address, err := FormatAddress(host, name, registration.ID)
 			if err != nil {
 				continue
 			}

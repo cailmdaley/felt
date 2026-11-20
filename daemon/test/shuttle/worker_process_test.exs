@@ -90,11 +90,11 @@ defmodule Shuttle.WorkerProcessTest do
     assert nil == WorkerProcess.holder(table, @uuid)
   end
 
-  defp receiver(root, pid, start, extra \\ %{}) do
+  defp receiver(root, pid, start, extra \\ %{}, harness \\ "codex") do
     Shuttle.Test.Env.put_env("SHUTTLE_DATA_DIR", root)
     Shuttle.Test.Env.put_env("SHUTTLE_SESSIONS_FILE", Path.join(root, "sessions.jsonl"))
     key = :crypto.hash(:sha256, @uuid) |> Base.encode16(case: :lower)
-    dir = Path.join([root, "mailboxes", "codex", key])
+    dir = Path.join([root, "mailboxes", harness, key])
     File.mkdir_p!(dir)
 
     File.write!(
@@ -111,6 +111,20 @@ defmodule Shuttle.WorkerProcessTest do
         )
       )
     )
+  end
+
+  @tag :tmp_dir
+  test "an Antigravity receiver its hooks registered holds the conversation", %{tmp_dir: root} do
+    Process.put(:ps_result, {"814 1 agy -i hello\n", 0})
+    receiver(root, 814, "123456", %{}, "antigravity")
+
+    Process.put(
+      :identity_result,
+      {Jason.encode!(%{"status" => "present", "start" => "123456"}), 0}
+    )
+
+    assert {:error, {:held, message}} = WorkerProcess.check_free(PsRunner, @uuid)
+    assert message =~ "pid 814"
   end
 
   @tag :tmp_dir
