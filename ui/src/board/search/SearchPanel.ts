@@ -1,3 +1,4 @@
+import { bindLayer } from '@ui-sdk/core'
 import { inPlace, type FindRow, type FindScope, type FindSection, type ListScope } from './scope.js'
 import { anchorPopover, type Release } from '../workspace/anchoredPopover.js'
 import './search.css'
@@ -55,6 +56,8 @@ export class SearchPanel {
   private readonly opened = new Set<string>()
   private shown = false
   private release: Release | null = null
+  /** Takes the list from the board's stack of layers, which puts it away on a press outside it or when focus leaves for a framed page. */
+  private unbind: (() => void) | null = null
   /** Where a shared field's list hangs. */
   private place: { host: HTMLElement; anchor?: HTMLElement } | null = null
 
@@ -78,6 +81,9 @@ export class SearchPanel {
       this.field.setAttribute('aria-label', 'Find')
       const bar = document.createElement('label')
       bar.className = 'ws-find-field'
+      // A press anywhere on the label is the field's, never the chip's.
+      this.field.id = `${this.el.id}-field`
+      bar.htmlFor = this.field.id
       bar.append(this.chip, this.field)
       this.el.append(bar)
       // A field of its own is served here; a shared one is served by its owner (`show`).
@@ -94,7 +100,6 @@ export class SearchPanel {
     }
     this.el.append(this.list, this.status)
     document.addEventListener('keydown', this.keydown, true)
-    document.addEventListener('pointerdown', this.outside)
   }
 
   get isOpen(): boolean { return this.shown }
@@ -113,6 +118,9 @@ export class SearchPanel {
     if (this.place && !this.el.isConnected) {
       this.place.host.append(this.el)
       this.release = this.place.anchor ? anchorPopover(this.el, this.place.anchor, { placement: 'below-start', gap: 6, margin: 12 }) : null
+      // The field and its chip count as inside; a press into a framed page reaches no listener here, so the window's blur puts it away.
+      const inside = this.place.anchor ?? this.field
+      this.unbind = bindLayer(this.el, { contains: target => inside.contains(target), closeOnBlur: true, onDismiss: () => this.close() })
     }
     this.shown = true
     this.refresh()
@@ -166,7 +174,6 @@ export class SearchPanel {
     this.field.removeEventListener('input', this.serve)
     this.field.removeEventListener('focus', this.serve)
     document.removeEventListener('keydown', this.keydown, true)
-    document.removeEventListener('pointerdown', this.outside)
     this.el.remove()
   }
 
@@ -192,7 +199,7 @@ export class SearchPanel {
     this.list.replaceChildren()
     this.say('')
     this.expanded(false)
-    if (this.opts.field) { this.release?.(); this.release = null; this.el.remove() }
+    if (this.opts.field) { this.unbind?.(); this.unbind = null; this.release?.(); this.release = null; this.el.remove() }
   }
 
   /** The status line's words, written only when they change, so a redraw is not announced again. */
@@ -350,10 +357,5 @@ export class SearchPanel {
     } else return
     event.preventDefault()
     event.stopImmediatePropagation()
-  }
-
-  private readonly outside = (event: PointerEvent): void => {
-    const target = event.target as Node
-    if (this.shown && this.opts.field && !this.el.contains(target) && !this.field.contains(target) && !this.chip.contains(target)) this.close()
   }
 }

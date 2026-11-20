@@ -586,6 +586,10 @@ export class KanbanModal {
     this.findEl.type = 'search'
     this.findEl.placeholder = 'Find'
     this.findEl.setAttribute('aria-label', 'Find')
+    // A press anywhere on the label is the field's, never the chip's (a label's control is otherwise its first button):
+    // a press that lands on the field's left edge shows the chip there, and its click lands on the label.
+    this.findEl.id = 'kbn-viewtabs-find-field'
+    find.htmlFor = this.findEl.id
     const serve = (): void => this.workspace?.find()
     this.findEl.addEventListener('focus', serve)
     this.findEl.addEventListener('input', serve)

@@ -279,6 +279,31 @@ describe('Desk keyboard selection', () => {
     expect(find.value).toBe('')
     expect(document.activeElement).not.toBe(find)
   })
+  it('puts the bar\'s Find list away when a press goes into a framed page, which no listener of the board hears', async () => {
+    const find = document.querySelector<HTMLInputElement>('.kbn-viewtabs-find input')!
+    find.focus()
+    await settle()
+    expect(document.querySelector('.ws-find')).not.toBeNull()
+    // A tapestry is an iframe: the press lands in its document, and all the board sees is its window losing focus to it.
+    const tapestry = document.createElement('iframe')
+    document.body.append(tapestry)
+    tapestry.focus()
+    window.dispatchEvent(new FocusEvent('blur'))
+    expect(document.querySelector('.ws-find')).toBeNull()
+    expect(find.getAttribute('aria-expanded')).toBe('false')
+  })
+  it('keeps the bar\'s Find chip when a press on the field\'s left edge is released over the chip it brought up', async () => {
+    inside.openDocumentChannel(card({ id: 'd1', uid: 'd1' }))
+    await settle()
+    const find = document.querySelector<HTMLInputElement>('.kbn-viewtabs-find input')!
+    const chip = document.querySelector<HTMLButtonElement>('.kbn-viewtabs-find .ws-find-chip')!
+    find.focus()
+    expect(chip.hidden).toBe(false)
+    // The press went down on the field and came up on the chip that focus drew under it, so the browser clicks their label.
+    find.closest('label')!.click()
+    expect(chip.hidden).toBe(false)
+    expect(document.activeElement).toBe(find)
+  })
   it('leaves initial focus alone and selects the top review card with the first j or k', () => {
     expect(document.activeElement).not.toBe(document.querySelector('.kbn-col-head'))
     expect(selected()).toBeUndefined()

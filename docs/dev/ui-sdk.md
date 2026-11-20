@@ -15,6 +15,7 @@ The board owns actions, presentation, the gestures that ask for a popup, and its
 | View tabs, phone folio strip | `board/KanbanModal.ts`, `KanbanSurfaces.ts` | `@ui-sdk/web/tabs` |
 | Dock Kind | `board/workspace/Dock.ts` | `@ui-sdk/web/segmented-control` |
 | Parent-fiber picker | `board/workspace/Dock.ts` | `@ui-sdk/web/autocomplete` |
+| The bar Find's list: dismissal on a press outside it, a press into a framed page or Escape | `board/search/SearchPanel.ts` | core `bindLayer` with `closeOnBlur` |
 | Screen-reader announcements | `announce` callers across the board | core `announce` |
 | The console above a phone's on-screen keyboard | `board/workspace/Dock.ts` | core `bindAvoidKeyboard` |
 | Form dialog, parent picker, tag chips | `forms/AppDialog.tsx`, `forms/StashForm.tsx` | `@ui-sdk/react` dialog, autocomplete, combobox |
