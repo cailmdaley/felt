@@ -1674,10 +1674,12 @@ test('Phone back swipe from a file returns to the view; edges, vertical pans and
   assert.equal(await key(), original, 'Safari edge-back starts are not claimed')
   await swipe(p, p.viewportSize().width - 5, 420, 150, 420)
   assert.equal(await key(), original, 'right-edge starts are not claimed')
+  // The swipe's fling carries on scrolling down well after the finger lifts; a return to the top before its scrollend is scrolled away again.
+  await (await reportDocument(p)).evaluate(() => { window.flung = new Promise(done => addEventListener('scrollend', () => done(), { once: true })) })
   await swipe(p, 200, 650, 204, 250)
   assert.equal(await key(), original, 'vertical report scroll is not a page gesture')
   await poll(p, () => document.querySelector('.ws-reader').classList.contains('ws-topbar-hidden'))
-  await p.waitForTimeout(650) // Let the native touch fling settle before returning to the top.
+  await (await reportDocument(p)).evaluate(() => window.flung)
   await (await reportDocument(p)).evaluate(() => window.scrollTo(0, 0))
   await poll(p, () => !document.querySelector('.ws-reader').classList.contains('ws-topbar-hidden'))
   const table = await report(p).contentFrame().locator('#wide-table').boundingBox()
