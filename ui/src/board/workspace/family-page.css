@@ -15,7 +15,8 @@
 /* Its lines, in fine ink over the stack and over the view (familyInk.ts): each fibre in its thread's identity colour,
    under the dots, which keep the state. */
 .ov-up, .ov-main { position: relative; }
-.ov-ink { position: absolute; top: 0; left: 0; z-index: 0; overflow: visible; pointer-events: none; }
+/* Each drawing is its frame's size by layout, never a frame behind it. */
+.ov-ink { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 0; overflow: visible; pointer-events: none; }
 .ov-fibre { fill: var(--line, var(--ws-hairline)); }
 .ov-up { overflow: hidden; }
 .ov-head, .ov-said, .ov-threads, .ov-unfold { position: relative; z-index: 1; }

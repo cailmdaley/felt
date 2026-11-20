@@ -2396,6 +2396,15 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   }
   await leave(p); await chooseDeskColumn(p, 1)
   await p.locator(`.kbn-desk .kbn-family[title*="Remote covariance review"] > :first-child`).click()
+  // The view stands once its newest sent file's preview has landed.
+  await poll(p, () => document.querySelector('.ws-selected .ov-unfold')?.getBoundingClientRect().height > 0)
+  // Its ink is its frame's size by layout: the view grown, the drawing has grown with it before any observer or frame callback runs.
+  assert.deepEqual(await selected(p).locator('.ov-main').evaluate(main => {
+    const grow = document.createElement('div'); grow.style.height = '200px'; main.append(grow)
+    const sizes = [main, main.querySelector(':scope > .ov-ink')].map(box => box.getBoundingClientRect().height)
+    grow.remove()
+    return sizes[1] - sizes[0]
+  }), 0)
   await still(p, 'a worker-state change', () => flipWorker(p), { allow: ['.ov-head', '.ov-up'], settle: 100 })
   assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper,.kbn-ctl-discard)').count(), 0)
   // Its view's head carries the verb button: Close for review on its face, the rest behind its caret.

@@ -272,7 +272,6 @@ export class FamilyPage {
     const headDot = centre(this.title.querySelector('.constitution-state-dot') ?? undefined, mainFrame)
     const strips = [...this.up.querySelectorAll(':scope > .ov-ancestor')]
     const chain: Knot[] = above.flatMap((each, k) => { const at = centre(dotOf(strips[k]), upFrame); return at ? [{ at, hue: lineHue(each), seed: each.uid ?? each.id }] : [] })
-    for (const [box, frame] of [[this.upInk, upFrame], [this.mainInk, mainFrame]] as const) { box.setAttribute('width', String(frame.width)); box.setAttribute('height', String(frame.height)) }
     this.upInk.replaceChildren()
     drawFibres(this.upInk, { chain, foot: headDot && chain.length ? [headDot[0], upFrame.height] : undefined })
     if (!headDot) { this.mainInk.replaceChildren(); return }
