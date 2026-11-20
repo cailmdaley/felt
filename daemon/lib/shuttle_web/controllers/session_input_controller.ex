@@ -33,7 +33,12 @@ defmodule ShuttleWeb.SessionInputController do
         end
 
       :error ->
-        error(conn, 404, "session_not_found", "No current terminal that takes typed input owns this session")
+        error(
+          conn,
+          404,
+          "session_not_found",
+          "No current terminal that takes typed input owns this session"
+        )
     end
   end
 
@@ -52,7 +57,12 @@ defmodule ShuttleWeb.SessionInputController do
         end
 
       :error ->
-        error(conn, 404, "session_not_found", "No current terminal that takes typed input owns this session")
+        error(
+          conn,
+          404,
+          "session_not_found",
+          "No current terminal that takes typed input owns this session"
+        )
     end
   end
 
