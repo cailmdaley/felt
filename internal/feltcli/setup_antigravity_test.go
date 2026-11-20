@@ -243,7 +243,8 @@ func TestPromotionMovesEveryHarnessCarryingFelt(t *testing.T) {
 	}
 }
 
-// agy's own plugin list decides whether felt is enabled there.
+// Where felt's agy plugin directory exists, agy's own plugin list decides
+// whether felt is enabled there.
 func TestReceiptReadsAgyPluginList(t *testing.T) {
 	t.Parallel()
 	for name, c := range map[string]struct {
@@ -264,6 +265,12 @@ func TestReceiptReadsAgyPluginList(t *testing.T) {
 			a := testApp(t, env)
 			dir, err := a.antigravityPluginDir()
 			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{"name":"felt"}`), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			env.Set("FAKE_AGY_LIST", strings.ReplaceAll(c.list, "PLUGIN", dir))

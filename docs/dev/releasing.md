@@ -111,9 +111,11 @@ Running pi sessions pick up the new generation at `/reload` or their next start,
 
 Every setup source, for any of the four harnesses, enters the same transaction. Remote GitHub refs
 are first acquired into a disposable checkout; local `--source` paths enter
-directly. Setup validates and copies only the complete marketplace payload into
+directly. Setup validates and copies only the complete marketplace payload, and
+the pi package files beside it, into
 `~/.felt/plugin-runtime/`, then promotes it under a cross-process lock with a
-crash journal. Both manifests must describe the same version; the two skills,
+crash journal. A source without `claude-plugin/hooks/agy.sh` cannot build the
+agy plugin and is refused for every harness. Both manifests must describe the same version; the two skills,
 hook manifest, executable hook files, and the installed Shuttle CLI contract
 must all validate before the native CLI sees the candidate. Native
 harness CLIs receive only the stable promoted `current` path and remain the

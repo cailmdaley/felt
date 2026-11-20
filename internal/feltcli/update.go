@@ -147,7 +147,7 @@ func (a *app) refreshPluginAfterUpdate(marketplaceRef string) {
 			continue
 		}
 		active, present, _ := promotedGenerationForVerify(current)
-		if present && bundles[0].Path != "" && h.verify(active, bundles[0], current) == nil {
+		if _, err := h.verify(active, bundles[0], current); present && bundles[0].Path != "" && err == nil {
 			continue
 		}
 		fmt.Fprintln(a.env.Stdout)

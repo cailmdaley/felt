@@ -21,8 +21,8 @@ type pluginHarness struct {
 	// hooks reports whether a bundle root carries felt's hooks.
 	hooks func(root string) bool
 	// verify checks a loaded bundle against the active generation promoted at
-	// current.
-	verify func(active pluginGenerationIdentity, bundle ReceiptBundle, current string) error
+	// current, and returns the identity the bundle was checked against.
+	verify func(active pluginGenerationIdentity, bundle ReceiptBundle, current string) (pluginGenerationIdentity, error)
 	// install points the harness at the generation promoted at current.
 	install func(a *app, current string) error
 	// capture records felt's installation in the harness before a promotion.
@@ -79,8 +79,8 @@ var claudeHarness = pluginHarness{
 	bundles: (*app).collectClaudeBundle,
 	install: (*app).installClaudePluginAtSource,
 	hooks:   hookFilesCompatible,
-	verify: func(active pluginGenerationIdentity, bundle ReceiptBundle, _ string) error {
-		return verifyLoadedGeneration("claude", active, bundle.Path)
+	verify: func(active pluginGenerationIdentity, bundle ReceiptBundle, _ string) (pluginGenerationIdentity, error) {
+		return active, verifyLoadedGeneration("claude", active, bundle.Path)
 	},
 	capture: func(a *app, intent *pluginNativeIntent) error {
 		if _, err := a.env.LookPath("claude"); err != nil {
@@ -116,7 +116,7 @@ var codexHarness = pluginHarness{
 	bundles: (*app).collectCodexBundle,
 	install: (*app).installCodexPluginAtSource,
 	hooks:   hookFilesCompatible,
-	verify: func(active pluginGenerationIdentity, bundle ReceiptBundle, _ string) error {
+	verify: func(active pluginGenerationIdentity, bundle ReceiptBundle, _ string) (pluginGenerationIdentity, error) {
 		expected := active
 		if active.CodexPayloadSHA256 != nil {
 			name := bundle.Name
@@ -125,10 +125,10 @@ var codexHarness = pluginHarness{
 			}
 			var err error
 			if expected, err = codexBundleGeneration(active, name); err != nil {
-				return err
+				return expected, err
 			}
 		}
-		return verifyLoadedGeneration("codex", expected, bundle.Path)
+		return expected, verifyLoadedGeneration("codex", expected, bundle.Path)
 	},
 	capture: func(a *app, intent *pluginNativeIntent) error {
 		if _, err := a.env.LookPath("codex"); err != nil {

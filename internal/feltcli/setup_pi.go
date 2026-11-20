@@ -88,7 +88,8 @@ func (a *app) piFeltPackage() (piInstallationState, error) {
 		switch {
 		case strings.HasPrefix(line, "    ") && strings.TrimSpace(line) != "":
 			path := strings.TrimSpace(line)
-			if strings.HasPrefix(source, "git:github.com/"+marketplaceRepo) || (!strings.Contains(source, ":") && isFeltPackageDir(path)) {
+			repo := "git:github.com/" + marketplaceRepo
+			if source == repo || strings.HasPrefix(source, repo+"@") || (!strings.Contains(source, ":") && isFeltPackageDir(path)) {
 				return piInstallationState{Source: source, Path: path}, nil
 			}
 		case strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "   "):
@@ -155,11 +156,11 @@ var piHarness = pluginHarness{
 	hooks: func(root string) bool {
 		return isRegularFile(filepath.Join(root, "extensions", "pi", "index.ts"))
 	},
-	verify: func(_ pluginGenerationIdentity, bundle ReceiptBundle, current string) error {
+	verify: func(active pluginGenerationIdentity, bundle ReceiptBundle, current string) (pluginGenerationIdentity, error) {
 		if !samePath(bundle.Path, current) {
-			return fmt.Errorf("pi loads felt from %s, not the promoted generation at %s", bundle.Path, current)
+			return active, fmt.Errorf("pi loads felt from %s, not the promoted generation at %s", bundle.Path, current)
 		}
-		return nil
+		return active, nil
 	},
 	capture: func(a *app, intent *pluginNativeIntent) error {
 		if _, err := a.env.LookPath("pi"); err != nil {

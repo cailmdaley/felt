@@ -177,12 +177,15 @@ func verifyAntigravityGeneration(expected pluginGenerationIdentity, dir string) 
 	return nil
 }
 
-// collectAntigravityBundle reports felt's agy plugin: confirmed by
-// `agy plugin list --json`, or from its directory, which is what agy loads,
-// where agy is not on PATH.
+// collectAntigravityBundle reports felt's agy plugin where its directory
+// holds one: confirmed by `agy plugin list --json`, or from the directory,
+// which is what agy loads, where agy is not on PATH.
 func (a *app) collectAntigravityBundle() []ReceiptBundle {
 	dir, err := a.antigravityPluginDir()
 	if err != nil {
+		return nil
+	}
+	if !isRegularFile(filepath.Join(dir, "plugin.json")) {
 		return nil
 	}
 	bundle := ReceiptBundle{Name: "felt", Harness: "antigravity", Path: dir, Enabled: true, Status: receiptHealthy}
@@ -208,9 +211,6 @@ func (a *app) collectAntigravityBundle() []ReceiptBundle {
 			bundle.Path, bundle.Inspection, bundle.Evidence = plugin.Path, inspectionConfirmed, "agy plugin list"
 			return []ReceiptBundle{antigravityBundleFiles(bundle)}
 		}
-		return nil
-	}
-	if !isRegularFile(filepath.Join(dir, "plugin.json")) {
 		return nil
 	}
 	bundle.Inspection, bundle.Evidence = inspectionConfigured, "plugin directory"
@@ -249,8 +249,8 @@ var antigravityHarness = pluginHarness{
 	bundles: (*app).collectAntigravityBundle,
 	install: (*app).installAntigravityPlugin,
 	hooks:   antigravityHooksCompatible,
-	verify: func(active pluginGenerationIdentity, bundle ReceiptBundle, _ string) error {
-		return verifyAntigravityGeneration(active, bundle.Path)
+	verify: func(active pluginGenerationIdentity, bundle ReceiptBundle, _ string) (pluginGenerationIdentity, error) {
+		return active, verifyAntigravityGeneration(active, bundle.Path)
 	},
 	capture: func(a *app, intent *pluginNativeIntent) error {
 		dir, err := a.antigravityPluginDir()

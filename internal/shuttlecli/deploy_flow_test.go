@@ -98,8 +98,8 @@ export LOGIN_PROFILE_LOADED=yes
 	if got := f.git(t, f.remote, "rev-parse", "HEAD"); got != f.sha {
 		t.Fatalf("regular checkout not fast-forwarded to the target: %s", got)
 	}
-	if release, inspect := strings.Index(events, "release\n"), strings.Index(events, "pi-inspect "+f.sha); release < 0 || inspect < release {
-		t.Fatalf("Pi inspected before release and checkout refresh: %s", events)
+	if release, inspect := strings.Index(events, "release\n"), strings.Index(events, "harness-inspect "+f.sha); release < 0 || inspect < release {
+		t.Fatalf("harnesses inspected before release and checkout refresh: %s", events)
 	}
 	if pid, err := strconv.Atoi(strings.TrimSpace(fleetRead(filepath.Join(f.root, "background.pid")))); err != nil || pid <= 0 {
 		t.Fatalf("background launcher did not run: %v", err)

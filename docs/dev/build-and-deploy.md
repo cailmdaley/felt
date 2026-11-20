@@ -380,6 +380,7 @@ still fails afterwards, the line names each component that is not healthy
 repair, for example a stale `felt` shadowing the new one on `PATH`, or `hooks
 mismatch: open a Codex session and approve felt's hooks`. It falls back to the
 receipt's top-level repair when no component reports one. A harness problem fails the host after its daemon activation and quarantine release, so it does not leave the daemon on the wrong build.
+pi loads felt from `~/.felt/plugin-runtime/current` itself, so a deploy of a revision whose setup does not stage the pi package there (`package.json` and `extensions/pi`) leaves pi without felt until a revision that does is deployed again.
 A failed build, activation, readiness check, quarantine release or prune also makes the invocation exit nonzero, with the host and failed step in its output.
 
 ### The Rex title helper

@@ -192,7 +192,9 @@ else mkdir -p "$(dirname "$dest")"; cp "$source" "$dest"; fi
 	link(filepath.Join(f.bin, "build-wrapper"), "#!/bin/sh\necho wrapper >> \"$EVENTS\"\nexec \"$@\"\n")
 	link(filepath.Join(f.bin, "felt"), `#!/bin/sh
 case "$*" in
- 'setup receipt --json') printf '{\n  "bundles": [],\n  "status": "healthy"\n}\n';;
+ 'setup receipt --json')
+  [ -z "${PI_CHECKOUT:-}" ] || echo "harness-inspect $(git -C "$PI_CHECKOUT" rev-parse HEAD)" >> "$EVENTS"
+  printf '{\n  "bundles": [],\n  "status": "healthy"\n}\n';;
  *) exit 0;;
 esac
 `)
@@ -233,7 +235,6 @@ cat "$STATE"
 	}
 	link(filepath.Join(f.bin, "pi"), `#!/bin/sh
 if [ -n "${PI_CHECKOUT:-}" ]; then
- echo "pi-inspect $(git -C "$PI_CHECKOUT" rev-parse HEAD)" >> "$EVENTS"
  printf '  %s\n    %s\n' "$PI_CHECKOUT" "$PI_CHECKOUT"
 fi
 `)

@@ -702,12 +702,13 @@ func (a *app) collectGenerationReceipt(bundles []ReceiptBundle, felt ReceiptComp
 		check := ReceiptHarnessGeneration{Name: bundle.Name, Harness: bundle.Harness, Path: bundle.Path, Status: receiptHealthy}
 		if activePresent {
 			h, _ := pluginHarnessNamed(bundle.Harness)
-			if err := h.verify(active, bundle, current); err != nil {
+			expected, err := h.verify(active, bundle, current)
+			if err != nil {
 				check.Status, check.Repair = receiptMismatch, fmt.Sprintf("%v; rerun `felt setup %s`", err, bundle.Harness)
 				receipt.Harnesses = append(receipt.Harnesses, check)
 				return generationReceiptWithHarnesses(receipt, receiptMismatch, joinReceiptRepairs(check.Repair, buildSkew))
 			}
-			check.Generation = &active
+			check.Generation = &expected
 		}
 		receipt.Harnesses = append(receipt.Harnesses, check)
 
