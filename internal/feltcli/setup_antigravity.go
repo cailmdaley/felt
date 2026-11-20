@@ -190,9 +190,7 @@ func (a *app) collectAntigravityBundle() []ReceiptBundle {
 	}
 	bundle := ReceiptBundle{Name: "felt", Harness: "antigravity", Path: dir, Enabled: true, Status: receiptHealthy}
 	if _, err := a.env.LookPath("agy"); err == nil {
-		list := a.env.Command("agy", "plugin", "list", "--json")
-		list.Env = append(a.env.Environ(), "AGY_CLI_DISABLE_AUTO_UPDATE=true")
-		out, err := list.Output()
+		out, err := a.harnessList([]string{"AGY_CLI_DISABLE_AUTO_UPDATE=true"}, "agy", "plugin", "list", "--json")
 		var plugins []struct {
 			Name    string `json:"name"`
 			Enabled bool   `json:"enabled"`

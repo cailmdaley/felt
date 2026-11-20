@@ -1,9 +1,11 @@
 package feltcli
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -75,11 +77,12 @@ is safe. --uninstall removes the package.`,
 }
 
 // piFeltPackage reads felt's package from `pi list`, which prints each
-// package's source, then the directory it resolves to indented below it. A
+// package's source, marked " (filtered)" where its settings select some of
+// its resources, then the directory it resolves to indented below it. A
 // package is felt's when it is the felt GitHub repository, or a local
 // directory whose package.json names felt.
 func (a *app) piFeltPackage() (piInstallationState, error) {
-	out, err := a.env.Command("pi", "list").Output()
+	out, err := a.harnessList(nil, "pi", "list")
 	if err != nil {
 		return piInstallationState{}, fmt.Errorf("pi list: %w", err)
 	}
@@ -93,10 +96,28 @@ func (a *app) piFeltPackage() (piInstallationState, error) {
 				return piInstallationState{Source: source, Path: path}, nil
 			}
 		case strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "   "):
-			source = strings.TrimSpace(line)
+			source = strings.TrimSuffix(strings.TrimSpace(line), " (filtered)")
 		}
 	}
 	return piInstallationState{}, nil
+}
+
+// harnessListTimeout bounds a harness CLI's listing of its packages or
+// plugins; a listing that has not answered by then has failed, and felt's
+// state in that harness is unknown.
+const harnessListTimeout = 5 * time.Second
+
+// harnessList runs a harness CLI's listing within harnessListTimeout, with
+// extraEnv added to the environment.
+func (a *app) harnessList(extraEnv []string, name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), harnessListTimeout)
+	defer cancel()
+	cmd := a.env.CommandContext(ctx, name, args...)
+	if len(extraEnv) > 0 {
+		cmd.Env = append(a.env.Environ(), extraEnv...)
+	}
+	cmd.WaitDelay = time.Second
+	return cmd.Output()
 }
 
 // isFeltPackageDir reports whether dir holds a package.json named felt.
@@ -108,8 +129,13 @@ func isFeltPackageDir(dir string) bool {
 }
 
 // installPiPackage points pi at the generation promoted at current, removing
-// any other felt package first so pi loads felt once.
+// any other felt package first so pi loads felt once. It refuses a generation
+// that is not a pi package, staged from a source without one, which pi would
+// load nothing from.
 func (a *app) installPiPackage(current string) error {
+	if !isFeltPackageDir(current) || !piExtensionPresent(current) {
+		return fmt.Errorf("the generation at %s is no pi package (no package.json or extensions/pi); rerun felt setup pi --source <a felt checkout that has them>", current)
+	}
 	installed, err := a.piFeltPackage()
 	if err != nil {
 		return err
@@ -129,6 +155,12 @@ func (a *app) installPiPackage(current string) error {
 	fmt.Fprintln(a.env.Stdout)
 	fmt.Fprintln(a.env.Stdout, "Restart any running pi sessions (or run /reload) so the skills and extension load.")
 	return nil
+}
+
+// piExtensionPresent reports whether a pi package root carries felt's pi
+// extension.
+func piExtensionPresent(root string) bool {
+	return isRegularFile(filepath.Join(root, "extensions", "pi", "index.ts"))
 }
 
 func (a *app) collectPiBundle() []ReceiptBundle {
@@ -153,9 +185,7 @@ var piHarness = pluginHarness{
 	name:    "pi",
 	bundles: (*app).collectPiBundle,
 	install: (*app).installPiPackage,
-	hooks: func(root string) bool {
-		return isRegularFile(filepath.Join(root, "extensions", "pi", "index.ts"))
-	},
+	hooks:   piExtensionPresent,
 	verify: func(active pluginGenerationIdentity, bundle ReceiptBundle, current string) (pluginGenerationIdentity, error) {
 		if !samePath(bundle.Path, current) {
 			return active, fmt.Errorf("pi loads felt from %s, not the promoted generation at %s", bundle.Path, current)
@@ -166,15 +196,18 @@ var piHarness = pluginHarness{
 		if _, err := a.env.LookPath("pi"); err != nil {
 			return nil
 		}
+		// A pi whose list fails is left as it is: the promotion neither moves
+		// nor reconciles it, and the receipt reports it unknown.
 		installed, err := a.piFeltPackage()
 		if err != nil {
-			return err
+			fmt.Fprintf(a.env.Stderr, "warning: leaving pi as it is: %v\n", err)
+			return nil
 		}
 		intent.Pi = &installed
 		return nil
 	},
 	follow: func(a *app, current string, intent *pluginNativeIntent) error {
-		if intent.Pi == nil || intent.Pi.Source == "" || samePath(intent.Pi.Path, current) {
+		if intent.Pi == nil || intent.Pi.Source == "" {
 			return nil
 		}
 		return a.installPiPackage(current)

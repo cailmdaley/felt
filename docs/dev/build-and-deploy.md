@@ -341,6 +341,9 @@ bundle; the split Codex integration still requires only one `felt setup codex`.
 Each receipt bundle's `inspection` says how its activation was established:
 `confirmed` by the harness's own plugin list, `configured` by its config and
 cache alone, or `unknown` when the list failed or the config could not be read.
+`pi list` and `agy plugin list --json` that have not answered within five
+seconds have failed. A failing `pi list` also leaves pi out of a promotion made
+for another harness: pi neither follows it nor is reconciled after it.
 The helper sets up confirmed and configured bundles. An unknown bundle fails the
 host with the receipt's repair and no setup runs. So does a receipt that is
 missing or incomplete (its bundles list unclosed, or no closing brace on the
@@ -354,6 +357,13 @@ build. A dirty checkout builds felt as `dev (<sha>-dirty)`, which does not
 identify a single tree, so a dirty host is set up again on every deploy. pi
 loads the generation directory as its package, so a pi on GitHub's package or
 a local checkout is moved onto it; agy's plugin is a copy verified by digest.
+A generation staged from a source without the pi package (`package.json` and
+`extensions/pi`) is refused wherever pi carries felt: by `felt setup pi`, and
+by a promotion for another harness that pi would follow. A felt built before
+generations carried pi's package (before `ae3da7589`, as a rollback deploy may
+run) seals generations without it, and a pi loading `current` then loads no
+felt; a newer felt's receipt reports pi's hooks missing there, so the next
+deploy of a newer felt sets pi up again.
 Setup compares actual native cache bytes against
 external provenance at `~/.felt/plugin-runtime/current/.felt-generation.json`.
 Claude's combined plugin and Codex's `felt` hook bundle and `felt-skills`

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
@@ -240,6 +241,109 @@ func TestPromotionMovesEveryHarnessCarryingFelt(t *testing.T) {
 	r = testApp(t, env).collectRuntimeReceipt()
 	if r.Generation.Status != receiptMismatch || !strings.Contains(r.Generation.Repair, "felt setup antigravity") {
 		t.Fatalf("an edited agy plugin passed the receipt: %s %s", r.Generation.Status, r.Generation.Repair)
+	}
+}
+
+// A pi whose `pi list` fails is left as it is: setting up another harness
+// promotes without it.
+func TestSetupBesidePiWithAFailingListLeavesPi(t *testing.T) {
+	t.Parallel()
+	env, _ := testEnv(t)
+	sysenvtest.OnlyPath(env)
+	calls := fakeCallLog(t, env, "pi", "[ \"$1\" = list ] && exit 1\n")
+	if _, stderr, err := executeIn(t, env, t.TempDir(), "setup", "antigravity", "--source", copyPluginSource(t)); err != nil {
+		t.Fatalf("setup antigravity beside a broken pi: %v %s", err, stderr)
+	}
+	if log := calls(); strings.Contains(log, "install") || strings.Contains(log, "remove") {
+		t.Fatalf("pi was changed:\n%s", log)
+	}
+}
+
+// A generation staged from a source without the pi package is refused
+// wherever pi carries felt, rather than leaving pi a package it loads nothing
+// from: by felt setup pi, and by another harness's promotion that pi would
+// follow.
+func TestPiRefusesAGenerationWithoutItsPackage(t *testing.T) {
+	t.Parallel()
+	env, _ := testEnv(t)
+	sysenvtest.OnlyPath(env)
+	clone := filepath.Join(t.TempDir(), "felt")
+	scaffoldFeltCheckout(t, clone)
+	calls := fakePi(t, env, "git:github.com/"+marketplaceRepo, clone)
+	bare := copyPluginSource(t)
+	for _, name := range piPackageFiles {
+		if err := os.RemoveAll(filepath.Join(bare, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := executeIn(t, env, t.TempDir(), "setup", "pi", "--source", bare); err == nil || !strings.Contains(err.Error(), "no pi package") {
+		t.Fatalf("setup pi from a source without the package: %v", err)
+	}
+	if log := calls(); strings.Contains(log, "install") || strings.Contains(log, "remove") {
+		t.Fatalf("pi was changed:\n%s", log)
+	}
+
+	if _, stderr, err := executeIn(t, env, t.TempDir(), "setup", "pi", "--source", copyPluginSource(t)); err != nil {
+		t.Fatalf("setup pi: %v %s", err, stderr)
+	}
+	if _, _, err := executeIn(t, env, t.TempDir(), "setup", "antigravity", "--source", bare); err == nil || !strings.Contains(err.Error(), "no pi package") {
+		t.Fatalf("a promotion pi follows, from a source without the package: %v", err)
+	}
+	current := filepath.Join(homeOf(t, env), ".felt", pluginRuntimeDirName, pluginCurrentName)
+	if !isFeltPackageDir(current) || !piExtensionPresent(current) {
+		t.Fatal("the generation pi loads lost its package")
+	}
+}
+
+// pi marks a package whose settings select some of its resources
+// " (filtered)"; felt's GitHub package so marked is still felt's, and setup
+// replaces it.
+func TestSetupPiReplacesAFilteredGitHubPackage(t *testing.T) {
+	t.Parallel()
+	env, _ := testEnv(t)
+	sysenvtest.OnlyPath(env)
+	clone := filepath.Join(t.TempDir(), "felt")
+	scaffoldFeltCheckout(t, clone)
+	calls := fakePi(t, env, "git:github.com/"+marketplaceRepo+" (filtered)", clone)
+	if _, stderr, err := executeIn(t, env, t.TempDir(), "setup", "pi", "--source", copyPluginSource(t)); err != nil {
+		t.Fatalf("setup pi: %v %s", err, stderr)
+	}
+	if log := calls(); !strings.Contains(log, "remove git:github.com/"+marketplaceRepo+"\n") {
+		t.Fatalf("the filtered GitHub package was kept beside the generation:\n%s", log)
+	}
+}
+
+// A harness listing that hangs reads as unknown within the receipt's bound,
+// rather than holding the receipt, and the deploy reading it, forever.
+func TestReceiptBoundsAHangingHarnessList(t *testing.T) {
+	t.Parallel()
+	env, _ := testEnv(t)
+	sysenvtest.OnlyPath(env)
+	a := testApp(t, env)
+	dir, err := a.antigravityPluginDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{"name":"felt"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fakeCommand(t, env, "agy", "exec sleep 60\n")
+	fakeCommand(t, env, "pi", "exec sleep 60\n")
+	done := make(chan []ReceiptBundle, 2)
+	go func() { done <- a.collectAntigravityBundle() }()
+	go func() { done <- a.collectPiBundle() }()
+	for range 2 {
+		select {
+		case bundles := <-done:
+			if len(bundles) != 1 || bundles[0].Inspection != inspectionUnknown {
+				t.Fatalf("bundles = %+v, want one unknown", bundles)
+			}
+		case <-time.After(harnessListTimeout + 10*time.Second):
+			t.Fatal("a hanging harness list held the receipt")
+		}
 	}
 }
 
