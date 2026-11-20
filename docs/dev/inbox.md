@@ -4,7 +4,7 @@ An inbox holds text waiting for a worker on the host that owns its address.
 An address is a fiber or a session.
 A fiber's host-local key is `fiber:` and its uid, as in `fiber:01ARZ3NDEKTSV4RRFFQ69G5FAV`; it names no store, so a fiber's inbox, scheduled check-ins included, stays where it is when its tree moves to another store.
 A fiber without a uid is keyed by its felt store path and id, joined by a colon.
-At boot, before it recovers any worker, the daemon runs `shuttle inbox rekey` over its stores: an inbox still keyed `<store>:<uid>` under any of them moves to `fiber:<uid>`, with the session links that name it; when several exist for one fiber, the one whose receiver was written last becomes the inbox and the others add the entries it lacks.
+At boot, before it recovers any worker, the daemon runs `shuttle inbox rekey` over its stores: an inbox still keyed `<store>:<uid>` under any of them moves to `fiber:<uid>`, with the session links that name it; when several exist for one fiber, the one whose receiver was written last becomes the inbox and the others add what it lacks: entries whose id it holds neither pending nor offered, open batches, and a receiver written later than its own. A store that is no longer configured, or is spelled by another path, is not searched.
 `Shuttle.Delivery.context_key/1` builds it.
 A session's address is `shuttle://<host>/<harness>/<id>`.
 The address `threads` is the host's routing inbox ([below](#thread-results-and-routing)).

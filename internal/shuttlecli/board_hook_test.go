@@ -387,7 +387,7 @@ func TestBoardLineKeepsOneRow(t *testing.T) {
 			daemonStub(t, env, map[string]http.HandlerFunc{"/api/v1/board/family": func(w http.ResponseWriter, r *http.Request) {
 				fmt.Fprint(w, `{"family":null,"viewer":null,"records":[]}`)
 			}})
-			key := dir + ":" + fiber.UID
+			key := messaging.FiberKey(fiber.UID)
 			if _, err := messaging.TransitionFiberReceiver(env, key, "host", "worker-1", "shuttle://host/claude/session"); err != nil {
 				t.Fatal(err)
 			}

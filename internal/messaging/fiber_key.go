@@ -23,11 +23,8 @@ func FiberKey(uid string) string { return FiberKeyPrefix + uid }
 // RekeyFiberInboxes moves the inbox of every fiber in uids that is still
 // keyed `<store>:<uid>`, for any store in stores, to its FiberKey, and points
 // session links at the new key. It is idempotent: a fiber with no store-keyed
-// inbox is left alone. When several store-keyed inboxes exist for one uid,
-// the one whose receiver record was written last becomes the inbox (receiver,
-// batches and all); the others contribute only the pending and offered
-// entries the inbox does not already hold. It reports how many store-keyed
-// inboxes it moved.
+// inbox is left alone. Several inboxes for one uid merge (rekeyFiberInbox).
+// It reports how many store-keyed inboxes it moved.
 func RekeyFiberInboxes(env *sysenv.Env, stores, uids []string) (int, error) {
 	moved := map[string]string{}
 	var errs []error
@@ -61,22 +58,19 @@ func RekeyFiberInboxes(env *sysenv.Env, stores, uids []string) (int, error) {
 }
 
 // rekeyFiberInbox gathers olds into key's inbox, each under its own lock.
+// With no inbox at key yet, the store-keyed one whose receiver was written
+// last moves there whole. Every other one adds what the inbox lacks: an entry
+// whose id it holds in neither state, open batch manifests, and its receiver
+// when that was written later than the inbox's.
 func rekeyFiberInbox(env *sysenv.Env, key string, olds []string) error {
 	dst := mailboxDir(env, "fiber", key)
-	// The newest receiver record names the inbox the fiber's current worker
-	// was bound to; it becomes the destination when there is none yet.
-	newest, newestAt := "", int64(-1)
-	for _, old := range olds {
-		info, err := os.Stat(filepath.Join(mailboxDir(env, "fiber", old), "destination.json"))
-		at := int64(0)
-		if err == nil {
-			at = info.ModTime().UnixNano()
-		}
-		if at > newestAt {
-			newest, newestAt = old, at
-		}
-	}
 	if _, err := os.Stat(dst); errors.Is(err, os.ErrNotExist) {
+		newest, newestAt := olds[0], int64(-1)
+		for _, old := range olds {
+			if at := receiverWritten(mailboxDir(env, "fiber", old)); at > newestAt {
+				newest, newestAt = old, at
+			}
+		}
 		if err := ensureDir(filepath.Dir(dst), 0700); err != nil {
 			return err
 		}
@@ -92,14 +86,7 @@ func rekeyFiberInbox(env *sysenv.Env, key string, olds []string) error {
 			continue
 		}
 		if err := withMailboxLock(dst, func() error {
-			return withMailboxLock(src, func() error {
-				for _, state := range []string{"pending", "offered"} {
-					if err := mergeEntries(filepath.Join(src, state), filepath.Join(dst, state)); err != nil {
-						return err
-					}
-				}
-				return os.RemoveAll(src)
-			})
+			return withMailboxLock(src, func() error { return mergeInbox(src, dst) })
 		}); err != nil {
 			return err
 		}
@@ -107,32 +94,58 @@ func rekeyFiberInbox(env *sysenv.Env, key string, olds []string) error {
 	return nil
 }
 
-// mergeEntries moves each entry file of src into dst unless dst holds one by
-// that name: an entry's file is named by its message id.
-func mergeEntries(src, dst string) error {
-	files, err := os.ReadDir(src)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
+// receiverWritten is when root's receiver record was last written, or -1.
+func receiverWritten(root string) int64 {
+	info, err := os.Stat(filepath.Join(root, "destination.json"))
 	if err != nil {
-		return err
+		return -1
 	}
-	if err := ensureDir(dst, 0700); err != nil {
-		return err
+	return info.ModTime().UnixNano()
+}
+
+// mergeInbox moves into dst what src holds that dst lacks, then removes src.
+// Called under both inboxes' locks.
+func mergeInbox(src, dst string) error {
+	held := map[string]bool{}
+	for _, state := range []string{"pending", "offered"} {
+		files, err := os.ReadDir(filepath.Join(dst, state))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		for _, f := range files {
+			held[f.Name()] = true
+		}
 	}
-	for _, f := range files {
-		if f.IsDir() || !strings.HasSuffix(f.Name(), ".json") {
+	for _, dir := range []string{"pending", "offered", "batches"} {
+		files, err := os.ReadDir(filepath.Join(src, dir))
+		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
-		to := filepath.Join(dst, f.Name())
-		if _, err := os.Stat(to); err == nil {
-			continue
+		if err != nil {
+			return err
 		}
-		if err := os.Rename(filepath.Join(src, f.Name()), to); err != nil {
+		if err := ensureDir(filepath.Join(dst, dir), 0700); err != nil {
+			return err
+		}
+		for _, f := range files {
+			to := filepath.Join(dst, dir, f.Name())
+			if f.IsDir() || strings.HasPrefix(f.Name(), ".") || held[f.Name()] {
+				continue
+			}
+			if _, err := os.Stat(to); err == nil {
+				continue
+			}
+			if err := os.Rename(filepath.Join(src, dir, f.Name()), to); err != nil {
+				return err
+			}
+		}
+	}
+	if receiverWritten(src) > receiverWritten(dst) {
+		if err := os.Rename(filepath.Join(src, "destination.json"), filepath.Join(dst, "destination.json")); err != nil {
 			return err
 		}
 	}
-	return nil
+	return os.RemoveAll(src)
 }
 
 func withMailboxLock(dir string, fn func() error) error {

@@ -37,7 +37,10 @@ defmodule Shuttle.Inbox do
   def rekey([]), do: :ok
 
   def rekey(stores) do
-    case Shuttle.CLI.run(["inbox", "rekey" | stores], timeout_ms: @timeout_ms) do
+    case Shuttle.CLI.run(["inbox", "rekey" | stores],
+           timeout_ms: @timeout_ms,
+           stderr_to_stdout: false
+         ) do
       {:ok, output} ->
         case String.trim(output) do
           "0" -> :ok
