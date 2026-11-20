@@ -15,6 +15,10 @@ const fontCache = join(import.meta.dirname, '..', 'node_modules', '.cache', 'e2e
  * receives input by the compositor's last hit-test map, so a click on a sheet
  * that opened over a frame in the same moment can land in the frame instead.
  *
+ * A sideways touch drag nothing on the page takes is not the browser's Back:
+ * Linux Chrome would otherwise read one (an edge start the reader leaves to
+ * the browser, say) as overscroll history navigation and leave the page.
+ *
  * Every context serves the board's Google Fonts from a disk cache filled on
  * first use, so a page's load never waits on the network and every journey
  * lays out in the same faces.
@@ -25,7 +29,7 @@ export async function launchBrowser({ args = [] } = {}) {
     headless: true,
     args: [...new Set([
       '--mute-audio', '--allow-file-access-from-files', '--autoplay-policy=no-user-gesture-required',
-      '--disable-features=IsolateSandboxedIframes', ...args,
+      '--disable-features=IsolateSandboxedIframes,OverscrollHistoryNavigation', ...args,
     ])],
   })
   const newContext = browser.newContext.bind(browser)
