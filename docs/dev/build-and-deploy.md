@@ -149,6 +149,71 @@ Refresh the credential before concluding shuttle is broken.
 It reads `~/.config/shuttle/remotes.json`; entries with a `checkout` field are deploy targets.
 Release users install packaged releases through the [installer](../shuttle/installation.md).
 
+### Reaching a remote: its daemon over the tailnet, or ssh
+
+**A remote whose entry has a `url` is deployed by its own daemon, over the tailnet.**
+No ssh connection is opened, so a host whose ssh login wants MFA deploys without
+the human. The helper asks the remote daemon for a *deploy run*
+(`/api/v1/deploy/runs`, [API reference](../reference/api.md)): a directory under
+`~/.shuttle/deploy/runs/<id>` on that host, into which it uploads the stage (the
+shipped CLIs and release, the UI bundle, the agent registry) as one tar and the
+framed bootstrap, then starts a launch script there. The daemon runs that script
+with `bash`, detached into its own session and with the environment an ssh login
+begins from, so the transaction is the same one ssh would run (the same
+`scripts/deploy-run.sh`, locks, lease, deadline, build in the login shell under
+`build_wrap`, activation, readiness, quarantine release, harness refresh,
+rollback) and survives the daemon it replaces. A run is only files: any daemon
+incarnation serves it, and the routes answer while the replacement is still
+booting.
+
+On the deploy host a small relay (`scripts/deploy-relay/main.go`, compiled
+beside the lock helper) stands where ssh stood under `deploy-lock --observe`: it
+takes the framed bootstrap and heartbeats on stdin, polls the run's output once
+a second to stdout, and exits with the run's status. Each poll is the heartbeat:
+the launch script feeds deploy-run a newline a second while polls keep arriving,
+and closes its stdin after a whole heartbeat lease without one, which cancels
+the transaction exactly as a lost ssh connection does. When the deployer goes
+away, the relay asks the daemon to cancel (a `cancel` marker the launch script
+obeys) and reads on until the run exits. While the daemon cycles itself the
+relay's polls fail; it retries, says when the host answers again, and gives up
+after five minutes unreachable (`SHUTTLE_DEPLOY_RELAY_GIVE_UP_SECONDS`), by
+which time the run has cancelled itself. Short probes (the platform, the live
+version) are deploy runs of their own.
+
+**ssh remains for what a daemon cannot do for itself:** the first install of a
+host, a host whose daemon is down, and a daemon built before these routes. The
+helper refuses such a host with that diagnosis rather than falling back, and
+`--ssh=<host>[,<host>]` (or `--ssh` for every remote) asks for ssh. A remote
+with no `url` is reached over ssh, the only way its entry names.
+`bin/shuttle-deploy --list` shows each host's transport.
+
+**Who may start a run is whoever may use the daemon's other control routes.**
+On a tailnet that is any peer `tailscale serve` admits, which on a personal
+tailnet is the operator's own devices; on a shared login node the daemon's private
+socket or its uid peer gate keeps the node's other users off the local hop. A run executes
+arbitrary shell as the daemon's user, which those routes already allow by
+launching agents with arbitrary prompts, so the routes add no new trust
+boundary. A tighter rule would check the `Tailscale-User-Login` header that
+`serve` adds against the daemon owner's login: that needs the owner's login in
+host configuration and refuses peers that carry no user, such as tagged
+devices.
+
+**Tailscale SSH was weighed and not taken.** Turning on Tailscale SSH in each
+host's userspace `tailscaled` would have left the helper unchanged but for the
+ssh target. It is an ssh server that bypasses the site's own authentication,
+the thing cluster usage policies name, it hands any admitted device an
+interactive shell rather than a deploy, it needs tailnet ACL `ssh` rules, and
+its support under an unprivileged userspace `tailscaled` is undocumented. The
+deploy routes reuse the daemon every host already runs and the access it
+already grants.
+
+**Bringing a host onto tailnet deploys** takes one ssh deploy of a revision
+that has the routes, after which no deploy needs ssh:
+
+```sh
+bin/shuttle-deploy --hosts <host> --ssh=<host> --handshake
+```
+
 The helper prints one warning if the target commit's latest completed main CI run failed.
 Its advisory GitHub query has a ten-second process timeout and never updates the latest-main cache.
 This repo's SessionStart hook reads `felt-ci-status.json` from Git's common directory, prints one line when that cached result is red, and starts a detached refresh for the next session.
@@ -194,14 +259,14 @@ The helper, transaction shell and local build subprocesses inherit the lock desc
 Preparation, harness and activation command shells close descriptors 3 and 4; background launchers and newly started tmux servers cannot retain a finished deploy's locks. The activation control descriptor is closed in those commands and builds too.
 An `srun` job on another node inherits no local descriptor and relies on its submitting client's lifetime and cancellation. Kernel lock release does not delete lock files.
 Different hosts can deploy concurrently, and one helper run deploys its remotes concurrently.
-It deploys the deploy host first, then stages each remote in turn: the SSH preflight and any interactive handshake, the platform probe, and the shipped files (the Linux artifacts are built during the first eligible remote's staging).
+It deploys the deploy host first, then stages each remote in turn: the transport's preflight (an ssh connection and any interactive handshake, or a deploy run on a tailnet remote), the platform probe, and the shipped files (the Linux artifacts are built during the first eligible remote's staging).
 Then every staged remote's transaction runs at once, each with its own bootstrap, lifetime FIFO and cancellation; their output lines carry the host name.
 Interrupting the helper cancels every running transaction.
 Do not delete lock files to recover a deploy; their existence is not evidence that they are held.
 
 ### Transaction ownership and diagnostics
 
-**A transaction dies with its observer.** SSH is attached and streams output directly; its exit status and the bootstrap's completion sentinel determine success. There is no detached runner or result polling.
+**A transaction dies with its observer.** The transport, ssh or the tailnet relay, is attached and streams output; its exit status and the bootstrap's completion sentinel determine success. Over ssh there is no detached runner or result polling; over the tailnet the remote daemon detaches the run so that it survives the daemon's own cycle, and the relay's polls carry its lifetime.
 The same helper supervises the local transport and the target transaction. Only the deployer holds its caller lifeline's write end: even a killed deployer closes the transport's stdin. On the target, observer EOF, TERM, INT or HUP cancels lock acquisition or sends TERM to the owned transaction group, then KILL after three seconds. The observer sends a newline every quarter of the heartbeat lease, `SHUTTLE_DEPLOY_HEARTBEAT_LEASE_SECONDS` (60 by default, every 15 seconds); the target treats a whole lease without one as EOF, including a stopped observer or silent network partition. A forgotten waiter cannot acquire a lock and deploy later.
 The activation socket's original endpoints are close-on-exec. Only its transaction endpoint is passed as fd 5; preparation, activation commands and harnesses close fd 5 before starting children, so owner death gives the transaction EOF.
 
@@ -212,7 +277,7 @@ Pointer selection through readiness verification, quarantine release and rollbac
 
 The caller sends a length-framed bootstrap on stdin. The target reads it completely before starting a login shell, whose stdin is `/dev/null`; a separate descriptor carries observer lifetime. Captured query values have explicit begin/end frames, so profile stdout cannot become a path or JSON value. A profile that exits zero without executing the bootstrap cannot report deployment success.
 
-After acquiring its locks, each target atomically publishes one private `~/.shuttle/deploy/last-run.log`, retaining ordered stdout/stderr and failure diagnostics even when SSH disappears. A waiter keeps private temporary output and cannot overwrite the holder's log. Logging ends at the completion token rather than waiting for background FIFO writers; the launched child closes fd 8. There are no persistent run directories. File privacy does not change the login umask inherited by builds or launched services.
+After acquiring its locks, each target atomically publishes one private `~/.shuttle/deploy/last-run.log`, retaining ordered stdout/stderr and failure diagnostics even when the transport disappears. A waiter keeps private temporary output and cannot overwrite the holder's log. Logging ends at the completion token rather than waiting for background FIFO writers; the launched child closes fd 8. There are no persistent run directories. File privacy does not change the login umask inherited by builds or launched services.
 
 ```sh
 tail -n 50 ~/.shuttle/deploy/last-run.log
@@ -402,7 +467,7 @@ On a Mac with Rex, `make cli-install` builds `scripts/shuttle-rex-title.c` into 
 The deploy host (the Mac running `bin/shuttle-deploy`) builds for itself with
 `make build`. A remote that is Linux x86_64 with a system glibc of 2.28 or newer
 builds nothing: the helper probes `uname -sm` and `/usr/bin/getconf
-GNU_LIBC_VERSION` over SSH, and for every host that qualifies it ships the same
+GNU_LIBC_VERSION` on the remote, and for every host that qualifies it ships the same
 artifacts, built once per run by `scripts/build-linux-release.sh` from the
 pinned local tree under its lease:
 
@@ -453,7 +518,7 @@ several more. Such a host opts out with `"build_ui": false` in its
 
 A remote can also set `"build_wrap": "srun -p serial --cpus-per-task=8 --mem=16G --time=00:45:00"`
 to run its build through a scheduler.
-The optional string is a trusted shell command prefix: deployment runs `<build_wrap> bash -lc '<build>'` inside the SSH login shell.
+The optional string is a trusted shell command prefix: deployment runs `<build_wrap> bash -lc '<build>'` inside the transaction's login shell.
 Only the build (including its checkout directory, CLI installation and version environment) is wrapped.
 Fetching the pinned object, worktree preparation, harness refresh, and daemon cycling stay outside the wrapper.
 The lock bootstrap also runs outside the wrapper, with its own bounded Go parallelism.
@@ -462,11 +527,11 @@ This composes with `build_ui: false` and `SKIP_UI=1`.
 
 `bin/shuttle-deploy --list` shows the choice per host (`build` or `shipped`).
 For a `shipped` host the helper snapshots the pinned revision's local `ui/dist` while holding the local tree's lease.
-It rsyncs that snapshot to a unique temporary directory on the remote, then publishes it into the remote deploy tree under that host's lock and lease before running `make build SKIP_UI=1`.
-Neither a competing deploy nor pruning can remove the rsync source mid-transfer.
+It stages that snapshot in a unique temporary directory on the remote (rsync over ssh, the stage tar over the tailnet), then publishes it into the remote deploy tree under that host's lock and lease before running `make build SKIP_UI=1`.
+Neither a competing deploy nor pruning can remove the staged source mid-transfer.
 The key is absent on every host that builds its own, and only `bin/shuttle-deploy` reads it — the felt CLI and the daemon carry it through untouched.
 
-**The rsync precedes the remote build, and the order is load-bearing.**
+**The staged bundle precedes the remote build, and the order is load-bearing.**
 `make daemon` copies `ui/dist` into the release's `priv/ui/dist`, and
 `ShuttleWeb.Assets` serves the release's copy in preference to the checkout's. A
 bundle that landed after the build would sit in the checkout unserved.

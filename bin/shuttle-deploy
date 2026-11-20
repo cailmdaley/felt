@@ -10,8 +10,14 @@
 # Targets must support incarnation-bound release (e8fc948a or a descendant).
 # Older revisions are not automated rollback targets; release stays held.
 #
+#   bin/shuttle-deploy --ssh=hub-a            # reach hub-a over ssh (--ssh: every remote)
 #   bin/shuttle-deploy --handshake            # bootstrap interactive ssh auth when
 #                                             # no live master — human must approve
+#
+# A remote whose fleet entry has a `url` is deployed over the tailnet: its own
+# daemon runs the transaction through its deploy-run routes, so no ssh login
+# (and no MFA) is involved. ssh is for a remote with no url, and, when --ssh
+# asks for it, for a first install or a host whose daemon is down.
 #
 # Each run resolves one commit. Under a host lock it prepares a detached root,
 # builds, refreshes harnesses, activates, verifies and releases quarantine.
@@ -33,7 +39,8 @@
 #
 # The fleet is NOT written here. It comes from ~/.config/shuttle/remotes.json
 # (`SHUTTLE_REMOTES_FILE` overrides) — the same file the daemon and `shuttle
-# remotes` read. Deploy uses six of its per-remote keys: `ssh` (destination,
+# remotes` read. Deploy uses these per-remote keys: `url` (the daemon's tailnet
+# address), `ssh` (destination,
 # defaults to the name), `checkout` (repo path on that host), `ssh_flags`
 # (extra ssh arguments), `auth` ("interactive" marks a host that needs a live
 # human credential), `enabled`, and `build_ui`. A remote without `checkout` is
@@ -124,7 +131,7 @@ FLEET_FILE="${SHUTTLE_REMOTES_FILE:-$HOME/.config/shuttle/remotes.json}"
 AGENTS_FILE="${SHUTTLE_AGENTS_FILE:-$HOME/.config/shuttle/agents.json}"
 
 # The fleet file rendered as TSV: name, ssh destination, checkout, auth, flags,
-# build_ui ("1"/"0"), build_wrap. jq if it is installed, python3 otherwise — the file is read
+# build_ui ("1"/"0"), build_wrap, url. jq if it is installed, python3 otherwise — the file is read
 # on the deploy host only, so this needs no remote-side dependency. Both accept
 # either document shape the Go and Elixir readers accept: {"remotes": [...]} or a
 # bare list, and both must agree field for field: only a literal `false` turns
@@ -138,7 +145,7 @@ read_fleet() {
            | select((.checkout // "") != "")
            | [.name, (.ssh // .name), .checkout, (.auth // "pubkey"),
               ((.ssh_flags // []) | join(" ")),
-              (if .build_ui == false then "0" else "1" end), (.build_wrap // "")]
+              (if .build_ui == false then "0" else "1" end), (.build_wrap // ""), (.url // "")]
            | @tsv' "$FLEET_FILE"
   elif command -v python3 >/dev/null 2>&1; then
     python3 - "$FLEET_FILE" <<'PY'
@@ -150,7 +157,8 @@ for r in (doc if isinstance(doc, list) else doc.get("remotes") or []):
     print("\t".join([r.get("name", ""), r.get("ssh") or r.get("name", ""),
                      r["checkout"], r.get("auth") or "pubkey",
                      " ".join(r.get("ssh_flags") or []),
-                     "0" if r.get("build_ui") is False else "1", r.get("build_wrap") or ""]))
+                     "0" if r.get("build_ui") is False else "1", r.get("build_wrap") or "",
+                     (r.get("url") or "").rstrip("/")]))
 PY
   else
     echo "shuttle-deploy: need jq or python3 to read $FLEET_FILE" >&2
@@ -174,6 +182,17 @@ fleet_flags() { # Dead-link bounds apply to probes and transfers as well as work
 fleet_auth()  { fleet_row "$1" | awk -F'\t' '{print $4}'; }   # pubkey | interactive
 fleet_build_wrap() { fleet_row "$1" | awk -F'\t' '{print $7}'; }
 builds_ui()   { [ "$(fleet_row "$1" | awk -F'\t' '{print $6}')" != 0 ]; }
+fleet_url()   { fleet_row "$1" | awk -F'\t' '{print $8}' | sed 's:/*$::'; }
+# A remote with a `url` is reached through its daemon's deploy-run routes over
+# the tailnet; --ssh names remotes to reach over ssh instead, as does a remote
+# with no url. ssh is for what a daemon cannot do for itself: a first install,
+# or a host whose daemon is down.
+uses_ssh() {
+  [ -n "$(fleet_url "$1")" ] || return 0
+  case " $SSH_HOSTS " in *" $1 "*|*" all "*) return 0 ;; esac
+  return 1
+}
+transport() { if uses_ssh "$1"; then echo ssh; else echo tailnet; fi; }
 
 # Hosts whose ssh needs an interactive human credential (push-2FA, short-lived
 # certificates) get a handshake verb: when the preflight finds no live
@@ -223,6 +242,7 @@ HOSTS="$FLEET_ORDER"
 PUSH=1
 HANDSHAKE=0
 DEPLOY_REF=""
+SSH_HOSTS=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -232,10 +252,13 @@ while [ $# -gt 0 ]; do
     --ref) [ $# -ge 2 ] && [ -n "$2" ] || { echo "--ref needs a revision" >&2; exit 2; }; DEPLOY_REF="$2"; shift 2 ;;
     --ref=*) DEPLOY_REF="${1#*=}"; [ -n "$DEPLOY_REF" ] || { echo "--ref needs a revision" >&2; exit 2; }; shift ;;
     --handshake) HANDSHAKE=1; shift ;;
+    --ssh) SSH_HOSTS="all"; shift ;;
+    --ssh=*) SSH_HOSTS="$(echo "${1#*=}" | tr ',' ' ')"; shift ;;
     --list)
       for h in $FLEET_ORDER; do
         ui=build; builds_ui "$h" || ui=shipped
-        printf '%-16s %-16s %-8s %s\n' "$h" "$(fleet_ssh "$h")" "$ui" "$(fleet_dir "$h")"
+        via=local; [ "$h" = local ] || via="$(transport "$h")"
+        printf '%-16s %-16s %-8s %-8s %s\n' "$h" "$(fleet_ssh "$h")" "$ui" "$via" "$(fleet_dir "$h")"
       done
       [ -f "$FLEET_FILE" ] || printf 'no fleet file at %s — local only\n' "$FLEET_FILE"
       exit 0 ;;
@@ -501,7 +524,11 @@ bash -c $(shell_quote "$2")
 status=\$?
 printf '\\n%s END %s\\n' '$marker' \"\$status\"
 exit \"\$status\""
-  out=$(ssh -n $(fleet_flags "$1") "$(fleet_ssh "$1")" "bash -lc $(shell_quote "$command") </dev/null")
+  if uses_ssh "$1"; then
+    out=$(ssh -n $(fleet_flags "$1") "$(fleet_ssh "$1")" "bash -lc $(shell_quote "$command") </dev/null")
+  else
+    out=$(relay_run "$1" "bash -lc $(shell_quote "$command") </dev/null")
+  fi
   status=$?
   [ "$status" = 0 ] || return "$status"
   case "$out" in
@@ -510,6 +537,15 @@ exit \"\$status\""
   esac
   out="${out#*"$marker BEGIN"$'\n'}"
   printf '%s' "${out%$'\n'"$marker END 0"}"
+}
+
+# A short command on a tailnet remote: a deploy run of its own, read to its end.
+relay_run() { # host, launch script
+  local run launch
+  run="$("$LOCAL_TOOL/relay" create "$(fleet_url "$1")")" || return 1
+  launch="$(mktemp "$RUN_DIR/launch.XXXXXX")" || return 1
+  printf '%s\n' "$2" > "$launch"
+  "$LOCAL_TOOL/relay" run "$(fleet_url "$1")" "${run%%$'\t'*}" "$launch" </dev/null
 }
 
 version_json() {
@@ -741,15 +777,25 @@ shipped_refusal() { # host
     || echo "its glibc ${glibc:-is unknown} is older than 2.28"
 }
 
-# Ship ui/dist into a non-building host's checkout. --delete because ui/dist is
-# wholly generated: a file left from an older bundle is never referenced by the
-# new index.html and only accumulates.
-ship_ui() { # SSH destination, checkout directory, SSH flags.
+# Put a file or directory into a remote's stage: rsync over ssh, or a copy
+# into the local tree a tailnet remote receives as one tar. A directory
+# source ends in / and replaces the destination wholly.
+stage_put() { # host, source, path under the stage
+  local host="$1" flags dest stage
+  if uses_ssh "$host"; then
+    flags="$(fleet_flags "$host")"; dest="$(fleet_ssh "$host")"; stage="$(cat "$RUN_DIR/$host.stage")"
+    ssh $flags "$dest" "mkdir -p $(shell_quote "$(dirname "$stage/$3")")" &&
+      rsync -az --delete -e "ssh $flags" "$2" "$dest:$stage/$3"
+  else
+    mkdir -p "$(dirname "$RUN_DIR/$host.stage.d/$3")" && cp -R "$2" "$RUN_DIR/$host.stage.d/$3"
+  fi
+}
+
+# Ship ui/dist to a non-building host. The stage's copy is published into the
+# pinned tree before the build, which must find it there (see the header).
+ship_ui() { # host
   ensure_local_ui || return 1
-  ssh $3 "$1" "mkdir -p $(shell_quote "$2/ui")" \
-    || { bad "could not prepare $2/ui"; return 1; }
-  rsync -az --delete -e "ssh $3" "$UI_SNAPSHOT/" "$1:$2/ui/dist/" \
-    || { bad "could not ship the UI bundle"; return 1; }
+  stage_put "$1" "$UI_SNAPSHOT/" ui/dist || { bad "could not ship the UI bundle"; return 1; }
   ok "shipped ui/dist (this host does not build it)"
 }
 
@@ -1114,9 +1160,13 @@ exit \"\$status\""
   [ -n "${LIFELINE_HELD:-}" ] || exec 6<> "$run.lifetime"
   if [ -z "$host" ]; then
     env SHUTTLE_DEPLOY_DEADLINE="$until" "$LOCAL_TOOL/lock" --observe "$run.bootstrap" "$token" bash -c "$RUN_SOURCE" -- "$token" "$HEARTBEAT_LEASE" < "$run.lifetime" 6>&- &
-  else
+  elif uses_ssh "$host"; then
     env SHUTTLE_DEPLOY_DEADLINE="$until" "$LOCAL_TOOL/lock" --observe "$run.bootstrap" "$token" ssh -o BatchMode=yes \
       $(fleet_flags "$host") "$(fleet_ssh "$host")" "bash -c $(shell_quote "$RUN_SOURCE") -- $(shell_quote "$token") $HEARTBEAT_LEASE" < "$run.lifetime" 6>&- &
+  else
+    tailnet_launch "$token" > "$run.launch"
+    env SHUTTLE_DEPLOY_DEADLINE="$until" "$LOCAL_TOOL/lock" --observe "$run.bootstrap" "$token" \
+      "$LOCAL_TOOL/relay" run "$(fleet_url "$host")" "$(cat "$RUN_DIR/$host.run")" "$run.launch" --attached < "$run.lifetime" 6>&- &
   fi
   active=$!
   wait "$active"
@@ -1127,33 +1177,76 @@ exit \"\$status\""
   [ "$status" = 0 ] || { bad "attached transaction failed (exit $status); see ~/.shuttle/deploy/last-run.log"; return 1; }
 }
 
+# What a tailnet remote's daemon runs in place of the ssh command: unpack the
+# stage, then feed deploy-run the framed bootstrap the relay stored and a
+# heartbeat a second while the relay keeps reading. The relay's reads are the
+# beats; a cancel marker or a lease without one closes deploy-run's stdin,
+# which cancels the transaction exactly as a dropped ssh connection does.
+tailnet_launch() { # token
+  cat <<SH
+set -u
+mkdir -p stage
+if [ -f stage.tar ]; then tar -xf stage.tar -C stage && rm -f stage.tar || exit 1; fi
+{
+  cat bootstrap
+  last= seen=\$(date +%s)
+  while [ ! -e cancel ]; do
+    beat=\$(cat beat 2>/dev/null) now=\$(date +%s)
+    if [ "\$beat" != "\$last" ]; then last=\$beat seen=\$now
+    elif [ \$((now - seen)) -ge $HEARTBEAT_LEASE ]; then
+      echo "deploy: no heartbeat from the deploy host for $HEARTBEAT_LEASE seconds" >&2; break
+    fi
+    printf '\\n' 2>/dev/null || break
+    sleep 1
+  done
+} | bash -c $(shell_quote "$RUN_SOURCE") -- $(shell_quote "$1") $HEARTBEAT_LEASE
+SH
+}
+
 # Staging runs serially, so interactive handshakes meet the human one at a
 # time and the Linux artifacts are built before any transaction starts. It
-# records the remote stage directory for remote_transaction.
+# records the remote stage directory for remote_transaction, and for a tailnet
+# remote the deploy run that carries it.
 stage_remote() {
-  local host="$1" dir dest flags stage refusal
-  dir="$(fleet_dir "$host")"; dest="$(fleet_ssh "$host")"; flags="$(fleet_flags "$host")"
-  say "$host ($dest:$dir)"
-  ssh $flags "$dest" true || try_handshake "$host" \
-    || { bad 'ssh: could not establish a connection'; return 1; }
-  stage="$(run_value "$host" 'mktemp -d')" || { bad 'stage: failed'; return 1; }
+  local host="$1" dir url run refusal tar_flags=
+  dir="$(fleet_dir "$host")"
+  if uses_ssh "$host"; then
+    say "$host ($(fleet_ssh "$host"):$dir, over ssh)"
+    ssh $(fleet_flags "$host") "$(fleet_ssh "$host")" true || try_handshake "$host" \
+      || { bad 'ssh: could not establish a connection'; return 1; }
+    run_value "$host" 'mktemp -d' > "$RUN_DIR/$host.stage" || { bad 'stage: failed'; return 1; }
+  else
+    url="$(fleet_url "$host")"
+    say "$host ($url:$dir, over the tailnet)"
+    run="$("$LOCAL_TOOL/relay" create "$url")" || {
+      bad "tailnet: no deploy run on $url; a daemon that is down or predates tailnet deploys needs one deploy with --ssh=$host"
+      return 1
+    }
+    printf '%s' "${run%%$'\t'*}" > "$RUN_DIR/$host.run"
+    printf '%s/stage' "${run#*$'\t'}" > "$RUN_DIR/$host.stage"
+    mkdir -p "$RUN_DIR/$host.stage.d"
+  fi
   refusal="$(shipped_refusal "$host")"
   [ -n "$refusal" ] || ensure_linux_artifacts || refusal="the Linux artifact build failed"
   if [ -z "$refusal" ]; then
-    rsync -az -e "ssh $flags" "$LINUX_OUT/" "$dest:$stage/linux/" \
-      || { bad 'ship Linux artifacts: failed'; return 1; }
+    stage_put "$host" "$LINUX_OUT/" linux || { bad 'ship Linux artifacts: failed'; return 1; }
     ok "shipped CLIs and release (built once on $(hostname -s))"
   else
     ok "nothing shipped: $refusal"
   fi
   if [ -z "$refusal" ] || ! builds_ui "$host"; then
-    ship_ui "$dest" "$stage" "$flags" || return 1
+    ship_ui "$host" || return 1
   fi
   if [ -f "$AGENTS_FILE" ]; then
-    rsync -az -e "ssh $flags" "$AGENTS_FILE" "$dest:$stage/agents.json" \
-      || { bad 'stage agent registry: failed'; return 1; }
+    stage_put "$host" "$AGENTS_FILE" agents.json || { bad 'stage agent registry: failed'; return 1; }
   fi
-  printf '%s' "$stage" > "$RUN_DIR/$host.stage"
+  if ! uses_ssh "$host"; then
+    tar --version 2>/dev/null | grep -q bsdtar && tar_flags='--no-xattrs --no-mac-metadata'
+    COPYFILE_DISABLE=1 tar $tar_flags -cf "$RUN_DIR/$host.stage.tar" -C "$RUN_DIR/$host.stage.d" . &&
+      "$LOCAL_TOOL/relay" put "$url" "$(cat "$RUN_DIR/$host.run")" stage.tar "$RUN_DIR/$host.stage.tar" \
+      || { bad 'stage: upload failed'; return 1; }
+    rm -rf "$RUN_DIR/$host.stage.d" "$RUN_DIR/$host.stage.tar"
+  fi
 }
 
 # One remote's transaction, run concurrently with the others in a subshell
@@ -1199,6 +1292,13 @@ LOCAL_TOOL=$(mktemp -d "$HOME/.shuttle/deploy/tools/lock.XXXXXX") || exit 1
 printf '%s' "$LOCK_SOURCE" > "$LOCAL_TOOL/main.go"
 printf '%s\n' "$LOCK_MOD" > "$LOCAL_TOOL/go.mod"
 GOMAXPROCS=2 GOFLAGS=-p=2 go build -C "$LOCAL_TOOL" -o lock . || exit 1
+for h in $HOSTS; do
+  [ "$h" = local ] || uses_ssh "$h" && continue
+  mkdir "$LOCAL_TOOL/relay.src" && cp "$REPO/scripts/deploy-relay/main.go" "$LOCAL_TOOL/relay.src/" &&
+    printf '%s\n' "$LOCK_MOD" > "$LOCAL_TOOL/relay.src/go.mod" &&
+    GOMAXPROCS=2 GOFLAGS=-p=2 go build -C "$LOCAL_TOOL/relay.src" -o ../relay . || exit 1
+  break
+done
 UI_SNAPSHOT="$RUN_DIR/ui"
 LINUX_OUT="$RUN_DIR/linux"
 mkdir -p "$UI_SNAPSHOT"

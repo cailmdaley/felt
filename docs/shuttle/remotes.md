@@ -195,5 +195,8 @@ Owner-routed writes transfer task documents; they do not synchronize code or the
 Run Git and `felt sync` explicitly to synchronize those at your own pace; each task's host determines which daemon may execute it.
 Distinct stores on different hosts can also appear together on the board without being merged.
 
+A source checkout deployed with `bin/shuttle-deploy` reaches a remote whose entry has a `url` through that remote's own daemon, over the same connection the board uses, so a host whose ssh login needs two-factor authentication deploys without it.
+ssh stays for the first install and for a host whose daemon is down ([Reaching a remote](../dev/build-and-deploy.md#reaching-a-remote-its-daemon-over-the-tailnet-or-ssh)).
+
 If the remote disappears, check the layers in order: host awake, daemon healthy, Serve or tunnel reachable, then stores and task ownership.
 [The configuration reference](configuration.md#configuring-remotes) covers timeouts, discovery overrides, recovery, and private userspace dialing.

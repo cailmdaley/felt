@@ -259,8 +259,11 @@ resolve one commit → push → on each host, under its deploy lock: build the S
 → fast-forward the clean checkout → refresh harnesses
 ```
 
-Locks, leases, deadlines, cancellation, logs, rollback, cluster builds and
-harness refresh: [`docs/dev/build-and-deploy.md`](docs/dev/build-and-deploy.md).
+A remote with a `url` in `~/.config/shuttle/remotes.json` is deployed by its
+own daemon over the tailnet, with no ssh and no MFA; `--ssh=<host>` is for a
+first install or a host whose daemon is down.
+Locks, leases, deadlines, cancellation, logs, rollback, cluster builds,
+transports and harness refresh: [`docs/dev/build-and-deploy.md`](docs/dev/build-and-deploy.md).
 Fetched-release users do not need this helper.
 
 ## License

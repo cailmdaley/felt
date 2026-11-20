@@ -64,7 +64,7 @@ func newDeployFleet(t *testing.T) *deployFleet {
 		t.Helper()
 		sysenvtest.LinkScript(t, path, body)
 	}
-	for _, relative := range []string{"bin/shuttle-deploy", "go.mod", "scripts/deploy-lock/main.go", "scripts/deploy-run.sh"} {
+	for _, relative := range []string{"bin/shuttle-deploy", "go.mod", "scripts/deploy-lock/main.go", "scripts/deploy-relay/main.go", "scripts/deploy-run.sh"} {
 		data, err := os.ReadFile(filepath.Join("../..", relative))
 		if err != nil {
 			t.Fatal(err)

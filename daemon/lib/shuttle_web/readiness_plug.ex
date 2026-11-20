@@ -4,7 +4,7 @@ defmodule ShuttleWeb.ReadinessPlug do
 
   The board shell remains available before Poller
   initialization, as do version, the API contract, direct text/file message delivery, peer
-  discovery and the append-only local session ledger. Plug.Static runs before
+  discovery, the append-only local session ledger and deploy runs. Plug.Static runs before
   this gate, so its assets also load. The booting response intentionally has no
   Retry-After header: HTTP clients such as OTP :httpc may replay POST requests
   when that header accompanies 503.
@@ -55,6 +55,11 @@ defmodule ShuttleWeb.ReadinessPlug do
       |> halt()
     end
   end
+
+  # A deploy run is files on disk; its caller reads it across the restart the
+  # run itself causes, while the replacement daemon is still booting.
+  defp request_available_during_boot?(%Plug.Conn{request_path: "/api/v1/deploy/runs" <> _}),
+    do: true
 
   defp request_available_during_boot?(conn),
     do: {conn.method, conn.request_path} in @available_during_boot

@@ -38,6 +38,7 @@ read -r ignored || :
 			// Exercise real -l startup, never the operator's /etc or home profiles.
 			harness := shellFunction(t, string(source), "shell_quote") + shellFunction(t, string(source), "run_value") + `
 fleet_flags() { :; }
+uses_ssh() { :; }
 fleet_ssh() { printf fake; }
 ssh() {
  local invocation="${@: -1}"; invocation="${invocation#bash -lc }"; invocation="${invocation% </dev/null}"

@@ -213,6 +213,13 @@ defmodule ShuttleWeb.Router do
     # hark socket. A WebSocket upgrade negotiates no JSON, so it stays outside
     # `:api` like the byte routes above.
     get("/voice/audio", PhoneAudioController, :upgrade)
+    # A deploy run's files, launch script and output are raw bytes, and the
+    # caller is bin/shuttle-deploy, not a browser negotiating JSON.
+    post("/deploy/runs", DeployRunController, :create)
+    put("/deploy/runs/:id/files/:name", DeployRunController, :put_file)
+    post("/deploy/runs/:id/start", DeployRunController, :start)
+    get("/deploy/runs/:id/output", DeployRunController, :output)
+    delete("/deploy/runs/:id", DeployRunController, :delete)
   end
 
   # The served frontend's bare-root document. Static assets are served by

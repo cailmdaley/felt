@@ -595,6 +595,11 @@ here" rather than as a missing file.
 | `GET /debug/profile` | host-scoped | A blocking CPU and VM profile of this daemon |
 | `POST /quarantine/release` | host-addressed | Release the boot quarantine (`shuttle daemon release`); optional `expected: {incarnation, release_path}` binds authorization to a verified daemon, with HTTP 409 `incarnation_mismatch` if it changed |
 | `POST /remotes/:name/reset` | host-addressed | Restart recovery for a tripped, degraded or unreachable remote; one reset buys one attempt, and it 409s when no recovery action is waiting |
+| `POST /deploy/runs` | host-addressed | Create a deploy run, a directory under `~/.shuttle/deploy/runs/<id>`; 201 `{id, dir}`. Runs older than a day are removed |
+| `PUT /deploy/runs/:id/files/:name` | host-addressed | Store the raw body as `<dir>/<name>` (`[a-z0-9][a-z0-9._-]*`) |
+| `POST /deploy/runs/:id/start` | host-addressed | Run the raw body as `bash launch` in the run directory, in its own session with an ssh-login environment, so it outlives this daemon; its output goes to `<dir>/out` and its exit status to `<dir>/status`; 409 once started |
+| `GET /deploy/runs/:id/output?offset=N` | host-addressed | Output bytes from `N`, with `x-deploy-status: <code>` once the run has exited and the response reaches its end; each read writes the time to `<dir>/beat` |
+| `DELETE /deploy/runs/:id` | host-addressed | Create `<dir>/cancel` while the run is running (202); remove a finished run (204) |
 
 The six [ledger feeds](#ledger-feeds) below are fleet routes too.
 
