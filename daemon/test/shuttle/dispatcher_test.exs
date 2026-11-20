@@ -1857,6 +1857,14 @@ defmodule Shuttle.DispatcherTest do
              ) == :fresh
     end
 
+    test "an agent with no cli starts fresh rather than resuming a session" do
+      agent = %{id: "w", cli: nil, wrapper: "custom"}
+
+      assert Dispatcher.effective_resume_intent({:previous, @prev.uuid}, agent,
+               previous_session: @prev
+             ) == :fresh
+    end
+
     test "same-harness resume stands, and an unknown harness still tries" do
       claude = %{id: "w", cli: "claude", wrapper: "claude"}
       pi = %{id: "w", cli: "pi", wrapper: "pi"}

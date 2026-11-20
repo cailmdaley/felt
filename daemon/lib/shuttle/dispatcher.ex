@@ -1535,7 +1535,7 @@ defmodule Shuttle.Dispatcher do
       end
 
     if prev_harness &&
-         Shuttle.Harness.normalize(prev_harness) != Shuttle.Harness.normalize(agent.cli),
+         Shuttle.Harness.normalize(prev_harness) != Shuttle.Harness.normalize(agent.cli || ""),
        do: :fresh,
        else: intent
   end
