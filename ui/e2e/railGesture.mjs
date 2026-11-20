@@ -97,6 +97,27 @@ try {
     await swipe(page, at, -240)
     await page.waitForFunction(() => location.hash === '#/channels')
     await settled(page, true)
+
+    // Over a framed page, the tapestry a close's card opens, the frame keeps the wheel from the board and from Safari's back:
+    // it passes the swipe up, so it brings the rail too. Dispatched in the frame, where a real trackpad's events land.
+    await swipe(page, at, 240)
+    await settled(page, false)
+    await page.locator('.kbn-ch-item[data-fiber="cmbx/covariance"][data-kind="close"] .uf-card[data-page]').click()
+    await page.waitForFunction(() => location.hash.includes('tapestry.html') && document.querySelector('.ws-selected iframe'))
+    const framed = page.frames().find(frame => frame !== page.mainFrame())
+    await framed.waitForFunction(() => document.readyState === 'complete')
+    const kept = await framed.evaluate(async () => {
+      let kept = 0
+      for (let step = 0; step < 40 && document.body; step++) {
+        const deltaX = step < 8 ? -30 : -30 * 0.9 ** (step - 8)
+        if (!document.body.dispatchEvent(new WheelEvent('wheel', { deltaX, bubbles: true, cancelable: true }))) kept++
+        await new Promise(next => setTimeout(next, 16))
+      }
+      return kept
+    }).catch(() => -1)
+    await page.waitForFunction(() => location.hash === '#/channels')
+    await settled(page, true)
+    assert.ok(kept !== 0, 'the frame kept the sideways wheel from the browser')
     assert.deepEqual(errors, [])
   }
   {
@@ -152,7 +173,7 @@ try {
     assert.equal(await hidden(page), true)
     assert.deepEqual(errors, [])
   }
-  console.log('Rail gesture in WebKit: a trackpad swipe and a finger both carry the rail, a second swipe in the first one\'s inertia takes effect, a half swipe settles back, a vertical scroll leaves it be, and over the reader the swipe brings the rail')
+  console.log('Rail gesture in WebKit: a trackpad swipe and a finger both carry the rail, a second swipe in the first one\'s inertia takes effect, a half swipe settles back, a vertical scroll leaves it be, and over the reader, a framed page included, the swipe brings the rail')
 } finally {
   await browser.close()
 }

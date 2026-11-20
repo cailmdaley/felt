@@ -160,6 +160,29 @@ it('routes board links through the parent while keeping ordinary fragments local
   expect(messages).not.toHaveBeenCalled()
 })
 
+it('passes a frame\'s wheel up and keeps a sideways one from the browser only while the view beneath takes it, save where the page scrolls sideways', async () => {
+  reportHtml = '<div id="strip" style="overflow-x: auto"><p id="wide">wide</p></div><p id="plain">plain</p>'
+  const frame = await report()
+  const win = frame.contentWindow! as Window & typeof globalThis
+  const say = (type: string, payload: Record<string, unknown>): void => win.postMessage({ protocol: 'shuttle-document', version: 1, type, payload }, '*')
+  const wheel = (id: string, deltaX: number, deltaY = 0): boolean => frame.contentDocument!.getElementById(id)!.dispatchEvent(new win.WheelEvent('wheel', { deltaX, deltaY, bubbles: true, cancelable: true }))
+  const sent = (): unknown[] => messages.mock.calls.flatMap(([message]) => message.type === 'wheel' ? [JSON.parse(JSON.stringify(message.payload))] : [])
+  const strip = frame.contentDocument!.getElementById('strip')!
+  Object.defineProperties(strip, { scrollWidth: { value: 900 }, clientWidth: { value: 300 }, scrollLeft: { value: 0, writable: true } })
+  say('active', { active: true })
+  messages.mockClear()
+  // Under a view that does not take the swipe, the browser keeps its back.
+  expect([wheel('plain', -40), sent()]).toStrictEqual([true, []])
+  say('sideways', { take: true })
+  expect([wheel('plain', -40, 2), wheel('plain', 1, 30), sent()]).toStrictEqual([false, true, [{ dx: -40, dy: 2 }, { dx: 1, dy: 30 }]])
+  // Content that scrolls that way keeps its gesture: rightward from its start is the swipe's, leftward the strip's.
+  messages.mockClear()
+  expect([wheel('wide', 40), wheel('wide', -40), sent()]).toStrictEqual([true, false, [{ dx: -40, dy: 0 }]])
+  say('sideways', { take: false })
+  messages.mockClear()
+  expect([wheel('plain', -40), sent()]).toStrictEqual([true, []])
+})
+
 it('asks the board to scroll a fitted page to its fragment, which the page cannot do itself', async () => {
   reportHtml = `<svg><a href="#ledger"><text>ledger</text></a></svg><a href="#">top</a><details id="ledger"></details>`
   const frame = await report()

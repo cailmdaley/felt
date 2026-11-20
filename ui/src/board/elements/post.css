@@ -54,7 +54,7 @@
 .kbn-ch-item-text :is(p, ul, ol, pre, blockquote) { margin: 4px 0; }
 .kbn-ch-item-text :is(ul, ol) { padding-left: 1.3em; }
 /* Its files below its words, at the stream's full width: the previews unfold in place (workspace/unfold.css). */
-.kbn-ch-previews { margin-top: 8px; }
+.kbn-ch-previews { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
 /* An unfolded file's bar pins below the band of pinned line names, the band's own offset taken back. */
 .kbn-ch-previews .uf-bar { top: -12px; }
 

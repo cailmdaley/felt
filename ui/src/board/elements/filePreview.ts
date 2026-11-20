@@ -82,6 +82,49 @@ export function fileRow(file: UnfoldFile, now = Date.now()): HTMLElement {
   return row
 }
 
+/**
+ * A page as one card in a card's slot, drawn before the page is looked for:
+ * each look fills its name and when it was written, or, finding none, says
+ * `none` and stills it. A press calls `open`.
+ */
+export class PageCard {
+  readonly el = document.createElement('div')
+  private readonly card = document.createElement('button')
+  private looking?: Promise<UnfoldFile | undefined>
+  private readonly none: string
+
+  constructor(open: () => void, none: string) {
+    this.none = none
+    const row = document.createElement('div')
+    this.el.className = 'uf'
+    row.className = 'uf-row'
+    Object.assign(this.card, { type: 'button', className: 'uf-card' })
+    this.card.dataset.density = 'card'
+    this.card.dataset.page = ''
+    this.card.addEventListener('click', open)
+    const [glyph, name] = face({ key: '' as DocKey, name: 'tapestry.html' }, Date.now())
+    name.textContent = 'Tapestry'
+    this.say('Open the tapestry', [glyph, name])
+    row.append(this.card)
+    this.el.append(row)
+  }
+  /** Looks for the page again; the newest look is the one that fills it. */
+  look(found: Promise<UnfoldFile | undefined>): void {
+    this.looking = found
+    void found.then(file => {
+      if (this.looking !== found) return
+      this.card.disabled = !file
+      if (file) this.say(`Open ${file.name}`, face(file, Date.now()))
+      else this.say(this.none, [Object.assign(document.createElement('span'), { className: 'uf-file-name', textContent: this.none })])
+    })
+  }
+  private say(label: string, faces: HTMLElement[]): void {
+    this.card.replaceChildren(...faces)
+    this.card.title = label
+    this.card.setAttribute('aria-label', label)
+  }
+}
+
 /** An open list of files: its close, and its rows drawn anew from the files as they stand now. */
 export interface OpenFileList { close(): void; update(files: readonly UnfoldFile[], current?: DocKey): void }
 

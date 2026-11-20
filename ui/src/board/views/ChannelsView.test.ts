@@ -2,7 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { layTube } from '../tube.js'
 import { ChannelsView } from './ChannelsView.js'
-import { foldPx } from '../elements/filePreview.js'
+import { CARD_PX } from '../elements/filePreview.js'
 import type { ViewContext } from './ViewRegistry.js'
 import { BoardFeed, type BoardRecord } from '../boardFeed.js'
 import type { SentFile } from '../sentFiles.js'
@@ -116,7 +116,7 @@ it('lists the recent channels, the newest wait first, and reads a channel as wha
   expect(item(host, 'mask').querySelector('.kbn-ch-kind')?.textContent).toBe('asks')
   // Its files are previews in one sideways row below its words, every kind of file alike.
   const files = item(host, 'tsz').querySelectorAll('.kbn-ch-previews .uf-row > .uf-card')
-  expect([[...files].map(file => file.getAttribute('aria-label')), item(host, 'tsz').querySelector('.kbn-ch-previews')!.hasAttribute('data-several')]).toStrictEqual([['Open spectrum.svg', 'Open deck.html', 'Open nulls.md'], true])
+  expect([[...files].map(file => file.getAttribute('aria-label')), item(host, 'tsz').querySelector('.kbn-ch-previews .uf')!.hasAttribute('data-several')]).toStrictEqual([['Open spectrum.svg', 'Open deck.html', 'Open nulls.md'], true])
   expect(item(host, 'tsz').querySelector('.kbn-ch-item-text')?.textContent?.trim()).toBe('The spectrum at 9σ.')
   expect(view.keydown(new KeyboardEvent('keydown', { key: 'j' }))).toBe(true)
   expect(shown(host)).toBe('van')
@@ -464,7 +464,7 @@ it('speaks for every constitution without a channel in misc, at the rail\'s foot
   expect([...document.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).not.toContain('Pin')
 })
 
-it('shows a close awaiting review by its note and its tapestry, never its outcome, and keeps the tapestry across redraws', async () => {
+it('shows a close awaiting review by its note and a card for its tapestry, never its outcome, and keeps the card across redraws', async () => {
   daemon()
   const cov = card({ id: 'cmbx/cov', uid: 'V', name: 'Covariance', orchestrator: 'C', column: 'awaitingReview', status: 'closed', closedAt: at(40), outcome: 'Validated against **2000** simulations.', reviewMark: { note: 'Agrees to 4%.', at: at(40) } })
   const { view, ctx, host } = await mount([chair, tsz, mask, beam, cov])
@@ -476,13 +476,16 @@ it('shows a close awaiting review by its note and its tapestry, never its outcom
   const review = item(host, 'cov')
   expect([review.dataset.kind, review.hasAttribute('data-waiting'), review.querySelector('.kbn-ch-kind')?.textContent]).toStrictEqual(['close', true, 'for review'])
   expect(review.querySelector('.kbn-ch-item-text')?.textContent?.trim()).toBe('Agrees to 4%.')
-  const lead = review.querySelector<HTMLElement>('.kbn-ch-previews .uf-card')!
-  expect([lead.dataset.key, lead.querySelector('.ws-thumbnail') !== null]).toStrictEqual(['local:/w/cov/tapestry.html', true])
+  // One line, nothing loaded; a press opens the tapestry in the reader.
+  const lead = review.querySelector<HTMLButtonElement>('.kbn-ch-previews .uf-card[data-page]')!
+  expect([lead.dataset.density, lead.getAttribute('aria-label'), lead.querySelector('.ws-thumbnail')]).toStrictEqual(['card', 'Open Tapestry', null])
   expect(host.textContent).not.toContain('2000')
   // A redraw of the stream draws the same tapestry at once, not a new one.
   ctx.response = board([chair, tsz, mask, beam, cov])
   view.refresh(ctx)
   expect(item(host, 'cov').querySelector('.kbn-ch-previews .uf-card')).toBe(lead)
+  lead.click(); await settle()
+  expect(vi.mocked(ctx.workspace!.openPage).mock.lastCall?.[1]).toBe('local:/w/cov/tapestry.html')
 })
 
 it('draws a post to the human that waits on them gold, with what it attached as a preview', async () => {
@@ -744,7 +747,7 @@ it('clears an old post by what waits now once its earlier clear and undo have la
   expect(ctx.workspace!.board.waiting.get('C')?.id).toBe('q1')
 })
 
-it('reads the tapestry of each fiber\'s newest close only, and reckons a close\'s row with a tapestry only when it shows one', async () => {
+it('draws a tapestry card on each fiber\'s newest close only, reckoned in its row before the tapestry is read, and says when there is none', async () => {
   const human = { label: 'Sam' }
   const cov = card({ id: 'cmbx/cov', uid: 'V', name: 'Covariance', orchestrator: 'C', column: 'tempered', status: 'closed', closedAt: at(20), outcome: 'Validated.' })
   daemon([], undefined, {}, { board: { C: [...BOARD.C, record({ id: 'v1', kind: 'closed', fiber: 'V', to: human, text: 'First pass.' }, 60), record({ id: 'v2', kind: 'closed', fiber: 'V', to: human, text: 'Second pass.' }, 20)] } })
@@ -755,15 +758,22 @@ it('reads the tapestry of each fiber\'s newest close only, and reckons a close\'
   ctx.response = board([chair, { ...tsz, name: 'κ × tSZ, final' }, mask, beam, cov])
   view.refresh(ctx); await settle(); await settle()
   const closes = () => [...host.querySelectorAll<HTMLElement>('.kbn-ch-item[data-kind="close"]')]
-  expect(closes().map(close => [...close.querySelectorAll<HTMLElement>('.kbn-ch-previews .uf-card')].map(card => card.dataset.key))).toStrictEqual([[], ['local:/w/cov/tapestry.html']])
+  expect(closes().map(close => close.querySelectorAll('.kbn-ch-previews .uf-card[data-page]').length)).toStrictEqual([0, 1])
   expect(lead.mock.calls.every(([each]) => each.uid === 'V')).toBe(true)
+  // Its row is reckoned with the card's line from the first layout, so nothing grows when the read lands.
+  const [entries, heights] = vi.mocked(layTube).mock.lastCall!
+  expect(entries.flatMap((entry, row) => entry.kind === 'close' ? [[entry.id, heights![row]]] : [])).toStrictEqual([['v1', 64], ['v2', 64 + CARD_PX]])
+  // Each draw of the stream looks again, for a tapestry written since.
   const calls = lead.mock.calls.length
   ctx.response = board([chair, tsz, mask, beam, cov])
   view.refresh(ctx); await settle()
   expect(lead.mock.calls.length - calls).toBe(1)
-  // The stream was laid out again with the tapestry the newest close shows, and none for the older one.
-  const [entries, heights] = vi.mocked(layTube).mock.lastCall!
-  expect(entries.flatMap((entry, row) => entry.kind === 'close' ? [[entry.id, heights![row]]] : [])).toStrictEqual([['v1', 64], ['v2', 64 + foldPx()]])
+  // A fiber with no tapestry: the card says so and stands still.
+  lead.mockResolvedValue(undefined as never)
+  ctx.response = board([chair, tsz, mask, beam, { ...cov, name: 'Covariance, again' }])
+  view.refresh(ctx); await settle(); await settle()
+  const none = closes()[1].querySelector<HTMLButtonElement>('.uf-card[data-page]')!
+  expect([none.disabled, none.textContent]).toStrictEqual([true, 'cov has no tapestry'])
 })
 
 it('takes from the stream the sends whose clear was written, and its undo brings back only those', async () => {

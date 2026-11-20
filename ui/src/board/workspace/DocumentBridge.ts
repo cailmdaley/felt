@@ -58,6 +58,8 @@ export function documentMessage(data: unknown): data is DocumentMessage {
     case 'media': case 'references:scan': case 'pdf:scan': return fields(p, [])
     case 'pause': return fields(p, []) || fields(p, ['candidate']) && shortString(p.candidate)
     case 'active': return fields(p, ['active']) && typeof p.active === 'boolean'
+    case 'sideways': return fields(p, ['take']) && typeof p.take === 'boolean'
+    case 'wheel': return fields(p, ['dx', 'dy']) && travel(p.dx) && travel(p.dy)
     case 'key': return fields(p, KEY_FIELDS) && shortString(p.key, 64) && p.key.length > 0
       && KEY_FIELDS.slice(1).every(key => p[key] === undefined || typeof p[key] === 'boolean')
     case 'scroll':
@@ -232,6 +234,8 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
     window.history[name] = (state: unknown, unused: string) => native(state, unused)
   }
   let active = false
+  // Whether the view beneath the reader takes a sideways swipe: the frame's wheel then goes to it, never to the browser's back.
+  let sideways = false
   let fitted = false
   let scroller: HTMLElement | null = null
   let pendingRestore: ScrollPosition | null = null
@@ -307,7 +311,8 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
     if (data.type === 'active' && typeof payload.active === 'boolean') {
       active = payload.active
       if (!active) { pause(); position() }
-    } else if (data.type === 'references:scan') links?.scan()
+    } else if (data.type === 'sideways' && typeof payload.take === 'boolean') sideways = payload.take
+    else if (data.type === 'references:scan') links?.scan()
     else if (data.type === 'pdf:scan') window.dispatchEvent(new Event('shuttle-pdf-scan'))
     else if (data.type === 'references:resolved' && Array.isArray(payload.targets)) {
       links?.resolve(payload.targets.filter((target: ReferenceTarget) => target && typeof target.candidate === 'string' && typeof target.title === 'string' && typeof target.audio === 'boolean'))
@@ -356,6 +361,21 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
     }
   })
   document.addEventListener('scroll', position, { capture: true, passive: true })
+  // A trackpad's wheel inside an opaque frame never reaches the board either: while the view beneath takes the sideways
+  // swipe, the frame passes its wheel up, and keeps a sideways one from the browser, save where the page scrolls that way.
+  document.addEventListener('wheel', event => {
+    if (!active || !sideways) return
+    const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerWidth : 1
+    const dx = Math.max(-8192, Math.min(8192, event.deltaX * unit)), dy = Math.max(-8192, Math.min(8192, event.deltaY * unit))
+    if (Math.abs(dx) > Math.abs(dy)) {
+      for (let el = event.target instanceof Element ? event.target : null; el; el = el.parentElement) {
+        const scrolls = el.scrollWidth > el.clientWidth + 1 && (el === document.scrollingElement || /auto|scroll/.test(getComputedStyle(el).overflowX))
+        if (scrolls && (dx < 0 ? el.scrollLeft > 0 : el.scrollLeft + el.clientWidth < el.scrollWidth - 1)) return
+      }
+      event.preventDefault()
+    }
+    send('wheel', { dx, dy })
+  }, { passive: false })
   // Touches inside an opaque frame never reach the board, so the frame
   // recognises a page swipe itself and reports its travel; follow updates are
   // coalesced to one per animation frame.
@@ -497,6 +517,20 @@ export interface FrameBridge {
 }
 const bridges = new WeakMap<HTMLIFrameElement, FrameBridge>()
 export function frameBridge(frame: HTMLIFrameElement): FrameBridge | undefined { return bridges.get(frame) }
+/** The connected frames, and whether the view beneath the reader takes their sideways wheel ({@link takeSidewaysWheel}). */
+const connected = new Set<FrameBridge>()
+let sidewaysTaken = false
+/**
+ * While `take` holds, every document frame passes its wheel up, replayed on
+ * the frame element as the board's own, and keeps a sideways one from the
+ * browser's back: a view beneath the reader that answers the sideways swipe
+ * (Channels' rail) is the only one that takes it.
+ */
+export function takeSidewaysWheel(take: boolean): void {
+  if (take === sidewaysTaken) return
+  sidewaysTaken = take
+  for (const bridge of connected) bridge.command('sideways', { take })
+}
 
 /** Opaque origins cannot authenticate by origin; only this top-frame Window can speak. */
 export function connectDocumentFrame(frame: HTMLIFrameElement, receive: (message: DocumentMessage) => void): FrameBridge {
@@ -522,7 +556,7 @@ export function connectDocumentFrame(frame: HTMLIFrameElement, receive: (message
     },
     subscribeScroll: listener => { listeners.add(listener); return () => { listeners.delete(listener) } },
     dispose: () => {
-      window.removeEventListener('message', onMessage); listeners.clear(); bridges.delete(frame)
+      window.removeEventListener('message', onMessage); listeners.clear(); bridges.delete(frame); connected.delete(bridge)
       clearTimeout(deferredTimer); deferredTimer = undefined; deferredReferences = undefined
     },
   }
@@ -555,9 +589,15 @@ export function connectDocumentFrame(frame: HTMLIFrameElement, receive: (message
       for (const listener of listeners) listener(bridge.position)
     }
     if (message.type === 'anchors') bridge.anchors = message.payload.items as ReadingAnchor[]
+    if (message.type === 'ready' && sidewaysTaken) bridge.command('sideways', { take: true })
+    if (message.type === 'wheel') {
+      if (active) frame.dispatchEvent(new WheelEvent('wheel', { deltaX: message.payload.dx as number, deltaY: message.payload.dy as number, bubbles: true, cancelable: true }))
+      return
+    }
     receive(message)
   }
   bridges.set(frame, bridge)
+  connected.add(bridge)
   window.addEventListener('message', onMessage)
   return bridge
 }
