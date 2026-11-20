@@ -243,6 +243,63 @@ func TestPromotionMovesEveryHarnessCarryingFelt(t *testing.T) {
 	}
 }
 
+// A promotion that fails back to a generation sealed by a felt whose
+// generations carried no agy plugin leaves agy's copy in place, and recovery
+// completes rather than holding every later setup on its journal.
+func TestRecoveryToAGenerationWithoutAgyKeepsAgysPlugin(t *testing.T) {
+	t.Parallel()
+	env, _ := testEnv(t)
+	sysenvtest.OnlyPath(env)
+	a := testApp(t, env)
+	runtimeDir := filepath.Join(homeOf(t, env), ".felt", pluginRuntimeDirName)
+	current := filepath.Join(runtimeDir, pluginCurrentName)
+	previous := filepath.Join(runtimeDir, pluginPreviousName)
+	if err := os.MkdirAll(current, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := copyPluginSource(t)
+	if err := copyTree(filepath.Join(source, "claude-plugin"), filepath.Join(previous, "claude-plugin")); err != nil {
+		t.Fatal(err)
+	}
+	identity, err := a.localPluginGeneration(source, previous)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(previous, antigravityBundleDir)); err != nil {
+		t.Fatal(err)
+	}
+	identity.AntigravityPayloadSHA256 = ""
+	if err := sealPluginGeneration(previous, identity); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := a.antigravityPluginDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{"name":"felt"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	installed := true
+	if err := writePluginJournal(filepath.Join(runtimeDir, pluginJournalName), pluginPromotionJournal{
+		Candidate: current, Phase: "pending_reconciliation", HadOld: true,
+		Native: &pluginNativeIntent{Antigravity: &installed},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.recoverPluginPromotion(runtimeDir); err != nil {
+		t.Fatalf("recovery: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dir, "plugin.json")); err != nil || string(got) != `{"name":"felt"}` {
+		t.Fatalf("agy's plugin = %q (%v), want it kept", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(runtimeDir, pluginJournalName)); !os.IsNotExist(err) {
+		t.Fatalf("recovery left its journal: %v", err)
+	}
+}
+
 // Where felt's agy plugin directory exists, agy's own plugin list decides
 // whether felt is enabled there.
 func TestReceiptReadsAgyPluginList(t *testing.T) {

@@ -272,8 +272,10 @@ var antigravityHarness = pluginHarness{
 			return nil
 		}
 		if *intent.Antigravity {
-			if _, err := os.Stat(current); err != nil {
-				return nil
+			// A restored generation sealed before generations carried agy's
+			// plugin has none to restore, so the copy agy has stays.
+			if expected, present, err := promotedGenerationForVerify(current); err != nil || !present || expected.AntigravityPayloadSHA256 == "" {
+				return err
 			}
 			if a.verifyAntigravityPlugin(current) == nil {
 				return nil
