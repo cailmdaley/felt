@@ -83,43 +83,69 @@ export function fileRow(file: UnfoldFile, now = Date.now()): HTMLElement {
 }
 
 /**
- * A page as one card in a card's slot, drawn before the page is looked for:
- * each look fills its name and when it was written, or, finding none, says
- * `none` and stills it. A press calls `open`.
+ * A file's page drawn at its real size in `el`, its preview's box: loaded as
+ * it nears the screen and released once well away, and none while `awake`
+ * says its host is hidden.
+ */
+function pagePreview(file: UnfoldFile, el: HTMLElement, opts: { shuttleBase: string; awake?(): boolean }, density?: FileDensity): Thumbnail {
+  const parsed = parseDocKey(file.key), path = parsed?.path ?? file.name
+  // A post's page is laid out at its card's width, so it is drawn at its real size; a view's lead, at least as wide as a reading column.
+  const thumbnail: Thumbnail = new Thumbnail({
+    key: `unfold:${file.key}`, shuttleBase: opts.shuttleBase, className: 'uf-thumb', fallback: file.name, keepMedia: true,
+    file: parsed ? { fullPath: parsed.path, owner: parsed.owner, basename: path.split('/').pop() ?? file.name } : undefined,
+    get pageWidth() { return density ? Math.round(el.clientWidth) || 720 : Math.max(720, Math.round(el.clientWidth)) },
+    priority: () => (opts.awake?.() ?? true) ? thumbnail.screenPriority() : 0,
+    distance: () => thumbnail.gap(),
+  })
+  return thumbnail
+}
+
+/**
+ * A constitution's tapestry in its slot among a post's previews, the slot's
+ * size set before the tapestry is looked for: a card, one line, or with
+ * `preview`, a page's box showing the top of the tapestry once it is found.
+ * The newest look is the one that fills it. A press calls `open`.
  */
 export class PageCard {
   readonly el = document.createElement('div')
   private readonly card = document.createElement('button')
+  private readonly preview?: { shuttleBase: string; awake?(): boolean }
   private looking?: Promise<UnfoldFile | undefined>
-  private readonly none: string
+  private shown?: { key: DocKey; thumbnail: Thumbnail }
 
-  constructor(open: () => void, none: string) {
-    this.none = none
+  constructor(open: () => void, preview?: { shuttleBase: string; awake?(): boolean }) {
+    this.preview = preview
     const row = document.createElement('div')
     this.el.className = 'uf'
     row.className = 'uf-row'
     Object.assign(this.card, { type: 'button', className: 'uf-card' })
-    this.card.dataset.density = 'card'
+    this.card.dataset.density = preview ? 'page' : 'card'
     this.card.dataset.page = ''
     this.card.addEventListener('click', open)
     const [glyph, name] = face({ key: '' as DocKey, name: 'tapestry.html' }, Date.now())
     name.textContent = 'Tapestry'
-    this.say('Open the tapestry', [glyph, name])
+    if (!preview) this.card.append(glyph, name)
+    this.say('Open the tapestry')
     row.append(this.card)
     this.el.append(row)
   }
+  /** Whether it shows the page, not a card. */
+  get previews(): boolean { return !!this.preview }
   /** Looks for the page again; the newest look is the one that fills it. */
   look(found: Promise<UnfoldFile | undefined>): void {
     this.looking = found
     void found.then(file => {
-      if (this.looking !== found) return
-      this.card.disabled = !file
-      if (file) this.say(`Open ${file.name}`, face(file, Date.now()))
-      else this.say(this.none, [Object.assign(document.createElement('span'), { className: 'uf-file-name', textContent: this.none })])
+      if (this.looking !== found || !file) return
+      this.say(`Open ${file.name}`)
+      if (!this.preview) { this.card.replaceChildren(...face(file, Date.now())); return }
+      if (this.shown?.key === file.key) return
+      this.shown?.thumbnail.dispose()
+      this.shown = { key: file.key, thumbnail: pagePreview(file, this.card, this.preview, 'page') }
+      this.card.replaceChildren(this.shown.thumbnail.el)
     })
   }
-  private say(label: string, faces: HTMLElement[]): void {
-    this.card.replaceChildren(...faces)
+  dispose(): void { this.shown?.thumbnail.dispose() }
+  private say(label: string): void {
     this.card.title = label
     this.card.setAttribute('aria-label', label)
   }
@@ -393,16 +419,7 @@ export class Unfold {
       this.cards.set(file.key, { el })
       return el
     }
-    const basename = path.split('/').pop() ?? file.name
-    // A post's page is laid out at its card's width, so it is drawn at its real size; a view's lead, at least as wide as a reading column.
-    const thumbnail: Thumbnail = new Thumbnail({
-      key: `unfold:${file.key}`, shuttleBase: this.opts.shuttleBase, className: 'uf-thumb', fallback: file.name, keepMedia: true,
-      file: parsed ? { fullPath: parsed.path, owner: parsed.owner, basename } : undefined,
-      get pageWidth() { return density ? Math.round(el.clientWidth) || 720 : Math.max(720, Math.round(el.clientWidth)) },
-      // Alive only near the screen: loaded as it nears, released once well away.
-      priority: () => (this.opts.awake?.() ?? true) ? thumbnail.screenPriority() : 0,
-      distance: () => thumbnail.gap(),
-    })
+    const thumbnail = pagePreview(file, el, this.opts, density)
     el.append(thumbnail.el)
     this.cards.set(file.key, { el, thumbnail })
     return el

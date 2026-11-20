@@ -54,6 +54,8 @@ const KEEP_MS = 7 * 86_400_000
 const SHADOW_PX = 24
 /** About how tall a post stands without its files: its head and two lines of words. */
 const POST_PX = 64
+/** A constitution as its tapestry was looked for: a tapestry written since is looked for again. */
+const tapestryKey = (card: KanbanCard): string => `${card.originId}:${fiberOf(card)}:${card.modifiedAt ?? ''}`
 /** How many of a clear's records are written at once: each write is a process in the daemon. */
 const CLEAR_WRITES = 4
 /** A channel written here is shown so this long at most before the feed's word stands, whatever it says. */
@@ -165,8 +167,10 @@ export class ChannelsView implements TemporalView {
   private readonly drafts = new Map<string, string>()
   /** Each item's files as previews, each opening its file in the reader, by item, kept across redraws. */
   private readonly unfolds = new Map<string, Unfold>()
-  /** Each fiber's newest close's tapestry card, by item, kept across redraws and looked for again on each. */
+  /** Each fiber's newest close's tapestry, by item, kept across redraws and looked for again on each. */
   private readonly pageCards = new Map<string, PageCard>()
+  /** Whether a constitution has a tapestry, by its fiber as last modified, once a look has said. */
+  private readonly tapestries = new Map<string, boolean>()
   /** The stream's rows as last drawn, by entry, each with what it drew: a row that would draw the same is kept. */
   private readonly rows = new Map<string, { sig: string; node: HTMLLIElement }>()
   private channels: Channel[] = []
@@ -778,12 +782,14 @@ export class ChannelsView implements TemporalView {
     // A row draws an entry; the thread's state, which moves while its worker runs, is painted on it in place.
     // A line follows the one before it in its group: the row above, of the same thread, moments before.
     const grouped = entries.map((entry, row) => { const before = entries[row - 1]; return entry.kind !== 'station' && before?.kind !== 'station' && groups(before, entry) })
-    // Each fiber's newest close leads its previews with its tapestry's card; an older close lets its go.
+    // Each fiber's newest close leads its previews with its tapestry, unless a look found it has none: the channel's newest close
+    // with the page's top, the others with a card. An older close lets its go.
     const newest = new Map<string, Item>()
     for (const entry of whole) if (entry.kind === 'close') newest.set(fiberOf(entry.card), entry)
-    const leading = new Set<Entry>(newest.values())
+    const last = whole.filter(entry => entry.kind === 'close').at(-1)
+    const leading = new Map<Entry, 'page' | 'card'>([...newest.values()].filter(close => this.tapestries.get(tapestryKey(close.card)) !== false).map(close => [close, close === last ? 'page' : 'card']))
     // What the elements draw of its card: its name, slug and office.
-    const said = entries.map((entry, row) => [entry.id, entry.kind, entry.at, entry.card.name, slug(entry.card), entry.card.shuttleRole, entry.line, entry.kind === 'station' ? [entry.what, entry.end] : [entry.text, entry.waiting, entry.clears, kindWord(entry), grouped[row], leading.has(entry), entry.files.map(file => [file.host, file.fullPath, file.timestamp]), lineIds(entry)]])
+    const said = entries.map((entry, row) => [entry.id, entry.kind, entry.at, entry.card.name, slug(entry.card), entry.card.shuttleRole, entry.line, entry.kind === 'station' ? [entry.what, entry.end] : [entry.text, entry.waiting, entry.clears, kindWord(entry), grouped[row], leading.get(entry), entry.files.map(file => [file.host, file.fullPath, file.timestamp]), lineIds(entry)]])
     // The margin's width, and how tall a folded preview stands.
     const margin = this.stream.clientWidth && this.stream.clientWidth < MARGIN.below ? MARGIN.narrow : MARGIN.wide
     const fold = foldPx()
@@ -794,8 +800,12 @@ export class ChannelsView implements TemporalView {
     const stream = JSON.stringify([channel.key, this.folding, failed, hidden, said, entries.map(entry => [attentionOf(entry.card, waits), turnOf(entry.card).turn]), fold, margin, ran, running.map(card => [fiberOf(card), attentionOf(card, waits)])])
     if (stream !== this.sigs.stream) {
       this.sigs.stream = stream
-      // Each row reckoned by its parts' sizes, a post's by its previews (a tapestry's card leading them), before anything in it loads.
-      const heights = entries.map(entry => entry.kind === 'station' ? rowHeight(entry) : POST_PX + (leading.has(entry) ? CARD_PX + (entry.files.length ? PREVIEW_GAP : 0) : 0) + previewsHeight(entry.files.map(file => file.fullPath), fold))
+      // Each row reckoned by its parts' sizes, a post's by its previews (a tapestry leading them), before anything in it loads.
+      const heights = entries.map(entry => {
+        if (entry.kind === 'station') return rowHeight(entry)
+        const lead = leading.get(entry)
+        return POST_PX + (lead ? (lead === 'page' ? fold : CARD_PX) + (entry.files.length ? PREVIEW_GAP : 0) : 0) + previewsHeight(entry.files.map(file => file.fullPath), fold)
+      })
       const index = threadIndexFor(this.ctx!.response)
       // Every thread in a channel is its chair's: a parent reaches to a sub-thread only below the chair.
       const parentOf = (card: KanbanCard): KanbanCard | undefined => { const parent = index.parentOf(card); return parent && (!seat || fiberOf(parent) !== fiberOf(seat)) ? parent : undefined }
@@ -820,7 +830,7 @@ export class ChannelsView implements TemporalView {
       const kept = new Set<string>()
       const drawn = entries.map((entry, row) => {
         const sig = JSON.stringify(said[row]), was = this.rows.get(entry.id)
-        const node = was?.sig === sig ? was.node : entry.kind === 'station' ? this.stationRow(entry, now) : this.itemRow(entry, now, grouped[row], leading.has(entry))
+        const node = was?.sig === sig ? was.node : entry.kind === 'station' ? this.stationRow(entry, now) : this.itemRow(entry, now, grouped[row], leading.get(entry))
         this.rows.set(entry.id, { sig, node })
         kept.add(entry.id)
         if (was?.node === node && entry.kind !== 'station') node.querySelector(':scope > .constitution-state-dot')?.replaceWith(this.dot(entry))
@@ -833,8 +843,14 @@ export class ChannelsView implements TemporalView {
       const gap = (rows: number): HTMLLIElement[] => rows ? [el('li', 'kbn-ch-folded', `· · · ${rows} ${rows === 1 ? 'row' : 'rows'} folded · · ·`)] : []
       this.rebuild(this.stream, [count, ink, ...hidden ? [this.earlierRow(hidden)] : [], ...folded ? [...drawn.flatMap((node, row) => [...gap(folded.gaps[row]), node]), ...gap(folded.gaps.at(-1)!)] : drawn])
       for (const id of this.rows.keys()) if (!kept.has(id)) this.rows.delete(id)
-      // A tapestry written since is found again: the lookup is the card's cached read, new when its fiber changed.
-      for (const close of leading) this.pageCards.get(`item:${close.id}`)?.look(this.ctx!.workspace!.globeHost.feeds.lead(close.card))
+      // A tapestry written since is found again: the lookup is the cached read, new when its fiber changed. One found to be
+      // missing gives up its slot: the stream is drawn again without it.
+      for (const close of leading.keys()) this.pageCards.get(`item:${close.id}`)?.look(this.ctx!.workspace!.globeHost.feeds.lead(close.card).then(file => {
+        const key = tapestryKey(close.card), had = this.tapestries.get(key)
+        this.tapestries.set(key, !!file)
+        if (!file && had !== false) this.draw()
+        return file
+      }))
       // What a fold hides keeps its previews, so they stand as they were when it unfolds.
       this.sweep(new Set(whole.flatMap(entry => entry.kind === 'station' ? [] : [`item:${entry.id}`])))
       if (!entries.length) this.stream.append(el('li', 'kbn-ch-hush', folded ? `Nothing in #${channel.name} says “${this.folding}”.` : failed ? 'This channel\'s history could not be read; trying again.' : 'Nothing addressed to you here yet.'))
@@ -1058,12 +1074,12 @@ export class ChannelsView implements TemporalView {
     return row
   }
   /** One thing a worker addressed to the human, as a post (elements/post.ts). */
-  private itemRow(item: Item, now: number, grouped: boolean, leads: boolean): HTMLLIElement {
+  private itemRow(item: Item, now: number, grouped: boolean, lead?: 'page' | 'card'): HTMLLIElement {
     const id = `item:${item.id}`
     const open = (): void => this.leaveFor(id, () => this.ctx?.workspace?.openFromDesk(item.card))
     return post(item, {
       now, dot: this.dot(item), open, grouped, clear: this.check(item),
-      previews: leads || item.files.length ? this.previews(item, id, leads) : undefined,
+      previews: lead || item.files.length ? this.previews(item, id, lead) : undefined,
     })
   }
   /** An item's state dot, which opens its worker's view. */
@@ -1207,21 +1223,28 @@ export class ChannelsView implements TemporalView {
   /**
    * An item's files below its words, each on a line of its own as wide as the
    * item (elements/filePreview.ts); a press opens that file in the reader,
-   * whose way back returns to this item. A fiber's newest close leads with a
-   * card for its tapestry, drawn in its slot before the tapestry is looked for.
+   * whose way back returns to this item. A fiber's newest close leads with
+   * its tapestry, drawn in its slot before the tapestry is looked for: the
+   * page's top for the channel's newest close, a card for the others.
    */
-  private previews(item: Item, id: string, leads: boolean): HTMLElement {
+  private previews(item: Item, id: string, lead?: 'page' | 'card'): HTMLElement {
     const { card } = item
-    const unfold = this.unfolds.get(id) ?? this.unfolds.set(id, new Unfold({
-      shuttleBase: this.ctx?.shuttleBase ?? '', awake: () => !this.ctx?.workspace?.isActive && !!this.stream?.isConnected,
-      open: key => this.openPage(id, card, key),
-    })).get(id)!
+    const shown = { shuttleBase: this.ctx?.shuttleBase ?? '', awake: () => !this.ctx?.workspace?.isActive && !!this.stream?.isConnected }
+    const unfold = this.unfolds.get(id) ?? this.unfolds.set(id, new Unfold({ ...shown, open: key => this.openPage(id, card, key) })).get(id)!
     unfold.update(item.files.map((file): UnfoldFile => {
       const key = docKey(file.host ?? card.originId, file.fullPath, card.originId, card.fiberDir)
       return { key, name: declaredTitle(key)?.title ?? file.basename, at: file.timestamp, caption: file.caption }
     }))
     const previews = el('div', 'kbn-ch-previews')
-    if (leads) previews.append((this.pageCards.get(id) ?? this.pageCards.set(id, new PageCard(() => void this.openTapestry(id), `${slug(card)} has no tapestry`)).get(id)!).el)
+    if (lead) {
+      let page = this.pageCards.get(id)
+      if (page?.previews !== (lead === 'page')) {
+        page?.dispose()
+        page = new PageCard(() => void this.openTapestry(id), lead === 'page' ? shown : undefined)
+        this.pageCards.set(id, page)
+      }
+      previews.append(page.el)
+    }
     previews.append(unfold.el)
     return previews
   }
@@ -1236,7 +1259,7 @@ export class ChannelsView implements TemporalView {
   /** Lets go of the previews the stream no longer draws. */
   private sweep(wanted: ReadonlySet<string>): void {
     for (const [id, unfold] of this.unfolds) if (!wanted.has(id)) { unfold.dispose(); this.unfolds.delete(id) }
-    for (const id of this.pageCards.keys()) if (!wanted.has(id)) this.pageCards.delete(id)
+    for (const [id, page] of this.pageCards) if (!wanted.has(id)) { page.dispose(); this.pageCards.delete(id) }
   }
 
   /** Writes a channel's unpin, hide or show, counting at once here; a write that fails is taken back and said. */

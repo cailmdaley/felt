@@ -99,6 +99,8 @@ const ROWS: Row[] = [
   { id: 'vizier', name: 'Vizier', channel: 'Vizier', role: 'vizier', seat: true, state: 'idle', minutes: 6 },
   { id: 'morning-post', name: 'Morning post', channel: 'Vizier', seat: true, standing: true, closed: true, minutes: 140, outcome: 'Eleven letters sorted; two need a reply from you, the rest are filed.',
     tapestry: { title: 'The morning post, sorted', lede: 'Eleven letters: two need your reply (the notary and the landlord), four are filed, five were newsletters.' } },
+  // Closed to the human with no tapestry: its close is only its line.
+  { id: 'insurance', name: 'Renew the insurance', parent: 'vizier', closed: true, minutes: 200, outcome: 'Renewed for a year at the same premium; the new policy is filed.' },
   { id: 'deed-form', name: 'Sign the deed form', parent: 'vizier', minutes: 50, ask: 'The notary needs the deed form back by Wednesday. Sign the scan in your Documents folder, or shall I book a slot to sign it in person?' },
   { id: 'felt', name: 'The Mill', channel: 'The Mill', seat: true, state: 'working', minutes: 1 },
   { id: 'felt/lander', name: 'Lander', parent: 'felt', state: 'idle', minutes: 15 },
@@ -320,6 +322,7 @@ function addBoardFixtures(example: WorkspaceExample, now: number, ROWS: Row[], m
     said('pando/unions/west', 'handed_off', 120),
     said('pando/unions/modes', 'asked', 35, { to: up('pando/unions/modes'), text: ROWS.find(row => row.id === 'pando/unions/modes')!.ask }),
     said('deed-form', 'asked', 50, { to: up('deed-form'), text: ROWS.find(row => row.id === 'deed-form')!.ask }),
+    said('insurance', 'closed', 200, { to: HUMAN, text: ROWS.find(row => row.id === 'insurance')!.outcome }),
     said('morning-post', 'closed', 140, { to: HUMAN, text: ROWS.find(row => row.id === 'morning-post')!.outcome, files: [`${dir('morning-post')}/reply-drafts.md`] }),
     said('felt', 'post', 25, { to: HUMAN, text: [
       'Landed the routing slice on main and deployed it to the Mac; the fleet catch-up waits on you.',

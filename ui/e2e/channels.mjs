@@ -311,7 +311,8 @@ try {
     console.log('Channels unread: something fresh addressed to the human in a channel not being read lights its rail dot, and reading it clears the dot')
   }
   {
-    // A close to the human with its closing post: the stream draws its tapestry, and neither it nor the view draws the outcome.
+    // A close to the human with its closing post: the stream draws its tapestry, and neither it nor the view draws the outcome;
+    // a close whose constitution has no tapestry is only its line.
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' })
     const page = await context.newPage()
     const errors = []
@@ -319,10 +320,13 @@ try {
     await page.goto(`${pathToFileURL(resolve('harness-board-dist/index.html'))}?example=channels#/channels`)
     await pick(page, 'vizier').click()
     const close = page.locator('.kbn-ch-item[data-fiber="morning-post"]')
-    // The tapestry is a one-line card leading its previews, before the file the close attached, and loads nothing.
-    await close.locator('.kbn-ch-previews .uf-card[data-page]:not(:disabled)').waitFor()
-    assert.equal(await close.locator('.kbn-ch-previews .uf-card').first().getAttribute('data-page'), '')
-    assert.equal(await close.locator('.kbn-ch-previews .uf-card[data-page] .ws-thumbnail').count(), 0)
+    // The channel's newest close leads its previews with the top of its tapestry, before the file the close attached.
+    await close.locator('.kbn-ch-previews .uf-card[data-page] .ws-thumbnail').waitFor()
+    assert.equal(await close.locator('.kbn-ch-previews .uf-card').first().getAttribute('data-density'), 'page')
+    const bare = page.locator('.kbn-ch-item[data-fiber="insurance"][data-kind="close"]')
+    await bare.waitFor()
+    await page.waitForTimeout(300)
+    assert.equal(await bare.locator('.kbn-ch-previews').count(), 0, 'a close with no tapestry draws nothing in its slot')
     const outcome = 'Eleven letters sorted'
     assert.equal(await close.getByText(outcome).count(), 0)
     await close.locator('.kbn-ch-who').click()

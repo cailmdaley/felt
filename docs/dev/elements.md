@@ -37,7 +37,7 @@ The rest are the board's own choices, made to sit with those numbers:
 | Thumbnail (globe tiles, sheets) | 176 by 116 |
 
 A post's previews stand each on a line of its own, as wide as the post, so a box's size never depends on its neighbours.
-`foldPx`, `CARD_PX` and `PREVIEW_GAP` in `filePreview.ts` state the same numbers for code that reckons a row's height (the stream's margin), and a test reads the stylesheet to keep them equal; `previewsHeight` sums a post's boxes; a close's row counts a tapestry only when it shows one.
+`foldPx`, `CARD_PX` and `PREVIEW_GAP` in `filePreview.ts` state the same numbers for code that reckons a row's height (the stream's margin), and a test reads the stylesheet to keep them equal; `previewsHeight` sums a post's boxes; a close's row counts its tapestry's box (a page's for the channel's newest close, a card's for the others) until a look finds it has none, and then counts nothing for it.
 
 ## Elements
 
@@ -71,7 +71,7 @@ One line a thread addressed to the human.
 |---|---|
 | Head | the thread's slug in its line's colour, its role, the age; the kind word only for an ask, a close (for review, closed) or a block |
 | Text | Markdown, at prose size |
-| Files | a row of file previews below the text; a fiber's newest close in the stream leads them with its tapestry |
+| Files | a row of file previews below the text; a fiber's newest close in the stream leads them with its tapestry: the channel's newest close with the tapestry's top in a page's box, every other a one-line card, and a constitution with no tapestry with nothing |
 | Clear | ✓ at the head's right, on every post, question and file line, and `e` on the line in focus: one press takes the line from the stream and, for a waiting post, stops it waiting too, with one undo for both; a worker's waiting question (`shuttle.ask`) is instead withdrawn on its owner (`/lifecycle` `ask-clear`) and its line taken once that lands, with no undo, since nothing writes a question back; a close that waits is given its verdict and a blocked turn its fix, not a ✓ |
 
 A clear is remembered as one `line:<ms>:<id>` record per line it took (a post by its id, a file item by each send it showed, so a send it did not show still appears) and, for a waiting post, `clear:<uid>:<ms>`; records are written four at a time, and the undo writes back only what was written. A line cleared again while its last clear, or that clear's undo, is still being written waits for those writes, so it sees whether its post waits.

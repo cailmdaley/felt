@@ -2,7 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { layTube } from '../tube.js'
 import { ChannelsView } from './ChannelsView.js'
-import { CARD_PX } from '../elements/filePreview.js'
+import { CARD_PX, foldPx } from '../elements/filePreview.js'
 import type { ViewContext } from './ViewRegistry.js'
 import { BoardFeed, type BoardRecord } from '../boardFeed.js'
 import type { SentFile } from '../sentFiles.js'
@@ -15,7 +15,9 @@ vi.mock('../tube.js', async original => {
 })
 
 const views: ChannelsView[] = []
-afterEach(() => { views.forEach(view => view.unmount()); views.length = 0; document.body.replaceChildren(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
+afterEach(() => { views.forEach(view => view.unmount()); views.length = 0; document.body.replaceChildren(); vi.unstubAllGlobals(); vi.restoreAllMocks(); tapestryOf = async () => undefined })
+/** Each constitution's tapestry, as the workspace finds it. */
+let tapestryOf = async (_card: { uid?: string }): Promise<unknown> => undefined
 
 const minute = 60_000, day = 86_400_000
 const at = (minutes: number): string => new Date(Date.now() - minutes * minute).toISOString()
@@ -75,7 +77,7 @@ async function mount(inFlight = [chair, tsz, mask, beam, van, notes], view = new
     console: (options: ConsoleOptions) => new Dock('', requestRefresh, undefined, undefined, options),
     library: { subscribe: () => () => {}, cancelOpen: vi.fn(), documents: () => library },
     board: new BoardFeed(''), said: () => undefined, followFind: vi.fn(),
-    globeHost: { feeds: { marks: (each: { uid?: string }) => ({ launches: launches[each.uid!] ?? [], commits: [] }), reach: () => 14 * day, files: () => [], lead: async () => undefined, refresh: () => {} } },
+    globeHost: { feeds: { marks: (each: { uid?: string }) => ({ launches: launches[each.uid!] ?? [], commits: [] }), reach: () => 14 * day, files: () => [], lead: (each: { uid?: string }) => tapestryOf(each), refresh: () => {} } },
   }
   const sends = { files: sent, subscribe: () => () => {}, refresh: async () => {} }
   const ctx = { cards: [], response: board(inFlight), shuttleBase: '', workspace, sends, requestRefresh, openCard: vi.fn() } as unknown as ViewContext
@@ -464,21 +466,20 @@ it('speaks for every constitution without a channel in misc, at the rail\'s foot
   expect([...document.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).not.toContain('Pin')
 })
 
-it('shows a close awaiting review by its note and a card for its tapestry, never its outcome, and keeps the card across redraws', async () => {
+it('shows a close awaiting review by its note and its tapestry, never its outcome, and keeps the tapestry across redraws', async () => {
   daemon()
   const cov = card({ id: 'cmbx/cov', uid: 'V', name: 'Covariance', orchestrator: 'C', column: 'awaitingReview', status: 'closed', closedAt: at(40), outcome: 'Validated against **2000** simulations.', reviewMark: { note: 'Agrees to 4%.', at: at(40) } })
+  tapestryOf = async each => each.uid === 'V' ? { key: 'local:/w/cov/tapestry.html', name: 'Tapestry', at: Date.now(), unread: false } : undefined
   const { view, ctx, host } = await mount([chair, tsz, mask, beam, cov])
-  const feeds = (ctx.workspace as unknown as { globeHost: { feeds: { lead: (card: { uid?: string }) => Promise<unknown> } } }).globeHost.feeds
-  feeds.lead = async card => card.uid === 'V' ? { key: 'local:/w/cov/tapestry.html', name: 'Tapestry', at: Date.now(), unread: false } : undefined
   // Drawn again once the stream changes.
   ctx.response = board([chair, { ...tsz, name: 'κ × tSZ, final' }, mask, beam, cov])
   view.refresh(ctx); await settle(); await settle()
   const review = item(host, 'cov')
   expect([review.dataset.kind, review.hasAttribute('data-waiting'), review.querySelector('.kbn-ch-kind')?.textContent]).toStrictEqual(['close', true, 'for review'])
   expect(review.querySelector('.kbn-ch-item-text')?.textContent?.trim()).toBe('Agrees to 4%.')
-  // One line, nothing loaded; a press opens the tapestry in the reader.
+  // The channel's newest close: the top of its tapestry, in a page's box; a press opens it in the reader.
   const lead = review.querySelector<HTMLButtonElement>('.kbn-ch-previews .uf-card[data-page]')!
-  expect([lead.dataset.density, lead.getAttribute('aria-label'), lead.querySelector('.ws-thumbnail')]).toStrictEqual(['card', 'Open Tapestry', null])
+  expect([lead.dataset.density, lead.getAttribute('aria-label'), !!lead.querySelector('.ws-thumbnail')]).toStrictEqual(['page', 'Open Tapestry', true])
   expect(host.textContent).not.toContain('2000')
   // A redraw of the stream draws the same tapestry at once, not a new one.
   ctx.response = board([chair, tsz, mask, beam, cov])
@@ -747,33 +748,39 @@ it('clears an old post by what waits now once its earlier clear and undo have la
   expect(ctx.workspace!.board.waiting.get('C')?.id).toBe('q1')
 })
 
-it('draws a tapestry card on each fiber\'s newest close only, reckoned in its row before the tapestry is read, and says when there is none', async () => {
+it('leads each fiber\'s newest close with its tapestry, the channel\'s newest as a page and the rest as cards, reckoned before it is read, and nothing where there is none', async () => {
   const human = { label: 'Sam' }
   const cov = card({ id: 'cmbx/cov', uid: 'V', name: 'Covariance', orchestrator: 'C', column: 'tempered', status: 'closed', closedAt: at(20), outcome: 'Validated.' })
-  daemon([], undefined, {}, { board: { C: [...BOARD.C, record({ id: 'v1', kind: 'closed', fiber: 'V', to: human, text: 'First pass.' }, 60), record({ id: 'v2', kind: 'closed', fiber: 'V', to: human, text: 'Second pass.' }, 20)] } })
-  const lead = vi.fn(async (_card: { uid?: string }) => ({ key: 'local:/w/cov/tapestry.html', name: 'Tapestry', at: Date.now(), unread: false }))
+  const rho = card({ id: 'cmbx/rho', uid: 'P', name: 'Rho stats', orchestrator: 'C', column: 'tempered', status: 'closed', closedAt: at(40), outcome: 'Null.' })
+  daemon([], undefined, {}, { board: { C: [...BOARD.C,
+    record({ id: 'v1', kind: 'closed', fiber: 'V', to: human, text: 'First pass.' }, 60),
+    record({ id: 'p1', kind: 'closed', fiber: 'P', to: human, text: 'Rho is null.' }, 40),
+    record({ id: 'v2', kind: 'closed', fiber: 'V', to: human, text: 'Second pass.' }, 20)] } })
+  const found = { V: true, P: true }
+  const lead = vi.fn(async (each: { uid?: string }) => found[each.uid as 'V' | 'P'] ? { key: `local:/w/${each.uid}/tapestry.html`, name: 'Tapestry', at: Date.now(), unread: false } : undefined)
+  tapestryOf = lead
   const view = new ChannelsView()
-  const { ctx, host } = await mount([chair, tsz, mask, beam, cov], view)
-  ;(ctx.workspace as unknown as { globeHost: { feeds: { lead: typeof lead } } }).globeHost.feeds.lead = lead
-  ctx.response = board([chair, { ...tsz, name: 'κ × tSZ, final' }, mask, beam, cov])
-  view.refresh(ctx); await settle(); await settle()
-  const closes = () => [...host.querySelectorAll<HTMLElement>('.kbn-ch-item[data-kind="close"]')]
-  expect(closes().map(close => close.querySelectorAll('.kbn-ch-previews .uf-card[data-page]').length)).toStrictEqual([0, 1])
-  expect(lead.mock.calls.every(([each]) => each.uid === 'V')).toBe(true)
-  // Its row is reckoned with the card's line from the first layout, so nothing grows when the read lands.
-  const [entries, heights] = vi.mocked(layTube).mock.lastCall!
-  expect(entries.flatMap((entry, row) => entry.kind === 'close' ? [[entry.id, heights![row]]] : [])).toStrictEqual([['v1', 64], ['v2', 64 + CARD_PX]])
+  const { ctx, host } = await mount([chair, tsz, mask, beam, cov, rho], view)
+  const redraw = async (cards: ReturnType<typeof card>[]): Promise<void> => { ctx.response = board(cards); view.refresh(ctx); await settle(); await settle() }
+  await redraw([chair, { ...tsz, name: 'κ × tSZ, final' }, mask, beam, cov, rho])
+  const closes = () => Object.fromEntries([...host.querySelectorAll<HTMLElement>('.kbn-ch-item[data-kind="close"]')].map(close => [close.querySelector<HTMLElement>('[data-item]')!.dataset.item, close.querySelector<HTMLElement>('.uf-card[data-page]')?.dataset.density ?? null]))
+  const reckoned = () => { const [entries, heights] = vi.mocked(layTube).mock.lastCall!; return Object.fromEntries(entries.flatMap((entry, row) => entry.kind === 'close' ? [[entry.id, heights![row]]] : [])) }
+  expect(closes()).toStrictEqual({ 'item:v1': null, 'item:p1': 'card', 'item:v2': 'page' })
+  // Each row is reckoned with its tapestry's box from the first layout, so nothing grows when the read lands.
+  expect(reckoned()).toStrictEqual({ v1: 64, p1: 64 + CARD_PX, v2: 64 + foldPx() })
   // Each draw of the stream looks again, for a tapestry written since.
   const calls = lead.mock.calls.length
-  ctx.response = board([chair, tsz, mask, beam, cov])
-  view.refresh(ctx); await settle()
-  expect(lead.mock.calls.length - calls).toBe(1)
-  // A fiber with no tapestry: the card says so and stands still.
-  lead.mockResolvedValue(undefined as never)
-  ctx.response = board([chair, tsz, mask, beam, { ...cov, name: 'Covariance, again' }])
-  view.refresh(ctx); await settle(); await settle()
-  const none = closes()[1].querySelector<HTMLButtonElement>('.uf-card[data-page]')!
-  expect([none.disabled, none.textContent]).toStrictEqual([true, 'cov has no tapestry'])
+  await redraw([chair, tsz, mask, beam, cov, rho])
+  expect(lead.mock.calls.length - calls).toBe(2)
+  // A constitution with no tapestry draws nothing in its slot, newest or not, and its row is reckoned without one.
+  found.V = false; found.P = false
+  await redraw([chair, tsz, mask, beam, { ...cov, name: 'Covariance, again' }, { ...rho, name: 'Rho, again' }])
+  expect(closes()).toStrictEqual({ 'item:v1': null, 'item:p1': null, 'item:v2': null })
+  expect(reckoned()).toStrictEqual({ v1: 64, p1: 64, v2: 64 })
+  // The page is the newest close's alone: with none of its own it draws nothing, and an older close keeps its card.
+  found.P = true
+  await redraw([chair, tsz, mask, beam, { ...cov, modifiedAt: new Date().toISOString() }, { ...rho, modifiedAt: new Date().toISOString() }])
+  expect(closes()).toStrictEqual({ 'item:v1': null, 'item:p1': 'card', 'item:v2': null })
 })
 
 it('takes from the stream the sends whose clear was written, and its undo brings back only those', async () => {
