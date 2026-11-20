@@ -99,8 +99,7 @@ Shuttle never interrupts a turn or stacks pulse turns.
 Pausing, resting or closing the constitution stops its pulse.
 The daemon persists pulse timing in its operational state across restarts.
 A tick creates no review card or board event by itself; the worker can still write or post what it finds.
-Claude and Codex support pulses.
-Pi does not expose the idle-safe wake needed to guarantee a pulse won't steer work already in progress.
+Every harness Shuttle runs supports pulses.
 
 ```bash
 shuttle install <fiber> [--disabled]   # add a oneshot block, armed (or a draft)
