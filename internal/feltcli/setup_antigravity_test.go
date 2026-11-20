@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -88,5 +89,27 @@ func readJSON(t *testing.T, path string, v any) {
 	}
 	if err := json.Unmarshal(data, v); err != nil {
 		t.Fatalf("%s: %v", path, err)
+	}
+}
+
+// A plugin source from before the agy shim installs nothing, rather than hooks
+// that run a missing command.
+func TestSetupAntigravityRefusesASourceWithoutTheShim(t *testing.T) {
+	t.Parallel()
+	env, _ := testEnv(t)
+	source := t.TempDir()
+	for _, path := range []string{".claude-plugin/marketplace.json", "claude-plugin/hooks/event.sh", "claude-plugin/skills/felt/SKILL.md"} {
+		if err := os.MkdirAll(filepath.Join(source, filepath.Dir(path)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(source, path), []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := executeIn(t, env, t.TempDir(), "setup", "antigravity", "--source", source); err == nil || !strings.Contains(err.Error(), "agy.sh") {
+		t.Fatalf("setup from a source without the shim: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(homeOf(t, env), ".gemini", "config", "plugins", "felt")); !os.IsNotExist(err) {
+		t.Fatalf("a plugin was installed: %v", err)
 	}
 }

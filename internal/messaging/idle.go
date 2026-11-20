@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/harness"
 	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
@@ -123,10 +124,12 @@ func subscribeIdle(env *sysenv.Env, a Address, req Request) *IdleSubscription {
 			return unsupported("Claude session has no live native inbox to subscribe to")
 		}
 		rec.Signal = IdleSignalClaudeNative
-	case "codex", "pi":
-		rec.Signal = IdleSignalHookEvents
 	default:
-		return unsupported("no idle signal for harness " + a.Harness)
+		// Every other harness's hooks write its turns to the event stream.
+		if !harness.Known(a.Harness) {
+			return unsupported("no idle signal for harness " + a.Harness)
+		}
+		rec.Signal = IdleSignalHookEvents
 	}
 	if info, err := os.Stat(eventsFile(env)); err == nil {
 		rec.EventsOffset = info.Size()

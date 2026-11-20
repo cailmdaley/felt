@@ -34,7 +34,7 @@ defmodule ShuttleWeb.TranscriptSearchController do
 
   @default_limit 20
   @max_limit 100
-  @harnesses ~w(claude codex pi)
+  @harnesses Enum.map(Shuttle.Harness.modules(), & &1.name())
   @timeout_ms 120_000
 
   def show(conn, params) do

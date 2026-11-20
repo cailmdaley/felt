@@ -66,6 +66,11 @@ func (a *app) antigravityPluginDir() (string, error) {
 // writeAntigravityPlugin assembles the plugin beside dir and swaps it in, so
 // agy never loads a half-written one.
 func writeAntigravityPlugin(dir, pluginDir string) error {
+	// A source from before the agy shim existed would install hooks that run
+	// nothing, and agy may read a failed tool hook as a refusal.
+	if _, err := os.Stat(filepath.Join(pluginDir, "hooks", "agy.sh")); err != nil {
+		return fmt.Errorf("%s has no hooks/agy.sh; pass --source <a felt checkout that has it>", pluginDir)
+	}
 	staging := dir + ".new"
 	if err := os.RemoveAll(staging); err != nil {
 		return err
