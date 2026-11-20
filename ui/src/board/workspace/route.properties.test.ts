@@ -25,7 +25,9 @@ import { formatRoute, parseRoute, viewOfHash, WorkspaceHistory, type WorkspaceOr
 const env = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env ?? {}
 const RUNS = Number(env.ROUTE_FUZZ_RUNS ?? 60)
 const VIEWS: WorkspaceOriginView[] = ['desk', 'chronicle', 'globe', 'channels']
-const settle = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 10))
+// jsdom lands a back or forward two timer turns after it is asked for, and a back the history takes on landing lands two turns later still.
+// Zero-delay timers fire in the order they were set, so counting turns waits for every move however long the machine stalls between them.
+const settle = async (): Promise<void> => { for (let turn = 0; turn < 4; turn++) await new Promise(resolve => setTimeout(resolve, 0)) }
 
 type Step =
   | { kind: 'open'; uid: string; view: WorkspaceOriginView }
