@@ -1,0 +1,10 @@
+{
+  "session_id": "01a1f6df-f695-7e23-926e-53b5642d0d55",
+  "turn_id": "01a1f6df-fb26-7333-8f34-9dd47fbd5cb0",
+  "transcript_path": "/home/user/.codex/sessions/2026/11/20/rollout-2026-11-20T03-53-56-01a1f6df-f695-7e23-926e-53b5642d0d55.jsonl",
+  "cwd": "/home/user/project",
+  "hook_event_name": "UserPromptSubmit",
+  "model": "gpt-6.1-sol",
+  "permission_mode": "default",
+  "prompt": "Run the shell command: true. Then reply done."
+}

@@ -101,6 +101,53 @@ func TestCodexHookAllowlistRejectsUnclassifiedReleaseFiles(t *testing.T) {
 	}
 }
 
+// Claude Code and Codex run the same event.sh; each one's hooks.json names its
+// own harness on every event hook, so the hook handler infers nothing.
+func TestEventHooksNameTheirHarness(t *testing.T) {
+	t.Parallel()
+	candidate := t.TempDir()
+	if err := copyTree(filepath.Join(repoRoot(t), "claude-plugin"), filepath.Join(candidate, "claude-plugin")); err != nil {
+		t.Fatal(err)
+	}
+	if err := materializeCodexBundles(candidate); err != nil {
+		t.Fatal(err)
+	}
+	for name, path := range map[string]string{
+		"claude": filepath.Join(candidate, "claude-plugin", "hooks", "hooks.json"),
+		"codex":  filepath.Join(codexBundleSource(candidate, "felt"), "hooks", "hooks.json"),
+	} {
+		var manifest struct {
+			Hooks map[string][]struct {
+				Hooks []struct{ Command string } `json:"hooks"`
+			} `json:"hooks"`
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(data, &manifest); err != nil {
+			t.Fatal(err)
+		}
+		events := 0
+		for event, groups := range manifest.Hooks {
+			for _, group := range groups {
+				for _, hook := range group.Hooks {
+					if !strings.Contains(hook.Command, "/hooks/event.sh") {
+						continue
+					}
+					events++
+					if !strings.HasSuffix(hook.Command, `"$p" `+name) {
+						t.Errorf("%s %s event hook names no %s: %s", name, event, name, hook.Command)
+					}
+				}
+			}
+		}
+		if events == 0 {
+			t.Errorf("%s hooks.json runs no event.sh", name)
+		}
+	}
+}
+
 func TestCodexGeneratedHookTreeMatchesAllowlist(t *testing.T) {
 	t.Parallel()
 	candidate := t.TempDir()

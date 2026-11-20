@@ -46,6 +46,10 @@ Writes only when the stream's parent directory already exists — the daemon's
 state directory is the opt-in. An explicit SHUTTLE_EVENTS_FILE overrides that
 and creates the directory; SHUTTLE_EVENTS=off disables recording outright.
 
+The payload's harness field names the harness running the hook; when it is
+absent, SHUTTLE_HOOK_HARNESS does (the plugin's event.sh sets it), and
+otherwise the transcript path and payload fields decide.
+
 Exits 0 on every path, including malformed input. Supported Claude and Codex hooks
 offer queued peer messages as additionalContext; Stop never continues a turn.
 Unoffered automatic Claude mail has a durable native-wake fallback.

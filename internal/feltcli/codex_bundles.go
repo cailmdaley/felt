@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Bundle versions describe the adapter format, not the Felt release. Payload
@@ -41,10 +42,13 @@ func materializeCodexBundles(current string) error {
 			if err := os.MkdirAll(filepath.Join(root, "hooks"), 0755); err != nil {
 				return err
 			}
-			for _, basename := range append([]string{"hooks.json"}, pluginHookBasenames...) {
+			for _, basename := range pluginHookBasenames {
 				if err := copyTree(filepath.Join(current, "claude-plugin", "hooks", basename), filepath.Join(root, "hooks", basename)); err != nil {
 					return err
 				}
+			}
+			if err := writeCodexHooksManifest(filepath.Join(current, "claude-plugin", "hooks", "hooks.json"), filepath.Join(root, "hooks", "hooks.json")); err != nil {
+				return err
 			}
 		} else if err := copyTree(filepath.Join(current, "claude-plugin", directory), filepath.Join(root, directory)); err != nil {
 			return err
@@ -101,6 +105,19 @@ func (a *app) codexBundlesFromList(plugins []receiptInstalledPlugin) ([]ReceiptB
 		}
 	}
 	return bundles, found
+}
+
+// claudeEventHarnessArg is how the plugin's hooks.json names Claude to
+// event.sh; the Codex bundle's copy names Codex there instead.
+const claudeEventHarnessArg = `\"$p\" claude"`
+
+func writeCodexHooksManifest(source, target string) error {
+	data, err := os.ReadFile(source)
+	if err != nil {
+		return err
+	}
+	manifest := strings.ReplaceAll(string(data), claudeEventHarnessArg, `\"$p\" codex"`)
+	return os.WriteFile(target, []byte(manifest), 0644)
 }
 
 func writeCodexBundleJSON(path string, value any) error {

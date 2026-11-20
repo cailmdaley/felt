@@ -22,6 +22,9 @@ if [ "\${1:-}" = "hook" ] && [ "\${2:-}" = "--help" ]; then
   exit 0
 fi
 printf '%s\\n' "\$*" >> "$args_file"
+if [ -n "\${SHUTTLE_HOOK_HARNESS:-}" ]; then
+  printf 'harness=%s\\n' "\$SHUTTLE_HOOK_HARNESS" >> "$args_file"
+fi
 /bin/cat >/dev/null
 EOF
   chmod +x "$binary"
@@ -93,6 +96,10 @@ write_fake "$both_home/.local/bin/shuttle" "$shuttle_args"
 both_env=(env -i HOME="$both_home" PATH="$bare_path" FELT_BIN= SHUTTLE_BIN=)
 
 printf '%s\n' '{}' | "${both_env[@]}" "$hooks/event.sh"
+! grep -q '^harness=' "$shuttle_args"
+# The harness hooks.json names reaches shuttle as SHUTTLE_HOOK_HARNESS.
+printf '%s\n' '{}' | "${both_env[@]}" "$hooks/event.sh" codex
+assert_arg "$shuttle_args" 'harness=codex'
 printf '%s\n' '{}' | "${both_env[@]}" "$hooks/remind.sh"
 printf '%s\n' '{}' | "${both_env[@]}" "$hooks/touch.sh"
 

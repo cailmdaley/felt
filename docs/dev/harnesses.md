@@ -18,7 +18,7 @@ Where the daemon holds only a harness's name, or a record from a CLI that carrie
 | Fact | Meaning | Read by |
 |---|---|---|
 | `name` | The one canonical spelling: an agent record's `cli`, an address's harness, the transcript index's harness | everything |
-| `ledger` | The spelling in session-ledger rows and event-stream lines; differs only for Claude Code (`claude-code`) | ledger and stream readers |
+| `ledger` | The spelling in session-ledger rows and event-stream lines; differs only for Claude Code (`claude-code`). Readers accept either spelling | ledger and stream writers |
 | `binary` | The executable a record without a `wrapper` runs | the agent registry |
 | `identity` | `assigned`: the daemon picks the conversation id and passes it at launch. `reported`: the harness names it after launch | dispatch, identity capture |
 | `delivery` | `native`: the harness's own message socket. `extension`: a socket Shuttle's extension opens in the harness. `paste`: typed into the terminal, which queues it behind a running turn. `inject`: context added to a running turn by a hook, and a wake typed into the terminal as with `paste` | messaging, receipts, the terminal input route |
@@ -58,7 +58,9 @@ Some behaviour belongs to one harness and stays outside the adapters, as that ha
 
 Every harness's hooks reach Shuttle in one shape, Claude Code's hook payload (`hook_event_name`, `session_id`, `cwd`, `transcript_path`, `prompt`, `tool_name`, `tool_input`, `background_tasks`).
 `shuttle hook event` records it on the host's event stream, registers the session's mailbox, records the turn state and offers queued messages; the daemon's `Shuttle.WaitingTracker` folds the stream into working, waiting and attention.
-Claude Code and Codex run the plugin's shims, which pass their payloads through.
+Every harness's hooks name the harness, so the handler never guesses it.
+Claude Code and Codex run the same `event.sh`, which passes their payloads through; the plugin's `hooks.json` gives it `claude` as its argument, the Codex bundle's copy gives it `codex`, and it hands the name to `shuttle hook event` as `SHUTTLE_HOOK_HARNESS`.
+A payload that names no harness comes from a shim installed before shims named one, which a running conversation keeps until it restarts and Codex's plugin cache keeps until `felt setup codex`; the handler infers its harness from the transcript path and Codex's payload fields.
 Pi's extension sends the same shape with an explicit `harness`; its `Stop` is Pi's `agent_settled`, after any retry, compaction retry or queued follow-up, since `agent_end` can be followed by more of the same run.
 Antigravity's shim runs `shuttle hook antigravity`, which translates agy's camelCase payload into this shape with `harness: "antigravity"` and answers in agy's shape.
 
@@ -72,6 +74,16 @@ The events Shuttle relies on:
 | `Stop` | The turn ended; a non-empty `background_tasks` means work it started is still running, so the turn stays open |
 | `SessionEnd` | The conversation ended |
 
+### The calling session
+
+A `shuttle` command run by a worker acts for the harness session running it: a bare `close`, `rest` or `handoff` closes that session's fiber, and `message`, `send-file`, `claim`, `migrate`, `thread` and `find` attribute their work to it.
+`currentSession` in `internal/shuttlecli/messaging.go` is the one place that finds it.
+Harnesses nest, and a child process inherits every parent's exported session id (agy's `ANTIGRAVITY_CONVERSATION_ID` reaches a Claude or Codex process started inside agy), so the environment cannot say which harness is nearest.
+Process ancestry can: each session's hooks register a receiver with the harness's process id, and the nearest live one among the caller's ancestors wins.
+The environment decides only when ancestry names no one, or two receivers share the nearest process (one Codex app server for many threads).
+Pi's own marker, `AI_AGENT=pi` with `PI_SESSION_ID`, outranks another harness found by ancestry, since a Pi that registered no receiver is invisible there; a Codex or agy session started inside Pi therefore reads as its Pi parent.
+A hook binds the session its payload names, not the caller's, since it fires before its session has registered.
+
 ### Conformance
 
 `daemon/test/fixtures/harnesses/` is the fixture set both suites run against every adapter:
@@ -81,6 +93,7 @@ The events Shuttle relies on:
 - `<harness>/transcript.jsonl`: a recorded transcript. The Go transcript index must find every role in it (`TestNativeFixturesRolesAndSkippedPayloads`), and every daemon reader must take every record.
 - `<harness>/usage*.jsonl`: field-selected usage records the daemon's `transcript_usage_test.exs` reads.
 - `antigravity/hooks/`: agy's hook payloads from one recorded session, replayed through `shuttle hook antigravity` (`TestAntigravityHooksReplayAsShuttleEvents`).
+- `claude/hooks/`, `codex/hooks/`: Claude Code's and Codex's hook payloads from one recorded session each, replayed through `shuttle hook event` with the shim's harness name and without it (`TestRecordedClaudeAndCodexHooksRecordTheirHarness`).
 
 Real binaries are not in the suite.
 A new harness's live behaviour is checked once by hand, and what it cannot do is written in its section below.
@@ -129,7 +142,7 @@ A new harness's live behaviour is checked once by hand, and what it cannot do is
 Observed on agy 1.5.13.
 
 - **Launch**: `agy <flags> --settings '<json>' -i '<prompt>'`. Effort is the model slug's suffix (`--model gemini-4-neon-high`; `agy models` lists the slugs, and no bare family runs, so every agent declares a default effort). `--settings` applies to this session only and is never saved: `{"altScreenMode":"never","trustedWorkspaces":["<project_dir>"],"artifactReviewPolicy":"always-proceed"}` skips the first-run screen and trust questions. The registry's agents add `--dangerously-skip-permissions` and `AGY_CLI_DISABLE_AUTO_UPDATE=true` from their record; agy's default command sandbox denies the Shuttle state directory and the daemon's port. A record's `extra_flags` can add `--agent <name>`.
-- **Identity**: reported, by the SessionStart hook. agy fires it under `-i`, before the first model call, with `conversationId`, `transcriptPath` and `cwd`; `shuttle hook antigravity` writes it to the event stream, and `Shuttle.Harness.Antigravity.find_session/3` matches it to the worker. agy exports `ANTIGRAVITY_CONVERSATION_ID` to its hooks and commands, which is how a worker's own `shuttle` calls know their session. It and nine other `ANTIGRAVITY_*` variables reach every descendant, so the daemon's launch scripts clear the whole family before a worker starts.
+- **Identity**: reported, by the SessionStart hook. agy fires it under `-i`, before the first model call, with `conversationId`, `transcriptPath` and `cwd`; `shuttle hook antigravity` writes it to the event stream, and `Shuttle.Harness.Antigravity.find_session/3` matches it to the worker. agy exports `ANTIGRAVITY_CONVERSATION_ID` to its hooks and commands, which is how a worker's own `shuttle` calls know their session when ancestry names none (see [The calling session](#the-calling-session)). It and nine other `ANTIGRAVITY_*` variables reach every descendant, so the daemon's launch scripts clear the whole family before a worker starts.
 - **Resume**: `--conversation <id> [-i '<prompt>']` keeps the history; without `-i` it opens interactively. No fresh fallback.
 - **Delivery**: inject. A `PreInvocation` hook, which runs before every model call, prints queued context as `{"injectSteps":[{"systemMessage":{"systemMessage":"…"}}]}`, and it reaches a turn already running. A wake is typed into the terminal, which queues it behind a running turn, as Codex's does. A conversation resumed without a prompt fires no hook until its next turn, so the daemon finds its receiver by the `--conversation <id>` process in the worker's terminal, as it finds Codex's by `resume <id>`.
 - **Turns**: a `PreInvocation` with `invocationNum` 0 starts a turn. `Stop` with `fullyIdle: false` leaves a background command running, and agy wakes itself when it ends, starting a turn that repeats the last input; `shuttle hook antigravity` remembers a digest of each conversation's last input and its last Stop, so that turn does not read as a prompt. That turn state sits under the Shuttle state directory, written only where the directory exists; agy reports no session end, so each SessionStart removes states idle for a week. Only `Stop` with `fullyIdle: true` is the human's turn.
@@ -142,8 +155,8 @@ Observed on agy 1.5.13.
 
 What each harness cannot do, as Shuttle runs it today:
 
-- **Claude Code**: its harness name is spelled two ways, `claude` and `claude-code` in ledgers and on the event stream.
-- **Codex**: no fresh fallback on a failed resume; no Remote Control; its hooks name no harness, so the hook handler infers Codex from the payload.
+- **Claude Code**: its harness name is spelled two ways, `claude` and `claude-code` in ledgers, on the event stream and in the daemon's session links. Every reader accepts both, through `harness.Normalize` and `Shuttle.Harness.normalize/1`. Writing `claude` everywhere waits on every host running a build whose readers accept both, since a host on an older build that reads another host's rows (a board's session links relayed between daemons) drops a `claude` row's Remote Control link; persisted rows keep `claude-code`, so readers keep the alias after the writers switch.
+- **Codex**: no fresh fallback on a failed resume; no Remote Control.
 - **Pi**: no interrupt reading, though `agent_settled` carries `aborted` when the human cancels with Escape; no task list; its transcript root does not follow `PI_CODING_AGENT_SESSION_DIR` or the `sessionDir` setting, which move Pi's sessions out of its agent directory; outside `felt setup`'s plugin promotion and the setup receipt.
 - **Antigravity**:
   - Its conversation id cannot be assigned at launch, and SessionStart does not fire on resume.

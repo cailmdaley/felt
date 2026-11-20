@@ -101,7 +101,12 @@ defmodule ShuttleWeb.SessionLinksController do
           else: "transcript_missing"
         ),
       harness: if(is_binary(harness), do: harness),
-      url: if(harness == "claude-code" and SessionLink.claude_url?(url), do: url)
+      url:
+        if(
+          is_binary(harness) and Shuttle.Harness.normalize(harness) == "claude" and
+            SessionLink.claude_url?(url),
+          do: url
+        )
     }
   end
 

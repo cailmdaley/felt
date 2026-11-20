@@ -1,0 +1,25 @@
+{
+  "session_id": "f0ef736f-d4ce-4ea6-b13a-3d36abbab0de",
+  "transcript_path": "/home/user/.claude/projects/-home-user-project/f0ef736f-d4ce-4ea6-b13a-3d36abbab0de.jsonl",
+  "cwd": "/home/user/project",
+  "prompt_id": "da2a2f3c-875a-44f0-96cc-5622c2023327",
+  "permission_mode": "auto",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "true",
+    "description": "Run the true no-op command"
+  },
+  "tool_response": {
+    "stdout": "",
+    "stderr": "",
+    "interrupted": false,
+    "isImage": false,
+    "noOutputExpected": false
+  },
+  "tool_use_id": "toolu_01XHaogvSbVpq4NXmqQZSpfM",
+  "duration_ms": 155
+}

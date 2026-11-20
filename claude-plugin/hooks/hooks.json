@@ -9,7 +9,7 @@
           },
           {
             "type": "command",
-            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"; [ ! -x \"$p\" ] || \"$p\""
+            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"; [ ! -x \"$p\" ] || \"$p\" claude"
           }
         ]
       }
@@ -23,7 +23,7 @@
           },
           {
             "type": "command",
-            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"; [ ! -x \"$p\" ] || \"$p\""
+            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"; [ ! -x \"$p\" ] || \"$p\" claude"
           }
         ]
       }
@@ -37,7 +37,7 @@
           },
           {
             "type": "command",
-            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"; [ ! -x \"$p\" ] || \"$p\""
+            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"; [ ! -x \"$p\" ] || \"$p\" claude"
           }
         ]
       }
@@ -64,7 +64,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"; [ ! -x \"$p\" ] || \"$p\""
+            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"; [ ! -x \"$p\" ] || \"$p\" claude"
           }
         ]
       }
@@ -74,7 +74,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"; [ ! -x \"$p\" ] || \"$p\""
+            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"; [ ! -x \"$p\" ] || \"$p\" claude"
           }
         ]
       }
@@ -84,7 +84,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"; [ ! -x \"$p\" ] || \"$p\""
+            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"; [ ! -x \"$p\" ] || \"$p\" claude"
           }
         ]
       }
@@ -94,7 +94,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"; [ ! -x \"$p\" ] || \"$p\"",
+            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"; [ ! -x \"$p\" ] || \"$p\" claude",
             "async": true
           }
         ]
@@ -105,7 +105,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"; [ ! -x \"$p\" ] || \"$p\""
+            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"; [ ! -x \"$p\" ] || \"$p\" claude"
           }
         ]
       }
@@ -115,7 +115,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"; [ ! -x \"$p\" ] || \"$p\""
+            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"; [ ! -x \"$p\" ] || \"$p\" claude"
           }
         ]
       }

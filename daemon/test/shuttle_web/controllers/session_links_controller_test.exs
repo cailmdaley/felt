@@ -188,6 +188,27 @@ defmodule ShuttleWeb.SessionLinksControllerTest do
       assert StubGetFileClient.last().url =~ "host=local"
     end
 
+    test "a remote that spells Claude's harness canonically keeps its link" do
+      remote_links = [
+        %{
+          "session" => @bridged,
+          "availability" => "available_local",
+          "harness" => "claude",
+          "url" => @url
+        }
+      ]
+
+      StubGetFileClient.set_response(
+        {:ok, 200, "application/json",
+         Jason.encode!(%{"host" => "hub-a-own-id", "links" => remote_links})}
+      )
+
+      assert links(%{"sessions" => @bridged, "host" => "hub-a"}) == %{
+               "host" => "hub-a",
+               "links" => remote_links
+             }
+    end
+
     test "a remote's answer is re-checked: requested sessions only, and only well-formed links" do
       StubGetFileClient.set_response(
         {:ok, 200, "application/json",

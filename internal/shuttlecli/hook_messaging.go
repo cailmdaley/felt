@@ -23,6 +23,9 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 	if json.NewDecoder(bytes.NewReader(b)).Decode(&input) != nil {
 		return nil
 	}
+	if input.Harness == "" {
+		input.Harness = a.env.Getenv("SHUTTLE_HOOK_HARNESS")
+	}
 	return a.handleHook(input, func(text string) error {
 		return json.NewEncoder(w).Encode(sessionEnvelope{HookSpecificOutput: sessionInner{HookEventName: input.HookEventName, AdditionalContext: text}})
 	})
@@ -159,6 +162,11 @@ func turnMailboxState(input eventHookInput) string {
 	}
 }
 
+// messageHookHarness is the harness a hook payload names. Every shim names it;
+// a payload without one comes from a shim installed before they did, which a
+// running session keeps until it restarts and a Codex cache keeps until
+// `felt setup codex`, so it is inferred from the transcript path and Codex's
+// payload fields.
 func (a *app) messageHookHarness(input eventHookInput) string {
 	if harness.Known(input.Harness) {
 		return input.Harness
