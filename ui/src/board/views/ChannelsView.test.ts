@@ -76,7 +76,7 @@ async function mount(inFlight = [chair, tsz, mask, beam, van, notes], view = new
     openFromDesk, openPage, look: see, isActive: false,
     console: (options: ConsoleOptions) => new Dock('', requestRefresh, undefined, undefined, options),
     library: { subscribe: () => () => {}, cancelOpen: vi.fn(), documents: () => library },
-    board: new BoardFeed(''), said: () => undefined, followFind: vi.fn(),
+    board: new BoardFeed(''), said: () => undefined, followFind: vi.fn(), dock: { openConversation: vi.fn(() => true) },
     globeHost: { feeds: { marks: (each: { uid?: string }) => ({ launches: launches[each.uid!] ?? [], commits: [] }), reach: () => 14 * day, files: () => [], lead: (each: { uid?: string }) => tapestryOf(each), refresh: () => {} } },
   }
   const sends = { files: sent, subscribe: () => () => {}, refresh: async () => {} }
@@ -444,6 +444,22 @@ it('heads the view with the channel itself, written as its name, the rail\'s tog
   host.querySelector<HTMLButtonElement>('[data-channel="channel:van"]')!.click()
   await settle()
   expect([shown(host), host.querySelector('.kbn-ch-name')!.hasAttribute('data-misc'), host.querySelector('.kbn-ch-name')!.getAttribute('title')]).toStrictEqual(['van', false, 'Moving house'])
+})
+
+it('c opens the conversation of the channel\'s chair, never while typing, and does nothing in misc', async () => {
+  daemon()
+  const stray = card({ id: 'errand', uid: 'E', name: 'Errand', status: 'active', ask: { text: 'Which form?', at: at(1) } })
+  const { view, ctx, host } = await mount([chair, tsz, mask, beam, van, stray])
+  const opened = vi.mocked(ctx.workspace!.dock.openConversation)
+  host.querySelector<HTMLButtonElement>('[data-channel="channel:cmbx"]')!.click(); await settle()
+  expect(view.keydown(new KeyboardEvent('keydown', { key: 'c' }))).toBe(true)
+  expect(opened.mock.calls.map(([each]) => each.uid)).toStrictEqual(['C'])
+  host.querySelector<HTMLInputElement>('.kbn-ch-jump')!.focus()
+  expect(view.keydown(new KeyboardEvent('keydown', { key: 'c' }))).toBe(false)
+  host.querySelector<HTMLInputElement>('.kbn-ch-jump')!.blur()
+  host.querySelector<HTMLButtonElement>('[data-channel="misc"]')!.click(); await settle()
+  expect(view.keydown(new KeyboardEvent('keydown', { key: 'c' }))).toBe(false)
+  expect(opened).toHaveBeenCalledTimes(1)
 })
 
 it('speaks for every constitution without a channel in misc, at the rail\'s foot, with no chair to address and nothing to pin', async () => {

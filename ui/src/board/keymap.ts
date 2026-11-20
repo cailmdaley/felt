@@ -186,6 +186,7 @@ export const helpSections: readonly HelpSection[] = [
     row(['['], 'Hide or show the channels', []),
     row(['/'], 'Find in the open channel: its stream folds to what matches, ↑ ↓ step, Esc unfolds', []),
     row(['Enter'], 'Write to the channel\'s chair', []),
+    row(['c'], 'Open the channel\'s chair\'s conversation in Rex', []),
     row(['e'], 'Clear the post or files in focus; a question or a close is answered, not cleared', []),
     row(['t'], 'Unfold the tapestry of the post in focus beneath it; again, fold it', []),
     row(['⌥↑', '⌥↓'], 'Move the channel in the rail', []),

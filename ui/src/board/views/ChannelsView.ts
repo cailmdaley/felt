@@ -1586,6 +1586,8 @@ export class ChannelsView implements TemporalView {
     // t opens the tapestry of the post in focus in the reader.
     const post = event.key === 't' ? active?.closest<HTMLElement>('.kbn-ch-item')?.querySelector<HTMLElement>('[data-item]')?.dataset.item : undefined
     if (post) { void this.openTapestry(post); return true }
+    // c opens the conversation of the channel's chair, as c does in its view; misc has no chair to speak to.
+    if (event.key === 'c' && this.channel?.seat) { this.ctx?.workspace?.dock.openConversation(this.channel.seat); return true }
     if (event.key === 'Escape' && this.overDrawer()) { this.moveRail(true); return true }
     if (event.key === 'j') { this.step(1); return true }
     if (event.key === 'k') { this.step(-1); return true }
