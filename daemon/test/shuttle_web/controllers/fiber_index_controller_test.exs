@@ -208,6 +208,13 @@ defmodule ShuttleWeb.FiberIndexControllerTest do
     assert request().status == 200
     assert_receive {:refresh, worker}
     ref = Process.monitor(worker)
+    # The monitor is a signal from this process and the cache's death another
+    # from the cache: unordered, the kill can reach the refresh first and the
+    # monitor report :noproc. Process.info is answered by the refresh after
+    # it has taken this process's monitor, so the refresh is alive and
+    # monitored before the cache dies.
+    assert {:monitored_by, monitors} = Process.info(worker, :monitored_by)
+    assert self() in monitors
     Process.exit(cache, :kill)
     assert_receive {:DOWN, ^ref, :process, ^worker, :killed}
 
