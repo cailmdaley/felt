@@ -11,10 +11,13 @@
 // run starts LAUNCH and polls the run's output once a second; each poll is
 // the heartbeat the remote script checks. With --attached, stdin first holds
 // a length-framed bootstrap, stored as <dir>/bootstrap before the start, and
-// its EOF means the observer is gone: the relay asks the daemon to cancel and
-// keeps reading until the run exits, or for 15 seconds of an unreachable host. Polls fail while the daemon restarts
-// itself mid-run; the relay retries until it has been unreachable for
-// SHUTTLE_DEPLOY_RELAY_GIVE_UP_SECONDS (300 by default).
+// its EOF means the observer is gone. Then, and on TERM, INT or HUP, the relay
+// asks the daemon to cancel the run; after EOF it reads on until the run exits
+// or the host has been unreachable for 15 seconds. Polls fail while the daemon
+// restarts itself mid-run; the relay retries until the host has been
+// unreachable for the tailnet lease, SHUTTLE_DEPLOY_TAILNET_LEASE_SECONDS (300
+// by default), after which the run, hearing no polls, cancels itself. A run
+// without --attached is a short probe and is given ten minutes.
 package main
 
 import (
@@ -26,13 +29,19 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
-var client = &http.Client{Timeout: 60 * time.Second}
+// A poll that hangs counts as a failed one; an upload of a release is slow.
+var (
+	client   = &http.Client{Timeout: 10 * time.Second}
+	uploader = &http.Client{Timeout: 30 * time.Minute}
+)
 
 // call makes one request and fails unless its status is one of ok.
 func call(c *http.Client, method, url string, body io.Reader, ok ...int) ([]byte, error) {
@@ -77,13 +86,12 @@ func create(base string) error {
 }
 
 func put(base, run, name string, body io.Reader) error {
-	// An upload of a release takes longer than a poll may.
-	_, err := call(&http.Client{}, "PUT", base+"/api/v1/deploy/runs/"+run+"/files/"+name, body, http.StatusNoContent)
+	_, err := call(uploader, "PUT", base+"/api/v1/deploy/runs/"+run+"/files/"+name, body, http.StatusNoContent)
 	return err
 }
 
-func giveUp() time.Duration {
-	if n, err := strconv.Atoi(os.Getenv("SHUTTLE_DEPLOY_RELAY_GIVE_UP_SECONDS")); err == nil && n > 0 {
+func lease() time.Duration {
+	if n, err := strconv.Atoi(os.Getenv("SHUTTLE_DEPLOY_TAILNET_LEASE_SECONDS")); err == nil && n > 0 {
 		return time.Duration(n) * time.Second
 	}
 	return 5 * time.Minute
@@ -91,7 +99,7 @@ func giveUp() time.Duration {
 
 func run(base, id, launch string, attached bool) (int, error) {
 	runURL := base + "/api/v1/deploy/runs/" + id
-	var cancelled atomic.Bool
+	var closed atomic.Bool
 	if attached {
 		in := bufio.NewReader(os.Stdin)
 		line, err := in.ReadString('\n')
@@ -111,7 +119,7 @@ func run(base, id, launch string, attached bool) (int, error) {
 		}
 		go func() {
 			io.Copy(io.Discard, in)
-			cancelled.Store(true)
+			closed.Store(true)
 		}()
 	}
 	script, err := os.Open(launch)
@@ -119,18 +127,30 @@ func run(base, id, launch string, attached bool) (int, error) {
 		return 1, err
 	}
 	defer script.Close()
-	// 409 is a start whose first answer was lost.
-	if _, err = call(client, "POST", runURL+"/start", script, http.StatusAccepted, http.StatusConflict); err != nil {
+	cancel := func() error {
+		_, err := call(client, "POST", runURL+"/cancel", nil, http.StatusAccepted)
+		return err
+	}
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+	if _, err = call(client, "POST", runURL+"/start", script, http.StatusAccepted); err != nil {
 		return 1, err
 	}
+	go func() {
+		<-signals
+		cancel()
+		os.Exit(143)
+	}()
 
-	offset, asked := 0, false
+	started, offset, asked := time.Now(), 0, false
 	var lost time.Time
 	for {
-		if cancelled.Load() && !asked {
-			if _, err := call(client, "DELETE", runURL, nil, http.StatusAccepted, http.StatusNoContent); err == nil {
-				asked = true
-			}
+		if closed.Load() && !asked {
+			asked = cancel() == nil
+		}
+		if !attached && time.Since(started) > 10*time.Minute {
+			cancel()
+			return 1, errors.New("the probe did not finish in ten minutes")
 		}
 		resp, err := client.Get(runURL + "/output?offset=" + strconv.Itoa(offset))
 		var chunk []byte
@@ -149,8 +169,8 @@ func run(base, id, launch string, attached bool) (int, error) {
 			if lost.IsZero() {
 				lost = time.Now()
 				fmt.Fprintf(os.Stderr, "deploy-relay: %s unreachable (%v); retrying\n", base, err)
-			} else if limit := giveUp(); cancelled.Load() && time.Since(lost) > 15*time.Second || time.Since(lost) > limit {
-				return 1, fmt.Errorf("%s unreachable since %s; the run cancels itself without heartbeats", base, lost.Format(time.TimeOnly))
+			} else if closed.Load() && time.Since(lost) > 15*time.Second || time.Since(lost) > lease() {
+				return 1, fmt.Errorf("%s unreachable since %s; the run cancels itself without polls", base, lost.Format(time.TimeOnly))
 			}
 			time.Sleep(time.Second)
 			continue

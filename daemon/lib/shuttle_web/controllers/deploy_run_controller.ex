@@ -9,22 +9,27 @@ defmodule ShuttleWeb.DeployRunController do
       PUT    /api/v1/deploy/runs/:id/files/:name       204; raw body to <dir>/<name>
       POST   /api/v1/deploy/runs/:id/start             202; raw body is the script
       GET    /api/v1/deploy/runs/:id/output?offset=N   200; output bytes from N
-      DELETE /api/v1/deploy/runs/:id                   202 cancel asked | 204 removed
+      POST   /api/v1/deploy/runs/:id/cancel            202; creates <dir>/cancel
+      DELETE /api/v1/deploy/runs/:id                   204 removed | 409 still running
 
   A run is a directory under `~/.shuttle/deploy/runs/<id>` and nothing else:
   any daemon incarnation serves any run, so a caller keeps reading across the
-  restart its own run causes. `start` writes the body to `<dir>/launch` and
-  runs `bash launch` in that directory in a new session, with stdin from
-  `/dev/null`, stdout and stderr appended to `<dir>/out`, and the environment
-  an ssh login would begin from (`HOME`, `USER`, `LOGNAME`, `SHELL`, the locale
-  and a system `PATH`), so the release's Erlang runtime never reaches it. Its
-  exit status lands in `<dir>/status`.
+  restart its own run causes. `start` writes the body to `<dir>/launch`, once,
+  and runs `bash launch` in that directory in a new session, with stdin from
+  `/dev/null` and stdout and stderr appended to `<dir>/out`. The script
+  inherits the daemon's environment without the release's Erlang runtime
+  (`ROOTDIR`, `BINDIR`, `EMU`, `PROGNAME`, `RELEASE_*` and every `PATH` entry
+  under the release root) or harness session identity, so it keeps what the
+  daemon's supervisor gave it (`XDG_RUNTIME_DIR` and the user bus that
+  `systemctl --user` needs, among them). Its exit status lands in
+  `<dir>/status`.
 
-  Every output read writes the time to `<dir>/beat`, and `DELETE` on a running
-  run creates `<dir>/cancel`. The daemon gives neither a meaning: the script
-  decides how to treat a stale beat or a cancel. An output response carries
-  `x-deploy-status` once the run has exited and the response reaches the end
-  of its output. Runs older than a day are removed when a new one is created.
+  Every output read writes the time to `<dir>/beat`, and `cancel` creates
+  `<dir>/cancel`. The daemon gives neither a meaning: the script decides how to
+  treat a stale beat or a cancel. An output response carries `x-deploy-status`
+  once the run has exited and the response reaches the end of its output.
+  Uploads may not take the names the run itself writes. Runs older than a day
+  are removed when a new one is created.
 
   Who may ask is whoever may use the daemon's other control routes: on a
   tailnet, any peer `tailscale serve` admits. A run executes arbitrary shell
@@ -40,11 +45,13 @@ defmodule ShuttleWeb.DeployRunController do
 
   @id ~r/\A[0-9a-f]{24}\z/
   @name ~r/\A[a-z0-9][a-z0-9._-]*\z/
+  @reserved ~w(launch out status status.tmp beat cancel)
   @chunk 1_048_576
   @max_age_seconds 86_400
 
   # Daemonize, then wait for the script and record its exit status. Python
   # because setsid(1) is absent on macOS; every host that deploys has python3.
+  # argv: run directory, release root ("" under Mix).
   @detach ~S"""
   import os, sys
   if os.fork():
@@ -55,9 +62,14 @@ defmodule ShuttleWeb.DeployRunController do
   out = os.open("out", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
   os.dup2(null, 0); os.dup2(out, 1); os.dup2(out, 2)
   os.closerange(3, 65536)
-  keep = ("HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "TZ")
-  env = {k: os.environ[k] for k in keep if k in os.environ}
-  env["PATH"] = "/usr/local/bin:/usr/bin:/bin"
+  root = sys.argv[2].rstrip("/")
+  drop = {"ROOTDIR", "BINDIR", "EMU", "PROGNAME", "ESCRIPT_NAME", "AI_AGENT", "PI_SESSION_ID",
+          "CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID", "CODEX_THREAD_ID"}
+  env = {k: v for k, v in os.environ.items()
+         if k not in drop and not k.startswith(("RELEASE_", "ANTIGRAVITY_"))}
+  path = [p for p in env.get("PATH", "").split(":")
+          if p and not (root and (p == root or p.startswith(root + "/")))]
+  env["PATH"] = ":".join(path or ["/usr/local/bin", "/usr/bin", "/bin"])
   pid = os.fork()
   if pid == 0:
       os.execvpe("bash", ["bash", "launch"], env)
@@ -85,7 +97,9 @@ defmodule ShuttleWeb.DeployRunController do
 
   def put_file(conn, %{"id" => id, "name" => name}) do
     with {:ok, dir} <- run_dir(id),
-         true <- Regex.match?(@name, name) || {:error, 400, "invalid file name"},
+         true <-
+           (Regex.match?(@name, name) and name not in @reserved and
+              not String.ends_with?(name, ".part")) || {:error, 400, "invalid file name"},
          {:ok, conn} <- receive_to(conn, Path.join(dir, name)) do
       send_resp(conn, 204, "")
     else
@@ -95,10 +109,11 @@ defmodule ShuttleWeb.DeployRunController do
 
   def start(conn, %{"id" => id}) do
     with {:ok, dir} <- run_dir(id),
-         :ok <- unstarted(dir),
-         {:ok, conn} <- receive_to(conn, Path.join(dir, "launch")),
-         {:ok, python} <- python() do
-      case Shuttle.Env.cmd(python, ["-c", @detach, dir], cd: dir, stderr_to_stdout: true) do
+         {:ok, python} <- python(),
+         {:ok, conn} <- receive_launch(conn, Path.join(dir, "launch")) do
+      args = ["-c", @detach, dir, Shuttle.Dispatcher.release_root() || ""]
+
+      case Shuttle.Env.cmd(python, args, cd: dir, stderr_to_stdout: true) do
         {_, 0} -> conn |> put_status(202) |> json(%{id: id, dir: dir})
         {out, code} -> error(conn, 500, "could not start the run (exit #{code}): #{out}")
       end
@@ -129,14 +144,22 @@ defmodule ShuttleWeb.DeployRunController do
     end
   end
 
+  def cancel(conn, %{"id" => id}) do
+    with {:ok, dir} <- run_dir(id) do
+      FS.write(Path.join(dir, "cancel"), "")
+      conn |> put_status(202) |> json(%{cancel: true})
+    else
+      {:error, status, message} -> error(conn, status, message)
+    end
+  end
+
   def delete(conn, %{"id" => id}) do
     with {:ok, dir} <- run_dir(id) do
       if FS.exists?(Path.join(dir, "status")) or not FS.exists?(Path.join(dir, "launch")) do
         FS.rm_rf(dir)
         send_resp(conn, 204, "")
       else
-        FS.write(Path.join(dir, "cancel"), "")
-        conn |> put_status(202) |> json(%{cancel: true})
+        error(conn, 409, "still running; cancel it first")
       end
     else
       {:error, status, message} -> error(conn, status, message)
@@ -154,8 +177,24 @@ defmodule ShuttleWeb.DeployRunController do
       else: {:error, 404, "no deploy run #{id}"}
   end
 
-  defp unstarted(dir) do
-    if FS.exists?(Path.join(dir, "launch")), do: {:error, 409, "already started"}, else: :ok
+  # The exclusive create is the start's one-time claim.
+  defp receive_launch(conn, path) do
+    case FS.open(path, [:write, :binary, :exclusive]) do
+      {:ok, file} ->
+        result = copy_body(conn, file)
+        FS.close(file)
+
+        with {:error, reason} <- result do
+          FS.rm(path)
+          {:error, 500, "could not receive the launch script: #{inspect(reason)}"}
+        end
+
+      {:error, :eexist} ->
+        {:error, 409, "already started"}
+
+      {:error, reason} ->
+        {:error, 500, "cannot write #{path}: #{FS.format_error(reason)}"}
+    end
   end
 
   defp python do

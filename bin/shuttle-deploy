@@ -329,6 +329,14 @@ EOF
 
 preflight_remote_revision || exit 1
 
+# A tailnet remote cycles onto the target's daemon mid-run and keeps reading
+# through it, so the target must serve deploy runs too.
+for h in $HOSTS; do
+  [ "$h" = local ] || uses_ssh "$h" && continue
+  git -C "$REPO" cat-file -e "$TARGET_COMMIT:daemon/lib/shuttle_web/controllers/deploy_run_controller.ex" 2>/dev/null \
+    || { HOST="$h" bad "preflight: $TARGET_SHA predates deploys over the tailnet; deploy it with --ssh=$h"; exit 1; }
+done
+
 # Every host fetches this object, never a moving branch. Harness packages use
 # the same exact-ref path even when the caller omitted --ref.
 DEPLOY_REF="${DEPLOY_REF:-HEAD}"
@@ -1180,8 +1188,10 @@ exit \"\$status\""
 # What a tailnet remote's daemon runs in place of the ssh command: unpack the
 # stage, then feed deploy-run the framed bootstrap the relay stored and a
 # heartbeat a second while the relay keeps reading. The relay's reads are the
-# beats; a cancel marker or a lease without one closes deploy-run's stdin,
-# which cancels the transaction exactly as a dropped ssh connection does.
+# beats; a cancel marker or a tailnet lease without one closes deploy-run's
+# stdin, which cancels the transaction exactly as a dropped ssh connection
+# does. The tailnet lease outlasts the daemon's own cycle, during which no
+# read can arrive; the relay asks for the cancel when its deployer goes.
 tailnet_launch() { # token
   cat <<SH
 set -u
@@ -1193,8 +1203,8 @@ if [ -f stage.tar ]; then tar -xf stage.tar -C stage && rm -f stage.tar || exit 
   while [ ! -e cancel ]; do
     beat=\$(cat beat 2>/dev/null) now=\$(date +%s)
     if [ "\$beat" != "\$last" ]; then last=\$beat seen=\$now
-    elif [ \$((now - seen)) -ge $HEARTBEAT_LEASE ]; then
-      echo "deploy: no heartbeat from the deploy host for $HEARTBEAT_LEASE seconds" >&2; break
+    elif [ \$((now - seen)) -ge $TAILNET_LEASE ]; then
+      echo "deploy: no read from the deploy host for $TAILNET_LEASE seconds" >&2; break
     fi
     printf '\\n' 2>/dev/null || break
     sleep 1
@@ -1272,6 +1282,11 @@ RUN_SOURCE="$(<"$REPO/scripts/deploy-run.sh")"
 HEARTBEAT_LEASE="${SHUTTLE_DEPLOY_HEARTBEAT_LEASE_SECONDS:-60}"
 case "$HEARTBEAT_LEASE" in ''|*[!0-9]*|0) echo "invalid SHUTTLE_DEPLOY_HEARTBEAT_LEASE_SECONDS: $HEARTBEAT_LEASE" >&2; exit 2 ;; esac
 export SHUTTLE_DEPLOY_HEARTBEAT_LEASE_SECONDS="$HEARTBEAT_LEASE"
+# How long a tailnet run waits for the relay's next read before cancelling
+# itself: long enough to span the remote daemon's own cycle.
+TAILNET_LEASE="${SHUTTLE_DEPLOY_TAILNET_LEASE_SECONDS:-300}"
+case "$TAILNET_LEASE" in ''|*[!0-9]*|0) echo "invalid SHUTTLE_DEPLOY_TAILNET_LEASE_SECONDS: $TAILNET_LEASE" >&2; exit 2 ;; esac
+export SHUTTLE_DEPLOY_TAILNET_LEASE_SECONDS="$TAILNET_LEASE"
 DEPLOYER="$(hostname):$$"
 RUN_DIR="$(mktemp -d)" || exit 1
 LOCAL_TOOL= active= RUNNING= LIFELINE_FDS=

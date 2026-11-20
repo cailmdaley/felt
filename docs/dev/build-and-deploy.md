@@ -158,8 +158,10 @@ the human. The helper asks the remote daemon for a *deploy run*
 `~/.shuttle/deploy/runs/<id>` on that host, into which it uploads the stage (the
 shipped CLIs and release, the UI bundle, the agent registry) as one tar and the
 framed bootstrap, then starts a launch script there. The daemon runs that script
-with `bash`, detached into its own session and with the environment an ssh login
-begins from, so the transaction is the same one ssh would run (the same
+with `bash`, detached into its own session, with its own environment less the
+release's Erlang runtime (so `systemctl --user` still finds the user bus), and
+the transaction starts its login shell from there. It is the same transaction
+ssh would run (the same
 `scripts/deploy-run.sh`, locks, lease, deadline, build in the login shell under
 `build_wrap`, activation, readiness, quarantine release, harness refresh,
 rollback) and survives the daemon it replaces. A run is only files: any daemon
@@ -170,15 +172,23 @@ On the deploy host a small relay (`scripts/deploy-relay/main.go`, compiled
 beside the lock helper) stands where ssh stood under `deploy-lock --observe`: it
 takes the framed bootstrap and heartbeats on stdin, polls the run's output once
 a second to stdout, and exits with the run's status. Each poll is the heartbeat:
-the launch script feeds deploy-run a newline a second while polls keep arriving,
-and closes its stdin after a whole heartbeat lease without one, which cancels
-the transaction exactly as a lost ssh connection does. When the deployer goes
-away, the relay asks the daemon to cancel (a `cancel` marker the launch script
-obeys) and reads on until the run exits. While the daemon cycles itself the
-relay's polls fail; it retries, says when the host answers again, and gives up
-after five minutes unreachable (`SHUTTLE_DEPLOY_RELAY_GIVE_UP_SECONDS`), by
-which time the run has cancelled itself. Short probes (the platform, the live
-version) are deploy runs of their own.
+the launch script feeds deploy-run a newline a second while polls keep
+arriving. When the deployer goes away (its lifeline closes, or the relay is
+signalled) the relay asks the daemon to cancel, a `cancel` marker on which the
+launch script closes deploy-run's stdin, and the transaction cancels as it
+would on a lost ssh connection. While the daemon cycles itself no poll can
+arrive, so the launch script waits a whole tailnet lease
+(`SHUTTLE_DEPLOY_TAILNET_LEASE_SECONDS`, 300 by default) without one before
+cancelling on its own; that lease, not the ssh heartbeat lease, is how long a
+deployer killed outright leaves its run going. The relay retries through the
+outage, says when the host answers again, and gives up after the same lease.
+Short probes (the platform, the live version) are deploy runs of their own,
+given ten minutes.
+A deploy run persists under `~/.shuttle/deploy/runs/<id>` until the relay
+removes it after reading its status; one left behind is removed after a day.
+A tailnet deploy needs a target that serves deploy runs itself, since the relay
+keeps reading from the daemon the target activates; an older target, such as a
+rollback, goes over `--ssh`.
 
 **ssh remains for what a daemon cannot do for itself:** the first install of a
 host, a host whose daemon is down, and a daemon built before these routes. The
@@ -277,7 +287,7 @@ Pointer selection through readiness verification, quarantine release and rollbac
 
 The caller sends a length-framed bootstrap on stdin. The target reads it completely before starting a login shell, whose stdin is `/dev/null`; a separate descriptor carries observer lifetime. Captured query values have explicit begin/end frames, so profile stdout cannot become a path or JSON value. A profile that exits zero without executing the bootstrap cannot report deployment success.
 
-After acquiring its locks, each target atomically publishes one private `~/.shuttle/deploy/last-run.log`, retaining ordered stdout/stderr and failure diagnostics even when the transport disappears. A waiter keeps private temporary output and cannot overwrite the holder's log. Logging ends at the completion token rather than waiting for background FIFO writers; the launched child closes fd 8. There are no persistent run directories. File privacy does not change the login umask inherited by builds or launched services.
+After acquiring its locks, each target atomically publishes one private `~/.shuttle/deploy/last-run.log`, retaining ordered stdout/stderr and failure diagnostics even when the transport disappears. A waiter keeps private temporary output and cannot overwrite the holder's log. Logging ends at the completion token rather than waiting for background FIFO writers; the launched child closes fd 8. Over ssh there are no persistent run directories. File privacy does not change the login umask inherited by builds or launched services.
 
 ```sh
 tail -n 50 ~/.shuttle/deploy/last-run.log

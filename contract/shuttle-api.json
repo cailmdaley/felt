@@ -91,6 +91,7 @@
         "PUT /deploy/runs/{id}/files/{name}",
         "POST /deploy/runs/{id}/start",
         "GET /deploy/runs/{id}/output",
+        "POST /deploy/runs/{id}/cancel",
         "DELETE /deploy/runs/{id}"
       ]
     },

@@ -219,6 +219,7 @@ defmodule ShuttleWeb.Router do
     put("/deploy/runs/:id/files/:name", DeployRunController, :put_file)
     post("/deploy/runs/:id/start", DeployRunController, :start)
     get("/deploy/runs/:id/output", DeployRunController, :output)
+    post("/deploy/runs/:id/cancel", DeployRunController, :cancel)
     delete("/deploy/runs/:id", DeployRunController, :delete)
   end
 

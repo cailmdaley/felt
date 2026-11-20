@@ -95,14 +95,17 @@ func fakeRunDaemon(t *testing.T, root string, env []string, events string, down 
 				w.Header().Set("x-deploy-status", strings.TrimSpace(string(status)))
 			}
 			w.Write(data[offset:])
+		case r.Method == "POST" && len(parts) == 3 && parts[2] == "cancel":
+			os.WriteFile(filepath.Join(dir, "cancel"), nil, 0600)
+			os.WriteFile(filepath.Join(root, "cancelled"), nil, 0600)
+			w.WriteHeader(http.StatusAccepted)
 		case r.Method == "DELETE" && len(parts) == 2:
-			if _, err := os.Stat(filepath.Join(dir, "status")); err == nil {
-				os.RemoveAll(dir)
-				w.WriteHeader(http.StatusNoContent)
-			} else {
-				os.WriteFile(filepath.Join(dir, "cancel"), nil, 0600)
-				w.WriteHeader(http.StatusAccepted)
+			if _, err := os.Stat(filepath.Join(dir, "status")); err != nil {
+				http.Error(w, "still running", http.StatusConflict)
+				return
 			}
+			os.RemoveAll(dir)
+			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.NotFound(w, r)
 		}
@@ -111,21 +114,40 @@ func fakeRunDaemon(t *testing.T, root string, env []string, events string, down 
 	return srv
 }
 
+// newTailnetFleet is a fleet whose one remote has a url served by a
+// fakeRunDaemon, at a target that carries the deploy-run routes.
+func newTailnetFleet(t *testing.T, down time.Duration) (*deployFleet, string) {
+	f := newDeployFleet(t)
+	controller := filepath.Join(f.repo, "daemon/lib/shuttle_web/controllers/deploy_run_controller.ex")
+	os.MkdirAll(filepath.Dir(controller), 0700)
+	if err := os.WriteFile(controller, []byte("# routes\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f.git(t, f.repo, "add", ".")
+	f.git(t, f.repo, "commit", "-m", "routes")
+	f.git(t, f.repo, "push")
+	f.sha = f.git(t, f.repo, "rev-parse", "HEAD")
+	env := append(append([]string{}, f.env...), "TEST_REMOTE=1", "SHUTTLE_TEST_GO_CACHES_PINNED=1", "GOTOOLCHAIN=local")
+	runs := filepath.Join(f.root, "runs")
+	srv := fakeRunDaemon(t, runs, env, f.events, down)
+	fleet := fmt.Sprintf(`{"remotes":[{"name":"fake","ssh":"fake","url":%q,"checkout":%q,"build_ui":false}]}`, srv.URL+"/", f.remote)
+	if err := os.WriteFile(filepath.Join(f.root, "remotes.json"), []byte(fleet), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return f, runs
+}
+
 // A remote with a url deploys through its daemon's deploy-run routes: no ssh
 // connection is opened, the stage (here the shipped UI) arrives as one tar,
 // and the transaction keeps going while its daemon is unreachable across the
 // cycle it causes.
 func TestDeployTailnetTransport(t *testing.T) {
 	t.Parallel()
-	f := newDeployFleet(t)
-	env := append(append([]string{}, f.env...), "TEST_REMOTE=1", "SHUTTLE_TEST_GO_CACHES_PINNED=1", "GOTOOLCHAIN=local")
-	srv := fakeRunDaemon(t, filepath.Join(f.root, "runs"), env, f.events, 3*time.Second)
-	fleet := fmt.Sprintf(`{"remotes":[{"name":"fake","ssh":"fake","url":%q,"checkout":%q,"build_ui":false}]}`, srv.URL+"/", f.remote)
-	if err := os.WriteFile(filepath.Join(f.root, "remotes.json"), []byte(fleet), 0600); err != nil {
-		t.Fatal(err)
-	}
+	// The outage outlasts the transaction's 60-second ssh heartbeat lease
+	// scaled down here to 2s, and stays inside the tailnet lease.
+	f, _ := newTailnetFleet(t, 4*time.Second)
 	fleetTouch(t, f.gate)
-	cmd, log := f.start(t, "tailnet")
+	cmd, log := f.start(t, "tailnet", "SHUTTLE_DEPLOY_HEARTBEAT_LEASE_SECONDS=2", "SHUTTLE_DEPLOY_TAILNET_LEASE_SECONDS=30")
 	if err := f.deployWait(t, cmd); err != nil {
 		t.Fatalf("deploy: %v %s", err, fleetRead(log))
 	}
@@ -146,5 +168,22 @@ func TestDeployTailnetTransport(t *testing.T) {
 	}
 	if !f.lockFree(t) {
 		t.Fatal("finished tailnet deploy retained the host lock")
+	}
+}
+
+// A deployer that goes away mid-build cancels its tailnet run at once: the
+// relay asks the daemon to cancel, the launch script closes deploy-run's
+// stdin, and the host lock comes free without waiting out the tailnet lease.
+func TestDeployTailnetCancelsWithItsDeployer(t *testing.T) {
+	t.Parallel()
+	f, runs := newTailnetFleet(t, 0)
+	cmd, log := f.start(t, "tailnet-cancel", "SHUTTLE_DEPLOY_TAILNET_LEASE_SECONDS=600")
+	deployAwait(t, "build: "+log, func() bool { _, err := os.Stat(filepath.Join(f.root, "build-entered")); return err == nil })
+	syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+	f.deployWait(t, cmd)
+	deployAwait(t, "cancel: "+log, func() bool { _, err := os.Stat(filepath.Join(runs, "cancelled")); return err == nil })
+	deployAwait(t, "lock free: "+log, func() bool { return f.lockFree(t) })
+	if strings.Contains(fleetRead(f.events), "cycle\n") {
+		t.Fatalf("cancelled deploy cycled the daemon: %s", fleetRead(f.events))
 	}
 }

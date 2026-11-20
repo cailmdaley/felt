@@ -1,9 +1,9 @@
 defmodule ShuttleWeb.DeployRunControllerTest do
   @moduledoc """
   The deploy-run routes end to end, with real detached processes: a run
-  receives its files, starts outside the daemon's session with an ssh-login
-  environment, streams its output, records its exit status, and turns DELETE
-  into a cancel marker while running and a removal once finished.
+  receives its files, starts once and outside the daemon's session with the
+  daemon's environment less the release runtime, streams its output, records
+  its exit status, takes a cancel marker, and is removed only once finished.
   """
   use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
@@ -47,9 +47,11 @@ defmodule ShuttleWeb.DeployRunControllerTest do
     end
   end
 
-  test "a run receives files, runs detached with a login-like environment, and reports its exit",
+  test "a run receives files, runs detached without the release runtime, and reports its exit",
        %{root: root} do
-    Env.put_env("SHUTTLE_DEPLOY_RUN_LEAK", "leaked")
+    Env.put_env("SHUTTLE_DEPLOY_RUN_KEPT", "kept")
+    Env.put_env("RELEASE_NODE", "leaked")
+    Env.put_env("AI_AGENT", "leaked")
     {id, dir} = create()
     assert dir == Path.join(root, id)
 
@@ -58,7 +60,7 @@ defmodule ShuttleWeb.DeployRunControllerTest do
 
     script = """
     cat payload.tar; echo
-    echo "leak=${SHUTTLE_DEPLOY_RUN_LEAK-unset} root=${ROOTDIR-unset} home=$HOME"
+    echo "kept=${SHUTTLE_DEPLOY_RUN_KEPT-unset} node=${RELEASE_NODE-unset} agent=${AI_AGENT-unset} root=${ROOTDIR-unset}"
     [ "$(ps -o pgid= -p $$)" != "$(ps -o pgid= -p #{System.pid()})" ] && echo own-session
     echo to-stderr >&2
     exit 3
@@ -70,7 +72,7 @@ defmodule ShuttleWeb.DeployRunControllerTest do
     {code, out} = drain(id)
     assert code == 3
     assert out =~ "payload bytes"
-    assert out =~ "leak=unset root=unset home=#{System.user_home!()}"
+    assert out =~ "kept=kept node=unset agent=unset root=unset"
     assert out =~ "own-session"
     assert out =~ "to-stderr"
     assert File.exists?(Path.join(dir, "beat"))
@@ -80,17 +82,19 @@ defmodule ShuttleWeb.DeployRunControllerTest do
     assert get(local_conn(), "/api/v1/deploy/runs/#{id}/output").status == 404
   end
 
-  test "DELETE on a running run leaves a cancel marker the script obeys" do
+  test "a running run is cancelled by its marker and removed only once finished" do
     {id, _dir} = create()
 
     script =
       "echo started; while [ ! -e cancel ]; do sleep 0.05; done; echo cancelled; exit 143\n"
 
     assert start(id, script).status == 202
+    assert delete(local_conn(), "/api/v1/deploy/runs/#{id}").status == 409
 
-    assert json_response(delete(local_conn(), "/api/v1/deploy/runs/#{id}"), 202) == %{
-             "cancel" => true
-           }
+    assert json_response(post(raw(local_conn()), "/api/v1/deploy/runs/#{id}/cancel", ""), 202) ==
+             %{
+               "cancel" => true
+             }
 
     assert {143, out} = drain(id)
     assert out =~ "started\n"
@@ -100,6 +104,11 @@ defmodule ShuttleWeb.DeployRunControllerTest do
   test "names and ids outside their forms are refused" do
     {id, _dir} = create()
     assert put(raw(local_conn()), "/api/v1/deploy/runs/#{id}/files/..evil", "x").status == 400
+
+    for name <- ~w(status launch out beat cancel x.part) do
+      assert put(raw(local_conn()), "/api/v1/deploy/runs/#{id}/files/#{name}", "0").status == 400
+    end
+
     assert get(local_conn(), "/api/v1/deploy/runs/../output").status == 404
     assert get(local_conn(), "/api/v1/deploy/runs/#{id}/output?offset=-1").status == 400
   end
