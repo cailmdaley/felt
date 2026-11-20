@@ -21,7 +21,7 @@ Every surface that moves the reader asks it; none touches `window.history` for t
 - **A back in flight** (the pop has not landed yet) holds whatever is asked meanwhile and applies it once the pop lands; an open queued this way pushes a fresh layer.
 
 - **In Channels the swipe is the rail's, never back.** A rightward swipe anywhere in Channels brings the channel rail: on a channel, and over the reader opened from it, where it leaves the reader (one `WorkspaceHistory.leave`, as back would) and goes on drawing the rail in under the same finger.
-  The reader offers each page swipe it recognises, its frames' included, to the view beneath first (`Workspace.swipeBeneath`); Channels takes the rightward ones, and a trackpad's sideways wheel over the reader it reads itself.
+  The reader offers each page swipe it recognises, its frames' included, to the view beneath first (`Workspace.swipeBeneath`); Channels takes the rightward ones, and a trackpad's sideways wheel over the reader it reads itself, except over a framed page (a report, a tapestry, a deck): a frame keeps its wheel events, so there the browser's own swipe-back still answers, landing on the channel.
   Back from the reader over Channels is its ‹, Escape and the browser's Back. Over the Desk, Chronicle and Globe the phone's swipe is still back.
 - **The view under the reader, chosen from it** (its tab, its key, the header's close on a reader opened from the Desk) is back, not a new entry.
 - **Popups over the reader keep no entry.** The list of sent files (`openFileList`) closes by Escape or a click outside; Back leaves the reader and the list with it.

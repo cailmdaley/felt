@@ -247,8 +247,12 @@ export class ChannelsView implements TemporalView {
 
   mount(host: HTMLElement, ctx: ViewContext): void {
     this.ctx = ctx
-    // The view outlives its mounts: coming back to the channel it showed is reading it again.
-    if (this.current) store(SEEN + this.current, String(Date.now()))
+    // The view outlives its mounts: coming back to the channel it showed is coming to it again, and reading it.
+    if (this.current) {
+      this.opened = { at: Date.now(), seen: lastSeen(this.current) }
+      this.earlier = 0
+      store(SEEN + this.current, String(Date.now()))
+    }
     const page = createViewPage('Channels')
     page.root.classList.add('kbn-channels')
     // The board's tab bar names the view: the channel's own head is the view's top row, the rail's toggle at its right.
@@ -745,8 +749,8 @@ export class ChannelsView implements TemporalView {
   /**
    * The part of a channel's stream it shows: from its {@link OPENS_ON}th
    * newest line to the human as of when it was come to (as many again for
-   * each Earlier), or from its oldest line unread then, waiting, or that Rex
-   * came to, whichever is older; with how many lines to the human stand
+   * each Earlier), or from its oldest line unread then or waiting, or the
+   * latest line or station of the worker Rex came to, whichever is older; with how many lines to the human stand
    * before it. What arrives after is always shown.
    */
   private window(all: Entry[]): { entries: Entry[]; hidden: number } {
@@ -754,7 +758,7 @@ export class ChannelsView implements TemporalView {
     const before = items.filter(item => item.arrived <= this.opened.at), want = OPENS_ON * (1 + this.earlier)
     let from = before.length > want ? before[before.length - want].at : -Infinity
     const held = items.find(item => item.waiting || item.arrived > this.opened.seen)
-    const marked = this.marked ? items.filter(item => fiberOf(item.card) === this.marked).at(-1) : undefined
+    const marked = this.marked ? all.filter(entry => fiberOf(entry.card) === this.marked).at(-1) : undefined
     for (const item of [held, marked]) if (item) from = Math.min(from, item.at)
     return { entries: all.filter(entry => entry.at >= from), hidden: items.filter(item => item.at < from).length }
   }

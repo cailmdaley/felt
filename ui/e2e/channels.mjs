@@ -201,6 +201,8 @@ try {
       await page.locator('.kbn-ch-earlier-more').waitFor()
       const shown = await page.locator('.kbn-ch > .kbn-ch-stream > .kbn-ch-item').count()
       assert.ok(shown < 14, `the channel opens on ${shown} of its 14 lines`)
+      // Measured with Earlier in sight, as a reader who scrolled up to it has it.
+      await page.locator('.kbn-ch-earlier-more').scrollIntoViewIfNeeded()
       const newest = page.locator('.kbn-ch > .kbn-ch-stream > .kbn-ch-item').last(), top = (await newest.boundingBox()).y
       await page.locator('.kbn-ch-earlier-more').click()
       assert.equal(Math.round((await newest.boundingBox()).y), Math.round(top), 'the lines being read stay where they were')
