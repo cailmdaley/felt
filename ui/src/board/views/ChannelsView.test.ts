@@ -925,6 +925,9 @@ it('opens a channel on its newest lines, back to the oldest it holds unread, and
   // Last read before the third: it opens there, on everything unread.
   const again = await read(105)
   expect(said(again.host)).toStrictEqual(posts.slice(2).map(post => post.text))
+  // Earlier reaches back from where the window starts, here past its first two lines.
+  again.host.querySelector<HTMLButtonElement>('.kbn-ch-earlier-more')!.click()
+  expect(said(again.host).length).toBe(12)
   again.view.unmount(); document.body.replaceChildren()
   // Rex brought to a worker whose only line is a handoff before the window: the window widens to it, and marks it.
   daemon([], new Map([['shuttle.channels.seen:channel:cmbx', String(Date.now())]]), {}, { board: { C: [record({ id: 'h1', kind: 'handed_off', fiber: 'B' }, 200), ...posts] } })

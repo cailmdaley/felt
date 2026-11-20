@@ -373,7 +373,7 @@ export class Reader {
    * quiet for half a second, is cancelled so layout owns the track again.
    */
   private swipe(signal: SwipeSignal): void {
-    if (!this.swiping && this.opts.onSwipe?.(signal)) return
+    if (!this.swiping && this.swipeable && this.opts.onSwipe?.(signal)) return
     const ch = this.channel
     const index = ch?.documents.findIndex(d => d.key === this.selected) ?? -1
     const width = this.stage.clientWidth

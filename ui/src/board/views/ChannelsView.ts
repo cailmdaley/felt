@@ -168,8 +168,8 @@ export class ChannelsView implements TemporalView {
   private current: string | null = null
   /** When the channel was come to, and what this device had read of it then: what arrived since stays in its window. */
   private opened = { at: 0, seen: -Infinity }
-  /** How many times Earlier was asked in this channel. */
-  private earlier = 0
+  /** Where the channel's window starts once it is known: it only ever reaches further back while the channel stays open. */
+  private from = Infinity
   /** What Jump to is looking for; '' lists the rail. */
   private query = ''
   /** The item a document or view was opened from, which takes focus again when the reader closes. */
@@ -250,7 +250,7 @@ export class ChannelsView implements TemporalView {
     // The view outlives its mounts: coming back to the channel it showed is coming to it again, and reading it.
     if (this.current) {
       this.opened = { at: Date.now(), seen: lastSeen(this.current) }
-      this.earlier = 0
+      this.from = Infinity
       store(SEEN + this.current, String(Date.now()))
     }
     const page = createViewPage('Channels')
@@ -499,7 +499,7 @@ export class ChannelsView implements TemporalView {
     if (key !== this.current) {
       if (this.current) store(SEEN + this.current, String(Date.now()))
       this.opened = { at: Date.now(), seen: key ? lastSeen(key) : -Infinity }
-      this.earlier = 0
+      this.from = Infinity
       this.current = key
       if (key) { store(SEEN + key, String(Date.now())); store(LAST, key) }
       this.following = true
@@ -748,26 +748,34 @@ export class ChannelsView implements TemporalView {
   }
   /**
    * The part of a channel's stream it shows: from its {@link OPENS_ON}th
-   * newest line to the human as of when it was come to (as many again for
-   * each Earlier), or from its oldest line unread then or waiting, or the
-   * latest line or station of the worker Rex came to, whichever is older; with how many lines to the human stand
-   * before it. What arrives after is always shown.
+   * newest line to the human as of when it was come to, or from its oldest
+   * line unread then or waiting, or the worker Rex came to (its latest post,
+   * else its latest station), whichever is older; with how many lines to the
+   * human stand before it. The start only moves back while the channel stays
+   * open (Earlier, a line that stops waiting leaves it where it was), and what
+   * arrives after is always shown.
    */
   private window(all: Entry[]): { entries: Entry[]; hidden: number } {
     const items = all.filter((entry): entry is Item => entry.kind !== 'station')
-    const before = items.filter(item => item.arrived <= this.opened.at), want = OPENS_ON * (1 + this.earlier)
-    let from = before.length > want ? before[before.length - want].at : -Infinity
+    const before = items.filter(item => item.arrived <= this.opened.at)
+    let start = before.length > OPENS_ON ? before[before.length - OPENS_ON].at : -Infinity
     const held = items.find(item => item.waiting || item.arrived > this.opened.seen)
-    const marked = this.marked ? all.filter(entry => fiberOf(entry.card) === this.marked).at(-1) : undefined
-    for (const item of [held, marked]) if (item) from = Math.min(from, item.at)
+    const own = this.marked ? all.filter(entry => fiberOf(entry.card) === this.marked) : []
+    const marked = own.filter(entry => entry.kind !== 'station').at(-1) ?? own.at(-1)
+    for (const entry of [held, marked]) if (entry) start = Math.min(start, entry.at)
+    // A start reckoned before the channel's lines have all been read is not kept: it would show the whole channel for good.
+    const from = Math.min(this.from, start)
+    if (Number.isFinite(start)) this.from = from
     return { entries: all.filter(entry => entry.at >= from), hidden: items.filter(item => item.at < from).length }
   }
   /** The row above a channel's window: Earlier shows as many lines again, the stream staying where it was read. */
   private earlierRow(hidden: number): HTMLLIElement {
     const row = el('li', 'kbn-ch-earlier')
     const more = button('kbn-ch-earlier-more', `Earlier · ${hidden} more`, () => {
-      const stream = this.stream!, height = stream.scrollHeight
-      this.earlier++
+      const stream = this.stream!, height = stream.scrollHeight, channel = this.channel
+      // As many lines again before where the window starts now.
+      const items = channel ? this.streamOf(channel).filter(entry => entry.kind !== 'station' && entry.at < this.from) : []
+      this.from = items.at(-OPENS_ON)?.at ?? -Infinity
       this.drawChannel()
       stream.scrollTop += stream.scrollHeight - height
       this.lastTop = stream.scrollTop
@@ -1348,8 +1356,8 @@ export class ChannelsView implements TemporalView {
    * Sideways gestures anywhere in Channels, the reader over it included: the
    * rail follows a finger or a two-finger trackpad swipe, rightward in,
    * leftward away, and settles by where it stands and how fast it went when
-   * let go. Over the reader, a rightward swipe leaves it and draws the rail in
-   * the same way ({@link readerSwipe}), so the swipe always means the rail and
+   * let go. Over the reader, a rightward swipe leaves it and brings the rail in,
+   * so the swipe always means the rail and
    * never back. Content that scrolls sideways keeps its gesture; travel along
    * the stream is the stream's.
    */
@@ -1414,24 +1422,13 @@ export class ChannelsView implements TemporalView {
       motion.drag(-px, event.timeStamp)
       clearTimeout(idle)
       // A trackpad says nothing when the fingers lift; the rail lets go once its events pause.
-      idle = window.setTimeout(() => motion.release(), WHEEL_IDLE_MS)
+      idle = window.setTimeout(() => { leaving = false; motion.release() }, WHEEL_IDLE_MS)
     }
-    // A touch the reader recognised: rightward, it leaves the reader and the rail follows on from there.
-    let fromReader: number | null = null
+    // A touch the reader recognised, moving rightward: it leaves the reader and the rail comes in. The rail does not follow the
+    // rest of that finger, since a frame stops reporting a touch once the reader that showed it is put away.
     const readerSwipe = (signal: SwipeSignal): boolean => {
-      if (signal.phase !== 'move') {
-        if (fromReader === null) return false
-        fromReader = null
-        motion.release()
-        return true
-      }
-      if (fromReader === null) {
-        if (signal.dx <= 0 || this.rail?.moving) return false
-        fromReader = 0
-        this.ctx?.workspace?.returnToOrigin()
-      }
-      if (toward(signal.dx - fromReader)) motion.drag(signal.dx - fromReader, performance.now())
-      fromReader = signal.dx
+      if (signal.phase !== 'move' || signal.dx <= 0 || this.rail?.moving) return false
+      if (reading()) { this.ctx?.workspace?.returnToOrigin(); if (!this.railShown()) motion.go(true) }
       return true
     }
     if (this.ctx?.workspace) this.ctx.workspace.swipeBeneath = readerSwipe
