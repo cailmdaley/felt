@@ -86,7 +86,12 @@
         "GET /transcript/raw",
         "GET /debug/profile",
         "POST /quarantine/release",
-        "POST /remotes/{name}/reset"
+        "POST /remotes/{name}/reset",
+        "POST /deploy/runs",
+        "PUT /deploy/runs/{id}/files/{name}",
+        "POST /deploy/runs/{id}/start",
+        "GET /deploy/runs/{id}/output",
+        "DELETE /deploy/runs/{id}"
       ]
     },
     "voice": {

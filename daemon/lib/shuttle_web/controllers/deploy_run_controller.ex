@@ -34,6 +34,8 @@ defmodule ShuttleWeb.DeployRunController do
 
   use Phoenix.Controller, formats: [:json]
 
+  alias Shuttle.FS
+
   import Plug.Conn
 
   @id ~r/\A[0-9a-f]{24}\z/
@@ -72,12 +74,12 @@ defmodule ShuttleWeb.DeployRunController do
     id = Base.encode16(:crypto.strong_rand_bytes(12), case: :lower)
     dir = Path.join(root, id)
 
-    with :ok <- File.mkdir_p(root),
-         :ok <- File.mkdir(dir),
-         :ok <- File.chmod(dir, 0o700) do
+    with :ok <- FS.mkdir_p(root),
+         :ok <- FS.mkdir(dir),
+         :ok <- FS.chmod(dir, 0o700) do
       conn |> put_status(201) |> json(%{id: id, dir: dir})
     else
-      {:error, reason} -> error(conn, 500, "cannot create #{dir}: #{:file.format_error(reason)}")
+      {:error, reason} -> error(conn, 500, "cannot create #{dir}: #{FS.format_error(reason)}")
     end
   end
 
@@ -108,8 +110,8 @@ defmodule ShuttleWeb.DeployRunController do
   def output(conn, %{"id" => id} = params) do
     with {:ok, dir} <- run_dir(id),
          {:ok, offset} <- offset(params["offset"]) do
-      File.write(Path.join(dir, "beat"), "#{System.os_time(:second)}\n")
-      status = File.read(Path.join(dir, "status"))
+      FS.write(Path.join(dir, "beat"), "#{System.os_time(:second)}\n")
+      status = FS.read(Path.join(dir, "status"))
       {bytes, size} = read_from(Path.join(dir, "out"), offset)
 
       conn =
@@ -129,11 +131,11 @@ defmodule ShuttleWeb.DeployRunController do
 
   def delete(conn, %{"id" => id}) do
     with {:ok, dir} <- run_dir(id) do
-      if File.exists?(Path.join(dir, "status")) or not File.exists?(Path.join(dir, "launch")) do
-        File.rm_rf(dir)
+      if FS.exists?(Path.join(dir, "status")) or not FS.exists?(Path.join(dir, "launch")) do
+        FS.rm_rf(dir)
         send_resp(conn, 204, "")
       else
-        File.write(Path.join(dir, "cancel"), "")
+        FS.write(Path.join(dir, "cancel"), "")
         conn |> put_status(202) |> json(%{cancel: true})
       end
     else
@@ -147,13 +149,13 @@ defmodule ShuttleWeb.DeployRunController do
   defp run_dir(id) do
     dir = Path.join(root(), id)
 
-    if Regex.match?(@id, id) and File.dir?(dir),
+    if Regex.match?(@id, id) and FS.dir?(dir),
       do: {:ok, dir},
       else: {:error, 404, "no deploy run #{id}"}
   end
 
   defp unstarted(dir) do
-    if File.exists?(Path.join(dir, "launch")), do: {:error, 409, "already started"}, else: :ok
+    if FS.exists?(Path.join(dir, "launch")), do: {:error, 409, "already started"}, else: :ok
   end
 
   defp python do
@@ -173,17 +175,17 @@ defmodule ShuttleWeb.DeployRunController do
   end
 
   defp read_from(path, offset) do
-    case File.open(path, [:read, :binary, :raw]) do
+    case FS.open(path, [:read, :binary]) do
       {:ok, file} ->
-        {:ok, %{size: size}} = File.stat(path)
+        {:ok, %{size: size}} = FS.stat(path)
 
         bytes =
-          case :file.pread(file, offset, @chunk) do
+          case FS.pread(file, offset, @chunk) do
             {:ok, data} -> data
             _ -> ""
           end
 
-        File.close(file)
+        FS.close(file)
         {bytes, size}
 
       {:error, _} ->
@@ -194,22 +196,22 @@ defmodule ShuttleWeb.DeployRunController do
   defp receive_to(conn, path) do
     tmp = path <> ".part"
 
-    case File.open(tmp, [:write, :binary, :raw]) do
+    case FS.open(tmp, [:write, :binary]) do
       {:ok, file} ->
         result = copy_body(conn, file)
-        File.close(file)
+        FS.close(file)
 
         with {:ok, conn} <- result,
-             :ok <- File.rename(tmp, path) do
+             :ok <- FS.rename(tmp, path) do
           {:ok, conn}
         else
           {:error, reason} ->
-            File.rm(tmp)
+            FS.rm(tmp)
             {:error, 500, "could not receive #{Path.basename(path)}: #{inspect(reason)}"}
         end
 
       {:error, reason} ->
-        {:error, 500, "cannot write #{path}: #{:file.format_error(reason)}"}
+        {:error, 500, "cannot write #{path}: #{FS.format_error(reason)}"}
     end
   end
 
@@ -217,8 +219,8 @@ defmodule ShuttleWeb.DeployRunController do
     timeout = ShuttleWeb.LargeBodyParser.read_timeout()
 
     case read_body(conn, length: @chunk, read_length: @chunk, read_timeout: timeout) do
-      {:ok, data, conn} -> with :ok <- IO.binwrite(file, data), do: {:ok, conn}
-      {:more, data, conn} -> with :ok <- IO.binwrite(file, data), do: copy_body(conn, file)
+      {:ok, data, conn} -> with :ok <- FS.write(file, data), do: {:ok, conn}
+      {:more, data, conn} -> with :ok <- FS.write(file, data), do: copy_body(conn, file)
       {:error, reason} -> {:error, reason}
     end
   end
@@ -226,9 +228,9 @@ defmodule ShuttleWeb.DeployRunController do
   defp prune(root) do
     cutoff = System.os_time(:second) - @max_age_seconds
 
-    with {:ok, ids} <- File.ls(root) do
+    with {:ok, ids} <- FS.ls(root) do
       for id <- ids, Regex.match?(@id, id), dir = Path.join(root, id), newest(dir) < cutoff do
-        File.rm_rf(dir)
+        FS.rm_rf(dir)
       end
     end
   end
@@ -236,7 +238,7 @@ defmodule ShuttleWeb.DeployRunController do
   defp newest(dir) do
     [dir, Path.join(dir, "out"), Path.join(dir, "beat")]
     |> Enum.map(fn path ->
-      case File.stat(path, time: :posix) do
+      case FS.stat(path, time: :posix) do
         {:ok, %{mtime: mtime}} -> mtime
         _ -> 0
       end
