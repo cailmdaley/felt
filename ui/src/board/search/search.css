@@ -18,7 +18,7 @@
 .ws-find-face { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .ws-find-face > small { font: var(--type-meta)/var(--leading-prose) var(--font-mono); color: var(--ws-ink-faint); overflow-wrap: anywhere; }
 .ws-find-face[data-state] > .ws-channel-name { opacity: 0.55; }
-.ws-find-face[data-current] > .ws-channel-name { text-decoration: underline 1px; text-underline-offset: 3px; }
+.ws-find-pick[aria-current='true'] .ws-channel-name { text-decoration: underline 1px; text-underline-offset: 3px; }
 .ws-find-kind { font: var(--type-meta)/var(--leading-solid) var(--font-mono); color: var(--ws-ink-muted); }
 .ws-find-quote {
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere;
@@ -52,6 +52,8 @@
 .ws-search-snippet { font: var(--type-label)/var(--leading-ui) var(--font-serif); overflow-wrap: anywhere; color: var(--ws-ink); }
 .ws-search-meta { font: var(--type-meta)/var(--leading-prose) var(--font-mono); color: var(--ws-ink-muted); }
 .ws-search-note { margin: 0; padding: 8px 12px; font: var(--type-label)/var(--leading-prose) var(--font-serif); color: var(--ws-ink-muted); }
+/* The panel's status line stays rendered while it has nothing to say, so what it says next is announced. */
+.ws-find > .ws-search-note:empty { padding: 0; }
 .ws-find-item:has(> .ws-find-extra) .ws-search-meta { padding-right: 80px; }
 
 /* The chip naming where Find searches: a stamp inside the field, its words cut before it grows the field. */

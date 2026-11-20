@@ -63,13 +63,13 @@ export function constitutionsSection(src: ConstitutionSources): FindSection {
     const content = (): HTMLElement => {
       const drawn = face(marked('ws-channel-name', hit.name, needle), [card ? card.originId : 'in the record', ...state ? [state] : []], hit.excerpt ? marked('ws-find-quote', hit.excerpt, needle) : undefined)
       if (state || !hit.onBoard) drawn.dataset.state = state ?? 'record'
-      if (card && src.current?.(card)) drawn.dataset.current = ''
       return drawn
     }
     return {
       key: card ? `${card.originId}:${card.uid ?? card.id}` : hit.id,
-      label: state ? `${hit.name}, ${state}` : hit.name,
+      label: [state ? `${hit.name}, ${state}` : hit.name, hit.excerpt].filter(Boolean).join(': '),
       content,
+      current: !!card && !!src.current?.(card),
       className: 'ws-channel-row',
       ...hit.onBoard ? { pick: () => src.pick(hit) } : {},
     }

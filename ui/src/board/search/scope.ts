@@ -20,6 +20,8 @@ export interface FindRow {
   pick?(): void
   /** A second control beside the row (a transcript hit's "copy path"). */
   extra?: HTMLElement
+  /** It is where the reader stands (the constitution being read). */
+  current?: boolean
   /** Extra classes for the row's button. */
   className?: string
 }

@@ -61,7 +61,6 @@ const MOVED_MS = 60_000
 const OPENS_ON = 8
 /** A stream within this many pixels of its foot follows what arrives. */
 const FOLLOW_PX = 24
-/** Jump to lists at most this many documents beneath the channels it matches. */
 /** Narrower than this, the rail is a drawer drawn in over the stream. */
 const DRAWER_PX = 1100
 /** The margin's width: wide on a desktop, where the fibres can wander; narrower where the stream's width is scarce. */
@@ -154,6 +153,8 @@ export class ChannelsView implements TemporalView {
   /** The channel the head was last drawn for. */
   private headKey?: string
   private stream: HTMLOListElement | null = null
+  /** Says, politely, how many matches a fold found and which is in hand. */
+  private foundSay: HTMLElement | null = null
   private note: HTMLElement | null = null
   /** The console, to the channel's chair. */
   private dock: Dock | null = null
@@ -343,7 +344,9 @@ export class ChannelsView implements TemporalView {
     // What the human sends from here is answered at the stream's foot: a send returns the stream there, wherever it was being read.
     this.dock = this.ctx!.workspace!.console({ keepPlace: true, onSent: () => { this.following = true; this.toFoot() } })
     this.dock.el.hidden = true
-    this.channelEl.append(this.head, this.stream, this.dock.el)
+    this.foundSay = el('p', 'ws-sr-only')
+    this.foundSay.setAttribute('role', 'status')
+    this.channelEl.append(this.head, this.stream, this.foundSay, this.dock.el)
     return this.channelEl
   }
   /** Opens the console on the channel's chair, with the draft kept for that channel; a chair with no worker to run has none. Its pages stand in the channel's head, so the console names none. */
@@ -524,16 +527,24 @@ export class ChannelsView implements TemporalView {
     unhighlight(this.stream)
     for (const row of this.stream.querySelectorAll('[data-found]')) row.removeAttribute('data-found')
     this.foundRows = folded ? matchedRows(folded).map(entry => entry.id) : []
-    if (!folded) return
+    if (!folded) { this.sayFound(); return }
     const needle = needleOf(this.folding)
     for (const id of this.foundRows) for (const part of this.rows.get(id)?.node.querySelectorAll('.kbn-ch-item-text, .uf-file-name, .uf-caption, .kbn-ch-slug') ?? []) highlight(part, needle)
     const at = this.foundAt && this.foundRows.includes(this.foundAt) ? this.foundAt : this.foundRows.at(-1)
     // A redraw that keeps the match in hand leaves the stream where the reader has it.
     if (at) this.showFound(at, at !== this.foundAt)
+    else this.sayFound()
+  }
+  /** The fold's count and the match in hand, for a screen reader; written only when it changes, so a redraw is not announced again. */
+  private sayFound(): void {
+    const count = this.foundRows.length, at = this.foundAt ? this.foundRows.indexOf(this.foundAt) : -1
+    const words = !this.folding ? '' : !count ? 'No matches' : `Match ${at + 1} of ${count}`
+    if (this.foundSay && this.foundSay.textContent !== words) this.foundSay.textContent = words
   }
   /** Marks the match in hand and, when it is a new one, brings it into sight. */
   private showFound(id: string, bring = true): void {
     this.foundAt = id
+    this.sayFound()
     for (const row of this.stream?.querySelectorAll('[data-found]') ?? []) row.removeAttribute('data-found')
     const row = this.rows.get(id)?.node
     if (!row || !this.stream) return
@@ -598,8 +609,9 @@ export class ChannelsView implements TemporalView {
       this.following = true
       this.marked = null
       this.markedItem = null
-      // Find searched the channel left: it is put away, its fold and its chip with it.
+      // Find searched the channel left: it is put away, its fold and its chip with it; an empty Find follows to the channel come to.
       if (this.folding) { this.folding = ''; this.foundAt = null; this.ctx?.workspace?.clearFind() }
+      else this.ctx?.workspace?.followFind()
       const channel = this.channel
       if (channel) this.ctx?.workspace?.board.read(channel.families)
     }
@@ -1591,7 +1603,7 @@ export class ChannelsView implements TemporalView {
     this.reading = false
     this.ctx = null
     this.layout = this.channelEl = this.head = this.note = null
-    this.list = null; this.jump = null; this.stream = null; this.railToggle = null
+    this.list = null; this.jump = null; this.stream = null; this.foundSay = null; this.railToggle = null
     this.dock?.reset(); this.dock = null
     this.drafted = null
     this.sigs = { rail: '', head: '', stream: '' }

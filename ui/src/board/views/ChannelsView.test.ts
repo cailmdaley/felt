@@ -74,7 +74,7 @@ async function mount(inFlight = [chair, tsz, mask, beam, van, notes], view = new
     openFromDesk, openPage, look: see, isActive: false,
     console: (options: ConsoleOptions) => new Dock('', requestRefresh, undefined, undefined, options),
     library: { subscribe: () => () => {}, cancelOpen: vi.fn(), documents: () => library },
-    board: new BoardFeed(''), said: () => undefined,
+    board: new BoardFeed(''), said: () => undefined, followFind: vi.fn(),
     globeHost: { feeds: { marks: (each: { uid?: string }) => ({ launches: launches[each.uid!] ?? [], commits: [] }), reach: () => 14 * day, files: () => [], lead: async () => undefined, refresh: () => {} } },
   }
   const sends = { files: sent, subscribe: () => () => {}, refresh: async () => {} }
@@ -985,8 +985,12 @@ it('keeps the reader\'s place while folded: a redraw scrolls only to a new match
   const scope = view.findScope()!
   const find = 'inPlace' in scope ? scope.inPlace : undefined
   const scrolled = vi.spyOn(HTMLElement.prototype, 'scrollIntoView')
+  const said = (): string | null | undefined => host.querySelector('.kbn-ch [role="status"]')?.textContent
   find!.input('σ')
   expect(scrolled).toHaveBeenCalledTimes(1)
+  const count = (view as unknown as { foundRows: string[] }).foundRows.length
+  expect(count).toBeGreaterThan(1)
+  expect(said()).toBe(`Match ${count} of ${count}`)
   // A poll that redraws the folded stream, a thread renamed, leaves the stream where the reader has it.
   const sig = (view as unknown as { sigs: { stream: string } }).sigs.stream
   view.refresh({ ...ctx, response: board([chair, { ...tsz, name: 'κ × tSZ, renamed' }, mask, beam, van, notes]) }); await settle()
@@ -995,7 +999,21 @@ it('keeps the reader\'s place while folded: a redraw scrolls only to a new match
   expect(scrolled).toHaveBeenCalledTimes(1)
   find!.step(-1)
   expect(scrolled).toHaveBeenCalledTimes(2)
+  expect(said()).toBe(`Match ${count - 1} of ${count}`)
+  find!.input('no such words anywhere')
+  expect(said()).toBe('No matches')
+  find!.input('σ')
   view.keydown(new KeyboardEvent('keydown', { key: 'j' }))
   expect(shown(host)).toBe('van')
   expect(clearFind).toHaveBeenCalledOnce()
+})
+
+it('has an empty Find follow to the channel the rail opens, so its chip names it', async () => {
+  daemon()
+  const { view, ctx, host } = await mount()
+  const followFind = ctx.workspace!.followFind as ReturnType<typeof vi.fn>
+  followFind.mockClear()
+  view.keydown(new KeyboardEvent('keydown', { key: 'j' }))
+  expect(followFind).toHaveBeenCalledOnce()
+  expect(view.findScope()?.chip).toBe(`in #${shown(host)}`)
 })

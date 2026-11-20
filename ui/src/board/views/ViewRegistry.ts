@@ -106,6 +106,8 @@ export interface ViewContext extends TemporalFetchers {
     said(card: KanbanCard): { text: string; at: number } | undefined
     /** Empty the bar's Find and put away whatever it did. */
     clearFind(): void
+    /** The bar's Find, serving, follows the view to where it stands now. */
+    followFind(): void
   }
   /**
    * WORK — every card on the eight lifecycle/planning surfaces, deduped. This

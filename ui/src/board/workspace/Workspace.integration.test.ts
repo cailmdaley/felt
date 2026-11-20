@@ -6,6 +6,7 @@ import { card, servedFeed, settle } from '../testFixtures.js'
 import type { ColumnKind, KanbanCard } from '../KanbanTypes.js'
 import type { Turn } from '../turn.js'
 import { Workspace, type WorkspaceOptions } from './Workspace.js'
+import { constitutionsSection } from '../search/sections.js'
 import { ThreadIndex } from '../threads.js'
 import { deskCardKey, deskOrder } from '../deskOrdering.js'
 import type { Reader } from './Reader.js'
@@ -476,7 +477,7 @@ describe('bar Find transcripts', () => {
       ? new Response(JSON.stringify(fail ? { error: 'offline' } : { hits: [{ ...hit, fibers: [] }], errors: [] }), { status: fail ? 502 : 200 })
       : original(input, init))
     type(find, 'Alpha'); await ask(find)
-    expect(document.querySelectorAll('.ws-search-note')).toHaveLength(1)
+    expect(document.querySelectorAll('.ws-search-note:not(:empty)')).toHaveLength(1)
     expect(document.querySelector('[data-section="transcripts"] .ws-search-note')?.textContent).toBe('Transcript search unavailable.')
     fail = false
     type(find, 'Alph'); await ask(find)
@@ -506,6 +507,104 @@ describe('bar Find transcripts', () => {
     press(find, 'Backspace')
     expect(chip.hidden).toBe(true)
     expect(document.querySelector('[data-section="constitutions"]')).not.toBeNull()
+  })
+
+  const searches = (): string[] => vi.mocked(fetch).mock.calls.map(([url]) => String(url)).filter(url => url.includes('/api/v1/search?'))
+  const withScope = (findScope: WorkspaceOptions['findScope']): { find: HTMLInputElement; chip: HTMLButtonElement } => {
+    const find = setup()
+    const chip = document.createElement('button')
+    workspace.dispose()
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => bodyCards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed), find, findChip: chip, findScope })
+    return { find, chip }
+  }
+
+  it('widened by the chip with words in the field, searches the board afresh: its own read, its own picks', async () => {
+    vi.useFakeTimers()
+    const picked = vi.fn()
+    const { find, chip } = withScope(() => ({ chip: 'in Chronicle', sections: [constitutionsSection({ shuttleBase: '', cards: () => bodyCards, pick: picked })] }))
+    type(find, 'Alpha'); await vi.advanceTimersByTimeAsync(250); await settle()
+    expect(chip.textContent).toBe('in Chronicle')
+    expect(searches()).toHaveLength(1)
+    chip.click(); await vi.advanceTimersByTimeAsync(250); await settle()
+    expect(chip.hidden).toBe(true)
+    expect(searches(), 'the board reads for itself').toHaveLength(2)
+    expect(document.querySelector('.ws-find-ask'), 'the board asks before reading transcripts').not.toBeNull()
+    document.querySelector<HTMLElement>('[data-section="constitutions"] .ws-find-pick')!.click(); await settle()
+    expect(picked).not.toHaveBeenCalled()
+    expect(workspace.isActive).toBe(true)
+    expect(workspace.reader.el.querySelector('.ws-channel-title')?.textContent).toBe('alpha')
+  })
+
+  it('widened from the reader with words in the field, reads the board\'s transcripts afresh when asked', async () => {
+    vi.useFakeTimers()
+    const { find, chip } = withScope(undefined)
+    answer([hit])
+    workspace.openFromDesk(bodyCards[0]); await settle()
+    type(find, 'Alpha'); await vi.advanceTimersByTimeAsync(250); await settle()
+    expect(transcriptReads()).toHaveLength(1)
+    chip.click(); await vi.advanceTimersByTimeAsync(250); await settle()
+    expect(document.querySelector('[data-section="transcripts"] .ws-search-result'), 'the reader\'s transcripts are not the board\'s').toBeNull()
+    await ask(find)
+    expect(transcriptReads()).toHaveLength(2)
+    expect(transcriptReads()[1]).not.toContain('fiber=')
+  })
+
+  it('in the reader, an empty field lists the constitutions, the one being read first and current; words search the thread alone', async () => {
+    vi.useFakeTimers()
+    const { find } = withScope(undefined)
+    workspace.openFromDesk(bodyCards[1]); await settle()
+    type(find, '')
+    const rows = [...document.querySelectorAll<HTMLElement>('[data-section="constitutions"] .ws-find-pick')]
+    expect(rows.map(row => row.getAttribute('aria-label'))).toEqual(['Beta', 'Alpha'])
+    expect(rows.map(row => row.getAttribute('aria-current'))).toEqual(['true', null])
+    expect(find.getAttribute('aria-expanded')).toBe('true')
+    expect(document.getElementById(find.getAttribute('aria-controls')!)?.contains(rows[0])).toBe(true)
+    type(find, 'Alpha'); await vi.advanceTimersByTimeAsync(250); await settle()
+    expect(document.querySelector('[data-section="constitutions"]')).toBeNull()
+    expect(searches(), 'the thread does not search the record').toEqual([])
+    type(find, '')
+    document.querySelectorAll<HTMLElement>('[data-section="constitutions"] .ws-find-pick')[1].click(); await settle()
+    expect(workspace.reader.el.querySelector('.ws-channel-title')?.textContent).toBe('alpha')
+  })
+
+  it('names a constitution found by its words with them, and says politely when nothing is found', async () => {
+    vi.useFakeTimers()
+    const { find } = withScope(undefined)
+    const original = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/api/v1/search?')
+      ? new Response(JSON.stringify({ results: String(input).includes('checked') ? [{ id: 'work/beta', name: 'Beta', where: ['body'], excerpt: 'A checked result.' }] : [] }))
+      : original(input, init))
+    type(find, 'checked'); await vi.advanceTimersByTimeAsync(250); await settle()
+    expect(document.querySelector('[data-section="constitutions"] .ws-find-pick')?.getAttribute('aria-label')).toBe('Beta: A checked result.')
+    // Two letters: the record is read, and transcripts (three at least) are not offered.
+    type(find, 'zz')
+    expect(document.querySelector('.ws-find [role="status"]')?.textContent).toBe('Searching…')
+    await vi.advanceTimersByTimeAsync(250); await settle()
+    expect(document.querySelector('.ws-find [role="status"]')?.textContent).toBe('Nothing found.')
+  })
+
+  it('reads the whole board\'s records in one request for its Said, once per opening', async () => {
+    vi.useFakeTimers()
+    const { find } = withScope(undefined)
+    const familyReads = (): string[] => vi.mocked(fetch).mock.calls.map(([url]) => String(url)).filter(url => url.includes('/api/v1/board/family'))
+    const before = familyReads().length
+    type(find, ''); type(find, 'Al'); type(find, 'Alpha'); await settle()
+    expect(familyReads().slice(before)).toHaveLength(1)
+    expect(familyReads().at(-1)).toContain('all=true')
+  })
+
+  it('Escape in the field puts Find away and leaves the reader be, though the list closed beneath it', async () => {
+    vi.useFakeTimers()
+    const { find } = withScope(undefined)
+    workspace.openFromDesk(bodyCards[0]); await settle()
+    find.focus()
+    type(find, 'Al')
+    workspace.clearFind()
+    find.value = 'Al'
+    press(find, 'Escape')
+    expect(find.value).toBe('')
+    expect(document.activeElement).not.toBe(find)
+    expect(workspace.isActive).toBe(true)
   })
 })
 

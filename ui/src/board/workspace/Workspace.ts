@@ -23,7 +23,7 @@ import './mentions.css'
 import { Reader } from './Reader.js'
 import { WorkspaceDepth } from './Depth.js'
 import { SearchPanel } from '../search/SearchPanel.js'
-import type { FindScope, ListScope } from '../search/scope.js'
+import type { FindScope, FindSection, ListScope } from '../search/scope.js'
 import { channelsSection, constitutionsSection, filesSection, saidSection, transcriptsSection } from '../search/sections.js'
 import { Library } from './Library.js'
 import { FamilyPage, type ViewFeeds } from './FamilyPage.js'
@@ -127,6 +127,8 @@ export class Workspace {
   /** The phone's Find, with a field of its own, in a sheet. */
   private readonly sheet = document.createElement('dialog')
   private readonly sheetFind: SearchPanel
+  /** The board's constitutions, as both the board's scope and the reader's list them. */
+  private readonly constitutions: FindSection
   /** What had the focus when the sheet opened, which takes it back when the sheet closes. */
   private sheetReturn: HTMLElement | null = null
   private readonly themes: ChannelThemes
@@ -219,6 +221,18 @@ export class Workspace {
       onOpen: (card, doc) => this.open(card, this.opts.origin(), doc, this.library.hasMetadata(card)),
     })
     this.library.subscribe(() => this.refreshFind())
+    this.constitutions = constitutionsSection({
+      shuttleBase: opts.shuttleBase,
+      cards: opts.cards,
+      // The one being read leads an empty field's list, then the most recently touched, then the rest of the board.
+      recent: () => {
+        const seen = new Set<string>()
+        return [...opts.cards().filter(card => this.reading(card)), ...this.library.orderedCards(), ...opts.cards()]
+          .filter(card => { const key = `${card.originId}:${card.uid ?? card.id}`; return !seen.has(key) && !!seen.add(key) })
+      },
+      pick: hit => hit.card && this.pickCard(hit.card),
+      current: card => this.reading(card),
+    })
     this.barFind = new SearchPanel({
       field: opts.find, chip: opts.findChip,
       scope: () => this.findScope(),
@@ -298,6 +312,8 @@ export class Workspace {
   }
   /** Empty the bar's Find and put away whatever it did. */
   clearFind(): void { this.barFind.clear() }
+  /** The view beneath moved where Find stands (another channel opened): the bar's Find, serving, follows it. */
+  followFind(): void { this.barFind.follow() }
   /** Where Find stands: in the reader, its constitution; else where the view on show says; else the whole board. */
   private findScope(): FindScope {
     if (this.isActive && this.current) return this.threadScope(this.current.card)
@@ -316,23 +332,18 @@ export class Workspace {
   private cardOf(ref: string): KanbanCard | undefined {
     return this.opts.cards().find(card => card.uid === ref || card.id === ref)
   }
-  /** Every family top-level the board's cards belong to. */
-  private families(): string[] {
-    const index = this.graph()
-    return [...new Set(this.opts.cards().map(card => { const root = index.rootOf(card); return root.uid ?? root.id }))]
-  }
   /**
-   * What was said to the human, for Find: the family board's records over
-   * `families`, and each open question a worker asked with no record of it,
-   * under the id the stream draws it by.
+   * What was said to the human, for Find: the family board's `records`, and
+   * each open question one of `cards` asked with no record of it, under the
+   * id the stream draws it by.
    */
-  private saidRecords(families: string[], cards = this.opts.cards()): BoardRecord[] {
+  private saidRecords(records: BoardRecord[], cards = this.opts.cards()): BoardRecord[] {
     const asks = cards.flatMap((card): BoardRecord[] => {
       const want = card.status === 'active' && card.ask ? wantOf(card, this.board.waiting) : undefined
       const uid = card.uid ?? card.id
       return want?.kind === 'ask' && !want.line ? [{ id: `ask:${uid}:${want.at}`, kind: 'asked', timestamp: want.at, fiber: uid, to: { label: 'you' }, text: want.text }] : []
     })
-    return [...this.board.records(families), ...asks]
+    return [...records, ...asks]
   }
   /** A line Find picked: Channels opens at it, marked; a fiber in no channel opens its page. */
   private openSaid(card: KanbanCard, item: string): void {
@@ -340,33 +351,32 @@ export class Workspace {
     if (channel && this.opts.openChannel) this.opts.openChannel({ channel: channel.key, item })
     else this.pickCard(card)
   }
+  /** Whether the reader has this card open. */
+  private reading(card: KanbanCard): boolean {
+    return this.isActive && (card.uid ?? card.id) === this.current?.channel.uid && card.originId === this.current.channel.owner
+  }
   /** The whole board: constitutions, channels, what was said, files, and transcripts when asked. */
   boardScope(): ListScope {
-    const recent = (): KanbanCard[] => {
-      const ordered = this.library.orderedCards()
-      return [...ordered, ...this.opts.cards().filter(card => !ordered.some(row => (row.uid ?? row.id) === (card.uid ?? card.id) && row.originId === card.originId))]
-    }
     return {
       sections: [
-        constitutionsSection({
-          shuttleBase: this.opts.shuttleBase, cards: this.opts.cards, recent, pick: hit => hit.card && this.pickCard(hit.card),
-          current: card => this.isActive && (card.uid ?? card.id) === this.current?.channel.uid && card.originId === this.current.channel.owner,
-        }),
+        this.constitutions,
         ...this.opts.openChannel ? [channelsSection({ channels: () => this.boardChannels(), open: channel => this.opts.openChannel!({ channel: channel.key }) })] : [],
-        saidSection({ records: () => this.saidRecords(this.families()), cardOf: uid => this.cardOf(uid), channelOf: card => this.channelOf(card), open: (card, record) => this.openSaid(card, record.id) }),
+        saidSection({ records: () => this.saidRecords(this.board.boardRecords()), cardOf: uid => this.cardOf(uid), channelOf: card => this.channelOf(card), open: (card, record) => this.openSaid(card, record.id) }),
         filesSection({ documents: () => this.library.documents(), open: (card, key) => this.openDocument(card, key) }),
         transcriptsSection({ shuttleBase: this.opts.shuttleBase, cardOf: id => this.cardOf(id), open: card => this.pickCard(card), ask: true }),
       ],
-      open: () => this.board.read(this.families()),
+      open: () => this.board.readBoard(),
     }
   }
-  /** One constitution: what it said, its files, and its own transcripts. */
+  /** One constitution: the board's constitutions while the field is empty, to step to another; typed words search what it said, its files, and its own transcripts. */
   private threadScope(card: KanbanCard): ListScope {
     const uid = card.uid ?? card.id, root = this.graph().rootOf(card), family = root.uid ?? root.id
+    const { read: _, ...constitutions } = this.constitutions
     return {
       chip: `in ${card.name}`,
       sections: [
-        saidSection({ records: () => this.saidRecords([family], [card]).filter(record => record.fiber === uid || record.fiber === card.id), cardOf: () => card, open: (_, record) => this.openSaid(card, record.id) }),
+        { ...constitutions, rows: query => query.trim() ? [] : constitutions.rows(query) },
+        saidSection({ records: () => this.saidRecords(this.board.records([family]), [card]).filter(record => record.fiber === uid || record.fiber === card.id), cardOf: () => card, open: (_, record) => this.openSaid(card, record.id) }),
         filesSection({ documents: () => this.library.documents().filter(doc => (doc.card.uid ?? doc.card.id) === uid && doc.card.originId === card.originId), open: (each, key) => this.openDocument(each, key) }),
         transcriptsSection({ shuttleBase: this.opts.shuttleBase, fiber: card.id, cardOf: id => this.cardOf(id), open: each => this.pickCard(each), title: 'Its transcripts' }),
       ],

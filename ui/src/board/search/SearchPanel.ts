@@ -34,11 +34,16 @@ interface Read { query: string; rows?: FindRow[]; failed?: boolean; controller: 
  * and widens to the whole board. A scope that answers in place is handed the
  * field's words and keys instead of a list.
  */
+/** Numbers each panel, so a field can name the one it controls. */
+let panels = 0
+
 export class SearchPanel {
   readonly el = document.createElement('div')
   readonly field: HTMLInputElement
   readonly chip: HTMLButtonElement
   private readonly list = document.createElement('div')
+  /** Says, politely, that a read is on its way or that nothing was found. */
+  private readonly status = document.createElement('p')
   private readonly opts: SearchPanelOptions
   private scope: FindScope | null = null
   private widened = false
@@ -56,7 +61,10 @@ export class SearchPanel {
   constructor(opts: SearchPanelOptions) {
     this.opts = opts
     this.el.className = 'ws-menu ws-switcher ws-find'
+    this.el.id = `ws-find-${++panels}`
     this.list.className = 'ws-find-list'
+    this.status.className = 'ws-search-note'
+    this.status.setAttribute('role', 'status')
     this.field = opts.field ?? document.createElement('input')
     this.chip = opts.chip ?? document.createElement('button')
     this.chip.type = 'button'
@@ -75,8 +83,16 @@ export class SearchPanel {
       // A field of its own is served here; a shared one is served by its owner (`show`).
       this.field.addEventListener('focus', this.serve)
       this.field.addEventListener('input', this.serve)
+    } else {
+      // The bar's field opens a panel the arrows move focus into, section by section.
+      this.el.setAttribute('role', 'dialog')
+      this.el.setAttribute('aria-label', 'Find')
+      this.field.setAttribute('role', 'combobox')
+      this.field.setAttribute('aria-haspopup', 'dialog')
+      this.field.setAttribute('aria-controls', this.el.id)
+      this.field.setAttribute('aria-expanded', 'false')
     }
-    this.el.append(this.list)
+    this.el.append(this.list, this.status)
     document.addEventListener('keydown', this.keydown, true)
     document.addEventListener('pointerdown', this.outside)
   }
@@ -88,6 +104,8 @@ export class SearchPanel {
     const scope = this.widened ? this.opts.board() : this.opts.scope()
     if (this.scope && inPlace(this.scope) && !(inPlace(scope) && scope.chip === this.scope.chip)) this.scope.inPlace.clear()
     const opening = !this.scope || this.scope.chip !== scope.chip
+    // Another scope's reads, asks and opened sections answer for it, not this one.
+    if (opening) this.forget()
     this.scope = scope
     this.paintChip()
     if (inPlace(scope)) { this.hide(); scope.inPlace.input(this.field.value); return }
@@ -98,6 +116,11 @@ export class SearchPanel {
     }
     this.shown = true
     this.refresh()
+  }
+
+  /** The view beneath moved (another channel opened): a Find serving it follows it there. */
+  follow(): void {
+    if (this.scope && !this.widened) this.serve()
   }
 
   /** Serves a shared field, its list hung in `host` under `anchor`. */
@@ -111,17 +134,13 @@ export class SearchPanel {
     const scope = this.scope
     if (!this.shown || !scope || inPlace(scope)) return
     const query = this.field.value.trim()
-    if (query !== this.query) { this.query = query; this.asked.clear(); this.opened.clear(); this.drop() }
+    if (query !== this.query) { this.forget(); this.query = query }
     const focused = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('[data-find-key]')?.dataset.findKey
     const blocks = scope.sections.flatMap(section => this.section(section, query))
-    if (query && !blocks.length) {
-      const note = document.createElement('p')
-      note.className = 'ws-search-note'
-      note.textContent = scope.sections.some(section => this.reading(section, query)) ? 'Searching…' : 'Nothing found.'
-      blocks.push(note)
-    }
+    this.say(query && !blocks.length ? scope.sections.some(section => this.reading(section, query)) ? 'Searching…' : 'Nothing found.' : '')
     this.list.replaceChildren(...blocks)
-    this.el.hidden = !blocks.length && !!this.opts.field
+    this.el.hidden = !blocks.length && !this.status.textContent && !!this.opts.field
+    this.expanded(!this.el.hidden)
     if (focused && document.activeElement === document.body) {
       (this.list.querySelector<HTMLElement>(`[data-find-key="${CSS.escape(focused)}"]`) ?? this.field).focus({ preventScroll: true })
     }
@@ -158,20 +177,31 @@ export class SearchPanel {
     this.serve()
   }
 
-  /** Abandons every read still on its way. */
-  private drop(): void {
+  /** Abandons every read still on its way, and forgets what was asked and opened. */
+  private forget(): void {
     for (const read of this.reads.values()) { read.controller.abort(); clearTimeout(read.timer) }
     this.reads.clear()
+    this.asked.clear()
+    this.opened.clear()
   }
 
   private hide(): void {
     this.shown = false
-    this.drop()
-    this.asked.clear()
-    this.opened.clear()
+    this.forget()
     this.query = ''
     this.list.replaceChildren()
+    this.say('')
+    this.expanded(false)
     if (this.opts.field) { this.release?.(); this.release = null; this.el.remove() }
+  }
+
+  /** The status line's words, written only when they change, so a redraw is not announced again. */
+  private say(words: string): void {
+    if (this.status.textContent !== words) this.status.textContent = words
+  }
+
+  private expanded(open: boolean): void {
+    if (this.opts.field) this.field.setAttribute('aria-expanded', String(open))
   }
 
   private paintChip(): void {
@@ -214,6 +244,9 @@ export class SearchPanel {
     const caption = document.createElement('h3')
     caption.className = 'kbn-flight-caption'
     caption.textContent = section.title
+    caption.id = `${this.el.id}-${section.id}`
+    block.setAttribute('role', 'group')
+    block.setAttribute('aria-labelledby', caption.id)
     block.append(caption, ...items)
     return [block]
   }
@@ -239,6 +272,7 @@ export class SearchPanel {
     pick.className = ['ws-find-pick', row.className].filter(Boolean).join(' ')
     pick.dataset.findKey = `${section.id}:${row.key}`
     pick.setAttribute('aria-label', row.label)
+    if (row.current) pick.setAttribute('aria-current', 'true')
     pick.append(row.content())
     if (row.pick) pick.addEventListener('click', () => { const chosen = row.pick!; this.done(); chosen() })
     else pick.setAttribute('aria-disabled', 'true')
@@ -287,10 +321,13 @@ export class SearchPanel {
   private readonly keydown = (event: KeyboardEvent): void => {
     const scope = this.scope
     const onField = event.target === this.field
-    if (!scope || (!onField && !this.el.contains(event.target as Node)) || event.defaultPrevented || event.isComposing || event.keyCode === 229) return
+    if ((!onField && !this.el.contains(event.target as Node)) || event.defaultPrevented || event.isComposing || event.keyCode === 229) return
+    // Escape puts Find away even when what it served went away beneath the field (a route change while typing).
     if (event.key === 'Escape') {
       this.clear()
       this.opts.onDone?.()
+    } else if (!scope) {
+      return
     } else if (event.key === 'Backspace' && onField && !this.field.value && scope.chip && !this.widened) {
       this.widen()
     } else if (inPlace(scope)) {
