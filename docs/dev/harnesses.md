@@ -84,7 +84,8 @@ The environment decides only when ancestry names no one, or two receivers share 
 Pi's own marker, `AI_AGENT=pi` with `PI_SESSION_ID`, outranks another harness found by ancestry, since a Pi that registered no receiver is invisible there; a Codex or agy session started inside Pi therefore reads as its Pi parent.
 Each harness sets its own variable for its children, so when ancestry finds a harness whose exported id differs, that id is a nearer session of the same harness that registered nothing (its hooks off or untrusted), and it is the caller; it has no binding of its own, so a bare `close` refuses instead of closing the parent's fiber.
 `shuttle message` alone keeps the registered receiver as its sender, since that is what a reply reaches.
-What stays out of reach is an unregistered session under a registered session of another harness, a Codex without hooks inside a Claude worker say: the environment cannot place it, and ancestry names the parent.
+An unregistered session under a registered session of another harness is placed by the process between them: a receiver at or beyond the caller's nearest process running a harness binary of another harness (`codex`, `agy`) belongs to the session that process runs inside, so ancestry names no one and the environment decides. An agy without hooks inside a Claude worker therefore reads as itself, and a bare `close` refuses for lack of a binding.
+What stays out of reach is an unregistered Claude session under a registered session of another harness, a Claude without hooks inside a Codex worker say: Claude Code's process is named for its version (`2.1.329`), so ancestry cannot see where it starts and names the parent. (Pi's process is `node`, but Pi's marker covers it.)
 A hook binds the session its payload names, not the caller's, since it fires before its session has registered.
 
 ### Conformance

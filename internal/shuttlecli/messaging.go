@@ -630,8 +630,9 @@ func (a *app) exportedSession(harness string) string {
 // from another harness, since a Pi that registered no receiver, such as an
 // SDK-embedded one, is invisible to ancestry; the cost is that a Codex or agy
 // session started inside Pi reads as its Pi parent. Several receivers on the
-// nearest process (one Codex app server for many threads) name no one, and the
-// environment decides.
+// nearest process (one Codex app server for many threads), or only receivers
+// beyond a nearer Codex or agy process of another harness, name no one, and
+// the environment decides.
 func (a *app) processSession() (harness, id string) {
 	if host, err := a.resolveOwnHost(""); err == nil {
 		address, err := messaging.ParseAddress(messaging.DetectProcessSender(a.env, host))

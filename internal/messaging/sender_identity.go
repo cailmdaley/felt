@@ -11,7 +11,11 @@ import (
 )
 
 // DetectProcessSender names the caller from the nearest live hook registration
-// in its process ancestry, or "" when none or several match.
+// in its process ancestry, or "" when none or several match. A registration at
+// or beyond the nearest process running another harness's binary belongs to a
+// session that harness runs inside, not to the caller. Claude Code's process
+// is named for its version and Pi's for node, so only Codex and agy are seen
+// this way.
 func DetectProcessSender(env *sysenv.Env, host string) string {
 	ancestors := make(map[int]int)
 	for pid, distance := os.Getpid(), 0; pid > 0 && distance < 64; distance++ {
@@ -25,22 +29,32 @@ func DetectProcessSender(env *sysenv.Env, host string) string {
 		}
 		pid = parent
 	}
-	codexDistance := len(ancestors) + 1
+	boundary, boundaryHarness := len(ancestors)+1, ""
 	for pid, distance := os.Getpid(), 0; distance < len(ancestors); distance++ {
 		parent, name, ok := processParent(pid)
 		if !ok {
 			break
 		}
-		if strings.EqualFold(name, "codex") {
-			codexDistance = distance
+		if boundaryHarness = harnessBinary(name); boundaryHarness != "" {
+			boundary = distance
 			break
 		}
 		pid = parent
 	}
-	return detectProcessSenderForThread(env, host, ancestors, codexDistance)
+	return detectProcessSenderForThread(env, host, ancestors, boundary, boundaryHarness)
 }
 
-func detectProcessSenderForThread(env *sysenv.Env, host string, ancestors map[int]int, codexDistance int) string {
+// harnessBinary names the harness whose binary a process runs, or "".
+func harnessBinary(process string) string {
+	for _, facts := range harness.All() {
+		if strings.EqualFold(process, facts.Binary) {
+			return facts.Name
+		}
+	}
+	return ""
+}
+
+func detectProcessSenderForThread(env *sysenv.Env, host string, ancestors map[int]int, boundary int, boundaryHarness string) string {
 	nearest := len(ancestors) + 64
 	sender := ""
 	ambiguous := false
@@ -64,7 +78,7 @@ func detectProcessSenderForThread(env *sysenv.Env, host string, ancestors map[in
 			if !ancestor || distance > nearest || !registration.live() {
 				continue
 			}
-			if distance >= codexDistance && name != "codex" {
+			if distance >= boundary && name != boundaryHarness {
 				continue
 			}
 			address, err := FormatAddress(host, name, registration.ID)
