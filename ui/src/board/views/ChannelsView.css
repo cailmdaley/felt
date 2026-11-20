@@ -160,6 +160,10 @@
   display: flex; flex-direction: column;
 }
 .kbn-ch-stream > .kbn-ch-hush { padding: 4px 20px; }
+/* Above a channel's window, the way to its earlier lines, set in the margin's quiet italic. */
+.kbn-ch-earlier { list-style: none; flex: none; padding: 2px 20px 10px calc(var(--kbn-ch-tube) + var(--kbn-ch-gutter, 0px)); }
+.kbn-ch-earlier-more { border: 0; background: none; padding: 2px 0; cursor: pointer; font: italic var(--type-row)/var(--leading-solid) var(--font-serif); color: var(--kbn-ink-muted); }
+.kbn-ch-earlier-more:hover, .kbn-ch-earlier-more:focus-visible { color: var(--kbn-ink); }
 .kbn-ch-margin { height: 0; flex: none; list-style: none; }
 .kbn-ch-ink { position: absolute; top: 0; left: 0; z-index: 1; overflow: visible; pointer-events: none; }
 /* A post's drop stands above the ink, which stands above the rows. */

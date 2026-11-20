@@ -116,14 +116,14 @@ it('lists the recent channels, the newest wait first, and reads a channel as wha
   expect(item(host, 'mask').querySelector('.kbn-ch-kind')?.textContent).toBe('asks')
   // Its files are previews in one sideways row below its words, every kind of file alike.
   const files = item(host, 'tsz').querySelectorAll('.kbn-ch-previews .uf-row > .uf-card')
-  expect([[...files].map(file => file.getAttribute('aria-label')), item(host, 'tsz').querySelector('.kbn-ch-previews')!.hasAttribute('data-several')]).toStrictEqual([['Expand spectrum.svg', 'Expand deck.html', 'Expand nulls.md'], true])
+  expect([[...files].map(file => file.getAttribute('aria-label')), item(host, 'tsz').querySelector('.kbn-ch-previews')!.hasAttribute('data-several')]).toStrictEqual([['Open spectrum.svg', 'Open deck.html', 'Open nulls.md'], true])
   expect(item(host, 'tsz').querySelector('.kbn-ch-item-text')?.textContent?.trim()).toBe('The spectrum at 9σ.')
   expect(view.keydown(new KeyboardEvent('keydown', { key: 'j' }))).toBe(true)
   expect(shown(host)).toBe('van')
   expect(stream(host)).toStrictEqual([['van', 'ask', true]])
 })
 
-it('opening, paging and returning to a channel look at nothing; clicking an item opens its constitution\'s view, a file unfolds in place', async () => {
+it('opening, paging and returning to a channel look at nothing; clicking an item opens its constitution\'s view, a file opens in the reader', async () => {
   daemon()
   const { view, ctx, host, see, openFromDesk, openPage } = await mount()
   view.keydown(new KeyboardEvent('keydown', { key: 'j' }))
@@ -135,17 +135,10 @@ it('opening, paging and returning to a channel look at nothing; clicking an item
   expect(see).not.toHaveBeenCalled()
   item(host, 'mask').querySelector<HTMLElement>('.kbn-ch-item-text')!.click()
   expect(openFromDesk).toHaveBeenLastCalledWith(mask)
-  // A preview unfolds in place: it opens no page and no view, and looks at nothing.
-  const opened = openFromDesk.mock.calls.length, paged = openPage.mock.calls.length
+  // A preview opens its file in the reader, and looks at nothing.
   item(host, 'tsz').querySelector<HTMLButtonElement>('.uf-card')!.click()
-  expect([item(host, 'tsz').querySelector('.kbn-ch-previews')!.hasAttribute('data-unfolded'), item(host, 'tsz').querySelector('.uf-count')?.textContent]).toStrictEqual([true, '1 / 3'])
-  item(host, 'tsz').querySelector<HTMLElement>('.uf-page')!.click()
-  expect([openFromDesk.mock.calls.length, openPage.mock.calls.length]).toStrictEqual([opened, paged])
-  // Its worker going idle repaints its dot, and the unfolded file stays where it is.
-  const page = item(host, 'tsz').querySelector('.uf-page')
-  ctx.response = board([chair, { ...tsz, runtimePhase: 'waiting' }, mask, beam])
-  view.refresh(ctx); await settle()
-  expect(item(host, 'tsz').querySelector('.uf-page')).toBe(page)
+  expect(openPage).toHaveBeenLastCalledWith(tsz, 'local:/w/tsz/spectrum.svg')
+  expect(host.querySelector('.kbn-ch-previews[data-unfolded]')).toBeNull()
   // The chair's pages in the head open there too.
   host.querySelector<HTMLButtonElement>('.kbn-ch-pages [data-part="constitution"]')!.click()
   expect(openPage).toHaveBeenLastCalledWith(chair, expect.stringContaining('C'))
@@ -499,7 +492,7 @@ it('draws a post to the human that waits on them gold, with what it attached as 
   // Every post and file line carries a clear: the waiting post's, and the expert's files'.
   expect(post.querySelector('.kbn-ch-clear')?.textContent).toBe('✓')
   expect([...host.querySelectorAll('.kbn-ch-clear')].map(check => check.getAttribute('aria-label'))).toStrictEqual(["Clear κ × tSZ's files", "Clear cmbx chair's post"])
-  expect([...post.querySelectorAll('.kbn-ch-previews .uf-card')].map(file => [file.getAttribute('aria-label'), file.querySelector('.ws-thumbnail') !== null])).toStrictEqual([['Expand deck.html', true]])
+  expect([...post.querySelectorAll('.kbn-ch-previews .uf-card')].map(file => [file.getAttribute('aria-label'), file.querySelector('.ws-thumbnail') !== null])).toStrictEqual([['Open deck.html', true]])
   expect(post.querySelector('.kbn-ch-previews')!.hasAttribute('data-several')).toBe(false)
 })
 
@@ -778,7 +771,7 @@ it('takes from the stream the sends whose clear was written, and its undo brings
   const { host } = await mount()
   item(host, 'tsz').querySelector<HTMLButtonElement>('.kbn-ch-clear')!.click()
   await settle(); await settle()
-  expect([...item(host, 'tsz').querySelectorAll<HTMLElement>('.uf-card')].map(card => card.getAttribute('aria-label'))).toStrictEqual(['Expand nulls.md'])
+  expect([...item(host, 'tsz').querySelectorAll<HTMLElement>('.uf-card')].map(card => card.getAttribute('aria-label'))).toStrictEqual(['Open nulls.md'])
   document.querySelector<HTMLButtonElement>('.shuttle-toast .toast-undo')!.click()
   await settle(); await settle()
   expect(posts.filter(([, body]) => String(body.key).startsWith('unline:')).map(([, body]) => String(body.key).replace(/^unline:\d+:/, ''))).toStrictEqual(SENT.slice(0, 2).map(file => `file:local:${file.fullPath}:${file.timestamp}`))
@@ -828,17 +821,6 @@ it('names in its ✓ a send brought back on another device, though the item draw
   item(document.body, 'tsz').querySelector<HTMLButtonElement>('.kbn-ch-clear')!.click()
   await settle(); await settle()
   expect(posts.map(([, body]) => String(body.key).replace(/^line:\d+:/, ''))).toContain(id)
-})
-
-it('keeps one file unfolded in the stream: unfolding another folds the first', async () => {
-  const human = { label: 'Sam' }
-  daemon([], undefined, {}, { board: { C: [...BOARD.C, record({ id: 'b5', kind: 'post', fiber: 'C', to: human, text: 'Two calls for you today.', files: ['/w/tsz/deck.html'] }, 4)] }, waiting: { C: { id: 'b5', at: Date.now() - 4 * minute } } })
-  const { host } = await mount([chair, tsz, beam])
-  const unfolded = () => [...host.querySelectorAll<HTMLElement>('.kbn-ch-previews[data-unfolded]')].map(previews => previews.closest<HTMLElement>('[data-slug]')!.dataset.slug)
-  item(host, 'tsz').querySelector<HTMLButtonElement>('.uf-card')!.click()
-  expect(unfolded()).toStrictEqual(['tsz'])
-  item(host, 'cmbx').querySelector<HTMLButtonElement>('.uf-card')!.click()
-  expect(unfolded()).toStrictEqual(['cmbx'])
 })
 
 const menuItem = async (label: string) => {
@@ -923,4 +905,24 @@ it('moves to misc a family whose channel comes from a closed constitution it is 
   host.querySelector('[data-channel="channel:cmbx"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 30 }))
   await menuItem('Move to bottom')
   expect(posts.filter(([url]) => url.endsWith('/channels/order')).at(-1)?.[1]).toStrictEqual({ keys: ['channel:cmbx'] })
+})
+
+it('opens a channel on its newest lines, back to the oldest it holds unread, and Earlier shows as many again', async () => {
+  const human = { label: 'Sam' }
+  const posts = Array.from({ length: 12 }, (_, n) => record({ id: `p${n}`, kind: 'post', fiber: 'C', to: human, text: `Round ${n}.` }, 120 - n * 10))
+  const said = (host: HTMLElement) => [...host.querySelectorAll('.kbn-ch-item .kbn-ch-item-text')].map(el => el.textContent?.trim())
+  const read = async (seenMinutesAgo: number) => {
+    daemon([], new Map([['shuttle.channels.seen:channel:cmbx', String(Date.now() - seenMinutesAgo * minute)]]), {}, { board: { C: posts } })
+    return mount([chair])
+  }
+  // Read a moment ago: its newest eight, and Earlier for the four before them.
+  const { host, view } = await read(1)
+  expect(said(host)).toStrictEqual(posts.slice(4).map(post => post.text))
+  expect(host.querySelector('.kbn-ch-earlier-more')?.textContent).toBe('Earlier · 4 more')
+  host.querySelector<HTMLButtonElement>('.kbn-ch-earlier-more')!.click()
+  expect([said(host).length, host.querySelector('.kbn-ch-earlier')]).toStrictEqual([12, null])
+  view.unmount(); document.body.replaceChildren()
+  // Last read before the third: it opens there, on everything unread.
+  const again = await read(105)
+  expect(said(again.host)).toStrictEqual(posts.slice(2).map(post => post.text))
 })

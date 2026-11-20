@@ -186,22 +186,16 @@ export function registerChannelsBackJourneys(test) {
       assert.equal(await streamScroll(page), scrolled, `${way}: the stream is where it was left`)
     }
 
-    // An unfolded file sent to full screen returns unfolded, with the keys.
+    // A post's file opens in the reader; one back returns to the post, in focus.
     await page.goto(channelsUrl)
     await toUnions(page)
-    const several = page.locator('.kbn-ch .kbn-ch-previews[data-several]').first()
+    const several = page.locator('.kbn-ch .kbn-ch-item:has(.kbn-ch-previews[data-several])').first()
+    const from = await several.locator('[data-item]').first().getAttribute('data-item')
     await several.locator('.uf-card').first().click()
-    const name = () => several.locator('.uf-name').textContent()
-    const first = await name()
-    await several.locator('.uf-full').click()
     await page.locator('.ws-reader:not(.ws-dormant)').waitFor()
     await (phone ? page.locator('.ws-return') : selected(page).locator('.ws-document-back')).click()
     await page.locator('.ws-reader.ws-dormant').waitFor()
-    assert.equal(await page.evaluate(() => document.activeElement?.classList.contains('uf-page')), true, 'the unfolded file has the keys')
-    await page.keyboard.press('ArrowRight')
-    assert.notEqual(await name(), first, '→ steps to the next file')
-    await page.keyboard.press('Escape')
-    assert.equal(await several.getAttribute('data-unfolded'), null, 'Escape folds it')
+    assert.equal(await page.evaluate(() => document.activeElement?.dataset.item), from, 'the post the file was opened from has the focus')
   }, viewport, 'reduce', phone)
 }
 
@@ -273,26 +267,19 @@ export function registerRexFollowJourneys(test) {
   }, { width: 1440, height: 900 }, 'reduce', false)
 }
 
-/** `t` on a post in Channels unfolds its worker's tapestry in the post's previews, in sight; again, it folds; a worker with none moves nothing. */
+/** `t` on a post in Channels opens its worker's tapestry in the reader; a worker with none moves nothing. */
 export function registerPostTapestryJourneys(test) {
-  test('t on a post in Channels unfolds its tapestry in place, and folds it again', async page => {
+  test('t on a post in Channels opens its tapestry in the reader', async page => {
     await page.goto(channelsUrl)
     await page.locator('.kbn-ch-pick', { hasText: 'cmbx' }).first().click()
     const post = fiber => page.locator(`.kbn-ch-item[data-fiber="${fiber}"]`).last()
     await post('cmbx/foregrounds').locator('.kbn-ch-who').focus()
     await page.keyboard.press('t')
     await page.waitForTimeout(200)
-    assert.equal(await post('cmbx/foregrounds').locator('.uf').count(), 0, 'no tapestry, nothing unfolds')
+    assert.equal(await page.locator('.ws-reader:not(.ws-dormant)').count(), 0, 'no tapestry, nothing opens')
     await post('cmbx/kappa-tsz').locator('.kbn-ch-who').focus()
     await page.keyboard.press('t')
-    const unfold = post('cmbx/kappa-tsz').locator('.uf[data-unfolded]')
-    await unfold.waitFor()
-    assert.equal(await unfold.locator('.uf-name').textContent(), 'Tapestry')
-    assert.ok(await unfold.locator('.uf-bar').isVisible(), 'its bar in sight')
-    assert.equal(await page.locator('.ws-reader:not(.ws-dormant)').count(), 0, 'no reader opens')
-    // From inside the unfolded tapestry, t folds it.
-    assert.equal(await page.evaluate(() => document.activeElement?.classList.contains('uf-page')), true)
-    await page.keyboard.press('t')
-    await post('cmbx/kappa-tsz').locator('.uf:not([data-unfolded])').waitFor()
+    await page.locator('.ws-reader:not(.ws-dormant)').waitFor()
+    await page.waitForFunction(() => /tapestry\.html/.test(decodeURIComponent(location.hash)))
   }, { width: 1280, height: 860 }, 'reduce', false)
 }

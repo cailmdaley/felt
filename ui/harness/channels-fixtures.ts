@@ -19,7 +19,7 @@ interface Row {
   closed?: boolean
   minutes: number
   /** Its tapestry page; `figure` names a file in its folder the page shows first. */
-  tapestry?: { title: string; lede: string; figure?: string; slide?: boolean }
+  tapestry?: { title: string; lede: string; figure?: string; slide?: boolean; heavy?: boolean }
   /** Put to rest (`horizon: stashed`), until this civil day when one is named. */
   rest?: string | true
   /** Armed with no worker: a standing one asleep until its next run. */
@@ -33,6 +33,20 @@ const DAY = 1440
 const HUMAN = { label: 'Sam' }
 /** A deck's first slide drawn inline as a portrait page, as a tapestry built from slides shows it. */
 const SLIDE = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 794 1123" width="100%"><rect width="794" height="1123" fill="#fbf6e9"/><text x="60" y="140" font-size="54" fill="#30291f">UNIONS cosmic shear</text><text x="60" y="210" font-size="30" fill="#6b5d45">Paris SWG · Thursday</text><path d="M80 900V400H720" fill="none" stroke="#a39478" stroke-width="3"/><path d="M100 820C260 520 420 760 560 560S680 620 710 480" fill="none" stroke="#3f8278" stroke-width="6"/></svg>'
+
+/**
+ * A tapestry as heavy as the fleet's heaviest (about 1.4 MB): forty plots of
+ * fifteen hundred points each, inline, between paragraphs, as a worker's
+ * page of every block of a covariance is.
+ */
+function heavyFigures(): string {
+  const plot = (n: number): string => {
+    let y = 200, d = 'M0 200'
+    for (let i = 1; i <= 1500; i++) { y = Math.max(20, Math.min(380, y + Math.sin(i * 0.05 + n) * 6 + Math.cos(i * 0.31 * (n + 1)) * 4)); d += `L${(i * 0.4).toFixed(1)} ${y.toFixed(1)}` }
+    return `<figure><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 400" width="100%"><rect width="600" height="400" fill="#f1e9d6"/><path d="${d}" fill="none" stroke="#3f8278" stroke-width="1.5"/></svg><figcaption>Block ${n + 1}: analytic over simulated, by bin pair.</figcaption></figure><p>Block ${n + 1} agrees to ${(2 + (n % 5) * 0.4).toFixed(1)}% across every bin pair; the off-diagonal terms follow the simulations to within their noise, and the shot-noise floor is where the analytic model puts it.</p>`
+  }
+  return Array.from({ length: 40 }, (_, n) => plot(n)).join('')
+}
 
 /**
  * Channels as the board draws them. cmbx: its chair idle with a tapestry,
@@ -59,7 +73,8 @@ const ROWS: Row[] = [
   { id: 'cmbx/kappa-tsz', name: 'κ × tSZ cross-spectrum', parent: 'cmbx', state: 'working', minutes: 4,
     tapestry: { title: 'κ × tSZ at 9σ', lede: 'The full-footprint cross-spectrum with the new beam window; every null passes at p > 0.1.', figure: 'kappa-tsz-spectrum.svg' } },
   { id: 'cmbx/foregrounds', name: 'Cluster foreground mask', parent: 'cmbx', minutes: 22, ask: 'Masking clusters at **5σ** keeps 94% of the area and leaves a 0.3σ residual in the 1-halo term; **3σ** removes it but costs 11% of the area. Which threshold?' },
-  { id: 'cmbx/covariance', name: 'Joint covariance', parent: 'cmbx', closed: true, minutes: 48, review: 'The analytic and simulation covariances agree to 4% on every block; the comparison plot is attached.', outcome: 'The joint covariance is validated against 2000 simulations.' },
+  { id: 'cmbx/covariance', name: 'Joint covariance', parent: 'cmbx', closed: true, minutes: 48,
+    tapestry: { title: 'Joint covariance, block by block', lede: 'The analytic and simulated covariances agree to 4% on every block of the joint data vector.', heavy: true }, review: 'The analytic and simulation covariances agree to 4% on every block; the comparison plot is attached.', outcome: 'The joint covariance is validated against 2000 simulations.' },
   { id: 'cmbx/beam', name: 'Beam window', parent: 'cmbx', state: 'working', minutes: 2 },
   { id: 'pando/unions', name: 'UNIONS chair', channel: 'UNIONS', seat: true, state: 'idle', minutes: 80 },
   { id: 'pando/unions/east', name: 'east hub', parent: 'pando/unions', seat: true, standing: true, state: 'working', minutes: 3 },
@@ -141,10 +156,18 @@ export function addChannelsFixtures(example: WorkspaceExample, now: number): Cha
       ['photoz', 41, 'The SOM calibration moves bin 5 by 0.008, inside the prior.'],
       ['paper', 29, 'Section 3 is drafted around the null tests.'],
     ]
-    return tally.flatMap(([id, minutes, text, files, answered]) => [
+    // The Mill over the board's whole reach, as the real one reads: three posts a day to the human and the lander's handoffs between.
+    const mill = Array.from({ length: 13 }, (_, day) => day + 1).flatMap(day => [
+      said('felt', 'post', day * DAY + 600, { to: human, text: `Morning round, day ${day}: two slices landed and deployed, one review pending.` }),
+      said('felt', 'post', day * DAY + 300, { to: human, text: `Landed the slice of day ${day} on main; both hubs run it.` }),
+      said('felt', 'post', day * DAY + 60, { to: human, text: `Evening: the lander is idle; tomorrow's slice is filed.` }),
+      said('felt/lander', 'handed_off', day * DAY + 400),
+      said('felt/lander', 'handed_off', day * DAY + 120),
+    ])
+    return [...mill, ...tally.flatMap(([id, minutes, text, files, answered]) => [
       said(`pando/unions/${id}`, 'post', minutes, { to: human, text, ...files ? { files } : {} }),
       ...answered ? [said(`pando/unions/${id}`, 'human', minutes - 2, { by: human, text: 'Thanks.' })] : [],
-    ])
+    ])]
   })
 }
 
@@ -214,7 +237,7 @@ function addBoardFixtures(example: WorkspaceExample, now: number, ROWS: Row[], m
   for (const row of ROWS) {
     example.bodies[row.id] = `## Desired State\n\n${row.name}.\n\n## Status\n\n${row.outcome ?? row.ask ?? 'Under way.'}`
     if (row.tapestry) {
-      const page = `<!doctype html><html><head><meta charset="utf-8"><title>${row.tapestry.title}</title><style>body{font:17px/1.6 Georgia,serif;margin:28px;color:#30291f;background:#fbf6e9}.map{height:30vh;display:grid;place-items:center;background:#e4dcc8;border-radius:4px;color:#6b5d45}</style></head><body><h1>${row.tapestry.title}</h1><p>${row.tapestry.lede}</p>${row.tapestry.slide ? SLIDE : row.tapestry.figure ? `<figure><img src="${row.tapestry.figure}" alt=""></figure>` : '<div class="map">κ × tSZ, 9σ</div>'}<p>The cross-spectrum is flat to ℓ = 3000 and the 1-halo term carries most of the signal; the <a href="#/board/${encodeURIComponent('cmbx/foregrounds')}@${WORKSPACE_HOST}">foreground mask</a> is the open call.</p></body></html>`
+      const page = `<!doctype html><html><head><meta charset="utf-8"><title>${row.tapestry.title}</title><style>body{font:17px/1.6 Georgia,serif;margin:28px;color:#30291f;background:#fbf6e9}.map{height:30vh;display:grid;place-items:center;background:#e4dcc8;border-radius:4px;color:#6b5d45}</style></head><body><h1>${row.tapestry.title}</h1><p>${row.tapestry.lede}</p>${row.tapestry.heavy ? heavyFigures() : row.tapestry.slide ? SLIDE : row.tapestry.figure ? `<figure><img src="${row.tapestry.figure}" alt=""></figure>` : '<div class="map">κ × tSZ, 9σ</div>'}<p>The cross-spectrum is flat to ℓ = 3000 and the 1-halo term carries most of the signal; the <a href="#/board/${encodeURIComponent('cmbx/foregrounds')}@${WORKSPACE_HOST}">foreground mask</a> is the open call.</p></body></html>`
       example.files.push({ owner: WORKSPACE_HOST, path: `${dir(row.id)}/tapestry.html`, mime: 'text/html', body: new Blob([page], { type: 'text/html' }) })
     }
   }

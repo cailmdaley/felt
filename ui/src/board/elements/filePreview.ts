@@ -54,6 +54,8 @@ export interface UnfoldOptions {
   opening?(): void
   /** Opens the file in the board's full file viewer, whose way back returns here; without it the bar offers no full screen. */
   full?(key: DocKey): void
+  /** Opens a file elsewhere (the reader) when its preview is pressed, instead of unfolding it in place. */
+  open?(key: DocKey): void
   /** A link followed in the unfolded file `key`: a board route, or a file beside it. */
   link?(key: DocKey, href: string): void
 }
@@ -327,7 +329,7 @@ export class Unfold {
   private card(file: UnfoldFile): HTMLButtonElement {
     const made = this.cards.get(file.key)
     if (made) {
-      made.el.title = `Expand ${file.name}`
+      made.el.title = `${this.opts.open ? 'Open' : 'Expand'} ${file.name}`
       // A card sent again says when it last came.
       made.el.querySelector('.uf-age')?.replaceWith(timeEl(file.at ?? 0, Date.now(), 'uf-age'))
       return made.el
@@ -337,9 +339,9 @@ export class Unfold {
     el.type = 'button'
     el.className = 'uf-card'
     el.dataset.key = file.key
-    el.title = `Expand ${file.name}`
+    el.title = `${this.opts.open ? 'Open' : 'Expand'} ${file.name}`
     el.setAttribute('aria-label', el.title)
-    el.addEventListener('click', () => this.unfold(file.key))
+    el.addEventListener('click', () => this.opts.open ? this.opts.open(file.key) : this.unfold(file.key))
     const density = this.opts.single ? undefined : densityOf(path)
     if (density) el.dataset.density = density
     if (density === 'card') {

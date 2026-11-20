@@ -54,6 +54,8 @@ const POST_PX = 64
 const CLEAR_WRITES = 4
 /** A channel written here is shown so this long at most before the feed's word stands, whatever it says. */
 const MOVED_MS = 60_000
+/** A channel opens on this many of its newest lines to the human, or back to the oldest it holds unread or waiting; Earlier shows as many again. */
+const OPENS_ON = 8
 /** A stream within this many pixels of its foot follows what arrives. */
 const FOLLOW_PX = 24
 /** Jump to lists at most this many documents beneath the channels it matches. */
@@ -129,7 +131,7 @@ function lastSeen(key: string): number {
  * question, post, close or sent files as one compact item, beside a margin
  * of its threads' lives drawn in fine ink (`layTube`, `drawMargin`), each a
  * fibre where it speaks, its posts hanging from it on drops. Choosing an item
- * or a fibre opens that constitution's view; its files unfold in place.
+ * or a fibre opens that constitution's view; a file opens in the reader.
  * The channel's head carries its chair's pages, and its console speaks to its
  * chair. Opening a channel looks at nothing; only a click on something in it
  * moves Rex and voice. On a phone the rail is the first screen.
@@ -158,12 +160,16 @@ export class ChannelsView implements TemporalView {
   private drafted: string | null = null
   /** What was typed to each channel's chair, by channel, kept while the reader is elsewhere. */
   private readonly drafts = new Map<string, string>()
-  /** Each item's files as previews that unfold in place, by item, kept across redraws with the close's tapestry it found. */
-  private readonly unfolds = new Map<string, { unfold: Unfold; lead?: UnfoldFile; files: UnfoldFile[]; asked?: boolean }>()
-  /** The stream's rows as last drawn, by entry, each with what it drew: a row that would draw the same is kept, an unfolded file in it with it. */
+  /** Each item's files as previews, each opening its file in the reader, by item, kept across redraws with the close's tapestry it found. */
+  private readonly unfolds = new Map<string, { unfold: Unfold; lead?: UnfoldFile; files: UnfoldFile[] }>()
+  /** The stream's rows as last drawn, by entry, each with what it drew: a row that would draw the same is kept. */
   private readonly rows = new Map<string, { sig: string; node: HTMLLIElement }>()
   private channels: Channel[] = []
   private current: string | null = null
+  /** When the channel was come to, and what this device had read of it then: what arrived since stays in its window. */
+  private opened = { at: 0, seen: -Infinity }
+  /** How many times Earlier was asked in this channel. */
+  private earlier = 0
   /** What Jump to is looking for; '' lists the rail. */
   private query = ''
   /** The item a document or view was opened from, which takes focus again when the reader closes. */
@@ -446,7 +452,6 @@ export class ChannelsView implements TemporalView {
     // Nothing redraws under the reader; coming back draws once and returns focus where the reader was opened from.
     if (ctx.workspace?.isActive) { this.depart(); return }
     const returning = this.away
-    if (returning) for (const { unfold } of this.unfolds.values()) unfold.resume()
     this.away = false
     this.channels = this.compose(ctx)
     if (!this.channels.some(channel => channel.key === this.current)) this.resume()
@@ -460,16 +465,14 @@ export class ChannelsView implements TemporalView {
     this.depart()
     open()
   }
-  /** The reader covers the channel: an unfolded file under it stops reading and playing, and the return is awaited. */
+  /** The reader covers the channel: the return is awaited. */
   private depart(): void {
-    if (!this.away) for (const { unfold } of this.unfolds.values()) unfold.suspend()
     this.away = true
   }
-  /** The item the reader was opened from (its unfolded file, when it has one, so ← → and Escape work at once), else the console. */
+  /** The item the reader was opened from, else the console. */
   private returnFocus(): void {
     const from = this.returnTo
     this.returnTo = null
-    if (from && this.unfolds.get(from)?.unfold.focus()) return
     const item = from && this.layout?.querySelector<HTMLElement>(`[data-item="${CSS.escape(from)}"]`)
     if (item) item.focus({ preventScroll: true })
     else this.dock?.focus()
@@ -491,6 +494,8 @@ export class ChannelsView implements TemporalView {
   private open(key: string | null, focus: boolean, deliberate = focus): void {
     if (key !== this.current) {
       if (this.current) store(SEEN + this.current, String(Date.now()))
+      this.opened = { at: Date.now(), seen: key ? lastSeen(key) : -Infinity }
+      this.earlier = 0
       this.current = key
       if (key) { store(SEEN + key, String(Date.now())); store(LAST, key) }
       this.following = true
@@ -528,6 +533,8 @@ export class ChannelsView implements TemporalView {
     this.open(channel.key, true, false)
     this.marked = fiberOf(card)
     this.bring = true
+    // The window widens to the marked line, and the draw marks it.
+    this.drawChannel()
     this.mark()
     return true
   }
@@ -641,7 +648,7 @@ export class ChannelsView implements TemporalView {
       this.rows.clear()
       return
     }
-    const now = Date.now(), entries = this.streamOf(channel), failed = channel.families.some(uid => this.ctx!.workspace!.board.failed(uid))
+    const now = Date.now(), { entries, hidden } = this.window(this.streamOf(channel)), failed = channel.families.some(uid => this.ctx!.workspace!.board.failed(uid))
     const seat = channel.seat
     // The head and the stream are drawn apart, so what arrives leaves a focused page or an open menu in the head be;
     // the head waits while a list hangs from its pages, whose count follows the chair's files in place, unless the channel changed: then the list closes.
@@ -675,7 +682,7 @@ export class ChannelsView implements TemporalView {
     const leading = new Set(newest.values())
     for (const entry of entries) {
       const made = entry.kind === 'close' && !leading.has(entry) ? this.unfolds.get(`item:${entry.id}`) : undefined
-      if (made?.lead && !made.asked) { made.lead = undefined; this.showPreviews(made) }
+      if (made?.lead) { made.lead = undefined; this.showPreviews(made) }
     }
     const leads = entries.map(entry => this.unfolds.get(`item:${entry.id}`)?.lead?.key)
     // The margin's width, and how tall a folded preview stands.
@@ -685,7 +692,7 @@ export class ChannelsView implements TemporalView {
     const runs = this.runs(channel, now, waits)
     const ran = [...new Set(entries.map(entry => entry.card))].map(card => runs(card).map(([from, to]) => [from, to === now ? 'now' : to]))
     // The count and its title name the threads running, what waits first, which can change with no entry changing.
-    const stream = JSON.stringify([channel.key, failed, said, entries.map(entry => [attentionOf(entry.card, waits), turnOf(entry.card).turn]), leads, fold, margin, ran, running.map(card => [fiberOf(card), attentionOf(card, waits)])])
+    const stream = JSON.stringify([channel.key, failed, hidden, said, entries.map(entry => [attentionOf(entry.card, waits), turnOf(entry.card).turn]), leads, fold, margin, ran, running.map(card => [fiberOf(card), attentionOf(card, waits)])])
     if (stream !== this.sigs.stream) {
       this.sigs.stream = stream
       // Each row reckoned by its parts' sizes, a post's by its previews (a tapestry it shows leading them), before anything in it loads.
@@ -712,10 +719,8 @@ export class ChannelsView implements TemporalView {
       this.entriesDrawn = entries
       this.titles.clear()
       const kept = new Set<string>()
-      this.rebuild(this.stream, [count, ink, ...entries.map((entry, row) => {
-        // A lead asked onto a post with no previews gives it a row of them; elsewhere the previews take it in place.
-        const grows = entry.kind !== 'station' && entry.kind !== 'close' && !entry.files.length && !!leads[row]
-        const sig = JSON.stringify([said[row], grows]), was = this.rows.get(entry.id)
+      this.rebuild(this.stream, [count, ink, ...hidden ? [this.earlierRow(hidden)] : [], ...entries.map((entry, row) => {
+        const sig = JSON.stringify(said[row]), was = this.rows.get(entry.id)
         const node = was?.sig === sig ? was.node : entry.kind === 'station' ? this.stationRow(entry, now) : this.itemRow(entry, now, grouped[row])
         this.rows.set(entry.id, { sig, node })
         kept.add(entry.id)
@@ -736,6 +741,37 @@ export class ChannelsView implements TemporalView {
       this.paint()
     }
     retime(this.layout!, now)
+  }
+  /**
+   * The part of a channel's stream it shows: from its {@link OPENS_ON}th
+   * newest line to the human as of when it was come to (as many again for
+   * each Earlier), or from its oldest line unread then, waiting, or that Rex
+   * came to, whichever is older; with how many lines to the human stand
+   * before it. What arrives after is always shown.
+   */
+  private window(all: Entry[]): { entries: Entry[]; hidden: number } {
+    const items = all.filter((entry): entry is Item => entry.kind !== 'station')
+    const before = items.filter(item => item.arrived <= this.opened.at), want = OPENS_ON * (1 + this.earlier)
+    let from = before.length > want ? before[before.length - want].at : -Infinity
+    const held = items.find(item => item.waiting || item.arrived > this.opened.seen)
+    const marked = this.marked ? items.filter(item => fiberOf(item.card) === this.marked).at(-1) : undefined
+    for (const item of [held, marked]) if (item) from = Math.min(from, item.at)
+    return { entries: all.filter(entry => entry.at >= from), hidden: items.filter(item => item.at < from).length }
+  }
+  /** The row above a channel's window: Earlier shows as many lines again, the stream staying where it was read. */
+  private earlierRow(hidden: number): HTMLLIElement {
+    const row = el('li', 'kbn-ch-earlier')
+    const more = button('kbn-ch-earlier-more', `Earlier · ${hidden} more`, () => {
+      const stream = this.stream!, height = stream.scrollHeight
+      this.earlier++
+      this.drawChannel()
+      stream.scrollTop += stream.scrollHeight - height
+      this.lastTop = stream.scrollTop
+    })
+    more.dataset.item = 'earlier'
+    more.title = `${hidden} earlier ${hidden === 1 ? 'line' : 'lines'} to you in this channel`
+    row.append(more)
+    return row
   }
   /** A line's colour: the thread's state now while the line runs, the ink once it has ended. */
   private lineState(line: TubeLine, waits: Waits): string {
@@ -764,8 +800,8 @@ export class ChannelsView implements TemporalView {
   private painting = 0
   private watchRows(): void {
     this.rowSizes ??= new ResizeObserver(() => {
-      // A row that grows late (a tapestry found, a figure's proportions read) or a stream that shortens (the console growing, the window) keeps a stream that follows at its foot, unless a file unfolded there is being read.
-      if (this.following && !this.stream?.querySelector('[data-unfolded]')) this.toFoot()
+      // A row that grows late (a tapestry found, a figure's proportions read) or a stream that shortens (the console growing, the window) keeps a stream that follows at its foot.
+      if (this.following) this.toFoot()
       if (this.painting) return
       this.painting = requestAnimationFrame(() => { this.painting = 0; this.paint() })
     })
@@ -912,7 +948,7 @@ export class ChannelsView implements TemporalView {
     const open = (): void => this.leaveFor(id, () => this.ctx?.workspace?.openFromDesk(item.card))
     return post(item, {
       now, dot: this.dot(item), open, grouped, clear: this.check(item),
-      previews: item.kind === 'close' || item.files.length || this.unfolds.get(id)?.lead ? this.previews(item, id) : undefined,
+      previews: item.kind === 'close' || item.files.length ? this.previews(item, id) : undefined,
     })
   }
   /** An item's state dot, which opens its worker's view. */
@@ -1055,20 +1091,16 @@ export class ChannelsView implements TemporalView {
   }
   /**
    * An item's files below its words, each on a line of its own as wide as the
-   * item (elements/filePreview.ts); a click unfolds one
-   * in place under a bar pinned as it scrolls, ← and → step through them and
-   * Escape folds it. A close leads with its tapestry, found as the read says.
+   * item (elements/filePreview.ts); a press opens that file in the reader,
+   * whose way back returns to this item. A close leads with its tapestry,
+   * found as the read says.
    */
   private previews(item: Item, id: string): HTMLElement {
     const { card } = item
     const made = this.unfolds.get(id) ?? this.unfolds.set(id, {
       unfold: new Unfold({
         shuttleBase: this.ctx?.shuttleBase ?? '', awake: () => !this.ctx?.workspace?.isActive && !!this.stream?.isConnected,
-        // Full screen opens the file in the reader; its way back returns to this item, the file still unfolded.
-        full: key => this.openPage(id, card, key),
-        // A link that goes somewhere leaves as full screen does; one that goes nowhere leaves the page as it is.
-        link: (key, href) => { if (this.ctx?.workspace?.openLink(card, key, href)) { this.returnTo = id; this.depart() } },
-        opening: () => this.foldOthers(id),
+        open: key => this.openPage(id, card, key),
       }), files: [],
     }).get(id)!
     const files = item.files.map((file): UnfoldFile => {
@@ -1098,41 +1130,13 @@ export class ChannelsView implements TemporalView {
       this.draw()
     })
   }
-  /**
-   * `t` on a post: its worker's tapestry unfolds in the post's previews, at
-   * their head as a close's leads them, or folds if it is the one unfolded;
-   * a worker with no tapestry says so.
-   */
-  private async unfoldTapestry(id: string): Promise<void> {
+  /** `t` on a post: its worker's tapestry opens in the reader; a worker with no tapestry says so. */
+  private async openTapestry(id: string): Promise<void> {
     const item = this.entriesDrawn.find((entry): entry is Item => entry.kind !== 'station' && `item:${entry.id}` === id)
     const lead = item && await this.ctx?.workspace?.globeHost.feeds.lead(item.card)
     if (!item || !this.entriesDrawn.includes(item)) return
     if (!lead) { announce(`${slug(item.card)} has no tapestry`); return }
-    const held = this.unfolds.get(id)
-    if (held?.unfold.unfolded === lead.key) { held.unfold.fold(); return }
-    if (held?.lead?.key !== lead.key) {
-      const made = held ?? (this.previews(item, id), this.unfolds.get(id)!)
-      made.lead = { key: lead.key, name: lead.name, at: lead.at }
-      made.asked = true
-      this.showPreviews(made)
-      this.sigs.stream = ''
-      this.drawChannel()
-    }
-    const made = this.unfolds.get(id)
-    made?.unfold.unfold(lead.key)
-    made?.unfold.el.scrollIntoView({ block: 'start' })
-  }
-  /**
-   * One file unfolded in the stream at a time: an unfolded file is a live
-   * page, polled while it shows. The others fold without moving what the
-   * human is looking at, whatever a fold above it takes out of the stream.
-   */
-  private foldOthers(id: string): void {
-    const others = [...this.unfolds].filter(([other, { unfold }]) => other !== id && unfold.unfolded)
-    if (!others.length) return
-    const here = this.unfolds.get(id)?.unfold.el, top = here?.getBoundingClientRect().top
-    for (const [, { unfold }] of others) unfold.fold(false)
-    if (here && top !== undefined && this.stream) this.stream.scrollTop += here.getBoundingClientRect().top - top
+    this.openPage(id, item.card, lead.key)
   }
   /** Lets go of the previews the stream no longer draws. */
   private sweep(wanted: ReadonlySet<string>): void {
@@ -1353,14 +1357,24 @@ export class ChannelsView implements TemporalView {
     const motion = this.motion, axis = new WheelAxis()
     // A gesture is taken only toward somewhere the rail can go, unless it is already moving.
     const toward = (px: number): boolean => !this.rail?.moving && (motion.active || (px > 0 ? !this.railShown() : this.railShown() && this.canLeaveRail()))
-    let touch: { x: number; y: number; taken: boolean | null } | null = null
+    let touch: { x: number; y: number; taken: boolean | null; on: EventTarget } | null = null
+    // A touch is followed on the node it began on: a redraw that takes that node out of the page (the rail's entries, as a peek bares
+    // a channel) would otherwise strand its moves and its lift, which no longer reach the page.
+    const follow = (on: EventTarget, listen: boolean): void => {
+      for (const [type, handle] of [['touchmove', move], ['touchend', up], ['touchcancel', up]] as const) {
+        if (listen) on.addEventListener(type, handle as EventListener, { passive: true })
+        else on.removeEventListener(type, handle as EventListener)
+      }
+    }
     const down = (event: TouchEvent): void => {
       // A second finger ends the drag where it stands.
       if (touch?.taken) motion.release()
+      if (touch) follow(touch.on, false)
       const point = event.touches[0]
-      touch = event.touches.length === 1 && point && onSurface(event.target) ? { x: point.clientX, y: point.clientY, taken: null } : null
+      touch = event.touches.length === 1 && point && event.target && onSurface(event.target) ? { x: point.clientX, y: point.clientY, taken: null, on: event.target } : null
+      if (touch) follow(touch.on, true)
     }
-    const move = (event: TouchEvent): void => {
+    function move(event: TouchEvent): void {
       const point = event.touches[0]
       if (!touch || !point || touch.taken === false) return
       const dx = point.clientX - touch.x, dy = point.clientY - touch.y
@@ -1372,8 +1386,9 @@ export class ChannelsView implements TemporalView {
       touch.x = point.clientX; touch.y = point.clientY
       motion.drag(dx, event.timeStamp)
     }
-    const up = (): void => {
+    function up(): void {
       if (touch?.taken) motion.release()
+      if (touch) follow(touch.on, false)
       touch = null
     }
     let idle = 0, leaving = false
@@ -1418,17 +1433,12 @@ export class ChannelsView implements TemporalView {
     if (this.ctx?.workspace) this.ctx.workspace.swipeBeneath = readerSwipe
     // Touch events, not pointer events: the browser cancels a pointer it starts panning, but a touch still ends.
     root.addEventListener('touchstart', down, { passive: true })
-    root.addEventListener('touchmove', move, { passive: true })
-    root.addEventListener('touchend', up, { passive: true })
-    root.addEventListener('touchcancel', up, { passive: true })
     document.addEventListener('wheel', wheel, { passive: false })
     return () => {
       clearTimeout(idle)
       motion.rest(this.railShown())
       root.removeEventListener('touchstart', down)
-      root.removeEventListener('touchmove', move)
-      root.removeEventListener('touchend', up)
-      root.removeEventListener('touchcancel', up)
+      if (touch) follow(touch.on, false)
       document.removeEventListener('wheel', wheel)
       if (this.ctx?.workspace?.swipeBeneath === readerSwipe) this.ctx.workspace.swipeBeneath = null
     }
@@ -1456,11 +1466,9 @@ export class ChannelsView implements TemporalView {
     // Enter in the bar's Find opens what it found first.
     if (event.key === 'Enter' && this.query && isTypingTarget(active) && !replying && active !== this.jump) { this.openFirst(); return true }
     if (keystrokeIsSpokenFor()) return false
-    // t unfolds the tapestry of the post in focus beneath it, and from inside it folds it.
+    // t opens the tapestry of the post in focus in the reader.
     const post = event.key === 't' ? active?.closest<HTMLElement>('.kbn-ch-item')?.querySelector<HTMLElement>('[data-item]')?.dataset.item : undefined
-    if (post) { void this.unfoldTapestry(post); return true }
-    // An unfolded file keeps the keys typed in it; its own are ←, →, ↑, ↓ and Escape.
-    if (active?.closest('.uf[data-unfolded]')) return false
+    if (post) { void this.openTapestry(post); return true }
     if (event.key === 'Escape' && this.overDrawer()) { this.moveRail(true); return true }
     if (event.key === '/' && this.jump) { this.moveRail(false); this.jump.focus({ preventScroll: true }); return true }
     if (event.key === 'j') { this.step(1); return true }

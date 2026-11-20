@@ -32,7 +32,7 @@ So from any reachable state, one back reaches a view.
 
 Leaving the reader is only half of back; the view underneath restores itself.
 Channels keeps its channel and its scroll while the reader covers it, and the surface that opened the reader names the item it opened from (`ChannelsView.leaveFor`).
-On return that item takes the focus, or, when it has an unfolded file, the file does, so ←, → and Escape reach it without a click.
+On return that item takes the focus.
 The Desk selects the last card viewed.
 
 ## Tests
@@ -40,4 +40,4 @@ The Desk selects the last card viewed.
 - `route.test.ts`: each rule above, against jsdom's session history.
 - `route.properties.test.ts`: random walks over every move (opens, moves, pages, scans, back, the browser's back and forward, tabs, typed addresses, reloads), some started at a deep link, some rushed so a back is still in flight; from wherever a walk ends the address names what is shown, and one back by the reader or by the browser lands on the view the reader names. `ROUTE_FUZZ_RUNS` deepens it.
 - `e2e/railGesture.mjs` (a trackpad, in WebKit) and `e2e/channels.mjs` (a finger): the swipe over the reader opened from a channel leaves it for the rail.
-- `e2e/navBack.mjs`: the journey on the harness board, desktop and phone: a channel, a post, its thread, the orchestrator and back and forth between them, a file, full screen from an unfolded file, then each way back.
+- `e2e/navBack.mjs`: the journey on the harness board, desktop and phone: a channel, a post, its thread, the orchestrator and back and forth between them, a file, a post's file opened in the reader, then each way back.

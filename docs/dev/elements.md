@@ -11,7 +11,7 @@ Read this page before changing what the board draws.
 - **Say what it is doing.** A slug alone tells the human nothing. Wherever a thread is listed, it says what it wants or last said, and when.
 - **Show what moves.** A list shows the threads that wait on the human or are working; the rest are the orchestrators' to manage and sit behind a quiet fold.
 - **One time.** Every time reads the same way, relative, in a face apart from the prose.
-- **Mostly text, with pictures.** A stream of posts reads like a conversation. Files stay visual, but each preview has a capped size, and unfolding it in place gives the whole file.
+- **Mostly text, with pictures.** A stream of posts reads like a conversation. Files stay visual, but each preview has a capped size; the whole file is one place, the reader (a constitution's view unfolds its own lead in place).
 - **Say it once.** The stream already shows that a line was posted or sent; the board only names what a line asks of the human (asks, for review, blocked).
 - **Know a box's size before it loads.** Every preview's box is sized by CSS from its density and file kind alone, so the stream never jumps as content arrives, and when to fill it can be decided separately.
 
@@ -36,7 +36,7 @@ The rest are the board's own choices, made to sit with those numbers:
 | A menu (a list of files, of threads) | 16px clear of the window's edge, so it stays on the board's sheet |
 | Thumbnail (globe tiles, sheets) | 176 by 116 |
 
-A post's previews stand each on a line of its own, as wide as the post, so unfolding one changes its height alone and never its width.
+A post's previews stand each on a line of its own, as wide as the post, so a box's size never depends on its neighbours.
 `foldPx`, `CARD_PX` and `PREVIEW_GAP` in `filePreview.ts` state the same numbers for code that reckons a row's height (the stream's margin), and a test reads the stylesheet to keep them equal; `previewsHeight` sums a post's boxes; a close's row counts a tapestry only when it shows one.
 
 ## Elements
@@ -87,7 +87,7 @@ The grammar's arithmetic (`relativeAge`) lives in `civilDay.ts` with every other
 
 ### File preview — `filePreview.ts`
 
-A file as a card that unfolds in place to the whole file, with ‹ i / n › between a post's files, Esc to fold and full screen.
+A file as a card. In a constitution's view it unfolds in place to the whole file, with ‹ i / n › between the files, Esc to fold and full screen; in a channel's post (`open`) pressing it opens the file in the reader instead.
 A link in an unfolded page goes where it goes in the reader (`Workspace.openLink`): a board route opens that fiber, and a file beside the page opens in the reader as one of the constitution's pages.
 Its density sets its box: **figure** (images, SVG plots), **page** (HTML, tapestries, decks), **card** (everything else, drawn from its name alone with nothing loaded) at the sizes above.
 A fifth density, **row** (`fileRow`), lists a file rather than previewing it: the card's kind glyph, name and age in one line, and its caption under them (why it was sent: its newest send's caption, else the latest an earlier send of it gave, the same in every list and in the reader); unread, its glyph takes the fresh ink, and the file being read is underlined.

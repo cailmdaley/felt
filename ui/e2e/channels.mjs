@@ -144,26 +144,13 @@ try {
     await page.waitForFunction(() => { const el = document.querySelector('.kbn-ch > .kbn-ch-stream'); return el.scrollHeight - el.scrollTop - el.clientHeight <= 24 }, null, { timeout: 5000 })
     await fits(page)
     await shot(page, `${name}-channel`)
-    // A click unfolds it in place, opening nothing; → steps to the next file, Escape folds it back.
+    // A click opens the file in the reader, where ← and → step among its sends; one back returns to the channel.
     await kappa.locator('.uf-card').first().click()
-    await page.waitForFunction(() => document.querySelector('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"] .kbn-ch-previews[data-unfolded] .uf-count')?.textContent === '1 / 3')
-    // Unfolded, the file is as wide as it was folded: it only grew downward.
-    assert.equal(Math.round((await kappa.locator('.uf-page').boundingBox()).width), Math.round(rowWidth))
-    assert.equal(await page.locator('.ws-selected').count(), 0, 'unfolding opens no view')
-    await shot(page, `${name}-unfolded`)
-    await page.keyboard.press('ArrowRight')
-    await page.waitForFunction(() => document.querySelector('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"] .uf-count')?.textContent === '2 / 3')
-    await page.keyboard.press('Escape')
-    await page.waitForFunction(() => !document.querySelector('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"] .kbn-ch-previews[data-unfolded]'))
-    // A fiber link in a page unfolded in place goes where it goes in the reader: to that fiber's view; back returns to the channel, the page still unfolded.
-    await kappa.locator('.uf-card').first().click()
-    await kappa.frameLocator('.kbn-ch-previews[data-unfolded] iframe').locator('a[href^="#/board/"]').click()
-    await page.waitForFunction(() => document.querySelector('.ws-selected .ov-name')?.textContent === 'foregrounds')
+    await page.locator('.ws-reader:not(.ws-dormant)').waitFor()
+    await page.waitForFunction(() => /deck\.html/.test(decodeURIComponent(location.hash)))
+    await shot(page, `${name}-file`)
     await page.keyboard.press('Escape')
     await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'cmbx' && document.querySelector('.kbn-ch').offsetParent)
-    assert.equal(await kappa.locator('.kbn-ch-previews[data-unfolded]').count(), 1)
-    await page.keyboard.press('Escape')
-    await page.waitForFunction(() => !document.querySelector('.kbn-ch-previews[data-unfolded]'))
     // An item opens its constitution's view in the reader.
     await page.locator('.kbn-ch-item[data-kind="ask"] .kbn-ch-who').click()
     await page.waitForFunction(() => document.querySelector('.ws-selected .ov-name')?.textContent === 'foregrounds')
@@ -210,8 +197,16 @@ try {
       await page.locator('.kbn-ch').focus()
       await page.keyboard.press('j')
       await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'unions')
+      // It opens on its newest lines, Earlier above them; Earlier shows the rest, the stream staying on the lines being read.
+      await page.locator('.kbn-ch-earlier-more').waitFor()
+      const shown = await page.locator('.kbn-ch > .kbn-ch-stream > .kbn-ch-item').count()
+      assert.ok(shown < 14, `the channel opens on ${shown} of its 14 lines`)
+      const newest = page.locator('.kbn-ch > .kbn-ch-stream > .kbn-ch-item').last(), top = (await newest.boundingBox()).y
+      await page.locator('.kbn-ch-earlier-more').click()
+      assert.equal(Math.round((await newest.boundingBox()).y), Math.round(top), 'the lines being read stay where they were')
       // A dozen threads' posts to the human through the day, a hub's figure, its chair's round, and a thread's question.
       await page.waitForFunction(() => document.querySelectorAll('.kbn-ch > .kbn-ch-stream > .kbn-ch-item').length === 14)
+      assert.equal(await page.locator('.kbn-ch-earlier').count(), 0)
       // The chains thread's second post, three minutes after its first, groups under its head.
       assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('.kbn-ch-item[data-grouped]')].map(el => el.dataset.slug)), ['chains'])
       // A dozen lines at once in one margin of fine ink, 56px wide, a few fibres at any height and the rest on the strand.
