@@ -209,11 +209,13 @@ export function saidHits<C>(records: readonly BoardRecord[], cardOf: (uid: strin
   const hits: SaidHit<C>[] = []
   const seen = new Set<string>()
   for (const record of records) {
-    if (seen.has(record.id) || !isSaid(record) || !holds(record.text, needle)) continue
+    if (seen.has(record.id) || !isSaid(record)) continue
+    const words = plain(record.text!)
+    if (!holds(words, needle)) continue
     const card = record.fiber ? cardOf(record.fiber) : undefined
     if (card === undefined) continue
     seen.add(record.id)
-    hits.push({ record, card, excerpt: excerpt(plain(record.text!), needle, SAID_ROOM) })
+    hits.push({ record, card, excerpt: excerpt(words, needle, SAID_ROOM) })
   }
   return hits.sort((a, b) => b.record.timestamp - a.record.timestamp || a.record.id.localeCompare(b.record.id))
 }

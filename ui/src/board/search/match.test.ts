@@ -233,6 +233,11 @@ describe('saidHits', () => {
     expect(hit.excerpt.length).toBeLessThanOrEqual(92)
   })
 
+  it('matches a line by its plain words, so a query across its emphasis finds it and its excerpt holds the match', () => {
+    const [hit] = saidHits([record('em', { text: 'Masking at **5σ keeps** most of the area' })], uid => cards.get(uid), 'at 5σ keeps')
+    expect(hit.excerpt).toBe('Masking at 5σ keeps most of the area')
+  })
+
   it('leaves out what a channel does not draw: a line to another thread, a handoff, and a fiber the board does not hold', () => {
     const records = [
       record('to-thread', { text: 'mask', to: { fiber: 'f2' } }),
