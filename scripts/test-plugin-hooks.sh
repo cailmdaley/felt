@@ -44,6 +44,15 @@ assert_arg() {
   }
 }
 
+# refute fails the script when its command succeeds. A bare `! cmd` would
+# not: set -e ignores the status of a negated command.
+refute() {
+  if "$@"; then
+    echo "unexpected success: $*" >&2
+    exit 1
+  fi
+}
+
 # ── shuttle present, felt absent ─────────────────────────────────────────
 # This isolates each missing-binary behavior; a machine-wide Felt install at
 # one of the fixed absolute probes makes the felt-absent branch unreachable.
@@ -53,7 +62,7 @@ write_fake "$shuttle_home/.local/bin/shuttle" "$shuttle_args"
 shuttle_only_env=(env -i HOME="$shuttle_home" PATH="$bare_path" FELT_BIN= SHUTTLE_BIN=)
 printf '%s\n' '{}' | "${shuttle_only_env[@]}" "$hooks/event.sh"
 assert_arg "$shuttle_args" 'hook event'
-! grep -Fxq 'hook commit' "$shuttle_args"
+refute grep -Fxq 'hook commit' "$shuttle_args"
 
 if ! has_system_binary felt; then
   session_output="$("${base_env[@]}" HOME="$shuttle_home" "$hooks/session.sh" </dev/null)"
@@ -96,7 +105,7 @@ write_fake "$both_home/.local/bin/shuttle" "$shuttle_args"
 both_env=(env -i HOME="$both_home" PATH="$bare_path" FELT_BIN= SHUTTLE_BIN=)
 
 printf '%s\n' '{}' | "${both_env[@]}" "$hooks/event.sh"
-! grep -q '^harness=' "$shuttle_args"
+refute grep -q '^harness=' "$shuttle_args"
 # The harness hooks.json names reaches shuttle as SHUTTLE_HOOK_HARNESS.
 printf '%s\n' '{}' | "${both_env[@]}" "$hooks/event.sh" codex
 assert_arg "$shuttle_args" 'harness=codex'
@@ -105,14 +114,14 @@ printf '%s\n' '{}' | "${both_env[@]}" "$hooks/touch.sh"
 
 # With no jq available, session.sh uses Felt's hook adapter.
 session_output="$("${both_env[@]}" "$hooks/session.sh" </dev/null)"
-! grep -q 'missing or too old' <<<"$session_output"
+refute grep -q 'missing or too old' <<<"$session_output"
 assert_arg "$felt_args" 'hook session'
 assert_arg "$felt_args" 'hook pretool'
 assert_arg "$felt_args" 'hook posttool'
 assert_arg "$shuttle_args" 'hook event'
-! grep -Fxq 'hook commit' "$shuttle_args"
-! grep -Eq '^hook (event|commit)$' "$felt_args"
-! grep -Eq '^hook (pretool|posttool|session)$' "$shuttle_args"
+refute grep -Fxq 'hook commit' "$shuttle_args"
+refute grep -Eq '^hook (event|commit)$' "$felt_args"
+refute grep -Eq '^hook (pretool|posttool|session)$' "$shuttle_args"
 
 # With jq available, SessionStart takes the felt session-context route and
 # emits exactly one harness envelope.
