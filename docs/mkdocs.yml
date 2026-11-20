@@ -79,6 +79,7 @@ nav:
       - Architecture: dev/architecture.md
       - Building and deploying: dev/build-and-deploy.md
       - Dispatch internals: dev/dispatch.md
+      - Harnesses: dev/harnesses.md
       - Operating the daemon: dev/operating.md
       - Event stream and ledgers: dev/event-stream.md
       - The inbox: dev/inbox.md

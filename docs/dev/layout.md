@@ -18,6 +18,7 @@ felt/
 │   ├── shuttlecli/          shuttle command tree
 │   ├── felt/                fiber storage, parsing, and generic frontmatter
 │   ├── shuttle/             Shuttle schema, registry, and orchestration
+│   ├── harness/             each harness's facts and transcript roots (docs/dev/harnesses.md)
 │   └── messaging/           Shuttle session and message transport
 ├── go.mod  go.sum           Go module
 ├── daemon/                  shuttle's Elixir/OTP Mix project
@@ -35,7 +36,7 @@ felt/
 │   ├── src/phone/           browser microphone, PCM worklet, relay, and audio session
 │   ├── harness/             offline visual-verification harnesses
 │   └── e2e/                 document workspace browser suite
-├── claude-plugin/           Claude Code and Codex plugin payload
+├── claude-plugin/           Claude Code, Codex and Antigravity plugin payload
 ├── scripts/                 bootstrap, release, and verification tooling
 └── docs/                    documentation, artwork, and mkdocs.yml
 ```
