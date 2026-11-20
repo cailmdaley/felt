@@ -248,7 +248,7 @@ func (a *app) searchTranscripts(ctx context.Context, q transcriptQuery) (transcr
 	}
 	excluded := append([]string(nil), q.ExcludeSessions...)
 	if !q.IncludeSelf {
-		if _, session := a.harnessSessionFromEnv(); session != "" {
+		if _, session := a.currentSession(); session != "" {
 			excluded = append(excluded, session)
 		}
 	}

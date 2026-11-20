@@ -88,7 +88,7 @@ func (a *app) resolveHandoffPath(fiber string) (string, bool, error) {
 	// An explicit target is never replaced with ambient worker identity.
 	// Preserve manual handoff outside an identified worker.
 	terminal, _ := a.currentTerminal()
-	_, native := a.harnessSessionFromEnv()
+	_, native := a.currentSession()
 	manual := native == "" && fiberUIDFromTmuxSession(terminal.Name) == "" && a.env.Getenv("SHUTTLE_FIBER_PATH") == ""
 	return f.Path, manual, nil
 }
@@ -177,7 +177,7 @@ func (a *app) endOwnTerminal() {
 	if err != nil || ref.Name == "" {
 		return
 	}
-	_, native := a.harnessSessionFromEnv()
+	_, native := a.currentSession()
 	if ref.Backend == "rex" || native != "" {
 		own, err := a.currentWorkerFiber()
 		if err != nil || fiberUIDFromTmuxSession(ref.Name) != own.UID {

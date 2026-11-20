@@ -52,7 +52,7 @@ If your session cannot be identified, leave the task as an open draft.`,
 			if session == "" {
 				// A session read from the environment means a harness is running
 				// this claim; its process is what the worker lives and dies with.
-				_, session = a.harnessSessionFromEnv()
+				_, session = a.currentSession()
 				if pid := a.eventReceiverPID(); session != "" && pid > 0 {
 					payload["harness_pid"] = pid
 				}

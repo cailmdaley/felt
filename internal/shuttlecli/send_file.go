@@ -17,9 +17,12 @@ func (a *app) shuttleSendFileCmd() *cobra.Command {
 host and Shuttle serves them through its existing owner-routed file surface.
 All paths must be readable regular files; validation completes before recording.
 
-Session attribution uses --session; else PI_SESSION_ID when AI_AGENT=pi;
-else the first of ANTIGRAVITY_CONVERSATION_ID, CODEX_THREAD_ID,
-CLAUDE_CODE_SESSION_ID, CLAUDE_SESSION_ID, PI_SESSION_ID; else this tmux session's latest local session-ledger entry. A Shuttle worker's tmux
+Session attribution uses --session; else the calling harness session (the
+nearest harness among this process's ancestors that registered a receiver,
+unless AI_AGENT=pi names Pi; else PI_SESSION_ID when AI_AGENT=pi; else the
+first of ANTIGRAVITY_CONVERSATION_ID, CODEX_THREAD_ID, CLAUDE_CODE_SESSION_ID,
+CLAUDE_SESSION_ID, PI_SESSION_ID); else this tmux session's latest local
+session-ledger entry. A Shuttle worker's tmux
 name also associates the delivery with its fiber. Outside a harness, supply
 --session explicitly. --caption records why the files are sent; the board
 shows it with them. Recording works while the daemon is offline; it does not
@@ -81,7 +84,7 @@ func (a *app) sendFiles(paths []string, session, caption string) ([]string, erro
 	tmux := a.currentTmuxSession()
 	session = strings.TrimSpace(session)
 	if session == "" {
-		_, session = a.harnessSessionFromEnv()
+		_, session = a.currentSession()
 	}
 	if session == "" {
 		session = a.sendFileLedgerSession(tmux)

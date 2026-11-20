@@ -23,7 +23,7 @@ func (a *app) actorSession(flag string) string {
 	if flag != "" {
 		return flag
 	}
-	_, id := a.harnessSessionFromEnv()
+	_, id := a.currentSession()
 	return id
 }
 

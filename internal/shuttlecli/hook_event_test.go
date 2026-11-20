@@ -992,6 +992,27 @@ func TestHookTmuxSessionUsesMovedNativeBindingWithoutPane(t *testing.T) {
 	}
 }
 
+// A Claude session started inside agy inherits agy's conversation id, and its
+// hooks fire before it registers a receiver. Its events carry its own
+// binding's terminal, named by the payload, not the agy parent's.
+func TestNestedHookEventCarriesItsOwnTerminal(t *testing.T) {
+	t.Parallel()
+	env, _ := isolateEvents(t)
+	env.Set("SHUTTLE_HOST", "test-host")
+	env.Set("ANTIGRAVITY_CONVERSATION_ID", "agy-conversation")
+	env.Set("CLAUDE_CODE_SESSION_ID", "nested-session")
+	writeMessageIdentityLedger(t, env, []SessionProvenance{
+		{Host: "test-host", Harness: "antigravity", Session: "agy-conversation", Fiber: "parent", Kind: "dispatch", Tmux: "parent-shuttle", At: 1},
+		{Host: "test-host", Harness: "claude-code", Session: "nested-session", Fiber: "nested", Kind: "dispatch", Tmux: "nested-shuttle", At: 2},
+	})
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	env.Set("SHUTTLE_EVENTS_FILE", path)
+	lines := record(t, env, path, map[string]any{"hook_event_name": "SessionStart", "session_id": "nested-session", "harness": "claude"})
+	if got := lines[0]["tmuxSession"]; got != "nested-shuttle" {
+		t.Fatalf("nested hook tmuxSession = %v, want nested-shuttle", got)
+	}
+}
+
 func TestHookTmuxSessionRequiresExactPane(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)

@@ -574,22 +574,51 @@ func newMessageID() (string, error) {
 	return "msg-" + hex.EncodeToString(raw[:]), nil
 }
 
-// messageCaller is the calling session's address: its live hook registration,
-// else the harness's exported session id, else "".
+// messageCaller is the calling session's address, or "" outside a harness.
 func (a *app) messageCaller() string {
+	harness, id := a.currentSession()
+	if id == "" {
+		return ""
+	}
 	host, err := a.resolveOwnHost("")
 	if err != nil {
 		return ""
 	}
-	if sender := messaging.DetectProcessSender(a.env, host); sender != "" {
-		return sender
+	address, err := messaging.FormatAddress(host, harness, id)
+	if err != nil {
+		return ""
 	}
-	if harness, value := a.harnessSessionFromEnv(); value != "" {
-		if address, err := messaging.FormatAddress(host, harness, value); err == nil {
-			return address
+	return address
+}
+
+// currentSession names the harness session this process runs in: the nearest
+// live hook registration in its process ancestry, else the session id its
+// harness exported.
+//
+// Harnesses nest, and a child inherits every parent's exported id, so the
+// environment alone cannot say which harness is nearest: agy's
+// ANTIGRAVITY_CONVERSATION_ID reaches a Claude or Codex process started inside
+// agy. Ancestry can, wherever the nearest harness registered a receiver.
+// Pi's marker (AI_AGENT=pi with PI_SESSION_ID) outranks an ancestry answer
+// from another harness, since a Pi that registered no receiver, such as an
+// SDK-embedded one, is invisible to ancestry; the cost is that a Codex or agy
+// session started inside Pi reads as its Pi parent. Several receivers on the
+// nearest process (one Codex app server for many threads) name no one, and the
+// environment decides.
+func (a *app) currentSession() (harness, id string) {
+	if host, err := a.resolveOwnHost(""); err == nil {
+		address, err := messaging.ParseAddress(messaging.DetectProcessSender(a.env, host))
+		if err == nil && (address.Harness == "pi" || !a.piMarked()) {
+			return address.Harness, address.ID
 		}
 	}
-	return ""
+	return a.harnessSessionFromEnv()
+}
+
+// piMarked reports Pi's own marker: Pi sets AI_AGENT=pi on its process, and
+// Claude Code overwrites AI_AGENT for its children.
+func (a *app) piMarked() bool {
+	return strings.TrimSpace(a.env.Getenv("AI_AGENT")) == "pi" && strings.TrimSpace(a.env.Getenv("PI_SESSION_ID")) != ""
 }
 
 func (a *app) canonicalMessageAddress(raw string) (string, error) {
@@ -613,10 +642,9 @@ func (a *app) canonicalMessageAddress(raw string) (string, error) {
 // same id its felt extension registers, so a Pi sender's reply address matches
 // what `shuttle sessions` lists. The Antigravity CLI exports
 // ANTIGRAVITY_CONVERSATION_ID to its commands and hooks, and every descendant
-// inherits it; it is listed first because no other harness sets it. The
-// trade-off: a Claude or Codex process nested under agy reads as the agy
-// session wherever only the environment is consulted. `shuttle message`
-// checks process ancestry first, so its sender is the nearest harness.
+// inherits it; it is listed first because no other harness sets it, so a
+// Claude or Codex process nested under agy reads as the agy session when
+// ancestry names no one.
 var harnessSessionEnv = []struct{ key, harness string }{
 	{"ANTIGRAVITY_CONVERSATION_ID", "antigravity"},
 	{"CODEX_THREAD_ID", "codex"},
@@ -625,23 +653,15 @@ var harnessSessionEnv = []struct{ key, harness string }{
 	{"PI_SESSION_ID", "pi"},
 }
 
-// harnessSessionFromEnv reads the session id a harness exported.
-//
-// Harnesses nest (a Pi worker launched from a Claude session inherits
-// CLAUDE_CODE_SESSION_ID), so the list order alone would attribute the Pi
-// session's message to its parent. Pi sets AI_AGENT=pi on its own process, and
-// Claude Code overwrites AI_AGENT for its children, so AI_AGENT=pi alongside
-// PI_SESSION_ID selects Pi's hint.
-//
-// The trade-off: Codex (checked at 0.159.1) sets no AI_AGENT, so a Codex
-// session started from Pi's bash tool carries the same environment as Pi
-// started from Codex, and selects its Pi parent's hint. Pi under a Codex
-// session (a confer worker) is the common nesting, so Pi wins.
+// harnessSessionFromEnv is currentSession's fallback: the session id a harness
+// exported. Pi's marker selects Pi's id over a parent's inherited one. Codex
+// (checked at 0.159.1) and agy set no AI_AGENT, so a Codex session started from
+// Pi's bash tool carries the same environment as Pi started from Codex, and
+// selects its Pi parent's id. Pi under a Codex session (a confer worker) is the
+// common nesting, so Pi wins.
 func (a *app) harnessSessionFromEnv() (harness, id string) {
-	if strings.TrimSpace(a.env.Getenv("AI_AGENT")) == "pi" {
-		if value := strings.TrimSpace(a.env.Getenv("PI_SESSION_ID")); value != "" {
-			return "pi", value
-		}
+	if a.piMarked() {
+		return "pi", strings.TrimSpace(a.env.Getenv("PI_SESSION_ID"))
 	}
 	for _, candidate := range harnessSessionEnv {
 		if value := strings.TrimSpace(a.env.Getenv(candidate.key)); value != "" {

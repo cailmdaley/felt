@@ -97,7 +97,7 @@ func (a *app) migrateWorker(cmd *cobra.Command, source, target *felt.Felt, rest,
 	if err != nil {
 		return nil, err
 	}
-	_, session := a.harnessSessionFromEnv()
+	_, session := a.currentSession()
 	pane := a.currentTerminalPane()
 	body, err := json.Marshal(map[string]any{"from": from, "to": to, "session_id": session, "tmux_pane": pane, "rest": rest, "disabled": disabled})
 	if err != nil {

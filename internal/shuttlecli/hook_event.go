@@ -262,18 +262,18 @@ func (a *app) renderEvent(input eventHookInput) (string, bool) {
 	}
 
 	line := eventLine{
-		ID:          sessionID + "-" + strconv.FormatInt(timestamp, 10) + "-" + strconv.Itoa(a.eventRand()),
-		Timestamp:   timestamp,
-		Type:        eventType,
-		SessionID:   sessionID,
-		CWD:         input.CWD,
-		TmuxSession: a.currentTmuxSession(),
-		Harness:     a.harnessFor(input.TranscriptPath),
-		OriginName:  origin,
+		ID:         sessionID + "-" + strconv.FormatInt(timestamp, 10) + "-" + strconv.Itoa(a.eventRand()),
+		Timestamp:  timestamp,
+		Type:       eventType,
+		SessionID:  sessionID,
+		CWD:        input.CWD,
+		Harness:    a.harnessFor(input.TranscriptPath),
+		OriginName: origin,
 	}
 	if harness.Known(input.Harness) {
 		line.Harness = harness.LedgerName(input.Harness)
 	}
+	line.TmuxSession = a.hookTmuxSession(line.Harness, input.SessionID)
 	pid := input.NativePID
 	if line.Harness != "pi" {
 		pid = a.eventReceiverPID()
@@ -391,15 +391,30 @@ func trimToolInput(raw json.RawMessage) json.RawMessage {
 	return out
 }
 
-// currentTmuxSession names the worker terminal this hook fired inside — the
+// currentTmuxSession names the worker terminal the caller runs inside — the
 // carrier of the fiber ULID for dispatched CLI workers. It provides artifact
 // and terminal context; turn phases join only by harness session UUID.
-//
-// Native sessions use their current ledger binding, never an inherited pane.
-// Without native identity, a pane's live name takes precedence over dispatch
-// environment. The environment-only fallback cannot detect reassignment.
 func (a *app) currentTmuxSession() string {
-	if harness, id := a.harnessSessionFromEnv(); id != "" {
+	return a.tmuxSessionOf(a.currentSession())
+}
+
+// hookTmuxSession is currentTmuxSession for a hook, whose payload names the
+// session it fires for. Where the harness exports a session id, the payload's
+// session is the one to bind: the exported ids may be a parent harness's.
+func (a *app) hookTmuxSession(name, session string) string {
+	if _, id := a.harnessSessionFromEnv(); id == "" {
+		return a.tmuxSessionOf("", "")
+	}
+	return a.tmuxSessionOf(harness.Normalize(name), session)
+}
+
+// tmuxSessionOf names the terminal of a native session, or of the caller when
+// it has none. Native sessions use their current ledger binding, never an
+// inherited pane. Without native identity, a pane's live name takes precedence
+// over dispatch environment. The environment-only fallback cannot detect
+// reassignment.
+func (a *app) tmuxSessionOf(harness, id string) string {
+	if id != "" {
 		host, err := a.resolveOwnHost("")
 		if err != nil {
 			return ""

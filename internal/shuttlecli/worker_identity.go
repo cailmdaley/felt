@@ -27,7 +27,7 @@ func workerBindingKind(kind string) bool {
 // or dispatch path. Without native or pane evidence an environment-only worker
 // cannot detect a reassignment; the path is only a compatibility fallback.
 func (a *app) currentWorkerFiber() (*felt.Felt, error) {
-	if harness, id := a.harnessSessionFromEnv(); id != "" {
+	if harness, id := a.currentSession(); id != "" {
 		host, err := a.resolveOwnHost("")
 		if err != nil {
 			return nil, err

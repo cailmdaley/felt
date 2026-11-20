@@ -297,3 +297,56 @@ func TestCodexWorkerExitsPlainlyUnderInheritedTerminal(t *testing.T) {
 		}
 	}
 }
+
+// A harness started inside agy inherits ANTIGRAVITY_CONVERSATION_ID, which the
+// environment reads first. A bare close from it must act on its own fiber, the
+// nearest registered receiver's, and never on the agy parent's. A Pi that
+// registered nothing under a registered parent is refused, not given the
+// parent's fiber.
+func TestNestedHarnessUnderAgyClosesItsOwnFiber(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, harness, key, ledger string }{
+		{"claude", "claude", "CLAUDE_CODE_SESSION_ID", "claude-code"},
+		{"codex", "codex", "CODEX_THREAD_ID", "codex"},
+		{"unregistered pi", "pi", "PI_SESSION_ID", "pi"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
+			dir, st := newStore(t)
+			seedShuttleRole(t, st, "agy-parent", felt.StatusActive, oneshot(), nil)
+			seedShuttleRole(t, st, "nested", felt.StatusActive, oneshot(), nil)
+			parent, nested := mustRead(t, st, "agy-parent"), mustRead(t, st, "nested")
+			env.Set("SHUTTLE_HOST", "test-host")
+			env.Set("ANTIGRAVITY_CONVERSATION_ID", "agy-conversation")
+			env.Set(tc.key, "nested-session")
+			registerSenderProcess(t, env, "antigravity", "agy-conversation", "test-host", os.Getppid())
+			bindings := []SessionProvenance{
+				{Kind: "dispatch", Host: "test-host", Harness: "antigravity", Session: "agy-conversation", Fiber: parent.ID, UID: parent.UID, FiberPath: parent.Path, At: 1},
+			}
+			if tc.harness == "pi" {
+				env.Set("AI_AGENT", "pi")
+			} else {
+				registerSenderProcess(t, env, tc.harness, "nested-session", "test-host", os.Getpid())
+				bindings = append(bindings, SessionProvenance{Kind: "dispatch", Host: "test-host", Harness: tc.ledger, Session: "nested-session", Fiber: nested.ID, UID: nested.UID, FiberPath: nested.Path, At: 2})
+			}
+			writeMessageIdentityLedger(t, env, bindings)
+			out, err := runIn(t, env, dir, "close")
+			if f := mustRead(t, st, "agy-parent"); f.Status != felt.StatusActive {
+				t.Fatalf("bare close from a %s session nested in agy closed the agy parent's fiber\n%s", tc.name, out)
+			}
+			if tc.harness == "pi" {
+				if err == nil {
+					t.Fatalf("unregistered pi closed without a binding\n%s", out)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("close: %v\n%s", err, out)
+			}
+			if f := mustRead(t, st, "nested"); f.Status != felt.StatusClosed {
+				t.Fatalf("nested fiber status = %s", f.Status)
+			}
+		})
+	}
+}
