@@ -166,7 +166,7 @@ export class Workspace {
   /** The channels the board's cards make, as last composed, and each constitution's channel by fiber. */
   private composed: { cards: KanbanCard[]; channels: BoardChannel[]; of: Map<string, BoardChannel> } | null = null
   /** Each constitution's tapestry read, by fiber and its last write. */
-  private readonly leadReads = new Map<string, { modified?: string; read: Promise<MapFile | undefined> }>()
+  private readonly leadReads = new Map<string, { modified?: string; read: Promise<MapFile | null | undefined> }>()
   /** What a surface over the whole fleet reaches through the board: the map's feeds, and its pages and conversations. */
   readonly globeHost: GlobeHost
 
@@ -461,29 +461,36 @@ export class Workspace {
     }
     return [...files.values()].sort((a, b) => b.at - a.at)
   }
-  /** The first companion page a fiber's directory holds, skipping past any `listed` already names, which ends the search. */
-  private async companion(fiberDir: string, owner: string, listed: (path: string) => boolean = () => false): Promise<{ path: string; name: string; modifiedAt?: string } | undefined> {
+  /**
+   * The first companion page a fiber's directory holds, skipping past any
+   * `listed` already names, which ends the search: undefined when it holds
+   * none, null when its owner could not say.
+   */
+  private async companion(fiberDir: string, owner: string, listed: (path: string) => boolean = () => false): Promise<{ path: string; name: string; modifiedAt?: string } | null | undefined> {
+    let unknown = false
     for (const file of COMPANION_NAMES) {
       const path = `${fiberDir}/${file}`
       if (listed(path)) return undefined
       const result = await head(fileBytesUrl(this.opts.shuttleBase, path, owner), RESOURCE_PRIORITY.neighbour, { fresh: true })
       if (this.disposed) return undefined
       if (result?.exists) return { path, name: file[0].toUpperCase() + file.slice(1, -5), modifiedAt: result.modifiedAt ?? undefined }
+      unknown ||= !result
     }
-    return undefined
+    return unknown ? null : undefined
   }
-  /** A constitution's tapestry or report, read once and again when its card's file changes. */
-  private mapLead(card: KanbanCard): Promise<MapFile | undefined> {
+  /** A constitution's tapestry or report, read once and again when its card's file changes or its owner could not say. */
+  private mapLead(card: KanbanCard): Promise<MapFile | null | undefined> {
     const key = `${card.originId}:${card.uid ?? card.id}`, known = this.leadReads.get(key)
     if (known && known.modified === card.modifiedAt) return known.read
     const read = this.readLead(card)
     this.leadReads.set(key, { modified: card.modifiedAt, read })
+    void read.then(found => { if (found === null && this.leadReads.get(key)?.read === read) this.leadReads.delete(key) })
     return read
   }
-  private async readLead(card: KanbanCard): Promise<MapFile | undefined> {
+  private async readLead(card: KanbanCard): Promise<MapFile | null | undefined> {
     if (!card.fiberDir) return undefined
     const found = await this.companion(card.fiberDir, card.originId)
-    if (!found) return undefined
+    if (!found) return found
     const key = docKey(card.originId, found.path, card.originId, card.fiberDir), at = Date.parse(found.modifiedAt ?? '') || 0
     return { key, name: found.name, at, unread: at > 0 && unseenSince(key, at) }
   }
@@ -1042,7 +1049,7 @@ export class Workspace {
       if (this.disposed || epoch !== this.routeEpoch) return
     }
     const { originId: home, fiberDir: dir } = card
-    const companion = page === 'tapestry' && dir ? await this.companion(dir, home) : undefined
+    const companion = page === 'tapestry' && dir ? await this.companion(dir, home) ?? undefined : undefined
     if (this.disposed || epoch !== this.routeEpoch) return
     const doc = page === 'constitution' ? fiberKey(home, card.uid ?? card.id)
       : page === 'tapestry' ? companion && docKey(home, companion.path, home, dir)

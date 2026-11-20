@@ -188,7 +188,7 @@ export const helpSections: readonly HelpSection[] = [
     row(['Enter'], 'Write to the channel\'s chair', []),
     row(['c'], 'Open the channel\'s chair\'s conversation in Rex', []),
     row(['e'], 'Clear the post or files in focus; a question or a close is answered, not cleared', []),
-    row(['t'], 'Unfold the tapestry of the post in focus beneath it; again, fold it', []),
+    row(['t'], 'Open the tapestry of the post in focus in the reader', []),
     row(['⌥↑', '⌥↓'], 'Move the channel in the rail', []),
     row(['Menu', '⇧F10'], 'The channel\'s menu: hide, pin, move to the bottom; a long press on a phone', []),
   ] },

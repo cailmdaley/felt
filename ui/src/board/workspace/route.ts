@@ -8,6 +8,10 @@ export type WorkspaceRoute =
 /** The reader's addresses live under `#/board/`; `#/board` itself is an old address of Channels. */
 const BOARD_HASH = '#/board'
 const STATE_KEY = 'shuttleWorkspace'
+/** A back goes on through at most this many entries of framed pages' own history. */
+export const FRAME_STEPS = 8
+/** A back whose landing the board has not heard of in this long is taken as landed. */
+export const LANDING_MS = 500
 export type WorkspaceOriginView = 'desk' | 'chronicle' | 'globe' | 'channels'
 const VIEW_NAMES: Record<WorkspaceOriginView, string> = { desk: 'Desk', chronicle: 'Chronicle', globe: 'Globe', channels: 'Channels' }
 /** What a reader entry says about itself: whether the view it was opened from is the entry below it, and which view that is. */
@@ -112,6 +116,9 @@ export class WorkspaceHistory {
   /** A back this history asked for has not landed: anything asked meanwhile waits for it. */
   private leaving = false
   private queued: (() => void) | null = null
+  /** How many entries of framed pages' history the back in flight has gone on through. */
+  private steps = 0
+  private landing = 0
 
   constructor(onRoute: (route: WorkspaceRoute, quiet: boolean) => void) {
     this.onRoute = onRoute
@@ -199,7 +206,7 @@ export class WorkspaceHistory {
 
   /** A back that landed in a framed page's own history (a deck's slides): the back this history asked for goes on to the view. */
   framePopped(): void {
-    if (this.leaving) window.history.back()
+    if (this.leaving && ++this.steps <= FRAME_STEPS) this.back()
   }
 
   /** Back, from anywhere in the reader: its view, in one step. */
@@ -208,7 +215,8 @@ export class WorkspaceHistory {
     const hash = `#/${this.origin}`
     if (this.layered) {
       this.leaving = true
-      window.history.back()
+      this.steps = 0
+      this.back()
     } else {
       window.history.replaceState(withRouteState(window.history.state, null), '', hash)
     }
@@ -218,7 +226,24 @@ export class WorkspaceHistory {
     this.onRoute(this.current, false)
   }
 
+  /**
+   * One step back. A back the board never hears land (it stopped in a frame's
+   * history past the steps it goes on through, or on an entry a nested frame
+   * made, which reports nothing) is taken as landed: the entry it stopped on
+   * names the view, and what was asked meanwhile goes ahead.
+   */
+  private back(): void {
+    window.history.back()
+    clearTimeout(this.landing)
+    this.landing = window.setTimeout(() => {
+      if (!this.leaving) return
+      window.history.replaceState(withRouteState(window.history.state, null), '', this.currentHash)
+      this.handleLocation(window.history.state)
+    }, LANDING_MS)
+  }
+
   dispose(): void {
+    clearTimeout(this.landing)
     if (!this.started) return
     window.removeEventListener('popstate', this.onPopState)
     window.removeEventListener('hashchange', this.onHashChange)
@@ -245,6 +270,7 @@ export class WorkspaceHistory {
   private handleLocation(state: unknown): void {
     this.redirect()
     const hash = window.location.hash
+    clearTimeout(this.landing)
     const queued = this.leaving ? this.queued : null
     this.leaving = false
     this.queued = null

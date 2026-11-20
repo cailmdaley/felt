@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { RailMotion, WHEEL_IDLE_MS, WheelAxis, settleMs, settlesShown } from './railMotion.js'
+import { RailMotion, SpentSwipe, WHEEL_IDLE_MS, WheelAxis, settleMs, settlesShown } from './railMotion.js'
 
 /** A rail 200px wide on a test clock: frames run when the clock is advanced. */
 function rail(shown = false) {
@@ -141,5 +141,41 @@ describe('which wheel events are the rail\'s', () => {
     burst(axis, 0, 6, -20, 0)
     expect(burst(axis, 96, 8, 0, -40).at(-1)).toBeNull()
     expect(burst(axis, 96 + 8 * 16 + WHEEL_IDLE_MS + 1, 4, -20, 0).at(-1)).not.toBeNull()
+  })
+})
+
+describe('a spent swipe', () => {
+  /** A swipe that left the reader at t = 0, then its events: each [px, ms since the last]; how many of them it kept. */
+  const kept = (events: Array<[number, number]>): number => {
+    const spent = new SpentSwipe()
+    spent.begin(0)
+    let t = 0, n = 0
+    for (const [px, dt] of events) { t += dt; if (!spent.feed(px, t)) break; n++ }
+    return n
+  }
+  const frames = (deltas: number[], dt = 16): Array<[number, number]> => deltas.map(px => [px, dt])
+  // The rest of a swipe at 30 px a frame, then its inertia decaying by a tenth a frame down to a pixel.
+  const swipe = frames([30, 30, 30, 30])
+  const inertia = frames(Array.from({ length: 30 }, (_, i) => Math.max(1, Math.round(30 * 0.9 ** (i + 1)))))
+
+  it('keeps the whole of the swipe and its inertia, a frame the browser coalesced and a dip mid-swipe included', () => {
+    expect(kept([...swipe, ...inertia])).toBe(swipe.length + inertia.length)
+    // Two inertia frames coalesced into one event: twice the travel over twice the time.
+    const tail = inertia.slice(0, 15), coalesced: [number, number] = [tail[14][0] * 2, 32]
+    expect(kept([...swipe, ...tail, coalesced, ...inertia.slice(16)])).toBe(swipe.length + 15 + 1 + 14)
+    // A human swipe that slows and speeds up again before it lets go.
+    expect(kept([...frames([30, 12, 26, 30]), ...inertia])).toBe(4 + inertia.length)
+  })
+
+  it('ends at the next swipe, however gently it ramps up, or once its events pause', () => {
+    const ramp = frames([1, 2, 4, 7, 11, 16, 22, 30, 30])
+    const spentFor = swipe.length + 12
+    // Begun during the inertia: kept until the fingers are clearly moving again, a few frames in.
+    const n = kept([...swipe, ...inertia.slice(0, 12), ...ramp])
+    expect(n).toBeGreaterThanOrEqual(spentFor)
+    expect(n).toBeLessThan(spentFor + 6)
+    // Begun after the inertia died away.
+    expect(kept([...swipe, ...inertia, ...ramp])).toBeLessThan(swipe.length + inertia.length + 6)
+    expect(kept([...swipe, [30, WHEEL_IDLE_MS + 1]])).toBe(swipe.length)
   })
 })

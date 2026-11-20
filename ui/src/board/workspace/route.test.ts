@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { formatRoute, parseRoute, WorkspaceHistory, type WorkspaceRoute } from './route.js'
+import { FRAME_STEPS, formatRoute, LANDING_MS, parseRoute, WorkspaceHistory, type WorkspaceRoute } from './route.js'
 
 const histories: WorkspaceHistory[] = []
 afterEach(() => {
@@ -111,6 +111,40 @@ describe('workspace routes', () => {
     history.framePopped()
     history.framePopped()
     expect(back).toHaveBeenCalledTimes(3)
+  })
+
+  it('a back goes on through a framed page\'s history a bounded number of steps, however often the page steps back', () => {
+    vi.useFakeTimers()
+    try {
+      resetHash('#/channels')
+      const history = create()
+      history.start()
+      history.enter('a', 'host', 'host:/files/deck.html', 'channels')
+      const back = vi.spyOn(window.history, 'back').mockImplementation(() => {})
+      history.leave()
+      // A page whose popstate pushes again reports a step back for every back it is given.
+      for (let n = 0; n < 50; n++) history.framePopped()
+      expect(back).toHaveBeenCalledTimes(1 + FRAME_STEPS)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('a back the board never hears land is taken as landed: the view\'s address stands, and what was asked meanwhile goes ahead', () => {
+    vi.useFakeTimers()
+    try {
+      resetHash('#/channels')
+      const onRoute = vi.fn()
+      const history = create(onRoute)
+      history.start()
+      history.enter('a', 'host', 'host:/files/deck.html', 'channels')
+      // The back stops on an entry a nested frame made, which reports nothing.
+      vi.spyOn(window.history, 'back').mockImplementation(() => {})
+      history.leave()
+      history.enter('b', 'host')
+      expect(onRoute).toHaveBeenLastCalledWith({ kind: 'overview', hash: '#/channels' })
+      vi.advanceTimersByTime(LANDING_MS)
+      expect(onRoute).toHaveBeenLastCalledWith({ kind: 'channel', uid: 'b', owner: 'host' })
+      expect(window.location.hash).toBe(formatRoute({ kind: 'channel', uid: 'b', owner: 'host' }))
+    } finally { vi.useRealTimers() }
   })
 
   it('a scan is quiet; the browser\'s forward reopens the reader where it was left', async () => {

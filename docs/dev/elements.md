@@ -37,7 +37,7 @@ The rest are the board's own choices, made to sit with those numbers:
 | Thumbnail (globe tiles, sheets) | 176 by 116 |
 
 A post's previews stand each on a line of its own, as wide as the post, so a box's size never depends on its neighbours.
-`foldPx`, `CARD_PX` and `PREVIEW_GAP` in `filePreview.ts` state the same numbers for code that reckons a row's height (the stream's margin), and a test reads the stylesheet to keep them equal; `previewsHeight` sums a post's boxes; a close's row counts its tapestry's box (a page's for the channel's newest close, a card's for the others) until a look finds it has none, and then counts nothing for it.
+`foldPx`, `CARD_PX` and `PREVIEW_GAP` in `filePreview.ts` state the same numbers for code that reckons a row's height (the stream's margin), and a test reads the stylesheet to keep them equal; `previewsHeight` sums a post's boxes; a close's row counts its tapestry's box (a page's for the channel's newest close, a card's for the others) unless the last look at its constitution found none; a look that cannot tell (a daemon that did not answer) leaves the slot as it stood.
 
 ## Elements
 

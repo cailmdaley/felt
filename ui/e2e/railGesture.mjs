@@ -102,11 +102,12 @@ try {
     assert.equal(await (await page.locator('.ws-selected iframe').elementHandle()).contentFrame().then(frame => frame.evaluate(() => location.hash)), '#/2', 'the deck stepped two slides on')
     await deck.locator('a[href^="#/board/"]').click()
     await page.waitForFunction(() => document.querySelector('.ws-selected .ov-name')?.textContent === 'foregrounds')
-    // The second swipe begins while the first's inertia still dies away: the inertia moves nothing, the new swipe brings the rail.
+    // The second swipe begins while the first's inertia still dies away, its fingers gathering speed gently: the inertia moves
+    // nothing, the new swipe brings the rail.
     await swipe(page, at, -240, { tail: 12 })
     assert.equal(await page.evaluate(() => location.hash), '#/channels', 'one swipe returns to the channel')
     assert.equal(await showing(page), 0, 'and does not bring the rail')
-    await swipe(page, at, -240)
+    for (const deltaX of [1, 2, 4, 7, 11, 16, 22, 30, 30, 30, 30, 30, 30, 30]) { await page.mouse.wheel(-deltaX, 0); await page.waitForTimeout(16) }
     await settled(page, true)
 
     // Over a framed page, the tapestry a close's card opens, the frame keeps the wheel from the board and from Safari's back:

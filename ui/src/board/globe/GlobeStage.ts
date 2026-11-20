@@ -15,7 +15,7 @@ import './globe.css'
 
 /** What the globe reaches through the board. */
 export interface GlobeHost {
-  feeds: MapFeeds & { refresh(): void; lead(card: KanbanCard): Promise<MapFile | undefined> }
+  feeds: MapFeeds & { refresh(): void; lead(card: KanbanCard): Promise<MapFile | null | undefined> }
   openDocument(card: KanbanCard, doc: string): void
   /** The board looks at a thread (`Workspace.look`): voice follows it and Rex moves quietly to its existing window; true once Rex moved. */
   converse(card: KanbanCard): Promise<boolean>

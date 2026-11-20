@@ -8,8 +8,8 @@ import './doc-buttons.css'
 
 /** What a constitution's page buttons read and open. */
 export interface DocFeeds {
-  /** Its tapestry or report, when its directory holds one. */
-  lead(card: KanbanCard): Promise<MapFile | undefined>
+  /** Its tapestry or report, when its directory holds one: undefined when it holds none, null when its owner could not say. */
+  lead(card: KanbanCard): Promise<MapFile | null | undefined>
   /** Its sent files, newest first. */
   files(card: KanbanCard): MapFile[]
   /** Opens one of its pages in the reader; the opening is a deliberate look at it. */

@@ -797,6 +797,36 @@ it('leads each fiber\'s newest close with its tapestry, the channel\'s newest as
   found.P = true
   await redraw([chair, tsz, mask, beam, { ...cov, modifiedAt: new Date().toISOString() }, { ...rho, modifiedAt: new Date().toISOString() }])
   expect(closes()).toStrictEqual({ 'item:v1': null, 'item:p1': 'card', 'item:v2': null })
+  // A later write to a fiber found to have none (a verdict, a review mark) reserves nothing while it is looked for again.
+  const now = new Date(Date.now() + minute).toISOString()
+  ctx.response = board([chair, tsz, mask, beam, { ...cov, modifiedAt: now }, { ...rho, modifiedAt: now }])
+  view.refresh(ctx)
+  expect(reckoned()).toStrictEqual({ v1: 64, p1: 64 + CARD_PX, v2: 64 })
+})
+
+it('keeps a tapestry\'s slot as it last stood while its owner cannot say whether there is one', async () => {
+  const human = { label: 'Sam' }
+  const cov = card({ id: 'cmbx/cov', uid: 'V', name: 'Covariance', orchestrator: 'C', column: 'tempered', status: 'closed', closedAt: at(20), outcome: 'Validated.' })
+  daemon([], undefined, {}, { board: { C: [...BOARD.C, record({ id: 'v1', kind: 'closed', fiber: 'V', to: human, text: 'Done.' }, 20)] } })
+  let answer: unknown = { key: 'local:/w/V/tapestry.html', name: 'Tapestry', at: Date.now(), unread: false }
+  tapestryOf = async () => answer
+  const view = new ChannelsView()
+  const { ctx, host } = await mount([chair, tsz, mask, beam, cov], view)
+  const redraw = async (name: string): Promise<void> => { ctx.response = board([chair, tsz, mask, beam, { ...cov, name }]); view.refresh(ctx); await settle(); await settle() }
+  const slot = () => item(host, 'cov').querySelector<HTMLElement>('.uf-card[data-page]')?.dataset.density ?? null
+  await redraw('Covariance, drawn')
+  expect(slot()).toBe('page')
+  // A daemon blip: the look cannot tell, and the tapestry stays.
+  answer = null
+  await redraw('Covariance, blip')
+  expect(slot()).toBe('page')
+  // Told there is none, the slot goes; a blip after that brings nothing back.
+  answer = undefined
+  await redraw('Covariance, gone')
+  expect(slot()).toBeNull()
+  answer = null
+  await redraw('Covariance, blip again')
+  expect(slot()).toBeNull()
 })
 
 it('takes from the stream the sends whose clear was written, and its undo brings back only those', async () => {

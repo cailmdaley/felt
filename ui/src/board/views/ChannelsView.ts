@@ -14,7 +14,7 @@ import { GUTTER, drawMargin, tautAlong, type MarginRow } from '../margin.js'
 import { random } from '../ink.js'
 import { lineHue } from '../lineHue.js'
 import { createRailReorder, type RailReorder } from '../channelRail.js'
-import { RailMotion, SLOP_PX, WHEEL_IDLE_MS, WheelAxis } from './railMotion.js'
+import { RailMotion, SLOP_PX, SpentSwipe, WHEEL_IDLE_MS, WheelAxis } from './railMotion.js'
 import type { SwipeSignal } from '../workspace/PhoneGestures.js'
 import { openActionMenu } from '../conversationMenu.js'
 import { stateDot } from '../stateDot.js'
@@ -54,8 +54,8 @@ const KEEP_MS = 7 * 86_400_000
 const SHADOW_PX = 24
 /** About how tall a post stands without its files: its head and two lines of words. */
 const POST_PX = 64
-/** A constitution as its tapestry was looked for: a tapestry written since is looked for again. */
-const tapestryKey = (card: KanbanCard): string => `${card.originId}:${fiberOf(card)}:${card.modifiedAt ?? ''}`
+/** A constitution, as whether it has a tapestry is remembered. */
+const tapestryKey = (card: KanbanCard): string => `${card.originId}:${fiberOf(card)}`
 /** How many of a clear's records are written at once: each write is a process in the daemon. */
 const CLEAR_WRITES = 4
 /** A channel written here is shown so this long at most before the feed's word stands, whatever it says. */
@@ -169,7 +169,7 @@ export class ChannelsView implements TemporalView {
   private readonly unfolds = new Map<string, Unfold>()
   /** Each fiber's newest close's tapestry, by item, kept across redraws and looked for again on each. */
   private readonly pageCards = new Map<string, PageCard>()
-  /** Whether a constitution has a tapestry, by its fiber as last modified, once a look has said. */
+  /** Whether a constitution has a tapestry, as its last look said; a look that could not tell leaves it be. */
   private readonly tapestries = new Map<string, boolean>()
   /** The stream's rows as last drawn, by entry, each with what it drew: a row that would draw the same is kept. */
   private readonly rows = new Map<string, { sig: string; node: HTMLLIElement }>()
@@ -843,16 +843,20 @@ export class ChannelsView implements TemporalView {
       const gap = (rows: number): HTMLLIElement[] => rows ? [el('li', 'kbn-ch-folded', `· · · ${rows} ${rows === 1 ? 'row' : 'rows'} folded · · ·`)] : []
       this.rebuild(this.stream, [count, ink, ...hidden ? [this.earlierRow(hidden)] : [], ...folded ? [...drawn.flatMap((node, row) => [...gap(folded.gaps[row]), node]), ...gap(folded.gaps.at(-1)!)] : drawn])
       for (const id of this.rows.keys()) if (!kept.has(id)) this.rows.delete(id)
-      // A tapestry written since is found again: the lookup is the cached read, new when its fiber changed. One found to be
-      // missing gives up its slot: the stream is drawn again without it.
-      for (const close of leading.keys()) this.pageCards.get(`item:${close.id}`)?.look(this.ctx!.workspace!.globeHost.feeds.lead(close.card).then(file => {
-        const key = tapestryKey(close.card), had = this.tapestries.get(key)
-        this.tapestries.set(key, !!file)
-        if (!file && had !== false) this.draw()
-        return file
-      }))
+      // Each close's tapestry is looked for again, the lookup the cached read, new when its fiber changed or its owner could not say.
+      // A close gives up its slot only once a look finds none, and has it back once one is found: the stream is drawn again then.
+      for (const close of newest.values()) {
+        const found = this.ctx!.workspace!.globeHost.feeds.lead(close.card).then(file => {
+          if (file === null) return file
+          const key = tapestryKey(close.card), had = this.tapestries.get(key) !== false
+          this.tapestries.set(key, !!file)
+          if (had !== !!file) this.draw()
+          return file
+        })
+        this.pageCards.get(`item:${close.id}`)?.look(found)
+      }
       // What a fold hides keeps its previews, so they stand as they were when it unfolds.
-      this.sweep(new Set(whole.flatMap(entry => entry.kind === 'station' ? [] : [`item:${entry.id}`])))
+      this.sweep(new Set(whole.flatMap(entry => entry.kind === 'station' ? [] : [`item:${entry.id}`])), new Set([...newest.values()].map(close => tapestryKey(close.card))))
       if (!entries.length) this.stream.append(el('li', 'kbn-ch-hush', folded ? `Nothing in #${channel.name} says “${this.folding}”.` : failed ? 'This channel\'s history could not be read; trying again.' : 'Nothing addressed to you here yet.'))
       if (this.following && !folded) this.toFoot()
       this.mark()
@@ -1256,10 +1260,11 @@ export class ChannelsView implements TemporalView {
     if (!lead) { announce(`${slug(item.card)} has no tapestry`); return }
     this.openPage(id, item.card, lead.key)
   }
-  /** Lets go of the previews the stream no longer draws. */
-  private sweep(wanted: ReadonlySet<string>): void {
+  /** Lets go of the previews the stream no longer draws, and of what it knew of tapestries of closes no longer in it. */
+  private sweep(wanted: ReadonlySet<string>, fibers: ReadonlySet<string> = new Set()): void {
     for (const [id, unfold] of this.unfolds) if (!wanted.has(id)) { unfold.dispose(); this.unfolds.delete(id) }
     for (const [id, page] of this.pageCards) if (!wanted.has(id)) { page.dispose(); this.pageCards.delete(id) }
+    for (const key of this.tapestries.keys()) if (!fibers.has(key)) this.tapestries.delete(key)
   }
 
   /** Writes a channel's unpin, hide or show, counting at once here; a write that fails is taken back and said. */
@@ -1510,9 +1515,9 @@ export class ChannelsView implements TemporalView {
       if (touch) follow(touch.on, false)
       touch = null
     }
-    // A trackpad swipe that left the reader is spent: the rest of it, its inertia dying away, moves nothing; its events pausing, or
-    // rising again as fingers start the next swipe, end it.
-    let idle = 0, spent: { peak: number; last: number } | null = null
+    // A trackpad swipe that left the reader is spent: the rest of it moves nothing (railMotion.ts).
+    let idle = 0
+    const spent = new SpentSwipe()
     const wheel = (event: WheelEvent): void => {
       const over = onReader(event.target)
       if (!over && !onSurface(event.target)) return
@@ -1523,13 +1528,9 @@ export class ChannelsView implements TemporalView {
       // Taking the gesture keeps the browser from going back a page.
       if (sideways || px !== null) event.preventDefault()
       if (px === null) return
-      const travel = Math.abs(px)
-      if (spent && spent.last < spent.peak / 2 && travel > 1.5 * spent.last + 2) spent = null
-      if (over && px < 0 && !spent) this.ctx?.workspace?.returnToOrigin()
-      if (over || spent) {
-        spent = { peak: Math.max(spent?.peak ?? 0, travel), last: travel }
-        clearTimeout(idle)
-        idle = window.setTimeout(() => { spent = null }, WHEEL_IDLE_MS)
+      if (spent.feed(Math.abs(px), event.timeStamp)) return
+      if (over) {
+        if (px < 0) { this.ctx?.workspace?.returnToOrigin(); spent.begin(event.timeStamp) }
         return
       }
       if (!toward(-px)) return

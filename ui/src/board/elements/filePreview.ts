@@ -110,7 +110,7 @@ export class PageCard {
   readonly el = document.createElement('div')
   private readonly card = document.createElement('button')
   private readonly preview?: { shuttleBase: string; awake?(): boolean }
-  private looking?: Promise<UnfoldFile | undefined>
+  private looking?: Promise<UnfoldFile | null | undefined>
   private shown?: { key: DocKey; thumbnail: Thumbnail }
 
   constructor(open: () => void, preview?: { shuttleBase: string; awake?(): boolean }) {
@@ -131,8 +131,8 @@ export class PageCard {
   }
   /** Whether it shows the page, not a card. */
   get previews(): boolean { return !!this.preview }
-  /** Looks for the page again; the newest look is the one that fills it. */
-  look(found: Promise<UnfoldFile | undefined>): void {
+  /** Looks for the page again; the newest look that finds it is the one that fills it. */
+  look(found: Promise<UnfoldFile | null | undefined>): void {
     this.looking = found
     void found.then(file => {
       if (this.looking !== found || !file) return
