@@ -26,6 +26,7 @@ hooks call `shuttle`. Each adapter fails quietly when its binary is absent.
 felt setup claude    # Claude Code
 felt setup codex     # Codex
 felt setup pi        # pi (@earendil-works/pi-coding-agent)
+felt setup antigravity  # Antigravity CLI (agy)
 ```
 
 Claude setup wraps the official plugin-marketplace flow:
@@ -45,11 +46,14 @@ Both caches are verified independently, and unchanged payloads are not
 reinstalled. A Go-only release changes no hashed plugin bytes; a skills update
 leaves the hook cache untouched.
 
-`felt setup pi` wraps pi's package manager:
+`felt setup pi` registers the promoted generation itself as a local pi
+package (`pi install ~/.felt/plugin-runtime/current`), replacing any other felt
+package pi has; each later promotion changes what pi loads in place.
+`felt setup antigravity` copies the generation's agy plugin to
+`~/.gemini/config/plugins/felt/`.
 
-```bash
-pi install git:github.com/cailmdaley/felt[@v<tag>]
-```
+Whichever harness a setup names, every other harness that carries felt moves
+to the same generation, so the four never load different felts.
 
 None of them need a local checkout. Felt acquires GitHub sources into a
 disposable checkout, validates the complete plugin payload, promotes one local
@@ -62,7 +66,7 @@ interrupted native activation is reconciled from the last known-good promoted
 generation before setup continues; `felt setup receipt --json` rejects pending
 or mismatched source/cache generations.
 
-All three commands are idempotent, so re-running is safe. All take `--uninstall` to
+All four commands are idempotent, so re-running is safe. All take `--uninstall` to
 remove what they installed. `felt uninstall` clears the harnesses at once, and
 serves as the general inverse.
 

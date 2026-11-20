@@ -171,39 +171,6 @@ is untouched. --trust-hooks repairs trust without reinstalling the plugin.
 	return command
 }
 
-func (a *app) setupPiCmd() *cobra.Command {
-	command := &cobra.Command{
-		Use:   "pi",
-		Short: "Install the felt package for pi via the pi package manager",
-		Long: `Installs the felt package for pi (@earendil-works/pi-coding-agent): the felt
-and shuttle skills and a pi extension that injects the session context,
-enforces the skill-activation gate, and records harness activity for shuttle.
-Re-running is safe.
-
-Runs pi install git:github.com/` + marketplaceRepo + `@v<tag> for this binary's tag
-(a dev build takes the default branch); pi clones the repository itself.
---uninstall removes the package.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			uninstall, _ := cmd.Flags().GetBool("uninstall")
-
-			if uninstall {
-				// Remove whatever source is actually registered — a dev-checkout
-				// install is invisible to the old hardcoded git spec. Fall back to
-				// the git default so the remove attempt matches the install default.
-				installed := a.piFeltPackageSource()
-				if installed == "" {
-					installed = "git:github.com/" + marketplaceRepo
-				}
-				return a.runHarnessCLI("pi", "remove", installed)
-			}
-
-			return a.installPiPackageViaCLI(piPackageSource(a.defaultMarketplaceRef()))
-		},
-	}
-	command.Flags().Bool("uninstall", false, "Remove the felt pi package")
-	return command
-}
-
 func (a *app) setupSkillsCmd() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "skills",
@@ -618,72 +585,6 @@ func (a *app) runHarnessCLI(bin string, args ...string) error {
 	cmd.Stdout = a.env.Stdout
 	cmd.Stderr = a.env.Stderr
 	return cmd.Run()
-}
-
-// piPackageSource converts a Claude-flavored marketplace ref (`owner/repo` or
-// `owner/repo#v<tag>`) or a local checkout path into the package spec pi
-// accepts: git sources need the full github.com host, local paths pass
-// through untouched.
-func piPackageSource(source string) string {
-	if isLocalPath(source) {
-		return source
-	}
-	ref := marketplaceRepo
-	if tag, ok := strings.CutPrefix(source, marketplaceRepo+"#v"); ok {
-		ref += "@v" + tag
-	}
-	return "git:github.com/" + ref
-}
-
-// installPiPackageViaCLI installs or refreshes the felt pi package at `spec`.
-// pi matches an installed package by source kind and location (git host/path,
-// npm name, resolved local path), so installing at a new kind or location
-// while an old entry remains would load the same skills and extension twice.
-// Drop any felt entry registered elsewhere first — git→local (what a
-// dev-source `felt update` does) and local→git alike; same-source reinstalls
-// (including a tag bump) replace their own entry in place.
-func (a *app) installPiPackageViaCLI(spec string) error {
-	if installed := a.piFeltPackageSource(); installed != "" && !samePiSourceLocation(installed, spec) {
-		if err := a.runHarnessCLI("pi", "remove", installed); err != nil {
-			return fmt.Errorf("removing %q before installing %q: %w", installed, spec, err)
-		}
-	}
-	if err := a.runHarnessCLI("pi", "install", spec); err != nil {
-		return err
-	}
-	fmt.Fprintln(a.env.Stdout)
-	fmt.Fprintln(a.env.Stdout, "Restart any running pi sessions (or run /reload) so the skills and extension load.")
-	return nil
-}
-
-// samePiSourceLocation compares two package specs by location: git entries
-// match host+repo regardless of tag (a tag bump replaces its own entry in
-// place), everything else compares literally.
-func samePiSourceLocation(a, b string) bool {
-	loc := func(s string) string {
-		if base, _, ok := strings.Cut(s, "@"); ok && strings.HasPrefix(s, "git:") {
-			return base
-		}
-		return s
-	}
-	return loc(a) == loc(b)
-}
-
-// refreshPiSetupIfInstalled reinstalls the felt pi package when pi has it —
-// the pi side of the lockstep contract refreshCodexSetupIfInstalled carries
-// for Codex, so `felt update` moves the package to the ref matching the binary
-// that just landed. Silent no-op when pi isn't installed or has no felt
-// package (a bare `pi install` of some other checkout isn't ours to move).
-func (a *app) refreshPiSetupIfInstalled(marketplaceRef string) {
-	if _, err := a.env.LookPath("pi"); err != nil || a.piFeltPackageSource() == "" {
-		return
-	}
-	fmt.Fprintln(a.env.Stdout)
-	fmt.Fprintln(a.env.Stdout, "Refreshing pi package...")
-	if err := a.installPiPackageViaCLI(piPackageSource(marketplaceRef)); err != nil {
-		fmt.Fprintf(a.env.Stdout, "pi refresh failed: %v\n", err)
-		fmt.Fprintln(a.env.Stdout, "Rerun `felt setup pi` to retry.")
-	}
 }
 
 // linkSkillsFromPlugin symlinks each skill in <pluginDir>/skills/ into targetDir.

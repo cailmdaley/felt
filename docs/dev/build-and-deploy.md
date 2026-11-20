@@ -324,11 +324,10 @@ release and the advisory checkout refresh, when the receipt does not already
 identify that clean revision. A changed source/build identity does not by
 itself require reinstalling a native plugin cache.
 
-A harness counts as installed where felt's plugin is enabled in it: Claude Code
-and Codex as the enabled bundles in `felt setup receipt --json`, and pi as a
-felt package in `pi list`, either `git:github.com/cailmdaley/felt` or a local
-directory whose committed `package.json` (its working copy, outside git) names
-felt. A harness binary on `PATH` without
+A harness counts as installed where `felt setup receipt --json` reports felt's
+plugin enabled in it: Claude Code, Codex, pi (a felt package in `pi list`) or
+Antigravity (felt in `agy plugin list --json`, or its plugin directory where
+agy is not on `PATH`). A harness binary on `PATH` without
 felt's plugin is left alone, so the deploy never installs a plugin the operator
 did not install or has removed. A host with no such harness reports
 `harness plugins: none carry felt`.
@@ -347,13 +346,15 @@ host with the receipt's repair and no setup runs. So does a receipt that is
 missing or incomplete (its bundles list unclosed, or no closing brace on the
 top-level object), rather than reading a partial answer as "no harness".
 
-Claude Code and Codex are set up with `--source <checkout>`, so the sealed
-generation holds the tree the felt binary was built from, and setup needs no
-network. They are skipped when the receipt already passes and its active
-generation was sealed at the checkout's `HEAD` by a clean build. A dirty
-checkout builds felt as `dev (<sha>-dirty)`, which does not identify a single
-tree, so a dirty host is set up again on every deploy. pi has no `--source`
-flag and no generation. Setup compares actual native cache bytes against
+Every installed harness is set up with `felt setup <harness> --source
+<checkout>`, so the sealed generation holds the tree the felt binary was built
+from, and setup needs no network. They are skipped when the receipt already
+passes and its active generation was sealed at the checkout's `HEAD` by a clean
+build. A dirty checkout builds felt as `dev (<sha>-dirty)`, which does not
+identify a single tree, so a dirty host is set up again on every deploy. pi
+loads the generation directory as its package, so a pi on GitHub's package or
+a local checkout is moved onto it; agy's plugin is a copy verified by digest.
+Setup compares actual native cache bytes against
 external provenance at `~/.felt/plugin-runtime/current/.felt-generation.json`.
 Claude's combined plugin and Codex's `felt` hook bundle and `felt-skills`
 bundle each skip native install/update/remove/add when their payload matches.
@@ -373,24 +374,13 @@ plugin generations. Keep CLI hook interfaces compatible with installed
 wrappers, which resolve the separately upgraded Felt and Shuttle binaries.
 See [plugin integration](releasing.md#plugin-promotion) for the trust boundary.
 
-For pi's GitHub package, deployment fetches and detaches a clean clone at the pinned commit when it differs from the checkout's `HEAD`.
-Tracked edits or a commit that cannot be fetched fail the host. A local felt
-package is never re-pointed: it is current when
-it is the deployed checkout or sits at its `HEAD`, and otherwise the host fails
-with the package's path and commit. Any pi package other than the deployed
-checkout must also have no tracked edits or deletions (`git status
---porcelain --untracked-files=no`); a package with them fails the host with the
-edited paths, and so does one git cannot inspect. Untracked files are ignored, since pi's npm install leaves a
-`package-lock.json` in its clone.
-
 If setup fails, the host's line carries its output. If `felt setup receipt`
 still fails afterwards, the line names each component that is not healthy
 (`felt`, a harness plugin, `hooks`, `generation`) with that component's own
 repair, for example a stale `felt` shadowing the new one on `PATH`, or `hooks
 mismatch: open a Codex session and approve felt's hooks`. It falls back to the
 receipt's top-level repair when no component reports one. A harness problem fails the host after its daemon activation and quarantine release, so it does not leave the daemon on the wrong build.
-A failed build, activation, readiness check, quarantine release or prune also makes the invocation exit nonzero, with the host and failed step in its output. A pi clone that cannot fetch
-the deployed commit fails the host.
+A failed build, activation, readiness check, quarantine release or prune also makes the invocation exit nonzero, with the host and failed step in its output.
 
 ### The Rex title helper
 

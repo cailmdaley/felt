@@ -45,7 +45,7 @@ Each package keeps one table keyed by the harness's name:
 
 - `internal/messaging`: `adapters()`, each with `discover` (the sessions this host can reach) and `send`.
 - `internal/transcriptindex`: `formats`, each saying which files under the root hold conversations, which conversation a file holds, and how to read one line for `shuttle find` and `shuttle show`.
-- `internal/feltcli`: `felt setup <harness>`, which installs the hooks and skills.
+- `internal/feltcli`: `pluginHarnesses`, each saying how `felt setup <harness>` installs the hooks and skills from the promoted plugin generation, how a harness that already carries felt follows a new generation, and how the setup receipt finds and verifies felt there.
 
 Some behaviour belongs to one harness and stays outside the adapters, as that harness's extra rather than part of the contract:
 
@@ -135,13 +135,13 @@ A new harness's live behaviour is checked once by hand, and what it cannot do is
 - **Turns**: the extension reports `SessionStart`, `UserPromptSubmit` (before each run starts), the tool events, `Stop` on `agent_settled`, and `SessionEnd`. Pi has no background-task registry, so its `Stop` carries no `background_tasks`.
 - **Transcript**: `$PI_CODING_AGENT_DIR/sessions/--<cwd>--/…<uuid>.jsonl`, with `PI_CODING_AGENT_DIR` defaulting to `~/.pi/agent`.
 - **Instructions**: the launch prompt, the package's skills.
-- **Installed by**: `felt setup pi`, through `pi install`.
+- **Installed by**: `felt setup pi`, which registers the promoted plugin generation itself as a local package with `pi install`; later promotions change what it loads in place.
 
 ## Antigravity
 
 Observed on agy 1.5.13.
 
-- **Launch**: `agy <flags> --settings '<json>' -i '<prompt>'`. Effort is the model slug's suffix (`--model gemini-4-neon-high`; `agy models` lists the slugs, and no bare family runs, so every agent declares a default effort). `--settings` applies to this session only and is never saved: `{"altScreenMode":"never","trustedWorkspaces":["<project_dir>"],"artifactReviewPolicy":"always-proceed"}` skips the first-run screen and trust questions. The registry's agents add `--dangerously-skip-permissions` and `AGY_CLI_DISABLE_AUTO_UPDATE=true` from their record; agy's default command sandbox denies the Shuttle state directory and the daemon's port. A record's `extra_flags` can add `--agent <name>`.
+- **Launch**: `agy <flags> --settings '<json>' -i '<prompt>'`. Effort is the model slug's suffix (`--model gemini-4-neon-high`; `agy models` lists the slugs, and no bare family runs, so every agent declares a default effort). `--settings` applies to this session only and is never saved: `{"altScreenMode":"never","trustedWorkspaces":["<project_dir>"],"artifactReviewPolicy":"always-proceed"}` skips the first-run screen and trust questions. The registry's agents add `--dangerously-skip-permissions` and `AGY_CLI_DISABLE_AUTO_UPDATE=true` from their record; agy's default command sandbox denies the Shuttle state directory and the daemon's port. A record's `extra_flags` can add `--agent <name>`, and a login-shell wrapper that adds one applies to workers as it does to the operator's own sessions, as Claude's and Pi's wrappers do.
 - **Identity**: reported, by the SessionStart hook. agy fires it under `-i`, before the first model call, with `conversationId`, `transcriptPath` and `cwd`; `shuttle hook antigravity` writes it to the event stream, and `Shuttle.Harness.Antigravity.find_session/3` matches it to the worker. agy exports `ANTIGRAVITY_CONVERSATION_ID` to its hooks and commands, which is how a worker's own `shuttle` calls know their session when ancestry names none (see [The calling session](#the-calling-session)). It and nine other `ANTIGRAVITY_*` variables reach every descendant, so the daemon's launch scripts clear the whole family before a worker starts.
 - **Resume**: `--conversation <id> [-i '<prompt>']` keeps the history; without `-i` it opens interactively. No fresh fallback.
 - **Delivery**: inject. A `PreInvocation` hook, which runs before every model call, prints queued context as `{"injectSteps":[{"systemMessage":{"systemMessage":"…"}}]}`, and it reaches a turn already running. A wake is typed into the terminal, which queues it behind a running turn, as Codex's does. A conversation resumed without a prompt fires no hook until its next turn, so the daemon finds its receiver by the `--conversation <id>` process in the worker's terminal, as it finds Codex's by `resume <id>`.
@@ -149,7 +149,7 @@ Observed on agy 1.5.13.
 - **Tool hooks print nothing**: agy reads a `PreToolUse` hook's JSON as a decision, and `{}` denies the tool, so the tool events run `hooks/agy.sh tool`, which discards whatever shuttle prints. The shim gives shuttle five seconds; `hooks.json` gives each hook ten (agy's `timeout` is in seconds, default 30).
 - **Transcript**: `~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript_full.jsonl`, one step per line (`source`, `type`, `created_at`, `content`, `tool_calls`, and on model steps `input_tokens` and `cache_read_tokens`). The human's text sits inside `<USER_REQUEST>`. `transcript.jsonl` beside it truncates long fields, so readers take it only when the full one is missing.
 - **Instructions**: agy reads `AGENTS.md` and `GEMINI.md`, not `CLAUDE.md`. Workers get theirs from the launch prompt and the plugin's felt and shuttle skills.
-- **Installed by**: `felt setup antigravity`, which writes a native plugin to `~/.gemini/config/plugins/felt/`: `plugin.json` and `hooks.json` at its root, `hooks/agy.sh` and the `hooks/shuttle-bin.sh` it sources, and `skills/`. agy loads any plugin directory there with a `plugin.json` at its next start, with no `agy plugin install`; hooks run with the plugin directory as their working directory and `PLUGIN_ROOT` set.
+- **Installed by**: `felt setup antigravity`, which copies the promoted generation's agy plugin to `~/.gemini/config/plugins/felt/`: `plugin.json` and `hooks.json` at its root, `hooks/agy.sh` and the `hooks/shuttle-bin.sh` it sources, and `skills/`. agy loads any plugin directory there with a `plugin.json` at its next start, with no `agy plugin install`; hooks run with the plugin directory as their working directory and `PLUGIN_ROOT` set. The receipt reads `agy plugin list --json`.
 
 ## Gaps
 
@@ -157,10 +157,9 @@ What each harness cannot do, as Shuttle runs it today:
 
 - **Claude Code**: its harness name is spelled two ways, `claude` and `claude-code` in ledgers, on the event stream and in the daemon's session links. Every reader accepts both, through `harness.Normalize` and `Shuttle.Harness.normalize/1`. Writing `claude` everywhere waits on every host running a build whose readers accept both, since a host on an older build that reads another host's rows (a board's session links relayed between daemons) drops a `claude` row's Remote Control link; persisted rows keep `claude-code`, so readers keep the alias after the writers switch.
 - **Codex**: no fresh fallback on a failed resume; no Remote Control.
-- **Pi**: no interrupt reading, though `agent_settled` carries `aborted` when the human cancels with Escape; no task list; its transcript root does not follow `PI_CODING_AGENT_SESSION_DIR` or the `sessionDir` setting, which move Pi's sessions out of its agent directory; outside `felt setup`'s plugin promotion and the setup receipt.
+- **Pi**: no interrupt reading, though `agent_settled` carries `aborted` when the human cancels with Escape; no task list; its transcript root does not follow `PI_CODING_AGENT_SESSION_DIR` or the `sessionDir` setting, which move Pi's sessions out of its agent directory.
 - **Antigravity**:
   - Its conversation id cannot be assigned at launch, and SessionStart does not fire on resume.
   - No interrupt detection. On agy 1.5.13, Escape fires no hook at all (no `Stop`, no `PostInvocation`), whether it cancels the model mid-stream or a running tool, so the cancelled turn stays working on the event stream until the next prompt. `USER_CANCELED`, which agy documents as a `Stop` `terminationReason`, was not observed. The only traces are agy's own: the transcript records an `ERROR_MESSAGE` "The stream was interrupted" for a cancel mid-stream and nothing for one during a tool, and agy's debug log (`~/.gemini/antigravity-cli/log/cli-<start>.log`) writes `Cancel requested for cascade <conversation id>` for every cancel. Neither is read: the first misses half the cancels, the second is an unversioned debug log.
   - No Remote Control, no task list, no context-budget handoff nudge, and no skill-activation gate.
   - Its transcript records no working directory, so `shuttle find` hits carry no project, and a History resume needs the session start still on the event stream.
-  - Not in `felt setup`'s plugin promotion or the setup receipt.

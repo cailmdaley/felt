@@ -6,17 +6,21 @@ plugins from a generated `.agents/plugins/marketplace.json`: `felt` contains
 only hooks and its manifest; `felt-skills` contains only skills and its manifest.
 The Codex hook root contains exactly its manifest, `hooks.json`, and the
 `pluginHookBasenames` shell adapters; Pi-only JavaScript is not copied.
-Their adapter-format version is independent of the CLI release. **pi** uses
-its native package and the same skill sources.
+Their adapter-format version is independent of the CLI release. **pi** loads
+the promoted generation directory as its package: the repository's
+`package.json` and `extensions/pi` are staged beside `claude-plugin/`.
+**Antigravity** loads a generated `antigravity/` plugin: its own `plugin.json`
+and `hooks.json`, the `agy.sh` shim and `shuttle-bin.sh`, and the skills.
 
 - `felt setup claude` registers the `cailmdaley/felt` marketplace and installs
   the plugin through Claude's native CLI; `felt setup codex` does the same
   through Codex's native marketplace and plugin commands. Neither installer
   hand-writes harness configuration.
-- `felt setup pi` installs the same skills plus the pi extension through pi's
-  package manager. `felt update` refreshes pi only when the Felt package is
-  already registered, so an update never opts a new harness into the
-  integration.
+- `felt setup pi` points pi's package manager at the promoted generation, and
+  `felt setup antigravity` copies the generation's agy plugin into place.
+  Every setup moves each other harness that already carries felt onto the
+  generation it promotes, and `felt update` does the same, so an update never
+  opts a new harness into the integration.
 - The plugin bundles the `felt` and `shuttle` skills, Felt hooks for
   SessionStart (active and recently touched fibers) and PreToolUse
   (`internal/feltcli/hook.go`), and Shuttle hooks for event and commit records.
@@ -99,13 +103,13 @@ Codex migrates such approvals to a private `.hook-trust` baseline; a missing `tr
 Review and approve those plugins through Codex's `/hooks` interface, then use a fresh runtime if an existing session retains stale approval.
 Felt does not approve another plugin's contents on its author's behalf.
 
-Refresh a source build on the current machine with `felt setup claude --source <clean-main-checkout>` and `felt setup codex --source <clean-main-checkout>` for installed harnesses, then check `felt setup receipt --json`.
-These commands promote `~/.felt/plugin-runtime/current` transactionally; they don't restart or deploy the daemon.
-For an installed Pi package, run `pi update git:github.com/cailmdaley/felt`, then `/reload` or start a new session.
+Refresh a source build on the current machine with `felt setup <harness> --source <clean-main-checkout>` for any one installed harness, then check `felt setup receipt --json`.
+The command promotes `~/.felt/plugin-runtime/current` transactionally and moves every harness carrying felt onto it; it doesn't restart or deploy the daemon.
+Running pi sessions pick up the new generation at `/reload` or their next start, agy sessions at their next start.
 
 ## Plugin promotion
 
-Every Claude/Codex setup source enters the same transaction. Remote GitHub refs
+Every setup source, for any of the four harnesses, enters the same transaction. Remote GitHub refs
 are first acquired into a disposable checkout; local `--source` paths enter
 directly. Setup validates and copies only the complete marketplace payload into
 `~/.felt/plugin-runtime/`, then promotes it under a cross-process lock with a
@@ -126,15 +130,20 @@ reinstall (uninstall+install / remove+add), because `plugin update` on an
 unchanged manifest version legitimately keeps the old versioned cache; a
 cache that still cannot prove the promoted generation after that is a
 rejected candidate — the filesystem rolls back and native reconciliation must verify the restored state before its journal is removed.
-The journal also records native
-activation intent: after an interruption, the next setup restores `current`
+After the named harness installs, each other harness that carried felt before
+the promotion follows it: Claude and Codex reinstall where their caches do not
+verify, pi is pointed at `current` if it loaded felt from elsewhere, and agy's
+plugin is copied again if its digest differs. The journal also records native
+activation intent for all four: after an interruption, the next setup restores `current`
 first, reinstalls each affected harness from that path, verifies the restored
 state, and retains the journal until reconciliation succeeds.
 
 `~/.felt/plugin-runtime/current/.felt-generation.json` holds provenance outside
 all plugin roots. It records the canonical source, requested ref, resolved
 commit, source plugin version, Felt build identity, the combined Claude digest,
-and each Codex bundle's digest. Native caches contain no copy of this file.
+each Codex bundle's digest, and the agy plugin's digest. Native caches contain
+no copy of this file. pi has no cache: the receipt checks that pi's felt
+package is `current` itself.
 The receipt checks the installed Felt build against that external identity and
 recomputes every enabled cache's digest. Same-version payload edits are detected
 without requiring release metadata inside a hashed root. Pending journals,

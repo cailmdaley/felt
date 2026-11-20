@@ -30,6 +30,9 @@ type pluginGenerationIdentity struct {
 	FeltBuild          string            `json:"felt_build"`
 	PayloadSHA256      string            `json:"payload_sha256"`
 	CodexPayloadSHA256 map[string]string `json:"codex_payload_sha256,omitempty"`
+	// AntigravityPayloadSHA256 is the digest of the generation's agy plugin,
+	// which agy loads as a copy.
+	AntigravityPayloadSHA256 string `json:"antigravity_payload_sha256,omitempty"`
 }
 
 func (a *app) localPluginGeneration(source, candidate string) (pluginGenerationIdentity, error) {
@@ -65,6 +68,13 @@ func (a *app) buildPluginGeneration(kind, source, requestedRef, commit, candidat
 		}
 		codexDigests[name] = digest
 	}
+	if err := materializeAntigravityPlugin(filepath.Join(candidate, antigravityBundleDir), filepath.Join(candidate, "claude-plugin")); err != nil {
+		return pluginGenerationIdentity{}, err
+	}
+	antigravityDigest, err := pluginPayloadDigest(filepath.Join(candidate, antigravityBundleDir))
+	if err != nil {
+		return pluginGenerationIdentity{}, err
+	}
 	manifest, err := readJSONFile[pluginManifest](filepath.Join(candidate, "claude-plugin", ".claude-plugin", "plugin.json"))
 	if err != nil {
 		return pluginGenerationIdentity{}, fmt.Errorf("reading promoted plugin version: %w", err)
@@ -83,6 +93,8 @@ func (a *app) buildPluginGeneration(kind, source, requestedRef, commit, candidat
 		FeltBuild:          a.feltBuildIdentity(),
 		PayloadSHA256:      digest,
 		CodexPayloadSHA256: codexDigests,
+
+		AntigravityPayloadSHA256: antigravityDigest,
 	}, nil
 }
 
@@ -160,6 +172,15 @@ func validatePluginGeneration(pluginRoot string) (pluginGenerationIdentity, erro
 		}
 		if actual != digest {
 			return pluginGenerationIdentity{}, fmt.Errorf("%s bundle payload digest disagrees with external provenance", name)
+		}
+	}
+	if identity.AntigravityPayloadSHA256 != "" {
+		actual, err := pluginPayloadDigest(filepath.Join(filepath.Dir(pluginRoot), antigravityBundleDir))
+		if err != nil {
+			return pluginGenerationIdentity{}, err
+		}
+		if actual != identity.AntigravityPayloadSHA256 {
+			return pluginGenerationIdentity{}, fmt.Errorf("antigravity plugin payload digest disagrees with external provenance")
 		}
 	}
 	return identity, nil

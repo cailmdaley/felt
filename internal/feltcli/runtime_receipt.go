@@ -218,8 +218,9 @@ machine-readable receipt.`,
 func (a *app) collectRuntimeReceipt() RuntimeReceipt {
 	r := RuntimeReceipt{Schema: 2}
 	r.Felt = a.collectFeltReceipt()
-	r.Bundles = a.collectCodexBundle()
-	r.Bundles = append(r.Bundles, a.collectClaudeBundle()...)
+	for _, h := range pluginHarnesses {
+		r.Bundles = append(r.Bundles, h.bundles(a)...)
+	}
 	r.Harnesses = receiptHarnesses(r.Bundles)
 	r.Hooks = a.collectHookReceipt(r.Bundles)
 	r.Generation = a.collectGenerationReceipt(r.Bundles, r.Felt)
@@ -557,7 +558,7 @@ func (a *app) bundleFromManifest(harness, path, source string) ReceiptBundle {
 
 func (a *app) collectHookReceipt(bundles []ReceiptBundle) ReceiptComponent {
 	if len(bundles) == 0 {
-		return ReceiptComponent{Status: receiptMissing, Repair: "enable a felt Claude or Codex plugin with `felt setup claude` or `felt setup codex`"}
+		return ReceiptComponent{Status: receiptMissing, Repair: "install felt's plugin in a harness with `felt setup claude`, `codex`, `pi` or `antigravity`"}
 	}
 	var codexTrust *ReceiptCodexTrust
 	hookBundlePresent := false
@@ -570,8 +571,8 @@ func (a *app) collectHookReceipt(bundles []ReceiptBundle) ReceiptComponent {
 		}
 		hookBundlePresent = true
 		root := b.Path
-		if !hookFilesCompatible(root) {
-			return ReceiptComponent{Status: receiptMismatch, Path: root, Repair: fmt.Sprintf("rerun `felt setup %s` to restore Felt and Shuttle hook files and their SessionStart, PreToolUse, and PostToolUse wiring", b.Harness)}
+		if h, _ := pluginHarnessNamed(b.Harness); !h.hooks(root) {
+			return ReceiptComponent{Status: receiptMismatch, Path: root, Repair: fmt.Sprintf("rerun `felt setup %s` to restore Felt and Shuttle hook files and their wiring", b.Harness)}
 		}
 		if b.Harness == "codex" {
 			trust := a.codexHookTrust(false)
@@ -673,7 +674,8 @@ func (a *app) collectGenerationReceipt(bundles []ReceiptBundle, felt ReceiptComp
 		return ReceiptGenerationReceipt{Status: receiptPartial, Repair: fmt.Sprintf("cannot inspect pending plugin promotion %s: %v", journalPath, err)}
 	}
 
-	activeRoot := filepath.Join(runtimeDir, pluginCurrentName, "claude-plugin")
+	current := filepath.Join(runtimeDir, pluginCurrentName)
+	activeRoot := filepath.Join(current, "claude-plugin")
 	receipt.ActivePath = activeRoot
 	active, activePresent, activeErr := readPluginGenerationMarker(activeRoot)
 	if activeErr != nil {
@@ -697,26 +699,15 @@ func (a *app) collectGenerationReceipt(bundles []ReceiptBundle, felt ReceiptComp
 			continue
 		}
 		harnessCount++
-		expected := active
 		check := ReceiptHarnessGeneration{Name: bundle.Name, Harness: bundle.Harness, Path: bundle.Path, Status: receiptHealthy}
 		if activePresent {
-			if bundle.Harness == "codex" && active.CodexPayloadSHA256 != nil {
-				name := bundle.Name
-				if name == "" {
-					name = "felt"
-				}
-				var err error
-				expected, err = codexBundleGeneration(active, name)
-				if err != nil {
-					return generationReceiptWithHarnesses(receipt, receiptMismatch, err.Error())
-				}
-			}
-			if err := verifyLoadedGeneration(bundle.Harness, expected, bundle.Path); err != nil {
-				check.Status, check.Repair = receiptMismatch, err.Error()+"; rerun the matching felt setup command"
+			h, _ := pluginHarnessNamed(bundle.Harness)
+			if err := h.verify(active, bundle, current); err != nil {
+				check.Status, check.Repair = receiptMismatch, fmt.Sprintf("%v; rerun `felt setup %s`", err, bundle.Harness)
 				receipt.Harnesses = append(receipt.Harnesses, check)
 				return generationReceiptWithHarnesses(receipt, receiptMismatch, joinReceiptRepairs(check.Repair, buildSkew))
 			}
-			check.Generation = &expected
+			check.Generation = &active
 		}
 		receipt.Harnesses = append(receipt.Harnesses, check)
 

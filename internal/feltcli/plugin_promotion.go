@@ -37,9 +37,12 @@ type pluginPromotionJournal struct {
 // filesystem promotion began. It is deliberately persisted in the journal:
 // a process can die after a native CLI has mutated its cache/config, before it
 // gets a chance to run the in-process rollback callback.
+// A nil harness was not captured and is left alone.
 type pluginNativeIntent struct {
-	Claude *claudeInstallationState `json:"claude,omitempty"`
-	Codex  *codexInstallationState  `json:"codex,omitempty"`
+	Claude      *claudeInstallationState `json:"claude,omitempty"`
+	Codex       *codexInstallationState  `json:"codex,omitempty"`
+	Pi          *piInstallationState     `json:"pi,omitempty"`
+	Antigravity *bool                    `json:"antigravity,omitempty"`
 }
 
 type marketplaceManifest struct {
@@ -487,6 +490,17 @@ func (a *app) stagePluginCandidate(source, executable string) (string, error) {
 			return "", fmt.Errorf("staging %s: %w", name, err)
 		}
 	}
+	// The generation's root is also the pi package: its manifest and
+	// extension sit beside the shared plugin they import from.
+	for _, name := range piPackageFiles {
+		if _, err := os.Stat(filepath.Join(root, name)); os.IsNotExist(err) {
+			continue
+		}
+		if err := copyTree(filepath.Join(root, name), filepath.Join(candidate, name)); err != nil {
+			os.RemoveAll(candidate)
+			return "", fmt.Errorf("staging %s: %w", name, err)
+		}
+	}
 	// Source acquisition can contain an in-payload provenance marker. The
 	// candidate gets freshly sealed outside its roots; never edit the source.
 	if err := os.Remove(filepath.Join(candidate, "claude-plugin", pluginGenerationMarkerName)); err != nil && !os.IsNotExist(err) {
@@ -584,19 +598,10 @@ func (a *app) promotePluginCandidate(candidate string, install func(string) erro
 
 func (a *app) capturePluginNativeIntent() (*pluginNativeIntent, error) {
 	intent := &pluginNativeIntent{}
-	if _, err := a.env.LookPath("claude"); err == nil {
-		state, err := a.captureClaudeInstallation()
-		if err != nil {
+	for _, h := range pluginHarnesses {
+		if err := h.capture(a, intent); err != nil {
 			return nil, err
 		}
-		intent.Claude = &state
-	}
-	if _, err := a.env.LookPath("codex"); err == nil {
-		state, err := a.captureCodexInstallation()
-		if err != nil {
-			return nil, err
-		}
-		intent.Codex = &state
 	}
 	return intent, nil
 }
@@ -696,26 +701,7 @@ func (a *app) recoverPluginPromotion(runtimeDir string) error {
 }
 
 func (a *app) reconcilePluginNativeIntent(current string, intent *pluginNativeIntent) error {
-	_, statErr := os.Stat(current)
-	if statErr != nil && !os.IsNotExist(statErr) {
-		return fmt.Errorf("checking restored plugin source: %w", statErr)
-	}
-	var err error
-	if intent.Claude != nil {
-		source := current
-		if os.IsNotExist(statErr) && intent.Claude.Configured {
-			source = claudeMarketplaceSource(intent.Claude.Marketplace)
-		}
-		err = errors.Join(err, a.reconcileClaudeInstallation(*intent.Claude, source))
-	}
-	if intent.Codex != nil {
-		source := current
-		if os.IsNotExist(statErr) && intent.Codex.Configured {
-			source = intent.Codex.Source
-		}
-		err = errors.Join(err, a.reconcileCodexInstallation(*intent.Codex, source))
-	}
-	return err
+	return a.reconcileEach(current, intent)
 }
 
 func (a *app) reconcileClaudeInstallation(intent claudeInstallationState, current string) error {
@@ -1008,24 +994,9 @@ func (a *app) sealAndPromote(candidate string, identity pluginGenerationIdentity
 		if err := install(source); err != nil {
 			return err
 		}
-		if intent.Claude != nil && intent.Claude.Installed && a.verifyClaudeLoadedGeneration(source) != nil {
-			if err := a.installClaudePluginAtSource(source); err != nil {
+		for _, h := range pluginHarnesses {
+			if err := h.follow(a, source, intent); err != nil {
 				return err
-			}
-		}
-		if codex := intent.Codex; codex != nil {
-			for _, bundle := range []struct {
-				name      string
-				installed bool
-			}{{"felt", codex.Installed}, {"felt-skills", codex.SkillsInstalled}} {
-				if bundle.installed && a.verifyCodexLoadedBundle(source, bundle.name) != nil {
-					if err := a.reconcileCodexInstallation(*codex, source); err != nil {
-						return err
-					}
-					if err := a.verifyCodexLoadedBundle(source, bundle.name); err != nil {
-						return err
-					}
-				}
 			}
 		}
 		return nil

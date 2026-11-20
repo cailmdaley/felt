@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -60,9 +59,11 @@ func (a *app) runFeltUninstall() {
 	}
 
 	if _, err := a.env.LookPath("pi"); err == nil {
-		if installed := a.piFeltPackageSource(); installed != "" {
+		if installed, err := a.piFeltPackage(); err != nil {
+			fmt.Fprintf(a.env.Stdout, "warning: %v\n", err)
+		} else if installed.Source != "" {
 			fmt.Fprintln(a.env.Stdout, "Removing pi package...")
-			if err := a.runHarnessCLI("pi", "remove", installed); err != nil {
+			if err := a.runHarnessCLI("pi", "remove", installed.spec()); err != nil {
 				fmt.Fprintf(a.env.Stdout, "warning: %v\n", err)
 			}
 			removedAnything = true
@@ -89,55 +90,4 @@ func (a *app) runFeltUninstall() {
 	fmt.Fprintln(a.env.Stdout, "To remove the felt binary itself:")
 	fmt.Fprintln(a.env.Stdout, "  brew uninstall felt        # if installed via brew")
 	fmt.Fprintln(a.env.Stdout, "  rm $(which felt)           # if installed via curl or go install")
-}
-
-// piFeltPackageSource returns the source spec of the felt package registered
-// in pi's settings (~/.pi/agent/settings.json under "packages"), or "" when
-// pi has none. Matching is structural: the git: entry for marketplaceRepo at
-// any tag, or any local path whose package.json names felt — so a dev
-// checkout at an arbitrary path is recognized. A substring probe over
-// "owner/repo" would miss local installs entirely: refresh would no-op and
-// uninstall would leave the package loaded.
-func (a *app) piFeltPackageSource() string {
-	home, err := a.env.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	settings, err := readJSONFile[struct {
-		Packages []string `json:"packages"`
-	}](filepath.Join(home, ".pi", "agent", "settings.json"))
-	if err != nil {
-		return ""
-	}
-	gitBase := "git:github.com/" + marketplaceRepo
-	for _, src := range settings.Packages {
-		if src == gitBase || strings.HasPrefix(src, gitBase+"@") {
-			return src
-		}
-		if !strings.Contains(src, ":") && isFeltPackageDir(home, src) {
-			return src
-		}
-	}
-	return ""
-}
-
-// isFeltPackageDir reports whether dir holds a package.json named felt.
-// Entries are tried as recorded, then home-relative; a literal ~ prefix is
-// expanded against home in case pi recorded it unexpanded.
-func isFeltPackageDir(home, dir string) bool {
-	candidates := []string{dir}
-	if strings.HasPrefix(dir, "~") {
-		candidates = append(candidates, filepath.Join(home, strings.TrimPrefix(dir, "~")))
-	} else if !filepath.IsAbs(dir) {
-		candidates = append(candidates, filepath.Join(home, dir))
-	}
-	for _, candidate := range candidates {
-		pkg, err := readJSONFile[struct {
-			Name string `json:"name"`
-		}](filepath.Join(candidate, "package.json"))
-		if err == nil && pkg.Name == "felt" {
-			return true
-		}
-	}
-	return false
 }

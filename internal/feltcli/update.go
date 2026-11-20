@@ -134,8 +134,29 @@ func (a *app) refreshPluginAfterUpdate(marketplaceRef string) {
 		}
 	}
 	a.refreshCodexSetupIfInstalled(marketplaceRef)
-	a.refreshPiSetupIfInstalled(marketplaceRef)
-	a.refreshAntigravitySetupIfInstalled()
+	// pi and agy followed whichever promotion ran above; one that carries
+	// felt and is still off the current generation promotes for itself.
+	runtimeDir, err := a.pluginRuntimeDir()
+	if err != nil {
+		return
+	}
+	current := filepath.Join(runtimeDir, pluginCurrentName)
+	for _, h := range []pluginHarness{piHarness, antigravityHarness} {
+		bundles := h.bundles(a)
+		if len(bundles) == 0 {
+			continue
+		}
+		active, present, _ := promotedGenerationForVerify(current)
+		if present && bundles[0].Path != "" && h.verify(active, bundles[0], current) == nil {
+			continue
+		}
+		fmt.Fprintln(a.env.Stdout)
+		fmt.Fprintf(a.env.Stdout, "Refreshing the %s plugin...\n", h.name)
+		if err := a.setupFromGeneration(marketplaceRef, func(current string) error { return h.install(a, current) }); err != nil {
+			fmt.Fprintf(a.env.Stdout, "%s refresh failed: %v\n", h.name, err)
+			fmt.Fprintf(a.env.Stdout, "Rerun `felt setup %s` to retry.\n", h.name)
+		}
+	}
 }
 
 // reportDaemonLevel prints what the shuttle installed beside this felt says

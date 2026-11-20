@@ -754,30 +754,24 @@ ship_ui() { # SSH destination, checkout directory, SSH flags.
 }
 
 # Bring felt's harness plugins up to the checkout just built. A harness counts
-# as installed when felt's plugin is enabled in it: Claude Code and Codex as
-# the enabled bundles of `felt setup receipt --json`, pi as a felt package in
-# `pi list` (the GitHub package, or a local directory whose package.json names
-# felt). A harness binary on PATH alone does not count, since setting up a
-# plugin the operator never installed, or removed, is worse than skipping it.
-# Each bundle's `inspection` says how its enablement was established:
-# "confirmed" by the harness's plugin list, "configured" by its config and
-# cache alone, or "unknown" when the list failed or the config could not be
-# read. An unknown bundle fails the host with the receipt's repair instead of
-# being set up, as does a receipt that cannot be read at all.
-# Claude Code and Codex are set up from the checkout itself (`--source`), so
-# the sealed generation carries the tree the felt binary was built from and
-# setup needs no network. They are skipped when the receipt passes and its
-# active generation was sealed at the checkout's HEAD by a clean build; a dirty
-# build ("dev (<sha>-dirty)") names no fixed tree, so it is always set up
-# again. pi has no --source and no generation. Its GitHub package follows the
-# default branch, so `felt setup pi` runs only when that clone is not at HEAD.
-# A local felt package is never re-pointed. Exact-ref deploys pin a clean
-# GitHub clone to the deployed commit; ordinary deploys follow felt setup pi.
+# as installed when `felt setup receipt --json` reports felt enabled in it:
+# Claude Code, Codex, pi or Antigravity, a harness with none of felt's plugin
+# reporting nothing. A harness binary on PATH alone does not count, since
+# setting up a plugin the operator never installed, or removed, is worse than
+# skipping it. Each harness row's `inspection` says how its enablement was
+# established: "confirmed" by the harness's plugin list, "configured" by its
+# config and files alone, or "unknown" when the list failed or the config
+# could not be read. An unknown harness fails the host with the receipt's
+# repair instead of being set up, as does a receipt that cannot be read at all.
+# Every harness is set up from the checkout itself (`--source`), so the sealed
+# generation carries the tree the felt binary was built from and setup needs
+# no network. They are skipped when the receipt passes and its active
+# generation was sealed at the checkout's HEAD by a clean build; a dirty build
+# ("dev (<sha>-dirty)") names no fixed tree, so it is always set up again.
 # The snippet runs in the host's login shell, the PATH its harnesses' hooks
 # resolve felt through, and ends with one `harness-ok` or `harness-fail` line.
 harness_setup_cmd() { # $1 = checkout dir
   printf 'dir=%s\n' "$(shell_quote "$1")"
-  printf 'exact_ref=%s\n' "$(shell_quote "${DEPLOY_REF:-}")"
   cat <<'SH'
 report() { printf 'harness-%s %s\n' "$1" "$2"; }
 fail() { report fail "$1"; exit 1; }
@@ -862,83 +856,6 @@ if [ -n "$harnesses" ]; then
     fi
     summary="${harnesses}set up"
   fi
-fi
-
-# `pi list` prints each package's source, then its resolved path indented
-# below it; a source without a scheme is a local directory.
-if command -v pi >/dev/null 2>&1; then
-  listed=$(pi list 2>&1) || fail "pi list failed: $(tail_of "$listed")"
-  packages=$(printf '%s\n' "$listed" | awk '
-    /^  [^ ]/ { src = $0; sub(/^ +/, "", src); next }
-    /^    [^ ]/ {
-      p = $0; sub(/^ +/, "", p)
-      if (index(src, "git:github.com/cailmdaley/felt") == 1) print "git\t" p
-      else if (src !~ /:/) print "local\t" p
-    }')
-  checkout=$(cd "$dir" && pwd -P)
-  # A package other than the deployed checkout must also match HEAD in its
-  # files: tracked edits or deletions change what pi loads. Untracked files
-  # are ignored, since pi's own npm install leaves a package-lock.json there.
-  # edits sets `changed` to the first edited paths, and fails the host when git
-  # cannot inspect the package at all.
-  edits() {
-    local out
-    out=$(git -C "$1" status --porcelain --untracked-files=no 2>&1) ||
-      fail "cannot inspect pi's felt package $1: $(tail_of "$out")"
-    changed=$(printf '%s\n' "$out" | sed '/^$/d' | head -n 3 | tr '\n' ' ')
-  }
-  # A local package is felt when its committed package.json names felt, so an
-  # edited or deleted working copy cannot hide it; a package outside git falls
-  # back to its working package.json.
-  manifest_name() {
-    if git -C "$1" rev-parse --git-dir >/dev/null 2>&1; then
-      git -C "$1" show HEAD:package.json 2>/dev/null
-    else
-      cat "$1/package.json" 2>/dev/null
-    fi |
-      sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1
-  }
-  while IFS="$tab" read -r kind path; do
-    [ -n "$path" ] || continue
-    if [ "$kind" = local ]; then
-      [ "$(manifest_name "$path")" = felt ] || continue
-      at=$(git -C "$path" rev-parse HEAD 2>/dev/null)
-      if [ "$(cd "$path" 2>/dev/null && pwd -P)" = "$checkout" ]; then
-        summary="${summary:+$summary, }pi current"
-      elif [ "$at" = "$head" ]; then
-        edits "$path"
-        [ -z "$changed" ] || fail "pi loads felt from the local package $path, at the deployed ${head:0:7} but with local edits ($changed); commit or discard them there (git -C $path status)"
-        summary="${summary:+$summary, }pi current"
-      else
-        where="no git commit"; [ -z "$at" ] || where="commit ${at:0:7}"
-        fail "pi loads felt from the local package $path at $where, not the deployed ${head:0:7}; update that checkout, or point pi at this one with pi install $dir"
-      fi
-      continue
-    fi
-    at=$(git -C "$path" rev-parse HEAD 2>/dev/null)
-    if [ "$at" = "$head" ]; then
-      state="pi current"
-    elif [ -n "$exact_ref" ]; then
-      edits "$path"
-      [ -z "$changed" ] || fail "pi's felt package $path is at ${at:0:7}, not the deployed ${head:0:7}; pin its installed source to $exact_ref or install the deployed source with pi install $dir"
-      out=$(git -C "$path" fetch origin "$head" 2>&1) &&
-        out=$(git -C "$path" checkout --detach "$head" 2>&1) ||
-        fail "pi's felt package $path is at ${at:0:7}, not the deployed ${head:0:7}; pin its installed source to $exact_ref or install the deployed source with pi install $dir"
-      at=$(git -C "$path" rev-parse HEAD 2>/dev/null)
-      [ "$at" = "$head" ] || fail "pi's felt package $path is at ${at:0:7}, not the deployed ${head:0:7}; pin its installed source to $exact_ref or install the deployed source with pi install $dir"
-      state="pi pinned"
-    else
-      out=$(felt setup pi 2>&1) || fail "felt setup pi failed: $(tail_of "$out")"
-      at=$(git -C "$path" rev-parse HEAD 2>/dev/null)
-      [ "$at" = "$head" ] || fail "pi's felt package is at ${at:0:7}, not ${head:0:7}; felt setup pi installs GitHub's default branch"
-      state="pi set up"
-    fi
-    edits "$path"
-    [ -z "$changed" ] || fail "pi's felt clone $path is at the deployed ${head:0:7} but has local edits ($changed); discard them with git -C $path checkout -- . and redeploy"
-    summary="${summary:+$summary, }$state"
-  done <<EOF
-$packages
-EOF
 fi
 
 report ok "harness plugins: ${summary:-none carry felt}"
