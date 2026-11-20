@@ -563,7 +563,23 @@ describe('bar Find transcripts', () => {
     expect(document.querySelector('[data-section="constitutions"]')).toBeNull()
     expect(searches(), 'the thread does not search the record').toEqual([])
     type(find, '')
-    document.querySelectorAll<HTMLElement>('[data-section="constitutions"] .ws-find-pick')[1].click(); await settle()
+    // Enter goes somewhere: past the constitution being read, to the next.
+    press(find, 'Enter'); await settle()
+    expect(workspace.reader.el.querySelector('.ws-channel-title')?.textContent).toBe('alpha')
+  })
+
+  it('finds what was said across the whole board once its one read lands, and a pick opens its constitution', async () => {
+    vi.useFakeTimers()
+    const { find } = withScope(undefined)
+    const original = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/api/v1/board/family?all=true')
+      ? new Response(JSON.stringify({ family: null, records: [{ id: 'p1', kind: 'post', timestamp: Date.now() - 1000, fiber: 'alpha', to: { label: 'Cail' }, text: 'The **mask threshold** is ready' }], reach_ms: 86_400_000, waiting: {} }))
+      : original(input, init))
+    type(find, 'mask threshold'); await settle()
+    const said = document.querySelector<HTMLElement>('[data-section="said"] .ws-find-pick')
+    expect(said?.getAttribute('aria-label')).toBe('alpha: The mask threshold is ready')
+    expect(said?.querySelector('mark')?.textContent).toBe('mask threshold')
+    said!.click(); await settle()
     expect(workspace.reader.el.querySelector('.ws-channel-title')?.textContent).toBe('alpha')
   })
 

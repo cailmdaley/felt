@@ -339,7 +339,8 @@ export class SearchPanel {
       this.list.querySelector<HTMLElement>('.ws-find-ask')?.click()
     } else if (event.key === 'Enter' && onField && !event.altKey && !event.shiftKey) {
       if (event.repeat) return
-      this.list.querySelector<HTMLElement>('.ws-find-pick:not([aria-disabled])')?.click()
+      // Enter takes the first row; from an empty field, the first that goes somewhere other than where the reader stands.
+      this.list.querySelector<HTMLElement>(`.ws-find-pick:not([aria-disabled])${this.field.value.trim() ? '' : ':not([aria-current="true"])'}`)?.click()
     } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && !event.altKey && !event.metaKey && !event.ctrlKey) {
       const stops = [...this.list.querySelectorAll<HTMLElement>('button')]
       const at = stops.indexOf(event.target as HTMLElement)
