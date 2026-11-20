@@ -14,7 +14,7 @@ import { GUTTER, drawMargin, tautAlong, type MarginRow } from '../margin.js'
 import { random } from '../ink.js'
 import { lineHue } from '../lineHue.js'
 import { createRailReorder, type RailReorder } from '../channelRail.js'
-import { RailMotion, SLOP_PX, SpentSwipe, WHEEL_IDLE_MS, WheelAxis } from './railMotion.js'
+import { LEAVE_PX, RailMotion, SLOP_PX, SpentSwipe, WHEEL_IDLE_MS, WheelAxis } from './railMotion.js'
 import type { SwipeSignal } from '../workspace/PhoneGestures.js'
 import { openActionMenu } from '../conversationMenu.js'
 import { stateDot } from '../stateDot.js'
@@ -1518,6 +1518,7 @@ export class ChannelsView implements TemporalView {
     // A trackpad swipe that left the reader is spent: the rest of it moves nothing (railMotion.ts).
     let idle = 0
     const spent = new SpentSwipe()
+    let away = 0, awayAt = -Infinity
     const wheel = (event: WheelEvent): void => {
       const over = onReader(event.target)
       if (!over && !onSurface(event.target)) return
@@ -1527,10 +1528,14 @@ export class ChannelsView implements TemporalView {
       const px = axis.feed(dx, dy, event.timeStamp)
       // Taking the gesture keeps the browser from going back a page.
       if (sideways || px !== null) event.preventDefault()
-      if (px === null) return
+      if (px === null) { away = 0; return }
       if (spent.feed(Math.abs(px), event.timeStamp)) return
       if (over) {
-        if (px < 0) { this.ctx?.workspace?.returnToOrigin(); spent.begin(event.timeStamp) }
+        // Leaving the reader takes a swipe's travel within one burst, never the sideways drift of a scroll down the page.
+        if (event.timeStamp - awayAt > WHEEL_IDLE_MS) away = 0
+        awayAt = event.timeStamp
+        away += px
+        if (away <= -LEAVE_PX) { away = 0; this.ctx?.workspace?.returnToOrigin(); spent.begin(event.timeStamp) }
         return
       }
       if (!toward(-px)) return

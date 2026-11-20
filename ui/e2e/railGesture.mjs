@@ -102,6 +102,12 @@ try {
     assert.equal(await (await page.locator('.ws-selected iframe').elementHandle()).contentFrame().then(frame => frame.evaluate(() => location.hash)), '#/2', 'the deck stepped two slides on')
     await deck.locator('a[href^="#/board/"]').click()
     await page.waitForFunction(() => document.querySelector('.ws-selected .ov-name')?.textContent === 'foregrounds')
+    // A scroll down the reader's page drifts sideways as fingers do, and stays on the page: the reader is left by a swipe alone.
+    const reading = await page.evaluate(() => location.hash)
+    for (const [deltaX, deltaY] of [[-3, 1], [-4, 2], [-3, 14], [-2, 30], [-3, 40], [-2, 40], [-4, 36], [-3, 30], [-2, 22], [-3, 14], [-2, 8], [-3, 2], [-2, 1]]) { await page.mouse.wheel(deltaX, deltaY); await page.waitForTimeout(16) }
+    await page.waitForTimeout(700)
+    assert.equal(await page.evaluate(() => location.hash), reading, 'a scroll that drifts sideways stays in the reader')
+    await page.waitForTimeout(200)
     // The second swipe begins while the first's inertia still dies away, its fingers gathering speed gently: the inertia moves
     // nothing, the new swipe brings the rail.
     await swipe(page, at, -240, { tail: 12 })

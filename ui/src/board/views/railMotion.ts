@@ -20,6 +20,8 @@ export const WHEEL_IDLE_MS = 140
 const AXIS_MS = 60
 /** Sideways travel a wheel burst or a finger needs before it is taken as the rail's. */
 export const SLOP_PX = 6
+/** Sideways travel over the reader that leaves it: a swipe, where the rail's slop would take a scroll's drift. */
+export const LEAVE_PX = 48
 
 export interface RailHooks {
   /** The motion starts: the rail is laid out to move, and its width returned. */

@@ -366,11 +366,16 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
   document.addEventListener('scroll', position, { capture: true, passive: true })
   // A trackpad's wheel inside an opaque frame never reaches the board either: while the view beneath takes the sideways
   // swipe, the frame passes a sideways wheel up, and keeps a sideways one from the browser, save where the page scrolls that way.
+  const wheeled: Array<{ t: number; dx: number; dy: number }> = []
   document.addEventListener('wheel', event => {
     if (!active || !sideways) return
     const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerWidth : 1
     const dx = Math.max(-8192, Math.min(8192, event.deltaX * unit)), dy = Math.max(-8192, Math.min(8192, event.deltaY * unit))
-    if (Math.abs(dx) <= Math.abs(dy)) return
+    // A scroll down the page drifts sideways for an event or two: only a wheel whose last moments run sideways too is a swipe.
+    wheeled.push({ t: event.timeStamp, dx, dy })
+    while (event.timeStamp - wheeled[0].t > 120) wheeled.shift()
+    const across = wheeled.reduce((sum, each) => sum + each.dx, 0), along = wheeled.reduce((sum, each) => sum + each.dy, 0)
+    if (Math.abs(dx) <= Math.abs(dy) || Math.abs(across) <= Math.abs(along)) return
     for (let el = event.target instanceof Element ? event.target : null; el; el = el.parentElement) {
       const scrolls = el.scrollWidth > el.clientWidth + 1 && (el === document.scrollingElement || /auto|scroll/.test(getComputedStyle(el).overflowX))
       if (scrolls && (dx < 0 ? el.scrollLeft > 0 : el.scrollLeft + el.clientWidth < el.scrollWidth - 1)) return
