@@ -216,5 +216,35 @@
     "requires_model": true,
     "cost_class": "openrouter",
     "aliases": ["union-alpha"]
+  },
+  {
+    "id": "agy-neon",
+    "cli": "antigravity",
+    "model": "gemini-4-neon",
+    "extra_flags": "--dangerously-skip-permissions",
+    "env": {"AGY_CLI_DISABLE_AUTO_UPDATE": "true"},
+    "effort_levels": ["low", "medium", "high", "xhigh"],
+    "default_effort": "medium",
+    "cost_class": "standard"
+  },
+  {
+    "id": "agy-argon",
+    "cli": "antigravity",
+    "model": "gemini-4-argon",
+    "extra_flags": "--dangerously-skip-permissions",
+    "env": {"AGY_CLI_DISABLE_AUTO_UPDATE": "true"},
+    "effort_levels": ["low", "medium", "high"],
+    "default_effort": "medium",
+    "cost_class": "premium"
+  },
+  {
+    "id": "agy-flash",
+    "cli": "antigravity",
+    "model": "gemini-3.8-flash",
+    "extra_flags": "--dangerously-skip-permissions",
+    "env": {"AGY_CLI_DISABLE_AUTO_UPDATE": "true"},
+    "effort_levels": ["low", "medium", "high"],
+    "default_effort": "medium",
+    "cost_class": "economy"
   }
 ]

@@ -22,7 +22,7 @@ interface GroupableAgent {
 
 /** Keep registry order independent of the order presented in every picker. */
 export function agentGroups<T extends GroupableAgent>(agents: readonly T[]): { label: string; agents: T[] }[] {
-  const labels: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', pi: 'Pi' }
+  const labels: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', pi: 'Pi', antigravity: 'Antigravity' }
   const groups = new Map<string, T[]>()
   for (const agent of agents) {
     const cli = agent.cli || agent.id.split('-')[0]

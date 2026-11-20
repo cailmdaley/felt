@@ -2,6 +2,7 @@ package feltcli
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -16,8 +17,8 @@ import (
 func (a *app) uninstallCmd() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "uninstall",
-		Short: "Remove the felt agent plugins (Claude Code, Codex, pi)",
-		Long: `The inverse of felt setup claude, codex, and pi: wherever felt is installed, it
+		Short: "Remove the felt agent plugins (Claude Code, Codex, pi, Antigravity)",
+		Long: `The inverse of felt setup claude, codex, pi and antigravity: wherever felt is installed, it
 removes the plugin (or pi package) and the ` + marketplaceName + ` marketplace.
 For Claude Code it also unlinks skills that felt setup skills linked into
 ~/.claude/skills from that marketplace, since removing it deletes their
@@ -62,6 +63,17 @@ func (a *app) runFeltUninstall() {
 		if installed := a.piFeltPackageSource(); installed != "" {
 			fmt.Fprintln(a.env.Stdout, "Removing pi package...")
 			if err := a.runHarnessCLI("pi", "remove", installed); err != nil {
+				fmt.Fprintf(a.env.Stdout, "warning: %v\n", err)
+			}
+			removedAnything = true
+			fmt.Fprintln(a.env.Stdout)
+		}
+	}
+
+	if dir, err := a.antigravityPluginDir(); err == nil {
+		if _, err := os.Stat(filepath.Join(dir, "plugin.json")); err == nil {
+			fmt.Fprintln(a.env.Stdout, "Removing the agy plugin...")
+			if err := os.RemoveAll(dir); err != nil {
 				fmt.Fprintf(a.env.Stdout, "warning: %v\n", err)
 			}
 			removedAnything = true

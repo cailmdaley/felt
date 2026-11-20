@@ -135,6 +135,7 @@ func (a *app) refreshPluginAfterUpdate(marketplaceRef string) {
 	}
 	a.refreshCodexSetupIfInstalled(marketplaceRef)
 	a.refreshPiSetupIfInstalled(marketplaceRef)
+	a.refreshAntigravitySetupIfInstalled()
 }
 
 // reportDaemonLevel prints what the shuttle installed beside this felt says
