@@ -130,6 +130,14 @@ defmodule Shuttle.PulseTest do
     refute Pulse.dormant_wait?(unsupported, row, @now)
   end
 
+  test "a resolved agent without harness facts pulses by its cli's harness" do
+    bare = fn cli -> put_in(fiber(), ["shuttle", "resolved", "agent"], %{"cli" => cli}) end
+
+    assert Pulse.config(bare.("claude"))
+    assert Pulse.config(bare.("codex"))
+    refute Pulse.config(bare.("pi"))
+  end
+
   test "one pending tick survives reconciliation until a fresh idle event, and handoff clears it" do
     pulses =
       Pulse.reconcile(%{}, [fiber()], "test-host", @now)

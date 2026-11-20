@@ -10,7 +10,13 @@ defmodule Shuttle.Pulse do
     block = fiber["shuttle"] || %{}
     pulse = block["pulse"]
     interval = get_in(block, ["resolved", "pulse_interval_ms"])
-    idle_signal? = get_in(block, ["resolved", "agent", "harness", "idle_signal"]) == true
+    agent = get_in(block, ["resolved", "agent"]) || %{}
+
+    idle_signal? =
+      case get_in(agent, ["harness", "idle_signal"]) do
+        nil -> Shuttle.Harness.idle_signal?(agent["cli"])
+        signal -> signal == true
+      end
 
     if Poller.block_kind(block) == "oneshot" and is_integer(interval) and
          interval >= 60_000 and interval <= 86_400_000 and idle_signal? do

@@ -78,13 +78,13 @@ defmodule Shuttle.Harness.Antigravity do
   @impl true
   def find_session(work_dir, dispatched_after, opts) do
     since = DateTime.to_unix(dispatched_after, :millisecond) - 5_000
-    fiber_line = "Fiber: #{Keyword.fetch!(opts, :fiber_id)}"
+    fiber_id = Keyword.fetch!(opts, :fiber_id)
 
     session_starts()
     |> Enum.find_value(:error, fn
       %{"sessionId" => id, "cwd" => cwd, "timestamp" => at}
       when is_binary(id) and is_binary(cwd) and is_integer(at) and at >= since ->
-        if Shuttle.Harness.same_directory?(cwd, work_dir) and mentions?(id, fiber_line),
+        if Shuttle.Harness.same_directory?(cwd, work_dir) and mentions?(id, fiber_id),
           do: {:ok, id}
 
       _ ->
@@ -92,22 +92,29 @@ defmodule Shuttle.Harness.Antigravity do
     end)
   end
 
+  # This harness's session starts on the event stream, newest first: the live
+  # file's tail, then the rotated file's. Only lines naming a session start
+  # are decoded.
   defp session_starts do
-    {lines, _whole?} = FileTail.last_lines(EventStream.default_events_file(), @events_tail_bytes)
+    live = EventStream.default_events_file()
 
-    lines
-    |> Enum.reverse()
+    [live, EventStream.rotated(live)]
+    |> Enum.flat_map(fn path ->
+      {lines, _whole?} = FileTail.last_lines(path, @events_tail_bytes)
+      Enum.reverse(lines)
+    end)
+    |> Enum.filter(&String.contains?(&1, "session_start"))
     |> Enum.map(&EventStream.decode/1)
     |> Enum.filter(&match?(%{"type" => "session_start", "harness" => "antigravity"}, &1))
   end
 
-  defp mentions?(id, text) do
+  defp mentions?(id, fiber_id) do
     Enum.any?(transcript_globs(id, []), fn pattern ->
       pattern
       |> Shuttle.FS.wildcard()
       |> Enum.any?(fn path ->
         case Shuttle.FS.read(path) do
-          {:ok, content} -> String.contains?(content, text)
+          {:ok, content} -> Shuttle.Harness.names_fiber?(content, fiber_id)
           _ -> false
         end
       end)

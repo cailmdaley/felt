@@ -1508,8 +1508,12 @@ defmodule Shuttle.Dispatcher do
   end
 
   # How the agent's harness learns a conversation id: its resolved record's
-  # facts (`Shuttle.Harness`), nil for a harness Shuttle does not know.
-  defp identity(agent), do: get_in(agent, [:harness, "identity"])
+  # facts, else its module's (a record from a CLI that carries no facts), nil
+  # for a harness Shuttle does not know.
+  defp identity(agent),
+    do:
+      get_in(agent, [:harness, "identity"]) ||
+        Shuttle.Harness.call(agent.cli, :identity, [], nil)
 
   # A resume is only meaningful WITHIN one harness: `pi --session <uuid>`
   # cannot open a claude-code transcript and vice versa. When the ledger knows
@@ -1702,7 +1706,7 @@ defmodule Shuttle.Dispatcher do
          opts,
          deadline
        ) do
-    case capture_session_uuid(cli, work_dir, fiber_id, dispatched_after, opts, deadline) do
+    case capture_session_uuid(cli, work_dir, fiber_id, dispatched_after, deadline) do
       {:ok, uuid} ->
         case Keyword.get(opts, :poller) do
           nil ->
@@ -1911,16 +1915,16 @@ defmodule Shuttle.Dispatcher do
 
   # Ask the harness for the conversation this worker started until the
   # elapsed-time deadline (`Shuttle.Harness.find_session/3`).
-  defp capture_session_uuid(cli, work_dir, fiber_id, dispatched_after, opts, deadline) do
+  defp capture_session_uuid(cli, work_dir, fiber_id, dispatched_after, deadline) do
     if System.monotonic_time(:millisecond) >= deadline do
       {:error, "timed out waiting for the harness to report its session"}
     else
       :timer.sleep(Shuttle.Env.app(:session_capture_poll_ms, @session_capture_poll_ms))
-      find = [fiber_id: fiber_id, tmux: Keyword.get(opts, :tmux)]
+      find = [fiber_id: fiber_id]
 
       case Shuttle.Harness.call(cli, :find_session, [work_dir, dispatched_after, find], :error) do
         {:ok, uuid} -> {:ok, uuid}
-        :error -> capture_session_uuid(cli, work_dir, fiber_id, dispatched_after, opts, deadline)
+        :error -> capture_session_uuid(cli, work_dir, fiber_id, dispatched_after, deadline)
       end
     end
   end

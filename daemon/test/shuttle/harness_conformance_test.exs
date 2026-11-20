@@ -135,6 +135,72 @@ defmodule Shuttle.HarnessConformanceTest do
     assert Shuttle.Transcript.path(id) == Path.join(logs, "transcript_full.jsonl")
   end
 
+  # Capture once matched `Fiber: a/b` as a substring, so a worker on fiber
+  # `a/b` bound the conversation of a concurrently started `a/b-review` in the
+  # same checkout (pi and Codex, and Antigravity after them).
+  @tag :tmp_dir
+  test "a fiber's capture never binds the conversation of a fiber whose id extends it", %{
+    tmp_dir: tmp
+  } do
+    work = Path.join(tmp, "work")
+    File.mkdir_p!(work)
+    dispatched = DateTime.utc_now()
+    at = DateTime.to_unix(dispatched, :millisecond)
+    parent = "11111111-1111-4111-8111-111111111111"
+    child = "22222222-2222-4222-8222-222222222222"
+    prompt = fn fiber -> "You are a Shuttle worker.\nFiber: #{fiber}\nGo." end
+
+    Shuttle.Test.Env.put_env("SHUTTLE_PI_SESSIONS_DIR", Path.join(tmp, "pi"))
+    sessions = Shuttle.HarnessPaths.pi_sessions_dir(work)
+    File.mkdir_p!(sessions)
+
+    for {name, id, fiber} <- [{"1.jsonl", parent, "a/b"}, {"2.jsonl", child, "a/b-review"}] do
+      header = %{
+        "type" => "session",
+        "id" => id,
+        "cwd" => work,
+        "timestamp" => DateTime.to_iso8601(dispatched)
+      }
+
+      message = %{"type" => "message", "content" => prompt.(fiber)}
+
+      File.write!(
+        Path.join(sessions, name),
+        Jason.encode!(header) <> "\n" <> Jason.encode!(message) <> "\n"
+      )
+    end
+
+    assert {:ok, ^parent} = Harness.Pi.find_session(work, dispatched, fiber_id: "a/b")
+    assert {:ok, ^child} = Harness.Pi.find_session(work, dispatched, fiber_id: "a/b-review")
+
+    brain = Path.join(tmp, "brain")
+    events = Path.join(tmp, "events.jsonl")
+    Shuttle.Test.Env.put_env("SHUTTLE_ANTIGRAVITY_BRAIN_DIR", brain)
+    Shuttle.Test.Env.put_env("SHUTTLE_EVENTS_FILE", events)
+
+    for {id, fiber, offset} <- [{parent, "a/b", 500}, {child, "a/b-review", 900}] do
+      logs = Path.join([brain, id, ".system_generated", "logs"])
+      File.mkdir_p!(logs)
+      step = %{"source" => "USER_EXPLICIT", "type" => "USER_INPUT", "content" => prompt.(fiber)}
+      File.write!(Path.join(logs, "transcript_full.jsonl"), Jason.encode!(step) <> "\n")
+
+      start = %{
+        "type" => "session_start",
+        "harness" => "antigravity",
+        "sessionId" => id,
+        "cwd" => work,
+        "timestamp" => at + offset
+      }
+
+      File.write!(events, Jason.encode!(start) <> "\n", [:append])
+    end
+
+    assert {:ok, ^parent} = Harness.Antigravity.find_session(work, dispatched, fiber_id: "a/b")
+
+    assert {:ok, ^child} =
+             Harness.Antigravity.find_session(work, dispatched, fiber_id: "a/b-review")
+  end
+
   test "an Antigravity transcript's tail gives its latest turn's context and cache reads" do
     usage = TranscriptUsage.read(fixture("antigravity", "transcript.jsonl"), "antigravity")
 

@@ -37,8 +37,7 @@ defmodule Shuttle.Harness do
   @doc """
   Finds the conversation a worker launched at `dispatched_after` in `work_dir`
   started, for a harness whose identity is reported after launch: `{:ok, id}`,
-  or `:error` until it can be found. `opts` carries `:fiber_id` and `:tmux`,
-  the worker's terminal.
+  or `:error` until it can be found. `opts` carries `:fiber_id`.
   """
   @callback find_session(String.t(), DateTime.t(), keyword()) :: {:ok, String.t()} | :error
 
@@ -146,7 +145,7 @@ defmodule Shuttle.Harness do
         ) ::
           {:ok, String.t()} | :error
   def scan_session_files(paths, header, work_dir, dispatched_after, opts) do
-    fiber_line = "Fiber: #{Keyword.fetch!(opts, :fiber_id)}"
+    fiber_id = Keyword.fetch!(opts, :fiber_id)
     earliest = DateTime.add(dispatched_after, -5, :second)
 
     Enum.find_value(paths, :error, fn path ->
@@ -159,13 +158,22 @@ defmodule Shuttle.Harness do
            {:ok, started_at, _} <- DateTime.from_iso8601(stamp),
            true <- same_directory?(cwd, work_dir),
            true <- DateTime.compare(started_at, earliest) != :lt,
-           true <- String.contains?(content, fiber_line) do
+           true <- names_fiber?(content, fiber_id) do
         {:ok, id}
       else
         _ -> nil
       end
     end)
   end
+
+  @doc """
+  Whether `content` carries the dispatch prompt's line for `fiber_id`, the id
+  whole: `Fiber: a/b` followed by a character no fiber id holds, or the end,
+  so `a/b` does not match the prompt of a concurrently started `a/b-review`.
+  """
+  @spec names_fiber?(String.t(), String.t()) :: boolean()
+  def names_fiber?(content, fiber_id),
+    do: Regex.match?(~r/Fiber: #{Regex.escape(fiber_id)}(?![A-Za-z0-9_\/-])/, content)
 
   @doc "Whether two working directories are the same once expanded and their symlinks resolved."
   def same_directory?(left, right) do
