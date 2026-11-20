@@ -79,20 +79,26 @@ is safe. --uninstall removes the package.`,
 // piFeltPackage reads felt's package from `pi list`, which prints each
 // package's source, marked " (filtered)" where its settings select some of
 // its resources, then the directory it resolves to indented below it. A
-// package is felt's when it is the felt GitHub repository, or a local
-// directory whose package.json names felt.
+// package is felt's when it is the felt GitHub repository, a local directory
+// whose package.json names felt, or the promoted generation, whatever it
+// holds: one sealed without the pi package is still felt's, and broken.
 func (a *app) piFeltPackage() (piInstallationState, error) {
 	out, err := a.harnessList(nil, "pi", "list")
 	if err != nil {
 		return piInstallationState{}, fmt.Errorf("pi list: %w", err)
 	}
+	runtimeDir, err := a.pluginRuntimeDir()
+	if err != nil {
+		return piInstallationState{}, err
+	}
+	current := filepath.Join(runtimeDir, pluginCurrentName)
 	var source string
 	for _, line := range strings.Split(string(out), "\n") {
 		switch {
 		case strings.HasPrefix(line, "    ") && strings.TrimSpace(line) != "":
 			path := strings.TrimSpace(line)
 			repo := "git:github.com/" + marketplaceRepo
-			if source == repo || strings.HasPrefix(source, repo+"@") || (!strings.Contains(source, ":") && isFeltPackageDir(path)) {
+			if source == repo || strings.HasPrefix(source, repo+"@") || (!strings.Contains(source, ":") && (isFeltPackageDir(path) || samePath(path, current))) {
 				return piInstallationState{Source: source, Path: path}, nil
 			}
 		case strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "   "):

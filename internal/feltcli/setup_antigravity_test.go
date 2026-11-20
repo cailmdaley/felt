@@ -295,6 +295,40 @@ func TestPiRefusesAGenerationWithoutItsPackage(t *testing.T) {
 	}
 }
 
+// A pi loading a current generation that is no pi package, sealed by a felt
+// whose generations did not carry one, still has felt's package there: the
+// receipt reports its hooks missing, so a deploy sets pi up again, and setup
+// from a source with the package restores it.
+func TestReceiptReportsPiOnAGenerationWithoutItsPackage(t *testing.T) {
+	t.Parallel()
+	env, _ := testEnv(t)
+	sysenvtest.OnlyPath(env)
+	current := filepath.Join(homeOf(t, env), ".felt", pluginRuntimeDirName, pluginCurrentName)
+	calls := fakePi(t, env, current, current)
+	if _, stderr, err := executeIn(t, env, t.TempDir(), "setup", "antigravity", "--source", copyPluginSource(t)); err != nil {
+		t.Fatalf("setup antigravity: %v %s", err, stderr)
+	}
+	for _, name := range piPackageFiles {
+		if err := os.RemoveAll(filepath.Join(current, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := testApp(t, env).collectRuntimeReceipt()
+	if r.Hooks.Status == receiptHealthy || !strings.Contains(r.Hooks.Repair, "felt setup pi") {
+		t.Fatalf("pi on a generation without its package passed the receipt: hooks %s %q", r.Hooks.Status, r.Hooks.Repair)
+	}
+	before := calls()
+	if _, stderr, err := executeIn(t, env, t.TempDir(), "setup", "pi", "--source", copyPluginSource(t)); err != nil {
+		t.Fatalf("setup pi: %v %s", err, stderr)
+	}
+	if again := strings.TrimPrefix(calls(), before); strings.Contains(again, "remove") {
+		t.Fatalf("pi on current was removed:\n%s", again)
+	}
+	if r := testApp(t, env).collectRuntimeReceipt(); r.Hooks.Status != receiptHealthy {
+		t.Fatalf("hooks %s after setup pi: %s", r.Hooks.Status, r.Hooks.Repair)
+	}
+}
+
 // pi marks a package whose settings select some of its resources
 // " (filtered)"; felt's GitHub package so marked is still felt's, and setup
 // replaces it.
