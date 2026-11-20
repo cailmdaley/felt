@@ -232,6 +232,7 @@ list. The maintained fleet ships built in:
 | Claude | `claude-opus` (registry default), `claude-sonnet`, `claude-fable`, `claude-haiku` | Browser access ("chrome") is an explicit axis on Claude agents, not a separate agent. |
 | Codex | `codex-astra`, `codex-terra`, `codex-sol`, `codex-luna` | Launched with `--approve-for-me`: Codex's automatic reviewer handles approval requests. |
 | Pi | `pi-luna`, `pi-haiku`, `pi-sonnet`, `pi-opus`, `pi-fable`, `pi-grok`, `pi-gemini-flash`, `pi-kimi`, `pi-deepseek-flash`, `pi-glm-flash`, `pi-union-alpha` | The four Claude agents use `anthropic` (Haiku/Sonnet/Opus 5.5, Fable 5.2); sign in with Pi's `/login anthropic`. `pi-union-alpha` uses OpenRouter's free Union Alpha model. |
+| Antigravity | `agy-neon`, `agy-argon`, `agy-flash` | Google's Antigravity CLI (`agy`), launched with `--dangerously-skip-permissions`; effort is the model slug's suffix. `felt setup antigravity` installs its hooks and skills. |
 
 Two orthogonal axes layer on the base id: `effort` (validated against the
 resolved agent's allowed levels) and `chrome` (Claude only, for browser work).

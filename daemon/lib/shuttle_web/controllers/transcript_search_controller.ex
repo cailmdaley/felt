@@ -8,7 +8,7 @@ defmodule ShuttleWeb.TranscriptSearchController do
   `shuttle transcript search <q> --json --no-index --include-self` and relays its document unchanged:
   `{query, index, hits, errors}`.
 
-  `session` is repeatable and `fiber` is a single id, `since` is `30d` or a date, `harness` is `claude|codex|pi`,
+  `session` is repeatable and `fiber` is a single id, `since` is `30d` or a date, `harness` is `claude|codex|pi|antigravity`,
   Results group by session (best message and `matches` count); `per_message=true`
   returns individual messages. `limit` counts sessions by default and is clamped to 100.
   Every value travels as its own argv element,

@@ -561,7 +561,7 @@ func (a *app) shuttleSessionsCmd() *cobra.Command {
 fleet. Use --host or --harness to filter, and pass a returned address to
 'shuttle message'. Discovery gaps report unavailable hosts or transports.
 
-With --since, lists every Claude, Codex and Pi session on one host with a
+With --since, lists every Claude, Codex, Pi and Antigravity session on one host with a
 transcript message since that time, live or ended, newest first: its last
 activity, whether it is live, its harness, its address (shuttle show opens it
 on that host), and the fibers it worked on. --since takes what shuttle find

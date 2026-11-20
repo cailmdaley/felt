@@ -32,7 +32,7 @@ func (a *app) findCmd() *cobra.Command {
 		Short: "Search fibers and session transcripts together",
 		Long: `find answers "does this exist, was this discussed, where did we put X" in one
 call. It runs felt find over the whole store, then shuttle transcript search
-over every Claude, Codex and Pi session on this host, and prints the fibers
+over every Claude, Codex, Pi and Antigravity session on this host, and prints the fibers
 first and the sessions after.
 
 The fiber half takes felt find's flags and ranking. The transcript half

@@ -54,8 +54,9 @@ The same stream feeds the in-flight idle ranking on the Desk and the
 
 The plugin registers `shuttle hook event` for SessionStart, UserPromptSubmit,
 PreToolUse, PostToolUse, Stop, StopFailure, SubagentStop, Notification and
-SessionEnd in Claude Code and Codex, and the Pi extension calls it for Pi's
-equivalents; `felt setup claude|codex|pi` installs the wiring. The hook writes
+SessionEnd in Claude Code and Codex, the Pi extension calls it for Pi's
+equivalents, and `shuttle hook antigravity` translates the Antigravity CLI's;
+`felt setup claude|codex|pi|antigravity` installs the wiring. The hook writes
 only when the stream's parent directory already exists, so an install without
 daemon state grows no stream. `SHUTTLE_EVENTS_FILE` overrides the path and
 creates its parent; `SHUTTLE_EVENTS=off` disables recording. Probe the writer

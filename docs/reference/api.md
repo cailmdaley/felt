@@ -589,7 +589,7 @@ here" rather than as a missing file.
 | `GET /threads/*id` | local, over cached owner feeds | A constitution's threads to every depth, for `shuttle threads` |
 | `POST /project-dir/resolve` | host-addressed | Validate `{path, origin?}` on the named host with `shuttle resolve-dir`; return `{path}` with the expanded absolute directory, or 422 for an invalid directory. Does not create or arm a fiber |
 | `POST /document-changed` | local | `{fiber_id}`: a local Shuttle CLI write tells the Poller to re-read that document promptly; answers `{ok: true}` |
-| `GET /sessions/recent` | host-routed | Every Claude, Codex and Pi session on one host with transcript activity since `since`, live or ended — shells `shuttle sessions --since --local --json` there (`since`, optional `host`, `harness`) and answers `{host, since, sessions, errors}` |
+| `GET /sessions/recent` | host-routed | Every Claude, Codex, Pi and Antigravity session on one host with transcript activity since `since`, live or ended — shells `shuttle sessions --since --local --json` there (`since`, optional `host`, `harness`) and answers `{host, since, sessions, errors}` |
 | `GET /transcript` | host-routed | Availability receipt for a native session transcript, including its authoritative path and digest |
 | `GET /transcript/raw` | host-routed | Exact native JSONL bytes for a session — no parsing or normalization |
 | `GET /debug/profile` | host-scoped | A blocking CPU and VM profile of this daemon |

@@ -12,7 +12,8 @@ Everything else Shuttle does (dispatch, lifecycle, the inbox, the board) stays h
 ### Facts
 
 `internal/harness` holds one record per harness, the only table of harness facts in the repo.
-Every resolved agent record carries its harness's record under `harness` (`shuttle ls --json`, `shuttle show -j`, `shuttle agents resolve --json`), so the daemon reads the facts it needs from the record it already has and keeps no table of its own.
+Every resolved agent record carries its harness's record under `harness` (`shuttle ls --json`, `shuttle show -j`, `shuttle agents resolve --json`), and the daemon reads `identity` and `idle_signal` from the record it already has.
+Where the daemon holds only a harness's name, or a record from a CLI that carries no `harness`, each Elixir module answers the facts the daemon needs by name (`identity/0`, `idle_signal?/0` and the rest under Verbs); the conformance test holds those answers in parity with `facts.json`. `Shuttle.HarnessPaths` holds the daemon's transcript roots, resolved from the same variables as `transcripts`.
 
 | Fact | Meaning | Read by |
 |---|---|---|
@@ -35,7 +36,7 @@ Each language has one place per harness for the code Shuttle calls.
 In the daemon, `Shuttle.Harness` is a behaviour with one module per harness (`Shuttle.Harness.Claude`, `.Codex`, `.Pi`, `.Antigravity`):
 
 - `launch_command/3` and `resume_command/4`: the shell command lines, rendered from a resolved agent record. `Shuttle.Agents` puts the record's env assignments in front and renders the flags every harness shares.
-- `find_session/3`: for a harness whose identity is reported, the conversation a worker started, matched by working directory, start time and the dispatch prompt's `Fiber: <id>` line.
+- `find_session/3`: for a harness whose identity is reported, the conversation a worker started, matched by working directory, start time and the dispatch prompt's `Fiber: <id>` line, the id whole (`Shuttle.Harness.names_fiber?/2`), so fiber `a/b` never binds the conversation of `a/b-review`.
 - Transcript readers: `usage_entries/1` (context and cache figures), `turn_record/1` (interrupts), `tasks/3` (the worker's own task list), `transcript_cwd/1` (where a History resume runs), `transcript_root/1` and `transcript_globs/2` (where a conversation's file is).
 - A few answers for sites that hold only a harness's name, such as a ledger row or a stream line: `identity/0`, `idle_signal?/0`, `interrupts?/0`, `takes_paste?/0`, `receiver_succession?/0`, `resume_fallback/0`. The conformance suite holds each one to the Go facts.
 
@@ -46,7 +47,12 @@ Each package keeps one table keyed by the harness's name:
 - `internal/transcriptindex`: `formats`, each saying which files under the root hold conversations, which conversation a file holds, and how to read one line for `shuttle find` and `shuttle show`.
 - `internal/feltcli`: `felt setup <harness>`, which installs the hooks and skills.
 
-Claude's Remote Control (`Shuttle.RemoteControl`) and Codex's hook trust (`internal/feltcli/codex_hook_trust.go`) stay outside the adapters: each is one harness's extra, not part of the contract.
+Some behaviour belongs to one harness and stays outside the adapters, as that harness's extra rather than part of the contract:
+
+- Claude's Remote Control (`Shuttle.RemoteControl`).
+- Codex's hook trust (`internal/feltcli/codex_hook_trust.go`).
+- In `Shuttle.Dispatcher`: Codex refuses a headless agent (`preflight_terminal/3`); a Codex worker's developer instructions merge the record's with the dispatch's; a quiet Claude resume runs interactive; and a Claude resume presses Enter to dismiss the resume warning.
+- In `Shuttle.Poller`: a pulse to Claude holds a durable reservation until a later idle event, since Claude's native inbox can race a new turn.
 
 ### Hooks
 
@@ -125,11 +131,11 @@ Observed on agy 1.5.13.
 - **Identity**: reported, by the SessionStart hook. agy fires it under `-i`, before the first model call, with `conversationId`, `transcriptPath` and `cwd`; `shuttle hook antigravity` writes it to the event stream, and `Shuttle.Harness.Antigravity.find_session/3` matches it to the worker. agy exports `ANTIGRAVITY_CONVERSATION_ID` to its hooks and commands, which is how a worker's own `shuttle` calls know their session.
 - **Resume**: `--conversation <id> [-i '<prompt>']` keeps the history; without `-i` it opens interactively. No fresh fallback.
 - **Delivery**: inject. A `PreInvocation` hook, which runs before every model call, prints queued context as `{"injectSteps":[{"systemMessage":{"systemMessage":"…"}}]}`, and it reaches a turn already running. A wake is typed into the terminal, which queues it behind a running turn, as Codex's does. A conversation resumed without a prompt fires no hook until its next turn, so the daemon finds its receiver by the `--conversation <id>` process in the worker's terminal, as it finds Codex's by `resume <id>`.
-- **Turns**: a `PreInvocation` with `invocationNum` 0 starts a turn. `Stop` with `fullyIdle: false` leaves a background command running, and agy wakes itself when it ends, starting a turn that repeats the last input; `shuttle hook antigravity` remembers each conversation's last input and last Stop, so that turn does not read as a prompt. Only `Stop` with `fullyIdle: true` is the human's turn.
-- **Tool hooks print nothing**: agy reads a `PreToolUse` hook's JSON as a decision, and `{}` denies the tool.
+- **Turns**: a `PreInvocation` with `invocationNum` 0 starts a turn. `Stop` with `fullyIdle: false` leaves a background command running, and agy wakes itself when it ends, starting a turn that repeats the last input; `shuttle hook antigravity` remembers a digest of each conversation's last input and its last Stop, so that turn does not read as a prompt. That turn state sits under the Shuttle state directory, written only where the directory exists; agy reports no session end, so each SessionStart removes states idle for a week. Only `Stop` with `fullyIdle: true` is the human's turn.
+- **Tool hooks print nothing**: agy reads a `PreToolUse` hook's JSON as a decision, and `{}` denies the tool, so the tool events run `hooks/agy.sh tool`, which discards whatever shuttle prints. The shim gives shuttle five seconds; `hooks.json` gives each hook ten (agy's `timeout` is in seconds, default 30).
 - **Transcript**: `~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript_full.jsonl`, one step per line (`source`, `type`, `created_at`, `content`, `tool_calls`, and on model steps `input_tokens` and `cache_read_tokens`). The human's text sits inside `<USER_REQUEST>`. `transcript.jsonl` beside it truncates long fields, so readers take it only when the full one is missing.
 - **Instructions**: agy reads `AGENTS.md` and `GEMINI.md`, not `CLAUDE.md`. Workers get theirs from the launch prompt and the plugin's felt and shuttle skills.
-- **Installed by**: `felt setup antigravity`, which writes a native plugin to `~/.gemini/config/plugins/felt/`: `plugin.json` and `hooks.json` at its root, `hooks/agy.sh`, and `skills/`. agy loads any plugin directory there with a `plugin.json` at its next start, with no `agy plugin install`; hooks run with the plugin directory as their working directory and `PLUGIN_ROOT` set.
+- **Installed by**: `felt setup antigravity`, which writes a native plugin to `~/.gemini/config/plugins/felt/`: `plugin.json` and `hooks.json` at its root, `hooks/agy.sh` and the `hooks/shuttle-bin.sh` it sources, and `skills/`. agy loads any plugin directory there with a `plugin.json` at its next start, with no `agy plugin install`; hooks run with the plugin directory as their working directory and `PLUGIN_ROOT` set.
 
 ## Gaps
 

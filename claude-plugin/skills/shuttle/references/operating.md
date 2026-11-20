@@ -173,7 +173,7 @@ Native wake respects Claude's approval policy. Codex sessions are woken through 
 
 ## Past conversations
 
-`shuttle find "<phrase>"` searches fibers and sessions together. `shuttle transcript search "<phrase>"` searches sessions alone: it ranks this host's Claude, Codex and Pi sessions by their best-matching message (`--fiber`, `--since 30d`, `--harness`, `--json`; `--per-message` for individual messages); `shuttle show <session>[/<agent>][:<line>]` reads a session from the index (the passage around a line, or an outline of the human's turns); `shuttle transcript <session-id>` gives the file. Your own session is excluded unless you pass `--include-self`; other hosts' transcripts are searched on those hosts. `shuttle sessions --since <time> [--host <host>]` lists every session on a host with activity since then, ended ones included, with the fibers each worked on; read one with `shuttle transcript <session-id>`.
+`shuttle find "<phrase>"` searches fibers and sessions together. `shuttle transcript search "<phrase>"` searches sessions alone: it ranks this host's Claude, Codex, Pi and Antigravity sessions by their best-matching message (`--fiber`, `--since 30d`, `--harness`, `--json`; `--per-message` for individual messages); `shuttle show <session>[/<agent>][:<line>]` reads a session from the index (the passage around a line, or an outline of the human's turns); `shuttle transcript <session-id>` gives the file. Your own session is excluded unless you pass `--include-self`; other hosts' transcripts are searched on those hosts. `shuttle sessions --since <time> [--host <host>]` lists every session on a host with activity since then, ended ones included, with the fibers each worked on; read one with `shuttle transcript <session-id>`.
 
 ## Remote hosts
 

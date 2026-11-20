@@ -92,7 +92,7 @@ people.
 `shuttle find "<query>"` searches fibers and transcripts in one call: `felt find`'s fiber hits over the whole store, every status included, then the transcript search's session hits below. Each session prints its date, title and fibers, its best passage (from the main thread when the main thread matches), and an address `<session>[/<agent>]:<line>`. `shuttle show <address>` prints the conversation around that line, tool calls folded to their names, with earlier and later addresses; `shuttle show <session>` outlines the human's turns and the last reply. A fiber id always wins over a bare session prefix. It takes `felt find`'s flags, plus `--since` and `--harness` for the sessions; `--limit` caps both blocks, and `--json` returns `{query, fibers, transcripts, index, errors}`. A regex or a query-less filter skips the sessions; a half that fails is reported under `errors` while the other still answers.
 
 `shuttle transcript <session-id>` resolves a transcript's native path, materializing a remote transcript into the local cache when needed.
-The same command family searches local Claude Code, Codex, and Pi JSONL transcripts:
+The same command family searches local Claude Code, Codex, Pi and Antigravity JSONL transcripts:
 
 ```sh
 shuttle transcript index                 # incremental catch-up
@@ -121,7 +121,7 @@ Mentions of these markers inside ordinary prose don't change its role.
 Whitespace-separated query terms are literal keywords combined with AND; FTS operators are not evaluated.
 Punctuation within a term separates adjacent tokens, so `daemon/lib/shuttle/harness_paths.ex` matches that sequence of path fragments rather than scattered words.
 Underscores stay inside tokens, preserving exact identifiers such as `handed_off_at`; searching `handed` alone does not match that identifier.
-Repeat `--session <uuid>` to select several sessions, or use `--fiber`, `--since 30d|YYYY-MM-DD`, `--project <path-prefix>`, and `--harness claude|codex|pi` to narrow the results.
+Repeat `--session <uuid>` to select several sessions, or use `--fiber`, `--since 30d|YYYY-MM-DD`, `--project <path-prefix>`, and `--harness claude|codex|pi|antigravity` to narrow the results.
 Search excludes the calling harness session by default, using Codex's `CODEX_THREAD_ID`, Claude Code's `CLAUDE_CODE_SESSION_ID` (or wrapper-provided `CLAUDE_SESSION_ID`), or Pi's `PI_SESSION_ID`.
 Pi's `AI_AGENT=pi` selects its own session ahead of inherited parent-harness variables.
 Outside a harness there is no automatic exclusion; board searches have no caller.
@@ -272,7 +272,7 @@ is then given back to the human rather than closed.
 | `shuttle ps` | Live terminal worker sessions |
 | `shuttle snapshot` | Print the local daemon's state snapshot |
 | `shuttle dispatch <fiber>` | Ask the daemon to dispatch a fiber now (`--ad-hoc`); remote owners route through this host's daemon, carrying this host's copy (`--carry` insists on it over a copy the owner holds), and an owner without the fiber has it created from that copy first. `--message <text>` or `--message-file <path>` adds a launch directive |
-| `shuttle sessions [fiber\|session-uuid]` | With no argument, list live native sessions across the fleet (`--host`, `--harness`, `--json`); JSON rows include `fiber` when the host's session ledger records a pairing. With `--since <time>` (what `shuttle find --since` takes: `30d`, `12h`, a date, or an RFC3339 time), list every Claude, Codex and Pi session on this host — or on `--host <host>`, through that host's daemon — with a transcript message since then, live or ended, newest first: last activity, `live`, harness, the `shuttle show` address on that host, and the fibers it worked on (`--harness`, `--json`). With a fiber or session, show the composite ledger by UID, including historical paths, lifecycle events, hosts, harnesses, staleness, transcript availability, and a canonical `address` when the row can be addressed. A session UUID or `--commit <sha>` reverse-resolves the owning fiber and its disposition; `--materialize [--dir <d>]` resolves every available transcript to an ordinary local file and writes a `manifest.json` |
+| `shuttle sessions [fiber\|session-uuid]` | With no argument, list live native sessions across the fleet (`--host`, `--harness`, `--json`); JSON rows include `fiber` when the host's session ledger records a pairing. With `--since <time>` (what `shuttle find --since` takes: `30d`, `12h`, a date, or an RFC3339 time), list every Claude, Codex, Pi and Antigravity session on this host — or on `--host <host>`, through that host's daemon — with a transcript message since then, live or ended, newest first: last activity, `live`, harness, the `shuttle show` address on that host, and the fibers it worked on (`--harness`, `--json`). With a fiber or session, show the composite ledger by UID, including historical paths, lifecycle events, hosts, harnesses, staleness, transcript availability, and a canonical `address` when the row can be addressed. A session UUID or `--commit <sha>` reverse-resolves the owning fiber and its disposition; `--materialize [--dir <d>]` resolves every available transcript to an ordinary local file and writes a `manifest.json` |
 | `shuttle message <target> [text\|-]` | Send to a full address, a unique native session ID, or a fiber path, slug, or UID, which sends through its owner's durable inbox (`--attach`, `--file`, `--context-only`, `--notify-when-idle`, `--notify-wake`, `--from`, `--message-id`, `--json`). Session IDs resolve through live discovery and the session ledger; ambiguous IDs list their candidate addresses. `-` and `--file -` read multiline text; repeat `--attach <path>` to include binary files. Receipts print the resolved canonical address and message ID for a safe explicit retry. A fiber message is refused, sending nothing, when the local daemon reports a CLI contract level other than this shuttle's, or when the fiber's owner reports that its own CLIs are at another level than it was built for: such a daemon queues the message and does not deliver it until it runs level with its CLIs |
 | `shuttle transcript [--date YYYY-MM-DD] [--fiber <id\|slug>] [--since HH:MM[:SS]] [--recorder HOST]` | Read the day's spoken transcript, including the card each line went to (`--json` for the daemon response) |
 | `shuttle say "<text>"` | Queue a spoken line on the speaker host, in the voice of the calling worker's role (its charter's `voice:`); playback waits behind queued lines and while the human talks, and a line whose card is out of view is held until its card is in view or `shuttle say --play` opens it. `--fiber` names the speaker from a plain terminal; `--voice` overrides the voice for this line. For voice conversations with the human only |
@@ -379,7 +379,7 @@ views and Shuttle-owned operations.
 
 ### Session discovery and messaging
 
-No-argument `sessions` may report a Claude, Codex, or Pi receiver with `state: "hook"`. This
+No-argument `sessions` may report a Claude, Codex, Pi or Antigravity receiver with `state: "hook"`. This
 means a supported hook registered the session for queued context; it does not
 claim that a model turn is live. `last_seen` records the latest registration in
 Unix milliseconds. A registration names the receiver's harness process and is
@@ -457,7 +457,8 @@ receipt's `idle` object gives `state` (`watching` or `unsupported`), the
 
 Shuttle routes to the configured owner host and its live harness integration.
 Claude uses its receiver-registered native inbox; Codex and Pi use their native
-harness integration. Existing Confer Pi workers
+harness integration; Antigravity takes queued context from its hooks before each
+model call and a wake typed into its terminal. Existing Confer Pi workers
 also remain addressable, but standalone Pi sessions do not require Confer.
 Hooks alone cannot wake Claude or Codex: install and enable the receiver's hooks
 for context delivery, and use a supported live native endpoint for wake.
@@ -674,7 +675,7 @@ Recording works offline.
 ### `shuttle send-file <path> [path...]`
 
 Publish readable regular files to the Shuttle board and the session/fiber sent-files
-trail. Claude, Codex and Pi sessions use this command. Paths are resolved to absolute
+trail. Claude, Codex, Pi and Antigravity sessions use this command. Paths are resolved to absolute
 paths on the owning host; files must remain there for subsequent viewing.
 The command validates the whole batch before recording one `file_sent` event.
 It fails visibly if attribution or recording is unavailable.

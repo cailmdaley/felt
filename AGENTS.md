@@ -74,7 +74,7 @@ For daemon Elixir/OTP changes, read the `practices/elixir` felt practice (`felt 
   preserve sessions. Details: [`docs/dev/architecture.md`](docs/dev/architecture.md#platform-story),
   [Rex setup](docs/shuttle/installation.md#rex-terminal-backend).
 - **Execution backends own conversations; shuttle owns task assignment and observation.**
-  Claude, Codex and Pi workers use the selected terminal backend. Existing
+  Claude, Codex, Pi and Antigravity workers use the selected terminal backend. Existing
   conversations retain their native identity across daemon restarts; a closed
   terminal viewer does not mean its conversation has died. `shuttle attach`
   opens the existing worker session when supported by the selected backend.

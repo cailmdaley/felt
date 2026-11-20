@@ -52,7 +52,7 @@ old ones already say, so also set `host:` on any already-armed fiber to the new
 name.
 
 **Every built-in agent assumes its CLI is installed.** The shipped records cover
-the configured Claude, Codex, and Pi fleet, with `claude-opus` as the
+the configured Claude, Codex, Pi and Antigravity fleet, with `claude-opus` as the
 default. A record whose CLI is absent or unauthenticated fails at dispatch, not
 at install. Use `builtins: "restrict"` when a host should expose only the
 subset it can run — see [Configuring agents](configuration.md#configuring-agents).
