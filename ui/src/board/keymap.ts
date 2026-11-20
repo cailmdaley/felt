@@ -35,8 +35,8 @@ const constitutionBindings: KeyBinding[] = [
   bind(['z'], 'undoVerdict', 'Undo latest pending verdict'),
 ]
 
-/** The acts the Desk's selected card or line answers to: the verdicts and Rest its view's head carries. */
-export const DESK_ACTS: readonly KeyIntent[] = ['temper', 'discard', 'toReview', 'rest']
+/** The acts the Desk's selected card or line answers to: the verdicts, Rest and conversation its view's head carries. */
+export const DESK_ACTS: readonly KeyIntent[] = ['conversation', 'temper', 'discard', 'toReview', 'rest']
 
 /** Desk regions follow reading order: its six sections, the three columns
  * left to right then the shelf's three, each its family cards and their lines
@@ -59,7 +59,7 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['j', 'ArrowDown'], 'down', 'Next card or line'), bind(['k', 'ArrowUp'], 'up', 'Previous card or line'),
     bind(['g'], 'first', 'First in column'), bind(['G'], 'last', 'Last in column'),
     bind(['l', 'ArrowRight', 'Enter', 'o'], 'open', 'Open constitution'), bind(['Escape'], 'back', 'Clear selection'), bind(['?'], 'help', 'Keyboard help'),
-    // The selected card or line's lifecycle acts, as its view's head offers them.
+    // The selected card or line's acts, as its view's head offers them.
     ...constitutionBindings.filter(binding => DESK_ACTS.includes(binding.intent)),
   ],
   view: [...VIEW_KEYS, bind(['/'], 'find', 'Find'), bind(['?'], 'help', 'Keyboard help')],
@@ -158,7 +158,7 @@ export const helpSections: readonly HelpSection[] = [
     row(['Enter', 'o'], 'On a fiber page, expand it', on('reader', 'open')),
   ] },
   { title: 'A constitution', note: `The open constitution, or the card or line selected on the Desk. Verdicts write after ${VERDICT_UNDO}; z or Undo cancels the latest.`, rows: [
-    row(['c', '.'], 'Open its conversation', on('reader', 'conversation')),
+    row(['c', '.'], 'Open its conversation', [...on('reader', 'conversation'), ...on('desk', 'conversation')]),
     row(['t'], 'Temper', [...on('reader', 'temper'), ...on('desk', 'temper')]),
     row(['x'], 'Discard; retire a standing one', [...on('reader', 'discard'), ...on('desk', 'discard')]),
     row(['a'], 'Close for review', [...on('reader', 'toReview'), ...on('desk', 'toReview')]),

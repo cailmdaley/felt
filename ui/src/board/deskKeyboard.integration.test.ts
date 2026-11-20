@@ -226,6 +226,18 @@ describe('Desk keyboard selection', () => {
     expect(document.querySelector('.kbn-rest-popover')).not.toBeNull()
   })
 
+  it('c opens the selected row\'s conversation, as the reader\'s c does; with nothing selected or in a field, nothing', () => {
+    const conversation = vi.spyOn(inside.workspace.dock, 'openConversation').mockReturnValue(true)
+    expect(press('c').defaultPrevented).toBe(false)
+    inside.deskKeyboard.select({ uid: 'head-uid', origin: 'local' })
+    const field = document.body.appendChild(document.createElement('textarea'))
+    expect(press('c', {}, field).defaultPrevented).toBe(false)
+    expect(conversation).not.toHaveBeenCalled()
+    expect(press('c').defaultPrevented).toBe(true)
+    expect(conversation).toHaveBeenCalledTimes(1)
+    expect(conversation.mock.calls[0][0].uid).toBe('head-uid')
+  })
+
   it('Escape returns a root Reader to Desk', async () => {
     press('j'); press('Enter')
     expect(inside.workspace.isActive).toBe(true)

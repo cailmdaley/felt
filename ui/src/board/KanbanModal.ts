@@ -1414,10 +1414,11 @@ export class KanbanModal {
   }
 
   /**
-   * A verdict or Rest key on the Desk acts on the selected card or line alone,
-   * the row drawn as selected (a family card names its top-level, a line its
-   * member), never on what the pointer is over or the voice target. A verdict
-   * waits out the same undo window as the reader's; Rest opens its popover.
+   * A verdict, Rest or conversation key on the Desk acts on the selected card
+   * or line alone, the row drawn as selected (a family card names its
+   * top-level, a line its member), never on what the pointer is over or the
+   * voice target. A verdict waits out the same undo window as the reader's;
+   * Rest opens its popover; `c` opens its conversation as the reader's does.
    */
   private actOnDeskSelection(intent: KeyIntent): boolean {
     const address = this.deskKeyboard?.selection
@@ -1425,7 +1426,7 @@ export class KanbanModal {
     const card = boardCards(this.lastResponse).find(card => (card.uid ?? card.id) === address.uid && card.originId === address.origin)
     return constitutionAction(intent, card, {
       verdict: (card, verdict) => { this.workspace?.queueVerdict(card, verdict) },
-      conversation: () => {},
+      conversation: card => { this.dock.openConversation(card) },
       rest: card => this.rest(card),
     })
   }

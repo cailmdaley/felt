@@ -122,13 +122,13 @@ describe('shared keyboard table', () => {
       expect(keyIntent(event(key, init), 'reader')).toBeNull()
     }
   })
-  it('c opens the conversation (dot is its alias) in the reader alone, s rests from the reader and the Desk; no report can ask for the conversation', () => {
+  it('c opens the conversation (dot is its alias) from the reader and the Desk, s rests from both; no report can ask for the conversation', () => {
     expect(keyIntent(event('c'), 'reader')).toBe('conversation')
     expect(keyIntent(event('.'), 'reader')).toBe('conversation')
     expect(keyIntent(event('s'), 'reader')).toBe('rest')
-    // The Desk's selected row takes the view head's verdicts and Rest; the conversation and undo keys are not the Desk's.
-    expect(['s', 't', 'x', 'a'].map(key => keyIntent(event(key), 'desk'))).toEqual(['rest', 'temper', 'discard', 'toReview'])
-    for (const key of ['c', '.', 'z']) expect(keyIntent(event(key), 'desk')).toBeNull()
+    // The Desk's selected row takes the view head's verdicts, Rest and conversation; undo is not the Desk's.
+    expect(['s', 't', 'x', 'a', 'c', '.'].map(key => keyIntent(event(key), 'desk'))).toEqual(['rest', 'temper', 'discard', 'toReview', 'conversation', 'conversation'])
+    expect(keyIntent(event('z'), 'desk')).toBeNull()
     expect(DOCUMENT_KEY_INTENTS).not.toContain('rest')
     expect(keyIntent(event('[', { metaKey: true }), 'reader')).toBeNull()
     expect(keyIntent(event(']', { metaKey: true }), 'reader')).toBeNull()
