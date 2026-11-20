@@ -105,14 +105,15 @@ defmodule ShuttleWeb.SessionInputController do
     case SessionLedger.latest_for_session(session) do
       %{
         "session" => ^session,
-        "harness" => "codex",
+        "harness" => harness,
         "host" => host,
         "tmux" => terminal,
         "uid" => uid
       }
       when is_binary(terminal) and is_binary(uid) ->
-        case {host == Shuttle.Poller.own_host_id(), SessionLedger.latest_for_uid(uid)} do
-          {true, %{"session" => ^session, "tmux" => ^terminal}} -> {:ok, terminal}
+        case {host == Shuttle.Poller.own_host_id(), SessionLedger.latest_for_uid(uid),
+              Shuttle.Harness.call(harness, :takes_paste?, [], false)} do
+          {true, %{"session" => ^session, "tmux" => ^terminal}, true} -> {:ok, terminal}
           _ -> :error
         end
 

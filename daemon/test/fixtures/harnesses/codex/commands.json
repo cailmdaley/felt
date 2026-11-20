@@ -1,0 +1,38 @@
+{
+  "agent": {
+    "cli": "codex",
+    "developer_instructions": "Say \"done\" when it's done.",
+    "effort": "xhigh",
+    "env": {
+      "FIXTURE_TOKEN": "it's here"
+    },
+    "extra_flags": "--approve-for-me",
+    "harness": {
+      "binary": "codex",
+      "delivery": "paste",
+      "identity": "reported",
+      "idle_signal": true,
+      "interrupts": true,
+      "ledger": "codex",
+      "name": "codex",
+      "transcripts": {
+        "env": "SHUTTLE_CODEX_SESSIONS_DIR",
+        "home": ".codex",
+        "home_env": "CODEX_HOME",
+        "leaf": "sessions"
+      }
+    },
+    "id": "codex-astra",
+    "model": "gpt-6-astra",
+    "wrapper": "codex"
+  },
+  "expect": {
+    "launch": "FIXTURE_TOKEN='it'\\''s here' env -u TMUX -u TMUX_PANE codex --model 'gpt-6-astra' -c model_reasoning_effort='xhigh' -c 'developer_instructions=\"Say \\\"done\\\" when it'\\''s done.\"' --approve-for-me 'Fiber: demo/task\nIt'\\''s your turn.'",
+    "launch_headless": "FIXTURE_TOKEN='it'\\''s here' env -u TMUX -u TMUX_PANE codex --model 'gpt-6-astra' -c model_reasoning_effort='xhigh' -c 'developer_instructions=\"Say \\\"done\\\" when it'\\''s done.\"' --approve-for-me 'Fiber: demo/task\nIt'\\''s your turn.'",
+    "resume": "FIXTURE_TOKEN='it'\\''s here' env -u TMUX -u TMUX_PANE codex --model 'gpt-6-astra' -c model_reasoning_effort='xhigh' -c 'developer_instructions=\"Say \\\"done\\\" when it'\\''s done.\"' --approve-for-me resume '0a1b2c3d-1111-4222-8333-444455556666' 'Fiber: demo/task\nIt'\\''s your turn.'",
+    "resume_quiet": "FIXTURE_TOKEN='it'\\''s here' env -u TMUX -u TMUX_PANE codex --model 'gpt-6-astra' -c model_reasoning_effort='xhigh' -c 'developer_instructions=\"Say \\\"done\\\" when it'\\''s done.\"' --approve-for-me resume '0a1b2c3d-1111-4222-8333-444455556666'"
+  },
+  "prompt": "Fiber: demo/task\nIt's your turn.",
+  "session": "0a1b2c3d-1111-4222-8333-444455556666",
+  "work_dir": "/work/sky's project"
+}

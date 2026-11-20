@@ -66,7 +66,7 @@ func TestCodexIdleWakeUsesLocalTerminalInput(t *testing.T) {
 	env.Set("SHUTTLE_DAEMON_URL", "http://127.0.0.1:4000")
 	registerCodexState(t, env, "thread-idle", "idle")
 	request := Request{Address: "shuttle://host/codex/thread-idle", MessageID: "wake-1", Text: "please continue", From: "shuttle://peer/pi/source", Wake: true}
-	receipt, err := submitCodexTerminalInputWithClient(context.Background(), env, Address{Host: "host", Harness: "codex", ID: "thread-idle"}, request, &http.Client{Transport: transport})
+	receipt, err := submitTerminalInputWithClient(context.Background(), env, Address{Host: "host", Harness: "codex", ID: "thread-idle"}, request, &http.Client{Transport: transport})
 	if err != nil || receipt.Status != StatusSubmitted || receipt.Transport != "codex-terminal" {
 		t.Fatalf("send = %+v, %v", receipt, err)
 	}
@@ -93,7 +93,7 @@ func TestCodexTerminalInputReadsDaemonFailures(t *testing.T) {
 		env := codexTestEnv(t)
 		env.Set("SHUTTLE_DAEMON_URL", server.URL)
 		request := Request{Address: "shuttle://host/codex/thread-fail", MessageID: "wake-fail", Text: "continue", Wake: true}
-		receipt, err := submitCodexTerminalInput(context.Background(), env, Address{Host: "host", Harness: "codex", ID: "thread-fail"}, request)
+		receipt, err := submitTerminalInput(context.Background(), env, Address{Host: "host", Harness: "codex", ID: "thread-fail"}, request)
 		server.Close()
 		if receipt.Status != tc.want || ErrorCode(err) != tc.code {
 			t.Errorf("HTTP %d: send = %+v, %v", tc.status, receipt, err)
@@ -131,7 +131,7 @@ func TestCodexBusyWakeSubmitsToTerminalQueue(t *testing.T) {
 	env := codexTestEnv(t)
 	request := Request{Address: "shuttle://host/codex/thread-busy", MessageID: "wake-busy", Text: "wait for next hook", Wake: true}
 	called := false
-	receipt, err := sendCodexTerminalWithDiscovery(context.Background(), env, Address{Host: "host", Harness: "codex", ID: "thread-busy"}, request, func(context.Context, *sysenv.Env, Address) error {
+	receipt, err := sendTerminalWithDiscovery(context.Background(), env, Address{Host: "host", Harness: "codex", ID: "thread-busy"}, request, func(context.Context, *sysenv.Env, Address) error {
 		t.Fatal("ordinary Wake must not depend on mailbox registration")
 		return nil
 	}, func(_ context.Context, _ *sysenv.Env, _ Address, got Request) (Receipt, error) {
@@ -173,7 +173,7 @@ func TestCodexContextOnlyRehydratesQuietResumeReceiver(t *testing.T) {
 	})
 	client := &http.Client{Transport: transport}
 	request := Request{Address: "shuttle://host/codex/" + id, MessageID: "context-resumed", Text: "next hook context", From: "shuttle://peer/pi/source"}
-	receipt, err := sendCodexTerminalWithDiscovery(context.Background(), env, Address{Host: "host", Harness: "codex", ID: id}, request,
+	receipt, err := sendTerminalWithDiscovery(context.Background(), env, Address{Host: "host", Harness: "codex", ID: id}, request,
 		func(ctx context.Context, env *sysenv.Env, address Address) error {
 			return discoverCodexTerminalReceiverWithClient(ctx, env, address, client)
 		},

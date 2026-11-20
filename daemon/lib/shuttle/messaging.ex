@@ -7,7 +7,6 @@ defmodule Shuttle.Messaging do
 
   alias Shuttle.{
     CLI,
-    Harnesses,
     OriginRouter,
     Poller,
     RegistryCommon,
@@ -380,7 +379,7 @@ defmodule Shuttle.Messaging do
   # its turn and is costly to wake is delivered as context instead.
   defp costly_wake(request, address) do
     if request.raw["wake"] == true and request.raw["context_if_busy"] == true and
-         request.attachments == [] and Harnesses.normalize(address.harness) == "claude" and
+         request.attachments == [] and Shuttle.Harness.normalize(address.harness) == "claude" and
          get_in(Poller.session_activity(), [address.native, :phase]) == "waiting",
        do: Shuttle.WakeCost.costly(address.native)
   end
@@ -617,7 +616,7 @@ defmodule Shuttle.Messaging do
             if valid_part?(host) and valid_part?(harness) and byte_size(parsed.native) <= 4_096 and
                  not String.contains?(parsed.native, <<0>>) and
                  format_address(host, harness, parsed.native) == value,
-               do: {:ok, %{parsed | harness: Harnesses.normalize(harness)}},
+               do: {:ok, %{parsed | harness: Shuttle.Harness.normalize(harness)}},
                else: {:error, 400, "address is not canonical"}
 
           _ ->
@@ -638,7 +637,7 @@ defmodule Shuttle.Messaging do
   end
 
   defp build_address(host, address),
-    do: format_address(host, Harnesses.normalize(address.harness), address.native)
+    do: format_address(host, Shuttle.Harness.normalize(address.harness), address.native)
 
   defp format_address(host, harness, native),
     do: "shuttle://#{host}/#{harness}/#{URI.encode(native, &go_path_segment_char?/1)}"
@@ -720,7 +719,7 @@ defmodule Shuttle.Messaging do
     address == expected or
       case {parse_address(address), parse_address(expected)} do
         {{:ok, got}, {:ok, want}} ->
-          Harnesses.normalize(got.harness) == Harnesses.normalize(want.harness) and
+          Shuttle.Harness.normalize(got.harness) == Shuttle.Harness.normalize(want.harness) and
             got.native == want.native
 
         _ ->
@@ -741,7 +740,7 @@ defmodule Shuttle.Messaging do
             (transport == "claude-hook" and request.raw["context_if_busy"] == true)
 
         {"submitted", transport} ->
-          transport in ["claude-native", "codex-terminal"]
+          transport in ["claude-native", "codex-terminal", "antigravity-terminal"]
 
         _ ->
           true

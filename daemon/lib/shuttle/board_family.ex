@@ -301,8 +301,10 @@ defmodule Shuttle.BoardFamily do
 
   defp resolve_session(_, _, _), do: nil
 
-  defp normalize_harness("claude-code"), do: "claude"
-  defp normalize_harness(value) when value in ["claude", "codex", "pi"], do: value
+  defp normalize_harness(value) when is_binary(value) do
+    if Shuttle.Harness.supported?(value), do: Shuttle.Harness.normalize(value)
+  end
+
   defp normalize_harness(_), do: nil
 
   defp member(index, roots, ref) do

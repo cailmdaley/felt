@@ -23,6 +23,15 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 	if json.NewDecoder(bytes.NewReader(b)).Decode(&input) != nil {
 		return nil
 	}
+	return a.handleHook(input, func(text string) error {
+		return json.NewEncoder(w).Encode(sessionEnvelope{HookSpecificOutput: sessionInner{HookEventName: input.HookEventName, AdditionalContext: text}})
+	})
+}
+
+// handleHook records one Claude-shaped hook event, registers its session's
+// mailbox and offers queued context through emit, which writes it in the
+// envelope the harness reads.
+func (a *app) handleHook(input eventHookInput, emit func(string) error) error {
 	harness := a.messageHookHarness(input)
 	// Only Claude child lifecycle/tool events would impersonate the parent's
 	// turn. Other harness events and SendUserFile retain their event trail.
@@ -51,7 +60,7 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 	if input.NativePID > 0 && !messaging.HookPIDIsAncestor(input.NativePID) {
 		return nil
 	}
-	if _, ok := eventTypes[input.HookEventName]; !ok {
+	if _, ok := eventTypes[input.HookEventName]; !ok && input.HookEventName != "PreInvocation" {
 		return nil
 	}
 	host, err := a.resolveOwnHost("")
@@ -61,7 +70,7 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 	digest := ""
 	var acknowledgeDigest func()
 	writeContext := func(text string) error {
-		err := json.NewEncoder(w).Encode(sessionEnvelope{HookSpecificOutput: sessionInner{HookEventName: input.HookEventName, AdditionalContext: text}})
+		err := emit(text)
 		if err == nil && acknowledgeDigest != nil {
 			acknowledgeDigest()
 		}
@@ -90,7 +99,7 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 		}
 		return nil
 	}
-	if harness == "codex" || harness == "claude" {
+	if harness != "pi" {
 		input.Harness = harness
 		state := turnMailboxState(input)
 		if state != "" {
@@ -105,7 +114,7 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 			a.env.Getenv("CLAUDE_CODE_MESSAGING_SOCKET"), input.TranscriptPath,
 			input.HookEventName != "SessionEnd")
 	}
-	offer := input.HookEventName == "UserPromptSubmit" || harness == "claude" && input.HookEventName == "PostToolUse" || harness == "codex" && (input.HookEventName == "SessionStart" || input.HookEventName == "PreToolUse" || input.HookEventName == "PostToolUse")
+	offer := input.HookEventName == "UserPromptSubmit" || harness == "claude" && input.HookEventName == "PostToolUse" || harness == "codex" && (input.HookEventName == "SessionStart" || input.HookEventName == "PreToolUse" || input.HookEventName == "PostToolUse") || harness == "antigravity" && (input.HookEventName == "SessionStart" || input.HookEventName == "PreInvocation")
 	wrote := false
 	if offer {
 		var outputErr error
@@ -136,7 +145,7 @@ func turnMailboxState(input eventHookInput) string {
 	switch input.HookEventName {
 	case "SessionStart":
 		return "idle"
-	case "UserPromptSubmit", "PreToolUse", "PostToolUse":
+	case "UserPromptSubmit", "PreInvocation", "PreToolUse", "PostToolUse":
 		return "working"
 	case "StopFailure":
 		return "idle"

@@ -10,7 +10,7 @@ defmodule Shuttle.TranscriptUsage do
 
     * `context` — the prompt's tokens at the latest turn: Claude and Pi split
       input, cache reads and cache writes; Codex's cached input is already part
-      of its input. A compaction replaces it with the count it records, or
+      of its input; Antigravity splits fresh input and cache reads. A compaction replaces it with the count it records, or
       leaves it unknown, and a Codex reset carries no measured input.
     * `window` — the context window, which only Codex records.
     * `cached` — the tokens that turn read from the prompt cache.
@@ -58,89 +58,13 @@ defmodule Shuttle.TranscriptUsage do
 
   defp line_entries(line, harness) do
     case Jason.decode(line) do
-      {:ok, record} -> entries(harness, record)
+      {:ok, record} -> Shuttle.Harness.call(harness, :usage_entries, [record], [])
       {:error, _} -> []
     end
   end
 
-  defp entries("claude-code", %{"isSidechain" => true}), do: []
-
-  defp entries("claude-code", %{"type" => "system", "subtype" => "compact_boundary"} = record),
-    do: [reset(record, count(record["compactMetadata"]["postTokens"]))]
-
-  # A `<synthetic>` record is Claude Code's own stand-in reply; no model read a prompt for it.
-  defp entries("claude-code", %{"type" => "assistant", "message" => %{"model" => "<synthetic>"}}),
-    do: []
-
-  defp entries("claude-code", %{"type" => "assistant", "message" => %{"usage" => %{} = u}} = r) do
-    read = u["cache_read_input_tokens"]
-    write = u["cache_creation_input_tokens"]
-
-    [
-      %{
-        kind: :usage,
-        at: time(r),
-        context: sum([u["input_tokens"], read, write]),
-        cached: count(read),
-        cache: %{
-          read: count(read) || 0,
-          write: count(write) || 0,
-          hour_write: count(u["cache_creation"]["ephemeral_1h_input_tokens"]) || 0
-        }
-      }
-    ]
-  end
-
-  defp entries("pi", %{"type" => type} = record) when type in ["compaction", "context_edit"],
-    do: [reset(record, nil)]
-
-  defp entries("pi", %{"type" => "message", "message" => %{"role" => "assistant"} = message} = r) do
-    case message do
-      %{"stopReason" => reason} when reason in ["error", "aborted"] ->
-        []
-
-      %{"usage" => %{} = u} ->
-        context = sum([u["input"], u["cacheRead"], u["cacheWrite"]])
-        [%{kind: :usage, at: time(r), context: context, cached: count(u["cacheRead"])}]
-
-      _ ->
-        []
-    end
-  end
-
-  defp entries("codex", %{"type" => "compacted"} = record), do: [reset(record, nil)]
-
-  defp entries("codex", %{"type" => "event_msg", "payload" => %{"type" => type} = payload} = r) do
-    case {type, payload} do
-      {"context_compacted", _} ->
-        [reset(r, nil)]
-
-      {"token_count", %{"info" => %{"last_token_usage" => %{} = usage} = info}} ->
-        [codex_usage(r, usage, info)]
-
-      _ ->
-        []
-    end
-  end
-
-  defp entries(_harness, _record), do: []
-
-  defp codex_usage(record, usage, info) do
-    # A compaction reset reports a retained total with no measured input or output.
-    reset_only? =
-      usage["input_tokens"] == 0 and usage["output_tokens"] == 0 and
-        (count(usage["total_tokens"]) || 0) > 0
-
-    %{
-      kind: :usage,
-      at: time(record),
-      context: if(!reset_only?, do: count(usage["input_tokens"])),
-      window: count(info["model_context_window"]),
-      cached: if(!reset_only?, do: count(usage["cached_input_tokens"]))
-    }
-  end
-
-  defp reset(record, context), do: %{kind: :reset, at: time(record), context: context}
+  @doc false
+  def reset(record, context), do: %{kind: :reset, at: time(record), context: context}
 
   defp apply_entry(%{kind: :reset} = entry, state) do
     %{
@@ -214,20 +138,23 @@ defmodule Shuttle.TranscriptUsage do
   defp hit_share(%{context_tokens: 0}), do: nil
   defp hit_share(state), do: Float.round(state.read_tokens / state.context_tokens, 3)
 
-  defp sum(values) do
+  @doc false
+  def sum(values) do
     counts = Enum.map(values, &count/1)
     if Enum.all?(counts), do: Enum.sum(counts)
   end
 
-  defp count(value) when is_number(value) and value >= 0, do: value
-  defp count(_value), do: nil
+  @doc false
+  def count(value) when is_number(value) and value >= 0, do: value
+  def count(_value), do: nil
 
-  defp time(%{"timestamp" => stamp}) when is_binary(stamp) do
+  @doc false
+  def time(%{"timestamp" => stamp}) when is_binary(stamp) do
     case DateTime.from_iso8601(stamp) do
       {:ok, datetime, _offset} -> DateTime.to_unix(datetime, :millisecond)
       {:error, _} -> nil
     end
   end
 
-  defp time(_record), do: nil
+  def time(_record), do: nil
 end

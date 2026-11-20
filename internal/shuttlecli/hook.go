@@ -21,7 +21,7 @@ func (a *app) hookCmd() *cobra.Command {
 		Long:  "Harness adapters that record Shuttle session events and commits for the daemon's activity stream.",
 	}
 	hookCmd.GroupID = groupOperations
-	hookCmd.AddCommand(a.hookEventCmd(), a.hookInterruptedCmd(), a.hookCommitCmd(), a.hookHandoffCmd())
+	hookCmd.AddCommand(a.hookEventCmd(), a.hookAntigravityCmd(), a.hookInterruptedCmd(), a.hookCommitCmd(), a.hookHandoffCmd())
 	return hookCmd
 }
 

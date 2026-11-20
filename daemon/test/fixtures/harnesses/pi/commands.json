@@ -1,0 +1,37 @@
+{
+  "agent": {
+    "cli": "pi",
+    "effort": "max",
+    "env": {
+      "FIXTURE_TOKEN": "it's here"
+    },
+    "harness": {
+      "binary": "pi",
+      "delivery": "extension",
+      "identity": "reported",
+      "idle_signal": false,
+      "interrupts": false,
+      "ledger": "pi",
+      "name": "pi",
+      "transcripts": {
+        "env": "SHUTTLE_PI_SESSIONS_DIR",
+        "home": ".pi/agent",
+        "leaf": "sessions"
+      }
+    },
+    "id": "pi-luna",
+    "model": "gpt-luna",
+    "provider": "github-copilot",
+    "requires_model": true,
+    "wrapper": "pi"
+  },
+  "expect": {
+    "launch": "FIXTURE_TOKEN='it'\\''s here' pi --provider 'github-copilot' --model 'gpt-luna:max' 'Fiber: demo/task\nIt'\\''s your turn.'",
+    "launch_headless": "FIXTURE_TOKEN='it'\\''s here' pi --provider 'github-copilot' --model 'gpt-luna:max' 'Fiber: demo/task\nIt'\\''s your turn.'",
+    "resume": "FIXTURE_TOKEN='it'\\''s here' pi --provider 'github-copilot' --model 'gpt-luna:max' --session '0a1b2c3d-1111-4222-8333-444455556666' 'Fiber: demo/task\nIt'\\''s your turn.'",
+    "resume_quiet": "FIXTURE_TOKEN='it'\\''s here' pi --provider 'github-copilot' --model 'gpt-luna:max' --session '0a1b2c3d-1111-4222-8333-444455556666'"
+  },
+  "prompt": "Fiber: demo/task\nIt's your turn.",
+  "session": "0a1b2c3d-1111-4222-8333-444455556666",
+  "work_dir": "/work/sky's project"
+}

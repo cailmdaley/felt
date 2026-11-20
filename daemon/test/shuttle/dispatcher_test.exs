@@ -111,6 +111,7 @@ defmodule Shuttle.DispatcherTest do
     @claude_opus_resolved %{
       "id" => "claude-opus",
       "cli" => "claude",
+      "harness" => Shuttle.Test.HarnessFacts.facts("claude"),
       "wrapper" => "claude",
       "model" => "opus",
       "extra_flags" => "--permission-mode auto"
@@ -118,6 +119,7 @@ defmodule Shuttle.DispatcherTest do
     @claude_sonnet_resolved %{
       "id" => "claude-sonnet",
       "cli" => "claude",
+      "harness" => Shuttle.Test.HarnessFacts.facts("claude"),
       "wrapper" => "claude",
       "model" => "sonnet",
       "extra_flags" => "--permission-mode auto"
@@ -125,6 +127,7 @@ defmodule Shuttle.DispatcherTest do
     @pi_resolved %{
       "id" => "pi-deepseek-flash",
       "cli" => "pi",
+      "harness" => Shuttle.Test.HarnessFacts.facts("pi"),
       "wrapper" => "pi",
       "provider" => "openrouter",
       "model" => "deepseek/deepseek-v4-flash-latest"
@@ -326,6 +329,7 @@ defmodule Shuttle.DispatcherTest do
           resolved = %{
             "id" => "claude-opus",
             "cli" => "claude",
+            "harness" => Shuttle.Test.HarnessFacts.facts("claude"),
             "wrapper" => "claude",
             "model" => "opus"
           }
@@ -339,6 +343,7 @@ defmodule Shuttle.DispatcherTest do
           {Jason.encode!(%{
              "id" => name,
              "cli" => "claude",
+             "harness" => Shuttle.Test.HarnessFacts.facts("claude"),
              "wrapper" => "claude",
              "model" => "opus"
            }), 0}
@@ -763,6 +768,7 @@ defmodule Shuttle.DispatcherTest do
           "agent" => %{
             "id" => "claude-sonnet",
             "cli" => "claude",
+            "harness" => Shuttle.Test.HarnessFacts.facts("claude"),
             "wrapper" => "claude",
             "model" => "sonnet",
             "headless" => true
@@ -794,6 +800,7 @@ defmodule Shuttle.DispatcherTest do
           "agent" => %{
             "id" => "pi-luna",
             "cli" => "pi",
+            "harness" => Shuttle.Test.HarnessFacts.facts("pi"),
             "wrapper" => "pi",
             "model" => "openai/gpt-6-luna"
           }
@@ -823,6 +830,7 @@ defmodule Shuttle.DispatcherTest do
           "agent" => %{
             "id" => "claude-sonnet",
             "cli" => "claude",
+            "harness" => Shuttle.Test.HarnessFacts.facts("claude"),
             "wrapper" => "claude",
             "model" => "sonnet"
           }
@@ -1993,12 +2001,9 @@ defmodule Shuttle.DispatcherTest do
       path = Path.join(sessions, "session.jsonl")
       File.write!(path, Jason.encode!(header) <> "\nFiber: tests/linked\n")
 
-      assert {:ok, ^path} =
-               Dispatcher.find_session_file(
-                 "pi",
-                 Path.join(tmp, "group/analyses"),
-                 "tests/linked",
-                 now
+      assert {:ok, "pi-session"} =
+               Shuttle.Harness.Pi.find_session(Path.join(tmp, "group/analyses"), now,
+                 fiber_id: "tests/linked"
                )
     end
 

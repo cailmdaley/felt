@@ -172,7 +172,7 @@ defmodule Shuttle.LifecycleModelWorkerTest do
 
     root = Shuttle.data_dir()
     project = Path.join(root, "project")
-    filed = Path.join([root, "claude", SessionResume.claude_slug(project)])
+    filed = Path.join([root, "claude", Shuttle.Harness.Claude.slug(project)])
     Enum.each([project, filed], &File.mkdir_p!/1)
     line = Jason.encode!(%{"type" => "user", "cwd" => project})
     File.write!(Path.join(filed, "#{session}.jsonl"), line <> "\n")

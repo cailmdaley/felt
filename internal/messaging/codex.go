@@ -16,20 +16,28 @@ func (codexAdapter) discover(_ context.Context, env *sysenv.Env, host string) ([
 }
 
 func (codexAdapter) send(ctx context.Context, env *sysenv.Env, address Address, request Request) (Receipt, error) {
-	return sendCodexTerminal(ctx, env, address, request, submitCodexTerminalInput)
+	return sendCodexTerminal(ctx, env, address, request, submitTerminalInput)
 }
 
 func sendCodexTerminal(ctx context.Context, env *sysenv.Env, address Address, request Request, submit func(context.Context, *sysenv.Env, Address, Request) (Receipt, error)) (Receipt, error) {
-	return sendCodexTerminalWithDiscovery(ctx, env, address, request, discoverCodexTerminalReceiver, submit)
+	return sendTerminalWithDiscovery(ctx, env, address, request, discoverCodexTerminalReceiver, submit)
 }
 
-type codexReceiverDiscover func(context.Context, *sysenv.Env, Address) error
+// terminalReceiverDiscover makes sure a live receiver's hook mailbox is
+// registered, or says why none is.
+type terminalReceiverDiscover func(context.Context, *sysenv.Env, Address) error
 
-func sendCodexTerminalWithDiscovery(ctx context.Context, env *sysenv.Env, address Address, request Request, discover codexReceiverDiscover, submit func(context.Context, *sysenv.Env, Address, Request) (Receipt, error)) (Receipt, error) {
+// sendTerminalWithDiscovery delivers to a harness that takes typed input in
+// either phase (Codex, Antigravity): a wake is pasted into its terminal, which
+// queues it behind a running turn; anything else waits in the hook mailbox,
+// offered at the harness's next hook. IdleOnly is guarded by the turn state
+// the last hook recorded.
+func sendTerminalWithDiscovery(ctx context.Context, env *sysenv.Env, address Address, request Request, discover terminalReceiverDiscover, submit func(context.Context, *sysenv.Env, Address, Request) (Receipt, error)) (Receipt, error) {
+	hook := address.Harness + "-hook"
 	if !request.Wake {
 		request.Wake = false
 		if err := discover(ctx, env, address); err != nil {
-			return rejected(request, "codex-hook", err.Error()), err
+			return rejected(request, hook, err.Error()), err
 		}
 		return queueMailbox(env, address, request)
 	}
@@ -39,22 +47,27 @@ func sendCodexTerminalWithDiscovery(ctx context.Context, env *sysenv.Env, addres
 	var err error
 	if request.IdleOnly {
 		if err := discover(ctx, env, address); err != nil {
-			return rejected(request, "codex-hook", err.Error()), err
+			return rejected(request, hook, err.Error()), err
 		}
-		state, unlock, err = lockMailboxSessionState(env, "codex", address.ID, address.Host)
+		state, unlock, err = lockMailboxSessionState(env, address.Harness, address.ID, address.Host)
 		if err != nil {
-			return rejected(request, "codex-hook", err.Error()), err
+			return rejected(request, hook, err.Error()), err
 		}
 		defer unlock()
 	}
 	if request.IdleOnly && state != "idle" {
-		return rejected(request, "codex-hook", "Codex turn is not known to be idle; message was not delivered"), errCode("busy", "Codex turn is not known to be idle")
+		turn := terminalTitle(address.Harness) + " turn is not known to be idle"
+		return rejected(request, hook, turn+"; message was not delivered"), errCode("busy", "%s", turn)
 	}
-
-	// Codex accepts terminal input while a turn is active and queues it as a
-	// follow-up. A Wake therefore goes to the TUI in either phase; hooks remain
-	// the context-only path and IdleOnly is guarded by the last observed hook.
 	return submit(ctx, env, address, request)
+}
+
+// terminalTitle names a terminal harness in messages a person reads.
+func terminalTitle(name string) string {
+	if name == "antigravity" {
+		return "Antigravity"
+	}
+	return "Codex"
 }
 
 // UnnamedSender heads a message whose caller gave no sender.

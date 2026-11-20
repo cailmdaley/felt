@@ -10,10 +10,10 @@ defmodule Shuttle.Pulse do
     block = fiber["shuttle"] || %{}
     pulse = block["pulse"]
     interval = get_in(block, ["resolved", "pulse_interval_ms"])
-    cli = get_in(block, ["resolved", "agent", "cli"])
+    idle_signal? = get_in(block, ["resolved", "agent", "harness", "idle_signal"]) == true
 
     if Poller.block_kind(block) == "oneshot" and is_integer(interval) and
-         interval >= 60_000 and interval <= 86_400_000 and cli in ["claude", "codex"] do
+         interval >= 60_000 and interval <= 86_400_000 and idle_signal? do
       case pulse do
         every when is_binary(every) -> %{every: every, interval: interval, window: nil}
         %{"every" => every} -> %{every: every, interval: interval, window: pulse["window"]}

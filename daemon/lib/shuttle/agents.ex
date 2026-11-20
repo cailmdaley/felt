@@ -28,7 +28,8 @@ defmodule Shuttle.Agents do
           requires_model: boolean(),
           effort: String.t() | nil,
           chrome: boolean(),
-          headless: boolean()
+          headless: boolean(),
+          harness: map() | nil
         }
 
   @doc """
@@ -52,7 +53,8 @@ defmodule Shuttle.Agents do
       requires_model: resolved["requires_model"] == true,
       effort: resolved["effort"],
       chrome: resolved["chrome"] == true,
-      headless: resolved["headless"] == true
+      headless: resolved["headless"] == true,
+      harness: resolved["harness"]
     }
   end
 
@@ -108,110 +110,52 @@ defmodule Shuttle.Agents do
   def wrapper_probe(_), do: :none
 
   @doc """
-  Builds the shell command string for invoking an agent with the dispatch prompt.
+  The shell command that starts `agent` with `prompt` as its first turn: the
+  harness module's launch command (`Shuttle.Harness`) behind the record's env
+  assignments. A record whose `cli` names no harness Shuttle knows runs its
+  wrapper with the prompt as an argument.
 
   ## Options
 
-    * `:session_id` — for Claude agents only: pre-specifies the session UUID via
-      `--session-id <uuid>`. Ignored for other harnesses. Allows the Shuttle
-      daemon to know the session UUID before the worker runs, so it can stamp it
-      into the fiber's `shuttle:` block at dispatch (`shuttle.session_uuid`, the
-      durable resume handle read by `Shuttle.Continuation`) rather than via
-      post-hoc capture.
+    * `:session_id` — the conversation id, for a harness whose identity is
+      assigned at launch (Claude's `--session-id`); others ignore it.
+    * `:work_dir` — the worker's working directory.
   """
   @spec build_command(agent_record(), String.t(), keyword()) :: String.t()
   def build_command(agent, prompt, opts \\ []) do
-    session_id = Keyword.get(opts, :session_id)
-    flags = render_flags(agent)
-
-    # Claude and Pi may use shell functions sourced by bash -l. Codex is
-    # executed by env so Bash functions cannot shadow the PATH executable.
-    # For claude: stdin via here-string; --session-id can be pre-specified.
-    # For codex/pi: positional arg.
     command =
-      case agent.cli do
-        "claude" ->
-          session_flag =
-            if session_id, do: "--session-id #{shell_escape(session_id)} ", else: ""
-
-          "#{agent.wrapper} #{session_flag}#{flags} <<< #{shell_escape(prompt)}"
-
-        "codex" ->
-          codex_invocation(agent.wrapper, "#{flags} #{shell_escape(prompt)}")
-
-        _ ->
-          "#{agent.wrapper} #{flags} #{shell_escape(prompt)}"
+      case Shuttle.Harness.module(agent.cli) do
+        nil -> "#{agent.wrapper} #{flags(agent)} #{shell_escape(prompt)}"
+        harness -> harness.launch_command(agent, prompt, opts)
       end
 
     with_env(command, agent)
   end
 
   @doc """
-  Builds the shell command string for resuming a previous worker session.
-
-  Each harness has a distinct resume invocation:
-  - claude: `claude --resume <uuid>` (pre-specified UUID, deterministic)
-  - codex:  `codex resume <uuid>` (UUID captured post-hoc after initial dispatch)
-  - pi:     `pi --session <uuid>` (partial UUID also accepted)
-
-  When `prompt` is non-empty (whitespace-trimmed), it is injected as the
-  next user turn in the resumed session — mirroring the fresh-dispatch
-  pattern (claude reads it via `<<<` here-string; codex and pi take it as
-  a positional arg). Without it, resume would land the worker in a session
-  with no signal that it was deliberately woken, and the user's directive
-  (the transient `user_message` dispatch parameter) would never reach it.
-  Autonomous restoration omits this prompt when durable turn evidence says the
-  previous turn had already ended or its state is ambiguous, and launches that
-  resume interactively so the terminal can wait for the human.
-
-  Do not feed pi the prompt on stdin: a piped stdin switches pi from
-  interactive to print mode, so a here-string would silently change the
-  session's shape. Positional `[messages...]` is the interactive path.
-
-  Extra flags (provider, model, extra_flags) are threaded through so the
-  harness wrapper runs with the same configuration as the original session.
+  The shell command that reopens conversation `session_id`, with `prompt` as
+  its next user turn when it is not blank. Autonomous restoration omits the
+  prompt when durable turn evidence says the previous turn had already ended
+  or its state is ambiguous, and launches that resume interactively so the
+  terminal can wait for the human. A record whose `cli` names no harness
+  Shuttle knows starts fresh with a note asking it to resume. `opts` takes
+  `:work_dir`.
   """
-  @spec build_resume_command(agent_record(), String.t(), String.t()) :: String.t()
-  def build_resume_command(agent, session_id, prompt \\ "") do
-    flags = render_flags(agent)
-
-    has_prompt = is_binary(prompt) and String.trim(prompt) != ""
+  @spec build_resume_command(agent_record(), String.t(), String.t(), keyword()) :: String.t()
+  def build_resume_command(agent, session_id, prompt \\ "", opts \\ []) do
+    prompt = if is_binary(prompt) and String.trim(prompt) != "", do: prompt, else: ""
 
     command =
-      case agent.cli do
-        "claude" ->
-          # Claude resumes from on-disk transcript. With a prompt, feed it
-          # via stdin (here-string) so it lands as the next user turn —
-          # mirrors fresh dispatch's `<<<` pattern.
-          base = "#{agent.wrapper} #{flags} --resume #{shell_escape(session_id)}"
-          if has_prompt, do: "#{base} <<< #{shell_escape(prompt)}", else: base
+      case Shuttle.Harness.module(agent.cli) do
+        nil ->
+          "#{agent.wrapper} #{flags(agent)} #{shell_escape("Resume session #{session_id} if possible.")}"
 
-        "codex" ->
-          # codex resume <uuid> [prompt] — resume subcommand, UUID positional,
-          # optional prompt as trailing positional.
-          args = "#{flags} resume #{shell_escape(session_id)}"
-          args = if has_prompt, do: "#{args} #{shell_escape(prompt)}", else: args
-          codex_invocation(agent.wrapper, args)
-
-        "pi" ->
-          # pi --session <path|partial-uuid> [messages...] — UUID prefix is
-          # enough; the optional message is the next user turn, same as fresh.
-          base = "#{agent.wrapper} #{flags} --session #{shell_escape(session_id)}"
-          if has_prompt, do: "#{base} #{shell_escape(prompt)}", else: base
-
-        _ ->
-          # Unknown harness: fall back to fresh dispatch with a note.
-          "#{agent.wrapper} #{flags} #{shell_escape("Resume session #{session_id} if possible.")}"
+        harness ->
+          harness.resume_command(agent, session_id, prompt, opts)
       end
 
     with_env(command, agent)
   end
-
-  # Codex's terminal startup probes tmux. Clearing the pane variables prevents
-  # those optional probes from waiting on the parent terminal's tmux server.
-  # `env` also executes the PATH program directly, without a login-shell function.
-  defp codex_invocation(wrapper, args),
-    do: "env -u TMUX -u TMUX_PANE #{wrapper} #{args}"
 
   # Assignment prefixes work for both executables and login-shell functions.
   # Values remain literal shell words, including quotes, newlines and expansions.
@@ -237,72 +181,51 @@ defmodule Shuttle.Agents do
     Enum.join(assignments ++ [command], " ")
   end
 
-  # Renders the harness invocation flags, folding the resolved axes (effort,
-  # chrome, headless) into each CLI's native form:
-  #   claude → `--effort <level>` flag + `--chrome`; headless adds `-p` and
-  #            swaps the interactive permission mode for `bypassPermissions`
-  #   pi     → `:level` suffix on the model string (preserves today's behaviour)
-  #   codex  → `-c model_reasoning_effort="<level>"`
-  # Effort/chrome/headless come from Shuttle's resolved record via from_resolved/1
-  # (the `:effort`/`:chrome`/`:headless` keys); absent (nil/false) means no axis
-  # rendering.
-  defp render_flags(agent) do
-    effort = agent[:effort]
-    chrome = agent[:chrome] == true
-    headless = agent[:headless] == true and agent.cli == "claude"
-    model = effective_model(agent, effort)
+  @doc """
+  The flags every harness takes from a record, in order: `-p` when headless,
+  `--provider`, `--model`, the harness's effort and instructions flags,
+  `--chrome`, then the record's `extra_flags`. A harness module passes what
+  it renders itself: `:model` (the model string, when effort is folded into
+  it), `:effort` and `:instructions` (whole flags), and `:headless` (print
+  mode, which swaps the interactive permission mode for `bypassPermissions`,
+  since nobody can approve a tool call).
+  """
+  @spec flags(agent_record(), keyword()) :: String.t()
+  def flags(agent, opts \\ []) do
+    headless = Keyword.get(opts, :headless, false)
 
     [
       if(headless, do: "-p", else: nil),
       flag("--provider", agent.provider),
-      flag("--model", model),
-      effort_flag(agent.cli, effort),
-      developer_instructions_flag(agent),
-      if(chrome, do: "--chrome", else: nil),
-      headless_extra_flags(agent, headless)
+      flag("--model", Keyword.get(opts, :model, agent.model)),
+      opts[:effort],
+      opts[:instructions],
+      if(agent[:chrome] == true, do: "--chrome", else: nil),
+      extra_flags(agent, headless)
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.join(" ")
   end
 
-  # A headless `-p` worker runs unattended: no human can approve a tool call, so
-  # the interactive `--permission-mode auto` is swapped for `bypassPermissions`
-  # (claude's "never stall" mode; codex agents never stall either, since
-  # `--approve-for-me` routes approvals to Codex's reviewer). Non-headless invocations keep
-  # their declared `extra_flags` verbatim.
-  defp headless_extra_flags(%{extra_flags: ef}, true) when is_binary(ef) do
+  defp extra_flags(%{extra_flags: ef}, true) when is_binary(ef) do
     String.replace(ef, "--permission-mode auto", "--permission-mode bypassPermissions")
   end
 
-  defp headless_extra_flags(agent, _headless), do: agent.extra_flags
+  defp extra_flags(agent, _headless), do: agent.extra_flags
 
-  # pi renders effort as a `:level` suffix on the model string; other harnesses
-  # keep the bare model.
-  defp effective_model(%{cli: "pi", model: model}, effort)
-       when is_binary(model) and is_binary(effort) and effort != "" do
-    "#{model}:#{effort}"
+  @doc "The effort axis when the record sets one, else nil."
+  def effort(agent) do
+    case agent[:effort] do
+      effort when is_binary(effort) and effort != "" -> effort
+      _ -> nil
+    end
   end
-
-  defp effective_model(agent, _effort), do: agent.model
-
-  defp effort_flag("claude", effort) when is_binary(effort) and effort != "",
-    do: "--effort #{shell_escape(effort)}"
-
-  defp effort_flag("codex", effort) when is_binary(effort) and effort != "",
-    do: "-c model_reasoning_effort=#{shell_escape(effort)}"
-
-  defp effort_flag(_cli, _effort), do: nil
-
-  defp developer_instructions_flag(%{cli: "codex", developer_instructions: instructions})
-       when is_binary(instructions) and instructions != "",
-       do: "-c " <> shell_escape("developer_instructions=" <> Jason.encode!(instructions))
-
-  defp developer_instructions_flag(_agent), do: nil
 
   defp flag(_key, nil), do: nil
   defp flag(key, value), do: "#{key} #{shell_escape(value)}"
 
-  defp shell_escape(str) do
+  @doc "One single-quoted shell word."
+  def shell_escape(str) do
     # Single-quote escaping: replace ' with '\''
     escaped = String.replace(str, "'", "'\\''")
     "'#{escaped}'"

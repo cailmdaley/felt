@@ -555,10 +555,10 @@ defmodule Shuttle.Dispatcher do
          :ok <- preflight_terminal(agent, work_dir, runner) do
       session = capture_session_name()
 
-      # Only claude can be handed a session id up front; `build_command/3` and
-      # `render_capture_prompt/2` both treat a nil `session_id`/`session_uuid`
-      # as absent, so the other harnesses need no separate path.
-      session_uuid = if agent.cli == "claude", do: generate_uuid4()
+      # Only a harness whose identity is assigned can be handed a session id up
+      # front; `build_command/3` and `render_capture_prompt/2` both treat a nil
+      # `session_id`/`session_uuid` as absent, so the others need no separate path.
+      session_uuid = if identity(agent) == "assigned", do: generate_uuid4()
 
       prompt =
         render_capture_prompt(yap,
@@ -573,7 +573,7 @@ defmodule Shuttle.Dispatcher do
           headless: agent[:headless] == true
         )
 
-      command = Agents.build_command(agent, prompt, session_id: session_uuid)
+      command = Agents.build_command(agent, prompt, session_id: session_uuid, work_dir: work_dir)
 
       # No `session:` opt: capture sessions are headless by design (the user
       # stays on the board), so the wait-for-client gate would only delay the
@@ -1256,13 +1256,18 @@ defmodule Shuttle.Dispatcher do
                 do: Map.put(agent, :headless, false),
                 else: agent
 
-            resume_command = Agents.build_resume_command(resume_agent, session_id, resume_prompt)
+            resume_command =
+              Agents.build_resume_command(resume_agent, session_id, resume_prompt,
+                work_dir: work_dir
+              )
 
             # Restoration always remains attached to the recorded conversation,
             # including when it was mid-turn. A failed resume stays visible as
             # a blocked worker instead of waking a new conversation.
+            fallback = Shuttle.Harness.call(agent.cli, :resume_fallback, [], :fresh)
+
             fallback_command =
-              if Keyword.get(opts, :restoration) or human_turn? or agent.cli == "codex" do
+              if Keyword.get(opts, :restoration) or human_turn? or fallback == :none do
                 nil
               else
                 fresh_fallback_command(
@@ -1279,7 +1284,7 @@ defmodule Shuttle.Dispatcher do
             opts = Keyword.put(opts, :prepared_launch, prepared)
 
             fallback_signal =
-              if agent.cli == "pi" and not Keyword.get(opts, :restoration),
+              if fallback == :recapture and not Keyword.get(opts, :restoration),
                 do: private_fallback_signal(session, resumed_at, session_id),
                 else: nil
 
@@ -1471,32 +1476,40 @@ defmodule Shuttle.Dispatcher do
   # launch succeeds), they just don't reuse the id.
   defp fresh_fallback_command(agent, fiber_id, session_id, prompt_context, opts) do
     prompt = render_context_prompt(fiber_id, prompt_context, opts)
-    # `build_command/3` ignores `session_id` for every non-claude harness.
-    Agents.build_command(agent, prompt, session_id: session_id)
+    # Only a harness whose identity is assigned takes `session_id`.
+    Agents.build_command(agent, prompt,
+      session_id: session_id,
+      work_dir: Keyword.get(opts, :work_dir)
+    )
   end
 
-  # Build the fresh dispatch command. For Claude we generate and inject a UUID
-  # upfront (--session-id) so we can store it synchronously. Codex/Pi identity is
-  # captured asynchronously after spawn.
+  # Build the fresh dispatch command. A harness whose identity is assigned gets
+  # a UUID up front (Claude's --session-id), stored synchronously; one whose
+  # identity is reported is captured asynchronously after spawn.
   defp build_fresh_command(agent, fiber_id, prompt_context, opts) do
     prompt = render_context_prompt(fiber_id, prompt_context, opts)
+    work_dir = Keyword.get(opts, :work_dir)
 
-    case agent.cli do
-      "claude" ->
+    case identity(agent) do
+      "assigned" ->
         uuid = generate_uuid4()
-        command = Agents.build_command(agent, prompt, session_id: uuid)
+        command = Agents.build_command(agent, prompt, session_id: uuid, work_dir: work_dir)
         {command, {:claude, uuid}}
 
-      cli when cli in ["pi", "codex"] ->
-        command = Agents.build_command(agent, prompt)
-        work_dir = Keyword.get(opts, :work_dir, Shuttle.FS.cwd!())
-        {command, {:capture, cli, work_dir, DateTime.utc_now()}}
+      "reported" ->
+        command = Agents.build_command(agent, prompt, work_dir: work_dir)
+        work_dir = work_dir || Shuttle.FS.cwd!()
+        {command, {:capture, agent.cli, work_dir, DateTime.utc_now()}}
 
       _ ->
-        command = Agents.build_command(agent, prompt)
+        command = Agents.build_command(agent, prompt, work_dir: work_dir)
         {command, :none}
     end
   end
+
+  # How the agent's harness learns a conversation id: its resolved record's
+  # facts (`Shuttle.Harness`), nil for a harness Shuttle does not know.
+  defp identity(agent), do: get_in(agent, [:harness, "identity"])
 
   # A resume is only meaningful WITHIN one harness: `pi --session <uuid>`
   # cannot open a claude-code transcript and vice versa. When the ledger knows
@@ -1689,7 +1702,7 @@ defmodule Shuttle.Dispatcher do
          opts,
          deadline
        ) do
-    case capture_session_uuid(cli, work_dir, fiber_id, dispatched_after, deadline) do
+    case capture_session_uuid(cli, work_dir, fiber_id, dispatched_after, opts, deadline) do
       {:ok, uuid} ->
         case Keyword.get(opts, :poller) do
           nil ->
@@ -1873,9 +1886,9 @@ defmodule Shuttle.Dispatcher do
     end)
   end
 
-  # Poll the harness's session JSONL files until the elapsed-time deadline. A candidate
-  # must match cwd, dispatch time and the fiber prompt, so concurrent workers
-  # sharing a checkout cannot borrow one another's identity.
+  # Poll the harness for the worker's conversation until the elapsed-time
+  # deadline; a harness that reports its identity matches it to the worker by
+  # cwd, dispatch time and the fiber prompt (`Shuttle.Harness.find_session/3`).
   @doc false
   def retry_session_capture(fiber_id, cli, work_dir, dispatched_after, runner, opts) do
     Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
@@ -1896,111 +1909,19 @@ defmodule Shuttle.Dispatcher do
   defp capture_timeout_ms,
     do: Shuttle.Env.app(:session_capture_timeout_ms, @session_capture_timeout_ms)
 
-  defp capture_session_uuid(cli, work_dir, fiber_id, dispatched_after, deadline) do
+  # Ask the harness for the conversation this worker started until the
+  # elapsed-time deadline (`Shuttle.Harness.find_session/3`).
+  defp capture_session_uuid(cli, work_dir, fiber_id, dispatched_after, opts, deadline) do
     if System.monotonic_time(:millisecond) >= deadline do
-      {:error, "timed out waiting for session file"}
+      {:error, "timed out waiting for the harness to report its session"}
     else
       :timer.sleep(Shuttle.Env.app(:session_capture_poll_ms, @session_capture_poll_ms))
+      find = [fiber_id: fiber_id, tmux: Keyword.get(opts, :tmux)]
 
-      case find_session_file(cli, work_dir, fiber_id, dispatched_after) do
-        {:ok, path} ->
-          read_uuid_from_jsonl(cli, path)
-
-        {:error, _} ->
-          capture_session_uuid(cli, work_dir, fiber_id, dispatched_after, deadline)
+      case Shuttle.Harness.call(cli, :find_session, [work_dir, dispatched_after, find], :error) do
+        {:ok, uuid} -> {:ok, uuid}
+        :error -> capture_session_uuid(cli, work_dir, fiber_id, dispatched_after, opts, deadline)
       end
-    end
-  end
-
-  # Pi candidates are sorted newest first by their ISO-stamped basenames.
-  # The first candidate that
-  # matches cwd, recency AND content is this dispatch's session; a bare
-  # newest-file pick would steal another worker's session whenever two workers
-  # share a cwd.
-  defp candidate_session_files("pi", work_dir, _dispatched_after) do
-    dir = Shuttle.HarnessPaths.pi_sessions_dir(work_dir)
-
-    case Shuttle.FS.ls(dir) do
-      {:ok, files} -> files |> Enum.sort(:desc) |> Enum.map(&Path.join(dir, &1))
-      {:error, _} -> []
-    end
-  end
-
-  defp candidate_session_files("codex", _work_dir, dispatched_after) do
-    Shuttle.HarnessPaths.codex_session_dirs(since: dispatched_after)
-    |> Enum.flat_map(fn dir ->
-      case Shuttle.FS.ls(dir) do
-        {:ok, files} -> files |> Enum.sort(:desc) |> Enum.map(&Path.join(dir, &1))
-        {:error, _} -> []
-      end
-    end)
-  end
-
-  defp candidate_session_files(_cli, _work_dir, _dispatched_after), do: []
-
-  @doc false
-  def find_session_file(cli, work_dir, fiber_id, dispatched_after) do
-    cli
-    |> candidate_session_files(work_dir, dispatched_after)
-    |> Enum.find(&session_matches?(cli, &1, work_dir, fiber_id, dispatched_after))
-    |> case do
-      nil -> {:error, :not_found}
-      path -> {:ok, path}
-    end
-  end
-
-  # Pi's first JSONL line carries its id, cwd and timestamp.
-  defp session_header(cli, content) do
-    with [first_line | _] <- String.split(content, "\n", parts: 2),
-         {:ok, event} <- Jason.decode(first_line) do
-      case {cli, event} do
-        {"pi", %{"type" => "session"}} ->
-          {:ok, event}
-
-        {"codex", %{"type" => "session_meta", "payload" => payload}} ->
-          {:ok, payload}
-
-        _ ->
-          :error
-      end
-    else
-      _ -> :error
-    end
-  end
-
-  # The transcript's session header names its cwd and start time, but the
-  # dispatch prompt's fiber line only appears once the first message lands
-  # (~1s after the header), so the WHOLE file is searched — the retry loop
-  # above re-reads until it matches.
-  defp session_matches?(cli, path, work_dir, fiber_id, dispatched_after) do
-    with {:ok, content} <- Shuttle.FS.read(path),
-         {:ok, header} <- session_header(cli, content),
-         cwd when is_binary(cwd) <- Map.get(header, "cwd"),
-         timestamp when is_binary(timestamp) <- Map.get(header, "timestamp"),
-         {:ok, started_at, _} <- DateTime.from_iso8601(timestamp) do
-      same_directory?(cwd, work_dir) and
-        DateTime.compare(started_at, DateTime.add(dispatched_after, -5, :second)) != :lt and
-        String.contains?(content, "Fiber: #{fiber_id}")
-    else
-      _ -> false
-    end
-  end
-
-  defp same_directory?(left, right) do
-    Shuttle.HarnessPaths.real_path(Shuttle.Env.expand(left)) ==
-      Shuttle.HarnessPaths.real_path(Shuttle.Env.expand(right))
-  end
-
-  # No cwd re-check here: the only caller hands us the path
-  # `find_session_file/4` just returned, and `session_matches?/5` already
-  # required the header's cwd to expand to `work_dir` before returning it.
-  defp read_uuid_from_jsonl(cli, path) do
-    with {:ok, content} <- Shuttle.FS.read(path),
-         {:ok, header} <- session_header(cli, content),
-         uuid when is_binary(uuid) and uuid != "" <- Map.get(header, "id") do
-      {:ok, uuid}
-    else
-      _ -> {:error, "could not parse session UUID from #{path}"}
     end
   end
 
@@ -2143,7 +2064,7 @@ defmodule Shuttle.Dispatcher do
     #{path_filter}unset RELEASE_ROOT RELEASE_SYS_CONFIG RELEASE_TMP RELEASE_VSN RELEASE_NAME \\
           RELEASE_NODE RELEASE_COOKIE RELEASE_MODE RELEASE_BOOT_SCRIPT \\
           RELEASE_BOOT_SCRIPT_CLEAN RELEASE_DISTRIBUTION RELEASE_PROG RELEASE_COMMAND
-    unset AI_AGENT PI_SESSION_ID CLAUDE_CODE_SESSION_ID CLAUDE_SESSION_ID CODEX_THREAD_ID
+    unset AI_AGENT PI_SESSION_ID CLAUDE_CODE_SESSION_ID CLAUDE_SESSION_ID CODEX_THREAD_ID ANTIGRAVITY_CONVERSATION_ID
     """
   end
 

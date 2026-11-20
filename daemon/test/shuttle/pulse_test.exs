@@ -15,7 +15,10 @@ defmodule Shuttle.PulseTest do
         "kind" => "oneshot",
         "host" => "test-host",
         "pulse" => "59m",
-        "resolved" => %{"pulse_interval_ms" => 3_540_000, "agent" => %{"cli" => "claude"}},
+        "resolved" => %{
+          "pulse_interval_ms" => 3_540_000,
+          "agent" => %{"cli" => "claude", "harness" => %{"idle_signal" => true}}
+        },
         "runtime" => %{
           "session_uuid" => "conversation",
           "dispatched_at" => "2026-11-01T10:00:00Z"
@@ -115,7 +118,12 @@ defmodule Shuttle.PulseTest do
   end
 
   test "an unsupported pulse cannot hold a dormant session from ordinary dispatch" do
-    unsupported = put_in(fiber(), ["shuttle", "resolved", "agent", "cli"], "pi")
+    unsupported =
+      put_in(fiber(), ["shuttle", "resolved", "agent"], %{
+        "cli" => "pi",
+        "harness" => %{"idle_signal" => false}
+      })
+
     row = Pulse.reconcile(%{}, [unsupported], "test-host", @now)["watch-uid"]
 
     assert row["state"] == "unsupported"

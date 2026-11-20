@@ -232,9 +232,9 @@ func consumePass(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 	}
 	// Deciding reads entries unchecked; only a reservation or a wake checks
 	// thread signals' currency, and decides again over the current ones.
-	// A receiver without a hook takes quiet context directly; Codex leaves it to
-	// its fiber hook.
-	direct := !dormant && !hook && a.Harness != "codex"
+	// A receiver without a hook takes quiet context directly; a harness that
+	// takes pasted input (Codex, Antigravity) leaves it to its fiber hook.
+	direct := !dormant && !hook && !PastedTransport(a.Harness+"-terminal")
 	decide := func(due []mailboxPendingItem) (string, bool) {
 		if dormant {
 			return decideLaunch(due, held, inFlight), false
@@ -690,7 +690,7 @@ func (a *Attempt) confirmed() bool {
 }
 
 func confirmedReceipt(r Receipt) bool {
-	return r.Status == StatusAccepted || r.Status == StatusContextAdded || (r.Status == StatusSubmitted && r.Transport == "codex-terminal")
+	return r.Status == StatusAccepted || r.Status == StatusContextAdded || (r.Status == StatusSubmitted && PastedTransport(r.Transport))
 }
 
 // batchTransportID is a bounded, domain-separated identity for the ordered

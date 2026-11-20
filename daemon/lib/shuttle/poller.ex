@@ -3082,7 +3082,9 @@ defmodule Shuttle.Poller do
       open_task? ->
         :unknown
 
-      cli in ["claude", "codex"] and (phase == "waiting" or (cli == "codex" and is_nil(phase))) ->
+      Shuttle.Harness.idle_signal?(cli) and
+          (phase == "waiting" or
+             (Shuttle.Harness.normalize(cli || "") == "codex" and is_nil(phase))) ->
         :idle
 
       true ->
@@ -3397,7 +3399,7 @@ defmodule Shuttle.Poller do
 
     case facts["harness"] do
       harness when is_binary(harness) ->
-        Map.put(worker, :context_harness, Shuttle.Harnesses.normalize(harness))
+        Map.put(worker, :context_harness, Shuttle.Harness.normalize(harness))
 
       _ ->
         worker
@@ -3446,7 +3448,7 @@ defmodule Shuttle.Poller do
         fallback_signal: signal
       ]
 
-      with true <- cli in ["codex", "pi"],
+      with true <- Shuttle.Harness.call(cli, :identity, [], nil) == "reported",
            {:ok, dispatched_at, _} <- DateTime.from_iso8601(boundary) do
         cond do
           signal != nil and not Shuttle.FS.exists?(signal) ->
@@ -5966,7 +5968,7 @@ defmodule Shuttle.Poller do
 
     address =
       if uuid && cli,
-        do: Shuttle.Messaging.address(state.own_host_id, Shuttle.Harnesses.normalize(cli), uuid),
+        do: Shuttle.Messaging.address(state.own_host_id, Shuttle.Harness.normalize(cli), uuid),
         else: "-"
 
     identity = if worker, do: worker.session <> ":" <> (uuid || "-"), else: ""

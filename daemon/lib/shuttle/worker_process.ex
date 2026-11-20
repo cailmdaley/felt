@@ -42,7 +42,7 @@ defmodule Shuttle.WorkerProcess do
   @script_prefix "shuttle-run-"
   @scan_timeout_ms 10_000
   @warn_every_ms 600_000
-  @session_flags ["--resume", "--session-id", "--session", "resume"]
+  @session_flags ["--resume", "--session-id", "--session", "resume", "--conversation"]
 
   @doc """
   A fresh run-script path for tmux session `session`:

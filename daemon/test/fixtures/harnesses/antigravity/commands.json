@@ -1,0 +1,36 @@
+{
+  "agent": {
+    "cli": "antigravity",
+    "effort": "medium",
+    "env": {
+      "AGY_CLI_DISABLE_AUTO_UPDATE": "true"
+    },
+    "extra_flags": "--dangerously-skip-permissions",
+    "harness": {
+      "binary": "agy",
+      "delivery": "inject",
+      "identity": "reported",
+      "idle_signal": true,
+      "interrupts": false,
+      "ledger": "antigravity",
+      "name": "antigravity",
+      "transcripts": {
+        "env": "SHUTTLE_ANTIGRAVITY_BRAIN_DIR",
+        "home": ".gemini/antigravity-cli",
+        "leaf": "brain"
+      }
+    },
+    "id": "agy-neon",
+    "model": "gemini-4-neon",
+    "wrapper": "agy"
+  },
+  "expect": {
+    "launch": "AGY_CLI_DISABLE_AUTO_UPDATE='true' agy --model 'gemini-4-neon-medium' --dangerously-skip-permissions --settings '{\"altScreenMode\":\"never\",\"trustedWorkspaces\":[\"/work/sky'\\''s project\"],\"artifactReviewPolicy\":\"always-proceed\"}' -i 'Fiber: demo/task\nIt'\\''s your turn.'",
+    "launch_headless": "AGY_CLI_DISABLE_AUTO_UPDATE='true' agy --model 'gemini-4-neon-medium' --dangerously-skip-permissions --settings '{\"altScreenMode\":\"never\",\"trustedWorkspaces\":[\"/work/sky'\\''s project\"],\"artifactReviewPolicy\":\"always-proceed\"}' -i 'Fiber: demo/task\nIt'\\''s your turn.'",
+    "resume": "AGY_CLI_DISABLE_AUTO_UPDATE='true' agy --model 'gemini-4-neon-medium' --dangerously-skip-permissions --settings '{\"altScreenMode\":\"never\",\"trustedWorkspaces\":[\"/work/sky'\\''s project\"],\"artifactReviewPolicy\":\"always-proceed\"}' --conversation '0a1b2c3d-1111-4222-8333-444455556666' -i 'Fiber: demo/task\nIt'\\''s your turn.'",
+    "resume_quiet": "AGY_CLI_DISABLE_AUTO_UPDATE='true' agy --model 'gemini-4-neon-medium' --dangerously-skip-permissions --settings '{\"altScreenMode\":\"never\",\"trustedWorkspaces\":[\"/work/sky'\\''s project\"],\"artifactReviewPolicy\":\"always-proceed\"}' --conversation '0a1b2c3d-1111-4222-8333-444455556666'"
+  },
+  "prompt": "Fiber: demo/task\nIt's your turn.",
+  "session": "0a1b2c3d-1111-4222-8333-444455556666",
+  "work_dir": "/work/sky's project"
+}

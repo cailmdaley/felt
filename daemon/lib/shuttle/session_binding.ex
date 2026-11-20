@@ -1,6 +1,6 @@
 defmodule Shuttle.SessionBinding do
   @moduledoc """
-  Claude and Pi receiver succession inferred from explicit session starts, never from panes.
+  Receiver succession, for harnesses whose receivers carry one conversation each, inferred from explicit session starts, never from panes.
   A known UUID anchors a worker to its receiver process lifetime.
   A newer explicit session start, or the first newer hook from a receiver never
   seen before, can resume a lineage member in a new receiver and retire its
@@ -27,13 +27,13 @@ defmodule Shuttle.SessionBinding do
     id = event["sessionId"]
     pid = event["receiverPid"]
     birth = event["receiverBirth"]
-    harness = if event["harness"] == "claude-code", do: "claude", else: event["harness"]
+    harness = Shuttle.Harness.normalize(event["harness"] || "")
     at = event["timestamp"]
 
-    # Codex conversation UUIDs remain stable across receivers, and one receiver
-    # can host distinct threads. Join Codex events by UUID alone.
+    # A harness whose receivers carry one conversation each succeeds by
+    # receiver; the others join their events by UUID alone.
     if valid_id?(id) and is_integer(pid) and pid > 0 and is_binary(birth) and birth != "" and
-         harness in ["claude", "pi"] and
+         Shuttle.Harness.call(harness, :receiver_succession?, [], false) and
          is_integer(at) and at >= now - @max_age_ms do
       key = {harness, pid, birth}
       owner = Map.get(state.members, id)
@@ -104,10 +104,10 @@ defmodule Shuttle.SessionBinding do
   def accept_event?(state, event) do
     pid = event["receiverPid"]
     birth = event["receiverBirth"]
-    harness = if event["harness"] == "claude-code", do: "claude", else: event["harness"]
+    harness = Shuttle.Harness.normalize(event["harness"] || "")
 
     if is_integer(pid) and pid > 0 and is_binary(birth) and birth != "" and
-         harness in ["claude", "pi"] do
+         Shuttle.Harness.call(harness, :receiver_succession?, [], false) do
       key = {harness, pid, birth}
 
       case Map.get(state.processes, key) do

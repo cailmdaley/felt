@@ -145,9 +145,10 @@ These event and commit adapters are also installed by the felt plugin, but the
 | Command | Purpose |
 |---|---|
 | `shuttle hook event` | Append one harness event to the host-local activity stream (`~/.shuttle/events.jsonl`) and handle Shuttle mailbox registration/delivery |
+| `shuttle hook antigravity` | Translate one Antigravity CLI (agy) hook payload into the event `shuttle hook event` records, register its conversation for messages, and print queued context as agy's `injectSteps` on SessionStart and PreInvocation (nothing on tool events); the felt plugin for agy installs it |
 | `shuttle hook commit` | Record a commit from a Bash call in the host-local commit ledger (`~/.shuttle/commits.jsonl`) |
 | `shuttle hook handoff` | Offer the session's one-shot context-budget handoff reminder (see [Agents & Plugin](../agents.md)) |
-| `shuttle hook interrupted` | Record a human interrupt read from a harness transcript on the activity stream (`--session`, `--harness claude\|codex`, `--at` ms, `--id`, `--cwd`); the daemon calls it, no harness hook does |
+| `shuttle hook interrupted` | Record a human interrupt read from a harness transcript on the activity stream (`--session`, `--harness` a harness whose transcript records interrupts: `claude\|codex`, `--at` ms, `--id`, `--cwd`); the daemon calls it, no harness hook does |
 
 The hidden `shuttle context-mailbox` subcommands (`put`, `get`, `receiver`, `revoke`) are daemon-internal, not a user surface: `put` is how the owner enqueues every fiber message `/deliver` receives into the fiber's inbox, and shares its code with `shuttle inbox put`; `get`, `receiver` and `revoke` read and change which conversation is the fiber's receiver.
 

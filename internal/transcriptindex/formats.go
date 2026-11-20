@@ -102,10 +102,7 @@ func antigravityLine(line []byte, _ *metadata) ([]message, error) {
 	}
 	switch {
 	case s.Type == "USER_INPUT" && s.Source == "USER_EXPLICIT":
-		text := strings.TrimSpace(s.Content)
-		text = strings.TrimPrefix(text, "<USER_REQUEST>")
-		text = strings.TrimSuffix(text, "</USER_REQUEST>")
-		add("user", text, 0)
+		add("user", userRequest(s.Content), 0)
 	case s.Type == "PLANNER_RESPONSE" && s.Source == "MODEL":
 		add("assistant", s.Content, 0)
 		for _, c := range s.ToolCalls {
@@ -115,4 +112,15 @@ func antigravityLine(line []byte, _ *metadata) ([]message, error) {
 		add("tool_result", s.Content, ToolResultCap)
 	}
 	return out, nil
+}
+
+// userRequest is what the human typed: the text inside <USER_REQUEST>, which
+// agy follows with metadata of its own (the time, a settings change).
+func userRequest(content string) string {
+	_, rest, ok := strings.Cut(content, "<USER_REQUEST>")
+	if !ok {
+		return content
+	}
+	request, _, _ := strings.Cut(rest, "</USER_REQUEST>")
+	return request
 }

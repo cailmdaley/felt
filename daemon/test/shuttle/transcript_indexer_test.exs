@@ -252,7 +252,7 @@ defmodule Shuttle.TranscriptIndexerTest do
       filename = if harness == "codex", do: "rollout-fixture.jsonl", else: "#{harness}.jsonl"
 
       File.cp!(
-        Path.expand("../../../internal/transcriptindex/testdata/#{harness}.jsonl", __DIR__),
+        Path.expand("../fixtures/harnesses/#{harness}/transcript.jsonl", __DIR__),
         Path.join(root, filename)
       )
     end

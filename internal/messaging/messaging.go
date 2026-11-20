@@ -31,7 +31,7 @@ func labeled(request Request) string { return Labeled(request) }
 
 func adapters() map[string]adapter {
 	return map[string]adapter{
-		"codex": codexAdapter{}, "pi": piAdapter{}, "claude": claudeAdapter{},
+		"codex": codexAdapter{}, "pi": piAdapter{}, "claude": claudeAdapter{}, "antigravity": antigravityAdapter{},
 	}
 }
 

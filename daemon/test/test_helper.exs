@@ -14,11 +14,16 @@ System.at_exit(fn _ -> File.rm_rf(test_tmp) end)
 
 # A suite run from inside an agent session is not that session: CLI calls that
 # record or message their caller (`shuttle thread`, `shuttle message`) see none.
-for key <- ~w(CODEX_THREAD_ID CLAUDE_CODE_SESSION_ID CLAUDE_SESSION_ID PI_SESSION_ID AI_AGENT),
+for key <-
+      ~w(CODEX_THREAD_ID CLAUDE_CODE_SESSION_ID CLAUDE_SESSION_ID PI_SESSION_ID AI_AGENT ANTIGRAVITY_CONVERSATION_ID),
     do: System.delete_env(key)
 
 # Task reads use an empty per-VM harness tree unless a test supplies its own.
 System.put_env("SHUTTLE_CLAUDE_TASKS_DIR", Path.join(test_tmp, "claude-tasks"))
+
+# The Antigravity CLI keeps its conversations under the operator's home; the
+# suite reads an empty tree unless a test supplies its own.
+System.put_env("SHUTTLE_ANTIGRAVITY_BRAIN_DIR", Path.join(test_tmp, "antigravity-brain"))
 
 # Real CLI writes must not notify the operator's daemon. Tests exercising HTTP
 # supply their own endpoint through the scoped environment.

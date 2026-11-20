@@ -8,7 +8,7 @@ defmodule Shuttle.TranscriptUsageTest do
 
   alias Shuttle.TranscriptUsage
 
-  @fixtures Path.expand("../fixtures/transcript_usage", __DIR__)
+  @fixtures Path.expand("../fixtures/harnesses", __DIR__)
   @minute 60_000
   @hour 3_600_000
 
@@ -51,7 +51,7 @@ defmodule Shuttle.TranscriptUsageTest do
 
   describe "claude" do
     test "context sums input, cache reads and cache writes", %{path: path} do
-      [hour_write, _read, _compaction] = captured("claude.jsonl")
+      [hour_write, _read, _compaction] = captured("claude/usage.jsonl")
       at = ms("2026-10-09T13:51:52.531Z")
 
       assert read(path, [hour_write], "claude-code") == %{
@@ -65,7 +65,7 @@ defmodule Shuttle.TranscriptUsageTest do
     end
 
     test "a read with no live hour-long entry stays warm five minutes", %{path: path} do
-      [_hour_write, read_only, _compaction] = captured("claude.jsonl")
+      [_hour_write, read_only, _compaction] = captured("claude/usage.jsonl")
       at = ms("2026-10-06T11:09:37.922Z")
 
       assert %{context: 80_844, cache_warm_until: warm} = read(path, [read_only], "claude-code")
@@ -101,7 +101,7 @@ defmodule Shuttle.TranscriptUsageTest do
     end
 
     test "a compaction replaces the context and forgets the cache", %{path: path} do
-      [hour_write, _read, compaction] = captured("claude.jsonl")
+      [hour_write, _read, compaction] = captured("claude/usage.jsonl")
 
       usage = read(path, [hour_write, compaction], "claude-code")
 
@@ -131,7 +131,7 @@ defmodule Shuttle.TranscriptUsageTest do
 
   describe "pi" do
     test "context sums input, cache reads and cache writes; no cache estimate", %{path: path} do
-      [turn, _compaction] = captured("pi.jsonl")
+      [turn, _compaction] = captured("pi/usage.jsonl")
 
       assert read(path, [turn], "pi") == %{
                context: 16_767,
@@ -142,7 +142,7 @@ defmodule Shuttle.TranscriptUsageTest do
     end
 
     test "errored and aborted turns are not usage", %{path: path} do
-      [turn, _compaction] = captured("pi.jsonl")
+      [turn, _compaction] = captured("pi/usage.jsonl")
       failed = String.replace(turn, ~s("stopReason":"toolUse"), ~s("stopReason":"error"))
       aborted = String.replace(turn, ~s("stopReason":"toolUse"), ~s("stopReason":"aborted"))
 
@@ -151,7 +151,7 @@ defmodule Shuttle.TranscriptUsageTest do
     end
 
     test "a compaction leaves the context unknown", %{path: path} do
-      [turn, compaction] = captured("pi.jsonl")
+      [turn, compaction] = captured("pi/usage.jsonl")
 
       assert read(path, [turn, compaction], "pi") |> Map.keys() |> Enum.sort() ==
                [:at, :hit_share]
@@ -160,7 +160,7 @@ defmodule Shuttle.TranscriptUsageTest do
 
   describe "codex" do
     test "cached input is part of the input, and the window is recorded", %{path: path} do
-      [turn, _compacted] = captured("codex.jsonl")
+      [turn, _compacted] = captured("codex/usage.jsonl")
 
       assert read(path, [turn], "codex") == %{
                context: 20_915,
@@ -173,7 +173,7 @@ defmodule Shuttle.TranscriptUsageTest do
 
     test "a reset's retained total is not a measured context until the next turn",
          %{path: path} do
-      [compacted, reset, turn] = captured("codex-compaction-reset.jsonl")
+      [compacted, reset, turn] = captured("codex/usage-compaction-reset.jsonl")
 
       assert read(path, [compacted, reset], "codex") == %{
                window: 258_400,
@@ -184,7 +184,7 @@ defmodule Shuttle.TranscriptUsageTest do
     end
 
     test "a compaction leaves the context unknown", %{path: path} do
-      [turn, compacted] = captured("codex.jsonl")
+      [turn, compacted] = captured("codex/usage.jsonl")
 
       refute read(path, [turn, compacted], "codex") |> Map.has_key?(:context)
     end
@@ -192,21 +192,21 @@ defmodule Shuttle.TranscriptUsageTest do
 
   describe "the tail" do
     test "widens past a large record to reach the last usage", %{path: path} do
-      [turn, _compacted] = captured("codex.jsonl")
+      [turn, _compacted] = captured("codex/usage.jsonl")
       bulk = ~s({"type":"response_item","payload":"#{String.duplicate("x", 2_000_000)}"})
 
       assert %{context: 20_915} = read(path, [turn, bulk], "codex")
     end
 
     test "stops at its bound", %{path: path} do
-      [turn, _compacted] = captured("codex.jsonl")
+      [turn, _compacted] = captured("codex/usage.jsonl")
       bulk = ~s({"type":"response_item","payload":"#{String.duplicate("x", 17_000_000)}"})
 
       assert read(path, [turn, bulk, bulk], "codex") == nil
     end
 
     test "ignores a partial trailing record and lines that are not JSON", %{path: path} do
-      [turn, _compacted] = captured("codex.jsonl")
+      [turn, _compacted] = captured("codex/usage.jsonl")
       File.write!(path, turn <> "\nnot json\n" <> String.slice(turn, 0, 40))
 
       assert %{context: 20_915} = TranscriptUsage.read(path, "codex")

@@ -134,7 +134,7 @@ defmodule Shuttle.SessionResumeTest do
     project = Path.join(root, "work/my project")
     File.mkdir_p!(project)
 
-    claude_dir = Path.join([root, "claude", SessionResume.claude_slug(project)])
+    claude_dir = Path.join([root, "claude", Shuttle.Harness.Claude.slug(project)])
     codex_dir = Path.join(root, "codex/2026/09/27")
     pi_dir = Path.join(root, "pi/--work--")
     Enum.each([claude_dir, codex_dir, pi_dir], &File.mkdir_p!/1)

@@ -8,7 +8,15 @@ defmodule Shuttle.Transcript do
   or the harness-specific recipes.
   """
 
-  alias Shuttle.{HarnessPaths, Poller, SessionLedger}
+  alias Shuttle.{Poller, SessionLedger}
+
+  @search_order [
+    Shuttle.Harness.Claude,
+    Shuttle.Harness.Pi,
+    Shuttle.Harness.Codex,
+    Shuttle.Harness.Antigravity
+  ]
+  @head_lines 200
 
   @uuid ~r/\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\z/
 
@@ -85,22 +93,19 @@ defmodule Shuttle.Transcript do
   The transcript file for `session`, or `nil` when no harness on this host
   wrote one.
 
-  Each harness root is globbed in turn — Claude Code first, then pi, then Codex
-  — and the first regular-file hit wins; the later roots are not globbed. Pi
-  leads its basenames with an ISO stamp, while Codex fans out by local civil
-  date; the session id is UUID-validated before any of this, so it remains the
-  only caller-supplied pattern component.
+  Each harness's wildcards (`Shuttle.Harness.transcript_globs/2`) are globbed
+  in turn — Claude Code first, then pi, Codex and Antigravity — and the first
+  regular-file hit wins; the later ones are not globbed. The session id is
+  UUID-validated before any of this, so it remains the only caller-supplied
+  pattern component.
 
-  Opts (for tests): `:root`, `:pi_root`, `:codex_root`.
+  Opts (for tests): `:root`, `:pi_root`, `:codex_root`, `:antigravity_root`.
   """
   @spec path(String.t(), keyword()) :: String.t() | nil
   def path(session, opts \\ []) when is_binary(session) do
     if valid_session?(session) do
-      [
-        Path.join(HarnessPaths.claude_projects_root(opts), "*/#{session}.jsonl"),
-        Path.join(HarnessPaths.pi_sessions_root(opts), "*/*#{session}.jsonl"),
-        HarnessPaths.codex_session_glob(session, opts)
-      ]
+      @search_order
+      |> Enum.flat_map(& &1.transcript_globs(session, opts))
       |> Enum.find_value(fn pattern ->
         pattern |> Shuttle.FS.wildcard() |> Enum.find(&Shuttle.FS.regular?/1)
       end)
@@ -124,17 +129,43 @@ defmodule Shuttle.Transcript do
   @spec harness_for(String.t(), keyword()) :: String.t() | nil
   def harness_for(path, opts \\ []) do
     expanded = Shuttle.Env.expand(path)
-    claude = Shuttle.Env.expand(HarnessPaths.claude_projects_root(opts))
-    pi = Shuttle.Env.expand(HarnessPaths.pi_sessions_root(opts))
-    codex = Shuttle.Env.expand(HarnessPaths.codex_sessions_root(opts))
 
-    cond do
-      under?(expanded, claude) -> "claude-code"
-      under?(expanded, pi) -> "pi"
-      under?(expanded, codex) -> "codex"
-      true -> nil
+    Enum.find_value(@search_order, fn harness ->
+      if under?(expanded, Shuttle.Env.expand(harness.transcript_root(opts))),
+        do: harness.ledger_name()
+    end)
+  end
+
+  @doc """
+  The values at `keys` in the first lines of the transcript at `path`, lazily:
+  the records that carry them, in order.
+  """
+  @spec head_values(String.t(), [String.t()]) :: Enumerable.t()
+  def head_values(path, keys) do
+    path
+    |> Shuttle.FS.stream!()
+    |> Stream.take(@head_lines)
+    |> Stream.map(&value(&1, keys))
+  end
+
+  defp value(line, keys) do
+    if String.contains?(line, "\"#{List.last(keys)}\"") do
+      case Jason.decode(line) do
+        {:ok, %{} = record} ->
+          case dig(record, keys) do
+            value when is_binary(value) and value != "" -> value
+            _ -> nil
+          end
+
+        _ ->
+          nil
+      end
     end
   end
+
+  defp dig(value, []), do: value
+  defp dig(%{} = map, [key | rest]), do: dig(Map.get(map, key), rest)
+  defp dig(_value, _keys), do: nil
 
   defp under?(path, root), do: path == root or String.starts_with?(path, root <> "/")
 

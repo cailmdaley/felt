@@ -3,6 +3,7 @@ package transcriptindex
 import (
 	"context"
 	"encoding/json"
+	"github.com/cailmdaley/felt/internal/harness"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,17 +24,32 @@ func testIndex(t *testing.T) *Index {
 	t.Cleanup(func() { i.Close() })
 	return i
 }
+
+// fixture copies a recorded transcript into a temporary file where its
+// harness keeps one: a harness's own sample from the shared conformance
+// fixtures (daemon/test/fixtures/harnesses/<harness>/transcript.jsonl), or a
+// regression sample from testdata.
 func fixture(t *testing.T, h string) string {
 	t.Helper()
-	b, e := os.ReadFile(filepath.Join("testdata", h+".jsonl"))
+	src := filepath.Join("testdata", h+".jsonl")
+	dst := filepath.Join(t.TempDir(), h+".jsonl")
+	if _, known := harness.Lookup(h); known {
+		src = filepath.Join("..", "..", "daemon", "test", "fixtures", "harnesses", h, "transcript.jsonl")
+	}
+	if h == "antigravity" {
+		dst = filepath.Join(t.TempDir(), "e63c2d73-3d33-457e-9457-0ab8670fac39", ".system_generated", "logs", "transcript_full.jsonl")
+	}
+	b, e := os.ReadFile(src)
 	if e != nil {
 		t.Fatal(e)
 	}
-	p := filepath.Join(t.TempDir(), h+".jsonl")
-	if e = os.WriteFile(p, b, 0o600); e != nil {
+	if e = os.MkdirAll(filepath.Dir(dst), 0o700); e != nil {
 		t.Fatal(e)
 	}
-	return p
+	if e = os.WriteFile(dst, b, 0o600); e != nil {
+		t.Fatal(e)
+	}
+	return dst
 }
 func search(t *testing.T, i *Index, q string, o Options) []Hit {
 	t.Helper()
@@ -59,8 +75,11 @@ func userLine(text string) string {
 	return string(b) + "\n"
 }
 
+// Every harness's recorded transcript yields each role, skips what is not
+// conversation, and carries its session and time.
 func TestNativeFixturesRolesAndSkippedPayloads(t *testing.T) {
-	for _, h := range []string{"claude", "codex", "pi"} {
+	for _, f := range harness.All() {
+		h := f.Name
 		t.Run(h, func(t *testing.T) {
 			i := testIndex(t)
 			p := fixture(t, h)
@@ -89,7 +108,8 @@ func TestNativeFixturesRolesAndSkippedPayloads(t *testing.T) {
 				}
 			}
 			hits := search(t, i, "VMPZ convention", Options{})
-			if len(hits) != 1 || hits[0].Project == "" || !strings.Contains(hits[0].Snippet, "«VMPZ»") {
+			// Antigravity's transcript records no working directory.
+			if len(hits) != 1 || (hits[0].Project == "") != (h == "antigravity") || !strings.Contains(hits[0].Snippet, "«VMPZ»") {
 				t.Fatalf("hit metadata/snippet: %+v", hits)
 			}
 			if hits[0].Line < 2 || hits[0].Timestamp == "" || hits[0].Session == "" {

@@ -1,0 +1,17 @@
+{
+  "artifactDirectoryPath": "/home/user/.gemini/antigravity-cli/brain/e63c2d73-3d33-457e-9457-0ab8670fac39",
+  "continuationActive": false,
+  "conversationId": "e63c2d73-3d33-457e-9457-0ab8670fac39",
+  "cwd": "/work/sky",
+  "error": "",
+  "executionNum": 0,
+  "fullyIdle": true,
+  "hookEventName": "Stop",
+  "lastUserInput": "Now say only the word done.",
+  "modelName": "gemini-3.8-flash-low",
+  "terminationReason": "NO_TOOL_CALL",
+  "transcriptPath": "/home/user/.gemini/antigravity-cli/brain/e63c2d73-3d33-457e-9457-0ab8670fac39/.system_generated/logs/transcript_full.jsonl",
+  "workspacePaths": [
+    "/work/sky"
+  ]
+}

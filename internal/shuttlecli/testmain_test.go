@@ -41,20 +41,21 @@ func testEnv(t testing.TB) *sysenv.Env {
 // loopback port carries over.
 func fenceOverrides(dir, home string) map[string]string {
 	return map[string]string{
-		"HOME":                         home,
-		"XDG_CACHE_HOME":               filepath.Join(dir, "cache"),
-		"XDG_CONFIG_HOME":              filepath.Join(dir, "config"),
-		"SHUTTLE_HOST_FILE":            filepath.Join(dir, "host"),
-		"SHUTTLE_HOST_CONFIG_FILE":     filepath.Join(dir, "host.json"),
-		"SHUTTLE_REMOTES_FILE":         filepath.Join(dir, "remotes.json"),
-		"SHUTTLE_STORES_FILE":          filepath.Join(dir, "stores.json"),
-		"SHUTTLE_AGENTS_FILE":          filepath.Join(dir, "agents.json"),
-		"SHUTTLE_PROJECTS_FILE":        filepath.Join(dir, "projects.json"),
-		"SHUTTLE_TRANSCRIPT_CACHE_DIR": filepath.Join(dir, "transcripts"),
-		"SHUTTLE_TRANSCRIPT_INDEX":     filepath.Join(dir, "transcript-index.sqlite"),
-		"SHUTTLE_CLAUDE_PROJECTS_DIR":  filepath.Join(dir, "claude-projects"),
-		"SHUTTLE_CODEX_SESSIONS_DIR":   filepath.Join(dir, "codex-sessions"),
-		"SHUTTLE_PI_SESSIONS_DIR":      filepath.Join(dir, "pi-sessions"),
+		"HOME":                          home,
+		"XDG_CACHE_HOME":                filepath.Join(dir, "cache"),
+		"XDG_CONFIG_HOME":               filepath.Join(dir, "config"),
+		"SHUTTLE_HOST_FILE":             filepath.Join(dir, "host"),
+		"SHUTTLE_HOST_CONFIG_FILE":      filepath.Join(dir, "host.json"),
+		"SHUTTLE_REMOTES_FILE":          filepath.Join(dir, "remotes.json"),
+		"SHUTTLE_STORES_FILE":           filepath.Join(dir, "stores.json"),
+		"SHUTTLE_AGENTS_FILE":           filepath.Join(dir, "agents.json"),
+		"SHUTTLE_PROJECTS_FILE":         filepath.Join(dir, "projects.json"),
+		"SHUTTLE_TRANSCRIPT_CACHE_DIR":  filepath.Join(dir, "transcripts"),
+		"SHUTTLE_TRANSCRIPT_INDEX":      filepath.Join(dir, "transcript-index.sqlite"),
+		"SHUTTLE_CLAUDE_PROJECTS_DIR":   filepath.Join(dir, "claude-projects"),
+		"SHUTTLE_CODEX_SESSIONS_DIR":    filepath.Join(dir, "codex-sessions"),
+		"SHUTTLE_PI_SESSIONS_DIR":       filepath.Join(dir, "pi-sessions"),
+		"SHUTTLE_ANTIGRAVITY_BRAIN_DIR": filepath.Join(dir, "antigravity-brain"),
 	}
 }
 
@@ -71,6 +72,7 @@ var fencedEnv = []string{
 	"SHUTTLE_AGENTS_FILE", "SHUTTLE_REMOTES_FILE", "SHUTTLE_STORES", "SHUTTLE_STORES_FILE",
 	"SHUTTLE_PROJECTS", "SHUTTLE_PROJECTS_FILE", "SHUTTLE_TRANSCRIPT_CACHE_DIR",
 	"SHUTTLE_TRANSCRIPT_INDEX", "SHUTTLE_CLAUDE_PROJECTS_DIR", "SHUTTLE_CODEX_SESSIONS_DIR", "SHUTTLE_PI_SESSIONS_DIR",
+	"SHUTTLE_ANTIGRAVITY_BRAIN_DIR", "ANTIGRAVITY_CONVERSATION_ID",
 	"SHUTTLE_BRIDGE_READY_FD", "SHUTTLE_BRIDGE_PARENT_PID", "SHUTTLE_BRIDGE_SOCKET",
 	"SHUTTLE_BRIDGE_ENV_FILE", "SHUTTLE_BRIDGE_ARGS_FILE", "SHUTTLE_BRIDGE_ERROR_FILE",
 	"TMUX", "TMUX_PANE", "REX_SESSION", "REX_BLOCK", "REX_SERVER", "SHUTTLE_REX_BIN", "SHUTTLE_REX_SERVER", "SSH_CONNECTION", "SSH_TTY", "CODEX_THREAD_ID", "CODEX_HOME", "CODEX_APP_TOOLS_PIPE_PATH",

@@ -83,12 +83,12 @@ func discoverCodexTerminalReceiverWithClient(ctx context.Context, env *sysenv.En
 	return nil
 }
 
-func submitCodexTerminalInput(ctx context.Context, env *sysenv.Env, address Address, request Request) (Receipt, error) {
-	return submitCodexTerminalInputWithClient(ctx, env, address, request, nil)
+func submitTerminalInput(ctx context.Context, env *sysenv.Env, address Address, request Request) (Receipt, error) {
+	return submitTerminalInputWithClient(ctx, env, address, request, nil)
 }
 
-func submitCodexTerminalInputWithClient(ctx context.Context, env *sysenv.Env, address Address, request Request, client *http.Client) (Receipt, error) {
-	receipt := Receipt{MessageID: request.MessageID, Address: request.Address, Transport: "codex-terminal"}
+func submitTerminalInputWithClient(ctx context.Context, env *sysenv.Env, address Address, request Request, client *http.Client) (Receipt, error) {
+	receipt := Receipt{MessageID: request.MessageID, Address: request.Address, Transport: address.Harness + "-terminal"}
 	endpoint, socket, err := codexDaemonEndpoint(env)
 	if err != nil {
 		return rejected(request, receipt.Transport, err.Error()), errCode("preflight_failed", "%v", err)
@@ -145,7 +145,7 @@ func submitCodexTerminalInputWithClient(ctx context.Context, env *sysenv.Env, ad
 		return receipt, errCode("ambiguous_delivery", "%s", receipt.Detail)
 	}
 	receipt.Status = StatusSubmitted
-	receipt.Detail = "message pasted into the Codex terminal"
+	receipt.Detail = "message pasted into the " + terminalTitle(address.Harness) + " terminal"
 	return receipt, nil
 }
 

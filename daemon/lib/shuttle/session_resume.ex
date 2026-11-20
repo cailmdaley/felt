@@ -104,7 +104,7 @@ defmodule Shuttle.SessionResume do
          agent: agent.id,
          cwd: cwd,
          wrapper: agent.wrapper,
-         command: Agents.build_resume_command(agent, session, "")
+         command: Agents.build_resume_command(agent, session, "", work_dir: cwd)
        }}
     end
   end
@@ -459,20 +459,17 @@ defmodule Shuttle.SessionResume do
     _ -> :error
   end
 
-  defp cli_for("claude-code"), do: "claude"
-  defp cli_for(harness), do: harness
+  defp cli_for(harness), do: Shuttle.Harness.normalize(harness)
 
   defp bare_agent(cli),
     do:
       Agents.from_resolved(%{
         "id" => cli,
         "cli" => cli,
-        "wrapper" => cli
+        "wrapper" => Shuttle.Harness.call(cli, :binary, [], cli)
       })
 
   # ── the working directory ──────────────────────────────────────────────────
-
-  @head_lines 200
 
   defp work_dir(harness, path) do
     case safe_cwd(harness, path) do
@@ -486,50 +483,9 @@ defmodule Shuttle.SessionResume do
     end
   end
 
-  defp cwd_from("claude-code", path) do
-    slug = path |> Path.dirname() |> Path.basename()
-
-    head(path)
-    |> Stream.map(&record_cwd(&1, ["cwd"]))
-    |> Enum.find(fn cwd -> is_binary(cwd) and claude_slug(cwd) == slug end)
-  end
-
-  defp cwd_from("codex", path),
-    do: head(path) |> Stream.map(&record_cwd(&1, ["payload", "cwd"])) |> Enum.find(&is_binary/1)
-
-  defp cwd_from("pi", path),
-    do: head(path) |> Stream.map(&record_cwd(&1, ["cwd"])) |> Enum.find(&is_binary/1)
-
-  defp cwd_from(_harness, _path), do: nil
-
   defp safe_cwd(harness, path) do
-    cwd_from(harness, path)
+    Shuttle.Harness.call(harness, :transcript_cwd, [path], nil)
   rescue
     _ -> nil
   end
-
-  @doc false
-  # Claude Code's project-directory name for a working directory.
-  def claude_slug(cwd), do: String.replace(cwd, ~r/[^A-Za-z0-9]/, "-")
-
-  defp head(path), do: path |> Shuttle.FS.stream!() |> Stream.take(@head_lines)
-
-  defp record_cwd(line, keys) do
-    if String.contains?(line, "\"cwd\"") do
-      case Jason.decode(line) do
-        {:ok, %{} = record} ->
-          case dig(record, keys) do
-            cwd when is_binary(cwd) and cwd != "" -> cwd
-            _ -> nil
-          end
-
-        _ ->
-          nil
-      end
-    end
-  end
-
-  defp dig(value, []), do: value
-  defp dig(%{} = map, [key | rest]), do: dig(Map.get(map, key), rest)
-  defp dig(_value, _keys), do: nil
 end

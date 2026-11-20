@@ -1213,7 +1213,7 @@ defmodule Shuttle.MigrationTest do
     address =
       Shuttle.Messaging.address(
         "local",
-        Shuttle.Harnesses.normalize(worker.cli),
+        Shuttle.Harness.normalize(worker.cli),
         worker.session_uuid
       )
 

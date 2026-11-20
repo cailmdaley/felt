@@ -24,7 +24,7 @@ func indexedTranscriptEnv(t *testing.T) *sysenv.Env {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		body, err := os.ReadFile(filepath.Join("..", "transcriptindex", "testdata", h.name+".jsonl"))
+		body, err := os.ReadFile(filepath.Join("..", "..", "daemon", "test", "fixtures", "harnesses", h.name, "transcript.jsonl"))
 		if err != nil {
 			t.Fatal(err)
 		}

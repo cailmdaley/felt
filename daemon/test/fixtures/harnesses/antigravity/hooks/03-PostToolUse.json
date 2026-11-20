@@ -1,0 +1,23 @@
+{
+  "artifactDirectoryPath": "/home/user/.gemini/antigravity-cli/brain/e63c2d73-3d33-457e-9457-0ab8670fac39",
+  "conversationId": "e63c2d73-3d33-457e-9457-0ab8670fac39",
+  "cwd": "/work/sky",
+  "error": "",
+  "hookEventName": "PostToolUse",
+  "lastUserInput": "Fiber: demo/fixture. Run the shell command: echo VMPZ convention check. Then reply in one short sentence saying what the command printed.",
+  "modelName": "gemini-3.8-flash-low",
+  "stepIdx": 3,
+  "toolCall": {
+    "args": {
+      "CommandLine": "echo VMPZ convention check",
+      "WaitMsBeforeAsync": 5000,
+      "toolSummary": "Run echo convention check"
+    },
+    "id": "call_2141545693472474925",
+    "name": "run_command"
+  },
+  "transcriptPath": "/home/user/.gemini/antigravity-cli/brain/e63c2d73-3d33-457e-9457-0ab8670fac39/.system_generated/logs/transcript_full.jsonl",
+  "workspacePaths": [
+    "/work/sky"
+  ]
+}

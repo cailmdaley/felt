@@ -70,7 +70,8 @@ defmodule Shuttle.InterruptWatcher do
     seen =
       open
       |> Enum.filter(fn {_id, turn} ->
-        turn.harness in ["claude-code", "codex"] and now - turn.at >= state.quiet_ms
+        Shuttle.Harness.call(turn.harness, :interrupts?, [], false) and
+          now - turn.at >= state.quiet_ms
       end)
       |> Enum.reduce(Map.take(state.seen, Map.keys(open)), fn {id, turn}, seen ->
         Map.put(seen, id, check(state, id, turn, Map.get(seen, id, %{})))
@@ -113,7 +114,7 @@ defmodule Shuttle.InterruptWatcher do
   @doc """
   The interrupt that ends a transcript tail, as `{record_id, at_ms}`, or `nil`
   when its last turn record is anything else. `harness` is the stream's
-  harness name, `"claude-code"` or `"codex"`.
+  harness name; its module reads each record (`Shuttle.Harness.turn_record/1`).
   """
   @spec interrupt(binary(), String.t()) :: {String.t(), integer()} | nil
   def interrupt(bytes, harness) do
@@ -122,7 +123,7 @@ defmodule Shuttle.InterruptWatcher do
     |> Enum.reverse()
     |> Enum.find_value(:none, fn line ->
       case Jason.decode(line) do
-        {:ok, %{} = record} -> turn_record(record, harness)
+        {:ok, %{} = record} -> Shuttle.Harness.call(harness, :turn_record, [record], nil)
         _ -> nil
       end
     end)
@@ -132,53 +133,15 @@ defmodule Shuttle.InterruptWatcher do
     end
   end
 
-  # A record that moves the turn: `{:interrupted, id, at}` or `:other`. Anything
-  # else (metadata, attachments, side chains) is nil and the search continues.
-  defp turn_record(%{"isSidechain" => true}, "claude-code"), do: nil
-
-  defp turn_record(
-         %{"type" => "user", "message" => %{"content" => content}} = record,
-         "claude-code"
-       ) do
-    if interrupt_text?(content) and is_binary(record["uuid"]),
-      do: interrupted(record["uuid"], record["timestamp"]),
-      else: :other
-  end
-
-  defp turn_record(%{"type" => "assistant"}, "claude-code"), do: :other
-
-  defp turn_record(
-         %{"type" => "event_msg", "payload" => %{"type" => type} = payload} = record,
-         "codex"
-       ) do
-    cond do
-      type == "turn_aborted" ->
-        interrupted("#{payload["turn_id"]}@#{record["timestamp"]}", record["timestamp"])
-
-      type in ["task_started", "task_complete", "user_message", "agent_message"] ->
-        :other
-
-      true ->
-        nil
-    end
-  end
-
-  defp turn_record(_record, _harness), do: nil
-
-  defp interrupt_text?(content) when is_binary(content),
-    do: String.starts_with?(content, "[Request interrupted by user")
-
-  defp interrupt_text?([%{"type" => "text", "text" => text} | _]), do: interrupt_text?(text)
-  defp interrupt_text?(_content), do: false
-
-  defp interrupted(record, timestamp) when is_binary(timestamp) do
+  @doc "A turn record for an interrupt at `timestamp`, or `:other` when the time is unreadable."
+  def interrupted(record, timestamp) when is_binary(timestamp) do
     case DateTime.from_iso8601(timestamp) do
       {:ok, at, _offset} -> {:interrupted, record, DateTime.to_unix(at, :millisecond)}
       _ -> :other
     end
   end
 
-  defp interrupted(_record, _timestamp), do: :other
+  def interrupted(_record, _timestamp), do: :other
 
   defp emit(session, harness, {record, at}) do
     args = [
@@ -187,7 +150,7 @@ defmodule Shuttle.InterruptWatcher do
       "--session",
       session,
       "--harness",
-      if(harness == "codex", do: "codex", else: "claude"),
+      Shuttle.Harness.normalize(harness),
       "--id",
       record,
       "--at",

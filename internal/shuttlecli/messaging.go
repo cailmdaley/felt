@@ -611,8 +611,11 @@ func (a *app) canonicalMessageAddress(raw string) (string, error) {
 // CLAUDE_CODE_SESSION_ID; CLAUDE_SESSION_ID is accepted for wrappers that set it.
 // Pi (0.82+) exports PI_SESSION_ID to every command its bash tool runs, the
 // same id its felt extension registers, so a Pi sender's reply address matches
-// what `shuttle sessions` lists.
+// what `shuttle sessions` lists. The Antigravity CLI exports
+// ANTIGRAVITY_CONVERSATION_ID to its commands and hooks, and is listed first:
+// it is set only by agy, for the processes it starts.
 var harnessSessionEnv = []struct{ key, harness string }{
+	{"ANTIGRAVITY_CONVERSATION_ID", "antigravity"},
 	{"CODEX_THREAD_ID", "codex"},
 	{"CLAUDE_CODE_SESSION_ID", "claude"},
 	{"CLAUDE_SESSION_ID", "claude"},
@@ -708,7 +711,7 @@ func (a *app) postMessageContext(ctx context.Context, request messaging.Request)
 		case messaging.StatusQueued, messaging.StatusSubmitted:
 			supported := receipt.Transport == "claude-native" ||
 				(request.ContextIfBusy && receipt.Status == messaging.StatusQueued && receipt.Transport == "claude-hook") ||
-				(receipt.Status == messaging.StatusSubmitted && receipt.Transport == "codex-terminal") ||
+				(receipt.Status == messaging.StatusSubmitted && messaging.PastedTransport(receipt.Transport)) ||
 				(receipt.Status == messaging.StatusQueued && receipt.Transport == "pi-native")
 			if !supported {
 				return messaging.Receipt{}, fmt.Errorf("daemon returned %q for a wake request from unsupported transport %q", receipt.Status, receipt.Transport)

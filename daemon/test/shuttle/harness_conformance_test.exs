@@ -1,0 +1,103 @@
+defmodule Shuttle.HarnessConformanceTest do
+  @moduledoc """
+  Every harness module against the shared conformance fixtures
+  (`test/fixtures/harnesses/`): the Go registry's table of facts, and per
+  harness a fixed agent record with its expected command lines and a recorded
+  transcript. The Go suite reads the same table and transcripts
+  (`internal/harness`, `internal/transcriptindex`).
+  """
+  use ExUnit.Case, async: true
+
+  alias Shuttle.{Agents, Harness, TranscriptUsage}
+
+  @fixtures Path.expand("../fixtures/harnesses", __DIR__)
+  @facts @fixtures |> Path.join("facts.json") |> File.read!() |> Jason.decode!()
+  @names Path.expand("../fixtures/harness_names.json", __DIR__)
+         |> File.read!()
+         |> Jason.decode!()
+         |> Map.fetch!("names")
+
+  defp fixture(harness, file), do: Path.join([@fixtures, harness, file])
+
+  test "each harness in the Go table has one module, which answers as the table does" do
+    assert length(Harness.modules()) == length(@facts)
+
+    for facts <- @facts do
+      module = Harness.module(facts["name"])
+      assert module, "no Shuttle.Harness module for #{facts["name"]}"
+      assert Harness.module(facts["ledger"]) == module
+      assert module.name() == facts["name"]
+      assert module.ledger_name() == facts["ledger"]
+      assert module.binary() == facts["binary"]
+      assert module.identity() == facts["identity"]
+      assert module.idle_signal?() == facts["idle_signal"]
+      assert module.interrupts?() == facts["interrupts"]
+      assert module.takes_paste?() == facts["delivery"] in ["paste", "inject"]
+    end
+  end
+
+  test "names normalize to the shared address vocabulary" do
+    for {spelling, canonical} <- @names do
+      assert Harness.normalize(spelling) == canonical
+      assert Harness.supported?(spelling)
+    end
+
+    assert Harness.ledger_name("claude") == "claude-code"
+    assert Harness.ledger_name("claude-code") == "claude-code"
+    assert Harness.ledger_name("unknown") == nil
+    assert Harness.ledger_name(nil) == nil
+    refute Harness.supported?("unknown")
+  end
+
+  test "each harness renders the fixture record's launch and resume command lines" do
+    for %{"name" => name} <- @facts do
+      cases = name |> fixture("commands.json") |> File.read!() |> Jason.decode!()
+      agent = Agents.from_resolved(cases["agent"])
+      opts = [session_id: cases["session"], work_dir: cases["work_dir"]]
+      expect = cases["expect"]
+
+      assert Agents.build_command(agent, cases["prompt"], opts) == expect["launch"], name
+
+      assert Agents.build_command(%{agent | headless: true}, cases["prompt"], opts) ==
+               expect["launch_headless"],
+             name
+
+      assert Agents.build_resume_command(agent, cases["session"], cases["prompt"], opts) ==
+               expect["resume"],
+             name
+
+      assert Agents.build_resume_command(agent, cases["session"], "  ", opts) ==
+               expect["resume_quiet"],
+             name
+    end
+  end
+
+  test "each harness's readers take every record of its recorded transcript" do
+    for %{"name" => name, "interrupts" => interrupts?} <- @facts do
+      module = Harness.module(name)
+
+      records =
+        name
+        |> fixture("transcript.jsonl")
+        |> File.stream!()
+        |> Enum.map(&Jason.decode!/1)
+
+      for record <- records do
+        assert is_list(module.usage_entries(record))
+        turn = module.turn_record(record)
+        assert turn in [nil, :other] or match?({:interrupted, _, _}, turn)
+        if not interrupts?, do: assert(turn == nil)
+      end
+    end
+  end
+
+  test "an Antigravity transcript's tail gives its latest turn's context and cache reads" do
+    usage = TranscriptUsage.read(fixture("antigravity", "transcript.jsonl"), "antigravity")
+
+    assert %{context: 13_687, cached: 11_435, hit_share: hit_share, at: at} = usage
+    assert at == DateTime.to_unix(~U[2026-11-20 00:03:34Z], :millisecond)
+
+    assert hit_share ==
+             Float.round((11_212 + 11_348 + 11_435) / (13_261 + 13_393 + 13_476 + 13_687), 3)
+  end
+end

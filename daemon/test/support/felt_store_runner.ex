@@ -448,41 +448,45 @@ defmodule Shuttle.Test.FeltStoreRunner do
   # the registry through `shuttle agents [resolve]`. The daemon consumes those
   # records without resolving names itself, so the mock synthesizes them — keyed
   # off the block's `agent` name (default claude-sonnet). Only the
-  # command-rendering keys matter (id/cli/wrapper/model); axes are absent here.
+  # command-rendering keys matter (id/cli/wrapper/model and the harness facts
+  # the real CLI carries); axes are absent here.
   # Defined before `cmd` so the attribute is in scope where the Shuttle resolve
   # branch reads it.
   @resolved_agents %{
-    "claude-sonnet" => %{
-      "id" => "claude-sonnet",
-      "cli" => "claude",
-      "wrapper" => "claude",
-      "model" => "sonnet"
-    },
-    "claude-opus" => %{
-      "id" => "claude-opus",
-      "cli" => "claude",
-      "wrapper" => "claude",
-      "model" => "opus"
-    },
-    "claude-haiku" => %{
-      "id" => "claude-haiku",
-      "cli" => "claude",
-      "wrapper" => "claude",
-      "model" => "haiku"
-    },
-    "pi-luna" => %{
-      "id" => "pi-luna",
-      "cli" => "pi",
-      "wrapper" => "pi",
-      "model" => "openai/gpt-6-luna"
-    },
-    "codex" => %{
-      "id" => "codex",
-      "cli" => "codex",
-      "wrapper" => "codex",
-      "model" => "gpt-5.5-codex"
-    }
-  }
+                     "claude-sonnet" => %{
+                       "id" => "claude-sonnet",
+                       "cli" => "claude",
+                       "wrapper" => "claude",
+                       "model" => "sonnet"
+                     },
+                     "claude-opus" => %{
+                       "id" => "claude-opus",
+                       "cli" => "claude",
+                       "wrapper" => "claude",
+                       "model" => "opus"
+                     },
+                     "claude-haiku" => %{
+                       "id" => "claude-haiku",
+                       "cli" => "claude",
+                       "wrapper" => "claude",
+                       "model" => "haiku"
+                     },
+                     "pi-luna" => %{
+                       "id" => "pi-luna",
+                       "cli" => "pi",
+                       "wrapper" => "pi",
+                       "model" => "openai/gpt-6-luna"
+                     },
+                     "codex" => %{
+                       "id" => "codex",
+                       "cli" => "codex",
+                       "wrapper" => "codex",
+                       "model" => "gpt-5.5-codex"
+                     }
+                   }
+                   |> Map.new(fn {id, agent} ->
+                     {id, Shuttle.Test.HarnessFacts.resolved(agent)}
+                   end)
 
   @impl true
   def cmd(command, args, opts) do
