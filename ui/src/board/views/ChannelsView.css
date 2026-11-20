@@ -131,6 +131,9 @@
 .kbn-ch-name { flex: 1; min-width: 0; margin: 0; font: 600 var(--type-title)/var(--leading-tight) var(--font-serif); color: var(--kbn-ink); overflow-wrap: anywhere; }
 .kbn-ch-name::before { content: '# '; color: var(--kbn-ink-muted); font-weight: 400; }
 .kbn-ch-handle { font-family: var(--font-sign); font-weight: 400; }
+/* With a chair, the name is its opener, drawn as the name, as a post's slug is. */
+button.kbn-ch-handle { padding: 0; border: 0; background: none; font-size: inherit; line-height: inherit; color: inherit; text-align: left; cursor: pointer; }
+button.kbn-ch-handle:hover { color: var(--kbn-ink-soft); }
 .kbn-ch-empty { margin: 40px 0; text-align: center; font: italic var(--type-prose)/var(--leading-prose) var(--font-serif); color: var(--kbn-ink-muted); }
 
 .kbn-ch-pages { margin-left: 4px; }

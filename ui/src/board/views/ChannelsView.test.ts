@@ -423,7 +423,7 @@ it('heads the view with the channel itself, written as its name, the rail\'s tog
   daemon()
   // The Mill's channel is written as its name, the-mill, not as its chair, felt.
   const mill = card({ id: 'felt', uid: 'L', name: 'The Mill', shuttleChannel: 'The Mill', shuttleSeat: true, ...working(2) })
-  const { host } = await mount([chair, tsz, van, mill])
+  const { host, openFromDesk } = await mount([chair, tsz, van, mill])
   // The tab bar names the view: no page title of its own.
   expect(host.querySelector('.kbn-view-title')).toBeNull()
   expect(rail(host)).toStrictEqual(['van', 'cmbx', 'the-mill'])
@@ -435,6 +435,9 @@ it('heads the view with the channel itself, written as its name, the rail\'s tog
   expect([...head.querySelectorAll('.kbn-ch-icon')].map(icon => icon.classList[1])).toStrictEqual(['kbn-ch-rail-toggle', 'kbn-ch-back', 'kbn-ch-menu'])
   // Its chair's pages stand beside its name.
   expect([...head.querySelectorAll<HTMLElement>('.kbn-ch-pages .ws-doc-button')].map(button => button.dataset.part)).toStrictEqual(['constitution'])
+  // Its name opens its chair's view, as a post's slug opens its thread's.
+  head.querySelector<HTMLButtonElement>('.kbn-ch-name > button')!.click()
+  expect(openFromDesk).toHaveBeenLastCalledWith(mill)
   // A channel of one constitution is written as its channel too, its chair's name in the tooltip.
   host.querySelector<HTMLButtonElement>('[data-channel="channel:van"]')!.click()
   await settle()
@@ -454,7 +457,7 @@ it('speaks for every constitution without a channel in misc, at the rail\'s foot
   // First seen on this device: what it said before counts as read.
   expect(Number(stored.get('shuttle.channels.seen:misc'))).toBeGreaterThan(Date.now() - minute)
   pick.click(); await settle()
-  expect([shown(host), host.querySelector('.kbn-ch-pages'), stream(host)]).toStrictEqual(['misc', null, [['errand', 'ask', true]]])
+  expect([shown(host), host.querySelector('.kbn-ch-pages'), host.querySelector('.kbn-ch-name > button'), stream(host)]).toStrictEqual(['misc', null, null, [['errand', 'ask', true]]])
   expect(host.querySelector<HTMLElement>('.ws-dock')?.hidden ?? true).toBe(true)
   pick.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 30 }))
   await settle()

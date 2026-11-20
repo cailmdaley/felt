@@ -758,7 +758,10 @@ export class ChannelsView implements TemporalView {
       this.headKey = channel.key
       const back = iconButton('kbn-ch-back', 'back', 'Channels', () => this.moveRail(false))
       const name = el('h3', 'kbn-ch-name')
-      name.append(el('span', 'kbn-ch-handle', channel.name))
+      // With a chair, the name opens the chair's view, as a post's slug opens its thread's.
+      const handle = seat ? button('kbn-ch-handle', channel.name, () => this.openLine(seat)) : el('span', 'kbn-ch-handle', channel.name)
+      if (seat) handle.title = `Open ${seat.name}`
+      name.append(handle)
       name.toggleAttribute('data-misc', channel.misc)
       name.title = channel.title
       // The chair's pages: opening one is a deliberate look at the chair.
