@@ -287,6 +287,9 @@ func (a *app) boardCmd() *cobra.Command {
 					return fmt.Errorf("invalid --since: %w", err)
 				}
 			}
+			if now := a.eventNow(); at.After(now) {
+				return fmt.Errorf("--since %s is in the future: it is now %s", since, now.Local().Format(time.RFC3339))
+			}
 			q.Set("since_ms", strconv.FormatInt(at.UnixMilli(), 10))
 		}
 		endpoint, err := a.daemonEndpoint("/api/v1/board/family")
@@ -450,7 +453,20 @@ poster says something newer. A post wakes no one.`,
 					return err
 				}
 			}
-			return a.appendBoard(boardRecord{Kind: "post", Fiber: f.UID, By: &boardParty{Fiber: f.UID}, To: address, Text: text, Files: files})
+			if err := a.appendBoard(boardRecord{Kind: "post", Fiber: f.UID, By: &boardParty{Fiber: f.UID}, To: address, Text: text, Files: files}); err != nil {
+				return err
+			}
+			receipt := "posted as " + f.ID
+			if address != nil && address.Label != "" {
+				receipt += " to " + address.Label
+			} else if to != "" {
+				receipt += " to " + to
+			}
+			if len(files) > 0 {
+				receipt += fmt.Sprintf(" with %d file(s)", len(files))
+			}
+			fmt.Fprintln(a.env.Stdout, receipt)
+			return nil
 		},
 	}
 	cmd.Flags().StringVar(&fiber, "fiber", "", "Post as the named family member")

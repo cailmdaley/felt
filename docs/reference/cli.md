@@ -661,11 +661,13 @@ reach every hub as dismissals do and are omitted from family-board reading.
 Read family activity from the local daemon, oldest first.
 Omit the fiber inside a worker to use its own family; `--all` reads across families.
 Each stretch of the human's turns, typed or spoken, reads as one line counting them per worker; `--turns` lists them in full, and `--json` always carries them.
+Times print in the host's zone; a `--since` later than now is refused with the current time.
 
 ### `shuttle post <text|-> [--fiber <id>] [--to <address>] [--file <path>]...`
 
 Post to a family board without waking anyone. A post is a line in its channel on the board, readable by everyone.
 The current worker identifies the member, or `--fiber` selects one explicitly; `-` reads the text from stdin.
+It prints one line saying it posted, as whom, to whom and with how many files; a post that printed it is on the board, and posting it again shows it twice.
 Its address, the record's `to`, says whose attention it asks for: `--to human` or the human's name (`SHUTTLE_HUMAN`, else the first word of Git's `user.name`) records `{label: <name>}`, a person; `--to <fiber>` records that fiber. Without `--to` a post goes to the poster's orchestrator, and is unaddressed at the top level.
 A post addressed to the human waits on them until they reply or clear it, or the poster says something newer (see `waiting` under [`/board/family`](api.md)).
 Each `--file` attaches a readable regular file: it is recorded as a sent file, as `shuttle send-file` records it, and the post lists its absolute path in `files`.

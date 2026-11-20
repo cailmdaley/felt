@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
 )
@@ -169,6 +170,36 @@ func TestPostAttachesFiles(t *testing.T) {
 	records := readBoardRecords(t, path)
 	if len(records) != 1 || records[0].Kind != "post" || len(records[0].Files) != 1 || records[0].Files[0] != plot {
 		t.Fatalf("records %+v", records)
+	}
+}
+
+// The night seat of 20 Nov 2026 posted its digest and tapestry twice: the post
+// printed nothing, its check read the board --since a time still in the future
+// and found nothing, and it posted again. A post says it posted, and a future
+// --since is refused with the current time.
+func TestPostThatPrintedNothingWasPostedTwice(t *testing.T) {
+	env := testEnv(t)
+	env.Set("SHUTTLE_HOST", "host")
+	env.Set("SHUTTLE_HUMAN", "Cail")
+	env.Set("CLAUDE_CODE_SESSION_ID", "worker-session")
+	env.Set("SHUTTLE_EVENTS", "")
+	env.Set("SHUTTLE_EVENTS_FILE", filepath.Join(t.TempDir(), "events.jsonl"))
+	dir, st := newStore(t)
+	seedShuttleRole(t, st, "vizier/dream", felt.StatusActive, map[string]any{"kind": "standing", "host": "host", "project_dir": t.TempDir()}, nil)
+	page := filepath.Join(t.TempDir(), "tapestry.html")
+	if err := os.WriteFile(page, []byte("<p>night</p>"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	out, stderr, err := executeIn(t, env, dir, "post", "--fiber", "vizier/dream", "--to", "human", "--file", page, "Dream, Fri 20 Nov")
+	if err != nil || strings.TrimSpace(out) != "posted as vizier/dream to Cail with 1 file(s)" {
+		t.Fatalf("post: %q %v %s", out, err, stderr)
+	}
+
+	a := newApp(env)
+	a.eventNow = func() time.Time { return time.Date(2026, 11, 20, 3, 53, 44, 0, time.UTC) }
+	_, _, err = executeApp(t, a, dir, "board", "--all", "--since", "2026-11-20T04:00:00Z")
+	if err == nil || !strings.Contains(err.Error(), "is in the future: it is now ") {
+		t.Fatalf("board --since in the future: %v", err)
 	}
 }
 
