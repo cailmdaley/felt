@@ -398,15 +398,9 @@ class ChronicleView implements TemporalView {
   }
 
   /**
-   * What a hit does when you pick it.
-   *
-   * A fiber the page is DRAWING is jumped to: its lifeline is lit and scrolled
-   * into view, which is the chronicle's own answer to "where is this in the
-   * record". A fiber the page holds as a card but has no row for (closed long
-   * before the drawn window, most often) opens its card overlay instead — the
-   * same affordance a row's name click uses, and the only one that can show a
-   * fiber that is not on screen. A hit the board has never heard of can do
-   * neither, and says so rather than clicking dead.
+   * A pick: a fiber the page draws has its lifeline lit and scrolled into
+   * view; one the board holds as a card with no row drawn (closed before the
+   * drawn window, most often) opens its card overlay.
    */
   private jumpTo(hit: SearchHit, ctx: ViewContext): void {
     this.setFound(hit.id)

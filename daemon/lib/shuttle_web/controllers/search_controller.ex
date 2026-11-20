@@ -2,17 +2,17 @@ defmodule ShuttleWeb.SearchController do
   @moduledoc """
   Agent-API endpoint: `GET /api/v1/search?q=<query>&limit=<n>`
 
-  The Chronicle's search bar. The board already holds every card's NAME and id
-  client-side, so those match without a round trip; what it does not hold — and
-  cannot, at the size of the record — is the BODY of every constitution. That is
-  what this endpoint is for.
+  The board's Find reads constitutions here. The board already holds every
+  card's NAME and id client-side, so those match without a round trip; what
+  it does not hold — and cannot, at the size of the record — is the BODY of
+  every constitution. That is what this endpoint is for.
 
   One `felt ls` per configured store does the whole job: felt's own query
   already searches name, outcome, additional YAML field text and the fiber id,
   and `--body` extends it to the markdown body. `-s all` reaches closed and
-  tempered work (the chronicle's whole point is the record, not the in-flight
-  slice), and `--has-field shuttle` constrains the population to fibers carrying
-  a `shuttle:` block — the same admission the kanban union includes, so a hit
+  tempered work (Find searches the record, not the in-flight slice), and
+  `--has-field shuttle` constrains the population to fibers carrying a
+  `shuttle:` block — the same admission the kanban union includes, so a hit
   is always something the board could in principle draw a lifeline for.
 
   The body itself never crosses the wire. Sending it would mean shipping a few
@@ -21,7 +21,7 @@ defmodule ShuttleWeb.SearchController do
   query was found in, so the UI can say why a row is in the list.
 
   LOCAL STORES ONLY. There is no owner-routing and no remote fan-out: a remote
-  daemon's constitutions are not searched here. The chronicle's rows come from
+  daemon's constitutions are not searched here. The board's cards come from
   the composite feed, which is cross-host, so a remote-owned fiber can be found
   by name client-side but not by body. Widening this to the tunnel is a
   deliberate follow-up, not an oversight.
@@ -121,7 +121,7 @@ defmodule ShuttleWeb.SearchController do
 
   # The ordering the UI shows results in, decided here so both halves of the
   # merged list (client-side name matches, these) can be ranked by one scale.
-  # See ui/src/board/views/chronicleSearch.ts, which mirrors it.
+  # See `rankOf` in ui/src/board/search/match.ts, which mirrors it.
   defp rank(where, name, id, needle) do
     down_name = String.downcase(name)
 

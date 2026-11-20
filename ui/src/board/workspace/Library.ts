@@ -5,7 +5,7 @@ import { cardFromCompositeEntry } from '../KanbanReadModel.js'
 import type { SentFile } from '../sentFiles.js'
 import { FiberSends, SEND_WINDOW_MS } from '../fiberSends.js'
 import { docKey, parseDocKey, type DocKey } from './documents.js'
-import { declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
+import { watchDocumentTitles } from './DocumentTitles.js'
 
 export interface LibraryOptions {
   shuttleBase: string
@@ -117,10 +117,6 @@ export class Library {
   documents(): Array<{ card: KanbanCard; receipt: Receipt }> {
     return [...this.shelves.values()].flatMap(shelf => shelf.receipts.map(receipt => ({ card: shelf.card, receipt })))
       .sort((a, b) => b.receipt.timestamp - a.receipt.timestamp || compare(a.receipt.key, b.receipt.key))
-  }
-  /** The names a fiber's documents answer to in Find; searching never reads fiber bodies. */
-  fileNames(card: KanbanCard): string[] {
-    return this.receipts(uidOf(card)).flatMap(r => [r.basename, r.fullPath, declaredTitle(r.key)?.title ?? ''])
   }
   hasMetadata(card: KanbanCard): boolean {
     const uid = uidOf(card)

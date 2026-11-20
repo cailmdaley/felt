@@ -1382,7 +1382,7 @@ export class KanbanModal {
     // A tablist's arrows, Home and End are its own (the view strip, the phone folio), not the active view's.
     if (TABLIST_KEYS.has(e.key) && (e.target as HTMLElement | null)?.closest?.('[role="tablist"]')) return
     if (this.activeView?.keydown?.(e)) { e.preventDefault(); e.stopPropagation(); return }
-    // Chronicle keeps its own record search in its head; `/` reaches the bar's Find there too, as on the Globe and Channels.
+    // On the Chronicle, the Globe and Channels, `/` reaches the bar's Find.
     if ((this.activeViewId === 'chronicle' || this.activeViewId === 'globe' || this.activeViewId === 'channels') && !keystrokeIsSpokenFor() && keyIntent(e, 'desk') === 'find' && this.focusFind()) {
       e.preventDefault(); e.stopPropagation()
       return
