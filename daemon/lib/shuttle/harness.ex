@@ -170,12 +170,14 @@ defmodule Shuttle.Harness do
 
   @doc """
   Whether `content` carries the dispatch prompt's line for `fiber_id`, the id
-  whole: `Fiber: a/b` followed by a character no fiber id holds, or the end,
-  so `a/b` does not match the prompt of a concurrently started `a/b-review`.
+  whole: `Fiber: a/b` ends at whitespace, a JSON escape's backslash (`\\n` in
+  an encoded transcript), a quote, a sentence's closing `.`, or the end. So
+  `a/b` does not match the prompt of a concurrently started `a/b-review`,
+  `a/b.c` or `a/bé`.
   """
   @spec names_fiber?(String.t(), String.t()) :: boolean()
   def names_fiber?(content, fiber_id),
-    do: Regex.match?(~r/Fiber: #{Regex.escape(fiber_id)}(?![A-Za-z0-9_\/-])/, content)
+    do: Regex.match?(~r/Fiber: #{Regex.escape(fiber_id)}\.?(?=[\s\\"]|$)/u, content)
 
   @doc "Whether two working directories are the same once expanded and their symlinks resolved."
   def same_directory?(left, right) do

@@ -2044,7 +2044,11 @@ defmodule Shuttle.Dispatcher do
   # or Pi session keeps that session's AI_AGENT and *_SESSION_ID / THREAD_ID in
   # its global environment, and every pane inherits it; `shuttle message`
   # and `send-file` read those to attribute the sender, so a worker would speak
-  # as the stale session. Each harness sets its own on launch.
+  # as the stale session. Each harness sets its own on launch. Antigravity
+  # exports a family of ANTIGRAVITY_* variables (conversation, trajectory,
+  # language server, CSRF token) to every descendant; the bash-only
+  # `${!ANTIGRAVITY_@}` expansion drops them all. Every caller runs the block
+  # under bash.
   @doc false
   # Shared with `Shuttle.SessionResume`: any shell the daemon starts in tmux
   # must drop the release's Erlang first.
@@ -2068,7 +2072,7 @@ defmodule Shuttle.Dispatcher do
     #{path_filter}unset RELEASE_ROOT RELEASE_SYS_CONFIG RELEASE_TMP RELEASE_VSN RELEASE_NAME \\
           RELEASE_NODE RELEASE_COOKIE RELEASE_MODE RELEASE_BOOT_SCRIPT \\
           RELEASE_BOOT_SCRIPT_CLEAN RELEASE_DISTRIBUTION RELEASE_PROG RELEASE_COMMAND
-    unset AI_AGENT PI_SESSION_ID CLAUDE_CODE_SESSION_ID CLAUDE_SESSION_ID CODEX_THREAD_ID ANTIGRAVITY_CONVERSATION_ID
+    unset AI_AGENT PI_SESSION_ID CLAUDE_CODE_SESSION_ID CLAUDE_SESSION_ID CODEX_THREAD_ID ${!ANTIGRAVITY_@}
     """
   end
 

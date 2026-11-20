@@ -6,18 +6,20 @@
 # Thin shim: `shuttle hook antigravity` reads agy's payload from stdin, records
 # it on the host-local activity stream and answers in agy's shape. agy reads
 # any JSON a tool hook prints as a decision (`{}` denies the tool), so a tool
-# event prints nothing at all; any other event prints only a JSON answer (an
-# older shuttle without this verb prints help). shuttle gets five seconds, well
-# inside the hook's timeout in hooks.json, so a stuck call cannot hold agy. It
-# exits 0 on every path.
+# event prints nothing at all; any other event prints shuttle's answer only
+# when it is a whole JSON object (an older shuttle without this verb prints
+# help; one cut off mid-write leaves a fragment). shuttle gets five seconds,
+# well inside the hook's timeout in hooks.json, so a stuck call cannot hold
+# agy. It exits 0 on every path.
 
 source "${0%/*}/shuttle-bin.sh"
 
-# Runs shuttle on this hook's stdin, killed after five seconds.
+# Runs shuttle on this hook's stdin, killed after five seconds. The watchdog
+# takes its sleep down with it when shuttle finishes first.
 bounded_hook() {
   "$SHUTTLE_BIN" hook antigravity 0<&0 2>/dev/null &
   local pid=$!
-  (sleep 5; kill "$pid") >/dev/null 2>&1 &
+  (trap 'kill $!; exit' TERM; sleep 5 & wait $!; kill "$pid") >/dev/null 2>&1 &
   local watchdog=$!
   wait "$pid" 2>/dev/null
   kill "$watchdog" 2>/dev/null
@@ -28,7 +30,7 @@ if shuttle_hook_available; then
     bounded_hook >/dev/null
   else
     output="$(bounded_hook)"
-    if [[ $output == \{* ]]; then printf '%s\n' "$output"; fi
+    if [[ $output == \{*\} ]]; then printf '%s\n' "$output"; fi
   fi
 fi
 

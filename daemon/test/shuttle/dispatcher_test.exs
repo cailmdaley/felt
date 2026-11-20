@@ -1656,8 +1656,9 @@ defmodule Shuttle.DispatcherTest do
   test "erts_scrub_block drops inherited harness session identity" do
     probe =
       Dispatcher.erts_scrub_block(nil) <>
-        ~s(printf '%s|%s|%s|%s|%s' "${AI_AGENT-unset}" "${PI_SESSION_ID-unset}" ) <>
-        ~s("${CLAUDE_CODE_SESSION_ID-unset}" "${CLAUDE_SESSION_ID-unset}" "${CODEX_THREAD_ID-unset}")
+        ~s(printf '%s|%s|%s|%s|%s|%s' "${AI_AGENT-unset}" "${PI_SESSION_ID-unset}" ) <>
+        ~s("${CLAUDE_CODE_SESSION_ID-unset}" "${CLAUDE_SESSION_ID-unset}" "${CODEX_THREAD_ID-unset}" ) <>
+        ~s{"$(env | grep ^ANTIGRAVITY_ || true)"}
 
     {out, 0} =
       System.cmd("/bin/bash", ["-c", probe],
@@ -1667,10 +1668,15 @@ defmodule Shuttle.DispatcherTest do
           {"CLAUDE_CODE_SESSION_ID", "stale-claude"},
           {"CLAUDE_SESSION_ID", "stale-claude"},
           {"CODEX_THREAD_ID", "stale-codex"}
+          | Enum.map(
+              ~w(AGENT AGENTAPI_EXE APP_DATA_DIR CONVERSATION_ID CSRF_TOKEN LS_ADDRESS
+                 LS_VERSION PROJECT_ID SOURCE_METADATA TRAJECTORY_ID),
+              &{"ANTIGRAVITY_" <> &1, "stale-agy"}
+            )
         ]
       )
 
-    assert out == "unset|unset|unset|unset|unset"
+    assert out == "unset|unset|unset|unset|unset|"
   end
 
   test "erts_scrub_block leaves PATH alone with no release root" do

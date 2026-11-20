@@ -133,12 +133,14 @@ cat > "$agy_home/.local/bin/shuttle" <<'EOF'
 #!/bin/bash
 payload="$(/bin/cat)"
 [[ $payload == *stuck* ]] && exec /bin/sleep 60
+[[ $payload == *partial* ]] && { printf '{"decision":'; exit 1; }
 printf '{}\n'
 EOF
 chmod +x "$agy_home/.local/bin/shuttle"
 agy_env=(env -i HOME="$agy_home" PATH="$bare_path" SHUTTLE_BIN=)
 [ -z "$(printf '{}' | "${agy_env[@]}" "$hooks/agy.sh" tool)" ]
 [ "$(printf '{}' | "${agy_env[@]}" "$hooks/agy.sh")" = '{}' ]
+[ -z "$(printf '"partial"' | "${agy_env[@]}" "$hooks/agy.sh")" ]
 started=$SECONDS
 [ -z "$(printf '"stuck"' | "${agy_env[@]}" "$hooks/agy.sh")" ]
 [ $((SECONDS - started)) -lt 9 ]

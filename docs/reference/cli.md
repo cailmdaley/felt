@@ -122,7 +122,7 @@ Whitespace-separated query terms are literal keywords combined with AND; FTS ope
 Punctuation within a term separates adjacent tokens, so `daemon/lib/shuttle/harness_paths.ex` matches that sequence of path fragments rather than scattered words.
 Underscores stay inside tokens, preserving exact identifiers such as `handed_off_at`; searching `handed` alone does not match that identifier.
 Repeat `--session <uuid>` to select several sessions, or use `--fiber`, `--since 30d|YYYY-MM-DD`, `--project <path-prefix>`, and `--harness claude|codex|pi|antigravity` to narrow the results.
-Search excludes the calling harness session by default, using Codex's `CODEX_THREAD_ID`, Claude Code's `CLAUDE_CODE_SESSION_ID` (or wrapper-provided `CLAUDE_SESSION_ID`), or Pi's `PI_SESSION_ID`.
+Search excludes the calling harness session by default, using Antigravity's `ANTIGRAVITY_CONVERSATION_ID`, Codex's `CODEX_THREAD_ID`, Claude Code's `CLAUDE_CODE_SESSION_ID` (or wrapper-provided `CLAUDE_SESSION_ID`), or Pi's `PI_SESSION_ID`.
 Pi's `AI_AGENT=pi` selects its own session ahead of inherited parent-harness variables.
 Outside a harness there is no automatic exclusion; board searches have no caller.
 `--include-self` disables only automatic exclusion, including when `--session` selects the caller explicitly.
@@ -684,10 +684,11 @@ shows it as the words of a file message that has none of its own.
 
 Session identity comes from `--session`; else `PI_SESSION_ID` when
 `AI_AGENT=pi` (Pi's own marker, so Pi nested under another harness is
-attributed to Pi); else the first set of `CODEX_THREAD_ID`,
-`CLAUDE_CODE_SESSION_ID`, `CLAUDE_SESSION_ID`, `PI_SESSION_ID`; else the
-current tmux session's local ledger. `shuttle message` derives its
-automatic `--from` the same way. A worker's tmux name identifies its
+attributed to Pi); else the first set of `ANTIGRAVITY_CONVERSATION_ID`,
+`CODEX_THREAD_ID`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_SESSION_ID`,
+`PI_SESSION_ID`; else the current tmux session's local ledger. `shuttle
+message` derives its automatic `--from` the same way, after first looking
+for a harness among its process ancestors. A worker's tmux name identifies its
 fiber. Outside a harness, pass `--session <native-session-id>`.
 The event stream uses the same configuration as `shuttle hook event`; recording
 works offline and confirms registration, not a completed client download.

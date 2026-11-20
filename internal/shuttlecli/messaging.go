@@ -612,8 +612,11 @@ func (a *app) canonicalMessageAddress(raw string) (string, error) {
 // Pi (0.82+) exports PI_SESSION_ID to every command its bash tool runs, the
 // same id its felt extension registers, so a Pi sender's reply address matches
 // what `shuttle sessions` lists. The Antigravity CLI exports
-// ANTIGRAVITY_CONVERSATION_ID to its commands and hooks, and is listed first:
-// it is set only by agy, for the processes it starts.
+// ANTIGRAVITY_CONVERSATION_ID to its commands and hooks, and every descendant
+// inherits it; it is listed first because no other harness sets it. The
+// trade-off: a Claude or Codex process nested under agy reads as the agy
+// session wherever only the environment is consulted. `shuttle message`
+// checks process ancestry first, so its sender is the nearest harness.
 var harnessSessionEnv = []struct{ key, harness string }{
 	{"ANTIGRAVITY_CONVERSATION_ID", "antigravity"},
 	{"CODEX_THREAD_ID", "codex"},

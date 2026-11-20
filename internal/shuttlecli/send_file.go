@@ -18,8 +18,8 @@ host and Shuttle serves them through its existing owner-routed file surface.
 All paths must be readable regular files; validation completes before recording.
 
 Session attribution uses --session; else PI_SESSION_ID when AI_AGENT=pi;
-else the first of CODEX_THREAD_ID, CLAUDE_CODE_SESSION_ID, CLAUDE_SESSION_ID,
-PI_SESSION_ID; else this tmux session's latest local session-ledger entry. A Shuttle worker's tmux
+else the first of ANTIGRAVITY_CONVERSATION_ID, CODEX_THREAD_ID,
+CLAUDE_CODE_SESSION_ID, CLAUDE_SESSION_ID, PI_SESSION_ID; else this tmux session's latest local session-ledger entry. A Shuttle worker's tmux
 name also associates the delivery with its fiber. Outside a harness, supply
 --session explicitly. --caption records why the files are sent; the board
 shows it with them. Recording works while the daemon is offline; it does not
