@@ -44,6 +44,7 @@ lives in the docs site (`docs/`, published to
 | Architecture stance, stores/views, the `shuttle:` block, platform story | [`docs/dev/architecture.md`](docs/dev/architecture.md) |
 | Make targets, restart discipline, the deploy ritual, remote deploy, UI bundle | [`docs/dev/build-and-deploy.md`](docs/dev/build-and-deploy.md) |
 | Poller eligibility, stores vs picker projects, prompt structure | [`docs/dev/dispatch.md`](docs/dev/dispatch.md) |
+| What a harness adapter provides (facts, verbs, hooks, conformance), each harness's probed facts and gaps | [`docs/dev/harnesses.md`](docs/dev/harnesses.md) |
 | `shuttle` CLI and daemon surface, sanity ladder, symptom debugging | [`docs/dev/operating.md`](docs/dev/operating.md) |
 | Event stream + ledger writer/reader contract | [`docs/dev/event-stream.md`](docs/dev/event-stream.md) |
 | Inbox entries, delivery wishes, `Enqueue` and its dedup, `shuttle inbox put\|pending\|ls` | [`docs/dev/inbox.md`](docs/dev/inbox.md) |
