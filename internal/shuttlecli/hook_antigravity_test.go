@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/messaging"
 )
@@ -22,12 +24,7 @@ func TestAntigravityHooksReplayAsShuttleEvents(t *testing.T) {
 	events := filepath.Join(t.TempDir(), "events.jsonl")
 	env.Set("SHUTTLE_EVENTS", "")
 	env.Set("SHUTTLE_EVENTS_FILE", events)
-	dir := filepath.Join("..", "..", "daemon", "test", "fixtures", "harnesses", "antigravity", "hooks")
-	names, err := filepath.Glob(filepath.Join(dir, "*.json"))
-	if err != nil || len(names) == 0 {
-		t.Fatalf("no recorded hooks: %v", err)
-	}
-	sort.Strings(names)
+	names := antigravityHookFixtures(t)
 	const id = "e63c2d73-3d33-457e-9457-0ab8670fac39"
 	hook := func(payload []byte) string {
 		t.Helper()
@@ -127,4 +124,67 @@ func TestAntigravityHookIgnoresWhatItCannotRead(t *testing.T) {
 			t.Fatalf("%q: %q %v", payload, out.String(), err)
 		}
 	}
+}
+
+// A host that never set Shuttle up gets nothing from agy's hooks: no stream,
+// no mailbox, no turn state.
+func TestAntigravityHookWritesNothingWithoutStateDir(t *testing.T) {
+	t.Parallel()
+	env, home := isolateEvents(t)
+	for _, name := range antigravityHookFixtures(t) {
+		payload, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := newApp(env).runAntigravityHook(bytes.NewReader(payload), io.Discard); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if entries, _ := os.ReadDir(home); len(entries) != 0 {
+		t.Fatalf("agy hooks created %v in a HOME with no ~/.shuttle", entries)
+	}
+}
+
+// A turn state holds a digest of the turn's input, never the input, and a
+// SessionStart removes the states of conversations idle for a week.
+func TestAntigravityTurnStateHoldsNoPromptAndExpires(t *testing.T) {
+	t.Parallel()
+	env := messageHookEnv(t, "host")
+	a := newApp(env)
+	const secret = "the whole prompt the human typed"
+	a.antigravityTurnEnded("fresh", secret, true)
+	a.antigravityTurnEnded("stale", secret, false)
+	fresh, _ := a.antigravityTurnPath("fresh")
+	stale, _ := a.antigravityTurnPath("stale")
+	if data, err := os.ReadFile(fresh); err != nil || strings.Contains(string(data), secret) || len(data) > 128 {
+		t.Fatalf("turn state %q %v", data, err)
+	}
+	old := time.Now().Add(-antigravityTurnTTL - time.Hour)
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if a.antigravityTurnStarted("fresh", secret) {
+		t.Fatal("agy's own turn after a running Stop read as a prompt")
+	}
+	start := `{"hookEventName":"SessionStart","conversationId":"new","cwd":"/work"}`
+	if err := a.runAntigravityHook(strings.NewReader(start), io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("a week-idle turn state survived a SessionStart: %v", err)
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Fatalf("a live turn state was pruned: %v", err)
+	}
+}
+
+func antigravityHookFixtures(t *testing.T) []string {
+	t.Helper()
+	dir := filepath.Join("..", "..", "daemon", "test", "fixtures", "harnesses", "antigravity", "hooks")
+	names, err := filepath.Glob(filepath.Join(dir, "*.json"))
+	if err != nil || len(names) == 0 {
+		t.Fatalf("no recorded hooks: %v", err)
+	}
+	sort.Strings(names)
+	return names
 }

@@ -122,6 +122,27 @@ jq_output="$(env -i HOME="$both_home" PATH="$jq_path:$bare_path" FELT_BIN= SHUTT
 [ "$(grep -c hookEventName <<<"$jq_output")" = 1 ]
 assert_arg "$felt_args" 'session'
 
+# ── the agy shim ─────────────────────────────────────────────────────────
+# agy reads any JSON a tool hook prints as a decision ({} denies the tool), so
+# a tool event prints nothing whatever shuttle answers; another event passes a
+# JSON answer through. A stuck shuttle is cut off well inside agy's timeout.
+agy_home="$tmp_dir/home-agy"
+mkdir -p "$agy_home/.local/bin"
+ln -s "$(command -v sleep)" "$bare_path/sleep"
+cat > "$agy_home/.local/bin/shuttle" <<'EOF'
+#!/bin/bash
+payload="$(/bin/cat)"
+[[ $payload == *stuck* ]] && exec /bin/sleep 60
+printf '{}\n'
+EOF
+chmod +x "$agy_home/.local/bin/shuttle"
+agy_env=(env -i HOME="$agy_home" PATH="$bare_path" SHUTTLE_BIN=)
+[ -z "$(printf '{}' | "${agy_env[@]}" "$hooks/agy.sh" tool)" ]
+[ "$(printf '{}' | "${agy_env[@]}" "$hooks/agy.sh")" = '{}' ]
+started=$SECONDS
+[ -z "$(printf '"stuck"' | "${agy_env[@]}" "$hooks/agy.sh")" ]
+[ $((SECONDS - started)) -lt 9 ]
+
 # Hook registrations stay in the combined plugin; only the binary owner changes.
 grep -q '\${CLAUDE_PLUGIN_ROOT:-\$PLUGIN_ROOT}' "$hooks/hooks.json"
 echo "plugin hook tests passed"

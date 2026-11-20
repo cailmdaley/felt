@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/atomicfile"
 	"github.com/cailmdaley/felt/internal/shuttle"
@@ -116,6 +117,7 @@ func (a *app) antigravityEvent(p antigravityHookInput) (eventHookInput, bool) {
 	}
 	switch p.HookEventName {
 	case "SessionStart":
+		a.pruneAntigravityTurns()
 	case "PreInvocation":
 		if p.InvocationNum == 0 && a.antigravityTurnStarted(p.ConversationID, p.LastUserInput) {
 			input.HookEventName = "UserPromptSubmit"
@@ -137,10 +139,15 @@ func (a *app) antigravityEvent(p antigravityHookInput) (eventHookInput, bool) {
 }
 
 // agy starts a turn on its own when a background command a turn left running
-// ends, repeating that turn's input. A conversation's turn state remembers
-// the input its last turn started from and whether its last Stop left work
-// running, so a turn that repeats the input after such a Stop is agy's own,
-// and any other is a prompt.
+// ends, repeating that turn's input. A conversation's turn state remembers a
+// digest of the input its last turn started from and whether its last Stop
+// left work running, so a turn that repeats the input after such a Stop is
+// agy's own, and any other is a prompt. The state lives in the Shuttle state
+// directory, written only where that directory exists, as the event stream
+// is; agy reports no session end, so each SessionStart removes the states
+// of conversations idle for a week.
+
+const antigravityTurnTTL = 7 * 24 * time.Hour
 
 // antigravityTurnStarted reports whether a turn starting from text is a
 // prompt rather than agy waking itself, and records the turn.
@@ -150,8 +157,8 @@ func (a *app) antigravityTurnStarted(conversation, text string) bool {
 		return true
 	}
 	previous, err := os.ReadFile(path)
-	self := err == nil && string(previous) == "running\n"+text
-	a.writeAntigravityTurn(path, "open", text)
+	self := err == nil && string(previous) == antigravityTurn("running", text)
+	_ = atomicfile.Write(path, []byte(antigravityTurn("open", text)), 0o600)
 	return !self
 }
 
@@ -166,20 +173,48 @@ func (a *app) antigravityTurnEnded(conversation, text string, running bool) {
 	if running {
 		state = "running"
 	}
-	a.writeAntigravityTurn(path, state, text)
+	_ = atomicfile.Write(path, []byte(antigravityTurn(state, text)), 0o600)
 }
 
-func (a *app) antigravityTurnPath(conversation string) (string, bool) {
-	dir, err := shuttle.DataDir(a.env)
+func antigravityTurn(state, text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return state + " " + hex.EncodeToString(sum[:])
+}
+
+// antigravityTurnDir is the directory of turn states, or ok=false on a host
+// without a Shuttle state directory.
+func (a *app) antigravityTurnDir() (string, bool) {
+	root, err := shuttle.DataDir(a.env)
 	if err != nil {
 		return "", false
 	}
-	sum := sha256.Sum256([]byte(conversation))
-	return filepath.Join(dir, "antigravity", hex.EncodeToString(sum[:])+".turn"), true
+	if info, err := os.Stat(root); err != nil || !info.IsDir() {
+		return "", false
+	}
+	dir := filepath.Join(root, "antigravity")
+	return dir, os.MkdirAll(dir, 0o700) == nil
 }
 
-func (a *app) writeAntigravityTurn(path, state, text string) {
-	if os.MkdirAll(filepath.Dir(path), 0o700) == nil {
-		_ = atomicfile.Write(path, []byte(state+"\n"+text), 0o600)
+func (a *app) antigravityTurnPath(conversation string) (string, bool) {
+	dir, ok := a.antigravityTurnDir()
+	if !ok {
+		return "", false
+	}
+	sum := sha256.Sum256([]byte(conversation))
+	return filepath.Join(dir, hex.EncodeToString(sum[:])+".turn"), true
+}
+
+// pruneAntigravityTurns removes the turn states of conversations idle longer
+// than antigravityTurnTTL.
+func (a *app) pruneAntigravityTurns() {
+	root, err := shuttle.DataDir(a.env)
+	if err != nil {
+		return
+	}
+	paths, _ := filepath.Glob(filepath.Join(root, "antigravity", "*.turn"))
+	for _, path := range paths {
+		if info, err := os.Stat(path); err == nil && time.Since(info.ModTime()) > antigravityTurnTTL {
+			_ = os.Remove(path)
+		}
 	}
 }

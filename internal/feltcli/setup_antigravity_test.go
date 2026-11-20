@@ -54,6 +54,13 @@ func TestSetupAntigravityInstallsTheNativePlugin(t *testing.T) {
 		if len(events[tool]) != 1 || events[tool][0]["matcher"] != "*" || events[tool][0]["hooks"] == nil {
 			t.Fatalf("%s groups = %v", tool, events[tool])
 		}
+		if handlers, _ := events[tool][0]["hooks"].([]any); len(handlers) != 1 ||
+			handlers[0].(map[string]any)["command"] != "./hooks/agy.sh tool" {
+			t.Fatalf("%s handlers = %v", tool, events[tool][0]["hooks"])
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "hooks", "hooks.json")); !os.IsNotExist(err) {
+		t.Fatalf("Claude's hooks.json was copied into the agy plugin: %v", err)
 	}
 	for _, path := range []string{"hooks/agy.sh", "hooks/shuttle-bin.sh", "skills/felt/SKILL.md", "skills/shuttle/SKILL.md"} {
 		if _, err := os.Stat(filepath.Join(dir, path)); err != nil {

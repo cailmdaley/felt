@@ -19,6 +19,10 @@ import (
 // handler groups with a matcher.
 var antigravityHookEvents = []string{"SessionStart", "PreInvocation", "PreToolUse", "PostToolUse", "Stop"}
 
+// antigravityPluginFiles are what the plugin copies from the felt plugin
+// source: the agy hook shim, the script it sources, and the skills.
+var antigravityPluginFiles = []string{"hooks/agy.sh", "hooks/shuttle-bin.sh", "skills"}
+
 func (a *app) setupAntigravityCmd() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "antigravity",
@@ -75,8 +79,11 @@ func writeAntigravityPlugin(dir, pluginDir string) error {
 	if err := os.RemoveAll(staging); err != nil {
 		return err
 	}
-	for _, sub := range []string{"hooks", "skills"} {
-		if err := copyTree(filepath.Join(pluginDir, sub), filepath.Join(staging, sub)); err != nil {
+	if err := os.MkdirAll(filepath.Join(staging, "hooks"), 0o755); err != nil {
+		return err
+	}
+	for _, path := range antigravityPluginFiles {
+		if err := copyTree(filepath.Join(pluginDir, path), filepath.Join(staging, path)); err != nil {
 			return err
 		}
 	}
@@ -85,13 +92,16 @@ func writeAntigravityPlugin(dir, pluginDir string) error {
 		"displayName": "Felt",
 		"description": "felt and Shuttle for Antigravity: the felt and shuttle skills, and hooks that report this session to Shuttle and deliver its messages.",
 	}
-	hook := []map[string]any{{"type": "command", "command": "./hooks/agy.sh", "timeout": 10}}
+	// The shim bounds shuttle at five seconds, inside this timeout (seconds).
+	hook := func(command string) []map[string]any {
+		return []map[string]any{{"type": "command", "command": command, "timeout": 10}}
+	}
 	events := map[string]any{}
 	for _, event := range antigravityHookEvents {
 		if event == "PreToolUse" || event == "PostToolUse" {
-			events[event] = []map[string]any{{"matcher": "*", "hooks": hook}}
+			events[event] = []map[string]any{{"matcher": "*", "hooks": hook("./hooks/agy.sh tool")}}
 		} else {
-			events[event] = hook
+			events[event] = hook("./hooks/agy.sh")
 		}
 	}
 	for name, value := range map[string]any{"plugin.json": manifest, "hooks.json": map[string]any{"felt-shuttle": events}} {
