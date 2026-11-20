@@ -298,6 +298,30 @@ func TestCodexWorkerExitsPlainlyUnderInheritedTerminal(t *testing.T) {
 	}
 }
 
+// A Claude session that registered no receiver, started inside a registered
+// Claude worker, exports its own CLAUDE_CODE_SESSION_ID. Ancestry finds only
+// the parent; a bare close refuses rather than closing the parent's fiber.
+func TestUnregisteredChildOfTheSameHarnessIsRefused(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	dir, st := newStore(t)
+	seedShuttleRole(t, st, "parent", felt.StatusActive, oneshot(), nil)
+	parent := mustRead(t, st, "parent")
+	env.Set("SHUTTLE_HOST", "test-host")
+	env.Set("CLAUDE_CODE_SESSION_ID", "unbound-child")
+	registerSenderProcess(t, env, "claude", "parent-session", "test-host", os.Getppid())
+	writeMessageIdentityLedger(t, env, []SessionProvenance{
+		{Kind: "dispatch", Host: "test-host", Harness: "claude-code", Session: "parent-session", Fiber: parent.ID, UID: parent.UID, FiberPath: parent.Path, At: 1},
+	})
+	out, err := runIn(t, env, dir, "close")
+	if f := mustRead(t, st, "parent"); f.Status != felt.StatusActive {
+		t.Fatalf("unregistered child closed its parent's fiber\n%s", out)
+	}
+	if err == nil {
+		t.Fatalf("unregistered child closed without a binding\n%s", out)
+	}
+}
+
 // A harness started inside agy inherits ANTIGRAVITY_CONVERSATION_ID, which the
 // environment reads first. A bare close from it must act on its own fiber, the
 // nearest registered receiver's, and never on the agy parent's. A Pi that

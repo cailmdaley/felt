@@ -1865,6 +1865,10 @@ defmodule Shuttle.DispatcherTest do
 
       assert Dispatcher.effective_resume_intent(intent, claude, previous_session: @prev) == intent
 
+      assert Dispatcher.effective_resume_intent(intent, claude,
+               previous_session: %{@prev | harness: "claude"}
+             ) == intent
+
       assert Dispatcher.effective_resume_intent(intent, pi,
                previous_session: %{uuid: @prev.uuid, harness: nil}
              ) ==

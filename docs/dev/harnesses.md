@@ -82,6 +82,9 @@ Harnesses nest, and a child process inherits every parent's exported session id 
 Process ancestry can: each session's hooks register a receiver with the harness's process id, and the nearest live one among the caller's ancestors wins.
 The environment decides only when ancestry names no one, or two receivers share the nearest process (one Codex app server for many threads).
 Pi's own marker, `AI_AGENT=pi` with `PI_SESSION_ID`, outranks another harness found by ancestry, since a Pi that registered no receiver is invisible there; a Codex or agy session started inside Pi therefore reads as its Pi parent.
+Each harness sets its own variable for its children, so when ancestry finds a harness whose exported id differs, that id is a nearer session of the same harness that registered nothing (its hooks off or untrusted), and it is the caller; it has no binding of its own, so a bare `close` refuses instead of closing the parent's fiber.
+`shuttle message` alone keeps the registered receiver as its sender, since that is what a reply reaches.
+What stays out of reach is an unregistered session under a registered session of another harness, a Codex without hooks inside a Claude worker say: the environment cannot place it, and ancestry names the parent.
 A hook binds the session its payload names, not the caller's, since it fires before its session has registered.
 
 ### Conformance
@@ -155,7 +158,7 @@ Observed on agy 1.5.13.
 
 What each harness cannot do, as Shuttle runs it today:
 
-- **Claude Code**: its harness name is spelled two ways, `claude` and `claude-code` in ledgers, on the event stream and in the daemon's session links. Every reader accepts both, through `harness.Normalize` and `Shuttle.Harness.normalize/1`. Writing `claude` everywhere waits on every host running a build whose readers accept both, since a host on an older build that reads another host's rows (a board's session links relayed between daemons) drops a `claude` row's Remote Control link; persisted rows keep `claude-code`, so readers keep the alias after the writers switch.
+- **Claude Code**: its harness name is spelled two ways, `claude` and `claude-code` in ledgers, on the event stream and in the daemon's session links. The readers that branch on it accept both, through `harness.Normalize` and `Shuttle.Harness.normalize/1`: Go's session bindings and hook handler, the daemon's session bindings, board family, waiting tracker, resume guard (`Dispatcher.effective_resume_intent/3`) and relayed session links; the board only displays it. Writing `claude` everywhere waits on every host running a build whose readers accept both, since a host on an older build that reads another host's rows (a board's session links relayed between daemons) drops a `claude` row's Remote Control link; persisted rows keep `claude-code`, so readers keep the alias after the writers switch.
 - **Codex**: no fresh fallback on a failed resume; no Remote Control.
 - **Pi**: no interrupt reading, though `agent_settled` carries `aborted` when the human cancels with Escape; no task list; its transcript root does not follow `PI_CODING_AGENT_SESSION_DIR` or the `sessionDir` setting, which move Pi's sessions out of its agent directory.
 - **Antigravity**:

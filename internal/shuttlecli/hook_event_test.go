@@ -911,6 +911,15 @@ func TestEventGoldenParity(t *testing.T) {
 		if !ok {
 			t.Fatalf("payload recorded nothing: %v", ev.payload)
 		}
+		// A shim that names the harness the payload's path implies records the same bytes.
+		var recorded struct{ Harness string }
+		if err := json.Unmarshal([]byte(line), &recorded); err != nil {
+			t.Fatal(err)
+		}
+		input.Harness = harness.Normalize(recorded.Harness)
+		if named, _ := a.renderEvent(input); named != line {
+			t.Fatalf("named harness changed the line\n got %s\nwant %s", named, line)
+		}
 		got.WriteString(line)
 		tick++
 	}

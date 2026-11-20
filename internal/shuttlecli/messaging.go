@@ -574,9 +574,11 @@ func newMessageID() (string, error) {
 	return "msg-" + hex.EncodeToString(raw[:]), nil
 }
 
-// messageCaller is the calling session's address, or "" outside a harness.
+// messageCaller is the calling session's address, or "" outside a harness. A
+// sender is the nearest registered receiver even where its harness exports
+// another id, since a registration is what a reply reaches.
 func (a *app) messageCaller() string {
-	harness, id := a.currentSession()
+	harness, id := a.processSession()
 	if id == "" {
 		return ""
 	}
@@ -591,7 +593,32 @@ func (a *app) messageCaller() string {
 	return address
 }
 
-// currentSession names the harness session this process runs in: the nearest
+// currentSession names the harness session this process runs in, the identity
+// every lifecycle verb acts for: processSession, unless the harness it names
+// exports a different id of its own. Each harness sets its own variable for its
+// children, so a different id there is a nearer session of the same harness
+// that registered no receiver (hooks off or untrusted), and it is the caller.
+func (a *app) currentSession() (harness, id string) {
+	harness, id = a.processSession()
+	if exported := a.exportedSession(harness); exported != "" && exported != id {
+		return harness, exported
+	}
+	return harness, id
+}
+
+// exportedSession is the session id the named harness exported, or "".
+func (a *app) exportedSession(harness string) string {
+	for _, candidate := range harnessSessionEnv {
+		if candidate.harness == harness {
+			if value := strings.TrimSpace(a.env.Getenv(candidate.key)); value != "" {
+				return value
+			}
+		}
+	}
+	return ""
+}
+
+// processSession names the harness session this process runs in: the nearest
 // live hook registration in its process ancestry, else the session id its
 // harness exported.
 //
@@ -605,7 +632,7 @@ func (a *app) messageCaller() string {
 // session started inside Pi reads as its Pi parent. Several receivers on the
 // nearest process (one Codex app server for many threads) name no one, and the
 // environment decides.
-func (a *app) currentSession() (harness, id string) {
+func (a *app) processSession() (harness, id string) {
 	if host, err := a.resolveOwnHost(""); err == nil {
 		address, err := messaging.ParseAddress(messaging.DetectProcessSender(a.env, host))
 		if err == nil && (address.Harness == "pi" || !a.piMarked()) {

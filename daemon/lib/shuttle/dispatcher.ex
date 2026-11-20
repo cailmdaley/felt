@@ -1534,9 +1534,10 @@ defmodule Shuttle.Dispatcher do
         _ -> nil
       end
 
-    if prev_harness && prev_harness != Shuttle.SessionLedger.harness_for_cli(agent.cli),
-      do: :fresh,
-      else: intent
+    if prev_harness &&
+         Shuttle.Harness.normalize(prev_harness) != Shuttle.Harness.normalize(agent.cli),
+       do: :fresh,
+       else: intent
   end
 
   def effective_resume_intent(intent, _agent, _opts), do: intent

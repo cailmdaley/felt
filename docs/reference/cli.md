@@ -689,7 +689,10 @@ The calling harness session, which `send-file`, `message`, `find`, `claim`,
 `migrate`, `thread` and a bare `handoff`, `close` or `rest` all use, is the
 nearest harness among the process's ancestors that registered a receiver
 through its hooks. Harnesses nest, and a child inherits every parent's
-exported session id, so ancestry decides wherever it can. Otherwise the
+exported session id, so ancestry decides wherever it can, except that a
+different id exported by the harness ancestry found names a nearer,
+unregistered session of that harness, which is the caller (`message` keeps
+the registered receiver as its sender). Otherwise the
 environment does: `PI_SESSION_ID` when `AI_AGENT=pi` (Pi's own marker, which
 also outranks an ancestry answer from another harness, since a Pi without a
 receiver is invisible to ancestry); else the first set of
