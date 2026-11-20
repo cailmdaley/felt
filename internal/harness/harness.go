@@ -29,8 +29,10 @@ type Facts struct {
 	Identity string `json:"identity"`
 	// Delivery is how a message reaches a live worker: "native" (the
 	// harness's own message socket), "extension" (a socket Shuttle's extension
-	// opens inside the harness), "paste" (typed into the worker's terminal),
-	// or "inject" (added to a running turn by a hook, and pasted when idle).
+	// opens inside the harness), "paste" (typed into the worker's terminal,
+	// which queues it behind a running turn), or "inject" (context added to a
+	// running turn by a hook before each model call, and a wake typed into the
+	// terminal as with paste).
 	Delivery string `json:"delivery"`
 	// IdleSignal is true when the harness's hooks say the human's turn has
 	// come, which is what pulse and idle-only wakes need.

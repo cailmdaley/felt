@@ -207,21 +207,26 @@ defmodule Shuttle.WorkerProcess do
 
   def holder(_procs, _uuid, _runner), do: nil
 
-  @doc "The native Codex process resuming `uuid` inside terminal `session`, or nil."
-  def codex_session_process(procs, session, uuid) when is_binary(session) and is_binary(uuid) do
+  @doc """
+  The harness process inside terminal `session` that runs `binary` with the
+  argument pair `resume` (Codex's `["resume", uuid]`, Antigravity's
+  `["--conversation", uuid]`), or nil.
+  """
+  def resumed_process(procs, session, binary, resume)
+      when is_binary(session) and is_binary(binary) and is_list(resume) do
     worker = session_process(procs, session)
 
     Enum.find(procs, fn %{args: args} = proc ->
       tokens = String.split(args)
 
       not is_nil(worker) and not tmux?(proc) and
-        Path.basename(List.first(tokens) || "") == "codex" and
-        Enum.any?(Enum.chunk_every(tokens, 2, 1, [nil]), &(&1 == ["resume", uuid])) and
+        Path.basename(List.first(tokens) || "") == binary and
+        Enum.any?(Enum.chunk_every(tokens, 2, 1, [nil]), &(&1 == resume)) and
         descends_from?(procs, proc, worker.pid)
     end)
   end
 
-  def codex_session_process(_procs, _session, _uuid), do: nil
+  def resumed_process(_procs, _session, _binary, _resume), do: nil
 
   defp descends_from?(procs, %{pid: pid}, ancestor) when pid != ancestor do
     case Enum.find(procs, &(&1.pid == pid)) do

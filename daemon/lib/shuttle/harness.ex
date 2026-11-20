@@ -78,6 +78,13 @@ defmodule Shuttle.Harness do
   @callback identity() :: String.t()
   @doc "Whether a message reaches an idle worker typed into its terminal (`/api/v1/sessions/input`)."
   @callback takes_paste?() :: boolean()
+  @doc """
+  For a harness that takes pasted input, the argument pair a process resuming
+  conversation `session` carries, by which the daemon finds a receiver no hook
+  has registered yet (`/api/v1/sessions/receiver`).
+  """
+  @callback resume_args(String.t()) :: [String.t()]
+  @optional_callbacks resume_args: 1
 
   @modules [
     Shuttle.Harness.Claude,

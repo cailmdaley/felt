@@ -20,7 +20,7 @@ func (codexAdapter) send(ctx context.Context, env *sysenv.Env, address Address, 
 }
 
 func sendCodexTerminal(ctx context.Context, env *sysenv.Env, address Address, request Request, submit func(context.Context, *sysenv.Env, Address, Request) (Receipt, error)) (Receipt, error) {
-	return sendTerminalWithDiscovery(ctx, env, address, request, discoverCodexTerminalReceiver, submit)
+	return sendTerminalWithDiscovery(ctx, env, address, request, discoverTerminalReceiver, submit)
 }
 
 // terminalReceiverDiscover makes sure a live receiver's hook mailbox is

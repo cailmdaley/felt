@@ -73,13 +73,13 @@ func TestAntigravityHooksReplayAsShuttleEvents(t *testing.T) {
 		t.Fatalf("mailbox states\n got %s\nwant %s", got, want)
 	}
 
-	// A turn agy starts itself when a background command ends repeats the
-	// last input: it is not the human's prompt. A Stop that leaves one running
-	// keeps the turn open.
-	last, _ := os.ReadFile(names[8])
-	hook(last)
+	// A Stop that leaves a background command running keeps the turn open,
+	// and the turn agy starts itself when the command ends repeats the last
+	// input: it is not a prompt. The same input after a Stop that left
+	// nothing running is one.
+	prompt, _ := os.ReadFile(names[8])
 	var stop map[string]any
-	if err := json.Unmarshal(last, &stop); err != nil {
+	if err := json.Unmarshal(prompt, &stop); err != nil {
 		t.Fatal(err)
 	}
 	stop["hookEventName"], stop["fullyIdle"] = "Stop", false
@@ -88,6 +88,10 @@ func TestAntigravityHooksReplayAsShuttleEvents(t *testing.T) {
 	if state() != "working" {
 		t.Fatalf("a Stop with a background command running reads as %q", state())
 	}
+	hook(prompt)
+	idle, _ := os.ReadFile(names[10])
+	hook(idle)
+	hook(prompt)
 
 	data, err := os.ReadFile(events)
 	if err != nil {
@@ -108,7 +112,7 @@ func TestAntigravityHooksReplayAsShuttleEvents(t *testing.T) {
 		}
 		types = append(types, label)
 	}
-	want = "session_start user_prompt_submit pre_tool_use post_tool_use stop user_prompt_submit stop stop+background"
+	want = "session_start user_prompt_submit pre_tool_use post_tool_use stop user_prompt_submit stop stop+background stop user_prompt_submit"
 	if got := strings.Join(types, " "); got != want {
 		t.Fatalf("event stream\n got %s\nwant %s", got, want)
 	}

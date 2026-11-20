@@ -19,14 +19,18 @@ import (
 const codexTerminalInputRoute = "/api/v1/sessions/input"
 const codexTerminalReceiverRoute = "/api/v1/sessions/receiver"
 
-func discoverCodexTerminalReceiver(ctx context.Context, env *sysenv.Env, address Address) error {
-	if MailboxAvailable(env, "codex", address.ID, address.Host) {
+// discoverTerminalReceiver makes sure a live receiver of a harness that takes
+// pasted input has its hook mailbox registered: one its hooks registered, or
+// else the process the daemon finds resuming the conversation in its
+// terminal, which no hook may have reported yet.
+func discoverTerminalReceiver(ctx context.Context, env *sysenv.Env, address Address) error {
+	if MailboxAvailable(env, address.Harness, address.ID, address.Host) {
 		return nil
 	}
-	return discoverCodexTerminalReceiverWithClient(ctx, env, address, nil)
+	return discoverTerminalReceiverWithClient(ctx, env, address, nil)
 }
 
-func discoverCodexTerminalReceiverWithClient(ctx context.Context, env *sysenv.Env, address Address, client *http.Client) error {
+func discoverTerminalReceiverWithClient(ctx context.Context, env *sysenv.Env, address Address, client *http.Client) error {
 	endpoint, socket, err := codexDaemonEndpoint(env)
 	if err != nil {
 		return err
@@ -48,19 +52,19 @@ func discoverCodexTerminalReceiverWithClient(ctx context.Context, env *sysenv.En
 	}
 	response, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("resolving the live Codex receiver: %w", err)
+		return fmt.Errorf("resolving the live %s receiver: %w", terminalTitle(address.Harness), err)
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, 16<<10))
 	if err != nil {
-		return fmt.Errorf("reading live Codex receiver receipt: %w", err)
+		return fmt.Errorf("reading live %s receiver receipt: %w", terminalTitle(address.Harness), err)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		detail := strings.TrimSpace(string(body))
 		if detail == "" {
 			detail = response.Status
 		}
-		return fmt.Errorf("live Codex receiver unavailable: %s", detail)
+		return fmt.Errorf("live %s receiver unavailable: %s", terminalTitle(address.Harness), detail)
 	}
 	var result struct {
 		SessionUUID  string `json:"session_uuid"`
@@ -68,17 +72,17 @@ func discoverCodexTerminalReceiverWithClient(ctx context.Context, env *sysenv.En
 		ProcessStart string `json:"process_start"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil || result.SessionUUID != address.ID || result.PID <= 0 || result.ProcessStart == "" {
-		return fmt.Errorf("daemon returned an invalid live Codex receiver identity")
+		return fmt.Errorf("daemon returned an invalid live %s receiver identity", terminalTitle(address.Harness))
 	}
 	if processStartToken(result.PID) != result.ProcessStart {
-		return fmt.Errorf("live Codex receiver process changed during lookup")
+		return fmt.Errorf("live %s receiver process changed during lookup", terminalTitle(address.Harness))
 	}
-	if err := RegisterMailbox(env, "codex", address.ID, address.Host, "", result.PID, true); err != nil {
-		return fmt.Errorf("registering live Codex receiver: %w", err)
+	if err := RegisterMailbox(env, address.Harness, address.ID, address.Host, "", result.PID, true); err != nil {
+		return fmt.Errorf("registering live %s receiver: %w", terminalTitle(address.Harness), err)
 	}
-	registered, err := mailboxRegistrationFor(env, "codex", address.ID)
+	registered, err := mailboxRegistrationFor(env, address.Harness, address.ID)
 	if err != nil || registered.PID != result.PID || registered.Start != result.ProcessStart || registered.Host != address.Host || registered.Ended {
-		return fmt.Errorf("live Codex receiver identity changed during registration")
+		return fmt.Errorf("live %s receiver identity changed during registration", terminalTitle(address.Harness))
 	}
 	return nil
 }

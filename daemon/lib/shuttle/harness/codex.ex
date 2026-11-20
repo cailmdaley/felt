@@ -32,6 +32,8 @@ defmodule Shuttle.Harness.Codex do
   def identity, do: "reported"
   @impl true
   def takes_paste?, do: true
+  @impl true
+  def resume_args(session), do: ["resume", session]
 
   @impl true
   def launch_command(agent, prompt, _opts),

@@ -269,6 +269,42 @@ defmodule ShuttleWeb.SessionInputControllerTest do
     assert_received {:identity_probe, "813"}
   end
 
+  # A conversation agy resumed without a prompt fires no hook until its next
+  # turn; its receiver is the agy process resuming it in the terminal.
+  test "returns the agy process resuming an Antigravity conversation", %{path: path} do
+    session = "22222222-2222-4222-8222-222222222222"
+    uid = "01ARZ3NDEKTSV4RRFFQ69G5FAW"
+
+    assert :ok =
+             Shuttle.SessionLedger.record_checked(
+               session: session,
+               fiber: "work/agy",
+               uid: uid,
+               harness: "antigravity",
+               host: "test-host",
+               tmux: "agy-shuttle",
+               kind: "resume",
+               path: path
+             )
+
+    Process.put(
+      :session_input_ps,
+      {"812 700 bash -l /tmp/shuttle-run-agy-shuttle.42.sh\n" <>
+         "813 812 agy --model gemini-4-neon-medium --conversation #{session}\n" <>
+         "814 812 codex resume #{session}\n", 0}
+    )
+
+    Process.put(:session_input_identity, {~s({"status":"present","start":"birth-813"}), 0})
+
+    assert %{"session_uuid" => ^session, "pid" => 813} =
+             post(
+               api_conn(),
+               "/api/v1/sessions/receiver",
+               Jason.encode!(%{session_uuid: session})
+             )
+             |> json_response(200)
+  end
+
   test "does not identify a shell containing the UUID as the native Codex receiver", %{
     path: path
   } do

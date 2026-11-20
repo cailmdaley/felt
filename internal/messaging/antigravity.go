@@ -2,7 +2,6 @@ package messaging
 
 import (
 	"context"
-	"errors"
 
 	"github.com/cailmdaley/felt/internal/harness"
 	"github.com/cailmdaley/felt/internal/sysenv"
@@ -11,7 +10,9 @@ import (
 // antigravityAdapter treats the Antigravity CLI (agy) as a terminal
 // conversation, as Codex is: its felt plugin's hooks register the session
 // and inject queued context before each model call, and a wake is pasted into
-// its terminal, which queues it behind a running turn.
+// its terminal, which queues it behind a running turn. A conversation resumed
+// without a prompt fires no hook until its next turn, so its receiver is found
+// as Codex's is, by the daemon's process scan.
 type antigravityAdapter struct{}
 
 func (antigravityAdapter) discover(_ context.Context, env *sysenv.Env, host string) ([]Session, error) {
@@ -19,15 +20,7 @@ func (antigravityAdapter) discover(_ context.Context, env *sysenv.Env, host stri
 }
 
 func (antigravityAdapter) send(ctx context.Context, env *sysenv.Env, address Address, request Request) (Receipt, error) {
-	return sendTerminalWithDiscovery(ctx, env, address, request, hookRegisteredReceiver, submitTerminalInput)
-}
-
-// hookRegisteredReceiver accepts a receiver whose own hooks registered it.
-func hookRegisteredReceiver(_ context.Context, env *sysenv.Env, address Address) error {
-	if reason := mailboxUnavailable(env, address.Harness, address.ID, address.Host); reason != "" {
-		return errors.New(reason)
-	}
-	return nil
+	return sendTerminalWithDiscovery(ctx, env, address, request, discoverTerminalReceiver, submitTerminalInput)
 }
 
 // PastedTransport reports a transport that types a message into a harness's

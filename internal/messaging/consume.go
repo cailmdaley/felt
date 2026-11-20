@@ -121,8 +121,8 @@ func consumePass(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 		if a.Host != host {
 			return Consumption{}, errCode("wrong_host", "fiber context belongs to another host")
 		}
-		if a.Harness == "codex" {
-			_ = discoverCodexTerminalReceiver(ctx, env, a)
+		if PastedTransport(a.Harness + "-terminal") {
+			_ = discoverTerminalReceiver(ctx, env, a)
 		}
 		hook = MailboxAvailable(env, a.Harness, a.ID, host)
 	}

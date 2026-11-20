@@ -14,7 +14,7 @@ defmodule ShuttleWeb.SessionInputController do
   def create(conn, %{"session_uuid" => session, "text" => text})
       when is_binary(session) and session != "" and is_binary(text) and text != "" do
     case current_terminal(session) do
-      {:ok, terminal} ->
+      {:ok, terminal, _harness} ->
         runner = Shuttle.Env.app(:terminal_runner, Shuttle.Runner.Default)
 
         case terminal_state(runner, terminal) do
@@ -47,11 +47,11 @@ defmodule ShuttleWeb.SessionInputController do
 
   def receiver(conn, %{"session_uuid" => session}) when is_binary(session) and session != "" do
     case current_terminal(session) do
-      {:ok, terminal} ->
+      {:ok, terminal, harness} ->
         runner = Shuttle.Env.app(:terminal_runner, Shuttle.Runner.Default)
 
         case terminal_state(runner, terminal) do
-          :alive -> receiver_process(conn, session, terminal, runner)
+          :alive -> receiver_process(conn, session, terminal, harness, runner)
           :gone -> error(conn, 404, "session_not_running", "The session is not running")
           :unknown -> error(conn, 503, "terminal_unavailable", "Terminal state is unknown")
         end
@@ -75,12 +75,17 @@ defmodule ShuttleWeb.SessionInputController do
       else: if(Terminal.status(runner, terminal) == :gone, do: :gone, else: :unknown)
   end
 
-  defp receiver_process(conn, session, terminal, runner) do
+  defp receiver_process(conn, session, terminal, harness, runner) do
     case WorkerProcess.scan(runner) do
       {:ok, processes} ->
-        case WorkerProcess.codex_session_process(processes, terminal, session) do
+        case WorkerProcess.resumed_process(
+               processes,
+               terminal,
+               harness.binary(),
+               harness.resume_args(session)
+             ) do
           %{pid: pid} -> receiver_identity(conn, session, pid, runner)
-          nil -> error(conn, 404, "session_not_running", "Native Codex process is not running")
+          nil -> error(conn, 404, "session_not_running", "Native harness process is not running")
         end
 
       {:error, :unknown} ->
@@ -122,9 +127,13 @@ defmodule ShuttleWeb.SessionInputController do
       }
       when is_binary(terminal) and is_binary(uid) ->
         case {host == Shuttle.Poller.own_host_id(), SessionLedger.latest_for_uid(uid),
-              Shuttle.Harness.call(harness, :takes_paste?, [], false)} do
-          {true, %{"session" => ^session, "tmux" => ^terminal}, true} -> {:ok, terminal}
-          _ -> :error
+              Shuttle.Harness.module(harness)} do
+          {true, %{"session" => ^session, "tmux" => ^terminal}, module}
+          when module != nil ->
+            if module.takes_paste?(), do: {:ok, terminal, module}, else: :error
+
+          _ ->
+            :error
         end
 
       _ ->

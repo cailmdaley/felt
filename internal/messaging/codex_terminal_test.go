@@ -175,7 +175,7 @@ func TestCodexContextOnlyRehydratesQuietResumeReceiver(t *testing.T) {
 	request := Request{Address: "shuttle://host/codex/" + id, MessageID: "context-resumed", Text: "next hook context", From: "shuttle://peer/pi/source"}
 	receipt, err := sendTerminalWithDiscovery(context.Background(), env, Address{Host: "host", Harness: "codex", ID: id}, request,
 		func(ctx context.Context, env *sysenv.Env, address Address) error {
-			return discoverCodexTerminalReceiverWithClient(ctx, env, address, client)
+			return discoverTerminalReceiverWithClient(ctx, env, address, client)
 		},
 		func(context.Context, *sysenv.Env, Address, Request) (Receipt, error) {
 			t.Fatal("context-only message must wait for a real hook")
@@ -245,7 +245,7 @@ func TestCodexContextOnlyRejectsChangedReceiverIdentity(t *testing.T) {
 	transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"session_uuid":"thread-resumed","pid":999999,"process_start":"old"}`))}, nil
 	})
-	err := discoverCodexTerminalReceiverWithClient(context.Background(), env, Address{Host: "host", Harness: "codex", ID: id}, &http.Client{Transport: transport})
+	err := discoverTerminalReceiverWithClient(context.Background(), env, Address{Host: "host", Harness: "codex", ID: id}, &http.Client{Transport: transport})
 	if err == nil || MailboxAvailable(env, "codex", id, "host") {
 		t.Fatalf("stale receiver accepted: err=%v", err)
 	}
