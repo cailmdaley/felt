@@ -149,6 +149,7 @@ export class ThreadPage {
       lead: card => this.leads.of(card),
       said: card => { const root = feed.index.rootOf(card); return lastSaid(card, feed.index, feed.board.records([root.uid ?? root.id])) },
       clearLine: item => { void this.clearLine(item) },
+      inPlace: true,
       onRedraw: () => this.render(),
     })
     this.stream.el.classList.add('pg-posts-scroll')

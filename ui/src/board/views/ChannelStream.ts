@@ -87,6 +87,8 @@ export interface ChannelStreamHost {
   said?(card: KanbanCard): { text: string; at: number } | undefined
   /** Clear a line from the stream (✓ button); omit to hide clear controls. */
   clearLine?(item: Item, done: HTMLButtonElement): void
+  /** Expand file and tapestry previews in place instead of opening them elsewhere. */
+  inPlace?: boolean
   /** Called when an async lookup (e.g. tapestry check) changes what should draw. */
   onRedraw(): void
   /** Optional status announcer for Find match counts. */
@@ -129,6 +131,8 @@ export class ChannelStream {
   private readonly unfolds = new Map<string, Unfold>()
   /** Each fiber's newest close's tapestry, by item, kept across redraws. */
   private readonly pageCards = new Map<string, PageCard>()
+  /** Resolved lead tapestry files for in-place unfolding, by item id. */
+  private readonly leadFiles = new Map<string, UnfoldFile>()
   /** Whether a constitution has a tapestry, as its last look said. */
   private readonly tapestries = new Map<string, boolean>()
   /** The stream's rows as last drawn, by entry. */
@@ -259,14 +263,28 @@ export class ChannelStream {
       rebuildChildren(this.el, [count, ink, ...hidden ? [this.earlierRow(hidden)] : [], ...folded ? [...drawn.flatMap((node, row) => [...gap(folded.gaps[row]), node]), ...gap(folded.gaps.at(-1)!)] : drawn])
       for (const id of this.rows.keys()) if (!kept.has(id)) this.rows.delete(id)
       for (const close of newest.values()) {
+        const itemId = `item:${close.id}`
         const found = this.host.lead(close.card).then(file => {
           if (file === null) return file
           const key = tapestryKey(close.card), had = this.tapestries.get(key) !== false
           this.tapestries.set(key, !!file)
-          if (had !== !!file) this.host.onRedraw()
+          let changed = had !== !!file
+          if (this.host.inPlace) {
+            const prev = this.leadFiles.get(itemId)
+            if (file) {
+              if (!prev || prev.key !== file.key) {
+                this.leadFiles.set(itemId, { key: file.key, name: file.name, at: file.at })
+                changed = true
+              }
+            } else if (prev) {
+              this.leadFiles.delete(itemId)
+              changed = true
+            }
+          }
+          if (changed) this.host.onRedraw()
           return file
         })
-        this.pageCards.get(`item:${close.id}`)?.look(found)
+        this.pageCards.get(itemId)?.look(found)
       }
       this.sweep(new Set(whole.flatMap(entry => entry.kind === 'station' ? [] : [`item:${entry.id}`])), new Set([...newest.values()].map(close => tapestryKey(close.card))))
       if (!entries.length) this.el.append(el('li', 'kbn-ch-hush', folded ? `Nothing in ${input.label} says “${this.folding}”.` : failed ? 'This channel\'s history could not be read; trying again.' : 'Nothing addressed to you here yet.'))
@@ -596,13 +614,19 @@ export class ChannelStream {
   private previews(item: Item, id: string, lead?: 'page' | 'card'): HTMLElement {
     const { card } = item
     const shown = { shuttleBase: this.host.shuttleBase, awake: () => this.host.awake() && this.el.isConnected }
-    const unfold = this.unfolds.get(id) ?? this.unfolds.set(id, new Unfold({ ...shown, open: key => this.host.openFile(id, card, key) })).get(id)!
-    unfold.update(item.files.map((file): UnfoldFile => {
+    const unfoldOpts = this.host.inPlace
+      ? { ...shown, full: (key: DocKey) => this.host.openFile(id, card, key) }
+      : { ...shown, open: (key: DocKey) => this.host.openFile(id, card, key) }
+    const unfold = this.unfolds.get(id) ?? this.unfolds.set(id, new Unfold(unfoldOpts)).get(id)!
+    const files: UnfoldFile[] = item.files.map((file): UnfoldFile => {
       const key = docKey(file.host ?? card.originId, file.fullPath, card.originId, card.fiberDir)
       return { key, name: declaredTitle(key)?.title ?? file.basename, at: file.timestamp, caption: file.caption }
-    }))
+    })
     const previews = el('div', 'kbn-ch-previews')
-    if (lead) {
+    if (lead && this.host.inPlace) {
+      const leadFile = this.leadFiles.get(id)
+      if (leadFile && !files.some(each => each.key === leadFile.key)) files.unshift(leadFile)
+    } else if (lead) {
       let page = this.pageCards.get(id)
       if (page?.previews !== (lead === 'page')) {
         page?.dispose()
@@ -611,6 +635,7 @@ export class ChannelStream {
       }
       previews.append(page.el)
     }
+    unfold.update(files)
     previews.append(unfold.el)
     return previews
   }
@@ -618,6 +643,7 @@ export class ChannelStream {
   private sweep(wanted: ReadonlySet<string>, fibers: ReadonlySet<string> = new Set()): void {
     for (const [id, unfold] of this.unfolds) if (!wanted.has(id)) { unfold.dispose(); this.unfolds.delete(id) }
     for (const [id, page] of this.pageCards) if (!wanted.has(id)) { page.dispose(); this.pageCards.delete(id) }
+    for (const id of this.leadFiles.keys()) if (!wanted.has(id)) this.leadFiles.delete(id)
     for (const key of this.tapestries.keys()) if (!fibers.has(key)) this.tapestries.delete(key)
   }
 }
