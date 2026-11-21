@@ -18,7 +18,7 @@
 //      dead in the Chronicle's search box — the single place a person is most
 //      likely to be typing when they reach for it.
 // S2 — settings is dispatched BEFORE the view hotkeys, so every key
-//      `settingsHotkey` answers for is a key `1`-`3` never sees. A predicate
+//      `settingsHotkey` answers for is a key `1`-`2` never sees. A predicate
 //      that got generous would shadow the view strip without a word.
 //
 // KanbanModal composes S1 as `kind === 'chord' ? blockingDialogOpen() :
@@ -124,7 +124,7 @@ describe('settingsHotkey', () => {
   /** Every one of the 16 modifier combinations, as a stroke's flags. */
   const chords = Array.from({ length: 1 << MODIFIERS.length }, (_, bits) =>
     Object.fromEntries(MODIFIERS.map((m, i) => [m, (bits & (1 << i)) !== 0])) as Omit<HotkeyLike, 'key'>)
-  // S2. `1`-`3` are here because the settings dispatch runs first: if this
+  // S2. `1`-`2` are here because the settings dispatch runs first: if this
   // predicate ever answered for a digit, the view strip would go dead and
   // nothing would say why. `<` is here because it is what a US layout actually
   // reports for ⇧, — the modifier check is the second line of defence, not the
@@ -270,14 +270,14 @@ describe('blockingDialogOpen beside keystrokeIsSpokenFor', () => {
 
   it('DISAGREE about a focused text field — which is what makes ⌘, work', () => {
     // S1, exactly. A caret in a search box speaks for `,` (there it is a
-    // comma) and for `1`-`3`, but never for a modifier chord.
+    // comma) and for `1`-`2`, but never for a modifier chord.
     stubDOM([boardRoot], searchBox)
     expect(keystrokeIsSpokenFor()).toBe(true)
     expect(blockingDialogOpen()).toBe(false)
   })
 
   it('both see the settings sheet, with no change to the selector', () => {
-    // An open `AppDialog` is what `[role="dialog"][data-open]` describes, so `,` and `1`-`3` go dead while settings is open — including
+    // An open `AppDialog` is what `[role="dialog"][data-open]` describes, so `,` and `1`-`2` go dead while settings is open — including
     // the `,` that would otherwise stack a second sheet on the first.
     //
     // The board root is listed FIRST, as it is in the document: it matches the

@@ -177,7 +177,7 @@ export function viewFallbackKind(state: {
 
 // ── Hotkey guard ─────────────────────────────────────────────────────────────
 //
-// The chassis runs bare-key hotkeys — the 1-4 view switch and the bare `,` for
+// The chassis runs bare-key hotkeys — the 1-2 view switch and the bare `,` for
 // settings — and each must agree on when a keystroke is NOT theirs. These are
 // the shared predicates, so the next dialog added to the app is covered by
 // every bare key at once.
@@ -218,7 +218,7 @@ export function isBlockingDialog(
  * `[data-open]` is the SDK dialog's open stamp — Stash, Capture and the
  * settings sheet all render through `AppDialog`. `[aria-modal="true"]` catches
  * every modal dialog, a hand-rolled one included: without this clause
- * `1`-`4` would switch views out from under it. Matching on aria rather than on
+ * `1`-`2` would switch views out from under it. Matching on aria rather than on
  * a library's attribute means a dialog built outside AppDialog is covered
  * without a code change here. A native `<dialog>` the board opens with
  * `showModal()` exposes its modality without the attribute, so `dialog[open]`
@@ -273,7 +273,7 @@ export interface HotkeyLike {
  * Two openings, because the board is two things at once. On a keyboard it is
  * an application, and an application's preferences are `⌘,` — the one chord
  * a Mac user tries without being told. On the board itself every other page is
- * a BARE key (`1`–`4`), and a phone's keyboard has no `⌘` at all, so a bare `,`
+ * a BARE key (`1`–`2`), and a phone's keyboard has no `⌘` at all, so a bare `,`
  * opens it too. `,` is free: the chassis owns only the digits.
  *
  * Pure, and it deliberately does NOT consult the DOM — the two kinds are
