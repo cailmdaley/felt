@@ -48,6 +48,7 @@ defmodule ShuttleWeb.SpaControllerTest do
 
       Shuttle.Test.Env.put_env("SHUTTLE_UI_DIST", dist)
       on_exit(fn -> File.rm_rf(dist) end)
+      {:ok, dist: dist}
     end
 
     test "a hashed asset is served precompressed and cached for good" do
@@ -70,6 +71,17 @@ defmodule ShuttleWeb.SpaControllerTest do
       assert get_resp_header(gzip, "content-encoding") == ["gzip"]
 
       assert get(local_conn(), "/assets/index-AbCd1234.js").resp_body == "plain"
+    end
+
+    test "a page is the pages document at its one-segment path, whatever names its fiber", %{
+      dist: dist
+    } do
+      File.write!(Path.join(dist, "index.html"), "the board")
+      File.write!(Path.join(dist, "pages.html"), "the pages")
+      conn = get(local_conn(), "/thread?f=01J00000000000000000000000@hub&in=rex")
+      assert {conn.status, conn.resp_body} == {200, "the pages"}
+      assert get_resp_header(conn, "content-type") |> List.first() =~ "text/html"
+      assert get(local_conn(), "/").resp_body == "the board"
     end
 
     test "an unhashed file is served precompressed and revalidated" do

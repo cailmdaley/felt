@@ -44,6 +44,8 @@ defmodule ShuttleWeb.Router do
     # Open a worker or resumed session on the board's display. Remote Rex
     # workers are selected by their owner through the reveal route.
     post("/attach", AttachController, :create)
+    # Move the Mac's Rex app to a fiber's live worker (owner-routed); a page's one verb.
+    post("/go", GoController, :create)
     post("/terminal/reveal", AttachController, :reveal)
     # Start (or find) the tmux session resuming a past harness session on THIS
     # host — the leg /attach forwards to the host that ran it.
@@ -217,10 +219,12 @@ defmodule ShuttleWeb.Router do
     delete("/deploy/runs/:id", DeployRunController, :delete)
   end
 
-  # The served frontend's bare-root document. Static assets are served by
-  # `Plug.Static` in the endpoint (it skips `/`); this serves `index.html` so the
-  # daemon hosts the board itself — one `shuttle` process, API + UI.
+  # The served frontend's documents. Static assets are served by `Plug.Static`
+  # in the endpoint (it skips `/`); this serves `index.html` so the daemon hosts
+  # the board itself — one `shuttle` process, API + UI — and `pages.html` at each
+  # page's one-segment path, so the bundle's relative asset base holds.
   scope "/", ShuttleWeb do
     get("/", SpaController, :index)
+    get("/thread", SpaController, :pages)
   end
 end

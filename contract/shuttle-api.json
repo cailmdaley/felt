@@ -21,6 +21,7 @@
       "routes": [
         "POST /transition",
         "POST /attach",
+        "POST /go",
         "POST /felt-edit",
         "POST /felt-nest",
         "GET /search",

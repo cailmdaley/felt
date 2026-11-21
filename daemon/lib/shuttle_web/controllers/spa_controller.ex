@@ -1,8 +1,8 @@
 defmodule ShuttleWeb.SpaController do
   @moduledoc """
-  Serve the Shuttle board at `GET /`. Static
-  assets (`/assets`, `/fonts`, …) are served by `Plug.Static` in the endpoint;
-  this controller handles the page document.
+  Serve the Shuttle board at `GET /` and the pages (`GET /thread`) from the
+  bundle's `pages.html`. Static assets (`/assets`, `/fonts`, …) are served by
+  `Plug.Static` in the endpoint; this controller handles the page documents.
 
   When the bundle is not built (a fresh checkout that hasn't run `npm run
   build`), respond 404 with the build hint rather than 500 — the API is still
@@ -12,6 +12,7 @@ defmodule ShuttleWeb.SpaController do
   use Phoenix.Controller, formats: [:html]
 
   def index(conn, _params), do: page(conn, "index.html")
+  def pages(conn, _params), do: page(conn, "pages.html")
 
   defp page(conn, file) do
     path = Path.join(ShuttleWeb.Assets.dist(), file)
