@@ -310,7 +310,6 @@ defmodule Shuttle.Terminal.Rex do
                    {:ok, b} <- created_binding(reply) do
                 case Bindings.put_family(root, b["session_id"], server) do
                   :ok ->
-                    Shuttle.RetainedTerminal.keep_last(runner)
                     {:ok, b}
 
                   error ->
@@ -326,7 +325,7 @@ defmodule Shuttle.Terminal.Rex do
 
           case store.(b) do
             :ok ->
-              {:ok, b}
+              {:ok, b, !existing}
 
             error ->
               result =
@@ -342,7 +341,17 @@ defmodule Shuttle.Terminal.Rex do
         error -> {:error, "Rex launch preparation failed: #{inspect(error)}"}
       end
     end)
+    |> keep_retained_last(runner)
   end
+
+  # A new family session's binding is stored; the retained sessions move below it.
+  defp keep_retained_last({:ok, b, true}, runner) do
+    Shuttle.RetainedTerminal.keep_last(runner)
+    {:ok, b}
+  end
+
+  defp keep_retained_last({:ok, b, _}, _runner), do: {:ok, b}
+  defp keep_retained_last(error, _runner), do: error
 
   defp launch_cleanup(error, cleanup) do
     case cleanup.() do
