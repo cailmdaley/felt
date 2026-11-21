@@ -33,6 +33,7 @@ felt/
 │   └── rel/                 built daemon release (gitignored)
 ├── ui/                      TypeScript board; npm run build produces ui/dist
 │   ├── src/board/views/     temporal and artifact views
+│   ├── src/pages/           the pages: one view per address (/thread), no workspace
 │   ├── src/phone/           browser microphone, PCM worklet, relay, and audio session
 │   ├── harness/             offline visual-verification harnesses
 │   └── e2e/                 document workspace browser suite
@@ -52,6 +53,9 @@ The documentation builds from the root with `mkdocs build -f docs/mkdocs.yml`.
 The board harness mounts the real board against a mocked daemon.
 Run `npm run harness:board` inside `ui/` to build a self-contained bundle in
 `ui/harness-board-dist/`. It opens over `file://` without a running daemon.
+With `?page=thread&f=<uid>@<host>` the same bundle mounts the thread page
+instead of the board (add `&in=rex` to post `go` on a click); the query strings
+are listed at the top of `ui/harness/harness-board.ts`.
 
 ## Tests
 

@@ -33,6 +33,27 @@ The daemon detects clean worker exits via the `shuttle.runtime.handed_off_at`
 frontmatter field. The editorial chain lives in the constitution body's
 `## Status` block plus the git log of the fiber.
 
+## Pages
+
+Beside the board, the UI bundle holds **pages**: small views, each at an
+address of its own, meant to stand in a Rex pane beside a worker's chat or in
+a browser tab. They are a second Vite entry, `ui/pages.html` →
+`ui/src/pages/main.ts`, which the daemon serves at each page's one-segment
+path, so the bundle's relative asset base holds. One page exists:
+
+- **`/thread?f=<uid>@<host>`** shows one constitution as the board's view of
+  it (`FamilyPage`): its head, its last post, its live sub-threads and its
+  tapestry or sent files, unfolding in place. Its feed polls
+  `/api/v1/fibers/composite` with `If-None-Match` only while the page is
+  visible, and lists no tempered or discarded fiber but its own. Its head
+  draws no lifecycle verbs.
+
+A page never touches the history API, voice, Rex focus or swipe handling. It
+moves Rex with one verb, [`POST /api/v1/go`](../reference/api.md#board), and
+only when its address carries `in=rex`; without it, going to another fiber
+opens that fiber's page in place. `ui/test/pagesImports.test.ts` fails if the
+pages entry ever loads the workspace, the board shell, its history or voice.
+
 ## Thread results
 
 A child constitution publishes lifecycle results to its nearest ancestor constitution that is not archived (tempered or discarded).

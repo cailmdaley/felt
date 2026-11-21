@@ -411,6 +411,7 @@ is not enough.
 |---|---|---|
 | `POST /transition` | owner-routed | The lifecycle write behind a verdict: move a fiber to a column (tempered, composted, awaiting review), one call per verdict |
 | `POST /attach` | **not** owner-routed | Open a worker or past-session viewer on the local display using Kitty or Rex; remote tmux uses SSH; brings the terminal forward. With both `tmux_session` and `session`, a terminal that has gone reopens that past session instead. `{select_only: true}` is a click's: Rex moves to a window the conversation already has, creating none, launching or raising no app and resuming no session, and answers `{moved, session}` |
+| `POST /go` | owner-routed | `{fiber_id, origin}`: show the fiber's live worker in the Mac's Rex app, the [pages'](../dev/architecture.md#pages) one verb. The owner selects the worker's Rex window in its macOS app client and the asked daemon brings Rex forward; a tmux worker opens as `/attach` opens it. Answers `{went, place}`: `{went: true, place: "live"}`, or `{went: false, place: "none"}` when no live worker can be shown. It never starts a worker. 404 for an unknown fiber, 422 for a tempered or discarded one, 502 when Rex or the owner cannot be reached |
 | `POST /felt-edit` | owner-routed | Shell `felt edit` on the owning host — felt keeps the validation |
 | `POST /felt-nest` | owner-routed | Shell `felt nest` on the owning host |
 | `GET /search` | local | Search constitution bodies in this daemon's configured stores |
@@ -435,7 +436,7 @@ is not enough.
 | `GET /sessions/links` | host-routed | For a batch of sessions: transcript present, harness, and a bridged Claude session's claude.ai URL |
 | `GET /state/composite` | fan-in | The full local state of [`GET /state`](#fleet) plus per-origin remote snapshots |
 
-`GET /` outside `/api/v1` serves the board's `index.html`, or a 404 with a build hint when `ui/dist` has never been built.
+`GET /` outside `/api/v1` serves the board's `index.html`, and `GET /thread` the pages' `pages.html` ([pages](../dev/architecture.md#pages)), or a 404 with a build hint when `ui/dist` has never been built.
 
 ```bash
 curl -s http://127.0.0.1:4000/api/v1/agents  | jq

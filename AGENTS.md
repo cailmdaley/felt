@@ -16,7 +16,10 @@ One repo, one checkout, four artifacts:
   tree and the fleet's session/commit ledgers (Desk kanban and the
   human's Channels — a Slack-like stream per channel, a thread per worker), plus a settings sheet on `⌘,` over every host's
   operator files. It keeps the map and renders no conversation: that lives in
-  Rex. The daemon serves it at `http://127.0.0.1:4000/`.
+  Rex. The daemon serves it at `http://127.0.0.1:4000/`. The same bundle
+  holds the pages, small views each at an address of their own
+  (`/thread?f=<uid>@<host>`) with no workspace, voice or Rex following
+  ([pages](docs/dev/architecture.md#pages)).
 
 felt owns fiber storage and generic frontmatter. shuttle owns the network and
 orchestration; the daemon is the production dispatcher.
