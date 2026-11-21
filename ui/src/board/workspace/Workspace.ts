@@ -180,7 +180,7 @@ export class Workspace {
       if (this.current && this.isActive) this.current.familyPage?.update(this.current.card, this.graph())
     })
     this.board = new BoardFeed(opts.shuttleBase)
-    this.leads = new Leads(opts.shuttleBase)
+    this.leads = new Leads(opts.shuttleBase, () => this.disposed)
     this.board.subscribe(() => {
       this.mentions.refresh()
       this.refreshFind()
@@ -450,9 +450,8 @@ export class Workspace {
     return [...files.values()].sort((a, b) => b.at - a.at)
   }
   /** The first companion page a fiber's directory holds ({@link companion}); undefined once the workspace is gone. */
-  private async companion(fiberDir: string, owner: string, listed?: (path: string) => boolean): Promise<{ path: string; name: string; modifiedAt?: string } | null | undefined> {
-    const found = await companion(this.opts.shuttleBase, fiberDir, owner, listed)
-    return this.disposed ? undefined : found
+  private companion(fiberDir: string, owner: string, listed?: (path: string) => boolean): Promise<{ path: string; name: string; modifiedAt?: string } | null | undefined> {
+    return companion(this.opts.shuttleBase, fiberDir, owner, listed, () => this.disposed)
   }
 
   /** The map among this card's pages, or none for a fiber with no map. */

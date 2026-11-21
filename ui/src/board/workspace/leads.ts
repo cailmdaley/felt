@@ -8,14 +8,16 @@ import { COMPANION_NAMES, docKey } from './documents.js'
 /**
  * The first companion page a fiber's directory holds, skipping past any
  * `listed` already names, which ends the search: undefined when it holds
- * none, null when its owner could not say.
+ * none, null when its owner could not say. It asks no further once `gone`
+ * (its reader was disposed), answering undefined.
  */
-export async function companion(base: string, fiberDir: string, owner: string, listed: (path: string) => boolean = () => false): Promise<{ path: string; name: string; modifiedAt?: string } | null | undefined> {
+export async function companion(base: string, fiberDir: string, owner: string, listed: (path: string) => boolean = () => false, gone: () => boolean = () => false): Promise<{ path: string; name: string; modifiedAt?: string } | null | undefined> {
   let unknown = false
   for (const file of COMPANION_NAMES) {
     const path = `${fiberDir}/${file}`
     if (listed(path)) return undefined
     const result = await head(fileBytesUrl(base, path, owner), RESOURCE_PRIORITY.neighbour, { fresh: true })
+    if (gone()) return undefined
     if (result?.exists) return { path, name: file[0].toUpperCase() + file.slice(1, -5), modifiedAt: result.modifiedAt ?? undefined }
     unknown ||= !result
   }
@@ -26,7 +28,9 @@ export async function companion(base: string, fiberDir: string, owner: string, l
 export class Leads {
   private readonly reads = new Map<string, { modified?: string; read: Promise<MapFile | null | undefined> }>()
   private readonly base: string
-  constructor(base: string) { this.base = base }
+  private readonly gone: () => boolean
+  /** `gone` says its reader was disposed: no read then asks further. */
+  constructor(base: string, gone: () => boolean = () => false) { this.base = base; this.gone = gone }
 
   of(card: KanbanCard): Promise<MapFile | null | undefined> {
     const key = `${card.originId}:${card.uid ?? card.id}`, known = this.reads.get(key)
@@ -39,7 +43,7 @@ export class Leads {
 
   private async read(card: KanbanCard): Promise<MapFile | null | undefined> {
     if (!card.fiberDir) return undefined
-    const found = await companion(this.base, card.fiberDir, card.originId)
+    const found = await companion(this.base, card.fiberDir, card.originId, undefined, this.gone)
     if (!found) return found
     const key = docKey(card.originId, found.path, card.originId, card.fiberDir), at = Date.parse(found.modifiedAt ?? '') || 0
     return { key, name: found.name, at, unread: at > 0 && unseenSince(key, at) }
