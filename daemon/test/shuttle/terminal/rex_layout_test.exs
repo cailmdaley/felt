@@ -699,5 +699,84 @@ defmodule Shuttle.Terminal.RexLayoutTest do
       assert restored["page_closed"] == false
       assert Enum.any?(blocks(sid), &(&1["block_id"] == restored["page_block_id"]))
     end
+
+    test "pages.desk: false leaves no Desk session; pages.desk: true creates, preserves, rebuilds, and removes it",
+         %{host: host} do
+      # Default (desk: false): no Desk session is created.
+      assert :ok = RexLayout.reconcile(FakeRex, fibers: [])
+      {:ok, doc0} = RexBindings.read()
+      assert doc0["desk"] == nil
+      assert FakeRex.state().sessions == %{}
+
+      # Create a pre-existing session so we can verify Desk moves to index 0.
+      assert {:ok, %{"session_id" => existing_sid}} =
+               Rex.create(FakeRex, %{
+                 "label" => "human",
+                 "initial_windows" => [
+                   %{"window_label" => "shell", "layout" => %{"block" => %{"label" => "shell"}}}
+                 ]
+               })
+
+      # Enable pages.desk: true -> creates Desk session at index 0 with /desk?in=rex holder.
+      File.write!(host, ~s({"pages":{"enabled":true,"base":"http://hub.test:4000","desk":true}}))
+      assert :ok = RexLayout.reconcile(FakeRex, fibers: [])
+
+      {:ok, doc1} = RexBindings.read()
+      desk = doc1["desk"]
+      assert %{"session_id" => desk_sid, "window_id" => desk_wid, "page_block_id" => desk_bid} =
+               desk
+
+      state1 = FakeRex.state()
+      assert hd(state1.order) == desk_sid
+      assert state1.order == [desk_sid, existing_sid]
+      assert state1.sessions[desk_sid].label == "Desk"
+      assert [desk_block] = blocks(desk_sid)
+      assert desk_block["block_id"] == desk_bid
+      assert desk_block["window_id"] == desk_wid
+      assert RexPages.page?(desk_block)
+
+      assert Enum.any?(FakeRex.calls(), fn {_cmd, args, opts} ->
+               "session.create" in args and
+                 String.contains?(opts[:input] || "", "http://hub.test:4000/desk?in=rex")
+             end)
+
+      # Second reconcile is idempotent: preserves the Desk session without recreating or moving it.
+      calls_before = length(FakeRex.calls())
+      assert :ok = RexLayout.reconcile(FakeRex, fibers: [])
+      new_args = FakeRex.calls() |> Enum.drop(calls_before) |> Enum.map(&elem(&1, 1))
+      refute Enum.any?(new_args, &("session.create" in &1))
+      refute Enum.any?(new_args, &("move" in &1))
+      {:ok, doc2} = RexBindings.read()
+      assert doc2["desk"] == desk
+
+      # Closing the Desk page block -> reconcile restores a Desk window in the same session.
+      assert {:ok, _} = Rex.call(FakeRex, "block.close", %{"block_id" => desk_bid}, session: desk_sid)
+      assert :ok = RexLayout.reconcile(FakeRex, fibers: [])
+      {:ok, doc3} = RexBindings.read()
+      assert doc3["desk"]["session_id"] == desk_sid
+      refute doc3["desk"]["page_block_id"] == desk_bid
+      assert Enum.any?(blocks(desk_sid), &(&1["block_id"] == doc3["desk"]["page_block_id"]))
+
+      # Rex server restart (new instance_id) -> retires stale Desk and rebuilds a fresh one.
+      FakeRex.reply(
+        "whoami",
+        {Jason.encode!(Map.put(FakeRex.fixture("whoami"), "instance_id", "desk-after-restart")), 0}
+      )
+
+      assert :ok = RexLayout.reconcile(FakeRex, fibers: [])
+      {:ok, doc4} = RexBindings.read()
+      refute doc4["desk"]["session_id"] == desk_sid
+      refute Map.has_key?(FakeRex.state().sessions, desk_sid)
+      assert Map.has_key?(FakeRex.state().sessions, doc4["desk"]["session_id"])
+
+      # Turning pages.desk off -> removes Desk session and clears rex.json desk entry.
+      new_desk_sid = doc4["desk"]["session_id"]
+      File.write!(host, ~s({"pages":{"enabled":true,"base":"http://hub.test:4000","desk":false}}))
+      assert :ok = RexLayout.reconcile(FakeRex, fibers: [])
+      {:ok, doc5} = RexBindings.read()
+      assert doc5["desk"] == nil
+      refute Map.has_key?(FakeRex.state().sessions, new_desk_sid)
+      assert Map.has_key?(FakeRex.state().sessions, existing_sid)
+    end
   end
 end

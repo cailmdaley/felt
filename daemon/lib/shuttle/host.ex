@@ -212,12 +212,13 @@ defmodule Shuttle.Host do
   end
 
   @doc """
-  Thread pages beside Rex workers, read fresh: `{:ok, %{base: url}}` when
-  `"pages": {"enabled": true}` is set, nil when pages are off, and
+  Thread pages beside Rex workers, read fresh: `{:ok, %{base: url, desk: boolean}}`
+  when `"pages": {"enabled": true}` is set, nil when pages are off, and
   `{:error, message}` for an invalid setting, which leaves pages off. `base`
-  defaults to the local daemon. The caller decides whether to log the message.
+  defaults to the local daemon, and `desk` defaults to `false`. The caller
+  decides whether to log the message.
   """
-  @spec pages() :: nil | {:ok, %{base: String.t()}} | {:error, String.t()}
+  @spec pages() :: nil | {:ok, %{base: String.t(), desk: boolean()}} | {:error, String.t()}
   def pages do
     path = config_path()
 
@@ -225,14 +226,15 @@ defmodule Shuttle.Host do
       {:ok, %{"pages" => %Jason.OrderedObject{values: pairs}}} ->
         config = Map.new(pairs)
         base = Map.get(config, "base", "http://127.0.0.1:4000")
+        desk = Map.get(config, "desk", false)
 
         cond do
           config["enabled"] == false ->
             nil
 
           config["enabled"] == true and is_binary(base) and
-              URI.parse(base).scheme in ["http", "https"] ->
-            {:ok, %{base: String.trim_trailing(base, "/")}}
+              URI.parse(base).scheme in ["http", "https"] and is_boolean(desk) ->
+            {:ok, %{base: String.trim_trailing(base, "/"), desk: desk}}
 
           true ->
             pages_error(path)
@@ -252,7 +254,7 @@ defmodule Shuttle.Host do
   defp pages_error(path),
     do:
       {:error,
-       ~s(#{path}: pages requires "enabled": true or false and an http\(s\) "base"; pages disabled)}
+       ~s(#{path}: pages requires "enabled": true or false, an http\(s\) "base", and a boolean "desk"; pages disabled)}
 
   @doc "`resolve/1`, raising `ArgumentError` with the message on a refusal."
   @spec resolve!(pos_integer()) :: settings()

@@ -1,8 +1,9 @@
 defmodule ShuttleWeb.SpaController do
   @moduledoc """
-  Serve the Shuttle board at `GET /` and the pages (`GET /thread`) from the
-  bundle's `pages.html`. Static assets (`/assets`, `/fonts`, …) are served by
-  `Plug.Static` in the endpoint; this controller handles the page documents.
+  Serve the Shuttle board at `GET /` and the pages (`GET /thread`, `GET /desk`)
+  from the bundle's `pages.html`. Static assets (`/assets`, `/fonts`, …) are
+  served by `Plug.Static` in the endpoint; this controller handles the page
+  documents.
 
   When the bundle is not built (a fresh checkout that hasn't run `npm run
   build`), respond 404 with the build hint rather than 500 — the API is still
@@ -13,10 +14,11 @@ defmodule ShuttleWeb.SpaController do
 
   def index(conn, _params), do: page(conn, "index.html")
 
-  # `/thread/` would resolve the bundle's relative assets under `/thread/`.
-  def pages(%Plug.Conn{request_path: "/thread/"} = conn, _params) do
+  # Trailing slashes would resolve the bundle's relative assets under the segment.
+  def pages(%Plug.Conn{request_path: path} = conn, _params)
+      when path in ["/thread/", "/desk/"] do
     query = if conn.query_string == "", do: "", else: "?" <> conn.query_string
-    redirect(conn, to: "/thread" <> query)
+    redirect(conn, to: String.trim_trailing(path, "/") <> query)
   end
 
   def pages(conn, _params), do: page(conn, "pages.html")

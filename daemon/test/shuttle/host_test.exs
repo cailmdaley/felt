@@ -149,14 +149,16 @@ defmodule Shuttle.HostTest do
       %{host_file: file}
     end
 
-    test "off unless enabled; base defaults to the local daemon", %{host_file: file} do
+    test "off unless enabled; base defaults to the local daemon and desk to false", %{host_file: file} do
       assert Host.pages() == nil
       File.write!(file, ~s({"pages":{"enabled":false,"base":"https://hub.example"}}))
       assert Host.pages() == nil
       File.write!(file, ~s({"pages":{"enabled":true}}))
-      assert Host.pages() == {:ok, %{base: "http://127.0.0.1:4000"}}
-      File.write!(file, ~s({"pages":{"enabled":true,"base":"https://hub.example/"}}))
-      assert Host.pages() == {:ok, %{base: "https://hub.example"}}
+      assert Host.pages() == {:ok, %{base: "http://127.0.0.1:4000", desk: false}}
+      File.write!(file, ~s({"pages":{"enabled":true,"base":"https://hub.example/","desk":true}}))
+      assert Host.pages() == {:ok, %{base: "https://hub.example", desk: true}}
+      File.write!(file, ~s({"pages":{"enabled":true,"desk":false}}))
+      assert Host.pages() == {:ok, %{base: "http://127.0.0.1:4000", desk: false}}
     end
 
     test "invalid config is an error that leaves pages off", %{host_file: file} do
@@ -165,7 +167,8 @@ defmodule Shuttle.HostTest do
             %{},
             %{"enabled" => "yes"},
             %{"enabled" => true, "base" => 4000},
-            %{"enabled" => true, "base" => "127.0.0.1:4000"}
+            %{"enabled" => true, "base" => "127.0.0.1:4000"},
+            %{"enabled" => true, "desk" => "yes"}
           ] do
         File.write!(file, Jason.encode!(%{pages: value}))
         assert {:error, message} = Host.pages()

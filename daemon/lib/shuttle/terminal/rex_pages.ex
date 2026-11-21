@@ -44,6 +44,9 @@ defmodule Shuttle.Terminal.RexPages do
   def url(base, uid, host_id \\ Shuttle.Poller.own_host_id()),
     do: "#{base}/thread?f=#{enc(uid)}@#{enc(host_id)}&in=rex"
 
+  @doc "The Desk page's URL in Rex."
+  def desk_url(base), do: "#{base}/desk?in=rex"
+
   defp enc(part), do: URI.encode_www_form(part)
 
   @doc """

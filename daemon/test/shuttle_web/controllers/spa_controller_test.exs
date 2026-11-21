@@ -83,10 +83,16 @@ defmodule ShuttleWeb.SpaControllerTest do
       assert get_resp_header(conn, "content-type") |> List.first() =~ "text/html"
       assert get(local_conn(), "/").resp_body == "the board"
 
-      # A trailing slash would put the bundle's relative assets under /thread/.
+      # A trailing slash would put the bundle's relative assets under /thread/ or /desk/.
       slash = get(local_conn(), "/thread/?f=01J00000000000000000000000@hub")
       assert redirected_to(slash) == "/thread?f=01J00000000000000000000000@hub"
       assert redirected_to(get(local_conn(), "/thread/")) == "/thread"
+
+      desk = get(local_conn(), "/desk?in=rex")
+      assert {desk.status, desk.resp_body} == {200, "the pages"}
+      assert get_resp_header(desk, "content-type") |> List.first() =~ "text/html"
+      assert redirected_to(get(local_conn(), "/desk/")) == "/desk"
+      assert redirected_to(get(local_conn(), "/desk/?in=rex")) == "/desk?in=rex"
     end
 
     test "an unhashed file is served precompressed and revalidated" do

@@ -226,5 +226,6 @@ defmodule ShuttleWeb.Router do
   scope "/", ShuttleWeb do
     get("/", SpaController, :index)
     get("/thread", SpaController, :pages)
+    get("/desk", SpaController, :pages)
   end
 end

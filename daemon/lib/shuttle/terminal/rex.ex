@@ -106,15 +106,50 @@ defmodule Shuttle.Terminal.Rex do
              end)
              |> then(fn result -> if result == :ok, do: {:cont, :ok}, else: {:halt, result} end)
            end) do
-      Enum.reduce_while(doc["places"] || %{}, :ok, fn {uid, place}, :ok ->
-        result =
-          with :ok <- close_stale_window(runner, place),
-               :ok <- Bindings.delete_place(uid, place) do
-            :ok
-          end
+      with :ok <-
+             Enum.reduce_while(doc["places"] || %{}, :ok, fn {uid, place}, :ok ->
+               result =
+                 with :ok <- close_stale_window(runner, place),
+                      :ok <- Bindings.delete_place(uid, place) do
+                   :ok
+                 end
 
-        if result == :ok, do: {:cont, :ok}, else: {:halt, result}
-      end)
+               if result == :ok, do: {:cont, :ok}, else: {:halt, result}
+             end) do
+        retire_stale_desk(runner, doc["desk"])
+      end
+    end
+  end
+
+  defp retire_stale_desk(_runner, nil), do: :ok
+
+  defp retire_stale_desk(runner, %{"session_id" => sid} = desk) do
+    family_lock(:desk, fn ->
+      with :ok <- close_stale_window(runner, desk),
+           :ok <- destroy_if_empty(runner, sid),
+           :ok <- Bindings.delete_desk(desk) do
+        :ok
+      end
+    end)
+  end
+
+  defp destroy_if_empty(runner, sid) do
+    case Rex.blocks(runner, sid) do
+      {:ok, []} ->
+        case Rex.destroy(runner, sid) do
+          {:ok, _} -> :ok
+          {:error, :not_found} -> :ok
+          error -> error
+        end
+
+      {:ok, _} ->
+        :ok
+
+      {:error, :not_found} ->
+        :ok
+
+      error ->
+        error
     end
   end
 

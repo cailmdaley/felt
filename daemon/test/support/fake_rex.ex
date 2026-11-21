@@ -60,7 +60,8 @@ defmodule Shuttle.Test.FakeRex do
       )
 
     case args do
-      ["session", "move", sid, "--index", _] -> {"session.move", %{"session_id" => sid}, sid}
+      ["session", "move", sid, "--index", index] ->
+        {"session.move", %{"session_id" => sid, "index" => String.to_integer(index)}, sid}
       ["api", "call", "-s", sid, method, "-"] -> {method, Jason.decode!(opts[:input]), sid}
       ["api", "call", method, "-"] -> {method, Jason.decode!(opts[:input]), nil}
       ["server", "start" | args] -> {"server.start", args, nil}
@@ -229,8 +230,11 @@ defmodule Shuttle.Test.FakeRex do
       {%{},
        %{state | sessions: Map.delete(state.sessions, sid), order: List.delete(state.order, sid)}}
 
-  defp run("session.move", %{"session_id" => sid}, sid, state),
-    do: {%{}, %{state | order: List.delete(state.order, sid) ++ [sid]}}
+  defp run("session.move", %{"session_id" => sid, "index" => index}, sid, state) do
+    rest = List.delete(state.order, sid)
+    pos = min(max(index, 0), length(rest))
+    {%{}, %{state | order: List.insert_at(rest, pos, sid)}}
+  end
 
   defp run("session.set_window_label", args, sid, state) do
     session = state.sessions[sid]

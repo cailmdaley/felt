@@ -1340,7 +1340,7 @@ defmodule Shuttle.Terminal.RexLayout do
   """
   def reconcile(runner, opts \\ []) do
     case Shuttle.Host.pages() do
-      {:ok, %{base: base}} ->
+      {:ok, %{base: base, desk: desk?}} ->
         {fibers, fibers_loaded?} = load_fibers(opts)
         family_fibers = load_family_fibers(opts, fibers)
         now = Keyword.get(opts, :now, DateTime.utc_now())
@@ -1411,26 +1411,159 @@ defmodule Shuttle.Terminal.RexLayout do
               end
             end)
 
-          case result do
-            {:ok, true} ->
+          with {:ok, family_created?} <- result,
+               {:ok, desk_created?} <- reconcile_desk(runner, server, identity, base, desk?) do
+            if family_created? or desk_created? do
               RetainedTerminal.keep_last(runner)
-              :ok
+            end
 
-            {:ok, false} ->
-              :ok
-
-            error ->
-              error
+            :ok
           end
         end
 
       nil ->
-        Pages.reconcile(runner)
+        with {:ok, _} <- remove_desk(runner), do: Pages.reconcile(runner)
 
       {:error, message} ->
         {:error, [message]}
     end
   end
+
+  defp reconcile_desk(runner, server, identity, base, true) do
+    Backend.family_lock(:desk, fn ->
+      with {:ok, doc} <- Bindings.read(),
+           {:ok, raw_sessions} <- Rex.sessions(runner) do
+        desk = if doc["server"] in [nil, server], do: doc["desk"], else: nil
+        sid = desk && desk["session_id"]
+        session_alive? = is_binary(sid) and Enum.any?(raw_sessions, &(&1["session_id"] == sid))
+
+        if session_alive? do
+          case Rex.blocks(runner, sid) do
+            {:ok, blocks} ->
+              if Enum.any?(
+                   blocks,
+                   &(&1["block_id"] == desk["page_block_id"] and &1["window_id"] == desk["window_id"])
+                 ) do
+                {:ok, false}
+              else
+                restore_desk_window(runner, sid, server, identity, base)
+              end
+
+            {:error, :not_found} ->
+              create_desk_session(runner, server, identity, base)
+
+            error ->
+              error
+          end
+        else
+          create_desk_session(runner, server, identity, base)
+        end
+      end
+    end)
+  end
+
+  defp reconcile_desk(runner, _server, _identity, _base, false), do: remove_desk(runner)
+
+  defp create_desk_session(runner, server, identity, base) do
+    with {:ok, page_blk} <- Pages.page_block(Pages.desk_url(base)),
+         spec = %{
+           "label" => "Desk",
+           "initial_windows" => [
+             %{"window_label" => "Desk", "layout" => %{"block" => page_blk}}
+           ]
+         },
+         {:ok,
+          %{
+            "session_id" => "session:" <> _ = sid,
+            "initial_windows" => [
+              %{"window_id" => "window:" <> _ = wid, "block_ids" => ["block:" <> _ = bid]}
+            ]
+          }} <- Rex.create(runner, spec, timeout_ms: Pages.launch_timeout_ms()),
+         :ok <- move_desk_first(runner, sid),
+         desk = %{"session_id" => sid, "window_id" => wid, "page_block_id" => bid},
+         :ok <- Bindings.put_desk(desk, server),
+         :ok <- maybe_set_instance(identity) do
+      {:ok, true}
+    else
+      {:ok, reply} -> {:error, {:unknown, "invalid Rex session.create reply: #{inspect(reply)}"}}
+      error -> error
+    end
+  end
+
+  defp restore_desk_window(runner, sid, server, identity, base) do
+    with {:ok, page_blk} <- Pages.page_block(Pages.desk_url(base)),
+         spec = %{"window_label" => "Desk", "layout" => %{"block" => page_blk}},
+         {:ok, %{"window_id" => "window:" <> _ = wid, "block_ids" => ["block:" <> _ = bid]}} <-
+           Rex.new_window(runner, sid, spec, timeout_ms: Pages.launch_timeout_ms()),
+         desk = %{"session_id" => sid, "window_id" => wid, "page_block_id" => bid},
+         :ok <- Bindings.put_desk(desk, server),
+         :ok <- maybe_set_instance(identity) do
+      {:ok, false}
+    else
+      {:error, :not_found} -> create_desk_session(runner, server, identity, base)
+      {:ok, reply} -> {:error, {:unknown, "invalid Rex new_window reply: #{inspect(reply)}"}}
+      error -> error
+    end
+  end
+
+  defp remove_desk(runner) do
+    Backend.family_lock(:desk, fn ->
+      with {:ok, doc} <- Bindings.read() do
+        case doc["desk"] do
+          %{"session_id" => sid, "window_id" => wid} = desk ->
+            close_result =
+              case Rex.close_window(runner, sid, wid) do
+                {:ok, _} -> :ok
+                {:error, :not_found} -> :ok
+                error -> error
+              end
+
+            with :ok <- close_result,
+                 :ok <- destroy_empty_desk(runner, sid),
+                 :ok <- Bindings.delete_desk(desk) do
+              {:ok, false}
+            end
+
+          _ ->
+            {:ok, false}
+        end
+      end
+    end)
+  end
+
+  defp destroy_empty_desk(runner, sid) do
+    case Rex.blocks(runner, sid) do
+      {:ok, []} ->
+        case Rex.destroy(runner, sid) do
+          {:ok, _} -> :ok
+          {:error, :not_found} -> :ok
+          error -> error
+        end
+
+      {:ok, _} ->
+        :ok
+
+      {:error, :not_found} ->
+        :ok
+
+      error ->
+        error
+    end
+  end
+
+  defp move_desk_first(runner, sid) do
+    case Rex.command(runner, ["session", "move", sid, "--index", "0"]) do
+      {:ok, _} -> :ok
+      error -> Logger.warning("Cannot move Desk session to index 0: #{inspect(error)}")
+    end
+
+    :ok
+  end
+
+  defp maybe_set_instance(%{"instance_id" => instance}) when is_binary(instance),
+    do: Bindings.set_instance(instance)
+
+  defp maybe_set_instance(_), do: :ok
 
   defp scope_desired(desired, root) do
     case Map.fetch(desired.families, root) do
