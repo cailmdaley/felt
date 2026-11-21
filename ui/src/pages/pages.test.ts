@@ -28,6 +28,7 @@ describe('the thread page', () => {
   const now = Date.now()
   let requests: Array<{ url: string; method: string; body?: string; headers: Headers }>
   let go: { went: boolean; place: string }
+  let serveFiles: ((url: string, method: string, headers: Headers) => Response) | undefined
   let feeds: PageFeed[]
 
   beforeEach(() => {
@@ -37,6 +38,7 @@ describe('the thread page', () => {
     const composite = servedFeed(example.feed, now)
     requests = []
     feeds = []
+    serveFiles = undefined
     go = { went: true, place: 'live' }
     vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
       const method = init.method ?? 'GET', headers = new Headers(init.headers)
@@ -45,6 +47,7 @@ describe('the thread page', () => {
       if (url.startsWith('/api/v1/fibers/composite')) return headers.get('If-None-Match') === '"v1"' ? new Response(null, { status: 304 }) : json(composite, { ETag: '"v1"' })
       if (url.startsWith('/api/v1/board/family')) return json({ family: WORKSPACE_UID, records: [], waiting: {}, reach_ms: 14 * 86_400_000 })
       if (url.startsWith('/api/v1/sent-files/all/composite')) return json({ files: [], origins: {} })
+      if (url.startsWith('/api/v1/file') && serveFiles) return serveFiles(url, method, headers)
       if (url === '/api/v1/go' && method === 'POST') return json(go)
       return new Response('{}', { status: 404 })
     }))
@@ -120,6 +123,28 @@ describe('the thread page', () => {
     const { page, navigate } = await open(`?f=thread-analysis@${WORKSPACE_HOST}`)
     page.el.querySelector('.ws-family-scroll')!.dispatchEvent(new WheelEvent('wheel', { deltaY: -400 }))
     expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('unfolds the tapestry at full height below the thread rows instead of a folded preview, and respects a manual fold', async () => {
+    const html = '<!doctype html><p>Full tapestry</p>'
+    serveFiles = url => {
+      if (!url.includes('tapestry.html')) return new Response('{}', { status: 404 })
+      if (url.startsWith('/api/v1/file-info')) return new Response(JSON.stringify({ exists: true, size: html.length, modified_at: Math.floor(now / 1000) }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+    }
+    const { page } = await open(`?f=${WORKSPACE_UID}@${WORKSPACE_HOST}`)
+    const unfold = page.el.querySelector<HTMLElement>('.ov-unfold')!
+    expect(unfold.hasAttribute('data-unfolded')).toBe(true)
+    expect(unfold.querySelector('.uf-card')).toBeNull()
+    expect(unfold.querySelector('.uf-name')!.textContent).toBe('Tapestry')
+    expect(unfold.querySelector<HTMLElement>('.uf-page')!.dataset.kind).toBe('html')
+    expect(unfold.querySelector('.kbn-fileview-frame')).not.toBeNull()
+    // Folding manually stays folded across subsequent polls.
+    unfold.querySelector<HTMLButtonElement>('.uf-fold')!.click()
+    expect(unfold.hasAttribute('data-unfolded')).toBe(false)
+    await vi.advanceTimersByTimeAsync(POLL_MS)
+    for (let i = 0; i < 4; i++) await settle()
+    expect(unfold.hasAttribute('data-unfolded')).toBe(false)
   })
 
   it('its constitution unfolds in place, beside its files, and folds when asked for again', async () => {

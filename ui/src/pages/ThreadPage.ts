@@ -25,9 +25,9 @@ const owned = (card: KanbanCard): { uid: string; host: string } => ({ uid: card.
  * One constitution, alone at its own address: the board's view of it
  * ({@link FamilyPage}) with no workspace around it. Going to another fiber
  * moves Rex there when the page stands in a Rex pane (`in=rex`), and otherwise
- * opens that fiber's page in its place. Its pages unfold in place; a file shown
- * full opens in a window of its own. It moves no history, voice or swipe, and
- * its head draws no lifecycle verbs.
+ * opens that fiber's page in its place. Its tapestry unfolds at full height in
+ * place; a file shown full opens in a window of its own. It moves no history,
+ * voice or swipe, and its head draws no lifecycle verbs.
  */
 export class ThreadPage {
   readonly el = document.createElement('main')
@@ -50,6 +50,7 @@ export class ThreadPage {
     this.said.hidden = true
     this.family = new FamilyPage(this.feeds(), () => {})
     this.family.pulls = false
+    this.family.unfoldLead = true
     this.el.append(this.status, this.family.el, this.said)
     feed.subscribe(() => this.render())
     this.render()

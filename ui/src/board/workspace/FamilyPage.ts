@@ -110,8 +110,12 @@ export class FamilyPage {
   private readonly actsFor?: (target: () => KanbanCard) => FiberActs
   /** `h` at the top of the family: off the page, back where it was opened from. */
   leave?: () => void
+  /** The constitution whose lead file was automatically unfolded when `unfoldLead` is set. */
+  private leadOpened: string | null = null
   /** Whether pulling the page down past its top opens its orchestrator's view. */
   pulls = true
+  /** Whether the constitution's lead file (its tapestry, else its newest sent file) unfolds at once at full height. */
+  unfoldLead = false
 
   constructor(feeds: ViewFeeds, disposed: () => void, actsFor?: (target: () => KanbanCard) => FiberActs) {
     this.feeds = feeds; this.disposed = disposed; this.actsFor = actsFor
@@ -355,12 +359,13 @@ export class FamilyPage {
    */
   private paintFiles(card: KanbanCard): void {
     const uid = card.uid ?? card.id
-    if (this.shown && this.shown.card !== uid) { this.unfold.update([]); this.shown = null }
+    if (this.shown && this.shown.card !== uid) { this.unfold.update([]); this.shown = null; this.leadOpened = null }
     const read = ++this.reads
     void this.feeds.lead(card).then(lead => {
       if (read !== this.reads) return
       const asked = this.asked?.card === uid ? [this.asked.file] : []
-      const files = [...lead ? [lead] : [], ...this.feeds.files(card).filter(file => file.key !== lead?.key), ...asked]
+      const leadFiles = [...lead ? [lead] : [], ...this.feeds.files(card).filter(file => file.key !== lead?.key)]
+      const files = [...leadFiles, ...asked]
       this.shown = { card: uid, files: new Map(files.map(file => [file.key, file])) }
       this.unfold.update(files)
       // Shown here, it is seen.
@@ -368,6 +373,10 @@ export class FamilyPage {
       const wanted = this.wanted
       this.wanted = null
       if (wanted) this.show(card, wanted)
+      else if (this.unfoldLead && this.leadOpened !== uid && leadFiles[0] && !this.unfold.unfolded) {
+        this.leadOpened = uid
+        this.unfold.unfold(leadFiles[0].key, false)
+      }
     })
   }
   /** Pulled past its top: its orchestrator's view opens, quietly, for a scroll is not a click. */

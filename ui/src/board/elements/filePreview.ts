@@ -302,7 +302,7 @@ export class Unfold {
   get unfolded(): DocKey | null { return this.open?.key ?? null }
 
   /** Unfolds one file in place, folding any other. */
-  unfold(key: DocKey): void {
+  unfold(key: DocKey, focus = true): void {
     const file = this.files.find(each => each.key === key), parsed = parseDocKey(key)
     if (!file || !parsed) return
     if (this.open?.key === key) return
@@ -329,7 +329,7 @@ export class Unfold {
     document.addEventListener('scroll', this.pin, { capture: true, passive: true })
     this.pin()
     this.paintBar()
-    this.page.focus({ preventScroll: true })
+    if (focus) this.page.focus({ preventScroll: true })
     this.opts.seen?.(key)
   }
   /**

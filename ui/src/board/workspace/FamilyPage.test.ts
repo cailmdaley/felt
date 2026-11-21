@@ -162,6 +162,27 @@ describe('a constitution\'s view', () => {
     expect(feeds.open).toHaveBeenCalledExactlyOnceWith(mid, 'fiber:local:hub/mid')
   })
 
+  it('unfolds its lead file at once when `unfoldLead` is set, without stealing focus, and keeps a manual fold across repaints', async () => {
+    const feeds = feedsWith()
+    const page = new FamilyPage(feeds, vi.fn())
+    page.unfoldLead = true
+    document.body.append(page.el)
+    const outside = document.body.appendChild(document.createElement('button'))
+    outside.focus()
+    page.update(mid, new ThreadIndex(cards), now)
+    await settle()
+    expect(page.el.querySelector('.ov-unfold')!.hasAttribute('data-unfolded')).toBe(true)
+    expect(page.el.querySelector('.uf-bar .uf-name')!.textContent).toBe('Tapestry')
+    expect(document.activeElement).toBe(outside)
+    // Folding manually is preserved on later repaints for the same constitution.
+    page.el.querySelector<HTMLButtonElement>('.uf-fold')!.click()
+    expect(page.el.querySelector('.ov-unfold')!.hasAttribute('data-unfolded')).toBe(false)
+    page.update(mid, new ThreadIndex(cards), now + 2 * 60_000)
+    await settle()
+    expect(page.el.querySelector('.ov-unfold')!.hasAttribute('data-unfolded')).toBe(false)
+    page.dispose()
+  })
+
   it('keeps its sent-files list current while it is open: a send that arrives takes its row', async () => {
     let files = sent
     const { page } = made(mid, { files: c => c.id === 'hub/mid' ? files : [] })
