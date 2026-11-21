@@ -32,6 +32,8 @@ export interface ViewFeeds extends MapFeeds, DocFeeds {
   link(card: KanbanCard, source: DocKey, href: string): void
   /** What waits on the human, by fiber. */
   waits(): Waits
+  /** One of its pages that the view unfolds in place beside its files, where no reader opens it (its constitution, in a page). */
+  page?(card: KanbanCard, doc: DocKey): MapFile | undefined
 }
 
 /** How far the page must be pulled down past its top before its orchestrator's view opens, in px. */
@@ -97,6 +99,8 @@ export class FamilyPage {
   private reads = 0
   /** A file asked for before its files were read, unfolded once they are. */
   private wanted: DocKey | null = null
+  /** A page asked for from the head that the view unfolds beside its files ({@link ViewFeeds.page}), and whose it is. */
+  private asked: { card: string; file: MapFile } | null = null
   private pull = 0
   /** The quiet threads are drawn too. */
   private quietShown = false
@@ -106,6 +110,8 @@ export class FamilyPage {
   private readonly actsFor?: (target: () => KanbanCard) => FiberActs
   /** `h` at the top of the family: off the page, back where it was opened from. */
   leave?: () => void
+  /** Whether pulling the page down past its top opens its orchestrator's view. */
+  pulls = true
 
   constructor(feeds: ViewFeeds, disposed: () => void, actsFor?: (target: () => KanbanCard) => FiberActs) {
     this.feeds = feeds; this.disposed = disposed; this.actsFor = actsFor
@@ -193,7 +199,14 @@ export class FamilyPage {
   private show(card: KanbanCard, doc: DocKey): void {
     // Its files not yet read, a file waits for them.
     if (this.shown?.card !== (card.uid ?? card.id) && parseDocKey(doc)) { this.wanted = doc; return }
-    if (!this.shown?.files.has(doc)) { this.feeds.open(card, doc); return }
+    if (!this.shown?.files.has(doc)) {
+      const page = this.feeds.page?.(card, doc)
+      if (!page) { this.feeds.open(card, doc); return }
+      this.asked = { card: card.uid ?? card.id, file: page }
+      this.wanted = page.key
+      this.paintFiles(card)
+      return
+    }
     if (this.unfold.unfolded === doc) { this.unfold.fold(); return }
     this.unfold.unfold(doc)
     this.unfold.el.scrollIntoView({ block: 'start' })
@@ -337,7 +350,8 @@ export class FamilyPage {
   }
   /**
    * Its tapestry, else its newest sent file, as the preview that unfolds in
-   * place, stepping through every sent file once unfolded. Shown, it is seen.
+   * place, stepping through every sent file, and a page asked for from its
+   * head, once unfolded. Shown, it is seen.
    */
   private paintFiles(card: KanbanCard): void {
     const uid = card.uid ?? card.id
@@ -345,7 +359,8 @@ export class FamilyPage {
     const read = ++this.reads
     void this.feeds.lead(card).then(lead => {
       if (read !== this.reads) return
-      const files = [...lead ? [lead] : [], ...this.feeds.files(card).filter(file => file.key !== lead?.key)]
+      const asked = this.asked?.card === uid ? [this.asked.file] : []
+      const files = [...lead ? [lead] : [], ...this.feeds.files(card).filter(file => file.key !== lead?.key), ...asked]
       this.shown = { card: uid, files: new Map(files.map(file => [file.key, file])) }
       this.unfold.update(files)
       // Shown here, it is seen.
@@ -357,7 +372,7 @@ export class FamilyPage {
   }
   /** Pulled past its top: its orchestrator's view opens, quietly, for a scroll is not a click. */
   private pulled(by: number): void {
-    if (this.scroller.scrollTop > 0 || by <= 0) { this.pull = 0; return }
+    if (!this.pulls || this.scroller.scrollTop > 0 || by <= 0) { this.pull = 0; return }
     this.pull += by
     if (this.pull < PULL_PX) return
     this.pull = 0

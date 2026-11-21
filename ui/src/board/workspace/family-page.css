@@ -5,7 +5,7 @@
 /* Its orchestrators, pinned above the view: one strip each, the family's top-level first, each indented to its
    depth, its fibre curving into the next level. Each opens its view. */
 .ov-up { display: flex; flex-direction: column; padding: 4px 0 0; border-bottom: 1px solid var(--ws-hairline-soft); background: color-mix(in srgb, var(--ws-ink) 3%, var(--ws-paper, var(--kbn-paper))); }
-.ov-up:empty { display: none; }
+.ov-up:not(:has(.ov-ancestor)) { display: none; }
 .ov-ancestor {
   --ov-step: 14px; position: relative; display: flex; align-items: center; gap: 6px; min-width: 0; cursor: pointer; outline: none;
   padding: 0 var(--ov-gutter) 0 calc(var(--ov-gutter) - 6px + var(--ov-depth) * var(--ov-step));

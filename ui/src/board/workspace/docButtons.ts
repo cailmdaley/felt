@@ -14,6 +14,8 @@ export interface DocFeeds {
   files(card: KanbanCard): MapFile[]
   /** Opens one of its pages in the reader; the opening is a deliberate look at it. */
   open(card: KanbanCard, doc: DocKey): void
+  /** False where nothing can show its edits: no reader bakes its change. */
+  edits?: false
 }
 
 /** A constitution's page buttons, and a way to read its files again. */
@@ -66,7 +68,7 @@ export function docButtons(card: KanbanCard, feeds: DocFeeds): DocButtons {
   }
   const page = (doc: DocKey) => (): void => feeds.open(card, doc)
   row.append(button('constitution', 'constitution', 'Constitution', page(fiberKey(card.originId, uid))), tapestry, sent)
-  if (card.shuttleProjectDir) row.append(button('edits', 'edits', 'Edits', page(changeKey(card.originId, uid))))
+  if (card.shuttleProjectDir && feeds.edits !== false) row.append(button('edits', 'edits', 'Edits', page(changeKey(card.originId, uid))))
   refresh()
   void feeds.lead(card).then(found => {
     if (!found) return
