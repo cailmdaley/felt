@@ -37,7 +37,8 @@ defmodule Shuttle.Go do
   @doc """
   Go to `fiber_id`, owned by `origin`. With `forwarded: true` (an owner's leg
   of a hub's request) it selects without bringing the app forward and leaves a
-  tmux worker's display to the hub.
+  tmux worker's display to the hub. With `activate: false` it selects the tab
+  quietly without bringing Rex forward.
 
   `{:ok, answer}`, `{:forwarded, status, body}` for an owner's refusal relayed
   verbatim, or `{:error, reason}` (`http_error/1`).
@@ -45,10 +46,13 @@ defmodule Shuttle.Go do
   @spec go(String.t(), String.t() | nil, keyword()) ::
           {:ok, answer()} | {:forwarded, non_neg_integer(), String.t()} | {:error, term()}
   def go(fiber_id, origin, opts \\ []) do
+    forwarded? = Keyword.get(opts, :forwarded, false)
+    activate? = Keyword.get(opts, :activate, true) and not forwarded?
+
     case OriginRouter.route(origin) do
       {:error, _} = error -> error
-      :local -> here(fiber_id, not Keyword.get(opts, :forwarded, false))
-      {:remote, %Remote{} = remote} -> there(remote, fiber_id)
+      :local -> here(fiber_id, not forwarded?, activate?)
+      {:remote, %Remote{} = remote} -> there(remote, fiber_id, activate?)
     end
   end
 
@@ -84,25 +88,25 @@ defmodule Shuttle.Go do
   def http_error(reason) when is_binary(reason), do: {502, reason}
   def http_error(reason), do: {502, inspect(reason)}
 
-  defp here(fiber_id, display?) do
+  defp here(fiber_id, display?, activate?) do
     with {:ok, fiber} <- fiber(fiber_id) do
       worker = Poller.live_worker(fiber["uid"] || fiber_id)
 
       case Lifecycle.column(fiber, worker != nil) do
         column when column in ["tempered", "discarded"] -> {:error, {:closed, column}}
-        _ when worker == nil -> show_place(fiber, display?)
-        _ -> show(worker.session, display?)
+        _ when worker == nil -> show_place(fiber, activate?)
+        _ -> show(worker.session, display?, activate?)
       end
     end
   end
 
-  defp show_place(fiber, display?) do
+  defp show_place(fiber, activate?) do
     if Terminal.primary() == Rex and match?({:ok, _}, Shuttle.Host.pages()) do
       runner = runner()
 
       with {:ok, place} <- RexLayout.ensure_place(runner, fiber),
            {:ok, moved} <- Rex.select_binding(runner, place, mac_only: true),
-           :ok <- if(moved and display?, do: Rex.activate_app(runner), else: :ok) do
+           :ok <- if(moved and activate?, do: Rex.activate_app(runner), else: :ok) do
         {:ok, if(moved, do: @view, else: @unshown_view)}
       end
     else
@@ -118,13 +122,13 @@ defmodule Shuttle.Go do
     end
   end
 
-  defp show(name, display?) do
+  defp show(name, display?, activate?) do
     runner = runner()
 
     case Terminal.locate_target(runner, name) do
       {Rex, binding} ->
         with {:ok, moved} <- Rex.select_binding(runner, binding, mac_only: true),
-             :ok <- if(moved and display?, do: Rex.activate_app(runner), else: :ok) do
+             :ok <- if(moved and activate?, do: Rex.activate_app(runner), else: :ok) do
           {:ok, if(moved, do: @live, else: @unshown)}
         end
 
@@ -139,13 +143,15 @@ defmodule Shuttle.Go do
     end
   end
 
-  defp there(remote, fiber_id) do
+  defp there(remote, fiber_id, activate?) do
     case OriginRouter.forward(remote, "/api/v1/go", %{"fiber_id" => fiber_id, "forwarded" => true}) do
       {:forwarded, 200, body} ->
         case Jason.decode(body) do
           {:ok, %{"went" => true} = reply} ->
             place = if reply["place"] in ["live", "view"], do: reply["place"], else: "live"
-            with :ok <- Rex.activate_app(runner()), do: {:ok, %{went: true, place: place}}
+
+            with :ok <- if(activate?, do: Rex.activate_app(runner()), else: :ok),
+                 do: {:ok, %{went: true, place: place}}
 
           {:ok, %{"tmux_session" => name}} when is_binary(name) ->
             opened(opener().open(name, remote.name))

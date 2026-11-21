@@ -351,7 +351,7 @@ defmodule Shuttle.RexFocus do
         raised = front and state.last_front != true
         state = state |> warning(nil) |> Map.merge(%{title_ready: true, last_front: front})
 
-        if not front or String.trim(title) == "" do
+        if not front or String.trim(title) == "" or desk_title?(title) do
           state
         else
           case state.bindings.() do

@@ -142,7 +142,6 @@ beforeEach(() => {
   visibility.mockClear()
   workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => boardCards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock("", changed) })
 })
-/** Lets Rex's hold between moves run out, on fake timers. */
 /** What the board asked Rex to select: every select-only attach body. */
 const selections = (): Record<string, unknown>[] => vi.mocked(fetch).mock.calls
   .filter(([url]) => String(url).endsWith('/api/v1/attach'))

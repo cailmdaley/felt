@@ -667,7 +667,8 @@ defmodule Shuttle.Speaker do
       end
   end
 
-  # Route live voice to the card the inbox opened and move Rex to it via `go`.
+  # Route live voice to the card the inbox opened and quietly move Rex to it
+  # when Rex is the terminal backend and live voice is following.
   defp retarget(item) do
     params = %{"fiber_id" => item.fiber_id, "name" => item.name, "source" => "inbox"}
     params = if item[:origin], do: Map.put(params, "origin", item.origin), else: params
@@ -677,15 +678,22 @@ defmodule Shuttle.Speaker do
       {:error, reason} -> Logger.warning("speaker: inbox could not route voice: #{reason}")
     end
 
-    if is_binary(item.fiber_id) and item.fiber_id != "" do
-      case Shuttle.Go.go(item.fiber_id, item[:origin]) do
-        {:ok, %{went: true}} -> :ok
-        {:ok, %{place: place}} -> Logger.info("speaker: inbox did not move Rex (#{place})")
-        other -> Logger.info("speaker: inbox did not move Rex: #{inspect(other)}")
-      end
+    if is_binary(item.fiber_id) and item.fiber_id != "" and following_rex?() do
+      Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
+        case Shuttle.Go.go(item.fiber_id, item[:origin], activate: false) do
+          {:ok, %{went: true}} -> :ok
+          {:ok, %{place: place}} -> Logger.info("speaker: inbox did not move Rex (#{place})")
+          other -> Logger.info("speaker: inbox did not move Rex: #{inspect(other)}")
+        end
+      end)
     end
   catch
     :exit, reason -> Logger.warning("speaker: inbox could not route voice: #{inspect(reason)}")
+  end
+
+  defp following_rex? do
+    Shuttle.Terminal.primary() == Shuttle.Terminal.Rex and
+      match?(%{enabled: true, follow: true}, Shuttle.Voice.snapshot(timeout: @target_ms))
   end
 
   defp in_view?(_item, nil), do: true

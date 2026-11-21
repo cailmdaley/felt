@@ -318,4 +318,21 @@ defmodule ShuttleWeb.GoControllerTest do
 
     assert activated?()
   end
+
+  test "go with activate: false selects locally and remotely without activating Rex" do
+    assert :ok = Rex.launch(FakeRex, @name, "/tmp", "worker.sh", [])
+
+    assert {:ok, %{went: true, place: "live"}} =
+             Shuttle.Go.go(uid("live"), "test-host", activate: false)
+
+    assert [%{"args" => %{"action" => "session.select"}}] = requests("client.perform")
+    refute activated?()
+
+    Env.put_app_env(:forward_response, {:ok, 200, ~s({"went":true,"place":"live"})})
+
+    assert {:ok, %{went: true, place: "live"}} =
+             Shuttle.Go.go("far", "remote-a", activate: false)
+
+    refute activated?()
+  end
 end
