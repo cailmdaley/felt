@@ -47,6 +47,7 @@
   padding: 2px 0 6px; color: var(--ws-ink-muted);
   font: var(--type-meta)/var(--leading-ui) var(--font-mono);
 }
+.uf-bar[hidden], .uf-control[hidden] { display: none; }
 /* Pinned over the file it names, it stands on its page's ground above a hairline. */
 .uf[data-pinned] .uf-bar { background: var(--uf-ground, var(--ws-paper, var(--kbn-paper))); box-shadow: 0 1px 0 var(--ws-hairline-soft); }
 .uf-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ws-ink-soft); }

@@ -37,6 +37,7 @@ describe('the thread page', () => {
   let serveFiles: ((url: string, method: string, headers: Headers) => Response) | undefined
   let boardRecords: Array<{ id: string; kind: string; fiber: string; by: { fiber?: string; label?: string }; to?: { label?: string; fiber?: string }; text?: string; timestamp: number; originName: string }>
   let sentFiles: Array<{ fullPath: string; basename: string; timestamp: number; sessionId: string; uid: string; host: string; show?: boolean; caption?: string }>
+  let usageResponse: Record<string, unknown> | null
   let feeds: PageFeed[]
   let pages: ThreadPage[]
 
@@ -51,6 +52,7 @@ describe('the thread page', () => {
     requests = []
     boardRecords = []
     sentFiles = []
+    usageResponse = null
     feeds = []
     serveFiles = undefined
     pages = []
@@ -62,6 +64,7 @@ describe('the thread page', () => {
       if (url.startsWith('/api/v1/fibers/composite')) return headers.get('If-None-Match') === '"v1"' ? new Response(null, { status: 304 }) : json(composite, { ETag: '"v1"' })
       if (url.startsWith('/api/v1/board/family')) return json({ family: WORKSPACE_UID, records: boardRecords, waiting: {}, reach_ms: 14 * 86_400_000 })
       if (url.startsWith('/api/v1/sent-files/all/composite')) return json({ files: sentFiles, origins: {} })
+      if (url.startsWith('/api/v1/transcript/usage')) return usageResponse ? json(usageResponse) : new Response('{}', { status: 404 })
       if (url.startsWith('/api/v1/file') && serveFiles) return serveFiles(url, method, headers)
       if (url === '/api/v1/go' && method === 'POST') return json(go)
       if (url === '/api/v1/dispatch' && method === 'POST') return json({ dispatched: true, tmux_session: 'started-session' })
@@ -143,7 +146,7 @@ describe('the thread page', () => {
     expect(navigate).not.toHaveBeenCalled()
   })
 
-  it('unfolds the tapestry at full height below the thread rows instead of a folded preview, and respects a manual fold', async () => {
+  it('unfolds the lead tapestry full-bleed with no fold control or bar when alone, and keeps the file switcher accessible when other files exist', async () => {
     const html = '<!doctype html><p>Full tapestry</p>'
     serveFiles = url => {
       if (!url.includes('tapestry.html')) return new Response('{}', { status: 404 })
@@ -153,16 +156,24 @@ describe('the thread page', () => {
     const { page } = await open(`?f=${WORKSPACE_UID}@${WORKSPACE_HOST}`)
     const unfold = page.el.querySelector<HTMLElement>('.ov-unfold')!
     expect(unfold.hasAttribute('data-unfolded')).toBe(true)
+    expect(unfold.hasAttribute('data-pinned-file')).toBe(true)
     expect(unfold.querySelector('.uf-card')).toBeNull()
     expect(unfold.querySelector('.uf-name')!.textContent).toBe('Tapestry')
     expect(unfold.querySelector<HTMLElement>('.uf-page')!.dataset.kind).toBe('html')
     expect(unfold.querySelector('.kbn-fileview-frame')).not.toBeNull()
-    // Folding manually stays folded across subsequent polls.
-    unfold.querySelector<HTMLButtonElement>('.uf-fold')!.click()
-    expect(unfold.hasAttribute('data-unfolded')).toBe(false)
-    await vi.advanceTimersByTimeAsync(POLL_MS)
+    // Lead tapestry alone: fold control and bar are hidden, and Escape does not fold it.
+    expect(unfold.querySelector<HTMLButtonElement>('.uf-fold')!.hidden).toBe(true)
+    expect(unfold.querySelector<HTMLElement>('.uf-bar')!.hidden).toBe(true)
+    unfold.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(unfold.hasAttribute('data-unfolded')).toBe(true)
+
+    // With another shown file, the file switcher bar appears while the fold control stays hidden on the lead tapestry.
+    sentFiles = [{ fullPath: '/tmp/plot.png', basename: 'plot.png', timestamp: now - 1_000, sessionId: 's1', uid: WORKSPACE_UID, host: WORKSPACE_HOST, show: true }]
+    await vi.advanceTimersByTimeAsync(SENDS_POLL_MS)
     for (let i = 0; i < 4; i++) await settle()
-    expect(unfold.hasAttribute('data-unfolded')).toBe(false)
+    expect(unfold.querySelector<HTMLElement>('.uf-bar')!.hidden).toBe(false)
+    expect(unfold.querySelector<HTMLElement>('.uf-steps')!.hidden).toBe(false)
+    expect(unfold.querySelector<HTMLButtonElement>('.uf-fold')!.hidden).toBe(true)
   })
 
   it('its constitution unfolds in place, beside its files, and folds when asked for again', async () => {
@@ -285,43 +296,102 @@ describe('the thread page', () => {
     expect(requests.length).toBe(before)
   })
 
-  it('shows a Resume / New session strip when the thread has no live worker, and hides it when live or tempered/discarded', async () => {
-    // Live worker: strip is hidden.
+  it('shows the floating bottom bar on both live and quiet threads, hides it on archived threads, and dispatches send/resume and new session', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    // Live worker: floating bar is visible; sending a message uses continue, and New session with a message uses fresh.
     const { page: livePage } = await open(`?f=thread-analysis@${WORKSPACE_HOST}`)
-    expect(livePage.el.querySelector<HTMLElement>('.pg-worker-strip')!.hidden).toBe(true)
+    expect(livePage.el.hasAttribute('data-dock')).toBe(true)
+    const liveDock = livePage.el.querySelector<HTMLElement>('.pg-dock')!
+    expect(liveDock.hidden).toBe(false)
+    const liveMsg = liveDock.querySelector<HTMLElement>('.ws-worker-message')!
+    const livePrimary = liveDock.querySelector<HTMLButtonElement>('.ws-worker-primary')!
+    const liveFresh = liveDock.querySelector<HTMLButtonElement>('.ws-worker-fresh')!
+    expect(livePrimary.disabled).toBe(true)
+    liveMsg.textContent = 'Check the residuals'
+    liveMsg.dispatchEvent(new Event('input'))
+    expect(livePrimary.disabled).toBe(false)
+    livePrimary.click()
+    await settle(); await settle()
+    const liveSend = JSON.parse(posts().filter(each => each.url === '/api/v1/dispatch').at(-1)!.body!) as Record<string, unknown>
+    expect(liveSend.resume_mode).toBe('continue')
+    expect(liveSend.user_message).toBe('Check the residuals')
+    expect(liveSend.origin).toBe(WORKSPACE_HOST)
 
-    // Tempered thread: strip is hidden.
+    liveMsg.textContent = 'Start fresh with new seed'
+    liveMsg.dispatchEvent(new Event('input'))
+    expect(liveFresh.hidden).toBe(false)
+    liveFresh.click()
+    await settle(); await settle()
+    expect(confirmSpy).toHaveBeenCalled()
+    const liveNew = JSON.parse(posts().filter(each => each.url === '/api/v1/dispatch').at(-1)!.body!) as Record<string, unknown>
+    expect(liveNew.resume_mode).toBe('fresh')
+    expect(liveNew.user_message).toBe('Start fresh with new seed')
+
+    // Tempered and discarded threads hide the floating bottom bar.
     const { page: temperedPage } = await open(`?f=thread-archive@${WORKSPACE_HOST}`)
-    expect(temperedPage.el.querySelector<HTMLElement>('.pg-worker-strip')!.hidden).toBe(true)
+    expect(temperedPage.el.querySelector<HTMLElement>('.pg-dock')!.hidden).toBe(true)
+    expect(temperedPage.el.hasAttribute('data-dock')).toBe(false)
 
-    // Discarded thread: strip is hidden.
     const { page: discardedPage } = await open(`?f=thread-discard@${WORKSPACE_HOST}`)
-    expect(discardedPage.el.querySelector<HTMLElement>('.pg-worker-strip')!.hidden).toBe(true)
+    expect(discardedPage.el.querySelector<HTMLElement>('.pg-dock')!.hidden).toBe(true)
+    expect(discardedPage.el.hasAttribute('data-dock')).toBe(false)
 
-    // Quiet thread (awaiting review, no live worker): strip is shown with WorkerActions.
+    // Quiet thread (awaiting review, no live worker): floating bar offers Resume and New session.
     const { page: quietPage } = await open(`?f=thread-review@${WORKSPACE_HOST}&in=rex`)
-    const strip = quietPage.el.querySelector<HTMLElement>('.pg-worker-strip')!
-    expect(strip.hidden).toBe(false)
-    const primary = strip.querySelector<HTMLButtonElement>('.ws-worker-primary')!
+    const quietDock = quietPage.el.querySelector<HTMLElement>('.pg-dock')!
+    expect(quietDock.hidden).toBe(false)
+    const primary = quietDock.querySelector<HTMLButtonElement>('.ws-worker-primary')!
     expect(primary.hidden).toBe(false)
+    const beforeQuiet = posts().filter(each => each.url === '/api/v1/dispatch').length
     primary.click()
     await settle(); await settle()
     const dispatches = posts().filter(each => each.url === '/api/v1/dispatch')
-    expect(dispatches).toHaveLength(1)
-    const body = JSON.parse(dispatches[0]!.body!) as Record<string, unknown>
+    expect(dispatches).toHaveLength(beforeQuiet + 1)
+    const body = JSON.parse(dispatches.at(-1)!.body!) as Record<string, unknown>
     expect(body.force).toBe(true)
     expect(body.ad_hoc).toBe(true)
     expect(body.origin).toBe(WORKSPACE_HOST)
     expect(['previous', 'continue']).toContain(body.resume_mode)
 
-    // New session button dispatches with resume_mode: 'fresh' when visible.
-    const fresh = strip.querySelector<HTMLButtonElement>('.ws-worker-fresh')!
+    const fresh = quietDock.querySelector<HTMLButtonElement>('.ws-worker-fresh')!
     if (!fresh.hidden) {
       fresh.click()
       await settle(); await settle()
       const latest = JSON.parse(posts().filter(each => each.url === '/api/v1/dispatch').at(-1)!.body!) as Record<string, unknown>
       expect(latest.resume_mode).toBe('fresh')
     }
+  })
+
+  it('renders context token count and warm/cold cache indicator in the floating bottom bar', async () => {
+    // Warm cache: shows formatted token count and warm cache state.
+    usageResponse = { context: 142_000, window: 1_000_000, cache_warm_until: now + 180_000, cache_ttl: 300_000 }
+    const { page: warmPage } = await open(`?f=thread-analysis@${WORKSPACE_HOST}`)
+    const warmMeter = warmPage.el.querySelector<HTMLElement>('.pg-dock [data-part="context-meter"]')!
+    const warmCtx = warmPage.el.querySelector<HTMLElement>('.pg-dock [data-part="context"]')!
+    const warmCache = warmPage.el.querySelector<HTMLElement>('.pg-dock [data-part="cache"]')!
+    expect(warmMeter.hidden).toBe(false)
+    expect(warmCtx.hidden).toBe(false)
+    expect(warmCtx.textContent).toBe('142k')
+    expect(warmCache.hidden).toBe(false)
+    expect(warmCache.dataset.cache).toBe('warm')
+    expect(warmCache.getAttribute('aria-label')).toMatch(/^Cache warm until /)
+
+    // Cold cache: shows formatted token count and cold cache state.
+    usageResponse = { context: 42_500, window: 1_000_000, cache_warm_until: now - 60_000, cache_ttl: 300_000 }
+    const { page: coldPage } = await open(`?f=thread-analysis@${WORKSPACE_HOST}`)
+    const coldMeter = coldPage.el.querySelector<HTMLElement>('.pg-dock [data-part="context-meter"]')!
+    const coldCtx = coldPage.el.querySelector<HTMLElement>('.pg-dock [data-part="context"]')!
+    const coldCache = coldPage.el.querySelector<HTMLElement>('.pg-dock [data-part="cache"]')!
+    expect(coldMeter.hidden).toBe(false)
+    expect(coldCtx.textContent).toBe('42.5k')
+    expect(coldCache.dataset.cache).toBe('cold')
+    expect(coldCache.getAttribute('aria-label')).toMatch(/^Cache cold since /)
+
+    // A thread with no session hides the meter while keeping the floating bar visible.
+    const { page: noSessionPage } = await open(`?f=thread-review@${WORKSPACE_HOST}`)
+    expect(noSessionPage.el.querySelector<HTMLElement>('.pg-dock')!.hidden).toBe(false)
+    expect(noSessionPage.el.querySelector<HTMLElement>('.pg-dock [data-part="context-meter"]')!.hidden).toBe(true)
   })
 
   it('defaults a family root to Posts mode, renders its stream, routes post clicks through go/navigate, toggles to Tapestry/Files, and sends composer messages via dispatch', async () => {
@@ -354,10 +424,15 @@ describe('the thread page', () => {
       .toStrictEqual([{ fiber_id: 'thread-analysis', origin: WORKSPACE_HOST }])
     expect(navigate).not.toHaveBeenCalled()
 
-    // Compact composer sends user_message to the family root via /api/v1/dispatch.
-    const input = postsPane.querySelector<HTMLTextAreaElement>('.pg-composer-input')!
-    const sendBtn = postsPane.querySelector<HTMLButtonElement>('.pg-composer-send')!
-    input.value = 'Check the null tests'
+    // Unified floating bottom bar sends user_message to the family root via /api/v1/dispatch with no duplicate message box.
+    expect(page.el.querySelectorAll('.ws-worker-message')).toHaveLength(1)
+    expect(page.el.querySelector('.pg-composer')).toBeNull()
+    const dock = page.el.querySelector<HTMLElement>('.pg-dock')!
+    expect(dock.hidden).toBe(false)
+    const input = dock.querySelector<HTMLElement>('.ws-worker-message')!
+    const sendBtn = dock.querySelector<HTMLButtonElement>('.ws-worker-primary')!
+    input.textContent = 'Check the null tests'
+    input.dispatchEvent(new Event('input'))
     sendBtn.click()
     await settle(); await settle()
     const dispatches = posts().filter(each => each.url === '/api/v1/dispatch')
@@ -366,15 +441,14 @@ describe('the thread page', () => {
     expect(dispatchBody.user_message).toBe('Check the null tests')
     expect(dispatchBody.resume_mode).toBe('continue')
     expect(dispatchBody.origin).toBe(WORKSPACE_HOST)
-    expect(input.value).toBe('')
-    // Avoid duplicate message inputs: worker strip stays hidden while Posts composer is shown.
-    expect(page.el.querySelector<HTMLElement>('.pg-worker-strip')!.hidden).toBe(true)
+    expect(input.textContent).toBe('')
 
-    // Toggling to Tapestry / Files hides Posts and shows FamilyPage.
+    // Toggling to Tapestry / Files hides Posts, shows FamilyPage, and keeps the same floating bottom bar visible.
     filesTab.click()
     expect(filesTab.getAttribute('aria-selected')).toBe('true')
     expect(postsPane.hidden).toBe(true)
     expect(familyPane.hidden).toBe(false)
+    expect(dock.hidden).toBe(false)
 
     // In a browser (no in=rex), clicking a post link navigates instead of calling /api/v1/go.
     const { page: browserPage, navigate: browserNav } = await open(`?f=${WORKSPACE_UID}@${WORKSPACE_HOST}`)

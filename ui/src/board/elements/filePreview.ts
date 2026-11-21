@@ -58,6 +58,8 @@ export interface UnfoldOptions {
   open?(key: DocKey): void
   /** A link followed in the unfolded file `key`: a board route, or a file beside it. */
   link?(key: DocKey, href: string): void
+  /** Keys that stay unfolded: no fold control and Escape does not fold them. */
+  pinned?(key: DocKey): boolean
 }
 
 /** A file's face, drawn alike in a card and a row: its kind's glyph, its name, and when it came. */
@@ -234,6 +236,7 @@ export class Unfold {
   private readonly count = document.createElement('button')
   private readonly prev = document.createElement('button')
   private readonly next = document.createElement('button')
+  private readonly foldBtn: HTMLButtonElement
   private readonly page = document.createElement('div')
   private files: UnfoldFile[] = []
   private readonly cards = new Map<DocKey, { el: HTMLButtonElement; thumbnail?: Thumbnail }>()
@@ -262,7 +265,7 @@ export class Unfold {
     this.count.classList.add('uf-count')
     this.steps.append(this.prev, this.count, this.next)
     const full = opts.full && control(document.createElement('button'), glyph('full'), 'Full screen', () => { if (this.open) opts.full!(this.open.key) })
-    const fold = control(document.createElement('button'), glyph('fold'), 'Collapse (Esc)', () => this.fold())
+    const fold = this.foldBtn = control(document.createElement('button'), glyph('fold'), 'Collapse (Esc)', () => this.fold())
     fold.classList.add('uf-fold')
     full?.classList.add('uf-full')
     this.bar.append(this.name, this.steps, ...full ? [full] : [], fold)
@@ -339,10 +342,11 @@ export class Unfold {
    */
   fold(asked = true): void {
     const key = this.open?.key
-    if (!key) return
+    if (!key || (asked && this.isPinned(key))) return
     const held = this.el.contains(document.activeElement)
     this.drop()
     this.el.removeAttribute('data-unfolded')
+    this.el.removeAttribute('data-pinned-file')
     this.el.replaceChildren(this.row)
     // Folded from a file the row does not draw, it returns to the row's first.
     const card = this.cards.get(key)?.el.isConnected ? this.cards.get(key)!.el : this.row.querySelector<HTMLButtonElement>('.uf-card')
@@ -382,9 +386,16 @@ export class Unfold {
     this.open.viewer.remove()
     this.open = null
   }
+  private isPinned(key = this.open?.key): boolean {
+    return !!key && !!this.opts.pinned?.(key)
+  }
   private paintBar(): void {
     const at = this.files.findIndex(file => file.key === this.open?.key), file = this.files[at]
     if (!file) return
+    const pinned = this.isPinned(file.key)
+    this.el.toggleAttribute('data-pinned-file', pinned)
+    this.foldBtn.hidden = pinned
+    this.bar.hidden = pinned && this.files.length < 2
     this.name.textContent = file.name
     this.name.title = parseDocKey(file.key)?.path ?? file.name
     this.steps.hidden = this.files.length < 2

@@ -114,10 +114,14 @@ export class FamilyPage {
   leave?: () => void
   /** The constitution whose lead file was automatically unfolded when `unfoldLead` is set. */
   private leadOpened: string | null = null
+  /** The current constitution's lead tapestry key, when it has one. */
+  private leadKey: DocKey | null = null
   /** Whether pulling the page down past its top opens its orchestrator's view. */
   pulls = true
   /** Whether the constitution's lead file (its tapestry, else its newest sent file) unfolds at once at full height. */
   unfoldLead = false
+  /** Whether the constitution's lead tapestry stays unfolded without a fold control or preview chrome. */
+  pinLead = false
 
   constructor(feeds: ViewFeeds, disposed: () => void, actsFor?: (target: () => KanbanCard) => FiberActs) {
     this.feeds = feeds; this.disposed = disposed; this.actsFor = actsFor
@@ -141,6 +145,7 @@ export class FamilyPage {
       },
       full: key => { if (this.card) feeds.open(this.card, key) },
       link: (key, href) => { if (this.card) feeds.link(this.card, key, href) },
+      pinned: key => this.pinLead && key === this.leadKey,
     })
     this.unfold.el.classList.add('ov-unfold')
     this.threads.setAttribute('aria-label', 'Threads')
@@ -229,7 +234,15 @@ export class FamilyPage {
       this.paintFiles(card)
       return
     }
-    if (this.unfold.unfolded === doc) { this.unfold.fold(); return }
+    if (this.unfold.unfolded === doc) {
+      if (this.pinLead && doc === this.leadKey) return
+      if (this.pinLead && this.leadKey && this.shown?.files.has(this.leadKey)) {
+        this.unfold.unfold(this.leadKey, false)
+        return
+      }
+      this.unfold.fold()
+      return
+    }
     this.unfold.unfold(doc)
     this.unfold.el.scrollIntoView({ block: 'start' })
   }
@@ -377,10 +390,11 @@ export class FamilyPage {
    */
   private paintFiles(card: KanbanCard): void {
     const uid = card.uid ?? card.id
-    if (this.shown && this.shown.card !== uid) { this.unfold.update([]); this.shown = null; this.leadOpened = null }
+    if (this.shown && this.shown.card !== uid) { this.unfold.update([]); this.shown = null; this.leadOpened = null; this.leadKey = null }
     const read = ++this.reads
     void this.feeds.lead(card).then(lead => {
       if (read !== this.reads) return
+      this.leadKey = lead?.key ?? null
       const asked = this.asked?.card === uid ? [this.asked.file] : []
       const leadFiles = [...lead ? [lead] : [], ...this.feeds.files(card).filter(file => file.key !== lead?.key)]
       const files = [...leadFiles, ...asked]

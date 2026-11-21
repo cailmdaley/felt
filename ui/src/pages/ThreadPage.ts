@@ -1,18 +1,19 @@
 import { composeStream, fiberOf, runningIn, type Channel } from '../board/channels.js'
+import { clockTime } from '../board/civilDay.js'
 import type { MapFile } from '../board/family/model.js'
-import { HumanMessageIds } from '../board/humanMessageId.js'
 import { isAgentCard } from '../board/KanbanModalShared.js'
-import { hasLiveWorker, type KanbanCard } from '../board/KanbanTypes.js'
+import type { KanbanCard } from '../board/KanbanTypes.js'
 import { lastSaid } from '../board/said.js'
 import { slug } from '../board/threadOutline.js'
 import { fileBytesUrl } from '../board/utils.js'
 import { ChannelStream } from '../board/views/ChannelStream.js'
-import { createWorkerStarter, dispatchWorkerStart } from '../board/workerStart.js'
+import { createWorkerStarter } from '../board/workerStart.js'
 import { parseRoute } from '../board/workspace/boardRoute.js'
 import { markSeen, unseenSince } from '../board/workspace/DocumentSeen.js'
 import { docKey, fiberKey, isExternalHref, linkedFile, parseDocKey, type DocKey } from '../board/workspace/documents.js'
 import { FamilyPage, type ViewFeeds } from '../board/workspace/FamilyPage.js'
 import { Leads } from '../board/workspace/leads.js'
+import { fetchTranscriptUsage, paintUsage, warmUntil, type TranscriptUsage } from '../board/workspace/transcriptUsage.js'
 import { WorkerActions, type StartWorker } from '../board/workspace/workerActions.js'
 import type { PageFeed } from './feed.js'
 import { go } from './go.js'
@@ -30,27 +31,27 @@ export type ThreadMode = 'posts' | 'files'
 /** How long the page must be untouched before a new `show` file auto-advances. */
 export const AUTO_ADVANCE_IDLE_MS = 60_000
 
+/** Minimum cadence between transcript usage refreshes, matching the page feed. */
+const USAGE_REFRESH_MS = 15_000
+
 const INTERACTION_EVENTS = ['pointerdown', 'keydown', 'wheel', 'scroll'] as const
 
 const owned = (card: KanbanCard): { uid: string; host: string } => ({ uid: card.uid ?? card.id, host: card.originId })
 
 const archived = (card: KanbanCard): boolean => card.column === 'tempered' || card.column === 'composted'
 
-const quietStartable = (card: KanbanCard): boolean =>
-  isAgentCard(card) && !hasLiveWorker(card) && !archived(card)
-
 /**
  * One constitution, alone at its own address: the board's view of it
  * ({@link FamilyPage}) with no workspace around it. When the constitution is a
  * family root or has sub-threads, a mode bar toggles between its **Posts**
- * stream (with a compact composer to its worker/chair) and **Tapestry / Files**
- * (defaulting to Posts on a family root). Going to another fiber moves Rex
- * there when the page stands in a Rex pane (`in=rex`), and otherwise opens
- * that fiber's page in its place. Its tapestry unfolds at full height in
- * place; a file shown full opens in a window of its own. When the thread has no
- * live worker (and is not tempered or discarded), a strip at the foot offers
- * Resume and New session. It moves no history, voice or swipe, and its head
- * draws no lifecycle verbs.
+ * stream and **Tapestry / Files** (defaulting to Posts on a family root). Going
+ * to another fiber moves Rex there when the page stands in a Rex pane
+ * (`in=rex`), and otherwise opens that fiber's page in its place. Its lead
+ * tapestry sits full-bleed in place with no fold chrome; a file shown full
+ * opens in a window of its own. For any non-archived constitution, a floating
+ * bottom bar holds its context/cache meter alongside {@link WorkerActions}
+ * (message box, Send/Resume, and New session) across both modes. It moves no
+ * history, voice or swipe, and its head draws no lifecycle verbs.
  */
 export class ThreadPage {
   readonly el = document.createElement('main')
@@ -60,10 +61,10 @@ export class ThreadPage {
   private readonly filesBtn = document.createElement('button')
   private readonly postsPane = document.createElement('section')
   private readonly stream: ChannelStream
-  private readonly composer = document.createElement('form')
-  private readonly composerInput = document.createElement('textarea')
-  private readonly composerSend = document.createElement('button')
-  private readonly strip = document.createElement('div')
+  private readonly dock = document.createElement('div')
+  private readonly meter = document.createElement('span')
+  private readonly contextFact = document.createElement('span')
+  private readonly cacheFact = document.createElement('span')
   private readonly said = document.createElement('p')
   private readonly family: FamilyPage
   private readonly feed: PageFeed
@@ -71,11 +72,13 @@ export class ThreadPage {
   private readonly leads: Leads
   private readonly unsubscribe: () => void
   private readonly startWorker: StartWorker
-  private readonly messageIds = new HumanMessageIds()
   private workerActions: WorkerActions | null = null
   private mode: ThreadMode = 'files'
   private modeCardUid: string | null = null
-  private sending = false
+  private usage: TranscriptUsage | null = null
+  private usageSession: string | undefined
+  private usageReadAt = -Infinity
+  private disposed = false
   private saidTimer: number | undefined
   private lastInteraction = -Infinity
   private knownShowAt: number | null = null
@@ -85,7 +88,15 @@ export class ThreadPage {
     this.feed = feed
     this.opts = opts
     this.leads = new Leads(opts.base)
-    this.startWorker = createWorkerStarter(opts.base, { onError: message => this.say(message) })
+    this.startWorker = createWorkerStarter(opts.base, {
+      onStarted: () => {
+        if (this.mode === 'posts') {
+          this.stream.following = true
+          this.stream.toFoot()
+        }
+      },
+      onError: message => this.say(message),
+    })
     this.el.className = 'pg-thread'
     this.status.className = 'pg-status'
 
@@ -121,37 +132,32 @@ export class ThreadPage {
       said: card => { const root = feed.index.rootOf(card); return lastSaid(card, feed.index, feed.board.records([root.uid ?? root.id])) },
       onRedraw: () => this.render(),
     })
+    this.stream.el.classList.add('pg-posts-scroll')
+    this.postsPane.append(this.stream.el)
 
-    this.composer.className = 'pg-composer'
-    this.composer.hidden = true
-    this.composerInput.className = 'pg-composer-input'
-    this.composerInput.rows = 1
-    this.composerInput.setAttribute('aria-label', 'Message family worker')
-    this.composerInput.addEventListener('keydown', event => {
-      if (event.key === 'Enter' && (!event.shiftKey || event.metaKey || event.ctrlKey)) {
-        event.preventDefault()
-        void this.submitComposer()
-      }
-    })
-    this.composerSend.type = 'submit'
-    this.composerSend.className = 'pg-composer-send'
-    this.composerSend.textContent = 'Send'
-    this.composer.addEventListener('submit', event => {
-      event.preventDefault()
-      void this.submitComposer()
-    })
-    this.composer.append(this.composerInput, this.composerSend)
-    this.postsPane.append(this.stream.el, this.composer)
+    this.dock.className = 'pg-dock'
+    this.dock.dataset.part = 'thread-dock'
+    this.dock.hidden = true
+    this.meter.className = 'pg-dock-meter'
+    this.meter.dataset.part = 'context-meter'
+    this.meter.hidden = true
+    this.contextFact.className = 'pg-dock-context'
+    this.contextFact.dataset.part = 'context'
+    this.contextFact.hidden = true
+    this.cacheFact.className = 'pg-dock-cache'
+    this.cacheFact.dataset.part = 'cache'
+    this.cacheFact.hidden = true
+    this.meter.append(this.contextFact, this.cacheFact)
+    this.dock.append(this.meter)
 
-    this.strip.className = 'pg-worker-strip'
-    this.strip.hidden = true
     this.said.className = 'pg-said'
     this.said.setAttribute('role', 'status')
     this.said.hidden = true
     this.family = new FamilyPage(this.feeds(), () => {})
     this.family.pulls = false
     this.family.unfoldLead = true
-    this.el.append(this.status, this.modes, this.postsPane, this.family.el, this.strip, this.said)
+    this.family.pinLead = true
+    this.el.append(this.status, this.modes, this.postsPane, this.family.el, this.dock, this.said)
     for (const event of INTERACTION_EVENTS) document.addEventListener(event, this.onInteract, { capture: true, passive: true })
     this.unsubscribe = feed.subscribe(() => this.render())
     this.render()
@@ -189,26 +195,25 @@ export class ThreadPage {
         this.renderPosts(card)
       }
 
-      const showStrip = quietStartable(card) && !(showPosts && !this.composer.hidden)
-      this.strip.hidden = !showStrip
-      if (showStrip) {
-        if (!this.workerActions) {
-          this.workerActions = new WorkerActions(card, this.startWorker)
-          this.strip.append(this.workerActions.el)
-        } else {
-          this.workerActions.update(card)
-        }
+      const showDock = isAgentCard(card) && !archived(card)
+      this.dock.hidden = !showDock
+      this.el.toggleAttribute('data-dock', showDock)
+      if (showDock) {
+        this.followUsage(card)
+        this.paintDock(card)
       }
     } else {
       this.modes.hidden = true
       this.postsPane.hidden = true
       this.family.el.hidden = true
-      this.strip.hidden = true
+      this.dock.hidden = true
+      this.el.removeAttribute('data-dock')
       this.status.textContent = this.feed.failure ?? (this.feed.loaded ? 'This thread is not on the board.' : 'Reading the board…')
     }
   }
 
   dispose(): void {
+    this.disposed = true
     clearTimeout(this.saidTimer)
     for (const event of INTERACTION_EVENTS) document.removeEventListener(event, this.onInteract, { capture: true })
     this.unsubscribe()
@@ -221,6 +226,39 @@ export class ThreadPage {
     if (this.mode === mode) return
     this.mode = mode
     this.render()
+  }
+
+  private followUsage(card: KanbanCard): void {
+    const session = card.sessionUuid
+    if (session !== this.usageSession) {
+      this.usageSession = session
+      this.usage = null
+      this.usageReadAt = -Infinity
+    }
+    if (!session) return
+    if (Date.now() - this.usageReadAt < USAGE_REFRESH_MS) return
+    this.usageReadAt = Date.now()
+    void this.readUsage(card, session)
+  }
+
+  private async readUsage(card: KanbanCard, session: string): Promise<void> {
+    const usage = await fetchTranscriptUsage(this.opts.base, session, card.shuttleHost)
+    if (this.disposed || this.usageSession !== session) return
+    this.usage = usage ?? this.usage
+    const current = this.feed.card()
+    if (current && isAgentCard(current) && !archived(current)) this.paintDock(current)
+  }
+
+  private paintDock(card: KanbanCard): void {
+    paintUsage(this.contextFact, this.cacheFact, this.usage, card.workerAgent ?? card.shuttleAgent)
+    this.meter.hidden = this.contextFact.hidden && this.cacheFact.hidden
+    const warm = warmUntil(this.usage)
+    const note = warm !== undefined ? `cache warm until ${clockTime(warm)}` : ''
+    if (!this.workerActions) {
+      this.workerActions = new WorkerActions(card, this.startWorker)
+      this.dock.append(this.workerActions.el)
+    }
+    this.workerActions.update(card, note)
   }
 
   private renderPosts(card: KanbanCard): void {
@@ -277,33 +315,6 @@ export class ThreadPage {
       failed: this.feed.board.failed(familyUid),
       now,
     })
-    const canCompose = isAgentCard(card) && !archived(card)
-    this.composer.hidden = !canCompose
-    if (canCompose) this.composerInput.placeholder = `Message ${slug(card)}…`
-  }
-
-  private async submitComposer(): Promise<void> {
-    if (this.sending) return
-    const card = this.feed.card()
-    const message = this.composerInput.value.trim()
-    if (!card || !message) return
-    this.sending = true
-    this.composerSend.disabled = true
-    this.composerSend.textContent = 'Sending…'
-    try {
-      const result = await dispatchWorkerStart(this.opts.base, this.messageIds, card, 'continue', { message })
-      if (result.ok) {
-        this.composerInput.value = ''
-        this.stream.following = true
-        this.stream.toFoot()
-      } else if (result.error) {
-        this.say(result.error)
-      }
-    } finally {
-      this.sending = false
-      this.composerSend.disabled = false
-      this.composerSend.textContent = 'Send'
-    }
   }
 
   private checkAutoAdvance(card: KanbanCard): void {
