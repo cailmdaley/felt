@@ -1168,7 +1168,7 @@ describe('session usage', () => {
     expect(part('cache').dataset.cache).toBe('warm')
     expect(part('cache').textContent).toBe('')
     expect(left()).toBe(0.5)
-    expect(part('cache').title).toBe(`Cache ${said} (estimated from Claude cache usage)`)
+    expect(part('cache').title).toBe(`Cache ${said} (estimated from cache usage)`)
     expect(session('Resume').title).toBe(`Resume a/task (Enter) · cache ${said}`)
     expect(band.el.querySelector('.ws-header-facts')!.textContent).toContain('94% cached')
     expect(usageReads()).toEqual([`/api/v1/transcript/usage?session=${id}&host=candide`])

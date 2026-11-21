@@ -190,6 +190,30 @@ defmodule Shuttle.TranscriptUsageTest do
     end
   end
 
+  describe "antigravity" do
+    test "sums fresh input and cache reads and estimates a 30-minute cache window", %{path: path} do
+      at = ms("2026-11-21T23:30:00Z")
+
+      line =
+        Jason.encode!(%{
+          source: "MODEL",
+          type: "PLANNER_RESPONSE",
+          created_at: "2026-11-21T23:30:00Z",
+          input_tokens: 2_191,
+          cache_read_tokens: 77_892
+        })
+
+      assert read(path, [line], "antigravity") == %{
+               context: 80_083,
+               cached: 77_892,
+               cache_warm_until: at + 30 * @minute,
+               cache_ttl: 30 * @minute,
+               hit_share: 0.973,
+               at: at
+             }
+    end
+  end
+
   describe "the tail" do
     test "widens past a large record to reach the last usage", %{path: path} do
       [turn, _compacted] = captured("codex/usage.jsonl")

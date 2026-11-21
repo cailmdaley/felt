@@ -66,7 +66,7 @@ export function paintUsage(context: HTMLElement, cache: HTMLElement, usage: Tran
   const said = until === undefined ? '' : warm ? `Cache warm until ${clockTime(until)}` : `Cache cold since ${clockTime(until)}`
   cache.hidden = until === undefined
   cache.dataset.cache = until === undefined ? '' : warm ? 'warm' : 'cold'
-  cache.title = until === undefined ? '' : `${said} (estimated from Claude cache usage)`
+  cache.title = until === undefined ? '' : `${said} (estimated from cache usage)`
   cache.setAttribute('aria-label', said)
   cache.style.setProperty('--ws-cache-left', warm ? String(Math.min(1, (until - now) / (usage?.cache_ttl ?? 300_000))) : '0')
 }

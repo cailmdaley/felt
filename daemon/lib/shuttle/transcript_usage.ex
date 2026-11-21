@@ -14,9 +14,10 @@ defmodule Shuttle.TranscriptUsage do
       leaves it unknown, and a Codex reset carries no measured input.
     * `window` — the context window, which only Codex records.
     * `cached` — the tokens that turn read from the prompt cache.
-    * `cache_warm_until` — epoch ms. Only Claude's native usage establishes a
-      TTL: an hour after an hour-long write or a read of a live hour-long
-      entry, otherwise five minutes. A compaction forgets it.
+    * `cache_warm_until` — epoch ms. Claude's native usage establishes an hour
+      after an hour-long write or a read of a live hour-long entry, otherwise
+      five minutes; Antigravity establishes an empirical 30-minute window. A
+      compaction forgets it.
     * `cache_ttl` — ms, the lifetime of the entry that sets `cache_warm_until`.
     * `hit_share` — the share of the tail's context tokens read from the cache.
     * `at` — epoch ms of the latest record.
@@ -118,6 +119,11 @@ defmodule Shuttle.TranscriptUsage do
         warm_until: warm_until,
         ttl: if(warm_until == hour_until, do: @hour_ms, else: @short_ms)
     }
+  end
+
+  defp apply_cache(state, %{ttl: ttl}, at)
+       when is_integer(at) and is_integer(ttl) and ttl > 0 do
+    %{state | warm_until: at + ttl, ttl: ttl}
   end
 
   defp apply_cache(state, _cache, _at), do: state

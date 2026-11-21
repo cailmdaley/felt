@@ -127,7 +127,7 @@
 .pg-desk .kbn-empty::after { content: '  ✶'; color: var(--kbn-owed-bright); opacity: 0.55; font-style: normal; }
 .pg-desk .kbn-folio { display: none; }
 
-@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+@media (max-width: 520px), (max-width: 700px) and (pointer: coarse), (max-height: 500px) and (pointer: coarse) {
   .pg-desk { padding: 8px; }
   .pg-desk .kbn-section-now { flex: 0 0 auto; min-height: 0; }
   .pg-desk .kbn-folio { display: block; }
@@ -196,10 +196,12 @@
   }
 }
 
-@media (min-width: 701px) and (max-width: 899px) {
+@media (min-width: 521px) and (max-width: 899px) and (pointer: fine) {
   .pg-desk .kbn-section-now { flex: none; min-height: 0; }
   .pg-desk .kbn-now-board { grid-template-columns: minmax(0, 1fr); align-items: start; }
   .pg-desk .kbn-now-board .kbn-col { max-height: none; }
   .pg-desk .kbn-now-board .kbn-col-list { overflow: visible; }
   .pg-desk .kbn-now-board .kbn-col-title { white-space: nowrap; }
+  .pg-desk .kbn-desk-shelf { grid-template-columns: minmax(0, 1fr); }
+  .pg-desk .kbn-desk-shelf > .kbn-col { max-height: none; }
 }

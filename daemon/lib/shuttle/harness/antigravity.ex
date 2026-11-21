@@ -133,19 +133,24 @@ defmodule Shuttle.Harness.Antigravity do
     [Path.join(logs, "transcript_full.jsonl"), Path.join(logs, "transcript.jsonl")]
   end
 
+  # Empirical implicit prompt-cache survival for Gemini/Neon on Antigravity (~30 min).
+  @cache_ttl_ms 1_800_000
+
   # A model step counts its fresh input and its cache reads apart.
   @impl true
   def usage_entries(
         %{"source" => "MODEL", "type" => "PLANNER_RESPONSE", "input_tokens" => input} = step
       ) do
     read = step["cache_read_tokens"]
+    context = TranscriptUsage.sum([input, read || 0])
 
     [
       %{
         kind: :usage,
         at: TranscriptUsage.time(%{"timestamp" => step["created_at"]}),
-        context: TranscriptUsage.sum([input, read || 0]),
-        cached: TranscriptUsage.count(read)
+        context: context,
+        cached: TranscriptUsage.count(read),
+        cache: if(is_number(context) and context > 0, do: %{ttl: @cache_ttl_ms}, else: nil)
       }
     ]
   end

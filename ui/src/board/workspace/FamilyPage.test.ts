@@ -58,14 +58,14 @@ describe('a constitution\'s view', () => {
     const launched = made(card({ ...mid, id: 'solo', orchestrator: undefined, outcome: undefined, dispatchedAt: when(5) }), { said: () => undefined }).page
     expect(launched.el.querySelector('.ov-head .ov-time')!.textContent).toBe('5h')
     expect(page.el.querySelector('.ov-needs')).toBeNull()
-    // Each says what it is doing: what it asks, else the newer of what it last said and its outcome, else its turn. The tempered thread stands behind the quiet control.
-    expect(threads(page)).toStrictEqual([['q', 'Which one?'], ['w', 'Needs a look'], ['mid', 'Posted the cut.']])
-    expect([...page.el.querySelectorAll<HTMLElement>('.ov-thread')].map(row => row.dataset.attention)).toStrictEqual(['waiting', 'working', 'working'])
+    // Each says what it is doing: what it asks, else the newer of what it last said and its outcome, else its turn. Active descendants nest beneath their parent; the tempered thread stands behind the quiet control.
+    expect(threads(page)).toStrictEqual([['q', 'Which one?'], ['w', 'Needs a look'], ['mid', 'Posted the cut.'], ['↳ a', 'idle']])
+    expect([...page.el.querySelectorAll<HTMLElement>('.ov-thread')].map(row => row.dataset.attention)).toStrictEqual(['waiting', 'working', 'working', 'working'])
     const quiet = page.el.querySelector<HTMLButtonElement>('.ov-quiet')!
     expect(quiet.textContent).toBe('1 quiet')
     quiet.click()
-    expect(threads(page).slice(0, 3)).toStrictEqual([['q', 'Which one?'], ['w', 'Needs a look'], ['mid', 'Posted the cut.']])
-    expect(threads(page).map(([slug]) => slug)).toStrictEqual(['q', 'w', 'mid', 'd'])
+    expect(threads(page).slice(0, 4)).toStrictEqual([['q', 'Which one?'], ['w', 'Needs a look'], ['mid', 'Posted the cut.'], ['↳ a', 'idle']])
+    expect(threads(page).map(([slug]) => slug)).toStrictEqual(['q', 'w', 'mid', '↳ a', 'd'])
     expect(page.el.querySelector('.ov-quiet')!.textContent).toBe('hide quiet')
     // A resting thread that waits on the human is never tucked away.
     const rested = card({ id: 'hub/r', name: 'Rested', orchestrator: 'hub', status: 'open', effectiveHorizon: 'stashed', column: 'resting', createdAt: when(30) })
@@ -77,8 +77,8 @@ describe('a constitution\'s view', () => {
     const rewrote = made(root, {}, cards.map(each => each === mid ? { ...mid, modifiedAt: new Date(now - 60_000).toISOString() } : each)).page
     const row = rewrote.el.querySelector<HTMLElement>('.ov-thread[data-fiber="hub/mid"]')!
     expect([row.querySelector('.thread-row-doing')!.textContent, row.querySelector('.thread-row-age')!.textContent, row.title]).toStrictEqual(['Mid came to this.', '1m', 'Mid — Mid came to this.'])
-    // Only its own threads: the leaf is mid's.
-    expect(page.el.textContent).not.toContain('Leaf')
+    // Active descendants appear nested under their parent.
+    expect(page.el.textContent).toContain('a')
   })
 
   it('lists only the threads that wait on the human or are working; a seat, a standing thread between runs, a draft and a rest join the quiet fold, which opens to them as the same rows', () => {
@@ -89,15 +89,15 @@ describe('a constitution\'s view', () => {
     const quietParent = card({ id: 'hub/qp', name: 'Quiet parent', orchestrator: 'hub', status: 'open', column: 'drafts', createdAt: when(30) })
     const below = card({ id: 'hub/qp/ask', name: 'Below', orchestrator: 'hub/qp', status: 'active', createdAt: when(10), ask: { text: 'Go?', at: when(1) } })
     const { page } = made(root, {}, [...cards, seat, weekly, draft, quietParent, below])
-    expect(threads(page).map(([name]) => name)).toStrictEqual(['q', 'qp', '↳ ask', 'w', 'mid'])
+    expect(threads(page).map(([name]) => name)).toStrictEqual(['q', 'qp', '↳ ask', 'w', 'mid', '↳ a'])
     const quiet = page.el.querySelector<HTMLButtonElement>('.ov-quiet')!
     expect(quiet.textContent).toBe('4 quiet')
     quiet.click()
-    expect(threads(page).map(([name]) => name).slice(5).sort()).toStrictEqual(['d', 'draft', 'seat', 'weekly'])
-    expect([...page.el.querySelectorAll<HTMLElement>('.ov-thread')].slice(5).every(row => row.classList.contains('thread-row') && row.dataset.attention === 'quiet')).toBe(true)
+    expect(threads(page).map(([name]) => name).slice(6).sort()).toStrictEqual(['d', 'draft', 'seat', 'weekly'])
+    expect([...page.el.querySelectorAll<HTMLElement>('.ov-thread')].slice(6).every(row => row.classList.contains('thread-row') && row.dataset.attention === 'quiet')).toBe(true)
   })
 
-  it('keeps a quiet thread in the list while a worker below it is working, and draws that worker beneath it to say why; a working thread does not list its workers', () => {
+  it('keeps a quiet thread in the list while a worker below it is working, and lists active workers beneath both quiet and working threads', () => {
     const quietParent = card({ id: 'hub/qp', name: 'Quiet parent', orchestrator: 'hub', status: 'open', column: 'drafts', createdAt: when(30) })
     const working = card({ id: 'hub/qp/run', name: 'Running', orchestrator: 'hub/qp', status: 'active', createdAt: when(10), workerState: 'running', runtimePhase: 'working', sessionUuid: 'session-run' })
     const busy = card({ id: 'hub/qp/run/fit', name: 'Fit', orchestrator: 'hub/qp/run', status: 'active', createdAt: when(5), workerState: 'running', runtimePhase: 'working', sessionUuid: 'session-fit' })
@@ -106,7 +106,7 @@ describe('a constitution\'s view', () => {
     expect(names.slice(names.indexOf('qp'), names.indexOf('qp') + 3)).toStrictEqual(['qp', '↳ run', '↳ fit'])
     expect(page.el.querySelector('.ov-quiet')!.textContent).toBe('1 quiet')
     page.update(root, new ThreadIndex([...cards, { ...quietParent, status: 'active', workerState: 'running', runtimePhase: 'working', sessionUuid: 'session-qp' }, working, busy]), now)
-    expect(threads(page).map(([name]) => name).filter(name => name.startsWith('↳ ') && /run|fit/.test(name))).toStrictEqual([])
+    expect(threads(page).map(([name]) => name).filter(name => name.startsWith('↳ ') && /run|fit/.test(name))).toStrictEqual(['↳ run', '↳ fit'])
   })
 
   it('unfolds a quiet thread at the next update once a worker below it starts working', () => {
