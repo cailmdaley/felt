@@ -7,8 +7,9 @@
 // walks the module graph from the pages entry, as the bundler does (type-only
 // imports are erased and followed nowhere), and names the chain to any of them.
 
-import { existsSync, readFileSync } from 'node:fs'
-import { dirname, relative, resolve } from 'node:path'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join, relative, resolve } from 'node:path'
 import ts from 'typescript'
 import { expect, it } from 'vitest'
 
@@ -32,10 +33,15 @@ function imports(file: string): string[] {
     ts.forEachChild(node, visit)
   }
   visit(source)
-  return found.filter(spec => spec.startsWith('.') && !/\.css(\?|$)/.test(spec)).flatMap(spec => {
+  return found.filter(spec => spec.startsWith('.')).flatMap(spec => {
     const path = resolve(dirname(file), spec.replace(/\?.*$/, ''))
-    const module = [path.replace(/\.js$/, '.ts'), path.replace(/\.js$/, '.tsx'), path].find(each => existsSync(each) && /\.tsx?$/.test(each))
-    return module ? [module] : []
+    const stem = path.replace(/\.js$/, '')
+    const module = [stem + '.ts', stem + '.tsx', path, path + '.ts', path + '.tsx', path + '/index.ts', path + '/index.tsx']
+      .find(each => /\.tsx?$/.test(each) && existsSync(each) && statSync(each).isFile())
+    if (module) return [module]
+    // A stylesheet, JSON or other asset loads no modules of its own.
+    if (existsSync(path) && statSync(path).isFile()) return []
+    throw new Error(`${relative(resolve('src'), file)} imports ${spec}, which resolves to no file`)
   })
 }
 
@@ -60,4 +66,17 @@ it('the pages entry never loads the workspace, the board shell, its history or v
   expect(offending).toEqual([])
   // The walk really follows the graph: the page reaches the board's view of a thread.
   expect([...reached.keys()].some(file => file.endsWith('board/workspace/FamilyPage.ts'))).toBe(true)
+})
+
+it('resolves every form a relative import takes, and fails on one it cannot', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pages-imports-'))
+  try {
+    mkdirSync(join(dir, 'lib'))
+    const write = (name: string, text: string): void => writeFileSync(join(dir, name), text)
+    write('entry.ts', "import './bare'\nimport './lib'\nimport './named.js'\nimport './look.css'\n")
+    for (const name of ['bare.ts', 'lib/index.ts', 'named.ts', 'look.css']) write(name, '')
+    expect([...graph(join(dir, 'entry.ts')).keys()].map(each => relative(dir, each)).sort()).toStrictEqual(['bare.ts', 'entry.ts', 'lib/index.ts', 'named.ts'])
+    write('entry.ts', "import './missing'\n")
+    expect(() => graph(join(dir, 'entry.ts'))).toThrow(/imports \.\/missing, which resolves to no file/)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
 })
