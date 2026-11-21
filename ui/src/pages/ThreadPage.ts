@@ -1,13 +1,16 @@
 import type { MapFile } from '../board/family/model.js'
-import type { KanbanCard } from '../board/KanbanTypes.js'
+import { isAgentCard } from '../board/KanbanModalShared.js'
+import { hasLiveWorker, type KanbanCard } from '../board/KanbanTypes.js'
 import { lastSaid } from '../board/said.js'
 import { slug } from '../board/threadOutline.js'
 import { fileBytesUrl } from '../board/utils.js'
+import { createWorkerStarter } from '../board/workerStart.js'
 import { parseRoute } from '../board/workspace/boardRoute.js'
 import { markSeen, unseenSince } from '../board/workspace/DocumentSeen.js'
 import { docKey, fiberKey, isExternalHref, linkedFile, parseDocKey, type DocKey } from '../board/workspace/documents.js'
 import { FamilyPage, type ViewFeeds } from '../board/workspace/FamilyPage.js'
 import { Leads } from '../board/workspace/leads.js'
+import { WorkerActions, type StartWorker } from '../board/workspace/workerActions.js'
 import type { PageFeed } from './feed.js'
 import { go } from './go.js'
 import { threadHref, type PageRoute } from './route.js'
@@ -26,23 +29,31 @@ const INTERACTION_EVENTS = ['pointerdown', 'keydown', 'wheel', 'scroll'] as cons
 
 const owned = (card: KanbanCard): { uid: string; host: string } => ({ uid: card.uid ?? card.id, host: card.originId })
 
+const quietStartable = (card: KanbanCard): boolean =>
+  isAgentCard(card) && !hasLiveWorker(card) && card.column !== 'tempered' && card.column !== 'composted'
+
 /**
  * One constitution, alone at its own address: the board's view of it
  * ({@link FamilyPage}) with no workspace around it. Going to another fiber
  * moves Rex there when the page stands in a Rex pane (`in=rex`), and otherwise
  * opens that fiber's page in its place. Its tapestry unfolds at full height in
- * place; a file shown full opens in a window of its own. It moves no history,
- * voice or swipe, and its head draws no lifecycle verbs.
+ * place; a file shown full opens in a window of its own. When the thread has no
+ * live worker (and is not tempered or discarded), a strip at the foot offers
+ * Resume and New session. It moves no history, voice or swipe, and its head
+ * draws no lifecycle verbs.
  */
 export class ThreadPage {
   readonly el = document.createElement('main')
   private readonly status = document.createElement('p')
+  private readonly strip = document.createElement('div')
   private readonly said = document.createElement('p')
   private readonly family: FamilyPage
   private readonly feed: PageFeed
   private readonly opts: ThreadPageOptions
   private readonly leads: Leads
   private readonly unsubscribe: () => void
+  private readonly startWorker: StartWorker
+  private workerActions: WorkerActions | null = null
   private saidTimer: number | undefined
   private lastInteraction = -Infinity
   private knownShowAt: number | null = null
@@ -52,15 +63,18 @@ export class ThreadPage {
     this.feed = feed
     this.opts = opts
     this.leads = new Leads(opts.base)
+    this.startWorker = createWorkerStarter(opts.base, { onError: message => this.say(message) })
     this.el.className = 'pg-thread'
     this.status.className = 'pg-status'
+    this.strip.className = 'pg-worker-strip'
+    this.strip.hidden = true
     this.said.className = 'pg-said'
     this.said.setAttribute('role', 'status')
     this.said.hidden = true
     this.family = new FamilyPage(this.feeds(), () => {})
     this.family.pulls = false
     this.family.unfoldLead = true
-    this.el.append(this.status, this.family.el, this.said)
+    this.el.append(this.status, this.family.el, this.strip, this.said)
     for (const event of INTERACTION_EVENTS) document.addEventListener(event, this.onInteract, { capture: true, passive: true })
     this.unsubscribe = feed.subscribe(() => this.render())
     this.render()
@@ -74,13 +88,27 @@ export class ThreadPage {
       this.family.update(card, this.feed.index)
       document.title = card.name
       this.checkAutoAdvance(card)
-    } else this.status.textContent = this.feed.failure ?? (this.feed.loaded ? 'This thread is not on the board.' : 'Reading the board…')
+      const showStrip = quietStartable(card)
+      this.strip.hidden = !showStrip
+      if (showStrip) {
+        if (!this.workerActions) {
+          this.workerActions = new WorkerActions(card, this.startWorker)
+          this.strip.append(this.workerActions.el)
+        } else {
+          this.workerActions.update(card)
+        }
+      }
+    } else {
+      this.strip.hidden = true
+      this.status.textContent = this.feed.failure ?? (this.feed.loaded ? 'This thread is not on the board.' : 'Reading the board…')
+    }
   }
 
   dispose(): void {
     clearTimeout(this.saidTimer)
     for (const event of INTERACTION_EVENTS) document.removeEventListener(event, this.onInteract, { capture: true })
     this.unsubscribe()
+    this.workerActions?.dispose()
     this.family.dispose()
   }
 
@@ -131,7 +159,7 @@ export class ThreadPage {
   private goTo(fiber: { uid: string; host: string }, name = fiber.uid): void {
     if (!this.opts.route.inRex) { this.opts.navigate(threadHref(window.location.href, fiber)); return }
     go(this.opts.base, fiber).then(
-      answer => { if (!answer.went) this.say(answer.place === 'live' ? `Rex could not show ${name}.` : `${name} is not running.`) },
+      answer => { if (!answer.went) this.say(answer.place === 'live' || answer.place === 'view' ? `Rex could not show ${name}.` : `${name} is not running.`) },
       (error: unknown) => this.say(error instanceof Error ? error.message : String(error)),
     )
   }

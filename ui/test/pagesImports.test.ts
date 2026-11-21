@@ -14,7 +14,7 @@ import ts from 'typescript'
 import { expect, it } from 'vitest'
 
 const ENTRY = resolve('src/pages/main.ts')
-const FORBIDDEN = ['board/workspace/Workspace.ts', 'board/KanbanModal.ts', 'board/workspace/route.ts', 'board/voice.ts']
+const FORBIDDEN = ['board/workspace/Dock.ts', 'board/workspace/Workspace.ts', 'board/KanbanModal.ts', 'board/workspace/route.ts', 'board/voice.ts']
 
 /** The relative modules a source file loads at run time. */
 function imports(file: string): string[] {

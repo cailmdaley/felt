@@ -1,15 +1,17 @@
 import '@ui-sdk/web/segmented-control'
 import { bindAvoidKeyboard } from '@ui-sdk/core'
 import { HumanMessageIds, repeatNotice } from '../humanMessageId.js'
+import { confirmCut, dispatchWorkerStart } from '../workerStart.js'
+export { alreadyRunningMessage } from '../workerStart.js'
 import { paintAncestry, type Ancestor } from './ancestryTrail.js'
 import { headerIcon, type HeaderIcon } from './headerIcon.js'
 import { attachConversationPicker, openActionMenu, type ConversationAction } from '../conversationMenu.js'
 import { canOpenDesktopApp } from '../conversationLinks.js'
 import { confirmWorkerStop, markVerdictHost, type Verdict } from './Verdicts.js'
 import { CONVERSATION_OPENING_CHANGED, conversationDestinations, conversationDevice, conversationOpening, linkDestination, resolveDestination, openDestination, type ConversationDestination, type WorkerOpener } from '../conversationOpening.js'
-import { hasLiveWorker, hasWorkerToStop, type KanbanCard, type ShuttleKind } from '../KanbanTypes.js'
+import { hasLiveWorker, type KanbanCard, type ShuttleKind } from '../KanbanTypes.js'
 import { agentGroups } from '../../forms/agents.js'
-import { dispatchFailureMessage, isAgentCard, needsProjectDir, postForceDispatch, type DispatchFailureBody, type PastedImage } from '../KanbanModalShared.js'
+import { dispatchFailureMessage, isAgentCard, postForceDispatch, type DispatchFailureBody, type PastedImage } from '../KanbanModalShared.js'
 import { getDaemonJson, postDaemonJson } from '../daemonApi.js'
 import { buildProjectDirPrompt } from '../projectDirPrompt.js'
 import { fetchFiberIndex, filterParentCandidates } from '../fiberSearch.js'
@@ -1608,7 +1610,7 @@ export class Dock {
    * on the desktop, where the human talks to it.
    */
   private async startSession(card: KanbanCard, mode: SessionMode, word?: HTMLElement, projectDir?: string, message = '', images: PastedImage[] = []): Promise<boolean> {
-    if (this.starting || (mode === 'fresh' && !this.confirmCut(card))) return false
+    if (this.starting || (mode === 'fresh' && !confirmCut(card))) return false
     const epoch = this.epoch
     const original = word?.textContent ?? ''
     if (word) word.textContent = message || images.length ? 'Sending…' : mode === 'previous' ? 'Resuming…' : 'Starting…'
@@ -1626,52 +1628,20 @@ export class Dock {
     }
     if (inBand() && this.errorEl) this.errorEl.style.display = 'none'
     try {
-      let res: Response
-      try {
-        res = await postForceDispatch(this.shuttleBase, card, { user_message: message, message_id: this.messageIds.for([card.originId, card.id, message, ...images.map(image => `${image.name}:${image.data.length}`)].join('\0')), resume_mode: mode, ...(images.length ? { images } : {}), ...(projectDir ? { project_dir: projectDir } : {}) })
-      } catch (err: unknown) {
-        showError(`Shuttle did not answer (${(err as { message?: string })?.message ?? String(err)}). Check the board before trying again.`)
-        return false
-      }
-      const body = (await res.json().catch(() => ({}))) as DispatchFailureBody & { tmux_session?: string, terminal?: string | null, duplicate?: boolean, disposition?: string }
-      // A 409 names the worker the daemon holds. With nothing to deliver, a
-      // reachable one is where the human was going; anything said, or a
-      // worker whose terminal the daemon cannot find, did not arrive.
-      const said = !!message || images.length > 0
-      const reachable = res.status === 409 && !!body.tmux_session && !!body.terminal
-      if (res.ok || (reachable && !said)) {
-        this.messageIds.sent()
-        const notice = repeatNotice(body)
-        if (notice) { showError(notice); return false }
+      const result = await dispatchWorkerStart(this.shuttleBase, this.messageIds, card, mode, { message, images, projectDir })
+      if (result.ok) {
         this.onSaved()
         this.onSent?.()
-        if (body.tmux_session && !coarsePointer() && !this.keepPlace) this.onOpenWorker?.(body.tmux_session, card.originId)
+        if (result.tmuxSession && !coarsePointer() && !this.keepPlace) this.onOpenWorker?.(result.tmuxSession, card.originId)
         return true
       }
-      if (res.status === 409) showError(alreadyRunningMessage(body, said))
-      else if (inBand() && needsProjectDir(body) && epoch === this.epoch) this.showStartPrompt(card, body, mode, message, images)
-      else showError(dispatchFailureMessage(body, `Requeue failed (${res.status})`, res.status))
+      if (inBand() && result.needsProjectDir && epoch === this.epoch) this.showStartPrompt(card, result.needsProjectDir, mode, message, images)
+      else if (result.error) showError(result.error)
       return false
     } finally {
       if (word) word.textContent = original
       if (epoch === this.epoch) { this.starting = false; this.actPaint?.() }
     }
-  }
-
-  /**
-   * A "New session" over a LIVE worker is a CUT: the daemon stamps the
-   * clean-exit marker, kills the running session, and starts fresh, which
-   * discards whatever in-flight context that worker was holding. A dormant
-   * card cuts nothing, so it's silent; Resume never cuts.
-   */
-  private confirmCut(card: KanbanCard): boolean {
-    if (!hasWorkerToStop(card)) return true
-    const working = card.runtimePhase === 'working' ? ' (actively working)' : ''
-    return window.confirm(
-      `A worker is still running for “${card.name}”${working}.\n\n` +
-        `Start a new session? This cuts the open session and discards its ` +
-        `in-flight context.`,
-    )
   }
 
   /**
@@ -2141,10 +2111,4 @@ export class Dock {
         }
     })
   }
-}
-
-/** Why a start answered 409 delivered nothing, in the words the human acts on. */
-export function alreadyRunningMessage(body: { tmux_session?: string, terminal?: string | null }, said: boolean): string {
-  if (body.tmux_session && !body.terminal) return `Shuttle holds a worker for this fiber but cannot reach its terminal, so ${said ? 'the message was not sent' : 'nothing opened'}. Stop it, then resume.`
-  return said ? 'A worker is already running for this fiber; the message was not sent.' : 'A worker is already running for this fiber.'
 }

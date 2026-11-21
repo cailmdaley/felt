@@ -56,6 +56,7 @@ describe('the thread page', () => {
       if (url.startsWith('/api/v1/sent-files/all/composite')) return json({ files: sentFiles, origins: {} })
       if (url.startsWith('/api/v1/file') && serveFiles) return serveFiles(url, method, headers)
       if (url === '/api/v1/go' && method === 'POST') return json(go)
+      if (url === '/api/v1/dispatch' && method === 'POST') return json({ dispatched: true, tmux_session: 'started-session' })
       return new Response('{}', { status: 404 })
     }))
   })
@@ -274,5 +275,44 @@ describe('the thread page', () => {
     feed.stop()
     await vi.advanceTimersByTimeAsync(POLL_MS * 4)
     expect(requests.length).toBe(before)
+  })
+
+  it('shows a Resume / New session strip when the thread has no live worker, and hides it when live or tempered/discarded', async () => {
+    // Live worker: strip is hidden.
+    const { page: livePage } = await open(`?f=thread-analysis@${WORKSPACE_HOST}`)
+    expect(livePage.el.querySelector<HTMLElement>('.pg-worker-strip')!.hidden).toBe(true)
+
+    // Tempered thread: strip is hidden.
+    const { page: temperedPage } = await open(`?f=thread-archive@${WORKSPACE_HOST}`)
+    expect(temperedPage.el.querySelector<HTMLElement>('.pg-worker-strip')!.hidden).toBe(true)
+
+    // Discarded thread: strip is hidden.
+    const { page: discardedPage } = await open(`?f=thread-discard@${WORKSPACE_HOST}`)
+    expect(discardedPage.el.querySelector<HTMLElement>('.pg-worker-strip')!.hidden).toBe(true)
+
+    // Quiet thread (awaiting review, no live worker): strip is shown with WorkerActions.
+    const { page: quietPage } = await open(`?f=thread-review@${WORKSPACE_HOST}&in=rex`)
+    const strip = quietPage.el.querySelector<HTMLElement>('.pg-worker-strip')!
+    expect(strip.hidden).toBe(false)
+    const primary = strip.querySelector<HTMLButtonElement>('.ws-worker-primary')!
+    expect(primary.hidden).toBe(false)
+    primary.click()
+    await settle(); await settle()
+    const dispatches = posts().filter(each => each.url === '/api/v1/dispatch')
+    expect(dispatches).toHaveLength(1)
+    const body = JSON.parse(dispatches[0]!.body!) as Record<string, unknown>
+    expect(body.force).toBe(true)
+    expect(body.ad_hoc).toBe(true)
+    expect(body.origin).toBe(WORKSPACE_HOST)
+    expect(['previous', 'continue']).toContain(body.resume_mode)
+
+    // New session button dispatches with resume_mode: 'fresh' when visible.
+    const fresh = strip.querySelector<HTMLButtonElement>('.ws-worker-fresh')!
+    if (!fresh.hidden) {
+      fresh.click()
+      await settle(); await settle()
+      const latest = JSON.parse(posts().filter(each => each.url === '/api/v1/dispatch').at(-1)!.body!) as Record<string, unknown>
+      expect(latest.resume_mode).toBe('fresh')
+    }
   })
 })
