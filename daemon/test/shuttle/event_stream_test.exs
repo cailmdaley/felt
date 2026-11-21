@@ -206,6 +206,54 @@ defmodule Shuttle.EventStreamTest do
     assert waiting(name) == %{"s1" => "waiting"}
   end
 
+  test "a rotation racing the seed is not counted twice", %{path: path} do
+    sent_line = fn minute, file ->
+      ev("file_sent", minute, %{"files" => [file]})
+    end
+
+    append(path <> ".1", [sent_line.(0, "/tmp/old-0.html")])
+    append(path, Enum.map(1..5, &sent_line.(&1, "/tmp/live-#{&1}.html")))
+
+    # Rotate once, between the seed's read of the live file and its fold of
+    # `.1`, and give the new live file lines of its own.
+    once = :counters.new(1, [])
+
+    hook = fn ->
+      if :counters.get(once, 1) == 0 do
+        :counters.add(once, 1, 1)
+        File.rename!(path, path <> ".1")
+        append(path, Enum.map(6..7, &sent_line.(&1, "/tmp/new-#{&1}.html")))
+      end
+    end
+
+    name = :"event_stream_#{System.unique_integer([:positive])}"
+
+    start_supervised!(
+      {EventStream, events_file: path, poll_interval_ms: 3_600_000, name: name, seed_hook: hook}
+    )
+
+    assert EventStream.sent_events(name) == EventFiles.sent_events(path)
+    assert :counters.get(once, 1) == 1
+    paths = sent(name)
+    assert paths == Enum.uniq(paths)
+
+    assert paths ==
+             Enum.map(1..5, &"/tmp/live-#{&1}.html") ++ Enum.map(6..7, &"/tmp/new-#{&1}.html")
+  end
+
+  test "a replacement it cannot account for rebuilds from the files", %{path: path} do
+    append(path, [ev("file_sent", 0, %{"files" => ["/tmp/before.html"]})])
+    name = start(path)
+    assert sent(name) == ["/tmp/before.html"]
+
+    # A new live file whose predecessor did not become events.jsonl.1. It is
+    # written beside the old one first, so the two cannot share an inode.
+    append(path <> ".new", [ev("file_sent", 4, %{"files" => ["/tmp/after.html"]})])
+    File.rename!(path <> ".new", path)
+    assert sent(name) == ["/tmp/after.html"]
+    assert EventStream.sent_events(name) == EventFiles.sent_events(path)
+  end
+
   test "session_activity answers at once while the stream is busy", %{path: path} do
     now = System.system_time(:millisecond)
     shuttle = "w-01KTS261GJMMRDRHS2QDMEFV3K-shuttle"
