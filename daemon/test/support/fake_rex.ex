@@ -188,11 +188,21 @@ defmodule Shuttle.Test.FakeRex do
     end
   end
 
-  defp run("session.move_window", %{"window_id" => wid}, sid, state) do
+  defp run("session.move_window", %{"window_id" => wid} = params, sid, state) do
     session = state.sessions[sid]
     windows = windows(session)
     window = Enum.find(windows, &(&1["window_id"] == wid))
-    windows = Enum.reject(windows, &(&1["window_id"] == wid)) ++ [window]
+    without = Enum.reject(windows, &(&1["window_id"] == wid))
+
+    windows =
+      case params["index"] do
+        idx when is_integer(idx) ->
+          List.insert_at(without, max(0, min(idx, length(without))), window)
+
+        _ ->
+          without ++ [window]
+      end
+
     {%{}, put_in(state, [:sessions, sid], Map.put(session, :windows, windows))}
   end
 
@@ -230,9 +240,14 @@ defmodule Shuttle.Test.FakeRex do
       {%{},
        %{state | sessions: Map.delete(state.sessions, sid), order: List.delete(state.order, sid)}}
 
+  defp run("session.move", %{"session_id" => _sid, "index" => index}, _sid2, state)
+       when index < 1 do
+    {{"Error: --index must be a positive integer\n", 1}, state}
+  end
+
   defp run("session.move", %{"session_id" => sid, "index" => index}, sid, state) do
     rest = List.delete(state.order, sid)
-    pos = min(max(index, 0), length(rest))
+    pos = min(max(index - 1, 0), length(rest))
     {%{}, %{state | order: List.insert_at(rest, pos, sid)}}
   end
 

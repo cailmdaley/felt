@@ -189,7 +189,7 @@ export class ThreadPage {
         this.renderPosts(card)
       }
 
-      const showStrip = quietStartable(card)
+      const showStrip = quietStartable(card) && !(showPosts && !this.composer.hidden)
       this.strip.hidden = !showStrip
       if (showStrip) {
         if (!this.workerActions) {
@@ -291,7 +291,7 @@ export class ThreadPage {
     this.composerSend.disabled = true
     this.composerSend.textContent = 'Sending…'
     try {
-      const result = await dispatchWorkerStart(this.opts.base, this.messageIds, card, 'previous', { message })
+      const result = await dispatchWorkerStart(this.opts.base, this.messageIds, card, 'continue', { message })
       if (result.ok) {
         this.composerInput.value = ''
         this.stream.following = true

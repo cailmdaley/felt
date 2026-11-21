@@ -28,7 +28,7 @@
 .pg-mode-pill[data-active] {
   color: var(--ws-ink);
   border-color: var(--ws-ink-muted);
-  background: var(--ws-surface, rgba(0, 0, 0, 0.04));
+  background: var(--ws-hover);
 }
 /* Family Posts stream and compact composer. */
 .pg-posts {

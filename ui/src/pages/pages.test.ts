@@ -364,9 +364,11 @@ describe('the thread page', () => {
     expect(dispatches).toHaveLength(1)
     const dispatchBody = JSON.parse(dispatches[0]!.body!) as Record<string, unknown>
     expect(dispatchBody.user_message).toBe('Check the null tests')
-    expect(dispatchBody.resume_mode).toBe('previous')
+    expect(dispatchBody.resume_mode).toBe('continue')
     expect(dispatchBody.origin).toBe(WORKSPACE_HOST)
     expect(input.value).toBe('')
+    // Avoid duplicate message inputs: worker strip stays hidden while Posts composer is shown.
+    expect(page.el.querySelector<HTMLElement>('.pg-worker-strip')!.hidden).toBe(true)
 
     // Toggling to Tapestry / Files hides Posts and shows FamilyPage.
     filesTab.click()

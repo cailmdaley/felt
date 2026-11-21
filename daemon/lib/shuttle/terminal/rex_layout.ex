@@ -1452,7 +1452,7 @@ defmodule Shuttle.Terminal.RexLayout do
 
     obs =
       obs
-      |> update_in([:sessions, sid, :windows], &(&1 ++ [win]))
+      |> update_in([:sessions, sid, :windows], &[win | &1])
       |> update_in([:sessions, sid, :blocks], &(&1 ++ [blk]))
       |> Map.put_new(:views, %{})
       |> put_in([:views, root], view_record(sid, wid, bid, view))
@@ -1682,6 +1682,7 @@ defmodule Shuttle.Terminal.RexLayout do
            server: doc["server"],
            sessions: sessions,
            session_order: Enum.map(raw_sessions, & &1["session_id"]),
+           desk_session_id: get_in(doc, ["desk", "session_id"]),
            focused_sessions: focused,
            families: families,
            bindings: doc["bindings"] || %{},
@@ -1896,7 +1897,7 @@ defmodule Shuttle.Terminal.RexLayout do
   defp apply_one(runner, {:move_session, %{session_id: sid_ref, index: idx}}, state, _locked?) do
     sid = resolve_sid(sid_ref, state.created)
 
-    case Rex.command(runner, ["session", "move", sid, "--index", Integer.to_string(idx)]) do
+    case Rex.command(runner, ["session", "move", sid, "--index", Integer.to_string(idx + 1)]) do
       {:ok, _} -> {:ok, state}
       {:error, :not_found} -> {:ok, state}
       error -> error
@@ -1983,6 +1984,7 @@ defmodule Shuttle.Terminal.RexLayout do
            spec = %{"window_label" => view.window_label, "layout" => %{"block" => page_blk}},
            {:ok, %{"window_id" => "window:" <> _ = wid, "block_ids" => ["block:" <> _ = bid]}} <-
              Rex.new_window(runner, sid, spec, timeout_ms: Pages.launch_timeout_ms()),
+           :ok <- move_window_first(runner, sid, wid),
            :ok <- Bindings.put_view(root, view_record(sid, wid, bid, view), server),
            :ok <-
              if(dp != nil,
@@ -2236,15 +2238,17 @@ defmodule Shuttle.Terminal.RexLayout do
         grace = Keyword.get(opts, :grace_seconds, @default_grace_seconds)
         own_host_id = Keyword.get(opts, :own_host_id, Poller.own_host_id())
 
-        chosen_roots =
-          Keyword.get_lazy(opts, :chosen_roots, fn ->
-            load_chosen_roots(fibers, family_fibers, own_host_id)
-          end)
-
         with {:ok, %{"host_id" => server} = identity} <- Rex.whoami(runner),
              :ok <- Backend.reconcile(runner, identity),
              {:ok, doc} <- Bindings.read(),
              {:ok, raw_sessions} <- Rex.sessions(runner) do
+          chosen_roots =
+            cond do
+              Keyword.has_key?(opts, :chosen_roots) -> Keyword.fetch!(opts, :chosen_roots)
+              not fibers_loaded? -> doc["chosen_roots"] || []
+              true -> load_chosen_roots(fibers, family_fibers, own_host_id)
+            end
+
           focused = observe_focused_sessions(runner, raw_sessions)
 
           # Discover all candidate family roots across rex.json and desired fibers.
@@ -2455,9 +2459,9 @@ defmodule Shuttle.Terminal.RexLayout do
   end
 
   defp move_desk_first(runner, sid) do
-    case Rex.command(runner, ["session", "move", sid, "--index", "0"]) do
+    case Rex.command(runner, ["session", "move", sid, "--index", "1"]) do
       {:ok, _} -> :ok
-      error -> Logger.warning("Cannot move Desk session to index 0: #{inspect(error)}")
+      error -> Logger.warning("Cannot move Desk session to index 1: #{inspect(error)}")
     end
 
     :ok
@@ -2491,7 +2495,7 @@ defmodule Shuttle.Terminal.RexLayout do
         })
 
       Enum.each(moves, fn {:move_session, %{session_id: sid, index: idx}} ->
-        case Rex.command(runner, ["session", "move", sid, "--index", Integer.to_string(idx)]) do
+        case Rex.command(runner, ["session", "move", sid, "--index", Integer.to_string(idx + 1)]) do
           {:ok, _} -> :ok
           {:error, :not_found} -> :ok
           error -> Logger.warning("Rex session move failed for #{sid}: #{inspect(error)}")
@@ -2654,6 +2658,7 @@ defmodule Shuttle.Terminal.RexLayout do
                   |> Map.put("depth", depth)
 
                 with :ok <- Bindings.put_place(uid, updated, server),
+                     :ok <- sync_root_view(doc, root, path, uid, updated, server),
                      :ok <- Bindings.set_instance(identity["instance_id"]) do
                   {:ok, updated, false}
                 end
@@ -2665,6 +2670,7 @@ defmodule Shuttle.Terminal.RexLayout do
                   server,
                   identity,
                   uid,
+                  root,
                   place,
                   anchor_bid,
                   path,
@@ -2753,6 +2759,7 @@ defmodule Shuttle.Terminal.RexLayout do
          server,
          identity,
          uid,
+         root,
          place,
          anchor_bid,
          path,
@@ -2793,6 +2800,7 @@ defmodule Shuttle.Terminal.RexLayout do
         end)
 
       with :ok <- Bindings.put_place(uid, updated, server),
+           :ok <- sync_root_view(doc, root, path, uid, updated, server),
            :ok <- restore_binding_page(matching_binding, page_id),
            :ok <- Bindings.set_instance(identity["instance_id"]) do
         {:ok, updated, false}
@@ -2801,6 +2809,38 @@ defmodule Shuttle.Terminal.RexLayout do
       {:ok, reply} -> {:error, {:unknown, "invalid Rex split reply: #{inspect(reply)}"}}
       error -> error
     end
+  end
+
+  defp sync_root_view(doc, root, path, uid, place, server) do
+    view_entry = get_in(doc, ["views", root])
+
+    if path == root or
+         (is_map(view_entry) and view_entry["session_id"] == place["session_id"] and
+            view_entry["window_id"] == place["window_id"]) do
+      view = %{
+        "session_id" => place["session_id"],
+        "window_id" => place["window_id"],
+        "page_block_id" => place["page_block_id"],
+        "family" => root,
+        "fiber" => root,
+        "uid" => uid,
+        "page_closed" => false
+      }
+
+      Bindings.put_view(root, view, server)
+    else
+      :ok
+    end
+  end
+
+  defp move_window_first(runner, sid, wid) do
+    case Rex.move_window(runner, sid, wid, 0) do
+      {:ok, _} -> :ok
+      {:error, :not_found} -> :ok
+      error -> Logger.warning("Cannot move family view window #{wid} to Tab 1: #{inspect(error)}")
+    end
+
+    :ok
   end
 
   defp restore_binding_page({bname, b}, page_id),
@@ -2832,7 +2872,8 @@ defmodule Shuttle.Terminal.RexLayout do
       created =
         if existing_session? do
           with {:ok, %{"window_id" => "window:" <> _ = wid, "block_ids" => ["block:" <> _ = bid]}} <-
-                 Rex.new_window(runner, sid, window_spec, timeout_ms: Pages.launch_timeout_ms()) do
+                 Rex.new_window(runner, sid, window_spec, timeout_ms: Pages.launch_timeout_ms()),
+               :ok <- if(path == root, do: move_window_first(runner, sid, wid), else: :ok) do
             {:ok, sid, wid, bid, false}
           else
             {:ok, reply} -> {:error, {:unknown, "invalid Rex new_window reply: #{inspect(reply)}"}}
@@ -2869,6 +2910,7 @@ defmodule Shuttle.Terminal.RexLayout do
         }
 
         with :ok <- Bindings.put_place(uid, place, server),
+             :ok <- sync_root_view(doc, root, path, uid, place, server),
              :ok <- Bindings.set_instance(identity["instance_id"]) do
           {:ok, place, new_session?}
         end

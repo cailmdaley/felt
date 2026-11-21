@@ -783,6 +783,121 @@ defmodule Shuttle.Terminal.RexLayoutTest do
       refute Map.has_key?(FakeRex.state().sessions, new_desk_sid)
       assert Map.has_key?(FakeRex.state().sessions, existing_sid)
     end
+
+    test "cold Poller cache at boot preserves persisted chosen_roots and quiet chosen Tab 1 views without reordering" do
+      now = ~U[2026-11-21 12:00:00Z]
+
+      root_fiber = %{
+        "id" => "u-root",
+        "uid" => "u-root",
+        "slug" => @root,
+        "status" => "open",
+        "shuttle" => %{"host" => "test-host", "kind" => "oneshot"}
+      }
+
+      # Warm reconcile creates the quiet chosen family's Tab 1 session and persists chosen_roots.
+      assert :ok =
+               RexLayout.reconcile(FakeRex,
+                 fibers: [root_fiber],
+                 chosen_roots: [@root],
+                 now: now
+               )
+
+      {:ok, doc1} = RexBindings.read()
+      sid = doc1["families"][@root]
+      assert is_binary(sid)
+      assert doc1["chosen_roots"] == [@root]
+      assert doc1["views"][@root]["session_id"] == sid
+
+      calls_before = length(FakeRex.calls())
+
+      # Cold Poller cache at boot (fibers: [], fibers_loaded?: false, no explicit chosen_roots):
+      # preserves chosen_roots, keeps the quiet chosen session/view, and issues no session moves.
+      assert :ok =
+               RexLayout.reconcile(FakeRex,
+                 fibers: [],
+                 fibers_loaded?: false,
+                 now: now
+               )
+
+      assert Map.has_key?(FakeRex.state().sessions, sid)
+      {:ok, doc2} = RexBindings.read()
+      assert doc2["chosen_roots"] == [@root]
+      assert doc2["views"][@root]["session_id"] == sid
+
+      new_calls = Enum.drop(FakeRex.calls(), calls_before)
+      refute Enum.any?(new_calls, fn {_, args, _} -> "move" in args end)
+    end
+
+    test "ensure_place restores a closed Tab 1 family view page and keeps views[root] in sync" do
+      now = ~U[2026-11-21 12:00:00Z]
+
+      root_fiber = %{
+        "id" => @uid_a,
+        "uid" => @uid_a,
+        "slug" => @root,
+        "status" => "active",
+        "shuttle" => %{"host" => "test-host", "kind" => "oneshot"}
+      }
+
+      # Launch root worker -> creates [chat | page] in Tab 1; reconcile records views[@root].
+      assert :ok = Backend.launch(FakeRex, @name_a, "/tmp", "worker.sh", fiber: @root)
+      assert :ok = RexLayout.reconcile(FakeRex, fibers: [root_fiber], chosen_roots: [@root], now: now)
+      {:ok, doc1} = RexBindings.read()
+      view1 = doc1["views"][@root]
+      sid = view1["session_id"]
+      old_page_bid = view1["page_block_id"]
+      assert is_binary(old_page_bid)
+
+      # Human closes Tab 1's page block -> reconcile marks views[@root].page_closed = true.
+      assert {:ok, _} = Rex.call(FakeRex, "block.close", %{"block_id" => old_page_bid}, session: sid)
+      assert :ok = RexLayout.reconcile(FakeRex, fibers: [root_fiber], chosen_roots: [@root], now: now)
+      {:ok, doc2} = RexBindings.read()
+      assert doc2["views"][@root]["page_closed"] == true
+
+      # `go` / ensure_place restores Tab 1's page split and updates views[@root].
+      assert {:ok, restored} = RexLayout.ensure_place(FakeRex, root_fiber, now: now)
+      {:ok, doc3} = RexBindings.read()
+      assert doc3["views"][@root]["page_closed"] == false
+      assert doc3["views"][@root]["page_block_id"] == restored["page_block_id"]
+      refute doc3["views"][@root]["page_block_id"] == old_page_bid
+    end
+
+    test "when a child window exists first, adding Tab 1 family view moves it to index 0" do
+      now = ~U[2026-11-21 12:00:00Z]
+
+      root_fiber = %{
+        "id" => "u-root",
+        "uid" => "u-root",
+        "slug" => @root,
+        "status" => "open",
+        "tags" => ["constitution"],
+        "shuttle" => %{"host" => "test-host", "kind" => "oneshot"}
+      }
+
+      child_fiber = %{
+        "id" => @uid_a,
+        "uid" => @uid_a,
+        "slug" => @root <> "/a",
+        "status" => "open",
+        "shuttle" => %{"host" => "test-host", "kind" => "oneshot"}
+      }
+
+      # 1. Child window is created first (no Tab 1 yet).
+      assert {:ok, child_place} = RexLayout.ensure_place(FakeRex, child_fiber, now: now)
+      sid = child_place["session_id"]
+      child_wid = child_place["window_id"]
+
+      # 2. Reconcile adds Tab 1 family view into that existing session and moves it to index 0.
+      assert :ok = RexLayout.reconcile(FakeRex, fibers: [root_fiber, child_fiber], now: now)
+      {:ok, doc} = RexBindings.read()
+      view_wid = doc["views"][@root]["window_id"]
+      assert is_binary(view_wid)
+      refute view_wid == child_wid
+
+      {:ok, wins} = Rex.windows(FakeRex, sid)
+      assert Enum.map(wins, & &1["window_id"]) == [view_wid, child_wid]
+    end
   end
 
   describe "S4: session ordering, marks, chosen channels, and Tab 1 family view" do

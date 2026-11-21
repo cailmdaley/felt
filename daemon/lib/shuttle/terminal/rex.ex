@@ -420,8 +420,13 @@ defmodule Shuttle.Terminal.Rex do
 
               existing ->
                 with {:ok, reply} <- Rex.new_window(runner, sid, window, rex_opts),
-                     {:ok, b} <- window_binding(sid, reply),
-                     do: {:ok, b, false}
+                     {:ok, b} <- window_binding(sid, reply) do
+                  if pages_enabled?() and family != nil and family.fiber == root do
+                    _ = Rex.move_window(runner, sid, b["window_id"], 0)
+                  end
+
+                  {:ok, b, false}
+                end
 
               true ->
                 spec = %{

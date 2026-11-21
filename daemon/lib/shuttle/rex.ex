@@ -148,6 +148,9 @@ defmodule Shuttle.Rex do
   def close_window(runner, sid, wid),
     do: call(runner, "session.close_window", %{"window_id" => wid}, session: sid)
 
+  def move_window(runner, sid, wid, index) when is_integer(index),
+    do: call(runner, "session.move_window", %{"window_id" => wid, "index" => index}, session: sid)
+
   def destroy(runner, sid), do: call(runner, "session.destroy", %{}, session: sid)
 
   def set_labels(runner, sid, bid, label) do
