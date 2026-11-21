@@ -1,6 +1,10 @@
 import { postDaemonJson } from '../board/daemonApi.js'
 
-/** Where `go` took Rex: `went` is false, with place `none`, when the fiber has no live worker to show. */
+/**
+ * Where `go` took Rex. `place` says whether the fiber has a live worker:
+ * `went` false with place `live` is a worker Rex could not show (no Mac app
+ * attached to its server), with place `none` a fiber with no live worker.
+ */
 export interface GoAnswer { went: boolean; place: string }
 
 /**

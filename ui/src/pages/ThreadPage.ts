@@ -95,11 +95,11 @@ export class ThreadPage {
     return { key, name: 'Constitution', at, unread: at > 0 && unseenSince(key, at) }
   }
 
-  /** In Rex, Rex moves to the fiber's live worker, and says so when it has none; in a browser, its page opens here. */
+  /** In Rex, Rex moves to the fiber's live worker, and says why when it cannot; in a browser, its page opens here. */
   private goTo(fiber: { uid: string; host: string }, name = fiber.uid): void {
     if (!this.opts.route.inRex) { this.opts.navigate(threadHref(window.location.href, fiber)); return }
     go(this.opts.base, fiber).then(
-      answer => { if (!answer.went) this.say(`${name} is not running.`) },
+      answer => { if (!answer.went) this.say(answer.place === 'live' ? `Rex could not show ${name}.` : `${name} is not running.`) },
       (error: unknown) => this.say(error instanceof Error ? error.message : String(error)),
     )
   }

@@ -90,7 +90,7 @@ describe('the thread page', () => {
     expect(page.el.querySelector('.ov-name')!.textContent).toBe('archive')
   })
 
-  it('in a Rex pane, a row asks the owner to go there and the page stays; a fiber with no worker is said to be not running', async () => {
+  it('in a Rex pane, a row asks the owner to go there and the page stays; a fiber with no worker is said to be not running, one Rex could not show is said so', async () => {
     const { page, navigate } = await open(`?f=${WORKSPACE_UID}@${WORKSPACE_HOST}&in=rex`)
     row(page, 'thread-analysis').click()
     await settle()
@@ -101,6 +101,11 @@ describe('the thread page', () => {
     await settle(); await settle()
     const said = page.el.querySelector<HTMLElement>('.pg-said')!
     expect([said.hidden, said.textContent]).toStrictEqual([false, 'review is not running.'])
+    // A live worker Rex could not show is not said to be not running.
+    go = { went: false, place: 'live' }
+    row(page, 'thread-analysis').click()
+    await settle(); await settle()
+    expect([said.hidden, said.textContent]).toStrictEqual([false, 'Rex could not show analysis.'])
     expect(navigate).not.toHaveBeenCalled()
   })
 
@@ -117,13 +122,17 @@ describe('the thread page', () => {
     expect(navigate).not.toHaveBeenCalled()
   })
 
-  it('its constitution unfolds in place, beside its files', async () => {
+  it('its constitution unfolds in place, beside its files, and folds when asked for again', async () => {
     const { page } = await open(`?f=${WORKSPACE_UID}@${WORKSPACE_HOST}`)
     page.el.querySelector<HTMLButtonElement>('.ov-tools [data-part="constitution"]')!.click()
     for (let i = 0; i < 4; i++) await settle()
     const unfold = page.el.querySelector<HTMLElement>('.ov-unfold')!
     expect([unfold.hasAttribute('data-unfolded'), unfold.querySelector('.uf-name')!.textContent]).toStrictEqual([true, 'Constitution'])
     expect(unfold.querySelector<HTMLElement>('.uf-page')!.dataset.key).toMatch(/:\/fixture-store\/workspace\/.*\/calibration-report\.md$/)
+    // Asked for again, it folds.
+    page.el.querySelector<HTMLButtonElement>('.ov-tools [data-part="constitution"]')!.click()
+    for (let i = 0; i < 4; i++) await settle()
+    expect(unfold.hasAttribute('data-unfolded')).toBe(false)
   })
 
   it('reads the board again only while it is visible, revalidating what it holds', async () => {
