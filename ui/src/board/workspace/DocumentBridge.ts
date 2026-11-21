@@ -6,7 +6,7 @@ import { installPageSwipe, SWIPE } from './PhoneGestures.js'
 import { mentionRuntime } from './bodyLinks.js'
 import { reportMentionRuntime } from './reportMentions.js'
 import mentionStyles from './mentions.css?inline'
-import { parseRoute } from './route.js'
+import { parseRoute } from './boardRoute.js'
 
 export const DOCUMENT_SANDBOX = 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-forms'
 const PROTOCOL = 'shuttle-document'
