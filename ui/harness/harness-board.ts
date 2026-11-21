@@ -13,6 +13,9 @@
  * `?identity=all` adds synthetic CLI workers with pending and failed session attribution.
  * `?example=channels&illuminated=1` is a design experiment, not the board: each channel's head set in the illuminated capitals.
  * `?example=desk` is a busy Desk over the channels' fixture, its `/board/family` answering what waits (a post to the human among it).
+ * `?page=thread&f=<uid>@<host>` mounts a page (src/pages/) instead of the board, over the same mocked daemon:
+ * `?example=threads&page=thread&f=01KVBR1F9BWBVKF97473PV67K8@umber-workstation` is a thread with every kind of
+ * sub-thread; add `&in=rex` for a page in a Rex pane, whose clicks post `/api/v1/go`.
  *
  * The SETTINGS sheet is exercised the same way and is the one surface here
  * that is stateful: the stub keeps an in-memory copy of each host's operator
@@ -32,6 +35,8 @@ import { stampLifecycle } from './ownerLifecycle.js'
 import { addNavigationFixtures } from './nav-back-fixtures.js'
 import { addFamilyFixtures, addFrontierFixtures, addThreadFixtures, addThreadReviewFixtures } from './thread-fixtures.js'
 import { KanbanModal } from '../src/board/KanbanModal.js'
+import { mountPage } from '../src/pages/mount.js'
+import { parsePageRoute } from '../src/pages/route.js'
 import { scopeTheme } from '../src/board/workspace/themeScope.js'
 import { Thumbnail } from '../src/board/workspace/Thumbnail.js'
 import { holdings } from '../src/board/holdings.js'
@@ -1170,6 +1175,13 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   // A constitution that follows several PRs lists them first.
   const listing = method === 'GET' ? /\/api\/v1\/changes\/([^/?]+)(\?|$)/.exec(url) : null
   if (workspaceFixture && listing) return json(listFixturePRs(decodeURIComponent(listing[1])))
+  // A page's `go`: Rex moves to a fiber with a running worker, and to nothing else.
+  if (method === 'POST' && url.split('?')[0].endsWith('/api/v1/go')) {
+    const { fiber_id: uid, origin } = body()
+    const rows = (workspaceFixture?.feed ?? docsExample?.feed ?? MOCK_FEED).fibers as Array<{ origin?: string; fiber: { uid?: string }; runtime?: unknown }>
+    const live = rows.some(row => row.fiber.uid === uid && row.origin === origin && row.runtime)
+    return json(live ? { went: true, place: 'live' } : { went: false, place: 'none' })
+  }
   // The board's composite feed.
   if (url.includes('/api/v1/fibers/composite')) return json(workspaceFixture?.feed ?? docsExample?.feed ?? MOCK_FEED)
   if (workspaceFixture && url.includes('/api/v1/fibers/') && url.includes('body=true')) {
@@ -1480,7 +1492,16 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 // Wire the lane actions so every available button can be exercised offline.
 // Terminal writes its selected session to the document for harness inspection;
 // KanbanModal owns polling the composite feed and its recovery action.
-try {
+const page = search.get('page')
+if (page) {
+  document.querySelectorAll('.sim-corner').forEach(element => element.remove())
+  const host = document.createElement('div')
+  host.id = 'app'
+  host.style.cssText = 'position:fixed; inset:0;'
+  document.body.append(host)
+  mountPage(host, parsePageRoute(window.location), '')
+  ;(window as unknown as { __harness: unknown }).__harness = { requests: mockRequests, handlers: mockHandlers }
+} else try {
   assertUlids()
   const modal = new KanbanModal({
     onStashClick: () => { void openStash({ shuttleBase: '' }) },

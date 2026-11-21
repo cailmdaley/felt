@@ -1,0 +1,20 @@
+/* A page alone at its own address: it fills its pane or tab, on the board's paper. */
+html, body { margin: 0; height: 100%; background: var(--ws-paper); color: var(--ws-ink); }
+#app { height: 100%; }
+.pg-thread { height: 100%; display: flex; flex-direction: column; }
+.pg-thread > .ws-family-page { flex: 1; min-height: 0; }
+.pg-thread > .ws-family-page[hidden] { display: none; }
+/* What the page cannot show: a quiet line in its place. */
+.pg-status { margin: 10px 24px 0; color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-ui) var(--font-serif); }
+.pg-status[hidden], .pg-said[hidden] { display: none; }
+/* What a go could not do: a passing word at the page's foot, over it, so nothing below it moves. */
+.pg-said {
+  position: fixed; left: 16px; bottom: 16px; z-index: 10; margin: 0; padding: 4px 10px; max-width: calc(100% - 32px); box-sizing: border-box;
+  color: var(--ws-ink); background: var(--ws-paper); border: 1px solid var(--ws-hairline); border-radius: var(--ws-control-radius);
+  font: var(--type-note)/var(--leading-ui) var(--font-serif);
+}
+.pg-missing { box-sizing: border-box; padding: 24px; color: var(--ws-ink-muted); font: var(--type-row)/var(--leading-prose) var(--font-serif); }
+/* A wide pane keeps the head and its words on the rows' measure (family-page.css), so its tools stand over the rows' times. */
+.pg-thread .ov-head { box-sizing: border-box; max-width: 760px; }
+.pg-thread .ov-said { max-width: calc(760px - 2 * var(--ov-gutter)); }
+.pg-thread .ov-ancestor { box-sizing: border-box; max-width: 760px; }

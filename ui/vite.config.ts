@@ -12,6 +12,8 @@ import { keepQueriesUncached } from './src/runtime/uncachedQueries.js'
  *
  * `index.html` → `src/main.ts`: the kanban board and Stash/Capture, with
  * phone audio owned by the board (vanilla TS DOM with React form islands).
+ * `pages.html` → `src/pages/main.ts`: the light pages (`/thread`), each one
+ * address, which the daemon serves from this one document.
  * The vellum/parchment look is hand-rolled CSS.
  *
  * The board fetches the daemon with a *relative* base (`/api/v1/...`):
@@ -84,5 +86,6 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    rollupOptions: { input: { index: resolve(__dirname, 'index.html'), pages: resolve(__dirname, 'pages.html') } },
   },
 })

@@ -1,0 +1,13 @@
+import { postDaemonJson } from '../board/daemonApi.js'
+
+/** Where `go` took Rex: `went` is false, with place `none`, when the fiber has no live worker to show. */
+export interface GoAnswer { went: boolean; place: string }
+
+/**
+ * The one verb a page has for moving Rex: `POST /api/v1/go`, which the daemon
+ * routes to the fiber's owner. It shows the fiber's live worker in the Mac's
+ * Rex app and starts nothing.
+ */
+export function go(base: string, fiber: { uid: string; host: string }): Promise<GoAnswer> {
+  return postDaemonJson<GoAnswer>(base, '/api/v1/go', { fiber_id: fiber.uid, origin: fiber.host }, 'Go failed')
+}
