@@ -4,7 +4,7 @@ defmodule Shuttle.Test.EventFiles do
   the oracle the projections `Shuttle.EventStream` holds are pinned against.
   """
 
-  alias Shuttle.{Activity, EventStream, SentFiles}
+  alias Shuttle.{EventStream, SentFiles}
 
   @doc "Every event of `live <> \".1\"` and then of `live`, folded onto `acc`."
   def fold(live, acc, fun) do
@@ -23,12 +23,6 @@ defmodule Shuttle.Test.EventFiles do
       end
     end)
   end
-
-  @doc "The activity fold of both files."
-  def activity(live), do: fold(live, Activity.new_acc(), &Activity.fold_event(&2, &1))
-
-  @doc "`lines` folded onto an activity accumulator."
-  def activity_lines(acc, lines), do: fold_lines(lines, acc, &Activity.fold_event(&2, &1))
 
   @doc "The projected sent-file events of both files, oldest first."
   def sent_events(live),

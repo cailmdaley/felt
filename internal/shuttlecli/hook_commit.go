@@ -39,8 +39,7 @@ func (a *app) hookCommitCmd() *cobra.Command {
 		Long: `Reads the PostToolUse payload from stdin and, when the Bash call ran a
 git commit, appends one JSON line to the commit ledger (SHUTTLE_COMMITS_FILE,
 else $SHUTTLE_DATA_DIR/commits.jsonl, else ~/.shuttle/commits.jsonl) naming
-the commit and the session that made it. The board's Chronicle narrates work
-from that ledger.
+the commit and the session that made it.
 
 Writes only when the ledger's parent directory already exists — the daemon's
 state directory is the opt-in. An explicit SHUTTLE_COMMITS_FILE overrides that

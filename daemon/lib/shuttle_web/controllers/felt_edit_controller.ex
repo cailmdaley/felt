@@ -29,7 +29,7 @@ defmodule ShuttleWeb.FeltEditController do
       of everything below the frontmatter, which is felt's own semantics for
       the flag. The caller is expected to have the current body in hand and to
       be sending the whole of it back; `""` empties the body. There is no
-      append. The chronicle's era face writes an intention through this.
+      append.
 
   felt itself owns the validation (native-key guard, scalar-only, structured
   clobber refusal) and surfaces a loud non-zero exit, so the daemon does not

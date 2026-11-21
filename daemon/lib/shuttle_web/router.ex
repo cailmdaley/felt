@@ -80,7 +80,7 @@ defmodule ShuttleWeb.Router do
     post("/project-dir/resolve", ProjectDirController, :resolve)
     post("/felt-edit", FeltEditController, :create)
     post("/felt-nest", FeltNestController, :create)
-    # Body search across the record, for the Chronicle's search bar. The board
+    # Body search across the record, for the board's Find bar. The board
     # matches names and ids client-side off the feed it already holds; only the
     # BODY of every constitution needs the daemon, which is what this shells
     # `felt ls --body --has-field shuttle -s all` for. Local stores only.
@@ -155,20 +155,14 @@ defmodule ShuttleWeb.Router do
     # (Shuttle.RemoteTemporalRegistry) the same way /commits/composite does.
     get("/sent-files/all/composite", SentFilesController, :composite_all)
     get("/sent-files/all", SentFilesController, :show_all)
-    # The temporal read plane, HOST-scoped rather than owner-routed (see the
-    # controller): /activity buckets this host's events.jsonl per minute. A
-    # cross-host view fans out and merges.
-    get("/activity", ActivityController, :show)
     # The cross-host counterparts: each fans this host's live read together with
     # each remote's feed as Shuttle.RemoteTemporalRegistry holds it — fetched on
     # demand, behind a freshness gate — and reports per-origin freshness in the
     # same `origins` block the kanban composite serves. A disconnected remote's
     # history stays on screen, marked stale.
-    get("/activity/composite", ActivityController, :composite)
     get("/sessions/composite", SessionsController, :composite)
-    # Join rung 0 for the temporal views: the structural fiber↔session pairing
-    # this host recorded at dispatch / claim / resume. Host-scoped like
-    # /activity.
+    # The structural fiber↔session pairing this host recorded at dispatch /
+    # claim / resume. Host-scoped.
     get("/sessions", SessionsController, :show)
     # Every session on one host with transcript activity since a time, live or
     # ended; shells `shuttle sessions --since --local --json` on the host named

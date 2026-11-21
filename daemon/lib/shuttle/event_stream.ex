@@ -2,11 +2,9 @@ defmodule Shuttle.EventStream do
   @moduledoc """
   The one reader of this host's hook-event stream (`~/.shuttle/events.jsonl`)
   and its rotated sibling `events.jsonl.1`. It reads each line once, decodes it
-  once, and hands the decoded event to five pure projections it holds in
+  once, and hands the decoded event to four pure projections it holds in
   memory:
 
-    * `Shuttle.Activity` — the per-minute activity fold behind
-      `GET /api/v1/activity`;
     * `Shuttle.SentFiles` — the sent-file events behind `/api/v1/sent-files`;
     * `Shuttle.WaitingTracker` — explicit turn state per harness session UUID,
       stamped onto running cards as their `phase` and when it began;
@@ -42,8 +40,6 @@ defmodule Shuttle.EventStream do
   following, it ingests that file's bytes past the old offset (the lines
   written just before the rename) and then the new live file from its start:
 
-    * the activity fold keeps its spell and pairing state and drops what the
-      overwritten `.1` alone held (`Shuttle.Activity.drop_before/2`);
     * the sent-file events are kept as two segments, one per file, so after a
       rotation the old live segment becomes the rotated one and the segment
       the overwritten `.1` held is dropped — exactly what the two files hold;
@@ -57,7 +53,7 @@ defmodule Shuttle.EventStream do
 
   ## Reads
 
-  `slice/3`, `sent_events/1` and `board_records/1` follow the file before they
+  `sent_events/1` and `board_records/1` follow the file before they
   answer, so a read sees everything written before the request with no polling
   latency; between ticks that costs two `stat`s. They are the only way into the
   projections: nothing else reads the stream, so a stream that is down makes
@@ -76,7 +72,7 @@ defmodule Shuttle.EventStream do
 
   require Logger
 
-  alias Shuttle.{Activity, Board, FileTail, SentFiles, WaitingTracker, SessionBinding}
+  alias Shuttle.{Board, FileTail, SentFiles, WaitingTracker, SessionBinding}
 
   @poll_interval_ms 1_000
   # A catch-up read that lands during a reseed waits for it; the seed of a
@@ -101,7 +97,6 @@ defmodule Shuttle.EventStream do
       :clock,
       :seed_hook,
       :inode,
-      :activity,
       offset: 0,
       sent_rotated: [],
       sent_live: [],
@@ -138,11 +133,6 @@ defmodule Shuttle.EventStream do
   @doc "The rotated sibling of `live`, named exactly as the writer names it."
   @spec rotated(Path.t()) :: Path.t()
   def rotated(live), do: live <> ".1"
-
-  @doc "The activity buckets for the canonical window of `from_ms..to_ms`, after catching up."
-  @spec slice(GenServer.server(), integer(), integer()) :: [Activity.bucket()]
-  def slice(server \\ __MODULE__, from_ms, to_ms),
-    do: call(server, {:slice, from_ms, to_ms})
 
   @doc "The sent-file events of both files, oldest first, after catching up."
   @spec sent_events(GenServer.server()) :: [SentFiles.event()]
@@ -251,11 +241,6 @@ defmodule Shuttle.EventStream do
   end
 
   @impl true
-  def handle_call({:slice, from_ms, to_ms}, _from, state) do
-    state = state |> follow() |> publish()
-    {:reply, Activity.slice(state.activity, from_ms, to_ms), state}
-  end
-
   def handle_call(:sent_events, _from, state) do
     state = state |> follow() |> publish()
     {:reply, Enum.reverse(state.sent_rotated, Enum.reverse(state.sent_live)), state}
@@ -308,8 +293,7 @@ defmodule Shuttle.EventStream do
 
     empty = %{
       state
-      | activity: Activity.new_acc(),
-        sent_rotated: [],
+      | sent_rotated: [],
         sent_live: [],
         board_rotated: %{},
         board_live: %{},
@@ -416,8 +400,7 @@ defmodule Shuttle.EventStream do
 
       state = %{
         state
-        | activity: Activity.drop_before(state.activity, Activity.first_timestamp(rotated)),
-          sent_rotated: state.sent_live,
+        | sent_rotated: state.sent_live,
           sent_live: [],
           board_rotated: state.board_live,
           board_live: %{}
@@ -461,8 +444,7 @@ defmodule Shuttle.EventStream do
 
     %{
       state
-      | activity: Activity.fold_event(state.activity, event),
-        sent_live: Enum.reverse(SentFiles.project(event), state.sent_live),
+      | sent_live: Enum.reverse(SentFiles.project(event), state.sent_live),
         board_live: Board.fold(state.board_live, event),
         binding: binding
     }

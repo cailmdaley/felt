@@ -12,7 +12,7 @@ defmodule Shuttle.EventStreamTest do
   """
   use ExUnit.Case, async: true
 
-  alias Shuttle.{Activity, EventStream}
+  alias Shuttle.EventStream
   alias Shuttle.Test.EventFiles
 
   @t0 1_770_000_000_000
@@ -47,14 +47,7 @@ defmodule Shuttle.EventStreamTest do
     name
   end
 
-  defp all(name) do
-    EventStream.slice(name, @t0 - 1_000 * @m, @t0 + 1_000 * @m)
-  end
-
-  defp fresh(path),
-    do: Activity.slice(EventFiles.activity(path), @t0 - 1_000 * @m, @t0 + 1_000 * @m)
-
-  defp kinds(buckets), do: Enum.map(buckets, &{div(&1.m - @t0, @m), &1.k, &1.n})
+  defp all(name), do: EventStream.sent_events(name)
 
   test "restart after two rotations leaves an idle-only suffix uncertain", %{path: path} do
     append(path, [ev("stop", 0, %{"backgroundTasks" => 1})])
@@ -143,139 +136,6 @@ defmodule Shuttle.EventStreamTest do
     assert EventStream.catch_up_session_phase("unknown-session", :missing_event_stream) == nil
   end
 
-  test "seeds from the rotated file then the live one, and matches a fresh fold", %{path: path} do
-    append(path <> ".1", [ev("notification", 0), ev("pre_tool_use", 1)])
-    append(path, [ev("notification", 2), ev("post_tool_use", 5)])
-    name = start(path)
-
-    assert all(name) == fresh(path)
-
-    assert kinds(all(name)) == [
-             {0, "notify", 1},
-             {1, "agent", 1},
-             {2, "agent", 1},
-             {2, "notify", 1},
-             {3, "agent", 1},
-             {4, "agent", 1},
-             {5, "agent", 1}
-           ]
-  end
-
-  test "a read catches up on appended lines, and leaves a partial line for later", %{path: path} do
-    append(path, [ev("stop", 0)])
-    name = start(path)
-    assert kinds(all(name)) == [{0, "agent", 1}, {0, "reply", 1}]
-
-    append(path, [ev("user_prompt_submit", 1)])
-    File.write!(path, String.slice(ev("user_prompt_submit", 2), 0, 20), [:append])
-    assert kinds(all(name)) == [{0, "agent", 1}, {0, "reply", 1}, {1, "attention", 1}]
-
-    File.write!(path, String.slice(ev("user_prompt_submit", 2), 20..-1//1) <> "\n", [:append])
-    assert {2, "attention", 1} in kinds(all(name))
-    assert all(name) == fresh(path)
-  end
-
-  test "a shrink in place rebuilds from the files", %{path: path} do
-    append(path, [ev("stop", 0), ev("stop", 1)])
-    name = start(path)
-    assert length(all(name)) == 4
-
-    File.write!(path, ev("user_prompt_submit", 7) <> "\n")
-    assert kinds(all(name)) == [{7, "attention", 1}]
-  end
-
-  test "rotation continues the fold: a spell and a tool call straddle the rename",
-       %{path: path} do
-    gamma = %{"tmuxSession" => "gamma", "sessionId" => "g1"}
-    append(path, [ev("notification", 0), ev("pre_tool_use", 1, gamma)])
-    name = start(path)
-    assert kinds(all(name)) == [{0, "notify", 1}, {1, "agent", 1}]
-
-    # Written after the follower last read, then rotated away before it reads
-    # again: the drain of the rotated file's tail must pick it up.
-    append(path, [ev("notification", 2, %{"tmuxSession" => "beta"})])
-    File.rename!(path, path <> ".1")
-
-    # The new live file repeats alpha's ask (the same spell, so no mark) and
-    # returns gamma's tool call, opened before the rotation.
-    append(path, [ev("notification", 3), ev("post_tool_use", 6, gamma)])
-
-    buckets = all(name)
-    assert buckets == fresh(path)
-
-    assert Enum.map(buckets, &{div(&1.m - @t0, @m), &1.s, &1.k}) == [
-             {0, @tmux, "notify"},
-             {1, "gamma", "agent"},
-             {2, "beta", "notify"},
-             {2, "gamma", "agent"},
-             {3, "gamma", "agent"},
-             {4, "gamma", "agent"},
-             {5, "gamma", "agent"},
-             {6, "gamma", "agent"}
-           ]
-  end
-
-  test "a second rotation drops what the overwritten file held, and keeps the spell",
-       %{path: path} do
-    append(path, [ev("notification", 0), ev("stop", 1, %{"tmuxSession" => "beta"})])
-    name = start(path)
-
-    File.rename!(path, path <> ".1")
-    append(path, [ev("stop", 10, %{"tmuxSession" => "beta"})])
-    assert length(all(name)) == 5
-
-    File.rename!(path, path <> ".1")
-    append(path, [ev("notification", 20), ev("stop", 21, %{"tmuxSession" => "beta"})])
-
-    # Minutes 0 and 1 lived only in the overwritten file. Alpha's spell from
-    # minute 0 is still open, so minute 20 is a repeat, not an onset.
-    assert Enum.map(all(name), &{div(&1.m - @t0, @m), &1.k}) == [
-             {10, "agent"},
-             {10, "reply"},
-             {21, "agent"},
-             {21, "reply"}
-           ]
-  end
-
-  test "a rotation racing the seed is not counted twice", %{path: path} do
-    append(path <> ".1", [ev("stop", 0, %{"tmuxSession" => "a"})])
-    append(path, Enum.map(1..5, &ev("stop", &1, %{"tmuxSession" => "b"})))
-
-    # Rotate once, between the seed's read of the live file and its fold of
-    # `.1`, and give the new live file lines of its own.
-    once = :counters.new(1, [])
-
-    hook = fn ->
-      if :counters.get(once, 1) == 0 do
-        :counters.add(once, 1, 1)
-        File.rename!(path, path <> ".1")
-        append(path, Enum.map(6..7, &ev("stop", &1, %{"tmuxSession" => "c"})))
-      end
-    end
-
-    name = :"event_stream_#{System.unique_integer([:positive])}"
-
-    start_supervised!(
-      {EventStream, events_file: path, poll_interval_ms: 3_600_000, name: name, seed_hook: hook}
-    )
-
-    assert all(name) == fresh(path)
-    assert :counters.get(once, 1) == 1
-    assert Enum.all?(all(name), &(&1.n == 1))
-  end
-
-  test "a replacement it cannot account for rebuilds from the files", %{path: path} do
-    append(path, [ev("stop", 0)])
-    name = start(path)
-    assert length(all(name)) == 2
-
-    # A new live file whose predecessor did not become events.jsonl.1. It is
-    # written beside the old one first, so the two cannot share an inode.
-    append(path <> ".new", [ev("user_prompt_submit", 4)])
-    File.rename!(path <> ".new", path)
-    assert kinds(all(name)) == [{4, "attention", 1}]
-  end
-
   # ── Every projection off the same pass ──
 
   defp waiting(name) do
@@ -284,16 +144,11 @@ defmodule Shuttle.EventStreamTest do
     |> Map.new(fn {session, %{phase: phase}} -> {session, phase} end)
   end
 
-  # The activity buckets of the ten minutes before `now`, after catching up.
-  defp recent(name, now) do
-    EventStream.slice(name, now - 10 * @m, now)
-  end
-
   defp sent(name) do
     name |> EventStream.sent_events() |> Enum.flat_map(& &1.paths)
   end
 
-  test "one pass seeds all three projections from both files", %{path: path} do
+  test "one pass seeds waiting and sent projections from both files", %{path: path} do
     now = System.system_time(:millisecond)
     shuttle = "w-01KTS261GJMMRDRHS2QDMEFV3K-shuttle"
     at = fn minute -> %{"timestamp" => now + minute * @m, "tmuxSession" => shuttle} end
@@ -319,8 +174,6 @@ defmodule Shuttle.EventStreamTest do
     assert waiting(name) == %{"s1" => "waiting", "other-session" => "attention"}
 
     assert sent(name) == ["/tmp/a.html"]
-
-    assert Enum.map(recent(name, now), & &1.k) == ["agent", "reply", "notify"]
   end
 
   test "a rotation carries the waiting map and the sent trail; a second one drops the trail",
@@ -533,7 +386,7 @@ defmodule Shuttle.EventStreamTest do
       }) <> "\n"
     )
 
-    assert Enum.map(recent(name, now), & &1.k) == ["agent", "reply"]
+    _ = all(name)
     assert waiting(name) == %{a => "attention", b => "waiting"}
   end
 end

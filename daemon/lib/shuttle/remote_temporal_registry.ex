@@ -100,16 +100,10 @@ defmodule Shuttle.RemoteTemporalRegistry do
   # See the moduledoc's staleness note.
   @stale_after_gates 10
 
-  # The trailing window activity is held over, and the boundary its upper
-  # bound is ceiled to.
-  @window_days 14
-  @window_ms @window_days * 24 * 60 * 60 * 1_000
-  @window_quantum_ms 5 * 60_000
-
-  @feeds [:activity, :sessions, :commits, :sent_files, :board]
+  @feeds [:sessions, :commits, :sent_files, :board]
 
   @typedoc "The feeds a composite can ask for."
-  @type feed :: :activity | :sessions | :commits | :sent_files | :board
+  @type feed :: :sessions | :commits | :sent_files | :board
 
   @typedoc """
   One remote's view of one feed, as `entries/2` returns it. `window` is the
@@ -160,8 +154,6 @@ defmodule Shuttle.RemoteTemporalRegistry do
       — as `Shuttle.RemoteFiberRegistry.start_link/1`.
     * `:store_dir` — directory the per-feed JSON caches live under. Defaults to
       `$SHUTTLE_DATA_DIR/remote-temporal` (`~/.shuttle/remote-temporal`).
-    * `:window_ms` — trailing window width for activity. Defaults to
-      #{@window_days} days.
     * `:freshness_ms` — the freshness gate. Defaults to #{@freshness_ms} ms.
     * `:wait_ms` — how long a request waits for its fetches. Defaults to
       #{@wait_ms} ms.
@@ -218,18 +210,6 @@ defmodule Shuttle.RemoteTemporalRegistry do
   def refresh_now(server),
     do: GenServer.call(server, :refresh_now, RegistryCommon.read_timeout_ms())
 
-  @doc """
-  The activity window a fetch made at `now` asks for: `to_ms` is `now` ceiled
-  to a #{div(@window_quantum_ms, 60_000)}-minute boundary and `from_ms` is
-  `width_ms` before it. Public so the quantization is testable on its own.
-  """
-  @spec activity_window(DateTime.t(), pos_integer()) :: {integer(), integer()}
-  def activity_window(%DateTime{} = now, width_ms \\ @window_ms) do
-    now_ms = DateTime.to_unix(now, :millisecond)
-    to_ms = -Integer.floor_div(-now_ms, @window_quantum_ms) * @window_quantum_ms
-    {to_ms - width_ms, to_ms}
-  end
-
   # ── Server ──
 
   @impl true
@@ -246,7 +226,6 @@ defmodule Shuttle.RemoteTemporalRegistry do
       task_supervisor: Keyword.get(opts, :task_supervisor, Shuttle.TaskSupervisor),
       request_timeout_ms: Keyword.get(opts, :request_timeout_ms, @default_request_timeout_ms),
       store_dir: store_dir,
-      window_ms: Keyword.get(opts, :window_ms, @window_ms),
       freshness_ms: Keyword.get(opts, :freshness_ms, @freshness_ms),
       wait_ms: Keyword.get(opts, :wait_ms, @wait_ms),
       clock: Keyword.get(opts, :clock, &DateTime.utc_now/0),
@@ -433,18 +412,13 @@ defmodule Shuttle.RemoteTemporalRegistry do
 
   # ── Fetching ──
 
-  defp fetch_window(%State{window_ms: width} = state, :activity),
-    do: activity_window(now(state), width)
-
   defp fetch_window(_state, _feed), do: nil
 
-  defp url(remote, :activity, {from_ms, to_ms}), do: Remote.activity_url(remote, from_ms, to_ms)
   defp url(remote, :sessions, _window), do: Remote.sessions_url(remote)
   defp url(remote, :commits, _window), do: Remote.commits_url(remote)
   defp url(remote, :sent_files, _window), do: Remote.sent_files_all_url(remote)
   defp url(remote, :board, _window), do: Remote.board_url(remote)
 
-  defp list_key(:activity), do: "buckets"
   defp list_key(:sessions), do: "records"
   defp list_key(:commits), do: "records"
   defp list_key(:sent_files), do: "files"

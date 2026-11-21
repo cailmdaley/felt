@@ -90,7 +90,6 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
     {:ok, dir: dir}
   end
 
-  @bucket %{"m" => 1_770_000_000_000, "s" => nil, "cwd" => "/repo", "k" => "agent", "n" => 3}
   @record %{"fiber" => "work/paper", "host" => "candide", "at" => 1_770_000_000_000}
   @ledgered_commit %{
     "at" => 1_770_000_000_000,
@@ -111,10 +110,9 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
     "uid" => "01KTS261GJMMRDRHS2QDMEFV3K"
   }
 
-  @paths ~w(/api/v1/activity /api/v1/sessions /api/v1/commits /api/v1/sent-files/all)
+  @paths ~w(/api/v1/sessions /api/v1/commits /api/v1/sent-files/all)
 
   defp script(:full) do
-    MockClient.set("/api/v1/activity", {:ok, Jason.encode!(%{"buckets" => [@bucket]})})
     MockClient.set("/api/v1/sessions", {:ok, Jason.encode!(%{"records" => [@record]})})
     MockClient.set("/api/v1/commits", {:ok, Jason.encode!(%{"records" => [@ledgered_commit]})})
     MockClient.set("/api/v1/sent-files/all", {:ok, Jason.encode!(%{"files" => [@sent_file]})})
@@ -288,7 +286,6 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
     test "each feed's list key is decoded into items", %{dir: dir} do
       {_pid, name} = start_registry(dir)
 
-      assert candide(name, :activity).items == [@bucket]
       assert candide(name, :sessions).items == [@record]
       assert candide(name, :commits).items == [@ledgered_commit]
       assert candide(name, :sent_files).items == [@sent_file]
@@ -336,10 +333,10 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
     @tag :timing
     test "a request waits a bounded time, then serves what is held; the fetch lands later",
          %{dir: dir} do
-      MockClient.hold("/api/v1/activity")
+      MockClient.hold("/api/v1/sessions")
       {_pid, name} = start_registry(dir, wait_ms: 30)
 
-      {elapsed_us, early} = :timer.tc(fn -> candide(name, :activity) end)
+      {elapsed_us, early} = :timer.tc(fn -> candide(name, :sessions) end)
 
       assert elapsed_us < 2_500_000
       assert early.items == []
@@ -349,43 +346,9 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
       send(fetcher, :release)
 
       # Still inside the gate, so no second fetch: the late result is served.
-      assert wait_until(fn -> candide(name, :activity).items == [@bucket] end)
-      refute candide(name, :activity).stale
-      assert MockClient.calls("/api/v1/activity") == 1
-    end
-  end
-
-  describe "the activity window" do
-    test "ends on a five-minute boundary at or after now and spans fourteen days" do
-      width = 14 * 24 * 60 * 60 * 1_000
-      quantum = 5 * 60_000
-
-      now = ~U[2026-09-28 10:07:31.250Z]
-      {from_ms, to_ms} = RemoteTemporalRegistry.activity_window(now)
-      assert to_ms == DateTime.to_unix(~U[2026-09-28 10:10:00Z], :millisecond)
-      assert to_ms - from_ms == width
-      assert rem(to_ms, quantum) == 0
-
-      on_boundary = ~U[2026-09-28 10:05:00.000Z]
-      assert {_, to_ms} = RemoteTemporalRegistry.activity_window(on_boundary)
-      assert to_ms == DateTime.to_unix(on_boundary, :millisecond)
-
-      # Every instant inside one quantum asks for the same window.
-      assert RemoteTemporalRegistry.activity_window(~U[2026-09-28 10:05:00.001Z]) ==
-               RemoteTemporalRegistry.activity_window(~U[2026-09-28 10:09:59.999Z])
-    end
-
-    test "is what the remote is asked for, and what the entry reports covering", %{dir: dir} do
-      {_pid, name} = start_registry(dir)
-      view = candide(name, :activity)
-
-      [url] = Enum.filter(MockClient.log(), &(URI.parse(&1).path == "/api/v1/activity"))
-      query = url |> URI.parse() |> Map.fetch!(:query) |> URI.decode_query()
-      asked = {String.to_integer(query["from_ms"]), String.to_integer(query["to_ms"])}
-
-      assert view.window == asked
-      assert rem(elem(asked, 1), 5 * 60_000) == 0
-      assert elem(asked, 1) >= System.system_time(:millisecond)
+      assert wait_until(fn -> candide(name, :sessions).items == [@record] end)
+      refute candide(name, :sessions).stale
+      assert MockClient.calls("/api/v1/sessions") == 1
     end
   end
 
@@ -410,7 +373,7 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
       MockClient.set("/api/v1/commits", {:error, :timeout})
       {_pid, name} = start_registry(dir)
 
-      assert %{items: [@bucket], last_error: nil, stale: false} = candide(name, :activity)
+      assert %{items: [@record], last_error: nil, stale: false} = candide(name, :sessions)
       assert %{items: [], last_error: :timeout, stale: true} = candide(name, :commits)
     end
 
@@ -418,7 +381,7 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
       MockClient.reset()
       {_pid, name} = start_registry(dir)
 
-      view = candide(name, :activity)
+      view = candide(name, :sessions)
       assert view.last_polled_at == nil
       assert view.stale
     end
@@ -441,20 +404,20 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
       MockClient.reset()
       {_pid, name} = start_registry(dir)
 
-      for _ <- 1..3, do: candide(name, :activity)
-      assert MockClient.calls("/api/v1/activity") == 1
+      for _ <- 1..3, do: candide(name, :sessions)
+      assert MockClient.calls("/api/v1/sessions") == 1
     end
 
     test "an envelope without the list key is zero items, not a failure", %{dir: dir} do
-      MockClient.set("/api/v1/activity", {:ok, Jason.encode!(%{"error" => "nope"})})
+      MockClient.set("/api/v1/sessions", {:ok, Jason.encode!(%{"error" => "nope"})})
       {_pid, name} = start_registry(dir)
 
-      assert %{items: [], last_error: nil} = candide(name, :activity)
+      assert %{items: [], last_error: nil} = candide(name, :sessions)
     end
 
     test "no remotes configured is an empty map, not a crash", %{dir: dir} do
       {_pid, name} = start_registry(dir, remotes: [])
-      assert RemoteTemporalRegistry.entries(name, :activity) == %{}
+      assert RemoteTemporalRegistry.entries(name, :sessions) == %{}
       assert MockClient.log() == []
     end
   end
@@ -477,15 +440,15 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
          %{dir: dir} do
       {_pid, name} = start_registry(dir)
       :ok = RemoteTemporalRegistry.refresh_now(name)
-      polled_at = candide(name, :activity).last_polled_at
+      polled_at = candide(name, :sessions).last_polled_at
       stop_supervised!(name)
 
       # The remote is gone entirely; the fresh registry has only the disk.
       MockClient.reset()
       {_pid, restarted} = start_registry(dir)
 
-      view = candide(restarted, :activity)
-      assert view.items == [@bucket]
+      view = candide(restarted, :sessions)
+      assert view.items == [@record]
       assert view.last_error == :not_set
       # Freshness is INHERITED, not reset: the entry reads "last seen at T",
       # where T is when the data was actually fetched.
@@ -498,7 +461,7 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
       :ok = RemoteTemporalRegistry.refresh_now(name)
       stop_supervised!(name)
 
-      path = Path.join([dir, "activity", "candide.json"])
+      path = Path.join([dir, "sessions", "candide.json"])
       cached = path |> File.read!() |> Jason.decode!()
       long_ago = DateTime.utc_now() |> DateTime.add(-3_600, :second) |> DateTime.to_iso8601()
       File.write!(path, Jason.encode!(%{cached | "last_polled_at" => long_ago}))
@@ -506,8 +469,8 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
       MockClient.reset()
       {_pid, restarted} = start_registry(dir)
 
-      view = candide(restarted, :activity)
-      assert view.items == [@bucket]
+      view = candide(restarted, :sessions)
+      assert view.items == [@record]
       assert view.stale
     end
 
@@ -528,9 +491,8 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
       {_pid, name} = start_registry(dir)
       :ok = RemoteTemporalRegistry.refresh_now(name)
 
-      decoded = Path.join([dir, "activity", "candide.json"]) |> File.read!() |> Jason.decode!()
-      assert decoded["items"] == [@bucket]
-      assert [_from, _to] = decoded["window"]
+      decoded = Path.join([dir, "sessions", "candide.json"]) |> File.read!() |> Jason.decode!()
+      assert decoded["items"] == [@record]
       assert is_binary(decoded["etag"])
       # Fleet config is authoritative at boot and is deliberately not persisted.
       refute Map.has_key?(decoded, "remote")
@@ -540,13 +502,13 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
     end
 
     test "a corrupt cache file degrades to an empty feed", %{dir: dir} do
-      File.mkdir_p!(Path.join(dir, "activity"))
-      File.write!(Path.join([dir, "activity", "candide.json"]), "{not json")
+      File.mkdir_p!(Path.join(dir, "sessions"))
+      File.write!(Path.join([dir, "sessions", "candide.json"]), "{not json")
 
       MockClient.reset()
       {_pid, name} = start_registry(dir)
 
-      view = candide(name, :activity)
+      view = candide(name, :sessions)
       assert view.items == []
       assert view.stale
     end
