@@ -51,6 +51,15 @@ describe('workspace file viewer hooks', () => {
     expect(source.searchParams.get('origin')).toBe('host-b')
     disposeFileViewer(viewer)
   })
+  it('renders a Markdown file\'s prose without its frontmatter', () => {
+    const viewer = buildFileViewer('', '/store/.felt/work/task/task.md', 'host-b')
+    watch.content!('---\nname: Task\nstatus: closed\ntempered: true\n---\n\n## Desired State\n\nThe cut is chosen.\n')
+    expect([...viewer.querySelectorAll('h2, p, hr')].map(each => each.textContent)).toStrictEqual(['Desired State', 'The cut is chosen.'])
+    // A rule later in the prose stays a rule.
+    watch.content!('Above.\n\n---\n\nBelow.\n')
+    expect(viewer.querySelectorAll('hr')).toHaveLength(1)
+    disposeFileViewer(viewer)
+  })
   it('reloads a rewritten change through the live watcher with a new review identity', async () => {
     const dispose = vi.fn()
     changeRenderer.mount.mockImplementation((root: HTMLElement, bundle: { title: string }) => {

@@ -975,7 +975,8 @@ function buildTextViewer(
       const scrollTop = hasContent ? wrap.scrollTop : 0
       if (MARKDOWN_EXTS.has(ext)) {
         pane.classList.add('kbn-detail-prose')
-        pane.innerHTML = renderMarkdown(text, { basePath: fullPath.slice(0, fullPath.lastIndexOf('/')) || '/', originId })
+        // A leading YAML frontmatter block (a fiber's) is the file's metadata, not its prose.
+        pane.innerHTML = renderMarkdown(text.replace(/^---\r?\n[\s\S]*?\r?\n---[ \t]*(\r?\n|$)/, ''), { basePath: fullPath.slice(0, fullPath.lastIndexOf('/')) || '/', originId })
       } else {
         pane.innerHTML =
           `<pre class="md-code-block language-${escapeHtml(ext || 'plaintext')}">` +
