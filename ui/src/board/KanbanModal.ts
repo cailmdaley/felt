@@ -282,7 +282,6 @@ export class KanbanModal {
       threadIndex: () => threadIndexFor(this.lastResponse),
       origin: () => this.activeViewId === 'desk' ? 'Desk' : 'Channels',
       onVisibility: (active) => this.showWorkspace(active),
-      onSight: card => this.voice.see(card),
       onReturnCard: card => {
         this.workspaceReturnCard = { id: card.id, origin: card.originId }
         this.workspaceReturnFocus = null
@@ -301,11 +300,6 @@ export class KanbanModal {
       onRest: card => this.rest(card),
       onExpand: (expanded) => { this.container?.classList.toggle('kbn-reader-expanded', expanded); this.placeReader() },
     })
-    this.voice.onRex = ({ fiber_id: id, origin }) => {
-      this.workspace?.rexAt(id, origin)
-      if (!this.workspace?.isActive && (this.activeView?.followRex?.(id, origin) || this.activeView?.reveal?.(id, origin))) return
-      this.workspace?.follow(id, origin)
-    }
     this.voice.onOpen = ({ fiber_id: id, origin, page }) => { void this.workspace?.openFiber(id, origin, page, true) }
     // What waits on the human moves the Desk as much as the feed does; a line the board names before its record is read is read at once.
     this.stopBoard = this.workspace.board.subscribe(() => {

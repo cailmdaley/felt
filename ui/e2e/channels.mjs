@@ -361,9 +361,6 @@ try {
       })
     }))
     await atFoot()
-    // Rex comes to the chair, whose newest line is the stream's: the board marks it, and what the chair says next is in sight.
-    await page.evaluate(() => window.__harness.modal.voice.onRex({ fiber_id: 'cmbx', origin: window.__harness.MOCK_FEED.fibers[0].origin }))
-    await page.locator('.kbn-ch-item[data-marked][data-fiber="cmbx"]').waitFor()
     await post('The covariance review is in: nothing to change before the joint fit.')
     await page.locator('.kbn-ch-stream').getByText('The covariance review is in').waitFor()
     await atFoot()

@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url'
 import { launchBrowser } from './browser.mjs'
 import { frames, layoutShift, settleTransitions, unexpected } from './layoutShift.mjs'
 import { registerMapViewJourneys } from './mapViews.mjs'
-import { registerChannelsBackJourneys, registerNavigationJourneys, registerViewFullScreenJourneys, registerRexFollowJourneys, registerPostTapestryJourneys } from './navBack.mjs'
+import { registerChannelsBackJourneys, registerNavigationJourneys, registerViewFullScreenJourneys, registerPostTapestryJourneys } from './navBack.mjs'
 import { registerLivingReportJourneys } from './livingReport.mjs'
 import { registerHeaderBarJourneys } from './headerBar.mjs'
 import { familySends, familyTree, showFile } from './familyNav.mjs'
@@ -2458,7 +2458,6 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
 registerNavigationJourneys(test)
 registerChannelsBackJourneys(test)
 registerViewFullScreenJourneys(test)
-registerRexFollowJourneys(test)
 registerPostTapestryJourneys(test)
 test('A file thumbnail shows an audio file\'s duration, a video\'s paused first frame and a PDF\'s face', async p => {
   for (const file of ['tone.mp3', 'test.mp4', 'response.pdf']) assert.ok(await p.evaluate(file => !!window.__harness.thumbnail(file), file), `${file} is a fixture send`)

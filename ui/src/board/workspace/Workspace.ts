@@ -14,8 +14,6 @@ import { fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
 import type { DeskPlacement } from '../deskOrdering.js'
 import { head, RESOURCE_PRIORITY } from '../documentResources.js'
 import { documentActivity, familyKey, fiberKey, isBaked, isDrawn, leadReceipt, buildChannel, linkedFile, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
-import { conversationDevice } from '../conversationOpening.js'
-import { selectWorker } from '../sessionHistory.js'
 import { buildFiberProse } from './FiberProse.js'
 import { bindConstitutionMentions } from './bodyLinks.js'
 import { frameBridge, onFramePopped } from './DocumentBridge.js'
@@ -36,7 +34,7 @@ import type { MapFile } from '../family/model.js'
 import { FamilyActivity } from './familyActivity.js'
 import { markSeen, unseenSince } from './DocumentSeen.js'
 import { FiberSends } from '../fiberSends.js'
-import { constitutionFor, type BoardOpen } from '../voice.js'
+import { type BoardOpen } from '../voice.js'
 import { parseRoute, viewOfHash, WorkspaceHistory, type WorkspaceOriginView, type WorkspaceRoute } from './route.js'
 import { ChannelThemes } from './ChannelThemes.js'
 import { changeReviewTarget } from './changeReviewTarget.js'
@@ -54,8 +52,6 @@ export interface WorkspaceOptions {
   deskPlacement?(card: KanbanCard): DeskPlacement | undefined
   origin(): string
   onVisibility(active: boolean): void
-  /** The constitution the board looks at, or none: voice follows it (`Workspace.look`). */
-  onSight?(card: KanbanCard | null): void
   onReturnCard?(card: KanbanCard): void
   onEscapeHome?(): void
   /** A history entry addressed a board view or channel origin; switch to it without pushing. */
@@ -81,11 +77,6 @@ export interface WorkspaceOptions {
   /** The fleet's sent files; a workspace without one reads its own. */
   sends?: FiberSends
 }
-/** Rex moves at most once in this span; looks within it wait, and only the last of them moves Rex. */
-const REX_HOLD_MS = 350
-/** A look's identity: the constitution and the worker it has, so a worker that starts later is still reached. */
-const rexKey = (card: KanbanCard | null): string =>
-  card ? [card.originId, card.uid ?? card.id, card.shuttleHost ?? '', card.tmuxSession ?? ''].join('\u0000') : ''
 interface ChannelState {
   card: KanbanCard
   channel: Channel
@@ -149,12 +140,6 @@ export class Workspace {
   private readonly mentions: ReturnType<typeof bindConstitutionMentions>
   private timer: number | null = null
   private disposed = false
-  /** What the board last looked at, by its worker, and whether Rex moved there. */
-  private looked: { key: string; moved: Promise<boolean> } = { key: '', moved: Promise.resolve(false) }
-  /** A Rex move waiting out the hold after the last one, and how to settle its answer if a later look supersedes it. */
-  private rexHold: { timer: number; resolve(moved: boolean): void } | null = null
-  /** The last move posted to Rex: when, and to which look. */
-  private rexMoved: { at: number; key: string; moved: Promise<boolean> } = { at: -Infinity, key: '', moved: Promise.resolve(false) }
   private routeEpoch = 0
   /** A route applied now is not a click: the board's load, or a session asking for a page. It moves neither Rex nor voice. */
   private quiet = false
@@ -693,64 +678,13 @@ export class Workspace {
     }
     return page
   }
-  /**
-   * The board looks at `card`, or at no fiber: the one act every surface that
-   * changes what is looked at goes through. Its constitution is the target:
-   * voice follows it, and on the desktop Rex moves quietly to the window its
-   * live worker already has. Nothing opens, is created or resumed, so a target
-   * without a live worker leaves Rex be; opening is `c` or Open in Rex
-   * (`Dock.openConversation`). Looking again at the same target moves nothing;
-   * looks in quick succession, like paging with `j`, move Rex once, to the
-   * last of them; and Rex is left alone while the board lacks the keyboard.
-   * Resolves true if Rex moved.
-   */
-  look(card: KanbanCard | null): Promise<boolean> {
-    const target = card && constitutionFor(this.live(card), this.opts.cards())
-    this.opts.onSight?.(target)
-    const key = rexKey(target)
-    if (key === this.looked.key) return this.looked.moved
-    this.dropRexHold()
-    if (key === this.rexMoved.key && Date.now() - this.rexMoved.at < REX_HOLD_MS) {
-      this.looked = { key, moved: this.rexMoved.moved }
-      return this.looked.moved
-    }
-    if (!target?.tmuxSession || !conversationDevice().desktop) {
-      this.looked = { key, moved: Promise.resolve(false) }
-      return this.looked.moved
-    }
-    // Rex is the human's while the board is behind it: a look without the keyboard moves nothing.
-    if (!document.hasFocus()) {
-      this.looked = { key: '', moved: Promise.resolve(false) }
-      return this.looked.moved
-    }
-    const { tmuxSession, shuttleHost } = target
-    const move = (): Promise<boolean> => {
-      const moved = selectWorker(this.opts.shuttleBase, tmuxSession, shuttleHost)
-      this.rexMoved = { at: Date.now(), key, moved }
-      return moved
-    }
-    const wait = this.rexMoved.at + REX_HOLD_MS - Date.now()
-    const moved = wait <= 0 ? move() : new Promise<boolean>(resolve => {
-      this.rexHold = { resolve, timer: window.setTimeout(() => { this.rexHold = null; resolve(move()) }, wait) }
-    })
-    this.looked = { key, moved }
-    return moved
+  /** No-op: the board does not steer Rex or voice. */
+  look(_card: KanbanCard | null): Promise<boolean> {
+    return Promise.resolve(false)
   }
   /** The board's current copy of a card a surface drew earlier: its worker may have started or stopped since. */
   private live(card: KanbanCard): KanbanCard {
     return cardNamed(this.opts.cards(), card.uid ?? card.id, card.originId) ?? card
-  }
-  /** A later look supersedes a move still waiting out its hold: it never posts, and answers that Rex did not move. */
-  private dropRexHold(): void {
-    if (!this.rexHold) return
-    window.clearTimeout(this.rexHold.timer)
-    this.rexHold.resolve(false)
-    this.rexHold = null
-  }
-  /** Rex moved itself to this fiber's worker: looking at it now moves nothing. */
-  rexAt(id: string, owner: string): void {
-    const card = cardNamed(this.opts.cards(), id, owner)
-    if (card) this.looked = { key: rexKey(constitutionFor(card, this.opts.cards())), moved: Promise.resolve(true) }
   }
   private family(): HTMLElement {
     const state = this.current!
@@ -967,17 +901,6 @@ export class Workspace {
       if (this.current === state && this.isActive && !this.disposed) { this.rebuild(state); this.show(state, false) }
     })
   }
-  /**
-   * Rex's focus moved to a fiber: a page of the fiber's own channel stands;
-   * otherwise its view opens. Rex is already there, so the look moves nothing.
-   */
-  follow(id: string, owner: string): void {
-    const shown = this.current?.card
-    if (this.isActive && shown && shown.originId === owner && (shown.uid === id || shown.id === id)) return
-    const known = cardNamed(this.opts.cards(), id, owner)
-    if (known) this.open(known, this.origin, this.familyDocument(known))
-    else void this.openFiber(id, owner)
-  }
   /** Runs `act` with its routes applied quietly. */
   private quietly(act: () => void): void {
     this.quiet = true
@@ -1176,7 +1099,6 @@ export class Workspace {
   private readonly visibility = (): void => { if (document.hidden) this.stopTimer(); else if (this.isActive) this.startTimer() }
   dispose(): void {
     this.mentions.dispose()
-    this.dropRexHold()
     this.disposed = true
     this.routeEpoch++
     this.stopTimer()

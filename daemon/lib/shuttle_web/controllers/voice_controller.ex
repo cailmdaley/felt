@@ -11,18 +11,14 @@ defmodule ShuttleWeb.VoiceController do
 
   @doc """
   The board's one live stream. Streams the target as server-sent `target` events,
-  the current one on connect, while the recorder is on this host. With `rex=1`
-  it also streams each worker Rex moves to as `focus` events, whether or not
-  voice is on; Rex's app is on this daemon's host, whatever the recorder, and
-  nothing is sent for it on connect. Every stream carries `open` events from
-  `open/2`. A comment every 15 s holds the connection.
+  the current one on connect, while the recorder is on this host. Every stream
+  carries `page` events from `open/2`. A comment every 15 s holds the connection.
   """
   def events(conn, params) do
     recorder =
-      match?({:ok, :local}, RecorderRouter.select_start(Map.drop(params, ["prefer", "rex"])))
+      match?({:ok, :local}, RecorderRouter.select_start(Map.delete(params, "prefer")))
 
     if recorder, do: Voice.subscribe()
-    if params["rex"] == "1", do: Shuttle.RexFocus.subscribe()
     Registry.register(Shuttle.Voice.Streams, :board_open, nil)
 
     conn =
@@ -83,7 +79,6 @@ defmodule ShuttleWeb.VoiceController do
     next =
       receive do
         {:voice_target, target} -> event("target", target)
-        {:rex_focus, target} -> event("focus", target)
         {:board_open, open} -> event("page", open)
       after
         15_000 -> ": keepalive\n\n"

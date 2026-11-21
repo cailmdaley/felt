@@ -226,47 +226,6 @@ export function registerViewFullScreenJourneys(test) {
   }, { width: 1440, height: 900 }, 'reduce', false)
 }
 
-/**
- * Rex moves to another worker. With Channels the view, the board opens that
- * worker's channel, scrolled to its latest line, which is marked, and opens no
- * reader; from the Desk it opens the worker's view in the reader, as before.
- */
-export function registerRexFollowJourneys(test) {
-  test('Rex follow: Channels lands on the worker\'s channel at its latest line, the Desk on its view', async page => {
-    await page.goto(channelsUrl)
-    const rex = id => page.evaluate(id => window.__harness.modal.voice.onRex({ fiber_id: id, origin: 'umber-workstation' }), id)
-    const marked = () => page.evaluate(() => {
-      const stream = document.querySelector('.kbn-ch-stream'), rows = [...stream.querySelectorAll(':scope > [data-marked]')]
-      const view = stream.getBoundingClientRect(), box = rows[0]?.getBoundingClientRect()
-      return { fibers: rows.map(row => row.dataset.fiber), latest: rows[0] === [...stream.querySelectorAll(`:scope > .kbn-ch-item[data-fiber="${CSS.escape(rows[0]?.dataset.fiber ?? '')}"]`)].at(-1), inSight: !!box && box.top >= view.top - 1 && (box.bottom <= view.bottom + 1 || box.height > view.height) }
-    })
-    await page.locator('.kbn-ch-pick', { hasText: 'cmbx' }).first().click()
-    await rex('pando/unions/shear-2pt')
-    await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'unions')
-    assert.deepEqual(await marked(), { fibers: ['pando/unions/shear-2pt'], latest: true, inSight: true })
-    if (process.env.NAV_BACK_SHOTS) await page.screenshot({ path: resolve(process.env.NAV_BACK_SHOTS, 'rex-follow-channels.png') })
-    assert.equal(await page.locator('.ws-reader:not(.ws-dormant)').count(), 0, 'no reader opens')
-    await rex('cmbx/kappa-tsz')
-    await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'cmbx')
-    assert.deepEqual(await marked(), { fibers: ['cmbx/kappa-tsz'], latest: true, inSight: true })
-    // Typing to the chair, nothing moves: the channel stays and the console keeps the keys.
-    await page.getByLabel('Message to cmbx').click()
-    await rex('pando/unions/psf')
-    await page.waitForTimeout(200)
-    assert.equal(await page.locator('.kbn-ch-name').textContent(), 'cmbx')
-    assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), 'Message to cmbx', 'the console keeps the keys')
-    assert.equal(await page.locator('.ws-reader:not(.ws-dormant)').count(), 0)
-    // Choosing a channel leaves the mark behind.
-    await page.locator('.kbn-ch-pick', { hasText: 'unions' }).first().click()
-    assert.deepEqual((await marked()).fibers, [])
-    // From the Desk, the worker's view opens in the reader.
-    await page.keyboard.press('1')
-    await page.locator('.kbn-desk').first().waitFor()
-    await rex('pando/unions/shear-2pt')
-    await page.locator('.ws-page.ws-selected[data-key^="family:"] .ov-head').waitFor()
-  }, { width: 1440, height: 900 }, 'reduce', false)
-}
-
 /** `t` on a post in Channels opens its worker's tapestry in the reader; a worker with none moves nothing. */
 export function registerPostTapestryJourneys(test) {
   test('t on a post in Channels opens its tapestry in the reader', async page => {

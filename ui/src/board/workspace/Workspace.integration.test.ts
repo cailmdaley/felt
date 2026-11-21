@@ -143,7 +143,6 @@ beforeEach(() => {
   workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => boardCards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock("", changed) })
 })
 /** Lets Rex's hold between moves run out, on fake timers. */
-const holdOut = async (): Promise<void> => { vi.advanceTimersByTime(400); await settle() }
 /** What the board asked Rex to select: every select-only attach body. */
 const selections = (): Record<string, unknown>[] => vi.mocked(fetch).mock.calls
   .filter(([url]) => String(url).endsWith('/api/v1/attach'))
@@ -1015,26 +1014,6 @@ describe('workspace reader integration', () => {
     workspace.openFromDesk(feed[2]); await settle()
     expect(selected()).toBe('family:host-a:hub-draft')
   })
-  it('follows Rex to a constitution\'s view, and stands on a page of the same fiber', async () => {
-    const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
-      card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, ...over })
-    const feed = [thread({ id: 'hub', status: 'active' }), thread({ id: 'hub/mid', orchestrator: 'hub', status: 'active' }), thread({ id: 'lone', status: 'active' })]
-    bodyCards = feed
-    workspace.dispose()
-    const dock = new Dock('', changed), conversation = vi.spyOn(dock, 'openConversation')
-    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock })
-    const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
-    workspace.open(feed[0], 'Desk'); await settle()
-    workspace.follow('hub-mid', 'host-a'); await settle()
-    expect(selected()).toBe('family:host-a:hub-mid')
-    workspace.open(feed[1], 'Desk', 'fiber:host-a:hub-mid'); await settle()
-    workspace.follow('hub-mid', 'host-a'); await settle()
-    expect(selected()).toBe('fiber:host-a:hub-mid')
-    workspace.follow('lone', 'host-a'); await settle()
-    expect(document.querySelector('.ws-stage-band .ws-band-title')?.textContent).toBe('lone')
-    expect(selected()).toBe('family:host-a:lone')
-    expect(conversation).not.toHaveBeenCalled()
-  })
   it('opens the page a session asks for: its constitution, its tapestry, or its view', async () => {
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
       card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, fiberDir: `/notes/${over.id}`, ...over })
@@ -1103,206 +1082,14 @@ describe('workspace reader integration', () => {
     expect(window.location.hash).toBe(route)
   })
 
-  it('goes where Rex went from the Desk, another family or a lone body, and never writes back', async () => {
-    const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
-      card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, sessionUuid: `session-${over.id}`, ...over })
-    const remote = thread({ id: 'far', originId: 'host-b', status: 'active' })
-    const feed = [thread({ id: 'hub', status: 'active' }), thread({ id: 'hub/mid', orchestrator: 'hub', status: 'active' }), remote]
-    bodyCards = feed
-    workspace.dispose()
-    const dock = new Dock('', changed), conversation = vi.spyOn(dock, 'openConversation').mockReturnValue(true), sight = vi.fn()
-    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, onSight: sight, dock })
-    const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
-    expect(workspace.isActive).toBe(false)
-    workspace.follow('hub-mid', 'host-a'); await settle()
-    expect(workspace.isActive).toBe(true)
-    expect(selected()).toBe('family:host-a:hub-mid')
-    workspace.follow('far', 'host-b'); await settle()
-    expect(selected()).toBe('family:host-b:far')
-    expect(sight.mock.lastCall?.[0].id).toBe('far')
-    expect(conversation).not.toHaveBeenCalled()
-  })
-  it('reaches a thread from a view that stays in place: Rex selects the window its worker has, voice goes with it, and nothing opens', async () => {
-    const worker = card({ id: 'hub', uid: 'hub', originId: 'host-a', shuttleHost: 'host-a', shuttleKind: 'oneshot', status: 'active', sessionUuid: 'session-hub', tmuxSession: 'worker-hub', workerState: 'running' })
-    const past = card({ id: 'done', originId: 'host-a', status: 'closed', sessionUuid: 'session-done' })
-    workspace.dispose()
-    const dock = new Dock('', changed), conversation = vi.spyOn(dock, 'openConversation'), sight = vi.fn()
-    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => [worker, past], origin: () => 'Channels', onVisibility: visibility, onSight: sight, dock })
-    const answer = (moved: boolean): void => {
-      const original = vi.mocked(fetch).getMockImplementation()!
-      vi.mocked(fetch).mockImplementation(async (input, init) => String(input).endsWith('/api/v1/attach') ? Response.json({ moved, session: 'worker-hub' }) : original(input, init))
-    }
-    vi.useFakeTimers()
-    answer(true)
-    expect(await workspace.look(worker)).toBe(true)
-    expect(selections()).toEqual([{ tmux_session: 'worker-hub', shuttle_host: 'host-a', select_only: true }])
-    expect(sight).toHaveBeenLastCalledWith(worker)
-    // Looking again at what the board looks at moves nothing, and answers as the first look did.
-    answer(false)
-    expect(await workspace.look(worker)).toBe(true)
-    expect(selections()).toHaveLength(1)
-    expect(await workspace.look(past)).toBe(false)
-    expect(selections()).toHaveLength(1)
-    expect(sight).toHaveBeenLastCalledWith(past)
-    await holdOut()
-    expect(await workspace.look(worker)).toBe(false)
-    expect(selections()).toHaveLength(2)
-    expect(conversation).not.toHaveBeenCalled()
-  })
-  it('reaches the worker a card has now, though the surface clicked drew it before the worker started', async () => {
-    const drawn = card({ id: 'hub', uid: 'hub', originId: 'host-a', shuttleHost: 'host-a', shuttleKind: 'oneshot', status: 'active' })
-    const now = { ...drawn, sessionUuid: 'session-hub', tmuxSession: 'worker-hub', workerState: 'running' as const }
-    workspace.dispose()
-    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => [now], origin: () => 'Channels', onVisibility: visibility, dock: new Dock('', changed) })
-    vi.useFakeTimers()
-    const original = vi.mocked(fetch).getMockImplementation()!
-    vi.mocked(fetch).mockImplementation(async (input, init) => String(input).endsWith('/api/v1/attach') ? Response.json({ moved: true, session: 'worker-hub' }) : original(input, init))
-    expect(await workspace.look(drawn)).toBe(true)
-    expect(selections()).toEqual([{ tmux_session: 'worker-hub', shuttle_host: 'host-a', select_only: true }])
-  })
-  it('steps to the next constitution with j, k or Alt-Down quietly: a scan moves neither voice nor Rex, a click after it does', async () => {
-    const hub = card({ id: 'hub', uid: 'hub', originId: 'host-a', shuttleHost: 'host-a', shuttleKind: 'oneshot', status: 'active', path: 'hub.md', tmuxSession: 'worker-hub', workerState: 'running' })
-    const other = card({ id: 'other', uid: 'other', originId: 'host-a', shuttleHost: 'host-a', shuttleKind: 'oneshot', status: 'active', path: 'other.md', tmuxSession: 'worker-other', workerState: 'running' })
-    const feed = [hub, other]
-    bodyCards = feed
-    workspace.dispose()
-    const sight = vi.fn()
-    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, deskRows: () => feed, origin: () => 'Desk', onVisibility: visibility, onSight: sight, dock: new Dock('', changed) })
-    const rex = (): unknown[] => selections().map(body => body.tmux_session)
-    vi.useFakeTimers()
-    const seen = (): unknown[] => [...new Set(sight.mock.calls.map(([target]) => target?.id))]
-    workspace.openFromDesk(hub); await holdOut()
-    expect([seen(), rex()]).toEqual([['hub'], ['worker-hub']])
-    for (const [key, alt] of [['j', false], ['k', false], ['ArrowDown', true]] as const) {
-      document.dispatchEvent(new KeyboardEvent('keydown', { key, altKey: alt, bubbles: true, cancelable: true })); await holdOut()
-    }
-    expect(document.querySelector('.ws-channel-title')?.textContent).toBe('other')
-    expect([seen(), rex()]).toEqual([['hub'], ['worker-hub']])
-    workspace.openFromDesk(other); await holdOut()
-    expect(sight).toHaveBeenLastCalledWith(other)
-    expect(rex()).toEqual(['worker-hub', 'worker-other'])
-  })
-  it('a scan back onto the constitution just clicked away from stays quiet, though it steps back through history', async () => {
-    const hub = card({ id: 'hub', uid: 'hub', originId: 'host-a', shuttleHost: 'host-a', shuttleKind: 'oneshot', status: 'active', path: 'hub.md', tmuxSession: 'worker-hub', workerState: 'running' })
-    const other = card({ id: 'other', uid: 'other', originId: 'host-a', shuttleHost: 'host-a', shuttleKind: 'oneshot', status: 'active', path: 'other.md', tmuxSession: 'worker-other', workerState: 'running' })
-    const feed = [hub, other]
-    bodyCards = feed
-    workspace.dispose()
-    const sight = vi.fn()
-    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, deskRows: () => feed, origin: () => 'Desk', onVisibility: visibility, onSight: sight, dock: new Dock('', changed) })
-    const rex = (): unknown[] => selections().map(body => body.tmux_session)
-    vi.useFakeTimers()
-    workspace.openFromDesk(hub); await holdOut()
-    workspace.openFromDesk(other); await holdOut()
-    expect(rex()).toEqual(['worker-hub', 'worker-other'])
-    const looks = sight.mock.calls.length
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true, cancelable: true })); await holdOut()
-    await vi.waitFor(() => expect(document.querySelector('.ws-channel-title')?.textContent).toBe('hub'))
-    await holdOut()
-    expect(sight.mock.calls.length).toBe(looks)
-    expect(rex()).toEqual(['worker-hub', 'worker-other'])
-  })
-  it('moves voice and Rex together from every page the board shows, to the constitution a page speaks to, once per target', async () => {
-    const hub = card({ id: 'hub', uid: 'hub', originId: 'host-a', shuttleHost: 'host-a', shuttleKind: 'oneshot', status: 'active', path: 'hub.md', tmuxSession: 'worker-hub', workerState: 'running' })
-    const report = card({ id: 'hub/report', uid: 'hub-report', originId: 'host-a', status: 'open', path: 'hub/report.md' })
-    const other = card({ id: 'other', uid: 'other', originId: 'host-a', shuttleHost: 'host-a', shuttleKind: 'oneshot', status: 'active', path: 'other.md', tmuxSession: 'worker-other', workerState: 'running' })
-    const feed = [hub, report, other]
-    bodyCards = feed
-    workspace.dispose()
-    const dock = new Dock('', changed), sight = vi.fn()
-    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, origin: () => 'Desk', onVisibility: visibility, onSight: sight, dock })
-    const rex = (): unknown[] => selections().map(body => body.tmux_session)
-    vi.useFakeTimers()
-    // A fiber's own page, opened from anywhere: voice and Rex reach its worker.
-    workspace.open(other, 'Desk'); await holdOut()
-    expect(sight).toHaveBeenLastCalledWith(other)
-    expect(rex()).toEqual(['worker-other'])
-    // A page of a fiber under a constitution speaks to that constitution: both follow it.
-    workspace.open(report, 'Desk'); await holdOut()
-    expect(sight).toHaveBeenLastCalledWith(hub)
-    expect(rex()).toEqual(['worker-other', 'worker-hub'])
-    // Repaints of the same page post nothing more.
-    workspace.open(report, 'Desk'); await holdOut()
-    expect(rex()).toEqual(['worker-other', 'worker-hub'])
-    // Looks in quick succession move Rex once more, to the last of them, and not at all when that is where it just went.
-    workspace.open(other, 'Desk'); await settle()
-    workspace.open(hub, 'Desk'); await settle()
-    workspace.open(report, 'Desk'); await settle()
-    expect(rex()).toEqual(['worker-other', 'worker-hub', 'worker-other'])
-    workspace.open(other, 'Desk'); await holdOut()
-    expect(rex()).toEqual(['worker-other', 'worker-hub', 'worker-other'])
-    // A tapestry or constitution page opened by name follows the same way.
-    void workspace.openFiber('hub', 'host-a', 'tapestry'); await holdOut()
-    expect(sight).toHaveBeenLastCalledWith(hub)
-    expect(rex()).toEqual(['worker-other', 'worker-hub', 'worker-other', 'worker-hub'])
-    // Rex moved itself to a worker: the board following it there writes nothing back.
-    workspace.rexAt('other', 'host-a')
-    workspace.follow('other', 'host-a'); await holdOut()
-    expect(sight).toHaveBeenLastCalledWith(other)
-    expect(rex()).toHaveLength(4)
-    // Without the keyboard the board leaves Rex be, and takes the look up once it has it again.
-    vi.mocked(document.hasFocus).mockReturnValue(false)
-    workspace.open(hub, 'Desk'); await holdOut()
-    expect(sight).toHaveBeenLastCalledWith(hub)
-    expect(rex()).toHaveLength(4)
-    vi.mocked(document.hasFocus).mockReturnValue(true)
-    void workspace.look(hub); await holdOut()
-    expect(rex()).toHaveLength(5)
-    // Leaving the reader looks at nothing.
-    vi.useRealTimers()
-    await pop(() => workspace.returnToOrigin())
-    expect(sight).toHaveBeenLastCalledWith(null)
-    // A page a session asks for opens without moving either.
-    await workspace.openFiber('other', 'host-a', undefined, true); await settle()
-    expect(workspace.isActive).toBe(true)
-    expect(sight).toHaveBeenLastCalledWith(null)
-    expect(rex()).toHaveLength(5)
-  })
-  it('loads, or reloads, on a constitution\'s page without moving voice or Rex', async () => {
-    const hub = card({ id: 'hub', uid: 'hub', originId: 'host-a', shuttleHost: 'host-a', shuttleKind: 'oneshot', status: 'active', path: 'hub.md', tmuxSession: 'worker-hub', workerState: 'running' })
-    bodyCards = [hub]
-    workspace.dispose()
-    window.history.replaceState(null, '', '#/board/hub@host-a')
-    const sight = vi.fn()
-    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => [hub], origin: () => 'Desk', onVisibility: visibility, onSight: sight, dock: new Dock('', changed) })
-    await settle()
-    expect(workspace.isActive).toBe(true)
-    expect(sight).not.toHaveBeenCalled()
-    expect(selections()).toEqual([])
-  })
-  it('moves voice but never Rex on a phone', async () => {
-    const worker = card({ id: 'hub', uid: 'hub', originId: 'host-a', shuttleKind: 'oneshot', status: 'active', path: 'hub.md', tmuxSession: 'worker-hub', workerState: 'running' })
+  it('does not steer Rex or voice when looking at or opening a constitution', async () => {
+    const worker = card({ id: 'hub', uid: 'hub', originId: 'host-a', shuttleHost: 'host-a', shuttleKind: 'oneshot', status: 'active', path: 'hub.md', sessionUuid: 'session-hub', tmuxSession: 'worker-hub', workerState: 'running' })
     bodyCards = [worker]
     workspace.dispose()
-    vi.stubGlobal('navigator', { ...navigator, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)' })
-    const sight = vi.fn()
-    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => [worker], origin: () => 'Desk', onVisibility: visibility, onSight: sight, dock: new Dock('', changed) })
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => [worker], origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     expect(await workspace.look(worker)).toBe(false)
-    expect(sight).toHaveBeenLastCalledWith(worker)
+    workspace.openFromDesk(worker); await settle()
     expect(selections()).toEqual([])
-  })
-  it('looks only on a click: opening a view or a thread\'s row moves voice and Rex, a repaint or a returning window never', async () => {
-    const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
-      card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, sessionUuid: `session-${over.id}`, tmuxSession: `worker-${over.id}`, workerState: 'running', ...over })
-    let feed = [thread({ id: 'hub', status: 'active' }), thread({ id: 'hub/mid', orchestrator: 'hub', status: 'active' })]
-    bodyCards = feed
-    workspace.dispose()
-    const dock = new Dock('', changed), sight = vi.fn()
-    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, onSight: sight, dock })
-    const seen = (): string | undefined => (sight.mock.lastCall?.[0] as KanbanCard | undefined)?.id
-    vi.useFakeTimers()
-    workspace.openFromDesk(feed[0]); await holdOut()
-    expect(seen()).toBe('hub')
-    expect(selections().at(-1)?.tmux_session).toBe('worker-hub')
-    document.querySelector<HTMLElement>('.ws-selected .ov-thread')!.click(); await holdOut()
-    expect(seen()).toBe('hub/mid')
-    expect(selections().at(-1)?.tmux_session).toBe('worker-hub/mid')
-    // A poll that redraws the view, even one that brings its worker a new terminal, and the window coming back, look at nothing.
-    const looks = sight.mock.calls.length, moves = selections().length
-    feed = feed.map(each => ({ ...each, tmuxSession: `${each.tmuxSession}-2` }))
-    workspace.update(); await holdOut()
-    window.dispatchEvent(new Event('focus')); await holdOut()
-    expect([sight.mock.calls.length, selections().length]).toStrictEqual([looks, moves])
   })
   it('draws a lone constitution\'s view as its head with its pages, a draft\'s too, where its acts live', async () => {
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
@@ -2093,7 +1880,7 @@ describe('a constitution\'s view', () => {
   /** Trees of threads as parent indices: node n > 0 hangs under some earlier node. */
   const trees = fc.array(fc.nat(), { minLength: 1, maxLength: 6 }).map(picks => picks.map((pick, n) => pick % (n + 1)))
   const step = fc.oneof(
-    fc.record({ act: fc.constantFrom('open', 'desk', 'follow', 'row', 'up'), at: fc.nat() }),
+    fc.record({ act: fc.constantFrom('open', 'desk', 'row', 'up'), at: fc.nat() }),
     fc.record({ act: fc.constant('b'), at: fc.constant(0) }),
   )
   it('is always of the constitution it shows, its band and its keys speaking to it, however it is entered and walked', async () => {
@@ -2117,7 +1904,6 @@ describe('a constitution\'s view', () => {
         const target = feed[at % feed.length]
         if (act === 'open') workspace.open(target, 'Desk')
         else if (act === 'desk') workspace.openFromDesk(target)
-        else if (act === 'follow') workspace.follow(target.uid!, 'host-a')
         else if (act === 'row') document.querySelector<HTMLElement>(`.ws-selected .ov-thread[data-fiber="${target.uid}"]`)?.click()
         else if (act === 'up') document.querySelector<HTMLElement>(`.ws-selected .ov-ancestor[data-fiber="${target.uid}"]`)?.click()
         else press('b')

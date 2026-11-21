@@ -667,9 +667,7 @@ defmodule Shuttle.Speaker do
       end
   end
 
-  # Route live voice to the card the inbox opened, which brings every board to
-  # it wherever this daemon stands, and move Rex to it behind the frontmost
-  # app, so all three agree. Rex stays put while Listen is pinned.
+  # Route live voice to the card the inbox opened and move Rex to it via `go`.
   defp retarget(item) do
     params = %{"fiber_id" => item.fiber_id, "name" => item.name, "source" => "inbox"}
     params = if item[:origin], do: Map.put(params, "origin", item.origin), else: params
@@ -679,9 +677,12 @@ defmodule Shuttle.Speaker do
       {:error, reason} -> Logger.warning("speaker: inbox could not route voice: #{reason}")
     end
 
-    case Shuttle.RexFocus.reveal(params) do
-      :ok -> :ok
-      {:skip, reason} -> Logger.info("speaker: inbox did not reveal in Rex: #{reason}")
+    if is_binary(item.fiber_id) and item.fiber_id != "" do
+      case Shuttle.Go.go(item.fiber_id, item[:origin]) do
+        {:ok, %{went: true}} -> :ok
+        {:ok, %{place: place}} -> Logger.info("speaker: inbox did not move Rex (#{place})")
+        other -> Logger.info("speaker: inbox did not move Rex: #{inspect(other)}")
+      end
     end
   catch
     :exit, reason -> Logger.warning("speaker: inbox could not route voice: #{inspect(reason)}")

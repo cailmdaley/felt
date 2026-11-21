@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { card, voiceStatus, settle } from './testFixtures.js'
-import { Voice, constitutionFor, voicePollDelay, type VoiceStatus } from './voice'
+import { voiceStatus, settle } from './testFixtures.js'
+import { Voice, voicePollDelay, type VoiceStatus } from './voice'
 
 const status = (changes: Partial<VoiceStatus> = {}): VoiceStatus => voiceStatus({ enabled: true, state: 'listening', ...changes })
 
@@ -65,7 +65,7 @@ describe('live voice', () => {
     }))
     const voice = new Voice('')
     voice.mount(); await settle()
-    expect(sources.map(s => s.url)).toEqual(['/api/v1/voice/events?rex=1'])
+    expect(sources.map(s => s.url)).toEqual(['/api/v1/voice/events'])
     sources[0].emit(null)
 
     slow = true
@@ -99,58 +99,20 @@ describe('live voice', () => {
       voice.mount(); await settle()
       return voice
     }
-    const move = { fiber_id: 'uid', origin: 'fir', name: 'Worker' }
-    const emit = (source: Source): void => source.listeners.get('focus')!(new MessageEvent('focus', { data: JSON.stringify(move) }))
-
-    it('hands on what Rex moved to, voice on or off, over a single stream', async () => {
-      const voice = await start(), moved: unknown[] = []
-      voice.onRex = event => moved.push(event)
-      expect(live()).toHaveLength(1)
-      emit(live()[0])
-      await voice.set({ enabled: false })
-      emit(live()[0])
-      expect(moved).toEqual([move, move])
-      voice.dispose()
-      expect(live()).toHaveLength(0)
-    })
-    const opened = (fiber: string): VoiceStatus['target'] => ({ fiber_id: fiber, origin: 'fir', name: fiber, source: 'inbox' })
-    it('moves to a card the inbox opens, once, and again if the board left it', async () => {
-      const target = (source: Source, value: unknown): void => source.listeners.get('target')!(new MessageEvent('target', { data: JSON.stringify(value) }))
-      const voice = await start(), moved: unknown[] = []
-      voice.onRex = event => moved.push(event.fiber_id)
-      target(live()[0], opened('card'))
-      target(live()[0], opened('card'))
-      target(live()[0], { fiber_id: 'board', origin: 'fir', name: 'board' })
-      target(live()[0], opened('card'))
-      expect(moved).toEqual(['card', 'card'])
-      voice.dispose()
-    })
-    it('hears the inbox of a remote recorder from its polled status, and not a card found on arrival', async () => {
-      const voice = await start(), moved: unknown[] = []
-      voice.onRex = event => moved.push(event.fiber_id)
-      vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ ...status(), target: opened('remote') }) })))
-      await vi.advanceTimersByTimeAsync(15_000)
-      expect(moved).toEqual(['remote'])
-      voice.dispose()
-      const later = new Voice('')
-      later.onRex = event => moved.push(event.fiber_id)
-      later.mount(); await settle()
-      expect(moved).toEqual(['remote'])
-      later.dispose()
-    })
-    it('closes while hidden, reopens on return, and moves nothing for it', async () => {
+    it('opens a single stream without rex=1, closes while hidden, and reopens on return', async () => {
       let hidden = false
       vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden)
-      const voice = await start(), moved: unknown[] = []
-      voice.onRex = event => moved.push(event)
+      const voice = await start()
+      expect(live()).toHaveLength(1)
+      expect(live()[0].url).toBe('/api/v1/voice/events')
       hidden = true
       document.dispatchEvent(new Event('visibilitychange')); await settle()
       expect(live()).toHaveLength(0)
       hidden = false
       document.dispatchEvent(new Event('visibilitychange')); await settle()
       expect(live()).toHaveLength(1)
-      expect(moved).toEqual([])
       voice.dispose()
+      expect(live()).toHaveLength(0)
     })
     it('opens nothing for a tab loaded hidden, until it is shown', async () => {
       let hidden = true
@@ -162,18 +124,6 @@ describe('live voice', () => {
       expect(live()).toHaveLength(1)
       voice.dispose()
     })
-    it('ignores a move while the window is phone-narrow, and hears the next once it widens', async () => {
-      const voice = await start(), moved: unknown[] = []
-      voice.onRex = event => moved.push(event)
-      let narrow = true
-      vi.stubGlobal('matchMedia', (query: string) => ({ matches: narrow && query.includes('max-width') }) as MediaQueryList)
-      emit(live()[0])
-      expect(moved).toEqual([])
-      narrow = false
-      emit(live()[0])
-      expect(moved).toEqual([move])
-      voice.dispose()
-    })
     it('hands on a page a session asked for, on a phone too', async () => {
       vi.stubGlobal('matchMedia', () => ({ matches: true }) as MediaQueryList)
       const voice = await start(), opened: unknown[] = []
@@ -181,12 +131,6 @@ describe('live voice', () => {
       const page = { fiber_id: 'uid', origin: 'fir', page: 'tapestry' }
       live()[0].listeners.get('page')!(new MessageEvent('page', { data: JSON.stringify(page) }))
       expect(opened).toEqual([page])
-      voice.dispose()
-    })
-    it('asks for no Rex moves on a phone', async () => {
-      vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('coarse') }) as MediaQueryList)
-      const voice = await start()
-      expect(live()[0].url).toBe('/api/v1/voice/events')
       voice.dispose()
     })
   })
@@ -272,142 +216,5 @@ describe('live voice', () => {
     expect(voicePollDelay(true, false, status())).toBe(15_000)
     expect(voicePollDelay(true, true, status({ enabled: false }))).toBe(15_000)
     expect(voicePollDelay(true, true, status())).toBe(2_000)
-  })
-  describe('following what the board shows', () => {
-    const worker = card({ id: 'project/a', uid: 'uid-a', name: 'A', originId: 'owner', shuttleKind: 'oneshot' })
-    const other = card({ id: 'project/b', uid: 'uid-b', name: 'B', originId: 'owner', shuttleKind: 'oneshot' })
-    const held = { fiber_id: 'uid-b', origin: 'owner', name: 'B' }
-    let current: VoiceStatus, posts: unknown[], focused: boolean
-    const mounted = async (start: VoiceStatus): Promise<Voice> => {
-      vi.useFakeTimers()
-      current = start
-      posts = []
-      focused = true
-      vi.spyOn(document, 'hasFocus').mockImplementation(() => focused)
-      vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
-        if (init?.method === 'POST') {
-          posts.push(JSON.parse(String(init.body)))
-          if (current.follow) current = { ...current, target: JSON.parse(String(init.body)) as VoiceStatus['target'] }
-        }
-        return { ok: true, json: async () => current }
-      }))
-      const voice = new Voice('')
-      voice.mount(); await settle()
-      return voice
-    }
-
-    it('sets the target from what the board shows, once the view holds', async () => {
-      const voice = await mounted(status({ target: held }))
-      voice.see(other)
-      voice.see(worker)
-      await vi.advanceTimersByTimeAsync(300)
-      voice.see(other)
-      await vi.advanceTimersByTimeAsync(300)
-      voice.see(worker)
-      await vi.advanceTimersByTimeAsync(400); await settle()
-      expect(posts).toEqual([{ fiber_id: 'uid-a', origin: 'owner', name: 'A' }])
-      await vi.advanceTimersByTimeAsync(2_000); await settle()
-      voice.dispose()
-    })
-    it('lets two boards that repaint on every target change settle instead of taking it back and forth', async () => {
-      const first = await mounted(status({ target: held }))
-      const second = new Voice('')
-      second.mount(); await settle()
-      // A target change repaints each board, and a repaint sights the page it shows.
-      first.subscribe(() => first.see(worker))
-      second.subscribe(() => second.see(other))
-      first.see(worker)
-      second.see(other)
-      await vi.advanceTimersByTimeAsync(20_000); await settle()
-      expect(posts.length).toBeLessThanOrEqual(2)
-      first.dispose(); second.dispose()
-    })
-    it('claims again once the board shows another fiber and comes back', async () => {
-      const voice = await mounted(status({ target: held }))
-      voice.see(worker)
-      await vi.advanceTimersByTimeAsync(400); await settle()
-      current = status({ target: held })
-      await vi.advanceTimersByTimeAsync(2_000); await settle()
-      voice.see(worker)
-      await vi.advanceTimersByTimeAsync(400); await settle()
-      expect(posts).toHaveLength(1)
-      voice.see(other)
-      voice.see(null)
-      voice.see(worker)
-      await vi.advanceTimersByTimeAsync(400); await settle()
-      expect(posts).toHaveLength(2)
-      voice.dispose()
-    })
-    it('remembers a board view while pinned without moving the target or repeating the write', async () => {
-      const voice = await mounted(status({ follow: false, target: held, recorder: 'audio-host' }))
-      voice.see(worker)
-      await vi.advanceTimersByTimeAsync(400); await settle()
-      expect(posts).toEqual([{ fiber_id: 'uid-a', origin: 'owner', name: 'A', recorder: 'audio-host' }])
-      expect(voice.status?.target).toEqual(held)
-      window.dispatchEvent(new Event('focus')); await settle()
-      expect(posts).toHaveLength(1)
-      voice.dispose()
-    })
-    it('routes the page viewed on a phone to its recorder', async () => {
-      vi.stubGlobal('matchMedia', () => ({ matches: true }) as MediaQueryList)
-      const voice = await mounted(status({ source: 'phone', target: held, recorder: 'audio-host' }))
-      voice.see(worker)
-      await vi.advanceTimersByTimeAsync(400); await settle()
-      expect(posts).toEqual([{ fiber_id: 'uid-a', origin: 'owner', name: 'A', recorder: 'audio-host' }])
-      voice.dispose()
-    })
-    it('takes nothing when the board\'s window comes back: only a look made with the keyboard counts', async () => {
-      const voice = await mounted(status({ target: held }))
-      focused = false
-      voice.see(worker)
-      await vi.advanceTimersByTimeAsync(400); await settle()
-      expect(posts).toEqual([])
-      focused = true
-      window.dispatchEvent(new Event('focus')); await settle()
-      await vi.advanceTimersByTimeAsync(2_000); await settle()
-      expect(posts).toEqual([])
-      voice.dispose()
-    })
-    it('leaves a target that already agrees alone, and survives a refused write', async () => {
-      const voice = await mounted(status({ target: held }))
-      voice.see(other)
-      await vi.advanceTimersByTimeAsync(400); await settle()
-      expect(posts).toEqual([])
-      vi.mocked(fetch).mockImplementation(async (_url, init) => init?.method === 'POST' ? { ok: false, status: 503 } as Response : { ok: true, json: async () => current } as Response)
-      voice.see(worker)
-      await vi.advanceTimersByTimeAsync(400); await settle()
-      await vi.advanceTimersByTimeAsync(2_000); await settle()
-      voice.dispose()
-    })
-    it('changes nothing while voice is off, nor when it comes on elsewhere; turned on from the board, it takes the view', async () => {
-      const voice = await mounted(status({ enabled: false, target: held }))
-      voice.see(worker)
-      await vi.advanceTimersByTimeAsync(400); await settle()
-      expect(posts).toEqual([])
-      current = status({ target: held })
-      await vi.advanceTimersByTimeAsync(15_000); await settle()
-      expect([voice.status?.enabled, posts]).toEqual([true, []])
-      await voice.set({ enabled: true }); await settle()
-      expect(posts).toEqual([{ enabled: true }, { fiber_id: 'uid-a', origin: 'owner', name: 'A' }])
-      voice.dispose()
-    })
-    it('leaves the target where it is on a fiber with no constitution, or off any fiber', async () => {
-      const voice = await mounted(status({ target: held }))
-      voice.see(card({ id: 'notes', originId: 'owner' }))
-      await vi.advanceTimersByTimeAsync(400); await settle()
-      voice.see(null)
-      await vi.advanceTimersByTimeAsync(400); await settle()
-      window.dispatchEvent(new Event('focus')); await settle()
-      expect(posts).toEqual([])
-      voice.dispose()
-    })
-    it('reads a plain fiber as the nearest constitution above it on the same host', () => {
-      const hub = card({ id: 'project', originId: 'owner', shuttleKind: 'standing' })
-      const elsewhere = card({ id: 'project/sub', originId: 'other', shuttleKind: 'oneshot' })
-      const page = card({ id: 'project/sub/tapestry', originId: 'owner' })
-      expect(constitutionFor(page, [hub, elsewhere, page])).toBe(hub)
-      expect(constitutionFor(hub, [hub, page])).toBe(hub)
-      expect(constitutionFor(page, [elsewhere, page])).toBe(page)
-    })
   })
 })

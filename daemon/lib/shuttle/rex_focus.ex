@@ -1,26 +1,20 @@
 defmodule Shuttle.RexFocus do
   @moduledoc """
-  Follows the worker on Rex's screen: it streams to the board through
-  `subscribe/0` when that worker changes, and routes the spoken-time voice
-  journal while voice follows. The watch runs while either wants it.
+  Follows Rex's focused tab and routes the spoken-time voice target
+  (`Shuttle.Voice.target/1`) while voice listens.
 
-  macOS accessibility window titles identify the app's selected worker across
+  macOS accessibility window titles identify the app's selected tab across
   sessions, read through `~/.local/bin/shuttle-rex-title`, which holds the
-  Accessibility grant so deploys can't invalidate it. Titles route only while
-  Rex is the frontmost app, and Rex coming to the front re-asserts the worker
-  its title names. `lsappinfo` reports the frontmost app without a grant: one
-  read when the watch begins, then its `listen` stream of frontmost changes.
-  Other hosts, and macOS without that grant, use Rex's per-session
-  active-window events, for voice alone.
+  Accessibility grant so deploys can't invalidate it. Titles route while Rex or
+  RexWeb (`dev.coey.rexweb`) is frontmost, and returning to the front
+  re-asserts the focused fiber. `lsappinfo` tracks the frontmost app without a
+  grant: one read when the watch begins, then its `listen` stream of frontmost
+  changes. Other hosts, and macOS without that grant, use Rex's per-session
+  active-window events.
 
-  While Rex is behind, its title is read every `slow_every` ticks, only to keep
-  up with selections the board makes there. The board hears of a worker change
-  made with Rex in front, or the one a click on Rex's sidebar brings it forward
-  with; Rex merely coming forward re-asserts voice and tells the board nothing.
-  A watch that begins learns where Rex stands without announcing it.
-
-  `reveal/2` moves Rex's selection behind whatever has the keyboard, for a
-  caller that sets the voice target itself. Selecting never activates the app.
+  Windows map through `rex.json` (`bindings`, `places`, `views`, `desk`):
+  worker and thread tabs target their fiber, a family Tab 1 view targets the
+  family root, and the `Desk` session leaves the voice target unchanged.
   """
   use GenServer
 
@@ -54,11 +48,9 @@ defmodule Shuttle.RexFocus do
       front_events: Keyword.get(opts, :front_events, &front_events/0),
       front: nil,
       front_port: nil,
-      following: false,
       ticks: 0,
       slow_every: Keyword.get(opts, :slow_every, 8),
       last_front: nil,
-      seen_title: nil,
       last_title: nil,
       last_bindings: nil,
       last_target: nil,
@@ -71,8 +63,6 @@ defmodule Shuttle.RexFocus do
       warn: Keyword.get(opts, :warn, &Shuttle.Voice.focus_error/1),
       poll_ms: Keyword.get(opts, :poll_ms, 250),
       active?: Keyword.get(opts, :active?, &listening?/0),
-      watched?: Keyword.get(opts, :watched?, &watched?/0),
-      publish: Keyword.get(opts, :publish, &publish/1),
       command: Keyword.get(opts, :command, &command/0),
       bindings: Keyword.get(opts, :bindings, &Shuttle.Terminal.RexBindings.read/0),
       fibers: Keyword.get(opts, :fibers, &Shuttle.ServedFibers.all/0),
@@ -85,19 +75,12 @@ defmodule Shuttle.RexFocus do
 
   @impl true
   def handle_info(:tick, state) do
-    following = state.active?.()
+    state = %{state | ticks: state.ticks + 1}
 
     state =
-      if following and not state.following,
-        do: %{state | last_title: nil, last_bindings: nil, last_target: nil},
-        else: state
-
-    state = %{state | following: following, ticks: state.ticks + 1}
-
-    state =
-      if following or (state.title != nil and state.watched?.()) do
+      if state.active?.() do
         state = poll_title(state)
-        if state.title_ready or not following, do: stop_stream(state), else: ensure_stream(state)
+        if state.title_ready, do: stop_stream(state), else: ensure_stream(state)
       else
         state
         |> stop_stream()
@@ -105,7 +88,6 @@ defmodule Shuttle.RexFocus do
         |> warning(nil)
         |> Map.merge(%{
           last_front: nil,
-          seen_title: nil,
           last_title: nil,
           last_bindings: nil,
           last_target: nil,
@@ -119,7 +101,7 @@ defmodule Shuttle.RexFocus do
 
   def handle_info({port, {:data, {:eol, line}}}, %{front_port: port} = state) do
     if String.contains?(line, "kLSNotifyBecameFrontmost"),
-      do: {:noreply, %{state | front: line =~ ~s("CFBundleIdentifier"="com.superlogical.rex)}},
+      do: {:noreply, %{state | front: rex_front_line?(line)}},
       else: {:noreply, state}
   end
 
@@ -159,16 +141,6 @@ defmodule Shuttle.RexFocus do
   @impl true
   def terminate(_reason, state), do: state |> stop_stream() |> stop_front() |> warning(nil)
 
-  @doc "Delivers `{:rex_focus, target}` to the calling process each time Rex's worker is chosen."
-  def subscribe, do: Registry.register(Shuttle.Voice.Streams, :rex_focus, nil)
-
-  @doc "Tells every subscriber that `target` is now the worker in view."
-  def publish(target) do
-    Registry.dispatch(Shuttle.Voice.Streams, :rex_focus, fn entries ->
-      for {pid, _} <- entries, do: send(pid, {:rex_focus, target})
-    end)
-  end
-
   @doc false
   def target(
         %{
@@ -178,148 +150,77 @@ defmodule Shuttle.RexFocus do
             "event" => %{"type" => "active_window_changed", "payload" => %{"window_id" => wid}}
           }
         },
-        %{"bindings" => bindings},
+        doc,
         fibers
-      ) do
+      )
+      when is_map(doc) do
+    if get_in(doc, ["desk", "session_id"]) == sid do
+      nil
+    else
+      binding_target(doc["bindings"], sid, wid, fibers) ||
+        place_target(doc["places"], sid, wid, fibers) ||
+        view_target(doc["views"], sid, wid, fibers)
+    end
+  end
+
+  def target(_, _, _), do: nil
+
+  defp binding_target(bindings, sid, wid, fibers) when is_map(bindings) do
     case Enum.find(bindings, fn {_, b} -> b["session_id"] == sid and b["window_id"] == wid end) do
       {_, %{"fiber" => id}} -> fiber_target(id, fibers)
       _ -> nil
     end
   end
 
-  def target(_, _, _), do: nil
+  defp binding_target(_, _, _, _), do: nil
+
+  defp place_target(places, sid, wid, fibers) when is_map(places) do
+    case Enum.find(places, fn {_, p} -> p["session_id"] == sid and p["window_id"] == wid end) do
+      {uid, place} ->
+        fiber_target(uid, fibers) || (place["fiber"] && fiber_target(place["fiber"], fibers))
+
+      _ ->
+        nil
+    end
+  end
+
+  defp place_target(_, _, _, _), do: nil
+
+  defp view_target(views, sid, wid, fibers) when is_map(views) do
+    case Enum.find(views, fn {_, v} -> v["session_id"] == sid and v["window_id"] == wid end) do
+      {root, view} ->
+        (view["uid"] && fiber_target(view["uid"], fibers)) ||
+          fiber_target(view["fiber"] || root, fibers)
+
+      _ ->
+        nil
+    end
+  end
+
+  defp view_target(_, _, _, _), do: nil
 
   @doc """
-  Selects the Rex worker for `fiber_id` and `origin`, leaving the frontmost app
-  in front.
-  A local worker is found by its binding; a worker on another host by its
-  window and session labels on that host's Rex server, which the app shows
-  under the host's name. Returns `:ok` when Rex was asked to show it,
-  otherwise `{:skip, reason}`: `:off` when Listen is off or pinned, `:unbound` when no worker window is found, `:shown` when Rex's front
-  window already shows it.
+  The constitution a Rex window title names. Local `bindings`, `places` and
+  `views` from `rex.json` map worker tabs, thread places and family Tab 1 views
+  to their fibers; the `Desk` session leaves the target unchanged. A worker on
+  another host is matched by the labels its own daemon projects from the fiber
+  tree, which the served fibers carry with their `shuttle.host`.
   """
-  def reveal(params, opts \\ []) do
-    following? = Keyword.get(opts, :active?, &following?/0)
-
-    cond do
-      not following?.() ->
-        {:skip, :off}
-
-      Shuttle.OriginRouter.local?(params["origin"], own_host_id: opts[:own_host]) ->
-        reveal_local(params, opts)
-
-      true ->
-        reveal_remote(params, opts)
-    end
-  end
-
-  defp reveal_local(params, opts) do
-    bindings = Keyword.get(opts, :bindings, &Shuttle.Terminal.RexBindings.read/0)
-    fibers = Keyword.get(opts, :fibers, &Shuttle.ServedFibers.all/0)
-    title = Keyword.get(opts, :title, &read_title/0)
-    select = Keyword.get(opts, :select, &select/3)
-
-    with {:ok, doc} <- bindings.(),
-         {:bound, %{"session_id" => sid, "window_id" => wid}} <-
-           {:bound, binding_for(params, doc, fibers.())},
-         {:shown, false} <- {:shown, shows?(title.(), doc, wid)} do
-      select.(nil, sid, wid)
-      :ok
+  def title_target(title, doc, fibers, own_host \\ Shuttle.Poller.own_host_id()) do
+    if desk_title?(title) do
+      nil
     else
-      {:bound, _} -> {:skip, :unbound}
-      {:shown, _} -> {:skip, :shown}
-      {:error, _} -> {:skip, :unbound}
+      # Several windows or records on one fiber share a title and name the same constitution.
+      case title_entries(title, doc, fibers) |> Enum.uniq_by(& &1.fiber) do
+        [entry] -> fiber_target(entry.id, fibers) || fiber_target(entry.fiber, fibers)
+        _ -> remote_title_target(title, fibers, own_host)
+      end
     end
   end
 
-  defp reveal_remote(%{"fiber_id" => id, "origin" => host}, opts) do
-    fibers = Keyword.get(opts, :fibers, &Shuttle.ServedFibers.all/0).()
-    title = Keyword.get(opts, :title, &read_title/0)
-    locate = Keyword.get(opts, :locate, &locate/3)
-    select = Keyword.get(opts, :select, &select/3)
-
-    with %{} = fiber <-
-           Enum.find(fibers, fn f ->
-             id in [f["id"], f["uid"], f["slug"]] and get_in(f, ["shuttle", "host"]) == host
-           end),
-         {window, session} = remote_labels(fiber, fibers),
-         {:shown, false} <- {:shown, shown_title?(title.(), window <> " - " <> session)},
-         {:ok, sid, wid} <- locate.(host, session, window) do
-      select.(host, sid, wid)
-      :ok
-    else
-      {:shown, true} -> {:skip, :shown}
-      _ -> {:skip, :unbound}
-    end
-  end
-
-  defp reveal_remote(_, _), do: {:skip, :unbound}
-
-  defp shown_title?({:ok, title}, expected), do: normalize_title(title) == expected
-  defp shown_title?(_, _), do: false
-
-  # The one window labelled `window` in the session labelled `session` on
-  # `host`'s Rex server.
-  defp locate(host, session, window) do
-    runner = Shuttle.Runner.Default
-
-    with {:ok, sessions} <- Shuttle.Rex.sessions(runner, server: host),
-         [%{"session_id" => sid}] <-
-           Enum.filter(sessions, &(normalize_title(&1["label"] || "") == session)),
-         {:ok, windows} <- Shuttle.Rex.windows(runner, sid, server: host),
-         [%{"window_id" => wid}] <-
-           Enum.filter(windows, &(normalize_title(&1["label"] || "") == window)) do
-      {:ok, sid, wid}
-    else
-      _ -> nil
-    end
-  end
-
-  defp binding_for(%{"fiber_id" => id} = params, %{"bindings" => bindings}, fibers) do
-    origin = params["origin"] || Shuttle.Poller.own_host_id()
-
-    with %{} = fiber <-
-           Enum.find(fibers, fn f ->
-             id in [f["id"], f["uid"], f["slug"]] and get_in(f, ["shuttle", "host"]) == origin
-           end),
-         ids = Enum.reject([fiber["id"], fiber["uid"], fiber["slug"]], &is_nil/1),
-         [binding] <-
-           Enum.filter(
-             Map.values(bindings),
-             &(&1["fiber"] in ids and is_binary(&1["session_id"]) and is_binary(&1["window_id"]))
-           ) do
-      binding
-    else
-      _ -> nil
-    end
-  end
-
-  defp binding_for(_, _, _), do: nil
-
-  defp shows?({:ok, title}, doc, wid), do: match?(%{window_id: ^wid}, title_binding(title, doc))
-  defp shows?(_, _, _), do: false
-
-  # `host` nil is this host's Rex server; another host's is addressed by name.
-  defp select(host, sid, wid) do
-    runner = Shuttle.Env.app(:rex_runner, Shuttle.Runner.Default)
-    server = if host, do: [server: host], else: []
-
-    with {:ok, client} <- Shuttle.Rex.app_client(runner, server),
-         do: Shuttle.Rex.select(runner, client, sid, wid, server)
-  end
-
-  @doc """
-  The worker a Rex window title names. A local binding names it exactly; a
-  worker on another host, whose Rex server the app also shows, is found by
-  the labels its own daemon projects from the fiber tree, which the served
-  fibers carry with their `shuttle.host`.
-  """
-  def title_target(title, bindings, fibers, own_host \\ Shuttle.Poller.own_host_id()) do
-    # Several windows on one fiber share a title and name the same worker.
-    case title_bindings(title, bindings) |> Enum.uniq_by(& &1.fiber) do
-      [%{fiber: id}] -> fiber_target(id, fibers)
-      _ -> remote_title_target(title, fibers, own_host)
-    end
+  defp desk_title?(title) do
+    norm = normalize_title(title)
+    norm == "Desk - Desk" or String.ends_with?(norm, " - Desk")
   end
 
   defp remote_title_target(title, fibers, own_host) do
@@ -357,39 +258,49 @@ defmodule Shuttle.RexFocus do
     end
   end
 
-  # The one window a title names, for callers that act on the window itself.
-  defp title_binding(title, doc) do
-    case title_bindings(title, doc) do
-      [match] -> match
-      _ -> nil
-    end
-  end
-
-  defp title_bindings(title, %{"bindings" => bindings}) do
+  defp title_entries(title, doc, fibers) when is_map(doc) do
     alias Shuttle.Terminal.RexTree
+    norm = normalize_title(title)
 
-    bindings
-    |> Enum.flat_map(fn
-      {_, %{"fiber" => fiber, "family" => family} = binding}
-      when is_binary(fiber) and is_binary(family) ->
-        [
-          %{
-            fiber: fiber,
-            family: family,
-            depth: binding["depth"] || 0,
-            window_id: binding["window_id"]
-          }
-        ]
+    binding_entries =
+      for {_, %{"fiber" => fiber, "family" => family} = b} <- doc["bindings"] || %{},
+          is_binary(fiber) and is_binary(family) do
+        %{id: fiber, fiber: fiber, family: family, depth: b["depth"] || 0}
+      end
 
-      _ ->
-        []
-    end)
+    place_entries =
+      for {uid, %{"family" => family} = p} <- doc["places"] || %{},
+          is_binary(family),
+          fiber = p["fiber"] || fiber_path(uid, fibers),
+          is_binary(fiber) do
+        depth = p["depth"] || RexTree.family(fiber, fibers).depth
+        %{id: uid, fiber: fiber, family: family, depth: depth}
+      end
+
+    view_entries =
+      for {root, v} <- doc["views"] || %{},
+          is_binary(root) and is_map(v) do
+        family = v["family"] || root
+        fiber = v["fiber"] || root
+        %{id: v["uid"] || fiber, fiber: fiber, family: family, depth: 0}
+      end
+
+    (binding_entries ++ place_entries ++ view_entries)
     |> RexTree.layout()
     |> Enum.filter(fn entry ->
       window = RexTree.display_label(entry.label)
       session = RexTree.display_label(RexTree.session_label(entry.family))
-      normalize_title(title) == normalize_title(window <> " - " <> session)
+      norm == normalize_title(window <> " - " <> session)
     end)
+  end
+
+  defp title_entries(_, _, _), do: []
+
+  defp fiber_path(uid, fibers) do
+    case Enum.find(fibers, &(uid in [&1["uid"], &1["id"], &1["slug"]])) do
+      %{} = f -> f["slug"] || f["id"]
+      _ -> nil
+    end
   end
 
   # The window and session labels a worker's own daemon projects for it,
@@ -429,7 +340,7 @@ defmodule Shuttle.RexFocus do
     state = track_front(state)
     front = state.front
 
-    if state.title_ready and not front and rem(state.ticks, state.slow_every) != 0,
+    if state.title_ready and not front,
       do: %{state | last_front: false},
       else: observe_title(state, front)
   end
@@ -437,14 +348,8 @@ defmodule Shuttle.RexFocus do
   defp observe_title(state, front) do
     case state.title.() do
       {:ok, title} ->
-        state = state |> warning(nil) |> Map.put(:title_ready, true)
-
         raised = front and state.last_front != true
-        # A window's title joins its labels; the bare app name is no worker.
-        named = String.contains?(title, " - ")
-        moved = named and not is_nil(state.seen_title) and title != state.seen_title
-        seen = if named, do: title, else: state.seen_title
-        state = %{state | last_front: front, seen_title: seen}
+        state = state |> warning(nil) |> Map.merge(%{title_ready: true, last_front: front})
 
         if not front or String.trim(title) == "" do
           state
@@ -459,8 +364,7 @@ defmodule Shuttle.RexFocus do
 
                 if target &&
                      (raised or title != state.last_title or identity != state.last_target) do
-                  if moved, do: state.publish.(target)
-                  if state.following, do: state.target.(target)
+                  state.target.(target)
                 end
 
                 %{state | last_title: title, last_bindings: bindings, last_target: identity}
@@ -487,7 +391,7 @@ defmodule Shuttle.RexFocus do
           end
 
         state
-        |> warning(if(state.following, do: message))
+        |> warning(message)
         |> Map.put(:title_ready, false)
     end
   end
@@ -526,29 +430,21 @@ defmodule Shuttle.RexFocus do
 
     with {front, 0} <- lsappinfo.(["front"]),
          {out, 0} <- lsappinfo.(["info", "-only", "bundleid", String.trim(front)]) do
-      out =~ ~s{bundleID="com.superlogical.rex}
+      out =~ ~s{bundleID="com.superlogical.rex} or out =~ ~s{bundleID="dev.coey.rexweb}
     else
       _ -> true
     end
+  end
+
+  defp rex_front_line?(line) do
+    line =~ ~s("CFBundleIdentifier"="com.superlogical.rex) or
+      line =~ ~s("CFBundleIdentifier"="dev.coey.rexweb)
   end
 
   defp title_helper, do: Path.join(Shuttle.Env.home(), ".local/bin/shuttle-rex-title")
 
   defp listening? do
     Shuttle.Terminal.primary() == Shuttle.Terminal.Rex and Shuttle.Voice.snapshot().enabled
-  end
-
-  defp following? do
-    Shuttle.Terminal.primary() == Shuttle.Terminal.Rex and
-      case Shuttle.Voice.snapshot() do
-        %{enabled: true, follow: true} -> true
-        _ -> false
-      end
-  end
-
-  defp watched? do
-    Shuttle.Terminal.primary() == Shuttle.Terminal.Rex and
-      Registry.lookup(Shuttle.Voice.Streams, :rex_focus) != []
   end
 
   defp command do
