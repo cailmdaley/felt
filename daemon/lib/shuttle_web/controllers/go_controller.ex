@@ -13,6 +13,17 @@ defmodule ShuttleWeb.GoController do
 
   import ShuttleWeb.RelayHelpers, only: [relay_json: 3]
 
+  def create(conn, %{"target" => "desk"}) do
+    case Shuttle.Go.desk() do
+      {:ok, answer} ->
+        json(conn, answer)
+
+      {:error, reason} ->
+        {status, error} = Shuttle.Go.http_error(reason)
+        conn |> put_status(status) |> json(%{went: false, error: error})
+    end
+  end
+
   def create(conn, %{"fiber_id" => fiber_id} = params)
       when is_binary(fiber_id) and fiber_id != "" do
     case Shuttle.Go.go(fiber_id, params["origin"], forwarded: params["forwarded"] == true) do

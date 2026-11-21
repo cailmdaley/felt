@@ -292,6 +292,7 @@ func (a *app) rootCmd() *cobra.Command {
 		a.statusCmd(),
 		a.psCmd(),
 		a.tunnelsCmd(),
+		a.rexSetupCmd(),
 		a.validateIdentityCmd(),
 		feltcli.NewLsCmd(a.env, a.shuttleViewOptions()),
 		a.wrapShowForFiles(a.wrapShowForTranscripts(feltcli.NewShowCmd(a.env, a.shuttleViewOptions()))),

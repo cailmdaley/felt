@@ -52,6 +52,22 @@ defmodule Shuttle.Go do
     end
   end
 
+  @doc "Go to the Desk tab in Rex when `pages.desk` is enabled."
+  @spec desk() :: {:ok, answer()} | {:error, term()}
+  def desk do
+    if Terminal.primary() == Rex and match?({:ok, %{desk: true}}, Shuttle.Host.pages()) do
+      runner = runner()
+
+      with {:ok, desk} <- RexLayout.ensure_desk(runner),
+           {:ok, moved} <- Rex.select_binding(runner, desk, mac_only: true),
+           :ok <- if(moved, do: Rex.activate_app(runner), else: :ok) do
+        {:ok, %{went: moved, place: "desk"}}
+      end
+    else
+      {:ok, @none}
+    end
+  end
+
   @doc "The HTTP status and words for a refused go."
   def http_error({:unknown_origin, origin}),
     do: {400, OriginRouter.unknown_origin_message(origin)}

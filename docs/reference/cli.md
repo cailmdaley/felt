@@ -598,6 +598,7 @@ See [Connect your machines](../shuttle/remotes.md#verify-work-across-the-connect
 | `shuttle host class <class>` | Set this host's trust class in `~/.config/shuttle/host.json` (`single-user`, `shared-multi-user`, `exposed`) |
 | `shuttle host check-owner` | Verify that a socket-class TCP listener belongs to this user, from `/proc/net/tcp{,6}` (a no-op for Unix listeners and off Linux) |
 | `shuttle tunnels install [name ...]` | Write (and optionally bootstrap) autossh tunnels for the named remotes, or all enabled remotes if none are given (`--unit-dir`, `--log-dir`, `--autossh-path`, `--write-only`, `--dry-run`). launchd on macOS, systemd user units on Linux |
+| `shuttle rex-setup` | Install `share/rex/shuttle.lua` into Rex's config directory (`~/.config/rex/shuttle/init.lua`) and append `require("shuttle").setup{}` to `~/.config/rex/init.lua` if not already present (`--config-dir`, `--source`, `--key`, `--dry-run`) |
 | `shuttle validate-identity` | Check federated fiber UID invariants across daemon feeds (`--daemon-url`, repeatable, to check other hosts) |
 | `shuttle contract` | Print the daemon-facing CLI contract version, used at daemon boot to detect an incompatible CLI |
 | `shuttle mark-runtime <fiber>` | Stamp `shuttle.runtime` continuation fields (`--dispatched-at`, `--session`, `--run-id`, `--handed-off-at`, `--thread-exit-verb`; at least one required); daemon-facing, not for manual use |

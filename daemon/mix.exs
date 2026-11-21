@@ -83,6 +83,13 @@ defmodule Shuttle.MixProject do
       File.cp!(src, Path.join(share, Path.basename(src)))
     end
 
+    rex_share = Path.join(share, "rex")
+    File.mkdir_p!(rex_share)
+
+    for src <- Path.wildcard(Path.expand("share/rex/*.lua", __DIR__)) do
+      File.cp!(src, Path.join(rex_share, Path.basename(src)))
+    end
+
     release
   end
 

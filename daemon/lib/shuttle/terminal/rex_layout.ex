@@ -2336,6 +2336,28 @@ defmodule Shuttle.Terminal.RexLayout do
     end
   end
 
+  @doc "Ensure the Desk session and tab exist in Rex and return its binding."
+  def ensure_desk(runner) do
+    case Shuttle.Host.pages() do
+      {:ok, %{base: base, desk: true}} ->
+        with {:ok, %{"host_id" => server} = identity} <- Rex.whoami(runner),
+             :ok <- Backend.reconcile(runner, identity),
+             {:ok, _} <- reconcile_desk(runner, server, identity, base, true),
+             {:ok, doc} <- Bindings.read() do
+          case doc["desk"] do
+            %{"session_id" => _, "window_id" => _} = desk -> {:ok, desk}
+            _ -> {:error, :desk_unavailable}
+          end
+        end
+
+      {:error, message} ->
+        {:error, message}
+
+      _ ->
+        {:error, :desk_disabled}
+    end
+  end
+
   defp reconcile_desk(runner, server, identity, base, true) do
     Backend.family_lock(:desk, fn ->
       with {:ok, doc} <- Bindings.read(),

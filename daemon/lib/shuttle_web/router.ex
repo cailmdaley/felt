@@ -46,6 +46,8 @@ defmodule ShuttleWeb.Router do
     post("/attach", AttachController, :create)
     # Move the Mac's Rex app to a fiber's live worker (owner-routed); a page's one verb.
     post("/go", GoController, :create)
+    # Fleet-wide items and focused-thread lifecycle actions for Rex's native palette.
+    get("/palette", PaletteController, :show)
     post("/terminal/reveal", AttachController, :reveal)
     # Start (or find) the tmux session resuming a past harness session on THIS
     # host — the leg /attach forwards to the host that ran it.
