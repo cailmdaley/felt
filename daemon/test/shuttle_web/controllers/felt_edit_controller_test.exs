@@ -273,9 +273,9 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     args_file
   end
 
-  # The chronicle renames a cycle band in place and writes an era's intention
-  # from its face. Both are felt-NATIVE fields, so neither can ride `set` —
-  # felt refuses native keys there — and each needs its own dedicated flag.
+  # Renaming a fiber and rewriting its body touch felt-NATIVE fields, so neither
+  # can ride `set` — felt refuses native keys there — and each needs its own
+  # dedicated flag.
   test "routes a rename and a body rewrite through felt edit --name/--body" do
     root =
       System.tmp_dir!()

@@ -143,14 +143,13 @@ const LOCAL_HOST = 'ada-workstation'
 /**
  * A block whose worker runs somewhere OTHER than the host serving this page.
  *
- * LOAD-BEARING, do not normalize away. Chronicle prints a row's hostname only
+ * LOAD-BEARING, do not normalize away. The board prints a row's hostname only
  * when that row ran elsewhere (a note matching the page host is suppressed,
  * because a hostname repeated on every row is a constant pretending to be
- * information). With every mock fiber on `ada-workstation` — which is also the
- * mock activity's `host` — that path could never fire, and a note that never
- * renders looks exactly like a note that is correctly suppressed. Exactly one
- * fiber wears this so both branches are visible at once: one row with a
- * hostname, the rest bare.
+ * information). With every mock fiber on `ada-workstation` that path could
+ * never fire, and a note that never renders looks exactly like a note that is
+ * correctly suppressed. Exactly one fiber wears this so both branches are
+ * visible at once: one row with a hostname, the rest bare.
  */
 const shuttleBlockElsewhere = () => ({
   ...shuttleBlock(),
@@ -186,8 +185,8 @@ const civilDay = (offsetDays: number) => {
 /**
  * Every mock fiber that runs carries a ULID, as a real one does: a Shuttle
  * worker runs in `<leaf>-<ULID>-shuttle`, the session ledger records the
- * fiber's `uid` beside its id (Chronicle's join falls back to it when the id
- * does not resolve), and the card drawer's History asks the ledger BY uid.
+ * fiber's `uid` beside its id, and the card drawer's History asks the ledger
+ * BY uid.
  *
  * Crockford base32 (0-9 A-Z minus I, L, O, U), 26 characters, checked at boot
  * by `assertUlids` below so a typo fails loudly instead of silently unjoining.
@@ -467,8 +466,7 @@ ROLE_SEATS.push({
 /**
  * RESTING — constitutions put down between sessions (`status: open` +
  * `horizon: stashed`). Enough of them to fill several Resting clusters. None
- * carry a `uid` — Resting never joins a row to the activity plane, only
- * Chronicle does.
+ * carry a `uid`.
  */
 const SEATS: MockFiber[] = [
   'null-suite/quick launch',
@@ -495,14 +493,12 @@ const SEATS: MockFiber[] = [
 }))
 
 /**
- * CYCLES — `cycle`-tagged fibers, each a named span of time. Chronicle draws
- * them as bands above the work, and they appear in NO desk column: the read model files a cycle in `response.cycles`
- * and nowhere else, so the column counts never see one.
+ * CYCLES — `cycle`-tagged fibers, each a named span of time. They appear in NO
+ * desk column: the read model files a cycle in `response.cycles` and nowhere
+ * else, so the column counts never see one.
  *
- * Without a band on screen there is nothing to click offline, so one live
- * cycle spans today (a band is visible whenever the harness is opened), one
- * runs open-ended, and one closed last week, giving Chronicle current, unbounded
- * and past spans to place.
+ * One live cycle spans today, one runs open-ended, and one closed last week,
+ * covering current, unbounded and past spans.
  */
 const CYCLES: MockFiber[] = [
   {
@@ -516,10 +512,7 @@ const CYCLES: MockFiber[] = [
     due: civilDay(10),
   },
   {
-    // OPEN-ENDED — a `start:` and no `due:`. `cycleSpan` clamps its end to
-    // today, so it draws as a band with no right edge yet rather than a span
-    // that happens to stop. That is a distinct render path from the dated
-    // cycle above, and this is the only card exercising it.
+    // OPEN-ENDED — a `start:` and no `due:`.
     id: 'loom/cycles/rentree-push',
     uid: ULID.rentreePush,
     name: 'rentrée push',
@@ -529,9 +522,7 @@ const CYCLES: MockFiber[] = [
     start: civilDay(-12),
   },
   {
-    // WHOLLY PAST — started and ended before today, closed last week. The two
-    // above both reach the present, so without this one Chronicle never draws a
-    // band that lies entirely behind today.
+    // WHOLLY PAST — started and ended before today, closed last week.
     id: 'work/cycles/summer-school-block',
     uid: ULID.summerSchool,
     name: 'summer-school block',
@@ -785,7 +776,7 @@ const MOCK_FEED = {
 
 /**
  * The session ledger — `GET /api/v1/sessions`, one line per fiber↔session
- * pairing. Chronicle joins activity buckets through it as RUNG 0.
+ * pairing.
  *
  * Three things it deliberately covers:
  *

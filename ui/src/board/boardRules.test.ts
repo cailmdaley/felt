@@ -357,11 +357,10 @@ describe('what the board admits — a shuttle block, or a cycle', () => {
   })
 
   it('still admits a cycle, which carries neither block nor due', () => {
-    // Open-ended on purpose: a `start:` and nothing else is a legitimate band,
-    // and the Chronicle must keep drawing it.
+    // Open-ended on purpose: a `start:` and nothing else is a valid cycle span.
     const board = boardOf([row({ id: 'cycles/autumn', tags: ['cycle'], start: dayFromNow(-10) })])
     expect(board.cycles).toHaveLength(1)
-    // ...and it reaches the Chronicle without ever touching a Desk column.
+    // ...and it lands in `cycles` without ever touching a Desk column.
     expect(everywhere(board)).toEqual([])
   })
 })

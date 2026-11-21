@@ -46,8 +46,8 @@ the drafts teaches you to distrust the Desk.
 ## Membership is derived, never assigned
 
 A fiber is never *put in* a cycle. There is no field to write, nothing to keep
-in sync, and no way for a cycle's roster to disagree with the calendar. The
-board asks three questions in order, and the first that answers is the reason:
+in sync, and no way for a cycle's roster to disagree with the calendar. A fiber
+belongs to a cycle's span when any of three conditions holds, in order:
 
 | Rung | A fiber belongs when |
 |---|---|

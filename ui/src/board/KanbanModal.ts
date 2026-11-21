@@ -421,7 +421,7 @@ export class KanbanModal {
     })
   }
 
-  /** Desk and Chronicle cards enter the same owner-addressed document channel. */
+  /** Desk cards enter the owner-addressed document channel. */
   private openDocumentChannel(card: KanbanCard, doc?: DocKey): void {
     if (this.activeViewId === 'desk') this.deskKeyboard?.select({ uid: card.uid ?? card.id, origin: card.originId }, false)
     this.workspaceReturnFocus = document.activeElement instanceof HTMLElement && document.activeElement !== document.body

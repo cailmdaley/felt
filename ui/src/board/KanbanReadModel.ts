@@ -51,9 +51,9 @@ export interface BuildKanbanResponseOptions {
  *
  * A CYCLE is the exception, and it is not work: admitted on its tag alone —
  * no shuttle block, no `due:`, no lifecycle status required, because an
- * open-ended cycle (a `start:` and nothing else) is a legitimate band the
- * Chronicle must draw. The read model files it among the `cycles` before it
- * reads any column, so it never reaches a Desk column.
+ * open-ended cycle (a `start:` and nothing else) is still a valid span. The
+ * read model files it among the `cycles` before it reads any column, so it
+ * never reaches a Desk column.
  *
  * The daemon's feed is WIDER than this on purpose (`--has-field due` is one of
  * its three admission walks, see daemon/lib/shuttle/fiber_documents.ex): it serves

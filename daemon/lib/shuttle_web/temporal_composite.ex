@@ -1,8 +1,8 @@
 defmodule ShuttleWeb.TemporalComposite do
   @moduledoc """
   Shared assembly for the cross-host temporal composites
-  (`/activity/composite`, `/sessions/composite`, `/commits/composite`,
-  `/sent-files/all/composite`).
+  (`/sessions/composite`, `/commits/composite`, `/sent-files/all/composite`,
+  `/board/composite`).
 
   Each composite is the same shape as the kanban's
   `GET /api/v1/fibers/composite`: this host's live local read, concatenated
@@ -72,8 +72,8 @@ defmodule ShuttleWeb.TemporalComposite do
   @doc """
   Build the `origins` block.
 
-  `local_extra` and `remote_extra.(name, entry)` contribute the per-composite
-  fields (activity adds each origin's covered `window`, the others add nothing).
+  `local_extra` and `remote_extra.(name, entry)` contribute any per-composite
+  fields.
   """
   def origins(entries, local_extra \\ %{}, remote_extra \\ fn _name, _entry -> %{} end) do
     entries

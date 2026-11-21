@@ -15,7 +15,7 @@
 //      it saw and the reason `blockingDialogOpen` exists as the dialog half of
 //      `keystrokeIsSpokenFor` without the typing half. Guard the chord with
 //      the whole predicate and the one shortcut a Mac user tries unprompted is
-//      dead in the Chronicle's search box — the single place a person is most
+//      dead in the Find box — the single place a person is most
 //      likely to be typing when they reach for it.
 // S2 — settings is dispatched BEFORE the view hotkeys, so every key
 //      `settingsHotkey` answers for is a key `1`-`2` never sees. A predicate

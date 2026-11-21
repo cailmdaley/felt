@@ -6,8 +6,8 @@ writer/reader contract.
 
 ## Owning the event stream — `shuttle hook event`
 
-shuttle derives per-minute activity, per-session waiting state and the
-sent-files trail from its OWN agent hook-event stream. `shuttle hook event`
+shuttle derives per-session waiting state, the sent-files trail, session
+succession and family-board records from its OWN agent hook-event stream. `shuttle hook event`
 (`internal/shuttlecli/hook_event.go`) appends one JSON line per hook event to
 `$SHUTTLE_EVENTS_FILE`, else `events.jsonl` under the data directory.
 `Shuttle.EventStream` is the daemon's one reader; outside the daemon, only an
@@ -23,7 +23,7 @@ socket, daemon state). Go resolves it in `shuttle.DataDir`
 (`internal/shuttle/datadir.go`), Elixir in `Shuttle.data_dir/0`, and
 `daemon/test/fixtures/data_dir/cases.json` holds both to the same answers.
 
-**One reader, five projections.** `Shuttle.EventStream` decodes each line once and feeds five pure projections held in memory: activity (`Shuttle.Activity`), sent files (`Shuttle.SentFiles`), turn state (`Shuttle.WaitingTracker`), session succession (`Shuttle.SessionBinding`), and family-board records (`Shuttle.Board`).
+**One reader, four projections.** `Shuttle.EventStream` decodes each line once and feeds four pure projections held in memory: sent files (`Shuttle.SentFiles`), turn state (`Shuttle.WaitingTracker`), session succession (`Shuttle.SessionBinding`), and family-board records (`Shuttle.Board`).
 It seeds from `events.jsonl.1` then the live file in `init/1`, before the Poller starts, and afterwards reads only appended bytes.
 Its projections are the only way into the stream's contents inside the daemon: a reader asks the stream, which catches up before answering, and a stream that is down fails the read rather than having it re-read both files.
 A rename rotation, recognized by the live path's inode moving, continues every projection: the tail of the old file is drained, then the new one is read from its start.

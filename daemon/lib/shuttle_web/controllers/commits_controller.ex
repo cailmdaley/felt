@@ -17,7 +17,7 @@ defmodule ShuttleWeb.CommitsController do
   — the alternative is silently serving a different window than the caller
   asked for.
 
-  **Host-scoped, not owner-routed**, like `/sessions` and `/activity`: the
+  **Host-scoped, not owner-routed**, like `/sessions`: the
   ledger records the commits made *on this machine*. A cross-host view fans out
   and merges on the `host` stamp the composite adds.
   """

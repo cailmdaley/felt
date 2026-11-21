@@ -13,14 +13,13 @@ defmodule ShuttleWeb.SessionsController do
 
   `since_ms` is optional and defaults to the whole ledger. `uid` is optional
   too and narrows the records to one fiber's pairings (both here and on the
-  composite). Unlike `/activity`
-  there is no width cap, because the file holds one line per *session* rather
-  than one per hook event — the whole history is smaller than a single busy
-  hour of activity. A `since_ms` that is present but not an integer is a 400;
+  composite). There is no width cap, because the file holds one line per
+  *session* rather than one per hook event — the whole history stays small. A
+  `since_ms` that is present but not an integer is a 400;
   the alternative is silently serving a different window than the caller asked
   for.
 
-  **Host-scoped, not owner-routed**, like `/activity` and `/commits`: the
+  **Host-scoped, not owner-routed**, like `/commits`: the
   ledger records the sessions THIS daemon paired. A cross-host view fans out
   and merges on the `host` stamp each record already carries.
   """
@@ -34,9 +33,8 @@ defmodule ShuttleWeb.SessionsController do
   alias ShuttleWeb.TemporalComposite, as: Composite
 
   # Absent means "the whole ledger", so the bound defaults to 0 rather than
-  # 400ing the way the required `/activity` bounds do. That is also why the 400
-  # renders through `bad_param/2` and not `epoch_ms_message/1`: the latter says
-  # "is required", and `since_ms` is not.
+  # 400ing. That is also why the 400 renders through `bad_param/2` and not
+  # `epoch_ms_message/1`: the latter says "is required", and `since_ms` is not.
   def show(conn, params) do
     case integer_param(params, "since_ms", default: 0) do
       {:ok, since_ms} ->

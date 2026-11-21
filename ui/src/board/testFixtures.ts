@@ -168,7 +168,7 @@ export function ownerFiberResponse(options: {
   }
 }
 
-// The real Chronicle column layout: 28 back, 14 forward, today fixed at a
+// Fixed test window: 28 back, 14 forward, today fixed at a
 // known civil day. Built from the production helper, which needs no zone.
 export const WINDOW_DAYS = buildTimelineDays(28, 14, '2026-07-15')
 export const DAY_INDEX = new Map(WINDOW_DAYS.map((d, i) => [d.iso, i]))

@@ -2127,13 +2127,11 @@ export class Dock {
           card.id = changes.parentId ? `${changes.parentId}/${slug}` : slug
         }
 
-        // `due:` — the same door every other due write on the board knocks on:
-        // `/felt-edit`, owner-routed by `origin` (a timeline drop through
-        // `setSurface`, the Chronicle's edge drag through `writeDue`). A fiber's
-        // due has exactly one write path and this is not a second one. The key's
-        // presence is the whole protocol server-side: absent leaves the date,
-        // `null` clears it, a string sets it — so the branch tests for the key,
-        // not for a truthy value.
+        // `due:` — owner-routed through `/felt-edit` by `origin`, the single
+        // write path for a fiber's due date. The key's presence is the whole
+        // protocol server-side: absent leaves the date, `null` clears it, a
+        // string sets it — so the branch tests for the key, not for a truthy
+        // value.
         if ('due' in changes) {
           await postDaemonJson(this.shuttleBase, '/api/v1/felt-edit', {
             fiber_id: fiberId,

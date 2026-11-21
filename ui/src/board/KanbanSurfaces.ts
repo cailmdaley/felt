@@ -348,10 +348,8 @@ export function buildTimelineDays(
 
 
 /** The `due <date>` chip on a card. Reads the value as the CIVIL DAY it names,
- *  the same way Chronicle places the card's due mark — otherwise one board
- *  would name two different days for one due, Thursday on the column and
- *  Wednesday on the chip. The day is said as a civil day, never re-parsed as
- *  an instant (see civilDay.ts). */
+ *  never re-parsed as an instant (see civilDay.ts), so the chip agrees with
+ *  the date written on the fiber across every timezone. */
 export function formatDue(iso: string): string {
   return formatCivilDay(dueCivilDay(iso), { month: 'short', day: 'numeric' }) ?? iso
 }

@@ -329,18 +329,9 @@ Observables: 9.
 | **aadf7826 settings hotkey (`chassisGuards.test.ts`)** | 23 key × modifier answers | **re-oracled** `bc67bcbf` (written truth table) |
 | | (absent modifier fields) | **restored** `bc67bcbf` |
 | **7811b90f projectsForHost (`projectPicker.test.ts`)** | local → 2 ids in order; a remote host → 1; a host with none → []; reversed order kept | **restored** `593d0584` as fixed examples; property now three invariants |
-| **4c71e70f columnIndexAtX, overlayDueEdits (`chronicleDueDrag.test.ts`)** | 0, 1, 5, edge at 48; clamps; dayW 0; dayCount 0 | floor-bracket property |
-| | 2.99·dayW → 2 | **restored** `76990c5e` |
-| | overlay: untouched cards by reference, no mutation, confirmed / unconfirmed / no-due edits | overlay property (each case 20–88 of 200 runs) |
-| **757420b7 localHits (`chronicleSearch.test.ts`)** | hit id, `where`, onBoard; id-only; case and padding | property set equality, `where`, re-query equality |
-| | exact > prefix > substring | **re-oracled and pinned** `92324444` |
 | **f8703362 wikilinks (`wikilinks.test.ts`)** | 7 resolutions | 7 table rows, same literals |
 | **0d07b647 settings API (`settingsApi.test.ts`)** | 15 method / URL / body checks | 15 calls × {local, remote}, whole-request equality |
 | | local write with empty text | **restored** `e952d80f` |
-| **cfcdedfa chronicle window (`chronicleWindow.test.ts`)** | 12 edge-extension cases | edge property, whole-plan equality (exact trigger edge 10×, one pixel outside 7×) |
-| | settled chunks re-found across a grown window and a later clock; contiguity; 6 am bounds; DST witnesses | chunk property in 5 zones |
-| | live chunk unchanged across a leftward grow at the same clock | **restored** `f1f8da93` |
-| | chunk helpers at the epoch | **pinned** `f1f8da93` (the property already anchors `% 28`) |
 | **810243e9 role placement (`KanbanComposite.test.ts`)** | 18 placement and field checks | 3 kinds × 6 runtimes table |
 | | in-flight list exactly `['role']` | **restored** `483c448e` (had become `includes`) |
 | **31424a79 project_dir inheritance (`startPrompt.test.ts`)** | nearest same-host, same-store ancestor; another store; own dir; no host | property over generated trees |

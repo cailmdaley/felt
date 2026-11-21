@@ -2,10 +2,8 @@ defmodule Shuttle.EventStreamTest do
   @moduledoc """
   `Shuttle.EventStream`: seeds its projections from `events.jsonl.1` and
   `events.jsonl`, follows appends, answers only for its own path, rebuilds on
-  a shrink in place, and continues across a real rename-rotation — including a
-  waiting spell and a tool call that straddle it. Most assertions read the
-  activity fold, the projection with the most state to carry; the last tests
-  read all three projections off the same pass.
+  a shrink in place or unaccountable replacement, and continues across a real
+  rename-rotation across its held projections.
 
   The poll interval is set far out, so every catch-up here is the one a read
   performs; nothing depends on timing.

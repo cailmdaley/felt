@@ -206,8 +206,8 @@ defmodule ShuttleWeb.RelayHelpers do
   Render `{:bad_param, key}` from `integer_param/3` as a 400.
 
   Note the one word this sentence lacks against `epoch_ms_message/1`:
-  `/activity`'s bounds must be present, while the temporal feeds'
-  `since_ms`/`until_ms` default to an open window and only have to parse.
+  optional `since_ms`/`until_ms` bounds default to an open window and only
+  have to parse.
   """
   def bad_param(conn, key) do
     conn

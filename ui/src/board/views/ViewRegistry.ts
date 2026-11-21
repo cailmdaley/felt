@@ -281,7 +281,7 @@ export interface HotkeyLike {
  *
  *   - `'chord'` is inert only while another dialog is layered over the board
  *     (`blockingDialogOpen`), not while a field has focus. A modifier chord is
- *     never typing, and refusing it inside the Chronicle's search box would
+ *     never typing, and refusing it inside the Find box would
  *     make the one universal shortcut the least reliable one.
  *   - `'bare'` follows the same rule as every other bare key
  *     (`keystrokeIsSpokenFor`), because a lone `,` in a text field is a comma.

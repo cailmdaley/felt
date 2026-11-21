@@ -264,12 +264,12 @@ export const RAIL_START_HOUR = 6
  * The civil day whose RAIL contains an instant — the "which day is it" a view
  * whose day begins at dawn has to ask.
  *
- * The chronicle draws a day as a `startHour → startHour` rail, because work
- * that runs past midnight belongs to the evening it grew from. That makes this a
- * different question from {@link isoDayLocal}: at 02:00 on Wednesday the rail
- * being worked is TUESDAY's. Asking the midnight question while drawing the dawn
- * one is a real defect — it puts "today" on a column that has not started yet
- * and inks the night's work one column past its own today line.
+ * A day rail runs `startHour → startHour`, because work that runs past midnight
+ * belongs to the evening it grew from. That makes this a different question
+ * from {@link isoDayLocal}: at 02:00 on Wednesday the rail being worked is
+ * TUESDAY's. Asking the midnight question while drawing the dawn one puts
+ * "today" on a column that has not started yet and inks the night's work one
+ * column past its own today line.
  *
  * The boundary is a WALL-CLOCK hour, so this reads the wall hour and steps back
  * a calendar day rather than subtracting `startHour` hours of milliseconds. On

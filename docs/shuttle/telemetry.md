@@ -138,15 +138,15 @@ the hub's cache instead. Each remote's last good answer is kept on disk under
 contributing what it last said, and is marked stale once that answer is more
 than ten minutes old.
 
-**Every route answers `304` when its inputs have not moved.** `/activity`'s
-validator is its window, quantized to the minute, plus the `{mtime, size}` of
-the events file and its rotated sibling; the ledgers validate on their files.
-A composite's validator adds each remote's cached copy of the feed.
+**Every route answers `304` when its inputs have not moved.** The ledgers
+validate on their files, and `/sent-files/all` validates on the `{mtime, size}`
+of the events file and its rotated sibling. A composite's validator adds each
+remote's cached copy of the feed.
 
 The `304` is a bandwidth saving, not a cost model. A validator over
 `events.jsonl` moves every few seconds on a busy host, so no route over it
 relies on one: `Shuttle.EventStream` reads `events.jsonl.1` and `events.jsonl`
-once at boot and holds four projections in memory: activity, sent-file events, per-session turn state, and session succession.
+once at boot and holds four projections in memory: sent-file events, per-session turn state, session succession, and family-board records.
 It then reads only what has been appended since its last poll, following a rotation by the file's inode. That is
 what makes a request cost a `stat` and an in-memory read rather than a full
 re-stream. A sent file therefore stays on the trail through one rotation and

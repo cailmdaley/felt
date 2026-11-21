@@ -1,7 +1,7 @@
 defmodule Shuttle.RemoteTemporalRegistry do
   @moduledoc """
-  Holds each configured remote Shuttle daemon's five **temporal** feeds —
-  `/activity`, `/sessions`, `/commits`, `/sent-files/all`, `/board` — fetching them on
+  Holds each configured remote Shuttle daemon's four **temporal** feeds —
+  `/sessions`, `/commits`, `/sent-files/all`, `/board` — fetching them on
   demand, and persists each to disk so the hub's memory of a remote survives
   both a disconnect and a daemon restart.
 
@@ -19,7 +19,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
 
     * **Per-feed state.** Each `{remote, feed}` pair carries its own items,
       etag, `last_polled_at`, `last_attempt_at` and `last_error`, and is
-      fetched by its own supervised task. A slow `/activity` never holds up
+      fetched by its own supervised task. A slow `/board` never holds up
       `/sessions`, and the `origins` block a composite serves describes the
       feed it served.
 
@@ -51,29 +51,17 @@ defmodule Shuttle.RemoteTemporalRegistry do
 
   A feed is `stale` iff its last success is more than `@stale_after_ms` ago
   (or it has never succeeded). That bound is ten freshness gates — ten minutes
-  — because it has to clear the consumer's own cadence (Chronicle refetches
+  — because it has to clear the consumer's own cadence (the board refetches
   every five minutes) plus one fetch that outlived the wait: a remote that
   answered the previous request and is slow on this one has not gone stale.
   A failure never sets the flag on its own; it withholds a fresh timestamp and
   records `last_error`. Restored data inherits its persisted `last_polled_at`,
   so it ages from when it was actually fetched.
 
-  ## The activity window
+  ## Feed windows
 
-  Activity is fetched over a **trailing 14-day window** whose upper bound is
-  now ceiled to a `@window_quantum_ms` (5-minute) boundary. The quantum is what
-  lets the remote answer 304: its validator covers the window, and a window
-  sliding with the wall clock would never match. Within a quantum the remote
-  304s until its event stream moves; the window re-anchors at most once per
-  quantum. The feed is refetched whole rather than merged incrementally — a
-  full refetch is redundant only behind an `If-None-Match`, which is exactly
-  where it happens. Sessions, commits, sent files and board ask for the whole ledger
+  Sessions, commits, sent files and board ask for the whole ledger
   (`since_ms=0`); the composite applies the request's window.
-
-  Each activity entry records the window it covers. A composite asking for a
-  wider window is served what is held, and the covered window is reported back
-  in the origins block, so the view marks the rest as unknown rather than
-  quiet.
 
   ## Test injection
 
@@ -107,9 +95,8 @@ defmodule Shuttle.RemoteTemporalRegistry do
 
   @typedoc """
   One remote's view of one feed, as `entries/2` returns it. `window` is the
-  covered `{from_ms, to_ms}` for activity and `nil` for every other feed (and
-  for activity before its first success). `etag` is the remote's validator for
-  `items`, `nil` when it sent none.
+  covered `{from_ms, to_ms}` when a feed carries one and `nil` otherwise.
+  `etag` is the remote's validator for `items`, `nil` when it sent none.
   """
   @type view :: %{
           items: [map()],

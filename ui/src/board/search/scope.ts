@@ -43,7 +43,7 @@ export interface FindSection {
 }
 
 export interface ListScope {
-  /** The chip's words (`in Chronicle`); none at the board's own scope. */
+  /** The chip's words (e.g. `in #channel`); none at the board's own scope. */
   chip?: string
   sections: FindSection[]
   /** The field is about to list: read what the sections will search. */

@@ -1,4 +1,4 @@
-/* A thread's state as colour, shared by the constitution's page and the Globe's counts: red only for questions and blocks. */
+/* A thread's state as colour on the constitution's page: red only for questions and blocks. */
 .family-map [data-standing] { --fm-tone: var(--ws-ink-muted); }
 .family-map :is([data-standing='question'], [data-standing='blocked']) { --fm-tone: var(--ws-state-question); }
 .family-map [data-standing='turn'] { --fm-tone: var(--ws-state-idle); }

@@ -1,6 +1,6 @@
 defmodule ShuttleWeb.SearchControllerTest do
   @moduledoc """
-  `GET /api/v1/search` — the Chronicle's body search.
+  `GET /api/v1/search` — the board's body search.
 
   felt is shelled through the `:felt_runner` seam, so these assertions never
   depend on what happens to be in the real loom (or on felt being on PATH).
@@ -80,7 +80,7 @@ defmodule ShuttleWeb.SearchControllerTest do
     assert "name" in hit["where"]
     assert "id" in hit["where"]
     assert "body" in hit["where"]
-    # The closed/tempered record is in scope — the chronicle is the whole record.
+    # The closed/tempered record is in scope — body search covers the whole record.
     assert hit["status"] == "closed"
     assert hit["tempered"] == true
 

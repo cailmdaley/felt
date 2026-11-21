@@ -39,11 +39,11 @@
  *
  *   kicker   all-small-caps, --track-kicker. Section and group heads,
  *            eyebrows ("Waiting on you"), rail groups, settings group heads, a
- *            pasted block's label, a Chronicle day name. At --type-note in
+ *            pasted block's label. At --type-note in
  *            chrome; the same treatment sets the Desk's column heads and a
  *            view's title at --type-display.
  *   nav      all-small-caps, --track-nav, at --type-title: the view tabs
- *            (Desk, Chronicle, Board), whose small caps then stand as tall as
+ *            (Desk, Channels), whose small caps then stand as tall as
  *            capitals at label size.
  *
  * Caps come only from font-variant-caps: all-small-caps. Other caps variants
