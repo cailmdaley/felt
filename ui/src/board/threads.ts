@@ -173,3 +173,35 @@ export function responseThreadIndex(resp: KanbanResponse, cards: () => readonly 
   return index
 }
 export function adoptThreadIndex(resp: KanbanResponse, index: ThreadIndex): void { indexes.set(resp, index) }
+
+const NO_THREADS = new ThreadIndex([])
+/** The response's thread graph: the one the read model built, or built once from its cards. */
+export function threadIndexFor(resp: KanbanResponse | null): ThreadIndex {
+  return resp ? responseThreadIndex(resp, () => boardCards(resp)) : NO_THREADS
+}
+
+/** Every card the response holds, each fiber once. */
+export function boardCards(resp: KanbanResponse | null): KanbanCard[] {
+  if (!resp) return []
+  const seen = new Set<string>()
+  const out: KanbanCard[] = []
+  for (const list of [
+    resp.now.drafts,
+    resp.now.inFlight,
+    resp.now.awaitingReview,
+    resp.timeline.past,
+    resp.timeline.futureDated,
+    resp.stash,
+    resp.roles,
+    resp.threads ?? [],
+  ]) {
+    for (const card of list) {
+      // A uid names one fiber on every host; without one, a path is one host's own.
+      const key = card.uid ?? `${card.originId}\u0000${card.id}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push(card)
+    }
+  }
+  return out
+}

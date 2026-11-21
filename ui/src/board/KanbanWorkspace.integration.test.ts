@@ -2,7 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { KanbanModal } from './KanbanModal.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
-import { KanbanSurfaceRenderer, threadIndexFor } from './KanbanSurfaces.js'
+import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
+import { threadIndexFor } from './threads.js'
 import { deskOrder } from './deskOrdering.js'
 import { card, response, settle } from './testFixtures.js'
 

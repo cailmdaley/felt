@@ -3,7 +3,7 @@ import { buildKanbanResponseFromComposite } from './KanbanReadModel.js'
 import { deskOrder } from './deskOrdering.js'
 import { attentionOf } from './attention.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
-import { boardCards, threadIndexFor } from './KanbanSurfaces.js'
+import { boardCards, threadIndexFor } from './threads.js'
 import type { KanbanResponse } from './KanbanTypes.js'
 import { servedFeed } from './testFixtures.js'
 

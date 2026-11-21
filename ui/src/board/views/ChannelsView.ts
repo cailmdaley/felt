@@ -3,7 +3,7 @@ import '@ui-sdk/web/tooltip'
 import { relative, retime } from '../elements/time.js'
 import { getDaemonJson, postDaemonJson } from '../daemonApi.js'
 import type { KanbanCard } from '../KanbanTypes.js'
-import { boardCards, threadIndexFor } from '../KanbanSurfaces.js'
+import { boardCards, threadIndexFor } from '../threads.js'
 import { isMobileViewport } from '../mobile.js'
 import {
   MISC, arranged, bygone, clearLineKey, clearedLines, lineIds, composeChannels, composeStream, fiberOf, runningIn, hideKey, railOrder, reordered, showKey, unclearLineKey, unpinKey,

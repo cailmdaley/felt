@@ -13,7 +13,7 @@ import { normalizeSentFiles, type SentFile } from '../sentFiles.js'
 import { fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
 import type { DeskPlacement } from '../deskOrdering.js'
 import { head, RESOURCE_PRIORITY } from '../documentResources.js'
-import { COMPANION_NAMES, documentActivity, familyKey, fiberKey, isBaked, isDrawn, leadReceipt, buildChannel, normalizeAbsolutePath, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
+import { documentActivity, familyKey, fiberKey, isBaked, isDrawn, leadReceipt, buildChannel, normalizeAbsolutePath, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { conversationDevice } from '../conversationOpening.js'
 import { selectWorker } from '../sessionHistory.js'
 import { buildFiberProse } from './FiberProse.js'
@@ -28,6 +28,8 @@ import { channelsSection, constitutionsSection, filesSection, saidSection, trans
 import { Library } from './Library.js'
 import { FamilyPage, type ViewFeeds } from './FamilyPage.js'
 import { BoardFeed, type BoardRecord } from '../boardFeed.js'
+import { lastSaid } from '../said.js'
+import { companion, Leads } from './leads.js'
 import { wantOf } from '../attention.js'
 import { composeChannels, fiberOf as channelFiber, type Channel as BoardChannel } from '../channels.js'
 import type { MapFile } from '../family/model.js'
@@ -165,7 +167,7 @@ export class Workspace {
   /** The channels the board's cards make, as last composed, and each constitution's channel by fiber. */
   private composed: { cards: KanbanCard[]; channels: BoardChannel[]; of: Map<string, BoardChannel> } | null = null
   /** Each constitution's tapestry read, by fiber and its last write. */
-  private readonly leadReads = new Map<string, { modified?: string; read: Promise<MapFile | null | undefined> }>()
+  private readonly leads: Leads
   /** The fleet's marks, files and tapestry leads. */
   get feeds(): ViewFeeds { return this.mapFeeds }
 
@@ -178,6 +180,7 @@ export class Workspace {
       if (this.current && this.isActive) this.current.familyPage?.update(this.current.card, this.graph())
     })
     this.board = new BoardFeed(opts.shuttleBase)
+    this.leads = new Leads(opts.shuttleBase)
     this.board.subscribe(() => {
       this.mentions.refresh()
       this.refreshFind()
@@ -188,7 +191,7 @@ export class Workspace {
       reach: () => this.activity.reach(),
       files: card => this.mapFiles(card),
       refresh: () => this.refreshFamilyFeeds(),
-      lead: card => this.mapLead(card),
+      lead: card => this.leads.of(card),
       open: (card, doc) => this.openDocument(card, doc),
       link: (card, source, href) => this.openLink(card, source, href),
       said: card => this.said(card),
@@ -411,15 +414,9 @@ export class Workspace {
   }
   /** What a constitution last posted: its newest post, question or close note the family board holds, its open question, or its review note; never its outcome. */
   said(card: KanbanCard): { text: string; at: number } | undefined {
-    const index = this.graph(), root = index.rootOf(card), uid = card.uid ?? card.id, outcome = card.outcome?.trim()
+    const index = this.graph(), root = index.rootOf(card)
     this.board.read([root.uid ?? root.id])
-    // A closing post's line carries the outcome as its text.
-    const posts = this.board.records([root.uid ?? root.id])
-      .filter(record => record.fiber === uid && ['post', 'asked', 'closed'].includes(record.kind) && record.text?.trim() && !(record.kind === 'closed' && record.text.trim() === outcome))
-      .map(record => ({ text: record.text!.trim(), at: record.timestamp }))
-    if (card.ask && card.status === 'active') posts.push({ text: card.ask.text, at: Date.parse(card.ask.at) || 0 })
-    if (index.state(card) === 'to-review' && card.reviewMark?.note) posts.push({ text: card.reviewMark.note, at: Date.parse(card.reviewMark.at) || 0 })
-    return posts.sort((a, b) => a.at - b.at).at(-1)
+    return lastSaid(card, index, this.board.records([root.uid ?? root.id]))
   }
   /** The channel chair's slug, as the console names it, or in the catch-all its family's top-level's; undefined for a card in no channel. */
   channelHandle(card: KanbanCard): string | undefined {
@@ -452,38 +449,10 @@ export class Workspace {
     }
     return [...files.values()].sort((a, b) => b.at - a.at)
   }
-  /**
-   * The first companion page a fiber's directory holds, skipping past any
-   * `listed` already names, which ends the search: undefined when it holds
-   * none, null when its owner could not say.
-   */
-  private async companion(fiberDir: string, owner: string, listed: (path: string) => boolean = () => false): Promise<{ path: string; name: string; modifiedAt?: string } | null | undefined> {
-    let unknown = false
-    for (const file of COMPANION_NAMES) {
-      const path = `${fiberDir}/${file}`
-      if (listed(path)) return undefined
-      const result = await head(fileBytesUrl(this.opts.shuttleBase, path, owner), RESOURCE_PRIORITY.neighbour, { fresh: true })
-      if (this.disposed) return undefined
-      if (result?.exists) return { path, name: file[0].toUpperCase() + file.slice(1, -5), modifiedAt: result.modifiedAt ?? undefined }
-      unknown ||= !result
-    }
-    return unknown ? null : undefined
-  }
-  /** A constitution's tapestry or report, read once and again when its card's file changes or its owner could not say. */
-  private mapLead(card: KanbanCard): Promise<MapFile | null | undefined> {
-    const key = `${card.originId}:${card.uid ?? card.id}`, known = this.leadReads.get(key)
-    if (known && known.modified === card.modifiedAt) return known.read
-    const read = this.readLead(card)
-    this.leadReads.set(key, { modified: card.modifiedAt, read })
-    void read.then(found => { if (found === null && this.leadReads.get(key)?.read === read) this.leadReads.delete(key) })
-    return read
-  }
-  private async readLead(card: KanbanCard): Promise<MapFile | null | undefined> {
-    if (!card.fiberDir) return undefined
-    const found = await this.companion(card.fiberDir, card.originId)
-    if (!found) return found
-    const key = docKey(card.originId, found.path, card.originId, card.fiberDir), at = Date.parse(found.modifiedAt ?? '') || 0
-    return { key, name: found.name, at, unread: at > 0 && unseenSince(key, at) }
+  /** The first companion page a fiber's directory holds ({@link companion}); undefined once the workspace is gone. */
+  private async companion(fiberDir: string, owner: string, listed?: (path: string) => boolean): Promise<{ path: string; name: string; modifiedAt?: string } | null | undefined> {
+    const found = await companion(this.opts.shuttleBase, fiberDir, owner, listed)
+    return this.disposed ? undefined : found
   }
 
   /** The map among this card's pages, or none for a fiber with no map. */

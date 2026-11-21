@@ -4,12 +4,12 @@ import { clearable, quietWord, type Waits } from './attention.js'
 import { dueCivilDay, formatCivilDay } from './civilDay.js'
 import { DESK_COLUMNS, DESK_FOLIO_NAME, DESK_SECTION_TITLE, DESK_SECTIONS, type DeskFamily, type DeskOrder, type DeskSection, type FamilyWait } from './deskOrdering.js'
 import { activeFolioIndex, folioScrollTarget } from './deskMobile.js'
-import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
+import type { KanbanCard } from './KanbanTypes.js'
 import { isMobileViewport } from './mobile.js'
 import { stateDot } from './stateDot.js'
 import { threadRow } from './elements/threadRow.js'
 import { rowLabel } from './threadOutline.js'
-import { responseThreadIndex, ThreadIndex } from './threads.js'
+import type { ThreadIndex } from './threads.js'
 import './desk.css'
 
 const EMPTY: Readonly<Record<DeskSection, string>> = {
@@ -310,37 +310,4 @@ export function appendCappedText(el: HTMLElement, label: string): void {
  *  the date written on the fiber across every timezone. */
 export function formatDue(iso: string): string {
   return formatCivilDay(dueCivilDay(iso), { month: 'short', day: 'numeric' }) ?? iso
-}
-
-
-const NO_THREADS = new ThreadIndex([])
-/** The response's thread graph: the one the read model built, or built once from its cards. */
-export function threadIndexFor(resp: KanbanResponse | null): ThreadIndex {
-  return resp ? responseThreadIndex(resp, () => boardCards(resp)) : NO_THREADS
-}
-
-/** Every card the response holds, each fiber once. */
-export function boardCards(resp: KanbanResponse | null): KanbanCard[] {
-  if (!resp) return []
-  const seen = new Set<string>()
-  const out: KanbanCard[] = []
-  for (const list of [
-    resp.now.drafts,
-    resp.now.inFlight,
-    resp.now.awaitingReview,
-    resp.timeline.past,
-    resp.timeline.futureDated,
-    resp.stash,
-    resp.roles,
-    resp.threads ?? [],
-  ]) {
-    for (const card of list) {
-      // A uid names one fiber on every host; without one, a path is one host's own.
-      const key = card.uid ?? `${card.originId}\u0000${card.id}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      out.push(card)
-    }
-  }
-  return out
 }
