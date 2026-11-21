@@ -862,6 +862,7 @@ If you close a page yourself, Shuttle leaves it closed until that worker's next 
 Shuttle closes any other `rexweb shuttle` block in its sessions.
 A Rex server restart restores blocks without rerunning their commands, so a restored page is a bare shell; Shuttle closes it with its worker's window.
 Turning pages off closes the pages Shuttle opened.
+Before rolling back to a daemon that predates pages, set `enabled` to `false` and wait one sweep (30 seconds) so this daemon closes them; an older daemon does not know the page blocks and leaves them in place.
 
 ## Terminal program status
 
