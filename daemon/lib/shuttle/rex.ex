@@ -185,10 +185,16 @@ defmodule Shuttle.Rex do
   def send_key(runner, sid, bid, key),
     do: command(runner, ["send-key", "-s", sid, "-b", bid, key])
 
+  @doc """
+  The app client a selection moves: the Mac's Rex app when one is attached,
+  else any attached app (a phone's, when it is the only one).
+  """
   def app_client(runner, opts \\ []) do
     with {:ok, %{"clients" => clients}} when is_list(clients) <-
            json_command(runner, ["client", "ls", "--json"], opts) do
-      case Enum.find(clients, &match?(%{"info" => %{"kind" => "app"}}, &1)) do
+      apps = Enum.filter(clients, &match?(%{"info" => %{"kind" => "app"}}, &1))
+
+      case Enum.find(apps, &match?(%{"info" => %{"platform" => "macos"}}, &1)) || List.first(apps) do
         %{"client_id" => id} -> {:ok, id}
         nil -> {:error, :not_found}
         _ -> {:error, {:unknown, "invalid Rex client"}}

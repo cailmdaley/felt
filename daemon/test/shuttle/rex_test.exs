@@ -162,6 +162,22 @@ defmodule Shuttle.RexTest do
     assert {:ok, %{"performed_by" => "client:app"}} = Rex.select(FakeRex, "client:app", sid)
   end
 
+  test "an iPhone attached before the Mac does not take the Mac's selections" do
+    FakeRex.clients([
+      %{"client_id" => "client:phone", "info" => %{"kind" => "app", "platform" => "ios"}},
+      %{"client_id" => "client:mac", "info" => %{"kind" => "app", "platform" => "macos"}}
+    ])
+
+    assert {:ok, "client:mac"} = Rex.app_client(FakeRex)
+
+    # Alone, the phone is the app a selection moves.
+    FakeRex.clients([
+      %{"client_id" => "client:phone", "info" => %{"kind" => "app", "platform" => "ios"}}
+    ])
+
+    assert {:ok, "client:phone"} = Rex.app_client(FakeRex)
+  end
+
   test "EOF stdin reaches a real CLI reader without placing the request in argv", %{tmp_dir: dir} do
     reader = Path.join(dir, "reader")
     File.write!(reader, "#!/bin/sh\n/bin/cat\n")
