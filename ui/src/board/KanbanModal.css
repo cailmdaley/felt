@@ -18,60 +18,6 @@
    pseudo-element duplicates the letter in F1 (the flourish overlay)
    at reduced opacity. Inline sizing reads as a manuscript second-
    color drop initial, not a UI rubrication. */
-.kbn-cap {
-  font-family: var(--font-initials);
-  color: var(--kbn-you);
-  position: relative;
-  display: inline-block;
-  font-size: var(--glyph-initial);
-  line-height: var(--leading-initial);
-  letter-spacing: 0;
-  /* Sits the cap on the body baseline rather than floating slightly
-     above it. Each typographic context overrides with its own tuned
-     value below (col title / masthead / section strip). */
-  vertical-align: -0.10em;
-  margin-right: 0.04em;
-  font-style: normal;
-  font-variant: normal;
-  font-weight: 500;
-}
-.kbn-cap::before {
-  content: attr(data-letter);
-  font-family: var(--font-initials-frill);
-  /* EBGI F1 is pure frill/framing — the F1 glyph alone isn't a
-     readable letter, just the decorative flourishes that surround
-     the position a letter would occupy. So this layer sits ON TOP
-     of the F2 letterform: the colored letter shows through, with
-     the iron-gall calligraphic ornament layered over it as the
-     "detail strokes" pass that traditionally finishes an
-     illumination. */
-  color: var(--kbn-ink);
-  opacity: 0.45;
-  position: absolute;
-  left: 0;
-  top: 0;
-  pointer-events: none;
-}
-/* On dark stock the initial is chrysography: the vine is laid in gilt BEHIND
-   the letter, burnished from bright gold at the upper left down to a rosy
-   gold, and the pigment letter sits on it inside a hairline of the stock so
-   the two never muddy into one block. The ::before box is padded out past the
-   glyph's overhang so the gradient clipped to its text covers every tendril. */
-:root[data-ws-appearance='dark'] .kbn-cap {
-  isolation: isolate;
-  text-shadow: 0 0 .025em var(--kbn-parchment), 0 0 .05em var(--kbn-parchment), 0 0 .08em var(--kbn-parchment);
-}
-:root[data-ws-appearance='dark'] .kbn-cap::before {
-  z-index: -1;
-  left: -.2em; top: -.2em; padding: .2em;
-  color: transparent;
-  text-shadow: none;
-  background: linear-gradient(160deg, var(--kbn-owed-bright) 25%, var(--kbn-owed) 50%, color-mix(in srgb, var(--kbn-owed) 70%, var(--kbn-you)) 75%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  opacity: 0.66;
-}
-
 /* Fills the host element the board is mounted into (`#app`, from main.ts):
    the host gives a positioning context, and the kanban stretches to inset:0
    inside it. No border or shadow — the page is the whole browser tab. */
@@ -484,22 +430,6 @@
   text-transform: none;
   color: var(--kbn-ink);
   margin: 0;
-}
-.kbn-col-title .kbn-cap {
-  /* Cap and small-caps body sit at matching visual height — the
-     dropcap and the small-caps trailing it read as a single uniform
-     line, with the illumination (color + F1 flourish) doing all the
-     differentiation rather than size. Deliberately breaks the
-     historical "versal initial slightly larger" convention in favor
-     of a flatter, more contemporary manuscript-line rhythm. Body
-     38px × EB Garamond's ~0.73 small-cap ratio → ~28px small-caps;
-     cap at 0.73em × 38px → ~28px. Ratio-locked to the body size in
-     em, so raising `.kbn-col-title`'s font-size carries the
-     illumination up with the word. */
-  font-size: var(--glyph-initial-heading);
-  vertical-align: -0.08em;
-  margin-right: 0.04em;
-  line-height: var(--leading-initial);
 }
 /* Only the initial carries the column's pigment, like a rubricated initial on plain text. */
 .kbn-col-count {

@@ -59,7 +59,7 @@ export class PageFeed {
     this.stopped = false
     document.addEventListener('visibilitychange', this.onVisibility)
     this.wake()
-    this.pollSends(false)
+    if (this.own) this.pollSends(false)
   }
   stop(): void {
     this.stopped = true
@@ -74,7 +74,7 @@ export class PageFeed {
 
   private readonly onVisibility = (): void => {
     this.wake()
-    this.pollSends(true)
+    if (this.own) this.pollSends(true)
   }
 
   private readonly wake = (): void => {
@@ -114,6 +114,7 @@ export class PageFeed {
       this.failure = null
       const card = this.card()
       if (card) { const root = this.index.rootOf(card); this.board.read([root.uid ?? root.id]) }
+      else if (!this.own) this.board.readBoard()
     } catch (error) {
       this.failure = isDaemonBooting(error) ? 'The daemon is starting…' : daemonErrorMessage(error)
     }

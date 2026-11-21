@@ -6,6 +6,51 @@
    shelf's slugs read in serif at note size too. Opening a card or a line
    enters the reader. */
 :root { --kbn-desk-row: 22px; }
+/* Illuminated initial: F2 body with F1 calligraphic flourish layered over it. */
+.kbn-cap {
+  font-family: var(--font-initials);
+  color: var(--kbn-you);
+  position: relative;
+  display: inline-block;
+  font-size: var(--glyph-initial);
+  line-height: var(--leading-initial);
+  letter-spacing: 0;
+  vertical-align: -0.10em;
+  margin-right: 0.04em;
+  font-style: normal;
+  font-variant: normal;
+  font-weight: 500;
+}
+.kbn-cap::before {
+  content: attr(data-letter);
+  font-family: var(--font-initials-frill);
+  color: var(--kbn-ink);
+  opacity: 0.45;
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+:root[data-ws-appearance='dark'] .kbn-cap {
+  isolation: isolate;
+  text-shadow: 0 0 .025em var(--kbn-parchment), 0 0 .05em var(--kbn-parchment), 0 0 .08em var(--kbn-parchment);
+}
+:root[data-ws-appearance='dark'] .kbn-cap::before {
+  z-index: -1;
+  left: -.2em; top: -.2em; padding: .2em;
+  color: transparent;
+  text-shadow: none;
+  background: linear-gradient(160deg, var(--kbn-owed-bright) 25%, var(--kbn-owed) 50%, color-mix(in srgb, var(--kbn-owed) 70%, var(--kbn-you)) 75%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  opacity: 0.66;
+}
+.kbn-col-title .kbn-cap {
+  font-size: var(--glyph-initial-heading);
+  vertical-align: -0.08em;
+  margin-right: 0.04em;
+  line-height: var(--leading-initial);
+}
 .kbn-desk-sections { display: contents; }
 .kbn-desk-head { display: none; align-items: center; justify-content: flex-end; gap: 8px; min-height: 28px; }
 .kbn-desk-head > .kbn-folio { flex: 1 1 auto; min-width: 0; }

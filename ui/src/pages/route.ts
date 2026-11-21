@@ -1,8 +1,9 @@
 /**
  * A page's address. Served by the daemon, the page is the path's one segment:
- * `/thread?f=<uid>@<host>[&in=rex]`. Opened over file:// (the harness), it is
- * the `page` parameter: `index.html?page=thread&f=…`. `in=rex` says the page
- * stands in a Rex pane, where going to a fiber moves Rex rather than the page.
+ * `/thread?f=<uid>@<host>[&in=rex]` or `/desk[?in=rex]`. Opened over file://
+ * (the harness), it is the `page` parameter: `index.html?page=thread&f=…` or
+ * `index.html?page=desk`. `in=rex` says the page stands in a Rex pane, where
+ * going to a fiber moves Rex rather than the page.
  */
 export interface PageRoute {
   page: string

@@ -4,10 +4,10 @@ import { mountPage } from './mount.js'
 import { parsePageRoute } from './route.js'
 
 /**
- * The pages entry: one small page per address (`/thread?f=…`), each shown in
- * a Rex pane or a browser tab, with none of the board's workspace, voice or
- * Rex following. The daemon serves this bundle's `pages.html` at each page's
- * path.
+ * The pages entry: one small page per address (`/thread?f=…`, `/desk`), each
+ * shown in a Rex pane or a browser tab, with none of the board's workspace,
+ * voice or Rex following. The daemon serves this bundle's `pages.html` at each
+ * page's path.
  */
 const webfonts = document.getElementById('webfonts')
 if (webfonts instanceof HTMLLinkElement) webfonts.rel = 'stylesheet'

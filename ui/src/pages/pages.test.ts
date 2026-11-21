@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { addThreadFixtures } from '../../harness/thread-fixtures.js'
 import { WORKSPACE_HOST, WORKSPACE_UID, workspaceExample } from '../../harness/workspace-fixtures.js'
 import { servedFeed, settle } from '../board/testFixtures.js'
+import { DeskPage } from './DeskPage.js'
 import { PageFeed, POLL_MS, SENDS_POLL_MS } from './feed.js'
+import { mountPage } from './mount.js'
 import { parsePageRoute, threadHref } from './route.js'
 import { AUTO_ADVANCE_IDLE_MS, ThreadPage } from './ThreadPage.js'
 
@@ -13,6 +15,10 @@ describe('a page\'s address', () => {
       .toStrictEqual({ page: 'thread', fiber: { uid: '01KV', host: 'umber' }, inRex: true })
     expect(parsePageRoute({ protocol: 'file:', pathname: '/x/harness-board-dist/index.html', search: '?example=threads&page=thread&f=01KV@umber' }))
       .toStrictEqual({ page: 'thread', fiber: { uid: '01KV', host: 'umber' }, inRex: false })
+    expect(parsePageRoute({ protocol: 'http:', pathname: '/desk', search: '?in=rex' }))
+      .toStrictEqual({ page: 'desk', fiber: undefined, inRex: true })
+    expect(parsePageRoute({ protocol: 'file:', pathname: '/x/harness-board-dist/index.html', search: '?page=desk' }))
+      .toStrictEqual({ page: 'desk', fiber: undefined, inRex: false })
     // An `f` without both halves names no fiber.
     for (const f of ['01KV', '@umber', '01KV@', '']) expect(parsePageRoute({ protocol: 'http:', pathname: '/thread', search: `?f=${f}` }).fiber).toBeUndefined()
   })
@@ -314,5 +320,115 @@ describe('the thread page', () => {
       const latest = JSON.parse(posts().filter(each => each.url === '/api/v1/dispatch').at(-1)!.body!) as Record<string, unknown>
       expect(latest.resume_mode).toBe('fresh')
     }
+  })
+})
+
+describe('the desk page', () => {
+  const now = Date.now()
+  let requests: Array<{ url: string; method: string; body?: string; headers: Headers }>
+  let goAnswer: { went: boolean; place: string }
+  let feeds: PageFeed[]
+  let pages: DeskPage[]
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    vi.setSystemTime(now)
+    const example = workspaceExample(now)
+    addThreadFixtures(example, now)
+    const composite = servedFeed(example.feed, now)
+    requests = []
+    feeds = []
+    pages = []
+    goAnswer = { went: true, place: 'live' }
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+      const method = init.method ?? 'GET', headers = new Headers(init.headers)
+      requests.push({ url, method, body: init.body as string | undefined, headers })
+      const json = (body: unknown, extra: Record<string, string> = {}): Response =>
+        new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json', ...extra } })
+      if (url.startsWith('/api/v1/fibers/composite')) return json(composite, { ETag: '"d1"' })
+      if (url.startsWith('/api/v1/board/family')) return json({ records: [], waiting: {}, reach_ms: 14 * 86_400_000 })
+      if (url === '/api/v1/go' && method === 'POST') return json(goAnswer)
+      return new Response('{}', { status: 404 })
+    }))
+  })
+
+  afterEach(() => {
+    for (const page of pages) page.dispose()
+    for (const feed of feeds) feed.stop()
+    document.body.replaceChildren()
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  async function openDesk(search = '', navigate = vi.fn()): Promise<{ page: DeskPage; feed: PageFeed; navigate: typeof navigate }> {
+    const route = parsePageRoute({ protocol: 'http:', pathname: '/desk', search })
+    const feed = new PageFeed('')
+    feeds.push(feed)
+    const page = new DeskPage(feed, { base: '', route, navigate })
+    pages.push(page)
+    document.body.append(page.el)
+    feed.start()
+    for (let i = 0; i < 4; i++) await settle()
+    return { page, feed, navigate }
+  }
+
+  const posts = () => requests.filter(each => each.method === 'POST')
+
+  it('renders the Desk columns and shelf without tempered or discarded fibers, and touches neither voice nor Rex focus', async () => {
+    const { page } = await openDesk()
+    const titles = [...page.el.querySelectorAll('.kbn-col-title')].map(el => el.textContent)
+    expect(titles).toStrictEqual(['Waiting on you', 'Working', 'Awaiting review', 'Drafts', 'Resting', 'Roles & standing'])
+    const uids = [...page.el.querySelectorAll<HTMLElement>('[data-card-uid]')].map(el => el.dataset.cardUid!)
+    expect(uids).toContain(WORKSPACE_UID)
+    expect(uids).not.toContain('thread-archive')
+    expect(uids).not.toContain('thread-discard')
+    expect(requests.map(each => new URL(each.url, 'http://d').pathname).filter(path => /voice|attach|terminal/.test(path))).toStrictEqual([])
+  })
+
+  it('in a Rex pane, clicking a card or waiting line calls POST /api/v1/go and shows .pg-said on failure', async () => {
+    const { page, navigate } = await openDesk('?in=rex')
+    const card = page.el.querySelector<HTMLElement>(`.kbn-family[data-card-uid="${WORKSPACE_UID}"]`)!
+    card.click()
+    await settle()
+    expect(posts().map(each => [each.url, JSON.parse(each.body!)])).toStrictEqual([
+      ['/api/v1/go', { fiber_id: WORKSPACE_UID, origin: WORKSPACE_HOST }],
+    ])
+    expect(page.el.querySelector<HTMLElement>('.pg-said')!.hidden).toBe(true)
+
+    // When go fails, a quiet .pg-said toast explains why.
+    goAnswer = { went: false, place: 'none' }
+    const waitLine = page.el.querySelector<HTMLElement>('.kbn-family-wait[data-card-uid="thread-review"]')!
+    waitLine.click()
+    await settle(); await settle()
+    const said = page.el.querySelector<HTMLElement>('.pg-said')!
+    expect(said.hidden).toBe(false)
+    expect(said.textContent).toBe('review is not running.')
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('in a browser, clicking a card navigates to /thread?f=<uid>@<host> without calling /api/v1/go', async () => {
+    const { page, navigate } = await openDesk()
+    const card = page.el.querySelector<HTMLElement>(`.kbn-family[data-card-uid="${WORKSPACE_UID}"]`)!
+    card.click()
+    expect(navigate).toHaveBeenCalledWith(`${window.location.origin}/thread?f=${WORKSPACE_UID}%40${WORKSPACE_HOST}`)
+    expect(posts()).toStrictEqual([])
+  })
+
+  it('supports DeskKeyboard navigation and opening with Enter', async () => {
+    const { navigate } = await openDesk('?in=rex')
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true }))
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await settle()
+    expect(posts().map(each => each.url)).toStrictEqual(['/api/v1/go'])
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('mountPage mounts DeskPage for /desk', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    mountPage(host, parsePageRoute({ protocol: 'http:', pathname: '/desk', search: '' }), '')
+    for (let i = 0; i < 4; i++) await settle()
+    expect(host.querySelector('main.pg-desk')).not.toBeNull()
+    expect(host.querySelector('.kbn-desk-sections')).not.toBeNull()
   })
 })
