@@ -87,7 +87,7 @@ For example, copy the complete `claude-opus` record, change its `id` to `claude-
 
 Alias records inherit their base agent's environment and can override individual variables with their own `env` map.
 Resolved aliases retain their own id, so capture and resume reapply their environment and axis overlays.
-Interactive Chronicle resumes explicitly clear `headless` because a human is at the terminal.
+Interactive resumes explicitly clear `headless` because a human is at the terminal.
 This alias overlay does not change the wholesale record replacement rule between registry layers.
 If a resume cannot resolve a registry record and falls back to a bare agent, that agent carries no `env` overrides.
 Codex workers run through the selected terminal backend using the Codex CLI.

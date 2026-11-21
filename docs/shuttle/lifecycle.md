@@ -146,23 +146,20 @@ previously running oneshots as described below.
 
 ## The board
 
-The daemon serves a board at `http://127.0.0.1:4000/`: one page, four full-page
+The daemon serves a board at `http://127.0.0.1:4000/`: one page, two full-page
 views behind a hotkey row.
 
 | Key | View | What it answers |
 |---|---|---|
 | `1` | **Desk** | What needs doing, and what is running right now |
-| `2` | **Chronicle** | What a stretch of weeks was about, under a strip of cycle bands |
-| `3` | **Channels** | Where the work talks to you: a channel per line of work, a thread per worker |
-| `4` | **Globe** | Everything at once, as one place to move through |
+| `2` | **Channels** | Where the work talks to you: a channel per line of work, a thread per worker |
 
 Any document opens in the reader, whose console docked under the fiber page carries its controls and opens the conversation.
 The board holds no state of its own. It views the same fibers the daemon polls,
 plus tmux liveness and the host-local [ledgers](telemetry.md).
 
-[The board](board.md) covers all four in depth: the Desk's columns, Channels, how Chronicle
-fetches its record, and how to build the
-bundle.
+[The board](board.md) covers both views in depth: the Desk's columns, Channels,
+and how to build the bundle.
 
 ## Dispatch eligibility
 

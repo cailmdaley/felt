@@ -481,12 +481,11 @@ are dropped, and a URL of any other shape is nulled. It is a sibling of
 
 #### Ledger composites
 
-The board reads Chronicle and the fleet's documents through these
+The board reads session history, board marks and the fleet's documents through these
 fan-in siblings of the fleet's [ledger feeds](#ledger-feeds):
 
 | Route | Reads | Serves |
 |---|---|---|
-| `GET /activity/composite` | local feed + remote caches | Cross-host activity buckets with per-origin freshness |
 | `GET /sessions/composite` | local ledger + remote caches | Cross-host fiber/session pairings; `uid=` narrows to one fiber |
 | `GET /commits/composite` | local ledger + remote caches | Cross-host commit narration and shortstat counts |
 | `GET /sent-files/all/composite` | local feed + remote caches | Cross-host `SendUserFile` pushes |
@@ -661,29 +660,18 @@ Ordinary human prompt records retain their prompt boundary even when their text 
 
 #### Ledger feeds
 
-The feeds behind Chronicle, Channels' files and the reader. The
-four host-scoped feeds each have a `/composite` fan-in sibling; `/sent-files`
+The feeds behind Channels' files, session history, board marks and the reader. The
+three host-scoped ledger feeds each have a `/composite` fan-in sibling; `/sent-files`
 is owner-routed instead and has none. See [Telemetry and the
 ledgers](../shuttle/telemetry.md) for what writes the files underneath.
 
 | Route | Reads | Serves |
 |---|---|---|
-| `GET /activity` | `events.jsonl` | Per-minute activity buckets (`agent` and `reply` overlap — see Telemetry) |
 | `GET /sessions` | `sessions.jsonl` | Which fiber each harness session belonged to; a Codex row may carry a separate `thread_id`; `uid=` narrows to one fiber |
 | `GET /commits` | `commits.jsonl` | Which session made each commit, with `--shortstat` counts |
 | `GET /sent-files/all` | `events.jsonl` | Every `SendUserFile` push on this host |
 | `GET /board` | `events.jsonl` | Host-local board records since `since_ms`, oldest first; ETag/304 supported |
 | `GET /board/family` | local and remote board feeds | Current family board, resolved against constitution containment |
-
-`/activity` takes `from_ms` and `to_ms` and answers
-`{host, from_ms, to_ms, buckets}`. It rounds the window inward to whole minutes
-(buckets are minute-stamped, so the answer is the same), and its weak `ETag` is
-that window plus the `{mtime, size}` of `events.jsonl` and its rotated sibling
-— a repeat request over an unchanged file is a `304`. As with the [sent-files
-routes](#files), that validator almost never matches on a busy host and is not
-what keeps the route cheap: `Shuttle.EventStream` holds the histogram in
-memory, folded once from both files and then only over appended bytes, and a
-request reads its window out of that.
 
 `/board/family` accepts `fiber=<id|slug|uid>` or `session=<harness>:<id>` (required unless `all=true`), `since_ms`, and optional `viewer=<uid>` for delivery marking.
 It returns `{family, viewer, records, reach_ms, waiting}`, `reach_ms` being the board's reach (its retention, 14 days), which `shuttle`'s board hook also uses to prune its per-session cursors; records are deduplicated by id and carry `member`, `to_member`, `actor`, and `delivered`.

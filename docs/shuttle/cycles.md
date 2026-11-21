@@ -23,9 +23,6 @@ Three things make it a cycle:
 - **the body's first paragraph**, read as the *intention* — what this stretch of
   time is for.
 
-The [Chronicle](board.md#chronicle-where-the-time-went) draws it as a
-named band over the day grid.
-
 ## Degenerate spans
 
 Both dates are optional, and each omission means something:
@@ -60,30 +57,6 @@ board asks three questions in order, and the first that answers is the reason:
 
 Both edges of the span are inclusive.
 
-The `worked` rung is the real historical rule: it reads activity days from the
-[temporal feeds](telemetry.md), which the Chronicle, where membership is drawn,
-fetches.
-
 ## Working with them
 
-Cycles are a board gesture. There is no `shuttle cycle` verb — a cycle is
-ordinary frontmatter (`tags`, `start:`, `due:`), so nothing stops you writing
-one in the file, and everything below is the board's shorthand for that.
-
-- **Draw one** by dragging across days in the Chronicle's cycle strip, then
-  naming the span.
-- **Speak one** with `+`: dictate the intention, and the cycle starts today and
-  runs open-ended.
-- **Rename** by double-clicking the name; **respan** by dragging an edge.
-- **Click the band** to open the cycle's own page — the board calls this the
-  **era face**: span, intention, derived figures, and *the look back*, a
-  memoir composed from the commit trail. **Inscribe this review** writes that
-  memoir back into the cycle fiber's body.
-
-!!! note "The look back reads the commit ledger"
-    The era memoir is composed from `~/.shuttle/commits.jsonl`, which the
-    `shuttle hook commit` PostToolUse hook writes. Commits made outside an
-    agent session
-    leave no trail, so an era worked entirely by hand reads *the era left no
-    trail* — the band still draws and the membership still resolves.
-    See [Telemetry and the ledgers](telemetry.md#the-commit-ledger).
+A cycle is ordinary frontmatter (`tags: [cycle]`, `start:`, `due:`) written directly in a fiber.

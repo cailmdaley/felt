@@ -6,7 +6,7 @@ fixture or generator to reuse, and how to write a property. The commands for
 running each suite are in [layout.md](layout.md#tests).
 
 Run `cd ui && npm test` for the board's unit and integration tests.
-Run `cd ui && npm run e2e` for every headless harness browser journey: workspace (including header, living-report, constitution page and Globe journeys), document request budgets, and performance budgets.
+Run `cd ui && npm run e2e` for every headless harness browser journey: workspace (including header, living-report and constitution page journeys), document request budgets, and performance budgets.
 The command builds both bundles, runs every suite even when one fails, and exits nonzero on any failure.
 Each suite launches its own headless Chrome, and the board's Google Fonts are served from a cache under `ui/node_modules/.cache/e2e-fonts` after their first fetch.
 The workspace suite runs its journeys four at a time, each in its own context (`E2E_JOBS` changes the count), prints each journey's time, and takes `E2E_ONLY=<regex>` to run the journeys it names; the whole command takes about three and a half minutes on a laptop.
@@ -252,7 +252,7 @@ and add your test to its file.
 - **Desk classification and ordering:** `boardRules.test.ts`, `KanbanComposite.test.ts`, `deskBands.integration.test.ts`, `deskOrdering.test.ts`, `moveDestinations.test.ts`.
 - **Desk input:** `keymap.test.ts`, `deskKeyboard.integration.test.ts`, `longPress`, `dismissGesture`, `mobile`.
 - **Dispatch actions:** `boardWire.test.ts`, `daemonApi`, `startPrompt`, `KanbanModal.verdict`.
-- **Chronicle:** `src/board/views/chronicle*.test.ts`, `temporalData.test.ts`, `vocabulary.test.ts`.
+- **Session ledger parsing:** `src/board/views/temporalData.test.ts`.
 - **Find:** `src/board/search/` (the matchers, the stream fold and the highlighter); the bar's scopes through `workspace/Workspace.integration.test.ts`, a channel's fold through `views/ChannelsView.test.ts`.
 - **Listen and the phone:** workspace Listen tests and `src/phone/*.test.ts`.
 - **Settings:** `src/forms/settings/`.
@@ -407,6 +407,6 @@ case holds a boot stage past sixteen seconds by design, and a change under
 ## Gotchas
 
 - In vitest, `toEqual([])` passes against `[undefined, undefined]`. Use `toStrictEqual` or `toHaveLength` when the absence of elements is what you're asserting.
-- A mutation tool's kill sets overstate redundancy. A test that kills nothing another test doesn't can still pin what operators can't express: a numeric boundary, precedence, state across calls, or the opposite-sign twin of a time-zone bug. So can an absence (“no request”, “without retrying”), since operators rarely add a call, or an argument passed through. Read before you cut. `ui/scripts/mutation-subsumption.mjs` with `ui/stryker.chronicle.config.json` is the worked example for one contract. It needs `disableBail`, or it records only the first killer of each mutant.
+- A mutation tool's kill sets overstate redundancy. A test that kills nothing another test doesn't can still pin what operators can't express: a numeric boundary, precedence, state across calls, or the opposite-sign twin of a time-zone bug. So can an absence (“no request”, “without retrying”), since operators rarely add a call, or an argument passed through. Read before you cut. `ui/scripts/mutation-subsumption.mjs` computes subsumption from a Stryker report; it needs `disableBail`, or it records only the first killer of each mutant.
 - Over the whole board, `disableBail` costs days, so `ui/scripts/mock-kills.mjs` measures in two runs: `ui/stryker.board.config.json` with bail settles every mutant an ordinary test kills first, and `recheck` reruns only the rest without bail. Narrow `mutate` to what you are asking about, and keep `concurrency` at 2 on a shared machine.
 - Stryker silently drops a test file that fails to load: no error, just fewer tests in the dry run's count. Instrumenting a module that uses `import.meta.glob` (`ChannelThemes.ts`) does that to every file importing it; check the dry run's count against `npm test`'s. Instrumenting a function serialized into framed documents (`DocumentBridge.ts`, `route.ts`, `keymap.ts` and the others the board config excludes) fails the bridge tests outright.

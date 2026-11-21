@@ -1,19 +1,17 @@
 # The board
 
 The daemon serves the board at `http://127.0.0.1:4000/`. It is one page with
-four full-page views behind a hotkey row, `1`–`4`, and a settings sheet on
+two full-page views behind a hotkey row, `1`–`2`, and a settings sheet on
 `⌘,`. Everything on it is a view over fibers the daemon already polls, plus
 the host-local [ledgers](telemetry.md) — the board stores nothing of its own.
 
 | Key | View | What it answers |
 |---|---|---|
 | `1` | **Desk** | What waits on you, what is working, what awaits your review, and what rests |
-| `2` | **Chronicle** | What a stretch of weeks was about |
-| `3` | **Channels** | Where the work talks to you: a channel per line of work, a thread per worker |
-| `4` | **Globe** | Everything at once, as one place to move through |
+| `2` | **Channels** | Where the work talks to you: a channel per line of work, a thread per worker |
 | `⌘,` | **Settings** | Every operator file, on any host in the fleet |
 
-`#/desk`, `#/chronicle`, `#/channels` and `#/globe` deep-link the views; `#/board` opens Channels.
+`#/desk` and `#/channels` deep-link the views; `#/board` opens Channels.
 A constitution uses `#/board/<uid>@<owner>/<document>`; Back returns to the view you opened it from (see [the reader](#the-reader)).
 
 ## Desk — six sections
@@ -84,37 +82,8 @@ Bare keys act on the Desk when focus is outside an editable field.
 
 ### Find
 
-The bar's Find searches where you stand and shows that place as a chip in the field: `in #<channel>` with a channel open, `in <constitution>` in the reader, `in Chronicle` on the Chronicle. Backspace in the empty field, or a press on the chip, drops it and searches the whole board. On the Desk and the Globe it searches the whole board from the start. The whole board lists, a few of each with the rest behind "more": **Constitutions** by name and id at once, and by outcome and body once the daemon answers (`GET /api/v1/search`), closed work included and marked; **Channels**, a hidden one brought back when picked; **Said**, the posts, questions and closing notes addressed to you within the board's reach, a pick opening the channel at that line, marked; **Files**, every sent document by name, path, declared title or its fiber's name, opened in the reader; and one row, **Search transcripts for “…”** (⌘↵, or Ctrl↵), which reads the transcripts of this host's sessions only when chosen, a hit opening the constitution its session worked on, its path copyable. On the Chronicle a pick finds its lifeline. A press anywhere outside the list puts it away, a press into a framed page such as a tapestry too, and the field keeps its words. On the phone a button in the bottom bar opens the same search as a sheet. A field beside a list (Channels' **Jump to**) only filters that list.
+The bar's Find searches where you stand and shows that place as a chip in the field: `in #<channel>` with a channel open, `in <constitution>` in the reader. Backspace in the empty field, or a press on the chip, drops it and searches the whole board. On the Desk it searches the whole board from the start. The whole board lists, a few of each with the rest behind "more": **Constitutions** by name and id at once, and by outcome and body once the daemon answers (`GET /api/v1/search`), closed work included and marked; **Channels**, a hidden one brought back when picked; **Said**, the posts, questions and closing notes addressed to you within the board's reach, a pick opening the channel at that line, marked; **Files**, every sent document by name, path, declared title or its fiber's name, opened in the reader; and one row, **Search transcripts for “…”** (⌘↵, or Ctrl↵), which reads the transcripts of this host's sessions only when chosen, a hit opening the constitution its session worked on, its path copyable. A press anywhere outside the list puts it away, a press into a framed page such as a tapestry too, and the field keeps its words. On the phone a button in the bottom bar opens the same search as a sheet. A field beside a list (Channels' **Jump to**) only filters that list.
 The selected row takes the acts its constitution's view head offers, by the same keys: `c` (or `.`) opens its conversation as the reader's `c` does, `a` closes for review, `s` rests (or pauses or resumes a schedule), `t` tempers and `x` discards. A family card acts on its top-level, a waiting line on that member. A key acts only on the row drawn as selected, which follows j/k, a click and keyboard focus, never on the one under the pointer or the voice target. A verdict waits out its undo window on that row, or on its family's head for a top-level's own line (`z` undoes it), a Temper on unfinished work closes and tempers it in one write, and a Rest records the board as its actor.
-
-## Chronicle — where the time went
-
-The activity stream bucketed per minute, joined to fibers through the session
-and commit ledgers. See [Telemetry](telemetry.md) for what feeds it and what
-happens when a ledger is absent.
-
-Chronicle draws fibers as multi-day lifelines across calendar days, under a
-strip of [cycle](cycles.md) bands. Activity is inked on each lifeline, one mark
-per civil day; ahead of today a row carries only hollow marks for what is due
-and what is armed.
-
-![Chronicle with the same fictional workshop tasks: venue research, programme review, access checks, and guide preparation across September and October, under the Plan a small workshop cycle.](../assets/board-chronicle.jpg)
-
-*No fill, just marks on a line per fiber, so months of fibers stack without
-drowning each other. The era strip is the [cycle](cycles.md) data.*
-
-Everything on the page is joined through the ledgers. A minute or a commit
-that does not resolve to a fiber the board carries is not drawn at all, so work
-started outside shuttle is invisible here — and nothing is ever attributed by
-reading a `slug:` prefix out of a commit subject or a directory name.
-
-**The record is fetched on demand.** The Desk's cards refresh every 15 s, and
-Chronicle redraws its rows from them, but its temporal feeds — activity, the
-session ledger, the commit ledger — are fetched when the view opens, again at
-most every five minutes while it stays open, and whenever you ask with the
-refresh control. Days already past are fetched once per open; scrolling back
-fetches only the days newly in view. Nothing on the board asks for temporal
-data while Chronicle is closed.
 
 ## Channels — where the work talks to you
 
@@ -157,7 +126,7 @@ Repeated sends of the same owner/path are one page with multiple receipts.
 Selection, constitution changes, and metadata polls preserve retained document instances and reading position.
 The board renders no conversation. Conversation lives in Rex, on the desktop and on the phone; the board keeps a constitution's threads, its tapestry and documents, its sent files, its change reader and its lifecycle.
 
-**What the board looks at, voice and Rex follow together, and only on a click.** Opening a Desk or Chronicle card, any page in the reader (a constitution's view, a tapestry, a document), a thread's row or an orchestrator's head in a view, a thread on the Globe, or an item, a file, the channel's name or one of the chair's pages in Channels makes the board look at that fiber's constitution: voice targets it and, on the desktop, Rex moves quietly to its live worker's window, behind the board. A click never opens Rex. A thread with no live worker, a stopped one or one with only a past session, leaves Rex as it is: a click starts no program, creates no session and resumes nothing, so clicking around leaves no trail of terminals. Every surface calls one function for this, `Workspace.look`, which posts `select_only` to `POST /api/v1/attach` and rings the thread only once the daemon says Rex moved; looking again at the same worker, or at the worker Rex just moved to itself, posts nothing, looks in quick succession move Rex once, to the last of them, and Rex is left alone while the board lacks the keyboard. Stepping to the next or previous constitution with `j`, `k`, `J`, `K` or Alt-↑/↓ is a scan, not a look: like pulling a view down to its orchestrator's, it moves neither voice nor Rex. Opening is an explicit act: `c` (or `.`) opens or creates the conversation's window, reopens a past session, and brings Rex forward. Rex keeps its view to what is in focus, plus the workers asking you something and those running a turn: a window you moved away from leaves it after two minutes while its worker runs on, and a click or `c` brings it back. Workers on other hosts follow the same rule. On a phone a click moves nothing.
+**What the board looks at, voice and Rex follow together, and only on a click.** Opening a Desk card, any page in the reader (a constitution's view, a tapestry, a document), a thread's row or an orchestrator's head in a view, or an item, a file, the channel's name or one of the chair's pages in Channels makes the board look at that fiber's constitution: voice targets it and, on the desktop, Rex moves quietly to its live worker's window, behind the board. A click never opens Rex. A thread with no live worker, a stopped one or one with only a past session, leaves Rex as it is: a click starts no program, creates no session and resumes nothing, so clicking around leaves no trail of terminals. Every surface calls one function for this, `Workspace.look`, which posts `select_only` to `POST /api/v1/attach` and rings the thread only once the daemon says Rex moved; looking again at the same worker, or at the worker Rex just moved to itself, posts nothing, looks in quick succession move Rex once, to the last of them, and Rex is left alone while the board lacks the keyboard. Stepping to the next or previous constitution with `j`, `k`, `J`, `K` or Alt-↑/↓ is a scan, not a look: like pulling a view down to its orchestrator's, it moves neither voice nor Rex. Opening is an explicit act: `c` (or `.`) opens or creates the conversation's window, reopens a past session, and brings Rex forward. Rex keeps its view to what is in focus, plus the workers asking you something and those running a turn: a window you moved away from leaves it after two minutes while its worker runs on, and a click or `c` brings it back. Workers on other hosts follow the same rule. On a phone a click moves nothing.
 Nothing that is not a click looks: a poll, a page's data arriving, a worker starting, the board's window coming back to the front, the board loading or reloading on a page, or a session asking the board to show a page leaves Rex and voice where they are.
 Every constitution, a draft included, and every fiber with threads opens on [its view](#a-constitutions-view), whatever level it sits at.
 One console, the board's one chat bar, is docked at the bottom of the reader under every page of a fiber on the Desk's lifecycle, and at the bottom of a channel; what is above it scrolls, and on a phone it stays above the on-screen keyboard. Its head is one row of slugs and controls: the chair's slug and the slug of whom it speaks to, as one path (`felt/outbox-for-the-human`; the slug alone when it speaks to the chair), its full name in the tooltip, then the session's figures. Where the head has room its acts stand as buttons: **Open conversation** first, Settings, whose sheet opens above the console, and the constitution's page, which a channel's console leaves to the channel's head; where it is short a menu (⋯) holds them all. It gives no verdict: those live in the constitution's view. A verdict's undo stands in its acts' place. The console draws no back and no ×. No word says the constitution's state: its colour does. Beside the name it shows the session's context size, tinted from verdigris toward red as it fills the window, and Claude's estimated prompt cache as a dot that drains as the entry ages and turns into a red ring once cold; hover either for the numbers. Resume's tooltip says until when the cache is warm, and Settings adds the share of recent context read from the cache. These facts come from the session's transcript on its host, so they hold with no worker running. On a phone the reader's top bar goes back, so the console draws no back of its own.
@@ -174,7 +143,7 @@ The fiber header shows status alone. Agent, effort, cadence, host and project di
 Document header lines show the title and arrival history, omit the agent, and name a host only for a document owned elsewhere. The fiber label shows its genuine last-change time.
 A file open on any page is watched while you read it: when its worker rewrites it, the new copy loads out of sight and takes the old one's place at the same scroll offset, or at its new end if it got shorter.
 Media, PDF and unsupported viewers add no title or provenance block inside the page. Audio/video use native transport controls; retained media pauses when receded or parked.
-**Back goes to the view the reader was opened from, in one step, from anywhere in it.** The reader is one layer over a view (Desk, Chronicle, Channels or Globe): however far you go inside it, to another thread, its orchestrator, a file, a link, a step with `j` or `k`, back does not retrace those steps. The ‹ button, Escape, the phone's right swipe (outside Channels), the view's own tab and the browser's Back all do the same thing and land in the same place: Channels on the channel you left, scrolled where it was, the item you opened from in focus; the Desk on the last card viewed. In Channels a rightward swipe, on the phone and on a trackpad, framed pages included, first returns to the channel: with anything open over it, however deep, one swipe shows the channel's stream, and the next swipe there brings the channel rail. The back control always names that view.
+**Back goes to the view the reader was opened from, in one step, from anywhere in it.** The reader is one layer over a view (Desk or Channels): however far you go inside it, to another thread, its orchestrator, a file, a link, a step with `j` or `k`, back does not retrace those steps. The ‹ button, Escape, the phone's right swipe (outside Channels), the view's own tab and the browser's Back all do the same thing and land in the same place: Channels on the channel you left, scrolled where it was, the item you opened from in focus; the Desk on the last card viewed. In Channels a rightward swipe, on the phone and on a trackpad, framed pages included, first returns to the channel: with anything open over it, however deep, one swipe shows the channel's stream, and the next swipe there brings the channel rail. The back control always names that view.
 The address always names the page shown, so a reload reopens it with its view still behind it. A direct address with nothing of the board's behind it (a link from elsewhere) goes back to its view by replacing itself.
 Another view's tab chosen from the reader takes the reader's place, so the browser's Back from there returns to the view the reader covered.
 The list of sent files is a menu over the reader: Escape or a click outside closes it, and Back leaves the reader with it.
@@ -203,14 +172,14 @@ Every constitution, reached from a Desk row, a channel, a role or a thread, open
 
 The console at its foot speaks to the constitution the view shows; so do the lifecycle keys and `c`. Over the view, the console draws neither its name nor the pages and acts the head already carries. The way back names a fiber by its slug. With the keys on its rows, `j` and `k` (or down and up) move among the orchestrators and the threads, Enter or `l` opens the one in focus, and `h` opens the orchestrator's view, or from the top of the family goes back where the view was opened from; moving the focus moves nothing else.
 
-When Rex's worker changes, from its sidebar or otherwise, the board goes to that fiber's view, with voice on or off, without speaking back to Rex; a page of the same fiber stands, so opening a file does not bounce back. Rex merely coming to the front moves nothing on the board. The Globe shows such a fiber in place, and Channels, with no reader open over it, opens that worker's channel scrolled to its latest post (else the latest station on its line), tinted until you choose a channel or Rex moves on while Channels shows, with the keys on it; while you type in the console, Channels stays where it is.
+When Rex's worker changes, from its sidebar or otherwise, the board goes to that fiber's view, with voice on or off, without speaking back to Rex; a page of the same fiber stands, so opening a file does not bounce back. Rex merely coming to the front moves nothing on the board. Channels, with no reader open over it, opens that worker's channel scrolled to its latest post (else the latest station on its line), tinted until you choose a channel or Rex moves on while Channels shows, with the keys on it; while you type in the console, Channels stays where it is.
 
 The view reads its feeds and repaints only while it is the selected page of an open reader, and runs nothing in between.
 
 ### Where voice goes
 
 With Follow me on, whichever of Rex and the board moved last chooses the destination: Rex's selected worker, or the card last clicked on the board and its nearest constitution.
-Opening a page, a thread or a Globe card moves the destination; hovering, moving a keyboard highlight, opening a channel or returning to the board's window does not.
+Opening a page or a thread moves the destination; hovering, moving a keyboard highlight, opening a channel or returning to the board's window does not.
 With Follow me off, the destination stays pinned while views continue to be remembered; turning it back on resumes the latest view seen while listening.
 Following sends after a short quiet, but words for a card without a live worker go nowhere unless they end with a standalone “send” clause (for example, “check the plot, send”; “sent” is taken as the same word), which starts the worker; pinned listening sends every batch and starts a worker when needed, using its own longer quiet threshold.
 The recorder's day transcript retains all speech, including unrouted or undelivered words, and every delivered batch points to its time in `shuttle transcript`.
@@ -218,37 +187,6 @@ The recorder's day transcript retains all speech, including unrouted or undelive
 The receipt feed is `/api/v1/sent-files/all/composite`, which combines each host's event stream.
 The board reads its last thirty days at most once a minute, into one store the Desk's report marks, Channels and the constitution views share; an unchanged feed answers 304.
 A host without an event stream contributes no receipts — see [Telemetry](telemetry.md).
-
-## Globe — everything on one sphere
-
-The Globe holds the whole fleet on a HEALPix sphere: zoom out and it holds everything running, zoom in and you reach a project, a family, a thread, its files and its finished work. `ui/src/board/globe/` is the view; its boundary maths is checked against healpy.
-
-**Latitude is state.** The twelve base pixels are three bands of four. The north holds families with anything in flight, the equator families at rest, the south families wholly finished, so a family's latitude says where it stands and going south is going into the past. Within a band each project is one cell, its province, labelled with the project's name. An area the ids name, such as `ai-futures/felt/`, is a cell inside that when two or more families share it, and families lie inside those. A project appears once in each band it has work in.
-
-**Area is a share of the work.** The nested scheme is a quadtree, so each size is a power of four, and siblings are packed by a buddy allocator. A cell is as large as it must be to hold what it holds, heavier threads take more, and shares are compressed so that a hub of a hundred threads does not reduce a lone thread to a speck. Not every tile is filled: the rest is ocean, or the ground of its parent.
-
-**What is live gets the area.** No family is larger than a cell of order 2, so ocean stays between families, and within a family live threads fill it. A thread with threads gives them its north, west and east quadrants, sized to fill them, heavier and fuller threads first. Its south quadrant holds the rest: its tapestry or report at the centre of the cell, its constitution and files to the east of that, its settled threads below. When none of its threads is live, the settled ones take the three quadrants. A thread with no threads keeps its north quadrant for its name, its tapestry to the west and its files to the south and east, a lone file largest, with its constitution at the east's corner. A tapestry's place is kept before it is read, so its arrival moves nothing.
-
-**Places hold.** Each sibling follows a path of quadrants drawn from a hash of its persistent id, and the eldest choose first, each taking the first free cell of its size along its path. A new thread takes what is left and usually moves nobody; every third or so makes a sibling give up a spare cell, which shifts some of that family's threads. A thread that changes state moves almost alone, within its family, and other families stay put. A family that changes band moves whole. A band that crosses a size limit rescales in place.
-
-The tile's colour is its state, in the Desk's pigments, and it fades with age. Archived threads keep a third of their colour and go unnamed, so a hub's finished work sits quietly in its south quadrant; they wake when the view comes to them or to the archived thread they lie in, and a tile of one is named once it is wide. A tile too small to open shows the most urgent thing inside it.
-
-**Pages show what they hold.** A tapestry, report, constitution or sent file is a page tile, in paper grey rather than a state's colour. From about 26 pixels it carries the mark of its kind (▨ an image, ▣ a page, ▧ a PDF, § a constitution) in its north quarter, clear of its name. From 130 pixels a file or tapestry shows its thumbnail instead: the plot itself, or a page's first screen, the board's own thumbnails in the largest box of the file's shape that fits the tile, named beneath when there is room. Thumbnails load as their tiles come into reach, nearest the centre first, within the board's one loading budget; none starts during a flight, and they stay cached a while after they leave the screen. A file its host no longer has shows its name and kind. What asks keeps a marker of constant size from any distance, and what asks over the horizon waits at the rim at its bearing. The chips under the trail count what asks, and clicking one walks to the next of that kind. The peek at the foot names the tile under the pointer or in focus, with its order and nested index.
-
-**Moving.** One hand does it: scroll zooms about the pointer, and so does a pinch, down to the smallest thing there filling the stage; drag turns. The globe turns freely, over the poles and on: the point you grab stays exactly under the pointer at any zoom and orientation, a drag beside the sphere turns it by its rim, and a let-go drag coasts to a stop. North rights itself only while the hand moves, turned about the grabbed point, so it never slides out from under you, and every flight lands north up. The view opens looking straight down on the north, where everything in flight is. A flight frames a tile whole between the trail and the peek. Under the tile in focus names come first, live threads before archived ones. A name that its tile cannot hold stands nearby inside the focus, or out on the open water beside it, never across its edge, with a fine line back to its tile. Names grow in as their tiles can hold them whole, and the grid, drawn under the tiles, refines with the zoom.
-
-**Mollweide and the plane.** `m` or the switch at the top right steps from the globe to Mollweide's whole sky, the map healpy draws, and on to HEALPix's own plane (Calabretta & Roukema 2007), looking where the last one looked. The plane lays the twelve base pixels out as diamonds in three rows, north in flight on top, every cell a straight square diamond, the polar ones included, scaled to the sphere's area so a tile is as wide on it as on the sphere; it wraps east and west and keeps itself in view top to bottom. On the globe the cells near the poles are sheared as HEALPix makes them, and Mollweide squeezes the polar row where everything in flight sits; the plane shows them undistorted. Clicks, zoom and flights are the same on all three.
-
-**Clicking.** A click on a thread flies to it and moves Rex to its window at once, if it has one; on a phone a tap comes to it. A click on a tapestry, report, file or constitution opens it on the stage, and Back returns to the Globe as it stood. A click on a province or area flies to it. Zooming, turning and stepping back never touch Rex. A click in Rex flies the Globe to that thread, as it moves the family map, while voice is on.
-
-| Key | On the Globe |
-|---|---|
-| `Esc`, `h` | One level out |
-| `←` `→` `↑` `↓` | The previous or next thing that asks, most urgent first |
-| `Enter` | What a click does, on the tile in focus |
-| `/` | Find; picking a thread flies the Globe to it, leaving Rex and the stage be, and a fiber the Globe has no tile for opens its page |
-| `+`, `-` | Zoom |
-| `m` | Globe, Mollweide, the HEALPix plane, in turn |
 
 ## The board is optional, and the bundle is its own artifact
 

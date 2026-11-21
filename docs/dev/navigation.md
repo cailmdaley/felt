@@ -1,7 +1,7 @@
 # Where back goes
 
 The board has one rule for back: **its destination depends on where you are, never on how you got there.**
-The reader is one layer over a view (Desk, Chronicle, Channels, Globe), and back from any page it shows returns to that view in one step.
+The reader is one layer over a view (Desk, Channels), and back from any page it shows returns to that view in one step.
 Read this page before adding anything that opens, moves or closes the reader.
 
 ## The model

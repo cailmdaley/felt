@@ -1,7 +1,6 @@
 # Telemetry and the ledgers
 
-The Desk needs only fibers and tmux. [Chronicle](board.md#chronicle-where-the-time-went)
-and Channels need a record of what happened, and
+The Desk needs only fibers and tmux. Channels, session history, and board marks need a record of what happened, and
 that record is three append-only JSONL files in the daemon's state directory.
 
 | File | Written by | Carries |
@@ -25,29 +24,9 @@ syncing it — which is why every temporal endpoint is host-scoped with a
 ## The event stream
 
 The raw material. `shuttle hook event` appends one JSON line per harness hook
-event; `Shuttle.Activity` folds those lines into a **per-minute histogram** —
-one bucket per `{minute, tmux session, cwd, kind}` — which is what Chronicle
-draws.
-
-The eight hook types collapse into three kinds, plus one facet laid over them:
-
-- **attention** — a human typed (`UserPromptSubmit`), unless the event carries
-  `machine: true`, meaning the harness injected that prompt and nobody was
-  present. The recorder makes that call — `shuttle hook event` prefix-matches the prompt
-  text against `machinePromptPrefixes` (internal/shuttlecli/hook_event.go), where a new
-  harness's wrapper is taught by adding its prefix. The daemon never sniffs
-  prompt text to guess.
-- **notify** — the agent asked for a human, at the onset of the ask.
-- **agent** — everything else. Any hook type invented later lands here rather
-  than disappearing.
-- **reply** — a *facet*, not a fourth slice: a `stop` hook (one finished agent
-  turn) emits both an `agent` bucket and a `reply` bucket for the same minute.
-  It is what makes a conversation countable in messages — the `9 back` in a
-  cycle's era face, `you 14 · 9 back`. **Summing `n` across every bucket therefore
-  counts each finished turn twice**; fold `agent` for effort, `reply` for
-  message counts, never both.
-
-The same stream feeds the in-flight idle ranking on the Desk and the
+event. `Shuttle.EventStream` reads `events.jsonl` and its rotated sibling
+`events.jsonl.1` once at boot and follows appends to feed worker turn state on
+the Desk, the family board, and
 [the board's document receipts](../concepts/companions.md#sent-files-shuttle-only).
 
 ### Recording and rotation
@@ -69,8 +48,8 @@ echo '{"hook_event_name":"SessionStart"}' | SHUTTLE_EVENTS_FILE=/tmp/e.jsonl shu
 The live file rotates once it passes `SHUTTLE_EVENTS_MAX_BYTES` (64 MiB): it is
 renamed to `events.jsonl.1` and a fresh stream starts. The daemon reads both
 files once at boot, the rotated one first, keeps what it derives from them in
-memory — activity, the sent-files trail, each session's last event — and
-carries that across a rotation rather than re-reading. Only `events.jsonl.1` is
+memory — the sent-files trail, retained board records, and each session's turn
+state — and carries that across a rotation rather than re-reading. Only `events.jsonl.1` is
 kept; an older rotation is overwritten, so a sent file leaves the trail with
 the second rotation after it. Writers that find the stream full at the same
 moment serialize the rename on a flock of `events.jsonl.lock`, so it rotates
@@ -99,15 +78,11 @@ session ends, so nothing downstream could answer "which sessions has this card
 had?" after the fact. The ledger makes the association structural, and the
 line outlives the session.
 
-Everything on Chronicle is joined through it. A minute that does not
-resolve to a fiber the board carries is not drawn at all, so work started
-outside shuttle is invisible there.
-
 ## The commit ledger
 
 `~/.shuttle/commits.jsonl` pairs a commit with the session that made it. It
-attributes commits without parsing a fiber name out of a subject line, and it
-lets the Chronicle narrate a stretch of days in prose and count lines changed.
+attributes commits without parsing a fiber name out of a subject line, backing
+provenance and board marks.
 
 The pairing is only knowable inside the session's own process tree, where the
 daemon is not — so the Pi extension writes it after a `bash` call that ran a
@@ -117,9 +92,7 @@ Claude Code and Codex plugin registers no commit recorder, so their commits
 appear only when something else appends them (below).
 
 The file stays absent on a host with no `~/.shuttle` — a felt user who does not
-run shuttle acquires nothing. There it is written, the commit strip fills, the
-Chronicle narrates per fiber, and a [cycle](cycles.md)'s look back has a trail
-to read. There is no git log fallback: only recorded, joined commits count, so
+run shuttle acquires nothing. There is no git log fallback: only recorded, joined commits count, so
 commits made outside an agent session do not appear.
 
 To grow one yourself, append a line per commit with at least:
@@ -141,8 +114,7 @@ Every temporal feed is optional, and every failure path resolves to an empty
 result rather than an error. A view with nothing to draw says so and moves on;
 it does not break, and neither does the rest of the board.
 
-That is also the first thing to check when Chronicle is blank: the event
-stream only grows once `~/.shuttle` exists, because `shuttle hook event` refuses to
+The event stream only grows once `~/.shuttle` exists, because `shuttle hook event` refuses to
 create its own directory. Bootstrap step 3 creates it, so a bootstrapped host is
 already enabled — a CLI-only install is not.
 
@@ -150,11 +122,10 @@ already enabled — a CLI-only install is not.
 
 Every feed is host-scoped with a `/composite` sibling that merges this host's
 read with every configured remote's, reporting per-origin freshness so a
-disconnected host grays out rather than silently drawing an empty day.
+disconnected host grays out rather than silently dropping history.
 
 | Route | Reads | Serves |
 |---|---|---|
-| `/api/v1/activity` | events | per-minute buckets |
 | `/api/v1/sessions` | session ledger | fiber↔session pairings |
 | `/api/v1/commits` | commit ledger | commit↔session pairings |
 | `/api/v1/sent-files/all` | events | `SendUserFile` pushes |
@@ -165,9 +136,7 @@ copy of that feed, and a remote asked within the last minute is served from
 the hub's cache instead. Each remote's last good answer is kept on disk under
 `$SHUTTLE_DATA_DIR/remote-temporal/`, so an unreachable host keeps
 contributing what it last said, and is marked stale once that answer is more
-than ten minutes old. The hub asks for a remote's
-activity over a trailing 14-day window whose end is quantized, so an unchanged
-events file answers `304`.
+than ten minutes old.
 
 **Every route answers `304` when its inputs have not moved.** `/activity`'s
 validator is its window, quantized to the minute, plus the `{mtime, size}` of

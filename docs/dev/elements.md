@@ -34,7 +34,7 @@ The rest are the board's own choices, made to sit with those numbers:
 | Constitution view's thread list | at most 760 wide, the reading measure, so a row's age stands near its words |
 | A thread row's age | at least 16px from its doing |
 | A menu (a list of files, of threads) | 16px clear of the window's edge, so it stays on the board's sheet |
-| Thumbnail (globe tiles, sheets) | 176 by 116 |
+| Thumbnail (sheets) | 176 by 116 |
 
 A post's previews stand each on a line of its own, as wide as the post, so a box's size never depends on its neighbours.
 `foldPx`, `CARD_PX` and `PREVIEW_GAP` in `filePreview.ts` state the same numbers for code that reckons a row's height (the stream's margin), and a test reads the stylesheet to keep them equal; `previewsHeight` sums a post's boxes; a close's row counts its tapestry's box (a page's for the channel's newest close, a card's for the others) unless the last look at its constitution found none; a look that cannot tell (a daemon that did not answer) leaves the slot as it stood.
@@ -80,7 +80,7 @@ A line that follows one from the same thread less than five minutes before it, a
 
 ### Time — `time.ts`
 
-Every age the board draws is `timeEl` (a thread row, a post's head, a file card, the constitution view's head, the reader's "Last changed" and "sent", a transcript search hit, the globe's peek, the Dock's live worker): relative in one grammar, `now` under a minute, then `12m ago`, `5h ago` under a day, then `3d ago` (a thread row and the constitution view's head drop the "ago": `12m`, `5h`, `3d`); the instant in full (`30 Oct 2026 03:31`) in its tooltip; set in `--font-mono` at `--type-meta`, muted, with tabular numerals, not the serif around it.
+Every age the board draws is `timeEl` (a thread row, a post's head, a file card, the constitution view's head, the reader's "Last changed" and "sent", a transcript search hit, the Dock's live worker): relative in one grammar, `now` under a minute, then `12m ago`, `5h ago` under a day, then `3d ago` (a thread row and the constitution view's head drop the "ago": `12m`, `5h`, `3d`); the instant in full (`30 Oct 2026 03:31`) in its tooltip; set in `--font-mono` at `--type-meta`, muted, with tabular numerals, not the serif around it.
 A row's time is the time of what its doing says; a working thread that has said nothing is timed from its launch.
 A clock that names an instant rather than an age stays a clock: the session strip's clock, its cache's warm-until, and a finished run's `14:02 → 15:10 · 1h 8m` in the Dock, which is set in the time's face.
 The grammar's arithmetic (`relativeAge`) lives in `civilDay.ts` with every other clock, and `retime` brings a drawn stream's times up to date in place.
@@ -98,4 +98,4 @@ Only thumbnails swap a page's large embedded images for placeholders; a figure o
 
 ## What stays the board's own
 
-The margin's fine ink (`tube.ts` lays it, `ink.ts` holds its noise, ribbon and non-crossing field, `margin.ts` draws it; the constitution view's lines are `workspace/familyInk.ts`), the Desk's layout, the Chronicle's lifelines and the globe's tiles are the board's own surfaces; they use these elements where they list a thread or show a file, and draw everything else themselves.
+The margin's fine ink (`tube.ts` lays it, `ink.ts` holds its noise, ribbon and non-crossing field, `margin.ts` draws it; the constitution view's lines are `workspace/familyInk.ts`) and the Desk's layout are the board's own surfaces; they use these elements where they list a thread or show a file, and draw everything else themselves.

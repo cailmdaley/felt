@@ -16,7 +16,7 @@ a laptop; a fresh worktree first pays `npm ci` (~15 s) and a cold Mix compile.
 ```bash
 cd ui && npm run harness:board  # ~18 s; the mocked-daemon bundle in harness-board-dist/
 agent-browser --session verify-<fiber> open "file://$PWD/harness-board-dist/index.html?example=channels"
-agent-browser --session verify-<fiber> press 3                   # 1 Desk, 2 Chronicle, 3 Channels, 4 Globe
+agent-browser --session verify-<fiber> press 2                   # 1 Desk, 2 Channels
 agent-browser --session verify-<fiber> snapshot -i               # refs for what you can click
 agent-browser --session verify-<fiber> click @e57 && agent-browser --session verify-<fiber> screenshot /path/in/scratchpad/after.png   # a ref from the snapshot
 agent-browser --session verify-<fiber> eval 'JSON.stringify(window.__harness.requests.filter(r => r.method !== "GET").slice(-3))'  # what it wrote to the mocked daemon
