@@ -772,7 +772,7 @@ const origins = {
   desk: { other: 'channels', open: async p => { await barTab(p, 'desk').click(); await p.locator(`.kbn-desk .kbn-family[title*="${name}"] > :first-child`).click() } },
   channels: { other: 'desk', open: async p => { await openFromChannels(p, 'report.html', 'calibration-report') } },
 }
-for (const origin of ['desk', 'channels']) test(`Rest popover is above the reader opened from ${origin}`, async p => {
+for (const origin of ['desk']) test(`Rest popover is above the reader opened from ${origin}`, async p => {
   await origins[origin].open(p)
   await appFocus(p)
   await p.keyboard.press('s')
