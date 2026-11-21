@@ -202,16 +202,18 @@ defmodule Shuttle.Terminal.RexTree do
       root = hd(windows).family
       label = display_label(session_label(root || hd(windows).fiber))
 
+      pages_on? = match?({:ok, _}, Shuttle.Host.pages())
+
       result =
         with {:ok, view} <- Rex.windows(runner, sid),
              {:ok, _} <-
-               if(label == labels[sid],
+               if(pages_on? or label == labels[sid],
                  do: {:ok, %{}},
                  else: Rex.call(runner, "session.set_label", %{"label" => label}, session: sid)
                ),
              :ok <- relabel_windows(runner, sid, windows, view),
              :ok <- relabel_blocks(runner, sid, windows) do
-          if match?({:ok, _}, Shuttle.Host.pages()) do
+          if pages_on? do
             :ok
           else
             desired = windows |> Enum.map(& &1.window_id) |> Enum.reject(&is_nil/1) |> Enum.uniq()

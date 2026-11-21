@@ -115,6 +115,16 @@ defmodule Shuttle.Terminal.Rex do
                  end
 
                if result == :ok, do: {:cont, :ok}, else: {:halt, result}
+             end),
+           :ok <-
+             Enum.reduce_while(doc["views"] || %{}, :ok, fn {root, view}, :ok ->
+               result =
+                 with :ok <- close_stale_window(runner, Map.put_new(view, "family", root)),
+                      :ok <- Bindings.delete_view(root, view) do
+                   :ok
+                 end
+
+               if result == :ok, do: {:cont, :ok}, else: {:halt, result}
              end) do
         retire_stale_desk(runner, doc["desk"])
       end

@@ -78,6 +78,13 @@ defmodule Shuttle.RexFocusTest do
 
     assert %{"fiber_id" => "project/task"} =
              RexFocus.title_target("task - project/task", twice, fibers())
+
+    # A waiting family session's leading "● " mark is stripped during normalization.
+    assert %{"fiber_id" => "project/task"} =
+             RexFocus.title_target("task - ● project/task", bindings, fibers())
+
+    assert %{"fiber_id" => "project/task"} =
+             RexFocus.title_target("\u2060\u2003└ task - ● project/root", child, fibers())
   end
 
   test "a remote worker's window resolves through the served fiber tree to its origin" do
@@ -111,6 +118,14 @@ defmodule Shuttle.RexFocusTest do
 
     assert %{"fiber_id" => "01HUB", "origin" => "fir"} =
              RexFocus.title_target("unions-hub - unions/unions-hub", bindings(), fibers, "mac")
+
+    assert %{"fiber_id" => "01CHILD", "origin" => "fir", "name" => "OneCov"} ==
+             RexFocus.title_target(
+               "\u2060└ onecov - ● unions/unions-hub",
+               bindings(),
+               fibers,
+               "mac"
+             )
 
     # Wrong depth or session label, or the worker's own host, names nothing.
     assert nil == RexFocus.title_target("onecov - unions/unions-hub", bindings(), fibers, "mac")

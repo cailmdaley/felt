@@ -42,17 +42,22 @@ defmodule Shuttle.RetainedTerminal do
     end)
   end
 
+  @doc "Session IDs of all persisted retained terminals (Remote Control, Hark)."
+  def session_ids(opts \\ []) do
+    for file <- FS.wildcard(Path.join(root(opts), "*.json")),
+        {:ok, json} <- [FS.read(file)],
+        {:ok, %{"session_id" => sid}} <- [Jason.decode(json)],
+        is_binary(sid),
+        do: sid
+  end
+
   @doc """
   Move the retained sessions (Remote Control, Hark) to the end of Rex's
   session list, keeping their relative order, so the sessions Shuttle creates
   for workers sit above them. A failed move only costs the ordering.
   """
   def keep_last(runner, opts \\ []) do
-    ids =
-      for file <- FS.wildcard(Path.join(root(opts), "*.json")),
-          {:ok, json} <- [FS.read(file)],
-          {:ok, %{"session_id" => sid}} <- [Jason.decode(json)],
-          do: sid
+    ids = session_ids(opts)
 
     with false <- ids == [],
          {:ok, sessions} <- Rex.sessions(runner),

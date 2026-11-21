@@ -17,13 +17,139 @@ defmodule Shuttle.Terminal.RexLayout do
   import Kernel, except: [apply: 2, apply: 3]
 
   require Logger
-  alias Shuttle.{FiberDocuments, Lifecycle, Poller, Rex, RetainedTerminal}
+  alias Shuttle.{Board, FiberDocuments, Lifecycle, Poller, RemoteTemporalRegistry, Rex, RetainedTerminal}
   alias Shuttle.Terminal.Rex, as: Backend
   alias Shuttle.Terminal.RexBindings, as: Bindings
   alias Shuttle.Terminal.RexPages, as: Pages
   alias Shuttle.Terminal.RexTree, as: Tree
 
   @default_grace_seconds 86_400
+  @waiting_mark "● "
+
+  @doc """
+  Map pinned channels from board records to their family roots in rail order.
+  Pure function.
+  """
+  def chosen_roots_from_channels(records, fibers, family_fibers \\ nil, own_host_id \\ nil) do
+    rows = normalize_fiber_rows(fibers)
+    family_rows = if family_fibers, do: normalize_fiber_rows(family_fibers), else: rows
+    all_rows = family_rows ++ rows
+
+    pinned =
+      for r <- records || [],
+          r["kind"] == "pinned" and is_binary(r["text"]) and is_integer(r["timestamp"]),
+          reduce: %{} do
+        acc -> Map.update(acc, r["text"], r["timestamp"], &max(&1, r["timestamp"]))
+      end
+
+    unpinned =
+      for r <- records || [],
+          r["kind"] == "dismissed" and is_binary(r["text"]),
+          reduce: %{} do
+        acc ->
+          case Regex.run(~r/^pin:(.+):(\d+)$/, r["text"]) do
+            [_, key, ms_str] ->
+              case Integer.parse(ms_str) do
+                {ms, ""} -> Map.update(acc, key, ms, &max(&1, ms))
+                _ -> acc
+              end
+
+            _ ->
+              acc
+          end
+      end
+
+    active_pinned =
+      for {key, at} <- pinned,
+          key != "misc",
+          at > Map.get(unpinned, key, -1),
+          do: key
+
+    order_keys =
+      (records || [])
+      |> Enum.filter(&(&1["kind"] == "ordered" and is_list(&1["keys"]) and is_integer(&1["timestamp"])))
+      |> Enum.max_by(& &1["timestamp"], fn -> nil end)
+      |> case do
+        %{"keys" => keys} -> keys
+        _ -> []
+      end
+
+    order_index = order_keys |> Enum.with_index() |> Map.new()
+
+    ordered_keys =
+      Enum.sort_by(active_pinned, fn key -> {Map.get(order_index, key, -1), key} end)
+
+    by_path =
+      for f <- all_rows,
+          path = f["slug"] || f["id"],
+          is_binary(path) and path != "",
+          into: %{},
+          do: {path, f}
+
+    roots_by_channel =
+      Enum.reduce(rows, %{}, fn fiber, acc ->
+        path = fiber["slug"] || fiber["id"]
+        host_ok? = own_host_id == nil or get_in(fiber, ["shuttle", "host"]) == own_host_id
+        column = Lifecycle.column(fiber, false)
+
+        if is_binary(path) and path != "" and host_ok? and column not in ["tempered", "discarded"] do
+          case fiber_channel_key(fiber, path, by_path) do
+            nil ->
+              acc
+
+            ch_key ->
+              root = Tree.family(path, family_rows).family
+              Map.update(acc, ch_key, [root], fn list -> if root in list, do: list, else: list ++ [root] end)
+          end
+        else
+          acc
+        end
+      end)
+
+    ordered_keys
+    |> Enum.flat_map(&Map.get(roots_by_channel, &1, []))
+    |> Enum.uniq()
+  end
+
+  defp fiber_channel_key(fiber, path, by_path) do
+    case declared_channel(fiber) do
+      nil ->
+        case parent_path(path, by_path) do
+          nil -> nil
+          parent_p -> fiber_channel_key(by_path[parent_p], parent_p, by_path)
+        end
+
+      "misc" ->
+        nil
+
+      name ->
+        "channel:" <> name
+    end
+  end
+
+  defp declared_channel(fiber) when is_map(fiber) do
+    case get_in(fiber, ["shuttle", "channel"]) do
+      ch when is_binary(ch) ->
+        trimmed = ch |> String.trim() |> String.downcase()
+        if trimmed == "", do: nil, else: trimmed
+
+      _ ->
+        nil
+    end
+  end
+
+  defp declared_channel(_), do: nil
+
+  defp parent_path(path, by_path) do
+    case String.split(path, "/") do
+      [_] ->
+        nil
+
+      parts ->
+        candidate = parts |> Enum.drop(-1) |> Enum.join("/")
+        if Map.has_key?(by_path, candidate), do: candidate, else: parent_path(candidate, by_path)
+    end
+  end
 
   @doc """
   Compute desired family sessions and thread places from fibers, bindings,
@@ -34,6 +160,8 @@ defmodule Shuttle.Terminal.RexLayout do
     family_fibers_input = Map.get(inputs, :family_fibers)
     bindings = Map.get(inputs, :bindings, %{})
     places = Map.get(inputs, :places, %{})
+    views = Map.get(inputs, :views, %{})
+    chosen_roots = Map.get(inputs, :chosen_roots, []) |> Enum.filter(&is_binary/1) |> Enum.uniq()
     sessions = Map.get(inputs, :sessions)
     now = Map.get(inputs, :now, DateTime.utc_now())
     grace = Map.get(inputs, :grace_seconds, @default_grace_seconds)
@@ -55,9 +183,9 @@ defmodule Shuttle.Terminal.RexLayout do
           into: MapSet.new(),
           do: uid
 
-    from_fibers =
+    {from_fibers, waiting_families} =
       rows
-      |> Enum.reduce(%{}, fn fiber, acc ->
+      |> Enum.reduce({%{}, MapSet.new()}, fn fiber, {acc, waiting} ->
         uid = fiber["uid"] || fiber["id"]
         path = fiber["slug"] || fiber["id"]
 
@@ -66,24 +194,36 @@ defmodule Shuttle.Terminal.RexLayout do
           live? = Map.has_key?(live_by_uid, uid)
           column = Lifecycle.column(fiber, live?)
 
-          if column not in ["tempered", "discarded"] and
-               wants_place?(fiber, column, live?, places[uid], now, grace) do
+          if column not in ["tempered", "discarded"] do
             fam = Tree.family(path, family_rows)
-            place = places[uid] || %{}
 
-            Map.put(acc, uid, %{
-              uid: uid,
-              fiber: path,
-              family: fam.family,
-              depth: fam.depth,
-              url: Pages.url(base, uid, own_host_id),
-              asked_at: place["asked_at"]
-            })
+            waiting =
+              if waiting_on_human?(fiber, column),
+                do: MapSet.put(waiting, fam.family),
+                else: waiting
+
+            acc =
+              if wants_place?(fiber, column, live?, places[uid], now, grace) do
+                place = places[uid] || %{}
+
+                Map.put(acc, uid, %{
+                  uid: uid,
+                  fiber: path,
+                  family: fam.family,
+                  depth: fam.depth,
+                  url: Pages.url(base, uid, own_host_id),
+                  asked_at: place["asked_at"]
+                })
+              else
+                acc
+              end
+
+            {acc, waiting}
           else
-            acc
+            {acc, waiting}
           end
         else
-          acc
+          {acc, waiting}
         end
       end)
 
@@ -137,11 +277,27 @@ defmodule Shuttle.Terminal.RexLayout do
         end
       end)
 
-    families =
+    grouped_places =
       places_by_uid
       |> Map.values()
       |> Enum.group_by(& &1.family)
-      |> Map.new(fn {root, entries} ->
+
+    chosen_set = MapSet.new(chosen_roots)
+
+    active_chosen_roots =
+      Enum.filter(chosen_roots, fn root ->
+        root_uid = rows_by_path[root] || get_in(views, [root, "uid"])
+        root_uid == nil or not MapSet.member?(closed_verdict_uids, root_uid)
+      end)
+
+    all_family_roots =
+      (Map.keys(grouped_places) ++ active_chosen_roots)
+      |> Enum.uniq()
+
+    families =
+      Map.new(all_family_roots, fn root ->
+        entries = Map.get(grouped_places, root, [])
+
         ordered =
           entries
           |> Tree.layout()
@@ -151,10 +307,35 @@ defmodule Shuttle.Terminal.RexLayout do
             |> Map.delete(:label)
           end)
 
+        waiting? = MapSet.member?(waiting_families, root)
+        base_label = Tree.display_label(Tree.session_label(root))
+        label = if waiting?, do: @waiting_mark <> base_label, else: base_label
+
+        root_uid = rows_by_path[root] || get_in(views, [root, "uid"])
+
+        view =
+          if is_binary(root_uid) and root_uid != "" do
+            [view_entry] = Tree.layout([%{fiber: root, depth: 0}])
+
+            %{
+              uid: root_uid,
+              fiber: root,
+              family: root,
+              depth: 0,
+              url: Pages.url(base, root_uid, own_host_id),
+              window_label: Tree.display_label(view_entry.label)
+            }
+          else
+            nil
+          end
+
         {root,
          %{
            family: root,
-           label: Tree.display_label(Tree.session_label(root)),
+           label: label,
+           waiting?: waiting?,
+           chosen?: MapSet.member?(chosen_set, root),
+           view: view,
            places: ordered
          }}
       end)
@@ -162,7 +343,7 @@ defmodule Shuttle.Terminal.RexLayout do
     places_by_uid =
       for {_root, fam} <- families, dp <- fam.places, into: %{}, do: {dp.uid, dp}
 
-    %{families: families, places_by_uid: places_by_uid}
+    %{families: families, places_by_uid: places_by_uid, chosen_roots: active_chosen_roots}
   end
 
   defp normalize_fiber_rows(list) do
@@ -206,10 +387,14 @@ defmodule Shuttle.Terminal.RexLayout do
       Map.has_key?(places, uid)
   end
 
+  defp waiting_on_human?(fiber, column) do
+    column == "awaiting_review" or
+      (fiber["status"] == "active" and is_map(get_in(fiber, ["shuttle", "ask"])))
+  end
+
   defp wants_place?(fiber, column, live?, place, now, grace) do
     live? or
-      column == "awaiting_review" or
-      (fiber["status"] == "active" and is_map(get_in(fiber, ["shuttle", "ask"]))) or
+      waiting_on_human?(fiber, column) or
       recently_asked?(place, now, grace)
   end
 
@@ -280,6 +465,7 @@ defmodule Shuttle.Terminal.RexLayout do
     families = Map.get(observed, :families, %{})
     bindings = Map.get(observed, :bindings, %{})
     places = Map.get(observed, :places, %{})
+    views = Map.get(observed, :views, %{})
 
     desired_uid_by_path =
       for {uid, dp} <- desired.places_by_uid,
@@ -313,17 +499,58 @@ defmodule Shuttle.Terminal.RexLayout do
         end
       end)
 
-    # 3. Desired families & places: create sessions/windows, split missing pages,
-    #    record human-closed pages, update labels.
-    {desired_actions, keep_pages_by_sid} =
+    # 2b. Stale view entries (session or window no longer exists in Rex).
+    {stale_view_actions, live_views} =
+      views
+      |> Enum.sort()
+      |> Enum.reduce({[], %{}}, fn {root, view}, {acts, live} ->
+        sid = view["session_id"]
+        wid = view["window_id"]
+        session = sessions[sid]
+
+        if session != nil and Enum.any?(session.windows, &(&1.window_id == wid)) do
+          {acts, Map.put(live, root, view)}
+        else
+          {acts ++ [{:delete_view, %{family: root, observed: view}}], live}
+        end
+      end)
+
+    # 3. Desired families, Tab 1 views & places: create sessions/windows, split
+    #    missing pages, record human-closed pages, update labels.
+    {desired_actions, keep_pages_by_sid, keep_view_windows_by_sid} =
       desired.families
       |> Enum.sort()
-      |> Enum.reduce({[], %{}}, fn {root, fam}, {acts, keep_map} ->
+      |> Enum.reduce({[], %{}, %{}}, fn {root, fam}, {acts, keep_map, view_wins_map} ->
         sid = live_families[root]
         session = sid && sessions[sid]
+        fam_view = Map.get(fam, :view)
 
-        {fam_acts, keep_ids, _created?} =
-          Enum.reduce(fam.places, {[], MapSet.new(), false}, fn dp, {f_acts, k_ids, created?} ->
+        {view_acts, view_keep_ids, view_wids, created?} =
+          if fam_view != nil do
+            root_dp = Enum.find(fam.places, &(&1.fiber == root))
+
+            plan_desired_view(
+              fam_view,
+              root_dp,
+              root,
+              fam.label,
+              sid,
+              session,
+              live_views[root],
+              live_places[fam_view.uid],
+              live_bindings[fam_view.uid]
+            )
+          else
+            {[], MapSet.new(), MapSet.new(), false}
+          end
+
+        other_places =
+          if fam_view != nil,
+            do: Enum.reject(fam.places, &(&1.fiber == root)),
+            else: fam.places
+
+        {place_acts, place_keep_ids, _created?} =
+          Enum.reduce(other_places, {[], MapSet.new(), created?}, fn dp, {f_acts, k_ids, c?} ->
             plan_desired_place(
               dp,
               root,
@@ -332,7 +559,7 @@ defmodule Shuttle.Terminal.RexLayout do
               session,
               live_places[dp.uid],
               live_bindings[dp.uid],
-              created?,
+              c?,
               f_acts,
               k_ids
             )
@@ -345,16 +572,24 @@ defmodule Shuttle.Terminal.RexLayout do
             []
           end
 
+        keep_ids = MapSet.union(view_keep_ids, place_keep_ids)
+
         keep_map =
           if sid,
             do: Map.update(keep_map, sid, keep_ids, &MapSet.union(&1, keep_ids)),
             else: keep_map
 
-        {acts ++ fam_acts ++ label_act, keep_map}
+        view_wins_map =
+          if is_binary(sid) and MapSet.size(view_wids) > 0,
+            do: Map.update(view_wins_map, sid, view_wids, &MapSet.union(&1, view_wids)),
+            else: view_wins_map
+
+        {acts ++ view_acts ++ place_acts ++ label_act, keep_map, view_wins_map}
       end)
 
     # 4. Close expired place windows (only in Shuttle family sessions, never
-    #    protected active windows, never windows holding non-page blocks).
+    #    protected active windows, never Tab 1 family view windows, never
+    #    windows holding non-page blocks).
     shuttle_sids = MapSet.new(Map.values(live_families))
 
     {close_window_actions, closing_windows_by_sid, protected_pages_by_sid} =
@@ -363,10 +598,15 @@ defmodule Shuttle.Terminal.RexLayout do
       |> Enum.reduce({[], %{}, %{}}, fn {uid, place}, {acts, closing, protected} ->
         sid = place["session_id"]
         wid = place["window_id"]
+        view_wids = view_wins_for(keep_view_windows_by_sid, sid)
 
         cond do
           Map.has_key?(desired.places_by_uid, uid) ->
             {acts, closing, protected}
+
+          MapSet.member?(view_wids, wid) ->
+            # Window is still the family's Tab 1 view; drop only the expired place entry.
+            {acts ++ [{:delete_place, %{uid: uid, observed: place}}], closing, protected}
 
           not MapSet.member?(shuttle_sids, sid) ->
             {acts, closing, protected}
@@ -398,6 +638,61 @@ defmodule Shuttle.Terminal.RexLayout do
                      uid: uid,
                      family: place["family"],
                      observed: place
+                   }}
+
+                closing = Map.update(closing, sid, MapSet.new([wid]), &MapSet.put(&1, wid))
+                {acts ++ [act], closing, protected}
+            end
+        end
+      end)
+
+    # 4b. Close expired Tab 1 view windows (families no longer desired).
+    {close_view_actions, closing_windows_by_sid, protected_pages_by_sid} =
+      live_views
+      |> Enum.sort()
+      |> Enum.reduce({[], closing_windows_by_sid, protected_pages_by_sid}, fn {root, view},
+                                                                             {acts, closing,
+                                                                              protected} ->
+        sid = view["session_id"]
+        wid = view["window_id"]
+        fam = desired.families[root]
+
+        cond do
+          fam != nil and Map.get(fam, :view) != nil ->
+            {acts, closing, protected}
+
+          not MapSet.member?(shuttle_sids, sid) ->
+            {acts, closing, protected}
+
+          MapSet.member?(Map.get(closing, sid, MapSet.new()), wid) ->
+            {acts ++ [{:delete_view, %{family: root, observed: view}}], closing, protected}
+
+          true ->
+            session = sessions[sid]
+            win_blocks = Enum.filter(session.blocks, &(&1.window_id == wid))
+
+            cond do
+              protected_active_window?(focused, session, wid) ->
+                page_ids =
+                  win_blocks
+                  |> Enum.filter(&page_block?/1)
+                  |> MapSet.new(& &1.block_id)
+
+                {acts, closing,
+                 Map.update(protected, sid, page_ids, &MapSet.union(&1, page_ids))}
+
+              Enum.any?(win_blocks, &(not page_block?(&1))) ->
+                {acts ++ [{:delete_view, %{family: root, observed: view}}], closing, protected}
+
+              true ->
+                act =
+                  {:close_window,
+                   %{
+                     session_id: sid,
+                     window_id: wid,
+                     view_family: root,
+                     family: root,
+                     observed_view: view
                    }}
 
                 closing = Map.update(closing, sid, MapSet.new([wid]), &MapSet.put(&1, wid))
@@ -469,12 +764,356 @@ defmodule Shuttle.Terminal.RexLayout do
       end
       |> Enum.reject(&is_nil/1)
 
+    # 7. Session ordering: applied ONLY when a Shuttle session is created or
+    #    the chosen channel set changes, never on a timer.
+    created_roots =
+      for {:create_session, %{family: root}} <- desired_actions, do: root
+
+    closing_sids =
+      for {:close_session, %{session_id: sid}} <- close_session_actions,
+          into: MapSet.new(),
+          do: sid
+
+    desired_chosen = Map.get(desired, :chosen_roots)
+    observed_chosen = Map.get(observed, :chosen_roots)
+    chosen_changed? = desired_chosen != nil and observed_chosen != desired_chosen
+
+    order_actions =
+      if is_list(Map.get(observed, :session_order)) and
+           (created_roots != [] or chosen_changed?) do
+        base_order =
+          observed.session_order
+          |> Enum.reject(&MapSet.member?(closing_sids, &1))
+
+        current_order = base_order ++ Enum.map(created_roots, &{:new, &1})
+
+        families_after =
+          live_families
+          |> Map.reject(fn {_root, sid} -> MapSet.member?(closing_sids, sid) end)
+          |> Map.merge(Map.new(created_roots, &{&1, {:new, &1}}))
+
+        moves =
+          plan_session_order(current_order, %{
+            desk_sids: List.wrap(Map.get(observed, :desk_session_id)),
+            families: families_after,
+            chosen_roots: desired_chosen || [],
+            retained_sids: Map.get(observed, :retained_session_ids, [])
+          })
+
+        record_chosen =
+          if chosen_changed?,
+            do: [{:record_chosen_roots, %{chosen_roots: desired_chosen}}],
+            else: []
+
+        moves ++ record_chosen
+      else
+        if chosen_changed? and Map.has_key?(observed, :chosen_roots) do
+          [{:record_chosen_roots, %{chosen_roots: desired_chosen}}]
+        else
+          []
+        end
+      end
+
     stale_family_actions ++
       stale_place_actions ++
+      stale_view_actions ++
       desired_actions ++
       close_window_actions ++
+      close_view_actions ++
       close_block_actions ++
-      close_session_actions
+      close_session_actions ++
+      order_actions
+  end
+
+  defp view_wins_for(map, sid), do: Map.get(map, sid, MapSet.new())
+
+  @doc """
+  Compute the minimal `:move_session` actions to order Rex's sidebar:
+  1. Desk (if present)
+  2. chosen channels in rail order
+  3. other Shuttle family sessions (preserving relative order)
+  4. human's own sessions (untouched, keeping their relative order)
+  5. retained sessions (Remote Control, Hark) last (preserving relative order)
+
+  Only Desk, Shuttle family, and retained sessions are ever moved; human
+  sessions are never touched. Pure function.
+  """
+  def plan_session_order(current_order, opts) when is_list(current_order) and is_map(opts) do
+    present = MapSet.new(current_order)
+    desk_sids = opts |> Map.get(:desk_sids, []) |> Enum.filter(&MapSet.member?(present, &1)) |> Enum.uniq()
+    families = Map.get(opts, :families, %{})
+    chosen_roots = Map.get(opts, :chosen_roots, [])
+
+    chosen_sids =
+      chosen_roots
+      |> Enum.map(&families[&1])
+      |> Enum.filter(&(not is_nil(&1) and MapSet.member?(present, &1)))
+      |> Enum.uniq()
+
+    desk_and_chosen = MapSet.new(desk_sids ++ chosen_sids)
+    all_family_sids = MapSet.new(Map.values(families))
+
+    other_shuttle_sids =
+      current_order
+      |> Enum.filter(&(MapSet.member?(all_family_sids, &1) and not MapSet.member?(desk_and_chosen, &1)))
+      |> Enum.uniq()
+
+    top = desk_sids ++ chosen_sids ++ other_shuttle_sids
+    top_set = MapSet.new(top)
+
+    retained_set =
+      opts
+      |> Map.get(:retained_sids, [])
+      |> Enum.reject(&MapSet.member?(top_set, &1))
+      |> MapSet.new()
+
+    retained_sids = Enum.filter(current_order, &MapSet.member?(retained_set, &1))
+
+    # Move any out-of-place Desk/Shuttle sessions into 0..length(top)-1.
+    {list_after_top, top_moves} =
+      top
+      |> Enum.with_index()
+      |> Enum.reduce({current_order, []}, fn {sid, target_idx}, {list, moves} ->
+        if Enum.at(list, target_idx) == sid do
+          {list, moves}
+        else
+          next_list = move_in_list(list, sid, target_idx)
+          {next_list, moves ++ [{:move_session, %{session_id: sid, index: target_idx}}]}
+        end
+      end)
+
+    # Move retained sessions last if they aren't already at the tail in order.
+    tail_moves =
+      if retained_sids == [] or Enum.take(list_after_top, -length(retained_sids)) == retained_sids do
+        []
+      else
+        last_idx = length(list_after_top) - 1
+
+        Enum.map(retained_sids, fn sid ->
+          {:move_session, %{session_id: sid, index: last_idx}}
+        end)
+      end
+
+    top_moves ++ tail_moves
+  end
+
+  defp move_in_list(list, item, target_idx) do
+    without = List.delete(list, item)
+    clamped = max(0, min(target_idx, length(without)))
+    List.insert_at(without, clamped, item)
+  end
+
+  defp plan_desired_view(view, root_dp, root, session_label, sid, session, obs_view, obs_place, binding_entry) do
+    existing = find_live_view_window(session, obs_view, obs_place, binding_entry)
+
+    case existing do
+      {:ok, wid, win, chat_bid, binding_name} ->
+        {page_acts, keep_ids} =
+          plan_view_window_page(
+            view,
+            root_dp,
+            root,
+            sid,
+            session,
+            wid,
+            obs_view,
+            obs_place,
+            binding_entry,
+            chat_bid,
+            binding_name
+          )
+
+        label_act =
+          if win.label != view.window_label do
+            [{:set_label, %{target: :window, session_id: sid, window_id: wid, label: view.window_label}}]
+          else
+            []
+          end
+
+        {page_acts ++ label_act, keep_ids, MapSet.new([wid]), false}
+
+      :none ->
+        if session != nil do
+          act = {:new_view_window, %{session_id: sid, family: root, view: view, place: root_dp}}
+          {[act], MapSet.new(), MapSet.new(), false}
+        else
+          act = {:create_session, %{family: root, label: session_label, view: view, place: root_dp}}
+          {[act], MapSet.new(), MapSet.new(), true}
+        end
+    end
+  end
+
+  defp find_live_view_window(nil, _obs_view, _obs_place, _binding_entry), do: :none
+
+  defp find_live_view_window(session, obs_view, obs_place, binding_entry) do
+    {binding_name, binding} = binding_entry || {nil, nil}
+
+    placed_chat =
+      if binding && binding["session_id"] == session.session_id do
+        Enum.find(session.blocks, &(&1.block_id == binding["block_id"] and is_binary(&1.window_id)))
+      end
+
+    wid =
+      cond do
+        obs_view && obs_view["session_id"] == session.session_id &&
+            Enum.any?(session.windows, &(&1.window_id == obs_view["window_id"])) ->
+          obs_view["window_id"]
+
+        obs_place && obs_place["session_id"] == session.session_id &&
+            Enum.any?(session.windows, &(&1.window_id == obs_place["window_id"])) ->
+          obs_place["window_id"]
+
+        placed_chat != nil ->
+          placed_chat.window_id
+
+        true ->
+          nil
+      end
+
+    case wid && Enum.find(session.windows, &(&1.window_id == wid)) do
+      nil -> :none
+      win -> {:ok, wid, win, placed_chat && placed_chat.block_id, binding_name}
+    end
+  end
+
+  defp plan_view_window_page(
+         view,
+         root_dp,
+         root,
+         sid,
+         session,
+         wid,
+         obs_view,
+         obs_place,
+         binding_entry,
+         chat_bid,
+         binding_name
+       ) do
+    binding = binding_entry && elem(binding_entry, 1)
+
+    recorded_page_id =
+      (obs_view && obs_view["page_block_id"]) ||
+        (obs_place && obs_place["page_block_id"]) ||
+        (binding && binding["page_block_id"])
+
+    page_closed? =
+      (is_map(obs_view) and obs_view["page_closed"] == true) or
+        (is_map(obs_place) and obs_place["page_closed"] == true) or
+        (is_map(binding) and binding["page_closed"] == true)
+
+    live_page =
+      recorded_page_id &&
+        Enum.find(session.blocks, &(&1.block_id == recorded_page_id and &1.window_id == wid))
+
+    cond do
+      live_page != nil ->
+        keep_ids = MapSet.new([live_page.block_id])
+
+        view_act =
+          if obs_view == nil do
+            [
+              {:record_view,
+               %{
+                 family: root,
+                 view: %{
+                   "session_id" => sid,
+                   "window_id" => wid,
+                   "page_block_id" => live_page.block_id,
+                   "family" => root,
+                   "fiber" => root,
+                   "uid" => view.uid,
+                   "page_closed" => false
+                 }
+               }}
+            ]
+          else
+            []
+          end
+
+        place_act =
+          if root_dp != nil and obs_place == nil do
+            [
+              {:record_place,
+               %{
+                 uid: root_dp.uid,
+                 place: %{
+                   "session_id" => sid,
+                   "window_id" => wid,
+                   "page_block_id" => live_page.block_id,
+                   "family" => root,
+                   "fiber" => root_dp.fiber,
+                   "depth" => root_dp.depth,
+                   "asked_at" => root_dp.asked_at,
+                   "page_closed" => false
+                 }
+               }}
+            ]
+          else
+            []
+          end
+
+        {view_act ++ place_act, keep_ids}
+
+      recorded_page_id != nil ->
+        view_act =
+          if obs_view != nil do
+            [
+              {:update_view,
+               %{
+                 family: root,
+                 observed_view: obs_view,
+                 fields: %{"page_block_id" => nil, "page_closed" => true}
+               }}
+            ]
+          else
+            []
+          end
+
+        place_act =
+          if obs_place != nil or (binding_name != nil and binding != nil) do
+            [
+              {:update_place,
+               %{
+                 uid: view.uid,
+                 observed_place: obs_place,
+                 observed_binding: binding,
+                 binding_name: binding_name,
+                 fields: %{"page_block_id" => nil, "page_closed" => true}
+               }}
+            ]
+          else
+            []
+          end
+
+        {view_act ++ place_act, MapSet.new()}
+
+      page_closed? ->
+        {[], MapSet.new()}
+
+      is_binary(chat_bid) ->
+        act =
+          {:new_split,
+           %{
+             session_id: sid,
+             window_id: wid,
+             anchor_id: chat_bid,
+             uid: view.uid,
+             url: view.url,
+             family: root,
+             fiber: root,
+             depth: 0,
+             asked_at: root_dp && root_dp.asked_at,
+             binding_name: binding_name,
+             observed_binding: binding,
+             record_view?: true,
+             record_place?: root_dp != nil
+           }}
+
+        {[act], MapSet.new()}
+
+      true ->
+        {[], MapSet.new()}
+    end
   end
 
   defp plan_desired_place(
@@ -690,8 +1329,45 @@ defmodule Shuttle.Terminal.RexLayout do
     {update_in(obs, [:places], &Map.delete(&1 || %{}, uid)), meta}
   end
 
+  defp apply_pure_one({:delete_view, %{family: root}}, obs, meta) do
+    {update_in(obs, [:views], &Map.delete(&1 || %{}, root)), meta}
+  end
+
   defp apply_pure_one({:record_place, %{uid: uid, place: place}}, obs, meta) do
     {put_in(obs, [:places, uid], place), meta}
+  end
+
+  defp apply_pure_one({:record_view, %{family: root, view: view}}, obs, meta) do
+    obs = Map.put_new(obs, :views, %{})
+    {put_in(obs, [:views, root], view), meta}
+  end
+
+  defp apply_pure_one({:update_view, %{family: root, fields: fields}}, obs, meta) do
+    obs =
+      if get_in(obs, [:views, root]) do
+        update_in(obs, [:views, root], &merge_fields(&1, fields))
+      else
+        obs
+      end
+
+    {obs, meta}
+  end
+
+  defp apply_pure_one({:record_chosen_roots, %{chosen_roots: roots}}, obs, meta) do
+    {Map.put(obs, :chosen_roots, roots), meta}
+  end
+
+  defp apply_pure_one({:move_session, %{session_id: sid_ref, index: idx}}, obs, meta) do
+    sid = resolve_sid(sid_ref, meta.created)
+
+    obs =
+      if is_list(obs[:session_order]) do
+        Map.update!(obs, :session_order, &move_in_list(&1, sid, idx))
+      else
+        obs
+      end
+
+    {obs, meta}
   end
 
   defp apply_pure_one(
@@ -716,38 +1392,79 @@ defmodule Shuttle.Terminal.RexLayout do
     {obs, meta}
   end
 
-  defp apply_pure_one({:create_session, %{family: root, label: label, place: dp}}, obs, meta) do
+  defp apply_pure_one({:create_session, %{family: root, label: label} = args}, obs, meta) do
     n = meta.next_id
     sid = "session:sim-#{n}"
     wid = "window:sim-#{n}"
     bid = "block:sim-page-#{n}"
+    view = Map.get(args, :view)
+    dp = Map.get(args, :place)
+    win_label = (view && view.window_label) || (dp && dp.window_label) || ""
 
     session = %{
       session_id: sid,
       label: label,
       active_window_id: wid,
-      windows: [%{window_id: wid, label: dp.window_label, block_ids: [bid]}],
+      windows: [%{window_id: wid, label: win_label, block_ids: [bid]}],
       blocks: [%{block_id: bid, label: Pages.label(), window_id: wid, placement: "placed"}]
-    }
-
-    place = %{
-      "session_id" => sid,
-      "window_id" => wid,
-      "page_block_id" => bid,
-      "family" => root,
-      "fiber" => dp.fiber,
-      "depth" => dp.depth,
-      "asked_at" => dp.asked_at,
-      "page_closed" => false
     }
 
     obs =
       obs
       |> put_in([:sessions, sid], session)
       |> put_in([:families, root], sid)
-      |> put_in([:places, dp.uid], place)
+
+    obs =
+      if view != nil do
+        obs
+        |> Map.put_new(:views, %{})
+        |> put_in([:views, root], view_record(sid, wid, bid, view))
+      else
+        obs
+      end
+
+    obs =
+      if dp != nil do
+        put_in(obs, [:places, dp.uid], place_record(sid, wid, bid, dp))
+      else
+        obs
+      end
+
+    obs =
+      if is_list(obs[:session_order]) do
+        Map.update!(obs, :session_order, &(&1 ++ [sid]))
+      else
+        obs
+      end
 
     {obs, %{meta | next_id: n + 1, created: Map.put(meta.created, root, sid)}}
+  end
+
+  defp apply_pure_one({:new_view_window, %{session_id: sid_ref, family: root, view: view} = args}, obs, meta) do
+    sid = resolve_sid(sid_ref, meta.created)
+    dp = Map.get(args, :place)
+    n = meta.next_id
+    wid = "window:sim-#{n}"
+    bid = "block:sim-page-#{n}"
+
+    win = %{window_id: wid, label: view.window_label, block_ids: [bid]}
+    blk = %{block_id: bid, label: Pages.label(), window_id: wid, placement: "placed"}
+
+    obs =
+      obs
+      |> update_in([:sessions, sid, :windows], &(&1 ++ [win]))
+      |> update_in([:sessions, sid, :blocks], &(&1 ++ [blk]))
+      |> Map.put_new(:views, %{})
+      |> put_in([:views, root], view_record(sid, wid, bid, view))
+
+    obs =
+      if dp != nil do
+        put_in(obs, [:places, dp.uid], place_record(sid, wid, bid, dp))
+      else
+        obs
+      end
+
+    {obs, %{meta | next_id: n + 1}}
   end
 
   defp apply_pure_one({:new_window, %{session_id: sid_ref, family: root, place: dp}}, obs, meta) do
@@ -790,7 +1507,7 @@ defmodule Shuttle.Terminal.RexLayout do
             depth: depth,
             asked_at: asked_at,
             binding_name: bname
-          }},
+          } = args},
          obs,
          meta
        ) do
@@ -817,7 +1534,30 @@ defmodule Shuttle.Terminal.RexLayout do
           if w.window_id == wid, do: %{w | block_ids: w.block_ids ++ [bid]}, else: w
         end)
       end)
-      |> put_in([:places, uid], place)
+
+    obs =
+      if Map.get(args, :record_place?, true) do
+        put_in(obs, [:places, uid], place)
+      else
+        obs
+      end
+
+    obs =
+      if Map.get(args, :record_view?, false) do
+        obs
+        |> Map.put_new(:views, %{})
+        |> put_in([:views, root], %{
+          "session_id" => sid,
+          "window_id" => wid,
+          "page_block_id" => bid,
+          "family" => root,
+          "fiber" => fiber,
+          "uid" => uid,
+          "page_closed" => false
+        })
+      else
+        obs
+      end
 
     obs =
       if bname && get_in(obs, [:bindings, bname]) do
@@ -842,12 +1582,21 @@ defmodule Shuttle.Terminal.RexLayout do
     {obs, meta}
   end
 
-  defp apply_pure_one({:close_window, %{session_id: sid, window_id: wid, uid: uid}}, obs, meta) do
+  defp apply_pure_one({:close_window, %{session_id: sid, window_id: wid} = args}, obs, meta) do
     obs =
       obs
       |> update_in([:sessions, sid, :windows], &Enum.reject(&1, fn w -> w.window_id == wid end))
       |> update_in([:sessions, sid, :blocks], &Enum.reject(&1, fn b -> b.window_id == wid end))
-      |> update_in([:places], &Map.delete(&1 || %{}, uid))
+
+    obs =
+      if uid = Map.get(args, :uid),
+        do: update_in(obs, [:places], &Map.delete(&1 || %{}, uid)),
+        else: obs
+
+    obs =
+      if root = Map.get(args, :view_family),
+        do: update_in(obs, [:views], &Map.delete(&1 || %{}, root)),
+        else: obs
 
     {obs, meta}
   end
@@ -857,6 +1606,12 @@ defmodule Shuttle.Terminal.RexLayout do
       obs
       |> update_in([:sessions], &Map.delete(&1, sid))
       |> update_in([:families], &Map.delete(&1 || %{}, root))
+      |> update_in([:views], &Map.delete(&1 || %{}, root))
+
+    obs =
+      if is_list(obs[:session_order]),
+        do: Map.update!(obs, :session_order, &List.delete(&1, sid)),
+        else: obs
 
     {obs, meta}
   end
@@ -926,11 +1681,15 @@ defmodule Shuttle.Terminal.RexLayout do
          %{
            server: doc["server"],
            sessions: sessions,
+           session_order: Enum.map(raw_sessions, & &1["session_id"]),
            focused_sessions: focused,
            families: families,
            bindings: doc["bindings"] || %{},
            viewers: doc["viewers"] || %{},
-           places: doc["places"] || %{}
+           places: doc["places"] || %{},
+           views: doc["views"] || %{},
+           chosen_roots: doc["chosen_roots"],
+           retained_session_ids: RetainedTerminal.session_ids()
          }}
       end
     end
@@ -966,6 +1725,11 @@ defmodule Shuttle.Terminal.RexLayout do
             p["family"] == root or (sid != nil and p["session_id"] == sid)
           end)
 
+        views =
+          Map.filter(doc["views"] || %{}, fn {fam, v} ->
+            fam == root or (sid != nil and v["session_id"] == sid)
+          end)
+
         {:ok,
          %{
            server: doc["server"],
@@ -974,7 +1738,8 @@ defmodule Shuttle.Terminal.RexLayout do
            families: families,
            bindings: bindings,
            viewers: doc["viewers"] || %{},
-           places: places
+           places: places,
+           views: views
          }}
       end
     end
@@ -1093,10 +1858,48 @@ defmodule Shuttle.Terminal.RexLayout do
     with :ok <- Bindings.delete_place(uid, observed), do: {:ok, state}
   end
 
+  defp apply_one(_runner, {:delete_view, %{family: root, observed: observed}}, state, _locked?) do
+    with :ok <- Bindings.delete_view(root, observed), do: {:ok, state}
+  end
+
   defp apply_one(runner, {:record_place, %{uid: uid, place: place}}, state, _locked?) do
     with {:ok, server, state} <- ensure_server_id(runner, state),
          :ok <- Bindings.put_place(uid, place, server) do
       {:ok, state}
+    end
+  end
+
+  defp apply_one(runner, {:record_view, %{family: root, view: view}}, state, _locked?) do
+    with {:ok, server, state} <- ensure_server_id(runner, state),
+         :ok <- Bindings.put_view(root, view, server) do
+      {:ok, state}
+    end
+  end
+
+  defp apply_one(
+         _runner,
+         {:update_view, %{family: root, observed_view: obs_view, fields: fields}},
+         state,
+         _locked?
+       ) do
+    with :ok <- if(obs_view, do: Bindings.update_view(root, obs_view, fields), else: :ok),
+         do: {:ok, state}
+  end
+
+  defp apply_one(runner, {:record_chosen_roots, %{chosen_roots: roots}}, state, _locked?) do
+    with {:ok, server, state} <- ensure_server_id(runner, state),
+         :ok <- Bindings.put_chosen_roots(roots, server) do
+      {:ok, state}
+    end
+  end
+
+  defp apply_one(runner, {:move_session, %{session_id: sid_ref, index: idx}}, state, _locked?) do
+    sid = resolve_sid(sid_ref, state.created)
+
+    case Rex.command(runner, ["session", "move", sid, "--index", Integer.to_string(idx)]) do
+      {:ok, _} -> {:ok, state}
+      {:error, :not_found} -> {:ok, state}
+      error -> error
     end
   end
 
@@ -1121,18 +1924,22 @@ defmodule Shuttle.Terminal.RexLayout do
 
   defp apply_one(
          runner,
-         {:create_session, %{family: root, label: label, place: dp}},
+         {:create_session, %{family: root, label: label} = args},
          state,
          locked?
        ) do
+    view = Map.get(args, :view)
+    dp = Map.get(args, :place)
+    target = view || dp
+
     maybe_lock(locked?, root, fn ->
       with {:ok, server, state} <- ensure_server_id(runner, state),
-           {:ok, page_blk} <- Pages.page_block(dp.url),
+           {:ok, page_blk} <- Pages.page_block(target.url),
            spec = %{
              "label" => label,
              "initial_windows" => [
                %{
-                 "window_label" => dp.window_label,
+                 "window_label" => target.window_label,
                  "layout" => %{"block" => page_blk}
                }
              ]
@@ -1143,11 +1950,48 @@ defmodule Shuttle.Terminal.RexLayout do
               "initial_windows" => [%{"window_id" => "window:" <> _ = wid, "block_ids" => ["block:" <> _ = bid]}]
             }} <- Rex.create(runner, spec, timeout_ms: Pages.launch_timeout_ms()),
            :ok <- Bindings.put_family(root, sid, server),
-           place = place_record(sid, wid, bid, dp),
-           :ok <- Bindings.put_place(dp.uid, place, server) do
+           :ok <-
+             if(view != nil,
+               do: Bindings.put_view(root, view_record(sid, wid, bid, view), server),
+               else: :ok
+             ),
+           :ok <-
+             if(dp != nil,
+               do: Bindings.put_place(dp.uid, place_record(sid, wid, bid, dp), server),
+               else: :ok
+             ) do
         {:ok, %{state | created: Map.put(state.created, root, sid), any_created?: true}}
       else
         {:ok, reply} -> {:error, {:unknown, "invalid Rex session.create reply: #{inspect(reply)}"}}
+        error -> error
+      end
+    end)
+  end
+
+  defp apply_one(
+         runner,
+         {:new_view_window, %{session_id: sid_ref, family: root, view: view} = args},
+         state,
+         locked?
+       ) do
+    sid = resolve_sid(sid_ref, state.created)
+    dp = Map.get(args, :place)
+
+    maybe_lock(locked?, root, fn ->
+      with {:ok, server, state} <- ensure_server_id(runner, state),
+           {:ok, page_blk} <- Pages.page_block(view.url),
+           spec = %{"window_label" => view.window_label, "layout" => %{"block" => page_blk}},
+           {:ok, %{"window_id" => "window:" <> _ = wid, "block_ids" => ["block:" <> _ = bid]}} <-
+             Rex.new_window(runner, sid, spec, timeout_ms: Pages.launch_timeout_ms()),
+           :ok <- Bindings.put_view(root, view_record(sid, wid, bid, view), server),
+           :ok <-
+             if(dp != nil,
+               do: Bindings.put_place(dp.uid, place_record(sid, wid, bid, dp), server),
+               else: :ok
+             ) do
+        {:ok, state}
+      else
+        {:ok, reply} -> {:error, {:unknown, "invalid Rex new_window reply: #{inspect(reply)}"}}
         error -> error
       end
     end)
@@ -1192,7 +2036,7 @@ defmodule Shuttle.Terminal.RexLayout do
             asked_at: asked_at,
             binding_name: bname,
             observed_binding: obs_binding
-          }},
+          } = args},
          state,
          locked?
        ) do
@@ -1224,7 +2068,29 @@ defmodule Shuttle.Terminal.RexLayout do
              "asked_at" => asked_at,
              "page_closed" => false
            },
-           :ok <- Bindings.put_place(uid, place, server),
+           :ok <-
+             if(Map.get(args, :record_place?, true),
+               do: Bindings.put_place(uid, place, server),
+               else: :ok
+             ),
+           :ok <-
+             if(Map.get(args, :record_view?, false),
+               do:
+                 Bindings.put_view(
+                   root,
+                   %{
+                     "session_id" => sid,
+                     "window_id" => wid,
+                     "page_block_id" => page_id,
+                     "family" => root,
+                     "fiber" => fiber,
+                     "uid" => uid,
+                     "page_closed" => false
+                   },
+                   server
+                 ),
+               else: :ok
+             ),
            :ok <-
              if(bname && obs_binding,
                do: Bindings.put_page(bname, obs_binding, %{"page_block_id" => page_id}),
@@ -1250,7 +2116,7 @@ defmodule Shuttle.Terminal.RexLayout do
 
   defp apply_one(
          runner,
-         {:close_window, %{session_id: sid, window_id: wid, uid: uid, family: root, observed: obs}},
+         {:close_window, %{session_id: sid, window_id: wid, family: root} = args},
          state,
          locked?
        ) do
@@ -1263,7 +2129,16 @@ defmodule Shuttle.Terminal.RexLayout do
         end
 
       with :ok <- result,
-           :ok <- Bindings.delete_place(uid, obs) do
+           :ok <-
+             if(args[:uid] && args[:observed],
+               do: Bindings.delete_place(args[:uid], args[:observed]),
+               else: :ok
+             ),
+           :ok <-
+             if(args[:view_family] && args[:observed_view],
+               do: Bindings.delete_view(args[:view_family], args[:observed_view]),
+               else: :ok
+             ) do
         {:ok, state}
       end
     end)
@@ -1335,6 +2210,18 @@ defmodule Shuttle.Terminal.RexLayout do
     }
   end
 
+  defp view_record(sid, wid, bid, view) do
+    %{
+      "session_id" => sid,
+      "window_id" => wid,
+      "page_block_id" => bid,
+      "family" => view.family,
+      "fiber" => view.fiber,
+      "uid" => view.uid,
+      "page_closed" => false
+    }
+  end
+
   @doc """
   Reconcile Rex's Shuttle family sessions and thread places with desired state.
   Each family is observed, planned, and mutated atomically under its
@@ -1348,6 +2235,11 @@ defmodule Shuttle.Terminal.RexLayout do
         now = Keyword.get(opts, :now, DateTime.utc_now())
         grace = Keyword.get(opts, :grace_seconds, @default_grace_seconds)
         own_host_id = Keyword.get(opts, :own_host_id, Poller.own_host_id())
+
+        chosen_roots =
+          Keyword.get_lazy(opts, :chosen_roots, fn ->
+            load_chosen_roots(fibers, family_fibers, own_host_id)
+          end)
 
         with {:ok, %{"host_id" => server} = identity} <- Rex.whoami(runner),
              :ok <- Backend.reconcile(runner, identity),
@@ -1363,6 +2255,8 @@ defmodule Shuttle.Terminal.RexLayout do
               fibers_loaded?: fibers_loaded?,
               bindings: doc["bindings"] || %{},
               places: doc["places"] || %{},
+              views: doc["views"] || %{},
+              chosen_roots: chosen_roots,
               now: now,
               grace_seconds: grace,
               pages_base: base,
@@ -1371,6 +2265,7 @@ defmodule Shuttle.Terminal.RexLayout do
 
           roots =
             (Map.keys(doc["families"] || %{}) ++
+               Map.keys(doc["views"] || %{}) ++
                Enum.map(Map.values(doc["places"] || %{}), & &1["family"]) ++
                Map.keys(seed_desired.families))
             |> Enum.filter(&is_binary/1)
@@ -1389,6 +2284,8 @@ defmodule Shuttle.Terminal.RexLayout do
                         fibers_loaded?: fibers_loaded?,
                         bindings: observed.bindings,
                         places: observed.places,
+                        views: observed.views,
+                        chosen_roots: chosen_roots,
                         sessions: observed.sessions,
                         now: now,
                         grace_seconds: grace,
@@ -1413,10 +2310,14 @@ defmodule Shuttle.Terminal.RexLayout do
               end
             end)
 
+          chosen_changed? =
+            seed_desired.chosen_roots != doc["chosen_roots"] and
+              not (seed_desired.chosen_roots == [] and doc["chosen_roots"] == nil)
+
           with {:ok, family_created?} <- result,
                {:ok, desk_created?} <- reconcile_desk(runner, server, identity, base, desk?) do
-            if family_created? or desk_created? do
-              RetainedTerminal.keep_last(runner)
+            if family_created? or desk_created? or chosen_changed? do
+              apply_session_order(runner, server, seed_desired.chosen_roots, opts)
             end
 
             :ok
@@ -1567,6 +2468,67 @@ defmodule Shuttle.Terminal.RexLayout do
 
   defp maybe_set_instance(_), do: :ok
 
+  defp apply_session_order(runner, server, chosen_roots, opts) do
+    with {:ok, doc} <- Bindings.read(),
+         {:ok, raw_sessions} <- Rex.sessions(runner) do
+      current_order = Enum.map(raw_sessions, & &1["session_id"])
+
+      desk_sids =
+        case Keyword.get(opts, :desk_session_id) || get_in(doc, ["desk", "session_id"]) do
+          sid when is_binary(sid) -> [sid]
+          _ -> for s <- raw_sessions, s["label"] == "Desk", do: s["session_id"]
+        end
+
+      retained_sids =
+        Keyword.get_lazy(opts, :retained_session_ids, fn -> RetainedTerminal.session_ids() end)
+
+      moves =
+        plan_session_order(current_order, %{
+          desk_sids: desk_sids,
+          families: doc["families"] || %{},
+          chosen_roots: chosen_roots,
+          retained_sids: retained_sids
+        })
+
+      Enum.each(moves, fn {:move_session, %{session_id: sid, index: idx}} ->
+        case Rex.command(runner, ["session", "move", sid, "--index", Integer.to_string(idx)]) do
+          {:ok, _} -> :ok
+          {:error, :not_found} -> :ok
+          error -> Logger.warning("Rex session move failed for #{sid}: #{inspect(error)}")
+        end
+      end)
+
+      if chosen_roots != doc["chosen_roots"] do
+        Bindings.put_chosen_roots(chosen_roots, server)
+      end
+    end
+  end
+
+  defp load_chosen_roots(fibers, family_fibers, own_host_id) do
+    reach = Board.retention_ms()
+    since = System.system_time(:millisecond) - reach
+
+    local =
+      try do
+        Board.all_since(since)
+      catch
+        :exit, _ -> []
+      end
+
+    remote =
+      try do
+        RemoteTemporalRegistry.entries_nowait(:board)
+        |> Map.values()
+        |> Enum.flat_map(& &1.items)
+        |> Enum.filter(&(is_integer(&1["received_at"]) and &1["received_at"] >= since))
+      catch
+        :exit, _ -> []
+      end
+
+    chosen_roots_from_channels(local ++ remote, fibers, family_fibers, own_host_id)
+  rescue
+    _ -> []
+  end
   defp scope_desired(desired, root) do
     case Map.fetch(desired.families, root) do
       {:ok, fam} ->
@@ -1627,10 +2589,16 @@ defmodule Shuttle.Terminal.RexLayout do
     sessions = opts[:sessions]
     server = opts[:server]
 
-    with true <- is_binary(uid),
-         true <- doc["server"] in [nil, server],
-         %{"session_id" => sid, "window_id" => wid, "page_block_id" => page_bid} = place <-
-           get_in(doc, ["places", uid]),
+    candidate =
+      if is_binary(uid) and doc["server"] in [nil, server] do
+        get_in(doc, ["places", uid]) ||
+          Enum.find_value(doc["views"] || %{}, fn {_root, view} ->
+            if view["uid"] == uid, do: view
+          end)
+      end
+
+    with %{"session_id" => sid, "window_id" => wid, "page_block_id" => page_bid} = place <-
+           candidate,
          true <- is_binary(page_bid),
          true <- Enum.any?(sessions, &(&1["session_id"] == sid)),
          {:ok, blocks} <- Rex.blocks(runner, sid),
@@ -1669,7 +2637,12 @@ defmodule Shuttle.Terminal.RexLayout do
           with {:ok, doc} <- Bindings.read(),
                {:ok, sessions} <- Rex.sessions(runner) do
             existing_place =
-              if doc["server"] in [nil, server], do: get_in(doc, ["places", uid]), else: nil
+              if doc["server"] in [nil, server] do
+                get_in(doc, ["places", uid]) ||
+                  if(path == root, do: get_in(doc, ["views", root]), else: nil)
+              else
+                nil
+              end
 
             case live_existing_place(runner, sessions, existing_place) do
               {:ok, place, :page_live} ->
@@ -1722,7 +2695,15 @@ defmodule Shuttle.Terminal.RexLayout do
 
       case result do
         {:ok, place, true} ->
-          RetainedTerminal.keep_last(runner)
+          chosen_roots =
+            Keyword.get_lazy(opts, :chosen_roots, fn ->
+              case Bindings.read() do
+                {:ok, %{"chosen_roots" => roots}} when is_list(roots) -> roots
+                _ -> []
+              end
+            end)
+
+          apply_session_order(runner, server, chosen_roots, opts)
           {:ok, place}
 
         {:ok, place, false} ->

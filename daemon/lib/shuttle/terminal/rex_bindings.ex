@@ -31,13 +31,15 @@ defmodule Shuttle.Terminal.RexBindings do
 
       viewers = if doc["server"] in [nil, server], do: doc["viewers"] || %{}, else: %{}
       places = if doc["server"] in [nil, server], do: doc["places"] || %{}, else: %{}
+      views = if doc["server"] in [nil, server], do: doc["views"] || %{}, else: %{}
 
       Map.merge(doc, %{
         "server" => server,
         "bindings" => Map.put(bindings, name, binding),
         "viewers" => viewers,
         "families" => if(doc["server"] in [nil, server], do: doc["families"] || %{}, else: %{}),
-        "places" => places
+        "places" => places,
+        "views" => views
       })
       |> then(&if(doc["server"] in [nil, server], do: &1, else: Map.delete(&1, "desk")))
     end)
@@ -96,6 +98,7 @@ defmodule Shuttle.Terminal.RexBindings do
         "bindings" => if(doc["server"] in [nil, server], do: doc["bindings"], else: %{}),
         "families" => if(doc["server"] in [nil, server], do: doc["families"] || %{}, else: %{}),
         "places" => if(doc["server"] in [nil, server], do: doc["places"] || %{}, else: %{}),
+        "views" => if(doc["server"] in [nil, server], do: doc["views"] || %{}, else: %{}),
         "viewers" => Map.put(viewers, key, binding)
       })
       |> then(&if(doc["server"] in [nil, server], do: &1, else: Map.delete(&1, "desk")))
@@ -107,7 +110,7 @@ defmodule Shuttle.Terminal.RexBindings do
       doc =
         if doc["server"] in [nil, server],
           do: doc,
-          else: %{"version" => 1, "bindings" => %{}, "viewers" => %{}, "places" => %{}}
+          else: %{"version" => 1, "bindings" => %{}, "viewers" => %{}, "places" => %{}, "views" => %{}}
 
       Map.merge(doc, %{
         "server" => server,
@@ -121,7 +124,7 @@ defmodule Shuttle.Terminal.RexBindings do
       doc =
         if doc["server"] in [nil, server],
           do: doc,
-          else: %{"version" => 1, "bindings" => %{}, "viewers" => %{}, "families" => %{}}
+          else: %{"version" => 1, "bindings" => %{}, "viewers" => %{}, "families" => %{}, "views" => %{}}
 
       Map.merge(doc, %{
         "server" => server,
@@ -157,7 +160,7 @@ defmodule Shuttle.Terminal.RexBindings do
       doc =
         if doc["server"] in [nil, server],
           do: doc,
-          else: %{"version" => 1, "bindings" => %{}, "viewers" => %{}, "families" => %{}, "places" => %{}}
+          else: %{"version" => 1, "bindings" => %{}, "viewers" => %{}, "families" => %{}, "places" => %{}, "views" => %{}}
 
       Map.merge(doc, %{
         "server" => server,
@@ -169,6 +172,57 @@ defmodule Shuttle.Terminal.RexBindings do
   def delete_desk(observed) do
     update(fn doc ->
       if doc["desk"] == observed, do: Map.delete(doc, "desk"), else: doc
+    end)
+  end
+
+  def put_view(family, view, server)
+      when is_binary(family) and is_map(view) and is_binary(server) do
+    update(fn doc ->
+      doc =
+        if doc["server"] in [nil, server],
+          do: doc,
+          else: %{"version" => 1, "bindings" => %{}, "viewers" => %{}, "families" => %{}, "places" => %{}}
+
+      Map.merge(doc, %{
+        "server" => server,
+        "views" => Map.put(doc["views"] || %{}, family, view)
+      })
+    end)
+  end
+
+  @doc """
+  Compare-and-set update on `views[family]`: merges `fields` when the stored
+  entry still equals `observed`. A nil value removes the field.
+  """
+  def update_view(family, observed, fields) when is_binary(family) and is_map(fields) do
+    update(fn doc ->
+      if get_in(doc, ["views", family]) == observed and is_map(observed) do
+        updated =
+          Enum.reduce(fields, observed, fn
+            {key, nil}, acc -> Map.delete(acc, key)
+            {key, value}, acc -> Map.put(acc, key, value)
+          end)
+
+        Map.put(doc, "views", Map.put(doc["views"] || %{}, family, updated))
+      else
+        doc
+      end
+    end)
+  end
+
+  def delete_view(family, observed), do: delete_entry("views", family, observed)
+
+  def put_chosen_roots(roots, server) when is_list(roots) and is_binary(server) do
+    update(fn doc ->
+      doc =
+        if doc["server"] in [nil, server],
+          do: doc,
+          else: %{"version" => 1, "bindings" => %{}, "viewers" => %{}, "families" => %{}, "places" => %{}, "views" => %{}}
+
+      Map.merge(doc, %{
+        "server" => server,
+        "chosen_roots" => roots
+      })
     end)
   end
 
@@ -203,7 +257,7 @@ defmodule Shuttle.Terminal.RexBindings do
   def prune(snapshot, live_ids) do
     update(fn doc ->
       doc =
-        Enum.reduce(["bindings", "viewers", "places"], doc, fn kind, acc ->
+        Enum.reduce(["bindings", "viewers", "places", "views"], doc, fn kind, acc ->
           Enum.reduce(snapshot[kind] || %{}, acc, fn {name, entry}, acc ->
             if entry["session_id"] not in live_ids and get_in(acc, [kind, name]) == entry,
               do: Map.put(acc, kind, Map.delete(acc[kind], name)),
@@ -317,6 +371,27 @@ defmodule Shuttle.Terminal.RexBindings do
 
   defp valid_desk?(_), do: false
 
+  defp valid_views?(views) when is_map(views) do
+    Enum.all?(views, fn {root, view} ->
+      is_binary(root) and
+        match?(
+          %{
+            "session_id" => "session:" <> _,
+            "window_id" => "window:" <> _
+          },
+          view
+        ) and
+        match?("block:" <> _, Map.get(view, "page_block_id", "block:")) and
+        is_boolean(Map.get(view, "page_closed", false))
+    end)
+  end
+
+  defp valid_views?(_), do: false
+
+  defp valid_chosen_roots?(nil), do: true
+  defp valid_chosen_roots?(roots) when is_list(roots), do: Enum.all?(roots, &is_binary/1)
+  defp valid_chosen_roots?(_), do: false
+
   defp decode(json) do
     with {:ok, %{"version" => 1, "server" => server, "bindings" => bindings} = doc} <-
            Jason.decode(json),
@@ -325,6 +400,8 @@ defmodule Shuttle.Terminal.RexBindings do
          true <- valid_families?(Map.get(doc, "families", %{})),
          true <- valid_places?(Map.get(doc, "places", %{})),
          true <- valid_desk?(Map.get(doc, "desk")),
+         true <- valid_views?(Map.get(doc, "views", %{})),
+         true <- valid_chosen_roots?(Map.get(doc, "chosen_roots")),
          true <-
            Enum.all?(bindings, fn {name, binding} ->
              is_binary(name) and

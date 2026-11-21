@@ -403,7 +403,15 @@ defmodule Shuttle.RexFocus do
      normalize_title(RexTree.display_label(RexTree.session_label(family.family)))}
   end
 
-  defp normalize_title(title), do: title |> String.replace("\u2060", "") |> String.trim()
+  defp normalize_title(title) do
+    title
+    |> String.replace("\u2060", "")
+    |> String.trim()
+    |> strip_session_mark()
+  end
+
+  defp strip_session_mark("● " <> rest), do: rest
+  defp strip_session_mark(title), do: String.replace(title, " - ● ", " - ")
 
   defp fiber_target(id, fibers) do
     case Enum.find(fibers, &(id in [&1["id"], &1["uid"], &1["slug"]])) do

@@ -514,7 +514,10 @@ defmodule Shuttle.Terminal.RexLayoutTest do
                )
 
       assert Map.has_key?(FakeRex.state().sessions, sid)
-      assert [%{"block_id" => ^page_bid, "window_id" => ^wid}] = blocks(sid)
+      assert Enum.any?(blocks(sid), &(&1["block_id"] == page_bid and &1["window_id"] == wid))
+      # Tab 1 family view is also present for the family root.
+      {:ok, mid_doc} = RexBindings.read()
+      assert mid_doc["views"][@root]["session_id"] == sid
 
       # 5. Past 24h grace while focused on this session's active window: still protected!
       FakeRex.clients([
@@ -584,13 +587,14 @@ defmodule Shuttle.Terminal.RexLayoutTest do
       assert cleared["bindings"] == %{}
       refute Map.has_key?(FakeRex.state().sessions, old_sid)
 
-      # Reconcile rebuilds the desired [page] place for the waiting fiber.
+      # Reconcile rebuilds the desired [page] place for the waiting fiber (plus Tab 1 family view).
       assert :ok = RexLayout.reconcile(FakeRex, fibers: [waiting_fiber], now: now)
       {:ok, rebuilt} = RexBindings.read()
       new_place = rebuilt["places"][@uid_a]
       assert is_binary(new_place["session_id"])
       assert is_binary(new_place["page_block_id"])
-      assert [%{"label" => "rexweb shuttle"}] = blocks(new_place["session_id"])
+      assert Enum.any?(blocks(new_place["session_id"]), &(&1["block_id"] == new_place["page_block_id"] and &1["label"] == "rexweb shuttle"))
+      assert rebuilt["views"][@root]["session_id"] == new_place["session_id"]
     end
 
     test "cold Poller cache at boot never wipes existing places" do
@@ -660,10 +664,11 @@ defmodule Shuttle.Terminal.RexLayoutTest do
       sid = b["session_id"]
       page_bid = b["page_block_id"]
 
-      # Reconcile with empty owner-filtered fibers: the live resume-* binding keeps its page.
+      # Reconcile with empty owner-filtered fibers: the live resume-* binding keeps its page
+      # (alongside Tab 1's family view page).
       assert :ok = RexLayout.reconcile(FakeRex, fibers: [])
       assert Enum.any?(blocks(sid), &(&1["block_id"] == page_bid))
-      assert length(Enum.filter(blocks(sid), &RexPages.page?/1)) == 1
+      assert Enum.count(blocks(sid), &(&1["window_id"] == b["window_id"] and RexPages.page?(&1))) == 1
     end
 
     test "ensure_place restores a human-closed page block in an existing live window" do
@@ -777,6 +782,245 @@ defmodule Shuttle.Terminal.RexLayoutTest do
       assert doc5["desk"] == nil
       refute Map.has_key?(FakeRex.state().sessions, new_desk_sid)
       assert Map.has_key?(FakeRex.state().sessions, existing_sid)
+    end
+  end
+
+  describe "S4: session ordering, marks, chosen channels, and Tab 1 family view" do
+    defp apply_moves(order, moves) do
+      Enum.reduce(moves, order, fn {:move_session, %{session_id: sid, index: idx}}, list ->
+        without = List.delete(list, sid)
+        List.insert_at(without, max(0, min(idx, length(without))), sid)
+      end)
+    end
+
+    property "plan_session_order/2 only moves Desk/Shuttle/retained sessions, preserves human order, and is idempotent" do
+      check all(
+              has_desk? <- StreamData.boolean(),
+              chosen_count <- StreamData.integer(0..3),
+              other_count <- StreamData.integer(0..3),
+              human_count <- StreamData.integer(0..4),
+              retained_count <- StreamData.integer(0..2),
+              shuffle_seed <- StreamData.integer(1..10_000),
+              max_runs: 100
+            ) do
+        desk_sids = if has_desk?, do: ["session:desk"], else: []
+        chosen_roots = for i <- 1..chosen_count//1, do: "work/chosen-#{i}"
+        chosen_sids = for i <- 1..chosen_count//1, do: "session:chosen-#{i}"
+        other_sids = for i <- 1..other_count//1, do: "session:other-#{i}"
+        human_sids = for i <- 1..human_count//1, do: "session:human-#{i}"
+        retained_sids = for i <- 1..retained_count//1, do: "session:retained-#{i}"
+
+        families =
+          Map.merge(
+            Map.new(Enum.zip(chosen_roots, chosen_sids)),
+            Map.new(Enum.with_index(other_sids, 1), fn {sid, i} -> {"work/other-#{i}", sid} end)
+          )
+
+        all = desk_sids ++ chosen_sids ++ other_sids ++ human_sids ++ retained_sids
+        :rand.seed(:exsss, {shuffle_seed, shuffle_seed * 3, shuffle_seed * 7})
+        current = Enum.shuffle(all)
+
+        opts = %{
+          desk_sids: desk_sids,
+          families: families,
+          chosen_roots: chosen_roots,
+          retained_sids: retained_sids
+        }
+
+        moves = RexLayout.plan_session_order(current, opts)
+
+        # Invariant 1: never moves a human session.
+        human_set = MapSet.new(human_sids)
+
+        for {:move_session, %{session_id: sid}} <- moves do
+          refute MapSet.member?(human_set, sid), "moved human session #{sid}"
+        end
+
+        after_order = apply_moves(current, moves)
+
+        # Invariant 2: human sessions keep their exact relative order.
+        human_before = Enum.filter(current, &MapSet.member?(human_set, &1))
+        human_after = Enum.filter(after_order, &MapSet.member?(human_set, &1))
+        assert human_after == human_before
+
+        # Invariant 3: Desk -> chosen (in rail order) -> other Shuttle -> human -> retained.
+        other_before = Enum.filter(current, &(&1 in other_sids))
+        retained_before = Enum.filter(current, &(&1 in retained_sids))
+        expected = desk_sids ++ chosen_sids ++ other_before ++ human_before ++ retained_before
+        assert after_order == expected
+
+        # Invariant 4: idempotent.
+        assert RexLayout.plan_session_order(after_order, opts) == []
+      end
+    end
+
+    test "plan/2 applies session order only on session creation or chosen-set change, never undoing human drags" do
+      now = ~U[2026-11-21 12:00:00Z]
+
+      root_a = %{"id" => "u-a", "uid" => "u-a", "slug" => "work/a", "status" => "open", "shuttle" => %{"host" => "h", "kind" => "oneshot"}}
+      root_b = %{"id" => "u-b", "uid" => "u-b", "slug" => "work/b", "status" => "open", "shuttle" => %{"host" => "h", "kind" => "oneshot"}}
+
+      obs = %{
+        sessions: %{
+          "session:human" => %{session_id: "session:human", label: "my-shell", active_window_id: "w:h", windows: [], blocks: []},
+          "session:rc" => %{session_id: "session:rc", label: "shuttle-remote-control@1", active_window_id: "w:rc", windows: [], blocks: []}
+        },
+        session_order: ["session:human", "session:rc"],
+        retained_session_ids: ["session:rc"],
+        focused_sessions: MapSet.new(),
+        families: %{},
+        bindings: %{},
+        viewers: %{},
+        places: %{},
+        views: %{},
+        chosen_roots: []
+      }
+
+      des =
+        RexLayout.desired(%{
+          fibers: [root_a, root_b],
+          chosen_roots: ["work/b", "work/a"],
+          now: now,
+          pages_base: "http://hub.test:4000",
+          own_host_id: "h"
+        })
+
+      actions = RexLayout.plan(obs, des)
+      assert Enum.any?(actions, &match?({:move_session, _}, &1))
+      assert Enum.any?(actions, &match?({:record_chosen_roots, %{chosen_roots: ["work/b", "work/a"]}}, &1))
+
+      obs2 = RexLayout.apply_pure(obs, actions)
+      sid_a = obs2.families["work/a"]
+      sid_b = obs2.families["work/b"]
+      assert obs2.session_order == [sid_b, sid_a, "session:human", "session:rc"]
+      assert RexLayout.plan(obs2, des) == []
+
+      # Human drags their shell to the top: with no new session and unchanged chosen set, plan emits nothing.
+      obs_dragged = %{obs2 | session_order: ["session:human", sid_b, sid_a, "session:rc"]}
+      assert RexLayout.plan(obs_dragged, des) == []
+
+      # When chosen order changes to ["work/a", "work/b"], ordering re-applies.
+      des_reordered =
+        RexLayout.desired(%{
+          fibers: [root_a, root_b],
+          chosen_roots: ["work/a", "work/b"],
+          now: now,
+          pages_base: "http://hub.test:4000",
+          own_host_id: "h"
+        })
+
+      actions2 = RexLayout.plan(obs_dragged, des_reordered)
+      obs3 = RexLayout.apply_pure(obs_dragged, actions2)
+      assert obs3.session_order == [sid_a, sid_b, "session:human", "session:rc"]
+      assert RexLayout.plan(obs3, des_reordered) == []
+    end
+
+    test "marks prefix family session labels with '● ' while waiting on human and strip it when clear" do
+      now = ~U[2026-11-21 12:00:00Z]
+
+      root = %{"id" => "u-root", "uid" => "u-root", "slug" => @root, "status" => "open", "shuttle" => %{"host" => "h", "kind" => "oneshot"}}
+      asking = %{"id" => @uid_a, "uid" => @uid_a, "slug" => @root <> "/a", "status" => "active", "shuttle" => %{"host" => "h", "kind" => "oneshot", "ask" => %{"text" => "Proceed?"}}}
+      clear = %{"id" => @uid_a, "uid" => @uid_a, "slug" => @root <> "/a", "status" => "active", "shuttle" => %{"host" => "h", "kind" => "oneshot"}}
+
+      des_waiting =
+        RexLayout.desired(%{
+          fibers: [root, asking],
+          chosen_roots: [@root],
+          now: now,
+          pages_base: "http://hub.test:4000",
+          own_host_id: "h"
+        })
+
+      assert des_waiting.families[@root].waiting? == true
+      assert des_waiting.families[@root].label == "● design/family"
+
+      obs = %{sessions: %{}, focused_sessions: MapSet.new(), families: %{}, bindings: %{}, viewers: %{}, places: %{}, views: %{}}
+      obs_waiting = RexLayout.apply_pure(obs, RexLayout.plan(obs, des_waiting))
+      sid = obs_waiting.families[@root]
+      assert obs_waiting.sessions[sid].label == "● design/family"
+
+      des_clear =
+        RexLayout.desired(%{
+          fibers: [root, clear],
+          chosen_roots: [@root],
+          now: now,
+          pages_base: "http://hub.test:4000",
+          own_host_id: "h"
+        })
+
+      assert des_clear.families[@root].waiting? == false
+      assert des_clear.families[@root].label == "design/family"
+
+      clear_actions = RexLayout.plan(obs_waiting, des_clear)
+      assert {:set_label, %{target: :session, session_id: sid, label: "design/family"}} in clear_actions
+      obs_clear = RexLayout.apply_pure(obs_waiting, clear_actions)
+      assert obs_clear.sessions[sid].label == "design/family"
+    end
+
+    test "chosen_roots_from_channels/4 maps pinned channels in rail order to family roots, honoring unpins" do
+      fibers = [
+        %{"id" => "u1", "uid" => "u1", "slug" => "work/alpha", "status" => "open", "shuttle" => %{"host" => "h", "channel" => "Alpha"}},
+        %{"id" => "u2", "uid" => "u2", "slug" => "work/beta", "status" => "open", "shuttle" => %{"host" => "h", "channel" => "Beta"}},
+        %{"id" => "u3", "uid" => "u3", "slug" => "work/gamma", "status" => "open", "shuttle" => %{"host" => "h", "channel" => "Gamma"}},
+        %{"id" => "u4", "uid" => "u4", "slug" => "work/other-host", "status" => "open", "shuttle" => %{"host" => "remote", "channel" => "Alpha"}}
+      ]
+
+      records = [
+        %{"kind" => "pinned", "text" => "channel:alpha", "timestamp" => 100},
+        %{"kind" => "pinned", "text" => "channel:beta", "timestamp" => 200},
+        %{"kind" => "pinned", "text" => "channel:gamma", "timestamp" => 300},
+        %{"kind" => "dismissed", "text" => "pin:channel:gamma:350"},
+        %{"kind" => "ordered", "keys" => ["channel:beta", "channel:alpha"], "timestamp" => 400}
+      ]
+
+      assert RexLayout.chosen_roots_from_channels(records, fibers, fibers, "h") == [
+               "work/beta",
+               "work/alpha"
+             ]
+    end
+
+    test "Tab 1 family view is created on new family session, reused by root worker launch, and preserved when child closes" do
+      now = ~U[2026-11-21 12:00:00Z]
+
+      root_fiber = %{"id" => "u-root", "uid" => "u-root", "slug" => @root, "status" => "open", "shuttle" => %{"host" => "h", "kind" => "oneshot"}}
+      child_fiber = %{"id" => @uid_a, "uid" => @uid_a, "slug" => @root <> "/a", "status" => "closed", "shuttle" => %{"host" => "h", "kind" => "oneshot"}}
+
+      obs = %{sessions: %{}, focused_sessions: MapSet.new(), families: %{}, bindings: %{}, viewers: %{}, places: %{}, views: %{}}
+
+      des1 =
+        RexLayout.desired(%{
+          fibers: [root_fiber, child_fiber],
+          chosen_roots: [@root],
+          now: now,
+          pages_base: "http://hub.test:4000",
+          own_host_id: "h"
+        })
+
+      obs1 = RexLayout.apply_pure(obs, RexLayout.plan(obs, des1))
+      sid = obs1.families[@root]
+      view = obs1.views[@root]
+      assert view["session_id"] == sid
+      assert view["uid"] == "u-root"
+      # Tab 1 is the first window in the newly created family session.
+      assert hd(obs1.sessions[sid].windows).window_id == view["window_id"]
+      assert length(obs1.sessions[sid].windows) == 2
+
+      # Child becomes tempered: child window closes, but Tab 1 family view stays (chosen channel).
+      tempered_child = Map.put(child_fiber, "tempered", true)
+
+      des2 =
+        RexLayout.desired(%{
+          fibers: [root_fiber, tempered_child],
+          chosen_roots: [@root],
+          now: now,
+          pages_base: "http://hub.test:4000",
+          own_host_id: "h"
+        })
+
+      obs2 = RexLayout.apply_pure(obs1, RexLayout.plan(obs1, des2))
+      assert length(obs2.sessions[sid].windows) == 1
+      assert hd(obs2.sessions[sid].windows).window_id == view["window_id"]
+      assert RexLayout.plan(obs2, des2) == []
     end
   end
 end
