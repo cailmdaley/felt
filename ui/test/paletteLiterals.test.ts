@@ -20,7 +20,6 @@ const EXEMPT: Array<[path: string, line: RegExp, reason: string]> = [
   ['board/workspace/AudioPage.ts', /\|\| '#[\da-f]{6}'/i, 'canvas fallback when computed style is empty'],
   ['board/workspace/MediaPoster.ts', /\|\| '#[\da-f]{6}'/i, 'canvas fallback when computed style is empty'],
   ['board/workspace/receiptMotion.ts', /\|\| '0 8px 18px rgba/, 'animation fallback when the shadow token is unset'],
-  ['board/views/ChronicleView.css', /mask-image:/, 'a mask reads alpha, not colour'],
 ]
 
 function sources(): Array<{ path: string; lines: string[] }> {

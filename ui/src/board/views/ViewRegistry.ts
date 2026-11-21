@@ -1,17 +1,15 @@
 /**
- * ViewRegistry — the contract between KanbanModal and the temporal views.
+ * ViewRegistry — the contract between KanbanModal and registered views.
  *
- * The board is four full-page views behind one hotkey row:
+ * The board is two full-page views behind one hotkey row:
  *
  *   1  desk       the kanban page (Now board + Resting). Owned by
  *                 KanbanModal itself, NOT a TemporalView.
- *   2  chronicle  ┐ registered views — each mounts into a full-width host
- *   3  channels   │ where the Desk surfaces would otherwise be.
- *   4  globe      ┘
+ *   2  channels   registered view — mounts into a full-width host
+ *                 where the Desk surfaces would otherwise be.
  *
- * Chronicle holds the record in time. Channels has one channel per office,
- * listed while something in it waits on the human or he keeps it pinned,
- * each with its files. The Globe is all the work on a sphere.
+ * Channels has one channel per office, listed while something in it waits on
+ * the human or he keeps it pinned, each with its files.
  *
  * The bar's Find searches where the board stands: a view says where with
  * `findScope` (a list of what it searches and what a pick does, or a handler
@@ -28,23 +26,21 @@
  * `refresh` fires on every successful 15s poll, INCLUDING polls where the
  * fiber data is byte-identical (the Desk skips those re-renders; views do not,
  * because their content also moves with the clock). Keep it cheap and
- * idempotent — Chronicle reads the temporal feeds on its own cadence
- * (./chronicleFeeds.ts) rather than refetching per poll.
+ * idempotent.
  */
 
 import type { BoardFeed } from '../boardFeed.js'
+import type { MapFeeds, MapFile } from '../family/model.js'
 import type { FindScope } from '../search/scope.js'
 import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
 import type { DocKey } from '../workspace/documents.js'
 import type { Library } from '../workspace/Library.js'
 import type { ConsoleOptions, Dock } from '../workspace/Dock.js'
-import type { TemporalFetchers } from './TemporalData.js'
 import type { FiberSends } from '../fiberSends.js'
-import type { GlobeHost } from '../globe/GlobeStage.js'
 import type { SwipeSignal } from '../workspace/PhoneGestures.js'
 
 export interface TemporalView {
-  id: 'chronicle' | 'globe' | 'channels'
+  id: 'channels'
   title: string
   hotkey: string
   mount(host: HTMLElement, ctx: ViewContext): void
@@ -63,21 +59,9 @@ export interface TemporalView {
 }
 
 /**
- * What a view is handed. It IS a {@link TemporalFetchers} — `activity`,
- * `sessions` and `commits` are that interface's, documented there — plus the
- * board's own response, cards and gestures.
- *
- * The one thing a view must know that the fetchers' own docs do not say: feed
- * `sessions` to `buildSessionIndex` and join buckets through `lookupTmux`.
- * That is RUNG 0, a recorded pairing, and it outranks every name-derived rung
- * because it survives the session ending. Join through `lookupTmux` rather
- * than `byTmux.get` — a tmux name is unique within a host, not across the
- * fleet, and the scoped key is what keeps two daemons' identically named
- * sessions apart. Likewise `commits`: join `record.session` through
- * `buildSessionIndex(...).bySession` (with `lookupSession`, host-scoped) and
- * the fiber is a recorded fact rather than a reading of the subject line.
+ * What a view is handed: the board's own response, cards, workspace handles and gestures.
  */
-export interface ViewContext extends TemporalFetchers {
+export interface ViewContext {
   /** The shared fleet sent-files store. */
   sends?: FiberSends
   response: KanbanResponse
@@ -99,7 +83,8 @@ export interface ViewContext extends TemporalFetchers {
     openPage(card: KanbanCard, doc?: DocKey): void
     /** A link followed in a file unfolded in the view, routed as the reader routes its own (`Workspace.openLink`). */
     openLink(card: KanbanCard, source: DocKey, href: string): boolean
-    readonly globeHost: GlobeHost
+    /** The fleet's marks, files and tapestry leads. */
+    readonly feeds: MapFeeds & { refresh(): void; lead(card: KanbanCard): Promise<MapFile | null | undefined> }
     /** The family board's records, which Channels reads its streams from. */
     readonly board: BoardFeed
     /** The last thing a constitution said to anyone, with when; undefined when it said nothing. */

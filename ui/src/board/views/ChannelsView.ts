@@ -143,7 +143,7 @@ function lastSeen(key: string): number {
 export class ChannelsView implements TemporalView {
   readonly id = 'channels' as const
   readonly title = 'Channels'
-  readonly hotkey = '3'
+  readonly hotkey = '2'
   private ctx: ViewContext | null = null
   private layout: HTMLElement | null = null
   private list: HTMLOListElement | null = null
@@ -369,7 +369,7 @@ export class ChannelsView implements TemporalView {
   }
   refresh(ctx: ViewContext): void {
     this.ctx = ctx
-    ctx.workspace?.globeHost.feeds.refresh()
+    ctx.workspace?.feeds.refresh()
     this.draw()
     void ctx.sends?.refresh().catch(() => {})
     void this.read()
@@ -424,7 +424,7 @@ export class ChannelsView implements TemporalView {
     const workspace = ctx.workspace!
     return composeStream({
       channel, records: workspace.board.records(channel.families), files: ctx.sends?.files ?? [], waits: workspace.board.waiting,
-      launches: card => workspace.globeHost.feeds.marks(card)?.launches ?? [], cleared: clearedLines([...this.dismissed, ...this.pending]),
+      launches: card => workspace.feeds.marks(card)?.launches ?? [], cleared: clearedLines([...this.dismissed, ...this.pending]),
       now: Date.now(), reachMs: workspace.board.reachMs,
     })
   }
@@ -772,7 +772,7 @@ export class ChannelsView implements TemporalView {
       name.toggleAttribute('data-misc', channel.misc)
       name.title = channel.title
       // The chair's pages: opening one is a deliberate look at the chair.
-      this.pages = seat && docButtons(seat, { ...this.ctx!.workspace!.globeHost.feeds, open: (card, doc) => this.leaveFor(null, () => this.ctx?.workspace?.openPage(card, doc)) })
+      this.pages = seat && docButtons(seat, { ...this.ctx!.workspace!.feeds, open: (card, doc) => this.leaveFor(null, () => this.ctx?.workspace?.openPage(card, doc)) })
       this.pages?.el.classList.add('kbn-ch-pages')
       const menu: IconButton = iconButton('kbn-ch-menu', 'actions', 'Channel menu', () => this.railMenu(channel.key, menu.button))
       menu.button.setAttribute('aria-haspopup', 'menu')
@@ -846,7 +846,7 @@ export class ChannelsView implements TemporalView {
       // Each close's tapestry is looked for again, the lookup the cached read, new when its fiber changed or its owner could not say.
       // A close gives up its slot only once a look finds none, and has it back once one is found: the stream is drawn again then.
       for (const close of newest.values()) {
-        const found = this.ctx!.workspace!.globeHost.feeds.lead(close.card).then(file => {
+        const found = this.ctx!.workspace!.feeds.lead(close.card).then(file => {
           if (file === null) return file
           const key = tapestryKey(close.card), had = this.tapestries.get(key) !== false
           this.tapestries.set(key, !!file)
@@ -1029,7 +1029,7 @@ export class ChannelsView implements TemporalView {
   private runs(channel: Channel, now: number, waits: Waits): (card: KanbanCard) => Array<[number, number]> {
     const workspace = this.ctx!.workspace!, records = workspace.board.records(channel.families), memo = new Map<KanbanCard, Array<[number, number]>>()
     return card => memo.get(card) ?? memo.set(card, runsOf(
-      workspace.globeHost.feeds.marks(card)?.launches ?? [],
+      workspace.feeds.marks(card)?.launches ?? [],
       records.filter(record => STOPS.has(record.kind) && (record.fiber === card.uid || record.fiber === card.id)).map(record => record.timestamp),
       { now, working: attentionOf(card, waits) === 'working', last: lastActive(card) },
     )).get(card)!
@@ -1255,7 +1255,7 @@ export class ChannelsView implements TemporalView {
   /** `t` on a post: its worker's tapestry opens in the reader; a worker with no tapestry says so. */
   private async openTapestry(id: string): Promise<void> {
     const item = this.entriesDrawn.find((entry): entry is Item => entry.kind !== 'station' && `item:${entry.id}` === id)
-    const lead = item && await this.ctx?.workspace?.globeHost.feeds.lead(item.card)
+    const lead = item && await this.ctx?.workspace?.feeds.lead(item.card)
     if (!item || !this.entriesDrawn.includes(item)) return
     if (!lead) { announce(`${slug(item.card)} has no tapestry`); return }
     this.openPage(id, item.card, lead.key)

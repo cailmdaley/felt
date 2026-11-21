@@ -747,7 +747,7 @@ test('Desk-opened channel reload and Back restore its Desk origin in the bar', a
 })
 
 // The bar stands in one place on every view: its tabs, Find and Settings
-// never move between the Desk, the reader, the Chronicle, Channels and the Globe.
+// never move between the Desk, the reader and Channels.
 test('The board bar holds its tabs, Find and Settings to the pixel on every view and over the reader', async p => {
   const bar = () => p.evaluate(() => {
     const box = el => { const r = el.getBoundingClientRect(); return [r.x, r.y, r.width, r.height].map(v => +v.toFixed(2)) }
@@ -755,19 +755,11 @@ test('The board bar holds its tabs, Find and Settings to the pixel on every view
       gear: box(document.querySelector('.kbn-viewtabs-settings')) }
   })
   const desk = await bar()
-  assert.equal(desk.tabs.length, 4)
+  assert.equal(desk.tabs.length, 2)
   await open(p); await reportReady(p)
   await p.waitForTimeout(350)
   assert.deepEqual(await bar(), desk, 'over the reader')
   await leave(p)
-  await barTab(p, 'chronicle').click()
-  await p.locator('.chr-name').first().waitFor()
-  await p.waitForTimeout(350)
-  assert.deepEqual(await bar(), desk, 'on the Chronicle')
-  await barTab(p, 'globe').click()
-  await p.locator('.globe-canvas').waitFor()
-  await p.waitForTimeout(350)
-  assert.deepEqual(await bar(), desk, 'on the Globe')
   await barTab(p, 'channels').click()
   await p.locator('.kbn-channels').waitFor()
   await p.waitForTimeout(350)
@@ -777,11 +769,10 @@ test('The board bar holds its tabs, Find and Settings to the pixel on every view
 // While the reader is open the bar marks the view it came from: that tab (or
 // its key) closes the reader back to it; another tab switches and closes.
 const origins = {
-  desk: { other: 'chronicle', open: async p => { await barTab(p, 'desk').click(); await p.locator(`.kbn-desk .kbn-family[title*="${name}"] > :first-child`).click() } },
+  desk: { other: 'channels', open: async p => { await barTab(p, 'desk').click(); await p.locator(`.kbn-desk .kbn-family[title*="${name}"] > :first-child`).click() } },
   channels: { other: 'desk', open: async p => { await openFromChannels(p, 'report.html', 'calibration-report') } },
-  chronicle: { other: 'channels', open: async p => { await barTab(p, 'chronicle').click(); await p.locator('.chr-name').filter({ hasText: name }).click() } },
 }
-for (const origin of ['desk', 'chronicle']) test(`Rest popover is above the reader opened from ${origin}`, async p => {
+for (const origin of ['desk', 'channels']) test(`Rest popover is above the reader opened from ${origin}`, async p => {
   await origins[origin].open(p)
   await appFocus(p)
   await p.keyboard.press('s')
@@ -805,8 +796,8 @@ for (const [origin, { other, open: openFrom }] of Object.entries(origins)) test(
     await selected(p).waitFor()
     await poll(p, () => !!document.querySelector('.kbn-reader-open'))
     assert.deepEqual(await state(), { open: true, view: origin, selected: [origin] }, `the bar marks ${origin} as the origin`)
-    assert.match(await barTab(p, origin).getAttribute('aria-label') ?? '', /^Close reader, back to (Desk|Channels|Chronicle)$/, 'the origin tab says it closes the reader')
-    assert.deepEqual(await p.locator('.kbn-viewtabs [role="tablist"]').first().evaluate(list => [...list.querySelectorAll('[role]')].map(el => el.getAttribute('role')).filter(role => role !== 'none')), ['tab', 'tab', 'tab', 'tab'], 'the bar\'s tablist holds its tabs alone')
+    assert.match(await barTab(p, origin).getAttribute('aria-label') ?? '', /^Close reader, back to (Desk|Channels)$/, 'the origin tab says it closes the reader')
+    assert.deepEqual(await p.locator('.kbn-viewtabs [role="tablist"]').first().evaluate(list => [...list.querySelectorAll('[role]')].map(el => el.getAttribute('role')).filter(role => role !== 'none')), ['tab', 'tab'], 'the bar\'s tablist holds its tabs alone')
   }
   await opened()
   await barTab(p, origin).click()
@@ -1580,7 +1571,7 @@ for (const width of [320, 390]) {
 test('Phone Channels finds a report from the rail, reads it and comes Back', async p => {
   const switcher = await p.locator('.kbn-viewtabs').boundingBox()
   assert.equal(Math.round(switcher.y + switcher.height), 844, 'view switcher sits at the bottom')
-  for (const view of ['desk', 'chronicle', 'channels']) assert.ok((await p.locator(`[data-view="${view}"]`).boundingBox()).height >= 44)
+  for (const view of ['desk', 'channels']) assert.ok((await p.locator(`[data-view="${view}"]`).boundingBox()).height >= 44)
   const seasons = p.locator('.kbn-viewtabs-lens')
   if (await seasons.locator('.kbn-lens-chip').count()) {
     const gear = await p.locator('.kbn-viewtabs-settings').boundingBox(), lane = await seasons.boundingBox()
@@ -1900,15 +1891,13 @@ test('Alt-up/down step constitutions from wherever focus rests; browser Back ret
   assert.equal(new URL(p.url()).hash, '#/channels')
 }, { width: 1440, height: 460 })
 
-for (const view of ['desk', 'chronicle']) test(`${view === 'desk' ? 'Desk' : 'Chronicle'} slash hangs its list under the bar Find without opening the reader; Escape and Enter work`, async p => {
-  if (view !== 'desk') { await barTab(p, view).click(); await poll(p, view => document.querySelector('.kbn-viewtab-active')?.dataset.view === view, view) }
+test('Desk slash hangs its list under the bar Find without opening the reader; Escape and Enter work', async p => {
   const find = barFind(p)
   await appFocus(p); await p.keyboard.press('/')
   assert.equal(await p.locator('.ws-page.ws-selected:visible').count(), 0, 'Find does not enter the reader')
   assert.ok(await find.evaluate(e => e === document.activeElement))
   const picker = p.locator('.ws-find')
-  // The Chronicle's Find searches its constitutions under a chip; the Desk's, the whole board.
-  assert.equal(await p.locator('.kbn-viewtabs-find .ws-find-chip').isVisible(), view === 'chronicle')
+  assert.equal(await p.locator('.kbn-viewtabs-find .ws-find-chip').isVisible(), false)
   for (const query of ['Calibrate the shear response', 'research/workspace/calibration-report']) {
     await find.fill(query)
     await picker.locator('.ws-channel-row').first().waitFor()
@@ -1920,27 +1909,19 @@ for (const view of ['desk', 'chronicle']) test(`${view === 'desk' ? 'Desk' : 'Ch
   assert.equal(await picker.count(), 0)
   assert.equal(await p.locator('.ws-page.ws-selected:visible').count(), 0)
   assert.deepEqual(await find.evaluate(e => [e === document.activeElement, e.value]), [false, ''], 'one Escape closes the list, clears and blurs Find')
-  assert.equal(await activeBarView(p), view)
+  assert.equal(await activeBarView(p), 'desk')
   // With the list closed and the field focused, Escape still clears and blurs.
   await p.keyboard.press('/')
   await find.fill('zzzz-no-match')
   await find.press('Escape')
   assert.deepEqual(await find.evaluate(e => [e === document.activeElement, e.value]), [false, ''], 'Escape on a field with no list clears and blurs')
   await p.keyboard.press('/')
-  if (view === 'chronicle') {
-    // A pick on the Chronicle finds the lifeline and opens nothing.
-    await find.fill('Calibrate the shear response')
-    await find.press('Enter')
-    await p.locator('.chr-found').first().waitFor()
-    assert.equal(await p.locator('.kbn-reader-open').count(), 0, 'the Chronicle shows the lifeline, not the reader')
-    return
-  }
   await find.fill('Calibrate the shear response')
   await find.press('Enter')
   await reportReady(p)
   assert.equal(await p.locator('.ws-channel-title').getAttribute('title'), name)
   assert.equal(await isSelected(p, 'calibration-report'), true)
-  assert.equal(await activeBarView(p), view, 'the bar marks the view Find opened the reader from')
+  assert.equal(await activeBarView(p), 'desk', 'the bar marks the view Find opened the reader from')
 })
 
 for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
@@ -2417,7 +2398,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
 
 for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['narrow', { width: 1000, height: 800 }]]) test(`Nothing moves when you touch the bar and label bar (${device})`, async p => {
   await open(p); await reportReady(p)
-  for (const control of ['.kbn-viewtab[data-view="desk"]', '.kbn-viewtab[data-view="chronicle"]', '.kbn-viewtab[data-view="channels"]', '.kbn-viewtabs-find', '.kbn-viewtabs-settings', '.ws-page.ws-selected .ws-document-back']) {
+  for (const control of ['.kbn-viewtab[data-view="desk"]', '.kbn-viewtab[data-view="channels"]', '.kbn-viewtabs-find', '.kbn-viewtabs-settings', '.ws-page.ws-selected .ws-document-back']) {
     await still(p, `hovering ${control}`, () => p.locator(control).hover(), { allow: [control] })
   }
   await p.mouse.move(viewport.width / 2, viewport.height - 4)
@@ -2479,7 +2460,7 @@ registerChannelsBackJourneys(test)
 registerViewFullScreenJourneys(test)
 registerRexFollowJourneys(test)
 registerPostTapestryJourneys(test)
-test('A Globe file thumbnail shows an audio file\'s duration, a video\'s paused first frame and a PDF\'s face', async p => {
+test('A file thumbnail shows an audio file\'s duration, a video\'s paused first frame and a PDF\'s face', async p => {
   for (const file of ['tone.mp3', 'test.mp4', 'response.pdf']) assert.ok(await p.evaluate(file => !!window.__harness.thumbnail(file), file), `${file} is a fixture send`)
   const thumb = file => p.locator(`[data-harness-thumb="${file}"]`)
   await poll(p, () => /\d+:\d\d/.test(document.querySelector('[data-harness-thumb="tone.mp3"] .kbn-thumbnail-audio')?.textContent ?? ''))

@@ -43,7 +43,7 @@ describe('the mobile viewport contract', () => {
   it('scans board styles, nested views, and component templates', () => {
     const paths = sheets().map((f) => f.path)
     expect(paths).toContain('board/KanbanModal.css')
-    expect(paths).toContain('board/views/ChronicleView.css')
+    expect(paths).toContain('board/views/ChannelsView.css')
     expect(paths).toContain('forms/StashForm.tsx')
     expect(paths).toContain('forms/settings/settingsStyles.ts')
     expect(sheets().filter((f) => f.text.includes('max-width: 700px')).length).toBeGreaterThan(4)

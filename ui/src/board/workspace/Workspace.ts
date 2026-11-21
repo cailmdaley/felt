@@ -30,7 +30,6 @@ import { FamilyPage, type ViewFeeds } from './FamilyPage.js'
 import { BoardFeed, type BoardRecord } from '../boardFeed.js'
 import { wantOf } from '../attention.js'
 import { composeChannels, fiberOf as channelFiber, type Channel as BoardChannel } from '../channels.js'
-import type { GlobeHost } from '../globe/GlobeStage.js'
 import type { MapFile } from '../family/model.js'
 import { FamilyActivity } from './familyActivity.js'
 import { markSeen, unseenSince } from './DocumentSeen.js'
@@ -104,8 +103,8 @@ interface ChannelState {
   error?: string
 }
 type WorkspaceView = WorkspaceOriginView
-const VIEW_LABELS: Record<WorkspaceView, string> = { desk: 'Desk', chronicle: 'Chronicle', globe: 'Globe', channels: 'Channels' }
-const viewForOrigin = (origin: string): WorkspaceOriginView => origin === 'Desk' ? 'desk' : origin === 'Chronicle' ? 'chronicle' : origin === 'Globe' ? 'globe' : 'channels'
+const VIEW_LABELS: Record<WorkspaceView, string> = { desk: 'Desk', channels: 'Channels' }
+const viewForOrigin = (origin: string): WorkspaceOriginView => origin === 'Desk' ? 'desk' : 'channels'
 const channelId = (uid: string, owner: string): string => JSON.stringify([owner, uid])
 const threadFamilyRevision = (card: KanbanCard, index: ThreadIndex): string => {
   const current = index.card(card)
@@ -167,8 +166,8 @@ export class Workspace {
   private composed: { cards: KanbanCard[]; channels: BoardChannel[]; of: Map<string, BoardChannel> } | null = null
   /** Each constitution's tapestry read, by fiber and its last write. */
   private readonly leadReads = new Map<string, { modified?: string; read: Promise<MapFile | null | undefined> }>()
-  /** What a surface over the whole fleet reaches through the board: the map's feeds, and its pages and conversations. */
-  readonly globeHost: GlobeHost
+  /** The fleet's marks, files and tapestry leads. */
+  get feeds(): ViewFeeds { return this.mapFeeds }
 
   constructor(root: HTMLElement, opts: WorkspaceOptions) {
     this.opts = opts
@@ -177,7 +176,6 @@ export class Workspace {
     this.stopSends = this.sends.subscribe(() => this.sendsChanged())
     this.activity = new FamilyActivity(opts.shuttleBase, () => {
       if (this.current && this.isActive) this.current.familyPage?.update(this.current.card, this.graph())
-      this.globeHost.onFeeds?.()
     })
     this.board = new BoardFeed(opts.shuttleBase)
     this.board.subscribe(() => {
@@ -197,13 +195,6 @@ export class Workspace {
       view: (card, quiet) => this.openFromDesk(card, quiet),
       seen: file => markSeen([file]),
       waits: () => this.board.waiting,
-      shuttleBase: opts.shuttleBase,
-    }
-    this.globeHost = {
-      feeds: this.mapFeeds,
-      openDocument: (card, doc) => this.openDocument(card, doc),
-      converse: card => this.look(card),
-      constitutionKey: card => fiberKey(card.originId, card.uid ?? card.id),
       shuttleBase: opts.shuttleBase,
     }
     this.mentions = bindConstitutionMentions(root, opts.cards, (id, origin) => { void this.openFiber(id, origin) }, {
@@ -506,7 +497,6 @@ export class Workspace {
   /** The sent-file feed moved: the open map redraws. */
   private sendsChanged(): void {
     if (this.current && this.isActive) this.current.familyPage?.update(this.current.card, this.graph())
-    this.globeHost.onFeeds?.()
   }
   private graph(): ThreadIndex { return this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards()) }
   /** A fiber has a view when it is on the lifecycle, a draft included (its acts live there), or has threads. */

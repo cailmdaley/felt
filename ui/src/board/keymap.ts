@@ -2,12 +2,12 @@ import { VERDICT_DELAY_MS } from './workspace/verdictDelay.js'
 import { DESK_SECTIONS } from './deskOrdering.js'
 
 export type KeySurface = 'desk' | 'view' | 'reader'
-export type KeyIntent = 'desk' | 'chronicle' | 'channels' | 'globe' | 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'nextGroup' | 'prevGroup' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward' | 'temper' | 'discard' | 'toReview' | 'undoVerdict' | 'conversation' | 'rest' | 'pin' | 'orchestrator' | 'tapestry'
+export type KeyIntent = 'desk' | 'channels' | 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'nextGroup' | 'prevGroup' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward' | 'temper' | 'discard' | 'toReview' | 'undoVerdict' | 'conversation' | 'rest' | 'pin' | 'orchestrator' | 'tapestry'
 /** Reports can request navigation only. New intents are excluded unless named here. */
 export const DOCUMENT_KEY_INTENTS: readonly KeyIntent[] = [
   'prev', 'next', 'prevChannel', 'nextChannel', 'prevGroup', 'nextGroup', 'first', 'last',
   'scrollDown', 'scrollUp', 'halfDown', 'halfUp', 'pageDown', 'pageUp',
-  'back', 'find', 'help', 'desk', 'chronicle', 'channels', 'globe', 'tapestry', 'next',
+  'back', 'find', 'help', 'desk', 'channels', 'tapestry', 'next',
 ]
 /**
  * Intents a document may pass up only while it holds the human's focus, so a
@@ -44,9 +44,9 @@ export const DESK_ACTS: readonly KeyIntent[] = ['conversation', 'temper', 'disca
  * movement stops at the ends, never wraps. */
 export const DESK_REGION_SELECTORS = DESK_SECTIONS.map(section => `[data-column="${section}"]`)
 
-/** `1`–`4` switch views from every surface. */
+/** `1`–`2` switch views from every surface. */
 const VIEW_KEYS: KeyBinding[] = [
-  bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'channels', 'Switch to Channels'), bind(['4'], 'globe', 'Switch to Globe'),
+  bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'channels', 'Switch to Channels'),
 ]
 
 /** The binding table is also the help overlay's source; surfaces consume intents,
@@ -145,7 +145,7 @@ const row = (keys: string[], label: string, covers: Array<readonly [KeySurface, 
  * covers its surface and intent and shows each of its keys. */
 export const helpSections: readonly HelpSection[] = [
   { title: 'Everywhere', rows: [
-    row(['1', '2', '3', '4'], 'Desk, Chronicle, Channels, Globe', everywhere('desk', 'chronicle', 'channels', 'globe')),
+    row(['1', '2'], 'Desk, Channels', everywhere('desk', 'channels')),
     row(['/'], 'Find', everywhere('find')),
     row(['Esc'], 'Close a layer, then step back', [...on('desk', 'back'), ...on('reader', 'back')]),
     row(['?'], 'This guide', everywhere('help')),

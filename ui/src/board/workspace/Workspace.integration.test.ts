@@ -1127,7 +1127,7 @@ describe('workspace reader integration', () => {
     const past = card({ id: 'done', originId: 'host-a', status: 'closed', sessionUuid: 'session-done' })
     workspace.dispose()
     const dock = new Dock('', changed), conversation = vi.spyOn(dock, 'openConversation'), sight = vi.fn()
-    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => [worker, past], origin: () => 'Globe', onVisibility: visibility, onSight: sight, dock })
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => [worker, past], origin: () => 'Channels', onVisibility: visibility, onSight: sight, dock })
     const answer = (moved: boolean): void => {
       const original = vi.mocked(fetch).getMockImplementation()!
       vi.mocked(fetch).mockImplementation(async (input, init) => String(input).endsWith('/api/v1/attach') ? Response.json({ moved, session: 'worker-hub' }) : original(input, init))
@@ -1139,13 +1139,13 @@ describe('workspace reader integration', () => {
     expect(sight).toHaveBeenLastCalledWith(worker)
     // Looking again at what the board looks at moves nothing, and answers as the first look did.
     answer(false)
-    expect(await workspace.globeHost.converse(worker)).toBe(true)
+    expect(await workspace.look(worker)).toBe(true)
     expect(selections()).toHaveLength(1)
-    expect(await workspace.globeHost.converse(past)).toBe(false)
+    expect(await workspace.look(past)).toBe(false)
     expect(selections()).toHaveLength(1)
     expect(sight).toHaveBeenLastCalledWith(past)
     await holdOut()
-    expect(await workspace.globeHost.converse(worker)).toBe(false)
+    expect(await workspace.look(worker)).toBe(false)
     expect(selections()).toHaveLength(2)
     expect(conversation).not.toHaveBeenCalled()
   })

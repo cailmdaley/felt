@@ -13,9 +13,6 @@ const events = new Set(['pointerenter', 'pointerleave', 'pointerover', 'pointero
 const exceptions = [
   { file: 'workspace/AudioPage.ts', source: "this.waveform.addEventListener('pointerleave', () => { this.hover.hidden = true })", reason: 'The workspace audio waveform clears its time cursor when the pointer leaves.' },
   { file: 'workspace/Depth.ts', source: "document.addEventListener('pointerleave', this.leave)", reason: 'Workspace depth resets its pointer drift when leaving the document, only while the workspace is raised.' },
-  { file: 'globe/GlobeStage.ts', source: "this.canvas.addEventListener('pointerleave', () => this.setHover(null), { signal })", reason: 'The globe drops the tile it was peeking at when the pointer leaves the sphere.' },
-  { file: 'views/ChronicleView.ts', source: "el.addEventListener('mouseenter', () => hot(true))", reason: 'Chronicle tints a settled cycle under the pointer without changing its content or geometry.' },
-  { file: 'views/ChronicleView.ts', source: "el.addEventListener('mouseleave', () => hot(false))", reason: 'Chronicle restores the settled cycle tint when the pointer leaves.' },
 ] as const
 
 function files(dir: string, extension: RegExp): string[] {
@@ -50,7 +47,6 @@ function pointerListeners(text: string): string[] {
 // outside the Desk design; shared chrome and tint palettes remain in scope.
 const styleExceptions = [
   { path: 'workspace/', reason: 'The document workspace and thread rail keep their own interaction design.' },
-  { path: 'views/ChronicleView.css', reason: 'Chronicle is a separate temporal view, outside the Desk design.' },
   { path: 'FileViewerPanel.css', reason: 'Document and media viewers belong to the reader, not Desk cards.' },
   { path: 'prose.css', reason: 'Rendered document prose and wikilinks belong to the reader, not Desk cards.' },
   { path: 'elements/filePreview.css', reason: 'A file preview is the reader\'s file, folded; its ring on hover is the reader\'s, not a Desk card\'s.' },

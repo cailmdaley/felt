@@ -39,16 +39,14 @@ describe('shared keyboard table', () => {
     const page = helpSections.find(section => section.title === "A constitution's view")!
     expect(page.rows.map(row => row.keys)).toEqual([['j', 'k', '↓', '↑'], ['Enter', 'l'], ['l'], ['h'], ['c']])
   })
-  it('routes 1·2·3·4 to the same view intents on every surface, without forwarding them into documents', () => {
-    const intents = ['desk', 'chronicle', 'channels', 'globe'] as const
+  it('routes 1·2 to the same view intents on every surface, without forwarding them into documents', () => {
+    const intents = ['desk', 'channels'] as const
     for (const surface of ['desk', 'view', 'reader'] as KeySurface[]) {
       for (const [index, intent] of intents.entries()) expect(keyIntent(event(String(index + 1)), surface)).toBe(intent)
     }
     expect(DOCUMENT_KEY_INTENTS).toContain('desk')
-    expect(DOCUMENT_KEY_INTENTS).toContain('globe')
-    expect(DOCUMENT_KEY_INTENTS).toContain('chronicle')
     expect(DOCUMENT_KEY_INTENTS).toContain('channels')
-    expect(keyIntent(event('5'), 'desk')).toBeNull()
+    expect(keyIntent(event('3'), 'desk')).toBeNull()
     expect(keyIntent(event('Tab'), 'desk')).toBeNull()
   })
   it.each(['input', 'textarea', 'select'])('ignores typing in %s, including reader Alt-arrows', tag => {

@@ -1,4 +1,4 @@
-import type { ActivityBucket, CommitRecord, SessionRecord, TemporalFetchers } from '../src/board/views/TemporalData.js'
+import type { SessionRecord } from '../src/board/views/TemporalData.js'
 
 /** Fictional workshop data for documentation screenshots, rendered by the real board. */
 export function workshopExample(now: number) {
@@ -11,7 +11,6 @@ export function workshopExample(now: number) {
     const date = new Date(now + offset * day)
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
   }
-  const origins = { [host]: { kind: 'local' as const, stale: false, lastPolledAt: iso(0) } }
   const settings = { kind: 'oneshot', host, project_dir: project, agent: 'claude-opus' }
   const tasks = [
     { slug: 'lunch-options', name: 'Compare lunch options', status: 'open', age: 4,
@@ -58,31 +57,6 @@ export function workshopExample(now: number) {
     harness: 'claude-code', agent: 'claude-opus', host,
     tmux: `${row.fiber.id.split('/').pop()}-${row.fiber.uid}-shuttle`, kind: 'dispatch',
   }))
-  const buckets: ActivityBucket[] = []
-  for (const [index, session] of sessions.entries()) {
-    const end = index < 2 ? now : now - (index === 2 ? 8 : 1) * day
-    for (let at = session.at; at <= end; at += day) {
-      for (let elapsed = 0; elapsed < 24; elapsed++) {
-        buckets.push({ m: Math.floor((at + elapsed * minute) / minute) * minute,
-          s: session.tmux, cwd: project, k: elapsed === 0 ? 'attention' : 'agent', n: 1, host })
-      }
-    }
-  }
-  const commits: CommitRecord[] = [
-    { index: 2, age: 8, subject: 'Record the library meeting room decision' },
-    { index: 3, age: 1, subject: 'Review the half-day programme and flag open details' },
-  ].map(({ index, age, subject }) => ({
-    at: now - age * day + 25 * minute, sha: String(index).repeat(40), subject, repo: project,
-    files: 1, insertions: 8, deletions: 0, session: sessions[index].session,
-    tmux: sessions[index].tmux, cwd: project, host,
-  }))
-  const temporal: TemporalFetchers = {
-    activity: async (fromMs, toMs) => ({ host, from_ms: fromMs, to_ms: toMs,
-      buckets: buckets.filter(bucket => bucket.m >= fromMs && bucket.m < toMs && bucket.m <= now), origins }),
-    sessions: async sinceMs => ({ host, records: sessions.filter(record => record.at >= sinceMs), origins }),
-    commits: async (fromMs, toMs) => ({ host,
-      records: commits.filter(record => record.at >= fromMs && record.at < toMs), origins }),
-  }
   const bodies: Record<string, string> = {
     'workshop/venue': 'Use the library meeting room: it seats 30 and is near the station.\n\nThe café seats 18, which is too small for 25 participants. The participant guide should use the library. Arrival and accessibility details still need checking.',
     'workshop/participant-guide': 'Prepare a one-page participant guide using [[workshop/venue]] and [[workshop/programme]].\n\n## Desired State\n\nThe guide describes the chosen venue and draft programme. Missing details are clearly marked for the organizer; no names, times, or access arrangements are invented.\n\n## Status\n\nThe venue and draft programme are available. Check venue access and flag the unconfirmed start time and speaker names.',
@@ -90,6 +64,6 @@ export function workshopExample(now: number) {
   return {
     feed: { host, fibers: [...rows, cycle],
       origins: { [host]: { kind: 'local', stale: false, fiber_count: rows.length + 1 } } },
-    temporal, sessions, bodies,
+    sessions, bodies,
   }
 }

@@ -22,13 +22,6 @@
  * that owns each grammar, and there is no felt here to ask, so a refusal is
  * the one behaviour this harness cannot stand in for.
  *
- * Chronicle (hotkey 2) is exercised the same way: `MOCK_TEMPORAL` below
- * injects a deterministic activity plane and the two ledgers as the
- * `TemporalFetchers` the board would otherwise build over `/api/v1/activity`,
- * `/sessions` and `/commits`, so the page renders with no daemon to serve it. The mock mirrors the FETCHER contract — one-minute
- * buckets, and ledger records over an instant range — so what the views are
- * exercised against is the shape they really receive.
- *
  * Build: `npm run harness:board`; open the emitted
  * harness-board-dist/index.html via file://. The page ships with the bundle,
  * so the output directory is self-sufficient — nothing to copy in by hand.
@@ -48,11 +41,7 @@ import { WORKSPACE_LATEST_SESSION, transcriptSearchHits } from './transcript-fix
 import { openCapture, openStash, openSettings } from '../src/forms/mountForms.js'
 import { showToast } from '../src/board/utils.js'
 import type {
-  ActivityBucket,
-  ActivityResult,
-  CommitRecord,
   SessionRecord,
-  TemporalFetchers,
   TemporalOrigins,
 } from '../src/board/views/TemporalData.js'
 
@@ -794,281 +783,6 @@ const MOCK_FEED = {
   },
 }
 
-// ── Mock temporal read plane ─────────────────────────────────────────────────
-//
-// The daemon serves `GET /api/v1/activity`, `/sessions` and `/commits`, but
-// the harness has no daemon at all — it runs off `file://` with a stubbed
-// `fetch`. So it injects a `TemporalFetchers` set directly, standing in for
-// those routes and mirroring their wire contract rather than the transport.
-//
-// SEEDED, NOT RANDOM: every span, actor and count is derived from absolute
-// clock position through mulberry32, so two loads of the same window produce
-// byte-identical data and a screenshot diff means a real change. The window
-// itself is now-relative because the mock feed is (its fibers are dated off
-// `now`), so the views cover the same three days the board's cards do.
-
-const FEED_SPAN_MS = 3 * 86_400_000
-/**
- * ONE MINUTE, matching the wire. `Shuttle.Activity` buckets on a fixed
- * `@minute_ms 60_000` grid, unconditionally — there is no coarser mode and no
- * width field on the wire for a client to infer from. A coarser mock grid
- * would under-report every duration by the factor between the two, a harness
- * artifact that any glance would blame on the page.
- */
-const BUCKET_MS = 60_000
-
-/** mulberry32 — a small deterministic PRNG. Same seed, same stream. */
-function seeded(seed: number): () => number {
-  let a = seed >>> 0
-  return () => {
-    a = (a + 0x6D2B79F5) >>> 0
-    let t = Math.imul(a ^ (a >>> 15), 1 | a)
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
-
-/** FNV-1a over a string — a stable seed for anything keyed by a civil day
- *  rather than by a number. Keyed on the DAY STRING, not on an epoch-day
- *  index, so the same civil day seeds identically in every timezone. */
-function seedFromString(text: string): number {
-  let h = 2166136261
-  for (let i = 0; i < text.length; i += 1) {
-    h ^= text.charCodeAt(i)
-    h = Math.imul(h, 16777619)
-  }
-  return h >>> 0
-}
-
-/**
- * Who was working, and where. Each entry is one (session, cwd) actor the
- * generator draws from, `weight` copies of it in the draw pool.
- *
- * Chronicle draws only work the session ledger (join rung 0) or a live
- * worker's tmux name (rung 1) places on a fiber, so the pool mixes both kinds
- * of claim with the work it must NOT draw:
- *
- *   JOINED      the first four, paired by the ledger — ink on their rows.
- *   LEDGER-ONLY `pi-2f9c41`, whose tmux name names no fiber at all; only the
- *               ledger can say whose work it was.
- *   UNPAIRED    `scratch-shuttle`, a session the ledger never recorded, and
- *               the two with `s: null` (a human at a shell). None of them may
- *               conjure a row.
- */
-const MOCK_ACTORS: Array<{
-  s: string | null
-  cwd: string | null
-  weight: number
-  /** Which daemon produced these minutes. Omitted is this host. Exactly one
-   *  actor runs elsewhere — the b-mode sweep, whose fiber already carries
-   *  `shuttleBlockElsewhere` — so the cross-host register (a row's host note,
-   *  and the stale gray of an unreachable remote) is visible offline. */
-  host?: string
-}> = [
-  {
-    s: sessionFor('work/spt3g_papers/bmodes-2d/run', ULID.bmodes),
-    cwd: '/leonardo_work/spt3g/papers',
-    weight: 5,
-    host: FOREIGN_HOST,
-  },
-  { s: sessionFor('loom/email/morning-post/refine', ULID.refine), cwd: '/home/ada/loom', weight: 4 },
-  { s: sessionFor('work/euclid/euclid-github/triage', ULID.triage), cwd: '/home/ada/work/euclid', weight: 3 },
-  { s: sessionFor('work/admin/conference-travel-receipts', ULID.receipts), cwd: '/home/ada/loom', weight: 2 },
-  // LEDGER-ONLY: nothing in the name says whose it is; the session ledger
-  // pairs it to photoz-systematics, and that pairing is the whole join.
-  { s: 'pi-2f9c41', cwd: '/home/ada/work/photoz', weight: 3 },
-  { s: 'scratch-shuttle', cwd: '/home/ada/scratch', weight: 3 },
-  { s: null, cwd: '/home/ada/dev/felt', weight: 3 },
-  { s: null, cwd: '/home/ada/notes', weight: 2 },
-]
-const ACTOR_POOL = MOCK_ACTORS.flatMap((a) => Array<typeof a>(a.weight).fill(a))
-
-const HOUR_MS = 3_600_000
-/** A span can run past the hour that spawned it, so generation starts this far
- *  back of the window to catch one that spills into it. Comfortably longer than
- *  the longest span below. */
-const SPAN_LOOKBACK_HOURS = 2
-
-/** Sessions per hour and their length, by time of day. Work arrives in RUNS,
- *  not as independent minutes — that is the whole reason for spans. */
-function hourShape(hour: number): { spans: number; minLen: number; maxLen: number } {
-  if (hour < 7) return { spans: 0.35, minLen: 3, maxLen: 12 }     // small hours: rare, short
-  if (hour < 10) return { spans: 1.6, minLen: 6, maxLen: 25 }     // morning ramp
-  if (hour < 19) return { spans: 2.4, minLen: 8, maxLen: 40 }     // the working day
-  return { spans: 1.1, minLen: 5, maxLen: 20 }                    // evening tail
-}
-
-/**
- * Generate the activity buckets covering [fromMs, toMs) on the wire's OWN
- * one-minute grid — one bucket per `{minute, session, cwd, kind}`, exactly as
- * `Shuttle.Activity` aggregates them.
- *
- * Work is generated as SPANS, not as independently sampled minutes. Sampling
- * each minute on its own would put a 60_000ms grid at whatever per-minute
- * probability you pick and produce uniform static — no runs to merge, no
- * spells to draw, and a duration total that is really just a coin-flip
- * count. Instead each absolute HOUR seeds its own handful of spans
- * (start minute, length, actor), and every minute inside a span emits a
- * bucket. Density lives in how much of the hour the spans cover, which is what
- * a duration total is actually measuring.
- *
- * Generation is keyed on ABSOLUTE hour index, never on the requested window,
- * so two chunks — or a chunk and a wider window — agree exactly on their
- * overlap. Generation starts SPAN_LOOKBACK_HOURS early so a span that
- * began before `fromMs` still contributes the minutes that fall inside it.
- *
- * Never emits a bucket later than page load: a window that runs to the end of
- * the civil day would otherwise draw work the machine has not done yet, and a
- * row inked past today reads as a rendering bug.
- */
-function mockActivity(fromMs: number, toMs: number): ActivityResult {
-  // Keyed exactly as the daemon keys them — {minute, session, cwd, kind} — so
-  // two spans by the same actor overlapping one minute MERGE into a single
-  // bucket with summed `n`, rather than emitting a duplicate key the real feed
-  // could never produce.
-  const byKey = new Map<string, ActivityBucket>()
-  const add = (bucket: ActivityBucket): void => {
-    const key = `${bucket.host ?? ''}|${bucket.m}|${bucket.s ?? ''}|${bucket.cwd ?? ''}|${bucket.k}`
-    const hit = byKey.get(key)
-    if (hit) hit.n += bucket.n
-    else byKey.set(key, bucket)
-  }
-  const endMs = Math.min(toMs, now)
-  const firstHour = Math.floor(fromMs / HOUR_MS) - SPAN_LOOKBACK_HOURS
-  const lastHour = Math.floor(endMs / HOUR_MS)
-
-  for (let hourIndex = firstHour; hourIndex <= lastHour; hourIndex += 1) {
-    const hourStart = hourIndex * HOUR_MS
-    const rng = seeded(hourIndex)
-    const shape = hourShape(new Date(hourStart).getHours())
-    // Fractional span counts read as a probability for the last one.
-    const spanCount = Math.floor(shape.spans) + (rng() < shape.spans % 1 ? 1 : 0)
-
-    for (let s = 0; s < spanCount; s += 1) {
-      const startMinute = Math.floor(rng() * 60)
-      const length = shape.minLen + Math.floor(rng() * (shape.maxLen - shape.minLen + 1))
-      const actor = ACTOR_POOL[Math.floor(rng() * ACTOR_POOL.length)]
-      // One notify per span at most, and only sometimes: the agent raising its
-      // hand is an event, not a texture.
-      const notifyAt = rng() < 0.35 ? Math.floor(rng() * length) : -1
-
-      for (let i = 0; i < length; i += 1) {
-        const m = hourStart + (startMinute + i) * BUCKET_MS
-        if (m < fromMs || m >= endMs) continue
-        const mRng = seeded(Math.floor(m / BUCKET_MS))
-        // A span is the agent's own time, punctuated by the human. The first
-        // minute is nearly always attention — that is the prompt that started
-        // it — and a steer lands here and there after.
-        const steering = i === 0 ? mRng() < 0.8 : mRng() < 0.06
-        if (steering) {
-          add({ m, s: actor.s, cwd: actor.cwd, k: 'attention', n: 1, host: actor.host ?? LOCAL_HOST })
-        }
-        // The agent works through the minute regardless (a steer and the work
-        // it provokes share a minute — two buckets, distinct `k`, exactly as
-        // the daemon would key them).
-        if (i > 0 || !steering) {
-          add({ m, s: actor.s, cwd: actor.cwd, k: 'agent', n: 1 + Math.floor(mRng() * 11), host: actor.host ?? LOCAL_HOST })
-        }
-        if (i === notifyAt) {
-          add({ m, s: actor.s, cwd: actor.cwd, k: 'notify', n: 1, host: actor.host ?? LOCAL_HOST })
-        }
-      }
-    }
-  }
-  // The daemon streams its events in file order, so buckets arrive roughly
-  // time-ordered; sort so the mock does not accidentally exercise a tolerance
-  // the real feed never asks a view for.
-  const buckets = [...byKey.values()].sort((a, b) => a.m - b.m)
-  return {
-    host: LOCAL_HOST,
-    from_ms: fromMs,
-    to_ms: toMs,
-    buckets,
-    // The remote's cache covers the trailing day only, and it has not answered
-    // in an hour. Both are ordinary states, not errors: its lanes keep their
-    // last-good ink in the stale register, and thin out before the window it
-    // can speak for.
-    origins: {
-      ...MOCK_ORIGINS,
-      [FOREIGN_HOST]: { ...MOCK_ORIGINS[FOREIGN_HOST], window: { fromMs: now - 86_400_000, toMs: now } },
-    },
-  }
-}
-
-/**
- * felt's commit convention is `<slug>: what happened`. Chronicle attributes a
- * commit by its recorded session, never by the prefix, and strips the prefix
- * off the prose it sets — so the subjects mix real mock-fiber slugs, slugs no
- * card answers to, and one with no prefix at all, and every one of them must
- * land on the fiber its SESSION names.
- */
-const MOCK_SUBJECTS = [
-  'triage: sort the open issues by milestone',
-  'refine: group the routine auto-archives by category',
-  'sweep: record the live-session resolutions',
-  'daily-digest: stage the bib entries for four papers',
-  'board-chrome-redesign: fold the masthead actions into the column heads',
-  'daemon: owner-route the felt-edit write plane',
-  'poller: back off a stale remote instead of retrying hot',
-  'tidy the leftover scaffolding from the last pass',
-]
-
-/**
- * The COMMIT LEDGER over an instant range — `GET /api/v1/commits`, one record
- * per commit, each stamped with the harness session that made it.
- *
- * Every record is attributed to one of {@link MOCK_SESSIONS}, because that is
- * the only way a commit reaches a page: the views join `record.session` through
- * the session ledger to a fiber, and a record naming no known session is drawn
- * nowhere. A mock that emitted bare subject lines would exercise a path
- * production does not have.
- */
-const MAX_LEDGER_DAYS = 400
-
-function mockCommits(fromMs: number, toMs: number): CommitRecord[] {
-  if (!(toMs >= fromMs)) return []
-  const sessions = MOCK_SESSIONS.filter((r) => r.session)
-  const records: CommitRecord[] = []
-  const first = new Date(fromMs)
-  for (let offset = 0; offset < MAX_LEDGER_DAYS; offset += 1) {
-    const day = new Date(first.getFullYear(), first.getMonth(), first.getDate() + offset)
-    if (day.getTime() > toMs) break
-    const dayISO = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`
-    const rng = seeded(seedFromString(dayISO))
-    const count = 4 + Math.floor(rng() * 5)
-    // Walk the subject list from a seeded start with a seeded ODD stride.
-    // MOCK_SUBJECTS.length is a power of two, so any odd stride is coprime
-    // with it and the walk visits distinct subjects — a day never repeats one.
-    // Drawing independently did repeat, and two identical subjects under one
-    // fiber render as `…; …` prose that reads like a duplication bug.
-    const subjectStart = Math.floor(rng() * MOCK_SUBJECTS.length)
-    const subjectStride = 1 + 2 * Math.floor(rng() * (MOCK_SUBJECTS.length / 2))
-    for (let i = 0; i < count; i += 1) {
-      // Local 09:00-21:00, spread across the day and ordered by construction.
-      const minutes = Math.floor((9 + (12 * (i + rng())) / count) * 60)
-      const at = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, minutes).getTime()
-      if (at < fromMs || at > toMs) continue
-      const source = sessions[Math.floor(rng() * sessions.length)]
-      records.push({
-        at,
-        // 40 hex digits: the parser drops anything else, exactly as the
-        // daemon's does.
-        sha: `${dayISO.replace(/-/g, '')}${String(i).padStart(2, '0')}`.padEnd(40, 'f'),
-        subject: MOCK_SUBJECTS[(subjectStart + i * subjectStride) % MOCK_SUBJECTS.length],
-        repo: null,
-        files: 1 + Math.floor(rng() * 6),
-        insertions: Math.floor(rng() * 120),
-        deletions: Math.floor(rng() * 40),
-        session: source.session,
-        tmux: source.tmux,
-        cwd: null,
-        host: source.host ?? null,
-      })
-    }
-  }
-  return records.sort((a, b) => a.at - b.at)
-}
-
 /**
  * The session ledger — `GET /api/v1/sessions`, one line per fiber↔session
  * pairing. Chronicle joins activity buckets through it as RUNG 0.
@@ -1260,19 +974,6 @@ const MOCK_DIGEST_SENT = [
   { fullPath: '/work/arxiv/digest.md', basename: 'digest.md', timestamp: now - 9 * 3_600_000 },
   { fullPath: '/work/shear/report/null-tests.html', basename: 'null-tests.html', timestamp: now - 3 * 3_600_000 },
 ]
-
-const MOCK_TEMPORAL: TemporalFetchers = {
-  activity: (fromMs, toMs) => Promise.resolve(mockActivity(fromMs, toMs)),
-  // Oldest first, and filtered by the bound, exactly as the daemon serves it.
-  sessions: (sinceMs) =>
-    Promise.resolve({
-      host: LOCAL_HOST,
-      records: MOCK_SESSIONS.filter((r) => r.at >= sinceMs).sort((a, b) => a.at - b.at),
-      origins: MOCK_ORIGINS,
-    }),
-  commits: (fromMs, untilMs) =>
-    Promise.resolve({ host: LOCAL_HOST, records: mockCommits(fromMs, untilMs), origins: MOCK_ORIGINS }),
-}
 
 /**
  * A malformed ULID is invisible: the uid lookups just quietly miss. So check
@@ -1708,12 +1409,6 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     return json({ host: LOCAL_HOST, records, origins: MOCK_ORIGINS })
   }
 
-  if (url.includes('/api/v1/commits/composite')) {
-    if (workspaceFixture) return json({ host: workspaceFixture.host, records: workspaceFixture.commits, origins: workspaceFixture.feed.origins })
-    if (docsExample) return json({ host: docsExample.feed.host, records: [], origins: docsExample.feed.origins })
-    return json({ host: LOCAL_HOST, records: [], origins: MOCK_ORIGINS })
-  }
-
   if (url.includes('/api/v1/channels/dismissed')) return json({ dismissed: channelsFixture?.dismissed ?? [], pinned: channelsFixture?.pinned ?? {}, order: channelsFixture?.order ?? null, reach_ms: 14 * 86_400_000 })
   if (url.includes('/api/v1/channels/order')) {
     if (channelsFixture) channelsFixture.order = { keys: body().keys as string[], at: Date.now() }
@@ -1805,7 +1500,6 @@ try {
     },
     onSettingsClick: () => { void openSettings({ shuttleBase: '' }) },
     shuttleBase: '',
-    temporalFetchers: docsExample?.temporal ?? workspaceFixture?.temporal ?? MOCK_TEMPORAL,
   })
 
   const host = document.createElement('div')
@@ -1826,20 +1520,18 @@ try {
   }
   if (search.has('capture')) void openCapture({ shuttleBase: '', onResult: (message, ok) => showToast(message, ok ? 'success' : 'error') })
 
-  // expose for agent-browser-driven interaction. `feedSpanMs` is the window the
-  // mock activity/commits cover, so a driving script can ask for exactly the
-  // range the board's cards live in.
+  // expose for agent-browser-driven interaction.
   ;(window as unknown as { __harness: unknown }).__harness = {
     modal,
     scopeTheme,
     /** What the board holds, as the installed web app reports it each minute. */
     holdings,
-    /** Lays a sent file's thumbnail on the page as the Globe lays one on a file tile, to read what it draws. */
+    /** Lays a sent file's thumbnail on the page to read what it draws. */
     thumbnail(basename: string): HTMLElement | null {
       const sent = workspaceFixture?.receipts.find(file => String(file.basename) === basename)
       if (!sent) return null
       const thumb = new Thumbnail({
-        key: `globe:${basename}`, shuttleBase: '', className: 'globe-preview-thumb', fallback: basename, captioned: false,
+        key: `thumb:${basename}`, shuttleBase: '', className: 'harness-preview-thumb', fallback: basename, captioned: false,
         file: { fullPath: String(sent.fullPath), owner: String(sent.host), basename },
         priority: () => 2, distance: () => 0,
       })
@@ -1852,16 +1544,12 @@ try {
     MOCK_FEED: workspaceFixture?.feed ?? docsExample?.feed ?? MOCK_FEED,
     /** Channels' board records and dismissals, for a journey to post into. */
     channels: channelsFixture,
-    temporal: docsExample?.temporal ?? workspaceFixture?.temporal ?? MOCK_TEMPORAL,
     requests: mockRequests,
     handlers: mockHandlers,
     events: harnessEvents,
     windowless,
     nativeFiles: nativeWorkspaceFiles,
     files: workspaceFixture?.files,
-    feedSpanMs: FEED_SPAN_MS,
-    feedFromMs: now - FEED_SPAN_MS,
-    feedToMs: now,
   }
 } catch (err) {
   const pre = document.createElement('pre')

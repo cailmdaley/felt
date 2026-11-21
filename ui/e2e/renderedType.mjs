@@ -82,9 +82,9 @@ async function assertRendered(page, state, failures = []) {
 export function registerRenderedTypeJourneys(test, { open, choose, headerAction }) {
   for (const width of [1440, 390, 320]) test(`Rendered type and clock roles across views (${width})`, async page => {
     const failures = []
-    for (const view of ['desk', 'chronicle', 'channels']) {
+    for (const view of ['desk', 'channels']) {
       await page.locator(`.kbn-viewtab[data-view="${view}"]`).click()
-      await page.locator({ desk: '.kbn-desk', chronicle: '.chr-scroll', channels: '.kbn-ch-layout' }[view]).first().waitFor({ state: 'visible' })
+      await page.locator({ desk: '.kbn-desk', channels: '.kbn-ch-layout' }[view]).first().waitFor({ state: 'visible' })
       await page.evaluate(() => document.fonts.ready.then(() => {}))
       await frames(page)
       await assertRendered(page, `${width} ${view}`, failures)

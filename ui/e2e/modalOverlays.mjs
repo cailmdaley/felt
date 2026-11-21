@@ -78,19 +78,6 @@ try {
     await p.keyboard.press('Escape'); await rest.waitFor({ state: 'detached' })
     assert.equal(await focused(p.locator('[data-rest-opener]')), true, 'Escape returns focus to where it was')
 
-    // Keyboard help over a Chronicle era: Escape closes help and leaves the era open.
-    if (!phone) {
-      await p.goto(harness)
-      await p.locator('.kbn-viewtab').filter({ hasText: 'Chronicle' }).click()
-      await p.locator('.chr-band').first().click()
-      const era = p.locator('.chr-face-close')
-      await era.waitFor()
-      await p.keyboard.press('?'); await help.waitFor()
-      await p.keyboard.press('Escape'); await help.waitFor({ state: 'detached' })
-      assert.equal(await era.isVisible(), true, 'Escape under help leaves the Chronicle era open')
-      await p.keyboard.press('Escape'); await era.waitFor({ state: 'detached' })
-    }
-
     // Sent files, on the phone's reader: the top bar's list takes the focus, and Escape returns it to the opener.
     if (phone) {
       await p.goto(`${harness}?example=threads`)

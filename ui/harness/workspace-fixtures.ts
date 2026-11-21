@@ -4,7 +4,7 @@ import mp4Data from './fixtures/test.mp4?inline'
 import webmData from './fixtures/test.webm?inline'
 import imageData from './fixtures/figure.png?inline'
 import pdfData from './fixtures/native.pdf?inline'
-import type { ActivityBucket, CommitRecord, SessionRecord, TemporalFetchers } from '../src/board/views/TemporalData.js'
+import type { SessionRecord } from '../src/board/views/TemporalData.js'
 import { LONG_OUTCOME, WORKSPACE_EARLIER_SESSION, WORKSPACE_LATEST_SESSION } from './transcript-fixtures.js'
 
 export const WORKSPACE_HOST = 'umber-workstation'
@@ -37,8 +37,7 @@ export interface WorkspaceExample {
   }
   bodies: Record<string, string>
   sessions: SessionRecord[]
-  commits: Array<Pick<CommitRecord, 'at' | 'session' | 'host'>>
-  temporal: TemporalFetchers
+  commits: Array<{ at: number; session: string | null; host: string | null }>
   files: WorkspaceFileFixture[]
   receipts: Array<Record<string, unknown>>
   fiberIndex: Array<{ id: string; name: string }>
@@ -161,10 +160,6 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
   const day = 86_400_000
   const project = '/fixture-store/workspace'
   const iso = (offset: number): string => new Date(now + offset).toISOString()
-  const origins = {
-    [WORKSPACE_HOST]: { kind: 'local' as const, stale: false, lastPolledAt: iso(0) },
-    [WORKSPACE_REMOTE]: { kind: 'remote' as const, stale: false, lastPolledAt: iso(-minute) },
-  }
   const fibers: Array<{ id: string; uid: string; name: string; status: string; age: number; outcome: string; host: string; role?: string; inCardIndex?: boolean }> = [
     {
       id: WORKSPACE_ID,
@@ -439,13 +434,7 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
     { at: now - 3 * 60 * minute, fiber: WORKSPACE_ID, uid: WORKSPACE_UID, session: WORKSPACE_LATEST_SESSION, harness: 'claude-code', agent: 'claude-opus', host: WORKSPACE_HOST, tmux: null, kind: 'dispatch' },
     { at: now - 8 * 60 * minute, fiber: WORKSPACE_ID, uid: WORKSPACE_UID, session: WORKSPACE_EARLIER_SESSION, harness: 'claude-code', agent: 'claude-opus', host: WORKSPACE_HOST, tmux: null, kind: 'resume' },
   ]
-  const buckets: ActivityBucket[] = []
-  const commits = [] as CommitRecord[]
-  const temporal: TemporalFetchers = {
-    activity: async (fromMs, toMs) => ({ host: WORKSPACE_HOST, from_ms: fromMs, to_ms: toMs, buckets, origins }),
-    sessions: async sinceMs => ({ host: WORKSPACE_HOST, records: sessions.filter(record => record.at >= sinceMs), origins }),
-    commits: async (fromMs, toMs) => ({ host: WORKSPACE_HOST, records: commits.filter(record => record.at >= fromMs && record.at < toMs), origins }),
-  }
+  const commits: Array<{ at: number; session: string | null; host: string | null }> = []
   const feed = {
     host: WORKSPACE_HOST,
     fibers: rows,
@@ -497,7 +486,6 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
     bodies,
     sessions,
     commits,
-    temporal,
     files,
     receipts,
     fiberIndex,

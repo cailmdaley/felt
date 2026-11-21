@@ -15,11 +15,11 @@ interface BoardInternals {
   fetchAndRender(): Promise<void>
   workspace: Workspace
   deskEl: HTMLElement
-  activeViewId: 'desk' | 'chronicle' | 'channels'
+  activeViewId: 'desk' | 'channels'
   voice: { status: VoiceStatus | null; notify(): void }
   deskKeyboard: { selection: { uid: string; origin: string } | null; select(address: { uid: string; origin: string }): void }
   workspaceColumn(card: typeof head): Array<{ card: typeof head }>
-  setView(view: 'desk' | 'chronicle' | 'channels'): void
+  setView(view: 'desk' | 'channels'): void
   openDocumentChannel(card: typeof head): void
 }
 let board: KanbanModal
@@ -89,8 +89,8 @@ it('keeps an idle worker that asked nothing in Working, its dot still, when a lo
 it('moves through the view tabs by arrows, Home and End, and keeps the numeric hotkeys', async () => {
   await settle()
   const tabs = Array.from(document.querySelectorAll<HTMLElement>('[role="tablist"][aria-label="Board views"] [role="tab"]'))
-  expect(tabs.map(tab => tab.dataset.view ?? tab.querySelector<HTMLElement>('[data-view]')?.dataset.view)).toEqual(['desk', 'chronicle', 'channels', 'globe'])
-  expect(tabs.map(tab => tab.tabIndex)).toEqual([0, -1, -1, -1])
+  expect(tabs.map(tab => tab.dataset.view ?? tab.querySelector<HTMLElement>('[data-view]')?.dataset.view)).toEqual(['desk', 'channels'])
+  expect(tabs.map(tab => tab.tabIndex)).toEqual([0, -1])
   tabs[0].focus()
   // The tablist's own keys do not reach the Desk underneath it.
   const before = selected()
@@ -98,11 +98,11 @@ it('moves through the view tabs by arrows, Home and End, and keeps the numeric h
   await settle()
   expect(document.activeElement).toBe(tabs[1])
   expect(tabs[1].getAttribute('aria-selected')).toBe('true')
-  expect(inside.activeViewId).toBe('chronicle')
+  expect(inside.activeViewId).toBe('channels')
   expect(selected()).toBe(before)
   press('End', {}, document.activeElement!)
   await settle()
-  expect(document.activeElement).toBe(tabs[3])
+  expect(document.activeElement).toBe(tabs[1])
   press('ArrowRight', {}, document.activeElement!)
   await settle()
   expect(document.activeElement).toBe(tabs[0])
@@ -110,7 +110,7 @@ it('moves through the view tabs by arrows, Home and End, and keeps the numeric h
   // Every other Desk key still works from a focused tab.
   press('j', {}, document.activeElement!)
   expect(selected()).not.toBe(before)
-  for (const [index, key] of ['1', '2', '3', '4'].entries()) {
+  for (const [index, key] of ['1', '2'].entries()) {
     press(key, {}, document.activeElement!)
     await settle()
     expect(tabs[index].getAttribute('aria-selected')).toBe('true')
@@ -121,12 +121,12 @@ it('moves through the view tabs by arrows, Home and End, and keeps the numeric h
 describe('Reader Rest lifecycle', () => {
   it.each([
     { view: 'desk', tempered: true }, { view: 'desk', tempered: false },
-    { view: 'chronicle', tempered: true }, { view: 'chronicle', tempered: false },
+    { view: 'channels', tempered: true }, { view: 'channels', tempered: false },
   ] as const)('s rests a constitution opened from $view with tempered=$tempered', async ({ view, tempered }) => {
     const finished = card({ id: 'finished', uid: 'finished-uid', originId: 'remote', status: 'closed', tempered, shuttleKind: 'oneshot', sessionUuid: 'finished-session' })
     draw(response({ timeline: { past: [finished], futureDated: [] } }))
     inside.setView(view)
-    // The same entry point receives Desk and Chronicle's original card, even
+    // The same entry point receives the original card, even
     // when it isn't present in any drawn Desk region.
     inside.openDocumentChannel(finished)
     await settle()
@@ -168,7 +168,7 @@ describe('Rest controls', () => {
   it.each([true, false])('a reviewed constitution offers Rest alone among its verbs, and on its keyboard, tempered=%s', async tempered => {
     const finished = card({ id: 'finished', uid: 'finished-uid', originId: 'remote', status: 'closed', tempered, shuttleKind: 'oneshot', sessionUuid: 'finished-session' })
     draw(response({ timeline: { past: [finished], futureDated: [] } }))
-    inside.setView('chronicle')
+    inside.setView('channels')
     inside.openDocumentChannel(finished)
     await settle()
     const acts = [...document.querySelectorAll<HTMLElement>('.ws-reader .ws-fiber-acts')].find(el => !el.closest('[hidden]'))!
@@ -190,9 +190,9 @@ describe('Rest controls', () => {
 
 describe('Desk keyboard selection', () => {
   it.each([
-    ['desk', 'desk'], ['desk', 'chronicle'], ['desk', 'channels'],
-    ['view', 'desk'], ['view', 'chronicle'], ['view', 'channels'],
-    ['reader', 'desk'], ['reader', 'chronicle'], ['reader', 'channels'],
+    ['desk', 'desk'], ['desk', 'channels'],
+    ['view', 'desk'], ['view', 'channels'],
+    ['reader', 'desk'], ['reader', 'channels'],
   ] as const)('%s switches with the numbered view key and keeps Desk selection when returning', async (from, to) => {
     press('j'); expect(selected()).toBe('review')
     expect(inside.deskKeyboard.selection?.uid).toBe('review')
@@ -201,7 +201,7 @@ describe('Desk keyboard selection', () => {
       press('Enter')
       expect(inside.workspace.isActive).toBe(true)
     }
-    const key = to === 'desk' ? '1' : to === 'chronicle' ? '2' : '3'
+    const key = to === 'desk' ? '1' : '2'
     expect(press(key).defaultPrevented).toBe(true)
     expect(inside.activeViewId).toBe(to)
     if (to === 'desk') expect(selected()).toBe('review')

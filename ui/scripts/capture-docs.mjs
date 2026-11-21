@@ -20,11 +20,8 @@ try {
   const assets = resolve('../docs/assets')
   await page.screenshot({ path: resolve(assets, 'shuttle-board-example.png') })
   await page.screenshot({ path: resolve(assets, 'board-desk.jpg'), type: 'jpeg', quality: 90 })
-  await page.locator('[data-view="chronicle"]').click()
-  await page.getByRole('button', { name: 'Choose a workshop venue', exact: true }).waitFor()
-  await page.screenshot({ path: resolve(assets, 'board-chronicle.jpg'), type: 'jpeg', quality: 90 })
   assert.deepEqual(errors, [])
-  console.log('Captured workshop Desk and Chronicle screenshots in docs/assets')
+  console.log('Captured workshop Desk screenshots in docs/assets')
 } finally {
   await browser.close()
 }

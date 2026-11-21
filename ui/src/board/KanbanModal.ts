@@ -52,13 +52,11 @@ import { Voice } from './voice.js'
 import type { WorkerOpener } from './conversationOpening.js'
 import {
   collectCards,
-  createTemporalFetchers,
   getView,
   listViews,
   createViewFallbackPage,
   keystrokeIsSpokenFor,
   type BoardViewId,
-  type TemporalFetchers,
   settingsHotkey,
   blockingDialogOpen,
   type TemporalView,
@@ -113,14 +111,6 @@ interface KanbanModalOptions {
    *  dispatch endpoints (dispatch carries user_message + resume_mode inline),
    *  owner-routed by `origin`. Defaults to `http://${hostname}:4000`. */
   shuttleBase?: string
-  /**
-   * Override the temporal views' read plane — the `activity`, `sessions` and
-   * `commits` fetchers a {@link ViewContext} carries. Defaults to
-   * {@link createTemporalFetchers} over `shuttleBase`. The offline harness
-   * injects deterministic mocks here so the views are exercisable with no
-   * daemon (see harness/harness-board.ts).
-   */
-  temporalFetchers?: TemporalFetchers
 }
 
 /** The Desk's own hotkey. The others come from the view registry, so a view
@@ -142,8 +132,6 @@ export class KanbanModal {
   private readonly onSettingsClick?: () => void
   private readonly shuttleBase: string
   private readonly handleDocumentKeyDown = (e: KeyboardEvent): void => this.handleKanbanKeyDown(e)
-
-  private readonly temporal: TemporalFetchers
 
   private container: HTMLDivElement | null = null
   private body: HTMLDivElement | null = null
@@ -234,7 +222,6 @@ export class KanbanModal {
     this.onNewIdeaClick = options.onNewIdeaClick
     this.onSettingsClick = options.onSettingsClick
     this.shuttleBase = options.shuttleBase ?? `http://${window.location.hostname}:4000`
-    this.temporal = options.temporalFetchers ?? createTemporalFetchers(this.shuttleBase)
     this.voice = new Voice(this.shuttleBase)
     this.phoneAudio = new PhoneListening(this.shuttleBase)
     this.voice.subscribe(() => this.phoneAudio.observe(this.voice.status))
@@ -292,7 +279,7 @@ export class KanbanModal {
       deskRows: () => this.workspaceCards(),
       deskPlacement: card => this.deskProjection.placements.get(deskCardKey(card)),
       threadIndex: () => threadIndexFor(this.lastResponse),
-      origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : this.activeViewId === 'globe' ? 'Globe' : 'Channels',
+      origin: () => this.activeViewId === 'desk' ? 'Desk' : 'Channels',
       onVisibility: (active) => this.showWorkspace(active),
       onSight: card => this.voice.see(card),
       onReturnCard: card => {
@@ -769,9 +756,6 @@ export class KanbanModal {
       workspace: this.workspace ?? undefined,
       sends: this.fiberSends,
       shuttleBase: this.shuttleBase,
-      // The fetchers ARE the context's temporal half — closures over their own
-      // cache, so spreading them is the same object, not a rebind.
-      ...this.temporal,
       openCard: (cardId) => {
         const card = resolveOpenTarget(cardId, cards, this.lastResponse?.cycles ?? [])
         if (card) this.openDocumentChannel(card)
@@ -806,7 +790,7 @@ export class KanbanModal {
   }
 
   /**
-   * `1`–`4` switch views. Deliberately narrow: a bare digit only, so
+   * `1`–`2` switch views. Deliberately narrow: a bare digit only, so
    * `Cmd/Ctrl+1` stays the browser's tab switch, and only when the keystroke
    * is not going somewhere it matters — a focused text field, or a
    * dialog layered over the board. Returns true when the
@@ -815,7 +799,7 @@ export class KanbanModal {
   private handleViewHotkey(e: KeyboardEvent): boolean {
     const surface = this.workspace?.isActive ? 'reader' : 'desk'
     const intent = keyIntent(e, surface)
-    if (intent !== 'desk' && intent !== 'chronicle' && intent !== 'globe' && intent !== 'channels') return false
+    if (intent !== 'desk' && intent !== 'channels') return false
     if (keystrokeIsSpokenFor()) return false
     e.preventDefault()
     e.stopPropagation()
@@ -1386,8 +1370,8 @@ export class KanbanModal {
     // A tablist's arrows, Home and End are its own (the view strip, the phone folio), not the active view's.
     if (TABLIST_KEYS.has(e.key) && (e.target as HTMLElement | null)?.closest?.('[role="tablist"]')) return
     if (this.activeView?.keydown?.(e)) { e.preventDefault(); e.stopPropagation(); return }
-    // On the Chronicle, the Globe and Channels, `/` reaches the bar's Find.
-    if ((this.activeViewId === 'chronicle' || this.activeViewId === 'globe' || this.activeViewId === 'channels') && !keystrokeIsSpokenFor() && keyIntent(e, 'desk') === 'find' && this.focusFind()) {
+    // On Channels, `/` reaches the bar's Find.
+    if (this.activeViewId === 'channels' && !keystrokeIsSpokenFor() && keyIntent(e, 'desk') === 'find' && this.focusFind()) {
       e.preventDefault(); e.stopPropagation()
       return
     }

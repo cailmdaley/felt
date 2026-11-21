@@ -77,7 +77,7 @@ async function mount(inFlight = [chair, tsz, mask, beam, van, notes], view = new
     console: (options: ConsoleOptions) => new Dock('', requestRefresh, undefined, undefined, options),
     library: { subscribe: () => () => {}, cancelOpen: vi.fn(), documents: () => library },
     board: new BoardFeed(''), said: () => undefined, followFind: vi.fn(), dock: { openConversation: vi.fn(() => true) },
-    globeHost: { feeds: { marks: (each: { uid?: string }) => ({ launches: launches[each.uid!] ?? [], commits: [] }), reach: () => 14 * day, files: () => [], lead: (each: { uid?: string }) => tapestryOf(each), refresh: () => {} } },
+    feeds: { marks: (each: { uid?: string }) => ({ launches: launches[each.uid!] ?? [], commits: [] }), reach: () => 14 * day, files: () => [], lead: (each: { uid?: string }) => tapestryOf(each), refresh: () => {} },
   }
   const sends = { files: sent, subscribe: () => () => {}, refresh: async () => {} }
   const ctx = { cards: [], response: board(inFlight), shuttleBase: '', workspace, sends, requestRefresh, openCard: vi.fn() } as unknown as ViewContext
@@ -652,7 +652,7 @@ it('redraws the count when the threads running change and nothing drawn does', a
 it('keeps the head\'s list of the chair\'s files current while it is open, whatever else the head shows', async () => {
   daemon()
   const { view, ctx, host } = await mount()
-  const feeds = (ctx.workspace as unknown as { globeHost: { feeds: { files: () => unknown[] } } }).globeHost.feeds
+  const feeds = (ctx.workspace as unknown as { feeds: { files: () => unknown[] } }).feeds
   let files = [{ key: 'local:/w/plan.md', name: 'plan.md', at: Date.now() - minute, unread: false }]
   feeds.files = () => files
   ctx.response = board([{ ...chair, modifiedAt: new Date().toISOString() }, tsz, mask, beam, van, notes])
@@ -671,7 +671,7 @@ it('keeps the head\'s list of the chair\'s files current while it is open, whate
 it('closes the chair\'s files list and draws the new head when Rex brings another channel', async () => {
   daemon()
   const { view, ctx, host } = await mount()
-  const feeds = (ctx.workspace as unknown as { globeHost: { feeds: { files: () => unknown[] } } }).globeHost.feeds
+  const feeds = (ctx.workspace as unknown as { feeds: { files: () => unknown[] } }).feeds
   feeds.files = () => [{ key: 'local:/w/plan.md', name: 'plan.md', at: Date.now() - minute, unread: false }]
   ctx.response = board([{ ...chair, modifiedAt: new Date().toISOString() }, tsz, mask, beam, van, notes])
   view.refresh(ctx); await settle()

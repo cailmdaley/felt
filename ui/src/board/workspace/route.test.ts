@@ -190,27 +190,38 @@ describe('workspace routes', () => {
   })
 
   it('an address typed over a freshly loaded view opens a layer above it', async () => {
-    resetHash('#/globe')
+    resetHash('#/desk')
     const history = create()
     history.start()
     await new Promise<void>(resolve => { window.addEventListener('hashchange', () => resolve(), { once: true }); window.location.hash = '#/board/typed@host' })
     await settle()
     await nextPop(() => history.leave())
-    expect(window.location.hash).toBe('#/globe')
+    expect(window.location.hash).toBe('#/desk')
   })
 
   it('a reload inside the reader keeps the view below it', async () => {
-    resetHash('#/globe')
+    resetHash('#/desk')
     let history = create()
     history.start()
-    history.enter('a', 'host', undefined, 'globe')
+    history.enter('a', 'host', undefined, 'desk')
     history.enter('b', 'host')
     history.dispose()
     history = create()
     history.start()
-    expect(history.backLabel).toBe('Globe')
+    expect(history.backLabel).toBe('Desk')
     await nextPop(() => history.leave())
-    expect(window.location.hash).toBe('#/globe')
+    expect(window.location.hash).toBe('#/desk')
+  })
+
+  it('redirects retired view hashes (#/chronicle, #/globe) to #/desk', () => {
+    for (const retired of ['#/chronicle', '#/globe']) {
+      resetHash(retired)
+      const history = create()
+      history.start()
+      expect(window.location.hash).toBe('#/desk')
+      expect(history.originView).toBe('desk')
+      history.dispose()
+    }
   })
 
   it('another view chosen from the reader takes the reader\'s entry, so the browser\'s back returns to the view it covered', async () => {

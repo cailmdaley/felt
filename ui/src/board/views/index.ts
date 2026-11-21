@@ -1,9 +1,7 @@
 /**
- * The view barrel. Importing this module is what puts the views in the
+ * The view barrel. Importing this module puts the registered views into the
  * registry — each view file calls `registerView` at module scope, so IMPORT
- * ORDER HERE IS TAB ORDER (chronicle · channels · globe), which follows the strip
- * after Desk and matches the `1`-`4` hotkeys. A view with no hotkey has no tab:
- * the map is the Desk's other posture.
+ * ORDER HERE IS TAB ORDER (channels), following Desk and matching `1`–`2`.
  *
  * KanbanModal imports this one module; nothing else needs to know the view
  * files exist. Shared page styles load here too, alongside the imports, the
@@ -12,9 +10,7 @@
 
 import './views.css'
 
-import './ChronicleView.js'
 import './ChannelsView.js'
-import './GlobeView.js'
 
 export {
   blockingDialogOpen,
@@ -28,8 +24,4 @@ export {
   type TemporalView,
   type ViewContext,
 } from './ViewRegistry.js'
-export {
-  createTemporalFetchers,
-  type TemporalFetchers,
-} from './TemporalData.js'
 export { createViewFallbackPage } from './ViewPage.js'

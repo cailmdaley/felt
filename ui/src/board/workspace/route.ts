@@ -12,8 +12,8 @@ const STATE_KEY = 'shuttleWorkspace'
 export const FRAME_STEPS = 8
 /** A back whose landing the board has not heard of in this long is taken as landed. */
 export const LANDING_MS = 500
-export type WorkspaceOriginView = 'desk' | 'chronicle' | 'globe' | 'channels'
-const VIEW_NAMES: Record<WorkspaceOriginView, string> = { desk: 'Desk', chronicle: 'Chronicle', globe: 'Globe', channels: 'Channels' }
+export type WorkspaceOriginView = 'desk' | 'channels'
+const VIEW_NAMES: Record<WorkspaceOriginView, string> = { desk: 'Desk', channels: 'Channels' }
 /** What a reader entry says about itself: whether the view it was opened from is the entry below it, and which view that is. */
 interface RouteState { layer: boolean; originView: WorkspaceOriginView }
 type StateObject = Record<string, unknown>
@@ -23,19 +23,19 @@ function encode(value: string): string {
 }
 
 function isOriginView(value: unknown): value is WorkspaceOriginView {
-  return value === 'desk' || value === 'chronicle' || value === 'globe' || value === 'channels'
+  return value === 'desk' || value === 'channels'
 }
 /** The board view a location hash addresses, or null for any other hash. */
 export function viewOfHash(hash: string): WorkspaceOriginView | null {
-  if (hash === '#/desk') return 'desk'
-  if (hash === '#/chronicle') return 'chronicle'
-  if (hash === '#/globe') return 'globe'
+  if (hash === '#/desk' || hash === '#/chronicle' || hash === '#/globe') return 'desk'
   if (hash === '#/channels' || hash === BOARD_HASH || hash.startsWith(`${BOARD_HASH}/`)) return 'channels'
   return null
 }
-/** The address a view is shown at: `#/board` redirects to `#/channels`. */
+/** The address a view is shown at: `#/board` redirects to `#/channels`; retired view hashes redirect to `#/desk`. */
 function canonical(hash: string): string {
-  return hash === BOARD_HASH ? '#/channels' : hash
+  if (hash === BOARD_HASH) return '#/channels'
+  if (hash === '#/chronicle' || hash === '#/globe') return '#/desk'
+  return hash
 }
 
 /** Self-contained: the document bridge serializes it into each document's runtime. */
