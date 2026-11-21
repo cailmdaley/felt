@@ -73,7 +73,8 @@ defmodule Shuttle.Terminal.Rex do
     end
   end
 
-  defp reconcile(runner, %{"instance_id" => instance}) when is_binary(instance) do
+  @doc "Retire stale bindings, viewers, and places when the Rex server's instance_id changes."
+  def reconcile(runner, %{"instance_id" => instance}) when is_binary(instance) do
     Shuttle.Terminal.with_lock({__MODULE__, Bindings.path(), :instance}, fn ->
       with {:ok, doc} <- Bindings.read(),
            :ok <- reconcile_instance(runner, doc, instance) do
@@ -84,7 +85,7 @@ defmodule Shuttle.Terminal.Rex do
     end)
   end
 
-  defp reconcile(_, _), do: :ok
+  def reconcile(_, _), do: :ok
 
   defp reconcile_instance(_, %{"instance" => instance}, instance), do: :ok
   defp reconcile_instance(_, doc, _) when not is_map_key(doc, "instance"), do: :ok
@@ -404,6 +405,11 @@ defmodule Shuttle.Terminal.Rex do
         with {:ok, b, created_session?} <- result do
           b = Map.merge(b, %{"family" => root, "depth" => entry.depth})
           b = if family, do: Map.put(b, "fiber", family.fiber), else: b
+
+          b =
+            if is_binary(uid) and Shuttle.ULID.from_tmux(name) == nil,
+              do: Map.put(b, "page_uid", uid),
+              else: b
 
           case store.(b) do
             :ok ->

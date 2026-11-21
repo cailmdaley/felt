@@ -81,6 +81,83 @@ defmodule Shuttle.Terminal.RexLayoutTest do
       refute Map.has_key?(des.places_by_uid, "u-tempered")
       refute Map.has_key?(des.places_by_uid, "u-discarded")
     end
+
+    test "never re-adds a tempered fiber from bindings, and ignores bindings dead in observed sessions" do
+      fibers = [
+        fiber(@uid_a, @root <> "/a", %{"status" => "closed", "tempered" => true}),
+        fiber(@uid_b, @root <> "/b", %{"status" => "open"})
+      ]
+
+      bindings = %{
+        @name_a => %{
+          "session_id" => "session:1",
+          "window_id" => "window:1",
+          "block_id" => "block:a",
+          "family" => @root,
+          "fiber" => @root <> "/a"
+        },
+        @name_b => %{
+          "session_id" => "session:1",
+          "window_id" => "window:2",
+          "block_id" => "block:dead",
+          "family" => @root,
+          "fiber" => @root <> "/b"
+        }
+      }
+
+      sessions = %{
+        "session:1" => %{
+          session_id: "session:1",
+          label: "design/family",
+          active_window_id: "window:1",
+          windows: [%{window_id: "window:1", label: "└ a", block_ids: ["block:a"]}],
+          blocks: [%{block_id: "block:a", label: @name_a, window_id: "window:1", placement: "placed"}]
+        }
+      }
+
+      des =
+        RexLayout.desired(%{
+          fibers: fibers,
+          bindings: bindings,
+          places: %{},
+          sessions: sessions,
+          now: @now,
+          pages_base: "http://hub.test:4000",
+          own_host_id: "host-a"
+        })
+
+      assert des.places_by_uid == %{}
+    end
+
+    test "plan/2 never closes the last remaining stray page block in a protected active window" do
+      obs = %{
+        sessions: %{
+          "session:fam" => %{
+            session_id: "session:fam",
+            label: "design/family",
+            active_window_id: "window:active",
+            windows: [%{window_id: "window:active", label: "a", block_ids: ["block:p1", "block:p2"]}],
+            blocks: [
+              %{block_id: "block:p1", label: RexPages.label(), window_id: "window:active", placement: "placed"},
+              %{block_id: "block:p2", label: RexPages.label(), window_id: "window:active", placement: "placed"}
+            ]
+          }
+        },
+        focused_sessions: MapSet.new(["session:fam"]),
+        families: %{@root => "session:fam"},
+        bindings: %{},
+        viewers: %{},
+        places: %{}
+      }
+
+      des = %{families: %{}, places_by_uid: %{}}
+      actions = RexLayout.plan(obs, des)
+      closed_ids = for {:close_block, %{block_id: bid}} <- actions, do: bid
+      assert length(closed_ids) == 1
+      after_obs = RexLayout.apply_pure(obs, actions)
+      assert length(after_obs.sessions["session:fam"].windows) == 1
+      assert length(after_obs.sessions["session:fam"].blocks) == 1
+    end
   end
 
   describe "plan/2 properties" do
@@ -514,6 +591,113 @@ defmodule Shuttle.Terminal.RexLayoutTest do
       assert is_binary(new_place["session_id"])
       assert is_binary(new_place["page_block_id"])
       assert [%{"label" => "rexweb shuttle"}] = blocks(new_place["session_id"])
+    end
+
+    test "cold Poller cache at boot never wipes existing places" do
+      now = ~U[2026-11-21 12:00:00Z]
+
+      quiet_fiber = %{
+        "id" => @uid_a,
+        "uid" => @uid_a,
+        "slug" => @root <> "/a",
+        "status" => "open",
+        "shuttle" => %{"host" => "test-host", "kind" => "oneshot"}
+      }
+
+      assert {:ok, place} = RexLayout.ensure_place(FakeRex, quiet_fiber, now: now)
+      sid = place["session_id"]
+
+      # Even past grace, when fibers_loaded? is false (cold cache), reconcile keeps the place.
+      expired = DateTime.add(now, 90_000, :second)
+
+      assert :ok =
+               RexLayout.reconcile(FakeRex,
+                 fibers: [],
+                 fibers_loaded?: false,
+                 now: expired
+               )
+
+      assert Map.has_key?(FakeRex.state().sessions, sid)
+      {:ok, doc} = RexBindings.read()
+      assert Map.has_key?(doc["places"], @uid_a)
+    end
+
+    test "ensure_place arriving first after a Rex server restart reconciles stale places before creating a fresh one" do
+      now = ~U[2026-11-21 12:00:00Z]
+
+      quiet_fiber = %{
+        "id" => @uid_a,
+        "uid" => @uid_a,
+        "slug" => @root <> "/a",
+        "status" => "open",
+        "shuttle" => %{"host" => "test-host", "kind" => "oneshot"}
+      }
+
+      assert {:ok, old_place} = RexLayout.ensure_place(FakeRex, quiet_fiber, now: now)
+      old_sid = old_place["session_id"]
+      old_wid = old_place["window_id"]
+
+      # Rex server restarts with a new instance_id; ensure_place is the very first call.
+      FakeRex.reply(
+        "whoami",
+        {Jason.encode!(Map.put(FakeRex.fixture("whoami"), "instance_id", "after-restart")), 0}
+      )
+
+      assert {:ok, new_place} = RexLayout.ensure_place(FakeRex, quiet_fiber, now: now)
+      refute new_place["window_id"] == old_wid
+      refute Map.has_key?(FakeRex.state().sessions, old_sid)
+      assert Map.has_key?(FakeRex.state().sessions, new_place["session_id"])
+    end
+
+    test "resume-<uuid> worker keeps its page during reconcile and is not treated as stray", ctx do
+      file = Path.join([ctx.dir, "family-store", ".felt", @root, "a", "a.md"])
+      File.write!(file, "---\nname: a\nuid: #{@uid_a}\ntags: [constitution]\n---\n")
+
+      assert :ok = Backend.launch(FakeRex, "resume-1234", "/tmp", "worker.sh", fiber: @root <> "/a")
+      {:ok, doc} = RexBindings.read()
+      b = doc["bindings"]["resume-1234"]
+      assert b["page_uid"] == @uid_a
+      sid = b["session_id"]
+      page_bid = b["page_block_id"]
+
+      # Reconcile with empty owner-filtered fibers: the live resume-* binding keeps its page.
+      assert :ok = RexLayout.reconcile(FakeRex, fibers: [])
+      assert Enum.any?(blocks(sid), &(&1["block_id"] == page_bid))
+      assert length(Enum.filter(blocks(sid), &RexPages.page?/1)) == 1
+    end
+
+    test "ensure_place restores a human-closed page block in an existing live window" do
+      now = ~U[2026-11-21 12:00:00Z]
+
+      fiber_a = %{
+        "id" => @uid_a,
+        "uid" => @uid_a,
+        "slug" => @root <> "/a",
+        "status" => "active",
+        "shuttle" => %{"host" => "test-host", "kind" => "oneshot"}
+      }
+
+      assert :ok = Backend.launch(FakeRex, @name_a, "/tmp", "worker.sh", fiber: @root <> "/a")
+      {:ok, doc} = RexBindings.read()
+      b = doc["bindings"][@name_a]
+      sid = b["session_id"]
+      wid = b["window_id"]
+      old_page_bid = b["page_block_id"]
+
+      # Human closes the page block (⌘W); chat block remains in the window.
+      assert {:ok, _} = Rex.call(FakeRex, "block.close", %{"block_id" => old_page_bid}, session: sid)
+      assert :ok = RexLayout.reconcile(FakeRex, fibers: [fiber_a], now: now)
+      {:ok, after_close} = RexBindings.read()
+      assert after_close["places"][@uid_a]["page_closed"] == true
+
+      # `go` / ensure_place restores the page split in that same window.
+      assert {:ok, restored} = RexLayout.ensure_place(FakeRex, fiber_a, now: now)
+      assert restored["session_id"] == sid
+      assert restored["window_id"] == wid
+      assert is_binary(restored["page_block_id"])
+      refute restored["page_block_id"] == old_page_bid
+      assert restored["page_closed"] == false
+      assert Enum.any?(blocks(sid), &(&1["block_id"] == restored["page_block_id"]))
     end
   end
 end

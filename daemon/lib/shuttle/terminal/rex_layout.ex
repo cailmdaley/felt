@@ -17,7 +17,7 @@ defmodule Shuttle.Terminal.RexLayout do
   import Kernel, except: [apply: 2, apply: 3]
 
   require Logger
-  alias Shuttle.{Lifecycle, Poller, Rex, RetainedTerminal}
+  alias Shuttle.{FiberDocuments, Lifecycle, Poller, Rex, RetainedTerminal}
   alias Shuttle.Terminal.Rex, as: Backend
   alias Shuttle.Terminal.RexBindings, as: Bindings
   alias Shuttle.Terminal.RexPages, as: Pages
@@ -31,21 +31,29 @@ defmodule Shuttle.Terminal.RexLayout do
   """
   def desired(inputs) when is_map(inputs) do
     fibers_input = Map.get(inputs, :fibers, [])
+    family_fibers_input = Map.get(inputs, :family_fibers)
     bindings = Map.get(inputs, :bindings, %{})
     places = Map.get(inputs, :places, %{})
+    sessions = Map.get(inputs, :sessions)
     now = Map.get(inputs, :now, DateTime.utc_now())
     grace = Map.get(inputs, :grace_seconds, @default_grace_seconds)
     base = Map.get(inputs, :pages_base, "http://127.0.0.1:4000")
     own_host_id = Map.get(inputs, :own_host_id, "local")
     fibers_loaded? = Map.get(inputs, :fibers_loaded?, true)
 
-    rows =
-      Enum.map(fibers_input, fn
-        %{fiber: fiber} -> fiber
-        fiber when is_map(fiber) -> fiber
-      end)
+    rows = normalize_fiber_rows(fibers_input)
+    family_rows = if family_fibers_input, do: normalize_fiber_rows(family_fibers_input), else: rows
+    rows_by_path = fiber_uid_by_path(rows, family_rows)
+    live_by_uid = live_family_bindings(bindings, rows_by_path, places, sessions)
 
-    live_by_uid = live_family_bindings(bindings)
+    closed_verdict_uids =
+      for fiber <- rows,
+          uid = fiber["uid"] || fiber["id"],
+          is_binary(uid) and uid != "",
+          live? = Map.has_key?(live_by_uid, uid),
+          Lifecycle.column(fiber, live?) in ["tempered", "discarded"],
+          into: MapSet.new(),
+          do: uid
 
     from_fibers =
       rows
@@ -60,7 +68,7 @@ defmodule Shuttle.Terminal.RexLayout do
 
           if column not in ["tempered", "discarded"] and
                wants_place?(fiber, column, live?, places[uid], now, grace) do
-            fam = Tree.family(path, rows)
+            fam = Tree.family(path, family_rows)
             place = places[uid] || %{}
 
             Map.put(acc, uid, %{
@@ -79,23 +87,29 @@ defmodule Shuttle.Terminal.RexLayout do
         end
       end)
 
-    # Every live family worker always keeps a place even if the fiber feed hasn't listed it yet.
+    # Every live family worker always keeps a place even if the fiber feed hasn't
+    # listed it yet — unless the fiber is tempered or discarded.
     with_live =
       Enum.reduce(live_by_uid, from_fibers, fn {uid, {_name, b}}, acc ->
-        if Map.has_key?(acc, uid) do
-          acc
-        else
-          fiber_path = b["fiber"] || b["family"]
-          place = places[uid] || %{}
+        cond do
+          Map.has_key?(acc, uid) ->
+            acc
 
-          Map.put(acc, uid, %{
-            uid: uid,
-            fiber: fiber_path,
-            family: b["family"],
-            depth: b["depth"] || 0,
-            url: Pages.url(base, uid, own_host_id),
-            asked_at: place["asked_at"]
-          })
+          MapSet.member?(closed_verdict_uids, uid) ->
+            acc
+
+          true ->
+            fiber_path = b["fiber"] || b["family"]
+            place = places[uid] || %{}
+
+            Map.put(acc, uid, %{
+              uid: uid,
+              fiber: fiber_path,
+              family: b["family"],
+              depth: b["depth"] || 0,
+              url: Pages.url(base, uid, own_host_id),
+              asked_at: place["asked_at"]
+            })
         end
       end)
 
@@ -107,6 +121,9 @@ defmodule Shuttle.Terminal.RexLayout do
       Enum.reduce(places, with_live, fn {uid, place}, acc ->
         cond do
           Map.has_key?(acc, uid) ->
+            acc
+
+          MapSet.member?(closed_verdict_uids, uid) ->
             acc
 
           not fibers_loaded? ->
@@ -146,6 +163,22 @@ defmodule Shuttle.Terminal.RexLayout do
       for {_root, fam} <- families, dp <- fam.places, into: %{}, do: {dp.uid, dp}
 
     %{families: families, places_by_uid: places_by_uid}
+  end
+
+  defp normalize_fiber_rows(list) do
+    Enum.map(list || [], fn
+      %{fiber: fiber} -> fiber
+      fiber when is_map(fiber) -> fiber
+    end)
+  end
+
+  defp fiber_uid_by_path(rows, family_rows) do
+    for fiber <- family_rows ++ rows,
+        path = fiber["slug"] || fiber["id"],
+        uid = fiber["uid"] || fiber["id"],
+        is_binary(path) and path != "" and is_binary(uid) and uid != "",
+        into: %{},
+        do: {path, uid}
   end
 
   defp keep_existing_place(acc, uid, place, base, own_host_id) do
@@ -189,11 +222,23 @@ defmodule Shuttle.Terminal.RexLayout do
 
   defp recently_asked?(_, _, _), do: false
 
-  defp live_family_bindings(bindings) do
-    Enum.reduce(bindings || %{}, %{}, fn {name, b}, acc ->
-      uid = binding_uid(name, b)
+  defp live_family_bindings(bindings, rows_by_path, places, sessions) do
+    places_by_win =
+      for {uid, p} <- places || %{},
+          is_binary(p["session_id"]) and is_binary(p["window_id"]),
+          into: %{},
+          do: {{p["session_id"], p["window_id"]}, uid}
 
-      if is_binary(b["family"]) and is_binary(uid) do
+    places_by_fiber =
+      for {uid, p} <- places || %{},
+          is_binary(p["fiber"]),
+          into: %{},
+          do: {p["fiber"], uid}
+
+    Enum.reduce(bindings || %{}, %{}, fn {name, b}, acc ->
+      uid = binding_uid(name, b, rows_by_path, places_by_win, places_by_fiber)
+
+      if is_binary(b["family"]) and is_binary(uid) and binding_alive?(b, sessions) do
         Map.put(acc, uid, {name, b})
       else
         acc
@@ -201,7 +246,23 @@ defmodule Shuttle.Terminal.RexLayout do
     end)
   end
 
-  defp binding_uid(name, b), do: Shuttle.ULID.from_tmux(name) || b["page_uid"]
+  defp binding_alive?(_b, nil), do: true
+
+  defp binding_alive?(b, sessions) when is_map(sessions) do
+    case sessions[b["session_id"]] do
+      nil -> false
+      session -> Enum.any?(session.blocks, &(&1.block_id == b["block_id"]))
+    end
+  end
+
+  defp binding_uid(name, b, rows_by_path, places_by_win, places_by_fiber) do
+    Shuttle.ULID.from_tmux(name) ||
+      b["page_uid"] ||
+      (is_binary(b["fiber"]) and rows_by_path[b["fiber"]]) ||
+      places_by_win[{b["session_id"], b["window_id"]}] ||
+      (is_binary(b["fiber"]) and places_by_fiber[b["fiber"]]) ||
+      nil
+  end
 
   @doc """
   Compute the minimal list of actions to bring `observed` to `desired`. Pure function.
@@ -220,7 +281,13 @@ defmodule Shuttle.Terminal.RexLayout do
     bindings = Map.get(observed, :bindings, %{})
     places = Map.get(observed, :places, %{})
 
-    live_bindings = live_family_bindings(bindings)
+    desired_uid_by_path =
+      for {uid, dp} <- desired.places_by_uid,
+          is_binary(dp.fiber),
+          into: %{},
+          do: {dp.fiber, uid}
+
+    live_bindings = live_family_bindings(bindings, desired_uid_by_path, places, sessions)
 
     # 1. Stale family entries (session no longer exists in Rex).
     stale_family_actions =
@@ -339,27 +406,37 @@ defmodule Shuttle.Terminal.RexLayout do
         end
       end)
 
-    # 5. Close stray/unrecorded `rexweb shuttle` page blocks in Shuttle family sessions.
+    # 5. Close stray/unrecorded `rexweb shuttle` page blocks in Shuttle family sessions,
+    #    tracking remaining blocks per window so a protected active window is never emptied.
     {close_block_actions, closing_blocks_by_sid} =
       live_families
       |> Enum.sort()
-      |> Enum.reduce({[], %{}}, fn {_root, sid}, {acts, closing_b} ->
+      |> Enum.reduce({[], %{}}, fn {root, sid}, {acts, closing_b} ->
         session = sessions[sid]
-        keep = MapSet.union(keep_pages_by_sid[sid] || MapSet.new(), protected_pages_by_sid[sid] || MapSet.new())
+
+        keep =
+          MapSet.union(
+            keep_pages_by_sid[sid] || MapSet.new(),
+            protected_pages_by_sid[sid] || MapSet.new()
+          )
+
         closing_wins = closing_windows_by_sid[sid] || MapSet.new()
 
-        strays =
-          for block <- session.blocks,
-              page_block?(block),
-              not MapSet.member?(keep, block.block_id),
-              not MapSet.member?(closing_wins, block.window_id),
-              not sole_block_in_protected_window?(focused, session, block) do
-            block.block_id
-          end
+        {strays, _planned} =
+          Enum.reduce(session.blocks, {[], MapSet.new()}, fn block, {acc, planned} ->
+            if page_block?(block) and
+                 not MapSet.member?(keep, block.block_id) and
+                 not MapSet.member?(closing_wins, block.window_id) and
+                 not sole_block_in_protected_window?(focused, session, block, planned) do
+              {acc ++ [block.block_id], MapSet.put(planned, block.block_id)}
+            else
+              {acc, planned}
+            end
+          end)
 
         new_acts =
           Enum.map(strays, fn bid ->
-            {:close_block, %{session_id: sid, block_id: bid, reason: :stray_page}}
+            {:close_block, %{session_id: sid, family: root, block_id: bid, reason: :stray_page}}
           end)
 
         closing_b = Map.put(closing_b, sid, MapSet.new(strays))
@@ -417,7 +494,18 @@ defmodule Shuttle.Terminal.RexLayout do
     case existing do
       {:ok, wid, win, chat_bid, binding_name} ->
         {page_acts, keep_ids} =
-          plan_window_page(dp, root, sid, session, wid, place, binding_entry, chat_bid, binding_name, keep_ids)
+          plan_window_page(
+            dp,
+            root,
+            sid,
+            session,
+            wid,
+            place,
+            binding_entry,
+            chat_bid,
+            binding_name,
+            keep_ids
+          )
 
         label_act =
           if win.label != dp.window_label do
@@ -474,7 +562,18 @@ defmodule Shuttle.Terminal.RexLayout do
     end
   end
 
-  defp plan_window_page(dp, root, sid, session, wid, place, binding_entry, chat_bid, binding_name, keep_ids) do
+  defp plan_window_page(
+         dp,
+         root,
+         sid,
+         session,
+         wid,
+         place,
+         binding_entry,
+         chat_bid,
+         binding_name,
+         keep_ids
+       ) do
     binding = binding_entry && elem(binding_entry, 1)
     recorded_page_id = (place && place["page_block_id"]) || (binding && binding["page_block_id"])
     page_closed? = (place && place["page_closed"] == true) or (binding && binding["page_closed"] == true)
@@ -556,10 +655,12 @@ defmodule Shuttle.Terminal.RexLayout do
     MapSet.member?(focused, session.session_id) and session.active_window_id == wid
   end
 
-  defp sole_block_in_protected_window?(focused, session, block) do
+  defp sole_block_in_protected_window?(focused, session, block, planned_closed) do
     is_binary(block.window_id) and
       protected_active_window?(focused, session, block.window_id) and
-      Enum.count(session.blocks, &(&1.window_id == block.window_id)) <= 1
+      Enum.count(session.blocks, fn b ->
+        b.window_id == block.window_id and not MapSet.member?(planned_closed, b.block_id)
+      end) <= 1
   end
 
   defp page_block?(%{label: label}), do: label == Pages.label()
@@ -806,7 +907,6 @@ defmodule Shuttle.Terminal.RexLayout do
               error -> {:halt, error}
             end
           else
-            # Non-Shuttle sessions are recorded minimally and never inspected or mutated.
             {:cont,
              {:ok,
               Map.put(acc, sid, %{
@@ -829,6 +929,50 @@ defmodule Shuttle.Terminal.RexLayout do
            bindings: doc["bindings"] || %{},
            viewers: doc["viewers"] || %{},
            places: doc["places"] || %{}
+         }}
+      end
+    end
+  end
+
+  defp observe_family(runner, root, focused) do
+    with {:ok, doc} <- Bindings.read(),
+         {:ok, raw_sessions} <- Rex.sessions(runner) do
+      sid = get_in(doc, ["families", root])
+      raw = sid && Enum.find(raw_sessions, &(&1["session_id"] == sid))
+
+      sessions_result =
+        if raw do
+          case observe_session(runner, sid, raw["label"] || "") do
+            {:ok, observed_session} -> {:ok, %{sid => observed_session}}
+            {:error, :not_found} -> {:ok, %{}}
+            error -> error
+          end
+        else
+          {:ok, %{}}
+        end
+
+      with {:ok, sessions} <- sessions_result do
+        families = if sid, do: %{root => sid}, else: %{}
+
+        bindings =
+          Map.filter(doc["bindings"] || %{}, fn {_k, b} ->
+            b["family"] == root or (sid != nil and b["session_id"] == sid)
+          end)
+
+        places =
+          Map.filter(doc["places"] || %{}, fn {_uid, p} ->
+            p["family"] == root or (sid != nil and p["session_id"] == sid)
+          end)
+
+        {:ok,
+         %{
+           server: doc["server"],
+           sessions: sessions,
+           focused_sessions: focused,
+           families: families,
+           bindings: bindings,
+           viewers: doc["viewers"] || %{},
+           places: places
          }}
       end
     end
@@ -911,11 +1055,12 @@ defmodule Shuttle.Terminal.RexLayout do
   @doc "Execute a list of planned actions against `runner`."
   def apply(runner, actions, opts \\ []) do
     server = Keyword.get(opts, :server)
+    locked? = Keyword.get(opts, :locked?, false)
 
     result =
       Enum.reduce_while(actions, {:ok, %{created: %{}, server: server, any_created?: false}}, fn action,
                                                                                                  {:ok, state} ->
-        case apply_one(runner, action, state) do
+        case apply_one(runner, action, state, locked?) do
           {:ok, next_state} -> {:cont, {:ok, next_state}}
           error -> {:halt, error}
         end
@@ -923,26 +1068,30 @@ defmodule Shuttle.Terminal.RexLayout do
 
     case result do
       {:ok, %{any_created?: true}} ->
-        RetainedTerminal.keep_last(runner)
-        :ok
+        unless locked?, do: RetainedTerminal.keep_last(runner)
+        if locked?, do: {:ok, :created}, else: :ok
 
       {:ok, _} ->
-        :ok
+        if locked?, do: {:ok, :unchanged}, else: :ok
 
       error ->
         error
     end
   end
 
-  defp apply_one(_runner, {:delete_family, %{family: root, session_id: sid}}, state) do
+  defp maybe_lock(true, _root, fun), do: fun.()
+  defp maybe_lock(false, nil, fun), do: fun.()
+  defp maybe_lock(false, root, fun), do: Backend.family_lock(root, fun)
+
+  defp apply_one(_runner, {:delete_family, %{family: root, session_id: sid}}, state, _locked?) do
     with :ok <- Bindings.delete_family(root, sid), do: {:ok, state}
   end
 
-  defp apply_one(_runner, {:delete_place, %{uid: uid, observed: observed}}, state) do
+  defp apply_one(_runner, {:delete_place, %{uid: uid, observed: observed}}, state, _locked?) do
     with :ok <- Bindings.delete_place(uid, observed), do: {:ok, state}
   end
 
-  defp apply_one(runner, {:record_place, %{uid: uid, place: place}}, state) do
+  defp apply_one(runner, {:record_place, %{uid: uid, place: place}}, state, _locked?) do
     with {:ok, server, state} <- ensure_server_id(runner, state),
          :ok <- Bindings.put_place(uid, place, server) do
       {:ok, state}
@@ -959,7 +1108,8 @@ defmodule Shuttle.Terminal.RexLayout do
             binding_name: bname,
             fields: fields
           }},
-         state
+         state,
+         _locked?
        ) do
     with :ok <- if(obs_place, do: Bindings.update_place(uid, obs_place, fields), else: :ok),
          :ok <- if(bname && obs_binding, do: Bindings.put_page(bname, obs_binding, fields), else: :ok) do
@@ -967,8 +1117,13 @@ defmodule Shuttle.Terminal.RexLayout do
     end
   end
 
-  defp apply_one(runner, {:create_session, %{family: root, label: label, place: dp}}, state) do
-    Backend.family_lock(root, fn ->
+  defp apply_one(
+         runner,
+         {:create_session, %{family: root, label: label, place: dp}},
+         state,
+         locked?
+       ) do
+    maybe_lock(locked?, root, fn ->
       with {:ok, server, state} <- ensure_server_id(runner, state),
            {:ok, page_blk} <- Pages.page_block(dp.url),
            spec = %{
@@ -988,8 +1143,7 @@ defmodule Shuttle.Terminal.RexLayout do
            :ok <- Bindings.put_family(root, sid, server),
            place = place_record(sid, wid, bid, dp),
            :ok <- Bindings.put_place(dp.uid, place, server) do
-        {:ok,
-         %{state | created: Map.put(state.created, root, sid), any_created?: true}}
+        {:ok, %{state | created: Map.put(state.created, root, sid), any_created?: true}}
       else
         {:ok, reply} -> {:error, {:unknown, "invalid Rex session.create reply: #{inspect(reply)}"}}
         error -> error
@@ -997,10 +1151,15 @@ defmodule Shuttle.Terminal.RexLayout do
     end)
   end
 
-  defp apply_one(runner, {:new_window, %{session_id: sid_ref, family: root, place: dp}}, state) do
+  defp apply_one(
+         runner,
+         {:new_window, %{session_id: sid_ref, family: root, place: dp}},
+         state,
+         locked?
+       ) do
     sid = resolve_sid(sid_ref, state.created)
 
-    Backend.family_lock(root, fn ->
+    maybe_lock(locked?, root, fn ->
       with {:ok, server, state} <- ensure_server_id(runner, state),
            {:ok, page_blk} <- Pages.page_block(dp.url),
            spec = %{"window_label" => dp.window_label, "layout" => %{"block" => page_blk}},
@@ -1032,9 +1191,10 @@ defmodule Shuttle.Terminal.RexLayout do
             binding_name: bname,
             observed_binding: obs_binding
           }},
-         state
+         state,
+         locked?
        ) do
-    Backend.family_lock(root, fn ->
+    maybe_lock(locked?, root, fn ->
       with {:ok, server, state} <- ensure_server_id(runner, state),
            {:ok, page_blk} <- Pages.page_block(url),
            {:ok, %{"block_ids" => ["block:" <> _ = page_id]}} <-
@@ -1076,20 +1236,23 @@ defmodule Shuttle.Terminal.RexLayout do
     end)
   end
 
-  defp apply_one(runner, {:close_block, %{session_id: sid, block_id: bid}}, state) do
-    case Rex.call(runner, "block.close", %{"block_id" => bid}, session: sid) do
-      {:ok, _} -> {:ok, state}
-      {:error, :not_found} -> {:ok, state}
-      error -> error
-    end
+  defp apply_one(runner, {:close_block, %{session_id: sid, block_id: bid} = args}, state, locked?) do
+    maybe_lock(locked?, args[:family], fn ->
+      case Rex.call(runner, "block.close", %{"block_id" => bid}, session: sid) do
+        {:ok, _} -> {:ok, state}
+        {:error, :not_found} -> {:ok, state}
+        error -> error
+      end
+    end)
   end
 
   defp apply_one(
          runner,
          {:close_window, %{session_id: sid, window_id: wid, uid: uid, family: root, observed: obs}},
-         state
+         state,
+         locked?
        ) do
-    Backend.family_lock(root, fn ->
+    maybe_lock(locked?, root, fn ->
       result =
         case Rex.close_window(runner, sid, wid) do
           {:ok, _} -> :ok
@@ -1104,8 +1267,8 @@ defmodule Shuttle.Terminal.RexLayout do
     end)
   end
 
-  defp apply_one(runner, {:close_session, %{session_id: sid, family: root}}, state) do
-    Backend.family_lock(root, fn ->
+  defp apply_one(runner, {:close_session, %{session_id: sid, family: root}}, state, locked?) do
+    maybe_lock(locked?, root, fn ->
       result =
         case Rex.destroy(runner, sid) do
           {:ok, _} -> :ok
@@ -1120,7 +1283,12 @@ defmodule Shuttle.Terminal.RexLayout do
     end)
   end
 
-  defp apply_one(runner, {:set_label, %{target: :session, session_id: sid, label: label}}, state) do
+  defp apply_one(
+         runner,
+         {:set_label, %{target: :session, session_id: sid, label: label}},
+         state,
+         _locked?
+       ) do
     case Rex.call(runner, "session.set_label", %{"label" => label}, session: sid) do
       {:ok, _} -> {:ok, state}
       {:error, :not_found} -> {:ok, state}
@@ -1131,7 +1299,8 @@ defmodule Shuttle.Terminal.RexLayout do
   defp apply_one(
          runner,
          {:set_label, %{target: :window, session_id: sid, window_id: wid, label: label}},
-         state
+         state,
+         _locked?
        ) do
     case Rex.call(runner, "session.set_window_label", %{"window_id" => wid, "label" => label},
            session: sid
@@ -1166,39 +1335,93 @@ defmodule Shuttle.Terminal.RexLayout do
 
   @doc """
   Reconcile Rex's Shuttle family sessions and thread places with desired state.
+  Each family is observed, planned, and mutated atomically under its
+  `family_lock/2`, eliminating TOCTOU races with concurrent launches.
   """
   def reconcile(runner, opts \\ []) do
     case Shuttle.Host.pages() do
       {:ok, %{base: base}} ->
-        {fibers, fibers_loaded?} =
-          case Keyword.fetch(opts, :fibers) do
-            {:ok, list} ->
-              {list, true}
+        {fibers, fibers_loaded?} = load_fibers(opts)
+        family_fibers = load_family_fibers(opts, fibers)
+        now = Keyword.get(opts, :now, DateTime.utc_now())
+        grace = Keyword.get(opts, :grace_seconds, @default_grace_seconds)
+        own_host_id = Keyword.get(opts, :own_host_id, Poller.own_host_id())
 
-            :error ->
-              case Poller.cached_fiber_documents(
-                     felt_stores: Shuttle.FeltStores.configured_stores()
-                   ) do
-                {:ok, %{fibers: entries}} -> {entries, true}
-                _ -> {[], false}
-              end
-          end
+        with {:ok, %{"host_id" => server} = identity} <- Rex.whoami(runner),
+             :ok <- Backend.reconcile(runner, identity),
+             {:ok, doc} <- Bindings.read(),
+             {:ok, raw_sessions} <- Rex.sessions(runner) do
+          focused = observe_focused_sessions(runner, raw_sessions)
 
-        with {:ok, observed} <- observe(runner) do
-          des =
+          # Discover all candidate family roots across rex.json and desired fibers.
+          seed_desired =
             desired(%{
               fibers: fibers,
+              family_fibers: family_fibers,
               fibers_loaded?: fibers_loaded?,
-              bindings: observed.bindings,
-              places: observed.places,
-              now: Keyword.get(opts, :now, DateTime.utc_now()),
-              grace_seconds: Keyword.get(opts, :grace_seconds, @default_grace_seconds),
+              bindings: doc["bindings"] || %{},
+              places: doc["places"] || %{},
+              now: now,
+              grace_seconds: grace,
               pages_base: base,
-              own_host_id: Keyword.get(opts, :own_host_id, Poller.own_host_id())
+              own_host_id: own_host_id
             })
 
-          actions = plan(observed, des)
-          apply(runner, actions, server: observed.server)
+          roots =
+            (Map.keys(doc["families"] || %{}) ++
+               Enum.map(Map.values(doc["places"] || %{}), & &1["family"]) ++
+               Map.keys(seed_desired.families))
+            |> Enum.filter(&is_binary/1)
+            |> Enum.uniq()
+            |> Enum.sort()
+
+          result =
+            Enum.reduce_while(roots, {:ok, false}, fn root, {:ok, any_created?} ->
+              fam_result =
+                Backend.family_lock(root, fn ->
+                  with {:ok, observed} <- observe_family(runner, root, focused) do
+                    des_all =
+                      desired(%{
+                        fibers: fibers,
+                        family_fibers: family_fibers,
+                        fibers_loaded?: fibers_loaded?,
+                        bindings: observed.bindings,
+                        places: observed.places,
+                        sessions: observed.sessions,
+                        now: now,
+                        grace_seconds: grace,
+                        pages_base: base,
+                        own_host_id: own_host_id
+                      })
+
+                    des_root = scope_desired(des_all, root)
+                    actions = plan(observed, des_root)
+
+                    apply(runner, actions,
+                      server: observed.server || server,
+                      locked?: true
+                    )
+                  end
+                end)
+
+              case fam_result do
+                {:ok, :created} -> {:cont, {:ok, true}}
+                {:ok, :unchanged} -> {:cont, {:ok, any_created?}}
+                error -> {:halt, error}
+              end
+            end)
+
+          case result do
+            {:ok, true} ->
+              RetainedTerminal.keep_last(runner)
+              :ok
+
+            {:ok, false} ->
+              :ok
+
+            error ->
+              error
+          end
         end
 
       nil ->
@@ -1206,6 +1429,53 @@ defmodule Shuttle.Terminal.RexLayout do
 
       {:error, message} ->
         {:error, [message]}
+    end
+  end
+
+  defp scope_desired(desired, root) do
+    case Map.fetch(desired.families, root) do
+      {:ok, fam} ->
+        %{
+          families: %{root => fam},
+          places_by_uid: Map.new(fam.places, &{&1.uid, &1})
+        }
+
+      :error ->
+        %{families: %{}, places_by_uid: %{}}
+    end
+  end
+
+  defp load_fibers(opts) do
+    case Keyword.fetch(opts, :fibers) do
+      {:ok, list} ->
+        {list, Keyword.get(opts, :fibers_loaded?, true)}
+
+      :error ->
+        case Poller.cached_fiber_documents(felt_stores: Shuttle.FeltStores.configured_stores()) do
+          {:ok, %{fibers: entries} = result} ->
+            cache_state =
+              get_in(result, [:cache, :state]) ||
+                get_in(result, [:cache, "state"]) ||
+                Map.get(result, :state)
+
+            if cache_state in ["cold", :cold], do: {[], false}, else: {entries, true}
+
+          _ ->
+            {[], false}
+        end
+    end
+  end
+
+  defp load_family_fibers(opts, fallback_fibers) do
+    case Keyword.fetch(opts, :family_fibers) do
+      {:ok, list} ->
+        list
+
+      :error ->
+        case FiberDocuments.list(felt_stores: Shuttle.FeltStores.configured_stores()) do
+          {:ok, %{fibers: entries}} -> entries
+          _ -> fallback_fibers
+        end
     end
   end
 
@@ -1239,8 +1509,8 @@ defmodule Shuttle.Terminal.RexLayout do
 
   @doc """
   Ensure a `[page]` place exists for `fiber`, creating its family session or
-  window if needed, and stamp `asked_at`. Used by `Shuttle.Go` when a quiet
-  thread is opened.
+  window if needed, restoring a closed page block if the window is still open,
+  and stamping `asked_at`. Used by `Shuttle.Go` when a quiet thread is opened.
   """
   def ensure_place(runner, fiber, opts \\ []) when is_map(fiber) do
     uid = fiber["uid"] || fiber["id"]
@@ -1249,7 +1519,8 @@ defmodule Shuttle.Terminal.RexLayout do
     with {:ok, %{base: base}} <- Shuttle.Host.pages(),
          true <- is_binary(uid) and uid != "" and is_binary(path) and path != "",
          {:ok, family} <- Tree.resolve(path, opts),
-         {:ok, %{"host_id" => server} = identity} <- Rex.whoami(runner) do
+         {:ok, %{"host_id" => server} = identity} <- Rex.whoami(runner),
+         :ok <- Backend.reconcile(runner, identity) do
       root = (family && family.family) || path
       depth = (family && family.depth) || 0
       [entry] = Tree.layout([%{fiber: path, depth: depth}])
@@ -1266,7 +1537,7 @@ defmodule Shuttle.Terminal.RexLayout do
               if doc["server"] in [nil, server], do: get_in(doc, ["places", uid]), else: nil
 
             case live_existing_place(runner, sessions, existing_place) do
-              {:ok, place} ->
+              {:ok, place, :page_live} ->
                 updated =
                   place
                   |> Map.put("asked_at", now_iso)
@@ -1278,6 +1549,21 @@ defmodule Shuttle.Terminal.RexLayout do
                      :ok <- Bindings.set_instance(identity["instance_id"]) do
                   {:ok, updated, false}
                 end
+
+              {:ok, place, {:restore_page, anchor_bid}} ->
+                restore_page_in_place(
+                  runner,
+                  doc,
+                  server,
+                  identity,
+                  uid,
+                  place,
+                  anchor_bid,
+                  path,
+                  depth,
+                  url,
+                  now_iso
+                )
 
               :none ->
                 create_page_place(
@@ -1321,17 +1607,90 @@ defmodule Shuttle.Terminal.RexLayout do
 
   defp live_existing_place(runner, sessions, %{"session_id" => sid, "window_id" => wid} = place) do
     if Enum.any?(sessions, &(&1["session_id"] == sid)) do
-      case Rex.windows(runner, sid) do
-        {:ok, windows} ->
-          if Enum.any?(windows, &(&1["window_id"] == wid)), do: {:ok, place}, else: :none
+      with {:ok, windows} <- Rex.windows(runner, sid),
+           true <- Enum.any?(windows, &(&1["window_id"] == wid)),
+           {:ok, blocks} <- Rex.blocks(runner, sid) do
+        win_blocks = Enum.filter(blocks, &(&1["window_id"] == wid))
+        page_bid = place["page_block_id"]
 
-        _ ->
-          :none
+        cond do
+          is_binary(page_bid) and Enum.any?(win_blocks, &(&1["block_id"] == page_bid)) ->
+            {:ok, place, :page_live}
+
+          anchor = Enum.find(win_blocks, &is_binary(&1["block_id"])) ->
+            {:ok, place, {:restore_page, anchor["block_id"]}}
+
+          true ->
+            :none
+        end
+      else
+        _ -> :none
       end
     else
       :none
     end
   end
+
+  defp restore_page_in_place(
+         runner,
+         doc,
+         server,
+         identity,
+         uid,
+         place,
+         anchor_bid,
+         path,
+         depth,
+         url,
+         now_iso
+       ) do
+    sid = place["session_id"]
+    wid = place["window_id"]
+
+    with {:ok, page_blk} <- Pages.page_block(url),
+         {:ok, %{"block_ids" => ["block:" <> _ = page_id]}} <-
+           Rex.call(
+             runner,
+             "session.new_split",
+             %{
+               "anchor_id" => anchor_bid,
+               "direction" => "horizontal",
+               "side" => "after",
+               "ratio" => 0.5,
+               "layout" => %{"block" => page_blk},
+               "focus" => false
+             },
+             session: sid,
+             timeout_ms: Pages.split_timeout_ms()
+           ) do
+      updated =
+        place
+        |> Map.put("page_block_id", page_id)
+        |> Map.put("page_closed", false)
+        |> Map.put("asked_at", now_iso)
+        |> Map.put("fiber", path)
+        |> Map.put("depth", depth)
+
+      matching_binding =
+        Enum.find(doc["bindings"] || %{}, fn {_, b} ->
+          b["session_id"] == sid and b["window_id"] == wid
+        end)
+
+      with :ok <- Bindings.put_place(uid, updated, server),
+           :ok <- restore_binding_page(matching_binding, page_id),
+           :ok <- Bindings.set_instance(identity["instance_id"]) do
+        {:ok, updated, false}
+      end
+    else
+      {:ok, reply} -> {:error, {:unknown, "invalid Rex split reply: #{inspect(reply)}"}}
+      error -> error
+    end
+  end
+
+  defp restore_binding_page({bname, b}, page_id),
+    do: Bindings.put_page(bname, b, %{"page_block_id" => page_id, "page_closed" => false})
+
+  defp restore_binding_page(nil, _page_id), do: :ok
 
   defp create_page_place(
          runner,
