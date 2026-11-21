@@ -239,6 +239,20 @@ a shared host.
 The receipt also reports the configured Tailscale LocalAPI socket and the
 live state of each private remote bridge.
 
+## Thread pages in Rex
+
+On a host whose terminal backend is Rex, `host.json`'s `pages` key puts each
+live worker's thread page beside it:
+
+```json
+{"pages": {"enabled": true, "base": "http://127.0.0.1:4000"}}
+```
+
+`enabled` is required and pages are off without it; `base` is an `http` or
+`https` address of the daemon that serves the page and defaults to
+`http://127.0.0.1:4000`. The daemon reads the key fresh. See
+[Thread pages beside workers](installation.md#thread-pages-beside-workers).
+
 ## Configuring remotes
 
 One daemon aggregates the others. On a tailnet it needs no configuration: every

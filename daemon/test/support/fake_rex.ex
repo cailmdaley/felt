@@ -100,23 +100,23 @@ defmodule Shuttle.Test.FakeRex do
     [bid] = window["block_ids"]
     bid = bid <> suffix
 
+    wid = window["window_id"] <> suffix
+    blocks = layout_blocks(hd(spec["initial_windows"])["layout"], bid, wid)
+
     reply =
       reply
       |> Map.put("session_id", sid)
-      |> put_in(["initial_windows", Access.at(0), "block_ids"], [bid])
-      |> put_in(["initial_windows", Access.at(0), "window_id"], window["window_id"] <> suffix)
-
-    block = hd(spec["initial_windows"])["layout"]["block"]
-
-    wid = window["window_id"] <> suffix
+      |> put_in(
+        ["initial_windows", Access.at(0), "block_ids"],
+        Enum.map(blocks, & &1["block_id"])
+      )
+      |> put_in(["initial_windows", Access.at(0), "window_id"], wid)
 
     session = %{
       label: spec["label"],
       windows: [%{"window_id" => wid, "label" => hd(spec["initial_windows"])["window_label"]}],
       window_label: hd(spec["initial_windows"])["window_label"],
-      blocks: [
-        %{"block_id" => bid, "label" => block["label"], "window_id" => wid}
-      ]
+      blocks: blocks
     }
 
     state = %{
@@ -132,14 +132,23 @@ defmodule Shuttle.Test.FakeRex do
   defp run("session.new_window", spec, sid, state) do
     n = state.creates
     wid = "window:#{n}"
-    bid = "block:#{n}"
-    block = %{"block_id" => bid, "window_id" => wid, "label" => spec["layout"]["block"]["label"]}
+    blocks = layout_blocks(spec["layout"], "block:#{n}", wid)
     session = state.sessions[sid]
     windows = windows(session) ++ [%{"window_id" => wid, "label" => spec["window_label"]}]
-    session = session |> Map.put(:windows, windows) |> Map.put(:blocks, session.blocks ++ [block])
+    session = session |> Map.put(:windows, windows) |> Map.put(:blocks, session.blocks ++ blocks)
 
-    {%{"window_id" => wid, "block_ids" => [bid], "revision" => n},
+    {%{"window_id" => wid, "block_ids" => Enum.map(blocks, & &1["block_id"]), "revision" => n},
      %{state | creates: n + 1, sessions: Map.put(state.sessions, sid, session)}}
+  end
+
+  defp run("session.new_split", args, sid, state) do
+    n = state.creates
+    anchor = Enum.find(state.sessions[sid].blocks, &(&1["block_id"] == args["anchor_id"]))
+    blocks = layout_blocks(args["layout"], "block:split-#{n}", anchor["window_id"])
+
+    {%{"block_ids" => Enum.map(blocks, & &1["block_id"]), "revision" => n},
+     %{state | creates: n + 1}
+     |> update_in([:sessions, sid, :blocks], &(&1 ++ blocks))}
   end
 
   defp run("session.view", _, sid, state) do
@@ -269,6 +278,25 @@ defmodule Shuttle.Test.FakeRex do
 
   defp run("block.event", _, _, state), do: {fixture("block_event_paste"), state}
   defp run("send-key", _, _, state), do: {{"", 0}, state}
+
+  # A layout's blocks in order; the first takes `bid`, the rest derive from it.
+  defp layout_blocks(layout, bid, wid) do
+    layout
+    |> leaves()
+    |> Enum.with_index()
+    |> Enum.map(fn {block, i} ->
+      %{
+        "block_id" => if(i == 0, do: bid, else: "#{bid}-#{i}"),
+        "label" => block["label"],
+        "window_id" => wid
+      }
+    end)
+  end
+
+  defp leaves(%{"split" => %{"before" => before, "after" => after_}}),
+    do: leaves(before) ++ leaves(after_)
+
+  defp leaves(%{"block" => block}), do: [block]
 
   defp update_block(state, sid, bid, fun) do
     blocks =

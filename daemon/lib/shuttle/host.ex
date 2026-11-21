@@ -211,6 +211,52 @@ defmodule Shuttle.Host do
     nil
   end
 
+  @doc """
+  Thread pages beside Rex workers, read fresh: `{:ok, %{base: url}}` when
+  `"pages": {"enabled": true}` is set, else nil. `base` defaults to the local
+  daemon; invalid settings warn and leave pages off.
+  """
+  @spec pages() :: nil | {:ok, %{base: String.t()}}
+  def pages do
+    path = config_path()
+
+    case read_document(path) do
+      {:ok, %{"pages" => %Jason.OrderedObject{values: pairs}}} ->
+        config = Map.new(pairs)
+        base = Map.get(config, "base", "http://127.0.0.1:4000")
+
+        cond do
+          config["enabled"] == false ->
+            nil
+
+          config["enabled"] == true and is_binary(base) and
+              URI.parse(base).scheme in ["http", "https"] ->
+            {:ok, %{base: String.trim_trailing(base, "/")}}
+
+          true ->
+            pages_warning(path)
+        end
+
+      {:ok, %{"pages" => _}} ->
+        pages_warning(path)
+
+      {:ok, _} ->
+        nil
+
+      {:error, _kind, message} ->
+        Logger.warning("#{message}; pages disabled")
+        nil
+    end
+  end
+
+  defp pages_warning(path) do
+    Logger.warning(
+      ~s(#{path}: pages requires "enabled": true or false and an http\(s\) "base"; pages disabled)
+    )
+
+    nil
+  end
+
   @doc "`resolve/1`, raising `ArgumentError` with the message on a refusal."
   @spec resolve!(pos_integer()) :: settings()
   def resolve!(fallback_port \\ @default_port) do

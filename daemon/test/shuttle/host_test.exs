@@ -141,6 +141,38 @@ defmodule Shuttle.HostTest do
     end
   end
 
+  describe "pages/0" do
+    @describetag :tmp_dir
+    setup %{tmp_dir: dir} do
+      file = Path.join(dir, "host.json")
+      Shuttle.Test.Env.put_env("SHUTTLE_HOST_CONFIG_FILE", file)
+      %{host_file: file}
+    end
+
+    test "off unless enabled; base defaults to the local daemon", %{host_file: file} do
+      assert Host.pages() == nil
+      File.write!(file, ~s({"pages":{"enabled":false,"base":"https://hub.example"}}))
+      assert Host.pages() == nil
+      File.write!(file, ~s({"pages":{"enabled":true}}))
+      assert Host.pages() == {:ok, %{base: "http://127.0.0.1:4000"}}
+      File.write!(file, ~s({"pages":{"enabled":true,"base":"https://hub.example/"}}))
+      assert Host.pages() == {:ok, %{base: "https://hub.example"}}
+    end
+
+    test "invalid config warns and leaves pages off", %{host_file: file} do
+      for value <- [
+            true,
+            %{},
+            %{"enabled" => "yes"},
+            %{"enabled" => true, "base" => 4000},
+            %{"enabled" => true, "base" => "127.0.0.1:4000"}
+          ] do
+        File.write!(file, Jason.encode!(%{pages: value}))
+        assert capture_log(fn -> assert Host.pages() == nil end) =~ "pages"
+      end
+    end
+  end
+
   describe "quarantine_auto_release?/0" do
     setup do
       dir = Path.join(System.tmp_dir!(), "shuttle-host-#{System.unique_integer([:positive])}")

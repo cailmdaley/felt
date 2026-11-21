@@ -839,6 +839,30 @@ Shuttle records launch metadata, exit status and output under its data directory
 On macOS tmux-primary hosts, Kitty launches the tmux anchor; a Rex host needs none.
 See [Opening conversations](conversations.md) for attach and remote limitations.
 
+### Thread pages beside workers
+
+With pages on, every live Rex worker's window is split: the worker on the left, its thread's page on the right.
+Pages are off by default; turn them on in `~/.config/shuttle/host.json`, preserving its other keys:
+
+```json
+{"pages": {"enabled": true, "base": "http://127.0.0.1:4000"}}
+```
+
+`base` is the daemon address the page loads from; it defaults to `http://127.0.0.1:4000`, and an `https` tailnet address makes the link tappable from a phone.
+The daemon reads the setting fresh, so no restart is needed; an invalid value logs a warning and leaves pages off.
+
+The page block is a small holder labelled `rexweb shuttle` that runs `<data dir>/rex/page-holder.sh <url>`.
+It titles its terminal `rexweb <url>` and prints the URL as a link, where `<url>` is `<base>/thread?f=<uid>@<host>&in=rex`.
+RexWeb draws the page over any block with that label and title; without RexWeb the block shows the link.
+
+A new worker's window is created with both blocks.
+Workers already running get their page within 30 seconds, and a worker put back in view after hiding gets a new one.
+Hiding a worker closes its page, and the page closes with its window when the worker ends.
+If you close a page yourself, Shuttle leaves it closed until that worker's next launch.
+Shuttle closes any other `rexweb shuttle` block in its sessions.
+A Rex server restart restores blocks without rerunning their commands, so a restored page is a bare shell; Shuttle closes it with its worker's window.
+Turning pages off closes the pages Shuttle opened.
+
 ## Terminal program status
 
 Inside tmux, Claude and Pi hooks can report working and blocked status to an outer terminal that supports OSC 7501.

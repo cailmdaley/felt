@@ -4,8 +4,9 @@ defmodule Shuttle.RexView do
   workers running a turn. Any other window this daemon opened, for a worker
   waiting at its prompt, a resumed conversation or a tmux viewer, leaves the
   view once it has stood behind its session's active window for `grace_ms`
-  (30 minutes): its block is detached (`Shuttle.Terminal.Rex.hide/3`), so the
-  window closes and the program in it runs on. A hidden worker that starts a
+  (30 minutes): its block is detached and its page closed
+  (`Shuttle.Terminal.Rex.hide/3`), so the window closes and the program in it
+  runs on. A hidden worker that starts a
   turn or raises an ask comes back, a click or an open puts it back in a window
   of its own, and stopping it closes its block.
 
@@ -13,7 +14,8 @@ defmodule Shuttle.RexView do
   (a human's shell, hark, Remote Control) are never touched.
 
   A sweep runs every `every_ms` on this host's Rex server; `sweep/3` is the
-  same pass, run once to clear what has gathered.
+  same pass, run once to clear what has gathered. Each timed sweep also
+  reconciles the workers' pages (`Shuttle.Terminal.RexPages.reconcile/1`).
   """
   use GenServer
 
@@ -53,6 +55,7 @@ defmodule Shuttle.RexView do
            {:ok, shown} <- shown(),
            {:ok, behind} <-
              sweep(runner(), state.behind, grace_ms: state.grace_ms, shown: shown) do
+        Shuttle.Terminal.RexPages.reconcile(runner())
         behind
       else
         false ->

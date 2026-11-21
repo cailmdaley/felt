@@ -6,6 +6,7 @@ defmodule Shuttle.Terminal.Rex do
   alias Shuttle.{Env, Rex, WorkerProcess}
   alias Shuttle.Terminal.RexBindings, as: Bindings
   alias Shuttle.Terminal.RexTree, as: Tree
+  alias Shuttle.Terminal.RexPages, as: Pages
   alias Shuttle.Terminal.LaunchAttempts
 
   @impl true
@@ -102,20 +103,21 @@ defmodule Shuttle.Terminal.Rex do
     end)
   end
 
-  defp retire_stale_window(runner, %{"window_id" => wid} = binding) when is_binary(wid),
-    do: retire_worker_window(runner, binding)
-
+  # A worker placed again after hiding lives in a window other than the one it
+  # launched in; retire the window its block is in now, page and all.
   defp retire_stale_window(runner, binding) do
     case Rex.blocks(runner, binding["session_id"]) do
       {:ok, blocks} ->
-        case Enum.find(blocks, &(&1["block_id"] == binding["block_id"])) do
-          nil ->
-            :ok
+        block = Enum.find(blocks, &(&1["block_id"] == binding["block_id"]))
 
-          %{"window_id" => wid} when is_binary(wid) ->
+        case (block && block["window_id"]) || binding["window_id"] do
+          wid when is_binary(wid) ->
             retire_worker_window(runner, Map.put(binding, "window_id", wid))
 
-          _ ->
+          nil when block == nil ->
+            :ok
+
+          nil ->
             {:error, :unknown}
         end
 
@@ -172,6 +174,7 @@ defmodule Shuttle.Terminal.Rex do
          {:ok, family} <- Tree.resolve(opts[:fiber] || Tree.fiber_for(name), opts) do
       spec =
         create_spec(name, cwd, script_path, Keyword.put(opts, :fiber, family && family.fiber))
+        |> Pages.with_page(Shuttle.ULID.from_tmux(name) || (family && family.uid))
 
       case in_family(
              runner,
@@ -229,18 +232,28 @@ defmodule Shuttle.Terminal.Rex do
 
   defp created_binding(_), do: {:error, {:unknown, :invalid_create_reply}}
 
+  # The worker's block comes first in its window's layout; a page follows it.
   defp window_binding(sid, %{
          "window_id" => "window:" <> _ = wid,
-         "block_ids" => ["block:" <> _ = bid]
-       }),
-       do: {:ok, Map.put(binding(sid, bid), "window_id", wid)}
+         "block_ids" => ["block:" <> _ = bid | page]
+       }) do
+    b = Map.put(binding(sid, bid), "window_id", wid)
+
+    case page do
+      [] -> {:ok, b}
+      ["block:" <> _ = page] -> {:ok, Map.put(b, "page_block_id", page)}
+      _ -> {:error, {:unknown, :invalid_window_reply}}
+    end
+  end
 
   defp window_binding(_, _), do: {:error, {:unknown, :invalid_window_reply}}
 
-  defp family_lock(root, fun),
+  @doc "Serialize changes to one family's Rex session."
+  def family_lock(root, fun),
     do: Shuttle.Terminal.with_lock({__MODULE__, Bindings.path(), :family, root}, fun)
 
-  defp in_family(runner, family, name, spec, server, store, launch \\ nil) do
+  # `spec` comes with the Rex request options its creation needs.
+  defp in_family(runner, family, name, {spec, rex_opts}, server, store, launch \\ nil) do
     root = if family, do: family.family, else: name
 
     family_lock(root, fn ->
@@ -280,7 +293,7 @@ defmodule Shuttle.Terminal.Rex do
         result =
           with :ok <- prepared do
             if existing do
-              with {:ok, reply} <- Rex.new_window(runner, sid, window),
+              with {:ok, reply} <- Rex.new_window(runner, sid, window, rex_opts),
                    do: window_binding(sid, reply)
             else
               spec = %{
@@ -293,7 +306,7 @@ defmodule Shuttle.Terminal.Rex do
                   "initial_windows" => [window]
               }
 
-              with {:ok, reply} <- Rex.create(runner, spec),
+              with {:ok, reply} <- Rex.create(runner, spec, rex_opts),
                    {:ok, b} <- created_binding(reply) do
                 case Bindings.put_family(root, b["session_id"], server) do
                   :ok ->
@@ -826,11 +839,16 @@ defmodule Shuttle.Terminal.Rex do
   defp window_for(runner, b, block), do: place(runner, b["session_id"], block)
 
   @doc """
-  Take a worker's block out of view: its window closes with it and its program
-  keeps running. `place/3` (through an open) puts it back in a window of its own.
+  Take a worker's block out of view and close its page: its window closes with
+  them and its program keeps running. `place/3` (through an open) puts it back
+  in a window of its own, where the tree refresh gives it a page again.
   """
-  def hide(runner, sid, bid),
-    do: Rex.call(runner, "session.detach_block", %{"block_id" => bid}, session: sid)
+  def hide(runner, sid, bid) do
+    with {:ok, _} = hidden <-
+           Rex.call(runner, "session.detach_block", %{"block_id" => bid}, session: sid),
+         :ok <- Pages.close_for(runner, sid, bid),
+         do: hidden
+  end
 
   @doc """
   Put a hidden block back in a window of its own. Rex places a detached block
@@ -1059,7 +1077,7 @@ defmodule Shuttle.Terminal.Rex do
 
     with {:ok, family} <- Tree.resolve(opts[:fiber] || (old && old["fiber"]), opts),
          {:ok, b} <-
-           in_family(runner, family, key, spec, server, fn b ->
+           in_family(runner, family, key, {spec, []}, server, fn b ->
              with :ok <- Bindings.put_viewer(key, Map.put(b, "suffix", suffix), server),
                   do: Bindings.set_instance(identity["instance_id"])
            end) do
@@ -1272,7 +1290,9 @@ defmodule Shuttle.Terminal.Rex do
       # Native claims may select a sole human pane. Name recovery requires
       # the worker block's label, never an unrelated remaining pane.
       matching =
-        if name, do: Enum.filter(blocks, &(&1["label"] == worker_label(name))), else: blocks
+        if name,
+          do: Enum.filter(blocks, &(&1["label"] == worker_label(name))),
+          else: Enum.reject(blocks, &Pages.page?/1)
 
       case matching do
         [%{"block_id" => bid} = block] ->

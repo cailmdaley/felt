@@ -41,6 +41,10 @@ System.put_env("SHUTTLE_AGENTS_FILE", Path.expand("fixtures/agents.json", __DIR_
 # file and set SHUTTLE_REMOTES_FILE themselves.
 System.put_env("SHUTTLE_REMOTES_FILE", Path.expand("fixtures/remotes/absent.json", __DIR__))
 
+# The developer's host.json can turn on host features such as Rex pages; the
+# suite reads an absent one unless a test writes its own.
+System.put_env("SHUTTLE_HOST_CONFIG_FILE", Path.expand("fixtures/host/absent.json", __DIR__))
+
 # Pin the store registry away from the developer's real one: a fresh tmp
 # path and no SHUTTLE_STORES mean no configured stores. Without this pin, a
 # dispatch that names no store resolves the developer's real

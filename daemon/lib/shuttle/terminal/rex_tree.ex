@@ -23,7 +23,10 @@ defmodule Shuttle.Terminal.RexTree do
   defp constitution?(row),
     do: is_map(row["shuttle"]) or "constitution" in (row["tags"] || [])
 
-  @doc "Read the fiber tree at launch; an unreadable tree cannot authorize a different family."
+  @doc """
+  Read the fiber tree at launch; an unreadable tree cannot authorize a
+  different family. The result also carries the fiber's `uid` when it has one.
+  """
   def resolve(fiber, opts \\ [])
   def resolve(nil, _opts), do: {:ok, nil}
 
@@ -34,7 +37,7 @@ defmodule Shuttle.Terminal.RexTree do
       rows = Enum.map(entries, & &1.fiber)
       row = Enum.find(rows, &((&1["slug"] || &1["id"]) == fiber or &1["id"] == fiber))
       path = if row, do: row["slug"] || row["id"], else: fiber
-      {:ok, family(path, rows)}
+      {:ok, Map.put(family(path, rows), :uid, row && row["uid"])}
     end
   end
 
@@ -108,6 +111,7 @@ defmodule Shuttle.Terminal.RexTree do
       {:error, reason} -> Logger.warning("Rex fiber tree refresh failed: #{inspect(reason)}")
     end
 
+    Shuttle.Terminal.RexPages.reconcile(runner)
     :ok
   end
 

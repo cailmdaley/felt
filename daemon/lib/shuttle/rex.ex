@@ -33,8 +33,8 @@ defmodule Shuttle.Rex do
   end
 
   @doc "CLI flags for `server`: this host's server by default, else another host's by its Rex label."
-  def flags(server \\ server()) do
-    ["--autostart=false", "--timeout", "5s"] ++
+  def flags(server \\ server(), timeout_ms \\ 5_000) do
+    ["--autostart=false", "--timeout", "#{div(timeout_ms, 1000)}s"] ++
       case server do
         nil -> []
         endpoint -> ["-S", endpoint]
@@ -52,7 +52,8 @@ defmodule Shuttle.Rex do
            command(runner, ["api", "call"] ++ session ++ [method, "-"],
              input: Jason.encode!(args) <> "\n",
              input_eof: true,
-             server: Keyword.get_lazy(opts, :server, &server/0)
+             server: Keyword.get_lazy(opts, :server, &server/0),
+             timeout_ms: Keyword.get(opts, :timeout_ms, 5_000)
            ),
          {:ok, result} when is_map(result) <- Jason.decode(output) do
       {:ok, result}
@@ -63,8 +64,13 @@ defmodule Shuttle.Rex do
     end
   end
 
+  @doc """
+  Run a bounded Rex CLI request. `:timeout_ms` (5 s by default) bounds Rex's
+  request; the process gets one more second to report it.
+  """
   def command(runner, args, opts \\ []) do
     {server, opts} = Keyword.pop_lazy(opts, :server, &server/0)
+    {timeout, opts} = Keyword.pop(opts, :timeout_ms, 5_000)
 
     case bin() do
       nil ->
@@ -73,8 +79,8 @@ defmodule Shuttle.Rex do
       executable ->
         runner.cmd(
           executable,
-          flags(server) ++ args,
-          Keyword.merge([stderr_to_stdout: true, timeout_ms: 6_000], opts)
+          flags(server, timeout) ++ args,
+          Keyword.merge([stderr_to_stdout: true, timeout_ms: timeout + 1_000], opts)
         )
         |> classify()
     end
@@ -121,7 +127,7 @@ defmodule Shuttle.Rex do
         session: sid
       )
 
-  def create(runner, spec), do: call(runner, "session.create", spec)
+  def create(runner, spec, opts \\ []), do: call(runner, "session.create", spec, opts)
 
   def windows(runner, sid, opts \\ []) do
     case call(runner, "session.view", %{}, Keyword.put(opts, :session, sid)) do
@@ -130,8 +136,14 @@ defmodule Shuttle.Rex do
     end
   end
 
-  def new_window(runner, sid, spec),
-    do: call(runner, "session.new_window", Map.put(spec, "focus", false), session: sid)
+  def new_window(runner, sid, spec, opts \\ []),
+    do:
+      call(
+        runner,
+        "session.new_window",
+        Map.put(spec, "focus", false),
+        Keyword.put(opts, :session, sid)
+      )
 
   def close_window(runner, sid, wid),
     do: call(runner, "session.close_window", %{"window_id" => wid}, session: sid)

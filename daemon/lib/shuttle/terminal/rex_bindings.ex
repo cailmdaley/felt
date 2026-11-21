@@ -57,6 +57,27 @@ defmodule Shuttle.Terminal.RexBindings do
 
   def put_fiber(_, _, _), do: :ok
 
+  @doc """
+  Set a binding's page fields when it still equals `observed`: `page_block_id`
+  is the page block beside the worker and `page_closed` records that the human
+  closed it. A nil value removes the field.
+  """
+  def put_page(name, observed, fields) do
+    update(fn doc ->
+      if doc["bindings"][name] == observed do
+        b =
+          Enum.reduce(fields, observed, fn
+            {key, nil}, b -> Map.delete(b, key)
+            {key, value}, b -> Map.put(b, key, value)
+          end)
+
+        put_in(doc, ["bindings", name], b)
+      else
+        doc
+      end
+    end)
+  end
+
   def put_viewer(key, binding, server) do
     update(fn doc ->
       viewers = if doc["server"] in [nil, server], do: doc["viewers"] || %{}, else: %{}
@@ -206,7 +227,9 @@ defmodule Shuttle.Terminal.RexBindings do
                  }
                  when is_binary(at),
                  binding
-               )
+               ) and
+               match?("block:" <> _, Map.get(binding, "page_block_id", "block:")) and
+               is_boolean(Map.get(binding, "page_closed", false))
            end) do
       {:ok, doc}
     else
