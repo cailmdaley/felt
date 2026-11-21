@@ -576,7 +576,9 @@ defmodule Shuttle.Terminal.RexLayout do
        ) do
     binding = binding_entry && elem(binding_entry, 1)
     recorded_page_id = (place && place["page_block_id"]) || (binding && binding["page_block_id"])
-    page_closed? = (place && place["page_closed"] == true) or (binding && binding["page_closed"] == true)
+    page_closed? =
+      (is_map(place) and place["page_closed"] == true) or
+        (is_map(binding) and binding["page_closed"] == true)
 
     live_page =
       recorded_page_id &&
