@@ -1,3 +1,4 @@
+import './worker-actions.css'
 import { slug } from '../threadOutline.js'
 import { hasLiveWorker, type KanbanCard } from '../KanbanTypes.js'
 import { isAgentCard, type PastedImage } from '../KanbanModalShared.js'

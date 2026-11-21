@@ -1,0 +1,39 @@
+/* WorkerActions: message box with Resume / Start / Send and New session tools,
+   shared by the board's Dock and standalone thread pages. */
+.ws-worker-acts { --ws-box-line: 36px; min-width: 0; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: transparent; cursor: text; }
+.ws-worker-acts:focus-within { border-color: var(--ws-ink-soft); }
+.ws-worker-acts[hidden] { display: none; }
+.ws-worker-compose { max-height: 33vh; overflow-y: auto; padding: 0 2px 0 10px; }
+.ws-worker-tools { position: sticky; top: 0; z-index: 1; float: right; background: var(--ws-paper); display: flex; align-items: center; gap: 2px; height: var(--ws-box-line); margin-left: 8px; cursor: default; }
+/* One centre line: the text's first line sits on the tools' centre. */
+.ws-worker-message {
+  min-height: 1lh; padding: calc((var(--ws-box-line) - 1lh) / 2) 0; outline: none;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  color: var(--ws-ink); font: var(--type-label)/var(--leading-prose) var(--font-serif);
+}
+/* An empty box names whom a line goes to, faint, on one line, until something is typed. */
+.ws-worker-message:empty { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-worker-message:empty::before { content: attr(data-placeholder); color: var(--ws-ink-faint); pointer-events: none; }
+.ws-worker-message[hidden] { display: none; }
+/* Pasted or dropped images wait under the text as thumbnails until the send. */
+.ws-worker-images { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 10px 8px; }
+.ws-worker-images[hidden] { display: none; }
+.ws-worker-image { position: relative; display: inline-flex; }
+.ws-worker-image img { display: block; height: 48px; max-width: 96px; object-fit: cover; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); }
+.ws-worker-image-remove {
+  position: absolute; top: -6px; right: -6px; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%;
+  background: var(--ws-ink); color: var(--ws-paper); font: var(--type-meta)/var(--leading-solid) var(--font-serif); cursor: pointer;
+}
+.ws-worker-acts .ws-header-icon {
+  display: inline-grid; place-items: center; flex: none; width: 32px; height: 36px; padding: 0; margin: 0;
+  border: 0 !important; border-radius: var(--ws-control-radius); background: transparent;
+  color: var(--ws-ink-muted); cursor: pointer;
+}
+.ws-worker-acts .ws-header-icon > svg { width: 20px; height: 20px; }
+.ws-worker-acts .ws-header-icon[hidden] { display: none; }
+.ws-worker-acts .ws-header-icon:hover:not(:disabled) { color: var(--ws-ink); background: var(--ws-hover); }
+.ws-worker-acts .ws-header-icon:focus-visible { outline: 2px solid var(--ws-state-working); outline-offset: 2px; }
+.ws-worker-acts .ws-header-icon:disabled { opacity: .45; cursor: default; }
+.ws-worker-receipt { flex: none; margin-right: 4px; color: var(--ws-ink-muted); font: italic var(--type-label)/var(--leading-solid) var(--font-serif); white-space: nowrap; }
+.ws-worker-receipt:empty { display: none; }
+.ws-sr-only { position: absolute; width: var(--ws-line-width); height: var(--ws-line-width); overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
