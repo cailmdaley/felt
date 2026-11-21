@@ -9,6 +9,7 @@
 }
 .constitution-state-dot[data-attention='waiting'] { --state-dot: var(--kbn-owed-bright); }
 .constitution-state-dot[data-attention='working'] { --state-dot: var(--kbn-agent); }
+@keyframes kbn-worker-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
 .constitution-state-dot[data-busy]::before { animation: kbn-worker-breathe 2.4s ease-in-out infinite; }
 [inert] .constitution-state-dot::before { animation: none; }
 @media (prefers-reduced-motion: reduce) { .constitution-state-dot::before { animation: none !important; } }

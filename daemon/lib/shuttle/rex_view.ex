@@ -99,6 +99,7 @@ defmodule Shuttle.RexView do
     pages =
       case Shuttle.Host.pages() do
         {:ok, _} -> Shuttle.Terminal.RexLayout.reconcile(runner())
+        nil -> Shuttle.Terminal.RexLayout.reconcile(runner())
         _ -> Shuttle.Terminal.RexPages.reconcile(runner())
       end
 

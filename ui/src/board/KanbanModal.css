@@ -537,7 +537,6 @@
   --verdict-tint-strong: color-mix(in srgb, var(--verdict-pigment) 24%, var(--ws-paper, var(--kbn-paper)));
   --verdict-edge: color-mix(in srgb, var(--verdict-pigment) 55%, var(--ws-paper, var(--kbn-paper)));
 }
-@keyframes kbn-worker-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
 /* The waiting badge is runtime-state
    info that depends on connection, not on fiber content. Cool grey-blue
    distinguishes "stale" from the teal of "worker running." */

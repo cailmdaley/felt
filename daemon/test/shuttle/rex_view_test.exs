@@ -184,6 +184,29 @@ defmodule Shuttle.RexViewTest do
     assert requests("session.detach_block") == []
   end
 
+  test "reconcile_pages cleans up an existing Desk session when pages.enabled turns off", %{
+    tmp_dir: dir
+  } do
+    Env.put_app_env(:own_host_id, "test-host")
+    host = Path.join(dir, "host.json")
+    Env.put_env("SHUTTLE_HOST_CONFIG_FILE", host)
+    File.write!(host, ~s({"pages":{"enabled":true,"base":"http://hub.test:4000","desk":true}}))
+    assert :ok = Shuttle.Terminal.RexLayout.reconcile(FakeRex, fibers: [])
+    {:ok, doc1} = RexBindings.read()
+    desk_sid = doc1["desk"]["session_id"]
+    assert Map.has_key?(FakeRex.state().sessions, desk_sid)
+
+    File.write!(host, ~s({"pages":{"enabled":false}}))
+    {:ok, pid} = GenServer.start_link(RexView, every_ms: 60_000, name: nil)
+    send(pid, :reconcile_pages)
+    _ = :sys.get_state(pid)
+    GenServer.stop(pid)
+
+    {:ok, doc2} = RexBindings.read()
+    assert doc2["desk"] == nil
+    refute Map.has_key?(FakeRex.state().sessions, desk_sid)
+  end
+
   defp requests(method) do
     for {_bin, args, opts} <- FakeRex.calls(), method in args, do: Jason.decode!(opts[:input])
   end

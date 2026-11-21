@@ -1,5 +1,6 @@
 import { DeskKeyboard } from '../board/DeskKeyboard.js'
 import { deskOrder } from '../board/deskOrdering.js'
+import '../board/elements/post.css'
 import { KanbanSurfaceRenderer } from '../board/KanbanSurfaces.js'
 import type { KanbanCard } from '../board/KanbanTypes.js'
 import { keyIntent } from '../board/keymap.js'
@@ -37,6 +38,7 @@ export class DeskPage {
   private readonly unsubscribe: () => void
   private readonly stopMobileWatch: () => void
   private saidTimer: number | undefined
+  private disposed = false
 
   constructor(feed: PageFeed, opts: DeskPageOptions) {
     this.feed = feed
@@ -92,6 +94,7 @@ export class DeskPage {
   }
 
   dispose(): void {
+    this.disposed = true
     clearTimeout(this.saidTimer)
     document.removeEventListener('keydown', this.onKeydown)
     this.stopMobileWatch()
@@ -122,6 +125,7 @@ export class DeskPage {
   }
 
   private say(text: string): void {
+    if (this.disposed) return
     clearTimeout(this.saidTimer)
     this.said.textContent = text
     this.said.hidden = false
