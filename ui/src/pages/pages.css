@@ -1,6 +1,5 @@
-/* A page alone at its own address: it fills its pane or tab, on the board's paper. */
-html, body { margin: 0; height: 100%; background: var(--ws-paper); color: var(--ws-ink); }
-#app { height: 100%; }
+/* A page's own classes only: the document it fills is pages.html's, and the
+   board harness, whose one stylesheet carries these too, keeps its own. */
 .pg-thread { height: 100%; display: flex; flex-direction: column; }
 .pg-thread > .ws-family-page { flex: 1; min-height: 0; }
 .pg-thread > .ws-family-page[hidden] { display: none; }

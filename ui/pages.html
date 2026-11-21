@@ -19,6 +19,11 @@
         if (dark) document.querySelector('meta[name="theme-color"]').content = theme === 'lamplight' ? '#0F0B0F' : '#0A1019'
       })()
     </script>
+    <!-- A page alone at its own address: it fills its pane or tab, on the board's paper. -->
+    <style>
+      html, body { margin: 0; height: 100%; background: var(--ws-paper); color: var(--ws-ink); }
+      #app { height: 100%; }
+    </style>
     <title>Shuttle</title>
     <link rel="icon" href="/favicon.ico" sizes="32x32 16x16" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
