@@ -49,7 +49,7 @@ defmodule Shuttle.RetainedTerminal do
   """
   def keep_last(runner, opts \\ []) do
     ids =
-      for file <- Path.wildcard(Path.join(root(opts), "*.json")),
+      for file <- FS.wildcard(Path.join(root(opts), "*.json")),
           {:ok, json} <- [FS.read(file)],
           {:ok, %{"session_id" => sid}} <- [Jason.decode(json)],
           do: sid
