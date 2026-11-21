@@ -22,6 +22,8 @@ export interface SentFile {
   host?: string | null
   /** Why it was sent, when its send said. */
   caption?: string
+  /** True when sent via `shuttle show` to display on the thread page. */
+  show?: boolean
 }
 
 /**
@@ -59,6 +61,7 @@ export function normalizeSentFiles(body: unknown): SentFile[] {
     if (typeof rec.uid === 'string' && rec.uid) file.uid = rec.uid
     if (typeof rec.host === 'string' && rec.host) file.host = rec.host
     if (typeof rec.caption === 'string' && rec.caption.trim()) file.caption = rec.caption.trim()
+    if (rec.show === true) file.show = true
     out.push(file)
   }
   return out

@@ -84,6 +84,32 @@ defmodule Shuttle.SentFilesProjectionTest do
     end
   end
 
+  test "each entry exposes show as a boolean, defaulting to false when absent",
+       %{events: events, ledger: ledger} do
+    append(
+      events,
+      sent_line(ts: 10, files: ["/tmp/shown.png"])
+      |> Jason.decode!()
+      |> Map.put("show", true)
+      |> Jason.encode!()
+    )
+
+    append(events, sent_line(ts: 20, files: ["/tmp/plain.png"]))
+    name = start_stream(events)
+
+    for opts <- [followed(events, ledger, name), scanned(events, ledger)] do
+      assert [
+               %{fullPath: "/tmp/plain.png", show: false},
+               %{fullPath: "/tmp/shown.png", show: true}
+             ] = SentFiles.for_uid(@match_ulid, opts)
+
+      assert [
+               %{fullPath: "/tmp/shown.png", show: true},
+               %{fullPath: "/tmp/plain.png", show: false}
+             ] = SentFiles.all_since(0, opts)
+    end
+  end
+
   test "each entry carries its send's caption, from send-file or SendUserFile; none when blank or absent",
        %{events: events, ledger: ledger} do
     append(
@@ -336,7 +362,8 @@ defmodule Shuttle.SentFilesProjectionTest do
           basename: Path.basename(abs),
           timestamp: timestamp,
           sessionId: session_id,
-          uid: uid
+          uid: uid,
+          show: event["show"] == true
         }
       end
     else
@@ -359,7 +386,8 @@ defmodule Shuttle.SentFilesProjectionTest do
           fullPath: abs,
           basename: Path.basename(abs),
           timestamp: timestamp,
-          sessionId: session_id
+          sessionId: session_id,
+          show: event["show"] == true
         }
       end
     else

@@ -3,9 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { addThreadFixtures } from '../../harness/thread-fixtures.js'
 import { WORKSPACE_HOST, WORKSPACE_UID, workspaceExample } from '../../harness/workspace-fixtures.js'
 import { servedFeed, settle } from '../board/testFixtures.js'
-import { PageFeed, POLL_MS } from './feed.js'
+import { PageFeed, POLL_MS, SENDS_POLL_MS } from './feed.js'
 import { parsePageRoute, threadHref } from './route.js'
-import { ThreadPage } from './ThreadPage.js'
+import { AUTO_ADVANCE_IDLE_MS, ThreadPage } from './ThreadPage.js'
 
 describe('a page\'s address', () => {
   it('is its path\'s one segment when served, and the page parameter over file://', () => {
@@ -29,16 +29,23 @@ describe('the thread page', () => {
   let requests: Array<{ url: string; method: string; body?: string; headers: Headers }>
   let go: { went: boolean; place: string }
   let serveFiles: ((url: string, method: string, headers: Headers) => Response) | undefined
+  let sentFiles: Array<{ fullPath: string; basename: string; timestamp: number; sessionId: string; uid: string; host: string; show?: boolean; caption?: string }>
   let feeds: PageFeed[]
+  let pages: ThreadPage[]
 
   beforeEach(() => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    vi.setSystemTime(now)
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k), clear: () => store.clear() })
     const example = workspaceExample(now)
     addThreadFixtures(example, now)
     const composite = servedFeed(example.feed, now)
     requests = []
+    sentFiles = []
     feeds = []
     serveFiles = undefined
+    pages = []
     go = { went: true, place: 'live' }
     vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
       const method = init.method ?? 'GET', headers = new Headers(init.headers)
@@ -46,13 +53,14 @@ describe('the thread page', () => {
       const json = (body: unknown, extra: Record<string, string> = {}): Response => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json', ...extra } })
       if (url.startsWith('/api/v1/fibers/composite')) return headers.get('If-None-Match') === '"v1"' ? new Response(null, { status: 304 }) : json(composite, { ETag: '"v1"' })
       if (url.startsWith('/api/v1/board/family')) return json({ family: WORKSPACE_UID, records: [], waiting: {}, reach_ms: 14 * 86_400_000 })
-      if (url.startsWith('/api/v1/sent-files/all/composite')) return json({ files: [], origins: {} })
+      if (url.startsWith('/api/v1/sent-files/all/composite')) return json({ files: sentFiles, origins: {} })
       if (url.startsWith('/api/v1/file') && serveFiles) return serveFiles(url, method, headers)
       if (url === '/api/v1/go' && method === 'POST') return json(go)
       return new Response('{}', { status: 404 })
     }))
   })
   afterEach(() => {
+    for (const page of pages) page.dispose()
     for (const feed of feeds) feed.stop()
     document.body.replaceChildren()
     vi.useRealTimers()
@@ -64,6 +72,7 @@ describe('the thread page', () => {
     const feed = new PageFeed('', route.fiber)
     feeds.push(feed)
     const page = new ThreadPage(feed, { base: '', route, navigate })
+    pages.push(page)
     document.body.append(page.el)
     feed.start()
     for (let i = 0; i < 4; i++) await settle()
@@ -175,5 +184,95 @@ describe('the thread page', () => {
     document.dispatchEvent(new Event('visibilitychange'))
     await settle()
     expect(reads()).toHaveLength(3)
+  })
+
+  it('polls sent-files every 10s while visible and pauses when hidden', async () => {
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    await open(`?f=${WORKSPACE_UID}@${WORKSPACE_HOST}`)
+    const sendsReads = () => requests.filter(each => each.url.startsWith('/api/v1/sent-files/all/composite'))
+    expect(sendsReads()).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(SENDS_POLL_MS)
+    expect(sendsReads()).toHaveLength(2)
+    visibility.mockReturnValue('hidden')
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(SENDS_POLL_MS * 3)
+    expect(sendsReads()).toHaveLength(2)
+    visibility.mockReturnValue('visible')
+    document.dispatchEvent(new Event('visibilitychange'))
+    await settle()
+    expect(sendsReads()).toHaveLength(3)
+  })
+
+  it('auto-advances to a newly shown file when idle without stealing focus, and never yanks a file already present on mount or while active', async () => {
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    const html = '<!doctype html><p>Tapestry</p>'
+    serveFiles = url => {
+      if (!url.includes('tapestry.html')) return new Response('{}', { status: 404 })
+      if (url.startsWith('/api/v1/file-info')) return new Response(JSON.stringify({ exists: true, size: html.length, modified_at: Math.floor(now / 1000) }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+    }
+    sentFiles = [{ fullPath: '/tmp/initial.png', basename: 'initial.png', timestamp: now - 5_000, sessionId: 's1', uid: WORKSPACE_UID, host: WORKSPACE_HOST, show: true }]
+    const { page } = await open(`?f=${WORKSPACE_UID}@${WORKSPACE_HOST}`)
+    const unfold = page.el.querySelector<HTMLElement>('.ov-unfold')!
+    // Tapestry unfolds on mount; the pre-existing show:true file does not yank away from it.
+    expect([unfold.hasAttribute('data-unfolded'), unfold.querySelector('.uf-name')!.textContent]).toStrictEqual([true, 'Tapestry'])
+
+    // New show:true arrives while idle -> auto-advances to it without stealing focus.
+    sentFiles = [
+      ...sentFiles,
+      { fullPath: '/tmp/fresh.png', basename: 'fresh.png', timestamp: now + 10_000, sessionId: 's1', uid: WORKSPACE_UID, host: WORKSPACE_HOST, show: true },
+    ]
+    await vi.advanceTimersByTimeAsync(SENDS_POLL_MS)
+    for (let i = 0; i < 4; i++) await settle()
+    expect([unfold.hasAttribute('data-unfolded'), unfold.querySelector('.uf-name')!.textContent]).toStrictEqual([true, 'fresh.png'])
+    expect(document.activeElement).not.toBe(unfold.querySelector('.uf-page'))
+
+    // User interacts (pointerdown): a newer show:true within 60s must NOT yank, and lights the unread dot.
+    document.dispatchEvent(new Event('pointerdown'))
+    sentFiles = [
+      ...sentFiles,
+      { fullPath: '/tmp/later.png', basename: 'later.png', timestamp: now + 20_000, sessionId: 's1', uid: WORKSPACE_UID, host: WORKSPACE_HOST, show: true },
+    ]
+    await vi.advanceTimersByTimeAsync(SENDS_POLL_MS)
+    for (let i = 0; i < 4; i++) await settle()
+    expect(unfold.querySelector('.uf-name')!.textContent).toBe('fresh.png')
+    expect(page.el.querySelector('.ov-tools [data-part="sends"]')!.hasAttribute('data-unread')).toBe(true)
+    expect(unfold.querySelector('.uf-count')!.hasAttribute('data-unread')).toBe(true)
+
+    // After 60s of idleness, a brand-new show:true auto-advances again.
+    await vi.advanceTimersByTimeAsync(AUTO_ADVANCE_IDLE_MS)
+    sentFiles = [
+      ...sentFiles,
+      { fullPath: '/tmp/after-idle.png', basename: 'after-idle.png', timestamp: Date.now() + 1_000, sessionId: 's1', uid: WORKSPACE_UID, host: WORKSPACE_HOST, show: true },
+    ]
+    await vi.advanceTimersByTimeAsync(SENDS_POLL_MS)
+    for (let i = 0; i < 4; i++) await settle()
+    expect(unfold.querySelector('.uf-name')!.textContent).toBe('after-idle.png')
+  })
+
+  it('does not auto-advance for a new sent file without show: true', async () => {
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    const html = '<!doctype html><p>Tapestry</p>'
+    serveFiles = url => {
+      if (!url.includes('tapestry.html')) return new Response('{}', { status: 404 })
+      if (url.startsWith('/api/v1/file-info')) return new Response(JSON.stringify({ exists: true, size: html.length, modified_at: Math.floor(now / 1000) }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+    }
+    const { page } = await open(`?f=${WORKSPACE_UID}@${WORKSPACE_HOST}`)
+    const unfold = page.el.querySelector<HTMLElement>('.ov-unfold')!
+    expect(unfold.querySelector('.uf-name')!.textContent).toBe('Tapestry')
+    sentFiles = [{ fullPath: '/tmp/quiet.png', basename: 'quiet.png', timestamp: now + 10_000, sessionId: 's1', uid: WORKSPACE_UID, host: WORKSPACE_HOST, show: false }]
+    await vi.advanceTimersByTimeAsync(SENDS_POLL_MS)
+    for (let i = 0; i < 4; i++) await settle()
+    expect(unfold.querySelector('.uf-name')!.textContent).toBe('Tapestry')
+  })
+
+  it('does not schedule further polls after stop()', async () => {
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    const { feed } = await open(`?f=${WORKSPACE_UID}@${WORKSPACE_HOST}`)
+    const before = requests.length
+    feed.stop()
+    await vi.advanceTimersByTimeAsync(POLL_MS * 4)
+    expect(requests.length).toBe(before)
   })
 })

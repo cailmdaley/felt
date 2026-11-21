@@ -99,6 +99,8 @@ export class FamilyPage {
   private reads = 0
   /** A file asked for before its files were read, unfolded once they are. */
   private wanted: DocKey | null = null
+  /** A file asked to unfold in place (never folding if already open), applied once its files land. */
+  private pendingUnfold: DocKey | null = null
   /** A page asked for from the head that the view unfolds beside its files ({@link ViewFeeds.page}), and whose it is. */
   private asked: { card: string; file: MapFile } | null = null
   private pull = 0
@@ -129,7 +131,14 @@ export class FamilyPage {
     this.head.append(this.title, this.facts, this.tools)
     this.unfold = new Unfold({
       shuttleBase: feeds.shuttleBase, single: true, awake: () => this.awake,
-      seen: key => { const file = this.shown?.files.get(key); if (file?.unread) feeds.seen(file) },
+      seen: key => {
+        const file = this.shown?.files.get(key)
+        if (file?.unread) {
+          file.unread = false
+          feeds.seen(file)
+          this.docs.refresh()
+        }
+      },
       full: key => { if (this.card) feeds.open(this.card, key) },
       link: (key, href) => { if (this.card) feeds.link(this.card, key, href) },
     })
@@ -173,7 +182,7 @@ export class FamilyPage {
     const said = this.feeds.said(current), waits = this.feeds.waits()
     // What each of them wants and whether it works: a grandchild's worker starting unfolds the thread above it.
     const wants = [current, ...above, ...index.subtree(current)].map(card => [wantOf(card, waits), attentionOf(card, waits)])
-    const signature = JSON.stringify([Math.floor(now / 60_000), current, above, children, said, [...above, ...index.subtree(current)].map(card => this.feeds.said(card)), wants, this.feeds.files(current).map(file => file.key)])
+    const signature = JSON.stringify([Math.floor(now / 60_000), current, above, children, said, [...above, ...index.subtree(current)].map(card => this.feeds.said(card)), wants, this.feeds.files(current).map(file => [file.key, file.at, file.unread])])
     if (signature === this.signature) return
     this.signature = signature
     this.paint(current, now)
@@ -185,6 +194,15 @@ export class FamilyPage {
   /** The reader showed `key` full screen: an unfolded file here steps to it, when it is one of this view's files. */
   follow(key: DocKey): void {
     if (this.unfold.unfolded) this.unfold.unfold(key)
+  }
+  /** Unfolds `key` in place without stealing focus, or waits for the current file read to land and unfolds it then. */
+  unfoldFile(key: DocKey): void {
+    const uid = this.card && (this.card.uid ?? this.card.id)
+    if (this.shown?.card === uid && this.shown.files.has(key)) {
+      this.unfold.unfold(key, false)
+      return
+    }
+    this.pendingUnfold = key
   }
   /** `l` away from the rows: unfolds the constitution's tapestry (else its newest sent file) here, or folds it if it is the one unfolded. */
   openLead(): void {
@@ -369,10 +387,13 @@ export class FamilyPage {
       this.shown = { card: uid, files: new Map(files.map(file => [file.key, file])) }
       this.unfold.update(files)
       // Shown here, it is seen.
-      if (files[0]?.unread) this.feeds.seen(files[0])
+      if (!this.unfold.unfolded && files[0]?.unread) this.feeds.seen(files[0])
+      const pending = this.pendingUnfold
+      this.pendingUnfold = null
       const wanted = this.wanted
       this.wanted = null
       if (wanted) this.show(card, wanted)
+      else if (pending && this.shown.files.has(pending)) this.unfold.unfold(pending, false)
       else if (this.unfoldLead && this.leadOpened !== uid && leadFiles[0] && !this.unfold.unfolded) {
         this.leadOpened = uid
         this.unfold.unfold(leadFiles[0].key, false)

@@ -8,6 +8,8 @@ import type { KanbanCard } from '../board/KanbanTypes.js'
 
 /** How often a visible page reads the board again. */
 export const POLL_MS = 15_000
+/** How often a visible page reads sent files again so new `show` items arrive promptly. */
+export const SENDS_POLL_MS = 10_000
 
 /** A tempered or discarded fiber, which a page lists nowhere. */
 const archived = (card: KanbanCard): boolean => card.column === 'tempered' || card.column === 'composted'
@@ -31,6 +33,8 @@ export class PageFeed {
   readonly sends: FiberSends
   private etag: string | null = null
   private timer: number | undefined
+  private sendsTimer: number | undefined
+  private stopped = false
   private readonly listeners = new Set<() => void>()
   private readonly base: string
   private readonly own: { uid: string; host: string } | undefined
@@ -39,7 +43,7 @@ export class PageFeed {
     this.base = base
     this.own = own
     this.board = new BoardFeed(base)
-    this.sends = new FiberSends(base)
+    this.sends = new FiberSends(base, { intervalMs: SENDS_POLL_MS })
     this.board.subscribe(() => this.changed())
     this.sends.subscribe(() => this.changed())
   }
@@ -52,23 +56,44 @@ export class PageFeed {
 
   /** Starts reading: now if the document is visible, and on every tick and every return to sight after. */
   start(): void {
-    document.addEventListener('visibilitychange', this.wake)
+    this.stopped = false
+    document.addEventListener('visibilitychange', this.onVisibility)
     this.wake()
+    this.pollSends(false)
   }
   stop(): void {
-    document.removeEventListener('visibilitychange', this.wake)
+    this.stopped = true
+    document.removeEventListener('visibilitychange', this.onVisibility)
     clearTimeout(this.timer)
+    clearTimeout(this.sendsTimer)
   }
   /** The page's own card, as the last read has it. */
   card(): KanbanCard | undefined {
     return this.own && cardNamed(this.cards, this.own.uid, this.own.host)
   }
 
+  private readonly onVisibility = (): void => {
+    this.wake()
+    this.pollSends(true)
+  }
+
   private readonly wake = (): void => {
     clearTimeout(this.timer)
-    if (document.visibilityState !== 'visible') return
+    if (this.stopped || document.visibilityState !== 'visible') return
     void this.read().finally(() => {
-      if (document.visibilityState === 'visible') this.timer = window.setTimeout(this.wake, POLL_MS)
+      if (this.stopped || document.visibilityState !== 'visible') return
+      clearTimeout(this.timer)
+      this.timer = window.setTimeout(this.wake, POLL_MS)
+    })
+  }
+
+  private pollSends(force: boolean): void {
+    clearTimeout(this.sendsTimer)
+    if (this.stopped || document.visibilityState !== 'visible') return
+    void this.sends.refresh(Date.now(), force).catch(() => {}).finally(() => {
+      if (this.stopped || document.visibilityState !== 'visible') return
+      clearTimeout(this.sendsTimer)
+      this.sendsTimer = window.setTimeout(() => this.pollSends(true), SENDS_POLL_MS)
     })
   }
 

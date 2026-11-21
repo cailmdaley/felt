@@ -391,6 +391,7 @@ export class Unfold {
     this.count.textContent = `${at + 1} / ${this.files.length}`
     this.count.title = `File ${at + 1} of ${this.files.length}: list them`
     this.count.setAttribute('aria-label', this.count.title)
+    this.count.toggleAttribute('data-unread', this.files.some(each => each.unread && each.key !== this.open?.key))
     this.prev.disabled = at === 0
     this.next.disabled = at === this.files.length - 1
   }

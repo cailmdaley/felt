@@ -37,6 +37,7 @@
   color: var(--ws-ink-soft); font: var(--type-meta)/var(--leading-ui) var(--font-serif);
 }
 .uf-file-row[data-unread] > .uf-glyph { color: var(--ws-fresh); }
+.uf-count[data-unread]::after { content: ''; display: inline-block; width: 5px; height: 5px; margin-left: 4px; border-radius: 50%; background: var(--ws-fresh); vertical-align: middle; }
 .uf-file-row[data-current] > .uf-file-name { text-decoration: underline 1px; text-underline-offset: 3px; }
 /* A list of rows reads denser than a menu of verbs where a pointer is fine; a finger keeps the menu's target. */
 @media (pointer: fine) { .kbn-conversation-menu:not(.kbn-verb-menu) [data-slot='menu-item']:has(> .uf-file-row) { padding: 6px 10px; } }

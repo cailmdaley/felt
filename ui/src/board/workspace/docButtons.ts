@@ -63,6 +63,7 @@ export function docButtons(card: KanbanCard, feeds: DocFeeds): DocButtons {
     number.textContent = String(now.length)
     count.title = `${label} · ${who}`
     count.setAttribute('aria-label', count.title)
+    count.toggleAttribute('data-unread', now.some(file => file.unread))
     if (!!now.length !== sent.contains(count)) sent.replaceChildren(...now.length ? [count] : [])
     list?.update(now)
   }

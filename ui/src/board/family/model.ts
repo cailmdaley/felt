@@ -1,7 +1,7 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 
 export interface ThreadMarks { launches: number[]; commits: number[] }
-export interface MapFile { key: string; name: string; at: number; unread: boolean; caption?: string }
+export interface MapFile { key: string; name: string; at: number; unread: boolean; caption?: string; show?: boolean }
 /** The facts about a thread that do not live on its card. */
 export interface MapFeeds {
   marks(card: KanbanCard): ThreadMarks | undefined

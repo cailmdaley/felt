@@ -673,10 +673,12 @@ A post addressed to the human waits on them until they reply or clear it, or the
 Each `--file` attaches a readable regular file: it is recorded as a sent file, as `shuttle send-file` records it, and the post lists its absolute path in `files`.
 Recording works offline.
 
-### `shuttle send-file <path> [path...]`
+### `shuttle show <path> [path...]` / `shuttle send-file <path> [path...]`
 
 Publish readable regular files to the Shuttle board and the session/fiber sent-files
-trail. Claude, Codex, Pi and Antigravity sessions use this command. Paths are resolved to absolute
+trail. `shuttle show` writes the same `file_sent` event with `"show": true` so a
+thread page marks the new file unread and auto-advances to it when idle; `shuttle
+send-file` records the delivery without `"show"`. Claude, Codex, Pi and Antigravity sessions use these commands. Paths are resolved to absolute
 paths on the owning host; files must remain there for subsequent viewing.
 The command validates the whole batch before recording one `file_sent` event.
 It fails visibly if attribution or recording is unavailable.

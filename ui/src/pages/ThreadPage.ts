@@ -19,6 +19,11 @@ export interface ThreadPageOptions {
   navigate(href: string): void
 }
 
+/** How long the page must be untouched before a new `show` file auto-advances. */
+export const AUTO_ADVANCE_IDLE_MS = 60_000
+
+const INTERACTION_EVENTS = ['pointerdown', 'keydown', 'wheel', 'scroll'] as const
+
 const owned = (card: KanbanCard): { uid: string; host: string } => ({ uid: card.uid ?? card.id, host: card.originId })
 
 /**
@@ -37,7 +42,11 @@ export class ThreadPage {
   private readonly feed: PageFeed
   private readonly opts: ThreadPageOptions
   private readonly leads: Leads
+  private readonly unsubscribe: () => void
   private saidTimer: number | undefined
+  private lastInteraction = -Infinity
+  private knownShowAt: number | null = null
+  private readonly onInteract = (): void => { this.lastInteraction = Date.now() }
 
   constructor(feed: PageFeed, opts: ThreadPageOptions) {
     this.feed = feed
@@ -52,7 +61,8 @@ export class ThreadPage {
     this.family.pulls = false
     this.family.unfoldLead = true
     this.el.append(this.status, this.family.el, this.said)
-    feed.subscribe(() => this.render())
+    for (const event of INTERACTION_EVENTS) document.addEventListener(event, this.onInteract, { capture: true, passive: true })
+    this.unsubscribe = feed.subscribe(() => this.render())
     this.render()
   }
 
@@ -63,7 +73,28 @@ export class ThreadPage {
     if (card) {
       this.family.update(card, this.feed.index)
       document.title = card.name
+      this.checkAutoAdvance(card)
     } else this.status.textContent = this.feed.failure ?? (this.feed.loaded ? 'This thread is not on the board.' : 'Reading the board…')
+  }
+
+  dispose(): void {
+    clearTimeout(this.saidTimer)
+    for (const event of INTERACTION_EVENTS) document.removeEventListener(event, this.onInteract, { capture: true })
+    this.unsubscribe()
+    this.family.dispose()
+  }
+
+  private checkAutoAdvance(card: KanbanCard): void {
+    if (!this.feed.sends.loaded) return
+    const shown = this.feed.sends.sends(card).filter(send => send.show)
+    if (this.knownShowAt === null) {
+      this.knownShowAt = shown.reduce((max, send) => Math.max(max, send.timestamp), 0)
+      return
+    }
+    const fresh = shown.find(send => send.timestamp > this.knownShowAt!)
+    if (!fresh) return
+    this.knownShowAt = fresh.timestamp
+    if (Date.now() - this.lastInteraction >= AUTO_ADVANCE_IDLE_MS) this.family.unfoldFile(fresh.key)
   }
 
   private feeds(): ViewFeeds {
@@ -72,7 +103,7 @@ export class ThreadPage {
       shuttleBase: this.opts.base,
       marks: () => undefined,
       reach: () => feed.board.reachMs,
-      files: card => feed.sends.sends(card).map(send => ({ key: send.key, name: send.basename, at: send.timestamp, unread: unseenSince(send.key, send.timestamp), caption: send.caption })),
+      files: card => feed.sends.sends(card).map(send => ({ key: send.key, name: send.basename, at: send.timestamp, unread: unseenSince(send.key, send.timestamp), caption: send.caption, ...send.show ? { show: true } : {} })),
       lead: card => this.leads.of(card),
       refresh: () => { void feed.sends.refresh() },
       said: card => { const root = feed.index.rootOf(card); return lastSaid(card, feed.index, feed.board.records([root.uid ?? root.id])) },

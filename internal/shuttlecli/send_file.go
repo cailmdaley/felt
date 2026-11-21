@@ -46,7 +46,67 @@ acknowledge that a client has downloaded the file.`,
 	return shuttleSendFileCmd
 }
 
+func (a *app) wrapShowForFiles(show *cobra.Command) *cobra.Command {
+	prevRun := show.RunE
+	show.Use = "show <path [path...] | fiber-id | session[/agent][:line]>"
+	show.Short = "Show local files on the thread page, a fiber, or a session transcript"
+	show.Long += `
+
+Given one or more local file paths (or --caption / --session), show records a
+file_sent event with "show": true so the thread page displays the files as
+pills and auto-advances when idle. It accepts the same --session and --caption
+flags as send-file.`
+	show.Example += `
+  shuttle show report.html --caption "Latest calibration"
+  shuttle show fig1.png fig2.png`
+	show.Args = cobra.MinimumNArgs(1)
+	show.Flags().String("session", "", "files: native session ID (otherwise detected from environment or tmux ledger)")
+	show.Flags().String("caption", "", "files: why these files are shown")
+	show.RunE = func(cmd *cobra.Command, args []string) error {
+		hasFileFlags := cmd.Flags().Changed("session") || cmd.Flags().Changed("caption")
+		hasViewFlags := a.json ||
+			cmd.Flags().Changed("store") || cmd.Flags().Changed("fiber-path") ||
+			cmd.Flags().Changed("exact") || cmd.Flags().Changed("path-hint") ||
+			cmd.Flags().Changed("body") || cmd.Flags().Changed("detail") ||
+			cmd.Flags().Changed("citations") || cmd.Flags().Changed("consumers") ||
+			cmd.Flags().Changed("field") || cmd.Flags().Changed("around")
+		if hasFileFlags || (!hasViewFlags && (len(args) > 1 || a.isRegularFileArg(args[0]))) {
+			session, _ := cmd.Flags().GetString("session")
+			caption, _ := cmd.Flags().GetString("caption")
+			files, err := a.recordSentFiles(args, session, caption, true)
+			if err != nil {
+				return err
+			}
+			for _, path := range files {
+				fmt.Fprintln(a.env.Stdout, "Recorded file:", path)
+			}
+			return nil
+		}
+		if len(args) != 1 {
+			return fmt.Errorf("accepts 1 arg(s), received %d", len(args))
+		}
+		return prevRun(cmd, args)
+	}
+	return show
+}
+
+func (a *app) isRegularFileArg(arg string) bool {
+	if strings.TrimSpace(arg) == "" {
+		return false
+	}
+	abs, err := a.env.Abs(arg)
+	if err != nil {
+		return false
+	}
+	info, err := os.Stat(abs)
+	return err == nil && info.Mode().IsRegular()
+}
+
 func (a *app) sendFiles(paths []string, session, caption string) ([]string, error) {
+	return a.recordSentFiles(paths, session, caption, false)
+}
+
+func (a *app) recordSentFiles(paths []string, session, caption string, show bool) ([]string, error) {
 	files := make([]string, 0, len(paths))
 	seen := map[string]bool{}
 	for _, path := range paths {
@@ -105,11 +165,12 @@ func (a *app) sendFiles(paths []string, session, caption string) ([]string, erro
 		eventLine
 		Files   []string `json:"files"`
 		Caption string   `json:"caption,omitempty"`
+		Show    bool     `json:"show,omitempty"`
 	}{eventLine: eventLine{
 		ID:        session + "-" + strconv.FormatInt(timestamp, 10) + "-" + strconv.Itoa(a.eventRand()),
 		Timestamp: timestamp, Type: "file_sent", SessionID: session,
 		CWD: cwd, TmuxSession: tmux, OriginName: origin,
-	}, Files: files, Caption: strings.TrimSpace(caption)}
+	}, Files: files, Caption: strings.TrimSpace(caption), Show: show}
 	line, err := encodeJSONLine(event)
 	if err != nil {
 		return nil, err

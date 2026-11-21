@@ -19,6 +19,8 @@ export interface FiberSend {
   owner: string
   /** Why it was sent, when its send said. */
   caption?: string
+  /** True when sent via `shuttle show` to display on the thread page. */
+  show?: boolean
 }
 
 /** How far back a sent file still counts. */
@@ -45,6 +47,8 @@ export class FiberSends {
   hosts: readonly string[] = []
   /** Whether the last read failed; `files` is then the last good answer. */
   failed = false
+  /** Whether at least one read has succeeded. */
+  loaded = false
   private byFiber = new Map<string, SentFile[]>()
   private readonly listeners = new Set<() => void>()
   private readonly reader: ThrottledRead
@@ -73,8 +77,8 @@ export class FiberSends {
   }
 
   /** Read at most once per interval; a failed read keeps the last answer and retries at the next ask. */
-  refresh(nowMs = Date.now()): Promise<void> {
-    return this.reader.run(false, nowMs)
+  refresh(nowMs = Date.now(), force = false): Promise<void> {
+    return this.reader.run(force, nowMs)
   }
 
   private async read(): Promise<void> {
@@ -84,7 +88,8 @@ export class FiberSends {
       const files = normalizeSentFiles(raw).filter(file => Number.isFinite(file.timestamp) && file.timestamp > 0)
       const origins = (raw as { origins?: unknown }).origins
       const hosts = origins && typeof origins === 'object' && !Array.isArray(origins) ? Object.keys(origins) : []
-      const moved = this.failed || !sameFiles(this.files, files) || (hosts.length > 0 && hosts.join('\n') !== this.hosts.join('\n'))
+      const moved = !this.loaded || this.failed || !sameFiles(this.files, files) || (hosts.length > 0 && hosts.join('\n') !== this.hosts.join('\n'))
+      this.loaded = true
       this.failed = false
       if (!moved) return
       this.files = files
@@ -106,14 +111,14 @@ function resolve(card: KanbanCard, file: SentFile): FiberSend | undefined {
   const key = docKey(file.host ?? '', file.fullPath, card.originId, card.fiberDir)
   const parsed = parseDocKey(key)
   if (!parsed) return undefined
-  return { key, fullPath: file.fullPath, basename: file.basename, timestamp: file.timestamp, owner: parsed.owner, ...file.caption ? { caption: file.caption } : {} }
+  return { key, fullPath: file.fullPath, basename: file.basename, timestamp: file.timestamp, owner: parsed.owner, ...file.caption ? { caption: file.caption } : {}, ...file.show ? { show: true } : {} }
 }
 
 function sameFiles(a: readonly SentFile[], b: readonly SentFile[]): boolean {
   if (a.length !== b.length) return false
   for (let i = 0; i < a.length; i++) {
     const x = a[i], y = b[i]
-    if (x.fullPath !== y.fullPath || x.timestamp !== y.timestamp || x.host !== y.host || x.uid !== y.uid || x.sessionId !== y.sessionId || x.caption !== y.caption) return false
+    if (x.fullPath !== y.fullPath || x.timestamp !== y.timestamp || x.host !== y.host || x.uid !== y.uid || x.sessionId !== y.sessionId || x.caption !== y.caption || !!x.show !== !!y.show) return false
   }
   return true
 }

@@ -87,6 +87,7 @@ defmodule Shuttle.SentFiles do
             session_id: String.t() | nil,
             tmux_session: String.t() | nil,
             caption: String.t() | nil,
+            show: boolean(),
             timestamp: term()
           }
           | %{cleared_uid: String.t(), cleared_path: String.t() | nil, timestamp: integer()}
@@ -191,6 +192,7 @@ defmodule Shuttle.SentFiles do
                 session_id: copy(event["sessionId"]),
                 tmux_session: copy(event["tmuxSession"]),
                 caption: caption(event),
+                show: event["show"] == true,
                 timestamp: event["timestamp"]
               }
             ]
@@ -273,7 +275,8 @@ defmodule Shuttle.SentFiles do
             fullPath: full_path,
             basename: Path.basename(full_path),
             timestamp: event.timestamp,
-            sessionId: event.session_id
+            sessionId: event.session_id,
+            show: event.show
           },
           event
         )
@@ -297,7 +300,8 @@ defmodule Shuttle.SentFiles do
           basename: Path.basename(full_path),
           timestamp: ts,
           sessionId: event.session_id,
-          uid: uid
+          uid: uid,
+          show: event.show
         },
         event
       )

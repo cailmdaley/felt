@@ -7,6 +7,7 @@
   color: var(--ws-ink-soft); font: var(--type-meta)/var(--leading-solid) var(--font-mono);
 }
 .ws-doc-button:is(:hover, :focus-visible) { color: var(--ws-ink); background: var(--ws-hover); outline: none; }
+.ws-doc-button[data-unread]::after { content: ''; width: 5px; height: 5px; border-radius: 50%; background: var(--ws-fresh); flex: none; }
 .ws-doc-button > svg { width: 16px; height: 16px; }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-doc-button { height: var(--ws-phone-target); min-width: var(--ws-phone-target); }

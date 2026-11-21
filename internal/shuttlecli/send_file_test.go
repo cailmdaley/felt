@@ -247,3 +247,98 @@ func TestSendFilesRejectsFIFOWithoutBlocking(t *testing.T) {
 		t.Fatal("blocked opening FIFO")
 	}
 }
+
+func TestShowCommandRecordsFileSentWithShowTrue(t *testing.T) {
+	t.Parallel()
+	env, sink, artifact := sendFileTestEnv(t)
+	second := filepath.Join(filepath.Dir(artifact), "plot.png")
+	if err := os.WriteFile(second, []byte("png"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := NewRootCmd(env)
+	cmd.SetArgs([]string{"show", artifact, second, "--caption", "Fresh plots"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("shuttle show failed: %v", err)
+	}
+	raw, err := os.ReadFile(sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var event map[string]any
+	if err := json.Unmarshal(raw, &event); err != nil {
+		t.Fatal(err)
+	}
+	if event["type"] != "file_sent" || event["show"] != true {
+		t.Fatalf("expected file_sent with show=true, got: %s", raw)
+	}
+	if event["caption"] != "Fresh plots" {
+		t.Fatalf("caption = %v, want %q", event["caption"], "Fresh plots")
+	}
+	files, _ := event["files"].([]any)
+	if len(files) != 2 || files[0] != artifact || files[1] != second {
+		t.Fatalf("files = %v, want [%s %s]", files, artifact, second)
+	}
+}
+
+func TestShowCommandSingleFileWithoutFlagsSetsShowTrue(t *testing.T) {
+	t.Parallel()
+	env, sink, artifact := sendFileTestEnv(t)
+	cmd := NewRootCmd(env)
+	cmd.SetArgs([]string{"show", artifact})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("shuttle show single file failed: %v", err)
+	}
+	raw, err := os.ReadFile(sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var event map[string]any
+	if err := json.Unmarshal(raw, &event); err != nil {
+		t.Fatal(err)
+	}
+	if event["type"] != "file_sent" || event["show"] != true {
+		t.Fatalf("expected file_sent with show=true, got: %s", raw)
+	}
+}
+
+func TestSendFileCommandOmitsShow(t *testing.T) {
+	t.Parallel()
+	env, sink, artifact := sendFileTestEnv(t)
+	cmd := NewRootCmd(env)
+	cmd.SetArgs([]string{"send-file", artifact})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("shuttle send-file failed: %v", err)
+	}
+	raw, err := os.ReadFile(sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var event map[string]any
+	if err := json.Unmarshal(raw, &event); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := event["show"]; present {
+		t.Fatalf("send-file should omit show, got: %s", raw)
+	}
+}
+
+func TestShowCommandWithStoreFlagIsNotHijackedByLocalFile(t *testing.T) {
+	t.Parallel()
+	env, sink, _ := sendFileTestEnv(t)
+	cwd := t.TempDir()
+	env.Chdir(cwd)
+	// Create a regular file in CWD with the same name as a fiber slug.
+	if err := os.WriteFile(filepath.Join(cwd, "notes"), []byte("local file"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	storeDir := t.TempDir()
+	cmd := NewRootCmd(env)
+	cmd.SetArgs([]string{"-C", storeDir, "show", "notes"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected fiber store error, not file_sent recording")
+	}
+	if _, statErr := os.Stat(sink); !os.IsNotExist(statErr) {
+		t.Fatalf("shuttle -C <store> show notes was hijacked by local file and wrote %s", sink)
+	}
+}
