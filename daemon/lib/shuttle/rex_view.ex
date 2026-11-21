@@ -72,18 +72,23 @@ defmodule Shuttle.RexView do
 
   def handle_info(:sweep, state) do
     state =
-      with true <- Shuttle.Terminal.primary() == Shuttle.Terminal.Rex,
-           {:ok, shown} <- shown(),
-           {:ok, behind} <-
-             sweep(runner(), state.behind, grace_ms: state.grace_ms, shown: shown) do
-        reconcile(%{state | behind: behind})
-      else
-        false ->
+      cond do
+        Shuttle.Terminal.primary() != Shuttle.Terminal.Rex ->
           %{state | behind: %{}}
 
-        reason ->
-          Logger.debug("Rex view sweep skipped: #{inspect(reason)}")
-          state
+        match?({:ok, _}, Shuttle.Host.pages()) ->
+          reconcile(%{state | behind: %{}})
+
+        true ->
+          with {:ok, shown} <- shown(),
+               {:ok, behind} <-
+                 sweep(runner(), state.behind, grace_ms: state.grace_ms, shown: shown) do
+            reconcile(%{state | behind: behind})
+          else
+            reason ->
+              Logger.debug("Rex view sweep skipped: #{inspect(reason)}")
+              state
+          end
       end
 
     Process.send_after(self(), :sweep, state.every_ms)
@@ -91,7 +96,11 @@ defmodule Shuttle.RexView do
   end
 
   defp reconcile(state) do
-    pages = Shuttle.Terminal.RexPages.reconcile(runner())
+    pages =
+      case Shuttle.Host.pages() do
+        {:ok, _} -> Shuttle.Terminal.RexLayout.reconcile(runner())
+        _ -> Shuttle.Terminal.RexPages.reconcile(runner())
+      end
 
     if pages != state.pages and pages != :ok,
       do: Logger.warning("Rex pages: #{inspect(pages)}")
@@ -139,25 +148,29 @@ defmodule Shuttle.RexView do
   Returns when each remaining one was first seen behind.
   """
   def sweep(runner, behind \\ %{}, opts \\ []) do
-    now = Keyword.get(opts, :now, System.monotonic_time(:millisecond))
-    grace = Keyword.get(opts, :grace_ms, 0)
-    shown = Keyword.get(opts, :shown, MapSet.new())
+    if match?({:ok, _}, Shuttle.Host.pages()) do
+      {:ok, %{}}
+    else
+      now = Keyword.get(opts, :now, System.monotonic_time(:millisecond))
+      grace = Keyword.get(opts, :grace_ms, 0)
+      shown = Keyword.get(opts, :shown, MapSet.new())
 
-    with {:ok, doc} <- RexBindings.read() do
-      ours = Enum.to_list(doc["bindings"]) ++ Enum.to_list(doc["viewers"] || %{})
-      names = Map.new(ours, fn {name, b} -> {b["block_id"], name} end)
-      keep = fn bid -> MapSet.member?(shown, names[bid]) end
+      with {:ok, doc} <- RexBindings.read() do
+        ours = Enum.to_list(doc["bindings"]) ++ Enum.to_list(doc["viewers"] || %{})
+        names = Map.new(ours, fn {name, b} -> {b["block_id"], name} end)
+        keep = fn bid -> MapSet.member?(shown, names[bid]) end
 
-      ours
-      |> Enum.map(fn {_, b} -> b["session_id"] end)
-      |> Enum.uniq()
-      |> Enum.reduce_while({:ok, %{}}, fn sid, {:ok, seen} ->
-        case session(runner, sid, names, keep, behind, now, grace) do
-          {:ok, more} -> {:cont, {:ok, Map.merge(seen, more)}}
-          {:error, :not_found} -> {:cont, {:ok, seen}}
-          error -> {:halt, error}
-        end
-      end)
+        ours
+        |> Enum.map(fn {_, b} -> b["session_id"] end)
+        |> Enum.uniq()
+        |> Enum.reduce_while({:ok, %{}}, fn sid, {:ok, seen} ->
+          case session(runner, sid, names, keep, behind, now, grace) do
+            {:ok, more} -> {:cont, {:ok, Map.merge(seen, more)}}
+            {:error, :not_found} -> {:cont, {:ok, seen}}
+            error -> {:halt, error}
+          end
+        end)
+      end
     end
   end
 

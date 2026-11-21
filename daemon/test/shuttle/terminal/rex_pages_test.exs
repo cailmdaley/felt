@@ -353,7 +353,8 @@ defmodule Shuttle.Terminal.RexPagesTest do
     assert :present = Backend.probe(FakeRex, @a)
   end
 
-  test "a worker whose block ends retires its window with the page", ctx do
+  test "with pages on, a worker whose block ends leaves its page tab intact; with pages off, it retires the window",
+       ctx do
     pages_on(ctx)
     assert :ok = launch(@a, @root <> "/a")
     assert :ok = launch(@b, @root <> "/b")
@@ -364,8 +365,21 @@ defmodule Shuttle.Terminal.RexPagesTest do
              Rex.call(FakeRex, "block.close", %{"block_id" => a["block_id"]}, session: sid)
 
     assert :absent = Backend.probe(FakeRex, @a)
-    refute Enum.any?(blocks(sid), &(&1["window_id"] == a["window_id"]))
+    assert [%{"block_id" => page_bid, "label" => "rexweb shuttle"}] =
+             Enum.filter(blocks(sid), &(&1["window_id"] == a["window_id"]))
+
+    assert page_bid == a["page_block_id"]
     assert :present = Backend.probe(FakeRex, @b)
+
+    # With pages off, a worker whose block ends retires its window as before.
+    File.write!(ctx.host, ~s({"pages":{"enabled":false}}))
+    b = bound(@b)
+
+    assert {:ok, _} =
+             Rex.call(FakeRex, "block.close", %{"block_id" => b["block_id"]}, session: sid)
+
+    assert :absent = Backend.probe(FakeRex, @b)
+    refute Enum.any?(blocks(sid), &(&1["window_id"] == b["window_id"]))
   end
 
   test "recovery by label and by session never takes a page for the worker", ctx do

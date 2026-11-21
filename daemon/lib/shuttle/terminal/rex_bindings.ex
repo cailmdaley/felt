@@ -30,12 +30,14 @@ defmodule Shuttle.Terminal.RexBindings do
         end)
 
       viewers = if doc["server"] in [nil, server], do: doc["viewers"] || %{}, else: %{}
+      places = if doc["server"] in [nil, server], do: doc["places"] || %{}, else: %{}
 
       Map.merge(doc, %{
         "server" => server,
         "bindings" => Map.put(bindings, name, binding),
         "viewers" => viewers,
-        "families" => if(doc["server"] in [nil, server], do: doc["families"] || %{}, else: %{})
+        "families" => if(doc["server"] in [nil, server], do: doc["families"] || %{}, else: %{}),
+        "places" => places
       })
     end)
   end
@@ -92,6 +94,7 @@ defmodule Shuttle.Terminal.RexBindings do
         "server" => server,
         "bindings" => if(doc["server"] in [nil, server], do: doc["bindings"], else: %{}),
         "families" => if(doc["server"] in [nil, server], do: doc["families"] || %{}, else: %{}),
+        "places" => if(doc["server"] in [nil, server], do: doc["places"] || %{}, else: %{}),
         "viewers" => Map.put(viewers, key, binding)
       })
     end)
@@ -102,7 +105,7 @@ defmodule Shuttle.Terminal.RexBindings do
       doc =
         if doc["server"] in [nil, server],
           do: doc,
-          else: %{"version" => 1, "bindings" => %{}, "viewers" => %{}}
+          else: %{"version" => 1, "bindings" => %{}, "viewers" => %{}, "places" => %{}}
 
       Map.merge(doc, %{
         "server" => server,
@@ -110,6 +113,42 @@ defmodule Shuttle.Terminal.RexBindings do
       })
     end)
   end
+
+  def put_place(uid, place, server) when is_binary(uid) and is_map(place) and is_binary(server) do
+    update(fn doc ->
+      doc =
+        if doc["server"] in [nil, server],
+          do: doc,
+          else: %{"version" => 1, "bindings" => %{}, "viewers" => %{}, "families" => %{}}
+
+      Map.merge(doc, %{
+        "server" => server,
+        "places" => Map.put(doc["places"] || %{}, uid, place)
+      })
+    end)
+  end
+
+  @doc """
+  Compare-and-set update on `places[uid]`: merges `fields` when the stored
+  entry still equals `observed`. A nil value removes the field.
+  """
+  def update_place(uid, observed, fields) when is_binary(uid) and is_map(fields) do
+    update(fn doc ->
+      if get_in(doc, ["places", uid]) == observed and is_map(observed) do
+        updated =
+          Enum.reduce(fields, observed, fn
+            {key, nil}, acc -> Map.delete(acc, key)
+            {key, value}, acc -> Map.put(acc, key, value)
+          end)
+
+        Map.put(doc, "places", Map.put(doc["places"] || %{}, uid, updated))
+      else
+        doc
+      end
+    end)
+  end
+
+  def delete_place(uid, observed), do: delete_entry("places", uid, observed)
 
   def delete_family(family, sid) do
     update(fn doc ->
@@ -141,9 +180,9 @@ defmodule Shuttle.Terminal.RexBindings do
 
   def prune(snapshot, live_ids) do
     update(fn doc ->
-      Enum.reduce(["bindings", "viewers"], doc, fn kind, acc ->
-        Enum.reduce(snapshot[kind] || %{}, acc, fn {name, binding}, acc ->
-          if binding["session_id"] not in live_ids and get_in(acc, [kind, name]) == binding,
+      Enum.reduce(["bindings", "viewers", "places"], doc, fn kind, acc ->
+        Enum.reduce(snapshot[kind] || %{}, acc, fn {name, entry}, acc ->
+          if entry["session_id"] not in live_ids and get_in(acc, [kind, name]) == entry,
             do: Map.put(acc, kind, Map.delete(acc[kind], name)),
             else: acc
         end)
@@ -216,12 +255,33 @@ defmodule Shuttle.Terminal.RexBindings do
 
   defp valid_families?(_), do: false
 
+  defp valid_places?(places) when is_map(places) do
+    Enum.all?(places, fn {uid, place} ->
+      is_binary(uid) and
+        match?(
+          %{
+            "session_id" => "session:" <> _,
+            "window_id" => "window:" <> _,
+            "family" => family
+          }
+          when is_binary(family),
+          place
+        ) and
+        match?("block:" <> _, Map.get(place, "page_block_id", "block:")) and
+        is_boolean(Map.get(place, "page_closed", false)) and
+        (is_nil(place["asked_at"]) or is_binary(place["asked_at"]))
+    end)
+  end
+
+  defp valid_places?(_), do: false
+
   defp decode(json) do
     with {:ok, %{"version" => 1, "server" => server, "bindings" => bindings} = doc} <-
            Jason.decode(json),
          true <- (is_binary(server) or is_nil(server)) and is_map(bindings),
          true <- valid_viewers?(Map.get(doc, "viewers", %{})),
          true <- valid_families?(Map.get(doc, "families", %{})),
+         true <- valid_places?(Map.get(doc, "places", %{})),
          true <-
            Enum.all?(bindings, fn {name, binding} ->
              is_binary(name) and

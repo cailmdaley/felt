@@ -34,13 +34,15 @@ defmodule Shuttle.Terminal.RexPages do
   """
 
   def label, do: @label
+  def launch_timeout_ms, do: @launch_timeout_ms
+  def split_timeout_ms, do: @split_timeout_ms
 
   @doc "Whether a Rex block is a page holder."
   def page?(block), do: block["label"] == @label
 
   @doc "The thread page's URL for a fiber on this daemon's host."
-  def url(base, uid),
-    do: "#{base}/thread?f=#{enc(uid)}@#{enc(Shuttle.Poller.own_host_id())}&in=rex"
+  def url(base, uid, host_id \\ Shuttle.Poller.own_host_id()),
+    do: "#{base}/thread?f=#{enc(uid)}@#{enc(host_id)}&in=rex"
 
   defp enc(part), do: URI.encode_www_form(part)
 
@@ -69,6 +71,9 @@ defmodule Shuttle.Terminal.RexPages do
       _ -> {spec, []}
     end
   end
+
+  @doc "Build the Rex block spec for a page holder pointing at `url`."
+  def page_block(url), do: block(url)
 
   defp block(url) do
     with {:ok, holder} <- holder() do

@@ -272,4 +272,50 @@ defmodule ShuttleWeb.GoControllerTest do
     assert FakeRex.calls() == []
     assert %{"error" => "fiber_id is required"} = go(%{origin: "test-host"}) |> json_response(400)
   end
+
+  test "with pages enabled, go on a quiet fiber creates its page place, selects it, and activates Rex",
+       %{tmp_dir: dir} do
+    host = Path.join(dir, "host.json")
+    File.write!(host, ~s({"pages":{"enabled":true,"base":"http://hub.test:4000"}}))
+    Env.put_env("SHUTTLE_HOST_CONFIG_FILE", host)
+
+    assert %{"went" => true, "place" => "view"} =
+             go(%{fiber_id: uid("quiet"), origin: "test-host"}) |> json_response(200)
+
+    assert {:ok, doc} = Shuttle.Terminal.RexBindings.read()
+    place = doc["places"][uid("quiet")]
+    assert is_binary(place["session_id"])
+    assert is_binary(place["window_id"])
+    assert is_binary(place["page_block_id"])
+    assert is_binary(place["asked_at"])
+
+    assert [
+             %{
+               "args" => %{
+                 "client_id" => "client:mac",
+                 "action" => "session.select",
+                 "args" => %{"session_id" => sid, "window_id" => wid}
+               }
+             }
+           ] = requests("client.perform")
+
+    assert sid == place["session_id"]
+    assert wid == place["window_id"]
+    assert activated?()
+
+    # Tempered and discarded fibers are still refused with pages on.
+    for id <- ["kept", "dropped"] do
+      assert %{"went" => false} = go(%{fiber_id: uid(id)}) |> json_response(422)
+      refute Map.has_key?(Shuttle.Terminal.RexBindings.read() |> elem(1) |> Map.get("places", %{}), uid(id))
+    end
+  end
+
+  test "remote go preserves place view when the remote owner opens a quiet thread" do
+    Env.put_app_env(:forward_response, {:ok, 200, ~s({"went":true,"place":"view"})})
+
+    assert %{"went" => true, "place" => "view"} =
+             go(%{fiber_id: "far", origin: "remote-a"}) |> json_response(200)
+
+    assert activated?()
+  end
 end

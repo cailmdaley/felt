@@ -20,11 +20,13 @@ defmodule Shuttle.Go do
   """
 
   alias Shuttle.{Env, FiberDocuments, Lifecycle, OriginRouter, Poller, Remote, Terminal}
-  alias Shuttle.Terminal.Rex
+  alias Shuttle.Terminal.{Rex, RexLayout}
 
   @none %{went: false, place: "none"}
   @live %{went: true, place: "live"}
   @unshown %{went: false, place: "live"}
+  @view %{went: true, place: "view"}
+  @unshown_view %{went: false, place: "view"}
 
   @type answer :: %{
           required(:went) => boolean(),
@@ -72,9 +74,23 @@ defmodule Shuttle.Go do
 
       case Lifecycle.column(fiber, worker != nil) do
         column when column in ["tempered", "discarded"] -> {:error, {:closed, column}}
-        _ when worker == nil -> {:ok, @none}
+        _ when worker == nil -> show_place(fiber, display?)
         _ -> show(worker.session, display?)
       end
+    end
+  end
+
+  defp show_place(fiber, display?) do
+    if Terminal.primary() == Rex and match?({:ok, _}, Shuttle.Host.pages()) do
+      runner = runner()
+
+      with {:ok, place} <- RexLayout.ensure_place(runner, fiber),
+           {:ok, moved} <- Rex.select_binding(runner, place, mac_only: true),
+           :ok <- if(moved and display?, do: Rex.activate_app(runner), else: :ok) do
+        {:ok, if(moved, do: @view, else: @unshown_view)}
+      end
+    else
+      {:ok, @none}
     end
   end
 
@@ -111,13 +127,14 @@ defmodule Shuttle.Go do
     case OriginRouter.forward(remote, "/api/v1/go", %{"fiber_id" => fiber_id, "forwarded" => true}) do
       {:forwarded, 200, body} ->
         case Jason.decode(body) do
-          {:ok, %{"went" => true}} ->
-            with :ok <- Rex.activate_app(runner()), do: {:ok, @live}
+          {:ok, %{"went" => true} = reply} ->
+            place = if reply["place"] in ["live", "view"], do: reply["place"], else: "live"
+            with :ok <- Rex.activate_app(runner()), do: {:ok, %{went: true, place: place}}
 
           {:ok, %{"tmux_session" => name}} when is_binary(name) ->
             opened(opener().open(name, remote.name))
 
-          {:ok, %{"went" => false, "place" => place}} when place in ["live", "none"] ->
+          {:ok, %{"went" => false, "place" => place}} when place in ["live", "view", "none"] ->
             {:ok, %{went: false, place: place}}
 
           _ ->

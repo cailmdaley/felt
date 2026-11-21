@@ -5,9 +5,12 @@ defmodule Shuttle.Terminal.Rex do
   require Logger
   alias Shuttle.{Env, Rex, WorkerProcess}
   alias Shuttle.Terminal.RexBindings, as: Bindings
+  alias Shuttle.Terminal.RexLayout, as: Layout
   alias Shuttle.Terminal.RexTree, as: Tree
   alias Shuttle.Terminal.RexPages, as: Pages
   alias Shuttle.Terminal.LaunchAttempts
+
+  defp pages_enabled?, do: match?({:ok, _}, Shuttle.Host.pages())
 
   @impl true
   def id, do: "rex"
@@ -88,19 +91,30 @@ defmodule Shuttle.Terminal.Rex do
   defp reconcile_instance(_, %{"instance" => nil}, _), do: :ok
 
   defp reconcile_instance(runner, doc, _) do
-    Enum.reduce_while(["bindings", "viewers"], :ok, fn kind, :ok ->
-      Enum.reduce_while(doc[kind] || %{}, :ok, fn {key, binding}, :ok ->
+    with :ok <-
+           Enum.reduce_while(["bindings", "viewers"], :ok, fn kind, :ok ->
+             Enum.reduce_while(doc[kind] || %{}, :ok, fn {key, binding}, :ok ->
+               result =
+                 with :ok <- retire_stale_window(runner, binding) do
+                   if kind == "bindings",
+                     do: Bindings.delete(key, binding),
+                     else: Bindings.delete_viewer(key, binding)
+                 end
+
+               if result == :ok, do: {:cont, :ok}, else: {:halt, result}
+             end)
+             |> then(fn result -> if result == :ok, do: {:cont, :ok}, else: {:halt, result} end)
+           end) do
+      Enum.reduce_while(doc["places"] || %{}, :ok, fn {uid, place}, :ok ->
         result =
-          with :ok <- retire_stale_window(runner, binding) do
-            if kind == "bindings",
-              do: Bindings.delete(key, binding),
-              else: Bindings.delete_viewer(key, binding)
+          with :ok <- close_stale_window(runner, place),
+               :ok <- Bindings.delete_place(uid, place) do
+            :ok
           end
 
         if result == :ok, do: {:cont, :ok}, else: {:halt, result}
       end)
-      |> then(fn result -> if result == :ok, do: {:cont, :ok}, else: {:halt, result} end)
-    end)
+    end
   end
 
   # A worker placed again after hiding lives in a window other than the one it
@@ -112,7 +126,7 @@ defmodule Shuttle.Terminal.Rex do
 
         case (block && block["window_id"]) || binding["window_id"] do
           wid when is_binary(wid) ->
-            retire_worker_window(runner, Map.put(binding, "window_id", wid))
+            close_stale_window(runner, Map.put(binding, "window_id", wid))
 
           nil when block == nil ->
             :ok
@@ -128,6 +142,31 @@ defmodule Shuttle.Terminal.Rex do
         error
     end
   end
+
+  defp close_stale_window(runner, %{"family" => root, "session_id" => sid, "window_id" => wid})
+       when is_binary(root) and is_binary(sid) and is_binary(wid) do
+    family_lock(root, fn ->
+      result =
+        case Rex.close_window(runner, sid, wid) do
+          {:ok, _} -> :ok
+          {:error, :not_found} -> :ok
+          error -> error
+        end
+
+      with :ok <- result, do: cleanup_family_now(runner, root, sid)
+    end)
+  end
+
+  defp close_stale_window(runner, %{"session_id" => sid, "window_id" => wid})
+       when is_binary(sid) and is_binary(wid) do
+    case Rex.close_window(runner, sid, wid) do
+      {:ok, _} -> :ok
+      {:error, :not_found} -> :ok
+      error -> error
+    end
+  end
+
+  defp close_stale_window(_, _), do: :ok
 
   defp start_server(runner) do
     if Rex.macos?() do
@@ -172,9 +211,11 @@ defmodule Shuttle.Terminal.Rex do
          {:ok, %{"host_id" => server} = identity} <- Rex.whoami(runner),
          :ok <- reconcile(runner, identity),
          {:ok, family} <- Tree.resolve(opts[:fiber] || Tree.fiber_for(name), opts) do
+      uid = Shuttle.ULID.from_tmux(name) || (family && family.uid)
+
       spec =
         create_spec(name, cwd, script_path, Keyword.put(opts, :fiber, family && family.fiber))
-        |> Pages.with_page(Shuttle.ULID.from_tmux(name) || (family && family.uid))
+        |> Pages.with_page(uid)
 
       case in_family(
              runner,
@@ -187,7 +228,7 @@ defmodule Shuttle.Terminal.Rex do
                     :ok <- Bindings.set_instance(identity["instance_id"]),
                     do: LaunchAttempts.commit_binding(name, script_path)
              end,
-             %{script: script_path, instance: identity["instance_id"]}
+             %{script: script_path, instance: identity["instance_id"], uid: uid}
            ) do
         {:ok, _} -> :ok
         error -> error
@@ -273,6 +314,16 @@ defmodule Shuttle.Terminal.Rex do
             do: Map.put(window, "window_label", Tree.display_label(entry.label)),
             else: window
 
+        uid = launch && launch[:uid]
+
+        reused_place =
+          if pages_enabled?() and is_binary(uid) do
+            case Layout.place_for(runner, uid: uid, doc: doc, sessions: sessions, server: server) do
+              {:ok, place} -> place
+              :none -> nil
+            end
+          end
+
         prepared =
           if launch do
             intent = %{
@@ -281,8 +332,8 @@ defmodule Shuttle.Terminal.Rex do
               "family" => root,
               "depth" => entry.depth,
               "fiber" => if(family, do: family.fiber),
-              "scope" => if(existing, do: "window", else: "session"),
-              "session_id" => if(existing, do: sid)
+              "scope" => if(reused_place || existing, do: "window", else: "session"),
+              "session_id" => if(reused_place, do: reused_place["session_id"], else: if(existing, do: sid))
             }
 
             LaunchAttempts.prepare_binding(name, launch.script, intent)
@@ -292,48 +343,100 @@ defmodule Shuttle.Terminal.Rex do
 
         result =
           with :ok <- prepared do
-            if existing do
-              with {:ok, reply} <- Rex.new_window(runner, sid, window, rex_opts),
-                   do: window_binding(sid, reply)
-            else
-              spec = %{
-                spec
-                | "label" =>
-                    if(family,
-                      do: Tree.display_label(Tree.session_label(root)),
-                      else: spec["label"]
-                    ),
-                  "initial_windows" => [window]
-              }
+            cond do
+              reused_place != nil ->
+                chat_layout = chat_block_layout(window["layout"])
 
-              with {:ok, reply} <- Rex.create(runner, spec, rex_opts),
-                   {:ok, b} <- created_binding(reply) do
-                case Bindings.put_family(root, b["session_id"], server) do
-                  :ok ->
-                    {:ok, b}
+                with {:ok, %{"block_ids" => ["block:" <> _ = chat_bid]}} <-
+                       Rex.call(
+                         runner,
+                         "session.new_split",
+                         %{
+                           "anchor_id" => reused_place["page_block_id"],
+                           "direction" => "horizontal",
+                           "side" => "before",
+                           "ratio" => 0.5,
+                           "layout" => chat_layout,
+                           "focus" => false
+                         },
+                         [session: reused_place["session_id"]] ++ rex_opts
+                       ) do
+                  b =
+                    binding(reused_place["session_id"], chat_bid)
+                    |> Map.put("window_id", reused_place["window_id"])
+                    |> Map.put("page_block_id", reused_place["page_block_id"])
 
-                  error ->
-                    launch_cleanup(error, fn -> Rex.destroy(runner, b["session_id"]) end)
+                  {:ok, b, false}
+                else
+                  {:ok, _} -> {:error, {:unknown, :invalid_split_reply}}
+                  error -> error
                 end
-              end
+
+              existing ->
+                with {:ok, reply} <- Rex.new_window(runner, sid, window, rex_opts),
+                     {:ok, b} <- window_binding(sid, reply),
+                     do: {:ok, b, false}
+
+              true ->
+                spec = %{
+                  spec
+                  | "label" =>
+                      if(family,
+                        do: Tree.display_label(Tree.session_label(root)),
+                        else: spec["label"]
+                      ),
+                    "initial_windows" => [window]
+                }
+
+                with {:ok, reply} <- Rex.create(runner, spec, rex_opts),
+                     {:ok, b} <- created_binding(reply) do
+                  case Bindings.put_family(root, b["session_id"], server) do
+                    :ok ->
+                      {:ok, b, true}
+
+                    error ->
+                      launch_cleanup(error, fn -> Rex.destroy(runner, b["session_id"]) end)
+                  end
+                end
             end
           end
 
-        with {:ok, b} <- result do
+        with {:ok, b, created_session?} <- result do
           b = Map.merge(b, %{"family" => root, "depth" => entry.depth})
           b = if family, do: Map.put(b, "fiber", family.fiber), else: b
 
           case store.(b) do
             :ok ->
-              {:ok, b, !existing}
+              if pages_enabled?() and is_binary(uid) and is_binary(b["page_block_id"]) do
+                place = %{
+                  "session_id" => b["session_id"],
+                  "window_id" => b["window_id"],
+                  "page_block_id" => b["page_block_id"],
+                  "family" => root,
+                  "fiber" => b["fiber"] || root,
+                  "depth" => entry.depth,
+                  "asked_at" => reused_place && reused_place["asked_at"],
+                  "page_closed" => false
+                }
+
+                Bindings.put_place(uid, place, server)
+              end
+
+              {:ok, b, created_session?}
 
             error ->
               result =
                 launch_cleanup(error, fn ->
-                  Rex.close_window(runner, b["session_id"], b["window_id"])
+                  if reused_place != nil do
+                    Rex.call(runner, "block.close", %{"block_id" => b["block_id"]},
+                      session: b["session_id"]
+                    )
+                  else
+                    Rex.close_window(runner, b["session_id"], b["window_id"])
+                  end
                 end)
 
-              cleanup_family(runner, root, b["session_id"])
+              if reused_place == nil, do: cleanup_family(runner, root, b["session_id"])
               result
           end
         end
@@ -343,6 +446,9 @@ defmodule Shuttle.Terminal.Rex do
     end)
     |> keep_retained_last(runner)
   end
+
+  defp chat_block_layout(%{"split" => %{"before" => chat}}), do: chat
+  defp chat_block_layout(layout), do: layout
 
   # A new family session's binding is stored; the retained sessions move below it.
   defp keep_retained_last({:ok, b, true}, runner) do
@@ -534,7 +640,13 @@ defmodule Shuttle.Terminal.Rex do
           {:error, :not_found}
 
         %{"window_id" => wid} when is_binary(wid) ->
-          Rex.close_window(runner, b["session_id"], wid)
+          if pages_enabled?() and is_binary(b["family"]) do
+            Rex.call(runner, "block.close", %{"block_id" => b["block_id"]},
+              session: b["session_id"]
+            )
+          else
+            Rex.close_window(runner, b["session_id"], wid)
+          end
 
         _hidden ->
           Rex.call(runner, "block.close", %{"block_id" => b["block_id"]},
@@ -617,6 +729,20 @@ defmodule Shuttle.Terminal.Rex do
   defp retire_viewer_session(_, _, _), do: :ok
 
   defp cleanup_family(runner, root, sid) do
+    with {:ok, doc} <- Bindings.read() do
+      has_place? =
+        pages_enabled?() and
+          Enum.any?(doc["places"] || %{}, fn {_, p} -> p["family"] == root end)
+
+      if has_place? do
+        :ok
+      else
+        cleanup_family_now(runner, root, sid)
+      end
+    end
+  end
+
+  defp cleanup_family_now(runner, root, sid) do
     with {:ok, doc} <- Bindings.read() do
       if get_in(doc, ["families", root]) == sid do
         case Rex.windows(runner, sid) do
@@ -1345,9 +1471,14 @@ defmodule Shuttle.Terminal.Rex do
         {:ok, if(opts[:live_window], do: Map.put(b, "window_id", block["window_id"]), else: b)}
       else
         if is_binary(b["family"]) and is_binary(b["window_id"]) and name != nil do
-          with :ok <- retire_worker_window(runner, b),
-               :ok <- Bindings.delete(name, b),
-               do: {:error, :not_found}
+          if pages_enabled?() do
+            # With pages on, the worker owned only its chat block; the [page] tab stays.
+            with :ok <- Bindings.delete(name, b), do: {:error, :not_found}
+          else
+            with :ok <- retire_worker_window(runner, b),
+                 :ok <- Bindings.delete(name, b),
+                 do: {:error, :not_found}
+          end
         else
           missing_block(runner, name, b, blocks)
         end
@@ -1356,16 +1487,26 @@ defmodule Shuttle.Terminal.Rex do
   end
 
   defp retire_worker_window(runner, b) do
-    family_lock(b["family"], fn ->
-      result =
-        case Rex.close_window(runner, b["session_id"], b["window_id"]) do
-          {:ok, _} -> :ok
-          {:error, :not_found} -> :ok
-          error -> error
-        end
+    if pages_enabled?() do
+      case Rex.call(runner, "block.close", %{"block_id" => b["block_id"]},
+             session: b["session_id"]
+           ) do
+        {:ok, _} -> :ok
+        {:error, :not_found} -> :ok
+        error -> error
+      end
+    else
+      family_lock(b["family"], fn ->
+        result =
+          case Rex.close_window(runner, b["session_id"], b["window_id"]) do
+            {:ok, _} -> :ok
+            {:error, :not_found} -> :ok
+            error -> error
+          end
 
-      with :ok <- result, do: cleanup_family(runner, b["family"], b["session_id"])
-    end)
+        with :ok <- result, do: cleanup_family(runner, b["family"], b["session_id"])
+      end)
+    end
   end
 
   defp missing_block(runner, name, b, blocks) do

@@ -211,15 +211,19 @@ defmodule Shuttle.Terminal.RexTree do
                ),
              :ok <- relabel_windows(runner, sid, windows, view),
              :ok <- relabel_blocks(runner, sid, windows) do
-          desired = windows |> Enum.map(& &1.window_id) |> Enum.reject(&is_nil/1) |> Enum.uniq()
-          current = Enum.map(view, & &1["window_id"])
-
-          if desired == Enum.take(current, -length(desired)) do
+          if match?({:ok, _}, Shuttle.Host.pages()) do
             :ok
           else
-            each(desired, fn wid ->
-              Rex.call(runner, "session.move_window", %{"window_id" => wid}, session: sid)
-            end)
+            desired = windows |> Enum.map(& &1.window_id) |> Enum.reject(&is_nil/1) |> Enum.uniq()
+            current = Enum.map(view, & &1["window_id"])
+
+            if desired == Enum.take(current, -length(desired)) do
+              :ok
+            else
+              each(desired, fn wid ->
+                Rex.call(runner, "session.move_window", %{"window_id" => wid}, session: sid)
+              end)
+            end
           end
         end
 

@@ -172,6 +172,18 @@ defmodule Shuttle.RexViewTest do
              "career-futures"
   end
 
+  test "with pages enabled, 30-minute hiding is a no-op", %{tmp_dir: dir} do
+    sid = family()
+    show(sid, @hub)
+    host = Path.join(dir, "host.json")
+    File.write!(host, ~s({"pages":{"enabled":true,"base":"http://hub.test:4000"}}))
+    Env.put_env("SHUTTLE_HOST_CONFIG_FILE", host)
+
+    assert {:ok, %{}} = RexView.sweep(FakeRex, %{}, now: 0, grace_ms: 0)
+    assert Enum.sort(placed(sid)) == Enum.sort([@hub, @kid, "shell"])
+    assert requests("session.detach_block") == []
+  end
+
   defp requests(method) do
     for {_bin, args, opts} <- FakeRex.calls(), method in args, do: Jason.decode!(opts[:input])
   end
