@@ -1,5 +1,6 @@
 defmodule Shuttle.RetainedTerminal do
   @moduledoc "Rex auxiliary launches with durable ownership, exit receipts and output."
+  require Logger
   alias Shuttle.{Env, FS, Rex}
 
   def rex?(opts \\ []),
@@ -31,11 +32,47 @@ defmodule Shuttle.RetainedTerminal do
              {:ok, reply} <- Rex.create(runner, spec),
              {:ok, record} <- bind(record, reply),
              :ok <- write(name, record, opts) do
+          keep_last(runner, opts)
           :ok
         end
       else
         {:ok, _} -> {:error, :already_started}
         error -> error
+      end
+    end)
+  end
+
+  @doc """
+  Move the retained sessions (Remote Control, Hark) to the end of Rex's
+  session list, keeping their relative order, so the sessions Shuttle creates
+  for workers sit above them. A failed move only costs the ordering.
+  """
+  def keep_last(runner, opts \\ []) do
+    ids =
+      for file <- Path.wildcard(Path.join(root(opts), "*.json")),
+          {:ok, json} <- [FS.read(file)],
+          {:ok, %{"session_id" => sid}} <- [Jason.decode(json)],
+          do: sid
+
+    with false <- ids == [],
+         {:ok, sessions} <- Rex.sessions(runner),
+         order = Enum.map(sessions, & &1["session_id"]),
+         retained = Enum.filter(order, &(&1 in ids)),
+         false <- Enum.take(order, -length(retained)) == retained,
+         :ok <- move_each_last(runner, retained) do
+      :ok
+    else
+      true -> :ok
+      error -> Logger.warning("Cannot move retained Rex sessions last: #{inspect(error)}")
+    end
+  end
+
+  # An index past the end moves a session last.
+  defp move_each_last(runner, sids) do
+    Enum.reduce_while(sids, :ok, fn sid, :ok ->
+      case Rex.command(runner, ["session", "move", sid, "--index", "999"]) do
+        {:ok, _} -> {:cont, :ok}
+        error -> {:halt, error}
       end
     end)
   end

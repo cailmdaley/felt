@@ -297,6 +297,7 @@ defmodule Shuttle.Terminal.Rex do
                    {:ok, b} <- created_binding(reply) do
                 case Bindings.put_family(root, b["session_id"], server) do
                   :ok ->
+                    Shuttle.RetainedTerminal.keep_last(runner)
                     {:ok, b}
 
                   error ->

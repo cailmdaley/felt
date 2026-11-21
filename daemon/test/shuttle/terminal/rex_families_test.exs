@@ -195,6 +195,35 @@ defmodule Shuttle.Terminal.RexFamiliesTest do
     assert Enum.sort(names) == ["a", "b"]
   end
 
+  test "a new family session lands above the retained sessions", %{tmp_dir: dir} do
+    retained = for name <- ["remote", "hark"], do: start_retained(name, dir)
+
+    FakeRex.sessions(
+      Map.put(FakeRex.state().sessions, "session:human", %{label: "human", blocks: []})
+    )
+
+    assert :ok = launch("a", @root <> "/a")
+    assert {:ok, sessions} = Rex.sessions(FakeRex)
+    assert ["session:human", sid | ^retained] = Enum.map(sessions, & &1["session_id"])
+    assert {:ok, %{"families" => %{@root => ^sid}}} = RexBindings.read()
+    assert moved_sessions() == retained
+
+    assert :ok = launch("b", @root <> "/b")
+    assert moved_sessions() == retained
+  end
+
+  defp start_retained(name, dir) do
+    assert :ok = Shuttle.RetainedTerminal.start(name, dir, ["sleep", "60"], %{}, FakeRex)
+    path = Path.join([dir, "retained", name <> ".json"])
+    path |> File.read!() |> Jason.decode!() |> Map.fetch!("session_id")
+  end
+
+  defp moved_sessions do
+    for {_, args, _} <- FakeRex.calls(),
+        ["session", "move", sid | _] <- [Enum.drop_while(args, &(&1 != "session"))],
+        do: sid
+  end
+
   test "concurrent sibling launches create exactly one family session" do
     tasks = for n <- 1..6, do: Task.async(fn -> launch("worker-#{n}", @root <> "/a") end)
     for task <- tasks, do: assert(Task.await(task, 30_000) == :ok)

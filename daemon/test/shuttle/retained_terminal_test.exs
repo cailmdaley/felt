@@ -171,6 +171,27 @@ defmodule Shuttle.RetainedTerminalTest do
              RetainedTerminal.observe("capture", FakeRex, opts)
   end
 
+  test "a retained start moves the retained sessions last and leaves the others in order", %{
+    tmp_dir: dir,
+    opts: opts
+  } do
+    assert :ok = RetainedTerminal.start("one", dir, ["sleep", "30"], %{}, FakeRex, opts)
+
+    FakeRex.sessions(
+      Map.put(FakeRex.state().sessions, "session:human", %{label: "human", blocks: []})
+    )
+
+    assert :ok = RetainedTerminal.start("two", dir, ["sleep", "30"], %{}, FakeRex, opts)
+    assert {:ok, sessions} = Shuttle.Rex.sessions(FakeRex)
+    assert ["human", "one@" <> _, "two@" <> _] = Enum.map(sessions, & &1["label"])
+    assert length(moves()) == 2
+
+    assert :ok = RetainedTerminal.keep_last(FakeRex, opts)
+    assert length(moves()) == 2
+  end
+
+  defp moves, do: Enum.filter(FakeRex.calls(), fn {_, args, _} -> "move" in args end)
+
   defp live_child_fixture(dir, opts) do
     Env.put_app_env(:os_type, {:unix, :linux})
     proc = Path.join(dir, "proc")
@@ -227,5 +248,15 @@ defmodule Shuttle.RetainedTerminalRealTest do
     end)
 
     assert :ok = RetainedTerminal.stop("input", @runner, opts)
+  end
+
+  test "retained sessions move after a session created later", %{tmp_dir: dir} do
+    IsolatedRex.start(dir)
+    opts = [state_dir: Path.join(dir, "retained")]
+    assert :ok = RetainedTerminal.start("one", dir, ["sleep", "30"], %{}, @runner, opts)
+    assert {:ok, _} = Rex.create(@runner, %{"label" => "human"})
+    assert :ok = RetainedTerminal.start("two", dir, ["sleep", "30"], %{}, @runner, opts)
+    assert {:ok, sessions} = Rex.sessions(@runner)
+    assert ["human", "one@" <> _, "two@" <> _] = Enum.map(sessions, & &1["label"])
   end
 end

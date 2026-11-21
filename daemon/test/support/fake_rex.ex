@@ -53,9 +53,14 @@ defmodule Shuttle.Test.FakeRex do
   defp request("open", args, _), do: {"open", args, nil}
 
   defp request(_, args, opts) do
-    args = Enum.drop_while(args, &(&1 not in ["api", "whoami", "client", "send-key", "server"]))
+    args =
+      Enum.drop_while(
+        args,
+        &(&1 not in ["api", "whoami", "client", "send-key", "server", "session"])
+      )
 
     case args do
+      ["session", "move", sid, "--index", _] -> {"session.move", %{"session_id" => sid}, sid}
       ["api", "call", "-s", sid, method, "-"] -> {method, Jason.decode!(opts[:input]), sid}
       ["api", "call", method, "-"] -> {method, Jason.decode!(opts[:input]), nil}
       ["server", "start" | args] -> {"server.start", args, nil}

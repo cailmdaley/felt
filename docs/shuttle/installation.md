@@ -834,6 +834,7 @@ Shuttle only starts missing servers; it never stops a Rex server.
 `rex server stop` ends **every session** on that server, and a running server keeps its version until it stops.
 Shuttle observes existing tmux workers on a Rex host when tmux is available, but launches new terminal workers in Rex.
 Claude Remote Control and Listen's Hark recorder use Rex blocks on Rex hosts.
+Their sessions stay at the end of Rex's session list: when Shuttle creates a session, it moves them below it, and it moves nothing else.
 Shuttle records launch metadata, exit status and output under its data directory. A Rex server restart makes an interrupted capture fail while preserving its transcript; Remote Control retries automatically.
 On macOS tmux-primary hosts, Kitty launches the tmux anchor; a Rex host needs none.
 See [Opening conversations](conversations.md) for attach and remote limitations.
