@@ -143,7 +143,7 @@ async function report(doc = documents[0]): Promise<HTMLIFrameElement> {
 }
 
 it('routes board links through the parent while keeping ordinary fragments local', async () => {
-  reportHtml = `<a href="#/board/alpha@host-a">route</a><a href="http://workspace.test/#/board/beta@host-b">absolute</a><a href="#section">section</a><div id="section"></div>`
+  reportHtml = `<a href="#/board/alpha@host-a">route</a><a href="http://workspace.test/#/board/beta@host-b">absolute</a><a href="#/chronicle">chronicle</a><a href="#/globe">globe</a><a href="#section">section</a><div id="section"></div>`
   const frame = await report()
   const win = frame.contentWindow!
   win.postMessage({ protocol: 'shuttle-document', version: 1, type: 'active', payload: { active: true } }, '*')
@@ -152,10 +152,14 @@ it('routes board links through the parent while keeping ordinary fragments local
   expect(messages).toHaveBeenCalledWith(expect.objectContaining({ type: 'navigate', payload: { href: '#/board/alpha@host-a' } }), '*')
   links[1].click()
   expect(messages).toHaveBeenCalledWith(expect.objectContaining({ type: 'navigate', payload: { href: '#/board/beta@host-b' } }), '*')
+  links[2].click()
+  expect(messages).toHaveBeenCalledWith(expect.objectContaining({ type: 'navigate', payload: { href: '#/chronicle' } }), '*')
+  links[3].click()
+  expect(messages).toHaveBeenCalledWith(expect.objectContaining({ type: 'navigate', payload: { href: '#/globe' } }), '*')
   messages.mockClear()
   const section = frame.contentDocument!.getElementById('section')!
   section.scrollIntoView = vi.fn()
-  links[2].click()
+  links[4].click()
   expect(section.scrollIntoView).toHaveBeenCalledOnce()
   expect(messages).not.toHaveBeenCalled()
 })

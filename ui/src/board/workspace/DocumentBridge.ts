@@ -433,7 +433,7 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
     if (!routeHash) {
       try { const url = new URL(href); if (url.origin === boardOrigin) routeHash = url.hash } catch { /* Relative files remain files. */ }
     }
-    if (active && href.length <= 4096 && (routeHash === '#/desk' || routeHash === '#/channels' || parseBoardRoute(routeHash))) {
+    if (active && href.length <= 4096 && (routeHash === '#/desk' || routeHash === '#/channels' || routeHash === '#/chronicle' || routeHash === '#/globe' || parseBoardRoute(routeHash))) {
       event.preventDefault()
       event.stopImmediatePropagation()
       send('navigate', { href: routeHash })
