@@ -83,9 +83,10 @@ defmodule ShuttleWeb.ReadinessTest do
     assert %{"error" => _} = Jason.decode!(conn.resp_body)
   end
 
-  test "board shell, message files, HEAD version and session discovery remain available" do
+  test "board shell, thread page, message files, HEAD version and session discovery remain available" do
     for {method, path} <- [
           {:get, "/"},
+          {:get, "/thread"},
           {:head, "/api/v1/version"},
           {:post, "/api/v1/messages/files"},
           {:get, "/api/v1/peers"},
@@ -100,6 +101,10 @@ defmodule ShuttleWeb.ReadinessTest do
     shell = get(api_conn(), "/")
     refute shell.status == 503
     refute shell.resp_body =~ "\"error\":\"booting\""
+
+    # A thread pane opened or reloaded mid-restart gets its page, which waits for the API.
+    page = get(api_conn(), "/thread?f=01J00000000000000000000000@hub")
+    refute page.status == 503
 
     # HEAD follows GET's version exemption and keeps the response body empty.
     head = head(api_conn(), "/api/v1/version")

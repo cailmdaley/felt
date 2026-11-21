@@ -12,6 +12,13 @@ defmodule ShuttleWeb.SpaController do
   use Phoenix.Controller, formats: [:html]
 
   def index(conn, _params), do: page(conn, "index.html")
+
+  # `/thread/` would resolve the bundle's relative assets under `/thread/`.
+  def pages(%Plug.Conn{request_path: "/thread/"} = conn, _params) do
+    query = if conn.query_string == "", do: "", else: "?" <> conn.query_string
+    redirect(conn, to: "/thread" <> query)
+  end
+
   def pages(conn, _params), do: page(conn, "pages.html")
 
   defp page(conn, file) do
