@@ -35,6 +35,7 @@ describe('the thread page', () => {
   let requests: Array<{ url: string; method: string; body?: string; headers: Headers }>
   let go: { went: boolean; place: string }
   let serveFiles: ((url: string, method: string, headers: Headers) => Response) | undefined
+  let boardRecords: Array<{ id: string; kind: string; fiber: string; by: { fiber?: string; label?: string }; to?: { label?: string; fiber?: string }; text?: string; timestamp: number; originName: string }>
   let sentFiles: Array<{ fullPath: string; basename: string; timestamp: number; sessionId: string; uid: string; host: string; show?: boolean; caption?: string }>
   let feeds: PageFeed[]
   let pages: ThreadPage[]
@@ -48,6 +49,7 @@ describe('the thread page', () => {
     addThreadFixtures(example, now)
     const composite = servedFeed(example.feed, now)
     requests = []
+    boardRecords = []
     sentFiles = []
     feeds = []
     serveFiles = undefined
@@ -58,7 +60,7 @@ describe('the thread page', () => {
       requests.push({ url, method, body: init.body as string | undefined, headers })
       const json = (body: unknown, extra: Record<string, string> = {}): Response => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json', ...extra } })
       if (url.startsWith('/api/v1/fibers/composite')) return headers.get('If-None-Match') === '"v1"' ? new Response(null, { status: 304 }) : json(composite, { ETag: '"v1"' })
-      if (url.startsWith('/api/v1/board/family')) return json({ family: WORKSPACE_UID, records: [], waiting: {}, reach_ms: 14 * 86_400_000 })
+      if (url.startsWith('/api/v1/board/family')) return json({ family: WORKSPACE_UID, records: boardRecords, waiting: {}, reach_ms: 14 * 86_400_000 })
       if (url.startsWith('/api/v1/sent-files/all/composite')) return json({ files: sentFiles, origins: {} })
       if (url.startsWith('/api/v1/file') && serveFiles) return serveFiles(url, method, headers)
       if (url === '/api/v1/go' && method === 'POST') return json(go)
@@ -320,6 +322,76 @@ describe('the thread page', () => {
       const latest = JSON.parse(posts().filter(each => each.url === '/api/v1/dispatch').at(-1)!.body!) as Record<string, unknown>
       expect(latest.resume_mode).toBe('fresh')
     }
+  })
+
+  it('defaults a family root to Posts mode, renders its stream, routes post clicks through go/navigate, toggles to Tapestry/Files, and sends composer messages via dispatch', async () => {
+    boardRecords = [
+      { id: 'rec-1', kind: 'post', fiber: 'thread-analysis', by: { fiber: 'thread-analysis' }, to: { label: 'human' }, text: 'Analysis finished at 9 sigma.', timestamp: now - 10_000, originName: WORKSPACE_HOST },
+      { id: 'rec-archived', kind: 'post', fiber: 'thread-archive', by: { fiber: 'thread-archive' }, to: { label: 'human' }, text: 'Should not show.', timestamp: now - 5_000, originName: WORKSPACE_HOST },
+    ]
+    const { page, navigate } = await open(`?f=${WORKSPACE_UID}@${WORKSPACE_HOST}&in=rex`)
+    const modes = page.el.querySelector<HTMLElement>('.pg-modes')!
+    const postsPane = page.el.querySelector<HTMLElement>('.pg-posts')!
+    const familyPane = page.el.querySelector<HTMLElement>('.ws-family-page')!
+    const postsTab = page.el.querySelector<HTMLButtonElement>('.pg-mode-pill[data-mode="posts"]')!
+    const filesTab = page.el.querySelector<HTMLButtonElement>('.pg-mode-pill[data-mode="files"]')!
+
+    expect(modes.hidden).toBe(false)
+    expect(postsTab.getAttribute('aria-selected')).toBe('true')
+    expect(postsPane.hidden).toBe(false)
+    expect(familyPane.hidden).toBe(true)
+
+    // Renders non-archived family post and excludes tempered fiber's post.
+    const items = [...postsPane.querySelectorAll<HTMLElement>('.kbn-ch-item')]
+    const analysisItem = items.find(each => each.textContent?.includes('Analysis finished at 9 sigma.'))
+    expect(analysisItem).toBeDefined()
+    expect(postsPane.textContent).not.toContain('Should not show.')
+
+    // Clicking a post link in Rex mode posts /api/v1/go.
+    analysisItem!.querySelector<HTMLButtonElement>('[data-item]')!.click()
+    await settle()
+    expect(posts().filter(each => each.url === '/api/v1/go').map(each => JSON.parse(each.body!)))
+      .toStrictEqual([{ fiber_id: 'thread-analysis', origin: WORKSPACE_HOST }])
+    expect(navigate).not.toHaveBeenCalled()
+
+    // Compact composer sends user_message to the family root via /api/v1/dispatch.
+    const input = postsPane.querySelector<HTMLTextAreaElement>('.pg-composer-input')!
+    const sendBtn = postsPane.querySelector<HTMLButtonElement>('.pg-composer-send')!
+    input.value = 'Check the null tests'
+    sendBtn.click()
+    await settle(); await settle()
+    const dispatches = posts().filter(each => each.url === '/api/v1/dispatch')
+    expect(dispatches).toHaveLength(1)
+    const dispatchBody = JSON.parse(dispatches[0]!.body!) as Record<string, unknown>
+    expect(dispatchBody.user_message).toBe('Check the null tests')
+    expect(dispatchBody.resume_mode).toBe('previous')
+    expect(dispatchBody.origin).toBe(WORKSPACE_HOST)
+    expect(input.value).toBe('')
+
+    // Toggling to Tapestry / Files hides Posts and shows FamilyPage.
+    filesTab.click()
+    expect(filesTab.getAttribute('aria-selected')).toBe('true')
+    expect(postsPane.hidden).toBe(true)
+    expect(familyPane.hidden).toBe(false)
+
+    // In a browser (no in=rex), clicking a post link navigates instead of calling /api/v1/go.
+    const { page: browserPage, navigate: browserNav } = await open(`?f=${WORKSPACE_UID}@${WORKSPACE_HOST}`)
+    const browserAnalysis = [...browserPage.el.querySelectorAll<HTMLElement>('.pg-posts .kbn-ch-item')].find(each => each.textContent?.includes('Analysis finished at 9 sigma.'))!
+    browserAnalysis.querySelector<HTMLButtonElement>('[data-item]')!.click()
+    expect(browserNav).toHaveBeenCalledWith(`${window.location.origin}/thread?f=thread-analysis%40${WORKSPACE_HOST}`)
+
+    // A non-root thread with a subtree offers Posts mode, defaulting to Tapestry / Files.
+    const { page: subPage } = await open(`?f=thread-analysis@${WORKSPACE_HOST}`)
+    expect(subPage.el.querySelector<HTMLElement>('.pg-modes')!.hidden).toBe(false)
+    expect(subPage.el.querySelector<HTMLButtonElement>('.pg-mode-pill[data-mode="files"]')!.getAttribute('aria-selected')).toBe('true')
+    expect(subPage.el.querySelector<HTMLElement>('.pg-posts')!.hidden).toBe(true)
+    expect(subPage.el.querySelector<HTMLElement>('.ws-family-page')!.hidden).toBe(false)
+
+    // A leaf thread (not a family root, no descendants) hides the mode bar and Posts pane.
+    const { page: leafPage } = await open(`?f=thread-review@${WORKSPACE_HOST}`)
+    expect(leafPage.el.querySelector<HTMLElement>('.pg-modes')!.hidden).toBe(true)
+    expect(leafPage.el.querySelector<HTMLElement>('.pg-posts')!.hidden).toBe(true)
+    expect(leafPage.el.querySelector<HTMLElement>('.ws-family-page')!.hidden).toBe(false)
   })
 })
 

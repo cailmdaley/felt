@@ -5,7 +5,73 @@
 .pg-thread > .ws-family-page[hidden] { display: none; }
 /* What the page cannot show: a quiet line in its place. */
 .pg-status { margin: 10px 24px 0; color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-ui) var(--font-serif); }
-.pg-status[hidden], .pg-said[hidden], .pg-worker-strip[hidden] { display: none; }
+.pg-status[hidden], .pg-said[hidden], .pg-worker-strip[hidden], .pg-modes[hidden], .pg-posts[hidden], .pg-composer[hidden] { display: none; }
+/* Mode pills (Posts / Tapestry & Files) on family roots and subtrees. */
+.pg-modes {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+  padding: 8px 16px 6px;
+  border-bottom: 1px solid var(--ws-hairline);
+  background: var(--ws-paper);
+}
+.pg-mode-pill {
+  appearance: none;
+  border: 1px solid var(--ws-hairline);
+  border-radius: var(--ws-control-radius);
+  background: transparent;
+  color: var(--ws-ink-muted);
+  padding: 3px 10px;
+  font: var(--type-note)/var(--leading-ui) var(--font-serif);
+  cursor: pointer;
+}
+.pg-mode-pill[data-active] {
+  color: var(--ws-ink);
+  border-color: var(--ws-ink-muted);
+  background: var(--ws-surface, rgba(0, 0, 0, 0.04));
+}
+/* Family Posts stream and compact composer. */
+.pg-posts {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.pg-posts > .kbn-ch-stream {
+  flex: 1;
+  min-height: 0;
+}
+.pg-composer {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  padding: 8px 16px 10px;
+  border-top: 1px solid var(--ws-hairline);
+  background: var(--ws-paper);
+}
+.pg-composer-input {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  padding: 6px 8px;
+  border: 1px solid var(--ws-hairline);
+  border-radius: var(--ws-control-radius);
+  background: var(--ws-paper);
+  color: var(--ws-ink);
+  font: var(--type-row)/var(--leading-ui) var(--font-serif);
+}
+.pg-composer-send {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  border: 1px solid var(--ws-hairline);
+  border-radius: var(--ws-control-radius);
+  background: var(--ws-paper);
+  color: var(--ws-ink);
+  font: var(--type-note)/var(--leading-ui) var(--font-serif);
+  cursor: pointer;
+}
+.pg-composer-send:disabled { opacity: 0.5; cursor: default; }
 /* Resume / New session strip at the foot of a quiet thread's page. */
 .pg-worker-strip {
   flex: 0 0 auto;
