@@ -58,6 +58,10 @@ describe('workspace file viewer hooks', () => {
     // A rule later in the prose stays a rule.
     watch.content!('Above.\n\n---\n\nBelow.\n')
     expect(viewer.querySelectorAll('hr')).toHaveLength(1)
+    // A file that opens on a rule keeps the prose between it and the next.
+    watch.content!('---\n\nKept.\n\n---\n\nAfter.\n')
+    expect([...viewer.querySelectorAll('p')].map(each => each.textContent)).toStrictEqual(['Kept.', 'After.'])
+    expect(viewer.querySelectorAll('hr')).toHaveLength(2)
     disposeFileViewer(viewer)
   })
   it('reloads a rewritten change through the live watcher with a new review identity', async () => {
