@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   ascByKey,
   civilDayAt,
-  civilDaySpan,
   clockSeconds,
   descByKey,
   dueCivilDay,
@@ -14,7 +13,7 @@ import {
   zone,
 } from './civilDay.js';
 import { effectiveHorizon } from './KanbanRules.js';
-import { buildTimelineDays, formatDue } from './KanbanSurfaces.js';
+import { formatDue } from './KanbanSurfaces.js';
 import {
   byClosedAtDesc,
   byCreatedAtDesc,
@@ -196,40 +195,6 @@ describe('the board comparators, over cards from two continents', () => {
   });
 });
 
-describe('the timeline strip across a DST transition', () => {
-  // Autumn 2026: Europe/Paris falls back on Oct 25, America/Los_Angeles on
-  // Nov 1. A fixed 86_400_000 ms stride over instants drifts an hour at the
-  // transition and then repeats a civil day while skipping another — and a
-  // skipped column is a card that VANISHES, because its due day finds nothing
-  // to land on. The strip strides civil days, so no zone enters it.
-  const days = buildTimelineDays(30, 30, '2026-10-15');
-
-  /** The expected civil days, generated in UTC where no DST exists. */
-  const expected = (() => {
-    const out: string[] = [];
-    let t = Date.UTC(2026, 8, 15); // Sep 15 — 30 days before Oct 15
-    for (let i = 0; i <= 60; i += 1) {
-      out.push(new Date(t).toISOString().slice(0, 10));
-      t += 86_400_000;
-    }
-    return out;
-  })();
-
-  it('spans one column per calendar day, none missing, none repeated', () => {
-    expect(days.map((d) => d.iso)).toEqual(expected);
-    expect(new Set(days.map((d) => d.iso)).size).toBe(days.length);
-  });
-
-  it('keeps today on the today column and the past/future split honest', () => {
-    expect(days[30].iso).toBe('2026-10-15');
-    expect(days[30].isToday).toBe(true);
-    expect(days.filter((d) => d.isPast)).toHaveLength(30);
-    // Oct 18 2026 is a Sunday: the weekend and the week boundary.
-    const sunday = days.find((d) => d.iso === '2026-10-18')!;
-    expect([sunday.isWeekend, sunday.weekBoundary, sunday.label]).toEqual([true, true, '18']);
-  });
-});
-
 describe('civilDayAt', () => {
   it('materializes a civil day as the zone’s midnight, never UTC midnight', () => {
     expect(civilDayAt('2026-07-30', 0, LA)).toBe(Date.parse('2026-07-30T07:00:00Z'));
@@ -239,14 +204,6 @@ describe('civilDayAt', () => {
   it('starts a spring-forward day whose midnight does not exist at its first instant', () => {
     // Santiago moves 00:00 → 01:00 on 2026-09-06.
     expect(civilDayAt('2026-09-06', 0, zone('America/Santiago'))).toBe(Date.parse('2026-09-06T04:00:00Z'));
-  });
-
-  it('spans a DST day by its real length', () => {
-    // 2026-03-08 is 23 hours in Los Angeles, 2026-11-01 is 25.
-    for (const [day, hours] of [['2026-03-08', 23], ['2026-11-01', 25], ['2026-07-30', 24]] as const) {
-      const [from, to] = civilDaySpan(day, day, LA);
-      expect(to + 1000 - from, day).toBe(hours * 3_600_000);
-    }
   });
 
   it('is undefined for anything that is not a bare civil day', () => {

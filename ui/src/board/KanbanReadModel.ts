@@ -311,17 +311,6 @@ function byNameAsc(a: KanbanCard, b: KanbanCard): number {
   return a.name.localeCompare(b.name) || byCardIdentity(a, b);
 }
 
-/**
- * Every top-level at rest, in one list: work put down (`horizon: stashed`,
- * or a standing constitution whose schedule is paused, on `resp.stash`) and
- * standing constitutions asleep between runs (on `resp.timeline.futureDated`,
- * filed by their next launch).
- */
-export function restingCards(resp: KanbanResponse | null): KanbanCard[] {
-  if (!resp) return [];
-  return [...resp.stash, ...resp.timeline.futureDated];
-}
-
 /** True when this card is a standing constitution asleep between runs — armed, no live
  *  worker, waiting on its own cron. The Resting region says so differently from
  *  a snooze, and `nextLaunchAt` is the day it names. */

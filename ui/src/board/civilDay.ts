@@ -253,39 +253,6 @@ export function wallClock(
   return { hour: w.getUTCHours(), minute: w.getUTCMinutes(), second: w.getUTCSeconds() }
 }
 
-/** The hour a rail opens, and the next one closes. Work past midnight belongs
- *  to the day it started, so the day boundary is dawn, not midnight. Every
- *  surface that asks "which day is it" draws from this one value — two
- *  surfaces disagreeing about which day it is, is the defect it exists to
- *  prevent. */
-export const RAIL_START_HOUR = 6
-
-/**
- * The civil day whose RAIL contains an instant — the "which day is it" a view
- * whose day begins at dawn has to ask.
- *
- * A day rail runs `startHour → startHour`, because work that runs past midnight
- * belongs to the evening it grew from. That makes this a different question
- * from {@link isoDayLocal}: at 02:00 on Wednesday the rail being worked is
- * TUESDAY's. Asking the midnight question while drawing the dawn one puts
- * "today" on a column that has not started yet and inks the night's work one
- * column past its own today line.
- *
- * The boundary is a WALL-CLOCK hour, so this reads the wall hour and steps back
- * a calendar day rather than subtracting `startHour` hours of milliseconds. On
- * a DST day those are not the same thing, and only the wall-clock reading
- * agrees with the rail the view actually drew ({@link railBounds}).
- */
-export function railCivilDay(
-  ms: number,
-  startHour = RAIL_START_HOUR,
-  z: Zone = hostZone(),
-): string {
-  const w = wall(ms, z)
-  const day = isoOfWall(w)
-  return w.getUTCHours() >= startHour ? day : shiftCivilDay(day, -1)
-}
-
 // ── Civil day → instant ──────────────────────────────────────────────────────
 
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -321,49 +288,6 @@ export function civilDayAt(
 ): number | undefined {
   const utc = civilUtc(day)
   return utc === undefined ? undefined : wallToInstant(utc + hour * HOUR_MS, z)
-}
-
-/**
- * The instant span one civil day's rail covers: `RAIL_START_HOUR` on the day
- * to `RAIL_START_HOUR` on the next. Both edges are real wall-clock times, so a
- * DST rail is genuinely 23h or 25h long and everything positioned on it by
- * time fraction stays in the right place; consecutive rails abut exactly.
- *
- * Unparseable input yields `{0, 0}`; a caller that needs a different fallback
- * must validate before calling.
- */
-export function railBounds(day: string, z: Zone = hostZone()): { startMs: number; endMs: number } {
-  const startMs = civilDayAt(day, RAIL_START_HOUR, z)
-  const endMs = civilDayAt(shiftCivilDay(day, 1), RAIL_START_HOUR, z)
-  if (startMs === undefined || endMs === undefined) return { startMs: 0, endMs: 0 }
-  return { startMs, endMs }
-}
-
-/** The instants a run of civil days covers in a zone, both ends included:
- *  the start of `first` to the last second of `last`. An end that is not a
- *  civil day reads as the epoch. */
-export function civilDaySpan(first: string, last: string, z: Zone = hostZone()): [number, number] {
-  const fromMs = civilDayAt(first, 0, z) ?? 0
-  const after = civilDayAt(shiftCivilDay(last, 1), 0, z)
-  return [fromMs, after === undefined ? 0 : after - 1000]
-}
-
-/**
- * {@link railCivilDay} for a run of instants — the shape of the views'
- * per-minute folding passes. It remembers the last rail's `[start, end)` and
- * answers any instant inside it by comparison alone, so a day's worth of
- * minutes costs one wall-clock reading, not fourteen hundred.
- */
-export function railDayReader(z: Zone = hostZone()): (ms: number) => string {
-  let day = ''
-  let startMs = 0
-  let endMs = 0
-  return (ms) => {
-    if (ms >= startMs && ms < endMs) return day
-    day = railCivilDay(ms, RAIL_START_HOUR, z)
-    ;({ startMs, endMs } = railBounds(day, z))
-    return day
-  }
 }
 
 // ── Civil-day arithmetic — no zone ───────────────────────────────────────────

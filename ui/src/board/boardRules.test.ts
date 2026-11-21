@@ -17,7 +17,7 @@ import {
 import type { Fiber } from './KanbanFiber.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { boardFrom, type FeedOf, type FeedRow } from './testFixtures.js'
-import { isSleepingOnSchedule, restingCards } from './KanbanReadModel.js'
+import { isSleepingOnSchedule } from './KanbanReadModel.js'
 import { sessionWindow, stripFacts } from './workspace/Dock.js'
 import { civilDayAt, isoDayLocal, shiftCivilDay } from './civilDay.js'
 
@@ -719,6 +719,7 @@ describe('Resting holds standing constitutions asleep between runs', () => {
       { host: 'laptop', entries, origins: { laptop: { kind: 'local', stale: false, fiberCount: entries.length } } },
       { nowMs: NOW },
     )
+  const restingCards = (resp: KanbanResponse): KanbanCard[] => [...resp.stash, ...resp.timeline.futureDated]
 
   it('draws an armed standing constitution in Resting, with a next launch to show', () => {
     const resp = boardOf([role()])

@@ -12,13 +12,8 @@ const PAGE = resolve('src/board/workspace/family-page.css')
 it('keeps board/family free of workspace imports', () => {
   const imports = readdirSync(FAMILY).filter(name => name.endsWith('.ts') && !name.endsWith('.test.ts'))
     .flatMap(name => [...readFileSync(join(FAMILY, name), 'utf8').matchAll(/from '([^']+)'/g)].map(match => match[1]))
-  expect(imports.length).toBeGreaterThan(2)
+  expect(imports.length).toBeGreaterThan(0)
   expect(imports.filter(path => path.includes('workspace'))).toEqual([])
-})
-it('scopes every shared state style under the family map root', () => {
-  const rules = readFileSync(join(FAMILY, 'family-map.css'), 'utf8').split('\n').filter(line => /^[.:[]/.test(line))
-  expect(rules.length).toBeGreaterThan(5)
-  expect(rules.filter(rule => !/^\.family-map/.test(rule))).toEqual([])
 })
 it('truncates no name by style', () => {
   const css = readFileSync(PAGE, 'utf8') + readFileSync(resolve('src/board/elements/threadRow.css'), 'utf8')

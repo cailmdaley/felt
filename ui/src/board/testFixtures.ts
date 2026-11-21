@@ -14,7 +14,6 @@ import { ownerRow, type LifeState } from '../../harness/lifecycleModel.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { cardFromCompositeEntry } from './KanbanReadModel.js'
 import { buildKanbanResponseFromComposite, surfaceTotals, type BuildKanbanResponseOptions } from './KanbanReadModel.js'
-import { buildTimelineDays } from './KanbanSurfaces.js'
 import { civilDayAt, hostZone } from './civilDay.js'
 import type { VoiceStatus } from './voice.js'
 import type { Conversations } from './conversationOpening.js'
@@ -168,13 +167,6 @@ export function ownerFiberResponse(options: {
   }
 }
 
-// Fixed test window: 28 back, 14 forward, today fixed at a
-// known civil day. Built from the production helper, which needs no zone.
-export const WINDOW_DAYS = buildTimelineDays(28, 14, '2026-07-15')
-export const DAY_INDEX = new Map(WINDOW_DAYS.map((d, i) => [d.iso, i]))
-export const TODAY_IDX = WINDOW_DAYS.findIndex((d) => d.isToday)
-export const TODAY_DAY = WINDOW_DAYS[TODAY_IDX].iso
-
 /** An INSTANT at noon on a civil day in the host zone — safely inside that
  *  day's column, unlike a midnight that a DST shift can push over the edge. */
 export function noonOf(dayISO: string): string {
@@ -213,13 +205,6 @@ export function captureFetch(respond: () => Response): FetchCall[] {
 
 export const ok = (body: unknown) => () =>
   new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
-
-/** A civil day N days from today, by index into the fixed window. */
-export function dayAt(offset: number): string {
-  const day = WINDOW_DAYS[TODAY_IDX + offset]
-  if (!day) throw new Error(`offset ${offset} outside fixture window`)
-  return day.iso
-}
 
 /** A surface's conversations as one mock: the explicit open calls it with the card, a click's reach with the card and true. */
 export const conversations = (converse: (card: KanbanCard, click?: true) => unknown = () => false): Conversations =>

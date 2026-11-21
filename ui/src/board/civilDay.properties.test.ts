@@ -17,10 +17,6 @@ import {
   dueSortMs,
   instantMs,
   isoDayLocal,
-  RAIL_START_HOUR,
-  railBounds,
-  railCivilDay,
-  railDayReader,
   shiftCivilDay,
   wallClock,
   zone,
@@ -262,48 +258,6 @@ describe('civil days and instants, in every zone', () => {
         expect(z.offsetMs(at - HOUR)).not.toBe(z.offsetMs(at))
       }
     }), { seed: 0x5eed, numRuns: RUNS })
-  })
-
-  it('puts an instant on its own day’s rail iff its wall hour has reached the start', () => {
-    // Drawn with a bias toward the rail edge on transition days: the hour a
-    // millisecond subtraction and a wall-clock reading disagree.
-    const railEdges = zonedDays.chain(({ z, day }) =>
-      fc.integer({ min: -2 * HOUR, max: 2 * HOUR }).map((delta) => ({
-        z,
-        ms: civilDayAt(day, RAIL_START_HOUR, z)! + delta,
-      })),
-    )
-    fc.assert(fc.property(fc.oneof(zonedInstants, railEdges), fc.integer({ min: 0, max: 12 }), ({ z, ms }, startHour) => {
-      const { day, hour } = oracle(ms, z)
-      const want = hour >= startHour ? day : shiftCivilDay(day, -1)
-      expect(railCivilDay(ms, startHour, z)).toBe(want)
-    }), { seed: 0x6a11, numRuns: RUNS })
-  })
-
-  it('tiles the timeline with rails: no gaps, no overlaps, each instant in its own', () => {
-    fc.assert(fc.property(zonedInstants, ({ z, ms }) => {
-      const day = railCivilDay(ms, RAIL_START_HOUR, z)
-      const rail = railBounds(day, z)
-      expect(rail.startMs).toBeLessThanOrEqual(ms)
-      expect(ms).toBeLessThan(rail.endMs)
-      // Neighbours abut exactly, and a rail is a day give or take a DST shift.
-      expect(railBounds(shiftCivilDay(day, 1), z).startMs).toBe(rail.endMs)
-      expect(railBounds(shiftCivilDay(day, -1), z).endMs).toBe(rail.startMs)
-      expect(Math.abs(rail.endMs - rail.startMs - DAY)).toBeLessThanOrEqual(HOUR)
-    }), { seed: 0x711e, numRuns: RUNS })
-  })
-
-  it('reads a run of instants onto the same rails one at a time would', () => {
-    const runs = zonedInstants.chain(({ z, ms }) =>
-      fc.array(fc.integer({ min: -3 * DAY, max: 3 * DAY }), { minLength: 1, maxLength: 40 })
-        .map((steps) => ({ z, times: steps.map((step) => ms + step) })),
-    )
-    fc.assert(fc.property(runs, fc.boolean(), ({ z, times }, sorted) => {
-      const read = railDayReader(z)
-      for (const t of sorted ? [...times].sort((a, b) => a - b) : times) {
-        expect(read(t)).toBe(railCivilDay(t, RAIL_START_HOUR, z))
-      }
-    }), { seed: 0x2ead, numRuns: RUNS })
   })
 
   it('sorts one instant equal to itself however its offset is written', () => {

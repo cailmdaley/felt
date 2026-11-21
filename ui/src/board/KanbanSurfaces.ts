@@ -1,7 +1,7 @@
 import '@ui-sdk/web/tabs'
 import { markVerdictHost } from './workspace/Verdicts.js'
 import { clearable, quietWord, type Waits } from './attention.js'
-import { civilWeekday, dueCivilDay, formatCivilDay, isoDayLocal, shiftCivilDay } from './civilDay.js'
+import { dueCivilDay, formatCivilDay } from './civilDay.js'
 import { DESK_COLUMNS, DESK_FOLIO_NAME, DESK_SECTION_TITLE, DESK_SECTIONS, type DeskFamily, type DeskOrder, type DeskSection, type FamilyWait } from './deskOrdering.js'
 import { activeFolioIndex, folioScrollTarget } from './deskMobile.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
@@ -304,48 +304,6 @@ export function appendCappedText(el: HTMLElement, label: string): void {
   const rest = label.slice(1)
   if (rest) el.append(document.createTextNode(rest))
 }
-
-export interface TimelineDay {
-  iso: string
-  label: string
-  weekdayLabel: string
-  isToday: boolean
-  isPast: boolean
-  isWeekend: boolean
-  weekBoundary: boolean
-}
-
-/**
- * The strip of day columns, from `past` days back to `future` days ahead.
- *
- * Strides by CALENDAR day (`shiftCivilDay`), never by 86_400_000 ms of an
- * instant. A fixed-millisecond stride drifts an hour across a DST transition
- * and eventually skips or repeats a civil day — and a skipped column is a card
- * that VANISHES, because its due day finds no column to land on. `today` is a
- * civil day, and the strip is built from it with no zone in sight.
- */
-export function buildTimelineDays(
-  past: number,
-  future: number,
-  today: string = isoDayLocal(Date.now()),
-): TimelineDay[] {
-  const days: TimelineDay[] = []
-  for (let offset = -past; offset <= future; offset += 1) {
-    const iso = shiftCivilDay(today, offset)
-    const dow = civilWeekday(iso)
-    days.push({
-      iso,
-      label: String(Number(iso.slice(8, 10))),
-      weekdayLabel: formatCivilDay(iso, { weekday: 'short' }) ?? '',
-      isToday: offset === 0,
-      isPast: offset < 0,
-      isWeekend: dow === 0 || dow === 6,
-      weekBoundary: dow === 0,
-    })
-  }
-  return days
-}
-
 
 /** The `due <date>` chip on a card. Reads the value as the CIVIL DAY it names,
  *  never re-parsed as an instant (see civilDay.ts), so the chip agrees with

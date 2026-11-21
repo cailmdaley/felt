@@ -112,7 +112,7 @@ export async function postDaemonJson<T = unknown>(
  */
 export function readComposite(
   shuttleBase: string,
-  feed: 'activity' | 'sessions' | 'commits' | 'sent-files/all',
+  feed: 'sessions' | 'sent-files/all',
   query: Record<string, number | string>,
 ): Promise<unknown> {
   const params = new URLSearchParams(Object.entries(query).map(([key, value]) => [key, typeof value === 'number' ? String(Math.floor(value)) : value]))
