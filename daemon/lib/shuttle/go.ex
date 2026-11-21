@@ -7,13 +7,16 @@ defmodule Shuttle.Go do
   The request is owner-routed like `/transition`. The owner resolves the fiber
   (a tempered or discarded one is refused) and its live worker. A worker in
   the owner's Rex server has its window selected in the macOS app client
-  attached to that server; the daemon the human asked then brings the Rex app
-  forward. A tmux worker opens as today's viewer (`Shuttle.Opener.open/2`) on
-  the daemon the human asked: an owner reached by a forward answers its
-  session name instead, since only the asking daemon holds the display.
+  attached to that server, and in no other client; the daemon the human asked
+  then brings the Rex app forward. A tmux worker opens as the `/attach` viewer
+  (`Shuttle.Opener.open/2`) on the daemon the human asked: an owner reached by
+  a forward answers its session name instead, since only the asking daemon
+  holds the display.
 
-  The answer is `%{went: bool, place: "live" | "none"}`; `went: false` with
-  place `none` means no live worker could be shown.
+  The answer is `%{went: bool, place: "live" | "none"}`. `place` says whether
+  the fiber has a live worker; `went: false` with place `live` means Rex could
+  not show it (no Mac app attached to the worker's Rex server, or no terminal
+  holding it).
   """
 
   alias Shuttle.{Env, FiberDocuments, Lifecycle, OriginRouter, Poller, Remote, Terminal}
@@ -21,6 +24,7 @@ defmodule Shuttle.Go do
 
   @none %{went: false, place: "none"}
   @live %{went: true, place: "live"}
+  @unshown %{went: false, place: "live"}
 
   @type answer :: %{
           required(:went) => boolean(),
@@ -64,7 +68,7 @@ defmodule Shuttle.Go do
 
   defp here(fiber_id, display?) do
     with {:ok, fiber} <- fiber(fiber_id) do
-      worker = live_worker().(fiber["uid"] || fiber_id)
+      worker = Poller.live_worker(fiber["uid"] || fiber_id)
 
       case Lifecycle.column(fiber, worker != nil) do
         column when column in ["tempered", "discarded"] -> {:error, {:closed, column}}
@@ -87,19 +91,19 @@ defmodule Shuttle.Go do
 
     case Terminal.locate_target(runner, name) do
       {Rex, binding} ->
-        with {:ok, moved} <- Rex.select_binding(runner, binding),
+        with {:ok, moved} <- Rex.select_binding(runner, binding, mac_only: true),
              :ok <- if(moved and display?, do: Rex.activate_app(runner), else: :ok) do
-          {:ok, if(moved, do: @live, else: @none)}
+          {:ok, if(moved, do: @live, else: @unshown)}
         end
 
       {Terminal.Tmux, _} when display? ->
         opened(opener().open(name, nil))
 
       {Terminal.Tmux, _} ->
-        {:ok, Map.put(@none, :tmux_session, name)}
+        {:ok, Map.put(@unshown, :tmux_session, name)}
 
       nil ->
-        {:ok, @none}
+        {:ok, @unshown}
     end
   end
 
@@ -113,8 +117,8 @@ defmodule Shuttle.Go do
           {:ok, %{"tmux_session" => name}} when is_binary(name) ->
             opened(opener().open(name, remote.name))
 
-          {:ok, %{"went" => false}} ->
-            {:ok, @none}
+          {:ok, %{"went" => false, "place" => place}} when place in ["live", "none"] ->
+            {:ok, %{went: false, place: place}}
 
           _ ->
             {:error, "#{remote.name} answered go without saying where it went"}
@@ -129,10 +133,9 @@ defmodule Shuttle.Go do
   end
 
   defp opened(:ok), do: {:ok, @live}
-  defp opened({:error, {:absent, _}}), do: {:ok, @none}
+  defp opened({:error, {:absent, _}}), do: {:ok, @unshown}
   defp opened({:error, _} = error), do: error
 
-  defp live_worker, do: Env.app(:go_live_worker, &Poller.live_worker/1)
   defp opener, do: Env.app(:opener_impl, Shuttle.Opener)
   defp runner, do: Env.app(:rex_runner, Shuttle.Runner.Default)
 end

@@ -176,6 +176,8 @@ defmodule Shuttle.RexTest do
     ])
 
     assert {:ok, "client:phone"} = Rex.app_client(FakeRex)
+    # Unless only the Mac's will do.
+    assert {:error, :not_found} = Rex.app_client(FakeRex, mac_only: true)
   end
 
   test "EOF stdin reaches a real CLI reader without placing the request in argv", %{tmp_dir: dir} do

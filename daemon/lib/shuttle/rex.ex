@@ -187,14 +187,18 @@ defmodule Shuttle.Rex do
 
   @doc """
   The app client a selection moves: the Mac's Rex app when one is attached,
-  else any attached app (a phone's, when it is the only one).
+  else any attached app (a phone's, when it is the only one). With
+  `mac_only: true` only the Mac's app answers.
   """
   def app_client(runner, opts \\ []) do
+    {mac_only?, opts} = Keyword.pop(opts, :mac_only, false)
+
     with {:ok, %{"clients" => clients}} when is_list(clients) <-
            json_command(runner, ["client", "ls", "--json"], opts) do
       apps = Enum.filter(clients, &match?(%{"info" => %{"kind" => "app"}}, &1))
+      mac = Enum.find(apps, &match?(%{"info" => %{"platform" => "macos"}}, &1))
 
-      case Enum.find(apps, &match?(%{"info" => %{"platform" => "macos"}}, &1)) || List.first(apps) do
+      case if(mac_only?, do: mac, else: mac || List.first(apps)) do
         %{"client_id" => id} -> {:ok, id}
         nil -> {:error, :not_found}
         _ -> {:error, {:unknown, "invalid Rex client"}}

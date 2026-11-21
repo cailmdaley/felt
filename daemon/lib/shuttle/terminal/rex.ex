@@ -908,17 +908,20 @@ defmodule Shuttle.Terminal.Rex do
   @doc """
   Select a located worker's window in an app client already attached,
   launching nothing; a worker hidden from the view gets its own window back
-  first. `{:ok, true}` when the app moved.
+  first. `{:ok, true}` when the app moved. `opts` choose the client
+  (`Shuttle.Rex.app_client/2`).
   """
-  def select_binding(runner, %{"window_id" => wid} = b) when is_binary(wid),
-    do: select_existing(runner, b["session_id"], wid)
+  def select_binding(runner, binding, opts \\ [])
+
+  def select_binding(runner, %{"window_id" => wid} = b, opts) when is_binary(wid),
+    do: select_existing(runner, b["session_id"], wid, opts)
 
   # A hidden worker's own window comes back for a click: no program starts.
-  def select_binding(runner, b) do
+  def select_binding(runner, b, opts) do
     with {:ok, blocks} <- Rex.blocks(runner, b["session_id"]),
          {:ok, wid} <-
            window_for(runner, b, Enum.find(blocks, &(&1["block_id"] == b["block_id"]))) do
-      select_existing(runner, b["session_id"], wid)
+      select_existing(runner, b["session_id"], wid, opts)
     else
       {:error, reason} when reason in [:not_found, :server_absent] -> {:ok, false}
       error -> open_error(error)
@@ -939,10 +942,10 @@ defmodule Shuttle.Terminal.Rex do
     end
   end
 
-  defp select_existing(runner, sid, wid) do
+  defp select_existing(runner, sid, wid, opts \\ []) do
     alias Shuttle.OpenTrace
 
-    with {:ok, client} <- OpenTrace.step(:app_client, fn -> Rex.app_client(runner) end),
+    with {:ok, client} <- OpenTrace.step(:app_client, fn -> Rex.app_client(runner, opts) end),
          {:ok, _} <- OpenTrace.step(:select, fn -> Rex.select(runner, client, sid, wid) end) do
       {:ok, true}
     else
