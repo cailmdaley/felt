@@ -79,6 +79,8 @@ describe('the thread page', () => {
       const json = (body: unknown, extra: Record<string, string> = {}): Response => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json', ...extra } })
       if (url.startsWith('/api/v1/fibers/composite')) return headers.get('If-None-Match') === '"v1"' ? new Response(null, { status: 304 }) : json(composite, { ETag: '"v1"' })
       if (url.startsWith('/api/v1/board/family')) return json({ family: WORKSPACE_UID, records: boardRecords, waiting: {}, reach_ms: 14 * 86_400_000 })
+      if (url.startsWith('/api/v1/channels/dismissed')) return json({ dismissed: [], reach_ms: 14 * 86_400_000 })
+      if (url === '/api/v1/channels/dismiss' && method === 'POST') return json({ ok: true })
       if (url.startsWith('/api/v1/sent-files/all/composite')) return json({ files: sentFiles, origins: {} })
       if (url.startsWith('/api/v1/transcript/usage')) return usageResponse ? json(usageResponse) : new Response('{}', { status: 404 })
       if (url.split('?')[0] === '/api/v1/voice') {
@@ -489,6 +491,16 @@ describe('the thread page', () => {
     expect(posts().filter(each => each.url === '/api/v1/go').map(each => JSON.parse(each.body!)))
       .toStrictEqual([{ fiber_id: 'thread-analysis', origin: WORKSPACE_HOST }])
     expect(navigate).not.toHaveBeenCalled()
+
+    // Checking off a post clears it from the stream and persists via /api/v1/channels/dismiss.
+    const checkBtn = analysisItem!.querySelector<HTMLButtonElement>('.kbn-ch-clear')!
+    expect(checkBtn).not.toBeNull()
+    checkBtn.click()
+    await settle(); await settle()
+    expect(postsPane.textContent).not.toContain('Analysis finished at 9 sigma.')
+    const dismissPosts = posts().filter(each => each.url === '/api/v1/channels/dismiss')
+    expect(dismissPosts).toHaveLength(1)
+    expect(JSON.parse(dismissPosts[0]!.body!)).toMatchObject({ fiber: 'thread-analysis' })
 
     // Unified docked footer sends user_message to the family root via /api/v1/dispatch with no duplicate message box.
     expect(page.el.querySelectorAll('.ws-worker-message')).toHaveLength(1)

@@ -1,13 +1,14 @@
 import { bindAvoidKeyboard } from '@ui-sdk/core'
-import { composeStream, fiberOf, runningIn, type Channel } from '../board/channels.js'
+import { clearLineKey, clearedLines, composeStream, fiberOf, lineIds, runningIn, type Channel, type Item } from '../board/channels.js'
 import { clockTime } from '../board/civilDay.js'
+import { getDaemonJson, postDaemonJson } from '../board/daemonApi.js'
 import type { MapFile } from '../board/family/model.js'
 import { isAgentCard } from '../board/KanbanModalShared.js'
 import type { KanbanCard } from '../board/KanbanTypes.js'
 import { lastSaid } from '../board/said.js'
 import { slug } from '../board/threadOutline.js'
 import { fileBytesUrl } from '../board/utils.js'
-import { ChannelStream } from '../board/views/ChannelStream.js'
+import { ChannelStream, withdraws } from '../board/views/ChannelStream.js'
 import { Voice } from '../board/voice.js'
 import { createWorkerStarter } from '../board/workerStart.js'
 import { parseRoute } from '../board/workspace/boardRoute.js'
@@ -92,6 +93,9 @@ export class ThreadPage {
   private usageSession: string | undefined
   private usageReadAt = -Infinity
   private usageTimer: number | undefined
+  private dismissed: string[] = []
+  private pendingDismiss: string[] = []
+  private dismissedReadAt = -Infinity
   private disposed = false
   private saidTimer: number | undefined
   private lastInteraction = -Infinity
@@ -144,6 +148,7 @@ export class ThreadPage {
       },
       lead: card => this.leads.of(card),
       said: card => { const root = feed.index.rootOf(card); return lastSaid(card, feed.index, feed.board.records([root.uid ?? root.id])) },
+      clearLine: item => { void this.clearLine(item) },
       onRedraw: () => this.render(),
     })
     this.stream.el.classList.add('pg-posts-scroll')
@@ -357,13 +362,14 @@ export class ThreadPage {
       hidden: 0,
       listed: true,
     }
+    this.followDismissed()
     const whole = composeStream({
       channel: scope,
       records,
       files: this.feed.sends.files,
       waits,
       launches: () => [],
-      cleared: new Map(),
+      cleared: clearedLines([...this.dismissed, ...this.pendingDismiss]),
       now,
       reachMs: this.feed.board.reachMs,
     })
@@ -384,6 +390,41 @@ export class ThreadPage {
       failed: this.feed.board.failed(familyUid),
       now,
     })
+  }
+
+  private followDismissed(): void {
+    if (Date.now() - this.dismissedReadAt < USAGE_REFRESH_MS) return
+    this.dismissedReadAt = Date.now()
+    void getDaemonJson<{ dismissed?: string[] }>(`${this.opts.base}/api/v1/channels/dismissed`)
+      .then(data => {
+        if (this.disposed || !Array.isArray(data.dismissed)) return
+        this.dismissed = data.dismissed
+        if (this.mode === 'posts') this.render()
+      })
+      .catch(() => {})
+  }
+
+  private async clearLine(item: Item): Promise<void> {
+    const at = Date.now()
+    const fiber = fiberOf(item.card)
+    const keys = lineIds(item).map(id => clearLineKey(id, at))
+    this.pendingDismiss.push(...keys)
+    this.render()
+    try {
+      if (withdraws(item)) {
+        await postDaemonJson(this.opts.base, '/api/v1/lifecycle', { action: 'ask-clear', fiber: item.card.id, origin: item.card.originId }, 'Clear failed')
+      } else if (item.clears) {
+        await this.feed.board.clear(item.clears)
+      }
+      await Promise.all(keys.map(key => postDaemonJson(this.opts.base, '/api/v1/channels/dismiss', { key, fiber }, 'Clear failed')))
+      this.dismissed = [...this.dismissed, ...keys]
+      this.pendingDismiss = this.pendingDismiss.filter(key => !keys.includes(key))
+      this.render()
+    } catch {
+      this.pendingDismiss = this.pendingDismiss.filter(key => !keys.includes(key))
+      this.render()
+      this.say(`Could not clear ${slug(item.card)}'s line.`)
+    }
   }
 
   private checkAutoAdvance(card: KanbanCard): void {
