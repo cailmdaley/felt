@@ -91,6 +91,7 @@ export class ThreadPage {
   private usage: TranscriptUsage | null = null
   private usageSession: string | undefined
   private usageReadAt = -Infinity
+  private usageTimer: number | undefined
   private disposed = false
   private saidTimer: number | undefined
   private lastInteraction = -Infinity
@@ -156,11 +157,6 @@ export class ThreadPage {
     this.dock.dataset.act = 'band'
     this.dock.toggleAttribute('data-echoed', true)
     this.dockBody.className = 'ws-dock-body'
-    const dockHead = document.createElement('header')
-    dockHead.className = 'ws-band-head'
-    dockHead.dataset.part = 'band-header'
-    const identity = document.createElement('div')
-    identity.className = 'ws-band-identity'
     this.meter.className = 'ws-band-meter'
     this.meter.dataset.part = 'context-meter'
     this.meter.hidden = true
@@ -170,9 +166,6 @@ export class ThreadPage {
     this.cacheFact.dataset.part = 'cache'
     this.cacheFact.hidden = true
     this.meter.append(this.contextFact, this.cacheFact)
-    identity.append(this.meter)
-    dockHead.append(identity)
-    this.dockBody.append(dockHead)
     this.dock.append(this.dockBody)
     this.dockBand.append(this.dock)
 
@@ -241,6 +234,7 @@ export class ThreadPage {
   dispose(): void {
     this.disposed = true
     clearTimeout(this.saidTimer)
+    clearInterval(this.usageTimer)
     for (const event of INTERACTION_EVENTS) document.removeEventListener(event, this.onInteract, { capture: true })
     this.unsubscribe()
     this.stream.dispose()
@@ -285,8 +279,24 @@ export class ThreadPage {
     this.meter.hidden = this.contextFact.hidden && this.cacheFact.hidden
     const warm = warmUntil(this.usage)
     const note = warm !== undefined ? `cache warm until ${clockTime(warm)}` : ''
+    if (warm !== undefined && this.usageTimer === undefined) {
+      this.usageTimer = window.setInterval(() => {
+        const current = this.feed.card()
+        if (this.disposed || !current || !isAgentCard(current) || archived(current)) {
+          clearInterval(this.usageTimer)
+          this.usageTimer = undefined
+          return
+        }
+        paintUsage(this.contextFact, this.cacheFact, this.usage, current.workerAgent ?? current.shuttleAgent)
+        this.meter.hidden = this.contextFact.hidden && this.cacheFact.hidden
+        if (warmUntil(this.usage) === undefined) {
+          clearInterval(this.usageTimer)
+          this.usageTimer = undefined
+        }
+      }, USAGE_REFRESH_MS)
+    }
     if (!this.workerActions) {
-      this.workerActions = new WorkerActions(card, this.startWorker)
+      this.workerActions = new WorkerActions(card, this.startWorker, { prompt: true })
       this.voice = new Voice(this.opts.base)
       this.voice.mount()
       this.listen = new ListenControl({
@@ -298,6 +308,7 @@ export class ThreadPage {
       this.voiceStrip = new VoiceStrip()
       this.voiceUnsub = this.voice.subscribe(() => this.paintVoice())
       this.workerActions.seat(this.listen.el, this.voiceStrip.el)
+      this.workerActions.seatPlaceholder(this.meter)
       this.dockBody.append(this.workerActions.el)
       this.unbindKeyboard = bindAvoidKeyboard(this.dock)
     }

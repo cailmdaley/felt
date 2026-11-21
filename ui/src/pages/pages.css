@@ -51,7 +51,9 @@
   color: var(--ws-ink); background: var(--ws-paper); border: 1px solid var(--ws-hairline); border-radius: var(--ws-control-radius);
   font: var(--type-note)/var(--leading-ui) var(--font-serif);
 }
-.pg-thread[data-dock] .pg-said { bottom: 88px; }
+/* Single-row docked console footer on /thread: flush bottom, symmetric margins around the prompt box. */
+.pg-thread .ws-dock .ws-worker-acts { margin: 6px 12px 8px; }
+.pg-thread[data-dock] .pg-said { bottom: 64px; }
 .pg-missing { box-sizing: border-box; padding: 24px; color: var(--ws-ink-muted); font: var(--type-row)/var(--leading-prose) var(--font-serif); }
 /* A wide pane keeps the head and its words on the rows' measure (family-page.css), so its tools stand over the rows' times. */
 .pg-thread .ov-head { box-sizing: border-box; max-width: 760px; }

@@ -414,19 +414,34 @@ describe('the thread page', () => {
     expect(mic.getAttribute('aria-label')).toBe('Mute')
   })
 
-  it('renders context token count and warm/cold cache indicator in the docked footer', async () => {
-    // Warm cache: shows formatted token count and warm cache state.
+  it('renders chevron prompt with inline context/cache meter placeholder that hides while typing', async () => {
+    // Warm cache: shows chevron prompt, no "Message ..." placeholder, formatted token count, and warm cache pie inside the box.
     usageResponse = { context: 142_000, window: 1_000_000, cache_warm_until: now + 180_000, cache_ttl: 300_000 }
     const { page: warmPage } = await open(`?f=thread-analysis@${WORKSPACE_HOST}`)
-    const warmMeter = warmPage.el.querySelector<HTMLElement>('[data-part="thread-dock"] [data-part="context-meter"]')!
-    const warmCtx = warmPage.el.querySelector<HTMLElement>('[data-part="thread-dock"] [data-part="context"]')!
-    const warmCache = warmPage.el.querySelector<HTMLElement>('[data-part="thread-dock"] [data-part="cache"]')!
+    const warmDock = warmPage.el.querySelector<HTMLElement>('[data-part="thread-dock"]')!
+    expect(warmDock.querySelector('.ws-band-head')).toBeNull()
+    expect(warmDock.querySelector('.ws-worker-prompt')?.textContent).toBe('›')
+    const warmMsg = warmDock.querySelector<HTMLElement>('.ws-worker-message')!
+    expect(warmMsg.dataset.placeholder).toBeUndefined()
+    const warmHint = warmDock.querySelector<HTMLElement>('[data-part="worker-hint"]')!
+    const warmMeter = warmHint.querySelector<HTMLElement>('[data-part="context-meter"]')!
+    const warmCtx = warmHint.querySelector<HTMLElement>('[data-part="context"]')!
+    const warmCache = warmHint.querySelector<HTMLElement>('[data-part="cache"]')!
+    expect(warmHint.hidden).toBe(false)
     expect(warmMeter.hidden).toBe(false)
     expect(warmCtx.hidden).toBe(false)
     expect(warmCtx.textContent).toBe('142k')
     expect(warmCache.hidden).toBe(false)
     expect(warmCache.dataset.cache).toBe('warm')
     expect(warmCache.getAttribute('aria-label')).toMatch(/^Cache warm until /)
+
+    // Typing hides the inline meter placeholder immediately; clearing brings it back.
+    warmMsg.textContent = 'h'
+    warmMsg.dispatchEvent(new Event('input'))
+    expect(warmHint.hidden).toBe(true)
+    warmMsg.textContent = ''
+    warmMsg.dispatchEvent(new Event('input'))
+    expect(warmHint.hidden).toBe(false)
 
     // Cold cache: shows formatted token count and cold cache state.
     usageResponse = { context: 42_500, window: 1_000_000, cache_warm_until: now - 60_000, cache_ttl: 300_000 }

@@ -3,7 +3,21 @@
 .ws-worker-acts { --ws-box-line: 36px; min-width: 0; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: transparent; cursor: text; }
 .ws-worker-acts:focus-within { border-color: var(--ws-ink-soft); }
 .ws-worker-acts[hidden] { display: none; }
-.ws-worker-compose { max-height: 33vh; overflow-y: auto; padding: 0 2px 0 10px; }
+.ws-worker-compose { position: relative; max-height: 33vh; overflow-y: auto; padding: 0 2px 0 10px; }
+.ws-worker-acts[data-prompt] .ws-worker-compose { padding-left: 24px; }
+.ws-worker-prompt {
+  position: absolute; left: 10px; top: 0; height: var(--ws-box-line);
+  display: inline-flex; align-items: center;
+  color: var(--ws-ink-muted); font: var(--type-row)/1 var(--font-mono);
+  pointer-events: none; user-select: none;
+}
+.ws-worker-hint {
+  position: absolute; left: 26px; top: 0; height: var(--ws-box-line);
+  display: inline-flex; align-items: center; gap: 6px;
+  max-width: calc(100% - 140px); overflow: hidden;
+  opacity: 0.58; cursor: text; user-select: none;
+}
+.ws-worker-hint[hidden] { display: none; }
 .ws-worker-tools { position: sticky; top: 0; z-index: 1; float: right; background: var(--ws-paper); display: flex; align-items: center; gap: 2px; height: var(--ws-box-line); margin-left: 8px; cursor: default; }
 /* One centre line: the text's first line sits on the tools' centre. */
 .ws-worker-message {

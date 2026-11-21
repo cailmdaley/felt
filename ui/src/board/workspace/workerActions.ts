@@ -43,6 +43,8 @@ const textOf = (field: HTMLElement): string => field.innerText ?? field.textCont
 export class WorkerActions {
   readonly el = document.createElement('div')
   private readonly compose = document.createElement('div')
+  private readonly promptEl: HTMLSpanElement | null = null
+  private readonly hint = document.createElement('span')
   private readonly tools = document.createElement('span')
   private readonly field = document.createElement('div')
   private readonly shelf = document.createElement('div')
@@ -54,19 +56,34 @@ export class WorkerActions {
   private busy = false
   /** Something was seated in the tools, which keeps the box when its worker has nothing to run. */
   private seated = false
+  /** Inline placeholder content seated inside the box (hidden once typing begins). */
+  private hasHint = false
   private receiptTimer: number | null = null
   private note = ''
   private readonly start: StartWorker
   /** An empty Enter resumes or starts the worker. */
   private readonly emptyEnter: boolean
+  /** Draw a leading chevron prompt and omit the default "Message <slug>" placeholder. */
+  private readonly prompt: boolean
 
-  constructor(card: KanbanCard, start: StartWorker, { emptyEnter = true } = {}) {
+  constructor(card: KanbanCard, start: StartWorker, { emptyEnter = true, prompt = false } = {}) {
     this.card = card
     this.start = start
     this.emptyEnter = emptyEnter
+    this.prompt = prompt
     this.el.className = 'ws-worker-acts'
     this.el.dataset.part = 'worker-actions'
+    if (prompt) {
+      this.el.toggleAttribute('data-prompt', true)
+      this.promptEl = document.createElement('span')
+      this.promptEl.className = 'ws-worker-prompt'
+      this.promptEl.setAttribute('aria-hidden', 'true')
+      this.promptEl.textContent = '›'
+    }
     this.compose.className = 'ws-worker-compose'
+    this.hint.className = 'ws-worker-hint'
+    this.hint.dataset.part = 'worker-hint'
+    this.hint.hidden = true
     this.tools.className = 'ws-worker-tools'
     this.field.className = 'ws-worker-message'
     this.field.setAttribute('contenteditable', 'plaintext-only')
@@ -81,11 +98,13 @@ export class WorkerActions {
     this.receipt.setAttribute('aria-live', 'polite')
     this.shelf.className = 'ws-worker-images'
     this.tools.append(this.receipt, this.primary, this.fresh)
+    if (this.promptEl) this.compose.append(this.promptEl)
     this.compose.append(this.tools, this.field)
     this.el.append(this.compose, this.shelf)
-    // A press on the box's padding or beside the tools lands in the text.
+    // A press on the box's padding, prompt, hint, or beside the tools lands in the text.
     this.compose.addEventListener('pointerdown', event => {
-      if (event.target !== this.compose) return
+      const target = event.target as Node | null
+      if (target !== this.compose && target !== this.promptEl && !(target && this.hint.contains(target))) return
       event.preventDefault()
       this.focus()
     })
@@ -128,6 +147,14 @@ export class WorkerActions {
   seat(...controls: HTMLElement[]): void {
     this.tools.prepend(...controls)
     this.seated ||= controls.length > 0
+    this.paint()
+  }
+
+  /** Seat faint inline content shown inside the empty message box until the user starts typing. */
+  seatPlaceholder(...nodes: HTMLElement[]): void {
+    this.hint.append(...nodes)
+    if (!this.hint.parentNode) this.compose.append(this.hint)
+    this.hasHint ||= nodes.length > 0
     this.paint()
   }
 
@@ -240,8 +267,10 @@ export class WorkerActions {
     this.fresh.title = `A new session for ${card.name}${said ? ', opening with this message' : ''}${live ? '; cuts the running one' : ''}`
     this.fresh.setAttribute('aria-label', `New session for ${card.name}`)
     this.field.title = `Message ${slug(card)}`
-    this.field.dataset.placeholder = `Message ${slug(card)}`
+    if (this.prompt) delete this.field.dataset.placeholder
+    else this.field.dataset.placeholder = `Message ${slug(card)}`
     this.field.setAttribute('aria-label', `Message to ${slug(card)}`)
+    this.hint.hidden = !this.hasHint || !runnable || this.message !== '' || this.held.length > 0
     this.paintShelf()
   }
 
