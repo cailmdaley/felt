@@ -38,6 +38,7 @@ describe('the thread page', () => {
   let boardRecords: Array<{ id: string; kind: string; fiber: string; by: { fiber?: string; label?: string }; to?: { label?: string; fiber?: string }; text?: string; timestamp: number; originName: string }>
   let sentFiles: Array<{ fullPath: string; basename: string; timestamp: number; sessionId: string; uid: string; host: string; show?: boolean; caption?: string }>
   let usageResponse: Record<string, unknown> | null
+  let voiceResponse: Record<string, unknown>
   let feeds: PageFeed[]
   let pages: ThreadPage[]
 
@@ -53,6 +54,21 @@ describe('the thread page', () => {
     boardRecords = []
     sentFiles = []
     usageResponse = null
+    voiceResponse = {
+      available: true,
+      enabled: false,
+      muted: false,
+      state: 'off',
+      follow: true,
+      system_audio: false,
+      sources: ['desktop'],
+      source: 'desktop',
+      launch: null,
+      target: null,
+      destination: null,
+      last: null,
+      error: null,
+    }
     feeds = []
     serveFiles = undefined
     pages = []
@@ -65,6 +81,13 @@ describe('the thread page', () => {
       if (url.startsWith('/api/v1/board/family')) return json({ family: WORKSPACE_UID, records: boardRecords, waiting: {}, reach_ms: 14 * 86_400_000 })
       if (url.startsWith('/api/v1/sent-files/all/composite')) return json({ files: sentFiles, origins: {} })
       if (url.startsWith('/api/v1/transcript/usage')) return usageResponse ? json(usageResponse) : new Response('{}', { status: 404 })
+      if (url.split('?')[0] === '/api/v1/voice') {
+        if (method === 'POST') {
+          const patch = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>
+          voiceResponse = { ...voiceResponse, ...patch, state: (patch.enabled ?? voiceResponse.enabled) ? 'listening' : 'off' }
+        }
+        return json(voiceResponse)
+      }
       if (url.startsWith('/api/v1/file') && serveFiles) return serveFiles(url, method, headers)
       if (url === '/api/v1/go' && method === 'POST') return json(go)
       if (url === '/api/v1/dispatch' && method === 'POST') return json({ dispatched: true, tmux_session: 'started-session' })
@@ -94,7 +117,7 @@ describe('the thread page', () => {
   const row = (page: ThreadPage, fiber: string): HTMLElement => page.el.querySelector<HTMLElement>(`.ov-thread[data-fiber="${fiber}"]`)!
   const posts = () => requests.filter(each => each.method === 'POST')
 
-  it('draws one constitution from the board\'s feed, lists no tempered or discarded thread, and touches neither voice nor Rex focus', async () => {
+  it('draws one constitution from the board\'s feed, lists no tempered or discarded thread, and never touches Rex focus', async () => {
     const { page } = await open(`?f=${WORKSPACE_UID}@${WORKSPACE_HOST}`)
     expect(page.el.querySelector('.ov-name')!.textContent).toBe('calibration-report')
     expect(rows(page)).toContain('thread-analysis')
@@ -106,7 +129,7 @@ describe('the thread page', () => {
     // Its head shows its pages but no lifecycle verbs, and no edits, which only the board's reader bakes.
     expect([...page.el.querySelectorAll<HTMLElement>('.ov-tools [data-part]')].map(each => each.dataset.part)).not.toContain('edits')
     expect(page.el.querySelector('.ws-fiber-acts')).toBeNull()
-    expect(requests.map(each => new URL(each.url, 'http://d').pathname).filter(path => /voice|attach|terminal/.test(path))).toStrictEqual([])
+    expect(requests.map(each => new URL(each.url, 'http://d').pathname).filter(path => /voice\/target|attach|terminal/.test(path))).toStrictEqual([])
   })
 
   it('a tempered thread\'s own page still draws it', async () => {
@@ -287,22 +310,29 @@ describe('the thread page', () => {
     expect(unfold.querySelector('.uf-name')!.textContent).toBe('Tapestry')
   })
 
-  it('does not schedule further polls after stop()', async () => {
+  it('does not schedule further polls after stop() and dispose()', async () => {
     vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
-    const { feed } = await open(`?f=${WORKSPACE_UID}@${WORKSPACE_HOST}`)
-    const before = requests.length
+    const { page, feed } = await open(`?f=${WORKSPACE_UID}@${WORKSPACE_HOST}`)
+    const feedReads = () => requests.filter(each => each.url.startsWith('/api/v1/fibers/') || each.url.startsWith('/api/v1/sent-files/')).length
+    const beforeFeed = feedReads()
     feed.stop()
+    await vi.advanceTimersByTimeAsync(POLL_MS * 2)
+    expect(feedReads()).toBe(beforeFeed)
+    const beforeDispose = requests.length
+    page.dispose()
     await vi.advanceTimersByTimeAsync(POLL_MS * 4)
-    expect(requests.length).toBe(before)
+    expect(requests.length).toBe(beforeDispose)
   })
 
-  it('shows the floating bottom bar on both live and quiet threads, hides it on archived threads, and dispatches send/resume and new session', async () => {
+  it('shows the docked footer on both live and quiet threads, hides it on archived threads, and dispatches send/resume and new session', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
 
-    // Live worker: floating bar is visible; sending a message uses continue, and New session with a message uses fresh.
+    // Live worker: docked footer is visible; sending a message uses continue, and New session with a message uses fresh.
     const { page: livePage } = await open(`?f=thread-analysis@${WORKSPACE_HOST}`)
     expect(livePage.el.hasAttribute('data-dock')).toBe(true)
-    const liveDock = livePage.el.querySelector<HTMLElement>('.pg-dock')!
+    const liveDock = livePage.el.querySelector<HTMLElement>('[data-part="thread-dock"]')!
+    expect(liveDock.classList.contains('ws-stage-band')).toBe(true)
+    expect(liveDock.querySelector('.ws-dock')).not.toBeNull()
     expect(liveDock.hidden).toBe(false)
     const liveMsg = liveDock.querySelector<HTMLElement>('.ws-worker-message')!
     const livePrimary = liveDock.querySelector<HTMLButtonElement>('.ws-worker-primary')!
@@ -328,18 +358,18 @@ describe('the thread page', () => {
     expect(liveNew.resume_mode).toBe('fresh')
     expect(liveNew.user_message).toBe('Start fresh with new seed')
 
-    // Tempered and discarded threads hide the floating bottom bar.
+    // Tempered and discarded threads hide the docked footer.
     const { page: temperedPage } = await open(`?f=thread-archive@${WORKSPACE_HOST}`)
-    expect(temperedPage.el.querySelector<HTMLElement>('.pg-dock')!.hidden).toBe(true)
+    expect(temperedPage.el.querySelector<HTMLElement>('[data-part="thread-dock"]')!.hidden).toBe(true)
     expect(temperedPage.el.hasAttribute('data-dock')).toBe(false)
 
     const { page: discardedPage } = await open(`?f=thread-discard@${WORKSPACE_HOST}`)
-    expect(discardedPage.el.querySelector<HTMLElement>('.pg-dock')!.hidden).toBe(true)
+    expect(discardedPage.el.querySelector<HTMLElement>('[data-part="thread-dock"]')!.hidden).toBe(true)
     expect(discardedPage.el.hasAttribute('data-dock')).toBe(false)
 
-    // Quiet thread (awaiting review, no live worker): floating bar offers Resume and New session.
+    // Quiet thread (awaiting review, no live worker): docked footer offers Resume and New session.
     const { page: quietPage } = await open(`?f=thread-review@${WORKSPACE_HOST}&in=rex`)
-    const quietDock = quietPage.el.querySelector<HTMLElement>('.pg-dock')!
+    const quietDock = quietPage.el.querySelector<HTMLElement>('[data-part="thread-dock"]')!
     expect(quietDock.hidden).toBe(false)
     const primary = quietDock.querySelector<HTMLButtonElement>('.ws-worker-primary')!
     expect(primary.hidden).toBe(false)
@@ -363,13 +393,34 @@ describe('the thread page', () => {
     }
   })
 
-  it('renders context token count and warm/cold cache indicator in the floating bottom bar', async () => {
+  it('seats ListenControl and VoiceStrip in the docked footer and toggles Listen through /api/v1/voice', async () => {
+    const { page } = await open(`?f=thread-analysis@${WORKSPACE_HOST}`)
+    const dock = page.el.querySelector<HTMLElement>('[data-part="thread-dock"]')!
+    const mic = dock.querySelector<HTMLButtonElement>('.listen-mic')!
+    const dropdown = dock.querySelector<HTMLButtonElement>('.listen-dropdown')!
+    const strip = dock.querySelector<HTMLElement>('[data-part="voice-strip"]')!
+    expect(mic).not.toBeNull()
+    expect(dropdown).not.toBeNull()
+    expect(strip.hidden).toBe(true)
+    expect(mic.disabled).toBe(false)
+    expect(mic.getAttribute('aria-label')).toBe('Listen')
+
+    mic.click()
+    await settle(); await settle()
+    const voicePosts = posts().filter(each => each.url.split('?')[0] === '/api/v1/voice')
+    expect(voicePosts).toHaveLength(1)
+    expect(JSON.parse(voicePosts[0]!.body!)).toMatchObject({ enabled: true, muted: false, source: 'desktop' })
+    expect(mic.classList.contains('listen-on')).toBe(true)
+    expect(mic.getAttribute('aria-label')).toBe('Mute')
+  })
+
+  it('renders context token count and warm/cold cache indicator in the docked footer', async () => {
     // Warm cache: shows formatted token count and warm cache state.
     usageResponse = { context: 142_000, window: 1_000_000, cache_warm_until: now + 180_000, cache_ttl: 300_000 }
     const { page: warmPage } = await open(`?f=thread-analysis@${WORKSPACE_HOST}`)
-    const warmMeter = warmPage.el.querySelector<HTMLElement>('.pg-dock [data-part="context-meter"]')!
-    const warmCtx = warmPage.el.querySelector<HTMLElement>('.pg-dock [data-part="context"]')!
-    const warmCache = warmPage.el.querySelector<HTMLElement>('.pg-dock [data-part="cache"]')!
+    const warmMeter = warmPage.el.querySelector<HTMLElement>('[data-part="thread-dock"] [data-part="context-meter"]')!
+    const warmCtx = warmPage.el.querySelector<HTMLElement>('[data-part="thread-dock"] [data-part="context"]')!
+    const warmCache = warmPage.el.querySelector<HTMLElement>('[data-part="thread-dock"] [data-part="cache"]')!
     expect(warmMeter.hidden).toBe(false)
     expect(warmCtx.hidden).toBe(false)
     expect(warmCtx.textContent).toBe('142k')
@@ -380,18 +431,18 @@ describe('the thread page', () => {
     // Cold cache: shows formatted token count and cold cache state.
     usageResponse = { context: 42_500, window: 1_000_000, cache_warm_until: now - 60_000, cache_ttl: 300_000 }
     const { page: coldPage } = await open(`?f=thread-analysis@${WORKSPACE_HOST}`)
-    const coldMeter = coldPage.el.querySelector<HTMLElement>('.pg-dock [data-part="context-meter"]')!
-    const coldCtx = coldPage.el.querySelector<HTMLElement>('.pg-dock [data-part="context"]')!
-    const coldCache = coldPage.el.querySelector<HTMLElement>('.pg-dock [data-part="cache"]')!
+    const coldMeter = coldPage.el.querySelector<HTMLElement>('[data-part="thread-dock"] [data-part="context-meter"]')!
+    const coldCtx = coldPage.el.querySelector<HTMLElement>('[data-part="thread-dock"] [data-part="context"]')!
+    const coldCache = coldPage.el.querySelector<HTMLElement>('[data-part="thread-dock"] [data-part="cache"]')!
     expect(coldMeter.hidden).toBe(false)
     expect(coldCtx.textContent).toBe('42.5k')
     expect(coldCache.dataset.cache).toBe('cold')
     expect(coldCache.getAttribute('aria-label')).toMatch(/^Cache cold since /)
 
-    // A thread with no session hides the meter while keeping the floating bar visible.
+    // A thread with no session hides the meter while keeping the docked footer visible.
     const { page: noSessionPage } = await open(`?f=thread-review@${WORKSPACE_HOST}`)
-    expect(noSessionPage.el.querySelector<HTMLElement>('.pg-dock')!.hidden).toBe(false)
-    expect(noSessionPage.el.querySelector<HTMLElement>('.pg-dock [data-part="context-meter"]')!.hidden).toBe(true)
+    expect(noSessionPage.el.querySelector<HTMLElement>('[data-part="thread-dock"]')!.hidden).toBe(false)
+    expect(noSessionPage.el.querySelector<HTMLElement>('[data-part="thread-dock"] [data-part="context-meter"]')!.hidden).toBe(true)
   })
 
   it('defaults a family root to Posts mode, renders its stream, routes post clicks through go/navigate, toggles to Tapestry/Files, and sends composer messages via dispatch', async () => {
@@ -424,10 +475,10 @@ describe('the thread page', () => {
       .toStrictEqual([{ fiber_id: 'thread-analysis', origin: WORKSPACE_HOST }])
     expect(navigate).not.toHaveBeenCalled()
 
-    // Unified floating bottom bar sends user_message to the family root via /api/v1/dispatch with no duplicate message box.
+    // Unified docked footer sends user_message to the family root via /api/v1/dispatch with no duplicate message box.
     expect(page.el.querySelectorAll('.ws-worker-message')).toHaveLength(1)
     expect(page.el.querySelector('.pg-composer')).toBeNull()
-    const dock = page.el.querySelector<HTMLElement>('.pg-dock')!
+    const dock = page.el.querySelector<HTMLElement>('[data-part="thread-dock"]')!
     expect(dock.hidden).toBe(false)
     const input = dock.querySelector<HTMLElement>('.ws-worker-message')!
     const sendBtn = dock.querySelector<HTMLButtonElement>('.ws-worker-primary')!

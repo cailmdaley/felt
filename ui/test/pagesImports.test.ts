@@ -2,8 +2,7 @@
 //
 // Each page is a pane of its own, one WebKit process apiece, beside a worker's
 // chat. Its entry must never reach, statically or by a dynamic import, the
-// modules that own the board's workspace, its history and its voice: those
-// would bring the reader, Rex following and the voice target with them. This
+// modules that own the board's workspace, reader, dock ledger or history. This
 // walks the module graph from the pages entry, as the bundler does (type-only
 // imports are erased and followed nowhere), and names the chain to any of them.
 
@@ -14,7 +13,7 @@ import ts from 'typescript'
 import { expect, it } from 'vitest'
 
 const ENTRY = resolve('src/pages/main.ts')
-const FORBIDDEN = ['board/workspace/Dock.ts', 'board/workspace/Workspace.ts', 'board/KanbanModal.ts', 'board/workspace/route.ts', 'board/voice.ts']
+const FORBIDDEN = ['board/workspace/Dock.ts', 'board/workspace/Workspace.ts', 'board/KanbanModal.ts', 'board/workspace/Reader.ts', 'board/workspace/route.ts']
 
 /** The relative modules a source file loads at run time. */
 function imports(file: string): string[] {
@@ -55,7 +54,7 @@ function graph(entry: string): Map<string, string | null> {
   return from
 }
 
-it('the pages entry never loads the workspace, the board shell, its history or voice', () => {
+it('the pages entry never loads the workspace, the board shell, the reader or its history', () => {
   const reached = graph(ENTRY)
   const chain = (file: string): string => {
     const steps: string[] = []

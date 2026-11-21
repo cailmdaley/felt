@@ -5,7 +5,7 @@
 .pg-thread > .ws-family-page[hidden] { display: none; }
 /* What the page cannot show: a quiet line in its place. */
 .pg-status { margin: 10px 24px 0; color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-ui) var(--font-serif); }
-.pg-status[hidden], .pg-said[hidden], .pg-dock[hidden], .pg-modes[hidden], .pg-posts[hidden] { display: none; }
+.pg-status[hidden], .pg-said[hidden], .pg-modes[hidden], .pg-posts[hidden] { display: none; }
 /* Mode pills (Posts / Tapestry & Files) on family roots and subtrees. */
 .pg-modes {
   flex: 0 0 auto;
@@ -41,62 +41,6 @@
   flex: 1;
   min-height: 0;
 }
-/* Floating bottom bar across Tapestry and Posts: context/cache meter alongside WorkerActions. */
-.pg-dock {
-  position: absolute;
-  left: 16px;
-  right: 16px;
-  bottom: 12px;
-  z-index: 5;
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  padding: 4px 6px 4px 10px;
-  border: var(--ws-line-width) solid var(--ws-hairline);
-  border-radius: var(--ws-radius);
-  background: var(--ws-paper);
-  box-shadow: var(--ws-chrome-shadow);
-}
-.pg-dock:focus-within { border-color: var(--ws-ink-soft); }
-.pg-dock > .ws-worker-acts {
-  flex: 1 1 auto;
-  min-width: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-}
-.pg-dock > .ws-worker-acts .ws-worker-compose { padding-left: 2px; }
-/* Context token count and prompt-cache warmth dot, matching Shuttle's Dock meter. */
-.pg-dock-meter {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 36px;
-  padding-right: 4px;
-  color: var(--ws-ink-muted);
-  white-space: nowrap;
-  font: var(--type-label)/var(--leading-prose) var(--font-mono);
-}
-.pg-dock-meter[hidden], .pg-dock-meter > [hidden] { display: none; }
-.pg-dock-cache {
-  --ws-cache-left: 1;
-  box-sizing: border-box;
-  flex: none;
-  width: 9px;
-  height: 9px;
-  border: 1.25px solid var(--ws-cache-warm);
-  border-radius: 50%;
-  background: conic-gradient(var(--ws-cache-warm) calc(var(--ws-cache-left) * 1turn), transparent 0);
-}
-.pg-dock-cache[data-cache='cold'] {
-  border-color: var(--ws-cache-cold);
-  background: transparent;
-}
-/* Reserve clearance at the foot of both scrollers so the last lines clear the floating bar. */
-.pg-thread[data-dock] .ws-family-scroll { box-sizing: border-box; padding-bottom: 96px; }
-.pg-thread[data-dock] .ov-main { padding-bottom: 0; }
-.pg-thread[data-dock] .pg-posts-scroll { padding-bottom: 96px; }
 /* Full-bleed unfolded tapestry/files on the thread page: edge-to-edge, no card frame. */
 .pg-thread .ov-unfold[data-unfolded] { margin: 8px 0 0; }
 .pg-thread .ov-unfold[data-unfolded] .uf-bar { padding: 4px var(--ov-gutter) 6px; }
@@ -107,7 +51,7 @@
   color: var(--ws-ink); background: var(--ws-paper); border: 1px solid var(--ws-hairline); border-radius: var(--ws-control-radius);
   font: var(--type-note)/var(--leading-ui) var(--font-serif);
 }
-.pg-thread[data-dock] .pg-said { bottom: 76px; }
+.pg-thread[data-dock] .pg-said { bottom: 88px; }
 .pg-missing { box-sizing: border-box; padding: 24px; color: var(--ws-ink-muted); font: var(--type-row)/var(--leading-prose) var(--font-serif); }
 /* A wide pane keeps the head and its words on the rows' measure (family-page.css), so its tools stand over the rows' times. */
 .pg-thread .ov-head { box-sizing: border-box; max-width: 760px; }

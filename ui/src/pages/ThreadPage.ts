@@ -1,3 +1,4 @@
+import { bindAvoidKeyboard } from '@ui-sdk/core'
 import { composeStream, fiberOf, runningIn, type Channel } from '../board/channels.js'
 import { clockTime } from '../board/civilDay.js'
 import type { MapFile } from '../board/family/model.js'
@@ -7,14 +8,18 @@ import { lastSaid } from '../board/said.js'
 import { slug } from '../board/threadOutline.js'
 import { fileBytesUrl } from '../board/utils.js'
 import { ChannelStream } from '../board/views/ChannelStream.js'
+import { Voice } from '../board/voice.js'
 import { createWorkerStarter } from '../board/workerStart.js'
 import { parseRoute } from '../board/workspace/boardRoute.js'
 import { markSeen, unseenSince } from '../board/workspace/DocumentSeen.js'
 import { docKey, fiberKey, isExternalHref, linkedFile, parseDocKey, type DocKey } from '../board/workspace/documents.js'
 import { FamilyPage, type ViewFeeds } from '../board/workspace/FamilyPage.js'
 import { Leads } from '../board/workspace/leads.js'
+import { ListenControl } from '../board/workspace/ListenControl.js'
 import { fetchTranscriptUsage, paintUsage, warmUntil, type TranscriptUsage } from '../board/workspace/transcriptUsage.js'
+import { VoiceStrip, voiceLine } from '../board/workspace/voiceStrip.js'
 import { WorkerActions, type StartWorker } from '../board/workspace/workerActions.js'
+import '../board/workspace/dock.css'
 import type { PageFeed } from './feed.js'
 import { go } from './go.js'
 import { threadHref, type PageRoute } from './route.js'
@@ -48,10 +53,11 @@ const archived = (card: KanbanCard): boolean => card.column === 'tempered' || ca
  * to another fiber moves Rex there when the page stands in a Rex pane
  * (`in=rex`), and otherwise opens that fiber's page in its place. Its lead
  * tapestry sits full-bleed in place with no fold chrome; a file shown full
- * opens in a window of its own. For any non-archived constitution, a floating
- * bottom bar holds its context/cache meter alongside {@link WorkerActions}
- * (message box, Send/Resume, and New session) across both modes. It moves no
- * history, voice or swipe, and its head draws no lifecycle verbs.
+ * opens in a window of its own. For any non-archived constitution, the board's
+ * docked console footer sits flush at the bottom edge across both modes,
+ * holding its context/cache warmth meter, Listen mic control and voice strip,
+ * and {@link WorkerActions} (message box, Send/Resume, and New session). It
+ * moves no history or swipe, and its head draws no lifecycle verbs.
  */
 export class ThreadPage {
   readonly el = document.createElement('main')
@@ -61,7 +67,9 @@ export class ThreadPage {
   private readonly filesBtn = document.createElement('button')
   private readonly postsPane = document.createElement('section')
   private readonly stream: ChannelStream
+  private readonly dockBand = document.createElement('div')
   private readonly dock = document.createElement('div')
+  private readonly dockBody = document.createElement('div')
   private readonly meter = document.createElement('span')
   private readonly contextFact = document.createElement('span')
   private readonly cacheFact = document.createElement('span')
@@ -73,6 +81,11 @@ export class ThreadPage {
   private readonly unsubscribe: () => void
   private readonly startWorker: StartWorker
   private workerActions: WorkerActions | null = null
+  private voice: Voice | null = null
+  private listen: ListenControl | null = null
+  private voiceStrip: VoiceStrip | null = null
+  private voiceUnsub: (() => void) | null = null
+  private unbindKeyboard: (() => void) | null = null
   private mode: ThreadMode = 'files'
   private modeCardUid: string | null = null
   private usage: TranscriptUsage | null = null
@@ -135,20 +148,33 @@ export class ThreadPage {
     this.stream.el.classList.add('pg-posts-scroll')
     this.postsPane.append(this.stream.el)
 
-    this.dock.className = 'pg-dock'
-    this.dock.dataset.part = 'thread-dock'
-    this.dock.hidden = true
-    this.meter.className = 'pg-dock-meter'
+    this.dockBand.className = 'ws-stage-band'
+    this.dockBand.dataset.part = 'thread-dock'
+    this.dockBand.hidden = true
+    this.dock.className = 'ws-dock'
+    this.dock.dataset.part = 'act'
+    this.dock.dataset.act = 'band'
+    this.dock.toggleAttribute('data-echoed', true)
+    this.dockBody.className = 'ws-dock-body'
+    const dockHead = document.createElement('header')
+    dockHead.className = 'ws-band-head'
+    dockHead.dataset.part = 'band-header'
+    const identity = document.createElement('div')
+    identity.className = 'ws-band-identity'
+    this.meter.className = 'ws-band-meter'
     this.meter.dataset.part = 'context-meter'
     this.meter.hidden = true
-    this.contextFact.className = 'pg-dock-context'
     this.contextFact.dataset.part = 'context'
     this.contextFact.hidden = true
-    this.cacheFact.className = 'pg-dock-cache'
+    this.cacheFact.className = 'ws-band-cache'
     this.cacheFact.dataset.part = 'cache'
     this.cacheFact.hidden = true
     this.meter.append(this.contextFact, this.cacheFact)
-    this.dock.append(this.meter)
+    identity.append(this.meter)
+    dockHead.append(identity)
+    this.dockBody.append(dockHead)
+    this.dock.append(this.dockBody)
+    this.dockBand.append(this.dock)
 
     this.said.className = 'pg-said'
     this.said.setAttribute('role', 'status')
@@ -157,7 +183,7 @@ export class ThreadPage {
     this.family.pulls = false
     this.family.unfoldLead = true
     this.family.pinLead = true
-    this.el.append(this.status, this.modes, this.postsPane, this.family.el, this.dock, this.said)
+    this.el.append(this.status, this.modes, this.postsPane, this.family.el, this.dockBand, this.said)
     for (const event of INTERACTION_EVENTS) document.addEventListener(event, this.onInteract, { capture: true, passive: true })
     this.unsubscribe = feed.subscribe(() => this.render())
     this.render()
@@ -196,7 +222,7 @@ export class ThreadPage {
       }
 
       const showDock = isAgentCard(card) && !archived(card)
-      this.dock.hidden = !showDock
+      this.dockBand.hidden = !showDock
       this.el.toggleAttribute('data-dock', showDock)
       if (showDock) {
         this.followUsage(card)
@@ -206,7 +232,7 @@ export class ThreadPage {
       this.modes.hidden = true
       this.postsPane.hidden = true
       this.family.el.hidden = true
-      this.dock.hidden = true
+      this.dockBand.hidden = true
       this.el.removeAttribute('data-dock')
       this.status.textContent = this.feed.failure ?? (this.feed.loaded ? 'This thread is not on the board.' : 'Reading the board…')
     }
@@ -218,6 +244,10 @@ export class ThreadPage {
     for (const event of INTERACTION_EVENTS) document.removeEventListener(event, this.onInteract, { capture: true })
     this.unsubscribe()
     this.stream.dispose()
+    this.listen?.dispose()
+    this.voiceUnsub?.()
+    this.voice?.dispose()
+    this.unbindKeyboard?.()
     this.workerActions?.dispose()
     this.family.dispose()
   }
@@ -250,15 +280,43 @@ export class ThreadPage {
   }
 
   private paintDock(card: KanbanCard): void {
+    this.dock.dataset.column = card.column
     paintUsage(this.contextFact, this.cacheFact, this.usage, card.workerAgent ?? card.shuttleAgent)
     this.meter.hidden = this.contextFact.hidden && this.cacheFact.hidden
     const warm = warmUntil(this.usage)
     const note = warm !== undefined ? `cache warm until ${clockTime(warm)}` : ''
     if (!this.workerActions) {
       this.workerActions = new WorkerActions(card, this.startWorker)
-      this.dock.append(this.workerActions.el)
+      this.voice = new Voice(this.opts.base)
+      this.voice.mount()
+      this.listen = new ListenControl({
+        card: () => this.feed.card() ?? card,
+        voice: this.voice,
+        shuttleBase: this.opts.base,
+        fiberSlug: (fiber, origin) => this.fiberSlug(fiber, origin),
+      })
+      this.voiceStrip = new VoiceStrip()
+      this.voiceUnsub = this.voice.subscribe(() => this.paintVoice())
+      this.workerActions.seat(this.listen.el, this.voiceStrip.el)
+      this.dockBody.append(this.workerActions.el)
+      this.unbindKeyboard = bindAvoidKeyboard(this.dock)
     }
+    this.paintVoice(card)
     this.workerActions.update(card, note)
+  }
+
+  private fiberSlug(fiber: string, origin?: string | null): string | undefined {
+    const cards = this.feed.cards.filter(card => card.id === fiber || card.uid === fiber)
+    const match = cards.find(card => card.originId === origin) ?? cards[0]
+    return match && slug(match)
+  }
+
+  private paintVoice(card?: KanbanCard): void {
+    const status = this.voice?.status ?? null
+    const spoken = status?.destination ?? status?.target
+    const typed = card ?? this.feed.card()
+    const here = !!spoken && !!typed && (spoken.fiber_id === typed.uid || spoken.fiber_id === typed.id) && (spoken.origin ?? null) === (typed.originId ?? null)
+    this.voiceStrip?.paint(voiceLine(status, (fiber, origin) => this.fiberSlug(fiber, origin)), here)
   }
 
   private renderPosts(card: KanbanCard): void {
