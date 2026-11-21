@@ -81,6 +81,32 @@ export function normalizeAbsolutePath(path: string, base = '/'): string {
   return `/${parts.join('/')}`
 }
 
+/** An href with a scheme or a host: the browser's to open, not a file's. */
+export const isExternalHref = (href: string): boolean => /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(href)
+
+/**
+ * The file a link in the document at `source` names: an
+ * `/api/v1/file?path=…&origin=…` address names one outright, owned by its
+ * origin, and any other href that is not external resolves against the
+ * document's directory. Undefined for an external href and for one no file
+ * path comes from, such as a malformed escape.
+ */
+export function linkedFile(source: ParsedDocKey, href: string, base: string): (ParsedDocKey & { hash: string }) | undefined {
+  let path: string, owner = source.owner, url: URL
+  try {
+    url = new URL(href, base)
+    if (url.pathname === '/api/v1/file' && url.searchParams.has('path')) {
+      path = url.searchParams.get('path')!
+      owner = url.searchParams.get('origin') || owner
+    } else {
+      if (isExternalHref(href)) return undefined
+      path = decodeURIComponent(href.split(/[?#]/)[0])
+    }
+  } catch { return undefined }
+  if (!path || path.includes('\0') || path.includes('\\')) return undefined
+  return { owner, path: normalizeAbsolutePath(path, source.path.slice(0, source.path.lastIndexOf('/'))), hash: url.hash }
+}
+
 /** A fiber's companion pages, in order of precedence. */
 export const COMPANION_NAMES = ['tapestry.html', 'artifact.html', 'report.html'] as const
 

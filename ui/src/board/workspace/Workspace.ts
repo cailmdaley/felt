@@ -13,7 +13,7 @@ import { normalizeSentFiles, type SentFile } from '../sentFiles.js'
 import { fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
 import type { DeskPlacement } from '../deskOrdering.js'
 import { head, RESOURCE_PRIORITY } from '../documentResources.js'
-import { documentActivity, familyKey, fiberKey, isBaked, isDrawn, leadReceipt, buildChannel, normalizeAbsolutePath, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
+import { documentActivity, familyKey, fiberKey, isBaked, isDrawn, leadReceipt, buildChannel, linkedFile, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { conversationDevice } from '../conversationOpening.js'
 import { selectWorker } from '../sessionHistory.js'
 import { buildFiberProse } from './FiberProse.js'
@@ -944,21 +944,9 @@ export class Workspace {
     if (route?.kind === 'channel') { this.history.enter(route.uid, route.owner, route.doc); return false }
     if (route?.kind === 'overview' || (viewOfHash(href) && !route)) { this.history.view(href); return false }
     if (href.startsWith('#')) return false
-    let path: string, hash: string, owner = source.owner
-    try {
-      const url = new URL(href, window.location.href)
-      const explicit = url.pathname === '/api/v1/file' && url.searchParams.has('path')
-      if (explicit) {
-        path = url.searchParams.get('path')!
-        owner = url.searchParams.get('origin') || owner
-      } else {
-        if (/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(href)) return false
-        path = decodeURIComponent(href.split(/[?#]/)[0])
-      }
-      hash = url.hash
-    } catch { return false }
-    if (!path || path.includes('\0') || path.includes('\\')) return false
-    const file = normalizeAbsolutePath(path, source.path.slice(0, source.path.lastIndexOf('/')))
+    const linked = linkedFile(source, href, window.location.href)
+    if (!linked) return false
+    const { owner, path: file, hash } = linked
     if (holder) {
       const key = docKey(owner, file, holder.originId, holder.fiberDir)
       this.openDocument(holder, key)

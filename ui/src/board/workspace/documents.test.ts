@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   leadReceipt, channelLead, buildChannel, defaultSelection, docKey, documentKind, documentLabels, documentLabelMetadata, fallbackSelection,
-  bakeOf, changeKey, fiberKey, isBaked, normalizeAbsolutePath, parseDocKey, proseDocument, sentCaption, sentDocuments, type ChannelInput, type WorkspaceDocument,
+  bakeOf, changeKey, fiberKey, isBaked, linkedFile, normalizeAbsolutePath, parseDocKey, proseDocument, sentCaption, sentDocuments, type ChannelInput, type WorkspaceDocument,
 } from './documents.js'
 
 const base: ChannelInput = {
@@ -18,6 +18,16 @@ describe('document identity and kinds', () => {
     expect(normalizeAbsolutePath('../reports/./latest.html', '/store/project/task')).toBe('/store/project/reports/latest.html')
     expect(normalizeAbsolutePath('/store//project/../report.pdf')).toBe('/store/report.pdf')
     expect(normalizeAbsolutePath('../../../../report.html', '/store/task')).toBe('/report.html')
+  })
+
+  it('resolves a link in a document to the file it names, or to none', () => {
+    const from = { owner: 'host-a', path: '/store/task/task.md' }, page = 'http://127.0.0.1:4000/thread?f=u@h'
+    expect(linkedFile(from, '../out/a%20b.html#fig', page)).toStrictEqual({ owner: 'host-a', path: '/store/out/a b.html', hash: '#fig' })
+    // A served-file address names its file and owner outright, relative or absolute.
+    expect(linkedFile(from, '/api/v1/file?path=%2Fother%2Fr.pdf&origin=host-b', page)).toStrictEqual({ owner: 'host-b', path: '/other/r.pdf', hash: '' })
+    expect(linkedFile(from, 'http://127.0.0.1:4000/api/v1/file?path=/other/r.pdf', page)).toStrictEqual({ owner: 'host-a', path: '/other/r.pdf', hash: '' })
+    // External, malformed or unsafe hrefs name no file.
+    for (const href of ['https://example.org/x', '//cdn.example.org/x', 'mailto:a@b', 'bad%zz.md', 'a\\b.md']) expect(linkedFile(from, href, page)).toBeUndefined()
   })
 
   it('round-trips owner-aware file keys and rejects fiber or malformed keys', () => {

@@ -5,7 +5,7 @@ import { slug } from '../board/threadOutline.js'
 import { fileBytesUrl } from '../board/utils.js'
 import { parseRoute } from '../board/workspace/boardRoute.js'
 import { markSeen, unseenSince } from '../board/workspace/DocumentSeen.js'
-import { docKey, fiberKey, normalizeAbsolutePath, parseDocKey, type DocKey } from '../board/workspace/documents.js'
+import { docKey, fiberKey, isExternalHref, linkedFile, parseDocKey, type DocKey } from '../board/workspace/documents.js'
 import { FamilyPage, type ViewFeeds } from '../board/workspace/FamilyPage.js'
 import { Leads } from '../board/workspace/leads.js'
 import type { PageFeed } from './feed.js'
@@ -118,9 +118,8 @@ export class ThreadPage {
     if (route?.kind === 'channel') { this.goTo({ uid: route.uid, host: route.owner }); return }
     if (route || href.startsWith('#')) return
     const from = parseDocKey(source)
-    const external = /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(href)
-    const url = external || !from ? href
-      : fileBytesUrl(this.opts.base, normalizeAbsolutePath(decodeURIComponent(href.split(/[?#]/)[0]), from.path.slice(0, from.path.lastIndexOf('/'))), from.owner)
-    window.open(url, '_blank', 'noopener')
+    const file = from && linkedFile(from, href, window.location.href)
+    if (file) window.open(fileBytesUrl(this.opts.base, file.path, file.owner) + file.hash, '_blank', 'noopener')
+    else if (isExternalHref(href)) window.open(href, '_blank', 'noopener')
   }
 }
