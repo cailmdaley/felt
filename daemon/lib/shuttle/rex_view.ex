@@ -15,7 +15,9 @@ defmodule Shuttle.RexView do
 
   A sweep runs every `every_ms` on this host's Rex server; `sweep/3` is the
   same pass, run once to clear what has gathered. Each timed sweep also
-  reconciles the workers' pages (`Shuttle.Terminal.RexPages.reconcile/1`).
+  reconciles the workers' pages (`Shuttle.Terminal.RexPages.reconcile/1`), as
+  does `reconcile_pages/0` at once. A reconcile problem is logged when it
+  changes, not on every pass.
   """
   use GenServer
 
@@ -32,12 +34,28 @@ defmodule Shuttle.RexView do
     state = %{
       every_ms: Keyword.get(opts, :every_ms, 30_000),
       grace_ms: Keyword.get(opts, :grace_ms, 1_800_000),
-      behind: %{}
+      behind: %{},
+      reconcile_queued: false,
+      pages: :ok
     }
 
     send(self(), :relabel)
     send(self(), :sweep)
     {:ok, state}
+  end
+
+  @doc """
+  Reconcile the workers' pages now, off the caller's path. Requests that
+  arrive while one waits share it.
+  """
+  def reconcile_pages, do: GenServer.cast(__MODULE__, :reconcile_pages)
+
+  @impl true
+  def handle_cast(:reconcile_pages, %{reconcile_queued: true} = state), do: {:noreply, state}
+
+  def handle_cast(:reconcile_pages, state) do
+    send(self(), :reconcile_pages)
+    {:noreply, %{state | reconcile_queued: true}}
   end
 
   # A boot relabels what earlier builds named, such as a resumed pane's `resume-<uuid>`.
@@ -49,25 +67,36 @@ defmodule Shuttle.RexView do
     {:noreply, state}
   end
 
+  def handle_info(:reconcile_pages, state),
+    do: {:noreply, reconcile(%{state | reconcile_queued: false})}
+
   def handle_info(:sweep, state) do
-    behind =
+    state =
       with true <- Shuttle.Terminal.primary() == Shuttle.Terminal.Rex,
            {:ok, shown} <- shown(),
            {:ok, behind} <-
              sweep(runner(), state.behind, grace_ms: state.grace_ms, shown: shown) do
-        Shuttle.Terminal.RexPages.reconcile(runner())
-        behind
+        reconcile(%{state | behind: behind})
       else
         false ->
-          %{}
+          %{state | behind: %{}}
 
         reason ->
           Logger.debug("Rex view sweep skipped: #{inspect(reason)}")
-          state.behind
+          state
       end
 
     Process.send_after(self(), :sweep, state.every_ms)
-    {:noreply, %{state | behind: behind}}
+    {:noreply, state}
+  end
+
+  defp reconcile(state) do
+    pages = Shuttle.Terminal.RexPages.reconcile(runner())
+
+    if pages != state.pages and pages != :ok,
+      do: Logger.warning("Rex pages: #{inspect(pages)}")
+
+    %{state | pages: pages}
   end
 
   @doc """

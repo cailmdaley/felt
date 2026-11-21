@@ -94,7 +94,11 @@ defmodule Shuttle.Terminal.RexTree do
     end)
   end
 
-  @doc "Refresh display only; a failed projection cannot invalidate a successful terminal mutation."
+  @doc """
+  Retire empty family sessions, relabel Rex's sessions and windows to the fiber
+  tree, and ask `Shuttle.RexView` to reconcile the workers' pages. Display
+  only: a failed projection cannot invalidate a successful terminal mutation.
+  """
   def refresh(runner) do
     result =
       Terminal.with_lock({__MODULE__, :projection}, fn ->
@@ -111,7 +115,7 @@ defmodule Shuttle.Terminal.RexTree do
       {:error, reason} -> Logger.warning("Rex fiber tree refresh failed: #{inspect(reason)}")
     end
 
-    Shuttle.Terminal.RexPages.reconcile(runner)
+    Shuttle.RexView.reconcile_pages()
     :ok
   end
 

@@ -7,12 +7,13 @@ defmodule Shuttle.Terminal.RexPages do
   draws the thread page over any block carrying that label and title. Without
   RexWeb the link is all there is.
 
-  A launch creates the window with both blocks (`with_page/3`). `reconcile/1`
-  brings every other bound worker to that state: it gives a placed worker
-  without a page its page, closes every `rexweb shuttle` block in a Shuttle
-  session that no placed worker records (a late duplicate, a hidden worker's
-  page, a shell Rex restored), and leaves a page the human closed closed until
-  the worker's next launch.
+  A launch creates the window with both blocks (`with_page/2`). `reconcile/1`
+  brings every other worker Shuttle launched to that state, in the family
+  sessions Shuttle created: it gives a placed worker without a page its page,
+  closes every `rexweb shuttle` block there that no placed worker records (a
+  late duplicate, a hidden worker's page, a shell Rex restored), and leaves a
+  page the human closed closed until the worker's next launch. A human's own
+  session, even one holding a claimed worker, never gets a page.
   """
 
   require Logger
@@ -20,8 +21,11 @@ defmodule Shuttle.Terminal.RexPages do
   alias Shuttle.Terminal.RexBindings, as: Bindings
 
   @label "rexweb shuttle"
-  # A Linux remote can take ten seconds to start a block.
-  @timeout_ms 60_000
+  # Rex starts a layout's blocks all or none, so a launch with a page waits for
+  # the page block too; a Linux remote can take ten seconds to start one.
+  @launch_timeout_ms 15_000
+  # A split runs off the launch path, in `Shuttle.RexView`.
+  @split_timeout_ms 60_000
 
   @holder ~S"""
   url=$1; stty -echo 2>/dev/null
@@ -30,7 +34,6 @@ defmodule Shuttle.Terminal.RexPages do
   """
 
   def label, do: @label
-  def timeout_ms, do: @timeout_ms
 
   @doc "Whether a Rex block is a page holder."
   def page?(block), do: block["label"] == @label
@@ -40,15 +43,6 @@ defmodule Shuttle.Terminal.RexPages do
     do: "#{base}/thread?f=#{enc(uid)}@#{enc(Shuttle.Poller.own_host_id())}&in=rex"
 
   defp enc(part), do: URI.encode_www_form(part)
-
-  @doc "The fiber uid a worker's page shows: the one in its name, else its fiber's."
-  def uid(name, fiber) do
-    Shuttle.ULID.from_tmux(name) ||
-      case Shuttle.Terminal.RexTree.resolve(fiber) do
-        {:ok, %{uid: uid}} when is_binary(uid) -> uid
-        _ -> nil
-      end
-  end
 
   @doc """
   The launch spec with the worker's window split `[chat | page]`, and the
@@ -70,7 +64,7 @@ defmodule Shuttle.Terminal.RexPages do
           }
         end)
 
-      {spec, [timeout_ms: @timeout_ms]}
+      {spec, [timeout_ms: @launch_timeout_ms]}
     else
       _ -> {spec, []}
     end
@@ -122,28 +116,35 @@ defmodule Shuttle.Terminal.RexPages do
     end
   end
 
-  @doc "Bring every Shuttle session's pages to the state the bindings and the flag ask for."
+  @doc """
+  Bring every family session's pages to the state the bindings and the flag
+  ask for. Returns `{:error, problems}` naming an invalid `pages` setting and
+  the sessions it could not reconcile; the caller decides what to log.
+  """
   def reconcile(runner) do
-    pages = with {:ok, pages} <- Shuttle.Host.pages(), do: pages
+    {pages, problems} =
+      case Shuttle.Host.pages() do
+        {:ok, pages} -> {pages, []}
+        nil -> {nil, []}
+        {:error, message} -> {nil, [message]}
+      end
 
     with {:ok, doc} <- Bindings.read() do
       # With pages off and none recorded there is nothing to look at.
-      if pages != nil or Enum.any?(doc["bindings"], fn {_, b} -> b["page_block_id"] end) do
-        roots = Map.new(doc["families"] || %{}, fn {root, sid} -> {sid, root} end)
+      failures =
+        if pages != nil or Enum.any?(doc["bindings"], fn {_, b} -> b["page_block_id"] end) do
+          for {root, sid} <- doc["families"] || %{},
+              result =
+                Shuttle.Terminal.Rex.family_lock(root, fn ->
+                  reconcile_session(runner, sid, pages)
+                end),
+              result not in [:ok, {:error, :not_found}],
+              do: {sid, result}
+        else
+          []
+        end
 
-        bound =
-          for {name, b} <- doc["bindings"], into: %{}, do: {b["session_id"], b["family"] || name}
-
-        Enum.each(Map.merge(bound, roots), fn {sid, root} ->
-          result =
-            Shuttle.Terminal.Rex.family_lock(root, fn -> reconcile_session(runner, sid, pages) end)
-
-          unless result in [:ok, {:error, :not_found}],
-            do: Logger.warning("Rex page reconcile failed for #{sid}: #{inspect(result)}")
-        end)
-      end
-
-      :ok
+      if problems ++ failures == [], do: :ok, else: {:error, problems ++ failures}
     end
   end
 
@@ -156,7 +157,7 @@ defmodule Shuttle.Terminal.RexPages do
 
       bound =
         for {name, b} <- doc["bindings"],
-            b["session_id"] == sid,
+            b["session_id"] == sid and is_binary(b["family"]),
             Map.has_key?(placed, b["block_id"]),
             do: {name, b}
 
@@ -201,18 +202,34 @@ defmodule Shuttle.Terminal.RexPages do
         b["page_closed"] ->
           :ok
 
-        uid = uid(name, b["fiber"]) ->
-          split(runner, sid, name, b, uid, base)
-
         true ->
-          :ok
+          case page_uid(name, b) do
+            {:ok, uid, b} -> split(runner, sid, name, b, uid, base)
+            nil -> :ok
+            error -> error
+          end
       end
     end)
   end
 
+  # The fiber uid a worker's page shows: the one in its name, else its
+  # fiber's, resolved once and kept in the binding as `page_uid`.
+  defp page_uid(name, b) do
+    with nil <- Shuttle.ULID.from_tmux(name),
+         nil <- b["page_uid"],
+         {:ok, %{uid: uid}} when is_binary(uid) <- Shuttle.Terminal.RexTree.resolve(b["fiber"]),
+         :ok <- Bindings.put_page(name, b, %{"page_uid" => uid}) do
+      {:ok, uid, Map.put(b, "page_uid", uid)}
+    else
+      uid when is_binary(uid) -> {:ok, uid, b}
+      {:error, _} = error -> error
+      _ -> nil
+    end
+  end
+
   defp split(runner, sid, name, b, uid, base) do
     with {:ok, page} <- block(url(base, uid)),
-         {:ok, %{"block_ids" => [page_id]}} <-
+         {:ok, %{"block_ids" => ["block:" <> _ = page_id]}} <-
            Rex.call(
              runner,
              "session.new_split",
@@ -225,7 +242,7 @@ defmodule Shuttle.Terminal.RexPages do
                "focus" => false
              },
              session: sid,
-             timeout_ms: @timeout_ms
+             timeout_ms: @split_timeout_ms
            ) do
       Bindings.put_page(name, b, %{"page_block_id" => page_id})
     else

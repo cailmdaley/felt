@@ -850,7 +850,7 @@ defmodule Shuttle.Terminal.Rex do
   @doc """
   Take a worker's block out of view and close its page: its window closes with
   them and its program keeps running. `place/3` (through an open) puts it back
-  in a window of its own, where the tree refresh gives it a page again.
+  in a window of its own, where the next page reconcile gives it a page again.
   """
   def hide(runner, sid, bid) do
     with {:ok, _} = hidden <-

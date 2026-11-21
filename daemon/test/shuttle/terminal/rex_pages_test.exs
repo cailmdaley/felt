@@ -75,15 +75,16 @@ defmodule Shuttle.Terminal.RexPagesTest do
            }
 
     refute Map.has_key?(bound(@a), "page_block_id")
+    calls = FakeRex.calls()
     assert :ok = RexPages.reconcile(FakeRex)
-    assert mutations(0) == []
+    assert FakeRex.calls() == calls
   end
 
   test "with pages on a launch splits its window into the worker and its page", ctx do
     pages_on(ctx)
     assert :ok = launch(@a, @root <> "/a")
     {args, spec} = request("session.create")
-    assert ["--autostart=false", "--timeout", "60s" | _] = args
+    assert ["--autostart=false", "--timeout", "15s" | _] = args
     [window] = spec["initial_windows"]
 
     assert %{
@@ -130,6 +131,62 @@ defmodule Shuttle.Terminal.RexPagesTest do
     [window] = spec["initial_windows"]
     [_, _, url] = window["layout"]["split"]["after"]["block"]["options"]["command"]
     assert url =~ "f=#{@uid}@"
+  end
+
+  test "a worker claimed in a human's own session never gets a page, before or after release",
+       ctx do
+    pages_on(ctx)
+    human = %{"block_id" => "block:human", "label" => "human", "window_id" => "window:human"}
+
+    FakeRex.sessions(%{
+      "session:human" => %{
+        label: "human",
+        blocks: [human],
+        windows: [%{"window_id" => "window:human", "label" => "human"}]
+      }
+    })
+
+    assert :ok = Backend.rename(FakeRex, "session:human", @a)
+    assert %{"session_owned" => false} = b = bound(@a)
+    refute Map.has_key?(b, "family")
+
+    calls = length(FakeRex.calls())
+    assert :ok = RexPages.reconcile(FakeRex)
+    assert :ok = Backend.release(FakeRex, @a, "leaf")
+    assert :ok = RexPages.reconcile(FakeRex)
+    assert mutations(calls) == []
+    assert pages("session:human") == []
+
+    assert [%{"block_id" => "block:human", "window_id" => "window:human"}] =
+             blocks("session:human")
+  end
+
+  test "a page's fiber uid is resolved once, so a split that keeps failing does not reread the tree",
+       ctx do
+    file = Path.join([ctx.tmp_dir, "family-store", ".felt", @root, "a", "a.md"])
+    File.write!(file, "---\nname: a\nuid: #{@uid}\ntags: [constitution]\n---\n")
+    assert :ok = launch("resume-1234", @root <> "/a")
+    pages_on(ctx)
+    FakeRex.reply("session.new_split", {"split failed", 1})
+    assert {:error, [{_, _}]} = RexPages.reconcile(FakeRex)
+    assert bound("resume-1234")["page_uid"] == @uid
+
+    File.write!(file, "---\nname: a\ntags: [constitution]\n---\n")
+    FakeRex.clear_reply("session.new_split")
+    assert :ok = RexPages.reconcile(FakeRex)
+    {_, split} = request("session.new_split")
+    [_, _, url] = split["layout"]["block"]["options"]["command"]
+    assert url =~ "f=#{@uid}@"
+    assert is_binary(bound("resume-1234")["page_block_id"])
+  end
+
+  test "an invalid pages setting is reported by reconcile and leaves pages off", ctx do
+    assert :ok = launch(@a, @root <> "/a")
+    File.write!(ctx.host, ~s({"pages":{"enabled":"yes"}}))
+    calls = FakeRex.calls()
+    assert {:error, [message]} = RexPages.reconcile(FakeRex)
+    assert message =~ "pages disabled"
+    assert FakeRex.calls() == calls
   end
 
   test "reconcile gives a worker launched with pages off its page exactly once", ctx do
@@ -229,6 +286,7 @@ defmodule Shuttle.Terminal.RexPagesTest do
 
     chat = Enum.find(blocks(sid), &(&1["block_id"] == a["block_id"]))
     assert {:ok, wid} = Backend.place(FakeRex, sid, chat)
+    assert :ok = RexPages.reconcile(FakeRex)
     page = bound(@a)["page_block_id"]
     assert %{"window_id" => ^wid} = Enum.find(blocks(sid), &(&1["block_id"] == page))
   end
@@ -243,6 +301,7 @@ defmodule Shuttle.Terminal.RexPagesTest do
     assert {:ok, _} = Backend.hide(FakeRex, sid, a["block_id"])
     chat = Enum.find(blocks(sid), &(&1["block_id"] == a["block_id"]))
     assert {:ok, _} = Backend.place(FakeRex, sid, chat)
+    assert :ok = RexPages.reconcile(FakeRex)
     assert length(pages(sid)) == 2
 
     FakeRex.reply(

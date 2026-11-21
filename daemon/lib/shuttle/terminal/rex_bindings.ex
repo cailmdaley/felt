@@ -48,9 +48,14 @@ defmodule Shuttle.Terminal.RexBindings do
   def put_fiber(name, fiber, observed) when is_binary(fiber) and fiber != "" do
     update(fn doc ->
       case doc["bindings"][name] do
-        nil -> doc
-        b when observed != nil and b != observed -> doc
-        b -> put_in(doc, ["bindings", name], Map.put(b, "fiber", fiber))
+        nil ->
+          doc
+
+        b when observed != nil and b != observed ->
+          doc
+
+        b ->
+          put_in(doc, ["bindings", name], b |> Map.put("fiber", fiber) |> Map.delete("page_uid"))
       end
     end)
   end
@@ -59,8 +64,9 @@ defmodule Shuttle.Terminal.RexBindings do
 
   @doc """
   Set a binding's page fields when it still equals `observed`: `page_block_id`
-  is the page block beside the worker and `page_closed` records that the human
-  closed it. A nil value removes the field.
+  is the page block beside the worker, `page_closed` records that the human
+  closed it, and `page_uid` is the fiber uid its page shows when the worker's
+  name carries none. A nil value removes the field.
   """
   def put_page(name, observed, fields) do
     update(fn doc ->

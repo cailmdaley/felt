@@ -159,7 +159,7 @@ defmodule Shuttle.HostTest do
       assert Host.pages() == {:ok, %{base: "https://hub.example"}}
     end
 
-    test "invalid config warns and leaves pages off", %{host_file: file} do
+    test "invalid config is an error that leaves pages off", %{host_file: file} do
       for value <- [
             true,
             %{},
@@ -168,7 +168,8 @@ defmodule Shuttle.HostTest do
             %{"enabled" => true, "base" => "127.0.0.1:4000"}
           ] do
         File.write!(file, Jason.encode!(%{pages: value}))
-        assert capture_log(fn -> assert Host.pages() == nil end) =~ "pages"
+        assert {:error, message} = Host.pages()
+        assert message =~ "pages disabled"
       end
     end
   end

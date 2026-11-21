@@ -213,10 +213,11 @@ defmodule Shuttle.Host do
 
   @doc """
   Thread pages beside Rex workers, read fresh: `{:ok, %{base: url}}` when
-  `"pages": {"enabled": true}` is set, else nil. `base` defaults to the local
-  daemon; invalid settings warn and leave pages off.
+  `"pages": {"enabled": true}` is set, nil when pages are off, and
+  `{:error, message}` for an invalid setting, which leaves pages off. `base`
+  defaults to the local daemon. The caller decides whether to log the message.
   """
-  @spec pages() :: nil | {:ok, %{base: String.t()}}
+  @spec pages() :: nil | {:ok, %{base: String.t()}} | {:error, String.t()}
   def pages do
     path = config_path()
 
@@ -234,28 +235,24 @@ defmodule Shuttle.Host do
             {:ok, %{base: String.trim_trailing(base, "/")}}
 
           true ->
-            pages_warning(path)
+            pages_error(path)
         end
 
       {:ok, %{"pages" => _}} ->
-        pages_warning(path)
+        pages_error(path)
 
       {:ok, _} ->
         nil
 
       {:error, _kind, message} ->
-        Logger.warning("#{message}; pages disabled")
-        nil
+        {:error, "#{message}; pages disabled"}
     end
   end
 
-  defp pages_warning(path) do
-    Logger.warning(
-      ~s(#{path}: pages requires "enabled": true or false and an http\(s\) "base"; pages disabled)
-    )
-
-    nil
-  end
+  defp pages_error(path),
+    do:
+      {:error,
+       ~s(#{path}: pages requires "enabled": true or false and an http\(s\) "base"; pages disabled)}
 
   @doc "`resolve/1`, raising `ArgumentError` with the message on a refusal."
   @spec resolve!(pos_integer()) :: settings()
