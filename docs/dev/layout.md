@@ -133,7 +133,7 @@ agent-browser --session "$LANE" close
 
 The board e2e suite uses a fixed clock, Europe/Paris time, and a mocked daemon; it never operates real fibers.
 
-`cd ui && npm run perf:typing` runs only the headless WebKit typing probe against the file harness.
+`cd ui && npm run perf:typing` runs only the headless WebKit typing probe against the file harness. Pair it with before/after measurements on the target host for performance work.
 Install its browser with `npx playwright-core install webkit` from `ui/` first.
 The probe stages 406 cards across ten hosts and measures each keydown through the task after the next rendering turn in bar Find.
 Results go to `/tmp/shuttle-typing.json` (`TYPING_OUTPUT` overrides it), with `shuttle-typing*.png` screenshots in `/tmp/`.

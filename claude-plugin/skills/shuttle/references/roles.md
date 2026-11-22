@@ -19,7 +19,7 @@ After syncing, read the office's charter with `felt -C <store> show roles/<offic
 shuttle role <task> surveyor
 ```
 
-When none fits, create one before substantive work. A role is cheap: a charter that starts with two sentences and its gates grows as holders fold in what they learn. `shuttle role <task> <role> --new "<Office name>"` creates the charter in the shared store's `roles/` and assigns it; then replace its placeholder body with the remit and gates, and add its row to `roles/roles.md` when the store keeps that map.
+An office splits only where the test of being right changes, never by probe, survey, project or codebase: transferable method belongs in `practices/`, codebase or cluster traps in the repository's `AGENTS.md` or skills, and project facts in project fibers. When none fits that test, create one before substantive work. A role is cheap: a charter that starts with two sentences and its gates grows as holders fold in what they learn. `shuttle role <task> <role> --new "<Office name>"` creates the charter in the shared store's `roles/` and assigns it; then replace its placeholder body with the remit and gates, and add its row to `roles/roles.md` when the store keeps that map.
 
 One symptom shows a missing role: a `## Status` that has grown a register, recipes, or lessons that would hold on any task in that office. That material is a charter that never got written. Move it there, and leave Status the handoff.
 

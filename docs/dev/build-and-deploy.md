@@ -243,6 +243,10 @@ To deploy a release candidate across the configured fleet, pin its tag:
 bin/shuttle-deploy --ref v2.0.0-rc.1 --no-push
 ```
 
+From a feature worktree, push reviewed commits to `main` first and deploy with
+`bin/shuttle-deploy --ref origin/main --no-push`. Never reset, check out, or
+mutate a worktree while a background deploy is running from it.
+
 Every invocation resolves `--ref` (or `HEAD` when omitted) to one full commit before contacting any host.
 An explicit commit object has no ref to push; branches and tags are pushed unless `--no-push` is set.
 The caller executes an in-memory copy of its entrypoint, so refreshing or editing its checkout cannot replace script bytes Bash has yet to read.

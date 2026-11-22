@@ -187,22 +187,46 @@ checkout; `make start` follows the existing selection and is also main-checkout-
 Linked-worktree restart only builds and prints deployment
 guidance, and linked-worktree stop refuses a foreign release. Deploy a committed
 worktree revision with `bin/shuttle-deploy --hosts local --ref <commit>`, or run
-`make restart` in the main checkout.
+`make restart` in the main checkout. From a feature worktree, push reviewed
+commits to `main` and deploy with `bin/shuttle-deploy --ref origin/main --no-push`;
+never reset or mutate a worktree while a background deploy is running from it.
 
 `npm ci` is stamped on `ui/package-lock.json` and runs only when the lockfile
 moves; `npm run build` runs every time.
 
 Editing `daemon/lib/*.ex` needs `make restart` (a restart without `make daemon` is a
 no-op — the release runs compiled BEAMs). Editing either Go CLI needs `make cli`.
-Editing `ui/` needs `cd ui && npm test` and `go test ./internal/feltcli -run Hygiene` (the hygiene scan covers `ui/`, harness fixtures included), then `make restart` from the root.
+Editing `ui/` needs `cd ui && npm test`, `npx tsc --noEmit -p .`,
+`go test ./internal/feltcli -run Hygiene` (the hygiene scan covers `ui/`, harness
+fixtures included), and `claude plugin test claude-plugin` when touching the
+mod/plugin, then `make restart` from the root (or `bin/shuttle-deploy` to every
+hub whose board is opened, including any phone-facing hub).
+Voice and Listen changes also run `mix compile --warnings-as-errors` in `daemon/`,
+the `voice_*` Elixir tests, `claude plugin test claude-plugin`, and hark's
+`uv run pytest` when touching hark.
+Performance changes run the headless typing probe (`cd ui && npm run perf:typing`,
+[`docs/dev/layout.md`](docs/dev/layout.md)) and take before/after measurements on
+the target host.
 Changing anything the board draws also wants a look at it: `cd ui && npm run
 harness:board` builds a self-contained bundle with a mocked daemon that opens
 over `file://`, which is the only way to see the board where `:4000` is
 unreachable — and the only way to stage states a live fleet will not hold
 still for.
+Screenshots uploaded to the public repository (`cailmdaley/felt`, `pr-assets`)
+come from the mocked-daemon harness, or have every pixel checked for private
+fibers, personal paths, and PII before upload.
 An agent's browser never opens the live board at `:4000`: the board takes the
 human's voice target and Rex focus for whatever a client looks at, a headless
 one included.
+Host-boundary probes have four sharp edges documented in
+[`docs/dev/architecture.md`](docs/dev/architecture.md): shared-hub umask `002`
+makes `mkdir`/`TempDir` `0775` unless `0700` is enforced explicitly; Linux
+`/proc/net/tcp` reports `uid 0` before `accept()` (`SYN_RECV`) and on unowned
+`TIME_WAIT`/orphaned rows; socket ancestry checks walk every component literally
+with `lstat` rather than resolving symlinks first; and macOS ACL `delete_child`
+is invisible in POSIX mode bits.
+Ask the human before running `shuttle daemon release` after an unexpected or
+out-of-band restart that parked workers in boot quarantine.
 Source builds require Go, Elixir/OTP, Node/npm, and Python 3 on each host.
 Python 3 publishes the release symlink atomically.
 To cycle a supervised daemon directly, use

@@ -258,7 +258,7 @@ and add your test to its file.
 - **Settings:** `src/forms/settings/`.
 - **Styles and accessibility:** `ui/test/*.test.ts`.
 - **The document workspace:** `src/board/workspace/`, owned by the document-workspace effort; it follows these conventions as it is rewritten.
-- **Browser-only behaviour** (layout, focus, real media, animation): `ui/e2e/workspace.mjs`.
+- **Browser-only behaviour** (layout, focus, real media, animation): `ui/e2e/workspace.mjs`. When a redesign retires UI, adapt `ui/e2e/workspace.mjs` from `main` rather than rewriting it from scratch, so the security-isolation, verdict, PDF, theme, and layout journeys stay intact.
 
 ## 2. Which tier?
 

@@ -247,6 +247,13 @@ independent credential. A shared TCP listener refuses to boot when
 of `/proc`. Use the class's Unix socket or declare the host `single-user` when
 loopback is private to its operator.
 
+Four host-boundary traps hold across implementations and tests:
+
+- **Shared-hub umask `002`:** `mkdir` and temporary directories inherit `0775`, which fails the ancestor-permission guard unless explicit `0700` modes are applied.
+- **Linux `/proc/net/tcp` uid `0` before `accept()` and on unowned rows:** `SYN_RECV`, `TIME_WAIT`, and orphaned closing rows carry `uid 0` (and `inode 0` on orphans) rather than a live peer's uid; `Shuttle.ProcNetTcp` admits only uid-bearing states with a nonzero inode.
+- **Literal-path `lstat` ancestry checks:** `Shuttle.Host.private_socket_problem/3` walks every component below the trusted root literally with `lstat` and refuses symlinks, rather than resolving symlinks first and validating the target path instead of the traversed ancestors.
+- **macOS ACL `delete_child`:** POSIX mode bits can read `0700` while an extended ACL grants `delete_child` to another principal; inspect ACLs (`ls -le`) when auditing macOS directory boundaries.
+
 ## The fleet
 
 Every daemon finds the others itself. `Shuttle.TailnetPeers` reads the tailnet
