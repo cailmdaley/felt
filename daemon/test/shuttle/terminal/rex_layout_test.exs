@@ -83,6 +83,60 @@ defmodule Shuttle.Terminal.RexLayoutTest do
       refute Map.has_key?(des.places_by_uid, "u-discarded")
     end
 
+    test "keeps on_demand tempered and discarded places within the grace window, and drops expired or non-on_demand ones" do
+      fibers = [
+        fiber("u-tempered-open", "archived-fam", %{"status" => "closed", "tempered" => true}),
+        fiber("u-discarded-open", "archived-fam/drop", %{"status" => "closed", "tempered" => false}),
+        fiber("u-tempered-expired", "archived-fam/old", %{"status" => "closed", "tempered" => true}),
+        fiber("u-newly-tempered", "archived-fam/fresh", %{"status" => "closed", "tempered" => true})
+      ]
+
+      recent_iso = DateTime.add(@now, -3_600, :second) |> DateTime.to_iso8601()
+      expired_iso = DateTime.add(@now, -90_000, :second) |> DateTime.to_iso8601()
+
+      places = %{
+        "u-tempered-open" => %{
+          "asked_at" => recent_iso,
+          "on_demand" => true,
+          "family" => "archived-fam",
+          "fiber" => "archived-fam"
+        },
+        "u-discarded-open" => %{
+          "asked_at" => recent_iso,
+          "on_demand" => true,
+          "family" => "archived-fam",
+          "fiber" => "archived-fam/drop"
+        },
+        "u-tempered-expired" => %{
+          "asked_at" => expired_iso,
+          "on_demand" => true,
+          "family" => "archived-fam",
+          "fiber" => "archived-fam/old"
+        },
+        "u-newly-tempered" => %{
+          "asked_at" => recent_iso,
+          "family" => "archived-fam",
+          "fiber" => "archived-fam/fresh"
+        }
+      }
+
+      des =
+        RexLayout.desired(%{
+          fibers: fibers,
+          bindings: %{},
+          places: places,
+          now: @now,
+          pages_base: "http://hub.test:4000",
+          own_host_id: "host-a"
+        })
+
+      assert Map.has_key?(des.places_by_uid, "u-tempered-open")
+      assert Map.has_key?(des.places_by_uid, "u-discarded-open")
+      assert Map.has_key?(des.families, "archived-fam")
+      refute Map.has_key?(des.places_by_uid, "u-tempered-expired")
+      refute Map.has_key?(des.places_by_uid, "u-newly-tempered")
+    end
+
     test "never re-adds a tempered fiber from bindings, and ignores bindings dead in observed sessions" do
       fibers = [
         fiber(@uid_a, @root <> "/a", %{"status" => "closed", "tempered" => true}),
@@ -652,6 +706,37 @@ defmodule Shuttle.Terminal.RexLayoutTest do
       refute new_place["window_id"] == old_wid
       refute Map.has_key?(FakeRex.state().sessions, old_sid)
       assert Map.has_key?(FakeRex.state().sessions, new_place["session_id"])
+    end
+
+    test "ensure_place on a tempered fiber stamps on_demand, survives reconcile, and closes via close_place" do
+      now = ~U[2026-11-21 12:00:00Z]
+
+      tempered_fiber = %{
+        "id" => @uid_a,
+        "uid" => @uid_a,
+        "slug" => @root <> "/a",
+        "status" => "closed",
+        "tempered" => true,
+        "shuttle" => %{"host" => "test-host", "kind" => "oneshot"}
+      }
+
+      assert {:ok, place} = RexLayout.ensure_place(FakeRex, tempered_fiber, now: now)
+      assert place["on_demand"] == true
+      assert is_binary(place["asked_at"])
+      sid = place["session_id"]
+      wid = place["window_id"]
+
+      # Reconcile within grace keeps the on-demand view-only place open.
+      assert :ok = RexLayout.reconcile(FakeRex, fibers: [tempered_fiber], now: now)
+      assert Enum.any?(blocks(sid), &(&1["window_id"] == wid))
+      assert {:ok, doc} = RexBindings.read()
+      assert get_in(doc, ["places", @uid_a, "on_demand"]) == true
+
+      # Explicit close_place closes the window and removes the place entry.
+      assert :ok = RexLayout.close_place(FakeRex, @uid_a)
+      refute Enum.any?(blocks(sid), &(&1["window_id"] == wid))
+      assert {:ok, doc_after} = RexBindings.read()
+      refute Map.has_key?(doc_after["places"] || %{}, @uid_a)
     end
 
     test "resume-<uuid> worker keeps its page during reconcile and is not treated as stray", ctx do

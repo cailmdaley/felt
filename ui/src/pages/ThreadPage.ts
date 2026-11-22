@@ -69,7 +69,7 @@ const openFloating = (url: string): void => {
  * to another fiber moves Rex there when the page stands in a Rex pane
  * (`in=rex`), and otherwise opens that fiber's page in its place. Its lead
  * tapestry sits full-bleed in place with no fold chrome; a file shown full
- * opens in a window of its own. For any non-archived constitution, the board's
+ * opens in a window of its own. For any constitution, the board's
  * docked console footer sits flush at the bottom edge across both modes,
  * holding its context/cache warmth meter, Listen mic control and voice strip,
  * and {@link WorkerActions} (message box, Send/Resume, and New session). It
@@ -237,7 +237,7 @@ export class ThreadPage {
         this.renderPosts(card)
       }
 
-      const showDock = isAgentCard(card) && !archived(card)
+      const showDock = isAgentCard(card)
       this.dockBand.hidden = !showDock
       this.el.toggleAttribute('data-dock', showDock)
       if (showDock) {
@@ -294,7 +294,7 @@ export class ThreadPage {
     if (this.disposed || this.usageSession !== session) return
     this.usage = usage ?? this.usage
     const current = this.feed.card()
-    if (current && isAgentCard(current) && !archived(current)) this.paintDock(current)
+    if (current && isAgentCard(current)) this.paintDock(current)
   }
 
   private paintDock(card: KanbanCard): void {
@@ -306,7 +306,7 @@ export class ThreadPage {
     if (warm !== undefined && this.usageTimer === undefined) {
       this.usageTimer = window.setInterval(() => {
         const current = this.feed.card()
-        if (this.disposed || !current || !isAgentCard(current) || archived(current)) {
+        if (this.disposed || !current || !isAgentCard(current)) {
           clearInterval(this.usageTimer)
           this.usageTimer = undefined
           return

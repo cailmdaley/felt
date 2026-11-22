@@ -4,15 +4,15 @@ defmodule Shuttle.Palette do
 
   Combines Desk (when `pages.desk` is enabled), lifecycle actions for the
   currently focused thread (resolved from `fiber_id` or Rex `session_id` /
-  `window_id` / `block_id`), and non-tempered, non-discarded channels and
-  threads ordered by attention: waiting on the human first, then live workers,
-  then channels, then recent threads.
+  `window_id` / `block_id`), and channels and threads ordered by attention:
+  waiting on the human first, then live workers, then channels, then recent
+  threads, then tempered and discarded threads.
   """
 
   alias Shuttle.{FeltStores, Host, Lifecycle, Poller, RemoteFiberRegistry}
   alias Shuttle.Terminal.RexBindings
 
-  @max_items 500
+  @max_items 2000
   @ulid_re ~r/([0-9A-HJKMNP-TV-Z]{26})/
 
   @doc """
@@ -62,7 +62,6 @@ defmodule Shuttle.Palette do
 
     thread_items =
       normalized
-      |> Enum.reject(&(&1.column in ["tempered", "discarded"]))
       |> Enum.sort_by(&sort_key(&1, chosen_roots))
       |> Enum.map(&entry_item(&1, chosen_roots))
 
@@ -270,7 +269,11 @@ defmodule Shuttle.Palette do
   end
 
   defp focused_actions(nil), do: []
-  defp focused_actions(%{column: col}) when col in ["tempered", "discarded"], do: []
+
+  defp focused_actions(%{column: col} = entry) when col in ["tempered", "discarded"] do
+    standing? = get_in(entry.fiber, ["shuttle", "kind"]) == "standing"
+    [action_item(entry, "new_session", "New session", "plus", standing?)]
+  end
 
   defp focused_actions(entry) do
     standing? = get_in(entry.fiber, ["shuttle", "kind"]) == "standing"
@@ -304,7 +307,7 @@ defmodule Shuttle.Palette do
   end
 
   defp entry_item(entry, chosen_roots) do
-    ch? = channel?(entry, chosen_roots)
+    ch? = entry.column not in ["tempered", "discarded"] and channel?(entry, chosen_roots)
     kind = if ch?, do: "channel", else: "thread"
     tier = attention_tier(entry, ch?)
 
@@ -321,12 +324,15 @@ defmodule Shuttle.Palette do
   end
 
   defp sort_key(entry, chosen_roots) do
-    tier = attention_tier(entry, channel?(entry, chosen_roots))
+    ch? = entry.column not in ["tempered", "discarded"] and channel?(entry, chosen_roots)
+    tier = attention_tier(entry, ch?)
     {tier, -entry.recency_ms, entry.slug}
   end
 
   defp attention_tier(entry, ch?) do
     cond do
+      entry.column == "tempered" -> 4
+      entry.column == "discarded" -> 5
       Lifecycle.yours?(entry.turn) or entry.column == "awaiting_review" -> 0
       entry.live? -> 1
       ch? -> 2

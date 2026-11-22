@@ -201,10 +201,10 @@ defmodule ShuttleWeb.GoControllerTest do
     refute_received {:opened, _, _}
   end
 
-  test "tempered and discarded fibers are refused; an unknown one is not found" do
+  test "tempered and discarded fibers return none when pages are off; an unknown one is not found" do
     for id <- ["kept", "dropped"] do
-      assert %{"went" => false, "error" => error} = go(%{fiber_id: uid(id)}) |> json_response(422)
-      assert error =~ if(id == "kept", do: "tempered", else: "discarded")
+      assert %{"went" => false, "place" => "none"} =
+               go(%{fiber_id: uid(id)}) |> json_response(200)
     end
 
     assert %{"error" => "not_found"} = go(%{fiber_id: "nowhere"}) |> json_response(404)
@@ -303,10 +303,19 @@ defmodule ShuttleWeb.GoControllerTest do
     assert wid == place["window_id"]
     assert activated?()
 
-    # Tempered and discarded fibers are still refused with pages on.
+    # Tempered and discarded fibers open on-demand view-only places with pages on.
     for id <- ["kept", "dropped"] do
-      assert %{"went" => false} = go(%{fiber_id: uid(id)}) |> json_response(422)
-      refute Map.has_key?(Shuttle.Terminal.RexBindings.read() |> elem(1) |> Map.get("places", %{}), uid(id))
+      assert %{"went" => true, "place" => "view"} =
+               go(%{fiber_id: uid(id)}) |> json_response(200)
+
+      closed_place =
+        Shuttle.Terminal.RexBindings.read() |> elem(1) |> get_in(["places", uid(id)])
+
+      assert is_binary(closed_place["session_id"])
+      assert is_binary(closed_place["window_id"])
+      assert is_binary(closed_place["page_block_id"])
+      assert is_binary(closed_place["asked_at"])
+      assert closed_place["on_demand"] == true
     end
   end
 

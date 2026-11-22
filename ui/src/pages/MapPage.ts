@@ -3549,7 +3549,7 @@ export class MapPage {
     }
 
     this.rdActions.replaceChildren()
-    if (cityItem && !['closed', 'settled'].includes(cityItem.state) && (cityItem.uid || cityItem.id)) {
+    if (cityItem && (cityItem.uid || cityItem.id)) {
       const hostId = cityItem.origin || cityItem.host || ''
       if (hostId) {
         const openLabel = this.opts.route.inRex ? 'Open in Rex' : 'Open thread'

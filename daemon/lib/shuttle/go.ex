@@ -5,21 +5,22 @@ defmodule Shuttle.Go do
   the voice target nor a board.
 
   The request is owner-routed like `/transition`. The owner resolves the fiber
-  (a tempered or discarded one is refused) and its live worker. A worker in
-  the owner's Rex server has its window selected in the macOS app client
-  attached to that server, and in no other client; the daemon the human asked
-  then brings the Rex app forward. A tmux worker opens as the `/attach` viewer
-  (`Shuttle.Opener.open/2`) on the daemon the human asked: an owner reached by
-  a forward answers its session name instead, since only the asking daemon
-  holds the display.
+  and its live worker. A worker in the owner's Rex server has its window
+  selected in the macOS app client attached to that server, and in no other
+  client; the daemon the human asked then brings the Rex app forward. A fiber
+  without a live worker (including resting, draft, tempered, or discarded
+  fibers) opens a view-only Rex place when pages are enabled. A tmux worker
+  opens as the `/attach` viewer (`Shuttle.Opener.open/2`) on the daemon the
+  human asked: an owner reached by a forward answers its session name instead,
+  since only the asking daemon holds the display.
 
-  The answer is `%{went: bool, place: "live" | "none"}`. `place` says whether
-  the fiber has a live worker; `went: false` with place `live` means Rex could
-  not show it (no Mac app attached to the worker's Rex server, or no terminal
-  holding it).
+  The answer is `%{went: bool, place: "live" | "view" | "none"}`. `place` says
+  whether the fiber has a live worker or a view-only place; `went: false` with
+  place `live` or `view` means Rex could not show it (no Mac app attached to
+  the worker's Rex server, or no terminal holding it).
   """
 
-  alias Shuttle.{Env, FiberDocuments, Lifecycle, OriginRouter, Poller, Remote, Terminal}
+  alias Shuttle.{Env, FiberDocuments, OriginRouter, Poller, Remote, Terminal}
   alias Shuttle.Terminal.{Rex, RexLayout}
 
   @none %{went: false, place: "none"}
@@ -97,12 +98,9 @@ defmodule Shuttle.Go do
 
   defp here(fiber_id, display?, activate?) do
     with {:ok, fiber} <- fiber(fiber_id) do
-      worker = Poller.live_worker(fiber["uid"] || fiber_id)
-
-      case Lifecycle.column(fiber, worker != nil) do
-        column when column in ["tempered", "discarded"] -> {:error, {:closed, column}}
-        _ when worker == nil -> show_place(fiber, activate?)
-        _ -> show(worker.session, display?, activate?)
+      case Poller.live_worker(fiber["uid"] || fiber_id) do
+        nil -> show_place(fiber, activate?)
+        worker -> show(worker.session, display?, activate?)
       end
     end
   end

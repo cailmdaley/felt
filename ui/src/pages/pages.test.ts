@@ -340,7 +340,7 @@ describe('the thread page', () => {
     expect(requests.length).toBe(beforeDispose)
   })
 
-  it('shows the docked footer on both live and quiet threads, hides it on archived threads, and dispatches send/resume and new session', async () => {
+  it('shows the docked footer on live, quiet, and archived threads, and dispatches send/resume and new session', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
 
     // Live worker: docked footer is visible; sending a message uses continue, and New session with a message uses fresh.
@@ -374,14 +374,18 @@ describe('the thread page', () => {
     expect(liveNew.resume_mode).toBe('fresh')
     expect(liveNew.user_message).toBe('Start fresh with new seed')
 
-    // Tempered and discarded threads hide the docked footer.
+    // Tempered and discarded threads also show the docked footer so a fresh session can be started, while staying in Tapestry / Files mode.
     const { page: temperedPage } = await open(`?f=thread-archive@${WORKSPACE_HOST}`)
-    expect(temperedPage.el.querySelector<HTMLElement>('[data-part="thread-dock"]')!.hidden).toBe(true)
-    expect(temperedPage.el.hasAttribute('data-dock')).toBe(false)
+    const temperedDock = temperedPage.el.querySelector<HTMLElement>('[data-part="thread-dock"]')!
+    expect(temperedDock.hidden).toBe(false)
+    expect(temperedPage.el.hasAttribute('data-dock')).toBe(true)
+    expect(temperedPage.el.querySelector<HTMLElement>('.pg-modes')!.hidden).toBe(true)
 
     const { page: discardedPage } = await open(`?f=thread-discard@${WORKSPACE_HOST}`)
-    expect(discardedPage.el.querySelector<HTMLElement>('[data-part="thread-dock"]')!.hidden).toBe(true)
-    expect(discardedPage.el.hasAttribute('data-dock')).toBe(false)
+    const discardedDock = discardedPage.el.querySelector<HTMLElement>('[data-part="thread-dock"]')!
+    expect(discardedDock.hidden).toBe(false)
+    expect(discardedPage.el.hasAttribute('data-dock')).toBe(true)
+    expect(discardedPage.el.querySelector<HTMLElement>('.pg-modes')!.hidden).toBe(true)
 
     // Quiet thread (awaiting review, no live worker): docked footer offers Resume and New session.
     const { page: quietPage } = await open(`?f=thread-review@${WORKSPACE_HOST}&in=rex`)

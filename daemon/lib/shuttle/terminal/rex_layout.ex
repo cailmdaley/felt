@@ -7,7 +7,9 @@ defmodule Shuttle.Terminal.RexLayout do
   holding its thread page pane, with a live worker's chat block split on the
   left (`[chat | page]`). A thread has a desired place while it has a live
   worker, waits on the human (ask or review), or was gone to (`asked_at`)
-  within the grace window (24 h), unless tempered or discarded.
+  within the grace window (24 h). Tempered and discarded threads drop their
+  places unless explicitly opened on demand (`on_demand: true`) within the
+  grace window.
 
   `desired/1` and `plan/2` are pure functions. `plan/2` never closes a chat
   block, never touches non-Shuttle sessions or human blocks, and never closes
@@ -178,8 +180,7 @@ defmodule Shuttle.Terminal.RexLayout do
       for fiber <- rows,
           uid = fiber["uid"] || fiber["id"],
           is_binary(uid) and uid != "",
-          live? = Map.has_key?(live_by_uid, uid),
-          Lifecycle.column(fiber, live?) in ["tempered", "discarded"],
+          Lifecycle.column(fiber, Map.has_key?(live_by_uid, uid)) in ["tempered", "discarded"],
           into: MapSet.new(),
           do: uid
 
@@ -264,7 +265,11 @@ defmodule Shuttle.Terminal.RexLayout do
             acc
 
           MapSet.member?(closed_verdict_uids, uid) ->
-            acc
+            if on_demand_place?(place, now, grace) do
+              keep_existing_place(acc, uid, place, base, own_host_id)
+            else
+              acc
+            end
 
           not fibers_loaded? ->
             keep_existing_place(acc, uid, place, base, own_host_id)
@@ -405,6 +410,11 @@ defmodule Shuttle.Terminal.RexLayout do
   end
 
   defp recently_asked?(_, _, _), do: false
+
+  defp on_demand_place?(%{"on_demand" => true} = place, now, grace),
+    do: recently_asked?(place, now, grace)
+
+  defp on_demand_place?(_, _, _), do: false
 
   defp live_family_bindings(bindings, rows_by_path, places, sessions) do
     places_by_win =
@@ -2833,6 +2843,7 @@ defmodule Shuttle.Terminal.RexLayout do
       session_label = Tree.display_label(Tree.session_label(root))
       url = Pages.url(base, uid, Keyword.get(opts, :own_host_id, Poller.own_host_id()))
       now_iso = Keyword.get(opts, :now, DateTime.utc_now()) |> DateTime.to_iso8601()
+      on_demand? = Lifecycle.column(fiber, false) in ["tempered", "discarded"]
 
       result =
         Backend.family_lock(root, fn ->
@@ -2854,6 +2865,7 @@ defmodule Shuttle.Terminal.RexLayout do
                   |> Map.put("page_closed", false)
                   |> Map.put("fiber", path)
                   |> Map.put("depth", depth)
+                  |> maybe_put_on_demand(on_demand?)
 
                 with :ok <- Bindings.put_place(uid, updated, server),
                      :ok <- sync_root_view(doc, root, path, uid, updated, server),
@@ -2874,7 +2886,8 @@ defmodule Shuttle.Terminal.RexLayout do
                   path,
                   depth,
                   url,
-                  now_iso
+                  now_iso,
+                  on_demand?
                 )
 
               :none ->
@@ -2891,7 +2904,8 @@ defmodule Shuttle.Terminal.RexLayout do
                   session_label,
                   window_label,
                   url,
-                  now_iso
+                  now_iso,
+                  on_demand?
                 )
             end
           end
@@ -2963,7 +2977,8 @@ defmodule Shuttle.Terminal.RexLayout do
          path,
          depth,
          url,
-         now_iso
+         now_iso,
+         on_demand?
        ) do
     sid = place["session_id"]
     wid = place["window_id"]
@@ -2991,6 +3006,7 @@ defmodule Shuttle.Terminal.RexLayout do
         |> Map.put("asked_at", now_iso)
         |> Map.put("fiber", path)
         |> Map.put("depth", depth)
+        |> maybe_put_on_demand(on_demand?)
 
       matching_binding =
         Enum.find(doc["bindings"] || %{}, fn {_, b} ->
@@ -3059,7 +3075,8 @@ defmodule Shuttle.Terminal.RexLayout do
          session_label,
          window_label,
          url,
-         now_iso
+         now_iso,
+         on_demand?
        ) do
     sid = if doc["server"] == server, do: get_in(doc, ["families", root])
     existing_session? = sid != nil and Enum.any?(sessions, &(&1["session_id"] == sid))
@@ -3096,16 +3113,18 @@ defmodule Shuttle.Terminal.RexLayout do
         end
 
       with {:ok, place_sid, wid, bid, new_session?} <- created do
-        place = %{
-          "session_id" => place_sid,
-          "window_id" => wid,
-          "page_block_id" => bid,
-          "family" => root,
-          "fiber" => path,
-          "depth" => depth,
-          "asked_at" => now_iso,
-          "page_closed" => false
-        }
+        place =
+          %{
+            "session_id" => place_sid,
+            "window_id" => wid,
+            "page_block_id" => bid,
+            "family" => root,
+            "fiber" => path,
+            "depth" => depth,
+            "asked_at" => now_iso,
+            "page_closed" => false
+          }
+          |> maybe_put_on_demand(on_demand?)
 
         with :ok <- Bindings.put_place(uid, place, server),
              :ok <- sync_root_view(doc, root, path, uid, place, server),
@@ -3115,4 +3134,7 @@ defmodule Shuttle.Terminal.RexLayout do
       end
     end
   end
+
+  defp maybe_put_on_demand(place, true), do: Map.put(place, "on_demand", true)
+  defp maybe_put_on_demand(place, false), do: Map.delete(place, "on_demand")
 end

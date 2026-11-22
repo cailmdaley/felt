@@ -80,10 +80,27 @@ defmodule ShuttleWeb.PaletteControllerTest do
       refute Enum.any?(without_desk.items, &(&1.kind in ["desk", "map"]))
     end
 
-    test "excludes tempered and discarded threads and orders by attention" do
+    test "orders threads by attention with tempered then discarded at the bottom" do
       entries = [
-        make_entry("kept", status: "closed", tempered: true, column: "tempered"),
-        make_entry("dropped", status: "closed", tempered: false, column: "discarded"),
+        make_entry("kept-old",
+          status: "closed",
+          tempered: true,
+          column: "tempered",
+          modified_at: "2026-11-18T10:00:00Z"
+        ),
+        make_entry("kept-new",
+          status: "closed",
+          tempered: true,
+          column: "tempered",
+          channel: "ops",
+          modified_at: "2026-11-22T10:00:00Z"
+        ),
+        make_entry("dropped",
+          status: "closed",
+          tempered: false,
+          column: "discarded",
+          modified_at: "2026-11-22T12:00:00Z"
+        ),
         make_entry("recent-old",
           status: "open",
           column: "drafts",
@@ -128,25 +145,62 @@ defmodule ShuttleWeb.PaletteControllerTest do
       result = Palette.build(entries, desk?: false)
       slugs = Enum.map(result.items, & &1.title)
 
-      refute "Kept" in slugs
-      refute "Dropped" in slugs
-
-      # Waiting on human (ask + review) before live, before channel, before recent (newest first).
+      # Waiting on human (ask + review) before live, before channel, before recent,
+      # before tempered (newest first), before discarded.
       waiting_idx = Enum.find_index(slugs, &(&1 == "Waiting-ask"))
       review_idx = Enum.find_index(slugs, &(&1 == "Awaiting-rev"))
       live_idx = Enum.find_index(slugs, &(&1 == "Live-work"))
       chan_idx = Enum.find_index(slugs, &(&1 == "Chan-root"))
       new_idx = Enum.find_index(slugs, &(&1 == "Recent-new"))
       old_idx = Enum.find_index(slugs, &(&1 == "Recent-old"))
+      kept_new_idx = Enum.find_index(slugs, &(&1 == "Kept-new"))
+      kept_old_idx = Enum.find_index(slugs, &(&1 == "Kept-old"))
+      dropped_idx = Enum.find_index(slugs, &(&1 == "Dropped"))
 
       assert waiting_idx < live_idx
       assert review_idx < live_idx
       assert live_idx < chan_idx
       assert chan_idx < new_idx
       assert new_idx < old_idx
+      assert old_idx < kept_new_idx
+      assert kept_new_idx < kept_old_idx
+      assert kept_old_idx < dropped_idx
 
       chan_item = Enum.find(result.items, &(&1.title == "Chan-root"))
       assert chan_item.kind == "channel"
+
+      kept_item = Enum.find(result.items, &(&1.title == "Kept-new"))
+      assert kept_item.kind == "thread"
+      assert kept_item.detail == "tempered"
+      assert kept_item.icon == "document"
+
+      dropped_item = Enum.find(result.items, &(&1.title == "Dropped"))
+      assert dropped_item.kind == "thread"
+      assert dropped_item.detail == "discarded"
+      assert dropped_item.icon == "document"
+    end
+
+    test "offers new_session action when focused on a tempered or discarded thread" do
+      kept_uid = FiberUid.for("kept-focus")
+      dropped_uid = FiberUid.for("dropped-focus")
+
+      entries = [
+        make_entry("kept-focus", uid: kept_uid, status: "closed", tempered: true, column: "tempered"),
+        make_entry("dropped-focus",
+          uid: dropped_uid,
+          status: "closed",
+          tempered: false,
+          column: "discarded"
+        )
+      ]
+
+      for uid <- [kept_uid, dropped_uid] do
+        result = Palette.build(entries, fiber_id: uid)
+        assert result.focused.fiber_id == uid
+
+        actions = Enum.filter(result.items, &(&1.kind == "action"))
+        assert [%{action: "new_session", icon: "plus", fiber_id: ^uid}] = actions
+      end
     end
 
     test "includes focused thread lifecycle actions when matched by fiber_id" do
