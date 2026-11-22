@@ -15,9 +15,17 @@
 /* A post's files, each as wide as the post and short: a page shows its top at its real size, a figure stands whole
    in the same box with its aspect kept, both a third of the screen high at most (foldPx in filePreview.ts); a card
    is one line, 56px. Each box is set before anything loads, and unfolding one changes its height alone. */
-.uf:not([data-single]) .uf-row { flex-direction: column; gap: 8px; overflow: visible; scroll-snap-type: none; }
+.uf:not([data-single]) .uf-row { flex-direction: column; gap: 8px; align-items: flex-start; overflow: visible; scroll-snap-type: none; }
 .uf:not([data-single]) .uf-card { flex: none; width: 100%; height: var(--uf-fold); }
-.uf:not([data-single]) .uf-card[data-density='figure'] :is(.kbn-thumbnail-image, .kbn-fileview-image-wrap) { justify-content: flex-start; }
+.uf:not([data-single]) .uf-card[data-density='figure'][data-fitted] {
+  width: min(100%, calc(var(--uf-fold) * var(--uf-aspect)));
+  height: auto;
+  aspect-ratio: var(--uf-aspect);
+}
+.uf:not([data-single]) .uf-card[data-density='figure'] :is(.uf-thumb.ws-thumbnail, .ws-thumbnail-body, .kbn-thumbnail-image, .kbn-fileview-image-wrap) {
+  background: transparent;
+  justify-content: flex-start;
+}
 .uf:not([data-single]) .uf-card[data-density='figure'] img { object-position: left center; }
 .uf:not([data-single]) .uf-card[data-density='card'] {
   height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 12px; text-align: left;

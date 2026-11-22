@@ -91,7 +91,7 @@ export function fileRow(file: UnfoldFile, now = Date.now()): HTMLElement {
  * it nears the screen and released once well away, and none while `awake`
  * says its host is hidden.
  */
-function pagePreview(file: UnfoldFile, el: HTMLElement, opts: { shuttleBase: string; awake?(): boolean }, density?: FileDensity): Thumbnail {
+function pagePreview(file: UnfoldFile, el: HTMLElement, opts: { shuttleBase: string; awake?(): boolean }, density?: FileDensity, onAspect?: (ratio: number) => void): Thumbnail {
   const parsed = parseDocKey(file.key), path = parsed?.path ?? file.name
   // A post's page is laid out at its card's width, so it is drawn at its real size; a view's lead, at least as wide as a reading column.
   const thumbnail: Thumbnail = new Thumbnail({
@@ -100,6 +100,7 @@ function pagePreview(file: UnfoldFile, el: HTMLElement, opts: { shuttleBase: str
     get pageWidth() { return density ? Math.round(el.clientWidth) || 720 : Math.max(720, Math.round(el.clientWidth)) },
     priority: () => (opts.awake?.() ?? true) ? thumbnail.screenPriority() : 0,
     distance: () => thumbnail.gap(),
+    onAspect,
   })
   return thumbnail
 }
@@ -434,7 +435,10 @@ export class Unfold {
       this.cards.set(file.key, { el })
       return el
     }
-    const thumbnail = pagePreview(file, el, this.opts, density)
+    const onAspect = density === 'figure'
+      ? (ratio: number) => { el.style.setProperty('--uf-aspect', String(ratio)); el.dataset.fitted = '' }
+      : undefined
+    const thumbnail = pagePreview(file, el, this.opts, density, onAspect)
     el.append(thumbnail.el)
     this.cards.set(file.key, { el, thumbnail })
     return el
