@@ -534,10 +534,9 @@ describe('the thread page', () => {
     browserAnalysis.querySelector<HTMLButtonElement>('[data-item]')!.click()
     expect(browserNav).toHaveBeenCalledWith(`${window.location.origin}/thread?f=thread-analysis%40${WORKSPACE_HOST}`)
 
-    // A non-root thread with a subtree offers Posts mode, defaulting to Tapestry / Files.
+    // A non-root thread (even one with sub-threads) hides the mode bar and stays on Tapestry / Files.
     const { page: subPage } = await open(`?f=thread-analysis@${WORKSPACE_HOST}`)
-    expect(subPage.el.querySelector<HTMLElement>('.pg-modes')!.hidden).toBe(false)
-    expect(subPage.el.querySelector<HTMLButtonElement>('.pg-mode-pill[data-mode="files"]')!.getAttribute('aria-selected')).toBe('true')
+    expect(subPage.el.querySelector<HTMLElement>('.pg-modes')!.hidden).toBe(true)
     expect(subPage.el.querySelector<HTMLElement>('.pg-posts')!.hidden).toBe(true)
     expect(subPage.el.querySelector<HTMLElement>('.ws-family-page')!.hidden).toBe(false)
 

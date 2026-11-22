@@ -203,11 +203,10 @@ export class ThreadPage {
     if (card) {
       const uid = fiberOf(card)
       const isRoot = !this.feed.index.parentOf(card)
-      const hasSubtree = this.feed.index.children(card).length > 0
-      const hasPostsMode = !archived(card) && (isRoot || hasSubtree)
+      const hasPostsMode = !archived(card) && isRoot
       if (this.modeCardUid !== uid) {
         this.modeCardUid = uid
-        this.mode = hasPostsMode && isRoot ? 'posts' : 'files'
+        this.mode = hasPostsMode ? 'posts' : 'files'
         this.stream.reset()
       }
       if (!hasPostsMode) this.mode = 'files'
