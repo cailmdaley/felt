@@ -94,10 +94,31 @@ defmodule Shuttle.Transition do
     with {:ok, %{id: action_id} = action} <- resolve(fiber_id, target),
          {:ok, felt_store} <- FeltStores.store_for_fiber(fiber_id),
          :ok <- invoke_action(fiber_id, action, felt_store) do
+      teardown_after_transition(fiber_id, action_id)
       Poller.refresh_document(fiber_id)
       {:ok, action_id}
     end
   end
+
+  # Closing or pausing a thread stops any live terminal worker immediately (the
+  # document write above already prevents relaunch) and closes its Rex tab when
+  # moving out of active work (to review, tempered, or discarded).
+  defp teardown_after_transition(fiber_id, action_id)
+       when action_id in ["close-awaiting-review", "close-tempered", "close-composted", "pause"] do
+    try do
+      _ = Poller.kill_session(fiber_id)
+    catch
+      :exit, _ -> :ok
+    end
+
+    if action_id != "pause" and Shuttle.Host.terminal() == :rex do
+      _ = Shuttle.Terminal.RexLayout.close_place(Shuttle.Runner, fiber_id)
+    end
+
+    :ok
+  end
+
+  defp teardown_after_transition(_fiber_id, _action_id), do: :ok
 
   defp resolve(fiber_id, target) do
     case ActionQueries.resolve_action(fiber_id, target) do

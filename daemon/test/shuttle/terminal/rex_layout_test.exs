@@ -31,7 +31,7 @@ defmodule Shuttle.Terminal.RexLayoutTest do
       )
     end
 
-    test "grants places for live workers, asks, awaiting_review, and recent asked_at; never tempered or discarded" do
+    test "grants places for live workers, asks, and recent asked_at; never awaiting_review, tempered, or discarded" do
       fibers = [
         fiber(@uid_a, @root, %{"status" => "active"}),
         fiber("u-ask", @root <> "/ask", %{
@@ -76,7 +76,8 @@ defmodule Shuttle.Terminal.RexLayoutTest do
         })
 
       uids = Map.keys(des.places_by_uid) |> Enum.sort()
-      assert uids == Enum.sort([@uid_a, "u-ask", "u-review", "u-recent"])
+      assert uids == Enum.sort([@uid_a, "u-ask", "u-recent"])
+      refute Map.has_key?(des.places_by_uid, "u-review")
       refute Map.has_key?(des.places_by_uid, "u-expired")
       refute Map.has_key?(des.places_by_uid, "u-tempered")
       refute Map.has_key?(des.places_by_uid, "u-discarded")
@@ -568,8 +569,8 @@ defmodule Shuttle.Terminal.RexLayoutTest do
         "id" => @uid_a,
         "uid" => @uid_a,
         "slug" => @root <> "/a",
-        "status" => "closed",
-        "shuttle" => %{"host" => "test-host", "kind" => "oneshot"}
+        "status" => "active",
+        "shuttle" => %{"host" => "test-host", "kind" => "oneshot", "ask" => %{"text" => "Ready?"}}
       }
 
       assert {:ok, place} = RexLayout.ensure_place(FakeRex, waiting_fiber, now: now)
@@ -1159,7 +1160,7 @@ defmodule Shuttle.Terminal.RexLayoutTest do
       now = ~U[2026-11-21 12:00:00Z]
 
       root_fiber = %{"id" => "u-root", "uid" => "u-root", "slug" => @root, "status" => "open", "shuttle" => %{"host" => "h", "kind" => "oneshot"}}
-      child_fiber = %{"id" => @uid_a, "uid" => @uid_a, "slug" => @root <> "/a", "status" => "closed", "shuttle" => %{"host" => "h", "kind" => "oneshot"}}
+      child_fiber = %{"id" => @uid_a, "uid" => @uid_a, "slug" => @root <> "/a", "status" => "active", "shuttle" => %{"host" => "h", "kind" => "oneshot", "ask" => %{"text" => "Ready?"}}}
 
       obs = %{sessions: %{}, focused_sessions: MapSet.new(), families: %{}, bindings: %{}, viewers: %{}, places: %{}, views: %{}}
 
@@ -1181,8 +1182,12 @@ defmodule Shuttle.Terminal.RexLayoutTest do
       assert hd(obs1.sessions[sid].windows).window_id == view["window_id"]
       assert length(obs1.sessions[sid].windows) == 2
 
-      # Child becomes tempered: child window closes, but Tab 1 family view stays (chosen channel).
-      tempered_child = Map.put(child_fiber, "tempered", true)
+      # Child moves to closed/tempered: child window closes, but Tab 1 family view stays (chosen channel).
+      tempered_child =
+        child_fiber
+        |> Map.put("status", "closed")
+        |> Map.put("tempered", true)
+        |> update_in(["shuttle"], &Map.delete(&1, "ask"))
 
       des2 =
         RexLayout.desired(%{

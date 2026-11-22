@@ -2432,21 +2432,27 @@ defmodule Shuttle.Poller do
         args: args ++ if(is_map(target), do: LifecycleService.hint_args(target), else: [])
       )
 
-    # A rest or a verdict writes first (the document is at rest, closed, or a
+    # A rest, pause, or close writes first (the document is at rest, closed, or a
     # standing run concluded before any stop), then stops the worker, so its
     # exit cannot be read as a reason to relaunch. A failed stop is reported;
     # the document has already moved.
     stops_worker? =
-      verb == :rest or (verb == :pause and "--no-kill" not in args) or
-        (verb == :close and Enum.any?(args, &String.starts_with?(&1, "--tempered=")))
+      verb == :rest or ((verb == :pause or verb == :close) and "--no-kill" not in args)
 
     {result, state} =
       case {stops_worker?, result} do
         {true, {:ok, output}} ->
           case stop_worker(state, address) do
-            {{:ok, :no_session}, state} -> {{:ok, output}, state}
-            {{:ok, session}, state} -> {{:ok, output <> "  worker: stopped #{session}\n"}, state}
-            {{:error, reason}, state} -> {{:error, reason}, state}
+            {{:ok, :no_session}, state} ->
+              if verb in [:rest, :close], do: close_rex_place(state.runner, address)
+              {{:ok, output}, state}
+
+            {{:ok, session}, state} ->
+              if verb in [:rest, :close], do: close_rex_place(state.runner, address)
+              {{:ok, output <> "  worker: stopped #{session}\n"}, state}
+
+            {{:error, reason}, state} ->
+              {{:error, reason}, state}
           end
 
         _ ->
@@ -2488,6 +2494,14 @@ defmodule Shuttle.Poller do
 
     # Tick now so parked fibers dispatch immediately, not a poll interval later.
     {:reply, :ok, schedule_tick(state, 0)}
+  end
+
+  defp close_rex_place(runner, address) do
+    if Shuttle.Host.terminal() == :rex do
+      _ = Shuttle.Terminal.RexLayout.close_place(runner, address)
+    end
+
+    :ok
   end
 
   # ── Snapshot ──

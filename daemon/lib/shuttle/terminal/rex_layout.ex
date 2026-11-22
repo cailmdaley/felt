@@ -387,9 +387,8 @@ defmodule Shuttle.Terminal.RexLayout do
       Map.has_key?(places, uid)
   end
 
-  defp waiting_on_human?(fiber, column) do
-    column == "awaiting_review" or
-      (fiber["status"] == "active" and is_map(get_in(fiber, ["shuttle", "ask"])))
+  defp waiting_on_human?(fiber, _column) do
+    fiber["status"] == "active" and is_map(get_in(fiber, ["shuttle", "ask"]))
   end
 
   defp wants_place?(fiber, column, live?, place, now, grace) do
@@ -2570,6 +2569,64 @@ defmodule Shuttle.Terminal.RexLayout do
   end
 
   defp remove_desk_window(_runner, _), do: :ok
+
+  @doc """
+  Close the Rex place window for `identifier` (a fiber uid or slug) when it is
+  no longer backed by a live terminal or Tab 1 family view, and drop its place
+  entry from `rex.json`. Best-effort; returns `:ok` when no place exists.
+  """
+  @spec close_place(module(), String.t()) :: :ok
+  def close_place(runner, identifier) when is_binary(identifier) and identifier != "" do
+    with {:ok, doc} <- Bindings.read(),
+         {uid, place} <- find_place_entry(doc["places"] || %{}, identifier) do
+      sid = place["session_id"]
+      wid = place["window_id"]
+      views = doc["views"] || %{}
+
+      is_view_window? =
+        is_binary(sid) and is_binary(wid) and
+          Enum.any?(views, fn {_root, v} -> v["session_id"] == sid and v["window_id"] == wid end)
+
+      if not is_view_window? and is_binary(sid) and is_binary(wid) do
+        case Rex.blocks(runner, sid) do
+          {:ok, blocks} ->
+            win_blocks = Enum.filter(blocks, &(&1["window_id"] == wid))
+
+            if Enum.all?(win_blocks, &raw_page_block?/1) do
+              _ = close_window_if_present(runner, sid, wid)
+            end
+
+          _ ->
+            :ok
+        end
+      end
+
+      _ = Bindings.delete_place(uid, place)
+      :ok
+    else
+      _ -> :ok
+    end
+  end
+
+  def close_place(_runner, _identifier), do: :ok
+
+  defp find_place_entry(places, identifier) when is_map(places) do
+    case Map.fetch(places, identifier) do
+      {:ok, place} ->
+        {identifier, place}
+
+      :error ->
+        Enum.find(places, fn {_uid, place} ->
+          is_map(place) and place["fiber"] == identifier
+        end)
+    end
+  end
+
+  defp raw_page_block?(%{"label" => label}) when is_binary(label) do
+    label == "rexweb" or String.starts_with?(label, "rexweb ")
+  end
+
+  defp raw_page_block?(_), do: false
 
   defp close_window_if_present(runner, sid, wid) do
     case Rex.close_window(runner, sid, wid) do
