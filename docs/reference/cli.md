@@ -109,6 +109,7 @@ Subsequent searches catch up changed transcripts unless `--no-index` is supplied
 A populated index built from individual files can be searched with `--no-index`, but automatic catch-up requires a completed root scan.
 The index is private, rebuildable cache data at `$XDG_CACHE_HOME/felt/transcript-index.sqlite`, defaulting to `~/.cache/felt/transcript-index.sqlite`; `SHUTTLE_TRANSCRIPT_INDEX` selects another file.
 Transcript roots can be overridden with `SHUTTLE_CLAUDE_PROJECTS_DIR`, `SHUTTLE_CODEX_SESSIONS_DIR`, and `SHUTTLE_PI_SESSIONS_DIR`.
+A directory holding a `.no-transcript-search` file keeps every session run in it, or below it, out of the index: their transcripts stay where the harness wrote them, but no message is stored, searched or listed as recent activity. The marker is read on every catch-up, so adding one drops what was already indexed; removing one lets each session back in the next time its transcript changes. Antigravity transcripts carry no working directory, so the marker doesn't reach them.
 
 Results rank by SQLite FTS5 BM25 relevance, with user and assistant message scores multiplied by 1.5 and tool scores unchanged.
 For example, raw relevance 10 becomes 15 for conversational text; a tool match scoring 16 still wins, while a tool match scoring 12 doesn't.

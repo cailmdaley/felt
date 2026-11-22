@@ -180,6 +180,9 @@ func (i *Index) CatchUp(ctx context.Context, roots []Root, rebuild bool) ([]stri
 			}
 		}
 	}
+	if err := i.dropUnindexed(ctx); err != nil {
+		return problems, err
+	}
 	ready, err := i.Ready(ctx)
 	if err != nil {
 		return problems, err
@@ -349,6 +352,12 @@ func (i *Index) IndexFile(ctx context.Context, path, harness string) error {
 			}
 			old.messages++
 		}
+	}
+	if old.messages > 0 && unindexed(old.meta.Project) {
+		if _, err = conn.ExecContext(ctx, "DELETE FROM messages WHERE file_id=?", old.id); err != nil {
+			return err
+		}
+		old.messages = 0
 	}
 	hash, err := tailHash(f, old.offset)
 	if err != nil {
