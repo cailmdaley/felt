@@ -6,7 +6,8 @@
 /* What the page cannot show: a quiet line in its place. */
 .pg-status { margin: 10px 24px 0; color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-ui) var(--font-serif); }
 .pg-status[hidden], .pg-said[hidden], .pg-modes[hidden], .pg-posts[hidden], .pg-console[hidden] { display: none; }
-.pg-console { text-decoration: none; }
+.pg-thread .ov-tools { gap: 2px; }
+.pg-console { box-sizing: border-box; text-decoration: none; }
 .pg-console[data-pending] { opacity: 0.45; pointer-events: none; }
 /* Mode pills (Posts / Tapestry & Files) on family roots and subtrees. */
 .pg-modes {
