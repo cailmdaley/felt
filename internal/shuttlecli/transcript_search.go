@@ -132,7 +132,7 @@ type transcriptQuery struct {
 
 func (a *app) transcriptSearchCmd() *cobra.Command {
 	q := transcriptQuery{}
-	cmd := &cobra.Command{Use: "search <query...>", Short: "Search local harness transcripts by relevance", Long: "Search local harness transcripts by relevance, returning each session's best message and matching-message count. Use --per-message for individual messages. The limit counts sessions by default. Sessions run in a directory holding a .no-transcript-search file, or below one, are never indexed. shuttle find runs this search alongside a fiber search.", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	cmd := &cobra.Command{Use: "search <query...>", Short: "Search local harness transcripts by relevance", Long: "Search local harness transcripts by relevance, returning each session's best message and matching-message count. Use --per-message for individual messages. The limit counts sessions by default. shuttle find runs this search alongside a fiber search.", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		q.Query = strings.Join(args, " ")
 		ctx, cancel := context.WithTimeout(cmd.Context(), 2*time.Minute)
 		defer cancel()

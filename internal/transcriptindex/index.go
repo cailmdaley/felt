@@ -180,9 +180,6 @@ func (i *Index) CatchUp(ctx context.Context, roots []Root, rebuild bool) ([]stri
 			}
 		}
 	}
-	if err := i.dropUnindexed(ctx); err != nil {
-		return problems, err
-	}
 	ready, err := i.Ready(ctx)
 	if err != nil {
 		return problems, err
@@ -328,9 +325,6 @@ func (i *Index) IndexFile(ctx context.Context, path, harness string) error {
 	}
 	defer stmt.Close()
 	malformed := 0
-	// A session that ever ran in a marked directory stays recorded under it,
-	// so a later cd elsewhere can't bring its earlier messages back.
-	seen, marked := old.meta.Project, unindexed(old.meta.Project)
 	for {
 		if err = ctx.Err(); err != nil {
 			return err
@@ -349,28 +343,12 @@ func (i *Index) IndexFile(ctx context.Context, path, harness string) error {
 			malformed++
 			continue
 		}
-		if marked {
-			old.meta.Project = seen
-			continue
-		}
-		if old.meta.Project != seen {
-			seen = old.meta.Project
-			if marked = unindexed(seen); marked {
-				continue
-			}
-		}
 		for _, m := range msgs {
 			if _, err = stmt.ExecContext(ctx, old.id, old.line, m.Timestamp, m.Role, m.Text); err != nil {
 				return err
 			}
 			old.messages++
 		}
-	}
-	if marked && old.messages > 0 {
-		if _, err = conn.ExecContext(ctx, "DELETE FROM messages WHERE file_id=?", old.id); err != nil {
-			return err
-		}
-		old.messages = 0
 	}
 	hash, err := tailHash(f, old.offset)
 	if err != nil {
