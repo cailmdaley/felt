@@ -24,6 +24,7 @@ import '../board/workspace/dock.css'
 import type { PageFeed } from './feed.js'
 import { go } from './go.js'
 import { threadHref, type PageRoute } from './route.js'
+import { ThreadSettings } from './ThreadSettings.js'
 
 export interface ThreadPageOptions {
   base: string
@@ -95,6 +96,7 @@ export class ThreadPage {
   private listen: ListenControl | null = null
   private voiceStrip: VoiceStrip | null = null
   private voiceUnsub: (() => void) | null = null
+  private settings: ThreadSettings | null = null
   private unbindKeyboard: (() => void) | null = null
   private mode: ThreadMode = 'files'
   private modeCardUid: string | null = null
@@ -255,6 +257,7 @@ export class ThreadPage {
     this.listen?.dispose()
     this.voiceUnsub?.()
     this.voice?.dispose()
+    this.settings?.dispose()
     this.unbindKeyboard?.()
     this.workerActions?.dispose()
     this.family.dispose()
@@ -321,12 +324,14 @@ export class ThreadPage {
       })
       this.voiceStrip = new VoiceStrip()
       this.voiceUnsub = this.voice.subscribe(() => this.paintVoice())
-      this.workerActions.seat(this.listen.el, this.voiceStrip.el)
+      this.settings = new ThreadSettings(this.opts.base, this.dock, card)
+      this.workerActions.seat(this.listen.el, this.voiceStrip.el, this.settings.button)
       this.workerActions.seatPlaceholder(this.meter)
       this.dockBody.append(this.workerActions.el)
       this.unbindKeyboard = bindAvoidKeyboard(this.dock)
     }
     this.paintVoice(card)
+    this.settings?.update(card)
     this.workerActions.update(card, note)
   }
 

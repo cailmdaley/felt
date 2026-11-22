@@ -91,6 +91,14 @@ describe('the thread page', () => {
         return json(voiceResponse)
       }
       if (url.startsWith('/api/v1/file') && serveFiles) return serveFiles(url, method, headers)
+      if (url === '/api/v1/agents' && method === 'GET') {
+        return json([
+          { id: 'claude-opus', cli: 'claude', model: 'claude-opus', default: true, effort_levels: ['low', 'medium', 'high'], default_effort: 'medium', chrome_capable: true },
+          { id: 'codex-5', cli: 'codex', model: 'codex-5', default: false, effort_levels: ['medium', 'high'], default_effort: 'high', chrome_capable: false },
+        ])
+      }
+      if (url === '/api/v1/lifecycle' && method === 'POST') return json({ ok: true })
+      if (url === '/api/v1/felt-edit' && method === 'POST') return json({ ok: true })
       if (url === '/api/v1/go' && method === 'POST') return json(go)
       if (url === '/api/v1/dispatch' && method === 'POST') return json({ dispatched: true, tmux_session: 'started-session' })
       return new Response('{}', { status: 404 })
@@ -545,6 +553,63 @@ describe('the thread page', () => {
     expect(leafPage.el.querySelector<HTMLElement>('.pg-modes')!.hidden).toBe(true)
     expect(leafPage.el.querySelector<HTMLElement>('.pg-posts')!.hidden).toBe(true)
     expect(leafPage.el.querySelector<HTMLElement>('.ws-family-page')!.hidden).toBe(false)
+  })
+
+  it('opens thread settings popover lazily from the docked footer, fetches /api/v1/agents on click, and commits agent, effort, chrome, and due edits', async () => {
+    const { page } = await open(`?f=thread-analysis@${WORKSPACE_HOST}`)
+    const dock = page.el.querySelector<HTMLElement>('[data-part="thread-dock"]')!
+    const gear = dock.querySelector<HTMLButtonElement>('.ws-thread-settings')!
+    expect(gear).not.toBeNull()
+    expect(gear.getAttribute('aria-label')).toBe('Settings')
+    // Zero-cost before open: /api/v1/agents is not fetched until clicked.
+    expect(requests.filter(each => each.url === '/api/v1/agents')).toHaveLength(0)
+
+    gear.click()
+    for (let i = 0; i < 4; i++) await settle()
+    expect(requests.filter(each => each.url === '/api/v1/agents')).toHaveLength(1)
+
+    const panel = dock.querySelector<HTMLElement>('.ws-settings-menu')!
+    expect(panel).not.toBeNull()
+    expect(panel.getAttribute('side')).toBe('top')
+
+    const agentSelect = panel.querySelector<HTMLSelectElement>('.kbn-ctl-agent-select')!
+    const effortSelect = panel.querySelector<HTMLSelectElement>('.kbn-ctl-effort-select')!
+    const chromeInput = panel.querySelector<HTMLInputElement>('.kbn-ctl-chrome input')!
+    const dueInput = panel.querySelector<HTMLInputElement>('.kbn-ctl-date')!
+    const facts = panel.querySelector<HTMLElement>('.ws-header-facts')!
+    expect([...agentSelect.options].map(o => o.value)).toContain('claude-opus')
+    expect([...agentSelect.options].map(o => o.value)).toContain('codex-5')
+    expect([...effortSelect.options].map(o => o.value)).toStrictEqual(['low', 'medium', 'high'])
+    expect(facts.textContent).toContain(WORKSPACE_HOST)
+
+    // Changing effort posts set-agent with only the changed axis.
+    effortSelect.value = 'high'
+    effortSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    await settle(); await settle()
+    const effortPost = JSON.parse(posts().filter(each => each.url === '/api/v1/lifecycle').at(-1)!.body!) as Record<string, unknown>
+    expect(effortPost).toMatchObject({ action: 'set-agent', origin: WORKSPACE_HOST, effort: 'high' })
+
+    // Toggling Chrome posts set-agent with chrome: true.
+    chromeInput.checked = true
+    chromeInput.dispatchEvent(new Event('change', { bubbles: true }))
+    await settle(); await settle()
+    const chromePost = JSON.parse(posts().filter(each => each.url === '/api/v1/lifecycle').at(-1)!.body!) as Record<string, unknown>
+    expect(chromePost).toMatchObject({ action: 'set-agent', origin: WORKSPACE_HOST, chrome: true })
+
+    // Changing agent to codex-5 disables/hides Chrome and posts the changed axes together.
+    agentSelect.value = 'codex-5'
+    agentSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    await settle(); await settle()
+    const agentPost = JSON.parse(posts().filter(each => each.url === '/api/v1/lifecycle').at(-1)!.body!) as Record<string, unknown>
+    expect(agentPost).toMatchObject({ action: 'set-agent', origin: WORKSPACE_HOST, agent: 'codex-5', chrome: false })
+    expect(chromeInput.parentElement!.hidden).toBe(true)
+
+    // Setting due date posts /api/v1/felt-edit.
+    dueInput.value = '2026-12-01'
+    dueInput.dispatchEvent(new Event('change', { bubbles: true }))
+    await settle(); await settle()
+    const duePost = JSON.parse(posts().filter(each => each.url === '/api/v1/felt-edit').at(-1)!.body!) as Record<string, unknown>
+    expect(duePost).toMatchObject({ origin: WORKSPACE_HOST, due: '2026-12-01' })
   })
 })
 

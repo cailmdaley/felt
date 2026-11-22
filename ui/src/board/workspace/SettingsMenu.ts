@@ -45,12 +45,12 @@ export class SettingsMenu {
     content.hidden = false
     this.panel.replaceChildren(content)
     opener.setAttribute('aria-expanded', 'true')
-    // Against the whole header line when the opener sits in it, aligned with the opener: above a console docked at the bottom, beneath anything else.
-    this.panel.setAttribute('side', opener.closest('.ws-band-head') ? 'top' : 'bottom')
+    // Against the whole header line or docked footer when the opener sits in one, aligned with the opener: above a console docked at the bottom, beneath anything else.
+    this.panel.setAttribute('side', opener.closest('.ws-band-head, .ws-dock') ? 'top' : 'bottom')
     const anchor = {
       getBoundingClientRect: (): DOMRect => {
         const own = opener.getBoundingClientRect()
-        const header = opener.closest('.ws-band-head')?.getBoundingClientRect() ?? own
+        const header = opener.closest('.ws-band-head, .ws-dock')?.getBoundingClientRect() ?? own
         return new DOMRect(own.left, header.top, own.width, header.bottom - header.top)
       },
     }
