@@ -62,3 +62,32 @@ func TestMarkedDirectoryLeavesTheIndex(t *testing.T) {
 		t.Fatalf("%d messages stored for a marked session", n)
 	}
 }
+
+func TestLeavingAMarkedDirectoryDoesNotIndexTheSession(t *testing.T) {
+	i := testIndex(t)
+	marked, open := t.TempDir(), t.TempDir()
+	if e := os.WriteFile(filepath.Join(marked, Marker), nil, 0o600); e != nil {
+		t.Fatal(e)
+	}
+	path := filepath.Join(t.TempDir(), "11111111-1111-4111-8111-111111111111.jsonl")
+	line := func(cwd, text string) string {
+		return `{"type":"user","sessionId":"11111111-1111-4111-8111-111111111111","cwd":"` + cwd + `","timestamp":"2026-10-01T12:00:00Z","message":{"role":"user","content":"` + text + `"}}` + "\n"
+	}
+	if e := os.WriteFile(path, []byte(line(open, "before")+line(marked, "lantern")+line(open, "ember")), 0o600); e != nil {
+		t.Fatal(e)
+	}
+	if e := i.IndexFile(ctx, path, "claude"); e != nil {
+		t.Fatal(e)
+	}
+	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	f.WriteString(line(open, "later"))
+	f.Close()
+	if e := i.IndexFile(ctx, path, "claude"); e != nil {
+		t.Fatal(e)
+	}
+	var n int
+	i.db.QueryRow("SELECT count(*) FROM messages").Scan(&n)
+	if n != 0 {
+		t.Fatalf("%d messages stored for a session that worked in a marked directory", n)
+	}
+}

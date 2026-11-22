@@ -7,11 +7,11 @@ import (
 )
 
 // Marker is the file that keeps a directory's sessions out of the index. A
-// session whose working directory is the marked directory, or anywhere under
-// it, keeps its file row (so catch-up stays a stat) and has no messages, so
-// search, recent activity and reads through the index never see its content.
-// The marker is read on every catch-up: adding one drops already-indexed
-// messages, and removing one lets the next change to a transcript index it.
+// session that ever works in the marked directory, or anywhere under it, keeps
+// its file row (so catch-up stays a stat) and has no messages, so search,
+// recent activity and reads through the index never see its content. The
+// marker is read on every catch-up: adding one drops already-indexed messages,
+// and removing one lets new messages in (a rebuild restores the history).
 const Marker = ".no-transcript-search"
 
 // unindexed reports whether project, a session's working directory, is at or
@@ -19,6 +19,9 @@ const Marker = ".no-transcript-search"
 func unindexed(project string) bool {
 	if project == "" || !filepath.IsAbs(project) {
 		return false
+	}
+	if real, err := filepath.EvalSymlinks(project); err == nil {
+		project = real
 	}
 	for dir := filepath.Clean(project); ; dir = filepath.Dir(dir) {
 		if _, err := os.Stat(filepath.Join(dir, Marker)); err == nil {
