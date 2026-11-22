@@ -91,7 +91,7 @@ describe('the thread page', () => {
         return json(voiceResponse)
       }
       if (url.startsWith('/api/v1/file') && serveFiles) return serveFiles(url, method, headers)
-      if (url === '/api/v1/agents' && method === 'GET') {
+      if (url.startsWith('/api/v1/agents') && method === 'GET') {
         return json([
           { id: 'claude-opus', cli: 'claude', model: 'claude-opus', default: true, effort_levels: ['low', 'medium', 'high'], default_effort: 'medium', chrome_capable: true },
           { id: 'codex-5', cli: 'codex', model: 'codex-5', default: false, effort_levels: ['medium', 'high'], default_effort: 'high', chrome_capable: false },
@@ -562,11 +562,12 @@ describe('the thread page', () => {
     expect(gear).not.toBeNull()
     expect(gear.getAttribute('aria-label')).toBe('Settings')
     // Zero-cost before open: /api/v1/agents is not fetched until clicked.
-    expect(requests.filter(each => each.url === '/api/v1/agents')).toHaveLength(0)
+    expect(requests.filter(each => each.url.startsWith('/api/v1/agents'))).toHaveLength(0)
 
     gear.click()
     for (let i = 0; i < 4; i++) await settle()
-    expect(requests.filter(each => each.url === '/api/v1/agents')).toHaveLength(1)
+    const agentFetches = requests.filter(each => each.url.startsWith('/api/v1/agents'))
+    expect(agentFetches.map(each => each.url)).toStrictEqual([`/api/v1/agents?origin=${encodeURIComponent(WORKSPACE_HOST)}`])
 
     const panel = dock.querySelector<HTMLElement>('.ws-settings-menu')!
     expect(panel).not.toBeNull()
@@ -603,6 +604,12 @@ describe('the thread page', () => {
     const agentPost = JSON.parse(posts().filter(each => each.url === '/api/v1/lifecycle').at(-1)!.body!) as Record<string, unknown>
     expect(agentPost).toMatchObject({ action: 'set-agent', origin: WORKSPACE_HOST, agent: 'codex-5', chrome: false })
     expect(chromeInput.parentElement!.hidden).toBe(true)
+
+    // Re-rendering with the same feed card reference does not clobber optimistic saved settings.
+    ;(document.activeElement as HTMLElement | null)?.blur?.()
+    page.render()
+    expect(agentSelect.value).toBe('codex-5')
+    expect(effortSelect.value).toBe('high')
 
     // Setting due date posts /api/v1/felt-edit.
     dueInput.value = '2026-12-01'

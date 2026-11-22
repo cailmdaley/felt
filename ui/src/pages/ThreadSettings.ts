@@ -92,6 +92,7 @@ export class ThreadSettings {
   private readonly base: string
   private readonly host: HTMLElement
   private card: KanbanCard
+  private lastFeedCard: KanbanCard
   private menu: SettingsMenu | null = null
   private drawer: HTMLElement | null = null
   private factsEl: HTMLElement | null = null
@@ -112,6 +113,7 @@ export class ThreadSettings {
     this.base = base
     this.host = host
     this.card = card
+    this.lastFeedCard = card
     this.button.type = 'button'
     this.button.className = 'ws-header-icon ws-thread-settings'
     this.button.setAttribute('aria-label', 'Settings')
@@ -123,6 +125,8 @@ export class ThreadSettings {
   }
 
   update(card: KanbanCard): void {
+    if (card === this.lastFeedCard) return
+    this.lastFeedCard = card
     this.card = card
     if (!this.drawer) return
     this.paintFacts()
@@ -445,7 +449,10 @@ export class ThreadSettings {
 
     let records: AgentEntry[]
     try {
-      const raw = await getDaemonJson<AgentEntry[]>(`${this.base}/api/v1/agents`)
+      const agentsUrl = this.card.originId
+        ? `${this.base}/api/v1/agents?origin=${encodeURIComponent(this.card.originId)}`
+        : `${this.base}/api/v1/agents`
+      const raw = await getDaemonJson<AgentEntry[]>(agentsUrl)
       records = Array.isArray(raw) ? raw : []
     } catch {
       if (!this.disposed) freeze('Agent registry unavailable')
