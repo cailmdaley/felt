@@ -590,6 +590,19 @@ describe('workspace file viewer hooks', () => {
     expect(htmlViewer.querySelector('.pdfViewer')).toBeNull()
     expect(pdfRenderer.mount).not.toHaveBeenCalled()
   })
+  it('leaves a fitted HTML frame to CSS min-height until content exceeds its box', () => {
+    const viewer = buildFileViewer('', '/dir/deck.html', 'host-a', undefined, undefined, { fit: true })
+    document.body.append(viewer)
+    vi.spyOn(viewer, 'getBoundingClientRect').mockReturnValue({ height: 424.7 } as DOMRect)
+    watch.content!('<!doctype html><style>html,body{height:100%}</style>')
+    const frame = viewer.querySelector('iframe')!
+    ready(frame)
+    window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, data: envelope('height', { height: 425 }) }))
+    expect(viewer.style.height).toBe('')
+    window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, data: envelope('height', { height: 960 }) }))
+    expect(viewer.style.height).toBe('960px')
+    disposeFileViewer(viewer)
+  })
 })
 
 it('weighs a page by its figures: a report with a hundred fills the reader\'s budget alone', () => {

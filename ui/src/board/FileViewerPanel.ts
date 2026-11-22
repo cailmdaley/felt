@@ -756,6 +756,9 @@ function buildHtmlViewer(
   let carried: { scroller: HTMLElement; top: number; at: number } | null = null
   const fit = (height: number): void => {
     if (coupled) return
+    // A viewport-sized page (e.g. a 16:9 deck with height: 100%) fills the wrap's CSS min-height;
+    // leaving style.height unset lets CSS keep tracking width changes cleanly in both directions.
+    if (!wrap.style.height && height <= Math.ceil(wrap.getBoundingClientRect().height)) return
     if (height > fitted && fitted && height - fitted === step) { coupled = true; return }
     step = height - fitted
     fitted = height

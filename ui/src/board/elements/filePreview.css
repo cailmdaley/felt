@@ -77,9 +77,9 @@
 
 /* The file at its natural height: a page grows to its content, text and images unclipped; what cannot (a PDF) keeps a tall pane. */
 /* The card grown: the folded preview's edge and corners, around the file at its full height. */
-.uf-page { display: flex; flex-direction: column; border-radius: 4px; box-shadow: 0 0 0 1px var(--ws-hairline-soft); overflow: clip; outline: none; }
+.uf-page { container-type: inline-size; display: flex; flex-direction: column; border-radius: 4px; box-shadow: 0 0 0 1px var(--ws-hairline-soft); overflow: clip; outline: none; }
 .uf-page > * { flex: none; }
-.uf-page[data-kind='html'] .kbn-fileview-frame-wrap { min-height: var(--uf-cap); }
+.uf-page[data-kind='html'] .kbn-fileview-frame-wrap { height: 56.25cqi; min-height: 56.25cqi; }
 .uf-page[data-kind='text'] .kbn-fileview-text-wrap { overflow: visible; }
 .uf-page[data-kind='image'] .kbn-fileview-image-wrap { padding: 12px; }
 .uf-page[data-kind='image'] .kbn-fileview-image { max-height: none; }
