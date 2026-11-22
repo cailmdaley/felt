@@ -39,6 +39,7 @@ describe('the thread page', () => {
   let sentFiles: Array<{ fullPath: string; basename: string; timestamp: number; sessionId: string; uid: string; host: string; show?: boolean; caption?: string }>
   let usageResponse: Record<string, unknown> | null
   let voiceResponse: Record<string, unknown>
+  let example: ReturnType<typeof workspaceExample>
   let feeds: PageFeed[]
   let pages: ThreadPage[]
 
@@ -47,9 +48,9 @@ describe('the thread page', () => {
     vi.setSystemTime(now)
     const store = new Map<string, string>()
     vi.stubGlobal('localStorage', { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k), clear: () => store.clear() })
-    const example = workspaceExample(now)
+    example = workspaceExample(now)
     addThreadFixtures(example, now)
-    const composite = servedFeed(example.feed, now)
+    const composite = () => servedFeed(example.feed, now)
     requests = []
     boardRecords = []
     sentFiles = []
@@ -77,7 +78,7 @@ describe('the thread page', () => {
       const method = init.method ?? 'GET', headers = new Headers(init.headers)
       requests.push({ url, method, body: init.body as string | undefined, headers })
       const json = (body: unknown, extra: Record<string, string> = {}): Response => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json', ...extra } })
-      if (url.startsWith('/api/v1/fibers/composite')) return headers.get('If-None-Match') === '"v1"' ? new Response(null, { status: 304 }) : json(composite, { ETag: '"v1"' })
+      if (url.startsWith('/api/v1/fibers/composite')) return headers.get('If-None-Match') === '"v1"' ? new Response(null, { status: 304 }) : json(composite(), { ETag: '"v1"' })
       if (url.startsWith('/api/v1/board/family')) return json({ family: WORKSPACE_UID, records: boardRecords, waiting: {}, reach_ms: 14 * 86_400_000 })
       if (url.startsWith('/api/v1/channels/dismissed')) return json({ dismissed: [], reach_ms: 14 * 86_400_000 })
       if (url === '/api/v1/channels/dismiss' && method === 'POST') return json({ ok: true })
@@ -100,6 +101,7 @@ describe('the thread page', () => {
       if (url === '/api/v1/lifecycle' && method === 'POST') return json({ ok: true })
       if (url === '/api/v1/felt-edit' && method === 'POST') return json({ ok: true })
       if (url === '/api/v1/go' && method === 'POST') return json(go)
+      if (url === '/api/v1/attach' && method === 'POST') return json({ attached: true, session: 'resumed-session' })
       if (url === '/api/v1/dispatch' && method === 'POST') return json({ dispatched: true, tmux_session: 'started-session' })
       return new Response('{}', { status: 404 })
     }))
@@ -617,6 +619,45 @@ describe('the thread page', () => {
     await settle(); await settle()
     const duePost = JSON.parse(posts().filter(each => each.url === '/api/v1/felt-edit').at(-1)!.body!) as Record<string, unknown>
     expect(duePost).toMatchObject({ origin: WORKSPACE_HOST, due: '2026-12-01' })
+  })
+
+  it('draws a console button beside Constitution/Tapestry/Sent Files that reopens a closed session or attaches a live worker', async () => {
+    type RawRow = { fiber: { uid?: string; shuttle?: Record<string, unknown> }; runtime?: Record<string, unknown> | null }
+    const rows = example.feed.fibers as unknown as RawRow[]
+    const analysisRow = rows.find(r => r.fiber.uid === 'thread-analysis')
+    if (analysisRow?.runtime) analysisRow.runtime.tmux_session = 'shuttle-analysis'
+    const reviewRow = rows.find(r => r.fiber.uid === 'thread-review')
+    if (reviewRow) reviewRow.fiber.shuttle = { ...reviewRow.fiber.shuttle, runtime: { session_uuid: '11111111-1111-4111-8111-111111111111' } }
+
+    // 1. Live worker (thread-analysis): console button attaches via /api/v1/attach with tmux_session + session.
+    const { page: livePage } = await open(`?f=thread-analysis@${WORKSPACE_HOST}&in=rex`)
+    const liveConsole = livePage.el.querySelector<HTMLAnchorElement>('.ov-tools [data-part="console"]')!
+    expect(liveConsole).not.toBeNull()
+    expect(liveConsole.hidden).toBe(false)
+    liveConsole.click()
+    await settle()
+    const liveAttach = posts().filter(each => each.url === '/api/v1/attach')
+    expect(liveAttach).toHaveLength(1)
+    expect(JSON.parse(liveAttach[0].body!)).toMatchObject({ tmux_session: 'shuttle-analysis', shuttle_host: WORKSPACE_HOST })
+
+    // 2. Done session with no live worker (thread-review has sessionUuid but no live worker): reopens via /api/v1/attach with { session, shuttle_host }.
+    requests.length = 0
+    const { page: donePage } = await open(`?f=thread-review@${WORKSPACE_HOST}&in=rex`)
+    const doneConsole = donePage.el.querySelector<HTMLAnchorElement>('.ov-tools [data-part="console"]')!
+    expect(doneConsole).not.toBeNull()
+    expect(doneConsole.hidden).toBe(false)
+    expect(doneConsole.getAttribute('aria-label')).toContain('Reopen')
+    doneConsole.click()
+    await settle()
+    const reopenAttach = posts().filter(each => each.url === '/api/v1/attach')
+    expect(reopenAttach).toHaveLength(1)
+    expect(JSON.parse(reopenAttach[0].body!)).toEqual({ session: '11111111-1111-4111-8111-111111111111', shuttle_host: WORKSPACE_HOST })
+
+    // 3. Draft with no session (thread-draft): console button stays hidden.
+    const { page: draftPage } = await open(`?f=thread-draft@${WORKSPACE_HOST}&in=rex`)
+    const draftConsole = draftPage.el.querySelector<HTMLAnchorElement>('.ov-tools [data-part="console"]')!
+    expect(draftConsole).not.toBeNull()
+    expect(draftConsole.hidden).toBe(true)
   })
 })
 

@@ -1,11 +1,14 @@
 import { bindAvoidKeyboard } from '@ui-sdk/core'
 import { clearLineKey, clearedLines, composeStream, fiberOf, lineIds, runningIn, type Channel, type Item } from '../board/channels.js'
 import { clockTime } from '../board/civilDay.js'
+import { attachConversationPicker } from '../board/conversationMenu.js'
+import { conversationDestinations, conversationDevice, conversationOpening, linkDestination, openDestination, resolveDestination, type ConversationDestination, type WorkerOpener } from '../board/conversationOpening.js'
 import { getDaemonJson, postDaemonJson } from '../board/daemonApi.js'
 import type { MapFile } from '../board/family/model.js'
 import { isAgentCard } from '../board/KanbanModalShared.js'
-import type { KanbanCard } from '../board/KanbanTypes.js'
+import { hasLiveWorker, type KanbanCard } from '../board/KanbanTypes.js'
 import { lastSaid } from '../board/said.js'
+import { attachConversation, workerOpener } from '../board/sessionHistory.js'
 import { slug } from '../board/threadOutline.js'
 import { fileBytesUrl } from '../board/utils.js'
 import { ChannelStream, withdraws } from '../board/views/ChannelStream.js'
@@ -14,7 +17,9 @@ import { createWorkerStarter } from '../board/workerStart.js'
 import { parseRoute } from '../board/workspace/boardRoute.js'
 import { markSeen, unseenSince } from '../board/workspace/DocumentSeen.js'
 import { docKey, fiberKey, isExternalHref, linkedFile, parseDocKey, type DocKey } from '../board/workspace/documents.js'
+import type { FiberActs } from '../board/workspace/Dock.js'
 import { FamilyPage, type ViewFeeds } from '../board/workspace/FamilyPage.js'
+import { headerIcon } from '../board/workspace/headerIcon.js'
 import { Leads } from '../board/workspace/leads.js'
 import { ListenControl } from '../board/workspace/ListenControl.js'
 import { fetchTranscriptUsage, paintUsage, warmUntil, type TranscriptUsage } from '../board/workspace/transcriptUsage.js'
@@ -91,6 +96,7 @@ export class ThreadPage {
   private readonly leads: Leads
   private readonly unsubscribe: () => void
   private readonly startWorker: StartWorker
+  private readonly openWorker: WorkerOpener
   private workerActions: WorkerActions | null = null
   private voice: Voice | null = null
   private listen: ListenControl | null = null
@@ -126,6 +132,7 @@ export class ThreadPage {
       },
       onError: message => this.say(message),
     })
+    this.openWorker = workerOpener(opts.base, message => this.say(message))
     this.el.className = 'pg-thread'
     this.status.className = 'pg-status'
 
@@ -189,7 +196,7 @@ export class ThreadPage {
     this.said.className = 'pg-said'
     this.said.setAttribute('role', 'status')
     this.said.hidden = true
-    this.family = new FamilyPage(this.feeds(), () => {})
+    this.family = new FamilyPage(this.feeds(), () => {}, target => this.buildConsole(target))
     this.family.pulls = false
     this.family.unfoldLead = true
     this.family.pinLead = true
@@ -482,6 +489,65 @@ export class ThreadPage {
     if (doc !== fiberKey(card.originId, card.uid ?? card.id) || !card.fiberDir || !card.path) return undefined
     const key = docKey(card.originId, `${card.fiberDir}/${card.path.split('/').at(-1)}`, card.originId), at = Date.parse(card.modifiedAt ?? '') || 0
     return { key, name: 'Constitution', at, unread: at > 0 && unseenSince(key, at) }
+  }
+
+  /** Whether the header console button opens a live worker, reopens the last session, or has nowhere to go. */
+  private conversationRoute(card: KanbanCard): { reopen: false; destination: ConversationDestination } | { reopen: true } | null {
+    const device = conversationDevice()
+    const destination = resolveDestination(conversationDestinations(card, device, this.openWorker))
+    if (device.desktop && card.sessionUuid && !hasLiveWorker(card) && destination?.id !== conversationOpening()) return { reopen: true }
+    return destination ? { reopen: false, destination } : null
+  }
+
+  /** Console button in the thread view's head, beside Constitution, Tapestry, and Sent Files. */
+  private buildConsole(target: () => KanbanCard): FiberActs {
+    const el = document.createElement('a')
+    el.className = 'ws-doc-button pg-console'
+    el.dataset.part = 'console'
+    el.tabIndex = 0
+    el.innerHTML = headerIcon('console')
+    let pending = false
+    const open = (): void => {
+      if (pending) return
+      const card = target(), route = this.conversationRoute(card)
+      if (!route) return
+      if (route.reopen) {
+        pending = true
+        el.dataset.pending = ''
+        void attachConversation(this.opts.base, { session: card.sessionUuid!, shuttle_host: card.shuttleHost ?? null }, message => this.say(message))
+          .finally(() => { pending = false; delete el.dataset.pending })
+      } else {
+        openDestination(route.destination)
+      }
+    }
+    el.addEventListener('click', event => {
+      event.stopPropagation()
+      if (el.hasAttribute('href')) return
+      event.preventDefault()
+      open()
+    })
+    el.addEventListener('keydown', event => {
+      if (el.hasAttribute('href') || (event.key !== 'Enter' && event.key !== ' ')) return
+      event.preventDefault()
+      el.click()
+    })
+    const dispose = attachConversationPicker(el, () => conversationDestinations(target(), conversationDevice(), this.openWorker))
+    const paint = (): void => {
+      const card = target(), route = this.conversationRoute(card)
+      el.hidden = !route
+      const href = route && !route.reopen ? route.destination.href : undefined
+      el.removeAttribute('href'); el.removeAttribute('target'); el.removeAttribute('rel')
+      if (href) { linkDestination(el, href); el.removeAttribute('role') }
+      else el.setAttribute('role', 'button')
+      if (!route) return
+      const who = slug(card)
+      const label = route.reopen
+        ? `Reopen ${who}'s last session${card.shuttleHost ? ` on ${card.shuttleHost}` : ''}`
+        : `Open ${who}'s conversation in ${route.destination.label}`
+      el.setAttribute('aria-label', label)
+      el.title = route.reopen ? label : `${label}\nLong-press or right-click to choose where to open.`
+    }
+    return { el, paint, dispose }
   }
 
   /** In Rex, Rex moves to the fiber's live worker, and says why when it cannot; in a browser, its page opens here. */
