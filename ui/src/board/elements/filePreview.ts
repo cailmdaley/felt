@@ -56,6 +56,8 @@ export interface UnfoldOptions {
   full?(key: DocKey): void
   /** Opens a file elsewhere (the reader) when its preview is pressed, instead of unfolding it in place. */
   open?(key: DocKey): void
+  /** Opens a figure (plot/image) directly when its preview is pressed, instead of unfolding it in place. */
+  openFigure?(key: DocKey): void
   /** A link followed in the unfolded file `key`: a board route, or a file beside it. */
   link?(key: DocKey, href: string): void
   /** Keys that stay unfolded: no fold control and Escape does not fold them. */
@@ -420,10 +422,11 @@ export class Unfold {
     el.type = 'button'
     el.className = 'uf-card'
     el.dataset.key = file.key
-    el.title = `${this.opts.open ? 'Open' : 'Expand'} ${file.name}`
-    el.setAttribute('aria-label', el.title)
-    el.addEventListener('click', () => this.opts.open ? this.opts.open(file.key) : this.unfold(file.key))
     const density = this.opts.single ? undefined : densityOf(path)
+    const direct = this.opts.open ?? (density === 'figure' ? this.opts.openFigure : undefined)
+    el.title = `${direct ? 'Open' : 'Expand'} ${file.name}`
+    el.setAttribute('aria-label', el.title)
+    el.addEventListener('click', () => direct ? direct(file.key) : this.unfold(file.key))
     if (density) el.dataset.density = density
     if (density === 'card') {
       // Nothing to see before it opens: its kind, its name and when it came, and nothing loads.

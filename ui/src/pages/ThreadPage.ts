@@ -46,6 +46,15 @@ const owned = (card: KanbanCard): { uid: string; host: string } => ({ uid: card.
 
 const archived = (card: KanbanCard): boolean => card.column === 'tempered' || card.column === 'composted'
 
+/** Opens a file in a 3/4-screen floating window (RexWeb Popup on Mac, normal window/tab in browsers). */
+const openFloating = (url: string): void => {
+  const availW = typeof window.screen?.availWidth === 'number' && window.screen.availWidth > 0 ? window.screen.availWidth : 1440
+  const availH = typeof window.screen?.availHeight === 'number' && window.screen.availHeight > 0 ? window.screen.availHeight : 900
+  const w = Math.max(640, Math.round(availW * 0.75))
+  const h = Math.max(480, Math.round(availH * 0.75))
+  window.open(url, '_blank', `width=${w},height=${h}`)
+}
+
 /**
  * One constitution, alone at its own address: the board's view of it
  * ({@link FamilyPage}) with no workspace around it. When the constitution is a
@@ -144,7 +153,7 @@ export class ThreadPage {
       openCard: card => this.goTo(owned(card), slug(card)),
       openFile: (_from, _card, key) => {
         const file = parseDocKey(key)
-        if (file) window.open(fileBytesUrl(this.opts.base, file.path, file.owner), '_blank', 'noopener')
+        if (file) openFloating(fileBytesUrl(this.opts.base, file.path, file.owner))
       },
       lead: card => this.leads.of(card),
       said: card => { const root = feed.index.rootOf(card); return lastSaid(card, feed.index, feed.board.records([root.uid ?? root.id])) },
@@ -458,7 +467,7 @@ export class ThreadPage {
       page: (card, doc) => this.constitution(card, doc),
       open: (_card, doc) => {
         const file = parseDocKey(doc)
-        if (file) window.open(fileBytesUrl(this.opts.base, file.path, file.owner), '_blank', 'noopener')
+        if (file) openFloating(fileBytesUrl(this.opts.base, file.path, file.owner))
       },
       edits: false,
     }

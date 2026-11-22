@@ -17,6 +17,8 @@
    is one line, 56px. Each box is set before anything loads, and unfolding one changes its height alone. */
 .uf:not([data-single]) .uf-row { flex-direction: column; gap: 8px; overflow: visible; scroll-snap-type: none; }
 .uf:not([data-single]) .uf-card { flex: none; width: 100%; height: var(--uf-fold); }
+.uf:not([data-single]) .uf-card[data-density='figure'] :is(.kbn-thumbnail-image, .kbn-fileview-image-wrap) { justify-content: flex-start; }
+.uf:not([data-single]) .uf-card[data-density='figure'] img { object-position: left center; }
 .uf:not([data-single]) .uf-card[data-density='card'] {
   height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 12px; text-align: left;
   background: var(--ws-paper, var(--kbn-paper)); color: var(--ws-ink-soft); font: var(--type-meta)/var(--leading-ui) var(--font-serif);

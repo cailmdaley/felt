@@ -615,7 +615,7 @@ export class ChannelStream {
     const { card } = item
     const shown = { shuttleBase: this.host.shuttleBase, awake: () => this.host.awake() && this.el.isConnected }
     const unfoldOpts = this.host.inPlace
-      ? { ...shown, full: (key: DocKey) => this.host.openFile(id, card, key) }
+      ? { ...shown, full: (key: DocKey) => this.host.openFile(id, card, key), openFigure: (key: DocKey) => this.host.openFile(id, card, key) }
       : { ...shown, open: (key: DocKey) => this.host.openFile(id, card, key) }
     const unfold = this.unfolds.get(id) ?? this.unfolds.set(id, new Unfold(unfoldOpts)).get(id)!
     const files: UnfoldFile[] = item.files.map((file): UnfoldFile => {
