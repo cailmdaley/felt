@@ -348,7 +348,22 @@ defmodule Shuttle.Terminal.RexLayout do
     places_by_uid =
       for {_root, fam} <- families, dp <- fam.places, into: %{}, do: {dp.uid, dp}
 
-    %{families: families, places_by_uid: places_by_uid, chosen_roots: active_chosen_roots}
+    clear_on_demand_uids =
+      if fibers_loaded? do
+        for {uid, %{"on_demand" => true}} <- places,
+            not MapSet.member?(closed_verdict_uids, uid),
+            into: MapSet.new(),
+            do: uid
+      else
+        MapSet.new()
+      end
+
+    %{
+      families: families,
+      places_by_uid: places_by_uid,
+      chosen_roots: active_chosen_roots,
+      clear_on_demand_uids: clear_on_demand_uids
+    }
   end
 
   defp normalize_fiber_rows(list) do
@@ -823,12 +838,51 @@ defmodule Shuttle.Terminal.RexLayout do
         end
       end
 
+    # 4c. Clear stale `on_demand` flags on live places whose fibers are no longer
+    #     tempered/discarded, so a later temper/discard closes them immediately.
+    clear_on_demand_uids = Map.get(desired, :clear_on_demand_uids, MapSet.new())
+
+    desired_actions =
+      Enum.map(desired_actions, fn
+        {:update_place, %{uid: uid, fields: fields} = args} = act ->
+          if MapSet.member?(clear_on_demand_uids, uid) do
+            {:update_place, %{args | fields: Map.put(fields, "on_demand", nil)}}
+          else
+            act
+          end
+
+        act ->
+          act
+      end)
+
+    handled_place_uids =
+      for {op, %{uid: u}} <- desired_actions ++ close_window_actions,
+          op in [:update_place, :delete_place, :close_window],
+          is_binary(u),
+          into: MapSet.new(),
+          do: u
+
+    clear_on_demand_actions =
+      for {uid, %{"on_demand" => true} = place} <- Enum.sort(live_places),
+          MapSet.member?(clear_on_demand_uids, uid),
+          not MapSet.member?(handled_place_uids, uid) do
+        {:update_place,
+         %{
+           uid: uid,
+           observed_place: place,
+           observed_binding: nil,
+           binding_name: nil,
+           fields: %{"on_demand" => nil}
+         }}
+      end
+
     stale_family_actions ++
       stale_place_actions ++
       stale_view_actions ++
       desired_actions ++
       close_window_actions ++
       close_view_actions ++
+      clear_on_demand_actions ++
       close_block_actions ++
       close_session_actions ++
       order_actions
@@ -2742,15 +2796,20 @@ defmodule Shuttle.Terminal.RexLayout do
     _ -> []
   end
   defp scope_desired(desired, root) do
+    clear_uids = Map.get(desired, :clear_on_demand_uids, MapSet.new())
+
     case Map.fetch(desired.families, root) do
       {:ok, fam} ->
+        places_by_uid = Map.new(fam.places, &{&1.uid, &1})
+
         %{
           families: %{root => fam},
-          places_by_uid: Map.new(fam.places, &{&1.uid, &1})
+          places_by_uid: places_by_uid,
+          clear_on_demand_uids: clear_uids
         }
 
       :error ->
-        %{families: %{}, places_by_uid: %{}}
+        %{families: %{}, places_by_uid: %{}, clear_on_demand_uids: clear_uids}
     end
   end
 

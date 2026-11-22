@@ -3,10 +3,13 @@ defmodule ShuttleWeb.GoController do
   `POST /api/v1/go {fiber_id, origin}`: move the Mac's Rex app to the fiber's
   live worker (`Shuttle.Go`). Owner-routed like `/transition`.
 
-  200 `{went, place}`: `went: false` with place `none` when the fiber has no
-  live worker, with place `live` when it has one Rex could not show. 400 for a missing `fiber_id` or an unknown origin, 404
-  for an unknown fiber, 422 for a tempered or discarded one, 502 when Rex or
-  the owner cannot be reached. An owner's refusal is relayed verbatim.
+  200 `{went, place}`: `place` is `"live"` for a live worker, `"view"` for a
+  view-only Rex place (including resting, draft, tempered, or discarded fibers
+  when pages are enabled), or `"none"` when pages are disabled and no worker is
+  live; `went: false` with `"live"` or `"view"` means Rex could not show it.
+  400 for a missing `fiber_id` or an unknown origin, 404 for an unknown fiber,
+  502 when Rex or the owner cannot be reached. An owner's refusal is relayed
+  verbatim.
   """
 
   use Phoenix.Controller, formats: [:json]

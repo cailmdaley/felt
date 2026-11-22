@@ -739,6 +739,43 @@ defmodule Shuttle.Terminal.RexLayoutTest do
       refute Map.has_key?(doc_after["places"] || %{}, @uid_a)
     end
 
+    test "reconcile strips stale on_demand after a tempered fiber is reopened so a later temper closes its tab" do
+      now = ~U[2026-11-21 12:00:00Z]
+
+      tempered_fiber = %{
+        "id" => @uid_a,
+        "uid" => @uid_a,
+        "slug" => @root <> "/a",
+        "status" => "closed",
+        "tempered" => true,
+        "shuttle" => %{"host" => "test-host", "kind" => "oneshot"}
+      }
+
+      # 1. Human opens tempered fiber on demand -> stamped with on_demand: true.
+      assert {:ok, place} = RexLayout.ensure_place(FakeRex, tempered_fiber, now: now)
+      assert place["on_demand"] == true
+      sid = place["session_id"]
+      wid = place["window_id"]
+
+      # 2. Fiber is reopened out-of-band (e.g. felt reopen / drafts); reconcile clears on_demand
+      #    while keeping the recently-asked place open.
+      reopened_fiber =
+        tempered_fiber
+        |> Map.put("status", "open")
+        |> Map.delete("tempered")
+
+      assert :ok = RexLayout.reconcile(FakeRex, fibers: [reopened_fiber], now: now)
+      assert Enum.any?(blocks(sid), &(&1["window_id"] == wid))
+      assert {:ok, doc_reopened} = RexBindings.read()
+      refute Map.has_key?(get_in(doc_reopened, ["places", @uid_a]), "on_demand")
+
+      # 3. Fiber is tempered again via CLI within the 24h grace window -> reconcile closes its tab.
+      assert :ok = RexLayout.reconcile(FakeRex, fibers: [tempered_fiber], now: now)
+      assert {:ok, doc_final} = RexBindings.read()
+      refute Map.has_key?(doc_final["places"] || %{}, @uid_a)
+      refute Map.has_key?(FakeRex.state().sessions, sid)
+    end
+
     test "resume-<uuid> worker keeps its page during reconcile and is not treated as stray", ctx do
       file = Path.join([ctx.dir, "family-store", ".felt", @root, "a", "a.md"])
       File.write!(file, "---\nname: a\nuid: #{@uid_a}\ntags: [constitution]\n---\n")

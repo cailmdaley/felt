@@ -86,9 +86,6 @@ defmodule Shuttle.Go do
 
   def http_error(:not_found), do: {404, "not_found"}
 
-  def http_error({:closed, column}),
-    do: {422, "the fiber is #{column}; there is nothing to go to"}
-
   def http_error({:forward_failed, name, reason}),
     do: {502, "forward to #{name} failed: #{inspect(reason)}"}
 
