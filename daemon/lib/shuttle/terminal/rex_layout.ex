@@ -2337,16 +2337,27 @@ defmodule Shuttle.Terminal.RexLayout do
   end
 
   @doc "Ensure the Desk session and tab exist in Rex and return its binding."
-  def ensure_desk(runner) do
+  def ensure_desk(runner), do: ensure_surface(runner, :desk)
+
+  @doc "Ensure the Fleet Map tab exists in Rex's Desk session and return its binding."
+  def ensure_map(runner), do: ensure_surface(runner, :map)
+
+  defp ensure_surface(runner, kind) when kind in [:desk, :map] do
+    {doc_key, unavailable, reconcile_opts} =
+      case kind do
+        :desk -> {"desk", :desk_unavailable, []}
+        :map -> {"map", :map_unavailable, [force_map?: true]}
+      end
+
     case Shuttle.Host.pages() do
       {:ok, %{base: base, desk: true}} ->
         with {:ok, %{"host_id" => server} = identity} <- Rex.whoami(runner),
              :ok <- Backend.reconcile(runner, identity),
-             {:ok, _} <- reconcile_desk(runner, server, identity, base, true),
+             {:ok, _} <- reconcile_desk(runner, server, identity, base, true, reconcile_opts),
              {:ok, doc} <- Bindings.read() do
-          case doc["desk"] do
-            %{"session_id" => _, "window_id" => _} = desk -> {:ok, desk}
-            _ -> {:error, :desk_unavailable}
+          case doc[doc_key] do
+            %{"session_id" => _, "window_id" => _} = entry -> {:ok, entry}
+            _ -> {:error, unavailable}
           end
         end
 
@@ -2358,7 +2369,11 @@ defmodule Shuttle.Terminal.RexLayout do
     end
   end
 
-  defp reconcile_desk(runner, server, identity, base, true) do
+  defp reconcile_desk(runner, server, identity, base, enabled?, opts \\ [])
+
+  defp reconcile_desk(runner, server, identity, base, true, opts) do
+    force_map? = Keyword.get(opts, :force_map?, false)
+
     Backend.family_lock(:desk, fn ->
       with {:ok, doc} <- Bindings.read(),
            {:ok, raw_sessions} <- Rex.sessions(runner) do
@@ -2366,32 +2381,105 @@ defmodule Shuttle.Terminal.RexLayout do
         sid = desk && desk["session_id"]
         session_alive? = is_binary(sid) and Enum.any?(raw_sessions, &(&1["session_id"] == sid))
 
-        if session_alive? do
-          case Rex.blocks(runner, sid) do
-            {:ok, blocks} ->
-              if Enum.any?(
-                   blocks,
-                   &(&1["block_id"] == desk["page_block_id"] and &1["window_id"] == desk["window_id"])
-                 ) do
-                {:ok, false}
-              else
-                restore_desk_window(runner, sid, server, identity, base)
-              end
+        desk_result =
+          if session_alive? do
+            case Rex.blocks(runner, sid) do
+              {:ok, blocks} ->
+                if Enum.any?(
+                     blocks,
+                     &(&1["block_id"] == desk["page_block_id"] and &1["window_id"] == desk["window_id"])
+                   ) do
+                  {:ok, sid, false, blocks}
+                else
+                  case restore_desk_window(runner, sid, server, identity, base) do
+                    {:ok, new_sid, created?} ->
+                      {:ok, new_sid, created?, if(created?, do: [], else: blocks)}
 
-            {:error, :not_found} ->
-              create_desk_session(runner, server, identity, base)
+                    error ->
+                      error
+                  end
+                end
 
-            error ->
-              error
+              {:error, :not_found} ->
+                with {:ok, new_sid} <- create_desk_session(runner, server, identity, base),
+                     do: {:ok, new_sid, true, []}
+
+              error ->
+                error
+            end
+          else
+            with {:ok, new_sid} <- create_desk_session(runner, server, identity, base),
+                 do: {:ok, new_sid, true, []}
           end
-        else
-          create_desk_session(runner, server, identity, base)
+
+        with {:ok, desk_sid, created?, blocks} <- desk_result,
+             :ok <-
+               ensure_map_window(
+                 runner,
+                 desk_sid,
+                 doc,
+                 server,
+                 identity,
+                 base,
+                 blocks,
+                 force_map?
+               ) do
+          {:ok, created?}
         end
       end
     end)
   end
 
-  defp reconcile_desk(runner, _server, _identity, _base, false), do: remove_desk(runner)
+  defp reconcile_desk(runner, _server, _identity, _base, false, _opts), do: remove_desk(runner)
+
+  defp ensure_map_window(runner, sid, doc, server, identity, base, blocks, force_map?) do
+    url = Pages.map_url(base)
+    map_entry = if doc["server"] in [nil, server], do: doc["map"], else: nil
+    same_session? = is_map(map_entry) and map_entry["session_id"] == sid
+
+    map_alive? =
+      same_session? and
+        is_binary(map_entry["window_id"]) and
+        is_binary(map_entry["page_block_id"]) and
+        Enum.any?(
+          blocks,
+          &(&1["block_id"] == map_entry["page_block_id"] and &1["window_id"] == map_entry["window_id"])
+        )
+
+    cond do
+      map_alive? ->
+        :ok
+
+      same_session? and map_entry["map_closed"] == true and not force_map? ->
+        :ok
+
+      same_session? and
+        (is_binary(map_entry["window_id"]) or is_binary(map_entry["page_block_id"])) and
+          not force_map? ->
+        # The human closed the Fleet Map tab in this Desk session; leave it closed
+        # until Go.map/0 or a fresh Desk session / Rex restart reopens it.
+        Bindings.put_map(%{"session_id" => sid, "map_closed" => true}, server)
+
+      true ->
+        with {:ok, page_blk} <- Pages.page_block(url),
+             spec = %{"window_label" => "Fleet Map", "layout" => %{"block" => page_blk}},
+             {:ok, %{"window_id" => "window:" <> _ = wid, "block_ids" => ["block:" <> _ = bid]}} <-
+               Rex.new_window(runner, sid, spec, timeout_ms: Pages.launch_timeout_ms()),
+             entry = %{
+               "session_id" => sid,
+               "window_id" => wid,
+               "page_block_id" => bid,
+               "url" => url
+             },
+             :ok <- Bindings.put_map(entry, server),
+             :ok <- maybe_set_instance(identity) do
+          :ok
+        else
+          {:ok, reply} -> {:error, {:unknown, "invalid Rex new_window reply: #{inspect(reply)}"}}
+          error -> error
+        end
+    end
+  end
 
   defp create_desk_session(runner, server, identity, base) do
     with {:ok, page_blk} <- Pages.page_block(Pages.desk_url(base)),
@@ -2412,7 +2500,7 @@ defmodule Shuttle.Terminal.RexLayout do
          desk = %{"session_id" => sid, "window_id" => wid, "page_block_id" => bid},
          :ok <- Bindings.put_desk(desk, server),
          :ok <- maybe_set_instance(identity) do
-      {:ok, true}
+      {:ok, sid}
     else
       {:ok, reply} -> {:error, {:unknown, "invalid Rex session.create reply: #{inspect(reply)}"}}
       error -> error
@@ -2427,37 +2515,68 @@ defmodule Shuttle.Terminal.RexLayout do
          desk = %{"session_id" => sid, "window_id" => wid, "page_block_id" => bid},
          :ok <- Bindings.put_desk(desk, server),
          :ok <- maybe_set_instance(identity) do
-      {:ok, false}
+      {:ok, sid, false}
     else
-      {:error, :not_found} -> create_desk_session(runner, server, identity, base)
-      {:ok, reply} -> {:error, {:unknown, "invalid Rex new_window reply: #{inspect(reply)}"}}
-      error -> error
+      {:error, :not_found} ->
+        with {:ok, new_sid} <- create_desk_session(runner, server, identity, base),
+             do: {:ok, new_sid, true}
+
+      {:ok, reply} ->
+        {:error, {:unknown, "invalid Rex new_window reply: #{inspect(reply)}"}}
+
+      error ->
+        error
     end
   end
 
   defp remove_desk(runner) do
     Backend.family_lock(:desk, fn ->
-      with {:ok, doc} <- Bindings.read() do
-        case doc["desk"] do
-          %{"session_id" => sid, "window_id" => wid} = desk ->
-            close_result =
-              case Rex.close_window(runner, sid, wid) do
-                {:ok, _} -> :ok
-                {:error, :not_found} -> :ok
-                error -> error
-              end
+      with {:ok, doc} <- Bindings.read(),
+           :ok <- remove_map_window(runner, doc["map"]),
+           :ok <- remove_desk_window(runner, doc["desk"]) do
+        sids =
+          [get_in(doc, ["desk", "session_id"]), get_in(doc, ["map", "session_id"])]
+          |> Enum.filter(&is_binary/1)
+          |> Enum.uniq()
 
-            with :ok <- close_result,
-                 :ok <- destroy_empty_desk(runner, sid),
-                 :ok <- Bindings.delete_desk(desk) do
-              {:ok, false}
+        result =
+          Enum.reduce_while(sids, :ok, fn sid, :ok ->
+            case destroy_empty_desk(runner, sid) do
+              :ok -> {:cont, :ok}
+              error -> {:halt, error}
             end
+          end)
 
-          _ ->
-            {:ok, false}
-        end
+        with :ok <- result, do: {:ok, false}
       end
     end)
+  end
+
+  defp remove_map_window(runner, %{"session_id" => sid, "window_id" => wid} = map_entry) do
+    with :ok <- close_window_if_present(runner, sid, wid),
+         :ok <- Bindings.delete_map(map_entry) do
+      :ok
+    end
+  end
+
+  defp remove_map_window(_runner, %{} = map_entry), do: Bindings.delete_map(map_entry)
+  defp remove_map_window(_runner, _), do: :ok
+
+  defp remove_desk_window(runner, %{"session_id" => sid, "window_id" => wid} = desk) do
+    with :ok <- close_window_if_present(runner, sid, wid),
+         :ok <- Bindings.delete_desk(desk) do
+      :ok
+    end
+  end
+
+  defp remove_desk_window(_runner, _), do: :ok
+
+  defp close_window_if_present(runner, sid, wid) do
+    case Rex.close_window(runner, sid, wid) do
+      {:ok, _} -> :ok
+      {:error, :not_found} -> :ok
+      error -> error
+    end
   end
 
   defp destroy_empty_desk(runner, sid) do

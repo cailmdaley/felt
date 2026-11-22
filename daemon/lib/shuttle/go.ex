@@ -58,14 +58,21 @@ defmodule Shuttle.Go do
 
   @doc "Go to the Desk tab in Rex when `pages.desk` is enabled."
   @spec desk() :: {:ok, answer()} | {:error, term()}
-  def desk do
+  def desk, do: surface(:desk)
+
+  @doc "Go to the Fleet Map tab in Rex when `pages.desk` is enabled."
+  @spec map() :: {:ok, answer()} | {:error, term()}
+  def map, do: surface(:map)
+
+  defp surface(kind) when kind in [:desk, :map] do
     if Terminal.primary() == Rex and match?({:ok, %{desk: true}}, Shuttle.Host.pages()) do
       runner = runner()
+      ensure = if kind == :desk, do: &RexLayout.ensure_desk/1, else: &RexLayout.ensure_map/1
 
-      with {:ok, desk} <- RexLayout.ensure_desk(runner),
-           {:ok, moved} <- Rex.select_binding(runner, desk, mac_only: true),
+      with {:ok, entry} <- ensure.(runner),
+           {:ok, moved} <- Rex.select_binding(runner, entry, mac_only: true),
            :ok <- if(moved, do: Rex.activate_app(runner), else: :ok) do
-        {:ok, %{went: moved, place: "desk"}}
+        {:ok, %{went: moved, place: Atom.to_string(kind)}}
       end
     else
       {:ok, @none}

@@ -253,6 +253,12 @@ export function wallClock(
   return { hour: w.getUTCHours(), minute: w.getUTCMinutes(), second: w.getUTCSeconds() }
 }
 
+/** Fractional local wall-clock hour in `[0, 24)` for an instant in a zone. */
+export function localHour(ms = Date.now(), z: Zone = hostZone()): number {
+  const w = wall(ms, z)
+  return w.getUTCHours() + w.getUTCMinutes() / 60
+}
+
 // ── Civil day → instant ──────────────────────────────────────────────────────
 
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/

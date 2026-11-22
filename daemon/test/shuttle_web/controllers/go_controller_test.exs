@@ -335,4 +335,52 @@ defmodule ShuttleWeb.GoControllerTest do
 
     refute activated?()
   end
+
+  test "POST /api/v1/go with target map creates and selects Fleet Map when pages.desk is enabled",
+       %{tmp_dir: dir} do
+    host = Path.join(dir, "host.json")
+    File.write!(host, ~s({"pages":{"enabled":true,"base":"http://hub.test:4000","desk":true}}))
+    Env.put_env("SHUTTLE_HOST_CONFIG_FILE", host)
+
+    assert %{"went" => true, "place" => "map"} =
+             go(%{target: "map"}) |> json_response(200)
+
+    assert {:ok, doc} = Shuttle.Terminal.RexBindings.read()
+    assert %{"session_id" => sid, "window_id" => map_wid, "page_block_id" => map_bid} = doc["map"]
+    assert doc["desk"]["session_id"] == sid
+    refute doc["desk"]["window_id"] == map_wid
+
+    assert [
+             %{
+               "args" => %{
+                 "client_id" => "client:mac",
+                 "action" => "session.select",
+                 "args" => %{"session_id" => ^sid, "window_id" => ^map_wid}
+               }
+             }
+           ] = requests("client.perform")
+
+    assert activated?()
+
+    # Closing Fleet Map and reconciling marks map_closed; target: "desk" leaves it closed,
+    # while target: "map" explicitly reopens and selects it.
+    assert {:ok, _} = Shuttle.Rex.call(FakeRex, "block.close", %{"block_id" => map_bid}, session: sid)
+    assert :ok = Shuttle.Terminal.RexLayout.reconcile(FakeRex, fibers: [])
+    assert {:ok, %{"map" => %{"session_id" => ^sid, "map_closed" => true}}} =
+             Shuttle.Terminal.RexBindings.read()
+
+    assert %{"went" => true, "place" => "desk"} = go(%{target: "desk"}) |> json_response(200)
+    assert {:ok, %{"map" => %{"session_id" => ^sid, "map_closed" => true}}} =
+             Shuttle.Terminal.RexBindings.read()
+
+    assert %{"went" => true, "place" => "map"} = go(%{target: "map"}) |> json_response(200)
+    assert {:ok, %{"map" => %{"session_id" => ^sid, "window_id" => new_map_wid} = reopened}} =
+             Shuttle.Terminal.RexBindings.read()
+    refute new_map_wid == map_wid
+    refute Map.has_key?(reopened, "map_closed")
+
+    # Disabling pages.desk returns went: false, place: none.
+    File.write!(host, ~s({"pages":{"enabled":true,"base":"http://hub.test:4000","desk":false}}))
+    assert %{"went" => false, "place" => "none"} = go(%{target: "map"}) |> json_response(200)
+  end
 end

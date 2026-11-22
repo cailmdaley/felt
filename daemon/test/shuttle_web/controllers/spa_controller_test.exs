@@ -93,6 +93,12 @@ defmodule ShuttleWeb.SpaControllerTest do
       assert get_resp_header(desk, "content-type") |> List.first() =~ "text/html"
       assert redirected_to(get(local_conn(), "/desk/")) == "/desk"
       assert redirected_to(get(local_conn(), "/desk/?in=rex")) == "/desk?in=rex"
+
+      map = get(local_conn(), "/map?in=rex")
+      assert {map.status, map.resp_body} == {200, "the pages"}
+      assert get_resp_header(map, "content-type") |> List.first() =~ "text/html"
+      assert redirected_to(get(local_conn(), "/map/")) == "/map"
+      assert redirected_to(get(local_conn(), "/map/?in=rex")) == "/map?in=rex"
     end
 
     test "an unhashed file is served precompressed and revalidated" do

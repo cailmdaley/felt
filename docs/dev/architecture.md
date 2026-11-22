@@ -39,7 +39,7 @@ Beside the board, the UI bundle holds **pages**: small views, each at an
 address of its own, meant to stand in a Rex pane beside a worker's chat or in
 a browser tab. They are a second Vite entry, `ui/pages.html` →
 `ui/src/pages/main.ts`, which the daemon serves at each page's one-segment
-path, so the bundle's relative asset base holds. One page exists:
+path, so the bundle's relative asset base holds:
 
 - **`/thread?f=<uid>@<host>`** shows one constitution as the board's view of
   it (`FamilyPage`): its head, its last post, its live sub-threads and its
@@ -47,6 +47,12 @@ path, so the bundle's relative asset base holds. One page exists:
   `/api/v1/fibers/composite` with `If-None-Match` only while the page is
   visible, and lists no tempered or discarded fiber but its own. Its head
   draws no lifecycle verbs.
+- **`/desk`** shows the host's Desk page in Rex when `pages.desk` is enabled.
+- **`/map`** shows the Fleet Map terrain view over `GET /api/v1/map/terrain`
+  and opens threads through `POST /api/v1/go`. In Rex with `pages.desk`
+  enabled, `RexLayout` opens a `Fleet Map` tab beside `Desk` on first creation
+  and after a Rex restart, respects manual tab closure on subsequent
+  reconciles, and reopens it on `POST /api/v1/go {"target": "map"}`.
 
 A page never touches the history API, voice, Rex focus or swipe handling. It
 moves Rex with one verb, [`POST /api/v1/go`](../reference/api.md#board), and

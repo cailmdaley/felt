@@ -47,6 +47,9 @@ defmodule Shuttle.Terminal.RexPages do
   @doc "The Desk page's URL in Rex."
   def desk_url(base), do: "#{base}/desk?in=rex"
 
+  @doc "The Fleet Map page's URL in Rex."
+  def map_url(base), do: "#{base}/map?in=rex"
+
   defp enc(part), do: URI.encode_www_form(part)
 
   @doc """

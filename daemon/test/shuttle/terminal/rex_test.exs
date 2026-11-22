@@ -668,6 +668,71 @@ defmodule Shuttle.Terminal.RexTest do
     assert {:ok, %{"bindings" => %{@name => ^replacement}}} = RexBindings.read()
   end
 
+  test "RexBindings put_map, delete_map, prune, validation, and server mismatch" do
+    map_entry = %{
+      "session_id" => "session:desk1",
+      "window_id" => "window:map1",
+      "page_block_id" => "block:map1",
+      "url" => "http://127.0.0.1:4000/map?in=rex"
+    }
+
+    assert :ok = RexBindings.put_map(map_entry, "server-a")
+    assert {:ok, %{"server" => "server-a", "map" => ^map_entry} = snap} = RexBindings.read()
+
+    # Stale delete_map does not remove a changed entry.
+    assert :ok = RexBindings.delete_map(Map.put(map_entry, "window_id", "window:other"))
+    assert {:ok, %{"map" => ^map_entry}} = RexBindings.read()
+
+    # Prune keeps map when its session is live, removes it when gone.
+    assert :ok = RexBindings.prune(snap, ["session:desk1"])
+    assert {:ok, %{"map" => ^map_entry}} = RexBindings.read()
+    assert :ok = RexBindings.prune(snap, [])
+    assert {:ok, doc_pruned} = RexBindings.read()
+    refute Map.has_key?(doc_pruned, "map")
+
+    # Server mismatch on put/3 clears map alongside desk.
+    assert :ok = RexBindings.put_map(map_entry, "server-a")
+
+    binding = %{
+      "session_id" => "session:b1",
+      "block_id" => "block:b1",
+      "created_at" => "2026-11-22T00:00:00Z"
+    }
+
+    assert :ok = RexBindings.put("worker-new", binding, "server-b")
+    assert {:ok, doc_switched} = RexBindings.read()
+    refute Map.has_key?(doc_switched, "map")
+
+    # delete_map removes matching entry cleanly.
+    assert :ok = RexBindings.put_map(map_entry, "server-b")
+    assert :ok = RexBindings.delete_map(map_entry)
+    assert {:ok, doc_deleted} = RexBindings.read()
+    refute Map.has_key?(doc_deleted, "map")
+
+    # Closed map entry (map_closed: true without window_id/page_block_id) is valid and prunable.
+    closed_map = %{"session_id" => "session:desk1", "map_closed" => true}
+    assert :ok = RexBindings.put_map(closed_map, "server-b")
+    assert {:ok, %{"map" => ^closed_map} = closed_snap} = RexBindings.read()
+    assert :ok = RexBindings.prune(closed_snap, ["session:desk1"])
+    assert {:ok, %{"map" => ^closed_map}} = RexBindings.read()
+    assert :ok = RexBindings.prune(closed_snap, [])
+    assert {:ok, closed_pruned} = RexBindings.read()
+    refute Map.has_key?(closed_pruned, "map")
+
+    # Malformed map entry fails decode validation.
+    File.write!(
+      RexBindings.path(),
+      Jason.encode!(%{
+        "version" => 1,
+        "server" => "server-b",
+        "bindings" => %{},
+        "map" => %{"session_id" => "bad"}
+      })
+    )
+
+    assert {:error, :invalid_bindings} = RexBindings.put_map(map_entry, "server-b")
+  end
+
   test "an exited worker cannot adopt or paste into a surviving human pane on later probes" do
     seed()
     assert :present = Rex.probe(FakeRex, @name)

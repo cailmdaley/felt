@@ -13,8 +13,10 @@ defmodule ShuttleWeb.GoController do
 
   import ShuttleWeb.RelayHelpers, only: [relay_json: 3]
 
-  def create(conn, %{"target" => "desk"}) do
-    case Shuttle.Go.desk() do
+  def create(conn, %{"target" => target}) when target in ["desk", "map"] do
+    result = if target == "desk", do: Shuttle.Go.desk(), else: Shuttle.Go.map()
+
+    case result do
       {:ok, answer} ->
         json(conn, answer)
 

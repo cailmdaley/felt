@@ -1,7 +1,7 @@
 defmodule ShuttleWeb.SpaController do
   @moduledoc """
-  Serve the Shuttle board at `GET /` and the pages (`GET /thread`, `GET /desk`)
-  from the bundle's `pages.html`. Static assets (`/assets`, `/fonts`, …) are
+  Serve the Shuttle board at `GET /` and the pages (`GET /thread`, `GET /desk`,
+  `GET /map`) from the bundle's `pages.html`. Static assets (`/assets`, `/fonts`, …) are
   served by `Plug.Static` in the endpoint; this controller handles the page
   documents.
 
@@ -16,7 +16,7 @@ defmodule ShuttleWeb.SpaController do
 
   # Trailing slashes would resolve the bundle's relative assets under the segment.
   def pages(%Plug.Conn{request_path: path} = conn, _params)
-      when path in ["/thread/", "/desk/"] do
+      when path in ["/thread/", "/desk/", "/map/"] do
     query = if conn.query_string == "", do: "", else: "?" <> conn.query_string
     redirect(conn, to: String.trim_trailing(path, "/") <> query)
   end

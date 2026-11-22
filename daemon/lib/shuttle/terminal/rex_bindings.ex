@@ -41,7 +41,7 @@ defmodule Shuttle.Terminal.RexBindings do
         "places" => places,
         "views" => views
       })
-      |> then(&if(doc["server"] in [nil, server], do: &1, else: Map.delete(&1, "desk")))
+      |> then(&if(doc["server"] in [nil, server], do: &1, else: Map.drop(&1, ["desk", "map"])))
     end)
   end
 
@@ -101,7 +101,7 @@ defmodule Shuttle.Terminal.RexBindings do
         "views" => if(doc["server"] in [nil, server], do: doc["views"] || %{}, else: %{}),
         "viewers" => Map.put(viewers, key, binding)
       })
-      |> then(&if(doc["server"] in [nil, server], do: &1, else: Map.delete(&1, "desk")))
+      |> then(&if(doc["server"] in [nil, server], do: &1, else: Map.drop(&1, ["desk", "map"])))
     end)
   end
 
@@ -172,6 +172,26 @@ defmodule Shuttle.Terminal.RexBindings do
   def delete_desk(observed) do
     update(fn doc ->
       if doc["desk"] == observed, do: Map.delete(doc, "desk"), else: doc
+    end)
+  end
+
+  def put_map(map_entry, server) when is_map(map_entry) and is_binary(server) do
+    update(fn doc ->
+      doc =
+        if doc["server"] in [nil, server],
+          do: doc,
+          else: %{"version" => 1, "bindings" => %{}, "viewers" => %{}, "families" => %{}, "places" => %{}, "views" => %{}}
+
+      Map.merge(doc, %{
+        "server" => server,
+        "map" => map_entry
+      })
+    end)
+  end
+
+  def delete_map(observed) do
+    update(fn doc ->
+      if doc["map"] == observed, do: Map.delete(doc, "map"), else: doc
     end)
   end
 
@@ -265,9 +285,18 @@ defmodule Shuttle.Terminal.RexBindings do
           end)
         end)
 
-      case snapshot["desk"] do
-        %{"session_id" => sid} = desk when is_binary(sid) ->
-          if sid not in live_ids and doc["desk"] == desk, do: Map.delete(doc, "desk"), else: doc
+      doc =
+        case snapshot["desk"] do
+          %{"session_id" => sid} = desk when is_binary(sid) ->
+            if sid not in live_ids and doc["desk"] == desk, do: Map.delete(doc, "desk"), else: doc
+
+          _ ->
+            doc
+        end
+
+      case snapshot["map"] do
+        %{"session_id" => sid} = map_entry when is_binary(sid) ->
+          if sid not in live_ids and doc["map"] == map_entry, do: Map.delete(doc, "map"), else: doc
 
         _ ->
           doc
@@ -371,6 +400,24 @@ defmodule Shuttle.Terminal.RexBindings do
 
   defp valid_desk?(_), do: false
 
+  defp valid_map?(nil), do: true
+
+  defp valid_map?(%{"session_id" => "session:" <> _, "map_closed" => true} = map_entry) do
+    is_nil(map_entry["window_id"]) and is_nil(map_entry["page_block_id"]) and
+      (is_nil(map_entry["url"]) or is_binary(map_entry["url"]))
+  end
+
+  defp valid_map?(%{
+         "session_id" => "session:" <> _,
+         "window_id" => "window:" <> _,
+         "page_block_id" => "block:" <> _
+       } = map_entry) do
+    is_boolean(Map.get(map_entry, "map_closed", false)) and
+      (is_nil(map_entry["url"]) or is_binary(map_entry["url"]))
+  end
+
+  defp valid_map?(_), do: false
+
   defp valid_views?(views) when is_map(views) do
     Enum.all?(views, fn {root, view} ->
       is_binary(root) and
@@ -400,6 +447,7 @@ defmodule Shuttle.Terminal.RexBindings do
          true <- valid_families?(Map.get(doc, "families", %{})),
          true <- valid_places?(Map.get(doc, "places", %{})),
          true <- valid_desk?(Map.get(doc, "desk")),
+         true <- valid_map?(Map.get(doc, "map")),
          true <- valid_views?(Map.get(doc, "views", %{})),
          true <- valid_chosen_roots?(Map.get(doc, "chosen_roots")),
          true <-

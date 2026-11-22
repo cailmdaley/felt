@@ -57,14 +57,27 @@ defmodule ShuttleWeb.PaletteControllerTest do
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   describe "Palette.build/2" do
-    test "includes Desk only when pages.desk is enabled" do
+    test "includes Desk and Fleet Map only when pages.desk is enabled" do
       entries = [make_entry("alpha", runtime: %{phase: "working"})]
 
       with_desk = Palette.build(entries, desk?: true)
-      assert [%{id: "desk", kind: "desk", fiber_id: nil, origin: nil} | _] = with_desk.items
+
+      assert [
+               %{id: "desk", kind: "desk", fiber_id: nil, origin: nil},
+               %{
+                 id: "map",
+                 kind: "map",
+                 title: "Fleet Map",
+                 detail: "map",
+                 icon: "map",
+                 fiber_id: nil,
+                 origin: nil
+               }
+               | _
+             ] = with_desk.items
 
       without_desk = Palette.build(entries, desk?: false)
-      refute Enum.any?(without_desk.items, &(&1.kind == "desk"))
+      refute Enum.any?(without_desk.items, &(&1.kind in ["desk", "map"]))
     end
 
     test "excludes tempered and discarded threads and orders by attention" do
@@ -376,7 +389,7 @@ defmodule ShuttleWeb.PaletteControllerTest do
       assert body["focused"]["fiber_id"] == uid_live
       items = body["items"]
 
-      assert hd(items)["kind"] == "desk"
+      assert Enum.take(items, 2) |> Enum.map(& &1["kind"]) == ["desk", "map"]
 
       actions = Enum.filter(items, &(&1["kind"] == "action"))
       assert Enum.map(actions, & &1["action"]) == ["temper", "review", "rest", "discard", "new_session"]
@@ -400,6 +413,23 @@ defmodule ShuttleWeb.PaletteControllerTest do
       )
 
       conn2 = post(api_conn(), "/api/v1/go", Jason.encode!(%{"target" => "desk"}))
+      assert conn2.status == 200
+      assert %{"went" => false, "place" => "none"} = Jason.decode!(conn2.resp_body)
+    end
+
+    test "POST /api/v1/go with target map creates and selects Fleet Map when enabled", %{
+      host_config: host_config
+    } do
+      conn = post(api_conn(), "/api/v1/go", Jason.encode!(%{"target" => "map"}))
+      assert conn.status == 200
+      assert %{"went" => true, "place" => "map"} = Jason.decode!(conn.resp_body)
+
+      File.write!(
+        host_config,
+        Jason.encode!(%{"pages" => %{"enabled" => true, "desk" => false}})
+      )
+
+      conn2 = post(api_conn(), "/api/v1/go", Jason.encode!(%{"target" => "map"}))
       assert conn2.status == 200
       assert %{"went" => false, "place" => "none"} = Jason.decode!(conn2.resp_body)
     end

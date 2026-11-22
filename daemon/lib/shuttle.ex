@@ -155,6 +155,7 @@ defmodule Shuttle.Application do
     Application.put_env(:shuttle, :booted_at, DateTime.utc_now())
 
     Shuttle.Readiness.begin_boot()
+    Shuttle.MapTerrain.init_cache()
 
     # The host identity, resolved exactly once and before any child starts:
     # every caller — the endpoint's first requests, the Poller, the owned-feed

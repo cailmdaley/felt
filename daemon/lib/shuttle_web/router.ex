@@ -48,6 +48,7 @@ defmodule ShuttleWeb.Router do
     post("/go", GoController, :create)
     # Fleet-wide items and focused-thread lifecycle actions for Rex's native palette.
     get("/palette", PaletteController, :show)
+    get("/map/terrain", MapTerrainController, :show)
     post("/terminal/reveal", AttachController, :reveal)
     # Start (or find) the tmux session resuming a past harness session on THIS
     # host — the leg /attach forwards to the host that ran it.
@@ -229,5 +230,6 @@ defmodule ShuttleWeb.Router do
     get("/", SpaController, :index)
     get("/thread", SpaController, :pages)
     get("/desk", SpaController, :pages)
+    get("/map", SpaController, :pages)
   end
 end

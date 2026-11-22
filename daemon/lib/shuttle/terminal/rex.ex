@@ -126,21 +126,50 @@ defmodule Shuttle.Terminal.Rex do
 
                if result == :ok, do: {:cont, :ok}, else: {:halt, result}
              end) do
-        retire_stale_desk(runner, doc["desk"])
+        retire_stale_desk(runner, doc["desk"], doc["map"])
       end
     end
   end
 
-  defp retire_stale_desk(_runner, nil), do: :ok
+  defp retire_stale_desk(_runner, nil, nil), do: :ok
 
-  defp retire_stale_desk(runner, %{"session_id" => sid} = desk) do
+  defp retire_stale_desk(runner, desk, map_entry) do
     family_lock(:desk, fn ->
-      with :ok <- close_stale_window(runner, desk),
-           :ok <- destroy_if_empty(runner, sid),
-           :ok <- Bindings.delete_desk(desk) do
+      sids =
+        [desk && desk["session_id"], map_entry && map_entry["session_id"]]
+        |> Enum.filter(&is_binary/1)
+        |> Enum.uniq()
+
+      with :ok <- retire_stale_map_entry(runner, map_entry),
+           :ok <- retire_stale_desk_entry(runner, desk),
+           :ok <-
+             Enum.reduce_while(sids, :ok, fn sid, :ok ->
+               case destroy_if_empty(runner, sid) do
+                 :ok -> {:cont, :ok}
+                 error -> {:halt, error}
+               end
+             end) do
         :ok
       end
     end)
+  end
+
+  defp retire_stale_map_entry(_runner, nil), do: :ok
+
+  defp retire_stale_map_entry(runner, map_entry) do
+    with :ok <- close_stale_window(runner, map_entry),
+         :ok <- Bindings.delete_map(map_entry) do
+      :ok
+    end
+  end
+
+  defp retire_stale_desk_entry(_runner, nil), do: :ok
+
+  defp retire_stale_desk_entry(runner, desk) do
+    with :ok <- close_stale_window(runner, desk),
+         :ok <- Bindings.delete_desk(desk) do
+      :ok
+    end
   end
 
   defp destroy_if_empty(runner, sid) do

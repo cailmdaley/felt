@@ -16,6 +16,20 @@ export function mountPage(host: HTMLElement, route: PageRoute, base: string): vo
     feed.start()
     return
   }
+  if (route.page === 'map') {
+    void import('./MapPage.js')
+      .then(({ MapPage }) => {
+        const page = new MapPage({ base, route, navigate })
+        host.append(page.el)
+        page.start()
+      })
+      .catch((error: unknown) => {
+        host.replaceChildren()
+        host.textContent = `Could not load map: ${error instanceof Error ? error.message : String(error)}`
+        host.className = 'pg-missing'
+      })
+    return
+  }
   if (route.page !== 'thread' || !route.fiber) {
     host.textContent = route.page === 'thread' ? 'No thread named: add ?f=<uid>@<host>.' : `No page called “${route.page}”.`
     host.className = 'pg-missing'

@@ -106,6 +106,11 @@ function M.setup(opts)
       return
     end
 
+    if item.kind == "map" then
+      http_post_json("/api/v1/go", { target = "map" })
+      return
+    end
+
     if item.kind == "thread" or item.kind == "channel" then
       http_post_json("/api/v1/go", {
         fiber_id = item.fiber_id,
@@ -156,7 +161,7 @@ function M.setup(opts)
     title = "Shuttle: Jump & Actions…",
     description = "Jump to Desk, a channel, or a thread, or run a lifecycle action on the focused thread.",
     category = "Shuttle",
-    keywords = "shuttle palette jump thread channel desk temper review rest discard session",
+    keywords = "shuttle palette jump thread channel desk map temper review rest discard session",
     run = function(ctx)
       local query = build_query({
         { "session_id", ctx.session_id },

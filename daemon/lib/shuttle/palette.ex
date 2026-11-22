@@ -57,7 +57,7 @@ defmodule Shuttle.Palette do
         Keyword.get(opts, :block_id)
       )
 
-    desk_items = if desk?, do: [desk_item()], else: []
+    desk_items = if desk?, do: [desk_item(), map_item()], else: []
     action_items = focused_actions(focused_entry)
 
     thread_items =
@@ -238,6 +238,19 @@ defmodule Shuttle.Palette do
       subtitle: "All threads across the fleet",
       detail: "desk",
       icon: "globe",
+      fiber_id: nil,
+      origin: nil
+    }
+  end
+
+  defp map_item do
+    %{
+      id: "map",
+      kind: "map",
+      title: "Fleet Map",
+      subtitle: "Interactive archipelago of the fleet",
+      detail: "map",
+      icon: "map",
       fiber_id: nil,
       origin: nil
     }

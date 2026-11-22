@@ -19,6 +19,10 @@ describe('a page\'s address', () => {
       .toStrictEqual({ page: 'desk', fiber: undefined, inRex: true })
     expect(parsePageRoute({ protocol: 'file:', pathname: '/x/harness-board-dist/index.html', search: '?page=desk' }))
       .toStrictEqual({ page: 'desk', fiber: undefined, inRex: false })
+    expect(parsePageRoute({ protocol: 'http:', pathname: '/map', search: '?in=rex' }))
+      .toStrictEqual({ page: 'map', fiber: undefined, inRex: true })
+    expect(parsePageRoute({ protocol: 'file:', pathname: '/x/harness-board-dist/index.html', search: '?page=map' }))
+      .toStrictEqual({ page: 'map', fiber: undefined, inRex: false })
     // An `f` without both halves names no fiber.
     for (const f of ['01KV', '@umber', '01KV@', '']) expect(parsePageRoute({ protocol: 'http:', pathname: '/thread', search: `?f=${f}` }).fiber).toBeUndefined()
   })
@@ -768,5 +772,142 @@ describe('the desk page', () => {
     for (let i = 0; i < 4; i++) await settle()
     expect(host.querySelector('main.pg-desk')).not.toBeNull()
     expect(host.querySelector('.kbn-desk-sections')).not.toBeNull()
+  })
+
+  it('mountPage lazily mounts MapPage for /map', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    mountPage(host, parsePageRoute({ protocol: 'http:', pathname: '/map', search: '?in=rex' }), '')
+    await vi.dynamicImportSettled()
+    for (let i = 0; i < 4; i++) await settle()
+    expect(host.querySelector('.pg-map')).not.toBeNull()
+    expect(requests.some(r => r.url === '/api/v1/map/terrain')).toBe(true)
+  })
+})
+
+describe('the map page', () => {
+  let pages: Array<{ dispose(): void }>
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+    pages = []
+  })
+
+  afterEach(() => {
+    for (const page of pages) page.dispose()
+    document.body.replaceChildren()
+    vi.restoreAllMocks()
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  it('dispose() aborts in-flight terrain fetch and removes global listeners cleanly', async () => {
+    const { MapPage } = await import('./MapPage.js')
+    let capturedSignal: AbortSignal | undefined
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) => {
+        capturedSignal = init?.signal ?? undefined
+        return new Promise<Response>(() => {})
+      }),
+    )
+    const removeWin = vi.spyOn(window, 'removeEventListener')
+    const removeDoc = vi.spyOn(document, 'removeEventListener')
+
+    const page = new MapPage({
+      base: '',
+      route: parsePageRoute({ protocol: 'http:', pathname: '/map', search: '' }),
+      navigate: vi.fn(),
+    })
+    pages.push(page)
+    document.body.append(page.el)
+    page.start()
+
+    expect(capturedSignal).toBeDefined()
+    expect(capturedSignal!.aborted).toBe(false)
+
+    page.dispose()
+
+    expect(capturedSignal!.aborted).toBe(true)
+    expect(removeDoc.mock.calls.map(c => c[0])).toEqual(expect.arrayContaining(['click', 'visibilitychange']))
+    expect(removeWin.mock.calls.map(c => c[0])).toEqual(
+      expect.arrayContaining(['resize', 'keydown', 'wheel', 'pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'click']),
+    )
+  })
+
+  it('distinguishes 503 booting from other 503 errors and times out a hung terrain request', async () => {
+    const { MapPage, TERRAIN_TIMEOUT_MS } = await import('./MapPage.js')
+    let mode: 'booting' | 'other503' | 'hang' = 'booting'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) => {
+        if (mode === 'booting') {
+          return Promise.resolve(
+            new Response(JSON.stringify({ error: 'booting' }), {
+              status: 503,
+              headers: { 'Content-Type': 'application/json' },
+            }),
+          )
+        }
+        if (mode === 'other503') {
+          return Promise.resolve(
+            new Response(JSON.stringify({ error: 'store unreachable' }), {
+              status: 503,
+              headers: { 'Content-Type': 'application/json' },
+            }),
+          )
+        }
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'))
+          })
+        })
+      }),
+    )
+
+    const page = new MapPage({
+      base: '',
+      route: parsePageRoute({ protocol: 'http:', pathname: '/map', search: '' }),
+      navigate: vi.fn(),
+    })
+    pages.push(page)
+    document.body.append(page.el)
+    page.start()
+    for (let i = 0; i < 4; i++) await settle()
+
+    const msg = page.el.querySelector<HTMLElement>('.map-loading-msg')!
+    const retry = page.el.querySelector<HTMLButtonElement>('.map-retry')!
+    expect(msg.textContent).toBe('The daemon is starting…')
+    expect(retry.hidden).toBe(false)
+
+    mode = 'other503'
+    retry.click()
+    for (let i = 0; i < 4; i++) await settle()
+    expect(msg.textContent).toContain('store unreachable')
+    expect(retry.hidden).toBe(false)
+
+    mode = 'hang'
+    retry.click()
+    await vi.advanceTimersByTimeAsync(TERRAIN_TIMEOUT_MS)
+    for (let i = 0; i < 4; i++) await settle()
+    expect(msg.textContent).toContain('Timed out')
+    expect(retry.hidden).toBe(false)
+  })
+
+  it('mountPage renders a clean error state if MapPage throws synchronously during mount', async () => {
+    const { MapPage } = await import('./MapPage.js')
+    vi.spyOn(MapPage.prototype, 'start').mockImplementation(() => {
+      throw new Error('map init exploded')
+    })
+
+    const host = document.createElement('div')
+    document.body.append(host)
+    mountPage(host, parsePageRoute({ protocol: 'http:', pathname: '/map', search: '' }), '')
+    await vi.dynamicImportSettled()
+    for (let i = 0; i < 4; i++) await settle()
+
+    expect(host.className).toBe('pg-missing')
+    expect(host.textContent).toBe('Could not load map: map init exploded')
+    expect(host.querySelector('.pg-map')).toBeNull()
   })
 })
