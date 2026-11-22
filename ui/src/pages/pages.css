@@ -54,8 +54,21 @@
   color: var(--ws-ink); background: var(--ws-paper); border: 1px solid var(--ws-hairline); border-radius: var(--ws-control-radius);
   font: var(--type-note)/var(--leading-ui) var(--font-serif);
 }
-/* Single-row docked console footer on /thread: flush bottom, symmetric margins around the prompt box. */
-.pg-thread .ws-dock .ws-worker-acts { margin: 6px 12px 8px; }
+/* Single-row docked console footer on /thread: flush bottom, symmetric margins, compact desktop tools. */
+.pg-thread .ws-dock .ws-worker-acts { --ws-box-line: 30px; margin: 6px 12px 8px; }
+.pg-thread .ws-dock .ws-worker-tools { gap: 1px; margin-left: 4px; }
+.pg-thread .ws-dock .ws-worker-acts .ws-header-icon { width: 24px; height: 26px; }
+.pg-thread .ws-dock .ws-worker-acts .ws-header-icon > svg { width: 15px; height: 15px; }
+.pg-thread .ws-dock .ws-worker-tools .listen-dropdown { width: 13px; margin-left: -2px; }
+.pg-thread .ws-dock .ws-worker-tools .listen-dropdown > svg { width: 11px; height: 11px; }
+@media (pointer: coarse) {
+  .pg-thread .ws-dock .ws-worker-acts { --ws-box-line: var(--ws-phone-target); }
+  .pg-thread .ws-dock .ws-worker-tools { gap: 2px; margin-left: 8px; }
+  .pg-thread .ws-dock .ws-worker-acts .ws-header-icon { width: var(--ws-phone-target); height: var(--ws-phone-target); }
+  .pg-thread .ws-dock .ws-worker-acts .ws-header-icon > svg { width: 20px; height: 20px; }
+  .pg-thread .ws-dock .ws-worker-tools .listen-dropdown { width: 32px; margin-left: 0; }
+  .pg-thread .ws-dock .ws-worker-tools .listen-dropdown > svg { width: 20px; height: 20px; }
+}
 .pg-thread[data-dock] .pg-said { bottom: 64px; }
 .pg-missing { box-sizing: border-box; padding: 24px; color: var(--ws-ink-muted); font: var(--type-row)/var(--leading-prose) var(--font-serif); }
 /* A wide pane keeps the head and its words on the rows' measure (family-page.css), so its tools stand over the rows' times. */

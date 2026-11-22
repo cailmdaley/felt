@@ -165,13 +165,14 @@ defmodule ShuttleWeb.PaletteControllerTest do
       result = Palette.build(entries, fiber_id: uid)
       assert result.focused.fiber_id == uid
       assert result.focused.slug == "focus-me"
+      assert result.focused.standing == false
 
       actions =
         result.items
         |> Enum.filter(&(&1.kind == "action"))
-        |> Enum.map(& &1.action)
 
-      assert actions == ["temper", "review", "rest", "discard", "new_session"]
+      assert Enum.map(actions, & &1.action) == ["temper", "review", "rest", "discard", "new_session"]
+      assert Enum.all?(actions, &(&1.standing == false))
     end
 
     test "omits review for standing constitutions and omits rest when already resting" do
@@ -193,11 +194,13 @@ defmodule ShuttleWeb.PaletteControllerTest do
         )
       ]
 
-      standing_actions =
-        Palette.build(entries, fiber_id: standing_uid).items
-        |> Enum.filter(&(&1.kind == "action"))
-        |> Enum.map(& &1.action)
+      standing_result = Palette.build(entries, fiber_id: standing_uid)
+      assert standing_result.focused.standing == true
 
+      standing_items = Enum.filter(standing_result.items, &(&1.kind == "action"))
+      standing_actions = Enum.map(standing_items, & &1.action)
+
+      assert Enum.all?(standing_items, &(&1.standing == true))
       refute "review" in standing_actions
       assert "temper" in standing_actions
       assert "rest" in standing_actions

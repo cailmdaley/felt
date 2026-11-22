@@ -264,7 +264,8 @@ defmodule Shuttle.Palette do
       slug: entry.slug,
       title: entry.title,
       origin: entry.origin,
-      column: entry.column
+      column: entry.column,
+      standing: get_in(entry.fiber, ["shuttle", "kind"]) == "standing"
     }
   end
 
@@ -276,18 +277,18 @@ defmodule Shuttle.Palette do
     active? = entry.fiber["status"] == "active"
 
     [
-      if(not standing? or active?, do: action_item(entry, "temper", "Temper", "star")),
+      if(not standing? or active?, do: action_item(entry, "temper", "Temper", "star", standing?)),
       if(not standing? and entry.column != "awaiting_review",
-        do: action_item(entry, "review", "To review", "clock")
+        do: action_item(entry, "review", "To review", "clock", standing?)
       ),
-      if(entry.column != "resting", do: action_item(entry, "rest", "Rest", "document")),
-      action_item(entry, "discard", "Discard", "gear"),
-      action_item(entry, "new_session", "New session", "plus")
+      if(entry.column != "resting", do: action_item(entry, "rest", "Rest", "document", standing?)),
+      action_item(entry, "discard", "Discard", "gear", standing?),
+      action_item(entry, "new_session", "New session", "plus", standing?)
     ]
     |> Enum.reject(&is_nil/1)
   end
 
-  defp action_item(entry, action, label, icon) do
+  defp action_item(entry, action, label, icon, standing?) do
     %{
       id: "action:#{action}:#{entry.fiber_id}",
       kind: "action",
@@ -297,7 +298,8 @@ defmodule Shuttle.Palette do
       icon: icon,
       fiber_id: entry.fiber_id,
       origin: entry.origin,
-      action: action
+      action: action,
+      standing: standing?
     }
   end
 
