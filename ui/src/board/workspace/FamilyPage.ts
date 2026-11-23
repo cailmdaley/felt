@@ -42,6 +42,11 @@ const PULL_PX = 120
 /** What a waiting constitution asks of the human, in a word; a post it waits with says nothing its words below do not. */
 const WANT_WORD: Readonly<Record<Want['kind'], string>> = { ask: 'asks', review: 'for review', post: '', blocked: 'blocked' }
 
+const isChangeDoc = (key: DocKey): boolean => {
+  const parsed = parseDocKey(key)
+  return !!parsed && documentKind(parsed.path) === 'change'
+}
+
 
 /**
  * One view of a constitution, the same from the Desk, a channel, a role or a
@@ -198,10 +203,12 @@ export class FamilyPage {
   }
   /** The reader showed `key` full screen: an unfolded file here steps to it, when it is one of this view's files. */
   follow(key: DocKey): void {
+    if (isChangeDoc(key)) return
     if (this.unfold.unfolded) this.unfold.unfold(key)
   }
   /** Unfolds `key` in place without stealing focus, or waits for the current file read to land and unfolds it then. */
   unfoldFile(key: DocKey): void {
+    if (isChangeDoc(key)) return
     const uid = this.card && (this.card.uid ?? this.card.id)
     if (this.shown?.card === uid && this.shown.files.has(key)) {
       this.unfold.unfold(key, false)
@@ -224,10 +231,9 @@ export class FamilyPage {
    * unfolded; any other page (its constitution, its edits) opens in the reader.
    */
   private show(card: KanbanCard, doc: DocKey): void {
-    const parsed = parseDocKey(doc)
-    if (parsed && documentKind(parsed.path) === 'change') { this.feeds.open(card, doc); return }
+    if (isChangeDoc(doc)) { this.feeds.open(card, doc); return }
     // Its files not yet read, a file waits for them.
-    if (this.shown?.card !== (card.uid ?? card.id) && parsed) { this.wanted = doc; return }
+    if (this.shown?.card !== (card.uid ?? card.id) && parseDocKey(doc)) { this.wanted = doc; return }
     if (!this.shown?.files.has(doc)) {
       const page = this.feeds.page?.(card, doc)
       if (!page) { this.feeds.open(card, doc); return }
@@ -408,8 +414,8 @@ export class FamilyPage {
       const wanted = this.wanted
       this.wanted = null
       if (wanted) this.show(card, wanted)
-      else if (pending && this.shown.files.has(pending)) this.unfold.unfold(pending, false)
-      else if (this.unfoldLead && this.leadOpened !== uid && leadFiles[0] && !this.unfold.unfolded) {
+      else if (pending && this.shown.files.has(pending) && !isChangeDoc(pending)) this.unfold.unfold(pending, false)
+      else if (this.unfoldLead && this.leadOpened !== uid && leadFiles[0] && !isChangeDoc(leadFiles[0].key) && !this.unfold.unfolded) {
         this.leadOpened = uid
         this.unfold.unfold(leadFiles[0].key, false)
       }

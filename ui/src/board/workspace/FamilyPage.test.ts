@@ -325,4 +325,46 @@ describe('its frame', () => {
     disposeFileViewer(page.el)
     expect(disposed).toHaveBeenCalledOnce()
   })
+
+  it('does not bounce back to open() when follow() receives a .change.json key, and does not auto-unfold .change.json inline', async () => {
+    const changeDoc = 'h:/tmp/pr-9.change.json'
+    const reportDoc = 'h:/tmp/report.html'
+    const open = vi.fn()
+    const page = new FamilyPage(feedsWith({
+      lead: async () => undefined,
+      files: () => [
+        { key: changeDoc, name: 'pr-9.change.json', at: now - 60_000, unread: false },
+        { key: reportDoc, name: 'report.html', at: now - 120_000, unread: false },
+      ],
+      open,
+    }), vi.fn())
+    page.unfoldLead = true
+    document.body.append(page.el)
+    page.update(mid, new ThreadIndex([root, mid, leaf]), now)
+    await settle()
+
+    // Lead is a .change.json: stays folded as a clickable card instead of auto-unfolding inline.
+    const unfold = page.el.querySelector<HTMLElement>('.ov-unfold')!
+    expect(unfold.hasAttribute('data-unfolded')).toBe(false)
+    expect(unfold.querySelector('.uf-card')).not.toBeNull()
+
+    // Clicking the card opens it via feeds.open rather than unfolding inline.
+    unfold.querySelector<HTMLButtonElement>('.uf-card')!.click()
+    expect(open).toHaveBeenCalledTimes(1)
+    expect(open).toHaveBeenLastCalledWith(mid, changeDoc)
+    expect(unfold.hasAttribute('data-unfolded')).toBe(false)
+
+    // With another file unfolded, follow(changeDoc) must NOT call feeds.open (no bounce back to Reader).
+    page.unfoldFile(reportDoc)
+    expect(unfold.hasAttribute('data-unfolded')).toBe(true)
+    open.mockClear()
+    page.follow(changeDoc)
+    expect(open).not.toHaveBeenCalled()
+    expect(unfold.querySelector<HTMLElement>('.uf-page')!.dataset.key).toBe(reportDoc)
+
+    // unfoldFile(changeDoc) also refuses to unfold a .change.json inline.
+    page.unfoldFile(changeDoc)
+    expect(unfold.querySelector<HTMLElement>('.uf-page')!.dataset.key).toBe(reportDoc)
+    page.dispose()
+  })
 })
