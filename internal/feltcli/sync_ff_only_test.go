@@ -403,4 +403,42 @@ func TestSyncFFOnlyRefusesHiddenUntrackedAndDirtySubmodule(t *testing.T) {
 			t.Fatalf("non-git result = %+v, want single error entry", report.Repos)
 		}
 	})
+
+	t.Run("inaccessible symlink mount target reports an error", func(t *testing.T) {
+		t.Parallel()
+		if os.Geteuid() == 0 {
+			t.Skip("root ignores directory permission bits")
+		}
+		f := newSyncFixture(t)
+		initFeltDir(t, f)
+		locked := filepath.Join(t.TempDir(), "locked")
+		target := filepath.Join(locked, "mounted", felt.DirName)
+		if err := os.MkdirAll(target, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		link := filepath.Join(f.clone, felt.DirName, "mounted")
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal(err)
+		}
+		writeSyncFile(t, f.clone, ".gitignore", ".felt/mounted\n")
+		syncTestGit(t, f.clone, "add", ".gitignore")
+		syncTestGit(t, f.clone, "commit", "-m", "ignore mounted")
+		syncTestGit(t, f.clone, "push")
+
+		if err := os.Chmod(locked, 0o000); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+		report := runFFOnlyJSON(t, f.clone)
+		var sawMountErr bool
+		for _, r := range report.Repos {
+			if r.Status == "error" && strings.HasSuffix(r.Path, filepath.Join(felt.DirName, "mounted")) {
+				sawMountErr = true
+			}
+		}
+		if !sawMountErr {
+			t.Fatalf("expected inaccessible mount error in report, got %+v", report.Repos)
+		}
+	})
 }

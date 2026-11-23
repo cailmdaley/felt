@@ -229,9 +229,19 @@ func (a *app) discoverMountedRepositories(parent context.Context, storeRoot stri
 			}
 			target, err := filepath.EvalSymlinks(p)
 			if err != nil {
+				if !errors.Is(err, os.ErrNotExist) {
+					errs = append(errs, syncFFRepoResult{Path: p, Status: "error", Reason: conciseSyncError(err)})
+				}
 				return nil
 			}
-			if info, err := os.Stat(target); err != nil || !info.IsDir() {
+			info, err := os.Stat(target)
+			if err != nil {
+				if !errors.Is(err, os.ErrNotExist) {
+					errs = append(errs, syncFFRepoResult{Path: p, Status: "error", Reason: conciseSyncError(err)})
+				}
+				return nil
+			}
+			if !info.IsDir() {
 				return nil
 			}
 			if !slices.Contains(strings.Split(filepath.ToSlash(target), "/"), felt.DirName) {
