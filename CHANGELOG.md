@@ -8,9 +8,46 @@ maintainer declares ([Versioning](docs/dev/releasing.md#versioning)).
 
 ## Unreleased
 
+## [2.2.0] — 2026-11-23
+
+What you get: opt-in **ambient mode** (`shuttle host ambient on` + atomic `shuttle adopt`) so any Claude Code, Codex, or Antigravity session can adopt itself into a Shuttle fiber; complete headless CLI access to tapestries, sent files, kill, and capture; a zero-build-step headless **UI Primitives SDK** served at `/sdk/shuttle-sdk.js` on Vercel's `@ui-sdk/*` with pluggable board views (`BoardViewPlugin`); an interactive agent-guided tutorial (`docs/llms.txt` and `docs/tutorial.md`); lifecycle buttons, menus, and `⌥⌘` hotkeys on `/thread` and `/desk` with **Rest** defaulting to no date; Antigravity harness support across hooks, transcripts, and `felt setup`; Fleet Map (`/map`); clean-store auto fast-forward (`Shuttle.StoreSync`); unreadable-fiber reporting; and cold-cache local-feed persistence.
+
+### Upgrading from 2.1.x
+
+- Stores used with `felt` alone need nothing: run `felt update` (or the installer) and you are done.
+- On a host running the Shuttle daemon, run `felt update` followed by `shuttle daemon upgrade` (or `bin/shuttle-deploy` from a source checkout). CLI contract level is now **55** (49 in 2.1.x); HTTP API level remains **3**. Upgrade every host in a fleet in one pass.
+- **Board views:** the Chronicle and Globe views and `/api/v1/activity` endpoints are removed; the board now ships with **Desk** (`1`) and **Channels** (`2`) plus pluggable view registration (`BoardViewPlugin`).
+- **Channels:** a channel appears only where a constitution declares `shuttle.channel` (everything else speaks in `#misc`), and a channel of only drafts stays out of the rail unless pinned or waiting.
+- **Rest default:** pressing `Enter` in the Rest dialog (`s` or `Cmd+Alt+S` in Rex) now rests with **no return date** by default; move the cursor or pick a preset to choose a return day.
+- **Rex users:** run `shuttle rex-setup` and `rex config reload` to install the updated `shuttle.lua` (view-only focus resolution and No-date-first Rest).
+
 ### Added
 
-- Claude Code workers get the context handoff nudge: once at 350,000 tokens and once more at 400,000, each stating the context size and threshold and asking for `## Status` and `shuttle handoff`. `SHUTTLE_HANDOFF_TOKENS` and `SHUTTLE_HANDOFF_HARD_TOKENS` override both limits. Claude sessions outside Shuttle workers are still not nudged.
+- **Ambient Shuttle mode & atomic adoption:** `shuttle host ambient [on|off]` (stored as `"ambient": true` in `host.json`, overridden by `$SHUTTLE_AMBIENT`, reported in `shuttle host --json`) injects a concise `SessionStart` hint into unattached Claude Code, Codex, and Antigravity sessions so substantive work can adopt itself via `shuttle adopt <parent>/<slug> "<title>"` (atomically creating, installing, claiming, and activating the fiber).
+- **Complete headless CLI coverage:**
+  - `shuttle tapestry <fiber> [--path | --url | --open | --json]` locates a fiber's `tapestry.html` locally or through its owning daemon and prints its path and `/api/v1/file` + `/thread` URLs (or opens it).
+  - `shuttle sent-files ls <fiber> [--json]` lists a fiber's sent-files trail with captions, timestamps, and daemon URLs, with offline fallback matching the daemon.
+  - `shuttle kill <fiber>` and `shuttle capture <prompt> --project-dir <dir>` expose the remaining Core HTTP API actions from the CLI.
+- **Three-layer UI architecture & `/sdk/shuttle-sdk.js`:**
+  - Layer 2 headless UI primitives SDK (`ui/src/sdk/`, bundled with zero external imports and served by every daemon at `/sdk/shuttle-sdk.js`): `ShuttleClient` (all 15 Core routes + `/inbox`), visibility-aware `ShuttleFeed` with ETag revalidation and abort-on-stop, headless domain helpers (`attentionOf`, `doingOf`, `offersFor`, `buildFamilyTree`, `groupPosts`, `relativeAge`), and unstyled `@ui-sdk/*`-backed `data-slot` primitives (`createThreadRow`, `createPost`, `createFilePreview`, `createActionMenu`, `createLifecycleBar`, `createComposer`, `createTapestryFrame`, `createTime`). Personal UIs in `~/.config/shuttle/ui/<name>/index.html` import `/sdk/shuttle-sdk.js` directly with no build step.
+  - Layer 3 pluggable view registry (`BoardViewPlugin`, `registerView`, `unregisterView`, `listViews`) so Desk, Channels, and optional custom views compose cleanly over the primitives.
+  - Documented in `docs/shuttle/ui-architecture.md` and `docs/dev/ui-sdk.md`.
+- **Interactive agent-guided tutorial:** `docs/llms.txt` (served at `/llms.txt`) and `docs/tutorial.md` let any coding agent walk a new user through felt and Shuttle step by step in a disposable sandbox, using the cheapest available configured model for demo threads.
+- **Lifecycle actions on `/thread` and `/desk` + Rex view-only hotkeys:** `/thread` (in Rex panes, browsers, and iPhone PWA) now carries a header lifecycle button, `⋯` actions menu, in-DOM `<ui-dialog>` live-worker confirmation (replacing `window.confirm` for WKWebView reliability), and `⌥⌘T/S/A/X/N` chords; `/desk` adds focused-row hotkeys and a right-click action menu; `Shuttle.Palette` resolves focused view-only Rex places by block or window without requiring a terminal session.
+- **Standalone pages & Fleet Map:** `/desk`, `/thread?f=<uid>@<host>` (with Posts, Tapestry/Files, Changes tabs, and unified header Console), and `/map` (Fleet Map archipelago view over `GET /api/v1/map/terrain`), plus iPhone PWA navigation and narrow-dock Console fixes.
+- **Antigravity harness integration:** full hooks, session/transcript discovery, receiver identity, and unified `felt setup antigravity` / `felt setup receipt` promotion alongside Claude Code, Codex, and Pi.
+- **Claude Code context handoff nudges:** Claude Code workers receive context handoff nudges at 350,000 tokens and 400,000 tokens (`SHUTTLE_HANDOFF_TOKENS` and `SHUTTLE_HANDOFF_HARD_TOKENS` override); sessions outside Shuttle workers are not nudged.
+- **Clean-store auto fast-forward:** `felt sync --ff-only --json` and `Shuttle.StoreSync` periodically fast-forward completely clean store repositories (default on `shared-multi-user` and `exposed` hosts, opt-in on `single-user`) without ever committing, pushing, rebasing, stashing, or resetting, reporting dirty or diverged stores via `/api/v1/version` and `shuttle doctor`.
+- **Unreadable-fiber surfacing & cold-feed persistence:** `felt ls --json --unreadable`, `felt sync`, `shuttle doctor`, and the Desk surface unreadable fibers instead of silently dropping them; `Shuttle.Poller.LocalFeed` persists the last observed owner feed so the board keeps rows while a restarting daemon warms.
+- **Tailnet deploys & LocalAPI dialing:** `bin/shuttle-deploy` deploys tailnet remotes through their own daemon's deploy routes (including dialing `https://` remotes through `tailscaled`'s LocalAPI socket from userspace-tailscale hubs), with no SSH or MFA required after first install.
+- **Linked-repo enclosing-store resolution:** `git config felt.enclosing` lets `felt rename` / `felt nest` inside a linked repository rewrite links across its enclosing store.
+- **Transport & terminal support tiers:** documented primary vs portable baseline vs fallback tiers across `docs/dev/architecture.md`, `docs/shuttle/remotes.md`, and `docs/shuttle/conversations.md`.
+
+### Fixed
+
+- Fixed board memory growth on long-lived Safari/WebKit web-app sessions (uncached query wrapper for framed documents, bounded figure previews, and holdings telemetry).
+- Fixed worker restoration requiring a local transcript (preventing re-homed constitutions from failing to resume), pulse reservation expiry after daemon death, cost-held message 1-hour escalation, worker-sent messages no longer counting as human replies or clearing asks, and keeping HEAD-committed local drafts on remote resume.
+- Fixed `ui/test/typeRoles.test.ts` violations in `map.css` and `worker-actions.css` and added `docs/llms.txt` to the repository hygiene scanner.
 
 ## [2.1.2] — 2026-11-18
 
