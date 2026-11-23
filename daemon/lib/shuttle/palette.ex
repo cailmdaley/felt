@@ -118,7 +118,7 @@ defmodule Shuttle.Palette do
     end
   end
 
-  @doc "First existing configured felt store directory, falling back to `System.user_home/0`."
+  @doc "First existing configured felt store directory, falling back to `Shuttle.Env.home/0`."
   @spec default_project_dir() :: String.t() | nil
   def default_project_dir do
     FeltStores.configured_stores()
@@ -129,7 +129,7 @@ defmodule Shuttle.Palette do
       else
         _ -> nil
       end
-    end) || System.user_home()
+    end) || Shuttle.Env.home()
   end
 
   # ── Entry normalization ──

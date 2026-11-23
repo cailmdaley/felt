@@ -22,6 +22,8 @@
         "POST /transition",
         "POST /attach",
         "POST /go",
+        "GET /palette",
+        "GET /map/terrain",
         "POST /felt-edit",
         "POST /felt-nest",
         "GET /search",
