@@ -28,7 +28,7 @@ export {
   viewFallbackKind,
   viewForHotkey,
   viewHotkeys,
-  viewTitle,
+  viewOrDesk,
   type BoardViewId,
   type BoardViewPlugin,
   type TemporalView,

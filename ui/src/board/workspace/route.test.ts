@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import '../views/index.js'
 import { FRAME_STEPS, formatRoute, LANDING_MS, parseRoute, WorkspaceHistory, type WorkspaceRoute } from './route.js'
 
 const histories: WorkspaceHistory[] = []

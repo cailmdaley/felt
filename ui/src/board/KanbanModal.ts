@@ -30,7 +30,7 @@ import { constitutionAction, runAwaitsHuman, schedulePaused, scheduled } from '.
 import { DeskKeyboard } from './DeskKeyboard.js'
 import { clearPost } from './utils.js'
 import { KeymapHelp } from './KeymapHelp.js'
-import { DESK_ACTS, keyIntent, type KeyIntent } from './keymap.js'
+import { DESK_ACTS, isEditableTarget, keyIntent, type KeyIntent } from './keymap.js'
 import { daemonFetch, isDaemonBooting, postDaemonJson } from './daemonApi.js'
 import { headerIcon } from './workspace/headerIcon.js'
 import { applyTerminalHost, TerminalHostReader } from './hostTerminal.js'
@@ -68,7 +68,7 @@ import {
   viewFallbackKind,
   viewForHotkey,
   viewHotkeys,
-  viewTitle,
+  viewOrDesk,
 } from './views/index.js'
 import { FiberSends } from './fiberSends.js'
 import { viewOfHash } from './workspace/route.js'
@@ -149,7 +149,7 @@ export class KanbanModal {
 
   /** The view tab strip — persistent chrome, built once in assembleChrome. */
   private tabsEl: HTMLElement | null = null
-  /** The strip's tablist, refilled whenever a view is registered or unregistered. */
+  /** The strip's tablist, brought in line whenever a view is registered or unregistered. */
   private viewTabsEl: HTMLElement | null = null
   /** The bar's Find: one field on every view, searching where the board stands. */
   private findEl: HTMLInputElement | null = null
@@ -289,7 +289,7 @@ export class KanbanModal {
       deskRows: () => this.workspaceCards(),
       deskPlacement: card => this.deskProjection.placements.get(deskCardKey(card)),
       threadIndex: () => threadIndexFor(this.lastResponse),
-      origin: () => viewTitle(this.activeViewId),
+      origin: () => this.activeViewId,
       onVisibility: (active) => this.showWorkspace(active),
       onReturnCard: card => {
         this.workspaceReturnCard = { id: card.id, origin: card.originId }
@@ -519,9 +519,9 @@ export class KanbanModal {
   /**
    * The tab strip: `desk` plus one tab per registered view that is not
    * `optional`, left-aligned on its own hairline row at the top of the page.
-   * The bar is built once; its tablist is refilled from the registry whenever
-   * a view is registered or unregistered (`fillViewTabs`), and otherwise only
-   * the selected tab's classes change.
+   * The bar is built once; its tablist follows the registry whenever a view
+   * is registered or unregistered (`fillViewTabs`), and otherwise only the
+   * selected tab's classes change.
    */
   private buildViewTabs(): HTMLElement {
     const strip = document.createElement('ui-tabs')
@@ -596,7 +596,12 @@ export class KanbanModal {
     return strip
   }
 
-  /** One tab for the Desk and each registered view that is not `optional`, each with its hotkey. */
+  /**
+   * One tab for the Desk and each registered view that is not `optional`, each
+   * with its hotkey. A view's tab stays the same element while the view is
+   * registered, so the focus stays on it; a focused tab whose view left gives
+   * the focus to the selected one.
+   */
   private fillViewTabs(): void {
     const views = this.viewTabsEl
     if (!views) return
@@ -604,17 +609,24 @@ export class KanbanModal {
       { id: DESK_VIEW, label: 'desk', hotkey: DESK_HOTKEY },
       ...viewHotkeys().filter(({ view }) => !view.optional).map(({ view, hotkey }) => ({ id: view.id, label: view.title.toLowerCase(), hotkey })),
     ]
-    views.replaceChildren()
+    const focused = views.contains(document.activeElement)
+    const parts = [...views.querySelectorAll<HTMLElement>('ui-tabs-tab')]
+    for (const part of parts) if (!specs.some(spec => spec.id === part.getAttribute('value'))) part.remove()
+    let before: Element | null = views.firstElementChild
     for (const spec of specs) {
-      const tab = document.createElement('button')
-      tab.type = 'button'
-      tab.className = 'kbn-viewtab'
-      tab.dataset.view = spec.id
+      let part = parts.find(each => each.getAttribute('value') === spec.id)
+      if (!part) {
+        part = this.buildViewTab(spec.id)
+        views.insertBefore(part, before)
+      }
+      before = part.nextElementSibling
+      const tab = part.querySelector<HTMLElement>('.kbn-viewtab')!
       tab.title = spec.hotkey ? `${spec.label} (${spec.hotkey})` : spec.label
 
       const labelEl = document.createElement('span')
       labelEl.className = 'kbn-viewtab-label'
       labelEl.textContent = spec.label
+      tab.replaceChildren()
       if (spec.hotkey) {
         const hotkeyEl = document.createElement('span')
         hotkeyEl.className = 'kbn-viewtab-hotkey'
@@ -623,31 +635,45 @@ export class KanbanModal {
         tab.append(hotkeyEl)
       }
       tab.append(labelEl)
-      tab.addEventListener('click', event => {
-        // The tab of the view under the reader closes it, and that view puts the focus back where the reader was opened from; the tablist's own press would take it.
-        if (this.workspace?.isActive && spec.id === this.activeViewId) event.stopImmediatePropagation()
-        this.setView(spec.id)
-      })
-      const part = document.createElement('ui-tabs-tab')
-      part.setAttribute('value', spec.id)
-      part.append(tab)
-      views.append(part)
     }
+    if (focused && !views.contains(document.activeElement)) {
+      views.querySelector<HTMLElement>(`.kbn-viewtab[data-view="${viewOrDesk(this.activeViewId)}"]`)?.focus({ preventScroll: true })
+    }
+  }
+
+  private buildViewTab(id: BoardViewId): HTMLElement {
+    const tab = document.createElement('button')
+    tab.type = 'button'
+    tab.className = 'kbn-viewtab'
+    tab.dataset.view = id
+    tab.addEventListener('click', event => {
+      // The tab of the view under the reader closes it, and that view puts the focus back where the reader was opened from; the tablist's own press would take it.
+      if (this.workspace?.isActive && id === this.activeViewId) event.stopImmediatePropagation()
+      this.setView(id)
+    })
+    const part = document.createElement('ui-tabs-tab')
+    part.setAttribute('value', id)
+    part.append(tab)
+    return part
   }
 
   /** A view was registered or unregistered: the strip follows, and a page whose view left goes home to the Desk. */
   private viewsChanged(): void {
     this.fillViewTabs()
-    if (this.activeViewId !== DESK_VIEW && !getView(this.activeViewId)) this.setView(DESK_VIEW, false)
-    else if (this.activeViewId !== DESK_VIEW) this.mountOrRefreshActiveView()
+    if (this.activeViewId !== viewOrDesk(this.activeViewId)) {
+      this.setView(DESK_VIEW, false)
+      this.workspace?.viewGone()
+    } else if (this.activeViewId !== DESK_VIEW) this.mountOrRefreshActiveView()
     this.syncViewChrome()
   }
 
   /**
    * Switch the page. Idempotent — re-selecting the active view is a no-op, so
-   * a stray click or repeated hotkey never tears a view down and back up.
+   * a stray click or repeated hotkey never tears a view down and back up. An
+   * id no registered view answers to is the Desk.
    */
-  private setView(id: BoardViewId, navigate = true, forceHome = false): void {
+  private setView(wanted: BoardViewId, navigate = true, forceHome = false): void {
+    const id = viewOrDesk(wanted)
     if (forceHome && id === DESK_VIEW && this.workspace?.isActive) {
       this.workspace.escapeHome()
       return
@@ -818,16 +844,16 @@ export class KanbanModal {
   }
 
   /**
-   * `1` goes home to the Desk; each registered view's hotkey (`2`–`9` unless
-   * it names its own) switches to it. Deliberately narrow: a bare key only, so
+   * `1` goes home to the Desk; each registered view's hotkey (`2`–`9`)
+   * switches to it. Deliberately narrow: a bare key only, so
    * `Cmd/Ctrl+1` stays the browser's tab switch, and only when the keystroke
-   * is not going somewhere it matters — a focused text field, or a dialog
-   * layered over the board. Returns true when the key was consumed.
+   * is not going somewhere it matters — a text field, an input method
+   * composing, or a dialog layered over the board. Returns true when the key was consumed.
    */
   private handleViewHotkey(e: KeyboardEvent): boolean {
     const surface = this.workspace?.isActive ? 'reader' : 'desk'
     const home = keyIntent(e, surface) === 'desk'
-    const bare = !e.defaultPrevented && !e.isComposing && !e.metaKey && !e.ctrlKey && !e.altKey
+    const bare = !e.defaultPrevented && !e.isComposing && e.keyCode !== 229 && !e.metaKey && !e.ctrlKey && !e.altKey && !isEditableTarget(e.target)
     const view = !home && bare ? viewForHotkey(e.key) : undefined
     if (!home && !view) return false
     if (keystrokeIsSpokenFor()) return false

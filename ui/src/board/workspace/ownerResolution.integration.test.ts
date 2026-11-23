@@ -37,7 +37,7 @@ function sheet(): Library {
 }
 function reader(hash = '#/channels'): Workspace {
   window.history.replaceState(null, '', hash)
-  workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, deskRows: () => cards, origin: () => 'Channels', onVisibility: vi.fn(), dock: new Dock('', vi.fn()), console: options => new Dock('', vi.fn(), undefined, undefined, options) })
+  workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, deskRows: () => cards, origin: () => 'channels', onVisibility: vi.fn(), dock: new Dock('', vi.fn()), console: options => new Dock('', vi.fn(), undefined, undefined, options) })
   library = workspace.library
   return workspace
 }

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import './views/index.js'
 import { holdings, reportHoldings } from './holdings.js'
 
 afterEach(() => {

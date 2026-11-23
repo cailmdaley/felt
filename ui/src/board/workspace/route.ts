@@ -1,6 +1,6 @@
 import type { DocKey } from './documents.js'
 import { parseRoute, type WorkspaceRoute } from './boardRoute.js'
-import { DESK_VIEW, getView, viewTitle } from '../views/ViewRegistry.js'
+import { DESK_VIEW, getView, viewOrDesk, viewTitle } from '../views/ViewRegistry.js'
 
 export { parseRoute, type WorkspaceRoute }
 
@@ -21,14 +21,14 @@ function encode(value: string): string {
   return encodeURIComponent(value).replace(/[@!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)
 }
 
-function isOriginView(value: unknown): value is WorkspaceOriginView {
-  return value === DESK_VIEW || value === 'channels' || (typeof value === 'string' && !!getView(value))
-}
+/** The view a deep link to the reader goes back to. */
+const CHANNELS_VIEW = 'channels'
+/** The id a hash of a view's shape (`#/<id>`) carries. */
+const idOfHash = (hash: string): string | undefined => /^#\/([^/?#]+)$/.exec(hash)?.[1]
 /** The board view a location hash addresses (`#/<id>` for a registered view), or null for any other hash. */
 export function viewOfHash(hash: string): WorkspaceOriginView | null {
   if (hash === '#/desk' || hash === '#/chronicle' || hash === '#/globe') return DESK_VIEW
-  if (hash === '#/channels' || hash === BOARD_HASH || hash.startsWith(`${BOARD_HASH}/`)) return 'channels'
-  const id = /^#\/([^/?#]+)$/.exec(hash)?.[1]
+  const id = hash === BOARD_HASH || hash.startsWith(`${BOARD_HASH}/`) ? CHANNELS_VIEW : idOfHash(hash)
   return id && getView(id) ? id : null
 }
 /** The address a view is shown at: `#/board` redirects to `#/channels`; retired view hashes redirect to `#/desk`. */
@@ -36,6 +36,11 @@ function canonical(hash: string): string {
   if (hash === BOARD_HASH) return '#/channels'
   if (hash === '#/chronicle' || hash === '#/globe') return '#/desk'
   return hash
+}
+/** The address the board moves to: a view's own, and the Desk's for one no registered view answers to. */
+function settled(hash: string): string {
+  const address = canonical(hash)
+  return idOfHash(address) && !viewOfHash(address) ? `#/${DESK_VIEW}` : address
 }
 
 export function formatRoute(route: WorkspaceRoute): string {
@@ -52,7 +57,7 @@ function stateObject(value: unknown): StateObject {
 
 function readRouteState(value: unknown): RouteState | null {
   const entry = stateObject(value)[STATE_KEY] as Partial<RouteState> | undefined
-  return entry && typeof entry.layer === 'boolean' && isOriginView(entry.originView) ? { layer: entry.layer, originView: entry.originView } : null
+  return entry && typeof entry.layer === 'boolean' && typeof entry.originView === 'string' && entry.originView ? { layer: entry.layer, originView: entry.originView } : null
 }
 
 function withRouteState(value: unknown, routeState: RouteState | null): StateObject {
@@ -87,7 +92,8 @@ export class WorkspaceHistory {
   private started = false
   private current: WorkspaceRoute | null = null
   private currentHash = ''
-  private origin: WorkspaceOriginView = 'channels'
+  /** The view opened from, as it was then: read through `originView`, since it may have been unregistered. */
+  private origin: WorkspaceOriginView = CHANNELS_VIEW
   /** The reader's entry sits directly above its view's. */
   private layered = false
   /** A back this history asked for has not landed: anything asked meanwhile waits for it. */
@@ -101,14 +107,16 @@ export class WorkspaceHistory {
     this.onRoute = onRoute
   }
 
-  get originView(): WorkspaceOriginView { return this.origin }
-  /** The name of the one place back goes. */
-  get backLabel(): string { return viewTitle(this.origin) }
+  /** The one place back goes: the view the reader was opened from, or the Desk once that view is unregistered. */
+  get originView(): WorkspaceOriginView { return viewOrDesk(this.origin) }
+  /** Its name. */
+  get backLabel(): string { return viewTitle(this.originView) }
 
   start(): void {
     if (this.started) return
     this.started = true
-    this.redirect()
+    // An address no view answers to yet is left for a view that registers later.
+    this.redirect(canonical)
     this.currentHash = window.location.hash
     window.addEventListener('popstate', this.onPopState)
     window.addEventListener('hashchange', this.onHashChange)
@@ -121,7 +129,7 @@ export class WorkspaceHistory {
     }
     this.current = route
     this.layered = saved?.layer ?? false
-    this.origin = saved?.originView ?? 'channels'
+    this.origin = saved?.originView ?? CHANNELS_VIEW
     this.onRoute(route, false)
   }
 
@@ -168,13 +176,13 @@ export class WorkspaceHistory {
   view(address: string): void {
     this.ensureStarted()
     if (this.leaving) { this.queued = () => this.view(address); return }
-    const hash = canonical(address)
+    const hash = settled(address)
     if (hash === this.currentHash) return
     // The view under the reader, chosen from it, is back.
-    if (this.current?.kind === 'channel' && viewOfHash(hash) === this.origin) { this.leave(); return }
+    if (this.current?.kind === 'channel' && viewOfHash(hash) === this.originView) { this.leave(); return }
     if (this.current?.kind === 'channel') window.history.replaceState(withRouteState(window.history.state, null), '', hash)
     else window.history.pushState(null, '', hash)
-    this.origin = viewOfHash(hash) ?? 'channels'
+    this.origin = viewOfHash(hash) ?? DESK_VIEW
     this.layered = false
     this.current = { kind: 'overview', hash }
     this.currentHash = hash
@@ -189,7 +197,7 @@ export class WorkspaceHistory {
   /** Back, from anywhere in the reader: its view, in one step. */
   leave(): void {
     if (this.current?.kind !== 'channel' || this.leaving) return
-    const hash = `#/${this.origin}`
+    const hash = `#/${this.originView}`
     if (this.layered) {
       this.leaving = true
       this.steps = 0
@@ -201,6 +209,17 @@ export class WorkspaceHistory {
     this.current = { kind: 'overview', hash }
     this.currentHash = hash
     this.onRoute(this.current, false)
+  }
+
+  /** The view on show was unregistered and the board went home: the address it left names the Desk in its place. */
+  viewGone(): void {
+    if (this.leaving || this.current?.kind !== 'overview') return
+    const hash = settled(this.currentHash)
+    if (hash === this.currentHash) return
+    window.history.replaceState(withRouteState(window.history.state, null), '', hash)
+    this.origin = DESK_VIEW
+    this.current = { kind: 'overview', hash }
+    this.currentHash = hash
   }
 
   /**
@@ -237,15 +256,15 @@ export class WorkspaceHistory {
     return { layer: this.layered, originView: this.origin }
   }
 
-  /** An old `#/board` address is replaced by `#/channels` where it stands. */
-  private redirect(): void {
-    const hash = canonical(window.location.hash)
+  /** An address that stands for another is replaced by it where it stands. */
+  private redirect(address: (hash: string) => string): void {
+    const hash = address(window.location.hash)
     if (hash !== window.location.hash) window.history.replaceState(window.history.state, '', hash)
   }
 
   /** The browser moved: through its own back or forward, a typed address, or a back this history asked for. */
   private handleLocation(state: unknown): void {
-    this.redirect()
+    this.redirect(settled)
     const hash = window.location.hash
     clearTimeout(this.landing)
     const queued = this.leaving ? this.queued : null

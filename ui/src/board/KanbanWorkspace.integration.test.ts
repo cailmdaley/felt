@@ -72,7 +72,7 @@ describe('Desk rows in the document workspace', () => {
     try {
       board.lastResponse = first
       board.render(first)
-      board.workspace.open(first.now.drafts[0], 'Desk')
+      board.workspace.open(first.now.drafts[0], 'desk')
       expect(readerRows(board)).toEqual(deskRows(first))
 
       board.lastResponse = next
@@ -108,7 +108,7 @@ describe('Desk rows in the document workspace', () => {
       board.lastResponse = data
       board.render(data)
       for (const page of [card({ id: 'notes/x' }), card({ id: 'roles/editor' })]) {
-        board.workspace.open(page, 'Desk')
+        board.workspace.open(page, 'desk')
         await settle()
         const stops = board.workspace as unknown as { deskStop(card: KanbanCard): string }
         expect(readerRows(board)).toEqual(['working', 'review', 'draft', 'resting/item', 'roles/seat', page.id])

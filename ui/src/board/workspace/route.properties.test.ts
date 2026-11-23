@@ -19,6 +19,7 @@
  * `ROUTE_FUZZ_RUNS` deepens it; a failure prints the seed and the shrunk walk.
  */
 import fc from 'fast-check'
+import '../views/index.js'
 import { afterEach, describe, expect, it } from 'vitest'
 import { formatRoute, parseRoute, viewOfHash, WorkspaceHistory, type WorkspaceOriginView, type WorkspaceRoute } from './route.js'
 

@@ -43,10 +43,10 @@ import type { FiberSends } from '../fiberSends.js'
 import type { SwipeSignal } from '../workspace/PhoneGestures.js'
 
 export interface BoardViewPlugin {
-  /** Its id: the tab's value, its `?view=` and `#/<id>` address. Never `desk`. */
+  /** Its id: the tab's value, its `?view=` and `#/<id>` address. Letters, digits, `-` and `_`, and none of the board's own addresses (`desk`, `board`, `chronicle`, `globe`). */
   id: string
   title: string
-  /** Its key on the hotkey row; without one it takes the first free digit from 2 to 9. */
+  /** Its key on the hotkey row, a digit from 2 to 9; without one it takes the first free one. */
   hotkey?: string
   /** Draws no tab: reached by its hotkey, its address, or code. */
   optional?: boolean
@@ -65,7 +65,7 @@ export interface BoardViewPlugin {
   show?(target: { channel: string; item?: string }): void
 }
 
-/** A registered view: the name the board's own views were written against. */
+/** A registered view. */
 export type TemporalView = BoardViewPlugin
 
 /**
@@ -140,8 +140,8 @@ export type BoardViewId = string
 export const DESK_VIEW = 'desk'
 /** The Desk's key on the hotkey row. */
 export const DESK_HOTKEY = '1'
-/** The keys a view without its own takes, in registration order. */
-const FREE_HOTKEYS = ['2', '3', '4', '5', '6', '7', '8', '9']
+/** The keys views take: the letters and punctuation are the board's and the reader's. */
+const VIEW_HOTKEYS = ['2', '3', '4', '5', '6', '7', '8', '9']
 
 // ── Registry ─────────────────────────────────────────────────────────────────
 //
@@ -153,10 +153,18 @@ const registry = new Map<ViewId, BoardViewPlugin>()
 const listeners = new Set<() => void>()
 const changed = (): void => { for (const listener of [...listeners]) listener() }
 
+/** Addresses the board answers itself: its Desk, the reader's root, and the two that lead to the Desk. */
+const RESERVED_IDS = [DESK_VIEW, 'board', 'chronicle', 'globe']
+/** What a view's id may be: one segment of an address, the same encoded or not. */
+const VIEW_ID = /^[a-z0-9][a-z0-9_-]*$/i
+
 /** Register a view. Re-registering an id replaces it (hot-reload friendly)
- *  while keeping its original position in the strip. */
+ *  while keeping its original position in the strip. Throws on an id or a
+ *  hotkey the board cannot give it. */
 export function registerView(view: BoardViewPlugin): void {
-  if (view.id === DESK_VIEW) throw new Error('`desk` is the board\'s own page, not a view to register')
+  if (!VIEW_ID.test(view.id)) throw new Error(`A view's id is letters, digits, - and _, starting with a letter or digit, not ${JSON.stringify(view.id)}`)
+  if (RESERVED_IDS.includes(view.id.toLowerCase())) throw new Error(`\`${view.id}\` is the board's own address, not a view to register`)
+  if (view.hotkey !== undefined && !VIEW_HOTKEYS.includes(view.hotkey)) throw new Error(`A view's hotkey is a digit from 2 to 9, not ${JSON.stringify(view.hotkey)}`)
   registry.set(view.id, view)
   changed()
 }
@@ -198,7 +206,7 @@ export function viewHotkeys(): Array<{ view: BoardViewPlugin; hotkey?: string }>
   return views.map(view => {
     if (own.has(view)) return { view, hotkey: own.get(view) }
     if (view.hotkey) return { view }
-    const free = FREE_HOTKEYS.find(key => !taken.has(key))
+    const free = VIEW_HOTKEYS.find(key => !taken.has(key))
     if (free) taken.add(free)
     return { view, hotkey: free }
   })
@@ -209,15 +217,14 @@ export function viewForHotkey(key: string): BoardViewPlugin | undefined {
   return viewHotkeys().find(each => each.hotkey === key)?.view
 }
 
-/** What the board calls a view: `Desk`, a registered view's title, or else its id as a name. */
-export function viewTitle(id: BoardViewId): string {
-  if (id === DESK_VIEW) return 'Desk'
-  return getView(id)?.title ?? `${id.charAt(0).toUpperCase()}${id.slice(1)}`
+/** The view an id names, or the Desk when no registered view answers to it. */
+export function viewOrDesk(id: BoardViewId): BoardViewId {
+  return getView(id) ? id : DESK_VIEW
 }
 
-/** The view a title names, the inverse of `viewTitle`. */
-export function viewOfTitle(title: string): BoardViewId | undefined {
-  return title === 'Desk' ? DESK_VIEW : listViews().find(view => view.title === title)?.id
+/** What the board calls a view: a registered view's title, else `Desk`. */
+export function viewTitle(id: BoardViewId): string {
+  return getView(id)?.title ?? 'Desk'
 }
 
 // ── View fallback ────────────────────────────────────────────────────────────
