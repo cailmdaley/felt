@@ -150,10 +150,9 @@ defmodule Shuttle.Pulse do
     Enum.reduce(fibers, pulses, fn fiber, acc ->
       pulse_key = key(fiber)
 
-      with %{"pending" => %{"activity_session" => session, "at" => sent}} <- acc[pulse_key],
+      with %{"pending" => %{} = pending} <- acc[pulse_key],
            false <- pulse_key in sending_keys,
-           true <-
-             idle_since?(activity[session], sent) or now_ms - sent >= config(fiber).interval do
+           true <- pending_done?(pending, activity, config(fiber).interval, now_ms) do
         released = release(acc, pulse_key)
 
         if window_reset_due?(fiber, released[pulse_key], now),
@@ -165,7 +164,14 @@ defmodule Shuttle.Pulse do
     end)
   end
 
-  defp idle_since?(%{phase: "waiting", last_event_at: at}, sent), do: at > sent
+  defp pending_done?(%{"activity_session" => session, "at" => sent}, activity, interval, now_ms)
+       when is_integer(sent) do
+    idle_since?(activity[session], sent) or now_ms - sent >= interval
+  end
+
+  defp pending_done?(_malformed, _activity, _interval, _now_ms), do: true
+
+  defp idle_since?(%{phase: "waiting", last_event_at: at}, sent) when is_integer(at), do: at > sent
   defp idle_since?(_, _), do: false
 
   def next_tick(%{window: nil}, at), do: DateTime.to_iso8601(at)

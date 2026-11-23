@@ -189,6 +189,13 @@ defmodule Shuttle.PulseTest do
     assert %{"pending" => nil, "state" => "scheduled"} = expired["watch-uid"]
     refute Pulse.due?(expired["watch-uid"], expiry)
     assert Pulse.due?(expired["watch-uid"], DateTime.add(expiry, 3540))
+
+    # A corrupted pending map (null/string/missing timestamp) clears cleanly rather than raising.
+    for bad <- [%{"activity_session" => "conversation", "at" => nil}, %{"activity_session" => "conversation", "at" => "bad"}, %{}] do
+      corrupted = put_in(pulses, ["watch-uid", "pending"], bad)
+      cleaned = Pulse.observe(corrupted, [fiber()], %{}, [], almost)
+      assert %{"pending" => nil, "state" => "scheduled"} = cleaned["watch-uid"]
+    end
   end
 
   test "the feed carries timing outside frontmatter and holds hide its deadline" do
