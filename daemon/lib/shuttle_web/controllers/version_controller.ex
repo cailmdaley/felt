@@ -62,6 +62,7 @@ defmodule ShuttleWeb.VersionController do
       |> Map.put(:discovery, Shuttle.TailnetPeers.status())
       |> Map.put(:rex_backend, Shuttle.Terminal.backend_health())
       |> Map.put(:transcript_indexer, Shuttle.TranscriptIndexer.status())
+      |> Map.put(:store_sync, Shuttle.StoreSync.status())
     )
   end
 

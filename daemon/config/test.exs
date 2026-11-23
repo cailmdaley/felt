@@ -9,6 +9,8 @@ config :shuttle,
   start_rex_view: false,
   # Only scoped indexer tests may scan synthetic transcripts.
   start_transcript_indexer: false,
+  # Store sync tests start Shuttle.StoreSync explicitly against temp git repos.
+  start_store_sync: false,
   # Tests boot pollers constantly; quarantining every one would park the very
   # dispatches the suite asserts on. Quarantine tests pass `boot_quarantine:
   # true` to Poller.start_link explicitly.

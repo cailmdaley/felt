@@ -261,6 +261,26 @@ live worker's thread page beside it:
 `http://127.0.0.1:4000`. The daemon reads the key fresh. See
 [Thread pages beside workers](installation.md#thread-pages-beside-workers).
 
+## Store auto fast-forward
+
+`host.json`'s `auto_ff_stores` boolean controls whether `Shuttle.StoreSync`
+periodically fetches and fast-forwards (`git merge --ff-only @{u}`) the git
+repositories backing configured felt stores and any symlinked mounted stores
+under `.felt/`.
+
+- **Default:** `false` on `single-user` hosts; `true` on `shared-multi-user`
+  and `exposed` hosts.
+- **Override:** set `"auto_ff_stores": true` or `"auto_ff_stores": false` in
+  `~/.config/shuttle/host.json`.
+
+A repository is fast-forwarded only when its working tree is completely clean
+(no staged, unstaged, or untracked files), no merge/rebase/cherry-pick is in
+progress, an upstream tracking branch is configured, and there are zero local
+commits ahead. The daemon never commits, pushes, rebases, stashes, resets, or
+checks out. Any dirty, diverged, unconfigured, or fetch-failed repository is
+left untouched and reported in `GET /api/v1/version` (`store_sync`) and as a
+warning in `shuttle doctor`.
+
 ## Configuring remotes
 
 One daemon aggregates the others. On a tailnet it needs no configuration: every

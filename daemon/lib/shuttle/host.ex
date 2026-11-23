@@ -328,6 +328,47 @@ defmodule Shuttle.Host do
     end
   end
 
+  @doc """
+  Whether the daemon periodically fast-forwards clean felt store repositories
+  (`Shuttle.StoreSync`).
+
+  Defaults to off on `single-user` hosts and on for `shared-multi-user` and
+  `exposed` hosts. host.json `"auto_ff_stores": true | false` overrides the
+  class default on any host. Daemon-only (the Go reader ignores the key).
+  """
+  @spec auto_ff_stores?() :: boolean()
+  def auto_ff_stores? do
+    path = config_path()
+
+    case read_document(path) do
+      {:ok, %{"auto_ff_stores" => value}} when is_boolean(value) ->
+        value
+
+      {:ok, doc} ->
+        default =
+          case file_class(doc, path) do
+            {:ok, class, _source} -> class != :single_user
+            {:error, _kind, _message} -> false
+          end
+
+        case Map.fetch(doc, "auto_ff_stores") do
+          :error ->
+            default
+
+          {:ok, value} ->
+            Logger.warning(
+              ~s(#{path}: "auto_ff_stores" must be true or false, got #{inspect(value)}; using #{default})
+            )
+
+            default
+        end
+
+      {:error, _kind, message} ->
+        Logger.warning("#{message}; cannot read auto_ff_stores; keeping it off")
+        false
+    end
+  end
+
   @doc "Whether transcript catch-up is enabled. Only host.json `transcript_index: false` opts out."
   @spec transcript_index?() :: boolean()
   def transcript_index? do

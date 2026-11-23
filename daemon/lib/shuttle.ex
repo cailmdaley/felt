@@ -125,6 +125,7 @@ defmodule Shuttle.Application do
     {Shuttle.Local, :start_remote_control, Shuttle.RemoteControl},
     {Shuttle.Local, :start_rex_view, Shuttle.RexView},
     {Shuttle.Local, :start_transcript_indexer, Shuttle.TranscriptIndexer},
+    {Shuttle.Local, :start_store_sync, Shuttle.StoreSync},
     {Shuttle.Local, :start_poller, Shuttle.Poller}
   ]
 

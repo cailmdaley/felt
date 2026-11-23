@@ -454,3 +454,40 @@ func TestRexTailnetListenerProbe(t *testing.T) {
 		})
 	}
 }
+
+func TestDoctorStoreSyncWarnings(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/version" {
+			w.WriteHeader(404)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"ready":true,"contract":{"expected":%d,"observed":%d,"ok":true},"store_sync":{"enabled":true,"state":"idle","repos":[{"path":"/stores/clean","status":"up_to_date","ahead":0,"behind":0},{"path":"/stores/dirty","status":"stale_dirty","ahead":0,"behind":2,"reason":"working tree has uncommitted changes"},{"path":"/stores/diverged","status":"stale_diverged","ahead":1,"behind":3,"reason":"branch has diverged (1 ahead, 3 behind origin/main)"},{"path":"/stores/broken","status":"fetch_failed","reason":"fatal: could not read from remote"}]}}`, ShuttleContractLevel, ShuttleContractLevel)
+	}))
+	a := newApp(env)
+	d := a.collectDaemonReceipt()
+	if d.Status != receiptHealthy {
+		t.Fatalf("daemon status = %s (%s)", d.Status, d.Repair)
+	}
+	if d.StoreSync == nil || len(d.StoreSync.Repos) != 4 {
+		t.Fatalf("store_sync = %+v", d.StoreSync)
+	}
+	var stdout bytes.Buffer
+	env.Stdout = &stdout
+	a.printStoreSyncReceipt(d.StoreSync)
+	out := stdout.String()
+	if strings.Contains(out, "/stores/clean") {
+		t.Fatalf("up_to_date repo should not warn: %s", out)
+	}
+	for _, want := range []string{
+		"warning: store /stores/dirty is stale_dirty (2 behind upstream): working tree has uncommitted changes",
+		"warning: store /stores/diverged is stale_diverged: branch has diverged",
+		"warning: store /stores/broken is fetch_failed: fatal: could not read from remote",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in:\n%s", want, out)
+		}
+	}
+}

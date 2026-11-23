@@ -1,12 +1,19 @@
 defmodule Shuttle.ApplicationBootTest do
   use ExUnit.Case, async: true
 
-  test "test startup never starts transcript indexing without scoped enable" do
+  test "test startup never starts transcript indexing or store sync without scoped enable" do
     refute Process.whereis(Shuttle.TranscriptIndexer)
+    refute Process.whereis(Shuttle.StoreSync)
   end
 
   test "endpoint precedes independent local and fleet subtrees" do
-    flags = [:start_poller, :start_tailnet_dial, :start_event_stream, :start_transcript_indexer]
+    flags = [
+      :start_poller,
+      :start_tailnet_dial,
+      :start_event_stream,
+      :start_transcript_indexer,
+      :start_store_sync
+    ]
     Enum.each(flags, &Shuttle.Test.Env.put_app_env(&1, true))
     Shuttle.Test.Env.put_app_env(:start_voice_transcript_relay, true)
     children = Shuttle.Application.child_specs()
@@ -22,6 +29,7 @@ defmodule Shuttle.ApplicationBootTest do
     assert Keyword.fetch!(opts, :own_host_id) == Shuttle.Poller.daemon_host_id()
     assert Shuttle.EventStream in locals
     assert Shuttle.TranscriptIndexer in locals
+    assert Shuttle.StoreSync in locals
     assert Enum.any?(children, &(&1.id == Shuttle.Voice.TranscriptRelay))
     assert Shuttle.TailnetDial in remotes
     assert Enum.find_index(ids, &(&1 == Shuttle.TaskSupervisor)) < endpoint

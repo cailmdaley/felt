@@ -32,7 +32,7 @@ conflicts with the work's context. Role charters live at `roles/<role>` or `<mou
 (docs/concepts/roles.md) and have no host owner. A constitution's `shuttle.host` selects the daemon
 allowed to execute it; synchronizing its file does not transfer execution.
 Armed cross-host creation and control use the owner daemon's existing APIs; the owner writes its store directly, independently of Git archive state.
-The daemon never runs Git or `felt sync`; a missing document returns not-found with its host and identifier.
+The daemon does not commit, push, rebase, stash, or reset stores; when `auto_ff_stores` is enabled (the default on `shared-multi-user` and `exposed` hosts, opt-in on `single-user`), `Shuttle.StoreSync` periodically fetches and runs `git merge --ff-only @{u}` on clean store repositories with zero local commits ahead, and reports any stale or unpullable store via `/api/v1/version` and `shuttle doctor`. A missing document returns not-found with its host and identifier.
 Remote-owned live state comes from the owner daemon; an unreachable-owner fallback to an archive copy is explicitly marked stale.
 The live board uses those same owner-routed APIs for host-local content and control.
 

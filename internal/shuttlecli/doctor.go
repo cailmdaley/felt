@@ -58,6 +58,26 @@ type ReceiptDaemon struct {
 	PeerGateUIDSource  string              `json:"peer_gate_uid_source,omitempty"`
 	TailnetDial        *ReceiptTailnetDial `json:"tailnet_dial,omitempty"`
 	Discovery          *daemonDiscovery    `json:"discovery,omitempty"`
+	StoreSync          *ReceiptStoreSync   `json:"store_sync,omitempty"`
+}
+
+type ReceiptStoreSync struct {
+	Enabled   *bool                  `json:"enabled,omitempty"`
+	State     string                 `json:"state,omitempty"`
+	LastRunAt string                 `json:"last_run_at,omitempty"`
+	Error     string                 `json:"error,omitempty"`
+	Repos     []ReceiptStoreSyncRepo `json:"repos,omitempty"`
+}
+
+type ReceiptStoreSyncRepo struct {
+	Path        string `json:"path"`
+	Status      string `json:"status"`
+	Upstream    string `json:"upstream,omitempty"`
+	Ahead       *int   `json:"ahead,omitempty"`
+	Behind      *int   `json:"behind,omitempty"`
+	PreviousSHA string `json:"previous_sha,omitempty"`
+	SHA         string `json:"sha,omitempty"`
+	Reason      string `json:"reason,omitempty"`
 }
 
 type ReceiptBootHold struct {
@@ -126,6 +146,7 @@ func (a *app) doctorCmd() *cobra.Command {
 				a.printHostReceipt(receipt.Host)
 				a.printTailnetDialReceipt(receipt.Daemon.TailnetDial)
 				a.printDiscoveryReceipt(receipt.Daemon.Discovery)
+				a.printStoreSyncReceipt(receipt.Daemon.StoreSync)
 				a.printTmuxServerReceipt(receipt.TmuxServer)
 				a.printRexReceipt(receipt.Rex)
 				a.printPendingContextReceipt(receipt)
@@ -370,6 +391,31 @@ func (a *app) printDiscoveryReceipt(discovery *daemonDiscovery) {
 	}
 }
 
+// printStoreSyncReceipt surfaces stale, dirty, diverged, or failed store repos
+// reported by the daemon's Shuttle.StoreSync pass as warnings.
+func (a *app) printStoreSyncReceipt(sync *ReceiptStoreSync) {
+	if sync == nil {
+		return
+	}
+	if sync.Error != "" {
+		fmt.Fprintf(a.env.Stdout, "warning: store sync pass failed: %s\n", sync.Error)
+	}
+	for _, repo := range sync.Repos {
+		switch repo.Status {
+		case "stale_dirty", "stale_diverged", "fetch_failed", "no_upstream":
+			detail := repo.Reason
+			if detail == "" {
+				detail = repo.Status
+			}
+			if repo.Status == "stale_dirty" && repo.Behind != nil && *repo.Behind > 0 {
+				fmt.Fprintf(a.env.Stdout, "warning: store %s is %s (%d behind upstream): %s\n", repo.Path, repo.Status, *repo.Behind, detail)
+			} else {
+				fmt.Fprintf(a.env.Stdout, "warning: store %s is %s: %s\n", repo.Path, repo.Status, detail)
+			}
+		}
+	}
+}
+
 func (a *app) collectHostReceiptWhenReady(daemon ReceiptDaemon) ReceiptHost {
 	if daemon.Ready != nil && !*daemon.Ready {
 		return ReceiptHost{Status: daemon.Status, Repair: daemon.Repair}
@@ -395,6 +441,7 @@ func (a *app) collectDaemonReceipt() ReceiptDaemon {
 		PeerGateUIDSource  string              `json:"peer_gate_uid_source"`
 		TailnetDial        *ReceiptTailnetDial `json:"tailnet_dial"`
 		Discovery          *daemonDiscovery    `json:"discovery"`
+		StoreSync          *ReceiptStoreSync   `json:"store_sync"`
 		Ready              *bool               `json:"ready"`
 		ReconciliationHold string              `json:"reconciliation_hold"`
 		BootHold           *ReceiptBootHold    `json:"boot_hold"`
@@ -411,6 +458,7 @@ func (a *app) collectDaemonReceipt() ReceiptDaemon {
 	d.PeerGateUID, d.PeerGateUIDSource = response.PeerGateUID, response.PeerGateUIDSource
 	d.TailnetDial, d.Ready = response.TailnetDial, response.Ready
 	d.Discovery = response.Discovery
+	d.StoreSync = response.StoreSync
 	d.ReconciliationHold = response.ReconciliationHold
 	d.BootHold = response.BootHold
 	if decodeErr != nil {
