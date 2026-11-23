@@ -45,12 +45,13 @@ defmodule ShuttleWeb.CaptureControllerTest do
     assert Jason.decode!(conn.resp_body)["error"] =~ "prompt"
   end
 
-  test "POST /api/v1/capture defaults omitted or blank project_dir to the first configured store", %{
+  test "POST /api/v1/capture defaults omitted or blank project_dir to the first existing configured store", %{
     tmp_dir: dir
   } do
+    missing_dir = Path.join(dir, "missing-store")
     store_dir = Path.join(dir, "store-a")
     File.mkdir_p!(store_dir)
-    Env.put_env("SHUTTLE_STORES", store_dir)
+    Env.put_env("SHUTTLE_STORES", "#{missing_dir},#{store_dir}")
 
     stub =
       start_supervised!(

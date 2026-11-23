@@ -170,10 +170,11 @@ export class DeskPage {
       void this.ensurePalette()
       this.renderSearchResults()
     })
-    input.addEventListener('keydown', event => {
+    wrap.addEventListener('keydown', event => {
       if (event.key === 'Escape') {
         event.preventDefault()
         this.clearSearch()
+        input.focus()
       }
     })
 
@@ -197,7 +198,9 @@ export class DeskPage {
             typeof item === 'object' && item !== null &&
             ((item as PaletteItem).kind === 'thread' || (item as PaletteItem).kind === 'channel') &&
             typeof (item as PaletteItem).fiber_id === 'string' &&
-            (item as PaletteItem).fiber_id!.length > 0,
+            (item as PaletteItem).fiber_id!.length > 0 &&
+            typeof (item as PaletteItem).origin === 'string' &&
+            (item as PaletteItem).origin!.length > 0,
         )
         this.paletteFetchedAt = Date.now()
         if (!this.disposed) this.renderSearchResults()

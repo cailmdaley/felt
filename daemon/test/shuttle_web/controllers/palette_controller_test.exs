@@ -58,8 +58,13 @@ defmodule ShuttleWeb.PaletteControllerTest do
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   describe "Palette.build/2" do
-    test "includes Desk, Fleet Map (when pages.desk is enabled), and New thread… before focused actions" do
-      entries = [make_entry("alpha", runtime: %{phase: "working"}, project_dir: "/work/alpha")]
+    test "includes Desk, Fleet Map (when pages.desk is enabled), and New thread… before focused actions", %{
+      tmp_dir: dir
+    } do
+      entries = [
+        make_entry("alpha", runtime: %{phase: "working"}, project_dir: dir),
+        make_entry("remote-beta", runtime: %{phase: "working"}, project_dir: "/no/such/remote/path")
+      ]
 
       with_desk = Palette.build(entries, desk?: true, default_project_dir: "/stores/loom")
 
@@ -92,7 +97,10 @@ defmodule ShuttleWeb.PaletteControllerTest do
       without_desk = Palette.build(entries, desk?: false, fiber_id: FiberUid.for("alpha"))
       refute Enum.any?(without_desk.items, &(&1.kind in ["desk", "map"]))
       assert [%{id: "new_thread", kind: "new_thread"}, %{kind: "action"} | _] = without_desk.items
-      assert without_desk.focused.project_dir == "/work/alpha"
+      assert without_desk.focused.project_dir == dir
+
+      remote_focus = Palette.build(entries, desk?: false, fiber_id: FiberUid.for("remote-beta"))
+      assert remote_focus.focused.project_dir == nil
     end
 
     test "orders threads by attention with tempered then discarded at the bottom" do

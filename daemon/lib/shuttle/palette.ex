@@ -118,11 +118,18 @@ defmodule Shuttle.Palette do
     end
   end
 
-  defp default_project_dir do
-    case FeltStores.configured_stores() do
-      [first | _] -> non_empty(first) || System.user_home()
-      _ -> System.user_home()
-    end
+  @doc "First existing configured felt store directory, falling back to `System.user_home/0`."
+  @spec default_project_dir() :: String.t() | nil
+  def default_project_dir do
+    FeltStores.configured_stores()
+    |> Enum.find_value(fn dir ->
+      with trimmed when is_binary(trimmed) <- non_empty(dir),
+           true <- Shuttle.FS.dir?(trimmed) do
+        trimmed
+      else
+        _ -> nil
+      end
+    end) || System.user_home()
   end
 
   # ── Entry normalization ──
@@ -295,8 +302,15 @@ defmodule Shuttle.Palette do
       origin: entry.origin,
       column: entry.column,
       standing: get_in(entry.fiber, ["shuttle", "kind"]) == "standing",
-      project_dir: non_empty(get_in(entry.fiber, ["shuttle", "project_dir"]))
+      project_dir: local_project_dir(entry.fiber)
     }
+  end
+
+  defp local_project_dir(fiber) do
+    case non_empty(get_in(fiber, ["shuttle", "project_dir"])) do
+      nil -> nil
+      dir -> if Shuttle.FS.dir?(dir), do: dir, else: nil
+    end
   end
 
   defp focused_actions(nil), do: []

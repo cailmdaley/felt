@@ -695,6 +695,7 @@ describe('the desk page', () => {
       { id: `channel:${WORKSPACE_HOST}:${WORKSPACE_UID}`, kind: 'channel', title: 'Calibration Report', subtitle: `calibration-report · ${WORKSPACE_HOST}`, detail: 'channel', fiber_id: WORKSPACE_UID, origin: WORKSPACE_HOST },
       { id: `thread:${WORKSPACE_HOST}:thread-analysis`, kind: 'thread', title: 'Analysis Run', subtitle: `analysis · ${WORKSPACE_HOST}`, detail: 'live', fiber_id: 'thread-analysis', origin: WORKSPACE_HOST },
       { id: `thread:${WORKSPACE_HOST}:thread-archive`, kind: 'thread', title: 'Old Archive', subtitle: `archive · ${WORKSPACE_HOST}`, detail: 'tempered', fiber_id: 'thread-archive', origin: WORKSPACE_HOST },
+      { id: 'thread:orphan:no-origin', kind: 'thread', title: 'Orphan Archive', subtitle: 'orphan', detail: 'tempered', fiber_id: 'thread-orphan', origin: '' },
     ]
     vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
       const method = init.method ?? 'GET', headers = new Headers(init.headers)
@@ -840,14 +841,17 @@ describe('the desk page', () => {
     expect(said.hidden).toBe(false)
     expect(said.textContent).toBe('Started capture session…')
 
-    // Escape clears the query and closes the dropdown.
+    // Escape clears the query, closes the dropdown, and returns focus to input even when a result button is focused.
     input.value = 'calibration'
     input.dispatchEvent(new Event('input'))
     await settle()
     expect(results.hidden).toBe(false)
-    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    const firstResult = results.querySelector<HTMLButtonElement>('.pg-desk-search-item')!
+    firstResult.focus()
+    firstResult.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     expect(input.value).toBe('')
     expect(results.hidden).toBe(true)
+    expect(document.activeElement).toBe(input)
 
     // Palette cache refreshes after >15s.
     expect(requests.filter(each => each.url === '/api/v1/palette')).toHaveLength(1)

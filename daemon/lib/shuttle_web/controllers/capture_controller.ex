@@ -32,14 +32,14 @@ defmodule ShuttleWeb.CaptureController do
       if present?(raw_dir) and String.trim(raw_dir) != "" do
         raw_dir
       else
-        default_project_dir()
+        Shuttle.Palette.default_project_dir()
       end
 
     cond do
       not present?(prompt) or String.trim(prompt) == "" ->
         conn |> put_status(400) |> json(%{error: "prompt is required"})
 
-      not Shuttle.FS.dir?(project_dir) ->
+      not is_binary(project_dir) or not Shuttle.FS.dir?(project_dir) ->
         conn
         |> put_status(422)
         |> json(%{spawned: false, reason: "project_dir_missing", project_dir: project_dir})
@@ -83,13 +83,6 @@ defmodule ShuttleWeb.CaptureController do
           {:error, reason} ->
             conn |> put_status(500) |> json(%{spawned: false, reason: error_code(reason)})
         end
-    end
-  end
-
-  defp default_project_dir do
-    case Shuttle.FeltStores.configured_stores() do
-      [first | _] when is_binary(first) and first != "" -> first
-      _ -> System.user_home!()
     end
   end
 
