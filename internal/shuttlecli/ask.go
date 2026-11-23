@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/spf13/cobra"
 )
@@ -38,6 +39,10 @@ since it was dispatched.`,
 			defer unlock()
 			if err := a.ensureOwnedHere(f, args[0]); err != nil {
 				return err
+			}
+			if askClear && answeredBy != "" && block.Ask != nil && !a.answersAsk(st, f, answeredBy) {
+				fmt.Fprintf(a.env.Stdout, "question for %s stands: %s is not who it asks\n", args[0], answeredBy)
+				return nil
 			}
 			if !askClear {
 				if err := a.requireReviewReport(f); err != nil {
@@ -87,4 +92,18 @@ since it was dispatched.`,
 	askCmd.Flags().BoolVar(&noBoard, "no-board", false, "Clear without a family-board row")
 	_ = askCmd.Flags().MarkHidden("no-board")
 	return askCmd
+}
+
+// answersAsk reports whether a message from sender answers f's question. A
+// person (the human, or any sender named by a label) answers it; an agent,
+// named by its session address, answers only the question addressed to it,
+// which is its own thread's: another worker writing to the fiber leaves the
+// question for whoever it asks.
+func (a *app) answersAsk(st *felt.Storage, f *felt.Felt, sender string) bool {
+	by := a.boardMessageActor(sender)
+	if by.Session == "" {
+		return true
+	}
+	to := a.upOrHuman(st, f)
+	return by.Fiber != "" && to != nil && to.Fiber == by.Fiber
 }

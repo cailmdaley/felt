@@ -4262,8 +4262,19 @@ defmodule Shuttle.Poller do
       {:ok, state} ->
         case dispatch_prepared(state, fiber_id, runtime_key, uid, opts) do
           # Typed input answers the question through the worker's prompt
-          # hook, which records it as one "answered" row with the line.
+          # hook, which records it as one "answered" row with the line. An
+          # agent's line is headed as a message, which the hook passes over,
+          # so it answers here, and only a question addressed to that agent.
           {:pasted, result, state} ->
+            state =
+              case Keyword.get(opts, :answered_by) do
+                nil ->
+                  state
+
+                from ->
+                  elem(write_lifecycle(state, :clear_ask, fiber_id, ["--answered-by", from]), 1)
+              end
+
             {:reply, result, state}
 
           # A human's start answers the worker's question; a launch for the
@@ -4274,6 +4285,12 @@ defmodule Shuttle.Poller do
               cond do
                 Keyword.get(opts, :inbox, false) ->
                   {:ok, state}
+
+                Keyword.get(opts, :answered_by) ->
+                  write_lifecycle(state, :clear_ask, fiber_id, [
+                    "--answered-by",
+                    Keyword.get(opts, :answered_by)
+                  ])
 
                 Keyword.get(opts, :line_recorded, false) ->
                   write_lifecycle(state, :clear_ask, fiber_id, ["--no-board"])
@@ -4383,6 +4400,16 @@ defmodule Shuttle.Poller do
     end
   end
 
+  # An agent's line typed into a worker carries the header every message
+  # between sessions does (`messaging.Labeled`), so the receiver, and its
+  # prompt hook, read it as that agent's and not the human's.
+  defp labeled(message, opts) do
+    case Keyword.get(opts, :user_message_from) do
+      nil -> message
+      from -> "[from #{from}]\n" <> message
+    end
+  end
+
   defp dispatch_after_cut(state, fiber_id, runtime_key, uid, opts) do
     message = Keyword.get(opts, :user_message)
 
@@ -4399,7 +4426,7 @@ defmodule Shuttle.Poller do
       is_binary(paste_into) ->
         # Resume with a message on a live terminal worker: the message is the
         # human's next turn, typed into the conversation as they would type it.
-        case Shuttle.Terminal.paste(state.runner, paste_into, message) do
+        case Shuttle.Terminal.paste(state.runner, paste_into, labeled(message, opts)) do
           :ok -> {:pasted, {:ok, paste_into}, state}
           {:error, reason} -> {:reply, {:error, {:paste_failed, reason}}, state}
         end

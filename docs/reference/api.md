@@ -212,7 +212,8 @@ To listen to a new topic, capture its card, then pin Listen to that card with `P
 ### Worker delivery
 
 `POST /dispatch` accepts `{fiber_id, force?, ad_hoc?, resume_mode?,
-user_message?, images?, project_dir?, release_launch_reservation?, existing_only?, document?, carry?, fiber_path?}` (plus `origin` to forward).
+user_message?, from?, reply_to?, images?, project_dir?, release_launch_reservation?, existing_only?, document?, carry?, fiber_path?}` (plus `origin` to forward).
+`from` names the agent session that sent `user_message` (`reply_to` the fiber a reply reaches); without it the line is the human's.
 `document`, `carry` and `fiber_path` carry the caller's copy of the constitution, which the owner adopts before dispatching as `/lifecycle` resume does.
 adopt's line returns as `carried` in the response body; an adopt refusal answers 422 `{dispatched: false, reason: "adopt_refused", fiber_id, error}` without dispatching, and a carried request for a fiber the owner lacks answers 404 with `reason` and `error_code` both `fiber_not_found`, plus `host`, `fiber` and `error`.
 `images` is up to 8 `{name, data}` objects, `data` base64 PNG, JPEG, GIF or WebP, 20 MB in all; the body may reach 32 MB.

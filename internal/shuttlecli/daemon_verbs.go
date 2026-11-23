@@ -47,6 +47,9 @@ func (a *app) shuttleDispatchCmd() *cobra.Command {
 		Short: "Ask the owning daemon to dispatch a fiber now",
 		Long: `Routes a remote-owned fiber through this host's daemon to the owner.
 Use --message or --message-file to add a launch directive (the From User prompt block).
+Run from inside an agent session, the directive is that session's: it is
+headed with the sender, recorded as its message rather than the human's, and
+does not answer a question the fiber put to anyone else.
 
 A remote dispatch carries this host's copy of the constitution. An owner whose
 own copy already holds the constitution (its shuttle: block names the owner)
@@ -70,6 +73,13 @@ from this host's copy, which stays here, and then dispatches it.`,
 			}
 			if messageSet {
 				fields["user_message"] = message
+				// A session's directive is that agent's line, not the human's.
+				if caller := a.messageCaller(); caller != "" {
+					fields["from"] = caller
+					if replyTo := a.messageReplyTarget(caller); replyTo != "" {
+						fields["reply_to"] = replyTo
+					}
+				}
 			}
 			address := args[0]
 			if fiber, st, _, resolveErr := a.shuttleResolveFiberRef(args[0], true); resolveErr == nil {

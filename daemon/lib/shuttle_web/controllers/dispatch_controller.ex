@@ -18,7 +18,10 @@ defmodule ShuttleWeb.DispatchController do
   The kanban requeue carries the user's directive (`user_message`) and
   continuation mode (`resume_mode ∈ {"previous", "fresh", "continue"}` or
   absent) inline in the body; `Shuttle.Delivery.human/3` records the line and
-  starts the worker with it, as for a human line through `/deliver`.
+  starts the worker with it, as for a human line through `/deliver`. A
+  `from` (with `reply_to`) names the agent session that sent the directive
+  (`shuttle dispatch --message` run inside a session): the line is that
+  agent's, not the human's.
   `continue` lets the worker's state choose: typed into a live worker, else
   fresh after a clean handoff, else the session resumed or started cold. It is
   the board console's plain send. Both ride the dispatch call into the prompt at launch; the remote
@@ -78,6 +81,8 @@ defmodule ShuttleWeb.DispatchController do
          {:ok, message} <- Shuttle.DispatchImages.attach(message, Map.get(params, "images")) do
       result =
         Shuttle.Delivery.human(fiber_id, message,
+          from: normalize_text(params["from"]),
+          reply_to: normalize_text(params["reply_to"]),
           message_id: params["message_id"],
           resume_mode: normalize_resume_mode(Map.get(params, "resume_mode")),
           force: force or ad_hoc,

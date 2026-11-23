@@ -25,7 +25,11 @@ defmodule Shuttle.Delivery do
 
   @doc """
   The human's start of `fiber_id`, from `/dispatch` and `/deliver`, with
-  `text`, the human's line, or nil. A line is recorded first under
+  `text`, the human's line, or nil. `:from` names an agent that sent the line
+  through `/dispatch` instead (`:reply_to` is the fiber a reply reaches): its
+  line is recorded as that agent's message, headed with the sender, and
+  answers the fiber's question only when it is addressed to that agent
+  (`shuttle ask --clear --answered-by`). A line is recorded first under
   `:message_id` (`Shuttle.InboxRecord`, `:source` voice for a spoken one),
   so a repeated id transports nothing; then it is typed into the live worker
   or carried in a From User launch prompt. `:resume_mode` `"continue"` (the
@@ -35,16 +39,27 @@ defmodule Shuttle.Delivery do
   pass to `Poller.dispatch_fiber/2`.
   """
   def human(fiber_id, text, opts \\ []) do
+    from = opts[:from] || "human"
+
+    sender =
+      if from == "human",
+        do: [],
+        else: [user_message_from: opts[:reply_to] || from, answered_by: from]
+
     dispatch = fn mode ->
-      Poller.dispatch_fiber(fiber_id,
-        force: Keyword.get(opts, :force, true),
-        ad_hoc: Keyword.get(opts, :ad_hoc, true),
-        existing_only: Keyword.get(opts, :existing_only, false),
-        release_launch_reservation: Keyword.get(opts, :release_launch_reservation, false),
-        project_dir: opts[:project_dir],
-        resume_mode: mode,
-        user_message: text,
-        line_recorded: text != nil
+      Poller.dispatch_fiber(
+        fiber_id,
+        sender ++
+          [
+            force: Keyword.get(opts, :force, true),
+            ad_hoc: Keyword.get(opts, :ad_hoc, true),
+            existing_only: Keyword.get(opts, :existing_only, false),
+            release_launch_reservation: Keyword.get(opts, :release_launch_reservation, false),
+            project_dir: opts[:project_dir],
+            resume_mode: mode,
+            user_message: text,
+            line_recorded: text != nil
+          ]
       )
     end
 
@@ -57,7 +72,7 @@ defmodule Shuttle.Delivery do
 
     if text,
       do:
-        Shuttle.InboxRecord.submit(fiber_id, text, opts[:message_id], "human", launch,
+        Shuttle.InboxRecord.submit(fiber_id, text, opts[:message_id], from, launch,
           source: opts[:source]
         ),
       else: launch.(nil)

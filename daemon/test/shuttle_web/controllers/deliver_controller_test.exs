@@ -453,6 +453,78 @@ defmodule ShuttleWeb.DeliverControllerTest do
     assert no_board_clears.() == before + 1
   end
 
+  # Regression: a worker's `shuttle dispatch --message` was recorded and typed
+  # in as the human's line, so the board counted it as the human's turn and it
+  # cleared the question the fiber had put to the human.
+  test "an agent's dispatch directive is its message, not the human's line" do
+    begins = fn id ->
+      for {"shuttle", ["inbox", "record-begin" | _] = args} <- MockRunner.commands(),
+          id in args,
+          do: args
+    end
+
+    clears = fn ->
+      for {"shuttle", args} <- MockRunner.commands(), "--clear" in args, do: args
+    end
+
+    fiber = "tests/agent-directive"
+    MockRunner.set_fiber(fiber, make_fiber(fiber))
+
+    MockRunner.set_shuttle(
+      fiber,
+      oneshot_shuttle() <> "ask:\n  text: Which?\n  at: \"2026-11-15T10:00:00Z\"\n"
+    )
+
+    {:ok, _} = Poller.dispatch_fiber(fiber, force: true)
+    Env.put_app_env(:felt_runner, MessageRunner)
+    Env.put_app_env(:deliver_test_pid, self())
+    :sys.replace_state(Env.server!(Poller), fn state -> %{state | runner: MessageRunner} end)
+
+    directive = fn extra ->
+      api_conn()
+      |> post(
+        "/api/v1/dispatch",
+        Jason.encode!(
+          Map.merge(
+            %{"fiber_id" => fiber, "resume_mode" => "continue", "force" => true},
+            extra
+          )
+        )
+      )
+      |> json_response(200)
+    end
+
+    sender = "shuttle://elsewhere/claude/mill"
+    before = length(clears.())
+
+    directive.(%{
+      "user_message" => "From the Mill: rerun the journeys",
+      "message_id" => "agent-directive",
+      "from" => sender,
+      "reply_to" => "felt/mill"
+    })
+
+    assert_receive {:paste, text}, 30_000
+    assert text == "[from felt/mill]\nFrom the Mill: rerun the journeys"
+    assert [args] = begins.("agent-directive")
+    assert ["--from", sender] -- args == []
+    refute "--fiber" in args
+    # The agent answers only a question addressed to it: the CLI decides.
+    assert [clear] = Enum.drop(clears.(), before)
+    assert ["--answered-by", sender] -- clear == []
+
+    before = length(clears.())
+
+    directive.(%{"user_message" => "keep going", "message_id" => "human-directive"})
+
+    assert_receive {:paste, "keep going"}, 30_000
+    assert [args] = begins.("human-directive")
+    assert ["--from", "human"] -- args == []
+    assert "--fiber" in args
+    # The human's typed line answers through the worker's prompt hook.
+    assert Enum.drop(clears.(), before) == []
+  end
+
   test "a human line over the inbox limit is pasted" do
     fiber = "tests/human-long"
     put_constitution(fiber)

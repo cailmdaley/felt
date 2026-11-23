@@ -378,6 +378,44 @@ func TestShuttleRemoteDispatchRoutesAndCarriesMessageFile(t *testing.T) {
 	}
 }
 
+// Regression: a worker's dispatch directive reached the owner unattributed,
+// which recorded it as the human's line. From inside a session it names that
+// session; from a plain shell it names no one, and the owner reads the human.
+func TestDispatchMessageNamesTheCallingSession(t *testing.T) {
+	t.Parallel()
+	for _, session := range []string{"", "mill-session"} {
+		t.Run("session="+session, func(t *testing.T) {
+			t.Parallel()
+			env := remoteLifecycleEnv(t)
+			if session != "" {
+				env.Set("AI_AGENT", "pi")
+				env.Set("PI_SESSION_ID", session)
+			}
+			dir, storage := newStore(t)
+			seedShuttleRole(t, storage, "active", felt.StatusActive, remoteShuttleBlock(t.TempDir()), nil)
+			var bodies requestBodies
+			serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				bodies.record(t, r)
+				_, _ = w.Write([]byte(`{"dispatched":true}`))
+			}))
+			if _, _, err := executeIn(t, env, dir, "dispatch", "active", "--message", "From the Mill: rerun"); err != nil {
+				t.Fatal(err)
+			}
+			got := bodies.last()
+			from, named := got["from"]
+			if session == "" {
+				if named {
+					t.Fatalf("plain-shell dispatch named a sender: %#v", got)
+				}
+				return
+			}
+			if from != "shuttle://hub/pi/"+session {
+				t.Fatalf("dispatch from = %#v", got)
+			}
+		})
+	}
+}
+
 func TestRemoteLifecycleVerbsUseBoardOwnerRoute(t *testing.T) {
 	t.Parallel()
 	project := t.TempDir()

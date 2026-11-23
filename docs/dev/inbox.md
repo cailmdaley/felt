@@ -108,7 +108,7 @@ Either kind of inbox refuses a 129th pending entry with `queue_full`, except the
 Plain sends ask for a turn, `--wake` forces one and `--context-only` never starts one.
 Attachments are retained under the owner's `message-files/`; the entry contains file references rather than binary frames.
 A plain agent `/deliver` does the same, minting an id when the caller supplies none.
-The owner clears the fiber's outstanding ask when a due entry from a sender other than `shuttle` reaches its inbox, including a remote sender.
+When a due entry from a sender other than `shuttle` reaches its inbox, including a remote sender, the owner asks `shuttle ask --clear --answered-by <sender>` to clear the fiber's outstanding question. A person (`human`, or a sender named by a label) answers it; an agent session answers only the question addressed to it, its own thread's, so a message from any other worker leaves the question standing.
 A future entry clears nothing.
 Session-addressed messages, idle notices included, go to the session's own transport under a receipt in the data directory's `messages/`.
 A session message that asks for a turn goes to the session's native transport whatever its turn state: a busy Claude session's native inbox queues it behind the running turn, which takes it in at its next model call or, if none comes, runs it as the next turn, and a held, refused or failed send answers its sender in the receipt.
@@ -146,6 +146,7 @@ Only the call that writes the record may transport the line: typed terminal past
 Writing the record also writes the line's one family-board row, `brd-<id>`, whichever harness the worker runs: `answered` (`Q: … — A: …`) when the fiber has a question, else `human`; a repeated id writes none.
 Typed input leaves the worker's question to its prompt hook, which clears it and writes its row under the same identity, replacing the owner's: the hook takes the identity of a human record with the same text written to one of its session's fiber inboxes within the last hour. A line typed in the terminal has no such record and gets the hook's own row.
 A From User launch clears the question as any human start does, without a row of its own (`ask --clear --no-board`).
+`shuttle dispatch --message` run inside an agent session sends that session as `from` (with `reply_to`, the fiber a reply reaches): the line is recorded as that agent's message, with no family-board row, typed in or launched under a `[from <sender>]` or `From <sender>:` header, and it answers the question only as an inbox entry from that sender does.
 The record is settled delivered on paste or launch success, undeliverable on a definite refusal, and unknown on an ambiguous paste or a queued launch whose outcome is not known.
 Since it is unknown before the side effect, a daemon that dies before reporting the outcome never sends the line again, even if it died before typing.
 A line over the inbox's 64 KiB limit is transported whole and recorded cut short, as a thread result is.

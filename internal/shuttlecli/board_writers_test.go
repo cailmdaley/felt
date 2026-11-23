@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
 func readBoardRecords(t *testing.T, path string) []boardRecord {
@@ -361,6 +362,67 @@ func TestClosePostRefusals(t *testing.T) {
 			}
 			if mustRead(t, st, "hub/fit").Status != felt.StatusActive {
 				t.Fatal("refusal closed it")
+			}
+		})
+	}
+}
+
+// Regression: another worker's message to a fiber cleared the question that
+// fiber had put to the human. Only the person or the orchestrator a question
+// is addressed to answers it; a session that is neither leaves it standing.
+func TestAskClearAnsweredOnlyByTheAddressee(t *testing.T) {
+	ask := map[string]any{"text": "which layout?", "at": "2026-11-20T00:40:00Z"}
+	for _, tc := range []struct {
+		name, fiber, sender string
+		clears              bool
+	}{
+		{"human answers a top-level question", "top", "human", true},
+		{"a person named by label answers", "top", "Alice", true},
+		{"another worker leaves the human's question", "top", "shuttle://host/claude/sibling", false},
+		{"an unpaired session leaves it", "top", "shuttle://host/claude/stranger", false},
+		{"the orchestrator answers its thread's question", "hub/child", "shuttle://host/claude/orchestrator", true},
+		{"a sibling leaves the orchestrator's question", "hub/child", "shuttle://host/claude/sibling", false},
+		{"the human answers any question", "hub/child", "human", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := testEnv(t)
+			env.Set("SHUTTLE_HOST", "host")
+			env.Set("SHUTTLE_EVENTS", "")
+			events := filepath.Join(t.TempDir(), "events.jsonl")
+			env.Set("SHUTTLE_EVENTS_FILE", events)
+			dir, st := newStore(t)
+			env.Set("SHUTTLE_STORES", dir)
+			block := func(extra map[string]any) map[string]any {
+				b := map[string]any{"kind": "oneshot", "host": "host", "project_dir": t.TempDir()}
+				for k, v := range extra {
+					b[k] = v
+				}
+				return b
+			}
+			seedShuttleRole(t, st, "hub", felt.StatusActive, block(nil), nil)
+			seedShuttleRole(t, st, "hub/child", felt.StatusActive, block(map[string]any{"ask": ask}), nil)
+			seedShuttleRole(t, st, "top", felt.StatusActive, block(map[string]any{"ask": ask}), nil)
+			seedShuttleRole(t, st, "sibling", felt.StatusActive, block(nil), nil)
+			writeMessageIdentityLedger(t, env, []SessionProvenance{
+				{Fiber: mustRead(t, st, "hub").UID, Session: "orchestrator", Harness: "claude", Host: "host", Kind: "dispatch", At: 1},
+				{Fiber: mustRead(t, st, "sibling").UID, Session: "sibling", Harness: "claude", Host: "host", Kind: "dispatch", At: 1},
+			})
+			if _, stderr, err := executeIn(t, env, dir, "ask", tc.fiber, "--clear", "--answered-by", tc.sender); err != nil {
+				t.Fatalf("ask --clear: %v %s", err, stderr)
+			}
+			b, _, err := shuttle.BlockOf(mustRead(t, st, tc.fiber))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cleared := b.Ask == nil; cleared != tc.clears {
+				t.Fatalf("cleared = %v, want %v", cleared, tc.clears)
+			}
+			var rows []boardRecord
+			if _, err := os.Stat(events); err == nil {
+				rows = readBoardRecords(t, events)
+			}
+			if tc.clears != (len(rows) == 1 && rows[0].Kind == "answered") {
+				t.Fatalf("board rows %+v", rows)
 			}
 		})
 	}
