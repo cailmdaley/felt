@@ -231,7 +231,8 @@ func (a *app) nestCmd() *cobra.Command {
 under analysis gives analysis/covariance. Every wikilink, markdown link, and
 inputs.from whose path the move would break is rewritten, whether it names a
 moved fiber or would be captured by one, across the enclosing store too when
-this is a view; each fiber rewritten is named.
+this is a view; each fiber rewritten is named. A repository that a larger store
+links in is a view of it when git config felt.enclosing names that store.
 
 A <parent> that is an existing path in the store is used as spelled, even a
 directory with no fiber of its own (roles/ is always the top-level roles

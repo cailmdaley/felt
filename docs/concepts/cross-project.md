@@ -96,10 +96,28 @@ has its own reason to keep the files inside its perimeter.
 
 The store still sees the project as one of its subtrees, so `tree`, `find` and
 links from the store side behave as above. The project side, though, is an
-ordinary top-level store. Nothing in `<project>/.felt/` says a larger store
-points at it, so felt run there sees only the project: `find` does not reach
-the rest of the store and ids from elsewhere in it do not resolve. Use
-`felt -C ~/store` for anything cross-project.
+ordinary top-level store unless its checkout says which store links it in:
+
+```bash
+git -C <project> config felt.enclosing ~/store
+```
+
+The value is the enclosing store's project directory or its `.felt/`; `~`
+expands, and a relative path is taken from `<project>`. With it, felt run in
+`<project>` is a view of `~/store` exactly as if it had come in through the
+link: `find` reaches the whole store, ids from elsewhere in it resolve, and
+`rename`, `nest` and `unnest` rewrite the store's links to the moved fibers
+(`[[<project>/…]]`) along with the project's own, naming each fiber rewritten.
+felt checks that the named store really links this one in, finding the
+symlink inside it that resolves to `<project>/.felt` and taking the link's
+position as the prefix. A value that links nothing in is ignored with a
+warning, so a stale entry never makes an unrelated store this one's namespace.
+The key may be given several times (`git config --add`); the first store that
+links the project in is the enclosing one.
+
+It is a setting of one checkout, so a collaborator's clone of the same
+repository, without it, stays an ordinary top-level store. Without the setting,
+use `felt -C ~/store` for anything cross-project.
 
 The store's own git history records the symlink, not the fibers behind it; the
 project's fibers are versioned wherever the project versions them. When that is

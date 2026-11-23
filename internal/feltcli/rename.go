@@ -18,7 +18,9 @@ func (a *app) renameCmd() *cobra.Command {
 		Use:   "rename <id> <new-slug>",
 		Short: "Change a fiber's basename, carrying descendants and links",
 		Long: `Renames the directory and its fiber document, preserving the intrinsic id.
-References are rewritten as with nest, including across the enclosing store.
+References are rewritten as with nest, including across the enclosing store:
+the store this one is linked into, or, in a repository a larger store links
+in, the store named by git config felt.enclosing.
 The new slug is one path segment following the slug convention: lowercase
 letters and digits joined by single hyphens; any other is refused with its
 conforming form. The fiber being renamed may have any slug. Guessed ids and

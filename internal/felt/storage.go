@@ -215,10 +215,20 @@ func AsExternalReference(err error) (*ExternalReference, bool) {
 // symlink hop at a time (see enclosingStore), so a mount point that is itself
 // a symlink into another repository — `~/loom/.felt/science` linking to
 // `~/science/.felt` — still answers the loom, where the project's link
-// points. The result is memoized: resolution consults it once per query.
+// points.
+//
+// A store no link leads out of — the repository's own `.felt` that a larger
+// store links in — has an enclosing store only when its repository names one
+// in felt.enclosing and that store mounts it (see configuredEnclosingStore);
+// it is then a view exactly as if opened through the mount. The result is
+// memoized: resolution consults it once per query.
 func (s *Storage) EnclosingStore() (root string, prefix string, ok bool) {
 	s.enclosingOnce.Do(func() {
-		if root, prefix, ok := enclosingStore(s.root); ok {
+		root, prefix, ok := enclosingStore(s.root)
+		if !ok {
+			root, prefix, ok = configuredEnclosingStore(s.root)
+		}
+		if ok {
 			s.external = &ExternalRefs{root: root, prefix: prefix, cache: map[string]string{}, via: map[string]resolution{}}
 		}
 	})
