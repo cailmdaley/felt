@@ -10,6 +10,12 @@ import { mountPage } from './mount.js'
 import { deskHref, parsePageRoute, threadHref } from './route.js'
 import { AUTO_ADVANCE_IDLE_MS, ThreadPage } from './ThreadPage.js'
 
+/** Waits in real time: a viewer's first dynamic import takes as long as the machine is loaded. */
+const waitUntil = async (fn: () => boolean): Promise<void> => {
+  const until = performance.now() + 4_000
+  while (!fn() && performance.now() < until) await settle()
+}
+
 describe('a page\'s address', () => {
   it('is its path\'s one segment when served, and the page parameter over file://', () => {
     expect(parsePageRoute({ protocol: 'http:', pathname: '/thread', search: '?f=01KV@umber&in=rex' }))
@@ -47,6 +53,7 @@ describe('the thread page', () => {
   let usageResponse: Record<string, unknown> | null
   let voiceResponse: Record<string, unknown>
   let example: ReturnType<typeof workspaceExample>
+  let transitionError: string | undefined
   let feeds: PageFeed[]
   let pages: ThreadPage[]
 
@@ -55,6 +62,7 @@ describe('the thread page', () => {
     vi.setSystemTime(now)
     const store = new Map<string, string>()
     vi.stubGlobal('localStorage', { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k), clear: () => store.clear() })
+    transitionError = undefined
     example = workspaceExample(now)
     addThreadFixtures(example, now)
     const composite = () => servedFeed(example.feed, now)
@@ -106,6 +114,7 @@ describe('the thread page', () => {
         ])
       }
       if (url === '/api/v1/lifecycle' && method === 'POST') return json({ ok: true })
+      if (url === '/api/v1/transition' && method === 'POST') return transitionError ? new Response(JSON.stringify({ error: transitionError }), { status: 409, headers: { 'Content-Type': 'application/json' } }) : json({ invoked: true })
       if (url === '/api/v1/felt-edit' && method === 'POST') return json({ ok: true })
       if (url === '/api/v1/go' && method === 'POST') return json(go)
       if (url === '/api/v1/attach' && method === 'POST') return json({ attached: true, session: 'resumed-session' })
@@ -145,7 +154,7 @@ describe('the thread page', () => {
     expect(all).toContain('thread-draft')
     expect(all).not.toContain('thread-archive')
     expect(all).not.toContain('thread-discard')
-    // Its head shows its pages but no lifecycle verbs, and no edits, which only the board's reader bakes.
+    // Its head shows its pages, its lifecycle acts standing in the bar above, and no edits, which only the board's reader bakes.
     expect([...page.el.querySelectorAll<HTMLElement>('.ov-tools [data-part]')].map(each => each.dataset.part)).not.toContain('edits')
     expect(page.el.querySelector('.ws-fiber-acts')).toBeNull()
     expect(requests.map(each => new URL(each.url, 'http://d').pathname).filter(path => /voice\/target|attach|terminal/.test(path))).toStrictEqual([])
@@ -672,11 +681,12 @@ describe('the thread page', () => {
     expect(reopenAttach).toHaveLength(1)
     expect(JSON.parse(reopenAttach[0].body!)).toEqual({ session: '11111111-1111-4111-8111-111111111111', shuttle_host: WORKSPACE_HOST })
 
-    // 3. Draft with no session (thread-draft): console button stays hidden and mode bar stays hidden when in=rex.
+    // 3. Draft with no session (thread-draft): console button stays hidden, and the bar stands for the thread's acts when in=rex.
     const { page: draftPage } = await open(`?f=thread-draft@${WORKSPACE_HOST}&in=rex`)
     const draftConsole = draftPage.el.querySelector<HTMLAnchorElement>('[data-part="console"]')!
     expect(draftConsole.hidden).toBe(true)
-    expect(draftPage.el.querySelector<HTMLElement>('.pg-modes')!.hidden).toBe(true)
+    expect(draftPage.el.querySelector<HTMLElement>('.pg-modes')!.hidden).toBe(false)
+    expect(draftPage.el.querySelector<HTMLElement>('.pg-modes > .pg-actions')!.hidden).toBe(false)
 
     // 4. Standalone phone (!inRex): ← Desk button is visible and navigates to /desk; Console stays visible across Posts, Files, and Changes and updates immediately when destination changes.
     vi.stubGlobal('matchMedia', () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
@@ -707,9 +717,6 @@ describe('the thread page', () => {
 
   it('mounts the baked Changes view lazily on non-root threads with projectDir, sends reviews to the live worker, and disposes cleanly', async () => {
     vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} unobserve() {} })
-    const waitUntil = async (fn: () => boolean): Promise<void> => {
-      for (let i = 0; i < 100 && !fn(); i++) await settle()
-    }
     const bundle = {
       version: 2,
       title: 'Response fit update',
@@ -799,9 +806,6 @@ describe('the thread page', () => {
 
   it('opens a clicked .change.json sent file or tapestry link in Changes mode instead of opening raw JSON via window.open', async () => {
     vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} unobserve() {} })
-    const waitUntil = async (fn: () => boolean): Promise<void> => {
-      for (let i = 0; i < 100 && !fn(); i++) await settle()
-    }
     const windowOpen = vi.spyOn(window, 'open').mockReturnValue(null)
     const makeBundle = (title: string) => JSON.stringify({
       version: 2,
@@ -873,6 +877,126 @@ describe('the thread page', () => {
     expect(changesPane.querySelector('.pg-changes-name')!.textContent).toBe('pr-7.change.json')
     expect(requests.some(req => decodeURIComponent(req.url).includes('/pr-7.change.json'))).toBe(true)
   })
+
+  describe('its lifecycle acts', () => {
+    type Row = { fiber: Record<string, unknown> & { shuttle: Record<string, unknown> }; runtime?: Record<string, unknown> | null }
+    const raw = (uid: string): Row => (example.feed.fibers as unknown as Row[]).find(each => each.fiber.uid === uid)!
+    /** thread-review as a standing constitution whose run ended on a question, with no worker. */
+    const standingAsk = (): void => {
+      const row = raw('thread-review')
+      Object.assign(row.fiber, { status: 'active', tempered: undefined, horizon: undefined })
+      Object.assign(row.fiber.shuttle, { kind: 'standing', schedule: { expr: '0 9 * * *', tz: 'UTC' }, ask: { text: 'Keep the cut?', at: new Date(now).toISOString() } })
+      row.runtime = null
+    }
+    const chord = (code: string, target: EventTarget = document): KeyboardEvent => {
+      // Option changes the character: ⌥⌘T types †.
+      const event = new KeyboardEvent('keydown', { key: '†', code, metaKey: true, altKey: true, bubbles: true, cancelable: true })
+      target.dispatchEvent(event)
+      return event
+    }
+    const bare = (key: string, target: EventTarget = document): void => { target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) }
+    const sent = () => posts().filter(each => /transition|lifecycle|dispatch$/.test(each.url)).map(each => [each.url, JSON.parse(each.body!) as Record<string, unknown>] as const)
+    const said = (page: ThreadPage): string => page.el.querySelector('.pg-said')!.textContent!
+    const face = (page: ThreadPage): HTMLButtonElement => page.el.querySelector<HTMLButtonElement>('.pg-actions .ws-verb-face')!
+    const menu = async (page: ThreadPage): Promise<Array<[string, string | null]>> => {
+      page.el.querySelector<HTMLButtonElement>('.pg-actions .ws-verb-more')!.click()
+      for (let i = 0; i < 3; i++) await settle()
+      return [...document.querySelectorAll<HTMLElement>('.kbn-verb-menu [data-action-index]')].map(item => [item.getAttribute('aria-label')!, item.getAttribute('aria-keyshortcuts')])
+    }
+    const reads = (): number => requests.filter(each => each.url.startsWith('/api/v1/fibers/composite')).length
+
+    it('a standing run waiting with no worker leads with Temper run, whose button and ⌥⌘T temper it and read the board again', async () => {
+      standingAsk()
+      const { page } = await open(`?f=thread-review@${WORKSPACE_HOST}&in=rex`)
+      expect(page.el.querySelector<HTMLElement>('.pg-modes')!.hidden).toBe(false)
+      expect(face(page).textContent).toBe('Temper run')
+      const before = reads()
+      face(page).click()
+      for (let i = 0; i < 4; i++) await settle()
+      expect(sent()).toStrictEqual([['/api/v1/transition', { fiber_id: raw('thread-review').fiber.id, target: 'tempered', origin: WORKSPACE_HOST }]])
+      expect(said(page)).toBe('Run tempered: review')
+      expect(reads()).toBe(before + 1)
+      expect(chord('KeyT').defaultPrevented).toBe(true)
+      for (let i = 0; i < 4; i++) await settle()
+      expect(sent()).toHaveLength(2)
+    })
+
+    it('lists every act with its keys, and Clear question withdraws the ask', async () => {
+      standingAsk()
+      const { page } = await open(`?f=thread-review@${WORKSPACE_HOST}`)
+      expect(page.el.querySelector('.pg-nav > .pg-actions')).not.toBeNull()
+      expect(await menu(page)).toStrictEqual([
+        ['Temper run', '⌥⌘T t'], ['Pause schedule', '⌥⌘S s'], ['Retire', '⌥⌘X x'], ['Clear question', null], ['New session', '⌥⌘N'],
+      ])
+      document.querySelectorAll<HTMLElement>('.kbn-verb-menu [data-action-index]')[3].click()
+      for (let i = 0; i < 6; i++) await settle()
+      expect(sent()).toStrictEqual([['/api/v1/lifecycle', { action: 'ask-clear', fiber: raw('thread-review').fiber.id, origin: WORKSPACE_HOST }]])
+    })
+
+    it.each([['active', 'rest'], ['open', 'resume']])('s on an %s schedule writes %s at once, with no popover', async (status, action) => {
+      standingAsk()
+      raw('thread-review').fiber.status = status
+      await open(`?f=thread-review@${WORKSPACE_HOST}`)
+      bare('s')
+      await settle()
+      expect(document.querySelector('.kbn-rest-popover')).toBeNull()
+      expect(sent()).toStrictEqual([['/api/v1/lifecycle', { action, fiber: raw('thread-review').fiber.id, origin: WORKSPACE_HOST, actor: 'board' }]])
+    })
+
+    it('⌥⌘S then Enter rests a oneshot with no date, from inside the message box too', async () => {
+      const { page } = await open(`?f=thread-review@${WORKSPACE_HOST}`)
+      const box = page.el.querySelector<HTMLElement>('.ws-worker-message')!
+      chord('KeyS', box)
+      await settle()
+      const panel = document.querySelector<HTMLElement>('.kbn-rest-popover')!
+      expect(panel.querySelector('.kbn-rest-headline')!.textContent).toMatch(/^No date/)
+      // Its own keys are the dialog's while it is open.
+      bare('x', panel)
+      bare('Enter', panel)
+      for (let i = 0; i < 4; i++) await settle()
+      expect(sent()).toStrictEqual([['/api/v1/lifecycle', { action: 'rest', fiber: raw('thread-review').fiber.id, origin: WORKSPACE_HOST, until: '', actor: 'board' }]])
+    })
+
+    it('bare keys act outside the message box only, and only where the verb is offered', async () => {
+      const { page } = await open(`?f=thread-review@${WORKSPACE_HOST}`)
+      const box = page.el.querySelector<HTMLElement>('.ws-worker-message')!
+      for (const key of ['t', 's', 'a', 'x']) bare(key, box)
+      // Work already awaiting review is not closed for review again: a key is nothing, a chord says so.
+      bare('a')
+      await settle()
+      expect([sent(), document.querySelector('.kbn-rest-popover')]).toStrictEqual([[], null])
+      chord('KeyA')
+      expect(said(page)).toBe('review does not offer that now.')
+      bare('x')
+      for (let i = 0; i < 4; i++) await settle()
+      expect(sent().map(([, body]) => body.target)).toStrictEqual(['composted'])
+    })
+
+    it('asks before stopping a live worker, and ⌥⌘N before cutting one', async () => {
+      const confirm = vi.spyOn(window, 'confirm').mockClear().mockReturnValue(false)
+      await open(`?f=thread-analysis@${WORKSPACE_HOST}`)
+      chord('KeyA'); chord('KeyN')
+      await settle()
+      expect([confirm.mock.calls.length, sent()]).toStrictEqual([2, []])
+      confirm.mockReturnValue(true)
+      chord('KeyN')
+      for (let i = 0; i < 4; i++) await settle()
+      expect(sent()).toMatchObject([['/api/v1/dispatch', { fiber_id: raw('thread-analysis').fiber.id, origin: WORKSPACE_HOST, force: true, resume_mode: 'fresh' }]])
+      chord('KeyA')
+      for (let i = 0; i < 4; i++) await settle()
+      expect(sent().at(-1)![1]).toMatchObject({ target: 'awaitingReview' })
+    })
+
+    it('says why the daemon refused, and writes one act at a time', async () => {
+      transitionError = 'the store is wedged'
+      const { page } = await open(`?f=thread-review@${WORKSPACE_HOST}`)
+      bare('t'); bare('t')
+      for (let i = 0; i < 4; i++) await settle()
+      expect(sent()).toHaveLength(1)
+      expect(said(page)).toContain('Temper failed on review')
+      expect(said(page)).toContain('the store is wedged')
+    })
+  })
 })
 
 describe('the desk page', () => {
@@ -918,6 +1042,7 @@ describe('the desk page', () => {
         })
       }
       if (url === '/api/v1/go' && method === 'POST') return json(goAnswer)
+      if (/^\/api\/v1\/(transition|lifecycle)$/.test(url) && method === 'POST') return json({ ok: true })
       return new Response('{}', { status: 404 })
     }))
   })
@@ -990,6 +1115,45 @@ describe('the desk page', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     await settle()
     expect(posts().map(each => each.url)).toStrictEqual(['/api/v1/go'])
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('lifecycle keys act on the selected row, bare or as ⌥⌘ chords, and on none when no row is selected', async () => {
+    const { page } = await openDesk('?in=rex')
+    const press = (init: KeyboardEventInit): void => { document.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })) }
+    press({ key: 't' })
+    press({ key: '†', code: 'KeyT', metaKey: true, altKey: true })
+    await settle()
+    expect(posts()).toStrictEqual([])
+    const line = page.el.querySelector<HTMLElement>('[data-card-uid="thread-review"]')!
+    line.tabIndex = -1
+    line.focus()
+    press({ key: 't' })
+    for (let i = 0; i < 4; i++) await settle()
+    expect(posts().map(each => [each.url, JSON.parse(each.body!).target])).toStrictEqual([['/api/v1/transition', 'tempered']])
+    press({ key: 'ß', code: 'KeyS', metaKey: true, altKey: true })
+    await settle()
+    const panel = document.querySelector<HTMLElement>('.kbn-rest-popover')!
+    panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    for (let i = 0; i < 4; i++) await settle()
+    expect(JSON.parse(posts().at(-1)!.body!)).toMatchObject({ action: 'rest', until: '', origin: WORKSPACE_HOST })
+  })
+
+  it('a right-click on a row opens its acts and leaves the page where it is', async () => {
+    const { page, navigate } = await openDesk()
+    const line = page.el.querySelector<HTMLElement>('[data-card-uid="thread-review"]')!
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 })
+    line.dispatchEvent(event)
+    for (let i = 0; i < 3; i++) await settle()
+    expect(event.defaultPrevented).toBe(true)
+    const items = [...document.querySelectorAll<HTMLElement>('.kbn-verb-menu [data-action-index]')]
+    expect(items.map(item => item.getAttribute('aria-label'))).toStrictEqual(['Rest', 'Temper', 'Discard', 'New session'])
+    // A read that lands while the menu is open leaves the row it hangs from.
+    page.render()
+    expect(line.isConnected).toBe(true)
+    items[2].click()
+    for (let i = 0; i < 6; i++) await settle()
+    expect(posts().map(each => [each.url, JSON.parse(each.body!).target])).toStrictEqual([['/api/v1/transition', 'composted']])
     expect(navigate).not.toHaveBeenCalled()
   })
 

@@ -35,6 +35,8 @@ export class PageFeed {
   private timer: number | undefined
   private sendsTimer: number | undefined
   private stopped = false
+  /** The latest read; an earlier one that answers after it is dropped. */
+  private reading = 0
   private readonly listeners = new Set<() => void>()
   private readonly base: string
   private readonly own: { uid: string; host: string } | undefined
@@ -72,6 +74,9 @@ export class PageFeed {
     return this.own && cardNamed(this.cards, this.own.uid, this.own.host)
   }
 
+  /** Reads the board again now: something this page wrote has landed. */
+  refresh(): void { this.wake() }
+
   private readonly onVisibility = (): void => {
     this.wake()
     if (this.own) this.pollSends(true)
@@ -98,14 +103,18 @@ export class PageFeed {
   }
 
   private async read(): Promise<void> {
+    const reading = ++this.reading
     try {
       const headers = new Headers()
       if (this.etag) headers.set('If-None-Match', this.etag)
       const res = await daemonFetch(`${this.base}/api/v1/fibers/composite`, { headers })
+      if (reading !== this.reading) return
       if (res.status !== 304) {
         if (!res.ok) throw new Error(`The daemon answered ${res.status}`)
+        const body: unknown = await res.json()
+        if (reading !== this.reading) return
         this.etag = res.headers.get('ETag')
-        const all = boardCards(buildKanbanResponseFromComposite(parseCompositeFeed(await res.json())))
+        const all = boardCards(buildKanbanResponseFromComposite(parseCompositeFeed(body)))
         const own = this.own && cardNamed(all, this.own.uid, this.own.host)
         this.cards = all.filter(card => card === own || !archived(card))
         this.index = new ThreadIndex(this.cards)
@@ -116,6 +125,7 @@ export class PageFeed {
       if (card) { const root = this.index.rootOf(card); this.board.read([root.uid ?? root.id]) }
       else if (!this.own) this.board.readBoard()
     } catch (error) {
+      if (reading !== this.reading) return
       this.failure = isDaemonBooting(error) ? 'The daemon is starting…' : daemonErrorMessage(error)
     }
     this.changed()

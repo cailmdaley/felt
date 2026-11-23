@@ -45,9 +45,16 @@ path, so the bundle's relative asset base holds:
   it (`FamilyPage`): its head, its last post, its live sub-threads and its
   tapestry or sent files, unfolding in place. Its feed polls
   `/api/v1/fibers/composite` with `If-None-Match` only while the page is
-  visible, and lists no tempered or discarded fiber but its own. Its head
-  draws no lifecycle verbs.
+  visible, and lists no tempered or discarded fiber but its own. Its
+  top bar holds the thread's lifecycle acts beside the Console, whether or not
+  a worker is live: the verb that fits its state, and a `⋯` menu of every act
+  it offers, Clear question and New session among them. `t`, `s`, `a` and `x`
+  (outside a text field) and `⌥⌘T`, `⌥⌘S`, `⌥⌘A`, `⌥⌘X` and `⌥⌘N` (anywhere)
+  perform them. They write at once, with no undo window, after asking about a
+  worker they would stop (`pages/pageActions.ts`).
 - **`/desk`** shows the host's Desk page in Rex when `pages.desk` is enabled.
+  The same keys act on its selected row, and a right-click on a row opens the
+  same menu.
 - **`/map`** shows the Fleet Map terrain view over `GET /api/v1/map/terrain`
   and opens threads through `POST /api/v1/go`. In Rex with `pages.desk`
   enabled, `RexLayout` opens a `Fleet Map` tab beside `Desk` on first creation

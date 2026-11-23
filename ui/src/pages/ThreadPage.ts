@@ -23,6 +23,7 @@ import { changeKey, docKey, fiberKey, isExternalHref, linkedFile, parseDocKey, t
 import type { FiberActs } from '../board/workspace/Dock.js'
 import { FamilyPage, type ViewFeeds } from '../board/workspace/FamilyPage.js'
 import { headerIcon } from '../board/workspace/headerIcon.js'
+import { labelVerb, leadVerb, lifecycleVerbsFor, verbSpec } from '../board/workspace/lifecycleVerbs.js'
 import { Leads } from '../board/workspace/leads.js'
 import { ListenControl } from '../board/workspace/ListenControl.js'
 import { fetchTranscriptUsage, paintUsage, warmUntil, type TranscriptUsage } from '../board/workspace/transcriptUsage.js'
@@ -31,6 +32,7 @@ import { WorkerActions, type StartWorker } from '../board/workspace/workerAction
 import '../board/workspace/dock.css'
 import type { PageFeed } from './feed.js'
 import { go } from './go.js'
+import { PageActions, pageActKeys, pageActLabel, pageActsFor } from './pageActions.js'
 import { deskHref, threadHref, type PageRoute } from './route.js'
 import { ThreadSettings } from './ThreadSettings.js'
 
@@ -84,8 +86,10 @@ const openFloating = (url: string): void => {
  * opens in a window of its own. For any constitution, the board's
  * docked console footer sits flush at the bottom edge across both modes,
  * holding its context/cache warmth meter, Listen mic control and voice strip,
- * and {@link WorkerActions} (message box, Send/Resume, and New session). It
- * moves no history or swipe, and its head draws no lifecycle verbs.
+ * and {@link WorkerActions} (message box, Send/Resume, and New session). Beside
+ * the Console in its top bar stand its lifecycle acts ({@link PageActions}),
+ * with a live worker or none: the verb that fits its state, a menu of them
+ * all, and their keys. It moves no history or swipe.
  */
 export class ThreadPage {
   readonly el = document.createElement('main')
@@ -113,6 +117,8 @@ export class ThreadPage {
   private readonly cacheFact = document.createElement('span')
   private readonly said = document.createElement('p')
   private readonly consoleAct: FiberActs
+  private readonly acts: PageActions
+  private readonly verbs: FiberActs
   private readonly family: FamilyPage
   private readonly feed: PageFeed
   private readonly opts: ThreadPageOptions
@@ -165,6 +171,8 @@ export class ThreadPage {
     this.status.className = 'pg-status'
 
     this.consoleAct = this.buildConsole(() => this.feed.card())
+    this.acts = new PageActions({ base: opts.base, target: () => this.feed.card(), say: text => this.say(text), changed: () => this.feed.refresh() })
+    this.verbs = this.buildVerbs(() => this.feed.card())
 
     this.nav.className = 'pg-nav'
     this.nav.setAttribute('aria-label', 'Thread navigation')
@@ -176,7 +184,7 @@ export class ThreadPage {
     this.navTitle.className = 'pg-bar-title'
     this.nav.hidden = opts.route.inRex
     if (!opts.route.inRex) {
-      this.nav.append(this.backBtn, this.navTitle, this.consoleAct.el)
+      this.nav.append(this.backBtn, this.navTitle, this.verbs.el, this.consoleAct.el)
     }
 
     this.modes.className = 'pg-modes'
@@ -205,7 +213,7 @@ export class ThreadPage {
     this.modeTabs.append(this.postsBtn, this.filesBtn, this.changesBtn)
     this.modes.append(this.modeTabs)
     if (opts.route.inRex) {
-      this.modes.append(this.consoleAct.el)
+      this.modes.append(this.verbs.el, this.consoleAct.el)
     }
 
     this.postsPane.className = 'pg-posts'
@@ -301,14 +309,15 @@ export class ThreadPage {
       this.navTitle.textContent = slug(card)
       this.navTitle.title = card.name
       this.consoleAct.paint()
-      const hasConsole = !this.consoleAct.el.hidden
+      this.verbs.paint()
+      const hasActs = !this.consoleAct.el.hidden || !this.verbs.el.hidden
       const hasTabs = hasPostsMode || hasChangesMode
 
       this.postsBtn.hidden = !hasPostsMode
       this.filesBtn.hidden = !hasTabs
       this.changesBtn.hidden = !hasChangesMode
       this.modeTabs.hidden = !hasTabs
-      this.modes.hidden = this.opts.route.inRex ? (!hasTabs && !hasConsole) : !hasTabs
+      this.modes.hidden = this.opts.route.inRex ? (!hasTabs && !hasActs) : !hasTabs
       this.postsBtn.setAttribute('aria-selected', String(this.mode === 'posts'))
       this.filesBtn.setAttribute('aria-selected', String(this.mode === 'files'))
       this.changesBtn.setAttribute('aria-selected', String(this.mode === 'changes'))
@@ -345,6 +354,7 @@ export class ThreadPage {
       this.navTitle.textContent = ''
       this.navTitle.title = ''
       this.consoleAct.paint()
+      this.verbs.paint()
       this.modes.hidden = true
       this.postsPane.hidden = true
       this.family.el.hidden = true
@@ -364,6 +374,7 @@ export class ThreadPage {
     window.removeEventListener(CONVERSATION_OPENING_CHANGED, this.onOpeningChanged)
     this.unsubscribe()
     this.consoleAct.dispose()
+    this.acts.dispose()
     this.disposeChanges()
     this.stream.dispose()
     this.listen?.dispose()
@@ -729,6 +740,59 @@ export class ThreadPage {
     const destination = resolveDestination(conversationDestinations(card, device, this.openWorker))
     if (device.desktop && card.sessionUuid && !hasLiveWorker(card) && destination?.id !== conversationOpening()) return { reopen: true }
     return destination ? { reopen: false, destination } : null
+  }
+
+  /** The fiber's lifecycle acts in the header bar, drawn as the board draws them: the verb that fits its state, and a menu of them all. */
+  private buildVerbs(target: () => KanbanCard | undefined): FiberActs {
+    const el = document.createElement('span')
+    el.className = 'pg-actions ws-acts-verbs'
+    el.dataset.part = 'verbs'
+    el.setAttribute('role', 'group')
+    const face = document.createElement('button')
+    face.type = 'button'
+    const more = document.createElement('button')
+    more.type = 'button'
+    more.className = 'ws-verb-more'
+    more.innerHTML = headerIcon('actions')
+    more.setAttribute('aria-haspopup', 'menu')
+    more.setAttribute('aria-expanded', 'false')
+    el.append(face, more)
+    const lead = (card: KanbanCard) => leadVerb(card, lifecycleVerbsFor(card, true))
+    let drawn = ''
+    face.addEventListener('click', () => {
+      const card = target(), verb = card && lead(card)
+      if (verb) this.acts.run(card, verb)
+    })
+    more.addEventListener('click', () => {
+      const card = target()
+      if (!card) return
+      const box = el.getBoundingClientRect()
+      this.acts.menu(card, more, { x: box.left, y: box.bottom + 4 })
+    })
+    const paint = (): void => {
+      const card = target(), offered = card ? pageActsFor(card) : []
+      el.hidden = !offered.length
+      if (!card || !offered.length) return
+      const who = slug(card), verb = lead(card)
+      el.setAttribute('aria-label', `${who}'s actions`)
+      const words = offered.map(act => `${pageActLabel(card, act)}${pageActKeys(act) ? ` (${pageActKeys(act)})` : ''}`).join(', ')
+      more.title = `Actions: ${words}`
+      more.setAttribute('aria-label', `Actions for ${who}: ${words}`)
+      face.hidden = !verb
+      if (!verb) return
+      const spec = verbSpec(verb, card)
+      face.className = `ws-verb-face ${spec.cls}`
+      labelVerb(face, verb, card, who)
+      face.title = `${spec.label} ${who} (${pageActKeys(verb)})`
+      if (drawn === `${spec.icon}:${spec.label}`) return
+      drawn = `${spec.icon}:${spec.label}`
+      face.innerHTML = headerIcon(spec.icon)
+      const word = document.createElement('span')
+      word.className = 'ws-verb-word'
+      word.textContent = spec.label
+      face.append(word)
+    }
+    return { el, paint, dispose: () => {} }
   }
 
   /** Console button in the thread header bar, visible across Posts, Tapestry/Files, and Changes. */

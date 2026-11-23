@@ -11,7 +11,7 @@ The board owns actions, presentation, the gestures that ask for a popup, and its
 
 | Widget | Where | SDK entry |
 |---|---|---|
-| Action, row and conversation menus, the Channels rail's entry and channel menu | `board/conversationMenu.ts`, `views/ChannelsView.ts` | `@ui-sdk/web/menu` |
+| Action, row and conversation menus, the Channels rail's entry and channel menu, the pages' lifecycle menu | `board/conversationMenu.ts`, `views/ChannelsView.ts`, `pages/pageActions.ts` | `@ui-sdk/web/menu` |
 | A list of files (a count's, an unfolded file's bar, the phone's top bar) | `board/elements/filePreview.ts` (`openFileList`, through `openActionMenu`) | `@ui-sdk/web/menu` |
 | Channels' icon controls (rail, channel menu, back, close), each named by its tooltip | `views/ChannelsView.ts` | `@ui-sdk/web/tooltip` |
 | Channels rail reordering (mouse drag, touch hold-then-drag, Alt+↑/↓) | `board/channelRail.ts` | core `createReorder` on a `definePrimitive` instance |

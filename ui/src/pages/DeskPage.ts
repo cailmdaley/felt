@@ -7,8 +7,10 @@ import { keyIntent } from '../board/keymap.js'
 import { onMobileChange } from '../board/mobile.js'
 import { slug } from '../board/threadOutline.js'
 import { cardNamed } from '../board/threads.js'
+import { blockingDialogOpen } from '../board/views/ViewRegistry.js'
 import type { PageFeed } from './feed.js'
 import { go } from './go.js'
+import { PageActions, pageActsFor } from './pageActions.js'
 import { threadHref, type PageRoute } from './route.js'
 
 export interface DeskPageOptions {
@@ -36,7 +38,9 @@ const MAX_SEARCH_RESULTS = 30
  * Working, Awaiting review) over a shelf of three (Drafts, Resting, Roles &
  * standing), with no depth, workspace, tabs, voice or Rex following. Clicking
  * a card or waiting line calls `POST /api/v1/go` when `in=rex`, and otherwise
- * navigates to that fiber's `/thread` page. Tempered and discarded fibers are
+ * navigates to that fiber's `/thread` page. The selected row answers to the
+ * lifecycle keys, and a right-click on any row opens its lifecycle acts
+ * ({@link PageActions}). Tempered and discarded fibers are
  * omitted by the feed; outside Rex, a compact search bar backed by
  * `/api/v1/palette` searches all threads (including tempered) and starts new
  * capture sessions.
@@ -50,6 +54,7 @@ export class DeskPage {
   private readonly opts: DeskPageOptions
   private readonly surfaces: KanbanSurfaceRenderer
   private readonly keyboard: DeskKeyboard
+  private readonly acts: PageActions
   private readonly unsubscribe: () => void
   private readonly stopMobileWatch: () => void
   private searchEl?: HTMLDivElement
@@ -86,6 +91,9 @@ export class DeskPage {
       if (card) this.openCard(card)
     })
 
+    this.acts = new PageActions({ base: opts.base, target: () => this.selectedCard(), say: text => this.say(text), changed: () => this.feed.refresh() })
+    this.deskEl.addEventListener('contextmenu', this.onContextMenu)
+
     if (!this.opts.route.inRex) {
       this.buildSearch()
       this.el.append(this.status, this.searchEl!, this.deskEl, this.said)
@@ -112,6 +120,9 @@ export class DeskPage {
     this.status.hidden = !this.feed.failure
     if (this.feed.failure) this.status.textContent = this.feed.failure
 
+    // A menu or dialog over the Desk holds its rows: one is its anchor, and where focus returns.
+    if (this.deskEl.firstChild && blockingDialogOpen()) return
+
     const scroll = this.captureScroll()
     const focused = this.keyboard.focusedRow()
     const order = deskOrder(this.feed.index, this.feed.board.waiting)
@@ -129,6 +140,7 @@ export class DeskPage {
     this.stopMobileWatch()
     this.unsubscribe()
     this.keyboard.dispose()
+    this.acts.dispose()
   }
 
   private readonly onKeydown = (event: KeyboardEvent): void => {
@@ -137,6 +149,26 @@ export class DeskPage {
     }
     const intent = keyIntent(event, 'desk')
     if (intent && this.keyboard.handle(intent)) event.preventDefault()
+  }
+
+  /** The card of the row drawn selected, the one in focus among them: what a lifecycle key acts on, but from the search. */
+  private selectedCard(): KanbanCard | undefined {
+    if (this.searchEl?.contains(document.activeElement)) return undefined
+    return this.cardOf(this.keyboard.selectedRow)
+  }
+
+  private cardOf(row: HTMLElement | null): KanbanCard | undefined {
+    return row ? cardNamed(this.feed.cards, row.dataset.cardUid!, row.dataset.cardOrigin!) : undefined
+  }
+
+  private readonly onContextMenu = (event: MouseEvent): void => {
+    const row = (event.target as Element).closest<HTMLElement>('[data-card-uid]')
+    const card = this.cardOf(row)
+    if (!row || !card || !pageActsFor(card).length) return
+    event.preventDefault()
+    this.keyboard.select({ uid: row.dataset.cardUid!, origin: row.dataset.cardOrigin!, ...row.hasAttribute('data-desk-line') ? { line: true } : {} }, false)
+    this.keyboard.focusSelection()
+    this.acts.menu(card, row, event.clientX || event.clientY ? { x: event.clientX, y: event.clientY } : undefined)
   }
 
   private readonly onDocumentClick = (event: MouseEvent): void => {
