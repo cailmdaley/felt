@@ -287,6 +287,7 @@ func (a *app) rootCmd() *cobra.Command {
 		a.resolveDirCmd(),
 		a.shuttleSendFileCmd(),
 		a.shuttleSentFilesCmd(),
+		a.tapestryCmd(),
 		a.sessionNameCmd(),
 		a.attachCmd(),
 		a.statusCmd(),
