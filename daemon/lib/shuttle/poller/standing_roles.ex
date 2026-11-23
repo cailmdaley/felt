@@ -78,6 +78,10 @@ defmodule Shuttle.Poller.StandingRoles do
       not Poller.host_owned?(shuttle, state.own_host_id) ->
         state
 
+      # A carried unreadable row cannot be written until its frontmatter parses.
+      Poller.Discovery.unreadable?(fiber) ->
+        state
+
       # Oneshots: no on-down handling — status:active + no live session just
       # re-dispatches next tick (retries are the poll loop now).
       kind != "standing" ->

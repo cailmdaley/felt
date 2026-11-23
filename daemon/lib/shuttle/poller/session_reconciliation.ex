@@ -32,6 +32,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
     case Poller.list_shuttle_sessions(state) do
       {complete, sessions} when complete in [:ok, :partial] ->
         state = Shuttle.Poller.Discovery.boot_seed(state)
+        Poller.log_unreadable(%State{felt_stores: state.felt_stores, last_known_listings: %{}}, state)
         lookup = candidate_uid_lookup(state)
 
         state =

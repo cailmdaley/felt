@@ -183,9 +183,12 @@ defmodule Shuttle.UnreadableFiberTest do
       assert unreadable_entry.path =~ "chair.md"
       assert is_binary(unreadable_entry.error)
 
-      # Force dispatch refuses an unreadable fiber by name.
+      # Force and inbox dispatch both refuse an unreadable fiber by name.
       assert {:error, {:not_eligible, {:unreadable, path, err}}} =
                Poller.dispatch_fiber(poller, uid, force: true)
+
+      assert {:error, {:not_eligible, {:unreadable, ^path, ^err}}} =
+               Poller.dispatch_fiber(poller, uid, inbox: true)
 
       assert path =~ "chair.md"
       assert is_binary(err)
@@ -239,6 +242,11 @@ defmodule Shuttle.UnreadableFiberTest do
 
       assert feed_conn2.status == 200
       assert Jason.decode!(feed_conn2.resp_body)["unreadable"] == []
+
+      assert {:ok, %{fibers: [recovered], unreadable: []}} =
+               Poller.cached_fiber_documents(poller, felt_stores: [store])
+
+      refute Map.has_key?(recovered.fiber, "unreadable")
     end
 
     test "RemoteFiberRegistry and composite carry remote unreadable and default to [] when omitted",

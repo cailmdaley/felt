@@ -3867,7 +3867,8 @@ defmodule Shuttle.Poller do
         force_dispatch_eligible?(fiber, state)
 
       Keyword.get(opts, :inbox, false) ->
-        Shuttle.Delivery.inbox_gate(fiber, state.own_host_id) == :ok
+        not Discovery.unreadable?(fiber) and
+          Shuttle.Delivery.inbox_gate(fiber, state.own_host_id) == :ok
 
       true ->
         eligible?(fiber, state)
@@ -3902,8 +3903,12 @@ defmodule Shuttle.Poller do
   # computed against the same `force` intent the caller passed.
   defp dispatch_ineligible_reason(fiber, state, opts) do
     if Keyword.get(opts, :inbox, false) and not Keyword.get(opts, :force, false) do
-      {:error, reason} = Shuttle.Delivery.inbox_gate(fiber, state.own_host_id)
-      reason
+      if Discovery.unreadable?(fiber) do
+        {:not_eligible, {:unreadable, Map.get(fiber, "path"), fiber["unreadable"]}}
+      else
+        {:error, reason} = Shuttle.Delivery.inbox_gate(fiber, state.own_host_id)
+        reason
+      end
     else
       forced_or_plain_ineligible_reason(fiber, state, opts)
     end
@@ -4275,8 +4280,14 @@ defmodule Shuttle.Poller do
         Keyword.get(opts, :inbox, false) ->
           replacing = Keyword.get(opts, :inbox_replace, false)
 
-          with {:ok, fiber} <- fetch_fiber_full(fiber_id, state),
-               :ok <- Shuttle.Delivery.inbox_gate(fiber, state.own_host_id) do
+          with {:ok, fiber} <- fetch_fiber_for_dispatch(fiber_id, state),
+               :ok <-
+                 if(Discovery.unreadable?(fiber),
+                   do:
+                     {:error,
+                      {:not_eligible, {:unreadable, Map.get(fiber, "path"), fiber["unreadable"]}}},
+                   else: Shuttle.Delivery.inbox_gate(fiber, state.own_host_id)
+                 ) do
             inbox_admission(state, fiber_id, runtime_key, replacing)
           else
             {:error, reason} -> {:error, reason, state}
@@ -6710,7 +6721,8 @@ defmodule Shuttle.Poller do
     |> Enum.sort_by(&{&1.path || "", &1.id || ""})
   end
 
-  defp log_unreadable(previous_state, state) do
+  @doc false
+  def log_unreadable(previous_state, state) do
     previous =
       previous_state.felt_stores
       |> Enum.flat_map(&Map.get(previous_state.last_known_listings, &1, []))
