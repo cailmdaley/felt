@@ -64,18 +64,21 @@ Some steps reach outside the sandbox. They are marked **[asks first]**: say exac
 ### 3. Use the cheapest model
 
 **Mandatory for every worker the tutorial launches.**
-Read `shuttle agents --json` (it carries `cost_class`) and choose the first of these that is in the registry, whose program is installed (`command -v claude`, `agy`, `pi` or `codex`), and that is signed in:
+Read `shuttle agents --json` (it carries `cost_class`) and choose the first of these that is in the registry, whose program is installed, and that is signed in. Check the program with `command -v`: `claude`, `codex` and `pi` are named as the record's `cli`, and `cli: antigravity` runs `agy`.
 
 1. `claude-haiku`
 2. `agy-flash`
 3. `pi-haiku`
-4. `pi-gemini-flash`
-5. `pi-openai-terra`
-6. otherwise, any agent with `cost_class: economy`, or whichever fast, small model the registry holds
+4. `codex-luna`
+5. `pi-openai-luna`
+6. `pi-luna`
+7. `pi-gemini-flash`
+8. `pi-openai-terra`
+9. otherwise, any agent with `cost_class: economy`, or whichever fast, small model the registry holds
 
 Never spend a flagship or lead model (`claude-fable`, `claude-opus`, `agy-neon`) on a demo unless the user explicitly asks.
 Omitting the agent does *not* mean cheap: the registry default is a large model. So always pass it: `-m "$CHEAP"` to `shuttle install`, `--agent "$CHEAP"` to `shuttle thread`, `adopt` and `capture`.
-Lower its effort too with `shuttle -C "$SANDBOX" set-agent <fiber> --effort low`, where the agent has effort levels.
+Lower its effort too, before launching, with `shuttle -C "$SANDBOX" set-agent <fiber> --effort low`, where the agent has effort levels. The luna agents default to `max`.
 Tell the user which model you chose and why. Keep the demo prompts tiny.
 
 ### 4. One small step at a time
@@ -270,9 +273,11 @@ shuttle -C "$SANDBOX" thread tutorial/host \
 felt -C "$SANDBOX" tree tutorial/host
 ```
 
-Each child took its host, project directory and role from the parent. `--disabled` holds it as a draft; without it, `thread` arms the child at once. Write a one-line Desired State into each child's file ("the outcome holds the list"), ask, then start them and watch:
+Each child took its host, project directory and role from the parent. `--disabled` holds it as a draft; without it, `thread` arms the child at once. Write a one-line Desired State into each child's file ("the outcome holds the list"), ask, then start them at low effort and watch:
 
 ```sh
+shuttle -C "$SANDBOX" set-agent tutorial/host/icebreakers --effort low
+shuttle -C "$SANDBOX" set-agent tutorial/host/signs --effort low
 shuttle -C "$SANDBOX" resume tutorial/host/icebreakers
 shuttle -C "$SANDBOX" resume tutorial/host/signs
 shuttle -C "$SANDBOX" threads tutorial/host
@@ -291,21 +296,24 @@ No browser needed. Use the fibers from Modules 3 and 4.
 shuttle sessions
 shuttle -C "$SANDBOX" message tutorial/host "Budget is fixed at 400." --context-only
 shuttle -C "$SANDBOX" post --fiber tutorial/host/signs "Signs need A3 paper."
+shuttle -C "$SANDBOX" post --fiber tutorial/host --to human "The room is ready: 25 chairs, A3 signs."
 shuttle -C "$SANDBOX" board tutorial/host
 ```
 
 - `sessions` lists live conversations as `shuttle://HOST/HARNESS/ID`. They may be the user's real work: look, and never message one that isn't part of the tutorial.
 - `message` addresses one fiber or session. `--context-only` never starts a turn. With no live worker it waits in the fiber's durable inbox: `shuttle -C "$SANDBOX" inbox ls tutorial/host`.
-- `post` writes a line on the family's shared board and wakes no one. `board` reads it.
+- `post` writes a line on the family's shared board and wakes no one. `board` reads it. Without `--to`, a thread's post goes up to its orchestrator, as the first one does. `--to human` puts the line in the board's Channels view, where it waits on the user until they reply or clear it.
 
-Send a file. Workers do this themselves; from your session it is recorded against your own session, and against a fiber only when your session is that fiber's worker:
+Send a file. A worker's own `shuttle send-file` is recorded against its fiber. From your session it would be recorded against your session, so name the fiber by its id:
 
 ```sh
-shuttle -C "$SANDBOX" send-file "$SANDBOX/guide.md" --caption "The guide, for review"
+FIBER_ID="$(felt -C "$SANDBOX" show tutorial/guide --field id)"
+shuttle -C "$SANDBOX" send-file "$SANDBOX/guide.md" \
+  --session "$FIBER_ID" --caption "The guide, for review"
 shuttle -C "$SANDBOX" sent-files ls tutorial/guide
 ```
 
-For a trail that surely belongs to `tutorial/guide`, use `shuttle -C "$SANDBOX" post --fiber tutorial/guide --file "$SANDBOX/guide.md" "The guide is ready."`, which records the file as sent too. `sent-files ls` then shows its time, caption and URL. `sent-files clear` hides the trail and deletes no file.
+`sent-files ls` shows the file's time, path, caption and URL. `sent-files clear` hides the trail and deletes no file.
 
 A **tapestry** is one page, `tapestry.html`, beside a fiber, showing where its work stands:
 
@@ -350,7 +358,7 @@ With no remotes, explain the two routes and offer the [connection guide](https:/
 On a single-user machine, the user opens <http://127.0.0.1:4000/>. **Let them open it**: never drive the live board with a browser tool, since it takes over what they are looking at. Shared servers listen on a private socket; see the [connection guide](https://cailmdaley.github.io/felt/shuttle/remotes/#shared-servers-and-clusters).
 
 - Press `1` for **Desk**: what waits on them, what is working, what awaits review, what rests. Find the tutorial's cards.
-- Press `2` for **Channels**: what the work says to them. Find Module 5's post.
+- Press `2` for **Channels**: what the work says to them. Find the line Module 5 posted with `--to human`, under `#misc`, and clear it with its ✓.
 - The **Fleet Map** is a page of its own at `/map`.
 
 **[asks first]** Now build a UI. Create `~/.config/shuttle/ui/tutorial-board/index.html`. If that folder exists, choose another name.

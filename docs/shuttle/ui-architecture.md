@@ -22,7 +22,7 @@ Everything Shuttle does with work can be done from a terminal:
 | Kill a live worker without recording a verdict | `shuttle kill <fiber>` |
 | Turn a sentence into a constitution | `shuttle capture "<prompt>" --project-dir <dir>` |
 | Run a tree of threads | `shuttle thread <parent> "<ask>"`, `shuttle threads <parent>` |
-| Follow a family of threads | `shuttle board <fiber>`, `shuttle post "<text>"` |
+| Follow a family of threads | `shuttle board <fiber>`, `shuttle post --fiber <fiber> "<text>"` |
 | Read a report page | `shuttle tapestry <fiber>` with `--path`, `--url`, `--open` or `--json` |
 | List the files a fiber's workers sent | `shuttle sent-files ls <fiber>` |
 | Let your own sessions become threads | `shuttle host ambient on`, then `shuttle adopt` from the session |
@@ -53,7 +53,8 @@ Its popups and composite controls are built on Vercel's `@ui-sdk/core` and `@ui-
 It has three parts.
 
 **Client and feed.**
-`ShuttleClient` has a method for each Core route.
+`ShuttleClient` has methods to read fibers, the fleet and files, and to create, capture, launch, message, change and stop work.
+For a route without a method, such as `POST /messages`, `client.url(path)` gives the address to `fetch`.
 `ShuttleFeed` polls the fleet's fibers and tells you when they change.
 `DaemonBootingError`, `isDaemonBooting` and `daemonErrorMessage` sort out a daemon that is starting from one that failed.
 
@@ -70,12 +71,13 @@ These are plain functions over feed rows, with no DOM:
 | `relativeAge` | how long ago |
 
 **Structural primitives.**
-Each returns accessible DOM with no skin:
+Each builds accessible DOM with no skin.
+All return an element except `createActionMenu`, which returns a controller, `{ element, offers, open, close, destroy }`:
 
 | Function | Root `data-slot` | Draws |
 |---|---|---|
-| `createThreadRow(fiber, options)` | `shuttle-thread-row` | a thread on one line |
-| `createPost(item, options)` | `shuttle-post` | one post, with its files |
+| `createThreadRow(fiber, { now, ... })` | `shuttle-thread-row` | a thread on one line |
+| `createPost(item, { now, ... })` | `shuttle-post` | one post, with its files |
 | `createFilePreview(file, client, options)` | `shuttle-file-preview` | a picture, page or file card |
 | `createActionMenu(fiber, client, options)` | `shuttle-action-menu` | the actions that fit the fiber, as a menu |
 | `createLifecycleBar(fiber, client, options)` | `shuttle-lifecycle-bar` | the main actions, as a toolbar |
@@ -157,7 +159,7 @@ Every color and border comes from the page's own stylesheet, which selects the S
 
 - **Subscribe once, draw when the rows change.** A poll that finds nothing new keeps the same `fibers` array, so comparing it keeps focus and any open menu in place. A changed feed redraws the list.
 - **A row needs the time.** `now` is the instant its age counts to. `onOpen` makes it a keyboard-operable button; without it the row is plain text.
-- **A menu is an object.** `createActionMenu` returns `{element, open, close, destroy}`. Put `element` on the page and call `open({ anchor })`; it lists what `offersFor` says, sends the choice, and returns focus to the anchor.
+- **A menu is a controller.** `createActionMenu` returns `{ element, offers, open, close, destroy }`. Put `element` on the page and call `open({ anchor })`; `offers` is the list it shows, what `offersFor` says by default. It sends the choice, and returns focus to the anchor.
 - **Writes carry the owner.** The client takes `origin` from the row, so the page works for every host in the fleet.
 - **The composer dispatches.** Sending a message to a fiber with no live worker starts one, on that fiber's own agent.
 
@@ -190,7 +192,9 @@ unregisterView('notes')
 ```
 
 `mount`, `refresh` and `unmount` are required.
-Optional hooks let a view join the board's own features: `keydown` takes a keystroke the board left alone, `reveal` shows a fiber, `findScope` says what Find searches, and `show` goes to a place Find picked.
+`hotkey` is optional too: without one, a view takes the first free digit from 2 to 9.
+`optional: true` gives the view no tab, so it is reached by its hotkey, its address or code.
+Optional hooks let a view join the board's own features: `keydown` takes a keystroke the board left alone, `reveal(id, origin)` shows a fiber Rex moved to, `followRex(id, origin)` shows where that fiber's worker speaks, `findScope` says what Find searches, and `show` goes to a place Find picked.
 The board owns the host element, the tab and the data; the view owns what is inside its host.
 Desk is the board's own page, Channels is a registered view, and the Fleet Map is a page of its own at `/map`.
 A view ships in the board's bundle: adding one means building the board.
